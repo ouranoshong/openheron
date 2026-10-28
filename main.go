@@ -129,15 +129,12 @@ func warnUnusedHomeConfig(root string) {
 // resolves to a config root that holds nothing — and the bare load error
 // ("agents/main.md does not exist") reads like a lost file rather than a
 // wrong directory. The root path is the missing piece, and for a defaulted
-// root it is also the thing to fix.
+// root the way out is one command.
 func configLoadError(svc *spec.Service, err error) error {
 	if svc.RootIsDefaulted() {
 		agent := filepath.Join(svc.Root(), spec.DirAgent, spec.DefaultAgentID+".md")
 		if _, statErr := os.Stat(agent); statErr != nil {
-			return fmt.Errorf("no configuration at %s (the default config root under the project root): "+
-				"run `openheron init --dir %s`, or point --config-dir / $OPENHERON_CONFIG_DIR "+
-				"at an existing config root: %w",
-				svc.Root(), filepath.Dir(svc.Root()), err)
+			return fmt.Errorf("no configuration at %s: run `openheron init` to create one", svc.Root())
 		}
 	}
 	return fmt.Errorf("config: load %s: %w", svc.Root(), err)
