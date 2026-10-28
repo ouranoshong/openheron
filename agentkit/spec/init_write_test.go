@@ -9,7 +9,7 @@ import (
 
 // ── NewServiceAt ───────────────────────────────────────────────────────────
 
-func TestNewServiceAtDoesNotProbeUpwards(t *testing.T) {
+func TestNewServiceDoesNotProbeUpwards(t *testing.T) {
 	root := t.TempDir()
 	ancestor := filepath.Join(root, "ancestor", ".openheron")
 	if err := os.MkdirAll(ancestor, 0o755); err != nil {
@@ -21,12 +21,15 @@ func TestNewServiceAtDoesNotProbeUpwards(t *testing.T) {
 	}
 
 	t.Setenv(ConfigDirEnv, "")
-	probed, err := NewService("", child)
+	derived, err := NewService("", child)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if probed.Root() != ancestor {
-		t.Fatalf("probing must find the ancestor, got %q", probed.Root())
+	if derived.Root() == ancestor {
+		t.Fatalf("the ancestor's config root must not be picked up, got %q", derived.Root())
+	}
+	if want := filepath.Join(child, ".openheron"); derived.Root() != want {
+		t.Fatalf("the config root must be the project root's own directory, got %q (want %q)", derived.Root(), want)
 	}
 
 	fixed, err := NewServiceAt(filepath.Join(child, ".openheron"), child)

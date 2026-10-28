@@ -31,8 +31,9 @@ for arg in "$@"; do
 done
 
 TEST_ROOT="$REPO_ROOT/$OPENHERON_TEST_ROOT"
-# 让 probeUpwards 停在这里 —— 否则它会一路找到**仓库根那个** .openheron/，
-# 于是测试实例读开发配置、写开发会话：端口隔离了而数据没隔离，等于没隔离。
+# 配置根由 OPENHERON_CONFIG_DIR 显式指定（下面 export），进程 cwd 切到
+# $PROJECT_DIR。配置根**不向上查找**了，所以仓库根那份 .openheron/ 结构上
+# 就读不到 —— 端口隔离与数据隔离不再靠「探测碰巧停下」，而是靠指名的根。
 PROJECT_DIR="$TEST_ROOT/project"
 CONFIG_DIR="$PROJECT_DIR/.openheron"
 STATE_DIR="$TEST_ROOT/state"
@@ -87,7 +88,8 @@ YAML
 fi
 
 # 不设 PROJECT_ROOT —— 用 cd 进 $PROJECT_DIR 代替。projectRoot 取的是工作
-# 目录；设成绝对路径还得再走一次上溯判定，不如让 cwd 就是它，语义同开发时。
+# 目录，让 cwd 就是它，语义同开发时。配置根本身由 OPENHERON_CONFIG_DIR
+# 指名，与 projectRoot 无关：projectRoot 只决定「默认根」的落点与 workdir。
 #
 # ★ OPENHERON_CONFIG_DIR 现在是**唯一的配置根**（里面直接有 llm/ agents/ …）——
 #   它以前是「用户级那一层」，与项目级叠加。值语义没变，角色变了：

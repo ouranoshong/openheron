@@ -80,7 +80,7 @@ func parseServerFlags(args []string) (serverFlags, error) {
 	fs.SetOutput(io.Discard)
 	var f serverFlags
 	fs.StringVar(&f.configDir, "config-dir", "",
-		"the config root to read (default: <project-root>/.openheron, or $OPENHERON_CONFIG_DIR)")
+		"the config root to read (default: <project-root>/.openheron, created when missing; or $OPENHERON_CONFIG_DIR)")
 	fs.StringVar(&f.projectRoot, "project-root", "",
 		"the project root (default: the current directory)")
 	if err := fs.Parse(args); err != nil {
@@ -96,7 +96,7 @@ func printServerUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "usage: openheron [--config-dir <path>] [--project-root <path>]")
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Reads exactly one configuration root: --config-dir, else $OPENHERON_CONFIG_DIR,")
-	fmt.Fprintln(stdout, "else the nearest .openheron/ at or above the project root.")
+	fmt.Fprintln(stdout, "else <project-root>/.openheron (created when missing).")
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "  --config-dir   the config root (llm/ agents/ policy/ server/ tools/ live here)")
 	fmt.Fprintln(stdout, "  --project-root the project root: agent workdir and relative-path base")
@@ -116,8 +116,31 @@ func warnUnusedHomeConfig(root string) {
 	if fi, err := os.Stat(homeCfg); err != nil || !fi.IsDir() {
 		return
 	}
-	obs.Logger().Warn("[main] a config dir exists but is not the config root in use",
+	// The config root is never searched for anymore, so a config in the home
+	// directory is never picked up on its own — it has to be named.
+	obs.Logger().Warn("[main] a config dir exists but is not the config root in use; "+
+		"pass --config-dir or set $OPENHERON_CONFIG_DIR to use it",
 		"dir", homeCfg, "root", root)
+}
+
+// configLoadError turns a config load failure into an actionable message.
+//
+// The upward search is gone, so a command started in the wrong directory now
+// resolves to a config root that holds nothing — and the bare load error
+// ("agents/main.md does not exist") reads like a lost file rather than a
+// wrong directory. The root path is the missing piece, and for a defaulted
+// root it is also the thing to fix.
+func configLoadError(svc *spec.Service, err error) error {
+	if svc.RootIsDefaulted() {
+		agent := filepath.Join(svc.Root(), spec.DirAgent, spec.DefaultAgentID+".md")
+		if _, statErr := os.Stat(agent); statErr != nil {
+			return fmt.Errorf("no configuration at %s (the default config root under the project root): "+
+				"run `openheron init --dir %s`, or point --config-dir / $OPENHERON_CONFIG_DIR "+
+				"at an existing config root: %w",
+				svc.Root(), filepath.Dir(svc.Root()), err)
+		}
+	}
+	return fmt.Errorf("config: load %s: %w", svc.Root(), err)
 }
 
 func runServer(flags serverFlags) error {
@@ -166,6 +189,8 @@ func setupConfig(flags serverFlags) (*startup, error) {
 	warnUnusedHomeConfig(cfgSvc.Root())
 
 	obs.Logger().Info("[main] openheron", "version", version)
+	obs.Logger().Info("[main] config root",
+		"root", cfgSvc.Root(), "projectRoot", cfgSvc.ProjectRoot())
 
 	mgr := &agentConfig{}
 	reloader, err := spec.NewReloader(cfgSvc, func(c *spec.Config) {
@@ -176,7 +201,7 @@ func setupConfig(flags serverFlags) (*startup, error) {
 		}
 	})
 	if err != nil {
-		return nil, err
+		return nil, configLoadError(cfgSvc, err)
 	}
 	cfg, _ := mgr.Current()
 

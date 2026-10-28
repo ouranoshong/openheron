@@ -69,6 +69,10 @@
 ## 其它约定
 
 - **不要在 API 层复制业务装配逻辑** —— 需要读「某个 agent 的生效工具表」时，由 `agent.Builder` 暴露只读查询，不要重算一遍 `Table.Blocked` / `Policy.TierOf`。
+- **配置根解析只有三级**：显式 `--config-dir` → `$OPENHERON_CONFIG_DIR` →
+  `<projectRoot>/.openheron`（不存在就创建）。**不向上查找祖先目录** ——
+  配置根一旦依赖「进程从哪启动」，同一条命令换个目录就读到另一份配置，
+  测试实例也会因此读到开发配置。要换配置根就指名，别加新的查找规则。
 - **归档优先于呈现** —— SSE sink 断裂后要停止渲染但继续消费事件流，否则 `Outcome.Intermediates` 不完整，历史会缺。
 - **`deny` 优先于 `disabled_tools`** —— 外层策略是子 agent 无法放松的唯一保证。
 - 改配置语义前先读上游的 `docs/config-design.md`；改接口前先读 `docs/api-design.md`；
@@ -146,8 +150,8 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
   （放开 `write_file` 意味着那个 agent 真能写文件）—— 要改先问自己一句。
 - **端口错开不等于数据隔离**。openheron 的会话写在 `.openheron/state/`，测试写
   进去就污染真实历史。测试实例把 `.openheron-test/project` 当项目根并**预置
-  自己的 `.openheron/`**，让配置上溯停在那里 —— 否则上溯会找到仓库根那份。
-  端口与状态必须**一起**隔离。
+  自己的 `.openheron/`**，再用 `OPENHERON_CONFIG_DIR` 指名配置根 —— 配置根
+  **不向上查找**，所以仓库根那份结构上就读不到。端口与状态必须**一起**隔离。
 - **`make test-env-sync` 是必须的，不是可选的**。测试实例里的
   `agents/ llm/ policy/ skills/` 是从开发侧**复制**的，改完 agent 不
   同步，测的还是旧定义。

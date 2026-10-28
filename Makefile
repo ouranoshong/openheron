@@ -147,8 +147,9 @@ lint: ## Go vet + gofmt + 前端 oxlint + TypeScript 类型检查
 #
 #   端口错开只是第一层。**状态**必须一起隔离：openheron 的会话写在
 #   .openheron/state/，测试若写进去就污染了真实会话历史。所以
-#   test-backend 用 .openheron-test/ 作为项目根，且预置自己的 .openheron/，
-#   让配置上溯**停在那里**而不是找到仓库根那份。
+#   test-backend 用 .openheron-test/ 作为项目根，预置自己的 .openheron/，
+#   并用 OPENHERON_CONFIG_DIR 指名配置根 —— 配置根**不向上查找**，仓库根
+#   那份结构上就读不到。
 
 .PHONY: test-env-backend
 test-env-backend: build-go ## 起测试实例（:18099，独立配置与会话；前台）

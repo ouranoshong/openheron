@@ -588,10 +588,8 @@ func TestDataDirResolvesAgainstConfigDir(t *testing.T) {
 	}
 }
 
-func TestRootProbingWalksUpwards(t *testing.T) {
-	f := newFixture(t)
-	f.seedMinimal(t)
-	deep := filepath.Join(filepath.Dir(f.root), "cmd", "server")
+func TestRootDefaultsToTheProjectRootDir(t *testing.T) {
+	deep := filepath.Join(t.TempDir(), "cmd", "server")
 	if err := os.MkdirAll(deep, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -601,11 +599,88 @@ func TestRootProbingWalksUpwards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Root() != f.root {
-		t.Fatalf("walking up from a subdirectory must find the config root, got %q (want %q)", s.Root(), f.root)
+	want := filepath.Join(deep, DefaultBaseDirName)
+	if s.Root() != want {
+		t.Fatalf("the config root must be the project root's own directory, got %q (want %q)", s.Root(), want)
 	}
-	if _, err := s.Load(); err != nil {
-		t.Fatalf("it must load after walking up: %v", err)
+	if fi, err := os.Stat(want); err != nil || !fi.IsDir() {
+		t.Fatalf("the missing config root must be created at %q", want)
+	}
+}
+
+func TestTheConfigRootIsNeverSearchedForUpwards(t *testing.T) {
+	root := t.TempDir()
+	ancestor := filepath.Join(root, "ancestor", DefaultBaseDirName)
+	if err := os.MkdirAll(ancestor, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	child := filepath.Join(root, "ancestor", "child")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv(ConfigDirEnv, "")
+	s, err := NewService("", child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Root() == ancestor {
+		t.Fatalf("the ancestor's config root must not be picked up, got %q", s.Root())
+	}
+	if want := filepath.Join(child, DefaultBaseDirName); s.Root() != want {
+		t.Fatalf("the config root must be the project root's own directory, got %q (want %q)", s.Root(), want)
+	}
+}
+
+func TestAnExplicitRootWinsOverTheEnvironment(t *testing.T) {
+	explicit := filepath.Join(t.TempDir(), "explicit")
+	t.Setenv(ConfigDirEnv, filepath.Join(t.TempDir(), "from-env"))
+
+	s, err := NewService(explicit, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Root() != explicit {
+		t.Fatalf("the explicit root must win, got %q (want %q)", s.Root(), explicit)
+	}
+	if s.RootIsDefaulted() {
+		t.Fatal("an explicit root must not be reported as defaulted")
+	}
+}
+
+func TestTheEnvironmentWinsOverTheProjectRootDir(t *testing.T) {
+	fromEnv := filepath.Join(t.TempDir(), "from-env")
+	t.Setenv(ConfigDirEnv, fromEnv)
+
+	projectRoot := t.TempDir()
+	s, err := NewService("", projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Root() != fromEnv {
+		t.Fatalf("the environment must win, got %q (want %q)", s.Root(), fromEnv)
+	}
+	if s.RootIsDefaulted() {
+		t.Fatal("a root from the environment must not be reported as defaulted")
+	}
+	if _, err := os.Stat(fromEnv); err == nil {
+		t.Fatal("a root named by the environment must not be created")
+	}
+}
+
+func TestAnAbsentExplicitRootIsNotCreated(t *testing.T) {
+	explicit := filepath.Join(t.TempDir(), "nope")
+	t.Setenv(ConfigDirEnv, "")
+
+	s, err := NewService(explicit, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(explicit); err == nil {
+		t.Fatalf("an explicit root must not be created: %q", explicit)
+	}
+	if _, err := s.Load(); err == nil {
+		t.Fatal("a missing agents/main.md must be an error")
 	}
 }
 

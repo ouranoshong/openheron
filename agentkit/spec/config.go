@@ -137,8 +137,22 @@ func (c *Config) deferKey(format string, args ...any) {
 type Service struct {
 	root        string
 	projectRoot string
+	defaulted   bool
 }
 
+// NewService resolves the configuration root and the project root.
+//
+// The configuration root is resolved in exactly three steps, in this order:
+//
+//  1. root, when it is not empty
+//  2. $OPENHERON_CONFIG_DIR, when it is set
+//  3. <projectRoot>/.openheron, created when it does not exist yet
+//
+// There is deliberately no upward search for an ancestor's .openheron/.
+// Probing made the effective configuration root depend on the working
+// directory, so the same command read a different configuration depending on
+// where it happened to be started — the classic way a test run ends up
+// writing into the developer's own session history.
 func NewService(root, projectRoot string) (*Service, error) {
 	if projectRoot == "" {
 		wd, err := os.Getwd()
@@ -152,23 +166,28 @@ func NewService(root, projectRoot string) (*Service, error) {
 		return nil, fmt.Errorf("config: resolve project root %q: %w", projectRoot, err)
 	}
 
+	defaulted := false
 	if root == "" {
 		root = os.Getenv(ConfigDirEnv)
 	}
 	if root == "" {
 		root = filepath.Join(projectRoot, DefaultBaseDirName)
-		if _, err := os.Stat(root); err != nil {
-			if found, ok := probeUpwards(projectRoot); ok {
-				root = found
-			}
-		}
+		defaulted = true
 	}
 
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("config: resolve config root %q: %w", root, err)
 	}
-	return &Service{root: abs, projectRoot: projectRoot}, nil
+	if defaulted {
+		// Only the defaulted root is created: an explicit --config-dir or
+		// $OPENHERON_CONFIG_DIR pointing nowhere is a user typo, and it must
+		// not turn into a silently empty configuration tree.
+		if err := os.MkdirAll(abs, 0o755); err != nil {
+			return nil, fmt.Errorf("config: create config root %q: %w", abs, err)
+		}
+	}
+	return &Service{root: abs, projectRoot: projectRoot, defaulted: defaulted}, nil
 }
 
 func NewServiceAt(root, projectRoot string) (*Service, error) {
@@ -189,22 +208,15 @@ func NewServiceAt(root, projectRoot string) (*Service, error) {
 	return &Service{root: root, projectRoot: projectRoot}, nil
 }
 
-func probeUpwards(from string) (string, bool) {
-	dir := from
-	for {
-		cand := filepath.Join(dir, DefaultBaseDirName)
-		if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
-			return cand, true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", false
-		}
-		dir = parent
-	}
-}
-
 func (s *Service) Root() string { return s.root }
+
+// RootIsDefaulted reports whether the config root was derived from the
+// project root instead of being named explicitly.
+//
+// Callers use it to tell "the user asked for a config root that is not
+// there" apart from "the user did not ask for one, so we made one" — the
+// two need different advice.
+func (s *Service) RootIsDefaulted() bool { return s.defaulted }
 
 func (s *Service) ProjectRoot() string { return s.projectRoot }
 

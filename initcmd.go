@@ -57,6 +57,10 @@ func initCmd(args []string, stdout io.Writer) error {
 	if root == "" {
 		root = filepath.Join(abs, spec.DefaultBaseDirName)
 	}
+	// NewServiceAt, not NewService: init writes into the directory it was
+	// pointed at and never reads $OPENHERON_CONFIG_DIR. The environment
+	// variable decides which configuration the server reads, and honoring it
+	// here would write the new configuration somewhere else than asked.
 	svc, err := spec.NewServiceAt(root, abs)
 	if err != nil {
 		return err
