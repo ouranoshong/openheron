@@ -11,11 +11,11 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
-	"openheron/agentkit/obs"
-	"openheron/agentkit/run"
-	"openheron/contract"
-	"openheron/message"
-	"openheron/storage"
+	"github.com/ouranoshong/openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/agentkit/run"
+	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/message"
+	"github.com/ouranoshong/openheron/storage"
 )
 
 // Agent switching sentinels. They are mapped onto v2 codes in v2FailErr.

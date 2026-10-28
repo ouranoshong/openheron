@@ -15,10 +15,10 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 
-	"openheron/agentkit/obs"
-	"openheron/contract"
-	"openheron/helpers"
-	"openheron/message"
+	"github.com/ouranoshong/openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/helpers"
+	"github.com/ouranoshong/openheron/message"
 )
 
 type Options struct {

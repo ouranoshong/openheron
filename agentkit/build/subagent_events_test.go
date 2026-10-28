@@ -6,8 +6,8 @@ import (
 
 	"github.com/cloudwego/eino/adk/prebuilt/deep"
 
-	"openheron/agentkit/spec/decl"
-	"openheron/contract"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/contract"
 )
 
 func TestSubagentEventsAreForwardedToTheParentStream(t *testing.T) {

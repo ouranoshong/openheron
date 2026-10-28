@@ -11,7 +11,7 @@ import (
 
 	"github.com/cloudwego/eino/adk/prebuilt/deep"
 
-	"openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
 
 func subSpec(id string, subs ...decl.SubAgentSpec) decl.SubAgentSpec {

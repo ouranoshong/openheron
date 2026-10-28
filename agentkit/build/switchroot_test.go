@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"openheron/agentkit/spec/decl"
-	"openheron/contract"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/contract"
 )
 
 func TestEveryDeclaredAgentCanBeTheSessionAgent(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"openheron/llm/common"
+	"github.com/ouranoshong/openheron/llm/common"
 )
 
 var ErrNoBaseURL = errors.New("llm: no endpoint configured; set OPENAI_BASE_URL or ARK_BASE_URL")

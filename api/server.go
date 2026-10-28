@@ -13,11 +13,11 @@ import (
 	hertzconfig "github.com/cloudwego/hertz/pkg/common/config"
 	"github.com/cloudwego/hertz/pkg/route"
 
-	"openheron/agentkit/run"
-	hcfg "openheron/agentkit/spec"
-	"openheron/storage"
-	"openheron/transport"
-	"openheron/webui"
+	"github.com/ouranoshong/openheron/agentkit/run"
+	hcfg "github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/storage"
+	"github.com/ouranoshong/openheron/transport"
+	"github.com/ouranoshong/openheron/webui"
 )
 
 // Server wires the routes to the runtime and the session store.

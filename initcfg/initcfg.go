@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec"
 )
 
 //go:embed all:templates

@@ -9,10 +9,10 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/google/uuid"
 
-	"openheron/agentkit/obs"
-	"openheron/agentkit/run"
-	"openheron/storage"
-	"openheron/transport"
+	"github.com/ouranoshong/openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/agentkit/run"
+	"github.com/ouranoshong/openheron/storage"
+	"github.com/ouranoshong/openheron/transport"
 )
 
 var (

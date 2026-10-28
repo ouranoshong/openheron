@@ -8,8 +8,8 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/approval"
-	"openheron/contract"
+	"github.com/ouranoshong/openheron/approval"
+	"github.com/ouranoshong/openheron/contract"
 )
 
 // interruptDetail turns the framework's interrupt payload into the shape the

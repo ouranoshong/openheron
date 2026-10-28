@@ -12,9 +12,9 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/agentkit/spec"
-	"openheron/agentkit/spec/decl"
-	"openheron/contract"
+	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/contract"
 )
 
 type scriptModel struct {

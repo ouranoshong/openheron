@@ -7,7 +7,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
 
 type depthKey struct{}

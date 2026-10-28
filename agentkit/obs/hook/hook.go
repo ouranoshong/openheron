@@ -9,7 +9,7 @@ import (
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/agentkit/obs"
 )
 
 type Handler struct {

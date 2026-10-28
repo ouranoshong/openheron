@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"openheron/storage"
+	"github.com/ouranoshong/openheron/storage"
 )
 
 func TestV2SessionDetailCarriesTheApprovalAudit(t *testing.T) {

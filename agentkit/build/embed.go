@@ -9,8 +9,8 @@ import (
 	aclembed "github.com/cloudwego/eino-ext/libs/acl/openai"
 	"github.com/cloudwego/eino/components/embedding"
 
-	"openheron/agentkit/spec/decl"
-	"openheron/llm/common"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/llm/common"
 )
 
 const embedTypeName = "OpenAICompat"

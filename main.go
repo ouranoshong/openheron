@@ -20,14 +20,14 @@ import (
 
 	"github.com/cloudwego/eino/callbacks"
 
-	"openheron/agentkit/build"
-	"openheron/agentkit/obs"
-	"openheron/agentkit/obs/hook"
-	"openheron/agentkit/run"
-	"openheron/agentkit/spec"
-	"openheron/api"
-	"openheron/storage/filestore"
-	"openheron/webui"
+	"github.com/ouranoshong/openheron/agentkit/build"
+	"github.com/ouranoshong/openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/agentkit/obs/hook"
+	"github.com/ouranoshong/openheron/agentkit/run"
+	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/api"
+	"github.com/ouranoshong/openheron/storage/filestore"
+	"github.com/ouranoshong/openheron/webui"
 )
 
 //go:embed all:web/dist

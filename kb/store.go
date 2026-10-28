@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"openheron/agentkit/obs"
-	"openheron/persist"
+	"github.com/ouranoshong/openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/persist"
 )
 
 const (

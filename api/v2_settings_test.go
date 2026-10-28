@@ -11,7 +11,7 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
-	"openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec"
 )
 
 func settingsEnv(t *testing.T) (*Server, *spec.Service, string) {

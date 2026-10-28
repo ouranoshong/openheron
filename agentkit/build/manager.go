@@ -6,7 +6,7 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec"
 )
 
 type ConfigManager interface {

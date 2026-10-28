@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"openheron/agentkit/obs"
-	"openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
 
 var HotDirs = hotDirList()

@@ -11,10 +11,10 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/approval"
-	"openheron/contract"
-	"openheron/message"
-	"openheron/storage"
+	"github.com/ouranoshong/openheron/approval"
+	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/message"
+	"github.com/ouranoshong/openheron/storage"
 )
 
 func newTestRuntime(t *testing.T, b AgentBuilder) (*Runtime, *fakeSessionManager) {

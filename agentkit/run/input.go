@@ -11,7 +11,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/message"
+	"github.com/ouranoshong/openheron/message"
 )
 
 // InputConfig controls the context prompt. All fields are optional; an empty

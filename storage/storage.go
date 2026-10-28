@@ -9,7 +9,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/contract"
+	"github.com/ouranoshong/openheron/contract"
 )
 
 // ErrSessionNotFound signals an unknown session id.

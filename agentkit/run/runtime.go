@@ -14,9 +14,9 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/approval"
-	"openheron/contract"
-	"openheron/storage"
+	"github.com/ouranoshong/openheron/approval"
+	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/storage"
 )
 
 // DefaultStartTimeout bounds how long a caller waits for a turn to become

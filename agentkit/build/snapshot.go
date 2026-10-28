@@ -12,9 +12,9 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/agentkit/spec"
-	"openheron/agentkit/spec/decl"
-	"openheron/llm/common"
+	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/llm/common"
 )
 
 type snapshot struct {

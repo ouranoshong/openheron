@@ -3,7 +3,7 @@ package spec
 import (
 	"testing"
 
-	"openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
 
 func TestCategoryTemplatesDecodeStrictly(t *testing.T) {

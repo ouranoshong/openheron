@@ -2,7 +2,7 @@ package spec
 
 import (
 	"fmt"
-	"openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"sort"
 )
 

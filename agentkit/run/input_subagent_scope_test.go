@@ -6,7 +6,7 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/message"
+	"github.com/ouranoshong/openheron/message"
 )
 
 func TestSubagentMessagesAreKeptOutOfTheModelInput(t *testing.T) {

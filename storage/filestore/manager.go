@@ -12,8 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"openheron/agentkit/obs"
-	"openheron/storage"
+	"github.com/ouranoshong/openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/storage"
 )
 
 var _ storage.SessionManager = (*FileManager)(nil)

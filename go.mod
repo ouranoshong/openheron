@@ -1,4 +1,4 @@
-module openheron
+module github.com/ouranoshong/openheron
 
 go 1.27.1
 

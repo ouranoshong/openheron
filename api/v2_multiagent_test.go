@@ -8,8 +8,8 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/contract"
-	"openheron/message"
+	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/message"
 )
 
 func agentMessage(agent, content string, tokens int) *schema.Message {

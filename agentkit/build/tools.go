@@ -6,8 +6,8 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 
-	"openheron/agentkit/obs"
-	"openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/agentkit/spec"
 )
 
 type toolEnv struct {

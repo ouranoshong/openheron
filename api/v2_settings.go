@@ -7,7 +7,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
-	"openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec"
 )
 
 const (

@@ -8,8 +8,8 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/agentkit/obs"
-	"openheron/contract"
+	"github.com/ouranoshong/openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/contract"
 )
 
 // loopItem is the TurnLoop's unit of work. One user query or one approval

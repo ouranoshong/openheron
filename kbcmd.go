@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"openheron/agentkit/build"
-	"openheron/agentkit/obs"
-	"openheron/agentkit/spec"
-	"openheron/kb"
+	"github.com/ouranoshong/openheron/agentkit/build"
+	"github.com/ouranoshong/openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/kb"
 )
 
 func kbCmd(ctx context.Context, args []string, stdout io.Writer) error {

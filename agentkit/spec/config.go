@@ -3,7 +3,7 @@ package spec
 import (
 	"errors"
 	"fmt"
-	"openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"os"
 	"path"
 	"path/filepath"

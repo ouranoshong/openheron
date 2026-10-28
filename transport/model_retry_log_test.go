@@ -10,7 +10,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/agentkit/obs"
 )
 
 func captureLog(t *testing.T) (*bytes.Buffer, func()) {

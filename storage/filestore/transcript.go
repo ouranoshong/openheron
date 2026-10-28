@@ -10,7 +10,7 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/agentkit/obs"
 )
 
 const (

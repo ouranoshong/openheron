@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"openheron/agentkit/spec"
-	"openheron/agentkit/spec/decl"
-	"openheron/contract"
+	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/contract"
 )
 
 func TestTheEntryAgentBuildsItsOwnTree(t *testing.T) {

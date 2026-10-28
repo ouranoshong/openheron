@@ -4,7 +4,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/message"
+	"github.com/ouranoshong/openheron/message"
 )
 
 func requestedBy(ic *adk.InterruptCtx, mainAgent string) string {

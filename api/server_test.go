@@ -16,10 +16,10 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/cloudwego/hertz/pkg/route"
 
-	"openheron/agentkit/run"
-	"openheron/contract"
-	"openheron/storage"
-	"openheron/storage/filestore"
+	"github.com/ouranoshong/openheron/agentkit/run"
+	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/storage"
+	"github.com/ouranoshong/openheron/storage/filestore"
 )
 
 func newTestServer(t *testing.T) (*Server, *filestore.FileManager) {

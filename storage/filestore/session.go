@@ -15,9 +15,9 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/contract"
-	"openheron/message"
-	"openheron/storage"
+	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/message"
+	"github.com/ouranoshong/openheron/storage"
 )
 
 var _ storage.Session = (*FileSession)(nil)

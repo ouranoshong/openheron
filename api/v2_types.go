@@ -10,10 +10,10 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
-	"openheron/agentkit/obs"
-	"openheron/agentkit/run"
-	"openheron/contract"
-	"openheron/storage"
+	"github.com/ouranoshong/openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/agentkit/run"
+	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/storage"
 )
 
 // rfc3339Nano is the timestamp shape every v2 field uses.

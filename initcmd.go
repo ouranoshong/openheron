@@ -9,8 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"openheron/agentkit/spec"
-	"openheron/initcfg"
+	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/initcfg"
 )
 
 func initCmd(args []string, stdout io.Writer) error {

@@ -8,10 +8,10 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/agentkit/obs"
-	"openheron/contract"
-	"openheron/message"
-	"openheron/storage"
+	"github.com/ouranoshong/openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/message"
+	"github.com/ouranoshong/openheron/storage"
 )
 
 // newLoop builds the TurnLoop for one session.

@@ -11,9 +11,9 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/agentkit/obs"
-	"openheron/agentkit/spec/decl"
-	"openheron/helpers"
+	"github.com/ouranoshong/openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/helpers"
 )
 
 func (b *Builder) baseConfig(snap *snapshot, root decl.SubAgentSpec) deep.Config {

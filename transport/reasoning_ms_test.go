@@ -7,7 +7,7 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/message"
+	"github.com/ouranoshong/openheron/message"
 )
 
 func TestTheEmitterMeasuresTheReasoningDuration(t *testing.T) {

@@ -2,7 +2,7 @@ package spec
 
 import (
 	"context"
-	"openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"os"
 	"path/filepath"
 	"strings"

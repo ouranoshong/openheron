@@ -7,7 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"openheron/contract"
+	"github.com/ouranoshong/openheron/contract"
 	"strings"
 	"sync"
 

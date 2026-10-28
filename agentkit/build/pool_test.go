@@ -2,7 +2,7 @@ package build
 
 import (
 	"context"
-	"openheron/contract"
+	"github.com/ouranoshong/openheron/contract"
 	"sync"
 	"testing"
 

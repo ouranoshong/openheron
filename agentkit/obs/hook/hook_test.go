@@ -11,7 +11,7 @@ import (
 	"github.com/cloudwego/eino/components"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/agentkit/obs"
 )
 
 var _ callbacks.Handler = (*Handler)(nil)

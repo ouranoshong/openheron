@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"openheron/persist"
+	"github.com/ouranoshong/openheron/persist"
 )
 
 func TestStartRunIsExclusiveWithinTheProcess(t *testing.T) {

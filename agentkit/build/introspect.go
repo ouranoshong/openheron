@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
 
 type ToolVerdict struct {

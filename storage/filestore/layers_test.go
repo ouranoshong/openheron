@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"openheron/contract"
-	"openheron/message"
-	"openheron/storage"
+	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/message"
+	"github.com/ouranoshong/openheron/storage"
 )
 
 func TestListingDoesNotParseTheTranscript(t *testing.T) {

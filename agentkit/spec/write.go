@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"openheron/persist"
+	"github.com/ouranoshong/openheron/persist"
 )
 
 const writeTmpSuffix = ".tmp"

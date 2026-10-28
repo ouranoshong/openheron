@@ -3,7 +3,7 @@ package kb
 import (
 	"context"
 	"fmt"
-	"openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/agentkit/obs"
 	"path/filepath"
 
 	"github.com/cloudwego/eino/callbacks"

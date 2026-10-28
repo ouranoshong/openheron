@@ -11,9 +11,9 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
-	"openheron/agentkit/obs"
-	"openheron/storage"
-	"openheron/storage/filestore"
+	"github.com/ouranoshong/openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/storage"
+	"github.com/ouranoshong/openheron/storage/filestore"
 )
 
 func captureLog(t *testing.T) *bytes.Buffer {

@@ -8,9 +8,9 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
-	"openheron/agentkit/build"
-	"openheron/agentkit/spec"
-	"openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/agentkit/build"
+	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
 
 // The /v2 introspection family exists because a surprising amount of what

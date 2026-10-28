@@ -12,9 +12,9 @@ import (
 	"github.com/cloudwego/eino/components/embedding"
 	"github.com/cloudwego/eino/components/tool"
 
-	"openheron/agentkit/spec"
-	"openheron/agentkit/spec/decl"
-	"openheron/kb"
+	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/kb"
 )
 
 type wordEmbedder struct{ dim int }

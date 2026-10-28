@@ -1,7 +1,7 @@
 package spec
 
 import (
-	"openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"path/filepath"
 	"strings"
 	"testing"

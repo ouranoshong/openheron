@@ -5,8 +5,8 @@ import (
 	"context"
 	"encoding/gob"
 	"github.com/cloudwego/eino/adk"
-	"openheron/agentkit/spec/decl"
-	"openheron/approval"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/approval"
 	"reflect"
 	"testing"
 )

@@ -15,11 +15,11 @@ import (
 	hertzconfig "github.com/cloudwego/hertz/pkg/common/config"
 	"github.com/cloudwego/hertz/pkg/route"
 
-	"openheron/agentkit/run"
-	"openheron/contract"
-	"openheron/storage"
-	"openheron/storage/filestore"
-	"openheron/transport"
+	"github.com/ouranoshong/openheron/agentkit/run"
+	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/storage"
+	"github.com/ouranoshong/openheron/storage/filestore"
+	"github.com/ouranoshong/openheron/transport"
 )
 
 func TestApprovalChainEndToEnd(t *testing.T) {

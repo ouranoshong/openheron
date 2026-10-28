@@ -11,9 +11,9 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 
-	"openheron/agentkit/spec"
-	"openheron/agentkit/spec/decl"
-	"openheron/llm/common"
+	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/llm/common"
 )
 
 func FromConfig(ctx context.Context, root string, p *decl.Provider, m *decl.Model) (

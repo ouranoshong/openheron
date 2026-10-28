@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec"
 )
 
 const userProviderYAML = `type: openai_compat

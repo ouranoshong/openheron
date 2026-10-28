@@ -10,9 +10,9 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/contract"
-	"openheron/message"
-	"openheron/storage"
+	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/message"
+	"github.com/ouranoshong/openheron/storage"
 )
 
 func newManager(t *testing.T, opts Options) *FileManager {

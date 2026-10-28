@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec"
 )
 
 func initEnv(t *testing.T) string {

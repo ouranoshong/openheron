@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/storage"
 	"io"
-	"openheron/contract"
-	"openheron/storage"
 	"sync"
 	"testing"
 	"time"
@@ -14,7 +14,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/message"
+	"github.com/ouranoshong/openheron/message"
 )
 
 // ---- in-memory storage.SessionManager for Runtime tests ----

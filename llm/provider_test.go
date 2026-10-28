@@ -3,9 +3,9 @@ package llm_test
 import (
 	"testing"
 
-	"openheron/agentkit/build"
-	"openheron/agentkit/spec"
-	"openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/agentkit/build"
+	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
 
 func testProvider() *decl.Provider {

@@ -22,13 +22,13 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	"github.com/google/uuid"
 
-	"openheron/agentkit/run"
-	"openheron/agentkit/spec"
-	"openheron/agentkit/spec/decl"
-	"openheron/contract"
-	"openheron/storage"
-	"openheron/storage/filestore"
-	"openheron/transport"
+	"github.com/ouranoshong/openheron/agentkit/run"
+	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/storage"
+	"github.com/ouranoshong/openheron/storage/filestore"
+	"github.com/ouranoshong/openheron/transport"
 )
 
 // These cover the /v2 contract. Two matter most:

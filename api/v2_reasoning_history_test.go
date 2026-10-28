@@ -5,7 +5,7 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/message"
+	"github.com/ouranoshong/openheron/message"
 )
 
 func TestTheHistoryCarriesTheReasoningAndItsDuration(t *testing.T) {

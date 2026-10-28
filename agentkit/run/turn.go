@@ -2,7 +2,7 @@ package run
 
 import (
 	"context"
-	"openheron/contract"
+	"github.com/ouranoshong/openheron/contract"
 	"sync"
 	"time"
 

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec"
 )
 
 func nestedConfig(t *testing.T) *spec.Config {

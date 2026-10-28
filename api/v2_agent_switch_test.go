@@ -9,9 +9,9 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
-	"openheron/agentkit/spec"
-	"openheron/contract"
-	"openheron/storage"
+	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/storage"
 )
 
 func newAgentServer(t *testing.T) (*Server, *spec.Config) {

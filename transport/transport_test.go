@@ -12,7 +12,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
-	"openheron/approval"
+	"github.com/ouranoshong/openheron/approval"
 )
 
 type sliceEvents struct {

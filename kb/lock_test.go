@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"openheron/persist"
+	"github.com/ouranoshong/openheron/persist"
 )
 
 func TestReconcileDoesNotLoseAnotherWritersEntries(t *testing.T) {

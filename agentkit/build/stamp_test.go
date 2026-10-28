@@ -7,8 +7,8 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/agentkit/spec/decl"
-	"openheron/message"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/message"
 )
 
 type stubStampModel struct {

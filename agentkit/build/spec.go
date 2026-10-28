@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"openheron/agentkit/spec"
-	"openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
 
 type agentSpec struct {

@@ -59,7 +59,7 @@
 为什么：错误信息常被 grep、被日志采集、被 `llm/common` 的 `Kind` 分类消费；混语言会让排障时的检索与匹配失效，也让 `/v2/config` 的 `deferred` 字段混入两种语言。
 界面文案同理 —— 用户看的是界面，不是源码，中英混排会让「这是 bug 还是我配置错了」更难判断。
 
-**日志出口只有一个**：`obs.Logger()`（`openheron/agentkit/obs`）。业务包里不要再直接
+**日志出口只有一个**：`obs.Logger()`（`github.com/ouranoshong/openheron/agentkit/obs`）。业务包里不要再直接
 `log.Printf` / `fmt.Fprintln(os.Stderr)` —— 级别（Info / Warn / Error）与前缀
 只有一处定义，而级别决定了一行会不会出现在默认输出里。
 

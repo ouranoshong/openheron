@@ -8,8 +8,8 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/approval"
-	"openheron/helpers"
+	"github.com/ouranoshong/openheron/approval"
+	"github.com/ouranoshong/openheron/helpers"
 )
 
 type filterMiddleware struct {

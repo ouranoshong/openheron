@@ -3,8 +3,8 @@ package spec
 import (
 	"testing"
 
-	"openheron/agentkit/spec/decl"
-	"openheron/kb"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/kb"
 )
 
 func TestDefaultPolicyCoversKBTools(t *testing.T) {

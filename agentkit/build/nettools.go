@@ -16,7 +16,7 @@ import (
 	"github.com/cloudwego/eino-ext/components/tool/wikipedia"
 	"github.com/cloudwego/eino/components/tool"
 
-	"openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
 
 const (

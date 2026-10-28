@@ -13,7 +13,7 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 
-	"openheron/approval"
+	"github.com/ouranoshong/openheron/approval"
 )
 
 type nestedToolCallModel struct {

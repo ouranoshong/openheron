@@ -2,7 +2,7 @@ package build
 
 import (
 	"context"
-	"openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/agentkit/obs"
 	"os"
 	"path/filepath"
 	"sort"

@@ -7,8 +7,8 @@ import (
 	"github.com/cloudwego/eino/components/embedding"
 	"github.com/cloudwego/eino/components/tool"
 
-	"openheron/agentkit/spec"
-	"openheron/kb"
+	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/kb"
 )
 
 func buildKBTools(ctx context.Context, c *spec.Config, projectRoot, dataDir string) ([]tool.BaseTool, error) {
