@@ -1,0 +1,92 @@
+package build
+
+import (
+	"context"
+	"slices"
+	"testing"
+
+	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/schema"
+)
+
+type stubAgent struct {
+	name  string
+	tools []string // names this sub-agent could invoke
+}
+
+func (s *stubAgent) Name(context.Context) string        { return s.name }
+func (s *stubAgent) Description(context.Context) string { return "stub" }
+
+func (s *stubAgent) Run(context.Context, *adk.TypedAgentInput[*schema.Message], ...adk.AgentRunOption) *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.Message]] {
+	iter, gen := adk.NewAsyncIteratorPair[*adk.TypedAgentEvent[*schema.Message]]()
+	gen.Close()
+	return iter
+}
+
+func defaultTestPolicy() Policy {
+	// ★ 与 config 的出厂策略同形：只读工具显式 allow，变更类 ask。
+	//   兜底是 allow —— 未点名的工具直接放行，所以**这里只列真正要拦的**。
+	return NewPolicy(
+		[]string{"write_file", "edit_file", "execute"},
+		nil,
+	)
+}
+
+// ★ NewBuilder 不做任何 agent 项的初始化：连根名字都不知道。
+//
+//	推导只发生在第一次 Build（snapshotFor）—— 于是启动与热更新走同一条路。
+func TestNewBuilderDefersEverythingToBuild(t *testing.T) {
+	b := NewBuilder(testManager(nil))
+	if b.snap != nil {
+		t.Fatal("NewBuilder must not derive a snapshot before the manager is asked")
+	}
+	if _, _, size, _ := b.Stats(); size != 0 {
+		t.Fatalf("NewBuilder must not populate the pool, got %d entries", size)
+	}
+}
+
+// The gate must wrap mutating tools and leave read-only ones untouched.
+func TestApprovalMiddlewareOnlyGatesMutatingTools(t *testing.T) {
+	mw := newApprovalMiddleware(defaultTestPolicy())
+
+	for _, name := range defaultTestPolicy().Ask {
+		tCtx := &adk.ToolContext{Name: name}
+		wrapped, err := mw.WrapInvokableToolCall(context.Background(), passthroughEndpoint, tCtx)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if wrapped == nil {
+			t.Fatalf("%s should be wrapped by the gate", name)
+		}
+	}
+
+	readOnly := &adk.ToolContext{Name: "read_file"}
+	wrapped, err := mw.WrapInvokableToolCall(context.Background(), passthroughEndpoint, readOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wrapped == nil {
+		t.Fatal("read_file must pass through unchanged")
+	}
+}
+
+func TestGatedToolSetMatchesBuiltinNames(t *testing.T) {
+	for _, name := range []string{"write_file", "edit_file", "execute"} {
+		if defaultTestPolicy().TierOf(name) != TierAsk {
+			t.Errorf("%s should be gated", name)
+		}
+	}
+	for _, name := range []string{"read_file", "ls", "glob", "grep"} {
+		if defaultTestPolicy().TierOf(name) == TierAsk {
+			t.Errorf("%s should not be gated", name)
+		}
+	}
+	if !slices.Contains(defaultTestPolicy().Ask, "execute") {
+		t.Error("execute must be covered by the gate")
+	}
+}
+
+func passthroughEndpoint(context.Context, string, ...tool.Option) (string, error) {
+	return "ok", nil
+}

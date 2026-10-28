@@ -1,0 +1,14 @@
+# ★ 出厂模板：一个 OpenAI 兼容端点。
+#   占位符的默认值就在这条文件里 —— **厂商知识不进 Go 代码**。
+type: openai_compat
+base_url: {{base_url|https://api.openai.com/v1}}
+
+# ★ api_key 写的是**环境变量名**，渲染成 ${NAME}。
+#   密钥在请求时才从环境里取：没设不阻塞启动，只记一条提醒。
+api_key: {{api_key_env|OPENAI_API_KEY}}
+
+timeout: 5m
+
+models:
+  - id: {{model|gpt-4o}}
+    context_window: 128000

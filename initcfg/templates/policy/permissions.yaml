@@ -1,0 +1,7 @@
+# ★ 只有 ask 与 deny 两列 —— **未点名的工具一律放行**。
+#   真正有后果的工具在这里点名（每次点头）或 deny（不可用）。
+ask:   [write_file, edit_file, execute, kb_index]
+deny:  []
+
+# ★ 外层 deny 优先于各 agent 自己的 disabled_tools —— 那是子 agent
+#   无法放松的唯一保证。要收窄**某一个** agent，用它自己的 disabled_tools。

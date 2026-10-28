@@ -1,0 +1,31 @@
+# 进程自身的配置。
+# ★ 本目录**不进热更新** —— 改了要重启。
+#
+#   外部工具（http / web_search / wikipedia）与知识库的配置在 tools/ 目录，
+#   那边**进热更新** —— 改完下一轮就生效。
+
+listen_addr: ":8080"
+static_dir: static        # 相对**项目根**解析（<root>/static）
+data_dir: state           # 运行数据；实际取 Service.StateDir() = <root>/.openheron/state
+
+# 一轮从提交到进入运行态的上限
+start_timeout: 60s
+
+retry:
+  max_retries: 5
+
+agent:
+  # 嵌套深度上限。**入口 agent（会话选定的那个）是第 0 层**；深度 d 的 agent
+  # 允许再生子 agent 当且仅当 d < max_depth。1 = 只有入口 agent 能委派。
+  # 声明的拓扑超出上限会在**启动期报错**，不会被静默截断。
+  max_depth: 1
+
+  # ★ **每个声明了的 agent 都能当会话的 agent** —— 没有「主 agent」，
+  #   也没有「候选主 agent」那套推导。会话选了谁，就以谁为第 0 层展开
+  #   它自己的队伍（各自的 subagents:）。
+  #   详见 docs/multi-agent-design.md §4。
+
+# llm/ agents/ policy/ tools/ 的改动会被自动发现并换代；server/ 不会
+watch:
+  enabled: true
+  debounce: 200ms

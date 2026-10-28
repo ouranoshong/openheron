@@ -1,0 +1,62 @@
+# air —— Go 开发期的自动重建 + 重启。
+#
+# ★ 为什么是「重建 + 重启」而不是前端那种 HMR：
+#
+#   Go 没有模块级热替换，标准做法就是重启进程。对 openheron 来说这条路成本很低，
+#   因为**需要跨重启存活的状态本来就落在磁盘上**：
+#
+#     会话历史      session.jsonl        启动时 Inspect 直接读回来
+#     待审批        state.json + checkpoint  Inspect 会核对二者是否配对
+#     配置          文件                 已有热重载（main.go 的 watch）
+#
+#   真正会丢的只有**进行中的一轮**（正在流式返回的模型调用）。
+#   实测增量重建 ~1.1s，改一行到看到效果约 1.5s，不需要更精巧的方案。
+#
+# ★ working_dir 必须是仓库根。
+#   openheron 按项目根解析相对路径（config.Service.ResolveDir），不是按进程 cwd。
+#   在别处启动会得到 `agents/main.md does not exist or could not be parsed`。
+
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # 二进制放 tmp/ 而不是 bin/：bin/ 是发布产物目录，不该被开发期的
+  # 半成品覆盖 —— `make build` 的产物和调试产物混在一起会分不清。
+  bin = "tmp/openheron-dev"
+  cmd = "go build -o tmp/openheron-dev ."
+  # 含测试文件的包一改就重编：openheron 的行为大量写在 _test.go 里
+  # （比如那些把反直觉设计钉住的注释），改测试后不重编会让人以为代码没生效。
+  include_ext = ["go", "yaml", "yml", "tmpl"]
+  exclude_dir = ["tmp", "bin", "web", "docs", "a2ui/web"]
+  # web/ 整个排除：前端由 Vite dev server 负责，它的 HMR 是毫秒级的，
+  # 没必要让 Go 这边跟着前端改动重编一次 40MB 的二进制。
+  exclude_file = []
+  # 留空 = 用 air 的默认 ["_test.go"]，这正好是对的：
+  # `go build` 根本不编译测试文件，改 _test.go 不可能改变二进制，
+  # 为此重编 1.1s 是白等。测试要跑是 `make test` 的事，不是 air 的事。
+  #
+  # docs/ 和 .md 不在 include_ext 里，本来就不会触发，不重复声明。
+  exclude_regex = []
+  delay = 200
+  stop_on_error = false
+  send_interrupt = true
+  kill_delay = "500ms"
+  # 二进制改完再等一小会儿再启动，给 air 自己释放监听端口的时间。
+  # 不加的话偶发 bind: address already in use —— 表现为「改完代码
+  # 服务没起来」，很容易误判成构建失败。
+  post_cmd = []
+
+[run]
+  # 复用 Vite 代理过来的默认端口。开发时前端在 :5173，代理打到这里。
+  full_bin = "tmp/openheron-dev"
+  # 前端热更新走 Vite，这里不用每次重启都盯静态目录。
+  include_dir = ["agents", "llm", "policy", "skills"]
+  # 忘了设也无所谓，但设了能避免调试时误以为「改了配置没生效」——
+  # 配置文件有自己的热重载，比重启进程快得多。
+  kill_delay = "500ms"
+  send_interrupt = true
+  log = "tmp/air.log"
+
+[misc]
+  # 跑在项目根，而不是 ~/.air/rs 这类全局配置 —— 换机器/换项目自动跟随。
+  clean_on_exit = true

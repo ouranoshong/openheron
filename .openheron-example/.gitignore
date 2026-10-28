@@ -1,0 +1,7 @@
+# 运行数据不进版本库 —— 配置要 diff / blame / 回滚，会话内容不能泄露
+state/
+.config.lock
+
+# 明文密钥的保险（正常写法是 ${ENV} 或 @file:）
+llm/*.local.yaml
+*.key

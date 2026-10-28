@@ -1,0 +1,13 @@
+# ★ 通用模板：**没有默认端点** —— 必须显式给 --base-url。
+#   不猜端点：猜错了用户拿到的是 404，比直接报错贵得多。
+type: openai_compat
+base_url: {{base_url}}
+
+# ★ api_key 写的是**环境变量名**，渲染成 ${NAME}。
+api_key: {{api_key_env}}
+
+timeout: 5m
+
+models:
+  - id: {{model}}
+    context_window: 0

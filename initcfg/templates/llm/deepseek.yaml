@@ -1,0 +1,27 @@
+# ★ 出厂模板：DeepSeek（OpenAI 兼容端点）。
+#
+# ★ 端点在配置里（代码零内置）——照厂商文档写，**含路径**。
+type: openai_compat
+base_url: {{base_url|https://api.deepseek.com}}
+
+# ★ api_key 写的是**环境变量名**，渲染成 ${NAME}。
+api_key: {{api_key_env|DEEPSEEK_API_KEY}}
+
+timeout: 5m
+
+models:
+  - id: {{model|deepseek-flash}}
+    context_window: 131072
+
+    # 档位词汇表：档位名 → 这个端点把它发成什么字段。
+    # agent 只写 `reasoning: high`，不需要知道 high 在这家是什么形状。
+    #
+    # ★ 这张表**不是可选的**：端点没声明的档位会被**静默忽略** ——
+    #   agent 写 `reasoning: high` 而模型没有 high，等于「不思考」，
+    #   而且不报错、不出声。声明了它，`high` / `low` 才真的生效。
+    reasoning:
+      off:  { reasoning_effort: none, thinking: { type: disabled } }
+      low:  { reasoning_effort: low,  thinking: { type: enabled } }
+      high: { reasoning_effort: high, thinking: { type: enabled } }
+      max:  { reasoning_effort: max,  thinking: { type: enabled } }
+    reasoning_default: off                        # agent 没写 reasoning 时用它

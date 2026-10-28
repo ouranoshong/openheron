@@ -1,0 +1,114 @@
+package common
+
+import (
+	"bytes"
+	"io"
+	"log"
+	"net/http"
+	"strconv"
+	"strings"
+	"testing"
+)
+
+type loggingRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f loggingRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func captureLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(prev) })
+	return &buf
+}
+
+func loggingClient(base http.RoundTripper) *http.Client {
+	return WrapHTTPClient(&http.Client{Transport: base}, "test-provider")
+}
+
+func okResponse(req *http.Request) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Status:     "200 OK",
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader("ok")),
+		Request:    req,
+	}
+}
+
+// 默认只打摘要：完整 body 是 opt-in，否则正常日志会变成一份会话副本。
+func TestRequestLoggingDefaultsToSummary(t *testing.T) {
+	t.Setenv(LogRequestsEnv, "")
+	out := captureLog(t)
+
+	var seen string
+	client := loggingClient(loggingRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		b, _ := io.ReadAll(req.Body)
+		seen = string(b)
+		return okResponse(req), nil
+	}))
+
+	body := `{"model":"m","messages":[{"role":"user","content":"hi"}]}`
+	req, _ := http.NewRequest(http.MethodPost, "https://example.com/chat/completions", strings.NewReader(body))
+	if _, err := client.Do(req); err != nil {
+		t.Fatal(err)
+	}
+
+	if seen != body {
+		t.Fatalf("the transport consumed the body: %q", seen)
+	}
+	got := out.String()
+	if !strings.Contains(got, "provider=test-provider") {
+		t.Fatalf("summary is missing the provider: %s", got)
+	}
+	if !strings.Contains(got, "bytes="+strconv.Itoa(len(body))) {
+		t.Fatalf("summary is missing the byte count: %s", got)
+	}
+	if strings.Contains(got, "body:") {
+		t.Fatalf("the body must stay out of the default log: %s", got)
+	}
+}
+
+// 打开开关后打印最终请求体，并且必须遮蔽密钥类字段；max_tokens 不能被误伤。
+func TestRequestLoggingFullBodyRedactsSecrets(t *testing.T) {
+	t.Setenv(LogRequestsEnv, "1")
+	out := captureLog(t)
+
+	var seen string
+	client := loggingClient(loggingRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		b, _ := io.ReadAll(req.Body)
+		seen = string(b)
+		return okResponse(req), nil
+	}))
+
+	body := `{"model":"m","api_key":"body-secret","max_tokens":42,"messages":[{"role":"user","content":"hi"}],"nested":{"authorization":"Bearer body-secret"}}`
+	req, _ := http.NewRequest(http.MethodPost,
+		"https://user:pass@example.com/chat/completions?api_key=query-secret&model=m",
+		strings.NewReader(body))
+	if _, err := client.Do(req); err != nil {
+		t.Fatal(err)
+	}
+
+	if seen != body {
+		t.Fatalf("the transport consumed the body: %q", seen)
+	}
+	got := out.String()
+	for _, want := range []string{
+		`provider=test-provider`,
+		`"api_key": "[redacted]"`,
+		`"authorization": "[redacted]"`,
+		`"max_tokens": 42`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("log is missing %q:\n%s", want, got)
+		}
+	}
+	for _, secret := range []string{"body-secret", "query-secret", "user:pass@"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("secret %q leaked into the log:\n%s", secret, got)
+		}
+	}
+}
