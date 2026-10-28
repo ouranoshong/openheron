@@ -1,11 +1,12 @@
 {
-  /* 测试代码的类型检查。
+  /* Type checking for the test code.
    *
-   * ★ 为什么单独一个 project：app 走 `moduleResolution: bundler`
-   *   （vite + `@/` 别名），而 node 侧是 `nodenext`（要求 import 带
-   *   扩展名）。测试代码是浏览器+node 混合的，两边规则都不完全合适，
-   *   放一起会一直报 "Relative import paths need explicit file
-   *   extensions"。这里统一用 bundler 解析，与 vite 实际行为一致。
+   * ★ Why a separate project: the app uses `moduleResolution: bundler`
+   *   (vite + the `@/` alias) while the node side uses `nodenext` (which
+   *   requires imports to carry the extension). The test code mixes browser
+   *   and node, so neither rule set fits; keeping them together keeps
+   *   reporting "Relative import paths need explicit file extensions".
+   *   Everything is resolved with bundler here, matching what vite really does.
    */
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
@@ -14,9 +15,10 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "types": ["node", "bun"],
-    /* ★ 必须与 tsconfig.app.json 一致：被测的 src/** 源码内部用 `@/`
-       导入，测试 project 没有这个映射就会报 "Cannot find module
-       '@/lib/api'" —— 而且报错指向测试文件，很容易误判成测试的问题。 */
+    /* ★ Must match tsconfig.app.json: the src/** code under test imports via
+       `@/`, so without this mapping the test project reports "Cannot find
+       module '@/lib/api'" — and the error points at the test file, which
+       easily gets misread as a problem with the test itself. */
     "paths": { "@/*": ["./src/*"] },
     "skipLibCheck": true,
     "strict": true,

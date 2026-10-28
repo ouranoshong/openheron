@@ -1,12 +1,3 @@
-// SSE 分帧：把「一行一个 JSON 事件」写成 SSE data frame，空闲时发 keepalive。
-//
-// ★ 它原本是独立的 sseio 包，并入 transport 时包注释忘了改 —— 于是 go doc
-//
-//	把两段包注释并排显示，而这一段还写着早已不用的 A2UI。
-//
-//	所以它现在与 package 子句之间留了空行：**这是文件说明，不是包说明**
-//	（包说明在 transport.go 开头）。
-
 package transport
 
 import (
@@ -23,7 +14,6 @@ import (
 const DefaultKeepalive = 15 * time.Second
 
 // SSEStream publishes newline-delimited payloads as SSE data frames.
-//
 // A renderer writes plain JSONL to it; the SSEStream buffers partial lines and
 // publishes one frame per complete line, so a frame never carries half a
 // record.

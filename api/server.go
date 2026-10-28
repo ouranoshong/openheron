@@ -26,11 +26,9 @@ type Server struct {
 	sm       storage.SessionManager
 	staticFS string
 
-	// embedded 是 go:embed 的 web/dist（v2 React 界面）。
 	embedded    fs.FS
 	embedPrefix string
-	// spa 是 webui 提供的 SPA 兜底处理器。
-	spa app.HandlerFunc
+	spa         app.HandlerFunc
 	// h is typed as IRoutes so tests can register onto a bare *route.Engine and
 	// drive it through ut.PerformRequest without binding a port.
 	h route.IRoutes
@@ -88,19 +86,10 @@ func New(rt *run.Runtime, sm storage.SessionManager, opts ...hertzconfig.Option)
 
 // SetStaticDir serves the front end from a directory on disk. Empty disables
 // it, which is what an embedding application wants.
-//
-// ★ 开发时它指向 web/dist（Vite 的构建产物）；发布形态用 SetEmbeddedFrontend
-// 把同一份产物嵌进二进制，不需要这个目录。
 func (s *Server) SetStaticDir(dir string) { s.staticFS = dir }
 
 // SetEmbeddedFrontend serves the React front end from assets, the go:embed
 // tree of web/dist. Takes precedence over SetStaticDir.
-//
-// ★ 两者互斥而不是叠加：staticDir 是磁盘上的目录（开发时是 web/dist），
-//
-//	assets 是编译进二进制的同一份产物。两个都注册会让「哪一套优先」变成
-//	注册顺序的隐式行为 —— 那种依赖只有在改了一行注册代码之后才会暴露，
-//	而表现是界面悄悄换了一整套、数据还是 /v2 的。
 func (s *Server) SetEmbeddedFrontend(assets fs.FS, prefix string) error {
 	handler, err := webui.Handler(assets, prefix)
 	if err != nil {
@@ -127,19 +116,10 @@ func (s *Server) registerRoutes() {
 	s.registerV2Routes()
 
 	if s.spa != nil {
-		// SPA 兜底挂在 NoRoute 上，而不是通配路由：
-		// 真接口先由路由表匹配；只有没匹配上的路径才落到 index.html。
-		// 若把兜底写成 h.GET("/*path")，一个拼错的 /v2 接口会拿到一份
-		// HTML 而不是 404 JSON，排查会从「接口没通」偏到「前端解析失败」。
 		s.h.(*hserver.Hertz).NoRoute(s.spa)
 	}
 
 	if s.staticFS != "" && s.embedded == nil {
-		// ★ 必须用 StaticFS 显式给 IndexNames，而不是 Static：
-		//   Hertz 的 app.FS 默认 IndexNames 为空、GenerateIndexPages=false，
-		//   于是请求目录 `/` 会命中 fs.go 的「cannot access directory without
-		//   index page」并回 403 —— 首页永远送不出去。
-		//   显式声明 index.html 后 `/` 才会返回静态首页。
 		h.StaticFS("/", &app.FS{
 			Root:       s.staticFS,
 			IndexNames: []string{"index.html"},
@@ -150,9 +130,3 @@ func (s *Server) registerRoutes() {
 func (s *Server) session(ctx context.Context, c *app.RequestContext) (storage.Session, error) {
 	return s.sm.Get(ctx, c.Param("id"))
 }
-
-// pendingFromIDs 把一组 interrupt id 变成待批集合。
-//
-// ★ 只带 id，不带详情：v1 的 A2UI 协议本来就没有详情（chip 上是一句
-//
-//	格式化过的字符串），而详情是 v2 才有的东西。

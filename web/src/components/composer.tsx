@@ -39,30 +39,6 @@ interface MentionState {
   error?: string
 }
 
-/**
- * 输入区。
- *
- * ★ Enter 发送、Shift+Enter 换行 —— 聊天界面的通用约定，不用问用户。
- *
- * ★ 高度自动增长但封顶：不限高的话粘贴一大段会把整屏挤走。
- *
- * ★ 有审批挂起时禁发：AG-UI 的语义是「有待答复的中断时不能开新一轮」，
- *   而服务端 Resume 路径是按 interruptId 找原会话的。放着不管的表现是
- *   点发送没反应，用户完全不知道原因。
- *
- * ★ 附件只是「提前把文件放进会话 workspace」，消息体里不带它们 ——
- *   模型通过工具读那个目录（见 openheronrt/loop.go 把 sess.Workspace()
- *   喂进 prompt 的那处）。所以发送时不需要做任何附件相关的处理。
- *
- * ★ @ 与 / 的解析都在 lib/composer-triggers.ts 与 lib/commands.ts，
- *   这里只把状态接到纯函数上。组件里不再藏一套 caret 规则。
- */
-/**
- * Composer 输入区。
- *
- * `inset` 只管外边距：底部版式要 `px-4 pb-3`，而**居中**版式由外层
- * 负责留白与定宽 —— 两边各留一份会让居中的那一组整体偏下。
- */
 export function Composer({ inset = true }: { inset?: boolean }) {
   const send = useStore((s) => s.send)
   const status = useStore(selectStatus)
@@ -74,19 +50,12 @@ export function Composer({ inset = true }: { inset?: boolean }) {
   const [mention, setMention] = useState<MentionState>({ query: null, items: [] })
   const [commands, setCommands] = useState<SlashCommand[] | null>(null)
   const [active, setActive] = useState(0)
-  // Agent 选择器的本地状态：它只属于输入区，不进 store —— 与 settings 那种
-  // 「打开后占据整个界面」的状态不同。
   const [picker, setPicker] = useState<{ open: boolean; filter?: string; error?: string }>({
     open: false,
   })
-  // Skill 选择器的本地状态：与 agent 选择器一样只属于输入区 ✅。
   const [skillPicker, setSkillPicker] = useState<{ open: boolean; filter?: string; error?: string }>({
     open: false,
   })
-  // skill 清单：选择器要它，「名字对不上」时也要它来判断。
-  //
-  // ★ 挂在组件上而不是 store：它是**只读**的配置视图，与 agent 拓扑一个
-  //   道理（见 lib/skill-info.ts 的缓存说明）。
   const [skills, setSkills] = useState<SkillView[]>([])
   useEffect(() => {
     let alive = true
@@ -95,7 +64,6 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         if (alive) setSkills(list)
       })
       .catch(() => {
-        // 清单拿不到不是错误：选择器会显示「没有匹配的 skill」✅。
       })
     return () => {
       alive = false
@@ -107,8 +75,6 @@ export function Composer({ inset = true }: { inset?: boolean }) {
   const rowRef = useRef<HTMLDivElement>(null)
   const composingRef = useRef(false)
 
-  // ★ 走 store 的 selector：内联写 `?? []` 每次渲染都造一个新数组，
-  //   zustand 判定快照一直在变 → 无限重渲染 → 白屏。
   const attachments = useStore(selectAttachments)
   const activeId = useStore((s) => s.activeId)
   const uploading = useStore((s) => s.uploading)
@@ -118,14 +84,10 @@ export function Composer({ inset = true }: { inset?: boolean }) {
   const agentChoices = agent.view ? selectableAgents(agent.view) : []
   const switchBlocked = busy || blocked
   const focusAfterSettings = useRef(false)
-  // pickerWasOpen 记住选择器「开过」——关掉的那一刻 open 已经是 false，
-  // 只看它会漏掉「开 → 关」这个跃迁。理由见下面的 effect。
   const pickerWasOpen = useRef(false)
   const addFiles = useStore((s) => s.addFiles)
   const removeFile = useStore((s) => s.removeFile)
 
-  // 10 个视觉行封顶：不做的话粘贴长文会把整屏挤走。line-height 走
-  // computed style，字号/主题变了不用同步改常量。
   const resize = useCallback(() => {
     const el = taRef.current
     if (!el) return
@@ -142,7 +104,6 @@ export function Composer({ inset = true }: { inset?: boolean }) {
     resize()
   }, [text, resize])
 
-  // 只按宽度变化重算：高度变化也会触发 observer，不设防会自激。
   useEffect(() => {
     const row = rowRef.current
     if (!row) return
@@ -233,11 +194,6 @@ export function Composer({ inset = true }: { inset?: boolean }) {
 
   // Opening settings from the composer should return focus to the composer
   // when the dialog closes.
-  //
-  // ★ 从**侧栏**打开时没有这层处理：那边也没有 `DialogTrigger`（设置对话框
-  //   由 store 控制，不挂在触发按钮上），所以 Radix 无处可还原，焦点会落到
-  //   <body>。那是个独立的缺口 —— 修它要先决定「从侧栏开、⌘, 开、composer
-  //   开」三种情况下焦点各回哪儿，不是这里顺手能定的。
   useEffect(() => {
     if (settingsOpen || !focusAfterSettings.current) return
     focusAfterSettings.current = false
@@ -249,15 +205,6 @@ export function Composer({ inset = true }: { inset?: boolean }) {
     })
   }, [settingsOpen])
 
-  // ★ 选择器关掉后把焦点交回输入框。
-  //
-  //	Radix Dialog 的焦点恢复依赖「打开它的那个 trigger」—— 而选择器是
-  //	**程序化**打开的（setPicker({open:true})），没有 trigger。所以 Radix
-  //	无处可还原，焦点落到 <body>：用户接着敲字会发现什么都没进去，
-  //	而命令早就执行完了 —— 看起来像「命令没生效」。
-  //
-  //	用 ref 记住「开过」而不是只看 open 的真假：关掉的那一刻 open 已经是
-  //	false 了，只看它会漏掉「开 → 关」这个跃迁。
   useEffect(() => {
     if (picker.open) {
       pickerWasOpen.current = true
@@ -266,19 +213,12 @@ export function Composer({ inset = true }: { inset?: boolean }) {
     if (!pickerWasOpen.current) return
     pickerWasOpen.current = false
     const focusComposer = () => {
-      // ★ 用 taRef 就够：选择器是 composer 的子节点，composer 卸载时这个
-      //   effect 根本不会跑（picker 也不会「关掉」—— 它跟着一起没了）。
-      //   所以这里不存在「ref 指向已移除的节点」的情况。
       const el = taRef.current
       if (!el) return
       el.focus()
       el.setSelectionRange(el.value.length, el.value.length)
     }
-    // ★ 先**同步**恢复：选择器一消失就该把焦点交回去 ——
-    //   否则「关掉选择器后接着敲字」有一个一帧的窗口，敲进去的字会丢。
     focusComposer()
-    // 再补一帧：Radix 的 FocusScope 在卸载时可能把焦点收回去，
-    //   而它比 effect 晚 —— 所以同一件事做两次，第二次保证结果。
     requestAnimationFrame(focusComposer)
   }, [picker.open])
 
@@ -299,7 +239,6 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         break
       }
       case "stop_run":
-        // ★ 异步：它要等服务端真的把那一轮停掉。
         void useStore.getState().stop()
         break
       case "attach_files":
@@ -429,21 +368,14 @@ export function Composer({ inset = true }: { inset?: boolean }) {
       // permanently disable action commands for this tab.
       const cmds = commands && commands.length > 0 ? commands : await loadCommands().catch(() => [])
 
-      // ★ /skill 必须先于 actionCommandFor：后者只认「整条就是一个命令名」，
-      //   而 /skill refactor 带参数，不能被当成普通消息发出去。
       const skillCmd = skillCommandFor(t, cmds)
       if (skillCmd) {
         closeTrigger()
         if (skillCmd.mode === "run" && skillCmd.name) {
           const known = skills.some((sk) => sk.name === skillCmd.name)
           if (known) {
-            // ★ 原样发出去：服务端把 `/skill <name> [任务]` 展开成
-            //   「用这个 skill」的话（api/commands.go 的模板）—— 前端不
-            //   自己拼 prompt，那份文本是命令表的地盘。
             void send(t)
           } else {
-            // 未知名字：打开选择器并用它过滤，而不是发出去或者报一个
-            // 「命令不存在」（与 /agents 同一套处理）。
             setSkillPicker({ open: true, filter: skillCmd.name })
           }
           return
@@ -452,8 +384,6 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         return
       }
 
-      // ★ /agents 必须先于 actionCommandFor：后者只认「整条就是一个命令名」，
-      //   而 /agents task 带参数，不能被当成普通消息发出去。
       const agentCmd = agentCommandFor(t, cmds)
       if (agentCmd) {
         setText("")
@@ -464,13 +394,9 @@ export function Composer({ inset = true }: { inset?: boolean }) {
             try {
               await useStore.getState().switchAgent(agentCmd.agentId)
             } catch (e) {
-              // 被拒（运行中 / 待审批）时把原因放进选择器：静默失败会让
-              // 用户以为命令写错了。
               setPicker({ open: true, filter: agentCmd.agentId, error: (e as Error).message })
             }
           } else {
-            // 未知名字：按 §13.6 打开选择器并用它过滤，而不是发出去
-            // 或者报一个「命令不存在」。
             setPicker({ open: true, filter: agentCmd.agentId })
           }
           return
@@ -543,7 +469,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
           aria-label="Attach files"
           onChange={(e) => {
             const files = Array.from(e.target.files ?? [])
-            e.target.value = "" // 允许连续选同一个文件
+            e.target.value = ""
             if (files.length > 0) void addFiles(files).catch(() => {})
           }}
         />
@@ -649,11 +575,6 @@ export function Composer({ inset = true }: { inset?: boolean }) {
             />
           )}
         </div>
-        {/*
-          ★ 运行中只留一个动作按钮：**停止按钮取代发送按钮**，而不是并排。
-            并排时用户会看到「停止 + 一个灰掉的发送」，既多占一个槽位，
-            也让「现在只能停、不能发」这件事不够明确。
-        */}
         {busy ? (
           <StopButton />
         ) : (
@@ -679,9 +600,6 @@ export function Composer({ inset = true }: { inset?: boolean }) {
           filter={skillPicker.filter}
           error={skillPicker.error}
           onPick={(sk) => {
-            // ★ 选中只**回填命令文本**，不直接发送 —— 用户多半还要补一句
-            //   任务；「发出去就等于请模型去调 skill 工具」由服务端展开
-            //   命令时完成 ✅。
             setSkillPicker({ open: false })
             setText(`/skill ${sk.name} `)
             taRef.current?.focus()

@@ -13,10 +13,6 @@ import (
 	goopenai "github.com/meguminnnnnnnnn/go-openai"
 )
 
-// ── 启动期校验 ────────────────────────────────────────────────────────────
-//
-// 不允许返回 (nil, nil)：那会让故障推迟到第一次模型调用才以难懂的形态爆出来。
-
 func TestNewRejectsMissingConfig(t *testing.T) {
 	if _, err := New(context.Background(), nil); !errors.Is(err, ErrNoConfig) {
 		t.Fatalf("want ErrNoConfig, got %v", err)
@@ -54,8 +50,6 @@ func TestGetTypeFallsBackWhenUnset(t *testing.T) {
 	}
 }
 
-// ── 请求级参数 ────────────────────────────────────────────────────────────
-
 func TestRequestOptionsEmitsEveryConfiguredField(t *testing.T) {
 	temp, max, top := float32(0.2), 4096, float32(0.9)
 	r := RequestOptions{
@@ -78,7 +72,6 @@ func TestRequestOptionsEmptyProducesNothing(t *testing.T) {
 	}
 }
 
-// 什么都没配就不包一层 —— 包了会让类型断言与调试变复杂。
 func TestAttachWithoutOptionsReturnsSameInstance(t *testing.T) {
 	cm, err := New(context.Background(), &Config{APIKey: "k", BaseURL: "https://x.example"})
 	if err != nil {
@@ -86,7 +79,7 @@ func TestAttachWithoutOptionsReturnsSameInstance(t *testing.T) {
 	}
 	got := AttachRequestOptions(cm, RequestOptions{}, nativeReasoningField, nativeReasoningField)
 	if any(got) != any(cm) {
-		t.Fatal("未配置任何参数时必须原样返回，不应包一层")
+		t.Fatal("with no options configured it must be returned unchanged, not wrapped")
 	}
 }
 
@@ -101,14 +94,13 @@ func TestAttachForwardsGetType(t *testing.T) {
 
 	tp, ok := wrapped.(interface{ GetType() string })
 	if !ok {
-		t.Fatal("包装器必须实现 components.Typer —— 漏了 agent type 会退化成空串")
+		t.Fatal("the wrapper must implement components.Typer - a missing agent type degrades to an empty string")
 	}
 	if got := tp.GetType(); got != "ark" {
 		t.Fatalf("wrapped GetType() = %q, want %q", got, "ark")
 	}
 }
 
-// WithTools 若不转发包装，一旦 agent 绑了工具就会拿到「配了不生效」的那个模型。
 func TestAttachForwardsThroughWithTools(t *testing.T) {
 	cm, err := New(context.Background(), &Config{APIKey: "k", BaseURL: "https://x.example"})
 	if err != nil {
@@ -131,8 +123,6 @@ func TestAttachForwardsThroughWithTools(t *testing.T) {
 	}
 }
 
-// ── 思维链字段改名 ────────────────────────────────────────────────────────
-
 func applyModifier(t *testing.T, field, from, body string) string {
 	t.Helper()
 	out, err := reasoningPayloadModifier(field, from)(context.Background(), []byte(body))
@@ -142,7 +132,6 @@ func applyModifier(t *testing.T, field, from, body string) string {
 	return string(out)
 }
 
-// 换名 + 删源字段：两个名字都发出去，有些端点会直接 400。
 func TestReasoningRenameDeletesSourceField(t *testing.T) {
 	body := `{"messages":[
 		{"role":"user","content":"hi"},
@@ -170,7 +159,6 @@ func TestReasoningRenameDeletesSourceField(t *testing.T) {
 	}
 }
 
-// 只有 assistant 的消息带思维链；user 消息不该被碰。
 func TestReasoningRenameSkipsNonAssistant(t *testing.T) {
 	body := `{"messages":[{"role":"user","reasoning_content":"X","content":"hi"}]}`
 	out := applyModifier(t, "reasoning", "reasoning_content", body)
@@ -198,7 +186,6 @@ func TestReasoningRenameDoesNotCorruptOnBadJSON(t *testing.T) {
 	}
 }
 
-// 源字段名缺失时默认取原生字段名 —— 配置没写也要能工作。
 func TestReasoningRenameDefaultsSourceField(t *testing.T) {
 	body := `{"messages":[{"role":"assistant","reasoning_content":"T"}]}`
 	out := applyModifier(t, "reasoning", "", body)
@@ -206,8 +193,6 @@ func TestReasoningRenameDefaultsSourceField(t *testing.T) {
 		t.Fatalf("with no explicit source field it must default to the native name: \n%s", out)
 	}
 }
-
-// ── 错误分层 ──────────────────────────────────────────────────────────────
 
 func TestClassifyByStatus(t *testing.T) {
 	cases := []struct {
@@ -218,7 +203,7 @@ func TestClassifyByStatus(t *testing.T) {
 		{http.StatusForbidden, KindAuth},
 		{http.StatusTooManyRequests, KindRateLimit},
 		{http.StatusServiceUnavailable, KindOverload},
-		{529, KindOverload}, // Anthropic 风格，与 503 归同一类
+		{529, KindOverload},
 		{http.StatusBadRequest, KindBadRequest},
 		{http.StatusNotFound, KindBadRequest},
 		{http.StatusInternalServerError, KindUpstream},
@@ -231,7 +216,6 @@ func TestClassifyByStatus(t *testing.T) {
 	}
 }
 
-// 限流与配额的处置**相反**：调并发对后者只会更快用完额度。
 func TestQuotaHintDiffersFromRateLimit(t *testing.T) {
 	rate := hintFor(&APIError{Kind: KindRateLimit}, nil)
 	quota := hintFor(&APIError{Kind: KindQuota}, nil)
@@ -248,7 +232,6 @@ func TestBadRequestHintUsesConfiguredKeys(t *testing.T) {
 	if h := badRequestHint(e, []string{"sw_reasoning_switch"}); !strings.Contains(h, "yaml") {
 		t.Fatalf("on a configured field name the hint must point back at the config: %q", h)
 	}
-	// 没配 keys 就走通用提示 —— 协议层不内置任何一家字段名。
 	if h := badRequestHint(&APIError{Message: "unsupported value: sw_reasoning_switch"}, nil); strings.Contains(h, "yaml") {
 		t.Fatalf("with no field name configured it must not guess: %q", h)
 	}
@@ -257,8 +240,6 @@ func TestBadRequestHintUsesConfiguredKeys(t *testing.T) {
 	}
 }
 
-// openheron 的 Abort 靠 context cancel 实现 —— 包成 APIError 会把「用户主动中止」
-// 变成「端点报错」。
 func TestContextCanceledPassesThrough(t *testing.T) {
 	if got := wrap(context.Canceled, nil); !errors.Is(got, context.Canceled) {
 		t.Fatalf("context.Canceled must pass through unchanged, got %#v", got)
@@ -282,7 +263,7 @@ func TestWrapEndpointError(t *testing.T) {
 		t.Fatalf("attribution is wrong: %+v", ae)
 	}
 	if ae.Hint == "" {
-		t.Fatal("归因后必须带处置建议 —— 「429」本身不说明任何事")
+		t.Fatal("after attribution a remedy hint must be attached - \"429\" alone says nothing")
 	}
 	if !strings.Contains(ae.Error(), "429 rate_limit") {
 		t.Fatalf("the Error() shape is wrong: %q", ae.Error())
@@ -313,14 +294,7 @@ func TestWrapNilIsNil(t *testing.T) {
 	}
 }
 
-// ── 护栏 ──────────────────────────────────────────────────────────────────
-//
-// 厂商知识（字段名、方言键）只允许出现在**配置**与**注释**里，不允许进逻辑代码。
-
 func TestNoVendorKnowledgeInCode(t *testing.T) {
-	// ★ 判据是**带引号的 JSON 键**而不是裸子串 —— 否则
-	//   reasoningPayloadModifier / ReasoningField 这类**我们自己的标识符**
-	//   会被误判（命名里带 reasoning 是合理的，它就是处理思维链的）。
 	banned := []string{
 		`"reasoning_effort"`,
 		`"enable_thinking"`,
@@ -347,8 +321,6 @@ func TestNoVendorKnowledgeInCode(t *testing.T) {
 	}
 }
 
-// stripComment 去掉行内注释 —— ★ 注释里**允许**出现厂商字段名：
-// 举「deepseek 要 reasoning_effort」是有价值的文档，扫它会把文档判成违规。
 func stripComment(line string) string {
 	line = strings.TrimSpace(line)
 	if i := strings.Index(line, "//"); i >= 0 {

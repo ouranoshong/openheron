@@ -15,8 +15,6 @@ import (
 // ConfigSource supplies the effective configuration to the introspection
 // endpoints.
 //
-// ★ A function rather than a *spec.Config so the endpoint always reads the
-//
 //	live value: openheron hot-reloads llm/, agents/ and policy/, and a captured
 //	pointer would serve stale agent topology after every reload.
 type ConfigSource func() *spec.Config
@@ -27,8 +25,6 @@ type ConfigSource func() *spec.Config
 func (s *Server) SetConfigSource(fn ConfigSource) { s.cfgFn = fn }
 
 // registerV2Routes mounts the /v2 family.
-//
-// ★ Order matters: every /v2 path is registered before StaticFS, which is
 //
 //	mounted last as a catch-all. A single misplaced route silently becomes a
 //	404 that looks exactly like "endpoint not implemented".
@@ -48,7 +44,6 @@ func (s *Server) registerV2Routes() {
 	h.POST("/v2/sessions/:id/files", s.v2UploadFiles)
 	h.GET("/v2/sessions/:id/files", s.v2ListFiles)
 
-	// ★ Must be registered before the static catch-all, like every other
 	//   /v2 route. project/files feeds the composer picker; it is read-only.
 	h.GET("/v2/project/files", s.v2ProjectFiles)
 	h.GET("/v2/commands", s.v2Commands)
@@ -62,8 +57,6 @@ func (s *Server) registerV2Routes() {
 	h.GET("/v2/health", s.v2Health)
 	h.GET("/v2/runtime", s.v2Runtime)
 
-	// ★ /v2/settings 必须在静态回落**之前**注册：SPA 兜底会吃掉任何没
-	//   匹配到路由的 GET，而那条 404 长得和「没实现」一模一样。
 	h.GET("/v2/settings", s.v2SettingsManifest)
 	h.GET("/v2/settings/item", s.v2SettingsItem)
 	h.POST("/v2/settings/item", s.v2SettingsSave)

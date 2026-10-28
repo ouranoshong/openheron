@@ -16,8 +16,9 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
-    /* 路径别名 —— 与 vite.config.ts 的 resolve.alias 保持一致。
-       TS 5+ 的 paths 相对本文件所在目录解析，不再需要 baseUrl（TS 6 已弃用）。 */
+    /* Path alias — kept in sync with resolve.alias in vite.config.ts.
+       TS 5+ resolves `paths` relative to this file's directory, so baseUrl is
+       no longer needed (deprecated in TS 6). */
     "paths": {
       "@/*": ["./src/*"]
     },

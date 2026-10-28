@@ -11,7 +11,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// stubModel 只需要满足 model.BaseModel（Generate/Stream）。
 type stubModel struct{}
 
 func (*stubModel) Generate(context.Context, []*schema.Message, ...model.Option) (*schema.Message, error) {
@@ -23,15 +22,11 @@ func (*stubModel) Stream(context.Context, []*schema.Message, ...model.Option) (
 	return schema.StreamReaderFromArray([]*schema.Message{}), nil
 }
 
-// newMinimalBuilder 造一个只够跑通池逻辑的 Builder。
-//
-// ★ 模型走 modelFactory 桩；配置里只有 ModelRef，没有实例。
 func newMinimalBuilder(t *testing.T) *Builder {
 	t.Helper()
 	return newTestBuilder(t)
 }
 
-// countingBuild 数一个 agent 名被真建了几次。
 type countingBuild struct {
 	mu    sync.Mutex
 	calls int
@@ -59,10 +54,7 @@ func newTestPool(t *testing.T) (*pool, *countingBuild) {
 	return p, c
 }
 
-// build 是「造一个 main」的构造函数（现在由调用方当参数传进池）。
 func (c *countingBuild) build(id string) buildFn { return c.fn(id) }
-
-// ── 复用 ─────────────────────────────────────────────────────────────────
 
 func TestPoolReusesInstanceForSameKey(t *testing.T) {
 	p, c := newTestPool(t)
@@ -76,34 +68,27 @@ func TestPoolReusesInstanceForSameKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	if e1 != e2 {
-		t.Fatal("★ 同 key 两次取必须拿到同一实例 —— 否则每轮都在重编 ReAct 图")
+		t.Fatal("★ two lookups with the same key must return the same instance - otherwise the ReAct graph is rebuilt every turn")
 	}
 	if c.count() != 1 {
 		t.Fatalf("it must be built exactly once, got %d", c.count())
 	}
 }
 
-// ── 换代 ─────────────────────────────────────────────────────────────────
-
 func TestBumpInvalidatesEntries(t *testing.T) {
 	p, c := newTestPool(t)
 
-	// ★ 换代现在是**代际号**的事：池的键含代际，而代际由快照给。
-	//   池自己不再记代际 —— 否则「换代」会有两个来源，必须永远同步。
 	e1, _ := p.GetOrBuild(context.Background(), "main", 1, c.build("main"))
 	e2, _ := p.GetOrBuild(context.Background(), "main", 2, c.build("main"))
 
 	if e1 == e2 {
-		t.Fatal("★ 换代后必须取到新实例")
+		t.Fatal("★ after the generation bump a new instance must be returned")
 	}
 	if c.count() != 2 {
 		t.Fatalf("after the bump it must rebuild once, cumulative %d", c.count())
 	}
 }
 
-// 池的条目数**不随换代增长**：同名再被用到时就地替换。
-//
-// ★ 实际回收交给 GC —— 在飞 turn 的引用会让旧实例存活到用完。
 func TestPoolDoesNotGrowAcrossGenerations(t *testing.T) {
 	p, c := newTestPool(t)
 	for gen := uint64(1); gen <= 5; gen++ {
@@ -114,8 +99,6 @@ func TestPoolDoesNotGrowAcrossGenerations(t *testing.T) {
 		t.Fatalf("★ the pool must not grow across generations, got %d entries", size)
 	}
 }
-
-// ── 边界 ─────────────────────────────────────────────────────────────────
 
 func TestUnregisteredAgentIsAnError(t *testing.T) {
 	p := newPool()
@@ -128,7 +111,6 @@ func TestUnregisteredAgentIsAnError(t *testing.T) {
 	}
 }
 
-// ★ 并发取用是主要用法（多 session 同时起 turn），必须无数据竞争。
 func TestPoolIsSafeUnderConcurrentUse(t *testing.T) {
 	p, c := newTestPool(t)
 
@@ -156,7 +138,6 @@ func TestPoolIsSafeUnderConcurrentUse(t *testing.T) {
 	}
 }
 
-// 换代与取用并发：不得 panic、不得把请求路由到已失效的条目上。
 func TestPoolIsSafeAcrossBump(t *testing.T) {
 	p, c := newTestPool(t)
 	p.GetOrBuild(context.Background(), "main", 1, c.build("main"))
@@ -190,8 +171,6 @@ func TestPoolIsSafeAcrossBump(t *testing.T) {
 	wg.Wait()
 }
 
-// ── 可观测 ───────────────────────────────────────────────────────────────
-
 func TestPoolStatsCountHitsAndMisses(t *testing.T) {
 	p, c := newTestPool(t)
 	p.GetOrBuild(context.Background(), "main", 1, c.build("main")) // miss
@@ -204,9 +183,6 @@ func TestPoolStatsCountHitsAndMisses(t *testing.T) {
 	}
 }
 
-// ── Builder 走池 ─────────────────────────────────────────────────────────
-
-// Builder.Build 必须走池 —— 否则池白建，每轮照旧重编图。
 func TestBuilderBuildGoesThroughPool(t *testing.T) {
 	b := newMinimalBuilder(t)
 
@@ -219,7 +195,7 @@ func TestBuilderBuildGoesThroughPool(t *testing.T) {
 		t.Fatal(err)
 	}
 	if a1 != a2 {
-		t.Fatal("★ 同一代际下两次 Build 必须拿到同一实例")
+		t.Fatal("★ two Build calls in the same generation must return the same instance")
 	}
 	hits, misses, _, _ := b.Stats()
 	if hits == 0 {
@@ -235,17 +211,16 @@ func TestBuilderBumpSwapsInstance(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, _ := managerOf(t, b).Current()
-	managerOf(t, b).set(cfg) // 只换代际，不换内容
+	managerOf(t, b).set(cfg)
 	a2, err := b.Build(context.Background(), "s1", "", contract.TurnQuery)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if a1 == a2 {
-		t.Fatal("★ 换代后必须换实例")
+		t.Fatal("★ the instance must be swapped after the generation bump")
 	}
 }
 
-// Build 的签名与语义对 agentkit/run 不变 —— 依赖铁律不允许为了池而破。
 func TestBuildSignatureUnchanged(t *testing.T) {
 	b := newMinimalBuilder(t)
 	var _ func(context.Context, string, string, contract.TurnKind) (adk.TypedAgent[*schema.Message], error) = b.Build

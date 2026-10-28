@@ -1,112 +1,133 @@
-# openheron 配置示例
+# openheron configuration example
 
-把这些目录复制到项目根的 `.openheron/` 即可：
+Copy these directories into the project root's `.openheron/`:
 
 ```bash
 cp -r .openheron-example/{agents,llm,policy,skills} /your/project/.openheron/
 ```
 
-| 目录 | 内容 |
+| Directory | Contents |
 |---|---|
-| `agents/main.md` | agent 声明 —— frontmatter（`model` / `max_iterations` …）+ **正文即提示词** |
-| `llm/openai.yaml` | 厂商档案 —— `base_url` / `api_key` / `models[]` / 思考档位表 |
-| `policy/permissions.yaml` | 审批档位 —— `ask` / `deny`（**未点名的一律放行**） |
-| `server/config.yaml` | 进程参数 —— 监听地址 / 目录 / 超时 / **不进热更新** |
-| `skills/<name>/SKILL.md` | eino 原生 skill 约定 |
-| `tools/<tool>.yaml` | 外部工具与知识库 —— **文件在 = 开启**（这份样例不带，外部工具默认全关） |
+| `agents/main.md` | agent declaration — frontmatter (`model` / `max_iterations` …) + **the body is the prompt** |
+| `llm/openai.yaml` | vendor profile — `base_url` / `api_key` / `models[]` / thinking tier table |
+| `policy/permissions.yaml` | approval tiers — `ask` / `deny` (**anything not named is allowed**) |
+| `server/config.yaml` | process parameters — listen address / directories / timeouts / **not hot-reloaded** |
+| `skills/<name>/SKILL.md` | eino native skill convention |
+| `tools/<tool>.yaml` | external tools and the knowledge base — **the file's presence = enabled** (this sample ships none; external tools are all off by default) |
 
-`state/`（会话与 checkpoint）在首次启动时自动创建，**不要**提交。
+`state/` (sessions and checkpoints) is created automatically on first startup —
+**do not** commit it.
 
-## 哪些改了会自动生效
+## Which changes take effect automatically
 
-| 目录 | 热更新 | 原因 |
+| Directory | Hot reload | Why |
 |---|---|---|
-| `llm/` `agents/` `policy/` `tools/` | ✅ | 下一轮就用新配置 |
-| `server/` | ❌ | 配的是进程自身，改了要重启 |
+| `llm/` `agents/` `policy/` `tools/` | ✅ | the new configuration is used from the next turn |
+| `server/` | ❌ | it configures the process itself, so a change needs a restart |
 
-改坏配置**不会让进程死** —— 沿用上一份并记一条日志。
+A broken configuration **does not kill the process** — the previous one is kept and
+one log line is written.
 
-## 三条会让人卡住的规则
+## Three rules that trip people up
 
-1. **`api_key` 写 `${ENV}`** —— 环境变量未设**不会**阻塞启动，只在启动日志里
-   记一条提醒；等到真正请求该端点时才返回「无权限访问」(401)。也可用
-   `@file:/path` 读文件（路径写错则启动期报错）。**不要把密钥写进本文件**，
-   它通常要入版本库。
+1. **`api_key` must be written as `${ENV}`** — an environment variable that is not
+   set does **not** block startup, it only records one reminder in the startup log;
+   the "no permission" (401) only comes back when that endpoint is actually
+   requested. You can also use `@file:/path` to read the key from a file (a wrong
+   path is an error at startup). **Do not write the key into this file** — it
+   normally belongs in version control.
 
-2. **`model` 必须写成 `<provider>/<model>`** —— `provider` 是 `llm/` 下的文件名，
-   `model` 是该文件 `models[]` 里声明的 `id`。解析不到会在启动期报错，
-   **不会静默退化到别的模型**。
+2. **`model` must be written as `<provider>/<model>`** — `provider` is the file name
+   under `llm/`, and `model` is the `id` declared in that file's `models[]`. A
+   reference that cannot be resolved is an error at startup; it **never silently
+   degrades to another model**.
 
-3. **时长必须带单位** —— `timeout: 5m`，写 `timeout: 300` 会被拒绝
-   （否则 `300` 会被当成 300 纳秒）。
+3. **Durations must carry a unit** — `timeout: 5m`; writing `timeout: 300` is
+   rejected (otherwise `300` would be read as 300 nanoseconds).
 
-## 思考档位
+## Thinking tiers
 
-档位名由 `llm/*.yaml` 的 `models[].reasoning` 定义，agent 只写档位名：
+Tier names are defined by `models[].reasoning` in `llm/*.yaml`; an agent only writes
+the tier name:
 
 ```yaml
 # agents/main.md
 reasoning: high
 ```
 
-**同一个 `high` 在不同端点发的字段可能完全不同** —— 这正是词汇表存在的理由。
-agent 写了一个该模型没有的档位时**不拦启动**，但会在启动日志里说一声
-（「这个档位的思考参数没发出去」）—— 那是唯一可见的线索。
+**The same `high` may map to a completely different field at different endpoints** —
+that is exactly why the vocabulary table exists. When an agent writes a tier the
+model does not have, startup is **not blocked**, but a line in the startup log says
+so ("the thinking parameters for this tier were not sent") — that is the only
+visible clue.
 
-## 子 agent（多角色）
+## Sub-agents (multiple roles)
 
-`agents/main.md` 的 `subagents: [researcher, coder, reviewer]` 声明拓扑。子 agent
-与其它 agent **是同一格式的同一个东西** —— 差别只是文件名。
+`subagents: [researcher, coder, reviewer]` in `agents/main.md` declares the topology.
+A sub-agent and any other agent **are the same thing in the same format** — the only
+difference is the file name.
 
-每个子 agent 都会被**逐个装配**自己的审批与工具过滤中间件（不能指望父 agent
-传播），且各自按 `model:` 建自己的模型实例。
+Every sub-agent gets **its own** approval and tool-filtering middleware assembled
+separately (you cannot count on the parent agent propagating it), and each one
+builds its own model instance from its own `model:`.
 
-| 开关 | 位置 | 作用 |
+| Switch | Location | Effect |
 |---|---|---|
-| `agent.max_depth` | `server/config.yaml` | 嵌套深度上限（入口是第 0 层）。默认 `1` = 只有入口 agent 能委派 |
-| `disabled_tools` | `agents/*.md` | 只影响这一个 agent。与全局 `deny` **分层保存，永不合并** |
+| `agent.max_depth` | `server/config.yaml` | max nesting depth (the entry is level 0). The default `1` = only the entry agent may delegate |
+| `disabled_tools` | `agents/*.md` | affects this one agent only. Stored **separately from the global `deny`, never merged** |
 
-声明的拓扑超出 `max_depth` 时**启动期报错**，不会被静默截断。
+A declared topology that exceeds `max_depth` is **an error at startup**; it is never
+silently truncated.
 
-### 出厂样例的四个角色
+### The four roles of the factory sample
 
-| 角色 | 干什么 | 能写文件吗 |
+| Role | What it does | Can it write files? |
 |---|---|---|
-| `main` | 编排：分派、汇总 | 否（默认禁用了写与执行） |
-| `researcher` | 只读检索：定位实现、追调用链 | 否 |
-| `coder` | 按结论改文件、跑测试 | **能** |
-| `reviewer` | 读改动、挑问题 | 否 |
+| `main` | orchestration: dispatch, summarize | No (writing and execution are disabled by default) |
+| `researcher` | read-only retrieval: locate implementations, trace call chains | No |
+| `coder` | change files per the conclusions, run tests | **Yes** |
+| `reviewer` | read the changes, find problems | No |
 
-「谁能写」靠**两层**控制，缺一不可：
+"Who may write" is controlled by **two** layers, and neither may be missing:
 
-- **外层** `policy/permissions.yaml` 的 `deny` —— 谁都别想用；
-- **内层** 各 agent 自己的 `disabled_tools` —— 只影响这一个。
+- **Outer**: the `deny` in `policy/permissions.yaml` — nobody may use it;
+- **Inner**: each agent's own `disabled_tools` — affects that one agent only.
 
-★ 外层 `deny` 优先于内层 `disabled_tools`：这是子 agent **无法放松**的唯一保证。
-  两层是分层保存的，永不合并 —— 合并就丢掉了「谁在外层」。
+★ The outer `deny` takes precedence over the inner `disabled_tools`: it is the one
+  guarantee a sub-agent **cannot relax**. The two layers are stored separately and
+  never merged — merging them would throw away "who is in the outer layer".
 
-### 并行委派
+### Parallel delegation
 
-几件**互不依赖**的事，可以一条消息里发多个 task 调用，让它们同时跑：
+Several **mutually independent** things can be sent as multiple task calls in one
+message so that they run at the same time:
 
-- 「A 模块和 B 模块各自实现一下」→ 两个 `coder` 并行；
-- 「先查 A 的实现，再查 B 的实现」→ 两个 `researcher` 并行（都只读，不互相踩）；
-- 「改完之后审一遍」→ **串行**，`reviewer` 必须等 `coder` 改完。
+- "implement module A and module B separately" → two `coder`s in parallel;
+- "first look up A's implementation, then look up B's" → two `researcher`s in
+  parallel (both are read-only and do not tread on each other);
+- "review it once the change is done" → **serial**; the `reviewer` must wait for the
+  `coder` to finish.
 
-★ 并行只对**互不依赖**的任务成立。前一步的输出是后一步的输入时，并行只会拿到
-  一堆基于旧世界的结论。
+★ Parallelism only holds for **mutually independent** tasks. When the output of one
+  step is the input of the next, running in parallel only yields a pile of
+  conclusions based on the old world.
 
-★ 多个子 agent 同时要人批准时，会**同时**弹出几张审批卡 —— 把它们**一起**答掉；
-  只答一张，另外几张会重新要一次。
+★ When several sub-agents need human approval at the same time, several approval
+  cards pop up **simultaneously** — answer them **together**; answer only one and
+  the others will ask again.
 
-★ 并行时每张审批卡会标出**是谁**要的（「Requested by coder」）—— 那是从框架的
-  地址链推出来的，不是猜的。详见 `docs/multi-agent-design.md`。
+★ In parallel, each approval card names **who** requested it ("Requested by coder") —
+  that is derived from the framework's address chain, not guessed. See
+  `docs/multi-agent-design.md`.
 
-## 审批默认档位
+## Default approval tiers
 
-**未列名的工具兜底是 `allow`（直接放行）** —— 策略文件只有 `ask` / `deny` 两列，
-没点名就是放行。所以新增一个工具后它默认能直接用；想让它**每次都要人点头**，
-去 `policy/permissions.yaml` 的 `ask` 里加名字；想让它**完全不能用**，加进 `deny`。
+**The fallback for an unlisted tool is `allow` (straight through)** — the policy file
+has only the `ask` / `deny` columns, so not being named means being allowed. A newly
+added tool is therefore directly usable by default; to make it **require a human nod
+every time**, add its name to `ask` in `policy/permissions.yaml`; to make it
+**completely unusable**, add it to `deny`.
 
-★ 外层 `deny` 优先于内层 `disabled_tools` —— 那是子 agent 无法放松的唯一保证。
-  要收窄**某一个** agent 的能力，用它自己的 `disabled_tools`，别用全局策略。
+★ The outer `deny` takes precedence over the inner `disabled_tools` — it is the one
+  guarantee a sub-agent cannot relax. To narrow down **one** agent's capabilities,
+  use its own `disabled_tools`, not the global policy.

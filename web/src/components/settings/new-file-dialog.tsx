@@ -1,13 +1,3 @@
-/**
- * 「新建文件」对话框。
- *
- * ★ 模板是**故意不完整**的：agents 的 `model:` 留空，直接保存会被试合并
- *   拒掉。强制用户从当前候选里挑一个 —— 候选会变，而模板生成那一刻的
- *   候选可能已经过期。
- *
- * ★ 项目级警告**常驻**在底部而不是一次性确认框：它是这条信息的归属，
- *   不是一个「点掉就消失」的障碍。
- */
 
 import { useState } from "react"
 
@@ -39,9 +29,6 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
   const [content, setContent] = useState("")
 
   const path = suggestPath(name, section)
-  // ★ 模板优先按**路径**取，回落到分区模板。
-  //   policy/ 下有两种文件形态（permissions.yaml / limits.yaml），
-  //   而分区模板只有一个 —— 所以服务端多给了一个按路径的键。
   const template = (path ? templates?.[path] : undefined) ?? templates?.[section] ?? ""
   const pathIssues = path ? validatePath(path) : [{ line: 1, message: "enter a file name" }]
 
@@ -62,8 +49,6 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
     onOpenChange?.(false)
   }
 
-  // 无 open/onOpenChange 时当作「由 NewFileButton 托管」的受控从属组件，
-  // 不渲染任何东西 —— 那样会在页面上多出一层空对话框。
   if (open === undefined) return null
 
   return (

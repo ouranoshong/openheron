@@ -23,7 +23,6 @@ func TestRunIDPrefix(t *testing.T) {
 	}
 }
 
-// 空 id 不该塞进 ctx —— 那只会让日志出现一个空壳前缀。
 func TestEmptyRunIDIsIgnored(t *testing.T) {
 	ctx := WithRunID(context.Background(), "")
 	if got := RunID(ctx); got != "" {

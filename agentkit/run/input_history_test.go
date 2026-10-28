@@ -25,11 +25,6 @@ func toolResult(id, text string) *schema.Message {
 	return schema.ToolMessage(text, id, schema.WithToolName("grep"))
 }
 
-// assertAnswerable 是本文件所有用例的共同判据：**每个 tool_call 都必须被回答**。
-//
-// ★ 断言「形态」而不是「内容」：端点校验的就是这条不变式，
-//
-//	而内容随修复策略变（补消息 vs 删消息），形态不变。
 func assertAnswerable(t *testing.T, hist []*schema.Message) {
 	t.Helper()
 	answered := map[string]bool{}
@@ -52,31 +47,21 @@ func assertAnswerable(t *testing.T, hist []*schema.Message) {
 			answered[msg.ToolCallID] = true
 			continue
 		}
-		// 非 tool 消息之前，上一批 tool_call 必须都已回答。
 		checkPending("message " + strconv.Itoa(i))
 		for _, tc := range msg.ToolCalls {
 			answered[tc.ID] = false
 		}
 	}
-	// 序列末尾同样不能留悬空的 tool_call。
 	checkPending("the tail")
 }
 
-// TestNormalizeHistoryFillsTheMissingResult 是这个文件存在的理由。
-//
-// ★ 复现的是真机上那条 400 的形状：
-//
-//	An assistant message with 'tool_calls' must be followed by tool messages
-//	responding to each 'tool_call_id'. (insufficient tool messages following
-//	tool_calls message)
-//
-//	成因是上一轮的工具**没跑出结果**就结束了（未知工具、abort、抢占…），
-//	而 archive 无条件把 assistant 消息落盘 —— 于是这条历史**永久**不合法。
+// An assistant message with 'tool_calls' must be followed by tool messages
+// responding to each 'tool_call_id'. (insufficient tool messages following
+// tool_calls message)
 func TestNormalizeHistoryFillsTheMissingResult(t *testing.T) {
 	hist := []*schema.Message{
 		schema.UserMessage("find it"),
 		assistantWithCalls("c1"),
-		// ← 少了 c1 的 tool 消息
 	}
 	got := normalizeHistory(hist)
 
@@ -90,7 +75,6 @@ func TestNormalizeHistoryFillsTheMissingResult(t *testing.T) {
 	if got[0] != hist[0] {
 		t.Fatal("the user's message must be preserved as-is")
 	}
-	// ★ 不能编造原因：模型会照着编出来的原因往下推。
 	if strings.Contains(got[2].Content, "abort") ||
 		strings.Contains(got[2].Content, "rejected") ||
 		strings.Contains(got[2].Content, "denied") {
@@ -101,8 +85,6 @@ func TestNormalizeHistoryFillsTheMissingResult(t *testing.T) {
 	}
 }
 
-// TestNormalizeHistoryDropsOrphanToolMessages 覆盖另一种 400 形状：
-// 没有对应 tool_call 的 tool 消息（中断恢复写重、游标错位都会产生）。
 func TestNormalizeHistoryDropsOrphanToolMessages(t *testing.T) {
 	hist := []*schema.Message{
 		schema.UserMessage("hi"),
@@ -123,8 +105,6 @@ func TestNormalizeHistoryDropsOrphanToolMessages(t *testing.T) {
 	}
 }
 
-// TestNormalizeHistoryFillsOnlyTheMissingOnes 一条 assistant 消息发两个调用、
-// 只回来一个 —— 补的那个不能顶掉已有的。
 func TestNormalizeHistoryFillsOnlyTheMissingOnes(t *testing.T) {
 	hist := []*schema.Message{
 		assistantWithCalls("c1", "c2"),
@@ -144,11 +124,6 @@ func TestNormalizeHistoryFillsOnlyTheMissingOnes(t *testing.T) {
 	}
 }
 
-// TestNormalizeHistoryLeavesCleanHistoryAlone 守住快路径。
-//
-// ★ 干净历史必须**原样返回同一个切片**（不是等值副本）：
-//
-//	Build 每轮都调，历史能有几百条；每次拷贝是白付的钱。
 func TestNormalizeHistoryLeavesCleanHistoryAlone(t *testing.T) {
 	hist := []*schema.Message{
 		schema.UserMessage("q1"),
@@ -169,22 +144,19 @@ func TestNormalizeHistoryLeavesCleanHistoryAlone(t *testing.T) {
 	}
 }
 
-// TestNormalizeHistoryHandlesSeveralBadTurns 一个会话里可能不止一处坏。
-// 逐条修完才是真的能救活老会话 —— 只修第一处的话，第二次提问还是 400。
 func TestNormalizeHistoryHandlesSeveralBadTurns(t *testing.T) {
 	hist := []*schema.Message{
 		schema.UserMessage("q1"),
-		assistantWithCalls("c1"), // 坏：没结果
+		assistantWithCalls("c1"),
 		schema.UserMessage("q2"),
 		assistantWithCalls("c2", "c3"),
 		toolResult("c2", "ok"),
 		schema.AssistantMessage("mid", nil),
-		assistantWithCalls("c4"), // 坏：没结果
+		assistantWithCalls("c4"),
 	}
 	got := normalizeHistory(hist)
 	assertAnswerable(t, got)
 
-	// ★ 每一条坏 turn 都要各自补上，不是只补最后一条。
 	ids := map[string]bool{}
 	for _, msg := range got {
 		if msg.Role == schema.Tool {
@@ -198,7 +170,6 @@ func TestNormalizeHistoryHandlesSeveralBadTurns(t *testing.T) {
 	}
 }
 
-// TestNormalizeHistorySkipsNil Build 的调用方可能塞 nil 进来。
 func TestNormalizeHistorySkipsNil(t *testing.T) {
 	got := normalizeHistory([]*schema.Message{nil, schema.UserMessage("q"), nil})
 	assertAnswerable(t, got)
@@ -207,8 +178,6 @@ func TestNormalizeHistorySkipsNil(t *testing.T) {
 	}
 }
 
-// TestBuildRunsHistoryThroughNormalize 是接线测试：修好的历史必须真的进了
-// agent input。上面几条测的是纯函数，漏掉调用点的话照样全绿。
 func TestBuildRunsHistoryThroughNormalize(t *testing.T) {
 	c := InputConfig{ProjectRoot: "/tmp/x"}
 	in, err := c.buildInput(context.Background(), inputParams{
@@ -220,6 +189,5 @@ func TestBuildRunsHistoryThroughNormalize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 第一条是 system prompt，不参与 tool_call 配平。
 	assertAnswerable(t, in.Messages[1:])
 }

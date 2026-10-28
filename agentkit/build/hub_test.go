@@ -30,8 +30,6 @@ func TestCollectSpecsFlattensWholeTree(t *testing.T) {
 	}
 }
 
-// ★ 缓存必须按 hub 实例（= 配置代际）拆：进程级缓存会让「改了 llm/*.yaml
-// 但 skill 还用老模型」重新出现，且没有任何提示。
 func TestSkillModelHubCachesWithinAHub(t *testing.T) {
 	calls := 0
 	h := &skillModelHub{resolve: func(context.Context, string) (model.BaseModel[*schema.Message], error) {
@@ -48,7 +46,6 @@ func TestSkillModelHubCachesWithinAHub(t *testing.T) {
 		t.Fatalf("the resolver must be called once per hub, got %d", calls)
 	}
 
-	// 另一个代际的 hub 必须重新解析。
 	other := &skillModelHub{resolve: h.resolve}
 	if _, err := other.Get(context.Background(), "openai/fast"); err != nil {
 		t.Fatal(err)
@@ -72,8 +69,6 @@ func TestSkillModelHubReportsEmptyAndMissingResolver(t *testing.T) {
 	}
 }
 
-// skill 的 model: 覆盖必须走一遍 name 查表才能知道有没有这个 agent ——
-// 报错时要把「可用的名字」带上，否则用户只能去翻 skill 与 agents 两个目录。
 func TestSkillAgentHubUnknownNameListsAvailable(t *testing.T) {
 	h := &skillAgentHub{
 		self:  "main",
@@ -88,10 +83,8 @@ func TestSkillAgentHubUnknownNameListsAvailable(t *testing.T) {
 	}
 }
 
-// 空名字 = 默认 agent：eino 在 skill 没写 agent: 时按这个约定调用。
 func TestSkillAgentHubEmptyNameReturnsThePooledAgent(t *testing.T) {
 	b := newMinimalBuilder(t)
-	// ★ hub 经 Builder 取池（代际号在快照上），不再直接摸池。
 	h := &skillAgentHub{builder: b, snap: mustSnapshot(t, b), self: "main"}
 
 	got, err := h.Get(context.Background(), "", nil)
@@ -107,8 +100,6 @@ func TestSkillAgentHubEmptyNameReturnsThePooledAgent(t *testing.T) {
 	}
 }
 
-// fork 到子 agent：必须是新构造的实例（模型可能在每个调用里不同），
-// 且带上子 agent 自己的中间件链与下一层拓扑。
 func TestSkillAgentHubForkBuildsNamedAgent(t *testing.T) {
 	cfg := configFromSpecs("test/model", nil, decl.Policy{}, []decl.SubAgentSpec{
 		{ID: "worker", Description: "does the work", Instruction: "work",
@@ -135,8 +126,6 @@ func TestSkillAgentHubForkBuildsNamedAgent(t *testing.T) {
 	}
 }
 
-// 同时写了 agent: 与 model: 时，框架解析出的模型必须赢过 spec.ModelRef ——
-// 否则 skill 里那行 model: 等于没写，而且不会有任何提示。
 func TestSkillAgentHubPrefersSkillModelOverride(t *testing.T) {
 	override := &stubModel{}
 	cfg := configFromSpecs("test/model", nil, decl.Policy{}, []decl.SubAgentSpec{

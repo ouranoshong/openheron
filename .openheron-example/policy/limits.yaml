@@ -1,27 +1,29 @@
-# 限制规则 —— 数量上的上限。
+# Limit rules — caps on quantities.
 #
-# ★ 它与 permissions.yaml 的分工是**正交**的：
+# ★ The division of labor with permissions.yaml is **orthogonal**:
 #
-#   permissions.yaml：这个工具要不要人点头（审批决策）
-#   limits.yaml：     最多能做多少（额度上限）
+#   permissions.yaml: does this tool need a human nod (approval decision)
+#   limits.yaml:      how much of it may be done at most (quota cap)
 #
-# ★ 只能**收紧**，不能放宽。
+# ★ They can only **tighten**, never relax.
 #
-#   这里的值与 server/config.yaml 里的同名值取**更严的**那个；
-#   用户级与项目级之间也是取更严的 —— 限制是安全边界，
-#   项目级只能收紧，不能放松。
+#   The value here and the value of the same name in server/config.yaml — the
+#   **stricter** one wins; between the user level and the project level it is the
+#   stricter one as well — limits are a safety boundary, the project level can
+#   only tighten, never relax.
 #
-#   放宽上限请改 server/config.yaml（进程级配置，需重启）。
-#   收紧则**立即生效**：policy/ 进热更新，改完保存即换代。
+#   To relax a cap, change server/config.yaml (process-level config, needs a
+#   restart). Tightening takes effect **immediately**: policy/ is hot-reloaded,
+#   so saving the change swaps the generation.
 #
-# ★ 0 = 不设限，沿用 server/config.yaml 的全局值。
+# ★ 0 = no limit, fall back to the global value in server/config.yaml.
 #
-# ★ 声明一个比全局基线更宽松的值是**空操作** —— 它会进 deferred，
-#   启动时打印出来告诉你「这个值没生效」。
+# ★ Declaring a value looser than the global baseline is a **no-op** — it lands in
+#   deferred, and startup prints it to tell you "this value did not take effect".
 #
-# agent.max_depth   嵌套深度上限。根 agent 是第 0 层；深度 d 的 agent
-#                   允许再生子 agent 当且仅当 d < max_depth。
-# retry.max_retries 模型调用失败后的重试次数上限。
+# agent.max_depth   max nesting depth. The root agent is level 0; an agent at
+#                   depth d may spawn sub-agents if and only if d < max_depth.
+# retry.max_retries max retries after a model call fails.
 agent:
   max_depth: 0
 retry:

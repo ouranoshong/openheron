@@ -4,23 +4,8 @@ import { reduceEvent, reduceEvents, type AgEvent } from "../src/lib/events"
 import { recordedRun } from "../src/lib/fixtures/recorded-run"
 import { emptyConversation, type ConversationState, type Message, type ToolPart } from "../src/lib/types"
 
-/**
- * reducer 的契约测试。
- *
- * ★ 这些断言证明的是「对不对」，不依赖任何框架知识 —— 纯函数，跑一遍
- *   比对输出即可。上一版的每个 bug 都是「对不对取决于回调什么时候触发」，
- *   那种东西没法这样钉住。
- */
-
 const evs = recordedRun
 
-/**
- * 录的那一轮覆盖了后端实际发出的每一种事件。
- *
- * ★ 后端加一种事件时这里会**立刻变红** —— 因为 fixture 是录的、且标成
- *   AgEvent[]（不是 Record<string, unknown>[]，那个标法会让类型检查形同
- *   虚设）。改这里比改代码更能说明「后端变了什么」。
- */
 const RECORDED_TYPES = [
   "RUN_STARTED",
   "RUN_FINISHED",
@@ -54,13 +39,10 @@ function toolParts(s: ConversationState): ToolPart[] {
   return s.messages.flatMap((m) => m.parts.filter((p): p is ToolPart => p.kind === "tool"))
 }
 
-// ── 录制的真实事件流 ──────────────────────────────────────────────────────
-
 describe("真后端录制的一轮", () => {
   const s = reduceEvents(emptyConversation(), evs)
 
   test("事件覆盖了后端实际发出的全部类型", () => {
-    // 换后端时这个断言会先响：少了一种类型说明 fixture 该重新录。
     expect(new Set(evs.map((e) => e.type)).size).toBeGreaterThanOrEqual(13)
   })
 
@@ -71,7 +53,6 @@ describe("真后端录制的一轮", () => {
   })
 
   test("没有 part 停在未完结状态", () => {
-    // 轮次结束后仍有 open part 的话，界面会一直转圈。
     for (const m of s.messages) {
       for (const p of m.parts) {
         if (p.kind === "text" || p.kind === "reasoning") {
@@ -82,14 +63,11 @@ describe("真后端录制的一轮", () => {
   })
 
   test("推理与正文是同一消息上的两段，不会互相覆盖", () => {
-    // ★ 这是后端的实际形状：agtransport 的 emitReasoningStart 与
-    //   emitTextStart 共用同一个 msgID。part 的身份因此必须是
-    //   (messageId, kind)，只看 messageId 会两段互相顶掉。
     const withBoth = s.messages.find(
       (m) =>
         m.parts.some((p) => p.kind === "reasoning") && m.parts.some((p) => p.kind === "text"),
     )
-    expect(withBoth, "应当有一条同时含推理与正文的消息").toBeDefined()
+    expect(withBoth, "there should be one message carrying both reasoning and body text").toBeDefined()
 
     const reasoning = withBoth!.parts.find((p) => p.kind === "reasoning")!
     const text = withBoth!.parts.find((p) => p.kind === "text")!
@@ -109,13 +87,6 @@ describe("真后端录制的一轮", () => {
     }
   })
 
-  // ★ 归属必须落在**消息**上。
-  //
-  //   踩过的坑：ensureMessage 返回的是**整个 state**，不是那条消息。
-  //   写成 `{ ...ensureMessage(...), agent }` 会把 agent 挂到 state 上
-  //   —— 挂上去也没人读，于是实时流里的归属**静默丢失**：界面不显示
-  //   agent 名，按 agent 过滤也筛不掉任何东西。而历史回放路径是好的，
-  //   所以只有对比两路才发现。
   test("TEXT_MESSAGE_START 的 name 落在消息上", () => {
     const one = reduceEvents(emptyConversation(), [
       { type: "TEXT_MESSAGE_START", messageId: "m1", role: "assistant", name: "coder" },
@@ -125,7 +96,6 @@ describe("真后端录制的一轮", () => {
     expect(one.messages[0]!.agent).toBe("coder")
   })
 
-  // 没有 name 的消息不带归属 —— 空 = 不知道是谁，不猜。
   test("没有 name 的消息不编造归属", () => {
     const one = reduceEvents(emptyConversation(), [
       { type: "TEXT_MESSAGE_START", messageId: "m1", role: "assistant" },
@@ -135,10 +105,6 @@ describe("真后端录制的一轮", () => {
     expect(one.messages[0]!.agent).toBeUndefined()
   })
 
-  // ★ 并行时两个 agent 的消息不能串。
-  //
-  //   内容按 messageId 归约：两个 agent 各有自己的 messageId，
-  //   各自的 delta 落到各自的消息里 —— 交错到达也不会串。
   test("并行的两个 agent 各自的消息不串", () => {
     const one = reduceEvents(emptyConversation(), [
       { type: "TEXT_MESSAGE_START", messageId: "mA", role: "assistant", name: "coder" },
@@ -159,16 +125,12 @@ describe("真后端录制的一轮", () => {
   })
 
   test("工具参数是原始 JSON 字符串而非解析后的对象", () => {
-    // 用户研究 agent 行为时要看到真实参数；解析或摘要都会让观察失真。
     const withArgs = toolParts(s).find((t) => t.argsText.length > 0)
     expect(withArgs).toBeDefined()
     expect(() => JSON.parse(withArgs!.argsText)).not.toThrow()
   })
 
   test("同一条消息里推理排在正文之前", () => {
-    // ★ 必须挑「两者都有」的那条：录的这一轮里还有只含推理的中间消息，
-    //   拿第一条含 reasoning 的去比，indexOf("text") 会是 -1，
-    //   断言变成"0 < -1"这种无意义的失败（第一版就这么写错了）。
     const msg = s.messages.find(
       (m) =>
         m.parts.some((p) => p.kind === "reasoning") && m.parts.some((p) => p.kind === "text"),
@@ -178,11 +140,8 @@ describe("真后端录制的一轮", () => {
   })
 })
 
-// ── 单事件分支 ────────────────────────────────────────────────────────────
-
 describe("RUN_STARTED", () => {
   test("清掉上一轮的审批挂起", () => {
-    // ★ 不清的话答复过一次之后状态点会一直显示「待审批」。
     const before: ConversationState = {
       ...emptyConversation(),
       status: "awaiting-approval",
@@ -223,8 +182,6 @@ describe("RUN_FINISHED · interrupt", () => {
     expect(s.interrupts[0]!.toolCallId).toBe("call-1")
   })
 
-  // ★ 子 agent 的审批必须能看出请求方：同一时刻可能有两个 agent 在等，
-  //   「批的是谁的工具」直接决定要不要同意。
   test("subagentRunId 归一成 requestedByAgent", () => {
     const s = reduceEvent(emptyConversation(), finished([
       { id: "int-1", reason: "tool_call", toolCallId: "call-1", subagentRunId: "worker" },
@@ -257,8 +214,6 @@ describe("RUN_FINISHED · interrupt", () => {
   })
 
   test("没有 interrupts 数组时不崩，且不进审批态", () => {
-    // outcome.type 说 interrupt 但数组缺失/为空 —— 降级成 idle，
-    // 而不是让界面停在「待审批」等一个永远等不到的答复。
     const s = reduceEvent(emptyConversation(), finished([]))
     expect(s.status).not.toBe("awaiting-approval")
   })
@@ -289,15 +244,12 @@ describe("RUN_ERROR", () => {
     } as AgEvent)
     expect(s.status).toBe("error")
     expect(s.error).toEqual({ code: "upstream_error", message: "provider unavailable" })
-    // ★ 模型报错后不存在待审批；留着会让状态点一直红着。
     expect(s.interrupts).toEqual([])
   })
 })
 
 describe("reasoning", () => {
   test("REASONING_MESSAGE_START 的 role 是 'reasoning'，消息角色仍是 assistant", () => {
-    // 前端 schema 是 zod.literal("reasoning")；那个字面量不是合法消息角色，
-    // 所以推理挂在同 id 的 assistant 消息上。
     const s = reduceEvent(emptyConversation(), {
       type: "REASONING_MESSAGE_START",
       messageId: "m1",
@@ -320,9 +272,6 @@ describe("reasoning", () => {
   })
 
   test("思维链记下开始与结束时刻（服务端时间戳）", () => {
-    // ★ 「想了多久」是从这两个时刻算出来的 —— 用**服务端**的时间戳，
-    //   不是客户端收到事件的时间（那含网络延迟），也不是渲染时读时钟
-    //   （那会让归约器不纯、组件渲染里出现 impure call）。
     const s = reduceEvents(emptyConversation(), [
       { type: "REASONING_START", messageId: "m1", timestamp: 1000 } as AgEvent,
       { type: "REASONING_MESSAGE_CONTENT", messageId: "m1", delta: "a", timestamp: 1000 } as AgEvent,
@@ -332,13 +281,10 @@ describe("reasoning", () => {
     expect(r.kind).toBe("reasoning")
     if (r.kind !== "reasoning") throw new Error("expected a reasoning part")
     expect(r.startedAt).toBe(1000)
-    // ★ 收尾那一刻算出来的用时（结束 2500 − 开始 1000）。
     expect(r.elapsedMs).toBe(1500)
   })
 
   test("没有时间戳就没有用时（不是 0）", () => {
-    // ★ 「不知道」与「零」是两件事 —— 没带 timestamp 的事件算不出用时，
-    //   那就显示「Thought」而不是「Thought for 0.0s」。
     const s = reduceEvents(emptyConversation(), [
       { type: "REASONING_START", messageId: "m1" } as AgEvent,
       { type: "REASONING_MESSAGE_CONTENT", messageId: "m1", delta: "a" } as AgEvent,
@@ -386,7 +332,6 @@ describe("工具调用", () => {
   })
 
   test("RESULT 早于 START 到达时不丢 —— 就地补一条", () => {
-    // 流可能从中间接上。让它抛错等于把网络抖动变成白屏。
     const s = reduceEvents(emptyConversation(), [
       { type: "TOOL_CALL_RESULT", toolCallId: "c9", content: "done", role: "tool" } as AgEvent,
     ])
@@ -396,7 +341,6 @@ describe("工具调用", () => {
   })
 
   test("RESULT 按 toolCallId 跨消息回填", () => {
-    // TOOL_CALL_RESULT 只带 toolCallId，工具调用可能挂在别的消息上。
     const s = reduceEvents(emptyConversation(), [
       { type: "TOOL_CALL_START", toolCallId: "c1", toolCallName: "ls", parentMessageId: "mA" } as AgEvent,
       { type: "TEXT_MESSAGE_START", messageId: "mB", role: "assistant" } as AgEvent,
@@ -435,7 +379,6 @@ describe("流式健壮性", () => {
   })
 
   test("不改入参", () => {
-    // 就地改会让 React 的比较彻底失效 —— 流式下每个 delta 都调一次。
     const before = emptyConversation()
     const snapshot = JSON.stringify(before)
     reduceEvents(before, evs.slice(0, 12))

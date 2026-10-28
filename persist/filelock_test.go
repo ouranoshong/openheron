@@ -30,8 +30,6 @@ func TestLockExcludesWithinTheProcess(t *testing.T) {
 		t.Fatalf("first lock: %v", err)
 	}
 
-	// ★ 同一实例的第二次获取是**计数**，不是第二次 syscall。这一点关系到
-	//   「Index 持锁跑完整轮、内部每次 Put 再锁一次」能不能成立。
 	rel2, err := a.Lock(context.Background())
 	if err != nil {
 		t.Fatalf("re-entrant lock: %v", err)
@@ -42,19 +40,15 @@ func TestLockExcludesWithinTheProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer b.Close()
-	// ★ 另一个**打开文件描述**必须被挡住 —— 这正是「换个 fd 去拿同一把锁会
-	//   死锁自己」的另一面，也是跨进程互斥的同一套语义。
 	if _, err := b.Try(); !errors.Is(err, ErrLocked) {
 		t.Fatalf("a second handle acquired the lock: %v", err)
 	}
 
-	// 内层释放后外层仍然持有。
 	rel2()
 	if _, err := b.Try(); !errors.Is(err, ErrLocked) {
 		t.Fatalf("the outer lock was lost when the inner one released: %v", err)
 	}
 	rel()
-	// 外层也放开之后，另一个描述符才拿得到。
 	rel3, err := b.Try()
 	if err != nil {
 		t.Fatalf("after full release: %v", err)
@@ -84,9 +78,6 @@ func TestTryReportsLockedWithoutWaiting(t *testing.T) {
 	}
 }
 
-// ★ Lock 必须**能被 ctx 打断**。用 flock 的阻塞形态就做不到 —— 而对方可能
-//
-//	正在跑一次十分钟的索引，那意味着 Ctrl-C 也没用。
 func TestLockIsCancellable(t *testing.T) {
 	path := tmpLock(t)
 	a, _ := OpenFileLock(path)
@@ -125,8 +116,6 @@ func TestLockErrorNamesTheHolder(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a lock conflict")
 	}
-	// ★ 报出持有者的 pid：`kill -0` 能确认它还在不在，而「谁占着」是用户
-	//   唯一能照做的信息。
 	if !strings.Contains(err.Error(), "pid ") {
 		t.Errorf("error should name the holder's pid, got: %v", err)
 	}
@@ -135,14 +124,8 @@ func TestLockErrorNamesTheHolder(t *testing.T) {
 	}
 }
 
-// ★ 这条是本文件存在的原因：**另一个进程**拿不到锁。
-//
-//	进程内互斥由 sync.Mutex 就够了，真正会出事的是 `openheron kb index` 与服务
-//	进程里的 kb_index 工具同时写 —— 而那是两个进程。用一个真的子进程来验，
-//	而不是在同一进程里开两个 handle（后者验的是 flock 的描述符语义）。
 func TestLockExcludesAnotherProcess(t *testing.T) {
 	if os.Getenv("OPENHERON_LOCK_HELPER") == "1" {
-		// 子进程：拿到锁、告诉父进程、然后一直持有到 stdin 关闭。
 		path := os.Getenv("OPENHERON_LOCK_PATH")
 		l, err := OpenFileLock(path)
 		if err != nil {
@@ -196,7 +179,6 @@ func TestLockExcludesAnotherProcess(t *testing.T) {
 		t.Fatalf("this process acquired a lock another process holds: %v", err)
 	}
 
-	// 放掉子进程，锁应当自己回来（不依赖它显式解锁）。
 	_ = stdin.Close()
 	_ = cmd.Wait()
 
@@ -214,9 +196,6 @@ func TestLockExcludesAnotherProcess(t *testing.T) {
 	}
 }
 
-// ★ 持有者被 kill -9 之后锁必须自己回来。这正是选 flock 而不是「O_EXCL 锁
-//
-//	文件」的理由：一次十分钟的索引崩掉不该让索引功能永久不可用。
 func TestLockSurvivesHolderBeingKilled(t *testing.T) {
 	if os.Getenv("OPENHERON_LOCK_HELPER") == "1" {
 		path := os.Getenv("OPENHERON_LOCK_PATH")
@@ -284,7 +263,6 @@ func TestLockPathIsDerivedFromTheDir(t *testing.T) {
 }
 
 func TestNilLockIsUsable(t *testing.T) {
-	// 零值可用：Store 在测试里可能没有锁文件。
 	var l *FileLock
 	rel, err := l.Lock(context.Background())
 	if err != nil || rel == nil {

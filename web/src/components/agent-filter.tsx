@@ -4,19 +4,6 @@ import { collectAgents, formatTokens } from "@/lib/agents"
 import { selectActiveUsage, selectMessages, useStore } from "@/lib/store"
 import { cn } from "@/lib/utils"
 
-/**
- * agent 过滤条。
- *
- * ★ 存在的理由：多 agent 模式下消息流是**交错**的 —— 根 agent 的思考、
- *   子 agent 的执行、工具结果按时间排在一起。「coder 到底改了哪些文件」
- *   这个问题，靠顺序读是读不出来的，必须能按 agent 切。
- *
- * ★ 每个 chip 上的 token 数是**分账**：谁花的。这是「谁贵」的唯一答案，
- *   而总用量回答不了它。
- *
- * ★ 只有一个 agent 时**整条不渲染** —— 单 agent 会话没有「切」的意义，
- *   多一行 chrome 只会让人以为这里能点什么。
- */
 export function AgentFilter() {
   const usage = useStore(selectActiveUsage)
   const messages = useStore(selectMessages)

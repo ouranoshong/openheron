@@ -5,28 +5,6 @@ import { emptyConversation, type Message, type Part } from "../src/lib/types"
 import { seedFromHistory } from "../src/lib/store/history"
 import type { AgMessage } from "../src/lib/api"
 
-/**
- * 事件回放与历史水合**必须得到同一份对话**。
- *
- * ★ 两条路通向同一个界面：一条是实时流（reducer 逐事件归约），
- *   一条是刷新后的历史（seedFromHistory）。若两者不等价，
- *   用户的观感就是「刷新一下，界面变了」—— 而那几乎无法排查，
- *   因为两条路各自都测得通。
- *
- * ★ 已知且**刻意**的差异只有一个：历史里的工具卡带 fromHistory
- *   （默认折叠）。本测试把那条差异**扣掉**再比 —— 其余必须逐字段相同。
- */
-
-/**
- * 扣掉两处**已知的内部差异**，让两条路的产物可比。
- *
- * ★ fromHistory：历史里的工具卡默认折叠（实时 reducer 不设这个标记）——
- *   这是**刻意**的 UI 差异，两条路的界面本就该长得不一样。
- *
- * ★ startedAt：只有流路径有（它是归约器内部算 elapsedMs 用的中间量）。
- *   历史没有服务端时间戳可用 —— 用时由后端**直接**放进 metadata.reasoningMs。
- *   组件不渲染 startedAt（见 message-parts.tsx 的注释），所以它不可见。
- */
 function normalize(messages: Message[]): unknown[] {
   return messages.map((m) => ({
     id: m.id,
@@ -155,7 +133,6 @@ describe("两条路的已知差异（钉住，别忘）", () => {
     ]
     const part = seedFromHistory(history).messages[0]!.parts[0]!
     expect((part as { startedAt?: number }).startedAt).toBeUndefined()
-    // ★ 用时在 —— 那才是用户看得见的那个数。
     expect((part as { elapsedMs?: number }).elapsedMs).toBe(2000)
   })
 })

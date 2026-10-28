@@ -6,14 +6,6 @@ import (
 	"testing"
 )
 
-// 没有「主 agent」：每个 agent 都是同一格式的同一个东西，声明了
-// `subagents:` 的那个能带队伍，没声明的就是独一个。
-//
-// ★ 会话选哪个 agent，就按哪个的声明装配 —— 所以**每个** agent 都得
-//
-//	有一棵自己的树（它自己 + 它的下属）。
-
-// ① 每个 agent 一棵树：main 的树是它自己的下属，lead 的树也是。
 func TestEachAgentExpandsItsOwnTree(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
@@ -31,21 +23,17 @@ func TestEachAgentExpandsItsOwnTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// main 的树：main + lead。
 	if got := specs["main"].Sub; len(got) != 1 || got[0].ID != "lead" {
 		t.Fatalf("main's tree = %+v, want [lead]", got)
 	}
-	// ★ lead 作为入口时带的是**它自己的**下属（architect）。
 	if got := specs["lead"].Sub; len(got) != 1 || got[0].ID != "architect" {
 		t.Fatalf("lead's own tree = %+v, want [architect]", got)
 	}
-	// 默认 agent 恒为 main。
 	if cfg.DefaultAgent() != "main" {
 		t.Fatalf("the default agent = %q, want main", cfg.DefaultAgent())
 	}
 }
 
-// ② 每个 agent 都能当会话入口 —— 声明了就有一棵树。
 func TestEveryDeclaredAgentIsSelectable(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
@@ -67,7 +55,6 @@ func TestEveryDeclaredAgentIsSelectable(t *testing.T) {
 	}
 }
 
-// ③ main.md 是必需的 —— 新会话没指定 agent 时用它。
 func TestDefaultAgentIsRequired(t *testing.T) {
 	f := newFixture(t)
 	f.write(t, "llm/openai.yaml", minimalLLM)
@@ -78,11 +65,6 @@ func TestDefaultAgentIsRequired(t *testing.T) {
 	}
 }
 
-// ④ 没人引用的 agent **不是**错误：它照样能当会话入口。
-//
-// ★ 以前这里报「unreachable」—— 那条规则的前提是「只有候选根能当入口」。
-//
-//	现在每个声明了的 agent 都能当入口，于是「没人引用」不意味着「用不上」。
 func TestAgentNobodyReferencesIsStillUsable(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
@@ -101,7 +83,6 @@ func TestAgentNobodyReferencesIsStillUsable(t *testing.T) {
 	}
 }
 
-// ⑤ 深度按**每个 agent 的队伍**校验：某支队伍超了上限就在启动期报错。
 func TestDepthIsValidatedPerAgent(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
@@ -119,9 +100,6 @@ func TestDepthIsValidatedPerAgent(t *testing.T) {
 	}
 }
 
-// ── 「那一段配置在不在」就是开关 ───────────────────────────────────────────
-
-// 没有 enabled 字段：tools/http.yaml 在 = 开，不在 = 关。
 func TestToolsAreEnabledByThePresenceOfTheirFile(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
@@ -140,19 +118,11 @@ func TestToolsAreEnabledByThePresenceOfTheirFile(t *testing.T) {
 	if cfg.Tools.Wikipedia != nil {
 		t.Fatal("tools/wikipedia.yaml was not written, so it must be off")
 	}
-	// 写了的那一个 → 默认 allow 档。
 	if got := cfg.EnabledToolNames(); len(got) != 1 || got[0] != decl.ToolNameHTTPGet {
 		t.Fatalf("enabled tool names = %v, want [%s]", got, decl.ToolNameHTTPGet)
 	}
 }
 
-// 文件不在 = 关。
-//
-// ★ 不再有「写个 null 关掉」这种形态 —— 一个工具一个文件，关它就是删文件。
-//
-//	这正是把 tools/ 从 server/config.yaml 里搬出来的附带好处：以前三个工具
-//	挤在一份 server 配置里，关掉一个要写 null，而 null 与「整段没写」
-//	在 yaml 里长得一模一样。
 func TestToolsAreOffWhenTheirFileIsAbsent(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
@@ -173,7 +143,6 @@ func TestToolsAreOffWhenTheirFileIsAbsent(t *testing.T) {
 	}
 }
 
-// 一个都没写 → 全部关（默认）。
 func TestNoToolsSectionMeansNoTools(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)

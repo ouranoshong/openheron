@@ -3,11 +3,11 @@ base_url: https://api.openai.com/v1
 api_key: ${OPENAI_API_KEY}
 timeout: 5m
 
-# 该端点使用的字段名 —— 只用于「请求被拒」时给出准确提示。
-# 协议层不内置任何一家的字段名。
+# The field names this endpoint uses — only used to give an accurate hint when a request is rejected.
+# The protocol layer hardcodes no vendor's field names.
 hint_keys: ["reasoning_effort"]
 
-# provider 级方言，所有模型共享
+# provider-level dialect, shared by all models
 extra:
   stream: true
 
@@ -17,12 +17,13 @@ models:
 
   - id: o3
     context_window: 200000
-    # 档位词汇表：档位名 → 这个端点把它发成什么字段。
-    # agent 只写 `reasoning: high`，不需要知道 high 在这家是什么形状。
+    # Tier vocabulary: tier name → the field this endpoint sends it as.
+    # An agent only writes `reasoning: high`; it does not need to know what shape
+    # "high" has at this vendor.
     reasoning:
-      off:  {}                                    # 不发任何思考字段
+      off:  {}                                    # send no thinking field at all
       low:  { reasoning_effort: low }
       high: { reasoning_effort: high }
-    reasoning_default: low                        # agent 没写 reasoning 时用它
-    # 思考模型慢一个数量级，可以覆盖 provider 级的 timeout
+    reasoning_default: low                        # used when the agent writes no reasoning
+    # Thinking models are an order of magnitude slower, so the provider-level timeout can be overridden
     timeout: 30m

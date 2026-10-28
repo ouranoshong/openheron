@@ -45,13 +45,6 @@ func sampleCatalog() Catalog {
 	}
 }
 
-// TestCatalogRoundTrip 是本文件最要紧的一条：渲染 → 解析 → 渲染必须**逐字节
-// 相同**。
-//
-// ★ 它是乐观提交（§7.3 ④）能成立的前提 —— 写后读比较依赖「我写的那份
-//
-//	还在」，而「还在」就是逐字节相同。若往返不等，冲突检测会报出一堆
-//	**并不存在**的冲突，而它的表现形式是「索引永远重试三次然后失败」。
 func TestCatalogRoundTrip(t *testing.T) {
 	want := sampleCatalog()
 	want.Sort()
@@ -65,7 +58,6 @@ func TestCatalogRoundTrip(t *testing.T) {
 		t.Errorf("round trip produced warnings: %v", got.Warnings)
 	}
 
-	// Header：Docs 由解析器按条目数回填，其余逐字段比。
 	if got.Header.Docs != len(want.Entries) {
 		t.Errorf("Docs = %d, want %d", got.Header.Docs, len(want.Entries))
 	}
@@ -92,29 +84,75 @@ func TestCatalogRoundTrip(t *testing.T) {
 	}
 }
 
-// TestRenderNormalizesButKeepsDocumentOrder 渲染归一化**该归一化的**，留
-// 住**不该归一化的**。
-//
-// ★ 这是「渲染可预测」的另一半：如果两次渲染同样的内容得到不同的字节，
-//
-//	写后读比较就分不清「我写的还在」与「我写的是同一份的另一个副本」，
-//	而后者会被当成冲突 —— 于是并发一次都不发生，重试先耗尽。
-//
-// ★ 但章节顺序**必须**保留文档序 —— 排序会毁掉「第 1 节在第 3 节前面」
-//
-//	这件事，而那正是模型照着跳的依据。
+func TestRenderCatalogUsesTheEnglishHeader(t *testing.T) {
+	out := string(RenderCatalog(sampleCatalog()))
+	for _, want := range []string{
+		"# Knowledge Base Catalog",
+		"corpus: docs",
+		"extraction rule v2",
+		"model local/embed (dim 1024)",
+		"updated at 2026-10-16T00:41:12Z",
+		"created at 2026-10-16T00:41:12Z",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the rendered header is missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestParseCatalogAcceptsTheLegacyChineseHeader proves that a catalog.md
+// written before the header was translated still parses: without the legacy
+// prefixes the corpus, revision, model, dim and timestamps would silently
+// become zero.
+func TestParseCatalogAcceptsTheLegacyChineseHeader(t *testing.T) {
+	body := "# 知识库目录\n\n" +
+		"> 语料: docs  ·  1 份文档  ·  rev 3  ·  writer abc  ·  建于 2026-10-15T00:00:00Z\n" +
+		"> 抽取规则 v2  ·  模型 local/embed (dim 1024)  ·  更新于 2026-10-16T00:41:12Z\n"
+
+	c, err := ParseCatalog([]byte(body))
+	if err != nil {
+		t.Fatalf("ParseCatalog: %v", err)
+	}
+	h := c.Header
+	if h.Corpus != "docs" {
+		t.Errorf("Corpus = %q, want docs", h.Corpus)
+	}
+	if h.Revision != 3 {
+		t.Errorf("Revision = %d, want 3", h.Revision)
+	}
+	if h.Writer != "abc" {
+		t.Errorf("Writer = %q, want abc", h.Writer)
+	}
+	if h.IndexVersion != 2 {
+		t.Errorf("IndexVersion = %d, want 2", h.IndexVersion)
+	}
+	if h.Model != "local/embed" {
+		t.Errorf("Model = %q, want local/embed", h.Model)
+	}
+	if h.Dim != 1024 {
+		t.Errorf("Dim = %d, want 1024", h.Dim)
+	}
+	created := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
+	updated := time.Date(2026, 10, 16, 0, 41, 12, 0, time.UTC)
+	if !h.Created.Equal(created) {
+		t.Errorf("Created = %v, want %v", h.Created, created)
+	}
+	if !h.Updated.Equal(updated) {
+		t.Errorf("Updated = %v, want %v", h.Updated, updated)
+	}
+}
+
 func TestRenderNormalizesButKeepsDocumentOrder(t *testing.T) {
 	a := sampleCatalog()
 
 	b := sampleCatalog()
-	b.Entries[0], b.Entries[1] = b.Entries[1], b.Entries[0] // 条目换序
+	b.Entries[0], b.Entries[1] = b.Entries[1], b.Entries[0]
 	b.Entries[1].Links = []string{"kb-design.md", "agent-design.md"}
 
 	if string(RenderCatalog(a)) != string(RenderCatalog(b)) {
 		t.Error("render depends on entry or link order; those are sets and must be normalized")
 	}
 
-	// 章节换序**必须**改渲染结果，否则就说明归一化做过头了。
 	c := sampleCatalog()
 	s := c.Entries[0].Sections
 	c.Entries[0].Sections = []Section{s[1], s[0]}
@@ -123,7 +161,6 @@ func TestRenderNormalizesButKeepsDocumentOrder(t *testing.T) {
 	}
 }
 
-// TestParseCatalogLenient 宽松解析的验收（§12.11）。
 func TestParseCatalogLenient(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -132,7 +169,7 @@ func TestParseCatalogLenient(t *testing.T) {
 		wantWarn int
 	}{
 		{
-			name: "人加的备注行被忽略且不报警告",
+			name: "a human-added note line is ignored without a warning",
 			body: catalogHead() + `
 ## a.md
 
@@ -150,43 +187,43 @@ stale: false
 			wantWarn: 0,
 		},
 		{
-			name:     "缺少 key 不报错，取零值",
+			name:     "a missing key does not error, it yields the zero value",
 			body:     catalogHead() + "\n## a.md\n\n> 摘要\n\ntitle: A\n",
 			wantPath: []string{"a.md"},
 			wantWarn: 0,
 		},
 		{
-			name:     "摘要写成 > 而非 > 也能读",
+			name:     "a summary written as > without a space still reads",
 			body:     catalogHead() + "\n## a.md\n\n>摘要没空格\n\ntitle: A\n",
 			wantPath: []string{"a.md"},
 			wantWarn: 0,
 		},
 		{
-			name:     "拼错的 key 记一条警告，条目仍留下",
+			name:     "a misspelled key records one warning and the entry stays",
 			body:     catalogHead() + "\n## a.md\n\n> 摘要\n\nsumary: 拼错了\n",
 			wantPath: []string{"a.md"},
 			wantWarn: 1,
 		},
 		{
-			name:     "非整数的 mtime 记一条警告，条目仍留下",
+			name:     "a non-integer mtime records one warning and the entry stays",
 			body:     catalogHead() + "\n## a.md\n\n> 摘要\n\nmtime: 昨天\n",
 			wantPath: []string{"a.md"},
 			wantWarn: 1,
 		},
 		{
-			name:     "stale 的含糊写法记一条警告，不当成 true",
+			name:     "an ambiguous stale value records one warning and is not taken as true",
 			body:     catalogHead() + "\n## a.md\n\n> 摘要\n\nstale: yes\n",
 			wantPath: []string{"a.md"},
 			wantWarn: 1,
 		},
 		{
-			name:     "空路径的 ## 行跳过整节",
+			name:     "an empty path on a ## line skips the whole section",
 			body:     catalogHead() + "\n## \n\n> 摘要\n\n## a.md\n\n> 摘要\n",
 			wantPath: []string{"a.md"},
 			wantWarn: 1,
 		},
 		{
-			name:     "多条摘要保留第一条并报警告",
+			name:     "multiple summaries keep the first one and record a warning",
 			body:     catalogHead() + "\n## a.md\n\n> 第一条\n\n> 第二条\n",
 			wantPath: []string{"a.md"},
 			wantWarn: 1,
@@ -197,7 +234,7 @@ stale: false
 		t.Run(tc.name, func(t *testing.T) {
 			c, err := ParseCatalog([]byte(tc.body))
 			if err != nil {
-				t.Fatalf("ParseCatalog returned an error: %v (宽松解析不该因人写错而失败)", err)
+				t.Fatalf("ParseCatalog returned an error: %v (lenient parsing must not fail because a human typed it wrong)", err)
 			}
 			var got []string
 			for _, e := range c.Entries {
@@ -220,7 +257,6 @@ func TestParseCatalogRejectsNonCatalog(t *testing.T) {
 	}
 }
 
-// TestParseCatalogSummaryIsSingleLine 摘要在渲染里必须是单行。
 func TestParseCatalogSummaryIsSingleLine(t *testing.T) {
 	c := sampleCatalog()
 	c.Entries[0].Summary = "第一行\n第二行"
@@ -233,13 +269,11 @@ func TestParseCatalogSummaryIsSingleLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 换行被合并成空格，而不是丢掉后半句 —— 后者是静默丢数据。
 	if want := "第一行 第二行"; got.Entries[0].Summary != want {
 		t.Errorf("Summary = %q, want %q", got.Entries[0].Summary, want)
 	}
 }
 
-// TestSectionParseKeepsBrackets 名字里的括号不该被当成行号。
 func TestSectionParseKeepBrackets(t *testing.T) {
 	cases := []struct {
 		in    string
@@ -261,7 +295,6 @@ func TestSectionParseKeepBrackets(t *testing.T) {
 	}
 }
 
-// TestSectionsTruncatedRendered 砍掉数必须出现在渲染里。
 func TestSectionsTruncatedRendered(t *testing.T) {
 	c := sampleCatalog()
 	out := string(RenderCatalog(c))
@@ -277,8 +310,6 @@ func TestSectionsTruncatedRendered(t *testing.T) {
 	}
 }
 
-// TestRenderOwnershipFormat 摘要用 `>`、其余用 `key: value` ——
-// 格式本身就是所有权声明（§5.2）。
 func TestRenderOwnershipFormat(t *testing.T) {
 	out := string(RenderCatalog(sampleCatalog()))
 	idx := strings.Index(out, "## config-design.md")
@@ -295,14 +326,12 @@ func TestRenderOwnershipFormat(t *testing.T) {
 			t.Errorf("key %q must render as its own `key: value` line:\n%s", k, sec)
 		}
 	}
-	// ★ 反过来也要成立：机器字段**不得**出现在 `>` 块里。反了的话解析
-	//   会把 title 当摘要，而那份文件人在编辑。
 	if strings.Contains(sec, "> "+keyTitle+":") {
 		t.Error("a machine field leaked into the human-owned summary block")
 	}
 }
 
 func catalogHead() string {
-	return "# 知识库目录\n\n> 语料: docs  ·  1 份文档  ·  rev 1  ·  writer abc  ·  建于 2026-10-16T00:41:12Z\n" +
-		"> 抽取规则 v2  ·  更新于 2026-10-16T00:41:12Z\n"
+	return "# Knowledge Base Catalog\n\n> corpus: docs  ·  1 document  ·  rev 1  ·  writer abc  ·  created at 2026-10-16T00:41:12Z\n" +
+		"> extraction rule v2  ·  updated at 2026-10-16T00:41:12Z\n"
 }

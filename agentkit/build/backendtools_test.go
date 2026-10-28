@@ -14,12 +14,6 @@ import (
 	"openheron/contract"
 )
 
-// plainModel 只回一句话，不调任何工具。
-//
-// ★ 它存在的理由是「让一轮真的跑起来」：框架在每一轮的 BeforeAgent 里把
-//
-//	工具表交出来（[Table.observe] 记的就是它），而 BeforeAgent 与模型
-//	调不调工具无关 —— 所以不调工具反而让这条用例只测「工具表」这一件事。
 type plainModel struct{ turns int }
 
 func (m *plainModel) Generate(context.Context, []*schema.Message, ...model.Option) (*schema.Message, error) {
@@ -39,7 +33,6 @@ func (m *plainModel) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel, 
 	return m, nil
 }
 
-// toolCallingModel 第一轮调一个指定工具，之后收尾。
 type toolCallingModel struct {
 	tool string
 	args string
@@ -73,7 +66,6 @@ func (m *toolCallingModel) WithTools([]*schema.ToolInfo) (model.ToolCallingChatM
 	return m, nil
 }
 
-// newModelBuilder 造一个按 ModelRef 分派模型的 Builder。
 func newModelBuilder(t *testing.T, cfg *spec.Config, fallback model.BaseModel[*schema.Message],
 	byRef map[string]model.BaseModel[*schema.Message]) *Builder {
 
@@ -90,16 +82,6 @@ func newModelBuilder(t *testing.T, cfg *spec.Config, fallback model.BaseModel[*s
 	return b
 }
 
-// ★ 文件系统工具必须**真的存在**。
-//
-//	回归：2026-10-15 的 fb56782 把 setup 改成按代际的 deps 快照时，漏了
-//	`cfg.Backend = d.backend` 与 `cfg.StreamingShell = d.skills` 两行 ——
-//	而 eino 的 deep.New **只在** 这两个字段非 nil 时才注册文件系统中间件
-//	（eino adk/prebuilt/deep/deep.go:219）。
-//
-//	后果是**静默**的：agent 照常跑，工具表里却没有 read_file / write_file /
-//	execute，模型一调就拿到「[tool unavailable]」。而未知工具兜底恰好把
-//	「整轮失败」变成了「一句回复」—— 于是没人发现。
 func TestFilesystemToolsAreActuallyWired(t *testing.T) {
 	m := &plainModel{}
 	cfg := configFromSpecs("test/model", nil,
@@ -125,7 +107,6 @@ func TestFilesystemToolsAreActuallyWired(t *testing.T) {
 	}
 }
 
-// ★ 以子 agent 为根（`/agents` 切换）时也必须有文件工具。
 func TestFilesystemToolsSurviveTheAgentsRootSwitch(t *testing.T) {
 	child := &toolCallingModel{tool: "read_file", args: `{"file_path":"/tmp/x"}`}
 	cfg := configFromSpecs("test/model", nil,
@@ -142,13 +123,11 @@ func TestFilesystemToolsSurviveTheAgentsRootSwitch(t *testing.T) {
 		t.Fatalf("build the sub agent as root: %v", err)
 	}
 
-	// ★ 读文件是 ask 档 —— 工具**存在**才会被闸门拦下并挂起中断。
 	if !runUntilInterrupt(t, a) {
 		t.Fatal("★ the read_file call was not gated — the tool is probably not wired")
 	}
 }
 
-// ★ 子 agent（经 task 工具委派进去的）也必须有文件工具。
 func TestSubAgentsAlsoGetTheFilesystemTools(t *testing.T) {
 	child := &toolCallingModel{tool: "read_file", args: `{"file_path":"/tmp/x"}`}
 	root := &toolCallingModel{tool: "task", args: `{"subagent_type":"task","description":"read it"}`}
@@ -171,7 +150,6 @@ func TestSubAgentsAlsoGetTheFilesystemTools(t *testing.T) {
 	}
 }
 
-// runOnce 跑完一轮，把事件丢掉。
 func runOnce(t *testing.T, a adk.TypedAgent[*schema.Message]) {
 	t.Helper()
 	iter := a.Run(context.Background(), &adk.TypedAgentInput[*schema.Message]{
@@ -188,7 +166,6 @@ func runOnce(t *testing.T, a adk.TypedAgent[*schema.Message]) {
 	}
 }
 
-// runUntilInterrupt 跑一轮，返回它是否以中断（挂起审批）结束。
 func runUntilInterrupt(t *testing.T, a adk.TypedAgent[*schema.Message]) bool {
 	t.Helper()
 	interrupted := false
@@ -209,7 +186,6 @@ func runUntilInterrupt(t *testing.T, a adk.TypedAgent[*schema.Message]) bool {
 	}
 }
 
-// ★ deny 能摘掉**文件工具** —— 这条依赖框架的一个具体保证。
 func TestDenyRemovesTheFilesystemToolsFromTheModel(t *testing.T) {
 	m := &scriptModel{tool: "write_file"}
 	cfg := configFromSpecs("test/model", nil,

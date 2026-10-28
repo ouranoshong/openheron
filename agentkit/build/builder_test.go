@@ -25,17 +25,12 @@ func (s *stubAgent) Run(context.Context, *adk.TypedAgentInput[*schema.Message], 
 }
 
 func defaultTestPolicy() Policy {
-	// ★ 与 config 的出厂策略同形：只读工具显式 allow，变更类 ask。
-	//   兜底是 allow —— 未点名的工具直接放行，所以**这里只列真正要拦的**。
 	return NewPolicy(
 		[]string{"write_file", "edit_file", "execute"},
 		nil,
 	)
 }
 
-// ★ NewBuilder 不做任何 agent 项的初始化：连根名字都不知道。
-//
-//	推导只发生在第一次 Build（snapshotFor）—— 于是启动与热更新走同一条路。
 func TestNewBuilderDefersEverythingToBuild(t *testing.T) {
 	b := NewBuilder(testManager(nil))
 	if b.snap != nil {

@@ -11,15 +11,6 @@ import (
 	"testing"
 )
 
-// ★ 根与子 agent 必须走**同一条** tool 侧中间件链。
-//
-//	两者的差别是「工具边界」（子 agent 的 disabled_tools 更严），不是
-//	「有哪些中间件」。各写一遍的话，改动只会生效一边，而两边的测试照样
-//	都绿 —— 这正是「单一产地」要消灭的那类漂移。
-//
-//	★ 这条曾经是红的：子 agent 那条链少了 SafeTool，于是子 agent 调工具
-//
-//	出错会整轮失败，而根同样的错会变成一句「[tool error] …」让模型自己改。
 func TestRootAndSubAgentShareTheSameToolChain(t *testing.T) {
 	b := newTestBuilder(t)
 	snap := mustSnapshot(t, b)
@@ -41,10 +32,6 @@ func TestRootAndSubAgentShareTheSameToolChain(t *testing.T) {
 	}
 }
 
-// ★ 中间件链的**顺序**有讲究（eino quickstart 第五章的洋葱模型）。
-//
-//	Filter 必须在 Approval 之前：deny 档的工具要在闸门看见它之前就被摘掉。
-//	UnknownToolScope 必须在 Filter 之后：它要标注的是**过滤后**的工具表。
 func TestToolChainOrderPutsFilterBeforeApproval(t *testing.T) {
 	chain := toolChain(newBoundary(NewPolicy(nil, nil), newTable("main", nil, nil)), 1)
 
@@ -72,17 +59,9 @@ func TestToolChainOrderPutsFilterBeforeApproval(t *testing.T) {
 	}
 }
 
-// ★ SafeTool 必须在链上：它把工具错误变成「[tool error] …」让模型自己改，
-//
-//	而不是整轮失败。
-//
-//	而它**不会**把审批中断吞掉 —— helpers/middleware.go 里透传了
-//	IsInterruptRerunError。
 func TestToolChainHasTheSafeToolMiddleware(t *testing.T) {
 	chain := toolChain(newBoundary(NewPolicy(nil, nil), newTable("main", nil, nil)), 1)
 
-	// SafeTool 是链上唯一一个包住工具**调用**的中间件，其余都作用在
-	// 工具表或 agent 拓扑上 —— 所以按「有没有包住调用」来认它。
 	found := false
 	for _, mw := range chain {
 		if _, ok := mw.(interface {
@@ -97,11 +76,9 @@ func TestToolChainHasTheSafeToolMiddleware(t *testing.T) {
 	}
 }
 
-// ★ The approval payload crosses a gob boundary every time a turn stops on a
-//
-//	human decision. Without this registration the failure surfaces as a model
-//	error at checkpoint-commit time, which reads like a bad model rather than
-//	a missing registration.
+// human decision. Without this registration the failure surfaces as a model
+// error at checkpoint-commit time, which reads like a bad model rather than
+// a missing registration.
 func TestApprovalInfoSurvivesGob(t *testing.T) {
 	in := map[string]any{"interrupt": &approval.ApprovalInfo{
 		ToolName:        "execute",

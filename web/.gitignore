@@ -23,12 +23,14 @@ dist-ssr
 *.sln
 *.sw?
 
-# ★ dist/.gitkeep 必须留下。
-#   `dist` 这条把整个目录排除掉，git 不会再下降到子文件，
-#   所以在仓库根写 `!/web/dist/.gitkeep` 也救不回来 —— 近的规则优先，
-#   而 web/.gitignore 比根目录那层更具体。
-#   没有它：go:embed 的目标目录在**新 clone 里不存在**，
-#   `go build ./...` 直接报 "pattern all:web/dist: no matching files found"。
+# ★ dist/.gitkeep must stay.
+#   The `dist` rule excludes the whole directory, so git never descends into
+#   its children — writing `!/web/dist/.gitkeep` at the repo root does not
+#   bring it back, because the nearest rule wins and web/.gitignore is more
+#   specific than the root one.
+#   Without it the go:embed target directory does not exist in a **fresh
+#   clone**, and `go build ./...` fails outright with
+#   "pattern all:web/dist: no matching files found".
 !dist/
 dist/*
 !dist/.gitkeep

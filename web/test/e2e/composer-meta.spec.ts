@@ -17,7 +17,6 @@ test("底栏显示默认 agent、厂商/模型与思考档位", async ({ page })
   await openApp(page)
 
   await expect(page.locator(META)).toBeVisible()
-  // 假后端的 agents[] 把 worker 排在 main 前面；这里必须仍是默认 agent。
   await expect(page.locator(AGENT)).toHaveText("Agent: main")
   await expect(page.locator(MODEL)).toHaveText("deepseek/deepseek-v4")
   await expect(page.locator(REASONING)).toHaveText("Reasoning: high")

@@ -8,17 +8,7 @@ import { selectSessionList, useStore } from "@/lib/store"
 import type { SessionEntry } from "@/lib/store"
 import { cn } from "@/lib/utils"
 
-/**
- * 侧栏：会话列表 + 新建 / 改名 / 删除。
- *
- * ★ 条目数只由 /v2/sessions 决定。
- *   上一版列表里同时存在「真实会话」和一个「本地占位」，显示成 "New Chat"
- *   且永远删不掉 —— 收编机制的问题。新的 store 里没有占位这个概念。
- */
-
 export function Sidebar() {
-  // ★ 必须 useShallow：selectSessionList 每次 map 出新数组，
-  //   默认的 Object.is 比较会判定「变了」→ 无限重渲染。
   const sessions = useStore(useShallow(selectSessionList))
   const activeId = useStore((s) => s.activeId)
   const loading = useStore((s) => s.loadingList)
@@ -78,8 +68,6 @@ function SessionRow({
   const [draft, setDraft] = useState(entry.meta.title)
   const wrapRef = useRef<HTMLLIElement>(null)
 
-  // 点外面关掉菜单。没有这一步的话点一次「新建」之后菜单还挂在原地，
-  // 而且它会盖住新会话的第一行。
   useEffect(() => {
     if (!menuOpen) return
     const onDown = (e: MouseEvent) => {
@@ -95,7 +83,6 @@ function SessionRow({
     setMenuOpen(false)
     if (!t || t === entry.meta.title) return
     await rename(entry.meta.threadId, t).catch(() => {
-      // 改名失败不该把整行搞崩 —— store 已经回滚，这里最多保持原样。
       setDraft(entry.meta.title)
     })
   }
@@ -123,8 +110,6 @@ function SessionRow({
   }
 
   return (
-    // ★ testid 在 li 上而不是那个 button 上：More options 是 button 的
-    //   **兄弟**（按钮不能嵌套按钮），测试要用它来开菜单就得从行去找。
     <li ref={wrapRef} data-testid="thread-row" className="group relative">
       <button
         type="button"

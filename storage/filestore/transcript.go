@@ -13,20 +13,10 @@ import (
 	"openheron/agentkit/obs"
 )
 
-// 本文件是 session.jsonl 的**唯一**编解码处。
-//
-// ★ 磁盘格式的四个硬编码点都在这里：header 的字段名、message_kind 的值、
-//
-//	version 的比对、每行的字节上限。动它们等于换一种磁盘格式 —— 已有的
-//	会话目录会读不出来。
-
 const (
-	// headerType 是 header 行的 type 字段取值。
 	headerType = "header"
 
 	// messageKind is the only message representation openheron persists.
-	//
-	// ★ 这个值是**磁盘契约**：改它等于让已有的 session.jsonl 全部读不出来。
 	messageKind = "message"
 
 	// maxLineBytes bounds a single JSONL record. The default bufio limit is
@@ -44,11 +34,6 @@ type logHeader struct {
 }
 
 // loadTranscript decodes this session's session.jsonl into fs.messages.
-//
-// ★ transcript 可能很大（长会话几百条消息），而 List 与 Inspect 每轮都要
-//
-//	问会话要状态 —— 那些路径不需要它。所以它**只在真的要读时**才读盘，
-//	而且只读一次。
 func (fs *FileSession) loadTranscript() error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
@@ -57,11 +42,6 @@ func (fs *FileSession) loadTranscript() error {
 
 // transcriptLocked decodes this session's session.jsonl into fs.messages.
 // The caller must hold fs.mu.
-//
-// ★ fs.id 以 header 为准：磁盘上的 header 才是这份 transcript 的身份证，
-//
-//	目录名只是存放位置（手动挪过目录就会不一致），拿目录名当 id 会让后续
-//	追加写到另一个目录去 —— checkpoint 的存取器也得跟着走。
 func (fs *FileSession) transcriptLocked() error {
 	if fs.loaded {
 		return nil
@@ -130,10 +110,6 @@ func readHeader(sc *bufio.Scanner, path string) (logHeader, error) {
 
 // initTranscript writes a fresh header to this session's transcript, failing if
 // the file already exists.
-//
-// ★ O_EXCL：会话 id 是新铸的，这个文件本不该存在；它是保险而不是分支 ——
-//
-//	真撞上了就让创建失败，而不是在已有日志上再写一个会话。
 func (fs *FileSession) initTranscript(createdAt time.Time) error {
 	path := messagesPath(fs.root, fs.id)
 	h := logHeader{
@@ -159,7 +135,6 @@ func (fs *FileSession) initTranscript(createdAt time.Time) error {
 }
 
 // readMessages decodes the message lines of a transcript.
-//
 // Malformed lines are skipped and counted rather than dropped silently: a
 // truncated tail after a crash must not be mistaken for a clean log.
 func readMessages(sc *bufio.Scanner) ([]*schema.Message, int, error) {
@@ -181,10 +156,6 @@ func readMessages(sc *bufio.Scanner) ([]*schema.Message, int, error) {
 }
 
 // marshalLine encodes one message as a session.jsonl record.
-//
-// ★ JSONL 记录是**这一层**的磁盘契约，不是任何线格式的一部分：客户端看的
-//
-//	AG-UI 事件是另一套形状，两者的生命周期与版本策略各管各的。
 func marshalLine(msg *schema.Message) ([]byte, error) {
 	return json.Marshal(msg)
 }
@@ -199,8 +170,6 @@ func unmarshalLine(line []byte) (*schema.Message, error) {
 }
 
 // writeMessage appends one message to the transcript.
-//
-// ★ 一条消息一次 write 落盘：分两次写就可能与并发写交错，一行被劈成两半。
 func (fs *FileSession) writeMessage(msg *schema.Message) error {
 	data, err := marshalLine(msg)
 	if err != nil {

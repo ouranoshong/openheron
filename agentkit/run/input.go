@@ -1,11 +1,3 @@
-// 这一轮给模型的输入：一段临时的上下文提示 + 会话历史。
-//
-// ★ 它住在编排层里，不是一个独立的包 —— 「这一轮给模型看什么」是**编排规则**，
-//
-//	而编排规则只有一处说得清。独立成包（原来的 inputctx）反而制造了一条
-//	「编排层 → 输入层」的边，多一跳、少一层归属。
-//
-// ★ 跨层共享的类型（[contract.TurnKind]）不在这里 —— 那是叶子包的事。
 package run
 
 import (
@@ -31,10 +23,6 @@ type InputConfig struct {
 }
 
 // inputParams is everything buildInput needs from the session.
-//
-// ★ 它只带**纯数据**：历史与工作区。带一个会话对象过来就会在
-//
-//	「读历史」与「改状态」之间分不清边界。
 type inputParams struct {
 	History   []*schema.Message
 	Workspace string
@@ -53,23 +41,10 @@ var defaultRules = []string{
 
 // buildInput returns the agent input for one turn: a transient context prompt
 // followed by history. The context prompt is never persisted to the session.
-//
-// ★ 历史先过一遍 [normalizeHistory]：端点对「tool_calls 没有对应 tool 消息」
-//
-//	是硬校验（直接 400），而历史是持久化的 —— 一条坏 turn 会把会话永久毒化。
-//	详见 [history.go]。
 func (c InputConfig) buildInput(ctx context.Context, p inputParams, query string) (*adk.TypedAgentInput[*schema.Message], error) {
 	messages := make([]*schema.Message, 0, len(p.History)+2)
 	messages = append(messages, newSystem(c.contextPrompt(ctx, p.Workspace)))
 
-	// ★ 先剔掉**子 agent 的中间过程**，再做配对修复。
-	//
-	//	子 agent 的消息留在历史里（那是可观测性的来源），但**不进**父 agent
-	//	的上下文 —— 「Agent 即工具」的隔离靠的是这一步，不是靠「不记录」。
-	//
-	//	★ 顺序不能反：专家的 assistant 消息带 tool_calls，若先归一化，
-	//	  它会为**马上要被剔掉**的那些调用补合成 tool 消息 —— 白做，
-	//	  而且合成出来的消息可能被父的配对逻辑认错。
 	history := withoutSubagentMessages(p.History)
 	for _, msg := range normalizeHistory(history) {
 		if msg != nil {
@@ -86,14 +61,6 @@ func (c InputConfig) buildInput(ctx context.Context, p inputParams, query string
 	}, nil
 }
 
-// withoutSubagentMessages 剔掉产生在子 agent 运行内部的消息。
-//
-// ★ 剔的是**整组**（专家的 assistant 消息与它的工具结果一起），所以剩下
-//
-//	的序列仍然合法：父的 assistant(tool_calls=[task]) 紧跟着它自己的
-//	tool(task 结果)，配对不乱。
-//
-// ★ 跨轮也剔：专家的过程在任何一轮都不该进父的上下文。
 func withoutSubagentMessages(hist []*schema.Message) []*schema.Message {
 	kept := make([]*schema.Message, 0, len(hist))
 	for _, m := range hist {

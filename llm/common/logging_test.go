@@ -39,7 +39,6 @@ func okResponse(req *http.Request) *http.Response {
 	}
 }
 
-// 默认只打摘要：完整 body 是 opt-in，否则正常日志会变成一份会话副本。
 func TestRequestLoggingDefaultsToSummary(t *testing.T) {
 	t.Setenv(LogRequestsEnv, "")
 	out := captureLog(t)
@@ -72,7 +71,6 @@ func TestRequestLoggingDefaultsToSummary(t *testing.T) {
 	}
 }
 
-// 打开开关后打印最终请求体，并且必须遮蔽密钥类字段；max_tokens 不能被误伤。
 func TestRequestLoggingFullBodyRedactsSecrets(t *testing.T) {
 	t.Setenv(LogRequestsEnv, "1")
 	out := captureLog(t)

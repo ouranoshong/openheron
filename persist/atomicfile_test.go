@@ -27,10 +27,6 @@ func TestAtomicWriteReplacesWholeFile(t *testing.T) {
 	}
 }
 
-// TestAtomicWriteLeavesNoTempFile 守住「失败不留残骸」的那一半。
-//
-// 残留 tmp 不会被下一次写入破坏（同名会被 O_TRUNC 覆盖），但它会让人
-// 以为「保存过一次」，而一个看起来存在的临时文件是最难解释的现象之一。
 func TestAtomicWriteLeavesNoTempFile(t *testing.T) {
 	dir := t.TempDir()
 	dst := filepath.Join(dir, "a.txt")
@@ -52,8 +48,6 @@ func TestAtomicWriteLeavesNoTempFile(t *testing.T) {
 }
 
 func TestAtomicWriteCreatesMissingDirectories(t *testing.T) {
-	// 配置写入要能在「用户级目录压根不存在」时建出第一个文件 ——
-	// 新项目的第一次配置就是这个形状。
 	dir := filepath.Join(t.TempDir(), "user", ".openheron", "policy")
 	dst := filepath.Join(dir, "permissions.yaml")
 
@@ -70,8 +64,6 @@ func TestAtomicWriteCreatesMissingDirectories(t *testing.T) {
 }
 
 func TestAtomicWriteRejectsEmptySuffix(t *testing.T) {
-	// 没有后缀 ⇒ 临时文件与目标同名 ⇒ rename 变成自己覆盖自己。
-	// 那种情况下「原子」是假的，而失败点会推迟到第一次写入。
 	dst := filepath.Join(t.TempDir(), "a.txt")
 	err := AtomicWrite(dst, []byte("x"), "")
 	if err == nil {
@@ -95,7 +87,6 @@ func TestAtomicWriteFailsWhenPathIsADirectory(t *testing.T) {
 	if err := AtomicWrite(target, []byte("x"), ".tmp"); err == nil {
 		t.Fatal("writing over a directory must fail")
 	}
-	// 失败不许把目标目录变成文件，也不许留下残骸。
 	info, err := os.Stat(target)
 	if err != nil || !info.IsDir() {
 		t.Fatalf("target must still be a directory (err=%v)", err)

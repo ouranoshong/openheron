@@ -9,12 +9,6 @@ import (
 	"openheron/agentkit/spec"
 )
 
-// 没有「主 agent」：每个 agent 都能当会话的 agent，装配按它自己的配置来。
-//
-// ★ 所以接口侧只有一件事要保证：**选中的 agent 必须存在**。
-//   选谁都行 —— 嵌套多深都行（它自己那棵树照样展开）。
-
-// nestedConfig 造一份带嵌套的配置：main → lead → coder。
 func nestedConfig(t *testing.T) *spec.Config {
 	t.Helper()
 	root := t.TempDir()
@@ -49,12 +43,6 @@ models:
 	return cfg
 }
 
-// ★ `/v2/agents` 列出**全部** agent —— 前端不必自己算「哪些能选」。
-//
-// ★ 每个 agent 报自己的下属（队伍结构），不报「归属根」：一个 agent 可以
-//
-//	同时是别人的下属、又是自己的入口，「它在谁的队伍里第几层」没有唯一
-//	答案。
 func TestV2AgentsListsEveryAgent(t *testing.T) {
 	srv := newV2Server(t)
 	srv.SetConfigSource(func() *spec.Config { return nestedConfig(t) })
@@ -77,7 +65,6 @@ func TestV2AgentsListsEveryAgent(t *testing.T) {
 			t.Fatalf("%s is missing from /v2/agents: %s", id, got.body)
 		}
 	}
-	// 队伍结构由「自己的下属」表达。
 	if got := byID["main"].Subagents; len(got) != 1 || got[0] != "lead" {
 		t.Fatalf("main's sub-agents = %v, want [lead]", got)
 	}
@@ -87,20 +74,11 @@ func TestV2AgentsListsEveryAgent(t *testing.T) {
 	if got := byID["coder"].Subagents; len(got) != 0 {
 		t.Fatalf("coder's sub-agents = %v, want none", got)
 	}
-	// 默认 agent 是 main —— 新会话没指定时用它。
 	if view.DefaultAgent != "main" {
 		t.Fatalf("defaultAgent = %q, want main", view.DefaultAgent)
 	}
 }
 
-// ★ `/v2/agents` 带**配置指纹** —— 前端唯一的「配置变了」信号。
-//
-// 用户可以在**编辑器里**改 `agents/*.md`（新增一个文件也算）：服务端会热更新，
-// 但浏览器此前拿不到任何通知，而这份列表在前端是**模块级缓存** —— 于是
-// 选择器一直显示过时的 agent 名单。
-//
-// 指纹取自 spec.Version（按「文件名 + 大小 + mtime」算），所以**新增一个
-// agent 文件必然改指纹**。
 func TestV2AgentsCarriesConfigFingerprint(t *testing.T) {
 	root := t.TempDir()
 	base := filepath.Join(root, ".openheron")
@@ -153,10 +131,9 @@ models:
 
 	before := fingerprint()
 	if before == "" {
-		t.Fatal("version must not be empty —— 它是前端发现热更新的唯一信号")
+		t.Fatal("version must not be empty - it is the only signal the frontend has for hot reload")
 	}
 
-	// ★ 用户在编辑器里新建了一个 agent 文件 —— 服务端重新加载了配置。
 	write("agents/latecomer.md", "---\ndescription: Late\nmodel: test/small\n---\nbody\n")
 	current = load()
 
@@ -165,7 +142,6 @@ models:
 	}
 }
 
-// ★ 切换到**任何**声明了的 agent 都行 —— 嵌套的也算。
 func TestSwitchSessionToAnyDeclaredAgent(t *testing.T) {
 	srv := newV2Server(t)
 	srv.SetConfigSource(func() *spec.Config { return nestedConfig(t) })
@@ -181,7 +157,6 @@ func TestSwitchSessionToAnyDeclaredAgent(t *testing.T) {
 		t.Fatalf("decode: %v (%s)", err, created.body)
 	}
 
-	// 嵌套的 lead 与更深的 coder 都能选。
 	for _, want := range []string{"lead", "coder"} {
 		got := callJSON(t, srv, "PATCH", "/v2/sessions/"+meta.ThreadID+"/agent",
 			map[string]any{"agentId": want})
@@ -199,7 +174,6 @@ func TestSwitchSessionToAnyDeclaredAgent(t *testing.T) {
 		}
 	}
 
-	// ★ 没声明的仍然拒绝 —— 这是唯一一种拒绝。
 	bad := callJSON(t, srv, "PATCH", "/v2/sessions/"+meta.ThreadID+"/agent",
 		map[string]any{"agentId": "ghost"})
 	if bad.code == 200 {
@@ -207,9 +181,6 @@ func TestSwitchSessionToAnyDeclaredAgent(t *testing.T) {
 	}
 }
 
-// 切换之后，**下一轮**以它为根运行。
-//
-// ★ 切换只影响之后的轮次：历史不改写，正在跑的 turn 不换归属。
 func TestSessionRunsAsTheSwitchedAgent(t *testing.T) {
 	srv := newV2Server(t)
 	srv.SetConfigSource(func() *spec.Config { return nestedConfig(t) })
@@ -230,7 +201,6 @@ func TestSessionRunsAsTheSwitchedAgent(t *testing.T) {
 		t.Fatalf("switch: = %d (%s)", got.code, got.body)
 	}
 
-	// 会话详情里的 agentId 就是切换后的那个。
 	got := callJSON(t, srv, "GET", "/v2/sessions/"+meta.ThreadID, nil)
 	if got.code != 200 {
 		t.Fatalf("= %d (%s)", got.code, got.body)

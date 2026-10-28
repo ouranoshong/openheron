@@ -1,14 +1,14 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* shadcn/ui 语义色由 CSS 变量驱动；assistant-ui 的 elements 也读同一组 token */
+/* shadcn/ui semantic colors are driven by CSS variables; assistant-ui's elements read the same set of tokens */
 @custom-variant dark (&:is(.dark *));
 
 :root {
   --radius: 0.625rem;
 
-  /* assistant-ui 的 thread/composer 圆角单独留一个变量，
-     改它只影响聊天界面，不动全局圆角 */
+  /* assistant-ui's thread/composer corner radius gets a variable of its own:
+     changing it only affects the chat surface, not the global radius */
   --radius-thread: 1.5rem;
 
   --background: oklch(1 0 0);
@@ -31,8 +31,8 @@
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
 
-  /* openheron 扩展语义色 —— 承接原 A2UI 的视觉语言：
-     琥珀=待审批，绿=工具成功。见 docs/frontend-design.md §10 */
+  /* openheron's extended semantic colors — carrying over the original A2UI visual language:
+     amber = awaiting approval, green = tool success. See docs/frontend-design.md §10 */
   --warning: oklch(0.79 0.16 70);
   --warning-foreground: oklch(0.25 0.08 60);
   --success: oklch(0.72 0.15 150);
@@ -79,8 +79,9 @@
 }
 
 @theme inline {
-  /* 中英混排字体栈：拉丁字形优先用系统 UI 字体，CJK 显式回退到
-     平台自带字体，避免 Linux/Windows 上不同浏览器各挑一套。 */
+  /* Mixed Chinese/Latin font stack: Latin glyphs prefer the system UI font while CJK
+     falls back explicitly to the platform's own fonts — otherwise browsers on
+     Linux/Windows each end up picking a different one. */
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, "Noto Sans", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif;
@@ -129,21 +130,24 @@
     @apply bg-background text-foreground font-sans;
   }
 }
-/* ── shiki 语法高亮 ────────────────────────────────────────────────────
+/* ── shiki syntax highlighting ───────────────────────────────────────────
  *
- * ★ 这段 CSS 是 `defaultColor: false`（双主题）的**必要组成**，不是可选装饰。
+ * ★ This CSS is a **required part** of `defaultColor: false` (dual theme), not decoration.
  *
- *   那个模式下 shiki 不输出 `color:`，而是在每个 span 上写两个 CSS 变量：
+ *   In that mode shiki emits no `color:`; it writes two CSS variables on every span:
  *       style="--shiki-light:#D73A49;--shiki-dark:#F97583"
- *   变量本身不产生任何视觉效果 —— 必须有规则把它们读出来变成 color。
- *   少了这一段：标记是对的、变量也在，但渲染出来全是默认文字色，
- *   表现为「高亮好像没生效」（它确实没生效）。
+ *   The variables themselves produce no visual effect — a rule has to read them
+ *   back out as color.
+ *   Without this block: the markup is right and the variables are there, yet
+ *   everything renders in the default text color, which looks like
+ *   "highlighting seems not to have taken effect" (it really did not).
  *
- *   代价换来的是主题切换不需要重新高亮 —— 这正是用变量而不是内联 color
- *   的理由。
+ *   What it buys is that switching themes needs no re-highlighting — which is
+ *   exactly why variables are used instead of an inline color.
  *
- *   第二个 `var()` 参数是兜底：引擎还没就绪、代码块回退到纯文本时，
- *   span 上不会有这些变量，此时必须用 currentColor 而不是继承成透明。
+ *   The second `var()` argument is the fallback: while the engine is not ready
+ *   and a code block falls back to plain text, spans carry no variables, so
+ *   currentColor must be inherited rather than a transparent color.
  */
 @layer components {
   .shiki,

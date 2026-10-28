@@ -1,10 +1,12 @@
-# ★ 出厂模板：一个 OpenAI 兼容端点。
-#   占位符的默认值就在这条文件里 —— **厂商知识不进 Go 代码**。
+# ★ Factory template: one OpenAI-compatible endpoint.
+#   The placeholder defaults live in this file — **vendor knowledge never enters
+#   the Go code**.
 type: openai_compat
 base_url: {{base_url|https://api.openai.com/v1}}
 
-# ★ api_key 写的是**环境变量名**，渲染成 ${NAME}。
-#   密钥在请求时才从环境里取：没设不阻塞启动，只记一条提醒。
+# ★ api_key holds the **name of an environment variable**, rendered as ${NAME}.
+#   The key is read from the environment only when a request is made: an unset
+#   variable does not block startup, it only records one reminder.
 api_key: {{api_key_env|OPENAI_API_KEY}}
 
 timeout: 5m

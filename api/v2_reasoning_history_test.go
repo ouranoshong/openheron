@@ -8,11 +8,6 @@ import (
 	"openheron/message"
 )
 
-// ── 历史里的思维链 ───────────────────────────────────────────────────────
-
-// ★ 历史里原来**只有正文** —— 推理内容从来没进过历史，于是刷新一次，
-//
-//	思维链整个没了。现在正文与用时一起带出去（走 AG-UI 的 metadata）。
 func TestTheHistoryCarriesTheReasoningAndItsDuration(t *testing.T) {
 	m := &schema.Message{
 		Role:    schema.Assistant,
@@ -37,7 +32,6 @@ func TestTheHistoryCarriesTheReasoningAndItsDuration(t *testing.T) {
 	}
 }
 
-// ★ 没有思维链的消息不带这两个键 —— 空 = 不知道，不是「想了 0 毫秒」。
 func TestTheHistoryHasNoReasoningKeysWithoutAThought(t *testing.T) {
 	m := &schema.Message{Role: schema.Assistant, Content: "直接答"}
 	out, ok := toAgUiMessage(m, 0)
@@ -52,9 +46,6 @@ func TestTheHistoryHasNoReasoningKeysWithoutAThought(t *testing.T) {
 	}
 }
 
-// ★ 只有思维链、没有正文的消息**也要留着** ——
-//
-//	丢掉它等于「这一轮它只想了、没说话」被抹掉了。
 func TestAMessageWithOnlyAThoughtIsNotDropped(t *testing.T) {
 	m := &schema.Message{
 		Role: schema.Assistant,
@@ -71,11 +62,6 @@ func TestAMessageWithOnlyAThoughtIsNotDropped(t *testing.T) {
 	}
 }
 
-// ── 历史里的模型与思考档位 ───────────────────────────────────────────────
-
-// ★ 事后要能回答「这条是哪个模型、哪个思考档位产的」—— 对账与复现都要它。
-//
-//	没有就是「不知道」，不是「没配」。
 func TestTheHistoryCarriesTheModelAndThinkingTier(t *testing.T) {
 	m := &schema.Message{Role: schema.Assistant, Content: "答完了"}
 	message.StampModel(m, "deepseek/deepseek-flash", "high")
@@ -92,7 +78,6 @@ func TestTheHistoryCarriesTheModelAndThinkingTier(t *testing.T) {
 	}
 }
 
-// 老消息（没盖戳）不带这两个键。
 func TestTheHistoryHasNoModelKeysWithoutAStamp(t *testing.T) {
 	m := &schema.Message{Role: schema.Assistant, Content: "直接答"}
 	out, ok := toAgUiMessage(m, 0)

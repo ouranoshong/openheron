@@ -3,17 +3,7 @@ import { describe, expect, test } from "bun:test"
 import { recordedFrames } from "../src/lib/fixtures/recorded-frames"
 import { takeEvents } from "../src/lib/sse"
 
-/**
- * 分帧器的契约测试。
- *
- * 重点是**分片**：网络会把一个 JSON 拦腰截断，任何「一次读到就解析」的
- * 做法都会在流式下随机炸掉。真帧保证了 `data:` 后面没有空格这件事
- * 不会被测试自己顺手写错。
- */
-
 describe("真后端录制的帧", () => {
-  // 末尾补一个空行：真流里最后一个事件也带终止空行，否则它会正确地
-  // 留在 rest 里（那是流被截断时的正确行为，另有专门一条测试）。
   const whole = recordedFrames.join("\n\n") + "\n\n"
 
   test("每一块都能解出 JSON", () => {
@@ -25,7 +15,6 @@ describe("真后端录制的帧", () => {
   })
 
   test("冒号后无空格的形式照样收得到", () => {
-    // data:{...} —— 带空格的那种当初反过来害得前端一条都收不到
     const { events } = takeEvents('data:{"type":"RUN_STARTED"}\n\n')
     expect(events[0]!.data).toBe('{"type":"RUN_STARTED"}')
   })
@@ -73,7 +62,6 @@ describe("分片", () => {
   })
 
   test("随机切点下 200 次都不丢事件", () => {
-    // 分帧器唯一的正确性要求就是不丢、不重、不乱序。
     const stream = recordedFrames.join("\n\n") + "\n\n"
     for (let seed = 0; seed < 200; seed++) {
       let buffer = ""

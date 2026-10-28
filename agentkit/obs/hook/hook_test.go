@@ -14,7 +14,6 @@ import (
 	"openheron/agentkit/obs"
 )
 
-// Handler 必须满足 eino 的回调接口 —— 少一个方法就装不上。
 var _ callbacks.Handler = (*Handler)(nil)
 
 func newTestHandler(buf *bytes.Buffer) *Handler {
@@ -58,8 +57,6 @@ func TestOnErrorLogsTheFailure(t *testing.T) {
 	}
 }
 
-// 嵌套组件：外层的结束事件在里层之后到达。
-// 栈的后进先出保证外层拿到的是**自己**的开始时刻。
 func TestNestedComponentsDoNotShareTheStartTime(t *testing.T) {
 	var buf bytes.Buffer
 	h := newTestHandler(&buf)
@@ -73,7 +70,6 @@ func TestNestedComponentsDoNotShareTheStartTime(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("expected two log lines, got %d: %s", len(lines), buf.String())
 	}
-	// 第一行是里层（ChatModel），第二行是外层（Graph）。
 	if !strings.Contains(lines[0], "component=ChatModel") {
 		t.Fatalf("expected the inner component first, got: %s", lines[0])
 	}
@@ -82,8 +78,6 @@ func TestNestedComponentsDoNotShareTheStartTime(t *testing.T) {
 	}
 }
 
-// Needed 决定框架要不要为某个时刻拷贝流。
-// 关掉的时刻必须真的关掉 —— 否则会白拷贝一份流。
 func TestNeededSkipsTheStreamInputTiming(t *testing.T) {
 	h := New(nil)
 	if h.Needed(context.Background(), nil, callbacks.TimingOnStartWithStreamInput) {
@@ -99,7 +93,6 @@ func TestNeededSkipsTheStreamInputTiming(t *testing.T) {
 	}
 }
 
-// 流的那份拷贝必须被关掉，否则底下的 goroutine 会泄漏。
 func TestOnEndWithStreamOutputClosesItsCopy(t *testing.T) {
 	var buf bytes.Buffer
 	h := newTestHandler(&buf)
@@ -114,13 +107,11 @@ func TestOnEndWithStreamOutputClosesItsCopy(t *testing.T) {
 	ctx = h.OnEndWithStreamOutput(ctx, &callbacks.RunInfo{Component: "ChatModel"}, sr)
 	_ = ctx
 
-	// 关掉之后再收应当立刻拿到 EOF（不阻塞）。
 	if _, err := sr.Recv(); err == nil {
 		t.Fatal("expected the closed copy to stop delivering")
 	}
 }
 
-// 日志行必须带上 runId 前缀 —— 这是「跨层排障有共同 id」的前提。
 func TestLogLineCarriesTheRunID(t *testing.T) {
 	var buf bytes.Buffer
 	h := newTestHandler(&buf)
@@ -134,7 +125,6 @@ func TestLogLineCarriesTheRunID(t *testing.T) {
 	}
 }
 
-// 不贵的组件不该在 info 级刷屏。
 func TestCheapComponentsStayQuietAtInfo(t *testing.T) {
 	var buf bytes.Buffer
 	h := New(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
@@ -147,12 +137,6 @@ func TestCheapComponentsStayQuietAtInfo(t *testing.T) {
 	}
 }
 
-// 全局注册之后，eino 的回调事件真的会被收下 ——
-//
-// ★ 这是旁路范式的**核心断言**：业务代码只管发（kb / llm/common 已经在发），
-//
-//	接收方装上就一定有效果。装不上、或者装了收不到，
-//	那 9 处 callbacks 调用就还是白付成本。
 func TestGlobalHandlerReceivesTheEvents(t *testing.T) {
 	var buf bytes.Buffer
 	callbacks.AppendGlobalHandlers(newTestHandler(&buf))
@@ -172,7 +156,6 @@ func TestGlobalHandlerReceivesTheEvents(t *testing.T) {
 	}
 }
 
-// 关掉的时刻，框架连回调都不该调 —— 更不该为它拷贝流。
 func TestSkippedTimingIsNeverDelivered(t *testing.T) {
 	var buf bytes.Buffer
 	callbacks.AppendGlobalHandlers(newTestHandler(&buf))
@@ -180,10 +163,8 @@ func TestSkippedTimingIsNeverDelivered(t *testing.T) {
 	ctx := callbacks.InitCallbacks(context.Background(), &callbacks.RunInfo{
 		Component: components.ComponentOfChatModel,
 	})
-	// OnStartWithStreamInput 需要一个流；这里只关心「handler 没被叫到」。
 	_, _ = callbacks.OnStartWithStreamInput[callbacks.CallbackInput](ctx, nil)
 
-	// OnStartWithStreamInput 不在本包的 Needed 名单里 ⇒ 不该有日志。
 	if strings.Contains(buf.String(), "component started") {
 		t.Fatalf("a skipped timing produced output: %s", buf.String())
 	}

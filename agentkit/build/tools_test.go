@@ -28,7 +28,6 @@ func (p *fakeProvider) Provide(context.Context, toolEnv) ([]tool.BaseTool, error
 	return p.tools, p.err
 }
 
-// metadataOnlyTool 只有 Info，没有 InvokableRun / StreamableRun。
 type metadataOnlyTool struct{ name string }
 
 func (t *metadataOnlyTool) Info(context.Context) (*schema.ToolInfo, error) {
@@ -144,7 +143,6 @@ func TestToolRegistryInvalidToolsAreFatal(t *testing.T) {
 }
 
 func TestToolRegistryIsAtomicPerProvider(t *testing.T) {
-	// 一批里第二个工具非法 ⇒ 第一个也不能留下（Build 返回空集）。
 	tools, err := buildRegistry(t, registryOf(
 		&fakeProvider{id: "a", tools: []tool.BaseTool{
 			&stubTool{name: "good"}, &stubTool{name: ""},

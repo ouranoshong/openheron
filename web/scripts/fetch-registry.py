@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""从 shadcn registry 拉取组件并写入项目。
+"""Fetch components from the shadcn registry and write them into the project.
 
-shadcn CLI 走 ui.shadcn.com/init，openheron 网络到该host 要 12s+、超过 CLI 内置
-的 10s 超时而失败；assistant-ui 的 registry 又依赖 shadcn CLI 解析依赖链。
-本脚本替代它：直接按 registry-item schema 递归解析 registryDependencies，
-写入 files[].path，并在最后汇总 npm 依赖。
+The shadcn CLI goes through ui.shadcn.com/init, which takes openheron's network
+12s+ — over the CLI's built-in 10s timeout, so it fails; assistant-ui's registry
+also depends on the shadcn CLI to resolve the dependency chain.
+This script replaces it: it resolves registryDependencies recursively straight
+from the registry-item schema, writes files[].path, and finally summarizes the
+npm dependencies.
 
-用法：
+Usage:
     python3 scripts/fetch-registry.py thread thread-list ...
 """
 import json
@@ -24,9 +26,10 @@ ASSISTANT_UI = "https://r.assistant-ui.com/styles/radix/{name}.json"
 
 TIMEOUT = 30
 
-# components.json 的 aliases → 实际目录。registry item 给的 path 是「alias 根」
-# 形式（如 components/assistant-ui/… 、hooks/…），shadcn 的 ui 基础件则给
-# 仓库源路径（registry/<style>/ui/…），两者的落地位置都由这张表决定。
+# components.json aliases → real directories. A registry item's path is given in
+# "alias root" form (e.g. components/assistant-ui/… , hooks/…), while shadcn's ui
+# primitives come with a repo source path (registry/<style>/ui/…); where each of
+# them lands is decided by this table.
 ALIASES = {
     "components": "src/components",
     "ui": "src/components/ui",
@@ -35,19 +38,20 @@ ALIASES = {
     "hooks": "src/hooks",
 }
 
-# registry 的 dependencies 里会混入 shadcn 的 utils 别名，那不是 npm 包
+# shadcn's utils alias sneaks into a registry item's dependencies; it is not an npm package
 NOT_NPM = {"cn"}
 
 
 def rewrite_imports(content: str) -> str:
-    """registry 给的源码用的是 shadcn CLI 的**未解析**导入写法，CLI 落地时才会改写。
-    这里手工做同样的改写，否则 TypeScript 解析不到。"""
-    # from "cn" → shadcn 的 utils 别名
+    """The source a registry hands over uses shadcn CLI's **unresolved** import
+    form; the CLI rewrites it when it writes the files. We do the same rewrite by
+    hand here, otherwise TypeScript cannot resolve them."""
+    # from "cn" → shadcn's utils alias
     content = content.replace('from "cn"', 'from "@/lib/utils"')
     content = content.replace("from 'cn'", "from '@/lib/utils'")
-    # from "@/registry/<style>/ui/x" → 别名根下的 ui
+    # from "@/registry/<style>/ui/x" → the ui directory under the alias root
     content = re.sub(r'from "@/registry/[^"]+/ui/([\w.-]+)"', r'from "@/components/ui/\1"', content)
-    # shadcn 内部开发组件，落在 components/ui 下（见 icon-placeholder.tsx）
+    # shadcn's internal dev component, which lands under components/ui (see icon-placeholder.tsx)
     content = content.replace(
         'from "@/app/(create)/components/icon-placeholder"',
         'from "@/components/ui/icon-placeholder"',
@@ -56,7 +60,7 @@ def rewrite_imports(content: str) -> str:
 
 
 def apply_aliases(rel: str) -> Path:
-    """把 alias 根路径映射到真实目录。"""
+    """Map an alias root path onto its real directory."""
     head, _, tail = rel.partition("/")
     if head in ALIASES:
         rel = f"{ALIASES[head]}/{tail}" if tail else ALIASES[head]
@@ -64,7 +68,7 @@ def apply_aliases(rel: str) -> Path:
 
 
 def target_path(f: dict) -> Path:
-    """决定一个 registry file 的落地路径。"""
+    """Decide where a registry file lands."""
     target = f.get("target")
     if target:
         if target.startswith("@/"):
@@ -72,7 +76,7 @@ def target_path(f: dict) -> Path:
         return PROJECT / target
 
     path = f["path"]
-    # shadcn 基础件给的是仓库源路径，按 ui 别名落
+    # shadcn's primitives come with a repo source path, so they land under the ui alias
     if path.startswith("registry/"):
         return apply_aliases(f"ui/{Path(path).name}")
     return apply_aliases(path)
@@ -85,7 +89,7 @@ def fetch(url: str) -> dict:
 
 
 def resolve(name: str) -> str | None:
-    """裸名 → registry URL。先试 shadcn 基础件，再试 assistant-ui。"""
+    """Bare name → registry URL. Try shadcn's primitives first, then assistant-ui."""
     if name.startswith("http"):
         return name
     for tpl in (SHADCN, ASSISTANT_UI):
@@ -128,14 +132,14 @@ def main(argv: list[str]) -> int:
             path = target_path(f)
             rel = path.relative_to(PROJECT)
             if path.exists() and not force:
-                print(f"  跳过（已存在） {rel}")
+                print(f"  skipped (already exists) {rel}")
             else:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(rewrite_imports(f.get("content", "")), encoding="utf-8")
                 files_written.append(str(rel))
-                print(f"  写入 {rel}")
+                print(f"  wrote {rel}")
 
-        # registry-item 可以声明 css / cssVars（shadcn 的主题注入）
+        # A registry item may declare css / cssVars (shadcn's theme injection)
         css = item.get("css")
         if isinstance(css, dict) and css.get("path"):
             path = apply_aliases(css["path"])
@@ -143,32 +147,32 @@ def main(argv: list[str]) -> int:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(css.get("content", ""), encoding="utf-8")
                 files_written.append(str(path.relative_to(PROJECT)))
-                print(f"  写入 {path.relative_to(PROJECT)}  (css)")
+                print(f"  wrote {path.relative_to(PROJECT)}  (css)")
         elif isinstance(css, str) and css.strip():
-            print(f"  ! {item_name} 声明了内联 css，需手工合入 src/index.css")
+            print(f"  ! {item_name} declares inline css, it must be merged into src/index.css by hand")
 
         for dep in item.get("registryDependencies") or []:
             target = resolve(dep)
             if target is None:
-                missing.append(f"{dep}  (依赖解析失败)")
+                missing.append(f"{dep}  (dependency resolution failed)")
             else:
                 visit(target, depth + 1)
 
     for r in roots:
         url = resolve(r)
         if url is None:
-            missing.append(f"{r}  (根项解析失败)")
+            missing.append(f"{r}  (root item resolution failed)")
             continue
         print(f"→ {r}")
         visit(url)
 
-    print(f"\n文件 {len(files_written)} 个 · registry 项 {len(seen)} 个")
+    print(f"\n{len(files_written)} files · {len(seen)} registry items")
     if missing:
-        print("未能解析：")
+        print("could not resolve:")
         for m in missing:
             print(f"  ✗ {m}")
     if deps:
-        print("\nnpm 依赖：")
+        print("\nnpm dependencies:")
         for d in sorted(deps):
             print(f"  {d}")
     return 1 if missing else 0

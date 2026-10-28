@@ -14,10 +14,6 @@ import (
 	"openheron/storage"
 )
 
-// ★ 这组用例守的是 P1 的核心承诺：审批详情必须**跨进程**存活。
-//   旧实现只存 interrupt_id 与 cursor，工具名、参数、发起 agent 只存在于
-//   那一轮的 SSE 流里；响应一断，GET /v2/sessions/{id} 就答不出「在批什么」。
-
 func TestPendingApprovalDetailSurvivesReload(t *testing.T) {
 	root := t.TempDir()
 	fm := newManagerAt(t, root)
@@ -43,7 +39,6 @@ func TestPendingApprovalDetailSurvivesReload(t *testing.T) {
 		t.Fatalf("SetPendingApproval: %v", err)
 	}
 
-	// 模拟重启：全新的 FileManager，从磁盘读
 	fresh, err := NewFileManager(root, Options{})
 	if err != nil {
 		t.Fatalf("NewFileManager: %v", err)
@@ -81,9 +76,6 @@ func TestPendingApprovalDetailSurvivesReload(t *testing.T) {
 	}
 }
 
-// ★ 一轮里可以有**多个**独立待批（模型一次请求四个都要审批的工具）。
-//
-//	它们必须**各自**存各自的 id 与详情 —— 少存一个，用户就再也答不了它。
 func TestPendingApprovalSetSurvivesReload(t *testing.T) {
 	root := t.TempDir()
 	fm := newManagerAt(t, root)
@@ -123,7 +115,6 @@ func TestPendingApprovalSetSurvivesReload(t *testing.T) {
 	}
 }
 
-// 兼容：state.json 里没有 detail 字段的旧文件必须照常加载，不能报错。
 func TestPendingApprovalWithoutDetailStillLoads(t *testing.T) {
 	root := t.TempDir()
 	fm := newManagerAt(t, root)
@@ -131,7 +122,6 @@ func TestPendingApprovalWithoutDetailStillLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	// 手写成 v1 时代的形状：只有 interrupt_id 与 cursor
 	legacy := `{"version":1,"pending":{"interrupt_id":"ic-old","cursor":2},"cursor":2}` + "\n"
 	if err := os.WriteFile(statePath(root, sess.ID()), []byte(legacy), 0o644); err != nil {
 		t.Fatalf("write legacy state: %v", err)
@@ -146,10 +136,6 @@ func TestPendingApprovalWithoutDetailStillLoads(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("legacy pending approval must load: %v %+v", err, got)
 	}
-	// ★ 旧格式是**单个**待批 —— 它必须被读成一个只有一项的集合。
-	//
-	//	否则升级之后磁盘上已有的会话会变成「没有待批」，用户再也答不了
-	//	那一问 —— 而那正是最难排查的一类数据丢失。
 	if len(got.Interrupts) != 1 {
 		t.Fatalf("a legacy pending approval must load as a one-item set, got %d", len(got.Interrupts))
 	}
@@ -161,7 +147,6 @@ func TestPendingApprovalWithoutDetailStillLoads(t *testing.T) {
 	}
 }
 
-// Take 之后 detail 也必须消失，否则下一次审批会读到上一轮的残留。
 func TestTakeClearsDetail(t *testing.T) {
 	fm := newManager(t, Options{})
 	sess, _ := fm.Create(t.Context(), "")
@@ -189,7 +174,6 @@ func TestTakeClearsDetail(t *testing.T) {
 	}
 }
 
-// 标题缓存：首条 user 消息落盘后，List 不必再读 transcript。
 func TestTitleIsCachedOnFirstUserMessage(t *testing.T) {
 	root := t.TempDir()
 	fm := newManagerAt(t, root)
@@ -218,7 +202,6 @@ func TestTitleIsCachedOnFirstUserMessage(t *testing.T) {
 		t.Fatal("created_at must be recorded so List() need not open the transcript")
 	}
 
-	// 重新加载后仍然命中缓存
 	fresh, _ := NewFileManager(root, Options{})
 	reopened, err := fresh.Get(t.Context(), sess.ID())
 	if err != nil {
@@ -229,7 +212,6 @@ func TestTitleIsCachedOnFirstUserMessage(t *testing.T) {
 	}
 }
 
-// List 必须按最近活跃排序，而不是目录顺序。
 func TestListSortsByRecency(t *testing.T) {
 	fm := newManager(t, Options{})
 	for _, q := range []string{"first", "second", "third"} {
@@ -258,7 +240,6 @@ func TestListSortsByRecency(t *testing.T) {
 	}
 }
 
-// 新会话初始就有标题，侧栏不必回落到 "New Session" 的二次推导。
 func TestNewSessionHasTitleAndCount(t *testing.T) {
 	fm := newManager(t, Options{})
 	if _, err := fm.Create(t.Context(), ""); err != nil {
@@ -279,7 +260,6 @@ func TestNewSessionHasTitleAndCount(t *testing.T) {
 	}
 }
 
-// 只追加非 user 消息不得改写标题。
 func TestTitleIgnoresNonUserMessages(t *testing.T) {
 	fm := newManager(t, Options{})
 	sess, _ := fm.Create(t.Context(), "")
@@ -303,11 +283,6 @@ func newManagerAt(t *testing.T, root string) *FileManager {
 	return fm
 }
 
-// ★ 审计记录必须**扛得住后续的写**。
-//
-//	stateForWrite 是**重建**整个状态的 —— 它不带审计的话，
-//	追加一条消息就把审批记录抹干净了。而「抹掉审计」是那种
-//	平时看不出来、出事时才发现的故障。
 func TestApprovalDecisionsSurviveLaterWrites(t *testing.T) {
 	root := t.TempDir()
 	fm := newManagerAt(t, root)
@@ -326,7 +301,6 @@ func TestApprovalDecisionsSurviveLaterWrites(t *testing.T) {
 		t.Fatalf("RecordDecision: %v", err)
 	}
 
-	// 之后的正常写入：追加消息、改标题。
 	if err := sess.Append(message.NewUser("hello")); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
@@ -334,7 +308,6 @@ func TestApprovalDecisionsSurviveLaterWrites(t *testing.T) {
 		t.Fatalf("SetTitle: %v", err)
 	}
 
-	// 重开：审计还在吗？
 	fresh, err := NewFileManager(root, Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -352,7 +325,6 @@ func TestApprovalDecisionsSurviveLaterWrites(t *testing.T) {
 	}
 }
 
-// 审计有上限 —— 它不是日志，无上限会让 state.json 无限增长。
 func TestApprovalDecisionsAreCapped(t *testing.T) {
 	root := t.TempDir()
 	fm := newManagerAt(t, root)
@@ -374,7 +346,6 @@ func TestApprovalDecisionsAreCapped(t *testing.T) {
 	if len(recs) != maxAuditRecords {
 		t.Fatalf("decisions = %d, want %d", len(recs), maxAuditRecords)
 	}
-	// 截断的是**最旧的**，留下的要按原顺序。
 	if recs[0].InterruptID != "ic-10" {
 		t.Fatalf("the oldest records must be dropped, got %q first", recs[0].InterruptID)
 	}

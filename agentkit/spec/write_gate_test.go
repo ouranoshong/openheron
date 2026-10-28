@@ -8,13 +8,6 @@ import (
 	"testing"
 )
 
-// ── 路径校验 ──────────────────────────────────────────────────────────────
-
-// writeErrKind 报 err 属于哪一类写入失败。
-//
-// ★ 这里自己判而不用包外导出的助手：调用方（api）走的是 `*config.WriteError`
-//
-//	类型断言，测试也该走同一条 —— 断言的形状要贴近真实用法。
 func writeErrKind(err error) WriteErrorKind {
 	var we *WriteError
 	if !errors.As(err, &we) {
@@ -24,8 +17,6 @@ func writeErrKind(err error) WriteErrorKind {
 }
 
 func TestValidatePathRejectsEscapes(t *testing.T) {
-	// ★ sessionID 直落文件路径这件事本仓库已经吃过一次亏（architecture.md
-	//   §5.6）。配置路径来自 HTTP 参数，威胁模型完全一样。
 	bad := []string{
 		"",
 		"   ",
@@ -48,7 +39,6 @@ func TestValidatePathRejectsEscapes(t *testing.T) {
 }
 
 func TestValidatePathRejectsNonEditableSection(t *testing.T) {
-	// server/ 不热更新 —— 写成「保存成功但不生效」比拒绝更糟。
 	_, err := ValidatePath("server/config.yaml")
 	if err == nil {
 		t.Fatal("server/config.yaml must not be writable")
@@ -62,14 +52,9 @@ func TestValidatePathRejectsNonEditableSection(t *testing.T) {
 }
 
 func TestValidatePathEnforcesPolicyFileNameWhitelist(t *testing.T) {
-	// ★ 加载器对 policy/ 的未知文件名是**报错**的。写入门若不守同一条，
-	//   用户会写进去一个「保存成功但下次加载即报错」的文件。
 	if _, err := ValidatePath("policy/permissions.yaml"); err != nil {
 		t.Fatalf("permissions.yaml must be valid: %v", err)
 	}
-	// ★ limits.yaml 现在是**真的**限制规则（不再是 deferred），所以写入门
-	//   必须放行它 —— 否则用户能写但不能存，与「policy/ 里的文件都可编辑」
-	//   这条前提矛盾。
 	if _, err := ValidatePath("policy/limits.yaml"); err != nil {
 		t.Fatalf("limits.yaml must be valid: %v", err)
 	}
@@ -93,9 +78,6 @@ func TestValidatePathAcceptsTheEditableSections(t *testing.T) {
 }
 
 func TestValidatePathRejectsDotfiles(t *testing.T) {
-	// 隐藏文件在本仓库的两级目录里没有语义，而它们会被 loadDir 读到
-	// （它只按扩展名过滤，不排除点文件）—— 那会让一个「看不见的文件」
-	// 参与合并。
 	for _, rel := range []string{"policy/.hidden.yaml", "llm/.env"} {
 		if _, err := ValidatePath(rel); err == nil {
 			t.Errorf("ValidatePath(%q) = nil error, want rejection", rel)
@@ -121,8 +103,6 @@ func TestRevisionIsStableAndContentAddressed(t *testing.T) {
 	}
 }
 
-// ── 明文密钥 ──────────────────────────────────────────────────────────────
-
 func TestWriteRejectsLiteralSecret(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
@@ -137,7 +117,6 @@ func TestWriteRejectsLiteralSecret(t *testing.T) {
 	if writeErrKind(err) != ErrSecretLiteral {
 		t.Fatalf("kind = %v, want ErrSecretLiteral", err)
 	}
-	// ★ 被拒的东西不许落盘 —— 否则「拒绝」只是界面上的说法。
 	if !strings.Contains(f.read(t, "llm/openai.yaml"), "${TEST_LLM_KEY}") {
 		t.Fatal("the original file was overwritten by a rejected write")
 	}
@@ -148,8 +127,6 @@ func TestWriteAcceptsSecretReferences(t *testing.T) {
 	f.seedMinimal(t)
 	s := f.service(t)
 
-	// @file: 要指向一个真存在的文件 —— 读不到它是**硬错误**（区别于 ${ENV}
-	// 未设只提醒），所以这条得给一个真的文件。
 	secretFile := filepath.Join(t.TempDir(), "key")
 	if err := os.WriteFile(secretFile, []byte("sk-from-file"), 0o600); err != nil {
 		t.Fatal(err)
@@ -157,8 +134,6 @@ func TestWriteAcceptsSecretReferences(t *testing.T) {
 
 	cases := []struct{ label, key string }{
 		{"env ref", "${TEST_LLM_KEY}"},
-		// ★ `@` 是 YAML 保留指示符，不加引号连解析都过不去 ——
-		//   所以带引号的写法才是这个引用形态的**正确**写法。
 		{"at-file ref", `"@file:` + secretFile + `"`},
 		{"no auth", ""},
 	}
@@ -172,8 +147,6 @@ func TestWriteAcceptsSecretReferences(t *testing.T) {
 }
 
 func TestCheckSecretOnlyGuardsTheTopLevelAPIKey(t *testing.T) {
-	// ★ 禁得太宽会误伤正当内容，而误报会让人把整个校验关掉。
-	//   这里要证明：别处出现 api_key 字样不受影响。
 	f := newFixture(t)
 	f.seedMinimal(t)
 	s := f.service(t)
@@ -191,8 +164,6 @@ models:
 		t.Fatalf("indented/commented api_key must not be treated as the credential: %v", err)
 	}
 }
-
-// ── 写入 ──────────────────────────────────────────────────────────────────
 
 func TestWriteLandsAndReportsPostWriteRevision(t *testing.T) {
 	f := newFixture(t)
@@ -217,8 +188,6 @@ func TestWriteLandsAndReportsPostWriteRevision(t *testing.T) {
 }
 
 func TestWriteLeavesNoTempFile(t *testing.T) {
-	// 残留 .tmp 不会被加载器读到（它只收 .yaml/.md），但会让人以为
-	// 「保存过一次」。
 	f := newFixture(t)
 	f.seedMinimal(t)
 	s := f.service(t)
@@ -236,17 +205,12 @@ func TestWriteCreatesFirstConfigInAnEmptyProject(t *testing.T) {
 	f.seedMinimal(t)
 	s := f.service(t)
 
-	// 配置根压根不存在 —— 新项目的第一次配置就是这个形状。
-	// 删掉配置根本身 —— newFixture 会建好各分区的空目录，
-	// 而「新项目的第一次配置」是连目录都没有的那个形状。
 	if err := os.RemoveAll(f.root); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(f.root); err == nil {
 		t.Fatal("precondition: the config root must not exist yet")
 	}
-	// ★ 三个文件必须**一起**写：分开写必然试合并失败 —— 写 agent 时磁盘上
-	//   还没有 provider，写 policy 时还没有 main agent。
 	if _, _, err := s.WriteMany([]File{
 		{Rel: "llm/openai.yaml", Content: []byte(minimalLLM)},
 		{Rel: "agents/main.md", Content: []byte("---\nmodel: openai/fast\n---\n你是助手。\n")},
@@ -262,8 +226,6 @@ func TestWriteCreatesFirstConfigInAnEmptyProject(t *testing.T) {
 	}
 }
 
-// ── 乐观并发 ──────────────────────────────────────────────────────────────
-
 func TestWriteRejectsStaleRevision(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
@@ -271,7 +233,6 @@ func TestWriteRejectsStaleRevision(t *testing.T) {
 	s := f.service(t)
 
 	stale := Revision([]byte("ask: [execute]\n"))
-	// 模拟「用户手改了磁盘」或「另一个窗口先保存了」。
 	f.write(t, "policy/permissions.yaml", "ask: [execute, write_file]\n")
 
 	_, _, err := s.Write("policy/permissions.yaml", []byte("ask: [ls]\n"), stale)
@@ -281,7 +242,6 @@ func TestWriteRejectsStaleRevision(t *testing.T) {
 	if writeErrKind(err) != ErrConflict {
 		t.Fatalf("kind = %v, want ErrConflict", err)
 	}
-	// ★ 磁盘上必须还是别人那一版。
 	if got := f.read(t, "policy/permissions.yaml"); !strings.Contains(got, "write_file") {
 		t.Fatalf("a rejected write must not overwrite: %q", got)
 	}
@@ -305,18 +265,14 @@ func TestWriteOnMissingFileTreatsEmptyRevisionAsCreate(t *testing.T) {
 	f.seedMinimal(t)
 	s := f.service(t)
 
-	// 空 rev = 文件不存在 = 新建。界面不该被迫先查一次「在不在」。
 	if _, _, err := s.Write("policy/permissions.yaml", []byte("ask: [execute]\n"), ""); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// ── 删除 ──────────────────────────────────────────────────────────────────
-
-// TestDeleteRejectsDanglingReference 是 DELETE 试合并存在的理由。
 func TestDeleteRejectsDanglingReference(t *testing.T) {
 	f := newFixture(t)
-	f.seedMinimal(t) // agents/main.md 引用 openai/fast
+	f.seedMinimal(t)
 	s := f.service(t)
 
 	_, err := s.Delete("llm/openai.yaml")
@@ -359,10 +315,7 @@ func TestDeleteMissingFileIsAnError(t *testing.T) {
 	}
 }
 
-// ── 读取 ──────────────────────────────────────────────────────────────────
-
 func TestReadFileReportsMissingAsEmptyNotError(t *testing.T) {
-	// ★ 界面要能区分「这一级还没有这个文件」与「读不出来」。
 	f := newFixture(t)
 	f.seedMinimal(t)
 	s := f.service(t)

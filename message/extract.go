@@ -22,17 +22,6 @@ func AssistantDeltaText(msg *schema.Message) string {
 }
 
 // AssistantDeltaReasoning returns the model's reasoning text from one streaming chunk.
-//
-// ★ 为什么单独一个取值函数：eino 把推理放在两处不同形状里 ——
-//
-//	多模态路径是 AssistantGenMultiContent 里 type=reasoning 的 part，
-//	走扁平的 ReasoningContent 字段。先看 part 再看扁平字段，因为
-//	同时存在时 part 更具体（部分模型会同时填两处）。
-//
-// ★ 为什么要读它：transport 此前只取 AssistantDeltaText，推理内容
-//
-//	在传输层被整个丢弃 —— 前端那 456 行 reasoning UI 因此永远拿不到
-//	数据，是死代码。
 func AssistantDeltaReasoning(msg *schema.Message) string {
 	if msg == nil {
 		return ""
@@ -42,7 +31,6 @@ func AssistantDeltaReasoning(msg *schema.Message) string {
 		if part.Type != schema.ChatMessagePartTypeReasoning {
 			continue
 		}
-		// 优先 Reasoning.Text；部分实现只填 part.Text。
 		switch {
 		case part.Reasoning != nil && part.Reasoning.Text != "":
 			parts = append(parts, part.Reasoning.Text)
@@ -98,10 +86,6 @@ func ToolCalls(msg *schema.Message) []ToolCall {
 }
 
 // toolResults extracts function tool results from a message or streaming chunk.
-//
-// ★ 不导出：只有本包用它（variant.go 判定与抽取）—— 对外暴露等于给
-//
-//	调用方一个「消息里有工具结果」的承诺，而那个承诺没人接。
 func toolResults(msg *schema.Message) []ToolResult {
 	if msg == nil || (msg.Role != schema.Tool && msg.ToolCallID == "") {
 		return nil

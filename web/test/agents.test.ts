@@ -8,8 +8,6 @@ function msg(agent: string | undefined, role: Message["role"] = "assistant"): Me
 }
 
 describe("collectAgents", () => {
-  // agent 名要同时来自「谁花的」与「谁干活的」两个来源 ——
-  // 只取一边会漏掉另一半的情况。
   test("union of the usage buckets and the message stamps", () => {
     const usage: Usage = {
       promptTokens: 0,
@@ -33,8 +31,6 @@ describe("collectAgents", () => {
 })
 
 describe("filterByAgent", () => {
-  // user 消息没有归属标记 —— 过滤后仍要显示，
-  // 否则用户会看到自己刚问的那句话凭空消失。
   test("keeps the user messages", () => {
     const messages = [msg(undefined, "user"), msg("coder"), msg("reviewer")]
     const out = filterByAgent(messages, "coder")
@@ -58,7 +54,6 @@ describe("formatTokens", () => {
     expect(formatTokens(999)).toBe("999")
   })
 
-  // 999 写成 "1.0k" 会让人以为它比 999 多。
   test("from a thousand it abbreviates", () => {
     expect(formatTokens(1000)).toBe("1.0k")
     expect(formatTokens(3400)).toBe("3.4k")

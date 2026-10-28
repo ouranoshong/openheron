@@ -10,25 +10,16 @@ import (
 	"openheron/message"
 )
 
-// agentSegment 造一个 agent 地址段。
 func agentSegment(name string) adk.AddressSegment {
 	return adk.AddressSegment{Type: adk.AddressSegmentAgent, ID: name}
 }
 
-// toolSegment 造一个工具地址段。
 func toolSegment(name string) adk.AddressSegment {
 	return adk.AddressSegment{Type: adk.AddressSegmentTool, ID: name}
 }
 
-// parallelInterruptEvent 造一个「并行子 agent 同时被拦下」的中断事件。
-//
-// ★ 形状必须与框架一致：两个子 agent 的中断被合成**一个**事件，
-//
-//	每个 context 带着**自己的**地址链（eino adk/chatmodel.go:970 把子信号
-//	收成 composite，再由 core.ToInterruptContexts 摊平成一组 root cause）。
 func parallelInterruptEvent() *adk.TypedAgentEvent[*schema.Message] {
 	return &adk.TypedAgentEvent[*schema.Message]{
-		// 事件是**根** agent 发的 —— 这正是归属必须另寻出处的理由。
 		AgentName: "main",
 		Action: &adk.AgentAction{Interrupted: &adk.InterruptInfo{
 			InterruptContexts: []*adk.InterruptCtx{
@@ -57,10 +48,6 @@ func parallelInterruptEvent() *adk.TypedAgentEvent[*schema.Message] {
 	}
 }
 
-// ★ 并行下最关键的一条：两个子 agent 同时要审批，两张卡的请求方**各归各的**。
-//
-// 旧实现把整个事件共用一个 `sub`（事件的 AgentName，即入口 agent）——
-// 于是两张卡要么都显示成 main，要么都显示成同一个子 agent。
 func TestParallelInterruptsKeepTheirOwnRequester(t *testing.T) {
 	evs, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{parallelInterruptEvent()},
 		Options{RootAgent: "main"})
@@ -86,7 +73,6 @@ func TestParallelInterruptsKeepTheirOwnRequester(t *testing.T) {
 		}
 	}
 
-	// 持久化的待批详情也要带请求方 —— 历史回放只有它，没有实时事件。
 	if len(res.Pending) != 2 {
 		t.Fatalf("Result.Pending must carry 2 entries, got %d", len(res.Pending))
 	}
@@ -103,7 +89,6 @@ func TestParallelInterruptsKeepTheirOwnRequester(t *testing.T) {
 	}
 }
 
-// 入口 agent 自己发起的调用不标归属 —— 与实时事件的规则一致。
 func TestRootInterruptHasNoRequester(t *testing.T) {
 	ev := &adk.TypedAgentEvent[*schema.Message]{
 		AgentName: "main",
@@ -129,7 +114,6 @@ func TestRootInterruptHasNoRequester(t *testing.T) {
 	}
 }
 
-// 没有地址链的老数据（升级前落盘的 checkpoint）不该崩，也不该编出请求方。
 func TestInterruptWithoutAddressHasNoRequester(t *testing.T) {
 	ev := &adk.TypedAgentEvent[*schema.Message]{
 		AgentName: "main",
@@ -151,11 +135,6 @@ func TestInterruptWithoutAddressHasNoRequester(t *testing.T) {
 	}
 }
 
-// ★ 只有工具调用、没有正文时，消息也必须带归属。
-//
-// 工具卡是这条消息**唯一**可见的内容 —— 「这个 agent 调了什么工具」
-// 恰恰是多 agent 下最该看见的东西。而前端是由 TOOL_CALL_START 顺带
-// 建出这条消息的，那个事件不带归属 → 不补声明的话它是匿名的。
 func TestToolOnlyMessageStillCarriesItsAgent(t *testing.T) {
 	idx := 0
 	evs, _, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
@@ -180,7 +159,6 @@ func TestToolOnlyMessageStillCarriesItsAgent(t *testing.T) {
 		t.Fatalf("RunStream: %v", err)
 	}
 
-	// 声明 = 一对 TEXT_MESSAGE_START/END，且 START 带 name。
 	var start, end int
 	for i, e := range evs {
 		switch e.Type() {
@@ -202,12 +180,6 @@ func TestToolOnlyMessageStillCarriesItsAgent(t *testing.T) {
 	}
 }
 
-// ★ 正文的 TEXT_MESSAGE_START 必须带 name —— 那是「这条消息属于谁」的
-//
-//	唯一来源（前端据此建出消息并记下 agent）。
-//
-//	现有的契约测试只钉了 subagentRunId（协议层的「子 agent 运行 id」），
-//	而前端过滤用的是 name —— 两者不是一回事。
 func TestTextMessageCarriesItsAgentName(t *testing.T) {
 	evs, _, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
 		{
@@ -238,8 +210,6 @@ func TestTextMessageCarriesItsAgentName(t *testing.T) {
 	}
 }
 
-// 工具调用要挂在**产出它的那条消息**上（parentMessageId）——
-// 前端据此把工具卡并进那条消息，归属随之继承。
 func TestToolCallCarriesItsParentMessage(t *testing.T) {
 	idx := 0
 	evs, _, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
@@ -278,10 +248,6 @@ func TestToolCallCarriesItsParentMessage(t *testing.T) {
 	}
 }
 
-// ★ 中间消息要带**产生时刻** —— 并行委派下它是「谁先谁后」的唯一依据。
-//
-// 归档是一轮结束时一次性做的，若在归档时打戳，一轮内所有消息的时间几乎
-// 相同，交错顺序的信息就整个丢了。
 func TestIntermediateMessagesCarryTheirTimestamp(t *testing.T) {
 	_, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
 		{
@@ -320,7 +286,6 @@ func TestIntermediateMessagesCarryTheirTimestamp(t *testing.T) {
 	}
 }
 
-// 中间消息要带归属标记 —— 分账与「按 agent 过滤历史」都靠它。
 func TestIntermediateMessagesCarryAgentStamp(t *testing.T) {
 	_, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
 		{
@@ -364,7 +329,6 @@ func TestIntermediateMessagesCarryAgentStamp(t *testing.T) {
 	}
 }
 
-// 工具结果也要带归属 —— 「task 改了哪些文件」靠的就是这一条。
 func TestToolResultCarriesAgentStamp(t *testing.T) {
 	_, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
 		{

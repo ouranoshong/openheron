@@ -52,16 +52,6 @@ var commandRegistry = []commandSpec{
 		Kind: commandKindAction, Action: commandActionOpenAgents, ArgumentHint: "[agent]",
 	},
 	{
-		// ★ /skill <name> [task] —— 第一个词是 **skill 名**，其余是任务。
-		//
-		//	为什么要单独的 {{name}}：{{args}} 是「命令名之后的全部」，
-		//	而「skill 名」与「任务」是**两件事**，粘在一起就没法把名字
-		//	单独放进模板（会出现「skill `refactor 拆一下`」）。
-		//
-		//	★ 执行走的是模型自己的 `skill` 工具 —— 那是 skill 唯一的执行
-		//	  路径，inline / fork / fork_with_context 三种模式都在里面。
-		//	  后端另开一条「直接执行 skill」的路，等于把中间件里的实现
-		//	  复制一份。
 		Name: "skill", Description: "Use a named skill for this task",
 		Kind: commandKindPrompt, ArgumentHint: "<skill> [task]",
 		Template: "Use the `{{name}}` skill for this task. Read its instructions with the skill tool first, then follow them.\n{{args}}",
@@ -126,7 +116,6 @@ func (s *Server) v2Commands(_ context.Context, c *app.RequestContext) {
 }
 
 // expandCommand turns a leading /command into the text the agent receives.
-//
 // It deliberately leaves anything it does not recognize untouched. A message
 // that starts with an absolute path ("/home/me/file.go") must be sent as
 // written, not rejected as an unknown command.
@@ -147,11 +136,6 @@ func expandCommand(query string) (string, error) {
 		return "", fmt.Errorf("%w: /%s", errCommandNotRunnable, spec.Name)
 	case commandKindPrompt:
 		args := strings.TrimSpace(m[2])
-		// ★ 只有**带 {{name}} 的命令**（/skill）才拆「名字 + 其余」——
-		//   「skill 名」与「任务」是两件事，粘在一起就没法分开。
-		//
-		//   别的命令（/review …）的 {{args}} 是「命令名之后的全部」，
-		//   拆了就把参数弄丢了 —— `/review src/a.go` 的路径不是名字。
 		name, rest := "", args
 		if strings.Contains(spec.Template, "{{name}}") {
 			name, rest = splitCommandName(args)
@@ -166,11 +150,6 @@ func expandCommand(query string) (string, error) {
 	}
 }
 
-// splitCommandName 把「命令名之后的全部」拆成「名字 + 其余」。
-//
-// ★ 只有**第一个词**是名字：skill 名不带空格 ✅ —— 拆更多就说不清
-//
-//	「`refactor 拆一下`」里哪个是名字了。
 func splitCommandName(args string) (name, rest string) {
 	args = strings.TrimSpace(args)
 	if args == "" {
@@ -184,8 +163,6 @@ func splitCommandName(args string) (name, rest string) {
 
 // expandCommandTemplate drops the placeholder line when the caller supplied no
 // arguments, so "/review" does not leave a blank line at the end of the prompt.
-//
-// ★ name 非空时替换 {{name}} —— 它是「命令的第一个词」（见 [splitCommandName]）。
 func expandCommandTemplate(template, args, name string) string {
 	if args != "" {
 		return strings.TrimSpace(strings.ReplaceAll(

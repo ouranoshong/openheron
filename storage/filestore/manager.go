@@ -19,17 +19,10 @@ import (
 var _ storage.SessionManager = (*FileManager)(nil)
 
 // FileManager owns the session root and caches opened sessions.
-//
-// ★ 它是**仓库**：只认「id 集合」与「会话对象」，不碰任何文件 ——
-//
-//	要状态、要待批、要 checkpoint，都问会话（FileSession）。这个包的文件
-//	读写全在会话层（session.go）与 checkpoint 存取器（checkpoint.go）里。
 type FileManager struct {
 	root string
 	opts Options
 
-	// legacyCkptRoot 是**老版**的 checkpoint 目录（<dataDir>/checkpoints）——
-	// 只读回退用，可以为空。
 	legacyCkptRoot string
 
 	mu    sync.Mutex
@@ -60,24 +53,16 @@ func (fm *FileManager) sessionOf(id string) *FileSession {
 }
 
 // open opens a session: it reads state.json and nothing else.
-//
-// ★ List 与 Inspect 用它 —— 那两条路径每轮都跑，不需要 transcript。
 func (fm *FileManager) open(id string) (*FileSession, error) {
 	return openSession(fm.root, id, fm.legacyCkptRoot)
 }
 
 // openFull opens a session and reads its transcript.
-//
-// ★ Get 用它。存在性检查在**会话层**做 —— 仓库不再自己判断一遍。
 func (fm *FileManager) openFull(id string) (*FileSession, error) {
 	return openFullSession(fm.root, id, fm.legacyCkptRoot)
 }
 
 // sessionIDs lists the ids of the session directories.
-//
-// ★ 读不出来就是**错** —— 目录没了、权限不对、路径根本不是目录，三种都
-//
-//	得让调用方看见，而不是当成「一个会话都没有」。
 func (fm *FileManager) sessionIDs() ([]string, error) {
 	entries, err := os.ReadDir(fm.root)
 	if err != nil {
@@ -97,17 +82,12 @@ func (fm *FileManager) sessionIDs() ([]string, error) {
 }
 
 // Create mints a new session and records its root agent.
-//
-// ★ agentID 写进**同一次** state 写入里：会话从诞生那一刻起就有根，
-//
-//	读它的人（侧栏、运行、归属）不需要自己回退，也就没有「两份答案」。
 func (fm *FileManager) Create(ctx context.Context, agentID string) (storage.Session, error) {
 	id := newID()
 	if err := validateID(id); err != nil {
 		return nil, err
 	}
 
-	// ★ 会话落地自己：建目录、建 workspace、写第一份 state.json。
 	fs := fm.sessionOf(id)
 	if err := fs.Init(agentID); err != nil {
 		return nil, err
@@ -161,7 +141,6 @@ func (fm *FileManager) List(_ context.Context) ([]storage.Meta, error) {
 			obs.Logger().Warn("[session] skipping unreadable session", "session", id, "err", err)
 			continue
 		}
-		// ★ 问会话要元数据 —— 仓库自己不读 state.json，也不碰 transcript。
 		metas = append(metas, fs.Meta())
 	}
 	// Newest activity first: the sidebar is a recency list, not a directory dump.
@@ -184,7 +163,6 @@ func (fm *FileManager) Delete(ctx context.Context, id string) error {
 	if fm.opts.Teardown != nil {
 		fm.opts.Teardown.Cleanup(ctx, id)
 	}
-	// ★ 会话删自己 —— 目录里含消息、状态、workspace 与 checkpoint，一次删净。
 	if err := fm.sessionOf(id).Delete(); err != nil {
 		return fmt.Errorf("remove session %s: %w", id, err)
 	}
@@ -204,8 +182,6 @@ func (fm *FileManager) SetTeardown(t Teardown) {
 
 // Inspect reports how the session state and the checkpoint state line up. It
 // runs once at startup, never on a hot path.
-//
-// ★ 它**只报告，不改数据**。
 //
 //	The two stores are independent files, so a crash between them leaves them
 //
@@ -248,12 +224,6 @@ func (fm *FileManager) Inspect(ctx context.Context) (storage.Report, error) {
 			report.PendingOK++
 
 		case hasPending && !hasCheckpoint:
-			// ★ 待批**留着**：界面要继续显示那张卡，用户才有得答。
-			//
-			//	早先这里把孤儿待批**清掉**，于是重启一次，用户的审批就凭空
-			//	消失 —— 而他什么都不知道。清掉并没有让状态变好：checkpoint
-			//	不在时 Resume 会干脆地拒绝（run.ErrNoCheckpoint），而待批
-			//	记录留着也不会坏 —— 它还带着工具名与参数，是那张卡的来源。
 			obs.Logger().Warn("[session] pending approval has no checkpoint; keeping it so the user can still answer",
 				"session", id)
 			report.Orphan++
@@ -270,10 +240,6 @@ func (fm *FileManager) Inspect(ctx context.Context) (storage.Report, error) {
 
 	return report, nil
 }
-
-// ── FileManager 的内部实现 ───────────────────────────────────────────────
-//
-//	下面这几个只有 FileManager 用：会话 id 的校验与生成。
 
 // validateID rejects anything that is not a canonical UUID. The id reaches us
 // straight from the HTTP path and lands in filenames, so this layer validates

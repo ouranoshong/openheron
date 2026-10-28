@@ -11,26 +11,16 @@ import (
 	"openheron/storage"
 )
 
-// ★ 仓库**不碰文件**：List 与 Inspect 只问会话要状态，不解析 transcript。
-//
-//	这不是洁癖：侧栏每轮都要列一次会话，而 transcript 可能很大（长会话
-//	几百条消息，开发侧实测最大一个 1.1 MB）。仓库一旦开始解析它，每轮
-//	就是 2.5 MB 的 JSON。
-//
-//	判据：把 transcript 写成**垃圾**，List 与 Inspect 仍然要能答出来 ——
-//	它们根本没读它。
 func TestListingDoesNotParseTheTranscript(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	fm, _ := NewFileManager(root, Options{})
 	sess, _ := fm.Create(ctx, "")
 
-	// 一条用户消息 ⇒ 标题被推导并缓存（于是 List 不需要正文）。
 	if err := sess.Append(message.NewUser("hello there")); err != nil {
 		t.Fatal(err)
 	}
 
-	// 把 transcript 写成垃圾。
 	path := messagesPath(root, sess.ID())
 	if err := os.WriteFile(path, []byte("{not json at all\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -54,9 +44,6 @@ func TestListingDoesNotParseTheTranscript(t *testing.T) {
 	}
 }
 
-// ★ 但**打开**一个会话要当场读 transcript —— 损坏必须是当场的失败，
-//
-//	而不是事后一个空列表（那看起来像历史丢了）。
 func TestOpeningASessionFailsOnACorruptTranscript(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -74,7 +61,6 @@ func TestOpeningASessionFailsOnACorruptTranscript(t *testing.T) {
 	}
 }
 
-// ★ 每个会话有自己的 checkpoint 目录 —— 互不干扰。
 func TestEachSessionHasItsOwnCheckpointDirectory(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -98,9 +84,6 @@ func TestEachSessionHasItsOwnCheckpointDirectory(t *testing.T) {
 	}
 }
 
-// ★ 会话落地自己：Create 之后，目录、transcript、state.json、workspace
-//
-//	都在 —— 而仓库只是铸了个 id。
 func TestCreateLaysDownTheWholeSession(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -118,7 +101,6 @@ func TestCreateLaysDownTheWholeSession(t *testing.T) {
 			t.Fatalf("missing %s", p)
 		}
 	}
-	// 入口 agent 落进 state.json。
 	st, _, err := readState(statePath(root, id))
 	if err != nil {
 		t.Fatal(err)
@@ -128,7 +110,6 @@ func TestCreateLaysDownTheWholeSession(t *testing.T) {
 	}
 }
 
-// ★ 删会话幂等 —— 目录可能已经不在了。
 func TestDeletingASessionTwiceIsANoOp(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -147,10 +128,6 @@ func TestDeletingASessionTwiceIsANoOp(t *testing.T) {
 	}
 }
 
-// ★ header 的 id 与目录名不一致时（有人手动挪过会话目录），checkpoint 的
-//
-//	存取器也得跟着走 —— 否则两半分家：transcript 在一个目录，checkpoint
-//	在另一个。
 func TestCheckpointStoreFollowsTheHeaderID(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -179,7 +156,6 @@ func TestCheckpointStoreFollowsTheHeaderID(t *testing.T) {
 	}
 }
 
-// ★ 待批在巡检之后**留着**（界面那张卡继续显示）。
 func TestInspectionKeepsThePendingApproval(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

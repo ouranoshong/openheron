@@ -16,16 +16,6 @@ import (
 	"openheron/agentkit/spec/decl"
 )
 
-// 这些用例盯的是「连到外面去」的那一族工具的**危险面**：
-//
-//	默认不挂、URL 由模型给、输出直接进上下文、方法默认只有读。
-//
-// ★ 每一条都是「配错了会出事」的地方，所以它们钉的是**行为**，
-//   不是实现细节。
-
-// ── 默认全关 ──────────────────────────────────────────────────────────────
-
-// 没配就一个都不挂 —— 挂一个永远搜不到东西的 web_search 比不挂更糟。
 func TestNetToolsAreOffByDefault(t *testing.T) {
 	cfg := configFromSpecs("test/model", nil, decl.Policy{}, nil)
 	env := toolEnv{cfg: cfg}
@@ -46,9 +36,6 @@ func TestNetToolsAreOffByDefault(t *testing.T) {
 	}
 }
 
-// ── HTTP 方法白名单 ───────────────────────────────────────────────────────
-
-// POST/PUT/DELETE 能改外部世界的状态 —— 默认只给 get。
 func TestHTTPToolsDefaultToGetOnly(t *testing.T) {
 	cfg := configFromSpecs("test/model", nil, decl.Policy{}, nil)
 	cfg.Tools.HTTP = &decl.HTTPToolsCfg{}
@@ -69,7 +56,6 @@ func TestHTTPToolsDefaultToGetOnly(t *testing.T) {
 	}
 }
 
-// 点名了才给写方法 —— 而且**只给点名的那些**。
 func TestHTTPToolsHonorTheMethodAllowlist(t *testing.T) {
 	cfg := configFromSpecs("test/model", nil, decl.Policy{}, nil)
 	cfg.Tools.HTTP = &decl.HTTPToolsCfg{Methods: []string{"get", "post"}}
@@ -93,9 +79,6 @@ func TestHTTPToolsHonorTheMethodAllowlist(t *testing.T) {
 
 // ── SSRF ──────────────────────────────────────────────────────────────────
 
-// ★ URL 是模型给的 ⇒ 一个能访问 127.0.0.1 的 HTTP 工具等于给了模型一把
-//
-//	钥匙：读本机配置、读会话状态、读云上元数据服务。
 func TestHTTPToolRefusesLoopback(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("secret"))
@@ -108,7 +91,6 @@ func TestHTTPToolRefusesLoopback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 用 httptest 的地址（127.0.0.1）来证明它被拒了。
 	out, err := runGetTool(t, tools, srv.URL)
 	if err == nil {
 		t.Fatalf("the loopback request must be refused, got %q", out)
@@ -118,16 +100,15 @@ func TestHTTPToolRefusesLoopback(t *testing.T) {
 	}
 }
 
-// 私有网段同样被拒 —— 模型够得到内网服务就够了。
 func TestPublicOnlyClientRejectsPrivateAddresses(t *testing.T) {
 	for _, ip := range []string{
-		"127.0.0.1",       // 回环
-		"10.0.0.5",        // 私有
-		"172.16.0.1",      // 私有
-		"192.168.1.1",     // 私有
-		"169.254.169.254", // 链路本地（云上元数据服务）
-		"100.64.0.1",      // CGNAT
-		"0.0.0.0",         // 未指定
+		"127.0.0.1",
+		"10.0.0.5",
+		"172.16.0.1",
+		"192.168.1.1",
+		"169.254.169.254",
+		"100.64.0.1", // CGNAT
+		"0.0.0.0",
 	} {
 		if isPublicIP(net.ParseIP(ip)) {
 			t.Fatalf("%s must not be considered public", ip)
@@ -140,9 +121,6 @@ func TestPublicOnlyClientRejectsPrivateAddresses(t *testing.T) {
 	}
 }
 
-// ── 输出长度上限 ──────────────────────────────────────────────────────────
-
-// 输出会原样进上下文 —— 一个 10MB 的页面会把这一轮直接撑爆。
 func TestToolOutputIsCapped(t *testing.T) {
 	big := strings.Repeat("x", defaultToolOutputBytes*2)
 	capped := capTool(fakeInvokable{out: big}, defaultToolOutputBytes)
@@ -159,7 +137,6 @@ func TestToolOutputIsCapped(t *testing.T) {
 	}
 }
 
-// 没超限就不该动它。
 func TestToolOutputUncappedWhenSmall(t *testing.T) {
 	capped := capTool(fakeInvokable{out: "small"}, defaultToolOutputBytes)
 	got, err := capped.InvokableRun(context.Background(), "{}")
@@ -171,11 +148,6 @@ func TestToolOutputUncappedWhenSmall(t *testing.T) {
 	}
 }
 
-// ── 档位：启用了就能用 ───────────────────────────────────────────────────
-
-// ★ 配置里写下「启用它」本身就是那个决定 —— 所以它默认 **allow**，不必
-//
-//	再去 permissions.yaml 里点名一次（同一件事说两遍）。
 func TestEnabledToolsAreAllowedByDefault(t *testing.T) {
 	cfg := configFromSpecs("test/model", nil, decl.Policy{}, nil)
 	cfg.Tools.HTTP = &decl.HTTPToolsCfg{}
@@ -194,8 +166,6 @@ func TestEnabledToolsAreAllowedByDefault(t *testing.T) {
 	}
 }
 
-// 策略仍然优先：ask 排在 allow 前面，deny 更是第一顺位 —— 策略是安全边界，
-// 配置只是「这个能力开不开」。
 func TestPolicyStillWinsOverTheEnabledDefault(t *testing.T) {
 	cfg := configFromSpecs("test/model", nil, decl.Policy{}, nil)
 	cfg.Tools.WebSearch = &decl.WebSearchCfg{}
@@ -212,7 +182,6 @@ func TestPolicyStillWinsOverTheEnabledDefault(t *testing.T) {
 	}
 }
 
-// 细粒度的收窄是每个 agent 的 disabled_tools —— 那是内层，它管得住。
 func TestDisabledToolsStillRemoveTheEnabledTools(t *testing.T) {
 	cfg := configFromSpecs("test/model", []string{decl.ToolNameWebSearch}, decl.Policy{}, nil)
 	cfg.Tools.WebSearch = &decl.WebSearchCfg{}
@@ -227,9 +196,6 @@ func TestDisabledToolsStillRemoveTheEnabledTools(t *testing.T) {
 	}
 }
 
-// ── 未知后端不静默降级 ───────────────────────────────────────────────────
-
-// 写错 provider 名不能变成「也是 duckduckgo」—— 那会让配置写错却看不出来。
 func TestUnknownWebSearchProviderIsRejected(t *testing.T) {
 	cfg := configFromSpecs("test/model", nil, decl.Policy{}, nil)
 	cfg.Tools.WebSearch = &decl.WebSearchCfg{Provider: "binggo"}
@@ -243,10 +209,6 @@ func TestUnknownWebSearchProviderIsRejected(t *testing.T) {
 	}
 }
 
-// ── 工具名不撞保留名 ──────────────────────────────────────────────────────
-
-// 注册器会拒掉与 middleware / DeepAgent 抢名字的工具 —— 名字撞了会出现
-// 「同一个工具被注册两次，而两边都自洽」。
 func TestNetToolNamesDoNotCollideWithReservedNames(t *testing.T) {
 	cfg := configFromSpecs("test/model", nil, decl.Policy{}, nil)
 	cfg.Tools.HTTP = &decl.HTTPToolsCfg{Methods: []string{"get", "post", "put", "delete"}}
@@ -281,9 +243,6 @@ func TestNetToolNamesDoNotCollideWithReservedNames(t *testing.T) {
 	}
 }
 
-// ── 小工具 ────────────────────────────────────────────────────────────────
-
-// fakeInvokable 是一个只回固定字符串的工具。
 type fakeInvokable struct {
 	out string
 }
@@ -296,7 +255,6 @@ func (f fakeInvokable) InvokableRun(context.Context, string, ...tool.Option) (st
 	return f.out, nil
 }
 
-// runGetTool 用 GET 工具打一个 URL。
 func runGetTool(t *testing.T, tools []tool.BaseTool, url string) (string, error) {
 	t.Helper()
 	if len(tools) == 0 {

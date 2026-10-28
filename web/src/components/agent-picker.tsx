@@ -1,12 +1,3 @@
-/**
- * Agent 选择器。
- *
- * ★ 列**全部** agent（每个声明了的都能当会话的 agent，装配按它自己的配置
- *   来）；点击之后是否真的允许由 PATCH 回答。
- *
- * ★ 运行中 / 待审批时整列禁用并说明原因，而不是让用户点一下再收 409：
- *   后者会让人以为是网络问题，而真实原因是「这一轮还没收尾」。
- */
 
 import { CheckIcon } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -29,7 +20,6 @@ export interface AgentPickerProps {
   agents: readonly AgentView[]
   currentId: string
   busy: boolean
-  /** 打开时预填的过滤词（`/agents t` 的 t）。 */
   filter?: string
   error?: string
   onPick(agentId: string): void | Promise<void>
@@ -45,9 +35,6 @@ export function AgentPicker({
   error,
   onPick,
 }: AgentPickerProps) {
-  // ★ 组件只在打开时挂载（见 composer）：过滤词因此可以直接用作初值，
-  //   不需要「打开时重置」的 effect —— 而 effect 里同步 setState 会多一次
-  //   渲染，oxlint 也会把它标成 cascading renders。
   const [query, setQuery] = useState(filter ?? "")
   const [active, setActive] = useState(0)
   const listRef = useRef<HTMLUListElement>(null)
@@ -63,17 +50,8 @@ export function AgentPicker({
     )
   }, [agents, query])
 
-  // 过滤后条数会变少：游标必须跟着夹住，否则 Enter 会落到 undefined。
   const cursor = items.length === 0 ? -1 : Math.min(active, items.length - 1)
 
-  // ★ 高亮的那一项要**滚进视野**。
-  //
-  //   列表是 `max-h-72 overflow-y-auto`：agent 多的时候它会滚。而键盘上下
-  //   移动只改游标，不改滚动位置 —— 于是光标走到了看不见的地方：用户按
-  //   Enter 选中了一个自己都看不到的 agent。
-  //
-  //   `block: "nearest"` 只在必要时滚动，且不动外层（弹窗本身不该被带着
-  //   滚）。鼠标悬停也会改游标，但悬停得到的就是看得见的项，滚动是空操作。
   useEffect(() => {
     const list = listRef.current
     if (!list || cursor < 0) return
@@ -165,8 +143,6 @@ export function AgentPicker({
                       {current ? (
                         <CheckIcon className="size-3.5" aria-label="Current agent" />
                       ) : null}
-                      {/* ★ 队伍规模：切到一个 agent 会带上它的下属 ——
-                          切到一支队伍与切到一个光杆，是两件不同的事。 */}
                       {team > 0 ? (
                         <span
                           data-testid="agent-option-team"

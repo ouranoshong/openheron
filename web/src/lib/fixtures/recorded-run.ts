@@ -1,34 +1,3 @@
-/**
- * 真后端录下的一轮事件序列（`POST /v2/run` 的 SSE 流，timestamp 已剥掉）。
- *
- * ★ 为什么用录的而不是手编的：手编的事件序列只覆盖「作者想到的分支」，
- *   而这个 fixture 里的 14 种事件类型都是真后端实际发过的 —— 包括
- *   reasoning 与正文共用 messageId、工具调用带 parentMessageId 这些细节。
- *   Phase 1 之所以漏掉 role 字面量，正是因为手编 fixture 不会告诉你
- *   前端 schema 到底认什么。
- *
- * 为了体积，连续的同类型 delta 已合并；长文本截断到 200 字符。
- * 形状（START / CONTENT×N / END）与顺序原样保留。
- *
- * ★ 后端后来加了两样东西，这份 fixture 是**回填**的（不是重录）：
- *
- *   ① TEXT_MESSAGE_START 带 `name` —— 产出这条消息的 agent。后端从
- *      2026-10-22 起发这个字段（多 agent 模式要靠它归属）。
- *   ② 只有推理/工具调用、没有正文的消息，末尾多一对
- *      TEXT_MESSAGE_START / TEXT_MESSAGE_END —— 那是「声明」，用来说明
- *      这条消息属于哪个 agent（REASONING_* / TOOL_CALL_* 不带归属）。
- *      见 agtransport/transport.go 的 emitter.announce。
- *
- *   回填而不是重录，是因为重录要一台真后端 + 真模型，而这两样都不在手边；
- *   而 fixture 的价值是「后端变了什么，这里一眼看得见」——
- *   留着旧形状，它就慢慢不再代表后端了。
- */
-/**
- * ★ 类型标成 AgEvent[] 而不是 Record<string, unknown>[]。
- *   标成后者时测试里必须 `as AgEvent` 强转，于是「这份 fixture 到底还对不对」
- *   永远没人验 —— 后端改了字段名，测试照样跑。
- *   标成前者，录下来的真实事件一旦与本地类型不符就是编译错误。
- */
 import type { AgEvent } from "../events"
 
 export const recordedRun: AgEvent[] = [

@@ -12,11 +12,6 @@ import (
 	"openheron/agentkit/spec/decl"
 )
 
-// fakeManager 是包内测试用的配置管理器。
-//
-// ★ 测试不再把模型实例塞进配置：配置里只有 ModelRef，实例由 [modelFactory]
-//
-//	给桩。这样「装配测试」不依赖厂商端点，也不会把测试桩漏进公开 API。
 type fakeManager struct {
 	mu  sync.Mutex
 	cfg *spec.Config
@@ -36,7 +31,6 @@ func (m *fakeManager) set(cfg *spec.Config) {
 	m.gen++
 }
 
-// minimalTestConfig 是一份只够派生出 main 的配置。
 func minimalTestConfig() *spec.Config {
 	return &spec.Config{
 		Agents: map[string]*decl.Agent{
@@ -52,7 +46,6 @@ func minimalTestConfig() *spec.Config {
 	}
 }
 
-// testManager 造一个带初代的假管理器。
 func testManager(cfg *spec.Config) *fakeManager {
 	if cfg == nil {
 		cfg = minimalTestConfig()
@@ -60,13 +53,11 @@ func testManager(cfg *spec.Config) *fakeManager {
 	return &fakeManager{cfg: cfg, gen: 1}
 }
 
-// newTestBuilder 造一个模型被桩替换的 Builder。
 func newTestBuilder(t *testing.T) *Builder {
 	t.Helper()
 	return newTestBuilderWithConfig(t, minimalTestConfig())
 }
 
-// newTestBuilderWithConfig 造一个指定配置的 Builder。
 func newTestBuilderWithConfig(t *testing.T, cfg *spec.Config) *Builder {
 	t.Helper()
 	b := NewBuilder(testManager(cfg))
@@ -78,7 +69,6 @@ func newTestBuilderWithConfig(t *testing.T, cfg *spec.Config) *Builder {
 	return b
 }
 
-// mustSnapshot 让测试拿到当前配置派生出的快照（NewBuilder 不预热）。
 func mustSnapshot(t *testing.T, b *Builder) *snapshot {
 	t.Helper()
 	cfg, gen := b.mgr.Current()
@@ -89,7 +79,6 @@ func mustSnapshot(t *testing.T, b *Builder) *snapshot {
 	return s
 }
 
-// managerOf 取测试 Builder 的管理器，用于换代。
 func managerOf(t *testing.T, b *Builder) *fakeManager {
 	t.Helper()
 	m, ok := b.mgr.(*fakeManager)
@@ -99,11 +88,6 @@ func managerOf(t *testing.T, b *Builder) *fakeManager {
 	return m
 }
 
-// configFromSpecs 把一棵 SubAgentSpec 树翻成真配置。
-//
-// ★ 测试注入的模型走 ModelRef + modelFactory，不再有「装配好的实例」字段。
-//
-//	rootRef 给根一个可解析的引用；子 agent 留空时走「回落底板」。
 func configFromSpecs(rootRef string, mainDisabled []string,
 	policy decl.Policy, subs []decl.SubAgentSpec) *spec.Config {
 
@@ -143,7 +127,6 @@ func addSpecs(dst map[string]*decl.Agent, specs []decl.SubAgentSpec) {
 	}
 }
 
-// specDepth 返回声明的层数（顶层子 agent = 1）。0 层时用默认 1。
 func specDepth(specs []decl.SubAgentSpec) int {
 	best := 0
 	for _, s := range specs {

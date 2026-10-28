@@ -12,8 +12,6 @@ import (
 	"time"
 )
 
-// ── 版本指纹 ─────────────────────────────────────────────────────────────
-
 func TestVersionChangesWithContent(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
@@ -27,36 +25,30 @@ func TestVersionChangesWithContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c1.Version == "" {
-		t.Fatal("★ Version 必须非空 —— 它是热更新与 Pool 代际的判定键")
+		t.Fatal("★ Version must not be empty — it is the key that decides hot reload and the Pool generation")
 	}
 	c2, err := s.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c1.Version != c2.Version {
-		t.Fatal("未改动时指纹必须稳定")
+		t.Fatal("the fingerprint must be stable when nothing changed")
 	}
 
-	// 改内容 → 指纹变。
 	f.write(t, "agents/main.md", "---\nmodel: openai/strong\n---\n改过了\n")
 	c3, err := s.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c3.Version == c1.Version {
-		t.Fatal("内容改动后指纹必须变")
+		t.Fatal("the fingerprint must change after the content changed")
 	}
 }
 
-// server/ **不进热更新** —— 它配的是进程自身，改了要重启。
-//
-// ★ 清单是**逐项写死**的，不是「至少包含这几个」。少了会漏（某个分区
-//
-//	改了不生效，只有沉默），多了会让 server/ 悄悄混进来。
 func TestServerDirIsNotHot(t *testing.T) {
 	for _, d := range HotDirs {
 		if d == DirServer {
-			t.Fatal("server/ 改了要重启，不得参与热更新")
+			t.Fatal("a change under server/ needs a restart and must not take part in hot reload")
 		}
 	}
 	want := []string{DirAgent, DirLLM, DirPolicy, DirTools}
@@ -70,12 +62,6 @@ func TestServerDirIsNotHot(t *testing.T) {
 	}
 }
 
-// tools/ **进热更新** —— 它是 2026-10-24 从 server/ 搬出来的，
-// 而搬出来的理由就是热更新：「改一个工具的超时」不该要重启进程。
-//
-// ★ 症状是「配置改了但工具表没变」，而那**没有任何报错** ——
-//
-//	所以这条要端到端验：真的写一个 tools/http.yaml，确认换代被触发。
 func TestToolsDirIsHot(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
@@ -107,8 +93,6 @@ func TestToolsDirIsHot(t *testing.T) {
 	if n.Load() < 2 {
 		t.Fatalf("* writing tools/ must trigger a reload, got %d callbacks", n.Load())
 	}
-	// 换代之后，新配置里那个工具必须**真的开着** —— 「触发了换代」
-	// 与「换代后的配置是对的」是两件事。
 	cfg := r.Current()
 	if cfg == nil {
 		t.Fatal("the reloaded config must be available")
@@ -121,8 +105,6 @@ func TestToolsDirIsHot(t *testing.T) {
 	}
 }
 
-// ── 失败不崩 ─────────────────────────────────────────────────────────────
-// ★ 改坏配置不该让进程死 —— 旧配置继续服务。
 func TestReloadFailureKeepsLastGood(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
@@ -139,25 +121,23 @@ func TestReloadFailureKeepsLastGood(t *testing.T) {
 	}
 	good := r.Current()
 	if good == nil {
-		t.Fatal("首次加载应成功")
+		t.Fatal("the first load should succeed")
 	}
 
-	// 写坏配置（未知字段）。
 	f.write(t, "llm/openai.yaml", "type: x\nbase_url: https://y\nbogus_key: 1\n")
 	if _, err := r.Reload(); err == nil {
-		t.Fatal("坏配置应报错")
+		t.Fatal("a broken configuration must be an error")
 	}
 	if r.Current() != good {
-		t.Fatal("★ 加载失败后当前配置必须仍是上一份")
+		t.Fatal("★ after a failed load the current configuration must still be the previous one")
 	}
 	if r.LastErr() == nil {
-		t.Fatal("失败原因必须留存，供日志/排障")
+		t.Fatal("the failure reason must be kept for logging and troubleshooting")
 	}
 	if len(got) != 1 {
 		t.Fatalf("* a failure must not trigger onChange (it would look like a successful reload), got %d callbacks", len(got))
 	}
 
-	// 改回好的 → 恢复。
 	f.write(t, "llm/openai.yaml", minimalLLM)
 	if _, err := r.Reload(); err != nil {
 		t.Fatal(err)
@@ -173,13 +153,10 @@ func TestNewReloaderFailsWhenFirstLoadFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 没有 agents/main.md ⇒ 首屏就失败。
 	if _, err := NewReloader(s, nil); err == nil {
-		t.Fatal("首次加载失败应返回错误（没有「空配置」这种状态）")
+		t.Fatal("a failed first load must return an error (there is no such thing as an empty configuration)")
 	}
 }
-
-// ── watch 参数 ───────────────────────────────────────────────────────────
 
 func TestWatchEnabledDistinguishesUnsetFromFalse(t *testing.T) {
 	f := newFixture(t)
@@ -190,7 +167,7 @@ func TestWatchEnabledDistinguishesUnsetFromFalse(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !c.WatchEnabled() {
-		t.Error("没写 enabled 应默认为开")
+		t.Error("an omitted enabled must default to on")
 	}
 
 	f.write(t, "server/config.yaml", "watch:\n  enabled: false\n")
@@ -199,7 +176,7 @@ func TestWatchEnabledDistinguishesUnsetFromFalse(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.WatchEnabled() {
-		t.Error("显式写 false 应被尊重 —— 「没写」与「写了 false」是两件事")
+		t.Error("an explicit false must be respected — omitting it and writing false are two different things")
 	}
 }
 
@@ -216,8 +193,6 @@ func TestDebounceFallsBackWithoutFailing(t *testing.T) {
 		t.Fatalf("it must fall back to the default debounce, got %v", c.Debounce())
 	}
 }
-
-// ── decl.Watch 真的能发现变更 ─────────────────────────────────────────────────
 
 func TestWatchDetectsChangeAndSwaps(t *testing.T) {
 	f := newFixture(t)
@@ -237,7 +212,6 @@ func TestWatchDetectsChangeAndSwaps(t *testing.T) {
 	defer cancel()
 	go r.Watch(ctx)
 
-	// 改一个热更新目录里的文件。
 	time.Sleep(50 * time.Millisecond)
 	f.write(t, "agents/main.md", "---\nmodel: openai/strong\n---\n改了\n")
 
@@ -256,7 +230,6 @@ func TestWatchDetectsChangeAndSwaps(t *testing.T) {
 	}
 }
 
-// 改 server/ **不该**触发回调。
 func TestWatchIgnoresServerDir(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
@@ -300,12 +273,11 @@ func TestWatchExitsOnContextCancel(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("decl.Watch 应随 ctx 取消而退出")
+		t.Fatal("decl.Watch must exit when ctx is cancelled")
 	}
 }
 
 func TestLogReloadFailedIsSwappable(t *testing.T) {
-	// 打桩出口存在 —— 「失败要出声」必须可断言。
 	orig := LogReloadFailed
 	var sb strings.Builder
 	LogReloadFailed = func(err error) { sb.WriteString(err.Error()) }
@@ -317,11 +289,6 @@ func TestLogReloadFailedIsSwappable(t *testing.T) {
 	}
 }
 
-// 热更成功要**出声**，而且要说清改的是哪一份 ——
-//
-// ★ 「改了没生效」是这类问题最难查的一种：界面上「配置更新了」与
-//
-//	「配置没更新」长得一模一样。日志里那句「changed: agents/」就是分叉点。
 func TestHotReloadLogsWhichPartitionsChanged(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
@@ -368,11 +335,6 @@ func TestHotReloadLogsWhichPartitionsChanged(t *testing.T) {
 	}
 }
 
-// 分目录的指纹：改一份不能动另一份。
-//
-// ★ 这是「changed: agents/」能说准的前提 —— 若指纹是混在一起的一个总数，
-//
-//	那「变了」只能回答「有没有变」。
 func TestHotDirFingerprintsSeparatePartitions(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)

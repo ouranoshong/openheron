@@ -1,6 +1,5 @@
 // Package openheronrt owns turn orchestration: admission, preemption, recovery and
 // the exact order in which results reach durable storage.
-//
 // It renders nothing, speaks no HTTP, and never decides on its own whether a
 // run may resume — the checkpoint is the authority on that.
 package run
@@ -27,8 +26,6 @@ const DefaultStartTimeout = 60 * time.Second
 // AgentBuilder produces the agent for one turn. It is injected so openheronrt
 // never imports the agent package, which keeps its tests free of a real model.
 type AgentBuilder interface {
-	// Build returns the agent for this turn. agentID 是会话选定的入口 agent；
-	// 空串 = 配置里的 main（旧会话与未切换过的会话都是这个值）。
 	Build(ctx context.Context, sessionID, agentID string, kind contract.TurnKind) (adk.TypedAgent[*schema.Message], error)
 }
 
@@ -36,22 +33,11 @@ type AgentBuilder interface {
 type Config struct {
 	AgentBuilder   AgentBuilder
 	SessionManager storage.SessionManager
-	// ★ checkpoint 的存取器**不在这里**：它由会话提供
-	//	（storage.Session.GetCheckPointStore）—— 一个会话的 checkpoint
-	//	住在它自己的目录里，存取器自然也归它。
-	//
-	//	没有存取器 = 不做 checkpoint：那时审批中断无法恢复
-	//	（见 [hasCheckpoint]）。
-	Input        InputConfig
-	StartTimeout time.Duration
+	Input          InputConfig
+	StartTimeout   time.Duration
 }
 
 // ApprovalDecision is one decision about one outstanding interrupt.
-//
-// ★ 它带自己的 InterruptID：一次可以带**多个**决定（一次答完整组待批）。
-//
-//	理由见 [storage.PendingApproval] —— 逐个答复在原理上走不通：没被答复的那些
-//	会带着新 id 重新中断，客户端手里那批旧 id 就全废了。
 type ApprovalDecision struct {
 	// InterruptID is the decision's target: the id of one outstanding
 	// interrupt. It is the framework's address, not a UUID.
@@ -123,27 +109,8 @@ func (rt *Runtime) Submit(ctx context.Context, sessionID, query string) (*Turn, 
 		return nil, errors.New("query must not be empty")
 	}
 
-	// ★ 一次提问**取代**之前被打断 / 被停掉的那一轮 —— 所以先把那一轮的状态
-	//   扔掉。
-	//
-	//	框架的契约（eino adk/turn_loop.go:569）：checkpoint 里有 runner
-	//	状态（被打断、或在轮次中途被取消）时，下一次 Run 一定走**恢复**路径
-	//	—— 而恢复路径只会「恢复那个被打断的 agent」，不会跑新的提问。
-	//
-	//	于是提问被吞掉：轮次永远不 ready，接口只能等到超时
-	//	（turn_start_timeout），日志里还留下一句「loop exited: no pending
-	//	interrupt」—— 与真实原因（上一轮被停掉了）毫不相干。
-	//
-	//	★ 什么时候会留下 checkpoint：
-	//
-	//	 · 中途「停止」—— 框架在 stop 落地时会写 checkpoint（canceled 态）；
-	//	 · 被打断（等审批）—— 框架写 checkpoint（可恢复态）。
-	//
-	//	两者的 checkpoint 都不是「新的提问」要用的东西：新的提问从头开始。
 	rt.discardCheckpoint(ctx, sess)
 
-	// ★ 待批记录与 checkpoint **同进同出**：checkpoint 没了，那张审批卡就再也
-	//   答不了 —— 留着只会让用户点一个必然失败的按钮。
 	if pending, perr := sess.PendingApproval(); perr == nil && pending != nil && len(pending.Interrupts) > 0 {
 		if err := sess.ClearPendingApproval(); err != nil {
 			rt.logf("session=%s failed to clear the stale pending approval: %v", sessionID, err)
@@ -153,9 +120,6 @@ func (rt *Runtime) Submit(ctx context.Context, sessionID, query string) (*Turn, 
 	return rt.startTurn(ctx, sess, loopItem{Query: query}, contract.TurnQuery)
 }
 
-// discardCheckpoint 清掉会话的 checkpoint（若有）。
-//
-// ★ 幂等：框架自己在干净退出时也会删它，重复删无害。
 func (rt *Runtime) discardCheckpoint(ctx context.Context, sess storage.Session) {
 	_, deleter := sess.GetCheckPointStore()
 	if deleter == nil {
@@ -167,36 +131,15 @@ func (rt *Runtime) discardCheckpoint(ctx context.Context, sess storage.Session) 
 }
 
 // Resume delivers approval decisions for the pending interrupts.
-//
 // The decisions are refused unless the session holds a persisted pending
 // record: the framework exposes no interrupt id to the application, so that
 // record is the only gate (architecture.md decision 7 and 8).
-//
-// ★ decisions 必须覆盖**全部**待批项。
-//
-//	框架的契约：不在 Targets 里的被中断组件会重新中断自己，而重新中断
-//	拿到的是**新的 id** —— 那些旧 id 从此再也不可能被答复。所以要么一次
-//	答完整组，要么剩下的会带着新 id 回来（那也能工作，但用户会看到审批
-//	卡闪一次、id 全变）。
-//
-//	★ 取走待批记录是在**答复之前**：框架一旦恢复就会改写 checkpoint，
-//
-//	旧记录留着会让人以为还能答第二遍。
 func (rt *Runtime) Resume(ctx context.Context, sessionID string, decisions []ApprovalDecision) (*Turn, error) {
 	sess, err := rt.cfg.SessionManager.Get(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
 
-	// ★ 先看 checkpoint 在不在 —— 恢复路径要读它（eino adk/turn_loop.go:1861）。
-	//
-	//	没有它，框架会在恢复时炸，而那时轮次已经起来了：接口只能等到超时
-	//	（turn_start_timeout），用户看到的是「点了批准没反应」。
-	//
-	//	这里先查一遍，把「没法恢复」变成一句干脆的拒绝 —— 而且要在
-	//	TakePendingApproval **之前**：待批记录被取走就再也答不了第二遍。
-	//	（待批留着，界面上的那张卡也还在 —— 用户看到的会是一句
-	//	「这个审批恢复不了了，重新提问吧」，而不是卡片凭空消失。）
 	if !rt.hasCheckpoint(ctx, sess) {
 		return nil, fmt.Errorf("%w (session %s)", ErrNoCheckpoint, sessionID)
 	}
@@ -220,24 +163,12 @@ func (rt *Runtime) Resume(ctx context.Context, sessionID string, decisions []App
 		return nil, ErrNoPendingInterrupt
 	}
 
-	// ★ 记审计 —— 这一步是「人做了什么」的**唯一**持久痕迹。
-	//
-	//	待批记录刚被取走（TakePendingApproval），那条「谁批了什么」的线索
-	//	就此消失；不留审计的话，事后无从查起。
-	//
-	//	★ 时刻由**服务端**盖：客户端可以传任何时间，而审计的时间必须是
-	//	真的发生时刻。
 	rt.recordDecisions(sess, pending, decisions)
 
 	item := loopItem{Approvals: approvals}
 	return rt.startTurn(ctx, sess, item, contract.TurnResume)
 }
 
-// recordDecisions 把这一轮的决定写进会话的审计记录。
-//
-// ★ 工具名与发起方来自**被取走前**的那份待批 —— 答复之后它就没了，
-//
-//	所以要在同一个位置取。
 func (rt *Runtime) recordDecisions(sess storage.Session, pending *storage.PendingApproval, decisions []ApprovalDecision) {
 	details := map[string]*contract.InterruptDetail{}
 	if pending != nil {
@@ -268,23 +199,15 @@ func (rt *Runtime) recordDecisions(sess storage.Session, pending *storage.Pendin
 		return
 	}
 	if err := sess.RecordDecision(recs...); err != nil {
-		// ★ 审计写不进去**不能**让这一轮失败 —— 决定已经答复了，
-		//	工具要照常执行；只是审计缺了一条。
 		rt.logf("session=%s failed to record the approval decisions: %v", sess.ID(), err)
 	}
 }
 
-// hasCheckpoint 报告这个会话还有没有可恢复的 checkpoint。
-//
-// ★ 没有存取器时一律当作「有」：那就根本没有 checkpoint 这件事，
-//
-//	不该由这里拦下。
 func (rt *Runtime) hasCheckpoint(ctx context.Context, sess storage.Session) bool {
 	store, _ := sess.GetCheckPointStore()
 	if store == nil {
 		return true
 	}
-	// ★ 「能不能恢复」由会话回答（它读文件并解码 —— 文件在不等于能用）。
 	ok, err := sess.HasCheckpoint(ctx)
 	if err != nil {
 		rt.logf("session=%s failed to read the checkpoint: %v", sess.ID(), err)
@@ -295,16 +218,6 @@ func (rt *Runtime) hasCheckpoint(ctx context.Context, sess storage.Session) bool
 
 // approvalResult maps the HTTP decision onto the payload the gated tool reads
 // back on resume.
-//
-// ★ 它必须是 [approval.Decision] —— **同一个具体类型**，不是「结构相同」。
-//
-//	eino 的 tool.GetResumeContext[T] 是具体类型断言
-//	（internal/core/resume.go:102），断言失败 ⇒ hasData=false ⇒
-//	闸门拿不到决定。而闸门此前把「拿不到决定」当成「照常执行」，
-//	于是**每一次审批都被忽略**，工具照跑。
-//
-//	各自定义一份同名结构（openheronrt.ApprovalResult / agent.ApprovalResult）
-//	编译期完全看不出来，只有运行期才炸 —— 而炸的方式是放行。
 func approvalResult(d ApprovalDecision) any {
 	return &approval.Decision{Approved: d.Approved, Reason: d.Reason}
 }
@@ -374,14 +287,11 @@ func (rt *Runtime) Abort(ctx context.Context, sessionID string) error {
 }
 
 // Cleanup stops the turn, removes the checkpoint and forgets the session.
-//
 // It is safe to call for an unknown id, which is what lets the session layer
 // inject it as a teardown hook without first checking existence.
 func (rt *Runtime) Cleanup(ctx context.Context, sessionID string) error {
 	_ = rt.Abort(ctx, sessionID)
 
-	// ★ checkpoint 的存取器由**会话**提供 —— 而这里只有 id，所以先把会话
-	//	拿出来（拿不到就说明它已经没了，那也没有 checkpoint 要删）。
 	if sess, err := rt.cfg.SessionManager.Get(ctx, sessionID); err == nil {
 		if _, deleter := sess.GetCheckPointStore(); deleter != nil {
 			if err := deleter.Delete(ctx, sessionID); err != nil {
@@ -447,8 +357,6 @@ func (rt *Runtime) Status() []SessionStatus {
 
 // StatusOf reports one session's phase, resolving the waiting-approval state
 // from the session itself.
-//
-// ★ SessionStatus.Phase cannot express "waiting for a human" on its own: the
 //
 //	approval lives in the session file, not in the volatile runtime state, and
 //	a session with a pending approval has no loop running — it would report

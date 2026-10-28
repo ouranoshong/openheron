@@ -1,10 +1,3 @@
-/**
- * 分类分段控件 + 文件列表。
- *
- * ★ 两栏而非三栏：分类只有四个且名称短，分段控件横排比竖列省空间，
- *   左栏就全给文件列表。三栏要吃掉 240+200 的固定宽度，在 1280px 屏上
- *   编辑器只剩 500px 出头 —— 而 agents/*.md 的正文是要长看的。
- */
 
 import { useShallow } from "zustand/react/shallow"
 
@@ -25,7 +18,6 @@ const LABEL: Record<string, string> = {
 }
 
 export function SettingsFileList() {
-  // ★ 两个都返回新数组（filter），必须配 useShallow —— 见 store.ts 的纪律。
   const items = useSettings(useShallow(selectItems))
   const categories = useSettings(useShallow(selectCategories))
   const selected = useSettings((s) => s.selected)
@@ -67,7 +59,6 @@ export function SettingsFileList() {
   )
 }
 
-/** Badge 是一个极小的标记 —— 它必须能被读屏念出来，所以带 title。 */
 function Badge({ children, title }: { children: React.ReactNode; title: string }) {
   return (
     <span title={title} aria-label={title} className="bg-muted text-muted-foreground rounded px-1 text-[10px]">
@@ -76,7 +67,6 @@ function Badge({ children, title }: { children: React.ReactNode; title: string }
   )
 }
 
-/** SectionPicker 供 NewFileDialog 用：列出可写入的分区。 */
 export function SectionPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const categories = useSettings(useShallow(selectCategories))
   const editable = categories.filter((c: SettingsState["manifest"] extends undefined ? never : NonNullable<SettingsState["manifest"]>["categories"][number]) => c.editable)

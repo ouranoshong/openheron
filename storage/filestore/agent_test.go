@@ -9,15 +9,6 @@ import (
 	"openheron/storage"
 )
 
-// 会话的入口 agent 必须落盘，并且熬过后续的每一次状态写入。
-//
-// ★ 这里钉的是一类具体的 bug：曾经有一条状态写入路径构造裸 `state{…}`，
-// 于是任何一次写入都会把 state.json 里其它字段抹掉。加 agent_id 之前
-// 它的症状只是「标题缓存偶尔失效」，加上之后会变成「切了 task，下一轮
-// 又跑回 main」—— 而且两边都自洽，很难查。
-//
-// ★ 那条路径（游标推进）已随 v1 下线一起删了，但**同类写入路径还在**
-// （写待批），所以这条断言继续有效。
 func TestAgentIDSurvivesApprovalWrites(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -62,7 +53,6 @@ func TestAgentIDSurvivesApprovalWrites(t *testing.T) {
 	}
 }
 
-// 加字段之前写下的 state.json 没有 agent_id：读成空串（= main），不报错。
 func TestLegacyStateWithoutAgentIDReadsEmpty(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -73,7 +63,6 @@ func TestLegacyStateWithoutAgentIDReadsEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 还原成旧格式：字段为空时 json 里就没有这个键。
 	st, _, err := readState(statePath(root, sess.ID()))
 	if err != nil {
 		t.Fatal(err)

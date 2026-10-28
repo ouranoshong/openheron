@@ -16,12 +16,6 @@ import (
 	"openheron/approval"
 )
 
-// 这个用例钉住“入口 agent → task 下属 → 审批工具 → resume”这条链路。
-//
-// ★ 它比单测中间件更靠近生产：TurnLoop 负责 checkpoint/resume，子 agent
-//   由 task 工具包装，resume 时还会用**重新构造**的 agent 实例（模拟 Pool）。
-//   只测 agent_tool 或只测 approvalMiddleware 都覆盖不到这条组合。
-
 type nestedToolCallModel struct {
 	mu   sync.Mutex
 	call *schema.ToolCall
@@ -29,7 +23,6 @@ type nestedToolCallModel struct {
 
 func (m *nestedToolCallModel) Generate(_ context.Context, in []*schema.Message, _ ...model.Option) (*schema.Message, error) {
 	for _, msg := range in {
-		// 工具结果已经回灌：模型可以收尾。
 		if msg.Role == schema.Tool {
 			return schema.AssistantMessage("done", nil), nil
 		}
@@ -153,10 +146,7 @@ type nestedLoopItem struct {
 	HasApproval bool
 	Approved    bool
 	InterruptID string
-	// Payload 覆盖「塞进 Targets 的那个值」。nil ⇒ 用默认的
-	// *approval.Decision。★ 它存在是为了能塞**类型不对**的值 ——
-	// 那正是本文件要钉的那类缺陷（闸门读的类型与送的类型不是同一个）。
-	Payload any
+	Payload     any
 }
 
 func TestNestedApprovalResumeThroughTurnLoop(t *testing.T) {
@@ -240,7 +230,6 @@ func TestNestedApprovalResumeThroughTurnLoop(t *testing.T) {
 		t.Fatal("no root-cause interrupt from the task sub-agent")
 	}
 
-	// ★ 模拟生产：resume 时 PrepareAgent 会通过 Pool 重新取/建 agent。
 	rebuilt, writeTool := buildNestedRoleAgents(t)
 	loop2 := newLoop(rebuilt)
 	loop2.Push(nestedLoopItem{HasApproval: true, Approved: true, InterruptID: rootID})
@@ -253,15 +242,6 @@ func TestNestedApprovalResumeThroughTurnLoop(t *testing.T) {
 	}
 }
 
-// ★★ 「拒绝」必须真的拦住工具。
-//
-//	这条曾经是**红的**，而且红得没有声音：agentkit/run 送进 Targets 的是
-//	`*agentkit/run.ApprovalResult`，闸门读的是 `*agent.ApprovalResult` ——
-//	eino 的 GetResumeContext 是具体类型断言（internal/core/resume.go:102），
-//	断言失败 ⇒ hasData=false ⇒ 而闸门把「拿不到决定」当成「照常执行」。
-//
-//	于是批准与拒绝的效果**完全一样**：工具都跑。而拒绝那句
-//	「tool was rejected」模型根本没看到。
 func TestApprovalGateRefusesTheToolWhenRejected(t *testing.T) {
 	calls, exit := runGatedResume(t, nestedLoopItem{
 		HasApproval: true,
@@ -271,19 +251,11 @@ func TestApprovalGateRefusesTheToolWhenRejected(t *testing.T) {
 	if calls != 0 {
 		t.Fatalf("write_file ran %d times after a rejection — the gate let it through", calls)
 	}
-	// 拒绝不是「整轮崩掉」：它要以工具结果的形式回到模型，让模型改主意。
 	if exit != nil {
 		t.Fatalf("a rejection must not fail the turn, got %v", exit)
 	}
 }
 
-// ★★ 类型对不上时**不许执行工具**（fail closed）。
-//
-//	这条钉的是「闸门读的类型」与「送的类型」必须同一个。它曾经不成立，
-//	而失败的方式是**放行** —— 最坏的那种失败。
-//
-//	用的载荷是结构完全相同、但类型不同的另一个结构 —— 正是本仓库曾经
-//	agentkit/run.ApprovalResult / agent.ApprovalResult 的关系。
 type foreignDecision struct {
 	Approved bool
 	Reason   string
@@ -298,15 +270,11 @@ func TestApprovalGateRefusesTheToolWhenTheDecisionTypeIsWrong(t *testing.T) {
 		t.Fatalf("write_file ran %d times with an unreadable decision — "+
 			"the gate must fail closed, not assume approval", calls)
 	}
-	// ★ 而且要**说出来**：静默拒绝会让人以为「审批生效了」，于是去查策略、
-	//	查前端、查会话 —— 而真正的原因是载荷类型对不上。
 	if err == nil {
 		t.Fatal("an unreadable decision must be reported, not silently swallowed")
 	}
 }
 
-// runGatedResume 跑一遍「先中断、再答复」的两轮 turn，返回工具被调用的次数
-// 与第二轮的退出原因。
 func runGatedResume(t *testing.T, reply nestedLoopItem) (int, error) {
 	t.Helper()
 	ctx := context.Background()

@@ -13,20 +13,6 @@ import (
 	"openheron/initcfg"
 )
 
-// initCmd 是 `openheron init …` 子命令。
-//
-// ★ 它在**当前目录**建一份最小可运行配置，而且只补确实缺的东西 ——
-//
-//	已存在的文件一律不动（同名文件是整体替换语义，写下去等于把用户
-//	自己那份悄悄换掉）。见 docs/init-design.md。
-//
-// ★ 落点是**生效的那个配置根**：给了 --config-dir 就写那里，
-//
-//	否则写 `<目标目录>/.openheron`。
-//
-// ★ 它只需要 config —— 不需要 session manager、checkpoint store、hertz、
-//
-//	agent builder。启动路径比 run() 短得多。
 func initCmd(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -67,11 +53,6 @@ func initCmd(args []string, stdout io.Writer) error {
 		return fmt.Errorf("openheron init: resolve target directory %q: %w", target, err)
 	}
 
-	// ★ 落点是**指定的那个目录**，不上溯探测 —— 祖先目录恰好有 .openheron/
-	//	时不该写到那里去（那正是运行期的规则，不是写配置的规则）。
-	//
-	//	--config-dir 给的是**配置根本身**（里面直接有 llm/ agents/），
-	//	与运行期的 OPENHERON_CONFIG_DIR 同一个值语义。
 	root := *configDir
 	if root == "" {
 		root = filepath.Join(abs, spec.DefaultBaseDirName)
@@ -100,9 +81,6 @@ func initCmd(args []string, stdout io.Writer) error {
 	return reportInit(plan, abs, *dryRun, *asJSON, stdout)
 }
 
-// reportInit 打印结果。
-//
-// ★ 运行时输出一律英文（AGENTS.md 的语言约定）。
 func reportInit(plan *initcfg.Plan, root string, dryRun, asJSON bool, stdout io.Writer) error {
 	created := make([]string, 0, len(plan.Files))
 	for _, f := range plan.Files {
@@ -154,7 +132,6 @@ func reportInit(plan *initcfg.Plan, root string, dryRun, asJSON bool, stdout io.
 	return nil
 }
 
-// printInitUsage 打印用法。
 func printInitUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "usage: openheron init [--dir <path>] [--model <provider>/<model>] [--provider <id>]")
 	fmt.Fprintln(stdout, "                [--base-url <url>] [--env <NAME>] [--no-policy]")

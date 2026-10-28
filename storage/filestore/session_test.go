@@ -73,11 +73,6 @@ func TestCreateAppendReload(t *testing.T) {
 	}
 }
 
-// 会话的入口 agent 在**创建时**就落进 state.json，之后从 state 读。
-//
-// ★ 钉的是「落盘」而不是「内存里有」：重新打开（模拟重启）之后它还在，
-//
-//	才说明它不是每次现算的默认值。
 func TestCreateRecordsTheRootAgentInTheState(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -163,7 +158,6 @@ func TestPendingPeekDoesNotConsume(t *testing.T) {
 	}
 }
 
-// 待批在重启后仍然读得到。
 func TestPendingApprovalSurvivesRestart(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -319,7 +313,6 @@ func TestMalformedLinesAreCounted(t *testing.T) {
 	}
 }
 
-// openForTest 打开一个会话**并**读出它的 transcript —— 像 Get 那样。
 func (fm *FileManager) openForTest(id string) (*FileSession, error) {
 	fs, err := fm.open(id)
 	if err != nil {
@@ -348,7 +341,6 @@ func TestInspectClassifiesEveryCombination(t *testing.T) {
 			wantReport: storage.Report{PendingOK: 1},
 		},
 		{
-			// ★ 孤儿待批**留着**：界面要继续显示那张卡，用户才有得答。
 			name: "orphaned approval is kept", pending: true, checkpoint: false,
 			wantReport: storage.Report{Orphan: 1},
 		},
@@ -374,8 +366,6 @@ func TestInspectClassifiesEveryCombination(t *testing.T) {
 				}
 			}
 			if tc.checkpoint {
-				// ★ 存取器是每个会话自己的 —— 造一个真的 checkpoint 文件，
-				//	而不是打桩（打桩要一个能注入的接口，而实现住在会话里）。
 				store, _ := sess.GetCheckPointStore()
 				if err := store.Set(ctx, id, []byte("runner state")); err != nil {
 					t.Fatal(err)
@@ -402,10 +392,6 @@ func TestInspectClassifiesEveryCombination(t *testing.T) {
 	}
 }
 
-// ★ 巡检**不许**动待批记录。
-//
-//	早先的孤儿分支会把待批清掉，于是重启一次用户的审批就凭空消失 ——
-//	界面上的那张卡没了，而他什么都不知道。这条用例钉住「只报告，不改数据」。
 func TestInspectionNeverClearsAPendingApproval(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -419,12 +405,10 @@ func TestInspectionNeverClearsAPendingApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 没有 checkpoint ⇒ 孤儿分支。
 	if _, err := fm.Inspect(ctx); err != nil {
 		t.Fatal(err)
 	}
 
-	// 重新开一个 manager（绕开内存缓存）看磁盘上的那份。
 	fresh, _ := NewFileManager(root, Options{})
 	reloaded, err := fresh.Get(ctx, id)
 	if err != nil {
@@ -451,16 +435,12 @@ func TestPutFileRejectsNilReader(t *testing.T) {
 var _ = schema.UserMessage
 var _ = filepath.Join
 
-// ★ 一个会话的 checkpoint 就住在**它自己的 checkpoints/ 子目录里** ——
-//
-//	删会话目录 = 删全。
 func TestCheckpointLivesInTheSessionDirectory(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	fm, _ := NewFileManager(root, Options{})
 	sess, _ := fm.Create(ctx, "")
 
-	// 会话把存取器交出去（契约上就是这一条）。
 	got, deleter := sess.GetCheckPointStore()
 	if got == nil || deleter == nil {
 		t.Fatal("the session must hand out its checkpoint store")
@@ -473,7 +453,6 @@ func TestCheckpointLivesInTheSessionDirectory(t *testing.T) {
 	if !fileExists(path) {
 		t.Fatalf("the checkpoint must live in the session's checkpoints directory: %s", path)
 	}
-	// 删会话目录 ⇒ checkpoint 一起没了。
 	if err := fm.Delete(ctx, sess.ID()); err != nil {
 		t.Fatal(err)
 	}

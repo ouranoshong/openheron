@@ -12,22 +12,15 @@ import (
 	"openheron/agentkit/spec/decl"
 )
 
-// modelA / modelB 是两个可区分的模型实例 —— 用来证明换代真的换了对象。
-//
-// ★ 用**指针身份**而不是比较字段：两份字段相等的配置看起来一样，
-//
-//	而「运行中用的是哪个」正是这里要验的东西。
 var (
 	modelA = &stubModel{}
 	modelB = &stubModel{}
 )
 
-// toConfigPolicy 把 agent.Policy 搬成 decl.Policy。
 func toConfigPolicy(p Policy) decl.Policy {
 	return decl.Policy{Ask: p.Ask, Deny: p.Deny}
 }
 
-// verdicts 把结论压成 name → verdict，方便按名字断言。
 func verdicts(t *testing.T, in []ToolVerdict) map[string]ToolVerdict {
 	t.Helper()
 	out := make(map[string]ToolVerdict, len(in))
@@ -37,7 +30,6 @@ func verdicts(t *testing.T, in []ToolVerdict) map[string]ToolVerdict {
 	return out
 }
 
-// introspectBuilder 造一个只带审批三档与拓扑的 Builder。
 func introspectBuilder(t *testing.T, p Policy, rootDisabled []string,
 	subs []decl.SubAgentSpec) *Builder {
 
@@ -49,8 +41,6 @@ func introspectBuilder(t *testing.T, p Policy, rootDisabled []string,
 }
 
 func TestEffectiveToolsDenyBeatsDisable(t *testing.T) {
-	// deny 与 disabled_tools 都列了 execute —— 外层必须赢，那是子 agent
-	// 不能放松的唯一保证。
 	p := NewPolicy(
 		[]string{"write_file", "execute"},
 		[]string{"execute"},
@@ -63,8 +53,6 @@ func TestEffectiveToolsDenyBeatsDisable(t *testing.T) {
 	if ex.Tier != TierDeny || ex.Blocked != LayerDeny {
 		t.Fatalf("execute = %+v, want deny blocked by the deny layer", ex)
 	}
-	// 只被本 agent 禁用的：生效档位是 deny，但层是 disable —— 用户要改的是
-	// agents/*.md 里的 disabled_tools，不是 policy。
 	rm := got["rm_rf"]
 	if rm.Tier != TierDeny || rm.Blocked != LayerDisable {
 		t.Fatalf("rm_rf = %+v, want deny blocked by the disable layer", rm)
@@ -74,7 +62,6 @@ func TestEffectiveToolsDenyBeatsDisable(t *testing.T) {
 	}
 }
 
-// TestVerdictOfFallsBackToAllow 钉的是「判定」这条规则本身。
 func TestVerdictOfFallsBackToAllow(t *testing.T) {
 	p := NewPolicy([]string{"execute"}, nil)
 	v := verdictOf(newBoundary(p, newTable("main", nil, nil)), "brand_new_write_tool", Observed{})
@@ -85,7 +72,6 @@ func TestVerdictOfFallsBackToAllow(t *testing.T) {
 }
 
 func TestEffectiveToolsPerAgentTable(t *testing.T) {
-	// ★ 同一个工具在不同 agent 下的结论可以不同 —— 那正是分层的意义。
 	p := NewPolicy([]string{"write_file"}, nil)
 	subs := []decl.SubAgentSpec{{
 		ID:            "writer",
@@ -107,13 +93,12 @@ func TestEffectiveToolsPerAgentTable(t *testing.T) {
 	}
 }
 
-// TestEffectiveToolsMatchesTheAssembledTable 是这个文件存在的理由。
 func TestEffectiveToolsMatchesTheAssembledTable(t *testing.T) {
 	p := NewPolicy([]string{"write_file"}, []string{"rm_rf"})
 	agentSpec := decl.SubAgentSpec{ID: "worker", DisabledTools: []string{"write_file", "mystery"}}
 	b := introspectBuilder(t, p, []string{"execute"}, []decl.SubAgentSpec{agentSpec})
 
-	assembled := specTable(p, agentSpec) // ← subHandlers 用的就是它
+	assembled := specTable(p, agentSpec)
 	reported := verdicts(t, b.EffectiveTools("worker"))
 
 	universe := append(append([]string{}, p.Ask...), p.Deny...)
@@ -123,7 +108,6 @@ func TestEffectiveToolsMatchesTheAssembledTable(t *testing.T) {
 			t.Fatalf("%s: reported block %q, assembled %q", name, got, want)
 		}
 	}
-	// 反向也要成立：表里留着它，报告里就不能说它被摘了。
 	for name, v := range reported {
 		if assembled.Blocked(name) == LayerNone && v.Blocked != LayerNone {
 			t.Fatalf("%s: reported blocked %q but the assembled table keeps it", name, v.Blocked)
@@ -132,7 +116,6 @@ func TestEffectiveToolsMatchesTheAssembledTable(t *testing.T) {
 }
 
 func TestPolicyToolsExcludesEveryAgentsDisable(t *testing.T) {
-	// ★ /v2/config 报的是**策略**，不是某个 agent 的视图。
 	p := NewPolicy([]string{"write_file"}, nil)
 	b := introspectBuilder(t, p, []string{"execute"}, []decl.SubAgentSpec{
 		{ID: "worker", DisabledTools: []string{"write_file"}},
@@ -143,14 +126,12 @@ func TestPolicyToolsExcludesEveryAgentsDisable(t *testing.T) {
 		t.Fatalf("policy view of write_file = %+v, want ask and reachable", v)
 	}
 
-	// 而 agent 视图里它是 deny。
 	if v := verdicts(t, b.EffectiveTools("worker"))["write_file"]; v.Tier != TierDeny {
 		t.Fatalf("worker view of write_file = %+v, want deny", v)
 	}
 }
 
 func TestPolicyToolsListsDisabledOnlyNames(t *testing.T) {
-	// 配置里提到、却没列进策略的名字必须出现在报告里。
 	p := NewPolicy(nil, nil)
 	b := introspectBuilder(t, p, []string{"oddly_named"}, []decl.SubAgentSpec{
 		{ID: "worker", DisabledTools: []string{"declared_downstream"}},
@@ -175,7 +156,6 @@ func TestPolicyToolsListsDisabledOnlyNames(t *testing.T) {
 }
 
 func TestEffectiveToolsIsSorted(t *testing.T) {
-	// 汇报的东西要有稳定顺序，否则同一份配置的两次响应看不出是同一份。
 	p := NewPolicy([]string{"zeta"}, []string{"beta"})
 	b := introspectBuilder(t, p, nil, nil)
 
@@ -197,7 +177,6 @@ func TestEffectiveToolsIsSorted(t *testing.T) {
 }
 
 func TestEffectiveToolsUnknownAgentFallsBackToRoot(t *testing.T) {
-	// 少报一项比报错更难查；调用方（自省端点）本来就会先校验名字存在。
 	p := NewPolicy(nil, nil)
 	b := introspectBuilder(t, p, nil, nil)
 
@@ -220,8 +199,6 @@ func TestEffectiveToolsFindsNestedSubAgents(t *testing.T) {
 	}
 }
 
-// ── 代际 ─────────────────────────────────────────────────────────────────
-
 func TestNewGenerationRebindsPolicyAndTable(t *testing.T) {
 	b := introspectBuilder(t, NewPolicy(nil, nil), nil, nil)
 
@@ -229,20 +206,15 @@ func TestNewGenerationRebindsPolicyAndTable(t *testing.T) {
 		t.Fatalf("before: read_file = %+v, want allow", v)
 	}
 
-	// 改了 policy：read_file 降级成 ask。
 	next := configFromSpecs("test/model", nil,
 		toConfigPolicy(NewPolicy([]string{"read_file"}, nil)), nil)
 	managerOf(t, b).set(next)
-	// ★ 刻意**不**调 mustSnapshot：自省读口要在下一次 Build 之前就跟上
-	//   管理器的新代。靠 Builder 的 b.snap 缓存会让接口慢一拍 —— 用户看到
-	//   旧 policy，而下一轮其实已经用新配置。
 	if v := verdicts(t, b.EffectiveTools("main"))["read_file"]; v.Tier != TierAsk {
 		t.Fatalf("after: read_file = %+v, want ask", v)
 	}
 }
 
 func TestNewGenerationBumpsTheGeneration(t *testing.T) {
-	// ★ 代际必须真的 +1 —— 换绑之后，下一次 Build 才不会复用旧实例。
 	b := introspectBuilder(t, NewPolicy(nil, nil), nil, nil)
 	before := mustSnapshot(t, b).gen
 
@@ -253,7 +225,6 @@ func TestNewGenerationBumpsTheGeneration(t *testing.T) {
 	}
 }
 
-// TestNewGenerationRebindsTheChatModel 是「模型按引用在 Build 期解析」的落地。
 func TestNewGenerationRebindsTheChatModel(t *testing.T) {
 	cfg := minimalTestConfig()
 	cfg.Agents[spec.DefaultAgentID].ModelRef = "ref/a"
@@ -271,8 +242,6 @@ func TestNewGenerationRebindsTheChatModel(t *testing.T) {
 		}
 	}
 
-	// ★ 模型是**装配期**按引用解析的（入口 agent 自己的 ModelRef）——
-	//   所以这里问的是「这一代的快照解析出来的模型是谁」。
 	first := mustSnapshot(t, b)
 	firstModel, err := resolveModel(context.Background(), first, first.agentSpec.agents[spec.DefaultAgentID], nil)
 	if err != nil {
@@ -296,7 +265,6 @@ func TestNewGenerationRebindsTheChatModel(t *testing.T) {
 	}
 }
 
-// TestSnapshotNeverRegresses 钉住 §4.8 的单调性。
 func TestSnapshotNeverRegresses(t *testing.T) {
 	b := introspectBuilder(t, NewPolicy(nil, nil), nil, nil)
 	newer := configFromSpecs("test/model", nil,
@@ -305,7 +273,6 @@ func TestSnapshotNeverRegresses(t *testing.T) {
 	if _, err := b.snapshotFor(newer, 7); err != nil {
 		t.Fatal(err)
 	}
-	// 一个先读到旧代际的 Build 晚到：不得把快照覆盖回旧代。
 	old := configFromSpecs("test/model", nil,
 		toConfigPolicy(NewPolicy(nil, nil)), nil)
 	got, err := b.snapshotFor(old, 3)
@@ -315,13 +282,11 @@ func TestSnapshotNeverRegresses(t *testing.T) {
 	if got.gen != 7 {
 		t.Fatalf("snapshot regressed to gen %d, want 7", got.gen)
 	}
-	// ★ 断言的是**代际**：晚到的旧代际不能覆盖新代际 ✅ ✅。
 	if got.gen != 7 {
 		t.Fatalf("the newer snapshot was overwritten: gen %d, want 7", got.gen)
 	}
 }
 
-// TestSnapshotForReadsTheGenerationUnderTheLock 钉住代际竞态。
 func TestSnapshotForReadsTheGenerationUnderTheLock(t *testing.T) {
 	b := introspectBuilder(t, NewPolicy(nil, nil), nil, nil)
 	mgr := managerOf(t, b)
@@ -335,7 +300,7 @@ func TestSnapshotForReadsTheGenerationUnderTheLock(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			cfg, _ := mgr.Current()
-			mgr.set(cfg) // 只换代际，不换内容
+			mgr.set(cfg)
 		}()
 		go func() {
 			defer wg.Done()
@@ -353,7 +318,6 @@ func TestSnapshotForReadsTheGenerationUnderTheLock(t *testing.T) {
 	wg.Wait()
 }
 
-// TestGenerationChangeIsSafeUnderConcurrency 覆盖换代与自省/装配并发的那条路径。
 func TestGenerationChangeIsSafeUnderConcurrency(t *testing.T) {
 	b := introspectBuilder(t, NewPolicy(nil, nil), nil, nil)
 	mgr := managerOf(t, b)
@@ -387,10 +351,6 @@ func TestGenerationChangeIsSafeUnderConcurrency(t *testing.T) {
 	wg.Wait()
 }
 
-// ★ 模型选专家**只依据描述** —— 描述空了或与别的雷同，模型就分不出该叫谁，
-//
-//	而症状（「模型老是不叫那个专家」）从外面看不出原因。
-//	这里给它一个能自省出来的结论。
 func TestDescriptionVerdictsFlagEmptyAndDuplicates(t *testing.T) {
 	cfg := &spec.Config{
 		Agents:    map[string]*decl.Agent{},
@@ -438,7 +398,6 @@ func TestDescriptionVerdictsFlagEmptyAndDuplicates(t *testing.T) {
 	}
 }
 
-// 描述不同就该是可区分的 —— 判据不能把「都不同」也报成重复。
 func TestDescriptionVerdictsDoNotFlagDistinctDescriptions(t *testing.T) {
 	cfg := &spec.Config{
 		Agents:    map[string]*decl.Agent{},

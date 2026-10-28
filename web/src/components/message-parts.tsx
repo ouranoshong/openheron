@@ -7,30 +7,6 @@ import { thinkingLabel } from "@/lib/thinking"
 import type { Message, Part } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-/**
- * 一条消息里的各个 part。
- *
- * ★ reasoning 默认折叠。
- *   思考过程通常很长，默认展开会把正文挤到屏幕外；而它本来就是「想看才看」
- *   的内容。用户想看推理时可以展开，且展开状态按 part 记住。
- */
-
-/**
- * ReasoningPart 渲染。
- *
- * 单独的组件而不是内联三元：它有自己的展开状态，而 MessageParts 是
- * 每次流式增量都会重渲染的 —— 把 useState 提到上层会让整条消息
- * 在每次 token 到达时都跟着重建。
- *
- * ★ **用时**在思维链结束时才定下来：期间只显示「Thinking…」，
- *   结束后标题变成「Thought for 3.2s」—— 结束的那一刻用户才知道
- *   「刚才那一下想了多久」。
- *
- *   ★ 计时用的是**服务端事件的时间戳**（part 的 startedAt/endedAt），
- *     不是组件里的 Date.now()：服务端知道模型**真的**在想的那段时间，
- *     而客户端只知道自己收到事件的时间；而且这样组件的渲染里没有
- *     「读时钟」这种 impure call（归约器也因此保持纯函数）。
- */
 export function Reasoning({
   text,
   complete,
@@ -40,7 +16,6 @@ export function Reasoning({
   text: string
   complete: boolean
   interrupted?: boolean
-  /** 用时（毫秒）；null = 不知道（还没结束，或历史回放没有计时）。 */
   elapsedMs: number | null
 }) {
   const [open, setOpen] = useState(false)
@@ -78,8 +53,6 @@ export function MessageParts({ parts, role }: { parts: Part[]; role: Message["ro
         switch (p.kind) {
           case "text":
             if (!p.text) return null
-            // ★ 用户输入按字面呈现：react-markdown 默认把软换行折叠成空格，
-            //   多行指令在历史里会变形；用户写下的 `#` / `**` 也不该被当成格式。
             if (role === "user") {
               return (
                 <MessageBody key={p.id}>

@@ -16,12 +16,6 @@ import (
 	"openheron/storage/filestore"
 )
 
-// captureLog 把统一日志入口的输出收进 buffer。
-//
-// ★ 收的是 obs 而不是标准 log：业务日志都走 obs.Logger()，
-//
-//	测试要盯的就是那一份 —— 否则「日志里有 cause」这条断言验的是
-//	另一个出口。
 func captureLog(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
@@ -31,12 +25,6 @@ func captureLog(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-// breakSessionStore 造一个**真的会失败**的会话存储。
-//
-// ★ 用真的 FileManager 而不是假实现：这条用例要验的是「错误有没有被
-//
-//	记下来」，而假实现返回的错误链与生产不同，验不到包装有没有被拆掉。
-//	手法是把 sessions 目录换成一个同名文件 —— 于是 List 拿到真的 ENOTDIR。
 func breakSessionStore(t *testing.T) (storage.SessionManager, string) {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "sessions")
@@ -53,14 +41,7 @@ func breakSessionStore(t *testing.T) (storage.SessionManager, string) {
 	return fm, dir
 }
 
-// TestV2InternalErrorCarriesTheCauseToTheLog 是这个文件存在的理由。
-//
-// ★ 修之前：11 个 5xx 出口都只报一句描述（"list sessions failed"…）并把
-//
-//	error 丢掉，于是日志里是：
-//	    [api] GET /v2/sessions -> 500 internal: list sessions failed
-//	后半句在本地目录里查得到，前半句才是有用的 —— 而它被扔了。
-//	不知道是文件坏了、目录没权限，还是路径类型不对，而这三种处置完全不同。
+// [api] GET /v2/sessions -> 500 internal: list sessions failed
 func TestV2InternalErrorCarriesTheCauseToTheLog(t *testing.T) {
 	srv := newV2Server(t)
 	buf := captureLog(t)
@@ -80,16 +61,11 @@ func TestV2InternalErrorCarriesTheCauseToTheLog(t *testing.T) {
 	if !strings.Contains(logged, "/v2/sessions") {
 		t.Fatalf("the log must name the route; got:\n%s", logged)
 	}
-	// ★ 判据是「日志里出现了 error 的内容」，不是「日志非空」：
-	//   后者由 `status >= 500` 就满足了，而那正是缺陷本身。
 	if strings.TrimSpace(strings.TrimPrefix(logged, logged[:strings.Index(logged, ": ")+2])) == "" {
 		t.Fatalf("the log carries no cause at all: %q", logged)
 	}
 }
 
-// TestV2FailInternalKeepsTheClientMessageGeneric 守住另一半：客户端**不该**
-// 拿到细节。500 的处置是看日志，不是看响应体 —— 而 error 里常带绝对路径，
-// 转贴 issue 时就泄露了本地目录结构。
 func TestV2FailInternalKeepsTheClientMessageGeneric(t *testing.T) {
 	srv := newV2Server(t)
 	_ = captureLog(t)
@@ -114,8 +90,6 @@ func TestV2FailInternalKeepsTheClientMessageGeneric(t *testing.T) {
 	}
 }
 
-// TestErrBodyNeverSerializesTheCause 守住「原因只在日志里」是**类型系统**给的
-// 保证，而不是靠约定。
 func TestErrBodyNeverSerializesTheCause(t *testing.T) {
 	raw, err := json.Marshal(errBody{
 		Error: "internal error",
@@ -128,7 +102,6 @@ func TestErrBodyNeverSerializesTheCause(t *testing.T) {
 	if bytes.Contains(raw, []byte(errNoSuchDir.Error())) {
 		t.Fatalf("the cause leaked into the response body: %s", raw)
 	}
-	// 顺带钉住字段名集合：多一个导出字段就多一条泄露路径。
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		t.Fatal(err)

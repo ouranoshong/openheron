@@ -17,28 +17,12 @@ export interface SkillPickerProps {
   open: boolean
   onClose(): void
   skills: SkillView[]
-  /** 打开时的过滤词（命令里写了但对不上的名字）。 */
   filter?: string
   error?: string
-  /** 选中一个 skill —— 回填命令文本，不直接发送。 */
   onPick(skill: SkillView): void
 }
 
-/**
- * skill 选择器。
- *
- * ★ 列出**这一代挂着的** skill：名字、干什么的（description）、以及执行
- *   模式（inline / fork）—— 模式要看得见：同一个 skill 在当前 agent 里
- *   跑与另起一个 agent 跑，是两件不同的事。
- *
- * ★ 选中只**回填命令文本**（`/skill <name> `），不直接发送 ——
- *   用户多半还要补一句任务；而「发出去就等于请模型去调 skill 工具」
- *   这件事由服务端展开命令时完成（见 api/commands.go 的 /skill 模板）。
- */
 export function SkillPicker({ open, onClose, skills, filter, error, onPick }: SkillPickerProps) {
-  // ★ 组件只在打开时挂载（见 composer）：过滤词因此可以直接用作初值，
-  //   不需要「打开时重置」的 effect —— 而 effect 里同步 setState 会多一次
-  //   渲染，oxlint 也会把它标成 cascading renders。
   const [query, setQuery] = useState(filter ?? "")
   const [active, setActive] = useState(0)
   const listRef = useRef<HTMLUListElement>(null)
@@ -54,12 +38,8 @@ export function SkillPicker({ open, onClose, skills, filter, error, onPick }: Sk
     )
   }, [skills, query])
 
-  // 过滤后条数会变少：游标必须跟着夹住，否则 Enter 会落到 undefined。
   const cursor = items.length === 0 ? -1 : Math.min(active, items.length - 1)
 
-  // ★ 高亮的那一项要**滚进视野**（与 agent 选择器同一条理由）：
-  //   列表会滚，而键盘移动只改游标 —— 光标走到看不见的地方，
-  //   用户按 Enter 选中了一个自己都看不到的 skill。
   useEffect(() => {
     const list = listRef.current
     if (!list || cursor < 0) return
@@ -140,8 +120,6 @@ export function SkillPicker({ open, onClose, skills, filter, error, onPick }: Sk
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1 font-medium">
                     {skill.name}
-                    {/* ★ 执行模式：inline 与 fork 是两件不同的事 —— 一个在
-                        当前 agent 里跑，一个另起一个 agent。 */}
                     <span
                       data-testid="skill-option-mode"
                       className="text-muted-foreground rounded border px-1 text-[10px] leading-4"

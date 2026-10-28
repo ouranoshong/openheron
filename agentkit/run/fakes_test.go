@@ -22,16 +22,9 @@ import (
 type fakeSessionManager struct {
 	mu   sync.Mutex
 	byID map[string]*fakeSession
-	// ckpt 是这个仓库的 checkpoint 存取器 —— 会话从它那里拿。
 	ckpt *fakeCheckpoints
 }
 
-// newFakeSessionManager 造一个**不做 checkpoint** 的仓库。
-//
-// ★ ckpt 默认是 nil：那时审批中断无法恢复，而 hasCheckpoint 会把它当作
-//
-//	「没有 checkpoint 这回事」放过去 —— 多数用例要的就是这个。
-//	要真的 checkpoint 的用例自己给 sm.ckpt 装一个。
 func newFakeSessionManager() *fakeSessionManager {
 	return &fakeSessionManager{byID: make(map[string]*fakeSession)}
 }
@@ -78,8 +71,7 @@ type fakeSession struct {
 	setCursorOnAppend bool
 	agentID           string
 	decisions         []storage.ApprovalRecord
-	// ckpt 是这个会话的 checkpoint 存取器（来自它所属的仓库）。
-	ckpt *fakeCheckpoints
+	ckpt              *fakeCheckpoints
 }
 
 func (s *fakeSession) ID() string           { return s.id }
@@ -158,7 +150,6 @@ func (s *fakeSession) ClearPendingApproval() error {
 
 func (s *fakeSession) Title() string { s.mu.Lock(); defer s.mu.Unlock(); return s.title }
 
-// decisions 是假会话的审计记录 —— 与真实现一样，只追加。
 func (s *fakeSession) RecordDecision(recs ...storage.ApprovalRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -304,13 +295,6 @@ func interruptedEvent(id, desc string) *adk.TypedAgentEvent[*schema.Message] {
 	}
 }
 
-// interruptedEvents 造一个**同时**带多个待批的中断事件。
-//
-// ★ 框架把一轮里所有被拦下的工具收成**一个** composite 事件（eino
-//
-//	adk/chatmodel.go:970），再由 core.ToInterruptContexts 摊平成一组
-//	root cause —— 所以并行委派时多个子 agent 同时要审批，就落在**一个**
-//	事件里。
 func interruptedEvents(ids []string) *adk.TypedAgentEvent[*schema.Message] {
 	ev := &adk.TypedAgentEvent[*schema.Message]{
 		Action: &adk.AgentAction{

@@ -12,13 +12,6 @@ import {
   trackRequests,
 } from "./fixtures"
 
-/**
- * Composer 的三件事：10 行封顶、@ 文件提示、/ 命令提示。
- *
- * 断言都落在可见行为上 —— 输入框值、弹层选项、是否真的发出了 /v2/run。
- * 不碰组件内部状态，所以换实现时这些用例仍然成立。
- */
-
 test.beforeEach(async () => {
   await resetBackend()
 })
@@ -66,7 +59,6 @@ test("输入框出现时自动聚焦", async ({ page }) => {
   const box = page.locator(COMPOSER)
   await expect(box).toBeFocused()
 
-  // 第一句发出后输入区从居中切到底部，会挂载新的 Composer 实例。
   await box.fill("focus check")
   await page.keyboard.press("Enter")
   await expect(box).toHaveValue("")
@@ -109,13 +101,11 @@ test("/ 选择命令后带参数发送", async ({ page }) => {
   await page.keyboard.type("/re")
   await expect(page.locator(COMPOSER_POPUP)).toBeVisible()
 
-  // "/re" 也会命中描述里的 "thread"；按选项文本挑 review，不依赖排序。
   const review = page.locator(COMPOSER_OPTION).filter({ hasText: "/review" })
   await expect(review).toHaveCount(1)
   await review.click()
   await expect(box).toHaveValue("/review ")
 
-  // 选中之后光标必须在末尾，否则参数会插到命令前面。
   await box.evaluate((el) => {
     const ta = el as HTMLTextAreaElement
     ta.setSelectionRange(ta.value.length, ta.value.length)
@@ -204,10 +194,8 @@ test("键盘移动超出可视区时列表自动跟随", async ({ page }) => {
   await box.click()
   await page.keyboard.type("/")
   const options = page.locator(COMPOSER_OPTION)
-  // stop 只在 running 时出现；idle 下可见 9 条，已超过 max-h-64。
   await expect(options).toHaveCount(9)
 
-  // 走到最后一条时列表必须自己滚下去。
   for (let i = 0; i < 8; i++) await page.keyboard.press("ArrowDown")
   await expect(options.nth(8)).toHaveAttribute("aria-selected", "true")
 

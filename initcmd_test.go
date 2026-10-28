@@ -11,13 +11,6 @@ import (
 	"openheron/agentkit/spec"
 )
 
-// initEnv 造一个空环境，返回目标目录。
-//
-// ★ 必须把 HOME 指到临时目录 —— 否则测试会读到开发者自己家目录里的
-//
-//	~/.openheron（那里可能有真的 provider 与密钥），用例的结果就不确定了。
-//	★ 也必须清掉 OPENHERON_CONFIG_DIR：它会**盖掉**目标目录，
-//	用例就会写到别处去。
 func initEnv(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -25,8 +18,6 @@ func initEnv(t *testing.T) string {
 	t.Setenv(spec.ConfigDirEnv, "")
 	return filepath.Join(root, "project")
 }
-
-// ── --json：机器可读输出 ────────────────────────────────────────────────────
 
 func TestInitJSONOutputIsValidJSON(t *testing.T) {
 	dir := initEnv(t)
@@ -47,9 +38,6 @@ func TestInitJSONOutputIsValidJSON(t *testing.T) {
 	if out.Dir == "" || out.Model == "" {
 		t.Fatalf("dir and model must be reported: %+v", out)
 	}
-	// ★ 出厂是**两个** agent + provider + policy = 四个文件。
-	//   agent 必须成套：main 的 `subagents: [task]` 引用 task，
-	//   少一个就是启动期硬错误（initcfg 的用例 23 钉住这条）。
 	if len(out.Created) != 4 {
 		t.Fatalf("created = %v, want four files", out.Created)
 	}
@@ -70,8 +58,6 @@ func TestInitJSONOutputIsValidJSON(t *testing.T) {
 	}
 }
 
-// ── --dry-run：只报告，不落盘 ──────────────────────────────────────────────
-
 func TestInitDryRunWritesNothing(t *testing.T) {
 	dir := initEnv(t)
 	var buf bytes.Buffer
@@ -85,8 +71,6 @@ func TestInitDryRunWritesNothing(t *testing.T) {
 		t.Fatal("a dry run must not create anything")
 	}
 }
-
-// ── 参数错误 ────────────────────────────────────────────────────────────────
 
 func TestInitRejectsAnUnknownFlag(t *testing.T) {
 	dir := initEnv(t)
@@ -129,8 +113,6 @@ func TestInitHelpPrintsTheUsage(t *testing.T) {
 	}
 }
 
-// ── 产物落在指定目录 ────────────────────────────────────────────────────────
-
 func TestInitWritesIntoTheGivenDirectory(t *testing.T) {
 	dir := initEnv(t)
 	var buf bytes.Buffer
@@ -147,9 +129,6 @@ func TestInitWritesIntoTheGivenDirectory(t *testing.T) {
 			t.Fatalf("%s must exist: %v", rel, err)
 		}
 	}
-	// ★ 产物必须**自己就能加载** —— 写完了不等于能跑。
-	//
-	//	配置根就是那份产物所在的地方：取消继承链之后，没有第二层可读。
 	svc, err := spec.NewServiceAt(filepath.Join(dir, ".openheron"), dir)
 	if err != nil {
 		t.Fatalf("NewServiceAt: %v", err)

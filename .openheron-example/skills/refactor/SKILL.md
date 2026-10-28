@@ -1,5 +1,5 @@
 ---
 name: refactor
-description: 重构既有代码
+description: Refactor existing code
 ---
-保持行为不变的最小改动重构。
+Refactor with the smallest possible change that keeps the behavior identical.

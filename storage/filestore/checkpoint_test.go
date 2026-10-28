@@ -11,15 +11,11 @@ import (
 
 const testID = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
 
-// newTestStore 造一个会话的 checkpoint 存取器。
 func newTestStore(t *testing.T) *fileCheckpointStore {
 	t.Helper()
 	return newfileCheckpointStore(filepath.Join(t.TempDir(), "sessions"), testID, "")
 }
 
-// ckptPath 是这个会话的 checkpoint 在盘上的位置。
-//
-// ★ 它住在会话自己的 checkpoints/ 子目录里：<sessions>/<id>/checkpoints/<id>.ckpt
 func ckptPath(root, id string) string {
 	return filepath.Join(root, id, ckptDir, id+ckptExt)
 }
@@ -218,16 +214,12 @@ func TestEncodeDecodeHeader(t *testing.T) {
 	}
 }
 
-// ★ 老布局的 checkpoint（<dataDir>/checkpoints/<id>.ckpt）要**读得到** ——
-//
-//	那一轮还等着人审批，读不到就再也恢复不了了。
 func TestLegacyCheckpointIsStillReadable(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "sessions")
 	legacy := filepath.Join(t.TempDir(), "checkpoints")
 	fs := newfileCheckpointStore(root, testID, legacy)
 	ctx := context.Background()
 
-	// 老文件：老布局是「一个会话一个平铺文件」。
 	if err := os.MkdirAll(legacy, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +240,6 @@ func TestLegacyCheckpointIsStillReadable(t *testing.T) {
 		t.Fatalf("the legacy checkpoint must be visible through Get too, got %v %v", exists, err)
 	}
 
-	// 写只写新路径 —— 老文件不该被改写。
 	if err := fs.Set(ctx, testID, []byte("new payload")); err != nil {
 		t.Fatal(err)
 	}

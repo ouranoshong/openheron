@@ -74,10 +74,6 @@ func TestSubmitArchivesInOrder(t *testing.T) {
 	}
 }
 
-// ★ user 消息在**提交时**打上产生时刻。
-//
-// 它是「谁、什么时候说的」这对出处标记的另一半（归属是哪个 agent 说的，
-// 这里是用户说的）。中间消息的时刻由 transport 在产出时打（见那边）。
 func TestUserMessageCarriesItsTimestamp(t *testing.T) {
 	b := &fakeBuilder{agent: func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
 		return &fakeAgent{script: func(ctx context.Context, emit func(*adk.TypedAgentEvent[*schema.Message]) bool) {
@@ -161,12 +157,6 @@ func TestPrepareAgentPassesSessionAgentID(t *testing.T) {
 	}
 }
 
-// fakeCheckpoints 是一份内存里的 checkpoint 存储。
-//
-// ★ 不用 [FileStore]：它要求 checkpoint id 是规范 UUID，而测试里的会话 id
-//
-//	是 "session-1"。这里要验的是**运行时怎么处理 checkpoint**，不是文件
-//	布局。
 type fakeCheckpoints struct {
 	mu   sync.Mutex
 	data map[string][]byte
@@ -197,14 +187,6 @@ func (s *fakeCheckpoints) Delete(_ context.Context, id string) error {
 	return nil
 }
 
-// ★ 上一轮留下的 checkpoint 不该吞掉新的提问。
-//
-//	框架的契约（eino adk/turn_loop.go:569）：checkpoint 里有 runner 状态
-//	（被打断、或在轮次中途被取消）时，下一次 Run 一定走**恢复**路径 —— 而
-//	恢复路径只恢复那个被打断的 agent，不会跑新的提问。于是提问被吞掉：
-//	轮次永远不 ready，接口只能等到超时（turn_start_timeout）。
-//
-//	这条用例用「上个 checkpoint 还在」的现场来钉它。
 func TestStaleCheckpointDoesNotSwallowTheNextQuery(t *testing.T) {
 	b := &fakeBuilder{agent: func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
 		return &fakeAgent{script: func(ctx context.Context, emit func(*adk.TypedAgentEvent[*schema.Message]) bool) {
@@ -213,8 +195,6 @@ func TestStaleCheckpointDoesNotSwallowTheNextQuery(t *testing.T) {
 		}}
 	}}
 	sm := newFakeSessionManager()
-	// ★ checkpoint 的存取器由**会话**提供（storage.Session.GetCheckPointStore），
-	//	所以它挂在仓库上，而不是 Runtime 的配置里。
 	store := newFakeCheckpoints()
 	sm.ckpt = store
 	rt := New(Config{
@@ -227,7 +207,6 @@ func TestStaleCheckpointDoesNotSwallowTheNextQuery(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	// 上一轮留下的 checkpoint（中途被取消时框架写下的那一份）。
 	if err := store.Set(ctx, sess.ID(), []byte("stale runner state")); err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +215,6 @@ func TestStaleCheckpointDoesNotSwallowTheNextQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// ★ 提问必须真的跑起来 —— 轮次要 ready。
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatalf("the query must not be swallowed by the stale checkpoint: %v", err)
 	}
@@ -245,12 +223,6 @@ func TestStaleCheckpointDoesNotSwallowTheNextQuery(t *testing.T) {
 	})
 }
 
-// ★ 中断之后 checkpoint 还在 ⇒ 答复**不该**被「没有 checkpoint」拒掉。
-//
-//	这条钉的是另一头：恢复路径要读 checkpoint（eino adk/turn_loop.go:1861），
-//	所以「有没有 checkpoint」是答复的前置条件 —— 但只有在真的没有时才拒。
-//
-//	（框架在中断/取消落地时会写 checkpoint，见 adk/turn_loop.go:2010。）
 func TestInterruptLeavesACheckpointSoTheResumeIsNotRejected(t *testing.T) {
 	b := &fakeBuilder{agent: func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
 		return &fakeAgent{script: func(ctx context.Context, emit func(*adk.TypedAgentEvent[*schema.Message]) bool) {
@@ -260,8 +232,6 @@ func TestInterruptLeavesACheckpointSoTheResumeIsNotRejected(t *testing.T) {
 		}}
 	}}
 	sm := newFakeSessionManager()
-	// ★ checkpoint 的存取器由**会话**提供（storage.Session.GetCheckPointStore），
-	//	所以它挂在仓库上，而不是 Runtime 的配置里。
 	store := newFakeCheckpoints()
 	sm.ckpt = store
 	rt := New(Config{
@@ -290,7 +260,6 @@ func TestInterruptLeavesACheckpointSoTheResumeIsNotRejected(t *testing.T) {
 		return p != nil
 	})
 
-	// ★ 中断必须留下 checkpoint —— 否则答复会被「没有 checkpoint」拒掉。
 	waitFor(t, func() bool {
 		_, ok, _ := store.Get(ctx, sess.ID())
 		return ok
@@ -303,10 +272,6 @@ func TestInterruptLeavesACheckpointSoTheResumeIsNotRejected(t *testing.T) {
 	}
 }
 
-// ★ 答复审批时 checkpoint 没了 ⇒ **干脆拒绝**，而不是让轮次起来又等超时。
-//
-//	框架的恢复路径要读 checkpoint（eino adk/turn_loop.go:1861）；没有它，
-//	恢复无从谈起。待批记录也不能被取走 —— 取走了用户就没法答第二遍。
 func TestResumeWithoutACheckpointIsRejected(t *testing.T) {
 	b := &fakeBuilder{agent: func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
 		return &fakeAgent{script: func(ctx context.Context, emit func(*adk.TypedAgentEvent[*schema.Message]) bool) {
@@ -314,7 +279,6 @@ func TestResumeWithoutACheckpointIsRejected(t *testing.T) {
 		}}
 	}}
 	sm := newFakeSessionManager()
-	// ★ 这个仓库**做** checkpoint（存取器在会话上），只是这一个会话还没写。
 	sm.ckpt = newFakeCheckpoints()
 	rt := New(Config{
 		AgentBuilder:   b,
@@ -326,7 +290,6 @@ func TestResumeWithoutACheckpointIsRejected(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	// 有待批记录，但没有 checkpoint。
 	if err := sess.SetPendingApproval(&storage.PendingApproval{
 		Interrupts: []contract.PendingInterrupt{{InterruptID: "int-1"}},
 	}); err != nil {
@@ -336,7 +299,6 @@ func TestResumeWithoutACheckpointIsRejected(t *testing.T) {
 	if _, err := rt.Resume(ctx, sess.ID(), []ApprovalDecision{{InterruptID: "int-1", Approved: true}}); !errors.Is(err, ErrNoCheckpoint) {
 		t.Fatalf("want ErrNoCheckpoint, got %v", err)
 	}
-	// ★ 待批记录必须还在：用户还能重试。
 	pending, _ := sess.PendingApproval()
 	if pending == nil || len(pending.Interrupts) != 1 {
 		t.Fatalf("the pending approval must survive a rejected resume: %+v", pending)
@@ -385,20 +347,8 @@ func TestInterruptRecordsPendingApproval(t *testing.T) {
 	}
 }
 
-// ★ 一轮里**多个**待批要一次答完整组。
-//
-// 并行委派时多个子 agent 同时被拦下，它们的待批落在**同一个**中断事件里
-// （框架收成 composite，再摊平成一组 root cause）—— 而每个都是**独立**
-// 的决定，各带各的 id。
-//
-// 这一条钉的是「成组」语义：这一组**一起**记、**一起**取、**一起**消费。
-// 逐个发的话，答完第一个，其余的 id 立刻作废（不在 Targets 里的被中断
-// 组件会带着**新 id** 重新中断，eino adk/runner.go:133）。
 func TestMultiplePendingApprovalsAreAnsweredAsAGroup(t *testing.T) {
 	ids := []string{"agent:A;tool:call_1", "agent:B;tool:call_2"}
-	// ★ 假 agent **不**自己中断 —— 待批由 drain 注入（与既有用例同一模式）。
-	//   「一个事件里带多个待批」那一层由 transport 的用例钉（框架把一轮
-	//   里所有被拦下的工具收成**一个** composite 事件）。
 	b := &fakeBuilder{agent: func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
 		return &fakeAgent{script: func(ctx context.Context, emit func(*adk.TypedAgentEvent[*schema.Message]) bool) {
 			emit(textEvent("about to write"))
@@ -429,7 +379,6 @@ func TestMultiplePendingApprovalsAreAnsweredAsAGroup(t *testing.T) {
 		return p != nil && len(p.Interrupts) == 2
 	})
 
-	// ★ 两个都记下来了，各带各的 id —— 不是只记第一个。
 	pending, _ := sess.PendingApproval()
 	if len(pending.Interrupts) != 2 {
 		t.Fatalf("pending must hold 2 interrupts, got %d", len(pending.Interrupts))
@@ -443,10 +392,6 @@ func TestMultiplePendingApprovalsAreAnsweredAsAGroup(t *testing.T) {
 		}
 	}
 
-	// ★ 一次答完整组：两个决定都在**同一个**请求里。
-	//
-	//   ★ 不对 resume turn 调 Wait —— 假循环的 ready 握手要靠调用方去消费
-	//     事件才会完成（既有用例也是这个形状）。
 	if _, err := rt.Resume(ctx, sess.ID(), []ApprovalDecision{
 		{InterruptID: ids[0], Approved: true},
 		{InterruptID: ids[1], Approved: true},
@@ -454,13 +399,11 @@ func TestMultiplePendingApprovalsAreAnsweredAsAGroup(t *testing.T) {
 		t.Fatalf("Resume: %v", err)
 	}
 
-	// 整组被一次消费掉 —— 不是一个一个。
 	after, _ := sess.PendingApproval()
 	if after != nil && len(after.Interrupts) != 0 {
 		t.Fatalf("the whole group must be consumed, got %+v", after.Interrupts)
 	}
 
-	// ★ 不能重放：组已经没了，再答一次必须是「没有待批」。
 	if _, err := rt.Resume(ctx, sess.ID(), []ApprovalDecision{
 		{InterruptID: ids[0], Approved: true},
 	}); !errors.Is(err, ErrNoPendingInterrupt) {
@@ -524,20 +467,6 @@ func TestApprovalResultCarriesTheDecision(t *testing.T) {
 	}
 }
 
-// ★ 决定载荷的类型必须是 [approval.Decision] —— **闸门读的那个类型**。
-//
-//	openheronrt 与 agent 不能互相 import（依赖铁律），所以这个「同一个类型」
-//	只能靠**共享叶子包**保证：两边都写 `approval.Decision`，谁改成自己的
-//	结构，编译器立刻报错。
-//
-//	这条曾经不成立：openheronrt 送 `*openheronrt.ApprovalResult`、闸门读
-//	`*agent.ApprovalResult`，两者结构相同、类型不同 ⇒ eino 的
-//	GetResumeContext 具体类型断言必然失败 ⇒ 闸门拿不到决定 ⇒ 而闸门把
-//	「拿不到决定」当成「照常执行」⇒ **每一次审批都被忽略**。
-//
-//	这条断言本身是「同包内」的，钉不住跨包那一半 —— 跨包那半由
-//	`agentkit/build` 包的 `TestApprovalGateRefusesTheToolWhenTheDecisionTypeIsWrong`
-//	从行为上钉住。
 func TestApprovalPayloadIsTheSharedDecisionType(t *testing.T) {
 	payload := approvalResult(ApprovalDecision{Approved: true})
 	if _, ok := payload.(*approval.Decision); !ok {
@@ -739,16 +668,6 @@ func waitFor(t *testing.T, cond func() bool) {
 
 var _ = strings.TrimSpace
 
-// ★ 一次答完整组：所有决定都要进框架的 Targets。
-//
-//	框架的契约（eino adk/runner.go:133）：不在 Targets 里的被中断组件会
-//	**重新中断自己**，而重新中断拿到的是**新的 id**（框架每次都发新的
-//	uuid）。所以只 target 一个的话，其余的 id 就全废了 —— 客户端手里那批
-//	旧 id 再也答不了，症状是「interruptId does not match the pending
-//	approval」。
-//
-//	这一条钉的就是那个缺陷：原先 makeGenResume 只取**第一个**带决定的
-//	item，塞进 Targets 的也只有一个。
 func TestMakeGenResumeTargetsEveryDecision(t *testing.T) {
 	rt := &Runtime{}
 	gen := rt.makeGenResume(nil)
@@ -776,8 +695,6 @@ func TestMakeGenResumeTargetsEveryDecision(t *testing.T) {
 	}
 }
 
-// 没有决定时必须报错，而不是发一个空的 Targets —— 那会让框架把**所有**
-// 被中断组件都当成「没被答复」，全部重新中断。
 func TestMakeGenResumeRefusesAnEmptyDecisionSet(t *testing.T) {
 	rt := &Runtime{}
 	gen := rt.makeGenResume(nil)
@@ -787,11 +704,6 @@ func TestMakeGenResumeRefusesAnEmptyDecisionSet(t *testing.T) {
 	}
 }
 
-// 答复之后，待批记录就**取走了** —— 那次决定必须留下审计。
-//
-// ★ 这是「上周那次到底批没批」唯一的持久痕迹：
-//
-//	不留审计，决定在答复的那一刻就再也找不回来了。
 func TestResumeRecordsTheApprovalDecision(t *testing.T) {
 	b := &fakeBuilder{agent: func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
 		return &fakeAgent{script: func(ctx context.Context, emit func(*adk.TypedAgentEvent[*schema.Message]) bool) {
@@ -845,7 +757,6 @@ func TestResumeRecordsTheApprovalDecision(t *testing.T) {
 	}
 }
 
-// 审计是**只追加**的 —— 后来的答复不能改写先前那一条。
 func TestDecisionsAreAppendOnly(t *testing.T) {
 	b := &fakeBuilder{agent: func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
 		return &fakeAgent{script: func(ctx context.Context, emit func(*adk.TypedAgentEvent[*schema.Message]) bool) {
@@ -877,14 +788,6 @@ func TestDecisionsAreAppendOnly(t *testing.T) {
 	}
 }
 
-// ★ 判死的轮次：Wait 必须**报出原因**。
-//
-//	判死的轮次**没有事件流**（事件流是 makeOnAgentEvents 才挂上的）——
-//	调用方若把它当成「起来了」，读 Events() 会拿到 nil 迭代器，
-//	于是接口在 nil 上崩，而不是给客户端一句「这一轮没起来」。
-//
-//	（这条钉的是 api 层那个 panic：接口层拿 Wait 的返回值决定是
-//	「开流」还是「报 RUN_ERROR」。）
 func TestAFailedTurnReportsWhyItNeverStarted(t *testing.T) {
 	turn := newTurnHandle("session-x", contract.TurnQuery)
 	turn.fail(ErrNoCheckpoint)

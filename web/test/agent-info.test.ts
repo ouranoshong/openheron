@@ -123,7 +123,6 @@ describe("checkConfigChanged", () => {
       }),
     )
 
-    // ★ 首屏那次请求失败过 → 底栏与选择器还空着，这一份得让界面知道。
     expect(await checkConfigChanged()).toBe(true)
     expect((await loadAgentBadge())?.id).toBe("main")
   })
@@ -140,7 +139,6 @@ describe("checkConfigChanged", () => {
     await loadAgentBadge(true)
     expect(await checkConfigChanged()).toBe(false)
 
-    // ★ 用户在编辑器里加了一个 agent —— 服务端热更新了，指纹随之变。
     version = "v2"
     expect(await checkConfigChanged()).toBe(true)
   })
@@ -158,7 +156,6 @@ describe("checkConfigChanged", () => {
     await loadAgentBadge(true)
     fail = true
     expect(await checkConfigChanged()).toBe(false)
-    // 旧缓存没被冲掉：底栏不该因为一次 5xx 变空白。
     expect((await loadAgentBadge())?.id).toBe("main")
   })
 })

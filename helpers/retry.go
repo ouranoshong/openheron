@@ -11,9 +11,6 @@ import (
 )
 
 // ApplyModelRetry enables model-call retries for transient rate-limit errors.
-//
-// maxRetries 由 server/config.yaml 的 retry.max_retries 给出；传 0 用默认值 ——
-// 「不配」与「配成 0」是两件事，后者会让每个可重试错误直接冒泡。
 func ApplyModelRetry(cfg *deep.Config, maxRetries int) {
 	if maxRetries <= 0 {
 		maxRetries = DefaultMaxRetries
@@ -32,7 +29,6 @@ func ApplyModelRetry(cfg *deep.Config, maxRetries int) {
 	}
 }
 
-// DefaultMaxRetries 是未配置时的重试次数。
 const DefaultMaxRetries = 5
 
 // IsModelRetryInProgress reports whether err is a retryable model-call failure

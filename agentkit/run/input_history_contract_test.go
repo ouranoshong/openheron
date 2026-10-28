@@ -8,12 +8,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// rejectUnanswerableToolCalls 复刻 OpenAI 兼容端点的那条硬校验。
-//
-// ★ 为什么要照抄端点的措辞：它决定了「历史长什么样才算合法」，
-//
-//	而这条不变式不是 openheron 定的。openheron 只需要保证**送出去之前**满足它。
-//	各家措辞略有出入（有的还额外要求工具消息紧邻），但这一条是一致的。
 func rejectUnanswerableToolCalls(hist []*schema.Message) error {
 	open := map[string]bool{}
 	for _, msg := range hist {
@@ -57,12 +51,6 @@ func errf(format string, args ...any) error {
 	return strErr(b.String())
 }
 
-// TestHistorySatisfiesTheEndpointContract 才是真正的验收：
-// 同一份坏历史，修复前被端点拒、修复后通过。
-//
-// ★ 单测 normalizeHistory 的形态是不够的 —— 形态对了但仍可能被端点拒，
-//
-//	而这里直接跑端点那条不变式。
 func TestHistorySatisfiesTheEndpointContract(t *testing.T) {
 	cases := map[string][]*schema.Message{
 		"unknown tool never produced a result": {
@@ -92,7 +80,6 @@ func TestHistorySatisfiesTheEndpointContract(t *testing.T) {
 
 	for name, hist := range cases {
 		t.Run(name, func(t *testing.T) {
-			// 前置：这确实是端点会拒的形状，否则这条用例什么都没证明。
 			if err := rejectUnanswerableToolCalls(hist); err == nil {
 				t.Fatalf("precondition failed: the endpoint would accept this history as-is, "+
 					"so the case proves nothing: %s", describeHistory(hist))
@@ -109,10 +96,6 @@ func TestHistorySatisfiesTheEndpointContract(t *testing.T) {
 	}
 }
 
-// TestNormalizeHistoryDoesNotFabricateResults 守住一个容易写错的点：
-//
-// 补出来的消息必须**如实说没跑成**，不能编一个看起来合理的结果。
-// 编出来的结果会让模型照着不存在的事实往下推 —— 那比 400 更难查。
 func TestNormalizeHistoryDoesNotFabricateResults(t *testing.T) {
 	hist := []*schema.Message{schema.UserMessage("q"), assistantWithCalls("c1")}
 	got := normalizeHistory(hist)

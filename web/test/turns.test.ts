@@ -41,8 +41,6 @@ describe("turnFlags", () => {
     expect(flags.map((f) => f.showRole)).toEqual([true, false])
   })
 
-  // ★ 多 agent：换了 agent 就要出标签 ——
-  //   「换人了」是用户最需要看到的信号，只看角色变化会把它抹掉。
   test("换了 agent 就重新显示标签", () => {
     const flags = turnFlags([
       msg("u1", "user"),
@@ -53,7 +51,6 @@ describe("turnFlags", () => {
     expect(flags.map((f) => f.showRole)).toEqual([false, true, true, false])
   })
 
-  // 同一个 agent 的连续片段仍然只出一次标签 —— 别把标签糊满屏。
   test("同一个 agent 的连续片段只显示一次标签", () => {
     const flags = turnFlags([
       msg("u1", "user"),

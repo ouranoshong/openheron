@@ -13,7 +13,6 @@ import (
 func toolContext(name string) *adk.ToolContext       { return &adk.ToolContext{Name: name} }
 func deniedToolContext(name string) *adk.ToolContext { return toolContext(name) }
 
-// stubTool 是一个只报得出名字的工具，用来验证「摘不摘得动」。
 type stubTool struct {
 	name string
 }
@@ -36,18 +35,16 @@ func namesOf(tools []tool.BaseTool) []string {
 	return out
 }
 
-// ── 三档判定 ─────────────────────────────────────────────────────────────
-
 func TestPolicyTierOrder(t *testing.T) {
 	p := NewPolicy(
 		[]string{"write_file", "execute"},
-		[]string{"execute"}, // 与 ask 重名 —— deny 必须赢,
+		[]string{"execute"},
 	)
 	cases := map[string]Tier{
 		"read_file":  TierAllow,
 		"ls":         TierAllow,
 		"write_file": TierAsk,
-		"execute":    TierDeny, // ★ 同名时 deny 优先
+		"execute":    TierDeny,
 	}
 	for name, want := range cases {
 		if got := p.TierOf(name); got != want {
@@ -56,10 +53,6 @@ func TestPolicyTierOrder(t *testing.T) {
 	}
 }
 
-// ★ 兜底是 **allow**：只有明确写进 ask / deny 的工具才被拦。
-//
-//	「新增一个写工具就自动获得写权限」这个担心，靠的是**把有后果的工具
-//	点名进 ask / deny**，而不是给每个工具装一道门。
 func TestPolicyFallsBackToAllow(t *testing.T) {
 	p := NewPolicy([]string{"write_file"}, nil)
 	for _, name := range []string{"brand_new_tool", "shell", "delete_everything"} {
@@ -67,17 +60,11 @@ func TestPolicyFallsBackToAllow(t *testing.T) {
 			t.Errorf("the unlisted %q must fall back to allow, got %q", name, got)
 		}
 	}
-	// ★ 点名的照旧：ask 拦一道，deny 更前一道。
 	if got := p.TierOf("write_file"); got != TierAsk {
 		t.Errorf("the listed %q must stay ask, got %q", "write_file", got)
 	}
 }
 
-// ── 分层工具表 ───────────────────────────────────────────────────────────
-
-// ★ **外层 deny 压过内层 disable**：同一名字同时出现在两层时，若按内层处理，
-//
-//	「全局禁止」会被一个 agent 的偏好悄悄解除。
 func TestDenyBeatsDisable(t *testing.T) {
 	tbl := newTable("main",
 		[]string{"execute"},
@@ -96,8 +83,8 @@ func TestDenyBeatsDisable(t *testing.T) {
 
 func TestFilterRemovesByLayer(t *testing.T) {
 	tbl := newTable("main",
-		[]string{"execute"},                   // 外层
-		[]string{"write_file", "write_todos"}, // 内层
+		[]string{"execute"},
+		[]string{"write_file", "write_todos"},
 	)
 	tools := []tool.BaseTool{
 		&stubTool{name: "read_file"},
@@ -120,13 +107,9 @@ func TestFilterRemovesByLayer(t *testing.T) {
 	}
 }
 
-// ★ **R1 回归**：被全局 deny 的工具，子 agent 也拿不回 ——
-//
-//	即使它自己的 disabled_tools 里没提它。
 func TestDeniedToolStaysDeniedForSubAgents(t *testing.T) {
 	globalDeny := []string{"execute"}
 
-	// 入口 agent 与一个「爱写文件」的下属，各自的 disable 都不含 execute。
 	parent := newTable("main", globalDeny, nil)
 	child := newTable("writer", globalDeny, []string{"write_todos"})
 
@@ -140,7 +123,6 @@ func TestDeniedToolStaysDeniedForSubAgents(t *testing.T) {
 	}
 }
 
-// 子 agent 自己的 disable 不该影响别的 agent。
 func TestDisableIsScopedToItsOwnAgent(t *testing.T) {
 	writer := newTable("writer", nil, []string{"write_file"})
 	reader := newTable("reader", nil, nil)
@@ -164,12 +146,11 @@ func TestFilterIsNoopWithoutRules(t *testing.T) {
 	}
 }
 
-// 报不出名字的工具**保留**而不是错摘：工具凭空消失会让模型无从解释。
 func TestFilterKeepsToolsThatCannotReportName(t *testing.T) {
 	tbl := newTable("main", []string{"mystery"}, nil)
 	kept, _ := tbl.Filter([]tool.BaseTool{&brokenTool{}})
 	if len(kept) != 1 {
-		t.Fatal("报不出名字的工具应被保留（宁可漏摘，不可错摘）")
+		t.Fatal("a tool that cannot report its name must be kept (over-keeping beats wrongly stripping)")
 	}
 }
 
@@ -184,8 +165,6 @@ var errBroken = &brokenErr{}
 type brokenErr struct{}
 
 func (*brokenErr) Error() string { return "cannot describe itself" }
-
-// ── 中间件装配 ───────────────────────────────────────────────────────────
 
 func TestFilterMiddlewareDropsDeniedToolInBeforeAgent(t *testing.T) {
 	tbl := newTable("main", []string{"execute"}, nil)
@@ -203,14 +182,12 @@ func TestFilterMiddlewareDropsDeniedToolInBeforeAgent(t *testing.T) {
 	}
 }
 
-// filterMiddleware 必须排在 ApprovalMiddleware 之前：deny 的工具要在闸门
-// 看见它之前就被摘掉，否则闸门会先挂中断。
 func TestApprovalMiddlewareRefusesDeniedToolEvenIfFilterMissed(t *testing.T) {
 	p := NewPolicy([]string{"write_file"}, []string{"execute"})
 	mw := newApprovalMiddleware(p)
 
 	endpoint := func(context.Context, string, ...tool.Option) (string, error) {
-		t.Fatal("★ 被 deny 的工具绝不能被执行到 endpoint")
+		t.Fatal("★ a denied tool must never reach the endpoint")
 		return "", nil
 	}
 	wrapped, err := mw.WrapInvokableToolCall(context.Background(), endpoint, deniedToolContext("execute"))
@@ -240,6 +217,6 @@ func TestApprovalMiddlewareLetsAllowTierThrough(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !called {
-		t.Fatal("allow 档的工具应直接放行到 endpoint")
+		t.Fatal("a tool on the allow tier must go straight to the endpoint")
 	}
 }

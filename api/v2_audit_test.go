@@ -8,12 +8,6 @@ import (
 	"openheron/storage"
 )
 
-// 审批的**审计**要能被读出来 ——
-//
-// ★ 记了却读不到等于没记：审计的价值在于事后能回答「批过什么」。
-//
-//	接口用 GET /v2/sessions/{id} 的 decisions 字段，与待批
-//	（pendingApprovals）分开放 —— 前者是「已经发生的」，后者是「还欠着的」。
 func TestV2SessionDetailCarriesTheApprovalAudit(t *testing.T) {
 	srv := newV2Server(t)
 	id := createThread(t, srv)

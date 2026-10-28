@@ -23,13 +23,8 @@ func subSpec(id string, subs ...decl.SubAgentSpec) decl.SubAgentSpec {
 	}
 }
 
-// buildSubtree 装配一棵**以子 agent 为顶层**的子树（不含根）。
-//
-// ★ depth=1 与生产里「根的下挂」同一层：maxDepth=1 时它们的下一层不再构造。
 func buildSubtree(t *testing.T, specs []decl.SubAgentSpec, maxDepth int) *buildCount {
 	t.Helper()
-	// ★ 策略要**点名** write_file（ask 档）—— 兜底是 allow，
-	//   没点名的工具压根不进闸门 ✅ ✅。
 	cfg := configFromSpecs("test/model", nil,
 		decl.Policy{Ask: []string{"write_file"}}, specs)
 	b := newTestBuilderWithConfig(t, cfg)
@@ -39,7 +34,6 @@ func buildSubtree(t *testing.T, specs []decl.SubAgentSpec, maxDepth int) *buildC
 	}
 	snap.agentSpec.maxDepth = maxDepth
 
-	// ★ 底板带的是**入口 agent**的身份（每个 agent 的身份不同）。
 	rootSp, ok := snap.agentSpec.agentSpec(snap.agentSpec.defaultAgent)
 	if !ok {
 		t.Fatalf("the default agent %q is not declared", snap.agentSpec.defaultAgent)
@@ -58,8 +52,6 @@ func buildSubtree(t *testing.T, specs []decl.SubAgentSpec, maxDepth int) *buildC
 	return bc
 }
 
-// ── 深度 ─────────────────────────────────────────────────────────────────
-
 func TestDepthStartsAtZeroAndIncrements(t *testing.T) {
 	ctx := context.Background()
 	if got := depthFrom(ctx); got != 0 {
@@ -71,7 +63,6 @@ func TestDepthStartsAtZeroAndIncrements(t *testing.T) {
 	}
 }
 
-// ★ 无论是否摘工具都要往下标一层 —— 否则上限变成「每层各算一次」。
 func TestDepthGuardAlwaysIncrements(t *testing.T) {
 	mw := newDepthMiddleware(1)
 	ctx, _, err := mw.BeforeAgent(context.Background(), &adk.ChatModelAgentContext{})
@@ -88,7 +79,6 @@ func TestDepthGuardRemovesTaskAtLimit(t *testing.T) {
 	runCtx := &adk.ChatModelAgentContext{
 		Tools: []tool.BaseTool{&stubTool{name: "read_file"}, &stubTool{name: taskToolName}},
 	}
-	// 深度 1 == 上限 1 ⇒ 不许再往下派。
 	ctx := withDepth(context.Background(), 1)
 	_, out, err := mw.BeforeAgent(ctx, runCtx)
 	if err != nil {
@@ -115,7 +105,6 @@ func TestDepthGuardKeepsTaskBelowLimit(t *testing.T) {
 	}
 }
 
-// ★ 到顶时**仍然标层**，且到顶的 agent 仍能做自己的事。
 func TestDepthGuardDoesNotBreakTheAgentItself(t *testing.T) {
 	mw := newDepthMiddleware(1)
 	runCtx := &adk.ChatModelAgentContext{Tools: []tool.BaseTool{&stubTool{name: "read_file"}}}
@@ -125,11 +114,9 @@ func TestDepthGuardDoesNotBreakTheAgentItself(t *testing.T) {
 		t.Fatalf("reaching the cap must not error: %v", err)
 	}
 	if len(out.Tools) != 1 {
-		t.Fatal("到顶的 agent 仍应保留自己的工具")
+		t.Fatal("an agent at the depth cap must still keep its own tools")
 	}
 }
-
-// ── 子 agent 构造 ───────────────────────────────────────────────────────
 
 func TestSubAgentsAreBuilt(t *testing.T) {
 	bc := buildSubtree(t, []decl.SubAgentSpec{subSpec("researcher"), subSpec("tester")}, 1)
@@ -138,16 +125,12 @@ func TestSubAgentsAreBuilt(t *testing.T) {
 	}
 }
 
-// ★ R1 闭环：子 agent 必须**逐个**带自己的审批中间件。
-//
-// 这是本次最关键的一条 —— eino 不把 cfg.Handlers 传播给用户 SubAgents，
-// 不显式挂上就等于子 agent 能无审批地写文件。
 func TestSubAgentsCarryTheirOwnApprovalMiddleware(t *testing.T) {
 	policy := NewPolicy([]string{"write_file"}, nil)
 	handlers := subHandlers(policy, subSpec("writer"), 1)
 
 	if !chainGatesWriteFile(t, handlers) {
-		t.Fatal("★ 子 agent 的中间件链里没有闸门 —— 它能无审批地写文件")
+		t.Fatal("★ the sub-agent middleware chain has no gate - it could write files without approval")
 	}
 }
 
@@ -155,10 +138,9 @@ func TestSubHandlersApplyItsOwnDeny(t *testing.T) {
 	policy := NewPolicy([]string{"write_file"}, []string{"execute"})
 	handlers := subHandlers(policy, decl.SubAgentSpec{ID: "w", DisabledTools: []string{"write_file"}}, 1)
 
-	// 它的 disabled_tools 不含 execute，但全局 deny 含 —— deny 必须赢。
 	fw := findFilter(t, handlers)
 	if fw == nil {
-		t.Fatal("中间件链里没有过滤器")
+		t.Fatal("the middleware chain has no filter")
 	}
 	if got := fw.table.Blocked("execute"); got != LayerDeny {
 		t.Fatalf("* the global deny must hold on sub-agents too, got %q", got)
@@ -168,9 +150,6 @@ func TestSubHandlersApplyItsOwnDeny(t *testing.T) {
 	}
 }
 
-// ── 深度截断 ─────────────────────────────────────────────────────────────
-
-// ★ 到顶**不再递归构造下一层**，而不是建出来再摘工具。
 func TestSubAgentsStopAtMaxDepth(t *testing.T) {
 	bc := buildSubtree(t, []decl.SubAgentSpec{subSpec("researcher", subSpec("grandchild"))}, 1)
 	if bc.n != 1 {
@@ -185,7 +164,6 @@ func TestSubAgentsOneLevelDeeperWhenAllowed(t *testing.T) {
 	}
 }
 
-// ★★ R1 在**每一层**都成立：嵌套的子 agent 也必须带自己的闸门。
 func TestEveryNestedSubAgentCarriesTheApprovalGate(t *testing.T) {
 	bc := buildSubtree(t, []decl.SubAgentSpec{subSpec("researcher", subSpec("grandchild"))}, 2)
 	if bc.n != 2 {
@@ -208,10 +186,6 @@ func TestDefaultMaxDepthBlocksFurtherNesting(t *testing.T) {
 	}
 }
 
-// countBuilds 把包内的装配入口换成计数版本，返回这次真构造了几个 agent
-// 以及每次的输入。
-//
-// ★ 它换的是**生产的那个入口**（`buildAgent`），不是另写一份装配逻辑。
 func countBuilds(t *testing.T) *buildCount {
 	t.Helper()
 	orig := buildAgent
@@ -225,13 +199,11 @@ func countBuilds(t *testing.T) *buildCount {
 	return bc
 }
 
-// buildCount 记下装配入口被调了几次、每次的输入是什么。
 type buildCount struct {
 	n      int
 	inputs []deep.Config
 }
 
-// findFilter 从链里找出过滤器中间件。
 func findFilter(t *testing.T, h []adk.TypedChatModelAgentMiddleware[*schema.Message]) *filterMiddleware {
 	t.Helper()
 	for _, m := range h {
@@ -242,8 +214,6 @@ func findFilter(t *testing.T, h []adk.TypedChatModelAgentMiddleware[*schema.Mess
 	return nil
 }
 
-// chainGatesWriteFile 逐个跑中间件的 WrapInvokableToolCall，
-// 看 write_file 最终是不是挂起而不是直接执行。
 func chainGatesWriteFile(t *testing.T, h []adk.TypedChatModelAgentMiddleware[*schema.Message]) bool {
 	t.Helper()
 	reached := false
@@ -264,12 +234,10 @@ func chainGatesWriteFile(t *testing.T, h []adk.TypedChatModelAgentMiddleware[*sc
 		}
 		wrapped = next
 	}
-	// 不给 resume context ⇒ 若被闸门挂起，endpoint 绝不该被触达。
 	_, _ = wrapped(context.Background(), "{}")
 	return !reached
 }
 
-// implementsToolWrapper 判断中间件是否实现了工具调用包装。
 type toolWrapper interface {
 	WrapInvokableToolCall(context.Context, adk.InvokableToolCallEndpoint, *adk.ToolContext) (adk.InvokableToolCallEndpoint, error)
 }

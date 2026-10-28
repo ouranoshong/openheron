@@ -166,10 +166,6 @@ func TestV2RunLeavesUnknownSlashAlone(t *testing.T) {
 	}
 }
 
-// ★ /skill <name> [task]：第一个词是 skill 名，其余是任务。
-//
-//	模板要能分开拿到这两样 —— 粘在一起的话，模板里就会出现
-//	「skill `refactor 拆一下`」这种读不通的东西。
 func TestExpandSkillCommandSplitsTheName(t *testing.T) {
 	tests := []struct {
 		name string
@@ -205,7 +201,6 @@ func TestExpandSkillCommandSplitsTheName(t *testing.T) {
 	}
 }
 
-// 别的命令的 {{args}} 是「命令名之后的全部」—— 不能被 {{name}} 的拆分吃掉。
 func TestExpandOtherPromptKeepsAllArgs(t *testing.T) {
 	got, err := expandCommand("/review src/a.go")
 	if err != nil {

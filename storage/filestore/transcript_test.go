@@ -8,13 +8,6 @@ import (
 	"testing"
 )
 
-// 本文件钉住 session.jsonl 的**磁盘格式契约**。
-//
-// ★ 这个包之前把编解码放在 storage/filestore/mem 里，而那个包零测试 ——
-//
-//	格式（header 字段、message_kind、version）没有任何东西拦着它被改掉。
-//	下面是那道闸门。
-
 // rewriteHeader replaces the first line of a transcript and keeps the message
 // lines intact. It is how the tests forge a header openheron should reject.
 func rewriteHeader(t *testing.T, path string, mutate func(*logHeader)) {
@@ -78,11 +71,6 @@ func TestTranscriptForeignMessageKindIsRejected(t *testing.T) {
 
 // The header is the transcript's identity: when it disagrees with the
 // directory name, the header wins.
-//
-// ★ 后果是已知的：后续追加会写向 header 指向的目录（那个目录可能并不存在）。
-//
-//	这是「以 header 为准」这条规则的直接后果，readTranscript 会为它打一条
-//	告警。把目录名当权威反而会让会话读得到、写不进另一个目录。
 func TestTranscriptHeaderIDWinsOverDirectoryName(t *testing.T) {
 	root := t.TempDir()
 	fm, _ := NewFileManager(root, Options{})

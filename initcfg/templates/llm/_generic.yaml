@@ -1,9 +1,10 @@
-# ★ 通用模板：**没有默认端点** —— 必须显式给 --base-url。
-#   不猜端点：猜错了用户拿到的是 404，比直接报错贵得多。
+# ★ Generic template: **no default endpoint** — --base-url must be given explicitly.
+#   Endpoints are never guessed: a wrong guess hands the user a 404, which is far
+#   more expensive than an outright error.
 type: openai_compat
 base_url: {{base_url}}
 
-# ★ api_key 写的是**环境变量名**，渲染成 ${NAME}。
+# ★ api_key holds the **name of an environment variable**, rendered as ${NAME}.
 api_key: {{api_key_env}}
 
 timeout: 5m
