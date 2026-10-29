@@ -507,25 +507,44 @@ The transcript is then the **single source of truth**: the effective history is 
 effective history = the last compaction message, and everything after it
 ```
 
-Concretely, the session gains one read:
+The session already has the read that returns the transcript. What it lacks is a way to ask for the **effective** view of it, so the read gains a parameter rather than a second method:
 
 ```go
-// EffectiveMessages returns the messages that make up the agent's context:
-// the last compaction message and everything after it.
+// Messages returns the session's messages.
 //
-// Messages() keeps returning the whole transcript — that is the audit trail
-// and what the UI renders.
-func (s *FileSession) EffectiveMessages() []*schema.Message
+// effective selects the view:
+//
+//	false (the default) — the whole transcript: the audit trail, and what the
+//	  UI renders.
+//	true — the effective history: the last compaction message and everything
+//	  after it, which is what the agent's context is built from.
+Messages(effective bool) []*schema.Message
 ```
 
-and the run loop asks for it instead of the whole transcript (`agentkit/run/loop.go:70`):
+★ Go has no default parameters, so the default is the zero value: `false` means "everything". The parameter is written out at every call site instead of hiding behind a second method — a reader of `sess.Messages(true)` knows exactly which view is meant, and the compiler makes every caller say which one it wants.
+
+There are two production call sites, and they want different views:
+
+| Call site | View | Why |
+|---|---|---|
+| the run loop (`agentkit/run/loop.go:70`) | `sess.Messages(true)` | the agent's context is the effective history |
+| the messages view (`api/v2_sessions.go:274`) | `sess.Messages(false)` | the UI shows the whole transcript — the superseded messages and the compaction marker |
+
+The implementation stays where it is (`storage/filestore/session.go:223`): the effective view is the suffix of the transcript that starts at the last compaction marker.
+The HTTP surface does not change with it: the messages endpoint keeps returning the whole transcript, because that is what the UI renders. If a client ever wants the agent's view instead, `GET /v2/sessions/{id}/messages?effective=1` is the natural extension.
+
 
 ```go
-built, err := rt.cfg.Input.buildInput(ctx, inputParams{
-	History:   sess.EffectiveMessages(),
-	Workspace: sess.Workspace(),
-}, queryItem.Query)
+func (fs *FileSession) Messages(effective bool) []*schema.Message {
+	// … load the transcript, copy it out …
+	if effective {
+		out = effectiveView(out)
+	}
+	return out
+}
 ```
+
+`Len()` (`storage/filestore/session.go:239`) keeps counting the whole transcript: it feeds the sidebar's message count, which is a fact about the **record**, not about the context. The interface changes with it (`storage/storage.go:42`), and so does the test double (`agentkit/run/fakes_test.go:90`).
 
 The existing filter still applies on top: the root agent's context excludes sub-agent messages (`agentkit/run/input.go:48`), and a sub-agent's context lives inside its own run — so **only the root agent's context is ever compacted**. Sub-agent messages carry their own flag (`message.IsSubagent`, `message/provenance.go:106`) and are dropped before the context is built.
 
@@ -599,7 +618,7 @@ P2 is the only phase that touches the session format, so it is split into steps 
 
 1. **The middleware, mounted but not persisted.** `deep.Config.Handlers` takes `adk.TypedChatModelAgentMiddleware` values (`adk/prebuilt/deep/deep.go:97`), which is what the summarization middleware is (`adk/middlewares/summarization/summarization.go:272`); openheron already appends its gate handlers there (`agentkit/build/assemble.go:110`, `agentkit/build/gate.go:105`). With the middleware in place, a long **turn** survives a window it would not have survived. The conversation still grows — nothing is persisted yet.
 2. **The compacted message.** The finalizer returns the summary alone (§7.2), the callback appends it to the transcript with the `ExtraCompaction` marker (§7.3), and the boundary is read back from it.
-3. **The effective history.** `Session.EffectiveMessages()` and the run loop asking for it (§7.4). From here the conversation stops growing across turns.
+3. **The effective history.** `Session.Messages(effective)`, and the run loop asking for the effective view (§7.4). From here the conversation stops growing across turns.
 4. **The UI.** The marker in the message list, the compaction count on the meter, the live `context_compacted` event (§7.7).
 
 ★ Step 2 without step 3 would be a bug: the compacted message would sit in the transcript and the agent would keep sending the full history, so every turn would compact again. Steps 2 and 3 land together.

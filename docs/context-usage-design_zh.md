@@ -507,25 +507,44 @@ type Compaction struct {
 有效历史 = 最后一条压缩消息，以及它之后的全部消息
 ```
 
-落到代码上，会话多一个读法：
+会话本来就有一个读法 —— 读整份记录。缺的是**要有效视图**这件事，所以给这个读法加参数，而不是再加一个方法：
 
 ```go
-// EffectiveMessages returns the messages that make up the agent's context:
-// the last compaction message and everything after it.
+// Messages returns the session's messages.
 //
-// Messages() keeps returning the whole transcript — that is the audit trail
-// and what the UI renders.
-func (s *FileSession) EffectiveMessages() []*schema.Message
+// effective selects the view:
+//
+//	false (the default) — the whole transcript: the audit trail, and what the
+//	  UI renders.
+//	true — the effective history: the last compaction message and everything
+//	  after it, which is what the agent's context is built from.
+Messages(effective bool) []*schema.Message
 ```
 
-而运行循环改问它，而不是整份记录（`agentkit/run/loop.go:70`）：
+★ Go 没有默认参数，所以默认靠零值表达：`false` 就是「全部」。参数在每个调用点写出来，而不是藏在另一个方法后面 —— 读 `sess.Messages(true)` 的人一眼知道要的是哪个视图，编译器也会逼每个调用方表态。
+
+生产代码里有两个调用点，要的视图不一样：
+
+| 调用点 | 视图 | 为什么 |
+|---|---|---|
+| 运行循环（`agentkit/run/loop.go:70`） | `sess.Messages(true)` | agent 的上下文就是有效历史 |
+| 消息视图（`api/v2_sessions.go:274`） | `sess.Messages(false)` | 界面显示整份记录 —— 被取代的消息与压缩标记都在里面 |
+
+实现还在原处（`storage/filestore/session.go:223`）：有效视图就是记录里从最后一条压缩标记开始的那一段后缀。
+HTTP 这一层不动：消息接口继续返回整份记录，因为界面渲染的就是它。若将来某个客户端要 agent 那个视图，`GET /v2/sessions/{id}/messages?effective=1` 是自然的扩展。
+
 
 ```go
-built, err := rt.cfg.Input.buildInput(ctx, inputParams{
-	History:   sess.EffectiveMessages(),
-	Workspace: sess.Workspace(),
-}, queryItem.Query)
+func (fs *FileSession) Messages(effective bool) []*schema.Message {
+	// … 读出记录、拷出来 …
+	if effective {
+		out = effectiveView(out)
+	}
+	return out
+}
 ```
+
+`Len()`（`storage/filestore/session.go:239`）继续数整份记录：它喂给侧边栏的消息条数，那是关于**记录**的事实，不是关于上下文的事实。接口跟着改（`storage/storage.go:42`），测试替身也一样（`agentkit/run/fakes_test.go:90`）。
 
 原有的过滤仍然叠在上面：根 agent 的上下文不含子 agent 的消息（`agentkit/run/input.go:48`），而子 agent 的上下文活在自己的那一轮里 —— 所以**只有根 agent 的上下文会被压缩**。子 agent 的消息带自己的标记（`message.IsSubagent`，`message/provenance.go:106`），在构造上下文之前就被丢掉了。
 
@@ -599,7 +618,7 @@ P2 是唯一会动会话格式的阶段，所以拆成各自都能独立发布�
 
 1. **挂上中间件，先不持久化。** `deep.Config.Handlers` 接受 `adk.TypedChatModelAgentMiddleware`（`adk/prebuilt/deep/deep.go:97`），摘要中间件正是它（`adk/middlewares/summarization/summarization.go:272`）；openheron 已经把自己的闸门处理器追加在那里（`agentkit/build/assemble.go:110`，`agentkit/build/gate.go:105`）。中间件挂上之后，一轮里长得撑爆窗口的活儿能扛住。对话还会变长 —— 还没落盘。
 2. **压缩消息。** finalizer 只返回摘要（§7.2），callback 把它带 `ExtraCompaction` 标记追加进记录（§7.3），边界再从它读回来。
-3. **有效历史。** `Session.EffectiveMessages()`，运行循环改问它（§7.4）。到这一步，对话跨轮也不长了。
+3. **有效历史。** `Session.Messages(effective)`，运行循环改问有效视图（§7.4）。到这一步，对话跨轮也不长了。
 4. **界面。** 消息列表里的标记、仪表盘上的压缩次数、实时的 `context_compacted` 事件（§7.7）。
 
 ★ 第 2 步没有第 3 步就是 bug：压缩消息躺在记录里，而 agent 仍在发完整历史，于是每轮都会再压一次。第 2、3 步一起落地。
