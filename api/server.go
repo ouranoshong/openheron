@@ -54,6 +54,10 @@ type Server struct {
 	// "what can this agent actually do", and recomputing it here would be the
 	// very duplication this injection exists to prevent.
 	toolsFn ToolsSource
+	// compactorFn hands out the summarizer of an agent, for the manual
+	// compaction. Optional: without it the endpoint reports that no
+	// compactor is wired.
+	compactorFn CompactorSource
 	// startTimeoutFn reads server.start_timeout. A function for the same
 	// reason as cfgFn: the value is configuration, not a constant.
 	startTimeoutFn func() time.Duration

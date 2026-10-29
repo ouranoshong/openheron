@@ -40,6 +40,7 @@ func (s *Server) registerV2Routes() {
 
 	h.GET("/v2/sessions/:id/messages", s.v2Messages)
 	h.POST("/v2/sessions/:id/abort", s.v2Abort)
+	h.POST("/v2/sessions/:id/compact", s.v2Compact)
 
 	h.POST("/v2/sessions/:id/files", s.v2UploadFiles)
 	h.GET("/v2/sessions/:id/files", s.v2ListFiles)

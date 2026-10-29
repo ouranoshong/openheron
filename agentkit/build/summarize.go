@@ -2,6 +2,9 @@ package build
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/summarization"
@@ -75,6 +78,85 @@ func agentID(sp *decl.SubAgentSpec) string {
 		return ""
 	}
 	return sp.ID
+}
+
+// Summarizer turns a message list into the summary a compaction produces.
+//
+// It exists for the manual compaction: eino's middleware only summarizes when
+// its trigger fires, and a manual command is the user asking for it now. The
+// summary itself is eino's — same model, same finalizer, same wording — so a
+// conversation compacted by hand and one compacted by the threshold carry the
+// same kind of message.
+type Summarizer struct {
+	mw *summarization.TypedMiddleware[*schema.Message]
+}
+
+// Summarize returns the summary of the given messages.
+//
+// The summary is the last message of the replacement history that is not a
+// system message: the replacement history keeps the agent's system messages
+// (the context prompt lives there), and only the summary is worth keeping.
+func (s *Summarizer) Summarize(ctx context.Context, msgs []*schema.Message) (*schema.Message, error) {
+	if s == nil || s.mw == nil {
+		return nil, errors.New("no summarizer")
+	}
+	state := &adk.TypedChatModelAgentState[*schema.Message]{Messages: msgs}
+	out, err := s.mw.Summarize(ctx, state)
+	if err != nil {
+		return nil, err
+	}
+	var summary *schema.Message
+	for _, m := range out {
+		if m == nil || m.Role == schema.System {
+			continue
+		}
+		summary = m
+	}
+	if summary == nil {
+		return nil, errors.New("the summarizer produced no summary")
+	}
+	return summary, nil
+}
+
+// SummarizerFor builds the summarizer of one agent.
+//
+// ★ It is independent of the agent's threshold. The threshold decides when
+// the context is compacted **by itself**; a manual command is the user
+// asking for it now, and "off" must not turn that into an error.
+//
+// The model is the one the agent runs on, and the finalizer is the same one
+// the middleware uses — the summary must not differ by how it was asked for.
+func (b *Builder) SummarizerFor(ctx context.Context, agentID string) (*Summarizer, error) {
+	snap := b.currentSnapshot()
+	if snap == nil {
+		return nil, errors.New("agent: no configuration is loaded")
+	}
+	name := strings.TrimSpace(agentID)
+	if name == "" {
+		name = snap.agentSpec.defaultAgent
+	}
+	sp, ok := snap.agentSpec.agentSpec(name)
+	if !ok {
+		return nil, fmt.Errorf("agent %q is not declared", name)
+	}
+	mdl, err := resolveModel(ctx, snap, sp, nil)
+	if err != nil {
+		return nil, err
+	}
+	mw, err := summarization.New(ctx, &summarization.Config{
+		Model: mdl,
+		// The trigger never fires here: the summary is requested directly.
+		Trigger:  &summarization.TriggerCondition{ContextTokens: 1},
+		Finalize: finalize,
+	})
+	if err != nil {
+		return nil, err
+	}
+	concrete, ok := mw.(*summarization.TypedMiddleware[*schema.Message])
+	if !ok {
+		return nil, fmt.Errorf("the summarization middleware is %T, not the expected type", mw)
+	}
+	return &Summarizer{mw: concrete}, nil
 }
 
 // finalize is the finalizer openheron hands the summarization middleware.

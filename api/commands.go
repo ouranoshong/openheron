@@ -28,6 +28,7 @@ const (
 	commandActionAttachFiles  commandAction = "attach_files"
 	commandActionOpenSettings commandAction = "open_settings"
 	commandActionOpenAgents   commandAction = "open_agents"
+	commandActionCompact      commandAction = "compact"
 )
 
 // commandSpec is the server-owned command table. The template stays here:
@@ -50,6 +51,14 @@ var commandRegistry = []commandSpec{
 	{
 		Name: "agents", Description: "Switch the active agent",
 		Kind: commandKindAction, Action: commandActionOpenAgents, ArgumentHint: "[agent]",
+	},
+	{
+		// ★ An action, not a prompt: a prompt would only make the model
+		//   *write* a summary, and the context would stay exactly as long.
+		//   Compacting means summarizing it and making that summary the new
+		//   boundary of the conversation.
+		Name: "compact", Description: "Compact the conversation into a summary",
+		Kind: commandKindAction, Action: commandActionCompact,
 	},
 	{
 		Name: "skill", Description: "Use a named skill for this task",

@@ -264,6 +264,7 @@ func setupRuntime(ctx context.Context, st *startup) error {
 	st.srv.SetConfigService(st.cfgSvc)
 	st.srv.SetToolsSource(toolsAdapter{b: builder})
 	st.srv.SetContextSource(contextsAdapter{b: builder})
+	st.srv.SetCompactorSource(compactorAdapter{b: builder})
 	st.srv.SetStartTimeoutSource(func() time.Duration {
 		c, _ := st.mgr.Current()
 		return startTimeout(c)
@@ -374,6 +375,17 @@ type contextsAdapter struct{ b *build.Builder }
 
 func (a contextsAdapter) Contexts() map[string]contract.AgentContext {
 	return a.b.Contexts()
+}
+
+// compactorAdapter exposes the builder's summarizers to the API layer.
+//
+// The summarizer is the agent's own model and the same finalizer the
+// middleware uses, so a manual compaction and an automatic one produce the
+// same kind of message.
+type compactorAdapter struct{ b *build.Builder }
+
+func (a compactorAdapter) Summarizer(ctx context.Context, agentID string) (run.Summarizer, error) {
+	return a.b.SummarizerFor(ctx, agentID)
 }
 
 type toolsAdapter struct{ b *build.Builder }

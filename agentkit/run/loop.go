@@ -206,14 +206,7 @@ func (rt *Runtime) archiveCompaction(sess storage.Session, out Outcome) {
 // estimated at four characters per token, which is eino's rule. Both numbers
 // are estimates; the point is the order of magnitude, not an exact count.
 func savedTokens(sess storage.Session, summary *schema.Message) int {
-	baseline := 0
-	for _, m := range sess.Messages(false) {
-		if m == nil || m.Role != schema.Assistant ||
-			m.ResponseMeta == nil || m.ResponseMeta.Usage == nil {
-			continue
-		}
-		baseline = m.ResponseMeta.Usage.TotalTokens
-	}
+	baseline := baselineTokens(sess)
 	summaryTokens := len(message.Text(summary)) / 4
 	saved := baseline - summaryTokens
 	if saved < 0 {

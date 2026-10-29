@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/ouranoshong/openheron/agentkit/spec"
@@ -151,5 +152,85 @@ func TestAnAgentThatSaysOffNeverCompacts(t *testing.T) {
 	}
 	if mw != nil {
 		t.Fatal("an agent that says off must not get the compaction middleware")
+	}
+}
+
+// The manual summarizer produces the same summary the middleware does: the
+// same model, the same finalizer. A conversation compacted by hand and one
+// compacted by the threshold carry the same kind of message.
+func TestTheSummarizerProducesEinosSummary(t *testing.T) {
+	b := NewBuilder(testManager(&spec.Config{
+		Providers: map[string]*decl.Provider{"test": {ID: "test", Type: "openai_compat"}},
+		Models:    map[string]*decl.Model{"test/model": {ID: "model", ContextWindow: 100000}},
+		Agents: map[string]*decl.Agent{
+			"main": {ID: "main", ModelRef: "test/model", MaxIterations: 1},
+		},
+	}))
+	b.models = func(context.Context, *spec.Config, string, CallIntent) (
+		model.BaseModel[*schema.Message], error) {
+		return &summarizingModel{}, nil
+	}
+
+	sum, err := b.SummarizerFor(context.Background(), "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := sum.Summarize(context.Background(), []*schema.Message{
+		{Role: schema.System, Content: "you are the context prompt"},
+		{Role: schema.User, Content: "do NOT rename the package"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out == nil {
+		t.Fatal("the summarizer produced nothing")
+	}
+	if out.Role == schema.System {
+		t.Fatal("the summary must not be a system message")
+	}
+	if !strings.Contains(out.Content, "do NOT rename the package") {
+		t.Fatalf("the summary lost the user's own words:\n%s", out.Content)
+	}
+}
+
+// The threshold says nothing about the manual path: an agent that never
+// compacts by itself can still be compacted by hand.
+func TestTheSummarizerIgnoresTheThreshold(t *testing.T) {
+	b := NewBuilder(testManager(&spec.Config{
+		Providers: map[string]*decl.Provider{"test": {ID: "test", Type: "openai_compat"}},
+		Models:    map[string]*decl.Model{"test/model": {ID: "model", ContextWindow: 100000}},
+		Agents: map[string]*decl.Agent{
+			"main": {
+				ID: "main", ModelRef: "test/model", MaxIterations: 1,
+				SummarizeAt: decl.Threshold{Off: true, Declared: true},
+			},
+		},
+	}))
+	b.models = func(context.Context, *spec.Config, string, CallIntent) (
+		model.BaseModel[*schema.Message], error) {
+		return &summarizingModel{}, nil
+	}
+
+	sum, err := b.SummarizerFor(context.Background(), "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum == nil {
+		t.Fatal("an agent that says off must still have a summarizer")
+	}
+}
+
+// An agent that is not declared has no summarizer.
+func TestTheSummarizerOfAnUnknownAgent(t *testing.T) {
+	b := NewBuilder(testManager(&spec.Config{
+		Providers: map[string]*decl.Provider{"test": {ID: "test", Type: "openai_compat"}},
+		Models:    map[string]*decl.Model{"test/model": {ID: "model", ContextWindow: 100000}},
+		Agents: map[string]*decl.Agent{
+			"main": {ID: "main", ModelRef: "test/model", MaxIterations: 1},
+		},
+	}))
+
+	if _, err := b.SummarizerFor(context.Background(), "ghost"); err == nil {
+		t.Fatal("an unknown agent must have no summarizer")
 	}
 }
