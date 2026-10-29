@@ -1,0 +1,354 @@
+# 架构设计说明
+
+> openheron 是一个多 Agent 运行时：每个专家 Agent 绑定自己的模型与工具边界，父 Agent 只做
+> 编排与合成。本文说明**代码实际是怎么组织的**，以及**为什么这样分层**。
+>
+> 与 [user-manual.md](user-manual.md)（面向使用者）、
+> [developer-manual.md](developer-manual.md)（面向改代码的人）配套。
+> 文中的每个结论都指向具体文件与行号。
+
+> English version: [architecture.md](architecture.md)
+
+## 1. 一句话概括
+
+一个 HTTP 服务进程（`api`）加载一份**文件化配置**（`agentkit/spec`），把每个 Agent 装配成
+一棵**有界的子 Agent 树**（`agentkit/build`），交给 eino ADK 的**运行循环**（`agentkit/run`）
+执行，过程以 **AG-UI 事件流**（`transport`）推给浏览器（`web/`）；状态落在**文件存储**
+（`storage/filestore`）里，审批靠 **checkpoint**（`approval` + `storage`）恢复。
+
+```
+                    ┌──────────────┐
+   HTTP /v2/*  ────▶ │     api      │  路由、SSE 出口、错误信封
+                    └──────┬───────┘
+              ┌────────────┼────────────┬───────────┐
+              ▼            ▼            ▼           ▼
+        agentkit/spec  agentkit/build  agentkit/run  transport
+         配置装载        Agent 装配       运行循环     AG-UI 事件
+              │            │            │           │
+              ▼            ▼            ▼           ▼
+         decl(声明)     llm/common    storage      webui
+         kb(语料)      approval       persist(原子写)  │
+         persist                     filestore      web/(React)
+```
+
+## 2. 分层与依赖方向
+
+依赖是**单向**的：上层可以引下层，下层**绝不**引上层。下面这张表是实际 import 图
+（用 `grep '"github.com/ouranoshong/openheron/'` 对每个包统计得出）：
+
+| 层 | 包 | 内部依赖 | 职责 |
+|---|---|---|---|
+| **L0 叶子** | `contract` | 无 | 跨层数据契约（事件、消息、中断） |
+| | `message` | 无 | 消息内容与来源（provenance） |
+| | `helpers` | 无 | 无状态小工具 |
+| | `persist` | 无 | 原子写文件 |
+| | `approval` | 无 | 审批决定的表示与校验 |
+| | `agentkit/obs` | 无 | **日志出口**（唯一的 `Logger()`） |
+| | `llm/common` | 无 | 厂商协议层（零 openheron 依赖） |
+| | `webui` | 无 | 嵌入式前端资源 |
+| **L1** | `agentkit/spec/decl` | 无 | **纯声明**结构体（yaml tag 集中处） |
+| | `storage` | `contract` | 会话/消息/待审批的接口 |
+| | `kb` | `obs`, `persist` | 知识库：语料、索引、检索、评分 |
+| | `agentkit/spec` | `obs`, `decl`, `kb`, `persist` | 配置装载、校验、热重载、写入闸门 |
+| **L2** | `agentkit/build` | `obs`, `spec`, `decl`, `approval`, `contract`, `helpers`, `kb`, `llm/common`, `message` | Agent 装配、工具装配、策略闸门 |
+| | `agentkit/run` | `obs`, `approval`, `contract`, `message`, `storage` | 运行循环、输入构造、事件桥接 |
+| | `storage/filestore` | `obs`, `contract`, `message`, `persist`, `storage` | 文件存储实现 |
+| | `transport` | `obs`, `approval`, `contract`, `helpers`, `message` | AG-UI 事件发射、用量与归属 |
+| | `llm` | `build`, `spec`, `decl` | 薄封装（只有 `common/` 与一个测试文件） |
+| | `initcfg` | `spec` | `openheron init` 的出厂模板 |
+| **L3 入口** | `api` | `build`, `obs`, `run`, `spec`, `decl`, `contract`, `message`, `storage`, `filestore`, `transport`, `webui` | HTTP 路由、SSE、错误信封 |
+
+### 2.1 两条不能破的依赖铁律
+
+**（一）日志只有一个出口。** 所有运行时日志走 `agentkit/obs` 的 `Logger()`
+（`agentkit/obs/logger.go:18`）。级别（Info/Warn/Error）与前缀只在这一处定义，
+而级别决定了一行会不会出现在默认输出里 —— 业务包直接调 `log.Printf` 或
+`fmt.Fprintln(os.Stderr)` 就会绕开这个开关。
+
+**唯一的例外**是 `llm/common`：它是零 openheron 依赖的叶子包，
+引 `obs` 就破了「协议层不依赖运行时」这条铁律，所以它用标准 logger。
+`llm/common` 里任何一处 import openheron 内部包都算回归。
+
+**（二）配置声明与配置行为分离。** `agentkit/spec/decl` 只放**纯结构体**和 yaml tag
+（`agentkit/spec/decl/decl.go`），不引任何其它包；`agentkit/spec` 放**行为**
+（装载、校验、重载、写入）。这样 `decl` 可以在 `build`、`api`、`initcfg` 之间自由传递，
+不会拉出一条依赖链。
+
+### 2.2 `agentkit/spec` 为什么引 `kb`
+
+因为知识库配置（`tools/kb.yaml`）的**校验**需要知道语料目录是否存在、模型是否声明为
+`kind: embedding`（`agentkit/spec/load.go:134` 的 `loadKB`、`load.go:265` 的 `validateKB`）。
+`kb` 自己只依赖 `obs` 和 `persist`，方向仍然是单向的。
+
+### 2.3 `agentkit/build` 为什么引 `llm/common` 而不是 `llm`
+
+`llm` 包会引 `build`（它是对 `build.Resolve` 的薄封装）。若 `build` 反过来引 `llm`，
+就成了环。`build` 直接用 `llm/common` 的协议类型，既避免了环，也让协议层保持叶子。
+
+## 3. 配置系统
+
+### 3.1 配置根只有三级
+
+```
+--config-dir  →  $OPENHERON_CONFIG_DIR  →  <project-root>/.openheron
+```
+
+实现在 `agentkit/spec/config.go` 的 `NewService`。**不向上查找祖先目录** ——
+配置根一旦依赖「进程从哪启动」，同一条命令换个目录就读到另一份配置，
+测试实例也会因此读到开发配置。
+
+只有**默认派生**的根会被自动创建（`config.go:186` 的 `os.MkdirAll`），
+显式 root / env root 指向不存在的位置时**不创建**：打错字不该静默长出一棵空配置树。
+
+`spec.NewServiceAt` 是另一条入口，供 `openheron init` 用：它**只认显式传入的路径**，
+不读环境变量 —— 否则 init 会把新配置写到用户没指的地方。
+
+### 3.2 目录分区
+
+| 目录 | 类别常量 | 热重载 | 内容 |
+|---|---|---|---|
+| `agents/` | `spec.DirAgent` | ✅ | 每个 Agent 一个 `.md` |
+| `llm/` | `spec.DirLLM` | ✅ | 每个厂商一个 `.yaml` |
+| `policy/` | `spec.DirPolicy` | ✅ | `permissions.yaml` + `limits.yaml` |
+| `tools/` | `spec.DirTools` | ✅ | `http.yaml` / `web_search.yaml` / `wikipedia.yaml` / `kb.yaml` |
+| `server/` | `spec.DirServer` | ❌ | 进程参数，需重启 |
+| `state/` | `spec.DirState` | — | 会话与 checkpoint，自动创建 |
+| `skills/` | — | ❌ | **独立解析**（见 §3.6） |
+
+`tools/` 下的文件名是**白名单**：`agentkit/spec/load.go:130` 对未知文件直接报错，
+不会静默忽略 —— 「我写了 kb.yaml 但它没生效」是最难查的一类问题。
+
+### 3.3 Agent 定义
+
+一个 Agent 是一个 markdown 文件：**frontmatter + 正文**。frontmatter 是**严格解码**的
+（`agentkit/spec/load.go:65` 的 `loadAgent`）—— 写错一个键就是启动错误。
+
+frontmatter 可用键（`agentkit/spec/decl/decl.go:67` 的 `decl.Agent`）：
+
+| 键 | yaml tag | 含义 |
+|---|---|---|
+| `description` | `description` | 这个 Agent 是干什么的（给父 Agent 看） |
+| `model` | `model` | `<provider>/<model>`，**不继承、不回退** |
+| `max_iterations` | `max_iterations` | 工具循环轮数上限 |
+| `subagents` | `subagents` | 可委派的子 Agent 列表 |
+| `disabled_tools` | `disabled_tools` | 对本 Agent 生效的工具禁用表 |
+| `temperature` | `temperature` | 采样温度 |
+| `max_tokens` | `max_tokens` | 采样上限 |
+| `reasoning` | `reasoning` | 思考档位名（`low`/`high`/`max`…） |
+
+`decl.Agent` 里还有三个 `yaml:"-"` 字段（`ID`、`File`、`Instruction`）——
+它们由装载器填充，**不是 frontmatter 键**。
+
+正文就是提示词本身（`Instruction`）。
+
+### 3.4 权限：两层，永不合并
+
+| 层 | 位置 | 作用域 |
+|---|---|---|
+| 外层 | `policy/permissions.yaml` 的 `deny` | 所有 Agent |
+| 内层 | `agents/*.md` 的 `disabled_tools` | 只影响这一个 Agent |
+
+两层**分开存储、从不合并** —— 合并就丢掉了「是哪一层拦的」这个信息。
+外层 `deny` 优先，是子 Agent 唯一放松不了的保证。
+
+档位只有两列（`decl.TierOf`，`decl/decl.go:122`）：`deny` → `ask` → 否则 `allow`。
+**未被点名的工具默认 `allow`（直接放行）**。要让某个工具每次都要人点头，
+把它加进 `ask`。
+
+### 3.5 深度上限与拓扑校验
+
+`server/config.yaml` 的 `agent.max_depth`（默认 `1`）与 `policy/limits.yaml` 的同名项
+**取更严的**（`spec/load.go:357` 的 `globalMaxDepth`）。
+
+声明的拓扑超过上限是**启动错误**（`spec/load.go:293` 的 `validateDepth`），
+不静默截断。子 agent 引用不存在的 agent、拓扑成环，也都是启动错误
+（`load.go:396`、`load.go:404`）。
+
+### 3.6 skills 的解析是另一套
+
+`skills/` **不是**「配置根下的一个分区」，而是独立解析的
+（`agentkit/build/skill.go:41`）：先看 `$EINO_EXT_SKILLS_DIR`，
+没有才从当前目录**向上**找 `.openheron/skills`。
+
+★ 这跟「配置根不向上查找」是两条不同的规则。skills 是目录树，
+向上找是为了能复用用户家目录里的技能；配置根是实体集合，向上找会让同一命令读到不同配置。
+
+### 3.7 装载的两种模式与「deferred」
+
+`spec.Service.Load()`（`config.go:245`）严格校验，失败即启动失败。
+`LoadUnchecked()`（`config.go:268`）跳过校验。
+
+`Config.Deferred()`（`config.go:114`）收集**非致命**的问题（比如某个 duration 字符串
+没法解析），以 `deferred` 数组出现在 `/v2/health` 与 `/v2/config` 里。
+致命与非致命的分界是：**会导致运行时行为错乱的是致命的**，只是提示的是 deferred。
+
+### 3.8 写入闸门
+
+配置编辑器（`/v2/settings`）的写路径有多道闸门：
+
+- `server/` **不可编辑**（`api/v2_settings.go`）—— 它不热重载，改了要重启，
+  接口直接拒绝。
+- 密钥字面量被拒：`api_key must be a reference, not a literal: use ${ENV_VAR} or @file:/path`
+  —— 防止密钥进了仓库。
+- 乐观并发：带 `baseRevision`，与磁盘上的 revision 不符就报冲突。
+
+## 4. Agent 装配
+
+`agentkit/build` 把「声明」变成「可运行的 Agent」。
+
+### 4.1 装配管线
+
+`agentkit/build/assemble.go` 的 `assemble`：
+
+1. 取 agent 的 `model` 引用，用 `build.Resolve`（`provider.go:58`）解出
+   `(provider, model)`；解不出就是启动错误。
+2. 按 `disabled_tools` + 外层 policy 算出**生效工具表**。
+3. 按 `subagents` 递归装配子树，把 `SubAgents` 填进 eino ADK 的 `deep.Config`
+   （`assemble.go:97`）。
+4. `WithoutGeneralSubAgent: true`（`assemble.go:25` 的 `baseConfig`，
+   以及 `hub.go:162`）——
+   **关掉 eino 自带的「通用子 Agent」**，因为那会让模型能凭空造子 agent，
+   绕过我们自己的拓扑与深度校验。
+
+★ `assemble.go:145-148` 还有一处容易看漏：`base.SubAgents = nil` 且
+`base.Name/Description/Instruction` 被清空 —— 那是**逐节点**装配时剥掉继承来的
+子 agent 列表，好让每个节点挂自己的子树，而不是把父的子 agent 复制一遍。
+
+### 4.2 工具闸门
+
+`agentkit/build/gate.go` 实现「工具能不能用」：
+
+- 外层 `deny` → 工具根本**不注册**给这个 agent，模型看不见它。
+- 外层 `ask` → 工具注册，但调用前**中断**，等人工决定。
+- 内层 `disabled_tools` → 对该 agent 同样不注册。
+
+被拒绝时，工具返回的是**一句拒绝说明**（带可选理由），**不是**一个错误 ——
+模型看到的是「被拒了，理由是 X」，于是可以据此调整。
+
+### 4.3 工具来源
+
+| 来源 | 装配位置 | 例子 |
+|---|---|---|
+| 文件系统中间件 | `build/tools.go:40` | `ls` `read_file` `write_file` `edit_file` `execute` |
+| 网络工具 | `build/nettools.go` | `web_search` `http` |
+| 知识库 | `build/kb.go` | `kb_search` `kb_index` |
+| 百科 | `build/nettools.go:236` | `wikipedia` |
+
+外部工具是**文件存在即启用**（`tools/*.yaml`），不需要改代码。
+★ 注意 `openheron init` **不生成** `tools/` 下的任何文件 —— 那一整个目录要用户自己写。
+
+## 5. 运行循环
+
+`agentkit/run` 是 eino ADK 的一层封装，负责三件事：
+
+1. **构造输入**（`agentkit/run/input.go:44`）：把系统提示词 + 会话历史 + 本轮 query
+   组装成 ADK 输入。子 Agent 的消息**不混进父的历史**（`input.go:64` 的
+   `withoutSubagentMessages`）—— 这是「隔离」在数据层面的落点。
+2. **驱动循环**（`agentkit/run/loop.go`）：跑 ADK 的 run，把事件转成 AG-UI 事件。
+3. **桥接审批**（`agentkit/run/bridge.go`）：工具请求审批时挂起，
+   审批结果回来后从 checkpoint 恢复。
+
+### 5.1 事件流
+
+事件类型来自 `ag-ui-protocol/ag-ui` 的 Go SDK。发射点在
+`transport/transport.go`：
+
+| 事件 | 发射点 | 含义 |
+|---|---|---|
+| `RUN_STARTED` | `transport.go:71` | 本轮开始，带 `threadId` |
+| `TEXT_MESSAGE_START/CONTENT/END` | `transport.go:526-542` | 助手正文增量 |
+| `REASONING_*` | `transport.go:549-561` | 思考过程 |
+| `TOOL_CALL_START/ARGS/END/RESULT` | `transport.go:565-595` | 工具调用 |
+| `CUSTOM`（`model_retry`） | `transport.go:109`, `:209` | 模型重试提示 |
+| `RUN_FINISHED` | `transport.go:77`, `:81` | 本轮结束，带结果与用量 |
+| `RUN_ERROR` | `transport.go:116`, `:214` | 失败 |
+
+子 Agent 的产出**通过事件上的 `subagentRunId` 归属**，而不是另开事件类型 ——
+这让前端能用同一套 reducer 处理所有 Agent 的输出。
+
+### 5.2 审批恢复
+
+审批请求被持久化（`storage` 的 `PendingApproval`），**checkpoint store** 是恢复的真相源。
+客户端把决定塞回同一个 `POST /v2/run` 的 `resume[]` 里（每项带 `interruptId` 与
+`payload.approved` / `payload.reason`）。
+
+checkpoint 没了就恢复不了 —— 这时接口返回
+`this approval can no longer be resumed: its checkpoint is gone. Send a new message to continue.`
+（`api/v2_types.go:110`），而不是静默新开一轮。
+
+## 6. 存储
+
+`storage` 定义接口（`SessionManager` / `Session`），`storage/filestore` 提供实现。
+
+磁盘布局（`storage/filestore/session.go`）：
+
+- `state.json` —— 会话状态（原子重写）
+- transcript —— 消息追加（`O_APPEND`）
+- checkpoint —— 审批恢复点
+
+**内存只是缓存**，磁盘才是真相源。会话列表（`List()`）只读 `state.json`，
+不打开 transcript —— 所以列会话是廉价的。
+
+## 7. HTTP 层
+
+`api` 只暴露 `/v2` 接口族（旧的无前缀接口已下线，实测 `/health` 返回 404）。
+
+- 路由注册集中在 `api/v2_files.go:34-65`。
+- 错误信封统一由 `api/v2_types.go` 的 `v2Fail` 产出：
+  `{"error": "...", "code": "...", "retryable": false}`。
+- **`/v2` 路由先注册，catch-all `GET /*` 后注册** —— SPA 回退不会吞掉接口。
+- **没有认证、没有 CORS。** 默认 `:8080` 绑全部网卡，要收窄就显式配 `listen_addr`。
+
+`POST /v2/run` 的 `threadId` **必填**（`api/v2_run.go:78`）——
+先 `POST /v2/sessions` 拿到会话，再发起 run。
+
+## 8. 前端
+
+React 19 + Vite + zustand，构建产物 `web/dist` 通过 `go:embed` 打进二进制
+（`webui/webui.go`）。
+
+`frontend_mode` 默认 `embed`（用嵌进二进制的界面）；`dir` 则从 `static_dir`
+（相对项目根）读磁盘上的构建产物。
+
+界面分三层。`lib/sse.ts`（SSE 分帧）与 `lib/events.ts`（事件解码 + reducer）
+**不依赖任何框架** —— 前者零 import，后者只有 `import type`；
+`lib/store/` 下的 `state.ts` / `selectors.ts` / `history.ts` 同样是纯的。
+`lib/store.ts` 是 barrel，转出的 `store/actions.ts` 拥有 zustand 实例，
+所以 import 它会一并拉进 zustand、`fetch` 与 `localStorage`。
+
+★ 新增逻辑落在这几层里，让它们保持纯函数 ——
+正确性由 `bun test` 证明，比「改了界面得开浏览器看」快得多。
+
+★ zustand 的 selector 必须返回**引用稳定**的值：每次调用造新数组/新对象会让
+`Object.is` 永远判定「变了」，表现为 `Maximum update depth exceeded` 白屏。
+selector 里不要写 `?? []`；用模块级常量或 store 里的 selector。
+
+## 9. 知识库
+
+`kb` 是一个**可选**的本地语料检索层。
+
+- 语料是一批 markdown 文档，目录由 `tools/kb.yaml` 的 `corpus` 指定（相对项目根）。
+- 索引落在 `<data-dir>/kb/<index>/`（`build/kb.go:42`），含 `catalog.md` 目录页。
+- **检索是混合打分**：`kb/score.go:53` 的 `scoreDoc` 在有向量时算
+  `0.5*词法分 + 0.5*余弦相似度`，无向量时**纯词法**（所以 `kb status` 会报
+  `lexical-only retrieval`）。
+- 词法分给**标识符加权**：出现在标题/小节标题/链接里的词比出现在正文里的词值钱。
+- `openheron kb index` 有**运行锁**（`kb/store.go:100` 的 `StartRun`）：同时只能跑一轮。
+- agent 侧拿到两个工具：`kb_search`（返回文档**大纲**而非全文）与 `kb_index`。
+  `kb_index` 默认落在 `ask` 档 —— 让 agent 自己重建索引需要人点头。
+
+## 10. 可观测性
+
+`agentkit/obs` 是唯一日志出口。级别与前缀只在这里定义。
+`agentkit/obs/hook` 提供观测钩子（依赖 `obs`，不反向依赖）。
+
+## 11. 边界与不做的事
+
+写清楚比事后解释便宜。以下是**当前没有**的：
+
+- **没有认证、没有多租户。** 默认 `:8080` 对全部网卡开放。
+- **没有 TLS。** 要在公网暴露得自己套反向代理。
+- **没有分布式。** 单进程、单二进制；会话在本地磁盘。
+- **知识库只支持本地目录语料**，不支持远程抓取。
+- **旧的无前缀 HTTP 接口已下线**，只有 `/v2`。
+- **`skills/` 仍保留向上探测**，与配置根的规则不同（见 §3.6）。

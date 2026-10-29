@@ -1,82 +1,330 @@
 # openheron
 
-**一个以「Agent 即工具」为原语的多 Agent 运行时**：专家 Agent 各自绑定适合自己的大模型，
-父 Agent 只做编排与合成，token 花在真正需要它的地方。
+**A multi-agent runtime that treats "expert agents" as tools**: every expert agent binds
+itself to a model that suits it, while the parent agent only orchestrates and
+synthesises — tokens are spent where they actually matter.
 
-配置定义专家与模型的映射，运行时在工具边界强制上下文隔离；单二进制常驻，热更新演进。
+Three mechanisms deliver the "token saving":
 
-它靠三条机制拿到「省 token」：
+- **Expert gets expert model** — every agent declares its own `model:` in
+  `agents/*.md`, so a simple retrieval does not pay for reasoning capability it does not
+  need, and a complex task does not settle for a small model.
+- **Tools are isolation** — an expert agent is called as a **bounded capability**: its
+  own tool loop and intermediate reasoning stay in its context, and the parent agent
+  receives only the structured summary it wrote.
+- **Structure is savings** — tokens are saved not by compressing prompts but by drawing
+  boundaries so that content which should not cross does not cross.
 
-- **专家配专模** —— 每个专家 Agent 在配置里绑定适合自己的模型：简单任务（检索、提取、摘要）
-  不为不需要的推理能力付费，复杂任务也不将就小模型。
-- **工具即隔离** —— 专家 Agent 作为一个**有界能力**被调用：它自己的工具循环与中间推理留在
-  它的上下文里，父 Agent 只拿到它写的那份结构化总结。
-- **结构即节省** —— 省 token 不是靠提示词压缩，是靠「Agent 即工具」的边界让不该跨界的内容不跨界。
+At the same time, "who may do what" becomes a few hard rules:
 
-它同时把「谁能干什么」变成几条硬规则：
+- **Tool permissions have two layers and are never merged** — the outer
+  `policy/permissions.yaml` sets the global `ask`/`deny`, and each inner agent narrows
+  it with its own `disabled_tools`. The outer `deny` beats the inner one, and **a sub
+  agent cannot relax it**.
+- **Delegation has a depth cap** — the entry agent is level 0, and an agent at depth `d`
+  may spawn children if and only if `d < max_depth`; a topology over the cap is a
+  **startup error**, never a silent truncation.
+- **One session can run several agents** — independent work is dispatched in parallel;
+  usage is **accounted per agent**.
+- **Configuration is files** — model profiles, prompts and approval policy are files you
+  can read and edit.
+- **One binary, runs anywhere** — the frontend is embedded into a single file, compiled
+  statically across platforms.
 
-- **工具边界分层，永不合并** —— 外层 `policy/permissions.yaml` 定全局 `ask`/`deny`，
-  内层每个 agent 用自己的 `disabled_tools` 收窄。外层的 `deny` 对所有 agent 生效，
-  **子 agent 放松不了它**。
-- **委派有深度上限** —— 入口 agent 是第 0 层，深度 d 的 agent 当且仅当 `d < max_depth`
-  才能再生子 agent；拓扑超限**启动期就报错**，不静默截断。
-- **一个会话能同时跑多个 agent** —— 互不依赖的活并行分派；用量**按 agent 分账**。
-- **配置是文件** —— 模型档案、提示词、审批策略都是能读能改的文件：要 review 就 review，
-  要提交进版本库就提交，不管它也有 `openheron init` 的出厂配置可用。
-- **一个二进制，扔哪都能跑** —— 前端嵌在 41MB 的单文件里，跨平台静态编译。
+★ Stating the boundaries up front is cheaper than explaining them afterwards:
 
-★ 边界先说清楚，比事后解释便宜：
+- Isolation is **complete**: an expert's intermediate steps **never enter any turn of
+  the parent's context**; and observability is **equally complete** — the expert's
+  reasoning and tool calls appear live in the interface (with attribution) and stay in
+  the record.
+- The token saving is largest on tasks that are **decomposable with verbose tool
+  output**; on strongly order-dependent tasks a single agent may be faster and more
+  accurate.
+- "High performance" means **useful output per token**; it promises neither zero
+  latency nor unlimited concurrency.
+- Expert-models-only pays off **when the pairing is right**: the factory configuration
+  has two agents sharing one model. A wrong model pairing wastes more than no pairing.
 
-- 隔离是**完全的**：专家的中间过程**不进父的任何一轮上下文** —— 父只拿到专家写的那份
-  总结。而**可观测性同样是完全的**：专家的思考与工具调用实时出现在界面上（带归属），
-  也留在记录里，事后能查「task 到底改了什么」。
-- 省 token 在**可分解、工具输出冗长**的任务上最显著；顺序依赖强的任务，单 Agent
-  反而可能更快更准。
-- 「高性能」指**单位 token 的有效产出**，不承诺零延迟或无限并发 —— 嵌套调用天然有串行开销。
-- 专家配专模要**配对才划算**：出厂配置里所有 agent 共用一个模型。配错模型比不配更浪费。
+★ This repository is the **code face**: a Go backend, a React frontend and the build
+configuration, with four document sets alongside
+(`docs/architecture.md`, `docs/user-manual.md`, `docs/developer-manual.md`,
+`docs/context-usage-design.md`, each with a `_zh` Chinese version).
+The first three describe what the code **is**; the last one is a **proposal** —
+a design for context-usage estimation that is not implemented yet.
+The finer-grained design documents and the industry comparison live in the **upstream
+repository** under `docs/` — for the mechanism breakdown and the trade-offs, see the
+upstream `docs/positioning.md`.
 
-★ 本仓库是**代码面**：Go 后端 + React 前端 + 构建配置。设计文档（`docs/`）
-不随本仓库分发 —— 机制拆解与行业对照见上游的 `docs/positioning.md`。
+> 中文版：[README_zh.md](README_zh.md)
+
+## Quick start
 
 ```bash
-make build                       # 构建（前端 + 单文件二进制）
-cd /your/project && openheron init   # 在你的项目里生成最小可运行配置
-export DEEPSEEK_API_KEY=sk-...  # 密钥只从环境变量读
-openheron                            # 启动，打开 http://localhost:8080
+make build                       # build (frontend + a single binary with the UI embedded)
+cd /your/project && openheron init   # generate a minimal runnable configuration in your project
+export DEEPSEEK_API_KEY=sk-...  # secrets are read from the environment only
+openheron                            # start, then open http://localhost:8080
 ```
 
-## 📖 文档
+`openheron init` writes four files: `agents/main.md`, `agents/task.md`,
+`llm/<provider>.yaml` and `policy/permissions.yaml`. Existing files are **kept, not
+overwritten** (unless you pass `--force`), so running it in an already-configured
+project is safe.
 
-`docs/` **不随本仓库分发**（见上方说明）。下列设计文档在上游仓库里：
+## Command line
 
-| 文档 | 内容 |
+| Command | Effect |
 |---|---|
-| `docs/user-manual.md` | **用户使用手册**（面向使用者） |
-| `docs/developer-manual.md` | **开发者手册**（面向改这个仓库的人：分层、依赖铁律、配方、测试） |
-| `docs/positioning.md` | **定位与取舍**：专家配专模 × Agent 即工具 —— 机制拆解与边界 |
-| `docs/architecture.md` | 总览与分册索引 |
-| `docs/config-design.md` | 配置 schema、分层、校验、热更新 |
-| `docs/agent-design.md` | Agent 池、审批、深度保护 |
-| `docs/multi-agent-design.md` | 多角色、并行委派、按 agent 分账 |
-| `docs/api-v2-design.md` | `/v2` 接口族与 AG-UI 事件契约 |
-| `docs/frontend-design.md` | React 前端架构与界面 |
-| `docs/config-editor-design.md` | 配置编辑器（`/v2/settings` 六条路由 + 界面） |
-| `docs/checkpoint-store.md` | Checkpoint Store：审批恢复的真相源 |
-| `docs/kb-design.md` | 知识库 |
-| `docs/init-design.md` | `openheron init` |
-| `docs/llm-common.md` | 厂商协议层 |
+| `openheron [--config-dir <path>] [--project-root <path>]` | Start the server |
+| `openheron init [--dir] [--model] [--provider] [--base-url] [--env] [--no-policy] [--force] [--dry-run] [--json]` | Generate a minimal runnable configuration |
+| `openheron kb index [--config-dir] [--json] [files...]` | Build the knowledge-base index |
+| `openheron kb search [--config-dir] <query>` | Search the knowledge base |
+| `openheron kb status [--config-dir] [--json]` | Inspect the index (no embedding service needed) |
+| `openheron version` | Print the version |
 
-本仓库自带的两份约定文档是 **[AGENTS.md](AGENTS.md)**（给在这儿工作的人与 AI 的
-项目约定）与 **[.openheron-example/README.md](.openheron-example/README.md)**
-（出厂配置样例的用法）。
+The listen address, directories and the like can all be overridden by environment
+variables: `LISTEN_ADDR`, `DATA_DIR`, `PROJECT_ROOT`, `FRONTEND_MODE`, `STATIC_DIR`.
 
-## 开发
+### How the config root is decided
+
+**Exactly three levels, no upward search**:
+
+```
+--config-dir  →  $OPENHERON_CONFIG_DIR  →  <project-root>/.openheron
+```
+
+The third (defaulted) level **is created** when it does not exist; the first two are
+**not** created when they point nowhere — a typo must not silently grow an empty
+configuration tree. In that case startup reports `config: load <root>: ...` rather than
+the `openheron init` hint (that hint is for the default root only).
+
+`openheron init` deliberately **does not read** `$OPENHERON_CONFIG_DIR`: it writes to
+the directory you point it at, and reading the environment variable would write the new
+configuration somewhere else.
+
+If the default root has no `agents/main.md`, startup collapses into a single sentence:
+
+```
+no configuration at /path/to/.openheron: run `openheron init` to create one
+```
+
+## What the configuration looks like
+
+The directories under the config root split by "is it hot-reloaded":
+
+| Directory | Contents | Hot reload |
+|---|---|---|
+| `agents/` | One `.md` per agent: frontmatter + body (the body is the prompt) | ✅ |
+| `llm/` | One `.yaml` per vendor: endpoint, secret, model list, reasoning tier table | ✅ |
+| `policy/` | `permissions.yaml` (approval tiers), `limits.yaml` (quota caps) | ✅ |
+| `tools/` | External tools and the knowledge-base config — **enabled by the file's presence** | ✅ |
+| `skills/` | `<name>/SKILL.md`, eino's native skill convention | ❌ see below |
+| `server/` | The process's own parameters: listen address, directories, timeouts, depth cap | ❌ needs a restart |
+| `state/` | Sessions and checkpoints (auto-created, **do not commit**) | — |
+
+`skills/` sits differently from the other directories: it is not "a partition of the
+config root" but is **resolved independently** — `$EINO_EXT_SKILLS_DIR` first, and only
+if that is unset does it search **upwards** from the current directory for
+`.openheron/skills`. In other words it keeps its upward search while the config root no
+longer has one.
+
+`.openheron-example/` holds a complete worked example, and
+`.openheron-example/README.md` walks through the traps of every field (secrets must be
+written as `${ENV}`, models as `<provider>/<model>`, durations with a unit).
+
+### Agent definitions
+
+```yaml
+---
+description: "task: the concrete executor. Writes files per the task order…"
+model: deepseek/deepseek-flash
+max_iterations: 50
+reasoning: low
+disabled_tools: [kb_index]
+---
+```
+
+The frontmatter is **strictly decoded** — one wrong key is a startup error, never
+silently ignored. Available keys: `description`, `model`, `max_iterations`,
+`subagents`, `disabled_tools`, `temperature`, `max_tokens`, `reasoning`.
+
+- `model` is required, in the form `<provider>/<model>`, and is **never inherited and
+  never falls back** — failing to resolve it is a startup error.
+- `subagents` declares the topology; every referenced agent must exist and the graph
+  **must not contain a cycle**.
+- `reasoning` names a **tier** (such as `high`), which `models[].reasoning` in
+  `llm/*.yaml` translates into the differing fields each vendor uses. **If that table
+  is missing, the tier is silently ignored** — an agent says `reasoning: high` while
+  the endpoint has no `high`, which means "no thinking at all", with no error at all.
+
+### The precedence between the two permission layers
+
+| Layer | Where | Scope |
+|---|---|---|
+| Outer | `deny` in `policy/permissions.yaml` | Every agent |
+| Inner | `disabled_tools` in `agents/*.md` | This one agent only |
+
+The two are **stored separately and never merged** — merging would destroy the
+information about *which* layer blocked something. The outer `deny` wins, and it is
+the one guarantee a sub agent cannot relax.
+
+There are only two columns of tiers: **a tool that is not named defaults to `allow`
+(straight through)**. To make a tool need a human every time, list it under `ask`; to
+disable it outright, list it under `deny`.
+
+### The depth cap
+
+`agent.max_depth` in `server/config.yaml` (default `1`, meaning only the entry agent may
+delegate) and the same key in `policy/limits.yaml` **resolve to the stricter of the
+two**. A declared topology over the cap is a **startup error**, never a silent
+truncation.
+
+## The HTTP API
+
+Only the `/v2` family is exposed (the old unprefixed API is gone). **No
+authentication, no CORS** — the default `:8080` binds every interface, so set
+`listen_addr` explicitly to narrow it.
+
+| Method | Path | Effect |
+|---|---|---|
+| POST | `/v2/sessions` | Create a session (returns `threadId`) |
+| GET | `/v2/sessions` | List sessions |
+| GET | `/v2/sessions/:id` | Session details (including pending approvals and past decisions) |
+| PATCH | `/v2/sessions/:id` | Rename it |
+| PATCH | `/v2/sessions/:id/agent` | Change the session's agent |
+| DELETE | `/v2/sessions/:id` | Delete the session |
+| GET | `/v2/sessions/:id/messages` | Replay the history + usage (filter with `?agent=`) |
+| POST | `/v2/sessions/:id/abort` | Abort the running turn |
+| POST/GET | `/v2/sessions/:id/files` | Upload / list session workspace files (32 MiB per upload) |
+| GET | `/v2/project/files` | List the files under the project root (`?q=` `?limit=`) |
+| GET | `/v2/commands` | The slash-command list |
+| POST | `/v2/run` | **SSE entry point**: ask a question, or answer an approval |
+| GET | `/v2/skills` `/v2/agents` `/v2/agents/:agentId` | Skills / agents and their effective tool tables |
+| GET | `/v2/config` `/v2/health` `/v2/runtime` | Effective config / health / runtime status |
+| GET/POST/PUT/DELETE | `/v2/settings/item` | Config editor reads and writes (`baseRevision` for optimistic concurrency) |
+| GET | `/v2/settings` | The list of editable items |
+| POST | `/v2/settings/validate` | Validate a configuration without writing it |
+
+The `POST /v2/run` body: `threadId` (**required** — get it from `POST /v2/sessions`),
+`query`, and `resume[]` when answering an approval (each entry carries `interruptId`
+plus `payload.approved` / `payload.reason`).
+
+The response is an AG-UI event stream with the event types `RUN_STARTED`,
+`TEXT_MESSAGE_START/CONTENT/END`, `REASONING_*`, `TOOL_CALL_START/ARGS/END/RESULT`,
+`CUSTOM` (`model_retry` notices), `RUN_FINISHED` and `RUN_ERROR`. A sub agent's output
+is **attributed through `subagentRunId` on the event**, not through a separate event
+type.
+
+### Approvals (human in the loop)
+
+When an `ask`-tier tool is called, the run **interrupts** first and the approval
+request is persisted into the session; the client receives an approval card and sends
+its decision back in the `resume[]` of the same `POST /v2/run`. Resuming relies on the
+**checkpoint store** — the checkpoint is the source of truth for approval resume, and
+the framework reads it to decide between resuming and starting a fresh turn.
+
+When an approval is denied, the tool returns a denial message (with an optional
+reason), **not** an error — the model sees "denied, the reason is X" and can adjust
+accordingly.
+
+## The knowledge base
+
+`kb` is an **optional** local corpus retrieval layer: the corpus is a set of markdown
+documents, and the index lives in `<data-dir>/kb/<index>/` (with a `catalog.md` index
+page and the derived data).
+
+- `tools/kb.yaml` configures `corpus` (relative to the project root), `index`, `model`
+  (which must be a `kind: embedding` model), `batch_size`, `top_k` and so on.
+  **Not configuring `corpus` means the knowledge base is off**.
+- `openheron kb index` builds the index (there is a run lock: only one run at a time),
+  `search` queries it, `status` inspects it.
+- On the agent side there are two tools: `kb_search` (retrieval, returning a document
+  outline rather than the full text) and `kb_index` (builds the index).
+- `kb_index` defaults to the `ask` tier — letting an agent rebuild the index needs a
+  human nod.
+
+## The frontend
+
+React 19 + Vite + zustand. The build output in `web/dist` is embedded into the binary
+with `go:embed`.
+
+- `frontend_mode` defaults to `embed` (use the interface baked into the binary); `dir`
+  reads the build output from disk at `static_dir` (relative to the project root).
+- Three layers: `web/src/lib/sse.ts` / `web/src/lib/events.ts` / `web/src/lib/store.ts` are
+  framework-free pure functions, with correctness proven by `bun test`; put new logic in
+  these layers.
+- The interface is mounted on a catch-all `GET /*` with an SPA fallback to
+  `index.html`; the `/v2` routes are registered first, so an API path can never be
+  swallowed by the SPA.
+
+## Development
 
 ```bash
-make build-go   # 只构建后端
-make web-dev    # Vite dev server（:5173，代理到 :8080）
-make dev        # Go 自动重建重启（air）
+make build-go   # backend only (no frontend rebuild) — fastest while iterating on Go code
+make web-dev    # Vite dev server (:5173, proxies /v2 to :8080)
+make dev        # rebuild and restart the Go binary automatically (air)
 make check      # lint + test
 ```
 
-给 AI 与协作者的约定见 [AGENTS.md](AGENTS.md)。
+### Testing
+
+The test environment isolates **both ports and state**, defined in `.env.test` at the
+repository root (committed):
+
+| | Development | Test |
+|---|---|---|
+| openheron itself | :8080 | **:18099** |
+| Vite | :5173 | **:15173** |
+| E2E fake backend | — | **:18180** |
+
+```bash
+make test-env-backend   # start the test instance in the foreground (:18099, its own config + session directory)
+make test-env-reset     # only rebuild the test directories, do not start
+make test-env-sync      # ★ must be run after you change the development-side agent definitions
+make test-e2e           # a real browser + a deterministic fake backend
+cd web && bun run test:unit   # the pure layers (reducer / framing / store / highlighting)
+make smoke              # real-backend integration (SSE framing, history replay, approval wiring)
+```
+
+Changing the interface **requires browser verification** — script-level tests cannot
+see the rendering layer. E2E uses a fake backend and must not be switched to the real
+one: the real backend depends on the model cooperating, so a failure cannot tell you
+whether the interface is broken or the model misbehaved.
+
+## Related documents
+
+This repository ships four document sets, maintained alongside the code, each in
+English and Chinese (**English is the primary version, `_zh` is the Chinese one**):
+
+| Document | Contents |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) · [中文](docs/architecture_zh.md) | **Architecture** — layering and dependency direction, the configuration system, assembly, the run loop, storage, HTTP, the frontend, the knowledge base |
+| [docs/user-manual.md](docs/user-manual.md) · [中文](docs/user-manual_zh.md) | **User manual** — installation, configuration, operating the interface |
+| [docs/developer-manual.md](docs/developer-manual.md) · [中文](docs/developer-manual_zh.md) | **Developer manual** — layering, the dependency rules, development recipes, testing and troubleshooting, known issues |
+| [docs/context-usage-design.md](docs/context-usage-design.md) · [中文](docs/context-usage-design_zh.md) | **Context usage estimate — design** — the occupancy metric, the data flow, the backend and frontend changes, and the eino summarization middleware's cross-turn trap (**a proposal, not implemented**) |
+
+The **rest** of the design documents under `docs/` live in the upstream repository and
+are not distributed with this one:
+
+| Document | Contents |
+|---|---|
+| `docs/implementation-audit.md` | **Implementation audit** — what was not built, where the docs drifted (2026-10-23) |
+| `docs/hygiene-research.md` | **Code hygiene research** — exported symbols with no exit, third-party archives, dead code (2026-10-23) |
+| `docs/agent-architecture-survey.md` | **External agent architecture survey** — the gateway and background-service problems of pi / rakazo / OpenClaw / Hermes / Letta (2026-10-24) |
+| `docs/positioning.md` | **Positioning and trade-offs**: expert-gets-expert-model × agent-as-tool — the mechanism breakdown and the boundaries |
+| `docs/architecture.md` | Overview and the index of the volumes (**same name, but it describes the upstream volume structure**) |
+| `docs/config-design.md` | Configuration schema, layering, validation, hot reload |
+| `docs/agent-design.md` | The agent pool, approvals, depth protection |
+| `docs/multi-agent-design.md` | Multiple roles, parallel delegation, per-agent accounting and history filtering |
+| `docs/api-v2-design.md` | The `/v2` API family and the AG-UI event contract |
+| `docs/frontend-design.md` | React frontend architecture and interface |
+| `docs/config-editor-design.md` | The config editor (six `/v2/settings` routes + the interface) |
+| `docs/checkpoint-store.md` | Checkpoint Store: the source of truth for approval resume |
+| `docs/kb-design.md` | The knowledge base |
+| `docs/init-design.md` | `openheron init` |
+| `docs/llm-common.md` | The vendor protocol layer |
+
+Two more convention documents live in this repository:
+**[AGENTS.md](AGENTS.md)** (the project conventions for the people and AI working here)
+and **[.openheron-example/README.md](.openheron-example/README.md)** (how to use the
+factory configuration sample).

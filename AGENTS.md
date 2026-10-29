@@ -2,9 +2,30 @@
 
 给在本仓库工作的人与 AI 的项目约定。
 
-> ★ **本仓库是代码面**：Go 后端 + React 前端 + 构建配置。设计文档 `docs/`
-> **不随本仓库分发** —— 下面凡引用 `docs/xxx.md` 的地方，说的都是上游仓库里
-> 的那份文档。改语义前若拿不到它，先问，别凭印象改配置或接口。
+> ★ **本仓库是代码面**：Go 后端 + React 前端 + 构建配置。
+>
+> 本仓库自带**五组**中英双语文档，随代码面一起维护
+> （**英文是主版本，`_zh` 后缀是中文版**）：
+> `README.md` / `README_zh.md`、
+> `docs/architecture.md` / `docs/architecture_zh.md`（架构设计说明）、
+> `docs/user-manual.md` / `docs/user-manual_zh.md`（用户使用说明）、
+> `docs/developer-manual.md` / `docs/developer-manual_zh.md`（开发者说明）、
+> `docs/context-usage-design.md` / `docs/context-usage-design_zh.md`（上下文使用预估设计方案）。
+> **`docs/` 下其余设计文档仍在上游仓库** ——
+> 下面凡引用 `docs/xxx.md` 而这几组之外的，都是上游那份。改语义前若拿不到它，
+> 先问，别凭印象改配置或接口。
+>
+> ★ 前面四组讲的是**代码面已经是什么样**；`docs/context-usage-design.md` 是
+> **提案**（尚未实现）。别把提案当现状引用 —— 它描述的东西代码里还没有。
+>
+> 写这几组文档时**照代码写**，别照想象写：每个结论都要能在代码里指到行。
+> 代码改了，文档跟着改 —— 文档漂移比没有文档更贵。
+>
+> ★ **两版必须同步**：改英文版就同时改 `_zh` 版，反之亦然。
+> 两版的代码标识符、行号引用、命令与路径应当一一对应 ——
+> 可以用 `grep -oP '`[a-zA-Z0-9_./:$-]+`' | sort -u` 逐组比对。
+> ★ 注意**反引号范围也要一致**：`` `POST /v2/run` `` 与 `` `POST` `/v2/run` `` 讲的
+> 是同一件事，但标识符集合不同 —— 比对会报差异。别让「写法不同」掩盖「内容不同」。
 
 ## 语言约定（强制）
 
@@ -64,7 +85,7 @@
 只有一处定义，而级别决定了一行会不会出现在默认输出里。
 
 例外只有一个：`llm/common` 用标准 logger —— 它是零 openheron 依赖的叶子包，
-引 `obs` 就破了那条铁律（`docs/architecture.md` §3.2.1）。
+引 `obs` 就破了那条铁律（`docs/architecture.md` §2.1「两条不能破的依赖铁律」）。
 
 ## 其它约定
 
@@ -78,7 +99,11 @@
 - 改配置语义前先读上游的 `docs/config-design.md`；改接口前先读 `docs/api-design.md`；
   新增 `/v2` 接口读 `docs/api-v2-design.md`；动前端读 `docs/frontend-design.md`；
   动测试环境（端口 / 隔离目录）读 `docs/frontend-design.md` §11.2 与
-  `docs/config-design.md` §5.2。**这些文档不在本仓库里** —— 拿不到就先问。
+  `docs/config-design.md` §5.2。**这几份上游文档不在本仓库里** —— 拿不到就先问。
+  本仓库自带的 `docs/architecture.md` / `docs/user-manual.md` /
+  `docs/developer-manual.md`（及其 `_zh` 中文版）讲的是**本代码面**的实际结构，
+  直接看就行。`docs/context-usage-design.md` 是**未实现的提案**，动上下文用量
+  相关代码前先看它，但别把它当现状。
 
 ### 前端（`web/`）
 
@@ -140,12 +165,18 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
   才能触发审批。那是模型的自由，不是代码回归；脚本会重试，全都不触发时
   **明确报错**，不伪装成接线有问题。别用重试次数掩盖它。
 - ★ **`smoke:hitl` 有一个前置条件，缺了它会 100% 失败（不是「抖」）**：
-  默认 agent（main）的 `write_file` 必须**不在** `disabled_tools` 里 ——
-  被禁用时模型根本调不出那个工具，自然没有审批可触发。
-  2026-10-21 实测：本地 `.openheron/agents/main.md` 写着
-  `disabled_tools: [write_file, edit_file, execute]`，于是脚本连试 8 次
-  全是「模型没调 write_file」。验审批接线前先确认这条：
-  `curl -s :18099/v2/agents | grep -A3 disabledTools`。
+  **真正调工具的那个 agent**，其 `write_file` 必须落在 `ask` 档（既没被全局 `deny`，
+  也没被它自己的 `disabled_tools` 禁用）—— 否则模型根本调不出那个工具，
+  自然没有审批可触发。
+  ★ 别盯着 `main`：出厂配置里 `main` 确实写着
+  `disabled_tools: [write_file, edit_file, execute]`，但它只做编排，会把活**委派**给
+  `task`，而 `task` 的 `write_file` 在 `ask` 档 —— 审批照样触发。
+  2026-10-29 实测的事件流：`TOOL_CALL_START name=task`（子 agent 是以工具形态被调的），
+  随后 `TOOL_CALL_START name=write_file subagentRunId=task`，
+  中断的 `subagentRunId` 也是 `task`。
+  要确认某档是否可达，看**每个** agent 的生效工具表：
+  `curl -s :18099/v2/agents | grep -A3 disabledTools` 与
+  `curl -s :18099/v2/agents/task`（里面 `effectiveTools` 会给出 tier 与 reason）。
   ★ `.openheron/` 是**本地未跟踪**的配置，改它会影响你自己的真实 agent
   （放开 `write_file` 意味着那个 agent 真能写文件）—— 要改先问自己一句。
 - **端口错开不等于数据隔离**。openheron 的会话写在 `.openheron/state/`，测试写
@@ -193,17 +224,30 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 
 ## 关联文档
 
-★ 下列文档在**上游仓库**里，**不随本仓库分发**（本仓库只有代码面）。
+### 本仓库自带（随代码面一起维护）
 
 | 文档 | 内容 |
 |---|---|
-| `docs/user-manual.md` | **用户使用手册** —— 安装、配置、界面操作（面向使用者，不含内部设计） |
-| `docs/developer-manual.md` | **开发者手册** —— 分层、依赖铁律、开发配方、测试与排障 |
+| `README.md` / `README_zh.md` | **项目说明** —— 定位、快速开始、命令、配置速览、HTTP 速查 |
+| `docs/architecture.md` / `docs/architecture_zh.md` | **架构设计说明** —— 分层与依赖方向、配置系统、装配、运行循环、存储、HTTP、前端、知识库 |
+| `docs/user-manual.md` / `docs/user-manual_zh.md` | **用户使用说明** —— 安装、配置、界面操作（面向使用者，不含内部设计） |
+| `docs/developer-manual.md` / `docs/developer-manual_zh.md` | **开发者说明** —— 分层、依赖铁律、开发配方、测试与排障、已知问题 |
+| `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` | **上下文使用预估设计方案** —— 占用口径、数据流、后端与前端改动、eino 摘要中间件的接入与其跨轮失效的坑（**提案，未实现**） |
+
+★ 无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。
+
+### 上游仓库（不随本仓库分发）
+
+★ 下列文档在**上游仓库**里。引用它们时要看清是上游那份 ——
+`docs/architecture.md` **两个仓库都有同名文件**，内容不同：
+本仓库那份讲的是**本代码面**的实际结构，上游那份是**总览与分册索引**。
+
+| 文档 | 内容 |
+|---|---|
 | `docs/implementation-audit.md` | **落地审计报告** —— 哪些没做、哪些是文档漂移（2026-10-23） |
 | `docs/hygiene-research.md` | **代码卫生调研** —— 无出口的导出符号、第三方归档、死代码（2026-10-23） |
 | `docs/agent-architecture-survey.md` | **外部 Agent 架构调研** —— pi / rakazo / OpenClaw / Hermes / Letta 的 gateway 与后台服务问题（2026-10-24） |
 | `docs/positioning.md` | **定位与取舍** —— 专家配专模 × Agent 即工具：机制拆解与边界（2026-10-25） |
-| `docs/architecture.md` | 总览与分册索引 |
 | `docs/config-design.md` | 配置 schema、分层、校验、热更新 |
 | `docs/api-design.md` | 旧的无前缀接口（**已于 2026-10-23 随 M3 下线**，保留为历史记录） |
 | `docs/api-v2-design.md` | `/v2` 接口族与 AG-UI 事件契约 |
@@ -211,8 +255,6 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 | `docs/agent-design.md` | Agent 池、审批、深度保护 |
 | `docs/agent-design-v2.md` | agent 装配 API v2（`deep.Config` 请出 openheron） |
 | `docs/multi-agent-design.md` | 多角色、并行委派、按 agent 分账与历史过滤 |
-| `docs/api-v2-design.md` | `/v2` 接口族与 AG-UI 事件契约 |
-| `docs/frontend-design.md` | React 前端架构与界面 |
 | `docs/config-editor-design.md` | 配置编辑器（`/v2/settings` 六条路由 + 界面） |
 | `docs/deep-config-fields.md` | `deep.Config` 字段使用参考 |
 | `docs/checkpoint-store.md` | Checkpoint Store：审批恢复的真相源 |
