@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 
 import { AgentFilter } from "@/components/agent-filter"
 import { BrandMark } from "@/components/brand-mark"
+import { CompactionDivider } from "@/components/compaction-divider"
 import { MessageParts } from "@/components/message-parts"
 import { collectAgents, filterByAgent } from "@/lib/agents"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -95,16 +96,20 @@ export function MessageList() {
 
           {!loading && messages.length === 0 && !error && <Welcome />}
 
-          {visible.map((m, i) => (
-            <MessageRow
-              key={m.id}
-              message={m}
-              startsTurn={flags[i]?.startsTurn ?? false}
-              showRole={flags[i]?.showRole ?? false}
-              showAgent={multiAgent}
-              first={i === 0}
-            />
-          ))}
+          {visible.map((m, i) =>
+            m.compaction ? (
+              <CompactionDivider key={m.id} mark={m.compaction} />
+            ) : (
+              <MessageRow
+                key={m.id}
+                message={m}
+                startsTurn={flags[i]?.startsTurn ?? false}
+                showRole={flags[i]?.showRole ?? false}
+                showAgent={multiAgent}
+                first={i === 0}
+              />
+            ),
+          )}
 
           {retry && (
             <p className="text-muted-foreground mt-4 text-xs" role="status">

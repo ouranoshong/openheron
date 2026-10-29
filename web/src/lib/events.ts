@@ -108,6 +108,17 @@ export interface ContextUsageEvent {
   updated_at?: string
 }
 
+// ContextCompactedEvent is the payload of the context_compacted custom event.
+//
+// It says that the context was compacted and when. The numbers — how many
+// messages were superseded, how many tokens the summary saved — are measured
+// against the transcript, which is written when the turn ends; the client
+// reads them from the marker on the next load.
+export interface ContextCompactedEvent {
+  agent?: string
+  at?: string
+}
+
 export interface UsageEvent {
   inputTokens?: number
   outputTokens?: number
@@ -335,6 +346,7 @@ export function reduceEvent(state: ConversationState, event: AgEvent): Conversat
         return { ...state, retry: { message: value?.message ?? "retrying" } }
       }
       if (event.name === "context_usage") return onContextUsage(state, event)
+      if (event.name === "context_compacted") return onContextCompacted(state, event)
       return state
     }
 
@@ -390,6 +402,28 @@ function onContextUsage(state: ConversationState, event: CustomEvent): Conversat
     updatedAt: value.updated_at,
   }
   return { ...state, context: { ...state.context, [agent]: next } }
+}
+
+// onContextCompacted inserts the compaction boundary into the message list.
+//
+// The compaction happens mid-turn, so the user is watching when it does: the
+// divider goes in at once, without the numbers. The numbers arrive with the
+// marker on the transcript, which is written when the turn ends.
+function onContextCompacted(state: ConversationState, event: CustomEvent): ConversationState {
+  const value = event.value as ContextCompactedEvent | undefined
+  const at = value?.at ?? new Date().toISOString()
+  const agent = value?.agent
+  const id = `compaction:${agent ?? ""}:${at}`
+  // The same compaction can be announced twice; one boundary is one boundary.
+  if (state.messages.some((m) => m.id === id)) return state
+  const boundary: Message = {
+    id,
+    role: "system",
+    parts: [],
+    agent,
+    compaction: { superseded: 0, savedTokens: 0, at },
+  }
+  return { ...state, messages: [...state.messages, boundary] }
 }
 
 function onRunError(state: ConversationState, event: RunErrorEvent): ConversationState {

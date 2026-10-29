@@ -3,6 +3,7 @@ package transport
 import (
 	"testing"
 
+	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/events"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/summarization"
 	"github.com/cloudwego/eino/schema"
@@ -76,5 +77,54 @@ func TestARunWithoutACompaction(t *testing.T) {
 	}
 	if res.Compaction != nil {
 		t.Fatal("a run that never compacted must not report a compaction")
+	}
+}
+
+// The compaction happens mid-turn, and the user is watching: the client has
+// to learn about it from the stream.
+func TestTheCompactionIsPublishedOnTheStream(t *testing.T) {
+	summary := &schema.Message{Role: schema.User, Content: "summary of the conversation"}
+
+	evs, _, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
+		compactionEvent(summary),
+		exitEvent(),
+	}, Options{RootAgent: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	found := false
+	for _, ev := range evs {
+		custom, ok := ev.(*events.CustomEvent)
+		if !ok || custom.Name != "context_compacted" {
+			continue
+		}
+		found = true
+		value, _ := custom.Value.(map[string]any)
+		if value["agent"] != "main" {
+			t.Fatalf("the event names the wrong agent: %v", value["agent"])
+		}
+		if at, _ := value["at"].(string); at == "" {
+			t.Fatal("the event must say when the compaction happened")
+		}
+	}
+	if !found {
+		t.Fatal("the compaction never reached the stream")
+	}
+}
+
+// A run without a compaction says nothing about one.
+func TestARunWithoutACompactionSaysNothingOnTheStream(t *testing.T) {
+	evs, _, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
+		textEvent(assistantText("working")),
+		exitEvent(),
+	}, Options{RootAgent: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range evs {
+		if custom, ok := ev.(*events.CustomEvent); ok && custom.Name == "context_compacted" {
+			t.Fatal("a run that never compacted must not announce one")
+		}
 	}
 }

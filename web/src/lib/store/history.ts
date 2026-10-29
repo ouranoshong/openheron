@@ -1,5 +1,26 @@
 import type { AgMessage, PendingApproval } from "@/lib/api"
-import { emptyConversation, type ConversationState, type Message, type Usage } from "@/lib/types"
+import {
+  emptyConversation,
+  type CompactionMark,
+  type ConversationState,
+  type Message,
+  type Usage,
+} from "@/lib/types"
+
+// readCompaction reads the compaction marker off the wire metadata.
+//
+// The server stamps it on the message that replaced a stretch of history
+// (api/v2_convert.go). The marker's presence is what makes the message a
+// boundary; the numbers inside it are details, and they may be missing.
+function readCompaction(raw: unknown): CompactionMark | undefined {
+  if (!raw || typeof raw !== "object") return undefined
+  const m = raw as Record<string, unknown>
+  return {
+    superseded: typeof m.superseded === "number" ? m.superseded : 0,
+    savedTokens: typeof m.savedTokens === "number" ? m.savedTokens : 0,
+    at: typeof m.at === "string" ? m.at : undefined,
+  }
+}
 
 function findToolOwner(messages: Message[], toolCallId: string): Message | undefined {
   if (!toolCallId) return undefined
@@ -59,7 +80,14 @@ export function seedFromHistory(
         fromHistory: true,
       })
     }
-    messages.push({ id: uniq(m.id || `msg-${messages.length}`), role: m.role, parts, agent: m.name })
+    const compaction = readCompaction(meta.compaction)
+    messages.push({
+      id: uniq(m.id || `msg-${messages.length}`),
+      role: m.role,
+      parts,
+      agent: m.name,
+      ...(compaction ? { compaction } : {}),
+    })
   }
 
   const convo = emptyConversation()

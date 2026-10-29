@@ -301,7 +301,7 @@ English and Chinese (**English is the primary version, `_zh` is the Chinese one*
 | [docs/architecture.md](docs/architecture.md) · [中文](docs/architecture_zh.md) | **Architecture** — layering and dependency direction, the configuration system, assembly, the run loop, storage, HTTP, the frontend, the knowledge base |
 | [docs/user-manual.md](docs/user-manual.md) · [中文](docs/user-manual_zh.md) | **User manual** — installation, configuration, operating the interface |
 | [docs/developer-manual.md](docs/developer-manual.md) · [中文](docs/developer-manual_zh.md) | **Developer manual** — layering, the dependency rules, development recipes, testing and troubleshooting, known issues |
-| [docs/context-usage-design.md](docs/context-usage-design.md) · [中文](docs/context-usage-design_zh.md) | **Context usage estimate — design** — the occupancy metric, the data flow, the backend and frontend changes, and how the compacted conversation is persisted (the meter and the compaction are in the code) |
+| [docs/context-usage-design.md](docs/context-usage-design.md) · [中文](docs/context-usage-design_zh.md) | **Context usage estimate — design** — the occupancy metric, the data flow, the backend and frontend changes, and how the compacted conversation is persisted (the meter, the compaction and the compaction marker are in the code) |
 
 The **rest** of the design documents under `docs/` live in the upstream repository and
 are not distributed with this one:

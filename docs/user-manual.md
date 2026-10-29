@@ -380,6 +380,28 @@ the conversation — every agent has its own context, and they are rarely the sa
 ★ The occupancy and the agent's **spend** are different numbers. The meter is about room left
 in the context; the spend is about what the agent has cost you over the whole session.
 
+### 6.5 The compaction divider
+
+When the context is compacted, the conversation gets a **divider**:
+
+```
+────────────  12 earlier messages · compacted into a summary · ≈62k tokens saved  ────────────
+```
+
+- The divider marks the **boundary of what the model reads**. Above it, the agent reads a
+  summary; the messages themselves are not sent any more.
+- The messages stay in the transcript and stay readable — compaction shortens the
+  **context**, not the **record**. Scroll up and the conversation before the cut is still
+  there.
+- The counts are estimates: `≈62k` is the vendor's own token count minus the size of the
+  summary, and it says how much room the cut bought.
+- A compaction that happens **during** a run draws the divider at once, without the
+  counts: the counts are measured against the transcript, which is written when the run
+  ends. Reload the thread and they are there.
+
+★ The summary itself is not shown. It is the model's working material, not your
+conversation — and the messages it replaces are still on screen.
+
 ## 7. The knowledge base
 
 The knowledge base is an **optional** local corpus retrieval layer: it turns a set of

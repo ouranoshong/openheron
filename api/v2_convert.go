@@ -87,8 +87,11 @@ func toAgUiMessage(m *schema.Message, index int) (types.Message, bool) {
 		out.Content = message.Text(m)
 	}
 
+	// A compaction is worth showing even when it carries nothing else: the
+	// marker is the whole point of the message, and the summary behind it is
+	// an implementation detail.
 	if out.Content == "" && len(out.ToolCalls) == 0 && out.ToolCallID == "" &&
-		out.Metadata["reasoning"] == nil {
+		out.Metadata["reasoning"] == nil && out.Metadata["compaction"] == nil {
 		return types.Message{}, false
 	}
 	return out, true

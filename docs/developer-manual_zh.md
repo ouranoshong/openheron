@@ -235,6 +235,16 @@ Messages(effective bool) []*schema.Message
 
 ★ 压缩**不是**删除。被取代的消息留在盘上、照样读得到；标记说明切口在哪儿。
 
+**客户端拿这个标记做什么。** 消息视图把标记盖在消息上（`api/v2_convert.go:63`），历史水合把它读
+出来（`web/src/lib/store/history.ts:14`），消息列表在气泡该在的位置上画一条分隔线
+（`web/src/components/message-list.tsx:101`，由 `web/src/components/compaction-divider.tsx`
+绘制）。**轮内**发生的压缩改走事件流通知：transport 发一个 `CUSTOM "context_compacted"` 事件
+（`transport/transport.go:590`），reducer 当场把边界插进列表（`web/src/lib/events.ts:412`）。
+
+★ 实时事件**不带数字**。数字 —— 顶替了多少条消息、摘要省下了多少 token —— 是拿记录量出来的，
+而记录要等这一轮结束才写；transport 手里没有记录可量。所以实时分隔线写的是*「earlier messages ·
+compacted into a summary」*，数字要等下一次加载 —— 那时标记跟着记录一起回来。
+
 ★ 摘要必须留住用户自己的话 —— eino 会把近期的用户消息拼回去，openheron 的 finalizer 不动
 这件事。有测试钉住它。
 

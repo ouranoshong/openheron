@@ -1,7 +1,7 @@
 # 上下文使用预估 —— 设计方案
 
-> **状态**：已实现，除了压缩标记的客户端渲染（§7.7）。占用仪表盘（§2、§4、§5）与
-> 压缩及其持久化（§7）都在代码里。
+> **状态**：已实现。占用仪表盘（§2、§4、§5）、压缩及其持久化、以及压缩标记的客户端渲染
+> （§7）都在代码里。
 > **范围**：本仓库的代码面 —— Go 后端与 `web/` 前端。
 > 配套阅读：[architecture.md](architecture.md)（代码怎么分层）、
 > [developer-manual.md](developer-manual.md)（怎么改代码）、
@@ -458,7 +458,7 @@ models:
 
 仪表盘（§4、§5）回答的是「这段对话什么时候快塞不下了」。这一节是另一半：**真塞不下时怎么办**。压缩出来的结果必须活过产生它的那一轮，否则对话的长度一点没变。
 
-**这一部分已经实现。** 中间件、自带的 finalizer、事件的接住、落盘、以及会话的两个视图都在代码里。还没进代码的是压缩标记的客户端渲染（§7.7）：压缩消息带着 `compaction` 元数据标记抵达浏览器，浏览器暂时把它当普通消息渲染。
+**这一部分已经实现。** 中间件、自带的 finalizer、事件的接住、落盘、会话的两个视图、以及压缩标记的客户端渲染（§7.7）都在代码里：压缩消息带着 `compaction` 元数据标记抵达浏览器，浏览器把它画成分隔线，而不是一个聊天气泡。
 
 ### 7.1 那个坑
 
@@ -596,9 +596,9 @@ session.jsonl:  … 旧历史 … │ 压缩消息 │ 本轮的消息 …
 
 三样东西，彼此不同：
 
-1. **消息列表里的一个标记。** 压缩消息不是聊天气泡。消息视图给它标上一个 `compaction` 元数据项（`api/v2_convert.go:63`），前端要把它渲染成一条分隔线：*「此前的 20 条消息已压缩成一段摘要 · 省下 62k token」*。被取代的消息留在它上面、仍然可见 —— 用户照样能读到切口之前说了什么。★ 标记已经送到，分隔线还没画。
-2. **仪表盘的第二根针。** `context[agent].summarized` 数压缩的次数，`savedTokens` 说上一次压缩省下了多少。
-3. **一个实时事件。** 压缩发生在轮内，所以界面从事件流里知道它：transport 把 `after_summarize` 转成 `CUSTOM "context_compacted"` 事件，带同样的数字。
+1. **消息列表里的一条分隔线。** 压缩消息不是聊天气泡。消息视图给它标上一个 `compaction` 元数据项（`api/v2_convert.go:63`），前端把它画成分隔线：*「12 earlier messages · compacted into a summary · ≈62k tokens saved」*（界面文案是英文）。标记在历史水合时被读出来（`web/src/lib/store/history.ts:14`），挂在消息上（`web/src/lib/types.ts:56`），由 `web/src/components/compaction-divider.tsx` 渲染，消息列表把它放在气泡该在的位置上（`web/src/components/message-list.tsx:101`）。被取代的消息留在它上面、仍然可见 —— 用户照样能读到切口之前说了什么。
+2. **仪表盘的第二根针。** `context[agent].summarized` 数压缩的次数（`api/v2_sessions.go:326`）。上一次压缩省下了多少，写在分隔线上而不在仪表盘上：仪表盘回答「上下文现在有多满」，分隔线回答「上一次切口省了多少」。
+3. **一个实时事件。** 压缩发生在轮内，所以界面从事件流里知道它：transport 把 `after_summarize` 转成 `CUSTOM "context_compacted"` 事件（`transport/transport.go:590`），reducer 当场把边界插进列表（`web/src/lib/events.ts:412`）。★ 实时事件只带**事实、agent 与时间** —— **不带数字**。数字是拿记录量出来的，而记录由运行循环在轮次结束时写入；transport 手里没有记录可量。所以实时分隔线写的是*「earlier messages · compacted into a summary」*，数字要等下一次加载 —— 那时标记跟着记录一起回来了。
 
 ### 7.8 配置
 
@@ -646,12 +646,13 @@ P2 是唯一会动会话格式的阶段，所以拆成各自都能独立发布�
 | 层 | 证明什么 |
 |---|---|
 | Go —— `transport` | 占用是每个 agent **最后一次**调用的数字，不是总和；三次调用的轮次报第三次；没说过话的 agent 不出现 |
-| Go —— `api` | 同一份记录上，会话视图的 `usage.context` 与实时事件一致；模型没声明窗口时 `model.contextWindow` 为零 |
+| Go —— `api` | 同一份记录上，会话视图的 `usage.context` 与实时事件一致；模型没声明窗口时 `model.contextWindow` 为零；压缩标记带着数字抵达浏览器，而空内容的压缩也不会被丢掉 |
 | Go —— `build` | `Contexts()` 报的是每个 agent **实际**所用模型的窗口，包括自带 `model:` 的子 agent |
 | Go —— `storage` | 有效历史是最后一条压缩消息及其后的消息；没有压缩标记的会话返回完整记录；被取代的消息仍在盘上 |
 | Go —— `agentkit/run` | 轮输入由有效历史构造；轮内发生的压缩**先于**本轮消息落盘 |
-| `bun run test:unit` | reducer 替换一个 agent 的项而不动其余；窗口未知时不画条、也不显示「0 %」；压缩标记渲染成分隔线而不是气泡 |
-| Playwright | 跑完一轮后输入框元信息行显示占用；逐 agent 的 chip 各显示一个占用；压缩之后消息列表出现标记，且此前的消息仍读得到 |
+| Go —— `transport` | 压缩以 `CUSTOM "context_compacted"` 事件在流上宣告；没压缩过的轮次什么也不宣告 |
+| `bun run test:unit` | reducer 替换一个 agent 的项而不动其余；窗口未知时不画条、也不显示「0 %」；压缩标记渲染成分隔线而不是气泡；实时事件把边界插进列表 |
+| Playwright | 跑完一轮后输入框元信息行显示占用；逐 agent 的 chip 各显示一个占用；压缩之后消息列表出现的是分隔线而不是气泡，且此前的消息仍读得到 |
 
 ★ 单元测试必须包含**厂商没回报用量**这个用例 —— `toUsageView` 对零用量返回 nil（`api/v2_types.go:243`），此时仪表盘必须是空的，而不是「0 tokens」。
 

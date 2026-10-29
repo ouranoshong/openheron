@@ -256,6 +256,21 @@ Messages(effective bool) []*schema.Message
 ★ Compaction is **not** deletion. The superseded messages stay on disk and stay readable; the
 marker says where the cut happened.
 
+**What the client does with the marker.** The messages view stamps it on the message
+(`api/v2_convert.go:63`), the history hydration reads it (`web/src/lib/store/history.ts:14`),
+and the message list draws a divider in place of the chat bubble
+(`web/src/components/message-list.tsx:101`, drawn by
+`web/src/components/compaction-divider.tsx`). A compaction that happens **mid-turn** is
+announced on the stream instead: the transport emits a `CUSTOM "context_compacted"` event
+(`transport/transport.go:590`) and the reducer puts a boundary into the list at once
+(`web/src/lib/events.ts:412`).
+
+★ The live event carries **no numbers**. The numbers — how many messages were superseded, how
+many tokens the summary saved — are measured against the transcript, and the transcript is
+written when the turn ends; the transport has no transcript to measure against. The live
+divider therefore reads *"earlier messages · compacted into a summary"*, and the counts arrive
+with the marker on the next load.
+
 ★ The summary must keep the user's own words — eino splices the recent user messages back into
 it, and openheron's finalizer leaves that alone. A test pins it.
 

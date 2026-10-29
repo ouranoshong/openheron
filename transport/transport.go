@@ -135,6 +135,7 @@ func streamEvents(e *emitter, src EventSource, opts Options) Result {
 		if ev.Action != nil && ev.Action.CustomizedAction != nil {
 			if cm := compactionFrom(ev.Action.CustomizedAction); cm != nil {
 				res.Compaction = cm
+				e.emitCompaction(ownerOf(ev, mainAgent))
 			}
 		}
 
@@ -576,6 +577,21 @@ func (e *emitter) emitContextUsage(u contract.ContextUsage) {
 			"context_window": u.ContextWindow,
 			"summarize_at":   u.SummarizeAt,
 			"updated_at":     u.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		})))
+}
+
+// emitCompaction publishes the compaction that just happened.
+//
+// The event carries the fact, the agent and the time — not the numbers. The
+// numbers (how many messages were superseded, how many tokens the summary
+// saved) are measured against the transcript, and the transcript is the run
+// loop's business: it writes the marker when it archives the turn. The
+// client learns the numbers from the marker, on the next load.
+func (e *emitter) emitCompaction(agent string) {
+	e.emit(events.NewCustomEvent("context_compacted",
+		events.WithValue(map[string]any{
+			"agent": agent,
+			"at":    time.Now().UTC().Format(time.RFC3339Nano),
 		})))
 }
 

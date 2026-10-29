@@ -209,6 +209,8 @@ export const SCENARIOS = {
   toolJson: ["A"],
 
   reasoningDone: ["A"],
+
+  compaction: ["A"],
 } as const
 
 export type ScenarioName = keyof typeof SCENARIOS
@@ -223,12 +225,16 @@ export const THREAD_HISTORY = "55555555-5555-4555-8555-555555555555"
 
 export const THREAD_MULTI = "66666666-6666-4666-8666-666666666666"
 
+export const THREAD_COMPACT = "77777777-7777-4777-8777-777777777777"
+
 export const MARKER_A = "MARKER-ALPHA"
 export const MARKER_B = "MARKER-BRAVO"
 export const MARKER_LONG = "MARKER-LONGCVT"
 export const MARKER_HISTORY = "MARKER-HISTORY"
 export const MARKER_MULTI_MAIN = "MARKER-MULTI-MAIN"
 export const MARKER_MULTI_CODER = "MARKER-MULTI-CODER"
+export const MARKER_COMPACT = "MARKER-COMPACT"
+export const SUMMARY_COMPACT = "SUMMARY-OF-THE-CONVERSATION"
 
 /** Mirrors api/commands.go — names and kinds are what the UI branches on. */
 const FAKE_SKILLS = [
@@ -452,6 +458,24 @@ function seedThreads(): FakeThread[] {
     { id: "m-a3", role: "assistant", content: `${MARKER_MULTI_CODER} verifying`, name: "coder" },
   ]
 
+  // A transcript that was compacted: the messages above the marker are still
+  // there, and the marker itself is a message carrying the compaction
+  // metadata — the way api/v2_convert.go stamps it.
+  const compactMessages: FakeMessage[] = [
+    { id: "c-u1", role: "user", content: `${MARKER_COMPACT} first question` },
+    { id: "c-a1", role: "assistant", content: `${MARKER_COMPACT} first answer` },
+    {
+      id: "c-compact",
+      role: "user",
+      content: SUMMARY_COMPACT,
+      name: "main",
+      metadata: {
+        compaction: { superseded: 12, savedTokens: 62000, at: "2026-10-29T13:04:11.512Z" },
+      },
+    },
+    { id: "c-a2", role: "assistant", content: `${MARKER_COMPACT} answer after the compaction` },
+  ]
+
   return [
     {
       threadId: THREAD_MULTI,
@@ -491,6 +515,15 @@ function seedThreads(): FakeThread[] {
           },
         },
       },
+    },
+    {
+      threadId: THREAD_COMPACT,
+      title: "Compacted conversation",
+      createdAt: T0,
+      updatedAt: T1,
+      state: "idle" as const,
+      files: [],
+      messages: compactMessages,
     },
     {
       threadId: THREAD_HISTORY,
@@ -823,6 +856,22 @@ function eventsFor(
         finished(threadId, runId),
       ]
     }
+
+    case "compaction":
+      // The compaction lands mid-turn: the boundary goes in before the
+      // answer that follows it.
+      return [
+        started(threadId, runId),
+        {
+          type: "CUSTOM",
+          name: "context_compacted",
+          value: { agent: "main", at: "2026-10-29T13:04:11.512Z" },
+        },
+        textStart("m-1", "assistant"),
+        textDelta("m-1", `${marker} answer after the compaction`),
+        textEnd("m-1"),
+        finished(threadId, runId),
+      ]
 
     default:
       return [

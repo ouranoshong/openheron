@@ -31,11 +31,29 @@ export interface ToolPart {
 
 export type Part = TextPart | ReasoningPart | ToolPart
 
+// CompactionMark is what a compacted message carries.
+//
+// It marks the boundary of the effective history: the model sees the
+// summary, not the messages above the boundary. Those messages stay in the
+// transcript — compaction is not deletion — so the user can still read them.
+export interface CompactionMark {
+  // superseded is how many transcript messages the summary replaced.
+  superseded: number
+  // savedTokens is the estimated number of tokens the compaction removed
+  // from the next request. It is an estimate.
+  savedTokens: number
+  // at is when the compaction happened.
+  at?: string
+}
+
 export interface Message {
   id: string
   role: Role
   parts: Part[]
   agent?: string
+  // compaction is set on the message that replaced a stretch of history.
+  // Such a message is a boundary, not a chat bubble.
+  compaction?: CompactionMark
 }
 
 export interface Interrupt {
