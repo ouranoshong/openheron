@@ -2,6 +2,7 @@ package kb
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -14,8 +15,33 @@ var recallCases = []struct {
 	{query: "为什么 5xx 要给客户端看 internal error", want: "api-v2-design.md"},
 }
 
+// requireUpstreamCorpus gates the v1 recall record on the corpus it was
+// recorded against.
+//
+// The record names two documents by file name, so it only means something for
+// the corpus that contains them — the upstream design corpus. This repository
+// ships a different docs/: the three manuals that sit next to the code. Running
+// the record against those would fail for the wrong reason, and skipping it
+// silently would be worse (a silently skipped integration test does not exist).
+//
+// So the corpus is identified rather than assumed. kb-design.md marks the
+// upstream corpus: when it is present every recorded target must be present
+// too, and a missing one fails loudly — upstream's rule is that a corpus that
+// moved must not pass quietly. When it is absent, the corpus is a different
+// one, the record does not apply, and the case says so out loud.
+func requireUpstreamCorpus(t *testing.T, corpus string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(corpus, "kb-design.md")); err != nil {
+		t.Skipf("corpus %s is not the upstream design corpus (no kb-design.md); "+
+			"the v1 recall record was recorded against the upstream one, so it does not apply here. "+
+			"Point OPENHERON_KB_CORPUS at the upstream corpus to make this case run.",
+			corpus)
+	}
+}
+
 func TestRealCorpusRecallMatchesTheV1Record(t *testing.T) {
 	corpus := repoCorpusDir(t)
+	requireUpstreamCorpus(t, corpus)
 	abs, err := filepath.Abs(corpus)
 	if err != nil {
 		t.Fatalf("abs: %v", err)
