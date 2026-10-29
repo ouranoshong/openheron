@@ -16,6 +16,8 @@ openheron 手里已经握有两个足以回答「这个会话是不是快撑爆�
 
 本设计新增一个数字 —— 每个 agent 的**上下文占用** —— 它的基线与 eino 自带的摘要中间件所数的是同一个基线，在运行过程中就随 SSE 推给前端，最终渲染在输入框下方的元信息行与按 agent 展开的过滤器里。
 
+它也把仪表盘打开的那个口子接上：上下文真的塞不下时，对话会被**压缩，且压缩结果被持久化**（§7）—— 随轮次一起消失的摘要，等于对话一点没变短。
+
 ---
 
 ## 1. 今天已经有什么
@@ -47,7 +49,7 @@ ContextWindow int `yaml:"context_window"`
 两个推论：
 
 - 会话的上下文**就是**它的记录。仓库里没有任何压缩、开窗或淘汰逻辑。
-- eino 摘要中间件若改写状态，那份状态**在轮末就被丢弃** —— 下一轮又从记录重来。这是 §7 里最要紧的一条约束。
+- eino 摘要中间件若改写状态，那份状态**在轮末就被丢弃** —— 下一轮又从记录重来。这是 §7 里最要紧的一条约束，也是压缩结果必须写回会话的原因。
 
 ### 1.4 每个 agent 有自己的上下文
 
@@ -438,38 +440,145 @@ models:
 
 ---
 
-## 7. 第二阶段 —— 接入摘要中间件
+## 7. 持久化压缩后的对话
 
-这个仪表盘存在的意义是回答「这段对话什么时候会撑爆」。诚实的答案是「当请求塞不进窗口的时候」—— 而防止这件事的机制 eino 已经带了。接上它是另一件更大的事，而且有一个必须正面设计的坑。
+仪表盘（§4、§5）回答的是「这段对话什么时候快塞不下了」。这一节是另一半：**真塞不下时怎么办**。压缩出来的结果必须活过产生它的那一轮，否则对话的长度一点没变。
 
-### 7.1 挂在哪里
+### 7.1 那个坑
 
-`deep.Config.Handlers` 接受 `adk.TypedChatModelAgentMiddleware`（`adk/prebuilt/deep/deep.go:97`），而摘要中间件正是它（`adk/middlewares/summarization/summarization.go:272`）。openheron 已经把自己的闸门处理器追加在那里（`agentkit/build/assemble.go:110`，`agentkit/build/gate.go:105`）。
+eino 的摘要中间件改写的是 agent 的**内存状态**（`BeforeModelRewriteState` → `Summarize`，`adk/middlewares/summarization/summarization.go:349`，`:281`）。而 openheron 每轮都从持久化记录重建模型输入（`agentkit/run/loop.go:69`，`agentkit/run/input.go:44`）。改写出来的状态随轮次一起没了，下一轮照旧把完整记录再发一遍。
 
-阈值来自与窗口同一个模型块（§6），摘要模型用同一厂商的另一个模型。
+照原样挂上去，中间件只会压**轮内**的状态 —— 这对一轮里很长的工具循环有用，对一段长对话没用。更糟的是仪表盘会在每轮开头又爬回阈值，那看起来像 bug，而不像事实。
 
-### 7.2 坑：压缩活不过一轮
+所以压缩结果必须**持久化**，之后的会话还得换个读法。这就是这一节的全部内容。
 
-openheron 每轮都从持久化记录重建模型输入（`agentkit/run/loop.go:69`，`agentkit/run/input.go:44`）。而摘要中间件改写的是**内存里**的 agent 状态（`BeforeModelRewriteState` 返回新状态，`adk/middlewares/summarization/summarization.go:335`）。轮一结束，那份状态就没了，下一轮照旧把完整记录再发一遍。
+### 7.2 eino 交出来的东西
 
-所以照原样挂上去，中间件只会压**轮内**的状态 —— 这对一轮里很长的工具循环有用，对一段长对话没用。届时仪表盘会显示上下文在每轮开头又爬回阈值，那不是解释，是困惑。
+`Summarize` 按顺序走四步（`adk/middlewares/summarization/summarization.go:281`）：
 
-要让压缩活得下去，摘要必须写回会话：
+1. 发 `before_summarize`，带上它即将摘要的消息（`:293`）；
+2. 生成摘要（`:493`）；
+3. 把原始消息与原始摘要交给 **finalizer**，拿回**替换后的历史**（`:307`）；
+4. 用前后两个状态调 `Callback`（`:315`），再发 `after_summarize`，带上替换后的历史（`:322`）。
 
-1. 中间件的 `Finalize`（或它之后的一个 handler）把摘要作为带标记的消息写进会话记录；
-2. 轮输入的构造丢掉被摘要替掉的那批消息；
-3. 压缩次数与摘要自身的大小都要记下来，仪表盘才能显示「已压缩 3 次，省下 4.1k token」。
+其中三个是 openheron 的入口：
 
-第 2 步最是侵入性的：`buildInput` 现在是把整段历史发出去（`agentkit/run/input.go:44`），被压缩过的会话不能再把压缩前的消息发一遍。所以记录里需要一个标记说明*摘要从哪开始*，`buildInput` 得认这个标记。
+| 钩子 | 携带什么 | openheron 拿它做什么 |
+|---|---|---|
+| `Config.Finalize` | 原始消息与原始摘要 | **塑形**替换后的历史 |
+| `Config.Callback` | 前后两个状态，同步调用 | **持久化**它 |
+| `after_summarize` 事件 | 替换后的历史（`After.Messages`） | **界面**事件 |
 
-★ 这就是为什么中间件排在第二阶段、仪表盘排在第一阶段：没有压缩时仪表盘依然有用（它告诉用户对话变长了），而压缩只有在结果能持久化之后才有用。
+默认 finalizer 返回 `[system messages…, summary]`（`adk/middlewares/summarization/finalizer_builder.go:37`）。摘要是**一条消息**，近期的用户原话被拼进了它的正文（`postProcessSummary`，`adk/middlewares/summarization/summarization.go:689`）。
 
-### 7.3 中间件能喂给仪表盘什么
+system 消息是 agent 自己的，而 openheron 的上下文提示按设计就是临时的（`agentkit/run/input.go:42`）—— 每轮重建，从不落盘。所以**openheron 自带 finalizer**，只返回摘要那一条。
 
-开着 `EmitInternalEvents` 时中间件会发内部事件（`adk/middlewares/summarization/consts.go:22`–`:24`）：`before_summarize`、`after_summarize`、`generate_summary`。transport 把它们转成 `CUSTOM` 事件透传，界面就能多知道两件老实事：
+摘要只覆盖上下文消息：中间件先把 system 消息摘出去（`splitSystemAndContextMsgs`，`adk/middlewares/summarization/summarization.go:506`）。
 
-- 这个 agent 的历史被压缩了**几次**；
-- 压缩**省下**了多少 token。
+### 7.3 落盘的是什么
+
+替换后的历史是**一条消息**。就这一个事实，让持久化变得简单。
+
+**压缩消息**像别的消息一样追加到 `session.jsonl`（`storage/filestore/transcript.go:172`）：一行，一条 `schema.Message`。记录仍然是只追加的（`storage/storage.go:40`），格式版本不动（`formatVersion`，`storage/filestore/session.go:492`），既有读法照旧 —— 这个功能之前写的会话读起来一模一样。
+
+**边界**就搭在这条消息上，放在 `Extra` map 里 —— 与 openheron 已经打戳的地方相同（`message/provenance.go:9`）：
+
+```go
+// ExtraCompaction marks the message that replaced a stretch of history.
+const ExtraCompaction = "openheron_compaction"
+
+// Compaction is what a compacted message carries.
+type Compaction struct {
+	// Superseded is the number of transcript messages this message replaced.
+	Superseded int `json:"superseded"`
+	// SavedTokens is how many tokens the compaction removed from the next
+	// request, as measured by the counter that triggered it.
+	SavedTokens int `json:"saved_tokens"`
+	// At is when the compaction happened.
+	At time.Time `json:"at"`
+}
+```
+
+于是记录成了**唯一真相源**：有效历史由「最后一条带标记的消息」推导出来。不动 `state.json`，不多一个要同步的文件，崩了之后也没有要对账的东西。
+
+### 7.4 有效历史
+
+```
+有效历史 = 最后一条压缩消息，以及它之后的全部消息
+```
+
+落到代码上，会话多一个读法：
+
+```go
+// EffectiveMessages returns the messages that make up the agent's context:
+// the last compaction message and everything after it.
+//
+// Messages() keeps returning the whole transcript — that is the audit trail
+// and what the UI renders.
+func (s *FileSession) EffectiveMessages() []*schema.Message
+```
+
+而运行循环改问它，而不是整份记录（`agentkit/run/loop.go:70`）：
+
+```go
+built, err := rt.cfg.Input.buildInput(ctx, inputParams{
+	History:   sess.EffectiveMessages(),
+	Workspace: sess.Workspace(),
+}, queryItem.Query)
+```
+
+原有的过滤仍然叠在上面：根 agent 的上下文不含子 agent 的消息（`agentkit/run/input.go:48`），而子 agent 的上下文活在自己的那一轮里 —— 所以**只有根 agent 的上下文会被压缩**。子 agent 的消息带自己的标记（`message.IsSubagent`，`message/provenance.go:106`），在构造上下文之前就被丢掉了。
+
+### 7.5 顺序，以及崩了会怎样
+
+压缩消息写在**本轮消息归档之前**（`agentkit/run/loop.go:149`）。磁盘上的顺序是：
+
+```
+session.jsonl:  … 旧历史 … │ 压缩消息 │ 本轮的消息 …
+```
+
+这正是语义顺序：压缩总结的是它之前的一切，本轮的消息在它之后。
+
+追加之后、下一次读之前崩了，代价为零：压缩消息已在盘上，下一轮读它当边界，历史就是短的。**追加之前**崩了，代价也为零：历史还是长的，下一轮再压一次。
+
+★ 顺序只在一边要紧。如果**先**记边界、**后**追加消息，中途崩了就留下一个指向自身末尾之外的记录 —— 有效历史会变空，agent 一觉醒来什么都不记得。先追加则造不出这种状态。
+
+### 7.6 摘要不能丢的东西
+
+| 东西 | 住在哪 | 压缩后还在吗 |
+|---|---|---|
+| 用户自己的话 | 摘要正文 —— eino 把近期的用户消息拼回去，最多约 30k token（`preserveUserMsgsMaxTokens`，`adk/middlewares/summarization/consts.go:29`） | 在，但受预算限制 |
+| 系统提示 | 每轮重建（`agentkit/run/input.go:44`） | 在 |
+| 工具 schema | 每次调用都重发 | 在 |
+| 审批审计日志 | `state.json`（`storage/filestore/session.go:474`），不在消息日志里 | 在，没被碰过 |
+| 原始消息 | 记录里，被取代但没被删 | 在 —— 还在盘上 |
+
+最后一行正是记录不被重写的原因：**压缩不是删除**。旧消息在记录里、在界面里都还读得到，标记说明切口在哪儿。
+
+若希望模型能回读原始对话，`Config.TranscriptFilePath` 就是那个钩子：eino 会把路径追加进摘要（`adk/middlewares/summarization/summarization.go:706`），摘要因此能把模型指向会话自己的记录。这只在摘要模型能读文件时才成立。
+
+### 7.7 界面显示什么
+
+三样东西，彼此不同：
+
+1. **消息列表里的一个标记。** 压缩消息不是聊天气泡。消息视图把它映射成一个合成条目（`api/v2_sessions.go:283`），前端渲染成一条分隔线：*「此前的 20 条消息已压缩成一段摘要 · 省下 62k token」*。被取代的消息留在它上面、仍然可见 —— 用户照样能读到切口之前说了什么。
+2. **仪表盘的第二根针。** `context[agent].summarized` 数压缩的次数，`savedTokens` 说上一次压缩省下了多少。
+3. **一个实时事件。** 压缩发生在轮内，所以界面从事件流里知道它：transport 把 `after_summarize` 转成 `CUSTOM "context_compacted"` 事件，带同样的数字。
+
+### 7.8 配置
+
+```yaml
+models:
+  - id: deepseek-flash
+    context_window: 131072
+    summarize_at: 104858      # 窗口的 80 % —— 触发线
+```
+
+`Trigger.ContextTokens` 就是中间件拿去比的那个数（`adk/middlewares/summarization/summarization.go:373`）；上游文档建议设为窗口的 80–90%。`summarize_at: 0` 表示「永不压缩」。
+
+摘要模型默认就是 agent 自己的模型，除非配置另指一个 —— `Config.Model` 接它（`adk/middlewares/summarization/summarization.go:58`）。
+
+★ 读仪表盘第二个刻度时要记住一条：eino 的默认计数器把工具 schema **加在**基线之上，而基线里本来就有它们（`adk/middlewares/summarization/summarization.go:420`）。所以触发线会早一点到 —— 偏早是安全的偏法。
 
 ---
 
@@ -479,10 +588,21 @@ openheron 每轮都从持久化记录重建模型输入（`agentkit/run/loop.go:
 |---|---|---|
 | **P0** | `contract.ContextUsage` · `transport/context.go` · `Builder.Contexts()` · 会话视图上的 `usage.context` · agent 视图上的 `model.contextWindow` · 输入框元信息行 · 单元测试 | 刷新后仍然正确的仪表盘 |
 | **P1** | 实时路径的 `CUSTOM "context_usage"` · reducer · 逐 agent 的 chip · Playwright spec | 运行中会动的仪表盘 |
-| **P2** | AG-UI 标准 `RUN_FINISHED.usage[]`（`events.WithUsage`） | 厂商记账通道，以及上游记录里的遗留项 |
-| **P3** | 挂上摘要中间件 · 摘要写回 · 显示压缩次数 | 活得过一轮的压缩 |
+| **P2** | **压缩及其持久化** —— 挂上中间件 · 自带 finalizer · 追加压缩消息 · 读有效历史 · 渲染标记 | 对话不再变长 |
+| **P3** | AG-UI 标准 `RUN_FINISHED.usage[]`（`events.WithUsage`） | 厂商记账通道，以及上游记录里的遗留项 |
 
-P0 与 P1 是这个功能本身。P2 是标准层面的清理。P3 是这个功能天然的后继，也是唯一会动会话格式的阶段。
+P0 与 P1 是仪表盘。P2 是让仪表盘有意义的那部分：没有它，一段长对话只能以一次拒绝收场。P3 是标准层面的清理。
+
+### P2 分步
+
+P2 是唯一会动会话格式的阶段，所以拆成各自都能独立发布的几步：
+
+1. **挂上中间件，先不持久化。** `deep.Config.Handlers` 接受 `adk.TypedChatModelAgentMiddleware`（`adk/prebuilt/deep/deep.go:97`），摘要中间件正是它（`adk/middlewares/summarization/summarization.go:272`）；openheron 已经把自己的闸门处理器追加在那里（`agentkit/build/assemble.go:110`，`agentkit/build/gate.go:105`）。中间件挂上之后，一轮里长得撑爆窗口的活儿能扛住。对话还会变长 —— 还没落盘。
+2. **压缩消息。** finalizer 只返回摘要（§7.2），callback 把它带 `ExtraCompaction` 标记追加进记录（§7.3），边界再从它读回来。
+3. **有效历史。** `Session.EffectiveMessages()`，运行循环改问它（§7.4）。到这一步，对话跨轮也不长了。
+4. **界面。** 消息列表里的标记、仪表盘上的压缩次数、实时的 `context_compacted` 事件（§7.7）。
+
+★ 第 2 步没有第 3 步就是 bug：压缩消息躺在记录里，而 agent 仍在发完整历史，于是每轮都会再压一次。第 2、3 步一起落地。
 
 ---
 
@@ -493,10 +613,14 @@ P0 与 P1 是这个功能本身。P2 是标准层面的清理。P3 是这个功�
 | Go —— `transport` | 占用是每个 agent **最后一次**调用的数字，不是总和；三次调用的轮次报第三次；没说过话的 agent 不出现 |
 | Go —— `api` | 同一份记录上，会话视图的 `usage.context` 与实时事件一致；模型没声明窗口时 `model.contextWindow` 为零 |
 | Go —— `build` | `Contexts()` 报的是每个 agent **实际**所用模型的窗口，包括自带 `model:` 的子 agent |
-| `bun run test:unit` | reducer 替换一个 agent 的项而不动其余；窗口未知时不画条、也不显示「0 %」 |
-| Playwright | 跑完一轮后输入框元信息行显示占用；逐 agent 的 chip 各显示一个占用 |
+| Go —— `storage` | 有效历史是最后一条压缩消息及其后的消息；没有压缩标记的会话返回完整记录；被取代的消息仍在盘上 |
+| Go —— `agentkit/run` | 轮输入由有效历史构造；轮内发生的压缩**先于**本轮消息落盘 |
+| `bun run test:unit` | reducer 替换一个 agent 的项而不动其余；窗口未知时不画条、也不显示「0 %」；压缩标记渲染成分隔线而不是气泡 |
+| Playwright | 跑完一轮后输入框元信息行显示占用；逐 agent 的 chip 各显示一个占用；压缩之后消息列表出现标记，且此前的消息仍读得到 |
 
 ★ 单元测试必须包含**厂商没回报用量**这个用例 —— `toUsageView` 对零用量返回 nil（`api/v2_types.go:243`），此时仪表盘必须是空的，而不是「0 tokens」。
+
+★ 压缩的测试必须包含**重启**用例：压缩 → 关掉会话 → 重新打开 → 有效历史仍然是短的。只活在内存里的压缩，正是这个设计要防的失败。
 
 ---
 
@@ -508,7 +632,9 @@ P0 与 P1 是这个功能本身。P2 是标准层面的清理。P3 是这个功�
 | 不同厂商的计数口径不同（工具、推理 token） | 数值就是厂商自己的数，标注为估算，绝不当精确值 |
 | 窗口通常没配（`context_window: 0`） | 界面退化成绝对 token 数，并说明窗口未配置 |
 | 多一条通道（`usage.context`）挨着 `usage.byAgent`，容易混 | 两者分开记载（§5.4），并有测试守住标签不互换 |
-| 活不过一轮的压缩会让仪表盘看着像坏了 | §7.2 —— 压缩与写回要么一起落地，要么都不做 |
+| 压缩活不过一轮，仪表盘看着像坏了 | §7 —— 压缩消息追加进记录，有效历史从它读出来 |
+| 摘要若丢了用户自己的话，会悄悄改变 agent 的行为 | eino 把近期的用户消息拼回摘要（`adk/middlewares/summarization/consts.go:29`）；预算是可调的旋钮，不是常量 |
+| 被取代的消息仍在盘上，会话的记录即使压缩后也继续变大 | 压缩缩短的是**上下文**，不是**记录** —— 记录是审计线索；记录的大小与窗口是两回事 |
 | API 层重推模型会与实际装配的 agent 漂移 | 窗口问 builder（§4.3），绝不重算 |
 
 ---
@@ -518,4 +644,6 @@ P0 与 P1 是这个功能本身。P2 是标准层面的清理。P3 是这个功�
 - **预估还没发出去的那次请求的上下文。** 事前估算需要分词器；eino 自己的默认计数器按四字符一个 token 估（`adk/middlewares/summarization/summarization.go:476`），那个精度够触发一次压缩，不够当数字展示。
 - **预测模型什么时候会拒绝。** 那是厂商的决定，拒绝会以错误形式抵达。
 - **成本核算。** token 数不是钱，价格在厂商那边。
-- **改会话格式。** 只有 P3 会碰，而且它是独立的一步。
+- **压缩子 agent 的上下文。** 子 agent 的上下文活在自己的那一轮里，随轮而死（§7.4）；只有根 agent 的上下文是长久的。
+- **改写或删除被取代的消息。** 压缩不是删除（§7.6）；记录原样保留、照样读得到。
+- **改记录的格式。** 压缩消息是一条带额外标记的普通消息（§7.3），所以 `formatVersion` 不动，旧会话照旧能读。

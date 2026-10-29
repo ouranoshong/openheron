@@ -232,7 +232,7 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 | `docs/architecture.md` / `docs/architecture_zh.md` | **架构设计说明** —— 分层与依赖方向、配置系统、装配、运行循环、存储、HTTP、前端、知识库 |
 | `docs/user-manual.md` / `docs/user-manual_zh.md` | **用户使用说明** —— 安装、配置、界面操作（面向使用者，不含内部设计） |
 | `docs/developer-manual.md` / `docs/developer-manual_zh.md` | **开发者说明** —— 分层、依赖铁律、开发配方、测试与排障、已知问题 |
-| `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` | **上下文使用预估设计方案** —— 占用口径、数据流、后端与前端改动、eino 摘要中间件的接入与其跨轮失效的坑（**提案，未实现**） |
+| `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` | **上下文使用预估设计方案** —— 占用口径、数据流、后端与前端改动、压缩结果的持久化与有效历史（**提案，未实现**） |
 
 ★ 无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。
 

@@ -16,6 +16,8 @@ openheron already holds two facts that would answer *"is this conversation about
 
 This design adds one number — the **context occupancy** of each agent — computed from the same baseline eino's own summarization middleware counts from, pushed over SSE while the run is still going, and rendered in the composer meta line and in the per-agent filter.
 
+And it closes the loop the meter opens: when the context really does run out of room, the conversation is **compacted, and the compacted result is persisted** (§7) — because a summary that dies with the turn leaves the conversation exactly as long as it was.
+
 ---
 
 ## 1. What exists today
@@ -47,7 +49,7 @@ Each turn rebuilds the model input from the persisted session history: `buildInp
 Two consequences:
 
 - The context of a session **is** its transcript. There is no compaction, no windowing, no eviction anywhere in the repository.
-- The state eino's summarization middleware would rewrite is **discarded at the end of the turn** — the next turn starts again from the transcript. This is the single most important constraint for §7.
+- The state eino's summarization middleware would rewrite is **discarded at the end of the turn** — the next turn starts again from the transcript. This is the single most important constraint for §7, and the reason the compacted result has to be written back to the session.
 
 ### 1.4 Every agent has its own context
 
@@ -438,38 +440,145 @@ Until then, `summarizeAt` is zero and the second scale is not shown.
 
 ---
 
-## 7. Phase 2 — adopting the summarization middleware
+## 7. Persisting the compacted conversation
 
-The meter exists to answer "when will this conversation break?". The honest answer is "when the request stops fitting in the window" — and eino already ships the mechanism that prevents that. Adopting it is a separate, larger piece of work, and it has one catch that must be designed for explicitly.
+The meter (§4, §5) answers "when is this conversation about to stop fitting?". This section is the other half: **what happens when it does not**. The compacted result has to outlive the turn that produced it, or the conversation never gets shorter.
 
-### 7.1 Where it would be mounted
+### 7.1 The trap
 
-`deep.Config.Handlers` takes `adk.TypedChatModelAgentMiddleware` values (`adk/prebuilt/deep/deep.go:97`), which is exactly what the summarization middleware is (`adk/middlewares/summarization/summarization.go:272`). openheron already appends its gate handlers there (`agentkit/build/assemble.go:110`, `agentkit/build/gate.go:105`).
+eino's summarization middleware rewrites the agent's **in-memory** state (`BeforeModelRewriteState` → `Summarize`, `adk/middlewares/summarization/summarization.go:349`, `:281`). openheron rebuilds the model input from the persisted transcript on every turn (`agentkit/run/loop.go:69`, `agentkit/run/input.go:44`). The rewritten state dies with the turn; the next turn sends the full transcript again.
 
-The threshold would come from the same model block as the window (§6), and the summary model would be a second model on the same provider.
+Mounted as-is, the middleware would compact **within** a turn — useful for a long tool loop — and do nothing for a long conversation. Worse, the meter would climb back to the threshold at the start of every turn, which reads as a bug rather than as a fact.
 
-### 7.2 The catch: compaction does not survive the turn
+So the compacted result must be **persisted**, and the session must be read differently afterwards. That is the whole design of this section.
 
-openheron rebuilds the model input from the persisted transcript on every turn (`agentkit/run/loop.go:69`, `agentkit/run/input.go:44`). The summarization middleware rewrites the **in-memory** agent state (`BeforeModelRewriteState` returns a new state, `adk/middlewares/summarization/summarization.go:335`). When the turn ends, that state is gone, and the next turn sends the full transcript again.
+### 7.2 What eino hands over
 
-So, mounted as-is, the middleware would compact **within** a turn — which helps a long tool loop — and do nothing for a long conversation. The meter would then show the context climbing back to the threshold at the start of every turn, which is confusing rather than informative.
+`Summarize` runs four steps in order (`adk/middlewares/summarization/summarization.go:281`):
 
-For compaction to survive, the summary must be written back into the session:
+1. it emits `before_summarize` with the messages it is about to summarize (`:293`);
+2. it generates the summary (`:493`);
+3. it runs the **finalizer** with the original messages and the raw summary, and gets back the **replacement history** (`:307`);
+4. it calls the `Callback` with the before and after states (`:315`), then emits `after_summarize` carrying the replacement history (`:322`).
 
-1. the middleware's `Finalize` (or a handler after it) writes the summary into the session transcript as a marked message;
-2. the turn's input builder drops the messages that the summary replaced;
-3. the compaction count and the summary's own size are recorded, so the meter can show *"compacted 3 times, 4.1k tokens saved"*.
+Three of those are openheron's way in:
 
-Step 2 is the invasive one: `buildInput` currently sends the whole history (`agentkit/run/input.go:44`), and a session that has been compacted must not send the pre-compaction messages again. The transcript therefore needs a marker that says *where the summary starts*, and `buildInput` has to honour it.
+| Hook | What it carries | What openheron uses it for |
+|---|---|---|
+| `Config.Finalize` | the original messages and the raw summary | **shaping** the replacement history |
+| `Config.Callback` | the before and after states, synchronously | **persisting** it |
+| `after_summarize` event | the replacement history (`After.Messages`) | the **UI** event |
 
-★ This is why the middleware is phase 2 and the meter is phase 1: the meter is useful without compaction (it tells the user the conversation is getting long), and compaction is useful only once its result is durable.
+The default finalizer (`adk/middlewares/summarization/finalizer_builder.go:37`) returns `[system messages…, summary]`. The summary is **one message**, with the recent user messages spliced into its text (`postProcessSummary`, `adk/middlewares/summarization/summarization.go:689`).
 
-### 7.3 What the middleware would give the meter
+The system messages are the agent's own, and openheron's context prompt is transient by design (`agentkit/run/input.go:42`) — it is rebuilt every turn and never persisted. So **openheron supplies its own finalizer** that returns the summary alone.
 
-The middleware emits internal events when `EmitInternalEvents` is on (`adk/middlewares/summarization/consts.go:22`–`:24`): `before_summarize`, `after_summarize`, `generate_summary`. The transport would forward them as `CUSTOM` events, which gives the UI two more honest facts:
+The summary covers the context messages only: the middleware splits the system messages off first (`splitSystemAndContextMsgs`, `adk/middlewares/summarization/summarization.go:506`).
 
-- **how many times** this agent's history was compacted;
-- **how many tokens** the compaction saved.
+### 7.3 What gets written
+
+The replacement history is **one message**. That single fact is what makes the persistence simple.
+
+**The compacted message** is appended to `session.jsonl` like any other message (`storage/filestore/transcript.go:172`): one line, one `schema.Message`. The transcript stays append-only (`storage/storage.go:40`), its format version does not move (`formatVersion`, `storage/filestore/session.go:492`), and the existing readers keep working — a session written before this feature reads exactly as it did.
+
+**The boundary** rides on that message itself, in the `Extra` map — the same place openheron already stamps provenance (`message/provenance.go:9`):
+
+```go
+// ExtraCompaction marks the message that replaced a stretch of history.
+const ExtraCompaction = "openheron_compaction"
+
+// Compaction is what a compacted message carries.
+type Compaction struct {
+	// Superseded is the number of transcript messages this message replaced.
+	Superseded int `json:"superseded"`
+	// SavedTokens is how many tokens the compaction removed from the next
+	// request, as measured by the counter that triggered it.
+	SavedTokens int `json:"saved_tokens"`
+	// At is when the compaction happened.
+	At time.Time `json:"at"`
+}
+```
+
+The transcript is then the **single source of truth**: the effective history is derived by finding the last message that carries the marker. No `state.json` change, no second file to keep in step, and nothing to reconcile after a crash.
+
+### 7.4 The effective history
+
+```
+effective history = the last compaction message, and everything after it
+```
+
+Concretely, the session gains one read:
+
+```go
+// EffectiveMessages returns the messages that make up the agent's context:
+// the last compaction message and everything after it.
+//
+// Messages() keeps returning the whole transcript — that is the audit trail
+// and what the UI renders.
+func (s *FileSession) EffectiveMessages() []*schema.Message
+```
+
+and the run loop asks for it instead of the whole transcript (`agentkit/run/loop.go:70`):
+
+```go
+built, err := rt.cfg.Input.buildInput(ctx, inputParams{
+	History:   sess.EffectiveMessages(),
+	Workspace: sess.Workspace(),
+}, queryItem.Query)
+```
+
+The existing filter still applies on top: the root agent's context excludes sub-agent messages (`agentkit/run/input.go:48`), and a sub-agent's context lives inside its own run — so **only the root agent's context is ever compacted**. Sub-agent messages carry their own flag (`message.IsSubagent`, `message/provenance.go:106`) and are dropped before the context is built.
+
+### 7.5 Ordering, and what a crash costs
+
+The compacted message is written **before** the turn's own messages are archived (`agentkit/run/loop.go:149`). The order on disk is:
+
+```
+session.jsonl:  … old history … │ compaction message │ this turn's messages …
+```
+
+which is the semantic order: the compaction summarizes everything before it, and the turn's messages came after it.
+
+A crash between the append and the next read costs nothing: the compaction message is on disk, the next turn reads it as the boundary, and the history is short. A crash **before** the append costs nothing either: the history stays long, and the next turn compacts again.
+
+★ The order matters in one direction only. If the boundary were recorded *before* the message were appended, a crash in between would leave the transcript pointing past its own end — the effective history would be empty and the agent would wake up amnesiac. Appending first cannot produce that state.
+
+### 7.6 What the summary must not lose
+
+| Thing | Where it lives | Survives compaction? |
+|---|---|---|
+| the user's own words | the summary text — eino splices the recent user messages back in, up to ~30k tokens (`preserveUserMsgsMaxTokens`, `adk/middlewares/summarization/consts.go:29`) | yes, up to the budget |
+| the system prompt | rebuilt every turn (`agentkit/run/input.go:44`) | yes |
+| the tool schemas | re-sent with every call | yes |
+| the approval audit log | `state.json` (`storage/filestore/session.go:474`), not the message log | yes, untouched |
+| the original messages | the transcript, superseded but not deleted | yes — they stay on disk |
+
+The last row is why the transcript is not rewritten: **compaction is not deletion**. The old messages stay readable in the transcript and in the UI, and the marker says where the cut happened.
+
+If the user wants the model to be able to re-read the original conversation, `Config.TranscriptFilePath` is the hook: eino appends the path to the summary (`adk/middlewares/summarization/summarization.go:706`), so the summary can point the model at the session's own transcript. It only works if the summarizing model can read files.
+
+### 7.7 What the UI shows
+
+Three things, and they are different from each other:
+
+1. **A marker in the message list.** The compacted message is not a chat bubble. The messages view maps it to a synthetic entry (`api/v2_sessions.go:283`), and the frontend renders a divider: *"20 earlier messages were compacted into a summary · 62k tokens saved"*. The superseded messages stay above it, visible — the user can still read what was said before the cut.
+2. **The meter's second needle.** `context[agent].summarized` counts the compactions, and `savedTokens` says what the last one bought.
+3. **A live event.** The compaction happens mid-turn, so the UI learns about it from the stream: the transport forwards `after_summarize` as a `CUSTOM "context_compacted"` event with the same numbers.
+
+### 7.8 Configuration
+
+```yaml
+models:
+  - id: deepseek-flash
+    context_window: 131072
+    summarize_at: 104858      # 80 % of the window — the trigger
+```
+
+`Trigger.ContextTokens` is what the middleware compares against (`adk/middlewares/summarization/summarization.go:373`); the upstream recommendation is 80–90 % of the window. `summarize_at: 0` means "never compact".
+
+The summarizing model is the agent's own model unless the config names another one — `Config.Model` takes it (`adk/middlewares/summarization/summarization.go:58`).
+
+★ One caveat to keep in mind when reading the meter's second scale: eino's default counter adds the tool schemas **on top of** the baseline, and the baseline already contained them (`adk/middlewares/summarization/summarization.go:420`). The trigger therefore fires a little early. That is the safe direction to be wrong in.
 
 ---
 
@@ -479,10 +588,21 @@ The middleware emits internal events when `EmitInternalEvents` is on (`adk/middl
 |---|---|---|
 | **P0** | `contract.ContextUsage` · `transport/context.go` · `Builder.Contexts()` · `usage.context` on the session view · `model.contextWindow` on the agent view · composer meta line · unit tests | the meter, correct after a refresh |
 | **P1** | `CUSTOM "context_usage"` on the live path · reducer · per-agent filter chips · Playwright spec | the meter moves while the run goes |
-| **P2** | AG-UI's standard `RUN_FINISHED.usage[]` (`events.WithUsage`) | the vendor-accounting channel, and the upstream record's open item |
-| **P3** | mount the summarization middleware · write the summary back · show the compaction count | compaction that survives the turn |
+| **P2** | **compaction and its persistence** — mount the middleware · own the finalizer · append the compacted message · read the effective history · render the marker | the conversation stops growing |
+| **P3** | AG-UI's standard `RUN_FINISHED.usage[]` (`events.WithUsage`) | the vendor-accounting channel, and the upstream record's open item |
 
-P0 and P1 are the feature. P2 is a standards cleanup. P3 is the feature's natural sequel, and it is the one that changes the session format.
+P0 and P1 are the meter. P2 is the part that makes the meter mean something: without it, a long conversation can only end in a refusal. P3 is a standards cleanup.
+
+### P2 in steps
+
+P2 is the only phase that touches the session format, so it is split into steps that are each independently shippable:
+
+1. **The middleware, mounted but not persisted.** `deep.Config.Handlers` takes `adk.TypedChatModelAgentMiddleware` values (`adk/prebuilt/deep/deep.go:97`), which is what the summarization middleware is (`adk/middlewares/summarization/summarization.go:272`); openheron already appends its gate handlers there (`agentkit/build/assemble.go:110`, `agentkit/build/gate.go:105`). With the middleware in place, a long **turn** survives a window it would not have survived. The conversation still grows — nothing is persisted yet.
+2. **The compacted message.** The finalizer returns the summary alone (§7.2), the callback appends it to the transcript with the `ExtraCompaction` marker (§7.3), and the boundary is read back from it.
+3. **The effective history.** `Session.EffectiveMessages()` and the run loop asking for it (§7.4). From here the conversation stops growing across turns.
+4. **The UI.** The marker in the message list, the compaction count on the meter, the live `context_compacted` event (§7.7).
+
+★ Step 2 without step 3 would be a bug: the compacted message would sit in the transcript and the agent would keep sending the full history, so every turn would compact again. Steps 2 and 3 land together.
 
 ---
 
@@ -493,10 +613,14 @@ P0 and P1 are the feature. P2 is a standards cleanup. P3 is the feature's natura
 | Go — `transport` | the occupancy is the **last** call of each agent, not the sum; a turn with three calls reports the third; an agent that never spoke is absent |
 | Go — `api` | `usage.context` on the session view matches the live event for the same transcript; `model.contextWindow` is zero when the model declares none |
 | Go — `build` | `Contexts()` reports the window of the model each agent actually runs on, including a sub-agent with its own `model:` |
-| `bun run test:unit` | the reducer replaces one agent's entry and leaves the others; an unknown window renders no bar and no "0 %" |
-| Playwright | the composer meta line shows the occupancy after a run; the per-agent chips show one occupancy per agent |
+| Go — `storage` | the effective history is the last compaction message and what follows it; a session with no compaction marker returns the whole transcript; the superseded messages are still on disk |
+| Go — `agentkit/run` | the turn's input is built from the effective history; a compaction during the turn is persisted **before** the turn's own messages |
+| `bun run test:unit` | the reducer replaces one agent's entry and leaves the others; an unknown window renders no bar and no "0 %"; the compaction marker renders as a divider, not as a bubble |
+| Playwright | the composer meta line shows the occupancy after a run; the per-agent chips show one occupancy per agent; after a compaction the message list shows the marker and the earlier messages are still readable |
 
 ★ The unit tests must include the case where **the endpoint reports no usage** — `toUsageView` returns nil for a zero usage (`api/v2_types.go:243`) and the meter must be empty, not "0 tokens".
+
+★ The compaction tests must include the **restart** case: compact, close the session, reopen it, and the effective history must still be short. A compaction that only lives in memory is the failure this design exists to prevent.
 
 ---
 
@@ -508,7 +632,9 @@ P0 and P1 are the feature. P2 is a standards cleanup. P3 is the feature's natura
 | Different vendors count differently (tools, reasoning tokens) | the value is the vendor's own number and is labelled as an estimate, never as an exact count |
 | The window is usually unconfigured (`context_window: 0`) | the UI degrades to an absolute token count and says the window is not configured |
 | A second channel (`usage.context`) next to `usage.byAgent` invites confusion | the two are documented separately (§5.4) and a test keeps the labels apart |
-| Compaction that does not survive the turn would make the meter look broken | §7.2 — compaction and the write-back land together, or not at all |
+| Compaction that does not survive the turn would make the meter look broken | §7 — the compacted message is appended to the transcript, and the effective history is read from it |
+| A summary that drops the user's own words would quietly change what the agent does | eino splices the recent user messages back into the summary (`adk/middlewares/summarization/consts.go:29`); the budget is a knob, not a constant |
+| The superseded messages stay on disk, so a session's transcript keeps growing even after compaction | compaction shortens the **context**, not the record — the record is the audit trail; the transcript's size is a separate concern from the window |
 | The API layer re-deriving the model would drift from the assembled agent | the window is asked of the builder (§4.3), never recomputed |
 
 ---
@@ -518,4 +644,6 @@ P0 and P1 are the feature. P2 is a standards cleanup. P3 is the feature's natura
 - **Predicting the context of the request that has not been made yet.** A pre-flight estimate would need a tokenizer; eino's own default counter estimates at four characters per token (`adk/middlewares/summarization/summarization.go:476`), which is good enough to trigger a compaction and not good enough to show as a number.
 - **Predicting when the *model* will refuse.** The endpoint decides that, and the refusal arrives as an error.
 - **Cost accounting.** Token counts are not money; prices live with the vendor.
-- **Changing the session format.** Only P3 touches it, and it does so as its own step.
+- **Compacting a sub-agent's context.** A sub-agent's context lives inside its own run and dies with it (§7.4); only the root agent's context is long-lived.
+- **Editing or deleting the superseded messages.** Compaction is not deletion (§7.6); the record stays intact and readable.
+- **Changing the transcript's format.** The compacted message is an ordinary message with an extra marker (§7.3), so `formatVersion` does not move and old sessions keep loading.
