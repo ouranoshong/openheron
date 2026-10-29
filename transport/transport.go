@@ -133,9 +133,15 @@ func streamEvents(e *emitter, src EventSource, opts Options) Result {
 		}
 
 		if ev.Action != nil && ev.Action.CustomizedAction != nil {
-			if cm := compactionFrom(ev.Action.CustomizedAction); cm != nil {
-				res.Compaction = cm
-				e.emitCompaction(ownerOf(ev, mainAgent))
+			// Only the root agent's compaction is a boundary of the
+			// session's history. A sub-agent compacts inside its own run,
+			// and that summary must never reach the transcript: it would cut
+			// the root's effective history at a sub-agent's summary.
+			if ownerOf(ev, mainAgent) == mainAgent {
+				if cm := compactionFrom(ev.Action.CustomizedAction); cm != nil {
+					res.Compaction = cm
+					e.emitCompaction(mainAgent)
+				}
 			}
 		}
 
@@ -212,9 +218,16 @@ func compactionFrom(action any) *schema.Message {
 		if m == nil {
 			continue
 		}
+		// The replacement history keeps the agent's system messages — the
+		// context prompt lives there. Only the summary is worth keeping:
+		// it is what the agent carries forward, and the only part that
+		// belongs in the transcript.
+		if m.Role == schema.System {
+			continue
+		}
 		if out != nil {
-			obs.Logger().Warn("[transport] compaction carried more than one message; "+
-				"keeping the last one", "agent", a.Type)
+			obs.Logger().Warn("[transport] compaction carried more than one message; " +
+				"keeping the last one")
 		}
 		out = m
 	}

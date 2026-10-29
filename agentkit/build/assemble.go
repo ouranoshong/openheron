@@ -113,10 +113,11 @@ func (b *Builder) buildNode(ctx context.Context, snap *snapshot, n node) (
 		cfg.Handlers = subHandlers(snap.agentSpec.policy, *sp, snap.agentSpec.maxDepth)
 	}
 
-	// The compaction middleware goes on the root agent. A sub-agent's
-	// context lives inside its own run and dies with it, so there is
-	// nothing durable to compact.
-	if n.root && sp != nil {
+	// The compaction middleware goes on every agent that declares a
+	// threshold. The root's compaction is the one that reaches the
+	// transcript; a sub-agent's lives and dies inside its own run, where it
+	// still protects the agent from filling its own window.
+	if sp != nil {
 		if mw := b.compactionMiddleware(ctx, snap, sp, cfg.ChatModel); mw != nil {
 			cfg.Handlers = append(cfg.Handlers, mw)
 		}

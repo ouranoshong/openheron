@@ -128,3 +128,44 @@ func TestARunWithoutACompactionSaysNothingOnTheStream(t *testing.T) {
 		}
 	}
 }
+
+// A sub-agent compacts inside its own run. Its summary is not a boundary
+// of the session's history — writing it to the transcript would cut the
+// root's effective history at a sub-agent's summary.
+func TestASubAgentsCompactionIsNotTheSessions(t *testing.T) {
+	summary := &schema.Message{Role: schema.User, Content: "summary of the conversation"}
+	ev := compactionEvent(summary)
+	ev.AgentName = "coder"
+
+	_, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
+		ev,
+		exitEvent(),
+	}, Options{RootAgent: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Compaction != nil {
+		t.Fatal("a sub-agent's compaction must not become the session's compaction")
+	}
+}
+
+// The replacement history keeps the agent's system messages — the context
+// prompt lives there. The transcript gets the summary alone.
+func TestTheSummaryIsPickedOutOfTheReplacementHistory(t *testing.T) {
+	prompt := &schema.Message{Role: schema.System, Content: "you are the context prompt"}
+	summary := &schema.Message{Role: schema.User, Content: "summary of the conversation"}
+
+	_, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
+		compactionEvent(prompt, summary),
+		exitEvent(),
+	}, Options{RootAgent: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Compaction == nil {
+		t.Fatal("the compaction was not captured")
+	}
+	if res.Compaction.Content != "summary of the conversation" {
+		t.Fatalf("the captured message = %q, want the summary", res.Compaction.Content)
+	}
+}
