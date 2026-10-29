@@ -177,7 +177,7 @@ openheron/
 
 ### 3.5 加一个厂商 / 模型
 
-1. `llm/<厂商>.yaml` 里声明 provider。**协议层不硬编码任何厂商的字段名** ——
+1. `llm/<vendor>.yaml` 里声明 provider。**协议层不硬编码任何厂商的字段名** ——
    `hint_keys` 只是为了在请求被拒时给出准确提示。
 
 2. `reasoning` 档位表是**翻译层**：Agent 写 `reasoning: high`，
@@ -191,6 +191,55 @@ openheron/
 4. 采样参数的优先级（见 `llm/provider_test.go` 的断言）：
    **Agent 的显式参数 > `extra` > 厂商默认**。
    `extra` 是多层的，后面的层覆盖前面的层。
+
+### 3.6 上下文压缩
+
+长对话迟早会塞不进模型的窗口。openheron 会压缩它：对话被一段摘要取代，从那以后 agent 带着
+摘要继续走。
+
+**阈值**按模型配，写在 `llm/<vendor>.yaml` 里：
+
+```yaml
+models:
+  - id: deepseek-flash
+    context_window: 131072
+    summarize_at: 104858        # 上下文窗口的 80%
+```
+
+`summarize_at: 0` 表示永不压缩。这个字段在装配时读取（`agentkit/build/summarize.go` 里的
+`summarizeAtOf`），中间件**只挂在根 agent 上** —— 子 agent 的上下文活在自己的那一轮里，
+随轮而死。
+
+**整条链**，从头到尾：
+
+| 环节 | 在哪 | 发生了什么 |
+|---|---|---|
+| 触发 | `agentkit/build/summarize.go` | eino 的摘要中间件在每次模型调用前给 agent 的状态数 token，超过阈值就压缩 |
+| finalizer | 同文件的 `finalizeWithoutSystem` | 替换后的历史**只有摘要** —— agent 的 system 消息被丢掉，因为 openheron 的上下文提示是临时的（`agentkit/run/input.go`），从不落盘 |
+| 宣告 | eino 的 `after_summarize` 事件 | 中间件把替换后的历史发到 agent 的事件流上 |
+| 接住 | `transport/transport.go:190` 的 `compactionFrom` | transport 读这个事件，把压缩消息放进 `Result.Compaction` |
+| 落盘 | `agentkit/run/loop.go:182` 的 `archiveCompaction` | 消息被追加到记录里，位置在**本轮消息之前** |
+| 边界 | `message/compaction.go:103` | 标记搭在这条消息上，所以记录仍是唯一真相源 |
+
+★ **写入顺序不是细节。** 压缩消息总结的是本轮消息之前的一切，所以必须先写。写在后面，摘要
+就落在对话末尾 —— 那儿它什么也没总结。
+
+**会话的两个视图**，该问哪个：
+
+```go
+Messages(effective bool) []*schema.Message
+```
+
+- `false`（默认）—— 整份记录：审计线索，以及界面渲染的东西。
+- `true` —— 有效历史：最后一条压缩消息及其后的部分。**agent 的上下文就是它**（`agentkit/run/loop.go`）。
+
+★ 压缩**不是**删除。被取代的消息留在盘上、照样读得到；标记说明切口在哪儿。
+
+★ 摘要必须留住用户自己的话 —— eino 会把近期的用户消息拼回去，openheron 的 finalizer 不动
+这件事。有测试钉住它。
+
+★ Go 的接口没有可选参数，所以默认靠零值表达：`false` 就是「全部」，每个调用点都写明自己要
+哪个视图。
 
 ## 4. 前端
 
@@ -327,7 +376,7 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 
 | 要求 | 规则 |
 |---|---|
-| **有标题** | 第 1 行是 `# 标题` |
+| **有标题** | 第 1 行是 `# Title` |
 | **有摘要** | 三选一：frontmatter 里的 `description:` 字段 / 标题下的 TLDR 小节（`一句话` `tldr` `summary` `概要` `摘要`）/ **标题后紧跟的连续引用块** `> ...` |
 | **小节行号有效** | 每个小节的 `Line` 必须落在文档行数范围内 |
 | **小节不被截断** | 小节数不能超过硬上限（超了会被 `SectionsTruncated` 记下来，测试会挂） |
@@ -402,7 +451,7 @@ E2E 共享一个假后端状态，并行会互相污染。
 
 **（四）`pkill` 要用 `-x`，不要用 `-f`。** `-f` 匹配完整命令行，
 会把执行这条命令的 shell 自己也杀掉（它的命令行里就含这个字符串）。
-★ `ps | grep | kill` 是同一种病。要按名字杀就用 `pgrep -x <名字>`。
+★ `ps | grep | kill` 是同一种病。要按名字杀就用 `pgrep -x <name>`。
 ★ 进程名超过 15 个字符时 `comm` 会被内核截断，那时按端口找 PID（`ss -ltnp`）逐个 kill。
 
 **（五）长任务放到后台任务里跑，不要用 shell 的 `&`。** 后台进程活不过那次工具调用，

@@ -1,6 +1,8 @@
 # Context Usage Estimate — Design
 
-> **Status**: proposal. Nothing described here is implemented yet.
+> **Status**: partly implemented. The compaction and its persistence (§7) are in the code; the
+> occupancy meter (§2, §4, §5) and the client-side rendering of the compaction marker (§7.7) are
+> not.
 > **Scope**: this repository's code surface — the Go backend and the `web/` frontend.
 > **Companion**: [architecture.md](architecture.md) (how the code is layered),
 > [developer-manual.md](developer-manual.md) (how to change the code),
@@ -44,7 +46,7 @@ The raw material is per-call and already persisted: each assistant message carri
 
 ### 1.3 The context is rebuilt from the transcript every turn
 
-Each turn rebuilds the model input from the persisted session history: `buildInput` composes a transient system prompt, the history, and the new query (`agentkit/run/input.go:44`), and the loop feeds it the session's messages (`agentkit/run/loop.go:69`).
+Each turn rebuilds the model input from the persisted session history: `buildInput` composes a transient system prompt, the history, and the new query (`agentkit/run/input.go:44`), and the loop feeds it the session's messages (`agentkit/run/loop.go:71`).
 
 Two consequences:
 
@@ -198,7 +200,7 @@ The struct carries numbers only. Ratios are computed by whoever renders them —
 
 ### 4.2 The computation lives in the transport
 
-The transport already owns the per-call usage: `res.Usage = aggregateUsage(res.Intermediates)` at `transport/transport.go:93` and `transport/transport.go:163`, over the intermediates it appends in order (`transport/transport.go:142`, `transport/transport.go:149`, `transport/transport.go:157`).
+The transport already owns the per-call usage: `res.Usage = aggregateUsage(res.Intermediates)` at `transport/transport.go:99` and `transport/transport.go:175`, over the intermediates it appends in order (`transport/transport.go:154`, `transport/transport.go:161`, `transport/transport.go:169`).
 
 A new `transport/context.go` computes the per-agent occupancy from the same list:
 
@@ -216,7 +218,7 @@ Two properties matter:
 - **The list is ordered.** The intermediates are appended as the events arrive, so "the last message of agent A" is a walk from the end, not a search.
 - **Streaming keeps the usage.** The streamed assistant message is the concatenation of the chunks (`message.ConcatChunks`, `message/variant.go:74`), and eino's `ConcatMessages` keeps the usage of the chunks it merges. A streamed turn therefore reports the same numbers as a non-streamed one.
 
-The result joins `transport.Result` next to `Usage` (`transport/transport.go:29`).
+The result joins `transport.Result` next to `Usage` (`transport/transport.go:30`).
 
 ### 4.3 The window comes from the builder, not from the API layer
 
@@ -256,9 +258,9 @@ res, streamErr := transport.Stream(stream, turn, transport.Options{
 
 ### 4.4 The live channel: a `CUSTOM` event
 
-The occupancy changes after **every model call**, so it must not wait for the end of the run. The transport already has the mechanism: `events.NewCustomEvent` with a value, used for the model-retry notice (`transport/transport.go:109`).
+The occupancy changes after **every model call**, so it must not wait for the end of the run. The transport already has the mechanism: `events.NewCustomEvent` with a value, used for the model-retry notice (`transport/transport.go:115`).
 
-The event is emitted right after an assistant message with usage is archived — the two places where the transport appends intermediates (`transport/transport.go:149` for a streamed message, `transport/transport.go:157` for a complete one):
+The event is emitted right after an assistant message with usage is archived — the two places where the transport appends intermediates (`transport/transport.go:161` for a streamed message, `transport/transport.go:169` for a complete one):
 
 ```json
 {
@@ -444,9 +446,11 @@ Until then, `summarizeAt` is zero and the second scale is not shown.
 
 The meter (§4, §5) answers "when is this conversation about to stop fitting?". This section is the other half: **what happens when it does not**. The compacted result has to outlive the turn that produced it, or the conversation never gets shorter.
 
+**This part is implemented.** The middleware, openheron's finalizer, the pickup of the event, the write to the transcript and the two views of a session are all in the code. What is not in the code is the client-side rendering of the marker (§7.7): the compacted message reaches the browser with a `compaction` metadata marker, and the browser renders it as an ordinary message for now.
+
 ### 7.1 The trap
 
-eino's summarization middleware rewrites the agent's **in-memory** state (`BeforeModelRewriteState` → `Summarize`, `adk/middlewares/summarization/summarization.go:349`, `:281`). openheron rebuilds the model input from the persisted transcript on every turn (`agentkit/run/loop.go:69`, `agentkit/run/input.go:44`). The rewritten state dies with the turn; the next turn sends the full transcript again.
+eino's summarization middleware rewrites the agent's **in-memory** state (`BeforeModelRewriteState` → `Summarize`, `adk/middlewares/summarization/summarization.go:349`, `:281`). openheron rebuilds the model input from the persisted transcript on every turn (`agentkit/run/loop.go:71`, `agentkit/run/input.go:44`). The rewritten state dies with the turn; the next turn sends the full transcript again.
 
 Mounted as-is, the middleware would compact **within** a turn — useful for a long tool loop — and do nothing for a long conversation. Worse, the meter would climb back to the threshold at the start of every turn, which reads as a bug rather than as a fact.
 
@@ -479,7 +483,7 @@ The summary covers the context messages only: the middleware splits the system m
 
 The replacement history is **one message**. That single fact is what makes the persistence simple.
 
-**The compacted message** is appended to `session.jsonl` like any other message (`storage/filestore/transcript.go:172`): one line, one `schema.Message`. The transcript stays append-only (`storage/storage.go:40`), its format version does not move (`formatVersion`, `storage/filestore/session.go:492`), and the existing readers keep working — a session written before this feature reads exactly as it did.
+**The compacted message** is appended to `session.jsonl` like any other message (`storage/filestore/transcript.go:172`): one line, one `schema.Message`. The transcript stays append-only (`storage/storage.go:40`), its format version does not move (`formatVersion`, `storage/filestore/session.go:501`), and the existing readers keep working — a session written before this feature reads exactly as it did.
 
 **The boundary** rides on that message itself, in the `Extra` map — the same place openheron already stamps provenance (`message/provenance.go:9`):
 
@@ -527,10 +531,10 @@ There are two production call sites, and they want different views:
 
 | Call site | View | Why |
 |---|---|---|
-| the run loop (`agentkit/run/loop.go:70`) | `sess.Messages(true)` | the agent's context is the effective history |
+| the run loop (`agentkit/run/loop.go:71`) | `sess.Messages(true)` | the agent's context is the effective history |
 | the messages view (`api/v2_sessions.go:274`) | `sess.Messages(false)` | the UI shows the whole transcript — the superseded messages and the compaction marker |
 
-The implementation stays where it is (`storage/filestore/session.go:223`): the effective view is the suffix of the transcript that starts at the last compaction marker.
+The implementation stays where it is (`storage/filestore/session.go:229`): the effective view is the suffix of the transcript that starts at the last compaction marker.
 The HTTP surface does not change with it: the messages endpoint keeps returning the whole transcript, because that is what the UI renders. If a client ever wants the agent's view instead, `GET /v2/sessions/{id}/messages?effective=1` is the natural extension.
 
 
@@ -544,13 +548,13 @@ func (fs *FileSession) Messages(effective bool) []*schema.Message {
 }
 ```
 
-`Len()` (`storage/filestore/session.go:239`) keeps counting the whole transcript: it feeds the sidebar's message count, which is a fact about the **record**, not about the context. The interface changes with it (`storage/storage.go:42`), and so does the test double (`agentkit/run/fakes_test.go:90`).
+`Len()` (`storage/filestore/session.go:248`) keeps counting the whole transcript: it feeds the sidebar's message count, which is a fact about the **record**, not about the context. The interface changes with it (`storage/storage.go:48`), and so does the test double (`agentkit/run/fakes_test.go:90`).
 
 The existing filter still applies on top: the root agent's context excludes sub-agent messages (`agentkit/run/input.go:48`), and a sub-agent's context lives inside its own run — so **only the root agent's context is ever compacted**. Sub-agent messages carry their own flag (`message.IsSubagent`, `message/provenance.go:106`) and are dropped before the context is built.
 
 ### 7.5 Ordering, and what a crash costs
 
-The compacted message is written **before** the turn's own messages are archived (`agentkit/run/loop.go:149`). The order on disk is:
+The compacted message is written **before** the turn's own messages are archived (`agentkit/run/loop.go:150`). The order on disk is:
 
 ```
 session.jsonl:  … old history … │ compaction message │ this turn's messages …
@@ -569,7 +573,7 @@ A crash between the append and the next read costs nothing: the compaction messa
 | the user's own words | the summary text — eino splices the recent user messages back in, up to ~30k tokens (`preserveUserMsgsMaxTokens`, `adk/middlewares/summarization/consts.go:29`) | yes, up to the budget |
 | the system prompt | rebuilt every turn (`agentkit/run/input.go:44`) | yes |
 | the tool schemas | re-sent with every call | yes |
-| the approval audit log | `state.json` (`storage/filestore/session.go:474`), not the message log | yes, untouched |
+| the approval audit log | `state.json` (`storage/filestore/session.go:483`), not the message log | yes, untouched |
 | the original messages | the transcript, superseded but not deleted | yes — they stay on disk |
 
 The last row is why the transcript is not rewritten: **compaction is not deletion**. The old messages stay readable in the transcript and in the UI, and the marker says where the cut happened.
@@ -580,7 +584,7 @@ If the user wants the model to be able to re-read the original conversation, `Co
 
 Three things, and they are different from each other:
 
-1. **A marker in the message list.** The compacted message is not a chat bubble. The messages view maps it to a synthetic entry (`api/v2_sessions.go:283`), and the frontend renders a divider: *"20 earlier messages were compacted into a summary · 62k tokens saved"*. The superseded messages stay above it, visible — the user can still read what was said before the cut.
+1. **A marker in the message list.** The compacted message is not a chat bubble. The messages view marks it with a `compaction` metadata entry (`api/v2_convert.go:63`), and the frontend is to render a divider: *"20 earlier messages were compacted into a summary · 62k tokens saved"*. The superseded messages stay above it, visible — the user can still read what was said before the cut. ★ The marker is delivered; the divider is not drawn yet.
 2. **The meter's second needle.** `context[agent].summarized` counts the compactions, and `savedTokens` says what the last one bought.
 3. **A live event.** The compaction happens mid-turn, so the UI learns about it from the stream: the transport forwards `after_summarize` as a `CUSTOM "context_compacted"` event with the same numbers.
 
@@ -607,7 +611,7 @@ The summarizing model is the agent's own model unless the config names another o
 |---|---|---|
 | **P0** | `contract.ContextUsage` · `transport/context.go` · `Builder.Contexts()` · `usage.context` on the session view · `model.contextWindow` on the agent view · composer meta line · unit tests | the meter, correct after a refresh |
 | **P1** | `CUSTOM "context_usage"` on the live path · reducer · per-agent filter chips · Playwright spec | the meter moves while the run goes |
-| **P2** | **compaction and its persistence** — mount the middleware · own the finalizer · append the compacted message · read the effective history · render the marker | the conversation stops growing |
+| **P2** | **compaction and its persistence** — mount the middleware · own the finalizer · append the compacted message · read the effective history · render the marker | the conversation stops growing — **steps 1-3 are in the code, step 4 (the marker in the interface) is not** |
 | **P3** | AG-UI's standard `RUN_FINISHED.usage[]` (`events.WithUsage`) | the vendor-accounting channel, and the upstream record's open item |
 
 P0 and P1 are the meter. P2 is the part that makes the meter mean something: without it, a long conversation can only end in a refusal. P3 is a standards cleanup.

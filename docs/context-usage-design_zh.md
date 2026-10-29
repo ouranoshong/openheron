@@ -1,6 +1,7 @@
 # 上下文使用预估 —— 设计方案
 
-> **状态**：提案。本文描述的一切都尚未实现。
+> **状态**：部分已实现。压缩及其持久化（§7）已在代码里；占用仪表盘（§2、§4、§5）与
+> 压缩标记的客户端渲染（§7.7）还没有。
 > **范围**：本仓库的代码面 —— Go 后端与 `web/` 前端。
 > 配套阅读：[architecture.md](architecture.md)（代码怎么分层）、
 > [developer-manual.md](developer-manual.md)（怎么改代码）、
@@ -44,7 +45,7 @@ ContextWindow int `yaml:"context_window"`
 
 ### 1.3 上下文每轮都从记录里重建
 
-每一轮都从持久化的会话历史重建模型输入：`buildInput` 拼一份临时的系统提示、历史与本轮 query（`agentkit/run/input.go:44`），循环把它与会话消息一起喂进去（`agentkit/run/loop.go:69`）。
+每一轮都从持久化的会话历史重建模型输入：`buildInput` 拼一份临时的系统提示、历史与本轮 query（`agentkit/run/input.go:44`），循环把它与会话消息一起喂进去（`agentkit/run/loop.go:71`）。
 
 两个推论：
 
@@ -198,7 +199,7 @@ type AgentContext struct {
 
 ### 4.2 计算放在 transport
 
-逐次调用的用量本来就是 transport 的：两次 `res.Usage = aggregateUsage(res.Intermediates)` 在 `transport/transport.go:93` 与 `transport/transport.go:163`，对象是它按顺序追加的中间消息（`transport/transport.go:142`、`transport/transport.go:149`、`transport/transport.go:157`）。
+逐次调用的用量本来就是 transport 的：两次 `res.Usage = aggregateUsage(res.Intermediates)` 在 `transport/transport.go:99` 与 `transport/transport.go:175`，对象是它按顺序追加的中间消息（`transport/transport.go:154`、`transport/transport.go:161`、`transport/transport.go:169`）。
 
 新增 `transport/context.go`，从同一份列表算出逐 agent 的占用：
 
@@ -216,7 +217,7 @@ func contextUsageOf(msgs []*schema.Message, contexts map[string]contract.AgentCo
 - **这个列表是有序的。** 中间消息随事件到达而追加，所以「agent A 的最后一条消息」是从尾部往回走，不是搜索。
 - **流式也留得住用量。** 流式的 assistant 消息是分片的拼接（`message.ConcatChunks`，`message/variant.go:74`），而 eino 的 `ConcatMessages` 会保留它合并的分片上的用量。所以流式一轮报出的数字与非流式一致。
 
-结果挂到 `transport.Result` 上，与 `Usage` 并排（`transport/transport.go:29`）。
+结果挂到 `transport.Result` 上，与 `Usage` 并排（`transport/transport.go:30`）。
 
 ### 4.3 窗口来自 builder，而不是 API 层
 
@@ -256,9 +257,9 @@ res, streamErr := transport.Stream(stream, turn, transport.Options{
 
 ### 4.4 实时通道：一个 `CUSTOM` 事件
 
-占用在**每次模型调用之后**都会变，所以不能等到运行结束。机制现成：`events.NewCustomEvent` 带一个 value，模型重试提示就是这么发的（`transport/transport.go:109`）。
+占用在**每次模型调用之后**都会变，所以不能等到运行结束。机制现成：`events.NewCustomEvent` 带一个 value，模型重试提示就是这么发的（`transport/transport.go:115`）。
 
-事件在带用量的 assistant 消息归档之后立刻发出 —— 也就是 transport 追加中间消息的那两处（流式消息 `transport/transport.go:149`，完整消息 `transport/transport.go:157`）：
+事件在带用量的 assistant 消息归档之后立刻发出 —— 也就是 transport 追加中间消息的那两处（流式消息 `transport/transport.go:161`，完整消息 `transport/transport.go:169`）：
 
 ```json
 {
@@ -444,9 +445,11 @@ models:
 
 仪表盘（§4、§5）回答的是「这段对话什么时候快塞不下了」。这一节是另一半：**真塞不下时怎么办**。压缩出来的结果必须活过产生它的那一轮，否则对话的长度一点没变。
 
+**这一部分已经实现。** 中间件、自带的 finalizer、事件的接住、落盘、以及会话的两个视图都在代码里。还没进代码的是压缩标记的客户端渲染（§7.7）：压缩消息带着 `compaction` 元数据标记抵达浏览器，浏览器暂时把它当普通消息渲染。
+
 ### 7.1 那个坑
 
-eino 的摘要中间件改写的是 agent 的**内存状态**（`BeforeModelRewriteState` → `Summarize`，`adk/middlewares/summarization/summarization.go:349`，`:281`）。而 openheron 每轮都从持久化记录重建模型输入（`agentkit/run/loop.go:69`，`agentkit/run/input.go:44`）。改写出来的状态随轮次一起没了，下一轮照旧把完整记录再发一遍。
+eino 的摘要中间件改写的是 agent 的**内存状态**（`BeforeModelRewriteState` → `Summarize`，`adk/middlewares/summarization/summarization.go:349`，`:281`）。而 openheron 每轮都从持久化记录重建模型输入（`agentkit/run/loop.go:71`，`agentkit/run/input.go:44`）。改写出来的状态随轮次一起没了，下一轮照旧把完整记录再发一遍。
 
 照原样挂上去，中间件只会压**轮内**的状态 —— 这对一轮里很长的工具循环有用，对一段长对话没用。更糟的是仪表盘会在每轮开头又爬回阈值，那看起来像 bug，而不像事实。
 
@@ -479,7 +482,7 @@ system 消息是 agent 自己的，而 openheron 的上下文提示按设计就�
 
 替换后的历史是**一条消息**。就这一个事实，让持久化变得简单。
 
-**压缩消息**像别的消息一样追加到 `session.jsonl`（`storage/filestore/transcript.go:172`）：一行，一条 `schema.Message`。记录仍然是只追加的（`storage/storage.go:40`），格式版本不动（`formatVersion`，`storage/filestore/session.go:492`），既有读法照旧 —— 这个功能之前写的会话读起来一模一样。
+**压缩消息**像别的消息一样追加到 `session.jsonl`（`storage/filestore/transcript.go:172`）：一行，一条 `schema.Message`。记录仍然是只追加的（`storage/storage.go:40`），格式版本不动（`formatVersion`，`storage/filestore/session.go:501`），既有读法照旧 —— 这个功能之前写的会话读起来一模一样。
 
 **边界**就搭在这条消息上，放在 `Extra` map 里 —— 与 openheron 已经打戳的地方相同（`message/provenance.go:9`）：
 
@@ -527,10 +530,10 @@ Messages(effective bool) []*schema.Message
 
 | 调用点 | 视图 | 为什么 |
 |---|---|---|
-| 运行循环（`agentkit/run/loop.go:70`） | `sess.Messages(true)` | agent 的上下文就是有效历史 |
+| 运行循环（`agentkit/run/loop.go:71`） | `sess.Messages(true)` | agent 的上下文就是有效历史 |
 | 消息视图（`api/v2_sessions.go:274`） | `sess.Messages(false)` | 界面显示整份记录 —— 被取代的消息与压缩标记都在里面 |
 
-实现还在原处（`storage/filestore/session.go:223`）：有效视图就是记录里从最后一条压缩标记开始的那一段后缀。
+实现还在原处（`storage/filestore/session.go:229`）：有效视图就是记录里从最后一条压缩标记开始的那一段后缀。
 HTTP 这一层不动：消息接口继续返回整份记录，因为界面渲染的就是它。若将来某个客户端要 agent 那个视图，`GET /v2/sessions/{id}/messages?effective=1` 是自然的扩展。
 
 
@@ -544,13 +547,13 @@ func (fs *FileSession) Messages(effective bool) []*schema.Message {
 }
 ```
 
-`Len()`（`storage/filestore/session.go:239`）继续数整份记录：它喂给侧边栏的消息条数，那是关于**记录**的事实，不是关于上下文的事实。接口跟着改（`storage/storage.go:42`），测试替身也一样（`agentkit/run/fakes_test.go:90`）。
+`Len()`（`storage/filestore/session.go:248`）继续数整份记录：它喂给侧边栏的消息条数，那是关于**记录**的事实，不是关于上下文的事实。接口跟着改（`storage/storage.go:48`），测试替身也一样（`agentkit/run/fakes_test.go:90`）。
 
 原有的过滤仍然叠在上面：根 agent 的上下文不含子 agent 的消息（`agentkit/run/input.go:48`），而子 agent 的上下文活在自己的那一轮里 —— 所以**只有根 agent 的上下文会被压缩**。子 agent 的消息带自己的标记（`message.IsSubagent`，`message/provenance.go:106`），在构造上下文之前就被丢掉了。
 
 ### 7.5 顺序，以及崩了会怎样
 
-压缩消息写在**本轮消息归档之前**（`agentkit/run/loop.go:149`）。磁盘上的顺序是：
+压缩消息写在**本轮消息归档之前**（`agentkit/run/loop.go:150`）。磁盘上的顺序是：
 
 ```
 session.jsonl:  … 旧历史 … │ 压缩消息 │ 本轮的消息 …
@@ -569,7 +572,7 @@ session.jsonl:  … 旧历史 … │ 压缩消息 │ 本轮的消息 …
 | 用户自己的话 | 摘要正文 —— eino 把近期的用户消息拼回去，最多约 30k token（`preserveUserMsgsMaxTokens`，`adk/middlewares/summarization/consts.go:29`） | 在，但受预算限制 |
 | 系统提示 | 每轮重建（`agentkit/run/input.go:44`） | 在 |
 | 工具 schema | 每次调用都重发 | 在 |
-| 审批审计日志 | `state.json`（`storage/filestore/session.go:474`），不在消息日志里 | 在，没被碰过 |
+| 审批审计日志 | `state.json`（`storage/filestore/session.go:483`），不在消息日志里 | 在，没被碰过 |
 | 原始消息 | 记录里，被取代但没被删 | 在 —— 还在盘上 |
 
 最后一行正是记录不被重写的原因：**压缩不是删除**。旧消息在记录里、在界面里都还读得到，标记说明切口在哪儿。
@@ -580,7 +583,7 @@ session.jsonl:  … 旧历史 … │ 压缩消息 │ 本轮的消息 …
 
 三样东西，彼此不同：
 
-1. **消息列表里的一个标记。** 压缩消息不是聊天气泡。消息视图把它映射成一个合成条目（`api/v2_sessions.go:283`），前端渲染成一条分隔线：*「此前的 20 条消息已压缩成一段摘要 · 省下 62k token」*。被取代的消息留在它上面、仍然可见 —— 用户照样能读到切口之前说了什么。
+1. **消息列表里的一个标记。** 压缩消息不是聊天气泡。消息视图给它标上一个 `compaction` 元数据项（`api/v2_convert.go:63`），前端要把它渲染成一条分隔线：*「此前的 20 条消息已压缩成一段摘要 · 省下 62k token」*。被取代的消息留在它上面、仍然可见 —— 用户照样能读到切口之前说了什么。★ 标记已经送到，分隔线还没画。
 2. **仪表盘的第二根针。** `context[agent].summarized` 数压缩的次数，`savedTokens` 说上一次压缩省下了多少。
 3. **一个实时事件。** 压缩发生在轮内，所以界面从事件流里知道它：transport 把 `after_summarize` 转成 `CUSTOM "context_compacted"` 事件，带同样的数字。
 
@@ -607,7 +610,7 @@ models:
 |---|---|---|
 | **P0** | `contract.ContextUsage` · `transport/context.go` · `Builder.Contexts()` · 会话视图上的 `usage.context` · agent 视图上的 `model.contextWindow` · 输入框元信息行 · 单元测试 | 刷新后仍然正确的仪表盘 |
 | **P1** | 实时路径的 `CUSTOM "context_usage"` · reducer · 逐 agent 的 chip · Playwright spec | 运行中会动的仪表盘 |
-| **P2** | **压缩及其持久化** —— 挂上中间件 · 自带 finalizer · 追加压缩消息 · 读有效历史 · 渲染标记 | 对话不再变长 |
+| **P2** | **压缩及其持久化** —— 挂上中间件 · 自带 finalizer · 追加压缩消息 · 读有效历史 · 渲染标记 | 对话不再变长 —— **第 1-3 步已在代码里，第 4 步（界面上的标记）还没有** |
 | **P3** | AG-UI 标准 `RUN_FINISHED.usage[]`（`events.WithUsage`） | 厂商记账通道，以及上游记录里的遗留项 |
 
 P0 与 P1 是仪表盘。P2 是让仪表盘有意义的那部分：没有它，一段长对话只能以一次拒绝收场。P3 是标准层面的清理。

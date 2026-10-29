@@ -61,7 +61,7 @@ func TestCreateAppendReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	msgs := reloaded.Messages()
+	msgs := reloaded.Messages(false)
 	if len(msgs) != 2 {
 		t.Fatalf("want 2 messages after reload, got %d", len(msgs))
 	}

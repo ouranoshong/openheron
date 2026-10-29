@@ -15,8 +15,9 @@
 > 下面凡引用 `docs/xxx.md` 而这几组之外的，都是上游那份。改语义前若拿不到它，
 > 先问，别凭印象改配置或接口。
 >
-> ★ 前面四组讲的是**代码面已经是什么样**；`docs/context-usage-design.md` 是
-> **提案**（尚未实现）。别把提案当现状引用 —— 它描述的东西代码里还没有。
+> ★ 前面四组讲的是**代码面已经是什么样**；`docs/context-usage-design.md`
+> **部分已实现** —— 压缩与持久化（§7）已经在代码里，占用仪表盘（§2、§4、§5）
+> 还没有。别把它整体当现状引用。
 >
 > 写这几组文档时**照代码写**，别照想象写：每个结论都要能在代码里指到行。
 > 代码改了，文档跟着改 —— 文档漂移比没有文档更贵。
@@ -102,8 +103,9 @@
   `docs/config-design.md` §5.2。**这几份上游文档不在本仓库里** —— 拿不到就先问。
   本仓库自带的 `docs/architecture.md` / `docs/user-manual.md` /
   `docs/developer-manual.md`（及其 `_zh` 中文版）讲的是**本代码面**的实际结构，
-  直接看就行。`docs/context-usage-design.md` 是**未实现的提案**，动上下文用量
-  相关代码前先看它，但别把它当现状。
+  直接看就行。`docs/context-usage-design.md` **部分已实现** —— 压缩与持久化
+  （§7）在代码里，占用仪表盘还没有；动上下文用量相关代码前先看它，但别把它
+  整体当现状。
 
 ### 前端（`web/`）
 
@@ -232,7 +234,7 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 | `docs/architecture.md` / `docs/architecture_zh.md` | **架构设计说明** —— 分层与依赖方向、配置系统、装配、运行循环、存储、HTTP、前端、知识库 |
 | `docs/user-manual.md` / `docs/user-manual_zh.md` | **用户使用说明** —— 安装、配置、界面操作（面向使用者，不含内部设计） |
 | `docs/developer-manual.md` / `docs/developer-manual_zh.md` | **开发者说明** —— 分层、依赖铁律、开发配方、测试与排障、已知问题 |
-| `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` | **上下文使用预估设计方案** —— 占用口径、数据流、后端与前端改动、压缩结果的持久化与有效历史（**提案，未实现**） |
+| `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` | **上下文使用预估设计方案** —— 占用口径、数据流、后端与前端改动、压缩结果的持久化与有效历史（**部分已实现**：压缩与持久化在代码里，仪表盘还没有） |
 
 ★ 无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。
 

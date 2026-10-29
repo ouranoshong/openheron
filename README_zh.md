@@ -255,7 +255,7 @@ make smoke              # 真后端联调（SSE 分帧、历史回放、审批�
 | [docs/architecture.md](docs/architecture.md) · [中文](docs/architecture_zh.md) | **架构设计说明** —— 分层与依赖方向、配置系统、装配、运行循环、存储、HTTP、前端、知识库 |
 | [docs/user-manual.md](docs/user-manual.md) · [中文](docs/user-manual_zh.md) | **用户使用说明** —— 安装、配置、界面操作 |
 | [docs/developer-manual.md](docs/developer-manual.md) · [中文](docs/developer-manual_zh.md) | **开发者说明** —— 分层、依赖铁律、开发配方、测试与排障、已知问题 |
-| [docs/context-usage-design.md](docs/context-usage-design.md) · [中文](docs/context-usage-design_zh.md) | **上下文使用预估设计方案** —— 占用口径、数据流、后端与前端改动，以及压缩后的对话如何持久化（**提案，未实现**） |
+| [docs/context-usage-design.md](docs/context-usage-design.md) · [中文](docs/context-usage-design_zh.md) | **上下文使用预估设计方案** —— 占用口径、数据流、后端与前端改动，以及压缩后的对话如何持久化（**部分已实现**：压缩与持久化已在代码里，仪表盘还没有） |
 
 `docs/` 下**其余**设计文档在上游仓库里，不随本仓库分发：
 

@@ -14,6 +14,13 @@ models:
   - id: {{model|deepseek-flash}}
     context_window: 131072
 
+    # ★ summarize_at is the token count at which the conversation is compacted
+    #   into a summary. 0 means never: the context grows until the endpoint
+    #   refuses the request. 80-90% of context_window is the usual choice —
+    #   a request that exactly fills the window is a request that gets
+    #   refused.
+    summarize_at: 0
+
     # Tier vocabulary: tier name → the field this endpoint sends it as.
     # An agent only writes `reasoning: high`; it does not need to know what shape
     # "high" has at this vendor.

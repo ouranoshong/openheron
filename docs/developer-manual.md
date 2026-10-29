@@ -210,6 +210,58 @@ The assembly logic is in `agentkit/build/assemble.go`; the validation logic is i
    **the agent's explicit parameters > `extra` > the vendor default**.
    `extra` is layered, with later layers overriding earlier ones.
 
+### 3.6 Context compaction
+
+A long conversation eventually stops fitting in the model's window. openheron compacts it: the
+conversation is replaced by a summary, and the summary is what the agent carries forward.
+
+**The threshold** is per model, in `llm/<vendor>.yaml`:
+
+```yaml
+models:
+  - id: deepseek-flash
+    context_window: 131072
+    summarize_at: 104858        # 80% of context_window
+```
+
+`summarize_at: 0` means never. The field is read at assembly time (`summarizeAtOf` in
+`agentkit/build/summarize.go`), and the middleware is mounted on the **root agent only** — a
+sub-agent's context lives inside its own run and dies with it.
+
+**The chain**, end to end:
+
+| Step | Where | What happens |
+|---|---|---|
+| the trigger | `agentkit/build/summarize.go` | eino's summarization middleware counts the agent's state before every model call and compacts it past the threshold |
+| the finalizer | `finalizeWithoutSystem`, same file | the replacement history is the **summary alone** — the agent's system messages are dropped, because openheron's context prompt is transient (`agentkit/run/input.go`) and never persisted |
+| the announcement | eino's `after_summarize` event | the middleware publishes the replacement history on the agent's event stream |
+| the pickup | `compactionFrom` in `transport/transport.go:190` | the transport reads the event and puts the compacted message on `Result.Compaction` |
+| the write | `archiveCompaction` in `agentkit/run/loop.go:182` | the message is appended to the transcript **before the turn's own messages** |
+| the boundary | `message/compaction.go:103` | the marker rides on that message, so the transcript stays the single source of truth |
+
+★ **The write order is not a detail.** The compacted message summarizes everything that came
+before the turn's messages, so it has to be written first. Written later, the summary would sit
+at the end of the conversation, where it summarizes nothing.
+
+**Two views of a session**, and which one to ask for:
+
+```go
+Messages(effective bool) []*schema.Message
+```
+
+- `false` (the default) — the whole transcript: the audit trail, and what the UI renders.
+- `true` — the effective history: the last compaction message and everything after it. **This
+  is what the agent's context is built from** (`agentkit/run/loop.go`).
+
+★ Compaction is **not** deletion. The superseded messages stay on disk and stay readable; the
+marker says where the cut happened.
+
+★ The summary must keep the user's own words — eino splices the recent user messages back into
+it, and openheron's finalizer leaves that alone. A test pins it.
+
+★ The interface has no optional parameters in Go, so the default is the zero value: `false`
+means "everything", and every call site says which view it wants.
+
 ## 4. The frontend
 
 ### 4.1 The pure layers

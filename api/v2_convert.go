@@ -2,6 +2,7 @@ package api
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 	"github.com/cloudwego/eino/schema"
@@ -51,6 +52,19 @@ func toAgUiMessage(m *schema.Message, index int) (types.Message, bool) {
 			out.Metadata = types.Metadata{}
 		}
 		out.Metadata["thinking"] = prov.Thinking
+	}
+	// A compacted message is not a chat bubble: it stands for the stretch of
+	// conversation it replaced. The marker travels with it so the client can
+	// render a divider instead of a message.
+	if c, ok := message.ReadCompaction(m); ok {
+		if out.Metadata == nil {
+			out.Metadata = types.Metadata{}
+		}
+		out.Metadata["compaction"] = map[string]any{
+			"superseded":  c.Superseded,
+			"savedTokens": c.SavedTokens,
+			"at":          c.At.UTC().Format(time.RFC3339Nano),
+		}
 	}
 
 	switch m.Role {

@@ -39,7 +39,15 @@ type Session interface {
 
 	// Message log. Append-only.
 	Append(msg *schema.Message) error
-	Messages() []*schema.Message
+	// Messages returns the session's messages.
+	//
+	// effective selects the view: false — the default — returns the whole
+	// transcript, which is the audit trail and what the UI renders. true
+	// returns the effective history: the last compaction message and
+	// everything after it, which is what the agent's context is built from.
+	Messages(effective bool) []*schema.Message
+	// Len reports how many messages the session holds. It counts the whole
+	// transcript: it is a fact about the record, not about the context.
 	Len() int
 
 	// SetPendingApproval is fail-closed: if the state cannot be persisted the

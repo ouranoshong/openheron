@@ -220,7 +220,13 @@ func (fs *FileSession) GetCheckPointStore() (adk.CheckPointStore, adk.CheckPoint
 	return fs.ckpt, fs.ckpt
 }
 
-func (fs *FileSession) Messages() []*schema.Message {
+// Messages returns the session's messages.
+//
+// effective selects the view: false — the default — returns the whole
+// transcript, which is the audit trail and what the UI renders. true returns
+// the effective history: the last compaction message and everything after it,
+// which is what the agent's context is built from.
+func (fs *FileSession) Messages(effective bool) []*schema.Message {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	// A session opened without its transcript loads it on first use. The
@@ -229,6 +235,9 @@ func (fs *FileSession) Messages() []*schema.Message {
 	_ = fs.transcriptLocked()
 	out := make([]*schema.Message, len(fs.messages))
 	copy(out, fs.messages)
+	if effective {
+		out = message.EffectiveView(out)
+	}
 	return out
 }
 

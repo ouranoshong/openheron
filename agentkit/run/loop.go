@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
@@ -67,7 +68,7 @@ func (rt *Runtime) makeGenInput(sess storage.Session, turn *Turn) func(context.C
 		}
 
 		built, err := rt.cfg.Input.buildInput(ctx, inputParams{
-			History:   sess.Messages(),
+			History:   sess.Messages(true),
 			Workspace: sess.Workspace(),
 		}, queryItem.Query)
 		if err != nil {
@@ -147,6 +148,8 @@ func (rt *Runtime) finalize(sess storage.Session, turn *Turn, out outcome) error
 // archive persists the turn's intermediates and, on an interrupt, the pending
 // approval.
 func (rt *Runtime) archive(sess storage.Session, turn *Turn, out Outcome) {
+	rt.archiveCompaction(sess, out)
+
 	for _, msg := range out.Intermediates {
 		if err := sess.Append(msg); err != nil {
 			rt.logf("session=%s failed to archive intermediate message: %v", sess.ID(), err)
@@ -164,6 +167,59 @@ func (rt *Runtime) archive(sess storage.Session, turn *Turn, out Outcome) {
 		// approve, so surface it loudly rather than silently degrading.
 		rt.logf("session=%s FAILED to persist pending approval %v: %v", sess.ID(), out.Interrupts[0].InterruptID, err)
 	}
+}
+
+// archiveCompaction writes the compacted message to the transcript.
+//
+// It goes first, ahead of the turn's own messages: the compaction summarizes
+// everything that came before it, and the turn's messages came after the
+// compaction happened. Writing it later would put the summary at the end of
+// the conversation, where it summarizes nothing.
+//
+// The boundary is the transcript length at this moment — every message before
+// the compacted one is superseded. Those messages stay on disk: compaction is
+// not deletion.
+func (rt *Runtime) archiveCompaction(sess storage.Session, out Outcome) {
+	if out.Compaction == nil {
+		return
+	}
+	msg := out.Compaction
+	message.StampCompaction(msg, message.Compaction{
+		Superseded:  sess.Len(),
+		SavedTokens: savedTokens(sess, msg),
+		At:          time.Now().UTC(),
+	})
+	message.StampNow(msg)
+	if agent := sess.AgentID(); agent != "" {
+		message.StampAgent(msg, agent)
+	}
+	if err := sess.Append(msg); err != nil {
+		rt.logf("session=%s failed to persist the compacted message: %v", sess.ID(), err)
+	}
+}
+
+// savedTokens estimates how many tokens the compaction removed from the next
+// request.
+//
+// The baseline is the one eino's own counter uses — the total tokens of the
+// last assistant message that carried usage — and the summary's size is
+// estimated at four characters per token, which is eino's rule. Both numbers
+// are estimates; the point is the order of magnitude, not an exact count.
+func savedTokens(sess storage.Session, summary *schema.Message) int {
+	baseline := 0
+	for _, m := range sess.Messages(false) {
+		if m == nil || m.Role != schema.Assistant ||
+			m.ResponseMeta == nil || m.ResponseMeta.Usage == nil {
+			continue
+		}
+		baseline = m.ResponseMeta.Usage.TotalTokens
+	}
+	summaryTokens := len(message.Text(summary)) / 4
+	saved := baseline - summaryTokens
+	if saved < 0 {
+		return 0
+	}
+	return saved
 }
 
 // makeGenResume delivers the approval decisions.

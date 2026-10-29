@@ -50,7 +50,11 @@ type Outcome struct {
 	// Usage is the token accounting for this turn, aggregated from the
 	// assistant messages' ResponseMeta. Zero when the endpoint reports none.
 	Usage contract.Usage
-	Err   error
+	// Compaction is the message that replaced the conversation so far, when
+	// the context was compacted during this turn. It is archived before the
+	// turn's own messages: it summarizes everything that came before them.
+	Compaction *schema.Message
+	Err        error
 }
 
 // Wait blocks until the turn is ready to stream, is superseded by a newer turn,

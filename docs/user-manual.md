@@ -149,6 +149,7 @@ timeout: 5m
 models:
   - id: deepseek-flash
     context_window: 131072
+    summarize_at: 104858        # 80% of context_window
     reasoning:
       off:  { reasoning_effort: none, thinking: { type: disabled } }
       low:  { reasoning_effort: low,  thinking: { type: enabled } }
@@ -165,6 +166,7 @@ models:
 | `timeout` | Timeout, with a unit (`5m` / `30m`) |
 | `models[].id` | Model name |
 | `models[].context_window` | Context window |
+| `models[].summarize_at` | Token count at which a long conversation is **compacted** into a summary; `0` means never |
 | `models[].reasoning` | **Tier table**: tier name → what this endpoint actually sends |
 | `models[].reasoning_default` | Which tier to use when the agent names no `reasoning` |
 | `models[].timeout` | Overrides the vendor-level timeout (thinking models usually need more) |
@@ -174,6 +176,15 @@ models:
 ★ **`api_key` may only be an environment variable name** (`${OPENAI_API_KEY}`) or a file
 reference (`@file:/path`). Writing a literal secret into the configuration makes the
 config editor refuse to save it — secrets do not belong in the repository.
+
+★ **`summarize_at` is what keeps a long conversation alive.** Past that token count the
+conversation is replaced by a summary, and the summary is what the agent carries forward from
+there on. `0` — the factory default — means never: the context grows until the endpoint
+refuses the request. 80–90% of `context_window` is the usual choice.
+
+Compaction shortens the **context**, not the **record**. The messages that were compacted away
+stay in the transcript and stay readable; the summary is written next to them. Your own words
+survive the cut: the summary keeps them.
 
 ★ **The `reasoning` tier table is not optional.** It is the translation layer between
 "the agent writes `reasoning: high`" and "how this endpoint expresses high". A tier

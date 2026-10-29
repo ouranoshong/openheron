@@ -87,11 +87,14 @@ func (s *fakeSession) Append(msg *schema.Message) error {
 	return nil
 }
 
-func (s *fakeSession) Messages() []*schema.Message {
+func (s *fakeSession) Messages(effective bool) []*schema.Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]*schema.Message, len(s.messages))
 	copy(out, s.messages)
+	if effective {
+		out = message.EffectiveView(out)
+	}
 	return out
 }
 

@@ -41,6 +41,14 @@ type Model struct {
 
 	ContextWindow int `yaml:"context_window"`
 
+	// SummarizeAt is the token count at which the agent's context is
+	// compacted: past it, the conversation is replaced by a summary.
+	//
+	// Zero means never — the context grows until the endpoint refuses it.
+	// The upstream guidance is 80-90% of ContextWindow, because a request
+	// that fills the window exactly is a request that gets refused.
+	SummarizeAt int `yaml:"summarize_at"`
+
 	Timeout Duration `yaml:"timeout"`
 
 	ReasoningField string `yaml:"reasoning_field"`

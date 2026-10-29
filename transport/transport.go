@@ -12,6 +12,7 @@ import (
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/events"
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/adk/middlewares/summarization"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 
@@ -31,8 +32,13 @@ type Result struct {
 	Interrupts    []types.Interrupt
 	Pending       []contract.PendingInterrupt
 	Usage         contract.Usage
-	StreamBroken  bool
-	Stopped       bool
+	// Compaction is the message that replaced the conversation so far, when
+	// the context was compacted during this turn. It is written to the
+	// transcript before the turn's own messages, because it summarizes
+	// everything that came before them.
+	Compaction   *schema.Message
+	StreamBroken bool
+	Stopped      bool
 }
 
 const (
@@ -120,6 +126,12 @@ func streamEvents(e *emitter, src EventSource, mainAgent string) Result {
 			return res
 		}
 
+		if ev.Action != nil && ev.Action.CustomizedAction != nil {
+			if cm := compactionFrom(ev.Action.CustomizedAction); cm != nil {
+				res.Compaction = cm
+			}
+		}
+
 		if ev.Action != nil && ev.Action.Interrupted != nil {
 			res.Interrupts, res.Pending = interruptsFrom(ev, mainAgent)
 			res.StreamBroken = e.broken()
@@ -164,6 +176,34 @@ func streamEvents(e *emitter, src EventSource, mainAgent string) Result {
 			return res
 		}
 	}
+}
+
+// compactionFrom reads the compacted history off the summarization
+// middleware's after_summarize event.
+//
+// The event carries the replacement history. openheron's finalizer leaves the
+// summary alone in it (the agent's system prompt is transient and must not be
+// persisted), so the last message of that history is the compaction.
+//
+// The transport is where the agent's events are read, so this is where the
+// compacted message is picked up on its way to the transcript.
+func compactionFrom(action any) *schema.Message {
+	a, ok := action.(*summarization.TypedCustomizedAction[*schema.Message])
+	if !ok || a == nil || a.Type != summarization.ActionTypeAfterSummarize || a.After == nil {
+		return nil
+	}
+	var out *schema.Message
+	for _, m := range a.After.Messages {
+		if m == nil {
+			continue
+		}
+		if out != nil {
+			obs.Logger().Warn("[transport] compaction carried more than one message; "+
+				"keeping the last one", "agent", a.Type)
+		}
+		out = m
+	}
+	return out
 }
 
 func hasOutput(ev *adk.TypedAgentEvent[*schema.Message]) bool {

@@ -157,6 +157,7 @@ func (s *Server) v2Run(ctx context.Context, c *app.RequestContext) {
 		Intermediates: res.Intermediates,
 		Interrupts:    res.Pending,
 		Usage:         res.Usage,
+		Compaction:    res.Compaction,
 	})
 	// A stream-side failure is already framed as RUN_ERROR by the transport;
 	// it only matters to the archive, so record it and move on.

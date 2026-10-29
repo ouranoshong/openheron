@@ -271,7 +271,7 @@ func (s *Server) v2Messages(ctx context.Context, c *app.RequestContext) {
 		v2FailErr(c, err)
 		return
 	}
-	history := sess.Messages()
+	history := sess.Messages(false)
 	pending, _ := sess.PendingApproval()
 
 	agent := trimSpace(c.Query("agent"))

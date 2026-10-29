@@ -65,7 +65,7 @@ func TestSubmitArchivesInOrder(t *testing.T) {
 
 	waitFor(t, func() bool { return sess.Len() >= 2 })
 
-	msgs := sess.Messages()
+	msgs := sess.Messages(false)
 	if message.UserText(msgs[0]) != "hello there" {
 		t.Fatalf("user message must be persisted first, got %q", message.Text(msgs[0]))
 	}
@@ -96,7 +96,7 @@ func TestUserMessageCarriesItsTimestamp(t *testing.T) {
 
 	waitFor(t, func() bool { return sess.Len() >= 1 })
 
-	msgs := sess.Messages()
+	msgs := sess.Messages(false)
 	ts, ok := message.MessageTS(msgs[0])
 	if !ok {
 		t.Fatal("the user message must carry a timestamp")
@@ -514,7 +514,7 @@ func TestPreemptionSupersedesPreviousTurn(t *testing.T) {
 
 	waitFor(t, func() bool {
 		n := 0
-		for _, m := range sess.Messages() {
+		for _, m := range sess.Messages(false) {
 			if message.UserText(m) != "" {
 				n++
 			}
@@ -524,7 +524,7 @@ func TestPreemptionSupersedesPreviousTurn(t *testing.T) {
 
 	// Both queries must be recorded, and in the order they were submitted.
 	var queries []string
-	for _, m := range sess.Messages() {
+	for _, m := range sess.Messages(false) {
 		if q := message.UserText(m); q != "" {
 			queries = append(queries, q)
 		}

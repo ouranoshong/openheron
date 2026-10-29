@@ -78,7 +78,7 @@ openheron
 
 - **默认那一档不存在会帮你创建**。
 - 前两档指向不存在的目录时**不会创建** —— 打错字不该静默长出一棵空配置树。
-  这种情况下启动会报 `config: load <路径>: ...`，告诉你哪里不对。
+  这种情况下启动会报 `config: load <path>: ...`，告诉你哪里不对。
 - 配置根**不依赖「进程从哪启动」**：在子目录里跑 `openheron` 读到的还是同一份配置。
 
 如果默认根下没有 `agents/main.md`，启动会直接告诉你：
@@ -89,7 +89,7 @@ no configuration at /你的项目/.openheron: run `openheron init` to create one
 
 ## 4. 配置怎么写
 
-### 4.1 Agent（`agents/<名字>.md`）
+### 4.1 Agent（`agents/<name>.md`）
 
 一个 Agent 是一个 markdown 文件：**frontmatter + 正文**。正文就是给模型看的提示词。
 
@@ -113,7 +113,7 @@ frontmatter 可用键：
 | 键 | 说明 |
 |---|---|
 | `description` | 这个 Agent 干什么用的（父 Agent 靠它决定委派给谁） |
-| `model` | `<厂商>/<模型>`，**必填**，不继承也不回退 |
+| `model` | `<vendor>/<model>`，**必填**，不继承也不回退 |
 | `max_iterations` | 工具循环的轮数上限 |
 | `subagents` | 它能委派给谁（见 §5） |
 | `disabled_tools` | 对**这个 Agent** 生效的工具禁用表 |
@@ -130,7 +130,7 @@ frontmatter 可用键：
 Agent 写着 `reasoning: high`，而端点没有 `high`，实际效果是「完全不思考」，且没有任何报错。
 详见 §4.2。
 
-### 4.2 模型档案（`llm/<厂商>.yaml`）
+### 4.2 模型档案（`llm/<vendor>.yaml`）
 
 ```yaml
 type: openai_compat
@@ -141,6 +141,7 @@ timeout: 5m
 models:
   - id: deepseek-flash
     context_window: 131072
+    summarize_at: 104858        # 上下文窗口的 80%
     reasoning:
       off:  { reasoning_effort: none, thinking: { type: disabled } }
       low:  { reasoning_effort: low,  thinking: { type: enabled } }
@@ -157,6 +158,7 @@ models:
 | `timeout` | 超时，带单位（`5m` / `30m`） |
 | `models[].id` | 模型名 |
 | `models[].context_window` | 上下文窗口 |
+| `models[].summarize_at` | 长对话被**压缩**成摘要的 token 数；`0` 表示永不压缩 |
 | `models[].reasoning` | **档位表**：档位名 → 这个端点实际发什么字段 |
 | `models[].reasoning_default` | Agent 没写 `reasoning` 时用哪档 |
 | `models[].timeout` | 覆盖厂商级超时（思考模型通常要调大） |
@@ -165,6 +167,13 @@ models:
 
 ★ **`api_key` 只能写环境变量名**（`${OPENAI_API_KEY}`）或文件引用（`@file:/path`）。
 在配置里写字面量密钥，配置编辑器会直接拒绝保存 —— 密钥不该进仓库。
+
+★ **`summarize_at` 是长对话能活下去的关键。** 超过那个 token 数，对话会被一段摘要取代，
+从那以后 agent 带着摘要继续走。`0` —— 出厂默认值 —— 表示永不压缩：上下文一路涨，直到厂商
+拒绝这个请求。通常取 `context_window` 的 80–90%。
+
+压缩缩短的是**上下文**，不是**记录**。被压缩掉的消息仍留在记录里、仍读得到；摘要就写在它们
+旁边。你自己的话不会在切口处丢失 —— 摘要把它们留住了。
 
 ★ **`reasoning` 档位表不是可选的**。它是「Agent 写 `reasoning: high`」与
 「这个端点怎么表达 high」之间的翻译层。表里没有的档位会被静默忽略，
@@ -225,7 +234,7 @@ deny: []
 
 ### 4.6 技能（`skills/`）
 
-`skills/<名字>/SKILL.md`，按 eino 原生的 skill 约定。
+`skills/<name>/SKILL.md`，按 eino 原生的 skill 约定。
 
 ★ skills 的查找**是另一套规则**：先看 `$EINO_EXT_SKILLS_DIR`，
 没有才从**当前目录向上**找 `.openheron/skills`。这跟配置根「不向上找」不一样 ——
@@ -356,7 +365,7 @@ openheron kb status                # 看索引现状
 openheron kb status --json         # 机器可读
 ```
 
-三条命令都支持 `--config-dir <路径>`，用来指向别的配置根。
+三条命令都支持 `--config-dir <path>`，用来指向别的配置根。
 
 ★ `kb index` 有**运行锁**：同一时间只能跑一轮，重复调用会等前一轮结束。
 
@@ -450,7 +459,7 @@ curl -N -X POST localhost:8080/v2/run \
 **Q：启动报 `no configuration at ...: run \`openheron init\` to create one`**
 配置根是空的。在项目根跑 `openheron init`。
 
-**Q：报 `config: load <路径>: agents/main.md does not exist or could not be parsed`**
+**Q：报 `config: load <path>: agents/main.md does not exist or could not be parsed`**
 两件事之一：配置根指错了（用 `--config-dir` 或 `$OPENHERON_CONFIG_DIR` 指对），
 或者 `agents/main.md` 的 frontmatter 写错了键。
 
@@ -460,7 +469,7 @@ curl -N -X POST localhost:8080/v2/run \
 
 **Q：模型不思考，`reasoning: high` 像是没用？**
 多半是模型档案里**没有声明 `high` 档**。档位表缺哪档，那档就被静默忽略。
-去 `llm/<厂商>.yaml` 的 `models[].reasoning` 补上。
+去 `llm/<vendor>.yaml` 的 `models[].reasoning` 补上。
 
 **Q：`kb_search` 找不到东西 / 搜得不准？**
 先 `openheron kb status`：显示 `lexical-only retrieval` 说明没有向量，
