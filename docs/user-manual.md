@@ -343,6 +343,7 @@ In the interface:
 | `/attach` | Attach files to the current session |
 | `/settings` | Open the config editor |
 | `/agents` | Switch the session's agent |
+| `/compact` | **Compact the conversation now** — see §6.6 |
 | `/skill` | Pick a named skill for this task |
 | `/review` | Review the current changes or the given paths |
 | `/test` | Run the relevant tests and summarise failures |
@@ -421,6 +422,35 @@ When the context is compacted, the conversation gets a **divider**:
 
 ★ The summary itself is not shown. It is the model's working material, not your
 conversation — and the messages it replaces are still on screen.
+
+### 6.6 `/compact` — compacting on demand
+
+The context is compacted **by itself** when it reaches the agent's threshold (see §4.1). `/compact`
+does the same thing **when you say so**: it summarizes the conversation and makes that summary the
+new boundary, right away.
+
+```
+/compact
+```
+
+- It costs **one model call** — the summary is generated the same way the automatic compaction
+  generates it, by the agent's own model.
+- It is **independent of the threshold**. An agent that never compacts by itself (`summarize_at: 0`)
+  can still be compacted by hand: "off" means "do not do it on your own", not "you may not".
+- The divider appears when it is done, with the counts. While it runs, the composer says
+  `Compacting the conversation…`.
+- The messages above the divider stay readable — compaction shortens the **context**, not the
+  **record**.
+
+★ **It refuses a context that is too small to be worth compressing.** A summary carries a preamble
+and your own messages, so a short conversation can come out *longer* than it went in. Below four
+messages, or below roughly 4k tokens of context, `/compact` says there is nothing worth
+compacting yet and changes nothing.
+
+★ **It refuses while a turn is running or an approval is waiting.** Both own the context: cutting
+the history under them would be cutting the history they are working with. Stop the turn first.
+
+The same thing is available over HTTP — `POST /v2/sessions/{id}/compact` — for scripts.
 
 ## 7. The knowledge base
 
@@ -502,6 +532,7 @@ publicly, or narrow `listen_addr` to `127.0.0.1`.
 | DELETE | `/v2/sessions/:id` | Delete the session |
 | GET | `/v2/sessions/:id/messages` | History + usage (filter with `?agent=`) |
 | POST | `/v2/sessions/:id/abort` | Abort the running turn |
+| POST | `/v2/sessions/:id/compact` | Compact the conversation now (see §6.6) |
 | POST/GET | `/v2/sessions/:id/files` | Upload / list session workspace files (32 MiB per file) |
 | GET | `/v2/project/files` | List files under the project root (`?q=` `?limit=`) |
 | GET | `/v2/commands` | The slash-command list |

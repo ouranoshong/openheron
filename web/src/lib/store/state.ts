@@ -39,6 +39,8 @@ export interface StoreState {
   removeFile(sessionId: string, name: string): Promise<void>
   answer(interrupts: Interrupt[], approved: boolean, reason?: string): Promise<void>
   stop(): Promise<void>
+  compact(): Promise<void>
+  clearNotice(id: string): void
   applyEvent(id: string, ev: AgEvent): void
   loadError(id: string, message: string): void
 }

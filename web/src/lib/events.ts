@@ -114,9 +114,13 @@ export interface ContextUsageEvent {
 // messages were superseded, how many tokens the summary saved — are measured
 // against the transcript, which is written when the turn ends; the client
 // reads them from the marker on the next load.
+//
+// A manual compaction knows its numbers already, so it sends them along.
 export interface ContextCompactedEvent {
   agent?: string
   at?: string
+  superseded?: number
+  savedTokens?: number
 }
 
 export interface UsageEvent {
@@ -407,8 +411,9 @@ function onContextUsage(state: ConversationState, event: CustomEvent): Conversat
 // onContextCompacted inserts the compaction boundary into the message list.
 //
 // The compaction happens mid-turn, so the user is watching when it does: the
-// divider goes in at once, without the numbers. The numbers arrive with the
-// marker on the transcript, which is written when the turn ends.
+// divider goes in at once. A live compaction carries no numbers — they are
+// measured against the transcript, which is written when the turn ends —
+// while a manual one knows them already.
 function onContextCompacted(state: ConversationState, event: CustomEvent): ConversationState {
   const value = event.value as ContextCompactedEvent | undefined
   const at = value?.at ?? new Date().toISOString()
@@ -421,7 +426,11 @@ function onContextCompacted(state: ConversationState, event: CustomEvent): Conve
     role: "system",
     parts: [],
     agent,
-    compaction: { superseded: 0, savedTokens: 0, at },
+    compaction: {
+      superseded: value?.superseded ?? 0,
+      savedTokens: value?.savedTokens ?? 0,
+      at,
+    },
   }
   return { ...state, messages: [...state.messages, boundary] }
 }

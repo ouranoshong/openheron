@@ -28,6 +28,7 @@ import {
   selectActiveAgentId,
   selectActiveContext,
   selectAttachments,
+  selectNotice,
   selectStatus,
   useStore,
 } from "@/lib/store"
@@ -84,6 +85,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
   const agent = useAgentBadge(settingsOpen, activeAgentId)
   const context = useStore(selectActiveContext)
   const contextUsage = agent.badge ? context?.[agent.badge.id] : undefined
+  const notice = useStore(selectNotice)
   const agentChoices = agent.view ? selectableAgents(agent.view) : []
   const switchBlocked = busy || blocked
   const focusAfterSettings = useRef(false)
@@ -253,6 +255,11 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         break
       case "open_agents":
         setPicker({ open: true })
+        break
+      case "compact":
+        // The compaction runs on the server: it summarizes the history and
+        // writes the new boundary. The divider appears when it is done.
+        void useStore.getState().compact()
         break
     }
   }
@@ -598,6 +605,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         loading={agent.loading}
         error={agent.error}
         context={contextUsage}
+        notice={notice}
       />
 
       {skillPicker.open ? (

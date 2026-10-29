@@ -117,6 +117,9 @@ export interface ConversationState {
   // this one is a point-in-time reading — so it does not live inside it.
   context?: Record<string, ContextUsage>
   retry?: { message: string }
+  // notice is a transient line about something the server is doing right
+  // now. It is not an error: the work is still going on.
+  notice?: string
 }
 
 export function emptyConversation(): ConversationState {

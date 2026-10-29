@@ -597,11 +597,12 @@ If the user wants the model to be able to re-read the original conversation, `Co
 
 ### 7.7 What the UI shows
 
-Three things, and they are different from each other:
+Four things, and they are different from each other:
 
 1. **A divider in the message list.** The compacted message is not a chat bubble. The messages view marks it with a `compaction` metadata entry (`api/v2_convert.go:63`), and the frontend draws a divider on it: *"12 earlier messages · compacted into a summary · ≈62k tokens saved"*. The marker is read during the history hydration (`web/src/lib/store/history.ts:14`), carried on the message (`web/src/lib/types.ts:56`) and rendered by `web/src/components/compaction-divider.tsx`, which the message list puts in place of the bubble (`web/src/components/message-list.tsx:101`). The superseded messages stay above it, visible — the user can still read what was said before the cut.
 2. **The meter's second needle.** `context[agent].summarized` counts the compactions (`api/v2_sessions.go:326`). What the last one bought is on the divider, not on the meter: the meter answers "how full is the context now", the divider answers "what did the last cut save".
 3. **A live event.** The compaction happens mid-turn, so the UI learns about it from the stream: the transport forwards `after_summarize` as a `CUSTOM "context_compacted"` event (`transport/transport.go:590`), and the reducer puts a boundary into the list at once (`web/src/lib/events.ts:412`). ★ The live event carries the fact, the agent and the time — **not the numbers**. The numbers are measured against the transcript, which the run loop writes when the turn ends; the transport has no transcript to measure against. So the live divider reads *"Earlier messages compacted into a summary"*, and the numbers show up on the next load, when the marker comes with the transcript.
+4. **A manual command.** `/compact` compacts on demand: `POST /v2/sessions/{id}/compact` summarizes the effective history (`run.Compact` in `agentkit/run/compact.go`), writes the same marker, and reports the numbers — so the manual divider carries them at once. The command is hidden while a turn runs or an approval waits, and it refuses a context too small to be worth compressing (`run.MinCompactMessages`, `run.MinCompactTokens`): a summary carries a preamble, so a short conversation can come out longer than it went in.
 
 ### 7.8 Configuration
 
@@ -678,7 +679,9 @@ P2 is the only phase that touches the session format, so it is split into steps 
 | Go — `storage` | the effective history is the last compaction message and what follows it; a session with no compaction marker returns the whole transcript; the superseded messages are still on disk |
 | Go — `agentkit/run` | the turn's input is built from the effective history; a compaction during the turn is persisted **before** the turn's own messages |
 | Go — `transport` | a compaction is announced on the stream as `CUSTOM "context_compacted"`; a run that never compacted announces nothing; a **sub-agent's** compaction is not the session's; the summary is picked out of a replacement history that also carries the system message |
-| `bun run test:unit` | the reducer replaces one agent's entry and leaves the others; an unknown window renders no bar and no "0 %"; the compaction marker renders as a divider, not as a bubble; the live event puts a boundary into the list |
+| Go — `run` | a manual compaction writes the boundary and the marker; a history that is too small is refused; a failed summarizer writes nothing |
+| Go — `api` | the manual compaction answers with what it achieved; a running turn is a 409; a tiny context is a 400 |
+| `bun run test:unit` | the reducer replaces one agent's entry and leaves the others; an unknown window renders no bar and no "0 %"; the compaction marker renders as a divider, not as a bubble; the live event puts a boundary into the list; `/compact` is hidden while a turn runs |
 | Playwright | the composer meta line shows the occupancy after a run; the per-agent chips show one occupancy per agent; after a compaction the message list shows the divider, not a bubble, and the earlier messages are still readable |
 
 ★ The unit tests must include the case where **the endpoint reports no usage** — `toUsageView` returns nil for a zero usage (`api/v2_types.go:243`) and the meter must be empty, not "0 tokens".

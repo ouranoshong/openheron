@@ -1,6 +1,6 @@
 import { create } from "zustand"
 
-import { ApiError, api, runStream, type RunHandle, type ThreadMeta } from "@/lib/api"
+import { ApiError, api, runStream, type CompactionResult, type RunHandle, type ThreadMeta } from "@/lib/api"
 import { readActiveThreadId, writeActiveThreadId } from "@/lib/active-thread"
 import { closeAllOpenParts, type AgEvent } from "@/lib/events"
 import { emptyConversation, type ConversationState, type Message, type TurnStatus } from "@/lib/types"
@@ -337,6 +337,91 @@ export const useStore = create<StoreState>((set, get) => ({
     } catch (e) {
       get().loadError(id, `abort failed: ${(e as Error).message}`)
     }
+  },
+
+  async compact() {
+    const id = get().activeId
+    if (!id) return
+
+    set((s) => {
+      const entry = s.sessions[id]
+      if (!entry) return s
+      const convo = entry.convo ?? emptyConversation()
+      return {
+        sessions: {
+          ...s.sessions,
+          [id]: {
+            ...entry,
+            convo: { ...convo, notice: "Compacting the conversation…" },
+          },
+        },
+      }
+    })
+
+    let res: CompactionResult
+    try {
+      res = await api.compact(id)
+    } catch (e) {
+      get().clearNotice(id)
+      get().loadError(id, `compact failed: ${(e as Error).message}`)
+      return
+    }
+    get().clearNotice(id)
+
+    // The boundary goes in through the same path as the live one: the
+    // divider is the divider, however the compaction was asked for.
+    get().applyEvent(id, {
+      type: "CUSTOM",
+      name: "context_compacted",
+      value: {
+        agent: get().sessions[id]?.meta.agentId,
+        at: res.at,
+        superseded: res.superseded,
+        savedTokens: res.savedTokens,
+      },
+    })
+
+    // The occupancy is now the size of the summary, not the size of the
+    // request that filled the context. The meter says "≈" for exactly this
+    // kind of number.
+    set((s) => {
+      const entry = s.sessions[id]
+      const convo = entry?.convo
+      const agent = entry?.meta.agentId
+      const usage = convo?.context?.[agent]
+      if (!entry || !convo || !usage) return s
+      return {
+        sessions: {
+          ...s.sessions,
+          [id]: {
+            ...entry,
+            convo: {
+              ...convo,
+              context: {
+                ...convo.context,
+                [agent]: { ...usage, usedTokens: res.usedTokens },
+              },
+            },
+          },
+        },
+      }
+    })
+  },
+
+  clearNotice(id) {
+    set((s) => {
+      const entry = s.sessions[id]
+      if (!entry?.convo?.notice) return s
+      return {
+        sessions: {
+          ...s.sessions,
+          [id]: {
+            ...entry,
+            convo: { ...entry.convo, notice: undefined },
+          },
+        },
+      }
+    })
   },
 
   applyEvent(id, ev) {

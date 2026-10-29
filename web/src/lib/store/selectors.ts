@@ -34,6 +34,11 @@ export function selectStatus(s: StoreState): TurnStatus {
   return selectConversation(s).status
 }
 
+// selectNotice is the transient line about work the server is doing.
+export function selectNotice(s: StoreState): string | undefined {
+  return selectConversation(s).notice
+}
+
 export function selectMessages(s: StoreState): Message[] {
   return selectConversation(s).messages || EMPTY_MESSAGES
 }

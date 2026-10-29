@@ -31,8 +31,9 @@ export function loadCommands(): Promise<SlashCommand[]> {
 
 /**
  * Commands the current turn can actually use. Stopping only makes sense while
- * a run is live; attaching only while no upload is in flight — showing a
- * menu item that would do nothing is worse than hiding it.
+ * a run is live; attaching only while no upload is in flight; compacting only
+ * while nothing else owns the context — showing a menu item that would do
+ * nothing is worse than hiding it.
  */
 export function filterCommands(
   commands: readonly SlashCommand[],
@@ -43,6 +44,9 @@ export function filterCommands(
   return commands.filter((cmd) => {
     if (cmd.action === "stop_run" && opts.status !== "running") return false
     if (cmd.action === "attach_files" && opts.uploading) return false
+    // A running turn and a waiting approval both own the context: the
+    // compaction would cut the history one of them is working with.
+    if (cmd.action === "compact" && opts.status !== "idle") return false
     if (!q) return true
     return cmd.name.toLowerCase().includes(q) || cmd.description.toLowerCase().includes(q)
   })

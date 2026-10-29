@@ -318,6 +318,7 @@ agent:
 | `/attach` | 往当前会话附加文件 |
 | `/settings` | 打开配置编辑器 |
 | `/agents` | 切换当前会话的 Agent |
+| `/compact` | **立刻压缩当前对话** —— 见 §6.6 |
 | `/skill` | 为这次任务指定一个技能 |
 | `/review` | 复查当前改动或给定路径 |
 | `/test` | 跑相关测试并汇总失败项 |
@@ -386,6 +387,30 @@ Agent: main · deepseek/deepseek-flash · Reasoning: off · Context: ≈18k / 13
   结束才写。重新打开这个会话，数字就出来了。
 
 ★ 摘要本身不显示。它是模型的工作材料，不是你的对话 —— 而且被它顶替的那些消息还在屏幕上。
+
+### 6.6 `/compact` —— 手动压缩
+
+上下文到了 agent 的阈值会**自己**被压缩（见 §4.1）。`/compact` 做的事一样，只是**由你开口**：
+它把对话总结成一段摘要，当场让那段摘要成为新的边界。
+
+```
+/compact
+```
+
+- 它花**一次模型调用** —— 摘要由 agent 自己的模型生成，与自动压缩走的是同一条路。
+- 它**与阈值无关**。自己不压缩的 agent（`summarize_at: 0`）照样能手动压：「关」说的是
+  「别自己压」，不是「不许压」。
+- 压完分隔线就出来了，带着数字。压的过程中，composer 上写着
+  `Compacting the conversation…`。
+- 分隔线上面的消息仍然读得到 —— 压缩缩短的是**上下文**，不是**记录**。
+
+★ **上下文太小的时候它会拒绝。** 摘要带着前言和你自己的话，短对话压完可能反而**更长**。
+少于四条消息、或者上下文不到大约 4k token 时，`/compact` 会说没什么值得压的，然后什么也不做。
+
+★ **轮次在跑、或者有审批在等的时候，它也会拒绝。** 两者都占着上下文：在它们底下切一刀，
+切的就是它们正在用的那份历史。先把轮次停掉。
+
+同一件事也有 HTTP 入口 —— `POST /v2/sessions/{id}/compact` —— 脚本可以用。
 
 ## 7. 知识库
 
@@ -460,6 +485,7 @@ openheron version                                         打印版本号
 | DELETE | `/v2/sessions/:id` | 删会话 |
 | GET | `/v2/sessions/:id/messages` | 历史 + 用量（可 `?agent=` 过滤） |
 | POST | `/v2/sessions/:id/abort` | 中断在跑的这轮 |
+| POST | `/v2/sessions/:id/compact` | 立刻压缩当前对话（见 §6.6） |
 | POST/GET | `/v2/sessions/:id/files` | 上传 / 列会话工作区文件（单文件上限 32 MiB） |
 | GET | `/v2/project/files` | 列项目根文件（`?q=` `?limit=`） |
 | GET | `/v2/commands` | 斜杠命令清单 |

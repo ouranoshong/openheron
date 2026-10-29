@@ -264,6 +264,23 @@ it still protects that agent's window. The transport only picks up the **root's*
 before the turn's messages, so it has to be written first. Written later, the summary would sit
 at the end of the conversation, where it summarizes nothing.
 
+**The manual compaction** (`/compact`) is the same thing with a different trigger — the user
+instead of the token count:
+
+| Piece | Where | What it does |
+|---|---|---|
+| the summarizer | `build.SummarizerFor` in `agentkit/build/summarize.go` | the agent's own model and the same finalizer, built into an eino middleware whose `Summarize` is called directly — the trigger never fires |
+| the write | `run.Compact` in `agentkit/run/compact.go` | the effective history is summarized, the marker is stamped, and the summary is appended to the transcript — the same marker and the same estimate as `archiveCompaction` |
+| the endpoint | `POST /v2/sessions/{id}/compact` in `api/v2_compact.go` | refuses while a turn runs or an approval waits; returns what the compaction achieved |
+
+★ **The manual path ignores the threshold.** "Off" means "do not compact on your own", not "you
+may not compact": a manual command is the user asking for it. The summarizer is therefore built
+independently of the agent's `summarize_at`.
+
+★ **The summarizer is an interface in `run`, not the builder's type.** `run` never imports the
+agent package — that is the rule the `AgentBuilder` interface exists for — so `run.Compact` takes
+a `run.Summarizer` and the API layer hands it one from the builder.
+
 **Two views of a session**, and which one to ask for:
 
 ```go

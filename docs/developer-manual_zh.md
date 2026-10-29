@@ -240,6 +240,21 @@ agent** 的压缩（`transport/transport.go`）：子 agent 的摘要不是会�
 ★ **写入顺序不是细节。** 压缩消息总结的是本轮消息之前的一切，所以必须先写。写在后面，摘要
 就落在对话末尾 —— 那儿它什么也没总结。
 
+**手动压缩**（`/compact`）是同一件事，只是触发者不同 —— 用户，而不是 token 数：
+
+| 环节 | 在哪 | 做了什么 |
+|---|---|---|
+| 摘要器 | `agentkit/build/summarize.go` 的 `build.SummarizerFor` | 用该 agent 自己的模型、同一个 finalizer 建一个 eino 中间件，直接调它的 `Summarize` —— 触发线根本不走 |
+| 落盘 | `agentkit/run/compact.go` 的 `run.Compact` | 摘要有效历史、盖标记、追加到记录里 —— 标记与估算都与 `archiveCompaction` 相同 |
+| 端点 | `api/v2_compact.go` 的 `POST /v2/sessions/{id}/compact` | 轮次在跑或审批在等时拒绝；返回这次压缩的战果 |
+
+★ **手动那条路不看阈值。** 「关」说的是「别自己压」，不是「不许压」：手动命令是用户开口要的。
+所以摘要器与 agent 的 `summarize_at` 无关。
+
+★ **摘要器在 `run` 里是接口，不是 builder 的类型。** `run` 从不 import agent 包 ——
+`AgentBuilder` 接口就是为这条规则存在的 —— 所以 `run.Compact` 收一个 `run.Summarizer`，
+由 API 层从 builder 那里拿一个给它。
+
 **会话的两个视图**，该问哪个：
 
 ```go

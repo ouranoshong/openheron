@@ -165,6 +165,7 @@ frontmatter 是**严格解码**的 —— 写错一个键就是启动错误，�
 | DELETE | `/v2/sessions/:id` | 删会话 |
 | GET | `/v2/sessions/:id/messages` | 回放历史 + 用量（可 `?agent=` 过滤） |
 | POST | `/v2/sessions/:id/abort` | 中断在跑的 turn |
+| POST | `/v2/sessions/:id/compact` | 立刻压缩当前对话 |
 | POST/GET | `/v2/sessions/:id/files` | 上传 / 列会话工作区文件（单次 32 MiB 上限） |
 | GET | `/v2/project/files` | 列项目根的文件（`?q=` `?limit=`） |
 | GET | `/v2/commands` | 斜杠命令清单 |

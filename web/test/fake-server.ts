@@ -269,6 +269,12 @@ const FAKE_COMMANDS = [
     argumentHint: "[agent]",
   },
   {
+    name: "compact",
+    description: "Compact the conversation into a summary",
+    kind: "action",
+    action: "compact",
+  },
+  {
     name: "skill",
     description: "Use a named skill for this task",
     kind: "prompt",
@@ -1366,11 +1372,40 @@ export function startFakeServer(port = 0): FakeServer {
         })
       }
 
-      const p = path.match(/^\/v2\/sessions\/([^/]+)\/(files|abort)$/)
+      const p = path.match(/^\/v2\/sessions\/([^/]+)\/(files|abort|compact)$/)
       if (p) {
         const t = find(p[1])
         if (!t) return notFound()
         if (p[2] === "abort") return json({ aborted: true })
+        if (p[2] === "compact") {
+          // The compaction takes a model call, so it is not instant: the
+          // client has something to show while it runs.
+          await new Promise((r) => setTimeout(r, 800))
+          // The compaction appends the summary to the transcript and reports
+          // what it achieved — the same shape the real server answers with.
+          const superseded = t.messages.length
+          const summary: FakeMessage = {
+            id: `c-compact-${superseded}`,
+            role: "user",
+            content: "SUMMARY-OF-THE-CONVERSATION",
+            name: "main",
+            metadata: {
+              compaction: {
+                superseded,
+                savedTokens: 62000,
+                at: "2026-10-30T00:00:00.000Z",
+              },
+            },
+          }
+          t.messages.push(summary)
+          return json({
+            threadId: t.threadId,
+            superseded,
+            savedTokens: 62000,
+            usedTokens: 1200,
+            at: "2026-10-30T00:00:00.000Z",
+          })
+        }
         if (req.method === "POST") {
           const form = await req.formData().catch(() => null)
           const names = form ? [...form.getAll("files")] : []

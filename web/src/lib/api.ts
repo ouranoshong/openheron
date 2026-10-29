@@ -73,6 +73,19 @@ export interface MessagesView {
   agent?: string
 }
 
+// CompactionResult is what a manual compaction achieved.
+export interface CompactionResult {
+  threadId: string
+  // superseded is how many transcript messages the summary replaced.
+  superseded: number
+  // savedTokens is the estimated number of tokens the compaction removed.
+  savedTokens: number
+  // usedTokens is the estimated size of the context that is left.
+  usedTokens: number
+  // at is when the compaction happened.
+  at: string
+}
+
 export interface UploadedFile {
   name: string
   path: string
@@ -99,6 +112,7 @@ export type CommandAction =
   | "attach_files"
   | "open_settings"
   | "open_agents"
+  | "compact"
 
 export interface SlashCommand {
   name: string
@@ -230,6 +244,11 @@ export const api = {
   getMessages: (id: string) => call<MessagesView>(sessionPath(id, "/messages")),
 
   abortRun: (id: string) => call<{ aborted: boolean }>(sessionPath(id, "/abort"), { method: "POST" }),
+
+  // compact compacts the session's context now. It is the manual
+  // counterpart of the threshold: the same summary, the same boundary.
+  compact: (id: string) =>
+    call<CompactionResult>(sessionPath(id, "/compact"), { method: "POST" }),
 
   listProjectFiles: (q: string, signal?: AbortSignal) =>
     call<ProjectFileList>(

@@ -2,6 +2,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { formatTokens } from "@/lib/agents"
 import type { AgentBadge } from "@/lib/agent-info"
 import type { ContextUsage } from "@/lib/types"
+import { Loader2Icon } from "lucide-react"
 
 const META =
   "text-muted-foreground mx-auto mt-1.5 flex min-h-4 max-w-3xl flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[11px]"
@@ -11,12 +12,24 @@ export function ComposerMeta({
   loading,
   error,
   context,
+  notice,
 }: {
   badge: AgentBadge | null
   loading: boolean
   error?: string
   context?: ContextUsage
+  // notice is a transient line about work the server is doing right now.
+  notice?: string
 }) {
+  // The notice says the server is working on something. It is not an error,
+  // and it does not replace anything — the rest of the line still stands.
+  const noticeNode = notice ? (
+    <span data-testid="composer-meta-notice" className="inline-flex items-center gap-1.5">
+      <Loader2Icon aria-hidden="true" className="size-3 shrink-0 animate-spin" />
+      {notice}
+    </span>
+  ) : null
+
   if (loading && !badge) {
     return (
       <div data-testid="composer-meta" aria-hidden="true" className={META}>
@@ -28,6 +41,7 @@ export function ComposerMeta({
   if (!badge) {
     return (
       <div data-testid="composer-meta" className={META}>
+        {noticeNode}
         <span data-testid="composer-meta-error" title={error}>
           Agent info unavailable
         </span>
@@ -47,6 +61,7 @@ export function ComposerMeta({
       aria-label="Current agent configuration"
       className={META}
     >
+      {noticeNode}
       <span
         data-testid="composer-meta-agent"
         title={badge.description || badge.id}
