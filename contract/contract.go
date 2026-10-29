@@ -40,6 +40,37 @@ type Usage struct {
 // IsZero reports whether nothing was reported.
 func (u Usage) IsZero() bool { return u.TotalTokens == 0 && u.PromptTokens == 0 }
 
+// ContextUsage is one agent's context occupancy.
+//
+// "Used" is the size of the agent's most recent model call — the same
+// baseline eino's summarization middleware counts from, so the number the UI
+// shows and the number that decides "compact now" never disagree.
+type ContextUsage struct {
+	Agent         string `json:"agent"`
+	Provider      string `json:"provider,omitempty"`
+	Model         string `json:"model,omitempty"`
+	UsedTokens    int    `json:"used_tokens"`
+	ContextWindow int    `json:"context_window"`
+	// SummarizeAt is the token count at which this agent's history would be
+	// compacted. Zero when no threshold is configured.
+	SummarizeAt int `json:"summarize_at,omitempty"`
+	// Summarized counts the compactions this agent has been through.
+	Summarized int       `json:"summarized,omitempty"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// AgentContext is what one agent's context allows.
+type AgentContext struct {
+	// Window is the model's context window. Zero means "not configured".
+	Window int
+	// SummarizeAt is the token count that triggers compaction. Zero means
+	// "never".
+	SummarizeAt int
+	// Provider and Model name the model the agent runs on.
+	Provider string
+	Model    string
+}
+
 // PendingInterrupt is one outstanding decision.
 type PendingInterrupt struct {
 	// InterruptID is the framework interrupt context ID. It is an address-like

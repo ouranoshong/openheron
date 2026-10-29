@@ -1,7 +1,7 @@
 # 上下文使用预估 —— 设计方案
 
-> **状态**：部分已实现。压缩及其持久化（§7）已在代码里；占用仪表盘（§2、§4、§5）与
-> 压缩标记的客户端渲染（§7.7）还没有。
+> **状态**：已实现，除了压缩标记的客户端渲染（§7.7）。占用仪表盘（§2、§4、§5）与
+> 压缩及其持久化（§7）都在代码里。
 > **范围**：本仓库的代码面 —— Go 后端与 `web/` 前端。
 > 配套阅读：[architecture.md](architecture.md)（代码怎么分层）、
 > [developer-manual.md](developer-manual.md)（怎么改代码）、
@@ -192,6 +192,9 @@ type AgentContext struct {
 	// SummarizeAt is the token count that triggers compaction. Zero means
 	// "never".
 	SummarizeAt int
+	// Provider and Model name the model the agent runs on.
+	Provider string
+	Model    string
 }
 ```
 
@@ -199,17 +202,20 @@ type AgentContext struct {
 
 ### 4.2 计算放在 transport
 
-逐次调用的用量本来就是 transport 的：两次 `res.Usage = aggregateUsage(res.Intermediates)` 在 `transport/transport.go:99` 与 `transport/transport.go:175`，对象是它按顺序追加的中间消息（`transport/transport.go:154`、`transport/transport.go:161`、`transport/transport.go:169`）。
+逐次调用的用量本来就是 transport 的：两次 `res.Usage = aggregateUsage(res.Intermediates)` 在 `transport/transport.go:105` 与 `transport/transport.go:189`，对象是它按顺序追加的中间消息（`transport/transport.go:160`、`transport/transport.go:167`、`transport/transport.go:175`）。
 
 新增 `transport/context.go`，从同一份列表算出逐 agent 的占用：
 
 ```go
-// contextUsageOf returns the context occupancy of every agent that spoke.
+// ContextUsageOf returns the context occupancy of every agent that spoke.
 //
 // The baseline is each agent's last assistant message carrying usage: the
 // endpoint reported the size of that request, and the next request has to
 // carry all of it.
-func contextUsageOf(msgs []*schema.Message, contexts map[string]contract.AgentContext) []contract.ContextUsage
+//
+// The live path and the history path both call this, so the number on screen
+// and the number after a refresh cannot disagree.
+func ContextUsageOf(msgs []*schema.Message, contexts map[string]contract.AgentContext) map[string]contract.ContextUsage
 ```
 
 两条性质要紧：
@@ -217,13 +223,13 @@ func contextUsageOf(msgs []*schema.Message, contexts map[string]contract.AgentCo
 - **这个列表是有序的。** 中间消息随事件到达而追加，所以「agent A 的最后一条消息」是从尾部往回走，不是搜索。
 - **流式也留得住用量。** 流式的 assistant 消息是分片的拼接（`message.ConcatChunks`，`message/variant.go:74`），而 eino 的 `ConcatMessages` 会保留它合并的分片上的用量。所以流式一轮报出的数字与非流式一致。
 
-结果挂到 `transport.Result` 上，与 `Usage` 并排（`transport/transport.go:30`）。
+结果挂到 `transport.Result` 上，与 `Usage` 并排（`transport/transport.go:35`）。
 
 ### 4.3 窗口来自 builder，而不是 API 层
 
 API 层不许重推某个 agent 跑在哪个模型上 —— 那是 builder 的知识，仓库的规矩也是这么写的：生效工具表要问 `agent.Builder`，不许自己重算。模型同理。
 
-所以 `agentkit/build/introspect.go` —— 已经负责回答 `EffectiveTools`（`agentkit/build/introspect.go:47`）的那个文件 —— 再加一个查询：
+所以 `agentkit/build/context.go` —— 与已经负责回答 `EffectiveTools`（`agentkit/build/introspect.go:47`）的那个文件作伴 —— 再加一个查询：
 
 ```go
 // Contexts reports the context window of every agent's model.
@@ -257,9 +263,9 @@ res, streamErr := transport.Stream(stream, turn, transport.Options{
 
 ### 4.4 实时通道：一个 `CUSTOM` 事件
 
-占用在**每次模型调用之后**都会变，所以不能等到运行结束。机制现成：`events.NewCustomEvent` 带一个 value，模型重试提示就是这么发的（`transport/transport.go:115`）。
+占用在**每次模型调用之后**都会变，所以不能等到运行结束。机制现成：`events.NewCustomEvent` 带一个 value，模型重试提示就是这么发的（`transport/transport.go:121`）。
 
-事件在带用量的 assistant 消息归档之后立刻发出 —— 也就是 transport 追加中间消息的那两处（流式消息 `transport/transport.go:161`，完整消息 `transport/transport.go:169`）：
+事件在带用量的 assistant 消息归档之后立刻发出 —— 也就是 transport 追加中间消息的那两处（流式消息 `transport/transport.go:167`，完整消息 `transport/transport.go:175`）：
 
 ```json
 {

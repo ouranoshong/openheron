@@ -121,7 +121,7 @@ openheron/
    `task` `write_todos` `skill`。撞上会在 `Build` 时报错。
    工具名同时是策略表里的键 —— 撞名会让策略表指向错误的工具。
 
-6. **跨 provider 撞名也会报错**：`tools.go:64` 的 `validateBatch` 用 `seen` 跟踪，
+6. **跨 provider 撞名也会报错**：`tools.go:76` 的 `validateBatch` 用 `seen` 跟踪，
    所以两个 provider 提供同名工具会在启动时失败，而不是谁先谁后地覆盖。
 
 ### 3.2 加一个新的配置分区
@@ -240,6 +240,33 @@ Messages(effective bool) []*schema.Message
 
 ★ Go 的接口没有可选参数，所以默认靠零值表达：`false` 就是「全部」，每个调用点都写明自己要
 哪个视图。
+
+### 3.7 上下文仪表盘
+
+一个 agent 的上下文有多满，以及那个数字从哪来。
+
+**那个数字**是该 agent **最近一次请求**的大小 —— 厂商自己的计数，不是会话的累加。
+`transport.ContextUsageOf`（`transport/context.go`）顺着消息走一遍，留下每个 agent 最后一条
+带用量的 assistant 消息。一个会话可以总量很大而上下文几乎为空；只有最近一次请求回答得了
+这个问题。
+
+**窗口**来自 builder：`Builder.Contexts`（`agentkit/build/context.go`）用与装配相同的方式解析
+每个 agent 的模型，包括继承父 agent 模型的子 agent。API 层问 builder —— 它不该自己重推
+某个 agent 跑在哪个模型上。
+
+**两条通道，一个数字**：
+
+| 通道 | 在哪 | 什么时候 |
+|---|---|---|
+| 实时路径 | transport 在每次模型调用后发 `CUSTOM "context_usage"` 事件 | 运行中 |
+| 历史路径 | `GET /v2/sessions/{id}` 带 `usage.context` | 刷新后 |
+
+两条都调 `transport.ContextUsageOf`，所以屏幕上的数字与刷新后的数字不会分叉。
+
+★ **`usage.byAgent` 与 `usage.context` 是两个不同的量。** 前者是累计开销，后者是时点占用。
+前端把它们分开，测试也守着标签不互换。
+
+★ **窗口为零表示用户没配。** 占用照报，但不显示比例 —— 显示「0 %」是撒谎。
 
 ## 4. 前端
 
@@ -497,7 +524,7 @@ E2E 共享一个假后端状态，并行会互相污染。
 
 | 现象 | 位置 | 说明 |
 |---|---|---|
-| **活跃流的用量没有按 Agent 分账** | `contract.Usage` 没有 `byAgent` 字段；前端 `events.ts:443` 的 `toUsage` 只映射扁平计数 | `usage.byAgent` **只在历史水合时才有**。所以新开的一轮里，Agent 过滤条上的 token 数是空的 —— 刷新一下（拉历史）才会出现。E2E 之所以没发现，是因为它测的是**带种子的历史线程**。 |
+| **活跃流的用量没有按 Agent 分账** | `contract.Usage` 没有 `byAgent` 字段；前端 `events.ts:479` 的 `toUsage` 只映射扁平计数 | `usage.byAgent` **只在历史水合时才有**。所以新开的一轮里，Agent 过滤条上的累计 token 数是空的 —— 刷新一下（拉历史）才会出现。**上下文占用**是实时的（§3.7）：它走自己的 `context_usage` 事件。E2E 之所以没发现这个缺口，是因为它测的是**带种子的历史线程**。 |
 | **SSE 断了不会自动重连** | `web/src/lib/api.ts` | 流断掉就是断掉：走 `onError` → 错误面板，用户得自己重发。没有重连、没有断点续传。 |
 | **冲突对话框不显示磁盘上的版本** | `web/src/components/settings/conflict-dialog.tsx:18-23` | 它只显示你那个陈旧的 `baseRevision` 加一句写死的「changed by someone else」，**没有真去取磁盘版本**。也没有「强行覆盖」按钮 —— 「Keep editing」只是清掉冲突标记，下次保存会带着同样的陈旧 revision 再冲突一次。 |
 | **`web/index.html` 声明 `lang="zh-CN"`** | `web/index.html:2` | 界面文案全是英文（AGENTS.md 的硬性要求），`lang` 声明却还是中文。会影响读屏软件的朗读语言。 |

@@ -33,6 +33,17 @@ interface PendingApproval {
   subagentRunId?: string
 }
 
+interface ContextUsage {
+  agent: string
+  provider?: string
+  model?: string
+  usedTokens: number
+  contextWindow: number
+  summarizeAt?: number
+  summarized?: number
+  updatedAt?: string
+}
+
 interface Usage {
   promptTokens: number
   completionTokens: number
@@ -40,6 +51,9 @@ interface Usage {
   reasoningTokens: number
   cachedTokens: number
   byAgent?: Record<string, Usage>
+  // context is the per-agent context occupancy — a point-in-time reading,
+  // unlike byAgent, which is a cumulative spend.
+  context?: Record<string, ContextUsage>
 }
 
 export interface FakeServer {
@@ -294,6 +308,7 @@ const FAKE_AGENTS = {
         reasoning: "low",
         reasoningAvailable: ["high", "low"],
         reasoningDefault: "low",
+        contextWindow: 8192,
       },
       maxIterations: 20,
       subagents: [],
@@ -308,6 +323,7 @@ const FAKE_AGENTS = {
         reasoning: "high",
         reasoningAvailable: ["high", "low", "off"],
         reasoningDefault: "off",
+        contextWindow: 131072,
       },
       maxIterations: 40,
       subagents: ["worker"],
@@ -455,6 +471,25 @@ function seedThreads(): FakeThread[] {
           main: { promptTokens: 500, completionTokens: 100, totalTokens: 600, reasoningTokens: 0, cachedTokens: 0 },
           coder: { promptTokens: 400, completionTokens: 200, totalTokens: 600, reasoningTokens: 0, cachedTokens: 0 },
         },
+        context: {
+          main: {
+            agent: "main",
+            provider: "deepseek",
+            model: "deepseek-v4",
+            usedTokens: 18432,
+            contextWindow: 131072,
+            summarizeAt: 104858,
+            updatedAt: T1,
+          },
+          coder: {
+            agent: "coder",
+            provider: "openai",
+            model: "fast",
+            usedTokens: 6144,
+            contextWindow: 8192,
+            updatedAt: T1,
+          },
+        },
       },
     },
     {
@@ -495,6 +530,18 @@ function seedThreads(): FakeThread[] {
         { id: "a-u1", role: "user", content: `${MARKER_A} first question` },
         { id: "a-a1", role: "assistant", content: `${MARKER_A} first answer` },
       ],
+      // A model that declares no window: the occupancy is reported, and
+      // there is no ratio to show.
+      usage: {
+        promptTokens: 1200,
+        completionTokens: 300,
+        totalTokens: 1500,
+        reasoningTokens: 0,
+        cachedTokens: 0,
+        context: {
+          main: { agent: "main", usedTokens: 1200, contextWindow: 0, updatedAt: T1 },
+        },
+      },
     },
     {
       threadId: THREAD_B,

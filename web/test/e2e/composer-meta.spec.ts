@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 
-import { COMPOSER, openApp, resetBackend, trackRequests } from "./fixtures"
+import { COMPOSER, openApp, openThread, resetBackend, trackRequests } from "./fixtures"
 
 const META = '[data-testid="composer-meta"]'
 const AGENT = '[data-testid="composer-meta-agent"]'
@@ -8,6 +8,7 @@ const MODEL = '[data-testid="composer-meta-model"]'
 const REASONING = '[data-testid="composer-meta-reasoning"]'
 const SETTINGS_ENTRY = '[data-testid="settings-entry"]'
 const SETTINGS_DIALOG = '[data-testid="settings-dialog"]'
+const CONTEXT = '[data-testid="composer-meta-context"]'
 
 test.beforeEach(async () => {
   await resetBackend()
@@ -61,4 +62,36 @@ test("设置弹窗关闭后重新拉取 agent 信息", async ({ page }) => {
   await expect
     .poll(() => requests.filter((p) => p === "/v2/agents").length)
     .toBeGreaterThan(before)
+})
+
+test("底栏显示该 agent 的上下文占用", async ({ page }) => {
+  await openApp(page)
+  await openThread(page, "Multi agent conversation")
+
+  const ctx = page.locator(CONTEXT)
+  await expect(ctx).toBeVisible()
+  await expect(ctx).toContainText("Context: ≈18k / 131k (14 %)")
+  await expect(ctx).toHaveAttribute(
+    "title",
+    /Tokens in the most recent request to this agent/,
+  )
+})
+
+test("模型没声明窗口时只报绝对 token 数，不报比例", async ({ page }) => {
+  await openApp(page)
+  await openThread(page, "Alpha conversation")
+
+  const ctx = page.locator(CONTEXT)
+  await expect(ctx).toBeVisible()
+  await expect(ctx).toContainText("Context: ≈1.2k tokens")
+  await expect(ctx).not.toContainText("%")
+  await expect(ctx).toHaveAttribute("title", /no context window/)
+})
+
+test("agent 过滤器按 agent 显示各自的占用", async ({ page }) => {
+  await openApp(page)
+  await openThread(page, "Multi agent conversation")
+
+  await expect(page.locator('[data-testid="agent-filter-main-context"]')).toHaveText("18k/131k")
+  await expect(page.locator('[data-testid="agent-filter-coder-context"]')).toHaveText("6.1k/8.2k")
 })

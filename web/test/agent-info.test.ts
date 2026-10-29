@@ -19,6 +19,7 @@ function makeAgent(id: string, model: Partial<AgentModelView> = {}): AgentView {
       reasoning: "high",
       reasoningAvailable: ["high", "low"],
       reasoningDefault: "high",
+      contextWindow: 0,
       ...model,
     },
     maxIterations: 10,

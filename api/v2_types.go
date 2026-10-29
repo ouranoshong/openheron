@@ -196,6 +196,46 @@ type usageView struct {
 	ReasoningTokens  int                   `json:"reasoningTokens"`
 	CachedTokens     int                   `json:"cachedTokens"`
 	ByAgent          map[string]*usageView `json:"byAgent,omitempty"`
+	// Context is the per-agent context occupancy: how full each agent's
+	// context is right now. It is a point-in-time reading, not a total like
+	// ByAgent.
+	Context map[string]contextUsageView `json:"context,omitempty"`
+}
+
+// contextUsageView is one agent's context occupancy on the wire.
+type contextUsageView struct {
+	Agent         string `json:"agent"`
+	Provider      string `json:"provider,omitempty"`
+	Model         string `json:"model,omitempty"`
+	UsedTokens    int    `json:"usedTokens"`
+	ContextWindow int    `json:"contextWindow"`
+	SummarizeAt   int    `json:"summarizeAt,omitempty"`
+	Summarized    int    `json:"summarized,omitempty"`
+	UpdatedAt     string `json:"updatedAt,omitempty"`
+}
+
+// toContextViews converts the per-agent occupancy for the wire.
+func toContextViews(in map[string]contract.ContextUsage) map[string]contextUsageView {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]contextUsageView, len(in))
+	for agent, u := range in {
+		v := contextUsageView{
+			Agent:         u.Agent,
+			Provider:      u.Provider,
+			Model:         u.Model,
+			UsedTokens:    u.UsedTokens,
+			ContextWindow: u.ContextWindow,
+			SummarizeAt:   u.SummarizeAt,
+			Summarized:    u.Summarized,
+		}
+		if !u.UpdatedAt.IsZero() {
+			v.UpdatedAt = u.UpdatedAt.UTC().Format(rfc3339Nano)
+		}
+		out[agent] = v
+	}
+	return out
 }
 
 type messagesView struct {

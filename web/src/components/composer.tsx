@@ -26,6 +26,7 @@ import {
 import { useSettings } from "@/lib/settings-store"
 import {
   selectActiveAgentId,
+  selectActiveContext,
   selectAttachments,
   selectStatus,
   useStore,
@@ -81,6 +82,8 @@ export function Composer({ inset = true }: { inset?: boolean }) {
   const settingsOpen = useSettings((s) => s.open)
   const activeAgentId = useStore(selectActiveAgentId)
   const agent = useAgentBadge(settingsOpen, activeAgentId)
+  const context = useStore(selectActiveContext)
+  const contextUsage = agent.badge ? context?.[agent.badge.id] : undefined
   const agentChoices = agent.view ? selectableAgents(agent.view) : []
   const switchBlocked = busy || blocked
   const focusAfterSettings = useRef(false)
@@ -590,7 +593,12 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         )}
       </div>
 
-      <ComposerMeta badge={agent.badge} loading={agent.loading} error={agent.error} />
+      <ComposerMeta
+        badge={agent.badge}
+        loading={agent.loading}
+        error={agent.error}
+        context={contextUsage}
+      />
 
       {skillPicker.open ? (
         <SkillPicker

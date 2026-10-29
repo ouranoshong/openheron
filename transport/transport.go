@@ -25,6 +25,11 @@ import (
 type Options struct {
 	RunID     string
 	RootAgent string
+	// Contexts reports what each agent's context allows: the model's window
+	// and the compaction threshold. The transport needs the window to turn a
+	// token count into a ratio; it must not resolve model refs itself — the
+	// builder owns that lookup.
+	Contexts map[string]contract.AgentContext
 }
 
 type Result struct {
@@ -76,7 +81,7 @@ func RunStream(w io.Writer, threadID string, src EventSource, opts Options) (Res
 	e := &emitter{w: w, threadID: threadID, runID: runID}
 	e.emit(events.NewRunStartedEvent(threadID, runID))
 
-	res := streamEvents(e, src, opts.RootAgent)
+	res := streamEvents(e, src, opts)
 
 	switch {
 	case len(res.Interrupts) > 0:
@@ -90,8 +95,9 @@ func RunStream(w io.Writer, threadID string, src EventSource, opts Options) (Res
 	return res, e.runErr
 }
 
-func streamEvents(e *emitter, src EventSource, mainAgent string) Result {
+func streamEvents(e *emitter, src EventSource, opts Options) Result {
 	var res Result
+	mainAgent := opts.RootAgent
 
 	for {
 		ev, ok := src.Next()
@@ -167,6 +173,14 @@ func streamEvents(e *emitter, src EventSource, mainAgent string) Result {
 					stamp(m, ownerOf(ev, mainAgent))
 				}
 				res.Intermediates = append(res.Intermediates, out...)
+			}
+		}
+
+		// The occupancy changes with every model call, and a meter that only
+		// moves at the end of a run is a meter nobody watches.
+		if n := len(res.Intermediates); n > 0 {
+			if u, ok := contextUsageOfMessage(res.Intermediates[n-1], opts.Contexts); ok {
+				e.emitContextUsage(u)
 			}
 		}
 
@@ -546,6 +560,23 @@ func (e *emitter) setRunErr(err error) {
 	if e.runErr == nil {
 		e.runErr = err
 	}
+}
+
+// emitContextUsage publishes one agent's context occupancy.
+//
+// The payload is the whole snapshot for that agent: the client replaces, it
+// does not merge, so a dropped event cannot leave a wrong number behind.
+func (e *emitter) emitContextUsage(u contract.ContextUsage) {
+	e.emit(events.NewCustomEvent("context_usage",
+		events.WithValue(map[string]any{
+			"agent":          u.Agent,
+			"provider":       u.Provider,
+			"model":          u.Model,
+			"used_tokens":    u.UsedTokens,
+			"context_window": u.ContextWindow,
+			"summarize_at":   u.SummarizeAt,
+			"updated_at":     u.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		})))
 }
 
 func (e *emitter) emit(ev events.Event) {

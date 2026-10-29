@@ -1,4 +1,5 @@
 import { readSse } from "@/lib/sse"
+import type { ContextUsage } from "@/lib/types"
 
 export interface Usage {
   promptTokens: number
@@ -7,6 +8,9 @@ export interface Usage {
   reasoningTokens: number
   cachedTokens: number
   byAgent?: Record<string, Usage>
+  // context is the per-agent context occupancy. It is a point-in-time
+  // reading, unlike byAgent, which is a cumulative spend.
+  context?: Record<string, ContextUsage>
 }
 
 export interface PendingApproval {
@@ -110,6 +114,9 @@ export interface AgentModelView {
   reasoning: string
   reasoningAvailable: string[]
   reasoningDefault: string
+  // contextWindow is the model's context window. Zero means the user did not
+  // configure one.
+  contextWindow: number
 }
 
 export interface AgentView {

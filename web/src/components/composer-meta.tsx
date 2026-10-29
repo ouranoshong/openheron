@@ -1,5 +1,7 @@
 import { Skeleton } from "@/components/ui/skeleton"
+import { formatTokens } from "@/lib/agents"
 import type { AgentBadge } from "@/lib/agent-info"
+import type { ContextUsage } from "@/lib/types"
 
 const META =
   "text-muted-foreground mx-auto mt-1.5 flex min-h-4 max-w-3xl flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[11px]"
@@ -8,10 +10,12 @@ export function ComposerMeta({
   badge,
   loading,
   error,
+  context,
 }: {
   badge: AgentBadge | null
   loading: boolean
   error?: string
+  context?: ContextUsage
 }) {
   if (loading && !badge) {
     return (
@@ -66,6 +70,70 @@ export function ComposerMeta({
       >
         Reasoning: {badge.reasoning}
       </span>
+      {context ? (
+        <>
+          <span aria-hidden="true" className="shrink-0">
+            ·
+          </span>
+          <ContextMeter usage={context} />
+        </>
+      ) : null}
     </div>
+  )
+}
+
+// ContextMeter shows how full this agent's context is.
+//
+// The number is the size of the agent's most recent request, not a sum over
+// the session, and it is the provider's own count — so it is an estimate,
+// and it is marked as one.
+//
+// A window of zero means the user configured none. There is then no ratio to
+// show, and showing "0 %" would be a lie.
+function ContextMeter({ usage }: { usage: ContextUsage }) {
+  const known = usage.contextWindow > 0
+  const ratio = known ? Math.min(1, usage.usedTokens / usage.contextWindow) : 0
+  const label = known
+    ? `Context: ≈${formatTokens(usage.usedTokens)} / ${formatTokens(usage.contextWindow)} (${Math.round(ratio * 100)} %)`
+    : `Context: ≈${formatTokens(usage.usedTokens)} tokens`
+
+  const lines = ["Tokens in the most recent request to this agent."]
+  if (known) {
+    lines.push(`Window: ${usage.contextWindow} tokens`)
+  } else {
+    lines.push("The model declares no context window.")
+  }
+  if (usage.summarizeAt && usage.summarizeAt > 0) {
+    lines.push(`Compacted at: ${usage.summarizeAt} tokens`)
+  }
+  if (usage.summarized) {
+    lines.push(`Compacted ${usage.summarized} time(s)`)
+  }
+
+  return (
+    <span
+      data-testid="composer-meta-context"
+      title={lines.join("\n")}
+      className="inline-flex min-w-0 items-center gap-1.5"
+    >
+      <span className="truncate tabular-nums">{label}</span>
+      {known ? (
+        <span
+          aria-hidden="true"
+          className="bg-muted/40 relative inline-block h-1 w-10 shrink-0 overflow-hidden rounded-full"
+        >
+          <span
+            className={
+              ratio >= 0.95
+                ? "bg-destructive absolute inset-y-0 left-0"
+                : ratio >= 0.8
+                  ? "bg-amber-500 absolute inset-y-0 left-0"
+                  : "bg-muted-foreground/60 absolute inset-y-0 left-0"
+            }
+            style={{ width: `${Math.round(ratio * 100)}%` }}
+          />
+        </span>
+      ) : null}
+    </span>
   )
 }

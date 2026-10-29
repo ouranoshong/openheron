@@ -26,6 +26,7 @@ import (
 	"github.com/ouranoshong/openheron/agentkit/run"
 	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/api"
+	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/storage/filestore"
 	"github.com/ouranoshong/openheron/webui"
 )
@@ -262,6 +263,7 @@ func setupRuntime(ctx context.Context, st *startup) error {
 	})
 	st.srv.SetConfigService(st.cfgSvc)
 	st.srv.SetToolsSource(toolsAdapter{b: builder})
+	st.srv.SetContextSource(contextsAdapter{b: builder})
 	st.srv.SetStartTimeoutSource(func() time.Duration {
 		c, _ := st.mgr.Current()
 		return startTimeout(c)
@@ -362,6 +364,16 @@ func serve(ctx context.Context, st *startup) error {
 		}
 		return nil
 	}
+}
+
+// contextsAdapter exposes the builder's context windows to the API layer.
+//
+// The builder owns the model-ref resolution, so the API layer asks it rather
+// than re-deriving which model an agent runs on.
+type contextsAdapter struct{ b *build.Builder }
+
+func (a contextsAdapter) Contexts() map[string]contract.AgentContext {
+	return a.b.Contexts()
 }
 
 type toolsAdapter struct{ b *build.Builder }

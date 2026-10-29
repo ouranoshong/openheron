@@ -1,4 +1,12 @@
-import { emptyConversation, type ConversationState, type Interrupt, type Message, type TurnStatus, type Usage } from "@/lib/types"
+import {
+  emptyConversation,
+  type ContextUsage,
+  type ConversationState,
+  type Interrupt,
+  type Message,
+  type TurnStatus,
+  type Usage,
+} from "@/lib/types"
 
 import { MAIN_AGENT, type Attachment, type SessionEntry, type StoreState } from "./state"
 
@@ -69,4 +77,14 @@ export function selectActiveRetry(s: StoreState) {
 
 export function selectActiveUsage(s: StoreState): Usage | undefined {
   return s.activeId ? s.sessions[s.activeId]?.convo?.usage : undefined
+}
+
+// selectActiveContext returns the per-agent context occupancy of the active
+// session.
+//
+// It hands back the map the store already holds, so the reference stays
+// stable: a new array or object here would make every render look like a
+// change (see AGENTS.md on zustand selectors).
+export function selectActiveContext(s: StoreState): Record<string, ContextUsage> | undefined {
+  return s.activeId ? s.sessions[s.activeId]?.convo?.context : undefined
 }

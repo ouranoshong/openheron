@@ -16,6 +16,7 @@ import (
 	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/message"
 	"github.com/ouranoshong/openheron/storage"
+	"github.com/ouranoshong/openheron/transport"
 )
 
 // Agent switching sentinels. They are mapped onto v2 codes in v2FailErr.
@@ -275,12 +276,19 @@ func (s *Server) v2Messages(ctx context.Context, c *app.RequestContext) {
 	pending, _ := sess.PendingApproval()
 
 	agent := trimSpace(c.Query("agent"))
+	usage := toUsageViewWithAgents(sessionUsage(history), sessionUsageByAgent(history))
+	if ctxUsage := s.sessionContextUsage(history); len(ctxUsage) > 0 {
+		if usage == nil {
+			usage = &usageView{}
+		}
+		usage.Context = toContextViews(ctxUsage)
+	}
 	view := messagesView{
 		ThreadID:         sess.ID(),
 		State:            s.stateOf(ctx, sess),
 		Messages:         make([]types.Message, 0, len(history)),
 		PendingApprovals: toPendingViews(pending),
-		Usage:            toUsageViewWithAgents(sessionUsage(history), sessionUsageByAgent(history)),
+		Usage:            usage,
 		Agent:            agent,
 	}
 	for i, m := range history {
@@ -292,6 +300,41 @@ func (s *Server) v2Messages(ctx context.Context, c *app.RequestContext) {
 		}
 	}
 	c.JSON(consts.StatusOK, view)
+}
+
+// sessionContextUsage reports the context occupancy of every agent that
+// spoke, read from the transcript.
+//
+// The live path and this one share the computation (transport.ContextUsageOf),
+// so the number on screen and the number after a refresh cannot disagree.
+func (s *Server) sessionContextUsage(history []*schema.Message) map[string]contract.ContextUsage {
+	out := transport.ContextUsageOf(history, s.contexts())
+	if len(out) == 0 {
+		return nil
+	}
+	for agent, u := range out {
+		u.Summarized = compactionCount(history, agent)
+		out[agent] = u
+	}
+	return out
+}
+
+// compactionCount counts the compactions an agent's history went through.
+//
+// The compacted messages stay in the transcript — compaction is not deletion —
+// so the count is a fact about the record.
+func compactionCount(history []*schema.Message, agent string) int {
+	n := 0
+	for _, m := range history {
+		if !message.IsCompaction(m) {
+			continue
+		}
+		if agent != "" && message.MessageAgent(m) != agent {
+			continue
+		}
+		n++
+	}
+	return n
 }
 
 // sessionUsage sums the usage already persisted on the transcript. openheron

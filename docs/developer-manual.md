@@ -131,7 +131,7 @@ answer and the runtime's answer stop agreeing.
    The tool name is also the key in the policy table — a collision would point the
    policy at the wrong tool.
 
-6. **A collision across providers also fails**: `validateBatch` at `tools.go:64` tracks
+6. **A collision across providers also fails**: `validateBatch` at `tools.go:76` tracks
    names in `seen`, so two providers offering the same tool name fail at startup
    instead of one silently overwriting the other.
 
@@ -261,6 +261,37 @@ it, and openheron's finalizer leaves that alone. A test pins it.
 
 ★ The interface has no optional parameters in Go, so the default is the zero value: `false`
 means "everything", and every call site says which view it wants.
+
+### 3.7 The context meter
+
+How full an agent's context is, and where the number comes from.
+
+**The number** is the size of that agent's **most recent request** — the endpoint's own
+count, not a sum over the session. `transport.ContextUsageOf` (`transport/context.go`) walks the
+messages and keeps each agent's last assistant message that carried usage. A session can carry
+a large total and an almost empty context; only the last request answers the question.
+
+**The window** comes from the builder: `Builder.Contexts` (`agentkit/build/context.go`) resolves
+each agent's model the same way the assembly does, including a sub-agent that inherits its
+parent's model. The API layer asks the builder — it must not re-derive which model an agent
+runs on.
+
+**Two channels, one number**:
+
+| Channel | Where | When |
+|---|---|---|
+| the live path | the transport emits a `CUSTOM "context_usage"` event after every model call | while the run goes |
+| the history path | `GET /v2/sessions/{id}` carries `usage.context` | after a refresh |
+
+Both call `transport.ContextUsageOf`, so the number on screen and the number after a refresh
+cannot disagree.
+
+★ **`usage.byAgent` and `usage.context` are different quantities.** The first is a cumulative
+spend; the second is a point-in-time occupancy. The frontend keeps them apart, and a test
+keeps the labels apart.
+
+★ **A window of zero means the user configured none.** The occupancy is still reported, but no
+ratio is shown — "0 %" would be a lie.
 
 ## 4. The frontend
 
@@ -544,7 +575,7 @@ the current state of the code, not a to-do list** — fixing one is a separate c
 
 | Symptom | Where | Explanation |
 |---|---|---|
-| **Usage on a live stream is not accounted per agent** | `contract.Usage` has no `byAgent` field; the frontend's `toUsage` at `events.ts:443` maps only flat counts | `usage.byAgent` **exists only with history hydration**. So in a fresh turn the agent filter chips show no token counts — they appear once you reload (pulling history). E2E missed it because it tests a **seeded history thread**. |
+| **Usage on a live stream is not accounted per agent** | `contract.Usage` has no `byAgent` field; the frontend's `toUsage` at `events.ts:479` maps only flat counts | `usage.byAgent` **exists only with history hydration**. So in a fresh turn the agent filter chips show no cumulative token counts — they appear once you reload (pulling history). The **context occupancy** is live (§3.7): it arrives as its own `context_usage` event. E2E missed the gap because it tests a **seeded history thread**. |
 | **A broken SSE stream does not reconnect** | `web/src/lib/api.ts` | A broken stream is simply broken: it goes to `onError` → the error panel, and the user has to resend. There is no reconnect and no resume-from-offset. |
 | **The conflict dialog does not show the on-disk version** | `web/src/components/settings/conflict-dialog.tsx:18-23` | It shows only your stale `baseRevision` plus a hard-coded "changed by someone else", and **never fetches the disk version**. There is no "overwrite anyway" button either — "Keep editing" merely clears the conflict marker, so the next save resends the same stale revision and conflicts again. |
 | **`web/index.html` declares `lang="zh-CN"`** | `web/index.html:2` | The interface is entirely in English (a hard requirement in AGENTS.md), but the `lang` declaration is still Chinese. It affects what a screen reader reads. |

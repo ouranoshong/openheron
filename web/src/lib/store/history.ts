@@ -65,6 +65,9 @@ export function seedFromHistory(
   const convo = emptyConversation()
   convo.messages = messages
   if (usage) convo.usage = usage
+  // The occupancy is a point-in-time reading, not a total: it does not live
+  // inside the usage.
+  if (usage?.context) convo.context = usage.context
   if (pending && pending.length > 0) {
     convo.status = "awaiting-approval"
     convo.interrupts = pending.map((p) => ({

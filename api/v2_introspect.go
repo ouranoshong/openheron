@@ -11,6 +11,7 @@ import (
 	"github.com/ouranoshong/openheron/agentkit/build"
 	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/contract"
 )
 
 // The /v2 introspection family exists because a surprising amount of what
@@ -72,6 +73,25 @@ type ToolVerdict struct {
 // SetToolsSource injects the source of the effective tool table.
 func (s *Server) SetToolsSource(src ToolsSource) { s.toolsFn = src }
 
+// ContextSource reports what each agent's context allows.
+//
+// The builder owns that lookup: the answer has to be the model the agent
+// actually runs on, not the one the configuration mentions.
+type ContextSource interface {
+	Contexts() map[string]contract.AgentContext
+}
+
+// SetContextSource injects the source of the context windows.
+func (s *Server) SetContextSource(src ContextSource) { s.contextsFn = src }
+
+// contexts returns the context windows of every agent.
+func (s *Server) contexts() map[string]contract.AgentContext {
+	if s.contextsFn == nil {
+		return nil
+	}
+	return s.contextsFn.Contexts()
+}
+
 // ── agent topology ───────────────────────────────────────────────────────
 
 type modelView struct {
@@ -80,6 +100,9 @@ type modelView struct {
 	Reasoning          string   `json:"reasoning"`
 	ReasoningAvailable []string `json:"reasoningAvailable"`
 	ReasoningDefault   string   `json:"reasoningDefault"`
+	// ContextWindow is the model's context window. Zero means the user did
+	// not configure one.
+	ContextWindow int `json:"contextWindow"`
 }
 
 type agentView struct {
@@ -220,6 +243,7 @@ func modelOf(cfg *spec.Config, a *decl.Agent) modelView {
 		Reasoning:          level,
 		ReasoningAvailable: available,
 		ReasoningDefault:   m.ReasoningDefault,
+		ContextWindow:      m.ContextWindow,
 	}
 }
 

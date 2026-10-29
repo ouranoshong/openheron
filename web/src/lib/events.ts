@@ -1,5 +1,6 @@
 
 import type {
+  ContextUsage,
   ConversationState,
   Interrupt,
   Usage,
@@ -91,6 +92,20 @@ export interface RawInterruptEvent {
     arguments?: unknown
   }
   subagentRunId?: string
+}
+
+// ContextUsageEvent is the payload of the context_usage custom event.
+//
+// The wire uses snake_case: the server owns the shape, and the reducer
+// translates it once, here.
+export interface ContextUsageEvent {
+  agent?: string
+  provider?: string
+  model?: string
+  used_tokens?: number
+  context_window?: number
+  summarize_at?: number
+  updated_at?: string
 }
 
 export interface UsageEvent {
@@ -319,6 +334,7 @@ export function reduceEvent(state: ConversationState, event: AgEvent): Conversat
         const value = event.value as { message?: string } | undefined
         return { ...state, retry: { message: value?.message ?? "retrying" } }
       }
+      if (event.name === "context_usage") return onContextUsage(state, event)
       return state
     }
 
@@ -354,6 +370,26 @@ function onRunFinished(state: ConversationState, event: RunFinishedEvent): Conve
     retry: undefined,
     usage: toUsage(outcome?.result?.usage) ?? closed.usage,
   }
+}
+
+// onContextUsage records one agent's context occupancy.
+//
+// The payload is the whole snapshot for that agent: the server replaces, it
+// does not merge, so a dropped event cannot leave a wrong number behind.
+function onContextUsage(state: ConversationState, event: CustomEvent): ConversationState {
+  const value = event.value as ContextUsageEvent | undefined
+  const agent = value?.agent
+  if (!agent) return state
+  const next: ContextUsage = {
+    agent,
+    provider: value.provider,
+    model: value.model,
+    usedTokens: value.used_tokens ?? 0,
+    contextWindow: value.context_window ?? 0,
+    summarizeAt: value.summarize_at,
+    updatedAt: value.updated_at,
+  }
+  return { ...state, context: { ...state.context, [agent]: next } }
 }
 
 function onRunError(state: ConversationState, event: RunErrorEvent): ConversationState {

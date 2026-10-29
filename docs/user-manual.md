@@ -357,6 +357,29 @@ The write path has several gates:
 - **Optimistic concurrency**: if the file changed elsewhere, saving reports a conflict
   and lets you choose to overwrite or to back off.
 
+### 6.4 The context meter
+
+The line under the input box ends with the **context occupancy** of the agent you are talking
+to:
+
+```
+Agent: main · deepseek/deepseek-flash · Reasoning: off · Context: ≈18.4k / 128k (14 %)
+```
+
+- The number is the size of that agent's **most recent request** — not a total over the
+  conversation. A long conversation can have spent a lot and still have plenty of room.
+- It is the vendor's own count, so it is an estimate: the `≈` is there on purpose.
+- The bar turns amber at 80 % of the window and red at 95 %.
+- If the model declares **no** context window, the meter shows the token count alone
+  (`Context: ≈18.4k tokens`) and no ratio. Declare `context_window` in
+  `llm/<vendor>.yaml` to get the bar.
+
+When several agents are in play, each one gets its own figure in the **agent filter** above
+the conversation — every agent has its own context, and they are rarely the same size.
+
+★ The occupancy and the agent's **spend** are different numbers. The meter is about room left
+in the context; the spend is about what the agent has cost you over the whole session.
+
 ## 7. The knowledge base
 
 The knowledge base is an **optional** local corpus retrieval layer: it turns a set of

@@ -1,8 +1,7 @@
 # Context Usage Estimate — Design
 
-> **Status**: partly implemented. The compaction and its persistence (§7) are in the code; the
-> occupancy meter (§2, §4, §5) and the client-side rendering of the compaction marker (§7.7) are
-> not.
+> **Status**: implemented, except the client-side rendering of the compaction marker (§7.7).
+> The occupancy meter (§2, §4, §5) and the compaction with its persistence (§7) are in the code.
 > **Scope**: this repository's code surface — the Go backend and the `web/` frontend.
 > **Companion**: [architecture.md](architecture.md) (how the code is layered),
 > [developer-manual.md](developer-manual.md) (how to change the code),
@@ -193,6 +192,9 @@ type AgentContext struct {
 	// SummarizeAt is the token count that triggers compaction. Zero means
 	// "never".
 	SummarizeAt int
+	// Provider and Model name the model the agent runs on.
+	Provider string
+	Model    string
 }
 ```
 
@@ -200,17 +202,20 @@ The struct carries numbers only. Ratios are computed by whoever renders them —
 
 ### 4.2 The computation lives in the transport
 
-The transport already owns the per-call usage: `res.Usage = aggregateUsage(res.Intermediates)` at `transport/transport.go:99` and `transport/transport.go:175`, over the intermediates it appends in order (`transport/transport.go:154`, `transport/transport.go:161`, `transport/transport.go:169`).
+The transport already owns the per-call usage: `res.Usage = aggregateUsage(res.Intermediates)` at `transport/transport.go:105` and `transport/transport.go:189`, over the intermediates it appends in order (`transport/transport.go:160`, `transport/transport.go:167`, `transport/transport.go:175`).
 
 A new `transport/context.go` computes the per-agent occupancy from the same list:
 
 ```go
-// contextUsageOf returns the context occupancy of every agent that spoke.
+// ContextUsageOf returns the context occupancy of every agent that spoke.
 //
 // The baseline is each agent's last assistant message carrying usage: the
 // endpoint reported the size of that request, and the next request has to
 // carry all of it.
-func contextUsageOf(msgs []*schema.Message, contexts map[string]contract.AgentContext) []contract.ContextUsage
+//
+// The live path and the history path both call this, so the number on screen
+// and the number after a refresh cannot disagree.
+func ContextUsageOf(msgs []*schema.Message, contexts map[string]contract.AgentContext) map[string]contract.ContextUsage
 ```
 
 Two properties matter:
@@ -218,13 +223,13 @@ Two properties matter:
 - **The list is ordered.** The intermediates are appended as the events arrive, so "the last message of agent A" is a walk from the end, not a search.
 - **Streaming keeps the usage.** The streamed assistant message is the concatenation of the chunks (`message.ConcatChunks`, `message/variant.go:74`), and eino's `ConcatMessages` keeps the usage of the chunks it merges. A streamed turn therefore reports the same numbers as a non-streamed one.
 
-The result joins `transport.Result` next to `Usage` (`transport/transport.go:30`).
+The result joins `transport.Result` next to `Usage` (`transport/transport.go:35`).
 
 ### 4.3 The window comes from the builder, not from the API layer
 
 The API layer must not re-derive which model an agent runs on — that is the builder's knowledge, and the repository's rule says so: the effective tool table is asked of `agent.Builder`, never recomputed. The same applies to the model.
 
-So `agentkit/build/introspect.go` — the file that already answers `EffectiveTools` (`agentkit/build/introspect.go:47`) — grows one query:
+So `agentkit/build/context.go` — next to the file that already answers `EffectiveTools` (`agentkit/build/introspect.go:47`) — grows one query:
 
 ```go
 // Contexts reports the context window of every agent's model.
@@ -258,9 +263,9 @@ res, streamErr := transport.Stream(stream, turn, transport.Options{
 
 ### 4.4 The live channel: a `CUSTOM` event
 
-The occupancy changes after **every model call**, so it must not wait for the end of the run. The transport already has the mechanism: `events.NewCustomEvent` with a value, used for the model-retry notice (`transport/transport.go:115`).
+The occupancy changes after **every model call**, so it must not wait for the end of the run. The transport already has the mechanism: `events.NewCustomEvent` with a value, used for the model-retry notice (`transport/transport.go:121`).
 
-The event is emitted right after an assistant message with usage is archived — the two places where the transport appends intermediates (`transport/transport.go:161` for a streamed message, `transport/transport.go:169` for a complete one):
+The event is emitted right after an assistant message with usage is archived — the two places where the transport appends intermediates (`transport/transport.go:167` for a streamed message, `transport/transport.go:175` for a complete one):
 
 ```json
 {

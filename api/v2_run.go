@@ -150,6 +150,7 @@ func (s *Server) v2Run(ctx context.Context, c *app.RequestContext) {
 	res, streamErr := transport.Stream(stream, turn, transport.Options{
 		RunID:     runID,
 		RootAgent: root,
+		Contexts:  s.contexts(),
 	})
 
 	// The turn's own bookkeeping runs whatever the renderer managed to do.

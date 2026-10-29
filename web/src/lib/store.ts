@@ -11,6 +11,7 @@ export {
   selectActiveLoading,
   selectActiveRetry,
   selectActiveUsage,
+  selectActiveContext,
   selectAttachments,
   selectConversation,
   selectInterrupts,

@@ -46,6 +46,9 @@ type Server struct {
 	// introspection endpoints simply omit the corresponding block.
 	skillsFn func() []SkillView
 	poolFn   func() map[string]any
+	// contextsFn reports what each agent's context allows: the model's
+	// window and the compaction threshold.
+	contextsFn ContextSource
 	// toolsFn reports the effective tool table. Optional for the same reason,
 	// but with a sharper edge: it is not a diagnostic, it is the answer to
 	// "what can this agent actually do", and recomputing it here would be the
