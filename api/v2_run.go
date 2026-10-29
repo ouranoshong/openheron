@@ -25,28 +25,59 @@ var (
 // and ignored: they belong to the client's view of the run, and openheron's
 // authority is the server.
 type runInput struct {
-	// ThreadID is optional. Empty means "start a conversation": the server
-	// mints the id and announces it in RUN_STARTED.
+	// ThreadID is the session to run in, and it is **required**.
+	//
+	// ★ Sessions are created only by POST /v2/sessions; /v2/run never creates
+	//   one.
+	//
+	//   "Who creates the session" belongs to the **client**: only it knows
+	//   whether there is a session already — the server can only infer it from
+	//   "is there a threadId", and that is a *result*, not a *decision*.
+	//
+	//   ★ It used to be optional (the server lazily created one on demand), to
+	//     save a round trip. The price was that "who decides to create a
+	//     session" had no owner: the client assumed the server would create
+	//     it, the server assumed the client would send an id — so the client
+	//     had to mint a local placeholder id, every session had two ids, and
+	//     a whole registry was needed to reconcile them; when reconciliation
+	//     failed, history 404'd and the whole history came up empty.
+	//
+	//   Now there is one rule: **to run, have a session first**.
 	ThreadID string `json:"threadId"`
 	RunID    string `json:"runId"`
 
 	// Query is the user's question. Preferred over Messages.
+	//
+	// ★ Why it was added: the server reads only the last user text, yet it
+	//   required the client to build a complete AG-UI message array — the
+	//   contract was dishonest, and it made the client believe its own copy
+	//   of the history mattered. Messages is kept for protocol compatibility
+	//   (AG-UI clients only send that); when it is empty, the server falls
+	//   back to it.
 	Query string `json:"query"`
 
 	// Messages is AG-UI's transcript. Read-only, and only for the last user
 	// text; see Query.
 	Messages []types.Message `json:"messages"`
-	Resume   []resumeEntry   `json:"resume"`
+	// Resume is the approval answer. The entry agent is carried by the
+	// session itself (chosen when the session was created, or changed with a
+	// PATCH), and it **cannot** be changed here — an approval must go back to
+	// the agent that raised it, because switching the root mid-resume leaves
+	// the interrupt without its gate.
+	Resume []resumeEntry `json:"resume"`
 }
 
 // resumeEntry is one interrupt answer.
 //
-//	resolved | cancelled, which cannot express "denied, and here is why",
-//	and openheron's ApprovalResult needs both fields. Both ends of this wire are
-//	openheron, so the server branches on payload.approved.
-//	merely ignored: a field that arrives and does nothing teaches every
-//	future reader that status decides something. Dropping it from the struct
-//	means the decision has exactly one home.
+// ★ The wire carries **approved + reason**, not a status. A status of
+// "resolved | cancelled" cannot express "denied, and here is why", and
+// openheron's ApprovalResult needs both fields. Both ends of this wire are
+// openheron, so the server branches on payload.approved.
+//
+// ★ `status` is not on the struct at all, rather than accepted and merely
+// ignored: a field that arrives and does nothing teaches every future reader
+// that status decides something. Dropping it from the struct means the
+// decision has exactly one home.
 type resumeEntry struct {
 	InterruptID string `json:"interruptId"`
 	Payload     *struct {
@@ -58,8 +89,9 @@ type resumeEntry struct {
 // v2Run is the single entry point for acting on a thread: ask a question, or
 // answer an approval.
 //
-//	was the request shape; AG-UI folds that distinction into the presence of
-//	RunAgentInput.resume, so the branch lives here instead of the route table.
+// ★ "Ask" and "answer" used to be two routes with two request shapes; AG-UI
+// folds that distinction into the presence of RunAgentInput.resume, so the
+// branch lives here instead of the route table.
 func (s *Server) v2Run(ctx context.Context, c *app.RequestContext) {
 	var in runInput
 	if err := c.Bind(&in); err != nil {
@@ -157,13 +189,15 @@ func (s *Server) reportRunStartFailure(stream *transport.SSEStream, err error) {
 	obs.Logger().Error("[api] run did not start", "code", code, "err", err)
 }
 
-// resolveRunSession finds, or for a plain question mints, the session a run
-// belongs to.
 // startRun picks the branch: a question starts a turn, a resume answers one.
+//
+// The session is never minted here — v2Run has already resolved it, and it
+// rejected a run without a threadId before reaching this point.
 func (s *Server) startRun(ctx context.Context, sess storage.Session, in runInput) (*run.Turn, error) {
 	if len(in.Resume) == 0 {
-		//   request; messages stays for protocol compatibility, not as a second
-		//   source of truth for the transcript.
+		// The query is preferred over the transcript; messages stays for
+		// protocol compatibility, not as a second source of truth for the
+		// transcript.
 		query := trimSpace(in.Query)
 		if query == "" {
 			query = lastUserText(in.Messages)
@@ -187,8 +221,8 @@ func (s *Server) startRun(ctx context.Context, sess storage.Session, in runInput
 	}
 
 	// A stale or cross-thread interruptId must not answer this approval.
-	// /v1 never checked, which let a client answer a decision whose context
-	// it no longer had.
+	// The v1 API never checked, which let a client answer a decision whose
+	// context it no longer had.
 	decisions := make([]run.ApprovalDecision, 0, len(in.Resume))
 	for _, entry := range in.Resume {
 		if entry.InterruptID == "" {

@@ -13,10 +13,18 @@ const check = (ok: boolean, label: string, extra = "") => {
   if (!ok) failed = true
 }
 
+// ★ /v2/run does not create sessions: the thread comes from POST /v2/sessions
+//   and must be carried on every run. Posting /v2/run without a threadId is
+//   answered with 400 "threadId is required; create the session with
+//   POST /v2/sessions first".
+const { threadId } = (await (
+  await fetch(`${BASE}/v2/sessions`, { method: "POST", headers: { "Content-Type": "application/json" } })
+).json()) as { threadId: string }
+
 const rawRes = await fetch(`${BASE}/v2/run`, {
   method: "POST",
   headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-  body: JSON.stringify({ query: "只回复两个字：好的" }),
+  body: JSON.stringify({ threadId, query: "只回复两个字：好的" }),
 })
 if (!rawRes.ok) throw new Error(`run: ${rawRes.status} ${await rawRes.text()}`)
 const rawText = await rawRes.text()
@@ -37,11 +45,16 @@ check(
   "RUN_STARTED carried a real threadId",
   firstEvent.threadId ?? "(empty)",
 )
+check(
+  firstEvent.threadId === threadId,
+  "RUN_STARTED echoed the threadId we asked for",
+  `${firstEvent.threadId} vs ${threadId}`,
+)
 
 const runRes = await fetch(`${BASE}/v2/run`, {
   method: "POST",
   headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-  body: JSON.stringify({ query: "只回复两个字：好的" }),
+  body: JSON.stringify({ threadId, query: "只回复两个字：好的" }),
 })
 if (!runRes.ok || !runRes.body) throw new Error("run failed")
 
@@ -72,7 +85,8 @@ const allClosed = convo.messages.every((m) =>
 )
 check(allClosed, "no part is left unfinished")
 
-const threadId = firstEvent.threadId!
+// The history is fetched after both runs, so its last assistant message is the
+// one the second run streamed — that is what has to match.
 const hist = (await (await fetch(`${BASE}/v2/sessions/${threadId}/messages`)).json()) as {
   messages: { role: string; content: string }[]
 }
