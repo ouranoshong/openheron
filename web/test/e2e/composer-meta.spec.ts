@@ -95,3 +95,15 @@ test("agent 过滤器按 agent 显示各自的占用", async ({ page }) => {
   await expect(page.locator('[data-testid="agent-filter-main-context"]')).toHaveText("18k/131k")
   await expect(page.locator('[data-testid="agent-filter-coder-context"]')).toHaveText("6.1k/8.2k")
 })
+
+// The threshold is the agent's own: the chip says where its context gets cut.
+test("agent 过滤器报出这个 agent 的压缩阈值", async ({ page }) => {
+  await openApp(page)
+  await openThread(page, "Multi agent conversation")
+
+  const main = page.locator('[data-testid="agent-filter-main"]')
+  await expect(main).toHaveAttribute("title", /Compacted at: 104858 tokens/)
+  // The agent without a threshold says nothing about one.
+  const coder = page.locator('[data-testid="agent-filter-coder"]')
+  await expect(coder).not.toHaveAttribute("title", /Compacted at/)
+})

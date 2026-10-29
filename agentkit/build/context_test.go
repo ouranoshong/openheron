@@ -74,9 +74,10 @@ func TestContextsReportsTheThresholdOfEachAgent(t *testing.T) {
 	if got["coder"].SummarizeAt != 4000 {
 		t.Fatalf("coder's threshold = %d, want 4000", got["coder"].SummarizeAt)
 	}
-	// An agent that says nothing compacts never.
-	if got["task"].SummarizeAt != 0 {
-		t.Fatalf("task's threshold = %d, want 0", got["task"].SummarizeAt)
+	// An agent that says nothing gets the default: 80% of the window it
+	// runs on.
+	if got["task"].SummarizeAt != 104857 {
+		t.Fatalf("task's threshold = %d, want 104857", got["task"].SummarizeAt)
 	}
 }
 

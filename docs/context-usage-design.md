@@ -105,7 +105,8 @@ A single percentage against the window hides the thing the user can act on. Two 
 | `used / window` | `context_window` from `llm/*.yaml` | *How much of the model's window is this conversation taking?* |
 | `used / summarizeAt` | the summarization threshold | *How far is this conversation from being compacted?* |
 
-`summarizeAt` is zero when no threshold is configured, and the second scale is then simply not shown.
+`summarizeAt` is zero when the agent never compacts — it says `0`, or its model declares no
+window to measure against — and the second scale is then simply not shown.
 
 ### 2.3 The window is unknown more often than not
 
@@ -439,18 +440,20 @@ It returns the stored map itself — a reference the store already owns — so `
 
 ## 6. Configuration
 
-Nothing new is required. `context_window` is already a model field, and the templates already carry it.
-
-One addition is worth making when §7 lands: a place to declare the summarization threshold. It belongs next to the window, in the same model block, because the two are the same kind of fact:
+`context_window` is already a model field, and the templates already carry it. The
+summarization threshold is an **agent** field, because the window is the model's and the
+threshold is this agent's own policy about how much of that window to fill:
 
 ```yaml
-models:
-  - id: deepseek-flash
-    context_window: 131072
-    summarize_at: 104858      # 80 % of the window
+# agents/main.md
+---
+model: deepseek/deepseek-flash
+summarize_at: 80%             # of the model's context_window
+---
 ```
 
-Until then, `summarizeAt` is zero and the second scale is not shown.
+Left out, the agent gets 80 % of its window — see §7.8 for the three spellings and what
+happens when the window is unknown.
 
 ---
 
@@ -602,14 +605,37 @@ Three things, and they are different from each other:
 
 ### 7.8 Configuration
 
+The threshold belongs to the **agent**, not to the model: the window is the model's, the
+threshold is this agent's own policy about how much of that window to fill before summarizing.
+
 ```yaml
-models:
-  - id: deepseek-flash
-    context_window: 131072
-    summarize_at: 104858      # 80 % of the window — the trigger
+# agents/main.md
+---
+model: deepseek/deepseek-flash
+summarize_at: 80%             # of the model's context_window — the trigger
+---
 ```
 
-`Trigger.ContextTokens` is what the middleware compares against (`adk/middlewares/summarization/summarization.go:373`); the upstream recommendation is 80–90 % of the window. `summarize_at: 0` means "never compact".
+Three spellings, resolved in `spec.SummarizeAt(threshold, window)`
+(`agentkit/spec/summarize.go`):
+
+| Written | Threshold |
+|---|---|
+| `80%` | 80 % of the window of the model the agent runs on |
+| `104858` | an absolute token count |
+| `0` (or `off`) | never |
+| *(absent)* | 80 % of the window — **the default** |
+
+`Trigger.ContextTokens` is what the middleware compares against (`adk/middlewares/summarization/summarization.go:373`); the upstream recommendation is 80–90 % of the window, which is why the default is 80 %.
+
+★ **A percentage needs a window.** `context_window: 0` means *not configured*, and a percentage
+of nothing is nothing: that agent never compacts, and the spec package records it in
+`deferred` when it loads the configuration (`noticeCompactionWindows`,
+`agentkit/spec/load.go`). An absolute token count needs no window.
+
+★ **The model profile's `summarize_at` is deprecated.** It still parses — deleting it would make
+every old `llm/*.yaml` fail at startup, because the decoder is `KnownFields`-strict — but nothing
+reads it, and the spec package points at the agent setting instead.
 
 The summarizing model is the agent's own model unless the config names another one — `Config.Model` takes it (`adk/middlewares/summarization/summarization.go:58`).
 
@@ -647,10 +673,11 @@ P2 is the only phase that touches the session format, so it is split into steps 
 |---|---|
 | Go — `transport` | the occupancy is the **last** call of each agent, not the sum; a turn with three calls reports the third; an agent that never spoke is absent |
 | Go — `api` | `usage.context` on the session view matches the live event for the same transcript; `model.contextWindow` is zero when the model declares none; the compaction marker reaches the browser with its numbers, and a compaction is not dropped for carrying nothing else |
-| Go — `build` | `Contexts()` reports the window of the model each agent actually runs on, including a sub-agent with its own `model:` |
+| Go — `build` | `Contexts()` reports the window of the model each agent actually runs on, including a sub-agent with its own `model:`; the **threshold** is each agent's own, resolved against that window; an agent that says nothing gets 80 %; a model without a window gives the agent none |
+| Go — `spec` | the threshold is spelled three ways and each lands where it should; an impossible one is a startup error; the threshold is read from the agent file; the old model field still loads and is reported; an agent whose model declares no window is reported |
 | Go — `storage` | the effective history is the last compaction message and what follows it; a session with no compaction marker returns the whole transcript; the superseded messages are still on disk |
 | Go — `agentkit/run` | the turn's input is built from the effective history; a compaction during the turn is persisted **before** the turn's own messages |
-| Go — `transport` | a compaction is announced on the stream as `CUSTOM "context_compacted"`; a run that never compacted announces nothing |
+| Go — `transport` | a compaction is announced on the stream as `CUSTOM "context_compacted"`; a run that never compacted announces nothing; a **sub-agent's** compaction is not the session's; the summary is picked out of a replacement history that also carries the system message |
 | `bun run test:unit` | the reducer replaces one agent's entry and leaves the others; an unknown window renders no bar and no "0 %"; the compaction marker renders as a divider, not as a bubble; the live event puts a boundary into the list |
 | Playwright | the composer meta line shows the occupancy after a run; the per-agent chips show one occupancy per agent; after a compaction the message list shows the divider, not a bubble, and the earlier messages are still readable |
 

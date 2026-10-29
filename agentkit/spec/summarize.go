@@ -7,8 +7,10 @@ import (
 // DefaultSummarizePercent is the share of the context window at which an
 // agent compacts its history when the agent does not declare a threshold.
 //
-// Zero means "no default": an agent that says nothing never compacts.
-const DefaultSummarizePercent = 0
+// 80% is the usual choice: a request that exactly fills the window is a
+// request that gets refused, and the 20% that is left is what the summary
+// itself needs.
+const DefaultSummarizePercent = 80
 
 // SummarizeAt resolves a compaction threshold against the window of the
 // model the agent runs on.

@@ -197,27 +197,43 @@ openheron/
 长对话迟早会塞不进模型的窗口。openheron 会压缩它：对话被一段摘要取代，从那以后 agent 带着
 摘要继续走。
 
-**阈值**按模型配，写在 `llm/<vendor>.yaml` 里：
+**阈值**按 Agent 配，写在 `agents/<name>.md` 里：
 
 ```yaml
-models:
-  - id: deepseek-flash
-    context_window: 131072
-    summarize_at: 104858        # 上下文窗口的 80%
+---
+model: deepseek/deepseek-flash
+summarize_at: 80%              # 模型 context_window 的 80%
+---
 ```
 
-`summarize_at: 0` 表示永不压缩。这个字段在装配时读取（`agentkit/build/summarize.go` 里的
-`summarizeAtOf`），中间件**只挂在根 agent 上** —— 子 agent 的上下文活在自己的那一轮里，
-随轮而死。
+三种写法：`80%`（窗口的份额）、绝对 token 数（`104858`）、`0`（或 `off`）表示永不。
+不写这个键，Agent 拿到的是**窗口的 80%** —— 自动压缩默认开着。
+
+★ **阈值属于 Agent，窗口属于模型。** 窗口说上下文有多大；阈值说这个 Agent 把窗口填到多少
+才压缩自己的历史。同一个模型可以服务多个策略不同的 Agent。两者只在一处相遇：
+`spec.SummarizeAt(threshold, window)`（`agentkit/spec/summarize.go`）—— builder 问那里，
+而不是自己解析任何一边。
+
+★ **百分比需要窗口。** 没有 `context_window` 就没什么可取 80%：那个 Agent 永不压缩，
+spec 包在加载配置时会把这件事记进 `deferred`（`agentkit/spec/load.go` 的
+`noticeCompactionWindows`）。绝对的 token 数不需要窗口，也就不会被记。
+
+★ **模型档案里的旧字段照常解析，但不再被读。** `models[].summarize_at` 已废弃：留着它是为了
+让老配置还能加载（字段是 `KnownFields` 严格的，直接删会让所有提到它的 `llm/*.yaml` 启动
+即失败），spec 包会指路到 Agent 上的那个设置。
+
+中间件挂在**每个声明了阈值的 Agent 上** —— 根 agent 的压缩才是进记录的那一份；子 agent 的
+压缩活在自己的那一轮里，随轮而死，但在那一轮里护住了它自己的窗口。transport 只接**根
+agent** 的压缩（`transport/transport.go`）：子 agent 的摘要不是会话历史的边界。
 
 **整条链**，从头到尾：
 
 | 环节 | 在哪 | 发生了什么 |
 |---|---|---|
 | 触发 | `agentkit/build/summarize.go` | eino 的摘要中间件在每次模型调用前给 agent 的状态数 token，超过阈值就压缩 |
-| finalizer | 同文件的 `finalizeWithoutSystem` | 替换后的历史**只有摘要** —— agent 的 system 消息被丢掉，因为 openheron 的上下文提示是临时的（`agentkit/run/input.go`），从不落盘 |
+| finalizer | 同文件的 `finalize` | 替换后的历史是 agent 的 system 消息**加上摘要** —— openheron 的上下文提示就是一条 system 消息（`agentkit/run/input.go`），丢掉它会让 agent 在这一轮余下的时间里没有自己的规则 |
 | 宣告 | eino 的 `after_summarize` 事件 | 中间件把替换后的历史发到 agent 的事件流上 |
-| 接住 | `transport/transport.go:190` 的 `compactionFrom` | transport 读这个事件，把压缩消息放进 `Result.Compaction` |
+| 接住 | `transport/transport.go` 的 `compactionFrom` | transport 读这个事件，把压缩消息放进 `Result.Compaction` —— 取的是**摘要**，不是同处替换历史里的那条 system 消息 |
 | 落盘 | `agentkit/run/loop.go:182` 的 `archiveCompaction` | 消息被追加到记录里，位置在**本轮消息之前** |
 | 边界 | `message/compaction.go:103` | 标记搭在这条消息上，所以记录仍是唯一真相源 |
 

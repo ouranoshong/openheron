@@ -62,7 +62,7 @@ func TestSummarizeAtResolvesAgainstTheWindow(t *testing.T) {
 		{name: "a percentage of the window", th: decl.Threshold{Percent: 80}, window: 100000, want: 80000},
 		{name: "an absolute count", th: decl.Threshold{Tokens: 4200}, window: 100000, want: 4200},
 		{name: "off", th: decl.Threshold{Off: true}, window: 100000, want: 0},
-		{name: "nothing declared", th: decl.Threshold{}, window: 100000, want: 0},
+		{name: "nothing declared", th: decl.Threshold{}, window: 100000, want: 80000},
 		{name: "a percentage without a window", th: decl.Threshold{Percent: 80}, window: 0, want: 0},
 		{name: "an absolute count without a window", th: decl.Threshold{Tokens: 4200}, window: 0, want: 4200},
 	}
@@ -130,5 +130,62 @@ models:
 	}
 	if !found {
 		t.Fatalf("the moved threshold must be reported, got %v", cfg.Deferred())
+	}
+}
+
+// A model without a window leaves the agent without a threshold, and the
+// user is told: silently never compacting is the worst of the outcomes.
+func TestAnAgentWithoutAWindowIsReported(t *testing.T) {
+	f := newFixture(t)
+	f.write(t, "llm/openai.yaml", `
+type: openai_compat
+base_url: https://api.example.com
+api_key: ${TEST_LLM_KEY}
+models:
+  - id: fast
+`)
+	f.write(t, "agents/main.md", minimalAgent)
+
+	cfg, err := f.load(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, d := range cfg.Deferred() {
+		if strings.Contains(d, "context_window") && strings.Contains(d, "compaction") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the missing window must be reported, got %v", cfg.Deferred())
+	}
+}
+
+// An absolute token count needs no window, so there is nothing to report.
+func TestAnAbsoluteThresholdNeedsNoWindow(t *testing.T) {
+	f := newFixture(t)
+	f.write(t, "llm/openai.yaml", `
+type: openai_compat
+base_url: https://api.example.com
+api_key: ${TEST_LLM_KEY}
+models:
+  - id: fast
+`)
+	f.write(t, "agents/main.md", `
+---
+model: openai/fast
+summarize_at: 80000
+---
+你是助手。
+`)
+
+	cfg, err := f.load(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range cfg.Deferred() {
+		if strings.Contains(d, "context_window") {
+			t.Fatalf("an absolute threshold needs no window, got %v", d)
+		}
 	}
 }

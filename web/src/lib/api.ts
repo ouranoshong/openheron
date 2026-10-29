@@ -126,6 +126,10 @@ export interface AgentView {
   maxIterations: number
   subagents: string[]
   disabledTools: string[]
+  // summarizeAt is the compaction threshold of this agent, in tokens. Zero
+  // means it never compacts — either because it says so, or because the
+  // model declares no window to measure against.
+  summarizeAt?: number
 }
 
 export interface SkillView {

@@ -68,6 +68,10 @@ function FilterChip({
         context.contextWindow > 0
           ? `Context: ≈${formatTokens(context.usedTokens)} / ${formatTokens(context.contextWindow)}`
           : `Context: ≈${formatTokens(context.usedTokens)} tokens`,
+        // Where the context gets cut, when it does.
+        ...(context.summarizeAt && context.summarizeAt > 0
+          ? [`Compacted at: ${context.summarizeAt} tokens`]
+          : []),
       ].join("\n")
     : tokens === undefined
       ? label

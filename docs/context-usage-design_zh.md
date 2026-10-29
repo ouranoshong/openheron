@@ -105,7 +105,7 @@ used(A) = Usage.TotalTokens            （退化时取 Usage.PromptTokens + Usag
 | `used / window` | `llm/*.yaml` 里的 `context_window` | *这个会话占了模型窗口的多大比例？* |
 | `used / summarizeAt` | 摘要阈值 | *离被压缩还差多少？* |
 
-`summarizeAt` 为零表示没配阈值，此时第二个刻度干脆不显示。
+`summarizeAt` 为零表示这个 Agent 永不压缩 —— 它自己写了 `0`，或者它的模型没声明窗口可量 —— 此时第二个刻度干脆不显示。
 
 ### 2.3 窗口未知的时候比想象中多
 
@@ -439,18 +439,18 @@ export function selectActiveContext(s: StoreState): Record<string, ContextUsage>
 
 ## 6. 配置
 
-不需要新增任何东西。`context_window` 本来就是模型字段，模板里本来就有。
-
-等 §7 落地时，有一处值得加：声明摘要阈值的地方。它该挨着窗口，在同一个模型块里，因为两者是同一类事实：
+`context_window` 本来就是模型字段，模板里本来就有。摘要阈值是 **Agent** 字段 —— 窗口是模型的，
+阈值是这个 Agent 自己「把窗口填到多少就压缩」的策略：
 
 ```yaml
-models:
-  - id: deepseek-flash
-    context_window: 131072
-    summarize_at: 104858      # 窗口的 80 %
+# agents/main.md
+---
+model: deepseek/deepseek-flash
+summarize_at: 80%             # 模型 context_window 的份额
+---
 ```
 
-在那之前 `summarizeAt` 为零，第二个刻度不显示。
+不写就是窗口的 80 % —— 三种写法与「窗口未知时怎么办」见 §7.8。
 
 ---
 
@@ -602,14 +602,35 @@ session.jsonl:  … 旧历史 … │ 压缩消息 │ 本轮的消息 …
 
 ### 7.8 配置
 
+阈值属于 **Agent**，不属于模型：窗口是模型的，阈值是这个 Agent 自己「填到多少就压缩」的
+策略。
+
 ```yaml
-models:
-  - id: deepseek-flash
-    context_window: 131072
-    summarize_at: 104858      # 窗口的 80 % —— 触发线
+# agents/main.md
+---
+model: deepseek/deepseek-flash
+summarize_at: 80%             # 模型 context_window 的份额 —— 触发线
+---
 ```
 
-`Trigger.ContextTokens` 就是中间件拿去比的那个数（`adk/middlewares/summarization/summarization.go:373`）；上游文档建议设为窗口的 80–90%。`summarize_at: 0` 表示「永不压缩」。
+三种写法，在 `spec.SummarizeAt(threshold, window)`（`agentkit/spec/summarize.go`）里解析：
+
+| 写法 | 阈值 |
+|---|---|
+| `80%` | 该 Agent 实际所用模型窗口的 80 % |
+| `104858` | 绝对 token 数 |
+| `0`（或 `off`） | 永不 |
+| *(不写)* | 窗口的 80 % —— **默认值** |
+
+`Trigger.ContextTokens` 就是中间件拿去比的那个数（`adk/middlewares/summarization/summarization.go:373`）；上游文档建议设为窗口的 80–90%，默认值取 80 % 就是这个缘故。
+
+★ **百分比需要窗口。** `context_window: 0` 意味着*没配置*，而百分比的百分比是零：那个 Agent
+永不压缩，spec 包在加载配置时把它记进 `deferred`（`noticeCompactionWindows`，
+`agentkit/spec/load.go`）。绝对的 token 数不需要窗口。
+
+★ **模型档案里的 `summarize_at` 已废弃。** 它照常解析 —— 直接删掉会让所有老 `llm/*.yaml` 启动
+即失败，因为解码器是 `KnownFields` 严格的 —— 但没有任何地方读它，spec 包会指路到 Agent 上的
+那个设置。
 
 摘要模型默认就是 agent 自己的模型，除非配置另指一个 —— `Config.Model` 接它（`adk/middlewares/summarization/summarization.go:58`）。
 
@@ -647,10 +668,11 @@ P2 是唯一会动会话格式的阶段，所以拆成各自都能独立发布�
 |---|---|
 | Go —— `transport` | 占用是每个 agent **最后一次**调用的数字，不是总和；三次调用的轮次报第三次；没说过话的 agent 不出现 |
 | Go —— `api` | 同一份记录上，会话视图的 `usage.context` 与实时事件一致；模型没声明窗口时 `model.contextWindow` 为零；压缩标记带着数字抵达浏览器，而空内容的压缩也不会被丢掉 |
-| Go —— `build` | `Contexts()` 报的是每个 agent **实际**所用模型的窗口，包括自带 `model:` 的子 agent |
+| Go —— `build` | `Contexts()` 报的是每个 agent **实际**所用模型的窗口，包括自带 `model:` 的子 agent；**阈值**是每个 agent 自己的，拿那个窗口量；什么都没写的 agent 拿到 80 %；模型没声明窗口就没有阈值 |
+| Go —— `spec` | 阈值三种写法各归各位；写不出来的是启动错误；阈值从 Agent 文件读；模型里的旧字段照常加载并被记下；模型没声明窗口的 Agent 会被记下 |
 | Go —— `storage` | 有效历史是最后一条压缩消息及其后的消息；没有压缩标记的会话返回完整记录；被取代的消息仍在盘上 |
 | Go —— `agentkit/run` | 轮输入由有效历史构造；轮内发生的压缩**先于**本轮消息落盘 |
-| Go —— `transport` | 压缩以 `CUSTOM "context_compacted"` 事件在流上宣告；没压缩过的轮次什么也不宣告 |
+| Go —— `transport` | 压缩以 `CUSTOM "context_compacted"` 事件在流上宣告；没压缩过的轮次什么也不宣告；**子 agent** 的压缩不是会话的；替换历史里还有 system 消息时，摘要被单独挑出来 |
 | `bun run test:unit` | reducer 替换一个 agent 的项而不动其余；窗口未知时不画条、也不显示「0 %」；压缩标记渲染成分隔线而不是气泡；实时事件把边界插进列表 |
 | Playwright | 跑完一轮后输入框元信息行显示占用；逐 agent 的 chip 各显示一个占用；压缩之后消息列表出现的是分隔线而不是气泡，且此前的消息仍读得到 |
 

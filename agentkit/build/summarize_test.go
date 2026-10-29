@@ -73,9 +73,9 @@ func TestFinalizeKeepsTheUserMessages(t *testing.T) {
 	}
 }
 
-// Compaction is opt-in per agent: an agent that declares no threshold gets
-// no middleware, so a conversation that never crosses one pays nothing.
-func TestNoMiddlewareWithoutAThreshold(t *testing.T) {
+// An agent that says nothing gets the default threshold: 80% of the window
+// of the model it runs on.
+func TestTheDefaultThresholdIsEightyPercent(t *testing.T) {
 	b := &Builder{}
 	snap := &snapshot{cfg: &spec.Config{
 		Providers: map[string]*decl.Provider{"test": {ID: "test", Type: "openai_compat"}},
@@ -87,8 +87,27 @@ func TestNoMiddlewareWithoutAThreshold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if mw == nil {
+		t.Fatal("an agent that says nothing must get the default threshold")
+	}
+}
+
+// A model that declares no window leaves the agent with no threshold: there
+// is nothing to take 80% of.
+func TestNoThresholdWithoutAWindow(t *testing.T) {
+	b := &Builder{}
+	snap := &snapshot{cfg: &spec.Config{
+		Providers: map[string]*decl.Provider{"test": {ID: "test", Type: "openai_compat"}},
+		Models:    map[string]*decl.Model{"test/model": {ID: "model"}},
+	}}
+
+	mw, err := b.summarizationMiddleware(context.Background(), snap,
+		&decl.SubAgentSpec{ID: "main", ModelRef: "test/model"}, &summarizingModel{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if mw != nil {
-		t.Fatal("an agent without a threshold must not get the compaction middleware")
+		t.Fatal("a model without a window must not give the agent a threshold")
 	}
 }
 

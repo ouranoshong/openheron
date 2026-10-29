@@ -264,7 +264,36 @@ func (c *Config) validate() error {
 	if err := c.validateKB(); err != nil {
 		return err
 	}
+	c.noticeCompactionWindows(ids)
 	return c.validateDepth(ids)
+}
+
+// noticeCompactionWindows reports the agents whose automatic compaction
+// cannot happen because their model declares no window.
+//
+// A percentage is measured against the window: without one there is nothing
+// to measure against, and the conversation grows until the endpoint refuses
+// it. Saying so out loud beats silently doing nothing — the user asked for
+// compaction and gets none.
+func (c *Config) noticeCompactionWindows(ids []string) {
+	for _, id := range ids {
+		a := c.Agents[id]
+		if a == nil {
+			continue
+		}
+		if a.SummarizeAt.Off || a.SummarizeAt.Tokens > 0 {
+			// An explicit token count needs no window.
+			continue
+		}
+		ref, _ := ParseRef(a.ModelRef)
+		m, ok := c.Models[ref.String()]
+		if !ok || m == nil || m.ContextWindow > 0 {
+			continue
+		}
+		c.deferKey("llm/%s.yaml: the model %s declares no context_window — automatic compaction is "+
+			"inactive for agent %s; declare context_window, or set summarize_at to an absolute token count",
+			ProviderIDOf(a.ModelRef), a.ModelRef, id)
+	}
 }
 
 func (c *Config) validateKB() error {

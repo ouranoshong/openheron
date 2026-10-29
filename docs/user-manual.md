@@ -107,6 +107,7 @@ model: deepseek/deepseek-flash
 max_iterations: 50
 reasoning: low
 disabled_tools: [kb_index]
+summarize_at: 80%
 ---
 
 你是执行 Agent。收到任务后：
@@ -122,6 +123,7 @@ Available frontmatter keys:
 | `description` | What this agent is for (the parent agent uses it to decide whom to delegate to) |
 | `model` | `<vendor>/<model>`, **required**, never inherited and never falls back |
 | `max_iterations` | Cap on tool-loop iterations |
+| `summarize_at` | When this agent's context is **compacted** into a summary: `80%` of the model's window (the default), an absolute token count (`104858`), or `0` for never |
 | `subagents` | Whom it may delegate to (see §5) |
 | `disabled_tools` | Tool deny-list effective for **this agent** |
 | `temperature` / `max_tokens` | Sampling parameters |
@@ -138,6 +140,25 @@ model" lands.
 is **silently ignored**: an agent says `reasoning: high`, the endpoint has no `high`, and
 the effect is "no thinking at all" — with no error and no message. See §4.2.
 
+★ **`summarize_at` is what keeps a long conversation alive.** Past that point the
+conversation is replaced by a summary, and the summary is what the agent carries forward from
+there on. It comes in three spellings:
+
+| Spelling | Means |
+|---|---|
+| `summarize_at: 80%` | 80% of the `context_window` of the model this agent runs on |
+| `summarize_at: 104858` | An absolute token count |
+| `summarize_at: 0` | Never compact — the context grows until the endpoint refuses the request |
+
+Leave the key out and the agent gets **80% of its window** — compaction is on by default.
+80–90% is the usual range: a request that exactly fills the window is a request that gets
+refused, and the room that is left is what the summary itself needs.
+
+★ **A percentage needs a window.** If the model declares no `context_window`, there is
+nothing to take 80% of: that agent never compacts, and openheron says so when it loads the
+configuration. Declare `context_window` in `llm/<vendor>.yaml`, or set an absolute
+`summarize_at` on the agent.
+
 ### 4.2 Model profiles (`llm/<vendor>.yaml`)
 
 ```yaml
@@ -149,7 +170,6 @@ timeout: 5m
 models:
   - id: deepseek-flash
     context_window: 131072
-    summarize_at: 104858        # 80% of context_window
     reasoning:
       off:  { reasoning_effort: none, thinking: { type: disabled } }
       low:  { reasoning_effort: low,  thinking: { type: enabled } }
@@ -165,8 +185,7 @@ models:
 | `api_key` | An **environment variable name**, written as `${NAME}` — never a literal |
 | `timeout` | Timeout, with a unit (`5m` / `30m`) |
 | `models[].id` | Model name |
-| `models[].context_window` | Context window |
-| `models[].summarize_at` | Token count at which a long conversation is **compacted** into a summary; `0` means never |
+| `models[].context_window` | Context window — the size the compaction threshold is measured against |
 | `models[].reasoning` | **Tier table**: tier name → what this endpoint actually sends |
 | `models[].reasoning_default` | Which tier to use when the agent names no `reasoning` |
 | `models[].timeout` | Overrides the vendor-level timeout (thinking models usually need more) |
@@ -177,10 +196,11 @@ models:
 reference (`@file:/path`). Writing a literal secret into the configuration makes the
 config editor refuse to save it — secrets do not belong in the repository.
 
-★ **`summarize_at` is what keeps a long conversation alive.** Past that token count the
-conversation is replaced by a summary, and the summary is what the agent carries forward from
-there on. `0` — the factory default — means never: the context grows until the endpoint
-refuses the request. 80–90% of `context_window` is the usual choice.
+★ **The compaction threshold belongs to the agent, not to the model.** `context_window` is the
+model's; `summarize_at` is the agent's, because how much of that window this agent fills before
+its history is summarized is this agent's own policy. One model can serve several agents with
+different policies. A `summarize_at` left in a model profile is ignored, and openheron says so
+when it loads the configuration.
 
 Compaction shortens the **context**, not the **record**. The messages that were compacted away
 stay in the transcript and stay readable; the summary is written next to them. Your own words

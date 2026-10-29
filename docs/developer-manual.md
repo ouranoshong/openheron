@@ -215,27 +215,48 @@ The assembly logic is in `agentkit/build/assemble.go`; the validation logic is i
 A long conversation eventually stops fitting in the model's window. openheron compacts it: the
 conversation is replaced by a summary, and the summary is what the agent carries forward.
 
-**The threshold** is per model, in `llm/<vendor>.yaml`:
+**The threshold** is per agent, in `agents/<name>.md`:
 
 ```yaml
-models:
-  - id: deepseek-flash
-    context_window: 131072
-    summarize_at: 104858        # 80% of context_window
+---
+model: deepseek/deepseek-flash
+summarize_at: 80%              # of the model's context_window
+---
 ```
 
-`summarize_at: 0` means never. The field is read at assembly time (`summarizeAtOf` in
-`agentkit/build/summarize.go`), and the middleware is mounted on the **root agent only** — a
-sub-agent's context lives inside its own run and dies with it.
+Three spellings: `80%` (a share of the window), an absolute token count (`104858`), and `0`
+(or `off`) for never. Leave it out and the agent gets **80% of its window** — compaction is on
+by default.
+
+★ **The threshold belongs to the agent, the window to the model.** The window says how big the
+context is; the threshold says how much of it this agent fills before its history is summarized.
+One model can serve several agents with different policies. The two meet in exactly one place,
+`spec.SummarizeAt(threshold, window)` (`agentkit/spec/summarize.go`) — the builder asks there
+instead of resolving either on its own.
+
+★ **A percentage needs a window.** No `context_window` means nothing to take 80% of: that agent
+never compacts, and the spec package says so in `deferred` when it loads the configuration
+(`noticeCompactionWindows` in `agentkit/spec/load.go`). An absolute token count needs no window
+and is never reported.
+
+★ **The old model field still parses, and is not read.** `models[].summarize_at` is deprecated:
+it keeps an old configuration loading (the field is `KnownFields`-strict, so deleting it would
+make every `llm/*.yaml` that mentions it fail at startup) and the spec package points at the
+agent setting instead.
+
+The middleware is mounted on **every agent that declares a threshold** — the root's compaction
+is the one that reaches the transcript, a sub-agent's lives and dies inside its own run, where
+it still protects that agent's window. The transport only picks up the **root's** compaction
+(`transport/transport.go`): a sub-agent's summary is not a boundary of the session's history.
 
 **The chain**, end to end:
 
 | Step | Where | What happens |
 |---|---|---|
 | the trigger | `agentkit/build/summarize.go` | eino's summarization middleware counts the agent's state before every model call and compacts it past the threshold |
-| the finalizer | `finalizeWithoutSystem`, same file | the replacement history is the **summary alone** — the agent's system messages are dropped, because openheron's context prompt is transient (`agentkit/run/input.go`) and never persisted |
+| the finalizer | `finalize`, same file | the replacement history is the agent's system messages **plus the summary** — openheron's context prompt is a system message (`agentkit/run/input.go`), and dropping it would leave the agent without its rules for the rest of the turn |
 | the announcement | eino's `after_summarize` event | the middleware publishes the replacement history on the agent's event stream |
-| the pickup | `compactionFrom` in `transport/transport.go:190` | the transport reads the event and puts the compacted message on `Result.Compaction` |
+| the pickup | `compactionFrom` in `transport/transport.go` | the transport reads the event and puts the compacted message on `Result.Compaction` — the **summary**, not the system message that shares the replacement history |
 | the write | `archiveCompaction` in `agentkit/run/loop.go:182` | the message is appended to the transcript **before the turn's own messages** |
 | the boundary | `message/compaction.go:103` | the marker rides on that message, so the transcript stays the single source of truth |
 

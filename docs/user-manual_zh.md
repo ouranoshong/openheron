@@ -100,6 +100,7 @@ model: deepseek/deepseek-flash
 max_iterations: 50
 reasoning: low
 disabled_tools: [kb_index]
+summarize_at: 80%
 ---
 
 你是执行 Agent。收到任务后：
@@ -115,6 +116,7 @@ frontmatter 可用键：
 | `description` | 这个 Agent 干什么用的（父 Agent 靠它决定委派给谁） |
 | `model` | `<vendor>/<model>`，**必填**，不继承也不回退 |
 | `max_iterations` | 工具循环的轮数上限 |
+| `summarize_at` | 这个 Agent 的上下文什么时候被**压缩**成摘要：模型窗口的 `80%`（默认）、绝对 token 数（`104858`）、或 `0` 表示永不 |
 | `subagents` | 它能委派给谁（见 §5） |
 | `disabled_tools` | 对**这个 Agent** 生效的工具禁用表 |
 | `temperature` / `max_tokens` | 采样参数 |
@@ -130,6 +132,22 @@ frontmatter 可用键：
 Agent 写着 `reasoning: high`，而端点没有 `high`，实际效果是「完全不思考」，且没有任何报错。
 详见 §4.2。
 
+★ **`summarize_at` 是长对话活下来的原因**。越过这个点，对话会被一段摘要取代，从那以后
+agent 带着摘要往前走。它有三种写法：
+
+| 写法 | 含义 |
+|---|---|
+| `summarize_at: 80%` | 该 Agent 实际所用模型 `context_window` 的 80% |
+| `summarize_at: 104858` | 绝对 token 数 |
+| `summarize_at: 0` | 永不压缩 —— 上下文一直长到端点拒绝请求 |
+
+不写这个键，Agent 拿到的是**窗口的 80%** —— 自动压缩默认开着。常用区间是 80–90%：
+正好填满窗口的请求就是会被拒绝的请求，剩下的那点余量正是摘要自己需要的。
+
+★ **百分比需要窗口**。模型没声明 `context_window`，就没什么可取 80%：那个 Agent 永远不压缩，
+而 openheron 加载配置时会说出来。在 `llm/<vendor>.yaml` 里声明 `context_window`，
+或者在 Agent 上写一个绝对的 `summarize_at`。
+
 ### 4.2 模型档案（`llm/<vendor>.yaml`）
 
 ```yaml
@@ -141,7 +159,6 @@ timeout: 5m
 models:
   - id: deepseek-flash
     context_window: 131072
-    summarize_at: 104858        # 上下文窗口的 80%
     reasoning:
       off:  { reasoning_effort: none, thinking: { type: disabled } }
       low:  { reasoning_effort: low,  thinking: { type: enabled } }
@@ -157,8 +174,7 @@ models:
 | `api_key` | **环境变量名**，写成 `${NAME}` —— 不能写字面量 |
 | `timeout` | 超时，带单位（`5m` / `30m`） |
 | `models[].id` | 模型名 |
-| `models[].context_window` | 上下文窗口 |
-| `models[].summarize_at` | 长对话被**压缩**成摘要的 token 数；`0` 表示永不压缩 |
+| `models[].context_window` | 上下文窗口 —— 压缩阈值就是拿它量的 |
 | `models[].reasoning` | **档位表**：档位名 → 这个端点实际发什么字段 |
 | `models[].reasoning_default` | Agent 没写 `reasoning` 时用哪档 |
 | `models[].timeout` | 覆盖厂商级超时（思考模型通常要调大） |
@@ -168,9 +184,9 @@ models:
 ★ **`api_key` 只能写环境变量名**（`${OPENAI_API_KEY}`）或文件引用（`@file:/path`）。
 在配置里写字面量密钥，配置编辑器会直接拒绝保存 —— 密钥不该进仓库。
 
-★ **`summarize_at` 是长对话能活下去的关键。** 超过那个 token 数，对话会被一段摘要取代，
-从那以后 agent 带着摘要继续走。`0` —— 出厂默认值 —— 表示永不压缩：上下文一路涨，直到厂商
-拒绝这个请求。通常取 `context_window` 的 80–90%。
+★ **压缩阈值属于 Agent，不属于模型。** `context_window` 是模型的；`summarize_at` 是 Agent 的 ——
+这个 Agent 把自己的上下文填到多少才压缩，是它自己的策略。同一个模型可以服务多个策略不同的
+Agent。模型档案里留着的 `summarize_at` 不再被读，openheron 加载配置时会说出来。
 
 压缩缩短的是**上下文**，不是**记录**。被压缩掉的消息仍留在记录里、仍读得到；摘要就写在它们
 旁边。你自己的话不会在切口处丢失 —— 摘要把它们留住了。
