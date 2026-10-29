@@ -5,6 +5,18 @@ max_iterations: 30
 reasoning: high
 subagents: [task]
 disabled_tools: [write_file, edit_file, execute]
+
+# ★ summarize_at is the point at which this agent's context is compacted into
+#   a summary. It belongs to the agent, not to the model: the window belongs
+#   to the model, the threshold to whoever fills it.
+#
+#   ★ 80% is the default and the usual choice — a request that exactly fills
+#   the window is a request that gets refused. The percentage is measured
+#   against the context_window of the model this agent runs on.
+#
+#   ★ An absolute token count works too (summarize_at: 104858), and 0 turns
+#   compaction off.
+summarize_at: 80%
 ---
 
 You are main, the user's only entry point. You are responsible for understanding the

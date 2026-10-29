@@ -46,6 +46,7 @@ func (c *Config) agentSpecOf(id string) (decl.SubAgentSpec, error) {
 		Reasoning:     a.Reasoning,
 		Temperature:   a.Temperature,
 		MaxTokens:     a.MaxTokens,
+		SummarizeAt:   a.SummarizeAt,
 		Sub:           subs,
 	}, nil
 }
@@ -75,6 +76,7 @@ func (c *Config) specsBelow(id string, depth, maxDepth int) ([]decl.SubAgentSpec
 			Reasoning:     sa.Reasoning,
 			Temperature:   sa.Temperature,
 			MaxTokens:     sa.MaxTokens,
+			SummarizeAt:   sa.SummarizeAt,
 			Sub:           []decl.SubAgentSpec{},
 		}
 		if depth < maxDepth && len(sa.SubAgents) > 0 {

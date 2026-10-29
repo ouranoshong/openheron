@@ -28,7 +28,7 @@ func (b *Builder) Contexts() map[string]contract.AgentContext {
 	if !ok {
 		return out
 	}
-	base := modelContextOf(snap.cfg, root.ModelRef)
+	base := agentContextOf(snap.cfg, root.ID, root.ModelRef)
 	out[root.ID] = base
 
 	var walk func(specs []decl.SubAgentSpec, parent contract.AgentContext)
@@ -38,6 +38,10 @@ func (b *Builder) Contexts() map[string]contract.AgentContext {
 			if strings.TrimSpace(sp.ModelRef) != "" {
 				ctx = modelContextOf(snap.cfg, sp.ModelRef)
 			}
+			// The threshold is the agent's own, whatever window it runs on:
+			// a sub-agent that shares its parent's model still decides for
+			// itself when to compact.
+			ctx.SummarizeAt = spec.SummarizeAt(sp.SummarizeAt, ctx.Window)
 			out[sp.ID] = ctx
 			walk(sp.Sub, ctx)
 		}
@@ -50,12 +54,29 @@ func (b *Builder) Contexts() map[string]contract.AgentContext {
 		if _, ok := out[id]; ok {
 			continue
 		}
-		out[id] = modelContextOf(snap.cfg, sp.ModelRef)
+		out[id] = agentContextOf(snap.cfg, id, sp.ModelRef)
 	}
 	return out
 }
 
-// modelContextOf reads the window and the compaction threshold of a model.
+// agentContextOf reports the window and the compaction threshold of one
+// agent.
+//
+// The window comes from the model the agent runs on, the threshold from the
+// agent itself.
+func agentContextOf(cfg *spec.Config, agentID, ref string) contract.AgentContext {
+	out := modelContextOf(cfg, ref)
+	var threshold decl.Threshold
+	if cfg != nil {
+		if a := cfg.Agents[agentID]; a != nil {
+			threshold = a.SummarizeAt
+		}
+	}
+	out.SummarizeAt = spec.SummarizeAt(threshold, out.Window)
+	return out
+}
+
+// modelContextOf reads the window of a model.
 //
 // A ref that does not resolve yields an empty context: the window is a fact
 // the configuration declares, and there is nothing to report when it
@@ -71,7 +92,6 @@ func modelContextOf(cfg *spec.Config, ref string) contract.AgentContext {
 		return out
 	}
 	out.Window = m.ContextWindow
-	out.SummarizeAt = m.SummarizeAt
 	out.Provider = spec.ProviderIDOf(ref)
 	out.Model = m.ID
 	return out

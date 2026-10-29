@@ -2,7 +2,6 @@ package build
 
 import (
 	"context"
-	"strings"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/summarization"
@@ -11,26 +10,29 @@ import (
 
 	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
 
-// summarizationMiddleware builds the context-compaction middleware for the
-// root agent.
+// summarizationMiddleware builds the context-compaction middleware for one
+// agent.
 //
-// It returns nil when the model declares no threshold: compaction is opt-in,
-// and a conversation that never crosses a threshold must not carry a
+// It returns nil when the agent has no threshold: compaction is opt-in per
+// agent, and a conversation that never crosses a threshold must not carry a
 // middleware it will never use.
 //
-// Only the root agent gets one. A sub-agent's context lives inside its own
-// run and dies with it (see agentkit/run/input.go), so there is nothing
-// durable to compact.
+// The threshold belongs to the agent, the window to the model it runs on.
+// The two meet here, and only here — the builder owns the model resolution,
+// so nobody else gets to guess which window an agent has.
 func (b *Builder) summarizationMiddleware(ctx context.Context, snap *snapshot,
-	ref string, mdl model.BaseModel[*schema.Message]) (adk.TypedChatModelAgentMiddleware[*schema.Message], error) {
+	sp *decl.SubAgentSpec, mdl model.BaseModel[*schema.Message]) (adk.TypedChatModelAgentMiddleware[*schema.Message], error) {
 
-	at := summarizeAtOf(snap.cfg, ref)
-	if at <= 0 {
+	if sp == nil || mdl == nil {
 		return nil, nil
 	}
-	if mdl == nil {
+
+	window := modelContextOf(snap.cfg, sp.ModelRef).Window
+	at := spec.SummarizeAt(sp.SummarizeAt, window)
+	if at <= 0 {
 		return nil, nil
 	}
 
@@ -39,7 +41,7 @@ func (b *Builder) summarizationMiddleware(ctx context.Context, snap *snapshot,
 		Trigger: &summarization.TriggerCondition{
 			ContextTokens: at,
 		},
-		Finalize: finalizeWithoutSystem,
+		Finalize: finalize,
 		// The transport reads the replacement history off the
 		// after_summarize event; without it there is nothing to persist.
 		EmitInternalEvents: true,
@@ -47,48 +49,46 @@ func (b *Builder) summarizationMiddleware(ctx context.Context, snap *snapshot,
 	if err != nil {
 		return nil, err
 	}
-	obs.Logger().Info("[agent] context compaction enabled", "summarizeAt", at)
+	obs.Logger().Info("[agent] context compaction enabled", "agent", sp.ID, "summarizeAt", at)
 	return mw, nil
 }
 
-// summarizeAtOf reads the compaction threshold of the model a ref points at.
+// compactionMiddleware attaches the compaction middleware to an agent that
+// has a threshold.
 //
-// An unresolvable ref yields no threshold rather than an error: the model
-// itself was already resolved when the agent was assembled, so reaching this
-// point with a broken ref means the threshold is simply not configured.
-func summarizeAtOf(cfg *spec.Config, ref string) int {
-	ref = strings.TrimSpace(ref)
-	if cfg == nil || ref == "" {
-		return 0
+// A middleware that cannot be built is not fatal: the conversation carries
+// on without compaction, which is what happened before compaction existed.
+func (b *Builder) compactionMiddleware(ctx context.Context, snap *snapshot,
+	sp *decl.SubAgentSpec, mdl model.BaseModel[*schema.Message]) adk.TypedChatModelAgentMiddleware[*schema.Message] {
+
+	mw, err := b.summarizationMiddleware(ctx, snap, sp, mdl)
+	if err != nil {
+		obs.Logger().Warn("[agent] context compaction disabled", "agent", agentID(sp), "err", err)
+		return nil
 	}
-	_, m, err := Resolve(cfg, ref)
-	if err != nil || m == nil {
-		return 0
-	}
-	return m.SummarizeAt
+	return mw
 }
 
-// finalizeWithoutSystem is the finalizer openheron hands the summarization
-// middleware.
+// agentID names an agent for the log.
+func agentID(sp *decl.SubAgentSpec) string {
+	if sp == nil {
+		return ""
+	}
+	return sp.ID
+}
+
+// finalize is the finalizer openheron hands the summarization middleware.
 //
 // eino's default keeps the agent's system messages in the replacement
-// history. openheron's context prompt is transient — it is rebuilt every turn
-// and never persisted (agentkit/run/input.go) — so a system message in the
-// persisted history would shadow the live one. The summary alone is what the
-// agent needs to carry the conversation forward.
-func finalizeWithoutSystem(ctx context.Context, original []*schema.Message,
+// history, and openheron wants that: the context prompt — the rules, the
+// project root, the workspace — is a system message
+// (agentkit/run/input.go), and dropping it would leave the agent without
+// them for the rest of the turn.
+//
+// The prompt is transient and never persisted: the transport takes the
+// summary off the replacement history, and only the summary reaches the
+// transcript. What the next turn rebuilds is the live prompt.
+func finalize(ctx context.Context, original []*schema.Message,
 	summary *schema.Message) ([]*schema.Message, error) {
-
-	msgs, err := summarization.DefaultFinalize(ctx, original, summary)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*schema.Message, 0, len(msgs))
-	for _, m := range msgs {
-		if m != nil && m.Role == schema.System {
-			continue
-		}
-		out = append(out, m)
-	}
-	return out, nil
+	return summarization.DefaultFinalize(ctx, original, summary)
 }

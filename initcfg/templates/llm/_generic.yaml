@@ -11,11 +11,7 @@ timeout: 5m
 
 models:
   - id: {{model}}
+    # ★ context_window is the size of the model's context. Fill it in: the
+    #   automatic compaction of an agent is measured against it, and without
+    #   it there is nothing to measure against.
     context_window: 0
-
-    # ★ summarize_at is the token count at which the conversation is compacted
-    #   into a summary. 0 means never: the context grows until the endpoint
-    #   refuses the request. 80-90% of context_window is the usual choice —
-    #   a request that exactly fills the window is a request that gets
-    #   refused.
-    summarize_at: 0

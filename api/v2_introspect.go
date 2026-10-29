@@ -117,6 +117,10 @@ type agentView struct {
 	RuntimeToolsKnown     bool       `json:"runtimeToolsKnown"`
 	DescriptionDistinct   bool       `json:"descriptionDistinct"`
 	DescriptionDuplicates []string   `json:"descriptionDuplicates,omitempty"`
+	// SummarizeAt is the compaction threshold of this agent, in tokens.
+	// Zero means the agent never compacts — either because it says so, or
+	// because the model declares no window to measure against.
+	SummarizeAt int `json:"summarizeAt"`
 }
 
 type toolView struct {
@@ -173,6 +177,7 @@ func (s *Server) v2AgentDetail(_ context.Context, c *app.RequestContext) {
 func (s *Server) agentViews(cfg *spec.Config, withTools bool) []agentView {
 	out := make([]agentView, 0, len(cfg.Agents))
 	verdicts := s.descriptionVerdicts()
+	contexts := s.contexts()
 	for _, id := range cfg.AgentNames() {
 		a := cfg.Agents[id]
 		v := agentView{
@@ -182,6 +187,7 @@ func (s *Server) agentViews(cfg *spec.Config, withTools bool) []agentView {
 			Subagents:     a.SubAgents,
 			DisabledTools: a.DisabledTools,
 			Model:         modelOf(cfg, a),
+			SummarizeAt:   contexts[id].SummarizeAt,
 		}
 		if v.Subagents == nil {
 			v.Subagents = []string{}

@@ -47,7 +47,7 @@ func TestTheCompactionEventReachesTheEventStream(t *testing.T) {
 	mw, err := summarization.New(ctx, &summarization.Config{
 		Model:              mdl,
 		Trigger:            &summarization.TriggerCondition{ContextTokens: 1},
-		Finalize:           finalizeWithoutSystem,
+		Finalize:           finalize,
 		EmitInternalEvents: true,
 	})
 	if err != nil {
@@ -87,10 +87,19 @@ func TestTheCompactionEventReachesTheEventStream(t *testing.T) {
 	if after == nil {
 		t.Fatal("the compaction never announced itself on the event stream")
 	}
-	if len(after.Messages) != 1 {
-		t.Fatalf("the compacted history has %d messages, want the summary alone", len(after.Messages))
+	// The replacement history is the system message plus the summary. The
+	// transport takes the summary off it — that is the one that reaches the
+	// transcript — and the system message stays in the agent's state so the
+	// context prompt survives the cut.
+	if len(after.Messages) != 2 {
+		t.Fatalf("the compacted history has %d messages, want the system message and the summary",
+			len(after.Messages))
 	}
-	if after.Messages[0].Role == schema.System {
-		t.Fatal("the compacted history kept a system message")
+	last := after.Messages[len(after.Messages)-1]
+	if last.Role == schema.System {
+		t.Fatal("the summary must not be a system message")
+	}
+	if after.Messages[0].Role != schema.System {
+		t.Fatal("the compacted history lost the system message")
 	}
 }

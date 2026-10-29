@@ -55,6 +55,11 @@ func (c *Config) loadProvider(file string, data []byte) error {
 		if m.ID == "" {
 			return fmt.Errorf("models[%d]: missing id", i)
 		}
+		if m.SummarizeAt.Declared {
+			c.deferKey("llm/%s.yaml: models[%s].summarize_at is no longer read — the compaction "+
+				"threshold belongs to the agent; set summarize_at in the agent's own file "+
+				"(agents/<id>.md), and use 0 to keep compaction off", id, m.ID)
+		}
 		c.Models[id+"/"+m.ID] = m
 	}
 

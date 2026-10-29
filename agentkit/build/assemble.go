@@ -108,17 +108,18 @@ func (b *Builder) buildNode(ctx context.Context, snap *snapshot, n node) (
 		}
 		boundary := newBoundary(snap.agentSpec.policy, n.table)
 		cfg.Handlers = append(handlers, toolChain(boundary, snap.agentSpec.maxDepth)...)
-		if sp != nil {
-			mw, err := b.summarizationMiddleware(ctx, snap, sp.ModelRef, cfg.ChatModel)
-			if err != nil {
-				obs.Logger().Warn("[agent] context compaction disabled", "err", err)
-			} else if mw != nil {
-				cfg.Handlers = append(cfg.Handlers, mw)
-			}
-		}
 		hubs.agent.bindRoot(cfg)
 	} else if sp != nil {
 		cfg.Handlers = subHandlers(snap.agentSpec.policy, *sp, snap.agentSpec.maxDepth)
+	}
+
+	// The compaction middleware goes on the root agent. A sub-agent's
+	// context lives inside its own run and dies with it, so there is
+	// nothing durable to compact.
+	if n.root && sp != nil {
+		if mw := b.compactionMiddleware(ctx, snap, sp, cfg.ChatModel); mw != nil {
+			cfg.Handlers = append(cfg.Handlers, mw)
+		}
 	}
 
 	agent, err := buildAgent(ctx, cfg)

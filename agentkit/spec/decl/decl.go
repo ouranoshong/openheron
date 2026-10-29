@@ -2,6 +2,7 @@ package decl
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,10 +45,11 @@ type Model struct {
 	// SummarizeAt is the token count at which the agent's context is
 	// compacted: past it, the conversation is replaced by a summary.
 	//
-	// Zero means never — the context grows until the endpoint refuses it.
-	// The upstream guidance is 80-90% of ContextWindow, because a request
-	// that fills the window exactly is a request that gets refused.
-	SummarizeAt int `yaml:"summarize_at"`
+	// Deprecated: the threshold belongs to the agent, not to the model —
+	// see Agent.SummarizeAt. The field is still parsed so that an old
+	// configuration keeps loading, but nothing reads it; the spec package
+	// points at the agent setting instead.
+	SummarizeAt Threshold `yaml:"summarize_at"`
 
 	Timeout Duration `yaml:"timeout"`
 
@@ -93,6 +95,101 @@ type Agent struct {
 	MaxTokens   *int     `yaml:"max_tokens"`
 
 	Reasoning string `yaml:"reasoning"`
+
+	// SummarizeAt is the compaction threshold of this agent.
+	//
+	// The threshold belongs to the agent, not to the model: the window is
+	// the model's, but how much of it this agent fills before its history
+	// is summarized is this agent's own policy. See Threshold.
+	SummarizeAt Threshold `yaml:"summarize_at"`
+}
+
+// Threshold is a compaction threshold.
+//
+// It is spelled three ways in the file:
+//
+//	summarize_at: 104858   an absolute token count
+//	summarize_at: 80%      a share of the model's context window
+//	summarize_at: off      never compact
+//
+// The zero value means "not declared", which is not the same as "declared
+// off": an agent that says nothing gets the default, and the default is the
+// spec package's business, not this one's.
+//
+// Decoding only. What the value means once the window is known is resolved
+// by the spec package.
+type Threshold struct {
+	// Percent is the share of the context window, 1..100.
+	Percent int
+
+	// Tokens is an absolute token count.
+	Tokens int
+
+	// Off is set when the threshold explicitly disables compaction.
+	Off bool
+
+	// Declared reports whether the key was present in the file at all.
+	Declared bool
+}
+
+// UnmarshalYAML accepts a token count, a percentage, or "off".
+func (t *Threshold) UnmarshalYAML(n *yamlNode) error {
+	t.Declared = true
+	switch n.Tag {
+	case "!!int":
+		var v int
+		if err := n.Decode(&v); err != nil {
+			return fmt.Errorf("cannot parse summarize_at: %w", err)
+		}
+		if v <= 0 {
+			t.Off = true
+			return nil
+		}
+		t.Tokens = v
+		return nil
+	case "!!str":
+		var s string
+		if err := n.Decode(&s); err != nil {
+			return fmt.Errorf("cannot parse summarize_at: %w", err)
+		}
+		return t.parseString(strings.TrimSpace(s))
+	default:
+		return fmt.Errorf("summarize_at must be a token count, a percentage, or \"off\"")
+	}
+}
+
+// parseString reads the string spellings: a percentage, "off", or a token
+// count written as a string.
+func (t *Threshold) parseString(s string) error {
+	switch strings.ToLower(s) {
+	case "":
+		return fmt.Errorf("summarize_at must not be empty")
+	case "off", "never", "none":
+		t.Off = true
+		return nil
+	}
+	if strings.HasSuffix(s, "%") {
+		raw := strings.TrimSpace(strings.TrimSuffix(s, "%"))
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return fmt.Errorf("cannot parse summarize_at %q: not a percentage", s)
+		}
+		if v <= 0 || v > 100 {
+			return fmt.Errorf("summarize_at %q must be between 1%% and 100%%", s)
+		}
+		t.Percent = v
+		return nil
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return fmt.Errorf("cannot parse summarize_at %q: not a token count, a percentage, or \"off\"", s)
+	}
+	if v <= 0 {
+		t.Off = true
+		return nil
+	}
+	t.Tokens = v
+	return nil
 }
 
 // ── policy/permissions.yaml ──────────────────────────────────────────────
@@ -302,5 +399,9 @@ type SubAgentSpec struct {
 	Reasoning     string
 	Temperature   *float32
 	MaxTokens     *int
-	Sub           []SubAgentSpec
+	// SummarizeAt is the agent's own compaction threshold, unresolved: a
+	// percentage still needs the window of the model to become a token
+	// count.
+	SummarizeAt Threshold
+	Sub         []SubAgentSpec
 }
