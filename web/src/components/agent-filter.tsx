@@ -63,14 +63,12 @@ function FilterChip({
   // the spend is what the agent has consumed over the whole session.
   const title = context
     ? [
-        label,
+        // The first line keeps its old shape: the label and the spend.
+        tokens === undefined ? label : `${label} — ${tokens} tokens`,
         context.contextWindow > 0
           ? `Context: ≈${formatTokens(context.usedTokens)} / ${formatTokens(context.contextWindow)}`
           : `Context: ≈${formatTokens(context.usedTokens)} tokens`,
-        tokens === undefined ? "" : `Spent: ${tokens} tokens`,
-      ]
-        .filter(Boolean)
-        .join("\n")
+      ].join("\n")
     : tokens === undefined
       ? label
       : `${label} — ${tokens} tokens`
@@ -91,13 +89,22 @@ function FilterChip({
     >
       {label}
       {context ? (
+        // Both numbers ride on the chip: the occupancy is the actionable one,
+        // the spend is what the agent has cost so far. They are different
+        // quantities, so the tooltip names them.
         <span data-testid={`${testId}-context`} className="ml-1 tabular-nums">
           {context.contextWindow > 0
             ? `${formatTokens(context.usedTokens)}/${formatTokens(context.contextWindow)}`
             : `≈${formatTokens(context.usedTokens)}`}
         </span>
-      ) : tokens !== undefined && tokens > 0 ? (
-        <span className="text-muted-foreground ml-1 tabular-nums">{formatTokens(tokens)}</span>
+      ) : null}
+      {tokens !== undefined && tokens > 0 ? (
+        <span
+          data-testid={`${testId}-tokens`}
+          className="text-muted-foreground ml-1 tabular-nums"
+        >
+          {formatTokens(tokens)}
+        </span>
       ) : null}
     </button>
   )

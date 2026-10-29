@@ -111,8 +111,8 @@ used(A) = Usage.TotalTokens            （退化时取 Usage.PromptTokens + Usag
 
 `context_window: 0` 的意思是*没配置* —— 通用模板出厂就是这样（`initcfg/templates/llm/_generic.yaml:14`）。窗口是用户声明的逐模型事实，openheron 不猜，界面也不该猜：
 
-- 窗口未知 → 显示 `≈12.3k tokens`，不画条，tooltip 说明窗口未配置；
-- 窗口已知 → 显示 `12.3k / 128k (10 %)`。
+- 窗口未知 → 显示 `≈12k tokens`，不画条，tooltip 说明窗口未配置；
+- 窗口已知 → 显示 `12k / 128k (10 %)`。
 
 零窗口绝不能渲染成「0 %」。
 
@@ -385,10 +385,10 @@ case "CUSTOM": {
 `web/src/components/composer-meta.tsx` 渲染 agent、模型与推理档位（`:34`、`:46`–`:68`）。占用加在这一行，排在推理档位之后：
 
 ```
-Agent: main · deepseek/deepseek-flash · Reasoning: off · Context: ≈18.4k / 128k (14 %)
+Agent: main · deepseek/deepseek-flash · Reasoning: off · Context: ≈18k / 131k (14 %)
 ```
 
-- 窗口已知时是 `used / window`，未知时是 `≈18.4k tokens`。
+- 窗口已知时是 `used / window`，未知时是 `≈18k tokens`。
 - 条是数字下面一条细线；到窗口的 80 % 转琥珀色，95 % 转红。
 - tooltip 写明口径 —— *「最近一次发给这个 agent 的请求的 token 数」* —— 没有口径的上下文仪表就是个谜。
 
@@ -396,13 +396,20 @@ Agent: main · deepseek/deepseek-flash · Reasoning: off · Context: ≈18.4k / 
 
 ### 5.3 按 agent 的过滤器
 
-`web/src/components/agent-filter.tsx` 列出说话的 agent，每个带着它的**累计**开销（`web/src/components/agent-filter.tsx:35`）。占用才是更能指导行动的数字，而且它是另一个量，所以 chip 上两个都带：
+`web/src/components/agent-filter.tsx` 列出说话的 agent。占用是更能指导行动的数字，而**累计花费**是另一个量 —— 所以 chip 上**两个都带**，占用在前：
 
 ```
-main 18.4k/128k   coder 6.1k/128k
+main 18k/131k 600   coder 6.1k/8.2k 600
 ```
 
-chip 的 `title`（`web/src/components/agent-filter.tsx:62`）说明哪个是哪个。累计总量继续保留 —— 它是「这个 agent 花了多少」的数字，也正是会话级 `usage.byAgent` 报的那个。
+chip 的 `title` 说清它们各是什么，两个数因此不会混淆：
+
+```
+main — 600 tokens
+Context: ≈18k / 131k
+```
+
+累计总量继续留在 chip 上 —— 它是「这个 agent 花了多少」的数字，也正是会话级 `usage.byAgent` 报的那个。
 
 ### 5.4 把两个量分开
 

@@ -363,7 +363,7 @@ The line under the input box ends with the **context occupancy** of the agent yo
 to:
 
 ```
-Agent: main · deepseek/deepseek-flash · Reasoning: off · Context: ≈18.4k / 128k (14 %)
+Agent: main · deepseek/deepseek-flash · Reasoning: off · Context: ≈18k / 131k (14 %)
 ```
 
 - The number is the size of that agent's **most recent request** — not a total over the
@@ -371,7 +371,7 @@ Agent: main · deepseek/deepseek-flash · Reasoning: off · Context: ≈18.4k / 
 - It is the vendor's own count, so it is an estimate: the `≈` is there on purpose.
 - The bar turns amber at 80 % of the window and red at 95 %.
 - If the model declares **no** context window, the meter shows the token count alone
-  (`Context: ≈18.4k tokens`) and no ratio. Declare `context_window` in
+  (`Context: ≈18k tokens`) and no ratio. Declare `context_window` in
   `llm/<vendor>.yaml` to get the bar.
 
 When several agents are in play, each one gets its own figure in the **agent filter** above

@@ -111,8 +111,8 @@ A single percentage against the window hides the thing the user can act on. Two 
 
 `context_window: 0` means *not configured* — the generic template ships exactly that (`initcfg/templates/llm/_generic.yaml:14`). The window is a per-model fact the user declares; openheron does not guess it, and neither should the UI:
 
-- window unknown → show `≈12.3k tokens` and no bar, with a tooltip saying the window is not configured;
-- window known → show `12.3k / 128k (10 %)`.
+- window unknown → show `≈12k tokens` and no bar, with a tooltip saying the window is not configured;
+- window known → show `12k / 128k (10 %)`.
 
 A zero window must never render as "0 %".
 
@@ -385,10 +385,10 @@ case "CUSTOM": {
 `web/src/components/composer-meta.tsx` renders the agent, the model and the reasoning tier (`:34`, `:46`–`:68`). The occupancy joins that row, after the reasoning tier:
 
 ```
-Agent: main · deepseek/deepseek-flash · Reasoning: off · Context: ≈18.4k / 128k (14 %)
+Agent: main · deepseek/deepseek-flash · Reasoning: off · Context: ≈18k / 131k (14 %)
 ```
 
-- The number is `used / window` when the window is known, and `≈18.4k tokens` when it is not.
+- The number is `used / window` when the window is known, and `≈18k tokens` when it is not.
 - The bar is a thin strip under the number; it turns amber at 80 % of the window and red at 95 %.
 - The tooltip states the definition — *"tokens in the most recent request to this agent"* — because a context meter without its definition is a mystery number.
 
@@ -396,13 +396,20 @@ Agent: main · deepseek/deepseek-flash · Reasoning: off · Context: ≈18.4k / 
 
 ### 5.3 The per-agent filter
 
-`web/src/components/agent-filter.tsx` lists the agents that spoke, each with its **cumulative** spend (`web/src/components/agent-filter.tsx:35`). The occupancy is the more actionable number, and it is a different quantity, so the chip carries both:
+`web/src/components/agent-filter.tsx` lists the agents that spoke. The occupancy is the more actionable number, and the **cumulative spend** is a different quantity — so the chip carries **both**, the occupancy first:
 
 ```
-main 18.4k/128k   coder 6.1k/128k
+main 18k/131k 600   coder 6.1k/8.2k 600
 ```
 
-The chip's `title` (`web/src/components/agent-filter.tsx:62`) explains which is which. The cumulative total stays available — it is the "how much did this agent cost" number, and it is the one the session-level `usage.byAgent` reports.
+The chip's `title` names them, so the two numbers are never ambiguous:
+
+```
+main — 600 tokens
+Context: ≈18k / 131k
+```
+
+The cumulative total stays on the chip because it is the "how much did this agent cost" number, and it is the one the session-level `usage.byAgent` reports.
 
 ### 5.4 Keeping the two quantities apart
 

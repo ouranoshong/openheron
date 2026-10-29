@@ -338,14 +338,14 @@ agent:
 输入框下面那一行的末尾，是**你正在对话的那个 agent** 的上下文占用：
 
 ```
-Agent: main · deepseek/deepseek-flash · Reasoning: off · Context: ≈18.4k / 128k (14 %)
+Agent: main · deepseek/deepseek-flash · Reasoning: off · Context: ≈18k / 131k (14 %)
 ```
 
 - 那个数字是该 agent **最近一次请求**的大小 —— 不是整段对话的总量。一段长对话可能花了很多，
   上下文却还很空。
 - 它是厂商自己的计数，所以是估算：`≈` 是故意写在那儿的。
 - 进度条到窗口的 80 % 变琥珀色，95 % 变红。
-- 模型**没声明**上下文窗口时，仪表盘只报 token 数（`Context: ≈18.4k tokens`），不报比例。
+- 模型**没声明**上下文窗口时，仪表盘只报 token 数（`Context: ≈18k tokens`），不报比例。
   想看进度条，就在 `llm/<vendor>.yaml` 里写 `context_window`。
 
 多个 agent 同时在场时，**agent 过滤器**里每个 agent 各有一个数字 —— 每个 agent 有自己的上下文，
