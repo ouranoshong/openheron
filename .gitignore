@@ -1,75 +1,80 @@
-# 构建产物
+# Build artifacts
 /bin/
 /tmp/
 /openheron
 openheron
 
-# 多平台发布产物（make release）
+# Multi-platform release artifacts (make release)
 /dist/
 
-# ★ web/dist 整个忽略，但 .gitkeep 必须留下。
-#   go:embed 在目标目录命中不到任何文件时会**编译期**失败，而 web/dist
-#   是 //go:embed all:web/dist 的目标（见 main.go）。没有这个例外，
-#   新 clone 之后连只改 Go 代码都 build 不出来。
-# ★ 两条例外都要写：只写 `!/web/dist/.gitkeep` 不生效。
-#   git 逐层判断目录是否被排除，父目录 `/web/dist` 一旦整条排除，
-#   就不会再下降到子文件，那条 `!` 规则永远没机会匹配。
-#   （实测：只有 `!/web/dist/.gitkeep` 时 `git add` 报 "paths are ignored"，
-#     且新 clone 里 web/dist 根本不存在 → `go build` 报
-#     "pattern all:web/dist: no matching files found"。）
+# ★ web/dist is ignored as a whole, but .gitkeep must stay.
+#   go:embed fails at **compile time** when its target directory matches no
+#   file at all, and web/dist is the target of //go:embed all:web/dist (see
+#   main.go). Without this exception, a fresh clone cannot even build after
+#   touching only Go code.
+# ★ Both exception rules are needed: `!/web/dist/.gitkeep` alone does not work.
+#   git decides directory by directory whether to descend, so once /web/dist is
+#   excluded wholesale it never descends into the children and that `!` rule
+#   never gets a chance to match.
+#   (Measured: with only `!/web/dist/.gitkeep`, `git add` reports "paths are
+#     ignored", and web/dist does not exist in a fresh clone → `go build`
+#     reports "pattern all:web/dist: no matching files found".)
 !/web/dist/
 web/dist/*
 !/web/dist/.gitkeep
 
-# 前端
+# Frontend
 /web/node_modules/
 /web/.vite/
 /web/.rolldown/
 *.tsbuildinfo
 
-# 运行时数据
+# Runtime data
 /data/
-# 本地实际配置（出厂样例见 .openheron-example/）；不跟踪，避免个人配置与密钥入库
+# The real local configuration (the factory sample is in .openheron-example/);
+# untracked, so that personal configuration and secrets stay out of the repo
 /.openheron/
 *.db
 *.db-journal
 *.db-wal
 
-# 会话与工作目录（agent 可能写了任何东西进来）
+# Sessions and the working directory (an agent may have written anything here)
 /workspace/
 
-# 测试专用根（端口与路径见 .env.test）
+# Test-only root (ports and paths are in .env.test)
 /.openheron-test/
 /sessions/
 
-# 本地配置覆盖 —— 可能含 api key
+# Local configuration overrides — may contain an api key
 /config.local.yaml
 .env
 .env.*
 !.env.example
-# 测试环境配置**要**提交 —— 它是端口与路径的唯一真相源，
-# 三处（Vite / Playwright / 冒烟脚本）共读。里面只有端口和路径，没有密钥。
+# The test environment config **must** be committed — it is the single source
+# of truth for the ports and paths, read by three places (Vite / Playwright /
+# the smoke scripts). It holds only ports and paths, no secrets.
 !.env.test
 
-# 编辑器
+# Editors
 .DS_Store
 .idea/
 .vscode/
 .commandcode/
 *.swp
 
-# 探针/临时产物
+# Probe / temporary artifacts
 *.log
 probe*.txt
 
-# E2E（Playwright）
+# E2E (Playwright)
 /web/test-results/
 /web/playwright-report/
 /web/blob-report/
 /web/.playwright/
 
-# 知识图谱工具（graphify）的产物与本地排除规则
-# ★ graphify-out/ 是**生成物**（图数据、HTML 报告、缓存），不入库。
-#   .graphifyignore 是 graphify 自己的扫描排除规则，与 git 无关。
+# Knowledge-graph tool (graphify): its artifacts and local exclusion rules
+# ★ graphify-out/ is a **generated artifact** (graph data, HTML reports,
+#   caches) and does not belong in the repository.
+#   .graphifyignore is graphify's own scan-exclusion rules, unrelated to git.
 /graphify-out/
 /.graphifyignore

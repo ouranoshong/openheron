@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# 起一个**测试专用**的 openheron 实例：独立配置、独立会话目录、独立端口。
+# Start a **test-only** openheron instance: its own config, its own session
+# directory, its own port.
 #
-# 与开发环境的三重隔离（端口 / 配置 / 会话数据）都定义在仓库根的 .env.test。
-# 用法：
-#   scripts/test-backend.sh            前台起
-#   scripts/test-backend.sh --reset    清空测试目录后起
-#   scripts/test-backend.sh --sync     重新拉取开发侧的 agent 定义后起
-#   scripts/test-backend.sh --prepare-only  只建好目录，不启动
+# The three-way isolation from the development environment (ports / config /
+# session data) is all defined in .env.test at the repository root.
+# Usage:
+#   scripts/test-backend.sh            start in the foreground
+#   scripts/test-backend.sh --reset    clear the test directories, then start
+#   scripts/test-backend.sh --sync     re-copy the development-side agent definitions, then start
+#   scripts/test-backend.sh --prepare-only  build the directories only, do not start
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,8 +19,10 @@ set -a
 . ./.env.test
 set +a
 
-# ★ 遍历**所有**参数而不是只看 $1 —— `--reset --prepare-only` 是常见组合，
-#   只看第一个会把后半段静默丢掉（曾经因此「--prepare-only」照样起了服务）。
+# ★ Iterate over **all** arguments instead of looking at $1 alone — `--reset
+#   --prepare-only` is a common combination, and reading only the first one
+#   silently drops the rest (which once made `--prepare-only` start the server
+#   anyway).
 SYNC=0
 PREPARE_ONLY=0
 for arg in "$@"; do
@@ -31,24 +35,30 @@ for arg in "$@"; do
 done
 
 TEST_ROOT="$REPO_ROOT/$OPENHERON_TEST_ROOT"
-# 配置根由 OPENHERON_CONFIG_DIR 显式指定（下面 export），进程 cwd 切到
-# $PROJECT_DIR。配置根**不向上查找**了，所以仓库根那份 .openheron/ 结构上
-# 就读不到 —— 端口隔离与数据隔离不再靠「探测碰巧停下」，而是靠指名的根。
+# The config root is named explicitly by OPENHERON_CONFIG_DIR (exported below),
+# and the process cwd moves to $PROJECT_DIR. The config root **no longer
+# searches upwards**, so the repository's own .openheron/ is structurally out of
+# reach — port isolation and data isolation no longer depend on "a probe that
+# happens to stop here", they depend on a named root.
 PROJECT_DIR="$TEST_ROOT/project"
 CONFIG_DIR="$PROJECT_DIR/.openheron"
 STATE_DIR="$TEST_ROOT/state"
 
 mkdir -p "$CONFIG_DIR/server" "$STATE_DIR"
 
-# agents/ llm/ policy/ skills/ tools/ 是**输入**（agent 定义、厂商协议、权限、
-# 工具配置），不是状态。测试实例要用真 agent 才跑得通一整轮，所以复制一份
-# 过来 —— 复制而非软链，是为了测试跑崩时不会写坏开发配置。
+# agents/ llm/ policy/ skills/ tools/ are **inputs** (agent definitions, vendor
+# protocols, permissions, tool configuration), not state. The test instance
+# needs real agents to get through a whole turn, so they are copied over — and
+# copied rather than symlinked so that a crashing test cannot damage the
+# development configuration.
 #
-# ★ tools/ 也在其中：它是**配置**目录（每个外部工具一个文件 + 知识库），
-#   改了要生效就得跟开发侧一致。漏掉它的话，测试实例里的 HTTP/搜索工具
-#   永远开着/关着，与开发侧不是一回事。
+# ★ tools/ is in there too: it is a **configuration** directory (one file per
+#   external tool, plus the knowledge base), and for it to behave the same it
+#   has to match the development side. Leaving it out means the HTTP/search
+#   tools are always on (or always off) in the test instance, which is not the
+#   same thing as development.
 #
-# 刻意不含 server/ 与 state/：这两个由本脚本自己管。
+# Deliberately excludes server/ and state/: this script manages those itself.
 copy_defs() {
   local src="$REPO_ROOT/.openheron" sub
   [[ -d "$src" ]] || { echo "[test-backend] no $src, skipping agent defs" >&2; return; }
@@ -63,37 +73,47 @@ copy_defs() {
 }
 copy_defs
 
-# ★ 这个文件的内容**直接**就是 config.Server，没有 server: 顶层键 ——
-#   写成嵌套结构会报 "field server not found in type config.Server"。
+# ★ This file's content **is** the config.Server struct — there is no `server:`
+#   top-level key. Writing it as a nested structure fails with
+#   "field server not found in type decl.Server".
 if [[ ! -f "$CONFIG_DIR/server/config.yaml" ]]; then
   cat > "$CONFIG_DIR/server/config.yaml" <<'YAML'
-# 测试用配置。与开发配置分开存放，避免测试改动影响日常使用。
+# Test configuration. Kept apart from the development configuration so that test
+# changes do not affect day-to-day use.
 
-# 端口实际由 LISTEN_ADDR 提供（见 .env.test），这里只兜底。
+# The port actually comes from LISTEN_ADDR (see .env.test); this is only a
+# fallback.
 listen_addr: ":18099"
 
-# 一轮从提交到进入运行态的上限。测试里调短：失败要快，
-# 否则一条断言能等 60 秒，把真正的报错埋在超时里。
+# The cap on one turn from submission to running state. Shortened for tests:
+# failures must be fast, otherwise a single assertion can wait 60 seconds and
+# bury the real error under a timeout.
 start_timeout: 10s
 
-# ★ 嵌套深度上限要与开发侧的 agent 拓扑对得上。
+# ★ The nesting-depth cap has to match the development-side agent topology.
 #
-#   agent/ 是从开发侧复制过来的（main → {task, pm} → 三个工程师，两层），
-#   上限还是默认的 1 的话实例**起不来**：「agent main has a team nested to
-#   depth 2」—— 而这条报错与「测试环境没配好」长得完全不一样，难查。
+#   agents/ is copied from the development side (the factory configuration is
+#   main → [task]; the sample under .openheron-example/ is
+#   main → [researcher, coder, reviewer] — one level of delegation), and with
+#   the default cap of 1 the instance would **refuse to start**: "agent main has
+#   a team nested to depth 2" — and that error looks nothing like "the test
+#   environment is misconfigured", which makes it hard to diagnose.
 agent:
   max_depth: 2
 YAML
   echo "[test-backend] wrote default server config"
 fi
 
-# 不设 PROJECT_ROOT —— 用 cd 进 $PROJECT_DIR 代替。projectRoot 取的是工作
-# 目录，让 cwd 就是它，语义同开发时。配置根本身由 OPENHERON_CONFIG_DIR
-# 指名，与 projectRoot 无关：projectRoot 只决定「默认根」的落点与 workdir。
+# PROJECT_ROOT is deliberately not set — cd-ing into $PROJECT_DIR does the same
+# job. projectRoot is taken from the working directory, so the cwd is it, which
+# matches development. The config root itself is named by
+# OPENHERON_CONFIG_DIR and is independent of projectRoot: projectRoot only
+# decides where the "default root" would land, and what the workdir is.
 #
-# ★ OPENHERON_CONFIG_DIR 现在是**唯一的配置根**（里面直接有 llm/ agents/ …）——
-#   它以前是「用户级那一层」，与项目级叠加。值语义没变，角色变了：
-#   设了它就不再看项目里的 .openheron/。
+# ★ OPENHERON_CONFIG_DIR is now the **only** config root (llm/ agents/ … live
+#   directly inside it) — it used to be the "user-level layer" that was stacked
+#   on top of the project level. The value semantics did not change, the role
+#   did: once it is set, the project's .openheron/ is never consulted.
 export OPENHERON_CONFIG_DIR="$CONFIG_DIR"
 export DATA_DIR="$STATE_DIR"
 export LISTEN_ADDR=":$OPENHERON_TEST_BACKEND_PORT"
