@@ -469,7 +469,7 @@ func (rt *Runtime) ensureNoLiveTurn(ctx context.Context, sess storage.Session) e
 > guards. When §7.3 lands, the two merge.
 
 **`PhaseWaitingApproval` matters.** `StatusOf` derives it from the session's
-own pending record (`agentkit/run/runtime.go:379`), so a session whose turn
+own pending record (`agentkit/run/runtime.go:727`), so a session whose turn
 just stopped to ask for approval still reports busy — even though no turn
 is executing. That is exactly D3.
 
@@ -704,7 +704,7 @@ func (s *Server) stateOf(ctx context.Context, sess storage.Session) threadState 
   not "this client owns a turn".
 
 `StatusOf` reports `PhaseWaitingApproval` from the session's own pending
-record (`agentkit/run/runtime.go:379`) — so the pending case is covered by
+record (`agentkit/run/runtime.go:727`) — so the pending case is covered by
 the same lookup, and `stateOf` does not need a second source.
 
 **One gap to close.** `stateOf` reads `HasPending()` and `StatusOf()`
@@ -736,17 +736,21 @@ func (s *Server) stateOf(ctx context.Context, sess storage.Session) threadState 
 ```
 
 > **The gate and `stateOf` do not read the same thing, on purpose.**
-> `stateOf` goes through `StatusOf`, which derives `PhaseRunning` from
-> `st.turn` — the pointer that lags (§5.1.1 Hole 2). The gate reads the
-> `turn`+`loop` pair directly. So for a moment after a turn's answer has
-> landed, the **UI** may still say "running" while the **gate** already
-> admits the next query.
+> `stateOf` goes through `StatusOf`, which derives `PhaseRunning` from the
+> **run ledger** — the scan of the session's runs
+> ([run-lifecycle-design.md](run-lifecycle-design.md) §4.1). The gate reads
+> the `turn`+`loop` pair directly. The two are released in the same breath:
+> the terminal row lands in the archive path (`agentkit/run/loop.go:130`),
+> and the gate is released a moment later by `markTurnDone`
+> (`agentkit/run/loop.go:167`). So for a moment after a turn's answer has
+> landed, the **UI** may already say "idle" while the **gate** has not yet
+> admitted the next query.
 >
 > That asymmetry is the correct way round:
 >
 > | | lags | consequence of being wrong |
 > |---|---|---|
-> | `stateOf` (presentation) | may say "running" a moment too long | the composer shows a stop button for a moment — harmless, and it resolves on the next event |
+> | `stateOf` (presentation) | may say "idle" a moment too early | the composer enables; the next message is refused with 409 and the bubble rolls back — recoverable, and the truth arrives a moment later |
 > | the gate (admission) | must never refuse a free session | a false refusal locks the user out of a session they can use |
 >
 > Making them read the same thing would give them the same lag — and the
@@ -1024,7 +1028,7 @@ send "hello" → running
 
 ### 6.1 `Resume` needs the gate too
 
-`Runtime.Resume` (`agentkit/run/runtime.go:330`) answers an approval. It
+`Runtime.Resume` (`agentkit/run/runtime.go:451`) answers an approval. It
 must **not** be gated on "no pending approval" — a pending approval is
 exactly what it is there to answer. But it must be gated on "no live
 turn", using the same `ensureNoLiveTurn` as everything else (§5.1.1 Hole 2

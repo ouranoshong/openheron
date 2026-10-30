@@ -8,11 +8,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
+	"github.com/google/uuid"
 
 	"github.com/ouranoshong/openheron/approval"
 	"github.com/ouranoshong/openheron/contract"
@@ -35,6 +37,11 @@ type Config struct {
 	SessionManager storage.SessionManager
 	Input          InputConfig
 	StartTimeout   time.Duration
+	// InstanceID names this process in the run ledger's rows.
+	//
+	// ★ It answers "which instance wrote this row" — the question a
+	//	post-mortem asks first. It defaults to the host name and the pid.
+	InstanceID string
 }
 
 // ApprovalDecision is one decision about one outstanding interrupt.
@@ -87,6 +94,9 @@ type SessionStatus struct {
 type Runtime struct {
 	cfg Config
 
+	// instanceID is the owner written into the ledger's rows.
+	instanceID string
+
 	mu     sync.Mutex
 	states map[string]*sessionState
 }
@@ -96,8 +106,34 @@ func New(cfg Config) *Runtime {
 	if cfg.StartTimeout <= 0 {
 		cfg.StartTimeout = DefaultStartTimeout
 	}
-	return &Runtime{cfg: cfg, states: make(map[string]*sessionState)}
+	if cfg.InstanceID == "" {
+		cfg.InstanceID = defaultInstanceID()
+	}
+	return &Runtime{cfg: cfg, instanceID: cfg.InstanceID, states: make(map[string]*sessionState)}
 }
+
+// defaultInstanceID names this process.
+//
+// ★ The host name and the pid are enough to tell two processes apart, and
+//
+//	they survive a restart as a trace: a row written by an instance that
+//	no longer exists is exactly what a reconciler looks for.
+func defaultInstanceID() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "unknown"
+	}
+	return fmt.Sprintf("%s:%d", host, os.Getpid())
+}
+
+// newRunID mints a protocol run id.
+//
+// ★ The id is the run's identity: it is what the client sees in every SSE
+//
+//	frame, what the ledger's rows are keyed by, and what a reconnecting
+//	client sends back to re-attach. It is minted once, here, and never
+//	reused.
+func (rt *Runtime) newRunID() string { return uuid.NewString() }
 
 // Submit admits a query into the session.
 //
@@ -113,7 +149,13 @@ func New(cfg Config) *Runtime {
 //
 //	checkpoint discard and the pending-approval clear below are
 //	destructive; a refused request must change nothing.
-func (rt *Runtime) Submit(ctx context.Context, sessionID, query string) (*Turn, error) {
+//
+// ★ runID is the run's identity. An empty one is minted by the runtime —
+//
+//	a caller that already has one (a client re-attaching to a run it
+//	knows) hands it in, and the run carries it from the first row to the
+//	last.
+func (rt *Runtime) Submit(ctx context.Context, sessionID, runID, query string) (*Turn, error) {
 	sess, err := rt.cfg.SessionManager.Get(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -126,7 +168,7 @@ func (rt *Runtime) Submit(ctx context.Context, sessionID, query string) (*Turn, 
 		return nil, err
 	}
 
-	turn, loop, prev, _, err := rt.claimTurn(ctx, sess, contract.TurnQuery)
+	turn, loop, prev, _, err := rt.claimTurn(ctx, sess, contract.TurnQuery, runID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -158,9 +200,19 @@ func (rt *Runtime) Submit(ctx context.Context, sessionID, query string) (*Turn, 
 //	turn it displaced. The displaced one has already completed — a live
 //	one would have been refused — so it only needs its handshake
 //	released.
-func (rt *Runtime) claimTurn(ctx context.Context, sess storage.Session, kind contract.TurnKind) (
+//
+// ★ The claimed turn gets a row in the session's run ledger before the
+//
+//	caller is told anything. A run that is not recorded cannot be scanned,
+//	and a run that cannot be scanned is a run whose busy state is a guess.
+func (rt *Runtime) claimTurn(ctx context.Context, sess storage.Session, kind contract.TurnKind,
+	runID, parentRunID string) (
 	*Turn, *adk.TurnLoop[loopItem, *schema.Message], *Turn, *adk.TurnLoop[loopItem, *schema.Message], error) {
+	if runID == "" {
+		runID = rt.newRunID()
+	}
 	turn := newTurnHandle(sess.ID(), kind)
+	turn.RunID = runID
 	st := rt.stateFor(sess.ID())
 	loop := rt.newLoop(ctx, sess, turn)
 
@@ -179,7 +231,60 @@ func (rt *Runtime) claimTurn(ctx context.Context, sess storage.Session, kind con
 	if busy {
 		return nil, nil, nil, nil, fmt.Errorf("%w: a turn is already running on this session", ErrSessionBusy)
 	}
+
+	row, err := rt.openRunRow(ctx, sess, turn, kind, parentRunID)
+	if err != nil {
+		// ★ The run cannot be recorded, so it cannot be owned: give the
+		//   slot back and refuse. A run that exists without a row would
+		//   leave the session unreadable to every scan.
+		rt.releaseClaim(sess, turn, prev, prevLoop)
+		return nil, nil, nil, nil, err
+	}
+	turn.row = row
+
 	return turn, loop, prev, prevLoop, nil
+}
+
+// openRunRow writes the run's first row and returns the writer that keeps
+// it up to date.
+//
+// ★ The row is written BEFORE the caller is told the run started. That is
+//
+//	the whole point of the ledger: the run's existence is a fact on disk,
+//	not a promise in memory.
+//
+// ★ A session without a ledger gets no row. That is not a failure — the
+//
+//	ledger is a storage driver, and a session that has none simply keeps
+//	the volatile behaviour it had before.
+func (rt *Runtime) openRunRow(ctx context.Context, sess storage.Session, turn *Turn,
+	kind contract.TurnKind, parentRunID string) (*runRow, error) {
+	ledger := sess.RunLedger()
+	if ledger == nil {
+		return nil, nil
+	}
+
+	epoch, err := ledger.NextEpoch(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("allocate the run epoch: %w", err)
+	}
+
+	now := time.Now().UTC()
+	row := storage.Run{
+		RunID:       turn.RunID,
+		SessionID:   sess.ID(),
+		Kind:        kind,
+		State:       storage.RunStarting,
+		Epoch:       epoch,
+		Owner:       rt.instanceID,
+		ParentRunID: parentRunID,
+		StartedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := ledger.Append(ctx, row); err != nil {
+		return nil, fmt.Errorf("write the run row: %w", err)
+	}
+	return newRunRow(ledger, row), nil
 }
 
 // releaseClaim gives the slot back when a claimed turn cannot start.
@@ -339,7 +444,12 @@ func (rt *Runtime) discardCheckpoint(ctx context.Context, sess storage.Session) 
 // The decisions are refused unless the session holds a persisted pending
 // record: the framework exposes no interrupt id to the application, so that
 // record is the only gate (architecture.md decision 7 and 8).
-func (rt *Runtime) Resume(ctx context.Context, sessionID string, decisions []ApprovalDecision) (*Turn, error) {
+//
+// ★ A resume is a NEW run, not a continuation of the old one: the run that
+//
+//	raised the approval has ended. The new run names it as its parent, so
+//	the ledger can tell which question the answer belongs to.
+func (rt *Runtime) Resume(ctx context.Context, sessionID, runID string, decisions []ApprovalDecision) (*Turn, error) {
 	sess, err := rt.cfg.SessionManager.Get(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -364,7 +474,8 @@ func (rt *Runtime) Resume(ctx context.Context, sessionID string, decisions []App
 	//   point would eat the user's decision: the card disappears and the
 	//   approval can never be answered again. Claiming first means a
 	//   refusal leaves the approval untouched.
-	turn, loop, prev, prevLoop, err := rt.claimTurn(ctx, sess, contract.TurnResume)
+	turn, loop, prev, prevLoop, err := rt.claimTurn(ctx, sess, contract.TurnResume, runID,
+		rt.parentRunOf(ctx, sess))
 	if err != nil {
 		return nil, err
 	}
@@ -593,6 +704,11 @@ func (rt *Runtime) Status() []SessionStatus {
 //	approval lives in the session file, not in the volatile runtime state, and
 //	a session with a pending approval has no loop running — it would report
 //	PhaseIdle and the sidebar dot would lie.
+//
+// ★ The phase comes from the run ledger, not from the volatile map. The map
+//
+//	says "a turn handle exists"; the ledger says "a run is open", and the
+//	second survives a restart while the first does not.
 func (rt *Runtime) StatusOf(ctx context.Context, sessionID string) (SessionStatus, bool) {
 	sm := rt.cfg.SessionManager
 	if sm == nil {
@@ -611,18 +727,108 @@ func (rt *Runtime) StatusOf(ctx context.Context, sessionID string) (SessionStatu
 	if pending != nil {
 		out.Phase = PhaseWaitingApproval
 	}
+	if active, ok := rt.activeRun(ctx, sess); ok {
+		// ★ A live run outranks a pending approval: the run is executing
+		//   now, and the approval it may raise comes later.
+		out.Phase = PhaseRunning
+		out.RunID = active.RunID
+		out.Kind = active.Kind
+	}
 	if st, ok := rt.lookupState(sessionID); ok {
 		st.mu.Lock()
-		out.StartedAt, out.LastError, out.Kind = st.startedAt, st.lastError, contract.TurnQuery
-		if st.turn != nil {
-			if out.Phase != PhaseWaitingApproval {
-				out.Phase = PhaseRunning
-			}
-			out.Kind = st.turn.Kind
-		}
+		out.StartedAt, out.LastError = st.startedAt, st.lastError
 		st.mu.Unlock()
 	}
 	return out, true
+}
+
+// activeRun returns the run that currently owns the session.
+//
+// ★ It is a scan of the ledger, never the volatile state: the ledger is
+//
+//	the only source that knows about a run this process did not start.
+func (rt *Runtime) activeRun(ctx context.Context, sess storage.Session) (storage.Run, bool) {
+	ledger := sess.RunLedger()
+	if ledger == nil {
+		return storage.Run{}, false
+	}
+	runs, err := ledger.List(ctx)
+	if err != nil {
+		logf("session=%s failed to read the run ledger: %v", sess.ID(), err)
+		return storage.Run{}, false
+	}
+	return storage.ActiveRun(runs)
+}
+
+// parentRunOf returns the run a resume continues.
+//
+// ★ It is the newest run that ended by raising an approval. The pending
+//
+//	approval itself does not carry the run's id — the record that holds
+//	the interrupt id is the checkpoint's business — so the ledger is where
+//	the question's owner is looked up.
+func (rt *Runtime) parentRunOf(ctx context.Context, sess storage.Session) string {
+	ledger := sess.RunLedger()
+	if ledger == nil {
+		return ""
+	}
+	runs, err := ledger.List(ctx)
+	if err != nil {
+		logf("session=%s failed to read the run ledger: %v", sess.ID(), err)
+		return ""
+	}
+	storage.SortRunsByStart(runs)
+	for i := len(runs) - 1; i >= 0; i-- {
+		if runs[i].State == storage.RunWaitingApproval {
+			return runs[i].RunID
+		}
+	}
+	return ""
+}
+
+// RunSnapshot is the scan of one session's runs.
+//
+// ★ It is what a reader gets: the rows, and the one run that owns the
+//
+//	session right now. The two are separate on purpose — the rows are the
+//	history, the active run is the present.
+type RunSnapshot struct {
+	SessionID   string
+	Runs        []storage.Run
+	ActiveRunID string
+}
+
+// ScanRuns reads a session's run ledger.
+//
+// ★ This is the truth. The volatile runtime state may say "running" for a
+//
+//	turn that already ended, and says nothing at all about a turn another
+//	instance started.
+func (rt *Runtime) ScanRuns(ctx context.Context, sessionID string) (RunSnapshot, error) {
+	sm := rt.cfg.SessionManager
+	if sm == nil {
+		return RunSnapshot{}, errors.New("no session manager is configured")
+	}
+	sess, err := sm.Get(ctx, sessionID)
+	if err != nil {
+		return RunSnapshot{}, err
+	}
+
+	out := RunSnapshot{SessionID: sess.ID(), Runs: []storage.Run{}}
+	ledger := sess.RunLedger()
+	if ledger == nil {
+		return out, nil
+	}
+	runs, err := ledger.List(ctx)
+	if err != nil {
+		return out, err
+	}
+	storage.SortRunsByStart(runs)
+	out.Runs = runs
+	if active, ok := storage.ActiveRun(runs); ok {
+		out.ActiveRunID = active.RunID
+	}
+	return out, nil
 }
 
 func (rt *Runtime) lookupState(sessionID string) (*sessionState, bool) {

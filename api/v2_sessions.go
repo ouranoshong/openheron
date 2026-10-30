@@ -408,6 +408,64 @@ func (s *Server) v2Abort(ctx context.Context, c *app.RequestContext) {
 	c.JSON(consts.StatusOK, out)
 }
 
+// ── GET /v2/sessions/{threadId}/runs ──────────────────────────────────────
+
+// v2SessionRuns returns the session's run ledger.
+//
+// ★ It is the scan. Every question about "what is happening" is answered
+//
+//	here and never by trusting a push: the stream may be late, incomplete
+//	or lost, the ledger is the record.
+//
+// ★ It never writes. A read that repairs the ledger would make the scan
+//
+//	unable to tell "what is" from "what was just fixed".
+func (s *Server) v2SessionRuns(ctx context.Context, c *app.RequestContext) {
+	sess, err := s.session(ctx, c)
+	if err != nil {
+		v2FailErr(c, err)
+		return
+	}
+	snap, err := s.rt.ScanRuns(ctx, sess.ID())
+	if err != nil {
+		v2FailInternal(c, err)
+		return
+	}
+	out := runsView{Items: make([]runView, 0, len(snap.Runs)), ActiveRunID: snap.ActiveRunID}
+	for _, r := range snap.Runs {
+		out.Items = append(out.Items, toRunView(r))
+	}
+	c.JSON(consts.StatusOK, out)
+}
+
+// ── GET /v2/sessions/{threadId}/runs/{runId} ──────────────────────────────
+
+// v2SessionRun returns one run of the session.
+func (s *Server) v2SessionRun(ctx context.Context, c *app.RequestContext) {
+	sess, err := s.session(ctx, c)
+	if err != nil {
+		v2FailErr(c, err)
+		return
+	}
+	runID := trimSpace(c.Param("runId"))
+	if runID == "" {
+		v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "runId is required", false)
+		return
+	}
+	snap, err := s.rt.ScanRuns(ctx, sess.ID())
+	if err != nil {
+		v2FailInternal(c, err)
+		return
+	}
+	for _, r := range snap.Runs {
+		if r.RunID == runID {
+			c.JSON(consts.StatusOK, toRunView(r))
+			return
+		}
+	}
+	v2Fail(c, consts.StatusNotFound, codeThreadNotFound, "run not found", false)
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────
 
 // metaOf projects a session into the listing shape.

@@ -2,6 +2,7 @@ package contract
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -27,6 +28,35 @@ func (k TurnKind) String() string {
 	default:
 		return "unknown"
 	}
+}
+
+// MarshalJSON encodes the kind as its wire name.
+//
+// ★ The durable records store the kind as a name, not a number: a ledger
+//
+//	that outlives the binary has to stay readable when the constants are
+//	renumbered.
+func (k TurnKind) MarshalJSON() ([]byte, error) { return json.Marshal(k.String()) }
+
+// UnmarshalJSON decodes a wire name back into a kind.
+//
+// ★ An unknown name is an error, not a zero: a zero is TurnQuery, and a
+//
+//	record that silently read as a query would resume as a fresh question.
+func (k *TurnKind) UnmarshalJSON(data []byte) error {
+	var name string
+	if err := json.Unmarshal(data, &name); err != nil {
+		return err
+	}
+	switch name {
+	case "query":
+		*k = TurnQuery
+	case "resume":
+		*k = TurnResume
+	default:
+		return fmt.Errorf("unknown turn kind %q", name)
+	}
+	return nil
 }
 
 type Usage struct {

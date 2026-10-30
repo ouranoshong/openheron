@@ -1,12 +1,25 @@
 # Run 生命周期设计 —— 一轮比连接活得久
 
-> 今天的 openheron 把一轮对话绑在一条 HTTP 连接上：连接负责抽干事件流，
-> 落盘靠连接回吐的东西。本文提议拆掉这根绑定——run 变成一个自带身份、
+> openheron 把一轮对话绑在一条 HTTP 连接上：连接负责抽干事件流，
+> 落盘靠连接回吐的东西。本文拆掉这根绑定——run 变成一个自带身份、
 > 所有权和真相的持久对象，SSE 连接退化成它的一个可选视图。
 >
-> ★ **第 1 节描述的是代码现状**，那里的每条结论都指着树上的一行；
->   **第 2 节往后是提案**，尚未实现。这个区分是刻意保持的：把「是什么」
->   和「要做什么」混在一份设计里，文档漂移就是这么开始的。
+> ★ **第 1 节描述的是代码现状**，那里的每条结论都指着树上的一行。
+>   **提案逐节标注**，因为它现在已经落地了一半：
+>
+> | 节 | 状态 |
+> |---|---|
+> | §1 今天的「一轮」是什么 | **代码现状** |
+> | §2 目标模型 | 提案——形状已由 §3、§4 具备 |
+> | §3 D1 —— run 是一行事实 | **已实现** |
+> | §4 D2 —— 通知是提示，扫描才是真相 | 服务端**已实现**，客户端是提案 |
+> | §5 D3 —— 租约与 fence | 提案 |
+> | §6 D4 —— 驱动可插拔 | 接口与文件驱动**已实现**，内存仲裁器还不在 |
+> | §7 事件管线 | 提案 |
+> | §8 API 表面 | 扫描路由**已实现**，attach 是提案 |
+> | §9 前端 | 提案 |
+>
+> 把「是什么」和「要做什么」混在一份设计里，文档漂移就是这么开始的。
 
 > 英文版：[run-lifecycle-design.md](run-lifecycle-design.md)
 >
@@ -22,75 +35,91 @@
 ```
 POST /v2/run
   │
-  ├─ api/v2_run.go:126   startRun → run.Runtime.Submit
-  │    └─ agentkit/run/runtime.go:129   claimTurn        (the gate: a mutex)
-  │    └─ agentkit/run/runtime.go:212   runClaimedTurn
-  │         └─ agentkit/run/bridge.go:99   startLoop → a goroutine
-  │              └─ agentkit/run/loop.go:21   newLoop → adk.TurnLoop
+  ├─ api/v2_run.go:202   startRun → run.Runtime.Submit
+  │    └─ agentkit/run/runtime.go:157   run.Runtime.Submit
+  │         └─ agentkit/run/runtime.go:207   claimTurn        (the gate: a mutex)
+  │              └─ agentkit/run/runtime.go:259   openRunRow     ← the row is written
+  │              └─ agentkit/run/runtime.go:316   runClaimedTurn
+  │                   └─ agentkit/run/bridge.go:99   startLoop → a goroutine
+  │                        └─ agentkit/run/loop.go:21   newLoop → adk.TurnLoop
   │
   ├─ agentkit/run/loop.go:100  makeOnAgentEvents  (inside the loop goroutine)
-  │    └─ agentkit/run/loop.go:112  turn.events = events     ← the iterator is handed over
-  │    └─ agentkit/run/loop.go:113  turn.signalReady()
-  │    └─ agentkit/run/loop.go:117  waits on turn.done        ← blocked here
+  │    └─ agentkit/run/loop.go:115  turn.events = events     ← the iterator is handed over
+  │    └─ agentkit/run/loop.go:116  turn.signalReady()
+  │    └─ agentkit/run/loop.go:120  waits on turn.done        ← blocked here
   │
-  └─ api/v2_run.go:137  turn.Wait(...)          (the HTTP handler blocks too)
-       api/v2_run.go:150  transport.Stream(stream, turn, ...)
-            └─ transport/transport.go:72   RunStream(w, …, turn.Events(), …)
-                 └─ transport/transport.go:103  src.Next()   ← the ONLY consumer
-                 └─ transport/transport.go:167/174/182  accumulates res.Intermediates
-       api/v2_run.go:157  turn.Complete(Outcome{Intermediates: res.Intermediates, …})
-            └─ agentkit/run/turn.go:157  t.done <- outcome
-                 └─ agentkit/run/loop.go:122  rt.archive(sess, turn, out.out)
-                      └─ agentkit/run/loop.go:157  sess.Append(msg)   ← the transcript
+  └─ api/v2_run.go:141  turn.Wait(...)          (the HTTP handler blocks too)
+       api/v2_run.go:154  transport.Stream(stream, turn, ...)
+            └─ transport/transport.go:68   Stream(w, turn, …)
+                 └─ transport/transport.go:75   RunStream(w, …, turn.Events(), …)
+                      └─ transport/transport.go:103  src.Next()   ← the ONLY consumer
+                      └─ transport/transport.go:167/174/182  accumulates res.Intermediates
+       api/v2_run.go:161  turn.Complete(Outcome{Intermediates: res.Intermediates, …})
+            └─ agentkit/run/turn.go:174  t.done <- outcome
+                 └─ agentkit/run/loop.go:125  rt.archive(sess, turn, out.out)
+                      └─ agentkit/run/loop.go:190  sess.Append(msg)   ← the transcript
+                 └─ agentkit/run/loop.go:130  rt.finishRun(turn, out)  ← the terminal row
 ```
 
 ★ **落盘路径穿过了渲染路径。** transcript 只有在 HTTP 处理器抽干 eino 事件流
 并回吐之后才会被写入。渲染器不是 run 的一个视图——它**就是** run 的产出管线。
 
+★ 账本的那一行是唯一**不**经过渲染器的东西：`openRunRow` 在 loop 启动之前
+写下它，终态行由 run 自己的 goroutine 写（`rt.finishRun`）。这一行是关于
+run 的事实，transcript 是关于对话的事实。两者落盘的时刻不同，而且是刻意的。
+
 ### 1.2 五个后果
 
-**C1 —— run 没有持久身份。**
-`Turn.RunID`（`agentkit/run/turn.go:23`）声明了却从未被赋值。协议层的 run id
-是在 API 层铸出来的（`api/v2_run.go:102-105`），只活在 SSE 帧和 obs 上下文里
-（`agentkit/obs/runid.go:7`）。`Runtime.StatusOf` 从不设置
-`SessionStatus.RunID`（`agentkit/run/runtime.go:596-626`），所以今天的
-`GET /v2/sessions/{threadId}` 返回的 `runId` 是空的（`api/v2_sessions.go:94`）。
-客户端压根不传 `runId`（`web/src/lib/store/actions.ts:250-254`），尽管线上
-类型里有这个字段（`web/src/lib/api.ts:46`）。
+★ 其中两个已经被 §3 部分解决——行存在了，于是 run 有了痕迹和身份；另外三个
+原封不动。下面逐条标出状态，读者才知道提案的哪一部分还在承重。
 
-**C2 —— 崩溃会静默地丢掉这一轮。**
-归档只能从连接抽干事件流的那条路抵达（`api/v2_run.go:157` →
-`agentkit/run/loop.go:122`）。进程在 run 中途死掉，消息不在 transcript 里，
-没有任何 run 记录，下次启动时会话读起来是 idle——和「从没跑过」无法区分。
-没有痕迹可供对账。
+**C1 —— run 没有持久身份。** —— *§3 已部分解决*
+`Turn.RunID`（`agentkit/run/turn.go:31`）现在在 turn 被认领时被赋值
+（`agentkit/run/runtime.go:214`），API 也把自己那一层铸的 id 传下去
+（`api/v2_run.go:218`），于是 SSE 帧里的 id 和账本行里的 id 是同一个。
+`Runtime.StatusOf` 从扫描里把它读回来，所以
+`GET /v2/sessions/{threadId}` 返回的是一个真实的 `runId`
+（`api/v2_sessions.go:94`），不再是空字符串。**还缺的是：**客户端从来不传
+`runId`（`web/src/lib/store/actions.ts:250-254`），所以「挂回一个你知道的
+run」还不存在——那是 §8。
+
+**C2 —— 崩溃会静默地丢掉这一轮。** —— *§3 已部分解决*
+run 的那一行在 loop 启动之前就写好了（`agentkit/run/runtime.go:259`），所以
+崩溃会留下痕迹：那一行还开着，启动时的对账把它收成 `interrupted`
+（`storage/filestore/manager.go:245`）。会话不再读起来像「从没跑过」——
+它读起来像「有一轮被中断了」。**还缺的是：**消息仍然随崩溃一起丢了，因为
+transcript 是渲染器写的（§7）。那一行记录了 run 发生过，但不记录它说了什么。
 
 **C3 —— 处理器死了会把会话卡死。**
-`agentkit/run/runtime.go:222` 把 run 与请求解绑：
+`agentkit/run/runtime.go:326` 把 run 与请求解绑：
 `context.WithCancel(context.WithoutCancel(ctx))`。存下来的 `turn.cancel`
-只在一个地方被调用——`agentkit/run/bridge.go:128`，而且是在 loop 退出**之后**。
-但只要 `agentkit/run/loop.go:117` 阻塞在 `turn.done` 上，loop 就退不出来；
-而 `turn.done` 只有 `Complete`（处理器）或 `fail`（`agentkit/run/turn.go:177`）
+只在一个地方被调用——`agentkit/run/bridge.go:129`，而且是在 loop 退出**之后**。
+但只要 `agentkit/run/loop.go:120` 阻塞在 `turn.done` 上，loop 就退不出来；
+而 `turn.done` 只有 `Complete`（处理器）或 `fail`（`agentkit/run/turn.go:194`）
 会喂。所以一个没调 `Complete` 就死掉的处理器——panic、worker 被杀——会让 run
 的 goroutine 永远阻塞，会话永远 busy。`Abort` 是唯一的逃生口
-（`agentkit/run/runtime.go:455`），而没有任何东西会自动调用它。
+（`agentkit/run/runtime.go:565`），而没有任何东西会自动调用它。
+★ 账本让这个卡死变得**看得见**——扫描会显示一个处于 `running` 却没有主人的
+run——但它并不能解开：闸门照样拒这个会话。解开它要靠 §5 的租约和 §7 的管线。
 （普通的客户端断开**不属于**这一类：处理器会继续跑，抽干也会继续，因为
 `transport/transport.go:611-623` 只在写失败之后停止**发帧**——第 167、174、
 182 行那份累积照走不误。）
 
 **C4 —— 活着的 run 对第二个界面是不可见的。**
-`turn.events` 是单消费者的 `*adk.AsyncIterator`（`agentkit/run/turn.go:25`），
+`turn.events` 是单消费者的 `*adk.AsyncIterator`（`agentkit/run/turn.go:33`），
 谁先抽干谁就占住它。第二个浏览器无法挂到一个正在跑的 turn 上，而
 `GET /v2/sessions/{threadId}/messages`（`api/v2_sessions.go:269`）只显示已经
 归档的部分——于是新开的页面看到一段说到一半的对话，却完全没有 indication
 说还有东西在跑。
 
 **C5 —— 所有权是先到先得，而且没有「活着」这回事。**
-`claimTurn`（`agentkit/run/runtime.go:161-183`）就是一把互斥锁：谁先拿到锁，
-谁就占住这个会话直到自己跑完。没有租约，没有 epoch，也没有办法区分「持有者
-正在推进」和「持有者卡住了」。今天存在的那些内存态身份检查——
-`markTurnDone`（`agentkit/run/bridge.go:51`）和 `loopExited` 里的 loop 身份
-检查（`agentkit/run/bridge.go:119-124`）——是手写的、建立在指针之上的 fence。
-它们在一个进程内有效，出了这个进程就不作数。
+`claimTurn`（`agentkit/run/runtime.go:207-241`）就是一把互斥锁：谁先拿到锁，
+谁就占住这个会话直到自己跑完。run 现在带着一个 epoch
+（`agentkit/run/runtime.go:259`），账本因此能给两个主人排序——但没有租约、
+没有过期，也没有办法区分「持有者正在推进」和「持有者卡住了」。今天存在的那些
+内存态身份检查——`markTurnDone`（`agentkit/run/bridge.go:51`）和 `loopExited`
+里的 loop 身份检查（`agentkit/run/bridge.go:115-124`）——是手写的、建立在
+指针之上的 fence。它们在一个进程内有效，出了这个进程就不作数。
 
 ### 1.3 上一轮的闸门
 
@@ -110,7 +139,8 @@ POST /v2/run
                               ▼
                  agentkit/run:  Runtime.Submit
                      │
-                     ├─ arbiter.Claim(session, runId)  →  Lease{Epoch: n}
+                     ├─ ledger.NextEpoch(session)  →  epoch n
+                     ├─ arbiter.Claim(session, runId, epoch n)  →  Lease{ExpiresAt}
                      ├─ ledger.Append(Run{state: starting, epoch: n})
                      ├─ start the run's own goroutine ─────────────────────┐
                      │      eino events                                   │
@@ -199,13 +229,16 @@ fence 说「谁可以记账」。两者都由可插拔的驱动裁决，于是�
 
 ## 3. D1 —— run 是一行事实
 
+★ **本节已实现。** 契约在 `storage/runledger.go`，文件驱动在
+`storage/filestore/runledger.go`，写行在 `agentkit/run/runrow.go`。
+
 ### 3.1 那一行
 
 run 的记录是**生命周期**，不是载荷。transcript 已经管着内容与数字；这一行
 管的是时序与所有权。
 
 ```go
-// storage/runledger.go (proposed)
+// storage/runledger.go
 package storage
 
 // RunState is where a run is in its lifecycle.
@@ -243,10 +276,14 @@ type Run struct {
 }
 ```
 
+★ 状态在线上是**名字**而不是数字（`storage/runledger.go`——
+`RunState.MarshalJSON`）。一份比二进制活得更久的账本，必须在常量重新编号之后
+仍然读得懂。
+
 ### 3.2 账本
 
 ```go
-// RunLedger is the durable record of runs.
+// storage/runledger.go
 //
 // ★ Append writes one COMPLETE snapshot of a run, not a delta. The reader
 //   takes the last row per run id, and the highest epoch among the open runs
@@ -254,9 +291,14 @@ type Run struct {
 //   what makes a fenced-out owner harmless: it cannot write itself back into
 //   the lead.
 type RunLedger interface {
+    // Append writes one complete snapshot of a run.
     Append(ctx context.Context, r Run) error
     // List returns one row per run, newest row per run id wins.
-    List(ctx context.Context, sessionID string) ([]Run, error)
+    List(ctx context.Context) ([]Run, error)
+    // NextEpoch allocates the fence epoch for a new run of this session.
+    NextEpoch(ctx context.Context) (uint64, error)
+    // Reconcile closes the runs that were still open when the process stopped.
+    Reconcile(ctx context.Context) (int, error)
 }
 ```
 
@@ -265,13 +307,19 @@ type RunLedger interface {
 上一刻真正处于的状态）。代价是字段重复——在这个量级上无关紧要。
 
 ★ **为什么是「未结束的 run 里 epoch 最高的赢」，而不是「最后一行赢」。**
-「最后一行赢」是**同一个 run 内部**的规则；**跨 run** 时由 epoch 裁决：一个
-来自 epoch 3 的僵尸持有者在 epoch 4 接管之后醒来写了一行，读者仍然认为
-epoch 4 是持有者。这就是 fence 在读侧起作用——那里既便宜又不需要锁。
+「最后一行赢」是**同一个 run 内部**的规则（`storage.FoldRuns`）；**跨 run**
+时由 epoch 裁决（`storage.ActiveRun`）：一个来自 epoch 3 的僵尸持有者在
+epoch 4 接管之后醒来写了一行，读者仍然认为 epoch 4 是持有者。这就是 fence
+在读侧起作用——那里既便宜又不需要锁。
+
+★ **epoch 由账本分配，不由仲裁器分配。** epoch 必须跨重启单调，而它不能住在
+一个易失的结构里——账本才是活得比进程久的那个东西。§5 的租约带着账本发出来
+的 epoch；租约管的是「还活着吗」，epoch 管的是「谁在前」。一个数字两个家，
+就是两个真相。
 
 ### 3.3 这一行放在哪
 
-放在会话目录里，和会话的其它文件作伴（`storage/filestore/session.go:503-507`
+放在会话目录里，和会话的其它文件作伴（`storage/filestore/session.go`
 定义了现有的文件名）：
 
 ```
@@ -280,14 +328,15 @@ epoch 4 是持有者。这就是 fence 在读侧起作用——那里既便宜�
 <root>/<sessionId>/runs.jsonl        the run ledger (append-only)  ← new
 ```
 
-★ **`runs.jsonl` 不是 `state.json`。** `state.json` 每次变更都是整体重写
-（`storage/filestore/session.go:483-498`）；把一份会变长的 run 列表塞进去，
+★ **`runs.jsonl` 不是 `state.json`。** `state.json` 每次变更都是整体重写；
+把一份会变长的 run 列表塞进去，
 意味着每次状态迁移都要重写这个会话的全部历史。追加式账本与 transcript 同形，
 复用同一套追加机制，而且账本自己的写入就是那道持久性屏障。
 
 ★ **账本是有界的。** 一个无限增长的账本就是泄漏。文件驱动默认保留最后 N 行
-（N = 200），用 `persist` 里已有的原子重写来裁剪：常见情况下文件仍然是
-追加式的，最坏情况下它有上界。
+（N = 200，`storage/filestore/runledger.go`——`maxRunLedgerRows`），用
+`state.json` 同一套原子重写来裁剪：常见情况下文件仍然是追加式的，最坏情况下
+它有上界。
 
 ### 3.4 这一行就是归档屏障
 
@@ -298,6 +347,17 @@ run goroutine:  … archive → transcript  →  ledger.Append(state: completed)
 scan:           sees "completed" ⟹ the messages are on disk
 ```
 
+★ 实现是 `rt.finishRun`（`agentkit/run/loop.go:145`），调用点在归档处
+（`agentkit/run/loop.go:130`）。有一个例外：以抛审批结束的 run 要等 loop 退出
+——审批和 checkpoint 是在那里写的（`agentkit/run/bridge.go:152`）——因为扫描
+不能比「用户要答的那个问题已经落盘」更早地宣布这一轮结束。
+
+★ **终态是 run 自己的真相，不是「没报错」。** 消费者看到的那个错误会被带进
+outcome（`api/v2_run.go`——`Outcome.Err`），所以模型超时的 run 记作 `failed`，
+用户停掉的 run 记作 `aborted`。少了这一步，账本就成了唯一会撒谎的地方：它会把
+一个中途死掉的 turn 记成 `completed`。被取消的 turn 也**不是**会话的最后一个
+错误——用户停掉一轮，不等于会话出了故障。
+
 今天同样的保证要靠一条 30 秒的等待通道来买
 （`agentkit/run/turn.go:156-165`、`agentkit/run/turn.go:173`），因为归档在
 连接的下游。有了这一行，等待就消失了：***这一行就是那道屏障***，没有超时
@@ -307,19 +367,22 @@ scan:           sees "completed" ⟹ the messages are on disk
 
 ### 4.1 服务端
 
-SSE 流的形状不变——还是一条 HTTP 响应上的 AG-UI 帧。变的是它的权威：
+★ **这一半已实现。** SSE 流的形状不变——还是一条 HTTP 响应上的 AG-UI 帧。
+变的是它的权威：
 
 - run 的 goroutine **无论有没有订阅者**都会写终态行。流的结束不是 run 的结束。
-- `GET /v2/sessions/{threadId}/runs` 扫描账本，回答「发生过什么、正在发生什么」。
-- `GET /v2/sessions/{threadId}` 的 `state` 来自扫描，而不是来自易失的 map
-  （今天的 `api/v2_sessions.go:448-461` 读的是 `Runtime.StatusOf`）。
+- `GET /v2/sessions/{threadId}/runs` 扫描账本，回答「发生过什么、正在发生什么」
+  （`api/v2_sessions.go:423`）。
+- `GET /v2/sessions/{threadId}` 的 `state` 来自扫描，而不是来自易失的 map：
+  `stateOf`（`api/v2_sessions.go:506`）问的是 `StatusOf`
+  （`agentkit/run/runtime.go:711`），而 `StatusOf` 问的是账本
+  （`agentkit/run/runtime.go:749`——`activeRun`）。
 
 ★ **易失的 map 降级为缓存。** `sessionState`
 （`agentkit/run/bridge.go:30-39`）留着——它持有活的 loop 和活的 turn，这两样
-本来就是内存里的东西——但它不再是**真相**。`StatusOf`
-（`agentkit/run/runtime.go:596-626`）今天已经在混用一个易失来源和一个持久
-来源（来自会话文件的待审批）；这个设计把这种混合摆到明面上，并让持久的那一
-边说了算。
+本来就是内存里的东西——但它不再是**真相**。`StatusOf` 混着一个易失来源
+（map 里的时间戳）和两个持久来源（会话文件里的待审批、账本里的活动 run）；
+现在由持久的那一边决定阶段。
 
 ### 4.2 客户端
 
@@ -343,34 +406,42 @@ busy 的会话——上一轮正是用归档等待把这事糊过去的。有了
 
 ### 4.3 扫描回答什么
 
+★ **已实现**，这就是线上的形状（`api/v2_types.go`——`runsView`）：
+
 ```
 GET /v2/sessions/{threadId}/runs
 {
   "items": [
     {
       "runId": "…", "state": "completed", "kind": "query",
-      "epoch": 7, "startedAt": "…", "endedAt": "…", "error": null
+      "epoch": 7, "startedAt": "…", "endedAt": "…"
     }
   ],
   "activeRunId": "…"      // the run that currently owns the session, if any
 }
 ```
 
+★ `error` 只在 run 失败时出现，`activeRunId` 只在有活动 run 时出现——空闲会话
+扫出来是 `{"items": []}`。一个永远存在却永远为空的字段，是客户端还得学会
+忽略的噪音。
+
 `activeRunId` 是 UI 最需要的那个字段：它让一个 run **可以被挂上**（§8.1），
 也顶替了今天 `GET /v2/sessions/{threadId}` 返回的那个空 `runId`
-（`api/v2_sessions.go:94`）。
+（`api/v2_sessions.go:94`——现在它返回活动 run 的 id）。
 
 ## 5. D3 —— 用租约和 fence 取代先到先得
 
+★ **本节是提案。** epoch 已经是真的了（§3.2），租约还不是。
+
 ### 5.1 为什么互斥锁不够
 
-`claimTurn`（`agentkit/run/runtime.go:161-183`）里的互斥锁回答的是「谁先到」。
+`claimTurn`（`agentkit/run/runtime.go:207-241`）里的互斥锁回答的是「谁先到」。
 它不回答「谁还活着」。于是有三个失效模式：
 
 1. **持有者停滞。** 持有者攥着锁却没有推进——模型调用挂住、GC 停顿、loop 里
    有 bug。别人接管不了，会话卡死，唯一的出路是 `Abort`。
 2. **持有者变僵尸。** 持有者被暂停过（虚拟机冻结、笔记本休眠、调试器断点）
-   然后醒来。它的 `loopExited`（`agentkit/run/bridge.go:115-140`）会去清
+   然后醒来。它的 `loopExited`（`agentkit/run/bridge.go:115-143`）会去清
    早已不属于它的状态——今天靠指针身份检查兜住，那是一道恰好免费的 fence。
 3. **第二个进程。** 一旦有两个 openheron 进程能看到同一个会话目录，互斥锁
    就什么都保护不了：它是一把在某个地址空间里的锁，守护的却是另一个地址
@@ -406,15 +477,18 @@ type Lease struct {
 
 // LeaseArbiter decides who owns a session.
 //
-// ★ The arbiter, not the run package, allocates the epoch. That is what makes
-//   the fence meaningful across processes: with a database driver the epoch
-//   comes from the row, so it is global; with the memory driver it is
-//   process-local, and the protocol is unchanged.
+// ★ The arbiter does NOT allocate the epoch. The epoch has to be monotonic
+//   across restarts, so it cannot live in a volatile structure — the ledger
+//   allocates it (RunLedger.NextEpoch) and the lease carries the number it
+//   was given. The arbiter's job is liveness: who holds the claim, and
+//   until when. Keeping the two apart is what lets the ledger's read rule
+//   stay simple: "highest epoch wins" needs no knowledge of liveness, and
+//   "the lease expired" needs no knowledge of write order.
 type LeaseArbiter interface {
     // Claim acquires the session's lease. It fails with ErrLeaseHeld when
     // another run holds a live lease, and succeeds when the lease is expired
     // or is already ours.
-    Claim(ctx context.Context, sessionID, runID, owner string, ttl time.Duration) (Lease, error)
+    Claim(ctx context.Context, sessionID, runID, owner string, epoch uint64, ttl time.Duration) (Lease, error)
     // Renew extends a lease the caller still holds.
     Renew(ctx context.Context, l Lease, ttl time.Duration) (Lease, error)
     // Release gives the lease back.
@@ -441,7 +515,7 @@ loop 每完成一次迭代续一次，续租凭的是进展报告。TTL（默认
 
 ★ **租约管的是一轮，不是一个会话的空档。** 一个以抛审批结束的 run 会释放
 它的租约——那一轮已经结束。让会话不接新 query 的是**待审批**，那是会话级的
-持久事实，不是租约（`agentkit/run/runtime.go:244-249`）。两把锁，两个作用域：
+持久事实，不是租约（`agentkit/run/runtime.go:348-353`）。两把锁，两个作用域：
 租约说「这一轮现在占着会话」，审批说「这个会话欠用户一个答复」。
 
 ★ **丢租约等于把自己 fence 掉。** 如果续租失败是因为别人持有着租约，这个
@@ -479,30 +553,37 @@ fence 是一个按会话单调递增的整数。它只回答一个问题：**这
 租约回答的是「这个会话我能接手吗」，所以它必须能在没有人参与的情况下回答
 「能」。
 
-★ 今天代码里有 fence 的精神、没有租约：`markTurnDone`
-（`agentkit/run/bridge.go:51`）和 `loopExited`
-（`agentkit/run/bridge.go:119-124`）里的指针身份检查就是建立在地址上的
-fence。提案把地址换成 epoch，再补上今天由那些指针检查顶替的租约。
+★ 今天代码里有 fence、没有租约：epoch 是真的
+（`storage.RunLedger.NextEpoch` 分配它，`storage.ActiveRun` 比较它），但所有权
+仍然由一把互斥锁决定。`markTurnDone`（`agentkit/run/bridge.go:51`）和
+`loopExited`（`agentkit/run/bridge.go:119-124`）里的指针身份检查是建立在地址上
+的 fence——它们在一个进程内有效，出了这个进程就不作数。租约来取代它们。
 
 ## 6. D4 —— 驱动可插拔
 
 ### 6.1 接口住在 `storage`
 
 `storage`（[architecture.md](architecture.md) 分层表里的 L1）本来就是持有
-会话与待审批接口的包（`storage/storage.go:19-93`）。run 账本和租约仲裁者
+会话与待审批接口的包（`storage/storage.go`）。run 账本和租约仲裁者
 也该住在那里，理由相同：`agentkit/run`（L2）只能依赖接口，而 API 层（L3）
 不许装配业务逻辑（AGENTS.md 的铁律）。
 
+★ **账本这一半已实现，租约那一半还没有。**
+
 ```go
 // storage — interfaces and value types
-type RunLedger interface { … }      // storage/runledger.go
-type LeaseArbiter interface { … }   // storage/lease.go
-type Run struct { … }               // storage/runledger.go
-type Lease struct { … }             // storage/lease.go
+type RunLedger interface { … }      // storage/runledger.go   ← 已实现
+type LeaseArbiter interface { … }   // storage/lease.go       ← 还不存在
+type Run struct { … }               // storage/runledger.go   ← 已实现
+type Lease struct { … }             // storage/lease.go       ← 还不存在
 
 var ErrLeaseHeld  = errors.New("lease held by another run")
-var ErrFenceStale = errors.New("fence is stale")
+var ErrFenceStale = errors.New("the run's fence is stale")   ← storage/runledger.go
 ```
+
+★ `ErrFenceStale` 已经定义在账本的契约旁边，因为 fence 已经是账本里的一个
+事实：epoch 在那里分配、也在那里比较。这个错误码是**可选的**写侧检查在仲裁器
+出现之后要返回的东西。
 
 ### 6.2 驱动，按到达顺序
 
@@ -522,6 +603,10 @@ transcript 本来就是一个追加式的 JSONL 文件，`persist` 本来就有�
 那个不依赖任何 IO 就把**协议**（租约、fence、对账、订阅）证明掉的东西。文件
 驱动随后用一个每会话一个新文件换来持久性。
 
+★ **文件驱动的账本已经实现**（`storage/filestore/runledger.go`），所以表中
+第二行今天有一半是真的：账本就是那个文件，仲裁器还不存在。epoch 来自账本而
+不是仲裁器——§3.2 讲了为什么，而数据库那一行也得用同样的办法发号。
+
 ### 6.3 内存驱动的代价
 
 如果账本只在内存里，那么：
@@ -535,6 +620,8 @@ transcript 本来就是一个追加式的 JSONL 文件，`persist` 本来就有�
 **仲裁者**随包是内存的，而它是以后变成数据库行的那个东西。
 
 ## 7. 事件管线：从单消费者到发布订阅
+
+★ **本节是提案。** 这里面没有一样东西在树里。
 
 ### 7.1 为什么现在的管线把耦合焊死了
 
@@ -673,6 +760,10 @@ type Run struct {
 | 有一个活着的 run，id **正是**它 | 同一个 `runId` | **挂上**：订阅这个活着的 run，并回放它的日志 |
 | 有一个活着的 run，id **不同** | 任意 `runId` | **409 `session_busy`**——与今天一致 |
 
+★ 第一行**已实现**：客户端不发 run id 时由服务端铸一个
+（`api/v2_run.go`），并把它传给运行时（`api/v2_run.go:218`），于是帧里的 id
+和账本行里的 id 是同一个。第二行是提案——它需要 §7。
+
 ★ 第二行是新增的能力：重连。今天客户端无法续上它弄丢的流
 （`web/src/lib/store/actions.ts:250-254` 压根不发 `runId`），所以连接一断，
 这一轮的输出就没了。有了已知的 run id，客户端要同一个 run，就能拿到剩下的
@@ -681,23 +772,29 @@ type Run struct {
 ★ 因此客户端必须**留着 run id**。扫描会返回它（`activeRunId`），SSE 帧里本来
 就带着它（AG-UI 的 `runId`）。
 
-**`GET /v2/sessions/{threadId}`** —— `state` 来自扫描；增加 `activeRunId`。
-今天 `api/v2_sessions.go:94` 返回的那个空 `runId` 会变成真值。
+**`GET /v2/sessions/{threadId}`** —— `state` 来自扫描。★ **已实现**：
+`stateOf`（`api/v2_sessions.go:506`）问的是 `StatusOf`，而 `StatusOf` 读的是
+账本。`api/v2_sessions.go:94` 返回的 `runId` 不再是空的——它是活动 run 的 id，
+也就是扫描报作 `activeRunId` 的同一个值。★ **不是**第二个字段：一个值，
+一个名字。
 
 **`POST /v2/sessions/{threadId}/abort`** —— 中止的是**run**，不是 loop。
 它取消 run 的上下文，（有界地）等终态行落地，并返回它中止的那个 run id。
-现在的实现（`api/v2_sessions.go:386-409` → `agentkit/run/runtime.go:455`）
-是直接操纵 loop；在提案下，run 自己的收尾会写那一行，所以中止就是「停掉这个
-run」，那一行随后而来。
+★ run id **已实现**（`api/v2_sessions.go:405`）。其余是提案：现在的实现
+（`api/v2_sessions.go:385` → `agentkit/run/runtime.go:565`）是直接操纵
+loop；在提案下，run 自己的收尾会写那一行，所以中止就是「停掉这个 run」，
+那一行随后而来。
 
 ### 8.2 新增的路由
+
+★ **已实现。**
 
 ```
 GET /v2/sessions/{threadId}/runs              the scan: every run of the session
 GET /v2/sessions/{threadId}/runs/{runId}      one run
 ```
 
-两个都读账本。两个都不写。
+两个都读账本（`api/v2_sessions.go:423`）。两个都不写。
 
 ### 8.3 错误信封
 
@@ -715,6 +812,8 @@ GET /v2/sessions/{threadId}/runs/{runId}      one run
 已经提过这一点；本提案不改变它。
 
 ## 9. 前端
+
+★ **本节是提案。** 服务端已经说真话了，客户端还没去问。
 
 ### 9.1 busy 标记变成扫描出来的事实
 
@@ -753,24 +852,27 @@ store 的形状几乎不变——reducer 仍然是纯函数，选择器仍然返
 
 ## 10. 改动落点
 
+★ **✓ = 已落地**，其余仍是提案。
+
 | 文件 | 改动 |
 |---|---|
-| `storage/runledger.go` | **新增** —— `Run`、`RunState`、`RunLedger` |
-| `storage/lease.go` | **新增** —— `Lease`、`LeaseArbiter`、`ErrLeaseHeld`、`ErrFenceStale` |
+| `storage/runledger.go` | ✓ **新增** —— `Run`、`RunState`、`RunLedger`、`FoldRuns`、`ActiveRun` |
+| `storage/lease.go` | **新增** —— `Lease`、`LeaseArbiter`、`ErrLeaseHeld` |
 | `storage/memarbit/arbiter.go` | **新增** —— 内存仲裁者 |
-| `storage/filestore/runledger.go` | **新增** —— `runs.jsonl` 驱动 |
-| `storage/filestore/session.go` | 会话目录多出 `runs.jsonl`；`FileSession` 多一个账本句柄 |
+| `storage/filestore/runledger.go` | ✓ **新增** —— `runs.jsonl` 驱动 |
+| `storage/filestore/session.go` | ✓ 会话目录多出 `runs.jsonl`；`FileSession` 多一个账本句柄 |
+| `storage/filestore/manager.go` | ✓ 启动时的巡检给未结束的 run 收尾 |
 | `agentkit/emit/` | **新增** —— 从 `transport` 里拆出来的推导层 |
 | `contract/runevent.go` | **新增** —— `RunEvent`、`RunEventKind` |
-| `agentkit/run/runtime.go` | `claimTurn` 变成租约申领；`Submit`/`Resume` 带着租约走；`StatusOf` 读扫描 |
-| `agentkit/run/turn.go` | `Turn` 变成带订阅者的 `Run`；`RunID` 被赋值 |
-| `agentkit/run/loop.go` | `handoff` 不再等消费者：run 自己的 goroutine 消费并归档 |
-| `agentkit/run/bridge.go` | `loopExited` 写终态行；`sessionState` 降级为缓存 |
+| `agentkit/run/runtime.go` | ✓ `Submit`/`Resume` 带着 run id；`claimTurn` 打开那一行；`StatusOf` 读扫描。**往后：** `claimTurn` 变成租约申领 |
+| `agentkit/run/turn.go` | ✓ `RunID` 被赋值；turn 自己收掉自己那一行。**往后：** `Turn` 变成带订阅者的 `Run` |
+| `agentkit/run/loop.go` | ✓ 终态行写在归档之后。**往后：** `handoff` 不再等消费者 |
+| `agentkit/run/bridge.go` | ✓ loop 退出时收掉那一行；`sessionState` 降级为缓存 |
 | `agentkit/run/errors.go` | `ErrSessionBusy` 保留；租约错误映射到它 |
 | `transport/transport.go` | 变成渲染器：`contract.RunEvent` → AG-UI 帧 |
-| `api/v2_run.go` | 创建 / 挂上 / 拒绝；处理器订阅而不是抽干 |
-| `api/v2_sessions.go` | `state` 来自扫描；`activeRunId`；中止针对 run |
-| `api/v2_files.go` | 两条新路由 |
+| `api/v2_run.go` | ✓ run id 只铸一次并往下传。**往后：** 创建 / 挂上 / 拒绝 |
+| `api/v2_sessions.go` | ✓ `state` 来自扫描；两条扫描路由；中止报出它停掉的 run |
+| `api/v2_files.go` | ✓ 两条新路由 |
 | `web/src/lib/store/actions.ts` | 留住 run id；重新挂上；重新扫描而不是假定 |
 | `web/src/lib/store/history.ts` | `busy` 来自扫描 |
 | `web/src/lib/api.ts` | run 请求带上 `runId`；加上 runs 扫描 |
@@ -778,11 +880,15 @@ store 的形状几乎不变——reducer 仍然是纯函数，选择器仍然返
 
 ## 11. 测试
 
-**Go —— 账本**（`storage/filestore`）：
-- 一行 run 记录能活过存储的重启；
-- 每个 run id 取最后一行；
-- 在未结束的 run 里，epoch 最高的那个是持有者，哪怕 epoch 更低的那个写得更晚；
-- 被截断的最后一行被丢弃，run 退回它上一刻的状态。
+★ **✓ = 测试已存在**，其余是计划。
+
+**Go —— 账本**（`storage/filestore`、`storage/filestore/runledger_test.go`）：
+- ✓ 一行 run 记录能活过存储的重启；
+- ✓ 每个 run id 取最后一行；
+- ✓ 在未结束的 run 里，epoch 最高的那个是持有者，哪怕 epoch 更低的那个写得更晚；
+- ✓ 被截断的最后一行被丢弃，run 退回它上一刻的状态；
+- ✓ epoch 从不复用，连重启也不复用；
+- ✓ 账本始终在自己的上界之内。
 
 **Go —— 仲裁者**（`storage/memarbit`）：
 - 对一把活着的租约二次申领失败，报 `ErrLeaseHeld`；
@@ -792,20 +898,33 @@ store 的形状几乎不变——reducer 仍然是纯函数，选择器仍然返
 - **报告了进展**的 run 保住租约；
 - **什么都没报告**的 run 丢掉租约——哪怕它活着。这就是 §5.1 说的 run 级停滞。
 
-**Go —— runtime**（`agentkit/run`）：
+**Go —— runtime**（`agentkit/run`、`agentkit/run/runrow_test.go`）：
+- ✓ run 在被交出去之前就已经入账；
+- ✓ 终态行落在归档之后（账本说 `completed` 时，transcript 里已经有答案）；
+- ✓ 没能启动的 turn 自己收掉自己那一行；
+- ✓ 扫描报出活动 run，run 结束后就不再报它；
+- ✓ resume 点名它答复的那一个 run；
+- ✓ `StatusOf` 报出活动 run 的 id；
 - **没有任何订阅者**时，run 依然归档它的消息——这是「一轮比连接活得久」的
   直接检验；
 - 订阅者消失不影响 run；
 - **通道溢出的订阅者被踢掉，run 继续归档**——这就是 §7.4 那个 socket 写永不
   返回的「卡住的订阅者」；
 - 处理器死掉的 run 依然写出终态行（C3 那一幕）；
-- 丢了租约的 run 会停下，并且不写 `running` 行。
+- 丢了租约的 run 会停下，并且不写 `running` 行；
 - 没人挂上来的 run，它的**事件日志不超出窗口大小**——没人看的轮次，代价是有界的
   （§7.4）。
 
-**Go —— 对账器**：
-- 崩溃时留下的 `running` run 会在启动时被收成 `interrupted`，且发生在服务
-  开始接受请求之前（钩子已经存在：`storage/storage.go:29`）。
+**Go —— 对账器**（`storage/filestore/runledger_test.go`）：
+- ✓ 崩溃时留下的 `running` run 会在启动时被收成 `interrupted`，且发生在服务
+  开始接受请求之前（钩子已经存在：`storage/storage.go`——
+  `SessionManager.Inspect`）。
+
+**Go —— API**（`api/v2_runs_test.go`）：
+- ✓ 扫描列出所有 run 并报出活动的那一个；
+- ✓ 会话自己的路由带着活动 run 的 id；
+- ✓ 按 id 取一个 run，不认识的 id 报 404；
+- ✓ 空闲会话扫出来是空列表。
 
 **前端 —— 单测**：
 - `busy` 只由扫描清除，不由流的结束清除；
@@ -819,25 +938,33 @@ store 的形状几乎不变——reducer 仍然是纯函数，选择器仍然返
 
 ## 12. 分期
 
-**第 1 期 —— run 变成一个事实。** 账本、那一行、扫描路由、对账器。SSE 仍然
-驱动着 run，但 run 的**那一行**已经独立于连接被写下，于是崩溃会留下痕迹。
-这一期修掉 C1 和 C2，并给前端一个真的可以扫的东西。
+**第 1 期 —— run 变成一个事实。** ✓ **已落地。** 账本、那一行、扫描路由、
+对账器。SSE 仍然驱动着 run，但 run 的**那一行**已经独立于连接被写下，于是
+崩溃会留下痕迹。这一期修掉 C1 和 C2，并给前端一个真的可以扫的东西。
 
-**第 2 期 —— 租约取代互斥锁。** 仲裁者、epoch、**进展驱动的续租**、fence。
-闸门的行为不变（仍然是「一个会话一轮」，仍然是 409）；只是内部换掉了。这一期
-治好了**两种**持有者停滞——进程级那一半靠「进程一停，租约就过期」，run 级
-那一半靠「续租由进展驱动」——并为第二个进程铺路。
-
-**第 3 期 —— run 自己消费。** `agentkit/emit` 的拆分、订阅者、run 的事件
+**第 2 期 —— run 自己消费。** `agentkit/emit` 的拆分、订阅者、run 的事件
 日志、挂上。这一期修掉 C3 和 C4——耦合本身。它也是「**卡住的订阅者不再是
 一种场景**」的那一期：从这里起 run 不再拥有 socket，wedge 住的连接根本够不着
 run。在此之前风险仍在——写 socket 的还是 run 自己，所以一个卡住的连接仍然能
 把归档拖住。
 
-★ **第 3 期是最贵的一期**，也是唯一真正把 turn 与连接解绑的一期。第 1、2 期
-单独做也值得：它们让 run 的事实成真、让所有权有界，代价只是第 3 期的零头。
-一个团队停在第 2 期，手上是一个「run 事实为真、所有权有界」的系统——那比
-今天好得多。
+**第 3 期 —— 租约取代互斥锁。** 仲裁者、**进展驱动的续租**、fence。闸门的
+行为不变（仍然是「一个会话一轮」，仍然是 409）；只是内部换掉了。这一期治好了
+**两种**持有者停滞——进程级那一半靠「进程一停，租约就过期」，run 级那一半靠
+「续租由进展驱动」——并为第二个进程铺路。
+
+★ **次序是在第 1 期施工期间改的，理由值得写下来。** 原计划把租约放在第 2 期。
+它不能放在第 2 期：**进展驱动的续租要求 run 能看见自己的进展**，而今天 run
+看不见那些事件——是 transport 抽干它们，再把归档的产物回吐（`agentkit/run/loop.go:115`）。
+一个由连接进度驱动的续租，会把「连接断了但 run 还活着」的租约判死，而这正是
+租约要拆掉的那根耦合。所以管线必须先拆，租约才能诚实。
+
+★ 新次序的好处是：**第 1 期不依赖任何一期**。它是关于 run 的一个事实，由 run
+自己的 goroutine 写下；而它也是另外两期的地基——租约需要一个持久的 epoch，
+而 epoch 是账本给的。
+
+★ **第 2 期是最贵的一期**，也是唯一真正把 turn 与连接解绑的一期。第 1、3 期
+单独做也值得：第 1 期让 run 的事实成真，第 3 期让所有权有界——那比今天好得多。
 
 ## 13. 待决问题
 
@@ -856,9 +983,9 @@ run。在此之前风险仍在——写 socket 的还是 run 自己，所以一�
 协议，不是一把锁。问题是：DB 驱动是真实需求，还是仅仅做准备。
 
 **Q3 —— 谁可以回答审批？**
-待审批是会话级的（`storage/storage.go:95-113`），所以两个界面都可能尝试。
+待审批是会话级的（`storage/storage.go:104`），所以两个界面都可能尝试。
 `TakePendingApproval` 是原子的，于是第二个会拿到 `ErrNoPendingInterrupt`
-（`agentkit/run/runtime.go:372-380`）——这是对的，但 UX 需要说明「别人已经
+（`agentkit/run/runtime.go:482`）——这是对的，但 UX 需要说明「别人已经
 答过了」。要不要告诉第二个界面是**谁**答的？
 
 **Q4 —— run 的那一行要不要带上用量合计？**

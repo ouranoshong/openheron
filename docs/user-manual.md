@@ -556,6 +556,8 @@ publicly, or narrow `listen_addr` to `127.0.0.1`.
 | PATCH | `/v2/sessions/:id/agent` | Change the session's agent |
 | DELETE | `/v2/sessions/:id` | Delete the session |
 | GET | `/v2/sessions/:id/messages` | History + usage (filter with `?agent=`) |
+| GET | `/v2/sessions/:id/runs` | The run ledger: every run of the session + the active one |
+| GET | `/v2/sessions/:id/runs/:runId` | One run of the session |
 | POST | `/v2/sessions/:id/abort` | Abort the running turn |
 | POST | `/v2/sessions/:id/compact` | Compact the conversation now (see §6.6) |
 | POST/GET | `/v2/sessions/:id/files` | Upload / list session workspace files (32 MiB per file) |

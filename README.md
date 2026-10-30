@@ -201,6 +201,8 @@ authentication, no CORS** — the default `:8080` binds every interface, so set
 | PATCH | `/v2/sessions/:id/agent` | Change the session's agent |
 | DELETE | `/v2/sessions/:id` | Delete the session |
 | GET | `/v2/sessions/:id/messages` | Replay the history + usage (filter with `?agent=`) |
+| GET | `/v2/sessions/:id/runs` | The run ledger: every run of the session + the active one |
+| GET | `/v2/sessions/:id/runs/:runId` | One run of the session |
 | POST | `/v2/sessions/:id/abort` | Abort the running turn |
 | POST | `/v2/sessions/:id/compact` | Compact the conversation now |
 | POST/GET | `/v2/sessions/:id/files` | Upload / list session workspace files (32 MiB per upload) |

@@ -72,6 +72,7 @@ type fakeSession struct {
 	agentID           string
 	decisions         []storage.ApprovalRecord
 	ckpt              *fakeCheckpoints
+	ledger            *fakeRunLedger
 }
 
 func (s *fakeSession) ID() string           { return s.id }
@@ -234,6 +235,62 @@ func (s *fakeSession) GetCheckPointStore() (adk.CheckPointStore, adk.CheckPointD
 		return nil, nil
 	}
 	return s.ckpt, s.ckpt
+}
+
+// RunLedger returns the fake session's in-memory run ledger.
+//
+// ★ The ledger is not optional in the fake: the runtime writes every run's
+//
+//	row through it, and a fake without one would exercise a different
+//	code path than production.
+func (s *fakeSession) RunLedger() storage.RunLedger {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ledger == nil {
+		s.ledger = &fakeRunLedger{}
+	}
+	return s.ledger
+}
+
+// fakeRunLedger is the in-memory ledger of a fake session.
+type fakeRunLedger struct {
+	mu    sync.Mutex
+	rows  []storage.Run
+	epoch uint64
+}
+
+func (l *fakeRunLedger) Append(_ context.Context, r storage.Run) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.rows = append(l.rows, r)
+	return nil
+}
+
+func (l *fakeRunLedger) List(_ context.Context) ([]storage.Run, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return storage.FoldRuns(append([]storage.Run(nil), l.rows...)), nil
+}
+
+func (l *fakeRunLedger) NextEpoch(_ context.Context) (uint64, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.epoch++
+	return l.epoch, nil
+}
+
+func (l *fakeRunLedger) Reconcile(_ context.Context) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	closed := 0
+	for i := range l.rows {
+		if l.rows[i].State.IsTerminal() {
+			continue
+		}
+		l.rows[i].State = storage.RunInterrupted
+		closed++
+	}
+	return closed, nil
 }
 
 func (s *fakeSession) Workspace() string                         { return "/tmp" }

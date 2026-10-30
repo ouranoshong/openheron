@@ -169,6 +169,8 @@ frontmatter 是**严格解码**的 —— 写错一个键就是启动错误，�
 | PATCH | `/v2/sessions/:id/agent` | 换会话的 agent |
 | DELETE | `/v2/sessions/:id` | 删会话 |
 | GET | `/v2/sessions/:id/messages` | 回放历史 + 用量（可 `?agent=` 过滤） |
+| GET | `/v2/sessions/:id/runs` | run 账本：这个会话的每一次 run，以及当前那一次 |
+| GET | `/v2/sessions/:id/runs/:runId` | 这个会话的某一次 run |
 | POST | `/v2/sessions/:id/abort` | 中断在跑的 turn |
 | POST | `/v2/sessions/:id/compact` | 立刻压缩当前对话 |
 | POST/GET | `/v2/sessions/:id/files` | 上传 / 列会话工作区文件（单次 32 MiB 上限） |

@@ -103,6 +103,10 @@ func (s *Server) v2Run(ctx context.Context, c *app.RequestContext) {
 	if runID == "" {
 		runID = uuid.NewString()
 	}
+	// ★ The run's id is settled here, before the run exists: the obs
+	//   context and the SSE frames carry it from the first byte, and the
+	//   runtime files the same id into the ledger's rows. One id, one run.
+	in.RunID = runID
 	ctx = obs.WithRunID(ctx, runID)
 
 	if trimSpace(in.ThreadID) == "" {
@@ -159,6 +163,10 @@ func (s *Server) v2Run(ctx context.Context, c *app.RequestContext) {
 		Interrupts:    res.Pending,
 		Usage:         res.Usage,
 		Compaction:    res.Compaction,
+		// ★ The error the consumer saw belongs to the run. Without it the
+		//   run's terminal row would say "completed" for a turn whose model
+		//   timed out — the ledger would be the one place that lies.
+		Err: streamErr,
 	})
 	// A stream-side failure is already framed as RUN_ERROR by the transport;
 	// it only matters to the archive, so record it and move on.
@@ -211,7 +219,7 @@ func (s *Server) startRun(ctx context.Context, sess storage.Session, in runInput
 		if err != nil {
 			return nil, err
 		}
-		return s.rt.Submit(ctx, sess.ID(), expanded)
+		return s.rt.Submit(ctx, sess.ID(), s.runIDOf(in), expanded)
 	}
 
 	pending, err := sess.PendingApproval()
@@ -244,7 +252,22 @@ func (s *Server) startRun(ctx context.Context, sess storage.Session, in runInput
 		return nil, run.ErrNoPendingInterrupt
 	}
 
-	return s.rt.Resume(ctx, sess.ID(), decisions)
+	return s.rt.Resume(ctx, sess.ID(), s.runIDOf(in), decisions)
+}
+
+// runIDOf returns the run id the request carries.
+//
+// ★ The client may bring its own: a run it knows about is the run it asks
+//
+//	to re-attach to. An empty one means "no opinion" — the runtime mints
+//	the run's identity and the client learns it from the stream.
+//
+// ★ The id is minted here, not in the runtime, because the HTTP layer
+//
+//	needs it before the run exists: the obs context and the SSE frames
+//	carry it from the very first byte.
+func (s *Server) runIDOf(in runInput) string {
+	return trimSpace(in.RunID)
 }
 
 // lastUserText extracts the query from the incoming messages, tolerating the

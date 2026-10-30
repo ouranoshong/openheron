@@ -507,6 +507,8 @@ openheron version                                         打印版本号
 | PATCH | `/v2/sessions/:id/agent` | 换会话的 Agent |
 | DELETE | `/v2/sessions/:id` | 删会话 |
 | GET | `/v2/sessions/:id/messages` | 历史 + 用量（可 `?agent=` 过滤） |
+| GET | `/v2/sessions/:id/runs` | run 账本：这个会话的每一次 run，以及当前那一次 |
+| GET | `/v2/sessions/:id/runs/:runId` | 这个会话的某一次 run |
 | POST | `/v2/sessions/:id/abort` | 中断在跑的这轮 |
 | POST | `/v2/sessions/:id/compact` | 立刻压缩当前对话（见 §6.6） |
 | POST/GET | `/v2/sessions/:id/files` | 上传 / 列会话工作区文件（单文件上限 32 MiB） |

@@ -269,7 +269,7 @@ func TestSwitchAgentRejectsRunningTurn(t *testing.T) {
 
 	ctx := context.Background()
 	sess := mustCreate(t, srv)
-	if _, err := srv.rt.Submit(ctx, sess.ID(), "hold the turn open"); err != nil {
+	if _, err := srv.rt.Submit(ctx, sess.ID(), "", "hold the turn open"); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	t.Cleanup(func() { _ = srv.rt.Abort(context.Background(), sess.ID()) })

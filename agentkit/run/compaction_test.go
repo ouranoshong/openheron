@@ -25,7 +25,7 @@ func TestTheCompactedMessageIsArchivedBeforeTheTurnMessages(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestATurnWithoutACompaction(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
 	if err != nil {
 		t.Fatal(err)
 	}

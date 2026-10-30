@@ -306,9 +306,15 @@ checkpoint 没了就恢复不了 —— 这时接口返回
 待审批是在 **loop 退出时**写的，不是在那一轮的回调返回时：框架正是在 loop 退出时
 写检查点，而一张审批只有在它要恢复的那个检查点存在时才回答得了。
 
-前端读服务端的答案，而不是自己的内存：会话的 `state` 来自
-`GET /v2/sessions/{id}/messages`，并喂给 composer 的守卫 —— 于是第二个标签页水合
-出来就是「忙」，而不是「空闲」。
+前端读服务端的答案，而不是自己的内存：会话的 `state` 来自服务端对 **run
+账本**的扫描，并喂给 composer 的守卫 —— 于是第二个标签页水合出来就是「忙」，
+而不是「空闲」。
+
+run 账本是一次 run 的持久记录：每次 run 一行，由 run 自己的 goroutine 写
+（`agentkit/run/runrow.go`），由 `GET /v2/sessions/{id}/runs` 读回来。run 的
+**终态行落在它的消息落盘之后**——单是这个次序，就让 busy 标记不用超时也天然
+诚实。被崩溃留下的、还开着的 run 会在启动巡检时被收成 `interrupted`，于是会话
+不会永远读起来是忙。
 
 ## 6. 存储
 
@@ -319,6 +325,7 @@ checkpoint 没了就恢复不了 —— 这时接口返回
 - `state.json` —— 会话状态（原子重写）
 - transcript —— 消息追加（`O_APPEND`）
 - checkpoint —— 审批恢复点
+- `runs.jsonl` —— run 账本：每次 run 一行，追加写入（`O_APPEND`），保留最后 200 行
 
 **内存只是缓存**，磁盘才是真相源。会话列表（`List()`）只读 `state.json`，
 不打开 transcript —— 所以列会话是廉价的。

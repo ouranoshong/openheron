@@ -428,7 +428,7 @@ func (rt *Runtime) ensureNoLiveTurn(ctx context.Context, sess storage.Session) e
 > 状态旁边。§7.3 落地后两者合一。
 
 **`PhaseWaitingApproval` 很关键。** `StatusOf` 从会话自己的待批记录推导它
-（`agentkit/run/runtime.go:379`），所以一个刚刚停下来要审批的会话仍然报
+（`agentkit/run/runtime.go:727`），所以一个刚刚停下来要审批的会话仍然报
 「忙」—— 尽管没有任何轮次在执行。这正是 D3。
 
 **轮次记账不再抢占。** `claimTurn` 把「忙不忙」的判定与接管放在同一把锁下，
@@ -634,7 +634,7 @@ func (s *Server) stateOf(ctx context.Context, sess storage.Session) threadState 
   「这个客户端持有一轮」。
 
 `StatusOf` 从会话自己的待批记录报出 `PhaseWaitingApproval`
-（`agentkit/run/runtime.go:379`）—— 所以待审批这一档由同一次查询覆盖，
+（`agentkit/run/runtime.go:727`）—— 所以待审批这一档由同一次查询覆盖，
 `stateOf` 不需要第二个来源。
 
 **有一处缺口要补。** `stateOf` 分开读 `HasPending()` 与 `StatusOf()`，
@@ -664,15 +664,18 @@ func (s *Server) stateOf(ctx context.Context, sess storage.Session) threadState 
 ```
 
 > **闸门与 `stateOf` 刻意读的不是同一个东西。** `stateOf` 走 `StatusOf`，
-> 而它是从 `st.turn` 推导 `PhaseRunning` 的 —— 那个滞后的指针（§5.1.1 洞 2）。
-> 闸门则直接读 `turn`+`loop` 这一对。于是，一轮答案落地后的片刻，**界面**可能
-> 还说「running」，而**闸门**已经放行下一次查询了。
+> 而它是从 **run 账本**推导 `PhaseRunning` 的 —— 也就是对这个会话的 run 做的那次
+> 扫描（[run-lifecycle-design.md](run-lifecycle-design.md) §4.1）。闸门则直接读
+> `turn`+`loop` 这一对。两者是在同一口气里被释放的：终态行落在归档那条路上
+> （`agentkit/run/loop.go:130`），闸门由 `markTurnDone`
+> （`agentkit/run/loop.go:167`）晚一点点放开。于是，一轮答案落地后的片刻，
+> **界面**可能已经说着「空闲」，而**闸门**还没放行下一次查询。
 >
 > 这个不对称是对的：
 >
 > | | 会滞后吗 | 错了的后果 |
 > |---|---|---|
-> | `stateOf`（呈现） | 可能多说一会儿「running」 | composer 短暂显示停止按钮 —— 无害，下一个事件就消 |
+> | `stateOf`（呈现） | 可能早说一会儿「空闲」 | composer 提前可用了；下一条消息被 409 拒掉、气泡回滚 —— 可以恢复，真相晚一点到 |
 > | 闸门（准入） | **绝不能**拒掉一个空闲的会话 | 误拒会把用户锁在一个他明明能用的会话外面 |
 >
 > 把两者改成读同一个东西，就等于给它们同一个滞后 —— 而闸门的滞后会变成误拒。
@@ -934,7 +937,7 @@ POST /v2/run → 200，SSE 在流
 
 ### 6.1 `Resume` 也需要闸门
 
-`Runtime.Resume`（`agentkit/run/runtime.go:330`）回答审批。它**不能**因为
+`Runtime.Resume`（`agentkit/run/runtime.go:451`）回答审批。它**不能**因为
 「有待审批」被拦 —— 待审批正是它要回答的东西。但它必须因为「有活轮次」被拦，
 用的是同一个 `ensureNoLiveTurn`（§5.1.1 洞 2 说明了它为什么问 loop 而不问
 轮次指针）：

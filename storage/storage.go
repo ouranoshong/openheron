@@ -90,6 +90,14 @@ type Session interface {
 	HasPending() bool
 	HasCheckpoint(ctx context.Context) (bool, error)
 	GetCheckPointStore() (adk.CheckPointStore, adk.CheckPointDeleter)
+
+	// RunLedger returns this session's run ledger.
+	//
+	// ★ The ledger is a durable record of the session's runs: who ran,
+	//	when, and how it ended. It is what a reader scans to learn whether
+	//	the session is busy — the volatile runtime state cannot answer that
+	//	after a crash.
+	RunLedger() RunLedger
 }
 
 // PendingApproval is the set of outstanding human decisions.
@@ -141,4 +149,8 @@ type Report struct {
 	Orphan         int // pending without checkpoint — kept, so the card stays visible
 	Ownerless      int // checkpoint without pending, unrecoverable
 	SkippedBadJSON int // unreadable state, skipped
+	// InterruptedRuns counts the runs that were still open when the process
+	// last stopped. They are closed as "interrupted" during the pass, so a
+	// crash leaves a trace instead of a session that reads as idle.
+	InterruptedRuns int
 }

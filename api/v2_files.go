@@ -42,6 +42,12 @@ func (s *Server) registerV2Routes() {
 	h.POST("/v2/sessions/:id/abort", s.v2Abort)
 	h.POST("/v2/sessions/:id/compact", s.v2Compact)
 
+	// ★ The run ledger's scan. It is a read of durable facts, and it is
+	//   the only way a client learns what a session is doing — the stream
+	//   is a hint, this is the truth.
+	h.GET("/v2/sessions/:id/runs", s.v2SessionRuns)
+	h.GET("/v2/sessions/:id/runs/:runId", s.v2SessionRun)
+
 	h.POST("/v2/sessions/:id/files", s.v2UploadFiles)
 	h.GET("/v2/sessions/:id/files", s.v2ListFiles)
 

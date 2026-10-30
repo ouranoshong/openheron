@@ -36,6 +36,9 @@ type FileSession struct {
 	root      string
 
 	ckpt *fileCheckpointStore
+	// ledger is this session's run ledger. It lives next to the transcript,
+	// in the same directory.
+	ledger *fileRunLedger
 
 	mu       sync.Mutex
 	messages []*schema.Message
@@ -54,9 +57,10 @@ type FileSession struct {
 // newSession assembles a session object without touching the disk.
 func newSession(root, id, legacyCkptRoot string) *FileSession {
 	return &FileSession{
-		root: root,
-		id:   id,
-		ckpt: newfileCheckpointStore(root, id, legacyCkptRoot),
+		root:   root,
+		id:     id,
+		ckpt:   newfileCheckpointStore(root, id, legacyCkptRoot),
+		ledger: newRunLedger(root, id),
 	}
 }
 
@@ -218,6 +222,19 @@ func (fs *FileSession) GetCheckPointStore() (adk.CheckPointStore, adk.CheckPoint
 		return nil, nil
 	}
 	return fs.ckpt, fs.ckpt
+}
+
+// RunLedger returns this session's run ledger.
+//
+// ★ The ledger is the session's own: its file lives in the session's
+//
+//	directory, next to the transcript. A run belongs to exactly one
+//	session, so the ledger needs no session id of its own.
+func (fs *FileSession) RunLedger() storage.RunLedger {
+	if fs.ledger == nil {
+		return nil
+	}
+	return fs.ledger
 }
 
 // Messages returns the session's messages.

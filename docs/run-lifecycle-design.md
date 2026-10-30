@@ -1,15 +1,29 @@
 # Run Lifecycle Design — a turn outlives its connection
 
-> openheron today binds one round of conversation to one HTTP connection: the
+> openheron binds one round of conversation to one HTTP connection: the
 > connection is what drains the event stream, and the archive is what the
-> connection hands back. This document proposes breaking that binding — the
-> run becomes a durable object with its own identity, ownership and truth, and
-> the SSE connection becomes one optional view of it.
+> connection hands back. This document breaks that binding — the run becomes
+> a durable object with its own identity, ownership and truth, and the SSE
+> connection becomes one optional view of it.
 >
 > ★ **Section 1 describes the code as it is.** Every claim there points at a
-> line in the tree. **Section 2 onwards is a proposal** — nothing in it is
-> implemented. The distinction is kept sharp on purpose: a design document
-> that blurs "what is" into "what would be" is how documentation drift starts.
+> line in the tree. **The proposal is marked per section**, because it is now
+> half built:
+>
+> | Section | Status |
+> |---|---|
+> | §1 What "one turn" means today | **as it is** |
+> | §2 The target model | proposal — the shape §3 and §4 already have |
+> | §3 D1 — a run is a row of facts | **implemented** |
+> | §4 D2 — notification is a hint, the scan is the truth | the server side is **implemented**, the client side is a proposal |
+> | §5 D3 — lease and fence | proposal |
+> | §6 D4 — the driver is pluggable | the interfaces and the file driver are **implemented**, the memory arbiter is not there yet |
+> | §7 The event pipeline | proposal |
+> | §8 The API surface | the scan routes are **implemented**, attach is a proposal |
+> | §9 The frontend | proposal |
+>
+> A design document that blurs "what is" into "what would be" is how
+> documentation drift starts.
 
 > 中文版：[run-lifecycle-design_zh.md](run-lifecycle-design_zh.md)
 >
@@ -26,26 +40,30 @@ the tree:
 ```
 POST /v2/run
   │
-  ├─ api/v2_run.go:126   startRun → run.Runtime.Submit
-  │    └─ agentkit/run/runtime.go:129   claimTurn        (the gate: a mutex)
-  │    └─ agentkit/run/runtime.go:212   runClaimedTurn
-  │         └─ agentkit/run/bridge.go:99   startLoop → a goroutine
-  │              └─ agentkit/run/loop.go:21   newLoop → adk.TurnLoop
+  ├─ api/v2_run.go:202   startRun → run.Runtime.Submit
+  │    └─ agentkit/run/runtime.go:157   run.Runtime.Submit
+  │         └─ agentkit/run/runtime.go:207   claimTurn        (the gate: a mutex)
+  │              └─ agentkit/run/runtime.go:259   openRunRow     ← the row is written
+  │              └─ agentkit/run/runtime.go:316   runClaimedTurn
+  │                   └─ agentkit/run/bridge.go:99   startLoop → a goroutine
+  │                        └─ agentkit/run/loop.go:21   newLoop → adk.TurnLoop
   │
   ├─ agentkit/run/loop.go:100  makeOnAgentEvents  (inside the loop goroutine)
-  │    └─ agentkit/run/loop.go:112  turn.events = events     ← the iterator is handed over
-  │    └─ agentkit/run/loop.go:113  turn.signalReady()
-  │    └─ agentkit/run/loop.go:117  waits on turn.done        ← blocked here
+  │    └─ agentkit/run/loop.go:115  turn.events = events     ← the iterator is handed over
+  │    └─ agentkit/run/loop.go:116  turn.signalReady()
+  │    └─ agentkit/run/loop.go:120  waits on turn.done        ← blocked here
   │
-  └─ api/v2_run.go:137  turn.Wait(...)          (the HTTP handler blocks too)
-       api/v2_run.go:150  transport.Stream(stream, turn, ...)
-            └─ transport/transport.go:72   RunStream(w, …, turn.Events(), …)
-                 └─ transport/transport.go:103  src.Next()   ← the ONLY consumer
-                 └─ transport/transport.go:167/174/182  accumulates res.Intermediates
-       api/v2_run.go:157  turn.Complete(Outcome{Intermediates: res.Intermediates, …})
-            └─ agentkit/run/turn.go:157  t.done <- outcome
-                 └─ agentkit/run/loop.go:122  rt.archive(sess, turn, out.out)
-                      └─ agentkit/run/loop.go:157  sess.Append(msg)   ← the transcript
+  └─ api/v2_run.go:141  turn.Wait(...)          (the HTTP handler blocks too)
+       api/v2_run.go:154  transport.Stream(stream, turn, ...)
+            └─ transport/transport.go:68   Stream(w, turn, …)
+                 └─ transport/transport.go:75   RunStream(w, …, turn.Events(), …)
+                      └─ transport/transport.go:103  src.Next()   ← the ONLY consumer
+                      └─ transport/transport.go:167/174/182  accumulates res.Intermediates
+       api/v2_run.go:161  turn.Complete(Outcome{Intermediates: res.Intermediates, …})
+            └─ agentkit/run/turn.go:174  t.done <- outcome
+                 └─ agentkit/run/loop.go:125  rt.archive(sess, turn, out.out)
+                      └─ agentkit/run/loop.go:190  sess.Append(msg)   ← the transcript
+                 └─ agentkit/run/loop.go:130  rt.finishRun(turn, out)  ← the terminal row
 ```
 
 ★ **The persistence path runs through the rendering path.** The transcript is
@@ -53,55 +71,74 @@ written only after the HTTP handler has drained the eino event stream and
 reported back. The renderer is not a view of the run — it *is* the run's
 output pipeline.
 
+★ The ledger's row is the one thing that does **not** run through the
+renderer: `openRunRow` writes it before the loop starts, and the terminal row
+is written by the run's own goroutine (`rt.finishRun`). The row is a fact
+about the run; the transcript is a fact about the conversation. They are
+written at different moments, on purpose.
+
 ### 1.2 Five consequences
 
-**C1 — A run has no durable identity.**
-`Turn.RunID` (`agentkit/run/turn.go:23`) is declared and never assigned. The
-protocol run id is minted in the API layer (`api/v2_run.go:102-105`) and lives
-only in the SSE frames and in the obs context (`agentkit/obs/runid.go:7`).
-`Runtime.StatusOf` never sets `SessionStatus.RunID` (`agentkit/run/runtime.go:596-626`),
-so `GET /v2/sessions/{threadId}` returns an empty `runId` today
-(`api/v2_sessions.go:94`). The client does not send a `runId` at all
-(`web/src/lib/store/actions.ts:250-254`), even though the wire type has one
-(`web/src/lib/api.ts:46`).
+★ Two of them are already partly addressed by §3 — the row exists, so the run
+has a trace and an identity. The other three are untouched. The consequences
+are listed with their status so that the reader knows which part of the
+proposal is still load-bearing.
 
-**C2 — A crash loses the run silently.**
-The archive is reachable only from the connection's drain
-(`api/v2_run.go:157` → `agentkit/run/loop.go:122`). If the process dies
-mid-run, the messages are not in the transcript, no run record exists, and the
-session reads as idle on the next start — indistinguishable from "never ran".
-There is no trace to reconcile.
+**C1 — A run has no durable identity.** — *partly addressed by §3*
+`Turn.RunID` (`agentkit/run/turn.go:31`) is now assigned when the turn is
+claimed (`agentkit/run/runtime.go:214`), and the API hands its own id down
+(`api/v2_run.go:218`) so that the id in the SSE frames and the id in the
+ledger's rows are the same one. `Runtime.StatusOf` reads it back from the
+scan, so `GET /v2/sessions/{threadId}` returns a real `runId`
+(`api/v2_sessions.go:94`) instead of an empty string. **What is still
+missing:** the client never sends one (`web/src/lib/store/actions.ts:250-254`),
+so "re-attach to a run you know" does not exist yet — that is §8.
+
+**C2 — A crash loses the run silently.** — *partly addressed by §3*
+The run's row is written before the loop starts
+(`agentkit/run/runtime.go:259`), so a crash leaves a trace: the row is still
+open, and the startup pass closes it as `interrupted`
+(`storage/filestore/manager.go:245`). The session no longer reads as "never
+ran" — it reads as "a run was interrupted". **What is still missing:** the
+messages are still lost with the crash, because the transcript is written by
+the renderer (§7). The row records that the run happened; it does not record
+what it said.
 
 **C3 — A dead handler wedges the session.**
-`agentkit/run/runtime.go:222` detaches the run from the request:
+`agentkit/run/runtime.go:326` detaches the run from the request:
 `context.WithCancel(context.WithoutCancel(ctx))`. The stored `turn.cancel` is
-called from exactly one place — `agentkit/run/bridge.go:128`, *after* the loop
-exits. But the loop cannot exit while `agentkit/run/loop.go:117` is blocked on
+called from exactly one place — `agentkit/run/bridge.go:129`, *after* the loop
+exits. But the loop cannot exit while `agentkit/run/loop.go:120` is blocked on
 `turn.done`, and `turn.done` is only fed by `Complete` (the handler) or `fail`
-(`agentkit/run/turn.go:177`). So a handler that dies without calling
+(`agentkit/run/turn.go:194`). So a handler that dies without calling
 `Complete` — a panic, a killed worker — leaves the run goroutine blocked
 forever and the session permanently busy. `Abort` is the only escape
-(`agentkit/run/runtime.go:455`), and nothing calls it automatically.
+(`agentkit/run/runtime.go:565`), and nothing calls it automatically.
+★ The ledger makes the wedge **visible** — the scan shows a run in state
+`running` that nobody owns — but it does not lift it: the gate still refuses
+the session. Lifting it is §5's lease and §7's pipeline.
 (An ordinary client disconnect is *not* this case: the handler keeps running
 and the drain continues, because `transport/transport.go:611-623` only stops
 *emitting* after a write error — the accumulation at lines 167/174/182 goes on.)
 
 **C4 — A live run is invisible to a second surface.**
 `turn.events` is a single-consumer `*adk.AsyncIterator`
-(`agentkit/run/turn.go:25`). Whoever drains it first owns it. A second browser
+(`agentkit/run/turn.go:33`). Whoever drains it first owns it. A second browser
 cannot attach to a running turn, and `GET /v2/sessions/{threadId}/messages`
 (`api/v2_sessions.go:269`) shows only what is already archived — so a fresh
 page shows a conversation that stops mid-thought with no indication that
 something is still running.
 
 **C5 — Ownership is first-come-first-served, with no notion of liveness.**
-`claimTurn` (`agentkit/run/runtime.go:161-183`) is a mutex: whoever gets the
-lock first owns the session until it finishes. There is no lease, no epoch, no
-way to distinguish "the owner is making progress" from "the owner is stalled".
-The in-memory identity checks that exist today — `markTurnDone`
-(`agentkit/run/bridge.go:51`) and the loop-identity check in `loopExited`
-(`agentkit/run/bridge.go:119-124`) — are hand-rolled fences over pointers.
-They work inside one process and nowhere else.
+`claimTurn` (`agentkit/run/runtime.go:207-241`) is a mutex: whoever gets the
+lock first owns the session until it finishes. The run now carries an epoch
+(`agentkit/run/runtime.go:259`), so the ledger can order two owners — but
+there is no lease, no expiry, and no way to distinguish "the owner is making
+progress" from "the owner is stalled". The in-memory identity checks that
+exist today — `markTurnDone` (`agentkit/run/bridge.go:51`) and the
+loop-identity check in `loopExited` (`agentkit/run/bridge.go:115-124`) — are
+hand-rolled fences over pointers. They work inside one process and nowhere
+else.
 
 ### 1.3 The gate from the previous round
 
@@ -122,7 +159,8 @@ being an in-memory projection and becomes a scanned fact.
                               ▼
                  agentkit/run:  Runtime.Submit
                      │
-                     ├─ arbiter.Claim(session, runId)  →  Lease{Epoch: n}
+                     ├─ ledger.NextEpoch(session)  →  epoch n
+                     ├─ arbiter.Claim(session, runId, epoch n)  →  Lease{ExpiresAt}
                      ├─ ledger.Append(Run{state: starting, epoch: n})
                      ├─ start the run's own goroutine ─────────────────────┐
                      │      eino events                                   │
@@ -220,13 +258,17 @@ several.
 
 ## 3. D1 — A run is a row of facts
 
+★ **This section is implemented.** `storage/runledger.go` holds the contract,
+`storage/filestore/runledger.go` holds the file driver, and
+`agentkit/run/runrow.go` writes the rows.
+
 ### 3.1 The row
 
 A run's record is a **lifecycle**, not a payload. The transcript already owns
 the content and the numbers; the row owns the timing and the ownership.
 
 ```go
-// storage/runledger.go (proposed)
+// storage/runledger.go
 package storage
 
 // RunState is where a run is in its lifecycle.
@@ -264,10 +306,14 @@ type Run struct {
 }
 ```
 
+★ The states are written on the wire as names, not numbers
+(`storage/runledger.go` — `RunState.MarshalJSON`). A ledger that outlives the
+binary has to stay readable when the constants are renumbered.
+
 ### 3.2 The ledger
 
 ```go
-// RunLedger is the durable record of runs.
+// storage/runledger.go
 //
 // ★ Append writes one COMPLETE snapshot of a run, not a delta. The reader
 //   takes the last row per run id, and the highest epoch among the open runs
@@ -275,9 +321,14 @@ type Run struct {
 //   what makes a fenced-out owner harmless: it cannot write itself back into
 //   the lead.
 type RunLedger interface {
+    // Append writes one complete snapshot of a run.
     Append(ctx context.Context, r Run) error
     // List returns one row per run, newest row per run id wins.
-    List(ctx context.Context, sessionID string) ([]Run, error)
+    List(ctx context.Context) ([]Run, error)
+    // NextEpoch allocates the fence epoch for a new run of this session.
+    NextEpoch(ctx context.Context) (uint64, error)
+    // Reconcile closes the runs that were still open when the process stopped.
+    Reconcile(ctx context.Context) (int, error)
 }
 ```
 
@@ -288,33 +339,39 @@ a state it was really in). The cost is repeated fields — irrelevant at this
 size.
 
 ★ **Why "highest epoch among open runs wins" and not "last row wins".** The
-last row wins *within* one run. *Across* runs, the epoch decides: a zombie
-owner from epoch 3 that wakes up after epoch 4 took over writes a row, but the
-reader still sees epoch 4 as the owner. This is the fence doing its work on
-the read side, where it is cheap and needs no lock.
+last row wins *within* one run (`storage.FoldRuns`). *Across* runs, the epoch
+decides (`storage.ActiveRun`): a zombie owner from epoch 3 that wakes up after
+epoch 4 took over writes a row, but the reader still sees epoch 4 as the
+owner. This is the fence doing its work on the read side, where it is cheap
+and needs no lock.
+
+★ **The epoch is allocated by the ledger, not by the arbiter.** The epoch has
+to be monotonic across restarts, so it cannot live in a volatile structure —
+and the ledger is the durable thing that outlives the process. §5's lease
+carries the epoch the ledger handed out; the lease itself is about liveness,
+the epoch is about order. Two homes for one number would be two truths.
 
 ### 3.3 Where the row lives
 
 Next to the session's other files, in the session directory
-(`storage/filestore/session.go:503-507` defines the current names):
+(`storage/filestore/session.go` defines the current names):
 
 ```
 <root>/<sessionId>/session.jsonl     the transcript (append-only)
 <root>/<sessionId>/state.json        the session state (rewritten atomically)
-<root>/<sessionId>/runs.jsonl        the run ledger (append-only)  ← new
+<root>/<sessionId>/runs.jsonl        the run ledger (append-only)
 ```
 
 ★ **`runs.jsonl` is not `state.json`.** `state.json` is rewritten whole on
-every change (`storage/filestore/session.go:483-498`); a growing list of runs
-inside it would mean rewriting the whole history of the session on every
-transition. An append-only ledger matches the transcript's shape, reuses the
-same append machinery, and makes the ledger's own write the durability
-barrier.
+every change; a growing list of runs inside it would mean rewriting the whole
+history of the session on every transition. An append-only ledger matches the
+transcript's shape, reuses the same append machinery, and makes the ledger's
+own write the durability barrier.
 
 ★ **The ledger is bounded.** A ledger that grows forever is a leak. The file
-driver trims to the last N rows (N = 200 by default) with the atomic rewrite
-already in `persist`, keeping the file append-only in the common case and
-bounded in the worst.
+driver trims to the last N rows (N = 200, `storage/filestore/runledger.go` —
+`maxRunLedgerRows`) with the same atomic rewrite `state.json` uses, keeping
+the file append-only in the common case and bounded in the worst.
 
 ### 3.4 The row is the archive barrier
 
@@ -326,6 +383,21 @@ run goroutine:  … archive → transcript  →  ledger.Append(state: completed)
 scan:           sees "completed" ⟹ the messages are on disk
 ```
 
+★ The implementation is `rt.finishRun` (`agentkit/run/loop.go:145`), called
+from the archive site (`agentkit/run/loop.go:130`). One exception: a run that
+ended by raising an interrupt waits for the loop's exit, because that is where
+the approval and the checkpoint are written
+(`agentkit/run/bridge.go:152`) — a scan must not be able to call the run over
+before the question the user has to answer is on disk.
+
+★ **The terminal state is the run's own truth, not the absence of an error.**
+The error the consumer saw is carried into the outcome
+(`api/v2_run.go` — `Outcome.Err`), so a run whose model timed out reads
+`failed` and a run the user stopped reads `aborted`. Without that, the ledger
+would be the one place that lies: it would call a turn that died mid-flight
+`completed`. A cancelled turn is also **not** the session's last error — the
+user stopping a run is not a failure of the session.
+
 Today the same guarantee costs a 30-second wait channel
 (`agentkit/run/turn.go:156-165`, `agentkit/run/turn.go:173`), because the
 archive is downstream of the connection. With the row in place, the wait
@@ -335,23 +407,24 @@ disappears: *the row is the barrier*, and there is nothing to time out.
 
 ### 4.1 The server side
 
-The SSE stream keeps its shape — it is still AG-UI frames over one HTTP
-response. What changes is its authority:
+★ **This half is implemented.** The SSE stream keeps its shape — it is still
+AG-UI frames over one HTTP response. What changes is its authority:
 
 - The run's goroutine writes the terminal row **whether or not anybody is
   subscribed**. The stream's end is not the run's end.
 - `GET /v2/sessions/{threadId}/runs` scans the ledger and answers "what
-  happened, what is happening".
+  happened, what is happening" (`api/v2_sessions.go:423`).
 - `GET /v2/sessions/{threadId}` reports `state` from the scan, not from the
-  volatile map (`api/v2_sessions.go:448-461` today reads
-  `Runtime.StatusOf`).
+  volatile map: `stateOf` (`api/v2_sessions.go:506`) asks `StatusOf`
+  (`agentkit/run/runtime.go:711`), and `StatusOf` asks the ledger
+  (`agentkit/run/runtime.go:749` — `activeRun`).
 
-★ **The volatile map becomes a cache.** `sessionState`
+★ **The volatile map became a cache.** `sessionState`
 (`agentkit/run/bridge.go:30-39`) stays — it holds the live loop and the live
 turn, which are genuinely in-memory things — but it is no longer the *truth*.
-`StatusOf` (`agentkit/run/runtime.go:596-626`) already mixes a volatile source
-with a durable one (the pending approval from the session file); the design
-makes that mixing explicit and puts the durable side in charge.
+`StatusOf` mixes a volatile source (the map's timestamps) with durable ones
+(the pending approval from the session file, the active run from the ledger);
+the durable side now decides the phase.
 
 ### 4.2 The client side
 
@@ -378,28 +451,37 @@ disappears instead of being timed around.
 
 ### 4.3 What the scan answers
 
+★ **Implemented**, and this is the wire shape (`api/v2_types.go` — `runsView`):
+
 ```
 GET /v2/sessions/{threadId}/runs
 {
   "items": [
     {
       "runId": "…", "state": "completed", "kind": "query",
-      "epoch": 7, "startedAt": "…", "endedAt": "…", "error": null
+      "epoch": 7, "startedAt": "…", "endedAt": "…"
     }
   ],
   "activeRunId": "…"      // the run that currently owns the session, if any
 }
 ```
 
+★ `error` appears only when the run failed, and `activeRunId` only when there
+is an active run — an idle session scans as `{"items": []}`. A field that is
+always there and always empty is noise a client has to learn to ignore.
+
 `activeRunId` is the one field the UI needs most: it is what makes a run
 **attachable** (§8.1) and what replaces the empty `runId` that
-`GET /v2/sessions/{threadId}` returns today (`api/v2_sessions.go:94`).
+`GET /v2/sessions/{threadId}` used to return (`api/v2_sessions.go:94` — it
+returns the active run's id now).
 
 ## 5. D3 — Lease and fence instead of first-come-first-served
 
+★ **This section is a proposal.** The epoch is already real (§3.2); the lease is not.
+
 ### 5.1 Why the mutex is not enough
 
-The mutex in `claimTurn` (`agentkit/run/runtime.go:161-183`) answers "who got
+The mutex in `claimTurn` (`agentkit/run/runtime.go:207-241`) answers "who got
 here first". It does not answer "who is still alive". Three failures follow:
 
 1. **A stalled owner.** The owner holds the lock but is not progressing — a
@@ -407,7 +489,7 @@ here first". It does not answer "who is still alive". Three failures follow:
    the session is stuck, and the only way out is `Abort`.
 2. **A zombie owner.** The owner was paused (VM freeze, laptop sleep, a
    debugger breakpoint) and wakes up later. Its `loopExited`
-   (`agentkit/run/bridge.go:115-140`) will clear state it no longer owns —
+   (`agentkit/run/bridge.go:115-143`) will clear state it no longer owns —
    today that is caught by a pointer-identity check, which is a fence that
    happens to be free.
 3. **A second process.** The moment two openheron processes can see the same
@@ -447,15 +529,18 @@ type Lease struct {
 
 // LeaseArbiter decides who owns a session.
 //
-// ★ The arbiter, not the run package, allocates the epoch. That is what makes
-//   the fence meaningful across processes: with a database driver the epoch
-//   comes from the row, so it is global; with the memory driver it is
-//   process-local, and the protocol is unchanged.
+// ★ The arbiter does NOT allocate the epoch. The epoch has to be monotonic
+//   across restarts, so it cannot live in a volatile structure — the ledger
+//   allocates it (RunLedger.NextEpoch) and the lease carries the number it
+//   was given. The arbiter's job is liveness: who holds the claim, and
+//   until when. Keeping the two apart is what lets the ledger's read rule
+//   stay simple: "highest epoch wins" needs no knowledge of liveness, and
+//   "the lease expired" needs no knowledge of write order.
 type LeaseArbiter interface {
     // Claim acquires the session's lease. It fails with ErrLeaseHeld when
     // another run holds a live lease, and succeeds when the lease is expired
     // or is already ours.
-    Claim(ctx context.Context, sessionID, runID, owner string, ttl time.Duration) (Lease, error)
+    Claim(ctx context.Context, sessionID, runID, owner string, epoch uint64, ttl time.Duration) (Lease, error)
     // Renew extends a lease the caller still holds.
     Renew(ctx context.Context, l Lease, ttl time.Duration) (Lease, error)
     // Release gives the lease back.
@@ -491,7 +576,7 @@ Both are configuration.
 raising an interrupt releases its lease — the run is over. What keeps the
 session from accepting a new query is the **pending approval**, which is a
 durable session-level fact rather than a lease
-(`agentkit/run/runtime.go:244-249`). Two locks, two scopes: the lease says
+(`agentkit/run/runtime.go:348-353`). Two locks, two scopes: the lease says
 "this run owns the session right now", the approval says "this session owes
 the user an answer".
 
@@ -534,11 +619,12 @@ model that is slow but alive also reports nothing — and is protected by a TTL
 longer than the provider's timeout, not by the lease. The lease answers "may
 I take this session over", so it has to be able to say yes without a human.
 
-★ The current code has the fence in spirit and the lease not at all: the
-pointer-identity checks in `markTurnDone` (`agentkit/run/bridge.go:51`) and
-`loopExited` (`agentkit/run/bridge.go:119-124`) are fences over addresses.
-The proposal replaces the addresses with epochs and adds the lease that the
-pointer checks stand in for today.
+★ The current code has the fence and not the lease: the epoch is real
+(`storage.RunLedger.NextEpoch` allocates it, `storage.ActiveRun` compares it),
+but ownership is still decided by a mutex. The pointer-identity checks in
+`markTurnDone` (`agentkit/run/bridge.go:51`) and `loopExited`
+(`agentkit/run/bridge.go:119-124`) are fences over addresses — they work
+inside one process and nowhere else. The lease replaces them.
 
 ## 6. D4 — The driver is pluggable
 
@@ -546,21 +632,28 @@ pointer checks stand in for today.
 
 `storage` (L1 in [architecture.md](architecture.md)'s layering table) is
 already the package that owns session and pending-approval interfaces
-(`storage/storage.go:19-93`). The run ledger and the lease arbiter belong
+(`storage/storage.go`). The run ledger and the lease arbiter belong
 there too, for the same reason: `agentkit/run` (L2) must depend on interfaces
 only, and the API layer (L3) must not assemble business logic
 (AGENTS.md's iron rule).
 
+★ **The ledger half is implemented.** The lease half is not.
+
 ```go
 // storage — interfaces and value types
-type RunLedger interface { … }      // storage/runledger.go
-type LeaseArbiter interface { … }   // storage/lease.go
-type Run struct { … }               // storage/runledger.go
-type Lease struct { … }             // storage/lease.go
+type RunLedger interface { … }      // storage/runledger.go   ← implemented
+type LeaseArbiter interface { … }   // storage/lease.go       ← not there yet
+type Run struct { … }               // storage/runledger.go   ← implemented
+type Lease struct { … }             // storage/lease.go       ← not there yet
 
 var ErrLeaseHeld  = errors.New("lease held by another run")
-var ErrFenceStale = errors.New("fence is stale")
+var ErrFenceStale = errors.New("the run's fence is stale")   ← storage/runledger.go
 ```
+
+★ `ErrFenceStale` is already defined, next to the ledger's contract, because
+the fence is already a fact in the ledger: the epoch is allocated there and
+compared there. The error is what the *optional* write-side check will
+return once the arbiter exists.
 
 ### 6.2 The drivers, in the order they arrive
 
@@ -569,6 +662,11 @@ var ErrFenceStale = errors.New("fence is stale")
 | 1 | `storage/memarbit` | in-memory | in-memory | The protocol, exercised, single process. Nothing survives a restart. |
 | 2 | `storage/filestore` | `runs.jsonl` | in-memory | Durability: a crash leaves a trace, and the reconciler can close it. |
 | 3 | a database driver | a table | a table, with the epoch allocated by `UPDATE … SET epoch = epoch + 1` | Several processes over one session store. |
+
+★ **The file driver's ledger is implemented** (`storage/filestore/runledger.go`),
+so the middle row is half true today: the ledger is the file, the arbiter does
+not exist yet. The epoch comes from the ledger, not from the arbiter — §3.2
+explains why, and the database row would have to hand it out the same way.
 
 ★ **The honest reading of "memory first, database later".** This repository has
 no database at all — the whole store is files (`storage/filestore`). Introducing
@@ -598,6 +696,8 @@ proposal keeps them apart: the **ledger** ships durable (file), the
 later.
 
 ## 7. The event pipeline: one consumer becomes publish/subscribe
+
+★ **This section is a proposal.** Nothing of it is in the tree.
 
 ### 7.1 Why the current pipeline forces the coupling
 
@@ -747,6 +847,11 @@ the case that matters most: a client that attaches halfway through.
 | a live run with **that** id | the same `runId` | **attach**: subscribe to the live run, replaying its log |
 | a live run with a **different** id | any `runId` | **409 `session_busy`** — unchanged from today |
 
+★ The first row is **implemented**: the server mints the id when the client
+sends none (`api/v2_run.go`), and hands it down to the runtime
+(`api/v2_run.go:218`) so the id in the frames and the id in the ledger's rows
+are one id. The second row is a proposal — it needs §7.
+
 ★ The second row is the new capability: a reconnect. Today the client cannot
 resume a stream it lost (`web/src/lib/store/actions.ts:250-254` sends no
 `runId` at all), so a dropped connection loses the turn's output. With the
@@ -755,25 +860,30 @@ run id known, the client asks for the same run and gets the rest of it.
 ★ The client must therefore **keep the run id**. The scan returns it
 (`activeRunId`), and the SSE frames already carry it (AG-UI's `runId`).
 
-**`GET /v2/sessions/{threadId}`** — `state` comes from the scan; add
-`activeRunId`. The empty `runId` that `api/v2_sessions.go:94` returns today
-becomes a real value.
+**`GET /v2/sessions/{threadId}`** — `state` comes from the scan. ★
+**Implemented**: `stateOf` (`api/v2_sessions.go:506`) asks `StatusOf`, and
+`StatusOf` reads the ledger. The `runId` that `api/v2_sessions.go:94` returns
+is no longer empty — it is the active run's id, the same value the scan
+reports as `activeRunId`. ★ **Not** a second field: one value, one name.
 
 **`POST /v2/sessions/{threadId}/abort`** — aborts the **run**, not the loop.
 It cancels the run's context, waits (bounded) for the terminal row, and
-returns the run id it aborted. The current implementation
-(`api/v2_sessions.go:386-409` → `agentkit/run/runtime.go:455`) manipulates the
+returns the run id it aborted. ★ The run id is **implemented**
+(`api/v2_sessions.go:405`). The rest is a proposal: the current implementation
+(`api/v2_sessions.go:385` → `agentkit/run/runtime.go:565`) manipulates the
 loop directly; under the proposal the run's own cleanup writes the row, so
 the abort is "stop this run" and the row follows.
 
 ### 8.2 New routes
+
+★ **Implemented.**
 
 ```
 GET /v2/sessions/{threadId}/runs              the scan: every run of the session
 GET /v2/sessions/{threadId}/runs/{runId}      one run
 ```
 
-Both read the ledger. Neither ever writes.
+Both read the ledger (`api/v2_sessions.go:423`). Neither ever writes.
 
 ### 8.3 The error envelope
 
@@ -792,6 +902,8 @@ path's sibling, never by a takeover. The concurrency design's §6.3 already note
 this; the proposal does not change it.
 
 ## 9. The frontend
+
+★ **This section is a proposal.** The server already tells the truth; the client does not ask it yet.
 
 ### 9.1 The busy flag becomes a scanned fact
 
@@ -833,24 +945,27 @@ selectors stay reference-stable (AGENTS.md's rules). What changes is the
 
 ## 10. What changes where
 
+★ **✓ = landed.** The rest is still a proposal.
+
 | File | Change |
 |---|---|
-| `storage/runledger.go` | **new** — `Run`, `RunState`, `RunLedger` |
-| `storage/lease.go` | **new** — `Lease`, `LeaseArbiter`, `ErrLeaseHeld`, `ErrFenceStale` |
+| `storage/runledger.go` | ✓ **new** — `Run`, `RunState`, `RunLedger`, `FoldRuns`, `ActiveRun` |
+| `storage/lease.go` | **new** — `Lease`, `LeaseArbiter`, `ErrLeaseHeld` |
 | `storage/memarbit/arbiter.go` | **new** — the in-memory arbiter |
-| `storage/filestore/runledger.go` | **new** — the `runs.jsonl` driver |
-| `storage/filestore/session.go` | the session directory gains `runs.jsonl`; the `FileSession` gains a ledger handle |
+| `storage/filestore/runledger.go` | ✓ **new** — the `runs.jsonl` driver |
+| `storage/filestore/session.go` | ✓ the session directory gains `runs.jsonl`; the `FileSession` gains a ledger handle |
+| `storage/filestore/manager.go` | ✓ the startup pass reconciles the open runs |
 | `agentkit/emit/` | **new** — the derivation split out of `transport` |
 | `contract/runevent.go` | **new** — `RunEvent`, `RunEventKind` |
-| `agentkit/run/runtime.go` | `claimTurn` becomes a lease claim; `Submit`/`Resume` carry the lease; `StatusOf` reads the scan |
-| `agentkit/run/turn.go` | `Turn` becomes a `Run` with subscribers; `RunID` is assigned |
-| `agentkit/run/loop.go` | `handoff` no longer waits for the consumer: the run's own goroutine consumes and archives |
-| `agentkit/run/bridge.go` | `loopExited` writes the terminal row; `sessionState` becomes a cache |
+| `agentkit/run/runtime.go` | ✓ `Submit`/`Resume` carry the run id; `claimTurn` opens the row; `StatusOf` reads the scan. **Later:** `claimTurn` becomes a lease claim |
+| `agentkit/run/turn.go` | ✓ `RunID` is assigned; the turn closes its own row. **Later:** `Turn` becomes a `Run` with subscribers |
+| `agentkit/run/loop.go` | ✓ the terminal row is written after the archive. **Later:** `handoff` no longer waits for the consumer |
+| `agentkit/run/bridge.go` | ✓ the loop's exit closes the row; `sessionState` becomes a cache |
 | `agentkit/run/errors.go` | `ErrSessionBusy` stays; the lease errors map onto it |
 | `transport/transport.go` | becomes a renderer: `contract.RunEvent` → AG-UI frames |
-| `api/v2_run.go` | create / attach / refuse; the handler subscribes instead of draining |
-| `api/v2_sessions.go` | `state` from the scan; `activeRunId`; abort targets the run |
-| `api/v2_files.go` | the two new routes |
+| `api/v2_run.go` | ✓ the run id is minted once and handed down. **Later:** create / attach / refuse |
+| `api/v2_sessions.go` | ✓ `state` comes from the scan; the two scan routes; the abort names the run it stopped |
+| `api/v2_files.go` | ✓ the two new routes |
 | `web/src/lib/store/actions.ts` | keep the run id; re-attach; re-scan instead of assuming |
 | `web/src/lib/store/history.ts` | `busy` from the scan |
 | `web/src/lib/api.ts` | `runId` on the run request; the runs scan |
@@ -858,12 +973,16 @@ selectors stay reference-stable (AGENTS.md's rules). What changes is the
 
 ## 11. Testing
 
-**Go — the ledger** (`storage/filestore`):
-- a run's row survives a restart of the store;
-- the last row per run id wins;
-- among open runs, the highest epoch is the owner, even when the lower-epoch
+★ **✓ = the test exists.** The rest is the plan.
+
+**Go — the ledger** (`storage/filestore`, `storage/filestore/runledger_test.go`):
+- ✓ a run's row survives a restart of the store;
+- ✓ the last row per run id wins;
+- ✓ among open runs, the highest epoch is the owner, even when the lower-epoch
   run wrote later;
-- a torn last line is dropped and the run falls back to its previous state.
+- ✓ a torn last line is dropped and the run falls back to its previous state;
+- ✓ the epoch never repeats, not even across a restart;
+- ✓ the ledger stays within its bound.
 
 **Go — the arbiter** (`storage/memarbit`):
 - a second claim on a live lease fails with `ErrLeaseHeld`;
@@ -874,7 +993,14 @@ selectors stay reference-stable (AGENTS.md's rules). What changes is the
 - a run that reports **nothing** loses the lease even while it is alive — the
   run-level stall §5.1 describes.
 
-**Go — the runtime** (`agentkit/run`):
+**Go — the runtime** (`agentkit/run`, `agentkit/run/runrow_test.go`):
+- ✓ the run is recorded before it is handed out;
+- ✓ the terminal row lands after the archive (the transcript already holds the
+  answer when the row says `completed`);
+- ✓ a turn that never starts closes its own row;
+- ✓ the scan names the active run, and stops naming it once the run is over;
+- ✓ a resume names the run it answers;
+- ✓ `StatusOf` reports the active run's id;
 - the run archives its messages **with no subscriber attached** — the direct
   test of "a turn outlives its connection";
 - a subscriber that vanishes does not stop the run;
@@ -882,14 +1008,20 @@ selectors stay reference-stable (AGENTS.md's rules). What changes is the
   archiving** — the stuck subscriber of §7.4, where the socket write never
   returns;
 - a run whose handler dies still writes its terminal row (the C3 case);
-- a run that loses its lease stops and does not write a `running` row.
+- a run that loses its lease stops and does not write a `running` row;
 - a run nobody attached to keeps its event log **within the window's size** —
   the cost of an unwatched turn is bounded (§7.4).
 
-**Go — the reconciler**:
-- a run left `running` by a crash is closed as `interrupted` at startup,
+**Go — the reconciler** (`storage/filestore/runledger_test.go`):
+- ✓ a run left `running` by a crash is closed as `interrupted` at startup,
   before the server accepts requests (the hook already exists:
-  `storage/storage.go:29`).
+  `storage/storage.go` — `SessionManager.Inspect`).
+
+**Go — the API** (`api/v2_runs_test.go`):
+- ✓ the scan lists the runs and names the active one;
+- ✓ the session's own route carries the active run's id;
+- ✓ one run by id, and 404 for an unknown one;
+- ✓ an idle session scans as an empty list.
 
 **Frontend — unit**:
 - `busy` is cleared only by a scan, not by a stream's end;
@@ -904,12 +1036,19 @@ selectors stay reference-stable (AGENTS.md's rules). What changes is the
 
 ## 12. Staging
 
-**Stage 1 — the run becomes a fact.** The ledger, the row, the scan route, the
-reconciler. The SSE still drives the run, but the run's **row** is written
-independently of the connection, so a crash leaves a trace. This stage fixes
-C1 and C2 and gives the frontend something true to scan.
+**Stage 1 — the run becomes a fact.** ✓ **landed.** The ledger, the row, the
+scan route, the reconciler. The SSE still drives the run, but the run's **row**
+is written independently of the connection, so a crash leaves a trace. This
+stage fixes C1 and C2 and gives the frontend something true to scan.
 
-**Stage 2 — the lease replaces the mutex.** The arbiter, the epoch, the
+**Stage 2 — the run owns its consumption.** The `agentkit/emit` split, the
+subscribers, the run's event log, attach. This stage fixes C3 and C4 — the
+coupling itself. It is also the stage where a **stuck subscriber stops being
+a scenario**: from here on the run owns no socket, so a wedged connection
+cannot reach the run at all. Until then the risk stands — the run still writes
+to the socket itself, so a connection that wedges can still stall the archive.
+
+**Stage 3 — the lease replaces the mutex.** The arbiter, the
 **progress-driven renewal**, the fence. The gate's behaviour is unchanged (still
 "one session, one turn", still 409); only its internals move. This stage fixes
 **both** kinds of stalled owner — the process-level one because the lease
@@ -917,18 +1056,24 @@ expires when the process stops reporting, the run-level one because the
 renewal is driven by progress — and it prepares the ground for a second
 process.
 
-**Stage 3 — the run owns its consumption.** The `agentkit/emit` split, the
-subscribers, the run's event log, attach. This stage fixes C3 and C4 — the
-coupling itself. It is also the stage where a **stuck subscriber stops being
-a scenario**: from here on the run owns no socket, so a wedged connection
-cannot reach the run at all. Until then the risk stands — the run still writes
-to the socket itself, so a connection that wedges can still stall the archive.
+★ **The order changed while Stage 1 was being built, and the reason is worth
+writing down.** The original plan put the lease second. It cannot go second:
+**progress-driven renewal needs the run to see its own progress**, and today
+the run does not see the events — the transport drains them and hands back the
+archive payload (`agentkit/run/loop.go:115`). A renewal driven by the
+connection's progress would expire the lease of a run whose connection died,
+which is exactly the coupling the lease is meant to remove. So the pipeline has
+to be split before the lease can be honest.
 
-★ **Stage 3 is the expensive one** and it is the only one that truly unbinds
-the turn from the connection. Stages 1 and 2 are worth doing on their own: they
-make the run observable and its ownership honest, and they cost a fraction of
-Stage 3. A team that stops after Stage 2 has a system whose run facts are true
-and whose ownership is bounded — a much better place to be than today.
+★ The upside of the new order: **Stage 1 depends on neither.** It is a fact
+about the run, written by the run's own goroutine, and it is the stage that
+makes the other two possible — the lease needs a durable epoch, and the epoch
+is the ledger's.
+
+★ **Stage 2 is the expensive one** and it is the only one that truly unbinds
+the turn from the connection. Stages 1 and 3 are worth doing on their own:
+Stage 1 makes the run observable, Stage 3 makes its ownership bounded — a much
+better place to be than today.
 
 ## 13. Open questions
 
@@ -950,9 +1095,9 @@ anything across processes — it is a protocol, not a lock. The question is
 whether the DB driver is a real requirement or a preparation.
 
 **Q3 — Who may answer an approval?**
-A pending approval is session-level (`storage/storage.go:95-113`), so two
+A pending approval is session-level (`storage/storage.go:104`), so two
 surfaces can both try. `TakePendingApproval` is atomic, so the second one gets
-`ErrNoPendingInterrupt` (`agentkit/run/runtime.go:372-380`) — correct, but the
+`ErrNoPendingInterrupt` (`agentkit/run/runtime.go:482`) — correct, but the
 UX needs to say "someone else already answered". Should the second surface be
 told *who* answered?
 

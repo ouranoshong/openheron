@@ -99,6 +99,9 @@ func (rt *Runtime) makePrepareAgent(sess storage.Session) func(context.Context, 
 // report back, then archives. openheronrt never renders anything itself.
 func (rt *Runtime) makeOnAgentEvents(sess storage.Session, turn *Turn) func(context.Context, *adk.TurnContext[loopItem, *schema.Message], *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.Message]]) error {
 	return func(ctx context.Context, _ *adk.TurnContext[loopItem, *schema.Message], events *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.Message]]) error {
+		// ★ The agent has started producing events: the run is executing,
+		//   not just claimed. The row says so before anything is archived.
+		turn.row.set(storage.RunRunning)
 		out, err := rt.handoff(ctx, sess, turn, events)
 		if err != nil {
 			return err
@@ -123,11 +126,51 @@ func (rt *Runtime) handoff(ctx context.Context, sess storage.Session, turn *Turn
 	// ★ The messages are on disk: the turn is finished with the session's
 	//   history, and the client waiting in Complete may go on.
 	turn.markArchived()
+	rt.finishRun(turn, out)
 	return out, nil
 }
 
+// finishRun writes the run's terminal row.
+//
+// ★ It runs AFTER the archive. That single ordering is what makes the row
+//
+//	a barrier: a scan that sees "completed" knows the messages are on disk,
+//	so the busy flag can be cleared without waiting for anything.
+//
+// ★ A run that ended by raising an interrupt is the one exception: its
+//
+//	row waits for the loop's exit, which is where the approval and the
+//	checkpoint are written. A scan must not be able to call the run over
+//	before the question the user has to answer is on disk.
+func (rt *Runtime) finishRun(turn *Turn, out outcome) {
+	if turn.row == nil {
+		return
+	}
+	switch {
+	case out.err != nil:
+		state, code := failedState(out.err)
+		turn.row.finish(state, code, out.err.Error())
+	case out.out.Err != nil:
+		// ★ A cancelled run is "aborted", not "failed": the user stopped
+		//   it. The distinction is the user's, and the row is what a
+		//   post-mortem reads.
+		state, code := failedState(out.out.Err)
+		turn.row.finish(state, code, out.out.Err.Error())
+	case len(out.out.Interrupts) > 0:
+		turn.awaitingApproval = true
+	default:
+		turn.row.finish(storage.RunCompleted, "", "")
+	}
+}
+
 func (rt *Runtime) finalize(sess storage.Session, turn *Turn, out outcome) error {
-	rt.stateFor(sess.ID()).markError(out.out.Err)
+	// ★ A cancelled turn is not a session error. The user stopped it, or
+	//   the run was aborted — putting "context canceled" in front of the
+	//   user as the session's last failure would be a lie about the
+	//   session. The run's own row still says "aborted".
+	if out.out.Err != nil && !errors.Is(out.out.Err, context.Canceled) {
+		rt.stateFor(sess.ID()).markError(out.out.Err)
+	}
 	//   the session state made /v2/sessions/{id} keep reporting "running"
 	//   forever after a completed turn — the loop stays alive waiting for
 	//   the next item, so "a loop exists" says nothing about activity.
@@ -246,5 +289,14 @@ func (rt *Runtime) makeGenResume(sess storage.Session) func(context.Context, *ad
 }
 
 func (rt *Runtime) logf(format string, args ...any) {
+	logf(format, args...)
+}
+
+// logf writes a warning through the one log outlet.
+//
+// ★ It is a package-level function because not every caller has a Runtime:
+//
+//	the run row is written by the turn handle, which does not.
+func logf(format string, args ...any) {
 	obs.Logger().Warn("[openheronrt] " + fmt.Sprintf(format, args...))
 }

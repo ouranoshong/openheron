@@ -342,8 +342,15 @@ returns: the framework writes the checkpoint at the loop's exit, and an approval
 answerable if the checkpoint it resumes from exists.
 
 The frontend reads the server's answer rather than its own memory: the session's
-`state` comes from `GET /v2/sessions/{id}/messages` and feeds the composer's guard,
-so a second tab hydrates as busy instead of idle.
+`state` comes from the server's scan of the **run ledger** and feeds the composer's
+guard, so a second tab hydrates as busy instead of idle.
+
+The run ledger is the durable record of the runs: one row per run, written by the run's
+own goroutine (`agentkit/run/runrow.go`), read back by
+`GET /v2/sessions/{id}/runs`. A run's **terminal row lands after its messages are on
+disk** — that single ordering is what lets the busy flag be honest without a timeout.
+A run that a crash left open is closed as `interrupted` during the startup pass, so
+a session never reads as busy for ever.
 
 ## 6. Storage
 
@@ -355,6 +362,8 @@ On-disk layout (`storage/filestore/session.go`):
 - `state.json` — session state (atomically rewritten)
 - transcript — messages, appended (`O_APPEND`)
 - checkpoint — the approval resume point
+- `runs.jsonl` — the run ledger: one row per run, appended (`O_APPEND`), bounded to
+  the last 200 rows
 
 **Memory is only a cache**; disk is the source of truth. Listing sessions (`List()`) reads
 only `state.json` and never opens the transcript — so listing is cheap.

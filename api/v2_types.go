@@ -186,11 +186,73 @@ type lastErrorView struct {
 
 type threadDetail struct {
 	threadMeta
+	// RunID is the run that currently owns the session, if any.
+	//
+	// ★ It used to be always empty: the runtime never assigned the turn's
+	//   run id, so the field existed and said nothing. It is now the
+	//   active run's id, read from the run ledger — the same value the
+	//   runs scan reports as activeRunId.
 	RunID            string         `json:"runId,omitempty"`
 	StartedAt        string         `json:"startedAt,omitempty"`
 	LastError        *lastErrorView `json:"lastError,omitempty"`
 	PendingApprovals []pendingView  `json:"pendingApprovals,omitempty"`
 	Decisions        []decisionView `json:"decisions,omitempty"`
+}
+
+// runView is one run of the ledger on the wire.
+//
+// ★ It carries the lifecycle facts and nothing else. The transcript owns
+//
+//	the messages and the usage numbers; a run list that carried them too
+//	would have two homes for the same numbers.
+type runView struct {
+	RunID string `json:"runId"`
+	// State is one of starting, running, waiting_approval, completed,
+	// failed, aborted, interrupted.
+	State string `json:"state"`
+	// Kind is "query" or "resume".
+	Kind string `json:"kind"`
+	// Epoch is the fence the run holds. The highest epoch among the open
+	// runs is the session's owner.
+	Epoch uint64 `json:"epoch"`
+	// ParentRunID is the run a resume continues.
+	ParentRunID string        `json:"parentRunId,omitempty"`
+	StartedAt   string        `json:"startedAt"`
+	EndedAt     string        `json:"endedAt,omitempty"`
+	Error       *runErrorView `json:"error,omitempty"`
+}
+
+type runErrorView struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// runsView is the scan of a session's runs.
+type runsView struct {
+	Items []runView `json:"items"`
+	// ActiveRunID is the run that owns the session right now, if any. It is
+	// the field the UI needs most: it says whether a second surface may
+	// attach, and it is what a reconnecting client asks for.
+	ActiveRunID string `json:"activeRunId,omitempty"`
+}
+
+// toRunView converts one ledger row for the wire.
+func toRunView(r storage.Run) runView {
+	out := runView{
+		RunID:       r.RunID,
+		State:       r.State.String(),
+		Kind:        r.Kind.String(),
+		Epoch:       r.Epoch,
+		ParentRunID: r.ParentRunID,
+		StartedAt:   r.StartedAt.UTC().Format(rfc3339Nano),
+	}
+	if !r.EndedAt.IsZero() {
+		out.EndedAt = r.EndedAt.UTC().Format(rfc3339Nano)
+	}
+	if r.ErrorCode != "" || r.ErrorMessage != "" {
+		out.Error = &runErrorView{Code: r.ErrorCode, Message: r.ErrorMessage}
+	}
+	return out
 }
 
 type decisionView struct {

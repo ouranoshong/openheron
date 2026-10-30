@@ -19,7 +19,7 @@ func TestV2RunOnBusySessionIsConflict(t *testing.T) {
 	// Hold the session open with a live turn. The turn is submitted
 	// directly: an HTTP run would not return until the stream closed, and
 	// the blocking agent never closes it.
-	if _, err := srv.rt.Submit(context.Background(), sess.ID(), "hold the turn open"); err != nil {
+	if _, err := srv.rt.Submit(context.Background(), sess.ID(), "", "hold the turn open"); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	t.Cleanup(func() { _ = srv.rt.Abort(context.Background(), sess.ID()) })
@@ -49,7 +49,7 @@ func TestV2RunOnBusySessionDoesNotDisturbTheRun(t *testing.T) {
 	srv, _ := newV2RunServerWith(t, blockingBuilder{})
 	sess := mustCreate(t, srv)
 
-	if _, err := srv.rt.Submit(context.Background(), sess.ID(), "hold the turn open"); err != nil {
+	if _, err := srv.rt.Submit(context.Background(), sess.ID(), "", "hold the turn open"); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	t.Cleanup(func() { _ = srv.rt.Abort(context.Background(), sess.ID()) })

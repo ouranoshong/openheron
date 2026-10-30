@@ -130,13 +130,62 @@ func (rt *Runtime) loopExited(sessionID string, turn *Turn, loop *adk.TurnLoop[l
 	if stale {
 		// A newer loop took over while this one was winding down. Its
 		// state is not ours to clear.
+		rt.closeOpenRow(turn, exit)
 		return
 	}
 	if exit != nil && exit.ExitReason != nil {
 		obs.Logger().Info("[openheronrt] loop exited", "session", sessionID, "reason", exit.ExitReason)
 	}
 	rt.writeHeldApproval(sessionID, turn)
+	rt.closeApprovalRow(turn)
+	rt.closeOpenRow(turn, exit)
 	rt.removeStateIfIdle(sessionID)
+}
+
+// closeApprovalRow writes the terminal row of a run that ended by raising an
+// approval.
+//
+// ★ It runs after the approval is persisted. The row is the barrier, and the
+//
+//	barrier has to stand behind everything the user needs: the approval card
+//	and the checkpoint that makes it answerable.
+func (rt *Runtime) closeApprovalRow(turn *Turn) {
+	if turn == nil || !turn.awaitingApproval {
+		return
+	}
+	turn.awaitingApproval = false
+	if turn.row == nil {
+		return
+	}
+	turn.row.finish(storage.RunWaitingApproval, "", "")
+}
+
+// closeOpenRow closes a row that is still open.
+//
+// ★ It is the safety net: whatever happened, a run whose loop has exited
+//
+//	does not own the session any more. Leaving the row open would make the
+//	scan report an owner that nobody is, and the session would read as busy
+//	for ever.
+//
+// ★ The loop's exit reason decides how the run ended. An error is a
+//
+//	failure; a clean exit that the run never accounted for is an
+//	interruption — nobody finished it and nobody archived it.
+func (rt *Runtime) closeOpenRow(turn *Turn, exit *adk.TurnLoopExitState[loopItem, *schema.Message]) {
+	if turn == nil || turn.row == nil {
+		return
+	}
+	if turn.row.isClosed() {
+		return
+	}
+	if exit != nil && exit.ExitReason != nil {
+		state, code := failedState(exit.ExitReason)
+		turn.row.finish(state, code, exit.ExitReason.Error())
+		return
+	}
+	turn.row.finish(storage.RunInterrupted, "interrupted",
+		"the run's loop exited before the run finished")
 }
 
 // writeHeldApproval persists the approval the turn raised.

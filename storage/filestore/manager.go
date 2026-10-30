@@ -236,6 +236,27 @@ func (fm *FileManager) Inspect(ctx context.Context) (storage.Report, error) {
 		default:
 			report.Clean++
 		}
+
+		// ★ The run ledger is reconciled in the same pass. A run that was
+		//   open when the process stopped has no owner any more, and
+		//   leaving its row open would make the session read as busy for
+		//   ever — the scan would see an owner that nobody is.
+		if ledger := fs.RunLedger(); ledger != nil {
+			closed, err := ledger.Reconcile(ctx)
+			if err != nil {
+				// A ledger that cannot be read is logged and skipped,
+				// not fatal: the startup pass must not fail because one
+				// session's ledger is damaged — the rest of the server
+				// has to come up.
+				obs.Logger().Warn("[session] failed to reconcile the run ledger", "session", id, "err", err)
+				continue
+			}
+			if closed > 0 {
+				obs.Logger().Warn("[session] closed the runs a crash left open",
+					"session", id, "runs", closed)
+			}
+			report.InterruptedRuns += closed
+		}
 	}
 
 	return report, nil

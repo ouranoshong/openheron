@@ -1121,7 +1121,7 @@ func TestV2AbortStopsARunningThread(t *testing.T) {
 	srv.SetConfigSource(func() *spec.Config { return testConfig(t) })
 
 	sess := mustCreate(t, srv)
-	if _, err := srv.rt.Submit(context.Background(), sess.ID(), "keep going"); err != nil {
+	if _, err := srv.rt.Submit(context.Background(), sess.ID(), "", "keep going"); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	if st, ok := srv.rt.StatusOf(context.Background(), sess.ID()); !ok || st.Phase != run.PhaseRunning {

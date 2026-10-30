@@ -2,12 +2,15 @@ package run
 
 import (
 	"context"
-	"github.com/ouranoshong/openheron/contract"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
+
+	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/storage"
 )
 
 // Turn is the handle a caller drives for one round.
@@ -18,8 +21,13 @@ import (
 type Turn struct {
 	sessionID string
 	Kind      contract.TurnKind
-	// RunID is the protocol-level run identifier, minted by the transport so
-	// the client can correlate its run with our events.
+	// RunID is the protocol-level run identifier: the id the client sees
+	// in every SSE frame, the key the ledger's rows are filed under, and
+	// the token a reconnecting client sends back to re-attach.
+	//
+	// ★ It is minted once, when the turn is claimed, and never changed.
+	//	Before this it was declared and never assigned — which is why the
+	//	server had no run identity of its own.
 	RunID string
 
 	events  *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.Message]]
@@ -31,6 +39,15 @@ type Turn struct {
 	archiveOnce  sync.Once
 	readyOnce    sync.Once
 	cancel       context.CancelFunc
+
+	// row is the run's durable record. Nil when the session has no ledger.
+	row *runRow
+
+	// awaitingApproval says the run ended by raising an interrupt. The
+	// terminal row waits for the approval to be persisted — the loop's
+	// exit writes it, and it must be on disk before the run may call
+	// itself over.
+	awaitingApproval bool
 
 	// pending is the approval the turn raised, kept until the checkpoint
 	// that would resume it exists.
@@ -182,6 +199,37 @@ func (t *Turn) fail(err error) {
 	//   archived channel from the archive path. Release it here or a
 	//   caller waiting in Complete waits forever.
 	t.markArchived()
+	// ★ The turn is over, and the loop may never reach the archive: the
+	//   input generator can fail before a single event is produced. The
+	//   row has to be closed here, or the run stays open in the ledger and
+	//   the session reads as busy for ever.
+	t.closeRow(err)
+}
+
+// closeRow writes the terminal row of a turn that will not run.
+func (t *Turn) closeRow(err error) {
+	if t.row == nil {
+		return
+	}
+	state, code := failedState(err)
+	t.row.finish(state, code, err.Error())
+}
+
+// failedState maps a fatal error onto the run's terminal state.
+//
+// ★ The distinction is the user's: "aborted" means the user stopped it,
+//
+//	"failed" means it broke. A superseded turn is aborted as well —
+//	nothing is broken, the run was simply replaced.
+func failedState(err error) (storage.RunState, string) {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return storage.RunAborted, "aborted"
+	case errors.Is(err, ErrSuperseded):
+		return storage.RunAborted, "superseded"
+	default:
+		return storage.RunFailed, "failed"
+	}
 }
 
 func (t *Turn) signalReady() {
