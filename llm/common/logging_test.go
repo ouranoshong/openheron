@@ -3,7 +3,6 @@ package common
 import (
 	"bytes"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,12 +15,14 @@ func (f loggingRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, erro
 	return f(req)
 }
 
+// captureLog redirects the package's own logger — the request log does not
+// go through the standard logger's default instance any more.
 func captureLog(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
-	prev := log.Writer()
-	log.SetOutput(&buf)
-	t.Cleanup(func() { log.SetOutput(prev) })
+	prev := stdlog.Writer()
+	stdlog.SetOutput(&buf)
+	t.Cleanup(func() { stdlog.SetOutput(prev) })
 	return &buf
 }
 

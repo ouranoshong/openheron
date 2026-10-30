@@ -65,6 +65,13 @@
 而级别决定了一行会不会出现在默认输出里 —— 业务包直接调 `log.Printf` 或
 `fmt.Fprintln(os.Stderr)` 就会绕开这个开关。
 
+格式跟 hertz 一样，于是整份输出读起来是一股：日期、带微秒的时间、调用点的文件与行号、
+级别，然后是消息与属性（`agentkit/obs/handler.go`）：
+
+```
+2026/10/29 22:28:34.346459 main.go:189: [Info] [main] openheron version=dev
+```
+
 **唯一的例外**是 `llm/common`：它是零 openheron 依赖的叶子包，
 引 `obs` 就破了「协议层不依赖运行时」这条铁律，所以它用标准 logger。
 `llm/common` 里任何一处 import openheron 内部包都算回归。

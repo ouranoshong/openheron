@@ -15,6 +15,17 @@ import (
 // OPENHERON_LOG_LLM_REQUESTS=1 make dev
 const LogRequestsEnv = "OPENHERON_LOG_LLM_REQUESTS"
 
+// stdlog writes the request log.
+//
+// ★ This package cannot import obs — it is a leaf with zero openheron
+// dependencies — so it uses the standard logger. The flags are the ones
+// hertz's logger uses, so a line reads the same as the rest of the output:
+// the date, the time with microseconds, the caller's file and line.
+//
+// ★ There is no level tag here: this package has no levels. Everything it
+// writes is a note about a request.
+var stdlog = log.New(os.Stderr, "", log.LstdFlags|log.Lshortfile|log.Lmicroseconds)
+
 func WrapHTTPClient(c *http.Client, providerID string) *http.Client {
 	if c == nil {
 		c = &http.Client{}
@@ -43,7 +54,7 @@ func (t *requestLoggingTransport) RoundTrip(req *http.Request) (*http.Response, 
 	if full && req.Body != nil {
 		b, err := io.ReadAll(req.Body)
 		if err != nil {
-			log.Printf("[llm] request provider=%s body read failed: %v", providerName(t.provider), err)
+			stdlog.Printf("[llm] request provider=%s body read failed: %v", providerName(t.provider), err)
 		} else {
 			body = b
 			_ = req.Body.Close()
@@ -52,14 +63,14 @@ func (t *requestLoggingTransport) RoundTrip(req *http.Request) (*http.Response, 
 		}
 	}
 
-	log.Printf("[llm] request provider=%s method=%s url=%s bytes=%s",
+	stdlog.Printf("[llm] request provider=%s method=%s url=%s bytes=%s",
 		providerName(t.provider), req.Method, safeRequestURL(req.URL), contentSize(req, body))
 
 	if full {
 		if len(body) == 0 {
-			log.Printf("[llm] request provider=%s body: <empty>", providerName(t.provider))
+			stdlog.Printf("[llm] request provider=%s body: <empty>", providerName(t.provider))
 		} else {
-			log.Printf("[llm] request provider=%s body:\n%s", providerName(t.provider), redactedJSON(body))
+			stdlog.Printf("[llm] request provider=%s body:\n%s", providerName(t.provider), redactedJSON(body))
 		}
 	}
 

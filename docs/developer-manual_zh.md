@@ -69,8 +69,21 @@ openheron/
 统一走 `obs.Logger()`。级别与前缀只在 `agentkit/obs/logger.go:18` 一处定义，
 而级别决定了一行会不会出现在默认输出里。
 
+一行的长相跟 hertz 的 logger 一样 —— 日期、带微秒的时间、**调用点的文件与行号**、
+级别，然后是消息与属性：
+
+```
+2026/10/29 22:28:34.346459 main.go:189: [Info] [main] openheron version=dev
+2026/10/29 22:28:34.351002 api/v2_run.go:123: [Warn] [run=abc123] request failed err="connection refused"
+```
+
+这个信封由 `agentkit/obs/handler.go`（一个 `slog.Handler`）拼出来 —— slog 自带的文本
+handler 拼不出来（它的信封是一串属性，源码也只是又一个属性）。★ 文件与行号是**调用点**
+的：slog 把调用点的程序计数器记在记录里，handler 打印的就是它。
+
 **唯一的例外是 `llm/common`** —— 它是零 openheron 依赖的叶子包，
-引 `obs` 就破了「协议层不依赖运行时」这条铁律，所以它用标准 logger。
+引 `obs` 就破了「协议层不依赖运行时」这条铁律，所以它用带同样 flag 的标准 logger
+（`llm/common/logging.go`）。它那几行信封相同，但**没有级别标签**：那个包没有级别。
 `llm/common` 里出现任何一处 openheron 内部 import 都算回归。
 
 **（二）声明与行为分离。** `agentkit/spec/decl` 只放纯结构体，不引任何其它包；

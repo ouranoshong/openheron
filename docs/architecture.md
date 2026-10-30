@@ -69,6 +69,14 @@ prefixes are defined in that one place, and the level decides whether a line sho
 the default output — so a business package calling `log.Printf` or
 `fmt.Fprintln(os.Stderr)` directly bypasses the switch.
 
+The format is hertz's, so the whole output reads as one stream: the date, the time with
+microseconds, the caller's file and line, the level, then the message and the attributes
+(`agentkit/obs/handler.go`):
+
+```
+2026/10/29 22:28:34.346459 main.go:189: [Info] [main] openheron version=dev
+```
+
 **The only exception** is `llm/common`: it is a leaf package with zero openheron
 dependencies, and importing `obs` there would break the "the protocol layer does not
 depend on the runtime" rule, so it uses the standard logger. Any openheron-internal

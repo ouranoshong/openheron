@@ -38,8 +38,12 @@ func SetLogger(l *slog.Logger) {
 	loggerMu.Unlock()
 }
 
+// DefaultLogger builds the logger openheron writes through.
+//
+// The format is hertz's: the date, the time with microseconds, the caller's
+// file and line, the level, then the message. See Handler.
 func DefaultLogger(w io.Writer) *slog.Logger {
-	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: levelFromEnv()}))
+	return slog.New(NewHandler(w, levelFromEnv()))
 }
 
 func levelFromEnv() slog.Level {

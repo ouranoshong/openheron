@@ -73,10 +73,25 @@ Two rules that **must not be broken**:
 Levels and prefixes are defined in one place, `agentkit/obs/logger.go:18`, and the
 level decides whether a line shows up in the default output.
 
+A line reads the way hertz's logger writes it — the date, the time with microseconds,
+**the caller's file and line**, the level, then the message and the attributes:
+
+```
+2026/10/29 22:28:34.346459 main.go:189: [Info] [main] openheron version=dev
+2026/10/29 22:28:34.351002 api/v2_run.go:123: [Warn] [run=abc123] request failed err="connection refused"
+```
+
+The envelope is built by `agentkit/obs/handler.go`, a `slog.Handler` — slog's own text
+handler cannot produce it (its envelope is a list of attributes, and the source is just
+another attribute). ★ The file and the line are the **caller's**: slog captures the call
+site's program counter in the record, and that is what the handler prints.
+
 **The only exception is `llm/common`** — it is a leaf package with zero openheron
 dependencies, and importing `obs` there would break the "the protocol layer does not
-depend on the runtime" rule, so it uses the standard logger. Any openheron-internal
-import inside `llm/common` is a regression.
+depend on the runtime" rule, so it uses the standard logger with the same flags
+(`llm/common/logging.go`). Its lines have the same envelope but **no level tag**:
+that package has no levels. Any openheron-internal import inside `llm/common` is a
+regression.
 
 **(2) Declaration and behaviour are separate.** `agentkit/spec/decl` holds only plain
 structs and imports no other package; `agentkit/spec` holds the behaviour (loading,
