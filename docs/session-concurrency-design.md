@@ -1,7 +1,14 @@
 # Session Concurrency Design — one session, one turn
 
-> Status: **design only.** Nothing in this document is implemented yet. The
-> code still behaves as described in [§2](#2-what-happens-today).
+> Status: **implemented.** The gate, the cross-client 409 and the frontend's
+> busy-state handling are all in the code — §5 points at where each piece
+> lives. §2 still describes the code as it was **before** the change, so it
+> reads as history.
+>
+> ★ **Successor.** [run-lifecycle-design.md](run-lifecycle-design.md) proposes
+> replacing the gate's mutex with a lease and a fence, and demoting the SSE
+> connection to a subscriber. It is a proposal — nothing in it is in the tree
+> yet. The rule this document fixes ("one session, one turn") stays.
 >
 > Scope: the `/v2` run path (`POST /v2/run`), the session state projection
 > (`GET /v2/sessions/{id}` and `GET /v2/sessions/{id}/messages`), and the

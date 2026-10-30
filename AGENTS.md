@@ -7,7 +7,7 @@ one — change one and change the other.
 
 > ★ **This repository is the code surface**: Go backend + React frontend + build configuration.
 >
-> It ships **six** bilingual document sets, maintained alongside the code
+> It ships **seven** bilingual document sets, maintained alongside the code
 > (**English is the main version; the `_zh` suffix marks the Chinese version**):
 > `README.md` / `README_zh.md`,
 > `docs/architecture.md` / `docs/architecture_zh.md` (architecture),
@@ -15,8 +15,9 @@ one — change one and change the other.
 > `docs/developer-manual.md` / `docs/developer-manual_zh.md` (developer guide),
 > `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` (context-usage estimation design),
 > `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` (session concurrency design),
+> `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` (run lifecycle design).
 > **Every other design document under `docs/` still lives in the upstream repository** ——
-> any `docs/xxx.md` reference below that is not one of these six is the upstream copy.
+> any `docs/xxx.md` reference below that is not one of these seven is the upstream copy.
 > If you cannot get hold of it before changing semantics, ask first; do not change
 > configuration or interfaces from memory.
 >
@@ -27,9 +28,17 @@ one — change one and change the other.
 > `docs/session-concurrency-design.md` covers **session concurrency** — the admission gate for
 > one turn per session (§5), the cross-client 409 (§5.2), and the frontend busy-state handling
 > (§5.4-§5.6) are all already in the code.
+> `docs/run-lifecycle-design.md` is the odd one out: it is a **proposal**, not a description.
+> Its §1 describes the code as it is — a turn is bound to one SSE connection today — while its
+> §2 onwards describe what would be built: a run as a durable row, a lease with a fence, and the
+> connection demoted to a subscriber. **Nothing from §2 onwards is in the tree.**
+>
 > Write these documents **from the code, not from imagination**: every conclusion must point at a
 > line in the code. When the code changes, the documents change with it — documentation drift is
 > worse than no documentation.
+>
+> A design that proposes something new may go past the code — but it must say so where the
+> description stops and the proposal starts, and label the proposal as not implemented.
 >
 > ★ **Both versions must stay in sync**: editing the English version means editing the `_zh`
 > version too, and vice versa. Code identifiers, line references, commands and paths must
@@ -277,6 +286,7 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 | `docs/developer-manual.md` / `docs/developer-manual_zh.md` | **Developer guide** — layering, dependency iron rules, development recipes, testing and troubleshooting, known issues |
 | `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` | **Context-usage estimation design** — accounting rules, data flow, backend and frontend changes, persistence of compaction results and effective history (**the usage dashboard and compaction persistence are implemented**) |
 | `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` | **Session concurrency design** — why cross-client preemption happened, the "one turn per session" rule and its implementation, and how the frontend learns that a session is busy (**the admission gate and the 409 are implemented**) |
+| `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` | **Run lifecycle design** — why a turn is bound to one SSE connection today, and how a run becomes a durable row with a lease and a fence, so the connection can be demoted to a subscriber (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
 
 ★ The file without a suffix is the **English main version**; `_zh` is the Chinese version; the two
 correspond one to one — change one and change the other.

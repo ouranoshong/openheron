@@ -46,14 +46,18 @@ At the same time, "who may do what" becomes a few hard rules:
   has two agents sharing one model. A wrong model pairing wastes more than no pairing.
 
 ★ This repository is the **code face**: a Go backend, a React frontend and the build
-configuration, with six document sets alongside
+configuration, with seven document sets alongside
 (`docs/architecture.md`, `docs/user-manual.md`, `docs/developer-manual.md`,
-`docs/context-usage-design.md`, `docs/session-concurrency-design.md`, each with a `_zh`
-Chinese version).
-The first three describe what the code **is**; the last two are designs whose
+`docs/context-usage-design.md`, `docs/session-concurrency-design.md`,
+`docs/run-lifecycle-design.md`, each with a `_zh` Chinese version).
+The first three describe what the code **is**; the next two are designs whose
 implementation **is already in the code** — context-usage estimation (the usage
 dashboard and the persistence of compaction results) and session concurrency (the
 one-turn-per-session gate and the cross-client 409).
+The last one is a **proposal**: `docs/run-lifecycle-design.md` describes how a turn
+is bound to one SSE connection today, and how a run could become a durable row with
+a lease and a fence, so the connection becomes a subscriber. Nothing beyond its
+§1 is in the code yet.
 The finer-grained design documents and the industry comparison live in the **upstream
 repository** under `docs/` — for the mechanism breakdown and the trade-offs, see the
 upstream `docs/positioning.md`.
@@ -312,6 +316,7 @@ English and Chinese (**English is the primary version, `_zh` is the Chinese one*
 | [docs/developer-manual.md](docs/developer-manual.md) · [中文](docs/developer-manual_zh.md) | **Developer manual** — layering, the dependency rules, development recipes, testing and troubleshooting, known issues |
 | [docs/context-usage-design.md](docs/context-usage-design.md) · [中文](docs/context-usage-design_zh.md) | **Context usage estimate — design** — the occupancy metric, the data flow, the backend and frontend changes, and how the compacted conversation is persisted (the meter, the compaction and the compaction marker are in the code) |
 | [docs/session-concurrency-design.md](docs/session-concurrency-design.md) · [中文](docs/session-concurrency-design_zh.md) | **Session concurrency — design** — why a second surface could cut into a running turn, the one-turn-per-session rule, and how the frontend learns that a session is busy (the gate is in the code) |
+| [docs/run-lifecycle-design.md](docs/run-lifecycle-design.md) · [中文](docs/run-lifecycle-design_zh.md) | **Run lifecycle — design** — why a turn is bound to one SSE connection today, and how a run could become a durable row with a lease and a fence, so the connection becomes a subscriber (a proposal: only §1 describes the code) |
 
 The **rest** of the design documents under `docs/` live in the upstream repository and
 are not distributed with this one:

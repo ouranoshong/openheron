@@ -31,12 +31,16 @@
 - 「高性能」指**单位 token 的有效产出**，不承诺零延迟或无限并发。
 - 专家配专模要**配对才划算**：出厂配置里两个 agent 共用一个模型。配错模型比不配更浪费。
 
-★ 本仓库是**代码面**：Go 后端 + React 前端 + 构建配置，随附六组文档
+★ 本仓库是**代码面**：Go 后端 + React 前端 + 构建配置，随附七组文档
 （`docs/architecture.md`、`docs/user-manual.md`、`docs/developer-manual.md`、
-`docs/context-usage-design.md`、`docs/session-concurrency-design.md`，各带一份 `_zh`
-中文版）。
-前三组讲的是代码**现在是什么样**；后两组是**已经落进代码**的设计 —— 上下文使用预估
-（占用仪表盘与压缩结果的持久化）与会话并发（一个会话一轮的闸门与跨客户端的 409）。
+`docs/context-usage-design.md`、`docs/session-concurrency-design.md`、
+`docs/run-lifecycle-design.md`，各带一份 `_zh` 中文版）。
+前三组讲的是代码**现在是什么样**；接下来的两组是**已经落进代码**的设计 ——
+上下文使用预估（占用仪表盘与压缩结果的持久化）与会话并发（一个会话一轮的闸门与
+跨客户端的 409）。
+最后一组是一份**提案**：`docs/run-lifecycle-design.md` 讲的是今天一轮为什么绑在
+一条 SSE 连接上，以及 run 怎么才能变成一行持久事实、配上租约与 fence，好让连接
+降级为订阅者。它的 §1 之外都还没进代码。
 更细的分册设计与行业对照在**上游仓库**的 `docs/` 里 ——
 机制拆解与取舍见上游的 `docs/positioning.md`。
 
@@ -263,6 +267,7 @@ make smoke              # 真后端联调（SSE 分帧、历史回放、审批�
 | [docs/developer-manual.md](docs/developer-manual.md) · [中文](docs/developer-manual_zh.md) | **开发者说明** —— 分层、依赖铁律、开发配方、测试与排障、已知问题 |
 | [docs/context-usage-design.md](docs/context-usage-design.md) · [中文](docs/context-usage-design_zh.md) | **上下文使用预估设计方案** —— 占用口径、数据流、后端与前端改动，以及压缩后的对话如何持久化（占用仪表盘、压缩持久化与压缩标记的渲染已实现） |
 | [docs/session-concurrency-design.md](docs/session-concurrency-design.md) · [中文](docs/session-concurrency-design_zh.md) | **会话并发设计方案** —— 为什么第二个界面能插进正在跑的轮次、「一个会话一轮」的规则，以及前端怎么知道会话正忙（闸门已实现） |
+| [docs/run-lifecycle-design.md](docs/run-lifecycle-design.md) · [中文](docs/run-lifecycle-design_zh.md) | **run 生命周期设计方案** —— 今天一轮为什么绑在一条 SSE 连接上，以及 run 怎么才能变成一行持久事实、配上租约与 fence，好让连接降级为订阅者（提案：只有 §1 讲的是代码现状） |
 
 `docs/` 下**其余**设计文档在上游仓库里，不随本仓库分发：
 

@@ -7,7 +7,7 @@
 
 > ★ **本仓库是代码面**：Go 后端 + React 前端 + 构建配置。
 >
-> 本仓库自带**六组**中英双语文档，随代码面一起维护
+> 本仓库自带**七组**中英双语文档，随代码面一起维护
 > （**英文是主版本，`_zh` 后缀是中文版**）：
 > `README.md` / `README_zh.md`、
 > `docs/architecture.md` / `docs/architecture_zh.md`（架构设计说明）、
@@ -15,6 +15,7 @@
 > `docs/developer-manual.md` / `docs/developer-manual_zh.md`（开发者说明）、
 > `docs/context-usage-design.md` / `docs/context-usage-design_zh.md`（上下文使用预估设计方案）、
 > `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md`（会话并发设计方案）、
+> `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md`（run 生命周期设计方案）。
 > **`docs/` 下其余设计文档仍在上游仓库** ——
 > 下面凡引用 `docs/xxx.md` 而这几组之外的，都是上游那份。改语义前若拿不到它，
 > 先问，别凭印象改配置或接口。
@@ -24,8 +25,16 @@
 > 以及压缩标记的界面渲染（§7.7）都已在代码里。
 > `docs/session-concurrency-design.md` 讲的是**会话并发** —— 一个会话一轮的准入闸门
 > （§5）、跨客户端的 409（§5.2）、以及前端的忙态处理（§5.4-§5.6）都已在代码里。
+> `docs/run-lifecycle-design.md` 是唯一的例外：它是一份**提案**，不是描述。
+> 它的 §1 讲的是代码现状 —— 今天一轮绑在一条 SSE 连接上 —— §2 往后讲的是
+> 要建成什么样：run 变成一行持久事实、租约配 fence、连接降级为订阅者。
+> **§2 往后的东西都还不在树上。**
+>
 > 写这几组文档时**照代码写**，别照想象写：每个结论都要能在代码里指到行。
 > 代码改了，文档跟着改 —— 文档漂移比没有文档更贵。
+>
+> 要提新东西的设计文档可以写到代码之外 —— 但必须说清哪里是描述、哪里是提案，
+> 并把提案标成「尚未实现」。
 >
 > ★ **两版必须同步**：改英文版就同时改 `_zh` 版，反之亦然。
 > 两版的代码标识符、行号引用、命令与路径应当一一对应 ——
@@ -240,6 +249,7 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 | `docs/developer-manual.md` / `docs/developer-manual_zh.md` | **开发者说明** —— 分层、依赖铁律、开发配方、测试与排障、已知问题 |
 | `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` | **上下文使用预估设计方案** —— 占用口径、数据流、后端与前端改动、压缩结果的持久化与有效历史（**占用仪表盘与压缩持久化已实现**） |
 | `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` | **会话并发设计方案** —— 跨客户端抢占的成因、「一个会话一轮」的规则与实现、以及前端怎么知道会话正忙（**准入闸门与 409 已实现**） |
+| `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` | **run 生命周期设计方案** —— 今天一轮为什么绑在一条 SSE 连接上，以及 run 怎么变成一行持久事实、配上租约与 fence，好让连接降级为订阅者（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
 
 ★ 无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。
 
