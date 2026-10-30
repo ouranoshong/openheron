@@ -1,4 +1,4 @@
-# openheron
+# <img src="web/public/favicon.svg" alt="openheron" width="72" height="72" /> openheron
 
 **一个把「专家 Agent」当工具使的多 Agent 运行时**：每个专家 Agent 在配置里绑定适合自己的
 大模型，父 Agent 只做编排与合成 —— token 花在真正需要它的地方。
@@ -31,11 +31,12 @@
 - 「高性能」指**单位 token 的有效产出**，不承诺零延迟或无限并发。
 - 专家配专模要**配对才划算**：出厂配置里两个 agent 共用一个模型。配错模型比不配更浪费。
 
-★ 本仓库是**代码面**：Go 后端 + React 前端 + 构建配置，随附四组文档
+★ 本仓库是**代码面**：Go 后端 + React 前端 + 构建配置，随附六组文档
 （`docs/architecture.md`、`docs/user-manual.md`、`docs/developer-manual.md`、
-`docs/context-usage-design.md`，各带一份 `_zh` 中文版）。
-前三组讲的是代码**现在是什么样**；第四组是**提案** —— 上下文使用预估的设计，
-尚未实现。
+`docs/context-usage-design.md`、`docs/session-concurrency-design.md`，各带一份 `_zh`
+中文版）。
+前三组讲的是代码**现在是什么样**；后两组是**已经落进代码**的设计 —— 上下文使用预估
+（占用仪表盘与压缩结果的持久化）与会话并发（一个会话一轮的闸门与跨客户端的 409）。
 更细的分册设计与行业对照在**上游仓库**的 `docs/` 里 ——
 机制拆解与取舍见上游的 `docs/positioning.md`。
 
@@ -284,5 +285,6 @@ make smoke              # 真后端联调（SSE 分帧、历史回放、审批�
 | `docs/llm-common.md` | 厂商协议层 |
 
 本仓库另有两份约定文档：**[AGENTS.md](AGENTS.md)**（给在这儿工作的人与 AI 的
-项目约定）与 **[.openheron-example/README.md](.openheron-example/README.md)**
+项目约定，中文版是 **[AGENTS_zh.md](AGENTS_zh.md)**）与
+**[.openheron-example/README.md](.openheron-example/README.md)**
 （出厂配置样例的用法）。

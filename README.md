@@ -1,4 +1,4 @@
-# openheron
+# <img src="web/public/favicon.svg" alt="openheron" width="72" height="72" /> openheron
 
 **A multi-agent runtime that treats "expert agents" as tools**: every expert agent binds
 itself to a model that suits it, while the parent agent only orchestrates and
@@ -46,11 +46,14 @@ At the same time, "who may do what" becomes a few hard rules:
   has two agents sharing one model. A wrong model pairing wastes more than no pairing.
 
 ★ This repository is the **code face**: a Go backend, a React frontend and the build
-configuration, with four document sets alongside
+configuration, with six document sets alongside
 (`docs/architecture.md`, `docs/user-manual.md`, `docs/developer-manual.md`,
-`docs/context-usage-design.md`, each with a `_zh` Chinese version).
-The first three describe what the code **is**; the last one is a **proposal** —
-a design for context-usage estimation that is not implemented yet.
+`docs/context-usage-design.md`, `docs/session-concurrency-design.md`, each with a `_zh`
+Chinese version).
+The first three describe what the code **is**; the last two are designs whose
+implementation **is already in the code** — context-usage estimation (the usage
+dashboard and the persistence of compaction results) and session concurrency (the
+one-turn-per-session gate and the cross-client 409).
 The finer-grained design documents and the industry comparison live in the **upstream
 repository** under `docs/` — for the mechanism breakdown and the trade-offs, see the
 upstream `docs/positioning.md`.
@@ -332,6 +335,7 @@ are not distributed with this one:
 | `docs/llm-common.md` | The vendor protocol layer |
 
 Two more convention documents live in this repository:
-**[AGENTS.md](AGENTS.md)** (the project conventions for the people and AI working here)
-and **[.openheron-example/README.md](.openheron-example/README.md)** (how to use the
+**[AGENTS.md](AGENTS.md)** (the project conventions for the people and AI working here;
+**[AGENTS_zh.md](AGENTS_zh.md)** is the Chinese version) and
+**[.openheron-example/README.md](.openheron-example/README.md)** (how to use the
 factory configuration sample).
