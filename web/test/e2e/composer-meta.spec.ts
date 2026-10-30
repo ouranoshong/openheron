@@ -73,7 +73,7 @@ test("底栏显示该 agent 的上下文占用", async ({ page }) => {
   await expect(ctx).toContainText("Context: ≈18k / 131k (14 %)")
   await expect(ctx).toHaveAttribute(
     "title",
-    /Tokens in the most recent request to this agent/,
+    /Tokens in this agent's context/,
   )
 })
 

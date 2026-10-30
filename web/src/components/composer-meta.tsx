@@ -112,7 +112,11 @@ function ContextMeter({ usage }: { usage: ContextUsage }) {
     ? `Context: ≈${formatTokens(usage.usedTokens)} / ${formatTokens(usage.contextWindow)} (${Math.round(ratio * 100)} %)`
     : `Context: ≈${formatTokens(usage.usedTokens)} tokens`
 
-  const lines = ["Tokens in the most recent request to this agent."]
+  const lines = [
+    // The number is the context's size. It is measured by the most recent
+    // request — or by the summary, right after a manual compaction.
+    "Tokens in this agent's context — the most recent request, or the summary after a compaction.",
+  ]
   if (known) {
     lines.push(`Window: ${usage.contextWindow} tokens`)
   } else {

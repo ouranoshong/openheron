@@ -194,7 +194,8 @@ test("键盘移动超出可视区时列表自动跟随", async ({ page }) => {
   await box.click()
   await page.keyboard.type("/")
   const options = page.locator(COMPOSER_OPTION)
-  await expect(options).toHaveCount(9)
+  // Every command but /stop, which only makes sense while a run is live.
+  await expect(options).toHaveCount(10)
 
   for (let i = 0; i < 8; i++) await page.keyboard.press("ArrowDown")
   await expect(options.nth(8)).toHaveAttribute("aria-selected", "true")
