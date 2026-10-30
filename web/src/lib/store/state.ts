@@ -35,6 +35,12 @@ export interface StoreState {
   switchAgent(agentId: string): Promise<void>
 
   send(text: string): Promise<void>
+  // reattach comes back to a run after the connection dropped. The run
+  // outlives the connection, so a broken stream is not a lost turn.
+  reattach(id: string, message: string): Promise<void>
+  // reloadHistory re-reads the session's transcript — what a client does
+  // when it learns a run is over.
+  reloadHistory(id: string): Promise<void>
   addFiles(files: File[]): Promise<void>
   removeFile(sessionId: string, name: string): Promise<void>
   answer(interrupts: Interrupt[], approved: boolean, reason?: string): Promise<void>

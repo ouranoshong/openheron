@@ -435,6 +435,11 @@ This session is running in another window — stop it to take over
 会话的 `state` 对每个看它的客户端都报 `"running"`。在轮次运行期间打开的第二个
 窗口，水合出来就是「忙」，发送按钮已经是禁用的。
 
+★ **连接断了也不会丢掉这一轮。** 轮次属于服务端，不属于碰巧在看着它的那条连接：
+服务端照样归档。连接断掉的客户端带着 run 的 id 回来——`POST /v2/run`，带
+`runId`、**不带问题**——就能拿到这一轮剩下的部分。`GET /v2/sessions/{id}/runs`
+说这个 run 还跑不跑；它不跑的时候，那一轮的历史就在那里。
+
 ## 7. 知识库
 
 知识库是**可选**的本地语料检索层：把一批 markdown 文档变成 Agent 能检索的资料。

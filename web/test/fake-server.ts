@@ -1,4 +1,22 @@
 
+// FakeRun is one run of the fake's session.
+//
+// ★ The fake keeps it because the real server keeps it: the run ledger is
+//   what a client scans to learn whether its run is still going, and the
+//   attach path needs the run's events to replay.
+export interface FakeRun {
+  runId: string
+  state: "starting" | "running" | "completed" | "failed"
+  kind: "query" | "resume"
+  startedAt: string
+  endedAt?: string
+  // events are the ones the client has already seen — the window.
+  events: RunEvent[]
+  // remaining are the ones a client that comes back late still gets.
+  remaining?: RunEvent[]
+  messageId?: string
+}
+
 export interface FakeThread {
   threadId: string
   title: string
@@ -8,6 +26,7 @@ export interface FakeThread {
   state: "idle" | "running" | "waiting_approval"
   agentId?: string
   pendings?: PendingApproval[]
+  runs?: FakeRun[]
   usage?: Usage
   files: { name: string; path: string; size: number }[]
 }
@@ -183,6 +202,8 @@ export const SCENARIOS = {
   approval: ["A"],
 
   slowRun: ["A"],
+
+  dropped: ["A"],
 
   approvalMulti: ["A"],
 
@@ -1217,6 +1238,33 @@ export function startFakeServer(port = 0): FakeServer {
       return sse(stream)
     }
 
+    // ★ Attach: the client comes back for a run it already knows. The
+    //   request carries the run's id and no question — a question would
+    //   mean "start a new run".
+    if (body.runId && !(body.query ?? "").trim() && !body.messages?.length && !body.resume?.length) {
+      const run = (thread.runs ?? []).find((r) => r.runId === body.runId)
+      if (!run || run.state !== "running") {
+        return fail(404, "the run is no longer live; load the session's history instead", "run_not_live")
+      }
+      const assistant = thread.messages.find((m) => m.id === run.messageId)
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          // The window: what the client missed when it lost the connection.
+          for (const ev of run.events) c.enqueue(encode(ev))
+          // And the rest of the turn.
+          for (const ev of run.remaining ?? []) {
+            if (assistant) applyToMessage(assistant, ev)
+            c.enqueue(encode(ev))
+          }
+          run.state = "completed"
+          run.endedAt = new Date().toISOString()
+          thread.state = "idle"
+          c.close()
+        },
+      })
+      return sse(stream)
+    }
+
     // ★ The admission gate. A session has at most one live turn, so a
     //   second run is refused — and the running turn is left alone.
     if (scenario === "busySession" && thread.state === "running") {
@@ -1235,6 +1283,43 @@ export function startFakeServer(port = 0): FakeServer {
     thread.messages.push(assistantMsg)
     if (thread.title === "New Session") thread.title = query.slice(0, 40)
 
+    // ★ The "dropped" scenario: the connection dies mid-turn, but the run
+    //   keeps going — the server archives the turn, not the stream. The
+    //   client comes back with the run's id and gets the rest of it.
+    if (scenario === "dropped") {
+      const head: RunEvent[] = [
+        started(thread!.threadId, runId),
+        textStart(msgId, "assistant"),
+        textDelta(msgId, `${marker} 前半`),
+      ]
+      const tail: RunEvent[] = [
+        textDelta(msgId, `${marker} 后半`),
+        textEnd(msgId),
+        finished(thread!.threadId, runId),
+      ]
+      const run: FakeRun = {
+        runId,
+        state: "running",
+        kind: "query",
+        startedAt: new Date().toISOString(),
+        events: head,
+        remaining: tail,
+        messageId: assistantMsg.id,
+      }
+      thread!.runs = [...(thread!.runs ?? []), run]
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          for (const ev of head) {
+            applyToMessage(assistantMsg, ev)
+            c.enqueue(encode(ev))
+          }
+          // ★ The connection dies here. The run does not.
+          c.close()
+        },
+      })
+      return sse(stream)
+    }
+
     const stream = new ReadableStream<Uint8Array>({
       start(c) {
         const events = eventsFor(scenario, thread!.threadId, marker, runId)
@@ -1242,6 +1327,20 @@ export function startFakeServer(port = 0): FakeServer {
           applyToMessage(assistantMsg, ev)
           c.enqueue(encode(ev))
         }
+        // ★ The run is a row in the ledger — the client scans it to learn
+        //   whether its run is still going.
+        thread!.runs = [
+          ...(thread!.runs ?? []),
+          {
+            runId,
+            state: "completed",
+            kind: "query",
+            startedAt: new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+            events,
+            messageId: assistantMsg.id,
+          },
+        ]
         const fin = events.at(-1)
         const hits = fin?.outcome?.type === "interrupt" ? (fin.outcome.interrupts ?? []) : []
         if (hits.length > 0) {
@@ -1436,6 +1535,25 @@ export function startFakeServer(port = 0): FakeServer {
           pendingApprovals: t.pendings,
           usage: t.usage,
         })
+      }
+
+      // ★ The run ledger's scan. It is the truth about "is my run still
+      //   going" — the stream cannot say that, because the run outlives
+      //   the stream.
+      const runsRoute = path.match(/^\/v2\/sessions\/([^/]+)\/runs$/)
+      if (runsRoute) {
+        const t = find(runsRoute[1])
+        if (!t) return notFound()
+        const items = (t.runs ?? []).map((r) => ({
+          runId: r.runId,
+          state: r.state,
+          kind: r.kind,
+          epoch: 1,
+          startedAt: r.startedAt,
+          ...(r.endedAt ? { endedAt: r.endedAt } : {}),
+        }))
+        const active = items.find((r) => r.state === "running" || r.state === "starting")
+        return json({ items, ...(active ? { activeRunId: active.runId } : {}) })
       }
 
       const p = path.match(/^\/v2\/sessions\/([^/]+)\/(files|abort|compact)$/)

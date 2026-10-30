@@ -289,7 +289,16 @@ function appendToOpenPart(
 export function reduceEvent(state: ConversationState, event: AgEvent): ConversationState {
   switch (event.type) {
     case "RUN_STARTED":
-      return { ...state, status: "running", interrupts: [], error: undefined, retry: undefined }
+      // ★ The run id is kept: it is the client's way back to this run if
+      //   the connection drops.
+      return {
+        ...state,
+        status: "running",
+        runId: (event as RunStartedEvent).runId ?? state.runId,
+        interrupts: [],
+        error: undefined,
+        retry: undefined,
+      }
 
     case "RUN_FINISHED":
       return onRunFinished(state, event)

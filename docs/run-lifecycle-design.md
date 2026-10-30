@@ -955,7 +955,8 @@ able to tell that apart from a session it may retry.
 
 ## 9. The frontend
 
-★ **This section is a proposal.** The server already tells the truth; the client does not ask it yet.
+★ **The re-attach is implemented.** The busy flag's own rule (§9.1) is still a
+proposal: the server tells the truth, and the client does not ask it yet.
 
 ### 9.1 The busy flag becomes a scanned fact
 
@@ -973,12 +974,19 @@ abort, then **re-scans**, instead of setting `busy: false` itself
 
 ### 9.2 Attach
 
-The store keeps the run id of the run it started. On a stream error or a
-reconnect, the client asks the scan whether that run is still live:
+★ **Implemented.** The store keeps the run id of the run it started (the
+`RUN_STARTED` frame carries it, and the reducer keeps it). When the stream
+ends **without a terminal frame**, the connection died — not the run — and the
+client asks the scan whether that run is still live:
 
-- live → re-`POST /v2/run` with the same `runId` → **attach**, and the rest of
-  the turn renders.
+- live → re-`POST /v2/run` with the same `runId` and **no question** →
+  **attach**, and the rest of the turn renders.
 - not live → the run is over; the transcript is the truth; load it.
+
+★ **A stream that ends without a terminal frame is the signal.** `RUN_FINISHED`
+means the run is over and `RUN_ERROR` means it broke; a stream that ends with
+neither means the connection died. That is a protocol-level fact, and it is
+the only one the client needs.
 
 ★ This is the visible payoff of the whole design: **a second tab can watch a
 running turn instead of being refused**, and a dropped connection can be
@@ -993,7 +1001,7 @@ selectors stay reference-stable (AGENTS.md's rules). What changes is the
 | Value | Today | Proposed |
 |---|---|---|
 | `busy` | inferred from the stream's end and from 409s | scanned |
-| the run id | not kept (`web/src/lib/store/actions.ts:250-254`) | kept, and sent on re-attach |
+| the run id | ✓ kept (`web/src/lib/events.ts` — the reducer) and sent on re-attach | kept, and sent on re-attach |
 
 ## 10. What changes where
 
@@ -1019,9 +1027,10 @@ selectors stay reference-stable (AGENTS.md's rules). What changes is the
 | `api/v2_run.go` | ✓ the run id is minted once and handed down; the handler subscribes instead of draining. **Later:** attach |
 | `api/v2_sessions.go` | ✓ `state` comes from the scan; the two scan routes; the abort names the run it stopped |
 | `api/v2_files.go` | ✓ the two new routes |
-| `web/src/lib/store/actions.ts` | keep the run id; re-attach; re-scan instead of assuming |
+| `web/src/lib/store/actions.ts` | ✓ keep the run id; ✓ re-attach after a dropped stream; re-scan instead of assuming |
 | `web/src/lib/store/history.ts` | `busy` from the scan |
-| `web/src/lib/api.ts` | `runId` on the run request; the runs scan |
+| `web/src/lib/api.ts` | ✓ `runId` on the run request; ✓ the runs scan |
+| `web/src/lib/events.ts` | ✓ the reducer keeps the run id |
 | `web/src/lib/types.ts` | `activeRunId` on the session meta |
 
 ## 11. Testing
@@ -1091,8 +1100,10 @@ selectors stay reference-stable (AGENTS.md's rules). What changes is the
 - a re-attach keeps the run id.
 
 **E2E** (the fake backend, `web/test/e2e/`):
+- ✓ a dropped connection re-attaches and receives the rest of the turn
+  (`web/test/e2e/reattach.spec.ts`);
+- ✓ the re-attach carries the run's id and no question;
 - a second tab attaches to a running turn and sees its output;
-- a dropped connection re-attaches and receives the rest of the turn;
 - a 409 still rolls back the optimistic bubble (the previous round's
   behaviour must survive the change).
 
@@ -1103,14 +1114,14 @@ scan route, the reconciler. The SSE still drives the run, but the run's **row**
 is written independently of the connection, so a crash leaves a trace. This
 stage fixes C1 and C2 and gives the frontend something true to scan.
 
-**Stage 2 — the run owns its consumption.** ✓ **landed (except attach).** The
-`agentkit/emit` split, the subscribers, the run's event window. The run reads
-its own events, derives what they mean, and archives the result; the
-connection subscribes to what the run publishes. This fixes C3 and C4 — the
-coupling itself. It is also the stage where a **stuck subscriber stops being
-a scenario**: the run owns no socket, so a wedged connection cannot reach the
-run at all. **What is left of this stage: attach** — the client sending the
-run's id back to re-attach to a live run (§8.1).
+**Stage 2 — the run owns its consumption.** ✓ **landed.** The
+`agentkit/emit` split, the subscribers, the run's event window, and the
+**attach**. The run reads its own events, derives what they mean, and archives
+the result; the connection subscribes to what the run publishes, and a client
+that lost its connection comes back with the run's id and gets the rest of the
+turn. This fixes C3 and C4 — the coupling itself. It is also the stage where a
+**stuck subscriber stops being a scenario**: the run owns no socket, so a
+wedged connection cannot reach the run at all.
 
 **Stage 3 — the lease replaces the mutex.** The arbiter, the
 **progress-driven renewal**, the fence. The gate's behaviour is unchanged (still

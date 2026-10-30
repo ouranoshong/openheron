@@ -120,6 +120,12 @@ export interface ConversationState {
   // notice is a transient line about something the server is doing right
   // now. It is not an error: the work is still going on.
   notice?: string
+  // runId is the id of the run this conversation is following.
+  //
+  // ★ It is how the client comes back to a run it lost the connection to:
+  //   the id goes back to the server, and the server hands the rest of the
+  //   turn over.
+  runId?: string
   // busy means the session has a live turn that this surface does not own —
   // another tab, another window, another client. It is not a failure: the
   // turn is fine, it just belongs to someone else. The user can stop it and

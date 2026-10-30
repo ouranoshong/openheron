@@ -64,6 +64,27 @@ export interface AgMessage {
   toolCallResults?: unknown[]
 }
 
+// RunView is one run of the session's ledger.
+//
+// ★ It is the truth about "what is this session doing". The stream is a
+// hint; this is the record.
+export interface RunView {
+  runId: string
+  state: "starting" | "running" | "waiting_approval" | "completed" | "failed" | "aborted" | "interrupted"
+  kind: "query" | "resume"
+  epoch: number
+  parentRunId?: string
+  startedAt: string
+  endedAt?: string
+  error?: { code: string; message: string }
+}
+
+// RunsView is the scan of a session's runs.
+export interface RunsView {
+  items: RunView[]
+  activeRunId?: string
+}
+
 export interface MessagesView {
   threadId: string
   state: ThreadMeta["state"]
@@ -243,6 +264,13 @@ export const api = {
 
   getMessages: (id: string) => call<MessagesView>(sessionPath(id, "/messages")),
 
+  // listRuns scans the session's run ledger.
+  //
+  // ★ It is how a client learns whether the run it started is still going.
+  //   The stream cannot say that: a broken connection says nothing about
+  //   the run, because the run outlives the connection.
+  listRuns: (id: string) => call<RunsView>(sessionPath(id, "/runs")),
+
   abortRun: (id: string) => call<{ aborted: boolean }>(sessionPath(id, "/abort"), { method: "POST" }),
 
   // compact compacts the session's context now. It is the manual
@@ -286,6 +314,13 @@ export interface RunInput {
   threadId: string
   query?: string
   resume?: ResumeInput[]
+  // runId asks for a specific run. With no query it means "attach to the
+  // run I already know" — the server refuses a run that is not live.
+  //
+  // ★ It is what turns a lost connection into a pause rather than a loss:
+  //   the client comes back with the id it was given and gets the rest of
+  //   the turn.
+  runId?: string
 }
 
 export interface RunHandle {
@@ -317,6 +352,7 @@ export function runStream(input: RunInput, handlers: RunHandlers): RunHandle {
         body: JSON.stringify({
           threadId: input.threadId,
           ...(input.query !== undefined ? { query: input.query } : {}),
+          ...(input.runId !== undefined ? { runId: input.runId } : {}),
           ...(input.resume
             ? { resume: input.resume.map((r) => ({ interruptId: r.interruptId, payload: { approved: r.approved, reason: r.reason ?? "" } })) }
             : {}),

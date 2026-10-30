@@ -477,6 +477,13 @@ gets the same answer, and the session's `state` reports `"running"` to every cli
 looking at it. A second window opened while a turn is running hydrates as busy, with the
 send button already disabled.
 
+★ **A broken connection does not lose the turn.** The turn belongs to the server, not
+to the connection that happened to be watching it: the server archives it either way.
+A client whose connection drops comes back with the run's id — `POST /v2/run` with
+`runId` and **no question** — and gets the rest of the turn. `GET
+/v2/sessions/{id}/runs` says whether the run is still going, and the run's own history
+is there for the times when it is not.
+
 ## 7. The knowledge base
 
 The knowledge base is an **optional** local corpus retrieval layer: it turns a set of

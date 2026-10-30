@@ -1,6 +1,14 @@
 import { create } from "zustand"
 
-import { ApiError, api, runStream, type CompactionResult, type RunHandle, type ThreadMeta } from "@/lib/api"
+import {
+  ApiError,
+  api,
+  runStream,
+  type CompactionResult,
+  type RunHandle,
+  type RunsView,
+  type ThreadMeta,
+} from "@/lib/api"
 import { readActiveThreadId, writeActiveThreadId } from "@/lib/active-thread"
 import { closeAllOpenParts, type AgEvent } from "@/lib/events"
 import { emptyConversation, type ConversationState, type Message, type TurnStatus } from "@/lib/types"
@@ -266,7 +274,80 @@ export const useStore = create<StoreState>((set, get) => ({
             get().markBusy(k, message)
             return
           }
-          get().loadError(k, message)
+          // ★ The connection died, not the run: the server archives the
+          //   turn, not this stream. So ask the server whether the run is
+          //   still going and come back to it if it is.
+          void get().reattach(k, message)
+        },
+        onDone: () => {
+          run = null
+          setCurrentRunKey(null)
+          // ★ The stream ended without a terminal frame: the connection
+          //   died, not the run. The server archives the turn, not the
+          //   stream — so come back to the run instead of losing the
+          //   answer. A run that finished (or failed) left the
+          //   conversation out of "running", and those need no rescue.
+          if (get().sessions[threadId]?.convo?.status === "running") {
+            void get().reattach(threadId, "the connection dropped before the run finished")
+            return
+          }
+          void get().refreshList()
+        },
+      },
+    )
+  },
+
+  // reattach comes back to a run after the connection dropped.
+  //
+  // ★ The run outlives the connection: the server archives the turn, not
+  //   this stream. So a broken stream does not mean a lost turn — it means
+  //   this surface can no longer see it. The scan says whether the run is
+  //   still going, and that answer decides what happens next:
+  //
+  //   - still going → attach to it, and the rest of the turn renders;
+  //   - over        → the transcript is the truth, so load it;
+  //   - unknown     → report the error, because there is nothing better
+  //     to say.
+  async reattach(id: string, message: string) {
+    const entry = get().sessions[id]
+    const runId = entry?.convo?.runId
+    if (!runId) {
+      get().loadError(id, message)
+      return
+    }
+
+    let runs: RunsView
+    try {
+      runs = await api.listRuns(id)
+    } catch {
+      get().loadError(id, message)
+      return
+    }
+    const live = runs.items.find(
+      (r) => r.runId === runId && (r.state === "running" || r.state === "starting"),
+    )
+    if (!live) {
+      // ★ The run is over. The transcript holds the finished turn, and it
+      //   is the only truth about what the session contains.
+      await get().reloadHistory(id)
+      return
+    }
+
+    setCurrentRunKey(id)
+    run = runStream(
+      { threadId: id, runId },
+      {
+        onEvent: (ev) => get().applyEvent(id, ev as AgEvent),
+        onError: (msg, code) => {
+          run = null
+          setCurrentRunKey(null)
+          if (code === "run_not_live") {
+            // ★ The run ended between the scan and the attach. The
+            //   transcript has the answer.
+            void get().reloadHistory(id)
+            return
+          }
+          get().loadError(id, msg)
         },
         onDone: () => {
           run = null
@@ -275,6 +356,30 @@ export const useStore = create<StoreState>((set, get) => ({
         },
       },
     )
+  },
+
+  // reloadHistory re-reads the session's transcript.
+  //
+  // ★ It is what a client does when it learns a run is over: the
+  //   transcript holds the finished turn, so loading it is the honest way
+  //   to end the story — and it beats reporting a failure the user cannot
+  //   act on.
+  async reloadHistory(id: string) {
+    try {
+      const view = await api.getMessages(id)
+      set((s) => ({
+        sessions: {
+          ...s.sessions,
+          [id]: {
+            meta: { ...(s.sessions[id]?.meta ?? stubMeta(id)), state: view.state },
+            convo: seedFromHistory(view.messages, view.pendingApprovals, view.usage, view.state),
+            loaded: true,
+          },
+        },
+      }))
+    } catch {
+      // The history is unavailable; the conversation keeps what it has.
+    }
   },
 
   async answer(interrupts, approved, reason) {

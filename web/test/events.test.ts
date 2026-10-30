@@ -441,3 +441,27 @@ describe("CUSTOM · model_retry", () => {
     expect(reduceEvent(before, { type: "CUSTOM", name: "whatever" } as AgEvent)).toBe(before)
   })
 })
+
+// The run id is kept, because it is the client's way back to a run it lost
+// the connection to.
+describe("RUN_STARTED 记住 run id", () => {
+  test("帧里的 run id 进到会话状态里", () => {
+    const next = reduceEvent(emptyConversation(), {
+      type: "RUN_STARTED",
+      threadId: "t1",
+      runId: "r-42",
+    } as AgEvent)
+    expect(next.runId).toBe("r-42")
+    expect(next.status).toBe("running")
+  })
+
+  test("没有 run id 的帧不会抹掉已有的那个", () => {
+    const first = reduceEvent(emptyConversation(), {
+      type: "RUN_STARTED",
+      threadId: "t1",
+      runId: "r-42",
+    } as AgEvent)
+    const second = reduceEvent(first, { type: "RUN_STARTED", threadId: "t1" } as AgEvent)
+    expect(second.runId).toBe("r-42")
+  })
+})
