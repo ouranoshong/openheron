@@ -81,9 +81,7 @@ func TestTheTerminalRowLandsAfterTheArchive(t *testing.T) {
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
-	drain(t, turn, Outcome{
-		Intermediates: []*schema.Message{message.NewAssistant("working", nil)},
-	})
+	drain(t, turn)
 
 	waitFor(t, func() bool {
 		runs := ledgerOf(t, sess)
@@ -159,7 +157,7 @@ func TestTheScanNamesTheActiveRun(t *testing.T) {
 	}
 
 	close(release)
-	drain(t, turn, Outcome{})
+	drain(t, turn)
 
 	waitFor(t, func() bool {
 		snap, err := rt.ScanRuns(ctx, sess.ID())
@@ -195,9 +193,7 @@ func TestTheResumeNamesItsParentRun(t *testing.T) {
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
-	drain(t, turn, Outcome{
-		Interrupts: []contract.PendingInterrupt{{InterruptID: "int-1"}},
-	})
+	drain(t, turn)
 	waitFor(t, func() bool {
 		p, _ := sess.PendingApproval()
 		return p != nil && len(p.Interrupts) == 1
@@ -231,7 +227,7 @@ func TestAFailedRunIsNotRecordedAsCompleted(t *testing.T) {
 	b := &fakeBuilder{agent: func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
 		return &fakeAgent{script: func(ctx context.Context, emit func(*adk.TypedAgentEvent[*schema.Message]) bool) {
 			emit(textEvent("working"))
-			emit(exitEvent())
+			emit(errorEvent(errors.New("model_network: the provider timed out")))
 		}}
 	}}
 	rt, sm := newTestRuntime(t, b)
@@ -245,7 +241,7 @@ func TestAFailedRunIsNotRecordedAsCompleted(t *testing.T) {
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
-	drain(t, turn, Outcome{Err: errors.New("model_network: the provider timed out")})
+	drain(t, turn)
 
 	waitFor(t, func() bool {
 		runs := ledgerOf(t, sess)
@@ -266,7 +262,7 @@ func TestAStoppedRunIsRecordedAsAborted(t *testing.T) {
 	b := &fakeBuilder{agent: func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
 		return &fakeAgent{script: func(ctx context.Context, emit func(*adk.TypedAgentEvent[*schema.Message]) bool) {
 			emit(textEvent("working"))
-			emit(exitEvent())
+			emit(errorEvent(context.Canceled))
 		}}
 	}}
 	rt, sm := newTestRuntime(t, b)
@@ -280,7 +276,7 @@ func TestAStoppedRunIsRecordedAsAborted(t *testing.T) {
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
-	drain(t, turn, Outcome{Err: context.Canceled})
+	drain(t, turn)
 
 	waitFor(t, func() bool {
 		runs := ledgerOf(t, sess)
@@ -335,7 +331,7 @@ func TestStatusOfReportsTheActiveRunID(t *testing.T) {
 	}
 
 	close(release)
-	drain(t, turn, Outcome{})
+	drain(t, turn)
 	waitFor(t, func() bool {
 		status, ok := rt.StatusOf(ctx, sess.ID())
 		return ok && status.Phase == PhaseIdle && status.RunID == ""

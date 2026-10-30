@@ -14,10 +14,17 @@ import (
 )
 
 // Turn is the handle a caller drives for one round.
-// Lifecycle: Submit/Resume -> Wait -> consume Events() -> Complete(Outcome).
-// The handle is what removes the baseline's mutual hostage situation, where
-// OnAgentEvents and the HTTP handler each had to hold a reference to the other
-// and the result could be delivered to the wrong request.
+//
+// ★ The lifecycle changed when the run took over its own consumption:
+//
+//	Submit/Resume -> Wait -> Subscribe -> render. The caller no longer
+//	drains the agent's events and reports back — the run does that, and
+//	the caller watches a subscription.
+//
+// ★ The handle is what removes the baseline's mutual hostage situation,
+//
+//	where OnAgentEvents and the HTTP handler each had to hold a reference
+//	to the other and the result could be delivered to the wrong request.
 type Turn struct {
 	sessionID string
 	Kind      contract.TurnKind
@@ -32,13 +39,23 @@ type Turn struct {
 
 	events  *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.Message]]
 	ready   chan struct{}
-	done    chan outcome
 	failErr error
 
-	completeOnce sync.Once
-	archiveOnce  sync.Once
-	readyOnce    sync.Once
-	cancel       context.CancelFunc
+	archiveOnce sync.Once
+	readyOnce   sync.Once
+	abortOnce   sync.Once
+	cancel      context.CancelFunc
+
+	// abort ends the derivation when the turn cannot finish.
+	//
+	// ★ It exists because the run consumes its own events now: an abort
+	//   has to be able to stop the run without waiting for an agent that
+	//   may ignore the cancellation.
+	abort chan struct{}
+
+	// publisher is the run's event bus. The run publishes to it; the
+	// connections subscribe.
+	publisher *publisher
 
 	// row is the run's durable record. Nil when the session has no ledger.
 	row *runRow
@@ -69,13 +86,12 @@ type Turn struct {
 	archived chan struct{}
 }
 
-type outcome struct {
-	out Outcome
-	err error
-}
-
-// Outcome is what a consumer reports back after draining the event stream.
-// openheronrt owns the archiving so the consumer never touches the session.
+// Outcome is what the run produced.
+//
+// ★ It used to be what a consumer reported back after draining the event
+//
+//	stream. The run derives it now — the consumer drains nothing and
+//	reports nothing, which is the whole point of the split.
 type Outcome struct {
 	// Intermediates are the tool-call and tool-result messages to archive.
 	Intermediates []*schema.Message
@@ -97,7 +113,7 @@ type Outcome struct {
 // Wait blocks until the turn is ready to stream, is superseded by a newer turn,
 // or exceeds the start timeout.
 // Readiness is not execution: the agent may still be running when Wait returns
-// nil, and the caller then drains Events() until it closes.
+// nil, and the caller then watches the subscription until it closes.
 func (t *Turn) Wait(timeout time.Duration) error {
 	select {
 	case <-t.ready:
@@ -125,9 +141,25 @@ func (t *Turn) Wait(timeout time.Duration) error {
 	}
 }
 
-// Events returns the event stream for this turn. Valid after Wait succeeds.
+// SessionID is the session the turn belongs to.
 func (t *Turn) SessionID() string { return t.sessionID }
 
+// Subscribe returns a view of the run's events.
+//
+// ★ The subscription replays the run's window first, so a subscriber that
+//
+//	joins late still sees the turn's tail. It is valid any time: before
+//	the run starts it is empty, and it closes when the run ends.
+func (t *Turn) Subscribe() *subscription {
+	return t.publisher.Subscribe()
+}
+
+// Events returns the agent's event stream.
+//
+// ★ It is the run's, not the caller's: the run consumes it and publishes
+//
+//	what it derived. It stays exported for the run's own plumbing — the
+//	caller must not drain it.
 func (t *Turn) Events() *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.Message]] {
 	return t.events
 }
@@ -136,22 +168,6 @@ func (t *Turn) Events() *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.Message]
 // checkpoint, not from a replayed history.
 func (t *Turn) History() []*schema.Message { return nil }
 
-// Complete hands the result back to openheronrt for archiving. It is safe to call
-// once; later calls are ignored.
-//
-// ★ It returns only after the archive has landed. The archive is what
-//
-//	puts the turn's messages into the transcript, and the next turn's
-//	input is built from that transcript — so a caller that sends the next
-//	message as soon as this returns must find the history complete.
-//
-// ★ That is also what makes the admission gate honest. The gate asks
-//
-//	whether the session is busy; the session becomes free when the
-//	archive lands. If the HTTP response went out before that, the client
-//	would be told "your turn is done" while the server still considered
-//	the session busy — and its very next message would be refused.
-//
 // holdPending keeps the approval the turn raised until the checkpoint lands.
 func (t *Turn) holdPending(interrupts []contract.PendingInterrupt) {
 	t.pending = interrupts
@@ -170,11 +186,13 @@ func (t *Turn) markArchived() {
 	t.archiveOnce.Do(func() { close(t.archived) })
 }
 
-func (t *Turn) Complete(out Outcome) {
-	t.completeOnce.Do(func() { t.done <- outcome{out: out} })
-	// ★ The wait is bounded. The archive is on the other side of this
-	//   channel, and a bug there must not hang the HTTP request: the
-	//   client would wait forever for a response that is never coming.
+// WaitArchived blocks until the turn's messages are on disk.
+//
+// ★ The wait is bounded. The archive is the run's own work, and a bug
+//
+//	there must not hang the HTTP request: the client would wait forever
+//	for a response that is never coming.
+func (t *Turn) WaitArchived() {
 	select {
 	case <-t.archived:
 	case <-time.After(archiveWaitTimeout):
@@ -189,12 +207,13 @@ func (t *Turn) Complete(out Outcome) {
 //	and the client must not hang on that.
 const archiveWaitTimeout = 30 * time.Second
 
-// fail releases a turn that can never run: it unblocks both Wait and the
-// OnAgentEvents handshake without waiting for a Complete that will not come.
+// fail releases a turn that can never run: it unblocks Wait without waiting
+// for a run that will never come.
 func (t *Turn) fail(err error) {
 	t.failErr = err
-	t.completeOnce.Do(func() { t.done <- outcome{err: err} })
 	t.signalReady()
+	// ★ The derivation may be waiting for an agent that never stops.
+	t.abortOnce.Do(func() { close(t.abort) })
 	// ★ A dead turn archives nothing, so nobody is going to close the
 	//   archived channel from the archive path. Release it here or a
 	//   caller waiting in Complete waits forever.

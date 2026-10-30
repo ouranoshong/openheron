@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/adk/middlewares/summarization"
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/ouranoshong/openheron/message"
@@ -370,6 +371,26 @@ func interruptedEvents(ids []string) *adk.TypedAgentEvent[*schema.Message] {
 	return ev
 }
 
+// errorEvent builds an event that carries the agent's failure.
+func errorEvent(err error) *adk.TypedAgentEvent[*schema.Message] {
+	return &adk.TypedAgentEvent[*schema.Message]{Err: err}
+}
+
+// compactionEvent builds the event the summarization middleware raises when
+// it replaces the history.
+func compactionEvent(msgs ...*schema.Message) *adk.TypedAgentEvent[*schema.Message] {
+	return &adk.TypedAgentEvent[*schema.Message]{
+		Action: &adk.AgentAction{
+			CustomizedAction: &summarization.TypedCustomizedAction[*schema.Message]{
+				Type: summarization.ActionTypeAfterSummarize,
+				After: &summarization.TypedAfterSummarizeAction[*schema.Message]{
+					Messages: msgs,
+				},
+			},
+		},
+	}
+}
+
 // fakeBuilder hands out a scripted agent per turn.
 type fakeBuilder struct {
 	mu       sync.Mutex
@@ -377,6 +398,16 @@ type fakeBuilder struct {
 	agentIDs []string
 	agent    func(call int, kind contract.TurnKind) adk.TypedAgent[*schema.Message]
 	err      error
+}
+
+// Contexts reports what each agent's context allows.
+//
+// ★ The fake has no models, so the windows are empty. The derivation asks
+//
+//	for them to turn a token count into a ratio, and an empty map means
+//	"no window configured" — which is what a model-less agent has.
+func (b *fakeBuilder) Contexts() map[string]contract.AgentContext {
+	return nil
 }
 
 func (b *fakeBuilder) Build(_ context.Context, _ string, agentID string, kind contract.TurnKind) (adk.TypedAgent[*schema.Message], error) {
@@ -397,20 +428,15 @@ func (b *fakeBuilder) Build(_ context.Context, _ string, agentID string, kind co
 }
 
 // drain consumes a turn's events to completion and reports the outcome.
-func drain(t *testing.T, turn *Turn, out Outcome) {
+// drain waits for the run to finish.
+//
+// ★ The run consumes its own events now, so the test drains nothing: it
+//
+//	waits for the run's archive. What the turn produced comes from the
+//	agent's events, exactly as it does in production.
+func drain(t *testing.T, turn *Turn) {
 	t.Helper()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		events := turn.Events()
-		for {
-			if _, ok := events.Next(); !ok {
-				break
-			}
-		}
-		turn.Complete(out)
-	}()
-	<-done
+	turn.WaitArchived()
 }
 
 var errBoom = errors.New("boom")

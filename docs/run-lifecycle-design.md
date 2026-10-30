@@ -18,7 +18,7 @@
 > | §4 D2 — notification is a hint, the scan is the truth | the server side is **implemented**, the client side is a proposal |
 > | §5 D3 — lease and fence | proposal |
 > | §6 D4 — the driver is pluggable | the interfaces and the file driver are **implemented**, the memory arbiter is not there yet |
-> | §7 The event pipeline | proposal |
+> | §7 The event pipeline | **implemented** — the derivation moved to `agentkit/emit`, the run owns its consumption |
 > | §8 The API surface | the scan routes are **implemented**, attach is a proposal |
 > | §9 The frontend | proposal |
 >
@@ -40,42 +40,38 @@ the tree:
 ```
 POST /v2/run
   │
-  ├─ api/v2_run.go:202   startRun → run.Runtime.Submit
-  │    └─ agentkit/run/runtime.go:157   run.Runtime.Submit
-  │         └─ agentkit/run/runtime.go:207   claimTurn        (the gate: a mutex)
-  │              └─ agentkit/run/runtime.go:259   openRunRow     ← the row is written
-  │              └─ agentkit/run/runtime.go:316   runClaimedTurn
+  ├─ api/v2_run.go:192   startRun → run.Runtime.Submit
+  │    └─ agentkit/run/runtime.go:177   run.Runtime.Submit
+  │         └─ agentkit/run/runtime.go:227   claimTurn        (the gate: a mutex)
+  │              └─ agentkit/run/runtime.go:279   openRunRow     ← the row is written
+  │              └─ agentkit/run/runtime.go:336   runClaimedTurn
   │                   └─ agentkit/run/bridge.go:99   startLoop → a goroutine
   │                        └─ agentkit/run/loop.go:21   newLoop → adk.TurnLoop
   │
-  ├─ agentkit/run/loop.go:100  makeOnAgentEvents  (inside the loop goroutine)
-  │    └─ agentkit/run/loop.go:115  turn.events = events     ← the iterator is handed over
-  │    └─ agentkit/run/loop.go:116  turn.signalReady()
-  │    └─ agentkit/run/loop.go:120  waits on turn.done        ← blocked here
+  ├─ agentkit/run/loop.go:110  makeOnAgentEvents  (inside the loop goroutine)
+  │    └─ agentkit/run/loop.go:119  emit.Derive(events, …)   ← the run reads its own events
+  │         └─ agentkit/emit/emit.go:150  src.Next()       ← the ONLY consumer
+  │         └─ agentkit/emit/emit.go:…    publishes contract.RunEvent to the subscribers
+  │    └─ agentkit/run/loop.go:134  rt.archive(sess, turn, out)
+  │         └─ agentkit/run/loop.go:…    sess.Append(msg)   ← the transcript
+  │    └─ agentkit/run/loop.go:166  rt.finishRun(turn, out)  ← the terminal row
   │
-  └─ api/v2_run.go:141  turn.Wait(...)          (the HTTP handler blocks too)
-       api/v2_run.go:154  transport.Stream(stream, turn, ...)
-            └─ transport/transport.go:68   Stream(w, turn, …)
-                 └─ transport/transport.go:75   RunStream(w, …, turn.Events(), …)
-                      └─ transport/transport.go:103  src.Next()   ← the ONLY consumer
-                      └─ transport/transport.go:167/174/182  accumulates res.Intermediates
-       api/v2_run.go:161  turn.Complete(Outcome{Intermediates: res.Intermediates, …})
-            └─ agentkit/run/turn.go:174  t.done <- outcome
-                 └─ agentkit/run/loop.go:125  rt.archive(sess, turn, out.out)
-                      └─ agentkit/run/loop.go:190  sess.Append(msg)   ← the transcript
-                 └─ agentkit/run/loop.go:130  rt.finishRun(turn, out)  ← the terminal row
+  └─ api/v2_run.go:157  turn.Subscribe()      (the connection subscribes)
+       api/v2_run.go:160  transport.Render(stream, sess.ID(), turn.RunID, sub.Events())
+            └─ transport/transport.go:60   Render: contract.RunEvent → AG-UI frames
+       api/v2_run.go:165  turn.WaitArchived()   (the response waits for the archive)
 ```
 
-★ **The persistence path runs through the rendering path.** The transcript is
-written only after the HTTP handler has drained the eino event stream and
-reported back. The renderer is not a view of the run — it *is* the run's
-output pipeline.
+★ **The persistence path no longer runs through the rendering path.** The run
+reads the agent's events itself (`agentkit/run/loop.go:119`), derives what
+they mean, and archives the result. The connection subscribes to what the run
+publishes (`api/v2_run.go:157`) and renders it — it is a view of the run, not
+its output pipeline. A connection that dies no longer stops the archive.
 
-★ The ledger's row is the one thing that does **not** run through the
-renderer: `openRunRow` writes it before the loop starts, and the terminal row
-is written by the run's own goroutine (`rt.finishRun`). The row is a fact
-about the run; the transcript is a fact about the conversation. They are
-written at different moments, on purpose.
+★ The ledger's row is written by the run's own goroutine as well:
+`openRunRow` writes it before the loop starts, and the terminal row is
+written by `rt.finishRun`. The row is a fact about the run; the transcript is
+a fact about the conversation.
 
 ### 1.2 Five consequences
 
@@ -699,39 +695,45 @@ later.
 
 ★ **This section is a proposal.** Nothing of it is in the tree.
 
-### 7.1 Why the current pipeline forces the coupling
+### 7.1 Why the old pipeline forced the coupling
 
-`transport/transport.go:98-200` (`streamEvents`) does two jobs at once:
+The transport's `streamEvents` did two jobs at once:
 
-- it **renders** AG-UI frames (`e.emit…`), and
-- it **derives** the archive payload — `res.Intermediates` (lines 167, 174,
-  182), `res.Interrupts` (line 149), `res.Compaction` (line 142),
-  `res.Usage` (lines 105, 196).
+- it **rendered** AG-UI frames (`e.emit…`), and
+- it **derived** the archive payload — the intermediates, the interrupts, the
+  compaction, the usage.
 
-★ The derivation cannot be done twice: `renderStream`
-(`transport/transport.go:266-292`) calls `mo.MessageStream.Recv()` on the
-model's stream, and `streamState` (`transport/transport.go:294-430`) folds the
-chunks into one message. **A second reader would split the chunks.** So the
-renderer is necessarily the single consumer — and since the renderer is the
-SSE sink, the sink owns the run's output.
+★ The derivation cannot be done twice: the streaming branch calls
+`mo.MessageStream.Recv()` on the model's stream and folds the chunks into one
+message. **A second reader would split the chunks.** So the renderer was
+necessarily the single consumer — and since the renderer was the SSE sink, the
+sink owned the run's output. A dead connection meant a turn that never
+archived.
 
 ### 7.2 The split
 
-Two responsibilities become two packages:
+★ **Implemented.** Two responsibilities, two packages:
 
-| Today | Proposed |
+| Before | Now |
 |---|---|
-| `transport/transport.go:98-430` — derive + render, in one pass | `agentkit/emit` — derive only: eino event → archive artifacts + `contract.RunEvent` |
-| `transport/transport.go:531-685` — the AG-UI emitter | `transport` — render only: `contract.RunEvent` → AG-UI frames → SSE |
+| `transport` — derive + render, in one pass | `agentkit/emit` — derive only: eino event → archive artifacts + `contract.RunEvent` |
+| `transport` — the AG-UI emitter | `transport` — render only: `contract.RunEvent` → AG-UI frames → SSE |
 
-`agentkit/emit` is a new L1 package: it depends on `contract`, `message` and
-eino, and nothing above it. `agentkit/run` calls it; `transport` does not need
-to — the transport receives `contract.RunEvent`s and renders them.
+`agentkit/emit` is an L1 package: it depends on `contract`, `message`,
+`approval`, `helpers` and `obs`, and nothing above it. `agentkit/run` calls
+it; `transport` does not need to — the transport receives `contract.RunEvent`s
+and renders them.
+
+★ The wire did not change: the frames are the same, one for one. What changed
+is who derives them. The transport's own contract tests
+(`transport/transport_test.go`) still assert the frame sequences, and they
+drive the derivation and the rendering together — the split must not be
+visible on the wire.
 
 ### 7.3 The run's event vocabulary
 
 ```go
-// contract/runevent.go (proposed)
+// contract/runevent.go
 package contract
 
 // RunEventKind is what happened in a run.
@@ -747,12 +749,13 @@ const (
     RunEventToolStart
     RunEventToolArgs
     RunEventToolEnd
-    RunEventMessage    // a complete message, for the archive
+    RunEventToolResult
+    RunEventAnnounce    // a message that produced no visible delta
     RunEventCompaction
+    RunEventContextUsage
     RunEventInterrupt
-    RunEventUsage
+    RunEventRetry       // the provider is retrying
     RunEventError
-    RunEventDone
 )
 
 // RunEvent is one thing that happened in a run.
@@ -765,13 +768,25 @@ type RunEvent struct {
     RunID string
     MsgID string
     Text  string
+    Role  string
+    Owner string
     ToolID string
     ToolName string
+    Sub  string
     Agent string
     At   time.Time
-    Msg  *schema.Message   // set on RunEventMessage
+    Usage ContextUsage
+    Interrupts []Interrupt
+    Pending []PendingInterrupt
+    Code string
 }
 ```
+
+★ There is no `RunEventMessage` and no `RunEventDone`. The archived messages
+are the derivation's **artifacts** — they come back with the derivation, not
+through the event stream, because they are facts about the run rather than
+things that happened in front of a watcher. And "done" is not an event: it is
+the **closing of the subscription's channel** (§7.4).
 
 ★ Why not reuse AG-UI's event types directly: `contract` is an L0 leaf
 ([architecture.md](architecture.md)'s layering table) and AG-UI is a transport
@@ -780,36 +795,54 @@ wire. The mapping is one-to-one in practice, which keeps `transport` thin.
 
 ### 7.4 The subscriber
 
-The run publishes to its subscribers; the subscriber is the SSE connection.
+★ **Implemented.** The run publishes to its subscribers; the subscriber is the
+SSE connection.
 
 ```go
-// agentkit/run (proposed)
-type Run struct {
-    // …
-    subs   map[int]chan contract.RunEvent
-    events []contract.RunEvent   // a BOUNDED window, not the turn's history
+// agentkit/run/publish.go
+type publisher struct {
+    mu     sync.Mutex
+    window []contract.RunEvent              // a BOUNDED window, not the turn's history
+    subs   map[*subscription]struct{}
+    closed bool
 }
 ```
 
 - A subscriber that is slow gets a **bounded** channel; when it overflows, the
-  run **drops the subscriber** and marks the stream broken. A slow reader must
-  never slow the run — that is the old "the sink blocks the loop" trap.
+  run **drops the subscriber**. A slow reader must never slow the run — that
+  is the old "the sink blocks the loop" trap.
 - ★ **A subscriber that is *stuck* is the case that matters, and it is not the
   same as one that is slow.** A slow reader drains its channel eventually. A
   stuck one has a socket write that never returns: the peer vanished without
   a reset, and the kernel keeps accepting bytes into a buffer nobody reads.
   The publisher must therefore **never block on a full channel** — it drops
-  the subscriber instead of waiting for it, and the run carries on. Today the
-  same situation stalls the run, because the run is the one writing to the
-  socket (`transport/transport.go:611-623` is where that write happens today).
+  the subscriber instead of waiting for it, and the run carries on. Before the
+  split the same situation stalled the run, because the run was the one
+  writing to the socket.
 - A subscriber that disappears takes nothing with it. The run keeps going and
   keeps archiving.
 - ★ **The run's event log is a bounded window, not the turn's history.** A
   client that attaches mid-run gets the events from the window, so it can
   render the tail of the turn without waiting for the turn to end. The window
-  holds the last N events (N = 1000 by default) and drops the oldest, so a
-  long turn costs a **fixed** amount of memory rather than one that grows with
-  the output. The run drops the window when it ends.
+  holds the last N events (N = 1000, `agentkit/run/publish.go` —
+  `windowSize`) and drops the oldest, so a long turn costs a **fixed** amount of
+  memory rather than one that grows with the output. The run drops the window
+  when it ends.
+
+★ **The window's replay and the registration happen under one lock**, so a
+subscriber sees every event exactly once: the ones from the window, then the
+ones that follow.
+
+★ **The run closes its subscription when the RUN is over — and a run that ended
+by raising an interrupt is not over until the approval is on disk.** This is
+not a detail: the client learns about the interrupt from the closing channel
+(the renderer writes `RUN_FINISHED` when the channel closes), so a channel
+that closed before the approval was persisted would invite the client to
+answer an approval the server cannot find yet — and the answer would be
+refused with `no_pending_interrupt`, for no reason the user can see. The
+approval is written when the loop exits (the checkpoint it resumes from must
+exist first), so that run's publisher closes there instead
+(`agentkit/run/bridge.go`).
 
 ★ **Two jobs, two stores.** "Coming back later" is the **transcript's** job: a
 client that opens a session hydrates from `GET /v2/sessions/{id}/messages` and
@@ -833,7 +866,7 @@ the case that matters most: a client that attaches halfway through.
   beyond the bounded channel.
 - **No persisted event log.** See §13 Q1.
 - **No change to the AG-UI wire format.** The frames are the same; only their
-  producer changes.
+  producer changes. The transport's contract tests assert the sequences.
 
 ## 8. The API surface
 
@@ -955,15 +988,16 @@ selectors stay reference-stable (AGENTS.md's rules). What changes is the
 | `storage/filestore/runledger.go` | ✓ **new** — the `runs.jsonl` driver |
 | `storage/filestore/session.go` | ✓ the session directory gains `runs.jsonl`; the `FileSession` gains a ledger handle |
 | `storage/filestore/manager.go` | ✓ the startup pass reconciles the open runs |
-| `agentkit/emit/` | **new** — the derivation split out of `transport` |
-| `contract/runevent.go` | **new** — `RunEvent`, `RunEventKind` |
+| `agentkit/emit/` | ✓ **new** — the derivation split out of `transport` |
+| `contract/runevent.go` | ✓ **new** — `RunEvent`, `RunEventKind` |
 | `agentkit/run/runtime.go` | ✓ `Submit`/`Resume` carry the run id; `claimTurn` opens the row; `StatusOf` reads the scan. **Later:** `claimTurn` becomes a lease claim |
+| `agentkit/run/publish.go` | ✓ **new** — the publisher, the subscriptions and the window |
 | `agentkit/run/turn.go` | ✓ `RunID` is assigned; the turn closes its own row. **Later:** `Turn` becomes a `Run` with subscribers |
-| `agentkit/run/loop.go` | ✓ the terminal row is written after the archive. **Later:** `handoff` no longer waits for the consumer |
-| `agentkit/run/bridge.go` | ✓ the loop's exit closes the row; `sessionState` becomes a cache |
+| `agentkit/run/loop.go` | ✓ the terminal row is written after the archive; the run derives and archives its own events. **Later:** the lease |
+| `agentkit/run/bridge.go` | ✓ the loop's exit closes the row and the publisher; `sessionState` becomes a cache |
 | `agentkit/run/errors.go` | `ErrSessionBusy` stays; the lease errors map onto it |
-| `transport/transport.go` | becomes a renderer: `contract.RunEvent` → AG-UI frames |
-| `api/v2_run.go` | ✓ the run id is minted once and handed down. **Later:** create / attach / refuse |
+| `transport/transport.go` | ✓ becomes a renderer: `contract.RunEvent` → AG-UI frames |
+| `api/v2_run.go` | ✓ the run id is minted once and handed down; the handler subscribes instead of draining. **Later:** attach |
 | `api/v2_sessions.go` | ✓ `state` comes from the scan; the two scan routes; the abort names the run it stopped |
 | `api/v2_files.go` | ✓ the two new routes |
 | `web/src/lib/store/actions.ts` | keep the run id; re-attach; re-scan instead of assuming |
@@ -993,7 +1027,16 @@ selectors stay reference-stable (AGENTS.md's rules). What changes is the
 - a run that reports **nothing** loses the lease even while it is alive — the
   run-level stall §5.1 describes.
 
-**Go — the runtime** (`agentkit/run`, `agentkit/run/runrow_test.go`):
+**Go — the runtime** (`agentkit/run`, `agentkit/run/runrow_test.go`,
+`agentkit/run/publish_test.go`):
+- ✓ a run with **no subscriber attached** still archives — the direct test of
+  "a turn outlives its connection";
+- ✓ a subscriber that vanishes does not stop the run;
+- ✓ a subscriber whose queue overflows is **dropped** and the run keeps
+  archiving — the stuck subscriber of §7.4;
+- ✓ the run's event window stays **within its bound** — the cost of an unwatched
+  turn is bounded;
+- ✓ a late subscriber gets the window replayed, then the live events;
 - ✓ the run is recorded before it is handed out;
 - ✓ the terminal row lands after the archive (the transcript already holds the
   answer when the row says `completed`);
@@ -1041,12 +1084,14 @@ scan route, the reconciler. The SSE still drives the run, but the run's **row**
 is written independently of the connection, so a crash leaves a trace. This
 stage fixes C1 and C2 and gives the frontend something true to scan.
 
-**Stage 2 — the run owns its consumption.** The `agentkit/emit` split, the
-subscribers, the run's event log, attach. This stage fixes C3 and C4 — the
+**Stage 2 — the run owns its consumption.** ✓ **landed (except attach).** The
+`agentkit/emit` split, the subscribers, the run's event window. The run reads
+its own events, derives what they mean, and archives the result; the
+connection subscribes to what the run publishes. This fixes C3 and C4 — the
 coupling itself. It is also the stage where a **stuck subscriber stops being
-a scenario**: from here on the run owns no socket, so a wedged connection
-cannot reach the run at all. Until then the risk stands — the run still writes
-to the socket itself, so a connection that wedges can still stall the archive.
+a scenario**: the run owns no socket, so a wedged connection cannot reach the
+run at all. **What is left of this stage: attach** — the client sending the
+run's id back to re-attach to a live run (§8.1).
 
 **Stage 3 — the lease replaces the mutex.** The arbiter, the
 **progress-driven renewal**, the fence. The gate's behaviour is unchanged (still
@@ -1055,6 +1100,13 @@ to the socket itself, so a connection that wedges can still stall the archive.
 expires when the process stops reporting, the run-level one because the
 renewal is driven by progress — and it prepares the ground for a second
 process.
+
+★ **Stage 3 can come only after Stage 2, and the reason is the renewal.** A
+progress-driven renewal needs the run to see its own progress, and before
+Stage 2 the run saw nothing: the transport drained the events and handed back
+the archive payload. A renewal driven by the connection's progress would
+expire the lease of a run whose connection died — exactly the coupling the
+lease is meant to remove.
 
 ★ **The order changed while Stage 1 was being built, and the reason is worth
 writing down.** The original plan put the lease second. It cannot go second:

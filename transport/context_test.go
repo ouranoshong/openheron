@@ -1,6 +1,8 @@
 package transport
 
 import (
+	"github.com/ouranoshong/openheron/agentkit/emit"
+
 	"testing"
 
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/events"
@@ -35,12 +37,12 @@ func TestTheContextUsageIsTheLastCallNotTheSum(t *testing.T) {
 		usageEvent(100, 20, 120),
 		usageEvent(300, 40, 340),
 		exitEvent(),
-	}, Options{RootAgent: "main", Contexts: testContexts()})
+	}, emit.Options{RootAgent: "main", Contexts: testContexts()})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	got := ContextUsageOf(res.Intermediates, testContexts())
+	got := emit.ContextUsageOf(res.Intermediates, testContexts())
 	if len(got) != 1 {
 		t.Fatalf("the occupancy covers %d agents, want 1", len(got))
 	}
@@ -64,11 +66,11 @@ func TestAnAgentThatNeverSpokeIsAbsent(t *testing.T) {
 	_, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
 		usageEvent(100, 20, 120),
 		exitEvent(),
-	}, Options{RootAgent: "main", Contexts: testContexts()})
+	}, emit.Options{RootAgent: "main", Contexts: testContexts()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := ContextUsageOf(res.Intermediates, testContexts())
+	got := emit.ContextUsageOf(res.Intermediates, testContexts())
 	if _, ok := got["coder"]; ok {
 		t.Fatal("an agent that never spoke must not be reported")
 	}
@@ -80,11 +82,11 @@ func TestNoUsageMeansNoOccupancy(t *testing.T) {
 	_, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
 		textEvent(assistantText("answer")),
 		exitEvent(),
-	}, Options{RootAgent: "main", Contexts: testContexts()})
+	}, emit.Options{RootAgent: "main", Contexts: testContexts()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := ContextUsageOf(res.Intermediates, testContexts()); len(got) != 0 {
+	if got := emit.ContextUsageOf(res.Intermediates, testContexts()); len(got) != 0 {
 		t.Fatalf("no usage must mean no occupancy, got %+v", got)
 	}
 }
@@ -95,7 +97,7 @@ func TestTheOccupancyIsPublishedOnTheStream(t *testing.T) {
 	evs, _, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
 		usageEvent(300, 40, 340),
 		exitEvent(),
-	}, Options{RootAgent: "main", Contexts: testContexts()})
+	}, emit.Options{RootAgent: "main", Contexts: testContexts()})
 	if err != nil {
 		t.Fatal(err)
 	}

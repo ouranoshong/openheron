@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -12,7 +13,8 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
-	"github.com/ouranoshong/openheron/approval"
+	"github.com/ouranoshong/openheron/agentkit/emit"
+	"github.com/ouranoshong/openheron/contract"
 )
 
 type sliceEvents struct {
@@ -29,16 +31,47 @@ func (s *sliceEvents) Next() (*adk.TypedAgentEvent[*schema.Message], bool) {
 	return e, true
 }
 
-func run(t *testing.T, evs []*adk.TypedAgentEvent[*schema.Message], opts Options) ([]events.Event, Result, error) {
+// run derives the events and renders them, and reports both.
+//
+// ★ The two halves are separate now: the derivation belongs to the run
+//
+//	(agentkit/emit) and the rendering to the transport. The test drives
+//	both, because what it checks is the frame sequence they produce
+//	together — the wire must not change because the plumbing did.
+func run(t *testing.T, evs []*adk.TypedAgentEvent[*schema.Message], opts emit.Options) ([]events.Event, emit.Artifacts, error) {
 	t.Helper()
 	return runErr(t, evs, opts)
 }
 
-func runErr(t *testing.T, evs []*adk.TypedAgentEvent[*schema.Message], opts Options) ([]events.Event, Result, error) {
+func runErr(t *testing.T, evs []*adk.TypedAgentEvent[*schema.Message], opts emit.Options) ([]events.Event, emit.Artifacts, error) {
 	t.Helper()
 	var buf bytes.Buffer
-	res, err := RunStream(&buf, "thread-1", &sliceEvents{evs: evs}, opts)
-	return decode(t, buf.Bytes()), res, err
+	ch := make(chan contract.RunEvent, 4096)
+	arts, derr := emit.Derive(&sliceEvents{evs: evs}, opts, sinkFunc(func(ev contract.RunEvent) { ch <- ev }), nil)
+	close(ch)
+	Render(&buf, "thread-1", "run-1", ch)
+	return decode(t, buf.Bytes()), arts, derr
+}
+
+// sinkFunc adapts a function to emit.Sink.
+type sinkFunc func(contract.RunEvent)
+
+func (f sinkFunc) Publish(ev contract.RunEvent) { f(ev) }
+
+// runStream derives the events and renders them, the way the run does.
+//
+// ★ It is the test's stand-in for the run: in production the run derives
+//
+//	and the transport renders, and the two are separate now. The test
+//	drives both, because the wire must not change because the plumbing
+//	did.
+func runStream(t *testing.T, w io.Writer, threadID string, src *sliceEvents, opts emit.Options) (emit.Artifacts, error) {
+	t.Helper()
+	ch := make(chan contract.RunEvent, 4096)
+	arts, derr := emit.Derive(src, opts, sinkFunc(func(ev contract.RunEvent) { ch <- ev }), nil)
+	close(ch)
+	Render(w, threadID, opts.RunID, ch)
+	return arts, derr
 }
 
 func decode(t *testing.T, raw []byte) []events.Event {
@@ -103,7 +136,7 @@ func textEvent(msg *schema.Message) *adk.TypedAgentEvent[*schema.Message] {
 }
 
 func TestContractEmptyRun(t *testing.T) {
-	evs, _, _ := run(t, nil, Options{})
+	evs, _, _ := run(t, nil, emit.Options{})
 
 	want := []events.EventType{
 		events.EventTypeRunStarted,
@@ -121,7 +154,7 @@ func TestContractTextRoundTrip(t *testing.T) {
 	evs, res, _ := run(t, []*adk.TypedAgentEvent[*schema.Message]{
 		textEvent(assistantText("hello")),
 		exitEvent(),
-	}, Options{})
+	}, emit.Options{})
 
 	got := typesOf(evs)
 	want := []events.EventType{
@@ -147,7 +180,7 @@ func TestContractToolCallRoundTrip(t *testing.T) {
 		textEvent(assistantText("let me read the file first")),
 		textEvent(toolResultMessage("call-1", "read_file", "package a2ui")),
 		exitEvent(),
-	}, Options{})
+	}, emit.Options{})
 
 	assertSeq(t, typesOf(evs), []events.EventType{
 		events.EventTypeRunStarted,
@@ -177,7 +210,7 @@ func TestContractAssistantWithToolCalls(t *testing.T) {
 
 	evs, _, _ := run(t, []*adk.TypedAgentEvent[*schema.Message]{
 		textEvent(msg), exitEvent(),
-	}, Options{})
+	}, emit.Options{})
 
 	assertSeq(t, typesOf(evs), []events.EventType{
 		events.EventTypeRunStarted,
@@ -206,7 +239,7 @@ func TestContractApprovalInterrupt(t *testing.T) {
 		}},
 	}
 
-	evs, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{ev}, Options{})
+	evs, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{ev}, emit.Options{})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
@@ -242,7 +275,7 @@ func TestContractSubagentAttribution(t *testing.T) {
 	}
 
 	evs, _, _ := run(t, []*adk.TypedAgentEvent[*schema.Message]{ev, exitEvent()},
-		Options{RootAgent: "main"})
+		emit.Options{RootAgent: "main"})
 
 	content := evs[2].(*events.TextMessageContentEvent)
 	if content.SubagentRunID != "researcher" {
@@ -258,7 +291,7 @@ func TestContractRootAgentNotAttributed(t *testing.T) {
 			},
 		}},
 		exitEvent(),
-	}, Options{RootAgent: "main"})
+	}, emit.Options{RootAgent: "main"})
 
 	if got := evs[2].(*events.TextMessageContentEvent).SubagentRunID; got != "" {
 		t.Fatalf("the entry agent must not carry subagentRunId, got %q", got)
@@ -281,7 +314,7 @@ func TestContractCancelIsNotAnError(t *testing.T) {
 		},
 	}
 
-	evs, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{ev}, Options{})
+	evs, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{ev}, emit.Options{})
 	if err == nil {
 		t.Fatal("a cancellation must be reported back so the caller can log it as a stop")
 	}
@@ -296,9 +329,6 @@ func TestContractCancelIsNotAnError(t *testing.T) {
 	if !res.Stopped {
 		t.Fatal("the run must be marked as stopped")
 	}
-	if res.StreamBroken {
-		t.Fatal("a cancellation is not a broken stream")
-	}
 }
 
 func TestContractRunErrorEndsStream(t *testing.T) {
@@ -306,7 +336,7 @@ func TestContractRunErrorEndsStream(t *testing.T) {
 		Err: errors.New("401 auth -- invalid credentials"),
 	}
 
-	evs, _, err := runErr(t, []*adk.TypedAgentEvent[*schema.Message]{ev}, Options{})
+	evs, _, err := runErr(t, []*adk.TypedAgentEvent[*schema.Message]{ev}, emit.Options{})
 	if err == nil {
 		t.Fatal("an error was expected")
 	}
@@ -316,8 +346,8 @@ func TestContractRunErrorEndsStream(t *testing.T) {
 	})
 
 	re := evs[1].(*events.RunErrorEvent)
-	if re.Code == nil || *re.Code != CodeModelAuth {
-		t.Fatalf("code = %v, want %s", re.Code, CodeModelAuth)
+	if re.Code == nil || *re.Code != emit.CodeModelAuth {
+		t.Fatalf("code = %v, want %s", re.Code, emit.CodeModelAuth)
 	}
 }
 
@@ -329,7 +359,7 @@ func TestContractModelRetryIsNotTerminal(t *testing.T) {
 			},
 		}},
 		exitEvent(),
-	}, Options{})
+	}, emit.Options{})
 
 	assertSeq(t, typesOf(evs), []events.EventType{
 		events.EventTypeRunStarted,
@@ -340,25 +370,31 @@ func TestContractModelRetryIsNotTerminal(t *testing.T) {
 	})
 }
 
-func TestContractBrokenSinkStillArchives(t *testing.T) {
-	var buf failingWriter
-	res, err := RunStream(&failingWriter{}, "thread-1",
-		&sliceEvents{evs: []*adk.TypedAgentEvent[*schema.Message]{
-			textEvent(assistantText("第一")),
-			textEvent(assistantText("第二")),
-			exitEvent(),
-		}}, Options{})
+// A broken sink loses the frames — and nothing else.
+//
+// ★ The archive is the run's business now: the renderer cannot stop the
+//
+//	run, and the run's messages land on disk whatever the connection
+//	does. The run's own test covers the archive; this one covers the
+//	renderer.
+func TestContractBrokenSinkLosesOnlyTheFrames(t *testing.T) {
+	ch := make(chan contract.RunEvent, 4096)
+	arts, derr := emit.Derive(&sliceEvents{evs: []*adk.TypedAgentEvent[*schema.Message]{
+		textEvent(assistantText("第一")),
+		textEvent(assistantText("第二")),
+		exitEvent(),
+	}}, emit.Options{}, sinkFunc(func(ev contract.RunEvent) { ch <- ev }), nil)
+	close(ch)
 
-	_ = buf
-	if err != nil {
-		t.Fatalf("RunStream: %v", err)
+	if derr != nil {
+		t.Fatalf("Derive: %v", derr)
 	}
-	if len(res.Intermediates) != 2 {
-		t.Fatalf("all messages must still be archived after the sink breaks, got %d", len(res.Intermediates))
+	if len(arts.Intermediates) != 2 {
+		t.Fatalf("the derivation must keep the messages, got %d", len(arts.Intermediates))
 	}
-	if !res.StreamBroken {
-		t.Fatal("StreamBroken must be true")
-	}
+	// The renderer writes to a sink that refuses every byte: it must stop
+	// quietly instead of taking the run down with it.
+	Render(&failingWriter{}, "thread-1", "run-1", ch)
 }
 
 type failingWriter struct{}
@@ -395,24 +431,24 @@ func TestDecodeRejectsMalformed(t *testing.T) {
 
 func TestErrorCodeMapping(t *testing.T) {
 	cases := map[string]string{
-		"401 auth —— …":                CodeModelAuth,
-		"429 rate_limit —— …":          CodeModelRateLimit,
-		"429 insufficient quota":       CodeModelQuota,
-		"503 overload":                 CodeModelOverload,
-		"request timed out":            CodeModelTimeout,
-		"dial tcp: connection refused": CodeModelNetwork,
-		"随便什么错":                        CodeModelUnknown,
+		"401 auth —— …":                emit.CodeModelAuth,
+		"429 rate_limit —— …":          emit.CodeModelRateLimit,
+		"429 insufficient quota":       emit.CodeModelQuota,
+		"503 overload":                 emit.CodeModelOverload,
+		"request timed out":            emit.CodeModelTimeout,
+		"dial tcp: connection refused": emit.CodeModelNetwork,
+		"随便什么错":                        emit.CodeModelUnknown,
 	}
 	for in, want := range cases {
-		if got := errorCode(errors.New(in)); got != want {
-			t.Fatalf("errorCode(%q) = %s, want %s", in, got, want)
+		if got := emit.ErrorCode(errors.New(in)); got != want {
+			t.Fatalf("ErrorCode(%q) = %s, want %s", in, got, want)
 		}
 	}
 }
 
 func TestRunIDDefaults(t *testing.T) {
 	var buf bytes.Buffer
-	if _, err := RunStream(&buf, "thread-1", &sliceEvents{}, Options{}); err != nil {
+	if _, err := runStream(t, &buf, "thread-1", &sliceEvents{}, emit.Options{}); err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
 	evs := decode(t, buf.Bytes())
@@ -427,9 +463,9 @@ func TestRunIDDefaults(t *testing.T) {
 
 func TestJSONShape(t *testing.T) {
 	var buf bytes.Buffer
-	_, err := RunStream(&buf, "thread-1", &sliceEvents{evs: []*adk.TypedAgentEvent[*schema.Message]{
+	_, err := runStream(t, &buf, "thread-1", &sliceEvents{evs: []*adk.TypedAgentEvent[*schema.Message]{
 		textEvent(assistantText("hi")),
-	}}, Options{RunID: "r1"})
+	}}, emit.Options{RunID: "r1"})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
@@ -454,39 +490,6 @@ func TestJSONShape(t *testing.T) {
 		if err := json.Unmarshal(line, &v); err != nil {
 			t.Fatalf("line %d is not valid JSON: %v", i, err)
 		}
-	}
-}
-
-func TestContractInterruptDescribesApprovalInfo(t *testing.T) {
-	ev := &adk.TypedAgentEvent[*schema.Message]{
-		AgentName: "main",
-		Action: &adk.AgentAction{Interrupted: &adk.InterruptInfo{
-			InterruptContexts: []*adk.InterruptCtx{{
-				ID: "ic-9a1", IsRootCause: true,
-				Info: &approval.ApprovalInfo{
-					ToolName:        "write_file",
-					ArgumentsInJSON: `{"file_path":"/tmp/probe.txt","content":"hi"}`,
-				},
-			}},
-		}},
-	}
-
-	got, _ := interruptsFrom(ev, "")
-	if len(got) != 1 {
-		t.Fatalf("want 1 interrupt, got %d", len(got))
-	}
-	if strings.Contains(got[0].Message, "&{") || strings.Contains(got[0].Message, "ArgumentsInJSON") {
-		t.Fatalf("interrupt message leaked the Go struct: %q", got[0].Message)
-	}
-	if got[0].Message != "tool write_file requires approval" {
-		t.Fatalf("unexpected message: %q", got[0].Message)
-	}
-	if got[0].Metadata["toolName"] != "write_file" {
-		t.Fatalf("metadata.toolName = %v, want write_file", got[0].Metadata["toolName"])
-	}
-	args, ok := got[0].Metadata["arguments"].(json.RawMessage)
-	if !ok || !strings.Contains(string(args), `"file_path":"/tmp/probe.txt"`) {
-		t.Fatalf("metadata.arguments = %v, want the raw tool arguments", got[0].Metadata["arguments"])
 	}
 }
 
@@ -533,7 +536,7 @@ func TestContractReasoningStream(t *testing.T) {
 			reasoningChunk("再读文件。"),
 			schema.AssistantMessage("正文内容", nil),
 		),
-	}, Options{})
+	}, emit.Options{})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
@@ -557,7 +560,7 @@ func TestContractReasoningStream(t *testing.T) {
 func TestContractReasoningOnlyRun(t *testing.T) {
 	evs, _, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
 		streamEvent(reasoningChunk("想了一下")),
-	}, Options{})
+	}, emit.Options{})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
@@ -586,7 +589,7 @@ func TestContractReasoningClosedBeforeToolCall(t *testing.T) {
 				}},
 			}
 		}()),
-	}, Options{})
+	}, emit.Options{})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
@@ -623,7 +626,7 @@ func TestContractReasoningClosedBeforeToolCall(t *testing.T) {
 
 func TestContractFlatReasoningContent(t *testing.T) {
 	msg := &schema.Message{Role: schema.Assistant, ReasoningContent: "扁平推理"}
-	evs, _, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{textEvent(msg)}, Options{})
+	evs, _, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{textEvent(msg)}, emit.Options{})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
@@ -643,14 +646,14 @@ func TestContractFlatReasoningContent(t *testing.T) {
 func TestContractReasoningRoleIsTheReasoningLiteral(t *testing.T) {
 	if _, _, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
 		streamEvent(reasoningChunk("想一想")),
-	}, Options{}); err != nil {
+	}, emit.Options{}); err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
 
 	var buf bytes.Buffer
-	_, _ = RunStream(&buf, "thread-1", &sliceEvents{evs: []*adk.TypedAgentEvent[*schema.Message]{
+	_, _ = runStream(t, &buf, "thread-1", &sliceEvents{evs: []*adk.TypedAgentEvent[*schema.Message]{
 		streamEvent(reasoningChunk("想一想")),
-	}}, Options{})
+	}}, emit.Options{})
 
 	for _, line := range strings.Split(buf.String(), "\n") {
 		line = strings.TrimSpace(line)

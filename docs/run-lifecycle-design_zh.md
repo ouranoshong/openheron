@@ -15,7 +15,7 @@
 > | §4 D2 —— 通知是提示，扫描才是真相 | 服务端**已实现**，客户端是提案 |
 > | §5 D3 —— 租约与 fence | 提案 |
 > | §6 D4 —— 驱动可插拔 | 接口与文件驱动**已实现**，内存仲裁器还不在 |
-> | §7 事件管线 | 提案 |
+> | §7 事件管线 | **已实现** —— 推导搬进 `agentkit/emit`，run 自己消费 |
 > | §8 API 表面 | 扫描路由**已实现**，attach 是提案 |
 > | §9 前端 | 提案 |
 >
@@ -35,38 +35,36 @@
 ```
 POST /v2/run
   │
-  ├─ api/v2_run.go:202   startRun → run.Runtime.Submit
-  │    └─ agentkit/run/runtime.go:157   run.Runtime.Submit
-  │         └─ agentkit/run/runtime.go:207   claimTurn        (the gate: a mutex)
-  │              └─ agentkit/run/runtime.go:259   openRunRow     ← the row is written
-  │              └─ agentkit/run/runtime.go:316   runClaimedTurn
+  ├─ api/v2_run.go:192   startRun → run.Runtime.Submit
+  │    └─ agentkit/run/runtime.go:177   run.Runtime.Submit
+  │         └─ agentkit/run/runtime.go:227   claimTurn        (the gate: a mutex)
+  │              └─ agentkit/run/runtime.go:279   openRunRow     ← the row is written
+  │              └─ agentkit/run/runtime.go:336   runClaimedTurn
   │                   └─ agentkit/run/bridge.go:99   startLoop → a goroutine
   │                        └─ agentkit/run/loop.go:21   newLoop → adk.TurnLoop
   │
-  ├─ agentkit/run/loop.go:100  makeOnAgentEvents  (inside the loop goroutine)
-  │    └─ agentkit/run/loop.go:115  turn.events = events     ← the iterator is handed over
-  │    └─ agentkit/run/loop.go:116  turn.signalReady()
-  │    └─ agentkit/run/loop.go:120  waits on turn.done        ← blocked here
+  ├─ agentkit/run/loop.go:110  makeOnAgentEvents  (inside the loop goroutine)
+  │    └─ agentkit/run/loop.go:119  emit.Derive(events, …)   ← the run reads its own events
+  │         └─ agentkit/emit/emit.go:150  src.Next()       ← the ONLY consumer
+  │         └─ agentkit/emit/emit.go:…    publishes contract.RunEvent to the subscribers
+  │    └─ agentkit/run/loop.go:134  rt.archive(sess, turn, out)
+  │         └─ agentkit/run/loop.go:…    sess.Append(msg)   ← the transcript
+  │    └─ agentkit/run/loop.go:166  rt.finishRun(turn, out)  ← the terminal row
   │
-  └─ api/v2_run.go:141  turn.Wait(...)          (the HTTP handler blocks too)
-       api/v2_run.go:154  transport.Stream(stream, turn, ...)
-            └─ transport/transport.go:68   Stream(w, turn, …)
-                 └─ transport/transport.go:75   RunStream(w, …, turn.Events(), …)
-                      └─ transport/transport.go:103  src.Next()   ← the ONLY consumer
-                      └─ transport/transport.go:167/174/182  accumulates res.Intermediates
-       api/v2_run.go:161  turn.Complete(Outcome{Intermediates: res.Intermediates, …})
-            └─ agentkit/run/turn.go:174  t.done <- outcome
-                 └─ agentkit/run/loop.go:125  rt.archive(sess, turn, out.out)
-                      └─ agentkit/run/loop.go:190  sess.Append(msg)   ← the transcript
-                 └─ agentkit/run/loop.go:130  rt.finishRun(turn, out)  ← the terminal row
+  └─ api/v2_run.go:157  turn.Subscribe()      (the connection subscribes)
+       api/v2_run.go:160  transport.Render(stream, sess.ID(), turn.RunID, sub.Events())
+            └─ transport/transport.go:60   Render: contract.RunEvent → AG-UI frames
+       api/v2_run.go:165  turn.WaitArchived()   (the response waits for the archive)
 ```
 
-★ **落盘路径穿过了渲染路径。** transcript 只有在 HTTP 处理器抽干 eino 事件流
-并回吐之后才会被写入。渲染器不是 run 的一个视图——它**就是** run 的产出管线。
+★ **落盘路径不再穿过渲染路径。** run 自己读 agent 的事件
+（`agentkit/run/loop.go:119`），推导它们的含义，归档结果。连接订阅 run 发布
+的东西（`api/v2_run.go:157`）并把它渲染出来——它是 run 的一个视图，不是它的
+产出管线。连接死了不再会拖住归档。
 
-★ 账本的那一行是唯一**不**经过渲染器的东西：`openRunRow` 在 loop 启动之前
-写下它，终态行由 run 自己的 goroutine 写（`rt.finishRun`）。这一行是关于
-run 的事实，transcript 是关于对话的事实。两者落盘的时刻不同，而且是刻意的。
+★ 账本的那一行同样由 run 自己的 goroutine 写：`openRunRow` 在 loop 启动之前
+写下它，终态行由 `rt.finishRun` 写。这一行是关于 run 的事实，transcript 是
+关于对话的事实。
 
 ### 1.2 五个后果
 
@@ -621,40 +619,42 @@ transcript 本来就是一个追加式的 JSONL 文件，`persist` 本来就有�
 
 ## 7. 事件管线：从单消费者到发布订阅
 
-★ **本节是提案。** 这里面没有一样东西在树里。
+★ **本节已实现**（除了 §8.1 的 attach）。推导搬进了 `agentkit/emit`，run
+自己消费自己的事件，连接退化成订阅者。
 
-### 7.1 为什么现在的管线把耦合焊死了
+### 7.1 为什么原来的管线把耦合焊死了
 
-`transport/transport.go:98-200`（`streamEvents`）一次干两件事：
+transport 的 `streamEvents` 一次干两件事：
 
 - 它**渲染** AG-UI 帧（`e.emit…`），
-- 它**推导**归档载荷——`res.Intermediates`（第 167、174、182 行）、
-  `res.Interrupts`（第 149 行）、`res.Compaction`（第 142 行）、
-  `res.Usage`（第 105、196 行）。
+- 它**推导**归档载荷——中间产物、审批、压缩与用量。
 
-★ 推导没法做两遍：`renderStream`（`transport/transport.go:266-292`）在模型
-的流上调用 `mo.MessageStream.Recv()`，`streamState`
-（`transport/transport.go:294-430`）把分片折成一条消息。**第二个读者会把
-分片劈开。** 于是渲染器必然是唯一消费者——而渲染器就是 SSE 的出口，于是出口
-拥有了 run 的产出。
+★ 推导没法做两遍：流式分支要在模型的流上调用 `mo.MessageStream.Recv()`，
+再把分片折成一条消息。**第二个读者会把分片劈开。** 于是渲染器必然是唯一
+消费者——而渲染器就是 SSE 的出口，于是出口拥有了 run 的产出。连接一死，
+这一轮就永远归档不了。
 
 ### 7.2 拆分
 
-两件事变成两个包：
+★ **已实现。** 两件事，两个包：
 
-| 今天 | 提案 |
+| 之前 | 现在 |
 |---|---|
-| `transport/transport.go:98-430` —— 一趟做完推导与渲染 | `agentkit/emit` —— 只推导：eino event → 归档产物 + `contract.RunEvent` |
-| `transport/transport.go:531-685` —— AG-UI 发射器 | `transport` —— 只渲染：`contract.RunEvent` → AG-UI 帧 → SSE |
+| `transport` —— 一趟做完推导与渲染 | `agentkit/emit` —— 只推导：eino event → 归档产物 + `contract.RunEvent` |
+| `transport` —— AG-UI 发射器 | `transport` —— 只渲染：`contract.RunEvent` → AG-UI 帧 → SSE |
 
-`agentkit/emit` 是一个新的 L1 包：它只依赖 `contract`、`message` 和 eino，
-不依赖任何上层。`agentkit/run` 调它；`transport` 不需要调——transport 收到
-`contract.RunEvent` 然后渲染。
+`agentkit/emit` 是一个 L1 包：它只依赖 `contract`、`message`、`approval`、
+`helpers` 和 `obs`，不依赖任何上层。`agentkit/run` 调它；`transport` 不需要
+调——transport 收到 `contract.RunEvent` 然后渲染。
+
+★ 线上没变：帧还是一个对一个的。变的是**谁在推导**。transport 自己的契约测试
+（`transport/transport_test.go`）仍然断言那些帧序列，它同时驱动推导与渲染
+——这次拆分不该在网线上看得见。
 
 ### 7.3 run 的事件词汇表
 
 ```go
-// contract/runevent.go (proposed)
+// contract/runevent.go
 package contract
 
 // RunEventKind is what happened in a run.
@@ -670,12 +670,13 @@ const (
     RunEventToolStart
     RunEventToolArgs
     RunEventToolEnd
-    RunEventMessage    // a complete message, for the archive
+    RunEventToolResult
+    RunEventAnnounce    // a message that produced no visible delta
     RunEventCompaction
+    RunEventContextUsage
     RunEventInterrupt
-    RunEventUsage
+    RunEventRetry       // the provider is retrying
     RunEventError
-    RunEventDone
 )
 
 // RunEvent is one thing that happened in a run.
@@ -688,13 +689,24 @@ type RunEvent struct {
     RunID string
     MsgID string
     Text  string
+    Role  string
+    Owner string
     ToolID string
     ToolName string
+    Sub  string
     Agent string
     At   time.Time
-    Msg  *schema.Message   // set on RunEventMessage
+    Usage ContextUsage
+    Interrupts []Interrupt
+    Pending []PendingInterrupt
+    Code string
 }
 ```
+
+★ 没有 `RunEventMessage`，也没有 `RunEventDone`。归档的消息是推导的**产物**
+——它们随推导一起回来，而不是从事件流里过，因为它们是关于 run 的事实，不是
+发生在观看者面前的事。而「结束」不是一个事件：它是**订阅通道的关闭**
+（§7.4）。
 
 ★ 为什么不直接复用 AG-UI 的事件类型：`contract` 是 L0 叶子（见
 [architecture.md](architecture.md) 的分层表），而 AG-UI 是传输层的关注点。
@@ -703,43 +715,53 @@ type RunEvent struct {
 
 ### 7.4 订阅者
 
-run 向订阅者发布；订阅者就是那条 SSE 连接。
+★ **已实现。** run 向它的订阅者发布；订阅者就是那条 SSE 连接。
 
 ```go
-// agentkit/run (proposed)
-type Run struct {
-    // …
-    subs   map[int]chan contract.RunEvent
-    events []contract.RunEvent   // a BOUNDED window, not the turn's history
+// agentkit/run/publish.go
+type publisher struct {
+    mu     sync.Mutex
+    window []contract.RunEvent              // a BOUNDED window, not the turn's history
+    subs   map[*subscription]struct{}
+    closed bool
 }
 ```
 
-- 订阅者慢了会拿到一条**有界**通道；一旦溢出，run **踢掉这个订阅者**并把
-  这条流标记为 broken。慢的读者永远不能拖慢 run——那正是当年「出口卡住
-  loop」的坑。
-- ★ **订阅者「卡住」才是要紧的那一种，它和「慢」不是一回事。** 慢的读者迟早
-  会把通道排空；卡住的那个，是一次永不返回的 socket 写：对端没发 RST 就消失
-  了，内核还在往一个没人读的缓冲区里塞字节。所以发布方**绝不能在满通道上
-  阻塞**——它应当踢掉这个订阅者而不是等它，run 继续往下走。今天同样的情形
-  会把 run 卡住，因为写 socket 的正是 run 自己
-  （`transport/transport.go:611-623` 就是今天那一次写发生的地方）。
-- 订阅者消失什么也带不走。run 继续跑，继续归档。
-- ★ **run 的事件日志是一个有界的窗口，不是这一轮的存档。** 中途挂上来的客户端
-  拿到窗口里的事件，于是它不用等这一轮结束就能把尾部渲染出来。窗口保留最近
-  N 个事件（N 默认 1000），挤掉最旧的，于是长轮次花的是**固定**的内存，
-  而不是随输出一起长。run 结束时把窗口丢掉。
+- 慢的订阅者拿到一个**有界**通道；通道满了，run 就**踢掉这个订阅者**。慢的
+  读者绝不能拖慢 run——那就是从前「出口卡住循环」的坑。
+- ★ **被卡住的订阅者才是要紧的那一种，它和「慢」不是一回事。** 慢的读者终究
+  会把通道排空；卡住的那个是 socket 写永不返回：对端消失了却没发 RST，内核
+  还在往一个没人读的缓冲区里塞字节。所以发布方**绝不能在满通道上等**——它
+  踢掉订阅者而不是等它，run 继续走。拆分之前，同一种情况会卡住 run，因为写
+  socket 的就是 run 自己。
+- 消失的订阅者什么也带不走。run 继续跑，继续归档。
+- ★ **run 的事件日志是有界的窗口，不是这一轮的历史。** 中途挂上来的客户端从
+  窗口里拿到那些事件，于是它能渲染这一轮的尾巴，不必等这一轮结束。窗口留
+  最后 N 个事件（N = 1000，`agentkit/run/publish.go`——`windowSize`），最老的
+  被丢掉，于是长的一轮花的是**固定**的内存，而不是一个随输出变长的内存。run
+  结束时把窗口丢掉。
 
-★ **两件事，两个去处。** 「过一会儿再回来看」是 **transcript** 的活：客户端
-打开会话时从 `GET /v2/sessions/{id}/messages` 水合，看到的是**已经结束**的
-那一轮（`web/src/lib/store/actions.ts:86` → `seedFromHistory`）。日志只服务
-「还在跑的时候挂上来」——是活的视图，永远不是最终的视图。
+★ **窗口的回放与登记在同一把锁里**，所以一个订阅者每个事件恰好看一次：先是
+窗口里的那些，然后是随后来的那些。
 
-★ **所以窗口填不填，跟有没有人在看无关**，没有哪个分支要判断。窗口大小是
-一道上界，于是没人看的轮次为一份没人读的日志付一份**恒定**的代价——而 run
-真正的产出（transcript）反正都要写。另一个选择是「等有人挂上来再建窗口」，
-那意味着猜，而且会漏掉最要紧的那种情况：中途挂上来的客户端。
+★ **run 在这一轮**结束**时才关掉订阅——而一个以抛审批结束的这一轮，在审批
+落盘之前不算结束。** 这不是细节：客户端是从通道关闭那一刻知道「有审批」的
+（渲染器在通道关闭时写 `RUN_FINISHED`），所以一个在审批落盘之前就关掉的通道，
+等于邀请客户端去回答一个服务端还找不到的审批——那个答复会被
+`no_pending_interrupt` 拒掉，而用户看不出理由。审批是在 loop 退出时写的（它
+要恢复的那个检查点必须先在），所以那一轮的发布方改在那里关。
 
-★ **要不要持久化它是另一个决定** —— 见 §13 Q1。现在先放在内存里。
+★ **两件事，两个存储。** 「以后再回来」是 **transcript** 的活：客户端打开一个
+会话时从 `GET /v2/sessions/{id}/messages` 水合，看到的是**已经结束**的那一轮
+（`web/src/lib/store/actions.ts:86` → `seedFromHistory`）。日志只服务「它还在
+跑的时候挂上来」——一个实时视图，永远不是最终视图。
+
+★ **所以窗口无论有没有人看都会被填满**，没有分支需要判断。它的大小是一个
+上界，于是没人看的一轮为一份没人读的日志付**恒定**的代价——而 run 真正的
+产出（transcript）反正都要写。另一种做法（等有人挂上来再开始建窗口）意味着
+猜——而且会漏掉最要紧的那种情况：挂到一半的客户端。
+
+★ **要不要持久化是另一个决定**——见 §13 Q1。目前只在内存里。
 
 ### 7.5 刻意不做的事
 
@@ -862,15 +884,16 @@ store 的形状几乎不变——reducer 仍然是纯函数，选择器仍然返
 | `storage/filestore/runledger.go` | ✓ **新增** —— `runs.jsonl` 驱动 |
 | `storage/filestore/session.go` | ✓ 会话目录多出 `runs.jsonl`；`FileSession` 多一个账本句柄 |
 | `storage/filestore/manager.go` | ✓ 启动时的巡检给未结束的 run 收尾 |
-| `agentkit/emit/` | **新增** —— 从 `transport` 里拆出来的推导层 |
-| `contract/runevent.go` | **新增** —— `RunEvent`、`RunEventKind` |
+| `agentkit/emit/` | ✓ **新增** —— 从 `transport` 里拆出来的推导层 |
+| `contract/runevent.go` | ✓ **新增** —— `RunEvent`、`RunEventKind` |
 | `agentkit/run/runtime.go` | ✓ `Submit`/`Resume` 带着 run id；`claimTurn` 打开那一行；`StatusOf` 读扫描。**往后：** `claimTurn` 变成租约申领 |
+| `agentkit/run/publish.go` | ✓ **新增** —— 发布方、订阅与窗口 |
 | `agentkit/run/turn.go` | ✓ `RunID` 被赋值；turn 自己收掉自己那一行。**往后：** `Turn` 变成带订阅者的 `Run` |
-| `agentkit/run/loop.go` | ✓ 终态行写在归档之后。**往后：** `handoff` 不再等消费者 |
-| `agentkit/run/bridge.go` | ✓ loop 退出时收掉那一行；`sessionState` 降级为缓存 |
+| `agentkit/run/loop.go` | ✓ 终态行写在归档之后；run 自己推导并归档。**往后：** 租约 |
+| `agentkit/run/bridge.go` | ✓ loop 退出时收掉那一行与发布方；`sessionState` 降级为缓存 |
 | `agentkit/run/errors.go` | `ErrSessionBusy` 保留；租约错误映射到它 |
-| `transport/transport.go` | 变成渲染器：`contract.RunEvent` → AG-UI 帧 |
-| `api/v2_run.go` | ✓ run id 只铸一次并往下传。**往后：** 创建 / 挂上 / 拒绝 |
+| `transport/transport.go` | ✓ 变成渲染器：`contract.RunEvent` → AG-UI 帧 |
+| `api/v2_run.go` | ✓ run id 只铸一次并往下传；处理器订阅而不是抽干。**往后：** 挂上 |
 | `api/v2_sessions.go` | ✓ `state` 来自扫描；两条扫描路由；中止报出它停掉的 run |
 | `api/v2_files.go` | ✓ 两条新路由 |
 | `web/src/lib/store/actions.ts` | 留住 run id；重新挂上；重新扫描而不是假定 |
@@ -898,7 +921,13 @@ store 的形状几乎不变——reducer 仍然是纯函数，选择器仍然返
 - **报告了进展**的 run 保住租约；
 - **什么都没报告**的 run 丢掉租约——哪怕它活着。这就是 §5.1 说的 run 级停滞。
 
-**Go —— runtime**（`agentkit/run`、`agentkit/run/runrow_test.go`）：
+**Go —— runtime**（`agentkit/run`、`agentkit/run/runrow_test.go`、
+`agentkit/run/publish_test.go`）：
+- ✓ **没有任何订阅者**时，run 依然归档——这是「一轮比连接活得久」的直接检验；
+- ✓ 订阅者消失不影响 run；
+- ✓ 队列溢出的订阅者被**踢掉**，run 继续归档——§7.4 那个卡住的订阅者；
+- ✓ run 的事件窗口**不超出它的上界**——没人看的轮次，代价是有界的；
+- ✓ 晚到的订阅者先拿到窗口的回放，再拿到实时事件；
 - ✓ run 在被交出去之前就已经入账；
 - ✓ 终态行落在归档之后（账本说 `completed` 时，transcript 里已经有答案）；
 - ✓ 没能启动的 turn 自己收掉自己那一行；
@@ -942,16 +971,22 @@ store 的形状几乎不变——reducer 仍然是纯函数，选择器仍然返
 对账器。SSE 仍然驱动着 run，但 run 的**那一行**已经独立于连接被写下，于是
 崩溃会留下痕迹。这一期修掉 C1 和 C2，并给前端一个真的可以扫的东西。
 
-**第 2 期 —— run 自己消费。** `agentkit/emit` 的拆分、订阅者、run 的事件
-日志、挂上。这一期修掉 C3 和 C4——耦合本身。它也是「**卡住的订阅者不再是
-一种场景**」的那一期：从这里起 run 不再拥有 socket，wedge 住的连接根本够不着
-run。在此之前风险仍在——写 socket 的还是 run 自己，所以一个卡住的连接仍然能
-把归档拖住。
+**第 2 期 —— run 自己消费。** ✓ **已落地（除挂上）。** `agentkit/emit` 的拆分、
+订阅者、run 的事件窗口。run 自己读自己的事件，推导含义，归档结果；连接订阅
+run 发布的东西。这一期修掉 C3 和 C4——耦合本身。它也是「**卡住的订阅者不再是
+一种场景**」的那一期：run 不再拥有 socket，wedge 住的连接根本够不着 run。
+**这一期还剩的：挂上**——客户端把 run 的 id 发回来，重新挂到一个活着的 run
+上（§8.1）。
 
 **第 3 期 —— 租约取代互斥锁。** 仲裁者、**进展驱动的续租**、fence。闸门的
 行为不变（仍然是「一个会话一轮」，仍然是 409）；只是内部换掉了。这一期治好了
 **两种**持有者停滞——进程级那一半靠「进程一停，租约就过期」，run 级那一半靠
 「续租由进展驱动」——并为第二个进程铺路。
+
+★ **第 3 期只能排在第 2 期后面，理由就是那个续租。** 进展驱动的续租要求 run
+能看见自己的进展，而在第 2 期之前 run 什么也看不见：是 transport 抽干事件、
+再把归档载荷回吐。由连接进度驱动的续租会把「连接断了但 run 还活着」的租约
+判死——而那正是租约要拆掉的耦合。
 
 ★ **次序是在第 1 期施工期间改的，理由值得写下来。** 原计划把租约放在第 2 期。
 它不能放在第 2 期：**进展驱动的续租要求 run 能看见自己的进展**，而今天 run

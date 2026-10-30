@@ -29,6 +29,13 @@ const DefaultStartTimeout = 60 * time.Second
 // never imports the agent package, which keeps its tests free of a real model.
 type AgentBuilder interface {
 	Build(ctx context.Context, sessionID, agentID string, kind contract.TurnKind) (adk.TypedAgent[*schema.Message], error)
+	// Contexts reports what each agent's context allows: the model's window
+	// and the compaction threshold.
+	//
+	// ★ The derivation needs the window to turn a token count into a ratio.
+	//	The builder owns that lookup — the run must not resolve model refs
+	//	itself.
+	Contexts() map[string]contract.AgentContext
 }
 
 // Config wires the Runtime's collaborators.
@@ -124,6 +131,18 @@ func defaultInstanceID() string {
 		host = "unknown"
 	}
 	return fmt.Sprintf("%s:%d", host, os.Getpid())
+}
+
+// contexts reports what each agent's context allows.
+//
+// ★ It is the builder's lookup, passed through: the run does not resolve
+//
+//	model refs itself.
+func (rt *Runtime) contexts() map[string]contract.AgentContext {
+	if rt.cfg.AgentBuilder == nil {
+		return nil
+	}
+	return rt.cfg.AgentBuilder.Contexts()
 }
 
 // newRunID mints a protocol run id.

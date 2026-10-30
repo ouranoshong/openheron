@@ -137,46 +137,32 @@ func (s *Server) v2Run(ctx context.Context, c *app.RequestContext) {
 
 	//   makeOnAgentEvents, so reading it earlier hands back a nil iterator.
 	//   Readying is not executing — the agent may still be running after this
-	//   returns, and the drain below is what follows it to completion.
+	//   returns, and the subscription below is what follows it to completion.
 	if err := turn.Wait(s.startTimeout()); err != nil {
 		// The failed wait already released the turn's handshake; there is
-		// nothing to Complete and nothing left to drain.
+		// nothing to render and nothing left to wait for.
 		s.reportRunStartFailure(stream, err)
 		stream.Flush()
 		return
 	}
-	// Keepalives start before draining: a preempted turn can take a long time
+	// Keepalives start before rendering: a preempted turn can take a long time
 	// to unwind, and silence on the wire reads as a dead connection.
 	kaStop := make(chan struct{})
 	defer close(kaStop)
 	go stream.Keepalive(kaStop, 15_000_000_000) // 15s
 
-	res, streamErr := transport.Stream(stream, turn, transport.Options{
-		RunID:     runID,
-		RootAgent: root,
-		Contexts:  s.contexts(),
-	})
+	// ★ The connection subscribes to the run. It does not consume it: the
+	//   run reads its own events and archives them, so a connection that
+	//   dies leaves the run going.
+	sub := turn.Subscribe()
+	defer sub.Close()
 
-	// The turn's own bookkeeping runs whatever the renderer managed to do.
-	turn.Complete(run.Outcome{
-		Intermediates: res.Intermediates,
-		Interrupts:    res.Pending,
-		Usage:         res.Usage,
-		Compaction:    res.Compaction,
-		// ★ The error the consumer saw belongs to the run. Without it the
-		//   run's terminal row would say "completed" for a turn whose model
-		//   timed out — the ledger would be the one place that lies.
-		Err: streamErr,
-	})
-	// A stream-side failure is already framed as RUN_ERROR by the transport;
-	// it only matters to the archive, so record it and move on.
-	if streamErr != nil {
-		if res.Stopped {
-			obs.Logger().Info("[api] run stopped by the client", "thread", in.ThreadID)
-		} else {
-			obs.Logger().Error("[api] run ended with a stream error", "thread", in.ThreadID, "err", streamErr)
-		}
-	}
+	transport.Render(stream, sess.ID(), turn.RunID, sub.Events())
+
+	// ★ The archive is the run's work, and the response waits for it: the
+	//   client's next message must find a complete history, or the next
+	//   turn's input is built from a half-written one.
+	turn.WaitArchived()
 	stream.Flush()
 }
 

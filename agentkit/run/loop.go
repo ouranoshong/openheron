@@ -9,6 +9,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/ouranoshong/openheron/agentkit/emit"
 	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/message"
@@ -94,40 +95,60 @@ func (rt *Runtime) makePrepareAgent(sess storage.Session) func(context.Context, 
 	}
 }
 
-// makeOnAgentEvents is the bridge between the TurnLoop and the consumer.
-// It hands the event iterator to the turn handle, waits for the consumer to
-// report back, then archives. openheronrt never renders anything itself.
+// makeOnAgentEvents is the bridge between the TurnLoop and the run.
+//
+// ★ The run consumes its own events. The connection is a subscriber of what
+//
+//	the run publishes, not the consumer of the agent's stream — so a
+//	connection that dies cannot stop the archive.
+//
+// ★ Nobody else may read the stream: the derivation folds the model's
+//
+//	chunks into one message, and a second reader would split them. That
+//	single-reader rule is why this used to be the transport's job, and
+//	why moving it here is what unbinds the run from the connection.
 func (rt *Runtime) makeOnAgentEvents(sess storage.Session, turn *Turn) func(context.Context, *adk.TurnContext[loopItem, *schema.Message], *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.Message]]) error {
 	return func(ctx context.Context, _ *adk.TurnContext[loopItem, *schema.Message], events *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.Message]]) error {
 		// ★ The agent has started producing events: the run is executing,
 		//   not just claimed. The row says so before anything is archived.
 		turn.row.set(storage.RunRunning)
-		out, err := rt.handoff(ctx, sess, turn, events)
-		if err != nil {
-			return err
+
+		turn.events = events
+		turn.signalReady()
+
+		artifacts, err := emit.Derive(events, emit.Options{
+			RunID:     turn.RunID,
+			RootAgent: sess.AgentID(),
+			Contexts:  rt.contexts(),
+		}, turn.publisher, turn.abort)
+
+		out := Outcome{
+			Intermediates: artifacts.Intermediates,
+			Interrupts:    artifacts.Pending,
+			Usage:         artifacts.Usage,
+			Compaction:    artifacts.Compaction,
+			Err:           err,
 		}
+		turn.holdPending(artifacts.Pending)
+
+		rt.archive(sess, turn, out)
+		// ★ The messages are on disk: the turn is finished with the
+		//   session's history, and the client may go on.
+		turn.markArchived()
+		rt.finishRun(turn, out)
+		// ★ The publisher closes when the RUN is over, not when the turn's
+		//   events end. A run that ended by raising an interrupt is not
+		//   over until the approval is on disk: the client learns about
+		//   the interrupt from the closing channel, and a client that
+		//   answers an approval the server has not persisted yet is
+		//   refused for no reason the user can see. That run's publisher
+		//   closes at the loop's exit instead.
+		if !turn.awaitingApproval {
+			turn.publisher.Close()
+		}
+
 		return rt.finalize(sess, turn, out)
 	}
-}
-
-func (rt *Runtime) handoff(ctx context.Context, sess storage.Session, turn *Turn,
-	events *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.Message]]) (outcome, error) {
-	turn.events = events
-	turn.signalReady()
-
-	var out outcome
-	select {
-	case out = <-turn.done:
-	case <-ctx.Done():
-		return outcome{}, ctx.Err()
-	}
-
-	rt.archive(sess, turn, out.out)
-	// ★ The messages are on disk: the turn is finished with the session's
-	//   history, and the client waiting in Complete may go on.
-	turn.markArchived()
-	rt.finishRun(turn, out)
-	return out, nil
 }
 
 // finishRun writes the run's terminal row.
@@ -142,47 +163,41 @@ func (rt *Runtime) handoff(ctx context.Context, sess storage.Session, turn *Turn
 //	row waits for the loop's exit, which is where the approval and the
 //	checkpoint are written. A scan must not be able to call the run over
 //	before the question the user has to answer is on disk.
-func (rt *Runtime) finishRun(turn *Turn, out outcome) {
+func (rt *Runtime) finishRun(turn *Turn, out Outcome) {
 	if turn.row == nil {
 		return
 	}
 	switch {
-	case out.err != nil:
-		state, code := failedState(out.err)
-		turn.row.finish(state, code, out.err.Error())
-	case out.out.Err != nil:
+	case out.Err != nil:
 		// ★ A cancelled run is "aborted", not "failed": the user stopped
 		//   it. The distinction is the user's, and the row is what a
 		//   post-mortem reads.
-		state, code := failedState(out.out.Err)
-		turn.row.finish(state, code, out.out.Err.Error())
-	case len(out.out.Interrupts) > 0:
+		state, code := failedState(out.Err)
+		turn.row.finish(state, code, out.Err.Error())
+	case len(out.Interrupts) > 0:
 		turn.awaitingApproval = true
 	default:
 		turn.row.finish(storage.RunCompleted, "", "")
 	}
 }
 
-func (rt *Runtime) finalize(sess storage.Session, turn *Turn, out outcome) error {
+func (rt *Runtime) finalize(sess storage.Session, turn *Turn, out Outcome) error {
 	// ★ A cancelled turn is not a session error. The user stopped it, or
 	//   the run was aborted — putting "context canceled" in front of the
 	//   user as the session's last failure would be a lie about the
 	//   session. The run's own row still says "aborted".
-	if out.out.Err != nil && !errors.Is(out.out.Err, context.Canceled) {
-		rt.stateFor(sess.ID()).markError(out.out.Err)
+	if out.Err != nil && !errors.Is(out.Err, context.Canceled) {
+		rt.stateFor(sess.ID()).markError(out.Err)
 	}
 	//   the session state made /v2/sessions/{id} keep reporting "running"
 	//   forever after a completed turn — the loop stays alive waiting for
 	//   the next item, so "a loop exists" says nothing about activity.
 	rt.stateFor(sess.ID()).markTurnDone(turn)
 
-	if out.err != nil {
-		return out.err
+	if out.Err != nil {
+		return out.Err
 	}
-	if out.out.Err != nil {
-		return out.out.Err
-	}
-	if len(out.out.Interrupts) > 0 {
+	if len(out.Interrupts) > 0 {
 		// Stopping the loop is what makes the checkpoint survive: the
 		// framework only writes one when the stop is committed.
 		rt.stateFor(sess.ID()).markError(errInterrupted)

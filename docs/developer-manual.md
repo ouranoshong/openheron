@@ -37,7 +37,8 @@ openheron/
 │   ├── spec/          # configuration: loading, validation, hot reload, write gates
 │   │   └── decl/      # pure declaration structs (where the yaml tags live)
 │   ├── build/         # agent assembly: tools, policy, providers
-│   ├── run/           # run loop: input construction, ADK driving, approval bridging
+│   ├── run/           # run loop: input construction, ADK driving, event consumption
+│   ├── emit/          # the derivation: agent events → the run's facts
 │   └── obs/           # the log sink (the only one)
 ├── approval/          # representation and validation of approval decisions
 ├── contract/          # cross-layer data contracts
@@ -49,7 +50,7 @@ openheron/
 ├── persist/           # atomic file writes
 ├── storage/
 │   └── filestore/     # file store implementation
-├── transport/         # AG-UI event emission, usage and attribution
+├── transport/         # AG-UI rendering: the run's events → frames
 ├── webui/             # embedded frontend assets
 └── web/               # React frontend
 ```
@@ -62,7 +63,7 @@ one. The measured internal import graph:
 | Layer | Packages | Internal dependencies |
 |---|---|---|
 | **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `llm/common` `webui` | none |
-| **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` | `decl` none; `storage`→`contract`; `kb`→`obs`,`persist`; `spec`→`obs`,`decl`,`kb`,`persist` |
+| **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` none; `storage`→`contract`; `kb`→`obs`,`persist`; `spec`→`obs`,`decl`,`kb`,`persist`; `emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
 | **L2** | `agentkit/build` `agentkit/run` `storage/filestore` `transport` `llm` `initcfg` | see architecture.md §2 |
 | **L3** | `api` | almost all of them |
 
@@ -261,8 +262,8 @@ agent setting instead.
 
 The middleware is mounted on **every agent that declares a threshold** — the root's compaction
 is the one that reaches the transcript, a sub-agent's lives and dies inside its own run, where
-it still protects that agent's window. The transport only picks up the **root's** compaction
-(`transport/transport.go`): a sub-agent's summary is not a boundary of the session's history.
+it still protects that agent's window. The derivation only picks up the **root's** compaction
+(`agentkit/emit/emit.go`): a sub-agent's summary is not a boundary of the session's history.
 
 **The chain**, end to end:
 
@@ -271,7 +272,7 @@ it still protects that agent's window. The transport only picks up the **root's*
 | the trigger | `agentkit/build/summarize.go` | eino's summarization middleware counts the agent's state before every model call and compacts it past the threshold |
 | the finalizer | `finalize`, same file | the replacement history is the agent's system messages **plus the summary** — openheron's context prompt is a system message (`agentkit/run/input.go`), and dropping it would leave the agent without its rules for the rest of the turn |
 | the announcement | eino's `after_summarize` event | the middleware publishes the replacement history on the agent's event stream |
-| the pickup | `compactionFrom` in `transport/transport.go` | the transport reads the event and puts the compacted message on `Result.Compaction` — the **summary**, not the system message that shares the replacement history |
+| the pickup | `compactionFrom` in `agentkit/emit/emit.go` | the derivation reads the event and puts the compacted message on `Artifacts.Compaction` — the **summary**, not the system message that shares the replacement history |
 | the write | `archiveCompaction` in `agentkit/run/loop.go:182` | the message is appended to the transcript **before the turn's own messages** |
 | the boundary | `message/compaction.go:103` | the marker rides on that message, so the transcript stays the single source of truth |
 
@@ -335,7 +336,7 @@ means "everything", and every call site says which view it wants.
 How full an agent's context is, and where the number comes from.
 
 **The number** is the size of that agent's **most recent request** — the endpoint's own
-count, not a sum over the session. `transport.ContextUsageOf` (`transport/context.go`) walks the
+count, not a sum over the session. `emit.ContextUsageOf` (`agentkit/emit/context.go`) walks the
 messages and keeps each agent's last assistant message that carried usage. A session can carry
 a large total and an almost empty context; only the last request answers the question.
 
@@ -351,7 +352,7 @@ runs on.
 | the live path | the transport emits a `CUSTOM "context_usage"` event after every model call | while the run goes |
 | the history path | `GET /v2/sessions/{id}` carries `usage.context` | after a refresh |
 
-Both call `transport.ContextUsageOf`, so the number on screen and the number after a refresh
+Both call `emit.ContextUsageOf`, so the number on screen and the number after a refresh
 cannot disagree.
 
 ★ **`usage.byAgent` and `usage.context` are different quantities.** The first is a cumulative

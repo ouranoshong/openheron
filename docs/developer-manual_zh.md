@@ -35,7 +35,8 @@ openheron/
 │   ├── spec/          # 配置：装载、校验、热重载、写入闸门
 │   │   └── decl/      # 纯声明结构体（yaml tag 集中处）
 │   ├── build/         # Agent 装配：工具、策略、provider
-│   ├── run/           # 运行循环：输入构造、ADK 驱动、审批桥接
+│   ├── run/           # 运行循环：输入构造、ADK 驱动、事件消费
+│   ├── emit/          # 推导层：agent 事件 → run 的事实
 │   └── obs/           # 日志出口（唯一）
 ├── approval/          # 审批决定的表示与校验
 ├── contract/          # 跨层数据契约
@@ -47,7 +48,7 @@ openheron/
 ├── persist/           # 原子写文件
 ├── storage/
 │   └── filestore/     # 文件存储实现
-├── transport/         # AG-UI 事件发射、用量与归属
+├── transport/         # AG-UI 渲染：run 的事件 → 帧
 ├── webui/             # 嵌入式前端资源
 └── web/               # React 前端
 ```
@@ -59,7 +60,7 @@ openheron/
 | 层 | 包 | 内部依赖 |
 |---|---|---|
 | **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `llm/common` `webui` | 无 |
-| **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` | `decl` 无；`storage`→`contract`；`kb`→`obs`,`persist`；`spec`→`obs`,`decl`,`kb`,`persist` |
+| **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` 无；`storage`→`contract`；`kb`→`obs`,`persist`；`spec`→`obs`,`decl`,`kb`,`persist`；`emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
 | **L2** | `agentkit/build` `agentkit/run` `storage/filestore` `transport` `llm` `initcfg` | 见 architecture.md §2 |
 | **L3** | `api` | 几乎全部 |
 
@@ -237,7 +238,7 @@ spec 包在加载配置时会把这件事记进 `deferred`（`agentkit/spec/load
 
 中间件挂在**每个声明了阈值的 Agent 上** —— 根 agent 的压缩才是进记录的那一份；子 agent 的
 压缩活在自己的那一轮里，随轮而死，但在那一轮里护住了它自己的窗口。transport 只接**根
-agent** 的压缩（`transport/transport.go`）：子 agent 的摘要不是会话历史的边界。
+agent** 的压缩（`agentkit/emit/emit.go`）：子 agent 的摘要不是会话历史的边界。
 
 **整条链**，从头到尾：
 
@@ -246,7 +247,7 @@ agent** 的压缩（`transport/transport.go`）：子 agent 的摘要不是会�
 | 触发 | `agentkit/build/summarize.go` | eino 的摘要中间件在每次模型调用前给 agent 的状态数 token，超过阈值就压缩 |
 | finalizer | 同文件的 `finalize` | 替换后的历史是 agent 的 system 消息**加上摘要** —— openheron 的上下文提示就是一条 system 消息（`agentkit/run/input.go`），丢掉它会让 agent 在这一轮余下的时间里没有自己的规则 |
 | 宣告 | eino 的 `after_summarize` 事件 | 中间件把替换后的历史发到 agent 的事件流上 |
-| 接住 | `transport/transport.go` 的 `compactionFrom` | transport 读这个事件，把压缩消息放进 `Result.Compaction` —— 取的是**摘要**，不是同处替换历史里的那条 system 消息 |
+| 接住 | `agentkit/emit/emit.go` 的 `compactionFrom` | 推导层读这个事件，把压缩消息放进 `Artifacts.Compaction` —— 取的是**摘要**，不是同处替换历史里的那条 system 消息 |
 | 落盘 | `agentkit/run/loop.go:182` 的 `archiveCompaction` | 消息被追加到记录里，位置在**本轮消息之前** |
 | 边界 | `message/compaction.go:103` | 标记搭在这条消息上，所以记录仍是唯一真相源 |
 
@@ -300,7 +301,7 @@ compacted into a summary」*，数字要等下一次加载 —— 那时标记�
 一个 agent 的上下文有多满，以及那个数字从哪来。
 
 **那个数字**是该 agent **最近一次请求**的大小 —— 厂商自己的计数，不是会话的累加。
-`transport.ContextUsageOf`（`transport/context.go`）顺着消息走一遍，留下每个 agent 最后一条
+`emit.ContextUsageOf`（`agentkit/emit/context.go`）顺着消息走一遍，留下每个 agent 最后一条
 带用量的 assistant 消息。一个会话可以总量很大而上下文几乎为空；只有最近一次请求回答得了
 这个问题。
 
@@ -315,7 +316,7 @@ compacted into a summary」*，数字要等下一次加载 —— 那时标记�
 | 实时路径 | transport 在每次模型调用后发 `CUSTOM "context_usage"` 事件 | 运行中 |
 | 历史路径 | `GET /v2/sessions/{id}` 带 `usage.context` | 刷新后 |
 
-两条都调 `transport.ContextUsageOf`，所以屏幕上的数字与刷新后的数字不会分叉。
+两条都调 `emit.ContextUsageOf`，所以屏幕上的数字与刷新后的数字不会分叉。
 
 ★ **`usage.byAgent` 与 `usage.context` 是两个不同的量。** 前者是累计开销，后者是时点占用。
 前端把它们分开，测试也守着标签不互换。

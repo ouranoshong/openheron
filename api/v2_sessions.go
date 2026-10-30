@@ -11,12 +11,12 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
+	"github.com/ouranoshong/openheron/agentkit/emit"
 	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/agentkit/run"
 	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/message"
 	"github.com/ouranoshong/openheron/storage"
-	"github.com/ouranoshong/openheron/transport"
 )
 
 // Agent switching sentinels. They are mapped onto v2 codes in v2FailErr.
@@ -305,10 +305,10 @@ func (s *Server) v2Messages(ctx context.Context, c *app.RequestContext) {
 // sessionContextUsage reports the context occupancy of every agent that
 // spoke, read from the transcript.
 //
-// The live path and this one share the computation (transport.ContextUsageOf),
+// The live path and this one share the computation (emit.ContextUsageOf),
 // so the number on screen and the number after a refresh cannot disagree.
 func (s *Server) sessionContextUsage(history []*schema.Message) map[string]contract.ContextUsage {
-	out := transport.ContextUsageOf(history, s.contexts())
+	out := emit.ContextUsageOf(history, s.contexts())
 	if len(out) == 0 {
 		return nil
 	}

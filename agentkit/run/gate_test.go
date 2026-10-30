@@ -181,7 +181,7 @@ func TestSubmitIsNotRefusedWhileTheTurnIsArchiving(t *testing.T) {
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatalf("first Wait: %v", err)
 	}
-	drain(t, turn, Outcome{Intermediates: []*schema.Message{message.NewAssistant("working", nil)}})
+	drain(t, turn)
 
 	// Once the outcome is archived the session is free again.
 	waitFor(t, func() bool {
@@ -236,7 +236,7 @@ func TestAbortClearsTheVoidApproval(t *testing.T) {
 	b := &fakeBuilder{agent: func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
 		return &fakeAgent{script: func(ctx context.Context, emit func(*adk.TypedAgentEvent[*schema.Message]) bool) {
 			emit(textEvent("about to write"))
-			emit(exitEvent())
+			emit(interruptedEvent("int-1", "write_file needs approval"))
 		}}
 	}}
 	rt, sm := newTestRuntime(t, b)
@@ -250,10 +250,7 @@ func TestAbortClearsTheVoidApproval(t *testing.T) {
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatalf("first Wait: %v", err)
 	}
-	drain(t, turn, Outcome{
-		Intermediates: []*schema.Message{message.NewAssistant("about to write", nil)},
-		Interrupts:    []contract.PendingInterrupt{{InterruptID: "int-1"}},
-	})
+	drain(t, turn)
 	waitFor(t, func() bool {
 		p, _ := sess.PendingApproval()
 		return p != nil && len(p.Interrupts) == 1

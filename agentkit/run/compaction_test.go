@@ -17,6 +17,7 @@ import (
 func TestTheCompactedMessageIsArchivedBeforeTheTurnMessages(t *testing.T) {
 	b := &fakeBuilder{agent: func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
 		return &fakeAgent{script: func(ctx context.Context, emit func(*adk.TypedAgentEvent[*schema.Message]) bool) {
+			emit(compactionEvent(message.NewUser("summary of the conversation")))
 			emit(textEvent("working"))
 			emit(exitEvent())
 		}}
@@ -32,10 +33,7 @@ func TestTheCompactedMessageIsArchivedBeforeTheTurnMessages(t *testing.T) {
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
-	drain(t, turn, Outcome{
-		Compaction:    message.NewUser("summary of the conversation"),
-		Intermediates: []*schema.Message{message.NewAssistant("working", nil)},
-	})
+	drain(t, turn)
 
 	waitFor(t, func() bool { return sess.Len() >= 3 })
 
@@ -96,7 +94,7 @@ func TestATurnWithoutACompaction(t *testing.T) {
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
-	drain(t, turn, Outcome{Intermediates: []*schema.Message{message.NewAssistant("working", nil)}})
+	drain(t, turn)
 
 	waitFor(t, func() bool { return sess.Len() >= 2 })
 

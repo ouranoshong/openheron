@@ -50,13 +50,14 @@ counting `grep '"github.com/ouranoshong/openheron/'` hits per package:
 | | `llm/common` | none | Vendor protocol layer (zero openheron dependencies) |
 | | `webui` | none | Embedded frontend assets |
 | **L1** | `agentkit/spec/decl` | none | **Pure declarations** (where the yaml tags live) |
+| | `agentkit/emit` | `obs`, `approval`, `contract`, `helpers`, `message` | The derivation: agent events → the run's facts |
 | | `storage` | `contract` | Interfaces for sessions/messages/pending approvals |
 | | `kb` | `obs`, `persist` | Knowledge base: corpus, index, retrieval, scoring |
 | | `agentkit/spec` | `obs`, `decl`, `kb`, `persist` | Config loading, validation, hot reload, write gates |
 | **L2** | `agentkit/build` | `obs`, `spec`, `decl`, `approval`, `contract`, `helpers`, `kb`, `llm/common`, `message` | Agent assembly, tool assembly, policy gates |
-| | `agentkit/run` | `obs`, `approval`, `contract`, `message`, `storage` | Run loop, input construction, event bridging |
+| | `agentkit/run` | `emit`, `obs`, `approval`, `contract`, `message`, `storage` | Run loop, input construction, event consumption |
 | | `storage/filestore` | `obs`, `contract`, `message`, `persist`, `storage` | File store implementation |
-| | `transport` | `obs`, `approval`, `contract`, `helpers`, `message` | AG-UI event emission, usage and attribution |
+| | `transport` | `contract` | AG-UI rendering: the run's events → frames |
 | | `llm` | `build`, `spec`, `decl` | Thin wrapper (only `common/` and one test file) |
 | | `initcfg` | `spec` | Factory templates for `openheron init` |
 | **L3 entry** | `api` | `build`, `obs`, `run`, `spec`, `decl`, `contract`, `message`, `storage`, `filestore`, `transport`, `webui` | HTTP routing, SSE, error envelope |
@@ -286,18 +287,19 @@ is yours to write.
 
 ### 5.1 The event stream
 
-The event types come from the `ag-ui-protocol/ag-ui` Go SDK. Emission points are in
-`transport/transport.go`:
+The event types come from the `ag-ui-protocol/ag-ui` Go SDK. The frames are rendered by
+`transport/transport.go` from the run's events — the derivation (what the agent's events
+*mean*) lives in `agentkit/emit`:
 
 | Event | Emitted at | Meaning |
 |---|---|---|
-| `RUN_STARTED` | `transport.go:71` | The turn began; carries `threadId` |
-| `TEXT_MESSAGE_START/CONTENT/END` | `transport.go:526-542` | Assistant body, incrementally |
-| `REASONING_*` | `transport.go:549-561` | Reasoning process |
-| `TOOL_CALL_START/ARGS/END/RESULT` | `transport.go:565-595` | Tool calls |
-| `CUSTOM` (`model_retry`) | `transport.go:109`, `:209` | Model-retry notice |
-| `RUN_FINISHED` | `transport.go:77`, `:81` | The turn ended; carries result and usage |
-| `RUN_ERROR` | `transport.go:116`, `:214` | Failure |
+| `RUN_STARTED` | `transport.go:54` | The turn began; carries `threadId` |
+| `TEXT_MESSAGE_START/CONTENT/END` | `transport.go:239-256` | Assistant body, incrementally |
+| `REASONING_*` | `transport.go:262-273` | Reasoning process |
+| `TOOL_CALL_START/ARGS/END/RESULT` | `transport.go:276-306` | Tool calls |
+| `CUSTOM` (`model_retry`) | `transport.go:220` | Model-retry notice |
+| `RUN_FINISHED` | `transport.go:62`, `:68` | The turn ended; carries result and usage |
+| `RUN_ERROR` | `transport.go:233` | Failure |
 
 A sub-agent's output is **attributed through `subagentRunId` on the event** rather than
 through a separate event type — that lets the frontend handle every agent's output with

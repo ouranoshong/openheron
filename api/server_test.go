@@ -167,6 +167,10 @@ func (noopAgent) Run(context.Context, *adk.TypedAgentInput[*schema.Message], ...
 
 type noopBuilder struct{}
 
+// Contexts reports what each agent's context allows. The fake has no
+// models, so there are no windows.
+func (noopBuilder) Contexts() map[string]contract.AgentContext { return nil }
+
 func (noopBuilder) Build(context.Context, string, string, contract.TurnKind) (adk.TypedAgent[*schema.Message], error) {
 	return noopAgent{}, nil
 }

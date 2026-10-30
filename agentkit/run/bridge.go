@@ -131,6 +131,9 @@ func (rt *Runtime) loopExited(sessionID string, turn *Turn, loop *adk.TurnLoop[l
 		// A newer loop took over while this one was winding down. Its
 		// state is not ours to clear.
 		rt.closeOpenRow(turn, exit)
+		// ★ The run is over even so: its subscribers must not wait for a
+		//   stream that will never come.
+		turn.publisher.Close()
 		return
 	}
 	if exit != nil && exit.ExitReason != nil {
@@ -139,6 +142,10 @@ func (rt *Runtime) loopExited(sessionID string, turn *Turn, loop *adk.TurnLoop[l
 	rt.writeHeldApproval(sessionID, turn)
 	rt.closeApprovalRow(turn)
 	rt.closeOpenRow(turn, exit)
+	// ★ The publisher closes here for the run that ended by raising an
+	//   interrupt: the approval is on disk now, so a client that answers
+	//   it cannot be refused.
+	turn.publisher.Close()
 	rt.removeStateIfIdle(sessionID)
 }
 
@@ -242,14 +249,20 @@ func (rt *Runtime) removeStateIfIdle(sessionID string) {
 	delete(rt.states, sessionID)
 }
 
-// newTurnHandle creates the three channels a turn needs: readiness, the event
-// hand-off and the result return path.
+// newTurnHandle creates what a turn needs: the readiness signal, the archive
+// signal and the event bus.
+//
+// ★ There is no "result return path" any more. The consumer used to report
+//
+//	back what it had seen; the run derives it now, so there is nothing to
+//	report.
 func newTurnHandle(sessionID string, kind contract.TurnKind) *Turn {
 	return &Turn{
 		sessionID: sessionID,
 		Kind:      kind,
 		ready:     make(chan struct{}),
-		done:      make(chan outcome, 1),
 		archived:  make(chan struct{}),
+		abort:     make(chan struct{}),
+		publisher: newPublisher(),
 	}
 }

@@ -1,6 +1,8 @@
 package transport
 
 import (
+	"github.com/ouranoshong/openheron/agentkit/emit"
+
 	"testing"
 
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/events"
@@ -30,7 +32,7 @@ func TestTheCompactionIsCaptured(t *testing.T) {
 	_, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
 		compactionEvent(summary),
 		exitEvent(),
-	}, Options{})
+	}, emit.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +59,7 @@ func TestOnlyTheCompletedCompactionIsCaptured(t *testing.T) {
 		},
 	}
 
-	_, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{before, exitEvent()}, Options{})
+	_, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{before, exitEvent()}, emit.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +73,7 @@ func TestARunWithoutACompaction(t *testing.T) {
 	_, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
 		textEvent(assistantText("working")),
 		exitEvent(),
-	}, Options{})
+	}, emit.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +90,7 @@ func TestTheCompactionIsPublishedOnTheStream(t *testing.T) {
 	evs, _, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
 		compactionEvent(summary),
 		exitEvent(),
-	}, Options{RootAgent: "main"})
+	}, emit.Options{RootAgent: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +120,7 @@ func TestARunWithoutACompactionSaysNothingOnTheStream(t *testing.T) {
 	evs, _, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
 		textEvent(assistantText("working")),
 		exitEvent(),
-	}, Options{RootAgent: "main"})
+	}, emit.Options{RootAgent: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +142,7 @@ func TestASubAgentsCompactionIsNotTheSessions(t *testing.T) {
 	_, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
 		ev,
 		exitEvent(),
-	}, Options{RootAgent: "main"})
+	}, emit.Options{RootAgent: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +160,7 @@ func TestTheSummaryIsPickedOutOfTheReplacementHistory(t *testing.T) {
 	_, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{
 		compactionEvent(prompt, summary),
 		exitEvent(),
-	}, Options{RootAgent: "main"})
+	}, emit.Options{RootAgent: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,10 +1,9 @@
-package transport
+package emit
 
 import (
 	"encoding/json"
 	"time"
 
-	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
@@ -35,12 +34,17 @@ func interruptDetailOf(ic *adk.InterruptCtx, sub string) *contract.InterruptDeta
 	return detail
 }
 
-func approvalMetadata(info any) types.Metadata {
+// approvalMetadata describes the tool the approval is about.
+//
+// ★ The shape is a plain map: it crosses into the wire format at the
+//
+//	renderer, and openheron's own facts must not carry the wire's types.
+func approvalMetadata(info any) map[string]any {
 	ai, ok := info.(*approval.ApprovalInfo)
 	if !ok || ai == nil {
 		return nil
 	}
-	md := types.Metadata{"toolName": ai.ToolName}
+	md := map[string]any{"toolName": ai.ToolName}
 	if ai.ArgumentsInJSON != "" && json.Valid([]byte(ai.ArgumentsInJSON)) {
 		md["arguments"] = json.RawMessage(ai.ArgumentsInJSON)
 	}

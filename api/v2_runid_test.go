@@ -20,6 +20,10 @@ type runIDCapturingBuilder struct {
 	seen string
 }
 
+// Contexts reports what each agent's context allows. The fake has no
+// models, so there are no windows.
+func (b *runIDCapturingBuilder) Contexts() map[string]contract.AgentContext { return nil }
+
 func (b *runIDCapturingBuilder) Build(ctx context.Context, _, _ string, _ contract.TurnKind) (
 	adk.TypedAgent[*schema.Message], error) {
 	b.seen = obs.RunID(ctx)

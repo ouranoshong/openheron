@@ -47,13 +47,14 @@
 | | `llm/common` | 无 | 厂商协议层（零 openheron 依赖） |
 | | `webui` | 无 | 嵌入式前端资源 |
 | **L1** | `agentkit/spec/decl` | 无 | **纯声明**结构体（yaml tag 集中处） |
+| | `agentkit/emit` | `obs`, `approval`, `contract`, `helpers`, `message` | 推导层：agent 事件 → run 的事实 |
 | | `storage` | `contract` | 会话/消息/待审批的接口 |
 | | `kb` | `obs`, `persist` | 知识库：语料、索引、检索、评分 |
 | | `agentkit/spec` | `obs`, `decl`, `kb`, `persist` | 配置装载、校验、热重载、写入闸门 |
 | **L2** | `agentkit/build` | `obs`, `spec`, `decl`, `approval`, `contract`, `helpers`, `kb`, `llm/common`, `message` | Agent 装配、工具装配、策略闸门 |
-| | `agentkit/run` | `obs`, `approval`, `contract`, `message`, `storage` | 运行循环、输入构造、事件桥接 |
+| | `agentkit/run` | `emit`, `obs`, `approval`, `contract`, `message`, `storage` | 运行循环、输入构造、事件消费 |
 | | `storage/filestore` | `obs`, `contract`, `message`, `persist`, `storage` | 文件存储实现 |
-| | `transport` | `obs`, `approval`, `contract`, `helpers`, `message` | AG-UI 事件发射、用量与归属 |
+| | `transport` | `contract` | AG-UI 渲染：run 的事件 → 帧 |
 | | `llm` | `build`, `spec`, `decl` | 薄封装（只有 `common/` 与一个测试文件） |
 | | `initcfg` | `spec` | `openheron init` 的出厂模板 |
 | **L3 入口** | `api` | `build`, `obs`, `run`, `spec`, `decl`, `contract`, `message`, `storage`, `filestore`, `transport`, `webui` | HTTP 路由、SSE、错误信封 |
@@ -257,18 +258,19 @@ frontmatter 可用键（`agentkit/spec/decl/decl.go:67` 的 `decl.Agent`）：
 
 ### 5.1 事件流
 
-事件类型来自 `ag-ui-protocol/ag-ui` 的 Go SDK。发射点在
-`transport/transport.go`：
+事件类型来自 `ag-ui-protocol/ag-ui` 的 Go SDK。帧由 `transport/transport.go`
+从 run 的事件渲染出来——推导（agent 的事件**意味着什么**）在
+`agentkit/emit`：
 
 | 事件 | 发射点 | 含义 |
 |---|---|---|
-| `RUN_STARTED` | `transport.go:71` | 本轮开始，带 `threadId` |
-| `TEXT_MESSAGE_START/CONTENT/END` | `transport.go:526-542` | 助手正文增量 |
-| `REASONING_*` | `transport.go:549-561` | 思考过程 |
-| `TOOL_CALL_START/ARGS/END/RESULT` | `transport.go:565-595` | 工具调用 |
-| `CUSTOM`（`model_retry`） | `transport.go:109`, `:209` | 模型重试提示 |
-| `RUN_FINISHED` | `transport.go:77`, `:81` | 本轮结束，带结果与用量 |
-| `RUN_ERROR` | `transport.go:116`, `:214` | 失败 |
+| `RUN_STARTED` | `transport.go:54` | 本轮开始，带 `threadId` |
+| `TEXT_MESSAGE_START/CONTENT/END` | `transport.go:239-256` | 助手正文增量 |
+| `REASONING_*` | `transport.go:262-273` | 思考过程 |
+| `TOOL_CALL_START/ARGS/END/RESULT` | `transport.go:276-306` | 工具调用 |
+| `CUSTOM`（`model_retry`） | `transport.go:220` | 模型重试提示 |
+| `RUN_FINISHED` | `transport.go:62`, `:68` | 本轮结束，带结果与用量 |
+| `RUN_ERROR` | `transport.go:233` | 失败 |
 
 子 Agent 的产出**通过事件上的 `subagentRunId` 归属**，而不是另开事件类型 ——
 这让前端能用同一套 reducer 处理所有 Agent 的输出。

@@ -1,534 +1,87 @@
+// Package transport renders a run's events as AG-UI frames.
+//
+// ★ It renders; it does not derive. The derivation — folding the agent's
+//
+//	events into the messages a run archives — lives in agentkit/emit,
+//	because it can only happen once and the run has to own it: a renderer
+//	that derived would own the run's output, and the run would die with
+//	the connection.
+//
+// ★ What is left here is the wire format and nothing else. The run's
+//
+//	events arrive on a channel; they go out as frames.
 package transport
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/events"
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
-	"github.com/cloudwego/eino/adk"
-	"github.com/cloudwego/eino/adk/middlewares/summarization"
-	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 
-	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/contract"
-	"github.com/ouranoshong/openheron/helpers"
-	"github.com/ouranoshong/openheron/message"
 )
 
-type Options struct {
-	RunID     string
-	RootAgent string
-	// Contexts reports what each agent's context allows: the model's window
-	// and the compaction threshold. The transport needs the window to turn a
-	// token count into a ratio; it must not resolve model refs itself — the
-	// builder owns that lookup.
-	Contexts map[string]contract.AgentContext
-}
-
-type Result struct {
-	Intermediates []*schema.Message
-	Interrupts    []types.Interrupt
-	Pending       []contract.PendingInterrupt
-	Usage         contract.Usage
-	// Compaction is the message that replaced the conversation so far, when
-	// the context was compacted during this turn. It is written to the
-	// transcript before the turn's own messages, because it summarizes
-	// everything that came before them.
-	Compaction   *schema.Message
-	StreamBroken bool
-	Stopped      bool
-}
-
+// The failure codes the run reports on the wire.
+//
+// ★ They are the codes the client branches on. The provider's failures are
+//
+//	classified by the derivation (agentkit/emit); the turn's own failures
+//	are the transport's.
 const (
-	CodeTurnSuperseded    = "turn_superseded"
-	CodeTurnStartTimeout  = "turn_start_timeout"
-	CodeModelAuth         = "model_auth"
-	CodeModelRateLimit    = "model_rate_limit"
-	CodeModelQuota        = "model_quota"
-	CodeModelOverload     = "model_overload"
-	CodeModelBadRequest   = "model_bad_request"
-	CodeModelUpstream     = "model_upstream"
-	CodeModelNetwork      = "model_network"
-	CodeModelTimeout      = "model_timeout"
-	CodeModelUnknown      = "model_unknown"
-	CodeStreamRecvFailure = "stream_recv_failed"
+	CodeTurnSuperseded   = "turn_superseded"
+	CodeTurnStartTimeout = "turn_start_timeout"
 )
 
-type EventSource interface {
-	Next() (*adk.TypedAgentEvent[*schema.Message], bool)
-}
-
-func Stream(w io.Writer, turn contract.TurnView, opts Options) (Result, error) {
-	if turn == nil {
-		return Result{}, errors.New("transport: nil turn")
-	}
-	return RunStream(w, turn.SessionID(), turn.Events(), opts)
-}
-
-func RunStream(w io.Writer, threadID string, src EventSource, opts Options) (Result, error) {
-	runID := opts.RunID
+// Render writes the run's events as AG-UI frames.
+//
+// ★ It returns when the channel closes — which happens when the run ends.
+//
+//	A connection that dies does not stop the run: the run publishes to
+//	its subscribers, and this is one of them.
+//
+// ★ The frames are the same as before the split, one for one. The split
+//
+//	changed who derives them, not what they say.
+func Render(w io.Writer, threadID, runID string, ch <-chan contract.RunEvent) error {
 	if runID == "" {
 		runID = uuid.NewString()
 	}
+	r := &renderer{w: w, threadID: threadID, runID: runID}
+	r.emit(events.NewRunStartedEvent(threadID, runID))
 
-	e := &emitter{w: w, threadID: threadID, runID: runID}
-	e.emit(events.NewRunStartedEvent(threadID, runID))
-
-	res := streamEvents(e, src, opts)
+	for ev := range ch {
+		r.render(ev)
+	}
 
 	switch {
-	case len(res.Interrupts) > 0:
-		e.emit(events.NewRunFinishedEventWithOptions(threadID, runID,
-			events.WithInterruptOutcome(res.Interrupts)))
-	case e.runErr != nil:
+	case len(r.interrupts) > 0:
+		r.emit(events.NewRunFinishedEventWithOptions(threadID, runID,
+			events.WithInterruptOutcome(r.interrupts)))
+	case r.runErr != nil:
+		// ★ The error frame already ended the stream. A success frame
+		//   after it would tell the client the run finished cleanly.
 	default:
-		e.emit(events.NewRunFinishedEventWithOptions(threadID, runID,
+		r.emit(events.NewRunFinishedEventWithOptions(threadID, runID,
 			events.WithSuccessOutcome()))
 	}
-	return res, e.runErr
+	return r.runErr
 }
 
-func streamEvents(e *emitter, src EventSource, opts Options) Result {
-	var res Result
-	mainAgent := opts.RootAgent
-
-	for {
-		ev, ok := src.Next()
-		if !ok {
-			res.Usage = aggregateUsage(res.Intermediates)
-			return res
-		}
-
-		sub := ""
-		if ev.AgentName != "" && ev.AgentName != mainAgent {
-			sub = ev.AgentName
-		}
-		if ev.Err != nil {
-			if errors.Is(ev.Err, context.Canceled) {
-				res.Stopped = true
-				e.setRunErr(ev.Err)
-				return res
-			}
-			if helpers.IsModelRetryInProgress(ev.Err) {
-				obs.Logger().Warn("[transport] model retry", "err", ev.Err)
-				e.emit(events.NewCustomEvent("model_retry",
-					events.WithValue(map[string]any{
-						"message": ev.Err.Error(),
-						"agent":   ev.AgentName,
-					})))
-				continue
-			}
-			e.emit(events.NewRunErrorEvent(ev.Err.Error(),
-				events.WithRunID(e.runID), events.WithErrorCode(errorCode(ev.Err))))
-			e.setRunErr(ev.Err)
-			res.StreamBroken = e.broken()
-			return res
-		}
-
-		if ev.Action != nil && ev.Action.CustomizedAction != nil {
-			// Only the root agent's compaction is a boundary of the
-			// session's history. A sub-agent compacts inside its own run,
-			// and that summary must never reach the transcript: it would cut
-			// the root's effective history at a sub-agent's summary.
-			if ownerOf(ev, mainAgent) == mainAgent {
-				if cm := compactionFrom(ev.Action.CustomizedAction); cm != nil {
-					res.Compaction = cm
-					e.emitCompaction(mainAgent)
-				}
-			}
-		}
-
-		if ev.Action != nil && ev.Action.Interrupted != nil {
-			res.Interrupts, res.Pending = interruptsFrom(ev, mainAgent)
-			res.StreamBroken = e.broken()
-			return res
-		}
-
-		hasExit := ev.Action != nil && ev.Action.Exit
-		if hasOutput(ev) {
-			mo := ev.Output.MessageOutput
-			stamp := stampMessage
-			if sub != "" {
-				stamp = stampSubagentMessage
-			}
-			switch {
-			case message.VariantIsToolResult(mo):
-				content, callID, name := message.DrainToolResult(mo)
-				e.emitToolResult(content, callID, sub)
-				out := []*schema.Message{message.NewToolResult(callID, name, content)}
-				stamp(out[0], ownerOf(ev, mainAgent))
-				res.Intermediates = append(res.Intermediates, out...)
-
-			case mo.IsStreaming && mo.MessageStream != nil:
-				so := renderStream(e, mo, sub, ownerOf(ev, mainAgent))
-				for _, m := range so.intermediates {
-					stamp(m, ownerOf(ev, mainAgent))
-				}
-				res.Intermediates = append(res.Intermediates, so.intermediates...)
-				res.StreamBroken = e.broken()
-
-			default:
-				out := emitMessage(e, mo.Message, sub, ownerOf(ev, mainAgent))
-				for _, m := range out {
-					stamp(m, ownerOf(ev, mainAgent))
-				}
-				res.Intermediates = append(res.Intermediates, out...)
-			}
-		}
-
-		// The occupancy changes with every model call, and a meter that only
-		// moves at the end of a run is a meter nobody watches.
-		if n := len(res.Intermediates); n > 0 {
-			if u, ok := contextUsageOfMessage(res.Intermediates[n-1], opts.Contexts); ok {
-				e.emitContextUsage(u)
-			}
-		}
-
-		if hasExit {
-			res.StreamBroken = e.broken()
-			res.Usage = aggregateUsage(res.Intermediates)
-			return res
-		}
-	}
-}
-
-// compactionFrom reads the compacted history off the summarization
-// middleware's after_summarize event.
+// errRunFailed marks that the run failed.
 //
-// The event carries the replacement history. openheron's finalizer leaves the
-// summary alone in it (the agent's system prompt is transient and must not be
-// persisted), so the last message of that history is the compaction.
+// ★ The renderer does not carry the run's error — the run knows it. The
 //
-// The transport is where the agent's events are read, so this is where the
-// compacted message is picked up on its way to the transcript.
-func compactionFrom(action any) *schema.Message {
-	a, ok := action.(*summarization.TypedCustomizedAction[*schema.Message])
-	if !ok || a == nil || a.Type != summarization.ActionTypeAfterSummarize || a.After == nil {
-		return nil
-	}
-	var out *schema.Message
-	for _, m := range a.After.Messages {
-		if m == nil {
-			continue
-		}
-		// The replacement history keeps the agent's system messages — the
-		// context prompt lives there. Only the summary is worth keeping:
-		// it is what the agent carries forward, and the only part that
-		// belongs in the transcript.
-		if m.Role == schema.System {
-			continue
-		}
-		if out != nil {
-			obs.Logger().Warn("[transport] compaction carried more than one message; " +
-				"keeping the last one")
-		}
-		out = m
-	}
-	return out
-}
+//	renderer only needs to know that the stream ended badly, so that it
+//	does not close the stream with a success frame.
+var errRunFailed = errors.New("the run failed")
 
-func hasOutput(ev *adk.TypedAgentEvent[*schema.Message]) bool {
-	return ev.Output != nil && ev.Output.MessageOutput != nil
-}
+// ── renderer ─────────────────────────────────────────────────────────────
 
-func interruptsFrom(ev *adk.TypedAgentEvent[*schema.Message], mainAgent string) ([]types.Interrupt, []contract.PendingInterrupt) {
-	var out []types.Interrupt
-	var pending []contract.PendingInterrupt
-	for _, ic := range ev.Action.Interrupted.InterruptContexts {
-		if ic == nil {
-			continue
-		}
-		item := types.Interrupt{
-			ID:       ic.ID,
-			Reason:   "tool_call",
-			Message:  describe(ic.Info),
-			Metadata: approvalMetadata(ic.Info),
-		}
-		if sub := requestedBy(ic, mainAgent); sub != "" {
-			item.SubagentRunID = sub
-		}
-		out = append(out, item)
-		pending = append(pending, contract.PendingInterrupt{
-			InterruptID: ic.ID,
-			Detail:      interruptDetailOf(ic, requestedBy(ic, mainAgent)),
-		})
-	}
-	return out, pending
-}
-
-func renderStream(e *emitter, mo *adk.TypedMessageVariant[*schema.Message], sub, owner string) streamOutcome {
-	st := newStreamState(e, mo.Role, sub, owner)
-
-	for {
-		chunk, recvErr := mo.MessageStream.Recv()
-		if errors.Is(recvErr, io.EOF) {
-			break
-		}
-		if recvErr != nil {
-			if helpers.IsModelRetryInProgress(recvErr) {
-				obs.Logger().Warn("[transport] model retry", "err", recvErr)
-				e.emit(events.NewCustomEvent("model_retry",
-					events.WithValue(map[string]any{"message": recvErr.Error()})))
-				return streamOutcome{}
-			}
-			obs.Logger().Error("[transport] stream recv failed", "err", recvErr)
-			e.emit(events.NewRunErrorEvent(recvErr.Error(),
-				events.WithRunID(e.runID), events.WithErrorCode(CodeStreamRecvFailure)))
-			e.setRunErr(recvErr)
-			break
-		}
-
-		st.consume(chunk)
-	}
-
-	return st.finish()
-}
-
-type streamState struct {
-	e     *emitter
-	role  schema.RoleType
-	msgID string
-	sub   string
-	owner string
-
-	textOpen           bool
-	reasonOpen         bool
-	textSegmentStarted bool
-	hasContent         bool
-
-	acc    strings.Builder
-	chunks []*schema.Message
-	calls  map[int]*openCall
-	order  []int
-}
-
-func newStreamState(e *emitter, role schema.RoleType, sub, owner string) *streamState {
-	return &streamState{
-		e:     e,
-		role:  role,
-		msgID: uuid.NewString(),
-		sub:   sub,
-		owner: owner,
-		calls: map[int]*openCall{},
-	}
-}
-
-func (s *streamState) consume(chunk *schema.Message) {
-	s.chunks = append(s.chunks, chunk)
-
-	s.consumeToolCalls(chunk)
-
-	if reason := message.AssistantDeltaReasoning(chunk); reason != "" {
-		s.consumeReasoning(reason)
-		return
-	}
-	s.consumeText(message.AssistantDeltaText(chunk))
-}
-
-func (s *streamState) consumeToolCalls(chunk *schema.Message) {
-	for _, tc := range message.ToolCalls(chunk) {
-		c, seen := s.calls[tc.Index]
-		if !seen {
-			c = &openCall{id: toolCallID(tc, s.msgID, tc.Index), name: tc.Name}
-			s.calls[tc.Index] = c
-			s.order = append(s.order, tc.Index)
-			s.closeAll()
-			s.hasContent = true
-			s.e.emitToolStart(c.id, c.name, s.msgID, s.sub)
-		}
-		if tc.Name != "" && c.name == "" {
-			c.name = tc.Name
-		}
-		if tc.ID != "" {
-			c.externalID = tc.ID
-		}
-		if tc.Args != "" {
-			s.e.emitToolArgs(c.id, tc.Args, s.sub)
-			c.args.WriteString(tc.Args)
-		}
-	}
-}
-
-func (s *streamState) consumeReasoning(reason string) {
-	if !s.reasonOpen {
-		s.closeText()
-		s.hasContent = true
-		s.e.emitReasoningStart(s.msgID, roleOf(s.role))
-		s.reasonOpen = true
-	}
-	s.e.emitReasoningContent(s.msgID, reason)
-}
-
-func (s *streamState) consumeText(text string) {
-	if text == "" {
-		return
-	}
-	if !s.textOpen {
-		s.closeReasoning()
-		s.e.emitTextStart(s.msgID, roleOf(s.role), s.owner)
-		s.textOpen = true
-		s.textSegmentStarted = true
-		s.hasContent = true
-	}
-	s.acc.WriteString(text)
-	s.e.emitTextContent(s.msgID, text, s.sub)
-}
-
-func (s *streamState) closeText() {
-	if s.textOpen {
-		s.e.emitTextEnd(s.msgID)
-		s.textOpen = false
-	}
-}
-
-func (s *streamState) closeReasoning() {
-	if s.reasonOpen {
-		s.e.emitReasoningEnd(s.msgID)
-		s.reasonOpen = false
-	}
-}
-
-func (s *streamState) closeAll() {
-	s.closeReasoning()
-	s.closeText()
-}
-
-func (s *streamState) finish() streamOutcome {
-	s.closeAll()
-	for _, idx := range s.order {
-		s.e.emitToolEnd(s.calls[idx].id, s.sub)
-	}
-	if s.hasContent && !s.textSegmentStarted {
-		s.e.announce(s.msgID, roleOf(s.role), s.owner)
-	}
-
-	var out streamOutcome
-	out.lastContent = s.acc.String()
-	switch {
-	case len(s.chunks) > 0:
-		if merged, err := message.ConcatChunks(s.chunks); err == nil && message.HasContent(merged) {
-			out.intermediates = append(out.intermediates, merged)
-		} else {
-			out.intermediates = append(out.intermediates,
-				message.NewAssistant(s.acc.String(), collectedCalls(s.calls, s.order)))
-		}
-	case s.acc.Len() > 0 || len(s.order) > 0:
-		out.intermediates = append(out.intermediates,
-			message.NewAssistant(s.acc.String(), collectedCalls(s.calls, s.order)))
-	}
-	for _, m := range out.intermediates {
-		message.StampReasoningMs(m, s.e.reasoningMs(s.msgID))
-	}
-	return out
-}
-
-func emitMessage(e *emitter, msg *schema.Message, sub, owner string) []*schema.Message {
-	if msg == nil {
-		return nil
-	}
-	reasonID := ""
-	if reason := message.AssistantDeltaReasoning(msg); reason != "" {
-		reasonID = uuid.NewString()
-		e.emitReasoningStart(reasonID, roleOf(msg.Role))
-		e.emitReasoningContent(reasonID, reason)
-		e.emitReasoningEnd(reasonID)
-	}
-	msgID := uuid.NewString()
-	text := message.AssistantText(msg)
-	calls := message.ToolCalls(msg)
-
-	if text != "" {
-		e.emitTextStart(msgID, roleOf(msg.Role), owner)
-		e.emitTextContent(msgID, text, sub)
-		e.emitTextEnd(msgID)
-	}
-	for _, tc := range calls {
-		id := firstNonEmpty(tc.ID, uuid.NewString())
-		e.emitToolStart(id, tc.Name, msgID, sub)
-		if tc.Args != "" {
-			e.emitToolArgs(id, tc.Args, sub)
-		}
-		e.emitToolEnd(id, sub)
-	}
-	if reasonID != "" {
-		e.announce(reasonID, roleOf(msg.Role), owner)
-	}
-	if text == "" && len(calls) > 0 {
-		e.announce(msgID, roleOf(msg.Role), owner)
-	}
-	if message.HasContent(msg) {
-		return []*schema.Message{msg}
-	}
-	return nil
-}
-
-func collectedCalls(calls map[int]*openCall, order []int) []message.ToolCall {
-	out := make([]message.ToolCall, 0, len(order))
-	for _, idx := range order {
-		c := calls[idx]
-		out = append(out, message.ToolCall{
-			ID:    firstNonEmpty(c.externalID, c.id),
-			Name:  c.name,
-			Args:  c.args.String(),
-			Index: idx,
-		})
-	}
-	return out
-}
-
-func roleOf(r schema.RoleType) string {
-	switch r {
-	case schema.User:
-		return "user"
-	case schema.System:
-		return "developer"
-	case schema.Tool:
-		return "tool"
-	case schema.Assistant, "":
-		return "assistant"
-	default:
-		return "assistant"
-	}
-}
-
-func toolCallID(tc message.ToolCall, msgID string, idx int) string {
-	if tc.ID != "" {
-		return tc.ID
-	}
-	return msgID + ":tc" + strconv.Itoa(idx)
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-type openCall struct {
-	id         string
-	externalID string
-	name       string
-	args       strings.Builder
-}
-
-type streamOutcome struct {
-	lastContent   string
-	intermediates []*schema.Message
-}
-
-// ── emitter ─────────────────────────────────────────────────────────────
-
-type emitter struct {
+type renderer struct {
 	w        io.Writer
 	threadID string
 	runID    string
@@ -536,43 +89,91 @@ type emitter struct {
 	brokenFlag bool
 	runErr     error
 
-	reasonStart map[string]int64
-	reasonEnd   map[string]int64
+	// interrupts are the approvals the run is waiting for, in the wire's
+	// shape. They ride along in the RUN_FINISHED frame's outcome.
+	interrupts []types.Interrupt
 }
 
-func (e *emitter) markReasonStart(msgID string) {
-	if e.reasonStart == nil {
-		e.reasonStart = map[string]int64{}
-	}
-	if _, ok := e.reasonStart[msgID]; !ok {
-		e.reasonStart[msgID] = time.Now().UnixMilli()
+// render turns one event into frames.
+func (r *renderer) render(ev contract.RunEvent) {
+	switch ev.Kind {
+	case contract.RunEventTextStart:
+		r.emitTextStart(ev.MsgID, ev.Role, ev.Owner)
+	case contract.RunEventTextDelta:
+		r.emitTextContent(ev.MsgID, ev.Text, ev.Sub)
+	case contract.RunEventTextEnd:
+		r.emitTextEnd(ev.MsgID)
+	case contract.RunEventReasoningStart:
+		r.emitReasoningStart(ev.MsgID, ev.Role)
+	case contract.RunEventReasoningDelta:
+		r.emitReasoningContent(ev.MsgID, ev.Text)
+	case contract.RunEventReasoningEnd:
+		r.emitReasoningEnd(ev.MsgID)
+	case contract.RunEventToolStart:
+		r.emitToolStart(ev.ToolID, ev.ToolName, ev.MsgID, ev.Sub)
+	case contract.RunEventToolArgs:
+		r.emitToolArgs(ev.ToolID, ev.Text, ev.Sub)
+	case contract.RunEventToolEnd:
+		r.emitToolEnd(ev.ToolID, ev.Sub)
+	case contract.RunEventToolResult:
+		r.emitToolResult(ev.Text, ev.ToolID, ev.Sub)
+	case contract.RunEventAnnounce:
+		r.announce(ev.MsgID, ev.Role, ev.Owner)
+	case contract.RunEventCompaction:
+		r.emitCompaction(ev.Agent, ev.At)
+	case contract.RunEventContextUsage:
+		r.emitContextUsage(ev.Usage)
+	case contract.RunEventInterrupt:
+		r.interrupts = append(r.interrupts, toWireInterrupts(ev.Interrupts)...)
+	case contract.RunEventRetry:
+		r.emitRetry(ev.Text, ev.Agent)
+	case contract.RunEventError:
+		r.emitRunError(ev.Text, ev.Code)
 	}
 }
 
-func (e *emitter) markReasonEnd(msgID string) {
-	if e.reasonEnd == nil {
-		e.reasonEnd = map[string]int64{}
+// toWireInterrupts maps openheron's approvals onto the wire's shape.
+//
+// ★ The mapping is one for one, and it happens here because the wire's
+//
+//	types belong to the wire.
+func toWireInterrupts(in []contract.Interrupt) []types.Interrupt {
+	if len(in) == 0 {
+		return nil
 	}
-	e.reasonEnd[msgID] = time.Now().UnixMilli()
+	out := make([]types.Interrupt, 0, len(in))
+	for _, i := range in {
+		item := types.Interrupt{
+			ID:       i.ID,
+			Reason:   i.Reason,
+			Message:  i.Message,
+			Metadata: types.Metadata(i.Metadata),
+		}
+		if i.SubagentRunID != "" {
+			item.SubagentRunID = i.SubagentRunID
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
-func (e *emitter) reasoningMs(msgID string) int64 {
-	start, ok := e.reasonStart[msgID]
-	if !ok {
-		return 0
+func (r *renderer) emit(ev events.Event) {
+	if r.brokenFlag {
+		return
 	}
-	end, ok := e.reasonEnd[msgID]
-	if !ok {
-		return 0
+	data, err := json.Marshal(ev)
+	if err != nil {
+		r.setRunErr(err)
+		return
 	}
-	return end - start
+	if _, err := r.w.Write(append(data, '\n')); err != nil {
+		r.brokenFlag = true
+	}
 }
 
-func (e *emitter) broken() bool { return e.brokenFlag }
-
-func (e *emitter) setRunErr(err error) {
-	if e.runErr == nil {
-		e.runErr = err
+func (r *renderer) setRunErr(err error) {
+	if r.runErr == nil {
+		r.runErr = err
 	}
 }
 
@@ -580,8 +181,8 @@ func (e *emitter) setRunErr(err error) {
 //
 // The payload is the whole snapshot for that agent: the client replaces, it
 // does not merge, so a dropped event cannot leave a wrong number behind.
-func (e *emitter) emitContextUsage(u contract.ContextUsage) {
-	e.emit(events.NewCustomEvent("context_usage",
+func (r *renderer) emitContextUsage(u contract.ContextUsage) {
+	r.emit(events.NewCustomEvent("context_usage",
 		events.WithValue(map[string]any{
 			"agent":          u.Agent,
 			"provider":       u.Provider,
@@ -600,29 +201,42 @@ func (e *emitter) emitContextUsage(u contract.ContextUsage) {
 // saved) are measured against the transcript, and the transcript is the run
 // loop's business: it writes the marker when it archives the turn. The
 // client learns the numbers from the marker, on the next load.
-func (e *emitter) emitCompaction(agent string) {
-	e.emit(events.NewCustomEvent("context_compacted",
+func (r *renderer) emitCompaction(agent string, at time.Time) {
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	r.emit(events.NewCustomEvent("context_compacted",
 		events.WithValue(map[string]any{
 			"agent": agent,
-			"at":    time.Now().UTC().Format(time.RFC3339Nano),
+			"at":    at.UTC().Format(time.RFC3339Nano),
 		})))
 }
 
-func (e *emitter) emit(ev events.Event) {
-	if e.brokenFlag {
-		return
+// emitRetry publishes that the provider is retrying.
+//
+// ★ It is not an error and not a terminal frame: the run goes on, and the
+//
+//	client shows a note.
+func (r *renderer) emitRetry(message, agent string) {
+	value := map[string]any{"message": message}
+	if agent != "" {
+		value["agent"] = agent
 	}
-	data, err := json.Marshal(ev)
-	if err != nil {
-		e.setRunErr(err)
-		return
-	}
-	if _, err := e.w.Write(append(data, '\n')); err != nil {
-		e.brokenFlag = true
-	}
+	r.emit(events.NewCustomEvent("model_retry", events.WithValue(value)))
 }
 
-func (e *emitter) emitTextStart(msgID, role, name string) {
+// emitRunError publishes the run's failure.
+//
+// ★ The code is the classification the derivation made; the frame carries
+//
+//	it so the client can say something more useful than "it broke".
+func (r *renderer) emitRunError(message, code string) {
+	r.emit(events.NewRunErrorEvent(message,
+		events.WithRunID(r.runID), events.WithErrorCode(code)))
+	r.setRunErr(errRunFailed)
+}
+
+func (r *renderer) emitTextStart(msgID, role, name string) {
 	ev := events.NewTextMessageStartEvent(msgID)
 	if role != "" {
 		ev.Role = &role
@@ -630,105 +244,67 @@ func (e *emitter) emitTextStart(msgID, role, name string) {
 	if name != "" {
 		ev.Name = name
 	}
-	e.emit(ev)
+	r.emit(ev)
 }
 
-func (e *emitter) emitTextContent(msgID, delta, sub string) {
+func (r *renderer) emitTextContent(msgID, delta, sub string) {
 	ev := events.NewTextMessageContentEvent(msgID, delta)
 	ev.SubagentRunID = sub
-	e.emit(ev)
+	r.emit(ev)
 }
 
-func (e *emitter) emitTextEnd(msgID string) { e.emit(events.NewTextMessageEndEvent(msgID)) }
+func (r *renderer) emitTextEnd(msgID string) { r.emit(events.NewTextMessageEndEvent(msgID)) }
 
 // ── reasoning ──
 
 const reasoningRole = "reasoning"
 
-func (e *emitter) emitReasoningStart(msgID, _ string) {
-	e.emit(events.NewReasoningStartEvent(msgID))
-	e.emit(events.NewReasoningMessageStartEvent(msgID, reasoningRole))
+func (r *renderer) emitReasoningStart(msgID, _ string) {
+	r.emit(events.NewReasoningStartEvent(msgID))
+	r.emit(events.NewReasoningMessageStartEvent(msgID, reasoningRole))
 }
 
-func (e *emitter) emitReasoningContent(msgID, delta string) {
-	e.markReasonStart(msgID)
-	e.emit(events.NewReasoningMessageContentEvent(msgID, delta))
+func (r *renderer) emitReasoningContent(msgID, delta string) {
+	r.emit(events.NewReasoningMessageContentEvent(msgID, delta))
 }
 
-func (e *emitter) emitReasoningEnd(msgID string) {
-	e.markReasonEnd(msgID)
-	e.emit(events.NewReasoningMessageEndEvent(msgID))
-	e.emit(events.NewReasoningEndEvent(msgID))
+func (r *renderer) emitReasoningEnd(msgID string) {
+	r.emit(events.NewReasoningMessageEndEvent(msgID))
+	r.emit(events.NewReasoningEndEvent(msgID))
 }
 
-func (e *emitter) emitToolStart(callID, name, parentMsgID, sub string) {
+func (r *renderer) emitToolStart(callID, name, parentMsgID, sub string) {
 	ev := events.NewToolCallStartEvent(callID, name)
 	if parentMsgID != "" {
 		p := parentMsgID
 		ev.ParentMessageID = &p
 	}
 	ev.SubagentRunID = sub
-	e.emit(ev)
+	r.emit(ev)
 }
 
-func (e *emitter) emitToolArgs(callID, delta, sub string) {
+func (r *renderer) emitToolArgs(callID, delta, sub string) {
 	ev := events.NewToolCallArgsEvent(callID, delta)
 	ev.SubagentRunID = sub
-	e.emit(ev)
+	r.emit(ev)
 }
 
-func (e *emitter) emitToolEnd(callID, sub string) {
+func (r *renderer) emitToolEnd(callID, sub string) {
 	ev := events.NewToolCallEndEvent(callID)
 	ev.SubagentRunID = sub
-	e.emit(ev)
+	r.emit(ev)
 }
 
-func (e *emitter) announce(messageID, role, owner string) {
-	e.emitTextStart(messageID, role, owner)
-	e.emitTextEnd(messageID)
+func (r *renderer) announce(messageID, role, owner string) {
+	r.emitTextStart(messageID, role, owner)
+	r.emitTextEnd(messageID)
 }
 
-func (e *emitter) emitToolResult(content, callID, sub string) {
+func (r *renderer) emitToolResult(content, callID, sub string) {
 	if callID == "" {
 		callID = uuid.NewString()
 	}
 	ev := events.NewToolCallResultEvent(uuid.NewString(), callID, content)
 	ev.SubagentRunID = sub
-	e.emit(ev)
-}
-
-func errorCode(err error) string {
-	if err == nil {
-		return CodeModelUnknown
-	}
-	s := err.Error()
-	switch {
-	case containsAny(s, "quota"):
-		return CodeModelQuota
-	case containsAny(s, "401", "403", "auth"):
-		return CodeModelAuth
-	case containsAny(s, "429", "rate_limit", "Too Many Requests"):
-		return CodeModelRateLimit
-	case containsAny(s, "529", "503", "overload"):
-		return CodeModelOverload
-	case containsAny(s, "network", "TLS", "dial", "certificate"):
-		return CodeModelNetwork
-	case containsAny(s, "timed out", "timeout", "DeadlineExceeded"):
-		return CodeModelTimeout
-	case containsAny(s, "bad_request", "400"):
-		return CodeModelBadRequest
-	case containsAny(s, "upstream"):
-		return CodeModelUpstream
-	default:
-		return CodeModelUnknown
-	}
-}
-
-func containsAny(s string, subs ...string) bool {
-	for _, sub := range subs {
-		if strings.Contains(s, sub) {
-			return true
-		}
-	}
-	return false
+	r.emit(ev)
 }

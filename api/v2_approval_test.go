@@ -187,6 +187,10 @@ func (interruptingBuilder) Build(context.Context, string, string, contract.TurnK
 	return &interruptingAgent{}, nil
 }
 
+// Contexts reports what each agent's context allows. The fake has no
+// models, so there are no windows.
+func (interruptingBuilder) Contexts() map[string]contract.AgentContext { return nil }
+
 type interruptingAgent struct{}
 
 func (a *interruptingAgent) Name(context.Context) string        { return "interrupting" }

@@ -263,6 +263,10 @@ func (b blockingBuilder) Build(context.Context, string, string, contract.TurnKin
 	return blockingAgent{onStop: b.onStop}, nil
 }
 
+// Contexts reports what each agent's context allows. The fake has no
+// models, so there are no windows.
+func (b blockingBuilder) Contexts() map[string]contract.AgentContext { return nil }
+
 func TestSwitchAgentRejectsRunningTurn(t *testing.T) {
 	srv, _ := newV2RunServerWith(t, blockingBuilder{})
 	srv.SetConfigSource(func() *spec.Config { return testConfig(t) })

@@ -30,9 +30,16 @@ func newTestRuntime(t *testing.T, b AgentBuilder) (*Runtime, *fakeSessionManager
 	return rt, sm
 }
 
+// mustSession creates a session with the fake agent's name.
+//
+// ★ The session's agent id and the agent's name are the same thing in
+//
+//	production — the builder names the agent after its id — and the
+//	derivation compares the two to tell the root agent's compaction from
+//	a sub-agent's. The fake has to keep that shape.
 func mustSession(t *testing.T, sm *fakeSessionManager) *fakeSession {
 	t.Helper()
-	s, err := sm.Create(context.Background(), "")
+	s, err := sm.Create(context.Background(), "fake")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,9 +66,7 @@ func TestSubmitArchivesInOrder(t *testing.T) {
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
-	drain(t, turn, Outcome{
-		Intermediates: []*schema.Message{message.NewAssistant("working", nil)},
-	})
+	drain(t, turn)
 
 	waitFor(t, func() bool { return sess.Len() >= 2 })
 
@@ -92,7 +97,7 @@ func TestUserMessageCarriesItsTimestamp(t *testing.T) {
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
-	drain(t, turn, Outcome{Intermediates: []*schema.Message{message.NewAssistant("working", nil)}})
+	drain(t, turn)
 
 	waitFor(t, func() bool { return sess.Len() >= 1 })
 
@@ -147,7 +152,7 @@ func TestPrepareAgentPassesSessionAgentID(t *testing.T) {
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	drain(t, turn, Outcome{})
+	drain(t, turn)
 
 	b.mu.Lock()
 	ids := append([]string(nil), b.agentIDs...)
@@ -218,9 +223,7 @@ func TestStaleCheckpointDoesNotSwallowTheNextQuery(t *testing.T) {
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatalf("the query must not be swallowed by the stale checkpoint: %v", err)
 	}
-	drain(t, turn, Outcome{
-		Intermediates: []*schema.Message{message.NewAssistant("working", nil)},
-	})
+	drain(t, turn)
 }
 
 func TestInterruptLeavesACheckpointSoTheResumeIsNotRejected(t *testing.T) {
@@ -251,10 +254,7 @@ func TestInterruptLeavesACheckpointSoTheResumeIsNotRejected(t *testing.T) {
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	drain(t, turn, Outcome{
-		Intermediates: []*schema.Message{message.NewAssistant("about to write", nil)},
-		Interrupts:    []contract.PendingInterrupt{{InterruptID: "agent:A;tool:call_1"}},
-	})
+	drain(t, turn)
 	waitFor(t, func() bool {
 		p, _ := sess.PendingApproval()
 		return p != nil
@@ -326,10 +326,7 @@ func TestInterruptRecordsPendingApproval(t *testing.T) {
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	drain(t, turn, Outcome{
-		Intermediates: []*schema.Message{message.NewAssistant("about to write", nil)},
-		Interrupts:    []contract.PendingInterrupt{{InterruptID: "agent:A;tool:call_1"}},
-	})
+	drain(t, turn)
 
 	waitFor(t, func() bool {
 		p, _ := sess.PendingApproval()
@@ -352,7 +349,7 @@ func TestMultiplePendingApprovalsAreAnsweredAsAGroup(t *testing.T) {
 	b := &fakeBuilder{agent: func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
 		return &fakeAgent{script: func(ctx context.Context, emit func(*adk.TypedAgentEvent[*schema.Message]) bool) {
 			emit(textEvent("about to write"))
-			emit(exitEvent())
+			emit(interruptedEvents(ids))
 		}}
 	}}
 	rt, sm := newTestRuntime(t, b)
@@ -366,13 +363,7 @@ func TestMultiplePendingApprovalsAreAnsweredAsAGroup(t *testing.T) {
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
-	drain(t, turn, Outcome{
-		Intermediates: []*schema.Message{message.NewAssistant("about to write", nil)},
-		Interrupts: []contract.PendingInterrupt{
-			{InterruptID: ids[0]},
-			{InterruptID: ids[1]},
-		},
-	})
+	drain(t, turn)
 
 	waitFor(t, func() bool {
 		p, _ := sess.PendingApproval()
@@ -522,18 +513,17 @@ func TestASecondSubmitIsRefusedWhileATurnRuns(t *testing.T) {
 	}
 }
 
+// drainBounded waits for the run to finish, in the background.
+//
+// ★ The run consumes its own events, so there is nothing to drain: the
+//
+//	test waits for the run's archive.
 func drainBounded(t *testing.T, turn *Turn) chan struct{} {
 	t.Helper()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		events := turn.Events()
-		for {
-			if _, ok := events.Next(); !ok {
-				break
-			}
-		}
-		turn.Complete(Outcome{})
+		turn.WaitArchived()
 	}()
 	return done
 }
@@ -559,15 +549,8 @@ func TestAbortStopsTheTurn(t *testing.T) {
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	go func() {
-		events := turn.Events()
-		for {
-			if _, ok := events.Next(); !ok {
-				break
-			}
-		}
-		turn.Complete(Outcome{})
-	}()
+	// ★ The run consumes its own events; the test only waits for it.
+	go turn.WaitArchived()
 
 	if err := rt.Abort(ctx, sess.ID()); err != nil {
 		t.Fatalf("Abort: %v", err)
@@ -621,15 +604,8 @@ func TestStatusReportsKnownSessions(t *testing.T) {
 	if err := turn.Wait(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	go func() {
-		events := turn.Events()
-		for {
-			if _, ok := events.Next(); !ok {
-				break
-			}
-		}
-		turn.Complete(Outcome{})
-	}()
+	// ★ The run consumes its own events; the test only waits for it.
+	go turn.WaitArchived()
 
 	statuses := rt.Status()
 	if len(statuses) != 1 || statuses[0].SessionID != sess.ID() {

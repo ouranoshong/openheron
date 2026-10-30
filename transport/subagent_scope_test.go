@@ -1,6 +1,8 @@
 package transport
 
 import (
+	"github.com/ouranoshong/openheron/agentkit/emit"
+
 	"testing"
 
 	"github.com/cloudwego/eino/adk"
@@ -20,7 +22,7 @@ func TestSubagentMessagesAreArchivedWithTheScopeFlag(t *testing.T) {
 			},
 		},
 		exitEvent(),
-	}, Options{RootAgent: "main"})
+	}, emit.Options{RootAgent: "main"})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
@@ -49,7 +51,7 @@ func TestRootMessagesDoNotCarryTheScopeFlag(t *testing.T) {
 			},
 		},
 		exitEvent(),
-	}, Options{RootAgent: "main"})
+	}, emit.Options{RootAgent: "main"})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
@@ -71,7 +73,7 @@ func TestTheScopeFlagFollowsTheEventNotTheAgentName(t *testing.T) {
 			},
 		},
 		exitEvent(),
-	}, Options{RootAgent: "main"})
+	}, emit.Options{RootAgent: "main"})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}

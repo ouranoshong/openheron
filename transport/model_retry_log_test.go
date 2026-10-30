@@ -1,6 +1,8 @@
 package transport
 
 import (
+	"github.com/ouranoshong/openheron/agentkit/emit"
+
 	"bytes"
 	"log/slog"
 	"strings"
@@ -40,7 +42,7 @@ func TestAModelRetryIsAlsoVisibleInTheServerLog(t *testing.T) {
 		retryEvent(1),
 		exitEvent(),
 	}
-	got, _, _ := runErr(t, evs, Options{})
+	got, _, _ := runErr(t, evs, emit.Options{})
 
 	customs := 0
 	for _, e := range got {
@@ -65,7 +67,7 @@ func TestANormalErrorDoesNotLogAModelRetry(t *testing.T) {
 		textEvent(assistantText("hello")),
 		{Err: errBoom{}},
 	}
-	runErr(t, evs, Options{})
+	runErr(t, evs, emit.Options{})
 
 	if strings.Contains(buf.String(), "model retry") {
 		t.Fatalf("an ordinary error must not be logged as a retry: %q", buf.String())

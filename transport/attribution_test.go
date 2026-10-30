@@ -1,6 +1,8 @@
 package transport
 
 import (
+	"github.com/ouranoshong/openheron/agentkit/emit"
+
 	"testing"
 
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/events"
@@ -50,7 +52,7 @@ func parallelInterruptEvent() *adk.TypedAgentEvent[*schema.Message] {
 
 func TestParallelInterruptsKeepTheirOwnRequester(t *testing.T) {
 	evs, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{parallelInterruptEvent()},
-		Options{RootAgent: "main"})
+		emit.Options{RootAgent: "main"})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
@@ -101,7 +103,7 @@ func TestRootInterruptHasNoRequester(t *testing.T) {
 		}},
 	}
 
-	evs, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{ev}, Options{RootAgent: "main"})
+	evs, res, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{ev}, emit.Options{RootAgent: "main"})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
@@ -125,7 +127,7 @@ func TestInterruptWithoutAddressHasNoRequester(t *testing.T) {
 		}},
 	}
 
-	evs, _, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{ev}, Options{RootAgent: "main"})
+	evs, _, err := run(t, []*adk.TypedAgentEvent[*schema.Message]{ev}, emit.Options{RootAgent: "main"})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
@@ -154,7 +156,7 @@ func TestToolOnlyMessageStillCarriesItsAgent(t *testing.T) {
 			},
 		},
 		exitEvent(),
-	}, Options{RootAgent: "main"})
+	}, emit.Options{RootAgent: "main"})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
@@ -191,7 +193,7 @@ func TestTextMessageCarriesItsAgentName(t *testing.T) {
 			},
 		},
 		exitEvent(),
-	}, Options{RootAgent: "main"})
+	}, emit.Options{RootAgent: "main"})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
@@ -229,7 +231,7 @@ func TestToolCallCarriesItsParentMessage(t *testing.T) {
 			},
 		},
 		exitEvent(),
-	}, Options{RootAgent: "main"})
+	}, emit.Options{RootAgent: "main"})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
@@ -267,7 +269,7 @@ func TestIntermediateMessagesCarryTheirTimestamp(t *testing.T) {
 			},
 		},
 		exitEvent(),
-	}, Options{RootAgent: "main"})
+	}, emit.Options{RootAgent: "main"})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
@@ -313,7 +315,7 @@ func TestIntermediateMessagesCarryAgentStamp(t *testing.T) {
 			},
 		},
 		exitEvent(),
-	}, Options{RootAgent: "main"})
+	}, emit.Options{RootAgent: "main"})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
@@ -340,7 +342,7 @@ func TestToolResultCarriesAgentStamp(t *testing.T) {
 			},
 		},
 		exitEvent(),
-	}, Options{RootAgent: "main"})
+	}, emit.Options{RootAgent: "main"})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
 	}
