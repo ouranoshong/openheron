@@ -1,268 +1,309 @@
 # AGENTS.md
 
-给在本仓库工作的人与 AI 的项目约定。
+Project conventions for the people and AI working in this repository.
 
-> ★ **本仓库是代码面**：Go 后端 + React 前端 + 构建配置。
->
-> 本仓库自带**六组**中英双语文档，随代码面一起维护
-> （**英文是主版本，`_zh` 后缀是中文版**）：
-> `README.md` / `README_zh.md`、
-> `docs/architecture.md` / `docs/architecture_zh.md`（架构设计说明）、
-> `docs/user-manual.md` / `docs/user-manual_zh.md`（用户使用说明）、
-> `docs/developer-manual.md` / `docs/developer-manual_zh.md`（开发者说明）、
-> `docs/context-usage-design.md` / `docs/context-usage-design_zh.md`（上下文使用预估设计方案）、
-> `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md`（会话并发设计方案）。
-> **`docs/` 下其余设计文档仍在上游仓库** ——
-> 下面凡引用 `docs/xxx.md` 而这几组之外的，都是上游那份。改语义前若拿不到它，
-> 先问，别凭印象改配置或接口。
->
-> ★ 前面四组讲的是**代码面已经是什么样**；`docs/context-usage-design.md`
-> 讲的是**上下文占用与压缩** —— 占用仪表盘（§2、§4、§5）、压缩及其持久化（§7）、
-> 以及压缩标记的界面渲染（§7.7）都已在代码里。
-> `docs/session-concurrency-design.md` 讲的是**会话并发** —— 一个会话一轮的准入闸门
-> （§5）、跨客户端的 409（§5.2）、以及前端的忙态处理（§5.4-§5.6）都已在代码里。
->
-> 写这几组文档时**照代码写**，别照想象写：每个结论都要能在代码里指到行。
-> 代码改了，文档跟着改 —— 文档漂移比没有文档更贵。
->
-> ★ **两版必须同步**：改英文版就同时改 `_zh` 版，反之亦然。
-> 两版的代码标识符、行号引用、命令与路径应当一一对应 ——
-> 可以用 `grep -oP '`[a-zA-Z0-9_./:$-]+`' | sort -u` 逐组比对。
-> ★ 注意**反引号范围也要一致**：`` `POST /v2/run` `` 与 `` `POST` `/v2/run` `` 讲的
-> 是同一件事，但标识符集合不同 —— 比对会报差异。别让「写法不同」掩盖「内容不同」。
+The Chinese version of this file is **[AGENTS_zh.md](AGENTS_zh.md)**; the two correspond one to
+one — change one and change the other.
 
-## 语言约定（强制）
+> ★ **This repository is the code surface**: Go backend + React frontend + build configuration.
+>
+> It ships **six** bilingual document sets, maintained alongside the code
+> (**English is the main version; the `_zh` suffix marks the Chinese version**):
+> `README.md` / `README_zh.md`,
+> `docs/architecture.md` / `docs/architecture_zh.md` (architecture),
+> `docs/user-manual.md` / `docs/user-manual_zh.md` (user guide),
+> `docs/developer-manual.md` / `docs/developer-manual_zh.md` (developer guide),
+> `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` (context-usage estimation design),
+> `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` (session concurrency design),
+> **Every other design document under `docs/` still lives in the upstream repository** ——
+> any `docs/xxx.md` reference below that is not one of these six is the upstream copy.
+> If you cannot get hold of it before changing semantics, ask first; do not change
+> configuration or interfaces from memory.
+>
+> ★ The first four sets describe **what the code surface already is**; `docs/context-usage-design.md`
+> covers **context usage and compaction** — the usage dashboard (§2, §4, §5), compaction and its
+> persistence (§7), and the rendering of compaction markers in the interface (§7.7) are all
+> already in the code.
+> `docs/session-concurrency-design.md` covers **session concurrency** — the admission gate for
+> one turn per session (§5), the cross-client 409 (§5.2), and the frontend busy-state handling
+> (§5.4-§5.6) are all already in the code.
+> Write these documents **from the code, not from imagination**: every conclusion must point at a
+> line in the code. When the code changes, the documents change with it — documentation drift is
+> worse than no documentation.
+>
+> ★ **Both versions must stay in sync**: editing the English version means editing the `_zh`
+> version too, and vice versa. Code identifiers, line references, commands and paths must
+> correspond one to one — you can compare them set by set with
+> `grep -oP '`[a-zA-Z0-9_./:$-]+`' | sort -u`.
+> ★ Note that the **backtick span has to match too**: `` `POST /v2/run` `` and `` `POST` `/v2/run` ``
+> say the same thing but yield different identifier sets — the comparison will report a
+> difference. Do not let "different phrasing" hide "different content".
 
-**所有运行时输出用英文**：日志打印、错误信息、警告信息、面向用户的消息提醒、
-**界面文案**。
+## Language rules (mandatory)
 
-| 范围 | 规则 | 例子 |
+**Everything the runtime emits is English**: log lines, error messages, warnings, user-facing
+notifications, and **interface copy**.
+
+| Scope | Rule | Example |
 |---|---|---|
-| 日志 | 英文 | `obs.Logger().Info("[main] config updated", "version", v)` |
-| 错误 | 英文 | `errors.New("query must not be empty")` |
-| 警告 | 英文 | `fmt.Fprintln(os.Stderr, "[config] hot reload failed, keeping previous config:", err)` |
-| 消息提醒 | 英文 | `c.deferKey("watch.debounce fell back to default: %s", msg)` |
-| 接口响应体 | 英文 | `c.JSON(400, map[string]string{"error": "thread not found"})` |
-| **界面文案** | **英文** | `"Run in a separate agent"` |
-| **写入用户配置的文件内容** | **英文** | `catalog.md` 的表头、`policy/limits.yaml` 的注释段 |
+| Log | English | `obs.Logger().Info("[main] config updated", "version", v)` |
+| Error | English | `errors.New("query must not be empty")` |
+| Warning | English | `fmt.Fprintln(os.Stderr, "[config] hot reload failed, keeping previous config:", err)` |
+| Notification | English | `c.deferKey("watch.debounce fell back to default: %s", msg)` |
+| API response body | English | `c.JSON(400, map[string]string{"error": "thread not found"})` |
+| **Interface copy** | **English** | `"Run in a separate agent"` |
+| **Content written into user configuration** | **English** | the header of `catalog.md`, the comment block of `policy/limits.yaml` |
 
-### 代码注释
+### Code comments
 
-★ **代码里暂不留中文注释。** 本仓库原有一批中文注释，已被整体清掉 ——
-注释要**逐点**重新写，**用英文**。
+★ **No Chinese comments in the code, for now.** A batch of Chinese comments that used to live here
+has been removed wholesale — comments have to be rewritten **point by point**, **in English**.
 
-补写注释时遵守这几条：
+When you add comments, follow these rules:
 
-- **英文**。新写的注释一律英文，与运行时输出同一套语言。
-- **写「为什么」，不写「是什么」** —— 尤其是那些被刻意设计成反直觉的地方。
-  补注释的价值全在这里：`func New() { … }` 不需要注释，
-  「为什么这里不能用 `time.Now()`」才需要。
-- **别把框架的语义写进注释当契约**。上一版前端的核心问题就是有一批
-  「必须先读框架源码才敢改」的行为，它们全靠注释维持，一改就错。现在
-  `lib/sse.ts` / `lib/events.ts` / `lib/store.ts` 三层都不依赖框架，正确性
-  由 `bun test` 证明；**新增逻辑请落在这三层里**，让它们保持纯函数。
-- **不降低信息密度**。原来用中文写的**为什么**（反直觉的设计取舍、
-  踩过的坑、对上游文档的指路）要**逐点**翻过去，不要压缩成一句话。
-  `★` 标记保留，它标的是「这里有坑」，丢掉等于把警告降级成闲聊。
-- **指路要指上游文档**：`docs/config-design.md`、`docs/api-v2-design.md`
-  这类分册才是设计依据，注释别复述它们的内容。
+- **English**. Every new comment is English — the same language as runtime output.
+- **Write the "why", not the "what"** — especially where the design is deliberately
+  counter-intuitive. That is where comments earn their keep: `func New() { … }` needs no comment;
+  "why `time.Now()` cannot be used here" does.
+- **Do not encode framework semantics in comments as a contract.** The previous frontend's core
+  problem was a set of behaviors you had to read the framework source before daring to change
+  them; they were all held together by comments, and every change made them wrong. Today
+  `lib/sse.ts` / `lib/events.ts` / `lib/store.ts` depend on no framework, and `bun test` proves
+  them correct; **put new logic in those three layers** and keep them pure functions.
+- **Do not lower the information density.** The **why**s that used to be written in Chinese
+  (counter-intuitive design trade-offs, pitfalls hit, pointers to upstream docs) must be
+  translated **point by point**, not compressed into a single sentence. Keep the `★` markers —
+  they mark "there is a trap here"; dropping them downgrades a warning to small talk.
+- **Point at upstream docs**: `docs/config-design.md`, `docs/api-v2-design.md` and the like are
+  the design basis; do not restate their content in comments.
 
-### 范围之外，保持中文
+### Outside that scope, Chinese stays
 
-| 范围 | 理由 |
+| Scope | Why |
 |---|---|
-| **测试用例名** | 描述性文本，不是运行时输出 |
-| **测试夹具数据** | 断言用的样本值（如 `"答完了"`），改了会让断言与被测行为脱节 |
+| **Test case names** | Descriptive text, not runtime output |
+| **Test fixture data** | Sample values used by assertions (e.g. `"答完了"`); changing them detaches the assertion from the behavior under test |
 
-★ **出厂 agent 提示词（`initcfg/templates/agents/*.md`、`.openheron-example/`）是英文的，
-不要改回中文。** 它们既是模型提示词，也是用户读到的文件内容 —— 按上面的规则走。
-`inputctx` 构造的 context prompt 本来就是英文（那是给 LLM 读的），不受这条影响。
+★ **The factory agent prompts (`initcfg/templates/agents/*.md`, `.openheron-example/`) are
+English — do not turn them back into Chinese.** They are both model prompts and file content the
+user reads — so they follow the rules above. The context prompt built by `inputctx` is English
+anyway (it is for the LLM), so that rule does not apply to it.
 
-判断标准：**这段字符串在进程运行时会被打印、返回给调用方，或写进用户读到的文件吗？**
-会 → 英文；不会 → 保持中文。
+The test: **will this string be printed at runtime, returned to a caller, or written into a file
+the user reads?** Yes → English; no → keep Chinese.
 
-为什么：错误信息常被 grep、被日志采集、被 `llm/common` 的 `Kind` 分类消费；混语言会让排障时的检索与匹配失效，也让 `/v2/config` 的 `deferred` 字段混入两种语言。
-界面文案同理 —— 用户看的是界面，不是源码，中英混排会让「这是 bug 还是我配置错了」更难判断。
+Why: error messages get grepped, get collected by log pipelines, and get consumed by the `Kind`
+classification in `llm/common`; mixing languages breaks retrieval and matching while debugging,
+and it mixes two languages into the `deferred` field of `/v2/config`. Interface copy is the same
+story — the user reads the interface, not the source, and a Chinese/English mix makes "is this a
+bug or did I misconfigure it?" harder to answer.
 
-**日志出口只有一个**：`obs.Logger()`（`github.com/ouranoshong/openheron/agentkit/obs`）。业务包里不要再直接
-`log.Printf` / `fmt.Fprintln(os.Stderr)` —— 级别（Info / Warn / Error）与前缀
-只有一处定义，而级别决定了一行会不会出现在默认输出里。
+**There is exactly one log outlet**: `obs.Logger()` (`github.com/ouranoshong/openheron/agentkit/obs`).
+Do not call `log.Printf` / `fmt.Fprintln(os.Stderr)` directly in business packages — the level
+(Info / Warn / Error) and the prefix are defined in one place, and the level decides whether a
+line shows up in the default output.
 
-例外只有一个：`llm/common` 用标准 logger —— 它是零 openheron 依赖的叶子包，
-引 `obs` 就破了那条铁律（`docs/architecture.md` §2.1「两条不能破的依赖铁律」）。
+There is exactly one exception: `llm/common` uses the standard logger — it is a leaf package with
+zero openheron dependencies, and importing `obs` would break that iron rule
+(`docs/architecture.md` §2.1, "the two dependency iron rules").
 
-## 其它约定
+## Other conventions
 
-- **不要在 API 层复制业务装配逻辑** —— 需要读「某个 agent 的生效工具表」时，由 `agent.Builder` 暴露只读查询，不要重算一遍 `Table.Blocked` / `Policy.TierOf`。
-- **配置根解析只有三级**：显式 `--config-dir` → `$OPENHERON_CONFIG_DIR` →
-  `<projectRoot>/.openheron`（不存在就创建）。**不向上查找祖先目录** ——
-  配置根一旦依赖「进程从哪启动」，同一条命令换个目录就读到另一份配置，
-  测试实例也会因此读到开发配置。要换配置根就指名，别加新的查找规则。
-- **归档优先于呈现** —— SSE sink 断裂后要停止渲染但继续消费事件流，否则 `Outcome.Intermediates` 不完整，历史会缺。
-- **`deny` 优先于 `disabled_tools`** —— 外层策略是子 agent 无法放松的唯一保证。
-- 改配置语义前先读上游的 `docs/config-design.md`；改接口前先读 `docs/api-design.md`；
-  新增 `/v2` 接口读 `docs/api-v2-design.md`；动前端读 `docs/frontend-design.md`；
-  动测试环境（端口 / 隔离目录）读 `docs/frontend-design.md` §11.2 与
-  `docs/config-design.md` §5.2。**这几份上游文档不在本仓库里** —— 拿不到就先问。
-  本仓库自带的 `docs/architecture.md` / `docs/user-manual.md` /
-  `docs/developer-manual.md`（及其 `_zh` 中文版）讲的是**本代码面**的实际结构，
-  直接看就行。`docs/context-usage-design.md` 讲的是上下文占用与压缩：占用仪表盘
-  与压缩持久化都已在代码里；动上下文用量相关代码前先看它。
+- **Do not duplicate business assembly logic in the API layer** — when you need "the effective
+  tool table of some agent", let `agent.Builder` expose a read-only query instead of recomputing
+  `Table.Blocked` / `Policy.TierOf`.
+- **Config root resolution has exactly three levels**: explicit `--config-dir` →
+  `$OPENHERON_CONFIG_DIR` → `<projectRoot>/.openheron` (created if missing).
+  **No upward search of ancestor directories** — once the config root depends on "where the
+  process was started from", the same command run from another directory reads a different
+  config, and test instances end up reading the development config too. To change the config
+  root, name it; do not add another lookup rule.
+- **Archival comes before presentation** — when the SSE sink breaks, stop rendering but keep
+  consuming the event stream, otherwise `Outcome.Intermediates` is incomplete and the history
+  has holes.
+- **`deny` beats `disabled_tools`** — the outer policy is the one guarantee a sub-agent cannot
+  relax.
+- Before changing configuration semantics, read upstream `docs/config-design.md`; before changing
+  an interface, read `docs/api-design.md`; before adding a `/v2` endpoint, read
+  `docs/api-v2-design.md`; before touching the frontend, read `docs/frontend-design.md`; before
+  touching the test environment (ports / isolation directories), read `docs/frontend-design.md`
+  §11.2 and `docs/config-design.md` §5.2. **Those upstream documents are not in this
+  repository** — if you cannot get them, ask first. The `docs/architecture.md` /
+  `docs/user-manual.md` / `docs/developer-manual.md` shipped here (and their `_zh` Chinese
+  versions) describe **this code surface** as it actually is — just read them.
+  `docs/context-usage-design.md` covers context usage and compaction: the usage dashboard and
+  compaction persistence are already in the code; read it before changing context-usage code.
 
-### 前端（`web/`）
+### Frontend (`web/`)
 
-- **zustand 的 selector 必须返回引用稳定的值**。每次调用造新数组/新对象
-  会让 `Object.is` 永远判定「变了」→ `Maximum update depth exceeded` 白屏。
-  用模块级空常量，返回数组的 selector 配 `useShallow`。
-- **zustand 的 selector 与组件里都不要写 `?? []`**。造新数组/新对象会让
-  快照永远「变了」→ 无限重渲染 → 白屏。用模块级常量或 store 里的 selector。
-- **界面改动必须配 Playwright spec**（理由与验收要求见下节「测试」）。
+- **A zustand selector must return a reference-stable value.** Building a new array/object on
+  every call makes `Object.is` always report "changed" → `Maximum update depth exceeded` white
+  screen. Use a module-level empty constant; a selector that returns an array pairs with
+  `useShallow`.
+- **Never write `?? []` in zustand selectors or in components.** Building a new array/object makes
+  the snapshot always "changed" → infinite re-render → white screen. Use a module-level constant
+  or a selector in the store.
+- **Every interface change needs a Playwright spec** (reasons and acceptance requirements are in
+  the "Testing" section below).
 
-## 测试
+## Testing
 
-### 端口：测试有自己的环境
+### Ports: testing has its own environment
 
-**端口与路径全部定义在仓库根的 `.env.test`（已提交）**，Vite、Playwright、
-冒烟脚本三处共读同一份。改端口只改这一个文件。
+**All ports and paths are defined in `.env.test` at the repository root (committed)**; Vite,
+Playwright and the smoke scripts all read the same file. To change a port, change only that one
+file.
 
-| | 开发 | 测试 |
+| | Dev | Test |
 |---|---|---|
-| openheron 本体 | :8080 | **:18099** |
+| openheron itself | :8080 | **:18099** |
 | Vite | :5173 | **:15173** |
-| E2E 假后端 | — | **:18180** |
+| E2E fake backend | — | **:18180** |
 
-### 命令
+### Commands
 
-| 命令 | 覆盖 | 需要前置 |
+| Command | Covers | Requires |
 |---|---|---|
-| `make test` | Go 全量（`go test ./...`） | — |
-| `cd web && bun run test:unit` | 纯函数层（reducer / 分帧 / store / 高亮） | — |
-| `make test-e2e` | 真实浏览器 + 确定性假后端 | 无（自带假后端） |
-| `make smoke` | 真后端联调：SSE 分帧、历史回放、审批接线 | **测试实例在跑** |
+| `make test` | Full Go suite (`go test ./...`) | — |
+| `cd web && bun run test:unit` | Pure-function layers (reducer / framing / store / highlighting) | — |
+| `make test-e2e` | Real browser + deterministic fake backend | nothing (it ships its own fake backend) |
+| `make smoke` | Real-backend integration: SSE framing, history replay, approval wiring | **the test instance must be running** |
 | `make lint` | Go vet + gofmt + oxlint + tsc | — |
-| `make check` | `lint` + `test`，提交前跑这个 | — |
+| `make check` | `lint` + `test`; run this before committing | — |
 
-起测试实例（`make smoke` 的前置）：
-
-```bash
-make test-env-backend   # 前台起，:18099，独立配置 + 独立会话目录
-make test-env-reset     # 只重建测试目录，不启动
-make test-env-sync      # ★ 改过开发侧的 agent 定义后必须跑
-```
-
-单个冒烟脚本（默认就连 :18099，**不需要手写 `OPENHERON_BASE`**）：
+Start the test instance (a prerequisite of `make smoke`):
 
 ```bash
-cd web && bun run smoke:interop            # SSE 分帧、拼接、历史水合
-cd web && bun run smoke:no-undefined-url   # 不会发出拼错的 URL
-cd web && bun run smoke:hitl               # 审批 resume 走通
+make test-env-backend   # foreground, :18099, separate config + separate session directory
+make test-env-reset     # rebuild the test directories only, do not start
+make test-env-sync      # ★ must run after you change agent definitions on the dev side
 ```
 
-### 规则
+Single smoke scripts (they connect to :18099 by default, **no need to write `OPENHERON_BASE`**):
 
-- **改界面必须浏览器验证**。「我改了，测试也绿了」不构成验收依据 ——
-  脚本级测试看不见渲染层，上一轮 10 个冒烟全绿而界面是坏的。
-- **E2E 用假后端，不要改成真后端**。真后端依赖模型配合，失败时分不清是
-  界面坏了还是模型没听话；`retries` 一开，失败变成噪音，三轮后没人看。
-  与真实后端的协议层验证由 `make smoke` 负责，两者互补。
-- **`smoke:hitl` 会抖，约 5 次里 1 次** —— 它依赖模型*选择*调 `write_file`
-  才能触发审批。那是模型的自由，不是代码回归；脚本会重试，全都不触发时
-  **明确报错**，不伪装成接线有问题。别用重试次数掩盖它。
-- ★ **`smoke:hitl` 有一个前置条件，缺了它会 100% 失败（不是「抖」）**：
-  **真正调工具的那个 agent**，其 `write_file` 必须落在 `ask` 档（既没被全局 `deny`，
-  也没被它自己的 `disabled_tools` 禁用）—— 否则模型根本调不出那个工具，
-  自然没有审批可触发。
-  ★ 别盯着 `main`：出厂配置里 `main` 确实写着
-  `disabled_tools: [write_file, edit_file, execute]`，但它只做编排，会把活**委派**给
-  `task`，而 `task` 的 `write_file` 在 `ask` 档 —— 审批照样触发。
-  2026-10-29 实测的事件流：`TOOL_CALL_START name=task`（子 agent 是以工具形态被调的），
-  随后 `TOOL_CALL_START name=write_file subagentRunId=task`，
-  中断的 `subagentRunId` 也是 `task`。
-  要确认某档是否可达，看**每个** agent 的生效工具表：
-  `curl -s :18099/v2/agents | grep -A3 disabledTools` 与
-  `curl -s :18099/v2/agents/task`（里面 `effectiveTools` 会给出 tier 与 reason）。
-  ★ `.openheron/` 是**本地未跟踪**的配置，改它会影响你自己的真实 agent
-  （放开 `write_file` 意味着那个 agent 真能写文件）—— 要改先问自己一句。
-- **端口错开不等于数据隔离**。openheron 的会话写在 `.openheron/state/`，测试写
-  进去就污染真实历史。测试实例把 `.openheron-test/project` 当项目根并**预置
-  自己的 `.openheron/`**，再用 `OPENHERON_CONFIG_DIR` 指名配置根 —— 配置根
-  **不向上查找**，所以仓库根那份结构上就读不到。端口与状态必须**一起**隔离。
-- **`make test-env-sync` 是必须的，不是可选的**。测试实例里的
-  `agents/ llm/ policy/ skills/` 是从开发侧**复制**的，改完 agent 不
-  同步，测的还是旧定义。
-- **`pkill` 要用 `-x`，不要用 `-f "bin/openheron"`**。`-f` 匹配完整命令行，
-  会把执行这条命令的 shell 自己也杀掉（它的命令行里就含这个字符串），
-  表现为命令无响应、像是卡住了。正确写法：`pkill -x openheron`。
-  ★ **`ps | grep | kill` 是同一种病**：它匹配的也是完整命令行，于是执行这条
-    命令的 shell 同样会被杀（命令行里含那个搜索串）。要按名字杀就
-    `pgrep -x <名字>`（只看 `comm`，不看命令行）。
-  ★ 进程名超过 15 个字符时 `comm` 会被内核截断（`openheron-multi-root` 变成
-    `openheron-multi-roo`），`-x` 就匹配不上了 —— 那时按端口找 PID
-    （`ss -ltnp`）逐个 kill。
-- **端口被占时让它响亮地失败**。`playwright.config.ts` 的
-  `reuseExistingServer: false` 与 Vite 的 `strictPort: true` 都是刻意的：
-  复用开发 vite 会让 E2E「全绿」但浏览器在跟真后端说话，
-  `OPENHERON_API_TARGET` 根本没注入。**不要图省事改成 `!CI`**。
-- **被强杀的 Playwright 会留下孤儿占端口**（webServer 子进程不随之退出）。
-  再跑时报 `already used`，那不是配置坏了 —— 先清进程。
-  ★ 表现是 `Error: http://127.0.0.1:18180/v2/health is already used`：
-    端口被上一轮的 vite / 假后端占着，而 `reuseExistingServer: false` 是
-    刻意的 —— 所以它**响亮地失败**（这正是要的）。清掉孤儿再跑。
-  ★ 别在 E2E **跑着的时候**清进程：一条 `pkill -x vite` 会把当轮正在用的
-    webServer 杀掉，而 Playwright 还在等它的健康检查 —— 表现为「端口一直没
-    起来、测试卡在启动」。要清就先把测试停掉。
-- **长任务要放到后台任务里跑**，不要用 shell 的 `&`。后台进程活不过那次
-  工具调用（调用一结束它就被杀），表现是「跑了一会儿就没了」「端口始终
-  没起来」—— 而日志里只有第一行，看不出是被谁杀的。
-- **新增/删除用例要同步文档里的条数**。`docs/frontend-design.md` 的目录树
-  把条数写死了，是为了让「忘了改」变成一次 diff 冲突而不是无声漂移 ——
-  上一次的 65/14 已经漂了三个轮次没人发现。
-- **动 `bun run build`、依赖或构建流程后要验新 clone**
-  （`rm -rf node_modules && bun install` 再跑一遍）。本地能过不代表清单是
-  对的：幽灵依赖（代码 import 了但 `package.json` 里没有）只有清空重装
-  才暴露。`.gitignore` 的例外规则也有同类坑 —— git 逐层判断，父目录被
-  排除就不再下降到子文件，近的规则优先。
+```bash
+cd web && bun run smoke:interop            # SSE framing, concatenation, history hydration
+cd web && bun run smoke:no-undefined-url   # never sends a malformed URL
+cd web && bun run smoke:hitl               # approval resume works end to end
+```
 
-隔离的完整细节见 `docs/frontend-design.md` §11.2 与
-`docs/config-design.md` §5.2。
+### Rules
 
-## 关联文档
+- **Interface changes must be verified in a browser.** "I changed it and the tests are green" is
+  not an acceptance basis — script-level tests cannot see the rendering layer; last round all 10
+  smoke scripts were green while the interface was broken.
+- **E2E uses the fake backend — do not switch it to the real backend.** The real backend depends
+  on model cooperation, and when it fails you cannot tell a broken interface from a model that
+  did not obey; with `retries` on, failures become noise and after three rounds nobody reads
+  them. Protocol-level verification against the real backend is `make smoke`'s job; the two
+  complement each other.
+- **`smoke:hitl` is flaky, about 1 in 5** — it depends on the model *choosing* to call
+  `write_file` to trigger an approval. That is the model's freedom, not a code regression; the
+  script retries, and when nothing triggers it **reports the error explicitly** instead of
+  pretending the wiring is broken. Do not use retry counts to cover it up.
+- ★ **`smoke:hitl` has a prerequisite; without it the script fails 100% of the time (that is not
+  "flaky")**: for **the agent that actually calls the tool**, its `write_file` must land in the
+  `ask` tier (neither globally `deny`-ed nor disabled by its own `disabled_tools`) — otherwise
+  the model cannot call that tool at all, and no approval can be triggered.
+  ★ Do not stare at `main`: the factory config does list
+  `disabled_tools: [write_file, edit_file, execute]` for `main`, but `main` only orchestrates and
+  **delegates** the work to `task`, whose `write_file` sits in the `ask` tier — the approval
+  still triggers. Observed event stream on 2026-10-29: `TOOL_CALL_START name=task` (the
+  sub-agent is invoked as a tool), then `TOOL_CALL_START name=write_file subagentRunId=task`;
+  the interrupted `subagentRunId` is `task` too.
+  To check whether a tier is reachable, look at **each** agent's effective tool table:
+  `curl -s :18099/v2/agents | grep -A3 disabledTools` and
+  `curl -s :18099/v2/agents/task` (`effectiveTools` gives the tier and the reason).
+  ★ `.openheron/` is **local untracked** configuration; changing it affects your own real
+  agents (opening up `write_file` means that agent really can write files) — ask yourself
+  first.
+- **Different ports are not data isolation.** openheron writes sessions under `.openheron/state/`;
+  a test that writes there pollutes the real history. The test instance treats
+  `.openheron-test/project` as the project root and **pre-seeds its own `.openheron/`**, then
+  names the config root with `OPENHERON_CONFIG_DIR` — the config root **does not search
+  upward**, so the one at the repository root is structurally unreachable. Ports and state must
+  be isolated **together**.
+- **`make test-env-sync` is mandatory, not optional.** The test instance's
+  `agents/ llm/ policy/ skills/` are **copied** from the dev side; without syncing, a changed
+  agent definition is not what gets tested.
+- **`pkill` needs `-x`; do not use `-f "bin/openheron"`.** `-f` matches the full command line
+  and kills the very shell that ran the command (its command line contains that string), which
+  shows up as an unresponsive command that looks hung. The correct form is `pkill -x openheron`.
+  ★ **`ps | grep | kill` is the same disease**: it also matches the full command line, so the
+    shell running it gets killed as well (its command line contains the search string). To kill
+    by name use `pgrep -x <name>` (it looks at `comm`, not the command line).
+  ★ When a process name exceeds 15 characters the kernel truncates `comm`
+    (`openheron-multi-root` becomes `openheron-multi-roo`) and `-x` no longer matches — then
+    find the PID by port (`ss -ltnp`) and kill them one by one.
+- **Let it fail loudly when a port is taken.** `playwright.config.ts`'s
+  `reuseExistingServer: false` and Vite's `strictPort: true` are deliberate: reusing the dev
+  Vite would let E2E go "all green" while the browser talks to the real backend, and
+  `OPENHERON_API_TARGET` would never be injected. **Do not "simplify" it to `!CI`.**
+- **A force-killed Playwright leaves orphans holding ports** (the webServer children do not exit
+  with it). A later run reports `already used` — that is not a broken config — clean up the
+  processes first.
+  ★ The symptom is `Error: http://127.0.0.1:18180/v2/health is already used`: the port is held
+    by the previous round's Vite / fake backend, and `reuseExistingServer: false` is deliberate —
+    so it **fails loudly** (which is exactly what we want). Clean the orphans, then run.
+  ★ Do not clean processes **while** E2E is running: one `pkill -x vite` kills the webServer
+    the current round is using, while Playwright is still waiting for its health check — the
+    symptom is "the port never comes up and the test hangs at startup". Stop the test first.
+- **Put long-running work in a background task**, not in a shell `&`. A background process does
+  not survive the tool call that started it (it is killed when the call ends), which shows up
+  as "it ran for a while and then vanished" and "the port never comes up" — while the log holds
+  only the first line, so you cannot tell who killed it.
+- **When you add or remove cases, sync the counts in the docs.** The tree in
+  `docs/frontend-design.md` hard-codes the counts, so that "forgot to update" turns into a diff
+  conflict instead of silent drift — the last 65/14 drifted for three rounds unnoticed.
+- **After touching `bun run build`, dependencies, or the build flow, verify a fresh clone**
+  (`rm -rf node_modules && bun install`, then run it again). Passing locally does not mean the
+  manifest is right: ghost dependencies (imported in code but missing from `package.json`) only
+  surface after a clean reinstall. The `.gitignore` exception rules have the same kind of trap —
+  git decides level by level, and once a parent directory is excluded it no longer descends into
+  children; the nearer rule wins.
 
-### 本仓库自带（随代码面一起维护）
+The full isolation details are in `docs/frontend-design.md` §11.2 and
+`docs/config-design.md` §5.2.
 
-| 文档 | 内容 |
+## Related documents
+
+### Shipped here (maintained alongside the code surface)
+
+| Document | Content |
 |---|---|
-| `README.md` / `README_zh.md` | **项目说明** —— 定位、快速开始、命令、配置速览、HTTP 速查 |
-| `docs/architecture.md` / `docs/architecture_zh.md` | **架构设计说明** —— 分层与依赖方向、配置系统、装配、运行循环、存储、HTTP、前端、知识库 |
-| `docs/user-manual.md` / `docs/user-manual_zh.md` | **用户使用说明** —— 安装、配置、界面操作（面向使用者，不含内部设计） |
-| `docs/developer-manual.md` / `docs/developer-manual_zh.md` | **开发者说明** —— 分层、依赖铁律、开发配方、测试与排障、已知问题 |
-| `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` | **上下文使用预估设计方案** —— 占用口径、数据流、后端与前端改动、压缩结果的持久化与有效历史（**占用仪表盘与压缩持久化已实现**） |
-| `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` | **会话并发设计方案** —— 跨客户端抢占的成因、「一个会话一轮」的规则与实现、以及前端怎么知道会话正忙（**准入闸门与 409 已实现**） |
+| `README.md` / `README_zh.md` | **Project overview** — positioning, quick start, commands, configuration at a glance, HTTP reference |
+| `docs/architecture.md` / `docs/architecture_zh.md` | **Architecture** — layering and dependency direction, configuration system, assembly, run loop, storage, HTTP, frontend, knowledge base |
+| `docs/user-manual.md` / `docs/user-manual_zh.md` | **User guide** — installation, configuration, interface operation (for users, no internal design) |
+| `docs/developer-manual.md` / `docs/developer-manual_zh.md` | **Developer guide** — layering, dependency iron rules, development recipes, testing and troubleshooting, known issues |
+| `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` | **Context-usage estimation design** — accounting rules, data flow, backend and frontend changes, persistence of compaction results and effective history (**the usage dashboard and compaction persistence are implemented**) |
+| `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` | **Session concurrency design** — why cross-client preemption happened, the "one turn per session" rule and its implementation, and how the frontend learns that a session is busy (**the admission gate and the 409 are implemented**) |
 
-★ 无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。
+★ The file without a suffix is the **English main version**; `_zh` is the Chinese version; the two
+correspond one to one — change one and change the other.
 
-### 上游仓库（不随本仓库分发）
+### Upstream repository (not distributed with this repository)
 
-★ 下列文档在**上游仓库**里。引用它们时要看清是上游那份 ——
-`docs/architecture.md` **两个仓库都有同名文件**，内容不同：
-本仓库那份讲的是**本代码面**的实际结构，上游那份是**总览与分册索引**。
+★ The documents below live in the **upstream repository**. When you cite them, make sure you are
+reading the upstream copy — `docs/architecture.md` **exists in both repositories** with different
+content: the one here describes **this code surface** as it actually is, the upstream one is the
+overview and the index of the volumes.
 
-| 文档 | 内容 |
+| Document | Content |
 |---|---|
-| `docs/implementation-audit.md` | **落地审计报告** —— 哪些没做、哪些是文档漂移（2026-10-23） |
-| `docs/hygiene-research.md` | **代码卫生调研** —— 无出口的导出符号、第三方归档、死代码（2026-10-23） |
-| `docs/agent-architecture-survey.md` | **外部 Agent 架构调研** —— pi / rakazo / OpenClaw / Hermes / Letta 的 gateway 与后台服务问题（2026-10-24） |
-| `docs/positioning.md` | **定位与取舍** —— 专家配专模 × Agent 即工具：机制拆解与边界（2026-10-25） |
-| `docs/config-design.md` | 配置 schema、分层、校验、热更新 |
-| `docs/api-design.md` | 旧的无前缀接口（**已于 2026-10-23 随 M3 下线**，保留为历史记录） |
-| `docs/api-v2-design.md` | `/v2` 接口族与 AG-UI 事件契约 |
-| `docs/frontend-design.md` | React 前端架构与界面 |
-| `docs/agent-design.md` | Agent 池、审批、深度保护 |
-| `docs/agent-design-v2.md` | agent 装配 API v2（`deep.Config` 请出 openheron） |
-| `docs/multi-agent-design.md` | 多角色、并行委派、按 agent 分账与历史过滤 |
-| `docs/config-editor-design.md` | 配置编辑器（`/v2/settings` 六条路由 + 界面） |
-| `docs/deep-config-fields.md` | `deep.Config` 字段使用参考 |
-| `docs/checkpoint-store.md` | Checkpoint Store：审批恢复的真相源 |
-| `docs/kb-design.md` | 知识库 |
-| `docs/init-design.md` | `openheron init` —— 二级（项目级）配置的最小可运行初始化 |
-| `docs/llm-common.md` | 厂商协议层 |
+| `docs/implementation-audit.md` | **Implementation audit** — what was not built, what is documentation drift (2026-10-23) |
+| `docs/hygiene-research.md` | **Code hygiene research** — exported symbols with no consumer, third-party archives, dead code (2026-10-23) |
+| `docs/agent-architecture-survey.md` | **Survey of external agent architectures** — the gateway and background-service problems of pi / rakazo / OpenClaw / Hermes / Letta (2026-10-24) |
+| `docs/positioning.md` | **Positioning and trade-offs** — expert per expert model × agent as a tool: mechanism breakdown and boundaries (2026-10-25) |
+| `docs/config-design.md` | Config schema, layering, validation, hot reload |
+| `docs/api-design.md` | The old unprefixed APIs (**retired on 2026-10-23 together with M3**, kept as history) |
+| `docs/api-v2-design.md` | The `/v2` API family and the AG-UI event contract |
+| `docs/frontend-design.md` | React frontend architecture and interface |
+| `docs/agent-design.md` | Agent pool, approvals, depth protection |
+| `docs/agent-design-v2.md` | Agent assembly API v2 (`deep.Config` leaves openheron) |
+| `docs/multi-agent-design.md` | Multiple roles, parallel delegation, per-agent accounting and history filtering |
+| `docs/config-editor-design.md` | The config editor (six `/v2/settings` routes + the interface) |
+| `docs/deep-config-fields.md` | Field reference for `deep.Config` |
+| `docs/checkpoint-store.md` | Checkpoint Store: the source of truth for approval resume |
+| `docs/kb-design.md` | The knowledge base |
+| `docs/init-design.md` | `openheron init` — the minimal runnable initialization of the secondary (project-level) configuration |
+| `docs/llm-common.md` | The vendor protocol layer |
