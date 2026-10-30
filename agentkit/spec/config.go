@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -379,10 +380,28 @@ func (s *Service) loadDir(dir, ext, cat string, ms map[string]*mutation,
 	return applyNew(newNames)
 }
 
+// ErrEmptyDocument signals that a config file carries no YAML document at
+// all: it is empty, or it holds nothing but comments.
+//
+// ★ The YAML decoder reports this as io.EOF. That is true and useless —
+//
+//	"EOF" tells a user nothing about what to do. The distinction matters:
+//	"your file has no content" is a different problem from "your file has a
+//	typo", and the fix is different too.
+//
+// ★ The error exists because the comment-only template is a real file shape:
+//
+//	tools/ ships a section template that is nothing but comments, and a file
+//	built from it has no document at all.
+var ErrEmptyDocument = errors.New("the file is empty (or contains only comments)")
+
 func decodeStrict(data []byte, v any) error {
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
 	if err := dec.Decode(v); err != nil {
+		if errors.Is(err, io.EOF) {
+			return ErrEmptyDocument
+		}
 		return err
 	}
 	return nil

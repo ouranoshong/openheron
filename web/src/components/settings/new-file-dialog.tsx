@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { SectionPicker } from "@/components/settings/file-list"
 import { useSettings } from "@/lib/settings-store"
-import { suggestPath, validatePath, type Section } from "@/lib/settings-validate"
+import { fileTemplate, resolveTemplate, suggestPath, validatePath, type Section } from "@/lib/settings-validate"
 
 export function NewFileButton() {
   const [open, setOpen] = useState(false)
@@ -27,20 +27,25 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
   const [section, setSection] = useState<Section>("policy")
   const [name, setName] = useState("")
   const [content, setContent] = useState("")
+  // edited records that the user has typed in the content box. Until then the
+  // content is still the template, and a new file name may replace it with
+  // that file's own template.
+  const [edited, setEdited] = useState(false)
 
   const path = suggestPath(name, section)
-  const template = (path ? templates?.[path] : undefined) ?? templates?.[section] ?? ""
   const pathIssues = path ? validatePath(path) : [{ line: 1, message: "enter a file name" }]
 
   const reset = () => {
     setSection("policy")
     setName("")
     setContent("")
+    setEdited(false)
   }
 
   const seed = (s: Section) => {
     setSection(s)
     setContent(templates?.[s] ?? "")
+    setEdited(false)
   }
 
   const submit = async () => {
@@ -81,8 +86,21 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
               id="new-file-name"
               value={name}
               onChange={(e) => {
-                setName(e.target.value)
-                if (!content && template) setContent(template)
+                const nextName = e.target.value
+                setName(nextName)
+                // ★ The skeleton follows the FILE, not the section: the
+                //   section template for tools/ is a comment block, and a
+                //   comment-only file has no YAML document at all — the
+                //   server rejects it with a bare "EOF". Once the name is
+                //   known, the file's own template takes over — unless the
+                //   user has already typed something.
+                //
+                //   A file with no template of its own keeps what it has:
+                //   the section template is the right start for it, and
+                //   swapping it back in would throw the user's work away.
+                if (edited) return
+                const nextTemplate = fileTemplate(templates, suggestPath(nextName, section))
+                if (nextTemplate !== undefined) setContent(nextTemplate)
               }}
               placeholder={
                 section === "agents"
@@ -107,13 +125,25 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium">Content</span>
-              <Button type="button" variant="ghost" size="sm" className="text-[11px]" onClick={() => setContent(templates?.[section] ?? "")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-[11px]"
+                onClick={() => {
+                  setContent(resolveTemplate(templates, path, section))
+                  setEdited(false)
+                }}
+              >
                 Reset to template
               </Button>
             </div>
             <textarea
               value={content}
-              onChange={(e) => setContent(e.target.value)}
+              onChange={(e) => {
+                setContent(e.target.value)
+                setEdited(true)
+              }}
               rows={8}
               spellCheck={false}
               className="bg-background rounded-md border p-2 font-mono text-xs"

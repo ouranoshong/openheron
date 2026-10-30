@@ -83,6 +83,36 @@ export function suggestPath(fileName: string, section: Section): string {
   return `${section}/${name}`
 }
 
+// fileTemplate returns the template the server ships for one file, if any.
+//
+// ★ Only some files have one: tools/ ships a skeleton per tool, because the
+//   file's content IS that tool's configuration. A file without a template
+//   of its own inherits the section's — but the caller may want to know that
+//   there was nothing to inherit, and keep what it already has.
+export function fileTemplate(
+  templates: Readonly<Record<string, string>> | undefined,
+  path: string,
+): string | undefined {
+  if (!templates || !path) return undefined
+  return templates[path]
+}
+
+// resolveTemplate picks the skeleton for a file: the file's own template
+// when it has one, the section's otherwise.
+//
+// ★ The FILE's template wins over the section's. The section template
+//   describes the directory ("tools/ one file = one tool"), and for tools/
+//   it is nothing but comments — a file built from it has no YAML document
+//   at all, and the server rejects it with a bare "EOF". The file template
+//   is the one that carries the fields the file must have.
+export function resolveTemplate(
+  templates: Readonly<Record<string, string>> | undefined,
+  path: string,
+  section: Section,
+): string {
+  return fileTemplate(templates, path) ?? templates?.[section] ?? ""
+}
+
 export function validateContent(
   path: string,
   content: string,
@@ -105,8 +135,30 @@ export function validateContent(
 
 // ── tools/<tool>.yaml ─────────────────────────────────────────────────────
 
+// hasYamlDocument reports whether the content carries a YAML document.
+//
+// ★ A file that is empty, blank, or nothing but comments has NO document:
+//   the YAML decoder reports that as io.EOF, and the server's answer is a
+//   bare "EOF" that says nothing. Catching it here turns a server round
+//   trip into a line the user can act on.
+function hasYamlDocument(content: string): boolean {
+  return content.split("\n").some((line) => {
+    const trimmed = line.trim()
+    return trimmed !== "" && !trimmed.startsWith("#")
+  })
+}
+
 function validateTool(path: string, content: string): Issue[] {
   const issues: Issue[] = []
+
+  if (!hasYamlDocument(content)) {
+    issues.push({
+      line: 1,
+      message: "the file has no YAML content — a tools file IS the tool's configuration",
+    })
+    return issues
+  }
+
   const lines = content.split("\n")
 
   lines.forEach((line, i) => {

@@ -228,6 +228,62 @@ test.describe("policy/limits.yaml", () => {
   })
 })
 
+test.describe("the new file dialog", () => {
+  const NEW_FILE = '[data-testid="settings-new-file"]'
+  const NEW_DIALOG = '[data-testid="new-file-dialog"]'
+  const NEW_NAME = '[data-testid="new-file-name"]'
+  const NEW_CONTENT = '[data-testid="new-file-content"]'
+  const NEW_CREATE = '[data-testid="new-file-create"]'
+
+  async function openNewFile(page: Page): Promise<void> {
+    await openSettings(page)
+    await page.click(NEW_FILE)
+    await expect(page.locator(NEW_DIALOG)).toBeVisible()
+  }
+
+  async function nameToolsFile(page: Page, file: string): Promise<void> {
+    await page.getByRole("button", { name: "Tools", exact: true }).click()
+    await page.locator(NEW_NAME).fill(file)
+  }
+
+  // ★ The skeleton follows the FILE, not the section. The tools/ section
+  //   template is nothing but comments, and a file built from it has no YAML
+  //   document at all — the server answers that with a bare "EOF". This is
+  //   the shape the bug lived in, so it gets a spec of its own.
+  test("typing the file name picks that file's template, not the section's", async ({ page }) => {
+    await openNewFile(page)
+    await nameToolsFile(page, "http.yaml")
+
+    await expect(page.locator(NEW_CONTENT)).toHaveValue(/methods: \[get\]/)
+    await expect(page.locator(NEW_CONTENT)).not.toHaveValue(/one file = one tool/)
+  })
+
+  test("a tools file is created with its own template and lands in the editor", async ({ page }) => {
+    await openNewFile(page)
+    await nameToolsFile(page, "http.yaml")
+    await page.click(NEW_CREATE)
+
+    await expect(page.locator(EDITOR)).toContainText("methods: [get]")
+    await expect(page.locator(STATUS)).not.toContainText(/EOF/)
+  })
+
+  test("a tools file with no YAML content is refused before the round trip", async ({ page }) => {
+    await openNewFile(page)
+    await nameToolsFile(page, "http.yaml")
+    await page.click(NEW_CREATE)
+    await expect(page.locator(EDITOR)).toContainText("methods: [get]")
+
+    await page.locator(EDITOR).click()
+    await page.keyboard.press("Control+a")
+    await page.keyboard.type("# only a comment\n")
+
+    await expect(page.locator(STATUS)).toContainText(/no YAML content/i)
+    // ★ The save is blocked **locally**: the button is disabled, so the
+    //   request never leaves the browser. Clicking it would wait forever.
+    await expect(page.locator(SAVE)).toBeDisabled()
+  })
+})
+
 test.describe("closing", () => {
   test("closing and reopening discards an unsaved draft", async ({ page }) => {
     await openSettings(page)

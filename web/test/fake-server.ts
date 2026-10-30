@@ -1033,6 +1033,7 @@ export function startFakeServer(port = 0): FakeServer {
       { id: "agents", label: "Agents", editable: true, hot: true },
       { id: "llm", label: "Providers", editable: true, hot: true },
       { id: "server", label: "Server", editable: false, hot: false, note: "not hot-reloaded; changes apply on restart" },
+      { id: "tools", label: "Tools", editable: true, hot: true },
     ],
     items: [
       { path: "policy/permissions.yaml", exists: true, hot: true, revision: "r1" },
@@ -1047,6 +1048,56 @@ export function startFakeServer(port = 0): FakeServer {
         "# 限制规则：数量上的上限。\n# 只能收紧；放宽请改 server/config.yaml。\nagent:\n  max_depth: 0\nretry:\n  max_retries: 0\n",
       agents: "---\nmodel: \ndescription: \n---\n\n# available models: deepseek/flash\n",
       llm: "type: openai\nbase_url: \napi_key: ${}\nmodels: []\n",
+      // ★ The tools section template is **nothing but comments**, exactly as
+      //   the real server ships it. A file built from it has no YAML
+      //   document at all, so the skeleton the dialog must offer is the
+      //   FILE's template — this is the shape the bug lived in.
+      tools:
+        "# tools/ one file = one tool:\n" +
+        "#   http.yaml         request_get / request_post / request_put / request_delete\n" +
+        "#   web_search.yaml   duckduckgo_search\n" +
+        "#   wikipedia.yaml    wikipedia_search\n" +
+        "#   kb.yaml           knowledge base\n" +
+        "#\n" +
+        "# ★ The content of the file IS **that tool's own configuration** (no outer wrapper key).\n" +
+        "#   Whether the file exists IS the switch — turning a tool off = deleting that file.\n" +
+        "#\n" +
+        "# ★ tools/ is hot-reloaded: the change takes effect on the next turn, no process restart.\n",
+      "tools/http.yaml":
+        "# HTTP tool. Writing this file enables it.\n" +
+        "#\n" +
+        "# ★ methods defaults to get only — write methods (post/put/delete) must be named\n" +
+        "#   explicitly, otherwise \"just adding a POST\" turns into an outbound channel.\n" +
+        "methods: [get]\n" +
+        "headers: {}\n" +
+        "timeout: 30s\n",
+      "tools/web_search.yaml":
+        "# Web search. Writing this file enables it.\n" +
+        "#\n" +
+        "# ★ provider has only two options: duckduckgo (zero config, zero key) and searxng (self-hosted).\n" +
+        "provider: duckduckgo\n" +
+        "max_results: 10\n" +
+        "timeout: 60s\n" +
+        "region: \"\"\n",
+      "tools/wikipedia.yaml":
+        "# Wikipedia lookup. Writing this file enables it.\n" +
+        "top_k: 3\n" +
+        "language: zh\n" +
+        "timeout: 15s\n" +
+        "base_url: \"\"\n",
+      "tools/kb.yaml":
+        "# Knowledge base. Writing this file enables it.\n" +
+        "#\n" +
+        "# ★ corpus is the **corpus directory**, relative to the project root. Empty string = knowledge base off.\n" +
+        "#   It lives and dies with the index: change the directory without rebuilding the index and it will confidently return unrelated answers.\n" +
+        "corpus: \"\"\n" +
+        "index: default\n" +
+        "# model must point at a model with kind: embedding in llm/*.yaml; empty = pure lexical retrieval.\n" +
+        "model: \"\"\n" +
+        "query_instruction: \"\"\n" +
+        "batch_size: 10\n" +
+        "max_batch_chars: 1200\n" +
+        "top_k: 8\n",
     },
     modelRefs: ["deepseek/flash"],
     reasoningLevels: { "deepseek/flash": ["off", "low", "high", "max"] },

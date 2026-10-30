@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"errors"
 	"fmt"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"path/filepath"
@@ -102,29 +103,60 @@ func (c *Config) loadServer(file string, data []byte) error {
 	return nil
 }
 
-// http.yaml        → decl.HTTPToolsCfg
-// web_search.yaml  → decl.WebSearchCfg
-// wikipedia.yaml   → decl.WikipediaCfg
-// kb.yaml          → decl.KB
+// toolHints name what each tools/ file must carry.
+//
+// ★ The file's existence is the switch that turns the tool on, and its
+//
+//	content is the tool's own configuration. So an empty file is "the tool
+//	is on, with nothing configured" — which is never what the user meant,
+//	and the hint says what to write instead.
+var toolHints = map[string]string{
+	"http":       "the HTTP tool's configuration (methods, headers, timeout)",
+	"web_search": "the web search configuration (provider, max_results, timeout)",
+	"wikipedia":  "the Wikipedia configuration (top_k, language, timeout)",
+	"kb":         "the knowledge base configuration (corpus, index, model)",
+}
+
+// decodeTool decodes one tools/ file.
+//
+// ★ An empty file is rejected with a hint rather than a bare parse error:
+//
+//	the content IS the tool's configuration, so "there is no configuration"
+//	is the useful thing to say — and it is the difference between a message
+//	the user can act on and a bare "EOF".
+func decodeTool(data []byte, v any, hint string) error {
+	err := decodeStrict(data, v)
+	if errors.Is(err, ErrEmptyDocument) {
+		return fmt.Errorf("%s is missing: %w", hint, err)
+	}
+	return err
+}
+
+// loadTool loads one tools/ file.
+//
+//	http.yaml        → decl.HTTPToolsCfg
+//	web_search.yaml  → decl.WebSearchCfg
+//	wikipedia.yaml   → decl.WikipediaCfg
+//	kb.yaml          → decl.KB
 func (c *Config) loadTool(file string, data []byte) error {
 	switch strings.TrimSuffix(file, ".yaml") {
 	case "http":
 		var t decl.HTTPToolsCfg
-		if err := decodeStrict(data, &t); err != nil {
+		if err := decodeTool(data, &t, toolHints["http"]); err != nil {
 			return err
 		}
 		c.Tools.HTTP = &t
 		return nil
 	case "web_search":
 		var t decl.WebSearchCfg
-		if err := decodeStrict(data, &t); err != nil {
+		if err := decodeTool(data, &t, toolHints["web_search"]); err != nil {
 			return err
 		}
 		c.Tools.WebSearch = &t
 		return nil
 	case "wikipedia":
 		var t decl.WikipediaCfg
-		if err := decodeStrict(data, &t); err != nil {
+		if err := decodeTool(data, &t, toolHints["wikipedia"]); err != nil {
 			return err
 		}
 		c.Tools.Wikipedia = &t
@@ -147,7 +179,7 @@ func (c *Config) loadKB(data []byte) error {
 		probe.Splitter != nil && probe.Splitter.Headers != nil {
 		k.Splitter.Headers = nil
 	}
-	if err := decodeStrict(data, &k); err != nil {
+	if err := decodeTool(data, &k, toolHints["kb"]); err != nil {
 		return err
 	}
 	c.KB = k

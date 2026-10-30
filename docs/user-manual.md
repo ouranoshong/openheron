@@ -375,6 +375,9 @@ The write path has several gates:
 - `server/` is **not editable** (not hot-reloaded, so a change needs a restart).
 - **Literal secrets are rejected** — `api_key must be a reference, not a literal`. Use
   `${ENV_VAR}` or `@file:/path`.
+- **A file with no YAML content is rejected** — a file that is empty, or holds nothing
+  but comments, carries no configuration at all. The message names the fields the file
+  needs; under `tools/` it says which tool is missing what.
 - **Optimistic concurrency**: if the file changed elsewhere, saving reports a conflict
   and lets you choose to overwrite or to back off.
 

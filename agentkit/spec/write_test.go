@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"errors"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"os"
 	"path/filepath"
@@ -318,4 +319,94 @@ func keys[V any](m map[string]V) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestDecodeStrictReportsAnEmptyDocument covers the file shape the config
+// editor actually produces: a file whose content is nothing but comments has
+// no YAML document at all.
+//
+// ★ The decoder reports that as io.EOF. "EOF" is not an error message a user
+//
+//	can act on, so the loader must name the problem instead.
+func TestDecodeStrictReportsAnEmptyDocument(t *testing.T) {
+	for name, content := range map[string]string{
+		"empty":         "",
+		"blank lines":   "\n\n  \n",
+		"comments only": "# HTTP tool. Writing this file enables it.\n",
+		"section tmpl":  Template(DirTools, nil),
+	} {
+		var v decl.HTTPToolsCfg
+		err := decodeStrict([]byte(content), &v)
+		if !errors.Is(err, ErrEmptyDocument) {
+			t.Fatalf("%s: error = %v, want ErrEmptyDocument", name, err)
+		}
+		if strings.Contains(err.Error(), "EOF") {
+			t.Fatalf("%s: message = %q, want it not to leak the decoder's EOF", name, err)
+		}
+	}
+}
+
+// TestWriteToolFileWithNoDocumentIsRejectedWithAReadableError walks the
+// whole write path with the content the "new file" dialog used to produce:
+// the tools/ section template, which is nothing but comments.
+//
+// ★ The rejection itself is right — a tools file IS the tool's
+//
+//	configuration, and a file with no configuration is not a tool the user
+//	meant to turn on. What was wrong was the message.
+func TestWriteToolFileWithNoDocumentIsRejectedWithAReadableError(t *testing.T) {
+	f := newFixture(t)
+	f.seedMinimal(t)
+	s := f.service(t)
+
+	_, _, err := s.Write("tools/http.yaml", []byte(Template(DirTools, nil)), "")
+	if err == nil {
+		t.Fatal("a tools file with no YAML document must be rejected")
+	}
+	var we *WriteError
+	if !errors.As(err, &we) {
+		t.Fatalf("error = %v, want a *WriteError", err)
+	}
+	if we.Kind != ErrMergeRejected {
+		t.Fatalf("kind = %v, want %v", we.Kind, ErrMergeRejected)
+	}
+	if strings.Contains(we.Message, "EOF") {
+		t.Fatalf("message = %q, want it not to leak the decoder's EOF", we.Message)
+	}
+	if !strings.Contains(we.Message, "empty") {
+		t.Fatalf("message = %q, want it to say the file is empty", we.Message)
+	}
+	if !strings.Contains(we.Message, "tools/http.yaml") {
+		t.Fatalf("message = %q, want it to name the file", we.Message)
+	}
+	// The hint must say what to write: the file's content IS the tool's
+	// configuration, so "there is no configuration" is the useful thing.
+	if !strings.Contains(we.Message, "methods") {
+		t.Fatalf("message = %q, want it to name the fields the tool needs", we.Message)
+	}
+	if f.exists(t, "tools/http.yaml") {
+		t.Fatal("a rejected write must not leave a file behind")
+	}
+}
+
+// TestWriteToolFileWithContentIsAccepted is the other half: a file that
+// carries a document goes through and turns the tool on.
+func TestWriteToolFileWithContentIsAccepted(t *testing.T) {
+	f := newFixture(t)
+	f.seedMinimal(t)
+	s := f.service(t)
+
+	_, cfg, err := s.Write("tools/http.yaml", []byte("methods: [get]\n"), "")
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if cfg.Tools.HTTP == nil {
+		t.Fatal("the HTTP tool must be on after the file was written")
+	}
+	if len(cfg.Tools.HTTP.Methods) != 1 || cfg.Tools.HTTP.Methods[0] != "get" {
+		t.Fatalf("methods = %v, want [get]", cfg.Tools.HTTP.Methods)
+	}
+	if !f.exists(t, "tools/http.yaml") {
+		t.Fatal("the accepted write must land on disk")
+	}
 }

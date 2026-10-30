@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test"
 
 import {
   check,
+  fileTemplate,
   isEditable,
+  resolveTemplate,
   suggestPath,
   validateContent,
   validatePath,
@@ -373,5 +375,66 @@ describe("validateContent for tools/", () => {
 
   test("an empty corpus is off, not an error", () => {
     expect(validateContent("tools/kb.yaml", "corpus: \"\"\n")).toEqual([])
+  })
+
+  // ★ The tools/ section template is nothing but comments, and a file built
+  //   from it has no YAML document at all — the server's decoder answers
+  //   with a bare "EOF". The editor must catch it before the round trip.
+  test("flags a file that has no YAML document at all", () => {
+    for (const content of ["", "\n\n", "# only a comment\n", "# tools/ one file = one tool:\n"]) {
+      const issues = validateContent("tools/http.yaml", content)
+      expect(issues.length).toBeGreaterThan(0)
+      expect(issues[0]!.message).toContain("no YAML content")
+    }
+  })
+
+  test("a separator alone is still a document", () => {
+    expect(validateContent("tools/http.yaml", "---\n")).toEqual([])
+  })
+})
+
+describe("resolveTemplate", () => {
+  const templates = {
+    tools: "# tools/ one file = one tool:\n#   http.yaml  request_get\n",
+    "tools/http.yaml": "methods: [get]\n",
+  }
+
+  // ★ The file's template wins. The section template only describes the
+  //   directory, and for tools/ it is nothing but comments — offering it as
+  //   the skeleton is what produced a file the server could not parse.
+  test("the file's template wins over the section's", () => {
+    expect(resolveTemplate(templates, "tools/http.yaml", "tools")).toBe("methods: [get]\n")
+  })
+
+  test("falls back to the section template when the file has none", () => {
+    expect(resolveTemplate(templates, "tools/other.yaml", "tools")).toBe(templates.tools)
+  })
+
+  test("an empty path falls back to the section template", () => {
+    expect(resolveTemplate(templates, "", "tools")).toBe(templates.tools)
+  })
+
+  test("survives a manifest that carries no templates", () => {
+    expect(resolveTemplate(undefined, "tools/http.yaml", "tools")).toBe("")
+  })
+})
+
+describe("fileTemplate", () => {
+  const templates = {
+    tools: "# tools/ one file = one tool:\n",
+    "tools/http.yaml": "methods: [get]\n",
+  }
+
+  test("returns the file's own template", () => {
+    expect(fileTemplate(templates, "tools/http.yaml")).toBe("methods: [get]\n")
+  })
+
+  // ★ There is no fallback here on purpose: a file with no template of its
+  //   own must keep whatever the editor already holds, or correcting a
+  //   file name would throw the user's work away.
+  test("has no fallback to the section's template", () => {
+    expect(fileTemplate(templates, "tools/other.yaml")).toBeUndefined()
+    expect(fileTemplate(templates, "")).toBeUndefined()
+    expect(fileTemplate(undefined, "tools/http.yaml")).toBeUndefined()
   })
 })

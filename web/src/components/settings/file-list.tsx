@@ -15,6 +15,7 @@ const LABEL: Record<string, string> = {
   agents: "Agents",
   llm: "Providers",
   server: "Server",
+  tools: "Tools",
 }
 
 export function SettingsFileList() {
