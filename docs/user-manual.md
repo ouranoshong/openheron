@@ -452,6 +452,28 @@ the history under them would be cutting the history they are working with. Stop 
 
 The same thing is available over HTTP — `POST /v2/sessions/{id}/compact` — for scripts.
 
+### 6.7 Two windows on one session
+
+A session runs **one turn at a time**. If the same session is open in two windows — two
+tabs, or a tab and another machine — only one of them can be running a turn.
+
+The other one says so:
+
+```
+This session is running in another window — stop it to take over
+```
+
+★ **Nothing is lost.** The refused message is not sent, so it does not appear in the
+conversation. The turn that is running keeps going, untouched.
+
+★ **The stop button is the way to take over.** It stops the session's turn — whoever
+owns it — and then you can send. The window that owned the turn sees it stop.
+
+★ **This is a server-side rule, not a browser one.** Any client that talks to the API
+gets the same answer, and the session's `state` reports `"running"` to every client
+looking at it. A second window opened while a turn is running hydrates as busy, with the
+send button already disabled.
+
 ## 7. The knowledge base
 
 The knowledge base is an **optional** local corpus retrieval layer: it turns a set of
@@ -536,7 +558,7 @@ publicly, or narrow `listen_addr` to `127.0.0.1`.
 | POST/GET | `/v2/sessions/:id/files` | Upload / list session workspace files (32 MiB per file) |
 | GET | `/v2/project/files` | List files under the project root (`?q=` `?limit=`) |
 | GET | `/v2/commands` | The slash-command list |
-| POST | `/v2/run` | **SSE entry point**: ask a question, or answer an approval |
+| POST | `/v2/run` | **SSE entry point**: ask a question, or answer an approval (see §6.7) |
 | GET | `/v2/skills` | The skill list |
 | GET | `/v2/agents` `/v2/agents/:agentId` | Agents and their effective tool tables |
 | GET | `/v2/config` | The effective configuration |
@@ -562,6 +584,10 @@ curl -N -X POST localhost:8080/v2/run \
 
 ★ **`threadId` is required.** Without it you get
 `threadId is required; create the session with POST /v2/sessions first`.
+
+★ **A session runs one turn at a time.** A second request on a session that is already
+running gets `409` with the code `session_busy` — and the running turn is not disturbed
+(see §6.7).
 
 The response is an **AG-UI event stream**, with event types `RUN_STARTED`,
 `TEXT_MESSAGE_*`, `REASONING_*`, `TOOL_CALL_*`, `CUSTOM` (`model_retry`),

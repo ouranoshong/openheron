@@ -211,6 +211,10 @@ export const SCENARIOS = {
   reasoningDone: ["A"],
 
   compaction: ["A"],
+
+  // busySession: the session already has a live turn, so a second run is
+  // refused with 409 session_busy — the cross-client case.
+  busySession: ["A"],
 } as const
 
 export type ScenarioName = keyof typeof SCENARIOS
@@ -662,6 +666,7 @@ function eventsFor(
       ]
 
     case "slowRun":
+    case "busySession":
       return [
         started(threadId, runId),
         textStart("m-1", "assistant"),
@@ -1161,6 +1166,12 @@ export function startFakeServer(port = 0): FakeServer {
       return sse(stream)
     }
 
+    // ★ The admission gate. A session has at most one live turn, so a
+    //   second run is refused — and the running turn is left alone.
+    if (scenario === "busySession" && thread.state === "running") {
+      return fail(409, "session is busy: a turn is already running on this session", "session_busy")
+    }
+
     thread.state = "running"
 
     const query = (body.query ?? "").trim() || lastUserText(body.messages)
@@ -1192,11 +1203,15 @@ export function startFakeServer(port = 0): FakeServer {
             toolName: "write_file",
             subagentRunId: (hit as { subagentRunId?: string }).subagentRunId,
           }))
+        } else if (scenario === "busySession") {
+          // ★ The session keeps its live turn: the stream stays open and
+          //   the state stays "running", so the next run meets the gate.
+          thread!.state = "running"
         } else {
           thread!.state = "idle"
         }
         thread!.usage = USAGE
-        if (scenario !== "slowRun") c.close()
+        if (scenario !== "slowRun" && scenario !== "busySession") c.close()
       },
       cancel() {
         if (thread && thread.state === "running") thread.state = "idle"
@@ -1376,7 +1391,16 @@ export function startFakeServer(port = 0): FakeServer {
       if (p) {
         const t = find(p[1])
         if (!t) return notFound()
-        if (p[2] === "abort") return json({ aborted: true })
+        if (p[2] === "abort") {
+          // ★ The abort really stops the turn: the session goes idle and
+          //   the pending approval dies with it. Otherwise "stop, then
+          //   take over" could not be tested — the session would stay
+          //   busy forever.
+          const wasRunning = t.state === "running"
+          t.state = "idle"
+          t.pendings = undefined
+          return json({ aborted: wasRunning })
+        }
         if (p[2] === "compact") {
           // The compaction takes a model call, so it is not instant: the
           // client has something to show while it runs.

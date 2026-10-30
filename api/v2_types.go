@@ -37,10 +37,18 @@ const (
 	codeNoCheckpoint       = "no_checkpoint"
 	codeInterruptMismatch  = "interrupt_mismatch"
 	codeAgentNotFound      = "agent_not_found"
-	codeAgentBusy          = "agent_busy"
-	codeTurnSuperseded     = "turn_superseded"
-	codeTurnStartTimeout   = "turn_start_timeout"
-	codeInternal           = "internal"
+	// codeSessionBusy is the session-level conflict: a turn is running, or
+	// an approval is waiting, so the request must not start.
+	//
+	// ★ It used to be called agent_busy. That name was wrong: all three
+	//   of its call sites (agent switch, compaction, run) guard the
+	//   SESSION, and parallel delegation means several agents can
+	//   legitimately be busy at once — a client that read agent_busy as
+	//   "the agent is working" would draw exactly the wrong conclusion.
+	codeSessionBusy      = "session_busy"
+	codeTurnSuperseded   = "turn_superseded"
+	codeTurnStartTimeout = "turn_start_timeout"
+	codeInternal         = "internal"
 )
 
 // errBody is the v2 error envelope.
@@ -100,7 +108,12 @@ func v2FailErr(c *app.RequestContext, err error) {
 	case errors.Is(err, errAgentNotFound):
 		v2Fail(c, consts.StatusBadRequest, codeAgentNotFound, err.Error(), false)
 	case errors.Is(err, errAgentBusy):
-		v2Fail(c, consts.StatusConflict, codeAgentBusy, err.Error(), true)
+		v2Fail(c, consts.StatusConflict, codeSessionBusy, err.Error(), true)
+	case errors.Is(err, run.ErrSessionBusy):
+		// ★ The session has a live turn, or an approval is waiting. The
+		//   conflict clears on its own once the turn finishes, so a retry
+		//   later is meaningful.
+		v2Fail(c, consts.StatusConflict, codeSessionBusy, err.Error(), true)
 	case errors.Is(err, storage.ErrSessionNotFound):
 		v2Fail(c, consts.StatusNotFound, codeThreadNotFound, "session not found", false)
 	case errors.Is(err, run.ErrNoPendingInterrupt):

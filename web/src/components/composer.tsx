@@ -28,6 +28,7 @@ import {
   selectActiveAgentId,
   selectActiveContext,
   selectAttachments,
+  selectBusyElsewhere,
   selectNotice,
   selectStatus,
   useStore,
@@ -86,6 +87,8 @@ export function Composer({ inset = true }: { inset?: boolean }) {
   const context = useStore(selectActiveContext)
   const contextUsage = agent.badge ? context?.[agent.badge.id] : undefined
   const notice = useStore(selectNotice)
+  // busy says the session has a live turn that this surface does not own.
+  const busyElsewhere = useStore(selectBusyElsewhere)
   const agentChoices = agent.view ? selectableAgents(agent.view) : []
   const switchBlocked = busy || blocked
   const focusAfterSettings = useRef(false)
@@ -606,6 +609,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         error={agent.error}
         context={contextUsage}
         notice={notice}
+        busy={busyElsewhere}
       />
 
       {skillPicker.open ? (

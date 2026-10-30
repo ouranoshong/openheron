@@ -412,6 +412,27 @@ Agent: main · deepseek/deepseek-flash · Reasoning: off · Context: ≈18k / 13
 
 同一件事也有 HTTP 入口 —— `POST /v2/sessions/{id}/compact` —— 脚本可以用。
 
+### 6.7 同一个会话开两个窗口
+
+一个会话**同时只跑一轮**。同一个会话开在两个窗口里 —— 两个标签页，或者一个标签页
+加另一台机器 —— 那么只有一个能跑轮次。
+
+另一个会告诉你：
+
+```
+This session is running in another window — stop it to take over
+```
+
+★ **什么都不会丢。** 被拒的那条消息没有发出去，所以它不会出现在对话里。正在跑的
+那一轮照跑，毫发无损。
+
+★ **停止按钮就是接管的方式。** 它停掉这个会话的轮次 —— 不管它属于谁 —— 然后你就
+能发消息了。拥有那个轮次的窗口会看到它停下来。
+
+★ **这是服务端的规矩，不是浏览器的。** 任何跟接口说话的客户端都得到同样的答复；
+会话的 `state` 对每个看它的客户端都报 `"running"`。在轮次运行期间打开的第二个
+窗口，水合出来就是「忙」，发送按钮已经是禁用的。
+
 ## 7. 知识库
 
 知识库是**可选**的本地语料检索层：把一批 markdown 文档变成 Agent 能检索的资料。
@@ -515,6 +536,9 @@ curl -N -X POST localhost:8080/v2/run \
 
 ★ **`threadId` 必填**。不传会得到
 `threadId is required; create the session with POST /v2/sessions first`。
+
+★ **一个会话同时只跑一轮。** 对已经在跑的会话再发一个请求，会得到 `409`，错误码是
+`session_busy` —— 正在跑的那一轮不受影响（见 §6.7）。
 
 响应是 **AG-UI 事件流**，事件类型：`RUN_STARTED`、`TEXT_MESSAGE_*`、`REASONING_*`、
 `TOOL_CALL_*`、`CUSTOM`（`model_retry`）、`RUN_FINISHED`、`RUN_ERROR`。

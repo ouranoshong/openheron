@@ -294,7 +294,14 @@ export interface RunHandle {
 
 export interface RunHandlers {
   onEvent(ev: unknown): void
-  onError?(message: string): void
+  // onError carries the machine-readable code alongside the message.
+  //
+  // ★ The prose alone cannot tell "the session is busy elsewhere" from
+  //   "the run failed": the first one is a conflict the user can act on
+  //   (stop the other turn), the second is a failure to report. The
+  //   code is what tells them apart — "session_busy" means the session
+  //   has a live turn, so the optimistic message must be rolled back.
+  onError?(message: string, code?: string): void
   onDone?(): void
 }
 
@@ -318,7 +325,7 @@ export function runStream(input: RunInput, handlers: RunHandlers): RunHandle {
 
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as ApiErrorBody | null
-        handlers.onError?.(body?.error ?? `HTTP ${res.status}`)
+        handlers.onError?.(body?.error ?? `HTTP ${res.status}`, body?.code)
         return
       }
       if (!res.body) {

@@ -43,7 +43,7 @@ func (s *Server) v2Compact(ctx context.Context, c *app.RequestContext) {
 	pending, _ := s.rt.StatusOf(ctx, sess.ID())
 	switch pending.Phase {
 	case run.PhaseRunning, run.PhaseWaitingApproval:
-		v2Fail(c, consts.StatusConflict, codeAgentBusy,
+		v2Fail(c, consts.StatusConflict, codeSessionBusy,
 			"a run is in progress; stop it before compacting", false)
 		return
 	}

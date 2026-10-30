@@ -117,8 +117,8 @@ func TestSwitchAgentRejectsPendingApproval(t *testing.T) {
 	if err := json.Unmarshal([]byte(got.body), &body); err != nil {
 		t.Fatalf("decode: %v (%s)", err, got.body)
 	}
-	if body.Code != codeAgentBusy {
-		t.Fatalf("code = %q, want %q", body.Code, codeAgentBusy)
+	if body.Code != codeSessionBusy {
+		t.Fatalf("code = %q, want %q", body.Code, codeSessionBusy)
 	}
 }
 
@@ -282,7 +282,7 @@ func TestSwitchAgentRejectsRunningTurn(t *testing.T) {
 	if err := json.Unmarshal([]byte(got.body), &body); err != nil {
 		t.Fatalf("decode: %v (%s)", err, got.body)
 	}
-	if body.Code != codeAgentBusy {
-		t.Fatalf("code = %q, want %q", body.Code, codeAgentBusy)
+	if body.Code != codeSessionBusy {
+		t.Fatalf("code = %q, want %q", body.Code, codeSessionBusy)
 	}
 }

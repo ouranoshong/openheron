@@ -475,9 +475,10 @@ func TestApprovalPayloadIsTheSharedDecisionType(t *testing.T) {
 	}
 }
 
-// A newer Submit must supersede the in-flight turn: the outgoing turn's
-// handshake is released with ErrSuperseded, and history stays ordered.
-func TestPreemptionSupersedesPreviousTurn(t *testing.T) {
+// A second Submit on a busy session must be REFUSED, not preempt: the
+// running turn is another surface's, and taking it over would destroy a
+// turn the user cannot see. The running turn must survive the refusal.
+func TestASecondSubmitIsRefusedWhileATurnRuns(t *testing.T) {
 	started := make(chan struct{}, 4)
 	b := &fakeBuilder{agent: func(call int, kind contract.TurnKind) adk.TypedAgent[*schema.Message] {
 		return &fakeAgent{script: func(ctx context.Context, emit func(*adk.TypedAgentEvent[*schema.Message]) bool) {
@@ -501,36 +502,23 @@ func TestPreemptionSupersedesPreviousTurn(t *testing.T) {
 	<-started
 	firstDone := drainBounded(t, first)
 
-	if _, err := rt.Submit(ctx, sess.ID(), "second"); err != nil {
-		t.Fatal(err)
+	// The second submit must be refused.
+	if _, err := rt.Submit(ctx, sess.ID(), "second"); !errors.Is(err, ErrSessionBusy) {
+		t.Fatalf("a second Submit must be refused with ErrSessionBusy, got %v", err)
 	}
-	<-started
 
+	// The refusal must not have disturbed the running turn.
 	select {
 	case <-firstDone:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the superseded turn was never released")
+		t.Fatal("the refused submit must not release the running turn")
+	case <-time.After(300 * time.Millisecond):
 	}
 
-	waitFor(t, func() bool {
-		n := 0
-		for _, m := range sess.Messages(false) {
-			if message.UserText(m) != "" {
-				n++
-			}
-		}
-		return n >= 2
-	})
-
-	// Both queries must be recorded, and in the order they were submitted.
-	var queries []string
+	// And the refused query must not be in the transcript.
 	for _, m := range sess.Messages(false) {
-		if q := message.UserText(m); q != "" {
-			queries = append(queries, q)
+		if q := message.UserText(m); q == "second" {
+			t.Fatalf("the refused query was persisted anyway: %q", q)
 		}
-	}
-	if len(queries) < 2 || queries[0] != "first" || queries[1] != "second" {
-		t.Fatalf("history out of order under preemption: %v", queries)
 	}
 }
 

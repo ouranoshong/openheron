@@ -39,6 +39,16 @@ export function selectNotice(s: StoreState): string | undefined {
   return selectConversation(s).notice
 }
 
+// selectBusyElsewhere says the session has a live turn this surface does
+// not own.
+//
+// ★ It returns a primitive, not a fresh object: a selector that built a
+//   new value on every call would make Object.is report "changed" every
+//   time, and the store would re-render forever.
+export function selectBusyElsewhere(s: StoreState): boolean {
+  return selectConversation(s).busy === true
+}
+
 export function selectMessages(s: StoreState): Message[] {
   return selectConversation(s).messages || EMPTY_MESSAGES
 }

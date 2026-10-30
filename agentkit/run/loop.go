@@ -120,6 +120,9 @@ func (rt *Runtime) handoff(ctx context.Context, sess storage.Session, turn *Turn
 	}
 
 	rt.archive(sess, turn, out.out)
+	// ★ The messages are on disk: the turn is finished with the session's
+	//   history, and the client waiting in Complete may go on.
+	turn.markArchived()
 	return out, nil
 }
 
@@ -160,13 +163,13 @@ func (rt *Runtime) archive(sess storage.Session, turn *Turn, out Outcome) {
 		return
 	}
 
-	if err := sess.SetPendingApproval(&storage.PendingApproval{
-		Interrupts: out.Interrupts,
-	}); err != nil {
-		// Fail-closed: without a persisted approval the user could never
-		// approve, so surface it loudly rather than silently degrading.
-		rt.logf("session=%s FAILED to persist pending approval %v: %v", sess.ID(), out.Interrupts[0].InterruptID, err)
-	}
+	// ★ The approval is HELD, not written. The checkpoint it would resume
+	//   from is written by the framework when the loop stops — after this
+	//   callback returns. Writing the approval now would leave a window
+	//   where the user sees the card but answering it fails with
+	//   no_checkpoint. The approval is written by the loop's exit, once the
+	//   checkpoint is on disk.
+	turn.holdPending(out.Interrupts)
 }
 
 // archiveCompaction writes the compacted message to the transcript.

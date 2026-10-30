@@ -99,7 +99,20 @@ func New(cfg Config) *Runtime {
 	return &Runtime{cfg: cfg, states: make(map[string]*sessionState)}
 }
 
-// Submit admits a query, preempting any turn already running for the session.
+// Submit admits a query into the session.
+//
+// ★ A session has at most one live turn. A second Submit on a busy
+//
+//	session is refused with ErrSessionBusy rather than preempting the
+//	first one: preemption cannot tell "the user interrupting themselves"
+//	from "another tab cutting in", and the second case destroys a turn
+//	the user cannot see — along with its checkpoint and its pending
+//	approval.
+//
+// ★ The gate runs FIRST, and everything it protects runs after it. The
+//
+//	checkpoint discard and the pending-approval clear below are
+//	destructive; a refused request must change nothing.
 func (rt *Runtime) Submit(ctx context.Context, sessionID, query string) (*Turn, error) {
 	sess, err := rt.cfg.SessionManager.Get(ctx, sessionID)
 	if err != nil {
@@ -109,6 +122,18 @@ func (rt *Runtime) Submit(ctx context.Context, sessionID, query string) (*Turn, 
 		return nil, errors.New("query must not be empty")
 	}
 
+	if err := rt.ensureIdle(ctx, sess); err != nil {
+		return nil, err
+	}
+
+	turn, loop, prev, _, err := rt.claimTurn(ctx, sess, contract.TurnQuery)
+	if err != nil {
+		return nil, err
+	}
+
+	// From here the session is ours: the checkpoint and the pending
+	// approval belong to a turn that is over, and discarding them is what
+	// makes the next turn start from a clean slate.
 	rt.discardCheckpoint(ctx, sess)
 
 	if pending, perr := sess.PendingApproval(); perr == nil && pending != nil && len(pending.Interrupts) > 0 {
@@ -117,7 +142,187 @@ func (rt *Runtime) Submit(ctx context.Context, sessionID, query string) (*Turn, 
 		}
 	}
 
-	return rt.startTurn(ctx, sess, loopItem{Query: query}, contract.TurnQuery)
+	rt.runClaimedTurn(ctx, sess, turn, loop, prev, loopItem{Query: query})
+	return turn, nil
+}
+
+// claimTurn reserves the session's turn slot for a new turn.
+//
+// ★ The busy check and the takeover happen under one lock, so two
+//
+//	simultaneous requests cannot both pass it. The gate in Submit and
+//	Resume is the friendly error; this is the rule.
+//
+// ★ It returns the turn it claimed, the loop that will run it, and the
+//
+//	turn it displaced. The displaced one has already completed — a live
+//	one would have been refused — so it only needs its handshake
+//	released.
+func (rt *Runtime) claimTurn(ctx context.Context, sess storage.Session, kind contract.TurnKind) (
+	*Turn, *adk.TurnLoop[loopItem, *schema.Message], *Turn, *adk.TurnLoop[loopItem, *schema.Message], error) {
+	turn := newTurnHandle(sess.ID(), kind)
+	st := rt.stateFor(sess.ID())
+	loop := rt.newLoop(ctx, sess, turn)
+
+	st.mu.Lock()
+	prev := st.turn
+	prevLoop := st.loop
+	busy := prev != nil && st.loop != nil && conflictTurns(kind, prev.Kind)
+	if !busy {
+		st.turn = turn
+		st.loop = loop
+		st.startedAt = time.Now()
+		st.lastError = nil
+	}
+	st.mu.Unlock()
+
+	if busy {
+		return nil, nil, nil, nil, fmt.Errorf("%w: a turn is already running on this session", ErrSessionBusy)
+	}
+	return turn, loop, prev, prevLoop, nil
+}
+
+// releaseClaim gives the slot back when a claimed turn cannot start.
+//
+// ★ Only the claim's own turn is released: a turn that replaced it in
+//
+//	the meantime keeps its slot.
+//
+// ★ The previous turn's loop is put back, not dropped. It may still be
+//
+//	archiving: the claim replaced the pointer while that loop was alive,
+//	and clearing it would make the session look idle while the archive is
+//	still in flight — the next turn would then read an incomplete
+//	history.
+func (rt *Runtime) releaseClaim(sess storage.Session, turn *Turn, prev *Turn, prevLoop *adk.TurnLoop[loopItem, *schema.Message]) {
+	st := rt.stateFor(sess.ID())
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.turn != turn {
+		// A newer turn took over in the meantime; its state is not ours
+		// to touch.
+		return
+	}
+	st.turn = prev
+	st.loop = prevLoop
+}
+
+// runClaimedTurn starts the loop for a turn that has already claimed the
+// session's slot.
+func (rt *Runtime) runClaimedTurn(ctx context.Context, sess storage.Session, turn *Turn,
+	loop *adk.TurnLoop[loopItem, *schema.Message], prev *Turn, item loopItem) {
+
+	if prev != nil && prev != turn {
+		// The outgoing turn has already completed — the claim would have
+		// refused a live one. Release its handshake so the OnAgentEvents
+		// side is not left waiting for a Complete that will never arrive.
+		prev.fail(ErrSuperseded)
+	}
+
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	turn.cancel = cancel
+
+	rt.startLoop(runCtx, sess.ID(), turn, loop, cancel)
+
+	if ok, _ := loop.Push(item, adk.WithPreempt[loopItem, *schema.Message](adk.AfterToolCalls)); !ok {
+		rt.logf("session=%s push was rejected: the loop is stopping or its buffer is full", sess.ID())
+	}
+}
+
+// ensureIdle refuses the request when the session already owes the user
+// something.
+//
+// ★ Both cases mean the context belongs to something else right now:
+//   - a live turn: it is executing;
+//   - a pending approval: the checkpoint it would resume from is the
+//     session's context, and answering it is the only way forward.
+//
+// ★ The check is a read. It does not touch the checkpoint and it does not
+//
+//	clear the pending approval — a refused request must change nothing.
+//	Those two side effects live in Submit, after the gate.
+func (rt *Runtime) ensureIdle(ctx context.Context, sess storage.Session) error {
+	if p, err := sess.PendingApproval(); err == nil && p != nil && len(p.Interrupts) > 0 {
+		return fmt.Errorf("%w: an approval is pending on this session", ErrSessionBusy)
+	}
+	return rt.ensureNoLiveTurn(ctx, sess)
+}
+
+// ensureNoLiveTurn refuses the request when a turn is executing.
+//
+// ★ It asks about the LOOP, not the turn pointer alone. st.turn is
+//
+//	cleared when the turn finishes archiving (markTurnDone), so it lags:
+//	a turn that has already produced its answer still reads as "running"
+//	for a moment, and refusing on that would be a false positive. The
+//	loop is the thing that is actually executing.
+//
+// ★ Both are needed. st.turn is set while the turn runs and cleared once
+//
+//	its outcome is archived; st.loop is set while the loop lives, which
+//	is longer — the loop stays alive waiting for the next item. The pair
+//	reads "busy" only while a turn is genuinely in flight.
+func (rt *Runtime) ensureNoLiveTurn(ctx context.Context, sess storage.Session) error {
+	st, ok := rt.lookupState(sess.ID())
+	if !ok {
+		return nil
+	}
+	st.mu.Lock()
+	turn, loop := st.turn, st.loop
+	st.mu.Unlock()
+	if turn != nil && loop != nil {
+		return fmt.Errorf("%w: a turn is already running on this session", ErrSessionBusy)
+	}
+	return nil
+}
+
+// conflictTurns reports whether a new turn of kind "kind" may not start
+// while a turn of kind "live" is running.
+//
+// ★ A resume continues the interrupted turn it answers — the same round
+//
+//	of the conversation — so two resumes never conflict. A query is a
+//	new round, and that is exactly what must not overlap: the
+//	cross-client case, where a second surface's message would take the
+//	running turn over.
+//
+// ★ So the only conflicting pair is query-behind-query. Everything else
+//
+//	— a resume behind a query (the user answering an approval raised by
+//	the running query), or a resume behind a resume — is the same
+//	conversation continuing.
+func conflictTurns(kind, live contract.TurnKind) bool {
+	if live == contract.TurnResume {
+		return false
+	}
+	return kind == contract.TurnQuery
+}
+
+// ensureNoLiveQuery refuses the request when a QUERY turn is executing.
+//
+// ★ A resume turn is not a conflict with another resume. A resume
+//
+//	continues the interrupted turn it answers — it is the same round of
+//	the conversation, not a new one — so the user may answer a second
+//	group of approvals while the first resume is still settling. What
+//	must never overlap is a fresh query: that is the "another tab cuts
+//	in" case, and it is what destroys the running turn.
+//
+// ★ So the gate is about the KIND of the live turn:
+//   - a query turn running → refuse (a new query would take it over);
+//   - a resume turn running → allow (it is the same conversation).
+func (rt *Runtime) ensureNoLiveQuery(ctx context.Context, sess storage.Session) error {
+	st, ok := rt.lookupState(sess.ID())
+	if !ok {
+		return nil
+	}
+	st.mu.Lock()
+	turn, loop := st.turn, st.loop
+	st.mu.Unlock()
+	if turn != nil && loop != nil && turn.Kind != contract.TurnResume {
+		return fmt.Errorf("%w: a turn is already running on this session", ErrSessionBusy)
+	}
+	return nil
 }
 
 func (rt *Runtime) discardCheckpoint(ctx context.Context, sess storage.Session) {
@@ -140,15 +345,37 @@ func (rt *Runtime) Resume(ctx context.Context, sessionID string, decisions []App
 		return nil, err
 	}
 
+	// ★ The pending approval is what this call is FOR — do not refuse on
+	//   it. Only a live turn is a conflict: somebody else's turn is
+	//   running, and this one would take it over.
+	//
+	// ★ This is a friendly pre-check; the authoritative one is the claim
+	//   below, which happens under a lock.
+	if err := rt.ensureNoLiveQuery(ctx, sess); err != nil {
+		return nil, err
+	}
+
 	if !rt.hasCheckpoint(ctx, sess) {
 		return nil, fmt.Errorf("%w (session %s)", ErrNoCheckpoint, sessionID)
 	}
 
+	// ★ Claim the slot BEFORE consuming the approval. TakePendingApproval
+	//   clears the record and writes the disk, so a refusal after that
+	//   point would eat the user's decision: the card disappears and the
+	//   approval can never be answered again. Claiming first means a
+	//   refusal leaves the approval untouched.
+	turn, loop, prev, prevLoop, err := rt.claimTurn(ctx, sess, contract.TurnResume)
+	if err != nil {
+		return nil, err
+	}
+
 	pending, err := sess.TakePendingApproval()
 	if err != nil {
+		rt.releaseClaim(sess, turn, prev, prevLoop)
 		return nil, fmt.Errorf("%w: %v", ErrNoPendingInterrupt, err)
 	}
 	if pending == nil || len(pending.Interrupts) == 0 {
+		rt.releaseClaim(sess, turn, prev, prevLoop)
 		return nil, ErrNoPendingInterrupt
 	}
 
@@ -160,13 +387,15 @@ func (rt *Runtime) Resume(ctx context.Context, sessionID string, decisions []App
 		approvals[d.InterruptID] = approvalResult(d)
 	}
 	if len(approvals) == 0 {
+		rt.releaseClaim(sess, turn, prev, prevLoop)
 		return nil, ErrNoPendingInterrupt
 	}
 
 	rt.recordDecisions(sess, pending, decisions)
 
 	item := loopItem{Approvals: approvals}
-	return rt.startTurn(ctx, sess, item, contract.TurnResume)
+	rt.runClaimedTurn(ctx, sess, turn, loop, prev, item)
+	return turn, nil
 }
 
 func (rt *Runtime) recordDecisions(sess storage.Session, pending *storage.PendingApproval, decisions []ApprovalDecision) {
@@ -222,50 +451,23 @@ func approvalResult(d ApprovalDecision) any {
 	return &approval.Decision{Approved: d.Approved, Reason: d.Reason}
 }
 
-// startTurn binds a fresh turn, superseding any predecessor, and gets a loop
-// running for it.
-func (rt *Runtime) startTurn(ctx context.Context, sess storage.Session, item loopItem, kind contract.TurnKind) (*Turn, error) {
-	turn := newTurnHandle(sess.ID(), kind)
-
-	st := rt.stateFor(sess.ID())
-
-	st.markStarted(time.Now())
-
-	st.mu.Lock()
-	prev := st.turn
-	st.turn = turn
-	st.mu.Unlock()
-
-	if prev != nil && prev != turn {
-		// Release the outgoing turn: its Wait must fail with ErrSuperseded and
-		// its OnAgentEvents handshake must not block on a Complete that will
-		// never arrive.
-		prev.fail(ErrSuperseded)
-	}
-
-	loop := rt.newLoop(ctx, sess, turn)
-	st.setLoop(loop)
-
-	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	turn.cancel = cancel
-
-	rt.startLoop(runCtx, sess.ID(), loop, cancel)
-
-	if ok, _ := loop.Push(item, adk.WithPreempt[loopItem, *schema.Message](adk.AfterToolCalls)); !ok {
-		rt.logf("session=%s push was rejected: the loop is stopping or its buffer is full", sess.ID())
-	}
-
-	return turn, nil
-}
-
 // Abort stops the current turn immediately.
 func (rt *Runtime) Abort(ctx context.Context, sessionID string) error {
 	st, ok := rt.lookupState(sessionID)
 	if !ok {
+		// ★ No runtime state, but the session may still owe a decision: a
+		//   turn that stopped to ask for approval leaves its approval on
+		//   disk, and the runtime forgets the session once it goes idle.
+		//   Clearing it is what lets the user take over.
+		rt.clearVoidApproval(ctx, sessionID)
 		return nil
 	}
 	loop := st.currentLoop()
 	if loop == nil {
+		// ★ No loop to stop, but the session may still owe a decision: a
+		//   turn that stopped to ask for approval leaves its approval
+		//   behind. Clearing it is what lets the user take over.
+		rt.clearVoidApproval(ctx, sessionID)
 		return nil
 	}
 
@@ -283,7 +485,37 @@ func (rt *Runtime) Abort(ctx context.Context, sessionID string) error {
 
 	st.clearTurn()
 	rt.removeStateIfIdle(sessionID)
+
+	// ★ The pending approval belonged to the turn that just stopped. It is
+	//   void now: there is no decision left to make, and leaving it behind
+	//   would keep the session locked — the gate refuses a query while an
+	//   approval is pending, so "stop, then take over" would not take over.
+	//
+	// ★ Only an ORPHANED approval (the checkpoint is gone) is worth
+	//   keeping; that one cannot be answered either, but it is not this
+	//   call's business and the card stays on screen.
+	rt.clearVoidApproval(ctx, sessionID)
+
 	return nil
+}
+
+// clearVoidApproval drops a pending approval that no turn is waiting for.
+//
+// ★ It runs after the turn stopped, so the approval it clears belongs to a
+//
+//	turn that no longer exists.
+func (rt *Runtime) clearVoidApproval(ctx context.Context, sessionID string) {
+	sess, err := rt.cfg.SessionManager.Get(ctx, sessionID)
+	if err != nil {
+		return
+	}
+	pending, perr := sess.PendingApproval()
+	if perr != nil || pending == nil || len(pending.Interrupts) == 0 {
+		return
+	}
+	if err := sess.ClearPendingApproval(); err != nil {
+		rt.logf("session=%s failed to clear the void approval on abort: %v", sessionID, err)
+	}
 }
 
 // Cleanup stops the turn, removes the checkpoint and forgets the session.

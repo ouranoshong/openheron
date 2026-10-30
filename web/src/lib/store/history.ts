@@ -1,4 +1,4 @@
-import type { AgMessage, PendingApproval } from "@/lib/api"
+import type { AgMessage, PendingApproval, ThreadMeta } from "@/lib/api"
 import {
   emptyConversation,
   type CompactionMark,
@@ -31,6 +31,7 @@ export function seedFromHistory(
   raw: AgMessage[],
   pending?: PendingApproval[],
   usage?: Usage,
+  state?: ThreadMeta["state"],
 ): ConversationState {
   const messages: Message[] = []
   const seen = new Map<string, number>()
@@ -96,6 +97,20 @@ export function seedFromHistory(
   // The occupancy is a point-in-time reading, not a total: it does not live
   // inside the usage.
   if (usage?.context) convo.context = usage.context
+  // ★ The server's state is the truth about whether this session is busy.
+  //   Without it a second tab hydrates as idle and its send button works —
+  //   the tab has no memory of the turn another tab started.
+  //
+  // ★ A hydrated "running" is ALWAYS somebody else's turn. This surface
+  //   has just opened the session: it cannot own a turn it did not start
+  //   (a surface that owns one keeps its own event stream and never
+  //   re-hydrates — openSession returns early for a loaded session). So
+  //   the busy flag goes up here too, and the composer says whose turn it
+  //   is.
+  if (state === "running") {
+    convo.status = "running"
+    convo.busy = true
+  }
   if (pending && pending.length > 0) {
     convo.status = "awaiting-approval"
     convo.interrupts = pending.map((p) => ({

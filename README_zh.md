@@ -184,6 +184,10 @@ frontmatter 是**严格解码**的 —— 写错一个键就是启动错误，�
 `RUN_FINISHED`、`RUN_ERROR`。子 agent 的产出**通过事件上的 `subagentRunId` 归属**，
 而不是另开事件类型。
 
+★ **一个会话同时只跑一轮。** 对已经在跑的会话再发一个 `POST /v2/run`，会得到
+`409`，错误码是 `session_busy` —— 正在跑的那一轮不受影响，它的东西也不会被丢掉。
+见 [docs/session-concurrency-design_zh.md](docs/session-concurrency-design_zh.md)。
+
 ### 审批（人在环）
 
 `ask` 档位的工具被调用时**先中断**并把审批请求持久化到会话；客户端拿到审批卡片，
@@ -248,7 +252,7 @@ make smoke              # 真后端联调（SSE 分帧、历史回放、审批�
 
 ## 关联文档
 
-本仓库自带四组文档，随代码面一起维护，每组中英一式两份
+本仓库自带五组文档，随代码面一起维护，每组中英一式两份
 （**英文是主版本，`_zh` 后缀是中文版**）：
 
 | 文档 | 内容 |
@@ -257,6 +261,7 @@ make smoke              # 真后端联调（SSE 分帧、历史回放、审批�
 | [docs/user-manual.md](docs/user-manual.md) · [中文](docs/user-manual_zh.md) | **用户使用说明** —— 安装、配置、界面操作 |
 | [docs/developer-manual.md](docs/developer-manual.md) · [中文](docs/developer-manual_zh.md) | **开发者说明** —— 分层、依赖铁律、开发配方、测试与排障、已知问题 |
 | [docs/context-usage-design.md](docs/context-usage-design.md) · [中文](docs/context-usage-design_zh.md) | **上下文使用预估设计方案** —— 占用口径、数据流、后端与前端改动，以及压缩后的对话如何持久化（占用仪表盘、压缩持久化与压缩标记的渲染已实现） |
+| [docs/session-concurrency-design.md](docs/session-concurrency-design.md) · [中文](docs/session-concurrency-design_zh.md) | **会话并发设计方案** —— 为什么第二个界面能插进正在跑的轮次、「一个会话一轮」的规则，以及前端怎么知道会话正忙（闸门已实现） |
 
 `docs/` 下**其余**设计文档在上游仓库里，不随本仓库分发：
 

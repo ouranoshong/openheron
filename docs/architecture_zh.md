@@ -281,7 +281,34 @@ frontmatter 可用键（`agentkit/spec/decl/decl.go:67` 的 `decl.Agent`）：
 
 checkpoint 没了就恢复不了 —— 这时接口返回
 `this approval can no longer be resumed: its checkpoint is gone. Send a new message to continue.`
-（`api/v2_types.go:110`），而不是静默新开一轮。
+（`api/v2_types.go:121`），而不是静默新开一轮。
+
+### 5.3 会话准入
+
+**一个会话至多有一轮活着的轮次。** 对忙着的会话发第二个 `POST /v2/run` 一律被
+拒（`409 session_busy`）—— 绝不接管正在跑的那一轮。
+
+这条规则住在 `agentkit/run`，就住在它所守护的状态旁边：
+
+- `ensureIdle`（`agentkit/run/runtime.go`）在有轮次执行**或**有审批在等时，拒绝
+  **新查询**。
+- `ensureNoLiveQuery` 同样拒绝新查询，但放行**恢复**：恢复续接的是它所回答的那个
+  被打断的轮次 —— 同一轮对话，不是新的一轮。
+- `claimTurn` 把「忙不忙」的判定与「接管」放在**同一把锁**下，所以两个同时到达
+  的请求不可能都通过。
+
+拒绝**不改变任何东西**：不删检查点、不清审批、不落消息。正在跑的那一轮毫发无损。
+
+`Complete` 只在这一轮的消息落盘之后才返回（`agentkit/run/turn.go`）。这让客户端
+的「你这轮完了」与服务端的「这个会话空了」不可能各说各话 —— 也让下一轮的输入绝不
+会读到不完整的历史。
+
+待审批是在 **loop 退出时**写的，不是在那一轮的回调返回时：框架正是在 loop 退出时
+写检查点，而一张审批只有在它要恢复的那个检查点存在时才回答得了。
+
+前端读服务端的答案，而不是自己的内存：会话的 `state` 来自
+`GET /v2/sessions/{id}/messages`，并喂给 composer 的守卫 —— 于是第二个标签页水合
+出来就是「忙」，而不是「空闲」。
 
 ## 6. 存储
 

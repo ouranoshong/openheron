@@ -438,14 +438,26 @@ func (s *Server) metaOf(ctx context.Context, sess storage.Session, pending *stor
 	return meta
 }
 
+// stateOf reports the session's observable state.
+//
+// ★ One read, one answer: the phase already accounts for the pending
+//
+//	approval (StatusOf derives PhaseWaitingApproval from the session's
+//	own pending record), so reading both separately could see them
+//	disagree.
 func (s *Server) stateOf(ctx context.Context, sess storage.Session) threadState {
-	if sess.HasPending() {
+	status, ok := s.rt.StatusOf(ctx, sess.ID())
+	if !ok {
+		return stateIdle
+	}
+	switch status.Phase {
+	case run.PhaseWaitingApproval:
 		return stateWaiting
-	}
-	if status, ok := s.rt.StatusOf(ctx, sess.ID()); ok && status.Phase == run.PhaseRunning {
+	case run.PhaseRunning:
 		return stateRunning
+	default:
+		return stateIdle
 	}
-	return stateIdle
 }
 
 // titleOf prefers the cached title; the session exposes it without parsing the

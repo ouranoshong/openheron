@@ -361,6 +361,65 @@ keeps the labels apart.
 ★ **A window of zero means the user configured none.** The occupancy is still reported, but no
 ratio is shown — "0 %" would be a lie.
 
+### 3.8 Session admission — one session, one turn
+
+**The rule: a session has at most one live turn.** A second `POST /v2/run` on a busy
+session is refused with `409 session_busy`; it never takes the running turn over.
+
+★ **The gate lives in `agentkit/run`, not in the API layer.** The API layer must not
+re-implement a rule about the runtime's state (§2.2) — the runtime owns that state, so
+the runtime owns the rule.
+
+| Function | Where | Refuses |
+|---|---|---|
+| `ensureIdle` | `agentkit/run/runtime.go` | a new **query** when a turn executes or an approval waits |
+| `ensureNoLiveQuery` | `agentkit/run/runtime.go` | a new **query** when a turn executes — but lets a **resume** through |
+| `claimTurn` | `agentkit/run/runtime.go` | nothing on its own: it takes the busy test **and** the takeover under one lock |
+
+**Why a resume is not a query.** A resume continues the interrupted turn it answers — the
+same round of the conversation. `contract.TurnKind` says so, and the rule follows:
+`conflictTurns` refuses only a query behind a live turn.
+
+★ **A refusal must change nothing.** The checkpoint discard and the pending-approval
+clear in `Submit` run **after** the gate. Before this change they ran first, so a
+refused request deleted the running turn's checkpoint and approval — the other surface's
+turn was destroyed by the request that was supposed to be refused.
+
+★ **The claim is the rule; the check is the message.** `ensureIdle` gives a friendly
+error, but two simultaneous requests could both pass it. `claimTurn` takes the test and
+the takeover under one lock, so exactly one wins.
+
+#### The three orderings that matter
+
+Each of these was a bug before it was a rule:
+
+| Ordering | Why |
+|---|---|
+| `Complete` returns **after** the archive lands | The HTTP response goes out before the archive otherwise, so the client is told "done" while the server still says "busy" — and the next turn would read an incomplete history. |
+| the pending approval is written **after** the checkpoint | The framework writes the checkpoint when the loop stops; the approval was written inside the callback, i.e. *before* it. The user saw the card, and answering it failed with `no_checkpoint`. |
+| the gate reads the **loop**, not the turn pointer | `st.turn` is cleared when the archive lands, so it lags: a turn that already produced its answer still reads as running. |
+
+★ **A gate that reads a lagging pointer is a gate with a hole in it.** When a fact
+about a turn is read at two different moments, make the second one **wait** for the
+first rather than guessing at it.
+
+#### The frontend half
+
+The composer must read the **server's** answer, not its own memory:
+
+- `GET /v2/sessions/{id}/messages` carries `state`; `seedFromHistory` feeds it into
+  `convo.status` (`web/src/lib/store/history.ts`). Without it a second tab hydrates as
+  idle and its send button works.
+- `runStream`'s `onError` carries the error **code** (`web/src/lib/api.ts`). The prose
+  cannot tell "busy elsewhere" from "failed" — the code can.
+- A `session_busy` refusal **rolls back the optimistic user message**: the server never
+  took it, so the transcript must not claim it (`markBusy` in
+  `web/src/lib/store/actions.ts`).
+
+★ **A busy session is not a failed session.** It gets `convo.busy`, not
+`status: "error"` — the turn is fine, it just belongs to someone else. The composer
+shows the stop button, which is how the user takes over.
+
 ## 4. The frontend
 
 ### 4.1 The pure layers

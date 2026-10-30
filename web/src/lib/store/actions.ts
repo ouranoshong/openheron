@@ -83,7 +83,7 @@ export const useStore = create<StoreState>((set, get) => ({
           ...s.sessions,
           [id]: {
             meta: { ...(s.sessions[id]?.meta ?? stubMeta(id)), state: view.state },
-            convo: seedFromHistory(view.messages, view.pendingApprovals, view.usage),
+            convo: seedFromHistory(view.messages, view.pendingApprovals, view.usage, view.state),
             loaded: true,
           },
         },
@@ -254,10 +254,18 @@ export const useStore = create<StoreState>((set, get) => ({
       },
       {
         onEvent: (ev) => handleEvent(set, get, localKey, ev as AgEvent),
-        onError: (message) => {
+        onError: (message, code) => {
           run = null
           const k = getCurrentRunKey() ?? localKey
           setCurrentRunKey(null)
+          if (code === "session_busy") {
+            // ★ The session has a live turn that this surface does not own.
+            //   The message never reached the server, so the optimistic
+            //   bubble must go back — otherwise the transcript claims a
+            //   message that was never sent.
+            get().markBusy(k, message)
+            return
+          }
           get().loadError(k, message)
         },
         onDone: () => {
@@ -326,6 +334,9 @@ export const useStore = create<StoreState>((set, get) => ({
             convo: {
               ...closeAllOpenParts(convo, { interrupted: true }),
               status: "idle" as TurnStatus,
+              // ★ The turn this surface did not own is now stopped, so the
+              //   session is free again and the busy line must go.
+              busy: false,
             },
           },
         },
@@ -443,6 +454,35 @@ export const useStore = create<StoreState>((set, get) => ({
       }
     })
   },
+
+  // markBusy records that the session has a live turn this surface does not
+  // own.
+  //
+  // ★ The optimistic user message is rolled back: the server refused the
+  //   run, so the message was never sent, and leaving it on screen would
+  //   make the transcript claim something that did not happen.
+  markBusy(id, message) {
+    set((s) => {
+      const entry = s.sessions[id]
+      if (!entry) return s
+      const convo = entry.convo ?? emptyConversation()
+      return {
+        sessions: {
+          ...s.sessions,
+          [id]: {
+            ...entry,
+            convo: {
+              ...convo,
+              messages: convo.messages.filter((m) => !m.id.startsWith(LOCAL_MESSAGE_PREFIX)),
+              status: "running",
+              busy: true,
+              error: { code: "session_busy", message },
+            },
+          },
+        },
+      }
+    })
+  },
 }))
 
 async function ensureSession(): Promise<string> {
@@ -473,9 +513,17 @@ function stubMeta(id: string): ThreadMeta {
   }
 }
 
+// LOCAL_MESSAGE_PREFIX marks a user bubble that the client added on its own,
+// before the server accepted it.
+//
+// ★ The prefix is what makes a rollback possible: a refused run must take
+//   the optimistic bubble back with it, and only the client's own bubbles
+//   can be identified that way.
+const LOCAL_MESSAGE_PREFIX = "local:"
+
 function appendLocalUserMessage(convo: ConversationState, text: string): ConversationState {
   const msg: Message = {
-    id: `local:${Date.now()}`,
+    id: `${LOCAL_MESSAGE_PREFIX}${Date.now()}`,
     role: "user",
     parts: [{ kind: "text", id: "t", text, complete: true }],
   }

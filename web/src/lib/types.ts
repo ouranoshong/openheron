@@ -120,6 +120,11 @@ export interface ConversationState {
   // notice is a transient line about something the server is doing right
   // now. It is not an error: the work is still going on.
   notice?: string
+  // busy means the session has a live turn that this surface does not own —
+  // another tab, another window, another client. It is not a failure: the
+  // turn is fine, it just belongs to someone else. The user can stop it and
+  // take over, which is why it is its own field rather than an error.
+  busy?: boolean
 }
 
 export function emptyConversation(): ConversationState {

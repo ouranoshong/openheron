@@ -13,6 +13,7 @@ export function ComposerMeta({
   error,
   context,
   notice,
+  busy,
 }: {
   badge: AgentBadge | null
   loading: boolean
@@ -20,6 +21,9 @@ export function ComposerMeta({
   context?: ContextUsage
   // notice is a transient line about work the server is doing right now.
   notice?: string
+  // busy says the session has a live turn that this surface does not own —
+  // another tab, another window, another client. It is not a failure.
+  busy?: boolean
 }) {
   // The notice says the server is working on something. It is not an error,
   // and it does not replace anything — the rest of the line still stands.
@@ -27,6 +31,16 @@ export function ComposerMeta({
     <span data-testid="composer-meta-notice" className="inline-flex items-center gap-1.5">
       <Loader2Icon aria-hidden="true" className="size-3 shrink-0 animate-spin" />
       {notice}
+    </span>
+  ) : null
+
+  // The busy line says whose turn it is. The stop button beside it acts on
+  // the session's turn, whoever owns it — that is the only way for this
+  // surface to proceed.
+  const busyNode = busy ? (
+    <span data-testid="composer-meta-busy" className="inline-flex items-center gap-1.5">
+      <Loader2Icon aria-hidden="true" className="size-3 shrink-0 animate-spin" />
+      This session is running in another window — stop it to take over
     </span>
   ) : null
 
@@ -42,6 +56,7 @@ export function ComposerMeta({
     return (
       <div data-testid="composer-meta" className={META}>
         {noticeNode}
+        {busyNode}
         <span data-testid="composer-meta-error" title={error}>
           Agent info unavailable
         </span>
@@ -62,6 +77,7 @@ export function ComposerMeta({
       className={META}
     >
       {noticeNode}
+      {busyNode}
       <span
         data-testid="composer-meta-agent"
         title={badge.description || badge.id}

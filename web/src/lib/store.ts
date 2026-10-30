@@ -13,6 +13,7 @@ export {
   selectActiveUsage,
   selectActiveContext,
   selectAttachments,
+  selectBusyElsewhere,
   selectConversation,
   selectInterrupts,
   selectIsEmptyView,

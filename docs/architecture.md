@@ -312,7 +312,38 @@ store** is the source of truth for resuming. The client sends its decision back 
 
 Without the checkpoint there is nothing to resume from — the API then returns
 `this approval can no longer be resumed: its checkpoint is gone. Send a new message to
-continue.` (`api/v2_types.go:110`) instead of silently starting a fresh turn.
+continue.` (`api/v2_types.go:121`) instead of silently starting a fresh turn.
+
+### 5.3 Session admission
+
+**A session has at most one live turn.** A second `POST /v2/run` on a busy session is
+refused with `409 session_busy` — it never takes the running turn over.
+
+The rule lives in `agentkit/run`, next to the state it guards:
+
+- `ensureIdle` (`agentkit/run/runtime.go`) refuses a **new query** when a turn is
+  executing or an approval is waiting.
+- `ensureNoLiveQuery` refuses a new query when a turn is executing, but lets a
+  **resume** through: a resume continues the interrupted turn it answers — the same
+  round of the conversation, not a new one.
+- `claimTurn` takes the busy test and the takeover under **one** lock, so two
+  simultaneous requests cannot both pass.
+
+A refusal changes **nothing**: no checkpoint discarded, no approval cleared, no
+message persisted. The running turn is untouched.
+
+`Complete` returns only after the turn's messages are on disk
+(`agentkit/run/turn.go`). That is what keeps the client's "your turn is done" and the
+server's "this session is free" from disagreeing — and it is why the next turn's input
+never reads an incomplete history.
+
+The pending approval is written when the **loop exits**, not when the turn's callback
+returns: the framework writes the checkpoint at the loop's exit, and an approval is only
+answerable if the checkpoint it resumes from exists.
+
+The frontend reads the server's answer rather than its own memory: the session's
+`state` comes from `GET /v2/sessions/{id}/messages` and feeds the composer's guard,
+so a second tab hydrates as busy instead of idle.
 
 ## 6. Storage
 

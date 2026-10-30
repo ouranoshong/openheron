@@ -43,6 +43,9 @@ export interface StoreState {
   clearNotice(id: string): void
   applyEvent(id: string, ev: AgEvent): void
   loadError(id: string, message: string): void
+  // markBusy records that the session has a live turn this surface does not
+  // own, and rolls back the message the server refused.
+  markBusy(id: string, message: string): void
 }
 
 export const MAIN_AGENT = "main"

@@ -10,6 +10,7 @@ import (
 
 	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/storage"
 )
 
 // loopItem is the TurnLoop's unit of work. One user query or one approval
@@ -91,33 +92,77 @@ func (st *sessionState) clearTurn() {
 
 // startLoop runs a freshly built loop and drops the session state when it
 // exits, so a later Submit builds a new loop rather than reusing a dead one.
-func (rt *Runtime) startLoop(ctx context.Context, sessionID string, loop *adk.TurnLoop[loopItem, *schema.Message], cancel context.CancelFunc) {
-	st := rt.stateFor(sessionID)
-	st.setLoop(loop)
-
+//
+// ★ The loop was already installed by the claim (see claimTurn); setting
+//
+//	it again here would be a redundant write under the lock.
+func (rt *Runtime) startLoop(ctx context.Context, sessionID string, turn *Turn,
+	loop *adk.TurnLoop[loopItem, *schema.Message], cancel context.CancelFunc) {
 	go func() {
 		loop.Run(ctx)
 		exit := loop.Wait()
-		rt.loopExited(sessionID, exit, cancel)
+		rt.loopExited(sessionID, turn, loop, exit, cancel)
 	}()
 }
 
 // loopExited clears runtime state when a loop finishes.
-func (rt *Runtime) loopExited(sessionID string, exit *adk.TurnLoopExitState[loopItem, *schema.Message], cancel context.CancelFunc) {
+//
+// ★ Only the loop that is CURRENTLY installed may clear the state. An
+//
+//	older loop finishing late must not wipe a newer turn's bookkeeping —
+//	that would make a live session look idle, and the admission gate
+//	would then let a second turn in.
+func (rt *Runtime) loopExited(sessionID string, turn *Turn, loop *adk.TurnLoop[loopItem, *schema.Message],
+	exit *adk.TurnLoopExitState[loopItem, *schema.Message], cancel context.CancelFunc) {
 	st := rt.stateFor(sessionID)
 	st.mu.Lock()
 	current := st.loop
-	st.loop = nil
-	st.turn = nil
+	stale := current != nil && current != loop
+	if current == loop {
+		st.loop = nil
+		st.turn = nil
+	}
 	st.mu.Unlock()
 
 	if cancel != nil {
 		cancel()
 	}
-	if current != nil && exit != nil && exit.ExitReason != nil {
+	if stale {
+		// A newer loop took over while this one was winding down. Its
+		// state is not ours to clear.
+		return
+	}
+	if exit != nil && exit.ExitReason != nil {
 		obs.Logger().Info("[openheronrt] loop exited", "session", sessionID, "reason", exit.ExitReason)
 	}
+	rt.writeHeldApproval(sessionID, turn)
 	rt.removeStateIfIdle(sessionID)
+}
+
+// writeHeldApproval persists the approval the turn raised.
+//
+// ★ It runs when the loop exits, not when the turn's callback returns.
+//
+//	The framework writes the checkpoint at the loop's exit — the callback
+//	returns first — and an approval is only answerable if the checkpoint
+//	it resumes from exists. Writing it earlier would leave a window where
+//	the user sees the card but answering it fails with no_checkpoint.
+func (rt *Runtime) writeHeldApproval(sessionID string, turn *Turn) {
+	interrupts := turn.takePending()
+	if len(interrupts) == 0 {
+		return
+	}
+	sess, err := rt.cfg.SessionManager.Get(context.Background(), sessionID)
+	if err != nil {
+		rt.logf("session=%s failed to persist the pending approval: %v", sessionID, err)
+		return
+	}
+	if err := sess.SetPendingApproval(&storage.PendingApproval{Interrupts: interrupts}); err != nil {
+		// Fail-closed: without a persisted approval the user could never
+		// approve, so surface it loudly rather than silently degrading.
+		rt.logf("session=%s FAILED to persist pending approval %v: %v",
+			sessionID, interrupts[0].InterruptID, err)
+	}
 }
 
 func (rt *Runtime) stateFor(sessionID string) *sessionState {
@@ -156,5 +201,6 @@ func newTurnHandle(sessionID string, kind contract.TurnKind) *Turn {
 		Kind:      kind,
 		ready:     make(chan struct{}),
 		done:      make(chan outcome, 1),
+		archived:  make(chan struct{}),
 	}
 }

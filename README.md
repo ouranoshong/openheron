@@ -216,6 +216,11 @@ The response is an AG-UI event stream with the event types `RUN_STARTED`,
 is **attributed through `subagentRunId` on the event**, not through a separate event
 type.
 
+★ **A session runs one turn at a time.** A second `POST /v2/run` on a session that is
+already running gets `409` with the code `session_busy` — the running turn is not
+disturbed, and nothing about it is discarded. See
+[docs/session-concurrency-design.md](docs/session-concurrency-design.md).
+
 ### Approvals (human in the loop)
 
 When an `ask`-tier tool is called, the run **interrupts** first and the approval
@@ -294,7 +299,7 @@ whether the interface is broken or the model misbehaved.
 
 ## Related documents
 
-This repository ships four document sets, maintained alongside the code, each in
+This repository ships five document sets, maintained alongside the code, each in
 English and Chinese (**English is the primary version, `_zh` is the Chinese one**):
 
 | Document | Contents |
@@ -303,6 +308,7 @@ English and Chinese (**English is the primary version, `_zh` is the Chinese one*
 | [docs/user-manual.md](docs/user-manual.md) · [中文](docs/user-manual_zh.md) | **User manual** — installation, configuration, operating the interface |
 | [docs/developer-manual.md](docs/developer-manual.md) · [中文](docs/developer-manual_zh.md) | **Developer manual** — layering, the dependency rules, development recipes, testing and troubleshooting, known issues |
 | [docs/context-usage-design.md](docs/context-usage-design.md) · [中文](docs/context-usage-design_zh.md) | **Context usage estimate — design** — the occupancy metric, the data flow, the backend and frontend changes, and how the compacted conversation is persisted (the meter, the compaction and the compaction marker are in the code) |
+| [docs/session-concurrency-design.md](docs/session-concurrency-design.md) · [中文](docs/session-concurrency-design_zh.md) | **Session concurrency — design** — why a second surface could cut into a running turn, the one-turn-per-session rule, and how the frontend learns that a session is busy (the gate is in the code) |
 
 The **rest** of the design documents under `docs/` live in the upstream repository and
 are not distributed with this one:
