@@ -245,7 +245,7 @@ agent** 的压缩（`transport/transport.go`）：子 agent 的摘要不是会�
 | 环节 | 在哪 | 做了什么 |
 |---|---|---|
 | 摘要器 | `agentkit/build/summarize.go` 的 `build.SummarizerFor` | 用该 agent 自己的模型、同一个 finalizer 建一个 eino 中间件，直接调它的 `Summarize` —— 触发线根本不走 |
-| 落盘 | `agentkit/run/compact.go` 的 `run.Compact` | 摘要有效历史、盖标记、追加到记录里 —— 标记与估算都与 `archiveCompaction` 相同 |
+| 落盘 | `agentkit/run/compact.go` 的 `run.Compact` | 摘要有效历史、盖标记、追加到记录里 —— 标记与估算都与 `archiveCompaction` 相同。摘要覆盖的**消息集合**也与自动压缩一致：子 agent 的消息被滤掉，因为它们不在根 agent 的上下文里 |
 | 端点 | `api/v2_compact.go` 的 `POST /v2/sessions/{id}/compact` | 轮次在跑或审批在等时拒绝；返回这次压缩的战果 |
 
 ★ **手动那条路不看阈值。** 「关」说的是「别自己压」，不是「不许压」：手动命令是用户开口要的。

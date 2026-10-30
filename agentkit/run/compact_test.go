@@ -138,6 +138,31 @@ func TestTheManualCompactionRefusesWithoutASummarizer(t *testing.T) {
 	}
 }
 
+// The summary covers the agent's own context: the sub-agents' messages are
+// not part of it, and putting them into the summary would carry chatter the
+// agent never read.
+func TestTheManualCompactionSkipsTheSubagentsMessages(t *testing.T) {
+	sess := conversation(t, 6, 20000)
+	// A message the sub-agent produced: it is in the transcript, and it is
+	// not in the root agent's context.
+	sub := &schema.Message{Role: schema.Assistant, Content: "the sub-agent's own output"}
+	message.StampAgent(sub, "coder")
+	message.StampSubagent(sub)
+	if err := sess.Append(sub); err != nil {
+		t.Fatal(err)
+	}
+
+	sum := &stubSummarizer{content: "summary"}
+	if _, err := Compact(context.Background(), sess, sum); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range sum.seen {
+		if m.Content == "the sub-agent's own output" {
+			t.Fatal("the summary must not cover the sub-agent's messages")
+		}
+	}
+}
+
 // A failing summarizer leaves the transcript alone: a half-written boundary
 // would cut the history at a message that says nothing.
 func TestAFailedCompactionWritesNothing(t *testing.T) {

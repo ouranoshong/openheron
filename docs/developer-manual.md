@@ -270,7 +270,7 @@ instead of the token count:
 | Piece | Where | What it does |
 |---|---|---|
 | the summarizer | `build.SummarizerFor` in `agentkit/build/summarize.go` | the agent's own model and the same finalizer, built into an eino middleware whose `Summarize` is called directly — the trigger never fires |
-| the write | `run.Compact` in `agentkit/run/compact.go` | the effective history is summarized, the marker is stamped, and the summary is appended to the transcript — the same marker and the same estimate as `archiveCompaction` |
+| the write | `run.Compact` in `agentkit/run/compact.go` | the effective history is summarized, the marker is stamped, and the summary is appended to the transcript — the same marker and the same estimate as `archiveCompaction`. The summary covers the **same messages** the automatic one would: the sub-agents' messages are filtered out, because they are not in the root agent's context |
 | the endpoint | `POST /v2/sessions/{id}/compact` in `api/v2_compact.go` | refuses while a turn runs or an approval waits; returns what the compaction achieved |
 
 ★ **The manual path ignores the threshold.** "Off" means "do not compact on your own", not "you

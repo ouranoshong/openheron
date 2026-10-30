@@ -83,7 +83,11 @@ func Compact(ctx context.Context, sess storage.Session, sum Summarizer) (*Compac
 		return nil, fmt.Errorf("%w: the context holds about %d tokens", ErrNothingToCompact, baseline)
 	}
 
-	summary, err := sum.Summarize(ctx, history)
+	// ★ The summary covers the same messages the automatic compaction would
+	// summarize: the agent's own context, without the sub-agents' messages.
+	// Summarizing more would put chatter the agent never read into the
+	// summary it carries forward.
+	summary, err := sum.Summarize(ctx, withoutSubagentMessages(history))
 	if err != nil {
 		return nil, err
 	}
