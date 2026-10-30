@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cloudwego/eino/adk"
@@ -177,10 +178,30 @@ func (noopBuilder) Build(context.Context, string, string, contract.TurnKind) (ad
 
 // bufExtWriter captures SSE bytes; it stands in for the connection writer, which
 // a bare route.Engine (no socket) does not provide.
-type bufExtWriter struct{ buf bytes.Buffer }
+// bufExtWriter captures what a renderer writes.
+//
+// ★ It is thread-safe: the renderer writes from its own goroutine while the
+//
+//	test reads, and a bytes.Buffer is not.
+type bufExtWriter struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
 
-func (w *bufExtWriter) Write(p []byte) (int, error) { return w.buf.Write(p) }
-func (w *bufExtWriter) Flush() error                { return nil }
-func (w *bufExtWriter) Finalize() error             { return nil }
+func (w *bufExtWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
+}
+
+// String returns what has been written so far.
+func (w *bufExtWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
+func (w *bufExtWriter) Flush() error    { return nil }
+func (w *bufExtWriter) Finalize() error { return nil }
 
 var _ network.ExtWriter = (*bufExtWriter)(nil)

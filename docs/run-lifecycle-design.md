@@ -877,13 +877,26 @@ the case that matters most: a client that attaches halfway through.
 | The session has | The request carries | Result |
 |---|---|---|
 | no live run | a `runId` (or none — the server mints one) | **create** the run; the response streams it |
-| a live run with **that** id | the same `runId` | **attach**: subscribe to the live run, replaying its log |
+| a live run with **that** id | the same `runId`, **and no question** | **attach**: subscribe to the live run, replaying its window |
 | a live run with a **different** id | any `runId` | **409 `session_busy`** — unchanged from today |
 
 ★ The first row is **implemented**: the server mints the id when the client
 sends none (`api/v2_run.go`), and hands it down to the runtime
 (`api/v2_run.go:218`) so the id in the frames and the id in the ledger's rows
-are one id. The second row is a proposal — it needs §7.
+are one id.
+
+★ The second row is **implemented** (server side). The request that asks for
+it carries **no question**: a question would mean "start a new run", and
+starting one here would silently run the user's message a second time. The
+server looks the live run up by id (`agentkit/run/runtime.go` — `LiveRun`),
+subscribes to it and renders its window — so a client that arrives late sees
+the tail of the turn instead of an empty stream.
+
+★ **A run that is over cannot be attached to.** The client has to hydrate from
+the transcript; the run's own facts are in the scan. The server refuses with
+**404 `run_not_live`** rather than starting a new run — the client's answer to
+that refusal is "load the history", and it must be able to tell it apart from
+a session it may retry.
 
 ★ The second row is the new capability: a reconnect. Today the client cannot
 resume a stream it lost (`web/src/lib/store/actions.ts:250-254` sends no
@@ -925,6 +938,7 @@ No new codes. The existing ones carry the meaning:
 | Code | Where it is produced | Meaning |
 |---|---|---|
 | `session_busy` | `api/v2_types.go:48` | another run owns the session |
+| `run_not_live` | `api/v2_types.go` | the attach asked for a run that is not running |
 | `no_pending_interrupt` | `api/v2_types.go:36` | the approval was already answered |
 | `turn_superseded` | `api/v2_types.go:49` | kept for compatibility; the superseding path is gone |
 | `turn_start_timeout` | `api/v2_types.go:50` | the run never became streamable |
@@ -933,6 +947,11 @@ No new codes. The existing ones carry the meaning:
 on it — but under the proposal it is only ever produced by the start-timeout
 path's sibling, never by a takeover. The concurrency design's §6.3 already noted
 this; the proposal does not change it.
+
+★ `run_not_live` is the one new code, and it exists because the attach needs
+one. "The run you asked for is gone" is neither "the session is busy" nor "no
+such run": the client's answer to it is "load the history", and it has to be
+able to tell that apart from a session it may retry.
 
 ## 9. The frontend
 

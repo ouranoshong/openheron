@@ -892,7 +892,7 @@ func TestV2RunWithoutThreadIdIsRejectedAndCreatesNothing(t *testing.T) {
 		t.Fatalf("sessions = %d, want unchanged %d", after, before)
 	}
 	if captured.buf.Len() != 0 {
-		t.Fatalf("a rejected run must not open a stream: %q", captured.buf.String())
+		t.Fatalf("a rejected run must not open a stream: %q", captured.String())
 	}
 }
 
@@ -908,7 +908,7 @@ func TestV2RunAnnouncesARealThreadId(t *testing.T) {
 		t.Fatalf("= %d, want 200: %s", got.code, got.body)
 	}
 
-	out := captured.buf.String()
+	out := captured.String()
 	if !strings.Contains(out, `"type":"RUN_STARTED"`) {
 		t.Fatalf("stream missing RUN_STARTED: %s", out)
 	}

@@ -817,6 +817,34 @@ type RunSnapshot struct {
 	ActiveRunID string
 }
 
+// LiveRun returns the session's live turn when it carries the given run id.
+//
+// ★ It is how a client re-attaches to a run it already knows. The turn is
+//
+//	the run's handle and its id is the run's identity, so a match on the id
+//	is the proof that this is the same run and not another one in the
+//	same session.
+//
+// ★ A run that has finished is not live: its turn is released when its
+//
+//	archive lands, so an attach that arrives too late finds nothing and
+//	the client has to hydrate from the transcript.
+func (rt *Runtime) LiveRun(sessionID, runID string) (*Turn, bool) {
+	if runID == "" {
+		return nil, false
+	}
+	st, ok := rt.lookupState(sessionID)
+	if !ok {
+		return nil, false
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.turn == nil || st.turn.RunID != runID {
+		return nil, false
+	}
+	return st.turn, true
+}
+
 // ScanRuns reads a session's run ledger.
 //
 // ★ This is the truth. The volatile runtime state may say "running" for a

@@ -48,7 +48,15 @@ const (
 	codeSessionBusy      = "session_busy"
 	codeTurnSuperseded   = "turn_superseded"
 	codeTurnStartTimeout = "turn_start_timeout"
-	codeInternal         = "internal"
+	// codeRunNotLive is the attach refusal: the run the client asked for is
+	// not running (it finished, or it never existed).
+	//
+	// ★ It is its own code because "the run you asked for is gone" is not
+	//   "the session is busy" and not "no such run": the client's answer
+	//   to it is "load the history", and it must be able to tell that
+	//   apart from a session it may retry.
+	codeRunNotLive = "run_not_live"
+	codeInternal   = "internal"
 )
 
 // errBody is the v2 error envelope.

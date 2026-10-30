@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 	"github.com/cloudwego/hertz/pkg/app"
@@ -127,6 +128,15 @@ func (s *Server) v2Run(ctx context.Context, c *app.RequestContext) {
 	obs.Logger().Info(obs.Prefix(ctx)+"run started",
 		"thread", in.ThreadID, "agent", root, "resume", len(in.Resume) > 0)
 
+	// ★ Attach: the client asks for a run it already knows. The request
+	//   carries the run's id and no question — a question would mean "start
+	//   a new run", and starting one here would silently run the user's
+	//   message twice.
+	if isAttachRequest(in) {
+		s.attachRun(ctx, c, sess, in.RunID)
+		return
+	}
+
 	turn, err := s.startRun(ctx, sess, in)
 	if err != nil {
 		v2FailErr(c, err)
@@ -162,6 +172,49 @@ func (s *Server) v2Run(ctx context.Context, c *app.RequestContext) {
 	// ★ The archive is the run's work, and the response waits for it: the
 	//   client's next message must find a complete history, or the next
 	//   turn's input is built from a half-written one.
+	turn.WaitArchived()
+	stream.Flush()
+}
+
+// isAttachRequest reports whether the request asks to re-attach to a run.
+//
+// ★ It is the absence of a question that says so. A request with a question
+//
+//	is a new run, whatever run id it carries; a request without one is the
+//	client coming back for a run it already started.
+func isAttachRequest(in runInput) bool {
+	return strings.TrimSpace(in.RunID) != "" &&
+		strings.TrimSpace(in.Query) == "" &&
+		len(in.Messages) == 0 &&
+		len(in.Resume) == 0
+}
+
+// attachRun streams a live run to a connection that asked for it.
+//
+// ★ The subscription replays the run's window, so a client that arrives
+//
+//	late still sees the tail of the turn instead of an empty stream.
+//
+// ★ A run that is over is refused, not faked: the client has to hydrate
+//
+//	from the transcript, and the run's own facts are in the scan.
+func (s *Server) attachRun(ctx context.Context, c *app.RequestContext, sess storage.Session, runID string) {
+	turn, ok := s.rt.LiveRun(sess.ID(), runID)
+	if !ok {
+		v2Fail(c, consts.StatusNotFound, codeRunNotLive,
+			"the run is no longer live; load the session's history instead", false)
+		return
+	}
+
+	stream := s.newStream(c)
+	kaStop := make(chan struct{})
+	defer close(kaStop)
+	go stream.Keepalive(kaStop, 15_000_000_000) // 15s
+
+	sub := turn.Subscribe()
+	defer sub.Close()
+
+	transport.Render(stream, sess.ID(), turn.RunID, sub.Events())
 	turn.WaitArchived()
 	stream.Flush()
 }

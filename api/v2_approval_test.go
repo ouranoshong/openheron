@@ -61,8 +61,8 @@ func TestApprovalChainEndToEnd(t *testing.T) {
 	if got.code != 200 {
 		t.Fatalf("run = %d (%s)", got.code, got.body)
 	}
-	if !strings.Contains(captured.buf.String(), "int-e2e") {
-		t.Fatalf("the interrupt must reach the client: %s", captured.buf.String())
+	if !strings.Contains(captured.String(), "int-e2e") {
+		t.Fatalf("the interrupt must reach the client: %s", captured.String())
 	}
 	waitForPending(t, sess, 1)
 
@@ -116,8 +116,8 @@ func TestApprovalChainEndToEnd(t *testing.T) {
 
 	waitForPending(t, sess, 0)
 
-	if !strings.Contains(captured.buf.String(), "RUN_ERROR") {
-		t.Fatalf("the dead turn must be reported, not crashed on: %s", captured.buf.String())
+	if !strings.Contains(captured.String(), "RUN_ERROR") {
+		t.Fatalf("the dead turn must be reported, not crashed on: %s", captured.String())
 	}
 
 	waitForDecisions(t, sess, 1)

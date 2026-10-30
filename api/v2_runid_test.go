@@ -48,8 +48,8 @@ func TestV2RunUsesOneRunIDForTheLogAndTheStream(t *testing.T) {
 		t.Fatalf("= %d, want 200: %s", got.code, got.body)
 	}
 
-	if !strings.Contains(captured.buf.String(), `"runId":"run-under-test"`) {
-		t.Fatalf("stream missing the run id: %s", captured.buf.String())
+	if !strings.Contains(captured.String(), `"runId":"run-under-test"`) {
+		t.Fatalf("stream missing the run id: %s", captured.String())
 	}
 
 	if !strings.Contains(logs.String(), "[run=run-under-test]") {
@@ -81,8 +81,8 @@ func TestV2RunMintsARunIDWhenTheClientHasNone(t *testing.T) {
 	if builder.seen == "" {
 		t.Fatal("the assembly layer saw no run id")
 	}
-	if !strings.Contains(captured.buf.String(), `"runId":"`+builder.seen+`"`) {
-		t.Fatalf("the stream run id differs from the one the runtime saw: %s", captured.buf.String())
+	if !strings.Contains(captured.String(), `"runId":"`+builder.seen+`"`) {
+		t.Fatalf("the stream run id differs from the one the runtime saw: %s", captured.String())
 	}
 	if !strings.Contains(logs.String(), "[run="+builder.seen+"]") {
 		t.Fatalf("log missing the run prefix: %s", logs.String())
@@ -124,7 +124,7 @@ func TestRunStartedCarriesTheRunIDField(t *testing.T) {
 		t.Fatalf("= %d, want 200: %s", got.code, got.body)
 	}
 
-	for _, line := range strings.Split(captured.buf.String(), "\n") {
+	for _, line := range strings.Split(captured.String(), "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "data:") {
 			continue
@@ -140,5 +140,5 @@ func TestRunStartedCarriesTheRunIDField(t *testing.T) {
 			return
 		}
 	}
-	t.Fatalf("no RUN_STARTED in stream: %s", captured.buf.String())
+	t.Fatalf("no RUN_STARTED in stream: %s", captured.String())
 }
