@@ -1,5 +1,5 @@
 import { BrainIcon, ChevronRightIcon } from "lucide-react"
-import { useState } from "react"
+import { memo, useState } from "react"
 
 import { MarkdownText, MessageBody } from "@/components/markdown"
 import { ToolCard } from "@/components/tool-card"
@@ -46,7 +46,16 @@ export function Reasoning({
   )
 }
 
-export function MessageParts({ parts, role }: { parts: Part[]; role: Message["role"] }) {
+// ★ MessageParts is memoized: only the message being streamed changes
+//   while a turn runs, and the rest of the transcript must not re-render
+//   with it.
+export const MessageParts = memo(function MessageParts({
+  parts,
+  role,
+}: {
+  parts: Part[]
+  role: Message["role"]
+}) {
   return (
     <>
       {parts.map((p) => {
@@ -85,4 +94,4 @@ export function MessageParts({ parts, role }: { parts: Part[]; role: Message["ro
       })}
     </>
   )
-}
+})

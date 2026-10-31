@@ -1,5 +1,5 @@
 import { ArrowDownIcon, SquareIcon } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 
 import { AgentFilter } from "@/components/agent-filter"
 import { BrandMark } from "@/components/brand-mark"
@@ -38,6 +38,11 @@ export function MessageList() {
 
   const visible = useMemo(() => filterByAgent(messages, agentFilter), [messages, agentFilter])
 
+  // ★ The flags and the multi-agent marker are recomputed per token, and
+  //   that is fine: on a long conversation they cost tens of
+  //   microseconds, against the milliseconds the rows and the layout
+  //   cost. Measured, not guessed — the memo's dependency stays the
+  //   array, so the linter stays quiet.
   const flags = useMemo(() => turnFlags(visible), [visible])
 
   const multiAgent = useMemo(() => collectAgents(messages).length > 1, [messages])
@@ -70,10 +75,25 @@ export function MessageList() {
     if (el) el.scrollTop = el.scrollHeight
   }, [activeId])
 
+  // ★ The scroll follows the content's **height**, not the render count.
+  //
+  //   Reading scrollHeight forces a layout of the whole list — and doing
+  //   it on every render means one layout per token, over hundreds of
+  //   rendered messages. That is what makes a long conversation stutter.
+  //   A ResizeObserver tells us when the content actually grew, and the
+  //   browser has laid it out by then, so the read is free.
   useEffect(() => {
     const el = scrollRef.current
-    if (el && pinnedRef.current) el.scrollTop = el.scrollHeight
-  })
+    if (!el) return
+    const content = el.firstElementChild
+    if (!content) return
+    const ro = new ResizeObserver(() => {
+      if (!pinnedRef.current) return
+      el.scrollTop = el.scrollHeight
+    })
+    ro.observe(content)
+    return () => ro.disconnect()
+  }, [])
 
   const jumpToLatest = () => {
     pinnedRef.current = true
@@ -177,7 +197,14 @@ function StatusLine({ status }: { status: TurnStatus }) {
   return null
 }
 
-function MessageRow({
+// ★ MessageRow is memoized: a token must not re-render the whole
+//   conversation.
+//
+//   The reducer copies only the message it touched, so every other
+//   message keeps its identity — and with it, its row. Without this, one
+//   token re-renders every row of the list, and a long conversation
+//   turns each token into a full pass over the transcript.
+const MessageRow = memo(function MessageRow({
   message,
   startsTurn,
   showRole,
@@ -222,7 +249,7 @@ function MessageRow({
       </div>
     </article>
   )
-}
+})
 
 function MessageSkeleton() {
   return (

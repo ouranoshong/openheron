@@ -481,7 +481,67 @@ const selectMessages = (s: State) => s.convo?.messages ?? EMPTY
 always look "changed". A selector that returns an array should be paired with
 `useShallow`.
 
-### 4.4 Build and embedding
+### 4.4 ★ Feature memo: virtualizing long conversations
+
+★ **This is a memo, not a to-do.** It records what we know we want, why, and
+what has to be true before it is worth doing. Nothing in the tree depends on
+it.
+
+**The problem.** A conversation with hundreds of messages renders hundreds of
+DOM rows. Each row holds parsed markdown, a tool card, a reasoning block. The
+browser's layout and paint cost grows with the row count, and the scroll
+container has to lay the whole list out whenever anything inside it changes.
+
+**What is already done** (and why virtualization is not the first move):
+
+| Done | What it removed |
+|---|---|
+| the frame batching in `web/src/lib/api.ts` | one state update per token → one per frame |
+| `memo` on `MessageRow` and `MessageParts` | every row re-rendering per token → only the touched one |
+| the `ResizeObserver` in `web/src/components/message-list.tsx` | one forced layout per render → one per content growth |
+| the memoized `MarkdownText` | the markdown of the *finished* messages being re-parsed |
+
+★ What is left is the DOM itself: the rows exist, they are just not re-rendered.
+A list of 500 finished rows costs layout and paint once per change, not once
+per token — which is usually good enough.
+
+**The proposal.** Virtualize the list: render only the rows in the viewport
+(plus a small overscan), and keep the total height with spacers. The obvious
+choice is `react-window` — it is small, it does one thing, and it is not a
+framework.
+
+**What has to be true first** — these are the reasons it is deferred, not
+implementation details:
+
+- ★ **The "stick to the bottom" behaviour must survive it.** The scroll
+  container pins itself to the newest message while the user is at the
+  bottom, and lets go the moment they scroll up
+  (`web/src/components/message-list.tsx` — `pinnedRef`). A virtualized list
+  has to preserve that, including the case where the newest message arrives
+  while the user is reading something older.
+- ★ **The row height is not known in advance.** The rows contain parsed
+  markdown, code blocks with syntax highlighting and collapsible tool cards —
+  their heights change with their content and with the user's clicks. A
+  virtualizer that assumes a fixed height will jump. The measurement pass
+  has to re-measure on every content change, which is the expensive part
+  that virtualization was supposed to avoid.
+- ★ **The tool cards and the reasoning blocks fold.** A collapsed card is
+  short; an expanded one is tall. The height cache has to be invalidated
+  when the user folds one.
+
+**Acceptance.** A conversation with 500 messages must stay responsive while a
+turn streams — measured as: the frame rate does not drop below 30fps during
+the stream, and the time between two tokens and their appearance stays under
+100ms. Today the equivalent check is the scroll spec
+(`web/test/e2e/scroll.spec.ts`).
+
+**How to measure before doing it.** React DevTools' Profiler, recording one
+long conversation while a turn streams. The three numbers to look at: the
+commit duration of the message list, the layout count, and the time spent in
+`MarkdownText`. If the layout count is low and the commit duration is small,
+the DOM is not the problem and virtualization would buy nothing.
+
+### 4.5 Build and embedding
 
 - `vite.config.ts`: `@` → `src`; dev port `5173` (`15173` in test mode),
   `strictPort: true`; `/v2` is proxied to `OPENHERON_API_TARGET`.

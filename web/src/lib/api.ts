@@ -340,8 +340,72 @@ export interface RunHandlers {
   onDone?(): void
 }
 
+// FRAME_MS is how often the stream's events reach the store.
+//
+// ★ A token per state update makes the whole tree re-render per token,
+//   and the streaming message's markdown is re-parsed from scratch every
+//   time — so the cost of one answer is quadratic in its length. A
+//   frame is what the screen can show anyway: batching at the frame
+//   rate costs nothing that is visible and takes the parse count down
+//   by an order of magnitude.
+const FRAME_MS = 33
+
+// URGENT_EVENTS are the frames the user must see **now**.
+//
+// ★ An interrupt or the end of a run is not a token: the user is about
+//   to click something, and a card that arrives a frame late reads as
+//   a broken button. They are never batched.
+const URGENT_EVENTS = new Set(["RUN_STARTED", "RUN_FINISHED", "RUN_ERROR"])
+
+/**
+ * batcher groups the stream's events into frames.
+ */
+function batcher(flush: (ev: unknown) => void) {
+  let queue: unknown[] = []
+  let timer: ReturnType<typeof setTimeout> | null = null
+
+  const drain = () => {
+    timer = null
+    const batch = queue
+    queue = []
+    for (const ev of batch) flush(ev)
+  }
+
+  return {
+    push(ev: unknown) {
+      const type = (ev as { type?: string }).type
+      if (type && URGENT_EVENTS.has(type)) {
+        // ★ The urgent frame goes out now, and it takes the queued ones
+        //   with it so the order on screen stays the order on the wire.
+        if (timer !== null) {
+          clearTimeout(timer)
+          timer = null
+        }
+        drain()
+        flush(ev)
+        return
+      }
+      queue.push(ev)
+      if (timer === null) timer = setTimeout(drain, FRAME_MS)
+    },
+    // flushAll empties the queue — the stream is over and nothing may
+    // be left behind.
+    flushAll() {
+      if (timer !== null) {
+        clearTimeout(timer)
+        timer = null
+      }
+      drain()
+    },
+  }
+}
+
 export function runStream(input: RunInput, handlers: RunHandlers): RunHandle {
   const controller = new AbortController()
+  // ★ The batch lives outside the try: a stream that breaks must still
+  //   deliver what it already delivered, or the answer the user saw
+  //   halfway would vanish with the error.
+  const batch = batcher((ev) => handlers.onEvent(ev))
 
   void (async () => {
     try {
@@ -369,15 +433,22 @@ export function runStream(input: RunInput, handlers: RunHandlers): RunHandle {
         return
       }
 
+      // ★ The events are batched into frames (see FRAME_MS). The order is
+      //   the wire's order; only the timing changes.
       for await (const ev of readSse(res.body)) {
         try {
-          handlers.onEvent(JSON.parse(ev.data))
+          batch.push(JSON.parse(ev.data))
         } catch {
           // A single event that will not parse must not destroy the whole turn — skip it and keep reading.
         }
       }
+      batch.flushAll()
       handlers.onDone?.()
     } catch (e) {
+      // ★ Whatever the stream managed to deliver still belongs to the
+      //   turn: the user saw half an answer, and half an answer is better
+      //   than none.
+      batch.flushAll()
       if (controller.signal.aborted) return
       handlers.onError?.((e as Error).message)
     }
