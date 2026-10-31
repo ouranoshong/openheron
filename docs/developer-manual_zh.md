@@ -511,7 +511,7 @@ const selectMessages = (s: State) => s.convo?.messages ?? EMPTY
 | `make test` | Go 全量（`go test ./...`） | — |
 | `cd web && bun run test:unit` | 纯函数层（reducer / 分帧 / store / 高亮） | — |
 | `make test-e2e` | 真实浏览器 + 确定性假后端 | 无（自带假后端） |
-| `make smoke` | 真后端联调：SSE 分帧、历史回放、审批接线 | **测试实例在跑** |
+| `make smoke` | 真后端联调：SSE 分帧、历史回放、审批接线 | **测试实例在跑，且模型可达** |
 | `make lint` | Go vet + gofmt + oxlint + tsc | — |
 | `make check` | `lint` + `test`，提交前跑这个 | — |
 
@@ -525,6 +525,12 @@ make test-env-sync      # ★ 改过开发侧的 agent 定义后必须跑
 
 ★ **`make test-env-sync` 是必须的，不是可选的** —— 测试实例里的 `agents/ llm/ policy/ skills/`
 是从开发侧**复制**的，改完 agent 不同步，测的还是旧定义。
+
+★ **冒烟脚本需要一个答得上话的模型。** 它们对着测试实例真跑一轮，而测试实例的
+`llm/` 指向一个本地端点。端点不通或很慢时，冒烟会失败——而且那个失败看起来
+像协议出 bug，而不是模型不在。**先查端点**
+（`curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:1234/v1/models`），
+它不答应就先别跑冒烟。
 
 单个冒烟脚本（默认就连 :18099，**不需要手写 `OPENHERON_BASE`**）：
 

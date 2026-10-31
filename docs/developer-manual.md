@@ -576,7 +576,7 @@ To change a port, change only that one file.
 | `make test` | All of Go (`go test ./...`) | — |
 | `cd web && bun run test:unit` | The pure layers (reducer / framing / store / highlighting) | — |
 | `make test-e2e` | A real browser + a deterministic fake backend | nothing (it brings its own fake backend) |
-| `make smoke` | Real-backend integration: SSE framing, history replay, approval wiring | **the test instance running** |
+| `make smoke` | Real-backend integration: SSE framing, history replay, approval wiring | **the test instance running, and a reachable model** |
 | `make lint` | Go vet + gofmt + oxlint + tsc | — |
 | `make check` | `lint` + `test` — run this before committing | — |
 
@@ -591,6 +591,13 @@ make test-env-sync      # ★ must be run after you change the development-side 
 ★ **`make test-env-sync` is mandatory, not optional** — the test instance's
 `agents/ llm/ policy/ skills/` are **copied** from the development side, so change an
 agent without syncing and you are still testing the old definition.
+
+★ **The smokes need a model that answers.** They run a real turn against the
+test instance, and the test instance's `llm/` points at a local endpoint. If
+that endpoint is down or slow, the smoke fails — and the failure looks like a
+protocol bug rather than a missing model. **Check the endpoint first**
+(`curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:1234/v1/models`) and
+skip the smokes until it answers.
 
 Individual smoke scripts (they connect to :18099 by default, so **you do not write
 `OPENHERON_BASE` yourself**):
