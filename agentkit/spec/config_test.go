@@ -100,6 +100,25 @@ func TestDefaultsSurviveWhenFileOmitsKeys(t *testing.T) {
 	if cfg.Server.Watch.Debounce.Duration().Milliseconds() != 200 {
 		t.Fatalf("an undeclared debounce must stay at the default 200ms, got %v", cfg.Server.Watch.Debounce)
 	}
+	if cfg.Server.LeaseTTL.Duration().Minutes() != 10 {
+		t.Fatalf("an undeclared lease_ttl must stay at the default 10m, got %v", cfg.Server.LeaseTTL)
+	}
+}
+
+// The lease's budget is a configuration item: it has to be longer than the
+// provider's own timeout, and the two live in different files.
+func TestTheLeaseTTLComesFromTheConfig(t *testing.T) {
+	f := newFixture(t)
+	f.seedMinimal(t)
+	f.write(t, "server/config.yaml", "listen_addr: \":9999\"\nlease_ttl: 30m\n")
+
+	cfg, err := f.load(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.LeaseTTL.Duration().Minutes() != 30 {
+		t.Fatalf("lease_ttl = %v, want 30m", cfg.Server.LeaseTTL)
+	}
 }
 
 func TestTheOnlyFileInTheRootIsTheOneThatCounts(t *testing.T) {

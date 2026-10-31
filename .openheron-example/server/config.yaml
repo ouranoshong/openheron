@@ -12,6 +12,12 @@ data_dir: state           # runtime data; in practice Service.StateDir() = <root
 # Upper bound for one turn, from submission to entering the running state
 start_timeout: 60s
 
+# How long a run's lease survives without progress. A run that reports
+# nothing for this long loses the lease, however alive it is — so it must be
+# **longer than the provider's own timeout** (llm/<id>.yaml), or a slow but
+# alive model is fenced out while it is thinking.
+lease_ttl: 10m
+
 retry:
   max_retries: 5
 

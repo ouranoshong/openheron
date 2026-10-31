@@ -570,6 +570,13 @@ alive it is. The renewal is throttled to a quarter of the TTL: a streaming
 model reports progress on every token, and a renewal per token would be a
 lock per token for nothing.
 
+★ **The TTL is a configuration item** (`server.lease_ttl`, 10m by default).
+It has to be **longer than the provider's own timeout** — the provider's
+timeout ends a call that is hung, and the lease only has to outlast a call
+that is slow — but the two live in different files (`llm/<id>.yaml` per
+endpoint), so the relation is the operator's to keep, not the code's to
+enforce. `server/` is not hot-reloaded: a change needs a restart.
+
 ★ **Why not a timer.** A timer-driven renewal keeps the lease alive for a run
 stuck in a hung model call, because the renewal goroutine does not care what
 the run is doing — it keeps saying "still here". That is precisely the

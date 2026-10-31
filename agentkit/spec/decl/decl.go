@@ -251,9 +251,16 @@ type Server struct {
 	DataDir      string          `yaml:"data_dir"`
 	FrontendMode string          `yaml:"frontend_mode"`
 	StartTimeout LenientDuration `yaml:"start_timeout"`
-	Watch        Watch           `yaml:"watch"`
-	Retry        RetryCfg        `yaml:"retry"`
-	Agent        AgentCfg        `yaml:"agent"`
+	// LeaseTTL is how long a run's lease survives without progress.
+	//
+	// ★ It must be **longer than the provider's own timeout**: a model
+	//   that is slow but alive must not be fenced out while it is
+	//   thinking. The provider's timeout ends a call that is hung; the
+	//   lease only has to outlast a call that is slow.
+	LeaseTTL LenientDuration `yaml:"lease_ttl"`
+	Watch    Watch           `yaml:"watch"`
+	Retry    RetryCfg        `yaml:"retry"`
+	Agent    AgentCfg        `yaml:"agent"`
 }
 
 const (

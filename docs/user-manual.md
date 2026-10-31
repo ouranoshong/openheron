@@ -260,6 +260,7 @@ tool table, and the model cannot see it.
 | `static_dir` | `web/dist` | Frontend build output (used when `frontend_mode: dir`) |
 | `frontend_mode` | `embed` | `embed` uses the interface baked into the binary; `dir` reads from disk |
 | `start_timeout` | `60s` | Startup timeout |
+| `lease_ttl` | `10m` | How long a run's lease survives without progress — **longer than the provider's own timeout** |
 | `agent.max_depth` | `1` | Cap on delegation depth |
 
 ★ **`server/` is not hot-reloaded** — a change only takes effect after a restart. That is

@@ -248,6 +248,7 @@ func setupRuntime(ctx context.Context, st *startup) error {
 		//   session, and it expires when the holder stops making
 		//   progress. The turn slot alone cannot say that.
 		LeaseArbiter: memarbit.New(),
+		LeaseTTL:     leaseTTL(st.cfg),
 	})
 	fm.SetTeardown(rt)
 	st.rt = rt
@@ -467,6 +468,18 @@ func short(v string) string {
 		return v[:12]
 	}
 	return v
+}
+
+// leaseTTL reads server.lease_ttl.
+//
+// ★ It falls back to the runtime's default when the config says nothing —
+//
+//	and `server/` is not hot-reloaded, so a change needs a restart.
+func leaseTTL(c *spec.Config) time.Duration {
+	if c == nil || c.Server.LeaseTTL <= 0 {
+		return run.DefaultLeaseTTL
+	}
+	return c.Server.LeaseTTL.Duration()
 }
 
 func startTimeout(c *spec.Config) time.Duration {

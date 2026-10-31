@@ -61,6 +61,7 @@ func defaultServer() decl.Server {
 		StaticDir:    "web/dist",
 		DataDir:      DirState,
 		StartTimeout: decl.LenientDuration(60 * time.Second),
+		LeaseTTL:     decl.LenientDuration(10 * time.Minute),
 		Agent:        decl.AgentCfg{MaxDepth: 1},
 		Watch:        decl.Watch{Debounce: decl.LenientDuration(decl.DefaultDebounce)},
 		Retry:        decl.RetryCfg{MaxRetries: 5},

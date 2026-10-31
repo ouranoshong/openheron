@@ -240,6 +240,7 @@ deny: []
 | `static_dir` | `web/dist` | 前端产物目录（`frontend_mode: dir` 时用） |
 | `frontend_mode` | `embed` | `embed` 用嵌进二进制的界面，`dir` 读磁盘 |
 | `start_timeout` | `60s` | 启动超时 |
+| `lease_ttl` | `10m` | 一轮在没有进展的情况下能持有多久的租约——**必须长于 provider 自己的超时** |
 | `agent.max_depth` | `1` | 委派深度上限 |
 
 ★ **`server/` 不热重载** —— 改了要重启才生效。所以配置编辑器里它是**只读**的，
