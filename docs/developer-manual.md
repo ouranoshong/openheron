@@ -41,6 +41,7 @@ openheron/
 │   ├── emit/          # the derivation: agent events → the run's facts
 │   └── obs/           # the log sink (the only one)
 ├── approval/          # representation and validation of approval decisions
+├── benchmarks/        # the cost benchmark: strong parent + cheap workers vs. one strong model
 ├── contract/          # cross-layer data contracts
 ├── helpers/           # stateless helpers
 ├── initcfg/           # factory templates for init

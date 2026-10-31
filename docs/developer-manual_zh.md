@@ -39,6 +39,7 @@ openheron/
 │   ├── emit/          # 推导层：agent 事件 → run 的事实
 │   └── obs/           # 日志出口（唯一）
 ├── approval/          # 审批决定的表示与校验
+├── benchmarks/        # 成本基准：强模型父 + 弱模型子 vs 强模型单干
 ├── contract/          # 跨层数据契约
 ├── helpers/           # 无状态小工具
 ├── initcfg/           # init 的出厂模板

@@ -1,0 +1,133 @@
+# The task set.
+#
+# ★ Every task has a **checkable** end state. That is what makes the cost
+#   comparison mean something: a run that is 40 % cheaper and wrong is not
+#   a saving.
+#
+# The tasks fall into three kinds, and the third one is the negative
+# control:
+#
+#   exec     — the work is execution; the parent has little to decide.
+#   decompose— the parent has to split the work and hand it out.
+#   judge    — the task is a judgement call. Delegating it buys nothing:
+#              the parent still has to make the call, and the coordination
+#              is pure overhead. These tasks are expected to be CHEAPER in
+#              arm B, and reporting them separately is the point: an
+#              average over all tasks hides the boundary of the pattern.
+#
+# `checks` are evaluated against the final transcript and the work tree.
+#   answer_contains  — the final assistant message contains the string
+#   file_contains    — a file in the work tree contains the string
+#   file_exists      — a file exists in the work tree
+#
+# The fixture tree (benchmarks/fixtures/work) is copied into the work
+# directory before a task runs, so every task starts from the same state.
+
+tasks:
+  # ── exec ─────────────────────────────────────────────────────────────────
+  - id: read-json-value
+    kind: exec
+    prompt: "Read data/values.json and report the value of the `port` field."
+    checks:
+      - type: answer_contains
+        value: "8080"
+
+  - id: count-go-files
+    kind: exec
+    prompt: "Count the .go files under internal/ and report the number."
+    checks:
+      - type: answer_contains
+        value: "2"
+
+  - id: write-a-file
+    kind: exec
+    prompt: "Create the file out/report.txt containing exactly the line: done"
+    checks:
+      - type: file_exists
+        value: out/report.txt
+      - type: file_contains
+        value: "done"
+
+  - id: run-a-command
+    kind: exec
+    prompt: "Run `cat data/values.json` in the project and report the `name` field it prints."
+    checks:
+      - type: answer_contains
+        value: "fixture"
+
+  - id: locate-a-symbol
+    kind: exec
+    prompt: "Find where the method `Save` is defined and report the file name and the line number."
+    checks:
+      - type: answer_contains
+        value: "store.go"
+
+  # ── decompose ────────────────────────────────────────────────────────────
+  - id: find-every-caller
+    kind: decompose
+    prompt: "Find every place in the project that calls `Save`, and list the files."
+    checks:
+      - type: answer_contains
+        value: "main.go"
+
+  - id: two-file-change
+    kind: decompose
+    prompt: >
+      Add a `Flush` method to the Cache type in internal/store/cache.go, and
+      make cmd/app/main.go call it after it finishes saving.
+    checks:
+      - type: file_contains
+        value: internal/store/cache.go
+        contains: "func (c *Cache) Flush"
+      - type: file_contains
+        value: cmd/app/main.go
+        contains: "Flush()"
+
+  - id: investigate-a-mismatch
+    kind: decompose
+    prompt: >
+      The application is supposed to read its port from data/values.json, but
+      it never does. Find out why and report the cause in one sentence.
+    checks:
+      - type: answer_contains
+        value: "port.txt"
+
+  - id: document-an-api
+    kind: decompose
+    prompt: "Document the Cache API in docs/notes.md — one subsection, its constructor and its methods."
+    checks:
+      - type: file_contains
+        value: docs/notes.md
+        contains: "Put"
+
+  # ── judge (the negative control) ──────────────────────────────────────────
+  - id: choose-a-design
+    kind: judge
+    prompt: >
+      We must support both a file-backed store and a memory-backed store, and
+      the process restarts often. Which of these two designs fits better:
+      (A) an interface with two implementations, (B) a global map with a flag
+      that picks the backend? Answer with the letter and one sentence.
+    checks:
+      - type: answer_contains
+        value: "A"
+
+  - id: spot-the-failure
+    kind: judge
+    prompt: >
+      The Cache type in internal/store/cache.go never evicts anything. What is
+      the first thing that breaks when the workload grows? One sentence.
+    checks:
+      - type: answer_contains
+        value: "memory"
+
+  - id: explain-a-policy
+    kind: judge
+    prompt: >
+      In this project the rules for who may write what live in one file, and
+      an agent's own list of forbidden tools can only narrow it, never widen
+      it. In one sentence: why is that the right direction for the narrower
+      list?
+    checks:
+      - type: answer_contains
+        value: "deny"

@@ -1,0 +1,63 @@
+# The three arms of the benchmark.
+#
+# ★ A is the hypothesis: a strong model decomposes, cheap models execute.
+#   B is the baseline: one strong model does everything. C is the control
+#   that keeps the conclusion honest: one cheap model does everything.
+#   Without C, "A is cheaper than B" may only mean "flash is cheaper than
+#   max" — the decomposition would not have earned anything.
+#
+# The agents' prompts live in agents/, one file per agent per arm. The
+# model references are `provider/model`; the provider prefix is whatever your
+# llm/<provider>.yaml is called.
+
+# ── the price table ────────────────────────────────────────────────────────
+#
+# ★ CNY per million tokens, as of 2026-10-31. Prices move: the report
+#   therefore carries both the absolute CNY and the ratio to arm B, and the
+#   ratio is the number that survives a price change.
+prices:
+  qwen3.8-max:
+    input: 12
+    output: 36
+    cached_input: 1.5
+  qwen3.8-flash:
+    input: 0.8
+    output: 2.7
+    cached_input: 0.1
+
+# ── the arms ───────────────────────────────────────────────────────────────
+arms:
+  # A: the strong model decomposes, the weak model executes.
+  - id: a-max-parent-flash-workers
+    label: "强模型分解 + 弱模型执行"
+    agents:
+      - file: agents/a-main.md
+        id: main
+        role: parent
+        model: qwen/qwen3.8-max
+      - file: agents/a-task.md
+        id: task
+        role: worker
+        model: qwen/qwen3.8-flash
+
+  # B: the strong model does everything, with the union of the tools.
+  - id: b-max-solo
+    label: "强模型单干"
+    agents:
+      - file: agents/b-solo.md
+        id: main
+        role: solo
+        model: qwen/qwen3.8-max
+
+  # C: the control. The weak model does everything.
+  - id: c-flash-solo
+    label: "弱模型单干（对照）"
+    agents:
+      - file: agents/c-solo.md
+        id: main
+        role: solo
+        model: qwen/qwen3.8-flash
+
+# ★ The cost of a message is looked up by the agent that produced it, using
+#   the model named in the arm table above — so the arms and the price table
+#   cannot drift apart.
