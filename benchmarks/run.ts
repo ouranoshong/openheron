@@ -184,6 +184,17 @@ async function runTask(arm: Arm, task: Task, repeat: number): Promise<Run> {
     run.turns = countModelTurns(events)
     run.answer = finalAnswer(events)
 
+    // ★ A run that ended in RUN_ERROR produced nothing to grade — it is
+    //   an error, not a failed answer. Without this, a quota that ran out
+    //   halfway through the sweep looks like a task the model could not
+    //   do, and the report's cost column says ¥0 for it.
+    const runError = events.find((e) => e.type === "RUN_ERROR")
+    if (runError) {
+      throw new Error(
+        `${runError.code ?? "run_error"}: ${String(runError.message ?? "").slice(0, 200)}`,
+      )
+    }
+
     const view = await getJSON(`/v2/sessions/${threadId}/messages`)
     run.usage = (view.usage?.byAgent ?? {}) as Record<string, Usage>
 

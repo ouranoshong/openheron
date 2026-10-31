@@ -186,6 +186,19 @@ when it was only a success for the price table.
 smoke, not a measurement — `--repeats 3` is the minimum for a claim, and the
 median matters more than the mean.
 
+## Running out of quota mid-sweep
+
+★ The sweep can die halfway: the endpoint's free tier has a quota, and a
+403 "Free quota exhausted" turns every later run into an empty one. The
+runner records a `RUN_ERROR` frame as the run's error (a run that produced
+nothing to grade is an error, not a failed answer), so a truncated sweep is
+visible in the report rather than looking like a task the model could not
+do.
+
+The runs before the quota ran out are still valid — the report keeps them
+(`benchmarks/out/report.json`), and `turns > 0` tells a real run from an
+empty one.
+
 ## The known gap this benchmark does not need
 
 The live run does not account the usage per agent — `usage.byAgent` exists
