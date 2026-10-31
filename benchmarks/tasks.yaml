@@ -105,6 +105,64 @@ tasks:
         value: docs/notes.md
         contains: "Put"
 
+  # ── big (the kind that can amortize the coordination) ─────────────────────
+  #
+  # ★ These are the tasks the break-even needs. The exec tasks are one or
+  #   two model calls: the coordination is a **fixed** cost (a strong
+  #   decomposition plus a strong integration) and the discount is
+  #   **proportional** to the work that moves — so a task that small can
+  #   only lose. A task that takes a dozen rounds is where the two can
+  #   be compared.
+  - id: find-the-odd-one-out
+    kind: big
+    prompt: >
+      internal/store/ has several helper files. Five of them define an
+      uppercase helper with the same behaviour; one of them uppercases
+      only the first letter. Find the odd one out and report the file name
+      and the function name.
+    checks:
+      - type: answer_contains
+        value: "helper_"
+
+  - id: add-a-method-to-three-types
+    kind: big
+    prompt: >
+      Add a `Describe() string` method to the Store, the Cache and the
+      Registry types in internal/store/, each returning a short description
+      of the type, and make cmd/app/main.go print the Store's description
+      when it starts.
+    checks:
+      - type: file_contains
+        value: internal/store/store.go
+        contains: "Describe() string"
+      - type: file_contains
+        value: internal/store/cache.go
+        contains: "Describe() string"
+      - type: file_contains
+        value: internal/store/registry.go
+        contains: "Describe() string"
+      - type: file_contains
+        value: cmd/app/main.go
+        contains: "Describe()"
+
+  - id: document-five-exported-things
+    kind: big
+    prompt: >
+      Document the exported API of the package internal/store/ in
+      docs/notes.md — one subsection per exported type or function, each
+      with its signature and one line of what it does. The package has
+      more than five exported things; cover all of them.
+    checks:
+      - type: file_contains
+        value: docs/notes.md
+        contains: "Registry"
+      - type: file_contains
+        value: docs/notes.md
+        contains: "Cache"
+      - type: file_contains
+        value: docs/notes.md
+        contains: "Upper"
+
   # ── judge (the negative control) ──────────────────────────────────────────
   - id: choose-a-design
     kind: judge
