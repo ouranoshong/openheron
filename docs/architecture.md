@@ -57,6 +57,7 @@ counting `grep '"github.com/ouranoshong/openheron/'` hits per package:
 | **L2** | `agentkit/build` | `obs`, `spec`, `decl`, `approval`, `contract`, `helpers`, `kb`, `llm/common`, `message` | Agent assembly, tool assembly, policy gates |
 | | `agentkit/run` | `emit`, `obs`, `approval`, `contract`, `message`, `storage` | Run loop, input construction, event consumption |
 | | `storage/filestore` | `obs`, `contract`, `message`, `persist`, `storage` | File store implementation |
+| | `storage/memarbit` | `storage` | The in-memory lease arbiter |
 | | `transport` | `contract` | AG-UI rendering: the run's events → frames |
 | | `llm` | `build`, `spec`, `decl` | Thin wrapper (only `common/` and one test file) |
 | | `initcfg` | `spec` | Factory templates for `openheron init` |

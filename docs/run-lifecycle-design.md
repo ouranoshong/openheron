@@ -16,7 +16,7 @@
 > | §2 The target model | proposal — the shape §3 and §4 already have |
 > | §3 D1 — a run is a row of facts | **implemented** |
 > | §4 D2 — notification is a hint, the scan is the truth | the server side is **implemented**, the client side is a proposal |
-> | §5 D3 — lease and fence | proposal |
+> | §5 D3 — lease and fence | **implemented** — the arbiter, the progress-driven renewal and the read-side fence |
 > | §6 D4 — the driver is pluggable | the interfaces and the file driver are **implemented**, the memory arbiter is not there yet |
 > | §7 The event pipeline | **implemented** — the derivation moved to `agentkit/emit`, the run owns its consumption |
 > | §8 The API surface | the scan routes are **implemented**, attach is a proposal |
@@ -473,7 +473,7 @@ returns the active run's id now).
 
 ## 5. D3 — Lease and fence instead of first-come-first-served
 
-★ **This section is a proposal.** The epoch is already real (§3.2); the lease is not.
+★ **Implemented.** The epoch was already real (§3.2); now the lease is too.
 
 ### 5.1 Why the mutex is not enough
 
@@ -507,7 +507,7 @@ is today.
 ### 5.2 The lease
 
 ```go
-// storage/lease.go (proposed)
+// storage/lease.go
 package storage
 
 // Lease is a time-bounded claim on a session.
@@ -543,14 +543,32 @@ type LeaseArbiter interface {
     Release(ctx context.Context, l Lease) error
     // Fence reports the session's current epoch.
     Fence(ctx context.Context, sessionID string) (uint64, error)
+    // Held reports the session's current lease, if any.
+    Held(ctx context.Context, sessionID string) (Lease, bool)
 }
 ```
 
+★ **The lease is what makes the gate say "stalled" instead of "busy".** The
+admission gate asks whether the session is busy; the answer used to come from
+the turn slot — "a turn is live" — and a stalled owner keeps its slot for ever.
+Now the gate asks the arbiter as well: an owner whose lease ran out is not
+holding the session any more, and the run may take it over
+(`agentkit/run/runtime.go` — `leaseExpired`). The epoch says which of the two
+is the owner from now on.
+
+★ **The arbiter is the in-memory one** (`storage/memarbit`). It arbitrates
+inside one process, and nothing survives a restart — the ledger's reconciler
+closes the runs a crash left open (§3.3), and the next run allocates a fresh
+epoch.
+
 ★ **The run renews — on progress, not on a timer.** The lease is renewed when
-the run **reports progress**: the loop renews after each iteration, and a
-progress report is what counts. The TTL (30s by default) is the **budget**,
-not the schedule: a run that has reported nothing for TTL loses the lease,
-however alive it is.
+the run **reports progress**: the run publishes its events, and every publish
+is a progress report. The TTL (10 minutes by default,
+`agentkit/run/lease.go` — `DefaultLeaseTTL`) is the **budget**, not the
+schedule: a run that has reported nothing for TTL loses the lease, however
+alive it is. The renewal is throttled to a quarter of the TTL: a streaming
+model reports progress on every token, and a renewal per token would be a
+lock per token for nothing.
 
 ★ **Why not a timer.** A timer-driven renewal keeps the lease alive for a run
 stuck in a hung model call, because the renewal goroutine does not care what
@@ -1010,8 +1028,8 @@ selectors stay reference-stable (AGENTS.md's rules). What changes is the
 | File | Change |
 |---|---|
 | `storage/runledger.go` | ✓ **new** — `Run`, `RunState`, `RunLedger`, `FoldRuns`, `ActiveRun` |
-| `storage/lease.go` | **new** — `Lease`, `LeaseArbiter`, `ErrLeaseHeld` |
-| `storage/memarbit/arbiter.go` | **new** — the in-memory arbiter |
+| `storage/lease.go` | ✓ **new** — `Lease`, `LeaseArbiter`, `ErrLeaseHeld` |
+| `storage/memarbit/arbiter.go` | ✓ **new** — the in-memory arbiter |
 | `storage/filestore/runledger.go` | ✓ **new** — the `runs.jsonl` driver |
 | `storage/filestore/session.go` | ✓ the session directory gains `runs.jsonl`; the `FileSession` gains a ledger handle |
 | `storage/filestore/manager.go` | ✓ the startup pass reconciles the open runs |
@@ -1022,7 +1040,8 @@ selectors stay reference-stable (AGENTS.md's rules). What changes is the
 | `agentkit/run/turn.go` | ✓ `RunID` is assigned; the turn closes its own row. **Later:** `Turn` becomes a `Run` with subscribers |
 | `agentkit/run/loop.go` | ✓ the terminal row is written after the archive; the run derives and archives its own events. **Later:** the lease |
 | `agentkit/run/bridge.go` | ✓ the loop's exit closes the row and the publisher; `sessionState` becomes a cache |
-| `agentkit/run/errors.go` | `ErrSessionBusy` stays; the lease errors map onto it |
+| `agentkit/run/lease.go` | ✓ **new** — the run's lease, the progress-driven renewal |
+| `agentkit/run/errors.go` | ✓ `ErrSessionBusy` stays; the lease errors map onto it |
 | `transport/transport.go` | ✓ becomes a renderer: `contract.RunEvent` → AG-UI frames |
 | `api/v2_run.go` | ✓ the run id is minted once and handed down; the handler subscribes instead of draining. **Later:** attach |
 | `api/v2_sessions.go` | ✓ `state` comes from the scan; the two scan routes; the abort names the run it stopped |
@@ -1046,14 +1065,21 @@ selectors stay reference-stable (AGENTS.md's rules). What changes is the
 - ✓ the epoch never repeats, not even across a restart;
 - ✓ the ledger stays within its bound.
 
-**Go — the arbiter** (`storage/memarbit`):
-- a second claim on a live lease fails with `ErrLeaseHeld`;
-- an expired lease can be claimed, and the new epoch is higher;
-- a renewal by a fenced-out holder fails;
-- the epoch never repeats;
-- a run that **reports progress** keeps its lease;
-- a run that reports **nothing** loses the lease even while it is alive — the
-  run-level stall §5.1 describes.
+**Go — the arbiter** (`storage/memarbit/arbiter_test.go`):
+- ✓ a second claim on a live lease fails with `ErrLeaseHeld`;
+- ✓ an expired lease can be claimed, and the new epoch is higher;
+- ✓ a renewal by a fenced-out holder fails;
+- ✓ a run that **reports progress** keeps its lease;
+- ✓ a run that reports **nothing** loses the lease even while it is alive — the
+  run-level stall §5.1 describes;
+- ✓ a stale release does not free the new holder's lease;
+- ✓ the fence reports the holder's epoch.
+
+**Go — the runtime** (`agentkit/run/lease_test.go`):
+- ✓ a live owner holds the session: a second run is refused;
+- ✓ **a stalled owner does not hold the session for ever** — the lease is a
+  budget, and the gate asks it;
+- ✓ a run that reports progress keeps its lease.
 
 **Go — the runtime** (`agentkit/run`, `agentkit/run/runrow_test.go`,
 `agentkit/run/publish_test.go`):
@@ -1123,7 +1149,7 @@ turn. This fixes C3 and C4 — the coupling itself. It is also the stage where a
 **stuck subscriber stops being a scenario**: the run owns no socket, so a
 wedged connection cannot reach the run at all.
 
-**Stage 3 — the lease replaces the mutex.** The arbiter, the
+**Stage 3 — the lease replaces the mutex.** ✓ **landed.** The arbiter, the
 **progress-driven renewal**, the fence. The gate's behaviour is unchanged (still
 "one session, one turn", still 409); only its internals move. This stage fixes
 **both** kinds of stalled owner — the process-level one because the lease

@@ -57,6 +57,10 @@ type Turn struct {
 	// connections subscribe.
 	publisher *publisher
 
+	// lease is the run's claim on its session. Nil when no arbiter is
+	// wired — the runtime then behaves as it did before the lease.
+	lease *runLease
+
 	// row is the run's durable record. Nil when the session has no ledger.
 	row *runRow
 

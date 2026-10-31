@@ -60,6 +60,9 @@ if (!runRes.ok || !runRes.body) throw new Error("run failed")
 
 const events: AgEvent[] = []
 for await (const ev of readSse(runRes.body)) {
+  // ★ A keepalive frame carries no data. It is not an event, and
+  //   parsing it as one fails the whole check on a slow model.
+  if (!ev.data) continue
   events.push(JSON.parse(ev.data) as AgEvent)
 }
 

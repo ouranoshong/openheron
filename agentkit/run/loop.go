@@ -182,6 +182,9 @@ func (rt *Runtime) finishRun(turn *Turn, out Outcome) {
 }
 
 func (rt *Runtime) finalize(sess storage.Session, turn *Turn, out Outcome) error {
+	// ★ The run is over, so it is not holding the session any more.
+	turn.lease.release()
+
 	// ★ A cancelled turn is not a session error. The user stopped it, or
 	//   the run was aborted — putting "context canceled" in front of the
 	//   user as the session's last failure would be a lie about the

@@ -49,6 +49,17 @@ type Config struct {
 	// ★ It answers "which instance wrote this row" — the question a
 	//	post-mortem asks first. It defaults to the host name and the pid.
 	InstanceID string
+	// LeaseArbiter decides who owns a session.
+	//
+	// ★ Optional: without one the runtime keeps the turn slot as the only
+	//	ownership rule, and a stalled owner keeps the session until the
+	//	process restarts.
+	LeaseArbiter storage.LeaseArbiter
+	// LeaseTTL is how long a run's lease survives without progress.
+	//
+	// ★ It must be longer than the provider's own timeout, or a slow but
+	//	alive model is fenced out while it is thinking.
+	LeaseTTL time.Duration
 }
 
 // ApprovalDecision is one decision about one outstanding interrupt.
@@ -239,6 +250,12 @@ func (rt *Runtime) claimTurn(ctx context.Context, sess storage.Session, kind con
 	prev := st.turn
 	prevLoop := st.loop
 	busy := prev != nil && st.loop != nil && conflictTurns(kind, prev.Kind)
+	if busy && rt.leaseExpired(sess.ID()) {
+		// ★ The previous owner's lease ran out: it is not holding the
+		//   session any more — it stalled. This run may take it over,
+		//   and the epoch says which of the two is the owner from now on.
+		busy = false
+	}
 	if !busy {
 		st.turn = turn
 		st.loop = loop
@@ -260,6 +277,25 @@ func (rt *Runtime) claimTurn(ctx context.Context, sess storage.Session, kind con
 		return nil, nil, nil, nil, err
 	}
 	turn.row = row
+
+	// ★ The lease is the ownership rule. The turn slot says "a turn is
+	//   live"; the lease says "that turn is making progress". A session
+	//   whose owner stalled can be taken over — and the turn slot alone
+	//   cannot say that.
+	turn.lease = newRunLease(rt.cfg.LeaseArbiter, rt.cfg.LeaseTTL)
+	if err := turn.lease.claim(sess.ID(), turn.RunID, rt.instanceID, row.run.Epoch); err != nil {
+		rt.releaseClaim(sess, turn, prev, prevLoop)
+		return nil, nil, nil, nil, fmt.Errorf("%w: %v", ErrSessionBusy, err)
+	}
+	// ★ Progress renews the lease: the run reports it by publishing.
+	turn.publisher.onProgress = func() {
+		if !turn.lease.renew() {
+			rt.logf("session=%s the run lost its lease", sess.ID())
+			if turn.cancel != nil {
+				turn.cancel()
+			}
+		}
+	}
 
 	return turn, loop, prev, prevLoop, nil
 }
@@ -394,7 +430,11 @@ func (rt *Runtime) ensureNoLiveTurn(ctx context.Context, sess storage.Session) e
 	st.mu.Lock()
 	turn, loop := st.turn, st.loop
 	st.mu.Unlock()
-	if turn != nil && loop != nil {
+	if turn != nil && loop != nil && !rt.leaseExpired(sess.ID()) {
+		// ★ The lease is the arbiter here, not the pointer: an owner
+		//   whose lease ran out is not holding the session any more — it
+		//   stalled. Without this a wedged owner would keep the session
+		//   until the process restarted.
 		return fmt.Errorf("%w: a turn is already running on this session", ErrSessionBusy)
 	}
 	return nil

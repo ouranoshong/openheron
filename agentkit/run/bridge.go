@@ -139,6 +139,8 @@ func (rt *Runtime) loopExited(sessionID string, turn *Turn, loop *adk.TurnLoop[l
 	if exit != nil && exit.ExitReason != nil {
 		obs.Logger().Info("[openheronrt] loop exited", "session", sessionID, "reason", exit.ExitReason)
 	}
+	// ★ The loop is gone: nobody holds the session any more.
+	turn.lease.release()
 	rt.writeHeldApproval(sessionID, turn)
 	rt.closeApprovalRow(turn)
 	rt.closeOpenRow(turn, exit)

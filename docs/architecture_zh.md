@@ -54,6 +54,7 @@
 | **L2** | `agentkit/build` | `obs`, `spec`, `decl`, `approval`, `contract`, `helpers`, `kb`, `llm/common`, `message` | Agent 装配、工具装配、策略闸门 |
 | | `agentkit/run` | `emit`, `obs`, `approval`, `contract`, `message`, `storage` | 运行循环、输入构造、事件消费 |
 | | `storage/filestore` | `obs`, `contract`, `message`, `persist`, `storage` | 文件存储实现 |
+| | `storage/memarbit` | `storage` | 内存租约仲裁器 |
 | | `transport` | `contract` | AG-UI 渲染：run 的事件 → 帧 |
 | | `llm` | `build`, `spec`, `decl` | 薄封装（只有 `common/` 与一个测试文件） |
 | | `initcfg` | `spec` | `openheron init` 的出厂模板 |

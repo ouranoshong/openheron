@@ -28,6 +28,7 @@ import (
 	"github.com/ouranoshong/openheron/api"
 	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/storage/filestore"
+	"github.com/ouranoshong/openheron/storage/memarbit"
 	"github.com/ouranoshong/openheron/webui"
 )
 
@@ -243,6 +244,10 @@ func setupRuntime(ctx context.Context, st *startup) error {
 		SessionManager: fm,
 		Input:          run.InputConfig{ProjectRoot: st.projectRoot, Workspace: sessionsRoot},
 		StartTimeout:   startTimeout(st.cfg),
+		// ★ The lease is the ownership rule: it says a run may hold the
+		//   session, and it expires when the holder stops making
+		//   progress. The turn slot alone cannot say that.
+		LeaseArbiter: memarbit.New(),
 	})
 	fm.SetTeardown(rt)
 	st.rt = rt

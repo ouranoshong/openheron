@@ -36,6 +36,12 @@ type publisher struct {
 	window []contract.RunEvent
 	subs   map[*subscription]struct{}
 	closed bool
+
+	// onProgress is called when an event is published.
+	//
+	// ★ It is the run's liveness signal: the lease is renewed by
+	//	progress, and by nothing else.
+	onProgress func()
 }
 
 func newPublisher() *publisher {
@@ -58,6 +64,9 @@ func (p *publisher) Publish(ev contract.RunEvent) {
 	p.window = append(p.window, ev)
 	if len(p.window) > windowSize {
 		p.window = p.window[len(p.window)-windowSize:]
+	}
+	if p.onProgress != nil {
+		p.onProgress()
 	}
 	for sub := range p.subs {
 		if !sub.push(ev) {

@@ -13,7 +13,7 @@
 > | §2 目标模型 | 提案——形状已由 §3、§4 具备 |
 > | §3 D1 —— run 是一行事实 | **已实现** |
 > | §4 D2 —— 通知是提示，扫描才是真相 | 服务端**已实现**，客户端是提案 |
-> | §5 D3 —— 租约与 fence | 提案 |
+> | §5 D3 —— 租约与 fence | **已实现** —— 仲裁器、进展驱动的续租、读侧的 fence |
 > | §6 D4 —— 驱动可插拔 | 接口与文件驱动**已实现**，内存仲裁器还不在 |
 > | §7 事件管线 | **已实现** —— 推导搬进 `agentkit/emit`，run 自己消费 |
 > | §8 API 表面 | 扫描路由**已实现**，attach 是提案 |
@@ -429,7 +429,7 @@ GET /v2/sessions/{threadId}/runs
 
 ## 5. D3 —— 用租约和 fence 取代先到先得
 
-★ **本节是提案。** epoch 已经是真的了（§3.2），租约还不是。
+★ **已实现。** epoch 早就是真的了（§3.2），现在租约也是。
 
 ### 5.1 为什么互斥锁不够
 
@@ -457,7 +457,7 @@ GET /v2/sessions/{threadId}/runs
 ### 5.2 租约
 
 ```go
-// storage/lease.go (proposed)
+// storage/lease.go
 package storage
 
 // Lease is a time-bounded claim on a session.
@@ -493,12 +493,27 @@ type LeaseArbiter interface {
     Release(ctx context.Context, l Lease) error
     // Fence reports the session's current epoch.
     Fence(ctx context.Context, sessionID string) (uint64, error)
+    // Held reports the session's current lease, if any.
+    Held(ctx context.Context, sessionID string) (Lease, bool)
 }
 ```
 
+★ **正是租约让闸门说得出「停滞」而不只是「忙」。** 准入闸门问的是会话忙不忙；
+答案过去来自轮次槽位——「有一轮在跑」——而一个停滞的持有者会把那个槽位一直
+占着。现在闸门也问仲裁器：租约过期的持有者已经不再占着这个会话，别的 run
+可以接手（`agentkit/run/runtime.go`——`leaseExpired`）；而 epoch 说得出此后
+两个里谁才是持有者。
+
+★ **仲裁器是内存的那个**（`storage/memarbit`）。它在一个进程内裁决，什么都
+活不过重启——账本的对账器会收掉崩溃留下的 run（§3.3），下一轮拿一个新的
+epoch。
+
 ★ **run 会续租 —— 靠进展，不是靠定时器。** 租约在 run **报告进展**时续：
-loop 每完成一次迭代续一次，续租凭的是进展报告。TTL（默认 30 秒）是**预算**，
-不是日程：一次 TTL 之内什么都没报告的 run 丢掉租约，不管它是不是活着的。
+run 发布它的事件，每发布一次就是一次进展报告。TTL（默认 10 分钟，
+`agentkit/run/lease.go`——`DefaultLeaseTTL`）是**预算**，不是日程：一次 TTL
+之内什么都没报告的 run 丢掉租约，不管它是不是活着的。续租被节流到 TTL 的
+四分之一：流式模型每个 token 都报一次进展，每个 token 续一次租约等于每个
+token 抢一次锁，白白地。
 
 ★ **为什么不靠定时器。** 定时器续租会让一个卡在模型调用里的 run 一直攥着
 租约——续租的 goroutine 不关心 run 在干什么，它只是一遍遍说「我还活着」。
@@ -899,19 +914,20 @@ store 的形状几乎不变——reducer 仍然是纯函数，选择器仍然返
 | 文件 | 改动 |
 |---|---|
 | `storage/runledger.go` | ✓ **新增** —— `Run`、`RunState`、`RunLedger`、`FoldRuns`、`ActiveRun` |
-| `storage/lease.go` | **新增** —— `Lease`、`LeaseArbiter`、`ErrLeaseHeld` |
-| `storage/memarbit/arbiter.go` | **新增** —— 内存仲裁者 |
+| `storage/lease.go` | ✓ **新增** —— `Lease`、`LeaseArbiter`、`ErrLeaseHeld` |
+| `storage/memarbit/arbiter.go` | ✓ **新增** —— 内存仲裁器 |
 | `storage/filestore/runledger.go` | ✓ **新增** —— `runs.jsonl` 驱动 |
 | `storage/filestore/session.go` | ✓ 会话目录多出 `runs.jsonl`；`FileSession` 多一个账本句柄 |
 | `storage/filestore/manager.go` | ✓ 启动时的巡检给未结束的 run 收尾 |
 | `agentkit/emit/` | ✓ **新增** —— 从 `transport` 里拆出来的推导层 |
 | `contract/runevent.go` | ✓ **新增** —— `RunEvent`、`RunEventKind` |
-| `agentkit/run/runtime.go` | ✓ `Submit`/`Resume` 带着 run id；`claimTurn` 打开那一行；`StatusOf` 读扫描。**往后：** `claimTurn` 变成租约申领 |
+| `agentkit/run/runtime.go` | ✓ `Submit`/`Resume` 带着 run id；`claimTurn` 打开那一行并申领租约；`StatusOf` 读扫描 |
 | `agentkit/run/publish.go` | ✓ **新增** —— 发布方、订阅与窗口 |
 | `agentkit/run/turn.go` | ✓ `RunID` 被赋值；turn 自己收掉自己那一行。**往后：** `Turn` 变成带订阅者的 `Run` |
 | `agentkit/run/loop.go` | ✓ 终态行写在归档之后；run 自己推导并归档。**往后：** 租约 |
 | `agentkit/run/bridge.go` | ✓ loop 退出时收掉那一行与发布方；`sessionState` 降级为缓存 |
-| `agentkit/run/errors.go` | `ErrSessionBusy` 保留；租约错误映射到它 |
+| `agentkit/run/lease.go` | ✓ **新增** —— run 的租约、进展驱动的续租 |
+| `agentkit/run/errors.go` | ✓ `ErrSessionBusy` 保留；租约错误映射到它 |
 | `transport/transport.go` | ✓ 变成渲染器：`contract.RunEvent` → AG-UI 帧 |
 | `api/v2_run.go` | ✓ run id 只铸一次并往下传；处理器订阅而不是抽干。**往后：** 挂上 |
 | `api/v2_sessions.go` | ✓ `state` 来自扫描；两条扫描路由；中止报出它停掉的 run |
@@ -934,13 +950,19 @@ store 的形状几乎不变——reducer 仍然是纯函数，选择器仍然返
 - ✓ epoch 从不复用，连重启也不复用；
 - ✓ 账本始终在自己的上界之内。
 
-**Go —— 仲裁者**（`storage/memarbit`）：
-- 对一把活着的租约二次申领失败，报 `ErrLeaseHeld`；
-- 过期的租约可以被申领，新的 epoch 更高；
-- 被 fence 掉的持有者续租失败；
-- epoch 从不复用；
-- **报告了进展**的 run 保住租约；
-- **什么都没报告**的 run 丢掉租约——哪怕它活着。这就是 §5.1 说的 run 级停滞。
+**Go —— 仲裁者**（`storage/memarbit/arbiter_test.go`）：
+- ✓ 对一把活着的租约二次申领失败，报 `ErrLeaseHeld`；
+- ✓ 过期的租约可以被申领，新的 epoch 更高；
+- ✓ 被 fence 掉的持有者续租失败；
+- ✓ **报告了进展**的 run 保住租约；
+- ✓ **什么都没报告**的 run 丢掉租约——哪怕它活着。这就是 §5.1 说的 run 级停滞；
+- ✓ 一次过期的释放不会把新持有者的租约放掉；
+- ✓ fence 报出持有者的 epoch。
+
+**Go —— runtime**（`agentkit/run/lease_test.go`）：
+- ✓ 活着的持有者占着会话：第二个 run 被拒；
+- ✓ **停滞的持有者不会永远占着会话**——租约是预算，闸门问的就是它；
+- ✓ 报告了进展的 run 保住租约。
 
 **Go —— runtime**（`agentkit/run`、`agentkit/run/runrow_test.go`、
 `agentkit/run/publish_test.go`）：
@@ -999,10 +1021,10 @@ run 的事件窗口，以及**挂上**。run 自己读自己的事件，推导�
 的部分。这一期修掉 C3 和 C4——耦合本身。它也是「**卡住的订阅者不再是一种
 场景**」的那一期：run 不再拥有 socket，wedge 住的连接根本够不着 run。
 
-**第 3 期 —— 租约取代互斥锁。** 仲裁者、**进展驱动的续租**、fence。闸门的
-行为不变（仍然是「一个会话一轮」，仍然是 409）；只是内部换掉了。这一期治好了
-**两种**持有者停滞——进程级那一半靠「进程一停，租约就过期」，run 级那一半靠
-「续租由进展驱动」——并为第二个进程铺路。
+**第 3 期 —— 租约取代互斥锁。** ✓ **已落地。** 仲裁者、**进展驱动的续租**、
+fence。闸门的行为不变（仍然是「一个会话一轮」，仍然是 409）；只是内部换掉了。
+这一期治好了**两种**持有者停滞——进程级那一半靠「进程一停，租约就过期」，run
+级那一半靠「续租由进展驱动」——并为第二个进程铺路。
 
 ★ **第 3 期只能排在第 2 期后面，理由就是那个续租。** 进展驱动的续租要求 run
 能看见自己的进展，而在第 2 期之前 run 什么也看不见：是 transport 抽干事件、

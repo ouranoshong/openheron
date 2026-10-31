@@ -47,7 +47,8 @@ openheron/
 ├── message/           # 消息内容与来源
 ├── persist/           # 原子写文件
 ├── storage/
-│   └── filestore/     # 文件存储实现
+│   ├── filestore/     # 文件存储实现
+│   └── memarbit/      # 内存租约仲裁器
 ├── transport/         # AG-UI 渲染：run 的事件 → 帧
 ├── webui/             # 嵌入式前端资源
 └── web/               # React 前端
@@ -61,7 +62,7 @@ openheron/
 |---|---|---|
 | **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `llm/common` `webui` | 无 |
 | **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` 无；`storage`→`contract`；`kb`→`obs`,`persist`；`spec`→`obs`,`decl`,`kb`,`persist`；`emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
-| **L2** | `agentkit/build` `agentkit/run` `storage/filestore` `transport` `llm` `initcfg` | 见 architecture.md §2 |
+| **L2** | `agentkit/build` `agentkit/run` `storage/filestore` `storage/memarbit` `transport` `llm` `initcfg` | 见 architecture.md §2 |
 | **L3** | `api` | 几乎全部 |
 
 两条**不能破**的铁律：

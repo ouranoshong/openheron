@@ -49,7 +49,8 @@ openheron/
 ├── message/           # message content and provenance
 ├── persist/           # atomic file writes
 ├── storage/
-│   └── filestore/     # file store implementation
+│   ├── filestore/     # file store implementation
+│   └── memarbit/      # the in-memory lease arbiter
 ├── transport/         # AG-UI rendering: the run's events → frames
 ├── webui/             # embedded frontend assets
 └── web/               # React frontend
@@ -64,7 +65,7 @@ one. The measured internal import graph:
 |---|---|---|
 | **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `llm/common` `webui` | none |
 | **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` none; `storage`→`contract`; `kb`→`obs`,`persist`; `spec`→`obs`,`decl`,`kb`,`persist`; `emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
-| **L2** | `agentkit/build` `agentkit/run` `storage/filestore` `transport` `llm` `initcfg` | see architecture.md §2 |
+| **L2** | `agentkit/build` `agentkit/run` `storage/filestore` `storage/memarbit` `transport` `llm` `initcfg` | see architecture.md §2 |
 | **L3** | `api` | almost all of them |
 
 Two rules that **must not be broken**:
