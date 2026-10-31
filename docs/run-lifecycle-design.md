@@ -13,14 +13,14 @@
 > | Section | Status |
 > |---|---|
 > | §1 What "one turn" means today | **as it is** |
-> | §2 The target model | proposal — the shape §3 and §4 already have |
+> | §2 The target model | the shape §3-§9 now have |
 > | §3 D1 — a run is a row of facts | **implemented** |
-> | §4 D2 — notification is a hint, the scan is the truth | the server side is **implemented**, the client side is a proposal |
+> | §4 D2 — notification is a hint, the scan is the truth | **implemented** — the server scans, the client asks |
 > | §5 D3 — lease and fence | **implemented** — the arbiter, the progress-driven renewal and the read-side fence |
-> | §6 D4 — the driver is pluggable | the interfaces and the file driver are **implemented**, the memory arbiter is not there yet |
+> | §6 D4 — the driver is pluggable | **implemented** — the interfaces, the file driver and the memory arbiter |
 > | §7 The event pipeline | **implemented** — the derivation moved to `agentkit/emit`, the run owns its consumption |
-> | §8 The API surface | the scan routes are **implemented**, attach is a proposal |
-> | §9 The frontend | proposal |
+> | §8 The API surface | **implemented** — the scan routes and the attach |
+> | §9 The frontend | **implemented** — the attach and the scanned busy flag |
 >
 > A design document that blurs "what is" into "what would be" is how
 > documentation drift starts.
@@ -980,8 +980,8 @@ able to tell that apart from a session it may retry.
 
 ## 9. The frontend
 
-★ **The re-attach is implemented.** The busy flag's own rule (§9.1) is still a
-proposal: the server tells the truth, and the client does not ask it yet.
+★ **Implemented.** The re-attach (§9.2) and the scanned busy flag (§9.1) are both
+in the tree: the server tells the truth, and the client asks it.
 
 ### 9.1 The busy flag becomes a scanned fact
 
