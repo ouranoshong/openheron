@@ -78,3 +78,8 @@ probe*.txt
 #   .graphifyignore is graphify's own scan-exclusion rules, unrelated to git.
 /graphify-out/
 /.graphifyignore
+
+# The benchmark's scratch config root and its output (the runner wipes the
+# work directory before every task).
+/.openheron-bench/
+/benchmarks/out/

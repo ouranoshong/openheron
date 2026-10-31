@@ -41,12 +41,17 @@ tasks:
 
   - id: write-a-file
     kind: exec
-    prompt: "Create the file out/report.txt containing exactly the line: done"
+    # ★ "in the project root", not a relative path: the run prompt tells the
+    #   model to pass absolute paths, and a relative one leaves it guessing
+    #   where the project root is. (The first smoke run wrote the file next
+    #   to the benchmark's output directory.)
+    prompt: "Create the file report.txt in the project root, containing exactly the line: done"
     checks:
       - type: file_exists
-        value: out/report.txt
+        value: report.txt
       - type: file_contains
-        value: "done"
+        value: report.txt
+        contains: "done"
 
   - id: run-a-command
     kind: exec

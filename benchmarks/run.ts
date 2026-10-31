@@ -35,12 +35,18 @@ type Check =
 type Task = { id: string; kind: string; prompt: string; checks: Check[] }
 type Usage = { promptTokens: number; completionTokens: number; totalTokens: number; cachedTokens: number }
 
+const here = dirname(new URL(import.meta.url).pathname)
+
 const args = parseArgs(process.argv.slice(2))
 const base = (args.base ?? "http://127.0.0.1:18099").replace(/\/$/, "")
-const configRoot = resolve(args.config ?? ".openheron")
-const workRoot = resolve(args.work ?? ".")
+const configRoot = resolve(args.config ?? ".openheron-bench")
+// ★ The work directory is **scratch**: the runner wipes it before every
+//   task. It must not be the fixture directory — that is the source.
+const workRoot = resolve(args.work ?? join(here, "out", "work"))
+const fixtureRoot = join(here, "fixtures", "work")
+const outDir = join(here, "out")
 const repeats = Number(args.repeats ?? 3)
-const here = dirname(new URL(import.meta.url).pathname)
+const runTimeoutMs = Number(args.timeout ?? 300_000)
 
 const armsDoc = Bun.YAML.parse(await readFile(join(here, "arms.yaml"), "utf8")) as {
   prices: Record<string, Price>
@@ -50,10 +56,23 @@ const armsDoc = Bun.YAML.parse(await readFile(join(here, "arms.yaml"), "utf8")) 
 const tasksDoc = Bun.YAML.parse(await readFile(join(here, "tasks.yaml"), "utf8")) as { tasks: Task[] }
 
 const arms = armsDoc.arms.filter((a) => !args.arm || a.id === args.arm)
-const tasks = tasksDoc.tasks.filter((t) => !args.kind || t.kind === args.kind)
+const tasks = tasksDoc.tasks.filter(
+  (t) => (!args.kind || t.kind === args.kind) && (!args.task || t.id === args.task),
+)
 
 if (arms.length === 0 || tasks.length === 0) {
   console.error("no arm or task selected")
+  process.exit(2)
+}
+
+// ★ The work directory gets wiped before every task. Pointing it at the
+//   fixture directory would delete the fixtures — and at the repository
+//   root would delete the repository.
+if (workRoot === fixtureRoot || workRoot === resolve(".") || workRoot === resolve(here)) {
+  console.error(
+    `--work must be a scratch directory, not ${workRoot}\n` +
+      `it is wiped before every task (the fixtures live in ${fixtureRoot})`,
+  )
   process.exit(2)
 }
 
@@ -74,6 +93,22 @@ type Run = {
 
 const results: Run[] = []
 
+const report: Record<string, unknown> = {
+  base,
+  configRoot,
+  repeats,
+  prices: armsDoc.prices,
+  runs: results,
+  summary: {},
+}
+
+async function writeReport() {
+  report.runs = results
+  report.summary = summarize(results)
+  await mkdir(outDir, { recursive: true })
+  await Bun.write(join(outDir, "report.json"), JSON.stringify(report, null, 2))
+}
+
 for (const arm of arms) {
   await installArm(arm)
   // The agents are hot-reloaded; give the server a moment to pick them up.
@@ -84,6 +119,9 @@ for (const arm of arms) {
     for (let repeat = 1; repeat <= repeats; repeat++) {
       const run = await runTask(arm, task, repeat)
       results.push(run)
+      // ★ The report is written after every run: a sweep that is killed
+      //   halfway must not lose the runs it already paid for.
+      await writeReport()
       console.error(
         `  ${run.ok ? "✓" : "✗"} ${task.id} #${repeat}  ¥${run.cost.toFixed(4)}  ` +
           `turns=${run.turns}  ${run.ok ? "" : run.failedChecks.join("; ")}`,
@@ -94,19 +132,12 @@ for (const arm of arms) {
 
 // ── the report ────────────────────────────────────────────────────────────
 
-const report = {
-  base,
-  configRoot,
-  repeats,
-  prices: armsDoc.prices,
-  runs: results,
-  summary: summarize(results),
-}
+// ★ The report is written after every run, so it must exist before the
+//   first one: a sweep that is killed halfway must not lose the runs it
+//   already paid for.
 
-const outDir = join(here, "out")
-await mkdir(outDir, { recursive: true })
-await Bun.write(join(outDir, "report.json"), JSON.stringify(report, null, 2))
-console.error(`\n${renderSummary(report)}`)
+await writeReport()
+console.error(`\n${renderSummary(report as any)}`)
 console.error(`\nfull report: ${join(outDir, "report.json")}`)
 
 // ── the pieces ────────────────────────────────────────────────────────────
@@ -129,7 +160,7 @@ async function runTask(arm: Arm, task: Task, repeat: number): Promise<Run> {
   // Every task starts from the same tree.
   await rm(workRoot, { recursive: true, force: true })
   await mkdir(workRoot, { recursive: true })
-  await cp(join(here, "fixtures", "work"), workRoot, { recursive: true })
+  await cp(fixtureRoot, workRoot, { recursive: true })
 
   const run: Run = {
     arm: arm.id,
@@ -300,19 +331,34 @@ async function getJSON(path: string): Promise<any> {
  *   turn is archived.
  */
 async function postRun(threadId: string, prompt: string): Promise<any[]> {
+  const controller = new AbortController()
   const res = await fetch(base + "/v2/run", {
     method: "POST",
+    signal: controller.signal,
     headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     body: JSON.stringify({ threadId, query: prompt }),
   })
   if (!res.ok || !res.body) throw new Error(`/v2/run → ${res.status} ${await res.text()}`)
   const events: any[] = []
-  for await (const ev of readSse(res.body)) {
-    try {
-      events.push(JSON.parse(ev.data))
-    } catch {
-      // a frame that will not parse is not a reason to stop reading
+  // ★ A run that never finishes must not take the sweep with it. The
+  //   timeout is generous — it is a guard against a hung model, not a
+  //   budget — and a timed-out run is recorded as a failed one.
+  const timer = setTimeout(() => controller.abort(), runTimeoutMs)
+  try {
+    for await (const ev of readSse(res.body)) {
+      try {
+        events.push(JSON.parse(ev.data))
+      } catch {
+        // a frame that will not parse is not a reason to stop reading
+      }
     }
+  } catch (e) {
+    if ((e as Error).name === "AbortError") {
+      throw new Error(`the run did not finish within ${runTimeoutMs / 1000}s`)
+    }
+    throw e
+  } finally {
+    clearTimeout(timer)
   }
   return events
 }

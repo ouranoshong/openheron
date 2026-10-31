@@ -141,6 +141,51 @@ run should add a rubric with a fixed judge model.
 3. ★ **The cache-hit rate** differs between the arms and is measured, not
    assumed.
 
+## What the first smoke showed
+
+`--repeats 1 --kind exec` on the five execution tasks, all fifteen runs passing
+(the report is `out/report.json`):
+
+| Arm | Total | Passed | Mean rounds | Ratio to B |
+|---|---|---|---|---|
+| A strong parent + cheap workers | ¥0.3736 | 5/5 | 4.6 | **1.009** |
+| B one strong model | ¥0.3701 | 5/5 | 3.4 | 1.000 |
+| C one cheap model | ¥0.0333 | 5/5 | 3.6 | **0.090** |
+
+★ **Two findings, and the second one is the bigger one.**
+
+**1. On these tasks the decomposition cancels the discount.** A and B are a
+tie (A is 0.9 % dearer), and the per-task numbers say why:
+
+| Task | A | B | rounds A/B |
+|---|---|---|---|
+| read-json-value | ¥0.0440 | ¥0.0396 | 2/2 |
+| count-go-files | ¥0.0534 | ¥0.1082 | 3/5 |
+| write-a-file | ¥0.1279 | ¥0.0844 | 10/4 |
+| run-a-command | ¥0.0803 | ¥0.0663 | 5/3 |
+| locate-a-symbol | ¥0.0680 | ¥0.0717 | 3/3 |
+
+`write-a-file` is where the topology shows its price: A spent **10 rounds**
+(decompose, delegate, integrate, read the worker's report) against B's 4, and
+paid for them. The coordination is a **fixed** cost — one strong-model
+decomposition plus one strong-model integration — while the discount is
+**proportional** to the work that moves. So the smaller the task, the more the
+decomposition has to lose. ★ **These five tasks are too small to amortize the
+coordination.** A benchmark that wants the break-even α\* needs tasks big
+enough that the delegated part dominates the parent's two calls.
+
+**2. The model choice outweighs the topology by an order of magnitude.** C —
+one cheap model doing everything — was **11× cheaper than both** and passed
+everything. On this task set the saving came from the model, not from the
+decomposition. That is exactly what the control arm is for: without C, "A is
+competitive with B" would have read as a success for the multi-agent topology
+when it was only a success for the price table.
+
+★ **One repeat is noise.** The same task in two runs of the same arm moved by
+2× (B's `count-go-files`: ¥0.0515, then ¥0.1082). The numbers above are a
+smoke, not a measurement — `--repeats 3` is the minimum for a claim, and the
+median matters more than the mean.
+
 ## The known gap this benchmark does not need
 
 The live run does not account the usage per agent — `usage.byAgent` exists
