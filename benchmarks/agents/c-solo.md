@@ -1,5 +1,9 @@
 ---
 description: "main: does the whole job itself (control arm)."
+# ★ The model line below is a placeholder. The runner rewrites it from the
+#   arm table in arms.yaml (see installArm), so the arm that says "flash"
+#   really runs flash no matter what this file says. It is spelled out
+#   here only so the file stays a valid agent definition on its own.
 model: qwen/qwen3.8-max
 max_iterations: 30
 reasoning: high

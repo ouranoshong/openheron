@@ -52,6 +52,7 @@ const armsDoc = Bun.YAML.parse(await readFile(join(here, "arms.yaml"), "utf8")) 
   prices: Record<string, Price>
   arms: Arm[]
   models: Record<string, string>
+  baseline?: string
 }
 const tasksDoc = Bun.YAML.parse(await readFile(join(here, "tasks.yaml"), "utf8")) as { tasks: Task[] }
 
@@ -59,6 +60,13 @@ const arms = armsDoc.arms.filter((a) => !args.arm || a.id === args.arm)
 const tasks = tasksDoc.tasks.filter(
   (t) => (!args.kind || t.kind === args.kind) && (!args.task || t.id === args.task),
 )
+
+// ★ The baseline arm is declared in arms.yaml, not guessed from the order
+//   of the arms: "one strong model does everything" is the alternative
+//   the decomposition has to beat, so it is the only meaningful
+//   denominator. When the baseline is not part of this run (a filtered
+//   sweep), the summary falls back to the first arm it has.
+const baselineArm = armsDoc.baseline ?? arms[0]?.id
 
 if (arms.length === 0 || tasks.length === 0) {
   console.error("no arm or task selected")
@@ -98,6 +106,7 @@ const report: Record<string, unknown> = {
   configRoot,
   repeats,
   prices: armsDoc.prices,
+  baseline: baselineArm,
   runs: results,
   summary: {},
 }
@@ -302,8 +311,14 @@ function summarize(runs: Run[]) {
       totalCost: total,
       meanCost: list.length ? total / list.length : 0,
       meanTurns: list.length ? list.reduce((s, r) => s + r.turns, 0) / list.length : 0,
+      // ★ The kinds are derived from the runs, not written down here.
+      //   A hardcoded list silently drops every kind that was added later:
+      //   `big` was in the task set and in the totals, but missing from
+      //   `byKind`, so the per-kind breakdown did not add up to the
+      //   arm total and the summary printed a story that the numbers did
+      //   not support. The order of first appearance is stable.
       byKind: Object.fromEntries(
-        ["exec", "decompose", "judge"].map((kind) => {
+        [...new Set(list.map((r) => r.kind))].map((kind) => {
           const k = list.filter((r) => r.kind === kind)
           return [
             kind,
@@ -320,17 +335,29 @@ function summarize(runs: Run[]) {
   return out
 }
 
-function renderSummary(report: { summary: Record<string, any> }): string {
+function renderSummary(report: { summary: Record<string, any> }): any {
   const lines: string[] = []
-  const base = report.summary[Object.keys(report.summary)[0]] as any
+  const armNames = Object.keys(report.summary)
+  // ★ The baseline is the arm named on the command line, not "the first
+  //   one in the object". The per-kind ratio is the number that actually
+  //   answers "is the strong-parent/weak-worker split worth it", and it
+  //   is the number that used to have to be computed by hand.
+  const baseName = baselineArm && report.summary[baselineArm] ? baselineArm : armNames[0]
+  const base = report.summary[baseName] as any
   for (const [arm, s] of Object.entries(report.summary)) {
     const ratio = base ? s.totalCost / base.totalCost : 1
     lines.push(
       `${arm.padEnd(28)} ¥${s.totalCost.toFixed(4).padStart(10)}  ` +
-        `pass ${s.passed}/${s.runs}  turns ${s.meanTurns.toFixed(1)}  ratio ${ratio.toFixed(3)}`,
+        `pass ${s.passed}/${s.runs}  turns ${s.meanTurns.toFixed(1)}  ` +
+        `ratio ${ratio.toFixed(3)}${arm === baseName ? "  (baseline)" : ""}`,
     )
     for (const [kind, k] of Object.entries(s.byKind)) {
-      lines.push(`  ${kind.padEnd(26)} ¥${k.totalCost.toFixed(4).padStart(10)}  pass ${k.passed}/${k.runs}`)
+      const bk = base?.byKind?.[kind]
+      const kRatio = bk?.totalCost ? k.totalCost / bk.totalCost : 1
+      lines.push(
+        `  ${kind.padEnd(26)} ¥${k.totalCost.toFixed(4).padStart(10)}  ` +
+          `pass ${k.passed}/${k.runs}  ratio ${kRatio.toFixed(3)}`,
+      )
     }
   }
   return lines.join("\n")

@@ -26,6 +26,14 @@ prices:
     cached_input: 0.1
 
 # ── the arms ───────────────────────────────────────────────────────────────
+#
+# ★ The baseline is the arm every other arm is measured against. It is
+#   declared here rather than guessed in code: "the strong model does it
+#   all" is the alternative the decomposition has to beat, so it is the
+#   only meaningful denominator. A run that does not include the baseline
+#   falls back to the first arm it has.
+baseline: b-max-solo
+
 arms:
   # A: the strong model decomposes, the weak model executes.
   - id: a-max-parent-flash-workers
