@@ -37,7 +37,10 @@ tasks:
     prompt: "Count the .go files under internal/ and report the number."
     checks:
       - type: answer_contains
-        value: "2"
+        # ★ The number follows the fixture: the package grew when the big
+        #   tasks were added, and a stale expectation would fail a run
+        #   that answered correctly.
+        value: "8"
 
   - id: write-a-file
     kind: exec

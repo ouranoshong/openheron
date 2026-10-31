@@ -253,7 +253,10 @@ function costOf(
 async function evaluate(check: Check, answer: string, workRoot: string): Promise<boolean> {
   switch (check.type) {
     case "answer_contains":
-      return answer.includes(check.value)
+      // ★ Case-insensitive: the model's capitalisation is not a fact about
+      //   the answer. "Memory does:" answers "what breaks first" just as
+      //   well as "memory does".
+      return answer.toLowerCase().includes(check.value.toLowerCase())
     case "file_exists":
       return existsSync(join(workRoot, check.value))
     case "file_contains": {

@@ -141,50 +141,56 @@ run should add a rubric with a fixed judge model.
 3. ★ **The cache-hit rate** differs between the arms and is measured, not
    assumed.
 
-## What the first smoke showed
+## What the sweep showed
 
-`--repeats 1 --kind exec` on the five execution tasks, all fifteen runs passing
-(the report is `out/report.json`):
+One repeat over all fifteen tasks (the report is `out/report.json`; the two
+judgement failures in that run were **check** bugs, not model failures — one
+expected a stale file count, one compared case-sensitively — and both are
+fixed, so the table below is the corrected verdict):
 
 | Arm | Total | Passed | Mean rounds | Ratio to B |
 |---|---|---|---|---|
-| A strong parent + cheap workers | ¥0.3736 | 5/5 | 4.6 | **1.009** |
-| B one strong model | ¥0.3701 | 5/5 | 3.4 | 1.000 |
-| C one cheap model | ¥0.0333 | 5/5 | 3.6 | **0.090** |
+| A strong parent + cheap workers | ¥3.9360 | 15/15 | 8.9 | **1.002** |
+| B one strong model | ¥3.9264 | 15/15 | 6.8 | 1.000 |
+| C one cheap model | ¥0.0372 (5 tasks) | 5/5 | 3.6 | 0.095 on those five |
 
-★ **Two findings, and the second one is the bigger one.**
+★ **A and B are a tie.** A won seven tasks and B won eight — there is no
+systematic win. By class:
 
-**1. On these tasks the decomposition cancels the discount.** A and B are a
-tie (A is 0.9 % dearer), and the per-task numbers say why:
+| Class | A | B | A/B | rounds A/B |
+|---|---|---|---|---|
+| exec | ¥0.452 | ¥0.386 | 1.171 | 4.2 / 3.0 |
+| decompose | ¥1.248 | ¥1.036 | 1.204 | 11.5 / 8.2 |
+| big | ¥1.178 | ¥1.295 | **0.910** | 16.0 / 10.0 |
+| judge | ¥1.058 | ¥1.209 | **0.875** | 6.3 / 8.0 |
 
-| Task | A | B | rounds A/B |
-|---|---|---|---|
-| read-json-value | ¥0.0440 | ¥0.0396 | 2/2 |
-| count-go-files | ¥0.0534 | ¥0.1082 | 3/5 |
-| write-a-file | ¥0.1279 | ¥0.0844 | 10/4 |
-| run-a-command | ¥0.0803 | ¥0.0663 | 5/3 |
-| locate-a-symbol | ¥0.0680 | ¥0.0717 | 3/3 |
+★ **The finding that explains the tie: the coordination is charged at the
+strong model's price.** The parent's extra rounds — the decomposition and the
+integration — are max-rate calls, and the workers' rounds are flash-rate
+calls. So the discount the workers earn is paid for in the currency the parent
+spends. A decomposition that adds three rounds at ¥36/M does not repay a
+worker doing the same work at ¥2.7/M unless the work moved is much larger than
+the coordination.
 
-`write-a-file` is where the topology shows its price: A spent **10 rounds**
-(decompose, delegate, integrate, read the worker's report) against B's 4, and
-paid for them. The coordination is a **fixed** cost — one strong-model
-decomposition plus one strong-model integration — while the discount is
-**proportional** to the work that moves. So the smaller the task, the more the
-decomposition has to lose. ★ **These five tasks are too small to amortize the
-coordination.** A benchmark that wants the break-even α\* needs tasks big
-enough that the delegated part dominates the parent's two calls.
+That is the break-even from the design section, measured: **α\* was not reached
+on these tasks.** The big class (16 rounds) and the judge class came out ahead
+for A; the exec class (4 rounds) and the decompose class (11.5 rounds) came
+out behind. The threshold sits somewhere around ten rounds of real work — and
+the classes where A won are the ones where the parent's own thinking was
+replaced by a cheap worker's execution, not the ones with the most work to
+move.
 
-**2. The model choice outweighs the topology by an order of magnitude.** C —
-one cheap model doing everything — was **11× cheaper than both** and passed
-everything. On this task set the saving came from the model, not from the
-decomposition. That is exactly what the control arm is for: without C, "A is
-competitive with B" would have read as a success for the multi-agent topology
-when it was only a success for the price table.
+★ **The control arm is where the real finding is.** C — one cheap model doing
+everything — was **12× cheaper** than A on the same five tasks, and passed
+them all. Then it **timed out on `find-every-caller`**, the first task that
+needs a real search. The cheap model is not slightly worse at this work; it
+falls off a cliff, and the cliff is exactly where the cost advantage would
+have been spent.
 
 ★ **One repeat is noise.** The same task in two runs of the same arm moved by
-2× (B's `count-go-files`: ¥0.0515, then ¥0.1082). The numbers above are a
-smoke, not a measurement — `--repeats 3` is the minimum for a claim, and the
-median matters more than the mean.
+2× (B's `count-go-files`: ¥0.0515, then ¥0.1082 — and this sweep's B run
+measured ¥0.0656). `--repeats 3` is the minimum for a claim, and the median
+matters more than the mean.
 
 ## Running out of quota mid-sweep
 
