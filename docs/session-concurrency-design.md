@@ -791,6 +791,15 @@ surface that owns one keeps its own event stream and never re-hydrates
 (`openSession` returns early for a loaded session). So the hydration
 raises the **busy** flag too, and the composer says whose turn it is.
 
+★ **And the flag is cleared by a scan of the run ledger, not by the
+abort's promise.** The hydration reads the server's state, and that state
+is a scan of the ledger (see
+[run-lifecycle-design.md](run-lifecycle-design.md) §9.1). The same holds
+when the flag goes down: `stop()` sends the abort and then re-scans. The
+abort says "I asked"; the scan says "the session is free". A scan that
+cannot be made leaves the flag alone — guessing is what the scan exists
+to stop.
+
 **`seedFromHistory` learns the server's state** (`web/src/lib/store/history.ts:30`):
 
 ```ts

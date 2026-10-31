@@ -875,16 +875,24 @@ GET /v2/sessions/{threadId}/runs/{runId}      one run
 
 ### 9.1 busy 标记变成扫描出来的事实
 
-`ConversationState.busy`（`web/src/lib/types.ts:123-127`）的含义是「这个
-会话有一个本界面不拥有的活着的 turn」。在提案下，它**只由扫描设置和清除**：
+★ **已实现。** `ConversationState.busy`（`web/src/lib/types.ts`）的含义是
+「这个会话有一个本界面不拥有的活着的 turn」。它**只由扫描设置和清除**：
 
 - **置上**：扫描报出一个本界面不拥有的 `activeRunId`。
 - **清掉**：扫描报出没有活跃的 run。
 
-★ `stop()`（`web/src/lib/store/actions.ts:318-351`）要改形状：它发 abort，
-然后**重新扫描**，而不是自己去置 `busy: false`
-（`web/src/lib/store/actions.ts:339`）。乐观地置它，正是这个设计要消灭的
-「相信通知」式的错误。
+★ `stop()`（`web/src/lib/store/actions.ts`）改了形状：它发 abort，然后
+**重新扫描**，而不是自己去置 `busy: false`。乐观地置它，正是这个设计要消灭的
+「相信通知」式的错误——abort 说「我问了」，扫描说「会话空了」。
+
+★ 流的结束是另一处：流结束什么也说明不了这个会话（别的界面可能正在跑），
+所以客户端在那里也重新扫一次。
+
+★ **扫描失败就让标记留在原样。** 猜正是扫描要治的病：扫不出来的时候不能把
+忙标记清掉——那行字是用户和「被拒的消息」之间唯一的挡板。
+
+★ 本界面自己拥有的那一轮不算「忙」。扫描拿活动 run 的 id 和会话自己的 run id
+比 ✓。
 
 ### 9.2 挂上
 

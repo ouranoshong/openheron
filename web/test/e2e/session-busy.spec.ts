@@ -85,6 +85,13 @@ test("忙着的会话可以停止另一轮来接管", async ({ page, context }) 
   await expect(other.locator(BUSY)).toBeVisible()
 
   // Stopping the turn frees the session.
+  //
+  // ★ And the session is free because the **ledger says so**: the client
+  //   scans the run ledger after the abort. The abort says "I asked"; the
+  //   scan says "the session is free".
+  const seen: string[] = []
+  other.on("request", (r) => seen.push(new URL(r.url()).pathname))
   await other.locator(STOP_BUTTON).click()
   await expect(other.locator(BUSY)).toHaveCount(0)
+  expect(seen.filter((p) => p.endsWith("/runs")).length).toBeGreaterThan(0)
 })

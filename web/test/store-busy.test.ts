@@ -17,6 +17,8 @@ const store = new Map<string, string>()
 }
 
 let busyResponse = false
+// runsView is what the run ledger's scan answers.
+let runsView: { items: unknown[]; activeRunId?: string } = { items: [] }
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -27,6 +29,7 @@ function json(body: unknown, status = 200): Response {
 
 beforeEach(() => {
   busyResponse = false
+  runsView = { items: [] }
   globalThis.fetch = (async (input: any) => {
     const url = typeof input === "string" ? input : String(input?.url ?? "")
     if (url === "/v2/sessions") {
@@ -47,6 +50,9 @@ beforeEach(() => {
     }
     if (url.endsWith("/messages")) {
       return json({ threadId: A, state: "idle", messages: [] })
+    }
+    if (url.endsWith("/runs")) {
+      return json(runsView)
     }
     if (url === "/v2/run") {
       if (busyResponse) {
@@ -131,5 +137,66 @@ describe("a refused run", () => {
     const convo = useStore.getState().sessions[A]?.convo
     expect(convo?.status).toBe("error")
     expect(selectBusyElsewhere(useStore.getState())).toBe(false)
+  })
+})
+
+describe("the scan decides whether the session is busy", () => {
+  test("an active run that is not ours means busy", async () => {
+    await useStore.getState().refreshList()
+    await useStore.getState().openSession(A)
+    runsView = { items: [{ runId: "other-run" }], activeRunId: "other-run" }
+
+    await useStore.getState().scanBusy(A)
+
+    expect(selectBusyElsewhere(useStore.getState())).toBe(true)
+  })
+
+  test("no active run means the session is free", async () => {
+    await useStore.getState().refreshList()
+    await useStore.getState().openSession(A)
+    // The surface was refused earlier, so it believes the session is busy.
+    busyResponse = true
+    await useStore.getState().send("hello")
+    await settle()
+    expect(selectBusyElsewhere(useStore.getState())).toBe(true)
+
+    // The scan says the run is over: the flag goes, and so does the reason.
+    runsView = { items: [] }
+    await useStore.getState().scanBusy(A)
+
+    const convo = useStore.getState().sessions[A]?.convo
+    expect(selectBusyElsewhere(useStore.getState())).toBe(false)
+    expect(convo?.error?.code).toBeUndefined()
+  })
+
+  test("our own run is not busy", async () => {
+    await useStore.getState().refreshList()
+    await useStore.getState().openSession(A)
+    useStore.setState((s) => ({
+      sessions: {
+        ...s.sessions,
+        [A]: { ...s.sessions[A]!, convo: { ...s.sessions[A]!.convo!, runId: "mine" } },
+      },
+    }))
+    runsView = { items: [{ runId: "mine" }], activeRunId: "mine" }
+
+    await useStore.getState().scanBusy(A)
+
+    expect(selectBusyElsewhere(useStore.getState())).toBe(false)
+  })
+
+  test("a failed scan leaves the flag alone", async () => {
+    await useStore.getState().refreshList()
+    await useStore.getState().openSession(A)
+    busyResponse = true
+    await useStore.getState().send("hello")
+    await settle()
+    expect(selectBusyElsewhere(useStore.getState())).toBe(true)
+
+    // The scan fails: guessing is what the scan exists to stop.
+    globalThis.fetch = (async () => new Response(null, { status: 500 })) as unknown as typeof fetch
+    await useStore.getState().scanBusy(A)
+
+    expect(selectBusyElsewhere(useStore.getState())).toBe(true)
   })
 })

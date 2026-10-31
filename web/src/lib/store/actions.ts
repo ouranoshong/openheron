@@ -291,6 +291,9 @@ export const useStore = create<StoreState>((set, get) => ({
             void get().reattach(threadId, "the connection dropped before the run finished")
             return
           }
+          // ★ The stream ended; the session may still be busy — another
+          //   surface's turn may be running. The scan decides.
+          void get().scanBusy(threadId)
           void get().refreshList()
         },
       },
@@ -356,6 +359,46 @@ export const useStore = create<StoreState>((set, get) => ({
         },
       },
     )
+  },
+
+  // scanBusy decides whether the session is busy, from the run ledger.
+  //
+  // ★ The busy flag may only be cleared on the word of a scan. A stream
+  //   that ends says nothing about the session: another surface's turn
+  //   may still be running, and the ledger is the only thing that knows.
+  //
+  // ★ The run this surface owns is not "busy". Busy means "a live turn
+  //   that belongs to somebody else".
+  //
+  // ★ A failed scan leaves the flag alone. Guessing is what the scan
+  //   exists to stop.
+  async scanBusy(id: string) {
+    let runs: RunsView
+    try {
+      runs = await api.listRuns(id)
+    } catch {
+      return
+    }
+    const mine = get().sessions[id]?.convo?.runId
+    const busy = !!runs.activeRunId && runs.activeRunId !== mine
+    set((s) => {
+      const entry = s.sessions[id]
+      if (!entry) return s
+      const convo = entry.convo ?? emptyConversation()
+      // The busy error belongs to the busy state: when the session goes
+      // free, the reason it was busy goes with it. Other errors stay.
+      const error = busy
+        ? convo.error
+        : convo.error?.code === "session_busy"
+          ? undefined
+          : convo.error
+      return {
+        sessions: {
+          ...s.sessions,
+          [id]: { ...entry, convo: { ...convo, busy, error } },
+        },
+      }
+    })
   },
 
   // reloadHistory re-reads the session's transcript.
@@ -439,9 +482,6 @@ export const useStore = create<StoreState>((set, get) => ({
             convo: {
               ...closeAllOpenParts(convo, { interrupted: true }),
               status: "idle" as TurnStatus,
-              // ★ The turn this surface did not own is now stopped, so the
-              //   session is free again and the busy line must go.
-              busy: false,
             },
           },
         },
@@ -452,7 +492,11 @@ export const useStore = create<StoreState>((set, get) => ({
       await api.abortRun(id)
     } catch (e) {
       get().loadError(id, `abort failed: ${(e as Error).message}`)
+      return
     }
+    // ★ The busy flag is cleared by the scan, not by the abort's promise.
+    //   The abort says "I asked"; the scan says "the session is free".
+    await get().scanBusy(id)
   },
 
   async compact() {

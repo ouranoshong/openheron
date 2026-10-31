@@ -714,6 +714,12 @@ set((s) => ({
 （`openSession` 对已加载的会话直接返回）。所以水合时**忙**标记也会置上，
 composer 会说清楚那是谁的轮次。
 
+★ **而标记是被 run 账本的扫描清掉的，不是被 abort 的承诺清掉的。** 水合读的是
+服务端的 state，而那个 state 就是账本的扫描（见
+[run-lifecycle-design.md](run-lifecycle-design.md) §9.1）。标记落下去时也是
+一样：`stop()` 先发 abort，然后重新扫描。abort 说「我问了」，扫描说「会话空了」。
+扫不出来的时候标记留在原样——猜正是扫描要治的病。
+
 **`seedFromHistory` 认服务端的 state**（`web/src/lib/store/history.ts:30`）：
 
 ```ts

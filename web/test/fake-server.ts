@@ -1357,14 +1357,19 @@ export function startFakeServer(port = 0): FakeServer {
         }
         // ★ The run is a row in the ledger — the client scans it to learn
         //   whether its run is still going.
+        //
+        //   A scenario that keeps the session busy leaves the run open:
+        //   the session's state and the ledger must agree, or the client
+        //   gets two different answers to the same question.
+        const stillRunning = scenario === "busySession" || scenario === "slowRun"
         thread!.runs = [
           ...(thread!.runs ?? []),
           {
             runId,
-            state: "completed",
+            state: stillRunning ? "running" : "completed",
             kind: "query",
             startedAt: new Date().toISOString(),
-            endedAt: new Date().toISOString(),
+            ...(stillRunning ? {} : { endedAt: new Date().toISOString() }),
             events,
             messageId: assistantMsg.id,
           },
@@ -1596,6 +1601,15 @@ export function startFakeServer(port = 0): FakeServer {
           const wasRunning = t.state === "running"
           t.state = "idle"
           t.pendings = undefined
+          // ★ The abort closes the run in the ledger too. The client's scan
+          //   asks the ledger, so a run that stays open there would keep
+          //   the session busy after it was stopped.
+          for (const r of t.runs ?? []) {
+            if (r.state === "running") {
+              r.state = "completed"
+              r.endedAt = new Date().toISOString()
+            }
+          }
           return json({ aborted: wasRunning })
         }
         if (p[2] === "compact") {

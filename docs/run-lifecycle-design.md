@@ -985,17 +985,28 @@ proposal: the server tells the truth, and the client does not ask it yet.
 
 ### 9.1 The busy flag becomes a scanned fact
 
-`ConversationState.busy` (`web/src/lib/types.ts:123-127`) means "the session
-has a live turn that this surface does not own". Under the proposal it is
-**set and cleared only by a scan**:
+★ **Implemented.** `ConversationState.busy` (`web/src/lib/types.ts`) means "the
+session has a live turn that this surface does not own". It is **set and
+cleared only by a scan**:
 
 - **Set**: the scan reports an `activeRunId` that this surface does not own.
 - **Cleared**: the scan reports no active run.
 
-★ `stop()` (`web/src/lib/store/actions.ts:318-351`) changes shape: it sends the
-abort, then **re-scans**, instead of setting `busy: false` itself
-(`web/src/lib/store/actions.ts:339`). Setting it optimistically is exactly the
-"trust the notification" mistake the design removes.
+★ `stop()` (`web/src/lib/store/actions.ts`) changed shape: it sends the abort,
+then **re-scans**, instead of setting `busy: false` itself. Setting it
+optimistically is exactly the "trust the notification" mistake the design
+removes — the abort says "I asked", the scan says "the session is free".
+
+★ The stream's end is the other place: a stream that ends says nothing about
+the session (another surface's turn may be running), so the client re-scans
+there too.
+
+★ **A failed scan leaves the flag alone.** Guessing is what the scan exists to
+stop: a scan that cannot be made must not clear the busy line, because the
+busy line is the only thing standing between the user and a refused message.
+
+★ The run this surface owns is not "busy". The scan compares the active run's
+id with the conversation's own run id ✓.
 
 ### 9.2 Attach
 

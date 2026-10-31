@@ -41,6 +41,9 @@ export interface StoreState {
   // reloadHistory re-reads the session's transcript — what a client does
   // when it learns a run is over.
   reloadHistory(id: string): Promise<void>
+  // scanBusy decides whether the session is busy, from the run ledger. The
+  // busy flag may only be cleared on the word of a scan.
+  scanBusy(id: string): Promise<void>
   addFiles(files: File[]): Promise<void>
   removeFile(sessionId: string, name: string): Promise<void>
   answer(interrupts: Interrupt[], approved: boolean, reason?: string): Promise<void>
