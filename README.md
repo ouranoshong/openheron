@@ -46,15 +46,16 @@ At the same time, "who may do what" becomes a few hard rules:
   has two agents sharing one model. A wrong model pairing wastes more than no pairing.
 
 ★ This repository is the **code face**: a Go backend, a React frontend and the build
-configuration, with seven document sets alongside
+configuration, with eight document sets alongside
 (`docs/architecture.md`, `docs/user-manual.md`, `docs/developer-manual.md`,
 `docs/context-usage-design.md`, `docs/session-concurrency-design.md`,
-`docs/run-lifecycle-design.md`, each with a `_zh` Chinese version).
-The first three describe what the code **is**; the next two are designs whose
+`docs/run-lifecycle-design.md`, `docs/fs-backend-design.md`, each with a `_zh` Chinese version).
+The first three describe what the code **is**; the next three are designs whose
 implementation **is already in the code** — context-usage estimation (the usage
-dashboard and the persistence of compaction results) and session concurrency (the
-one-turn-per-session gate and the cross-client 409).
-The last one is a **proposal**: `docs/run-lifecycle-design.md` describes how a turn
+dashboard and the persistence of compaction results), session concurrency (the
+one-turn-per-session gate and the cross-client 409), and the filesystem backend
+(the `agentkit/fsx` fork and the path confinement every tool passes through).
+`docs/run-lifecycle-design.md`, by contrast, is a **proposal**: it describes how a turn
 is bound to one SSE connection today, and how a run could become a durable row with
 a lease and a fence, so the connection becomes a subscriber. Nothing beyond its
 §1 is in the code yet.

@@ -6,6 +6,7 @@ import { BrandMark } from "@/components/brand-mark"
 import { CompactionDivider } from "@/components/compaction-divider"
 import { MessageParts } from "@/components/message-parts"
 import { collectAgents, filterByAgent } from "@/lib/agents"
+import { followAfterScroll, atBottom, type ScrollSample } from "@/lib/scroll-follow"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   selectActiveError,
@@ -30,6 +31,10 @@ export function MessageList() {
   const agentFilter = useStore((s) => s.agentFilter)
   const scrollRef = useRef<HTMLDivElement>(null)
   const pinnedRef = useRef(true)
+  // The geometry of the last scroll event, so "the browser moved us while the
+  // content grew" can be told apart from "the user scrolled away".
+  const sampleRef = useRef<ScrollSample>({ top: 0, height: 0 })
+  const userMovedUpRef = useRef(false)
   const [pinState, setPinState] = useState<{ id: string | null; pinned: boolean }>({
     id: activeId,
     pinned: true,
@@ -47,32 +52,48 @@ export function MessageList() {
 
   const multiAgent = useMemo(() => collectAgents(messages).length > 1, [messages])
 
-  const BOTTOM_TOLERANCE = 32
-
-  const atBottom = () => {
-    const el = scrollRef.current
-    if (!el) return true
-    return el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_TOLERANCE
-  }
-
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
     const onScroll = () => {
-      const next = atBottom()
-      pinnedRef.current = next
+      const next = followAfterScroll({
+        sample: { top: el.scrollTop, height: el.scrollHeight },
+        previous: sampleRef.current,
+        clientHeight: el.clientHeight,
+        pinned: pinnedRef.current,
+        userMovedUp: userMovedUpRef.current,
+      })
+      userMovedUpRef.current = false
+      sampleRef.current = next.sample
+      pinnedRef.current = next.pinned
       setPinState((prev) =>
-        prev.id === activeId && prev.pinned === next ? prev : { id: activeId, pinned: next },
+        prev.id === activeId && prev.pinned === next.pinned
+          ? prev
+          : { id: activeId, pinned: next.pinned },
       )
     }
+    // Only the user's own up intent has to be read from the input events: a
+    // keyboard or scrollbar-thumb move produces a scroll event without a
+    // content change, which the rule above still reads as "away".
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) userMovedUpRef.current = true
+    }
     el.addEventListener("scroll", onScroll, { passive: true })
-    return () => el.removeEventListener("scroll", onScroll)
+    el.addEventListener("wheel", onWheel, { passive: true })
+    return () => {
+      el.removeEventListener("scroll", onScroll)
+      el.removeEventListener("wheel", onWheel)
+    }
   }, [activeId])
 
   useEffect(() => {
     pinnedRef.current = true
     const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    // The sample has to follow a scroll we made ourselves, or the next scroll
+    // event would read it as the user moving.
+    sampleRef.current = { top: el.scrollTop, height: el.scrollHeight }
   }, [activeId])
 
   // ★ The scroll follows the content's **height**, not the render count.
@@ -87,11 +108,22 @@ export function MessageList() {
     if (!el) return
     const content = el.firstElementChild
     if (!content) return
-    const ro = new ResizeObserver(() => {
-      if (!pinnedRef.current) return
+    const follow = () => {
+      const sample = { top: el.scrollTop, height: el.scrollHeight }
+      // A user who caught up between two scroll events gets the follow back:
+      // the observer is the only thing that runs after the layout a growth
+      // produced, so a fast reply could otherwise be impossible to catch.
+      if (!pinnedRef.current && !atBottom(sample, el.clientHeight)) return
+      pinnedRef.current = true
       el.scrollTop = el.scrollHeight
-    })
+      sampleRef.current = { top: el.scrollTop, height: el.scrollHeight }
+    }
+    const ro = new ResizeObserver(follow)
     ro.observe(content)
+    // The viewport changes height too — the composer grows while typing — and
+    // the content does not change then, so the observer above would never
+    // fire and the view would drift off the bottom.
+    ro.observe(el)
     return () => ro.disconnect()
   }, [])
 
@@ -99,7 +131,13 @@ export function MessageList() {
     pinnedRef.current = true
     setPinState({ id: activeId, pinned: true })
     const el = scrollRef.current
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
+    if (!el) return
+    // ★ Instant, not smooth: a smooth scroll fires intermediate scroll events
+    //   with the position off the bottom, which the rule reads as the user
+    //   scrolling away — so a block landing mid-animation would break the
+    //   follow it was meant to fix.
+    el.scrollTop = el.scrollHeight
+    sampleRef.current = { top: el.scrollTop, height: el.scrollHeight }
   }
 
   return (

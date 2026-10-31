@@ -60,7 +60,7 @@ openheron/
 
 | 层 | 包 | 内部依赖 |
 |---|---|---|
-| **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `llm/common` `webui` | 无 |
+| **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `agentkit/fsx` `llm/common` `webui` | 无 |
 | **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` 无；`storage`→`contract`；`kb`→`obs`,`persist`；`spec`→`obs`,`decl`,`kb`,`persist`；`emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
 | **L2** | `agentkit/build` `agentkit/run` `storage/filestore` `storage/memarbit` `transport` `llm` `initcfg` | 见 architecture.md §2 |
 | **L3** | `api` | 几乎全部 |
@@ -542,7 +542,7 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 
 ### 5.3 Go 单元测试
 
-`go test ./...` 覆盖 17 个包。契约主要由这几处锁定：
+`go test ./...` 覆盖 20 个包。契约主要由这几处锁定：
 
 | 包 | 锁住的契约 |
 |---|---|
@@ -554,6 +554,7 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 | `storage/filestore` | 追加写、原子重写、checkpoint、待审批持久化 |
 | `transport` | 事件类型、归属、用量分账 |
 | `initcfg` | 出厂模板的完整性 |
+| `agentkit/fsx` | 写边界（含符号链接逃逸）、`ls`/`glob`/`grep` 的上限、绝对 glob pattern |
 
 ### 5.4 知识库语料约定（`docs/`）
 

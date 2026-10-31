@@ -107,6 +107,82 @@ test.describe("大块增量下的跟随", () => {
       .poll(() => distanceToBottom(page), { timeout: 8000, message: "should still follow down to the bottom with large chunks" })
       .toBeLessThanOrEqual(80)
   })
+
+  test("★ 浏览器自己挪了滚动位置之后，仍然继续跟随", async ({ page }) => {
+    await setScenario("bigChunks")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} long one`)
+    await expect.poll(() => overflows(page), { timeout: 5000 }).toBe(true)
+    await expect.poll(() => distanceToBottom(page), { timeout: 8000 }).toBeLessThanOrEqual(80)
+
+    // ★ A content change and a scroll position change in the same batch is
+    //   what the browser itself does when a tall block lands (a clamp, a
+    //   scroll anchoring adjustment). The user did not scroll, so the view
+    //   must keep following — treating that event as "the user left the
+    //   bottom" is what left the list stuck above the bottom.
+    await page.locator(LIST).evaluate((el) => {
+      const n = el as HTMLElement
+      const block = document.createElement("div")
+      block.style.height = "200px"
+      block.textContent = "block"
+      n.firstElementChild!.prepend(block)
+      n.scrollTop += 40
+      n.dispatchEvent(new Event("scroll"))
+    })
+    await page.waitForTimeout(200)
+
+    await page.locator(LIST).evaluate((el) => {
+      const n = el as HTMLElement
+      const block = document.createElement("div")
+      block.style.height = "400px"
+      block.textContent = "more"
+      n.firstElementChild!.appendChild(block)
+    })
+
+    await expect
+      .poll(() => distanceToBottom(page), { timeout: 3000, message: "the view should keep following after a browser-induced scroll" })
+      .toBeLessThanOrEqual(80)
+  })
+
+  test("★ 掉队之后滚回底部，跟随重新接上", async ({ page }) => {
+    await setScenario("bigChunks")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} long one`)
+    await expect.poll(() => overflows(page), { timeout: 5000 }).toBe(true)
+    await expect.poll(() => distanceToBottom(page), { timeout: 8000 }).toBeLessThanOrEqual(80)
+
+    await page.locator(LIST).evaluate((el) => {
+      ;(el as HTMLElement).scrollTop = 0
+    })
+    await page.waitForTimeout(200)
+    expect(await distanceToBottom(page)).toBeGreaterThan(400)
+
+    const append = () =>
+      page.locator(LIST).evaluate((el) => {
+        const block = document.createElement("div")
+        block.style.height = "300px"
+        block.textContent = "block"
+        el.firstElementChild!.appendChild(block)
+      })
+
+    // Content grows while the user is away: the view must stay put.
+    await append()
+    await page.waitForTimeout(200)
+    expect(await distanceToBottom(page), "the view was dragged back while the user was reading").toBeGreaterThan(400)
+
+    // The user scrolls back down: the follow has to come back with them.
+    await page.locator(LIST).evaluate((el) => {
+      ;(el as HTMLElement).scrollTop = (el as HTMLElement).scrollHeight
+    })
+    await page.waitForTimeout(200)
+    await append()
+
+    await expect
+      .poll(() => distanceToBottom(page), { timeout: 3000, message: "after the user catches up, the follow should re-attach" })
+      .toBeLessThanOrEqual(80)
+  })
 })
 
 test.describe("打开长历史会话时的初始位置", () => {

@@ -46,6 +46,7 @@
 | | `agentkit/obs` | 无 | **日志出口**（唯一的 `Logger()`） |
 | | `llm/common` | 无 | 厂商协议层（零 openheron 依赖） |
 | | `webui` | 无 | 嵌入式前端资源 |
+| | `agentkit/fsx` | 无 | **文件系统后端**：有界的本地后端 —— 写收敛在项目根、忽略规则、结果上限（见 [fs-backend-design_zh.md](fs-backend-design_zh.md)） |
 | **L1** | `agentkit/spec/decl` | 无 | **纯声明**结构体（yaml tag 集中处） |
 | | `agentkit/emit` | `obs`, `approval`, `contract`, `helpers`, `message` | 推导层：agent 事件 → run 的事实 |
 | | `storage` | `contract` | 会话/消息/待审批的接口 |

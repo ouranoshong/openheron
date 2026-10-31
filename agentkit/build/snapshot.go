@@ -6,12 +6,12 @@ import (
 	"strings"
 	"sync"
 
-	localbk "github.com/cloudwego/eino-ext/adk/backend/local"
 	fsapi "github.com/cloudwego/eino/adk/filesystem"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/ouranoshong/openheron/agentkit/fsx"
 	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"github.com/ouranoshong/openheron/llm/common"
@@ -47,7 +47,13 @@ func (s *snapshot) heavyDepsOf(ctx context.Context) (heavyDeps, error) {
 func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 	var out heavyDeps
 
-	local, err := localbk.NewBackend(ctx, &localbk.Config{})
+	// The session workspace (uploads) and the skills directory may live outside the
+	// project root; everything else is off limits.
+	roots := []string{s.dataDir}
+	if dir, ok := resolveSkillsDir(); ok {
+		roots = append(roots, dir)
+	}
+	local, err := fsx.New(fsx.Config{Root: s.projectRoot, ExtraRoots: roots})
 	if err != nil {
 		return out, fmt.Errorf("build filesystem backend: %w", err)
 	}

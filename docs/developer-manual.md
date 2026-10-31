@@ -63,7 +63,7 @@ one. The measured internal import graph:
 
 | Layer | Packages | Internal dependencies |
 |---|---|---|
-| **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `llm/common` `webui` | none |
+| **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `agentkit/fsx` `llm/common` `webui` | none |
 | **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` none; `storage`→`contract`; `kb`→`obs`,`persist`; `spec`→`obs`,`decl`,`kb`,`persist`; `emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
 | **L2** | `agentkit/build` `agentkit/run` `storage/filestore` `storage/memarbit` `transport` `llm` `initcfg` | see architecture.md §2 |
 | **L3** | `api` | almost all of them |
@@ -610,7 +610,7 @@ cd web && bun run smoke:hitl               # the approval resume path works
 
 ### 5.3 Go unit tests
 
-`go test ./...` covers 17 packages. The contracts are pinned mainly here:
+`go test ./...` covers 20 packages. The contracts are pinned mainly here:
 
 | Package | Contract it pins |
 |---|---|
@@ -622,6 +622,7 @@ cd web && bun run smoke:hitl               # the approval resume path works
 | `storage/filestore` | Append writes, atomic rewrites, checkpoints, pending-approval persistence |
 | `transport` | Event types, attribution, per-agent usage accounting |
 | `initcfg` | The completeness of the factory templates |
+| `agentkit/fsx` | The write boundary (including symlink escapes), the `ls`/`glob`/`grep` caps, and absolute glob patterns |
 
 ### 5.4 The knowledge-base corpus convention (`docs/`)
 

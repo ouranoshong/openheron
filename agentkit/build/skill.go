@@ -2,17 +2,18 @@ package build
 
 import (
 	"context"
-	"github.com/ouranoshong/openheron/agentkit/obs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	localbk "github.com/cloudwego/eino-ext/adk/backend/local"
 	"github.com/cloudwego/eino/adk"
 	fsapi "github.com/cloudwego/eino/adk/filesystem"
 	"github.com/cloudwego/eino/adk/middlewares/skill"
 	"github.com/cloudwego/eino/schema"
+
+	"github.com/ouranoshong/openheron/agentkit/fsx"
+	"github.com/ouranoshong/openheron/agentkit/obs"
 )
 
 func skillChain(ctx context.Context, backend fsapi.Backend, hubs *skillHubs) (
@@ -92,7 +93,7 @@ func Skills(ctx context.Context) []SkillInfo {
 	if !ok {
 		return nil
 	}
-	backend, err := localbk.NewBackend(ctx, &localbk.Config{})
+	backend, err := fsx.New(fsx.Config{Root: dir})
 	if err != nil {
 		obs.Logger().Warn("[agent] failed to build the filesystem backend for the skill list", "err", err)
 		return nil

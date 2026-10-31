@@ -4,9 +4,9 @@ go 1.27.1
 
 require (
 	github.com/ag-ui-protocol/ag-ui/sdks/community/go v0.0.0-20261010025249-2aabfc8cada0
+	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/bytedance/sonic v1.15.4
 	github.com/cloudwego/eino v0.9.21
-	github.com/cloudwego/eino-ext/adk/backend/local v0.2.2
 	github.com/cloudwego/eino-ext/components/tool/duckduckgo/v2 v2.0.0-20261019121619-eee37f63ff95
 	github.com/cloudwego/eino-ext/components/tool/httprequest v0.0.0-20261019121619-eee37f63ff95
 	github.com/cloudwego/eino-ext/components/tool/wikipedia v0.0.0-20261019121619-eee37f63ff95
@@ -24,7 +24,6 @@ require (
 	github.com/PuerkitoBio/goquery v1.10.3 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
-	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic/loader v0.5.2 // indirect

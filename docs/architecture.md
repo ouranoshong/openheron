@@ -49,6 +49,7 @@ counting `grep '"github.com/ouranoshong/openheron/'` hits per package:
 | | `agentkit/obs` | none | **The log sink** (the only `Logger()`) |
 | | `llm/common` | none | Vendor protocol layer (zero openheron dependencies) |
 | | `webui` | none | Embedded frontend assets |
+| | `agentkit/fsx` | none | **The filesystem backend**: a bounded local backend — writes confined to the project root, ignore rules, result caps (see [fs-backend-design.md](fs-backend-design.md)) |
 | **L1** | `agentkit/spec/decl` | none | **Pure declarations** (where the yaml tags live) |
 | | `agentkit/emit` | `obs`, `approval`, `contract`, `helpers`, `message` | The derivation: agent events → the run's facts |
 | | `storage` | `contract` | Interfaces for sessions/messages/pending approvals |
