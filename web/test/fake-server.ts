@@ -252,6 +252,10 @@ export const THREAD_MULTI = "66666666-6666-4666-8666-666666666666"
 
 export const THREAD_COMPACT = "77777777-7777-4777-8777-777777777777"
 
+// A session whose context holds a fraction of a percent of a very large
+// window — the case where "0 %" would be a lie.
+export const THREAD_TINY = "88888888-8888-4888-8888-888888888888"
+
 export const MARKER_A = "MARKER-ALPHA"
 export const MARKER_B = "MARKER-BRAVO"
 export const MARKER_LONG = "MARKER-LONGCVT"
@@ -604,6 +608,30 @@ function seedThreads(): FakeThread[] {
         cachedTokens: 0,
         context: {
           main: { agent: "main", usedTokens: 1200, contextWindow: 0, updatedAt: T1 },
+        },
+      },
+    },
+    {
+      threadId: THREAD_TINY,
+      title: "Tiny context conversation",
+      createdAt: T1,
+      updatedAt: T1,
+      state: "idle",
+      files: [],
+      messages: [
+        { id: "t-u1", role: "user", content: "tiny first question" },
+        { id: "t-a1", role: "assistant", content: "tiny first answer" },
+      ],
+      // A context that holds a third of a percent of a very large window.
+      // Rounding that to "0 %" would say "nothing is in there".
+      usage: {
+        promptTokens: 4300,
+        completionTokens: 0,
+        totalTokens: 4300,
+        reasoningTokens: 0,
+        cachedTokens: 0,
+        context: {
+          main: { agent: "main", usedTokens: 4300, contextWindow: 1311000, updatedAt: T1 },
         },
       },
     },

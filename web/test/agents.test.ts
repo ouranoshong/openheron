@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { collectAgents, filterByAgent, formatTokens } from "../src/lib/agents"
+import { collectAgents, filterByAgent, formatPercent, formatTokens } from "../src/lib/agents"
 import type { Message, Usage } from "../src/lib/types"
 
 function msg(agent: string | undefined, role: Message["role"] = "assistant"): Message {
@@ -58,5 +58,26 @@ describe("formatTokens", () => {
     expect(formatTokens(1000)).toBe("1.0k")
     expect(formatTokens(3400)).toBe("3.4k")
     expect(formatTokens(12000)).toBe("12k")
+  })
+
+  test("a million reads as millions", () => {
+    // "1311k" takes longer to compare at a glance than "1.3M".
+    expect(formatTokens(1311000)).toBe("1.3M")
+    expect(formatTokens(2000000)).toBe("2.0M")
+  })
+})
+
+describe("formatPercent", () => {
+  test("a non-zero ratio is never rounded down to zero", () => {
+    // 0.3 % is not 0 %. The reader stops watching exactly when the number
+    // starts to matter.
+    expect(formatPercent(4300 / 1311000)).toBe("0.3 %")
+    expect(formatPercent(0.0005)).toBe("<0.1 %")
+  })
+
+  test("the precision follows the size", () => {
+    expect(formatPercent(0)).toBe("0 %")
+    expect(formatPercent(14.06 / 100)).toBe("14 %")
+    expect(formatPercent(99.6 / 100)).toBe("100 %")
   })
 })

@@ -392,7 +392,12 @@ Agent: main · deepseek/deepseek-flash · Reasoning: off · Context: ≈18k / 13
 - 条是数字下面一条细线；到窗口的 80 % 转琥珀色，95 % 转红。
 - tooltip 写明口径 —— *「最近一次发给这个 agent 的请求的 token 数」* —— 没有口径的上下文仪表就是个谜。
 
-缩写复用 `formatTokens`（`web/src/lib/agents.ts:15`），不新增格式化器。
+缩写复用 `formatTokens`（`web/src/lib/agents.ts`）负责缩写，而且一百万按百万读：`1311k`
+比 `1.3M` 难比，而人们拿来比的窗口大小本来就在百万量级。
+
+★ **百分比绝不把非零的比例四舍五入成零。** `formatPercent` 在 10 % 以下给一位
+小数、以下给 `<0.1 %`：一个占了自己窗口 0.3 % 的上下文不是空的，而「0 %」读起来
+像「里面什么都没有」—— 读者恰好在数字开始变得要紧的时候停止关注。
 
 ### 5.3 按 agent 的过滤器
 

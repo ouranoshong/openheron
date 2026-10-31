@@ -1,5 +1,5 @@
 import { Skeleton } from "@/components/ui/skeleton"
-import { formatTokens } from "@/lib/agents"
+import { formatPercent, formatTokens } from "@/lib/agents"
 import type { AgentBadge } from "@/lib/agent-info"
 import type { ContextUsage } from "@/lib/types"
 import { Loader2Icon } from "lucide-react"
@@ -125,7 +125,7 @@ function ContextMeter({ usage }: { usage: ContextUsage }) {
   const known = usage.contextWindow > 0
   const ratio = known ? Math.min(1, usage.usedTokens / usage.contextWindow) : 0
   const label = known
-    ? `Context: ≈${formatTokens(usage.usedTokens)} / ${formatTokens(usage.contextWindow)} (${Math.round(ratio * 100)} %)`
+    ? `Context: ≈${formatTokens(usage.usedTokens)} / ${formatTokens(usage.contextWindow)} (${formatPercent(ratio)})`
     : `Context: ≈${formatTokens(usage.usedTokens)} tokens`
 
   const lines = [

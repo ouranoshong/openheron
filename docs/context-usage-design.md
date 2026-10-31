@@ -393,7 +393,14 @@ Agent: main · deepseek/deepseek-flash · Reasoning: off · Context: ≈18k / 13
 - The bar is a thin strip under the number; it turns amber at 80 % of the window and red at 95 %.
 - The tooltip states the definition — *"tokens in the most recent request to this agent"* — because a context meter without its definition is a mystery number.
 
-`formatTokens` (`web/src/lib/agents.ts:15`) is reused for the abbreviation; no new formatter.
+`formatTokens` (`web/src/lib/agents.ts`) is reused for the abbreviation, and it reads
+a million as millions: `1311k` is harder to compare at a glance than `1.3M`, and the
+window sizes people compare are in the millions.
+
+★ **The percentage never rounds a non-zero ratio down to zero.** `formatPercent`
+gives a decimal below 10 % and `<0.1 %` below that: a context holding 0.3 % of its
+window is not empty, and "0 %" reads like "there is nothing in there" — the reader
+stops watching exactly when the number starts to matter.
 
 ### 5.3 The per-agent filter
 

@@ -77,6 +77,21 @@ test("底栏显示该 agent 的上下文占用", async ({ page }) => {
   )
 })
 
+// A context that holds a fraction of a percent must not read as "0 %".
+//
+// ★ The percentage is the number people watch, and "0 %" reads like "there
+//   is nothing in the context" — which is exactly the moment the number
+//   starts to matter.
+test("占比很小时不四舍五入成 0 %", async ({ page }) => {
+  await openApp(page)
+  await openThread(page, "Tiny context conversation")
+
+  const ctx = page.locator(CONTEXT)
+  await expect(ctx).toBeVisible()
+  await expect(ctx).toContainText("Context: ≈4.3k / 1.3M (0.3 %)")
+  await expect(ctx).not.toContainText("(0 %)")
+})
+
 test("模型没声明窗口时只报绝对 token 数，不报比例", async ({ page }) => {
   await openApp(page)
   await openThread(page, "Alpha conversation")
