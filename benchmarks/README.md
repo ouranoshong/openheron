@@ -187,6 +187,37 @@ needs a real search. The cheap model is not slightly worse at this work; it
 falls off a cliff, and the cliff is exactly where the cost advantage would
 have been spent.
 
+★ **The cost is not where the delegation saves it — and the input cache is
+exactly why.** The cost splits three ways, and the split is the finding:
+
+| Arm | cached input | fresh input | output | total |
+|---|---|---|---|---|
+| A | ¥1.1223 (28.5 %) | ¥1.4605 (37.1 %) | ¥1.3532 (34.4 %) | ¥3.9360 |
+| B | ¥1.4390 (36.7 %) | ¥1.2519 (31.9 %) | ¥1.2355 (31.5 %) | ¥3.9264 |
+
+★ **In arm A the workers' execution is 3.1 % of the cost.** Everything else —
+96.9 % — is the parent: reading the workers' output, and writing the
+integration. The workers' own output (flash-priced) is ¥0.043 of the ¥3.94.
+
+★ **And the cache cannot touch the part that hurts.** The cached input is 8×
+cheaper (¥1.5/M against ¥12/M), and it covers exactly the context the parent
+re-reads — the part it would have paid for anyway. The input that a
+delegation *has* to read — the workers' report — is **fresh by definition**:
+new content, never in the cache, full price. It is the single largest item in
+arm A (37.1 %).
+
+★ So the saving a delegation can buy is the workers' **output**, and the price
+it pays is the parent's **fresh input plus its own output** — both at the strong
+model's rate. The discount on repeated context, which is what the cache
+actually gives, lands on both arms and cancels out of the comparison.
+
+★ **This is a concrete, measurable lever.** The factory's task order asks the
+worker to report "the real diff and the complete output" — that report is
+exactly the fresh input the parent has to read and pay full price for. A
+worker that returned a conclusion and a *reference* would cut the largest
+item in arm A. The benchmark can measure that: same tasks, same arms, a task
+order that asks for a summary instead of the transcript.
+
 ★ **One repeat is noise.** The same task in two runs of the same arm moved by
 2× (B's `count-go-files`: ¥0.0515, then ¥0.1082 — and this sweep's B run
 measured ¥0.0656). `--repeats 3` is the minimum for a claim, and the median

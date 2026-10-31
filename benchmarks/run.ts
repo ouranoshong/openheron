@@ -105,6 +105,7 @@ const report: Record<string, unknown> = {
 async function writeReport() {
   report.runs = results
   report.summary = summarize(results)
+  report.costByCategory = { ...byCategory }
   await mkdir(outDir, { recursive: true })
   await Bun.write(join(outDir, "report.json"), JSON.stringify(report, null, 2))
 }
@@ -221,6 +222,14 @@ async function runTask(arm: Arm, task: Task, repeat: number): Promise<Run> {
  *   the endpoint's own accounting on each message. Nothing here is
  *   estimated.
  */
+/** byCategory is the cost split by what was paid for.
+ *
+ * ★ The cached input is 8× cheaper than the fresh one, and the input a
+ *   delegation has to read — the workers' output — is fresh by
+ *   definition. A single total hides that.
+ */
+const byCategory = { cachedInput: 0, freshInput: 0, output: 0 }
+
 function costOf(
   arm: Arm,
   prices: Record<string, Price>,
@@ -239,13 +248,19 @@ function costOf(
     if (!price) continue
     const cached = u.cachedTokens ?? 0
     const fresh = Math.max(0, (u.promptTokens ?? 0) - cached)
+    const output = u.completionTokens ?? 0
     const c =
-      (fresh * price.input +
-        cached * price.cached_input +
-        (u.completionTokens ?? 0) * price.output) /
+      (fresh * price.input + cached * price.cached_input + output * price.output) /
       1_000_000
     cost += c
     breakdown[agent] = c
+    // ★ The three categories are not interchangeable. The cached input is
+    //   8× cheaper, and the input that a delegation *has* to read — the
+    //   workers' output — is fresh by definition. A cost report that
+    //   adds them up hides that.
+    byCategory.cachedInput += (cached * price.cached_input) / 1_000_000
+    byCategory.freshInput += (fresh * price.input) / 1_000_000
+    byCategory.output += (output * price.output) / 1_000_000
   }
   return { cost, breakdown }
 }
