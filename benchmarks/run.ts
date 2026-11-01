@@ -46,7 +46,13 @@ const workRoot = resolve(args.work ?? join(here, "out", "work"))
 const fixtureRoot = join(here, "fixtures", "work")
 const outDir = join(here, "out")
 const repeats = Number(args.repeats ?? 3)
-const runTimeoutMs = Number(args.timeout ?? 300_000)
+// ★ The timeout is a guard against a hung model, not a budget. It is
+//   generous on purpose: an arm that delegates twice (a scout pass and
+//   an implementation pass) needs roughly twice the wall clock of a solo
+//   arm, and a timeout that cuts the slower shape off would bias the
+//   comparison against it. The run is aborted when the timeout fires, so
+//   the extra allowance is paid for at most once per run.
+const runTimeoutMs = Number(args.timeout ?? 600_000)
 
 const armsDoc = Bun.YAML.parse(await readFile(join(here, "arms.yaml"), "utf8")) as {
   prices: Record<string, Price>
@@ -56,10 +62,25 @@ const armsDoc = Bun.YAML.parse(await readFile(join(here, "arms.yaml"), "utf8")) 
 }
 const tasksDoc = Bun.YAML.parse(await readFile(join(here, "tasks.yaml"), "utf8")) as { tasks: Task[] }
 
-const arms = armsDoc.arms.filter((a) => !args.arm || a.id === args.arm)
+// ★ --task and --arm take a comma-separated list, so a sweep can name
+//   several of them without being run once per name. The old single-value
+//   form still works: "a,b" splits into two, and a lone "a" stays one.
+const wantedTasks = splitList(args.task)
+const wantedArms = splitList(args.arm)
+const arms = armsDoc.arms.filter((a) => !wantedArms.length || wantedArms.includes(a.id))
 const tasks = tasksDoc.tasks.filter(
-  (t) => (!args.kind || t.kind === args.kind) && (!args.task || t.id === args.task),
+  (t) =>
+    (!args.kind || t.kind === args.kind) && (!wantedTasks.length || wantedTasks.includes(t.id)),
 )
+
+/** splitList turns "a,b" into ["a","b"] and an empty value into []. */
+function splitList(value: string | undefined): string[] {
+  if (!value) return []
+  return value
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+}
 
 // ★ The baseline arm is declared in arms.yaml, not guessed from the order
 //   of the arms: "one strong model does everything" is the alternative
@@ -96,10 +117,34 @@ type Run = {
   usage: Record<string, Usage>
   cost: number
   costBreakdown: Record<string, number>
+  // ★ The thread id is the session's own id, so the transcript of a run can
+  //   be found without guessing. analyze.ts needs it: the per-turn cost
+  //   breakdown (who spent what before and after the delegation) lives in
+  //   the transcript, not in this summary.
+  threadId: string
+  // ★ A run that never finished has no final cost. The calls it made and
+  //   never got an answer for are billed by the provider, and the endpoint
+  //   reports no usage for them, so no accounting here can see them.
+  //   `cost` is what the transcript proves; the rest is unknown. Reporting
+  //   a zero would read as "this run was free", and it was not.
+  costIncomplete: boolean
   error?: string
 }
 
 const results: Run[] = []
+
+/** byCategory is the cost split by what was paid for.
+ *
+ * ★ The cached input is 8× cheaper than the fresh one, and the input a
+ *   delegation has to read — the workers' output — is fresh by
+ *   definition. A single total hides that.
+ *
+ * ★ It is declared here, above the first `writeReport()` call, because a
+ *   `const` is in its temporal dead zone until this line runs: declaring it
+ *   further down made every sweep die with "Cannot access 'byCategory'
+ *   before initialization" before a single task ran.
+ */
+const byCategory = { cachedInput: 0, freshInput: 0, output: 0 }
 
 const report: Record<string, unknown> = {
   base,
@@ -184,11 +229,13 @@ async function runTask(arm: Arm, task: Task, repeat: number): Promise<Run> {
     usage: {},
     cost: 0,
     costBreakdown: {},
+    costIncomplete: false,
   }
 
   try {
     const created = await postJSON("/v2/sessions", {})
     const threadId = created.threadId as string
+    run.threadId = threadId
 
     const events = await postRun(threadId, task.prompt)
     run.turns = countModelTurns(events)
@@ -221,6 +268,11 @@ async function runTask(arm: Arm, task: Task, repeat: number): Promise<Run> {
     run.ok = failed.length === 0
   } catch (e) {
     run.error = (e as Error).message
+    // ★ A failed run is not a free run: the provider bills every call it
+    //   made, and the calls that never came back are the ones this
+    //   transcript cannot see. The cost below is the part the transcript
+    //   proves; the flag says the rest is unknown.
+    run.costIncomplete = true
   }
   return run
 }
@@ -231,13 +283,7 @@ async function runTask(arm: Arm, task: Task, repeat: number): Promise<Run> {
  *   the endpoint's own accounting on each message. Nothing here is
  *   estimated.
  */
-/** byCategory is the cost split by what was paid for.
- *
- * ★ The cached input is 8× cheaper than the fresh one, and the input a
- *   delegation has to read — the workers' output — is fresh by
- *   definition. A single total hides that.
- */
-const byCategory = { cachedInput: 0, freshInput: 0, output: 0 }
+/** costOf prices one run's usage with the arm's price table. */
 
 function costOf(
   arm: Arm,
@@ -409,6 +455,18 @@ async function postRun(threadId: string, prompt: string): Promise<any[]> {
       }
     }
   } catch (e) {
+    // ★ The run does not stop when the connection dies — it goes on
+    //   spending money on a run nobody is watching (api/v2_run.go:164:
+    //   "a connection that dies leaves the run going"). That is the
+    //   right behaviour for a user who closes the browser and expects
+    //   the agent to keep working; it is the wrong behaviour for a
+    //   benchmark that has given up. Abort it explicitly, or the provider
+    //   bills for calls whose answers nobody will read.
+    //
+    //   The abort is idempotent (api/v2_sessions.go:395), so it is safe
+    //   on a run that already ended — which is the case for every error
+    //   except the timeout.
+    await abortRun(threadId)
     if ((e as Error).name === "AbortError") {
       throw new Error(`the run did not finish within ${runTimeoutMs / 1000}s`)
     }
@@ -417,6 +475,21 @@ async function postRun(threadId: string, prompt: string): Promise<any[]> {
     clearTimeout(timer)
   }
   return events
+}
+
+/** abortRun stops a run the client has given up on.
+ *
+ * ★ POST /v2/sessions/{id}/abort is idempotent and succeeds for a live
+ *   session (api/v2_sessions.go:395), so this is safe to call on a run
+ *   that already ended.
+ */
+async function abortRun(threadId: string): Promise<void> {
+  try {
+    await postJSON(`/v2/sessions/${threadId}/abort`, {})
+  } catch {
+    // The run is already gone: there is nothing left to stop, and a
+    // failure here must not mask the timeout that caused it.
+  }
 }
 
 /** readSse cuts a byte stream into SSE events. */

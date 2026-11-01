@@ -15,6 +15,13 @@
 # ★ CNY per million tokens, as of 2026-10-31. Prices move: the report
 #   therefore carries both the absolute CNY and the ratio to arm B, and the
 #   ratio is the number that survives a price change.
+#
+# ★ VERIFIED against the vendor's own bill on 2026-11-01 (Bailian / DashScope,
+#   cn-beijing, API Key 7352725). Every rate back-solves from the billed
+#   amount and the billed token count with zero residual:
+#     max   fresh 12.0000  output 36.0000  cached 1.5000
+#     flash fresh  0.8000  output  2.7000  cached 0.1000
+#   The numbers below are the billed ones, not a reading of the price page.
 prices:
   qwen3.8-max:
     input: 12
@@ -44,6 +51,56 @@ arms:
         role: parent
         model: qwen/qwen3.8-max
       - file: agents/a-task.md
+        id: task
+        role: worker
+        model: qwen/qwen3.8-flash
+
+  # ★ A′: the same shape as A, with the worker's report reduced to
+  #   conclusions and citations.
+  #
+  #   The hypothesis under test: A's acceptance cost is high because the
+  #   worker pastes whole files and the parent re-reads them. A′ changes
+  #   both ends of that one chain — the worker reports less, the parent
+  #   spot-checks instead of re-reading. It is deliberately **one** variable
+  #   (the report form), not two: splitting it would need four arms, and the
+  #   sample could not carry that.
+  - id: a2-max-parent-flash-workers-cited
+    label: "强模型分解 + 弱模型执行（子回报结论+引用）"
+    agents:
+      - file: agents/a2-main.md
+        id: main
+        role: parent
+        model: qwen/qwen3.8-max
+      - file: agents/a2-task.md
+        id: task
+        role: worker
+        model: qwen/qwen3.8-flash
+
+  # ★ A″: the same shape as A′, with the **investigation** delegated too.
+  #
+  #   A′ still has the parent read the code itself before it writes the work
+  #   order — and that reading is the parent's single most expensive phase
+  #   (56.5 % of its tokens). A″ puts a read-only scout in front: the scout
+  #   reads the code on the cheap model and reports facts with `file:line`
+  #   citations; the parent decides from those citations and never opens a
+  #   file itself.
+  #
+  #   ★ The scout runs on **flash** on purpose. The hypothesis is that moving
+  #     the reading to the cheap model is what pays; a scout on the strong
+  #     model would keep the cost where it was. If the quality drops, the
+  #     finding is that the investigation needs the strong model.
+  - id: a3-max-parent-flash-workers-scouted
+    label: "强模型规划 + 弱模型调研 + 弱模型落地"
+    agents:
+      - file: agents/a3-main.md
+        id: main
+        role: parent
+        model: qwen/qwen3.8-max
+      - file: agents/a3-scout.md
+        id: scout
+        role: investigator
+        model: qwen/qwen3.8-flash
+      - file: agents/a3-task.md
         id: task
         role: worker
         model: qwen/qwen3.8-flash
