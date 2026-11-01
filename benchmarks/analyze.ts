@@ -573,12 +573,15 @@ const armAgg = new Map<
     //   sub-agent each one named. Arm A″ must show scout *and* task.
     callsBySub: Record<string, number>
     reportBySub: Record<string, number>
+    // ★ An agent that ran on more than one model: its price is a fallback
+    //   rather than a measurement.
+    conflicts: string[]
   }
 >()
 for (const r of rows) {
   const a = armAgg.get(r.arm) ?? {
     cost: 0, passed: 0, runs: 0, incomplete: 0, stages: {}, subStages: {}, delegated: 0, rereads: 0, reportChars: 0, over: 0,
-    callsBySub: {}, reportBySub: {},
+    callsBySub: {}, reportBySub: {}, conflicts: [],
   }
   a.cost += r.cost
   a.runs++
@@ -596,6 +599,7 @@ for (const r of rows) {
     for (const [k, v] of Object.entries(r.analysis.reportCharsBySub)) {
       a.reportBySub[k] = (a.reportBySub[k] ?? 0) + v
     }
+    for (const c of r.modelConflicts ?? []) a.conflicts.push(c)
   }
   for (const [k, s] of Object.entries(r.analysis.stages)) a.stages[k] = (a.stages[k] ?? 0) + s.cost
   for (const [k, s] of Object.entries(r.analysis.subStages)) a.subStages[k] = (a.subStages[k] ?? 0) + s.cost
@@ -619,6 +623,11 @@ for (const [arm, a] of armAgg) {
       `child ¥${(s.child ?? 0).toFixed(4)}  accept ¥${(s.accept ?? 0).toFixed(4)}  land ¥${(s.land ?? 0).toFixed(4)}` +
       `  decide ¥${(s.decide ?? 0).toFixed(4)}  scout ¥${(ss["child:scout"] ?? 0).toFixed(4)}`,
   )
+  if (a.conflicts.length) {
+    console.log(
+      `${" ".repeat(34)}   ★ model conflicts: ${[...new Set(a.conflicts)].join("; ")}`,
+    )
+  }
   if (Object.keys(a.callsBySub).length) {
     const calls = Object.entries(a.callsBySub)
       .map(([k, v]) => `${k}×${v}`)

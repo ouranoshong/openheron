@@ -128,6 +128,10 @@ type Run = {
   //   `cost` is what the transcript proves; the rest is unknown. Reporting
   //   a zero would read as "this run was free", and it was not.
   costIncomplete: boolean
+  // ★ An agent that ran on more than one model: its token bucket cannot be
+  //   split between them, so its price is a fallback rather than a
+  //   measurement. Empty in every ordinary run.
+  modelConflicts: string[]
   error?: string
 }
 
@@ -230,6 +234,7 @@ async function runTask(arm: Arm, task: Task, repeat: number): Promise<Run> {
     cost: 0,
     costBreakdown: {},
     costIncomplete: false,
+    modelConflicts: [],
   }
 
   try {
@@ -255,7 +260,20 @@ async function runTask(arm: Arm, task: Task, repeat: number): Promise<Run> {
     const view = await getJSON(`/v2/sessions/${threadId}/messages`)
     run.usage = (view.usage?.byAgent ?? {}) as Record<string, Usage>
 
-    const { cost, breakdown } = costOf(arm, armsDoc.prices, run.usage)
+    // ★ The model each agent ran on is read from the transcript, not from
+    //   the arm table. The arm table says which model an agent should run
+    //   on; the message says which one it did. Pricing the measurement is
+    //   what makes "the strong model costs X" a fact about the run rather
+    //   than a fact about the configuration.
+    const measured = measuredModels(view.messages)
+    run.modelConflicts = measured.conflicts
+    // ★ The measured model wins. The arm table's mapping is the fallback
+    //   for an agent that ran on two models — its token bucket cannot be
+    //   split between them, so its price is a guess, and the conflict is
+    //   reported so the guess is visible rather than silent.
+    const modelOf: Record<string, string> = { ...armModelOf(arm), ...measured.models }
+
+    const { cost, breakdown } = costOf(armsDoc.prices, run.usage, modelOf)
     run.cost = cost
     run.costBreakdown = breakdown
 
@@ -277,27 +295,77 @@ async function runTask(arm: Arm, task: Task, repeat: number): Promise<Run> {
   return run
 }
 
+/**
+ * armModelOf is the arm table's own answer to "which model does this agent
+ * run on".
+ *
+ * ★ It is the fallback, not the source: the run's own messages say which
+ *   model each agent actually used, and that is what the run is priced
+ *   with.
+ */
+function armModelOf(arm: Arm): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const a of arm.agents) {
+    out[a.id] = a.model.split("/").pop() ?? a.model
+  }
+  return out
+}
+
+/**
+ * measuredModels reads the model each agent actually ran on, from the
+ * transcript the API serves.
+ *
+ * ★ The arm table says which model an agent *should* use; the message
+ *   says which one it *did*. The second is the one worth pricing: this
+ *   benchmark exists to compare what the strong model costs against what
+ *   the cheap one costs, and that comparison is only as good as the model
+ *   attribution behind it.
+ *
+ *   The agent's name is on the message (`name`), and the model it ran on
+ *   is in the metadata (`metadata.model`) — both written by the server
+ *   when it archived the message.
+ */
+function measuredModels(messages: any[]): {
+  models: Record<string, string>
+  conflicts: string[]
+} {
+  const seen: Record<string, Set<string>> = {}
+  for (const m of messages ?? []) {
+    const agent = m?.name
+    const model = m?.metadata?.model
+    if (!agent || !model) continue
+    const bare = model.split("/").pop() ?? model
+    ;(seen[agent] ??= new Set()).add(bare)
+  }
+  const models: Record<string, string> = {}
+  const conflicts: string[] = []
+  for (const [agent, set] of Object.entries(seen)) {
+    if (set.size === 1) {
+      models[agent] = [...set][0]
+      continue
+    }
+    // ★ One agent, two models: its token bucket cannot be split between
+    //   them, so any single price for it is a guess. The guess is
+    //   reported rather than made silently.
+    conflicts.push(`${agent}: ${[...set].sort().join(" / ")}`)
+  }
+  return { models, conflicts }
+}
+
 /** The cost of one run, split by role.
  *
- * ★ The agent's model comes from the arm table, and the tokens come from
- *   the endpoint's own accounting on each message. Nothing here is
- *   estimated.
+ * ★ The tokens come from the endpoint's own accounting on each message,
+ *   and the model they are priced with is the one the agent ran on.
  */
-/** costOf prices one run's usage with the arm's price table. */
-
 function costOf(
-  arm: Arm,
   prices: Record<string, Price>,
   usage: Record<string, Usage>,
+  modelOf: Record<string, string>,
 ): { cost: number; breakdown: Record<string, number> } {
-  // ★ The agent's model is a `provider/model` ref; the price table is keyed
-  //   by the bare model name. Stripping the prefix here keeps one source
-  //   of truth: the arm table.
-  const modelOf = new Map(arm.agents.map((a) => [a.id, a.model.split("/").pop() ?? a.model]))
   const breakdown: Record<string, number> = {}
   let cost = 0
   for (const [agent, u] of Object.entries(usage)) {
-    const model = modelOf.get(agent)
+    const model = modelOf[agent]
     if (!model) continue
     const price = prices[model]
     if (!price) continue
