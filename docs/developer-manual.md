@@ -622,7 +622,7 @@ cd web && bun run smoke:hitl               # the approval resume path works
 | Package | Contract it pins |
 |---|---|
 | `agentkit/spec` | Config root resolution, strict frontmatter decoding, depth validation, cycle detection, write gates |
-| `agentkit/build` | Tool assembly, policy tiers, the gate, topology, nested resume |
+| `agentkit/build` | Tool assembly, policy tiers, the gate, topology, nested resume, the skill scope |
 | `agentkit/run` | Input construction (a sub-agent's messages do not mix into the parent's history), event bridging |
 | `api` | Routing, SSE frames, the error envelope, `threadId` being required |
 | `kb` | Indexing, scoring, the catalog format (including legacy Chinese header compatibility) |

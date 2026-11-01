@@ -130,6 +130,7 @@ Available frontmatter keys:
 | `summarize_at` | When this agent's context is **compacted** into a summary: `80%` of the model's window (the default), an absolute token count (`104858`), or `0` for never |
 | `subagents` | Whom it may delegate to (see §5) |
 | `disabled_tools` | Tool deny-list effective for **this agent** |
+| `skills` | The skills this agent may use — an allow-list of the folders under `skills/` (**not declared means every skill**, an empty list means none) |
 | `temperature` / `max_tokens` | Sampling parameters |
 | `reasoning` | Reasoning tier: `off` / `low` / `high` / `max` (names defined by the vendor profile) |
 
@@ -283,6 +284,18 @@ These environment variables override the file and take precedence:
 that is unset does it search **upwards** from the current directory for
 `.openheron/skills`. That differs from the config root's "never search upwards" — skills
 are a directory tree, and searching upwards lets you use skills from your home directory.
+
+★ **Which skills an agent may use is declared by that agent.** The `skills` key in
+`agents/<name>.md` is an allow-list, and the names are the folders under `skills/`:
+
+```yaml
+skills: [refactor, review]
+```
+
+Not declaring the key means **every** skill in the directory; declaring an empty list
+means **none**. A skill outside the list is not advertised to the model, and asking for
+it by name fails — a model cannot load what it cannot see. A name that is not in the
+directory is reported in the log when the agent is built, rather than ignored.
 
 ## 5. Multiple agents and delegation
 

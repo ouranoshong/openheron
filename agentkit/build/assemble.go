@@ -102,7 +102,7 @@ func (b *Builder) buildNode(ctx context.Context, snap *snapshot, n node) (
 			self = sp.ID
 		}
 		hubs := b.newSkillHubs(snap, n.base, snap.agentSpec.subsOf(self), self)
-		handlers, err := b.skillHandlers(ctx, n.backend, hubs)
+		handlers, err := b.skillHandlers(ctx, n.backend, hubs, scopeOf(sp))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -171,10 +171,10 @@ func (b *Builder) assemble(ctx context.Context, snap *snapshot,
 	return agent, mdl, nil
 }
 
-func (b *Builder) skillHandlers(ctx context.Context, backend fsapi.Backend, hubs *skillHubs) (
-	[]adk.TypedChatModelAgentMiddleware[*schema.Message], error) {
+func (b *Builder) skillHandlers(ctx context.Context, backend fsapi.Backend, hubs *skillHubs,
+	scope skillScope) ([]adk.TypedChatModelAgentMiddleware[*schema.Message], error) {
 
-	mw, err := skillChain(ctx, backend, hubs)
+	mw, err := skillChain(ctx, backend, hubs, scope)
 	if err != nil {
 		obs.Logger().Warn("[agent] skill middleware disabled", "err", err)
 		return nil, nil
@@ -183,4 +183,17 @@ func (b *Builder) skillHandlers(ctx context.Context, backend fsapi.Backend, hubs
 		return nil, nil
 	}
 	return []adk.TypedChatModelAgentMiddleware[*schema.Message]{mw}, nil
+}
+
+// scopeOf reads the skill allow-list of an agent.
+//
+// ★ A nil spec means no restriction: an agent that says nothing about skills
+//
+//	gets every skill in the directory, which is what it got before the field
+//	existed.
+func scopeOf(sp *decl.SubAgentSpec) skillScope {
+	if sp == nil {
+		return skillScope{all: true}
+	}
+	return skillScopeOf(sp.Skills)
 }

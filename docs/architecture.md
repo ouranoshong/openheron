@@ -202,6 +202,21 @@ directory tree, and searching upwards lets you reuse skills from your home direc
 the config root is a set of entities, and searching upwards would make the same command
 read different configurations.
 
+★ **Which skills an agent may use is a scoped backend.** The `skills` key in
+`agents/<name>.md` is an allow-list of the folders under the skills directory, and it
+reaches the middleware as `scopedSkillBackend` (`agentkit/build/skill.go`). The scope
+filters both halves: `List` — the skill tool's description is rendered from it, so it is
+what the model **sees** — and `Get` — what the model can actually **load**. Filtering
+only one half would leave a skill that a model remembers the name of loadable.
+
+★ The list is carried as a **pointer** (`decl.Agent.Skills`), because "not declared"
+and "declared and empty" mean different things: the first is every skill, the second is
+none.
+
+★ The skill middleware is attached to the **entry agent** — the one the session
+selected (`agentkit/build/assemble.go`). A sub-agent does not get the skill tool at all,
+so there the list has nothing to filter.
+
 ### 3.7 Two loading modes and "deferred"
 
 `spec.Service.Load()` (`config.go:245`) validates strictly — a failure is a startup

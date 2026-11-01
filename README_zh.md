@@ -132,11 +132,13 @@ disabled_tools: [kb_index]
 ```
 
 frontmatter 是**严格解码**的 —— 写错一个键就是启动错误，不会被忽略。可用键：
-`description`、`model`、`max_iterations`、`subagents`、`disabled_tools`、`temperature`、
-`max_tokens`、`reasoning`。
+`description`、`model`、`max_iterations`、`subagents`、`disabled_tools`、`skills`、
+`temperature`、`max_tokens`、`reasoning`。
 
 - `model` 必填，格式 `<provider>/<model>`，**不继承、不回退** —— 解析不了就在启动时报错。
 - `subagents` 声明拓扑；引用的 agent 必须存在，且**不能成环**。
+- `skills` 是这个 agent 能用的技能白名单，名字就是 `skills/` 下的文件夹名。
+  **不写就是全部技能**，写空列表就是**一个都没有**。
 - `reasoning` 写的是**档位名**（如 `high`），由 `llm/*.yaml` 的 `models[].reasoning` 表翻译成
   各厂商不同的字段。**这张表不填，档位就被静默忽略** —— agent 写着 `reasoning: high` 而
   端点没有 `high`，等于「完全不思考」，且没有任何报错。

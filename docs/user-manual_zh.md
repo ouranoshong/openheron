@@ -123,6 +123,7 @@ frontmatter 可用键：
 | `summarize_at` | 这个 Agent 的上下文什么时候被**压缩**成摘要：模型窗口的 `80%`（默认）、绝对 token 数（`104858`）、或 `0` 表示永不 |
 | `subagents` | 它能委派给谁（见 §5） |
 | `disabled_tools` | 对**这个 Agent** 生效的工具禁用表 |
+| `skills` | 这个 Agent 能用的技能 —— `skills/` 下文件夹的白名单（**不写就是全部**，写空列表就是一个都没有） |
 | `temperature` / `max_tokens` | 采样参数 |
 | `reasoning` | 思考档位：`off` / `low` / `high` / `max`（名字由厂商档案定义） |
 
@@ -261,6 +262,17 @@ deny: []
 ★ skills 的查找**是另一套规则**：先看 `$EINO_EXT_SKILLS_DIR`，
 没有才从**当前目录向上**找 `.openheron/skills`。这跟配置根「不向上找」不一样 ——
 skills 是目录树，向上找是为了能用你家目录里的技能。
+
+★ **一个 Agent 能用哪些技能，由它自己声明**。`agents/<name>.md` 的 `skills` 键是
+白名单，名字就是 `skills/` 下的文件夹名：
+
+```yaml
+skills: [refactor, review]
+```
+
+不写这个键就是**目录里的全部技能**；写空列表就是**一个都没有**。不在名单里的技能
+不会出现在给模型看的技能清单里，点名去调也会失败 —— 看不见的东西调不到。
+名单里写了目录里没有的名字，Agent 装配时日志会报出来，不会被忽略。
 
 ## 5. 多 Agent 与委派
 

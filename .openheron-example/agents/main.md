@@ -4,6 +4,7 @@ model: openai/gpt-4o
 max_iterations: 30
 # reasoning: high      ← tier name, taken from a key of models[].reasoning
 # disabled_tools: []   ← affects this agent only; passed separately from the global deny, never merged
+# skills: [refactor]   ← the skills this agent may use; the names are the folders under skills/
 subagents: [researcher, coder, reviewer]
 ---
 

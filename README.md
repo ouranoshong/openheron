@@ -158,12 +158,15 @@ disabled_tools: [kb_index]
 
 The frontmatter is **strictly decoded** — one wrong key is a startup error, never
 silently ignored. Available keys: `description`, `model`, `max_iterations`,
-`subagents`, `disabled_tools`, `temperature`, `max_tokens`, `reasoning`.
+`subagents`, `disabled_tools`, `skills`, `temperature`, `max_tokens`, `reasoning`.
 
 - `model` is required, in the form `<provider>/<model>`, and is **never inherited and
   never falls back** — failing to resolve it is a startup error.
 - `subagents` declares the topology; every referenced agent must exist and the graph
   **must not contain a cycle**.
+- `skills` is the allow-list of skills this agent may use; the names are the folders
+  under `skills/`. **Not declaring it means every skill**, and declaring an empty list
+  means none.
 - `reasoning` names a **tier** (such as `high`), which `models[].reasoning` in
   `llm/*.yaml` translates into the differing fields each vendor uses. **If that table
   is missing, the tier is silently ignored** — an agent says `reasoning: high` while

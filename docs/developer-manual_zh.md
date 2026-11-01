@@ -553,7 +553,7 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 | 包 | 锁住的契约 |
 |---|---|
 | `agentkit/spec` | 配置根解析、frontmatter 严格解码、深度校验、环检测、写入闸门 |
-| `agentkit/build` | 工具装配、策略档位、闸门、拓扑、嵌套恢复 |
+| `agentkit/build` | 工具装配、策略档位、闸门、拓扑、嵌套恢复、技能范围 |
 | `agentkit/run` | 输入构造（子 Agent 消息不混入父历史）、事件桥接 |
 | `api` | 路由、SSE 帧、错误信封、`threadId` 必填 |
 | `kb` | 索引、评分、目录格式（含旧中文表头兼容） |

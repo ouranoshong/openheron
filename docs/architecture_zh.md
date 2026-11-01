@@ -183,6 +183,18 @@ frontmatter 可用键（`agentkit/spec/decl/decl.go:67` 的 `decl.Agent`）：
 ★ 这跟「配置根不向上查找」是两条不同的规则。skills 是目录树，
 向上找是为了能复用用户家目录里的技能；配置根是实体集合，向上找会让同一命令读到不同配置。
 
+★ **一个 agent 能用哪些技能，是一个被限定的后端。** `agents/<name>.md` 的 `skills` 键是
+skills 目录下文件夹的白名单，它以 `scopedSkillBackend`（`agentkit/build/skill.go`）的形式
+到达中间件。这个限定同时管住两半：`List` —— 技能工具的说明就是从它渲染出来的，也就是模型
+**看得见**的；`Get` —— 模型真正**调得动**的。只管一半的话，一个模型只要记得名字，照样能调
+到自己看不见的技能。
+
+★ 这个列表用**指针**带着走（`decl.Agent.Skills`），因为「没声明」和「声明了但是空的」是两件
+事：前者是全部技能，后者是一个都没有。
+
+★ 技能中间件挂在**入口 agent** —— 会话选中的那个（`agentkit/build/assemble.go`）。子 agent
+根本拿不到技能工具，所以在那儿这个列表没有可过滤的对象。
+
 ### 3.7 装载的两种模式与「deferred」
 
 `spec.Service.Load()`（`config.go:245`）严格校验，失败即启动失败。

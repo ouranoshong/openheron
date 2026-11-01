@@ -91,6 +91,19 @@ type Agent struct {
 
 	DisabledTools []string `yaml:"disabled_tools"`
 
+	// Skills is the allow-list of skills this agent may use.
+	//
+	// ★ A nil list — the key is absent — means every skill in the skills
+	//   directory: that is what an agent got before this field existed. An
+	//   empty list means none. The pointer is what tells the two apart, the
+	//   same way Threshold tells "not declared" from "declared off".
+	//
+	// ★ The names are the **folders** under skills/ (the skill's own
+	//   frontmatter name is accepted as well). The folder is the identity the
+	//   user sees in the directory tree; the frontmatter name is the identity
+	//   the model sees in the tool.
+	Skills *[]string `yaml:"skills"`
+
 	Temperature *float32 `yaml:"temperature"`
 	MaxTokens   *int     `yaml:"max_tokens"`
 
@@ -403,9 +416,12 @@ type SubAgentSpec struct {
 	MaxIter       int
 	ModelRef      string
 	DisabledTools []string
-	Reasoning     string
-	Temperature   *float32
-	MaxTokens     *int
+	// Skills is the agent's skill allow-list. A nil list means every skill in
+	// the skills directory; an empty list means none.
+	Skills      *[]string
+	Reasoning   string
+	Temperature *float32
+	MaxTokens   *int
 	// SummarizeAt is the agent's own compaction threshold, unresolved: a
 	// percentage still needs the window of the model to become a token
 	// count.

@@ -106,12 +106,18 @@ type modelView struct {
 }
 
 type agentView struct {
-	ID                    string     `json:"id"`
-	Description           string     `json:"description,omitempty"`
-	Model                 modelView  `json:"model"`
-	MaxIterations         int        `json:"maxIterations"`
-	Subagents             []string   `json:"subagents"`
-	DisabledTools         []string   `json:"disabledTools"`
+	ID            string    `json:"id"`
+	Description   string    `json:"description,omitempty"`
+	Model         modelView `json:"model"`
+	MaxIterations int       `json:"maxIterations"`
+	Subagents     []string  `json:"subagents"`
+	DisabledTools []string  `json:"disabledTools"`
+	// Skills is the agent's skill allow-list.
+	Skills []string `json:"skills"`
+	// SkillsRestricted reports that the list above is an allow-list. When it
+	// is false the agent says nothing about skills, so it gets every skill in
+	// the skills directory.
+	SkillsRestricted      bool       `json:"skillsRestricted"`
 	EffectiveTools        []toolView `json:"effectiveTools,omitempty"`
 	RuntimeTools          []string   `json:"runtimeTools,omitempty"`
 	RuntimeToolsKnown     bool       `json:"runtimeToolsKnown"`
@@ -194,6 +200,13 @@ func (s *Server) agentViews(cfg *spec.Config, withTools bool) []agentView {
 		}
 		if v.DisabledTools == nil {
 			v.DisabledTools = []string{}
+		}
+		if a.Skills != nil {
+			v.Skills = append([]string{}, *a.Skills...)
+			v.SkillsRestricted = true
+		}
+		if v.Skills == nil {
+			v.Skills = []string{}
 		}
 		if d, ok := verdicts[id]; ok {
 			v.DescriptionDistinct = d.Distinct

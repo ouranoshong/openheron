@@ -43,12 +43,30 @@ func (c *Config) agentSpecOf(id string) (decl.SubAgentSpec, error) {
 		MaxIter:       a.MaxIterations,
 		ModelRef:      a.ModelRef,
 		DisabledTools: append([]string(nil), a.DisabledTools...),
+		Skills:        cloneSkills(a.Skills),
 		Reasoning:     a.Reasoning,
 		Temperature:   a.Temperature,
 		MaxTokens:     a.MaxTokens,
 		SummarizeAt:   a.SummarizeAt,
 		Sub:           subs,
 	}, nil
+}
+
+// cloneSkills copies the allow-list so that the spec nobody else holds cannot
+// be changed through the agent it was built from.
+//
+// ★ The pointer is copied as a pointer on purpose: nil (the key is absent) and
+//
+//	an empty list (the key is there, the list is empty) mean different
+//	things, and a copy that lost that distinction would silently widen the
+//	scope back to "every skill".
+func cloneSkills(s *[]string) *[]string {
+	if s == nil {
+		return nil
+	}
+	out := make([]string, len(*s))
+	copy(out, *s)
+	return &out
 }
 
 func (c *Config) specsBelow(id string, depth, maxDepth int) ([]decl.SubAgentSpec, error) {
