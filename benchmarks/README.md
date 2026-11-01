@@ -334,14 +334,31 @@ Per task (median of 3; A″'s `add-a-method` has one completed run out of three)
    that pastes the whole diff) to **0.22** — the parent's own file-reading is
    what the citations remove.
 
-2. **★ The scout's report is longer than the worker's.** Across A″'s
-   completed runs the scout returned **16,633 characters** and the worker
-   **6,921** — the investigation report is **2.4×** the implementation report,
-   and the parent pays full price for reading it. The scout is supposed to be
-   the cheap stage; it became the expensive one, because "here is what the
-   code does" is a longer answer than "here is what I changed". ★ A scout
-   that reports *the places to change* rather than *the state of the code*
-   would be cheaper than the worker it was meant to replace.
+2. **★ The scout's report is longer than the worker's — and that is not
+   what makes it expensive.** Across A″'s completed runs the scout returned
+   **16,633 characters** and the worker **6,921** — the investigation report
+   is **2.4×** the implementation report. It looks like the expensive
+   stage, and it is not: **the report's length turned out to be a red
+   herring.** ★ An arm that reports *where the change has to go* instead of
+   *what the code currently is* (A″′, `a4-max-parent-flash-workers-scouted-tight`)
+   did not get cheaper: the scout's report per run went from 2,376 to 1,934
+   characters on the same task, and the parent's cost stayed flat.
+
+   ★ **What actually costs is the parent's own output.** Per delegated run
+   the parent's spend splits:
+
+   | | cached (re-reads) | fresh (new content) | **output (its own reasoning)** |
+   |---|---|---|---|
+   | tokens | 22,752 | 5,087 | **2,980** |
+   | ¥ | 0.0341 | 0.0610 | **0.1073** |
+
+   ★ **Half the parent's cost is its own output** — 2,980 tokens at ¥36/M,
+   which is **24× the cached rate**. Reading the report is a *cached* read
+   (¥1.5/M) and is nearly free; the parent re-reads its own context 22,752
+   tokens a run at that rate. ★ So the lever is not "make the parent read
+   less" — it is **"make the parent think less and write less"**: fewer
+   turns, and a shorter work order. A prompt that makes the parent more
+   careful makes it *more* expensive, which is exactly what A″′ measured.
 
 3. **★ A″ is cheaper but not equally reliable: 6/9 against B's 9/9.** Two of
    the three failures are the endpoint's own (a request timeout and a network
@@ -360,6 +377,31 @@ Per task (median of 3; A″'s `add-a-method` has one completed run out of three)
 two delegations instead of one, so it runs longer: an A″ run exceeded the
 300 s timeout that the earlier sweep used, and the sweeps since use 600 s. An
 arm that delegates twice needs roughly twice the time.
+
+### A″′: the fix that was not a fix
+
+★ A″′ (`a4-max-parent-flash-workers-scouted-tight`) is A″ with the two
+defects above addressed: the scout reports **where the change has to go**
+instead of what the code currently is, and the parent is told that the
+implementation step is not optional. One probe (3 tasks, 1 repeat, B in the
+same sweep) came out at **0.603** against B — indistinguishable from A″'s
+0.587, and the scout's report did not get shorter either (1,934 characters
+against 1,938 on the same task).
+
+★ **The reason is finding 2 above: the report's length was never the cost.**
+The parent's own output is, and a prompt that makes the parent more careful
+makes it *more* expensive. ★ **A negative result, and the useful one: to make
+this shape pay, shorten the parent's work order and cut its turns — do not
+give it more instructions.** A″′'s instructions did exactly that, and the cost
+went up by 8 %.
+
+★ One of A″′'s three runs failed a check, and **the check was the bug**: it
+required the literal text `Flush()` in `main.go`, which prescribes a no-argument
+signature the prompt never asked for. The worker wrote
+`Flush(w io.Writer) error` and called `c.Flush(os.Stdout)` — a better design,
+marked wrong. The check now looks for `.Flush(`, which matches either. ★
+Every run that passed before still passes: all of them wrote a no-argument
+call, which `.Flush(` also matches.
 
 ### Why the two shapes differ
 

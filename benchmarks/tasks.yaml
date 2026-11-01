@@ -87,9 +87,16 @@ tasks:
       - type: file_contains
         value: internal/store/cache.go
         contains: "func (c *Cache) Flush"
+      # ★ The check is "main.go calls it", not "main.go calls it with no
+      #   arguments". The prompt does not prescribe a signature, and a
+      #   worker that writes `Flush(w io.Writer) error` and calls
+      #   `c.Flush(os.Stdout)` satisfies the requirement while failing a
+      #   literal "Flush()" — it marked a correct implementation wrong.
+      #   `.Flush(` matches both a no-argument call and one with an
+      #   argument, which is what the requirement actually says.
       - type: file_contains
         value: cmd/app/main.go
-        contains: "Flush()"
+        contains: ".Flush("
 
   - id: investigate-a-mismatch
     kind: decompose
