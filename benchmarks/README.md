@@ -184,6 +184,13 @@ run should add a rubric with a fixed judge model.
    to the scout; when it decides to read the code itself, that task's
    delegation loses. This is the parent's discretion, so it is a variance
    source, not a constant — the arm needs a median over repeats.
+5. ★ **★ Whether the parent finishes the shape.** A shape with two
+   delegations can be abandoned half-way: on one `two-file-change` run the
+   parent investigated twice and then reported the investigation as the
+   answer, without ever delegating the implementation. The prompt says what
+   the steps are; the model decides how many to take. A shape that depends on
+   a *sequence* of delegations needs the second one to be non-optional, or it
+   needs a mechanism that enforces it.
 
 ## What the sweep showed
 
@@ -295,47 +302,64 @@ reading the code at the strong model's rate.
 
 ### What the measurement showed
 
-Three coding tasks, A′ at `--repeats 3`, A″ at `--repeats 1`, all against the
-same B baseline:
+Three coding tasks, `--repeats 3`, **all three arms in one sweep** so the
+baseline is the same batch for every row:
 
-| Arm | Total | Passed | Ratio to B | Parent's `analyze` phase |
+| Arm | Total (median of medians) | Passed | Ratio to B | Parent's `analyze` phase |
 |---|---|---|---|---|
-| **A′** citations | ¥1.0325 | 9/9 | **0.929** | ¥0.1398 /run |
-| **A″** scout | ¥0.8348 | 3/3 | **0.751** | **¥0.0000 /run** |
-| **B** one strong model | ¥1.1118 | 8/9 | 1.000 | ¥0.1109 /run |
+| **A″** scout | ¥0.6963 | **6/9** | **0.587** | **¥0.0000 /run** |
+| **A′** citations | ¥0.8719 | 9/9 | **0.735** | ¥0.0924 /run |
+| **B** one strong model | ¥1.1862 | 9/9 | 1.000 | ¥0.1273 /run |
 
 ★ **In this shape the delegation does pay — and A″'s mechanism is visible in
 the stages.** The parent's `analyze` phase in A″ is **exactly zero**: it reads
 no code. Everything the parent knows about the code arrives through the
-scout's report. In A′ the same phase costs ¥0.1398 per run, which is the
+scout's report. In A′ the same phase costs ¥0.0924 per run, which is the
 parent reading the files itself.
 
-Per task (median of 3 for A′ and B, single run for A″):
+Per task (median of 3; A″'s `add-a-method` has one completed run out of three):
 
-| Task | A′ | A″ | B | A′/B | A″/B |
+| Task | A″ | A′ | B | A″/B | A′/B |
 |---|---|---|---|---|---|
-| `write-a-file` | 0.0770 | 0.1304 | 0.0837 | 0.920 | 1.557 |
-| `two-file-change` | 0.5261 | 0.5094 | 0.4878 | 1.079 | 1.044 |
-| `add-a-method-to-three-types` | 0.4293 | 0.1950 | 0.5403 | 0.795 | 0.361 |
+| `write-a-file` | 0.0672 | 0.0740 | 0.1013 | **0.663** | **0.731** |
+| `two-file-change` | 0.3449 | 0.4643 | 0.5703 | **0.605** | **0.814** |
+| `add-a-method-to-three-types` | 0.2842 | 0.3335 | 0.5145 | **0.552** | **0.648** |
 
-★ **Two findings that the totals hide.**
+★ **Three findings that the totals hide.**
 
 1. **The worker's report is the parent's fresh input.** The parent pays full
    price for whatever the worker hands back, because a report is new content
    that was never in the cache. A′ asks for conclusions with citations, and
-   the parent's acceptance re-reads drop from 2.4 times per run to 0.44 — the
-   parent's own file-reading is what the citations remove.
-2. **A″'s numbers are not yet a claim.** Its two independent single runs
-   measured 0.751 and 0.486. The spread is not the model's noise on the task:
-   it is **whether the parent called the scout at all** — on `write-a-file` the
-   parent skipped the scout and delegated straight to the worker, and that
-   task is the one A″ loses (1.557). A″ needs `--repeats 3` before its
-   headline can be written down.
+   the parent's acceptance re-reads drop from **2.4 times per run** (the arm
+   that pastes the whole diff) to **0.22** — the parent's own file-reading is
+   what the citations remove.
+
+2. **★ The scout's report is longer than the worker's.** Across A″'s
+   completed runs the scout returned **16,633 characters** and the worker
+   **6,921** — the investigation report is **2.4×** the implementation report,
+   and the parent pays full price for reading it. The scout is supposed to be
+   the cheap stage; it became the expensive one, because "here is what the
+   code does" is a longer answer than "here is what I changed". ★ A scout
+   that reports *the places to change* rather than *the state of the code*
+   would be cheaper than the worker it was meant to replace.
+
+3. **★ A″ is cheaper but not equally reliable: 6/9 against B's 9/9.** Two of
+   the three failures are the endpoint's own (a request timeout and a network
+   error) and would have hit any arm. The third is the shape's: on
+   `two-file-change` the parent called the scout **twice** and then reported
+   the scout's findings as its answer — it never delegated the
+   implementation, so nothing was changed. The same run shows the parent
+   calling the scout twice and *then* implementing (`scout, scout, task`), so
+   the parent is not following a fixed sequence. ★ The prompt says "have scout
+   investigate, then have task implement it"; the model decides how many
+   times to investigate, and one investigation is enough to look like the job
+   is done. **A shape with two delegations needs the second one to be
+   non-optional.**
 
 ★ **And the shape has a cost the ratio does not show: wall clock.** A″ makes
-two delegations instead of one, so it runs longer: one A″ run exceeded the
-300 s timeout that the sweep used before, and had to be re-run with a 600 s
-timeout. An arm that delegates twice needs roughly twice the time.
+two delegations instead of one, so it runs longer: an A″ run exceeded the
+300 s timeout that the earlier sweep used, and the sweeps since use 600 s. An
+arm that delegates twice needs roughly twice the time.
 
 ### Why the two shapes differ
 
