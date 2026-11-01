@@ -29,6 +29,11 @@ web/dist/*
 /web/.rolldown/
 *.tsbuildinfo
 
+# ★ The root node_modules/ belongs to the root package.json (a developer tool,
+#   not the app). It was tracked by accident once, and a public repository
+#   should not carry a third party's source.
+/node_modules/
+
 # Runtime data
 /data/
 # The real local configuration (the factory sample is in .openheron-example/);
