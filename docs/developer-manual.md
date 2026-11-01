@@ -749,6 +749,58 @@ To check whether a tier is reachable, look at **each** agent's effective tool ta
 **(7) Changing the interface requires browser verification.** "I changed it and the tests
 are green" is not evidence — script-level tests cannot see the rendering layer.
 
+### 5.8 ★ The cost benchmark
+
+`benchmarks/` measures what the multi-agent topology costs against one strong
+model doing the same work. It is a measurement with assertions, not a unit
+test: the runner sweeps the arms, and `analyze.ts` checks the result.
+
+```bash
+# the server, pointed at a scratch config root and a scratch project root
+./bin/openheron --config-dir $PWD/.openheron-bench --project-root $PWD/benchmarks/out/work
+
+# the sweep: --arm and --task take comma-separated lists
+bun run benchmarks/run.ts --base http://127.0.0.1:18099 \
+  --config $PWD/.openheron-bench --work $PWD/benchmarks/out/work \
+  --arm a2-max-parent-flash-workers-cited,b-max-solo \
+  --task write-a-file,two-file-change,add-a-method-to-three-types --repeats 3
+
+# the analysis: per-phase costs, medians, ratios — and the assertions
+bun run benchmarks/analyze.ts --report benchmarks/out/report.json --config $PWD/.openheron-bench
+```
+
+★ **Three things about it that are easy to get wrong.**
+
+**(1) `--work` is scratch, and the fixture tree is the source.** The runner
+wipes the work directory and copies `benchmarks/fixtures/work/` into it before
+every task, so every task starts from the same tree and the checks read the
+files the agents left behind. Pointing `--work` at the fixture directory
+destroys the fixtures; the runner refuses to start if you do.
+
+**(2) The cost is priced by the model the agent ran on, not by the one the
+arm table says it should run on.** The transcript carries it per message — the
+agent's name is on the message and the model is in its metadata
+(`api/v2_convert.go`). Read that, not the arm table: the arm table is the
+fallback for the rare case of one agent running on two models, and that case
+is reported (`modelConflicts`) rather than priced silently.
+
+**(3) A run that never finished is not a free run.** The provider bills every
+call it made, including the ones that never came back — those produce no
+message, so no local accounting can see them. A failed run's cost is a
+**lower bound**, and the report marks it `costIncomplete`.
+
+★ **And one trap:** the connection subscribes to the run; it does not consume
+it, so **a client that gives up leaves the run going** (`api/v2_run.go`). The
+runner therefore calls `POST /v2/sessions/{id}/abort` when it times out —
+without that, the sweep keeps paying for calls whose answers nobody reads.
+The abort is idempotent, so it is safe on a run that already ended.
+
+★ `--repeats 3` is the minimum for a claim: the model is stochastic, and a
+single repeat moved by 2× on the same task. Report the **median**.
+
+The findings, the price table's verification against the provider's bill, and
+the two shapes the benchmark measures are in `benchmarks/README.md`.
+
 ## 6. Troubleshooting
 
 | Symptom | Check first |

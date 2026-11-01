@@ -662,6 +662,52 @@ E2E 共享一个假后端状态，并行会互相污染。
 **（七）改界面必须浏览器验证。** 「我改了，测试也绿了」不构成验收依据 ——
 脚本级测试看不见渲染层。
 
+### 5.8 ★ 成本基准
+
+`benchmarks/` 衡量的是多 agent 拓扑相对于「一个强模型做同样的事」多花或少花多少钱。
+它是带断言的度量，不是单元测试：跑手扫各个 arm，`analyze.ts` 校验结果。
+
+```bash
+# 服务端，指向一个 scratch 配置根与一个 scratch 工程根
+./bin/openheron --config-dir $PWD/.openheron-bench --project-root $PWD/benchmarks/out/work
+
+# 扫描：--arm 与 --task 接逗号分隔的列表
+bun run benchmarks/run.ts --base http://127.0.0.1:18099 \
+  --config $PWD/.openheron-bench --work $PWD/benchmarks/out/work \
+  --arm a2-max-parent-flash-workers-cited,b-max-solo \
+  --task write-a-file,two-file-change,add-a-method-to-three-types --repeats 3
+
+# 分析：分段成本、中位数、比值 —— 以及那些断言
+bun run benchmarks/analyze.ts --report benchmarks/out/report.json --config $PWD/.openheron-bench
+```
+
+★ **关于它，有三件容易搞错的事。**
+
+**（一）`--work` 是 scratch，fixture 树才是源头。** 跑手在每个任务前都会清空
+work 目录并把 `benchmarks/fixtures/work/` 拷进去，所以每个任务都从同一棵树开始，
+判据读的是 agent 留下的文件。把 `--work` 指向 fixture 目录会毁掉 fixture；
+跑手会拒绝这样启动。
+
+**（二）成本按 agent 实际跑的那个模型定价，不是按 arm 表说它该跑的那个。**
+transcript 逐条带着它 —— agent 的名字在消息上，模型在消息的 metadata 里
+（`api/v2_convert.go`）。读那个，别读 arm 表：arm 表只在「一个 agent 跑了两个模型」
+这种少见情况下兜底，而这种情况会被报出来（`modelConflicts`），不会被悄悄定价掉。
+
+**（三）没跑完的 run 不是免费的 run。** 厂商为它发出的每一次调用计费，
+包括那些没回来的 —— 它们不产生消息，所以任何本地记账都看不见它们。
+失败 run 的成本是**下界**，报告里用 `costIncomplete` 标出来。
+
+★ **还有一个坑：** 连接只是*订阅*这个 run，并不消费它，所以**客户端放弃之后
+run 还在跑**（`api/v2_run.go`）。因此跑手超时时会调
+`POST /v2/sessions/{id}/abort` —— 不这么做，扫描会继续为那些没人读的答案付钱。
+abort 是幂等的，所以对已经结束的 run 调用它也安全。
+
+★ `--repeats 3` 是下结论的最低要求：模型是随机的，同一个任务单次重复之间能差 2×。
+报**中位数**。
+
+结论、价格表与厂商账单的对账、以及这个基准测量的两种形态，都写在
+`benchmarks/README.md`。
+
 ## 6. 排障
 
 | 症状 | 先查 |

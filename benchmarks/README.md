@@ -13,6 +13,8 @@ eat the saving.
 | Arm | Topology | Models | Role |
 |---|---|---|---|
 | **A** `a-max-parent-flash-workers` | parent + workers | parent `qwen3.8-max`, worker `qwen3.8-flash` | the hypothesis |
+| **A′** `a2-max-parent-flash-workers-cited` | parent + one worker | parent `qwen3.8-max`, worker `qwen3.8-flash` | the same shape, but the worker reports conclusions and citations |
+| **A″** `a3-max-parent-flash-workers-scouted` | parent + scout + worker | parent `qwen3.8-max`, scout and worker `qwen3.8-flash` | the parent delegates the investigation too |
 | **B** `b-max-solo` | one agent | `qwen3.8-max` | the baseline: one strong model does everything |
 | **C** `c-flash-solo` | one agent | `qwen3.8-flash` | the control that keeps the conclusion honest |
 
@@ -52,6 +54,11 @@ order of magnitude.
 | `qwen3.8-max` | ¥12 | ¥36 | ¥1.5 |
 | `qwen3.8-flash` | ¥0.8 | ¥2.7 | ¥0.1 |
 
+★ **The table is checked against the provider's own bill**, not taken on
+trust: every rate back-solves from the billed amount and the billed token
+count, with zero residual on all six. If a rate here is ever wrong, the
+benchmark's headline is wrong with it.
+
 ★ **Three things the table says that are easy to get wrong:**
 
 1. **The saving is in the output.** The output is 13× more expensive at max, so
@@ -67,13 +74,14 @@ move and the ratio survives that.
 
 ## The tasks
 
-`tasks.yaml` — 12 tasks over a small fixture tree (`fixtures/work/`), in
-three kinds:
+`tasks.yaml` — 15 tasks over a small fixture tree (`fixtures/work/`), in
+four kinds:
 
 | Kind | Count | What it is | What it is expected to show |
 |---|---|---|---|
 | `exec` | 5 | execution: read a value, count files, write a file, run a command, locate a symbol | A wins: the work is the workers' to do |
 | `decompose` | 4 | the parent has to split the work and hand it out | A wins, but κ is what decides by how much |
+| `big` | 3 | the work is large enough for the delegation to matter | ★ **A wins**: the same ratio, applied to more work |
 | `judge` | 3 | a judgement call | ★ **B wins**: delegating a judgement buys nothing, the parent still decides — the coordination is pure overhead |
 
 ★ **The third kind is the point of the set.** A benchmark that averages over
@@ -111,11 +119,23 @@ bun run benchmarks/run.ts \
 ★ `--work` is the project root the agents may touch: the runner resets it
 from `fixtures/work/` before every task, so the tasks start from the same tree.
 
-Flags: `--arm <id>` (one arm), `--kind <kind>` (one kind), `--repeats N`
+Flags: `--arm <id>` and `--task <id>` take a **comma-separated list**
+(`--arm a2-...,b-max-solo`), `--kind <kind>` takes one kind, `--repeats N`
 (default 3 — the model is stochastic, so the report uses the mean and the
-median matters more than any single run).
+median matters more than any single run), `--timeout <ms>` (default 600000 —
+a guard against a hung model, not a budget; the run is aborted when it fires).
 
 Output: `benchmarks/out/report.json` (every run) and a summary on stderr.
+
+`benchmarks/analyze.ts` is the second half of the tool: it reads the
+transcripts and splits each run into its phases, prints the per-task medians
+and the per-arm ratios, and **asserts two things on every run** — that the
+staged sum equals the cost the runner recorded, and that the decomposition
+identity holds. It exits non-zero when either fails.
+
+```bash
+bun run benchmarks/analyze.ts --report benchmarks/out/report.json --config $PWD/.openheron-bench
+```
 
 ## Where the numbers come from
 
@@ -124,8 +144,27 @@ carries the endpoint's own token accounting (`ResponseMeta`) and the agent that
 produced it. The API already splits the usage per agent on the history path
 (`api/v2_sessions.go` — `sessionUsageByAgent`), and the runner reads that same
 split: prompt tokens, completion tokens, and **cached** prompt tokens, per
-agent. The model each agent ran comes from `arms.yaml`, so the arms and the
-price table cannot drift apart.
+agent.
+
+★ **The model is the one the agent ran on, not the one the arm table says it
+should run on.** The transcript carries it per message: the agent's name is on
+the message and the model is in its metadata (`api/v2_convert.go` — `name` and
+`metadata.model`). The arm table says which model an agent *should* use; the
+message says which one it *did*. This benchmark exists to compare what the
+strong model costs against what the cheap one costs, and that comparison is
+only as good as the model attribution behind it — so the attribution is read,
+not assumed. The arm table's mapping is the fallback for the rare case of one
+agent running on two models, where the token bucket cannot be split; that case
+is reported (`modelConflicts`) rather than priced silently.
+
+★ **The stages come from the same transcript.** `analyze.ts` splits a run into
+the phases the arrangement has — `analyze` (the parent works out what has to
+happen), `handoff` (the parent writes the task order), `child` (the worker
+executes), `accept` (the parent checks the result) — by the position of the
+parent's `task` tool calls. The API's per-agent split cannot answer "which
+phase", and the phase split is what the finding is made of. The two agree:
+the staged sum must equal the recorded cost, and that check is one of the
+analyzer's two assertions.
 
 ★ The quality is the check, not a judge: the checks are strings and files.
 The `judge` tasks are the weak point — a keyword check is a proxy, and a real
@@ -140,6 +179,11 @@ run should add a rubric with a fixed judge model.
    and the rounds multiply: the cost goes up, not down.
 3. ★ **The cache-hit rate** differs between the arms and is measured, not
    assumed.
+4. ★ **Whether the parent delegates the work at all.** In the one-task shape
+   (A″) the saving depends on the parent choosing to hand the investigation
+   to the scout; when it decides to read the code itself, that task's
+   delegation loses. This is the parent's discretion, so it is a variance
+   source, not a constant — the arm needs a median over repeats.
 
 ## What the sweep showed
 
@@ -223,6 +267,124 @@ order that asks for a summary instead of the transcript.
 measured ¥0.0656). `--repeats 3` is the minimum for a claim, and the median
 matters more than the mean.
 
+## The other shape: one coding task, two roles
+
+The sweep above measures **many tasks, decomposed and handed out**. There is a
+second shape, and it is the one that looks like the question people actually
+ask: **one requirement, one strong model plans it, one cheap model implements
+it, the strong model does not write a line of code.**
+
+The two shapes have different economics, and the numbers below do not transfer
+between them. Here the parent's job is not to split work — it is to decide, and
+to decide well. The interesting question is whether the cheap implementation
+pays for the strong decision.
+
+### The arms
+
+| Arm | Topology | What the worker reports |
+|---|---|---|
+| **A′** `a2-max-parent-flash-workers-cited` | parent + one worker | conclusions with `file:line` citations, not the diff |
+| **A″** `a3-max-parent-flash-workers-scouted` | parent + read-only **scout** + one worker | the scout's findings first, then the worker's citations |
+
+★ **A″ puts the investigation itself on the cheap model.** The parent never
+reads the code: a read-only scout reads it and reports the facts with
+citations, and the parent decides from those. This is the shape that matches
+"the strong model understands the requirement and the cheap one does the
+typing" — and it is the only one of the two where the parent does not pay for
+reading the code at the strong model's rate.
+
+### What the measurement showed
+
+Three coding tasks, A′ at `--repeats 3`, A″ at `--repeats 1`, all against the
+same B baseline:
+
+| Arm | Total | Passed | Ratio to B | Parent's `analyze` phase |
+|---|---|---|---|---|
+| **A′** citations | ¥1.0325 | 9/9 | **0.929** | ¥0.1398 /run |
+| **A″** scout | ¥0.8348 | 3/3 | **0.751** | **¥0.0000 /run** |
+| **B** one strong model | ¥1.1118 | 8/9 | 1.000 | ¥0.1109 /run |
+
+★ **In this shape the delegation does pay — and A″'s mechanism is visible in
+the stages.** The parent's `analyze` phase in A″ is **exactly zero**: it reads
+no code. Everything the parent knows about the code arrives through the
+scout's report. In A′ the same phase costs ¥0.1398 per run, which is the
+parent reading the files itself.
+
+Per task (median of 3 for A′ and B, single run for A″):
+
+| Task | A′ | A″ | B | A′/B | A″/B |
+|---|---|---|---|---|---|
+| `write-a-file` | 0.0770 | 0.1304 | 0.0837 | 0.920 | 1.557 |
+| `two-file-change` | 0.5261 | 0.5094 | 0.4878 | 1.079 | 1.044 |
+| `add-a-method-to-three-types` | 0.4293 | 0.1950 | 0.5403 | 0.795 | 0.361 |
+
+★ **Two findings that the totals hide.**
+
+1. **The worker's report is the parent's fresh input.** The parent pays full
+   price for whatever the worker hands back, because a report is new content
+   that was never in the cache. A′ asks for conclusions with citations, and
+   the parent's acceptance re-reads drop from 2.4 times per run to 0.44 — the
+   parent's own file-reading is what the citations remove.
+2. **A″'s numbers are not yet a claim.** Its two independent single runs
+   measured 0.751 and 0.486. The spread is not the model's noise on the task:
+   it is **whether the parent called the scout at all** — on `write-a-file` the
+   parent skipped the scout and delegated straight to the worker, and that
+   task is the one A″ loses (1.557). A″ needs `--repeats 3` before its
+   headline can be written down.
+
+★ **And the shape has a cost the ratio does not show: wall clock.** A″ makes
+two delegations instead of one, so it runs longer: one A″ run exceeded the
+300 s timeout that the sweep used before, and had to be re-run with a 600 s
+timeout. An arm that delegates twice needs roughly twice the time.
+
+### Why the two shapes differ
+
+In the many-tasks shape the parent's overhead is a **fixed** cost per task
+(decompose once, integrate once) and the delegated work is **many small
+pieces** — so α can be large and κ small. In the one-task shape the parent's
+overhead is **the whole decision**, and the delegated work is one piece, so
+the saving is a single price ratio and the overhead is a single investigation.
+
+★ **That is why the same two models flip their order between the shapes.** In
+the many-tasks shape A ties B (1.002) because the parent's extra rounds cost
+as much as the workers save. In the one-task shape the parent's extra work is
+*reading the code*, and moving that reading to the cheap model is worth more
+than it costs — as long as the parent actually delegates it.
+
+## What the numbers cost to trust
+
+The cost column is only as good as the accounting behind it. Three things were
+found by checking the benchmark's own output against the provider's bill, and
+all three are now properties of the benchmark rather than surprises.
+
+★ **The price table is verified, not assumed.** Every rate in `arms.yaml`
+back-solves from the billed amount and the billed token count with zero
+residual. The bill is the arbiter; the price page is a starting point.
+
+★ **A run that never finished is not a free run.** The provider bills every
+call it made, and the calls that never came back — a request that hangs and
+then fails — are billed without ever producing a message, so no local
+accounting can see them. A failed run's `cost` is a **lower bound**, not the
+whole: the report marks it `costIncomplete`, and the analyzer says so on the
+arm's line. Reporting a zero would read as "this run was free", and it was
+not.
+
+★ **The free tier is an account-level, one-time resource.** The October bill
+reproduces to within 0.4 % of "the usage from a certain moment onwards" — the
+usage before that moment was covered by the free quota and was never charged.
+★ It hit the **early** runs of a sweep and nothing else, so it moves the
+absolute ¥ of a campaign without moving the **ratio** between arms: it is
+charged to whoever spent it first, and the arms interleave. A ratio is the
+number that survives it.
+
+★ **A client that gives up does not stop the run.** The connection subscribes
+to the run; it does not consume it, so a connection that dies leaves the run
+going (`api/v2_run.go`). That is right for a user who closes the browser and
+expects the agent to keep working, and it is wrong for a benchmark that has
+given up — it would keep paying for calls whose answers nobody reads. The
+runner therefore calls `POST /v2/sessions/{id}/abort` when it times out. The
+abort is idempotent, so it is safe on a run that already ended.
+
 ## Running out of quota mid-sweep
 
 ★ The sweep can die halfway: the endpoint's free tier has a quota, and a
@@ -236,10 +398,24 @@ The runs before the quota ran out are still valid — the report keeps them
 (`benchmarks/out/report.json`), and `turns > 0` tells a real run from an
 empty one.
 
+★ **A quota that runs out is not a modelling result.** The runs it covered
+were free, and the runs after it were not; averaging the two into one arm
+total mixes two pricing regimes. When a sweep is truncated by the quota, the
+runs before and after it belong to different cost regimes and should be read
+separately — the bill is what tells them apart, and the cut-off is visible in
+it as the point where the accounted usage starts matching the billed one.
+
 ## The known gap this benchmark does not need
 
 The live run does not account the usage per agent — `usage.byAgent` exists
 only on the history path (a known issue in the developer manual). The
-benchmark reads the transcript, so it does not care. Fixing the live path
+benchmark reads the history, so it does not care. Fixing the live path
 would still be worth it: the agent filter's chips show no cumulative spend
 during a live turn.
+
+★ The benchmark reads **both** paths on purpose: the API's per-agent usage
+for the total (the server's own view of the session), and the transcript for
+the phases and for the model each message ran on (which the per-agent split
+cannot give). The two are cross-checked against each other on every run, so a
+disagreement between them shows up as a failed assertion rather than as a
+wrong number.
