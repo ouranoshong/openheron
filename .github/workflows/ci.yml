@@ -79,13 +79,30 @@ jobs:
         # ★ Only chromium: the config declares one project, and installing
         #   every browser would cost minutes for nothing.
         run: bun x playwright install --with-deps chromium
-      - run: make test-e2e
+      - name: e2e
+        # ★ The command stays the repo's own (`make test-e2e`); the tee is
+        #   only there so that a failure can be summarized **in an
+        #   annotation** — the annotation is visible on the run page without
+        #   any authentication, while the job log is not. A CI that fails
+        #   without saying what failed is a CI nobody can act on.
+        run: |
+          set -o pipefail
+          make test-e2e 2>&1 | tee /tmp/e2e.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            summary=$(grep -E "✘|[0-9]+\) |Error:|Timed out|failed|passed" /tmp/e2e.log \
+              | tail -15 | tr '\n' ' ' | cut -c1-900)
+            echo "::error title=E2E failed::${summary}"
+          fi
+          exit "$status"
       - name: keep the report
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: web/playwright-report/
+          path: |
+            web/playwright-report/
+            /tmp/e2e.log
           retention-days: 7
 
   release:
