@@ -300,6 +300,22 @@ func (d *deriver) run(cancel <-chan struct{}) (Artifacts, error) {
 }
 
 func (d *deriver) artifacts() Artifacts {
+	// ★ The usage is aggregated on **every** path out of the deriver, not
+	//   only on the successful exit.
+	//
+	//   A run that ends in an error still spent tokens on every call it
+	//   completed before the failure, and that spend is real: those
+	//   messages go into the transcript, and the session's own usage view
+	//   reads them back (api/v2_sessions.go:343). Aggregating only on the
+	//   success path made a failed run report no usage at all while its
+	//   messages sat in the transcript carrying theirs.
+	//
+	//   The zero check keeps the endpoint's own number when there is one:
+	//   aggregateUsage returns zero when the endpoint reported none, so
+	//   the fallback cannot invent a figure.
+	if d.usage.TotalTokens == 0 && len(d.intermediates) > 0 {
+		d.usage = aggregateUsage(d.intermediates)
+	}
 	return Artifacts{
 		Intermediates: d.intermediates,
 		Pending:       d.pending,
