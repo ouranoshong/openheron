@@ -61,6 +61,27 @@ model does not have, startup is **not blocked**, but a line in the startup log s
 so ("the thinking parameters for this tier were not sent") — that is the only
 visible clue.
 
+## Which skills an agent may use
+
+`skills/` holds the skills; **the agent decides which of them it may use**, with the
+`skills` key in its own frontmatter:
+
+```yaml
+# agents/main.md
+skills: [refactor]
+```
+
+The names are the **folders** under `skills/` — the skill's own frontmatter name is
+accepted as well. Not declaring the key means **every** skill in the directory;
+declaring an empty list means **none**.
+
+A skill outside the list is not advertised to the model, and asking for it by name
+fails: a model cannot load what it cannot see. A name that is not in the directory is
+reported in the log when the agent is built, rather than ignored.
+
+★ Only the **entry agent** — the one the session selected — carries the skill tool at
+all. A sub-agent has none, so a list on a sub-agent has nothing to filter.
+
 ## Sub-agents (multiple roles)
 
 `subagents: [researcher, coder, reviewer]` in `agents/main.md` declares the topology.

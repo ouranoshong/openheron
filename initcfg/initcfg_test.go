@@ -196,6 +196,18 @@ func TestTheTwoFactoryAgentsAreWrittenAsOneSet(t *testing.T) {
 	}
 }
 
+func TestTheFactoryAgentNamesTheSkillKey(t *testing.T) {
+	// ★ The factory file is where a user learns which keys exist: a field
+	//   nobody can find is a field nobody uses.
+	raw, err := templates.ReadFile(templatesRoot + "/agents/main.md")
+	if err != nil {
+		t.Fatalf("read the factory agent: %v", err)
+	}
+	if !strings.Contains(string(raw), "skills:") {
+		t.Fatalf("the factory agent must name the skills key:\n%s", raw)
+	}
+}
+
 func TestBothFactoryAgentsUseTheChosenModel(t *testing.T) {
 	e := newEnv(t)
 	p := e.plan(Options{Model: "openai/gpt-4o"})

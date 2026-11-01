@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
@@ -31,6 +32,20 @@ func TestCategoryTemplatesDecodeStrictly(t *testing.T) {
 			t.Fatalf("the agent template must decode with the loader's own decoder: %v", err)
 		}
 	})
+}
+
+// ★ The scaffold a user gets when they create an agent in the settings editor
+//
+//	has to name the skill key: a field nobody can find is a field nobody
+//	uses.
+func TestTheAgentTemplateNamesTheSkillKey(t *testing.T) {
+	fm, _, err := splitFrontmatter([]byte(Template(DirAgent, nil)))
+	if err != nil {
+		t.Fatalf("the agent template must have a frontmatter: %v", err)
+	}
+	if !strings.Contains(string(fm), "skills:") {
+		t.Fatalf("the agent template must name the skills key:\n%s", fm)
+	}
 }
 
 func TestDeclarationsDecodeWithTheirOwnTags(t *testing.T) {

@@ -153,7 +153,12 @@ func Template(catDir string, modelRefs []string) string {
 	case DirLLM:
 		return "type: openai\nbase_url: \napi_key: ${}\nmodels: []\n"
 	case DirAgent:
-		s := "---\nmodel: \ndescription: \n---\n"
+		s := "---\nmodel: \ndescription: \n"
+		// ★ The skills hint belongs in the frontmatter: the key is a
+		//   frontmatter key, and a comment in the body would reach the model
+		//   as part of the prompt.
+		s += "# skills: [name]  the skills this agent may use; the names are the folders under skills/\n"
+		s += "---\n"
 		if len(modelRefs) > 0 {
 			s += "# available models: " + strings.Join(modelRefs, ", ") + "\n"
 		}

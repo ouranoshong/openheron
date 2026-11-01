@@ -6,9 +6,10 @@ reasoning: high
 subagents: [task]
 disabled_tools: [write_file, edit_file, execute]
 
-# ★ skills is the allow-list of skills this agent may use — the folders under
-#   .openheron/skills/. A skill outside the list is not advertised to the model
-#   and cannot be loaded by name.
+# ★ skills is the allow-list of skills this agent may use — the names are the
+#   folders under the skills directory (.openheron/skills/ by default). A skill
+#   outside the list is not advertised to the model and cannot be loaded by
+#   name.
 #
 #   ★ Leave the key out and the agent gets every skill in the directory;
 #   write an empty list and it gets none.
