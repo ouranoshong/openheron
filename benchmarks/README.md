@@ -360,6 +360,34 @@ Per task (median of 3; A″'s `add-a-method` has one completed run out of three)
    turns, and a shorter work order. A prompt that makes the parent more
    careful makes it *more* expensive, which is exactly what A″′ measured.
 
+★ **Which of the two levers actually pays — the parent's turn count, by a
+wide margin.** Each parent turn re-pays a fixed context of about 6,500
+tokens (cached, ¥0.0097) plus that turn's new content and output:
+
+| Lever | What it saves | Per run | A″/B |
+|---|---|---|---|
+| — | A″ as measured | — | 0.625 |
+| **the work order's length** | 1,000 characters ≈ 285 output tokens ≈ ¥0.0103 | halved → ¥0.0051 | 0.612 |
+| | | gone entirely → ¥0.0103 | 0.599 |
+| **the parent's turn count** | one turn ≈ ¥0.0248 | 3.1 → 2.0 turns → ¥0.0239 | **0.564** |
+| | | 3.1 → 1.5 turns → ¥0.0348 | 0.536 |
+
+★ **Shortening the work order is the weak lever** — cutting it away entirely
+moves the ratio from 0.625 to 0.599, because the order is only about a fifth
+of the parent's spend. ★ **Cutting a turn is worth five times as much.** And
+the parent cannot spend fewer turns without giving up the thinking that
+produces the order — which is the expensive part.
+
+★ **This is the tension in the shape, and it is worth stating plainly:** the
+delegation saves the parent's *turns* (3.1 against B's 10.7), but the parent
+has to spend a turn writing the order, and that turn is the most expensive
+one it has. ★ So "the strong model plans, the cheap model executes" is
+paying for the strong model's planning at ¥36/M per output token — and
+**the planning is the thing the delegation is supposed to be saving**. The way
+out is to have the scout propose the plan as well, which brings the parent to
+two turns; but then the *weak* model is deciding, and the shape is no longer
+"the strong model plans".
+
 3. **★ A″ is cheaper but not equally reliable: 6/9 against B's 9/9.** Two of
    the three failures are the endpoint's own (a request timeout and a network
    error) and would have hit any arm. The third is the shape's: on
@@ -402,6 +430,38 @@ signature the prompt never asked for. The worker wrote
 marked wrong. The check now looks for `.Flush(`, which matches either. ★
 Every run that passed before still passes: all of them wrote a no-argument
 call, which `.Flush(` also matches.
+
+### ★ What this shape is actually asking for
+
+Put the three findings together and the shape stops being a cost question.
+
+★ The delegation saves the parent's **turns**: 3.1 against B's 10.7. That is
+where the whole saving comes from — B pays for ten rounds of reading, writing
+and verifying, and A″ pays for three. ★ But the parent cannot spend fewer
+turns without someone producing the plan, and the plan is written in the
+parent's own output tokens at ¥36/M. ★ **So the arrangement is paying for the
+strong model's planning at the rate the delegation was supposed to be
+avoiding.**
+
+That gives one question to answer before any further tuning, and it is not a
+cost question:
+
+> **Does "the strong model plans" mean the strong model must understand the
+> code itself, or only that it must approve the plan?**
+>
+> - If it must understand the code, the parent reads the code and writes the
+>   plan, and the plan costs what it costs. Measured: **A″/B = 0.587**,
+>   **A′/B = 0.735**.
+> - If it only has to approve, then the scout proposes the plan and the parent
+>   is down to two turns. Measured cost estimate: **A″/B ≈ 0.56**. ★ But the
+>   planner is then the *cheap* model, and the shape is no longer "the strong
+>   model plans" — it is "a cheap model plans and the strong model signs off".
+
+★ That is the honest boundary of this measurement, and it is why the numbers
+here are 0.587 and not 0.2. The "80 % at a 50× price gap" figure is reachable
+when the orchestrator is thin: it writes one line, it does not read the code,
+and it does not think. ★ **On a coding task the orchestrator has to think, and
+thinking is the expensive part.**
 
 ### Why the two shapes differ
 
