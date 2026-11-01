@@ -91,8 +91,13 @@ jobs:
   release:
     name: release
     # ★ A tag on a red commit publishes nothing: the checks come first.
+    #
+    #   ★ The string literals are **single** quotes: GitHub's expression
+    #     parser does not accept double quotes, and the whole workflow file is
+    #     rejected when one expression does not parse (which shows up as a
+    #     failed run with zero jobs, not as a failing job).
     needs: [go, web, e2e]
-    if: startsWith(github.ref, "refs/tags/v") || inputs.tag != ""
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
