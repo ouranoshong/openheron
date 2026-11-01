@@ -41,7 +41,7 @@ openheron
 
 Open <http://localhost:8080>.
 
-`openheron init` writes four files:
+`openheron init` writes six files:
 
 ```
 your/project/
@@ -51,8 +51,11 @@ your/project/
     │   └── task.md          # executor agent: does the actual work
     ├── llm/
     │   └── deepseek.yaml    # model profile
-    └── policy/
-        └── permissions.yaml # approval policy
+    ├── policy/
+    │   ├── permissions.yaml # approval policy
+    │   └── limits.yaml      # caps on quantities
+    └── server/
+        └── config.yaml      # process parameters (not hot-reloaded)
 ```
 
 ★ **Existing files are not overwritten** (unless you pass `--force`), so running it in
@@ -67,7 +70,8 @@ Other `init` options:
 | `--model <name>` | Choose the model, default `deepseek-flash` |
 | `--base-url <url>` | The vendor endpoint (**with the path**, copy it from their docs) |
 | `--env <NAME>` | The environment variable holding the secret, default `<PROVIDER>_API_KEY` |
-| `--no-policy` | Do not generate `permissions.yaml` |
+| `--no-policy` | Do not generate the `policy/` section (`permissions.yaml` and `limits.yaml`) |
+| `--tools` | Also generate the tool configurations under `tools/` |
 | `--force` | Overwrite existing files |
 | `--dry-run` | Print what would be written, write nothing |
 | `--json` | Machine-readable output |
@@ -247,9 +251,10 @@ recognised today:
 ★ **Only these four file names are accepted** under `tools/`; any other name is a
 **startup error** and is never silently ignored.
 
-★ **`openheron init` generates nothing under `tools/`** — that whole directory is yours
-to write. Not writing it means not enabled: the tool does not appear in the agent's
-tool table, and the model cannot see it.
+★ **`openheron init` writes nothing under `tools/` by default** — that whole directory is
+yours to write. Pass `--tools` and it writes the four files above. Not writing a file
+means not enabled: the tool does not appear in the agent's tool table, and the model
+cannot see it.
 
 ### 4.5 Process parameters (`server/config.yaml`)
 

@@ -58,7 +58,7 @@
 | | `storage/memarbit` | `storage` | 内存租约仲裁器 |
 | | `transport` | `contract` | AG-UI 渲染：run 的事件 → 帧 |
 | | `llm` | `build`, `spec`, `decl` | 薄封装（只有 `common/` 与一个测试文件） |
-| | `initcfg` | `spec` | `openheron init` 的出厂模板 |
+| | `initcfg` | `spec`, `persist` | `openheron init` 的出厂模板 |
 | **L3 入口** | `api` | `build`, `obs`, `run`, `spec`, `decl`, `contract`, `message`, `storage`, `filestore`, `transport`, `webui` | HTTP 路由、SSE、错误信封 |
 
 ### 2.1 两条不能破的依赖铁律
@@ -245,7 +245,8 @@ frontmatter 可用键（`agentkit/spec/decl/decl.go:67` 的 `decl.Agent`）：
 | 百科 | `build/nettools.go:236` | `wikipedia` |
 
 外部工具是**文件存在即启用**（`tools/*.yaml`），不需要改代码。
-★ 注意 `openheron init` **不生成** `tools/` 下的任何文件 —— 那一整个目录要用户自己写。
+★ 注意 `openheron init` **默认不写** `tools/` 下的任何文件 —— 那一整个目录要用户自己写；
+文件存在即启用，所以开一个工具是一个决定，不是一个副作用。`--tools` 会写那四个配置文件。
 
 ## 5. 运行循环
 

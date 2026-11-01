@@ -179,6 +179,12 @@ Say you want a new `mcp/` directory:
 
 6. **Defaults**: `agentkit/spec/defaults.go`.
 
+7. **Factory template**: `openheron init` writes the minimum runnable configuration, so
+   a new partition needs one too. Either add a file under `initcfg/templates/<dir>/` —
+   for the files only init produces — or reuse the scaffold the config editor already
+   has (`spec.ToolTemplates()` / `spec.LimitsTemplate()`). ★ **One file's content has
+   one source**: two copies of the same file are two copies that drift.
+
 ### 3.3 Adding an API route
 
 1. **Register it.** Routes are registered in one place, `api/v2_files.go:34-65`.

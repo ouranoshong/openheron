@@ -61,7 +61,7 @@ counting `grep '"github.com/ouranoshong/openheron/'` hits per package:
 | | `storage/memarbit` | `storage` | The in-memory lease arbiter |
 | | `transport` | `contract` | AG-UI rendering: the run's events → frames |
 | | `llm` | `build`, `spec`, `decl` | Thin wrapper (only `common/` and one test file) |
-| | `initcfg` | `spec` | Factory templates for `openheron init` |
+| | `initcfg` | `spec`, `persist` | Factory templates for `openheron init` |
 | **L3 entry** | `api` | `build`, `obs`, `run`, `spec`, `decl`, `contract`, `message`, `storage`, `filestore`, `transport`, `webui` | HTTP routing, SSE, error envelope |
 
 ### 2.1 Two dependency rules that must not be broken
@@ -271,8 +271,9 @@ When a call is denied, the tool returns **a denial message** (with an optional r
 
 External tools are **enabled by the presence of the file** (`tools/*.yaml`); no code
 change is needed.
-★ Note that `openheron init` **generates nothing** under `tools/` — that whole directory
-is yours to write.
+★ Note that `openheron init` **writes nothing** under `tools/` by default — that whole
+directory is yours to write, and the file's presence is the switch, so turning a tool
+on is a decision, not a side effect. `--tools` writes the four configuration files.
 
 ## 5. The run loop
 

@@ -38,7 +38,7 @@ openheron
 
 打开 <http://localhost:8080>。
 
-`openheron init` 会写四个文件：
+`openheron init` 会写六个文件：
 
 ```
 你的项目/
@@ -48,8 +48,11 @@ openheron
     │   └── task.md          # 执行 Agent：真正动手干活
     ├── llm/
     │   └── deepseek.yaml    # 模型档案
-    └── policy/
-        └── permissions.yaml # 审批策略
+    ├── policy/
+    │   ├── permissions.yaml # 审批策略
+    │   └── limits.yaml      # 配额上限
+    └── server/
+        └── config.yaml      # 进程自身参数（不热重载）
 ```
 
 ★ **已存在的文件不会被覆盖**（除非加 `--force`），所以在一个已经配好的项目里跑它是安全的。
@@ -63,7 +66,8 @@ openheron
 | `--model <name>` | 选模型，默认 `deepseek-flash` |
 | `--base-url <url>` | 厂商端点（**含路径**，从厂商文档抄） |
 | `--env <NAME>` | 密钥的环境变量名，默认 `<PROVIDER>_API_KEY` |
-| `--no-policy` | 不生成 `permissions.yaml` |
+| `--no-policy` | 不生成 `policy/` 目录（`permissions.yaml` 与 `limits.yaml`） |
+| `--tools` | 同时生成 `tools/` 下的工具配置 |
 | `--force` | 覆盖已存在的文件 |
 | `--dry-run` | 只打印要写什么，不落盘 |
 | `--json` | 机器可读输出 |
@@ -228,8 +232,9 @@ deny: []
 
 ★ `tools/` 下**只认这四个文件名**，写别的名字会**启动报错**，不会被静默忽略。
 
-★ **`openheron init` 不会生成 `tools/` 下的任何文件** —— 这一整个目录要你自己写。
-没写就是没启用：对应的工具不会出现在 agent 的工具表里，模型也看不见它。
+★ **`openheron init` 默认不写 `tools/` 下的任何文件** —— 这一整个目录要你自己写；加
+`--tools` 才会把上面那四个文件写出来。没写就是没启用：对应的工具不会出现在 agent 的
+工具表里，模型也看不见它。
 
 ### 4.5 进程参数（`server/config.yaml`）
 

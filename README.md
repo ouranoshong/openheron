@@ -74,17 +74,21 @@ export DEEPSEEK_API_KEY=sk-...  # secrets are read from the environment only
 openheron                            # start, then open http://localhost:8080
 ```
 
-`openheron init` writes four files: `agents/main.md`, `agents/task.md`,
-`llm/<provider>.yaml` and `policy/permissions.yaml`. Existing files are **kept, not
-overwritten** (unless you pass `--force`), so running it in an already-configured
-project is safe.
+`openheron init` writes six files: `agents/main.md`, `agents/task.md`,
+`llm/<provider>.yaml`, `policy/permissions.yaml`, `policy/limits.yaml` and
+`server/config.yaml`. Existing files are **kept, not overwritten** (unless you pass
+`--force`), so running it in an already-configured project is safe.
+
+`tools/` is **not** written by default — a file's presence is the switch that turns a
+tool on, so which tools exist is yours to decide. Pass `--tools` to get
+`tools/http.yaml`, `tools/web_search.yaml`, `tools/wikipedia.yaml` and `tools/kb.yaml`.
 
 ## Command line
 
 | Command | Effect |
 |---|---|
 | `openheron [--config-dir <path>] [--project-root <path>]` | Start the server |
-| `openheron init [--dir] [--model] [--provider] [--base-url] [--env] [--no-policy] [--force] [--dry-run] [--json]` | Generate a minimal runnable configuration |
+| `openheron init [--dir] [--model] [--provider] [--base-url] [--env] [--no-policy] [--tools] [--force] [--dry-run] [--json]` | Generate a minimal runnable configuration |
 | `openheron kb index [--config-dir] [--json] [files...]` | Build the knowledge-base index |
 | `openheron kb search [--config-dir] <query>` | Search the knowledge base |
 | `openheron kb status [--config-dir] [--json]` | Inspect the index (no embedding service needed) |

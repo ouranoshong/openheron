@@ -38,10 +38,17 @@ func TestInitJSONOutputIsValidJSON(t *testing.T) {
 	if out.Dir == "" || out.Model == "" {
 		t.Fatalf("dir and model must be reported: %+v", out)
 	}
-	if len(out.Created) != 4 {
-		t.Fatalf("created = %v, want four files", out.Created)
+	if len(out.Created) != 6 {
+		t.Fatalf("created = %v, want six files", out.Created)
 	}
-	for _, want := range []string{".openheron/agents/main.md", ".openheron/agents/task.md"} {
+	for _, want := range []string{
+		".openheron/agents/main.md",
+		".openheron/agents/task.md",
+		".openheron/llm/deepseek.yaml",
+		".openheron/policy/permissions.yaml",
+		".openheron/policy/limits.yaml",
+		".openheron/server/config.yaml",
+	} {
 		found := false
 		for _, c := range out.Created {
 			if c == want {
@@ -124,6 +131,38 @@ func TestInitWritesIntoTheGivenDirectory(t *testing.T) {
 		".openheron/agents/task.md",
 		".openheron/llm/deepseek.yaml",
 		".openheron/policy/permissions.yaml",
+		".openheron/policy/limits.yaml",
+		".openheron/server/config.yaml",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
+			t.Fatalf("%s must exist: %v", rel, err)
+		}
+	}
+	// ★ The file's presence is the switch that turns a tool on, so init does
+	//   not open an outbound channel on its own.
+	if _, err := os.Stat(filepath.Join(dir, ".openheron", "tools")); err == nil {
+		t.Fatal("tools/ must not be written unless --tools is given")
+	}
+	svc, err := spec.NewServiceAt(filepath.Join(dir, ".openheron"), dir)
+	if err != nil {
+		t.Fatalf("NewServiceAt: %v", err)
+	}
+	if _, err := svc.Load(); err != nil {
+		t.Fatalf("the produced config must load: %v", err)
+	}
+}
+
+func TestInitToolsWritesTheToolConfigurations(t *testing.T) {
+	dir := initEnv(t)
+	var buf bytes.Buffer
+	if err := initCmd([]string{"--dir", dir, "--tools"}, &buf); err != nil {
+		t.Fatalf("initCmd: %v", err)
+	}
+	for _, rel := range []string{
+		".openheron/tools/http.yaml",
+		".openheron/tools/web_search.yaml",
+		".openheron/tools/wikipedia.yaml",
+		".openheron/tools/kb.yaml",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
 			t.Fatalf("%s must exist: %v", rel, err)
@@ -133,7 +172,12 @@ func TestInitWritesIntoTheGivenDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServiceAt: %v", err)
 	}
-	if _, err := svc.Load(); err != nil {
+	cfg, err := svc.Load()
+	if err != nil {
 		t.Fatalf("the produced config must load: %v", err)
+	}
+	if cfg.Tools.HTTP == nil || cfg.Tools.WebSearch == nil ||
+		cfg.Tools.Wikipedia == nil {
+		t.Fatalf("the written tool files must enable the tools: %+v", cfg.Tools)
 	}
 }

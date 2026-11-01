@@ -56,16 +56,19 @@ export DEEPSEEK_API_KEY=sk-...  # 密钥只从环境变量读
 openheron                            # 启动，打开 http://localhost:8080
 ```
 
-`openheron init` 写四个文件：`agents/main.md`、`agents/task.md`、`llm/<provider>.yaml`、
-`policy/permissions.yaml`。已存在的文件**保留不覆盖**（除非加 `--force`），
-所以在一个已经配好的项目里跑它是安全的。
+`openheron init` 写六个文件：`agents/main.md`、`agents/task.md`、`llm/<provider>.yaml`、
+`policy/permissions.yaml`、`policy/limits.yaml` 和 `server/config.yaml`。已存在的文件
+**保留不覆盖**（除非加 `--force`），所以在一个已经配好的项目里跑它是安全的。
+
+`tools/` 默认**不写** —— 文件存在即启用，用哪些工具得由你来定；加 `--tools` 才会写
+`tools/http.yaml`、`tools/web_search.yaml`、`tools/wikipedia.yaml` 和 `tools/kb.yaml`。
 
 ## 命令行
 
 | 命令 | 作用 |
 |---|---|
 | `openheron [--config-dir <path>] [--project-root <path>]` | 启动服务 |
-| `openheron init [--dir] [--model] [--provider] [--base-url] [--env] [--no-policy] [--force] [--dry-run] [--json]` | 生成最小可运行配置 |
+| `openheron init [--dir] [--model] [--provider] [--base-url] [--env] [--no-policy] [--tools] [--force] [--dry-run] [--json]` | 生成最小可运行配置 |
 | `openheron kb index [--config-dir] [--json] [files...]` | 给知识库建索引 |
 | `openheron kb search [--config-dir] <query>` | 检索知识库 |
 | `openheron kb status [--config-dir] [--json]` | 看索引现状（不需要向量化服务在跑） |

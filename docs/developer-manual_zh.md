@@ -164,6 +164,11 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
 
 6. **默认值**：`agentkit/spec/defaults.go`。
 
+7. **出厂模板**：`openheron init` 要写出最小可运行配置，新分区也得有模板。要么在
+   `initcfg/templates/<dir>/` 下加一个文件（只由 init 产出的那些文件），要么复用
+   配置编辑器已有的脚手架（`spec.ToolTemplates()` / `spec.LimitsTemplate()`）。
+   ★ **一份文件的内容只有一个来源**：同一个文件的两份拷贝，就是两份会漂移的拷贝。
+
 ### 3.3 加一条 API 路由
 
 1. **注册**。路由注册集中在 `api/v2_files.go:34-65`。**注册顺序有意义**：

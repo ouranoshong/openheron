@@ -3,6 +3,7 @@ package initcfg
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -284,6 +285,8 @@ func TestNothingIsWrittenWhenEverythingIsAlreadyThere(t *testing.T) {
 	e.write("llm/openai.yaml", userProviderYAML)
 	e.write("agents/main.md", userAgentMD)
 	e.write("policy/permissions.yaml", userPolicyYAML)
+	e.write("policy/limits.yaml", "agent:\n  max_depth: 0\n")
+	e.write("server/config.yaml", "listen_addr: \":8080\"\n")
 
 	p := e.plan(Options{})
 	if len(p.Files) != 0 {
@@ -494,5 +497,154 @@ func TestInitIsIdempotent(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(e.root, "agents", "main.md")); err != nil {
 		t.Fatalf("the existing agent must survive: %v", err)
+	}
+}
+
+// ── the server section ──────────────────────────────────────────────────────
+
+func TestTheServerConfigurationIsWritten(t *testing.T) {
+	e := newEnv(t)
+	p := e.plan(Options{})
+	if !hasRel(rels(p), "server/config.yaml") {
+		t.Fatalf("the server configuration must be written: %v", rels(p))
+	}
+	if err := p.Apply(e.svc()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(e.root, "server", "config.yaml")); err != nil {
+		t.Fatalf("server/config.yaml must exist: %v", err)
+	}
+	if _, err := e.svc().Load(); err != nil {
+		t.Fatalf("the produced config must load: %v", err)
+	}
+}
+
+// The template writes the code's own defaults, so writing it must change
+// nothing. That is the property worth pinning: the day a default moves, this
+// test says the template has to move with it.
+func TestTheServerConfigurationHoldsTheCodeDefaults(t *testing.T) {
+	e := newEnv(t)
+	p := e.plan(Options{})
+	if err := p.Apply(e.svc()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	with, err := e.svc().Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := os.Remove(filepath.Join(e.root, "server", "config.yaml")); err != nil {
+		t.Fatalf("remove the server file: %v", err)
+	}
+	without, err := e.svc().Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !reflect.DeepEqual(with.Server, without.Server) {
+		t.Fatalf("the written server configuration differs from the code defaults:\nwith:    %+v\nwithout: %+v",
+			with.Server, without.Server)
+	}
+}
+
+// ★ server/ is not hot-reloaded, so the config editor refuses to write it.
+// init is not the editor: it creates the file before the process starts.
+func TestTheServerConfigurationIsWrittenEvenThoughTheEditorMayNotWriteIt(t *testing.T) {
+	e := newEnv(t)
+	p := e.plan(Options{})
+	if err := p.Apply(e.svc()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, err := spec.ValidatePath("server/config.yaml"); err == nil {
+		t.Fatal("the config editor must still refuse to write server/")
+	}
+}
+
+// ── the limits ──────────────────────────────────────────────────────────────
+
+func TestTheLimitsAreWritten(t *testing.T) {
+	e := newEnv(t)
+	p := e.plan(Options{})
+	if !hasRel(rels(p), "policy/limits.yaml") {
+		t.Fatalf("the limits must be written: %v", rels(p))
+	}
+	if err := p.Apply(e.svc()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(e.root, "policy", "limits.yaml"))
+	if err != nil {
+		t.Fatalf("read the limits: %v", err)
+	}
+	// ★ One source of truth: the config editor scaffolds the same file.
+	if string(got) != spec.LimitsTemplate() {
+		t.Fatalf("the written limits differ from the canonical template:\n%s", got)
+	}
+}
+
+func TestNoPolicySkipsTheWholePolicySection(t *testing.T) {
+	e := newEnv(t)
+	p := e.plan(Options{NoPolicy: true})
+	for _, rel := range []string{"policy/permissions.yaml", "policy/limits.yaml"} {
+		if hasRel(rels(p), rel) {
+			t.Fatalf("%s must be skipped: %v", rel, rels(p))
+		}
+	}
+	if err := p.Apply(e.svc()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(e.root, "policy")); err == nil {
+		t.Fatal("policy/ must not be created")
+	}
+}
+
+// ── the tools ───────────────────────────────────────────────────────────────
+
+func TestTheToolsAreNotWrittenByDefault(t *testing.T) {
+	e := newEnv(t)
+	p := e.plan(Options{})
+	for _, rel := range []string{"tools/http.yaml", "tools/web_search.yaml"} {
+		if hasRel(rels(p), rel) {
+			t.Fatalf("%s must not be written by default: %v", rel, rels(p))
+		}
+	}
+	if err := p.Apply(e.svc()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(e.root, "tools")); err == nil {
+		t.Fatal("tools/ must not be created")
+	}
+}
+
+func TestTheToolsAreWrittenOnRequest(t *testing.T) {
+	e := newEnv(t)
+	p := e.plan(Options{Tools: true})
+	for rel := range spec.ToolTemplates() {
+		if !hasRel(rels(p), rel) {
+			t.Fatalf("%s must be written: %v", rel, rels(p))
+		}
+	}
+	if err := p.Apply(e.svc()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	cfg, err := e.svc().Load()
+	if err != nil {
+		t.Fatalf("the produced config must load: %v", err)
+	}
+	if cfg.Tools.HTTP == nil || cfg.Tools.WebSearch == nil || cfg.Tools.Wikipedia == nil {
+		t.Fatalf("the written tool files must enable the tools: %+v", cfg.Tools)
+	}
+}
+
+// A rejected merge must leave nothing behind — including the server file,
+// which is written outside the merge.
+func TestARejectedMergeLeavesNoServerFile(t *testing.T) {
+	e := newEnv(t)
+	e.write("agents/main.md", "---\nmodel: openai/nope\n---\n\n坏的。\n")
+	e.write("llm/openai.yaml", userProviderYAML)
+
+	p := e.plan(Options{})
+	if err := p.Apply(e.svc()); err == nil {
+		t.Fatal("a configuration that does not load must not be written")
+	}
+	if _, err := os.Stat(filepath.Join(e.root, "server", "config.yaml")); err == nil {
+		t.Fatal("the server file must not be written when the merge is rejected")
 	}
 }

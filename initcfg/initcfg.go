@@ -4,12 +4,14 @@ import (
 	"embed"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/persist"
 )
 
 //go:embed all:templates
@@ -17,13 +19,24 @@ var templates embed.FS
 
 const templatesRoot = "templates"
 
+// initTmpSuffix is the temporary-file suffix of a direct write. It matches
+// the one the configuration service uses, so a half-written file is never
+// mistaken for a configuration file.
+const initTmpSuffix = ".tmp"
+
 type Options struct {
 	Model    string
 	Provider string
 	BaseURL  string
 	Env      string
 	NoPolicy bool
-	Force    bool
+	// Tools writes the tool configurations under tools/.
+	//
+	// ★ The file's presence is the switch that turns a tool on, so this is
+	//   opt-in: a minimal runnable configuration should not open an outbound
+	//   channel on its own.
+	Tools bool
+	Force bool
 }
 
 type Plan struct {
@@ -102,8 +115,11 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 	}
 
 	// ── policy ──────────────────────────────────────────────────────────
+	//
+	// ★ --no-policy skips the whole section: the approval tiers and the caps
+	//   are one policy, and half of it is not a policy.
 	if opts.NoPolicy {
-		p.Notes = append(p.Notes, "policy/permissions.yaml was skipped (--no-policy)")
+		p.Notes = append(p.Notes, "policy/ was skipped (--no-policy)")
 	} else {
 		has, err := rootHas(svc, spec.DirPolicy, "permissions.yaml")
 		if err != nil {
@@ -119,6 +135,68 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 			}
 			p.add("policy/permissions.yaml", content)
 		}
+
+		hasLimits, err := rootHas(svc, spec.DirPolicy, "limits.yaml")
+		if err != nil {
+			return nil, err
+		}
+		if hasLimits {
+			p.Notes = append(p.Notes,
+				"policy/limits.yaml is already declared; it is kept as is")
+		} else {
+			// ★ The caps live in agentkit/spec, not in this package: the config
+			//   editor scaffolds the very same file, and two copies of one
+			//   file's content are two copies that drift.
+			p.add("policy/limits.yaml", []byte(spec.LimitsTemplate()))
+		}
+	}
+
+	// ── tools ───────────────────────────────────────────────────────────
+	//
+	// ★ The file's presence is the switch that turns a tool on, so init does
+	//   not write them on its own — which tools exist is the user's call.
+	if !opts.Tools {
+		p.Notes = append(p.Notes, "tools/ was skipped (--tools writes the tool configurations)")
+	} else {
+		tpls := spec.ToolTemplates()
+		rels := make([]string, 0, len(tpls))
+		for rel := range tpls {
+			rels = append(rels, rel)
+		}
+		sort.Strings(rels)
+		for _, rel := range rels {
+			has, err := rootHas(svc, spec.DirTools, path.Base(rel))
+			if err != nil {
+				return nil, err
+			}
+			if has {
+				p.Notes = append(p.Notes,
+					fmt.Sprintf("%s is already declared; it is kept as is", rel))
+				continue
+			}
+			p.add(rel, []byte(tpls[rel]))
+		}
+	}
+
+	// ── server ──────────────────────────────────────────────────────────
+	//
+	// ★ server/ is not hot-reloaded and the config editor may not write it,
+	//   so init writes it directly (see Apply). The values are the code's own
+	//   defaults: writing them changes nothing, it only makes them visible.
+	hasServer, err := rootHas(svc, spec.DirServer, "config.yaml")
+	if err != nil {
+		return nil, err
+	}
+	if hasServer {
+		p.Notes = append(p.Notes, "server/config.yaml is already declared; it is kept as is")
+	} else {
+		content, err := renderTemplate("server/config.yaml", nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		p.add("server/config.yaml", content)
+		p.Notes = append(p.Notes,
+			"server/ is not hot-reloaded — it configures the process, so it takes effect on the next start")
 	}
 
 	return p, nil
@@ -128,8 +206,32 @@ func (p *Plan) Apply(svc *spec.Service) error {
 	if len(p.Files) == 0 {
 		return nil
 	}
-	_, _, err := svc.WriteMany(p.Files, "")
-	return err
+	// ★ server/ is not hot-reloaded, so the config editor refuses to write it
+	//   (spec.ValidatePath rejects the whole section). init is not the editor:
+	//   it creates the file before the process starts, so it writes it
+	//   directly. The direct write happens **after** the merge of everything
+	//   else has been checked, so a rejected configuration leaves nothing
+	//   behind.
+	var editable, direct []spec.File
+	for _, f := range p.Files {
+		if path.Dir(f.Rel) == spec.DirServer {
+			direct = append(direct, f)
+			continue
+		}
+		editable = append(editable, f)
+	}
+	if len(editable) > 0 {
+		if _, _, err := svc.WriteMany(editable, ""); err != nil {
+			return err
+		}
+	}
+	for _, f := range direct {
+		dst := filepath.Join(svc.Root(), filepath.FromSlash(f.Rel))
+		if err := persist.AtomicWrite(dst, f.Content, initTmpSuffix); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *Plan) add(rel string, content []byte) {
