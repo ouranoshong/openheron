@@ -1,0 +1,140 @@
+# openheron CI — checks on every push, and the release on a tag.
+#
+# ★ One file, one reason: the release job **waits for the checks**, so a tag
+#   on a red commit publishes nothing. Two workflow files could not express
+#   that (a job cannot `needs:` a job in another workflow), so they would
+#   have to re-run the checks here — the same recipe in two places.
+#
+# ★ The commands are the repo's own: `make lint-go`, `make test`,
+#   `make test-e2e`. What CI runs is what a developer runs locally; the
+#   recipe stays in the Makefile.
+#
+# ★ The smokes are **not** here: `make smoke` needs a model that answers, and
+#   a model that answers is not reproducible in CI. The E2E uses the fake
+#   backend it ships with — that half is deterministic, so it belongs here.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "release this tag (e.g. v0.1.0); leave empty to only run the checks"
+        required: false
+        type: string
+
+# ★ A new push makes the previous run pointless — cancel it.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: go (vet + gofmt + tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # ★ The version comes from go.mod, not from a literal here: the two
+          #   would drift, and the drift is a build that fails on the runner
+          #   and nowhere else.
+          go-version-file: go.mod
+          cache: true
+      - run: make lint-go
+      - run: make test
+
+  web:
+    name: web (lint + types + unit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: install the dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+      - run: make lint-web
+      - name: unit tests
+        working-directory: web
+        run: bun run test:unit
+
+  e2e:
+    name: e2e (playwright, fake backend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: install the dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+      - name: install the browser
+        working-directory: web
+        # ★ Only chromium: the config declares one project, and installing
+        #   every browser would cost minutes for nothing.
+        run: bun x playwright install --with-deps chromium
+      - run: make test-e2e
+      - name: keep the report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          retention-days: 7
+
+  release:
+    name: release
+    # ★ A tag on a red commit publishes nothing: the checks come first.
+    needs: [go, web, e2e]
+    if: startsWith(github.ref, "refs/tags/v") || inputs.tag != ""
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      # ★ The tag, not `git describe`: a shallow clone has no tags, and the
+      #   tag is the version the release is published under anyway.
+      VERSION: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          # ★ Full history: `make release` reads the version from
+          #   `git describe --tags`, and a shallow clone would find no tag.
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: oven-sh/setup-bun@v2
+      - name: build the artifacts
+        # ★ `make release` builds the frontend **first**: web/dist is the
+        #   target of //go:embed, so building the backend first would publish
+        #   a binary with no interface.
+        #
+        #   ★ VERSION reaches the build through the environment: the Makefile
+        #   reads it with `?=`, so the environment wins over `git describe`.
+        run: make release
+      - name: check the version inside the artifact
+        run: |
+          set -euo pipefail
+          dir="openheron_${VERSION}_linux_amd64"
+          tar -xzf "dist/${dir}.tar.gz" -C /tmp
+          got="$(/tmp/${dir}/openheron version)"
+          echo "the binary reports: ${got}"
+          if [ "$got" != "$VERSION" ]; then
+            echo "the version was not stamped into the binary" >&2
+            exit 1
+          fi
+      - name: publish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          files: dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true

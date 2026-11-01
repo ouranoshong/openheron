@@ -1,0 +1,25 @@
+# Keep the toolchain and the CI itself current.
+#
+# ★ The npm ecosystem is deliberately **not** listed: the frontend is pinned by
+#   `web/bun.lock`, and CI installs it with `--frozen-lockfile`. A dependency
+#   PR that changed package.json without the lockfile would break that
+#   install — so the frontend's dependencies are bumped by hand, on purpose.
+
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      go-modules:
+        patterns: ["*"]

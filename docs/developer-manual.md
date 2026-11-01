@@ -429,6 +429,53 @@ The composer must read the **server's** answer, not its own memory:
 `status: "error"` — the turn is fine, it just belongs to someone else. The composer
 shows the stop button, which is how the user takes over.
 
+### 3.9 CI and releases
+
+`.github/workflows/ci.yml` is the whole pipeline: three checks and one release.
+
+| Job | What it runs | Needs |
+|---|---|---|
+| `go` | `make lint-go` + `make test` | Go |
+| `web` | `make lint-web` + `bun run test:unit` | bun |
+| `e2e` | `make test-e2e` — the fake backend it ships with | bun + chromium |
+| `release` | `make release`, then publish to a GitHub Release | the three above |
+
+★ **The release waits for the checks** (`needs`), so a tag on a red commit publishes
+nothing. That is why the pipeline is one file: a job cannot wait for a job in another
+workflow, so two files would have to run the checks a second time.
+
+★ **The smokes are not in CI.** `make smoke` needs a model that answers, and a model
+that answers is not reproducible on a runner — a failure there would be noise, not a
+signal. The E2E is the deterministic half, and it is the half that can gate a release.
+
+★ **The commands are the repo's own.** CI calls `make lint-go` / `make test` /
+`make test-e2e` — the commands §5.2 lists — so the recipe lives in the Makefile and
+nowhere else. `make lint-go` and `make lint-web` are the two halves of `make lint`,
+split so that a job installs only the toolchain it needs.
+
+#### Cutting a release
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The tag pushes, the checks run, and the artifacts land on the releases page:
+
+- six platforms (Linux / macOS / Windows × amd64 / arm64), as `.tar.gz` or `.zip`;
+- `checksums.txt` next to them;
+- the release notes generated from the merged pull requests.
+
+★ The version stamped into the binary is the **tag**, not `git describe` — the tag is
+what the release is published under, and a shallow clone has no tags to describe. The
+pipeline then runs the binary it just built and checks that it reports that version,
+so a forgotten `-ldflags` fails the release instead of shipping.
+
+★ The frontend is built **before** the backend: `web/dist` is the target of
+`//go:embed`, so a backend-only build would publish a binary with no interface.
+
+To publish an existing tag again, run the workflow by hand and give it the tag.
+
 ## 4. The frontend
 
 ### 4.1 The pure layers
@@ -585,6 +632,7 @@ To change a port, change only that one file.
 | `make test-e2e` | A real browser + a deterministic fake backend | nothing (it brings its own fake backend) |
 | `make smoke` | Real-backend integration: SSE framing, history replay, approval wiring | **the test instance running, and a reachable model** |
 | `make lint` | Go vet + gofmt + oxlint + tsc | — |
+| `make lint-go` / `make lint-web` | The two halves of `make lint`, for a job that only has one toolchain | — |
 | `make check` | `lint` + `test` — run this before committing | — |
 
 To start the test instance:

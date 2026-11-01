@@ -27,6 +27,28 @@ make build
 make build-go     # 只构建后端（不含界面），迭代 Go 代码时更快
 ```
 
+★ **或者直接下载一个发布出来的二进制。** 每个 `v*` tag 都会发布同样的单文件可执行程序，
+覆盖六个平台 —— 界面是嵌进去的，旁边不需要再装任何东西：
+
+| 平台 | 产物 |
+|---|---|
+| Linux x64 | `openheron_<version>_linux_amd64.tar.gz` |
+| Linux arm64 | `openheron_<version>_linux_arm64.tar.gz` |
+| macOS x64 | `openheron_<version>_darwin_amd64.tar.gz` |
+| macOS arm64 | `openheron_<version>_darwin_arm64.tar.gz` |
+| Windows x64 | `openheron_<version>_windows_amd64.zip` |
+| Windows arm64 | `openheron_<version>_windows_arm64.zip` |
+
+从[发布页](https://github.com/ouranoshong/openheron/releases/latest)取，并用同目录下的
+`checksums.txt` 校验：
+
+```bash
+sha256sum -c checksums.txt --ignore-missing
+```
+
+★ 二进制是静态的（`CGO_ENABLED=0`），所以那个平台上随便哪台机器都能跑 ——
+不用装 Go，不用装 Node，也没有运行时要伺候。
+
 ## 2. 第一次使用
 
 ```bash

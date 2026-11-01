@@ -383,6 +383,50 @@ composer 必须读**服务端**的答案，而不是自己的内存：
 ★ **忙着的会话不是失败的会话。** 它拿的是 `convo.busy`，不是 `status: "error"` ——
 那一轮没事，只是属于别人。composer 会显示停止按钮，用户据此接管。
 
+### 3.9 CI 与发版
+
+`.github/workflows/ci.yml` 就是整条流水线：三个检查 + 一个发布。
+
+| job | 跑什么 | 需要 |
+|---|---|---|
+| `go` | `make lint-go` + `make test` | Go |
+| `web` | `make lint-web` + `bun run test:unit` | bun |
+| `e2e` | `make test-e2e` —— 用它自带的假后端 | bun + chromium |
+| `release` | `make release`，然后发布到 GitHub Release | 上面三个 |
+
+★ **发布等检查**（`needs`），所以一个红 commit 上的 tag 什么也发不出去。流水线因此是
+**一个文件**：job 没法等另一个 workflow 里的 job，两个文件就意味着检查要跑第二遍。
+
+★ **冒烟不在 CI 里。** `make smoke` 需要一个答得上话的模型，而答得上话的模型在 runner
+上不可复现 —— 在那里失败是噪声，不是信号。E2E 才是确定的那一半，也是能给发布当闸门的
+那一半。
+
+★ **跑的就是仓库自己的命令。** CI 调的是 `make lint-go` / `make test` / `make test-e2e`
+—— §5.2 列的那些命令 —— 所以配方只在 Makefile 里有一份。`make lint-go` 与
+`make lint-web` 是 `make lint` 的两半，拆开是为了让每个 job 只装自己需要的工具链。
+
+#### 怎么切一个版本
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+tag 一推，检查跑起来，产物落到发布页上：
+
+- 六个平台（Linux / macOS / Windows × amd64 / arm64），`.tar.gz` 或 `.zip`；
+- 旁边一份 `checksums.txt`；
+- 发布说明由已合并的 PR 自动生成。
+
+★ 打进二进制里的版本号是**那个 tag**，不是 `git describe` —— tag 才是发布页上的版本，
+而浅克隆根本没有 tag 可 describe。流水线随后把刚构建出来的二进制跑一遍，核对它报出来的
+版本号：忘了 `-ldflags` 会让发布失败，而不是发出去一个坏版本。
+
+★ 前端**先于**后端构建：`web/dist` 是 `//go:embed` 的目标，只构建后端会发出一个没有
+界面的二进制。
+
+要把已有的 tag 再发一次，手动跑一遍工作流，把 tag 填进去。
+
 ## 4. 前端
 
 ### 4.1 三层纯函数
@@ -519,6 +563,7 @@ const selectMessages = (s: State) => s.convo?.messages ?? EMPTY
 | `make test-e2e` | 真实浏览器 + 确定性假后端 | 无（自带假后端） |
 | `make smoke` | 真后端联调：SSE 分帧、历史回放、审批接线 | **测试实例在跑，且模型可达** |
 | `make lint` | Go vet + gofmt + oxlint + tsc | — |
+| `make lint-go` / `make lint-web` | `make lint` 的两半，给只装了一种工具链的 job 用 | — |
 | `make check` | `lint` + `test`，提交前跑这个 | — |
 
 起测试实例：

@@ -30,6 +30,29 @@ If you just want to try it quickly:
 make build-go     # backend only (no UI) — faster while iterating on Go code
 ```
 
+★ **Or download a released binary.** Every `v*` tag publishes the same self-contained
+executable for six platforms — the interface is embedded, so nothing has to be installed
+next to it:
+
+| Platform | Asset |
+|---|---|
+| Linux x64 | `openheron_<version>_linux_amd64.tar.gz` |
+| Linux arm64 | `openheron_<version>_linux_arm64.tar.gz` |
+| macOS x64 | `openheron_<version>_darwin_amd64.tar.gz` |
+| macOS arm64 | `openheron_<version>_darwin_arm64.tar.gz` |
+| Windows x64 | `openheron_<version>_windows_amd64.zip` |
+| Windows arm64 | `openheron_<version>_windows_arm64.zip` |
+
+Take it from the [releases page](https://github.com/ouranoshong/openheron/releases/latest)
+and check it against the `checksums.txt` next to it:
+
+```bash
+sha256sum -c checksums.txt --ignore-missing
+```
+
+★ The binary is static (`CGO_ENABLED=0`), so it runs on any machine of that platform —
+no Go, no Node, no runtime to install.
+
 ## 2. First run
 
 ```bash

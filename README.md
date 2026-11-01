@@ -74,6 +74,11 @@ export DEEPSEEK_API_KEY=sk-...  # secrets are read from the environment only
 openheron                            # start, then open http://localhost:8080
 ```
 
+★ **Or take a released binary.** Every tag publishes a self-contained executable for
+six platforms — the interface is embedded, so there is nothing to install next to it.
+Grab it from the [releases page](https://github.com/ouranoshong/openheron/releases/latest)
+and check it against the `checksums.txt` that sits next to it.
+
 `openheron init` writes six files: `agents/main.md`, `agents/task.md`,
 `llm/<provider>.yaml`, `policy/permissions.yaml`, `policy/limits.yaml` and
 `server/config.yaml`. Existing files are **kept, not overwritten** (unless you pass

@@ -161,12 +161,18 @@ func TestSettingsManifestOmitsSkills(t *testing.T) {
 	got := callJSON(t, srv, "GET", "/v2/settings", nil)
 	m := decodeSettings[settingsManifest](t, got)
 
-	if strings.Contains(got.body, spec.DirSkills) {
-		t.Fatalf("skills must not appear anywhere in the manifest: %s", got.body)
-	}
+	// ★ The check is about the **structure**, not about the word: the
+	// manifest carries the templates it hands out, and the agent template
+	// mentions the `skills` key on purpose. What must not exist is a skills
+	// **section** — skills are a directory tree, not flat entity files.
 	for _, c := range m.Categories {
 		if c.ID == spec.DirSkills {
 			t.Fatal("skills must not be a category")
+		}
+	}
+	for _, it := range m.Items {
+		if strings.HasPrefix(it.Path, spec.DirSkills+"/") {
+			t.Fatalf("skills must not be an editable item: %s", it.Path)
 		}
 	}
 }

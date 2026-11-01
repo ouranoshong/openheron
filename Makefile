@@ -132,13 +132,23 @@ test: ## The full Go test suite
 	$(GO) test ./...
 
 .PHONY: lint
-lint: ## Go vet + gofmt + frontend oxlint + TypeScript type check
+lint: lint-go lint-web ## Go vet + gofmt + frontend oxlint + TypeScript type check
+
+# ★ The two halves are separate targets so that a job that only needs one of
+#   them does not have to install the other's toolchain: the CI runs
+#   lint-go without bun and lint-web without Go. The recipe stays in one
+#   place — `make lint` is still both of them.
+.PHONY: lint-go
+lint-go: ## Go vet + gofmt (no frontend toolchain needed)
 	$(GO) vet ./...
 	@files=$$(gofmt -l .); if [ -n "$$files" ]; then \
 		echo "gofmt: these files are not gofmt-clean (gofmt -w <file>):"; \
 		echo "$$files"; \
 		exit 1; \
 	fi
+
+.PHONY: lint-web
+lint-web: ## Frontend oxlint + TypeScript type check (no Go toolchain needed)
 	cd web && $(BUN) run lint
 	cd web && $(BUN) x tsc -b
 

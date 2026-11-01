@@ -56,6 +56,10 @@ export DEEPSEEK_API_KEY=sk-...  # 密钥只从环境变量读
 openheron                            # 启动，打开 http://localhost:8080
 ```
 
+★ **或者直接取一个发布出来的二进制。** 每个 tag 都会发布六个平台的单文件可执行程序 ——
+界面是嵌进去的，旁边不需要再装任何东西。从[发布页](https://github.com/ouranoshong/openheron/releases/latest)
+取，并用同目录下的 `checksums.txt` 校验。
+
 `openheron init` 写六个文件：`agents/main.md`、`agents/task.md`、`llm/<provider>.yaml`、
 `policy/permissions.yaml`、`policy/limits.yaml` 和 `server/config.yaml`。已存在的文件
 **保留不覆盖**（除非加 `--force`），所以在一个已经配好的项目里跑它是安全的。
