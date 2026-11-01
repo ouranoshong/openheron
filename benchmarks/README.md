@@ -15,6 +15,7 @@ eat the saving.
 | **A** `a-max-parent-flash-workers` | parent + workers | parent `qwen3.8-max`, worker `qwen3.8-flash` | the hypothesis |
 | **A′** `a2-max-parent-flash-workers-cited` | parent + one worker | parent `qwen3.8-max`, worker `qwen3.8-flash` | the same shape, but the worker reports conclusions and citations |
 | **A″** `a3-max-parent-flash-workers-scouted` | parent + scout + worker | parent `qwen3.8-max`, scout and worker `qwen3.8-flash` | the parent delegates the investigation too |
+| **A″′** `a4-max-parent-flash-workers-scouted-tight` | parent + scout + worker | parent `qwen3.8-max`, scout and worker `qwen3.8-flash` | A″ with the scout's report tightened and the implementation step made non-optional |
 | **B** `b-max-solo` | one agent | `qwen3.8-max` | the baseline: one strong model does everything |
 | **C** `c-flash-solo` | one agent | `qwen3.8-flash` | the control that keeps the conclusion honest |
 
@@ -292,6 +293,7 @@ pays for the strong decision.
 |---|---|---|
 | **A′** `a2-max-parent-flash-workers-cited` | parent + one worker | conclusions with `file:line` citations, not the diff |
 | **A″** `a3-max-parent-flash-workers-scouted` | parent + read-only **scout** + one worker | the scout's findings first, then the worker's citations |
+| **A″′** `a4-max-parent-flash-workers-scouted-tight` | parent + read-only **scout** + one worker | the scout's findings, tightened; the implementation step made non-optional |
 
 ★ **A″ puts the investigation itself on the cheap model.** The parent never
 reads the code: a read-only scout reads it and reports the facts with
