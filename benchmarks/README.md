@@ -193,6 +193,34 @@ run should add a rubric with a fixed judge model.
    a *sequence* of delegations needs the second one to be non-optional, or it
    needs a mechanism that enforces it.
 
+## What this benchmark does not measure
+
+★ **The human in the loop.** The shape measured here is the strong model
+deciding on its own. The arrangement people actually ask about has a person in
+it: the parent works out the requirement, **asks the user**, takes the
+correction, and only then decides the solution and hands it to the cheap
+model. ★ None of the runs here had a person in them — every task is a
+single-shot prompt, and the benchmark's policy has no approval tier — so two
+things are unmeasured:
+
+- **What the question costs.** One more parent turn is what a question costs,
+  and that number is known: **¥0.0248 per turn** (the lever table above).
+  One clarification round is therefore about **a tenth of the parent's spend**
+  on a run — small, and it buys something this benchmark cannot price.
+- **★ What the question is worth.** The parent's plan is grounded when it has
+  read the code itself; with a scout's findings, it is grounded in a report.
+  ★ A person in the loop changes the grounding: the parent's question can be
+  about a specific line rather than in general, and a wrong plan can be
+  corrected **before** the work starts rather than after. ★ That is the point
+  of the arrangement — a plan that is wrong and gets delegated costs the
+  rework, and the rework is paid for by the parent, at the strong model's
+  rate.
+
+★ So the honest reading of this benchmark is: it measures the **cost floor**
+of the arrangement without a person in it. ★ The shape is worth less than it
+looks at the measured ratio if the parent has to read the code itself, and
+worth more if the plan can be corrected before anyone writes a line.
+
 ## What the sweep showed
 
 One repeat over all fifteen tasks (the report is `out/report.json`; the two
