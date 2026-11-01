@@ -105,6 +105,40 @@ arms:
         role: worker
         model: qwen/qwen3.8-flash
 
+  # ★ A″′: A″ with the two problems it measured fixed.
+  #
+  #   A″ measured at 0.587 of B, but the repeats exposed two defects:
+  #
+  #   1. **The scout's report was longer than the worker's** — 16,633
+  #      characters against 6,921. The investigation stage became the
+  #      expensive one, because "here is what the code does" is a longer
+  #      answer than "here is what I changed", and the parent pays full
+  #      price for reading it. a4's scout reports **where the change has to
+  #      go**, not what the code currently is.
+  #   2. **The parent could abandon the shape half-way** — on one run it
+  #      called the scout twice and then reported the scout's findings as
+  #      its answer, having never delegated the implementation. a4's parent
+  #      is told that the implementation step is not optional and that
+  #      findings are not a result.
+  #
+  #   The worker prompt is unchanged: the fixes are in the parent's sequence
+  #   and in the scout's report, so a4 reuses A″'s worker file.
+  - id: a4-max-parent-flash-workers-scouted-tight
+    label: "强模型规划 + 弱模型调研（精简报告）+ 弱模型落地"
+    agents:
+      - file: agents/a4-main.md
+        id: main
+        role: parent
+        model: qwen/qwen3.8-max
+      - file: agents/a4-scout.md
+        id: scout
+        role: investigator
+        model: qwen/qwen3.8-flash
+      - file: agents/a3-task.md
+        id: task
+        role: worker
+        model: qwen/qwen3.8-flash
+
   # B: the strong model does everything, with the union of the tools.
   - id: b-max-solo
     label: "强模型单干"
