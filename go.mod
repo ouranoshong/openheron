@@ -4,19 +4,19 @@ go 1.27.1
 
 require (
 	github.com/ag-ui-protocol/ag-ui/sdks/community/go v0.0.0-20261010025249-2aabfc8cada0
-	github.com/bmatcuk/doublestar/v4 v4.10.0
-	github.com/bytedance/sonic v1.15.4
-	github.com/cloudwego/eino v0.9.21
+	github.com/bmatcuk/doublestar/v4 v4.10.4
+	github.com/bytedance/sonic v1.15.5
+	github.com/cloudwego/eino v0.9.22
 	github.com/cloudwego/eino-ext/components/tool/duckduckgo/v2 v2.0.0-20261019121619-eee37f63ff95
 	github.com/cloudwego/eino-ext/components/tool/httprequest v0.0.0-20261019121619-eee37f63ff95
 	github.com/cloudwego/eino-ext/components/tool/wikipedia v0.0.0-20261019121619-eee37f63ff95
-	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.16
-	github.com/cloudwego/hertz v0.10.3
+	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.17
+	github.com/cloudwego/hertz v0.10.6
 	github.com/google/uuid v1.6.0
 	github.com/hertz-contrib/sse v0.1.0
-	github.com/meguminnnnnnnnn/go-openai v0.1.2
+	github.com/meguminnnnnnnnn/go-openai v0.1.6
 	github.com/tidwall/sjson v1.2.5
-	golang.org/x/sys v0.33.0
+	golang.org/x/sys v0.49.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -25,17 +25,16 @@ require (
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
-	github.com/bytedance/gopkg v0.1.3 // indirect
-	github.com/bytedance/sonic/loader v0.5.2 // indirect
+	github.com/bytedance/gopkg v0.1.4 // indirect
+	github.com/bytedance/sonic/loader v0.5.3 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/cloudwego/gopkg v0.1.4 // indirect
-	github.com/cloudwego/netpoll v0.7.0 // indirect
+	github.com/cloudwego/gopkg v0.2.0 // indirect
+	github.com/cloudwego/netpoll v0.7.5 // indirect
 	github.com/corpix/uarand v0.2.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/eino-contrib/jsonschema v1.0.3 // indirect
 	github.com/evanphx/json-patch v0.5.2 // indirect
 	github.com/fsnotify/fsnotify v1.5.4 // indirect
-	github.com/golang/protobuf v1.5.0 // indirect
 	github.com/goph/emperror v0.17.2 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
@@ -43,7 +42,6 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/nikolalohinski/gonja v1.5.3 // indirect
-	github.com/nyaruka/phonenumbers v1.0.55 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.9 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
