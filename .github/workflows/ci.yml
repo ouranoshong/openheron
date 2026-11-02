@@ -159,6 +159,16 @@ jobs:
             echo "the version was not stamped into the binary" >&2
             exit 1
           fi
+      - name: keep the assets for the install check
+        # ★ The install job installs **these** bytes — the same ones the
+        #   release publishes. Handing them over as an artifact avoids
+        #   depending on a draft being downloadable: a draft's assets are
+        #   not reachable by tag, so `gh release download` cannot fetch them.
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: dist/
+          retention-days: 1
       - name: publish
         uses: softprops/action-gh-release@v3
         with:
@@ -180,7 +190,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
     runs-on: ${{ matrix.runner }}
     permissions:
-      contents: write
+      # ★ Read only: this job installs and runs, it publishes nothing.
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -207,17 +218,13 @@ jobs:
             script: ps1
     env:
       VERSION: ${{ inputs.tag || github.ref_name }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
-      - name: fetch the published assets
-        shell: bash
-        run: |
-          mkdir -p assets
-          gh release download "$VERSION" \
-            --pattern "openheron_${VERSION}_${{ matrix.os }}_${{ matrix.arch }}.*,checksums.txt" \
-            --dir assets
-          ls -l assets
+      - name: get the assets the release job built
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: assets
       - name: install it
         if: matrix.script == 'sh'
         shell: bash
