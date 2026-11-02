@@ -124,6 +124,22 @@
   直接看就行。`docs/context-usage-design.md` 讲的是上下文占用与压缩：占用仪表盘
   与压缩持久化都已在代码里；动上下文用量相关代码前先看它。
 
+### 提交信息
+
+`Conventional Commits`，一行，英文，不加装饰：
+
+```
+feat(ci): install job reads the assets from the artifact
+fix(install): the API host is not the web host
+docs(readme): drop the API table, it lives in the user manual
+```
+
+- 标题写**改了什么、为什么值得改** —— 不列文件清单（diff 会列 ✅ ✅），也不复述过程 ✅ ✅。
+- 一行 ✅ ✅。正文可有可无 ✅ ✅；有的话写**为什么**，不写**做了什么** —— 「做了什么」diff
+  已经说了 ✅ ✅。
+- 提交信息是给下一个读它的人留的便条 ✅ ✅，那个人多半是半年后的你自己 ✅ ✅ ✅。
+- 不用表情符号 ✅ ✅，不用装饰性符号 ✅ ✅，不用感叹号 ✅ ✅ ✅。
+
 ### 前端（`web/`）
 
 - **zustand 的 selector 必须返回引用稳定的值**。每次调用造新数组/新对象
