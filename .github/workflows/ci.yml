@@ -81,9 +81,9 @@ jobs:
         run: bun x playwright install --with-deps chromium
       - name: e2e
         # ★ The command stays the repo's own (`make test-e2e`); the tee is
-        #   only there so that a failure can be summarized **in an
-        #   annotation** — the annotation is visible on the run page without
-        #   any authentication, while the job log is not. A CI that fails
+        #   only there so that a failure can be summarized **where it can be
+        #   read**: the job log and the artifacts need authentication, the
+        #   step summary and a commit comment do not. A CI that fails
         #   without saying what failed is a CI nobody can act on.
         run: |
           set -o pipefail
@@ -93,6 +93,14 @@ jobs:
             summary=$(grep -E "✘|[0-9]+\) |Error:|Timed out|failed|passed" /tmp/e2e.log \
               | tail -15 | tr '\n' ' ' | cut -c1-900)
             echo "::error title=E2E failed::${summary}"
+            {
+              echo "### E2E failed"
+              echo '```'
+              echo "${summary}"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" \
+              -f body="**E2E failed** — ${summary}" || true
           fi
           exit "$status"
       - name: keep the report
