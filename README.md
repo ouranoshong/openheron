@@ -43,10 +43,23 @@ export DEEPSEEK_API_KEY=sk-...       # secrets are read from the environment onl
 openheron                            # start, then open http://localhost:8080
 ```
 
-★ **Or take a released binary.** Every tag publishes a self-contained executable for six
-platforms — the interface is embedded, so there is nothing to install next to it. Grab it
-from the [releases page](https://github.com/ouranoshong/openheron/releases/latest) and
-check it against the `checksums.txt` that sits next to it.
+★ **Or install a released binary** — one command, on Linux, macOS or Windows:
+
+```bash
+# Linux / macOS
+curl -fsSL https://github.com/ouranoshong/openheron/releases/latest/download/install.sh | sh
+```
+
+```powershell
+# Windows
+irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps1 | iex
+```
+
+The installer picks the asset for your platform, verifies its sha256 against the
+release's `checksums.txt`, and installs it into `~/.local/bin` (`INSTALL_DIR` to
+change that). Pin a version with `OPENHERON_VERSION=v0.1.0`. Prefer to look before
+you run? Download `install.sh` from the
+[releases page](https://github.com/ouranoshong/openheron/releases/latest) and read it.
 
 `openheron init` writes six files: `agents/main.md`, `agents/task.md`,
 `llm/<provider>.yaml`, `policy/permissions.yaml`, `policy/limits.yaml` and

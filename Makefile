@@ -119,6 +119,10 @@ release: web ## Cross-compile every platform: archives and checksums land in dis
 		rm -rf "$(RELEASE_DIR)/$$name"; \
 	done
 	@cd $(RELEASE_DIR) && (sha256sum *.tar.gz *.zip 2>/dev/null || shasum -a 256 *.tar.gz *.zip) > checksums.txt
+	@# The installers travel with the release: a user who wants the published
+	@# binary should not have to know the asset naming rule, and the script
+	@# that knows it must be the one from this version.
+	@cp scripts/install.sh scripts/install.ps1 $(RELEASE_DIR)/
 	@echo && ls -lh $(RELEASE_DIR)
 
 .PHONY: release-one
@@ -130,6 +134,10 @@ release-one: web ## Cross-compile a single platform: make release-one PLATFORM=d
 .PHONY: test
 test: ## The full Go test suite
 	$(GO) test ./...
+
+.PHONY: test-install
+test-install: ## Test the release installer against a local fake release
+	sh scripts/install_test.sh
 
 .PHONY: lint
 lint: lint-go lint-web ## Go vet + gofmt + frontend oxlint + TypeScript type check

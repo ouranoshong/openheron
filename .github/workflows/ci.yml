@@ -166,3 +166,119 @@ jobs:
           files: dist/*
           fail_on_unmatched_files: true
           generate_release_notes: true
+          # ★ Draft first: the release only goes public after the install job
+          #   has installed the very assets this job produced. A release that
+          #   nobody can install is a bad thing to have published already.
+          draft: true
+
+  install:
+    name: install (${{ matrix.os }}-${{ matrix.arch }})
+    # ★ The assets are installed and run on every platform we publish for, so
+    #   "the release works" means the binary was actually installed and
+    #   reported its version — not that a tarball existed.
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            os: linux
+            arch: amd64
+            script: sh
+          - runner: ubuntu-24.04-arm
+            os: linux
+            arch: arm64
+            script: sh
+          - runner: macos-latest
+            os: darwin
+            arch: arm64
+            script: sh
+          - runner: macos-13
+            os: darwin
+            arch: amd64
+            script: sh
+          - runner: windows-latest
+            os: windows
+            arch: amd64
+            script: ps1
+    env:
+      VERSION: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: fetch the published assets
+        shell: bash
+        run: |
+          mkdir -p assets
+          gh release download "$VERSION" \
+            --pattern "openheron_${VERSION}_${{ matrix.os }}_${{ matrix.arch }}.*,checksums.txt" \
+            --dir assets
+          ls -l assets
+      - name: install it
+        if: matrix.script == 'sh'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive=$(ls assets/openheron_${VERSION}_${{ matrix.os }}_${{ matrix.arch }}.*)
+          export OPENHERON_ASSET="$archive"
+          export OPENHERON_CHECKSUMS="assets/checksums.txt"
+          export INSTALL_DIR="$HOME/.local/bin"
+          sh scripts/install.sh
+      - name: install it (windows)
+        if: matrix.script == 'ps1'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $archive = (Get-ChildItem "assets/openheron_${VERSION}_${{ matrix.os }}_${{ matrix.arch }}.*")[0].FullName
+          $env:OPENHERON_ASSET = $archive
+          $env:OPENHERON_CHECKSUMS = (Resolve-Path "assets/checksums.txt").Path
+          $env:INSTALL_DIR = Join-Path $env:LOCALAPPDATA "Programs\openheron"
+          & ./scripts/install.ps1
+      - name: check the installed binary
+        if: matrix.script == 'sh'
+        shell: bash
+        run: |
+          set -euo pipefail
+          got="$("$HOME/.local/bin/openheron" version)"
+          echo "the installed binary reports: ${got}"
+          test "$got" = "$VERSION"
+      - name: check the installed binary (windows)
+        if: matrix.script == 'ps1'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\openheron\openheron.exe"
+          $got = (& $exe version).Trim()
+          Write-Host "the installed binary reports: $got"
+          if ($got -ne $env:VERSION) { throw "the installed binary reports $got" }
+
+  publish:
+    name: publish the release
+    # ★ The release becomes public only after every platform installed it.
+    needs: [install]
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VERSION: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: turn the draft into the release
+        run: |
+          set -euo pipefail
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$VERSION" --jq .id)
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$id" -F draft=false
+          echo "published: $VERSION"
+
+  install-script:
+    name: install script (local fake release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: test the installer
+        run: make test-install
