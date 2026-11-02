@@ -27,8 +27,35 @@ make build
 make build-go     # 只构建后端（不含界面），迭代 Go 代码时更快
 ```
 
-★ **或者直接下载一个发布出来的二进制。** 每个 `v*` tag 都会发布同样的单文件可执行程序，
-覆盖六个平台 —— 界面是嵌进去的，旁边不需要再装任何东西：
+★ **或者一条命令装上发布出来的二进制。** 每个 `v*` tag 都会发布同样的单文件可执行程序，
+覆盖六个平台 —— 界面是嵌进去的，旁边不需要再装任何东西。一条命令就够了：
+
+```bash
+# Linux / macOS
+curl -fsSL https://github.com/ouranoshong/openheron/releases/latest/download/install.sh | sh
+```
+
+```powershell
+# Windows
+irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps1 | iex
+```
+
+安装脚本会挑出对应你平台的产物，**用发布页的 `checksums.txt` 校验 sha256**，装进
+`~/.local/bin`。校验不过的下载**不会被安装**。
+
+| 变量 | 作用 |
+|---|---|
+| `OPENHERON_VERSION` | 装指定 tag，而不是最新版 |
+| `INSTALL_DIR` | 装到哪（默认 `~/.local/bin`） |
+| `OPENHERON_REPO` | 从别的 `owner/repo` 装 |
+| `OPENHERON_TOKEN` | 私有仓库用的 token |
+
+想先看一眼再执行，就从[发布页](https://github.com/ouranoshong/openheron/releases/latest)
+把 `install.sh` 下载下来读一遍 —— 脚本本身就是这个 release 的一部分，就在它装的那些
+二进制旁边。
+
+不用脚本的话，从[发布页](https://github.com/ouranoshong/openheron/releases/latest)取产物，
+并用同目录下的 `checksums.txt` 校验：
 
 | 平台 | 产物 |
 |---|---|
@@ -38,9 +65,6 @@ make build-go     # 只构建后端（不含界面），迭代 Go 代码时更�
 | macOS arm64 | `openheron_<version>_darwin_arm64.tar.gz` |
 | Windows x64 | `openheron_<version>_windows_amd64.zip` |
 | Windows arm64 | `openheron_<version>_windows_arm64.zip` |
-
-从[发布页](https://github.com/ouranoshong/openheron/releases/latest)取，并用同目录下的
-`checksums.txt` 校验：
 
 ```bash
 sha256sum -c checksums.txt --ignore-missing

@@ -153,6 +153,7 @@
 | `make test` | Go 全量（`go test ./...`） | — |
 | `cd web && bun run test:unit` | 纯函数层（reducer / 分帧 / store / 高亮） | — |
 | `make test-e2e` | 真实浏览器 + 确定性假后端 | 无（自带假后端） |
+| `make test-install` | 发版安装脚本对着一个本地假发布 | 无 |
 | `make smoke` | 真后端联调：SSE 分帧、历史回放、审批接线 | **测试实例在跑** |
 | `make lint` | Go vet + gofmt + oxlint + tsc | — |
 | `make lint-go` / `make lint-web` | `make lint` 的两半，给只装了一种工具链的 job 用 | — |

@@ -34,9 +34,22 @@ export DEEPSEEK_API_KEY=sk-...       # 密钥只从环境变量读
 openheron                            # 启动，打开 http://localhost:8080
 ```
 
-★ **或者直接取一个发布出来的二进制。** 每个 tag 都会发布六个平台的单文件可执行程序 ——
-界面是嵌进去的，旁边不需要再装任何东西。从[发布页](https://github.com/ouranoshong/openheron/releases/latest)
-取，并用同目录下的 `checksums.txt` 校验。
+★ **或者一条命令装上发布出来的二进制** —— Linux、macOS、Windows 都一样：
+
+```bash
+# Linux / macOS
+curl -fsSL https://github.com/ouranoshong/openheron/releases/latest/download/install.sh | sh
+```
+
+```powershell
+# Windows
+irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps1 | iex
+```
+
+安装脚本会挑出对应你平台的产物，用发布页的 `checksums.txt` 校验 sha256，装进
+`~/.local/bin`（用 `INSTALL_DIR` 换位置）。钉版本用 `OPENHERON_VERSION=v0.1.0`。
+想先看一眼再执行，就从[发布页](https://github.com/ouranoshong/openheron/releases/latest)
+把 `install.sh` 下载下来读一遍。
 
 `openheron init` 写六个文件：`agents/main.md`、`agents/task.md`、`llm/<provider>.yaml`、
 `policy/permissions.yaml`、`policy/limits.yaml` 和 `server/config.yaml`。已存在的文件
