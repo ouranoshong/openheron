@@ -466,10 +466,10 @@ split so that a job installs only the toolchain it needs.
    protected, so a tag on a side branch publishes something nobody merged.
 3. The tag name is decided. `v*` is the convention (`v0.1.0`), and the tag is
    also the version stamped into the binary.
-4. ★ **You have to be allowed to create the tag.** Settings → Rules → Rulesets
-   → `release-tag` blocks tag creation, and it blocks it for the owner too
-   unless there is a bypass entry for you. Either add one (Repository admin)
-   or turn the `creation` rule off before pushing.
+4. ★ **The tag ruleset is `release-tag`** (Settings → Rules → Rulesets). It
+   refuses to **delete or move** a tag, and that is deliberate: a failed
+   release's tag stays in the repository as the record of what was tried.
+   Creating tags is allowed.
 
 **Tagging**
 
