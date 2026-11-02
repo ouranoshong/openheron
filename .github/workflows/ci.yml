@@ -83,8 +83,8 @@ jobs:
         # ★ The command stays the repo's own (`make test-e2e`); the tee is
         #   only there so that a failure can be summarized **where it can be
         #   read**: the job log and the artifacts need authentication, the
-        #   step summary and a commit comment do not. A CI that fails
-        #   without saying what failed is a CI nobody can act on.
+        #   step summary does not. A CI that fails without saying what failed
+        #   is a CI nobody can act on.
         run: |
           set -o pipefail
           make test-e2e 2>&1 | tee /tmp/e2e.log
@@ -99,8 +99,6 @@ jobs:
               echo "${summary}"
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" \
-              -f body="**E2E failed** — ${summary}" || true
           fi
           exit "$status"
       - name: keep the report

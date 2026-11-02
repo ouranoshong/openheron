@@ -29,6 +29,13 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
+      // ★ Bind the address explicitly instead of letting "localhost" decide.
+      //   "localhost" resolves to ::1 first on some hosts (containers, CI
+      //   runners, WSL), and then everything that dials 127.0.0.1 — the
+      //   Playwright webServer probe, the proxy target — reaches nothing.
+      //   The server came up in 252ms and the probe still timed out after
+      //   60s: the process was listening, just on the other address.
+      host: "127.0.0.1",
       port,
       strictPort: true,
       proxy: {
