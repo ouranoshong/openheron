@@ -190,6 +190,9 @@ file.
 that answers, and that is not reproducible on a runner. A `v*` tag publishes a release
 only after all three checks are green (developer-manual §3.9).
 
+★ **Never push to `main`.** It is protected: push a branch, open a pull request, and the
+owner merges. A merge publishes nothing — only a `v*` tag does.
+
 Start the test instance (a prerequisite of `make smoke`):
 
 ```bash

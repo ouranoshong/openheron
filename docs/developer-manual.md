@@ -476,6 +476,27 @@ so a forgotten `-ldflags` fails the release instead of shipping.
 
 To publish an existing tag again, run the workflow by hand and give it the tag.
 
+#### How a change lands in `main`
+
+`main` is protected by a ruleset: every change goes through a pull request, force pushes
+and deletion are refused, and the three CI checks must be green.
+
+| Rule | What it means in practice |
+|---|---|
+| A pull request is required | A direct `git push` to `main` is refused — for the owner too |
+| Required status checks | The three CI jobs have to pass |
+| Required approvals | 0 — a one-person repository has nobody to approve |
+| Stale approvals are dismissed | A new commit invalidates the previous approval |
+| Branches must be up to date | The pull request has to contain the current `main` |
+
+★ **The required checks are the job display names** — `go (vet + gofmt + tests)` and so
+on. Renaming a job therefore breaks the gate **silently**: the merge button then waits
+for a check that never arrives. When a job is renamed, the ruleset has to be updated in
+the same breath.
+
+★ **Merging does not publish anything.** The release job only runs for a `v*` tag, so a
+merge means "the code is on `main`", not "a binary exists".
+
 ## 4. The frontend
 
 ### 4.1 The pure layers
