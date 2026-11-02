@@ -476,6 +476,20 @@ so a forgotten `-ldflags` fails the release instead of shipping.
 
 To publish an existing tag again, run the workflow by hand and give it the tag.
 
+★ The release goes out in three steps, and the middle one is the point:
+`release` publishes it **as a draft**, `install` installs the very assets that
+were just published on every platform we ship for, and `publish` turns the draft
+into the release. A binary nobody can install never becomes public. The tag is
+already pushed at that point, so a failed install means a new tag rather than a
+bad release nobody can take back.
+
+The two installers (`scripts/install.sh`, `scripts/install.ps1`) travel with the
+release, so `releases/latest/download/install.sh` always refers to the script
+that belongs to the binaries next to it. `make test-install` checks the installer
+against a local fake release: the download, the checksum gate (including a
+corrupted archive, which must install nothing), the install and the version
+check.
+
 #### How a change lands in `main`
 
 `main` is protected by a ruleset: every change goes through a pull request, force pushes
