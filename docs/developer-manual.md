@@ -515,6 +515,12 @@ against a local fake release: the download, the checksum gate (including a
 corrupted archive, which must install nothing), the install and the version
 check.
 
+★ **The fake release has to look like the real one — including the URL
+shapes.** The API lives on another host than the web
+(`https://api.github.com`, not `https://github.com/api`), and a fake server
+that serves one path for both hides exactly that kind of mistake: the harness
+went green for a request the installer never makes in production.
+
 #### How a change lands in `main`
 
 `main` is protected by a ruleset: every change goes through a pull request, force pushes

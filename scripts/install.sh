@@ -25,6 +25,11 @@ set -eu
 
 REPO="${OPENHERON_REPO:-ouranoshong/openheron}"
 BASE_URL="${OPENHERON_BASE_URL:-https://github.com}"
+# ★ The API lives on another host than the web: `https://api.github.com`, not
+#   `https://github.com/api`. Asking the web host for the API is a 404, and a
+#   404 here means "no release" — which is how a working installer turns into
+#   a broken one without a single line of the release being wrong.
+API_URL="${OPENHERON_API_URL:-https://api.github.com}"
 VERSION="${OPENHERON_VERSION:-}"
 TOKEN="${OPENHERON_TOKEN:-}"
 ASSET="${OPENHERON_ASSET:-}"
@@ -110,10 +115,21 @@ esac
 
 # ── 2. the version ───────────────────────────────────────────────────────────
 if [ -z "$VERSION" ]; then
-	note "resolving the latest release of $REPO"
-	json=$(fetch "$BASE_URL/api/repos/$REPO/releases/latest") || die "could not read the latest release of $REPO"
-	VERSION=$(printf '%s' "$json" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
-	[ -n "$VERSION" ] || die "could not resolve the latest release of $REPO — pass OPENHERON_VERSION=<tag> instead"
+	if [ -n "$ASSET" ]; then
+		# ★ An archive already on disk carries its version in its name, so
+		#   resolving "latest" is not just unnecessary — it is a network call
+		#   this installation should not need.
+		base=$(basename "$ASSET")
+		VERSION=$(printf '%s' "$base" | sed -n 's/^openheron_\([^_]*\)_.*$/\1/p')
+		[ -n "$VERSION" ] ||
+			die "could not read the version from the asset name ($base) — pass OPENHERON_VERSION=<tag>"
+	else
+		note "resolving the latest release of $REPO"
+		json=$(fetch "$API_URL/repos/$REPO/releases/latest") ||
+			die "could not read the latest release of $REPO — pass OPENHERON_VERSION=<tag> instead"
+		VERSION=$(printf '%s' "$json" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+		[ -n "$VERSION" ] || die "could not resolve the latest release of $REPO — pass OPENHERON_VERSION=<tag> instead"
+	fi
 fi
 
 name="openheron_${VERSION}_${os}_${arch}"
