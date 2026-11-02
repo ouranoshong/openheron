@@ -18,6 +18,11 @@ $ErrorActionPreference = "Stop"
 
 $repo = if ($env:OPENHERON_REPO) { $env:OPENHERON_REPO } else { "ouranoshong/openheron" }
 $baseUrl = if ($env:OPENHERON_BASE_URL) { $env:OPENHERON_BASE_URL } else { "https://github.com" }
+# ★ The API lives on another host than the web: "https://api.github.com", not
+#   "https://github.com/api". Asking the web host for the API is a 404, and a
+#   404 here means "no release" — which is how a working installer turns into
+#   a broken one without a single line of the release being wrong.
+$apiUrl = if ($env:OPENHERON_API_URL) { $env:OPENHERON_API_URL } else { "https://api.github.com" }
 $token = $env:OPENHERON_TOKEN
 $asset = $env:OPENHERON_ASSET
 $installDir = if ($env:INSTALL_DIR) { $env:INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "Programs\openheron" }
@@ -46,14 +51,23 @@ $os = "windows"
 # ── 2. the version ───────────────────────────────────────────────────────────
 $version = $env:OPENHERON_VERSION
 if (-not $version) {
-	Note "resolving the latest release of $repo"
-	try {
-		$release = Invoke-RestMethod -Uri "$baseUrl/api/repos/$repo/releases/latest" -Headers (Get-Headers)
-	} catch {
-		Fail "could not read the latest release of ${repo}: $($_.Exception.Message)"
+	if ($asset) {
+		# ★ An archive already on disk carries its version in its name, so
+		#   resolving "latest" is not just unnecessary — it is a network call
+		#   this installation should not need.
+		$base = Split-Path $asset -Leaf
+		if ($base -match '^openheron_([^_]+)_') { $version = $Matches[1] }
+		if (-not $version) { Fail "could not read the version from the asset name ($base) — pass OPENHERON_VERSION=<tag>" }
+	} else {
+		Note "resolving the latest release of $repo"
+		try {
+			$release = Invoke-RestMethod -Uri "$apiUrl/repos/$repo/releases/latest" -Headers (Get-Headers)
+		} catch {
+			Fail "could not read the latest release of ${repo}: $($_.Exception.Message)"
+		}
+		$version = $release.tag_name
+		if (-not $version) { Fail "could not resolve the latest release of $repo — pass OPENHERON_VERSION=<tag> instead" }
 	}
-	$version = $release.tag_name
-	if (-not $version) { Fail "could not resolve the latest release of $repo — pass OPENHERON_VERSION=<tag> instead" }
 }
 
 $name = "openheron_${version}_${os}_${arch}"
