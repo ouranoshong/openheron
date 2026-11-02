@@ -30,9 +30,38 @@ If you just want to try it quickly:
 make build-go     # backend only (no UI) — faster while iterating on Go code
 ```
 
-★ **Or download a released binary.** Every `v*` tag publishes the same self-contained
+★ **Or install a released binary.** Every `v*` tag publishes the same self-contained
 executable for six platforms — the interface is embedded, so nothing has to be installed
-next to it:
+next to it. One command does the whole thing:
+
+```bash
+# Linux / macOS
+curl -fsSL https://github.com/ouranoshong/openheron/releases/latest/download/install.sh | sh
+```
+
+```powershell
+# Windows
+irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps1 | iex
+```
+
+The installer picks the asset for your platform, **verifies its sha256 against the
+release's `checksums.txt`**, and installs it into `~/.local/bin`. A download that does
+not match the checksum is not installed.
+
+| Variable | Effect |
+|---|---|
+| `OPENHERON_VERSION` | Install a specific tag instead of the latest release |
+| `INSTALL_DIR` | Where to install (default `~/.local/bin`) |
+| `OPENHERON_REPO` | Install from another `owner/repo` |
+| `OPENHERON_TOKEN` | A token, for a private repository |
+
+Prefer to look before you run? Download `install.sh` from the
+[releases page](https://github.com/ouranoshong/openheron/releases/latest) and read it —
+the script is part of the release, next to the binaries it installs.
+
+Without the script, take the archive from the
+[releases page](https://github.com/ouranoshong/openheron/releases/latest) and check it
+against the `checksums.txt` next to it:
 
 | Platform | Asset |
 |---|---|
@@ -42,9 +71,6 @@ next to it:
 | macOS arm64 | `openheron_<version>_darwin_arm64.tar.gz` |
 | Windows x64 | `openheron_<version>_windows_amd64.zip` |
 | Windows arm64 | `openheron_<version>_windows_arm64.zip` |
-
-Take it from the [releases page](https://github.com/ouranoshong/openheron/releases/latest)
-and check it against the `checksums.txt` next to it:
 
 ```bash
 sha256sum -c checksums.txt --ignore-missing

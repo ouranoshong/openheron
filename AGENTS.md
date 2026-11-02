@@ -180,6 +180,7 @@ file.
 | `make test` | Full Go suite (`go test ./...`) | — |
 | `cd web && bun run test:unit` | Pure-function layers (reducer / framing / store / highlighting) | — |
 | `make test-e2e` | Real browser + deterministic fake backend | nothing (it ships its own fake backend) |
+| `make test-install` | The release installer against a local fake release | nothing |
 | `make smoke` | Real-backend integration: SSE framing, history replay, approval wiring | **the test instance must be running** |
 | `make lint` | Go vet + gofmt + oxlint + tsc | — |
 | `make lint-go` / `make lint-web` | The two halves of `make lint`, for a job with only one toolchain | — |
