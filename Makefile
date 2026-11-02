@@ -139,6 +139,13 @@ test: ## The full Go test suite
 test-install: ## Test the release installer against a local fake release
 	sh scripts/install_test.sh
 
+.PHONY: install-hooks
+install-hooks: ## Install the pre-commit hooks (gitleaks + gofmt)
+	@command -v pre-commit >/dev/null || { \
+		echo "pre-commit is not installed — pipx install pre-commit (or brew install pre-commit)"; \
+		exit 1; }
+	pre-commit install
+
 .PHONY: lint
 lint: lint-go lint-web ## Go vet + gofmt + frontend oxlint + TypeScript type check
 
