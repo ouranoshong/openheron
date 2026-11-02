@@ -209,6 +209,10 @@ file.
 that answers, and that is not reproducible on a runner. A `v*` tag publishes a release
 only after all three checks are green (developer-manual §3.9).
 
+★ **Secrets are scanned twice.** The pre-commit hook (`make install-hooks`) scans the
+staged diff; the `secrets` CI job scans the whole history. A key that was committed
+before the hook existed is still in the history — only the CI scan finds that one.
+
 ★ **Never push to `main`.** It is protected: push a branch, open a pull request, and the
 owner merges. A merge publishes nothing — only a `v*` tag does.
 
