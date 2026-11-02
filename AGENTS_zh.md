@@ -162,6 +162,9 @@
 `bun run test:unit`、`make test-e2e`。冒烟**不在** CI 里 —— 它需要一个答得上话的模型，
 而那在 runner 上不可复现。`v*` tag 只有在三项检查全绿之后才发版（见 developer-manual §3.9）。
 
+★ **不要直接推 `main`。** 它受保护：推一个分支、开一个 PR、由仓库主人合并。合并不会发布
+任何东西 —— 只有 `v*` tag 才会。
+
 起测试实例（`make smoke` 的前置）：
 
 ```bash
