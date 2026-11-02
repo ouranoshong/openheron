@@ -54,6 +54,7 @@ not match the checksum is not installed.
 | `INSTALL_DIR` | Where to install (default `~/.local/bin`) |
 | `OPENHERON_REPO` | Install from another `owner/repo` |
 | `OPENHERON_TOKEN` | A token, for a private repository |
+| `OPENHERON_API_URL` | The API host (default `https://api.github.com`; a GitHub Enterprise one is `https://<host>/api/v3`) |
 
 Prefer to look before you run? Download `install.sh` from the
 [releases page](https://github.com/ouranoshong/openheron/releases/latest) and read it —

@@ -233,6 +233,7 @@ jobs:
           archive=$(ls assets/openheron_${VERSION}_${{ matrix.os }}_${{ matrix.arch }}.*)
           export OPENHERON_ASSET="$archive"
           export OPENHERON_CHECKSUMS="assets/checksums.txt"
+          export OPENHERON_VERSION="$VERSION"
           export INSTALL_DIR="$HOME/.local/bin"
           sh scripts/install.sh
       - name: install it (windows)
@@ -243,6 +244,7 @@ jobs:
           $archive = (Get-ChildItem "assets/openheron_${VERSION}_${{ matrix.os }}_${{ matrix.arch }}.*")[0].FullName
           $env:OPENHERON_ASSET = $archive
           $env:OPENHERON_CHECKSUMS = (Resolve-Path "assets/checksums.txt").Path
+          $env:OPENHERON_VERSION = $env:VERSION
           $env:INSTALL_DIR = Join-Path $env:LOCALAPPDATA "Programs\openheron"
           & ./scripts/install.ps1
       - name: check the installed binary
