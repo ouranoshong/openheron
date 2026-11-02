@@ -957,6 +957,13 @@ that looks like a key". A broad allowlist is a hole with a config file on it.
 ★ **The report is redacted** (`--redact`): the log says where the finding is, not
 what the secret is. A CI log is not a place to print a live key.
 
+★ **The CI job runs the binary, not the action.** The gitleaks **action** runs a
+licence check — fine for an organisation with a licence, a step that only gets in
+the way for the rest. The scanner itself is MIT, so the job downloads the release
+binary and runs it. ★ The **checksum is pinned too**: a binary fetched over the
+network without one is exactly what this job exists to catch, so the job would
+be the first place a substituted binary gets noticed.
+
 ★ **The escape hatch is `SKIP=gitleaks git commit`** — for the emergency case,
 where the finding is not a secret and the rule needs fixing first. The CI job has
 no escape hatch: that is the point of having it.
