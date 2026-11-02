@@ -100,10 +100,14 @@ done
 [ "$i" -lt 50 ] || fail "the fake server did not come up: $(cat "$work/server.log")"
 
 base="http://127.0.0.1:$port"
+# ★ The API is a different host than the web in production; the fake server
+#   mirrors that split, so the installer is exercised against the same URL
+#   shapes it will really use.
+api="$base/api"
 
 # ── 1 + 2. resolve the latest release, verify, install ───────────────────────
 install_dir="$work/install"
-env OPENHERON_BASE_URL="$base" OPENHERON_REPO="$repo" INSTALL_DIR="$install_dir" \
+env OPENHERON_BASE_URL="$base" OPENHERON_API_URL="$api" OPENHERON_REPO="$repo" INSTALL_DIR="$install_dir" \
 	sh "$installer" >"$work/run1.log" 2>&1 ||
 	{ cat "$work/run1.log"; fail "the installer failed on the happy path"; }
 
@@ -114,7 +118,7 @@ pass "the latest release is resolved, verified and installed"
 
 # ── 3. a pinned version ──────────────────────────────────────────────────────
 install_dir="$work/install-pinned"
-env OPENHERON_BASE_URL="$base" OPENHERON_REPO="$repo" OPENHERON_VERSION="$version" \
+env OPENHERON_BASE_URL="$base" OPENHERON_API_URL="$api" OPENHERON_REPO="$repo" OPENHERON_VERSION="$version" \
 	INSTALL_DIR="$install_dir" sh "$installer" >"$work/run2.log" 2>&1 ||
 	{ cat "$work/run2.log"; fail "the installer failed with a pinned version"; }
 [ -x "$install_dir/openheron" ] || fail "the pinned install did not happen"
@@ -122,7 +126,7 @@ pass "a pinned version is honoured"
 
 # ── 4. an archive that is already on disk ────────────────────────────────────
 install_dir="$work/install-local"
-env OPENHERON_BASE_URL="$base" OPENHERON_REPO="$repo" \
+env OPENHERON_BASE_URL="$base" OPENHERON_API_URL="$api" OPENHERON_REPO="$repo" \
 	OPENHERON_ASSET="$root/$repo/releases/download/$version/$binary_name.tar.gz" \
 	OPENHERON_CHECKSUMS="$root/$repo/releases/download/$version/checksums.txt" \
 	INSTALL_DIR="$install_dir" sh "$installer" >"$work/run3.log" 2>&1 ||
@@ -143,7 +147,7 @@ cp "$root/$repo/releases/download/$version/checksums.txt" "$bad_dir/"
 printf 'corrupted\n' >> "$bad_dir/$binary_name.tar.gz"
 
 install_dir="$work/install-bad"
-if env OPENHERON_BASE_URL="$base" OPENHERON_REPO="$repo" \
+if env OPENHERON_BASE_URL="$base" OPENHERON_API_URL="$api" OPENHERON_REPO="$repo" \
 	OPENHERON_ASSET="$bad_dir/$binary_name.tar.gz" \
 	OPENHERON_CHECKSUMS="$bad_dir/checksums.txt" \
 	INSTALL_DIR="$install_dir" sh "$installer" >"$work/run4.log" 2>&1; then
