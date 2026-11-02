@@ -745,9 +745,16 @@ test.describe("空状态的版式", () => {
 
     await sendMessage(page, `${MARKER_A} first`)
 
-    const after = await composerCenterRatio(page)
-    expect(after, "the composer should sit at the bottom once there is a conversation").toBeGreaterThan(before)
-    expect(after).toBeGreaterThan(0.85)
+    // The composer moves when the conversation renders, which is later than
+    // the send itself. Measuring once can catch the composer before it has
+    // moved, and then "after > before" is false for a composer that has not
+    // moved yet — not for one that never moves.
+    await expect
+      .poll(() => composerCenterRatio(page), {
+        timeout: 5000,
+        message: "the composer should sit at the bottom once there is a conversation",
+      })
+      .toBeGreaterThan(0.85)
   })
 
   test("★ 打开一个已有的空会话，仍是居中版式", async ({ page }) => {

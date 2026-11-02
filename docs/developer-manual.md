@@ -849,7 +849,16 @@ process does not survive the tool call, which shows up as "it ran for a while an
 vanished" or "the port never came up" — and the log holds only the first line, so
 nothing tells you who killed it.
 
-**(6) `smoke:hitl` is flaky — roughly 1 in 5.** It depends on the model *choosing* to
+**(6) ★ A one-shot measurement measures the wrong moment.** The composer switches
+layout when the conversation renders, which is later than the send that triggers
+it. Measuring right after the send catches the composer **before** it moves, and
+then "after > before" is false for a composer that has not moved *yet*. It passes
+on a fast workstation and fails on a CI runner — which is how a timing bug in a
+test looks like a flaky test.
+★ Measure with `expect.poll`, the way the neighbouring layout assertions do it:
+it waits for the state instead of guessing when it arrives.
+
+**(7) `smoke:hitl` is flaky — roughly 1 in 5.** It depends on the model *choosing* to
 call `write_file` in order to trigger an approval. That is the model's freedom, not a
 code regression; the script retries, and when nothing triggers it **reports an error
 explicitly** rather than pretending the wiring is broken.
@@ -866,7 +875,7 @@ the approval fires anyway. Measured event stream:
 To check whether a tier is reachable, look at **each** agent's effective tool table:
 `GET /v2/agents` and `GET /v2/agents/task` report the tier and the reason per tool.
 
-**(7) Changing the interface requires browser verification.** "I changed it and the tests
+**(8) Changing the interface requires browser verification.** "I changed it and the tests
 are green" is not evidence — script-level tests cannot see the rendering layer.
 
 ### 5.8 ★ The cost benchmark
