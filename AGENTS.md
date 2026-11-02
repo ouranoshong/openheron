@@ -147,6 +147,24 @@ zero openheron dependencies, and importing `obs` would break that iron rule
   `docs/context-usage-design.md` covers context usage and compaction: the usage dashboard and
   compaction persistence are already in the code; read it before changing context-usage code.
 
+### Commit messages
+
+`Conventional Commits`, one line, English, no decoration:
+
+```
+feat(ci): install job reads the assets from the artifact
+fix(install): the API host is not the web host
+docs(readme): drop the API table, it lives in the user manual
+```
+
+- The subject says **what changed and why it matters** — not a list of the files
+  (the diff lists those) and not a walkthrough of the mechanics.
+- One line. A body is optional; when there is one it says **why**, not what — the
+  diff already answers what.
+- A commit is a note to whoever reads it next, which is usually you in six months.
+  Write it for that reader.
+- No emoji, no decorative symbols, no exclamation marks.
+
 ### Frontend (`web/`)
 
 - **A zustand selector must return a reference-stable value.** Building a new array/object on
