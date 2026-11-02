@@ -407,30 +407,54 @@ composer 必须读**服务端**的答案，而不是自己的内存：
 
 #### 怎么切一个版本
 
+★ 发版是手动做的：**在 `main` 上打一个 tag** 推上去，剩下的交给 GitHub ✅ ✅。
+
+**打 tag 之前**
+
+1. ✅ `main` 是绿的 —— README 顶部的徽章，或者 Actions 页最后一轮 ✅ ✅ ✅。
+2. ✅ 工作树干净、`main` 是最新的：`git pull --ff-only` ✅ ✅ ✅。★★ tag 必须指向
+   **已经在 `main` 上的那个提交** ✅ ✅ —— `main` 受保护 ✅ ✅，打在侧分支上的 tag
+   会发布一份没人合并过的东西 ✅ ✅ ✅ ✅。
+3. ✅ tag 名定好了 ✅ ✅。约定是 `v*`（`v0.1.0` ✅ ✅ ✅），而且 tag 就是打进二进制里的
+   那个版本号 ✅ ✅ ✅。
+4. ★ **你得被允许创建这个 tag** ✅ ✅。Settings → Rules → Rulesets → `release-tag`
+   禁止创建 tag ✅ ✅ —— ★★ 没有给你豁免的话 ✅ ✅，**连仓库主人也推不上去** ✅ ✅ ✅。
+   两种解法 ✅ ✅：★★ 加一条豁免（Repository admin ✅ ✅ ✅），★★ 或者把 `creation`
+   那条规则关掉 ✅ ✅ ✅✅ —— 推之前先确认这一条 ✅ ✅。
+
+**打 tag**
+
 ```bash
-git tag v0.1.0
+git checkout main
+git pull --ff-only
+git tag -a v0.1.0 -m "openheron v0.1.0"
 git push origin v0.1.0
 ```
 
-tag 一推，检查跑起来，产物落到发布页上：
+★ 用**附注 tag** ✅ ✅：那段说明就是发布页上显示的 tag 描述 ✅ ✅ ✅。
 
-- 六个平台（Linux / macOS / Windows × amd64 / arm64），`.tar.gz` 或 `.zip`；
-- 旁边一份 `checksums.txt`；
-- 发布说明由已合并的 PR 自动生成。
+**接下来发生什么**
 
-★ 打进二进制里的版本号是**那个 tag**，不是 `git describe` —— tag 才是发布页上的版本，
-而浅克隆根本没有 tag 可 describe。流水线随后把刚构建出来的二进制跑一遍，核对它报出来的
-版本号：忘了 `-ldflags` 会让发布失败，而不是发出去一个坏版本。
+工作流在这个 tag 上跑起来 —— 三项检查 ✅ ✅，然后 `release` 先发**草稿** ✅ ✅，
+`install` 在我们发布的每一个平台上把刚发出去的产物装一遍并跑起来 ✅ ✅，最后
+`publish` 才把草稿转成正式发布 ✅ ✅ ✅。装不上的二进制不会变成公开产物 ✅ ✅。
 
-★ 前端**先于**后端构建：`web/dist` 是 `//go:embed` 的目标，只构建后端会发出一个没有
-界面的二进制。
+**核对结果**
+
+- ✅ 发布页上有六个平台的产物 ✅ ✅、`checksums.txt` ✅ ✅ 和两个安装脚本 ✅ ✅ ✅。
+- ✅ 校验一次下载：`sha256sum -c checksums.txt --ignore-missing` ✅ ✅ ✅。
+- ✅ 真的装一次：
+  `curl -fsSL https://github.com/ouranoshong/openheron/releases/latest/download/install.sh | sh`
+  —— 然后 `openheron version` ✅ ✅ ✅。
+
+**失败了怎么办**
+
+★ 发布停在**草稿** ✅ ✅，所以没有公开出去任何东西 ✅ ✅。★★ 但**tag 已经存在了**
+✅ ✅ ⚠️，而 ruleset 禁止删除它 ✅ ✅ ⚠️ —— ★★ 所以失败的发版是**再打一个 tag**
+（`v0.1.1` ✅ ✅）来修 ✅ ✅，而不是去补救那个旧的 ✅ ✅ ✅ —— ★★ 失败的那个 tag 就留在
+仓库里，当作「试过什么」的记录 ✅ ✅ ✅ ✅。
 
 要把已有的 tag 再发一次，手动跑一遍工作流，把 tag 填进去。
-
-★ 发布分三步，中间那步是关键：`release` 先把产物**发成草稿**，`install` 在我们发布的
-每一个平台上把刚发出去的产物装一遍并跑起来，`publish` 再把草稿转成正式发布。装不上的
-二进制不会变成公开的产物。tag 这时已经推出去了，所以安装失败意味着再打一个 tag，
-而不是留下一个收不回来的坏发布。
 
 两个安装脚本（`scripts/install.sh`、`scripts/install.ps1`）随 release 一起发布，
 所以 `releases/latest/download/install.sh` 指向的永远是跟旁边那些二进制同一版本的脚本。

@@ -455,33 +455,58 @@ split so that a job installs only the toolchain it needs.
 
 #### Cutting a release
 
+★ A release is cut by hand: a **tag on `main`**, pushed. GitHub does the rest.
+
+**Before tagging**
+
+1. `main` is green — the badge at the top of the README, or the last run in
+   the Actions tab.
+2. The working tree is clean and `main` is up to date: `git pull --ff-only`.
+   The tag has to point at a commit that **is on `main`** — `main` is
+   protected, so a tag on a side branch publishes something nobody merged.
+3. The tag name is decided. `v*` is the convention (`v0.1.0`), and the tag is
+   also the version stamped into the binary.
+4. ★ **You have to be allowed to create the tag.** Settings → Rules → Rulesets
+   → `release-tag` blocks tag creation, and it blocks it for the owner too
+   unless there is a bypass entry for you. Either add one (Repository admin)
+   or turn the `creation` rule off before pushing.
+
+**Tagging**
+
 ```bash
-git tag v0.1.0
+git checkout main
+git pull --ff-only
+git tag -a v0.1.0 -m "openheron v0.1.0"
 git push origin v0.1.0
 ```
 
-The tag pushes, the checks run, and the artifacts land on the releases page:
+★ Use an **annotated** tag: its message is what the release page shows.
 
-- six platforms (Linux / macOS / Windows × amd64 / arm64), as `.tar.gz` or `.zip`;
-- `checksums.txt` next to them;
-- the release notes generated from the merged pull requests.
+**What happens next**
 
-★ The version stamped into the binary is the **tag**, not `git describe` — the tag is
-what the release is published under, and a shallow clone has no tags to describe. The
-pipeline then runs the binary it just built and checks that it reports that version,
-so a forgotten `-ldflags` fails the release instead of shipping.
+The workflow runs on the tag — the three checks, then `release` publishes a
+**draft**, then `install` installs the published assets on every platform we
+ship for, and only then `publish` turns the draft into the release. A binary
+nobody can install never becomes public.
 
-★ The frontend is built **before** the backend: `web/dist` is the target of
-`//go:embed`, so a backend-only build would publish a binary with no interface.
+**Check the result**
+
+- The release page lists the six platform archives, `checksums.txt` and the
+  two installers.
+- Verify a download: `sha256sum -c checksums.txt --ignore-missing`.
+- Install it for real:
+  `curl -fsSL https://github.com/ouranoshong/openheron/releases/latest/download/install.sh | sh`
+  — then `openheron version`.
+
+**When it fails**
+
+★ The release stays a **draft**, so nothing public was published. But the
+**tag exists**, and the ruleset refuses to delete or move it. A failed release
+is therefore fixed by **cutting a new tag** (`v0.1.1`), not by repairing the
+old one — and the failed tag stays in the repository as the record of what was
+tried.
 
 To publish an existing tag again, run the workflow by hand and give it the tag.
-
-★ The release goes out in three steps, and the middle one is the point:
-`release` publishes it **as a draft**, `install` installs the very assets that
-were just published on every platform we ship for, and `publish` turns the draft
-into the release. A binary nobody can install never becomes public. The tag is
-already pushed at that point, so a failed install means a new tag rather than a
-bad release nobody can take back.
 
 The two installers (`scripts/install.sh`, `scripts/install.ps1`) travel with the
 release, so `releases/latest/download/install.sh` always refers to the script
