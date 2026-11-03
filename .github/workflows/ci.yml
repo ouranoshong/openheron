@@ -241,24 +241,39 @@ jobs:
           export OPENHERON_CHECKSUMS="assets/checksums.txt"
           export OPENHERON_VERSION="$VERSION"
           export INSTALL_DIR="$HOME/.local/bin"
-          sh scripts/install.sh
+          # ★ The reason goes into an annotation, not only into the log: the
+          #   job log is readable with admin rights alone, and an annotation
+          #   is readable from the API by anyone. The installer prints its
+          #   reason as "openheron: ...", so that is the line to report.
+          # ★ The output is captured, not teed: a "tee /dev/stderr" in the
+          #   pipeline makes the *step* fail when tee cannot write to it,
+          #   even though the installer itself succeeded.
+          if ! output=$(sh scripts/install.sh 2>&1); then
+            reason=$(printf '%s\n' "$output" | grep '^openheron:' | tail -1)
+            printf '%s\n' "$output" >&2
+            echo "::error title=the installer failed::${reason:-install.sh exited non-zero}"
+            exit 1
+          fi
+          printf '%s\n' "$output"
       - name: install it (windows)
         if: matrix.script == 'ps1'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          # ★ The execution policy is not ours to assume: a .ps1 file invoked
-          #   directly is refused outright when the policy is Restricted, and
-          #   the script never runs — the step fails in a second with nothing
-          #   but the refusal. The Process scope lasts this step only and
-          #   changes nothing on the machine.
-          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          $archive = Get-ChildItem "assets/openheron_${VERSION}_${{ matrix.os }}_${{ matrix.arch }}.*" |
+          # ★ $env:VERSION, not ${VERSION}: PowerShell does **not** import the
+          #   environment into its variable namespace, so "${VERSION}" expands
+          #   to an empty string — the pattern becomes
+          #   "openheron__windows_amd64.*", matches nothing, and the step dies
+          #   on "[0] of a null array". The bash leg gets this right by
+          #   accident: in a shell, ${VERSION} *is* the environment.
+          $archive = Get-ChildItem "assets/openheron_$($env:VERSION)_${{ matrix.os }}_${{ matrix.arch }}.*" |
             Select-Object -First 1
           # ★ The asset is named after the matrix, so a miss here is a broken
-          #   handoff, not a broken installer — say which one it is.
+          #   handoff, not a broken installer — say which one it is, and say
+          #   what *is* there.
           if (-not $archive) {
-            throw "no asset for ${{ matrix.os }}-${{ matrix.arch }} under assets/"
+            $listing = (Get-ChildItem assets | ForEach-Object { $_.Name }) -join ", "
+            throw "no asset for ${{ matrix.os }}-${{ matrix.arch }} (VERSION=$($env:VERSION)) under assets/; assets holds: $listing"
           }
           $env:OPENHERON_ASSET = $archive.FullName
           $env:OPENHERON_CHECKSUMS = (Resolve-Path "assets/checksums.txt").Path
@@ -269,7 +284,25 @@ jobs:
           Write-Host "policy: $(Get-ExecutionPolicy)"
           Write-Host "asset: $($env:OPENHERON_ASSET)"
           Write-Host "install dir: $($env:INSTALL_DIR)"
-          & ./scripts/install.ps1
+          # ★ The installer runs as a child process, and the policy is passed
+          #   on its command line: a .ps1 file invoked in this session is
+          #   refused outright when the runner's policy is Restricted, and the
+          #   script never runs — the step fails in a second with nothing but
+          #   the refusal. A child process also turns the installer's own
+          #   "exit 1" into an exit code instead of killing the step, so the
+          #   reason can be reported as an annotation — readable from the API
+          #   by anyone, while the job log needs admin rights.
+          $output = & pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./scripts/install.ps1 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $output
+          if ($code -ne 0) {
+            $reason = ($output -split "`n" | Where-Object { $_ -match "openheron:" } | Select-Object -Last 1)
+            # ★ The annotation must not fail on its own: a missing line here
+            #   would replace the real reason with a null-reference error.
+            $reason = if ($reason) { $reason.Trim() } else { "the installer exited $code" }
+            Write-Host "::error title=the Windows installer failed::$reason"
+            exit $code
+          }
       - name: check the installed binary
         if: matrix.script == 'sh'
         shell: bash
