@@ -210,7 +210,11 @@ jobs:
             os: darwin
             arch: arm64
             script: sh
-          - runner: macos-13
+          # ★ macos-15-intel, not macos-13: the macOS 13 runner image was
+          #   retired on 2025-12-04, and a job on a retired label sits in the
+          #   queue forever — the release waits on it, so the release waits
+          #   forever. macos-15-intel is GitHub's x86_64 macOS label.
+          - runner: macos-15-intel
             os: darwin
             arch: amd64
             script: sh
@@ -243,11 +247,28 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $archive = (Get-ChildItem "assets/openheron_${VERSION}_${{ matrix.os }}_${{ matrix.arch }}.*")[0].FullName
-          $env:OPENHERON_ASSET = $archive
+          # ★ The execution policy is not ours to assume: a .ps1 file invoked
+          #   directly is refused outright when the policy is Restricted, and
+          #   the script never runs — the step fails in a second with nothing
+          #   but the refusal. The Process scope lasts this step only and
+          #   changes nothing on the machine.
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          $archive = Get-ChildItem "assets/openheron_${VERSION}_${{ matrix.os }}_${{ matrix.arch }}.*" |
+            Select-Object -First 1
+          # ★ The asset is named after the matrix, so a miss here is a broken
+          #   handoff, not a broken installer — say which one it is.
+          if (-not $archive) {
+            throw "no asset for ${{ matrix.os }}-${{ matrix.arch }} under assets/"
+          }
+          $env:OPENHERON_ASSET = $archive.FullName
           $env:OPENHERON_CHECKSUMS = (Resolve-Path "assets/checksums.txt").Path
           $env:OPENHERON_VERSION = $env:VERSION
           $env:INSTALL_DIR = Join-Path $env:LOCALAPPDATA "Programs\openheron"
+          # ★ What the next line failed on, printed before it runs: a failure
+          #   without these three lines is a failure nobody can act on.
+          Write-Host "policy: $(Get-ExecutionPolicy)"
+          Write-Host "asset: $($env:OPENHERON_ASSET)"
+          Write-Host "install dir: $($env:INSTALL_DIR)"
           & ./scripts/install.ps1
       - name: check the installed binary
         if: matrix.script == 'sh'
