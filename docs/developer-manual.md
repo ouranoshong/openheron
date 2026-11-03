@@ -431,18 +431,30 @@ shows the stop button, which is how the user takes over.
 
 ### 3.9 CI and releases
 
-`.github/workflows/ci.yml` is the whole pipeline: three checks and one release.
+`.github/workflows/ci.yml` is the whole pipeline: the checks, a draft release, and
+the install gate in front of it.
 
 | Job | What it runs | Needs |
 |---|---|---|
 | `go` | `make lint-go` + `make test` | Go |
 | `web` | `make lint-web` + `bun run test:unit` | bun |
 | `e2e` | `make test-e2e` — the fake backend it ships with | bun + chromium |
-| `release` | `make release`, then publish to a GitHub Release | the three above |
+| `secrets` | gitleaks over the whole history (§5.9) | — |
+| `install-script` | `make test-install` — the installer against a local fake release | — |
+| `release` | `make release`, then a **draft** GitHub Release | the four checks |
+| `install` | installs the assets of that draft on every platform we ship for | `release` |
+| `publish` | turns the draft into the public release | `install` |
 
 ★ **The release waits for the checks** (`needs`), so a tag on a red commit publishes
 nothing. That is why the pipeline is one file: a job cannot wait for a job in another
 workflow, so two files would have to run the checks a second time.
+
+★ **The release also waits for the install gate.** The `install` job installs the very
+assets the `release` job built, on every platform we publish for, and only then does
+`publish` make the release public — a binary nobody can install never becomes public.
+★ **A failed leg says why in an annotation**, not only in a log line: a job log is
+readable with admin rights alone, while an annotation is readable from the API by
+anyone.
 
 ★ **The smokes are not in CI.** `make smoke` needs a model that answers, and a model
 that answers is not reproducible on a runner — a failure there would be noise, not a
