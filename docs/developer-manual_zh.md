@@ -385,17 +385,26 @@ composer 必须读**服务端**的答案，而不是自己的内存：
 
 ### 3.9 CI 与发版
 
-`.github/workflows/ci.yml` 就是整条流水线：三个检查 + 一个发布。
+`.github/workflows/ci.yml` 就是整条流水线：检查、一份草稿发布，以及挡在它前面的安装闸门。
 
 | job | 跑什么 | 需要 |
 |---|---|---|
 | `go` | `make lint-go` + `make test` | Go |
 | `web` | `make lint-web` + `bun run test:unit` | bun |
 | `e2e` | `make test-e2e` —— 用它自带的假后端 | bun + chromium |
-| `release` | `make release`，然后发布到 GitHub Release | 上面三个 |
+| `secrets` | gitleaks 扫整个历史（§5.9） | — |
+| `install-script` | `make test-install` —— 用本地假发布测安装脚本 | — |
+| `release` | `make release`，然后建一份**草稿** GitHub Release | 上面四个检查 |
+| `install` | 在我们发布的每个平台上装那份草稿里的产物 | `release` |
+| `publish` | 把草稿转成公开的 release | `install` |
 
 ★ **发布等检查**（`needs`），所以一个红 commit 上的 tag 什么也发不出去。流水线因此是
 **一个文件**：job 没法等另一个 workflow 里的 job，两个文件就意味着检查要跑第二遍。
+
+★ **发布还要过安装闸门。** `install` job 装的就是 `release` job 造出来的那批产物，
+在我们要发布的每个平台上都装一遍，全装成了 `publish` 才把 release 公开 ✅ —— 一个没人
+装得上的二进制，不该先发布出去 ✅。★ **失败的那条腿把原因写在注解里**，不只是写在日志
+里：job 日志要管理员权限才读得到，注解谁都能从 API 读到 ✅。
 
 ★ **冒烟不在 CI 里。** `make smoke` 需要一个答得上话的模型，而答得上话的模型在 runner
 上不可复现 —— 在那里失败是噪声，不是信号。E2E 才是确定的那一半，也是能给发布当闸门的
