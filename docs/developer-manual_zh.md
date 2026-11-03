@@ -622,6 +622,7 @@ const selectMessages = (s: State) => s.convo?.messages ?? EMPTY
 | `make lint` | Go vet + gofmt + oxlint + tsc | — |
 | `make lint-go` / `make lint-web` | `make lint` 的两半，给只装了一种工具链的 job 用 | — |
 | `make check` | `lint` + `test`，提交前跑这个 | — |
+| `make install-hooks` | 装 pre-commit 钩子（gitleaks + gofmt） | `pre-commit` |
 
 起测试实例：
 
@@ -821,6 +822,39 @@ abort 是幂等的，所以对已经结束的 run 调用它也安全。
 
 结论、价格表与厂商账单的对账、以及这个基准测量的两种形态，都写在
 `benchmarks/README.md`。
+
+### 5.9 仓库里的密钥
+
+两层，因为它们看到的不是一回事：
+
+| 位置 | 扫什么 | 什么时候 |
+|---|---|---|
+| pre-commit 钩子 | **暂存区**的差异 | 每次提交，本地 |
+| CI 的 `secrets` job | **全部历史** | 每次 push 与 pull request |
+
+★ 钩子是便宜的那一层 ✅ ✅，也是拦住一个密钥被写进去的那一层 ✅ ✅。CI 那一层找的是钩子
+找不到的东西 ✅ ✅：★ 钩子存在之前提交进去的密钥 ✅ ✅，或者在没有钩子的机器上提交的那次
+✅ ✅。
+
+装钩子用 `make install-hooks` ✅ ✅（需要 `pre-commit` ✅ ✅ —— `pipx install pre-commit
+✅ ✅ ✅`）。★ gitleaks 的版本在 `.pre-commit-config.yaml` 里**钉死** ✅ ✅ —— ★★ 上游新增
+一条规则，不该在某天把所有人的提交都变红 ✅ ✅ ✅ ✅。
+
+★ **规则不放松。** ✅ ✅ gitleaks 报了一个不是密钥的东西 ✅ ✅，修法是 `.gitleaks.toml` 里
+一条**窄的路径 allowlist** ✅ ✅ —— ★★ 一个已知放夹具的路径 ✅ ✅，★★ 而不是一条「凡是像密钥
+就算」的宽正则 ✅ ✅。★★ 宽 allowlist 就是一个洞加一个配置文件 ✅ ✅ ✅。
+
+★ **报告是脱敏的**（`--redact` ✅ ✅）：日志说发现哪 ✅ ✅，不说密钥是什么 ✅ ✅ ✅ ——
+CI 日志不是打印活密钥的地方 ✅ ✅ ✅。
+
+★ **CI 那层跑的是二进制，不是 action ✅ ✅ ✅**。gitleaks 的 **action ✅ ✅** 会做 license
+校验 ✅ ✅ —— 组织有 license 没问题 ✅ ✅，对其他人就只是多一道手续 ✅ ✅。★ 扫描器本身是
+MIT ✅ ✅ ✅，所以 job 直接下载发布出来的二进制来跑 ✅ ✅ ✅。★ **校验和也钉死 ✅ ✅ ✅** ——
+从网络拉一个不校验的二进制 ✅ ✅，正是这个 job 要抓的东西 ✅ ✅ ✅ ✅ ✅ —— ★★ 也就是说，
+这个 job 反而是「二进制被掉包」最早被发现的地方 ✅ ✅ ✅ ✅ ✅ ✅。
+
+★ **逃生口是 `SKIP=gitleaks git commit` ✅ ✅** —— 给「这不是密钥、规则待修 ✅ ✅」的紧急情况
+✅ ✅。★ CI 那层没有逃生口 ✅ ✅ —— 有它就是为了这个 ✅ ✅ ✅。
 
 ## 6. 排障
 

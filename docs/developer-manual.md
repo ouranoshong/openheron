@@ -700,6 +700,7 @@ To change a port, change only that one file.
 | `make lint` | Go vet + gofmt + oxlint + tsc | — |
 | `make lint-go` / `make lint-web` | The two halves of `make lint`, for a job that only has one toolchain | — |
 | `make check` | `lint` + `test` — run this before committing | — |
+| `make install-hooks` | Install the pre-commit hooks (gitleaks + gofmt) | `pre-commit` |
 
 To start the test instance:
 
@@ -929,6 +930,43 @@ single repeat moved by 2× on the same task. Report the **median**.
 
 The findings, the price table's verification against the provider's bill, and
 the two shapes the benchmark measures are in `benchmarks/README.md`.
+
+### 5.9 Secrets in the repository
+
+Two layers, because they see different things:
+
+| Where | What it scans | When |
+|---|---|---|
+| The pre-commit hook | The **staged** diff | On every commit, locally |
+| The `secrets` CI job | The **whole history** | On every push and pull request |
+
+★ The hook is the cheap one, and it is the one that stops a key from being
+written. The CI job is the one that finds what the hook cannot: a secret that was
+committed before the hook existed, or on a machine without it.
+
+Install the hooks with `make install-hooks` (it needs `pre-commit` — `pipx install
+pre-commit`). The gitleaks revision is **pinned** in `.pre-commit-config.yaml`, so
+a new upstream rule cannot turn every commit red on a day nobody touched the
+security setup.
+
+★ **The rules are not loosened.** When gitleaks reports something that is not a
+secret, the fix is a **narrow path allowlist** in a `.gitleaks.toml` — a path
+that is known to hold fixtures, not a regular expression that matches "anything
+that looks like a key". A broad allowlist is a hole with a config file on it.
+
+★ **The report is redacted** (`--redact`): the log says where the finding is, not
+what the secret is. A CI log is not a place to print a live key.
+
+★ **The CI job runs the binary, not the action.** The gitleaks **action** runs a
+licence check — fine for an organisation with a licence, a step that only gets in
+the way for the rest. The scanner itself is MIT, so the job downloads the release
+binary and runs it. ★ The **checksum is pinned too**: a binary fetched over the
+network without one is exactly what this job exists to catch, so the job would
+be the first place a substituted binary gets noticed.
+
+★ **The escape hatch is `SKIP=gitleaks git commit`** — for the emergency case,
+where the finding is not a secret and the rule needs fixing first. The CI job has
+no escape hatch: that is the point of having it.
 
 ## 6. Troubleshooting
 
