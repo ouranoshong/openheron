@@ -336,9 +336,28 @@ jobs:
       - name: turn the draft into the release
         run: |
           set -euo pipefail
-          id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$VERSION" --jq .id)
+          # ★ The draft is found through the LIST endpoint, not through
+          #   releases/tags/{tag}: a draft release is not served by that
+          #   endpoint — it answers 404 — and the list endpoint is the one
+          #   that shows drafts to a caller with push access, which the
+          #   GITHUB_TOKEN here has. Looking the draft up by tag is how this
+          #   job died on every release so far: the 404 failed the command
+          #   substitution under "set -e", and the PATCH never ran.
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"$VERSION\" and .draft == true) | .id" | head -1)
+          if [ -z "$id" ]; then
+            # ★ Already public — a re-run of an existing tag. Patching it again
+            #   is harmless, and failing here would block a release that is
+            #   already out.
+            id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+              --jq ".[] | select(.tag_name == \"$VERSION\") | .id" | head -1)
+          fi
+          if [ -z "$id" ]; then
+            echo "::error title=no release for $VERSION::the release job did not create one"
+            exit 1
+          fi
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$id" -F draft=false
-          echo "published: $VERSION"
+          echo "published: $VERSION (release $id)"
 
   install-script:
     name: install script (local fake release)
