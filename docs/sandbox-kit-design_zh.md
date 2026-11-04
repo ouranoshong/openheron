@@ -237,7 +237,7 @@ version: "${{ kit.args.version }}"
 
 args:
   version:
-    default: "0.0.3"
+    default: "0.0.6"
     pattern: '^[0-9]+(\.[0-9A-Za-z-]+)*$'
     buildArg: OPENHERON_VERSION
 
@@ -881,6 +881,8 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
 | 进程是不是从工作区启动的？ | **是** —— `PWD` 与 `OLDPWD` 都是工作区 |
 | 配置是不是落在挂载上？ | **是** —— `.openheron/{agents,llm,policy,server,state}` 在宿主上，会话也在 |
 | 凭据到不到模型？ | **到** —— 容器里是 `DEEPSEEK_API_KEY=proxy-managed`；代理换上真值，调用返回了 "ok" |
+| 发布版配方构建得出来吗？ | **能** —— `make kit` 用 container-driver builder 产出 `openheron-kit:0.0.6`，里面的二进制自报 `v0.0.6` |
+| 发布版 Kit 在沙箱里跑得起来吗？ | **能** —— startup hook 把配置写到挂载上，服务在自己的数据目录里建出了 state |
 | 端口转发会不会缓冲 SSE？ | **不会** —— 10.3 秒里 1339 帧，首帧 +21ms |
 | agent 写出的文件归谁？ | 归宿主用户 —— VM 的 uid `1000` 就是宿主的 uid `1000`（§2.14） |
 
@@ -910,13 +912,20 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
 - ★ **`default` builder 会把 Kit 的 manifest annotation 丢掉。**
   镜像构建成功，而它已经不是 Kit 了：描述文件 annotation 没了。
   container driver 的 builder 才保得住，所以 `make kit` 指定了它。
+- ★ **那个 builder 还需要 `--load`。** 不给的话结果留在构建缓存里，
+  本地没有镜像可供校验 —— `make kit-check` 会去找一个从没导出的镜像。
+- ★ **端口转发在 WSL2 宿主上不可靠。** 代理拨的是 bridge 网关
+  （`172.17.0.1:8080`），拿到 connection refused，而 workload 是活的：
+  同一个 Kit 在同一次会话的早些时候回了 1339 帧 SSE，之后就不回了，
+  Kit 本身没变。重发端口有时能救回来。这是宿主侧的症状，
+  不能把账记在 Kit 上。
 - ★ **宿主需要 `/dev/kvm`**，所以用户得在 `kvm` 组里。
   开这个设备的是守护进程，不是 CLI。
 - ★ **`sbx run --name` 是重启沙箱，不会用改过的 Kit 重建容器。**
   改了 Kit 要 `sbx rm` 再 `sbx run` —— 重启会悄悄留着旧镜像，
   于是探针看起来像"没跑"。
-- ★ **配方指名的那个 release 还不存在**（`v0.0.3`，§2.9）。
-  在它发布之前，除了手上有二进制的作者本人，谁也构建不了这个 Kit。
+- ★ **配方指名的是一个已发布的 release**（`v0.0.6`），所以谁都能构建这个 Kit。
+  上面的实测用的是本地构建的二进制 —— 因为当时配方指名的那个 release 还不存在。
 
 ### 6.3 `WORKSPACE_DIR` 是怎么来的
 

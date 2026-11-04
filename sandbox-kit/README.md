@@ -34,7 +34,7 @@ finds the companion recipe by that convention.
 
 ```sh
 docker buildx create --name kit-builder --driver docker-container --bootstrap
-docker buildx build --builder kit-builder . -f openheron.yaml -t openheron-kit:0.0.3
+docker buildx build --builder kit-builder . -f openheron.yaml -t openheron-kit:0.0.6
 ```
 
 or, from the repository root, `make kit`.
@@ -42,7 +42,7 @@ or, from the repository root, `make kit`.
 ## Check
 
 ```sh
-kit-tck validate openheron-kit:0.0.3
+kit-tck validate openheron-kit:0.0.6
 ```
 
 A build is not proof that the Kit works. The checks that matter are the

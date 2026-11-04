@@ -275,7 +275,7 @@ version: "${{ kit.args.version }}"
 
 args:
   version:
-    default: "0.0.3"
+    default: "0.0.6"
     pattern: '^[0-9]+(\.[0-9A-Za-z-]+)*$'
     buildArg: OPENHERON_VERSION
 
@@ -998,7 +998,7 @@ A boundary that is not a unit test has to be verified behaviourally.
 
 ★ Measured on 2026-11-04, on a real sandbox: `sbx` v0.51.0, Docker Engine
 29.9.2, Linux on WSL2, the Kit built from `sandbox-kit/` with the binary baked
-locally (the release it names is not published yet — §2.9). The workload's own
+locally. The workload's own
 environment was captured from inside the sandbox and read on the host.
 
 | Question | Answer |
@@ -1007,6 +1007,8 @@ environment was captured from inside the sandbox and read on the host.
 | Does the process start in the workspace? | **Yes** — `PWD` and `OLDPWD` are both the workspace |
 | Does the configuration land on the mount? | **Yes** — `.openheron/{agents,llm,policy,server,state}` is on the host, and the sessions with it |
 | Does the credential reach the model? | **Yes** — the container held `DEEPSEEK_API_KEY=proxy-managed`; the proxy substituted the real value and the call returned "ok" |
+| Does the published recipe build? | **Yes** — `make kit` with the container-driver builder produces `openheron-kit:0.0.6`, and the binary inside reports `v0.0.6` |
+| Does the published Kit run in a sandbox? | **Yes** — the startup hook writes the configuration onto the mount and the server creates its data directory there |
 | Does the port forwarding buffer the SSE stream? | **No** — 1339 frames over 10.3 s, the first at +21 ms |
 | Who owns the files the agent writes? | The host user — the VM's uid `1000` is the host's uid `1000` (§2.14) |
 
@@ -1038,15 +1040,24 @@ model; only the first keeps the key out of the VM (§2.8).
 - ★ **The `default` buildx builder drops the Kit's manifest annotations.** The
   image builds, and it is no longer a Kit: the descriptor annotation is gone.
   A container-driver builder keeps it, so `make kit` names one.
+- ★ **That builder also needs `--load`.** Without it the result stays in the
+  build cache and there is no local image to validate — `make kit-check` would
+  look for an image that was never exported.
+- ★ **The port forwarding is unreliable on a WSL2 host.** The proxy dials the
+  bridge gateway (`172.17.0.1:8080`) and gets a connection refused, while the
+  workload is up: the same Kit answered 1339 SSE frames earlier in the same
+  session and stopped answering later, with no change to the Kit. Re-publishing
+  the port sometimes brings it back. It is a host-side symptom, and the Kit
+  must not be read as the cause.
 - ★ **The host needs `/dev/kvm`,** so the user has to be in the `kvm` group.
   The daemon is the process that opens it, not the CLI.
 - ★ **`sbx run --name` restarts the sandbox; it does not rebuild the
   container from a changed Kit.** Kit changes need `sbx rm` and a new
   `sbx run` — a restart silently keeps the old image, which makes a probe look
   like it did not run.
-- ★ **The recipe names a release that does not exist yet** (`v0.0.3`,
-  §2.9). Until it is published, the Kit cannot be built by anyone but its
-  author, who has the binary locally.
+- ★ **The recipe names a published release** (`v0.0.6`), so anyone can build
+  the Kit. The measurement above used a locally built binary instead, because
+  the release the recipe named did not exist yet at the time.
 
 ### 6.3 How `WORKSPACE_DIR` arrives
 
