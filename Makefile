@@ -129,6 +129,34 @@ release: web ## Cross-compile every platform: archives and checksums land in dis
 release-one: web ## Cross-compile a single platform: make release-one PLATFORM=darwin/arm64
 	@$(MAKE) --no-print-directory release PLATFORMS="$(PLATFORM)"
 
+# ── Docker Sandbox Kit ──────────────────────────────────────────────────────
+#
+# ★ A separate artifact, not part of the release pipeline: `make release` still
+#   produces the six static binaries and nothing else. The Kit packages
+#   openheron as a Docker Sandboxes workload — its design is
+#   docs/sandbox-kit-design.md.
+#
+# The build context is sandbox-kit/, because the Kit specification finds the
+# content recipe by the descriptor's filename stem, beside it.
+
+KIT_DIR    ?= sandbox-kit
+KIT_VERSION ?= 0.0.3
+KIT_IMAGE  ?= openheron-kit:$(KIT_VERSION)
+KIT_BUILDER ?= kit-builder
+
+.PHONY: kit
+kit: ## Build the Docker Sandbox Kit image (needs docker buildx)
+	@docker buildx inspect $(KIT_BUILDER) >/dev/null 2>&1 || \
+		docker buildx create --name $(KIT_BUILDER) --driver docker-container --bootstrap
+	cd $(KIT_DIR) && docker buildx build --builder $(KIT_BUILDER) . -f openheron.yaml -t $(KIT_IMAGE)
+# ★ --builder is not optional: the docker driver with the classic image store
+#   drops the manifest annotations, and an image without the descriptor
+#   annotation is not a Kit any more.
+
+.PHONY: kit-check
+kit-check: ## Validate the Kit against the specification (needs kit-tck)
+	kit-tck validate $(KIT_IMAGE)
+
 # ── Verification ───────────────────────────────────────────────────────────
 
 .PHONY: test

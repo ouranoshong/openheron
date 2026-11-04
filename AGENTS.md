@@ -7,7 +7,7 @@ one — change one and change the other.
 
 > ★ **This repository is the code surface**: Go backend + React frontend + build configuration.
 >
-> It ships **eight** bilingual document sets, maintained alongside the code
+> It ships **ten** bilingual document sets, maintained alongside the code
 > (**English is the main version; the `_zh` suffix marks the Chinese version**):
 > `README.md` / `README_zh.md`,
 > `docs/architecture.md` / `docs/architecture_zh.md` (architecture),
@@ -16,9 +16,11 @@ one — change one and change the other.
 > `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` (context-usage estimation design),
 > `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` (session concurrency design),
 > `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` (run lifecycle design),
-> `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` (filesystem backend design).
+> `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` (filesystem backend design),
+> `docs/microvm-execution-design.md` / `docs/microvm-execution-design_zh.md` (microVM execution isolation),
+> `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` (Docker Sandbox Kit packaging).
 > **Every other design document under `docs/` still lives in the upstream repository** ——
-> any `docs/xxx.md` reference below that is not one of these eight is the upstream copy.
+> any `docs/xxx.md` reference below that is not one of these ten is the upstream copy.
 > If you cannot get hold of it before changing semantics, ask first; do not change
 > configuration or interfaces from memory.
 >
@@ -33,9 +35,24 @@ one — change one and change the other.
 > Its §1 describes the code as it is — a turn is bound to one SSE connection today — while its
 > §2 onwards describe what would be built: a run as a durable row, a lease with a fence, and the
 > connection demoted to a subscriber. **Nothing from §2 onwards is in the tree.**
+> `docs/microvm-execution-design.md` is a **proposal** too: its §1 describes where `execute`
+> runs today (`/bin/sh` as a child of the server process) and the single `StreamingShell`
+> interface it would plug into; its §2 onwards describe running the tool inside a microVM.
+> **Nothing from §2 onwards is in the tree.**
+> `docs/sandbox-kit-design.md` is a **proposal** as well, and the other half of that pair:
+> its §1 describes the openheron process as it is — one process with an HTTP/SSE server,
+> the file tools and the shell tool sharing one backend — while its §2 onwards describe
+> packaging that whole process as a Docker Sandbox Kit, so the boundary moves outward
+> instead of inward and the read path is covered too.
+> **Nothing from §2 onwards is in the tree.**
 > `docs/fs-backend-design.md` describes the **filesystem backend** — the bounded fork of
 > `eino-ext`'s local backend (§5) and the confinement rule every tool passes through — and it is
 > **implemented**: `agentkit/fsx` is wired in at both call sites.
+>
+> ★ One directory is not a document set: **`sandbox-kit/`** holds the Docker Sandbox Kit that
+> packages openheron as a workload — the descriptor, the content recipe and the entrypoint.
+> It is a **separate artifact**: `make release` still produces the six static binaries and
+> nothing else. Its design is `docs/sandbox-kit-design.md`, and `make kit` builds it.
 >
 > Write these documents **from the code, not from imagination**: every conclusion must point at a
 > line in the code. When the code changes, the documents change with it — documentation drift is
@@ -324,6 +341,8 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 | `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` | **Session concurrency design** — why cross-client preemption happened, the "one turn per session" rule and its implementation, and how the frontend learns that a session is busy (**the admission gate and the 409 are implemented**) |
 | `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` | **Filesystem backend design** — why `eino-ext`'s local backend was forked into `agentkit/fsx`, how paths are confined to the project root, and how `ls`/`glob` are bounded (**implemented**) |
 | `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` | **Run lifecycle design** — why a turn is bound to one SSE connection today, and how a run becomes a durable row with a lease and a fence, so the connection can be demoted to a subscriber (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
+| `docs/microvm-execution-design.md` / `docs/microvm-execution-design_zh.md` | **MicroVM execution isolation** — where `execute` runs today, the single `StreamingShell` interface a microVM would plug into, and what running the tool inside a microVM would and would not protect (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
+| `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` | **Docker Sandbox Kit packaging** — the openheron process as it is, a v3 workload Kit that would carry the whole process into a microVM, how the model key stays on the host, and the SSE path that has to be measured (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
 
 ★ The file without a suffix is the **English main version**; `_zh` is the Chinese version; the two
 correspond one to one — change one and change the other.

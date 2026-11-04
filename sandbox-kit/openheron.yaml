@@ -1,0 +1,100 @@
+# syntax=docker/sandbox-kit:3
+#
+# The openheron agent server, packaged as a Docker Sandboxes workload Kit.
+#
+# ★ The whole process runs inside the sandbox: the HTTP/SSE server, the file
+#   tools and the shell tool share one backend inside the microVM, so the read
+#   path is inside the boundary too — not just the command path.
+#
+# ★ The configuration is the user's: the startup hook seeds it inside the
+#   mounted workspace, and the server reads it from there.
+#
+# The design this implements is docs/sandbox-kit-design.md.
+
+schemaVersion: "3"
+kind: workload
+displayName: openheron
+description: the openheron agent server, running entirely inside the sandbox
+sourceUrl: https://github.com/ouranoshong/openheron
+licenses: [Apache-2.0]
+
+args:
+  # ★ No `v` prefix: the Kit version grammar is a dotted sequence, and the
+  #   Dockerfile adds the `v` the release tag and asset name carry.
+  #
+  # ★ This is the only argument. The provider, the model API host and the name
+  #   of the api key environment variable are openheron's own rules, decided by
+  #   the factory templates — a Kit that re-exposed them would be a second
+  #   place to keep them in sync, and the configuration on the mount is the
+  #   user's to manage anyway.
+  version:
+    default: "0.0.3"
+    pattern: '^[0-9]+(\.[0-9A-Za-z-]+)*$'
+    description: openheron release to install
+    buildArg: OPENHERON_VERSION
+
+provides: ["openheron@${{ kit.args.version }}"]
+version: "${{ kit.args.version }}"
+
+capabilities:
+  # ★ The launch contract: the shells and the agent user the base image owes.
+  - type: com.docker.sandbox/sbx@1
+
+  # ★ openheron is a server, not a session: it has to come up, serve and stay up.
+  - type: com.docker.sandbox/long-running@1
+
+  # ★ The Kit does not restrict what the agent may reach. The microVM is the
+  #   boundary; the egress rules are the host's to set (sbx policy) and the
+  #   organization's to govern. "*" is the portable form of "no restriction
+  #   from this Kit" — an absent phase block would grant nothing at all, so
+  #   saying nothing is the opposite of saying "open".
+  #
+  # ★ The install phase stays empty: this Kit has no install hooks, and the
+  #   Dockerfile fetches the binary at build time, on the builder's network.
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          - "*"
+
+  # ★ proxyManaged: the real key stays on the host's secret store; the
+  #   container only ever sees the sentinel "proxy-managed", and the proxy
+  #   swaps in the real value on the way out.
+  #
+  # ★ The three names below are openheron's factory defaults, and they have to
+  #   move together with them:
+  #     api.deepseek.com    initcfg/templates/llm/deepseek.yaml (base_url)
+  #     DEEPSEEK_API_KEY    initcfg/initcfg.go:361-363 (defaultEnvName)
+  #     deepseek            initcfg/initcfg.go:365 (defaultProvider)
+  #
+  # ★ The user binds the key with ONE command, and the placeholder it uses is
+  #   the sentinel itself, so the runtime's injection and the host's binding
+  #   agree without the user passing an environment variable:
+  #     printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
+  #       --host api.deepseek.com --env DEEPSEEK_API_KEY \
+  #       --placeholder proxy-managed --value-stdin
+  #   The real key never enters the sandbox.
+  - type: com.docker.sandbox/credential@1
+    optional: true
+    description: model API access
+    config:
+      service: deepseek
+      phase: runtime
+      apiKey:
+        name: DEEPSEEK_API_KEY
+        proxyManaged: true
+        inject:
+          - {domain: api.deepseek.com, header: Authorization, format: "Bearer %s"}
+
+  # ★ A startup hook, not an install hook: it runs on every boot, as uid 1000,
+  #   and openheron init is idempotent. The hook environment is deny by
+  #   default, so every name it reads is declared.
+  #
+  # ★ No --provider and no --env: openheron init decides both from its own
+  #   rules, which is what the three literals above mirror.
+  - type: com.docker.sandbox/lifecycle@1
+    config:
+      startup:
+        - command: 'openheron init --dir "$WORKSPACE_DIR" || echo "[kit] init did not complete; the existing configuration is kept"'
+          env: [WORKSPACE_DIR]
+          description: Seed the project configuration in the workspace

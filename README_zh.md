@@ -178,7 +178,7 @@ make check      # lint + test
 
 ## 关联文档
 
-本仓库自带七组文档，随代码面一起维护，每组中英一式两份
+本仓库自带九组文档，随代码面一起维护，每组中英一式两份
 （**英文是主版本，`_zh` 后缀是中文版**）：
 
 | 文档 | 内容 |
@@ -190,6 +190,12 @@ make check      # lint + test
 | [docs/session-concurrency-design.md](docs/session-concurrency-design.md) · [中文](docs/session-concurrency-design_zh.md) | **会话并发设计方案** —— 「一个会话一轮」的规则，以及前端怎么知道会话正忙（已实现） |
 | [docs/run-lifecycle-design.md](docs/run-lifecycle-design.md) · [中文](docs/run-lifecycle-design_zh.md) | **run 生命周期设计方案** —— run 怎么才能变成一行持久事实、配上租约与 fence（提案：只有 §1 讲的是代码现状） |
 | [docs/fs-backend-design.md](docs/fs-backend-design.md) · [中文](docs/fs-backend-design_zh.md) | **文件系统后端设计方案** —— `agentkit/fsx` 这个分叉，与每个工具都要经过的路径收敛（已实现） |
+| [docs/microvm-execution-design.md](docs/microvm-execution-design.md) · [中文](docs/microvm-execution-design_zh.md) | **microVM 执行隔离设计方案** —— `execute` 今天跑在哪里，以及把工具放进 microVM 能防住什么、不能防住什么（提案：只有 §1 讲的是代码现状） |
+| [docs/sandbox-kit-design.md](docs/sandbox-kit-design.md) · [中文](docs/sandbox-kit-design_zh.md) | **Docker Sandbox Kit 打包设计方案** —— 整个进程作为 v3 workload Kit 进 microVM、模型密钥如何留在宿主，以及 SSE 这条路（提案：只有 §1 讲的是代码现状） |
+
+★ 把 openheron 打包成沙箱 workload 的 **Docker Sandbox Kit** 在
+[`sandbox-kit/`](sandbox-kit/) 里 —— 描述文件、内容配方与入口脚本。
+它的设计见 [docs/sandbox-kit-design.md](docs/sandbox-kit-design.md)。
 
 ★ `docs/` 下更细的分册设计与行业对照在**上游仓库**里 —— 机制拆解与取舍见上游的
 `docs/positioning.md`。
