@@ -151,11 +151,11 @@ fix(install): the API host is not the web host
 docs(readme): drop the API table, it lives in the user manual
 ```
 
-- 标题写**改了什么、为什么值得改** —— 不列文件清单（diff 会列 ✅ ✅），也不复述过程 ✅ ✅。
-- 一行 ✅ ✅。正文可有可无 ✅ ✅；有的话写**为什么**，不写**做了什么** —— 「做了什么」diff
-  已经说了 ✅ ✅。
-- 提交信息是给下一个读它的人留的便条 ✅ ✅，那个人多半是半年后的你自己 ✅ ✅ ✅。
-- 不用表情符号 ✅ ✅，不用装饰性符号 ✅ ✅，不用感叹号 ✅ ✅ ✅。
+- 标题写**改了什么、为什么值得改** —— 不列文件清单（diff 会列），也不复述过程。
+- 一行。正文可有可无；有的话写**为什么**，不写**做了什么** —— 「做了什么」diff
+  已经说了。
+- 提交信息是给下一个读它的人留的便条，那个人多半是半年后的你自己。
+- 不用表情符号，不用装饰性符号，不用感叹号。
 
 ### 前端（`web/`）
 
@@ -200,9 +200,9 @@ docs(readme): drop the API table, it lives in the user manual
 然后把 workload 与每一份 mixin 推到 Docker Hub。它需要 `DOCKERHUB_USERNAME` 与
 `DOCKERHUB_TOKEN` 两个 secret。
 
-★ **密钥扫两遍。** pre-commit 的钩子（`make install-hooks` ✅ ✅）扫暂存区 ✅ ✅；CI 的
-`secrets` job 扫全历史 ✅ ✅。★ 钩子存在之前提交进去的密钥还在历史里 ✅ ✅ —— 只有 CI 那遍
-找得到它 ✅ ✅ ✅ ✅。
+★ **密钥扫两遍。** pre-commit 的钩子（`make install-hooks`）扫暂存区；CI 的
+`secrets` job 扫全历史。★ 钩子存在之前提交进去的密钥还在历史里 —— 只有 CI 那遍
+找得到它。
 
 ★ **不要直接推 `main`。** 它受保护：推一个分支、开一个 PR、由仓库主人合并。合并不会发布
 任何东西 —— 只有 `v*` tag 才会。
