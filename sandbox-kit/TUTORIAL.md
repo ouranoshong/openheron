@@ -10,15 +10,16 @@ file tools and the shell tool — runs inside a microVM. Your host is outside
 that boundary. The workspace you name is the only thing that crosses it, and
 it crosses it as an ordinary directory on your host.
 
-★ **What you run.** Two things, and the runtime resolves them separately:
+★ **What you run.** Two things:
 
-| | What it is | Where you get it |
-|---|---|---|
-| **workload** | the root filesystem the agent works in, plus the launch contract | `docker.io/ouranoshong/openheron-kit:0.0.6` |
-| **mixin** | the model credential, and the network rule that goes with it | a published image, **or a file of your own** (step 2) |
+| | What it is |
+|---|---|
+| **the workload** | the root filesystem the agent works in, plus the launch contract — the published image `docker.io/ouranoshong/openheron-kit:0.0.6` |
+| **a mixin** | the model credential, and the network rule that goes with it |
 
 ★ A sandbox without a mixin starts and then answers every model call with a
-401: the credential is what the mixin carries.
+401: the credential is what the mixin carries. One mixin per vendor, and you
+compose the ones you use.
 
 ---
 
@@ -62,62 +63,37 @@ process arguments.
 
 ---
 
-## 1. Start a sandbox
+## 1. One choice to make: where the mixin comes from
 
-```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
-    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
-    --name openheron ~/my-project
+★ **A mixin is a declaration, not a product.** It says two things — which
+credential to inject, and which host may reach it — and it carries no content
+of its own. So it reaches you in one of two shapes, and **you pick either
+one**; the runtime accepts both and behaves the same:
+
+| | a published image | a file of your own |
+|---|---|---|
+| **What you get** | `docker.io/ouranoshong/openheron-kit-deepseek:0.0.6` | one YAML file, 25 lines |
+| **To start using it** | nothing — pull it | copy it into a directory |
+| **To point it at your own endpoint** | wait for a new image | edit one line |
+| **The version** | fixed, and the one that was measured | whatever you wrote |
+| **You must trust** | the publisher | nobody but yourself |
+
+★ **Take the image** if you want the version that was measured, and you have
+no reason to change the endpoint.
+
+★ **Take the file** if openheron has to talk to *your* endpoint — a proxy, a
+gateway, a vendor with no published mixin. Then the change is one line, and
+there is no release to wait for.
+
+### 1.1 The image
+
+Nothing to do. The reference is the whole thing:
+
+```
+docker.io/ouranoshong/openheron-kit-deepseek:0.0.6
 ```
 
-Read the three arguments apart:
-
-| | |
-|---|---|
-| `docker.io/ouranoshong/openheron-kit:0.0.6` | the workload — the published image, pulled on first use |
-| `--kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6` | the mixin — the credential and its network rule |
-| `~/my-project` | the workspace — a directory on your host, mounted into the sandbox |
-
-★ **The workspace is a real directory on your host.** Point it at a project
-you want the agent to work on, or at an empty directory to start from. It
-appears at the same absolute path inside the sandbox, so the paths in the
-conversation mean the same thing on both sides.
-
-What you will see:
-
-```
-  ○ image — pulling…
-      0a096e869e28 downloaded  509.3 MB
-  ✓ image — ready
-  ✓ assembled kit image (21 layers)
-    setting 1 environment variable
-      +DEEPSEEK_API_KEY
-  ✓ http — published localhost:32772 -> 8080/tcp
-
-  ✓ Created sandbox openheron
-  ○ openheron — starting in sandbox openheron…
-      workspace /home/you/my-project
-```
-
-★ **`http — published localhost:32772 -> 8080/tcp` is the runtime telling you
-the port is ready.** The workload declares the port it serves on, and the
-runtime publishes it on an ephemeral loopback port at start time. You never
-choose that port yourself — two sandboxes asking for the same one would
-collide.
-
-★ **The terminal stays busy.** The workload's entrypoint is the server
-itself, and the session is what starts it. You will see the server's log
-lines here.
-
----
-
-## 2. The mixin as a file
-
-★ **A mixin is a declaration, so it can be a file.** The published mixin
-images are convenient, but they are not required: a **directory holding one
-YAML file** is a complete mixin, and the runtime builds the declaration-only
-image from it. You never build anything, you never push anything, and nothing
-depends on a version someone else published.
+### 1.2 The file
 
 This is the whole file. Save it as `openheron-deepseek.yaml`:
 
@@ -157,7 +133,40 @@ mkdir -p ~/openheron-deepseek
 # save the file above as ~/openheron-deepseek/openheron-deepseek.yaml
 ```
 
-Then point `--kit` at that directory:
+★ **Three rules the runtime insists on**, all measured:
+
+- **A directory, not the file.** `--kit ~/mixin.yaml` is refused:
+  `artifact zip "./mixin.yaml": zip: not a valid zip file` — the path is
+  taken as an archive.
+- **The directory name is the file name's stem.** `openheron-deepseek/`
+  holds `openheron-deepseek.yaml`.
+- **A v3 mixin is not a ZIP.** Zipping the directory is refused with
+  `artifact: spec.yaml (or spec.yml) is required` — that is the older kit
+  grammar, where a kit is a `spec.yaml` and an optional `files/` directory.
+
+★ **Why the network rule is in the same file as the credential.** The runtime
+wants every domain the credential injects into to appear **literally** in the
+allow list for the same phase. The workload's own rule is `*`, which covers
+every domain but does not satisfy that check — so the mixin names the host
+outright. The two allow lists union per phase.
+
+★ **The `service` name is what makes a second vendor possible.** A credential
+has one owner per (service, phase), so two vendors need two service names.
+Two mixins claiming `deepseek` do not compose.
+
+---
+
+## 2. Start a sandbox
+
+With the published mixin:
+
+```sh
+sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
+    --name openheron ~/my-project
+```
+
+With your own file:
 
 ```sh
 sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
@@ -165,41 +174,48 @@ sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
     --name openheron ~/my-project
 ```
 
-What you will see is the same as with the published image:
+★ **Only the `--kit` line differs.** The workload is an image in both cases —
+the workload has a root filesystem, so it has to be an image.
+
+Read the arguments apart:
+
+| | |
+|---|---|
+| `docker.io/ouranoshong/openheron-kit:0.0.6` | the workload — the published image, pulled on first use |
+| `--kit …` | the mixin — an image reference or a directory, your choice |
+| `~/my-project` | the workspace — a directory on your host, mounted into the sandbox |
+
+★ **The workspace is a real directory on your host.** Point it at a project
+you want the agent to work on, or at an empty directory to start from. It
+appears at the same absolute path inside the sandbox, so the paths in the
+conversation mean the same thing on both sides.
+
+What you will see — with the file form, the only difference is where the
+mixin came from:
 
 ```
-    loading kit image docker.io/ouranoshong/openheron-kit:0.0.6
-    loading kit image /home/you/openheron-deepseek
+  ○ image — pulling…
+      0a096e869e28 downloaded  509.3 MB
+  ✓ image — ready
   ✓ assembled kit image (21 layers)
     setting 1 environment variable
       +DEEPSEEK_API_KEY
-  ✓ http — published localhost:32774 -> 8080/tcp
+  ✓ http — published localhost:32772 -> 8080/tcp
+
+  ✓ Created sandbox openheron
+  ○ openheron — starting in sandbox openheron…
+      workspace /home/you/my-project
 ```
 
-★ **Three things the runtime insists on**, all measured:
+★ **`http — published localhost:32772 -> 8080/tcp` is the runtime telling you
+the port is ready.** The workload declares the port it serves on, and the
+runtime publishes it on an ephemeral loopback port at start time. You never
+choose that port yourself — two sandboxes asking for the same one would
+collide.
 
-- **A directory, not a file.** `--kit ./mixin.yaml` is refused:
-  `artifact zip "./mixin.yaml": zip: not a valid zip file` — it takes the
-  path as an archive.
-- **The directory name is the file name's stem.** `openheron-deepseek/`
-  holds `openheron-deepseek.yaml`.
-- **A v3 mixin is not a ZIP.** Zipping the directory is refused with
-  `artifact: spec.yaml (or spec.yml) is required` — that is the older kit
-  grammar, where a kit is a `spec.yaml` and an optional `files/`
-  directory.
-
-★ **Which one should you use?**
-
-| | a file | a published image |
-|---|---|---|
-| To start using it | copy one YAML | nothing |
-| To change the endpoint | edit a line | wait for a new image |
-| The version is fixed | no — it is whatever you wrote | yes |
-
-★ A file is the better answer when you point openheron at **your own**
-endpoint, your own vendor, or your own proxy: the change is one line, and
-there is no release to wait for. The published image is the better answer
-when you want the version that was measured.
+★ **The terminal stays busy.** The workload's entrypoint is the server
+itself, and the session is what starts it. You will see the server's log
+lines here.
 
 ---
 
@@ -361,34 +377,40 @@ of the server, not the first.
 
 ## 7. Another vendor
 
-Write the mixin for that vendor (step 2 has the shape), bind the key, and
-compose the two:
+★ **Add one more mixin.** Either shape works, and they compose the same way —
+so keep whichever you started with.
+
+With images:
 
 ```sh
-printf '%s' "$OPENAI_API_KEY" | sbx secret set-custom \
-    --host api.openai.com --env OPENAI_API_KEY \
-    --placeholder proxy-managed --value-stdin
-
 sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
     --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
     --kit docker.io/ouranoshong/openheron-kit-openai:0.0.6 \
     --name openheron ~/my-project
 ```
 
+With files — the second one is the same YAML as in step 1.2, with `openai`
+where it says `deepseek`:
+
+```sh
+sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
+    --kit ~/openheron-deepseek \
+    --kit ~/openheron-openai \
+    --name openheron ~/my-project
+```
+
+★ **And bind that vendor's key** before you start:
+
+```sh
+printf '%s' "$OPENAI_API_KEY" | sbx secret set-custom \
+    --host api.openai.com --env OPENAI_API_KEY \
+    --placeholder proxy-managed --value-stdin
+```
+
 ★ Both keys arrive in the container as sentinels, each with its own network
 rule. What the **provider configuration** does is your business:
 `openheron init` maintains one provider configuration per configuration root,
 so the second vendor's `llm/*.yaml` is written by you, on the mount.
-
-★ **Why the network rule is in the same file as the credential.** The runtime
-wants every domain the credential injects into to appear **literally** in the
-allow list for the same phase. The workload's own rule is `*`, which covers
-every domain but does not satisfy that check — so the mixin names the host
-outright. The two allow lists union per phase.
-
-★ **The `service` name is what makes a second vendor possible.** A credential
-has one owner per (service, phase), so two vendors need two service names.
-Two mixins claiming `openai` do not compose.
 
 ---
 
@@ -410,7 +432,7 @@ this one left off.
 |---|---|
 | `error: resolve kits: kit "…": its source is not in your allowlist` | the Kit is not on `docker.io/` — an administrator has to allow its source |
 | `error: … fetch manifest: … http: server gave HTTP response to HTTPS client` | the registry serves plain HTTP; it has to serve HTTPS |
-| `artifact zip "./mixin.yaml": zip: not a valid zip file` | `--kit` takes a **directory** for a mixin, not a file |
+| `artifact zip "./mixin.yaml": zip: not a valid zip file` | `--kit` takes a **directory** for a mixin, not the file |
 | `artifact: spec.yaml (or spec.yml) is required` | a ZIP of a v3 mixin is refused — that is the older kit grammar |
 | `error: sandbox '…' already exists; --kit can only be used when creating a new sandbox` | you passed `--kit` to an existing sandbox — drop it, or `sbx rm` first |
 | `error: agent exited with code 2` | the server was already running; the one you want is still up |

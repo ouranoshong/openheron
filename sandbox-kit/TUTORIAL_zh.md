@@ -9,15 +9,15 @@ shell 工具 —— 都跑在一个 microVM 里，你的宿主在边界之外。
 只有你指定的那个工作区穿过了边界，而它穿过的方式，
 就是宿主上的一个普通目录。
 
-★ **你要跑的是两样东西**，而运行时是分别解析它们的：
+★ **你要跑的是两样东西：**
 
-| | 是什么 | 从哪拿 |
-|---|---|---|
-| **workload** | agent 干活的那个根文件系统，加上启动契约 | `docker.io/ouranoshong/openheron-kit:0.0.6` |
-| **mixin** | 模型凭据，以及与它配套的网络规则 | 已发布的镜像，**或者你自己的一份文件**（第 2 步） |
+| | 是什么 |
+|---|---|
+| **workload** | agent 干活的那个根文件系统，加上启动契约 —— 已发布的镜像 `docker.io/ouranoshong/openheron-kit:0.0.6` |
+| **mixin** | 模型凭据，以及与它配套的网络规则 |
 
 ★ 没有 mixin 的沙箱会起得来，然后每个模型调用都回 401：
-凭据正是 mixin 带来的东西。
+凭据正是 mixin 带来的东西。每个厂商一份 mixin，用哪几份就组合哪几份。
 
 ---
 
@@ -59,57 +59,34 @@ printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
 
 ---
 
-## 1. 起一个沙箱
+## 1. 一个要做的选择：mixin 从哪来
 
-```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
-    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
-    --name openheron ~/my-project
+★ **mixin 是一份声明，不是一件产品。** 它只说两件事 —— 注入哪个凭据、
+哪个主机可以够到 —— 自身不带任何内容。于是它有两种形态到你手上，
+**你挑其中一种就行**；运行时两种都收，行为也完全一样：
+
+| | 已发布的镜像 | 你自己的一份文件 |
+|---|---|---|
+| **你拿到什么** | `docker.io/ouranoshong/openheron-kit-deepseek:0.0.6` | 一个 YAML 文件，25 行 |
+| **开始用它要做什么** | 什么都不用 —— 拉下来 | 复制进一个目录 |
+| **要指向自己的端点** | 等一个新镜像 | 改一行 |
+| **版本** | 固定，而且是被实测过的那个 | 就是你写下的样子 |
+| **你要信任谁** | 发布者 | 除了你自己没有别人 |
+
+★ **拿镜像**：你就是要那个被实测过的版本，也没有换端点的理由。
+
+★ **拿文件**：openheron 得连到**你自己的**端点 —— 代理、网关、
+或者某个没有发布 mixin 的厂商。那样改动就是一行，也没有 release 要等。
+
+### 1.1 镜像
+
+什么都不用做。引用本身就是全部：
+
+```
+docker.io/ouranoshong/openheron-kit-deepseek:0.0.6
 ```
 
-三个参数分开看：
-
-| | |
-|---|---|
-| `docker.io/ouranoshong/openheron-kit:0.0.6` | workload —— 已发布的镜像，第一次用时会拉取 |
-| `--kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6` | mixin —— 凭据与它的网络规则 |
-| `~/my-project` | 工作区 —— 宿主上的一个目录，被挂进沙箱 |
-
-★ **工作区就是宿主上的真实目录。** 指向你希望 agent 动手的项目，
-或者指向一个空目录从头开始。它在沙箱内出现在同一个绝对路径上，
-所以对话里提到的路径，两边说的是同一个东西。
-
-你会看到：
-
-```
-  ○ image — pulling…
-      0a096e869e28 downloaded  509.3 MB
-  ✓ image — ready
-  ✓ assembled kit image (21 layers)
-    setting 1 environment variable
-      +DEEPSEEK_API_KEY
-  ✓ http — published localhost:32772 -> 8080/tcp
-
-  ✓ Created sandbox openheron
-  ○ openheron — starting in sandbox openheron…
-      workspace /home/you/my-project
-```
-
-★ **`http — published localhost:32772 -> 8080/tcp` 是运行时在告诉你端口好了。**
-workload 声明了自己服务的端口，运行时在启动时把它发布到一个临时回环端口上。
-这个端口不由你指定 —— 两个沙箱要同一个会撞。
-
-★ **终端会一直占着。** workload 的入口脚本就是服务本身，
-而会话是把它拉起来的东西。所以你会在这里看到服务的日志行。
-
----
-
-## 2. mixin 就是一份文件
-
-★ **mixin 是一份声明，所以它可以是一个文件。** 已发布的 mixin 镜像只是方便，
-并不是必需的：**一个只放着一个 YAML 文件的目录**就是一份完整的 mixin，
-运行时把这份纯声明构建成镜像。你不用构建任何东西、不用推任何东西，
-也不依赖别人发布的某个版本。
+### 1.2 文件
 
 这就是全部内容。存成 `openheron-deepseek.yaml`：
 
@@ -148,7 +125,39 @@ mkdir -p ~/openheron-deepseek
 # save the file above as ~/openheron-deepseek/openheron-deepseek.yaml
 ```
 
-然后把 `--kit` 指向那个目录：
+★ **运行时坚持的三件事**，都是实测的：
+
+- **要目录，不要文件。** `--kit ~/mixin.yaml` 会被拒：
+  `artifact zip "./mixin.yaml": zip: not a valid zip file` ——
+  那个路径被当成了压缩包。
+- **目录名就是文件名的词干。** `openheron-deepseek/` 里放
+  `openheron-deepseek.yaml`。
+- **v3 的 mixin 不是 ZIP。** 把目录打包会被拒：
+  `artifact: spec.yaml (or spec.yml) is required` —— 那是更老的 kit 语法，
+  一个 kit 是一个 `spec.yaml` 加一个可选的 `files/` 目录。
+
+★ **为什么网络规则和凭据在同一个文件里。** 运行时要每个 inject 域名
+**逐字**出现在同阶段的 allow 列表里，而 workload 自己那条规则是 `*`，
+它覆盖所有域名却不满足这条检查 —— 所以 mixin 把主机名写实。
+两张 allow 列表按阶段取并集。
+
+★ **`service` 名是第二个厂商能成立的原因。** 凭据在每个 (service, phase)
+上只有一个主人，所以两个厂商要两个 service 名。
+两个都声称 `deepseek` 的 mixin 合不到一起。
+
+---
+
+## 2. 起一个沙箱
+
+用已发布的 mixin：
+
+```sh
+sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
+    --name openheron ~/my-project
+```
+
+用你自己的文件：
 
 ```sh
 sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
@@ -156,39 +165,43 @@ sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
     --name openheron ~/my-project
 ```
 
-你看到的与用已发布镜像时一样：
+★ **只有 `--kit` 那一行不同。** 两种情况下 workload 都是镜像 ——
+workload 带着根文件系统，所以它只能是镜像。
+
+参数分开看：
+
+| | |
+|---|---|
+| `docker.io/ouranoshong/openheron-kit:0.0.6` | workload —— 已发布的镜像，第一次用时会拉取 |
+| `--kit …` | mixin —— 镜像引用或目录，你挑 |
+| `~/my-project` | 工作区 —— 宿主上的一个目录，被挂进沙箱 |
+
+★ **工作区就是宿主上的真实目录。** 指向你希望 agent 动手的项目，
+或者指向一个空目录从头开始。它在沙箱内出现在同一个绝对路径上，
+所以对话里提到的路径，两边说的是同一个东西。
+
+你会看到 —— 用文件形态时，唯一的区别是 mixin 从哪来：
 
 ```
-    loading kit image docker.io/ouranoshong/openheron-kit:0.0.6
-    loading kit image /home/you/openheron-deepseek
+  ○ image — pulling…
+      0a096e869e28 downloaded  509.3 MB
+  ✓ image — ready
   ✓ assembled kit image (21 layers)
     setting 1 environment variable
       +DEEPSEEK_API_KEY
-  ✓ http — published localhost:32774 -> 8080/tcp
+  ✓ http — published localhost:32772 -> 8080/tcp
+
+  ✓ Created sandbox openheron
+  ○ openheron — starting in sandbox openheron…
+      workspace /home/you/my-project
 ```
 
-★ **运行时坚持的三件事**，都是实测的：
+★ **`http — published localhost:32772 -> 8080/tcp` 是运行时在告诉你端口好了。**
+workload 声明了自己服务的端口，运行时在启动时把它发布到一个临时回环端口上。
+这个端口不由你指定 —— 两个沙箱要同一个会撞。
 
-- **要目录，不要文件。** `--kit ./mixin.yaml` 会被拒：
-  `artifact zip "./mixin.yaml": zip: not a valid zip file` ——
-  它把那个路径当成压缩包了。
-- **目录名就是文件名的词干。** `openheron-deepseek/` 里放
-  `openheron-deepseek.yaml`。
-- **v3 的 mixin 不是 ZIP。** 把目录打包会被拒：
-  `artifact: spec.yaml (or spec.yml) is required` —— 那是更老的 kit 语法，
-  一个 kit 是一个 `spec.yaml` 加一个可选的 `files/` 目录。
-
-★ **你该用哪一种？**
-
-| | 一份文件 | 已发布的镜像 |
-|---|---|---|
-| 开始用它 | 复制一个 YAML | 什么都不用做 |
-| 换端点 | 改一行 | 等一个新镜像 |
-| 版本是否固定 | 不固定 —— 就是你写下的样子 | 固定 |
-
-★ 当你把 openheron 指向**你自己的**端点、自己的厂商、自己的代理时，
-文件是更好的答案：改动就是一行，而且没有 release 要等。
-而当你想要那个被实测过的版本时，已发布的镜像更合适。
+★ **终端会一直占着。** workload 的入口脚本就是服务本身，
+而会话是把它拉起来的东西。所以你会在这里看到服务的日志行。
 
 ---
 
@@ -346,31 +359,38 @@ error: inspect exec: context deadline exceeded
 
 ## 7. 换一个厂商
 
-给那个厂商写一份 mixin（第 2 步有形状），把密钥绑上，然后组合两份：
+★ **再加一份 mixin。** 两种形态都行，组合方式也一样 ——
+所以从你开始用的那种接着用就行。
+
+用镜像：
 
 ```sh
-printf '%s' "$OPENAI_API_KEY" | sbx secret set-custom \
-    --host api.openai.com --env OPENAI_API_KEY \
-    --placeholder proxy-managed --value-stdin
-
 sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
     --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
     --kit docker.io/ouranoshong/openheron-kit-openai:0.0.6 \
     --name openheron ~/my-project
 ```
 
+用文件 —— 第二份就是第 1.2 节那个 YAML，把 `deepseek` 换成 `openai`：
+
+```sh
+sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
+    --kit ~/openheron-deepseek \
+    --kit ~/openheron-openai \
+    --name openheron ~/my-project
+```
+
+★ **还要在起沙箱之前把那个厂商的密钥绑上：**
+
+```sh
+printf '%s' "$OPENAI_API_KEY" | sbx secret set-custom \
+    --host api.openai.com --env OPENAI_API_KEY \
+    --placeholder proxy-managed --value-stdin
+```
+
 ★ 两个密钥都以哨兵值进容器，各带各的网络规则。
 而 **provider 配置** 是你自己的事：`openheron init` 每个配置根只维护一份
 provider 配置，所以第二个厂商的 `llm/*.yaml` 由你在挂载上写。
-
-★ **为什么网络规则和凭据在同一个文件里。** 运行时要每个 inject 域名
-**逐字**出现在同阶段的 allow 列表里，而 workload 自己那条规则是 `*`，
-它覆盖所有域名却不满足这条检查 —— 所以 mixin 把主机名写实。
-两张 allow 列表按阶段取并集。
-
-★ **`service` 名是第二个厂商能成立的原因。** 凭据在每个 (service, phase)
-上只有一个主人，所以两个厂商要两个 service 名。
-两个都声称 `openai` 的 mixin 合不到一起。
 
 ---
 
