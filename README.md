@@ -219,7 +219,6 @@ and Chinese (**English is the primary version, `_zh` the Chinese one**):
 | [docs/session-concurrency-design.md](docs/session-concurrency-design.md) · [中文](docs/session-concurrency-design_zh.md) | **Session concurrency — design** — the one-turn-per-session rule and how the frontend learns that a session is busy (implemented) |
 | [docs/run-lifecycle-design.md](docs/run-lifecycle-design.md) · [中文](docs/run-lifecycle-design_zh.md) | **Run lifecycle — design** — how a run could become a durable row with a lease and a fence (a proposal: only §1 describes the code) |
 | [docs/fs-backend-design.md](docs/fs-backend-design.md) · [中文](docs/fs-backend-design_zh.md) | **Filesystem backend — design** — the `agentkit/fsx` fork and the path confinement every tool passes through (implemented) |
-| [docs/microvm-execution-design.md](docs/microvm-execution-design.md) · [中文](docs/microvm-execution-design_zh.md) | **MicroVM execution isolation — design** — where `execute` runs today, and what putting the tool inside a microVM would and would not protect (a proposal: only §1 describes the code) |
 | [docs/sandbox-kit-design.md](docs/sandbox-kit-design.md) · [中文](docs/sandbox-kit-design_zh.md) | **Docker Sandbox Kit packaging — design** — the whole process as a v3 workload Kit inside a microVM, how the model key stays on the host, and the SSE path (a proposal: only §1 describes the code) |
 
 ★ The **Docker Sandbox Kit** that packages openheron as a sandbox workload lives in

@@ -76,8 +76,10 @@ There are exactly two places an isolation boundary could go, and this document
 picks one:
 
 - **Inward** — keep the server on the host and move only the `execute` tool
-  into an isolation unit. That is `docs/microvm-execution-design.md`; it
-  replaces the `StreamingShell` value and nothing else.
+  into an isolation unit. It replaces the `StreamingShell` value and nothing
+  else, so the server, the file tools and the state store stay on the host.
+  ★ **That seam was dropped** (§3): a boundary around one tool leaves the read
+  path open, and a boundary around the process closes it for the same work.
 - **Outward** — move the **whole process** into an isolation unit. Then the
   file tools, the shell tool, the model client and the state store are all
   inside, and the host keeps only a forwarded port.
@@ -223,10 +225,10 @@ The host keeps exactly one thing: a forwarded port for the HTTP/SSE server.
 Non-goals: replacing the approval flow, changing the agent model, changing
 the API, or making openheron faster.
 
-★ The difference from `docs/microvm-execution-design.md` is the whole point.
-That document keeps the server on the host and moves only `execute` into the
-VM, which hardens the command path and leaves the read path open (§2.7 there).
-Here the read path is inside too, because the process that serves it is inside.
+★ **The difference from the inward seam (§1.3) is the whole point.** Keeping
+the server on the host and moving only `execute` into the VM hardens the
+command path and leaves the read path open. Here the read path is inside too,
+because the process that serves it is inside.
 
 ### 2.2 The shape: a v3 workload Kit
 
@@ -993,11 +995,11 @@ this document is worth writing before any code is written.
 | `darwin/amd64` | **not supported** | Intel Macs have no microVM path |
 | `windows/amd64`, `windows/arm64` | Windows Hypervisor Platform | supported, with caveats |
 
-★ Intel Mac is the same hole `docs/microvm-execution-design.md` §2.8 records
-for the microsandbox route. Two proposals, one hole: the release matrix has
-six targets and microVM isolation reaches five of them.
+★ Intel Mac has no microVM path at all, and that is a property of the
+platform rather than of this document: the release matrix has six targets and
+microVM isolation reaches five of them.
 
-The difference is what fills the hole. The microsandbox route leaves the
+The difference is what fills the hole. The inward seam (§1.3) would leave the
 server on the host, so on Intel Mac the **host path** still works and only the
 `execute` isolation is unavailable. Here the whole process is inside the VM,
 so there is nothing to fall back to: on Intel Mac, openheron-as-a-Kit does not
@@ -1062,11 +1064,11 @@ before editing. This one is worth verifying rather than assuming (§5).
 
 ---
 
-## 3. The relation to the microsandbox proposal
+## 3. The other seam, and why this one
 
-Two proposals, one goal, different shapes:
+Two seams were on the table (§1.3). They have the same goal and different shapes:
 
-| | `docs/microvm-execution-design.md` | this document |
+| | the inward seam | this document |
 |---|---|---|
 | What is isolated | the `execute` tool | the whole process |
 | Where the server runs | on the host | inside the microVM |
@@ -1076,14 +1078,16 @@ Two proposals, one goal, different shapes:
 | Runtime | microsandbox (Apache-2.0, self-hosted) | Docker Sandboxes (`sbx`, Docker sign-in) |
 | Distribution | openheron ships or requires `msb` | a registry artifact plus `sbx` |
 
-★ They are not mutually exclusive, and the difference is the point: the
-microsandbox route is a **narrower** boundary that openheron can adopt without
-moving anything. This one is a **wider** boundary that costs no code.
+★ **The inward seam was dropped.** It is a **narrower** boundary that openheron
+could adopt without moving anything; this one is a **wider** boundary that
+costs no code. ★ And the two are not worth composing: **the Kit is the outer
+boundary, so a microVM inside it is not needed** — the sandbox already
+provides the isolation the `execute` tool was going to ask for. Two isolation
+layers for one command path is one too many.
 
-If both were built, the natural composition is: **the Kit is the outer boundary,
-and microsandbox is not needed inside it** — the sandbox already provides the
-isolation the `execute` tool was going to ask for. Two isolation layers for one
-command path is one too many.
+★ So there is one boundary, and it is the whole process. openheron does not
+run a microVM of its own: the Kit is the isolation, and the host's own policy
+(`sbx policy`) is what governs what happens inside it (§2.7).
 
 ---
 

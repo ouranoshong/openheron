@@ -190,7 +190,6 @@ make check      # lint + test
 | [docs/session-concurrency-design.md](docs/session-concurrency-design.md) · [中文](docs/session-concurrency-design_zh.md) | **会话并发设计方案** —— 「一个会话一轮」的规则，以及前端怎么知道会话正忙（已实现） |
 | [docs/run-lifecycle-design.md](docs/run-lifecycle-design.md) · [中文](docs/run-lifecycle-design_zh.md) | **run 生命周期设计方案** —— run 怎么才能变成一行持久事实、配上租约与 fence（提案：只有 §1 讲的是代码现状） |
 | [docs/fs-backend-design.md](docs/fs-backend-design.md) · [中文](docs/fs-backend-design_zh.md) | **文件系统后端设计方案** —— `agentkit/fsx` 这个分叉，与每个工具都要经过的路径收敛（已实现） |
-| [docs/microvm-execution-design.md](docs/microvm-execution-design.md) · [中文](docs/microvm-execution-design_zh.md) | **microVM 执行隔离设计方案** —— `execute` 今天跑在哪里，以及把工具放进 microVM 能防住什么、不能防住什么（提案：只有 §1 讲的是代码现状） |
 | [docs/sandbox-kit-design.md](docs/sandbox-kit-design.md) · [中文](docs/sandbox-kit-design_zh.md) | **Docker Sandbox Kit 打包设计方案** —— 整个进程作为 v3 workload Kit 进 microVM、模型密钥如何留在宿主，以及 SSE 这条路（提案：只有 §1 讲的是代码现状） |
 
 ★ 把 openheron 打包成沙箱 workload 的 **Docker Sandbox Kit** 在

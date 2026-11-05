@@ -66,7 +66,9 @@ disabled_tools: [write_file, edit_file, execute]
 隔离边界只有两个可去的地方，这份文档选其中一个：
 
 - **往里** —— 服务留在宿主，只把 `execute` 工具搬进隔离单元。
-  那是 `docs/microvm-execution-design.md`；它只换掉 `StreamingShell` 这一个值。
+  它只换掉 `StreamingShell` 这一个值，服务、文件工具与状态存储都留在宿主。
+  ★ **那条接缝已经放弃**（§3）：围着单个工具的边界留着读路径敞着，
+  而围着进程的边界花同样的功夫就把它关上了。
 - **往外** —— 把**整个进程**搬进隔离单元。于是文件工具、shell 工具、模型客户端、
   状态存储全在里面，宿主只留一条转发端口。
 
@@ -193,8 +195,8 @@ agent 在一个目录里干活，配置却从另一个目录读。
 
 非目标：替换审批流程、改 agent 模型、改 API、或者让 openheron 变快。
 
-★ 与 `docs/microvm-execution-design.md` 的差别正是重点。那份文档把服务留在宿主、
-只把 `execute` 搬进 VM，加固的是命令路径，读路径照旧敞着（那里的 §2.7）。
+★ 与**往里那条接缝**（§1.3）的差别正是重点。把服务留在宿主、
+只把 `execute` 搬进 VM，加固的是命令路径，读路径照旧敞着。
 这里读路径也在里面，因为提供读的服务进程本身就在里面。
 
 ### 2.2 形态：一个 v3 workload Kit
@@ -869,10 +871,10 @@ agent 可以从环境里把它读出来，它跑的任何东西都能把它发�
 | `darwin/amd64` | **不支持** | Intel Mac 没有 microVM 这条路 |
 | `windows/amd64`、`windows/arm64` | Windows Hypervisor Platform | 可用，但有注意事项 |
 
-★ Intel Mac 正是 `docs/microvm-execution-design.md` §2.8 为 microsandbox 那条路记下的同一个洞。
-两个提案、同一个洞：发布矩阵有六个目标，microVM 隔离够得着五个。
+★ Intel Mac 根本没有 microVM 这条路，而这是平台的属性，不是这份文档的属性：
+发布矩阵有六个目标，microVM 隔离够得着五个。
 
-差别在于谁来填这个洞。microsandbox 那条路把服务留在宿主，
+差别在于谁来填这个洞。往里那条接缝（§1.3）把服务留在宿主，
 所以在 Intel Mac 上**宿主那条路仍然能用**，缺的只是 `execute` 的隔离。
 这里整个进程都在 VM 里，于是没有退路：在 Intel Mac 上，
 openheron-as-a-Kit 根本跑不起来。
@@ -926,11 +928,11 @@ agent 在工作区里写下的文件，在宿主视角下属于 uid `1000`，
 
 ---
 
-## 3. 与 microsandbox 提案的关系
+## 3. 另一条接缝，以及为什么取这条
 
-两个提案，一个目标，形状不同：
+桌上摆过两条接缝（§1.3）。它们目标相同，形状不同：
 
-| | `docs/microvm-execution-design.md` | 本文档 |
+| | 往里那条 | 本文档 |
 |---|---|---|
 | 隔离的是什么 | `execute` 工具 | 整个进程 |
 | 服务跑在哪 | 宿主 | microVM 里 |
@@ -940,12 +942,14 @@ agent 在工作区里写下的文件，在宿主视角下属于 uid `1000`，
 | 运行时 | microsandbox（Apache-2.0，自托管） | Docker Sandboxes（`sbx`，需 Docker 登录） |
 | 分发 | openheron 自带或要求装 `msb` | 一个 registry 产物加 `sbx` |
 
-★ 两者不互斥，而且差别正是重点：microsandbox 那条是**更窄**的边界，
-openheron 不挪任何东西就能采纳；这一条是**更宽**的边界，代价是零代码。
-
-若两条都做，自然的组合是：**Kit 是外层边界，里面就不需要 microsandbox 了** ——
+★ **往里那条接缝已经放弃。** 它是**更窄**的边界，openheron 不挪任何东西就能采纳；
+这一条是**更宽**的边界，代价是零代码。★ 而且这两条不值得叠起来：
+**Kit 是外层边界，里面就不需要 microVM 了** ——
 沙箱已经提供了 `execute` 工具本来打算去要的那层隔离。
 一条命令路径上叠两层隔离，多了一层。
+
+★ 所以边界只有一道，而且是整个进程那道。openheron 不自己跑 microVM：
+隔离由 Kit 提供，沙箱里面发生什么由宿主自己的策略（`sbx policy`）管（§2.7）。
 
 ---
 
