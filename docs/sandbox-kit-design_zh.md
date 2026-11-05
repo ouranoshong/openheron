@@ -901,6 +901,11 @@ Intel Mac 上的用户继续用普通二进制；进 Kit 的用户拿到完整�
 
 - Kit 是一个 **registry 产物**。`sbx run <image>` 消费它；
   已发布的描述文件是签名覆盖的对象，也是权限闸门评判的对象。
+- ★ **`v*` tag 会发布它**，而且是同一个 tag 发布 release：CI 里的 `kit` job
+  构建 workload 与每一份 mixin 并推到 Docker Hub，
+  等的是 release 等的那同一批检查。镜像的 tag 不带 `v` ——
+  release 是 `v0.1.0`，Kit 是 `0.1.0` —— 版本同时进到已发布的描述文件里，
+  所以引用与描述文件说的是同一件事。
 - ★ **这套东西是三个仓库，不是一个。** workload 与每个厂商的 mixin 是
   各自独立的引用，而运行时是分别解析它们的 —— 所以只拿 workload 而没拿
   mixin 的用户，会得到一个起得来、然后每个模型调用都回 401 的沙箱。

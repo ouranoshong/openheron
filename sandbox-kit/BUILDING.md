@@ -152,6 +152,37 @@ curl -s -X POST "https://hub.docker.com/v2/repositories/ouranoshong/" \
   -d '{"name":"openheron-kit","is_private":false,"namespace":"ouranoshong"}'
 ```
 
+### In CI
+
+★ **A tag publishes the Kit.** The `kit` job in
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) builds the workload
+and every mixin and pushes them, and it runs on a `v*` tag and on nothing
+else:
+
+```yaml
+needs: [go, web, e2e, secrets]
+if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+```
+
+★ **It waits for the same checks the release waits for**, including the
+secret scan: a tag on a red commit publishes no image, and a tag whose commit
+holds a key publishes none either.
+
+★ **It needs two secrets**: `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`. The
+token is a Docker Hub access token — a personal access token or a read-write
+organization token — not the account password.
+
+★ **The image is tagged without the `v`**: the release is `v0.1.0` and the Kit
+is `0.1.0`, so the reference in the guide is the tag. The version reaches the
+**published descriptor** as well, because `make kit` builds in a copy of the
+Kit's directory with the version written into it — the working tree is never
+left modified.
+
+★ **The Kit is one architecture.** The binary is built on the runner, so the
+image is the runner's architecture — `linux/amd64` for the GitHub runners.
+A multi-platform Kit would need a cross-compiled binary, and the current one
+is dynamically linked.
+
 ★ **The tag is the version, and the version is the release.** The Kit's
 `version` argument is the release tag it installs, and `make kit-push` tags
 the image with that same version. A Kit that names a release nobody

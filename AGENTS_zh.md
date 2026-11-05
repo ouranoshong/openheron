@@ -196,6 +196,10 @@ docs(readme): drop the API table, it lives in the user manual
 `bun run test:unit`、`make test-e2e`。冒烟**不在** CI 里 —— 它需要一个答得上话的模型，
 而那在 runner 上不可复现。`v*` tag 只有在三项检查全绿之后才发版（见 developer-manual §3.9）。
 
+★ **`v*` tag 也会发布沙箱 Kit。** `kit` job 等的是同一批检查（含密钥扫描），
+然后把 workload 与每一份 mixin 推到 Docker Hub。它需要 `DOCKERHUB_USERNAME` 与
+`DOCKERHUB_TOKEN` 两个 secret。
+
 ★ **密钥扫两遍。** pre-commit 的钩子（`make install-hooks` ✅ ✅）扫暂存区 ✅ ✅；CI 的
 `secrets` job 扫全历史 ✅ ✅。★ 钩子存在之前提交进去的密钥还在历史里 ✅ ✅ —— 只有 CI 那遍
 找得到它 ✅ ✅ ✅ ✅。

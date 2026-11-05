@@ -141,6 +141,33 @@ curl -s -X POST "https://hub.docker.com/v2/repositories/ouranoshong/" \
   -d '{"name":"openheron-kit","is_private":false,"namespace":"ouranoshong"}'
 ```
 
+### 在 CI 里
+
+★ **打 tag 就发布 Kit。** [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+里的 `kit` job 构建 workload 与每一份 mixin 并推送，
+它只在 `v*` tag 上跑，别的什么都不跑：
+
+```yaml
+needs: [go, web, e2e, secrets]
+if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+```
+
+★ **它等的是 release 等的那同一批检查**，包括密钥扫描：
+红色提交上的 tag 不发布任何镜像，持有密钥的提交上的 tag 也不发布。
+
+★ **它需要两个 secret**：`DOCKERHUB_USERNAME` 与 `DOCKERHUB_TOKEN`。
+那个 token 是 Docker Hub 的访问令牌 ——  个人访问令牌或组织可读写令牌 ——
+不是账号密码。
+
+★ **镜像的 tag 不带 `v`**：release 是 `v0.1.0`，Kit 是 `0.1.0`，
+所以指南里那个引用就是 tag。版本同时进到**已发布的描述文件**里 ——
+因为 `make kit` 是在 Kit 目录的一份副本里构建的、版本写在那份副本上，
+工作区永远不会被改脏。
+
+★ **这个 Kit 是单架构的。** 二进制在 runner 上构建，所以镜像就是 runner 的
+架构 —— GitHub 的 runner 是 `linux/amd64`。多架构的 Kit 需要交叉编译的二进制，
+而现在这个是动态链接的。
+
 ★ **tag 就是版本，而版本就是 release。** Kit 的 `version` 参数是它安装的
 release tag，`make kit-push` 用同一个版本给镜像打 tag。
 一个指向没人发布过的 release 的 Kit，就是没人构建得出来的 Kit ——

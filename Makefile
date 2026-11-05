@@ -146,6 +146,10 @@ release-one: web ## Cross-compile a single platform: make release-one PLATFORM=d
 
 KIT_DIR    ?= sandbox-kit
 KIT_WORKLOAD ?= $(KIT_DIR)/openheron
+# ★ The build happens in a copy of the Kit's directory, so that the version
+#   in the published descriptor can be set to the one being built without
+#   leaving a modified file in the working tree.
+KIT_STAGE ?= $(KIT_DIR)/.stage-openheron
 KIT_MIXINS ?= $(KIT_DIR)/openheron-deepseek $(KIT_DIR)/openheron-openai
 KIT_VERSION ?= 0.0.6
 KIT_IMAGE  ?= openheron-kit:$(KIT_VERSION)
@@ -157,7 +161,10 @@ kit: build ## Build the openheron workload Kit image (needs docker buildx)
 	@docker buildx inspect $(KIT_BUILDER) >/dev/null 2>&1 || \
 		docker buildx create --name $(KIT_BUILDER) --driver docker-container --bootstrap
 	cp $(BIN) $(KIT_WORKLOAD)/openheron
-	cd $(KIT_WORKLOAD) && docker buildx build --builder $(KIT_BUILDER) . -f openheron.yaml -t $(KIT_IMAGE) --load
+	rm -rf $(KIT_STAGE) && cp -r $(KIT_WORKLOAD) $(KIT_STAGE)
+	sed -i 's|^    default: .*|    default: "$(KIT_VERSION)"|' $(KIT_STAGE)/openheron.yaml
+	cd $(KIT_STAGE) && docker buildx build --builder $(KIT_BUILDER) . -f openheron.yaml -t $(KIT_IMAGE) --load
+	rm -rf $(KIT_STAGE)
 # ★ --builder is not optional: the docker driver with the classic image store
 #   drops the manifest annotations, and an image without the descriptor
 #   annotation is not a Kit any more.
@@ -181,8 +188,11 @@ kit-mixin: ## Build the credential mixin images (declaration only, no content)
 .PHONY: kit-push
 kit-push: build ## Publish the workload Kit to the registry (needs docker login)
 	cp $(BIN) $(KIT_WORKLOAD)/openheron
-	cd $(KIT_WORKLOAD) && docker buildx build --builder $(KIT_BUILDER) . -f openheron.yaml \
+	rm -rf $(KIT_STAGE) && cp -r $(KIT_WORKLOAD) $(KIT_STAGE)
+	sed -i 's|^    default: .*|    default: "$(KIT_VERSION)"|' $(KIT_STAGE)/openheron.yaml
+	cd $(KIT_STAGE) && docker buildx build --builder $(KIT_BUILDER) . -f openheron.yaml \
 		-t $(KIT_REPO):$(KIT_VERSION) --push
+	rm -rf $(KIT_STAGE)
 
 .PHONY: kit-push-mixin
 kit-push-mixin: ## Publish the credential mixin images to the registry

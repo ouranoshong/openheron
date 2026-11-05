@@ -1029,6 +1029,12 @@ the whole boundary.
 - The Kit is a **registry artifact**. `sbx run <image>` consumes it; the
   published descriptor is what the signature covers and what the permission
   gate judges.
+- ★ **A `v*` tag publishes it**, and the same tag publishes the release: the
+  `kit` job in CI builds the workload and every mixin and pushes them to
+  Docker Hub, after the same checks the release waits for. The image is
+  tagged without the `v` — the release is `v0.1.0` and the Kit is `0.1.0` —
+  and the version reaches the published descriptor as well, so the reference
+  and the descriptor agree.
 - ★ **The set is three repositories, not one.** The workload and each vendor's
   mixin are separate references, and the runtime resolves each of them
   separately — so a user who takes the workload without a mixin gets a sandbox
