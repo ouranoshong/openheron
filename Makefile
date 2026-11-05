@@ -151,7 +151,7 @@ KIT_WORKLOAD ?= $(KIT_DIR)/openheron
 #   leaving a modified file in the working tree.
 KIT_STAGE ?= $(KIT_DIR)/.stage-openheron
 KIT_MIXINS ?= $(KIT_DIR)/openheron-deepseek $(KIT_DIR)/openheron-openai
-KIT_VERSION ?= 0.0.7
+KIT_VERSION ?= 0.0.8
 KIT_IMAGE  ?= openheron-kit:$(KIT_VERSION)
 KIT_BUILDER ?= kit-builder
 KIT_REPO   ?= docker.io/ouranoshong/openheron-kit
