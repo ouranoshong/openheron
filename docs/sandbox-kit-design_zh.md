@@ -1313,3 +1313,87 @@ agent 读了文件、跑了那个失败的测试、**在动手改之前先问了
 **自带 builder** 构建出来的 Kit，于是构建缓存是空的：105 MB 的基础镜像
 重新拉了一遍，配方是从零跑得通的，而不是靠上一轮留在缓存里的东西。
 ★ 那个镜像里的二进制就是这份克隆自己的构建 —— 这正是"从源码构建"的意义。
+
+### 6.7 把生命周期交给 Compose
+
+★ 2026-11-05 实测。**Compose 可以驱动沙箱**，而这里的机制值得说准 ——
+因为第一次的读法是反的。
+
+★ **`sbx` 是 Compose 的 *provider*，不是 Compose 的客户端。** `sbx compose`
+是 Compose 调用的入口，而不是一个去调用 Compose 的命令。协议是单向的：
+Compose 解析完文件，就运行
+`<provider> compose --project-name=<project> up <service>`，
+provider 用自己的 stdin/stdout 一行一个 JSON 消息来应答
+（`compose/pkg/compose/plugins.go:552-597`）。
+
+★ **所以那条报错是 provider 抛的，不是 Compose 抛的。** 手工跑
+`sbx compose up` 会失败：
+
+```
+compose did not answer get-service-config: this Docker Compose version does not support provider requests, upgrade Docker Compose
+```
+
+★ 这个串在 **`sbx` 二进制**里，不在 Compose 里：provider 通过 stdin 向
+Compose 索要它所管理的服务的解析结果，却读到了 EOF —— 因为对面没有 Compose。
+真正的入口是 `docker compose up`，而 Compose v5.6.1 完整实现了 provider 协议
+（`compose/pkg/compose/plugins.go`）。
+
+★ **provider 支撑的服务用两行声明** —— 镜像与 provider：
+
+```yaml
+services:
+  openheron:
+    image: docker.io/ouranoshong/openheron-kit:0.0.6
+    provider:
+      type: sbx
+```
+
+★ **`image:` 是 workload Kit 的已发布镜像**，而且必须在：没有它 Compose 会自己
+拼一个名字（`<project>-<service>`），镜像阶段去拉那个名字，
+于是还没建沙箱就先吃了一个 403。
+
+★ **provider 认什么，实测如下：**
+
+| compose 文件里写的 | provider 的行为 |
+|---|---|
+| `image:` | 沙箱的镜像 —— Kit 的 workload，被拉起并启动 |
+| `environment:` | 沙箱的环境变量（workload 进程带着它） |
+| `provider: {type: sbx}` | 这个服务归谁管 |
+| `volumes:` | **被拒** —— "a sandbox has its own isolated filesystem" |
+| `secrets:` / `configs:` | **被拒** —— "the sbx provider does not support yet" |
+| `provider.options:` | **被忽略** —— 见下 |
+
+★ **`provider.options` 在这条路上是死通道，而这是 Compose 造成的。**
+只有当 provider 的 metadata 声明了某个参数，Compose 才会把对应的 option
+转成命令行参数传给 provider（`compose/pkg/compose/plugins.go:571-580`）；
+而 `sbx compose metadata` 给 `up` 声明的参数是**零个**。
+这些值其实送到了 provider 手上 —— 它们就在 provider 通过 `get-service-config`
+取回的那份服务配置里 —— 但 provider 不理它们。
+用 `agent`、`kits`、`workspace`、`mounts`、`ports` 以及一个故意编造的键名
+逐个探过：agent 始终是 `compose-<service>`，`Kits` 始终是 `none`。
+
+★ **所以工作区在 Compose 这条路上够不着。** provider 拒绝 `volumes:`，
+而另一条通道 `provider.options` 又被忽略。沙箱起来时 `Workspace: -`：
+它自己的文件系统，没有挂任何宿主目录。**真正会挂工作区的声明文件是
+`sbxenv.yaml`** —— 运行时直接照它行事。
+
+★ **这两条通道是互补的，不是重复的。** Compose 管生命周期，
+`sbxenv.yaml` 管形状。示例项目两份都带：
+`sandbox-kit/examples/demo-project/compose.yml` 管这个服务，
+`sandbox-kit/examples/demo-project/sbxenv.yaml` 管工作区。
+
+★ **端到端实测：** `docker compose up -d` 建出了沙箱并发布
+`127.0.0.1:32823 -> 8080/tcp`；健康端点回答 `status: ok`；
+`/v2/agents` 列出了这个项目的两个 agent 与 DeepSeek 模型；
+一次 `POST /v2/run` 流出了 `RUN_STARTED`，接着是模型的推理帧。
+`docker compose stop` 停了沙箱，`docker compose down` 把它删了。
+
+★ **凭据不会出现在 Compose 文件里。** 沙箱拿到的是宿主绑定的
+`DEEPSEEK_API_KEY` —— 与直接启动那条路同一个密钥库 —— 然后模型答了话。
+Compose 文件是会被提交进版本库的东西，密钥不是。
+
+★ **有一个意外值得记一笔：** 第一次模型调用失败，报的是
+`Approval required for api.deepseek.com:443`。那是运行时的网络策略在问宿主，
+不是 Kit 坏了：沙箱得先被放行这个域名，才能连上模型。
+用 `sbx policy approval respond <id> --option allow` 回应了那条待审批之后，
+下一次调用就成功了。

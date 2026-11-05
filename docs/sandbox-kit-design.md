@@ -1500,3 +1500,95 @@ empty: the 105 MB base image was fetched again, and the recipe was proven to
 work from scratch rather than from whatever a previous round left in the cache.
 ★ The binary in that image was the clone's own build, which is the point of
 building from the source.
+
+### 6.7 Compose as the lifecycle owner
+
+★ Measured on 2026-11-05. **Compose can drive the sandbox**, and the mechanism
+is worth stating precisely, because the first attempt read it backwards.
+
+★ **`sbx` is a Compose *provider*, not a Compose client.** `sbx compose` is
+the entrypoint Compose calls, not a command that calls Compose. The protocol
+is one-directional: Compose resolves the file, then runs
+`<provider> compose --project-name=<project> up <service>`, and the provider
+answers over its own stdin/stdout with one JSON line per message
+(`compose/pkg/compose/plugins.go:552-597`).
+
+★ **So the error message was the provider's, not Compose's.** Running
+`sbx compose up` by hand fails with
+
+```
+compose did not answer get-service-config: this Docker Compose version does not support provider requests, upgrade Docker Compose
+```
+
+★ That string is in the **`sbx` binary**, not in Compose's: the provider asked
+Compose for its service configuration over stdin and got EOF, because there was
+no Compose on the other end. The real entry point is `docker compose up`, and
+Compose v5.6.1 implements the provider protocol in full
+(`compose/pkg/compose/plugins.go`).
+
+★ **A provider-backed service is declared with two lines** — the image and the
+provider:
+
+```yaml
+services:
+  openheron:
+    image: docker.io/ouranoshong/openheron-kit:0.0.6
+    provider:
+      type: sbx
+```
+
+★ **`image:` is the workload Kit's published image**, and it has to be there:
+without it Compose fabricates a name (`<project>-<service>`), the image phase
+tries to pull that, and the pull fails with a 403 before the sandbox is ever
+created.
+
+★ **What the provider honours, measured:**
+
+| The compose file says | The provider does |
+|---|---|
+| `image:` | the sandbox's image — the Kit's workload, pulled and started |
+| `environment:` | the sandbox's environment (the workload process carries it) |
+| `provider: {type: sbx}` | who owns the service |
+| `volumes:` | **refused** — "a sandbox has its own isolated filesystem" |
+| `secrets:` / `configs:` | **refused** — "the sbx provider does not support yet" |
+| `provider.options:` | **ignored** — see below |
+
+★ **`provider.options` is a dead channel here, and that is Compose's doing.**
+Compose only forwards an option as a command-line flag when the provider's
+metadata declares that parameter
+(`compose/pkg/compose/plugins.go:571-580`); `sbx compose metadata` declares
+**zero** parameters for `up`. The values still reach the provider — they are in
+the service configuration the provider fetches over `get-service-config` — but
+the provider ignores them. Probed with `agent`, `kits`, `workspace`,
+`mounts`, `ports` and a deliberately unknown key: the agent stayed
+`compose-<service>` and `Kits` stayed `none` in every case.
+
+★ **The workspace is therefore not reachable through Compose.** The provider
+refuses `volumes:`, and the only other channel — `provider.options` — is
+ignored. The sandbox comes up with `Workspace: -`: its own filesystem, no host
+directory mounted. The declarative file that *does* mount a workspace is
+`sbxenv.yaml`, which the runtime acts on directly.
+
+★ **The two channels are complementary, not redundant.** Compose owns the
+lifecycle and `sbxenv.yaml` owns the shape. The example project carries both:
+`sandbox-kit/examples/demo-project/compose.yml` for the service, and
+`sandbox-kit/examples/demo-project/sbxenv.yaml` for the workspace.
+
+★ **Measured end to end through Compose:** `docker compose up -d` created the
+sandbox and published `127.0.0.1:32823 -> 8080/tcp`; the health endpoint
+answered `status: ok`; `/v2/agents` listed the project's two agents with the
+DeepSeek model; a `POST /v2/run` streamed `RUN_STARTED` and then the model's
+reasoning frames. `docker compose stop` stopped the sandbox and
+`docker compose down` removed it.
+
+★ **The credential does not travel in the Compose file.** The sandbox picked up
+the host's bound `DEEPSEEK_API_KEY` — the same store the direct form uses —
+and the model answered. A Compose file is something people check into a
+repository; a key is not.
+
+★ **One surprise worth naming:** the first model call failed with
+`Approval required for api.deepseek.com:443`. That is the runtime's network
+policy asking the host, not the Kit failing: the sandbox had to be granted the
+domain before it could reach the model. Answering the pending approval with
+`sbx policy approval respond <id> --option allow` made the next call succeed.
+

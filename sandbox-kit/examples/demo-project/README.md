@@ -34,6 +34,34 @@ directory is self-contained: a mixin is a declaration, and a declaration is a
 directory holding one YAML file. Point `--kit` at it and the runtime builds it
 on the spot — no image, no registry.
 
+## Two ways to declare it
+
+★ **This directory carries two declarative files, and they are not
+redundant — they cover different halves.**
+
+`sbxenv.yaml` declares the **shape**: the agent, the Kits, and the workspace
+this directory. The workspace is the important part — it is what puts your
+project inside the sandbox, and the runtime does the mounting:
+
+```sh
+sbx env plan      # what would change
+sbx env create    # create the sandbox
+```
+
+`compose.yml` declares the **lifecycle**: the service is a sandbox, and
+Compose brings it up and takes it down with everything else in the stack:
+
+```sh
+docker compose up -d
+docker compose down
+```
+
+★ **Compose cannot mount the workspace.** The `sbx` provider refuses a
+`volumes:` section — a sandbox has its own isolated filesystem — so the two
+files answer two different questions. Use `sbxenv.yaml` when the agent has to
+see your files; use `compose.yml` when the sandbox is one service among
+several.
+
 ## The configuration this project carries
 
 `.openheron/` is not empty, and that is the point:
