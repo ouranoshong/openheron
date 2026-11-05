@@ -73,13 +73,71 @@ against the `checksums.txt` next to it:
 | Windows x64 | `openheron_<version>_windows_amd64.zip` |
 | Windows arm64 | `openheron_<version>_windows_arm64.zip` |
 
-★ **Or run it inside a sandbox.** If you would rather the agent's file and
-shell tools could not reach your machine at all, openheron ships as a Docker
-Sandbox Kit: the whole process runs inside a microVM, and the workspace you
-name is the only thing that crosses the boundary. The step-by-step guide is
-[`sandbox-kit/TUTORIAL.md`](../sandbox-kit/TUTORIAL.md), and
-[`sandbox-kit/TUTORIAL_zh.md`](../sandbox-kit/TUTORIAL_zh.md) is its Chinese
-version.
+### Running it in a sandbox
+
+★ **The binary is not the only way to run openheron.** If you would rather the
+agent's file and shell tools could not reach your machine at all, openheron
+ships as a Docker Sandbox Kit: the whole process — the HTTP/SSE server, the
+file tools and the shell tool — runs inside a microVM, and the workspace you
+name is the only thing that crosses the boundary.
+
+**What it takes.** A Docker account (`sbx login`), a hypervisor (KVM on
+Linux), and the model key bound on the host the way openheron reads it:
+
+```sh
+printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
+    --host api.deepseek.com --env DEEPSEEK_API_KEY \
+    --placeholder proxy-managed --value-stdin
+```
+
+★ `proxy-managed` is a sentinel: the container sees that string, and the
+host's proxy swaps in the real value on the way out. The key itself never
+enters the sandbox.
+
+**Starting it.** Two Kits, and the runtime resolves them separately — the
+**workload** (the server) and a **mixin** (the credential and the network
+rule that goes with it). The published set:
+
+```sh
+sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
+    --name openheron ~/my-project
+```
+
+★ A mixin is a declaration, so it can also be a **directory holding one YAML
+file**: no image, no build, and editing one line points it at your own
+endpoint. The workload has a root filesystem, so it stays an image.
+
+**Opening it.** The runtime publishes the port the workload declares, on an
+ephemeral loopback port:
+
+```sh
+sbx ports openheron
+```
+
+```
+HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
+127.0.0.1   32772       8080           tcp
+::1         32772       8080           tcp
+```
+
+★ Open **http://127.0.0.1:32772** — the same interface, the same API, the
+same agent.
+
+**What is different.** Not much, and all of it in your favour:
+
+- The **workspace** is a directory on your host, mounted into the sandbox at
+  the same path. The agent's edits land there, and you can watch them arrive.
+- The **configuration** lands in that workspace too: `.openheron/` is written
+  on the first start, and it is yours to edit from then on.
+- The **key** stays on the host; the sandbox holds a sentinel.
+- **Approvals** still apply, and the policy is yours:
+  `policy/permissions.yaml` in the workspace decides which tools ask first.
+
+★ The step-by-step guide is
+[`sandbox-kit/TUTORIAL.md`](../sandbox-kit/TUTORIAL.md) (Chinese:
+[`sandbox-kit/TUTORIAL_zh.md`](../sandbox-kit/TUTORIAL_zh.md)), and the design
+behind it is in [`docs/sandbox-kit-design.md`](sandbox-kit-design.md).
 
 ```bash
 sha256sum -c checksums.txt --ignore-missing

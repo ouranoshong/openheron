@@ -67,11 +67,66 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 | Windows x64 | `openheron_<version>_windows_amd64.zip` |
 | Windows arm64 | `openheron_<version>_windows_arm64.zip` |
 
-★ **或者在沙箱里跑它。** 如果你希望 agent 的文件工具与 shell 工具根本够不到你的
-机器，openheron 有 Docker Sandbox Kit 的形态：整个进程跑在 microVM 里，
-而你指定的那个工作区是唯一穿过边界的东西。分步教程见
-[`sandbox-kit/TUTORIAL.md`](../sandbox-kit/TUTORIAL.md)，
-[`sandbox-kit/TUTORIAL_zh.md`](../sandbox-kit/TUTORIAL_zh.md) 是它的中文版。
+### 在沙箱里跑
+
+★ **跑 openheron 不止有二进制这一条路。** 如果你希望 agent 的文件工具与
+shell 工具根本够不到你的机器，openheron 有 Docker Sandbox Kit 的形态：
+整个进程 —— HTTP/SSE 服务、文件工具、shell 工具 —— 都跑在一个 microVM 里，
+而你指定的那个工作区是唯一穿过边界的东西。
+
+**需要什么。** 一个 Docker 账号（`sbx login`）、一个虚拟化支持
+（Linux 上要 KVM），以及按 openheron 读密钥的方式绑在宿主上的模型密钥：
+
+```sh
+printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
+    --host api.deepseek.com --env DEEPSEEK_API_KEY \
+    --placeholder proxy-managed --value-stdin
+```
+
+★ `proxy-managed` 是个哨兵值：容器里看到的是这个字符串，
+宿主上的代理在出网那一刻换上真值。密钥本身从不进沙箱。
+
+**怎么起。** 两个 Kit，运行时分别解析 —— **workload**（服务本身）
+与一份 **mixin**（凭据，以及与它配套的网络规则）。已发布的那一套：
+
+```sh
+sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
+    --name openheron ~/my-project
+```
+
+★ mixin 是一份声明，所以它也可以是**一个只放着一个 YAML 文件的目录**：
+不用镜像、不用构建，而改一行就能把它指向你自己的端点。
+workload 带着根文件系统，所以它只能是镜像。
+
+**怎么打开。** 运行时会把 workload 声明的端口发布到一个临时的回环端口上：
+
+```sh
+sbx ports openheron
+```
+
+```
+HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
+127.0.0.1   32772       8080           tcp
+::1         32772       8080           tcp
+```
+
+★ 浏览器打开 **http://127.0.0.1:32772** —— 同一个界面、同一个 API、同一个 agent。
+
+**有什么不一样。** 不多，而且全是对你有利的：
+
+- **工作区**是你宿主上的一个目录，以同一个路径挂进沙箱。
+  agent 的改动落在那儿，你看得见它们一个个到达。
+- **配置**也落在那儿：`.openheron/` 在第一次启动时写好，
+  从此它就是你的文件，你随便改。
+- **密钥**留在宿主上，沙箱里只有哨兵值。
+- **审批**照旧，而且策略是你的：工作区里的 `policy/permissions.yaml`
+  决定哪些工具先问一声。
+
+★ 分步教程见
+[`sandbox-kit/TUTORIAL.md`](../sandbox-kit/TUTORIAL.md)（中文：
+[`sandbox-kit/TUTORIAL_zh.md`](../sandbox-kit/TUTORIAL_zh.md)），
+背后的设计见 [`docs/sandbox-kit-design.md`](sandbox-kit-design_zh.md)。
 
 ```bash
 sha256sum -c checksums.txt --ignore-missing
