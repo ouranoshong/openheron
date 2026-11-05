@@ -10,6 +10,11 @@ GO    ?= go
 BUN   ?= bun
 BIN   ?= bin/openheron
 
+# ★ The repository root, derived from this file's own path: the Kit's build
+#   context is the root, because the recipe copies the binary the root's
+#   `make build` produced.
+REPO_ROOT := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+
 # Version: taken from git describe by default (a short hash with -dirty when
 # there is no tag). Override with: make VERSION=1.2.3.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -128,6 +133,86 @@ release: web ## Cross-compile every platform: archives and checksums land in dis
 .PHONY: release-one
 release-one: web ## Cross-compile a single platform: make release-one PLATFORM=darwin/arm64
 	@$(MAKE) --no-print-directory release PLATFORMS="$(PLATFORM)"
+
+# ── Docker Sandbox Kit ──────────────────────────────────────────────────────
+#
+# ★ A separate artifact, not part of the release pipeline: `make release` still
+#   produces the six static binaries and nothing else. The Kit packages
+#   openheron as a Docker Sandboxes workload — its design is
+#   docs/sandbox-kit-design.md.
+#
+# The build context is sandbox-kit/, because the Kit specification finds the
+# content recipe by the descriptor's filename stem, beside it.
+
+KIT_DIR    ?= sandbox-kit
+KIT_WORKLOAD ?= $(KIT_DIR)/openheron
+# ★ The build happens in a copy of the Kit's directory, so that the version
+#   in the published descriptor can be set to the one being built without
+#   leaving a modified file in the working tree.
+KIT_STAGE ?= $(KIT_DIR)/.stage-openheron
+KIT_MIXINS ?= $(KIT_DIR)/openheron-deepseek $(KIT_DIR)/openheron-openai
+KIT_VERSION ?= 0.0.6
+KIT_IMAGE  ?= openheron-kit:$(KIT_VERSION)
+KIT_BUILDER ?= kit-builder
+KIT_REPO   ?= docker.io/ouranoshong/openheron-kit
+
+.PHONY: kit
+kit: build ## Build the openheron workload Kit image (needs docker buildx)
+	@docker buildx inspect $(KIT_BUILDER) >/dev/null 2>&1 || \
+		docker buildx create --name $(KIT_BUILDER) --driver docker-container --bootstrap
+	cp $(BIN) $(KIT_WORKLOAD)/openheron
+	rm -rf $(KIT_STAGE) && cp -r $(KIT_WORKLOAD) $(KIT_STAGE)
+	sed -i 's|^    default: .*|    default: "$(KIT_VERSION)"|' $(KIT_STAGE)/openheron.yaml
+	cd $(KIT_STAGE) && docker buildx build --builder $(KIT_BUILDER) . -f openheron.yaml -t $(KIT_IMAGE) --load
+	rm -rf $(KIT_STAGE)
+# ★ --builder is not optional: the docker driver with the classic image store
+#   drops the manifest annotations, and an image without the descriptor
+#   annotation is not a Kit any more.
+# ★ --load is not optional either: the container driver keeps the result in
+#   its own build cache, and without it there is no local image to validate.
+# ★ The binary is copied in beside the recipe before the build, because the
+#   build context cannot reach outside the directory it is given -- and the
+#   repository's bin/ is outside the Kit's directory. The copy is what makes
+#   `sbx run ./sandbox-kit/openheron` work too: that path builds the Kit
+#   from this same directory.
+
+.PHONY: kit-mixin
+kit-mixin: ## Build the credential mixin images (declaration only, no content)
+	@for d in $(KIT_MIXINS); do \
+		name=$$(basename $$d); \
+		vendor=$${name#openheron-}; \
+		( cd $$d && docker buildx build --builder $(KIT_BUILDER) . -f $$name.yaml \
+			-t openheron-kit-$$vendor:$(KIT_VERSION) --load ) || exit 1; \
+	done
+
+.PHONY: kit-push
+kit-push: build ## Publish the workload Kit to the registry (needs docker login)
+	cp $(BIN) $(KIT_WORKLOAD)/openheron
+	rm -rf $(KIT_STAGE) && cp -r $(KIT_WORKLOAD) $(KIT_STAGE)
+	sed -i 's|^    default: .*|    default: "$(KIT_VERSION)"|' $(KIT_STAGE)/openheron.yaml
+	cd $(KIT_STAGE) && docker buildx build --builder $(KIT_BUILDER) . -f openheron.yaml \
+		-t $(KIT_REPO):$(KIT_VERSION) --push
+	rm -rf $(KIT_STAGE)
+
+.PHONY: kit-push-mixin
+kit-push-mixin: ## Publish the credential mixin images to the registry
+	@for d in $(KIT_MIXINS); do \
+		name=$$(basename $$d); \
+		vendor=$${name#openheron-}; \
+		( cd $$d && docker buildx build --builder $(KIT_BUILDER) . -f $$name.yaml \
+			-t $(KIT_REPO)-$$vendor:$(KIT_VERSION) --push ) || exit 1; \
+	done
+# ★ The mixins need their own repositories: a Kit is identified by its
+#   reference, and the host resolves each one separately. A workload pushed
+#   without its mixins leaves a user unable to reach a model -- the Kit runs,
+#   and every call comes back 401.
+#
+# ★ The Kit set is one workload plus one mixin per vendor. Push all of them
+#   together: make kit-push kit-push-mixin
+
+.PHONY: kit-check
+kit-check: ## Validate the Kit against the specification (needs kit-tck)
+	kit-tck validate $(KIT_IMAGE)
 
 # ── Verification ───────────────────────────────────────────────────────────
 

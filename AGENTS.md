@@ -7,7 +7,7 @@ one — change one and change the other.
 
 > ★ **This repository is the code surface**: Go backend + React frontend + build configuration.
 >
-> It ships **eight** bilingual document sets, maintained alongside the code
+> It ships **nine** bilingual document sets, maintained alongside the code
 > (**English is the main version; the `_zh` suffix marks the Chinese version**):
 > `README.md` / `README_zh.md`,
 > `docs/architecture.md` / `docs/architecture_zh.md` (architecture),
@@ -16,9 +16,10 @@ one — change one and change the other.
 > `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` (context-usage estimation design),
 > `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` (session concurrency design),
 > `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` (run lifecycle design),
-> `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` (filesystem backend design).
+> `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` (filesystem backend design),
+> `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` (Docker Sandbox Kit packaging).
 > **Every other design document under `docs/` still lives in the upstream repository** ——
-> any `docs/xxx.md` reference below that is not one of these eight is the upstream copy.
+> any `docs/xxx.md` reference below that is not one of these nine is the upstream copy.
 > If you cannot get hold of it before changing semantics, ask first; do not change
 > configuration or interfaces from memory.
 >
@@ -33,9 +34,26 @@ one — change one and change the other.
 > Its §1 describes the code as it is — a turn is bound to one SSE connection today — while its
 > §2 onwards describe what would be built: a run as a durable row, a lease with a fence, and the
 > connection demoted to a subscriber. **Nothing from §2 onwards is in the tree.**
+> `docs/sandbox-kit-design.md` is a **proposal** as well: its §1 describes the openheron process
+> as it is — one process with an HTTP/SSE server, the file tools and the shell tool sharing one
+> backend — while its §2 onwards describe packaging that whole process as a Docker Sandbox Kit,
+> so the boundary moves outward instead of inward and the read path is covered too.
+> **Nothing from §2 onwards is in the tree.**
 > `docs/fs-backend-design.md` describes the **filesystem backend** — the bounded fork of
 > `eino-ext`'s local backend (§5) and the confinement rule every tool passes through — and it is
 > **implemented**: `agentkit/fsx` is wired in at both call sites.
+>
+> ★ One directory is not a document set: **`sandbox-kit/`** holds the Docker Sandbox Kits that
+> package openheron as a sandbox workload — `openheron/` (the workload: descriptor, content
+> recipe, entrypoint) and one mixin per vendor (`openheron-deepseek/`, `openheron-openai/`:
+> the model credential and its network rule). `sandbox-kit/TUTORIAL.md` is the user's
+> guide — run the published image — and `sandbox-kit/BUILDING.md` is the developer's —
+> build it, change the descriptor, publish a version (`TUTORIAL_zh.md` and
+> `BUILDING_zh.md` are the Chinese versions), `sandbox-kit/acceptance/run.sh` is the
+> acceptance run — every claim the design makes, as a check that fails the script.
+> They are a **separate artifact**: `make release` still produces the six static
+> binaries and nothing else. Their design is `docs/sandbox-kit-design.md`, and
+> `make kit` builds them.
 >
 > Write these documents **from the code, not from imagination**: every conclusion must point at a
 > line in the code. When the code changes, the documents change with it — documentation drift is
@@ -209,6 +227,10 @@ file.
 that answers, and that is not reproducible on a runner. A `v*` tag publishes a release
 only after all three checks are green (developer-manual §3.9).
 
+★ **A `v*` tag also publishes the sandbox Kit.** The `kit` job waits for the same
+checks — the secret scan included — and then pushes the workload and every mixin to
+Docker Hub. It needs the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets.
+
 ★ **Secrets are scanned twice.** The pre-commit hook (`make install-hooks`) scans the
 staged diff; the `secrets` CI job scans the whole history. A key that was committed
 before the hook existed is still in the history — only the CI scan finds that one.
@@ -324,6 +346,7 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 | `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` | **Session concurrency design** — why cross-client preemption happened, the "one turn per session" rule and its implementation, and how the frontend learns that a session is busy (**the admission gate and the 409 are implemented**) |
 | `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` | **Filesystem backend design** — why `eino-ext`'s local backend was forked into `agentkit/fsx`, how paths are confined to the project root, and how `ls`/`glob` are bounded (**implemented**) |
 | `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` | **Run lifecycle design** — why a turn is bound to one SSE connection today, and how a run becomes a durable row with a lease and a fence, so the connection can be demoted to a subscriber (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
+| `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` | **Docker Sandbox Kit packaging** — the openheron process as it is, a v3 workload Kit that would carry the whole process into a microVM, how the model key stays on the host, and the SSE path that has to be measured (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
 
 ★ The file without a suffix is the **English main version**; `_zh` is the Chinese version; the two
 correspond one to one — change one and change the other.

@@ -1,0 +1,51 @@
+# syntax=docker/sandbox-kit:3
+#
+# The OpenAI model credential, as a mixin.
+#
+# ★ A mixin carries declarations, and one vendor's declarations do not
+#   interfere with another's: the network allow lists union per phase, and a
+#   credential has one owner per (service, phase) — so two vendors need two
+#   service names, and each mixin seeds its own provider config.
+#
+# ★ Compose it alongside the other vendor mixins:
+#     sbx run ./sandbox-kit/openheron \
+#       --kit ./sandbox-kit/openheron-deepseek \
+#       --kit ./sandbox-kit/openheron-openai .
+#
+# ★ The user binds each key with one command, and the placeholder it uses is
+#   the sentinel itself, so the runtime's injection and the host's binding
+#   agree without the user passing an environment variable:
+#     printf '%s' "$OPENAI_API_KEY" | sbx secret set-custom \
+#       --host api.openai.com --env OPENAI_API_KEY \
+#       --placeholder proxy-managed --value-stdin
+#
+# The design this implements is docs/sandbox-kit-design.md.
+
+schemaVersion: "3"
+kind: mixin
+displayName: openheron credential (OpenAI)
+description: the OpenAI model credential for an openheron workload, injected by the host proxy
+licenses: [Apache-2.0]
+
+capabilities:
+  # ★ The network rule and the credential travel together: the runtime checks
+  #   that every inject domain appears literally in the allow list for the
+  #   same phase, and the workload's bare "*" does not satisfy that check.
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          - api.openai.com
+
+  - type: com.docker.sandbox/credential@1
+    optional: true
+    description: OpenAI API access
+    config:
+      service: openai
+      phase: runtime
+      apiKey:
+        name: OPENAI_API_KEY
+        proxyManaged: true
+        inject:
+          - {domain: api.openai.com, header: Authorization, format: "Bearer %s"}
+

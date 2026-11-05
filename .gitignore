@@ -71,6 +71,20 @@ web/dist/*
 *.log
 probe*.txt
 
+# The binary `make kit` copies in beside the recipe, for the image to pick up.
+# It is a build artifact: the image carries it, the tree does not.
+/sandbox-kit/openheron/openheron
+
+# The staging copy `make kit` builds in, so that the published descriptor can
+# carry the version being built without the working tree changing.
+/sandbox-kit/.stage-openheron/
+
+# ★ The example project carries no configuration: `openheron init` writes the
+#   whole thing on the first start, and every file it writes is the runtime's,
+#   not the repository's. A sandbox run over the example leaves them behind,
+#   and they must not show up as a change.
+/sandbox-kit/examples/demo-project/.openheron/
+
 # E2E (Playwright)
 /web/test-results/
 /web/playwright-report/

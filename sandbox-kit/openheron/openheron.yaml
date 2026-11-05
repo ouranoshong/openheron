@@ -1,0 +1,98 @@
+# syntax=docker/sandbox-kit:3
+#
+# The openheron agent server, packaged as a Docker Sandboxes workload Kit.
+#
+# ★ The whole process runs inside the sandbox: the HTTP/SSE server, the file
+#   tools and the shell tool share one backend inside the microVM, so the read
+#   path is inside the boundary too — not just the command path.
+#
+# ★ The configuration is the user's: the startup hook seeds it inside the
+#   mounted workspace, and the server reads it from there.
+#
+# ★ This workload declares **no credential** — which vendor's key belongs to
+#   the user, not to the workload. The credentials live in the mixins beside
+#   this one: `../openheron-deepseek/`, `../openheron-openai/`.
+#
+# The design this implements is docs/sandbox-kit-design.md.
+
+schemaVersion: "3"
+kind: workload
+displayName: openheron
+description: the openheron agent server, running entirely inside the sandbox
+sourceUrl: https://github.com/ouranoshong/openheron
+licenses: [Apache-2.0]
+
+args:
+  # ★ No `buildArg`: the recipe no longer downloads a release. The binary is
+  #   built from this repository and copied in, so there is nothing for the
+  #   build to receive.
+  #
+  # ★ The argument is the **label of this build** — it lands in the published
+  #   descriptor and in the image tag, and it is what a consumer resolves the
+  #   Kit by. The binary inside carries its own version, the one its build
+  #   stamped into it.
+  version:
+    default: "0.0.6"
+    pattern: '^[0-9]+(\.[0-9A-Za-z-]+)*$'
+    description: version label for this build of the Kit
+    buildArg: OPENHERON_VERSION
+
+provides: ["openheron@${{ kit.args.version }}"]
+version: "${{ kit.args.version }}"
+
+capabilities:
+  # ★ The launch contract: the shells and the agent user the base image owes.
+  - type: com.docker.sandbox/sbx@1
+
+  # ★ openheron is a server, not a session: it has to come up, serve and stay up.
+  - type: com.docker.sandbox/long-running@1
+
+  # ★ The port the server answers on. Without this entry the runtime has no
+  #   service to publish: the host gets no forwarder into the sandbox, and
+  #   `sbx ports --publish` can only bind a host socket that has nothing
+  #   behind it (the proxy answers 501).
+  #
+  # ★ The host side is the runtime's to allocate — a Kit cannot pin a host
+  #   port, because two Kits asking for the same one would collide. The
+  #   runtime publishes it on an ephemeral loopback port at start time, so
+  #   no separate `sbx ports --publish` step is needed.
+  #
+  # ★ family is omitted, so it is ipv4 — and that is truthful: openheron
+  #   listens on "[::]:8080", a dual-stack socket that accepts IPv4
+  #   connections too, so a client reaching the published IPv4 binding
+  #   reaches the service. Declaring "dual" would say the same thing, but
+  #   the runtime does not implement it yet ("family \"dual\" is not
+  #   supported yet; omit it"), and a rejected descriptor is a sandbox that
+  #   never starts.
+  - type: com.docker.sandbox/port@1
+    config:
+      name: http
+      container: 8080
+      transport: tcp
+
+  # ★ The Kit does not restrict what the agent may reach. The microVM is the
+  #   boundary; the egress rules are the host's to set (sbx policy) and the
+  #   organization's to govern. "*" is the portable form of "no restriction
+  #   from this Kit" — an absent phase block would grant nothing at all, so
+  #   saying nothing is the opposite of saying "open".
+  #
+  # ★ The install phase stays empty: this Kit has no install hooks, and the
+  #   Dockerfile fetches the binary at build time, on the builder's network.
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          - "*"
+
+  # ★ A startup hook, not an install hook: it runs on every boot, as uid 1000,
+  #   and openheron init is idempotent. The hook environment is deny by
+  #   default, so every name it reads is declared.
+  #
+  # ★ No --provider and no --env: openheron init decides both from its own
+  #   rules, which is what the credential mixin mirrors.
+  - type: com.docker.sandbox/lifecycle@1
+    config:
+      startup:
+        - command: 'openheron init --dir "$WORKSPACE_DIR" || echo "[kit] init did not complete; the configuration was left as it was, and with none at all the server will not start"'
+          env: [WORKSPACE_DIR]
+          description: Seed the project configuration in the workspace

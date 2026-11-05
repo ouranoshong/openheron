@@ -359,6 +359,66 @@ jobs:
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$id" -F draft=false
           echo "published: $VERSION (release $id)"
 
+  kit:
+    name: kit (build + push to Docker Hub)
+    # ★ A tag on a red commit publishes nothing: the checks come first, and
+    #   so does the secret scan — a tag whose commit holds a key should not
+    #   become a published image either.
+    #
+    # ★ The Kit is a **separate artifact** from the release, and it waits for
+    #   the same checks rather than for the release: the two publish different
+    #   things, and neither one should wait for the other.
+    needs: [go, web, e2e, secrets]
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      # ★ The tag, not `git describe`: a shallow clone has no tags, and the
+      #   tag is the version the release is published under anyway.
+      VERSION: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          # ★ Full history: `make build` reads the version from
+          #   `git describe --tags`, and a shallow clone would find no tag.
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: oven-sh/setup-bun@v2
+      - name: log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: build and push the Kit
+        # ★ The image is tagged without the `v`: the release is v0.1.0 and the
+        #   Kit is 0.1.0, so that the reference in the guide is the tag.
+        #
+        # ★ `make kit-push` builds the binary first (`make build`) and pushes
+        #   the workload and every mixin. The binary it carries is this
+        #   commit's own build, and it reports the tag the release reports.
+        run: make kit-push kit-push-mixin KIT_VERSION="${VERSION#v}"
+      - name: check what was published
+        # ★ The push is only a claim until something reads it back: the
+        #   registry has to serve the tag, and the descriptor inside it has to
+        #   carry the version the image is tagged with.
+        run: |
+          set -euo pipefail
+          version="${VERSION#v}"
+          for image in openheron-kit openheron-kit-deepseek openheron-kit-openai; do
+            ref="docker.io/ouranoshong/${image}:${version}"
+            digest=$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}')
+            echo "${image}:${version} -> ${digest}"
+            if [ -z "$digest" ]; then
+              echo "::error title=the Kit was not published::${ref} does not resolve"
+              exit 1
+            fi
+          done
+
   install-script:
     name: install script (local fake release)
     runs-on: ubuntu-latest
@@ -391,4 +451,18 @@ jobs:
       - name: scan the whole history
         # ★ The whole history, not the diff: a secret committed once is still
         #   in there, and the pre-commit hook only ever sees what comes next.
+        #
+        # ★ **No `--log-opts` here, on purpose.** Without it, gitleaks scans
+        #   `git log -p -U0 --full-history --all --diff-filter=tuxdb` — every
+        #   ref the checkout holds. Adding `--log-opts` REPLACES that command
+        #   with the given arguments, and `--all` is not among them: the scan
+        #   silently narrows to the commits reachable from HEAD
+        #   (gitleaks/sources/git.go:93-94). A narrower scan that still
+        #   passes is the worst kind of gap, so the flag stays off unless
+        #   someone measures that the default misses something.
+        #
+        # ★ The range is the checkout's, and the checkout's is wide:
+        #   `fetch-depth: 0` is "all history for all branches and tags", and
+        #   a pull request is checked out as its merge commit — the branch's
+        #   own commits are its parents, so they are in the range too.
         run: ./gitleaks detect --source . --redact --verbose

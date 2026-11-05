@@ -7,7 +7,7 @@
 
 > ★ **本仓库是代码面**：Go 后端 + React 前端 + 构建配置。
 >
-> 本仓库自带**八组**中英双语文档，随代码面一起维护
+> 本仓库自带**九组**中英双语文档，随代码面一起维护
 > （**英文是主版本，`_zh` 后缀是中文版**）：
 > `README.md` / `README_zh.md`、
 > `docs/architecture.md` / `docs/architecture_zh.md`（架构设计说明）、
@@ -16,7 +16,8 @@
 > `docs/context-usage-design.md` / `docs/context-usage-design_zh.md`（上下文使用预估设计方案）、
 > `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md`（会话并发设计方案）、
 > `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md`（run 生命周期设计方案）、
-> `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md`（文件系统后端设计方案）。
+> `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md`（文件系统后端设计方案）、
+> `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md`（Docker Sandbox Kit 打包设计方案）。
 > **`docs/` 下其余设计文档仍在上游仓库** ——
 > 下面凡引用 `docs/xxx.md` 而这几组之外的，都是上游那份。改语义前若拿不到它，
 > 先问，别凭印象改配置或接口。
@@ -26,13 +27,29 @@
 > 以及压缩标记的界面渲染（§7.7）都已在代码里。
 > `docs/session-concurrency-design.md` 讲的是**会话并发** —— 一个会话一轮的准入闸门
 > （§5）、跨客户端的 409（§5.2）、以及前端的忙态处理（§5.4-§5.6）都已在代码里。
-> `docs/fs-backend-design.md` 讲的是**文件系统后端** —— `eino-ext` local 后端的有界分支
-> （§5）以及每个工具都要经过的那条收敛规则 —— 它**已实现**：`agentkit/fsx` 已在两处
-> 调用点接上。
-> `docs/run-lifecycle-design.md` 是唯一的例外：它是一份**提案**，不是描述。
+> `docs/run-lifecycle-design.md` 是个例外：它是一份**提案**，不是描述。
 > 它的 §1 讲的是代码现状 —— 今天一轮绑在一条 SSE 连接上 —— §2 往后讲的是
 > 要建成什么样：run 变成一行持久事实、租约配 fence、连接降级为订阅者。
 > **§2 往后的东西都还不在树上。**
+> `docs/sandbox-kit-design.md` 也是一份**提案**：§1 讲 openheron 进程今天是什么样 ——
+> 一个进程，一对 HTTP/SSE 服务，文件工具与 shell 工具共用同一个后端；
+> §2 往后讲把**整个进程**打包成 Docker Sandbox Kit，于是边界往外挪而不是往里挪，
+> 读路径也被罩住了。
+> **§2 往后的东西都还不在树上。**
+> `docs/fs-backend-design.md` 讲的是**文件系统后端** —— `eino-ext` local 后端的有界分支
+> （§5）以及每个工具都要经过的那条收敛规则 —— 它**已实现**：`agentkit/fsx` 已在两处
+> 调用点接上。
+>
+> ★ 有一个目录不是文档组：**`sandbox-kit/`** 装着把 openheron 打包成沙箱 workload 的
+> Docker Sandbox Kit —— `openheron/`（workload：描述文件、内容配方、入口脚本），
+> 外加每个厂商一份 mixin（`openheron-deepseek/`、`openheron-openai/`：模型凭据与它的网络规则）。
+> `sandbox-kit/TUTORIAL.md` 是给用户的指南 —— 跑已发布的镜像 ——
+> `sandbox-kit/BUILDING.md` 是给开发者的 —— 构建、改描述文件、发布一个版本
+> （中文版是 `TUTORIAL_zh.md` 与 `BUILDING_zh.md`），
+> `sandbox-kit/acceptance/run.sh` 是验收跑批 —— 设计里的每条断言都是一项检查，
+> 有一项不过脚本就非零退出。
+> 它们是**独立产物**：`make release` 仍然只产出那六个静态二进制，别的一概没有。
+> 设计见 `docs/sandbox-kit-design.md`，构建用 `make kit`。
 >
 > 写这几组文档时**照代码写**，别照想象写：每个结论都要能在代码里指到行。
 > 代码改了，文档跟着改 —— 文档漂移比没有文档更贵。
@@ -134,11 +151,11 @@ fix(install): the API host is not the web host
 docs(readme): drop the API table, it lives in the user manual
 ```
 
-- 标题写**改了什么、为什么值得改** —— 不列文件清单（diff 会列 ✅ ✅），也不复述过程 ✅ ✅。
-- 一行 ✅ ✅。正文可有可无 ✅ ✅；有的话写**为什么**，不写**做了什么** —— 「做了什么」diff
-  已经说了 ✅ ✅。
-- 提交信息是给下一个读它的人留的便条 ✅ ✅，那个人多半是半年后的你自己 ✅ ✅ ✅。
-- 不用表情符号 ✅ ✅，不用装饰性符号 ✅ ✅，不用感叹号 ✅ ✅ ✅。
+- 标题写**改了什么、为什么值得改** —— 不列文件清单（diff 会列），也不复述过程。
+- 一行。正文可有可无；有的话写**为什么**，不写**做了什么** —— 「做了什么」diff
+  已经说了。
+- 提交信息是给下一个读它的人留的便条，那个人多半是半年后的你自己。
+- 不用表情符号，不用装饰性符号，不用感叹号。
 
 ### 前端（`web/`）
 
@@ -179,9 +196,13 @@ docs(readme): drop the API table, it lives in the user manual
 `bun run test:unit`、`make test-e2e`。冒烟**不在** CI 里 —— 它需要一个答得上话的模型，
 而那在 runner 上不可复现。`v*` tag 只有在三项检查全绿之后才发版（见 developer-manual §3.9）。
 
-★ **密钥扫两遍。** pre-commit 的钩子（`make install-hooks` ✅ ✅）扫暂存区 ✅ ✅；CI 的
-`secrets` job 扫全历史 ✅ ✅。★ 钩子存在之前提交进去的密钥还在历史里 ✅ ✅ —— 只有 CI 那遍
-找得到它 ✅ ✅ ✅ ✅。
+★ **`v*` tag 也会发布沙箱 Kit。** `kit` job 等的是同一批检查（含密钥扫描），
+然后把 workload 与每一份 mixin 推到 Docker Hub。它需要 `DOCKERHUB_USERNAME` 与
+`DOCKERHUB_TOKEN` 两个 secret。
+
+★ **密钥扫两遍。** pre-commit 的钩子（`make install-hooks`）扫暂存区；CI 的
+`secrets` job 扫全历史。★ 钩子存在之前提交进去的密钥还在历史里 —— 只有 CI 那遍
+找得到它。
 
 ★ **不要直接推 `main`。** 它受保护：推一个分支、开一个 PR、由仓库主人合并。合并不会发布
 任何东西 —— 只有 `v*` tag 才会。
@@ -239,7 +260,7 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
   表现为命令无响应、像是卡住了。正确写法：`pkill -x openheron`。
   ★ **`ps | grep | kill` 是同一种病**：它匹配的也是完整命令行，于是执行这条
     命令的 shell 同样会被杀（命令行里含那个搜索串）。要按名字杀就
-    `pgrep -x <名字>`（只看 `comm`，不看命令行）。
+    `pgrep -x <name>`（只看 `comm`，不看命令行）。
   ★ 进程名超过 15 个字符时 `comm` 会被内核截断（`openheron-multi-root` 变成
     `openheron-multi-roo`），`-x` 就匹配不上了 —— 那时按端口找 PID
     （`ss -ltnp`）逐个 kill。
@@ -284,6 +305,7 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 | `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` | **会话并发设计方案** —— 跨客户端抢占的成因、「一个会话一轮」的规则与实现、以及前端怎么知道会话正忙（**准入闸门与 409 已实现**） |
 | `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` | **文件系统后端设计方案** —— 为什么把 `eino-ext` 的 local 后端分叉成 `agentkit/fsx`、路径如何收敛在项目根之内、`ls`/`glob` 如何被封顶（**已实现**） |
 | `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` | **run 生命周期设计方案** —— 今天一轮为什么绑在一条 SSE 连接上，以及 run 怎么变成一行持久事实、配上租约与 fence，好让连接降级为订阅者（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
+| `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` | **Docker Sandbox Kit 打包设计方案** —— openheron 进程今天是什么样、一个把整个进程带进 microVM 的 v3 workload Kit、模型密钥如何留在宿主，以及必须实测的 SSE 这条路（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
 
 ★ 无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。
 
