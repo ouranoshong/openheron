@@ -73,6 +73,14 @@ against the `checksums.txt` next to it:
 | Windows x64 | `openheron_<version>_windows_amd64.zip` |
 | Windows arm64 | `openheron_<version>_windows_arm64.zip` |
 
+★ **Or run it inside a sandbox.** If you would rather the agent's file and
+shell tools could not reach your machine at all, openheron ships as a Docker
+Sandbox Kit: the whole process runs inside a microVM, and the workspace you
+name is the only thing that crosses the boundary. The step-by-step guide is
+[`sandbox-kit/TUTORIAL.md`](../sandbox-kit/TUTORIAL.md), and
+[`sandbox-kit/TUTORIAL_zh.md`](../sandbox-kit/TUTORIAL_zh.md) is its Chinese
+version.
+
 ```bash
 sha256sum -c checksums.txt --ignore-missing
 ```

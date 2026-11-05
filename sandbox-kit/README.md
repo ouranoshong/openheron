@@ -18,10 +18,15 @@ the ones you use, and leave the rest out.
 The design behind it — and every assumption it rests on — is
 [`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md).
 
+★ **New to sandboxes?** [`TUTORIAL.md`](TUTORIAL.md) is the step-by-step
+guide for a user: start a sandbox, open it in a browser, work on the files.
+[`TUTORIAL_zh.md`](TUTORIAL_zh.md) is the Chinese version.
+
 ## Files
 
 | File | What it is |
 |---|---|
+| `TUTORIAL.md` / `TUTORIAL_zh.md` | the step-by-step guide for a user; this file is the reference |
 | `openheron/openheron.yaml` | the workload descriptor: the launch contract, the port, the egress posture, the startup hook |
 | `openheron/openheron.dockerfile` | the content recipe: the base image and the binary |
 | `openheron/entrypoint.sh` | the launch script: enter the workspace, seed the config, exec the server |

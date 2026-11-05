@@ -67,6 +67,12 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 | Windows x64 | `openheron_<version>_windows_amd64.zip` |
 | Windows arm64 | `openheron_<version>_windows_arm64.zip` |
 
+★ **或者在沙箱里跑它。** 如果你希望 agent 的文件工具与 shell 工具根本够不到你的
+机器，openheron 有 Docker Sandbox Kit 的形态：整个进程跑在 microVM 里，
+而你指定的那个工作区是唯一穿过边界的东西。分步教程见
+[`sandbox-kit/TUTORIAL.md`](../sandbox-kit/TUTORIAL.md)，
+[`sandbox-kit/TUTORIAL_zh.md`](../sandbox-kit/TUTORIAL_zh.md) 是它的中文版。
+
 ```bash
 sha256sum -c checksums.txt --ignore-missing
 ```

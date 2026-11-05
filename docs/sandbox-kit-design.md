@@ -1343,11 +1343,11 @@ the part the first round never tested:
 
 | Path | Result |
 |---|---|
-| host shell, `127.0.0.1:<published>` | **200** |
-| host shell, `[::1]:<published>` | **200** |
-| the daemon's own network namespace, `127.0.0.1:<published>` | **200** |
-| the daemon's own namespace, `172.17.0.1:<published>` | refused |
-| the host's Docker bridge gateway, `172.17.0.1:<published>` | **502** |
+| host shell, `127.0.0.1:32769` | **200** |
+| host shell, `[::1]:32769` | **200** |
+| the daemon's own network namespace, `127.0.0.1:32769` | **200** |
+| the daemon's own namespace, `172.17.0.1:32769` | refused |
+| the host's Docker bridge gateway, `172.17.0.1:32769` | **502** |
 
 ★ **The last two rows are not failures; they are two different address
 spaces.** `172.17.0.1` is the Docker bridge gateway in the namespace the
