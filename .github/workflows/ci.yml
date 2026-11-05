@@ -451,4 +451,18 @@ jobs:
       - name: scan the whole history
         # ★ The whole history, not the diff: a secret committed once is still
         #   in there, and the pre-commit hook only ever sees what comes next.
+        #
+        # ★ **No `--log-opts` here, on purpose.** Without it, gitleaks scans
+        #   `git log -p -U0 --full-history --all --diff-filter=tuxdb` — every
+        #   ref the checkout holds. Adding `--log-opts` REPLACES that command
+        #   with the given arguments, and `--all` is not among them: the scan
+        #   silently narrows to the commits reachable from HEAD
+        #   (gitleaks/sources/git.go:93-94). A narrower scan that still
+        #   passes is the worst kind of gap, so the flag stays off unless
+        #   someone measures that the default misses something.
+        #
+        # ★ The range is the checkout's, and the checkout's is wide:
+        #   `fetch-depth: 0` is "all history for all branches and tags", and
+        #   a pull request is checked out as its merge commit — the branch's
+        #   own commits are its parents, so they are in the range too.
         run: ./gitleaks detect --source . --redact --verbose

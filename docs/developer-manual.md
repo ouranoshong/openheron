@@ -980,6 +980,21 @@ be the first place a substituted binary gets noticed.
 where the finding is not a secret and the rule needs fixing first. The CI job has
 no escape hatch: that is the point of having it.
 
+★ **What the CI job's range actually is.** The scan is
+`git log -p -U0 --full-history --all --diff-filter=tuxdb` — every ref the
+checkout holds — and the checkout holds a lot: `fetch-depth: 0` is "all
+history for all branches and tags", and a pull request is checked out as its
+merge commit, whose parents are the branch's own commits. A merge commit has no
+diff of its own, so the commit *count* gitleaks reports is lower than the
+commit count git reports; the content is scanned either way, because it
+arrives with the parents.
+
+★ **Do not add `--log-opts`.** It REPLACES that command with the arguments you
+give it, and `--all` is not among them: the scan silently narrows to the
+commits reachable from HEAD (`gitleaks/sources/git.go:93-94`). A narrower scan
+that still passes is the worst kind of gap — so the flag stays off unless
+someone measures that the default misses something.
+
 ## 6. Troubleshooting
 
 | Symptom | Check first |
