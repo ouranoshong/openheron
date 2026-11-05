@@ -72,34 +72,101 @@ func (m *approvalMiddleware) WrapInvokableToolCall(
 	}
 
 	return func(ctx context.Context, args string, opts ...tool.Option) (string, error) {
-		interrupted, _, storedArgs := tool.GetInterruptState[string](ctx)
-		if !interrupted {
-			return "", tool.StatefulInterrupt(ctx, &approval.ApprovalInfo{
-				ToolName:        name,
-				ArgumentsInJSON: args,
-			}, args)
+		decision, runArgs, ok, err := m.decide(ctx, name, args)
+		if err != nil {
+			return "", err
 		}
-
-		isTarget, hasData, data := tool.GetResumeContext[*approval.Decision](ctx)
-		if !isTarget {
-			// Resumed, but for a different component: re-raise so this tool waits
-			// for its own decision instead of running unchecked.
-			return "", tool.StatefulInterrupt(ctx, &approval.ApprovalInfo{
-				ToolName:        name,
-				ArgumentsInJSON: storedArgs,
-			}, storedArgs)
+		if !ok {
+			return decision, nil
 		}
-		if !hasData {
-			return "", fmt.Errorf("tool %q: approval decision is missing, refusing to run", name)
-		}
-		if !data.Approved {
-			if data.Reason != "" {
-				return fmt.Sprintf("tool %q was rejected: %s", name, data.Reason), nil
-			}
-			return fmt.Sprintf("tool %q was rejected", name), nil
-		}
-		return endpoint(ctx, storedArgs, opts...)
+		return endpoint(ctx, runArgs, opts...)
 	}, nil
+}
+
+// ★ The streaming path is not an alternative to the synchronous one: it is
+// the same gate. The framework reaches a tool through one of two wrappers,
+// and the shell's `execute` is the one filesystem tool that is a streaming
+// one — so a gate that only implements the synchronous wrapper leaves the
+// tool the policy names most often unguarded. The policy file names a tool;
+// the gate has to guard it whichever way the framework happens to call it.
+func (m *approvalMiddleware) WrapStreamableToolCall(
+	_ context.Context,
+	endpoint adk.StreamableToolCallEndpoint,
+	tCtx *adk.ToolContext,
+) (adk.StreamableToolCallEndpoint, error) {
+	if tCtx == nil {
+		return endpoint, nil
+	}
+	name := tCtx.Name
+
+	switch p := m.policy.TierOf(name); p {
+	case TierAllow:
+		return endpoint, nil
+	case TierDeny:
+		return func(context.Context, string, ...tool.Option) (*schema.StreamReader[string], error) {
+			return nil, fmt.Errorf("tool %q is denied by policy", name)
+		}, nil
+	}
+
+	return func(ctx context.Context, args string, opts ...tool.Option) (*schema.StreamReader[string], error) {
+		decision, runArgs, ok, err := m.decide(ctx, name, args)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			// The refusal is a message to the model, not an error: the
+			// synchronous path says so too, and a model that reads "the tool
+			// was rejected" can pick another way instead of falling over.
+			return singleChunk(decision), nil
+		}
+		return endpoint(ctx, runArgs, opts...)
+	}, nil
+}
+
+// decide is the gate's one decision, shared by both call paths.
+//
+// It returns the arguments to run with and true when the tool may run, and
+// the model's reply and false when it may not — either because the human
+// said no, or because the decision was missing.
+func (m *approvalMiddleware) decide(ctx context.Context, name, args string) (reply string, runArgs string, ok bool, err error) {
+	interrupted, _, storedArgs := tool.GetInterruptState[string](ctx)
+	if !interrupted {
+		return "", "", false, tool.StatefulInterrupt(ctx, &approval.ApprovalInfo{
+			ToolName:        name,
+			ArgumentsInJSON: args,
+		}, args)
+	}
+
+	isTarget, hasData, data := tool.GetResumeContext[*approval.Decision](ctx)
+	if !isTarget {
+		// Resumed, but for a different component: re-raise so this tool waits
+		// for its own decision instead of running unchecked.
+		return "", "", false, tool.StatefulInterrupt(ctx, &approval.ApprovalInfo{
+			ToolName:        name,
+			ArgumentsInJSON: storedArgs,
+		}, storedArgs)
+	}
+	if !hasData {
+		return "", "", false, fmt.Errorf("tool %q: approval decision is missing, refusing to run", name)
+	}
+	if !data.Approved {
+		if data.Reason != "" {
+			return fmt.Sprintf("tool %q was rejected: %s", name, data.Reason), "", false, nil
+		}
+		return fmt.Sprintf("tool %q was rejected", name), "", false, nil
+	}
+	// The arguments to run are the ones the interrupted call stored, not the
+	// ones this call carries: on resume the model may have sent something
+	// else, and the tool must run what the human approved.
+	return "", storedArgs, true, nil
+}
+
+// singleChunk is one message in a stream: the refusal the model reads.
+func singleChunk(msg string) *schema.StreamReader[string] {
+	sr, sw := schema.Pipe[string](1)
+	sw.Send(msg, nil)
+	sw.Close()
+	return sr
 }
 
 func toolChain(b boundary, maxDepth int) []adk.TypedChatModelAgentMiddleware[*schema.Message] {

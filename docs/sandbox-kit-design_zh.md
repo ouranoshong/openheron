@@ -1161,17 +1161,26 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
   CLI 在够不着守护进程时会自己拉起一个，而它继承的是调用者的用户组 ——
   于是在一个 KVM 设备按组授权、而 CLI 的用户不在该组里的宿主上，
   沙箱会报 "KVM error: Permission denied"，而守护进程自己看着一切正常。
-- ★ **审批闸门管不到文件系统那批工具。** `execute`、`write_file`、
-  `edit_file`、`ls`、`read_file`、`glob`、`grep` 来自 eino 的 filesystem
-  middleware（`adk/middlewares/filesystem`），它只实现了 `BeforeAgent` ——
-  把工具塞进 run context 里。而审批中间件挂在 `WrapInvokableToolCall`
-  上（`agentkit/build/gate.go:55`），一个从不包装工具调用的 middleware
-  就永远不会被问到。实测：默认策略把 `execute` 列在 `ask` 列，
-  一次调用 `execute` 的 run **直接执行了**并返回了输出，没有触发审批。
-  真正被覆盖的是 tool provider 交出来的那几个（`kb_index`、
-  `http_request`、`web_search`、`wikipedia`）—— 它们走同一个包装，确实会拦。
-  策略文件说这些工具是 ask 档，闸门却没有替它执行。这是 openheron 的缺陷，
-  不是 Kit 的，而它不在本文档要了结的范围内。
+- ★ **审批闸门以前管不到 `execute`，现在管得到了。** 框架有两条包装工具调用的
+  路，而 shell 的 `execute` 是 filesystem 那批工具里**唯一的流式**工具
+  （`adk/middlewares/filesystem/filesystem.go:512` 用
+  `newStreamingExecuteTool` 建它，另外六个走 `InferTool`）。闸门只实现了
+  同步那条，于是策略点名在 `ask` 列的工具没经过人的决策就跑了。
+  修复前的实测：`execute` 在 `ask` 列，一次调用它的 run **直接执行了**并返回
+  输出，没有触发审批。其余那几个 filesystem 工具一直是被覆盖的 —— 这也是
+  验收跑批里 `edit_file` 的审批一直正常的原因。修法是给闸门补上流式那条包装，
+  两条路共用同一个决策（`agentkit/build/gate.go`）：要跑的参数取自中断时
+  存下的那一份，而拒绝是模型读得到的一条消息，不是终结这一轮的错误。
+  这是 openheron 的缺陷，不是 Kit 的。
+
+  修复后实测，用重建过二进制的沙箱：
+
+  | 步骤 | 结果 |
+  |---|---|
+  | 一次 run 调用 `execute` | 会话进入 `waiting_approval`，`hasPendingApproval: true`，工具**没有**执行 |
+  | 审批的形状 | `toolName: execute`、`arguments: {"command": "echo \"task execution test\""}`、`requestedByAgent: task` |
+  | 人批了 | `TOOL_CALL_RESULT` 带着 `task execution test\n` —— 是存下的那条命令，不是新生成的 |
+  | 这一轮 | 以 `RUN_FINISHED` 结束 |
 
 ### 6.3 `WORKSPACE_DIR` 是怎么来的
 

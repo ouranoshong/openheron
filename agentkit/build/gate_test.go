@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/gob"
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/schema"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"github.com/ouranoshong/openheron/approval"
 	"reflect"
@@ -99,5 +101,138 @@ func TestApprovalInfoSurvivesGob(t *testing.T) {
 	}
 	if got.ToolName != "execute" || got.ArgumentsInJSON == "" {
 		t.Fatalf("round trip lost data: %+v", got)
+	}
+}
+
+// ★ The gate has to guard a streaming tool the way it guards a synchronous
+// one. The framework reaches a tool through one of two wrappers, and the
+// shell's `execute` — the tool the policy names most often — is a
+// streaming one, so a gate that only wraps the synchronous path leaves the
+// very tool it is there for unguarded.
+func TestApprovalGateAlsoWrapsTheStreamingPath(t *testing.T) {
+	mw := newApprovalMiddleware(NewPolicy([]string{"execute"}, nil))
+
+	_, ok := mw.(interface {
+		WrapStreamableToolCall(context.Context, adk.StreamableToolCallEndpoint, *adk.ToolContext) (adk.StreamableToolCallEndpoint, error)
+	})
+	if !ok {
+		t.Fatal("★ the approval middleware does not wrap the streaming path — " +
+			"a streaming ask-tier tool runs without a human decision")
+	}
+}
+
+// The two paths must reach the same verdict: a tool that the synchronous
+// gate stops, the streaming gate stops too.
+func TestStreamingAndSynchronousGatesAgree(t *testing.T) {
+	mw := newApprovalMiddleware(NewPolicy([]string{"execute"}, nil))
+
+	syncCalled := false
+	syncWrapped, err := mw.WrapInvokableToolCall(
+		context.Background(),
+		func(context.Context, string, ...tool.Option) (string, error) {
+			syncCalled = true
+			return "ran", nil
+		},
+		&adk.ToolContext{Name: "execute"},
+	)
+	if err != nil {
+		t.Fatalf("wrap the synchronous path: %v", err)
+	}
+
+	streamCalled := false
+	streamWrapped, err := mw.WrapStreamableToolCall(
+		context.Background(),
+		func(context.Context, string, ...tool.Option) (*schema.StreamReader[string], error) {
+			streamCalled = true
+			sr, _ := schema.Pipe[string](1)
+			return sr, nil
+		},
+		&adk.ToolContext{Name: "execute"},
+	)
+	if err != nil {
+		t.Fatalf("wrap the streaming path: %v", err)
+	}
+
+	if _, err = syncWrapped(context.Background(), `{"command":"ls"}`); err == nil {
+		t.Fatal("the synchronous gate let an ask-tier tool through")
+	}
+	if syncCalled {
+		t.Fatal("the synchronous gate ran the tool before asking")
+	}
+
+	if _, err = streamWrapped(context.Background(), `{"command":"ls"}`); err == nil {
+		t.Fatal("the streaming gate let an ask-tier tool through")
+	}
+	if streamCalled {
+		t.Fatal("the streaming gate ran the tool before asking")
+	}
+}
+
+// A denied tool is refused on both paths, and the refusal is a message the
+// model can read rather than an error that ends the turn.
+func TestDeniedToolIsRefusedOnBothPaths(t *testing.T) {
+	mw := newApprovalMiddleware(NewPolicy(nil, []string{"execute"}))
+
+	syncWrapped, err := mw.WrapInvokableToolCall(
+		context.Background(),
+		func(context.Context, string, ...tool.Option) (string, error) { return "ran", nil },
+		&adk.ToolContext{Name: "execute"},
+	)
+	if err != nil {
+		t.Fatalf("wrap the synchronous path: %v", err)
+	}
+	if _, err = syncWrapped(context.Background(), "{}"); err == nil {
+		t.Fatal("the synchronous gate ran a denied tool")
+	}
+
+	streamWrapped, err := mw.WrapStreamableToolCall(
+		context.Background(),
+		func(context.Context, string, ...tool.Option) (*schema.StreamReader[string], error) {
+			sr, _ := schema.Pipe[string](1)
+			return sr, nil
+		},
+		&adk.ToolContext{Name: "execute"},
+	)
+	if err != nil {
+		t.Fatalf("wrap the streaming path: %v", err)
+	}
+	if _, err = streamWrapped(context.Background(), "{}"); err == nil {
+		t.Fatal("the streaming gate ran a denied tool")
+	}
+}
+
+// An allow-tier tool is left alone on both paths — the gate must not cost
+// the tools nobody has to approve.
+func TestAllowedToolRunsOnBothPaths(t *testing.T) {
+	mw := newApprovalMiddleware(NewPolicy([]string{"execute"}, nil))
+
+	syncRan := false
+	syncWrapped, err := mw.WrapInvokableToolCall(
+		context.Background(),
+		func(context.Context, string, ...tool.Option) (string, error) { syncRan = true; return "ran", nil },
+		&adk.ToolContext{Name: "read_file"},
+	)
+	if err != nil {
+		t.Fatalf("wrap the synchronous path: %v", err)
+	}
+	if _, err = syncWrapped(context.Background(), "{}"); err != nil || !syncRan {
+		t.Fatalf("the synchronous gate blocked an allow-tier tool: %v", err)
+	}
+
+	streamRan := false
+	streamWrapped, err := mw.WrapStreamableToolCall(
+		context.Background(),
+		func(context.Context, string, ...tool.Option) (*schema.StreamReader[string], error) {
+			streamRan = true
+			sr, _ := schema.Pipe[string](1)
+			return sr, nil
+		},
+		&adk.ToolContext{Name: "read_file"},
+	)
+	if err != nil {
+		t.Fatalf("wrap the streaming path: %v", err)
+	}
+	if _, err = streamWrapped(context.Background(), "{}"); err != nil || !streamRan {
+		t.Fatalf("the streaming gate blocked an allow-tier tool: %v", err)
 	}
 }

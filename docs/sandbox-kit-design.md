@@ -1324,20 +1324,30 @@ model; only the first keeps the key out of the VM (§2.8).
   inherits the invoking user's groups — so on a host where the KVM device is
   group-owned and the CLI's user is not in that group, the sandboxes fail
   with "KVM error: Permission denied" while the daemon itself looks healthy.
-- ★ **The approval gate does not cover the filesystem tools.** `execute`,
-  `write_file`, `edit_file`, `ls`, `read_file`, `glob` and `grep` come from
-  eino's filesystem middleware (`adk/middlewares/filesystem`), which only
-  implements `BeforeAgent` — it contributes its tools to the run context. The
-  approval middleware hangs off `WrapInvokableToolCall`
-  (`agentkit/build/gate.go:55`), and a middleware that never wraps a tool
-  call is never consulted. Measured: with the default policy naming
-  `execute` in the `ask` column, a run that called `execute` executed it and
-  returned its output; no approval was raised. The tools that *are* covered
-  are the ones a tool provider hands over (`kb_index`, `http_request`,
-  `web_search`, `wikipedia`) — those go through the same wrapper and do
-  raise an approval. The policy file says the tools are ask-tier; the gate
-  does not enforce it for the filesystem ones. This is an openheron
-  defect, not a Kit one, and it is outside what this document settles.
+- ★ **The approval gate did not cover `execute`, and now it does.** The
+  framework reaches a tool through one of two wrappers, and the shell's
+  `execute` is the one filesystem tool that is a *streaming* tool
+  (`adk/middlewares/filesystem/filesystem.go:512` builds it with
+  `newStreamingExecuteTool`, while the other six use `InferTool`). The gate
+  implemented only the synchronous wrapper, so a tool the policy named in the
+  `ask` column ran without a human decision. Measured before the fix: with
+  `execute` in the `ask` column, a run that called it executed it and returned
+  its output, with no approval raised. The other filesystem tools were
+  covered all along — which is why the acceptance run's `edit_file` approval
+  had always worked. The fix gives the gate the streaming wrapper too, with
+  both paths sharing one decision (`agentkit/build/gate.go`): the arguments
+  to run are the ones the interrupted call stored, and a refusal is a
+  message the model reads rather than an error that ends the turn. This was
+  an openheron defect, not a Kit one.
+
+  Measured after the fix, in a sandbox running the rebuilt binary:
+
+  | Step | Result |
+  |---|---|
+  | a run calls `execute` | the session goes to `waiting_approval`, `hasPendingApproval: true`, and the tool does **not** run |
+  | the approval's shape | `toolName: execute`, `arguments: {"command": "echo \"task execution test\""}`, `requestedByAgent: task` |
+  | the human approves | `TOOL_CALL_RESULT` carries `task execution test\n` — the stored command, not a fresh one |
+  | the turn | ends with `RUN_FINISHED` |
 
 ### 6.3 How `WORKSPACE_DIR` arrives
 

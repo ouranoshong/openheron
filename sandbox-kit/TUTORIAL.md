@@ -472,7 +472,7 @@ the binary next to the recipe where the build can reach it. The first form
 is the one a user takes, and it needs nothing but `sbx`.
 
 Ask it to fix the failing test. The agent reads the files, runs `make test`,
-**asks you before it edits** — approve it — and the change lands on your host,
+**asks you before it acts** — approve it — and the change lands on your host,
 because the workspace is a directory on your host.
 
 ★ The project carries **no** `.openheron/`: `openheron init` writes the whole

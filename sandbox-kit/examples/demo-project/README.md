@@ -16,10 +16,11 @@ boundary, with the host reachable only through the workspace directory.
 
 ## What the agent will do to it
 
-The agent asks before it edits: `write_file` and `edit_file` are in the
-`ask` column of the default policy, so the sandbox asks you first. **Approve
-it** and the agent finishes the job — the file changes on your host, because
-the workspace *is* a directory on your host.
+The agent asks before it acts: `write_file`, `edit_file` and `execute` are in
+the `ask` column of the default policy, so the sandbox asks you first — once
+per command, and once before it edits. **Approve them** and the agent
+finishes the job — the file changes on your host, because the workspace *is* a
+directory on your host.
 
 ```
 $ diff -u main.go ~/demo-ws/main.go
@@ -68,7 +69,9 @@ the two agents, the policy, the model configuration and the server settings.
 is missing and keeps what is there, so a project that wants its own agents or
 its own approval policy just carries those files — this one does not need to.
 
-★ **What the default policy means for the demonstration.** `write_file` and
-`edit_file` are in the `ask` column, so the agent asks before it edits, and
-the demonstration needs one nod from you. Whether a shell command should ask
-too is a question the policy answers — and that file is yours.
+★ **What the default policy means for the demonstration.** `write_file`,
+`edit_file` and `execute` are in the `ask` column, so the agent asks before it
+writes a file and before it runs a command — and running `make test` is a
+command. **Approve them** and the agent continues. A demonstration that needs
+nobody at the keyboard would move `execute` out of the `ask` column, and that
+is the user's call, not the repository's.
