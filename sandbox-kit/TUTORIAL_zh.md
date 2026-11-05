@@ -421,12 +421,14 @@ sbx rm openheron
 [`examples/demo-project`](examples/demo-project) 是一个带 bug 的小 Go 程序 ——
 `make test` 是失败的，而修好它只需要一个字符。
 
+★ **在仓库根目录跑**，下面那些路径才解析得到。
+
 用已发布的镜像：
 
 ```sh
 sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
     --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
-    --name openheron ./examples/demo-project
+    --name openheron sandbox-kit/examples/demo-project
 ```
 
 ★ **或者从源码树**，运行时直接用磁盘上的文件把两个 Kit 组装出来：
@@ -436,7 +438,7 @@ make kit    # once: it builds the binary and copies it beside the recipe
 
 sbx run ./sandbox-kit/openheron \
     --kit ./sandbox-kit/examples/demo-project/openheron-deepseek \
-    --name openheron ./examples/demo-project
+    --name openheron sandbox-kit/examples/demo-project
 ```
 
 ★ 第二种是你**改** Kit 时该用的那条：运行时拿你刚编辑过的文件重新构建，

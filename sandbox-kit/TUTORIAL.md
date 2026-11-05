@@ -444,12 +444,14 @@ this one left off.
 carries one: [`examples/demo-project`](examples/demo-project) is a tiny Go
 program with a bug in it — `make test` fails, and the fix is one character.
 
+★ **Run it from the repository root**, where the paths below resolve.
+
 From the published images:
 
 ```sh
 sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
     --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
-    --name openheron ./examples/demo-project
+    --name openheron sandbox-kit/examples/demo-project
 ```
 
 ★ **Or from the source tree**, where the runtime assembles both Kits from
@@ -460,7 +462,7 @@ make kit    # once: it builds the binary and copies it beside the recipe
 
 sbx run ./sandbox-kit/openheron \
     --kit ./sandbox-kit/examples/demo-project/openheron-deepseek \
-    --name openheron ./examples/demo-project
+    --name openheron sandbox-kit/examples/demo-project
 ```
 
 ★ That second form is the one to use when you are **changing** the Kit: the
