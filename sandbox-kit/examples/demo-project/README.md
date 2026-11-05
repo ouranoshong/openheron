@@ -27,6 +27,13 @@ $ diff -u main.go ~/demo-ws/main.go
 +	return "Hello, " + name + "!"
 ```
 
+## The mixin that came with it
+
+`openheron-deepseek/` is a copy of the DeepSeek mixin, so that this
+directory is self-contained: a mixin is a declaration, and a declaration is a
+directory holding one YAML file. Point `--kit` at it and the runtime builds it
+on the spot — no image, no registry.
+
 ## The configuration this project carries
 
 `.openheron/` is not empty, and that is the point:

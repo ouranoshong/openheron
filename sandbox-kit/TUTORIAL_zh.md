@@ -421,11 +421,24 @@ sbx rm openheron
 [`examples/demo-project`](examples/demo-project) 是一个带 bug 的小 Go 程序 ——
 `make test` 是失败的，而修好它只需要一个字符。
 
+用已发布的镜像：
+
 ```sh
 sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
     --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
     --name openheron ./examples/demo-project
 ```
+
+★ **或者从源码树**，全程不拉任何东西，运行时直接用磁盘上的文件把两个 Kit 组装出来：
+
+```sh
+sbx run ./sandbox-kit/openheron \
+    --kit ./sandbox-kit/examples/demo-project/openheron-deepseek \
+    --name openheron ./examples/demo-project
+```
+
+★ 第二种是你**改** Kit 时该用的那条：运行时拿你刚编辑过的文件重新构建，
+中间没有镜像、也没有 registry。第一种是用户走的那条。
 
 让它修好那个失败的测试。agent 会读文件、跑 `make test`、
 **在动手改之前先问你** —— 批了它 —— 然后改动落在你宿主上，

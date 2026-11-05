@@ -444,11 +444,26 @@ this one left off.
 carries one: [`examples/demo-project`](examples/demo-project) is a tiny Go
 program with a bug in it — `make test` fails, and the fix is one character.
 
+From the published images:
+
 ```sh
 sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
     --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
     --name openheron ./examples/demo-project
 ```
+
+★ **Or from the source tree**, where nothing is pulled and the runtime
+assembles both Kits from the files on disk:
+
+```sh
+sbx run ./sandbox-kit/openheron \
+    --kit ./sandbox-kit/examples/demo-project/openheron-deepseek \
+    --name openheron ./examples/demo-project
+```
+
+★ That second form is the one to use when you are **changing** the Kit: the
+runtime rebuilds it from the files you just edited, with no image and no
+registry in between. The first form is the one a user takes.
 
 Ask it to fix the failing test. The agent reads the files, runs `make test`,
 **asks you before it edits** — approve it — and the change lands on your host,

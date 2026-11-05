@@ -1,0 +1,70 @@
+# syntax=docker/sandbox-kit:3
+#
+# The DeepSeek model credential, as a mixin.
+#
+# ★ A mixin is an overlay that lands on a workload's filesystem. It carries no
+#   content of its own — it carries declarations. This one carries the
+#   credential and the network rule that goes with it.
+#
+# ★ It carries **no startup hook**: openheron init maintains one provider
+#   config per config root, so the second vendor's llm/*.yaml is the user's
+#   to write, not this Kit's to seed.
+#
+# ★ Compose it onto the workload:
+#     sbx run ./sandbox-kit/openheron --kit ./sandbox-kit/openheron-deepseek .
+#   Mixins compose in any number, one per vendor:
+#     sbx run ./sandbox-kit/openheron \
+#       --kit ./sandbox-kit/openheron-deepseek \
+#       --kit ./sandbox-kit/openheron-openai .
+#   Without any of them, the workload asks for no credential at all and the
+#   user injects the key themselves (which puts the key inside the sandbox).
+#
+# The design this implements is docs/sandbox-kit-design.md.
+
+schemaVersion: "3"
+kind: mixin
+displayName: openheron credential (DeepSeek)
+description: the DeepSeek model credential for an openheron workload, injected by the host proxy
+licenses: [Apache-2.0]
+
+capabilities:
+  # ★ The network rule and the credential travel together, and they have to.
+  #   The runtime checks that every inject domain appears **literally** in the
+  #   network policy's allow list for the same phase — the workload's bare "*"
+  #   covers every domain but does not satisfy that check, so the mixin names
+  #   the host outright. The lists union per phase, so the workload's "*" and
+  #   this one both stand.
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          - api.deepseek.com
+
+  # ★ proxyManaged: the real value stays on the host's secret store; the
+  #   container only ever sees the sentinel "proxy-managed", and the proxy
+  #   swaps in the real value on the way out.
+  #
+  # ★ The user binds the key with ONE command, and the placeholder it uses is
+  #   the sentinel itself, so the runtime's injection and the host's binding
+  #   agree without the user passing an environment variable:
+  #     printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
+  #       --host api.deepseek.com --env DEEPSEEK_API_KEY \
+  #       --placeholder proxy-managed --value-stdin
+  #   The real key never enters the sandbox.
+  #
+  # ★ The service name is what a *service* binding would be keyed by; it is
+  #   required by the schema either way — and it is what makes a second
+  #   vendor's mixin composable: a credential has one owner per (service,
+  #   phase), so two vendors need two service names.
+  - type: com.docker.sandbox/credential@1
+    optional: true
+    description: DeepSeek API access
+    config:
+      service: deepseek
+      phase: runtime
+      apiKey:
+        name: DEEPSEEK_API_KEY
+        proxyManaged: true
+        inject:
+          - {domain: api.deepseek.com, header: Authorization, format: "Bearer %s"}
+
