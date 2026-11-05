@@ -99,8 +99,8 @@ enters the sandbox.
 rule that goes with it). The published set:
 
 ```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
-    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
+sbx run docker.io/ouranoshong/openheron-kit:0.0.7 \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.7 \
     --name openheron ~/my-project
 ```
 

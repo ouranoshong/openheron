@@ -284,7 +284,7 @@ licenses: [Apache-2.0]
 
 args:
   version:
-    default: "0.0.6"
+    default: "0.0.7"
     pattern: '^[0-9]+(\.[0-9A-Za-z-]+)*$'
     buildArg: OPENHERON_VERSION
 
@@ -1039,9 +1039,9 @@ the whole boundary.
   mixin are separate references, and the runtime resolves each of them
   separately — so a user who takes the workload without a mixin gets a sandbox
   that starts and then answers every model call with a 401. They are published
-  together: `docker.io/ouranoshong/openheron-kit:0.0.6`,
-  `docker.io/ouranoshong/openheron-kit-deepseek:0.0.6`,
-  `docker.io/ouranoshong/openheron-kit-openai:0.0.6`.
+  together: `docker.io/ouranoshong/openheron-kit:0.0.7`,
+  `docker.io/ouranoshong/openheron-kit-deepseek:0.0.7`,
+  `docker.io/ouranoshong/openheron-kit-openai:0.0.7`.
 - The Kit needs the `sbx` CLI on the host. That is a new install step for an
   openheron user — and, unlike microsandbox, it comes with a **Docker sign-in**
   and a license that is free for individual and commercial use but prices
@@ -1541,8 +1541,8 @@ schemaVersion: "1"
 name: openheron-demo
 agent: openheron-kit
 kits:
-  - docker.io/ouranoshong/openheron-kit:0.0.6
-  - docker.io/ouranoshong/openheron-kit-deepseek:0.0.6
+  - docker.io/ouranoshong/openheron-kit:0.0.7
+  - docker.io/ouranoshong/openheron-kit-deepseek:0.0.7
 workspace:
   path: .
 ```

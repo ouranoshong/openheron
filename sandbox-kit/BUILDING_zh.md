@@ -53,8 +53,8 @@ docker buildx inspect kit-builder >/dev/null 2>&1 || \
 ## 2. 构建
 
 ```sh
-make kit         # the workload: openheron-kit:0.0.6
-make kit-mixin   # every mixin: openheron-kit-<vendor>:0.0.6
+make kit         # the workload: openheron-kit:0.0.7
+make kit-mixin   # every mixin: openheron-kit-<vendor>:0.0.7
 ```
 
 ★ 两者都会导出到本地 docker store。不导出的话本地就没有镜像可供校验，
@@ -128,9 +128,9 @@ make kit-push kit-push-mixin
 ★ 三张镜像落在 Docker Hub 的 `ouranoshong/` 名下：
 
 ```
-docker.io/ouranoshong/openheron-kit:0.0.6
-docker.io/ouranoshong/openheron-kit-deepseek:0.0.6
-docker.io/ouranoshong/openheron-kit-openai:0.0.6
+docker.io/ouranoshong/openheron-kit:0.0.7
+docker.io/ouranoshong/openheron-kit-deepseek:0.0.7
+docker.io/ouranoshong/openheron-kit-openai:0.0.7
 ```
 
 ★ **仓库得先存在。** Docker Hub 的 API 可以建：
@@ -185,7 +185,7 @@ mixin 只是声明。
 ```yaml
 args:
   version:
-    default: "0.0.6"
+    default: "0.0.7"
     pattern: '^[0-9]+(\.[0-9A-Za-z-]+)*$'
     description: openheron release to install
     buildArg: OPENHERON_VERSION

@@ -55,8 +55,8 @@ them.
 ## 2. Build
 
 ```sh
-make kit         # the workload: openheron-kit:0.0.6
-make kit-mixin   # every mixin: openheron-kit-<vendor>:0.0.6
+make kit         # the workload: openheron-kit:0.0.7
+make kit-mixin   # every mixin: openheron-kit-<vendor>:0.0.7
 ```
 
 ★ Both export into the local docker store. Without the export there is no
@@ -139,9 +139,9 @@ unable to reach a model — the Kit runs, and every call comes back 401.
 ★ The three land on Docker Hub under `ouranoshong/`:
 
 ```
-docker.io/ouranoshong/openheron-kit:0.0.6
-docker.io/ouranoshong/openheron-kit-deepseek:0.0.6
-docker.io/ouranoshong/openheron-kit-openai:0.0.6
+docker.io/ouranoshong/openheron-kit:0.0.7
+docker.io/ouranoshong/openheron-kit-deepseek:0.0.7
+docker.io/ouranoshong/openheron-kit-openai:0.0.7
 ```
 
 ★ **The repositories have to exist first.** Docker Hub's API creates them:
@@ -203,7 +203,7 @@ matter:
 ```yaml
 args:
   version:
-    default: "0.0.6"
+    default: "0.0.7"
     pattern: '^[0-9]+(\.[0-9A-Za-z-]+)*$'
     description: openheron release to install
     buildArg: OPENHERON_VERSION
