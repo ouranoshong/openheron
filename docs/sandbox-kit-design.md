@@ -1511,7 +1511,9 @@ the entrypoint Compose calls, not a command that calls Compose. The protocol
 is one-directional: Compose resolves the file, then runs
 `<provider> compose --project-name=<project> up <service>`, and the provider
 answers over its own stdin/stdout with one JSON line per message
-(`compose/pkg/compose/plugins.go:552-597`).
+(`compose/pkg/compose/plugins.go:552-598`). The service configuration the
+provider needs comes back over the same channel, as the answer to a
+`get-service-config` request (`compose/pkg/compose/plugins.go:439-455`).
 
 ★ **So the error message was the provider's, not Compose's.** Running
 `sbx compose up` by hand fails with
@@ -1556,7 +1558,7 @@ created.
 ★ **`provider.options` is a dead channel here, and that is Compose's doing.**
 Compose only forwards an option as a command-line flag when the provider's
 metadata declares that parameter
-(`compose/pkg/compose/plugins.go:571-580`); `sbx compose metadata` declares
+(`compose/pkg/compose/plugins.go:580-586`); `sbx compose metadata` declares
 **zero** parameters for `up`. The values still reach the provider — they are in
 the service configuration the provider fetches over `get-service-config` — but
 the provider ignores them. Probed with `agent`, `kits`, `workspace`,

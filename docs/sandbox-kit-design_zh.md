@@ -1324,7 +1324,9 @@ agent 读了文件、跑了那个失败的测试、**在动手改之前先问了
 Compose 解析完文件，就运行
 `<provider> compose --project-name=<project> up <service>`，
 provider 用自己的 stdin/stdout 一行一个 JSON 消息来应答
-（`compose/pkg/compose/plugins.go:552-597`）。
+（`compose/pkg/compose/plugins.go:552-598`）。provider 需要的那个服务配置，
+也走同一条通道回来 —— 它是 `get-service-config` 请求的应答
+（`compose/pkg/compose/plugins.go:439-455`）。
 
 ★ **所以那条报错是 provider 抛的，不是 Compose 抛的。** 手工跑
 `sbx compose up` 会失败：
@@ -1365,7 +1367,7 @@ services:
 
 ★ **`provider.options` 在这条路上是死通道，而这是 Compose 造成的。**
 只有当 provider 的 metadata 声明了某个参数，Compose 才会把对应的 option
-转成命令行参数传给 provider（`compose/pkg/compose/plugins.go:571-580`）；
+转成命令行参数传给 provider（`compose/pkg/compose/plugins.go:580-586`）；
 而 `sbx compose metadata` 给 `up` 声明的参数是**零个**。
 这些值其实送到了 provider 手上 —— 它们就在 provider 通过 `get-service-config`
 取回的那份服务配置里 —— 但 provider 不理它们。
