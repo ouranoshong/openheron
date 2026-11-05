@@ -37,11 +37,10 @@ bun --version      # the frontend toolchain: make kit runs make build
 （设计的 §2.14）。
 
 ★ **要一个自带的 builder。** 构建需要 container driver 的 buildx builder，
-`make kit` 会在缺的时候建一个：
+每个 Kit 目标都会在缺的时候建一个：
 
 ```sh
-docker buildx inspect kit-builder >/dev/null 2>&1 || \
-  docker buildx create --name kit-builder --driver docker-container --bootstrap
+make kit-builder
 ```
 
 ★ **为什么不用默认 builder。** `docker` driver 配经典镜像存储会丢掉

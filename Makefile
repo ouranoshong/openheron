@@ -156,10 +156,18 @@ KIT_IMAGE  ?= openheron-kit:$(KIT_VERSION)
 KIT_BUILDER ?= kit-builder
 KIT_REPO   ?= docker.io/ouranoshong/openheron-kit
 
-.PHONY: kit
-kit: build ## Build the openheron workload Kit image (needs docker buildx)
+.PHONY: kit-builder
+kit-builder: ## Make sure the container-driver builder exists
 	@docker buildx inspect $(KIT_BUILDER) >/dev/null 2>&1 || \
 		docker buildx create --name $(KIT_BUILDER) --driver docker-container --bootstrap
+# ★ Every Kit target needs this builder, and a fresh machine has none: the
+#   `docker` driver is the default, and it is the one that drops the
+#   manifest annotations — without which an image is not a Kit any more.
+#   Creating it here rather than in one target is what lets `kit-push` run on
+#   a CI runner, where nothing has been set up before it.
+
+.PHONY: kit
+kit: build kit-builder ## Build the openheron workload Kit image (needs docker buildx)
 	cp $(BIN) $(KIT_WORKLOAD)/openheron
 	rm -rf $(KIT_STAGE) && cp -r $(KIT_WORKLOAD) $(KIT_STAGE)
 	sed -i 's|^    default: .*|    default: "$(KIT_VERSION)"|' $(KIT_STAGE)/openheron.yaml
@@ -177,7 +185,7 @@ kit: build ## Build the openheron workload Kit image (needs docker buildx)
 #   from this same directory.
 
 .PHONY: kit-mixin
-kit-mixin: ## Build the credential mixin images (declaration only, no content)
+kit-mixin: kit-builder ## Build the credential mixin images (declaration only, no content)
 	@for d in $(KIT_MIXINS); do \
 		name=$$(basename $$d); \
 		vendor=$${name#openheron-}; \
@@ -186,7 +194,7 @@ kit-mixin: ## Build the credential mixin images (declaration only, no content)
 	done
 
 .PHONY: kit-push
-kit-push: build ## Publish the workload Kit to the registry (needs docker login)
+kit-push: build kit-builder ## Publish the workload Kit to the registry (needs docker login)
 	cp $(BIN) $(KIT_WORKLOAD)/openheron
 	rm -rf $(KIT_STAGE) && cp -r $(KIT_WORKLOAD) $(KIT_STAGE)
 	sed -i 's|^    default: .*|    default: "$(KIT_VERSION)"|' $(KIT_STAGE)/openheron.yaml
@@ -196,7 +204,7 @@ kit-push: build ## Publish the workload Kit to the registry (needs docker login)
 	$(MAKE) kit-tag-latest
 
 .PHONY: kit-push-mixin
-kit-push-mixin: ## Publish the credential mixin images to the registry
+kit-push-mixin: kit-builder ## Publish the credential mixin images to the registry
 	@for d in $(KIT_MIXINS); do \
 		name=$$(basename $$d); \
 		vendor=$${name#openheron-}; \

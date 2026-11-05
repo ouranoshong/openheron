@@ -38,11 +38,10 @@ bun --version      # the frontend toolchain: make kit runs make build
 documents is a mode openheron cannot use (§2.14 of the design).
 
 ★ **A builder of its own.** The build needs a container-driver buildx
-builder, and `make kit` creates one if it is missing:
+builder, and every Kit target creates one if it is missing:
 
 ```sh
-docker buildx inspect kit-builder >/dev/null 2>&1 || \
-  docker buildx create --name kit-builder --driver docker-container --bootstrap
+make kit-builder
 ```
 
 ★ **Why not the default builder.** The `docker` driver with the classic
