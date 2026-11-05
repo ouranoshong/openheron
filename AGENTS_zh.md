@@ -35,8 +35,10 @@
 > ★ 有一个目录不是文档组：**`sandbox-kit/`** 装着把 openheron 打包成沙箱 workload 的
 > Docker Sandbox Kit —— `openheron/`（workload：描述文件、内容配方、入口脚本），
 > 外加每个厂商一份 mixin（`openheron-deepseek/`、`openheron-openai/`：模型凭据与它的网络规则）。
-> 它们是**独立产物**：`make release` 仍然只产出那六个静态二进制，别的一概没有。设计见
-> `docs/sandbox-kit-design.md`，构建用 `make kit`。
+> `sandbox-kit/acceptance/run.sh` 是验收跑批 —— 设计里的每条断言都是一项检查，
+> 有一项不过脚本就非零退出 —— `sandbox-kit/acceptance/results/` 存着跑批记录。
+> 它们是**独立产物**：`make release` 仍然只产出那六个静态二进制，别的一概没有。
+> 设计见 `docs/sandbox-kit-design.md`，构建用 `make kit`。
 > `docs/run-lifecycle-design.md` 是一份**提案**，不是描述。
 > 它的 §1 讲的是代码现状 —— 今天一轮绑在一条 SSE 连接上 —— §2 往后讲的是
 > 要建成什么样：run 变成一行持久事实、租约配 fence、连接降级为订阅者。

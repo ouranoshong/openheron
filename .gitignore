@@ -70,6 +70,9 @@ web/dist/*
 # Probe / temporary artifacts
 *.log
 probe*.txt
+# ★ The acceptance records are results, not probe artifacts: they are the
+#   reproducible evidence of the measurement, and they belong in the tree.
+!sandbox-kit/acceptance/results/*.log
 
 # E2E (Playwright)
 /web/test-results/

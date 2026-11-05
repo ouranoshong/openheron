@@ -22,11 +22,13 @@ The design behind it — and every assumption it rests on — is
 
 | File | What it is |
 |---|---|
-| `openheron/openheron.yaml` | the workload descriptor: the launch contract, the egress posture, the startup hook |
+| `openheron/openheron.yaml` | the workload descriptor: the launch contract, the port, the egress posture, the startup hook |
 | `openheron/openheron.dockerfile` | the content recipe: the base image and the binary |
 | `openheron/entrypoint.sh` | the launch script: enter the workspace, seed the config, exec the server |
 | `openheron-deepseek/openheron-deepseek.yaml` | the DeepSeek mixin: declaration only, no content, no Dockerfile |
 | `openheron-openai/openheron-openai.yaml` | the OpenAI mixin: the same, for another vendor |
+| `acceptance/run.sh` | the acceptance run: every claim this design makes, as a check that fails the script |
+| `acceptance/results/` | recorded runs |
 
 ## Requirements
 
@@ -63,7 +65,7 @@ printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
     --placeholder proxy-managed --value-stdin
 
 sbx run ./sandbox-kit/openheron --kit ./sandbox-kit/openheron-deepseek \
-    --name openheron .
+    --name openheron ~/my-project
 ```
 
 Two vendors — the mixins compose, and each one brings its own key and its own
@@ -80,21 +82,40 @@ printf '%s' "$OPENAI_API_KEY" | sbx secret set-custom \
 sbx run ./sandbox-kit/openheron \
     --kit ./sandbox-kit/openheron-deepseek \
     --kit ./sandbox-kit/openheron-openai \
-    --name openheron .
+    --name openheron ~/my-project
 ```
 
 Without any mixin — the key goes into the sandbox:
 
 ```sh
 sbx run ./sandbox-kit/openheron --name openheron \
-    --env DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" .
+    --env DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" ~/my-project
 ```
 
-Then publish the server's port and open it:
+★ **The run above opens an agent session, and the session is what starts the
+server.** The Kit's entrypoint is the agent's launch command, so a detached
+run (`sbx run … --detach`) creates the sandbox and runs the startup hooks —
+and leaves the server down. Let the session open, watch the server come up,
+then detach from it: the Kit declares `long-running@1`, so the workload keeps
+running when no session remains attached.
+
+★ **The port is published for you.** The Kit declares
+`com.docker.sandbox/port@1` for container port `8080`, so the runtime
+publishes it on an ephemeral loopback port at start time. Read it with:
 
 ```sh
-sbx ports openheron --publish 8080:8080
+sbx ports openheron
 ```
+
+```
+HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
+127.0.0.1   32772       8080           tcp
+::1         32772       8080           tcp
+```
+
+★ There is nothing to publish by hand. `sbx ports --publish` still works, but
+a Kit cannot pin a host port — the runtime allocates it, because two Kits
+asking for the same one would collide.
 
 The configuration lands in `<workspace>/.openheron` — on your mount, not
 inside the sandbox — so you can edit `llm/deepseek.yaml`, `agents/main.md` and
@@ -173,17 +194,41 @@ root holds a usable model it reuses it and ignores `--provider` — so a second
 vendor's `llm/*.yaml` is written by hand on the mount, or through the
 configuration editor.
 
+## Acceptance
+
+The measurement is a script, not a transcript:
+
+```sh
+sandbox-kit/acceptance/run.sh                       # one vendor
+sandbox-kit/acceptance/run.sh --build               # and build the Kit first
+MIXINS="sandbox-kit/openheron-deepseek sandbox-kit/openheron-openai" \
+  sandbox-kit/acceptance/run.sh                     # two vendors
+```
+
+It runs the whole thing — preflight, a clean sandbox, the configuration on the
+mount, the credential, a real model call, the shape of the stream, the
+client's departure, and the port from every vantage point — and exits
+non-zero if any check fails.
+
+★ Two runs are recorded under `acceptance/results/`: the single vendor case
+and the two-mixin case. Both are **21 checks, 21 passed**.
+
 ## What has been measured
 
-Two things this Kit depends on were settled in a real sandbox on 2026-11-04
-(`sbx` v0.51.0, Linux on WSL2):
+Three things this Kit depends on were settled in a real sandbox on 2026-11-05
+(`sbx` v0.51.0, Linux on WSL2, a Kit built from a clean clone of `develop`):
 
 - **`WORKSPACE_DIR` is injected** into the workload's environment, and it is
   the host's workspace path — the same path the workspace is mounted at. The
   hook and the entrypoint can both rely on it.
-- **The port forwarding does not buffer.** The SSE stream arrived as 1339
-  frames over 10.3 seconds, the first at +21 ms — the model streams to the
-  browser as it happens.
+- **The port forwarding does not buffer.** The SSE stream arrived as ~1000
+  frames over ten seconds, the first at a few milliseconds — the model
+  streams to the browser as it happens.
+- ★ **The Kit has to declare the port it serves on.** It did not, and that was
+  the whole of the "the port forwarding is unreliable" symptom: with no
+  `port@1` the runtime had no service to forward to, and the client saw a
+  connection accepted and then closed. The forwarding layer was never the
+  problem.
 
 ★ Everything else that was measured — both credential routes, the two-vendor
 composition, the ownership of the written files — is in

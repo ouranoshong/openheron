@@ -47,6 +47,29 @@ capabilities:
   # ★ openheron is a server, not a session: it has to come up, serve and stay up.
   - type: com.docker.sandbox/long-running@1
 
+  # ★ The port the server answers on. Without this entry the runtime has no
+  #   service to publish: the host gets no forwarder into the sandbox, and
+  #   `sbx ports --publish` can only bind a host socket that has nothing
+  #   behind it (the proxy answers 501).
+  #
+  # ★ The host side is the runtime's to allocate — a Kit cannot pin a host
+  #   port, because two Kits asking for the same one would collide. The
+  #   runtime publishes it on an ephemeral loopback port at start time, so
+  #   no separate `sbx ports --publish` step is needed.
+  #
+  # ★ family is omitted, so it is ipv4 — and that is truthful: openheron
+  #   listens on "[::]:8080", a dual-stack socket that accepts IPv4
+  #   connections too, so a client reaching the published IPv4 binding
+  #   reaches the service. Declaring "dual" would say the same thing, but
+  #   the runtime does not implement it yet ("family \"dual\" is not
+  #   supported yet; omit it"), and a rejected descriptor is a sandbox that
+  #   never starts.
+  - type: com.docker.sandbox/port@1
+    config:
+      name: http
+      container: 8080
+      transport: tcp
+
   # ★ The Kit does not restrict what the agent may reach. The microVM is the
   #   boundary; the egress rules are the host's to set (sbx policy) and the
   #   organization's to govern. "*" is the portable form of "no restriction

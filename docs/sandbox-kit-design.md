@@ -292,6 +292,11 @@ version: "${{ kit.args.version }}"
 capabilities:
   - type: com.docker.sandbox/sbx@1
   - type: com.docker.sandbox/long-running@1
+  - type: com.docker.sandbox/port@1
+    config:
+      name: http
+      container: 8080
+      transport: tcp
   - type: com.docker.sandbox/network-policy@1
     config:
       runtime:
@@ -529,30 +534,38 @@ where its image says it runs.
 ★ So the Kit has one job the Dockerfile alone cannot do: make the process
 **start in the workspace**. Everything else in this section follows from that.
 
-The environment the container gets:
+The environment the container gets — and what the Kit does **not** set:
 
-- `LISTEN_ADDR` — consumed at `main.go:217`.
-- `OPENHERON_CONFIG_DIR` — the config root, per the three-level rule (§1.7).
-  It has to name the workspace, or the default lands in the image's workdir.
-- `DATA_DIR` — consumed at `main.go:218`. Point it at a volume when the
-  sessions should outlive the sandbox (§2.9).
-- `OPENHERON_PORT` — the arg exported by the descriptor (§2.3). openheron does
-  not read it; it is exported to the container, and the entrypoint turns it
-  into `LISTEN_ADDR`.
-- `HTTPS_PROXY` and `HTTP_PROXY` — the runtime's proxy. openheron honors them
-  (§2.7), and they are what makes the credential swap work (§2.8).
-- `WORKSPACE_DIR` — where the workspace is mounted. The specification's own
-  `lifecycle@1` example passes it to a hook by that name; whether the
-  **workload** sees it in its environment is the open question below.
+★ **The Kit sets no openheron environment variable at all.** The entrypoint
+`cd`s into the workspace, and openheron's own defaults land where they belong
+from there:
 
-★ `main.go:459-464` (`override`) is what makes the first three possible:
-`LISTEN_ADDR`, `DATA_DIR` and `PROJECT_ROOT` are read from the environment
-**before** the config file, so the container can be shaped without editing a
-config file.
+- `PROJECT_ROOT` — the working directory, by default
+  (`agentkit/spec/config.go:157-164`). The entrypoint's `cd` is what puts it on
+  the mount.
+- the config root — `<projectRoot>/.openheron`, by default
+  (`agentkit/spec/config.go:170-177`), so it is the workspace's own
+  `.openheron`, on the mount.
+- `DATA_DIR` — `state` under the config root, by default
+  (`agentkit/spec/config.go:224-232`), so the sessions live on the mount too
+  (§2.9).
+- `LISTEN_ADDR` — the server configuration's `ListenAddr`, by default
+  (`main.go:217`): `:8080`.
 
-★ **`$PROJECT_ROOT` is deliberately absent from that list.** It does not move
-the config root (§1.7), so setting it would give the container two roots
-instead of one.
+★ The variables that come from the **runtime** rather than from the Kit:
+`HTTPS_PROXY` and `HTTP_PROXY` (openheron honors them, §2.7, and they are
+what makes the credential swap work, §2.8), and `WORKSPACE_DIR` — the path
+the workspace is mounted at. `WORKSPACE_DIR` is also what the startup hook
+declares (§2.5).
+
+★ **`main.go:459-464` (`override`) is what makes the other arrangement
+possible.** `LISTEN_ADDR`, `DATA_DIR` and `PROJECT_ROOT` are read from the
+environment **before** the config file, so a user who wants the sessions on a
+volume (§2.9) sets `DATA_DIR` and nothing else changes.
+
+★ **`$PROJECT_ROOT` is deliberately absent from what the Kit sets.** It does
+not move the config root (§1.7), so setting it would give the container two
+roots instead of one.
 
 #### The first run: initialization
 
@@ -612,6 +625,68 @@ carry it, and the specification does not say. Two shapes follow:
 ★ Either way the entrypoint stays a two-line script, and the difference
 between the two shapes is one line in it. §4's first question is which shape
 to build against; §5's second question is how to observe the answer.
+
+★ **Measured: the first shape.** The workload's environment carries
+`WORKSPACE_DIR` (§6.3), so the entrypoint does everything on its own and the
+hook is a redundancy, not a dependency.
+
+#### The port the server answers on
+
+★ **A workload that serves has to declare the port.** `com.docker.sandbox/port@1`
+is the capability that says "there is a service here"; without it the runtime
+has no service to forward to, and the sandbox is reachable but silent.
+
+```
+error: resolve kits: kit "./sandbox-kit/openheron": effective v3 descriptor:
+  capabilities[2].config.container: 8080 is required
+```
+
+★ The declaration is four lines, and the host side is **not** among them: the
+runtime allocates the host port itself, on an ephemeral loopback port, at
+start time. A Kit cannot pin a host port — two Kits asking for the same one
+would collide — so the user reads the port from `sbx ports` instead of
+choosing it.
+
+```
+✓ http — published localhost:32772 -> 8080/tcp
+```
+
+★ **The family is left out, and the omission is the truth.** The default is
+`ipv4`; openheron listens on `[::]:8080`, a dual-stack socket that accepts
+IPv4 connections too, so a client reaching the published IPv4 binding reaches
+the service. Declaring `dual` says the same thing and is refused:
+
+```
+error: resolve kits: kit "./sandbox-kit/openheron": port 8080: family "dual"
+  is not supported yet; omit it
+```
+
+★ **A descriptor the runtime rejects is a sandbox that never starts**, so the
+Kit declares what the runtime implements today and the capability's page
+remains the place where the difference is recorded.
+
+#### What actually starts the server
+
+★ **The entrypoint is the agent's launch command, and an agent session is
+what launches it.** The specification is explicit: `sbx@1` requires the host
+not to let the image's entrypoint become PID 1, and to read the entrypoint as
+the command it runs later. So:
+
+- `sbx run … --detach` creates the sandbox, runs the startup hooks, and opens
+  **no agent session** — so nothing starts the server. The sandbox comes up
+  configured and silent.
+- `sbx run …` without `--detach` opens the agent session, and the server
+  starts.
+
+★ **And it keeps running.** `long-running@1` is what makes that true: the
+runtime must not stop a sandbox that holds it merely because no session
+remains attached. So the client may detach — the interactive session has a
+detach gesture for exactly that — and the server stays up, serving, until the
+sandbox is stopped or removed.
+
+★ This is the whole shape of running openheron as a sandbox workload: **the
+session starts it, the capability keeps it.** A user who wants the service up
+and unattended opens the session once and detaches from it.
 
 ### 2.6 Path semantics inside the VM
 
@@ -1015,6 +1090,17 @@ These are decided; the Kit in `sandbox-kit/` is built on them.
    host's policy and the organization's rules are the levers, and they sit
    above the Kit in the enforcement order. A Kit that restricted egress would
    buy friction rather than safety — and the friction lands on the agent.
+5. **The port is declared, and the host side is the runtime's.** The workload
+   declares `com.docker.sandbox/port@1` for container port `8080` (§2.5). The
+   runtime publishes it on an ephemeral loopback port at start time; the user
+   reads it from `sbx ports`. A Kit cannot pin a host port, and the Kit does
+   not need one. **The family is left at its default**, because the runtime
+   does not implement `dual` yet and a rejected descriptor is a sandbox that
+   never starts.
+6. **The session starts the server; the capability keeps it.** The entrypoint
+   is the agent's launch command, so a detached `sbx run` leaves the sandbox
+   configured and silent (§2.5). `long-running@1` is what lets the client
+   detach afterwards without the server going down with it.
 
 ### 4.2 Still open
 
@@ -1096,6 +1182,10 @@ environment was captured from inside the sandbox and read on the host.
 | Do two mixins with the same service compose? | **No** — "one credential has one owner" |
 | Does the port forwarding buffer the SSE stream? | **No** — 1339 frames over 10.3 s, the first at +21 ms |
 | Who owns the files the agent writes? | The host user — the VM's uid `1000` is the host's uid `1000` (§2.14) |
+| Does the Kit declare the port it serves on? | **No — that was the defect.** §6.5 |
+| Does the runtime publish the declared port? | **Yes** — `✓ http — published localhost:32772 -> 8080/tcp`, on an ephemeral loopback port |
+| Does a detached run start the server? | **No** — the entrypoint is the agent's launch command, and `--detach` opens no session (§2.5) |
+| Does the server outlive its client? | **Yes** — `long-running@1` keeps it up; the health endpoint still answered 200 after the client was gone |
 
 ★ **Both credential routes were measured.** With the placeholder
 (`--placeholder proxy-managed`) the container held `DEEPSEEK_API_KEY=proxy-managed`
@@ -1141,7 +1231,10 @@ model; only the first keeps the key out of the VM (§2.8).
   workload is up: the same Kit answered 1339 SSE frames earlier in the same
   session and stopped answering later, with no change to the Kit. Re-publishing
   the port sometimes brings it back. It is a host-side symptom, and the Kit
-  must not be read as the cause.
+  must not be read as the cause. ★ **This entry was wrong.** §6.5 measures the
+  same symptom and gives it a different cause: the Kit declared no
+  `port@1`, so there was no service for the runtime to forward to. The
+  forwarding layer was never the problem.
 - ★ **The host needs `/dev/kvm`,** so the user has to be in the `kvm` group.
   The daemon is the process that opens it, not the CLI.
 - ★ **`sbx run --name` restarts the sandbox; it does not rebuild the
@@ -1211,3 +1304,102 @@ lifetime.** A variable baked in at create stays with the sandbox; one applied
 to a session applies to that session only. Recreating the sandbox drops the
 former and keeps the latter's own rules.
 
+
+### 6.5 The port path, measured
+
+★ **This is where the earlier round went wrong, and the correction is the most
+useful thing this section has to say.** A previous run reported the port
+forwarding as "unreliable on a WSL2 host": the proxy dialed the bridge
+gateway, got a connection refused, and the same Kit answered 1339 SSE frames
+earlier in the same session. That reading blamed the host. It was wrong, and
+the Kit was the cause.
+
+★ **The Kit declared no `port@1`.** The workload serves HTTP on `8080` and
+never said so. Without the capability the runtime has no service to forward
+to, so it published nothing, and a hand-made `sbx ports --publish` could only
+bind a host socket with nothing behind it — which is exactly what a client
+sees as "connected, then nothing":
+
+```
+HTTP/1.1 501 Not Implemented
+Connection: close
+Content-Length: 0
+Content-Type: application/json
+```
+
+★ **Two things had to be true for the port to work**, and the second one is
+the part the first round never tested:
+
+1. **The Kit declares the port.** `com.docker.sandbox/port@1`, container `8080`
+   (§2.5). With it, the runtime publishes the service itself, on an ephemeral
+   loopback port, at start time — no `sbx ports --publish` step, because a
+   Kit cannot pin a host port.
+2. **An agent session has been opened.** The entrypoint is the agent's launch
+   command (§2.5), and `--detach` opens no session — so a detached sandbox is
+   configured and silent. The server starts when the session opens, and
+   `long-running@1` keeps it running when the client detaches afterwards.
+
+★ **The measurement, from the host, on the same published port:**
+
+| Path | Result |
+|---|---|
+| host shell, `127.0.0.1:<published>` | **200** |
+| host shell, `[::1]:<published>` | **200** |
+| the daemon's own network namespace, `127.0.0.1:<published>` | **200** |
+| the daemon's own namespace, `172.17.0.1:<published>` | refused |
+| the host's Docker bridge gateway, `172.17.0.1:<published>` | **502** |
+
+★ **The last two rows are not failures; they are two different address
+spaces.** `172.17.0.1` is the Docker bridge gateway in the namespace the
+daemon runs in, and the daemon resolves the sandbox's service address in its
+own namespace — not in the guest's. The guest's own forwarder answers 502
+when it has no backend, which is what a client sees when it reaches the wrong
+`172.17.0.1`. The published loopback port is the supported path, and all
+three rows above it agree.
+
+★ **The runtime's log names the hop**, which is how the diagnosis was made:
+
+```
+"msg":"TCP proxy failed to dial backend","host_address":"127.0.0.1:32768",
+"container_address":"172.17.0.1:8080",
+"error":"connect tcp 172.17.0.1:8080: connection was refused"
+```
+
+★ Eight such failures belonged to the sandbox whose server was never started;
+the sandbox that actually served logged **none**. So the counter is the
+diagnostic: "the forwarding layer is flaky" and "nothing is listening behind
+the binding" look identical from the client, and only the log separates them.
+
+### 6.6 The acceptance run
+
+★ **The measurement is a script, not a transcript.** `sandbox-kit/acceptance/run.sh`
+runs the whole thing — preflight, a clean sandbox, the mount, the credential,
+a model call, the stream's shape, the client's departure, and the port from
+every vantage point — and exits non-zero if any check fails. It is the
+repeatable form of everything in this section.
+
+★ Two runs are recorded under `sandbox-kit/acceptance/results/`: the single
+vendor case and the two-mixin case. Both are **21 checks, 21 passed**. The
+numbers they carry:
+
+| | single vendor | two mixins |
+|---|---|---|
+| published port | `127.0.0.1:32775 -> 8080/tcp` | `127.0.0.1:32776 -> 8080/tcp` |
+| SSE frames | 772 | 933 |
+| first frame | +15 ms | +16 ms |
+| last frame | +7795 ms | +8615 ms |
+| frame span | 7780 ms | 8599 ms |
+| model call | answered | answered |
+| server after the client left | 200 | 200 |
+
+★ **The frame span is the acceptance criterion that matters.** A span of
+several seconds with the first frame at a few milliseconds means the frames
+arrived as the answer was generated. A short span with a late last frame would
+mean the forwarder held the whole body and released it at the end — the
+failure §2.10 is about.
+
+★ **The clean build is part of it.** The recorded run used a Kit built from a
+fresh clone of `develop` with a **builder of its own**, so the build cache was
+empty: the 105 MB base image and the `v0.0.6` release asset were fetched
+again, and the recipe was proven to work from scratch rather than from
+whatever a previous round left in the cache.
