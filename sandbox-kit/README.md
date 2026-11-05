@@ -62,6 +62,16 @@ make kit-check   # kit-tck validate against the specification
 
 ## Run
 
+★ **A mixin does not have to be an image.** It is a declaration, so a
+directory holding one YAML file is a complete mixin — the runtime builds the
+declaration-only image from it. Copy `openheron-deepseek/openheron-deepseek.yaml`
+into a directory of your own and point `--kit` at that, and you never build
+or publish anything. The tutorial gives the whole file.
+
+★ **Where a Kit may come from is a policy.** The runtime's allowlist holds
+`docker.io/` and `dhi.io/` by default; a Kit from anywhere else is refused
+with the command that would allow it.
+
 One vendor:
 
 ```sh
@@ -70,6 +80,15 @@ printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
     --placeholder proxy-managed --value-stdin
 
 sbx run ./sandbox-kit/openheron --kit ./sandbox-kit/openheron-deepseek \
+    --name openheron ~/my-project
+```
+
+★ **From a packaged image instead of the source tree**, the workload is an
+OCI reference and the mixin stays a file:
+
+```sh
+sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
+    --kit ./openheron-deepseek \
     --name openheron ~/my-project
 ```
 

@@ -311,6 +311,30 @@ error: resolve kits: merge: .../openheron-deepseek (capabilities[1]) and
   one credential has one owner
 ```
 
+★ **mixin 是一个文件，不是一镜像。** 描述文件就是它的全部内容：
+一个只放着一个 YAML 文件的目录，就是一份完整的 mixin，
+运行时自己把这份纯声明构建成镜像。这正是 mixin 能被从没构建过任何东西的
+用户用起来的原因 —— 没有 Dockerfile，没有 `make`，也没有 registry 可推。
+实测：手写的目录与构建出来的镜像被同样地消费（§6）。
+
+★ **Kit 能从哪来是策略，不是细节。** 运行时维护一份 Kit 来源的允许列表，
+默认只有两项：
+
+```
+["docker.io/","dhi.io/"]
+```
+
+★ 别的来源会被拒，而拒绝的报错里就写着想放行它的命令。
+这在两个方向上都是有意的：Kit 是可执行的内容，所以它从哪来是宿主做的决定 ——
+而想用自家 registry 的用户需要的是管理员，而不是一个开关。
+
+★ **registry 必须提供 HTTPS。** 没有明文 HTTP 的选项，失败信息也会这么讲：
+
+```
+error: resolve kits: kit "…": fetch manifest: Get "https://…/v2/…/manifests/…":
+  http: server gave HTTP response to HTTPS client
+```
+
 ★ **mixin 不带初始化 hook** —— 这是实测结论，不是偏好。
 `openheron init` 每个配置根只维护**一份** provider 配置：
 一旦根里已有可用的模型，它就复用它并忽略 `--provider`、`--env`、`--base-url`
@@ -1032,6 +1056,10 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
 | 发布版 Kit 在沙箱里跑得起来吗？ | **能** —— startup hook 把配置写到挂载上，服务在自己的数据目录里建出了 state |
 | 两个厂商 mixin 能组合吗？ | **能** —— 两个哨兵都在容器里，DeepSeek 那边回了 200 |
 | 两个同 service 的 mixin 能组合吗？ | **不能** —— "one credential has one owner" |
+| mixin 能就是一个 YAML 文件吗？ | **能** —— 手写的目录与构建出来的镜像被同样地消费 |
+| 打包好的 Kit 能按 OCI 引用消费吗？ | **能** —— Docker 官方发布的 v3 Kit 被拉取并跑起来 |
+| 默认允许来自别的 registry 的 Kit 吗？ | **不允许** —— `kit.allowedSources` 只有 `docker.io/` 与 `dhi.io/` |
+| registry 引用必须是 HTTPS 吗？ | **是** —— "http: server gave HTTP response to HTTPS client" |
 | 端口转发会不会缓冲 SSE？ | **不会** —— 10.3 秒里 1339 帧，首帧 +21ms |
 | agent 写出的文件归谁？ | 归宿主用户 —— VM 的 uid `1000` 就是宿主的 uid `1000`（§2.14） |
 | Kit 声明了它服务的那个端口吗？ | **没有 —— 那就是缺陷本身。** §6.5 |
@@ -1087,6 +1115,13 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
   于是探针看起来像"没跑"。
 - ★ **配方指名的是一个已发布的 release**（`v0.0.6`），所以谁都能构建这个 Kit。
   上面的实测用的是本地构建的二进制 —— 因为当时配方指名的那个 release 还不存在。
+- ★ **`sbx kit pack` 是另一套语法。** 它要的是 `spec.yaml` ——
+  v1/v2 的产物格式 —— 并且拒绝 v3 的 Kit 目录。
+  所以 v3 的 Kit 是以 OCI 镜像或目录的形式流传的，不是 ZIP。
+- ★ **服务那个 socket 的守护进程，才是需要 `/dev/kvm` 的那一个。**
+  CLI 在够不着守护进程时会自己拉起一个，而它继承的是调用者的用户组 ——
+  于是在一个 KVM 设备按组授权、而 CLI 的用户不在该组里的宿主上，
+  沙箱会报 "KVM error: Permission denied"，而守护进程自己看着一切正常。
 
 ### 6.3 `WORKSPACE_DIR` 是怎么来的
 

@@ -351,6 +351,33 @@ error: resolve kits: merge: .../openheron-deepseek (capabilities[1]) and
   one credential has one owner
 ```
 
+★ **A mixin is a file, not an image.** The descriptor is the whole content: a
+directory holding one YAML file is a complete mixin, and the runtime builds
+the declaration-only image from it. That is what makes a mixin usable by a
+user who has never built anything — there is no Dockerfile, no `make`, and no
+registry to publish to. Measured: a hand-written directory was consumed
+exactly like a built one (§6).
+
+★ **Where a Kit may come from is a policy, not a detail.** The runtime keeps
+an allowlist of Kit sources, and by default it holds two entries:
+
+```
+["docker.io/","dhi.io/"]
+```
+
+★ A Kit from anywhere else is refused, and the refusal names the command that
+would allow it. That is deliberate in both directions: a Kit is executable
+content, so where it comes from is a decision the host makes — and the user
+who wants a Kit from their own registry needs an administrator, not a flag.
+
+★ **A registry has to serve HTTPS.** There is no plain-HTTP option, and the
+failure says so:
+
+```
+error: resolve kits: kit "…": fetch manifest: Get "https://…/v2/…/manifests/…":
+  http: server gave HTTP response to HTTPS client
+```
+
 ★ **A mixin carries no initialization hook**, and that is a measured
 conclusion rather than a preference. `openheron init` maintains **one**
 provider configuration per configuration root: once the root holds a usable
@@ -1180,6 +1207,10 @@ environment was captured from inside the sandbox and read on the host.
 | Does the published Kit run in a sandbox? | **Yes** — the startup hook writes the configuration onto the mount and the server creates its data directory there |
 | Do two vendor mixins compose? | **Yes** — both sentinels were in the container, and the DeepSeek call returned 200 |
 | Do two mixins with the same service compose? | **No** — "one credential has one owner" |
+| Can a mixin be a plain YAML file? | **Yes** — a hand-written directory was consumed exactly like a built image |
+| Can a packaged Kit be consumed by OCI reference? | **Yes** — Docker's own published v3 Kit was pulled and ran |
+| Is a Kit from another registry allowed by default? | **No** — `kit.allowedSources` holds `docker.io/` and `dhi.io/` |
+| Does a registry reference have to be HTTPS? | **Yes** — "http: server gave HTTP response to HTTPS client" |
 | Does the port forwarding buffer the SSE stream? | **No** — 1339 frames over 10.3 s, the first at +21 ms |
 | Who owns the files the agent writes? | The host user — the VM's uid `1000` is the host's uid `1000` (§2.14) |
 | Does the Kit declare the port it serves on? | **No — that was the defect.** §6.5 |
@@ -1244,6 +1275,14 @@ model; only the first keeps the key out of the VM (§2.8).
 - ★ **The recipe names a published release** (`v0.0.6`), so anyone can build
   the Kit. The measurement above used a locally built binary instead, because
   the release the recipe named did not exist yet at the time.
+- ★ **`sbx kit pack` is the other grammar.** It wants a `spec.yaml` — the
+  v1/v2 artifact — and refuses a v3 Kit directory. So a v3 Kit travels as an
+  OCI image or as a directory, not as a ZIP.
+- ★ **The daemon that serves the socket is the one that needs `/dev/kvm`.**
+  The CLI starts a daemon of its own when it cannot reach one, and that one
+  inherits the invoking user's groups — so on a host where the KVM device is
+  group-owned and the CLI's user is not in that group, the sandboxes fail
+  with "KVM error: Permission denied" while the daemon itself looks healthy.
 
 ### 6.3 How `WORKSPACE_DIR` arrives
 
