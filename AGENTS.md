@@ -47,10 +47,12 @@ one — change one and change the other.
 > package openheron as a sandbox workload — `openheron/` (the workload: descriptor, content
 > recipe, entrypoint) and one mixin per vendor (`openheron-deepseek/`, `openheron-openai/`:
 > the model credential and its network rule). `sandbox-kit/TUTORIAL.md` is the user's
-> step-by-step guide (`TUTORIAL_zh.md` is its Chinese version),
-> `sandbox-kit/acceptance/run.sh` is the acceptance run — every claim the design makes, as a
-> check that fails the script. They are a **separate artifact**: `make release` still produces
-> the six static binaries and nothing else. Their design is `docs/sandbox-kit-design.md`, and
+> guide — run the published image — and `sandbox-kit/BUILDING.md` is the developer's —
+> build it, change the descriptor, publish a version (`TUTORIAL_zh.md` and
+> `BUILDING_zh.md` are the Chinese versions), `sandbox-kit/acceptance/run.sh` is the
+> acceptance run — every claim the design makes, as a check that fails the script.
+> They are a **separate artifact**: `make release` still produces the six static
+> binaries and nothing else. Their design is `docs/sandbox-kit-design.md`, and
 > `make kit` builds them.
 >
 > Write these documents **from the code, not from imagination**: every conclusion must point at a

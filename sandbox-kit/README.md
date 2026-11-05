@@ -15,18 +15,23 @@ which provider, which endpoint and which variable name are the user's
 business. Vendor mixins are **optional** and compose in any number — compose
 the ones you use, and leave the rest out.
 
-The design behind it — and every assumption it rests on — is
-[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md).
+## Start here
 
-★ **New to sandboxes?** [`TUTORIAL.md`](TUTORIAL.md) is the step-by-step
-guide for a user: start a sandbox, open it in a browser, work on the files.
-[`TUTORIAL_zh.md`](TUTORIAL_zh.md) is the Chinese version.
+| | |
+|---|---|
+| **I want to run openheron in a sandbox** | [`TUTORIAL.md`](TUTORIAL.md) — bind the key, start the sandbox, open it in a browser. The Chinese version is [`TUTORIAL_zh.md`](TUTORIAL_zh.md). |
+| **I want to change the Kit** | [`BUILDING.md`](BUILDING.md) — build it, change the descriptor, publish a new version. The Chinese version is [`BUILDING_zh.md`](BUILDING_zh.md). |
+| **I want to know why it is shaped this way** | [`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md) — the design, and every assumption it rests on, measured. |
+
+★ This file is the reference: what the three Kits carry, what the runtime
+enforces, and what was measured.
 
 ## Files
 
 | File | What it is |
 |---|---|
-| `TUTORIAL.md` / `TUTORIAL_zh.md` | the step-by-step guide for a user; this file is the reference |
+| `TUTORIAL.md` / `TUTORIAL_zh.md` | the guide for a user: run the published image |
+| `BUILDING.md` / `BUILDING_zh.md` | the guide for a developer: build, change, publish |
 | `openheron/openheron.yaml` | the workload descriptor: the launch contract, the port, the egress posture, the startup hook |
 | `openheron/openheron.dockerfile` | the content recipe: the base image and the binary |
 | `openheron/entrypoint.sh` | the launch script: enter the workspace, seed the config, exec the server |
@@ -74,6 +79,9 @@ docker.io/ouranoshong/openheron-kit:0.0.6
 docker.io/ouranoshong/openheron-kit-deepseek:0.0.6
 docker.io/ouranoshong/openheron-kit-openai:0.0.6
 ```
+
+★ [`BUILDING.md`](BUILDING.md) has the whole story: the builder, the
+descriptor, what the runtime enforces, and what to do when a build misbehaves.
 
 ## Run
 

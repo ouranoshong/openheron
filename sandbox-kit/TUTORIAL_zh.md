@@ -1,17 +1,23 @@
-# 用打包好的沙箱 Kit 跑 openheron
+# 在沙箱里跑 openheron
 
-写给手上已经有一个 **openheron 沙箱镜像**、想用 `sbx` 把它跑起来的用户 ——
-不需要源码树，不需要构建步骤，不需要 Dockerfile。
-
-★ **你要准备的东西只有两样。** 一个 **workload** Kit（打包好的镜像：
-openheron 服务和它的运行时）和一个 **mixin** Kit（声明式覆盖层：
-模型凭据，以及与它配套的网络规则）。mixin 就那么几行 YAML ——
-你可以自己写，第 2 步给出的是可以直接抄的原文。
+写给想把 openheron agent **跑在 Docker 沙箱里**的用户。你需要的是：一个
+Docker 账号、`sbx` CLI、一把模型密钥。**不需要**源码树、不需要构建、不需要
+Dockerfile —— 沙箱镜像已经发布好了。
 
 ★ **你得到的是什么。** 整个 openheron 进程 —— HTTP/SSE 服务、文件工具、
 shell 工具 —— 都跑在一个 microVM 里，你的宿主在边界之外。
 只有你指定的那个工作区穿过了边界，而它穿过的方式，
 就是宿主上的一个普通目录。
+
+★ **你要跑的是两样东西**，而运行时是分别解析它们的：
+
+| | 是什么 | 从哪拿 |
+|---|---|---|
+| **workload** | agent 干活的那个根文件系统，加上启动契约 | `docker.io/ouranoshong/openheron-kit:0.0.6` |
+| **mixin** | 模型凭据，以及与它配套的网络规则 | `docker.io/ouranoshong/openheron-kit-deepseek:0.0.6` |
+
+★ 没有 mixin 的沙箱会起得来，然后每个模型调用都回 401：
+凭据正是 mixin 带来的东西。
 
 ---
 
@@ -36,7 +42,7 @@ ls -l /dev/kvm          # must exist
 sudo usermod -aG kvm "$USER"
 ```
 
-**模型凭据。** openheron 从环境变量读密钥，但沙箱本身不该持有密钥。
+**模型密钥。** openheron 从环境变量读密钥，但沙箱本身不该持有密钥。
 在宿主上绑一次：
 
 ```sh
@@ -53,127 +59,11 @@ printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
 
 ---
 
-## 1. 两个 Kit
-
-| | 是什么 | 从哪来 |
-|---|---|---|
-| **workload** | agent 干活的那个根文件系统，加上启动契约 | 打包好的镜像，按 OCI 名字引用 |
-| **mixin** | 凭据，以及与它配套的网络规则 | 打包好的镜像，**或者你自己写的一个 YAML 文件** |
-
-★ **workload 是一个镜像引用。** 长这样：
-
-```
-docker.io/ouranoshong/openheron-kit:0.0.6
-```
-
-★ **它就发布在那里。** workload 与两份 mixin 都在 Docker Hub 上，
-在 openheron 这个项目名下。发布它们是：
-
-```sh
-make kit-push kit-push-mixin
-```
-
-★ —— 之后引用就是它们被推上去的那个名字。
-如果你的 Kit 来自你们自己的 registry，就换成那个名字。
-
-★ **mixin 不一定非得是镜像。** 它是一份声明，而声明就是一个 YAML 文件。
-如果你的 Kit 集合里带了 mixin 镜像，就照样用；
-如果没有，第 2 步给你的是可以直接保存的原文。
-
-★ **发布出去的是三张镜像**，一个 workload，每个厂商一份 mixin：
-
-```
-docker.io/ouranoshong/openheron-kit:0.0.6
-docker.io/ouranoshong/openheron-kit-deepseek:0.0.6
-docker.io/ouranoshong/openheron-kit-openai:0.0.6
-```
-
-★ 一个 Kit 集合是**一个 workload 加每个厂商一份 mixin** ——
-运行时是分别解析每个引用的，所以少了 mixin 的 workload 起得来，
-然后每个模型调用都回 401。
-
-★ **镜像可以从哪些地方来。** 默认情况下 `sbx` 只安装两个地方的 Kit：
-
-```sh
-sbx settings get kit.allowedSources
-```
-
-```
-["docker.io/","dhi.io/"]
-```
-
-★ 别的来源会被拒，报错里就带着修它的命令：
-
-```
-error: resolve kits: kit "…": its source is not in your allowlist;
-current kit.allowedSources: docker.io/, dhi.io/
-```
-
-★ 这是有意画的一条线：Kit 是可执行的内容，所以"它从哪来"是一个决定，
-不是细节。你的 Kit 在 Docker Hub 上就什么都不用做；
-在你们公司的 registry 上，就需要管理员放行那个来源。
-
-★ **registry 必须提供 HTTPS。** 没有明文 HTTP 的选项。
-
----
-
-## 2. 写 mixin
-
-把下面这段存成 `openheron-deepseek.yaml`，放在它自己专属的目录里：
-
-```yaml
-# syntax=docker/sandbox-kit:3
-schemaVersion: "3"
-kind: mixin
-displayName: openheron credential (DeepSeek)
-description: the DeepSeek model credential for an openheron workload, injected by the host proxy
-licenses: [Apache-2.0]
-
-capabilities:
-  # ★ The network rule and the credential travel together: the runtime checks
-  #   that every inject domain appears literally in the allow list for the
-  #   same phase, and the workload's bare "*" does not satisfy that check.
-  - type: com.docker.sandbox/network-policy@1
-    config:
-      runtime:
-        allow:
-          - api.deepseek.com
-
-  # ★ proxyManaged: the real value stays on the host's secret store; the
-  #   container only ever sees the sentinel "proxy-managed".
-  - type: com.docker.sandbox/credential@1
-    optional: true
-    description: DeepSeek API access
-    config:
-      service: deepseek
-      phase: runtime
-      apiKey:
-        name: DEEPSEEK_API_KEY
-        proxyManaged: true
-        inject:
-          - {domain: api.deepseek.com, header: Authorization, format: "Bearer %s"}
-```
-
-★ **目录名就是文件名的词干** —— `openheron-deepseek.yaml` 放在叫
-`openheron-deepseek` 的目录里。`sbx` 读这个文件，自己把这份纯声明
-构建成镜像；你不用构建任何东西。
-
-★ **为什么网络规则和凭据在同一个文件里。** 运行时要每个 inject 域名
-**逐字**出现在同阶段的 allow 列表里，而 workload 自己那条规则是 `*`，
-它覆盖所有域名却不满足这条检查 —— 所以 mixin 把主机名写实。
-两张 allow 列表按阶段取并集。
-
-★ **`service` 名是第二个厂商能成立的原因。** 凭据在每个 (service, phase)
-上只有一个主人，所以两个厂商要两个 service 名。
-两个都声称 `deepseek` 的 mixin 合不到一起。
-
----
-
-## 3. 起一个沙箱
+## 1. 起一个沙箱
 
 ```sh
 sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
-    --kit ./openheron-deepseek \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
     --name openheron ~/my-project
 ```
 
@@ -181,8 +71,8 @@ sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
 
 | | |
 |---|---|
-| `docker.io/ouranoshong/openheron-kit:0.0.6` | workload —— 打包好的镜像，第一次用时会拉取 |
-| `--kit ./openheron-deepseek` | mixin —— 你在第 2 步写的那个目录 |
+| `docker.io/ouranoshong/openheron-kit:0.0.6` | workload —— 已发布的镜像，第一次用时会拉取 |
+| `--kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6` | mixin —— 凭据与它的网络规则 |
 | `~/my-project` | 工作区 —— 宿主上的一个目录，被挂进沙箱 |
 
 ★ **工作区就是宿主上的真实目录。** 指向你希望 agent 动手的项目，
@@ -193,38 +83,28 @@ sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
 
 ```
   ○ image — pulling…
-      a72c2ead8a2a downloaded
-      509.3 MB
+      0a096e869e28 downloaded  509.3 MB
   ✓ image — ready
   ✓ assembled kit image (21 layers)
     setting 1 environment variable
       +DEEPSEEK_API_KEY
-  ✓ http — published localhost:32777 -> 8080/tcp
+  ✓ http — published localhost:32772 -> 8080/tcp
 
   ✓ Created sandbox openheron
   ○ openheron — starting in sandbox openheron…
       workspace /home/you/my-project
 ```
 
-★ **`http — published localhost:32777 -> 8080/tcp` 是运行时在告诉你端口好了。**
+★ **`http — published localhost:32772 -> 8080/tcp` 是运行时在告诉你端口好了。**
 workload 声明了自己服务的端口，运行时在启动时把它发布到一个临时回环端口上。
-这个端口不由你指定 —— 两个 Kit 要同一个会撞。
+这个端口不由你指定 —— 两个沙箱要同一个会撞。
 
 ★ **终端会一直占着。** workload 的入口脚本就是服务本身，
 而会话是把它拉起来的东西。所以你会在这里看到服务的日志行。
 
-★ **如果你手上有源码树而不是已发布的镜像**，workload 可以是本地目录，
-那样就什么都不用拉：
-
-```sh
-sbx run ./sandbox-kit/openheron \
-    --kit ./openheron-deepseek \
-    --name openheron ~/my-project
-```
-
 ---
 
-## 4. 打开它
+## 2. 打开它
 
 ```sh
 sbx ports openheron
@@ -232,11 +112,11 @@ sbx ports openheron
 
 ```
 HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
-127.0.0.1   32777       8080           tcp
-::1         32777       8080           tcp
+127.0.0.1   32772       8080           tcp
+::1         32772       8080           tcp
 ```
 
-浏览器打开 **http://127.0.0.1:32777**。那就是完整的 openheron 界面：
+浏览器打开 **http://127.0.0.1:32772**。那就是完整的 openheron 界面：
 对话、agents、设置编辑器。网页界面和 API 共用这个端口，
 所以没有什么要配的。
 
@@ -245,7 +125,7 @@ HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
 
 ---
 
-## 5. 让它一直跑着
+## 3. 让它一直跑着
 
 ★ **你可以关掉终端，服务照样在服务。** 按 `Ctrl-\` 离开会话，
 沙箱继续运行：
@@ -255,14 +135,14 @@ HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
 ```
 
 沙箱还在，端口也还发布着。终端窗口可以关掉；
-下次要用的时候，见第 7 步。
+下次要用的时候，见第 5 步。
 
 ★ 没有 `long-running@1` 的话，沙箱会在最后一个客户端断开时就停掉。
 workload 声明了它，所以这个服务是个后台 workload，而不是一个会话。
 
 ---
 
-## 6. openheron 自己写下的配置
+## 4. openheron 自己写下的配置
 
 ★ **第一次启动时，openheron 会在工作区种下自己的配置** ——
 是启动 hook 干的，在服务起来之前就做完了：
@@ -347,14 +227,14 @@ deny:  []
 
 ---
 
-## 7. 下次再来
+## 5. 下次再来
 
 ```sh
 sbx run --name openheron
 ```
 
 ★ **不带路径，也不带 `--kit`。** 沙箱两样都记得。
-传路径会被 CLI 当成要运行的 agent，而 `--kit` 会被拒绝：
+传路径会被 CLI 当成要运行的 agent，而 `--kit` 会被拒：
 
 ```
 error: sandbox 'openheron' already exists; --kit can only be used when creating a new sandbox
@@ -376,9 +256,28 @@ error: inspect exec: context deadline exceeded
 
 ---
 
-## 8. 换一个厂商
+## 6. 换一个厂商
 
-加第二份 mixin —— 同一个文件，把厂商名换掉：
+加上第二份 mixin，把那个密钥绑上，然后组合两份：
+
+```sh
+printf '%s' "$OPENAI_API_KEY" | sbx secret set-custom \
+    --host api.openai.com --env OPENAI_API_KEY \
+    --placeholder proxy-managed --value-stdin
+
+sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
+    --kit docker.io/ouranoshong/openheron-kit-openai:0.0.6 \
+    --name openheron ~/my-project
+```
+
+★ 两个密钥都以哨兵值进容器，各带各的网络规则。
+而 **provider 配置** 是你自己的事：`openheron init` 每个配置根只维护一份
+provider 配置，所以第二个厂商的 `llm/*.yaml` 由你在挂载上写。
+
+★ **没有已发布 mixin 的厂商也一样能用。** mixin 是一份声明，
+所以那十二行你可以自己写，然后把 `--kit` 指向你自己的目录 ——
+不用构建、不用拉取、不用 registry：
 
 ```yaml
 # syntax=docker/sandbox-kit:3
@@ -408,26 +307,27 @@ capabilities:
           - {domain: api.openai.com, header: Authorization, format: "Bearer %s"}
 ```
 
-把那个密钥也绑上，然后组合两份 mixin：
+★ 存成 `openheron-openai.yaml`，放在它自己专属的目录里 ——
+目录名就是文件名的词干 —— 然后把那个目录传进去：
 
 ```sh
-printf '%s' "$OPENAI_API_KEY" | sbx secret set-custom \
-    --host api.openai.com --env OPENAI_API_KEY \
-    --placeholder proxy-managed --value-stdin
-
 sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
-    --kit ./openheron-deepseek \
     --kit ./openheron-openai \
     --name openheron ~/my-project
 ```
 
-★ 两个密钥都以哨兵值进容器，各带各的网络规则。
-而 **provider 配置** 是你自己的事：`openheron init` 每个配置根只维护一份
-provider 配置，所以第二个厂商的 `llm/*.yaml` 由你在挂载上写。
+★ **为什么网络规则和凭据在同一个文件里。** 运行时要每个 inject 域名
+**逐字**出现在同阶段的 allow 列表里，而 workload 自己那条规则是 `*`，
+它覆盖所有域名却不满足这条检查 —— 所以 mixin 把主机名写实。
+两张 allow 列表按阶段取并集。
+
+★ **`service` 名是第二个厂商能成立的原因。** 凭据在每个 (service, phase)
+上只有一个主人，所以两个厂商要两个 service 名。
+两个都声称 `openai` 的 mixin 合不到一起。
 
 ---
 
-## 9. 收工
+## 7. 收工
 
 ```sh
 sbx rm openheron
@@ -462,8 +362,7 @@ sbx rm openheron
 
 ---
 
-这一切背后的设计，以及它依赖的每一条假设，都在
-[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md) 里。
-这份指南的可重复版本是
-[`sandbox-kit/acceptance/run.sh`](acceptance/run.sh) ——
-上面每条断言在那儿都是一项检查，而检查不成立时跑批就失败。
+★ **想自己构建？** 镜像是发布好的，但源码在仓库里：
+[`BUILDING.md`](BUILDING_zh.md) 讲怎么从源码构建、怎么改描述文件、
+怎么发布新版本。[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design_zh.md)
+是它背后的设计，而它依赖的每一条假设都是实测出来的。

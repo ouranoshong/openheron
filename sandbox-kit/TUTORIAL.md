@@ -1,18 +1,24 @@
-# Running openheron from a packaged sandbox Kit
+# Running openheron in a sandbox
 
-A guide for a user who has an **openheron sandbox image** and wants to run it
-with `sbx` — no source tree, no build step, no Dockerfile.
-
-★ **What you need is two small things.** A **workload** Kit (the packaged
-image: the openheron server and its runtime) and a **mixin** Kit (a
-declarative overlay: the model credential and the network rule that goes with
-it). The mixin is a few lines of YAML — you can write it yourself, and
-step 2 gives you the exact text.
+A guide for a user who wants to run the openheron agent **inside a Docker
+sandbox**. You need a Docker account, the `sbx` CLI, and a model key. You do
+not need the source tree, a build step, or a Dockerfile — the sandbox image is
+already published.
 
 ★ **What you get.** The whole openheron process — the HTTP/SSE server, the
 file tools and the shell tool — runs inside a microVM. Your host is outside
 that boundary. The workspace you name is the only thing that crosses it, and
 it crosses it as an ordinary directory on your host.
+
+★ **What you run.** Two things, and the runtime resolves them separately:
+
+| | What it is | Where you get it |
+|---|---|---|
+| **workload** | the root filesystem the agent works in, plus the launch contract | `docker.io/ouranoshong/openheron-kit:0.0.6` |
+| **mixin** | the model credential, and the network rule that goes with it | `docker.io/ouranoshong/openheron-kit-deepseek:0.0.6` |
+
+★ A sandbox without a mixin starts and then answers every model call with a
+401: the credential is what the mixin carries.
 
 ---
 
@@ -37,8 +43,8 @@ group. Adding it needs a logout to take effect:
 sudo usermod -aG kvm "$USER"
 ```
 
-**The model credential.** openheron reads the key from the environment, but
-the sandbox must not hold the key itself. Bind it on the host once:
+**The model key.** openheron reads the key from the environment, but the
+sandbox must not hold the key itself. Bind it on the host once:
 
 ```sh
 printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
@@ -56,132 +62,11 @@ process arguments.
 
 ---
 
-## 1. The two Kits
-
-| | What it is | Where it comes from |
-|---|---|---|
-| **workload** | the root filesystem the agent works in, plus the launch contract | a packaged image, referenced by its OCI name |
-| **mixin** | the credential, and the network rule that goes with it | a packaged image, **or a YAML file you write** |
-
-★ **The workload is an image reference.** It looks like this:
-
-```
-docker.io/ouranoshong/openheron-kit:0.0.6
-```
-
-★ **It is published there.** The workload and both mixins are on Docker Hub,
-under the openheron project. Publishing them is
-
-```sh
-make kit-push kit-push-mixin
-```
-
-★ — and the reference is then the name they were pushed to. If your Kit came
-from your own registry, that is the name to use instead.
-
-★ **The mixin does not have to be an image.** It is a declaration, and a
-declaration is a YAML file. If your Kit set came with mixin images, use them
-the same way; if it did not, step 2 gives you the text to save.
-
-★ **The published set is three images**, one workload and one mixin per
-vendor:
-
-```
-docker.io/ouranoshong/openheron-kit:0.0.6
-docker.io/ouranoshong/openheron-kit-deepseek:0.0.6
-docker.io/ouranoshong/openheron-kit-openai:0.0.6
-```
-
-★ A Kit set is **one workload plus one mixin per vendor** — the runtime
-resolves each reference separately, so a workload without its mixin starts
-and then answers every model call with a 401.
-
-★ **Where the images may come from.** By default `sbx` only installs Kits
-from two places:
-
-```sh
-sbx settings get kit.allowedSources
-```
-
-```
-["docker.io/","dhi.io/"]
-```
-
-★ A Kit from anywhere else is refused, with the command to fix it in the
-message:
-
-```
-error: resolve kits: kit "…": its source is not in your allowlist;
-current kit.allowedSources: docker.io/, dhi.io/
-```
-
-★ That is a deliberate line: a Kit is executable content, so where it comes
-from is a decision, not a detail. If your Kit is on Docker Hub, nothing to do.
-If it is on your company's registry, an administrator has to allow that
-source.
-
-★ **A registry has to serve HTTPS.** There is no plain-HTTP option.
-
----
-
-## 2. Write the mixin
-
-Save this as `openheron-deepseek.yaml` in a directory of its own:
-
-```yaml
-# syntax=docker/sandbox-kit:3
-schemaVersion: "3"
-kind: mixin
-displayName: openheron credential (DeepSeek)
-description: the DeepSeek model credential for an openheron workload, injected by the host proxy
-licenses: [Apache-2.0]
-
-capabilities:
-  # ★ The network rule and the credential travel together: the runtime checks
-  #   that every inject domain appears literally in the allow list for the
-  #   same phase, and the workload's bare "*" does not satisfy that check.
-  - type: com.docker.sandbox/network-policy@1
-    config:
-      runtime:
-        allow:
-          - api.deepseek.com
-
-  # ★ proxyManaged: the real value stays on the host's secret store; the
-  #   container only ever sees the sentinel "proxy-managed".
-  - type: com.docker.sandbox/credential@1
-    optional: true
-    description: DeepSeek API access
-    config:
-      service: deepseek
-      phase: runtime
-      apiKey:
-        name: DEEPSEEK_API_KEY
-        proxyManaged: true
-        inject:
-          - {domain: api.deepseek.com, header: Authorization, format: "Bearer %s"}
-```
-
-★ **The directory name is the file name's stem** — `openheron-deepseek.yaml`
-in a directory called `openheron-deepseek`. `sbx` reads the file and builds
-the declaration-only image from it; there is nothing to build yourself.
-
-★ **Why the network rule is in the same file as the credential.** The runtime
-wants every domain the credential injects into to appear **literally** in the
-allow list for the same phase. The workload's own rule is `*`, which covers
-every domain but does not satisfy that check — so the mixin names the host
-outright. The two allow lists union per phase.
-
-★ **The `service` name is what makes a second vendor possible.** A credential
-has one owner per (service, phase), so two vendors need two service names.
-Two mixins claiming `deepseek` do not compose.
-
----
-
-## 3. Start a sandbox
+## 1. Start a sandbox
 
 ```sh
 sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
-    --kit ./openheron-deepseek \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
     --name openheron ~/my-project
 ```
 
@@ -189,8 +74,8 @@ Read the three arguments apart:
 
 | | |
 |---|---|
-| `docker.io/ouranoshong/openheron-kit:0.0.6` | the workload — the packaged image, pulled on first use |
-| `--kit ./openheron-deepseek` | a mixin — the directory you wrote in step 2 |
+| `docker.io/ouranoshong/openheron-kit:0.0.6` | the workload — the published image, pulled on first use |
+| `--kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6` | the mixin — the credential and its network rule |
 | `~/my-project` | the workspace — a directory on your host, mounted into the sandbox |
 
 ★ **The workspace is a real directory on your host.** Point it at a project
@@ -202,40 +87,31 @@ What you will see:
 
 ```
   ○ image — pulling…
-      a72c2ead8a2a downloaded
-      509.3 MB
+      0a096e869e28 downloaded  509.3 MB
   ✓ image — ready
   ✓ assembled kit image (21 layers)
     setting 1 environment variable
       +DEEPSEEK_API_KEY
-  ✓ http — published localhost:32777 -> 8080/tcp
+  ✓ http — published localhost:32772 -> 8080/tcp
 
   ✓ Created sandbox openheron
   ○ openheron — starting in sandbox openheron…
       workspace /home/you/my-project
 ```
 
-★ **`http — published localhost:32777 -> 8080/tcp` is the runtime telling you
+★ **`http — published localhost:32772 -> 8080/tcp` is the runtime telling you
 the port is ready.** The workload declares the port it serves on, and the
 runtime publishes it on an ephemeral loopback port at start time. You never
-choose that port yourself — two Kits asking for the same one would collide.
+choose that port yourself — two sandboxes asking for the same one would
+collide.
 
 ★ **The terminal stays busy.** The workload's entrypoint is the server
 itself, and the session is what starts it. You will see the server's log
 lines here.
 
-★ **If you have the source tree instead of a published image**, the workload
-can be a local directory, and then nothing is pulled:
-
-```sh
-sbx run ./sandbox-kit/openheron \
-    --kit ./openheron-deepseek \
-    --name openheron ~/my-project
-```
-
 ---
 
-## 4. Open it
+## 2. Open it
 
 ```sh
 sbx ports openheron
@@ -243,11 +119,11 @@ sbx ports openheron
 
 ```
 HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
-127.0.0.1   32777       8080           tcp
-::1         32777       8080           tcp
+127.0.0.1   32772       8080           tcp
+::1         32772       8080           tcp
 ```
 
-Open **http://127.0.0.1:32777** in a browser. That is the full openheron
+Open **http://127.0.0.1:32772** in a browser. That is the full openheron
 interface: the chat, the agents, the settings editor. The web interface and
 the API share the port, so there is nothing to configure.
 
@@ -256,7 +132,7 @@ the words appear, not the finished text at once.
 
 ---
 
-## 5. Leave it running
+## 3. Leave it running
 
 ★ **You can close the terminal and the server keeps serving.** Press
 `Ctrl-\` to leave the session while the sandbox keeps running:
@@ -266,7 +142,7 @@ the words appear, not the finished text at once.
 ```
 
 The sandbox stays up with the port still published. You can close the
-terminal window; the next time you want it, see step 7.
+terminal window; the next time you want it, see step 5.
 
 ★ Without `long-running@1` the sandbox would stop as soon as its last client
 disconnected. The workload declares it, so the server is a background
@@ -274,7 +150,7 @@ workload rather than a session.
 
 ---
 
-## 6. The configuration openheron writes
+## 4. The configuration openheron writes
 
 ★ **On the first start, openheron seeds its own configuration** in the
 workspace — the startup hook does it, before the server comes up:
@@ -360,7 +236,7 @@ survive the sandbox being stopped, recreated or removed.
 
 ---
 
-## 7. Come back later
+## 5. Come back later
 
 ```sh
 sbx run --name openheron
@@ -391,9 +267,29 @@ of the server, not the first.
 
 ---
 
-## 8. Another vendor
+## 6. Another vendor
 
-Add a second mixin — the same file with the vendor's names in it:
+Add the second mixin, bind that key, and compose the two:
+
+```sh
+printf '%s' "$OPENAI_API_KEY" | sbx secret set-custom \
+    --host api.openai.com --env OPENAI_API_KEY \
+    --placeholder proxy-managed --value-stdin
+
+sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
+    --kit docker.io/ouranoshong/openheron-kit-openai:0.0.6 \
+    --name openheron ~/my-project
+```
+
+★ Both keys arrive in the container as sentinels, each with its own network
+rule. What the **provider configuration** does is your business:
+`openheron init` maintains one provider configuration per configuration root,
+so the second vendor's `llm/*.yaml` is written by you, on the mount.
+
+★ **A vendor with no published mixin is still fine.** The mixin is a
+declaration, so you can write the twelve lines yourself and point `--kit` at
+your own directory — no build, no pull, no registry:
 
 ```yaml
 # syntax=docker/sandbox-kit:3
@@ -423,27 +319,28 @@ capabilities:
           - {domain: api.openai.com, header: Authorization, format: "Bearer %s"}
 ```
 
-Bind that key too, and compose the two mixins:
+★ Save it as `openheron-openai.yaml` in a directory of its own — the
+directory name is the file name's stem — and pass that directory:
 
 ```sh
-printf '%s' "$OPENAI_API_KEY" | sbx secret set-custom \
-    --host api.openai.com --env OPENAI_API_KEY \
-    --placeholder proxy-managed --value-stdin
-
 sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
-    --kit ./openheron-deepseek \
     --kit ./openheron-openai \
     --name openheron ~/my-project
 ```
 
-★ Both keys arrive in the container as sentinels, each with its own network
-rule. What the **provider configuration** does is your business:
-`openheron init` maintains one provider configuration per configuration root,
-so the second vendor's `llm/*.yaml` is written by you, on the mount.
+★ **Why the network rule is in the same file as the credential.** The runtime
+wants every domain the credential injects into to appear **literally** in the
+allow list for the same phase. The workload's own rule is `*`, which covers
+every domain but does not satisfy that check — so the mixin names the host
+outright. The two allow lists union per phase.
+
+★ **The `service` name is what makes a second vendor possible.** A credential
+has one owner per (service, phase), so two vendors need two service names.
+Two mixins claiming `openai` do not compose.
 
 ---
 
-## 9. Clean up
+## 7. Clean up
 
 ```sh
 sbx rm openheron
@@ -480,8 +377,8 @@ narrow that, narrow it on the host, not by editing the Kit.
 
 ---
 
-The design behind all of this, and every assumption it rests on, is in
-[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md). The repeatable
-version of this guide is
-[`sandbox-kit/acceptance/run.sh`](acceptance/run.sh) — every claim above is a
-check there, and the check fails the run when it does not hold.
+★ **Building this yourself?** The image is published, but the sources are
+in the repository: [`BUILDING.md`](BUILDING.md) covers building it from
+source, changing the descriptor, and publishing a new version.
+[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md) is the design
+behind it, and every assumption it rests on is measured.
