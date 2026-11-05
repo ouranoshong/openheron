@@ -430,21 +430,12 @@ workload 保留 `*`（"这个 Kit 不限制"），mixin 补上它需要的主机
 
 FROM docker/sandbox-templates:shell
 
-ARG OPENHERON_VERSION
-ARG TARGETARCH
-
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
 
-# ★ The release asset is the same static, CGO_ENABLED=0 binary the six release
-#   targets ship (Makefile:96 and Makefile:108). The Kit adds no second build.
-RUN curl -fsSL "https://github.com/ouranoshong/openheron/releases/download/v${OPENHERON_VERSION}/openheron_v${OPENHERON_VERSION}_linux_${TARGETARCH}.tar.gz" \
-    -o /tmp/openheron.tar.gz \
-    && mkdir -p /tmp/openheron \
-    && tar -xzf /tmp/openheron.tar.gz -C /tmp/openheron --strip-components=1 \
-    && mv /tmp/openheron/openheron /usr/local/bin/openheron \
-    && rm -rf /tmp/openheron /tmp/openheron.tar.gz
+# ★ The binary `make build` produced. It is a local build, so it carries the
+#   host's architecture — a Kit built on an amd64 host is an amd64 image.
+COPY openheron /usr/local/bin/openheron
+RUN chmod 0755 /usr/local/bin/openheron
 
 # ★ The entrypoint is copied as root: the agent user could not chmod a
 #   root-owned file.
@@ -473,7 +464,7 @@ cd "${WORKSPACE_DIR:-$PWD}" || exit 1
 # ★ No --provider and no --env: openheron init decides both from its own
 #   rules, and the configuration on the mount is the user's to edit.
 openheron init --dir "$PWD" || \
-    echo "[entrypoint] init did not complete; the existing configuration is kept"
+    echo "[entrypoint] init did not complete; the configuration was left as it was, and with none at all the server will not start"
 
 exec openheron
 ```
@@ -482,9 +473,19 @@ exec openheron
 
 - 基础镜像**必须**满足平台底线：uid `1000` 的 `agent` 用户、`/home/agent`、
   `bash`、`git`、CA 证书库。规范说，workload 不满足这条就是"构建顺利，启动时失败"。
-- 二进制就是 `Makefile:96` 那份发布产物 —— 与六个目标发的是同一份静态、
-  `CGO_ENABLED=0` 的构建（`Makefile:108`）。Kit 不引入第二套构建。
-- `TARGETARCH` 选 `amd64` 或 `arm64`，对应两个 Linux 目标。
+- **二进制是从这个仓库构建出来的，不是下载来的。** `make kit` 先跑
+  `make build`，把产物复制到这份配方旁边，配方再把它拷进镜像。
+  于是这个 Kit 带的是**当前源码**而不是某个 release，
+  构建也不需要基础镜像之外的任何网络。
+- ★ **那个二进制是动态链接的**，而发布出来的二进制是静态的
+  （`CGO_ENABLED=0`，`Makefile:108`）。基础镜像是 Ubuntu，
+  所以它要的 libc 在里面；代价是二进制更大，
+  而且这个 Kit 绑在基础镜像的 libc 上。
+- ★ **它带的是宿主的架构。** amd64 宿主上构建出来的 Kit 就是 amd64 镜像 ——
+  六个目标是 `make release` 的事。
+- ★ **把产物复制到配方旁边，正是本地那条路能通的原因。**
+  构建上下文够不到它被给到的目录之外，所以仓库根的 `bin/openheron` 够不着：
+  二进制被复制进 Kit 自己的目录，`sbx run ./sandbox-kit/openheron` 就从那里构建。
 - CA 证书库是要紧的：模型客户端走 TLS，`llm/common/error.go:133` 告诉用户去查
   "network and TLS are healthy"。
 - **先 `cd`，其余都跟着来**：工作目录就是项目根（§1.7），
@@ -492,8 +493,8 @@ exec openheron
 - **入口脚本故意再初始化一遍**。`openheron init` 是幂等的，
   所以在 startup hook 与入口脚本里各跑一次，代价是一次空操作，
   却把"hook 与入口脚本谁先谁后"这个依赖去掉了（§2.5）。
-- **`EXPOSE 8080`** 声明端口；把它发布出去是运行时的事
-  （`sbx ports --publish 8080:8080`），不是 Kit 申请的一项 capability。
+- **`EXPOSE 8080`** 声明端口，而 `port@1` capability 申请把它发布出去（§2.3）；
+  宿主侧由运行时分配。
 
 ### 2.5 启动契约
 
@@ -1137,8 +1138,10 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
 - ★ **`sbx run --name` 是重启沙箱，不会用改过的 Kit 重建容器。**
   改了 Kit 要 `sbx rm` 再 `sbx run` —— 重启会悄悄留着旧镜像，
   于是探针看起来像"没跑"。
-- ★ **配方指名的是一个已发布的 release**（`v0.0.6`），所以谁都能构建这个 Kit。
-  上面的实测用的是本地构建的二进制 —— 因为当时配方指名的那个 release 还不存在。
+- ★ **配方是从这个仓库构建的**，所以这个 Kit 带的是当前源码：
+  `make kit` 跑 `make build` 并把二进制拷进去。镜像里的二进制自报它的版本 ——
+  `git describe` 的结果，而不是 release tag；
+  而且它是动态链接的，而发布出来的二进制是静态的。
 - ★ **`sbx kit pack` 是另一套语法。** 它要的是 `spec.yaml` ——
   v1/v2 的产物格式 —— 并且拒绝 v3 的 Kit 目录。
   所以 v3 的 Kit 是以 OCI 镜像或目录的形式流传的，不是 ZIP。
@@ -1302,6 +1305,6 @@ agent 读了文件、跑了那个失败的测试、**在动手改之前先问了
 会让服务**完全没有**配置 —— 而沙箱照样起来（§6.2）。
 
 ★ **干净构建是其中一环。** 记录下来的这一轮，用的是从 `develop` 全新克隆、
-**自带 builder** 构建出来的 Kit，于是构建缓存是空的：105 MB 的基础镜像与
-`v0.0.6` 的 release 资产都重新拉了一遍，
-配方是从零跑得通的，而不是靠上一轮留在缓存里的东西。
+**自带 builder** 构建出来的 Kit，于是构建缓存是空的：105 MB 的基础镜像
+重新拉了一遍，配方是从零跑得通的，而不是靠上一轮留在缓存里的东西。
+★ 那个镜像里的二进制就是这份克隆自己的构建 —— 这正是"从源码构建"的意义。

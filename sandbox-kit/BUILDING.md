@@ -30,6 +30,7 @@ root filesystem, the mixins carry declarations and no content.
 ```sh
 sbx --version      # 0.42.0 or later
 docker --version
+bun --version      # the frontend toolchain: make kit runs make build
 ```
 
 ★ The version floor is not cosmetic: 0.42.0 fixed `CVE-2026-77179` and
@@ -62,22 +63,30 @@ make kit-mixin   # every mixin: openheron-kit-<vendor>:0.0.6
 local image to validate, and `make kit-check` would look for an image that
 was never exported.
 
-★ **The workload's binary comes from a release, not from a build.** The
-recipe downloads the same static, `CGO_ENABLED=0` binary the six release
-targets ship:
+★ **The binary is built on the host, not in the image.** `make kit` runs
+`make build` first — the frontend, the embedded binary, the same code this
+repository builds — and copies the result beside the recipe:
 
 ```dockerfile
-RUN curl -fsSL "https://github.com/ouranoshong/openheron/releases/download/v${OPENHERON_VERSION}/openheron_v${OPENHERON_VERSION}_linux_${TARGETARCH}.tar.gz" \
-    -o /tmp/openheron.tar.gz \
-    && mkdir -p /tmp/openheron \
-    && tar -xzf /tmp/openheron.tar.gz -C /tmp/openheron --strip-components=1 \
-    && mv /tmp/openheron/openheron /usr/local/bin/openheron \
-    && rm -rf /tmp/openheron /tmp/openheron.tar.gz
+COPY openheron /usr/local/bin/openheron
+RUN chmod 0755 /usr/local/bin/openheron
 ```
 
-★ So the Kit can only reference a release that exists. Bumping `version`
-without publishing the release gives you an image whose download 404s — and
-the recipe has no apt step, so it fails fast and says so.
+★ **Two consequences.** The Kit carries the **current source**, not a
+release: there is no release to wait for, and the binary inside reports
+`git describe` rather than a release tag. And the build needs the **frontend
+toolchain** — `make build` runs vite — so building a Kit takes more than
+docker does.
+
+★ **The binary is copied beside the recipe** because a build context cannot
+reach outside the directory it is given: the repository's `bin/openheron` is
+out of reach from the Kit's own directory, and the copy is what makes
+`sbx run ./sandbox-kit/openheron` build from here too.
+
+★ **That binary is dynamically linked**, where the release binaries are
+static (`CGO_ENABLED=0`). The base image is Ubuntu, so it has the libc the
+binary wants; the cost is a larger binary and a Kit bound to its base image's
+libc.
 
 ---
 
@@ -234,6 +243,7 @@ wherever you want it.
 | `kit-tck` finds no image to validate | the build did not export — `--load` is required, and it is in the recipe |
 | the image builds but the runtime does not recognise it as a Kit | the manifest annotations are gone — use a container-driver builder |
 | the download 404s during the build | the version names a release that was never published |
+| `openheron: not found` during the build | the binary was not copied in — `make kit` does that, so build the Kit with `make kit` and not with buildx directly |
 | `family "dual" is not supported yet` | the runtime does not implement it; omit the field |
 | `spec.yaml (or spec.yml) is required` | `sbx kit pack` is the **v1/v2** artifact grammar; a v3 Kit travels as an OCI image or a directory |
 | `KVM error: Permission denied` | the daemon serving the socket is not the one with `/dev/kvm` access — see §6.2 of the design |

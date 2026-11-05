@@ -486,21 +486,12 @@ say how to start it. The real file is **`sandbox-kit/openheron/openheron.dockerf
 
 FROM docker/sandbox-templates:shell
 
-ARG OPENHERON_VERSION
-ARG TARGETARCH
-
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
 
-# ★ The release asset is the same static, CGO_ENABLED=0 binary the six release
-#   targets ship (Makefile:96 and Makefile:108). The Kit adds no second build.
-RUN curl -fsSL "https://github.com/ouranoshong/openheron/releases/download/v${OPENHERON_VERSION}/openheron_v${OPENHERON_VERSION}_linux_${TARGETARCH}.tar.gz" \
-    -o /tmp/openheron.tar.gz \
-    && mkdir -p /tmp/openheron \
-    && tar -xzf /tmp/openheron.tar.gz -C /tmp/openheron --strip-components=1 \
-    && mv /tmp/openheron/openheron /usr/local/bin/openheron \
-    && rm -rf /tmp/openheron /tmp/openheron.tar.gz
+# ★ The binary `make build` produced. It is a local build, so it carries the
+#   host's architecture — a Kit built on an amd64 host is an amd64 image.
+COPY openheron /usr/local/bin/openheron
+RUN chmod 0755 /usr/local/bin/openheron
 
 # ★ The entrypoint is copied as root: the agent user could not chmod a
 #   root-owned file.
@@ -529,7 +520,7 @@ cd "${WORKSPACE_DIR:-$PWD}" || exit 1
 # ★ No --provider and no --env: openheron init decides both from its own
 #   rules, and the configuration on the mount is the user's to edit.
 openheron init --dir "$PWD" || \
-    echo "[entrypoint] init did not complete; the existing configuration is kept"
+    echo "[entrypoint] init did not complete; the configuration was left as it was, and with none at all the server will not start"
 
 exec openheron
 ```
@@ -539,10 +530,20 @@ Points:
 - The base **must** be a platform-floor image: the `agent` user at uid `1000`,
   `/home/agent`, `bash`, `git`, a CA store. The specification says a workload
   that ignores this "builds fine and fails at agent launch".
-- The binary is the release artifact from `Makefile:96` — the same static,
-  `CGO_ENABLED=0` build (`Makefile:108`) the six targets ship. The Kit does
-  not introduce a second build.
-- `TARGETARCH` selects `amd64` or `arm64`, matching the two Linux targets.
+- **The binary is built from this repository, not downloaded.** `make kit`
+  runs `make build` and copies the result beside this recipe, and the recipe
+  copies it in. The Kit therefore carries **the current source** rather than a
+  release, and the build needs no network beyond the base image.
+- ★ **That binary is dynamically linked**, where the release binaries are
+  static (`CGO_ENABLED=0`, `Makefile:108`). The base image is Ubuntu, so it
+  has the libc the binary wants; the cost is a larger binary and a Kit bound
+  to its base image's libc.
+- ★ **It carries the host's architecture.** A Kit built on an amd64 host is an
+  amd64 image — `make release` is what produces the six targets.
+- ★ **The copy beside the recipe is what makes the local path work.** A build
+  context cannot reach outside the directory it is given, so `bin/openheron` at
+  the repository root is out of reach: the binary is copied into the Kit's own
+  directory, and `sbx run ./sandbox-kit/openheron` builds from there.
 - The CA store matters: the model client talks TLS, and
   `llm/common/error.go:133` tells the user to check that "network and TLS are
   healthy".
@@ -552,9 +553,8 @@ Points:
   is idempotent, so running it in both the startup hook and the entrypoint
   costs one extra no-op and removes the dependency on the hooks' position
   relative to the entrypoint (§2.5).
-- **`EXPOSE 8080`** declares the port; publishing it is the runtime's job
-  (`sbx ports --publish 8080:8080`), and it is not a capability the Kit asks
-  for.
+- **`EXPOSE 8080`** declares the port, and the `port@1` capability asks for it
+  to be published (§2.3); the runtime allocates the host side.
 
 ### 2.5 The launch contract
 
@@ -1298,9 +1298,10 @@ model; only the first keeps the key out of the VM (§2.8).
   container from a changed Kit.** Kit changes need `sbx rm` and a new
   `sbx run` — a restart silently keeps the old image, which makes a probe look
   like it did not run.
-- ★ **The recipe names a published release** (`v0.0.6`), so anyone can build
-  the Kit. The measurement above used a locally built binary instead, because
-  the release the recipe named did not exist yet at the time.
+- ★ **The recipe builds from this repository**, so the Kit carries the current
+  source: `make kit` runs `make build` and copies the binary in. The binary
+  inside reports its own version — `git describe`, not a release tag — and it
+  is dynamically linked where the release binaries are static.
 - ★ **`sbx kit pack` is the other grammar.** It wants a `spec.yaml` — the
   v1/v2 artifact — and refuses a v3 Kit directory. So a v3 Kit travels as an
   OCI image or as a directory, not as a ZIP.
@@ -1489,6 +1490,7 @@ all — and the sandbox still comes up (§6.2).
 
 ★ **The clean build is part of it.** The recorded run used a Kit built from a
 fresh clone of `develop` with a **builder of its own**, so the build cache was
-empty: the 105 MB base image and the `v0.0.6` release asset were fetched
-again, and the recipe was proven to work from scratch rather than from
-whatever a previous round left in the cache.
+empty: the 105 MB base image was fetched again, and the recipe was proven to
+work from scratch rather than from whatever a previous round left in the cache.
+★ The binary in that image was the clone's own build, which is the point of
+building from the source.

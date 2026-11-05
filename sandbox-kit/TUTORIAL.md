@@ -452,10 +452,12 @@ sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
     --name openheron ./examples/demo-project
 ```
 
-★ **Or from the source tree**, where nothing is pulled and the runtime
-assembles both Kits from the files on disk:
+★ **Or from the source tree**, where the runtime assembles both Kits from
+the files on disk:
 
 ```sh
+make kit    # once: it builds the binary and copies it beside the recipe
+
 sbx run ./sandbox-kit/openheron \
     --kit ./sandbox-kit/examples/demo-project/openheron-deepseek \
     --name openheron ./examples/demo-project
@@ -463,7 +465,9 @@ sbx run ./sandbox-kit/openheron \
 
 ★ That second form is the one to use when you are **changing** the Kit: the
 runtime rebuilds it from the files you just edited, with no image and no
-registry in between. The first form is the one a user takes.
+registry in between. It needs `make kit` once, because that is what copies
+the binary next to the recipe where the build can reach it. The first form
+is the one a user takes, and it needs nothing but `sbx`.
 
 Ask it to fix the failing test. The agent reads the files, runs `make test`,
 **asks you before it edits** — approve it — and the change lands on your host,

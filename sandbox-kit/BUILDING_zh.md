@@ -29,6 +29,7 @@ sandbox-kit/
 ```sh
 sbx --version      # 0.42.0 or later
 docker --version
+bun --version      # the frontend toolchain: make kit runs make build
 ```
 
 ★ 版本下限不是装饰：0.42.0 修了 `CVE-2026-77179` 与 `CVE-2026-79994`
@@ -59,21 +60,27 @@ make kit-mixin   # every mixin: openheron-kit-<vendor>:0.0.6
 ★ 两者都会导出到本地 docker store。不导出的话本地就没有镜像可供校验，
 `make kit-check` 会去找一个从没导出的镜像。
 
-★ **workload 里的二进制来自 release，不是现场构建的。**
-配方下载的是与六个发布目标完全相同的那个静态、`CGO_ENABLED=0` 二进制：
+★ **二进制是在宿主上构建的，不是在镜像里。** `make kit` 先跑
+`make build` —— 前端、嵌进二进制的界面、这个仓库自己的代码 ——
+再把产物复制到配方旁边：
 
 ```dockerfile
-RUN curl -fsSL "https://github.com/ouranoshong/openheron/releases/download/v${OPENHERON_VERSION}/openheron_v${OPENHERON_VERSION}_linux_${TARGETARCH}.tar.gz" \
-    -o /tmp/openheron.tar.gz \
-    && mkdir -p /tmp/openheron \
-    && tar -xzf /tmp/openheron.tar.gz -C /tmp/openheron --strip-components=1 \
-    && mv /tmp/openheron/openheron /usr/local/bin/openheron \
-    && rm -rf /tmp/openheron /tmp/openheron.tar.gz
+COPY openheron /usr/local/bin/openheron
+RUN chmod 0755 /usr/local/bin/openheron
 ```
 
-★ 所以这个 Kit 只能指向一个**确实存在**的 release。
-改了 `version` 却没发那个 release，得到的镜像会在下载处 404 ——
-而配方里没有 apt 步骤，所以它失败得很快，也说得很清楚。
+★ **两个后果。** 这个 Kit 带的是**当前源码**，而不是某个 release：
+不必等 release，镜像里的二进制自报的是 `git describe` 而不是 release tag。
+而且构建需要**前端工具链** —— `make build` 会跑 vite —— 所以构建一个 Kit
+比"有 docker 就行"要多一些东西。
+
+★ **二进制被复制到配方旁边**，是因为构建上下文够不到它被给到的目录之外：
+仓库的 `bin/openheron` 从 Kit 自己的目录出发够不着，
+而这次复制正是 `sbx run ./sandbox-kit/openheron` 也能从这里构建的原因。
+
+★ **那个二进制是动态链接的**，而发布出来的二进制是静态的
+（`CGO_ENABLED=0`）。基础镜像是 Ubuntu，所以它要的 libc 在里面；
+代价是二进制更大，而且这个 Kit 绑在基础镜像的 libc 上。
 
 ---
 
@@ -215,6 +222,8 @@ sandbox-kit/acceptance/run.sh
 | `kit-tck` 说找不到可校验的镜像 | 构建没有导出 —— `--load` 是必需的，它就在配方里 |
 | 镜像构建出来了，但运行时不认它是 Kit | manifest annotation 没了 —— 用 container driver 的 builder |
 | 构建时下载 404 | 那个版本指向一个从没发布过的 release |
+| 构建时报 `openheron: not found` | 二进制没被复制进去 —— `make kit` 会做这件事，
+所以用 `make kit` 构建，而不是直接调 buildx |
 | `family "dual" is not supported yet` | 运行时还没实现它；把字段去掉 |
 | `spec.yaml (or spec.yml) is required` | `sbx kit pack` 是 **v1/v2** 的产物语法；v3 的 Kit 以 OCI 镜像或目录流传 |
 | `KVM error: Permission denied` | 服务那个 socket 的守护进程不是有 `/dev/kvm` 权限的那一个 —— 见设计的 §6.2 |

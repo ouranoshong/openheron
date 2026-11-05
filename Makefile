@@ -10,6 +10,11 @@ GO    ?= go
 BUN   ?= bun
 BIN   ?= bin/openheron
 
+# ★ The repository root, derived from this file's own path: the Kit's build
+#   context is the root, because the recipe copies the binary the root's
+#   `make build` produced.
+REPO_ROOT := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+
 # Version: taken from git describe by default (a short hash with -dirty when
 # there is no tag). Override with: make VERSION=1.2.3.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -148,15 +153,21 @@ KIT_BUILDER ?= kit-builder
 KIT_REPO   ?= docker.io/ouranoshong/openheron-kit
 
 .PHONY: kit
-kit: ## Build the openheron workload Kit image (needs docker buildx)
+kit: build ## Build the openheron workload Kit image (needs docker buildx)
 	@docker buildx inspect $(KIT_BUILDER) >/dev/null 2>&1 || \
 		docker buildx create --name $(KIT_BUILDER) --driver docker-container --bootstrap
+	cp $(BIN) $(KIT_WORKLOAD)/openheron
 	cd $(KIT_WORKLOAD) && docker buildx build --builder $(KIT_BUILDER) . -f openheron.yaml -t $(KIT_IMAGE) --load
 # ★ --builder is not optional: the docker driver with the classic image store
 #   drops the manifest annotations, and an image without the descriptor
 #   annotation is not a Kit any more.
 # ★ --load is not optional either: the container driver keeps the result in
 #   its own build cache, and without it there is no local image to validate.
+# ★ The binary is copied in beside the recipe before the build, because the
+#   build context cannot reach outside the directory it is given -- and the
+#   repository's bin/ is outside the Kit's directory. The copy is what makes
+#   `sbx run ./sandbox-kit/openheron` work too: that path builds the Kit
+#   from this same directory.
 
 .PHONY: kit-mixin
 kit-mixin: ## Build the credential mixin images (declaration only, no content)
@@ -168,7 +179,8 @@ kit-mixin: ## Build the credential mixin images (declaration only, no content)
 	done
 
 .PHONY: kit-push
-kit-push: ## Publish the workload Kit to the registry (needs docker login)
+kit-push: build ## Publish the workload Kit to the registry (needs docker login)
+	cp $(BIN) $(KIT_WORKLOAD)/openheron
 	cd $(KIT_WORKLOAD) && docker buildx build --builder $(KIT_BUILDER) . -f openheron.yaml \
 		-t $(KIT_REPO):$(KIT_VERSION) --push
 
