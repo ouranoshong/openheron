@@ -1417,19 +1417,22 @@ a model call, the stream's shape, the client's departure, and the port from
 every vantage point — and exits non-zero if any check fails. It is the
 repeatable form of everything in this section.
 
-★ Two runs are recorded under `sandbox-kit/acceptance/results/`: the single
-vendor case and the two-mixin case. Both are **21 checks, 21 passed**. The
-numbers they carry:
+★ Two runs went through it — the single vendor case and the two-mixin case.
+Both were **21 checks, 21 passed**. The numbers they carried:
 
 | | single vendor | two mixins |
 |---|---|---|
-| published port | `127.0.0.1:32775 -> 8080/tcp` | `127.0.0.1:32776 -> 8080/tcp` |
 | SSE frames | 772 | 933 |
 | first frame | +15 ms | +16 ms |
 | last frame | +7795 ms | +8615 ms |
 | frame span | 7780 ms | 8599 ms |
 | model call | answered | answered |
 | server after the client left | 200 | 200 |
+
+★ **The run's own transcript is not part of the tree.** It is a run artifact:
+absolute paths, an ephemeral port, frame counts, the model's own words — and
+every rerun would contradict the numbers above. The script is what belongs
+here; `--out` writes the transcript wherever the reader wants it.
 
 ★ **The frame span is the acceptance criterion that matters.** A span of
 several seconds with the first frame at a few milliseconds means the frames

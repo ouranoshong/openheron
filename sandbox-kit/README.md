@@ -33,7 +33,6 @@ guide for a user: start a sandbox, open it in a browser, work on the files.
 | `openheron-deepseek/openheron-deepseek.yaml` | the DeepSeek mixin: declaration only, no content, no Dockerfile |
 | `openheron-openai/openheron-openai.yaml` | the OpenAI mixin: the same, for another vendor |
 | `acceptance/run.sh` | the acceptance run: every claim this design makes, as a check that fails the script |
-| `acceptance/results/` | recorded runs |
 
 ## Requirements
 
@@ -234,8 +233,10 @@ mount, the credential, a real model call, the shape of the stream, the
 client's departure, and the port from every vantage point — and exits
 non-zero if any check fails.
 
-★ Two runs are recorded under `acceptance/results/`: the single vendor case
-and the two-mixin case. Both are **21 checks, 21 passed**.
+★ **The transcript is yours to keep, not the tree's.** `--out` writes it
+wherever you want it; the numbers that matter are in
+[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md) §6.6. The
+single-vendor and two-mixin runs were both **21 checks, 21 passed**.
 
 ## What has been measured
 
