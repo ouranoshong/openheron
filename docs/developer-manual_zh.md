@@ -493,6 +493,39 @@ ruleset 要在同一件事里一起改。
 ★ **合并不会发布任何东西。** 发布 job 只为 `v*` tag 跑，所以合并意味着「代码在 `main`
 上了」，不意味着「有二进制了」。
 
+#### Kit 的版本号
+
+★ **版本号只住在一处：Makefile 里的 `KIT_VERSION`。** 其它地方要么从那里拿，
+要么根本不写版本号：
+
+| 位置 | 版本号从哪来 |
+|---|---|
+| `Makefile` 的 `KIT_VERSION ?= …` | **源头** |
+| `sandbox-kit/openheron/openheron.yaml` 的 `args.version.default` | 构建时盖进去（对暂存副本 `sed`） |
+| 发布出来的镜像 tag | `$(KIT_VERSION)` |
+| 指南（`sandbox-kit/TUTORIAL.md`） | 它写的是 `latest`，CI 把它指向那次发布 |
+
+★ **所以一次发版就是一个只动两行的 PR。** 开一个 PR，改 Makefile 里的
+`KIT_VERSION` 与描述文件里的 `args.version.default`，别的都不用动：指南写的是
+`latest`，而 CI 从你打的 tag 推导版本。
+
+```sh
+# the whole contract of a release pull request — $NEXT is the version you tag
+sed -i "s/^KIT_VERSION ?= .*/KIT_VERSION ?= $NEXT/" Makefile
+sed -i "s|^    default: .*|    default: \"$NEXT\"|" sandbox-kit/openheron/openheron.yaml
+```
+★ **既然构建总会覆盖它，描述文件里为什么还要写版本号。** 那份值是个占位 ——
+但必须是**合法**的占位：描述文件的 `pattern` 不接受不是版本号的东西，而从本地
+目录安装 Kit 时 `sbx` 是直接读这个文件的。一个解析不了的占位，就是一份根本读不了
+的描述文件。
+
+★ **`latest` 是指针，不是另一次构建。** CI 用发布推上去的那个镜像创建它，
+所以两个 tag 的 digest 相同，而 job 会检查这一点。一个指向别处的 `latest`，
+就是指南在讲一句假话。
+
+★ **版本 tag 是消费者钉住的那个。** `latest` 会走，`0.0.7` 不会。两个都发布，
+教程里说了什么时候用哪个。
+
 ## 4. 前端
 
 ### 4.1 三层纯函数

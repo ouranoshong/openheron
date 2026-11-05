@@ -554,6 +554,44 @@ the same breath.
 ★ **Merging does not publish anything.** The release job only runs for a `v*` tag, so a
 merge means "the code is on `main`", not "a binary exists".
 
+#### The Kit's version
+
+★ **The version lives in one place: `KIT_VERSION` in the Makefile.** Everything
+else either gets it from there or does not name it:
+
+| Where | How it gets the version |
+|---|---|
+| `Makefile` — `KIT_VERSION ?= …` | **the source** |
+| `sandbox-kit/openheron/openheron.yaml` — `args.version.default` | stamped in by the build (`sed` on the staged copy) |
+| the published image tag | `$(KIT_VERSION)` |
+| the guide (`sandbox-kit/TUTORIAL.md`) | it names `latest`, which CI points at the release |
+
+★ **So a release is a pull request that touches two lines.** Open one that
+changes `KIT_VERSION` in the Makefile and `args.version.default` in the
+descriptor, and nothing else: the guide says `latest`, and CI derives the tag
+from the version you tag.
+
+```sh
+# the whole contract of a release pull request — $NEXT is the version you tag
+sed -i "s/^KIT_VERSION ?= .*/KIT_VERSION ?= $NEXT/" Makefile
+sed -i "s|^    default: .*|    default: \"$NEXT\"|" sandbox-kit/openheron/openheron.yaml
+```
+
+★ **Why the descriptor carries a version at all, when the build overwrites
+it.** The build always stamps it, so the value in the file is a placeholder —
+but it has to be a *legal* one: the descriptor's `pattern` rejects anything
+that is not a version, and `sbx` reads the file directly when a kit is
+installed from a local directory. A placeholder that does not parse would be
+a descriptor that cannot be read at all.
+
+★ **`latest` is a pointer, not a build.** CI creates it from the image the
+release pushed, so both tags carry the same digest, and the job checks that
+they do. A `latest` that pointed somewhere else would be a lie the guide
+tells.
+
+★ **The version tag is what a consumer pins.** `latest` moves; `0.0.7` does
+not. Both are published, and the tutorial says which to use when.
+
 ## 4. The frontend
 
 ### 4.1 The pure layers

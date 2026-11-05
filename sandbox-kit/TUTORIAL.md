@@ -14,12 +14,28 @@ it crosses it as an ordinary directory on your host.
 
 | | What it is |
 |---|---|
-| **the workload** | the root filesystem the agent works in, plus the launch contract — the published image `docker.io/ouranoshong/openheron-kit:0.0.7` |
+| **the workload** | the root filesystem the agent works in, plus the launch contract — the published image `docker.io/ouranoshong/openheron-kit:latest` |
 | **a mixin** | the model credential, and the network rule that goes with it |
 
 ★ A sandbox without a mixin starts and then answers every model call with a
 401: the credential is what the mixin carries. One mixin per vendor, and you
 compose the ones you use.
+
+★ **`latest` is the current release, and it moves.** The images are also
+published under their version — `0.0.7`, `0.0.6`, and so on, the version
+being whatever the release notes say — so a sandbox you want to be the same
+sandbox next month names that one instead:
+
+```sh
+sbx run docker.io/ouranoshong/openheron-kit:X.Y.Z \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:X.Y.Z \
+    --name openheron ~/my-project
+```
+
+★ `X.Y.Z` is the version the release notes name. ★ The version inside the
+Kit is the release it was built from, so the two never drift apart: `latest`
+and `X.Y.Z` are the same image on the day `X.Y.Z` is the latest, and
+`latest` moves on while `X.Y.Z` stays.
 
 ---
 
@@ -72,7 +88,7 @@ one**; the runtime accepts both and behaves the same:
 
 | | a published image | a file of your own |
 |---|---|---|
-| **What you get** | `docker.io/ouranoshong/openheron-kit-deepseek:0.0.7` | one YAML file, 25 lines |
+| **What you get** | `docker.io/ouranoshong/openheron-kit-deepseek:latest` | one YAML file, 25 lines |
 | **To start using it** | nothing — pull it | copy it into a directory |
 | **To point it at your own endpoint** | wait for a new image | edit one line |
 | **The version** | fixed, and the one that was measured | whatever you wrote |
@@ -90,7 +106,7 @@ there is no release to wait for.
 Nothing to do. The reference is the whole thing:
 
 ```
-docker.io/ouranoshong/openheron-kit-deepseek:0.0.7
+docker.io/ouranoshong/openheron-kit-deepseek:latest
 ```
 
 ### 1.2 The file
@@ -161,15 +177,15 @@ Two mixins claiming `deepseek` do not compose.
 With the published mixin:
 
 ```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.7 \
-    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.7 \
+sbx run docker.io/ouranoshong/openheron-kit:latest \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:latest \
     --name openheron ~/my-project
 ```
 
 With your own file:
 
 ```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.7 \
+sbx run docker.io/ouranoshong/openheron-kit:latest \
     --kit ~/openheron-deepseek \
     --name openheron ~/my-project
 ```
@@ -181,7 +197,7 @@ Read the arguments apart:
 
 | | |
 |---|---|
-| `docker.io/ouranoshong/openheron-kit:0.0.7` | the workload — the published image, pulled on first use |
+| `docker.io/ouranoshong/openheron-kit:latest` | the workload — the published image, pulled on first use |
 | `--kit …` | the mixin — an image reference or a directory, your choice |
 | `~/my-project` | the workspace — a directory on your host, mounted into the sandbox |
 
@@ -479,9 +495,9 @@ so keep whichever you started with.
 With images:
 
 ```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.7 \
-    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.7 \
-    --kit docker.io/ouranoshong/openheron-kit-openai:0.0.7 \
+sbx run docker.io/ouranoshong/openheron-kit:latest \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:latest \
+    --kit docker.io/ouranoshong/openheron-kit-openai:latest \
     --name openheron ~/my-project
 ```
 
@@ -489,7 +505,7 @@ With files — the second one is the same YAML as in step 1.2, with `openai`
 where it says `deepseek`:
 
 ```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.7 \
+sbx run docker.io/ouranoshong/openheron-kit:latest \
     --kit ~/openheron-deepseek \
     --kit ~/openheron-openai \
     --name openheron ~/my-project
@@ -533,8 +549,8 @@ program with a bug in it — `make test` fails, and the fix is one character.
 From the published images:
 
 ```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.7 \
-    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.7 \
+sbx run docker.io/ouranoshong/openheron-kit:latest \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:latest \
     --name openheron sandbox-kit/examples/demo-project
 ```
 

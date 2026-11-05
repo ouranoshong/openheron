@@ -55,9 +55,13 @@ them.
 ## 2. Build
 
 ```sh
-make kit         # the workload: openheron-kit:0.0.7
-make kit-mixin   # every mixin: openheron-kit-<vendor>:0.0.7
+make kit         # the workload: openheron-kit:<version>
+make kit-mixin   # every mixin: openheron-kit-<vendor>:<version>
 ```
+
+★ **`<version>` is `KIT_VERSION` in the Makefile** — the one place the
+version lives. The build stamps it into the descriptor and into the image
+tag, so the image you get locally is the one the release publishes.
 
 ★ Both export into the local docker store. Without the export there is no
 local image to validate, and `make kit-check` would look for an image that
@@ -139,9 +143,9 @@ unable to reach a model — the Kit runs, and every call comes back 401.
 ★ The three land on Docker Hub under `ouranoshong/`:
 
 ```
-docker.io/ouranoshong/openheron-kit:0.0.7
-docker.io/ouranoshong/openheron-kit-deepseek:0.0.7
-docker.io/ouranoshong/openheron-kit-openai:0.0.7
+docker.io/ouranoshong/openheron-kit:latest
+docker.io/ouranoshong/openheron-kit-deepseek:latest
+docker.io/ouranoshong/openheron-kit-openai:latest
 ```
 
 ★ **The repositories have to exist first.** Docker Hub's API creates them:
@@ -203,10 +207,13 @@ matter:
 ```yaml
 args:
   version:
-    default: "0.0.7"
+    default: "<version>"
     pattern: '^[0-9]+(\.[0-9A-Za-z-]+)*$'
-    description: openheron release to install
+    description: version label for this build of the Kit
     buildArg: OPENHERON_VERSION
+
+provides: ["openheron@${{ kit.args.version }}"]
+version: "${{ kit.args.version }}"
 
 capabilities:
   - type: com.docker.sandbox/port@1
@@ -215,6 +222,10 @@ capabilities:
       container: 8080
       transport: tcp
 ```
+
+★ **The snippet is a copy, so it can drift — the file is the truth.** When the
+two disagree, the descriptor wins; a copy that silently ages is worse than no
+copy at all, because it reads as current.
 
 ★ **`buildArg` is how the version reaches the recipe.** The recipe reads
 `${OPENHERON_VERSION}`; the descriptor's `buildArg` is what puts the

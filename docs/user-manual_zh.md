@@ -90,8 +90,8 @@ printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
 与一份 **mixin**（凭据，以及与它配套的网络规则）。已发布的那一套：
 
 ```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.7 \
-    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.7 \
+sbx run docker.io/ouranoshong/openheron-kit:latest \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:latest \
     --name openheron ~/my-project
 ```
 

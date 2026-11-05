@@ -13,11 +13,25 @@ shell 工具 —— 都跑在一个 microVM 里，你的宿主在边界之外。
 
 | | 是什么 |
 |---|---|
-| **workload** | agent 干活的那个根文件系统，加上启动契约 —— 已发布的镜像 `docker.io/ouranoshong/openheron-kit:0.0.7` |
+| **workload** | agent 干活的那个根文件系统，加上启动契约 —— 已发布的镜像 `docker.io/ouranoshong/openheron-kit:latest` |
 | **mixin** | 模型凭据，以及与它配套的网络规则 |
 
 ★ 没有 mixin 的沙箱会起得来，然后每个模型调用都回 401：
 凭据正是 mixin 带来的东西。每个厂商一份 mixin，用哪几份就组合哪几份。
+
+★ **`latest` 就是当前发布版，而且它会动。** 镜像同时也按版本发布 ——
+`0.0.7`、`0.0.6` 等等，版本号就是发布说明里写的那个 —— 所以想要"下个月还是
+同一个沙箱"，就点名那个版本：
+
+```sh
+sbx run docker.io/ouranoshong/openheron-kit:X.Y.Z \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:X.Y.Z \
+    --name openheron ~/my-project
+```
+
+★ `X.Y.Z` 填发布说明里写的那个版本。★ Kit 内部的版本就是它构建自的那次
+发布，所以两者不会对不上：`X.Y.Z` 是最新版的那天，`latest` 与 `X.Y.Z` 是同一个
+镜像；之后 `latest` 往前走，`X.Y.Z` 留在原地。
 
 ---
 
@@ -67,7 +81,7 @@ printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
 
 | | 已发布的镜像 | 你自己的一份文件 |
 |---|---|---|
-| **你拿到什么** | `docker.io/ouranoshong/openheron-kit-deepseek:0.0.7` | 一个 YAML 文件，25 行 |
+| **你拿到什么** | `docker.io/ouranoshong/openheron-kit-deepseek:latest` | 一个 YAML 文件，25 行 |
 | **开始用它要做什么** | 什么都不用 —— 拉下来 | 复制进一个目录 |
 | **要指向自己的端点** | 等一个新镜像 | 改一行 |
 | **版本** | 固定，而且是被实测过的那个 | 就是你写下的样子 |
@@ -83,7 +97,7 @@ printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
 什么都不用做。引用本身就是全部：
 
 ```
-docker.io/ouranoshong/openheron-kit-deepseek:0.0.7
+docker.io/ouranoshong/openheron-kit-deepseek:latest
 ```
 
 ### 1.2 文件
@@ -152,15 +166,15 @@ mkdir -p ~/openheron-deepseek
 用已发布的 mixin：
 
 ```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.7 \
-    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.7 \
+sbx run docker.io/ouranoshong/openheron-kit:latest \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:latest \
     --name openheron ~/my-project
 ```
 
 用你自己的文件：
 
 ```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.7 \
+sbx run docker.io/ouranoshong/openheron-kit:latest \
     --kit ~/openheron-deepseek \
     --name openheron ~/my-project
 ```
@@ -172,7 +186,7 @@ workload 带着根文件系统，所以它只能是镜像。
 
 | | |
 |---|---|
-| `docker.io/ouranoshong/openheron-kit:0.0.7` | workload —— 已发布的镜像，第一次用时会拉取 |
+| `docker.io/ouranoshong/openheron-kit:latest` | workload —— 已发布的镜像，第一次用时会拉取 |
 | `--kit …` | mixin —— 镜像引用或目录，你挑 |
 | `~/my-project` | 工作区 —— 宿主上的一个目录，被挂进沙箱 |
 
@@ -453,16 +467,16 @@ sbx ports openheron --publish 8080:8080
 用镜像：
 
 ```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.7 \
-    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.7 \
-    --kit docker.io/ouranoshong/openheron-kit-openai:0.0.7 \
+sbx run docker.io/ouranoshong/openheron-kit:latest \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:latest \
+    --kit docker.io/ouranoshong/openheron-kit-openai:latest \
     --name openheron ~/my-project
 ```
 
 用文件 —— 第二份就是第 1.2 节那个 YAML，把 `deepseek` 换成 `openai`：
 
 ```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.7 \
+sbx run docker.io/ouranoshong/openheron-kit:latest \
     --kit ~/openheron-deepseek \
     --kit ~/openheron-openai \
     --name openheron ~/my-project
@@ -504,8 +518,8 @@ sbx rm openheron
 用已发布的镜像：
 
 ```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.7 \
-    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.7 \
+sbx run docker.io/ouranoshong/openheron-kit:latest \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:latest \
     --name openheron sandbox-kit/examples/demo-project
 ```
 
