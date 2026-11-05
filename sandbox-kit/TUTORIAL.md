@@ -15,7 +15,7 @@ it crosses it as an ordinary directory on your host.
 | | What it is | Where you get it |
 |---|---|---|
 | **workload** | the root filesystem the agent works in, plus the launch contract | `docker.io/ouranoshong/openheron-kit:0.0.6` |
-| **mixin** | the model credential, and the network rule that goes with it | `docker.io/ouranoshong/openheron-kit-deepseek:0.0.6` |
+| **mixin** | the model credential, and the network rule that goes with it | a published image, **or a file of your own** (step 2) |
 
 ★ A sandbox without a mixin starts and then answers every model call with a
 401: the credential is what the mixin carries.
@@ -111,7 +111,99 @@ lines here.
 
 ---
 
-## 2. Open it
+## 2. The mixin as a file
+
+★ **A mixin is a declaration, so it can be a file.** The published mixin
+images are convenient, but they are not required: a **directory holding one
+YAML file** is a complete mixin, and the runtime builds the declaration-only
+image from it. You never build anything, you never push anything, and nothing
+depends on a version someone else published.
+
+This is the whole file. Save it as `openheron-deepseek.yaml`:
+
+```yaml
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
+kind: mixin
+displayName: openheron credential (DeepSeek)
+description: the DeepSeek model credential for an openheron workload, injected by the host proxy
+licenses: [Apache-2.0]
+
+capabilities:
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          - api.deepseek.com
+
+  - type: com.docker.sandbox/credential@1
+    optional: true
+    description: DeepSeek API access
+    config:
+      service: deepseek
+      phase: runtime
+      apiKey:
+        name: DEEPSEEK_API_KEY
+        proxyManaged: true
+        inject:
+          - {domain: api.deepseek.com, header: Authorization, format: "Bearer %s"}
+```
+
+★ **Put it in a directory of its own** — the directory name is the file name's
+stem:
+
+```sh
+mkdir -p ~/openheron-deepseek
+# save the file above as ~/openheron-deepseek/openheron-deepseek.yaml
+```
+
+Then point `--kit` at that directory:
+
+```sh
+sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
+    --kit ~/openheron-deepseek \
+    --name openheron ~/my-project
+```
+
+What you will see is the same as with the published image:
+
+```
+    loading kit image docker.io/ouranoshong/openheron-kit:0.0.6
+    loading kit image /home/you/openheron-deepseek
+  ✓ assembled kit image (21 layers)
+    setting 1 environment variable
+      +DEEPSEEK_API_KEY
+  ✓ http — published localhost:32774 -> 8080/tcp
+```
+
+★ **Three things the runtime insists on**, all measured:
+
+- **A directory, not a file.** `--kit ./mixin.yaml` is refused:
+  `artifact zip "./mixin.yaml": zip: not a valid zip file` — it takes the
+  path as an archive.
+- **The directory name is the file name's stem.** `openheron-deepseek/`
+  holds `openheron-deepseek.yaml`.
+- **A v3 mixin is not a ZIP.** Zipping the directory is refused with
+  `artifact: spec.yaml (or spec.yml) is required` — that is the older kit
+  grammar, where a kit is a `spec.yaml` and an optional `files/`
+  directory.
+
+★ **Which one should you use?**
+
+| | a file | a published image |
+|---|---|---|
+| To start using it | copy one YAML | nothing |
+| To change the endpoint | edit a line | wait for a new image |
+| The version is fixed | no — it is whatever you wrote | yes |
+
+★ A file is the better answer when you point openheron at **your own**
+endpoint, your own vendor, or your own proxy: the change is one line, and
+there is no release to wait for. The published image is the better answer
+when you want the version that was measured.
+
+---
+
+## 3. Open it
 
 ```sh
 sbx ports openheron
@@ -132,7 +224,7 @@ the words appear, not the finished text at once.
 
 ---
 
-## 3. Leave it running
+## 4. Leave it running
 
 ★ **You can close the terminal and the server keeps serving.** Press
 `Ctrl-\` to leave the session while the sandbox keeps running:
@@ -142,7 +234,7 @@ the words appear, not the finished text at once.
 ```
 
 The sandbox stays up with the port still published. You can close the
-terminal window; the next time you want it, see step 5.
+terminal window; the next time you want it, see step 6.
 
 ★ Without `long-running@1` the sandbox would stop as soon as its last client
 disconnected. The workload declares it, so the server is a background
@@ -150,7 +242,7 @@ workload rather than a session.
 
 ---
 
-## 4. The configuration openheron writes
+## 5. The configuration openheron writes
 
 ★ **On the first start, openheron seeds its own configuration** in the
 workspace — the startup hook does it, before the server comes up:
@@ -236,7 +328,7 @@ survive the sandbox being stopped, recreated or removed.
 
 ---
 
-## 5. Come back later
+## 6. Come back later
 
 ```sh
 sbx run --name openheron
@@ -267,9 +359,10 @@ of the server, not the first.
 
 ---
 
-## 6. Another vendor
+## 7. Another vendor
 
-Add the second mixin, bind that key, and compose the two:
+Write the mixin for that vendor (step 2 has the shape), bind the key, and
+compose the two:
 
 ```sh
 printf '%s' "$OPENAI_API_KEY" | sbx secret set-custom \
@@ -287,47 +380,6 @@ rule. What the **provider configuration** does is your business:
 `openheron init` maintains one provider configuration per configuration root,
 so the second vendor's `llm/*.yaml` is written by you, on the mount.
 
-★ **A vendor with no published mixin is still fine.** The mixin is a
-declaration, so you can write the twelve lines yourself and point `--kit` at
-your own directory — no build, no pull, no registry:
-
-```yaml
-# syntax=docker/sandbox-kit:3
-schemaVersion: "3"
-kind: mixin
-displayName: openheron credential (OpenAI)
-description: the OpenAI model credential for an openheron workload, injected by the host proxy
-licenses: [Apache-2.0]
-
-capabilities:
-  - type: com.docker.sandbox/network-policy@1
-    config:
-      runtime:
-        allow:
-          - api.openai.com
-
-  - type: com.docker.sandbox/credential@1
-    optional: true
-    description: OpenAI API access
-    config:
-      service: openai
-      phase: runtime
-      apiKey:
-        name: OPENAI_API_KEY
-        proxyManaged: true
-        inject:
-          - {domain: api.openai.com, header: Authorization, format: "Bearer %s"}
-```
-
-★ Save it as `openheron-openai.yaml` in a directory of its own — the
-directory name is the file name's stem — and pass that directory:
-
-```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
-    --kit ./openheron-openai \
-    --name openheron ~/my-project
-```
-
 ★ **Why the network rule is in the same file as the credential.** The runtime
 wants every domain the credential injects into to appear **literally** in the
 allow list for the same phase. The workload's own rule is `*`, which covers
@@ -340,7 +392,7 @@ Two mixins claiming `openai` do not compose.
 
 ---
 
-## 7. Clean up
+## 8. Clean up
 
 ```sh
 sbx rm openheron
@@ -358,6 +410,8 @@ this one left off.
 |---|---|
 | `error: resolve kits: kit "…": its source is not in your allowlist` | the Kit is not on `docker.io/` — an administrator has to allow its source |
 | `error: … fetch manifest: … http: server gave HTTP response to HTTPS client` | the registry serves plain HTTP; it has to serve HTTPS |
+| `artifact zip "./mixin.yaml": zip: not a valid zip file` | `--kit` takes a **directory** for a mixin, not a file |
+| `artifact: spec.yaml (or spec.yml) is required` | a ZIP of a v3 mixin is refused — that is the older kit grammar |
 | `error: sandbox '…' already exists; --kit can only be used when creating a new sandbox` | you passed `--kit` to an existing sandbox — drop it, or `sbx rm` first |
 | `error: agent exited with code 2` | the server was already running; the one you want is still up |
 | `error: resolve kits: kit "…": artifact: spec.yaml (or spec.yml) is required` | you put a path where the agent goes; `sbx run --name <name>` takes no path |

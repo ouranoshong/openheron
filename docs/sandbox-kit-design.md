@@ -360,6 +360,21 @@ user who has never built anything — there is no Dockerfile, no `make`, and no
 registry to publish to. Measured: a hand-written directory was consumed
 exactly like a built one (§6).
 
+★ **Three things the runtime insists on**, all measured:
+
+- **A directory, not a file.** `--kit ./mixin.yaml` is refused —
+  `artifact zip "./mixin.yaml": zip: not a valid zip file`: the path is taken
+  as an archive.
+- **The directory name is the file name's stem.** The frontend finds the
+  descriptor by that convention (§3.1 of the specification).
+- **A v3 mixin is not a ZIP.** Zipping the directory is refused with
+  `artifact: spec.yaml (or spec.yml) is required` — that is the older kit
+  grammar, where a kit is a `spec.yaml` and an optional `files/` directory.
+
+★ So the file form is the one a **user** can take: copy one YAML, edit one
+line to point at their own endpoint, and compose it. The image form is the
+one that is **measured and versioned**.
+
 ★ **Where a Kit may come from is a policy, not a detail.** The runtime keeps
 an allowlist of Kit sources, and by default it holds two entries:
 

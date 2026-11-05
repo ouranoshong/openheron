@@ -319,6 +319,20 @@ error: resolve kits: merge: .../openheron-deepseek (capabilities[1]) and
 用户用起来的原因 —— 没有 Dockerfile，没有 `make`，也没有 registry 可推。
 实测：手写的目录与构建出来的镜像被同样地消费（§6）。
 
+★ **运行时坚持的三件事**，都是实测的：
+
+- **要目录，不要文件。** `--kit ./mixin.yaml` 会被拒 ——
+  `artifact zip "./mixin.yaml": zip: not a valid zip file`：
+  那个路径被当成了压缩包。
+- **目录名就是文件名的词干。** 前端按这个约定找描述文件
+  （规范的 §3.1）。
+- **v3 的 mixin 不是 ZIP。** 把目录打包会被拒：
+  `artifact: spec.yaml (or spec.yml) is required` —— 那是更老的 kit 语法，
+  一个 kit 是一个 `spec.yaml` 加一个可选的 `files/` 目录。
+
+★ 所以文件形态是**用户**能拿的那一种：复制一个 YAML，
+改一行指向自己的端点，然后组合起来。而镜像形态是**被实测过、版本固定**的那一种。
+
 ★ **Kit 能从哪来是策略，不是细节。** 运行时维护一份 Kit 来源的允许列表，
 默认只有两项：
 

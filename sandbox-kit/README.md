@@ -89,7 +89,9 @@ descriptor, what the runtime enforces, and what to do when a build misbehaves.
 directory holding one YAML file is a complete mixin — the runtime builds the
 declaration-only image from it. Copy `openheron-deepseek/openheron-deepseek.yaml`
 into a directory of your own and point `--kit` at that, and you never build
-or publish anything. The tutorial gives the whole file.
+or publish anything. The tutorial gives the whole file, and the three rules
+the runtime insists on: a **directory** (not the YAML itself), the directory
+name is the file name's stem, and a v3 mixin is not a ZIP.
 
 ★ **Where a Kit may come from is a policy.** The runtime's allowlist holds
 `docker.io/` and `dhi.io/` by default; a Kit from anywhere else is refused

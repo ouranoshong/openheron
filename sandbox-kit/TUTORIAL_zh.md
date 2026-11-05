@@ -14,7 +14,7 @@ shell 工具 —— 都跑在一个 microVM 里，你的宿主在边界之外。
 | | 是什么 | 从哪拿 |
 |---|---|---|
 | **workload** | agent 干活的那个根文件系统，加上启动契约 | `docker.io/ouranoshong/openheron-kit:0.0.6` |
-| **mixin** | 模型凭据，以及与它配套的网络规则 | `docker.io/ouranoshong/openheron-kit-deepseek:0.0.6` |
+| **mixin** | 模型凭据，以及与它配套的网络规则 | 已发布的镜像，**或者你自己的一份文件**（第 2 步） |
 
 ★ 没有 mixin 的沙箱会起得来，然后每个模型调用都回 401：
 凭据正是 mixin 带来的东西。
@@ -104,7 +104,95 @@ workload 声明了自己服务的端口，运行时在启动时把它发布到�
 
 ---
 
-## 2. 打开它
+## 2. mixin 就是一份文件
+
+★ **mixin 是一份声明，所以它可以是一个文件。** 已发布的 mixin 镜像只是方便，
+并不是必需的：**一个只放着一个 YAML 文件的目录**就是一份完整的 mixin，
+运行时把这份纯声明构建成镜像。你不用构建任何东西、不用推任何东西，
+也不依赖别人发布的某个版本。
+
+这就是全部内容。存成 `openheron-deepseek.yaml`：
+
+```yaml
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
+kind: mixin
+displayName: openheron credential (DeepSeek)
+description: the DeepSeek model credential for an openheron workload, injected by the host proxy
+licenses: [Apache-2.0]
+
+capabilities:
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          - api.deepseek.com
+
+  - type: com.docker.sandbox/credential@1
+    optional: true
+    description: DeepSeek API access
+    config:
+      service: deepseek
+      phase: runtime
+      apiKey:
+        name: DEEPSEEK_API_KEY
+        proxyManaged: true
+        inject:
+          - {domain: api.deepseek.com, header: Authorization, format: "Bearer %s"}
+```
+
+★ **把它放进它自己专属的目录** —— 目录名就是文件名的词干：
+
+```sh
+mkdir -p ~/openheron-deepseek
+# save the file above as ~/openheron-deepseek/openheron-deepseek.yaml
+```
+
+然后把 `--kit` 指向那个目录：
+
+```sh
+sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
+    --kit ~/openheron-deepseek \
+    --name openheron ~/my-project
+```
+
+你看到的与用已发布镜像时一样：
+
+```
+    loading kit image docker.io/ouranoshong/openheron-kit:0.0.6
+    loading kit image /home/you/openheron-deepseek
+  ✓ assembled kit image (21 layers)
+    setting 1 environment variable
+      +DEEPSEEK_API_KEY
+  ✓ http — published localhost:32774 -> 8080/tcp
+```
+
+★ **运行时坚持的三件事**，都是实测的：
+
+- **要目录，不要文件。** `--kit ./mixin.yaml` 会被拒：
+  `artifact zip "./mixin.yaml": zip: not a valid zip file` ——
+  它把那个路径当成压缩包了。
+- **目录名就是文件名的词干。** `openheron-deepseek/` 里放
+  `openheron-deepseek.yaml`。
+- **v3 的 mixin 不是 ZIP。** 把目录打包会被拒：
+  `artifact: spec.yaml (or spec.yml) is required` —— 那是更老的 kit 语法，
+  一个 kit 是一个 `spec.yaml` 加一个可选的 `files/` 目录。
+
+★ **你该用哪一种？**
+
+| | 一份文件 | 已发布的镜像 |
+|---|---|---|
+| 开始用它 | 复制一个 YAML | 什么都不用做 |
+| 换端点 | 改一行 | 等一个新镜像 |
+| 版本是否固定 | 不固定 —— 就是你写下的样子 | 固定 |
+
+★ 当你把 openheron 指向**你自己的**端点、自己的厂商、自己的代理时，
+文件是更好的答案：改动就是一行，而且没有 release 要等。
+而当你想要那个被实测过的版本时，已发布的镜像更合适。
+
+---
+
+## 3. 打开它
 
 ```sh
 sbx ports openheron
@@ -125,7 +213,7 @@ HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
 
 ---
 
-## 3. 让它一直跑着
+## 4. 让它一直跑着
 
 ★ **你可以关掉终端，服务照样在服务。** 按 `Ctrl-\` 离开会话，
 沙箱继续运行：
@@ -135,14 +223,14 @@ HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
 ```
 
 沙箱还在，端口也还发布着。终端窗口可以关掉；
-下次要用的时候，见第 5 步。
+下次要用的时候，见第 6 步。
 
 ★ 没有 `long-running@1` 的话，沙箱会在最后一个客户端断开时就停掉。
 workload 声明了它，所以这个服务是个后台 workload，而不是一个会话。
 
 ---
 
-## 4. openheron 自己写下的配置
+## 5. openheron 自己写下的配置
 
 ★ **第一次启动时，openheron 会在工作区种下自己的配置** ——
 是启动 hook 干的，在服务起来之前就做完了：
@@ -227,7 +315,7 @@ deny:  []
 
 ---
 
-## 5. 下次再来
+## 6. 下次再来
 
 ```sh
 sbx run --name openheron
@@ -256,9 +344,9 @@ error: inspect exec: context deadline exceeded
 
 ---
 
-## 6. 换一个厂商
+## 7. 换一个厂商
 
-加上第二份 mixin，把那个密钥绑上，然后组合两份：
+给那个厂商写一份 mixin（第 2 步有形状），把密钥绑上，然后组合两份：
 
 ```sh
 printf '%s' "$OPENAI_API_KEY" | sbx secret set-custom \
@@ -275,47 +363,6 @@ sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
 而 **provider 配置** 是你自己的事：`openheron init` 每个配置根只维护一份
 provider 配置，所以第二个厂商的 `llm/*.yaml` 由你在挂载上写。
 
-★ **没有已发布 mixin 的厂商也一样能用。** mixin 是一份声明，
-所以那十二行你可以自己写，然后把 `--kit` 指向你自己的目录 ——
-不用构建、不用拉取、不用 registry：
-
-```yaml
-# syntax=docker/sandbox-kit:3
-schemaVersion: "3"
-kind: mixin
-displayName: openheron credential (OpenAI)
-description: the OpenAI model credential for an openheron workload, injected by the host proxy
-licenses: [Apache-2.0]
-
-capabilities:
-  - type: com.docker.sandbox/network-policy@1
-    config:
-      runtime:
-        allow:
-          - api.openai.com
-
-  - type: com.docker.sandbox/credential@1
-    optional: true
-    description: OpenAI API access
-    config:
-      service: openai
-      phase: runtime
-      apiKey:
-        name: OPENAI_API_KEY
-        proxyManaged: true
-        inject:
-          - {domain: api.openai.com, header: Authorization, format: "Bearer %s"}
-```
-
-★ 存成 `openheron-openai.yaml`，放在它自己专属的目录里 ——
-目录名就是文件名的词干 —— 然后把那个目录传进去：
-
-```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
-    --kit ./openheron-openai \
-    --name openheron ~/my-project
-```
-
 ★ **为什么网络规则和凭据在同一个文件里。** 运行时要每个 inject 域名
 **逐字**出现在同阶段的 allow 列表里，而 workload 自己那条规则是 `*`，
 它覆盖所有域名却不满足这条检查 —— 所以 mixin 把主机名写实。
@@ -327,7 +374,7 @@ sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
 
 ---
 
-## 7. 收工
+## 8. 收工
 
 ```sh
 sbx rm openheron
@@ -344,6 +391,8 @@ sbx rm openheron
 |---|---|
 | `error: resolve kits: kit "…": its source is not in your allowlist` | 这个 Kit 不在 `docker.io/` 上 —— 需要管理员放行它的来源 |
 | `error: … fetch manifest: … http: server gave HTTP response to HTTPS client` | 那个 registry 走的是明文 HTTP；它必须提供 HTTPS |
+| `artifact zip "./mixin.yaml": zip: not a valid zip file` | mixin 的 `--kit` 要的是**目录**，不是文件 |
+| `artifact: spec.yaml (or spec.yml) is required` | v3 mixin 的 ZIP 会被拒 —— 那是更老的 kit 语法 |
 | `error: sandbox '…' already exists; --kit can only be used when creating a new sandbox` | 你给已有沙箱传了 `--kit` —— 去掉它，或者先 `sbx rm` |
 | `error: agent exited with code 2` | 服务已经在跑了；你要的那份还活着 |
 | `error: resolve kits: kit "…": artifact: spec.yaml (or spec.yml) is required` | 你把路径放到了 agent 的位置上；`sbx run --name <name>` 不带路径 |
@@ -363,6 +412,6 @@ sbx rm openheron
 ---
 
 ★ **想自己构建？** 镜像是发布好的，但源码在仓库里：
-[`BUILDING.md`](BUILDING_zh.md) 讲怎么从源码构建、怎么改描述文件、
-怎么发布新版本。[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design_zh.md)
+[`BUILDING.md`](BUILDING.md) 讲怎么从源码构建、怎么改描述文件、
+怎么发布新版本。[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md)
 是它背后的设计，而它依赖的每一条假设都是实测出来的。
