@@ -55,9 +55,13 @@ them.
 ## 2. Build
 
 ```sh
-make kit         # the workload: openheron-kit:0.0.7
-make kit-mixin   # every mixin: openheron-kit-<vendor>:0.0.7
+make kit         # the workload: openheron-kit:<version>
+make kit-mixin   # every mixin: openheron-kit-<vendor>:<version>
 ```
+
+★ **`<version>` is `KIT_VERSION` in the Makefile** — the one place the
+version lives. The build stamps it into the descriptor and into the image
+tag, so the image you get locally is the one the release publishes.
 
 ★ Both export into the local docker store. Without the export there is no
 local image to validate, and `make kit-check` would look for an image that
@@ -203,7 +207,7 @@ matter:
 ```yaml
 args:
   version:
-    default: "0.0.7"
+    default: "<version>"
     pattern: '^[0-9]+(\.[0-9A-Za-z-]+)*$'
     description: version label for this build of the Kit
     buildArg: OPENHERON_VERSION

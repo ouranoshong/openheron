@@ -22,18 +22,20 @@ it crosses it as an ordinary directory on your host.
 compose the ones you use.
 
 ★ **`latest` is the current release, and it moves.** The images are also
-published under their version — `0.0.7`, `0.0.6`, and so on — so a sandbox
-you want to be the same sandbox next month names that one instead:
+published under their version — `0.0.7`, `0.0.6`, and so on, the version
+being whatever the release notes say — so a sandbox you want to be the same
+sandbox next month names that one instead:
 
 ```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.7 \
-    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.7 \
+sbx run docker.io/ouranoshong/openheron-kit:X.Y.Z \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:X.Y.Z \
     --name openheron ~/my-project
 ```
 
-★ The version inside the Kit is the release it was built from, so the two
-never drift apart: `latest` and `0.0.7` are the same image on the day
-`0.0.7` is the latest, and `latest` moves on while `0.0.7` stays.
+★ `X.Y.Z` is the version the release notes name. ★ The version inside the
+Kit is the release it was built from, so the two never drift apart: `latest`
+and `X.Y.Z` are the same image on the day `X.Y.Z` is the latest, and
+`latest` moves on while `X.Y.Z` stays.
 
 ---
 

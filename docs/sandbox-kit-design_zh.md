@@ -246,7 +246,7 @@ licenses: [Apache-2.0]
 
 args:
   version:
-    default: "0.0.7"
+    default: "<version>"
     pattern: '^[0-9]+(\.[0-9A-Za-z-]+)*$'
     buildArg: OPENHERON_VERSION
 

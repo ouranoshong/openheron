@@ -53,9 +53,12 @@ docker buildx inspect kit-builder >/dev/null 2>&1 || \
 ## 2. 构建
 
 ```sh
-make kit         # the workload: openheron-kit:0.0.7
-make kit-mixin   # every mixin: openheron-kit-<vendor>:0.0.7
+make kit         # the workload: openheron-kit:<version>
+make kit-mixin   # every mixin: openheron-kit-<vendor>:<version>
 ```
+
+★ **`<version>` 就是 Makefile 里的 `KIT_VERSION`** —— 版本只住在那一处。
+构建把它盖进描述文件与镜像 tag，所以本地拿到的镜像就是发布出去的那个。
 
 ★ 两者都会导出到本地 docker store。不导出的话本地就没有镜像可供校验，
 `make kit-check` 会去找一个从没导出的镜像。
@@ -185,7 +188,7 @@ mixin 只是声明。
 ```yaml
 args:
   version:
-    default: "0.0.7"
+    default: "<version>"
     pattern: '^[0-9]+(\.[0-9A-Za-z-]+)*$'
     description: version label for this build of the Kit
     buildArg: OPENHERON_VERSION

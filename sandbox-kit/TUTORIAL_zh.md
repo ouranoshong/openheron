@@ -20,16 +20,18 @@ shell 工具 —— 都跑在一个 microVM 里，你的宿主在边界之外。
 凭据正是 mixin 带来的东西。每个厂商一份 mixin，用哪几份就组合哪几份。
 
 ★ **`latest` 就是当前发布版，而且它会动。** 镜像同时也按版本发布 ——
-`0.0.7`、`0.0.6` 等等 —— 所以想要"下个月还是同一个沙箱"，就点名那个版本：
+`0.0.7`、`0.0.6` 等等，版本号就是发布说明里写的那个 —— 所以想要"下个月还是
+同一个沙箱"，就点名那个版本：
 
 ```sh
-sbx run docker.io/ouranoshong/openheron-kit:0.0.7 \
-    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.7 \
+sbx run docker.io/ouranoshong/openheron-kit:X.Y.Z \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:X.Y.Z \
     --name openheron ~/my-project
 ```
 
-★ Kit 内部的版本就是它构建自的那次发布，所以两者不会对不上：`0.0.7` 是最新版的
-那天，`latest` 与 `0.0.7` 是同一个镜像；之后 `latest` 往前走，`0.0.7` 留在原地。
+★ `X.Y.Z` 填发布说明里写的那个版本。★ Kit 内部的版本就是它构建自的那次
+发布，所以两者不会对不上：`X.Y.Z` 是最新版的那天，`latest` 与 `X.Y.Z` 是同一个
+镜像；之后 `latest` 往前走，`X.Y.Z` 留在原地。
 
 ---
 
