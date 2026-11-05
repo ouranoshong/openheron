@@ -1,30 +1,30 @@
 # syntax=docker/sandbox-kit:3
 #
-# The openheron model credential, as a mixin.
+# The DeepSeek model credential, as a mixin.
 #
 # ★ A mixin is an overlay that lands on a workload's filesystem. It carries no
-#   content of its own — it carries declarations. This one declares the
-#   credential and nothing else, so the workload stays vendor-neutral: which
-#   provider, which endpoint and which variable name are the user's business.
+#   content of its own — it carries declarations. This one carries the
+#   credential and the network rule that goes with it.
+#
+# ★ It carries **no startup hook**: openheron init maintains one provider
+#   config per config root, so the second vendor's llm/*.yaml is the user's
+#   to write, not this Kit's to seed.
 #
 # ★ Compose it onto the workload:
-#     sbx run ./sandbox-kit/openheron --kit ./sandbox-kit/openheron-credential .
-#   Without it, the workload asks for no credential at all and the user
-#   injects the key themselves (which puts the key inside the sandbox).
-#
-# ★ The declarations below mirror openheron's factory defaults, because the
-#   provider config the workload's startup hook writes references them:
-#     DEEPSEEK_API_KEY    initcfg/templates/llm/deepseek.yaml (api_key)
-#     api.deepseek.com    initcfg/templates/llm/deepseek.yaml (base_url)
-#   Change them together with the config on the user's mount, or compose a
-#   different mixin.
+#     sbx run ./sandbox-kit/openheron --kit ./sandbox-kit/openheron-deepseek .
+#   Mixins compose in any number, one per vendor:
+#     sbx run ./sandbox-kit/openheron \
+#       --kit ./sandbox-kit/openheron-deepseek \
+#       --kit ./sandbox-kit/openheron-openai .
+#   Without any of them, the workload asks for no credential at all and the
+#   user injects the key themselves (which puts the key inside the sandbox).
 #
 # The design this implements is docs/sandbox-kit-design.md.
 
 schemaVersion: "3"
 kind: mixin
-displayName: openheron credential
-description: the model credential for an openheron workload, injected by the host proxy
+displayName: openheron credential (DeepSeek)
+description: the DeepSeek model credential for an openheron workload, injected by the host proxy
 licenses: [Apache-2.0]
 
 capabilities:
@@ -53,10 +53,12 @@ capabilities:
   #   The real key never enters the sandbox.
   #
   # ★ The service name is what a *service* binding would be keyed by; it is
-  #   required by the schema either way.
+  #   required by the schema either way — and it is what makes a second
+  #   vendor's mixin composable: a credential has one owner per (service,
+  #   phase), so two vendors need two service names.
   - type: com.docker.sandbox/credential@1
     optional: true
-    description: model API access
+    description: DeepSeek API access
     config:
       service: deepseek
       phase: runtime
@@ -65,3 +67,4 @@ capabilities:
         proxyManaged: true
         inject:
           - {domain: api.deepseek.com, header: Authorization, format: "Bearer %s"}
+

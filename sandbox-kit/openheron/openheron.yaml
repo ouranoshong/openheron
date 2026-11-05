@@ -10,8 +10,8 @@
 #   mounted workspace, and the server reads it from there.
 #
 # ★ This workload declares **no credential** — which vendor's key belongs to
-#   the user, not to the workload. The credential lives in the mixin beside
-#   this one: `../openheron-credential/`.
+#   the user, not to the workload. The credentials live in the mixins beside
+#   this one: `../openheron-deepseek/`, `../openheron-openai/`.
 #
 # The design this implements is docs/sandbox-kit-design.md.
 

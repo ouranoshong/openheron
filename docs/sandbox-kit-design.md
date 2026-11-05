@@ -262,10 +262,11 @@ short.
 
 ### 2.3 The descriptors
 
-There are two, and the split is the point. The real files are
+There are three, and the split is the point. The real files are
 **`sandbox-kit/openheron/openheron.yaml`** — the workload — and
-**`sandbox-kit/openheron-credential/openheron-credential.yaml`** — the
-mixin. Each sits beside its own recipe where it has one; the mixin has
+**`sandbox-kit/openheron-deepseek/openheron-deepseek.yaml`** /
+**`sandbox-kit/openheron-openai/openheron-openai.yaml`** — the mixins, one
+per vendor. Each sits beside its own recipe where it has one; a mixin has
 none, because it carries declarations rather than content.
 
 The workload:
@@ -303,14 +304,16 @@ capabilities:
           env: [WORKSPACE_DIR]
 ```
 
-The mixin — declaration only:
+A mixin — declaration only, one per vendor. `openheron-deepseek/` and
+`openheron-openai/` differ only in the vendor's names: the host, the service,
+the variable and the two description strings.
 
 ```yaml
 # syntax=docker/sandbox-kit:3
 schemaVersion: "3"
 kind: mixin
-displayName: openheron credential
-description: the model credential for an openheron workload, injected by the host proxy
+displayName: openheron credential (DeepSeek)
+description: the DeepSeek model credential for an openheron workload, injected by the host proxy
 licenses: [Apache-2.0]
 
 capabilities:
@@ -321,7 +324,7 @@ capabilities:
           - api.deepseek.com
   - type: com.docker.sandbox/credential@1
     optional: true
-    description: model API access
+    description: DeepSeek API access
     config:
       service: deepseek
       phase: runtime
@@ -332,10 +335,39 @@ capabilities:
           - {domain: api.deepseek.com, header: Authorization, format: "Bearer %s"}
 ```
 
+★ **Any number of vendor mixins compose onto one workload**, and they do not
+interfere: the allow lists union per phase, and each mixin's credential has
+its own service name. Two mixins that claim the **same** service do not
+compose — the runtime refuses them:
+
+```
+error: resolve kits: merge: .../openheron-deepseek (capabilities[1]) and
+  /tmp/kit-dup (capabilities[1]) both declare com.docker.sandbox/credential@1;
+  one credential has one owner
+```
+
+★ **A mixin carries no initialization hook**, and that is a measured
+conclusion rather than a preference. `openheron init` maintains **one**
+provider configuration per configuration root: once the root holds a usable
+model, it reuses it and ignores `--provider`, `--env` and `--base-url`
+(`initcfg/initcfg.go:278-286`). A mixin whose hook tried to seed a second
+provider would therefore be ignored, and the log says so:
+
+```
+> 003-startup-openheron-openai/000-cmd.sh
+note: model "deepseek/deepseek-flash" is already declared; it is reused as is
+nothing to do: /home/you/my-project is already covered by the existing configuration
+```
+
+★ So the **second vendor's configuration is the user's to write** —
+`llm/openai.yaml` on the mount, by hand or through the configuration editor.
+The workload's own hook seeds the default provider; the mixins add the
+credentials and the network rules for the others.
+
 ★ **The workload declares no credential.** Which provider, which endpoint and
 which variable name are the user's business, and a workload that ships
-openheron has no business choosing them for the user. The credential moves
-into a **mixin** — an overlay that lands on a workload and carries
+openheron has no business choosing them for the user. The credentials move
+into the **mixins** — overlays that land on a workload and carry
 declarations rather than content.
 
 ★ **The network rule travels with the credential.** The runtime checks that
@@ -343,7 +375,7 @@ every inject domain appears **literally** in the allow list for the same
 phase, and the workload's bare `*` does not satisfy that check:
 
 ```
-error: resolve kits: kit ".../openheron-credential": effective v3 descriptor:
+error: resolve kits: kit ".../openheron-deepseek": effective v3 descriptor:
   capabilities[0].config.apiKey.inject[0].domain: capabilities[0] (deepseek):
   inject domain "api.deepseek.com" is not in the network policy's runtime allow list
 ```
@@ -352,12 +384,16 @@ So the mixin names the host outright, and the two allow lists union per
 phase: the workload keeps `*` — "this Kit does not restrict" — and the mixin
 adds the host it needs. That is a mixin doing exactly what mixins are for.
 
-★ **The mixin is optional, and that is the point of the split.**
+★ **The mixins are optional, and that is the point of the split.**
 
 | | the container holds | does the real key enter the VM |
 |---|---|---|
 | workload **+** credential mixin | `proxy-managed` | no |
 | workload alone, key injected | `sk-…` | **yes** |
+
+★ And the sentinel appears whether or not the key is bound: the container always
+learns which variable to use, and only the **real value** needs a binding. A
+vendor mixin with no binding is a 401 away, not a broken sandbox.
 
 ★ The points that are not decoration:
 
@@ -379,7 +415,7 @@ adds the host it needs. That is a mixin doing exactly what mixins are for.
   default, so the name it reads is declared.
 - **The version argument is the only argument.** The provider, the model API
   host and the name of the api key environment variable are openheron's own
-  rules (§2.7) — and they live in the mixin now, not in the workload.
+  rules (§2.7) — and they live in the mixins now, not in the workload.
 - **No `agent-context@2`.** openheron's own instructions live in the config
   root (`agents/main.md`, `agents/task.md`), so the runtime has nothing to hand
   over — and a Kit that declares it has to survive a runtime that does not
@@ -1056,6 +1092,8 @@ environment was captured from inside the sandbox and read on the host.
 | Does the workload compose with the credential mixin? | **Yes** — the container held `DEEPSEEK_API_KEY=proxy-managed`, the configuration was on the mount, and the model answered |
 | Does a declaration-only mixin build without a Dockerfile? | **Yes** — `make kit-mixin` produces it from the descriptor alone |
 | Does the published Kit run in a sandbox? | **Yes** — the startup hook writes the configuration onto the mount and the server creates its data directory there |
+| Do two vendor mixins compose? | **Yes** — both sentinels were in the container, and the DeepSeek call returned 200 |
+| Do two mixins with the same service compose? | **No** — "one credential has one owner" |
 | Does the port forwarding buffer the SSE stream? | **No** — 1339 frames over 10.3 s, the first at +21 ms |
 | Who owns the files the agent writes? | The host user — the VM's uid `1000` is the host's uid `1000` (§2.14) |
 
@@ -1095,6 +1133,9 @@ model; only the first keeps the key out of the VM (§2.8).
   the inject domain to appear literally in the allow list, and the workload's
   bare `*` does not satisfy that. The mixin adds the host as well, and the two
   allow lists union (§2.3).
+- ★ **`openheron init` maintains one provider configuration per root.** A
+  second vendor's `llm/*.yaml` is written by the user, not by a Kit hook
+  (§2.3).
 - ★ **The port forwarding is unreliable on a WSL2 host.** The proxy dials the
   bridge gateway (`172.17.0.1:8080`) and gets a connection refused, while the
   workload is up: the same Kit answered 1339 SSE frames earlier in the same

@@ -222,11 +222,12 @@ openheron 是 **workload**，不是 mixin：它的层就是 agent 干活那台�
 ★ workload 的镜像配置承载启动契约，而规范明确说描述文件不重复它。
 这就是 §2.5 能那么短的原因。
 
-### 2.3 两个描述文件
+### 2.3 三个描述文件
 
-有两个，而这个切分正是重点。真正的文件是
+有三个，而这个切分正是重点。真正的文件是
 **`sandbox-kit/openheron/openheron.yaml`** —— workload ——
-与 **`sandbox-kit/openheron-credential/openheron-credential.yaml`** —— mixin。
+与 **`sandbox-kit/openheron-deepseek/openheron-deepseek.yaml`** /
+**`sandbox-kit/openheron-openai/openheron-openai.yaml`** —— 每厂商一份 mixin。
 各自配一份自己的配方（若有）；mixin 没有配方，
 因为它带的是声明而不是内容。
 
@@ -265,14 +266,15 @@ capabilities:
           env: [WORKSPACE_DIR]
 ```
 
-mixin —— 纯声明：
+mixin —— 纯声明，每个厂商一份。`openheron-deepseek/` 与 `openheron-openai/`
+只差厂商名：主机、service、变量名和两处描述字符串。
 
 ```yaml
 # syntax=docker/sandbox-kit:3
 schemaVersion: "3"
 kind: mixin
-displayName: openheron credential
-description: the model credential for an openheron workload, injected by the host proxy
+displayName: openheron credential (DeepSeek)
+description: the DeepSeek model credential for an openheron workload, injected by the host proxy
 licenses: [Apache-2.0]
 
 capabilities:
@@ -283,7 +285,7 @@ capabilities:
           - api.deepseek.com
   - type: com.docker.sandbox/credential@1
     optional: true
-    description: model API access
+    description: DeepSeek API access
     config:
       service: deepseek
       phase: runtime
@@ -294,15 +296,41 @@ capabilities:
           - {domain: api.deepseek.com, header: Authorization, format: "Bearer %s"}
 ```
 
+★ **任意多个厂商 mixin 都可以叠到同一个 workload 上**，而且互不干扰：
+allow 列表按阶段取并集，每份 mixin 的凭据有自己的 service 名。
+★ 但两个声称**同一个 service** 的 mixin 合不了 —— 运行时会拒绝：
+
+```
+error: resolve kits: merge: .../openheron-deepseek (capabilities[1]) and
+  /tmp/kit-dup (capabilities[1]) both declare com.docker.sandbox/credential@1;
+  one credential has one owner
+```
+
+★ **mixin 不带初始化 hook** —— 这是实测结论，不是偏好。
+`openheron init` 每个配置根只维护**一份** provider 配置：
+一旦根里已有可用的模型，它就复用它并忽略 `--provider`、`--env`、`--base-url`
+（`initcfg/initcfg.go:278-286`）。
+所以一份想种下第二个 provider 的 hook 会被无视，日志也这么说：
+
+```
+> 003-startup-openheron-openai/000-cmd.sh
+note: model "deepseek/deepseek-flash" is already declared; it is reused as is
+nothing to do: /home/you/my-project is already covered by the existing configuration
+```
+
+★ 所以**第二个厂商的配置归用户写** —— 挂载上的 `llm/openai.yaml`，
+手写或用配置编辑器都行。
+workload 自己的 hook 种下默认 provider；mixin 补上别家的凭据与网络规则。
+
 ★ **workload 不声明任何凭据。** 用哪家 provider、哪个端点、哪个变量名，
 都是用户的事；而一个只负责交付 openheron 的 workload，没资格替用户挑。
-凭据因此移进 **mixin** —— 一个叠加在 workload 上、带声明而不带内容的覆盖层。
+凭据因此移进 **mixin** —— 叠加在 workload 上、带声明而不带内容的覆盖层，每个厂商一份。
 
 ★ **网络规则和凭据必须一起走。** 运行时要每个 inject 域名**逐字**出现在同阶段的
 allow 列表里，而 workload 的裸 `*` 不满足这条检查：
 
 ```
-error: resolve kits: kit ".../openheron-credential": effective v3 descriptor:
+error: resolve kits: kit ".../openheron-deepseek": effective v3 descriptor:
   capabilities[0].config.apiKey.inject[0].domain: capabilities[0] (deepseek):
   inject domain "api.deepseek.com" is not in the network policy's runtime allow list
 ```
@@ -311,12 +339,15 @@ error: resolve kits: kit ".../openheron-credential": effective v3 descriptor:
 workload 保留 `*`（"这个 Kit 不限制"），mixin 补上它需要的主机。
 这正是 mixin 该干的事。
 
-★ **mixin 是可选的，而这正是切分的意义。**
+★ **mixin 是可选的（要用几家就组合几家），而这正是切分的意义。**
 
 | | 容器里是什么 | 真密钥进不进 VM |
 |---|---|---|
 | workload **+** credential mixin | `proxy-managed` | 不进 |
 | 只有 workload，密钥自己注入 | `sk-…` | **进** |
+
+★ 而且哨兵值**有没有绑定都在**：容器总是知道自己该用哪个变量，
+只有**真值**才需要绑定。没有绑定的厂商 mixin 差一个 401，不是一个坏掉的沙箱。
 
 ★ 几处不是装饰的地方：
 
@@ -928,6 +959,8 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
 | workload 能与 credential mixin 组合吗？ | **能** —— 容器里是 `DEEPSEEK_API_KEY=proxy-managed`，配置在挂载上，模型答了 |
 | 纯声明的 mixin 没有 Dockerfile 也构建得出来吗？ | **能** —— `make kit-mixin` 只靠描述文件就产出镜像 |
 | 发布版 Kit 在沙箱里跑得起来吗？ | **能** —— startup hook 把配置写到挂载上，服务在自己的数据目录里建出了 state |
+| 两个厂商 mixin 能组合吗？ | **能** —— 两个哨兵都在容器里，DeepSeek 那边回了 200 |
+| 两个同 service 的 mixin 能组合吗？ | **不能** —— "one credential has one owner" |
 | 端口转发会不会缓冲 SSE？ | **不会** —— 10.3 秒里 1339 帧，首帧 +21ms |
 | agent 写出的文件归谁？ | 归宿主用户 —— VM 的 uid `1000` 就是宿主的 uid `1000`（§2.14） |
 
@@ -962,6 +995,8 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
 - ★ **凭据和它的网络规则必须一起声明。**
   只带凭据的 mixin 组合不上：运行时要 inject 域名逐字出现在 allow 列表里，
   而 workload 的裸 `*` 不满足。mixin 于是把主机名一并加上，两张 allow 列表取并集（§2.3）。
+- ★ **`openheron init` 每个配置根只维护一份 provider 配置。**
+  第二个厂商的 `llm/*.yaml` 由用户写，不由 Kit 的 hook 写（§2.3）。
 - ★ **端口转发在 WSL2 宿主上不可靠。** 代理拨的是 bridge 网关
   （`172.17.0.1:8080`），拿到 connection refused，而 workload 是活的：
   同一个 Kit 在同一次会话的早些时候回了 1339 帧 SSE，之后就不回了，

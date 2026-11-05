@@ -141,10 +141,9 @@ release-one: web ## Cross-compile a single platform: make release-one PLATFORM=d
 
 KIT_DIR    ?= sandbox-kit
 KIT_WORKLOAD ?= $(KIT_DIR)/openheron
-KIT_MIXIN  ?= $(KIT_DIR)/openheron-credential
+KIT_MIXINS ?= $(KIT_DIR)/openheron-deepseek $(KIT_DIR)/openheron-openai
 KIT_VERSION ?= 0.0.6
 KIT_IMAGE  ?= openheron-kit:$(KIT_VERSION)
-KIT_MIXIN_IMAGE ?= openheron-kit-credential:$(KIT_VERSION)
 KIT_BUILDER ?= kit-builder
 KIT_REPO   ?= docker.io/ouranoshong/openheron-kit
 
@@ -160,8 +159,13 @@ kit: ## Build the openheron workload Kit image (needs docker buildx)
 #   its own build cache, and without it there is no local image to validate.
 
 .PHONY: kit-mixin
-kit-mixin: ## Build the credential mixin image (declaration only, no content)
-	cd $(KIT_MIXIN) && docker buildx build --builder $(KIT_BUILDER) . -f openheron-credential.yaml -t $(KIT_MIXIN_IMAGE) --load
+kit-mixin: ## Build the credential mixin images (declaration only, no content)
+	@for d in $(KIT_MIXINS); do \
+		name=$$(basename $$d); \
+		vendor=$${name#openheron-}; \
+		( cd $$d && docker buildx build --builder $(KIT_BUILDER) . -f $$name.yaml \
+			-t openheron-kit-$$vendor:$(KIT_VERSION) --load ) || exit 1; \
+	done
 
 .PHONY: kit-push
 kit-push: ## Publish the workload Kit to the registry (needs docker login)

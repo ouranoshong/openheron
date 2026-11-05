@@ -51,10 +51,10 @@ one — change one and change the other.
 >
 > ★ One directory is not a document set: **`sandbox-kit/`** holds the Docker Sandbox Kits that
 > package openheron as a sandbox workload — `openheron/` (the workload: descriptor, content
-> recipe, entrypoint) and `openheron-credential/` (the mixin: the model credential and its
-> network rule). They are a **separate artifact**: `make release` still produces the six static
-> binaries and nothing else. Their design is `docs/sandbox-kit-design.md`, and `make kit`
-> builds them.
+> recipe, entrypoint) and one mixin per vendor (`openheron-deepseek/`, `openheron-openai/`:
+> the model credential and its network rule). They are a **separate artifact**: `make release`
+> still produces the six static binaries and nothing else. Their design is
+> `docs/sandbox-kit-design.md`, and `make kit` builds them.
 >
 > Write these documents **from the code, not from imagination**: every conclusion must point at a
 > line in the code. When the code changes, the documents change with it — documentation drift is

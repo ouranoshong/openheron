@@ -2,17 +2,18 @@
 
 The openheron agent server, packaged as Docker Sandboxes **v3 Kits**.
 
-Two of them, and the split is the point:
+Three of them, and the split is the point:
 
 | Kit | Kind | What it carries |
 |---|---|---|
 | [`openheron/`](openheron/) | `workload` | the server itself: the binary, the startup hook, and the egress posture ("no restriction from this Kit") |
-| [`openheron-credential/`](openheron-credential/) | `mixin` | the model credential and the network rule that goes with it — **vendor-specific**, and **optional** |
+| [`openheron-deepseek/`](openheron-deepseek/) | `mixin` | the DeepSeek credential and the network rule that goes with it |
+| [`openheron-openai/`](openheron-openai/) | `mixin` | the same, for OpenAI |
 
 ★ The workload is vendor-neutral: it declares no credential at all, because
 which provider, which endpoint and which variable name are the user's
-business. Compose the credential mixin when the key should stay on the host;
-leave it out when the user injects the key themselves.
+business. Vendor mixins are **optional** and compose in any number — compose
+the ones you use, and leave the rest out.
 
 The design behind it — and every assumption it rests on — is
 [`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md).
@@ -24,7 +25,8 @@ The design behind it — and every assumption it rests on — is
 | `openheron/openheron.yaml` | the workload descriptor: the launch contract, the egress posture, the startup hook |
 | `openheron/openheron.dockerfile` | the content recipe: the base image and the binary |
 | `openheron/entrypoint.sh` | the launch script: enter the workspace, seed the config, exec the server |
-| `openheron-credential/openheron-credential.yaml` | the credential mixin: declaration only, no content, no Dockerfile |
+| `openheron-deepseek/openheron-deepseek.yaml` | the DeepSeek mixin: declaration only, no content, no Dockerfile |
+| `openheron-openai/openheron-openai.yaml` | the OpenAI mixin: the same, for another vendor |
 
 ## Requirements
 
@@ -40,7 +42,7 @@ The design behind it — and every assumption it rests on — is
 
 ```sh
 make kit         # the workload: openheron-kit:0.0.6
-make kit-mixin   # the credential mixin: openheron-kit-credential:0.0.6
+make kit-mixin   # every mixin: openheron-kit-<vendor>:0.0.6
 ```
 
 Both use a container-driver buildx builder, and both export into the local
@@ -53,18 +55,35 @@ make kit-check   # kit-tck validate against the specification
 
 ## Run
 
-With the credential mixin — the key stays on the host:
+One vendor:
 
 ```sh
 printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
     --host api.deepseek.com --env DEEPSEEK_API_KEY \
     --placeholder proxy-managed --value-stdin
 
-sbx run ./sandbox-kit/openheron --kit ./sandbox-kit/openheron-credential \
+sbx run ./sandbox-kit/openheron --kit ./sandbox-kit/openheron-deepseek \
     --name openheron .
 ```
 
-Without it — the key goes into the sandbox:
+Two vendors — the mixins compose, and each one brings its own key and its own
+network rule:
+
+```sh
+printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
+    --host api.deepseek.com --env DEEPSEEK_API_KEY \
+    --placeholder proxy-managed --value-stdin
+printf '%s' "$OPENAI_API_KEY" | sbx secret set-custom \
+    --host api.openai.com --env OPENAI_API_KEY \
+    --placeholder proxy-managed --value-stdin
+
+sbx run ./sandbox-kit/openheron \
+    --kit ./sandbox-kit/openheron-deepseek \
+    --kit ./sandbox-kit/openheron-openai \
+    --name openheron .
+```
+
+Without any mixin — the key goes into the sandbox:
 
 ```sh
 sbx run ./sandbox-kit/openheron --name openheron \
@@ -87,9 +106,9 @@ by itself.
 
 ## Credentials
 
-The credential mixin declares the credential `proxyManaged`, so the container
-receives a **sentinel** and the host-side proxy swaps in the real value on
-the way out. Two ways to give the sandbox a working key:
+A mixin declares its credential `proxyManaged`, so the container receives a
+**sentinel** and the host-side proxy swaps in the real value on the way out.
+Two ways to give the sandbox a working key:
 
 ### The placeholder — the key stays on the host
 
@@ -132,25 +151,41 @@ sandbox.
 
 With no credential at all, the sandbox still starts and the model calls fail
 with a 401 — the `optional: true` degradation of the credential capability.
+The sentinel still appears, so the agent always knows which variable to use;
+only the real value needs a binding.
 
-## Changing the provider
+## Using another provider
 
-The mixin names the vendor: `DEEPSEEK_API_KEY` and `api.deepseek.com`, which
-are openheron's factory defaults
-(`initcfg/templates/llm/deepseek.yaml`). They have to move together with the
-provider config the startup hook writes on the mount — either edit the mixin
-and the config, or write a mixin for the provider you use.
+Write a mixin for it — the same three declarations with the vendor's host,
+service name and variable name — and compose it. Two rules the runtime
+enforces:
 
-## What is not verified yet
+- **The network rule and the credential travel together.** Every inject
+  domain has to appear *literally* in the allow list for the same phase; the
+  workload's bare `*` does not satisfy that check, so the mixin names the
+  host outright. The two allow lists union per phase.
+- **One credential has one owner.** Two mixins that claim the same service
+  name do not compose; give each vendor its own.
 
-The design lists five things that need a real sandbox to settle. Two of them
-shape this Kit:
+★ **The provider configuration is the user's to write.** `openheron init`
+maintains **one** provider configuration per configuration root — once the
+root holds a usable model it reuses it and ignores `--provider` — so a second
+vendor's `llm/*.yaml` is written by hand on the mount, or through the
+configuration editor.
 
-- **Does the workload's environment carry `WORKSPACE_DIR`?** The Kit's hook
-  reads it, and the entrypoint falls back to it. If the runtime does not
-  export it to the workload, the entrypoint needs the path from the hook
-  instead, and the hooks' position relative to the entrypoint has to hold.
-- **Does the port forwarding buffer the SSE stream?** If it does, the model
-  stops streaming and the whole interaction changes character.
+## What has been measured
 
-Both are in `docs/sandbox-kit-design.md` §4 and §5.
+Two things this Kit depends on were settled in a real sandbox on 2026-11-04
+(`sbx` v0.51.0, Linux on WSL2):
+
+- **`WORKSPACE_DIR` is injected** into the workload's environment, and it is
+  the host's workspace path — the same path the workspace is mounted at. The
+  hook and the entrypoint can both rely on it.
+- **The port forwarding does not buffer.** The SSE stream arrived as 1339
+  frames over 10.3 seconds, the first at +21 ms — the model streams to the
+  browser as it happens.
+
+★ Everything else that was measured — both credential routes, the two-vendor
+composition, the ownership of the written files — is in
+[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md) §6, and the
+operational findings that are none of the Kit's business are in §6.2.
