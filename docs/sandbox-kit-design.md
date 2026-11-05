@@ -260,24 +260,33 @@ the machine the agent works in.
 is explicit that the descriptor duplicates none of it. That is what keeps §2.5
 short.
 
-### 2.3 The descriptor
+### 2.3 The descriptors
 
-The real descriptor is **`sandbox-kit/openheron.yaml`**, beside
-`sandbox-kit/openheron.dockerfile` and `sandbox-kit/entrypoint.sh`. What
-follows is the part of it the decisions below are about:
+There are two, and the split is the point. The real files are
+**`sandbox-kit/openheron/openheron.yaml`** — the workload — and
+**`sandbox-kit/openheron-credential/openheron-credential.yaml`** — the
+mixin. Each sits beside its own recipe where it has one; the mixin has
+none, because it carries declarations rather than content.
+
+The workload:
 
 ```yaml
 # syntax=docker/sandbox-kit:3
 schemaVersion: "3"
 kind: workload
-provides: ["openheron@${{ kit.args.version }}"]
-version: "${{ kit.args.version }}"
+displayName: openheron
+description: the openheron agent server, running entirely inside the sandbox
+sourceUrl: https://github.com/ouranoshong/openheron
+licenses: [Apache-2.0]
 
 args:
   version:
     default: "0.0.6"
     pattern: '^[0-9]+(\.[0-9A-Za-z-]+)*$'
     buildArg: OPENHERON_VERSION
+
+provides: ["openheron@${{ kit.args.version }}"]
+version: "${{ kit.args.version }}"
 
 capabilities:
   - type: com.docker.sandbox/sbx@1
@@ -287,8 +296,32 @@ capabilities:
       runtime:
         allow:
           - "*"
+  - type: com.docker.sandbox/lifecycle@1
+    config:
+      startup:
+        - command: 'openheron init --dir "$WORKSPACE_DIR" || echo "[kit] init did not complete; the existing configuration is kept"'
+          env: [WORKSPACE_DIR]
+```
+
+The mixin — declaration only:
+
+```yaml
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
+kind: mixin
+displayName: openheron credential
+description: the model credential for an openheron workload, injected by the host proxy
+licenses: [Apache-2.0]
+
+capabilities:
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          - api.deepseek.com
   - type: com.docker.sandbox/credential@1
     optional: true
+    description: model API access
     config:
       service: deepseek
       phase: runtime
@@ -297,57 +330,65 @@ capabilities:
         proxyManaged: true
         inject:
           - {domain: api.deepseek.com, header: Authorization, format: "Bearer %s"}
-  - type: com.docker.sandbox/lifecycle@1
-    config:
-      startup:
-        - command: 'openheron init --dir "$WORKSPACE_DIR" || echo "[kit] init did not complete; the existing configuration is kept"'
-          env: [WORKSPACE_DIR]
 ```
 
-Points that are not decoration:
+★ **The workload declares no credential.** Which provider, which endpoint and
+which variable name are the user's business, and a workload that ships
+openheron has no business choosing them for the user. The credential moves
+into a **mixin** — an overlay that lands on a workload and carries
+declarations rather than content.
 
-- **`com.docker.sandbox/sbx@1`** declares that the workload is prepared for the
-  host to launch the agent's way, and it is the capability that carries the
-  launch contract — the shells and the user account the base image has to
+★ **The network rule travels with the credential.** The runtime checks that
+every inject domain appears **literally** in the allow list for the same
+phase, and the workload's bare `*` does not satisfy that check:
+
+```
+error: resolve kits: kit ".../openheron-credential": effective v3 descriptor:
+  capabilities[0].config.apiKey.inject[0].domain: capabilities[0] (deepseek):
+  inject domain "api.deepseek.com" is not in the network policy's runtime allow list
+```
+
+So the mixin names the host outright, and the two allow lists union per
+phase: the workload keeps `*` — "this Kit does not restrict" — and the mixin
+adds the host it needs. That is a mixin doing exactly what mixins are for.
+
+★ **The mixin is optional, and that is the point of the split.**
+
+| | the container holds | does the real key enter the VM |
+|---|---|---|
+| workload **+** credential mixin | `proxy-managed` | no |
+| workload alone, key injected | `sk-…` | **yes** |
+
+★ The points that are not decoration:
+
+- **`com.docker.sandbox/sbx@1`** declares that the workload is prepared for
+  the host to launch the agent's way, and it is the capability that carries
+  the launch contract — the shells and the user account the base image has to
   provide.
 - **`com.docker.sandbox/long-running@1`** keeps the workload running
   independently of attached sessions. openheron is a server, not a session: it
   has to come up, serve, and stay up.
 - **`com.docker.sandbox/network-policy@1` with `allow: ["*"]`** says that the
-  Kit itself places **no restriction** on what the agent may reach (§2.7).
+  workload itself places **no restriction** on what the agent may reach (§2.7).
   ★ The "everything" pattern is the portable form of that: an absent phase
   block grants nothing at all, so saying nothing is the opposite of saying
   "open".
-- **`com.docker.sandbox/credential@1` with `proxyManaged: true`** is the
-  mechanism the whole credential story rests on. The host keeps the real value
-  in its secret store; the container only ever sees the sentinel; the proxy
-  substitutes the real value on the way out to the named domain. openheron
-  already speaks that protocol (§2.8).
 - **`com.docker.sandbox/lifecycle@1`** is where the initialization lives (§2.5):
   a `startup` hook, so it runs on every boot as uid `1000` and may rely on
   `openheron init` being idempotent. The hook environment is deny by
   default, so the name it reads is declared.
 - **The version argument is the only argument.** The provider, the model API
   host and the name of the api key environment variable are openheron's own
-  rules (§2.7), and the descriptor mirrors them in three literals that have
-  to move together with the factory defaults:
-  `api.deepseek.com` (`initcfg/templates/llm/deepseek.yaml`),
-  `DEEPSEEK_API_KEY` (`initcfg/initcfg.go:361-363`),
-  `deepseek` (`initcfg/initcfg.go:365`).
+  rules (§2.7) — and they live in the mixin now, not in the workload.
 - **No `agent-context@2`.** openheron's own instructions live in the config
   root (`agents/main.md`, `agents/task.md`), so the runtime has nothing to hand
   over — and a Kit that declares it has to survive a runtime that does not
   implement it.
 
-★ The credential's `optional: true` is a statement about **degradation**: if the
-host cannot provide it, the sandbox still starts and the model calls fail with
-401 — which is exactly what `agentkit/spec/load.go:39-42` already tolerates.
-How the user binds the key, and what the container ends up holding, is §2.8.
-
 ### 2.4 The Dockerfile
 
 The recipe's job is small: provide the platform floor, put openheron in, and
-say how to start it. The real file is **`sandbox-kit/openheron.dockerfile`**:
+say how to start it. The real file is **`sandbox-kit/openheron/openheron.dockerfile`**:
 
 ```dockerfile
 # syntax=docker/dockerfile:1
@@ -387,7 +428,7 @@ EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/openheron-entrypoint"]
 ```
 
-and the entrypoint it copies is **`sandbox-kit/entrypoint.sh`**:
+and the entrypoint it copies is **`sandbox-kit/openheron/entrypoint.sh`**:
 
 ```sh
 #!/bin/sh
@@ -650,7 +691,9 @@ That is exactly the shape openheron already has:
 
 ★ **Two ways to run it.** They differ in exactly one thing — what the
 container ends up holding — and that one thing decides whether the agent can
-read the key. Both were measured (§6).
+read the key. Both were measured (§6). The credential itself lives in the
+mixin (§2.3), so the first way is "compose the mixin" and the second is
+"do not compose it".
 
 | | the container holds | does the real key enter the VM |
 |---|---|---|
@@ -678,7 +721,8 @@ process arguments and out of the shell history.
 
 ★ The alternative to the custom secret is a **service binding**, and it takes
 two steps instead of one: the stored secret is only the *value*, while the
-*authorization* lives in a second file.
+*authorization* lives in a second file. The mixin's `service` name is the key
+that binding would use.
 
 ```sh
 sbx secret set deepseek      # the value
@@ -718,8 +762,9 @@ runs both ways.
 
 #### 2.8.3 What the two have in common
 
-- The Kit's `credential@1` entry stays in the descriptor either way, so the
-  credential's purpose remains in the permission surface (§2.14).
+- The credential's purpose remains in the permission surface (§2.14) either
+  way — in the mixin when the mixin is composed, in the workload's absence of
+  it when it is not.
 - The **inject domain is not a limit on the agent**: it says where the
   **secret** belongs. A configuration pointing at another host reaches that
   host fine; it just does not carry the model key there, so that call comes
@@ -1008,6 +1053,8 @@ environment was captured from inside the sandbox and read on the host.
 | Does the configuration land on the mount? | **Yes** — `.openheron/{agents,llm,policy,server,state}` is on the host, and the sessions with it |
 | Does the credential reach the model? | **Yes** — the container held `DEEPSEEK_API_KEY=proxy-managed`; the proxy substituted the real value and the call returned "ok" |
 | Does the published recipe build? | **Yes** — `make kit` with the container-driver builder produces `openheron-kit:0.0.6`, and the binary inside reports `v0.0.6` |
+| Does the workload compose with the credential mixin? | **Yes** — the container held `DEEPSEEK_API_KEY=proxy-managed`, the configuration was on the mount, and the model answered |
+| Does a declaration-only mixin build without a Dockerfile? | **Yes** — `make kit-mixin` produces it from the descriptor alone |
 | Does the published Kit run in a sandbox? | **Yes** — the startup hook writes the configuration onto the mount and the server creates its data directory there |
 | Does the port forwarding buffer the SSE stream? | **No** — 1339 frames over 10.3 s, the first at +21 ms |
 | Who owns the files the agent writes? | The host user — the VM's uid `1000` is the host's uid `1000` (§2.14) |
@@ -1043,6 +1090,11 @@ model; only the first keeps the key out of the VM (§2.8).
 - ★ **That builder also needs `--load`.** Without it the result stays in the
   build cache and there is no local image to validate — `make kit-check` would
   look for an image that was never exported.
+- ★ **The credential and its network rule have to be declared together.**
+  A mixin that carries only the credential does not compose: the runtime wants
+  the inject domain to appear literally in the allow list, and the workload's
+  bare `*` does not satisfy that. The mixin adds the host as well, and the two
+  allow lists union (§2.3).
 - ★ **The port forwarding is unreliable on a WSL2 host.** The proxy dials the
   bridge gateway (`172.17.0.1:8080`) and gets a connection refused, while the
   workload is up: the same Kit answered 1339 SSE frames earlier in the same

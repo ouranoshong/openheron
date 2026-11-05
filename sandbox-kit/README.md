@@ -1,10 +1,18 @@
-# openheron — Docker Sandbox Kit
+# openheron — Docker Sandbox Kits
 
-The openheron agent server packaged as a **Docker Sandboxes v3 workload Kit**.
+The openheron agent server, packaged as Docker Sandboxes **v3 Kits**.
 
-The whole openheron process runs inside a microVM: the HTTP/SSE server, the
-file tools and the shell tool share one backend inside the boundary. The host
-keeps one forwarded port.
+Two of them, and the split is the point:
+
+| Kit | Kind | What it carries |
+|---|---|---|
+| [`openheron/`](openheron/) | `workload` | the server itself: the binary, the startup hook, and the egress posture ("no restriction from this Kit") |
+| [`openheron-credential/`](openheron-credential/) | `mixin` | the model credential and the network rule that goes with it — **vendor-specific**, and **optional** |
+
+★ The workload is vendor-neutral: it declares no credential at all, because
+which provider, which endpoint and which variable name are the user's
+business. Compose the credential mixin when the key should stay on the host;
+leave it out when the user injects the key themselves.
 
 The design behind it — and every assumption it rests on — is
 [`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md).
@@ -13,12 +21,10 @@ The design behind it — and every assumption it rests on — is
 
 | File | What it is |
 |---|---|
-| `openheron.yaml` | the descriptor: what the Kit needs from the host |
-| `openheron.dockerfile` | the content recipe: the base image and the binary |
-| `entrypoint.sh` | the launch script: enter the workspace, seed the config, exec the server |
-
-The YAML and the Dockerfile share a filename stem because the Kit specification
-finds the companion recipe by that convention.
+| `openheron/openheron.yaml` | the workload descriptor: the launch contract, the egress posture, the startup hook |
+| `openheron/openheron.dockerfile` | the content recipe: the base image and the binary |
+| `openheron/entrypoint.sh` | the launch script: enter the workspace, seed the config, exec the server |
+| `openheron-credential/openheron-credential.yaml` | the credential mixin: declaration only, no content, no Dockerfile |
 
 ## Requirements
 
@@ -33,40 +39,57 @@ finds the companion recipe by that convention.
 ## Build
 
 ```sh
-docker buildx create --name kit-builder --driver docker-container --bootstrap
-docker buildx build --builder kit-builder . -f openheron.yaml -t openheron-kit:0.0.6
+make kit         # the workload: openheron-kit:0.0.6
+make kit-mixin   # the credential mixin: openheron-kit-credential:0.0.6
 ```
 
-or, from the repository root, `make kit`.
-
-## Check
+Both use a container-driver buildx builder, and both export into the local
+docker store — the default builder drops the manifest annotations that make
+an image a Kit, and without the export there is no local image to validate.
 
 ```sh
-kit-tck validate openheron-kit:0.0.6
+make kit-check   # kit-tck validate against the specification
 ```
-
-A build is not proof that the Kit works. The checks that matter are the
-behavioural ones in `docs/sandbox-kit-design.md` §5 — in particular the SSE
-test, which no offline check can stand in for.
 
 ## Run
 
-```sh
-# from the project directory you want the agent to work in
-sbx run ./openheron.yaml --name openheron .
+With the credential mixin — the key stays on the host:
 
-# publish the server's port, then open it
+```sh
+printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
+    --host api.deepseek.com --env DEEPSEEK_API_KEY \
+    --placeholder proxy-managed --value-stdin
+
+sbx run ./sandbox-kit/openheron --kit ./sandbox-kit/openheron-credential \
+    --name openheron .
+```
+
+Without it — the key goes into the sandbox:
+
+```sh
+sbx run ./sandbox-kit/openheron --name openheron \
+    --env DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" .
+```
+
+Then publish the server's port and open it:
+
+```sh
 sbx ports openheron --publish 8080:8080
 ```
 
-The configuration lands in `<workspace>/.openheron` — on your mount, not inside
-the sandbox — so you can edit `llm/deepseek.yaml`, `agents/main.md` and the
-policy files with your own editor, and openheron picks the change up.
+The configuration lands in `<workspace>/.openheron` — on your mount, not
+inside the sandbox — so you can edit `llm/deepseek.yaml`, `agents/main.md` and
+the policy files with your own editor, and openheron picks the change up.
+
+★ `sbx rm` takes the published ports with it: after recreating a sandbox,
+`sbx ports` reports "No published ports" and the forwarding does not come back
+by itself.
 
 ## Credentials
 
-Two ways to give the sandbox a working model key. They differ in exactly one
-thing: what the container ends up holding.
+The credential mixin declares the credential `proxyManaged`, so the container
+receives a **sentinel** and the host-side proxy swaps in the real value on
+the way out. Two ways to give the sandbox a working key:
 
 ### The placeholder — the key stays on the host
 
@@ -77,10 +100,10 @@ printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
 ```
 
 ★ The placeholder is `proxy-managed` on purpose: that is the sentinel the
-Kit's `credential@1` puts into the container, so the runtime's injection and
-the host's binding agree without the user passing an environment variable at
-all. The container ends up holding `DEEPSEEK_API_KEY=proxy-managed`, and the
-host-side proxy swaps in the real value on the way out.
+mixin's `credential@1` puts into the container, so the runtime's injection
+and the host's binding agree without the user passing an environment
+variable at all. The container ends up holding
+`DEEPSEEK_API_KEY=proxy-managed`, and the real key never enters the sandbox.
 
 ★ `--value-stdin` keeps the key out of the process arguments and out of the
 shell history. `sbx secret set deepseek` also works, but then a **binding**
@@ -90,16 +113,14 @@ instead of one.
 ### The key itself — the agent can read it
 
 ```sh
-sbx run --detach --name openheron --env DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
-    ./openheron.yaml .
+sbx run ./sandbox-kit/openheron --name openheron \
+    --env DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" .
 ```
 
 A runtime variable carries whatever it is given, so the real key ends up
 inside the VM — where the agent reads it out of the environment, and where
 anything it runs can send it anywhere. The model call still works: the proxy
-forwards the bearer token unchanged, because it is not the placeholder. The
-Kit's `credential@1` entry does not get in the way — the injected value wins
-over the sentinel it would have installed.
+forwards the bearer token unchanged, because it is not the placeholder.
 
 ★ So the two are not two spellings of the same thing. The first keeps the
 secret on the host and leaves the agent unable to read it; the second hands
@@ -109,58 +130,16 @@ sandbox.
 
 ### Neither
 
-With no binding at all, the sandbox still starts and the model calls fail
-with a 401 — which is the `optional: true` degradation of the credential
-capability.
+With no credential at all, the sandbox still starts and the model calls fail
+with a 401 — the `optional: true` degradation of the credential capability.
 
-## Network
+## Changing the provider
 
-★ **The Kit does not restrict what the agent may reach.** The runtime phase
-is granted `*`, because the boundary here is the microVM, not an allow list.
-An agent that cannot install a dependency or reach its own MCP server cannot
-do the job it was given — and a second wall inside the sandbox buys friction
-rather than safety.
-
-What the agent *actually* reaches is decided above the Kit:
-
-- the **host's policy** — `sbx policy`, and the preset you chose at sign-in
-  (Open, Balanced, Locked Down);
-- your **organization's rules**, where they apply — there the Kit's and the
-  local allow rules are inactive, and only the organization's rules grant;
-- the **sandbox's own posture** — the private ranges, the loopback and the
-  link-local addresses are unreachable, and non-HTTP protocols are refused at
-  the network layer.
-
-★ Note that "saying nothing" is not "saying open": the runtime is
-deny-by-default, and a phase with no policy block grants nothing at all. The
-`*` is what expresses the choice.
-
-The one place the Kit names a host is the credential's **inject domain** —
-where the secret belongs, not a limit on the agent's reach. See below.
-
-## The provider is openheron's own
-
-The Kit declares **no provider arguments**. Which provider, which endpoint and
-what the api key environment variable is called are openheron's own rules,
-decided by the factory templates — and the configuration on your mount is yours
-to edit.
-
-What the descriptor mirrors is those defaults, in three literals:
-
-| Literal | Comes from |
-|---|---|
-| `api.deepseek.com` | `initcfg/templates/llm/deepseek.yaml` — the `base_url` |
-| `DEEPSEEK_API_KEY` | `initcfg/initcfg.go:361-363` — `defaultEnvName` |
-| `deepseek` | `initcfg/initcfg.go:365` — `defaultProvider` |
-
-★ Those three have to be changed together with the factory defaults. A Kit
-that re-exposed them as arguments would be a second place to keep them in
-sync, and nothing in the Kit needs to vary per user: the reach is open, and
-the configuration is the user's.
-
-To use a different provider, edit the three literals in `openheron.yaml` and
-rebuild — and edit the provider file in `llm/` on your mount to match. Or run
-the plain binary, where the host's network policy is yours to set.
+The mixin names the vendor: `DEEPSEEK_API_KEY` and `api.deepseek.com`, which
+are openheron's factory defaults
+(`initcfg/templates/llm/deepseek.yaml`). They have to move together with the
+provider config the startup hook writes on the mount — either edit the mixin
+and the config, or write a mixin for the provider you use.
 
 ## What is not verified yet
 

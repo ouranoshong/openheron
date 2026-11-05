@@ -9,6 +9,10 @@
 # ★ The configuration is the user's: the startup hook seeds it inside the
 #   mounted workspace, and the server reads it from there.
 #
+# ★ This workload declares **no credential** — which vendor's key belongs to
+#   the user, not to the workload. The credential lives in the mixin beside
+#   this one: `../openheron-credential/`.
+#
 # The design this implements is docs/sandbox-kit-design.md.
 
 schemaVersion: "3"
@@ -57,41 +61,12 @@ capabilities:
         allow:
           - "*"
 
-  # ★ proxyManaged: the real key stays on the host's secret store; the
-  #   container only ever sees the sentinel "proxy-managed", and the proxy
-  #   swaps in the real value on the way out.
-  #
-  # ★ The three names below are openheron's factory defaults, and they have to
-  #   move together with them:
-  #     api.deepseek.com    initcfg/templates/llm/deepseek.yaml (base_url)
-  #     DEEPSEEK_API_KEY    initcfg/initcfg.go:361-363 (defaultEnvName)
-  #     deepseek            initcfg/initcfg.go:365 (defaultProvider)
-  #
-  # ★ The user binds the key with ONE command, and the placeholder it uses is
-  #   the sentinel itself, so the runtime's injection and the host's binding
-  #   agree without the user passing an environment variable:
-  #     printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
-  #       --host api.deepseek.com --env DEEPSEEK_API_KEY \
-  #       --placeholder proxy-managed --value-stdin
-  #   The real key never enters the sandbox.
-  - type: com.docker.sandbox/credential@1
-    optional: true
-    description: model API access
-    config:
-      service: deepseek
-      phase: runtime
-      apiKey:
-        name: DEEPSEEK_API_KEY
-        proxyManaged: true
-        inject:
-          - {domain: api.deepseek.com, header: Authorization, format: "Bearer %s"}
-
   # ★ A startup hook, not an install hook: it runs on every boot, as uid 1000,
   #   and openheron init is idempotent. The hook environment is deny by
   #   default, so every name it reads is declared.
   #
   # ★ No --provider and no --env: openheron init decides both from its own
-  #   rules, which is what the three literals above mirror.
+  #   rules, which is what the credential mixin mirrors.
   - type: com.docker.sandbox/lifecycle@1
     config:
       startup:

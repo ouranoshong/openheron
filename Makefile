@@ -140,25 +140,32 @@ release-one: web ## Cross-compile a single platform: make release-one PLATFORM=d
 # content recipe by the descriptor's filename stem, beside it.
 
 KIT_DIR    ?= sandbox-kit
+KIT_WORKLOAD ?= $(KIT_DIR)/openheron
+KIT_MIXIN  ?= $(KIT_DIR)/openheron-credential
 KIT_VERSION ?= 0.0.6
 KIT_IMAGE  ?= openheron-kit:$(KIT_VERSION)
+KIT_MIXIN_IMAGE ?= openheron-kit-credential:$(KIT_VERSION)
 KIT_BUILDER ?= kit-builder
 KIT_REPO   ?= docker.io/ouranoshong/openheron-kit
 
 .PHONY: kit
-kit: ## Build the Docker Sandbox Kit image into the local docker store (needs docker buildx)
+kit: ## Build the openheron workload Kit image (needs docker buildx)
 	@docker buildx inspect $(KIT_BUILDER) >/dev/null 2>&1 || \
 		docker buildx create --name $(KIT_BUILDER) --driver docker-container --bootstrap
-	cd $(KIT_DIR) && docker buildx build --builder $(KIT_BUILDER) . -f openheron.yaml -t $(KIT_IMAGE) --load
+	cd $(KIT_WORKLOAD) && docker buildx build --builder $(KIT_BUILDER) . -f openheron.yaml -t $(KIT_IMAGE) --load
 # ★ --builder is not optional: the docker driver with the classic image store
 #   drops the manifest annotations, and an image without the descriptor
 #   annotation is not a Kit any more.
 # ★ --load is not optional either: the container driver keeps the result in
 #   its own build cache, and without it there is no local image to validate.
 
+.PHONY: kit-mixin
+kit-mixin: ## Build the credential mixin image (declaration only, no content)
+	cd $(KIT_MIXIN) && docker buildx build --builder $(KIT_BUILDER) . -f openheron-credential.yaml -t $(KIT_MIXIN_IMAGE) --load
+
 .PHONY: kit-push
-kit-push: ## Publish the Kit to the registry (needs docker login)
-	cd $(KIT_DIR) && docker buildx build --builder $(KIT_BUILDER) . -f openheron.yaml \
+kit-push: ## Publish the workload Kit to the registry (needs docker login)
+	cd $(KIT_WORKLOAD) && docker buildx build --builder $(KIT_BUILDER) . -f openheron.yaml \
 		-t $(KIT_REPO):$(KIT_VERSION) --push
 
 .PHONY: kit-check

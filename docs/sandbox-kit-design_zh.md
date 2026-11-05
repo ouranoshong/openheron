@@ -222,24 +222,33 @@ openheron 是 **workload**，不是 mixin：它的层就是 agent 干活那台�
 ★ workload 的镜像配置承载启动契约，而规范明确说描述文件不重复它。
 这就是 §2.5 能那么短的原因。
 
-### 2.3 描述文件
+### 2.3 两个描述文件
 
-真正的描述文件是 **`sandbox-kit/openheron.yaml`**，
-与 `sandbox-kit/openheron.dockerfile`、`sandbox-kit/entrypoint.sh` 并排。
-下面是其中与下面这些决策相关的部分：
+有两个，而这个切分正是重点。真正的文件是
+**`sandbox-kit/openheron/openheron.yaml`** —— workload ——
+与 **`sandbox-kit/openheron-credential/openheron-credential.yaml`** —— mixin。
+各自配一份自己的配方（若有）；mixin 没有配方，
+因为它带的是声明而不是内容。
+
+workload：
 
 ```yaml
 # syntax=docker/sandbox-kit:3
 schemaVersion: "3"
 kind: workload
-provides: ["openheron@${{ kit.args.version }}"]
-version: "${{ kit.args.version }}"
+displayName: openheron
+description: the openheron agent server, running entirely inside the sandbox
+sourceUrl: https://github.com/ouranoshong/openheron
+licenses: [Apache-2.0]
 
 args:
   version:
     default: "0.0.6"
     pattern: '^[0-9]+(\.[0-9A-Za-z-]+)*$'
     buildArg: OPENHERON_VERSION
+
+provides: ["openheron@${{ kit.args.version }}"]
+version: "${{ kit.args.version }}"
 
 capabilities:
   - type: com.docker.sandbox/sbx@1
@@ -249,8 +258,32 @@ capabilities:
       runtime:
         allow:
           - "*"
+  - type: com.docker.sandbox/lifecycle@1
+    config:
+      startup:
+        - command: 'openheron init --dir "$WORKSPACE_DIR" || echo "[kit] init did not complete; the existing configuration is kept"'
+          env: [WORKSPACE_DIR]
+```
+
+mixin —— 纯声明：
+
+```yaml
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
+kind: mixin
+displayName: openheron credential
+description: the model credential for an openheron workload, injected by the host proxy
+licenses: [Apache-2.0]
+
+capabilities:
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          - api.deepseek.com
   - type: com.docker.sandbox/credential@1
     optional: true
+    description: model API access
     config:
       service: deepseek
       phase: runtime
@@ -259,49 +292,56 @@ capabilities:
         proxyManaged: true
         inject:
           - {domain: api.deepseek.com, header: Authorization, format: "Bearer %s"}
-  - type: com.docker.sandbox/lifecycle@1
-    config:
-      startup:
-        - command: 'openheron init --dir "$WORKSPACE_DIR" || echo "[kit] init did not complete; the existing configuration is kept"'
-          env: [WORKSPACE_DIR]
 ```
 
-几处不是装饰的地方：
+★ **workload 不声明任何凭据。** 用哪家 provider、哪个端点、哪个变量名，
+都是用户的事；而一个只负责交付 openheron 的 workload，没资格替用户挑。
+凭据因此移进 **mixin** —— 一个叠加在 workload 上、带声明而不带内容的覆盖层。
+
+★ **网络规则和凭据必须一起走。** 运行时要每个 inject 域名**逐字**出现在同阶段的
+allow 列表里，而 workload 的裸 `*` 不满足这条检查：
+
+```
+error: resolve kits: kit ".../openheron-credential": effective v3 descriptor:
+  capabilities[0].config.apiKey.inject[0].domain: capabilities[0] (deepseek):
+  inject domain "api.deepseek.com" is not in the network policy's runtime allow list
+```
+
+所以 mixin 把主机名写实，而两张 allow 列表按阶段取并集：
+workload 保留 `*`（"这个 Kit 不限制"），mixin 补上它需要的主机。
+这正是 mixin 该干的事。
+
+★ **mixin 是可选的，而这正是切分的意义。**
+
+| | 容器里是什么 | 真密钥进不进 VM |
+|---|---|---|
+| workload **+** credential mixin | `proxy-managed` | 不进 |
+| 只有 workload，密钥自己注入 | `sk-…` | **进** |
+
+★ 几处不是装饰的地方：
 
 - **`com.docker.sandbox/sbx@1`** 声明这个 workload 是准备好让宿主按 agent 的方式启动的，
   而承载启动契约的正是它 —— 基础镜像必须提供的 shell 与用户账户。
 - **`com.docker.sandbox/long-running@1`** 让 workload 不依赖挂着的会话而持续运行。
   openheron 是服务，不是会话：它得起来、得服务、得一直活着。
-- **`com.docker.sandbox/network-policy@1` 带 `allow: ["*"]`** 说的是这个 Kit
-  **不限制** agent 能够到什么地方（§2.7）。
+- **`com.docker.sandbox/network-policy@1` 带 `allow: ["*"]`** 说的是这个 workload
+  自己**不限制** agent 能够到什么地方（§2.7）。
   ★ "什么"就是"不限制"的可移植写法：某个阶段整块省略等于那个阶段什么都没有，
   所以"什么都不写"恰恰是"不写放开"的反面。
-- **`com.docker.sandbox/credential@1` 带 `proxyManaged: true`** 是整个凭据故事的地基。
-  宿主把真值留在自己的密钥库里；容器只看得到哨兵值；
-  代理在出站到指定域名时把真值换上去。openheron 说的已经是这套协议（§2.8）。
 - **`com.docker.sandbox/lifecycle@1`** 是初始化待的地方（§2.5）：
   一个 `startup` hook，所以它每次启动都跑、以 uid `1000` 跑，
   并且可以依赖 `openheron init` 的幂等。
   hook 的环境默认拒绝，所以它读的那个名字要声明出来。
 - **版本参数是唯一的参数。** provider、模型 API 的主机、以及 api key 环境变量的名字
-  都是 openheron 自己的规则（§2.7），描述文件用三个字面量镜像它们，
-  而这三个字面量必须跟着工厂默认值一起动：
-  `api.deepseek.com`（`initcfg/templates/llm/deepseek.yaml`）、
-  `DEEPSEEK_API_KEY`（`initcfg/initcfg.go:361-363`）、
-  `deepseek`（`initcfg/initcfg.go:365`）。
+  都是 openheron 自己的规则（§2.7）—— 而它们现在住在 mixin 里，不在 workload 里。
 - **没有 `agent-context@2`。** openheron 自己的说明在配置根里
   （`agents/main.md`、`agents/task.md`），运行时没什么可交给它的 ——
   而且声明了它的 Kit 还得扛得住一个不实现它的运行时。
 
-★ 凭据上的 `optional: true` 是一句关于**降级**的话：
-宿主给不出这个凭据时，沙箱照样起来，模型调用以 401 失败 ——
-而这正是 `agentkit/spec/load.go:39-42` 已经容忍的形态。
-用户怎么绑定密钥、容器最后拿着什么，见 §2.8。
-
 ### 2.4 Dockerfile
 
 配方的活儿很小：提供平台底线，把 openheron 放进去，说明怎么启动。
-真正的文件是 **`sandbox-kit/openheron.dockerfile`**：
+真正的文件是 **`sandbox-kit/openheron/openheron.dockerfile`**：
 
 ```dockerfile
 # syntax=docker/dockerfile:1
@@ -341,7 +381,7 @@ EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/openheron-entrypoint"]
 ```
 
-它拷进去的入口脚本是 **`sandbox-kit/entrypoint.sh`**：
+它拷进去的入口脚本是 **`sandbox-kit/openheron/entrypoint.sh`**：
 
 ```sh
 #!/bin/sh
@@ -567,6 +607,8 @@ openheron 的客户端走的正是它：`llm/common/model.go:60-63` 建的是一
 
 ★ **两种跑法。** 它们只差一件事 —— 容器最后拿着什么 ——
 而那件事决定了 agent 能不能读到密钥。两种都实测过（§6）。
+凭据本身住在 mixin 里（§2.3），所以第一种跑法是"组合 mixin"，
+第二种是"不组合"。
 
 | | 容器里是什么 | 真密钥进不进 VM |
 |---|---|---|
@@ -592,6 +634,7 @@ printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
 
 ★ custom secret 的替代是 **service 绑定**，而它要两步而不是一步：
 存下来的密钥只是**值**，**授权**在另一个文件里。
+mixin 里的 `service` 名就是那份绑定要用的键。
 
 ```sh
 sbx secret set deepseek      # the value
@@ -628,8 +671,8 @@ agent 可以从环境里把它读出来，它跑的任何东西都能把它发�
 
 #### 2.8.3 两者共有的部分
 
-- Kit 描述文件里的 `credential@1` 条目两种跑法都留着，
-  所以凭据的用途始终在权限面里（§2.14）。
+- 凭据的用途始终在权限面里（§2.14）—— 组合 mixin 时在 mixin 里，
+  不组合时在 workload 的"没有它"里。
 - **inject 域名不是对 agent 的限制**：它说的是**密钥**该落在哪儿。
   用户把配置改到别的主机，那个主机照样够得到 —— 只是模型密钥不会被带过去，
   于是那次调用会以 401 收场，除非把 inject 域名一并改成对应的（§2.3）。
@@ -882,6 +925,8 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
 | 配置是不是落在挂载上？ | **是** —— `.openheron/{agents,llm,policy,server,state}` 在宿主上，会话也在 |
 | 凭据到不到模型？ | **到** —— 容器里是 `DEEPSEEK_API_KEY=proxy-managed`；代理换上真值，调用返回了 "ok" |
 | 发布版配方构建得出来吗？ | **能** —— `make kit` 用 container-driver builder 产出 `openheron-kit:0.0.6`，里面的二进制自报 `v0.0.6` |
+| workload 能与 credential mixin 组合吗？ | **能** —— 容器里是 `DEEPSEEK_API_KEY=proxy-managed`，配置在挂载上，模型答了 |
+| 纯声明的 mixin 没有 Dockerfile 也构建得出来吗？ | **能** —— `make kit-mixin` 只靠描述文件就产出镜像 |
 | 发布版 Kit 在沙箱里跑得起来吗？ | **能** —— startup hook 把配置写到挂载上，服务在自己的数据目录里建出了 state |
 | 端口转发会不会缓冲 SSE？ | **不会** —— 10.3 秒里 1339 帧，首帧 +21ms |
 | agent 写出的文件归谁？ | 归宿主用户 —— VM 的 uid `1000` 就是宿主的 uid `1000`（§2.14） |
@@ -914,6 +959,9 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
   container driver 的 builder 才保得住，所以 `make kit` 指定了它。
 - ★ **那个 builder 还需要 `--load`。** 不给的话结果留在构建缓存里，
   本地没有镜像可供校验 —— `make kit-check` 会去找一个从没导出的镜像。
+- ★ **凭据和它的网络规则必须一起声明。**
+  只带凭据的 mixin 组合不上：运行时要 inject 域名逐字出现在 allow 列表里，
+  而 workload 的裸 `*` 不满足。mixin 于是把主机名一并加上，两张 allow 列表取并集（§2.3）。
 - ★ **端口转发在 WSL2 宿主上不可靠。** 代理拨的是 bridge 网关
   （`172.17.0.1:8080`），拿到 connection refused，而 workload 是活的：
   同一个 Kit 在同一次会话的早些时候回了 1339 帧 SSE，之后就不回了，
