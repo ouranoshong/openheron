@@ -128,9 +128,9 @@ make kit-push kit-push-mixin
 ★ 三张镜像落在 Docker Hub 的 `ouranoshong/` 名下：
 
 ```
-docker.io/ouranoshong/openheron-kit:0.0.7
-docker.io/ouranoshong/openheron-kit-deepseek:0.0.7
-docker.io/ouranoshong/openheron-kit-openai:0.0.7
+docker.io/ouranoshong/openheron-kit:latest
+docker.io/ouranoshong/openheron-kit-deepseek:latest
+docker.io/ouranoshong/openheron-kit-openai:latest
 ```
 
 ★ **仓库得先存在。** Docker Hub 的 API 可以建：
@@ -187,8 +187,11 @@ args:
   version:
     default: "0.0.7"
     pattern: '^[0-9]+(\.[0-9A-Za-z-]+)*$'
-    description: openheron release to install
+    description: version label for this build of the Kit
     buildArg: OPENHERON_VERSION
+
+provides: ["openheron@${{ kit.args.version }}"]
+version: "${{ kit.args.version }}"
 
 capabilities:
   - type: com.docker.sandbox/port@1
@@ -197,6 +200,9 @@ capabilities:
       container: 8080
       transport: tcp
 ```
+
+★ **这段是抄的，所以它会漂移 —— 文件才是准的。** 两者不一致时以描述文件为准；
+一份悄悄过期的抄本比没有抄本更糟，因为它读起来像是当前的。
 
 ★ **`buildArg` 是版本抵达配方的路径。** 配方读 `${OPENHERON_VERSION}`，
 而描述文件里的 `buildArg` 就是把参数的值放到那儿的东西。

@@ -269,9 +269,13 @@ capabilities:
   - type: com.docker.sandbox/lifecycle@1
     config:
       startup:
-        - command: 'openheron init --dir "$WORKSPACE_DIR" || echo "[kit] init did not complete; the existing configuration is kept"'
+        - command: 'openheron init --dir "$WORKSPACE_DIR" || echo "[kit] init did not complete; the configuration was left as it was, and with none at all the server will not start"'
           env: [WORKSPACE_DIR]
 ```
+
+★ **这段是抄的，描述文件才是准的。** 这里做了裁剪 —— 注释与 `description`
+字段都省掉了 —— 所以它读起来是一份草图，而不是文件本身。两者不一致时以文件
+为准。
 
 mixin —— 纯声明，每个厂商一份。`openheron-deepseek/` 与 `openheron-openai/`
 只差厂商名：主机、service、变量名和两处描述字符串。
@@ -568,7 +572,7 @@ openheron 自己的默认值从那里落到了正确的位置：
   - type: com.docker.sandbox/lifecycle@1
     config:
       startup:
-        - command: 'openheron init --dir "$WORKSPACE_DIR" || echo "[kit] init did not complete; the existing configuration is kept"'
+        - command: 'openheron init --dir "$WORKSPACE_DIR" || echo "[kit] init did not complete; the configuration was left as it was, and with none at all the server will not start"'
           env: [WORKSPACE_DIR]
           description: Seed the project configuration in the workspace
 ```
@@ -909,9 +913,9 @@ Intel Mac 上的用户继续用普通二进制；进 Kit 的用户拿到完整�
 - ★ **这套东西是三个仓库，不是一个。** workload 与每个厂商的 mixin 是
   各自独立的引用，而运行时是分别解析它们的 —— 所以只拿 workload 而没拿
   mixin 的用户，会得到一个起得来、然后每个模型调用都回 401 的沙箱。
-  它们是一起发布的：`docker.io/ouranoshong/openheron-kit:0.0.7`、
-  `docker.io/ouranoshong/openheron-kit-deepseek:0.0.7`、
-  `docker.io/ouranoshong/openheron-kit-openai:0.0.7`。
+  它们是一起发布的：`docker.io/ouranoshong/openheron-kit:latest`、
+  `docker.io/ouranoshong/openheron-kit-deepseek:latest`、
+  `docker.io/ouranoshong/openheron-kit-openai:latest`。
 - Kit 要求宿主上装了 `sbx` CLI。这对 openheron 用户是一个新的安装步骤 ——
   而且与 microsandbox 不同，它还带来一次 **Docker 登录**，
   以及一份对个人与商用免费、但对组织级治理单独计价的许可。
@@ -1348,8 +1352,8 @@ schemaVersion: "1"
 name: openheron-demo
 agent: openheron-kit
 kits:
-  - docker.io/ouranoshong/openheron-kit:0.0.7
-  - docker.io/ouranoshong/openheron-kit-deepseek:0.0.7
+  - docker.io/ouranoshong/openheron-kit:latest
+  - docker.io/ouranoshong/openheron-kit-deepseek:latest
 workspace:
   path: .
 ```

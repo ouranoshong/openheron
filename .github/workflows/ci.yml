@@ -401,20 +401,38 @@ jobs:
         # ★ `make kit-push` builds the binary first (`make build`) and pushes
         #   the workload and every mixin. The binary it carries is this
         #   commit's own build, and it reports the tag the release reports.
+        #
+        # ★ It also points `latest` at what it just pushed. The guide names
+        #   `latest`, so that a release does not have to edit the guide — and
+        #   the guide is what most people read.
         run: make kit-push kit-push-mixin KIT_VERSION="${VERSION#v}"
       - name: check what was published
         # ★ The push is only a claim until something reads it back: the
         #   registry has to serve the tag, and the descriptor inside it has to
         #   carry the version the image is tagged with.
+        #
+        # ★ `latest` is checked too, and it is checked for the same reason:
+        #   the guide points at it, so a missing `latest` is a guide that does
+        #   not work.
         run: |
           set -euo pipefail
           version="${VERSION#v}"
           for image in openheron-kit openheron-kit-deepseek openheron-kit-openai; do
-            ref="docker.io/ouranoshong/${image}:${version}"
-            digest=$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}')
-            echo "${image}:${version} -> ${digest}"
-            if [ -z "$digest" ]; then
-              echo "::error title=the Kit was not published::${ref} does not resolve"
+            for tag in "$version" latest; do
+              ref="docker.io/ouranoshong/${image}:${tag}"
+              digest=$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}')
+              echo "${image}:${tag} -> ${digest}"
+              if [ -z "$digest" ]; then
+                echo "::error title=the Kit was not published::${ref} does not resolve"
+                exit 1
+              fi
+            done
+            # ★ The two tags have to be the same image: `latest` is a pointer,
+            #   and a pointer to something else is a lie the guide would tell.
+            versioned=$(docker buildx imagetools inspect "docker.io/ouranoshong/${image}:${version}" --format '{{.Manifest.Digest}}')
+            latest=$(docker buildx imagetools inspect "docker.io/ouranoshong/${image}:latest" --format '{{.Manifest.Digest}}')
+            if [ "$versioned" != "$latest" ]; then
+              echo "::error title=latest does not point at the release::${image} latest is ${latest}, the release is ${versioned}"
               exit 1
             fi
           done

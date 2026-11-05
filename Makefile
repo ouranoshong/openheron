@@ -193,6 +193,7 @@ kit-push: build ## Publish the workload Kit to the registry (needs docker login)
 	cd $(KIT_STAGE) && docker buildx build --builder $(KIT_BUILDER) . -f openheron.yaml \
 		-t $(KIT_REPO):$(KIT_VERSION) --push
 	rm -rf $(KIT_STAGE)
+	$(MAKE) kit-tag-latest
 
 .PHONY: kit-push-mixin
 kit-push-mixin: ## Publish the credential mixin images to the registry
@@ -202,6 +203,36 @@ kit-push-mixin: ## Publish the credential mixin images to the registry
 		( cd $$d && docker buildx build --builder $(KIT_BUILDER) . -f $$name.yaml \
 			-t $(KIT_REPO)-$$vendor:$(KIT_VERSION) --push ) || exit 1; \
 	done
+	$(MAKE) kit-tag-latest MIXINS=1
+
+.PHONY: kit-tag-latest
+kit-tag-latest: ## Point the `latest` tag at the version just pushed
+	@set -e; \
+	if [ -n "$(MIXINS)" ]; then \
+		for d in $(KIT_MIXINS); do \
+			name=$$(basename $$d); \
+			vendor=$${name#openheron-}; \
+			docker buildx imagetools create --tag "$(KIT_REPO)-$$vendor:latest" \
+				"$(KIT_REPO)-$$vendor:$(KIT_VERSION)"; \
+		done; \
+	else \
+		docker buildx imagetools create --tag "$(KIT_REPO):latest" \
+			"$(KIT_REPO):$(KIT_VERSION)"; \
+	fi
+# ★ `latest` is what the guide points at, so the guide does not have to change
+#   with every release. The version tag stays the exact one: it is what a
+#   consumer pins when they want a reproducible sandbox, and it is what the
+#   release job checks back after the push.
+#
+# ★ The tag is created from the pushed image rather than built twice: the
+#   descriptor inside it carries the version, and a second build would carry
+#   it too — but it would be a different image with the same contents, and
+#   "the tag points at the image the release published" is a statement worth
+#   being able to make.
+#
+# ★ Every mixin gets its own `latest`: the workload and a mixin are separate
+#   repositories, and a mixin published without one leaves a user unable to
+#   reach a model.
 # ★ The mixins need their own repositories: a Kit is identified by its
 #   reference, and the host resolves each one separately. A workload pushed
 #   without its mixins leaves a user unable to reach a model -- the Kit runs,

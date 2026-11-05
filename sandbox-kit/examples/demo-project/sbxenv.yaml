@@ -2,7 +2,7 @@ schemaVersion: "1"
 name: openheron-demo
 agent: openheron-kit
 kits:
-  - docker.io/ouranoshong/openheron-kit:0.0.7
-  - docker.io/ouranoshong/openheron-kit-deepseek:0.0.7
+  - docker.io/ouranoshong/openheron-kit:latest
+  - docker.io/ouranoshong/openheron-kit-deepseek:latest
 workspace:
   path: .

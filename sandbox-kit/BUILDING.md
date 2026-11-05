@@ -139,9 +139,9 @@ unable to reach a model — the Kit runs, and every call comes back 401.
 ★ The three land on Docker Hub under `ouranoshong/`:
 
 ```
-docker.io/ouranoshong/openheron-kit:0.0.7
-docker.io/ouranoshong/openheron-kit-deepseek:0.0.7
-docker.io/ouranoshong/openheron-kit-openai:0.0.7
+docker.io/ouranoshong/openheron-kit:latest
+docker.io/ouranoshong/openheron-kit-deepseek:latest
+docker.io/ouranoshong/openheron-kit-openai:latest
 ```
 
 ★ **The repositories have to exist first.** Docker Hub's API creates them:
@@ -205,8 +205,11 @@ args:
   version:
     default: "0.0.7"
     pattern: '^[0-9]+(\.[0-9A-Za-z-]+)*$'
-    description: openheron release to install
+    description: version label for this build of the Kit
     buildArg: OPENHERON_VERSION
+
+provides: ["openheron@${{ kit.args.version }}"]
+version: "${{ kit.args.version }}"
 
 capabilities:
   - type: com.docker.sandbox/port@1
@@ -215,6 +218,10 @@ capabilities:
       container: 8080
       transport: tcp
 ```
+
+★ **The snippet is a copy, so it can drift — the file is the truth.** When the
+two disagree, the descriptor wins; a copy that silently ages is worse than no
+copy at all, because it reads as current.
 
 ★ **`buildArg` is how the version reaches the recipe.** The recipe reads
 `${OPENHERON_VERSION}`; the descriptor's `buildArg` is what puts the
