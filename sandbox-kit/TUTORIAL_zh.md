@@ -66,19 +66,31 @@ printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
 docker.io/ouranoshong/openheron-kit:0.0.6
 ```
 
-★ **那个名字是它发布的地方，不是它今天所在的地方。** openheron 的 Kit
-还没上 Docker Hub；托管它的人用
+★ **它就发布在那里。** workload 与两份 mixin 都在 Docker Hub 上，
+在 openheron 这个项目名下。发布它们是：
 
 ```sh
-make kit-push
+make kit-push kit-push-mixin
 ```
 
-把它发布出去，之后的引用就是它被推上去的那个名字。
-如果你的 Kit 来自你们自己的 registry，就用那个名字。
+★ —— 之后引用就是它们被推上去的那个名字。
+如果你的 Kit 来自你们自己的 registry，就换成那个名字。
 
 ★ **mixin 不一定非得是镜像。** 它是一份声明，而声明就是一个 YAML 文件。
 如果你的 Kit 集合里带了 mixin 镜像，就照样用；
 如果没有，第 2 步给你的是可以直接保存的原文。
+
+★ **发布出去的是三张镜像**，一个 workload，每个厂商一份 mixin：
+
+```
+docker.io/ouranoshong/openheron-kit:0.0.6
+docker.io/ouranoshong/openheron-kit-deepseek:0.0.6
+docker.io/ouranoshong/openheron-kit-openai:0.0.6
+```
+
+★ 一个 Kit 集合是**一个 workload 加每个厂商一份 mixin** ——
+运行时是分别解析每个引用的，所以少了 mixin 的 workload 起得来，
+然后每个模型调用都回 401。
 
 ★ **镜像可以从哪些地方来。** 默认情况下 `sbx` 只安装两个地方的 Kit：
 

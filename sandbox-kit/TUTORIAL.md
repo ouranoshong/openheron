@@ -69,19 +69,32 @@ process arguments.
 docker.io/ouranoshong/openheron-kit:0.0.6
 ```
 
-★ **That name is where it is published, not where it is today.** openheron's
-Kit is not on Docker Hub yet; whoever hosts it publishes it with
+★ **It is published there.** The workload and both mixins are on Docker Hub,
+under the openheron project. Publishing them is
 
 ```sh
-make kit-push
+make kit-push kit-push-mixin
 ```
 
-and the reference is then the name it was pushed to. If your Kit came from
-your own registry, that is the name to use.
+★ — and the reference is then the name they were pushed to. If your Kit came
+from your own registry, that is the name to use instead.
 
 ★ **The mixin does not have to be an image.** It is a declaration, and a
 declaration is a YAML file. If your Kit set came with mixin images, use them
 the same way; if it did not, step 2 gives you the text to save.
+
+★ **The published set is three images**, one workload and one mixin per
+vendor:
+
+```
+docker.io/ouranoshong/openheron-kit:0.0.6
+docker.io/ouranoshong/openheron-kit-deepseek:0.0.6
+docker.io/ouranoshong/openheron-kit-openai:0.0.6
+```
+
+★ A Kit set is **one workload plus one mixin per vendor** — the runtime
+resolves each reference separately, so a workload without its mixin starts
+and then answers every model call with a 401.
 
 ★ **Where the images may come from.** By default `sbx` only installs Kits
 from two places:

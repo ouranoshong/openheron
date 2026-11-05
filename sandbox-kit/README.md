@@ -59,6 +59,22 @@ an image a Kit, and without the export there is no local image to validate.
 make kit-check   # kit-tck validate against the specification
 ```
 
+★ **Publishing is two targets**, because the mixins live in their own
+repositories — a Kit is identified by its reference, and the host resolves
+each one separately:
+
+```sh
+make kit-push kit-push-mixin   # the workload and every mixin
+```
+
+★ They land on Docker Hub under `ouranoshong/`:
+
+```
+docker.io/ouranoshong/openheron-kit:0.0.6
+docker.io/ouranoshong/openheron-kit-deepseek:0.0.6
+docker.io/ouranoshong/openheron-kit-openai:0.0.6
+```
+
 ## Run
 
 ★ **A mixin does not have to be an image.** It is a declaration, so a
@@ -90,6 +106,19 @@ sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
     --kit ./openheron-deepseek \
     --name openheron ~/my-project
 ```
+
+★ **Or take all three from the registry** — the workload and one mixin per
+vendor:
+
+```sh
+sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
+    --name openheron ~/my-project
+```
+
+★ A Kit set is **one workload plus one mixin per vendor**: the runtime
+resolves each reference separately, so a workload without its mixin starts
+and then answers every model call with a 401.
 
 Two vendors — the mixins compose, and each one brings its own key and its own
 network rule:

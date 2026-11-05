@@ -172,6 +172,22 @@ kit-push: ## Publish the workload Kit to the registry (needs docker login)
 	cd $(KIT_WORKLOAD) && docker buildx build --builder $(KIT_BUILDER) . -f openheron.yaml \
 		-t $(KIT_REPO):$(KIT_VERSION) --push
 
+.PHONY: kit-push-mixin
+kit-push-mixin: ## Publish the credential mixin images to the registry
+	@for d in $(KIT_MIXINS); do \
+		name=$$(basename $$d); \
+		vendor=$${name#openheron-}; \
+		( cd $$d && docker buildx build --builder $(KIT_BUILDER) . -f $$name.yaml \
+			-t $(KIT_REPO)-$$vendor:$(KIT_VERSION) --push ) || exit 1; \
+	done
+# ★ The mixins need their own repositories: a Kit is identified by its
+#   reference, and the host resolves each one separately. A workload pushed
+#   without its mixins leaves a user unable to reach a model -- the Kit runs,
+#   and every call comes back 401.
+#
+# ★ The Kit set is one workload plus one mixin per vendor. Push all of them
+#   together: make kit-push kit-push-mixin
+
 .PHONY: kit-check
 kit-check: ## Validate the Kit against the specification (needs kit-tck)
 	kit-tck validate $(KIT_IMAGE)

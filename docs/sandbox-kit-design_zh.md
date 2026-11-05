@@ -886,6 +886,12 @@ Intel Mac 上的用户继续用普通二进制；进 Kit 的用户拿到完整�
 
 - Kit 是一个 **registry 产物**。`sbx run <image>` 消费它；
   已发布的描述文件是签名覆盖的对象，也是权限闸门评判的对象。
+- ★ **这套东西是三个仓库，不是一个。** workload 与每个厂商的 mixin 是
+  各自独立的引用，而运行时是分别解析它们的 —— 所以只拿 workload 而没拿
+  mixin 的用户，会得到一个起得来、然后每个模型调用都回 401 的沙箱。
+  它们是一起发布的：`docker.io/ouranoshong/openheron-kit:0.0.6`、
+  `docker.io/ouranoshong/openheron-kit-deepseek:0.0.6`、
+  `docker.io/ouranoshong/openheron-kit-openai:0.0.6`。
 - Kit 要求宿主上装了 `sbx` CLI。这对 openheron 用户是一个新的安装步骤 ——
   而且与 microsandbox 不同，它还带来一次 **Docker 登录**，
   以及一份对个人与商用免费、但对组织级治理单独计价的许可。
