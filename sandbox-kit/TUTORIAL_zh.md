@@ -236,6 +236,73 @@ HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
 
 ---
 
+## 3.1 想钉住端口的话
+
+★ **上面那个端口是临时的。** 它由运行时分配 —— 两个沙箱要同一个宿主端口
+就会撞上。这对只打开一次的沙箱是对的，对你想每次都从同一个地址找到它的
+沙箱就不对。
+
+★ **发布到一个你自己挑的端口上**，就能从固定地址到达：
+
+```sh
+sbx ports openheron --publish 8080:8080
+```
+
+```
+Published 127.0.0.1:8080 -> 8080/tcp4
+```
+
+★ **规格读作 `HOST_PORT:SANDBOX_PORT`。** 左边是宿主上的端口，右边是沙箱
+里的端口 —— 而沙箱那个已经是 `8080` 了，因为 workload 声明的就是它。
+
+★ **它是新增一条映射，不是搬走一条。** 那个临时端口照样能用，
+所以两个地址服务的是同一个沙箱：
+
+```
+HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
+127.0.0.1   8080        8080           tcp4
+::1         32772       8080           tcp
+127.0.0.1   32772       8080           tcp
+```
+
+★ **不写协议的话只绑 IPv4** —— `tcp4`，在 `127.0.0.1` 上。写上 `tcp`
+就两个地址族都绑，所以把 `localhost` 解析到 `::1` 的客户端也能连上：
+
+```sh
+sbx ports openheron --publish 8080:8080/tcp
+```
+
+```
+Published 127.0.0.1:8080 -> 8080/tcp
+Published [::1]:8080 -> 8080/tcp
+```
+
+★ **有两件事会出错，而只有一件会吭声。** 同一条映射发布两次会被明确拒绝：
+
+```
+error: publish ports: request failed: 409 Conflict: request[0]: port 127.0.0.1:8080/tcp4 is already published to sandbox port 8080
+```
+
+★ **宿主端口被别的进程占着则不会。** 发布照样报成功 —— 转发器绑的是它自己的
+socket，不是你的 —— 于是你的客户端连到的是**那个别的进程**，不是沙箱：
+
+```
+Published 127.0.0.1:8081 -> 8080/tcp4
+```
+
+```
+$ curl http://127.0.0.1:8081/v2/health
+# no answer: something else is listening there
+```
+
+★ **钉之前先看一眼。** `ss -ltn | grep 8080` 能看出端口空着没有，
+`sbx ports openheron` 能看出已经发布了哪些。
+
+★ **而且发布过的端口活不过沙箱。** `sbx rm` 会把它一起带走，
+所以重建过的沙箱得重新发布一次 —— 第 6 步讲这个。
+
+---
+
 ## 4. 让它一直跑着
 
 ★ **你可以关掉终端，服务照样在服务。** 按 `Ctrl-\` 离开会话，
@@ -364,6 +431,17 @@ error: inspect exec: context deadline exceeded
 
 ★ **两种都不是失败。** 你要的那个服务还在跑，还在已发布端口上服务。
 这条消息说的是**第二份**服务，不是第一份。
+
+★ **重建过的沙箱回来时是没有端口的。** `sbx rm` 会把已发布的端口一起带走，
+而运行时给新的那个沙箱发一个全新的临时端口。你要的那个得重新发布一次 ——
+命令在第 3.1 步：
+
+```sh
+sbx ports openheron --publish 8080:8080
+```
+
+★ **上面那条 `sbx run --name openheron` 是另一种情况。** 它接的是已经在那儿的
+沙箱，端口也还在，所以什么都不用重新发布。
 
 ---
 

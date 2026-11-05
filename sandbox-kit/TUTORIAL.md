@@ -252,6 +252,78 @@ the words appear, not the finished text at once.
 
 ---
 
+## 3.1 Pin the port, if you want to
+
+★ **The port above is temporary.** The runtime picks it, because two sandboxes
+asking for the same host port would collide. That is right for a sandbox you
+open once, and wrong for one you want to reach at the same address every time.
+
+★ **Publish it on a port of your own** to get there:
+
+```sh
+sbx ports openheron --publish 8080:8080
+```
+
+```
+Published 127.0.0.1:8080 -> 8080/tcp4
+```
+
+★ **The specification reads `HOST_PORT:SANDBOX_PORT`.** The left number is the
+port on your host, the right one is the port inside the sandbox — and the
+sandbox's is already `8080`, because that is what the workload declares.
+
+★ **It adds a mapping; it does not move one.** The temporary port keeps
+working, so both addresses serve the same sandbox:
+
+```
+HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
+127.0.0.1   8080        8080           tcp4
+::1         32772       8080           tcp
+127.0.0.1   32772       8080           tcp
+```
+
+★ **Without a protocol the binding is IPv4 only** — `tcp4`, on `127.0.0.1`.
+Name `tcp` and it binds both families, so a client that resolves `localhost`
+to `::1` reaches it too:
+
+```sh
+sbx ports openheron --publish 8080:8080/tcp
+```
+
+```
+Published 127.0.0.1:8080 -> 8080/tcp
+Published [::1]:8080 -> 8080/tcp
+```
+
+★ **Two things can go wrong, and only one of them complains.** Publishing the
+same mapping twice is refused, plainly:
+
+```
+error: publish ports: request failed: 409 Conflict: request[0]: port 127.0.0.1:8080/tcp4 is already published to sandbox port 8080
+```
+
+★ **A host port another process already holds is not.** The publish reports
+success — the forwarder binds its own socket, not yours — and then your client
+reaches *that other process* instead of the sandbox:
+
+```
+Published 127.0.0.1:8081 -> 8080/tcp4
+```
+
+```
+$ curl http://127.0.0.1:8081/v2/health
+# no answer: something else is listening there
+```
+
+★ **Check before you pin.** `ss -ltn | grep 8080` shows whether the port is
+free, and `sbx ports openheron` shows what is already published.
+
+★ **And a published port does not survive the sandbox.** `sbx rm` takes it
+with it, so a sandbox you recreate needs the publish again — step 6 covers
+that.
+
+---
+
 ## 4. Leave it running
 
 ★ **You can close the terminal and the server keeps serving.** Press
@@ -384,6 +456,18 @@ error: inspect exec: context deadline exceeded
 ★ **Neither is a failure.** The running server is the one you wanted; it is
 still serving on the published port. The message is about the *second* copy
 of the server, not the first.
+
+★ **A sandbox you *recreate* comes back without its ports.** `sbx rm` takes
+the published ports with it, and the runtime publishes the new one on a fresh
+temporary port. Publish the one you want again — step 3.1 has the command:
+
+```sh
+sbx ports openheron --publish 8080:8080
+```
+
+★ **The `sbx run --name openheron` above is the other case.** It attaches to
+the sandbox that is already there, ports and all, so nothing has to be
+published again.
 
 ---
 
