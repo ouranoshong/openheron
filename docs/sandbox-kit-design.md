@@ -1324,6 +1324,20 @@ model; only the first keeps the key out of the VM (§2.8).
   inherits the invoking user's groups — so on a host where the KVM device is
   group-owned and the CLI's user is not in that group, the sandboxes fail
   with "KVM error: Permission denied" while the daemon itself looks healthy.
+- ★ **The approval gate does not cover the filesystem tools.** `execute`,
+  `write_file`, `edit_file`, `ls`, `read_file`, `glob` and `grep` come from
+  eino's filesystem middleware (`adk/middlewares/filesystem`), which only
+  implements `BeforeAgent` — it contributes its tools to the run context. The
+  approval middleware hangs off `WrapInvokableToolCall`
+  (`agentkit/build/gate.go:55`), and a middleware that never wraps a tool
+  call is never consulted. Measured: with the default policy naming
+  `execute` in the `ask` column, a run that called `execute` executed it and
+  returned its output; no approval was raised. The tools that *are* covered
+  are the ones a tool provider hands over (`kb_index`, `http_request`,
+  `web_search`, `wikipedia`) — those go through the same wrapper and do
+  raise an approval. The policy file says the tools are ask-tier; the gate
+  does not enforce it for the filesystem ones. This is an openheron
+  defect, not a Kit one, and it is outside what this document settles.
 
 ### 6.3 How `WORKSPACE_DIR` arrives
 
@@ -1489,6 +1503,12 @@ character, and ran the test again. The change landed on the host, because the
 workspace *is* a directory on the host, and the host's own `go test` was green
 afterwards.
 
+★ That run asked **once**, because the workspace carried a policy of its own
+that left `execute` out of the `ask` column. The example project does not
+carry one any more — `openheron init` writes the whole configuration on the
+first start, and the default policy names `execute` alongside the file
+tools.
+
 ★ That run also found a trap worth naming: `openheron init` writes the
 configuration all or nothing, so a workspace that ships one agent file and
 leaves out the subagent it names leaves the server with **no** configuration at
@@ -1501,96 +1521,83 @@ work from scratch rather than from whatever a previous round left in the cache.
 ★ The binary in that image was the clone's own build, which is the point of
 building from the source.
 
-### 6.7 Compose as the lifecycle owner
+### 6.7 The declarative file, and what proves it works
 
-★ Measured on 2026-11-05. **Compose can drive the sandbox**, and the mechanism
-is worth stating precisely, because the first attempt read it backwards.
-
-★ **`sbx` is a Compose *provider*, not a Compose client.** `sbx compose` is
-the entrypoint Compose calls, not a command that calls Compose. The protocol
-is one-directional: Compose resolves the file, then runs
-`<provider> compose --project-name=<project> up <service>`, and the provider
-answers over its own stdin/stdout with one JSON line per message
-(`compose/pkg/compose/plugins.go:552-598`). The service configuration the
-provider needs comes back over the same channel, as the answer to a
-`get-service-config` request (`compose/pkg/compose/plugins.go:439-455`).
-
-★ **So the error message was the provider's, not Compose's.** Running
-`sbx compose up` by hand fails with
-
-```
-compose did not answer get-service-config: this Docker Compose version does not support provider requests, upgrade Docker Compose
-```
-
-★ That string is in the **`sbx` binary**, not in Compose's: the provider asked
-Compose for its service configuration over stdin and got EOF, because there was
-no Compose on the other end. The real entry point is `docker compose up`, and
-Compose v5.6.1 implements the provider protocol in full
-(`compose/pkg/compose/plugins.go`).
-
-★ **A provider-backed service is declared with two lines** — the image and the
-provider:
+★ Measured on 2026-11-05. **The sandbox is declared by an `sbxenv.yaml`** —
+Docker Sandboxes' own environment file, not an openheron invention.
 
 ```yaml
-services:
-  openheron:
-    image: docker.io/ouranoshong/openheron-kit:0.0.6
-    provider:
-      type: sbx
+schemaVersion: "1"
+name: openheron-demo
+agent: openheron-kit
+kits:
+  - docker.io/ouranoshong/openheron-kit:0.0.6
+  - docker.io/ouranoshong/openheron-kit-deepseek:0.0.6
+workspace:
+  path: .
 ```
 
-★ **`image:` is the workload Kit's published image**, and it has to be there:
-without it Compose fabricates a name (`<project>-<service>`), the image phase
-tries to pull that, and the pull fails with a 403 before the sandbox is ever
-created.
+★ **What proves the file is valid is that every key in it is a documented
+key.** Docker publishes the
+[environment file reference](https://docs.docker.com/ai/sandboxes/configuration/environment-files/),
+and it lists these fields: `schemaVersion` (whose only supported value is
+`"1"`), `name`, `agent`, `kits`, and `workspace` — with `workspace` taking
+either a path string or an object with a `path` field. The example uses the
+object form, and the reference documents it.
 
-★ **What the provider honours, measured:**
+★ **The reference also documents the v3 shape this file uses.** Its "Add v3
+kits" section shows a file that lists a v3 workload *and* a v3 mixin in
+`kits`, with `agent` set to the workload's name — which is exactly what
+`openheron-kit` is here: the last component of the workload's repository
+name.
 
-| The compose file says | The provider does |
+★ **`kits` takes a local directory as well as a reference.** The reference
+says so ("`kits` accepts local directories, ZIP archives, OCI registry
+references, and Git URLs"), and it was measured: replacing the two OCI
+references with `../../openheron` and `./openheron-deepseek` produces a
+plan that resolves both to their directories on disk. The example keeps the
+published images, because that is the form a user can run without building
+anything first.
+
+★ **The commands are the documented ones too:** `sbx env plan` shows the
+change without applying it, `sbx env create` applies it, and `sbx env run`
+does both and attaches to the agent.
+
+★ **Measured, on this exact file:**
+
+| Step | Result |
 |---|---|
-| `image:` | the sandbox's image — the Kit's workload, pulled and started |
-| `environment:` | the sandbox's environment (the workload process carries it) |
-| `provider: {type: sbx}` | who owns the service |
-| `volumes:` | **refused** — "a sandbox has its own isolated filesystem" |
-| `secrets:` / `configs:` | **refused** — "the sbx provider does not support yet" |
-| `provider.options:` | **ignored** — see below |
+| `sbx env plan` | the plan lists the sandbox, both Kits and the workspace, and asks for approval |
+| `sbx env create --force` | `✓ Created sandbox openheron-demo`, the port published on an ephemeral loopback port |
+| the sandbox's own state | the workspace is mounted at its host path, and `openheron-demo` is the agent |
+| `sbx env run --force` | the agent session opens and the server starts |
+| the server | `/v2/health` answers `status: ok`, `/v2/agents` lists the two agents, and a `POST /v2/run` streams the model's frames |
 
-★ **`provider.options` is a dead channel here, and that is Compose's doing.**
-Compose only forwards an option as a command-line flag when the provider's
-metadata declares that parameter
-(`compose/pkg/compose/plugins.go:580-586`); `sbx compose metadata` declares
-**zero** parameters for `up`. The values still reach the provider — they are in
-the service configuration the provider fetches over `get-service-config` — but
-the provider ignores them. Probed with `agent`, `kits`, `workspace`,
-`mounts`, `ports` and a deliberately unknown key: the agent stayed
-`compose-<service>` and `Kits` stayed `none` in every case.
+★ **The startup hook writes the configuration onto the mount.** The Kit's
+`lifecycle@1` startup command runs `openheron init --dir "$WORKSPACE_DIR"`,
+and the log inside the sandbox shows the whole set written:
 
-★ **The workspace is therefore not reachable through Compose.** The provider
-refuses `volumes:`, and the only other channel — `provider.options` — is
-ignored. The sandbox comes up with `Workspace: -`: its own filesystem, no host
-directory mounted. The declarative file that *does* mount a workspace is
-`sbxenv.yaml`, which the runtime acts on directly.
+```
+created .openheron/agents/main.md
+created .openheron/agents/task.md
+created .openheron/llm/deepseek.yaml
+created .openheron/policy/permissions.yaml
+created .openheron/policy/limits.yaml
+created .openheron/server/config.yaml
+```
 
-★ **The two channels are complementary, not redundant.** Compose owns the
-lifecycle and `sbxenv.yaml` owns the shape. The example project carries both:
-`sandbox-kit/examples/demo-project/compose.yml` for the service, and
-`sandbox-kit/examples/demo-project/sbxenv.yaml` for the workspace.
+★ **So the example project ships no configuration at all.** The workspace
+holds the project and the environment file, and the runtime writes the rest
+on the first start.
 
-★ **Measured end to end through Compose:** `docker compose up -d` created the
-sandbox and published `127.0.0.1:32823 -> 8080/tcp`; the health endpoint
-answered `status: ok`; `/v2/agents` listed the project's two agents with the
-DeepSeek model; a `POST /v2/run` streamed `RUN_STARTED` and then the model's
-reasoning frames. `docker compose stop` stopped the sandbox and
-`docker compose down` removed it.
-
-★ **The credential does not travel in the Compose file.** The sandbox picked up
-the host's bound `DEEPSEEK_API_KEY` — the same store the direct form uses —
-and the model answered. A Compose file is something people check into a
-repository; a key is not.
-
-★ **One surprise worth naming:** the first model call failed with
-`Approval required for api.deepseek.com:443`. That is the runtime's network
-policy asking the host, not the Kit failing: the sandbox had to be granted the
-domain before it could reach the model. Answering the pending approval with
-`sbx policy approval respond <id> --option allow` made the next call succeed.
-
+★ **A Compose file is not the way to declare this, and the reason is that
+there is no documented format for it.** Docker Compose v5 supports
+*provider-backed* services — a service whose lifecycle an external binary
+owns — and `sbx` implements that protocol. It works: `docker compose up`
+creates the sandbox and publishes its port. But the format is not
+documented anywhere on the Compose or Sandboxes side, `provider.options`
+turns out to be a dead channel (Compose only forwards an option when the
+provider's metadata declares that parameter, and `sbx compose metadata`
+declares none), and the provider refuses a `volumes:` section outright — so
+the workspace, the one thing that matters here, cannot be declared that way.
+An undocumented path is not something to build a tutorial on.

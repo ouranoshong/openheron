@@ -16,10 +16,10 @@ boundary, with the host reachable only through the workspace directory.
 
 ## What the agent will do to it
 
-The agent stops once, before it edits: `write_file` and `edit_file` are in the
-`ask` column of the policy, so the sandbox asks you first. **Approve it** and
-the agent finishes the job — the file changes on your host, because the
-workspace *is* a directory on your host.
+The agent asks before it edits: `write_file` and `edit_file` are in the
+`ask` column of the default policy, so the sandbox asks you first. **Approve
+it** and the agent finishes the job — the file changes on your host, because
+the workspace *is* a directory on your host.
 
 ```
 $ diff -u main.go ~/demo-ws/main.go
@@ -34,46 +34,41 @@ directory is self-contained: a mixin is a declaration, and a declaration is a
 directory holding one YAML file. Point `--kit` at it and the runtime builds it
 on the spot — no image, no registry.
 
-## Two ways to declare it
+## Declaring it
 
-★ **This directory carries two declarative files, and they are not
-redundant — they cover different halves.**
-
-`sbxenv.yaml` declares the **shape**: the agent, the Kits, and the workspace
-this directory. The workspace is the important part — it is what puts your
-project inside the sandbox, and the runtime does the mounting:
+★ **This directory carries an `sbxenv.yaml`** — the environment file that
+declares the sandbox: the agent, the Kits, and the workspace.
 
 ```sh
 sbx env plan      # what would change
 sbx env create    # create the sandbox
 ```
 
-`compose.yml` declares the **lifecycle**: the service is a sandbox, and
-Compose brings it up and takes it down with everything else in the stack:
+★ **The format is the documented one.** `sbxenv.yaml` is Docker Sandboxes'
+own environment file, and its
+[field reference](https://docs.docker.com/ai/sandboxes/configuration/environment-files/)
+covers every key used here — `schemaVersion`, `name`, `agent`, `kits` and
+`workspace`. The file is not an openheron invention, so a file that works
+here works with the rest of the toolchain.
 
-```sh
-docker compose up -d
-docker compose down
-```
+★ **The workspace is the important part.** It is what puts your project inside
+the sandbox: the runtime mounts the directory, and the agent works on your
+files rather than on a copy.
 
-★ **Compose cannot mount the workspace.** The `sbx` provider refuses a
-`volumes:` section — a sandbox has its own isolated filesystem — so the two
-files answer two different questions. Use `sbxenv.yaml` when the agent has to
-see your files; use `compose.yml` when the sandbox is one service among
-several.
+★ **The file stays out of the sandbox's reach.** `sbx` mounts it read-only,
+because it declares what runs on your host.
 
 ## The configuration this project carries
 
-`.openheron/` is not empty, and that is the point:
+★ **None — and that is the point.** There is no `.openheron/` in this
+directory, and `openheron init` writes the whole thing on the first start:
+the two agents, the policy, the model configuration and the server settings.
 
-- `agents/main.md` and `agents/task.md` — this project's own agents. The
-  default pair works the same way, but on a requirement this small the default
-  entry agent can end a turn with the diagnosis done and the fix not yet
-  delegated. This project's entry agent delegates the whole job in one order.
-- `policy/permissions.yaml` — `execute` is not in the `ask` column, so the
-  agent can run `make test` without a prompt. A real workspace would keep
-  `execute` there: a shell command has consequences, and the agent should ask
-  before it runs one.
+★ **A project that ships its own configuration keeps it.** `init` writes what
+is missing and keeps what is there, so a project that wants its own agents or
+its own approval policy just carries those files — this one does not need to.
 
-★ `openheron init` writes what is missing and keeps what is there — so these
-files survive, and the ones it fills in arrive on the first start.
+★ **What the default policy means for the demonstration.** `write_file` and
+`edit_file` are in the `ask` column, so the agent asks before it edits, and
+the demonstration needs one nod from you. Whether a shell command should ask
+too is a question the policy answers — and that file is yours.

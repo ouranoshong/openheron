@@ -475,92 +475,10 @@ Ask it to fix the failing test. The agent reads the files, runs `make test`,
 **asks you before it edits** — approve it — and the change lands on your host,
 because the workspace is a directory on your host.
 
-★ The project carries its own `.openheron/`: its two agents and its policy.
-`openheron init` writes what is missing and keeps what is there, so the files
-you ship with a project win, and the ones you leave out arrive on the first
-start.
-
----
-
-## Manage it with Compose
-
-★ **Compose can drive the sandbox.** The `sbx` CLI is a Compose **provider**:
-Compose resolves the file, then calls `sbx` to bring the service up and down.
-The project ships one: [`examples/demo-project/compose.yml`](examples/demo-project/compose.yml).
-
-```sh
-cd sandbox-kit/examples/demo-project
-docker compose up -d
-```
-
-```
- openheron Pulling
- openheron Pulling docker.io/ouranoshong/openheron-kit:0.0.6
- openheron Image synced
- openheron Pulled
- openheron Creating
- openheron Creating sandbox demo-project-openheron-0260adfa8379377e
- openheron Created
- openheron Published 127.0.0.1:32823 -> 8080/tcp
- openheron Created
-```
-
-★ `Published 127.0.0.1:32823 -> 8080/tcp` is the same published port the direct
-form gives you — the workload declares the container port, the runtime allocates
-the host side. The interface is at **http://127.0.0.1:32823**.
-
-★ **The file has two lines that matter.** `image:` is the workload Kit's
-published image, and `provider: {type: sbx}` says who owns the service:
-
-```yaml
-services:
-  openheron:
-    image: docker.io/ouranoshong/openheron-kit:0.0.6
-    provider:
-      type: sbx
-```
-
-★ **The vendor key does not travel in a Compose file.** It comes from the host's
-own secret store, exactly as in step 0 — a Compose file is a thing you check
-into a repository, and a key is not.
-
-★ **There is no `volumes:` in it, on purpose.** The provider refuses one:
-
-```
-service "openheron" declares volumes:, which the sbx provider does not support — a sandbox has its own isolated filesystem
-```
-
-★ **That is where the second file comes in.** The same directory carries an
-[`sbxenv.yaml`](examples/demo-project/sbxenv.yaml), and that one *does* declare
-a workspace — because the runtime mounts it, not Compose:
-
-```yaml
-schemaVersion: "1"
-name: openheron-demo
-agent: openheron-kit
-kits:
-  - docker.io/ouranoshong/openheron-kit:0.0.6
-  - docker.io/ouranoshong/openheron-kit-deepseek:0.0.6
-workspace:
-  path: .
-```
-
-```sh
-sbx env plan      # what would change
-sbx env create    # create it
-```
-
-★ **So: Compose owns the lifecycle, `sbxenv.yaml` owns the shape.** Use Compose
-when the sandbox is a service in a larger stack — it starts with everything
-else and stops with it. Use `sbxenv.yaml` when the workspace matters, because
-that is the one that mounts your project directory into the sandbox.
-
-★ **`docker compose down` removes the sandbox** — the container, the published
-port and the machine go:
-
-```sh
-docker compose down
-```
+★ The project carries **no** `.openheron/`: `openheron init` writes the whole
+configuration on the first start. A project that *does* ship its own agents or
+its own policy keeps them — `init` writes what is missing and keeps what is
+there, so the files you ship win and the ones you leave out arrive.
 
 ---
 

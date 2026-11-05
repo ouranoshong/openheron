@@ -450,88 +450,10 @@ sbx run ./sandbox-kit/openheron \
 **在动手改之前先问你** —— 批了它 —— 然后改动落在你宿主上，
 因为工作区就是你宿主上的一个目录。
 
-★ 这个项目自带 `.openheron/`：它的两个 agent 与它的策略。
-`openheron init` 写缺的、留有的，所以**你随项目带上的文件说了算**，
+★ 这个项目**不带** `.openheron/`：第一次启动时 `openheron init` 把整份配置
+写出来。而**自带**了 agent 或策略的项目会保留它们 ——
+`init` 写缺的、留有的，所以**你随项目带上的文件说了算**，
 而你留下的那些，第一次启动时补齐。
-
----
-
-## 用 Compose 管理它
-
-★ **Compose 可以驱动沙箱。** `sbx` 这个 CLI 是一个 Compose **provider**：
-Compose 解析完文件，就调用 `sbx` 把这个服务拉起来、收下去。
-这个项目自带一份：[`examples/demo-project/compose.yml`](examples/demo-project/compose.yml)。
-
-```sh
-cd sandbox-kit/examples/demo-project
-docker compose up -d
-```
-
-```
- openheron Pulling
- openheron Pulling docker.io/ouranoshong/openheron-kit:0.0.6
- openheron Image synced
- openheron Pulled
- openheron Creating
- openheron Creating sandbox demo-project-openheron-0260adfa8379377e
- openheron Created
- openheron Published 127.0.0.1:32823 -> 8080/tcp
- openheron Created
-```
-
-★ `Published 127.0.0.1:32823 -> 8080/tcp` 就是直接启动那条路给的同一个已发布
-端口 —— workload 声明容器端口，宿主那一侧由运行时分配。
-界面在 **http://127.0.0.1:32823**。
-
-★ **这份文件里真正起作用的是两行。** `image:` 是 workload Kit 的已发布镜像，
-`provider: {type: sbx}` 说明这个服务归谁管：
-
-```yaml
-services:
-  openheron:
-    image: docker.io/ouranoshong/openheron-kit:0.0.6
-    provider:
-      type: sbx
-```
-
-★ **厂商的密钥不会出现在 Compose 文件里。** 它来自宿主自己的密钥库，
-和第 0 步完全一样 —— Compose 文件是要进版本库的东西，密钥不是。
-
-★ **它里面没有 `volumes:`，这是故意的。** provider 会拒绝：
-
-```
-service "openheron" declares volumes:, which the sbx provider does not support — a sandbox has its own isolated filesystem
-```
-
-★ **这就是第二个文件存在的理由。** 同一个目录里还有一份
-[`sbxenv.yaml`](examples/demo-project/sbxenv.yaml)，而它**确实**声明了工作区 ——
-因为挂载工作区的是运行时，不是 Compose：
-
-```yaml
-schemaVersion: "1"
-name: openheron-demo
-agent: openheron-kit
-kits:
-  - docker.io/ouranoshong/openheron-kit:0.0.6
-  - docker.io/ouranoshong/openheron-kit-deepseek:0.0.6
-workspace:
-  path: .
-```
-
-```sh
-sbx env plan      # what would change
-sbx env create    # create it
-```
-
-★ **所以：Compose 管生命周期，`sbxenv.yaml` 管形状。** 当沙箱是一个更大栈里的
-一个服务时用 Compose —— 它和别的服务一起起、一起停。
-当工作区重要时用 `sbxenv.yaml`，因为只有它把你的项目目录挂进沙箱。
-
-★ **`docker compose down` 会把沙箱删掉** —— 容器、已发布端口和那台机器都没了：
-
-```sh
-docker compose down
-```
 
 ---
 

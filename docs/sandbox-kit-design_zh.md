@@ -1161,6 +1161,17 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
   CLI 在够不着守护进程时会自己拉起一个，而它继承的是调用者的用户组 ——
   于是在一个 KVM 设备按组授权、而 CLI 的用户不在该组里的宿主上，
   沙箱会报 "KVM error: Permission denied"，而守护进程自己看着一切正常。
+- ★ **审批闸门管不到文件系统那批工具。** `execute`、`write_file`、
+  `edit_file`、`ls`、`read_file`、`glob`、`grep` 来自 eino 的 filesystem
+  middleware（`adk/middlewares/filesystem`），它只实现了 `BeforeAgent` ——
+  把工具塞进 run context 里。而审批中间件挂在 `WrapInvokableToolCall`
+  上（`agentkit/build/gate.go:55`），一个从不包装工具调用的 middleware
+  就永远不会被问到。实测：默认策略把 `execute` 列在 `ask` 列，
+  一次调用 `execute` 的 run **直接执行了**并返回了输出，没有触发审批。
+  真正被覆盖的是 tool provider 交出来的那几个（`kb_index`、
+  `http_request`、`web_search`、`wikipedia`）—— 它们走同一个包装，确实会拦。
+  策略文件说这些工具是 ask 档，闸门却没有替它执行。这是 openheron 的缺陷，
+  不是 Kit 的，而它不在本文档要了结的范围内。
 
 ### 6.3 `WORKSPACE_DIR` 是怎么来的
 
@@ -1305,6 +1316,10 @@ agent 读了文件、跑了那个失败的测试、**在动手改之前先问了
 改动落在宿主上，因为工作区*就是*宿主上的一个目录，
 而宿主自己跑的 `go test` 之后是绿的。
 
+★ 那一轮**只问了一次**，因为工作区自带一份策略，把 `execute` 留在了 `ask`
+列之外。示例项目现在**不再自带**了 —— `openheron init` 在第一次启动时写出
+整份配置，而默认策略把 `execute` 与文件工具一起列进了 `ask`。
+
 ★ 那一轮还挖出一个值得记下的陷阱：`openheron init` 对配置是全有或全无，
 所以一个只带了一份 agent 文件、却漏了它点名的 subagent 的工作区，
 会让服务**完全没有**配置 —— 而沙箱照样起来（§6.2）。
@@ -1314,88 +1329,71 @@ agent 读了文件、跑了那个失败的测试、**在动手改之前先问了
 重新拉了一遍，配方是从零跑得通的，而不是靠上一轮留在缓存里的东西。
 ★ 那个镜像里的二进制就是这份克隆自己的构建 —— 这正是"从源码构建"的意义。
 
-### 6.7 把生命周期交给 Compose
+### 6.7 声明文件，以及它有效的依据
 
-★ 2026-11-05 实测。**Compose 可以驱动沙箱**，而这里的机制值得说准 ——
-因为第一次的读法是反的。
-
-★ **`sbx` 是 Compose 的 *provider*，不是 Compose 的客户端。** `sbx compose`
-是 Compose 调用的入口，而不是一个去调用 Compose 的命令。协议是单向的：
-Compose 解析完文件，就运行
-`<provider> compose --project-name=<project> up <service>`，
-provider 用自己的 stdin/stdout 一行一个 JSON 消息来应答
-（`compose/pkg/compose/plugins.go:552-598`）。provider 需要的那个服务配置，
-也走同一条通道回来 —— 它是 `get-service-config` 请求的应答
-（`compose/pkg/compose/plugins.go:439-455`）。
-
-★ **所以那条报错是 provider 抛的，不是 Compose 抛的。** 手工跑
-`sbx compose up` 会失败：
-
-```
-compose did not answer get-service-config: this Docker Compose version does not support provider requests, upgrade Docker Compose
-```
-
-★ 这个串在 **`sbx` 二进制**里，不在 Compose 里：provider 通过 stdin 向
-Compose 索要它所管理的服务的解析结果，却读到了 EOF —— 因为对面没有 Compose。
-真正的入口是 `docker compose up`，而 Compose v5.6.1 完整实现了 provider 协议
-（`compose/pkg/compose/plugins.go`）。
-
-★ **provider 支撑的服务用两行声明** —— 镜像与 provider：
+★ 2026-11-05 实测。**沙箱由一份 `sbxenv.yaml` 声明** —— 它是 Docker
+Sandboxes 自己的环境文件，不是 openheron 的发明。
 
 ```yaml
-services:
-  openheron:
-    image: docker.io/ouranoshong/openheron-kit:0.0.6
-    provider:
-      type: sbx
+schemaVersion: "1"
+name: openheron-demo
+agent: openheron-kit
+kits:
+  - docker.io/ouranoshong/openheron-kit:0.0.6
+  - docker.io/ouranoshong/openheron-kit-deepseek:0.0.6
+workspace:
+  path: .
 ```
 
-★ **`image:` 是 workload Kit 的已发布镜像**，而且必须在：没有它 Compose 会自己
-拼一个名字（`<project>-<service>`），镜像阶段去拉那个名字，
-于是还没建沙箱就先吃了一个 403。
+★ **证明这份文件有效的，是它里面的每一个键都是文档里的键。** Docker 公开了
+[环境文件参考](https://docs.docker.com/ai/sandboxes/configuration/environment-files/)，
+里面列着这些字段：`schemaVersion`（唯一支持的值是 `"1"`）、`name`、`agent`、
+`kits` 与 `workspace` —— 而 `workspace` 既可以是路径字符串，也可以是带
+`path` 字段的对象。这个例子用的是对象形式，参考文档里有。
 
-★ **provider 认什么，实测如下：**
+★ **参考文档也正好讲了这个文件所用的 v3 形态。** 它的「Add v3 kits」一节
+给的例子，`kits` 里同时列一个 v3 workload 和一个 v3 mixin，`agent` 设成
+workload 的名字 —— 这里正是 `openheron-kit`：workload 仓库名的最后一段。
 
-| compose 文件里写的 | provider 的行为 |
+★ **`kits` 除了引用也接受本地目录。** 参考文档就是这么写的（"`kits`
+accepts local directories, ZIP archives, OCI registry references, and Git
+URLs"），而且实测过：把两个 OCI 引用换成 `../../openheron` 与
+`./openheron-deepseek`，计划里两者都解析成了磁盘上的目录。这个例子保留
+已发布的镜像，因为那是用户不必先构建任何东西就能跑的形式。
+
+★ **命令也都是文档里的那些：** `sbx env plan` 看不施加会改什么，
+`sbx env create` 施加，`sbx env run` 两件都做，并接上 agent。
+
+★ **在这份文件上实测：**
+
+| 步骤 | 结果 |
 |---|---|
-| `image:` | 沙箱的镜像 —— Kit 的 workload，被拉起并启动 |
-| `environment:` | 沙箱的环境变量（workload 进程带着它） |
-| `provider: {type: sbx}` | 这个服务归谁管 |
-| `volumes:` | **被拒** —— "a sandbox has its own isolated filesystem" |
-| `secrets:` / `configs:` | **被拒** —— "the sbx provider does not support yet" |
-| `provider.options:` | **被忽略** —— 见下 |
+| `sbx env plan` | 计划列出沙箱、两个 Kit 与工作区，并要求批准 |
+| `sbx env create --force` | `✓ Created sandbox openheron-demo`，端口发布在临时回环端口上 |
+| 沙箱自身的状态 | 工作区挂在它的宿主路径上，agent 是 `openheron-demo` |
+| `sbx env run --force` | agent 会话打开，服务启动 |
+| 服务 | `/v2/health` 回答 `status: ok`，`/v2/agents` 列出两个 agent，一次 `POST /v2/run` 流出模型的帧 |
 
-★ **`provider.options` 在这条路上是死通道，而这是 Compose 造成的。**
-只有当 provider 的 metadata 声明了某个参数，Compose 才会把对应的 option
-转成命令行参数传给 provider（`compose/pkg/compose/plugins.go:580-586`）；
-而 `sbx compose metadata` 给 `up` 声明的参数是**零个**。
-这些值其实送到了 provider 手上 —— 它们就在 provider 通过 `get-service-config`
-取回的那份服务配置里 —— 但 provider 不理它们。
-用 `agent`、`kits`、`workspace`、`mounts`、`ports` 以及一个故意编造的键名
-逐个探过：agent 始终是 `compose-<service>`，`Kits` 始终是 `none`。
+★ **startup hook 把配置写在挂载上。** Kit 的 `lifecycle@1` 启动命令跑的是
+`openheron init --dir "$WORKSPACE_DIR"`，沙箱里的日志显示整套都写了出来：
 
-★ **所以工作区在 Compose 这条路上够不着。** provider 拒绝 `volumes:`，
-而另一条通道 `provider.options` 又被忽略。沙箱起来时 `Workspace: -`：
-它自己的文件系统，没有挂任何宿主目录。**真正会挂工作区的声明文件是
-`sbxenv.yaml`** —— 运行时直接照它行事。
+```
+created .openheron/agents/main.md
+created .openheron/agents/task.md
+created .openheron/llm/deepseek.yaml
+created .openheron/policy/permissions.yaml
+created .openheron/policy/limits.yaml
+created .openheron/server/config.yaml
+```
 
-★ **这两条通道是互补的，不是重复的。** Compose 管生命周期，
-`sbxenv.yaml` 管形状。示例项目两份都带：
-`sandbox-kit/examples/demo-project/compose.yml` 管这个服务，
-`sandbox-kit/examples/demo-project/sbxenv.yaml` 管工作区。
+★ **所以示例项目什么配置都不带。** 工作区里放着项目与环境文件，其余的由
+运行时在第一次启动时写出来。
 
-★ **端到端实测：** `docker compose up -d` 建出了沙箱并发布
-`127.0.0.1:32823 -> 8080/tcp`；健康端点回答 `status: ok`；
-`/v2/agents` 列出了这个项目的两个 agent 与 DeepSeek 模型；
-一次 `POST /v2/run` 流出了 `RUN_STARTED`，接着是模型的推理帧。
-`docker compose stop` 停了沙箱，`docker compose down` 把它删了。
-
-★ **凭据不会出现在 Compose 文件里。** 沙箱拿到的是宿主绑定的
-`DEEPSEEK_API_KEY` —— 与直接启动那条路同一个密钥库 —— 然后模型答了话。
-Compose 文件是会被提交进版本库的东西，密钥不是。
-
-★ **有一个意外值得记一笔：** 第一次模型调用失败，报的是
-`Approval required for api.deepseek.com:443`。那是运行时的网络策略在问宿主，
-不是 Kit 坏了：沙箱得先被放行这个域名，才能连上模型。
-用 `sbx policy approval respond <id> --option allow` 回应了那条待审批之后，
-下一次调用就成功了。
+★ **Compose 文件不是声明这件事的方式，原因是那种格式没有文档。** Docker
+Compose v5 支持 *provider 支撑的* 服务 —— 生命周期交给外部二进制管的服务 ——
+而 `sbx` 实现了这个协议。它是能用的：`docker compose up` 会建出沙箱并发布
+端口。但这个格式在 Compose 侧与 Sandboxes 侧都没有任何文档，
+`provider.options` 事实证明是死通道（只有当 provider 的 metadata 声明了某个
+参数，Compose 才会转发对应的 option，而 `sbx compose metadata` 一个都没声明），
+而且 provider 直接拒绝 `volumes:` —— 于是这里唯一要紧的那件事（工作区）
+没法用那种方式声明。一条没有文档的路，不值得写教程。

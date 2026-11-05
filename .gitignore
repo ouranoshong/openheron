@@ -79,14 +79,11 @@ probe*.txt
 # carry the version being built without the working tree changing.
 /sandbox-kit/.stage-openheron/
 
-# ★ The example project carries its own agents and its own policy, and those
-#   are committed. The files `openheron init` writes beside them are the
-#   runtime's, not the repository's: a sandbox run over the example leaves
-#   them behind, and they must not show up as a change.
-/sandbox-kit/examples/demo-project/.openheron/llm/
-/sandbox-kit/examples/demo-project/.openheron/server/
-/sandbox-kit/examples/demo-project/.openheron/policy/limits.yaml
-/sandbox-kit/examples/demo-project/.openheron/state/
+# ★ The example project carries no configuration: `openheron init` writes the
+#   whole thing on the first start, and every file it writes is the runtime's,
+#   not the repository's. A sandbox run over the example leaves them behind,
+#   and they must not show up as a change.
+/sandbox-kit/examples/demo-project/.openheron/
 
 # E2E (Playwright)
 /web/test-results/
