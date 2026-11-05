@@ -190,6 +190,18 @@ you want the agent to work on, or at an empty directory to start from. It
 appears at the same absolute path inside the sandbox, so the paths in the
 conversation mean the same thing on both sides.
 
+★ **The daemon has to be able to see that path.** The sandbox runtime runs the
+daemon somewhere of its own choosing — on Linux with Docker Desktop that is a
+virtual machine — and it mounts what it can reach. A path it cannot see is
+refused before the sandbox starts:
+
+```
+error: cannot create sandbox: request failed: 400 Bad Request: workspace "/tmp/work" does not exist
+```
+
+★ Your home directory is the safe answer. A project under it is reachable;
+`/tmp` usually is not.
+
 What you will see — with the file form, the only difference is where the
 mixin came from:
 
@@ -426,6 +438,29 @@ this one left off.
 
 ---
 
+## Try it on a project
+
+★ **A project that does something is the whole demonstration.** The repository
+carries one: [`examples/demo-project`](examples/demo-project) is a tiny Go
+program with a bug in it — `make test` fails, and the fix is one character.
+
+```sh
+sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
+    --name openheron ./examples/demo-project
+```
+
+Ask it to fix the failing test. The agent reads the files, runs `make test`,
+**asks you before it edits** — approve it — and the change lands on your host,
+because the workspace is a directory on your host.
+
+★ The project carries its own `.openheron/`: its two agents and its policy.
+`openheron init` writes what is missing and keeps what is there, so the files
+you ship with a project win, and the ones you leave out arrive on the first
+start.
+
+---
+
 ## If something goes wrong
 
 | What you see | What it means |
@@ -438,6 +473,7 @@ this one left off.
 | `error: agent exited with code 2` | the server was already running; the one you want is still up |
 | `error: resolve kits: kit "…": artifact: spec.yaml (or spec.yml) is required` | you put a path where the agent goes; `sbx run --name <name>` takes no path |
 | the browser shows "connection refused" | the port changed — `sbx ports <name>` again, or the sandbox stopped |
+| the sandbox came up but nothing answers on the port | `openheron init` wrote **nothing** — it refuses to write a configuration that does not load, so a broken agent file leaves the server with no configuration at all. The session log says which file broke it |
 | the port is gone after a restart | `sbx rm` takes the published ports with it; the runtime republishes on the next start |
 | the model call fails with 401 | the key was never bound — redo step 0 |
 | the model call fails with a connection error | the credential's network rule is missing — the mixin carries it, so check you passed the mixin |

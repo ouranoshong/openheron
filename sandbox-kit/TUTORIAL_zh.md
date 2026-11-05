@@ -180,6 +180,16 @@ workload 带着根文件系统，所以它只能是镜像。
 或者指向一个空目录从头开始。它在沙箱内出现在同一个绝对路径上，
 所以对话里提到的路径，两边说的是同一个东西。
 
+★ **守护进程必须看得见那个路径。** 沙箱运行时把守护进程放在它自己选的地方 ——
+在 Linux 上配 Docker Desktop，那是一台虚拟机 —— 而它只挂载自己够得到的部分。
+够不到的路径会在沙箱起之前就被拒：
+
+```
+error: cannot create sandbox: request failed: 400 Bad Request: workspace "/tmp/work" does not exist
+```
+
+★ 你的家目录是稳妥答案。它下面的项目够得到；`/tmp` 通常够不到。
+
 你会看到 —— 用文件形态时，唯一的区别是 mixin 从哪来：
 
 ```
@@ -405,6 +415,28 @@ sbx rm openheron
 
 ---
 
+## 在一个真项目上试试
+
+★ **一件能干活的事，就是整个演示。** 仓库里带了一个：
+[`examples/demo-project`](examples/demo-project) 是一个带 bug 的小 Go 程序 ——
+`make test` 是失败的，而修好它只需要一个字符。
+
+```sh
+sbx run docker.io/ouranoshong/openheron-kit:0.0.6 \
+    --kit docker.io/ouranoshong/openheron-kit-deepseek:0.0.6 \
+    --name openheron ./examples/demo-project
+```
+
+让它修好那个失败的测试。agent 会读文件、跑 `make test`、
+**在动手改之前先问你** —— 批了它 —— 然后改动落在你宿主上，
+因为工作区就是你宿主上的一个目录。
+
+★ 这个项目自带 `.openheron/`：它的两个 agent 与它的策略。
+`openheron init` 写缺的、留有的，所以**你随项目带上的文件说了算**，
+而你留下的那些，第一次启动时补齐。
+
+---
+
 ## 出了岔子
 
 | 你看到 | 它的意思 |
@@ -417,6 +449,8 @@ sbx rm openheron
 | `error: agent exited with code 2` | 服务已经在跑了；你要的那份还活着 |
 | `error: resolve kits: kit "…": artifact: spec.yaml (or spec.yml) is required` | 你把路径放到了 agent 的位置上；`sbx run --name <name>` 不带路径 |
 | 浏览器显示 "connection refused" | 端口变了 —— 再 `sbx ports <name>` 一次，或者沙箱停了 |
+| 沙箱起来了，但端口上没人应答 | `openheron init` **一个字都没写** —— 它拒绝写下一个加载不了的配置，
+所以一个坏掉的 agent 文件会让服务完全没有配置。会话日志里写着是哪个文件坏了 |
 | 重启之后端口没了 | `sbx rm` 会把已发布的端口一起带走；下次启动运行时重新发布 |
 | 模型调用报 401 | 密钥压根没绑 —— 重做第 0 步 |
 | 模型调用报连接错误 | 凭据的网络规则没带上 —— mixin 里带着它，检查一下有没有传 mixin |

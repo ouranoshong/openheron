@@ -1304,6 +1304,14 @@ model; only the first keeps the key out of the VM (§2.8).
 - ★ **`sbx kit pack` is the other grammar.** It wants a `spec.yaml` — the
   v1/v2 artifact — and refuses a v3 Kit directory. So a v3 Kit travels as an
   OCI image or as a directory, not as a ZIP.
+- ★ **`openheron init` writes the configuration all or nothing.** It trial-loads
+  the merged result and refuses to write a configuration that does not load
+  (`agentkit/spec/write.go:341-344`). A pre-seeded agent that references a
+  subagent nobody defines — `subagents: [task]` with no `agents/task.md` — is
+  exactly that case: nothing is written, and the server then refuses to start
+  with "no configuration at …" (`main.go:135-143`). The startup hook swallowed
+  the failure, so the sandbox came up and looked healthy with nothing
+  listening on the port. The Kit's message now says what actually happened.
 - ★ **The daemon that serves the socket is the one that needs `/dev/kvm`.**
   The CLI starts a daemon of its own when it cannot reach one, and that one
   inherits the invoking user's groups — so on a host where the KVM device is
@@ -1465,6 +1473,19 @@ several seconds with the first frame at a few milliseconds means the frames
 arrived as the answer was generated. A short span with a late last frame would
 mean the forwarder held the whole body and released it at the end — the
 failure §2.10 is about.
+
+★ **And the boundary holds an agent to its work.** The repository carries a
+workspace to point a sandbox at: `sandbox-kit/examples/demo-project`, a tiny Go
+program with a bug in it. The agent read the files, ran the failing test,
+**asked before it edited** — one approval, on `edit_file` — changed one
+character, and ran the test again. The change landed on the host, because the
+workspace *is* a directory on the host, and the host's own `go test` was green
+afterwards.
+
+★ That run also found a trap worth naming: `openheron init` writes the
+configuration all or nothing, so a workspace that ships one agent file and
+leaves out the subagent it names leaves the server with **no** configuration at
+all — and the sandbox still comes up (§6.2).
 
 ★ **The clean build is part of it.** The recorded run used a Kit built from a
 fresh clone of `develop` with a **builder of its own**, so the build cache was

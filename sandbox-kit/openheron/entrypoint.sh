@@ -11,6 +11,6 @@ cd "${WORKSPACE_DIR:-$PWD}" || exit 1
 # ★ No --provider and no --env: openheron init decides both from its own
 #   rules, and the configuration on the mount is the user's to edit.
 openheron init --dir "$PWD" || \
-    echo "[entrypoint] init did not complete; the existing configuration is kept"
+    echo "[entrypoint] init did not complete; the configuration was left as it was, and with none at all the server will not start"
 
 exec openheron

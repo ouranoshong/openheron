@@ -26,6 +26,10 @@ the ones you use, and leave the rest out.
 ★ This file is the reference: what the three Kits carry, what the runtime
 enforces, and what was measured.
 
+★ **Want to see it work?** `examples/demo-project/` is a workspace you can
+point a sandbox at: a tiny Go program with a bug in it. The agent reads it,
+runs its test, asks before it edits, and the fix lands on your host.
+
 ## Files
 
 | File | What it is |
@@ -38,6 +42,7 @@ enforces, and what was measured.
 | `openheron-deepseek/openheron-deepseek.yaml` | the DeepSeek mixin: declaration only, no content, no Dockerfile |
 | `openheron-openai/openheron-openai.yaml` | the OpenAI mixin: the same, for another vendor |
 | `acceptance/run.sh` | the acceptance run: every claim this design makes, as a check that fails the script |
+| `examples/demo-project/` | a workspace to point a sandbox at: a tiny Go program with a bug in it, and the agents and policy it carries |
 
 ## Requirements
 
