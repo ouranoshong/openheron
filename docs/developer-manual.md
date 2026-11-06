@@ -440,7 +440,7 @@ the install gate in front of it.
 
 | Job | What it runs | Needs |
 |---|---|---|
-| `go` | `make lint-go` + `make test` | Go |
+| `go` | `make lint-go` + `make test` + `make test-race` | Go |
 | `web` | `make lint-web` + `bun run test:unit` | bun |
 | `e2e` | `make test-e2e` — the fake backend it ships with | bun + chromium |
 | `secrets` | gitleaks over the whole history (§5.9) | — |
@@ -465,9 +465,15 @@ that answers is not reproducible on a runner — a failure there would be noise,
 signal. The E2E is the deterministic half, and it is the half that can gate a release.
 
 ★ **The commands are the repo's own.** CI calls `make lint-go` / `make test` /
-`make test-e2e` — the commands §5.2 lists — so the recipe lives in the Makefile and
-nowhere else. `make lint-go` and `make lint-web` are the two halves of `make lint`,
-split so that a job installs only the toolchain it needs.
+`make test-race` / `make test-e2e` — the commands §5.2 lists — so the recipe lives in
+the Makefile and nowhere else. `make lint-go` and `make lint-web` are the two halves of
+`make lint`, split so that a job installs only the toolchain it needs.
+
+★ **The race detector is a step of the `go` job, not a job of its own.** The branch
+protection already requires that job's name, so a step inside it is covered by the
+protection — a new job would be a check that nothing waits for, and a check nobody
+waits for is not a gate. For the same reason the job's **name** does not change: a
+renamed job is a new check name, and the old one goes missing.
 
 #### Cutting a release
 
@@ -748,6 +754,7 @@ To change a port, change only that one file.
 | Command | Covers | Requires |
 |---|---|---|
 | `make test` | All of Go (`go test ./...`) | — |
+| `make test-race` | The same suite under the race detector (`go test -race -count=1 ./...`) | — |
 | `cd web && bun run test:unit` | The pure layers (reducer / framing / store / highlighting) | — |
 | `make test-e2e` | A real browser + a deterministic fake backend | nothing (it brings its own fake backend) |
 | `make smoke` | Real-backend integration: SSE framing, history replay, approval wiring | **the test instance running, and a reachable model** |

@@ -232,12 +232,12 @@ file.
 | `make smoke` | Real-backend integration: SSE framing, history replay, approval wiring | **the test instance must be running** |
 | `make lint` | Go vet + gofmt + oxlint + tsc | — |
 | `make lint-go` / `make lint-web` | The two halves of `make lint`, for a job with only one toolchain | — |
-| `make check` | `lint` + `test`; run this before committing | — |
+| `make check` | `lint` + `test` + `test-race`; run this before committing | — |
 
-★ **CI runs the repo's own commands**: `make lint-go` + `make test`, `make lint-web` +
-`bun run test:unit`, `make test-e2e`. The smokes are **not** in CI — they need a model
-that answers, and that is not reproducible on a runner. A `v*` tag publishes a release
-only after all three checks are green (developer-manual §3.9).
+★ **CI runs the repo's own commands**: `make lint-go` + `make test` + `make test-race`,
+`make lint-web` + `bun run test:unit`, `make test-e2e`. The smokes are **not** in CI — they
+need a model that answers, and that is not reproducible on a runner. A `v*` tag publishes a
+release only after all three checks are green (developer-manual §3.9).
 
 ★ **A `v*` tag also publishes the sandbox Kit.** The `kit` job waits for the same
 checks — the secret scan included — and then pushes the workload and every mixin to

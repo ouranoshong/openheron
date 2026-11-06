@@ -201,10 +201,10 @@ docs(readme): drop the API table, it lives in the user manual
 | `make smoke` | 真后端联调：SSE 分帧、历史回放、审批接线 | **测试实例在跑** |
 | `make lint` | Go vet + gofmt + oxlint + tsc | — |
 | `make lint-go` / `make lint-web` | `make lint` 的两半，给只装了一种工具链的 job 用 | — |
-| `make check` | `lint` + `test`，提交前跑这个 | — |
+| `make check` | `lint` + `test` + `test-race`，提交前跑这个 | — |
 
-★ **CI 跑的就是仓库自己的命令**：`make lint-go` + `make test`、`make lint-web` +
-`bun run test:unit`、`make test-e2e`。冒烟**不在** CI 里 —— 它需要一个答得上话的模型，
+★ **CI 跑的就是仓库自己的命令**：`make lint-go` + `make test` + `make test-race`、
+`make lint-web` + `bun run test:unit`、`make test-e2e`。冒烟**不在** CI 里 —— 它需要一个答得上话的模型，
 而那在 runner 上不可复现。`v*` tag 只有在三项检查全绿之后才发版（见 developer-manual §3.9）。
 
 ★ **`v*` tag 也会发布沙箱 Kit。** `kit` job 等的是同一批检查（含密钥扫描），

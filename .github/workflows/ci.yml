@@ -6,8 +6,8 @@
 #   have to re-run the checks here — the same recipe in two places.
 #
 # ★ The commands are the repo's own: `make lint-go`, `make test`,
-#   `make test-e2e`. What CI runs is what a developer runs locally; the
-#   recipe stays in the Makefile.
+#   `make test-race`, `make test-e2e`. What CI runs is what a developer runs
+#   locally; the recipe stays in the Makefile.
 #
 # ★ The smokes are **not** here: `make smoke` needs a model that answers, and
 #   a model that answers is not reproducible in CI. The E2E uses the fake
@@ -50,6 +50,16 @@ jobs:
           cache: true
       - run: make lint-go
       - run: make test
+      # ★ The race detector is a **step in this job**, not a job of its own:
+      #   the branch protection already requires this job's name, so a step
+      #   here is covered by it — while a new job would be a check that
+      #   nothing waits for. The job's name stays as it is for that reason.
+      - name: race detector
+        run: make test-race
+        env:
+          # ★ The detector needs cgo, and the runner's default is not
+          #   something to rely on: -race refuses to build without it.
+          CGO_ENABLED: "1"
 
   web:
     name: web (lint + types + unit)

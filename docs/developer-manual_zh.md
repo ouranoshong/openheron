@@ -392,7 +392,7 @@ composer 必须读**服务端**的答案，而不是自己的内存：
 
 | job | 跑什么 | 需要 |
 |---|---|---|
-| `go` | `make lint-go` + `make test` | Go |
+| `go` | `make lint-go` + `make test` + `make test-race` | Go |
 | `web` | `make lint-web` + `bun run test:unit` | bun |
 | `e2e` | `make test-e2e` —— 用它自带的假后端 | bun + chromium |
 | `secrets` | gitleaks 扫整个历史（§5.9） | — |
@@ -413,9 +413,15 @@ composer 必须读**服务端**的答案，而不是自己的内存：
 上不可复现 —— 在那里失败是噪声，不是信号。E2E 才是确定的那一半，也是能给发布当闸门的
 那一半。
 
-★ **跑的就是仓库自己的命令。** CI 调的是 `make lint-go` / `make test` / `make test-e2e`
-—— §5.2 列的那些命令 —— 所以配方只在 Makefile 里有一份。`make lint-go` 与
-`make lint-web` 是 `make lint` 的两半，拆开是为了让每个 job 只装自己需要的工具链。
+★ **跑的就是仓库自己的命令。** CI 调的是 `make lint-go` / `make test` /
+`make test-race` / `make test-e2e` —— §5.2 列的那些命令 —— 所以配方只在 Makefile 里
+有一份。`make lint-go` 与 `make lint-web` 是 `make lint` 的两半，拆开是为了让每个 job
+只装自己需要的工具链。
+
+★ **竞态检测器是 `go` 这个 job 里的一个 step，不是单独的 job。** 分支保护本来就要求
+这个 job 的名字，所以放在里面的 step 自动被它罩住 —— 而新开一个 job 会是一个**没人等**
+的检查；没人等的检查不是闸门。同理，这个 job 的**名字**不能改：改了就是一个新的检查
+名字，旧的那个会变成"缺失"。
 
 #### 怎么切一个版本
 
@@ -661,6 +667,7 @@ const selectMessages = (s: State) => s.convo?.messages ?? EMPTY
 | 命令 | 覆盖 | 前置 |
 |---|---|---|
 | `make test` | Go 全量（`go test ./...`） | — |
+| `make test-race` | 同一套在竞态检测器下跑（`go test -race -count=1 ./...`） | — |
 | `cd web && bun run test:unit` | 纯函数层（reducer / 分帧 / store / 高亮） | — |
 | `make test-e2e` | 真实浏览器 + 确定性假后端 | 无（自带假后端） |
 | `make smoke` | 真后端联调：SSE 分帧、历史回放、审批接线 | **测试实例在跑，且模型可达** |

@@ -259,9 +259,13 @@ kit-check: ## Validate the Kit against the specification (needs kit-tck)
 test: ## The full Go test suite
 	$(GO) test ./...
 
+# ★ -count=1 is not optional: `go test` caches the **result**, so a run that
+#   happened not to trip a race is cached as "ok" and every later run replays
+#   that verdict instead of testing anything. The detector only helps if the
+#   tests really run.
 .PHONY: test-race
 test-race: ## The full Go test suite under the race detector
-	$(GO) test -race ./...
+	$(GO) test -race -count=1 ./...
 
 .PHONY: test-install
 test-install: ## Test the release installer against a local fake release
@@ -344,7 +348,7 @@ test-e2e: ## Browser E2E (brings its own fake backend, uses :15173/:18180, never
 	cd web && $(BUN) x playwright test
 
 .PHONY: check
-check: lint test ## Full verification before committing
+check: lint test test-race ## Full verification before committing
 
 .PHONY: clean
 clean: ## Remove the build artifacts
