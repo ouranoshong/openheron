@@ -380,6 +380,108 @@ tier (§4.4).
 **layers on top** of it. A configuration with an empty `env:` still produces a child
 with a full environment.
 
+### 5.6 The configuration templates
+
+★ **The comments in a template are English**, because a template is content that lands
+in the user's configuration (`AGENTS.md`).
+
+#### `mcps/<server>.yaml` — a server over stdio
+
+```yaml
+# .openheron/mcps/github.yaml
+#
+# ★ One MCP server, one file. The file's name is the server's name, and it is
+#   the namespace segment of its tools: mcp__github__<tool>.
+#
+# ★ The tier lives here, next to the server it is about, and it is written in
+#   the server's OWN vocabulary — "create_issue", not "mcp__github__create_issue".
+transport: stdio
+command: npx
+args: ["-y", "@modelcontextprotocol/server-github"]
+env:
+  # ★ Expanded at load time. In a sandbox the variable holds a sentinel and the
+  #   host proxy swaps in the real key on the way out (§8.1).
+  GITHUB_TOKEN: ${GITHUB_TOKEN}
+
+# ★ The tier of every tool this server offers — including the ones it has not
+#   offered yet. Default: ask.
+tier: allow
+
+# ★ The ones that ask first, on top of the tier above.
+ask: [create_issue]
+
+# ★ The tools to offer, by the server's own names. Absent = all of them.
+tools: [create_issue, list_issues, search_issues]
+
+# ★ To take one tool out for good, it is the GLOBAL deny that says so, in the
+#   exposed names (§4) — a file cannot say "never".
+```
+
+#### `mcps/<server>.yaml` — a server over http
+
+```yaml
+# .openheron/mcps/files.yaml
+transport: http
+url: https://mcp.example.com/mcp
+headers:
+  Authorization: Bearer ${FILES_TOKEN}
+timeout: 30s
+call_timeout: 60s
+```
+
+★ The **host** holds the key and the proxy substitutes it, so the container never sees
+it — but an http server on the host may still need the sandbox to authenticate *to it*,
+and that is the `headers:` map (§8.1).
+
+#### `tools/filesystem.yaml`
+
+```yaml
+# .openheron/tools/filesystem.yaml
+#
+# ★ The filesystem tool set. These tools are always there — this file tunes them.
+tier: allow
+ask: [write_file, edit_file, execute]
+# tools: [ls, read_file, glob, grep]   # uncomment for a read-only agent
+```
+
+#### `tools/kb.yaml`
+
+```yaml
+# .openheron/tools/kb.yaml
+corpus: ""
+index: default
+model: ""
+query_instruction: ""
+batch_size: 10
+max_batch_chars: 1200
+top_k: 8
+# ★ kb_index writes the index on disk, so it asks. kb_search does not.
+ask: [kb_index]
+```
+
+#### `tools/http.yaml`
+
+```yaml
+# .openheron/tools/http.yaml
+methods: [get]
+headers: {}
+timeout: 30s
+# ★ The write methods change the outside world, so they ask.
+ask: [post, put, delete]
+```
+
+#### `policy/permissions.yaml`
+
+```yaml
+# .openheron/policy/permissions.yaml
+#
+# ★ Only the outer boundary lives here. The "ask" tiers live in each tool's own
+#   file (§5.5, §7.3).
+deny: []
+# deny: [mcp__github__delete_repo]   # one tool that must never run
+# deny: [mcp__*]                     # no MCP tool, ever
+```
+
 ## 6. The assembly path
 
 ### 6.1 The provider
@@ -483,6 +585,66 @@ server that never answers would hold the lock for ever, and every other call of 
 server would queue behind it. ⇒ `call_timeout` (LenientDuration, default `60s`) bounds
 one tool call. It is lenient, like every other duration that only decides *how long we
 wait*.
+
+### 6.6 From a file to one tool call
+
+The whole path, from the file on disk to the gate's decision:
+
+```
+.openheron/mcps/github.yaml
+  │  spec.loadMCP (agentkit/spec/load.go) — the file name and the fields are
+  │  validated here, and a bad one is a startup error
+  ▼
+decl.MCPServerCfg — transport / command / args / env / tier / ask / tools / timeouts
+  │
+  │  snapshot.buildHeavy (agentkit/build/snapshot.go)
+  │    → mcpToolProvider.Provide (agentkit/build/mcptools.go)
+  ▼
+per server:
+  client.NewStdioMCPClient / client.NewStreamableHttpClient
+  cli.Start(ctx) → cli.Initialize(ctx) → mcpp.GetTools(ctx, &mcpp.Config{Cli: cli})
+  │
+  │  each tool:  name = mcp__<server>__<tool>     (sanitized; a bad name is skipped
+  │                                                with a warning — §3.2)
+  │              tier = the file's tier and ask list, read in the SERVER's own
+  │                    names and mapped to the exposed ones
+  ▼
+[]tool.BaseTool — the stdio ones wrapped in the per-server mutex (§6.5)
+  │
+  ▼
+toolRegistry.Build → heavyDeps.tools → applyToolConfig → deep.Config.ToolsConfig.Tools
+  │
+  ▼
+the model calls mcp__github__create_issue
+  │
+  ▼
+the gate: Policy.TierOf("mcp__github__create_issue")
+  ├─ allow → the tool runs → the cap truncates the output → the result reaches the model
+  ├─ ask   → the turn is interrupted for a human → resumed
+  └─ deny  → the call is refused
+```
+
+★ **The tier resolution** is three lookups, and the gate never asks which file a tool
+came from — the assembly fills the table with the **exposed** names:
+
+```
+Policy.TierOf(name):
+  1. the global deny, in exposed names (§4)        → deny
+  2. the file that provides the tool:
+       its per-item ask list, in its own names       → ask
+       its tier (allow | ask)                        → that tier
+  3. otherwise                                       → allow
+```
+
+★ **The assembly happens in `agentkit/build`, not in `agentkit/spec`** (§7.3): only the
+provider knows its file's vocabulary and the exposed names behind it, and `agentkit/spec`
+may not import `kb` (the iron rule) nor eino (where the filesystem tool names live).
+
+★ **The reload is part of the flow.** `mcps/` is a hot partition, so the whole chain
+above runs again on the next turn after a change: the loader re-reads the file, the
+snapshot is replaced, the stdio child is torn down and a new one started, and the tier
+table is rebuilt with the exposed names. The gate reads the new tier from the next turn
+on — no restart, and no window where a tool keeps its old tier.
 
 ## 7. The gate and the tiers
 
@@ -664,29 +826,72 @@ of what to fetch, executed by the runtime.
 ★ **The fallback is a real downgrade, and it should be said out loud.** A key inside
 the VM is readable by the agent's own tools, and it is the user who chose that.
 
-## 9. The change list
+## 9. The core code architecture
+
+### 9.1 The packages
+
+| Package | What it holds | What it must not hold |
+|---|---|---|
+| `agentkit/spec/decl` | the **declarations**: `MCPServerCfg` and the namespace constants | any behaviour — it is the pure declaration layer (`AGENTS.md`'s dependency iron rules) |
+| `agentkit/spec` | the **loader**: reads `mcps/<server>.yaml`, validates the file name and the fields, expands `${ENV}` / `@file:` | the MCP client, eino, `kb` — it may not import them |
+| `agentkit/build/mcptools.go` | the **provider** and the **wrappers**: the client lifecycle, the naming, the tier mapping, the per-server mutex, the output cap | the loader's file walking — it receives the declarations |
+| `agentkit/build/tools.go` | the **registry**: `toolProvider`, `defaultToolRegistry`, the reserved names | the MCP specifics — it knows only the interface (§1.2) |
+| `agentkit/build/policy.go` | the **tier lookup**: `Policy.TierOf`, `Table.Blocked` | which file a tool came from — it sees names only |
+
+★ **The direction is one-way**: `spec` → `build`. The declaration layer never imports
+the assembly layer, and the assembly layer never walks the config directory itself.
+
+### 9.2 The types
+
+| Type | Where | What it is |
+|---|---|---|
+| `decl.MCPServerCfg` | `agentkit/spec/decl/decl.go` | one server's declaration: the transport, the command, the environment, the tier keys, the whitelist, the two timeouts |
+| `decl.MCPFiles` | `agentkit/spec/decl/decl.go` | the partition's holder: `map[string]*MCPServerCfg` keyed by the server name |
+| `spec.Config.MCPs` | `agentkit/spec/config.go` | where the loader puts them |
+| `mcpToolProvider` | `agentkit/build/mcptools.go` | the `toolProvider` implementation (§1.2) |
+| `mcpTool` | `agentkit/build/mcptools.go` | one tool: the eino tool plus the server it belongs to |
+| `serialTool` | `agentkit/build/mcptools.go` | the wrapper that serializes the calls of one stdio server (§6.5) |
+| `build.Policy` | `agentkit/build/policy.go` | the assembled table: name → tier. **Unchanged in shape** — only where the entries come from changes (§7.3) |
+
+### 9.3 Where each piece of the design lands
+
+| The design | The code |
+|---|---|
+| the namespace (§3) | `mcpToolProvider.Provide` — the one place that composes `mcp__<server>__<tool>` |
+| the skip-and-warn (§3.2) | the same function — the name is checked before the tool is kept |
+| the file's own tier (§7.3) | the same function — the provider maps the file's names to the exposed ones |
+| the serialization (§6.5) | `serialTool` — a wrapper, the same shape as `cappedTool` in `nettools.go` |
+| the output cap (§6.4) | the same wrapper family — the component's `ToolCallResultHandler` |
+| the client's life (§6.2) | the provider — `Start` / `Initialize` / `GetTools`, and the teardown on the snapshot swap |
+| the hot reload (§5.4) | `agentkit/spec/reload.go` — the partition is hot, and the snapshot swap rebuilds the tools |
+
+★ **One function does three things**: the namespace, the skip-and-warn, and the tier
+mapping all live in `mcpToolProvider.Provide`, because they all need the same two
+inputs — the server's own tool list and the file that describes it. Splitting them
+would mean passing the same two things around.
+
+## 10. The change list
 
 Nothing below is in the tree. This is the list a later implementation round would work
 through.
 
-### 9.1 The code
+### 10.1 The code
 
 | # | File | Change |
 |---|---|---|
 | 1 | `go.mod` | add `github.com/cloudwego/eino-ext/components/tool/mcp` and `github.com/mark3labs/mcp-go` |
 | 2 | `agentkit/spec/config.go` | `DirMCP = "mcps"` and a `Categories` entry, hot (`hotDirList` at `:77` picks it up) |
-| 3 | `agentkit/spec/decl/decl.go` | the `MCPServerCfg` declaration struct; the namespace constants; `call_timeout` |
+| 3 | `agentkit/spec/decl/decl.go` | the `MCPServerCfg` declaration struct, the `MCPFiles` holder, the namespace constants; `call_timeout` |
 | 4 | `agentkit/spec/load.go` | the loader for `mcps/<server>.yaml`, with the file-name and field validation of §3.1 and §5.2 |
-| 5 | `agentkit/spec/defaults.go` | `EnabledToolNames` gains the namespaced MCP tools |
+| 5 | `agentkit/spec/defaults.go` | `EnabledToolNames` gains the namespaced MCP tools; the default tier of a server (`ask`) |
 | 6 | `agentkit/spec/write.go` | the scaffold for a new `mcps/` file |
 | 7 | `agentkit/build/tools.go` | `mcpToolProvider`, registered at the placeholder line `:35` |
-| 8 | `agentkit/build/policy.go` | the prefix matcher for `TierOf` and `Blocked` |
+| 8 | `agentkit/build/policy.go` | the prefix matcher for `TierOf` and `Blocked`, **and** the tier **assembly**: the providers contribute (exposed name → tier) from their own file's declarations, and the global `deny` still wins (§7.3) |
 | 9 | `api/v2_settings.go` | the editable section for `mcps/` |
 | 10 | `agentkit/build/nettools.go` | the output cap, applied to the MCP batch |
-| 11 | `agentkit/build/mcptools.go` | the per-server mutex that serializes the stdio calls (§6.5), and the environment assembly for the child process (§5.5) |
-| 12 | `agentkit/build/policy.go` | the tier **assembly**: the providers contribute (exposed name → tier) from their own file's declarations, and the global `deny` still wins (§7.3) |
+| 11 | `agentkit/build/mcptools.go` | the provider's client lifecycle and naming (§6.2, §6.3), the per-server mutex that serializes the stdio calls (§6.5), and the environment assembly for the child process (§5.5) |
 
-### 9.2 The tests
+### 10.2 The tests
 
 | Area | What it has to prove |
 |---|---|
@@ -708,7 +913,7 @@ through.
 | Tier | the global `deny` beats the file's `tier` |
 | Tier | the file's `ask:` is written in the server's own vocabulary and reaches the gate under the composed name |
 
-### 9.3 The documentation
+### 10.3 The documentation
 
 | Document | What changes |
 |---|---|
@@ -716,7 +921,7 @@ through.
 | `docs/user-manual.md` | how to configure a server, and what the names in the interface look like |
 | `docs/architecture.md` | the tool assembly path gains the MCP provider |
 
-## 10. What is not in this design
+## 11. What is not in this design
 
 | Not covered | Why |
 |---|---|
@@ -729,5 +934,5 @@ through.
 
 ★ Every entry in this document that describes code names a file and a line. When the
 code moves, the line moves with it — that is the contract this repository keeps for
-every other design document, and it is the reason the table in §9.1 is a list of
+every other design document, and it is the reason the table in §10.1 is a list of
 locations rather than a list of intentions.

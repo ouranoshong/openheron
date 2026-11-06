@@ -357,6 +357,106 @@ MCP 服务器按服务器一个文件来配：
 ★ 配置里的 `env:` **不替换**继承来的环境，而是**叠在它上面**。
   `env:` 为空的配置，产出的子进程仍然有一个完整的环境。
 
+### 5.6 配置模板
+
+★ **模板里的注释是英文**，因为模板是写进用户配置里的内容（`AGENTS.md`）。
+
+#### `mcps/<server>.yaml` —— 一个走 stdio 的服务器
+
+```yaml
+# .openheron/mcps/github.yaml
+#
+# ★ One MCP server, one file. The file's name is the server's name, and it is
+#   the namespace segment of its tools: mcp__github__<tool>.
+#
+# ★ The tier lives here, next to the server it is about, and it is written in
+#   the server's OWN vocabulary — "create_issue", not "mcp__github__create_issue".
+transport: stdio
+command: npx
+args: ["-y", "@modelcontextprotocol/server-github"]
+env:
+  # ★ Expanded at load time. In a sandbox the variable holds a sentinel and the
+  #   host proxy swaps in the real key on the way out (§8.1).
+  GITHUB_TOKEN: ${GITHUB_TOKEN}
+
+# ★ The tier of every tool this server offers — including the ones it has not
+#   offered yet. Default: ask.
+tier: allow
+
+# ★ The ones that ask first, on top of the tier above.
+ask: [create_issue]
+
+# ★ The tools to offer, by the server's own names. Absent = all of them.
+tools: [create_issue, list_issues, search_issues]
+
+# ★ To take one tool out for good, it is the GLOBAL deny that says so, in the
+#   exposed names (§4) — a file cannot say "never".
+```
+
+#### `mcps/<server>.yaml` —— 一个走 http 的服务器
+
+```yaml
+# .openheron/mcps/files.yaml
+transport: http
+url: https://mcp.example.com/mcp
+headers:
+  Authorization: Bearer ${FILES_TOKEN}
+timeout: 30s
+call_timeout: 60s
+```
+
+★ **宿主**持有那把 key、由代理替换它，所以容器永远看不到它 —— 但宿主上的一个 http
+  服务器仍然可能需要沙箱向*它*做认证，而那就是 `headers:` 这张表（§8.1）。
+
+#### `tools/filesystem.yaml`
+
+```yaml
+# .openheron/tools/filesystem.yaml
+#
+# ★ The filesystem tool set. These tools are always there — this file tunes them.
+tier: allow
+ask: [write_file, edit_file, execute]
+# tools: [ls, read_file, glob, grep]   # uncomment for a read-only agent
+```
+
+#### `tools/kb.yaml`
+
+```yaml
+# .openheron/tools/kb.yaml
+corpus: ""
+index: default
+model: ""
+query_instruction: ""
+batch_size: 10
+max_batch_chars: 1200
+top_k: 8
+# ★ kb_index writes the index on disk, so it asks. kb_search does not.
+ask: [kb_index]
+```
+
+#### `tools/http.yaml`
+
+```yaml
+# .openheron/tools/http.yaml
+methods: [get]
+headers: {}
+timeout: 30s
+# ★ The write methods change the outside world, so they ask.
+ask: [post, put, delete]
+```
+
+#### `policy/permissions.yaml`
+
+```yaml
+# .openheron/policy/permissions.yaml
+#
+# ★ Only the outer boundary lives here. The "ask" tiers live in each tool's own
+#   file (§5.5, §7.3).
+deny: []
+# deny: [mcp__github__delete_repo]   # one tool that must never run
+# deny: [mcp__*]                     # no MCP tool, ever
+```
+
 ## 6. 装配路径
 
 ### 6.1 provider
@@ -452,6 +552,65 @@ if _, err := c.stdin.Write(requestBytes); err != nil {   // ← no lock
   一个永不回答的 MCP server 会永远占着锁，同 server 的其它调用全排在它后面。
   ⇒ `call_timeout`（LenientDuration，缺省 `60s`）给一次工具调用封顶。
   它是宽松的，与其他只决定「等多久」的时长一样。
+
+### 6.6 从一个文件到一次工具调用
+
+整条路径，从磁盘上那个文件一路走到闸门的那一个决定：
+
+```
+.openheron/mcps/github.yaml
+  │  spec.loadMCP (agentkit/spec/load.go) — the file name and the fields are
+  │  validated here, and a bad one is a startup error
+  ▼
+decl.MCPServerCfg — transport / command / args / env / tier / ask / tools / timeouts
+  │
+  │  snapshot.buildHeavy (agentkit/build/snapshot.go)
+  │    → mcpToolProvider.Provide (agentkit/build/mcptools.go)
+  ▼
+per server:
+  client.NewStdioMCPClient / client.NewStreamableHttpClient
+  cli.Start(ctx) → cli.Initialize(ctx) → mcpp.GetTools(ctx, &mcpp.Config{Cli: cli})
+  │
+  │  each tool:  name = mcp__<server>__<tool>     (sanitized; a bad name is skipped
+  │                                                with a warning — §3.2)
+  │              tier = the file's tier and ask list, read in the SERVER's own
+  │                    names and mapped to the exposed ones
+  ▼
+[]tool.BaseTool — the stdio ones wrapped in the per-server mutex (§6.5)
+  │
+  ▼
+toolRegistry.Build → heavyDeps.tools → applyToolConfig → deep.Config.ToolsConfig.Tools
+  │
+  ▼
+the model calls mcp__github__create_issue
+  │
+  ▼
+the gate: Policy.TierOf("mcp__github__create_issue")
+  ├─ allow → the tool runs → the cap truncates the output → the result reaches the model
+  ├─ ask   → the turn is interrupted for a human → resumed
+  └─ deny  → the call is refused
+```
+
+★ **档位的解析**是三次查找，而闸门从不去问一个工具来自哪个文件 ——
+  装配时填进表里的就是**对外的**名字：
+
+```
+Policy.TierOf(name):
+  1. the global deny, in exposed names (§4)        → deny
+  2. the file that provides the tool:
+       its per-item ask list, in its own names       → ask
+       its tier (allow | ask)                        → that tier
+  3. otherwise                                       → allow
+```
+
+★ **装配发生在 `agentkit/build`，不在 `agentkit/spec`**（§7.3）：只有 provider 知道
+  自己文件的词儿，以及它背后的对外名字；而 `agentkit/spec` 不得 import `kb`
+  （那条铁律），也不得 import eino（文件系统工具的名字住在那里）。
+
+★ **重载是这条流程的一部分。** `mcps/` 是热分区，所以改动之后，上面整条链在下一轮
+  重跑一遍：加载器重新读文件，快照换代，stdio 的子进程被拆掉、新的被拉起来，
+  而档位表用对外的名字重建。闸门从下一轮起读到新档位 —— 不用重启，
+  也不会出现「一个工具还揣着旧档位」的空窗期。
 
 ## 7. 闸门与档位
 
@@ -623,28 +782,71 @@ the host proxy substitutes the real key ──► api.github.com
 ★ **兜底那一条是真的降级，而且应该说出来。** 落在 VM 里的 key 能被 agent 自己的工具读到，
   而这是用户自己选的。
 
-## 9. 改动清单
+## 9. 核心代码架构
+
+### 9.1 那些包
+
+| 包 | 装什么 | 装不得什么 |
+|---|---|---|
+| `agentkit/spec/decl` | **声明**：`MCPServerCfg` 与命名空间常量 | 任何行为 —— 它是纯声明层（`AGENTS.md` 的依赖铁律） |
+| `agentkit/spec` | **加载器**：读 `mcps/<server>.yaml`，校验文件名与字段，展开 `${ENV}` / `@file:` | MCP 客户端、eino、`kb` —— 它不得 import 它们 |
+| `agentkit/build/mcptools.go` | **provider** 与**包装层**：客户端生命周期、命名、档位映射、per-server 互斥锁、输出封顶 | 加载器的文件遍历 —— 它拿到的是声明 |
+| `agentkit/build/tools.go` | **注册表**：`toolProvider`、`defaultToolRegistry`、保留名 | MCP 特有的东西 —— 它只认那个接口（§1.2） |
+| `agentkit/build/policy.go` | **档位查找**：`Policy.TierOf`、`Table.Blocked` | 一个工具来自哪个文件 —— 它只看得到名字 |
+
+★ **方向是单向的**：`spec` → `build`。声明层从不 import 装配层，
+  而装配层也从不自己去遍历配置目录。
+
+### 9.2 那些类型
+
+| 类型 | 在哪 | 是什么 |
+|---|---|---|
+| `decl.MCPServerCfg` | `agentkit/spec/decl/decl.go` | 一个服务器的声明：传输方式、命令、环境、那几个档位键、白名单、两个超时 |
+| `decl.MCPFiles` | `agentkit/spec/decl/decl.go` | 这个分区的持有者：`map[string]*MCPServerCfg`，按服务器名做键 |
+| `spec.Config.MCPs` | `agentkit/spec/config.go` | 加载器把它们放在这儿 |
+| `mcpToolProvider` | `agentkit/build/mcptools.go` | `toolProvider` 的那个实现（§1.2） |
+| `mcpTool` | `agentkit/build/mcptools.go` | 一个工具：eino 工具加上它归属的那个服务器 |
+| `serialTool` | `agentkit/build/mcptools.go` | 把同一个 stdio 服务器的调用串行化起来的那个包装层（§6.5） |
+| `build.Policy` | `agentkit/build/policy.go` | 装配出来的表：名字 → 档位。**形状不变** —— 变的只是条目从哪儿来（§7.3） |
+
+### 9.3 设计的哪一块落在哪一行代码
+
+| 设计 | 代码 |
+|---|---|
+| 命名空间（§3） | `mcpToolProvider.Provide` —— 唯一一处拼出 `mcp__<server>__<tool>` 的地方 |
+| 跳过并警告（§3.2） | 同一个函数 —— 名字在工具被留下之前先检查一遍 |
+| 文件自己的档位（§7.3） | 同一个函数 —— provider 把文件里的名字映射到对外的名字 |
+| 串行化（§6.5） | `serialTool` —— 一个包装层，与 `nettools.go` 里的 `cappedTool` 同一个形状 |
+| 输出封顶（§6.4） | 同一族包装层 —— 组件的 `ToolCallResultHandler` |
+| 客户端的生命（§6.2） | provider —— `Start` / `Initialize` / `GetTools`，以及快照换代时的拆解 |
+| 热重载（§5.4） | `agentkit/spec/reload.go` —— 这个分区是热的，而快照换代会重建工具 |
+
+★ **一个函数干三件事**：命名空间、跳过并警告、档位映射都住在
+  `mcpToolProvider.Provide` 里，因为它们要的都是同样两样输入 ——
+  服务器自己的工具清单，与描述它的那个文件。拆开它们就意味着
+  把同样这两样东西到处传。
+
+## 10. 改动清单
 
 下面这些都还不在树上。这是一轮后来的实现要照着走过的清单。
 
-### 9.1 代码
+### 10.1 代码
 
 | # | 文件 | 改动 |
 |---|---|---|
 | 1 | `go.mod` | 加 `github.com/cloudwego/eino-ext/components/tool/mcp` 与 `github.com/mark3labs/mcp-go` |
 | 2 | `agentkit/spec/config.go` | `DirMCP = "mcps"` 与一条 `Categories` 条目，热更新（`hotDirList` 在 `:77` 会自动带上它） |
-| 3 | `agentkit/spec/decl/decl.go` | `MCPServerCfg` 声明结构体；命名空间常量；`call_timeout` |
+| 3 | `agentkit/spec/decl/decl.go` | `MCPServerCfg` 声明结构体、`MCPFiles` 持有者、命名空间常量；`call_timeout` |
 | 4 | `agentkit/spec/load.go` | `mcps/<server>.yaml` 的加载器，带 §3.1 与 §5.2 的文件名与字段校验 |
-| 5 | `agentkit/spec/defaults.go` | `EnabledToolNames` 加上带命名空间的 MCP 工具 |
+| 5 | `agentkit/spec/defaults.go` | `EnabledToolNames` 加上带命名空间的 MCP 工具；一个服务器的缺省档位（`ask`） |
 | 6 | `agentkit/spec/write.go` | 新建 `mcps/` 文件的脚手架 |
 | 7 | `agentkit/build/tools.go` | `mcpToolProvider`，注册在占位注释那一行 `:35` |
-| 8 | `agentkit/build/policy.go` | `TierOf` 与 `Blocked` 的前缀匹配器 |
+| 8 | `agentkit/build/policy.go` | `TierOf` 与 `Blocked` 的前缀匹配器，**以及**档位的**装配**：各 provider 从自己文件里的声明贡献（对外名字 → 档位），而全局 `deny` 仍然赢（§7.3） |
 | 9 | `api/v2_settings.go` | `mcps/` 的可编辑分区 |
 | 10 | `agentkit/build/nettools.go` | 输出封顶，套到 MCP 批次上 |
-| 11 | `agentkit/build/mcptools.go` | 把 stdio 调用串行化的 per-server 互斥锁（§6.5），以及子进程的环境装配（§5.5） |
-| 12 | `agentkit/build/policy.go` | 档位的**装配**：各 provider 从自己文件里的声明贡献（对外名字 → 档位），而全局 `deny` 仍然赢（§7.3） |
+| 11 | `agentkit/build/mcptools.go` | provider 的客户端生命周期与命名（§6.2、§6.3），把 stdio 调用串行化的 per-server 互斥锁（§6.5），以及子进程的环境装配（§5.5） |
 
-### 9.2 测试
+### 10.2 测试
 
 | 领域 | 要证明什么 |
 |---|---|
@@ -666,7 +868,7 @@ the host proxy substitutes the real key ──► api.github.com
 | 档位 | 全局 `deny` 压过文件里的 `tier` |
 | 档位 | 文件里的 `ask:` 用 server 自己的词儿写，到闸门时用的是合成后的名字 |
 
-### 9.3 文档
+### 10.3 文档
 
 | 文档 | 要改什么 |
 |---|---|
@@ -674,7 +876,7 @@ the host proxy substitutes the real key ──► api.github.com
 | `docs/user-manual.md` | 怎么配一个服务器，以及界面上看到的名字长什么样 |
 | `docs/architecture.md` | 工具装配路径加上 MCP provider |
 
-## 10. 这份设计不管什么
+## 11. 这份设计不管什么
 
 | 没覆盖 | 为什么 |
 |---|---|
@@ -687,4 +889,4 @@ the host proxy substitutes the real key ──► api.github.com
 
 ★ 这份文档里每一条描述代码的地方都点了文件名与行号。代码动了，行号跟着动 ——
   这是本仓库对每一份其它设计文档守着的契约，
-  也是 §9.1 那张表是一份**位置**清单而不是一份**意图**清单的原因。
+  也是 §10.1 那张表是一份**位置**清单而不是一份**意图**清单的原因。
