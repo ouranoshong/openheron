@@ -1,12 +1,12 @@
 # MCP 接入设计 —— 运行期才定下来的工具集，与一张静态的策略表
 
 > 状态：**§1 讲的是代码现状。§2 往后是一份提案** —— §2 往后的东西都还不在树上。
-> `go.mod` 里没有 MCP 依赖，没有 `mcp/` 配置目录，也没有任何说这套协议的代码。
+> `go.mod` 里没有 MCP 依赖，没有 `mcps/` 配置目录，也没有任何说这套协议的代码。
 >
 > 范围：MCP（Model Context Protocol）服务器如何变成 openheron agent 可以调用的工具集，
 > 这些工具叫什么名字，以及策略层如何决定它们能不能跑。
 > 不在范围内：MCP 协议本身、传输方式的实现（那属于 `mcp-go`）、
-> 以及沙箱打包（见 `sandbox-kit-design.md` §8）。
+> 以及沙箱打包（见 `sandbox-kit-design.md` §2.3）。
 
 ## 1. 代码现状
 
@@ -50,7 +50,7 @@ type toolProvider interface {
 		// mcpToolProvider{}, projectToolsProvider{}, ...
 ```
 
-★ 那行注释是树上**唯一**的 MCP 痕迹。没有 MCP 依赖，没有 `mcp/` 目录，
+★ 那行注释是树上**唯一**的 MCP 痕迹。没有 MCP 依赖，没有 `mcps/` 目录，
   也没有任何说这套协议的代码。
 
 ### 1.3 名字就是策略
@@ -252,14 +252,14 @@ deny → ask → allow (the fallback)
   但它只有一行，而且很容易顺手写下来。
   真正值得先够的是点名单个 server 的那条规则（`mcp__github__*`）。
 
-## 5. `mcp/<server>.yaml` 分区
+## 5. `mcps/<server>.yaml` 分区
 
 ### 5.1 为什么要单独一个分区
 
 MCP 服务器按服务器一个文件来配：
 
 ```
-.openheron/mcp/
+.openheron/mcps/
 └─ github.yaml
 ```
 
@@ -304,7 +304,7 @@ MCP 服务器按服务器一个文件来配：
 
 ### 5.4 这个分区是热的
 
-`mcp/` 与 `tools/`、`policy/` 一起进热更新：改一个服务器的命令或超时，
+`mcps/` 与 `tools/`、`policy/` 一起进热更新：改一个服务器的命令或超时，
 下一轮就该生效，不必重启。
 
 ★ 这意味着客户端生命周期要扛得住一次重载：快照换代时，
@@ -417,7 +417,8 @@ MCP 落进它有两种方式，而且这两者并不对称。
   要变的是它的网络规则。
 
 ★ 还有第三种选择，**故意不**在这份设计里：一种**安装**宿主侧 MCP 服务器的 mixin。
-  那会让 mixin 带上内容，而内容属于 workload（§8）。
+  那会让 mixin 带上内容，而内容属于 workload —— 这是 `sandbox-kit-design.md` §2.3
+  划的那条边界。
 
 ## 9. 改动清单
 
@@ -428,14 +429,14 @@ MCP 落进它有两种方式，而且这两者并不对称。
 | # | 文件 | 改动 |
 |---|---|---|
 | 1 | `go.mod` | 加 `github.com/cloudwego/eino-ext/components/tool/mcp` 与 `github.com/mark3labs/mcp-go` |
-| 2 | `agentkit/spec/config.go` | `DirMCP = "mcp"` 与一条 `Categories` 条目，热更新（`hotDirList` 在 `:77` 会自动带上它） |
+| 2 | `agentkit/spec/config.go` | `DirMCP = "mcps"` 与一条 `Categories` 条目，热更新（`hotDirList` 在 `:77` 会自动带上它） |
 | 3 | `agentkit/spec/decl/decl.go` | `MCPServerCfg` 声明结构体；命名空间常量 |
-| 4 | `agentkit/spec/load.go` | `mcp/<server>.yaml` 的加载器，带 §3.1 与 §5.2 的文件名与字段校验 |
+| 4 | `agentkit/spec/load.go` | `mcps/<server>.yaml` 的加载器，带 §3.1 与 §5.2 的文件名与字段校验 |
 | 5 | `agentkit/spec/defaults.go` | `EnabledToolNames` 加上带命名空间的 MCP 工具 |
-| 6 | `agentkit/spec/write.go` | 新建 `mcp/` 文件的脚手架 |
+| 6 | `agentkit/spec/write.go` | 新建 `mcps/` 文件的脚手架 |
 | 7 | `agentkit/build/tools.go` | `mcpToolProvider`，注册在占位注释那一行 `:35` |
 | 8 | `agentkit/build/policy.go` | `TierOf` 与 `Blocked` 的前缀匹配器 |
-| 9 | `api/v2_settings.go` | `mcp/` 的可编辑分区 |
+| 9 | `api/v2_settings.go` | `mcps/` 的可编辑分区 |
 | 10 | `agentkit/build/nettools.go` | 输出封顶，套到 MCP 批次上 |
 
 ### 9.2 测试
@@ -455,7 +456,7 @@ MCP 落进它有两种方式，而且这两者并不对称。
 
 | 文档 | 要改什么 |
 |---|---|
-| `docs/developer-manual.md` | 「加一个工具」的配方加上 MCP provider；「加一个分区」的配方加上 `mcp/` 这一例 |
+| `docs/developer-manual.md` | 「加一个工具」的配方加上 MCP provider；「加一个分区」的配方加上 `mcps/` 这一例 |
 | `docs/user-manual.md` | 怎么配一个服务器，以及界面上看到的名字长什么样 |
 | `docs/architecture.md` | 工具装配路径加上 MCP provider |
 
@@ -467,7 +468,7 @@ MCP 落进它有两种方式，而且这两者并不对称。
 | 带发现、健康检查与重试的 server 注册表 | 一个服务器一个文件，够起步了；注册表是下一轮的事 |
 | MCP 的 resources、prompts 与 sampling | eino-ext 那个组件**只**暴露工具 |
 | 按工具计的速率限制与配额 | `policy/limits.yaml` 数的是数量，它没有工具名这一维 |
-| 一种安装宿主侧 MCP 服务器的 mixin | mixin 是声明；内容属于 workload（§8） |
+| 一种安装宿主侧 MCP 服务器的 mixin | mixin 是声明；内容属于 workload（`sandbox-kit-design.md` §2.3） |
 
 ★ 这份文档里每一条描述代码的地方都点了文件名与行号。代码动了，行号跟着动 ——
   这是本仓库对每一份其它设计文档守着的契约，

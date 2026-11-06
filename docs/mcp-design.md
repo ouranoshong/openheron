@@ -1,13 +1,13 @@
 # MCP Integration Design — a runtime tool set, a fixed policy table
 
 > Status: **§1 describes the code as it is. §2 onwards is a proposal** — nothing from §2
-> onwards is in the tree. There is no MCP dependency in `go.mod`, no `mcp/` config
+> onwards is in the tree. There is no MCP dependency in `go.mod`, no `mcps/` config
 > directory, and no code that speaks the protocol.
 >
 > Scope: how an MCP (Model Context Protocol) server becomes a set of tools an openheron
 > agent can call, how those tools are named, and how the policy layer decides whether
 > they may run. Not in scope: the MCP protocol itself, the transport implementations
-> (they belong to `mcp-go`), and the sandbox packaging (see `sandbox-kit-design.md` §8).
+> (they belong to `mcp-go`), and the sandbox packaging (see `sandbox-kit-design.md` §2.3).
 
 ## 1. The code as it is
 
@@ -53,7 +53,7 @@ line that names this design:
 ```
 
 ★ That comment is the **only** MCP trace in the tree. There is no MCP dependency, no
-`mcp/` directory, and no code that speaks the protocol.
+`mcps/` directory, and no code that speaks the protocol.
 
 ### 1.3 The names are the policy
 
@@ -265,14 +265,14 @@ from the agent, and `ask: ["mcp__*"]` puts every one of them behind a click. Tha
 usually the intent, but it is one line, and it is easy to write by accident. A rule
 that names a single server (`mcp__github__*`) is the one worth reaching for first.
 
-## 5. The `mcp/<server>.yaml` partition
+## 5. The `mcps/<server>.yaml` partition
 
 ### 5.1 Why a partition of its own
 
 MCP servers are configured one file per server:
 
 ```
-.openheron/mcp/
+.openheron/mcps/
 └─ github.yaml
 ```
 
@@ -320,7 +320,7 @@ hard error** — we wrote it, so we can fix it.
 
 ### 5.4 The partition is hot
 
-`mcp/` joins the hot partitions, next to `tools/` and `policy/`: changing a server's
+`mcps/` joins the hot partitions, next to `tools/` and `policy/`: changing a server's
 command or timeout should take effect on the next turn, without a restart.
 
 ★ This means the client lifecycle has to survive a reload: when the snapshot is
@@ -438,7 +438,7 @@ http is a mixin's business — its network rule is the thing that has to change.
 
 ★ A third option exists and is deliberately **not** in this design: a mixin that
 **installs** a host-side MCP server. That would make the mixin carry content, which is
-the boundary §2 of the Kit design draws.
+the boundary `sandbox-kit-design.md` §2.3 draws.
 
 ## 9. The change list
 
@@ -450,14 +450,14 @@ through.
 | # | File | Change |
 |---|---|---|
 | 1 | `go.mod` | add `github.com/cloudwego/eino-ext/components/tool/mcp` and `github.com/mark3labs/mcp-go` |
-| 2 | `agentkit/spec/config.go` | `DirMCP = "mcp"` and a `Categories` entry, hot (`hotDirList` at `:77` picks it up) |
+| 2 | `agentkit/spec/config.go` | `DirMCP = "mcps"` and a `Categories` entry, hot (`hotDirList` at `:77` picks it up) |
 | 3 | `agentkit/spec/decl/decl.go` | the `MCPServerCfg` declaration struct; the namespace constants |
-| 4 | `agentkit/spec/load.go` | the loader for `mcp/<server>.yaml`, with the file-name and field validation of §3.1 and §5.2 |
+| 4 | `agentkit/spec/load.go` | the loader for `mcps/<server>.yaml`, with the file-name and field validation of §3.1 and §5.2 |
 | 5 | `agentkit/spec/defaults.go` | `EnabledToolNames` gains the namespaced MCP tools |
-| 6 | `agentkit/spec/write.go` | the scaffold for a new `mcp/` file |
+| 6 | `agentkit/spec/write.go` | the scaffold for a new `mcps/` file |
 | 7 | `agentkit/build/tools.go` | `mcpToolProvider`, registered at the placeholder line `:35` |
 | 8 | `agentkit/build/policy.go` | the prefix matcher for `TierOf` and `Blocked` |
-| 9 | `api/v2_settings.go` | the editable section for `mcp/` |
+| 9 | `api/v2_settings.go` | the editable section for `mcps/` |
 | 10 | `agentkit/build/nettools.go` | the output cap, applied to the MCP batch |
 
 ### 9.2 The tests
@@ -477,7 +477,7 @@ through.
 
 | Document | What changes |
 |---|---|
-| `docs/developer-manual.md` | the "adding a tool" recipe gains the MCP provider; the "adding a partition" recipe gains the `mcp/` case |
+| `docs/developer-manual.md` | the "adding a tool" recipe gains the MCP provider; the "adding a partition" recipe gains the `mcps/` case |
 | `docs/user-manual.md` | how to configure a server, and what the names in the interface look like |
 | `docs/architecture.md` | the tool assembly path gains the MCP provider |
 
@@ -489,7 +489,7 @@ through.
 | A server registry with discovery, health checks and retries | one file per server is enough to start; a registry is a second round |
 | MCP resources, prompts and sampling | the eino-ext component exposes **tools** only |
 | Per-tool rate limits and quotas | `policy/limits.yaml` counts things; it has no tool-name dimension |
-| A mixin that installs a host-side MCP server | a mixin is a declaration; content belongs to the workload (§8) |
+| A mixin that installs a host-side MCP server | a mixin is a declaration; content belongs to the workload (`sandbox-kit-design.md` §2.3) |
 
 ★ Every entry in this document that describes code names a file and a line. When the
 code moves, the line moves with it — that is the contract this repository keeps for

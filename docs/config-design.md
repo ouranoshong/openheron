@@ -1,6 +1,6 @@
 # Configuration System Design
 
-> Status: this document describes **openheron's configuration system as it is**. Two parts of it are **proposals and not implemented**: the `mcp/` partition (§6.7) and the prefix matching in the policy tables (§6.3). Documents that live in the upstream repository are marked "upstream".
+> Status: this document describes **openheron's configuration system as it is**. Two parts of it are **proposals and not implemented**: the `mcps/` partition (§6.7) and the prefix matching in the policy tables (§6.3). Documents that live in the upstream repository are marked "upstream".
 > Scope: in scope — the config root, the partitions, the file specs, loading and precedence, hot reload, and the dependency iron rules. Out of scope — the HTTP API surface (see `docs/api-v2-design.md` (upstream)) and the frontend.
 > Framework versions: eino `v0.9.22` (`go.mod:9`), `gopkg.in/yaml.v3 v3.0.1` (`go.mod:20`).
 
@@ -1428,12 +1428,12 @@ by the file's presence but by a non-empty `corpus` (`agentkit/build/kb.go:15`), 
 through the tiers like everything else: `kb_search` is a plain `allow`, and `kb_index` — a write
 operation — is in the factory default's `ask` list (`agentkit/spec/defaults.go:11`) ✅ ✅.
 
-### 6.7 `mcp/<server>.yaml` (★ decided 2026-11-06, **not implemented**)
+### 6.7 `mcps/<server>.yaml` (★ decided 2026-11-06, **not implemented**)
 
 The configuration of an MCP server. **One file per server**:
 
 ```
-.openheron/mcp/
+.openheron/mcps/
 └─ github.yaml
 ```
 
@@ -1527,7 +1527,7 @@ symptom would be "this feature seems to be missing".
 
 #### Implementation status
 
-★ **This whole section is not implemented yet**: there is no MCP dependency, no `mcp/`
+★ **This whole section is not implemented yet**: there is no MCP dependency, no `mcps/`
 partition, no loader and no provider. `agentkit/build/tools.go:35` carries one
 placeholder comment, `// mcpToolProvider{}, projectToolsProvider{}, ...`, that remembers
 the thing. The complete design and the change list are in `docs/mcp-design.md`.
@@ -1625,7 +1625,7 @@ agent assembly API is in `agent-design-v2.md (upstream)`.
 | Directory | Hot reload | Why |
 |---|---|---|
 | `llm/` `agents/` `policy/` `tools/` | ✅ | implemented in `agentkit/spec/reload.go`: `HotDirs` + polling + a generation swap |
-| `mcp/` | ✅ (★ decided, **not implemented**) | see §6.7 — changing a server's command or timeout should take effect on the next round, without a restart |
+| `mcps/` | ✅ (★ decided, **not implemented**) | see §6.7 — changing a server's command or timeout should take effect on the next round, without a restart |
 | `server/` | ❌ | it configures the process itself (listen / static dir), a change needs a restart |
 
 ★ This boundary **is guarded by a test** (`TestWatchIgnoresServerDir`,
@@ -1867,7 +1867,7 @@ agentkit/spec/write.go:persist.AtomicWrite
 | 10 | (proposal, **not implemented**) MCP tools always carry the `mcp__` namespace, and **only** MCP tools may use that prefix | without the namespace, a server that exposes `ls` takes the whole agent down (it collides with a reserved tool name, which is a load-time error); without the "only MCP" half, a built-in tool could take the namespace and a prefix rule in the policy would quietly shadow it |
 | 11 | (proposal, **not implemented**) A policy entry supports only a **trailing** `*` prefix pattern; every other spelling errors at load time | a rule that reads differently from what it actually covers is a silent policy mismatch |
 
-★ Rows **10** and **11** are **proposals**: there is no MCP dependency, no `mcp/`
+★ Rows **10** and **11** are **proposals**: there is no MCP dependency, no `mcps/`
 partition and no loader (the only trace is the placeholder comment at
 `agentkit/build/tools.go:35`), and the policy tables match **exactly** today
 (`agentkit/build/policy.go:39` and `agentkit/build/policy.go:94`). See §6.3 and §6.7.
@@ -2206,7 +2206,7 @@ but only two actually run" is the hardest class of problem to track down.
 | the write gate rejects a literal secret | ✅ | `agentkit/spec/write.go:473` `checkSecret` |
 | `policy/limits.yaml` (the limit rules) | ✅ | `agentkit/spec/load.go:199`, `agentkit/spec/decl/decl.go:215` |
 | ~~`chatmodel.New` reads the environment directly~~ | ✅ deleted | the package is gone; it is `llm/common` now |
-| the `mcp/` partition + the MCP provider | ❌ **not implemented** | the design is in [mcp-design.md](mcp-design.md); the configuration surface is §6.7 of this document |
+| the `mcps/` partition + the MCP provider | ❌ **not implemented** | the design is in [mcp-design.md](mcp-design.md); the configuration surface is §6.7 of this document |
 | policy prefix matching (a trailing `*`) | ❌ **not implemented** | the matching semantics are §6.3 of this document |
 
 **Landed**: `AgentHub` / `ModelHub` (§7) — implemented in `agentkit/build/hub.go`

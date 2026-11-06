@@ -46,11 +46,11 @@ one — change one and change the other.
 > **implemented**: `agentkit/fsx` is wired in at both call sites.
 > `docs/mcp-design.md` is a **proposal** too: its §1 describes the code as it is — the tool
 > assembly path, the provider contract, and the exact-match policy tables — while its §2 onwards
-> describe what would be built: an `mcp/` config partition, the `mcp__<server>__<tool>` namespace,
+> describe what would be built: an `mcps/` config partition, the `mcp__<server>__<tool>` namespace,
 > and prefix matching in the policy tables. **Nothing from §2 onwards is in the tree.**
 > `docs/config-design.md` describes the **configuration system** — the config root and its
 > three levels, the partitions and their file specs, loading and precedence, hot reload, and
-> the dependency iron rules. **Its body describes the code as it is**; the `mcp/` partition
+> the dependency iron rules. **Its body describes the code as it is**; the `mcps/` partition
 > (§6.7) and the prefix matching in the policy tables (§6.3) are labeled as proposals,
 > because they are not implemented.
 >
@@ -359,7 +359,7 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 | `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` | **Run lifecycle design** — why a turn is bound to one SSE connection today, and how a run becomes a durable row with a lease and a fence, so the connection can be demoted to a subscriber (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
 | `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` | **Docker Sandbox Kit packaging** — the openheron process as it is, a v3 workload Kit that would carry the whole process into a microVM, how the model key stays on the host, and the SSE path that has to be measured (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
 | `docs/mcp-design.md` / `docs/mcp-design_zh.md` | **MCP integration design** — the tool assembly path as it is, what an MCP client adds to it, the `mcp__<server>__<tool>` namespace, prefix matching in the policy tables, and where an MCP server runs inside the Kit (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
-| `docs/config-design.md` / `docs/config-design_zh.md` | **Configuration system design** — the config root and its three levels, the partitions and their file specs, loading and precedence, hot reload, and the dependency iron rules (**the body describes the code as it is**; the `mcp/` partition and the prefix matching are proposals) |
+| `docs/config-design.md` / `docs/config-design_zh.md` | **Configuration system design** — the config root and its three levels, the partitions and their file specs, loading and precedence, hot reload, and the dependency iron rules (**the body describes the code as it is**; the `mcps/` partition and the prefix matching are proposals) |
 
 ★ The file without a suffix is the **English main version**; `_zh` is the Chinese version; the two
 correspond one to one — change one and change the other.

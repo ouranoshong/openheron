@@ -1,6 +1,6 @@
 # 配置系统设计说明
 
-> 状态：本文描述的是 **openheron 当前的配置系统**。其中有两处是 **提案，尚未实现**：`mcp/` 分区（§6.7）以及策略表里的前缀匹配（§6.3）。只存在于上游仓库的文档标注为「upstream」。
+> 状态：本文描述的是 **openheron 当前的配置系统**。其中有两处是 **提案，尚未实现**：`mcps/` 分区（§6.7）以及策略表里的前缀匹配（§6.3）。只存在于上游仓库的文档标注为「upstream」。
 > 范围：包含 —— 配置根、分区、文件规格、加载与优先级、热更新、依赖铁律。不包含 —— HTTP 接口层（见 `docs/api-v2-design.md`（upstream））与前端。
 > 框架版本：eino `v0.9.22`（`go.mod:9`）、`gopkg.in/yaml.v3 v3.0.1`（`go.mod:20`）。
 
@@ -1355,12 +1355,12 @@ server 是 openheron 的**子进程** —— 它能写文件、能联网，「�
 `corpus` 来开（`agentkit/build/kb.go:15`），并且和其它工具一样走档位：`kb_search` 是普通 `allow`，
 而 `kb_index` —— 一个写操作 —— 在出厂默认的 `ask` 名单里（`agentkit/spec/defaults.go:11`）✅ ✅。
 
-### 6.7 `mcp/<server>.yaml`（★ 2026-11-06 决策，**未实施**）
+### 6.7 `mcps/<server>.yaml`（★ 2026-11-06 决策，**未实施**）
 
 MCP 服务器的配置。**一个 server 一个文件**：
 
 ```
-.openheron/mcp/
+.openheron/mcps/
 └─ github.yaml
 ```
 
@@ -1447,7 +1447,7 @@ deny: [mcp__github__delete_repo]
 
 #### 实施状态
 
-★ **这一节整节都还没实现**：没有 MCP 依赖、没有 `mcp/` 分区、没有加载器、
+★ **这一节整节都还没实现**：没有 MCP 依赖、没有 `mcps/` 分区、没有加载器、
   没有 provider。`agentkit/build/tools.go:35` 有一行占位注释
   `// mcpToolProvider{}, projectToolsProvider{}, ...` 记着这件事。
   完整设计与改动清单见 `docs/mcp-design.md`。
@@ -1537,7 +1537,7 @@ Agent 池与审批链见 `agent-design.md (upstream)`；agent 装配 API 见
 | 目录 | 热更新 | 理由 |
 |---|---|---|
 | `llm/` `agents/` `policy/` `tools/` | ✅ | 已在 `agentkit/spec/reload.go` 实施：`HotDirs` + 轮询 + 换代 |
-| `mcp/` | ✅（★ 决策已定，**未实施**） | 见 §6.7 —— 改一个 server 的命令或超时，下一轮就该生效，不必重启 |
+| `mcps/` | ✅（★ 决策已定，**未实施**） | 见 §6.7 —— 改一个 server 的命令或超时，下一轮就该生效，不必重启 |
 | `server/` | ❌ | 配进程自身（listen / 静态目录），改了要重启 |
 
 ★ 这条边界**有测试守着**（`TestWatchIgnoresServerDir`，
@@ -1752,7 +1752,7 @@ agentkit/spec/write.go:persist.AtomicWrite
 | 10 | （提案，**未实施**）MCP 工具一律带 `mcp__` 命名空间，且**只有** MCP 工具能用这个前缀 | 没有命名空间，一个暴露 `ls` 的 server 会让整个 agent 起不来（撞上保留工具名即在加载期报错）；没有「只有 MCP 能用」这一半，内置工具就能占了这个命名空间，策略里的前缀规则会悄悄盖住它 |
 | 11 | （提案，**未实施**）策略条目只支持**尾部** `*` 的前缀模式，其余写法加载期报错 | 一条读起来与实际覆盖范围不同的规则，就是一次静默的策略错配 |
 
-★ 第 **10**、**11** 两行是**提案**：没有 MCP 依赖、没有 `mcp/` 分区、也没有加载器（唯一
+★ 第 **10**、**11** 两行是**提案**：没有 MCP 依赖、没有 `mcps/` 分区、也没有加载器（唯一
 的痕迹是 `agentkit/build/tools.go:35` 的占位注释），而策略表今天是**精确匹配**
 （`agentkit/build/policy.go:39` 与 `agentkit/build/policy.go:94`）。见 §6.3 与 §6.7。
 
@@ -2067,7 +2067,7 @@ retry:
 | 写入门拒绝字面量密钥 | ✅ | `agentkit/spec/write.go:473` `checkSecret` |
 | `policy/limits.yaml`（限制规则） | ✅ | `agentkit/spec/load.go:199`，`agentkit/spec/decl/decl.go:215` |
 | ~~`chatmodel.New` 直读 env~~ | ✅ 已删 | 包已移除，改 `llm/common` |
-| `mcp/` 分区 + MCP provider | ❌ **未实施** | 架构设计见 [mcp-design.md](mcp-design.md)；配置面见本文件 §6.7 |
+| `mcps/` 分区 + MCP provider | ❌ **未实施** | 架构设计见 [mcp-design.md](mcp-design.md)；配置面见本文件 §6.7 |
 | 策略前缀匹配（尾部 `*`） | ❌ **未实施** | 匹配语义见本文件 §6.3 |
 
 **已落地**：`AgentHub` / `ModelHub`（§7）—— 实现在 `agentkit/build/hub.go`
