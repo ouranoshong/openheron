@@ -365,6 +365,10 @@ server, `[]` = none** — the same pointer trick `skills` already uses, for the 
 reason: the common case is **one** place. Write the server file, and every agent that
 has not narrowed its list gets it.
 
+★ **Where that narrowing happens is not free**, because the tool set is **one set for
+the whole snapshot** (§1.1). The answer is in §11.3: the agent's **table**, where
+`disabled_tools` already narrows the tools.
+
 ★ The server name is the file name without `.yaml`, and it is the namespace segment
 (§3.1). A file name that does not match `^[a-z0-9]+(_[a-z0-9]+)*$` is a **load-time
 hard error** — we wrote it, so we can fix it.
@@ -527,11 +531,16 @@ table, and the user sees "this feature seems to be missing". For an MCP server t
 exactly the wrong symptom to leave unexplained, so the warning must name the server,
 the transport and the error.
 
-★ **An unreachable server is a warning, not a row.** The API does **not** expose the
-servers that are configured but unreachable. The user learns from the warning and from
-the tools that are missing; an endpoint that listed "the server you configured is not
-there" would be a second truth to keep in sync with the first, and it would answer a
-question the warning already answers.
+★ **An unreachable server is a warning, not a row.** The **configuration** views do
+**not** expose the servers that are configured but unreachable. The user learns from the
+warning and from the tools that are missing; an endpoint that listed "the server you
+configured is not there" as part of the configuration would be a second truth to keep in
+sync with the first, and it would answer a question the warning already answers.
+
+★ **The `/mcps` view is the exception, and it is not a second truth** (§11.2): it is a
+**projection of the manager's live state**, and it exists because the user asked for it.
+The warning and the view read the same state — the manager's client — so they cannot
+disagree about a server.
 
 ### 6.2 The client lifecycle
 
@@ -627,7 +636,7 @@ does this snapshot have"; the manager is what a client outlives.
 | Responsibility | What it means |
 |---|---|
 | **one client per server** | a server is one connection, and for stdio one child process |
-| **start only what the agent asked for** | the manager starts the servers in that agent's `mcps:` list (§5.3) — a server nobody lists is never started, and never becomes a child process |
+| **start only what an agent asked for** | the manager starts the servers in the `mcps:` lists of the agents (§5.3) — a server no agent lists is never started, and never becomes a child process. ★ the list is the **union**, because the snapshot's tool set is shared by every agent (§11.3) |
 | **start lazily** | a server is started when a turn first needs it, not at boot |
 | **restart a crashed child** | a stdio server that dies is started again on the next call — a crash is not a configuration error, and a dead server that stays dead is the worst outcome |
 | **notice a changed tool list** | the manager re-lists the tools; when the list changed, the **generation is bumped** and the tools are rebuilt, exactly like a configuration reload (§6.7) |
@@ -920,6 +929,7 @@ the VM is readable by the agent's own tools, and it is the user who chose that.
 | `agentkit/build/mcpmanager.go` | the **manager**: one client per server, the lazy start, the restart of a crashed child, the tool-list poll, the teardown on the snapshot swap | the naming and the tiers — those belong to the provider |
 | `agentkit/build/tools.go` | the **registry**: `toolProvider`, `defaultToolRegistry`, the reserved names | the MCP specifics — it knows only the interface (§1.2) |
 | `agentkit/build/policy.go` | the **tier lookup**: `Policy.TierOf`, `Table.Blocked` | which file a tool came from — it sees names only |
+| `agentkit/build/mcpstatus.go` | the **projection**: the manager's state, the provider's naming, the boundary's verdict — one row per server (§11.2) | any decision of its own — it reads, it does not evaluate |
 
 ★ **The direction is one-way**: `spec` → `build`. The declaration layer never imports
 the assembly layer, and the assembly layer never walks the config directory itself.
@@ -937,6 +947,7 @@ the assembly layer, and the assembly layer never walks the config directory itse
 | `mcpTool` | `agentkit/build/mcptools.go` | one tool: the eino tool plus the server it belongs to |
 | `serialTool` | `agentkit/build/mcptools.go` | the wrapper that serializes the calls of one stdio server (§6.5) |
 | `build.Policy` | `agentkit/build/policy.go` | the assembled table: name → tier. **Unchanged in shape** — only where the entries come from changes (§7.3) |
+| `MCPServerState` | `agentkit/build/mcpstatus.go` | one server's row: the name, the transport, the state, the error, the tools |
 
 ### 9.3 Where each piece of the design lands
 
@@ -953,6 +964,8 @@ the assembly layer, and the assembly layer never walks the config directory itse
 | the servers a run touched (§7.4) | `agentkit/run/runrow.go` — the run's row names them |
 | the example and the editor's template (§5.6) | `agentkit/spec/write.go` (`spec.Template`) and `initcfg/templates/` |
 | which servers an agent loads (§5.3) | `agentkit/spec/decl` (the field) → `agentkit/build/mcpmanager.go` (the start) |
+| the agent's narrowing (§11.3) | `agentkit/build/policy.go` — the table's denied namespace prefixes |
+| the `/mcps` view (§11.2) | `agentkit/build/mcpstatus.go` — the manager's state, the provider's naming, and the boundary's verdict, in one projection |
 
 ★ **One function does three things**: the namespace, the skip-and-warn, and the tier
 mapping all live in `mcpToolProvider.Provide`, because they all need the same two
@@ -982,6 +995,15 @@ through.
 | 12 | `agentkit/build/mcpmanager.go` | the manager: one client per server, the lazy start **of the servers that agent asked for** (§5.3), the restart of a crashed child, the tool-list poll that bumps the generation, and the teardown on the snapshot swap (§6.6) |
 | 13 | `agentkit/run/runrow.go` | the run's row records which MCP servers the run touched (§7.4) |
 | 14 | `initcfg/templates/` and `spec.Template` | the `mcps/example.yaml.disabled` example, and the editor's template for a new `mcps/` file — the editor's manifest is filled per category, so a new category gets its scaffold for free (§5.6) |
+| 15 | `api/commands.go` | the `mcps` action command and `commandActionOpenMCPs` (§11.1) |
+| 16 | `api/v2_mcps.go` | `GET /v2/mcps` — the view (§11.4) |
+| 17 | `api/v2_introspect.go` | the `MCPSource` interface and `SetMCPSource`: the API layer asks the builder, it does not read the manager (§11.2) |
+| 18 | `agentkit/build/mcpstatus.go` | `Builder.MCPServers(agentID)` — the projection of the manager's state (§11.2) |
+| 19 | `agentkit/build/policy.go` | the agent's `mcps:` list in the table: the denied namespace prefixes, and the reason that goes with them (§11.3) |
+| 20 | `main.go` | the wiring, next to `SetToolsSource` (`main.go:271`) (§11.2) |
+| 21 | `web/src/lib/api.ts` | the `open_mcps` action and `listMCPServers` (§11.5) |
+| 22 | `web/src/components/mcp-panel.tsx` | the panel (§11.5) |
+| 23 | `web/src/components/composer.tsx` | the action case that opens the panel (§11.5) |
 
 ### 10.2 The tests
 
@@ -1012,6 +1034,18 @@ through.
 | Tier | the file's `allows:` is written in the server's own vocabulary and reaches the gate under the composed name |
 | Servers | an agent that does not list a server in `mcps:` does not get it, and the server is never started |
 | Servers | an absent `mcps:` means every configured server, `[]` means none |
+| Command | `/mcps` is an action, and it never reaches the model as a prompt |
+| Command | the panel asks the manager, and the manager starts the servers the agent uses (§11.2) |
+| View | the agent parameter is optional, and an unknown agent is a 404 |
+| View | a server that is up reports the tools it offered, and the tier the gate would use |
+| View | an unreachable server reports the error and its last listing |
+| View | a server the agent does not use is `unused`, not missing |
+| View | the tool rows are the verdicts the agents view reports, not a second evaluation |
+| Narrowing | the agent's `mcps:` list removes the other servers' tools from that agent's run |
+| Narrowing | the table denies the namespace **prefix**, and `mcp__github__` does not reach `mcp__github_x__` |
+| Narrowing | a server no agent lists is never started |
+| Panel | the panel shows the server's own name next to the exposed name |
+| Panel | the empty state says that no server is configured |
 
 ### 10.3 The documentation
 
@@ -1020,8 +1054,192 @@ through.
 | `docs/developer-manual.md` | the "adding a tool" recipe gains the MCP provider; the "adding a partition" recipe gains the `mcps/` case |
 | `docs/user-manual.md` | how to configure a server, and what the names in the interface look like |
 | `docs/architecture.md` | the tool assembly path gains the MCP provider |
+| `docs/user-manual.md` | how to configure a server, what the names in the interface look like, and what the `/mcps` command shows (§11.5) |
 
-## 11. What is not in this design
+## 11. The `/mcps` command: the MCP servers in the interface
+
+★ The interface has to answer a question the log cannot: **which MCP servers does this
+agent have, are they up, and what will they cost me when they run?** The manager knows
+all three. The panel must not compute a verdict of its own.
+
+### 11.1 It is an action, not a prompt
+
+`/mcps` is registered in the server's command table (`api/commands.go:46`) as an
+**action**:
+
+```go
+{
+    Name: "mcps", Description: "Show the MCP servers of this agent",
+    Kind: commandKindAction, Action: commandActionOpenMCPs,
+},
+```
+
+★ **An action, not a prompt**, for the reason `/compact` is one (`api/commands.go:56`):
+a prompt would ask the **model** to describe the servers, and the model's answer would
+be a second, lossy truth about a fact the **runtime** holds. The status is read, not
+generated.
+
+★ The action opens a panel; it does not write a message into the transcript. A status
+readout is not a turn, and a `/mcps` in the middle of a dialogue would read as if the
+agent had said something.
+
+### 11.2 The rule
+
+> **`/mcps` asks the manager what this agent would get from its servers.**
+
+One sentence, and every row of the panel follows from it:
+
+| The question | The answer comes from |
+|---|---|
+| is the server up? | the manager's client (§6.6) |
+| what did it offer? | the manager's listing (§6.6) |
+| what is the tool called? | the provider's naming function (§9.3) |
+| will it ask me? | `Policy.TierOf` — the gate's own lookup (§1.3) |
+| can this agent reach it? | the agent's table (§11.3) |
+
+★ **The panel derives nothing.** Every value it shows is one the runtime already holds.
+A panel that re-decides anything becomes a second truth, and the first thing that
+breaks is the tier: the panel would say `ask` while the gate says `allow`.
+
+★ **The tool rows are the verdicts the agents view already reports.** The per-tool
+verdict is computed by the same function (`agentkit/build/introspect.go:111`), over the
+same boundary, so `/mcps` and `/v2/agents/<id>` cannot report two different tiers for
+one tool. ★ The only difference is the **name universe**: the agents view walks the
+observed tools, the panel walks the manager's listing — so a server that is down still
+shows what it offered.
+
+★ **Asking starts the servers.** The manager starts a server when it is asked for, and
+the panel asks. So `/mcps` before the first turn starts the servers **this agent** uses —
+the same start the first turn would do for this agent, and no more. ★ The alternative (a
+strictly read-only panel that reports "not started") cannot answer the question the user
+typed the command for: "is my server broken?" — and the answer would be "run a turn and
+find out".
+
+### 11.3 The per-agent narrowing, and where it lands
+
+★ §5.3 says the agent's `mcps:` list decides who gets a server, and §6.6 says a server
+no agent lists is never started. Neither says **where** the narrowing happens, and the
+answer is not free: the tool set is **one set for the whole snapshot**
+(`agentkit/build/snapshot.go:40-45` — `buildHeavy` runs under a `sync.Once`), and every
+agent shares it.
+
+⇒ **The narrowing happens in the agent's table**, exactly where `disabled_tools` already
+narrows the tools (`agentkit/build/gate.go:33` — `Table.Filter` drops the tools from
+`runCtx.Tools` before the agent runs, so the model never sees them).
+
+The table gets the agent's server list, and a server the agent does not use is denied
+**by its namespace prefix**:
+
+| The agent's `mcps:` | The table denies |
+|---|---|
+| absent | nothing — every configured server |
+| `[github]` | the prefix of every configured server except `github` |
+| `[]` | the prefix of every configured server |
+
+★ **The prefix, not the parsed name.** §3.1 says the composed name is never split back
+into its two halves; the table matches `mcp__<server>__` as a **prefix string** it
+already knows from the configuration. ★ And a server name may not contain a run of
+underscores (§3.1), so `mcp__github__` cannot reach `mcp__github_x__`.
+
+★ **The start is the union.** The snapshot is shared, so the manager starts the servers
+that **some** agent lists: a server no agent lists is never started, and a server only
+`task` lists is started — but `main` cannot reach its tools. ★ The alternative (a tool
+set per agent) would mean rebuilding the tool list for every agent, and the tool list
+is what the snapshot freezes (§1.1).
+
+### 11.4 The endpoint
+
+`GET /v2/mcps?agent=<agentId>` — `agent` is optional, and absent means the config's
+default agent.
+
+★ The endpoint is **new**, not an extension of `/v2/agents`: the agents view is a
+**configuration** view (it is built from the config, `api/v2_introspect.go:183`), and
+the MCP status is **runtime** state — it changes when a child process dies, and it must
+not be cached for the tab's lifetime the way the agents list is
+(`web/src/lib/agent-info.ts:48`).
+
+```json
+{
+  "agent": "main",
+  "servers": [
+    {
+      "name": "github",
+      "transport": "stdio",
+      "status": "ready",
+      "error": "",
+      "tools": [
+        {
+          "name": "read_issue",
+          "exposedName": "mcp__github__read_issue",
+          "tier": "ask",
+          "status": "available",
+          "reason": ""
+        }
+      ]
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `servers[].status` | `ready` — the client is up; `unreachable` — the last start failed, and `error` says why; `unused` — this agent does not list the server |
+| `servers[].error` | the failure text of the last start |
+| `servers[].tools[].name` | the server's **own** name — the vocabulary of the file (§5.2) |
+| `servers[].tools[].exposedName` | the name the model sees (§3) |
+| `servers[].tools[].tier` | the gate's verdict for that name (§1.3) |
+| `servers[].tools[].status` | `available` — this agent reaches it; `skipped` — the server offered it and it was not exposed (§3.2); `blocked` — exposed, but this agent does not reach it |
+| `servers[].tools[].reason` | why it is not available: `disabled_tools`, `mcps`, `name_too_long` or `name_collision` |
+
+★ **Both vocabularies are shown.** The file says `allows: [read_issue]`; the model sees
+`mcp__github__read_issue`. A panel that shows only the exposed name leaves the user
+unable to connect a row to their own file, and a panel that shows only the own name
+hides what the model can call.
+
+★ **Every configured server appears, exactly once.** A server the agent does not use is
+`unused` — not missing. ★ A server that is absent from the list and a server the agent
+does not use look the same to the reader, and only one of them is a problem.
+
+★ **An `unused` server has no tool rows.** The panel is about **this agent's** servers,
+and the tools of a server it does not use are not its tools — listing them would put
+rows in front of the user that no call can ever reach.
+
+★ **The tools of an unreachable server are its last listing.** The manager keeps the
+last successful list (§6.6 — a crashed child is started again on the next call, and the
+list comes back with it), so the panel can say "github — unreachable — these are the
+tools it had when it was last up". The status says whether the listing is current; the
+listing says what the server offers.
+
+★ **And `available` is about the agent, not about liveness.** It means *this agent's
+table does not remove the tool* — not *the call would succeed*. A downed server's rows
+are the tools it had; whether the call would work is the server's status to say.
+
+★ **The reasons are tokens, the copy is the panel's.** `disabled_tools` and `mcps` are
+machine values, like the `code` of an error body; the English sentence that explains
+them belongs to the interface, not to the wire.
+
+### 11.5 The panel
+
+★ It is a **dialog**, like the agent picker (`web/src/components/agent-picker.tsx:68`):
+the content is a table of servers, the answer is transient, and the transcript is not
+the place for it.
+
+| Element | What it shows |
+|---|---|
+| the title | "MCP servers", and the agent they belong to |
+| one block per server | the name, the transport, the status, the error line |
+| one row per tool | the own name, the exposed name, the tier |
+| the empty state | "No MCP servers are configured" |
+
+★ The panel fetches when it opens, every time — the status is live state, and the
+tab's caches (the command table at `web/src/lib/commands.ts:9`, the agents list) are
+not the place for it. A **Refresh** button re-reads it, because the user fixes a
+server and wants to see the fix without closing the dialog.
+
+★ The agent is the session's agent (`web/src/lib/store/selectors.ts:13`), and the title
+says which one — the servers of `task` are not the servers of `main`.
+
+## 12. What is not in this design
 
 | Not covered | Why |
 |---|---|
@@ -1031,6 +1249,7 @@ through.
 | Per-tool rate limits and quotas | `policy/limits.yaml` counts things; it has no tool-name dimension |
 | A credential that is not a header | `inject` is a header injection; a key in a query parameter, a cookie or a non-HTTP protocol has to enter the sandbox instead (§8.1) |
 | A mixin that installs a host-side MCP server | a mixin is a declaration; content belongs to the workload (`sandbox-kit-design.md` §2.3) |
+| The panel as a live view | the panel reads the manager's state when it opens; it does not subscribe, and it does not retry (§11.5) |
 
 ★ Every entry in this document that describes code names a file and a line. When the
 code moves, the line moves with it — that is the contract this repository keeps for
