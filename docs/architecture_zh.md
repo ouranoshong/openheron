@@ -262,9 +262,12 @@ skills 目录下文件夹的白名单，它以 `scopedSkillBackend`（`agentkit/
 | 知识库 | `build/kb.go` | `kb_search` `kb_index` |
 | 百科 | `build/nettools.go:236` | `wikipedia` |
 
-外部工具是**文件存在即启用**（`tools/*.yaml`），不需要改代码。
+对外的网络工具是**文件存在即启用**（`tools/*.yaml`），不需要改代码。★ 文件系统中间件是
+例外 —— `fsx.New` 无条件挂载它（`agentkit/build/snapshot.go:56`），知识库则是由它的
+**corpus** 开关，而不是由文件开关。
 ★ 注意 `openheron init` **默认不写** `tools/` 下的任何文件 —— 那一整个目录要用户自己写；
-文件存在即启用，所以开一个工具是一个决定，不是一个副作用。`--tools` 会写那四个配置文件。
+配置缺失的 provider 什么都不挂，所以开一个工具是一个决定，不是一个副作用。`--tools` 会写
+那四个配置文件。
 
 ## 5. 运行循环
 

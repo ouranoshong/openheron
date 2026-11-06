@@ -232,10 +232,10 @@ form is **stronger** than a pattern: it covers the tools the server has **not of
 yet**.
 
 ★ **The global `deny` is gone too** (§6.3 of the configuration design). "Not exposed" is
-said in exactly two places now: a file's **whitelist**, which says what that file offers,
-and an agent's **`disabled_tools`**, which says what that agent does not get. The
-narrowing is the one statement left that is about a **namespace** rather than about a
-tool — "this agent gets no MCP tools" — and a prefix is what names a namespace.
+said in exactly two places now: a file's **whitelist**, which picks the ones to offer out of
+what the server has, and an agent's **`disabled_tools`**, which says what that agent does
+not get. The narrowing is the one statement left that is about a **namespace** rather than
+about a tool — "this agent gets no MCP tools" — and a prefix is what names a namespace.
 
 ### 4.1 The syntax rules
 
@@ -313,7 +313,7 @@ not to the tool.
 | `headers` | `map[string]string` | `{}` | http only: sent on every request |
 | `timeout` | `LenientDuration` | `30s` | the ceiling for connect + initialize + list tools |
 | `call_timeout` | `LenientDuration` | `60s` | the ceiling for **one tool call** (§6.5) |
-| `tools` | `[]string` | `[]` → all | ★ **the exposed set** — the server's **raw** tool names to offer (not the namespaced ones); absent = all of them |
+| `tools` | `[]string` | `[]` → all | ★ **a filter, not a switch** — the server's **raw** tool names to offer **out of the ones it has** (not the namespaced ones); absent = all of them |
 | `allows` | `[]string` | `[]` | the server's **own** tool names that run **without a nod** — ★ everything else this server offers asks, including the tools it has **not offered yet** |
 
 ★ **`command` is resolved in the sandbox's PATH, never against the project root.** The
@@ -344,14 +344,20 @@ changes *how long we wait*, not *what happens* — it must not keep the process 
 starting.
 
 ★ `tools: []` means **all**, not **none**. An empty whitelist that meant "nothing" would
-be indistinguishable from a missing key, and the file's own presence is the switch (§5.3).
+be indistinguishable from a missing key — and it is a **filter** on what the server
+offers (§5.3), not a switch.
 
-### 5.3 The file's presence is the switch
+### 5.3 The file defines the server
 
-There is no `enabled` field. A server is configured because its file exists; removing
-the file removes the server. This is the rule `tools/` already follows, and it keeps the
-switch in one place instead of splitting it between "the file is there" and "the flag
-inside it says on".
+There is no `enabled` field. A server is **defined** because its file exists; removing
+the file removes the definition. This is the rule `tools/` already follows for the tools
+whose provider reads a configuration file — ★ and it keeps **whether the server exists**
+in one place, instead of splitting it between "the file is there" and "the flag inside it
+says on".
+
+★ **The file defines the server; it does not decide what the server offers.** The tools
+a server has come from the server itself, and the file's `tools:` picks the ones worth
+offering out of them (§5.2).
 
 ★ **The file says what a server is; the agent says who gets it.** Which agents load a
 server is the agent's own `mcps:` list in its frontmatter: ★ **absent = every configured
@@ -430,11 +436,12 @@ env:
 #   A trusted server names its exceptions:
 allows: [read_issue, list_issues]
 
-# ★ The tools to offer, by the server's own names. Absent = all of them.
+# ★ The tools to offer, by the server's own names, picked out of the ones the
+#   server actually has. Absent = all of them.
 tools: [create_issue, list_issues, search_issues]
 
-# ★ To take one tool out, leave it out of the list above. The whitelist is
-#   how a file says what it offers.
+# ★ To take one tool out, leave it out of the list above. The list filters what
+#   the server offers; it never adds a tool the server does not have.
 ```
 
 #### `mcps/<server>.yaml` — a server over http
@@ -498,7 +505,7 @@ allows: [get]
 | Writer | What it writes |
 |---|---|
 | the user | the `mcps/<server>.yaml` files, by hand |
-| `openheron init` | ★ an **example** — and an example cannot be a live `.yaml`, because the file's presence is the switch (§5.3) and a live file would try to start a server that is not installed. ⇒ `mcps/example.yaml.disabled`: the shape is right there, the name says it is not a configuration yet, and renaming it is the act of enabling it |
+| `openheron init` | ★ an **example** — and an example cannot be a live `.yaml`: the file **defines** the server (§5.3), so a live one would make every agent that does not narrow its list try to start a server that is not installed. ⇒ `mcps/example.yaml.disabled`: the shape is right there, the name says it is not a configuration yet, and renaming it is the act of defining it |
 | the config editor | ★ the same template, through its "new file" dialog — the editor can write `mcps/` |
 
 ## 6. The assembly path
@@ -747,7 +754,7 @@ mistyped name stays invisible until the tool behaves differently than the file s
 
 | Where | Vocabulary | Decides |
 |---|---|---|
-| a file's `tools` / `allows` | **the file's own** names (`create_issue`) | what this file offers, and which of those need no nod |
+| a file's `tools` / `allows` | **the file's own** names (`create_issue`) | which of the server's tools to offer, and which of those need no nod |
 | an agent's `disabled_tools` | exposed names | this agent does not get these tools |
 
 ★ **The order**: the file that provides the tool first, then the agent's narrowing —
@@ -755,8 +762,8 @@ which removes the tool for that agent and nothing else.
 
 ★ **A file has no `deny` of its own**, and that is deliberate: "not exposed" is already
 the whitelist's job. ★ And there is **no global `deny` to say "never"** — the two levels
-above do not duplicate each other: the file says **what this file offers**, the agent
-says **what this agent does not get**.
+above do not duplicate each other: the file says **which of the server's tools to offer**,
+the agent says **what this agent does not get**.
 
 ★ **The assembled policy keeps its shape.** `build.Policy` and `TierOf`
 (`agentkit/build/policy.go:39`) still take a name and answer a tier; what changed is

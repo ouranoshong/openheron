@@ -138,7 +138,7 @@ func TestInitWritesIntoTheGivenDirectory(t *testing.T) {
 			t.Fatalf("%s must exist: %v", rel, err)
 		}
 	}
-	// ★ The file's presence is the switch that turns a tool on, so init does
+	// ★ A provider whose configuration is absent mounts nothing, so init does
 	//   not open an outbound channel on its own.
 	if _, err := os.Stat(filepath.Join(dir, ".openheron", "tools")); err == nil {
 		t.Fatal("tools/ must not be written unless --tools is given")

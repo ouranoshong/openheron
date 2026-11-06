@@ -143,7 +143,7 @@ Its `README.md` lists the three rules that trip people up most: an unset `${ENV}
 >   The design is in `init-design.md` (upstream).
 >
 > What it writes: `agents/main.md`, `agents/task.md`, `llm/<provider>.yaml`, `policy/permissions.yaml`, `policy/limits.yaml`, `server/config.yaml` — and, with `--tools`, the tool configurations under `tools/` (`initcmd.go:142-154`, `initcfg/initcfg.go:77-86`, `initcfg/initcfg.go:110`, `initcfg/initcfg.go:124-151`, `initcfg/initcfg.go:161-178`).
-> ★ **The `tools/` section is opt-in**: the presence of the file is the switch that turns a tool on, so `init` does not write it unless asked.
+> ★ **The `tools/` section is opt-in**: `init` does not write it unless `--tools` is given — a provider whose configuration is absent returns nothing, so writing the file is what mounts the tool (`agentkit/build/nettools.go`).
 
 ---
 
@@ -1066,7 +1066,7 @@ where the central file had to name the internal tool name `request_post` (§6.6)
 
 ★ **Why the global `deny` would go with it.** "Not exposed" is already expressible twice,
 and neither needs a central list:
-- a **file's whitelist** says what that file offers (§6.6), and
+- a **file's whitelist** picks the ones to offer out of what the provider gives (§6.6), and
 - an **agent's `disabled_tools`** says what that agent does not get (§6.2).
 
 ⇒ A third place for the same decision is one more place to keep in sync — and the
@@ -1313,11 +1313,28 @@ relative to the **config root** — `.openheron/` when it is the default one):
 ```
 
 ★ **The file's content is that tool's own configuration** (there is no outer wrapper key) —
-`http.yaml` writes `methods:` directly, not `http: { methods: … }`. **Whether the file is
-there** is the switch: there is no `enabled` field and no "write a null to turn it off" shape —
-**turning it off is deleting the file**. The loader says so itself
-(`agentkit/spec/load.go:106-118`), and an empty file is rejected with a hint that names what to
-write instead (`agentkit/spec/load.go:127-133`).
+`http.yaml` writes `methods:` directly, not `http: { methods: … }`. There is no `enabled` field
+and no "write a null to turn it off" shape.
+
+★ **The file does not decide which tools exist — the provider does.** The tool set comes
+from the code: the providers registered in `defaultToolRegistry`
+(`agentkit/build/tools.go:29`) and the filesystem tools that `fsx.New`
+(`agentkit/build/snapshot.go:56`) mounts unconditionally. ★ The file's part is the
+**parameters** and the **tier** — which of the tools run without a nod.
+
+★ Today the two coincide for three of the families: `httpRequestToolProvider`,
+`webSearchToolProvider` and `wikipediaToolProvider` return **nothing** when their
+configuration is absent (`agentkit/build/nettools.go`: `if cfg == nil { return nil, nil }`),
+so for them "the file is there" happens to be the switch. ★ That is the **provider's**
+decision, not something the file's shape implies — and the filesystem tools show the
+other case: they are **always** there, so the file proposed for them below
+(`tools/filesystem.yaml`) tunes only their tiers. The loader's own rule — the file name
+is a whitelist, an unknown name is a startup error (`agentkit/spec/load.go:141-167`) —
+is about **which files are read**, not about which tools exist.
+
+★ An empty file is rejected with a hint that names what to write instead
+(`agentkit/spec/load.go:127-135`): the content **is** the tool's configuration, so "there
+is no configuration" is the useful thing to say.
 
 ★ **It takes part in hot reload**: change a tool's timeout, swap a search backend, point the
 knowledge base at another corpus — written down, **it takes effect on the next turn**, without
@@ -1368,7 +1385,7 @@ thing everywhere:
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `tools` | `[]string` | all of them | **the exposed set** — the **raw** names (this file's own vocabulary, *not* the exposed ones) that this file offers. Absent = all of them |
+| `tools` | `[]string` | all of them | ★ **a filter, not a switch** — the **raw** names (this file's own vocabulary, *not* the exposed ones) to offer **out of the tools the provider gives**. Absent = all of them |
 | `allows` | `[]string` | the code's list for these tools | the exposed ones that run **without a nod** — **in this file's vocabulary** |
 
 ★ **The default is `ask`, and `allows:` is the exception.** Every tool asks first unless
@@ -1578,14 +1595,14 @@ So the rules of this family are (the implementation is in `agentkit/build/nettoo
 
 | Rule | Why |
 |---|---|
-| **off by default** | with nothing configured not one is mounted — mounting a `web_search` that never finds anything is worse than not mounting it. The switch is "**whether that file is there**", there is no `enabled` field ✅ |
+| **off by default** | with nothing configured not one is mounted — mounting a `web_search` that never finds anything is worse than not mounting it. For this family the switch is "**whether that file is there**", there is no `enabled` field ✅ |
 | **the public network only** | for the HTTP tool the URL is the model's. An HTTP tool that can reach `127.0.0.1` = the model can read this machine's configuration, the session state, the cloud metadata service (`169.254.169.254`) |
 | **the output has a length cap** (20000 bytes) | a 10MB page blows this turn up — the symptom is "the model suddenly starts talking nonsense", not an error |
 | **write methods have to be named explicitly** | POST/PUT/DELETE can change the state of the outside world, and the model does not need a reason to invent a POST |
 
 Each provider mounts nothing when its file is absent
-(`agentkit/build/nettools.go:127-131`, `agentkit/build/nettools.go:195-199`,
-`agentkit/build/nettools.go:241-245`), and the cap is `defaultToolOutputBytes`
+(`agentkit/build/nettools.go:129-131`, `agentkit/build/nettools.go:197-199`,
+`agentkit/build/nettools.go:243-245`), and the cap is `defaultToolOutputBytes`
 (`agentkit/build/nettools.go:26`).
 
 "The public network only" is decided **at the moment of dialing**, and it connects to **the IP it
@@ -1612,9 +1629,11 @@ thing twice).
 
 | Who decides | What it governs |
 |---|---|
-| the file in `tools/` | **whether the capability is on** (the file is not there = the tool does not exist), **which of its tools are offered** (the whitelist), **and which of those run without a nod** (`allows:`) |
+| ★ **the provider** (`defaultToolRegistry`, `fsx.New`) | ★ **the tool set itself** — which tools exist at all |
+| the file in `tools/` | the **parameters** of those tools, and **which of them run without a nod** (`allows:`). ★ For MCP it also carries the server's definition — and `tools:` picks the ones to offer out of what the server offers |
 | `policy/permissions.yaml` | ★ **gone in the proposal** — there is no global boundary any more (§6.3) |
-| each agent's `disabled_tools` | **narrowing**: this one agent does not use this tool (the inner layer, it can control that) |
+| each agent's `mcps:` | **which servers this agent loads** (§6.2) |
+| each agent's `disabled_tools` | **narrowing**: this one agent does not get these tools at all (the inner layer, it can control that) |
 
 ★ A tool's tier is therefore read from **two** places, and the order is fixed: the
 file that provides the tool, and then the agent's `disabled_tools` — which removes the
@@ -1667,7 +1686,7 @@ not narrowed its list gets it.
 | | `headers` | `map[string]string` | `{}` | http only: sent on every request |
 | | `timeout` | `LenientDuration` | `30s` | the ceiling for connect + initialize + list tools |
 | | `call_timeout` | `LenientDuration` | `60s` | the ceiling for **one tool call** — ★ without it, a server that never answers holds the call lock and every other call of that server queues behind it |
-| | `tools` | `[]string` | `[]` → all | ★ **the exposed set** — the server's **raw** tool names to offer (not the namespaced ones); absent = all of them |
+| | `tools` | `[]string` | `[]` → all | ★ **a filter, not a switch** — the server's **raw** tool names to offer **out of the ones it has** (not the namespaced ones); absent = all of them |
 | | `allows` | `[]string` | `[]` | the server's **own** tool names that run **without a nod** — ★ everything else this server offers asks, including the tools it has **not offered yet** |
 
 ★ `timeout` is a **lenient** duration: a wrong value degrades to the default and is
@@ -1704,10 +1723,15 @@ rule of its own: **only MCP tools may use the `mcp__` prefix**.
 ★ **The composed name is never parsed back** — the policy layer matches whole names and
 prefixes only, so the tool segment can keep its original case and characters.
 
-#### "The file is there" is the switch
+#### The file defines the server
 
-There is no `enabled` field. Deleting the file deletes the server — the same rule as
-§6.6, the switch lives in one place only.
+There is no `enabled` field. A server is **defined** because its file exists; removing
+the file removes the definition. ★ **Whether the server exists** lives in one place
+only — not split between "the file is there" and "the flag inside it says on".
+
+★ **The file defines the server; it does not decide what the server offers.** The tools
+a server has come from the server itself, and the file's `tools:` picks the ones worth
+offering out of them (§6.7's key table).
 
 #### The junction with the policy layer
 

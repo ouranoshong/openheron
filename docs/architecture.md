@@ -292,11 +292,14 @@ When a call is denied, the tool returns **a denial message** (with an optional r
 | Knowledge base | `build/kb.go` | `kb_search` `kb_index` |
 | Encyclopedia | `build/nettools.go:236` | `wikipedia` |
 
-External tools are **enabled by the presence of the file** (`tools/*.yaml`); no code
-change is needed.
+The external network tools are **enabled by the presence of the file** (`tools/*.yaml`);
+no code change is needed. ★ The filesystem middleware is the exception — `fsx.New`
+mounts it unconditionally (`agentkit/build/snapshot.go:56`), and the knowledge base is
+switched by its **corpus**, not by its file.
 ★ Note that `openheron init` **writes nothing** under `tools/` by default — that whole
-directory is yours to write, and the file's presence is the switch, so turning a tool
-on is a decision, not a side effect. `--tools` writes the four configuration files.
+directory is yours to write, and a provider without a configuration mounts nothing, so
+turning a tool on is a decision, not a side effect. `--tools` writes the four
+configuration files.
 
 ## 5. The run loop
 

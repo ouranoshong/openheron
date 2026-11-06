@@ -365,6 +365,9 @@ recognised today:
 | `wikipedia.yaml` | Encyclopedia lookup |
 | `kb.yaml` | The knowledge base (see §7) |
 
+★ The knowledge base is the one exception: its file only holds the settings — it is
+switched on by a **non-empty `corpus`**, not by the file's presence.
+
 ★ **Only these four file names are accepted** under `tools/`; any other name is a
 **startup error** and is never silently ignored.
 

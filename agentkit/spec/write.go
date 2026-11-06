@@ -171,7 +171,8 @@ func Template(catDir string, modelRefs []string) string {
 			"#   kb.yaml           knowledge base\n" +
 			"#\n" +
 			"# ★ The content of the file IS **that tool's own configuration** (no outer wrapper key).\n" +
-			"#   Whether the file exists IS the switch — turning a tool off = deleting that file.\n" +
+			"#   A provider whose configuration is absent mounts nothing, so for these tools\n" +
+			"#   the file's presence IS the switch — turning a tool off = deleting that file.\n" +
 			"#\n" +
 			"# ★ tools/ is hot-reloaded: the change takes effect on the next turn, no process restart.\n"
 	default:
@@ -200,7 +201,7 @@ func ToolTemplates() map[string]string {
 			"language: zh\n" +
 			"timeout: 15s\n" +
 			"base_url: \"\"\n",
-		DirTools + "/kb.yaml": "# Knowledge base. Writing this file enables it.\n" +
+		DirTools + "/kb.yaml": "# Knowledge base. The file holds its settings; the corpus turns it on.\n" +
 			"#\n" +
 			"# ★ corpus is the **corpus directory**, relative to the project root. Empty string = knowledge base off.\n" +
 			"#   It lives and dies with the index: change the directory without rebuilding the index and it will confidently return unrelated answers.\n" +

@@ -32,9 +32,10 @@ type Options struct {
 	NoPolicy bool
 	// Tools writes the tool configurations under tools/.
 	//
-	// ★ The file's presence is the switch that turns a tool on, so this is
-	//   opt-in: a minimal runnable configuration should not open an outbound
-	//   channel on its own.
+	// ★ A provider whose configuration is absent mounts nothing, so writing
+	//   the file is what turns the tool on — which makes this opt-in: a
+	//   minimal runnable configuration should not open an outbound channel
+	//   on its own.
 	Tools bool
 	Force bool
 }
@@ -153,7 +154,7 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 
 	// ── tools ───────────────────────────────────────────────────────────
 	//
-	// ★ The file's presence is the switch that turns a tool on, so init does
+	// ★ A provider whose configuration is absent mounts nothing, so init does
 	//   not write them on its own — which tools exist is the user's call.
 	if !opts.Tools {
 		p.Notes = append(p.Notes, "tools/ was skipped (--tools writes the tool configurations)")

@@ -171,7 +171,8 @@ cp -r .openheron-example/{agents,llm,policy,skills} /your/project/.openheron/
 > `policy/limits.yaml`、`server/config.yaml` —— 加上 `--tools` 时才写 `tools/` 下的工具配置
 > （`initcmd.go:142-154`、`initcfg/initcfg.go:77-86`、`initcfg/initcfg.go:110`、
 > `initcfg/initcfg.go:124-151`、`initcfg/initcfg.go:161-178`）。
-> ★ **`tools/` 这一段是可选的**：文件的存在就是打开某个工具的开关，所以 `init` 不会主动写它。
+> ★ **`tools/` 这一段是可选的**：没有 `--tools` 时 `init` 不写它 —— 配置缺失的 provider 返回空，
+> 所以写下这个文件才是把工具挂上去的那一步（`agentkit/build/nettools.go`）。
 
 ---
 
@@ -1034,7 +1035,7 @@ deny:  []
 
 ★ **为什么全局 `deny` 跟着一起走。** 「不被暴露」这件事已经能表达两遍，而两处都不需要中心
 清单：
-- **文件的清单**说这个文件提供什么（§6.6），以及
+- **文件的清单**从 provider 给的里面挑要暴露的（§6.6），以及
 - **agent 的 `disabled_tools`** 说这个 agent 拿不到什么（§6.2）。
 
 ⇒ 同一个决定的第三处，就是多一处要同步的地方 —— 而中心那处是三者里最糟的一处：只有它必须
@@ -1255,9 +1256,21 @@ skills are not enabled
 ```
 
 ★ **文件的内容就是那个工具自己的配置**（没有外层包装键）—— `http.yaml` 里直接写 `methods:`，不是
-`http: { methods: … }`。「**文件在不在**」就是开关：没有 `enabled` 字段，也没有「写个 null 关掉」
-这种形态 —— **关它就是删文件**。加载器自己就是这么说的（`agentkit/spec/load.go:106-118`），空文件
-会被拒掉，并给出一条提示告诉你该写什么（`agentkit/spec/load.go:127-133`）。
+`http: { methods: … }`。没有 `enabled` 字段，也没有「写个 null 关掉」这种形态。
+
+★ **文件不决定哪些工具存在 —— 决定的是 provider。** 工具集来自代码：`defaultToolRegistry` 里注册的
+那些 provider（`agentkit/build/tools.go:29`），以及 `fsx.New`（`agentkit/build/snapshot.go:56`）
+无条件挂载的文件系统工具。★ 文件负责的是**参数**和**档位** —— 哪些工具不用点头。
+
+★ 今天这两件事在三个族上恰好重合：`httpRequestToolProvider`、`webSearchToolProvider` 与
+`wikipediaToolProvider` 在配置缺失时返回**空**（`agentkit/build/nettools.go`：
+`if cfg == nil { return nil, nil }`），所以对它们来说「文件在不在」碰巧成了开关。★ 那是 **provider
+的决定**，不是文件形状蕴含的 —— 而文件系统工具是另一种情况：它们**一直都在**，于是下面为它们
+提议的那个文件（`tools/filesystem.yaml`）只调它们的档位。加载器自己的规矩 —— 文件名是白名单，
+未知文件名是启动错误（`agentkit/spec/load.go:141-167`）—— 说的是**读哪些文件**，不是哪些工具存在。
+
+★ 空文件会被拒绝，并给出一条提示、告诉用户该写什么（`agentkit/spec/load.go:127-135`）：文件的内容
+**就是**这个工具的配置，所以「这里没有配置」才是用户用得上的那句话。
 
 ★ **它进热更新**：改一个工具的超时、换一个搜索后端、给知识库换个语料目录，写完**下一轮就生效**，
 不必重启进程。tools 分区带着 `hot: true`（`agentkit/spec/config.go:61-65`）。这正是它从
@@ -1301,7 +1314,7 @@ skills are not enabled
 
 | 键 | 类型 | 缺省 | 含义 |
 |---|---|---|---|
-| `tools` | `[]string` | 全部 | ★ **暴露集合** —— 这个文件要提供的那些名字，用**原始**名字写（这个文件自己的词汇，**不是**暴露出来的那些名字）。不写 = 全部 |
+| `tools` | `[]string` | 全部 | ★ **过滤器，不是开关** —— 要提供的那些**原始**名字（这个文件自己的词汇，**不是**暴露出来的那些名字），**从 provider 给出的那些工具里挑**。不写 = 全部 |
 | `allows` | `[]string` | 这些工具在代码里那份清单 | 被暴露的那些里**不用点头**的 —— **用这个文件自己的词汇** |
 
 ★ **缺省是 `ask`，而 `allows:` 是例外。** 除非有别的东西说话，否则每个工具都要先点头。
@@ -1479,13 +1492,13 @@ wikipedia.yaml and kb.yaml`）—— 写进去一个永远不生效的段落，�
 
 | 规矩 | 为什么 |
 |---|---|
-| **默认全关** | 没配就一个都不挂 —— 挂一个永远搜不到东西的 `web_search` 比不挂更糟。开关是「**那个文件在不在**」，没有 `enabled` 字段 ✅ |
+| **默认全关** | 没配就一个都不挂 —— 挂一个永远搜不到东西的 `web_search` 比不挂更糟。就这一族而言，开关是「**那个文件在不在**」，没有 `enabled` 字段 ✅ |
 | **只连公网** | 对 HTTP 工具来说 URL 是模型给的。能访问 `127.0.0.1` 的 HTTP 工具 = 模型能自己读本机配置、会话状态、云上元数据服务（`169.254.169.254`） |
 | **输出有长度上限**（20000 字节） | 一个 10MB 的页面会把这一轮直接撑爆 —— 表现是「模型突然开始胡说」，不是报错 |
 | **写方法要显式点名** | POST/PUT/DELETE 能改外部世界的状态，而模型不需要理由就能编出一个 POST |
 
-文件不在时，每个 provider 都不挂任何工具（`agentkit/build/nettools.go:127-131`、
-`agentkit/build/nettools.go:195-199`、`agentkit/build/nettools.go:241-245`），上限是
+文件不在时，每个 provider 都不挂任何工具（`agentkit/build/nettools.go:129-131`、
+`agentkit/build/nettools.go:197-199`、`agentkit/build/nettools.go:243-245`），上限是
 `defaultToolOutputBytes`（`agentkit/build/nettools.go:26`）。
 
 「只连公网」是在**拨号那一刻**解析并判的，且连到**刚判过的那个 IP** ——
@@ -1508,9 +1521,11 @@ server 是 openheron 的**子进程** —— 它能写文件、能联网，「�
 
 | 谁来定 | 管什么 |
 |---|---|
-| `tools/` 里的文件 | **开不开**这个能力（文件不在 = 工具根本不存在）、**它提供的那一套里暴露哪些**（清单）、**以及其中哪些不用点头**（`allows:`） |
+| ★ **provider**（`defaultToolRegistry`、`fsx.New`） | ★ **工具集本身** —— 到底哪些工具存在 |
+| `tools/` 里的文件 | 那些工具的**参数**，以及**其中哪些不用点头**（`allows:`）。★ 对 MCP 它还承载 server 的定义 —— `tools:` 从 server 提供的工具里挑要暴露的 |
 | `policy/permissions.yaml` | ★ **提案里没了** —— 不再有全局边界了（§6.3） |
-| 每个 agent 的 `disabled_tools` | **细粒度收窄**：某一个 agent 不用这个工具（内层，它管得住） |
+| 每个 agent 的 `mcps:` | **这个 agent 加载哪些 server**（§6.2） |
+| 每个 agent 的 `disabled_tools` | **收窄**：这个 agent 干脆不拿这些工具（内层，它自己能控制） |
 
 ★ 所以一个工具的档位是从**两处**读的，顺序是固定的：先是提供这个工具的那个文件，然后是
 agent 的 `disabled_tools` —— 它只为那个 agent 摘掉这个工具，仅此而已。
@@ -1557,7 +1572,7 @@ MCP 服务器的配置。**一个 server 一个文件**：
 | | `headers` | `map[string]string` | `{}` | http 专用：每次请求都带的头 |
 | | `timeout` | `LenientDuration` | `30s` | 连接 + 初始化 + 取工具清单的上限 |
 | | `call_timeout` | `LenientDuration` | `60s` | **一次工具调用**的上限 —— ★ 没有它，一个永不回答的服务器会占着调用锁，同 server 的其它调用全排在它后面 |
-| | `tools` | `[]string` | `[]`→全部 | ★ **暴露集合** —— 这个 server 要提供的那些**原始**工具名（不是带命名空间的那个）；不写 = 全部 |
+| | `tools` | `[]string` | `[]`→全部 | ★ **过滤器，不是开关** —— 这个 server 要提供的那些**原始**工具名，**从它自己有的那些里挑**（不是带命名空间的那个）；不写 = 全部 |
 | | `allows` | `[]string` | `[]` | 这个 server **自己的**工具名里**不用点头**的那些 —— ★ 这个 server 提供的其余一切都要点头，**包括它还没提供的那些工具** |
 
 ★ `timeout` 是**宽松**时长：写错退回默认并记 `deferred`，
@@ -1592,10 +1607,13 @@ mcp__<server>__<tool>
 ★ **合成名永远不被读回来** —— 策略层只做整名与前缀匹配，
   所以工具段能保留原始大小写与字符。
 
-#### 「文件在不在」就是开关
+#### 文件定义 server
 
-没有 `enabled` 字段。删掉文件就是删掉这个 server —— 与 §6.6 同一条规则，
-开关只待在一个地方。
+没有 `enabled` 字段。server 是**因为文件存在**而被**定义**的，删掉文件就是删掉定义。★ **server 存不存在**
+只待在一个地方，不是拆成「文件在不在」和「里面的标志说开」两处。
+
+★ **文件定义 server；它不决定 server 提供什么。** server 有哪些工具来自 server 自己，文件的 `tools:`
+只是从里面挑值得暴露的（§6.7 的键表）。
 
 #### 与策略层的衔接
 

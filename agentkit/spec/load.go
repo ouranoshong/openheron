@@ -105,11 +105,13 @@ func (c *Config) loadServer(file string, data []byte) error {
 
 // toolHints name what each tools/ file must carry.
 //
-// ★ The file's existence is the switch that turns the tool on, and its
+// ★ The file's content is the tool's own configuration. ★ The file does not
 //
-//	content is the tool's own configuration. So an empty file is "the tool
-//	is on, with nothing configured" — which is never what the user meant,
-//	and the hint says what to write instead.
+//	decide which tools exist — the provider does: a provider whose
+//	configuration is absent mounts nothing, and the filesystem tools are
+//	mounted unconditionally (build/snapshot.go). So an empty file is "the
+//	tool is on, with nothing configured" — which is never what the user
+//	meant, and the hint says what to write instead.
 var toolHints = map[string]string{
 	"http":       "the HTTP tool's configuration (methods, headers, timeout)",
 	"web_search": "the web search configuration (provider, max_results, timeout)",

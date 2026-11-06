@@ -149,6 +149,6 @@ func printInitUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Written: agents/main.md, agents/task.md, llm/<provider>.yaml,")
 	fmt.Fprintln(stdout, "        policy/permissions.yaml, policy/limits.yaml, server/config.yaml.")
-	fmt.Fprintln(stdout, "--tools adds the tool configurations under tools/ — a file's presence is")
-	fmt.Fprintln(stdout, "the switch that turns a tool on, so that is opt-in.")
+	fmt.Fprintln(stdout, "--tools adds the tool configurations under tools/ — a provider without")
+	fmt.Fprintln(stdout, "a configuration mounts nothing, so that is opt-in.")
 }

@@ -220,9 +220,9 @@ mcp__<server>__<tool>
   那种写法比模式**更强**：它覆盖服务器**还没提供**的工具。
 
 ★ **全局 `deny` 也没了**（配置设计 §6.3）。现在「不被暴露」恰好在两个地方说：
-  一个文件的**白名单**，说这个文件提供什么；以及某个 agent 的 **`disabled_tools`**，
-  说这个 agent 拿不到什么。收窄是唯一一条**关于命名空间**而不是关于工具的陈述 ——
-  「这个 agent 不要任何 MCP 工具」—— 而前缀正是给一个命名空间起名的写法。
+  一个文件的**白名单**，它从 server **实际有的**工具里挑出要暴露的那些；以及某个 agent 的
+  **`disabled_tools`**，它说这个 agent 拿不到什么。收窄是唯一一条**关于命名空间**而不是关于
+  工具的陈述 —— 「这个 agent 不要任何 MCP 工具」—— 而前缀正是给一个命名空间起名的写法。
 
 ### 4.1 语法规则
 
@@ -294,7 +294,7 @@ MCP 服务器按服务器一个文件来配：
 | `headers` | `map[string]string` | `{}` | 仅 http：每次请求都带的头 |
 | `timeout` | `LenientDuration` | `30s` | 连接 + 初始化 + 取工具清单的上限 |
 | `call_timeout` | `LenientDuration` | `60s` | **一次工具调用**的上限（§6.5） |
-| `tools` | `[]string` | `[]`→全部 | ★ **暴露集合** —— 这个 server 要提供的那些**原始**工具名（不是带命名空间的那个）；不写 = 全部 |
+| `tools` | `[]string` | `[]`→全部 | ★ **过滤器，不是开关** —— 从这个 server **自己有的**工具里挑出来要提供的那些**原始**工具名（不是带命名空间的那个）；不写 = 全部 |
 | `allows` | `[]string` | `[]` | 这个 server **自己的**工具名里，哪些**不用点头**就跑 —— ★ 这个 server 提供的其余一切都要先点头，包括那些它**还没提供**的工具 |
 
 ★ **`command` 在沙箱的 PATH 里解析，绝不相对项目根。** 工作区不许决定跑什么：
@@ -323,14 +323,18 @@ MCP 服务器按服务器一个文件来配：
   不是「会发生什么」—— 它不该让进程起不来。
 
 ★ `tools: []` 的意思是**全部**，不是**一个都没有**。
-  一个表示「什么也没有」的空白名单会与「键缺失」分不出来，
-  而这个分区的开关就是文件本身在不在（§5.3）。
+  一个表示「什么也没有」的空白名单会与「键缺失」分不出来 —— 而它是对 server 提供什么的
+  **过滤器**（§5.3），不是开关。
 
-### 5.3 文件在不在就是开关
+### 5.3 文件定义 server
 
-没有 `enabled` 字段。服务器被配置，是因为它的文件存在；删掉文件就是删掉这个服务器。
-这条规则 `tools/` 已经在用，它让开关只待在一个地方，
-而不是一半在「文件在不在」、另一半在「文件里那个标志说开不开」。
+没有 `enabled` 字段。服务器是被**定义**的，因为它的文件存在；删掉文件就是删掉这个定义。
+这条规则 `tools/` 已经在那些 provider 会读配置文件的工具上遵守了 —— ★ 而且它让
+**server 存不存在**只待在一个地方，而不是拆成「文件在不在」和「文件里那个标志说开不开」
+两处。
+
+★ **文件定义 server；它不决定 server 提供什么。** server 有哪些工具来自 server 自己，
+文件的 `tools:` 只是从里面挑出值得暴露的（§5.2）。
 
 ★ **文件说服务器是什么；agent 说谁拿它。** 哪些 agent 加载一个服务器，
   取决于它 frontmatter 里自己的 `mcps:` 清单：★ **缺失 = 全部已配置的服务器，
@@ -400,11 +404,12 @@ env:
 #   A trusted server names its exceptions:
 allows: [read_issue, list_issues]
 
-# ★ The tools to offer, by the server's own names. Absent = all of them.
+# ★ The tools to offer, by the server's own names, picked out of the ones the
+#   server actually has. Absent = all of them.
 tools: [create_issue, list_issues, search_issues]
 
-# ★ To take one tool out, leave it out of the list above. The whitelist is
-#   how a file says what it offers.
+# ★ To take one tool out, leave it out of the list above. The list filters what
+#   the server offers; it never adds a tool the server does not have.
 ```
 
 #### `mcps/<server>.yaml` —— 一个走 http 的服务器
@@ -467,7 +472,7 @@ allows: [get]
 | 谁来写 | 写什么 |
 |---|---|
 | 用户 | 手写 `mcps/<server>.yaml` 这些文件 |
-| `openheron init` | ★ 一个**示例** —— 而示例不能是一份活的 `.yaml`，因为文件在不在就是开关（§5.3），而一份活文件会去启动一个没装的 server。⇒ `mcps/example.yaml.disabled`：形状在那儿，名字说明它还不是一份配置，改名就是启用它 |
+| `openheron init` | ★ 一个**示例** —— 而示例不能是一份活的 `.yaml`：文件**定义**了 server（§5.3），所以一份活文件会让每个没有收窄自己清单的 agent 去启动一个没装的 server。⇒ `mcps/example.yaml.disabled`：形状在那儿，名字说明它还不是一份配置，改名就是定义它 |
 | 配置编辑器 | ★ 同一份模板，走它的「新建文件」对话框 —— 编辑器**能写** `mcps/` |
 
 ## 6. 装配路径
@@ -701,7 +706,7 @@ allows: [read_issue, list_issues]
 
 | 位置 | 词儿 | 决定什么 |
 |---|---|---|
-| 某个文件的 `tools` / `allows` | **那个文件自己的**名字（`create_issue`） | 这个文件提供什么，以及哪些不用点头 |
+| 某个文件的 `tools` / `allows` | **那个文件自己的**名字（`create_issue`） | 从 server 提供的工具里暴露哪些，以及其中哪些不用点头 |
 | 某个 agent 的 `disabled_tools` | 对外的名字 | 这个 agent 拿不到这些工具 |
 
 ★ **顺序**：先提供这个工具的文件，然后是 agent 的收窄 ——
@@ -709,7 +714,7 @@ allows: [read_issue, list_issues]
 
 ★ **文件自己没有 `deny`，而这是刻意的。** 「不被暴露」本来就是清单的活。
   ★ 而且**没有全局 `deny` 来说「永不」** —— 上面那两层不是彼此重复：
-  文件说**这个文件提供什么**，agent 说**这个 agent 拿不到什么**。
+  文件说**要暴露 server 的哪些工具**，agent 说**这个 agent 拿不到什么**。
 
 ★ **装配出来的策略形状不变。** `build.Policy` 与 `TierOf`
 （`agentkit/build/policy.go:39`）仍然是收一个名字、答一个档位；变的是条目的来源：
