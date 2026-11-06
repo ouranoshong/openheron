@@ -278,10 +278,11 @@ MCP 服务器按服务器一个文件来配：
 | `transport` | `string` | `stdio` | `stdio` 或 `http`；**未知值是硬错误**，不静默退回 stdio |
 | `command` | `string` | — | 仅 stdio，**必填**：要执行的命令 |
 | `args` | `[]string` | `[]` | 仅 stdio：它的参数 |
-| `env` | `map[string]string` | `{}` | 子进程的环境；密钥写成 `${ENV}` / `@file:`，绝不内联 |
+| `env` | `map[string]string` | `{}` | **叠加**在继承来的环境之上的变量（§5.5）；取值与其他配置一样展开 |
 | `url` | `string` | — | 仅 http，**必填**：服务器地址 |
 | `headers` | `map[string]string` | `{}` | 仅 http：每次请求都带的头 |
 | `timeout` | `LenientDuration` | `30s` | 连接 + 初始化 + 取工具清单的上限 |
+| `call_timeout` | `LenientDuration` | `60s` | **一次工具调用**的上限（§6.5） |
 | `tools` | `[]string` | `[]`→全部 | 暴露出去的工具名白名单 |
 
 ★ `timeout` 是**宽松**时长：写错就退回默认并记进 `deferred`，
@@ -310,6 +311,29 @@ MCP 服务器按服务器一个文件来配：
 ★ 这意味着客户端生命周期要扛得住一次重载：快照换代时，
   stdio 的子进程被拆掉、新的被拉起来。
   一个资源无法重建的热分区，就是一个谎称自己是热的分区。
+
+### 5.5 子进程的环境
+
+★ **子进程的环境 = openheron 自己的环境，被配置里的 `env:` 覆盖同名项。**
+
+子进程是本进程的子进程，所以它从本进程的环境起步 —— 包括沙箱运行时注入到容器里的
+那些东西。
+
+★ **正是这份继承让凭据路径不需要任何配置**（§8.1）：运行时把**哨兵**放进容器里的那个
+  变量，MCP server 从那儿读到它。若要配置把每个变量都点名，用户就得把凭据的变量名写下来
+  —— 而那是 **MCP server 的事**，不是 openheron 的。
+
+`env:` 这张表是给 MCP server **除此之外**需要的变量用的：一个日志级别、一个特性开关、
+第二个它按自己名字找的令牌。取值与其他配置一样展开（`${ENV}` / `@file:`），
+而 `${ENV}` 未设**不致命** —— 与其他缺失值一样记进 `deferred`。
+
+★ **继承不是新增的暴露面。** agent 自己的工具读的是同一批东西：`read_file` 读项目，
+  `execute` 在这个环境里跑命令。一个看得见环境的 MCP server，看不见任何 agent 看不见的
+  东西。区别只在于 `execute` 出厂在 `ask` 档，而 MCP 工具未必是。
+  ⇒ 若这个不对称对你重要，就把 `mcp__*` 放进 `ask` 档（§4.4）。
+
+★ 配置里的 `env:` **不替换**继承来的环境，而是**叠在它上面**。
+  `env:` 为空的配置，产出的子进程仍然有一个完整的环境。
 
 ## 6. 装配路径
 
@@ -371,6 +395,42 @@ provider 照 §1.2 的契约写，注册在占位注释那一行（`agentkit/bui
   封顶对 MCP 工具同样适用，而实现它的位置就是组件的 `ToolCallResultHandler` ——
   那个组件 README 从没提过的钩子（§2.2）。
 
+### 6.5 一个 server 一个 client，且调用串行化
+
+★ **一个 server 一个 client。** eino-ext 那个组件包的是单个 `client.MCPClient`，
+  该 server 的所有工具共用它。一个 server 就是一条连接 —— 对 stdio 来说，是一个子进程。
+
+★ **同一个 stdio server 的调用被串行化。** 这是**正确性**决定，不是性能决定。
+  `mcp-go` 的 stdio 传输把请求直接写进子进程的 stdin：
+
+```go
+// mcp-go@v0.43.0, client/transport/stdio.go — SendRequest
+c.mu.Lock(); c.responses[idKey] = responseChan; c.mu.Unlock()
+...
+if _, err := c.stdin.Write(requestBytes); err != nil {   // ← no lock
+```
+
+`c.stdin` 是 `cmd.StdinPipe()` 给的管道。POSIX 只保证不超过 `PIPE_BUF`
+（Linux 上 4096 字节）的管道写是原子的 —— 更大的 JSON-RPC 行会**与另一次调用的行交错**，
+服务器读到的是一个坏掉的帧。
+
+★ 而 openheron 确实会并发调工具：两个会话同时跑，agent 实例也可并发复用
+  （`session-concurrency-design.md` §2.5）。两个会话打同一个 MCP server，
+  就是对同一条管道的两次并发写。
+
+⇒ **provider 给同一 server 的 stdio 工具包一把 per-server 的互斥锁**，
+  而闸门与封顶看到的正是这个包装层 —— 与 `nettools.go` 里 `cappedTool` 同一个形状。
+  这把锁是**等**，不是让第二次调用失败。代价是同一 server 内的队头阻塞，
+  而这是两种代价里较便宜的一种：另一种是每次调用开一个子进程。
+
+★ **http server 不串行化。** 每个请求彼此独立，而一个等慢 API 的 MCP 工具
+  不该把同 server 的其它工具一起堵住。串行化是**传输方式**的属性，不是 MCP 的属性。
+
+★ **调用有截止时间。** 没有截止时间的互斥锁就是一条把轮次挂死的路：
+  一个永不回答的 MCP server 会永远占着锁，同 server 的其它调用全排在它后面。
+  ⇒ `call_timeout`（LenientDuration，缺省 `60s`）给一次工具调用封顶。
+  它是宽松的，与其他只决定「等多久」的时长一样。
+
 ## 7. 闸门与档位
 
 ### 7.1 档位照旧适用
@@ -420,6 +480,69 @@ MCP 落进它有两种方式，而且这两者并不对称。
   那会让 mixin 带上内容，而内容属于 workload —— 这是 `sandbox-kit-design.md` §2.3
   划的那条边界。
 
+### 8.1 凭据路径
+
+需要授权 key 的 MCP 服务器与不需要的，是两个不同的问题 —— 而 Kit 已有的机制
+答得出大部分。
+
+#### 机制
+
+Kit 已经能在**不让密钥进沙箱**的前提下注入**模型**凭据：mixin 声明一个
+`proxyManaged: true` 的 `credential@1`，运行时把哨兵 `proxy-managed` 放进容器的变量，
+宿主持真值，而**宿主侧的代理**在出站时把它换掉。
+
+★ **替换发生在出站请求上，而代理不知道请求是谁发的。** 它匹配的是目标域名与头名。
+  所以 MCP 服务器不过是那个代理的另一个客户端：它照发令牌的样子把哨兵发出去，
+  代理再把真值换上去。
+
+```
+the host holds the real key
+  └─ sbx secret set-custom --host api.github.com --env GITHUB_TOKEN \
+       --placeholder proxy-managed --value-stdin
+        ↓
+the container holds GITHUB_TOKEN=proxy-managed
+        ↓
+the MCP server reads it and sends Authorization: Bearer proxy-managed
+        ↓
+the host proxy substitutes the real key ──► api.github.com
+```
+
+★ **`mcps/<server>.yaml` 里一个字段都不用为它写。** 哨兵注入的是**容器**，
+  而 §5.5 把环境透传下去 —— 于是 MCP server 按它自己的约定就找到了那个变量。
+  凭据的变量名是 **MCP server 的事**，openheron 不需要知道。
+
+#### mixin 要声明什么
+
+| 能力 | 装什么 |
+|---|---|
+| `network-policy@1` | 上游域名 —— 运行时会检查每个注入域名都**字面**出现在同一阶段的允许列表里，所以凭据的域名必须被点名 |
+| `credential@1` | 凭据本身：`service`、`apiKey.name`、`proxyManaged: true`，以及 `inject` 规则（域名、头名、格式） |
+| `lifecycle@1` | 可选：一个把服务器二进制装进沙箱的安装钩子 |
+
+★ **mixin 的粒度是上游，不是 MCP 服务器。** 一份凭据在（service, 阶段）上只有一个属主，
+  而环境是注入到**容器**的 —— 所以一份凭据声明就服务沙箱里所有读那个变量的服务器。
+  两个都跟 GitHub 打交道的 MCP 服务器，需要**一份**凭据 mixin 与**一次**绑定，不是两份。
+
+★ **mixin 可以把 MCP 服务器装进沙箱。** 服务器的二进制得在沙箱里，而 workload 镜像是
+  openheron 自己的 —— 它装不下每一个 MCP 服务器。mixin 把这件事声明成一个
+  `lifecycle@1` 的 **install** 钩子（哪个 registry、哪个包），它的网络规则放行那个
+  registry。mixin 本身仍然不带内容：字节是运行时去取的，不是 mixin 揣着的。
+
+★ 这与上面那段拒绝的选项不是一回事。那一个是把**宿主侧**服务器装起来，那会让 mixin
+  定义一个服务；这一个是从 mixin 点名的 registry 把**客侧**二进制取下来 ——
+  一句「取什么」的声明，由运行时去执行。
+
+#### 机制够不着的时候
+
+| 情况 | 会怎样 |
+|---|---|
+| key 放在头里 | ★ 机制覆盖它 —— `inject` 说明是哪个头、什么格式 |
+| key 放在 URL query、cookie 或非 HTTP 协议里 | ★ **表达不了**：`inject` 是头注入。真值只能进沙箱（`sbx run --env …`），此后它就是 agent 要保护的东西 |
+| 根本没有 mixin | 那个变量就是没设，服务器自己的错误（401）作为工具结果到达模型 |
+
+★ **兜底那一条是真的降级，而且应该说出来。** 落在 VM 里的 key 能被 agent 自己的工具读到，
+  而这是用户自己选的。
+
 ## 9. 改动清单
 
 下面这些都还不在树上。这是一轮后来的实现要照着走过的清单。
@@ -430,7 +553,7 @@ MCP 落进它有两种方式，而且这两者并不对称。
 |---|---|---|
 | 1 | `go.mod` | 加 `github.com/cloudwego/eino-ext/components/tool/mcp` 与 `github.com/mark3labs/mcp-go` |
 | 2 | `agentkit/spec/config.go` | `DirMCP = "mcps"` 与一条 `Categories` 条目，热更新（`hotDirList` 在 `:77` 会自动带上它） |
-| 3 | `agentkit/spec/decl/decl.go` | `MCPServerCfg` 声明结构体；命名空间常量 |
+| 3 | `agentkit/spec/decl/decl.go` | `MCPServerCfg` 声明结构体；命名空间常量；`call_timeout` |
 | 4 | `agentkit/spec/load.go` | `mcps/<server>.yaml` 的加载器，带 §3.1 与 §5.2 的文件名与字段校验 |
 | 5 | `agentkit/spec/defaults.go` | `EnabledToolNames` 加上带命名空间的 MCP 工具 |
 | 6 | `agentkit/spec/write.go` | 新建 `mcps/` 文件的脚手架 |
@@ -438,6 +561,7 @@ MCP 落进它有两种方式，而且这两者并不对称。
 | 8 | `agentkit/build/policy.go` | `TierOf` 与 `Blocked` 的前缀匹配器 |
 | 9 | `api/v2_settings.go` | `mcps/` 的可编辑分区 |
 | 10 | `agentkit/build/nettools.go` | 输出封顶，套到 MCP 批次上 |
+| 11 | `agentkit/build/mcptools.go` | 把 stdio 调用串行化的 per-server 互斥锁（§6.5），以及子进程的环境装配（§5.5） |
 
 ### 9.2 测试
 
@@ -451,6 +575,12 @@ MCP 落进它有两种方式，而且这两者并不对称。
 | 匹配 | `deny` 仍然压过 `disabled_tools` |
 | provider | 一个够不着的服务器丢掉它的工具、警告里带服务器名，其它 provider 的工具不受影响 |
 | 生命周期 | 一次热重载换掉客户端，旧的 stdio 子进程没了 |
+| 并发 | 同一个 **stdio** server 的两次并发调用被串行化 —— 第二次等第一次，且两者的请求都没有写坏 |
+| 并发 | 同一个 **http** server 的两次并发调用**不**被串行化 |
+| 并发 | 超过 `call_timeout` 的调用会返回，且那把锁被释放 |
+| 环境 | 子进程看得见 openheron 的环境，`env:` 覆盖同名项 |
+| 环境 | `env:` 里未设的 `${ENV}` 进 `deferred`，不致命 |
+| 凭据 | `credential@1` 的哨兵经继承的环境到达子进程，而配置里没有任何字段提到它 |
 
 ### 9.3 文档
 
@@ -468,6 +598,7 @@ MCP 落进它有两种方式，而且这两者并不对称。
 | 带发现、健康检查与重试的 server 注册表 | 一个服务器一个文件，够起步了；注册表是下一轮的事 |
 | MCP 的 resources、prompts 与 sampling | eino-ext 那个组件**只**暴露工具 |
 | 按工具计的速率限制与配额 | `policy/limits.yaml` 数的是数量，它没有工具名这一维 |
+| 不是放在头里的凭据 | `inject` 是头注入；放在 query、cookie 或非 HTTP 协议里的 key 只能进沙箱（§8.1） |
 | 一种安装宿主侧 MCP 服务器的 mixin | mixin 是声明；内容属于 workload（`sandbox-kit-design.md` §2.3） |
 
 ★ 这份文档里每一条描述代码的地方都点了文件名与行号。代码动了，行号跟着动 ——

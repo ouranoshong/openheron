@@ -1380,10 +1380,11 @@ MCP 服务器的配置。**一个 server 一个文件**：
 | `<server>.yaml` | `transport` | `string` | `stdio` | `stdio` \| `http`；★ **未知值硬报错**，不静默退回 stdio |
 | | `command` | `string` | — | stdio 专用，**必填**：要执行的命令 |
 | | `args` | `[]string` | `[]` | stdio 专用：它的参数 |
-| | `env` | `map[string]string` | `{}` | 子进程的环境；★ 密钥写 `${ENV}` / `@file:`，绝不内联 |
+| | `env` | `map[string]string` | `{}` | **叠加**在继承来的环境之上的变量；★ 子进程的环境就是 openheron 自己的环境，这些覆盖同名项 —— 而这份继承正是把凭据的哨兵送到服务器、而这里一个字段都不用写的原因 |
 | | `url` | `string` | — | http 专用，**必填**：服务器地址 |
 | | `headers` | `map[string]string` | `{}` | http 专用：每次请求都带的头 |
 | | `timeout` | `LenientDuration` | `30s` | 连接 + 初始化 + 取工具清单的上限 |
+| | `call_timeout` | `LenientDuration` | `60s` | **一次工具调用**的上限 —— ★ 没有它，一个永不回答的服务器会占着调用锁，同 server 的其它调用全排在它后面 |
 | | `tools` | `[]string` | `[]`→全部 | 暴露出去的工具名白名单；★ 空 = 全部（不是「一个都不挂」） |
 
 ★ `timeout` 是**宽松**时长：写错退回默认并记 `deferred`，
@@ -1444,6 +1445,16 @@ deny: [mcp__github__delete_repo]
 ★ **一个 server 连不上时**：它的工具整个不挂 + 一条警告（带 server 名、
   传输方式与错误），**不影响其它 server，也不影响进程启动**。
   静默丢掉是最糟的结果 —— 症状会是「这个功能好像不见了」。
+
+#### 凭据
+
+★ **本节没有凭据字段，而这正是要点。** MCP server 需要的 key 是**服务器自己的**事 ——
+  它知道该读哪个变量。沙箱运行时把**哨兵**注入容器的环境，
+  而子进程的环境就是本进程的环境（`docs/mcp-design.md` §5.5），
+  于是服务器自己就找到了它 —— 这里一个字都不用写。
+
+完整路径 —— 声明凭据的 mixin、换上真值的宿主侧代理、以及机制够不着的情况 ——
+见 `docs/mcp-design.md` §8.1。
 
 #### 实施状态
 

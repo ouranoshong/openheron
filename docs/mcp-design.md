@@ -293,10 +293,11 @@ not to the tool.
 | `transport` | `string` | `stdio` | `stdio` or `http`; an **unknown value is a hard error** — no silent fallback to stdio |
 | `command` | `string` | — | stdio only, **required**: the executable to run |
 | `args` | `[]string` | `[]` | stdio only: its arguments |
-| `env` | `map[string]string` | `{}` | the child's environment; secrets as `${ENV}` / `@file:`, never inline |
+| `env` | `map[string]string` | `{}` | variables **layered over** the inherited environment (§5.5); values are expanded like every other value |
 | `url` | `string` | — | http only, **required**: the server address |
 | `headers` | `map[string]string` | `{}` | http only: sent on every request |
 | `timeout` | `LenientDuration` | `30s` | the ceiling for connect + initialize + list tools |
+| `call_timeout` | `LenientDuration` | `60s` | the ceiling for **one tool call** (§6.5) |
 | `tools` | `[]string` | `[]` → all | a whitelist of tool names to expose |
 
 ★ `timeout` is a **lenient** duration: a wrong value degrades to the default and is
@@ -326,6 +327,37 @@ command or timeout should take effect on the next turn, without a restart.
 ★ This means the client lifecycle has to survive a reload: when the snapshot is
 replaced, the stdio child process is torn down and a new one is started. A hot
 partition whose resources cannot be rebuilt is a partition that lies about being hot.
+
+### 5.5 The child's environment
+
+★ **The child's environment is openheron's own environment, overlaid with the `env:`
+map.** Same name: the configuration wins.
+
+The child is a child process of this one, so it starts from the environment this
+process has — including everything the sandbox runtime injected into the container.
+
+★ **That inheritance is what makes the credential path work without configuration**
+(§8.1): the runtime puts a **sentinel** into the container's variable, and the MCP
+server reads it from there. A configuration that had to name every variable would
+force the user to write down the credential's variable name — a fact that belongs to
+the MCP server, not to openheron.
+
+The `env:` map is for the variables the MCP server needs **beyond** that: a log level,
+a feature flag, a second token the server expects under its own name. Its values go
+through the same expansion as everything else in the configuration (`${ENV}` /
+`@file:`), and an unset `${ENV}` is not fatal — it is recorded in `deferred`, like every
+other missing value.
+
+★ **Inheritance is not a new exposure.** The agent's own tools already read the same
+things: `read_file` reads the project, and `execute` runs a command in this
+environment. An MCP server that sees the environment sees nothing the agent could not
+already see. The difference is only that `execute` is in the `ask` tier by default and
+an MCP tool may not be. ⇒ If that asymmetry matters to you, put `mcp__*` in the `ask`
+tier (§4.4).
+
+★ The configuration's `env:` does not **replace** the inherited environment, it
+**layers on top** of it. A configuration with an empty `env:` still produces a child
+with a full environment.
 
 ## 6. The assembly path
 
@@ -390,6 +422,47 @@ context unfiltered. The cap applies to MCP tools too, and the component's
 `ToolCallResultHandler` is where it is implemented — the hook the component's README
 never mentions (§2.2).
 
+### 6.5 One client per server, and the calls are serialized
+
+★ **One client per server.** The eino-ext component wraps a single
+`client.MCPClient`, and every tool of that server shares it. One server is one
+connection — and, for stdio, one child process.
+
+★ **The calls to one stdio server are serialized.** This is a correctness decision,
+not a performance one. `mcp-go`'s stdio transport writes the request straight to the
+child's stdin:
+
+```go
+// mcp-go@v0.43.0, client/transport/stdio.go — SendRequest
+c.mu.Lock(); c.responses[idKey] = responseChan; c.mu.Unlock()
+...
+if _, err := c.stdin.Write(requestBytes); err != nil {   // ← no lock
+```
+
+`c.stdin` is the pipe from `cmd.StdinPipe()`. POSIX makes a pipe write atomic only up
+to `PIPE_BUF` — 4096 bytes on Linux — so a larger JSON-RPC line can be **interleaved
+with another call's line**, and the server reads a corrupted frame.
+
+★ And openheron does call tools concurrently: two sessions run at the same time, and
+an agent instance is reusable concurrently (`session-concurrency-design.md` §2.5). Two
+sessions hitting the same MCP server are two concurrent writes to the same pipe.
+
+⇒ **The provider wraps the stdio tools of one server with a per-server mutex**, and
+that wrapper is what the gate and the cap see — the same shape as `cappedTool` in
+`nettools.go`. The mutex **waits**; it does not fail the second call. The cost is
+head-of-line blocking inside one server, which is the cheaper of the two: the
+alternative is a child process per call.
+
+★ **http servers are not serialized.** Each request stands on its own, and an MCP tool
+that waits on a slow API should not block the other tools of the same server. The
+serialization is a property of the **transport**, not of MCP.
+
+★ **A call has a deadline.** A mutex without one is a way to hang a turn: an MCP
+server that never answers would hold the lock for ever, and every other call of that
+server would queue behind it. ⇒ `call_timeout` (LenientDuration, default `60s`) bounds
+one tool call. It is lenient, like every other duration that only decides *how long we
+wait*.
+
 ## 7. The gate and the tiers
 
 ### 7.1 The tiers apply unchanged
@@ -440,6 +513,76 @@ http is a mixin's business — its network rule is the thing that has to change.
 **installs** a host-side MCP server. That would make the mixin carry content, which is
 the boundary `sandbox-kit-design.md` §2.3 draws.
 
+### 8.1 The credential path
+
+An MCP server that needs an authorization key is a different problem from one that
+needs none, and the Kit's existing mechanism answers most of it.
+
+#### The mechanism
+
+The Kit already injects the **model** credential without letting it into the sandbox:
+the mixin declares a `credential@1` with `proxyManaged: true`, the runtime puts the
+sentinel `proxy-managed` into the container's variable, the host holds the real value,
+and the **host-side proxy** substitutes it on the way out.
+
+★ **The substitution happens on the outbound request, and the proxy does not know who
+sent it.** It matches on the destination domain and the header name. An MCP server is
+therefore just another client of that proxy: it sends the sentinel the way it would
+send a token, and the proxy swaps in the real value.
+
+```
+the host holds the real key
+  └─ sbx secret set-custom --host api.github.com --env GITHUB_TOKEN \
+       --placeholder proxy-managed --value-stdin
+        ↓
+the container holds GITHUB_TOKEN=proxy-managed
+        ↓
+the MCP server reads it and sends Authorization: Bearer proxy-managed
+        ↓
+the host proxy substitutes the real key ──► api.github.com
+```
+
+★ **Nothing in `mcps/<server>.yaml` has to mention the key.** The sentinel is injected
+into the **container**, and §5.5 passes the environment through — so the MCP server
+finds the variable under the name it expects. The credential's variable name is the
+**MCP server's** business, and openheron never learns it.
+
+#### What a mixin declares
+
+| Capability | What it carries |
+|---|---|
+| `network-policy@1` | the upstream domains — the runtime checks that every inject domain appears literally in the allow list for the same phase, so the credential's domain has to be named |
+| `credential@1` | the credential: `service`, `apiKey.name`, `proxyManaged: true`, and the `inject` rule (domain, header, format) |
+| `lifecycle@1` | optional: an install hook that puts the server's binary in the sandbox |
+
+★ **The mixin's granularity is the upstream, not the MCP server.** A credential has one
+owner per (service, phase), and the environment is injected into the **container** — so
+one credential declaration serves every server in that sandbox that reads the variable.
+Two MCP servers that both talk to GitHub need **one** credential mixin and **one**
+binding, not two.
+
+★ **A mixin may install the MCP server into the sandbox.** The server's binary has to
+be there, and the workload image is openheron's own — it cannot carry every MCP
+server. The mixin declares the install as a `lifecycle@1` **install** hook (which
+registry, which package), and its network rule allows that registry. The mixin still
+carries no content: the runtime fetches the bytes, the mixin does not hold them.
+
+★ This is not the option the paragraph above refuses. That one is a mixin that
+installs a **host-side** server, which would make the mixin define a service. This
+one installs a **guest-side** binary from a registry the mixin names — a declaration
+of what to fetch, executed by the runtime.
+
+#### When the mechanism does not reach
+
+| Case | What happens |
+|---|---|
+| the key goes in a header | ★ the mechanism covers it — `inject` says which header and which format |
+| the key goes in a URL query parameter, a cookie, or a non-HTTP protocol | ★ **not expressible**: `inject` is a header injection. The real key has to enter the sandbox (`sbx run --env …`), and then it is the agent's to protect |
+| no mixin at all | the variable is simply not set, and the server's own error (a 401) reaches the model as the tool's result |
+
+★ **The fallback is a real downgrade, and it should be said out loud.** A key inside
+the VM is readable by the agent's own tools, and it is the user who chose that.
+
 ## 9. The change list
 
 Nothing below is in the tree. This is the list a later implementation round would work
@@ -451,7 +594,7 @@ through.
 |---|---|---|
 | 1 | `go.mod` | add `github.com/cloudwego/eino-ext/components/tool/mcp` and `github.com/mark3labs/mcp-go` |
 | 2 | `agentkit/spec/config.go` | `DirMCP = "mcps"` and a `Categories` entry, hot (`hotDirList` at `:77` picks it up) |
-| 3 | `agentkit/spec/decl/decl.go` | the `MCPServerCfg` declaration struct; the namespace constants |
+| 3 | `agentkit/spec/decl/decl.go` | the `MCPServerCfg` declaration struct; the namespace constants; `call_timeout` |
 | 4 | `agentkit/spec/load.go` | the loader for `mcps/<server>.yaml`, with the file-name and field validation of §3.1 and §5.2 |
 | 5 | `agentkit/spec/defaults.go` | `EnabledToolNames` gains the namespaced MCP tools |
 | 6 | `agentkit/spec/write.go` | the scaffold for a new `mcps/` file |
@@ -459,6 +602,7 @@ through.
 | 8 | `agentkit/build/policy.go` | the prefix matcher for `TierOf` and `Blocked` |
 | 9 | `api/v2_settings.go` | the editable section for `mcps/` |
 | 10 | `agentkit/build/nettools.go` | the output cap, applied to the MCP batch |
+| 11 | `agentkit/build/mcptools.go` | the per-server mutex that serializes the stdio calls (§6.5), and the environment assembly for the child process (§5.5) |
 
 ### 9.2 The tests
 
@@ -472,6 +616,12 @@ through.
 | Matching | `deny` still beats `disabled_tools` |
 | Provider | an unreachable server drops its tools, warns with the server's name, and leaves the other providers' tools alone |
 | Lifecycle | a hot reload replaces the client, and the old stdio child is gone |
+| Concurrency | two concurrent calls to one **stdio** server are serialized — the second waits for the first, and neither corrupts the other's request |
+| Concurrency | two concurrent calls to one **http** server are not serialized |
+| Concurrency | a call that exceeds `call_timeout` returns, and the server's lock is released |
+| Environment | the child sees openheron's environment, with `env:` overriding the same names |
+| Environment | an unset `${ENV}` in `env:` is deferred, not fatal |
+| Credentials | a `credential@1` sentinel reaches the child through the inherited environment, with no field in the configuration naming it |
 
 ### 9.3 The documentation
 
@@ -489,6 +639,7 @@ through.
 | A server registry with discovery, health checks and retries | one file per server is enough to start; a registry is a second round |
 | MCP resources, prompts and sampling | the eino-ext component exposes **tools** only |
 | Per-tool rate limits and quotas | `policy/limits.yaml` counts things; it has no tool-name dimension |
+| A credential that is not a header | `inject` is a header injection; a key in a query parameter, a cookie or a non-HTTP protocol has to enter the sandbox instead (§8.1) |
 | A mixin that installs a host-side MCP server | a mixin is a declaration; content belongs to the workload (`sandbox-kit-design.md` §2.3) |
 
 ★ Every entry in this document that describes code names a file and a line. When the

@@ -1455,10 +1455,11 @@ the **configuration surface** only.
 | `<server>.yaml` | `transport` | `string` | `stdio` | `stdio` \| `http`; ★ an **unknown value is a hard error**, no silent fallback to stdio |
 | | `command` | `string` | — | stdio only, **required**: the executable to run |
 | | `args` | `[]string` | `[]` | stdio only: its arguments |
-| | `env` | `map[string]string` | `{}` | the child's environment; ★ secrets as `${ENV}` / `@file:`, never inline |
+| | `env` | `map[string]string` | `{}` | variables **layered over** the inherited environment; ★ the child's environment is openheron's own, with these overriding the same names — and that inheritance is what carries a credential's sentinel to the server without a field here |
 | | `url` | `string` | — | http only, **required**: the server address |
 | | `headers` | `map[string]string` | `{}` | http only: sent on every request |
 | | `timeout` | `LenientDuration` | `30s` | the ceiling for connect + initialize + list tools |
+| | `call_timeout` | `LenientDuration` | `60s` | the ceiling for **one tool call** — ★ without it, a server that never answers holds the call lock and every other call of that server queues behind it |
 | | `tools` | `[]string` | `[]` → all | a whitelist of the tool names to expose; ★ empty = all (not "nothing at all") |
 
 ★ `timeout` is a **lenient** duration: a wrong value degrades to the default and is
@@ -1524,6 +1525,18 @@ reason the prefix syntax ought to exist.
 (with the server name, the transport and the error), **and it affects neither the other
 servers nor the startup of the process**. Silently dropping it is the worst outcome — the
 symptom would be "this feature seems to be missing".
+
+#### The credential
+
+★ **This section has no credential fields, and that is the point.** The key an MCP
+server needs is the **server's** business — it knows which variable it reads. The
+sandbox runtime injects a **sentinel** into the container's environment, and the
+child's environment is this process's environment (`docs/mcp-design.md` §5.5), so the
+server finds it without anything being written here.
+
+The full path — the mixin that declares the credential, the host-side proxy that
+substitutes it, and the cases where the mechanism does not reach — is in
+`docs/mcp-design.md` §8.1.
 
 #### Implementation status
 
