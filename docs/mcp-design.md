@@ -153,12 +153,13 @@ compiling `components/tool/mcp v0.0.9` against `eino v0.9.22` with
 |---|---|---|---|
 | 1 | **A server's tool name can collide with a reserved name** — an MCP server that offers `ls` or `grep` | `agentkit/build/tools.go:92` — `validateBatch` returns an error, `Build` propagates it (`agentkit/build/tools.go:66`), and the **whole agent fails to start**. Not "this tool is dropped" — the process is down | §3 |
 | 2 | **A server's tool name can be illegal for the provider** — server-prefixed names such as `github.create_issue` are common | the model provider's function-name character set does not accept `.`; the call fails at the model, not at load time | §3 |
-| 3 | **A runtime tool set cannot be named in a static policy** — the policy is a table keyed by name, and the names are not known until the connection is up | `agentkit/build/policy.go:39` and `:94` — exact match only. Every MCP tool lands in the `allow` fallback, which is **not** a safe default for a tool that runs an arbitrary process | §4 |
+| 3 | **A runtime tool set cannot be named in a static policy** — the policy is a table keyed by name, and the names are not known until the connection is up | `agentkit/build/policy.go:39` and `:94` — exact match only. Every MCP tool lands in the `allow` fallback, which is **not** a safe default for a tool that runs an arbitrary process | §4 and §7.3 |
 
-★ Problem 3 is the reason a namespace (§3) and a prefix syntax (§4) are two halves of
-one decision rather than two conveniences: **the namespace is what makes a prefix
-meaningful**, because a prefix only separates cleanly if the prefix boundary is
-unambiguous.
+★ Problem 3 is the reason a namespace (§3) and a tier that lives with the tool (§7.3)
+are two halves of one decision rather than two conveniences: **the namespace is what
+makes a prefix meaningful**, because a prefix only separates cleanly if the prefix
+boundary is unambiguous — and the per-file tier is what makes the namespace usable,
+because a file can speak about its own tools without knowing their exposed names.
 
 ## 3. The namespace: `mcp__<server>__<tool>`
 
@@ -213,16 +214,23 @@ rule of its own:
 Without it, a built-in tool could claim the namespace and a prefix rule written for MCP
 would quietly cover it.
 
-## 4. Prefix matching in the policy tables
+## 4. Prefix matching in the global deny
 
-The tiers and the per-agent narrowing accept a **prefix pattern** in addition to an
-exact name.
+The global `deny` list and each agent's `disabled_tools` accept a **prefix pattern** in
+addition to an exact name.
 
 | Entry | Matches |
 |---|---|
 | `execute` | exactly the tool named `execute` |
 | `mcp__github__*` | every tool of the server named `github` |
 | `mcp__*` | every MCP tool, from any server |
+
+★ **The `ask` tier is not in this list any more.** It moved into the tool's own file
+(§7.3), and a file speaks **its own vocabulary** — so "every tool of this server asks"
+is `tier: ask` in `mcps/<server>.yaml`, not a pattern in a shared list.
+
+★ That form is **stronger** than the pattern: it covers the tools the server has **not
+offered yet**. A pattern in a shared list can only name what was already discovered.
 
 ### 4.1 The syntax rules
 
@@ -250,13 +258,16 @@ matching semantics stay as they are.
 
 | Place | Where it is written | Meaning |
 |---|---|---|
-| `policy/permissions.yaml` → `ask` | `agentkit/build/policy.go:39` | these tools need a human decision |
 | `policy/permissions.yaml` → `deny` | `agentkit/build/policy.go:39` | these tools may not run at all |
 | an agent's `disabled_tools` | `agentkit/build/topology.go:64` | this agent does not get these tools |
 
-★ The three places are the same decision written at three levels, so they share one
+★ The two places are the same decision written at two levels, so they share one
 syntax. An agent that disables `mcp__github__*` disables the whole server for that
 agent; it does not need to know the server's tool names.
+
+★ **Both of them speak in exposed names** (`mcp__github__delete_repo`), because that is
+what the gate looks up. The per-file tiers do not (§7.3): a file speaks its own
+vocabulary, and the provider translates.
 
 ### 4.4 What it costs
 
@@ -299,6 +310,14 @@ not to the tool.
 | `timeout` | `LenientDuration` | `30s` | the ceiling for connect + initialize + list tools |
 | `call_timeout` | `LenientDuration` | `60s` | the ceiling for **one tool call** (§6.5) |
 | `tools` | `[]string` | `[]` → all | a whitelist of tool names to expose |
+| `tier` | `string` | `allow` | the tier for every tool this server offers — ★ including the ones it has **not offered yet** |
+| `ask` | `[]string` | `[]` | the server's **own** tool names that ask first |
+| `deny` | `[]string` | `[]` | the server's **own** tool names that are **not exposed** |
+
+★ The three tier keys mean the same thing in every file of `tools/` and `mcps/`, and
+they are written in **that file's own vocabulary**: `ask: [create_issue]` here is the
+server's own name, not the composed one. The provider translates it to the name the
+model sees (§7.3).
 
 ★ `timeout` is a **lenient** duration: a wrong value degrades to the default and is
 recorded in `deferred`, exactly like `debounce` and `start_timeout`. A wrong timeout
@@ -489,10 +508,50 @@ reach the network and read anything openheron can read. The "only public network
 rule that §6.6 of the config design sets for the HTTP tools **does not apply** — it
 bounds what the *tool* may reach, not what the *server* may do.
 
-This is the strongest argument for the namespace and the prefix syntax together: they
-are how a class of external tools gets a tier **before** anyone has enumerated its
-members. `ask: ["mcp__*"]` is one line that says "every tool from every MCP server
-asks first".
+This is the strongest argument for the namespace and for giving each server its own tier:
+they are how a class of external tools gets a tier **before** anyone has enumerated its
+members. `tier: ask` in `mcps/<server>.yaml` is one line that says "every tool from this
+server asks first" (§7.3).
+
+### 7.3 The tier lives with the tool
+
+★ **A tool's tier is written in the tool's own file, in that file's own vocabulary.**
+The global `policy/permissions.yaml` keeps only the `deny` (§4), and the `ask` tier moved
+next to the tool it is about:
+
+```yaml
+# .openheron/mcps/github.yaml
+tier: ask                       # every tool of this server asks first
+deny: [delete_repo]             # …except this one, which is not offered at all
+```
+
+★ **Why the file's own vocabulary.** A tier is a statement about **one tool**, so it
+belongs in that tool's file — and there it can use the names that file already uses. The
+old central file had to name the internal tool name (`request_post`) while the tool's own
+file said `post`; ★ two vocabularies for one tool is a mismatch waiting to happen, and a
+mistyped name stays invisible until the tool behaves differently than the file says.
+
+| Where | Vocabulary | Decides |
+|---|---|---|
+| the global `deny` (`policy/permissions.yaml`) | **exposed** names (`mcp__github__delete_repo`) | never runs, anywhere — beats everything |
+| a file's `tier` / `ask` / `deny` | **the file's own** names (`create_issue`) | the tier of what this file provides |
+| an agent's `disabled_tools` | exposed names | this agent does not get these tools |
+
+★ **The order**: the global `deny` first — it wins — then the file that provides the
+tool.
+
+★ **The assembled policy keeps its shape.** `build.Policy` and `TierOf`
+(`agentkit/build/policy.go:39`) still take a name and answer a tier; what changed is
+where the entries come from: the providers assemble them, each from its own file's
+declarations and its own vocabulary. ⇒ the gate, the tables, the API's
+`EffectiveTools` view and the frontend do not learn a new concept.
+
+★ **The assembly happens in `agentkit/build`, not in `agentkit/spec`.** Only the provider
+knows its file's vocabulary and the exposed names behind it, and `agentkit/spec` may not
+import `kb` (the iron rule) nor eino (where the filesystem tool names live).
+
+★ **The filesystem tools get a file too** — `tools/filesystem.yaml` — so their tiers are
+written next to them and the set can be narrowed. See `docs/config-design.md` §6.6.
 
 ## 8. The sandbox Kit
 
@@ -603,6 +662,7 @@ through.
 | 9 | `api/v2_settings.go` | the editable section for `mcps/` |
 | 10 | `agentkit/build/nettools.go` | the output cap, applied to the MCP batch |
 | 11 | `agentkit/build/mcptools.go` | the per-server mutex that serializes the stdio calls (§6.5), and the environment assembly for the child process (§5.5) |
+| 12 | `agentkit/build/policy.go` | the tier **assembly**: the providers contribute (exposed name → tier) from their own file's declarations, and the global `deny` still wins (§7.3) |
 
 ### 9.2 The tests
 
@@ -622,6 +682,9 @@ through.
 | Environment | the child sees openheron's environment, with `env:` overriding the same names |
 | Environment | an unset `${ENV}` in `env:` is deferred, not fatal |
 | Credentials | a `credential@1` sentinel reaches the child through the inherited environment, with no field in the configuration naming it |
+| Tier | a server's `tier: ask` covers the tools it has **not offered yet** |
+| Tier | the global `deny` beats the file's `tier` |
+| Tier | the file's `ask:` is written in the server's own vocabulary and reaches the gate under the composed name |
 
 ### 9.3 The documentation
 

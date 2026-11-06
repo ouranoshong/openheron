@@ -18,17 +18,17 @@
 
 ```
                     ┌──────────────┐
-   HTTP /v2/*  ────▶ │     api      │  路由、SSE 出口、错误信封
+   HTTP /v2/*  ────▶ │     api      │  routing, SSE sink, error envelope
                     └──────┬───────┘
               ┌────────────┼────────────┬───────────┐
               ▼            ▼            ▼           ▼
         agentkit/spec  agentkit/build  agentkit/run  transport
-         配置装载        Agent 装配       运行循环     AG-UI 事件
+          config load   agent assembly  run loop     AG-UI events
               │            │            │           │
               ▼            ▼            ▼           ▼
-         decl(声明)     llm/common    storage      webui
-         kb(语料)      approval       persist(原子写)  │
-         persist                     filestore      web/(React)
+         decl(decls)    llm/common     storage      webui
+         kb(corpus)     approval       persist      │
+         persist                       filestore    web/(React)
 ```
 
 ## 2. 分层与依赖方向
@@ -163,12 +163,13 @@ frontmatter 可用键（`agentkit/spec/decl/decl.go:67` 的 `decl.Agent`）：
 | 外层 | `policy/permissions.yaml` 的 `deny` | 所有 Agent |
 | 内层 | `agents/*.md` 的 `disabled_tools` | 只影响这一个 Agent |
 
-两层**分开存储、从不合并** —— 合并就丢掉了「是哪一层拦的」这个信息。
+两者**分开存储、从不合并** —— 合并就丢掉了「是哪一层拦的」这个信息。
 外层 `deny` 优先，是子 Agent 唯一放松不了的保证。
 
-档位只有两列（`decl.TierOf`，`decl/decl.go:122`）：`deny` → `ask` → 否则 `allow`。
-**未被点名的工具默认 `allow`（直接放行）**。要让某个工具每次都要人点头，
-把它加进 `ask`。
+档位只有两列（`build.Policy.TierOf`，`agentkit/build/policy.go:39`；镜像的
+`decl.Policy.TierOf` 在 `agentkit/spec/decl/decl.go:240`，未被使用）：`deny` →
+`ask` → 否则 `allow`。**未被点名的工具默认 `allow`（直接放行）**。
+要让某个工具每次都要人点头，把它列进 `ask`。
 
 ### 3.5 深度上限与拓扑校验
 

@@ -47,12 +47,13 @@ one — change one and change the other.
 > `docs/mcp-design.md` is a **proposal** too: its §1 describes the code as it is — the tool
 > assembly path, the provider contract, and the exact-match policy tables — while its §2 onwards
 > describe what would be built: an `mcps/` config partition, the `mcp__<server>__<tool>` namespace,
-> and prefix matching in the policy tables. **Nothing from §2 onwards is in the tree.**
+> the tier that lives with the tool, and prefix matching in the global deny. **Nothing from §2
+> onwards is in the tree.**
 > `docs/config-design.md` describes the **configuration system** — the config root and its
 > three levels, the partitions and their file specs, loading and precedence, hot reload, and
 > the dependency iron rules. **Its body describes the code as it is**; the `mcps/` partition
-> (§6.7) and the prefix matching in the policy tables (§6.3) are labeled as proposals,
-> because they are not implemented.
+> (§6.7), the tier that lives with the tool (§6.6), and the prefix matching in the global
+> deny (§6.3) are labeled as proposals, because they are not implemented.
 >
 > ★ One directory is not a document set: **`sandbox-kit/`** holds the Docker Sandbox Kits that
 > package openheron as a sandbox workload — `openheron/` (the workload: descriptor, content
@@ -94,7 +95,7 @@ notifications, and **interface copy**.
 | Notification | English | `c.deferKey("watch.debounce fell back to default: %s", msg)` |
 | API response body | English | `c.JSON(400, map[string]string{"error": "thread not found"})` |
 | **Interface copy** | **English** | `"Run in a separate agent"` |
-| **Content written into user configuration** | **English** | the header of `catalog.md`, the comment block of `policy/limits.yaml` |
+| **Content written into user configuration** | **English** | the header of `catalog.md`, the comment block of `policy/limits.yaml`, the comment block of `tools/filesystem.yaml` |
 
 ### Code comments
 

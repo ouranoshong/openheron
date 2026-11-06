@@ -148,11 +148,13 @@ type Config struct {
 |---|---|---|---|
 | 1 | **服务器的工具名可能撞上保留名** —— 一个提供 `ls` 或 `grep` 的 MCP 服务器 | `agentkit/build/tools.go:92` —— `validateBatch` 返回错误，`Build` 往上抛（`agentkit/build/tools.go:66`），于是**整个 agent 起不来**。不是「这个工具被丢掉」—— 是进程没了 | §3 |
 | 2 | **服务器的工具名可能对 provider 非法** —— 带服务器前缀的名字很常见，比如 `github.create_issue` | 模型 provider 的 function name 字符集不收 `.`；失败发生在调模型的时候，而不是加载的时候 | §3 |
-| 3 | **运行期才有的工具集没法写进静态策略** —— 策略是以名字为键的表，而名字要等连接建立才拿到 | `agentkit/build/policy.go:39` 与 `:94` —— 只有精确匹配。每一个 MCP 工具都落进 `allow` 兜底档，而对一个能执行任意进程的工具来说，**这不是一个安全的缺省** | §4 |
+| 3 | **运行期才有的工具集没法写进静态策略** —— 策略是以名字为键的表，而名字要等连接建立才拿到 | `agentkit/build/policy.go:39` 与 `:94` —— 只有精确匹配。每一个 MCP 工具都落进 `allow` 兜底档，而对一个能执行任意进程的工具来说，**这不是一个安全的缺省** | §4 与 §7.3 |
 
-★ 问题 3 是「命名空间（§3）」与「前缀语法（§4）」是同一个决定的两个半边、
+★ 问题 3 是「命名空间（§3）」与「住在工具旁边的档位（§7.3）」是同一个决定的两个半边、
   而不是两件方便事的原因：**命名空间让前缀才有意义** ——
-  因为前缀要切得干净，前缀的边界就不能有歧义。
+  因为前缀要切得干净，前缀的边界就不能有歧义 ——
+  而「按文件写的档位」是让命名空间变得可用的那半边：
+  一个文件可以在不知道自己那些工具对外叫什么名字的情况下，谈它自己的工具。
 
 ## 3. 命名空间：`mcp__<server>__<tool>`
 
@@ -202,15 +204,22 @@ mcp__<server>__<tool>
 
 否则一个内置工具就能占了命名空间，而为 MCP 写的前缀规则会悄悄盖住它。
 
-## 4. 策略表里的前缀匹配
+## 4. 全局 deny 里的前缀匹配
 
-档位与每个 agent 的收窄，除了精确名字，还接受一种**前缀模式**。
+全局的 `deny` 列表与每个 agent 的 `disabled_tools`，除了精确名字，还接受一种**前缀模式**。
 
 | 条目 | 匹配 |
 |---|---|
 | `execute` | 名字正好是 `execute` 的那个工具 |
 | `mcp__github__*` | server 名为 `github` 的每一个工具 |
 | `mcp__*` | 来自任何 server 的每一个 MCP 工具 |
+
+★ **`ask` 档不再在这张表里。** 它搬进了工具自己的文件（§7.3），
+  而一个文件讲的是**自己的词儿** —— 所以「这个 server 的每个工具都要先点头」
+  是 `mcps/<server>.yaml` 里的 `tier: ask`，不是共享表里的一个模式。
+
+★ 那种写法比模式**更强**：它覆盖服务器**还没提供**的工具。
+  共享表里的模式只能点名那些已经被发现的东西。
 
 ### 4.1 语法规则
 
@@ -233,17 +242,19 @@ deny → ask → allow (the fallback)
 
 ★ **`policy/limits.yaml` 不参与。** 它装的是数量，不是工具名，匹配语义照旧。
 
-### 4.3 前缀语法用在哪三处
+### 4.3 前缀语法用在哪
 
 | 位置 | 写在哪 | 含义 |
 |---|---|---|
-| `policy/permissions.yaml` → `ask` | `agentkit/build/policy.go:39` | 这些工具需要人点头 |
 | `policy/permissions.yaml` → `deny` | `agentkit/build/policy.go:39` | 这些工具根本不许跑 |
 | 某个 agent 的 `disabled_tools` | `agentkit/build/topology.go:64` | 这个 agent 拿不到这些工具 |
 
-★ 这三处是同一个决定的三个层次，所以共用一套语法。
+★ 这两处是同一个决定写在两个层次上，所以共用一套语法。
   一个 agent 禁掉 `mcp__github__*`，就是对这个 agent 禁掉整个 server ——
   它不需要知道那个 server 有哪些工具。
+
+★ **这两处都用对外的名字说话**（`mcp__github__delete_repo`），因为闸门查的就是它。
+  按文件写的档位不是这样（§7.3）：一个文件讲自己的词儿，由 provider 去翻译。
 
 ### 4.4 代价是什么
 
@@ -284,6 +295,14 @@ MCP 服务器按服务器一个文件来配：
 | `timeout` | `LenientDuration` | `30s` | 连接 + 初始化 + 取工具清单的上限 |
 | `call_timeout` | `LenientDuration` | `60s` | **一次工具调用**的上限（§6.5） |
 | `tools` | `[]string` | `[]`→全部 | 暴露出去的工具名白名单 |
+| `tier` | `string` | `allow` | 这个 server 提供的每一个工具的档位 —— ★ 包括那些它**还没提供**的工具 |
+| `ask` | `[]string` | `[]` | 这个 server **自己的**工具名里，哪些要先点头 |
+| `deny` | `[]string` | `[]` | 这个 server **自己的**工具名里，哪些**不暴露** |
+
+★ 这三个档位键在 `tools/` 与 `mcps/` 的每一个文件里都是同一个意思，
+  而且它们是用**那个文件自己的词儿**写的：这里的 `ask: [create_issue]` 是
+  server 自己的名字，不是合成出来的那个名字。provider 会把它翻译成模型看到的
+  那个名字（§7.3）。
 
 ★ `timeout` 是**宽松**时长：写错就退回默认并记进 `deferred`，
   与 `debounce`、`start_timeout` 完全一样。写错 timeout 改变的是「等多久」，
@@ -456,9 +475,48 @@ Policy.TierOf("mcp__github__create_issue")
   配置设计 §6.6 给 HTTP 工具定的「只连公网」**在这里不适用** ——
   那条限制的是*工具*能碰到什么，不是*服务器*能做什么。
 
-这是命名空间与前缀语法合起来的最强理由：
+这是命名空间与「给每个 server 自己的档位」合起来的最强理由：
 它们是「在有人把成员列出来之前，先给一类外部工具定档」的办法。
-`ask: ["mcp__*"]` 是一行字，意思是「来自任何 MCP 服务器的每个工具都要先点头」。
+`mcps/<server>.yaml` 里的 `tier: ask` 是一行字，
+意思是「这个 server 的每个工具都要先点头」（§7.3）。
+
+### 7.3 档位住在工具旁边
+
+★ **一个工具的档位写在它自己的文件里，用那个文件自己的词儿。**
+全局的 `policy/permissions.yaml` 只留 `deny`（§4），而 `ask` 档搬到了
+它所说的那个工具旁边：
+
+```yaml
+# .openheron/mcps/github.yaml
+tier: ask                       # every tool of this server asks first
+deny: [delete_repo]             # …except this one, which is not offered at all
+```
+
+★ **为什么要用文件自己的词儿。** 档位是关于**一个工具**的陈述，
+  所以它属于那个工具的文件 —— 而在那里它可以用那个文件已经在用的名字。
+  原来那个中心文件必须点名内部工具名（`request_post`），而工具自己的文件说的是 `post`；
+  ★ 一个工具两套词儿，就是一处等着发生的错配，而一个拼错的名字
+  在工具的行为与文件所说的不一致之前，一直是看不见的。
+
+| 位置 | 词儿 | 决定什么 |
+|---|---|---|
+| 全局 `deny`（`policy/permissions.yaml`） | **对外的**名字（`mcp__github__delete_repo`） | 哪儿都不跑 —— 压过一切 |
+| 某个文件的 `tier` / `ask` / `deny` | **那个文件自己的**名字（`create_issue`） | 这个文件提供的东西的档位 |
+| 某个 agent 的 `disabled_tools` | 对外的名字 | 这个 agent 拿不到这些工具 |
+
+★ **顺序**：先全局 `deny` —— 它赢 —— 然后是提供这个工具的文件。
+
+★ **装配出来的策略形状不变。** `build.Policy` 与 `TierOf`
+（`agentkit/build/policy.go:39`）仍然是收一个名字、答一个档位；变的是条目的来源：
+  provider 各自从自己文件里的声明、用它自己的词儿装配出来。⇒ 闸门、各张表、
+  API 的 `EffectiveTools` 视图与前端都不必学一个新概念。
+
+★ **装配发生在 `agentkit/build`，不在 `agentkit/spec`。** 只有 provider 知道
+  自己文件的词儿，以及它背后的对外名字；而 `agentkit/spec` 不得 import `kb`
+  （那条铁律），也不得 import eino（文件系统工具的名字住在那里）。
+
+★ **文件系统工具也有自己的文件** —— `tools/filesystem.yaml` —— 这样它们的档位
+  写在它们旁边，这个集合也可以被收窄。见 `docs/config-design.md` §6.6。
 
 ## 8. 沙箱 Kit
 
@@ -562,6 +620,7 @@ the host proxy substitutes the real key ──► api.github.com
 | 9 | `api/v2_settings.go` | `mcps/` 的可编辑分区 |
 | 10 | `agentkit/build/nettools.go` | 输出封顶，套到 MCP 批次上 |
 | 11 | `agentkit/build/mcptools.go` | 把 stdio 调用串行化的 per-server 互斥锁（§6.5），以及子进程的环境装配（§5.5） |
+| 12 | `agentkit/build/policy.go` | 档位的**装配**：各 provider 从自己文件里的声明贡献（对外名字 → 档位），而全局 `deny` 仍然赢（§7.3） |
 
 ### 9.2 测试
 
@@ -581,6 +640,9 @@ the host proxy substitutes the real key ──► api.github.com
 | 环境 | 子进程看得见 openheron 的环境，`env:` 覆盖同名项 |
 | 环境 | `env:` 里未设的 `${ENV}` 进 `deferred`，不致命 |
 | 凭据 | `credential@1` 的哨兵经继承的环境到达子进程，而配置里没有任何字段提到它 |
+| 档位 | 一个 server 的 `tier: ask` 覆盖它**还没提供**的工具 |
+| 档位 | 全局 `deny` 压过文件里的 `tier` |
+| 档位 | 文件里的 `ask:` 用 server 自己的词儿写，到闸门时用的是合成后的名字 |
 
 ### 9.3 文档
 

@@ -183,9 +183,10 @@ The two are **stored separately and never merged** — merging would destroy the
 information about *which* layer blocked a tool. The outer `deny` wins, and it is the
 one guarantee a sub-agent cannot relax.
 
-There are only two columns of tiers (`decl.TierOf`, `decl/decl.go:122`): `deny` → `ask` →
-otherwise `allow`. **A tool that is not named defaults to `allow` (straight through)**.
-To make a tool require a human every time, list it under `ask`.
+There are only two columns of tiers (`build.Policy.TierOf`, `agentkit/build/policy.go:39`;
+the mirrored `decl.Policy.TierOf` at `agentkit/spec/decl/decl.go:240` is unused): `deny` →
+`ask` → otherwise `allow`. **A tool that is not named defaults to `allow` (straight
+through)**. To make a tool require a human every time, list it under `ask`.
 
 ### 3.5 Depth cap and topology validation
 

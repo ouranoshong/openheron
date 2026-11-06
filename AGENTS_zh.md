@@ -43,11 +43,12 @@
 > 调用点接上。
 > `docs/mcp-design.md` 也是一份**提案**：§1 讲代码现状 —— 工具装配路径、provider 契约、
 > 以及只做精确匹配的策略表 —— §2 往后讲要建成什么样：一个新的 `mcps/` 配置分区、
-> `mcp__<server>__<tool>` 命名空间，以及策略表里的前缀匹配。
+> `mcp__<server>__<tool>` 命名空间、住在工具旁边的档位，以及全局 deny 里的前缀匹配。
 > **§2 往后的东西都还不在树上。**
 > `docs/config-design.md` 讲的是**配置系统** —— 配置根与它的三级解析、各个分区与它们的
 > 文件规格、加载与优先级、热更新，以及依赖铁律。**正文讲的是代码现状**；
-> `mcps/` 分区（§6.7）与策略表里的前缀匹配（§6.3）标成了提案，因为它们还没实现。
+> `mcps/` 分区（§6.7）、住在工具旁边的档位（§6.6）与全局 deny 里的前缀匹配（§6.3）
+> 标成了提案，因为它们还没实现。
 >
 > ★ 有一个目录不是文档组：**`sandbox-kit/`** 装着把 openheron 打包成沙箱 workload 的
 > Docker Sandbox Kit —— `openheron/`（workload：描述文件、内容配方、入口脚本），
@@ -85,7 +86,7 @@
 | 消息提醒 | 英文 | `c.deferKey("watch.debounce fell back to default: %s", msg)` |
 | 接口响应体 | 英文 | `c.JSON(400, map[string]string{"error": "thread not found"})` |
 | **界面文案** | **英文** | `"Run in a separate agent"` |
-| **写入用户配置的文件内容** | **英文** | `catalog.md` 的表头、`policy/limits.yaml` 的注释段 |
+| **写入用户配置的文件内容** | **英文** | `catalog.md` 的表头、`policy/limits.yaml` 的注释段、`tools/filesystem.yaml` 的注释段 |
 
 ### 代码注释
 
