@@ -603,7 +603,7 @@ session.jsonl:  … 旧历史 … │ 压缩消息 │ 本轮的消息 …
 
 1. **消息列表里的一条分隔线。** 压缩消息不是聊天气泡。消息视图给它标上一个 `compaction` 元数据项（`api/v2_convert.go:63`），前端把它画成分隔线：*「12 earlier messages · compacted into a summary · ≈62k tokens saved」*（界面文案是英文）。标记在历史水合时被读出来（`web/src/lib/store/history.ts:14`），挂在消息上（`web/src/lib/types.ts:56`），由 `web/src/components/compaction-divider.tsx` 渲染，消息列表把它放在气泡该在的位置上（`web/src/components/message-list.tsx:101`）。被取代的消息留在它上面、仍然可见 —— 用户照样能读到切口之前说了什么。
 2. **仪表盘的第二根针。** `context[agent].summarized` 数压缩的次数（`api/v2_sessions.go:326`）。上一次压缩省下了多少，写在分隔线上而不在仪表盘上：仪表盘回答「上下文现在有多满」，分隔线回答「上一次切口省了多少」。
-3. **一个实时事件。** 压缩发生在轮内，所以界面从事件流里知道它：transport 把 `after_summarize` 转成 `CUSTOM "context_compacted"` 事件（`transport/transport.go:590`），reducer 当场把边界插进列表（`web/src/lib/events.ts:412`）。★ 实时事件只带**事实、agent 与时间** —— **不带数字**。数字是拿记录量出来的，而记录由运行循环在轮次结束时写入；transport 手里没有记录可量。所以实时分隔线写的是*「earlier messages · compacted into a summary」*，数字要等下一次加载 —— 那时标记跟着记录一起回来了。
+3. **一个实时事件。** 压缩发生在轮内，所以界面从事件流里知道它：transport 把 `after_summarize` 转成 `CUSTOM "context_compacted"` 事件（`transport/transport.go:208`），reducer 当场把边界插进列表（`web/src/lib/events.ts:412`）。★ 实时事件只带**事实、agent 与时间** —— **不带数字**。数字是拿记录量出来的，而记录由运行循环在轮次结束时写入；transport 手里没有记录可量。所以实时分隔线写的是*「earlier messages · compacted into a summary」*，数字要等下一次加载 —— 那时标记跟着记录一起回来了。
 4. **一个手动命令。** `/compact` 随叫随压：`POST /v2/sessions/{id}/compact` 摘要有效历史（`agentkit/run/compact.go` 的 `run.Compact`）、盖上同一个标记，并把数字报回来 —— 所以手动压出来的分隔线当场就带数字。轮次在跑或审批在等时，命令不出现；上下文小到不值得压时，它拒绝（`run.MinCompactMessages`、`run.MinCompactTokens`）：摘要带着前言，短对话压完可能反而更长。
 
 ### 7.8 配置

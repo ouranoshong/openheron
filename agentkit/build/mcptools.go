@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -354,7 +355,11 @@ func (t serialTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		defer cancel()
 	}
 	out, err := t.InvokableTool.InvokableRun(ctx, argumentsInJSON, opts...)
-	if err != nil && t.onFailure != nil {
+	if err != nil && t.onFailure != nil && !errors.Is(err, context.DeadlineExceeded) &&
+		!errors.Is(err, context.Canceled) {
+		// ★ A call that ran out of time is **not** a broken connection: the
+		//   server may simply be slow, and the next call has to reach it.
+		//   Only a broken pipe (or a dead child) restarts the server.
 		t.onFailure()
 	}
 	return out, err
