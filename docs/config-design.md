@@ -1964,21 +1964,22 @@ not exist is worse than not listing it.
 ★ **`go test ./...` is green**: **902** top-level cases in the root module, **20**
 packages carry tests.
 
-★ **`go test -race ./...` is not green today** — and that is recorded here rather than
-hidden. The race detector reports races in four packages:
+★ **`go test -race ./...` is green as well** — it was not, and the four races it
+reported are worth writing down, because each one was the same mistake in a
+different place: **the lock was there, and one path did not go through it.**
 
-| Package | What races |
-|---|---|
-| `agentkit/run` | `Turn.fail` writes the turn state (`agentkit/run/turn.go:217`) while another goroutine reads it |
-| `api` | loading a transcript rewrites the session's id (`storage/filestore/transcript.go:70`) while another goroutine reads that id (`storage/filestore/session.go:171`) |
-| `kb` | `Store.Reconcile` / `Store.Docs` write the store (`kb/store.go:504`, `kb/store.go:653`) while a search reads it |
-| `agentkit/spec` | ★ this one is in the **test itself**: the capture callback writes the changed-partition slice from the watcher's goroutine (`agentkit/spec/reload_test.go:305`) while the test goroutine reads it (`agentkit/spec/reload_test.go:322`) — neither side is synchronized |
+| Package | What raced | What it is now |
+|---|---|---|
+| `agentkit/run` | `Turn.fail` wrote the turn's failure reason (`agentkit/run/turn.go:217`) while another goroutine read it — the failure path is reachable from the event loop, a superseding turn, the shutdown path and the start timeout, and they overlap | a mutex guards the field, and the reason keeps its **old** meaning: the last failure to land is the one `Wait` reports, so the supersede path still answers with `ErrSuperseded` |
+| `api` | loading a transcript rewrites the session's id (`storage/filestore/transcript.go:70`) while another goroutine read that id (`storage/filestore/session.go:171`) — the id is **not** immutable, because the transcript's header is authoritative | the mutex moved to the top of the struct and now covers the identity fields too; the accessors read under it, and the id is read under it and the disk work happens outside it |
+| `kb` | the store wrote its own state outside the lock (`kb/store.go:504`, `kb/store.go:653`) while a search read it — one write was a **derived** value (the catalog file's stat), the other was a **shallow** copy of a map another goroutine mutates in place | the stat is read before the lock and assigned inside it; the derived state is snapshotted as a **deep** copy under the read lock, because a shallow copy still shares the map |
+| `agentkit/spec` | ★ this one was in the **test itself**: the capture callback wrote the changed-partition slice from the watcher's goroutine (`agentkit/spec/reload_test.go:305`) while the test goroutine read it (`agentkit/spec/reload_test.go:322`) — neither side was synchronized | the notification travels through a channel and the test waits for the watcher to stop before it reads — and before it puts the package-level hook back, because the watcher reads that variable too |
 
-★ The `agentkit/spec` one is a test bug, not a production race — but it is enough to
-make the `-race` run of that package fail, and it is the only one of the four that
-belongs to the configuration layer. The other three are in the run loop, the file
-store and the knowledge base; they are recorded here because this document claims a
-test matrix, and a matrix that quietly hides a red `-race` run is not a matrix.
+★ Each of the three production races came with the same second half: **the scope of
+the lock was never written down.** A mutex in the middle of a struct reads as "it
+guards the fields below it", and one code path acted on that reading. The fix was
+not only the missing lock — it was the sentence saying what the lock is for, next
+to the lock.
 
 ### 11.6 ★ Effective status of parsed fields
 
@@ -2163,7 +2164,7 @@ but only two actually run" is the hardest class of problem to track down.
 | the number of top-level cases in the whole repository | `grep -rhoP '^func \KTest\w+' --include='*_test.go' . \| sort -u \| wc -l` → **903**, of which one belongs to the nested module `sandbox-kit/examples/demo-project` ⇒ **902** in the root module |
 | the number of packages carrying tests in the root module | `go list -f '{{.ImportPath}} {{len .TestGoFiles}} {{len .XTestGoFiles}}' ./... \| awk '$2+$3>0' \| wc -l` → **20** |
 | the whole test suite is green | `go test ./...` → every package `ok` |
-| `-race` is not green today | `go test -race ./...` → FAIL in `agentkit/run`, `api`, `kb` and `agentkit/spec`; the one inside `spec` is at `agentkit/spec/reload_test.go:305` against `agentkit/spec/reload_test.go:322` |
+| `-race` is green now | `go test -race ./...` → every package is `ok`; §11.5 records what each of the four races was |
 | `policy/limits.yaml` only tightens | read `mergeLimits` / `tighter` (`agentkit/spec/load.go:211`) + the cases `TestLimitsTightenButNeverLoosen` and `TestLimitsCannotLoosenTheGlobalBaseline` |
 | a no-op limit goes into `deferred` | `collectNoopLimits` (`agentkit/spec/load.go:437`) + `TestLooserLimitIsReportedAsDeferred` |
 | the effective depth and retry count | `MaxDepth()` / `MaxRetries()` (`agentkit/spec/load.go:409`) + the cases in `agentkit/spec/config_test.go` |
@@ -2243,6 +2244,6 @@ but only two actually run" is the hardest class of problem to track down.
 | the `agentkit/spec` → `agentkit/run` exception was retracted upstream on 2026-10-21 | openheron **never had it** — the code surface was extracted after the retraction, and `agentkit/spec` mentions `agentkit/run` only in a comment | the retraction was a design decision upstream; openheron inherited the retracted form |
 | `models[].context_window` is pure metadata and takes no effect | it **takes effect**: it is the denominator of the compaction threshold (`agentkit/spec/summarize.go:25`) | openheron implements compaction and the context-usage dashboard — see [context-usage-design.md](context-usage-design.md) |
 | an agent naming a reasoning gear the model does not declare lands in `deferred` | it does **not** — it is silently ignored | the vocabulary lives in `llm/`, the gear name in `agents/`, and the two files are never cross-checked |
-| `go test -race ./...` is green across the whole repository | it is **not** green today: the race detector reports races in `agentkit/run`, `api`, `kb` and `agentkit/spec` | the one inside `spec` is in the test itself (`agentkit/spec/reload_test.go:305` against `agentkit/spec/reload_test.go:322`); it is recorded rather than hidden |
+| `go test -race ./...` is green across the whole repository | it **was** not: the race detector reported races in `agentkit/run`, `api`, `kb` and `agentkit/spec` | the one inside `spec` was in the test itself; all four are fixed now, and §11.5 records what each one was |
 | a bad `tools/` timeout is reported as `watch.debounce` | the label is fixed: `collectBadDurations` prefixes **every** bad duration with "watch.debounce fell back to default", so a bad `timeout` in `tools/http.yaml` lands under the same label | `decl.BadDurations()` is a package-level list with no attribution (`agentkit/spec/decl/decl.go:338`) |
 

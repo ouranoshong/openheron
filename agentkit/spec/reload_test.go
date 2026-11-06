@@ -297,13 +297,26 @@ func TestHotReloadLogsWhichPartitionsChanged(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	orig := LogReloaded
-	var gotVersion string
-	var gotChanged []string
-	LogReloaded = func(version string, changed []string) {
-		gotVersion = version
-		gotChanged = changed
+	// ★ The notification travels through a channel, not through captured
+	//   variables: the hook runs on the watcher's goroutine, and a variable
+	//   it writes is read by the test goroutine — that is a race, and the
+	//   detector reports it as one.
+	type notice struct {
+		version string
+		changed []string
 	}
+	notices := make(chan notice, 1)
+
+	orig := LogReloaded
+	LogReloaded = func(version string, changed []string) {
+		// ★ The send never blocks: the watcher must not wait for the test.
+		select {
+		case notices <- notice{version: version, changed: changed}:
+		default:
+		}
+	}
+	// ★ The hook is restored last — after the watcher has stopped, because
+	//   the watcher reads this package-level variable.
 	defer func() { LogReloaded = orig }()
 
 	r, err := NewReloader(s, func(*Config) {})
@@ -311,26 +324,35 @@ func TestHotReloadLogsWhichPartitionsChanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go r.Watch(ctx)
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		r.Watch(ctx)
+	}()
+	// ★ Stopping the watcher is what orders this test's reads: the writes
+	//   the hook made happen-before the goroutine ends, and the goroutine
+	//   ending happens-before the receive below.
+	defer func() {
+		cancel()
+		<-watcherDone
+	}()
 
 	time.Sleep(50 * time.Millisecond)
 	f.write(t, "agents/main.md", "---\nmodel: openai/strong\n---\n改了\n")
 
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if len(gotChanged) > 0 {
-			break
+	var got notice
+	deadline := time.After(3 * time.Second)
+	for len(got.changed) == 0 {
+		select {
+		case got = <-notices:
+		case <-deadline:
+			t.Fatal("the hot reload must report which partition changed")
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
-	if len(gotChanged) == 0 {
-		t.Fatal("the hot reload must report which partition changed")
+	if got.changed[0] != "agents" {
+		t.Fatalf("changed = %v, want agents", got.changed)
 	}
-	if gotChanged[0] != "agents" {
-		t.Fatalf("changed = %v, want agents", gotChanged)
-	}
-	if gotVersion == "" {
+	if got.version == "" {
 		t.Fatal("the hot reload must report the new version")
 	}
 }

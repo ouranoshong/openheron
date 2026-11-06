@@ -259,6 +259,10 @@ kit-check: ## Validate the Kit against the specification (needs kit-tck)
 test: ## The full Go test suite
 	$(GO) test ./...
 
+.PHONY: test-race
+test-race: ## The full Go test suite under the race detector
+	$(GO) test -race ./...
+
 .PHONY: test-install
 test-install: ## Test the release installer against a local fake release
 	sh scripts/install_test.sh

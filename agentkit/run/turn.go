@@ -37,8 +37,21 @@ type Turn struct {
 	//	server had no run identity of its own.
 	RunID string
 
-	events  *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.Message]]
-	ready   chan struct{}
+	events *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.Message]]
+	ready  chan struct{}
+
+	// failMu guards failErr, and nothing else.
+	//
+	// ★ The failure path is reachable from four goroutines — the event
+	//   loop, a superseding turn, the shutdown path and the start timeout —
+	//   and they overlap. Without the lock two of them write the field at
+	//   once, and a waiter can read it while it is being written.
+	//
+	// ★ The other mutable fields of this struct are not shared that way:
+	//   awaitingApproval and pending belong to the loop's goroutine (the
+	//   turn's callback and the loop's exit handler run on the same one),
+	//   and cancel is written before the loop starts.
+	failMu  sync.Mutex
 	failErr error
 
 	archiveOnce sync.Once
@@ -121,20 +134,20 @@ type Outcome struct {
 func (t *Turn) Wait(timeout time.Duration) error {
 	select {
 	case <-t.ready:
-		return t.failErr
+		return t.failure()
 	default:
 	}
 
 	if timeout <= 0 {
 		<-t.ready
-		return t.failErr
+		return t.failure()
 	}
 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
 	case <-t.ready:
-		return t.failErr
+		return t.failure()
 	case <-timer.C:
 		// ★ The turn never became streamable. It will never archive
 		//   anything either, so fail it here: that releases the session's
@@ -214,7 +227,14 @@ const archiveWaitTimeout = 30 * time.Second
 // fail releases a turn that can never run: it unblocks Wait without waiting
 // for a run that will never come.
 func (t *Turn) fail(err error) {
+	// ★ The lock makes the write safe, and it keeps the **old** meaning: the
+	//   last failure to land is the one Wait reports. That matters for the
+	//   supersede path — a turn that was already running is released with
+	//   ErrSuperseded, and the client is told why it died.
+	t.failMu.Lock()
 	t.failErr = err
+	t.failMu.Unlock()
+
 	t.signalReady()
 	// ★ The derivation may be waiting for an agent that never stops.
 	t.abortOnce.Do(func() { close(t.abort) })
@@ -227,6 +247,17 @@ func (t *Turn) fail(err error) {
 	//   row has to be closed here, or the run stays open in the ledger and
 	//   the session reads as busy for ever.
 	t.closeRow(err)
+}
+
+// failure returns why the turn failed, or nil when it did not fail.
+//
+// ★ The read takes the lock: failErr is written by the failure path, which
+//
+//	can run on a different goroutine than the one waiting for the turn.
+func (t *Turn) failure() error {
+	t.failMu.Lock()
+	defer t.failMu.Unlock()
+	return t.failErr
 }
 
 // closeRow writes the terminal row of a turn that will not run.

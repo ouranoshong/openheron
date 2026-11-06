@@ -225,6 +225,7 @@ file.
 | Command | Covers | Requires |
 |---|---|---|
 | `make test` | Full Go suite (`go test ./...`) | — |
+| `make test-race` | The same suite under the race detector (`go test -race ./...`) | — |
 | `cd web && bun run test:unit` | Pure-function layers (reducer / framing / store / highlighting) | — |
 | `make test-e2e` | Real browser + deterministic fake backend | nothing (it ships its own fake backend) |
 | `make test-install` | The release installer against a local fake release | nothing |

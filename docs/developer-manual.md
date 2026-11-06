@@ -800,6 +800,16 @@ cd web && bun run smoke:hitl               # the approval resume path works
 | `initcfg` | The completeness of the factory templates |
 | `agentkit/fsx` | The write boundary (including symlink escapes), the `ls`/`glob`/`grep` caps, and absolute glob patterns |
 
+★ **Run the race detector too**: `make test-race` (`go test -race ./...`). The plain
+  suite is green while the detector is red more often than one would like — a race
+  needs two goroutines to meet, and the plain suite does not care when they do.
+  The three production races it caught (2026-11-06) were all the same mistake:
+  **the lock was there, and one path did not go through it.** A mutex in the middle
+  of a struct reads as "it guards the fields below it", and that reading is how
+  `FileSession`'s identity fields ended up outside the protection. ⇒ When you add
+  a field to a type that has a lock, write down what the lock covers — next to the
+  lock — and make every read and write of that field go through it.
+
 ### 5.4 The knowledge-base corpus convention (`docs/`)
 
 The `kb` package's corpus **is this repository's `docs/`** (`repoCorpusDir` in

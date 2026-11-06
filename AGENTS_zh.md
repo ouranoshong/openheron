@@ -194,6 +194,7 @@ docs(readme): drop the API table, it lives in the user manual
 | 命令 | 覆盖 | 需要前置 |
 |---|---|---|
 | `make test` | Go 全量（`go test ./...`） | — |
+| `make test-race` | 同一套在竞态检测器下跑（`go test -race ./...`） | — |
 | `cd web && bun run test:unit` | 纯函数层（reducer / 分帧 / store / 高亮） | — |
 | `make test-e2e` | 真实浏览器 + 确定性假后端 | 无（自带假后端） |
 | `make test-install` | 发版安装脚本对着一个本地假发布 | 无 |

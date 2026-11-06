@@ -52,12 +52,33 @@ type Store struct {
 
 	run *persist.FileLock
 
+	// mu guards the store's three pieces of state: cat, der and stamp.
+	//
+	// ★ Two rules follow from the scope, and both of them were broken before
+	//	  they were written down:
+	//
+	//	- Every read takes the lock and every write happens under it —
+	//	  including the writes of **derived** values. stamp is the catalog
+	//	  file's stat, so refreshing it means stat'ing the file (I/O, which
+	//	  must happen outside the lock) and assigning the result (which
+	//	  must happen inside it).
+	//	- A reader that needs the entries takes a **deep** copy under the
+	//	  lock. der.Entries is a map that install and SetVectors mutate in
+	//	  place, so a shallow copy is still shared with the writer — and a
+	//	  reader iterating a map another goroutine writes is a fatal error,
+	//	  not a race the detector merely reports.
 	mu  sync.RWMutex
 	cat Catalog
 	der Derived
 
 	stamp fileStamp
 
+	// runMu serialises the reloads: it makes "the catalog changed on disk"
+	// a thing that is re-read once, not once per goroutine that noticed.
+	//
+	// ★ It is not a data lock — the state it protects is guarded by mu.
+	//   It is the "one reload at a time" gate, and the stamp is re-checked
+	//   under it because another goroutine may have reloaded in between.
 	runMu sync.Mutex
 
 	afterWrite func()
@@ -224,7 +245,15 @@ func (s *Store) Reconcile(ctx context.Context, req ReconcileRequest) (*Reconcile
 		cur, warnings := s.readCatalog()
 		lastWarnings = warnings
 
-		merged, next, res := mergeCatalog(cur, s.der, req)
+		// ★ The derived state is snapshotted under the lock, and the snapshot
+		//   is a **deep** copy: s.der.Entries is a map that install and
+		//   SetVectors mutate in place, so a shallow copy would still be
+		//   shared with the writer — and mergeCatalog iterates it.
+		s.mu.RLock()
+		der := cloneDerived(s.der)
+		s.mu.RUnlock()
+
+		merged, next, res := mergeCatalog(cur, der, req)
 
 		if req.Embed != nil {
 			vectors, err := req.Embed(ctx, merged.Entries)
@@ -466,6 +495,13 @@ func (s *Store) install(cat Catalog, next Derived, req ReconcileRequest, res *Re
 		touched[e.Path] = true
 	}
 
+	// ★ The stamp is the catalog file's stat, and the catalog has already
+	//   been written — so it can be stat'ed here, before the lock, and the
+	//   result assigned inside it. Stat'ing under the lock would hold it
+	//   across I/O, and assigning it after the unlock would write a guarded
+	//   field outside the guard.
+	stamp, _ := statStamp(filepath.Join(s.dir, catalogFile))
+
 	s.mu.Lock()
 	if s.der.Entries == nil {
 		s.der.Entries = make(map[string]DerivedEntry, len(touched))
@@ -496,12 +532,12 @@ func (s *Store) install(cat Catalog, next Derived, req ReconcileRequest, res *Re
 		s.der.Dim = req.Dim
 	}
 	s.cat = cloneCatalog(cat)
+	s.stamp = stamp
 	s.mu.Unlock()
 
 	if err := s.saveSidecar(); err != nil {
 		obs.Logger().Warn("[kb] sidecar write failed, vectors will be rebuilt next run", "err", err)
 	}
-	s.stamp, _ = statStamp(filepath.Join(s.dir, catalogFile))
 }
 
 func (s *Store) SetVectors(vectors map[string][]float32) error {
@@ -554,6 +590,12 @@ func (s *Store) readCatalog() (Catalog, []string) {
 	return c, c.Warnings
 }
 
+// load reads the catalog and the sidecar into the store.
+//
+// ★ It does not take the lock: it runs while the store is being opened,
+//
+//	before anybody else can reach it. The lazy path — refresh — is the one
+//	that can race, and that one is locked.
 func (s *Store) load() error {
 	b, err := os.ReadFile(filepath.Join(s.dir, catalogFile))
 	if err != nil {

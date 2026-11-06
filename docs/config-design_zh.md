@@ -1845,20 +1845,19 @@ agentkit/spec/write.go:persist.AtomicWrite
 
 ★ **`go test ./...` 是绿的**：根模块里 **902** 条顶层用例，**20** 个包有测试。
 
-★ **`go test -race ./...` 今天不是绿的** —— 这件事写在这里，而不是藏起来。竞态检测器在
-四个包里报了竞态：
+★ **`go test -race ./...` 也是绿的** —— 它曾经不是，而检测器报出的那四处竞态值得写
+下来，因为它们是同一个错误的不同形态：**锁就在那儿，只有一条路径没走它。**
 
-| 包 | 竞的是什么 |
-|---|---|
-| `agentkit/run` | `Turn.fail` 写 turn 状态（`agentkit/run/turn.go:217`），而另一个 goroutine 在读它 |
-| `api` | 读入一份 transcript 会改写会话的 id（`storage/filestore/transcript.go:70`），而另一个 goroutine 在读那个 id（`storage/filestore/session.go:171`） |
-| `kb` | `Store.Reconcile` / `Store.Docs` 写 store（`kb/store.go:504`、`kb/store.go:653`），而一次检索在读它 |
-| `agentkit/spec` | ★ 这个在**测试自己**里：捕获回调在 watcher 的 goroutine 上写「哪些分区变了」这个切片（`agentkit/spec/reload_test.go:305`），而测试 goroutine 在读它（`agentkit/spec/reload_test.go:322`）—— 两边都没有同步 |
+| 包 | 竞的是什么 | 现在是什么 |
+|---|---|---|
+| `agentkit/run` | `Turn.fail` 写 turn 的失败原因（`agentkit/run/turn.go:217`），而另一个 goroutine 在读它 —— 失败这条路可以从事件循环、被抢占的那一轮、关闭路径与启动超时四处到达，而它们会重叠 | 一把互斥锁护住该字段，**原因保持原来的语义**：最后落地的那个失败才是 `Wait` 报告的，所以被抢占那条路仍然回答 `ErrSuperseded` |
+| `api` | 读入一份 transcript 会改写会话的 id（`storage/filestore/transcript.go:70`），而另一个 goroutine 在读那个 id（`storage/filestore/session.go:171`）—— id **不是**不可变的，因为 transcript 的 header 才是权威 | 互斥锁移到结构体顶部，现在也护住身份字段；accessor 在锁内读它，id 在锁内读、磁盘操作在锁外做 |
+| `kb` | store 在锁外写自己的状态（`kb/store.go:504`、`kb/store.go:653`），而一次检索在读它 —— 其中一处写的是**派生**值（catalog 文件的 stat），另一处写的是另一 goroutine 原地改的那张 map 的**浅拷贝** | stat 在加锁前读出、在锁内赋值；派生状态在读锁内取**深拷贝**快照，因为浅拷贝仍然共享那张 map |
+| `agentkit/spec` | ★ 这个在**测试自己**里：捕获回调在 watcher 的 goroutine 上写「哪些分区变了」这个切片（`agentkit/spec/reload_test.go:305`），而测试 goroutine 在读它（`agentkit/spec/reload_test.go:322`）—— 两边都没有同步 | 通知改走 channel，测试在读之前先等 watcher 停下来，也在把包级钩子放回去之前等它停下来 —— 因为 watcher 也在读那个变量 |
 
-★ `agentkit/spec` 那个是测试的 bug，不是生产代码的竞态 —— 但它足以让该包的 `-race` 跑
-失败，而且它是四个里唯一属于配置层的一个。另外三个在运行循环、文件存储与知识库里；它们
-之所以写在这里，是因为本文档声称有一张测试矩阵，而一张把红色的 `-race` 悄悄藏起来的矩阵
-不算矩阵。
+★ 三个生产竞态各自都带着同一个后半句：**这把锁的范围从来没有被写下来过。** 放在结构体
+中间的互斥锁读起来就是「它护下面那些字段」，而有一条代码路径就照这个读法行事了。
+修的不只是漏掉的那把锁 —— 还有锁旁边那句「它是干什么的」。
 
 ### 11.6 ★ 已解析字段的生效状态
 
@@ -2024,7 +2023,7 @@ retry:
 | 全仓顶层用例数 | `grep -rhoP '^func \KTest\w+' --include='*_test.go' . \| sort -u \| wc -l` → **903**，其中一条属于嵌套模块 `sandbox-kit/examples/demo-project` ⇒ 根模块里是 **902** |
 | 根模块里有测试的包数 | `go list -f '{{.ImportPath}} {{len .TestGoFiles}} {{len .XTestGoFiles}}' ./... \| awk '$2+$3>0' \| wc -l` → **20** |
 | 整个测试套件是绿的 | `go test ./...` → 每个包都是 `ok` |
-| `-race` 今天不是绿的 | `go test -race ./...` → `agentkit/run`、`api`、`kb`、`agentkit/spec` 四个包 FAIL；`spec` 里那处在 `agentkit/spec/reload_test.go:305` 对 `agentkit/spec/reload_test.go:322` |
+| `-race` 现在是绿的 | `go test -race ./...` → 每个包都是 `ok`；修复过程见 §11.5 |
 | `policy/limits.yaml` 只能收紧 | 读 `mergeLimits` / `tighter`（`agentkit/spec/load.go:211`）+ 用例 `TestLimitsTightenButNeverLoosen` 与 `TestLimitsCannotLoosenTheGlobalBaseline` |
 | 空操作的上限会进 `deferred` | `collectNoopLimits`（`agentkit/spec/load.go:437`）+ `TestLooserLimitIsReportedAsDeferred` |
 | 生效的深度与重试次数 | `MaxDepth()` / `MaxRetries()`（`agentkit/spec/load.go:409`）+ `agentkit/spec/config_test.go` 里的用例 |
@@ -2100,6 +2099,6 @@ retry:
 | `agentkit/spec` → `agentkit/run` 的破例在上游已于 2026-10-21 撤销 | openheron **从未有过** —— 代码面是在撤销之后抽出来的，`agentkit/spec` 提到 `agentkit/run` 的地方只有一条注释 | 撤销是上游的一个设计决定；openheron 直接继承了撤销后的形态 |
 | `models[].context_window` 是纯元数据，不生效 | 它**生效**：它是压缩阈值的分母（`agentkit/spec/summarize.go:25`） | openheron 实施了压缩与上下文用量看板 —— 见 [context-usage-design.md](context-usage-design.md) |
 | agent 写了模型没有声明的思考档位会进 `deferred` | 不会 —— 它被静默忽略 | 词汇表在 `llm/`，档位名在 `agents/`，两个文件从不互相核对 |
-| `go test -race ./...` 全仓是绿的 | 今天**不是**：竞态检测器在 `agentkit/run`、`api`、`kb`、`agentkit/spec` 报了竞态 | `spec` 里那处在测试自己身上（`agentkit/spec/reload_test.go:305` 对 `agentkit/spec/reload_test.go:322`）；写出来而不是藏起来 |
+| `go test -race ./...` 全仓是绿的 | 它**曾经不是**：竞态检测器在 `agentkit/run`、`api`、`kb`、`agentkit/spec` 报了竞态 | `spec` 里那处在测试自己身上；四处现在都修好了，§11.5 逐条记着各自是什么 |
 | `tools/` 里的坏超时会被报成 `watch.debounce` | 这个标签是错的：`collectBadDurations` 给**每一条**坏时长都加上前缀 "watch.debounce fell back to default"，于是 `tools/http.yaml` 里的坏 `timeout` 落到了同一个标签下 | `decl.BadDurations()` 是一个不带来源信息的包级列表（`agentkit/spec/decl/decl.go:338`） |
 

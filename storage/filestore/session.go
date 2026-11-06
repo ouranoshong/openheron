@@ -30,6 +30,23 @@ const maxAuditRecords = 50
 // messages are backed by filestore.jsonl and appended in O_APPEND; pending lives
 // in state.json, which is rewritten atomically. Memory is only a cache of both.
 type FileSession struct {
+	// mu guards every mutable field of this struct: the identity fields
+	// (id, createdAt, updatedAt) as well as the cached content (messages,
+	// loaded, pending, title, count, agentID, decisions).
+	//
+	// ★ It is a plain Mutex, not an RWMutex, and the reason is the id:
+	//
+	//	id is NOT immutable. The transcript's header is authoritative, so
+	//	the first load may replace it (transcriptLocked, under this lock).
+	//	A session therefore has an identity that can change once, while it
+	//	is already reachable from the API handlers — which is why the
+	//	accessors below take the lock instead of reading the field.
+	//
+	// ★ It sits at the top on purpose. A mutex in the middle of a struct
+	//   reads as "it guards the fields below it", and that reading is how
+	//   the identity fields ended up outside the protection.
+	mu sync.Mutex
+
 	id        string
 	createdAt time.Time
 	updatedAt time.Time
@@ -40,7 +57,6 @@ type FileSession struct {
 	// in the same directory.
 	ledger *fileRunLedger
 
-	mu       sync.Mutex
 	messages []*schema.Message
 	loaded   bool
 	pending  *storage.PendingApproval
@@ -93,7 +109,17 @@ func openFullSession(root, id, legacyCkptRoot string) (*FileSession, error) {
 
 // Init lays down a brand new session: its directory, its workspace, its
 // transcript header and its first state.json.
+//
+// ★ It holds the lock for the whole call, because it writes the identity
+//
+//	fields (createdAt, agentID) and the message cache. It runs once, before
+//	the session is published to anybody else, so holding the lock across the
+//	file operations costs nothing — and it keeps the lock's scope honest:
+//	every write to a guarded field happens under it.
 func (fs *FileSession) Init(agentID string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
 	if err := ensureDir(sessionDir(fs.root, fs.id)); err != nil {
 		return err
 	}
@@ -122,12 +148,16 @@ func (fs *FileSession) Init(agentID string) error {
 // Delete removes everything this session has on disk: the transcript, the
 // state, the workspace and the checkpoints.
 func (fs *FileSession) Delete() error {
-	return os.RemoveAll(sessionDir(fs.root, fs.id))
+	// ★ The id is read under the lock, and the removal happens outside it:
+	//   removing a directory tree is not something to hold a lock for.
+	id, _ := fs.identity()
+	return os.RemoveAll(sessionDir(fs.root, id))
 }
 
 // exists reports whether this session is really on disk.
 func (fs *FileSession) exists() bool {
-	return fileExists(messagesPath(fs.root, fs.id))
+	id, _ := fs.identity()
+	return fileExists(messagesPath(fs.root, id))
 }
 
 // Meta is this session's metadata — what the sidebar shows.
@@ -164,12 +194,46 @@ func (fs *FileSession) HasCheckpoint(ctx context.Context) (bool, error) {
 	if fs.ckpt == nil {
 		return false, nil
 	}
-	_, found, err := fs.ckpt.Get(ctx, fs.id)
+	// ★ The id is read under the lock, but the lookup happens outside it:
+	//   the lookup touches the disk, and the lock is not there to serialise
+	//   I/O.
+	id, _ := fs.identity()
+	_, found, err := fs.ckpt.Get(ctx, id)
 	return found, err
 }
 
-func (fs *FileSession) ID() string           { return fs.id }
-func (fs *FileSession) CreatedAt() time.Time { return fs.createdAt }
+// ID returns the session's identifier.
+//
+// ★ It takes the lock: the id is **not** immutable — the transcript's header
+//
+//	is authoritative, and the first load may replace it — and the API
+//	handlers read it while the run's own goroutine may still be loading
+//	that transcript.
+func (fs *FileSession) ID() string {
+	id, _ := fs.identity()
+	return id
+}
+
+// CreatedAt returns when the session was created.
+//
+// ★ It takes the lock for the same reason ID does: the transcript's header
+//
+//	carries the creation time too, and the first load replaces it.
+func (fs *FileSession) CreatedAt() time.Time {
+	_, createdAt := fs.identity()
+	return createdAt
+}
+
+// identity returns the session's id and creation time under the lock.
+//
+// ★ The two are read together because they are written together: the
+//
+//	transcript's header carries both, and the first load replaces them.
+func (fs *FileSession) identity() (string, time.Time) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.id, fs.createdAt
+}
 
 func (fs *FileSession) Append(msg *schema.Message) error {
 	if msg == nil {
@@ -550,7 +614,12 @@ func titleOf(messages []*schema.Message) string {
 	return defaultTitle
 }
 
-// loadState reads state.json into the session's memory.
+// loadState reads state.json into the cached fields.
+//
+// ★ It does not take the lock: it runs while the session is being opened,
+//
+//	before anybody else can reach it. The lazy path — the transcript load —
+//	is the one that can race, and that one is locked.
 func (fs *FileSession) loadState() error {
 	st, _, err := readState(statePath(fs.root, fs.id))
 	if err != nil {
