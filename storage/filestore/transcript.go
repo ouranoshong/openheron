@@ -110,6 +110,8 @@ func readHeader(sc *bufio.Scanner, path string) (logHeader, error) {
 
 // initTranscript writes a fresh header to this session's transcript, failing if
 // the file already exists.
+//
+// ★ The caller must hold fs.mu: it reads the id.
 func (fs *FileSession) initTranscript(createdAt time.Time) error {
 	path := messagesPath(fs.root, fs.id)
 	h := logHeader{
@@ -175,7 +177,13 @@ func (fs *FileSession) writeMessage(msg *schema.Message) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(messagesPath(fs.root, fs.id), os.O_APPEND|os.O_WRONLY, 0o644)
+	// ★ The id is read under the lock, and the append happens outside it:
+	//   the append is I/O, and the lock is not there to serialise I/O.
+	//   It matters that the id is read at all: the transcript's header is
+	//   authoritative, so the id can change once, while an append may be
+	//   racing that first load.
+	id, _ := fs.identity()
+	f, err := os.OpenFile(messagesPath(fs.root, id), os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}

@@ -265,6 +265,8 @@ func (fs *FileSession) Append(msg *schema.Message) error {
 // stateForWrite builds the state to persist, carrying the cached title
 // forward. Every writeState call must go through it: a bare state{…}
 // would silently drop the title on the next approval write.
+//
+// ★ The caller must hold fs.mu: it reads the cached fields.
 func (fs *FileSession) stateForWrite() state {
 	st := state{
 		Title:        fs.title,
@@ -468,7 +470,15 @@ func (fs *FileSession) SetTitle(title string) error {
 	return nil
 }
 
-func (fs *FileSession) Workspace() string { return workspacePath(fs.root, fs.id) }
+// Workspace returns the path of this session's own workspace.
+//
+// ★ It takes the lock: the id is not immutable — the transcript's header is
+//
+//	authoritative, and the first load may replace it.
+func (fs *FileSession) Workspace() string {
+	id, _ := fs.identity()
+	return workspacePath(fs.root, id)
+}
 
 func (fs *FileSession) PutFile(name string, r io.Reader) (string, error) {
 	if r == nil {
@@ -636,6 +646,8 @@ func (fs *FileSession) loadState() error {
 }
 
 // writeState persists this session's state.
+//
+// ★ The caller must hold fs.mu: it reads the id and writes updatedAt.
 func (fs *FileSession) writeState(st state) error {
 	st.Version = formatVersion
 	st.UpdatedAt = time.Now().UTC()
