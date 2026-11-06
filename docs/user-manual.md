@@ -157,7 +157,7 @@ openheron
 
 Open <http://localhost:8080>.
 
-`openheron init` writes six files:
+`openheron init` writes seven files:
 
 ```
 your/project/
@@ -167,12 +167,16 @@ your/project/
     │   └── task.md          # executor agent: does the actual work
     ├── llm/
     │   └── deepseek.yaml    # model profile
+    ├── mcps/
+    │   └── example.yaml.disabled   # an MCP server example, not a live server
     ├── policy/
     │   ├── permissions.yaml # approval policy
     │   └── limits.yaml      # caps on quantities
     └── server/
         └── config.yaml      # process parameters (not hot-reloaded)
 ```
+
+★ The file under `mcps/` is an **example**, not a configuration — see §4.7.
 
 ★ **Existing files are not overwritten** (unless you pass `--force`), so running it in
 an already-configured project is safe.
@@ -245,8 +249,9 @@ Available frontmatter keys:
 | `max_iterations` | Cap on tool-loop iterations |
 | `summarize_at` | When this agent's context is **compacted** into a summary: `80%` of the model's window (the default), an absolute token count (`104858`), or `0` for never |
 | `subagents` | Whom it may delegate to (see §5) |
-| `disabled_tools` | Tool deny-list effective for **this agent** |
+| `disabled_tools` | Tool deny-list effective for **this agent** (an MCP tool may also be named by a prefix — see §4.8) |
 | `skills` | The skills this agent may use — an allow-list of the folders under `skills/` (**not declared means every skill**, an empty list means none) |
+| `mcps` | The MCP servers this agent may use — **not declared means every server**, an empty list means none (see §4.8) |
 | `temperature` / `max_tokens` | Sampling parameters |
 | `reasoning` | Reasoning tier: `off` / `low` / `high` / `max` (names defined by the vendor profile) |
 
@@ -416,6 +421,117 @@ means **none**. A skill outside the list is not advertised to the model, and ask
 it by name fails — a model cannot load what it cannot see. A name that is not in the
 directory is reported in the log when the agent is built, rather than ignored.
 
+### 4.7 MCP servers (`mcps/`)
+
+An MCP server is a program that offers tools to a model. openheron mounts **one server
+per file**, and **the file's presence is the definition** — there is no `enabled` key.
+
+`mcps/<server>.yaml` — the file's name is the server's name:
+
+```yaml
+# .openheron/mcps/github.yaml
+transport: stdio
+command: npx
+args: ["-y", "@modelcontextprotocol/server-github"]
+env:
+  GITHUB_TOKEN: ${GITHUB_TOKEN}
+timeout: 30s
+call_timeout: 60s
+tools: []
+allows: [read_issue, list_issues]
+```
+
+The same server over HTTP:
+
+```yaml
+# .openheron/mcps/remote.yaml
+transport: http
+url: https://mcp.example.com/mcp
+headers:
+  Authorization: Bearer ${REMOTE_TOKEN}
+timeout: 30s
+call_timeout: 60s
+```
+
+| Field | Applies to | Meaning |
+|---|---|---|
+| `transport` | both | `stdio` (a child process) or `http` (**streamable HTTP** — there is no SSE transport). Defaults to `stdio` |
+| `command` | stdio | The executable to run. **Required** |
+| `args` | stdio | The command's arguments |
+| `env` | stdio | The child's environment, layered over the inherited one |
+| `url` | http | The server's address. **Required** |
+| `headers` | http | Sent on every request |
+| `timeout` | both | The ceiling for connect, initialize and list tools (default `30s`) |
+| `call_timeout` | both | The ceiling for one tool call (default `60s`) |
+| `tools` | both | A **filter** on the server's own tool names; absent or empty means all of them |
+| `allows` | both | The server's own tool names that run **without** asking; everything else asks |
+
+★ **The file's name must match `^[a-z0-9]+(_[a-z0-9]+)*$`.** A name with a run of
+underscores is refused: the exposed name `mcp__a__b__x` could not be read back later —
+is that the server `a` with the tool `b__x`, or the server `a__b` with the tool `x`?
+
+★ **`openheron init` writes `mcps/example.yaml.disabled`** — an *example*, not a
+configuration. **Renaming it to `mcps/<server>.yaml` is the act of defining that server.**
+A live `example.yaml` would make every agent that does not narrow its list try to start
+a server that is not installed.
+
+★ **What fails at startup:** an unknown `transport`; a stdio server with no `command`; an
+http server with no `url`; `env:` on an http server; an agent naming a server that does
+not exist.
+
+★ **What does not fail:** a bad `timeout` — it degrades to the default and is reported in
+the notices; an unset `${ENV}` in `env:` — that entry is left out and reported. A wrong
+timeout changes *how long we wait*, not *what happens*, so it must not keep a server from
+starting.
+
+**The names you will see.** A server's tool `create_issue` reaches the model as
+`mcp__github__create_issue`. The server's own name and the exposed name are both shown
+in the `/mcps` panel (see §6.8).
+
+★ **The file does not have to name the credential.** In a sandbox the variable holds the
+`credential@1` sentinel and the host's proxy swaps in the real value on the way out — so
+the sentinel reaches the server through the inherited environment, and the same holds for
+an http server's `headers:`.
+
+★ **`mcps/` is hot.** A change takes effect on the next turn — no restart.
+
+### 4.8 Which servers an agent gets
+
+Two levers, and they are independent.
+
+**The `mcps:` key in the agent's frontmatter** decides which servers the agent may use:
+
+```yaml
+---
+model: deepseek/deepseek-flash
+mcps: [github]
+---
+```
+
+| The `mcps:` key | Means |
+|---|---|
+| absent | **every** configured server |
+| `[]` | **none** |
+| `[github]` | exactly those servers |
+
+★ A sub-agent carries a list of its **own**, next to its own `skills` and
+`disabled_tools` — the list is read from the agent that is running, not from the root's.
+
+**`disabled_tools` is the second lever.** It takes an exact tool name and a **trailing**
+`*` prefix:
+
+```yaml
+disabled_tools: [mcp__github__*]
+```
+
+- `mcp__github__*` — every tool of the `github` server.
+- `mcp__*` — every MCP tool of every server.
+- `mcp__github__create_issue` — exactly that one tool.
+
+★ **`mcp*foo` and a lone `*` are refused at startup.** Only a *trailing* `*` is a pattern,
+and a lone `*` would take the agent's own tools away as well: a rule whose reach differs
+from what it reads as is a silent mismatch.
+
 ## 5. Multiple agents and delegation
 
 ### 5.1 Who may delegate to whom
@@ -481,6 +597,7 @@ In the interface:
 | `/attach` | Attach files to the current session |
 | `/settings` | Open the config editor |
 | `/agents` | Switch the session's agent |
+| `/mcps` | Show the MCP servers of this agent — see §6.8 |
 | `/compact` | **Compact the conversation now** — see §6.6 |
 | `/skill` | Pick a named skill for this task |
 | `/review` | Review the current changes or the given paths |
@@ -506,7 +623,7 @@ silently starting a fresh turn.
 
 ### 6.3 The config editor
 
-`/settings` opens it. It can edit `llm/`, `agents/`, `policy/` and `tools/`.
+`/settings` opens it. It can edit `llm/`, `agents/`, `policy/`, `tools/` and `mcps/`.
 
 The write path has several gates:
 
@@ -516,6 +633,8 @@ The write path has several gates:
 - **A file with no YAML content is rejected** — a file that is empty, or holds nothing
   but comments, carries no configuration at all. The message names the fields the file
   needs; under `tools/` it says which tool is missing what.
+- **A file under `mcps/` must be named `<server>.yaml`**, and the server name must match
+  the pattern of §4.7 — any other name is refused at save time.
 - **Optimistic concurrency**: if the file changed elsewhere, saving reports a conflict
   and lets you choose to overwrite or to back off.
 
@@ -622,6 +741,29 @@ A client whose connection drops comes back with the run's id — `POST /v2/run` 
 /v2/sessions/{id}/runs` says whether the run is still going, and the run's own history
 is there for the times when it is not.
 
+### 6.8 `/mcps` — the MCP servers of this agent
+
+`/mcps` is an **action**, not a prompt: it opens a dialog, and it never writes into the
+transcript and never reaches the model. The status is **read**, not generated — a model
+describing the servers would be a second, lossy truth about a fact the runtime already
+holds.
+
+The dialog is titled "MCP servers" and holds one block per configured server:
+
+- the server's name, its transport (`stdio` or `http`), and its state — `ready`,
+  `unreachable` or `unused`;
+- one row per tool: the server's own name, the exposed name (`mcp__github__create_issue`),
+  the tier (`allow` or `ask`), and the state.
+
+A configuration with no server says "No MCP servers are configured".
+
+★ **Opening the dialog starts the servers it asks about**, so it can answer "is my server
+broken?" — otherwise the answer would be "run a turn and find out". A server the agent
+does not use is `unused` and carries no tool rows.
+
+The **Refresh** button re-reads the state, so you can fix a server and see the fix without
+closing the dialog.
+
 ## 7. The knowledge base
 
 The knowledge base is an **optional** local corpus retrieval layer: it turns a set of
@@ -716,6 +858,7 @@ publicly, or narrow `listen_addr` to `127.0.0.1`.
 | POST | `/v2/run` | **SSE entry point**: ask a question, or answer an approval (see §6.7) |
 | GET | `/v2/skills` | The skill list |
 | GET | `/v2/agents` `/v2/agents/:agentId` | Agents and their effective tool tables |
+| GET | `/v2/mcps` | The MCP servers of one agent (`?agent=`); see §6.8 |
 | GET | `/v2/config` | The effective configuration |
 | GET | `/v2/health` | Health check (includes `deferred` notices) |
 | GET | `/v2/runtime` | Runtime status |
@@ -795,6 +938,16 @@ configuration it only orchestrates.
 
 **Q: `/v2/run` says `threadId is required`**
 Create the session with `POST /v2/sessions` first.
+
+**Q: The model does not see the MCP server's tools?**
+Open `/mcps` (see §6.8). A server the agent does not use reads `unused`; a tool the agent
+cannot reach reads `blocked`, and the reason names `disabled_tools`, `mcps` or
+`policy.deny`. A server that reads `unreachable` carries the error that says why it could
+not be started.
+
+**Q: An MCP server does not start?**
+The startup error names the file and the field. `mcps/` is hot, so a fix takes effect on
+the next turn — no restart.
 
 **Q: The port is taken / the interface will not open?**
 Change the port in `listen_addr`, or override it with the `LISTEN_ADDR` environment

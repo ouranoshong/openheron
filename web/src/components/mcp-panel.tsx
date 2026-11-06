@@ -100,7 +100,7 @@ export function MCPPanel({ open, onClose, agentId }: MCPPanelProps) {
 
         {servers !== null && servers.length === 0 ? (
           <p data-testid="mcp-panel-empty" className="text-muted-foreground text-sm">
-            No MCP servers are configured.
+            No MCP servers are configured
           </p>
         ) : null}
 

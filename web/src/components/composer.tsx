@@ -95,6 +95,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
   const switchBlocked = busy || blocked
   const focusAfterSettings = useRef(false)
   const pickerWasOpen = useRef(false)
+  const mcpWasOpen = useRef(false)
   const addFiles = useStore((s) => s.addFiles)
   const removeFile = useStore((s) => s.removeFile)
 
@@ -214,6 +215,23 @@ export function Composer({ inset = true }: { inset?: boolean }) {
       el.setSelectionRange(el.value.length, el.value.length)
     })
   }, [settingsOpen])
+
+  useEffect(() => {
+    if (mcpPanel) {
+      mcpWasOpen.current = true
+      return
+    }
+    if (!mcpWasOpen.current) return
+    mcpWasOpen.current = false
+    const focusComposer = () => {
+      const el = taRef.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(el.value.length, el.value.length)
+    }
+    focusComposer()
+    requestAnimationFrame(focusComposer)
+  }, [mcpPanel])
 
   useEffect(() => {
     if (picker.open) {

@@ -150,6 +150,7 @@ frontmatter 是**严格解码**的 —— 写错一个键就是启动错误，�
 | GET | `/v2/sessions/:id/messages` | 回放历史 + 用量 |
 | POST | `/v2/sessions/:id/abort` | 中断在跑的 turn |
 | GET | `/v2/agents` `/v2/agents/:agentId` | agent 及其生效工具表 |
+| GET | `/v2/mcps` | 某个 agent 的 MCP 服务器（`?agent=<agentId>`，可省略） |
 | GET | `/v2/config` `/v2/health` `/v2/runtime` | 生效配置 / 健康 / 运行时状态 |
 | GET/POST/PUT/DELETE | `/v2/settings/item` | 配置编辑器的读写 |
 

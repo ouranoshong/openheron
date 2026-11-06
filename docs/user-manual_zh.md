@@ -24,7 +24,7 @@ make build
 只想快速试一下：
 
 ```bash
-make build-go     # 只构建后端（不含界面），迭代 Go 代码时更快
+make build-go     # backend only (no UI) — faster while iterating on Go code
 ```
 
 ★ **或者一条命令装上发布出来的二进制。** 每个 `v*` tag 都会发布同样的单文件可执行程序，
@@ -138,30 +138,34 @@ sha256sum -c checksums.txt --ignore-missing
 ## 2. 第一次使用
 
 ```bash
-cd /你的项目
-openheron init                      # 在当前目录下生成配置
-export DEEPSEEK_API_KEY=sk-...     # 密钥只从环境变量读
+cd /your/project
+openheron init                      # generate the configuration in the current directory
+export DEEPSEEK_API_KEY=sk-...     # secrets are read from the environment only
 openheron
 ```
 
 打开 <http://localhost:8080>。
 
-`openheron init` 会写六个文件：
+`openheron init` 会写七个文件：
 
 ```
-你的项目/
+your/project/
 └── .openheron/
     ├── agents/
-    │   ├── main.md          # 入口 Agent：理解需求、拆任务、委派、验收
-    │   └── task.md          # 执行 Agent：真正动手干活
+    │   ├── main.md          # entry agent: understand, split, delegate, verify
+    │   └── task.md          # executor agent: does the actual work
     ├── llm/
-    │   └── deepseek.yaml    # 模型档案
+    │   └── deepseek.yaml    # model profile
+    ├── mcps/
+    │   └── example.yaml.disabled   # an MCP server example, not a live server
     ├── policy/
-    │   ├── permissions.yaml # 审批策略
-    │   └── limits.yaml      # 配额上限
+    │   ├── permissions.yaml # approval policy
+    │   └── limits.yaml      # caps on quantities
     └── server/
-        └── config.yaml      # 进程自身参数（不热重载）
+        └── config.yaml      # process parameters (not hot-reloaded)
 ```
+
+★ `mcps/` 下那个文件是**示例**，不是配置 —— 见 §4.7。
 
 ★ **已存在的文件不会被覆盖**（除非加 `--force`），所以在一个已经配好的项目里跑它是安全的。
 
@@ -185,7 +189,7 @@ openheron
 **只有三级，不向上查找**：
 
 ```
---config-dir  →  $OPENHERON_CONFIG_DIR  →  <项目根>/.openheron
+--config-dir  →  $OPENHERON_CONFIG_DIR  →  <project-root>/.openheron
 ```
 
 - **默认那一档不存在会帮你创建**。
@@ -196,7 +200,7 @@ openheron
 如果默认根下没有 `agents/main.md`，启动会直接告诉你：
 
 ```
-no configuration at /你的项目/.openheron: run `openheron init` to create one
+no configuration at /your/project/.openheron: run `openheron init` to create one
 ```
 
 ## 4. 配置怎么写
@@ -230,8 +234,9 @@ frontmatter 可用键：
 | `max_iterations` | 工具循环的轮数上限 |
 | `summarize_at` | 这个 Agent 的上下文什么时候被**压缩**成摘要：模型窗口的 `80%`（默认）、绝对 token 数（`104858`）、或 `0` 表示永不 |
 | `subagents` | 它能委派给谁（见 §5） |
-| `disabled_tools` | 对**这个 Agent** 生效的工具禁用表 |
+| `disabled_tools` | 对**这个 Agent** 生效的工具禁用表（MCP 的工具可以按前缀写 —— 见 §4.8） |
 | `skills` | 这个 Agent 能用的技能 —— `skills/` 下文件夹的白名单（**不写就是全部**，写空列表就是一个都没有） |
+| `mcps` | 这个 Agent 能用的 MCP 服务器 —— **不写就是全部**，写空列表就是一个都没有（见 §4.8） |
 | `temperature` / `max_tokens` | 采样参数 |
 | `reasoning` | 思考档位：`off` / `low` / `high` / `max`（名字由厂商档案定义） |
 
@@ -386,6 +391,112 @@ skills: [refactor, review]
 不会出现在给模型看的技能清单里，点名去调也会失败 —— 看不见的东西调不到。
 名单里写了目录里没有的名字，Agent 装配时日志会报出来，不会被忽略。
 
+### 4.7 MCP 服务器（`mcps/`）
+
+MCP 服务器是一个把工具提供给模型的程序。openheron **一个文件挂一个服务器**，
+而且**文件在就是定义** —— 没有 `enabled` 这个键。
+
+`mcps/<server>.yaml` —— 文件名就是服务器的名字：
+
+```yaml
+# .openheron/mcps/github.yaml
+transport: stdio
+command: npx
+args: ["-y", "@modelcontextprotocol/server-github"]
+env:
+  GITHUB_TOKEN: ${GITHUB_TOKEN}
+timeout: 30s
+call_timeout: 60s
+tools: []
+allows: [read_issue, list_issues]
+```
+
+同一个服务器走 HTTP 的写法：
+
+```yaml
+# .openheron/mcps/remote.yaml
+transport: http
+url: https://mcp.example.com/mcp
+headers:
+  Authorization: Bearer ${REMOTE_TOKEN}
+timeout: 30s
+call_timeout: 60s
+```
+
+| 字段 | 用在哪 | 说明 |
+|---|---|---|
+| `transport` | 两者 | `stdio`（一个子进程）或 `http`（**streamable HTTP** —— 没有 SSE 这个传输方式）。默认 `stdio` |
+| `command` | stdio | 要执行的命令。**必填** |
+| `args` | stdio | 命令的参数 |
+| `env` | stdio | 子进程的环境变量，叠在继承来的那份之上 |
+| `url` | http | 服务器的地址。**必填** |
+| `headers` | http | 每次请求都带上 |
+| `timeout` | 两者 | 连接、握手、列工具的时限（默认 `30s`） |
+| `call_timeout` | 两者 | 单次工具调用的时限（默认 `60s`） |
+| `tools` | 两者 | 对**服务器自己的**工具名的**过滤**；不写或写空就是全都要 |
+| `allows` | 两者 | 服务器自己的工具名里**不用问**的那些；其余都要问 |
+
+★ **文件名必须匹配 `^[a-z0-9]+(_[a-z0-9]+)*$`。** 带一串连续下划线的名字会被拒绝：
+暴露出来的名字 `mcp__a__b__x` 以后没法反解回来 —— 那是服务器 `a` 带工具 `b__x`，
+还是服务器 `a__b` 带工具 `x`？
+
+★ **`openheron init` 写的是 `mcps/example.yaml.disabled`** —— 那是**示例**，不是配置。
+**把它改名成 `mcps/<server>.yaml`，这个动作本身就是定义这个服务器。**
+一个活的 `example.yaml` 会让每个没有收窄名单的 Agent 去启动一个根本没装的服务器。
+
+★ **会在启动时报错的**：写了不认识的 `transport`；stdio 服务器没有 `command`；
+http 服务器没有 `url`；http 服务器上写了 `env:`；Agent 点名了一个不存在的服务器。
+
+★ **不会启动报错的**：`timeout` 写坏了 —— 它退回到默认值，并在告警里报出来；
+`env:` 里的 `${ENV}` 没设 —— 那一条被跳过，并在告警里报出来。写错的 timeout 改的是
+「等多久」，不是「会怎样」，所以它不该拦住服务器启动。
+
+**你会看到的名字。** 服务器自己的工具 `create_issue` 到模型那里叫
+`mcp__github__create_issue`。服务器自己的名字和暴露出来的名字在 `/mcps` 面板里都列出来
+（见 §6.8）。
+
+★ **文件里不必写出凭据的名字。** 在沙箱里那个变量装的是 `credential@1` 哨兵，
+宿主上的代理在出网时才把真值换上去 —— 于是哨兵顺着继承的环境到达服务器，
+http 服务器的 `headers:` 也是一回事。
+
+★ **`mcps/` 是热的。** 改了下一轮就生效 —— 不用重启。
+
+### 4.8 一个 Agent 能拿到哪些服务器
+
+有两根杠杆，互相独立。
+
+**Agent frontmatter 里的 `mcps:` 键**决定这个 Agent 能用哪些服务器：
+
+```yaml
+---
+model: deepseek/deepseek-flash
+mcps: [github]
+---
+```
+
+| `mcps:` 这个键 | 含义 |
+|---|---|
+| 不写 | **全部**已配置的服务器 |
+| `[]` | **一个都没有** |
+| `[github]` | 正好这些服务器 |
+
+★ 子 Agent 有**自己**的名单，和它自己的 `skills`、`disabled_tools` 并排 —— 读的是
+正在跑的那个 Agent 的名单，不是根 Agent 的。
+
+**第二根杠杆是 `disabled_tools`。** 它接受一个精确的工具名，和一个**结尾**的 `*` 前缀：
+
+```yaml
+disabled_tools: [mcp__github__*]
+```
+
+- `mcp__github__*` —— `github` 这个服务器的全部工具。
+- `mcp__*` —— 所有服务器的全部 MCP 工具。
+- `mcp__github__create_issue` —— 就那一个工具。
+
+★ **`mcp*foo` 和单独一个 `*` 会在启动时报错。** 只有**结尾**的 `*` 才是前缀模式，
+而单独一个 `*` 会把这个 Agent 自己的工具也一起端掉：一条作用范围和字面读法不一致的
+规则，就是一次无声的错配。
+
 ## 5. 多 Agent 与委派
 
 ### 5.1 谁能委派给谁
@@ -448,6 +559,7 @@ agent:
 | `/attach` | 往当前会话附加文件 |
 | `/settings` | 打开配置编辑器 |
 | `/agents` | 切换当前会话的 Agent |
+| `/mcps` | 看看这个 Agent 的 MCP 服务器 —— 见 §6.8 |
 | `/compact` | **立刻压缩当前对话** —— 见 §6.6 |
 | `/skill` | 为这次任务指定一个技能 |
 | `/review` | 复查当前改动或给定路径 |
@@ -471,7 +583,7 @@ agent:
 
 ### 6.3 配置编辑器
 
-`/settings` 打开。它能改：`llm/` `agents/` `policy/` `tools/`。
+`/settings` 打开。它能改：`llm/` `agents/` `policy/` `tools/` `mcps/`。
 
 写入有几道闸门：
 
@@ -480,6 +592,8 @@ agent:
   要用 `${ENV_VAR}` 或 `@file:/path`。
 - **没有 YAML 内容的文件被拒** —— 纯空、或者只有注释的文件根本没有配置。报错会点名
   这个文件需要哪些字段；在 `tools/` 下还会说清是哪个工具缺了什么。
+- **`mcps/` 下的文件必须叫 `<server>.yaml`**，服务器名字还要匹配 §4.7 的模式 ——
+  别的名字在保存时就被拒。
 - **乐观并发**：如果文件在别处被改过，保存会报冲突，让你选覆盖还是放弃。
 
 ### 6.4 上下文仪表盘
@@ -570,6 +684,26 @@ This session is running in another window — stop it to take over
 `runId`、**不带问题**——就能拿到这一轮剩下的部分。`GET /v2/sessions/{id}/runs`
 说这个 run 还跑不跑；它不跑的时候，那一轮的历史就在那里。
 
+### 6.8 `/mcps` —— 这个 Agent 的 MCP 服务器
+
+`/mcps` 是一个**动作**，不是提示词：它打开一个对话框，**不写进对话记录，也永远不到模型那里**。
+状态是**读**出来的，不是生成出来的 —— 让模型去描述这些服务器，等于造一个关于运行时
+已知事实的、有损的第二份真相。
+
+对话框标题是 "MCP servers"，每个已配置的服务器一块：
+
+- 服务器的名字、它的传输方式（`stdio` 或 `http`）、以及它的状态 —— `ready`、
+  `unreachable` 或 `unused`；
+- 每个工具一行：服务器自己的名字、暴露出来的名字（`mcp__github__create_issue`）、
+  档位（`allow` 或 `ask`）、以及状态。
+
+一个服务器都没配时，对话框说的是 "No MCP servers are configured"。
+
+★ **打开对话框会把它问到的那些服务器启动起来**，所以它能回答「我的服务器是不是坏了」——
+否则答案只能是「跑一轮看看」。这个 Agent 没用到的服务器是 `unused`，不带工具行。
+
+**Refresh** 按钮会重读一次状态，所以你改完服务器不用关掉对话框就能看到效果。
+
 ## 7. 知识库
 
 知识库是**可选**的本地语料检索层：把一批 markdown 文档变成 Agent 能检索的资料。
@@ -599,11 +733,11 @@ top_k: 8
 ### 7.2 命令行
 
 ```bash
-openheron kb index                 # 建索引
-openheron kb index docs/a.md       # 只索引指定文件
-openheron kb search "配置根怎么解析"  # 检索
-openheron kb status                # 看索引现状
-openheron kb status --json         # 机器可读
+openheron kb index                 # build the index
+openheron kb index docs/a.md       # index only the given files
+openheron kb search "how is the config root resolved"   # search
+openheron kb status                # inspect the index
+openheron kb status --json         # machine-readable
 ```
 
 三条命令都支持 `--config-dir <path>`，用来指向别的配置根。
@@ -624,12 +758,12 @@ Agent 拿到两个工具：
 ## 8. 命令行速查
 
 ```
-openheron [--config-dir <path>] [--project-root <path>]   启动服务
-openheron init [选项]                                     生成最小可运行配置
-openheron kb index [--config-dir] [--json] [文件...]       建索引
-openheron kb search [--config-dir] <查询>                  检索
-openheron kb status [--config-dir] [--json]                看索引现状
-openheron version                                         打印版本号
+openheron [--config-dir <path>] [--project-root <path>]   start the server
+openheron init [options]                                   generate a minimal runnable configuration
+openheron kb index [--config-dir] [--json] [files...]      build the index
+openheron kb search [--config-dir] <query>                 search
+openheron kb status [--config-dir] [--json]                inspect the index
+openheron version                                         print the version
 ```
 
 ## 9. HTTP 接口速查
@@ -656,6 +790,7 @@ openheron version                                         打印版本号
 | POST | `/v2/run` | **SSE 入口**：提问，或回复审批 |
 | GET | `/v2/skills` | 技能清单 |
 | GET | `/v2/agents` `/v2/agents/:agentId` | Agent 及其生效工具表 |
+| GET | `/v2/mcps` | 某个 Agent 的 MCP 服务器（`?agent=`）；见 §6.8 |
 | GET | `/v2/config` | 生效配置 |
 | GET | `/v2/health` | 健康检查（含 `deferred` 告警） |
 | GET | `/v2/runtime` | 运行时状态 |
@@ -666,15 +801,15 @@ openheron version                                         打印版本号
 ### 9.1 跑一轮
 
 ```bash
-# 1. 建会话
+# 1. Create a session
 curl -s -X POST localhost:8080/v2/sessions \
   -H 'content-type: application/json' -d '{"agentId":"main"}'
 # → {"threadId":"...","state":"idle",...}
 
-# 2. 提问（SSE 流）
+# 2. Ask (SSE stream)
 curl -N -X POST localhost:8080/v2/run \
   -H 'content-type: application/json' \
-  -d '{"threadId":"<上一步的 id>","query":"读一下 README"}'
+  -d '{"threadId":"<the id from step 1>","query":"read the README"}'
 ```
 
 ★ **`threadId` 必填**。不传会得到
@@ -696,7 +831,7 @@ curl -N -X POST localhost:8080/v2/run \
   "threadId": "...",
   "resume": [
     {"interruptId": "...", "payload": {"approved": true}},
-    {"interruptId": "...", "payload": {"approved": false, "reason": "别动那个文件"}}
+    {"interruptId": "...", "payload": {"approved": false, "reason": "do not touch that file"}}
   ]
 }
 ```
@@ -729,6 +864,14 @@ curl -N -X POST localhost:8080/v2/run \
 
 **Q：`/v2/run` 报 `threadId is required`**
 先 `POST /v2/sessions` 建会话。
+
+**Q：模型看不见 MCP 服务器的工具？**
+打开 `/mcps`（见 §6.8）。这个 Agent 没用到的服务器写着 `unused`；够不着的工具写着
+`blocked`，括号里的理由会点名 `disabled_tools`、`mcps` 或 `policy.deny`。
+写着 `unreachable` 的服务器旁边带着出错原因，说清它为什么起不来。
+
+**Q：MCP 服务器起不来？**
+启动报错会点名是哪个文件的哪个字段。`mcps/` 是热的，所以改完下一轮就生效 —— 不用重启。
 
 **Q：端口被占 / 界面打不开？**
 `listen_addr` 改端口，或用环境变量 `LISTEN_ADDR` 覆盖。

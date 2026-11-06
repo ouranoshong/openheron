@@ -285,6 +285,57 @@ const FAKE_SKILLS = [
   },
 ]
 
+// The MCP view the fake backend serves.
+//
+// ★ It carries the three states the panel has to show: a server that is up,
+//   one that is unreachable, and one the agent does not use.
+const FAKE_MCP_SERVERS = [
+  {
+    name: "github",
+    transport: "stdio",
+    status: "ready",
+    error: "",
+    tools: [
+      {
+        name: "read_issue",
+        exposedName: "mcp__github__read_issue",
+        tier: "ask",
+        status: "available",
+        reason: "",
+      },
+      {
+        name: "delete_repo",
+        exposedName: "mcp__github__delete_repo",
+        tier: "ask",
+        status: "available",
+        reason: "",
+      },
+    ],
+  },
+  {
+    name: "files",
+    transport: "http",
+    status: "unreachable",
+    error: "the command is not on the PATH",
+    tools: [
+      {
+        name: "read_file",
+        exposedName: "mcp__files__read_file",
+        tier: "allow",
+        status: "available",
+        reason: "",
+      },
+    ],
+  },
+  {
+    name: "deploy",
+    transport: "stdio",
+    status: "unused",
+    error: "",
+    tools: [],
+  },
+]
+
 const FAKE_COMMANDS = [
   { name: "new", description: "Start a new thread", kind: "action", action: "new_thread" },
   { name: "stop", description: "Stop the current run", kind: "action", action: "stop_run" },
@@ -302,6 +353,12 @@ const FAKE_COMMANDS = [
     description: "Compact the conversation into a summary",
     kind: "action",
     action: "compact",
+  },
+  {
+    name: "mcps",
+    description: "Show the MCP servers of this agent",
+    kind: "action",
+    action: "open_mcps",
   },
   {
     name: "skill",
@@ -1013,6 +1070,7 @@ export function startFakeServer(port = 0): FakeServer {
   let seq = 0
   let scenario: ScenarioName = "simple"
   let agentsMode: "default" | "multi" | "many" | "grew" = "default"
+  let mcpMode: "default" | "empty" = "default"
   let defaultRoot = "main"
 
   const find = (id: string) => threads.find((t) => t.threadId === id)
@@ -1416,6 +1474,10 @@ export function startFakeServer(port = 0): FakeServer {
         if (agentsMode === "grew") return json(FAKE_AGENTS_GREW)
         return json(FAKE_AGENTS)
       }
+      if (path === "/v2/mcps" && req.method === "GET") {
+        const agent = url.searchParams.get("agent") ?? "main"
+        return json({ agent, servers: mcpMode === "empty" ? [] : FAKE_MCP_SERVERS })
+      }
       if (path === "/v2/health") return json({ ok: true })
 
       if (path === "/__fake/reset" && req.method === "POST") {
@@ -1425,6 +1487,7 @@ export function startFakeServer(port = 0): FakeServer {
         seq = 0
         scenario = "simple"
         agentsMode = "default"
+        mcpMode = "default"
         defaultRoot = "main"
         return json({ ok: true })
       }
@@ -1435,6 +1498,11 @@ export function startFakeServer(port = 0): FakeServer {
         }
         defaultRoot = agent
         return json({ ok: true, defaultRoot })
+      }
+      if (path === "/__fake/mcp-mode" && req.method === "POST") {
+        const mode = url.searchParams.get("mode") ?? "default"
+        mcpMode = mode === "empty" ? "empty" : "default"
+        return json({ ok: true, mode: mcpMode })
       }
       if (path === "/__fake/threads/clear" && req.method === "POST") {
         threads = []

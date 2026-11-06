@@ -173,6 +173,7 @@ to narrow it.
 | GET | `/v2/sessions/:id/messages` | Replay the history + usage |
 | POST | `/v2/sessions/:id/abort` | Abort the running turn |
 | GET | `/v2/agents` `/v2/agents/:agentId` | Agents and their effective tool tables |
+| GET | `/v2/mcps` | The MCP servers of one agent (`?agent=<agentId>`, optional) |
 | GET | `/v2/config` `/v2/health` `/v2/runtime` | Effective config / health / runtime status |
 | GET/POST/PUT/DELETE | `/v2/settings/item` | Config editor reads and writes |
 
