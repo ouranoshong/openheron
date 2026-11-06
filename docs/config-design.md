@@ -55,8 +55,8 @@
 | 14 | Sub-agent spec | lives in `decl.SubAgentSpec`, the assembly layer uses it directly | `agentkit/build → agentkit/spec` is an allowed one-way dependency anyway; a second copy would "compile fine and be one value short at runtime" (`agentkit/spec/decl/decl.go:412-430`, `agentkit/spec/subagent.go:18-28`, `agentkit/build/spec.go:22`) |
 | 15 | MCP tool naming | every name exposed to the model is namespaced `mcp__<server>__<tool>` | **proposal — not implemented** (see §6.7). MCP tool names are **decided by the remote server**: they collide with reserved tool names (`ls` / `execute`) and often carry dots (`github.create_issue`) — the latter does not pass the provider's function-name character set. The namespace turns "a collision" into "impossible". The only trace in the tree is the placeholder comment at `agentkit/build/tools.go:35` |
 | 16 | Policy matching | an agent's `disabled_tools` accepts an exact name **+** a trailing `*` prefix pattern | **proposal — not implemented** (see §6.3). The tiers moved into the tools' own files, so the one statement left that is about a **namespace** rather than a tool is "this agent gets no MCP tools" — and a prefix is what names a namespace. Today the tables match **exactly** (`agentkit/build/policy.go:39-47`, `agentkit/build/policy.go:94-105`) |
-| 17 | Where a tier is written | **with the tool**: the `ask` tier lives in the tool's own file (`tools/*.yaml`, `mcps/*.yaml`); ★ there is **no global list** any more — `policy/permissions.yaml` disappears | **proposal — not implemented** (see §6.3, §6.6). ★ a tier is a statement about **one tool**, so it belongs in that tool's file — and there it uses **the same vocabulary** (`http.yaml` says `post`, so it can say `ask: [post]`; the central file had to name the internal `request_post`). ★ the global `deny` goes with it: "not exposed" is said twice already (a file's whitelist, an agent's `disabled_tools`), and a third place is one more to keep in sync — and it was the only one that had to speak the exposed names |
-| 18 | The default tier | the **code** carries one per group; a file that says nothing gets it, a file that says something wins | ★ the built-in defaults are **known** defaults — openheron knows that `write_file` writes and that `execute` runs commands, so it asks exactly about the dangerous ones. An MCP server's tools are **discovered at runtime**: openheron cannot know what `delete_repo` does, and under stdio the server is a child process with the agent's own privileges ⇒ its default is **ask**, and a trusted server says `tier: allow` once |
+| 17 | Where a tier is written | **with the tool**: each file's `allows:` names what runs **without a nod**, and everything else asks; ★ there is **no global list** any more — `policy/permissions.yaml` disappears | **proposal — not implemented** (see §6.3, §6.6). ★ a tier is a statement about **one tool**, so it belongs in that tool's file — and there it uses **the same vocabulary** (`http.yaml` says `post`, so it can say `allows: [post]`; the central file had to name the internal `request_post`). ★ the global `deny` goes with it: "not exposed" is said twice already (a file's whitelist, an agent's `disabled_tools`), and a third place is one more to keep in sync — and it was the only one that had to speak the exposed names |
+| 18 | The default tier | **`ask`, everywhere** — the code carries one allow list for the tools it knows are read-only, and a file's `allows:` replaces it for the tools that file provides | ★ one rule for everything: the filesystem tools, the HTTP tool and an MCP server behave the same way, and there is no per-group default to remember. ★ the code's list exists because `task` — the delegation tool — has **no file of its own**, and an agent that cannot delegate without a click cannot delegate at all. An MCP server's tools are **discovered at runtime**: openheron cannot know what `delete_repo` does, and under stdio the server is a child process with the agent's own privileges ⇒ asking by default is the safe side of the trade |
 
 ### "One entity, one file" rather than a single-file partition table
 
@@ -1046,7 +1046,7 @@ into each tool's own file (§6.6, §6.7) — and **removes the global `deny` alt
 
 ★ **Why `ask` would move.** A tier is a statement about **one tool**: "this one asks
 first". That statement belongs in the tool's own file — and putting it there also puts it
-in **the same vocabulary**: `http.yaml` says `post`, so `http.yaml` can say `ask: [post]`,
+in **the same vocabulary**: `http.yaml` says `post`, so `http.yaml` can say `allows: [post]`,
 where the central file had to name the internal tool name `request_post` (§6.6).
 
 ★ **Why the global `deny` would go with it.** "Not exposed" is already expressible twice,
@@ -1092,7 +1092,7 @@ file's vocabulary and the exposed names behind it, and `agentkit/spec` may not i
 | 4 | an exact entry and a prefix entry are **equivalent** — a match removes the tool for that agent | there is no tier to choose here; the tool is simply not there for that agent |
 
 ★ **This is the one remaining place the prefix syntax earns its keep.** The tiers moved
-into the tools' own files, where a file's own `tier` covers a whole class without a
+into the tools' own files, where a file's own `allows:` covers a whole class without a
 pattern at all; what is left is the **narrowing**, and "this agent gets no MCP tools" is
 the one statement that is about a **namespace** rather than about a tool.
 
@@ -1340,7 +1340,7 @@ column while the tool's own file spoke the second, so `http.yaml` said `post` an
 mismatch waiting to happen, and a mistyped name is invisible until the tool behaves
 differently than the file says.
 
-⇒ **A file's `tools:` / `tier:` / `ask:` are written in the second column.** The provider
+⇒ **A file's `tools:` and `allows:` are written in the second column.** The provider
 translates; nothing else has to know the exposed name.
 
 (The exposed names are `agentkit/spec/decl/decl.go:279-286`, `kb/tools.go:16-17` and eino's
@@ -1354,8 +1354,23 @@ thing everywhere:
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `tools` | `[]string` | all of them | **the exposed set** — the **raw** names (this file's own vocabulary, *not* the exposed ones) that this file offers. Absent = all of them |
-| `tier` | `string` | `allow` | the tier for the exposed ones: `allow` \| `ask` |
-| `ask` | `[]string` | `[]` | the exposed ones that ask first — **in this file's vocabulary** |
+| `allows` | `[]string` | the code's list for these tools | the exposed ones that run **without a nod** — **in this file's vocabulary** |
+
+★ **The default is `ask`, and `allows:` is the exception.** Every tool asks first unless
+something says otherwise. There is no per-group default and no special case: the same
+rule covers the filesystem tools, the HTTP tool and an MCP server.
+
+★ **The code ships one allow list**, for the tools it knows are read-only — `ls`,
+`read_file`, `glob`, `grep`, `task`, `write_todos`, `skill`, `duckduckgo_search`,
+`wikipedia_search`, `kb_search`, `request_get`. Three of them have no file of their own
+(`task`, `write_todos`, `skill` — the framework's own), so their exceptions can only
+live in the code; the rest are in their files.
+
+★ **A file's `allows:` replaces the code's list for the tools that file provides** — the
+more specific wins. So `tools/filesystem.yaml` may widen the set (`execute` does not
+ask) or narrow it (`read_file` asks after all), and a file that is **absent** leaves
+the code's list in place — an existing workspace does not suddenly start asking for
+every read.
 
 ★ **There is no `deny` in a file, and in the proposal there is no global `deny` either**
 (§6.3). "Not exposed" is said in exactly two places: this file's **whitelist** — each
@@ -1366,55 +1381,59 @@ and an agent's **`disabled_tools`**.
 only one that had to speak the **exposed** names while the tools' own files speak
 theirs. ⇒ **one mechanism per level, one vocabulary per level.**
 
-★ **The three keys answer three different questions, and none of them subsumes
-another:** `tools:` says **what is offered**, `ask:` says **which of those ask first**,
-and `tier:` says **what the rest do** (`allow` or `ask`).
+★ **The two keys answer two different questions, and neither subsumes the other:**
+`tools:` says **what is offered**, and `allows:` says **which of those run without a
+nod**. Everything else asks.
 
-★ **The order inside a file**: `ask` beats `tier`. So `tier: allow` + `ask: [post]` means
-"only post asks", and `tier: ask` alone means "everything this file provides asks".
+★ **`allows:` is the whole of it.** There is no second key and no per-group default:
+the default is `ask`, and the list names the exceptions. A file that lists nothing asks
+about everything it offers.
 
-★ **A key that repeats the default says nothing.** In `tools/filesystem.yaml` the
-default tier is `allow`, so `tier: allow` is a line that changes nothing — the file
-needs only its `ask:` list. ⇒ the templates write the tier only where it is **not** the
-code's default: the MCP server's `tier: ask`, where the line also covers the tools the
-server has not offered yet.
-
-★ **`tier` is what lets an MCP server's tier cover tools it has not offered yet.** A
+★ **An `allows:` list covers the tools the server has not offered yet**, because it is
+a statement about the **server**, not about the names it happens to have right now. A
 server's tool list is only known at runtime, so a rule that named the tools could not
-cover a tool the server adds tomorrow. `tier: ask` covers every tool the server will
-ever offer — which is the thing a prefix rule could never do for the `ask` tier (§6.3).
+cover a tool the server adds tomorrow — the list can, because it names the exceptions
+in the server's own vocabulary and the rest asks by default.
 
-#### ★ The default tiers
+#### ★ The default is ask, and `allows:` is the exception
 
-★ **The fallback**: a tool that no file names is **allow** — straight through. That is
-the rule that keeps "read a file" from asking every single time.
+★ **One rule, everywhere.** A tool asks first unless something says otherwise. The
+exceptions are named in the **`allows:`** list of the file that provides the tool, in
+that file's own vocabulary.
 
-★ **Each group has a code default**, and the file overrides it:
+★ **The code ships one allow list** for the tools it knows are read-only:
 
-| Group | File | The default |
+```
+ls  read_file  glob  grep
+task  write_todos  skill
+duckduckgo_search  wikipedia_search  kb_search  request_get
+```
+
+★ **Why the code has one at all.** `task` — the delegation tool — has **no file of its
+own**: it comes from the framework's agent, not from a `tools/` entry. Under "ask by
+default" it would ask before every delegation, and an agent that cannot delegate
+without a click cannot delegate at all. ⇒ the framework's own tools are the exception
+that only the code can express.
+
+★ **A file's `allows:` replaces the code's list for the tools that file provides.** The
+more specific wins, so a file may widen the set (`execute` does not ask) or narrow it
+(`read_file` asks after all). A file that is **absent** leaves the code's list in place
+— an existing workspace does not suddenly start asking for every read.
+
+| File | Its `allows:` | The rest |
 |---|---|---|
-| the filesystem tools | `tools/filesystem.yaml` | `write_file` `edit_file` `execute` → **ask**; the rest → allow |
-| the HTTP tool | `tools/http.yaml` | allow |
-| web search | `tools/web_search.yaml` | allow |
-| the encyclopedia | `tools/wikipedia.yaml` | allow |
-| the knowledge base | `tools/kb.yaml` | `kb_search` → allow; `kb_index` → **ask** (it writes the index) |
-| ★ **an MCP server** | `mcps/<server>.yaml` | ★ **ask** — every tool of the server |
-| the framework's own (`task` `write_todos` `skill`) | no file | allow |
+| `tools/filesystem.yaml` | `ls` `read_file` `glob` `grep` | `write_file` `edit_file` `execute` → ask |
+| `tools/http.yaml` | the read methods | the write methods → ask |
+| `tools/web_search.yaml` | `duckduckgo_search` | — |
+| `tools/wikipedia.yaml` | `wikipedia_search` | — |
+| `tools/kb.yaml` | `kb_search` | `kb_index` → ask (it writes the index) |
+| ★ `mcps/<server>.yaml` | usually empty | ★ **everything asks** — the server's tools are discovered at runtime, openheron cannot know what `delete_repo` does, and under stdio the server is a **child process** with the agent's own privileges (§6.7) ⇒ the cost of guessing wrong is asymmetric: one extra click against a destructive call nobody saw |
 
-★ **One rule for all of them: a key that is not written means the default; a key that
-is written wins.** So `ask: []` in `tools/filesystem.yaml` is an explicit "none of these
-asks", while deleting the line brings the default back.
-
-★ **Why an MCP server defaults to `ask` and the built-ins do not.** The built-in
-defaults are **known** defaults: openheron knows that `write_file` writes and that
-`execute` runs commands, so it knows which ones to ask about. An MCP server's tools are
-**discovered at runtime** — openheron cannot know what `delete_repo` does — and under
-stdio the server is a **child process** with the agent's own privileges (§6.7).
-⇒ the cost of guessing wrong is asymmetric: one extra click against a destructive call
-nobody saw. A server the user trusts says so **once**:
+★ **A trusted MCP server says so once** — and the exceptions are the server's own tool
+names:
 
 ```yaml
-tier: allow
+allows: [read_issue, list_issues]
 ```
 
 ★ **The defaults live where they are read.** The factory template for
@@ -1444,18 +1463,20 @@ nothing could narrow the set. The file gives them a home:
 
 ```yaml
 # .openheron/tools/filesystem.yaml
-tier: allow
-ask:  [write_file, edit_file, execute]
+#
+# ★ The default is ask, so the list names the exceptions: the read-only tools
+#   run straight through, and write_file / edit_file / execute ask.
+allows: [ls, read_file, glob, grep]
 ```
 
 The set is eino's filesystem middleware: `ls`, `read_file`, `write_file`, `edit_file`,
 `glob`, `grep`, `execute` (`eino@v0.9.22/adk/middlewares/filesystem/filesystem.go:38-46`).
 
-★ **An absent file means the default set with the default tiers.** The file is a
-**tuner**, not a switch: the filesystem tools are the agent's core capability, not an
-optional integration — the same reason the knowledge base is switched by its corpus rather
-than by its file. ★ `openheron init` writes it anyway, so the tiers are **visible and
-editable** rather than implied.
+★ **An absent file means the code's allow list stands.** The file is a **tuner**, not a
+switch: the filesystem tools are the agent's core capability, not an optional integration
+— the same reason the knowledge base is switched by its corpus rather than by its file.
+★ `openheron init` writes it anyway, so the tiers are **visible and editable** rather than
+implied.
 
 ★ **The whitelist is how a read-only agent is spelled** — the tools that are not in it
 are simply not offered:
@@ -1463,7 +1484,7 @@ are simply not offered:
 ```yaml
 # .openheron/tools/filesystem.yaml
 tools: [ls, read_file, glob, grep]
-tier: allow
+allows: [ls, read_file, glob, grep]
 ```
 
 #### ★ Migration (what about the old configuration)
@@ -1475,7 +1496,7 @@ ignored:
 |---|---|---|
 | the `tools:` section in `server/config.yaml` | split into `tools/http.yaml` `tools/web_search.yaml` `tools/wikipedia.yaml` | a startup error: `field tools not found in type decl.Server` |
 | `kb/config.yaml` | `tools/kb.yaml` | **silent** — the knowledge base is no longer read, `kb_search` disappears and nothing says so |
-| `ask:` in `policy/permissions.yaml` | the tier moves into the tool's own file: `tools/filesystem.yaml` for `write_file` / `edit_file` / `execute`, `tools/kb.yaml` for `kb_index` | a startup error that names the new home — ★ deliberately **not** silent: a tier that stopped being read would drop those tools into the allow fallback, and the fallback does not stop them |
+| `ask:` in `policy/permissions.yaml` | the tiers move into the tool's own file: `tools/filesystem.yaml` and `tools/kb.yaml` name what runs **without a nod** in their `allows:` lists | a startup error that names the new home — ★ deliberately **not** silent: a tier that stopped being read would flip those tools from "asks" to "does not ask", which is the wrong way to fail |
 
 ★ That "silent" one is the part of this move to watch. `kb/` is not one of the loaded categories
 (`agentkit/spec/config.go:40-66`), so an old `kb/config.yaml` is simply never read: `corpus`
@@ -1576,7 +1597,7 @@ thing twice).
 
 | Who decides | What it governs |
 |---|---|
-| the file in `tools/` | **whether the capability is on** (the file is not there = the tool does not exist), **which of its tools are offered** (the whitelist), **and the tier of those** (`tier` / `ask`) |
+| the file in `tools/` | **whether the capability is on** (the file is not there = the tool does not exist), **which of its tools are offered** (the whitelist), **and which of those run without a nod** (`allows:`) |
 | `policy/permissions.yaml` | ★ **gone in the proposal** — there is no global boundary any more (§6.3) |
 | each agent's `disabled_tools` | **narrowing**: this one agent does not use this tool (the inner layer, it can control that) |
 
@@ -1584,12 +1605,13 @@ thing twice).
 file that provides the tool, and then the agent's `disabled_tools` — which removes the
 tool for that agent and nothing else.
 
-★ The fallback tier is **allow** ✅ — a tool that is not named (ls / read_file / task / skill …)
-goes straight through ✅ ✅. **Only the ones named in `ask` / `deny` are stopped** ✅ ✅.
+★ **The fallback tier is `ask`** ✅ — a tool that nobody names in an `allows:` list
+interrupts the turn for a human ✅ ✅. The code's own allow list is what keeps the
+read-only tools and the framework's `task` from asking every single time ✅.
 
 ★ The knowledge base (`kb.corpus`) is **not** switched on by the file's presence but by a
 non-empty `corpus` (`agentkit/build/kb.go:15`), and its two tools go through the tiers like
-everything else: `kb_search` is a plain `allow`, and `kb_index` — a write operation — asks
+everything else: `kb_search` is in `allows:`, and `kb_index` — a write operation — asks
 by default (`tools/kb.yaml`).
 
 ### 6.7 `mcps/<server>.yaml` (★ decided 2026-11-06, **not implemented**)
@@ -1625,8 +1647,7 @@ the **configuration surface** only.
 | | `timeout` | `LenientDuration` | `30s` | the ceiling for connect + initialize + list tools |
 | | `call_timeout` | `LenientDuration` | `60s` | the ceiling for **one tool call** — ★ without it, a server that never answers holds the call lock and every other call of that server queues behind it |
 | | `tools` | `[]string` | `[]` → all | ★ **the exposed set** — the server's **raw** tool names to offer (not the namespaced ones); absent = all of them |
-| | `tier` | `string` | `ask` | the tier for every tool this server offers — ★ including the ones it has **not offered yet**; `allow` \| `ask` |
-| | `ask` | `[]string` | `[]` | the server's **own** tool names that ask first |
+| | `allows` | `[]string` | `[]` | the server's **own** tool names that run **without a nod** — ★ everything else this server offers asks, including the tools it has **not offered yet** |
 
 ★ `timeout` is a **lenient** duration: a wrong value degrades to the default and is
 recorded in `deferred`, exactly like `debounce` and `start_timeout`. A wrong timeout
@@ -1674,10 +1695,13 @@ server's own vocabulary — the typical form:
 
 ```yaml
 # .openheron/mcps/github.yaml
-tier: ask                       # every tool of this server asks first
+#
+# ★ The default is ask, so an empty list means "every tool of this server asks".
+#   A trusted server names its exceptions:
+allows: [read_issue, list_issues]
 ```
 
-★ "Writing `tier: ask`" means "every tool this server offers needs a nod" — a whole
+★ "An empty `allows:`" means "every tool this server offers needs a nod" — a whole
 **class** of external tools gets a tier, without writing the tool names down first.
 
 ★ **And it covers the tools the server has not offered yet.** A server's tool list is
@@ -1693,6 +1717,10 @@ out** — in the server's own vocabulary, which is where that decision belongs:
 # .openheron/mcps/github.yaml
 tools: [create_issue, list_issues]
 ```
+
+★ And `allows:` is the other half of the same file: it names the ones that need **no
+nod**. The whitelist says *which* are offered; the allow list says *which of those run
+straight through*.
 
 ★ **The permissions of a stdio server are the permissions of the process**: the MCP server
 is a child process that openheron starts, it can write files and it can reach the network.
@@ -2059,7 +2087,7 @@ agentkit/spec/write.go:persist.AtomicWrite
 | 9 | The model name is overridden at request level; **one instance per agent, not per model** | one instance per model ⇒ pointless construction overhead |
 | 10 | (proposal, **not implemented**) MCP tools always carry the `mcp__` namespace, and **only** MCP tools may use that prefix | without the namespace, a server that exposes `ls` takes the whole agent down (it collides with a reserved tool name, which is a load-time error); without the "only MCP" half, a built-in tool could take the namespace and a prefix rule in the policy would quietly shadow it |
 | 11 | (proposal, **not implemented**) An agent's `disabled_tools` supports only a **trailing** `*` prefix pattern; every other spelling errors at load time | a rule that reads differently from what it actually covers is a silent mismatch |
-| 12 | (proposal, **not implemented**) A tier is written **in the tool's own file and vocabulary**, and there is **no global list** to contradict it | one tool's permission is one fact in one place; a file that says `post` says `ask: [post]`, and nothing has to translate between two vocabularies |
+| 12 | (proposal, **not implemented**) A tier is written **in the tool's own file and vocabulary** — the file's `allows:` names what runs without a nod, and there is **no global list** to contradict it | one tool's permission is one fact in one place; a file that says `post` says `allows: [post]`, and nothing has to translate between two vocabularies |
 | 13 | (proposal, **not implemented**) The filesystem tools have a file of their own, `tools/filesystem.yaml`, and it is a **tuner** — an absent file means the default set with the default tiers | the filesystem tools are the agent's core capability, not an optional integration; the file makes their tiers visible and editable without making them optional |
 
 ★ Rows **10** and **11** are **proposals**: there is no MCP dependency, no `mcps/`

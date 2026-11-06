@@ -227,8 +227,9 @@ name.
 
 ★ **The tiers are not in this list at all.** They moved into the tool's own file
 (§7.3), and a file speaks **its own vocabulary** — so "every tool of this server asks"
-is `tier: ask` in `mcps/<server>.yaml`, not a pattern in a shared list. That form is
-**stronger** than a pattern: it covers the tools the server has **not offered yet**.
+is an **empty** `allows:` in `mcps/<server>.yaml`, not a pattern in a shared list. That
+form is **stronger** than a pattern: it covers the tools the server has **not offered
+yet**.
 
 ★ **The global `deny` is gone too** (§6.3 of the configuration design). "Not exposed" is
 said in exactly two places now: a file's **whitelist**, which says what that file offers,
@@ -247,10 +248,11 @@ tool — "this agent gets no MCP tools" — and a prefix is what names a namespa
 
 ### 4.2 The prefix syntax adds no tier
 
-★ The tiers are unchanged, and they live in the tools' own files now (§7.3):
+★ The tiers live in the tools' own files now (§7.3), and only two are left — the
+`deny` tier went with the global list:
 
 ```
-allow → ask (the fallback is allow)
+allow (if the file's allows list names it) → ask (everything else)
 ```
 
 ★ The prefix syntax only decides **whether an entry matches a name** — it adds no tier,
@@ -312,8 +314,7 @@ not to the tool.
 | `timeout` | `LenientDuration` | `30s` | the ceiling for connect + initialize + list tools |
 | `call_timeout` | `LenientDuration` | `60s` | the ceiling for **one tool call** (§6.5) |
 | `tools` | `[]string` | `[]` → all | ★ **the exposed set** — the server's **raw** tool names to offer (not the namespaced ones); absent = all of them |
-| `tier` | `string` | `ask` | the tier for every tool this server offers — ★ including the ones it has **not offered yet**; `allow` \| `ask` |
-| `ask` | `[]string` | `[]` | the server's **own** tool names that ask first |
+| `allows` | `[]string` | `[]` | the server's **own** tool names that run **without a nod** — ★ everything else this server offers asks, including the tools it has **not offered yet** |
 
 ★ **`command` is resolved in the sandbox's PATH, never against the project root.** The
 workspace must not get to choose what runs: a command resolved against the project root
@@ -325,14 +326,13 @@ there (§8) — and outside a Kit the user installs it themselves.
 install, the **config** says how to invoke it (`command` plus `args`). The config's
 `command` names what the Kit laid down.
 
-★ The tier keys mean the same thing in every file of `tools/` and `mcps/`, and they are
-written in **that file's own vocabulary**: `ask: [create_issue]` here is the server's own
-name, not the composed one. The provider translates it to the name the model sees (§7.3).
+★ The keys mean the same thing in every file of `tools/` and `mcps/`, and they are written
+in **that file's own vocabulary**: `allows: [create_issue]` here is the server's own name,
+not the composed one. The provider translates it to the name the model sees (§7.3).
 
-★ **A key that repeats the default says nothing.** The filesystem's default tier is
-`allow`, so `tools/filesystem.yaml` needs only its `ask:` list — the templates write the
-tier only where it is **not** the code's default (the MCP server's `tier: ask`, which
-also covers the tools the server has not offered yet). See `docs/config-design.md` §6.6.
+★ **The default is `ask`, and `allows:` is the exception.** There is no second key and no
+per-group default — the same rule covers the filesystem tools, the HTTP tool and an MCP
+server. See `docs/config-design.md` §6.6.
 
 ★ **There is no `deny` in a file, and there is no global one either** (§4). "Not
 exposed" is said in exactly two places: this file's **whitelist** — a tool that is not
@@ -389,9 +389,9 @@ other missing value.
 ★ **Inheritance is not a new exposure.** The agent's own tools already read the same
 things: `read_file` reads the project, and `execute` runs a command in this
 environment. An MCP server that sees the environment sees nothing the agent could not
-already see. The difference is only that `execute` is in the `ask` tier by default and
-an MCP tool may not be. ⇒ If that asymmetry matters to you, put `mcp__*` in the `ask`
-tier (§4.4).
+already see. The difference is only that `execute` is not in the `allows:` list and
+an MCP tool may not be. ⇒ If that asymmetry matters to you, put `mcp__*` in that
+agent's `disabled_tools` (§4).
 
 ★ The configuration's `env:` does not **replace** the inherited environment, it
 **layers on top** of it. A configuration with an empty `env:` still produces a child
@@ -420,12 +420,9 @@ env:
   #   host proxy swaps in the real key on the way out (§8.1).
   GITHUB_TOKEN: ${GITHUB_TOKEN}
 
-# ★ The tier of every tool this server offers — including the ones it has not
-#   offered yet. Default: ask.
-tier: allow
-
-# ★ The ones that ask first, on top of the tier above.
-ask: [create_issue]
+# ★ The default is ask, so an empty list means "every tool of this server asks".
+#   A trusted server names its exceptions:
+allows: [read_issue, list_issues]
 
 # ★ The tools to offer, by the server's own names. Absent = all of them.
 tools: [create_issue, list_issues, search_issues]
@@ -457,9 +454,9 @@ and that is the `headers:` map (§8.1).
 #
 # ★ The filesystem tool set. These tools are always there — this file tunes them.
 #
-# ★ The default tier here is allow, so only the ones that ask are named. Writing
-#   "tier: allow" would say nothing.
-ask: [write_file, edit_file, execute]
+# ★ The default is ask, so the list names the exceptions: the read-only tools
+#   run straight through, and write_file / edit_file / execute ask.
+allows: [ls, read_file, glob, grep]
 # tools: [ls, read_file, glob, grep]   # uncomment for a read-only agent
 ```
 
@@ -474,8 +471,8 @@ query_instruction: ""
 batch_size: 10
 max_batch_chars: 1200
 top_k: 8
-# ★ kb_index writes the index on disk, so it asks. kb_search does not.
-ask: [kb_index]
+# ★ kb_search reads and does not ask; kb_index writes the index on disk, so it asks.
+allows: [kb_search]
 ```
 
 #### `tools/http.yaml`
@@ -485,8 +482,9 @@ ask: [kb_index]
 methods: [get]
 headers: {}
 timeout: 30s
-# ★ The write methods change the outside world, so they ask.
-ask: [post, put, delete]
+# ★ The read methods run straight through; the write methods change the outside
+#   world, so they ask.
+allows: [get]
 ```
 
 #### ★ Who writes these files
@@ -635,7 +633,7 @@ The whole path, from the file on disk to the gate's decision:
   │  spec.loadMCP (agentkit/spec/load.go) — the file name and the fields are
   │  validated here, and a bad one is a startup error
   ▼
-decl.MCPServerCfg — transport / command / args / env / tier / ask / tools / timeouts
+decl.MCPServerCfg — transport / command / args / env / allows / tools / timeouts
   │
   │  snapshot.buildHeavy (agentkit/build/snapshot.go)
   │    → mcpToolProvider.Provide (agentkit/build/mcptools.go)
@@ -646,8 +644,8 @@ the mcps manager (agentkit/build/mcpmanager.go):
   │
   │  each tool:  name = mcp__<server>__<tool>     (sanitized; a bad name is skipped
   │                                                with a warning — §3.2)
-  │              tier = the file's tier and ask list, read in the SERVER's own
-  │                    names and mapped to the exposed ones
+  │              tier = the file's allows list, read in the SERVER's own names
+  │                    and mapped to the exposed ones
   ▼
 []tool.BaseTool — the stdio ones wrapped in the per-server mutex (§6.5)
   │
@@ -663,15 +661,15 @@ the gate: Policy.TierOf("mcp__github__create_issue")
   └─ ask   → the turn is interrupted for a human → resumed
 ```
 
-★ **The tier resolution** is two lookups, and the gate never asks which file a tool
-came from — the assembly fills the table with the **exposed** names:
+★ **The tier resolution** is one lookup plus a fallback, and the gate never asks which
+file a tool came from — the assembly fills the table with the **exposed** names:
 
 ```
 Policy.TierOf(name):
   1. the file that provides the tool:
-       its per-item ask list, in its own names       → ask
-       its tier (allow | ask)                        → that tier
-  2. otherwise                                       → allow
+       its allows list, in its own names            → allow
+       otherwise                                    → ask
+  2. otherwise                                       → ask
 ```
 
 ★ **The assembly happens in `agentkit/build`, not in `agentkit/spec`** (§7.3): only the
@@ -698,9 +696,9 @@ A tool named `mcp__github__create_issue` is looked up exactly like any other:
 Policy.TierOf("mcp__github__create_issue")
 ```
 
-and lands in `ask` if the server's file says `tier: ask` (§7.3), or in `allow` if it
-says `tier: allow`. The gate code does not change at all: it reads the tier and acts
-(§1.3).
+and lands in `ask` unless the server's file names it in `allows:` (§7.3) — which is
+the same rule every tool follows. The gate code does not change at all: it reads the
+tier and acts (§1.3).
 
 ★ **This is the whole point of the namespace.** The gate, the tables, the API's
 `EffectiveTools` view and the per-agent narrowing all work on names. A name that is
@@ -714,10 +712,10 @@ reach the network and read anything openheron can read. The "only public network
 rule that §6.6 of the config design sets for the HTTP tools **does not apply** — it
 bounds what the *tool* may reach, not what the *server* may do.
 
-This is the strongest argument for the namespace and for giving each server its own tier:
-they are how a class of external tools gets a tier **before** anyone has enumerated its
-members. `tier: ask` in `mcps/<server>.yaml` is one line that says "every tool from this
-server asks first" (§7.3).
+This is the strongest argument for the namespace and for giving each server its own
+list: they are how a class of external tools gets a tier **before** anyone has
+enumerated its members. An **empty** `allows:` in `mcps/<server>.yaml` is one line that
+says "every tool from this server asks first" (§7.3).
 
 ### 7.3 The tier lives with the tool
 
@@ -728,7 +726,10 @@ a file's whitelist and an agent's `disabled_tools`:
 
 ```yaml
 # .openheron/mcps/github.yaml
-tier: ask                       # every tool of this server asks first
+#
+# ★ The default is ask, so an empty list means "every tool of this server asks".
+#   A trusted server names its exceptions:
+allows: [read_issue, list_issues]
 ```
 
 ★ **Why the file's own vocabulary.** A tier is a statement about **one tool**, so it
@@ -739,7 +740,7 @@ mistyped name stays invisible until the tool behaves differently than the file s
 
 | Where | Vocabulary | Decides |
 |---|---|---|
-| a file's `tools` / `tier` / `ask` | **the file's own** names (`create_issue`) | what this file offers, and the tier of those |
+| a file's `tools` / `allows` | **the file's own** names (`create_issue`) | what this file offers, and which of those need no nod |
 | an agent's `disabled_tools` | exposed names | this agent does not get these tools |
 
 ★ **The order**: the file that provides the tool first, then the agent's narrowing —
@@ -760,15 +761,16 @@ declarations and its own vocabulary. ⇒ the gate, the tables, the API's
 knows its file's vocabulary and the exposed names behind it, and `agentkit/spec` may not
 import `kb` (the iron rule) nor eino (where the filesystem tool names live).
 
-★ **A server's default tier is `ask`.** The built-in groups have **known** defaults —
-openheron knows that `write_file` writes and that `execute` runs commands, so it knows
-which ones to ask about. A server's tools are **discovered at runtime**: openheron cannot
-know what `delete_repo` does, and under stdio the server is a **child process** with the
-agent's own privileges (§7.2). ⇒ the cost of guessing wrong is asymmetric — one extra
-click against a destructive call nobody saw. A server the user trusts says so **once**:
+★ **The default is `ask` for a server — and for everything else.** The built-in groups
+are not the exception any more: the code ships an allow list for the tools it knows are
+read-only, and every other tool asks. A server's tools are **discovered at runtime**:
+openheron cannot know what `delete_repo` does, and under stdio the server is a **child
+process** with the agent's own privileges (§7.2). ⇒ the cost of guessing wrong is
+asymmetric — one extra click against a destructive call nobody saw. A server the user
+trusts names its exceptions **once**:
 
 ```yaml
-tier: allow
+allows: [read_issue, list_issues]
 ```
 
 ★ **A tier change takes effect on the next turn.** `mcps/` is a **hot** partition, so a
@@ -983,8 +985,8 @@ through.
 | Environment | the child sees openheron's environment, with `env:` overriding the same names |
 | Environment | an unset `${ENV}` in `env:` is deferred, not fatal |
 | Credentials | a `credential@1` sentinel reaches the child through the inherited environment, with no field in the configuration naming it |
-| Tier | a server's `tier: ask` covers the tools it has **not offered yet** |
-| Tier | a file's `tier` beats the allow fallback, and nothing else |
+| Tier | an empty `allows:` covers the tools a server has **not offered yet** |
+| Tier | a file's `allows:` names what runs without a nod; everything else asks |
 | Manager | a crashed stdio child is started again on the next call |
 | Manager | a changed tool list bumps the generation and rebuilds the tools, with no restart |
 | Manager | the snapshot swap closes the old generation's clients and kills their children |

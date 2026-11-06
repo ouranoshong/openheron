@@ -57,8 +57,8 @@
 | 14 | 子 agent 规格 | 放 `decl.SubAgentSpec`，装配层直接用 | `agentkit/build → agentkit/spec` 本就是允许的单向依赖；另立一份会「编译不报错、运行期少个值」（`agentkit/spec/decl/decl.go:412-430`、`agentkit/spec/subagent.go:18-28`、`agentkit/build/spec.go:22`） |
 | 15 | MCP 工具命名 | 暴露给模型的名字一律加命名空间 `mcp__<server>__<tool>` | **提案，尚未实现**（见 §6.7）。MCP 工具名**由远端服务器定**：会撞保留工具名（`ls` / `execute`），也常带点号（`github.create_issue`）—— 后者过不了 provider 的 function name 字符集。命名空间把「撞名」变成「不可能」。树上唯一的痕迹是 `agentkit/build/tools.go:35` 的占位注释 |
 | 16 | 策略匹配 | 某个 agent 的 `disabled_tools` 接受精确名 **+** 尾部 `*` 的前缀模式 | **提案，尚未实现**（见 §6.3）。档位搬进了工具自己的文件，于是仅剩的那句关于**命名空间**而不是关于某个工具的话是「这个 agent 不要任何 MCP 工具」—— 而前缀正是给命名空间起名的那个东西。今天的表是**精确匹配**（`agentkit/build/policy.go:39-47`、`agentkit/build/policy.go:94-105`） |
-| 17 | 档位写在哪 | **跟着工具走**：`ask` 档住在工具自己的文件里（`tools/*.yaml`、`mcps/*.yaml`）；★ **不再有任何全局清单** —— `policy/permissions.yaml` 消失 | **提案 —— 未实施**（见 §6.3、§6.6）。★ 档位是关于**某一个工具**的一句话，所以就该待在那个工具的文件里 —— 而且在那里用的是**同一套词汇**（`http.yaml` 说 `post`，所以它能说 `ask: [post]`；中心那份文件却不得不点名内部名字 `request_post`）。★ 全局 `deny` 跟着一起走：「不被暴露」已经说了两遍（文件的清单、agent 的 `disabled_tools`），第三处就多一处要同步的地方 —— 而它是唯一必须说暴露名的那处 |
-| 18 | 缺省档位 | 每一组的缺省由**代码**带着；文件没写就拿缺省，写了就听文件的 | ★ 内置那几组的缺省是**已知**的缺省 —— openheron 知道 `write_file` 会写、`execute` 会跑命令，所以恰好对危险的那几个要点头。MCP server 的工具是**运行期才发现**的：openheron 不知道 `delete_repo` 做什么，而 stdio 之下 server 是带着 agent 权限的子进程 ⇒ 它的缺省是 **ask**，而信任的 server 写一次 `tier: allow` 就行 |
+| 17 | 档位写在哪 | **跟着工具走**：每个文件的 `allows:` 点名**不用点头**的那些，其余一律要点头；★ **不再有任何全局清单** —— `policy/permissions.yaml` 消失 | **提案 —— 未实施**（见 §6.3、§6.6）。★ 档位是关于**某一个工具**的一句话，所以就该待在那个工具的文件里 —— 而且在那里用的是**同一套词汇**（`http.yaml` 说 `post`，所以它能说 `allows: [post]`；中心那份文件却不得不点名内部名字 `request_post`）。★ 全局 `deny` 跟着一起走：「不被暴露」已经说了两遍（文件的清单、agent 的 `disabled_tools`），第三处就多一处要同步的地方 —— 而它是唯一必须说暴露名的那处 |
+| 18 | 缺省档位 | **到处都是 `ask`** —— 代码带着一份 allow 清单，给它知道是只读的那些工具；而文件的 `allows:` 就它提供的那些工具替换掉这份清单 | ★ 全体同一条规则：文件系统工具、HTTP 工具与一个 MCP server 行为一致，也没有需要记的分组缺省。★ 代码那份清单之所以存在，是因为 `task` —— 委派工具 —— **没有自己的文件**，而一个不点一下就不能委派的 agent 等于不能委派。MCP server 的工具是**运行期才发现**的：openheron 不知道 `delete_repo` 做什么，而 stdio 之下 server 是带着 agent 自己权限的子进程 ⇒ 默认点头是这场交易里安全的那一侧 |
 
 ### 「一实体一文件」而非单文件分区表
 
@@ -1056,8 +1056,8 @@ deny:  []
 | 3 | `*` 前面不能为空 | 规则 2 |
 | 4 | 精确条目与前缀条目**等价** —— 命中就是该 agent 拿不到这个工具 | 这里没有档位可选；这个工具对那个 agent 就是不存在 |
 
-★ **这是前缀语法仅剩的用武之地。** 档位搬进了工具自己的文件，在那里，文件自己的 `tier` 不用
-任何模式就能覆盖一整类；剩下的是**收窄**，而「这个 agent 不要任何 MCP 工具」是唯一一句关于
+★ **这是前缀语法仅剩的用武之地。** 档位搬进了工具自己的文件，在那里，文件自己的 `allows:`
+不用任何模式就能覆盖一整类；剩下的是**收窄**，而「这个 agent 不要任何 MCP 工具」是唯一一句关于
 **命名空间**而不是关于某个工具的话。
 
 ★ **它不新增档位，也不重排档位** —— 模式只决定**一条条目是否匹配某个名字**。
@@ -1276,7 +1276,7 @@ skills are not enabled
 `http.yaml` 说 `post`，`permissions.yaml` 却不得不说 `request_post`。★ 一个工具两套词汇，
 就是等着发生的错配；而名字拼错了，在工具的表现与文件所写不一致之前根本看不出来。
 
-⇒ **一个文件的 `tools:` / `tier:` / `ask:` 写在第二列里。** 由 provider 来翻译；别的任何东西
+⇒ **一个文件的 `tools:` 与 `allows:` 写在第二列里。** 由 provider 来翻译；别的任何东西
 都不必知道暴露名。
 
 （暴露名在 `agentkit/spec/decl/decl.go:279-286`、`kb/tools.go:16-17` 与 eino 的
@@ -1289,8 +1289,20 @@ skills are not enabled
 | 键 | 类型 | 缺省 | 含义 |
 |---|---|---|---|
 | `tools` | `[]string` | 全部 | ★ **暴露集合** —— 这个文件要提供的那些名字，用**原始**名字写（这个文件自己的词汇，**不是**暴露出来的那些名字）。不写 = 全部 |
-| `tier` | `string` | `allow` | 被暴露的那些的档位：`allow` \| `ask` |
-| `ask` | `[]string` | `[]` | 被暴露的那些里要先点头的 —— **用这个文件自己的词汇** |
+| `allows` | `[]string` | 这些工具在代码里那份清单 | 被暴露的那些里**不用点头**的 —— **用这个文件自己的词汇** |
+
+★ **缺省是 `ask`，而 `allows:` 是例外。** 除非有别的东西说话，否则每个工具都要先点头。
+没有分组缺省，也没有特例：同一条规则盖住文件系统工具、HTTP 工具与一个 MCP server。
+
+★ **代码自带一份 allow 清单**，给它知道是只读的那些工具 —— `ls`、`read_file`、`glob`、`grep`、
+`task`、`write_todos`、`skill`、`duckduckgo_search`、`wikipedia_search`、`kb_search`、
+`request_get`。其中三个没有自己的文件（`task`、`write_todos`、`skill` —— 框架自带的），
+所以它们的例外只能住在代码里；其余的都在各自的文件里。
+
+★ **文件的 `allows:` 就它提供的那些工具替换掉代码里那份清单** —— 更具体的赢。所以
+`tools/filesystem.yaml` 可以放宽这一套（`execute` 不用点头），也可以收紧（`read_file`
+终究还是要点头），而文件**不在**就由代码里那份清单原样生效 —— 一个已有的工作区不会突然开始
+为每次读文件点头。
 
 ★ **文件里没有 `deny`，而且提案里连全局 `deny` 也没有了**（§6.3）。「不被暴露」只说两处：这个
   文件的**清单** —— 每个文件把清单叫成合口的名字，HTTP 用 `methods:`，其余用 `tools:` ——
@@ -1299,51 +1311,51 @@ skills are not enabled
 ★ 全局那份清单没了，因为它是同一个决定的第三处，而且是**唯一**必须说暴露名的那处，
   而工具自己的文件说的是它们自己的词儿。⇒ **每一层一个机制，每一层一套词汇。**
 
-★ **这三个键回答三个不同的问题，谁也吞不掉谁：** `tools:` 回答**提供什么**，
-  `ask:` 回答**其中哪些要先点头**，`tier:` 回答**其余的怎么办**（`allow` 或 `ask`）。
+★ **这两个键回答两个不同的问题，谁也吞不掉谁：** `tools:` 回答**提供什么**，
+  `allows:` 回答**其中哪些不用点头**。其余的一律要点头。
 
-★ **一个文件内部的顺序**：`ask` 压过 `tier`。所以 `tier: allow` + `ask: [post]` 的意思是
-「只有 post 要点头」，而单写 `tier: ask` 的意思是「这个文件提供的一切都要点头」。
+★ **`allows:` 就是全部。** 没有第二个键，也没有分组缺省：缺省就是 `ask`，而清单点名的
+  是那些例外。一个什么都不列的文件，对它提供的每一样东西都要点头。
 
-★ **把缺省再写一遍的那一行，什么也没说。** `tools/filesystem.yaml` 的缺省档位是 `allow`，
-  所以 `tier: allow` 那一行不改变任何事 —— 这个文件只需要它的 `ask:` 清单。
-  ⇒ 模板只在**缺省不是代码的缺省**时才写档位：MCP server 的 `tier: ask`，
-  而那一行同时盖住了服务器还没提供的那些工具。
+★ **一份 `allows:` 清单能覆盖 server 还没提供的工具**，因为它是关于**服务器**的一句话，
+  而不是关于它眼下恰好有的那些名字。server 的工具清单只有运行期才知道，所以一条点名了工具的
+  规则覆盖不了 server 明天才加的工具 —— 而清单能，因为它用 server 自己的词汇点名了那些例外，
+  其余的默认要点头。
 
-★ **`tier` 正是让 MCP server 的档位能覆盖它还没提供的工具的东西。** server 的工具清单只有
-运行期才知道，所以一条点名了工具的规则覆盖不了 server 明天才加的工具。`tier: ask` 覆盖
-server 将来会提供的每一个工具 —— 这正是前缀规则对 `ask` 档永远做不到的事（§6.3）。
+#### ★ 缺省是 ask，而 `allows:` 是例外
 
-#### ★ 缺省档位
+★ **同一条规则，处处适用。** 除非有别的东西说话，否则一个工具都要先点头。例外写在提供这个
+  工具的那个文件的 **`allows:`** 清单里，用那个文件自己的词汇。
 
-★ **兜底**：没有被任何文件点名的工具是 **allow** —— 直接放行。正是这条规则让
-「读一个文件」不必每次都点头。
+★ **代码自带一份 allow 清单**，给它知道是只读的那些工具：
 
-★ **每一组都有一个代码缺省**，文件覆盖它：
+```
+ls  read_file  glob  grep
+task  write_todos  skill
+duckduckgo_search  wikipedia_search  kb_search  request_get
+```
 
-| 组 | 文件 | 缺省 |
+★ **代码为什么要有这么一份。** `task` —— 委派工具 —— **没有自己的文件**：它来自框架的
+  agent，而不是一个 `tools/` 条目。在「缺省点头」之下它每次委派都要点头，而一个不点一下
+  就不能委派的 agent 等于不能委派。⇒ 框架自带的那些工具正是只有代码才能表达的例外。
+
+★ **文件的 `allows:` 就它提供的那些工具替换掉代码里那份清单。** 更具体的赢，所以一个文件
+  可以放宽这一套（`execute` 不用点头），也可以收紧（`read_file` 终究还是要点头）。文件
+  **不在**就由代码里那份清单原样生效 —— 一个已有的工作区不会突然开始为每次读文件点头。
+
+| 文件 | 它的 `allows:` | 其余 |
 |---|---|---|
-| 文件系统工具 | `tools/filesystem.yaml` | `write_file` `edit_file` `execute` → **ask**；其余 → allow |
-| HTTP 工具 | `tools/http.yaml` | allow |
-| 网页搜索 | `tools/web_search.yaml` | allow |
-| 百科 | `tools/wikipedia.yaml` | allow |
-| 知识库 | `tools/kb.yaml` | `kb_search` → allow；`kb_index` → **ask**（它要写索引） |
-| ★ **一个 MCP server** | `mcps/<server>.yaml` | ★ **ask** —— 这个 server 的每一个工具 |
-| 框架自带的（`task` `write_todos` `skill`） | 没有文件 | allow |
+| `tools/filesystem.yaml` | `ls` `read_file` `glob` `grep` | `write_file` `edit_file` `execute` → ask |
+| `tools/http.yaml` | 读方法 | 写方法 → ask |
+| `tools/web_search.yaml` | `duckduckgo_search` | — |
+| `tools/wikipedia.yaml` | `wikipedia_search` | — |
+| `tools/kb.yaml` | `kb_search` | `kb_index` → ask（它要写索引） |
+| ★ `mcps/<server>.yaml` | 通常是空的 | ★ **一切都点头** —— server 的工具是运行期才发现的，openheron 无从知道 `delete_repo` 做什么，而在 stdio 之下那个 server 是带着 agent 自己权限的**子进程**（§6.7）⇒ 猜错的代价是不对称的：多一次点击，换掉的是一次没人看见的破坏性调用 |
 
-★ **对它们全体是同一条规则：没写的键 = 缺省；写了的键 = 说话。** 所以
-`tools/filesystem.yaml` 里的 `ask: []` 是明明白白的「这些一个都不点头」，
-而把那一行删掉，缺省就回来了。
-
-★ **为什么 MCP server 的缺省是 `ask`，而内置的不是。** 内置那些缺省是**已知**的缺省：
-openheron 知道 `write_file` 会写文件、`execute` 会跑命令，所以它知道哪些该问。
-而一个 MCP server 的工具是**运行期才发现**的 —— openheron 无从知道 `delete_repo` 做什么 ——
-而在 stdio 之下，那个 server 是带着 agent 自己权限的**子进程**（§6.7）。
-⇒ 猜错的代价是不对称的：多一次点击，换掉的是一次没人看见的破坏性调用。
-用户信得过的 server 说**一次**就够了：
+★ **用户信得过的 MCP server 说一次就够了** —— 而例外就是 server 自己的工具名：
 
 ```yaml
-tier: allow
+allows: [read_issue, list_issues]
 ```
 
 ★ **缺省值就住在读到它的地方。** `tools/filesystem.yaml` 的出厂模板是用代码用的
@@ -1367,14 +1379,16 @@ tier: allow
 
 ```yaml
 # .openheron/tools/filesystem.yaml
-tier: allow
-ask:  [write_file, edit_file, execute]
+#
+# ★ The default is ask, so the list names the exceptions: the read-only tools
+#   run straight through, and write_file / edit_file / execute ask.
+allows: [ls, read_file, glob, grep]
 ```
 
 这一套就是 eino 的文件系统中间件：`ls`、`read_file`、`write_file`、`edit_file`、
 `glob`、`grep`、`execute`（`eino@v0.9.22/adk/middlewares/filesystem/filesystem.go:38-46`）。
 
-★ **文件不在意味着用默认那套工具与默认那些档位。** 这个文件是**调音旋钮**，不是开关：
+★ **文件不在意味着代码里那份 allow 清单照旧生效。** 这个文件是**调音旋钮**，不是开关：
 文件系统工具是 agent 的核心能力，不是可选集成 —— 知识库由语料而不是由文件来开关，也是同一个
 理由。★ `openheron init` 照样会写它，所以这些档位是**看得见、改得动**的，而不是靠约定隐含的。
 
@@ -1383,7 +1397,7 @@ ask:  [write_file, edit_file, execute]
 ```yaml
 # .openheron/tools/filesystem.yaml
 tools: [ls, read_file, glob, grep]
-tier: allow
+allows: [ls, read_file, glob, grep]
 ```
 
 #### ★ 迁移（旧配置怎么办）
@@ -1394,7 +1408,7 @@ tier: allow
 |---|---|---|
 | `server/config.yaml` 里的 `tools:` 段 | 拆成 `tools/http.yaml` `tools/web_search.yaml` `tools/wikipedia.yaml` | 启动报错 `field tools not found in type decl.Server` |
 | `kb/config.yaml` | `tools/kb.yaml` | **静默** —— 知识库不再被读到，`kb_search` 消失但没有任何报错 |
-| `policy/permissions.yaml` 里的 `ask:` | 档位搬进工具自己的文件：`write_file` / `edit_file` / `execute` 进 `tools/filesystem.yaml`，`kb_index` 进 `tools/kb.yaml` | 启动报错，并指出新家在哪儿 —— ★ 故意**不**静默：一个不再被读到的档位会把那些工具丢进兜底 allow 档，而兜底档不拦它们 |
+| `policy/permissions.yaml` 里的 `ask:` | 档位搬进工具自己的文件：`tools/filesystem.yaml` 与 `tools/kb.yaml` 各自在自己的 `allows:` 清单里点名**不用点头**的那些 | 启动报错，并指出新家在哪儿 —— ★ 故意**不**静默：一个不再被读到的档位会把那些工具从「要点头」翻成「不用点头」，而这是错的失败方向 |
 
 ★ 那条「静默」是这次搬动里最需要当心的一处：`kb/` 不在加载的分区清单里
 （`agentkit/spec/config.go:40-66`），所以旧的 `kb/config.yaml` 根本不会被读：`corpus` 像是「没配」
@@ -1481,19 +1495,19 @@ server 是 openheron 的**子进程** —— 它能写文件、能联网，「�
 
 | 谁来定 | 管什么 |
 |---|---|
-| `tools/` 里的文件 | **开不开**这个能力（文件不在 = 工具根本不存在）、**它提供的那一套里暴露哪些**（清单）、**以及那些的档位**（`tier` / `ask`） |
+| `tools/` 里的文件 | **开不开**这个能力（文件不在 = 工具根本不存在）、**它提供的那一套里暴露哪些**（清单）、**以及其中哪些不用点头**（`allows:`） |
 | `policy/permissions.yaml` | ★ **提案里没了** —— 不再有全局边界了（§6.3） |
 | 每个 agent 的 `disabled_tools` | **细粒度收窄**：某一个 agent 不用这个工具（内层，它管得住） |
 
 ★ 所以一个工具的档位是从**两处**读的，顺序是固定的：先是提供这个工具的那个文件，然后是
 agent 的 `disabled_tools` —— 它只为那个 agent 摘掉这个工具，仅此而已。
 
-★ 兜底档是 **allow** ✅ —— 未点名的工具（ls / read_file / task / skill …）直接放行 ✅ ✅。
-**只有 `ask` / `deny` 点名的才被拦** ✅ ✅。
+★ **兜底档是 `ask`** ✅ —— 没有任何 `allows:` 清单点名的工具，会打断这一轮、等人来点 ✅ ✅。
+代码自己那份 allow 清单，就是让那些只读工具与框架自带的 `task` 不必每次都点头的东西 ✅。
 
 ★ 知识库（`kb.corpus`）**不是**由文件在不在来开，而是由非空的 `corpus` 来开
-（`agentkit/build/kb.go:15`），它的两个工具和其它工具一样走档位：`kb_search` 是普通 `allow`，
-而 `kb_index` —— 一个写操作 —— 默认要点头（`tools/kb.yaml`）。
+（`agentkit/build/kb.go:15`），它的两个工具和其它工具一样走档位：`kb_search` 在
+`allows:` 里，而 `kb_index` —— 一个写操作 —— 默认要点头（`tools/kb.yaml`）。
 
 ### 6.7 `mcps/<server>.yaml`（★ 2026-11-06 决策，**未实施**）
 
@@ -1526,8 +1540,7 @@ MCP 服务器的配置。**一个 server 一个文件**：
 | | `timeout` | `LenientDuration` | `30s` | 连接 + 初始化 + 取工具清单的上限 |
 | | `call_timeout` | `LenientDuration` | `60s` | **一次工具调用**的上限 —— ★ 没有它，一个永不回答的服务器会占着调用锁，同 server 的其它调用全排在它后面 |
 | | `tools` | `[]string` | `[]`→全部 | ★ **暴露集合** —— 这个 server 要提供的那些**原始**工具名（不是带命名空间的那个）；不写 = 全部 |
-| | `tier` | `string` | `ask` | 这个 server 提供的每个工具的档位 —— ★ **包括它还没提供的那些**；`allow` \| `ask` |
-| | `ask` | `[]string` | `[]` | 这个 server **自己的**工具名里要先点头的那些 |
+| | `allows` | `[]string` | `[]` | 这个 server **自己的**工具名里**不用点头**的那些 —— ★ 这个 server 提供的其余一切都要点头，**包括它还没提供的那些工具** |
 
 ★ `timeout` 是**宽松**时长：写错退回默认并记 `deferred`，
   与 `debounce` / `start_timeout` 同理。写错 timeout 改变的是「等多久」，
@@ -1572,10 +1585,13 @@ mcp__<server>__<tool>
 
 ```yaml
 # .openheron/mcps/github.yaml
-tier: ask                       # every tool of this server asks first
+#
+# ★ The default is ask, so an empty list means "every tool of this server asks".
+#   A trusted server names its exceptions:
+allows: [read_issue, list_issues]
 ```
 
-★ 「写 `tier: ask`」就是「这个 server 提供的每个工具都要点头」—— 给**一整类**外部工具定档，
+★ 「空的 `allows:`」就是「这个 server 提供的每个工具都要点头」—— 给**一整类**外部工具定档，
 不必先把工具名抄下来。
 
 ★ **而且它覆盖 server 还没提供的工具。** server 的工具清单只有运行期才知道，所以一条点名了
@@ -1590,6 +1606,9 @@ tier: ask                       # every tool of this server asks first
 # .openheron/mcps/github.yaml
 tools: [create_issue, list_issues]
 ```
+
+★ 而 `allows:` 是同一个文件的另一半：它点名那些**不用点头**的。清单说*哪些*被提供，
+allow 清单说*其中哪些*直接放行。
 
 ★ **stdio server 的权限就是进程的权限**：MCP server 是 openheron 拉起的子进程，
   它能写文件、能联网。§6.6 给 HTTP 工具定的「只连公网」在它身上**不成立**
@@ -1916,7 +1935,7 @@ agentkit/spec/write.go:persist.AtomicWrite
 | 9 | 模型名**请求级**覆盖，**每 agent 一个实例，不是每模型一个** | 每模型各建实例 ⇒ 无谓的构造开销 |
 | 10 | （提案，**未实施**）MCP 工具一律带 `mcp__` 命名空间，且**只有** MCP 工具能用这个前缀 | 没有命名空间，一个暴露 `ls` 的 server 会让整个 agent 起不来（撞上保留工具名即在加载期报错）；没有「只有 MCP 能用」这一半，内置工具就能占了这个命名空间，策略里的前缀规则会悄悄盖住它 |
 | 11 | （提案，**未实施**）某个 agent 的 `disabled_tools` 只支持**尾部** `*` 的前缀模式，其余写法加载期报错 | 一条读起来与实际覆盖范围不同的规则，就是一次静默的错配 |
-| 12 | （提案，**未实施**）档位写在**工具自己的文件与自己的词汇里**，而且**没有全局清单**能与它矛盾 | 一个工具的权限就是一处的一个事实；一个说 `post` 的文件就说 `ask: [post]`，不必在两套词汇之间来回翻译 |
+| 12 | （提案，**未实施**）档位写在**工具自己的文件与自己的词汇里** —— 文件的 `allows:` 点名哪些不用点头，而且**没有全局清单**能与它矛盾 | 一个工具的权限就是一处的一个事实；一个说 `post` 的文件就说 `allows: [post]`，不必在两套词汇之间来回翻译 |
 | 13 | （提案，**未实施**）文件系统工具有了自己的文件 `tools/filesystem.yaml`，而它是**调音旋钮** —— 文件不在意味着用默认那套工具与默认那些档位 | 文件系统工具是 agent 的核心能力，不是可选集成；这个文件让它们的档位看得见、改得动，又不让它们变成可选项 |
 
 ★ 第 **10**、**11** 两行是**提案**：没有 MCP 依赖、没有 `mcps/` 分区、也没有加载器（唯一

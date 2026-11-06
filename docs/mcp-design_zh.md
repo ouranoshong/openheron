@@ -216,7 +216,7 @@ mcp__<server>__<tool>
 
 ★ **档位根本不在这张表里。** 它们搬进了工具自己的文件（§7.3），
   而一个文件讲的是**自己的词儿** —— 所以「这个 server 的每个工具都要先点头」
-  是 `mcps/<server>.yaml` 里的 `tier: ask`，不是共享表里的一个模式。
+  是 `mcps/<server>.yaml` 里一个**空的** `allows:`，不是共享表里的一个模式。
   那种写法比模式**更强**：它覆盖服务器**还没提供**的工具。
 
 ★ **全局 `deny` 也没了**（配置设计 §6.3）。现在「不被暴露」恰好在两个地方说：
@@ -235,10 +235,11 @@ mcp__<server>__<tool>
 
 ### 4.2 前缀语法不新增档位
 
-★ 档位没变，而且它们现在住在工具自己的文件里（§7.3）：
+★ 档位现在住在工具自己的文件里（§7.3），而且只剩两档 —— `deny` 那一档
+  跟着全局清单一起没了：
 
 ```
-allow → ask (the fallback is allow)
+allow (if the file's allows list names it) → ask (everything else)
 ```
 
 ★ 前缀语法只决定**一条条目是否匹配某个名字** —— 它不新增档位，也不重排任何档位。
@@ -294,8 +295,7 @@ MCP 服务器按服务器一个文件来配：
 | `timeout` | `LenientDuration` | `30s` | 连接 + 初始化 + 取工具清单的上限 |
 | `call_timeout` | `LenientDuration` | `60s` | **一次工具调用**的上限（§6.5） |
 | `tools` | `[]string` | `[]`→全部 | ★ **暴露集合** —— 这个 server 要提供的那些**原始**工具名（不是带命名空间的那个）；不写 = 全部 |
-| `tier` | `string` | `ask` | 这个 server 提供的每一个工具的档位 —— ★ 包括那些它**还没提供**的工具；`allow` \| `ask` |
-| `ask` | `[]string` | `[]` | 这个 server **自己的**工具名里，哪些要先点头 |
+| `allows` | `[]string` | `[]` | 这个 server **自己的**工具名里，哪些**不用点头**就跑 —— ★ 这个 server 提供的其余一切都要先点头，包括那些它**还没提供**的工具 |
 
 ★ **`command` 在沙箱的 PATH 里解析，绝不相对项目根。** 工作区不许决定跑什么：
   一个相对项目根解析的命令，等于让一次 checkout 决定 agent 跑哪个可执行文件，
@@ -307,13 +307,12 @@ MCP 服务器按服务器一个文件来配：
   点名的正是 Kit 铺下的那个东西。
 
 ★ 这几个键在 `tools/` 与 `mcps/` 的每一个文件里都是同一个意思，
-  而且它们是用**那个文件自己的词儿**写的：这里的 `ask: [create_issue]` 是
+  而且它们是用**那个文件自己的词儿**写的：这里的 `allows: [create_issue]` 是
   server 自己的名字，不是合成出来的那个名字。provider 会把它翻译成模型看到的
   那个名字（§7.3）。
 
-★ **把缺省再写一遍的那一行，什么也没说。** 文件系统那组的缺省档位是 `allow`，
-  所以 `tools/filesystem.yaml` 只需要它的 `ask:` 清单 —— 模板只在**缺省不是代码的缺省**
-  时才写档位（MCP server 的 `tier: ask`，那一行同时盖住了服务器还没提供的那些工具）。
+★ **缺省是 `ask`，`allows:` 是那个例外。** 没有第二个键，也没有按组的缺省 ——
+  同一条规则盖住文件系统工具、HTTP 工具与一个 MCP server。
   见 `docs/config-design.md` §6.6。
 
 ★ **文件里没有 `deny`，全局的也没有**（§4）。「不被暴露」只说两处：这个文件的
@@ -363,8 +362,8 @@ MCP 服务器按服务器一个文件来配：
 
 ★ **继承不是新增的暴露面。** agent 自己的工具读的是同一批东西：`read_file` 读项目，
   `execute` 在这个环境里跑命令。一个看得见环境的 MCP server，看不见任何 agent 看不见的
-  东西。区别只在于 `execute` 出厂在 `ask` 档，而 MCP 工具未必是。
-  ⇒ 若这个不对称对你重要，就把 `mcp__*` 放进 `ask` 档（§4.4）。
+  东西。区别只在于 `execute` 不在 `allows:` 清单里，而 MCP 工具未必在。
+  ⇒ 若这个不对称对你重要，就把 `mcp__*` 放进那个 agent 的 `disabled_tools`（§4）。
 
 ★ 配置里的 `env:` **不替换**继承来的环境，而是**叠在它上面**。
   `env:` 为空的配置，产出的子进程仍然有一个完整的环境。
@@ -391,12 +390,9 @@ env:
   #   host proxy swaps in the real key on the way out (§8.1).
   GITHUB_TOKEN: ${GITHUB_TOKEN}
 
-# ★ The tier of every tool this server offers — including the ones it has not
-#   offered yet. Default: ask.
-tier: allow
-
-# ★ The ones that ask first, on top of the tier above.
-ask: [create_issue]
+# ★ The default is ask, so an empty list means "every tool of this server asks".
+#   A trusted server names its exceptions:
+allows: [read_issue, list_issues]
 
 # ★ The tools to offer, by the server's own names. Absent = all of them.
 tools: [create_issue, list_issues, search_issues]
@@ -427,9 +423,9 @@ call_timeout: 60s
 #
 # ★ The filesystem tool set. These tools are always there — this file tunes them.
 #
-# ★ The default tier here is allow, so only the ones that ask are named. Writing
-#   "tier: allow" would say nothing.
-ask: [write_file, edit_file, execute]
+# ★ The default is ask, so the list names the exceptions: the read-only tools
+#   run straight through, and write_file / edit_file / execute ask.
+allows: [ls, read_file, glob, grep]
 # tools: [ls, read_file, glob, grep]   # uncomment for a read-only agent
 ```
 
@@ -444,8 +440,8 @@ query_instruction: ""
 batch_size: 10
 max_batch_chars: 1200
 top_k: 8
-# ★ kb_index writes the index on disk, so it asks. kb_search does not.
-ask: [kb_index]
+# ★ kb_search reads and does not ask; kb_index writes the index on disk, so it asks.
+allows: [kb_search]
 ```
 
 #### `tools/http.yaml`
@@ -455,8 +451,9 @@ ask: [kb_index]
 methods: [get]
 headers: {}
 timeout: 30s
-# ★ The write methods change the outside world, so they ask.
-ask: [post, put, delete]
+# ★ The read methods run straight through; the write methods change the outside
+#   world, so they ask.
+allows: [get]
 ```
 
 #### ★ 谁写这些文件
@@ -593,7 +590,7 @@ if _, err := c.stdin.Write(requestBytes); err != nil {   // ← no lock
   │  spec.loadMCP (agentkit/spec/load.go) — the file name and the fields are
   │  validated here, and a bad one is a startup error
   ▼
-decl.MCPServerCfg — transport / command / args / env / tier / ask / tools / timeouts
+decl.MCPServerCfg — transport / command / args / env / allows / tools / timeouts
   │
   │  snapshot.buildHeavy (agentkit/build/snapshot.go)
   │    → mcpToolProvider.Provide (agentkit/build/mcptools.go)
@@ -604,8 +601,8 @@ the mcps manager (agentkit/build/mcpmanager.go):
   │
   │  each tool:  name = mcp__<server>__<tool>     (sanitized; a bad name is skipped
   │                                                with a warning — §3.2)
-  │              tier = the file's tier and ask list, read in the SERVER's own
-  │                    names and mapped to the exposed ones
+  │              tier = the file's allows list, read in the SERVER's own names
+  │                    and mapped to the exposed ones
   ▼
 []tool.BaseTool — the stdio ones wrapped in the per-server mutex (§6.5)
   │
@@ -621,15 +618,15 @@ the gate: Policy.TierOf("mcp__github__create_issue")
   └─ ask   → the turn is interrupted for a human → resumed
 ```
 
-★ **档位的解析**是两步查找，而闸门从不去问一个工具来自哪个文件 ——
+★ **档位的解析**是一次查找加一个兜底，而闸门从不去问一个工具来自哪个文件 ——
   装配时填进表里的就是**对外的**名字：
 
 ```
 Policy.TierOf(name):
   1. the file that provides the tool:
-       its per-item ask list, in its own names       → ask
-       its tier (allow | ask)                        → that tier
-  2. otherwise                                       → allow
+       its allows list, in its own names            → allow
+       otherwise                                    → ask
+  2. otherwise                                       → ask
 ```
 
 ★ **装配发生在 `agentkit/build`，不在 `agentkit/spec`**（§7.3）：只有 provider 知道
@@ -654,8 +651,8 @@ Policy.TierOf(name):
 Policy.TierOf("mcp__github__create_issue")
 ```
 
-当 server 的文件写着 `tier: ask`（§7.3）时它落进 `ask` 档，当它写着 `tier: allow`
-时它落进 `allow` 档。闸门代码一个字都不用改：它读档位，然后动作（§1.3）。
+除非 server 的文件在 `allows:` 里点了它的名（§7.3），否则它落进 `ask` 档 ——
+而这正是每一个工具都遵守的同一条规则。闸门代码一个字都不用改：它读档位，然后动作（§1.3）。
 
 ★ **这正是命名空间的意义。** 闸门、各张表、API 的 `EffectiveTools` 视图
   与每个 agent 的收窄，全都在名字上工作。
@@ -671,7 +668,7 @@ Policy.TierOf("mcp__github__create_issue")
 
 这是命名空间与「给每个 server 自己的档位」合起来的最强理由：
 它们是「在有人把成员列出来之前，先给一类外部工具定档」的办法。
-`mcps/<server>.yaml` 里的 `tier: ask` 是一行字，
+`mcps/<server>.yaml` 里一个**空的** `allows:` 是一行字，
 意思是「这个 server 的每个工具都要先点头」（§7.3）。
 
 ### 7.3 档位住在工具旁边
@@ -683,7 +680,10 @@ Policy.TierOf("mcp__github__create_issue")
 
 ```yaml
 # .openheron/mcps/github.yaml
-tier: ask                       # every tool of this server asks first
+#
+# ★ The default is ask, so an empty list means "every tool of this server asks".
+#   A trusted server names its exceptions:
+allows: [read_issue, list_issues]
 ```
 
 ★ **为什么要用文件自己的词儿。** 档位是关于**一个工具**的陈述，
@@ -694,7 +694,7 @@ tier: ask                       # every tool of this server asks first
 
 | 位置 | 词儿 | 决定什么 |
 |---|---|---|
-| 某个文件的 `tools` / `tier` / `ask` | **那个文件自己的**名字（`create_issue`） | 这个文件提供什么，以及那些的档位 |
+| 某个文件的 `tools` / `allows` | **那个文件自己的**名字（`create_issue`） | 这个文件提供什么，以及哪些不用点头 |
 | 某个 agent 的 `disabled_tools` | 对外的名字 | 这个 agent 拿不到这些工具 |
 
 ★ **顺序**：先提供这个工具的文件，然后是 agent 的收窄 ——
@@ -713,15 +713,15 @@ tier: ask                       # every tool of this server asks first
   自己文件的词儿，以及它背后的对外名字；而 `agentkit/spec` 不得 import `kb`
   （那条铁律），也不得 import eino（文件系统工具的名字住在那里）。
 
-★ **一个 server 的缺省档位是 `ask`。** 内置那些组有**已知**的缺省 ——
-  openheron 知道 `write_file` 会写文件、`execute` 会跑命令，所以它知道哪些该问。
+★ **缺省是 `ask` —— 对 server 如此，对别的一切也如此。** 内置那些组不再是例外：
+  代码里带着一份它知道的只读工具的 allow 清单，其余一切都要先点头。
   而一个 server 的工具是**运行期才发现**的：openheron 无从知道 `delete_repo` 做什么，
   而在 stdio 之下，那个 server 是带着 agent 自己权限的**子进程**（§7.2）。
   ⇒ 猜错的代价是不对称的 —— 多一次点击，换掉的是一次没人看见的破坏性调用。
-  用户信得过的 server 说**一次**就够了：
+  用户信得过的 server 点名它的例外，**一次**就够了：
 
 ```yaml
-tier: allow
+allows: [read_issue, list_issues]
 ```
 
 ★ **档位改动下一轮就生效。** `mcps/` 是**热**分区，所以档位并不特殊：
@@ -927,8 +927,8 @@ headers:
 | 环境 | 子进程看得见 openheron 的环境，`env:` 覆盖同名项 |
 | 环境 | `env:` 里未设的 `${ENV}` 进 `deferred`，不致命 |
 | 凭据 | `credential@1` 的哨兵经继承的环境到达子进程，而配置里没有任何字段提到它 |
-| 档位 | 一个 server 的 `tier: ask` 覆盖它**还没提供**的工具 |
-| 档位 | 文件里的 `tier` 压过 allow 兜底，仅此而已 |
+| 档位 | 一个空的 `allows:` 覆盖 server **还没提供**的工具 |
+| 档位 | 文件的 `allows:` 点名哪些不用点头，其余都要点头 |
 | 管理者 | 崩掉的 stdio 子进程在下一次调用时被重新拉起 |
 | 管理者 | 工具清单变了会推进代际并重建工具，且不重启 |
 | 管理者 | 快照换代会关掉旧一代的客户端并杀掉它们的子进程 |
