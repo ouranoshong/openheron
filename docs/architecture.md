@@ -56,13 +56,20 @@ counting `grep '"github.com/ouranoshong/openheron/'` hits per package:
 | | `kb` | `obs`, `persist` | Knowledge base: corpus, index, retrieval, scoring |
 | | `agentkit/spec` | `obs`, `decl`, `persist` | Config loading, validation, hot reload, write gates |
 | **L2** | `agentkit/build` | `obs`, `spec`, `decl`, `approval`, `contract`, `helpers`, `kb`, `llm/common`, `message` | Agent assembly, tool assembly, policy gates |
-| | `agentkit/run` | `emit`, `obs`, `approval`, `contract`, `message`, `storage` | Run loop, input construction, event consumption |
+| | `agentkit/run` | `emit`, `obs`, `approval`, `contract`, `decl`, `message`, `storage` | Run loop, input construction, event consumption |
 | | `storage/filestore` | `obs`, `contract`, `message`, `persist`, `storage` | File store implementation |
 | | `storage/memarbit` | `storage` | The in-memory lease arbiter |
 | | `transport` | `contract` | AG-UI rendering: the run's events → frames |
 | | `llm` | `build`, `spec`, `decl` | Thin wrapper (only `common/` and one test file) |
 | | `initcfg` | `spec`, `persist` | Factory templates for `openheron init` |
 | **L3 entry** | `api` | `build`, `obs`, `run`, `spec`, `decl`, `contract`, `message`, `storage`, `filestore`, `transport`, `webui` | HTTP routing, SSE, error envelope |
+
+The table counts **internal** dependencies only — the third-party packages are not in it.
+The MCP path is where two of them enter the tree:
+`github.com/cloudwego/eino-ext/components/tool/mcp` (the eino adapter) and
+`github.com/mark3labs/mcp-go` (the protocol client), both in `agentkit/build`.
+`agentkit/run` imports `agentkit/spec/decl` for the namespace constants alone — the run's
+ledger records the servers a turn touched.
 
 ### 2.1 Two dependency rules that must not be broken
 
@@ -95,7 +102,7 @@ dependency chain along.
 
 **Validating** the knowledge-base config (`tools/kb.yaml`) needs to know whether the
 corpus path is relative, whether the model is declared at all, and whether it is
-declared as `kind: embedding` (`agentkit/spec/load.go:173` `loadKB`, `load.go:345`
+declared as `kind: embedding` (`agentkit/spec/load.go:195` `loadKB`, `load.go:594`
 `validateKB`).
 
 ★ All three answers live in the **declarations** (`decl.Model.IsEmbedding`,
@@ -124,7 +131,7 @@ searched** — once the config root depends on "where the process was started fr
 same command run from a different directory reads a different configuration, and a test
 instance would read the development configuration too.
 
-Only a **defaulted** root is created automatically (`config.go:186`'s `os.MkdirAll`). An
+Only a **defaulted** root is created automatically (`config.go:204`'s `os.MkdirAll`). An
 explicit root or an env root pointing nowhere is **not** created: a typo must not silently
 grow an empty configuration tree.
 
@@ -140,21 +147,27 @@ write the new configuration somewhere the user did not point at.
 | `llm/` | `spec.DirLLM` | ✅ | One `.yaml` per vendor |
 | `policy/` | `spec.DirPolicy` | ✅ | `permissions.yaml` + `limits.yaml` |
 | `tools/` | `spec.DirTools` | ✅ | `http.yaml` / `web_search.yaml` / `wikipedia.yaml` / `kb.yaml` |
+| `mcps/` | `spec.DirMCP` | ✅ | One `.yaml` per MCP server |
 | `server/` | `spec.DirServer` | ❌ | Process parameters; needs a restart |
 | `state/` | `spec.DirState` | — | Sessions and checkpoints; auto-created |
 | `skills/` | — | ❌ | **Resolved independently** (see §3.6) |
 
-File names under `tools/` are a **whitelist**: `agentkit/spec/load.go:130` errors out on
+File names under `tools/` are a **whitelist**: `agentkit/spec/load.go:191` errors out on
 an unknown file instead of ignoring it — "I wrote kb.yaml and it did not take effect" is
 one of the hardest classes of problem to debug.
+
+★ The `mcps/` partition holds **one file per server**
+(`agentkit/spec/config.go:26`'s `spec.DirMCP`): the file's presence **is** the definition
+— there is no `enabled` key — and the file's name is the server's name, which is also the
+namespace segment of that server's tools.
 
 ### 3.3 Agent definitions
 
 An agent is a markdown file: **frontmatter + body**. The frontmatter is **strictly
-decoded** (`agentkit/spec/load.go:65`'s `loadAgent`) — a single wrong key is a startup
+decoded** (`agentkit/spec/load.go:72`'s `loadAgent`) — a single wrong key is a startup
 error.
 
-Available frontmatter keys (`agentkit/spec/decl/decl.go:67`'s `decl.Agent`):
+Available frontmatter keys (`agentkit/spec/decl/decl.go:78`'s `decl.Agent`):
 
 | Key | yaml tag | Meaning |
 |---|---|---|
@@ -163,6 +176,7 @@ Available frontmatter keys (`agentkit/spec/decl/decl.go:67`'s `decl.Agent`):
 | `max_iterations` | `max_iterations` | Cap on tool-loop iterations |
 | `subagents` | `subagents` | The sub-agents it may delegate to |
 | `disabled_tools` | `disabled_tools` | Tool deny-list effective for this agent |
+| `mcps` | `mcps` | The MCP servers this agent may use — absent means every configured server, an empty list means none (`agentkit/spec/decl/decl.go:114`) |
 | `temperature` | `temperature` | Sampling temperature |
 | `max_tokens` | `max_tokens` | Sampling cap |
 | `reasoning` | `reasoning` | Reasoning tier name (`low`/`high`/`max`…) |
@@ -183,26 +197,32 @@ The two are **stored separately and never merged** — merging would destroy the
 information about *which* layer blocked a tool. The outer `deny` wins, and it is the
 one guarantee a sub-agent cannot relax.
 
-There are only two columns of tiers (`build.Policy.TierOf`, `agentkit/build/policy.go:39`;
-the mirrored `decl.Policy.TierOf` at `agentkit/spec/decl/decl.go:240` is unused): `deny` →
+There are only two columns of tiers (`build.Policy.TierOf`, `agentkit/build/policy.go:49`;
+the mirrored `decl.Policy.TierOf` at `agentkit/spec/decl/decl.go:249` is unused): `deny` →
 `ask` → otherwise `allow`. **A tool that is not named defaults to `allow` (straight
 through)**. To make a tool require a human every time, list it under `ask`.
+
+★ **One exception: the MCP namespace defaults to `ask`** (`agentkit/build/policy.go:49`).
+A tool whose name starts with `mcp__` asks, unless the server's own file names it in
+`allows:` — a server's tools are discovered at runtime, and under stdio the server is a
+child process with the agent's own privileges, so the cost of guessing wrong is
+asymmetric.
 
 ### 3.5 Depth cap and topology validation
 
 `agent.max_depth` in `server/config.yaml` (default `1`) and the same key in
 `policy/limits.yaml` **resolve to the stricter of the two**
-(`spec/load.go:357`'s `globalMaxDepth`).
+(`spec/load.go:686`'s `globalMaxDepth`).
 
 A declared topology that exceeds the cap is a **startup error**
-(`spec/load.go:293`'s `validateDepth`) — never a silent truncation. A sub-agent
+(`spec/load.go:622`'s `validateDepth`) — never a silent truncation. A sub-agent
 referencing an unknown agent and a cyclic topology are startup errors too
-(`load.go:396`, `load.go:404`).
+(`load.go:726`, `load.go:733`).
 
 ### 3.6 skills resolve by a different rule
 
 `skills/` is **not** "a partition of the config root"; it is resolved independently
-(`agentkit/build/skill.go:41`): `$EINO_EXT_SKILLS_DIR` first, and only if that is unset
+(`agentkit/build/skill.go:188`): `$EINO_EXT_SKILLS_DIR` first, and only if that is unset
 does it search **upwards** from the current directory for `.openheron/skills`.
 
 ★ This is a different rule from "the config root never searches upwards". Skills are a
@@ -227,10 +247,10 @@ so there the list has nothing to filter.
 
 ### 3.7 Two loading modes and "deferred"
 
-`spec.Service.Load()` (`config.go:245`) validates strictly — a failure is a startup
-failure. `LoadUnchecked()` (`config.go:268`) skips validation.
+`spec.Service.Load()` (`config.go:263`) validates strictly — a failure is a startup
+failure. `LoadUnchecked()` (`config.go:286`) skips validation.
 
-`Config.Deferred()` (`config.go:114`) collects **non-fatal** problems (a duration string
+`Config.Deferred()` (`config.go:132`) collects **non-fatal** problems (a duration string
 that will not parse, for instance), and surfaces them as a `deferred` array in
 `/v2/health` and `/v2/config`. The dividing line is: **anything that would make runtime
 behaviour wrong is fatal; anything that is merely a hint is deferred.**
@@ -283,14 +303,20 @@ copying the parent's.
 When a call is denied, the tool returns **a denial message** (with an optional reason),
 **not** an error — the model sees "denied, the reason is X" and can adjust accordingly.
 
+★ The MCP tools go through the **same** gate: they are looked up **by name** like every
+other tool (`agentkit/build/policy.go:49`'s `TierOf`), so `mcp__<server>__<tool>` is
+denied, asked or allowed exactly like any other name. The gate does not change — only the
+namespace does.
+
 ### 4.3 Where tools come from
 
 | Source | Assembled at | Examples |
 |---|---|---|
-| Filesystem middleware | `build/tools.go:40` | `ls` `read_file` `write_file` `edit_file` `execute` |
+| Filesystem middleware | `build/tools.go:45` | `ls` `read_file` `write_file` `edit_file` `execute` |
 | Network tools | `build/nettools.go` | `web_search` `http` |
 | Knowledge base | `build/kb.go` | `kb_search` `kb_index` |
 | Encyclopedia | `build/nettools.go:236` | `wikipedia` |
+| MCP servers | `build/mcptools.go:193` | `mcp__<server>__<tool>` |
 
 The external network tools need **no code change**: a provider whose configuration is
 absent mounts nothing, so writing the file is what turns the tool on (`tools/*.yaml`).
@@ -301,6 +327,32 @@ switched by its **corpus**, not by its file.
 directory is yours to write, and a provider without a configuration mounts nothing, so
 turning a tool on is a decision, not a side effect. `--tools` writes the four
 configuration files.
+
+The path a tool takes is the same for every source:
+
+`tools/*.yaml` → `spec.loadTool` (`agentkit/spec/load.go:165`) → `decl.ToolsCfg` →
+`toolRegistry.Build` (`agentkit/build/tools.go:55`) → `snapshot.buildHeavy`
+(`agentkit/build/snapshot.go:47`) → `applyToolConfig` (`agentkit/build/assemble.go:31`) →
+`deep.Config.ToolsConfig.Tools` → `deep.New` (`agentkit/build/assemble.go:40`).
+
+The MCP branch joins it at the registry: `mcps/<server>.yaml` → `spec.loadMCP`
+(`agentkit/spec/load.go:256`) → `decl.MCPServerCfg` → the MCP provider
+(`agentkit/build/mcptools.go:193`), registered at `agentkit/build/tools.go:41` → the same
+`toolRegistry.Build` → the same `applyToolConfig`.
+
+★ **The MCP client is the one resource on this path that does not belong to the
+snapshot.** The heavy dependencies are built once, under a `sync.Once`
+(`agentkit/build/snapshot.go:41`), and the provider answers a single question — "what
+tools does this snapshot have" — and returns a **batch** of them. The client behind that
+batch outlives the batch: it is owned by the manager (`agentkit/build/mcpmanager.go:41`),
+because a stdio server is a **child process**, and a child process started for one turn
+must still be there for the next one. The provider is **optional** — an unreachable server
+is skipped with a warning, never an error, so one dead server cannot keep the agent down.
+
+★ The exposed name is `mcp__<server>__<tool>`, composed in exactly one place
+(`agentkit/build/mcptools.go:140`). The server's own name is the namespace segment, and
+the agent's `mcps:` list narrows the servers **in the agent's own table** — the same place
+where `disabled_tools` narrows the tools.
 
 ## 5. The run loop
 
@@ -344,7 +396,7 @@ store** is the source of truth for resuming. The client sends its decision back 
 
 Without the checkpoint there is nothing to resume from — the API then returns
 `this approval can no longer be resumed: its checkpoint is gone. Send a new message to
-continue.` (`api/v2_types.go:121`) instead of silently starting a fresh turn.
+continue.` (`api/v2_types.go:131`) instead of silently starting a fresh turn.
 
 ### 5.3 Session admission
 
@@ -413,7 +465,7 @@ only `state.json` and never opens the transcript — so listing is cheap.
 - **No authentication and no CORS.** The default `:8080` binds every interface; set
   `listen_addr` explicitly to narrow it.
 
-`threadId` is **required** by `POST /v2/run` (`api/v2_run.go:78`) — create the session
+`threadId` is **required** by `POST /v2/run` (`api/v2_run.go:113`) — create the session
 with `POST /v2/sessions` first, then start the run.
 
 ## 8. The frontend
@@ -451,7 +503,7 @@ use a module-level constant or a selector from the store.
   without them (which is why `kb status` reports `lexical-only retrieval`).
 - The lexical score **weights identifiers**: a term appearing in the title, a section
   heading or a link is worth more than one buried in the prose.
-- `openheron kb index` takes a **run lock** (`kb/store.go:100`'s `StartRun`): only one
+- `openheron kb index` takes a **run lock** (`kb/store.go:121`'s `StartRun`): only one
   run at a time.
 - Agents get two tools: `kb_search` (returns a document **outline**, not the full text)
   and `kb_index`. `kb_index` defaults to the `ask` tier — letting an agent rebuild the

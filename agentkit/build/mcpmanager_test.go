@@ -69,7 +69,7 @@ func (c *fakeMCPClient) setTools(names []string) {
 // newFakeMCPManager returns a manager whose clients are fakes.
 func newFakeMCPManager(starts *int32, cli *fakeMCPClient) *mcpManager {
 	m := newMCPManager()
-	m.start = func(context.Context, *decl.MCPServerCfg) (mcpClient, error) {
+	m.start = func(context.Context, context.Context, *decl.MCPServerCfg) (mcpClient, error) {
 		atomic.AddInt32(starts, 1)
 		return cli, nil
 	}
@@ -241,7 +241,7 @@ func TestAnUnreachableServerSaysSoAndKeepsTheOtherServersAlive(t *testing.T) {
 	var starts int32
 	cli := &fakeMCPClient{tools: []string{"read_issue"}}
 	m := newMCPManager()
-	m.start = func(_ context.Context, cfg *decl.MCPServerCfg) (mcpClient, error) {
+	m.start = func(_ context.Context, _ context.Context, cfg *decl.MCPServerCfg) (mcpClient, error) {
 		atomic.AddInt32(&starts, 1)
 		if cfg.Name == "broken" {
 			return nil, errors.New("the command is not on the PATH")

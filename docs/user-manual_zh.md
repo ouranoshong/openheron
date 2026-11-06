@@ -695,7 +695,7 @@ This session is running in another window — stop it to take over
 - 服务器的名字、它的传输方式（`stdio` 或 `http`）、以及它的状态 —— `ready`、
   `unreachable` 或 `unused`；
 - 每个工具一行：服务器自己的名字、暴露出来的名字（`mcp__github__create_issue`）、
-  档位（`allow` 或 `ask`）、以及状态。
+  档位（`allow`、`ask` 或 `deny`）、以及状态。
 
 一个服务器都没配时，对话框说的是 "No MCP servers are configured"。
 

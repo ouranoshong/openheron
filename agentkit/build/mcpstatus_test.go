@@ -62,7 +62,7 @@ func TestAServerTheAgentDoesNotUseIsUnusedAndHasNoToolRows(t *testing.T) {
 
 func TestAnUnreachableServerReportsTheErrorAndKeepsItsLastListing(t *testing.T) {
 	b := newTestBuilderWithConfig(t, mcpViewConfig(nil))
-	b.mcp.start = func(context.Context, *decl.MCPServerCfg) (mcpClient, error) {
+	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg) (mcpClient, error) {
 		return nil, errors.New("the command is not on the PATH")
 	}
 
@@ -119,7 +119,7 @@ func TestTheReasonIsTheToolRuleWhenTheServerIsThere(t *testing.T) {
 func TestThePanelAsksTheManagerAndTheManagerStartsTheServer(t *testing.T) {
 	b := newTestBuilderWithConfig(t, mcpViewConfig(nil))
 	started := 0
-	b.mcp.start = func(context.Context, *decl.MCPServerCfg) (mcpClient, error) {
+	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg) (mcpClient, error) {
 		started++
 		return &fakeMCPClient{tools: []string{"read_issue"}}, nil
 	}
@@ -159,7 +159,7 @@ func TestThePanelShowsTheTierTheGateWouldUse(t *testing.T) {
 	cfg := mcpViewConfig(&list)
 	cfg.MCPs["github"].Allows = []string{"read_issue"}
 	b := newTestBuilderWithConfig(t, cfg)
-	b.mcp.start = func(context.Context, *decl.MCPServerCfg) (mcpClient, error) {
+	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg) (mcpClient, error) {
 		return &fakeMCPClient{tools: []string{"read_issue", "delete_repo"}}, nil
 	}
 

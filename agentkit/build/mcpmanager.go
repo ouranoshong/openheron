@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"sync"
@@ -48,7 +49,13 @@ type mcpManager struct {
 	//   protocol is not what the manager is about: a test puts a fake in
 	//   its place and exercises the lifecycle — the single start, the
 	//   restart, the re-list — without a child process.
-	start func(ctx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error)
+	//
+	// ★ The two contexts are different on purpose. The operation context
+	//   bounds the start — connect, initialize, list tools — and the
+	//   lifetime context bounds the **child process**. The client outlives
+	//   the start that created it, so a child spawned under the start's
+	//   deadline would be killed the moment the start returned.
+	start func(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error)
 }
 
 func newMCPManager() *mcpManager {
@@ -166,6 +173,10 @@ type mcpEntry struct {
 	err         error
 	serial      bool
 
+	// cancel ends the child's lifetime. It is the entry's, because the
+	// client outlives the snapshot it was built for.
+	cancel context.CancelFunc
+
 	// startMu makes the start single-flight.
 	startMu sync.Mutex
 
@@ -202,7 +213,7 @@ func (e *mcpEntry) stale() bool {
 //	and a hot partition whose resources are not rebuilt lies about being
 //	hot.
 func (e *mcpEntry) ensure(ctx context.Context, cfg *decl.MCPServerCfg,
-	start func(context.Context, *decl.MCPServerCfg) (mcpClient, error)) error {
+	start func(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error)) error {
 	e.startMu.Lock()
 	defer e.startMu.Unlock()
 
@@ -218,14 +229,20 @@ func (e *mcpEntry) ensure(ctx context.Context, cfg *decl.MCPServerCfg,
 		e.close()
 	}
 
-	started, err := start(ctx, cfg)
+	life, cancel := context.WithCancel(context.Background())
+	started, err := start(ctx, life, cfg)
 	if err != nil {
+		cancel()
 		e.mu.Lock()
 		e.err = err
 		e.mu.Unlock()
 		return err
 	}
 	e.mu.Lock()
+	if e.cancel != nil {
+		e.cancel()
+	}
+	e.cancel = cancel
 	e.cli, e.fingerprint, e.err = started, want, nil
 	e.serial = cfg.Transport == decl.MCPTransportStdio
 	e.mu.Unlock()
@@ -273,19 +290,32 @@ func (e *mcpEntry) list(ctx context.Context) ([]string, error) {
 func (e *mcpEntry) markBroken() {
 	e.mu.Lock()
 	cli := e.cli
-	e.cli, e.tools, e.listedAt = nil, nil, time.Time{}
+	cancel := e.cancel
+	e.cli, e.cancel, e.tools, e.listedAt = nil, nil, nil, time.Time{}
 	e.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	if cli != nil {
 		_ = cli.Close()
 	}
 }
 
 // close tears the client down.
+//
+// ★ The child's lifetime ends with the client: a stdio server is a child
+//
+//	process of this one, and it must not outlive the connection that owns
+//	it.
 func (e *mcpEntry) close() {
 	e.mu.Lock()
 	cli := e.cli
-	e.cli, e.tools, e.listedAt = nil, nil, time.Time{}
+	cancel := e.cancel
+	e.cli, e.cancel, e.tools, e.listedAt = nil, nil, nil, time.Time{}
 	e.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	if cli != nil {
 		_ = cli.Close()
 	}
@@ -362,12 +392,12 @@ func sameStrings(a, b []string) bool {
 //	tool list. A failure to initialize is the same failure as an
 //	unreachable server — the server does not contribute tools, and it says
 //	so.
-func startMCPClient(ctx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error) {
+func startMCPClient(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error) {
 	switch cfg.Transport {
 	case decl.MCPTransportStdio:
-		return startStdioClient(ctx, cfg)
+		return startStdioClient(opCtx, lifeCtx, cfg)
 	case decl.MCPTransportHTTP:
-		return startHTTPClient(ctx, cfg)
+		return startHTTPClient(opCtx, cfg)
 	default:
 		return nil, fmt.Errorf("unknown transport %q", cfg.Transport)
 	}
@@ -385,18 +415,27 @@ func startMCPClient(ctx context.Context, cfg *decl.MCPServerCfg) (mcpClient, err
 // ★ The command is resolved in the sandbox's PATH, never against the
 //
 //	project root: the workspace must not get to choose what runs.
-func startStdioClient(ctx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error) {
+func startStdioClient(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error) {
 	env := mcpChildEnv(cfg)
 
-	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout.Value)
+	opCtx, cancel := context.WithTimeout(opCtx, cfg.Timeout.Value)
 	defer cancel()
 
-	tr := transport.NewStdio(cfg.Command, env, cfg.Args...)
-	if err := tr.Start(ctx); err != nil {
+	// ★ The child is spawned under the **lifetime** context, not under the
+	//   start's deadline: the client outlives the start that created it,
+	//   and a child bound to the start would be killed the moment the
+	//   start returned.
+	tr := transport.NewStdioWithOptions(cfg.Command, env, cfg.Args,
+		transport.WithCommandFunc(func(ctx context.Context, command string, _ []string, args []string) (*exec.Cmd, error) {
+			cmd := exec.CommandContext(ctx, command, args...)
+			cmd.Env = env
+			return cmd, nil
+		}))
+	if err := tr.Start(lifeCtx); err != nil {
 		return nil, fmt.Errorf("start %q: %w", cfg.Command, err)
 	}
 	cli := client.NewClient(tr)
-	if err := initializeMCPClient(ctx, cli); err != nil {
+	if err := initializeMCPClient(opCtx, cli); err != nil {
 		_ = tr.Close()
 		return nil, err
 	}

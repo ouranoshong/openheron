@@ -753,7 +753,7 @@ The dialog is titled "MCP servers" and holds one block per configured server:
 - the server's name, its transport (`stdio` or `http`), and its state — `ready`,
   `unreachable` or `unused`;
 - one row per tool: the server's own name, the exposed name (`mcp__github__create_issue`),
-  the tier (`allow` or `ask`), and the state.
+  the tier (`allow`, `ask` or `deny`), and the state.
 
 A configuration with no server says "No MCP servers are configured".
 

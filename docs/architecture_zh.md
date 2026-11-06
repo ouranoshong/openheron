@@ -53,13 +53,19 @@
 | | `kb` | `obs`, `persist` | 知识库：语料、索引、检索、评分 |
 | | `agentkit/spec` | `obs`, `decl`, `persist` | 配置装载、校验、热重载、写入闸门 |
 | **L2** | `agentkit/build` | `obs`, `spec`, `decl`, `approval`, `contract`, `helpers`, `kb`, `llm/common`, `message` | Agent 装配、工具装配、策略闸门 |
-| | `agentkit/run` | `emit`, `obs`, `approval`, `contract`, `message`, `storage` | 运行循环、输入构造、事件消费 |
+| | `agentkit/run` | `emit`, `obs`, `approval`, `contract`, `decl`, `message`, `storage` | 运行循环、输入构造、事件消费 |
 | | `storage/filestore` | `obs`, `contract`, `message`, `persist`, `storage` | 文件存储实现 |
 | | `storage/memarbit` | `storage` | 内存租约仲裁器 |
 | | `transport` | `contract` | AG-UI 渲染：run 的事件 → 帧 |
 | | `llm` | `build`, `spec`, `decl` | 薄封装（只有 `common/` 与一个测试文件） |
 | | `initcfg` | `spec`, `persist` | `openheron init` 的出厂模板 |
 | **L3 入口** | `api` | `build`, `obs`, `run`, `spec`, `decl`, `contract`, `message`, `storage`, `filestore`, `transport`, `webui` | HTTP 路由、SSE、错误信封 |
+
+这张表只统计**内部**依赖 —— 第三方包不在表里。MCP 这条路径带进来两个第三方包：
+`github.com/cloudwego/eino-ext/components/tool/mcp`（eino 适配器）与
+`github.com/mark3labs/mcp-go`（协议客户端），两者都在 `agentkit/build` 里。
+`agentkit/run` 引 `agentkit/spec/decl` 只为命名空间常量 —— run 账本要记下这一轮碰过
+哪些 server。
 
 ### 2.1 两条不能破的依赖铁律
 
@@ -87,8 +93,8 @@
 ### 2.2 `agentkit/spec` 为什么**不**引 `kb`
 
 知识库配置（`tools/kb.yaml`）的**校验**需要知道语料路径是不是相对路径、模型有没有被声明、
-以及它是不是声明为 `kind: embedding`（`agentkit/spec/load.go:173` 的 `loadKB`、
-`load.go:345` 的 `validateKB`）。
+以及它是不是声明为 `kind: embedding`（`agentkit/spec/load.go:195` 的 `loadKB`、
+`load.go:594` 的 `validateKB`）。
 
 ★ 这三个答案都在**声明**里（`decl.Model.IsEmbedding`、`decl.Model.Dimensions`），
   所以配置层根本不引知识库 —— 只有测试文件引（`agentkit/spec/policy_contract_test.go:7`）。
@@ -112,7 +118,7 @@
 配置根一旦依赖「进程从哪启动」，同一条命令换个目录就读到另一份配置，
 测试实例也会因此读到开发配置。
 
-只有**默认派生**的根会被自动创建（`config.go:186` 的 `os.MkdirAll`），
+只有**默认派生**的根会被自动创建（`config.go:204` 的 `os.MkdirAll`），
 显式 root / env root 指向不存在的位置时**不创建**：打错字不该静默长出一棵空配置树。
 
 `spec.NewServiceAt` 是另一条入口，供 `openheron init` 用：它**只认显式传入的路径**，
@@ -126,19 +132,24 @@
 | `llm/` | `spec.DirLLM` | ✅ | 每个厂商一个 `.yaml` |
 | `policy/` | `spec.DirPolicy` | ✅ | `permissions.yaml` + `limits.yaml` |
 | `tools/` | `spec.DirTools` | ✅ | `http.yaml` / `web_search.yaml` / `wikipedia.yaml` / `kb.yaml` |
+| `mcps/` | `spec.DirMCP` | ✅ | 每个 MCP server 一个 `.yaml` |
 | `server/` | `spec.DirServer` | ❌ | 进程参数，需重启 |
 | `state/` | `spec.DirState` | — | 会话与 checkpoint，自动创建 |
 | `skills/` | — | ❌ | **独立解析**（见 §3.6） |
 
-`tools/` 下的文件名是**白名单**：`agentkit/spec/load.go:130` 对未知文件直接报错，
+`tools/` 下的文件名是**白名单**：`agentkit/spec/load.go:191` 对未知文件直接报错，
 不会静默忽略 —— 「我写了 kb.yaml 但它没生效」是最难查的一类问题。
+
+★ `mcps/` 分区**一个 server 一个文件**（`agentkit/spec/config.go:26` 的 `spec.DirMCP`）：
+文件在，定义就在 —— 没有 `enabled` 键 —— 而且文件名就是 server 的名字，也就是这个 server
+工具的命名空间那一段。
 
 ### 3.3 Agent 定义
 
 一个 Agent 是一个 markdown 文件：**frontmatter + 正文**。frontmatter 是**严格解码**的
-（`agentkit/spec/load.go:65` 的 `loadAgent`）—— 写错一个键就是启动错误。
+（`agentkit/spec/load.go:72` 的 `loadAgent`）—— 写错一个键就是启动错误。
 
-frontmatter 可用键（`agentkit/spec/decl/decl.go:67` 的 `decl.Agent`）：
+frontmatter 可用键（`agentkit/spec/decl/decl.go:78` 的 `decl.Agent`）：
 
 | 键 | yaml tag | 含义 |
 |---|---|---|
@@ -147,6 +158,7 @@ frontmatter 可用键（`agentkit/spec/decl/decl.go:67` 的 `decl.Agent`）：
 | `max_iterations` | `max_iterations` | 工具循环轮数上限 |
 | `subagents` | `subagents` | 可委派的子 Agent 列表 |
 | `disabled_tools` | `disabled_tools` | 对本 Agent 生效的工具禁用表 |
+| `mcps` | `mcps` | 本 Agent 可用的 MCP server —— 不写表示所有已配置的 server，写空列表表示一个都不用（`agentkit/spec/decl/decl.go:114`） |
 | `temperature` | `temperature` | 采样温度 |
 | `max_tokens` | `max_tokens` | 采样上限 |
 | `reasoning` | `reasoning` | 思考档位名（`low`/`high`/`max`…） |
@@ -166,24 +178,29 @@ frontmatter 可用键（`agentkit/spec/decl/decl.go:67` 的 `decl.Agent`）：
 两者**分开存储、从不合并** —— 合并就丢掉了「是哪一层拦的」这个信息。
 外层 `deny` 优先，是子 Agent 唯一放松不了的保证。
 
-档位只有两列（`build.Policy.TierOf`，`agentkit/build/policy.go:39`；镜像的
-`decl.Policy.TierOf` 在 `agentkit/spec/decl/decl.go:240`，未被使用）：`deny` →
+档位只有两列（`build.Policy.TierOf`，`agentkit/build/policy.go:49`；镜像的
+`decl.Policy.TierOf` 在 `agentkit/spec/decl/decl.go:249`，未被使用）：`deny` →
 `ask` → 否则 `allow`。**未被点名的工具默认 `allow`（直接放行）**。
 要让某个工具每次都要人点头，把它列进 `ask`。
+
+★ **一个例外：MCP 命名空间默认落在 `ask`**（`agentkit/build/policy.go:49`）。
+名字以 `mcp__` 开头的工具要人点头 —— 除非 server 自己的文件在 `allows:` 里点了它：
+server 的工具是运行时才发现的，而 stdio 下的 server 是一个与 agent 同权限的子进程，
+猜错的代价是不对称的。
 
 ### 3.5 深度上限与拓扑校验
 
 `server/config.yaml` 的 `agent.max_depth`（默认 `1`）与 `policy/limits.yaml` 的同名项
-**取更严的**（`spec/load.go:357` 的 `globalMaxDepth`）。
+**取更严的**（`spec/load.go:686` 的 `globalMaxDepth`）。
 
-声明的拓扑超过上限是**启动错误**（`spec/load.go:293` 的 `validateDepth`），
+声明的拓扑超过上限是**启动错误**（`spec/load.go:622` 的 `validateDepth`），
 不静默截断。子 agent 引用不存在的 agent、拓扑成环，也都是启动错误
-（`load.go:396`、`load.go:404`）。
+（`load.go:726`、`load.go:733`）。
 
 ### 3.6 skills 的解析是另一套
 
 `skills/` **不是**「配置根下的一个分区」，而是独立解析的
-（`agentkit/build/skill.go:41`）：先看 `$EINO_EXT_SKILLS_DIR`，
+（`agentkit/build/skill.go:188`）：先看 `$EINO_EXT_SKILLS_DIR`，
 没有才从当前目录**向上**找 `.openheron/skills`。
 
 ★ 这跟「配置根不向上查找」是两条不同的规则。skills 是目录树，
@@ -203,10 +220,10 @@ skills 目录下文件夹的白名单，它以 `scopedSkillBackend`（`agentkit/
 
 ### 3.7 装载的两种模式与「deferred」
 
-`spec.Service.Load()`（`config.go:245`）严格校验，失败即启动失败。
-`LoadUnchecked()`（`config.go:268`）跳过校验。
+`spec.Service.Load()`（`config.go:263`）严格校验，失败即启动失败。
+`LoadUnchecked()`（`config.go:286`）跳过校验。
 
-`Config.Deferred()`（`config.go:114`）收集**非致命**的问题（比如某个 duration 字符串
+`Config.Deferred()`（`config.go:132`）收集**非致命**的问题（比如某个 duration 字符串
 没法解析），以 `deferred` 数组出现在 `/v2/health` 与 `/v2/config` 里。
 致命与非致命的分界是：**会导致运行时行为错乱的是致命的**，只是提示的是 deferred。
 
@@ -253,14 +270,19 @@ skills 目录下文件夹的白名单，它以 `scopedSkillBackend`（`agentkit/
 被拒绝时，工具返回的是**一句拒绝说明**（带可选理由），**不是**一个错误 ——
 模型看到的是「被拒了，理由是 X」，于是可以据此调整。
 
+★ MCP 工具走的是**同一道**闸门：它们和其它工具一样**按名字**查
+（`agentkit/build/policy.go:49` 的 `TierOf`），所以 `mcp__<server>__<tool>` 同样会被
+拒、要人点头或直接放行。闸门没变 —— 变的只是命名空间。
+
 ### 4.3 工具来源
 
 | 来源 | 装配位置 | 例子 |
 |---|---|---|
-| 文件系统中间件 | `build/tools.go:40` | `ls` `read_file` `write_file` `edit_file` `execute` |
+| 文件系统中间件 | `build/tools.go:45` | `ls` `read_file` `write_file` `edit_file` `execute` |
 | 网络工具 | `build/nettools.go` | `web_search` `http` |
 | 知识库 | `build/kb.go` | `kb_search` `kb_index` |
 | 百科 | `build/nettools.go:236` | `wikipedia` |
+| MCP server | `build/mcptools.go:193` | `mcp__<server>__<tool>` |
 
 对外的网络工具**不用改代码**：配置缺失的 provider 什么都不挂，所以写下这个文件才是把工具
 挂上去的那一步（`tools/*.yaml`）。★ 文件系统中间件是
@@ -269,6 +291,29 @@ skills 目录下文件夹的白名单，它以 `scopedSkillBackend`（`agentkit/
 ★ 注意 `openheron init` **默认不写** `tools/` 下的任何文件 —— 那一整个目录要用户自己写；
 配置缺失的 provider 什么都不挂，所以开一个工具是一个决定，不是一个副作用。`--tools` 会写
 那四个配置文件。
+
+工具的来路都一样：
+
+`tools/*.yaml` → `spec.loadTool`（`agentkit/spec/load.go:165`）→ `decl.ToolsCfg` →
+`toolRegistry.Build`（`agentkit/build/tools.go:55`）→ `snapshot.buildHeavy`
+（`agentkit/build/snapshot.go:47`）→ `applyToolConfig`（`agentkit/build/assemble.go:31`）→
+`deep.Config.ToolsConfig.Tools` → `deep.New`（`agentkit/build/assemble.go:40`）。
+
+MCP 这一支在注册表处并进来：`mcps/<server>.yaml` → `spec.loadMCP`
+（`agentkit/spec/load.go:256`）→ `decl.MCPServerCfg` → MCP provider
+（`agentkit/build/mcptools.go:193`），注册在 `agentkit/build/tools.go:41` → 同一个
+`toolRegistry.Build` → 同一个 `applyToolConfig`。
+
+★ **MCP 客户端是这条路径上唯一不属于 snapshot 的资源。** 重依赖只构建一次，
+在 `sync.Once` 之下（`agentkit/build/snapshot.go:41`），而 provider 只回答一个问题 ——
+「这个 snapshot 有哪些工具」，然后交回**一批**工具。那批工具背后的客户端活得比这批工具久：
+它由 manager 拥有（`agentkit/build/mcpmanager.go:41`），因为 stdio 的 server 是一个
+**子进程**，为一轮启动的子进程下一轮还得在。provider 是**可选**的 —— 连不上的 server
+只跳过并告警，绝不报错，所以一个死掉的 server 不能把 agent 拖下水。
+
+★ 暴露出来的名字是 `mcp__<server>__<tool>`，只在一处拼装（`agentkit/build/mcptools.go:140`）。
+server 自己的名字就是命名空间那一段，而 agent 的 `mcps:` 列表在**agent 自己的表**里
+收窄 server —— 正是 `disabled_tools` 收窄工具的那一层。
 
 ## 5. 运行循环
 
@@ -308,7 +353,7 @@ skills 目录下文件夹的白名单，它以 `scopedSkillBackend`（`agentkit/
 
 checkpoint 没了就恢复不了 —— 这时接口返回
 `this approval can no longer be resumed: its checkpoint is gone. Send a new message to continue.`
-（`api/v2_types.go:121`），而不是静默新开一轮。
+（`api/v2_types.go:131`），而不是静默新开一轮。
 
 ### 5.3 会话准入
 
@@ -367,7 +412,7 @@ run 账本是一次 run 的持久记录：每次 run 一行，由 run 自己的 
 - **`/v2` 路由先注册，catch-all `GET /*` 后注册** —— SPA 回退不会吞掉接口。
 - **没有认证、没有 CORS。** 默认 `:8080` 绑全部网卡，要收窄就显式配 `listen_addr`。
 
-`POST /v2/run` 的 `threadId` **必填**（`api/v2_run.go:78`）——
+`POST /v2/run` 的 `threadId` **必填**（`api/v2_run.go:113`）——
 先 `POST /v2/sessions` 拿到会话，再发起 run。
 
 ## 8. 前端
@@ -401,7 +446,7 @@ selector 里不要写 `?? []`；用模块级常量或 store 里的 selector。
   `0.5*词法分 + 0.5*余弦相似度`，无向量时**纯词法**（所以 `kb status` 会报
   `lexical-only retrieval`）。
 - 词法分给**标识符加权**：出现在标题/小节标题/链接里的词比出现在正文里的词值钱。
-- `openheron kb index` 有**运行锁**（`kb/store.go:100` 的 `StartRun`）：同时只能跑一轮。
+- `openheron kb index` 有**运行锁**（`kb/store.go:121` 的 `StartRun`）：同时只能跑一轮。
 - agent 侧拿到两个工具：`kb_search`（返回文档**大纲**而非全文）与 `kb_index`。
   `kb_index` 默认落在 `ask` 档 —— 让 agent 自己重建索引需要人点头。
 
