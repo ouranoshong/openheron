@@ -7,7 +7,7 @@ one — change one and change the other.
 
 > ★ **This repository is the code surface**: Go backend + React frontend + build configuration.
 >
-> It ships **nine** bilingual document sets, maintained alongside the code
+> It ships **ten** bilingual document sets, maintained alongside the code
 > (**English is the main version; the `_zh` suffix marks the Chinese version**):
 > `README.md` / `README_zh.md`,
 > `docs/architecture.md` / `docs/architecture_zh.md` (architecture),
@@ -17,9 +17,10 @@ one — change one and change the other.
 > `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` (session concurrency design),
 > `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` (run lifecycle design),
 > `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` (filesystem backend design),
-> `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` (Docker Sandbox Kit packaging).
+> `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` (Docker Sandbox Kit packaging),
+> `docs/mcp-design.md` / `docs/mcp-design_zh.md` (MCP integration design).
 > **Every other design document under `docs/` still lives in the upstream repository** ——
-> any `docs/xxx.md` reference below that is not one of these nine is the upstream copy.
+> any `docs/xxx.md` reference below that is not one of these ten is the upstream copy.
 > If you cannot get hold of it before changing semantics, ask first; do not change
 > configuration or interfaces from memory.
 >
@@ -42,6 +43,10 @@ one — change one and change the other.
 > `docs/fs-backend-design.md` describes the **filesystem backend** — the bounded fork of
 > `eino-ext`'s local backend (§5) and the confinement rule every tool passes through — and it is
 > **implemented**: `agentkit/fsx` is wired in at both call sites.
+> `docs/mcp-design.md` is a **proposal** too: its §1 describes the code as it is — the tool
+> assembly path, the provider contract, and the exact-match policy tables — while its §2 onwards
+> describe what would be built: an `mcp/` config partition, the `mcp__<server>__<tool>` namespace,
+> and prefix matching in the policy tables. **Nothing from §2 onwards is in the tree.**
 >
 > ★ One directory is not a document set: **`sandbox-kit/`** holds the Docker Sandbox Kits that
 > package openheron as a sandbox workload — `openheron/` (the workload: descriptor, content
@@ -347,6 +352,7 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 | `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` | **Filesystem backend design** — why `eino-ext`'s local backend was forked into `agentkit/fsx`, how paths are confined to the project root, and how `ls`/`glob` are bounded (**implemented**) |
 | `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` | **Run lifecycle design** — why a turn is bound to one SSE connection today, and how a run becomes a durable row with a lease and a fence, so the connection can be demoted to a subscriber (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
 | `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` | **Docker Sandbox Kit packaging** — the openheron process as it is, a v3 workload Kit that would carry the whole process into a microVM, how the model key stays on the host, and the SSE path that has to be measured (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
+| `docs/mcp-design.md` / `docs/mcp-design_zh.md` | **MCP integration design** — the tool assembly path as it is, what an MCP client adds to it, the `mcp__<server>__<tool>` namespace, prefix matching in the policy tables, and where an MCP server runs inside the Kit (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
 
 ★ The file without a suffix is the **English main version**; `_zh` is the Chinese version; the two
 correspond one to one — change one and change the other.

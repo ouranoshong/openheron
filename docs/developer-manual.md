@@ -157,6 +157,10 @@ answer and the runtime's answer stop agreeing.
 
 Say you want a new `mcp/` directory:
 
+★ That directory is not hypothetical — `docs/mcp-design.md` designs it (a proposal:
+  nothing from its §2 onwards is in the tree). The recipe below is the one that
+  partition would follow.
+
 1. **`agentkit/spec/config.go`**: add the directory constant `DirMCP = "mcp"` and an entry
    in `Categories` (with `ID`, `Label`, `Dir`, `Ext`). Keep **hot-reloaded** and
    **non-hot-reloaded** directories clearly apart — whether a directory is hot changes

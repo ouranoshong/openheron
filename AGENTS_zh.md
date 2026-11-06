@@ -7,7 +7,7 @@
 
 > ★ **本仓库是代码面**：Go 后端 + React 前端 + 构建配置。
 >
-> 本仓库自带**九组**中英双语文档，随代码面一起维护
+> 本仓库自带**十组**中英双语文档，随代码面一起维护
 > （**英文是主版本，`_zh` 后缀是中文版**）：
 > `README.md` / `README_zh.md`、
 > `docs/architecture.md` / `docs/architecture_zh.md`（架构设计说明）、
@@ -17,7 +17,8 @@
 > `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md`（会话并发设计方案）、
 > `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md`（run 生命周期设计方案）、
 > `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md`（文件系统后端设计方案）、
-> `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md`（Docker Sandbox Kit 打包设计方案）。
+> `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md`（Docker Sandbox Kit 打包设计方案）、
+> `docs/mcp-design.md` / `docs/mcp-design_zh.md`（MCP 接入设计方案）。
 > **`docs/` 下其余设计文档仍在上游仓库** ——
 > 下面凡引用 `docs/xxx.md` 而这几组之外的，都是上游那份。改语义前若拿不到它，
 > 先问，别凭印象改配置或接口。
@@ -39,6 +40,10 @@
 > `docs/fs-backend-design.md` 讲的是**文件系统后端** —— `eino-ext` local 后端的有界分支
 > （§5）以及每个工具都要经过的那条收敛规则 —— 它**已实现**：`agentkit/fsx` 已在两处
 > 调用点接上。
+> `docs/mcp-design.md` 也是一份**提案**：§1 讲代码现状 —— 工具装配路径、provider 契约、
+> 以及只做精确匹配的策略表 —— §2 往后讲要建成什么样：一个新的 `mcp/` 配置分区、
+> `mcp__<server>__<tool>` 命名空间，以及策略表里的前缀匹配。
+> **§2 往后的东西都还不在树上。**
 >
 > ★ 有一个目录不是文档组：**`sandbox-kit/`** 装着把 openheron 打包成沙箱 workload 的
 > Docker Sandbox Kit —— `openheron/`（workload：描述文件、内容配方、入口脚本），
@@ -306,6 +311,7 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 | `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` | **文件系统后端设计方案** —— 为什么把 `eino-ext` 的 local 后端分叉成 `agentkit/fsx`、路径如何收敛在项目根之内、`ls`/`glob` 如何被封顶（**已实现**） |
 | `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` | **run 生命周期设计方案** —— 今天一轮为什么绑在一条 SSE 连接上，以及 run 怎么变成一行持久事实、配上租约与 fence，好让连接降级为订阅者（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
 | `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` | **Docker Sandbox Kit 打包设计方案** —— openheron 进程今天是什么样、一个把整个进程带进 microVM 的 v3 workload Kit、模型密钥如何留在宿主，以及必须实测的 SSE 这条路（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
+| `docs/mcp-design.md` / `docs/mcp-design_zh.md` | **MCP 接入设计方案** —— 今天的工具装配路径、MCP 客户端给它带来什么、`mcp__<server>__<tool>` 命名空间、策略表里的前缀匹配，以及 MCP 服务器在 Kit 里跑在哪（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
 
 ★ 无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。
 
