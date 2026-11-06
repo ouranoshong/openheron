@@ -7,7 +7,7 @@ one — change one and change the other.
 
 > ★ **This repository is the code surface**: Go backend + React frontend + build configuration.
 >
-> It ships **ten** bilingual document sets, maintained alongside the code
+> It ships **eleven** bilingual document sets, maintained alongside the code
 > (**English is the main version; the `_zh` suffix marks the Chinese version**):
 > `README.md` / `README_zh.md`,
 > `docs/architecture.md` / `docs/architecture_zh.md` (architecture),
@@ -18,9 +18,10 @@ one — change one and change the other.
 > `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` (run lifecycle design),
 > `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` (filesystem backend design),
 > `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` (Docker Sandbox Kit packaging),
-> `docs/mcp-design.md` / `docs/mcp-design_zh.md` (MCP integration design).
+> `docs/mcp-design.md` / `docs/mcp-design_zh.md` (MCP integration design),
+> `docs/config-design.md` / `docs/config-design_zh.md` (configuration system design).
 > **Every other design document under `docs/` still lives in the upstream repository** ——
-> any `docs/xxx.md` reference below that is not one of these ten is the upstream copy.
+> any `docs/xxx.md` reference below that is not one of these eleven is the upstream copy.
 > If you cannot get hold of it before changing semantics, ask first; do not change
 > configuration or interfaces from memory.
 >
@@ -47,6 +48,11 @@ one — change one and change the other.
 > assembly path, the provider contract, and the exact-match policy tables — while its §2 onwards
 > describe what would be built: an `mcp/` config partition, the `mcp__<server>__<tool>` namespace,
 > and prefix matching in the policy tables. **Nothing from §2 onwards is in the tree.**
+> `docs/config-design.md` describes the **configuration system** — the config root and its
+> three levels, the partitions and their file specs, loading and precedence, hot reload, and
+> the dependency iron rules. **Its body describes the code as it is**; the `mcp/` partition
+> (§6.7) and the prefix matching in the policy tables (§6.3) are labeled as proposals,
+> because they are not implemented.
 >
 > ★ One directory is not a document set: **`sandbox-kit/`** holds the Docker Sandbox Kits that
 > package openheron as a sandbox workload — `openheron/` (the workload: descriptor, content
@@ -110,7 +116,7 @@ When you add comments, follow these rules:
   (counter-intuitive design trade-offs, pitfalls hit, pointers to upstream docs) must be
   translated **point by point**, not compressed into a single sentence. Keep the `★` markers —
   they mark "there is a trap here"; dropping them downgrades a warning to small talk.
-- **Point at upstream docs**: `docs/config-design.md`, `docs/api-v2-design.md` and the like are
+- **Point at the design docs**: `docs/config-design.md`, `docs/api-v2-design.md` and the like are
   the design basis; do not restate their content in comments.
 
 ### Outside that scope, Chinese stays
@@ -159,13 +165,13 @@ zero openheron dependencies, and importing `obs` would break that iron rule
   has holes.
 - **`deny` beats `disabled_tools`** — the outer policy is the one guarantee a sub-agent cannot
   relax.
-- Before changing configuration semantics, read upstream `docs/config-design.md`; before changing
+- Before changing configuration semantics, read `docs/config-design.md`; before changing
   an interface, read `docs/api-design.md`; before adding a `/v2` endpoint, read
   `docs/api-v2-design.md`; before touching the frontend, read `docs/frontend-design.md`; before
   touching the test environment (ports / isolation directories), read `docs/frontend-design.md`
-  §11.2 and `docs/config-design.md` §5.2. **Those upstream documents are not in this
-  repository** — if you cannot get them, ask first. The `docs/architecture.md` /
-  `docs/user-manual.md` / `docs/developer-manual.md` shipped here (and their `_zh` Chinese
+  §11.2 and `docs/config-design.md` §5.2. ★ `docs/config-design.md` **is** in this repository;
+  the other three are upstream documents that are **not** — if you cannot get them, ask
+  first. The `docs/architecture.md` / `docs/user-manual.md` / `docs/developer-manual.md` shipped here (and their `_zh` Chinese
   versions) describe **this code surface** as it actually is — just read them.
   `docs/context-usage-design.md` covers context usage and compaction: the usage dashboard and
   compaction persistence are already in the code; read it before changing context-usage code.
@@ -353,6 +359,7 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 | `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` | **Run lifecycle design** — why a turn is bound to one SSE connection today, and how a run becomes a durable row with a lease and a fence, so the connection can be demoted to a subscriber (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
 | `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` | **Docker Sandbox Kit packaging** — the openheron process as it is, a v3 workload Kit that would carry the whole process into a microVM, how the model key stays on the host, and the SSE path that has to be measured (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
 | `docs/mcp-design.md` / `docs/mcp-design_zh.md` | **MCP integration design** — the tool assembly path as it is, what an MCP client adds to it, the `mcp__<server>__<tool>` namespace, prefix matching in the policy tables, and where an MCP server runs inside the Kit (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
+| `docs/config-design.md` / `docs/config-design_zh.md` | **Configuration system design** — the config root and its three levels, the partitions and their file specs, loading and precedence, hot reload, and the dependency iron rules (**the body describes the code as it is**; the `mcp/` partition and the prefix matching are proposals) |
 
 ★ The file without a suffix is the **English main version**; `_zh` is the Chinese version; the two
 correspond one to one — change one and change the other.
@@ -370,7 +377,6 @@ overview and the index of the volumes.
 | `docs/hygiene-research.md` | **Code hygiene research** — exported symbols with no consumer, third-party archives, dead code (2026-10-23) |
 | `docs/agent-architecture-survey.md` | **Survey of external agent architectures** — the gateway and background-service problems of pi / rakazo / OpenClaw / Hermes / Letta (2026-10-24) |
 | `docs/positioning.md` | **Positioning and trade-offs** — expert per expert model × agent as a tool: mechanism breakdown and boundaries (2026-10-25) |
-| `docs/config-design.md` | Config schema, layering, validation, hot reload |
 | `docs/api-design.md` | The old unprefixed APIs (**retired on 2026-10-23 together with M3**, kept as history) |
 | `docs/api-v2-design.md` | The `/v2` API family and the AG-UI event contract |
 | `docs/frontend-design.md` | React frontend architecture and interface |

@@ -7,7 +7,7 @@
 
 > ★ **本仓库是代码面**：Go 后端 + React 前端 + 构建配置。
 >
-> 本仓库自带**十组**中英双语文档，随代码面一起维护
+> 本仓库自带**十一组**中英双语文档，随代码面一起维护
 > （**英文是主版本，`_zh` 后缀是中文版**）：
 > `README.md` / `README_zh.md`、
 > `docs/architecture.md` / `docs/architecture_zh.md`（架构设计说明）、
@@ -18,7 +18,8 @@
 > `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md`（run 生命周期设计方案）、
 > `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md`（文件系统后端设计方案）、
 > `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md`（Docker Sandbox Kit 打包设计方案）、
-> `docs/mcp-design.md` / `docs/mcp-design_zh.md`（MCP 接入设计方案）。
+> `docs/mcp-design.md` / `docs/mcp-design_zh.md`（MCP 接入设计方案）、
+> `docs/config-design.md` / `docs/config-design_zh.md`（配置系统设计说明）。
 > **`docs/` 下其余设计文档仍在上游仓库** ——
 > 下面凡引用 `docs/xxx.md` 而这几组之外的，都是上游那份。改语义前若拿不到它，
 > 先问，别凭印象改配置或接口。
@@ -44,6 +45,9 @@
 > 以及只做精确匹配的策略表 —— §2 往后讲要建成什么样：一个新的 `mcp/` 配置分区、
 > `mcp__<server>__<tool>` 命名空间，以及策略表里的前缀匹配。
 > **§2 往后的东西都还不在树上。**
+> `docs/config-design.md` 讲的是**配置系统** —— 配置根与它的三级解析、各个分区与它们的
+> 文件规格、加载与优先级、热更新，以及依赖铁律。**正文讲的是代码现状**；
+> `mcp/` 分区（§6.7）与策略表里的前缀匹配（§6.3）标成了提案，因为它们还没实现。
 >
 > ★ 有一个目录不是文档组：**`sandbox-kit/`** 装着把 openheron 打包成沙箱 workload 的
 > Docker Sandbox Kit —— `openheron/`（workload：描述文件、内容配方、入口脚本），
@@ -101,7 +105,7 @@
 - **不降低信息密度**。原来用中文写的**为什么**（反直觉的设计取舍、
   踩过的坑、对上游文档的指路）要**逐点**翻过去，不要压缩成一句话。
   `★` 标记保留，它标的是「这里有坑」，丢掉等于把警告降级成闲聊。
-- **指路要指上游文档**：`docs/config-design.md`、`docs/api-v2-design.md`
+- **指路要指设计文档**：`docs/config-design.md`、`docs/api-v2-design.md`
   这类分册才是设计依据，注释别复述它们的内容。
 
 ### 范围之外，保持中文
@@ -137,10 +141,11 @@
   测试实例也会因此读到开发配置。要换配置根就指名，别加新的查找规则。
 - **归档优先于呈现** —— SSE sink 断裂后要停止渲染但继续消费事件流，否则 `Outcome.Intermediates` 不完整，历史会缺。
 - **`deny` 优先于 `disabled_tools`** —— 外层策略是子 agent 无法放松的唯一保证。
-- 改配置语义前先读上游的 `docs/config-design.md`；改接口前先读 `docs/api-design.md`；
+- 改配置语义前先读 `docs/config-design.md`；改接口前先读 `docs/api-design.md`；
   新增 `/v2` 接口读 `docs/api-v2-design.md`；动前端读 `docs/frontend-design.md`；
   动测试环境（端口 / 隔离目录）读 `docs/frontend-design.md` §11.2 与
-  `docs/config-design.md` §5.2。**这几份上游文档不在本仓库里** —— 拿不到就先问。
+  `docs/config-design.md` §5.2。★ `docs/config-design.md` **就在本仓库里**，
+  另外三份是**不在**本仓库的上游文档 —— 拿不到就先问。
   本仓库自带的 `docs/architecture.md` / `docs/user-manual.md` /
   `docs/developer-manual.md`（及其 `_zh` 中文版）讲的是**本代码面**的实际结构，
   直接看就行。`docs/context-usage-design.md` 讲的是上下文占用与压缩：占用仪表盘
@@ -312,6 +317,7 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 | `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` | **run 生命周期设计方案** —— 今天一轮为什么绑在一条 SSE 连接上，以及 run 怎么变成一行持久事实、配上租约与 fence，好让连接降级为订阅者（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
 | `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` | **Docker Sandbox Kit 打包设计方案** —— openheron 进程今天是什么样、一个把整个进程带进 microVM 的 v3 workload Kit、模型密钥如何留在宿主，以及必须实测的 SSE 这条路（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
 | `docs/mcp-design.md` / `docs/mcp-design_zh.md` | **MCP 接入设计方案** —— 今天的工具装配路径、MCP 客户端给它带来什么、`mcp__<server>__<tool>` 命名空间、策略表里的前缀匹配，以及 MCP 服务器在 Kit 里跑在哪（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
+| `docs/config-design.md` / `docs/config-design_zh.md` | **配置系统设计说明** —— 配置根与它的三级解析、各个分区与它们的文件规格、加载与优先级、热更新，以及依赖铁律（**正文讲的是代码现状**；`mcp/` 分区与前缀匹配是提案） |
 
 ★ 无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。
 
@@ -327,7 +333,6 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 | `docs/hygiene-research.md` | **代码卫生调研** —— 无出口的导出符号、第三方归档、死代码（2026-10-23） |
 | `docs/agent-architecture-survey.md` | **外部 Agent 架构调研** —— pi / rakazo / OpenClaw / Hermes / Letta 的 gateway 与后台服务问题（2026-10-24） |
 | `docs/positioning.md` | **定位与取舍** —— 专家配专模 × Agent 即工具：机制拆解与边界（2026-10-25） |
-| `docs/config-design.md` | 配置 schema、分层、校验、热更新 |
 | `docs/api-design.md` | 旧的无前缀接口（**已于 2026-10-23 随 M3 下线**，保留为历史记录） |
 | `docs/api-v2-design.md` | `/v2` 接口族与 AG-UI 事件契约 |
 | `docs/frontend-design.md` | React 前端架构与界面 |

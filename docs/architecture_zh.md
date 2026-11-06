@@ -51,7 +51,7 @@
 | | `agentkit/emit` | `obs`, `approval`, `contract`, `helpers`, `message` | 推导层：agent 事件 → run 的事实 |
 | | `storage` | `contract` | 会话/消息/待审批的接口 |
 | | `kb` | `obs`, `persist` | 知识库：语料、索引、检索、评分 |
-| | `agentkit/spec` | `obs`, `decl`, `kb`, `persist` | 配置装载、校验、热重载、写入闸门 |
+| | `agentkit/spec` | `obs`, `decl`, `persist` | 配置装载、校验、热重载、写入闸门 |
 | **L2** | `agentkit/build` | `obs`, `spec`, `decl`, `approval`, `contract`, `helpers`, `kb`, `llm/common`, `message` | Agent 装配、工具装配、策略闸门 |
 | | `agentkit/run` | `emit`, `obs`, `approval`, `contract`, `message`, `storage` | 运行循环、输入构造、事件消费 |
 | | `storage/filestore` | `obs`, `contract`, `message`, `persist`, `storage` | 文件存储实现 |
@@ -84,11 +84,16 @@
 （装载、校验、重载、写入）。这样 `decl` 可以在 `build`、`api`、`initcfg` 之间自由传递，
 不会拉出一条依赖链。
 
-### 2.2 `agentkit/spec` 为什么引 `kb`
+### 2.2 `agentkit/spec` 为什么**不**引 `kb`
 
-因为知识库配置（`tools/kb.yaml`）的**校验**需要知道语料目录是否存在、模型是否声明为
-`kind: embedding`（`agentkit/spec/load.go:134` 的 `loadKB`、`load.go:265` 的 `validateKB`）。
-`kb` 自己只依赖 `obs` 和 `persist`，方向仍然是单向的。
+知识库配置（`tools/kb.yaml`）的**校验**需要知道语料路径是不是相对路径、模型有没有被声明、
+以及它是不是声明为 `kind: embedding`（`agentkit/spec/load.go:171` 的 `loadKB`、
+`load.go:331` 的 `validateKB`）。
+
+★ 这三个答案都在**声明**里（`decl.Model.IsEmbedding`、`decl.Model.Dimensions`），
+  所以配置层根本不引知识库 —— 只有测试文件引（`agentkit/spec/policy_contract_test.go:7`）。
+  于是依赖方向仍然单向，而 `kb` 并不参与其中：`kb` 依赖 `obs` 和 `persist`，
+  `agentkit/spec` 依赖 `obs`、`decl` 与 `persist`。
 
 ### 2.3 `agentkit/build` 为什么引 `llm/common` 而不是 `llm`
 

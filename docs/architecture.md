@@ -54,7 +54,7 @@ counting `grep '"github.com/ouranoshong/openheron/'` hits per package:
 | | `agentkit/emit` | `obs`, `approval`, `contract`, `helpers`, `message` | The derivation: agent events → the run's facts |
 | | `storage` | `contract` | Interfaces for sessions/messages/pending approvals |
 | | `kb` | `obs`, `persist` | Knowledge base: corpus, index, retrieval, scoring |
-| | `agentkit/spec` | `obs`, `decl`, `kb`, `persist` | Config loading, validation, hot reload, write gates |
+| | `agentkit/spec` | `obs`, `decl`, `persist` | Config loading, validation, hot reload, write gates |
 | **L2** | `agentkit/build` | `obs`, `spec`, `decl`, `approval`, `contract`, `helpers`, `kb`, `llm/common`, `message` | Agent assembly, tool assembly, policy gates |
 | | `agentkit/run` | `emit`, `obs`, `approval`, `contract`, `message`, `storage` | Run loop, input construction, event consumption |
 | | `storage/filestore` | `obs`, `contract`, `message`, `persist`, `storage` | File store implementation |
@@ -91,12 +91,19 @@ structs** and yaml tags (`agentkit/spec/decl/decl.go`) and imports no other pack
 way `decl` can be passed freely between `build`, `api` and `initcfg` without dragging a
 dependency chain along.
 
-### 2.2 Why `agentkit/spec` imports `kb`
+### 2.2 Why `agentkit/spec` does **not** import `kb`
 
-Because **validating** the knowledge-base config (`tools/kb.yaml`) has to know whether the
-corpus directory exists and whether the model is declared as `kind: embedding`
-(`agentkit/spec/load.go:134` `loadKB`, `load.go:265` `validateKB`). `kb` itself depends
-only on `obs` and `persist`, so the direction stays one-way.
+**Validating** the knowledge-base config (`tools/kb.yaml`) needs to know whether the
+corpus path is relative, whether the model is declared at all, and whether it is
+declared as `kind: embedding` (`agentkit/spec/load.go:171` `loadKB`, `load.go:331`
+`validateKB`).
+
+★ All three answers live in the **declarations** (`decl.Model.IsEmbedding`,
+`decl.Model.Dimensions`), so the configuration layer does not import the knowledge base
+at all — only a test file does (`agentkit/spec/policy_contract_test.go:7`). The
+dependency direction therefore stays one-way without `kb` being involved in it: `kb`
+depends on `obs` and `persist`, and `agentkit/spec` depends on `obs`, `decl` and
+`persist`.
 
 ### 2.3 Why `agentkit/build` imports `llm/common` and not `llm`
 
