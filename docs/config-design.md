@@ -56,6 +56,7 @@
 | 15 | MCP tool naming | every name exposed to the model is namespaced `mcp__<server>__<tool>` | **proposal — not implemented** (see §6.7). MCP tool names are **decided by the remote server**: they collide with reserved tool names (`ls` / `execute`) and often carry dots (`github.create_issue`) — the latter does not pass the provider's function-name character set. The namespace turns "a collision" into "impossible". The only trace in the tree is the placeholder comment at `agentkit/build/tools.go:35` |
 | 16 | Policy matching | exact name **+** a trailing `*` for prefix matching | **proposal — not implemented** (see §6.3). The MCP tool set is only known at runtime, so naming each one is impossible; a single `mcp__github__*` would tier a whole server. Today the tables match **exactly** (`agentkit/build/policy.go:39-47`, `agentkit/build/policy.go:94-105`) |
 | 17 | Where a tier is written | **with the tool**: the `ask` tier lives in the tool's own file (`tools/*.yaml`, `mcps/*.yaml`); `policy/permissions.yaml` keeps the global `deny` | **proposal — not implemented** (see §6.3, §6.6). ★ a tier is a statement about **one tool**, so it belongs in that tool's file — and there it uses **the same vocabulary** (`http.yaml` says `post`, so it can say `ask: [post]`; the central file had to name the internal `request_post`). A `deny` is a different kind of statement — the boundary itself — and it must be expressible for the tools that have no file of their own |
+| 18 | The default tier | the **code** carries one per group; a file that says nothing gets it, a file that says something wins | ★ the built-in defaults are **known** defaults — openheron knows that `write_file` writes and that `execute` runs commands, so it asks exactly about the dangerous ones. An MCP server's tools are **discovered at runtime**: openheron cannot know what `delete_repo` does, and under stdio the server is a child process with the agent's own privileges ⇒ its default is **ask**, and a trusted server says `tier: allow` once |
 
 ### "One entity, one file" rather than a single-file partition table
 
@@ -1369,7 +1370,7 @@ thing everywhere:
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `tools` | `[]string` | all of them | **the exposed set** — the names, in this file's own vocabulary, that this file offers. Absent = all of them |
+| `tools` | `[]string` | all of them | **the exposed set** — the **raw** names (this file's own vocabulary, *not* the exposed ones) that this file offers. Absent = all of them |
 | `tier` | `string` | `allow` | the tier for the exposed ones: `allow` \| `ask` |
 | `ask` | `[]string` | `[]` | the exposed ones that ask first — **in this file's vocabulary** |
 
@@ -1391,10 +1392,57 @@ server's tool list is only known at runtime, so a rule that named the tools coul
 cover a tool the server adds tomorrow. `tier: ask` covers every tool the server will
 ever offer — which is the thing a prefix rule could never do for the `ask` tier (§6.3).
 
-★ A file that says nothing has the tier `allow`. The **code** carries the defaults for
-the built-in groups: the filesystem tools ask for `write_file`, `edit_file` and `execute`,
-and `kb_index` asks. ⇒ the factory templates write the same constants out, so the file
-and the default cannot drift.
+#### ★ The default tiers
+
+★ **The fallback**: a tool that no file names is **allow** — straight through. That is
+the rule that keeps "read a file" from asking every single time.
+
+★ **Each group has a code default**, and the file overrides it:
+
+| Group | File | The default |
+|---|---|---|
+| the filesystem tools | `tools/filesystem.yaml` | `write_file` `edit_file` `execute` → **ask**; the rest → allow |
+| the HTTP tool | `tools/http.yaml` | allow |
+| web search | `tools/web_search.yaml` | allow |
+| the encyclopedia | `tools/wikipedia.yaml` | allow |
+| the knowledge base | `tools/kb.yaml` | `kb_search` → allow; `kb_index` → **ask** (it writes the index) |
+| ★ **an MCP server** | `mcps/<server>.yaml` | ★ **ask** — every tool of the server |
+| the framework's own (`task` `write_todos` `skill`) | no file | allow |
+
+★ **One rule for all of them: a key that is not written means the default; a key that
+is written wins.** So `ask: []` in `tools/filesystem.yaml` is an explicit "none of these
+asks", while deleting the line brings the default back.
+
+★ **Why an MCP server defaults to `ask` and the built-ins do not.** The built-in
+defaults are **known** defaults: openheron knows that `write_file` writes and that
+`execute` runs commands, so it knows which ones to ask about. An MCP server's tools are
+**discovered at runtime** — openheron cannot know what `delete_repo` does — and under
+stdio the server is a **child process** with the agent's own privileges (§6.7).
+⇒ the cost of guessing wrong is asymmetric: one extra click against a destructive call
+nobody saw. A server the user trusts says so **once**:
+
+```yaml
+tier: allow
+```
+
+★ **The defaults live where they are read.** The factory template for
+`tools/filesystem.yaml` is written from the same constants the code uses, so the file
+and the default cannot drift — and `openheron init` writes it, because it is the
+successor of the ask list that `policy/permissions.yaml` used to carry. ★ The optional
+integrations stay behind `--tools`: which of them exist is the user's call, and the
+filesystem set is not optional.
+
+#### ★ A tier change takes effect on the next turn
+
+★ `tools/` and `mcps/` are **hot** partitions, so a tier is not special: changing one
+takes effect on the next turn, like any other key in the partition. The policy table is
+rebuilt with the snapshot, so the gate reads the new tier from the next turn on — no
+restart, and no stale window where a tool keeps the old tier.
+
+★ The one thing a reload has to get right is the **client**: when the snapshot is
+replaced, the stdio child process is torn down and a new one is started (§5.4 of
+`docs/mcp-design.md`). A hot partition whose resources cannot be rebuilt is a partition
+that lies about being hot.
 
 #### ★ `tools/filesystem.yaml` — the filesystem tool set (★ proposal 2026-11-06, **not implemented**)
 
@@ -1583,8 +1631,8 @@ the **configuration surface** only.
 | | `headers` | `map[string]string` | `{}` | http only: sent on every request |
 | | `timeout` | `LenientDuration` | `30s` | the ceiling for connect + initialize + list tools |
 | | `call_timeout` | `LenientDuration` | `60s` | the ceiling for **one tool call** — ★ without it, a server that never answers holds the call lock and every other call of that server queues behind it |
-| | `tools` | `[]string` | `[]` → all | ★ **the exposed set** — the server's own tool names to offer; absent = all of them |
-| | `tier` | `string` | `allow` | the tier for every tool this server offers — ★ including the ones it has **not offered yet**; `allow` \| `ask` |
+| | `tools` | `[]string` | `[]` → all | ★ **the exposed set** — the server's **raw** tool names to offer (not the namespaced ones); absent = all of them |
+| | `tier` | `string` | `ask` | the tier for every tool this server offers — ★ including the ones it has **not offered yet**; `allow` \| `ask` |
 | | `ask` | `[]string` | `[]` | the server's **own** tool names that ask first |
 
 ★ `timeout` is a **lenient** duration: a wrong value degrades to the default and is
@@ -1776,7 +1824,7 @@ agent assembly API is in `agent-design-v2.md (upstream)`.
 | Directory | Hot reload | Why |
 |---|---|---|
 | `llm/` `agents/` `policy/` `tools/` | ✅ | implemented in `agentkit/spec/reload.go`: `HotDirs` + polling + a generation swap |
-| `mcps/` | ✅ (★ decided, **not implemented**) | see §6.7 — changing a server's command or timeout should take effect on the next round, without a restart |
+| `mcps/` | ✅ (★ decided, **not implemented**) | see §6.7 — changing a server's command, its timeout **or its tier** should take effect on the next round, without a restart |
 | `server/` | ❌ | it configures the process itself (listen / static dir), a change needs a restart |
 
 ★ This boundary **is guarded by a test** (`TestWatchIgnoresServerDir`,

@@ -309,8 +309,8 @@ not to the tool.
 | `headers` | `map[string]string` | `{}` | http only: sent on every request |
 | `timeout` | `LenientDuration` | `30s` | the ceiling for connect + initialize + list tools |
 | `call_timeout` | `LenientDuration` | `60s` | the ceiling for **one tool call** (§6.5) |
-| `tools` | `[]string` | `[]` → all | ★ **the exposed set** — the server's own tool names to offer; absent = all of them |
-| `tier` | `string` | `allow` | the tier for every tool this server offers — ★ including the ones it has **not offered yet**; `allow` \| `ask` |
+| `tools` | `[]string` | `[]` → all | ★ **the exposed set** — the server's **raw** tool names to offer (not the namespaced ones); absent = all of them |
+| `tier` | `string` | `ask` | the tier for every tool this server offers — ★ including the ones it has **not offered yet**; `allow` \| `ask` |
 | `ask` | `[]string` | `[]` | the server's **own** tool names that ask first |
 
 ★ The tier keys mean the same thing in every file of `tools/` and `mcps/`, and they are
@@ -555,6 +555,22 @@ declarations and its own vocabulary. ⇒ the gate, the tables, the API's
 ★ **The assembly happens in `agentkit/build`, not in `agentkit/spec`.** Only the provider
 knows its file's vocabulary and the exposed names behind it, and `agentkit/spec` may not
 import `kb` (the iron rule) nor eino (where the filesystem tool names live).
+
+★ **A server's default tier is `ask`.** The built-in groups have **known** defaults —
+openheron knows that `write_file` writes and that `execute` runs commands, so it knows
+which ones to ask about. A server's tools are **discovered at runtime**: openheron cannot
+know what `delete_repo` does, and under stdio the server is a **child process** with the
+agent's own privileges (§7.2). ⇒ the cost of guessing wrong is asymmetric — one extra
+click against a destructive call nobody saw. A server the user trusts says so **once**:
+
+```yaml
+tier: allow
+```
+
+★ **A tier change takes effect on the next turn.** `mcps/` is a **hot** partition, so a
+tier is not special: the policy table is rebuilt with the snapshot and the gate reads the
+new tier from the next turn on. The one thing the reload has to get right is the
+**client**: the stdio child process is torn down and a new one started (§5.4).
 
 ★ **The filesystem tools get a file too** — `tools/filesystem.yaml` — so their tiers are
 written next to them and the set can be narrowed. See `docs/config-design.md` §6.6.

@@ -58,6 +58,7 @@
 | 15 | MCP 工具命名 | 暴露给模型的名字一律加命名空间 `mcp__<server>__<tool>` | **提案，尚未实现**（见 §6.7）。MCP 工具名**由远端服务器定**：会撞保留工具名（`ls` / `execute`），也常带点号（`github.create_issue`）—— 后者过不了 provider 的 function name 字符集。命名空间把「撞名」变成「不可能」。树上唯一的痕迹是 `agentkit/build/tools.go:35` 的占位注释 |
 | 16 | 策略匹配 | 精确名 **+** 尾部 `*` 前缀匹配 | **提案，尚未实现**（见 §6.3）。MCP 工具集是运行期才知道的，逐个点名写不完；`mcp__github__*` 一条就能给一整个 server 定档。今天的表是**精确匹配**（`agentkit/build/policy.go:39-47`、`agentkit/build/policy.go:94-105`） |
 | 17 | 档位写在哪 | **跟着工具走**：`ask` 档住在工具自己的文件里（`tools/*.yaml`、`mcps/*.yaml`）；`policy/permissions.yaml` 只留全局 `deny` | **提案 —— 未实施**（见 §6.3、§6.6）。★ 档位是关于**某一个工具**的一句话，所以就该待在那个工具的文件里 —— 而且在那里用的是**同一套词汇**（`http.yaml` 说 `post`，所以它能说 `ask: [post]`；中心那份文件却不得不点名内部名字 `request_post`）。`deny` 是另一种话 —— 它是边界本身 —— 而且必须能对那些没有自己文件的工具表达出来 |
+| 18 | 缺省档位 | 每一组的缺省由**代码**带着；文件没写就拿缺省，写了就听文件的 | ★ 内置那几组的缺省是**已知**的缺省 —— openheron 知道 `write_file` 会写、`execute` 会跑命令，所以恰好对危险的那几个要点头。MCP server 的工具是**运行期才发现**的：openheron 不知道 `delete_repo` 做什么，而 stdio 之下 server 是带着 agent 权限的子进程 ⇒ 它的缺省是 **ask**，而信任的 server 写一次 `tier: allow` 就行 |
 
 ### 「一实体一文件」而非单文件分区表
 
@@ -1303,7 +1304,7 @@ skills are not enabled
 
 | 键 | 类型 | 缺省 | 含义 |
 |---|---|---|---|
-| `tools` | `[]string` | 全部 | ★ **暴露集合** —— 用这个文件自己的词汇写的、这个文件要提供的那些名字。不写 = 全部 |
+| `tools` | `[]string` | 全部 | ★ **暴露集合** —— 这个文件要提供的那些名字，用**原始**名字写（这个文件自己的词汇，**不是**暴露出来的那些名字）。不写 = 全部 |
 | `tier` | `string` | `allow` | 被暴露的那些的档位：`allow` \| `ask` |
 | `ask` | `[]string` | `[]` | 被暴露的那些里要先点头的 —— **用这个文件自己的词汇** |
 
@@ -1322,9 +1323,51 @@ skills are not enabled
 运行期才知道，所以一条点名了工具的规则覆盖不了 server 明天才加的工具。`tier: ask` 覆盖
 server 将来会提供的每一个工具 —— 这正是前缀规则对 `ask` 档永远做不到的事（§6.3）。
 
-★ 一个什么都不说的文件，档位就是 `allow`。**代码**里带着内置那几组的缺省值：文件系统工具
-对 `write_file`、`edit_file` 与 `execute` 要点头，`kb_index` 也要点头。⇒ 出厂模板把同一批
-常量原样写出来，于是文件与缺省值不会走偏。
+#### ★ 缺省档位
+
+★ **兜底**：没有被任何文件点名的工具是 **allow** —— 直接放行。正是这条规则让
+「读一个文件」不必每次都点头。
+
+★ **每一组都有一个代码缺省**，文件覆盖它：
+
+| 组 | 文件 | 缺省 |
+|---|---|---|
+| 文件系统工具 | `tools/filesystem.yaml` | `write_file` `edit_file` `execute` → **ask**；其余 → allow |
+| HTTP 工具 | `tools/http.yaml` | allow |
+| 网页搜索 | `tools/web_search.yaml` | allow |
+| 百科 | `tools/wikipedia.yaml` | allow |
+| 知识库 | `tools/kb.yaml` | `kb_search` → allow；`kb_index` → **ask**（它要写索引） |
+| ★ **一个 MCP server** | `mcps/<server>.yaml` | ★ **ask** —— 这个 server 的每一个工具 |
+| 框架自带的（`task` `write_todos` `skill`） | 没有文件 | allow |
+
+★ **对它们全体是同一条规则：没写的键 = 缺省；写了的键 = 说话。** 所以
+`tools/filesystem.yaml` 里的 `ask: []` 是明明白白的「这些一个都不点头」，
+而把那一行删掉，缺省就回来了。
+
+★ **为什么 MCP server 的缺省是 `ask`，而内置的不是。** 内置那些缺省是**已知**的缺省：
+openheron 知道 `write_file` 会写文件、`execute` 会跑命令，所以它知道哪些该问。
+而一个 MCP server 的工具是**运行期才发现**的 —— openheron 无从知道 `delete_repo` 做什么 ——
+而在 stdio 之下，那个 server 是带着 agent 自己权限的**子进程**（§6.7）。
+⇒ 猜错的代价是不对称的：多一次点击，换掉的是一次没人看见的破坏性调用。
+用户信得过的 server 说**一次**就够了：
+
+```yaml
+tier: allow
+```
+
+★ **缺省值就住在读到它的地方。** `tools/filesystem.yaml` 的出厂模板是用代码用的
+同一批常量写出来的，于是文件与缺省值不会走偏 —— 而 `openheron init` 会写它，
+因为它是 `policy/permissions.yaml` 原来那份 ask 清单的接班人。★ 那些可选的集成
+留在 `--tools` 后面：它们存在哪些是用户说了算，而文件系统那套不是可选的。
+
+#### ★ 档位改动下一轮就生效
+
+★ `tools/` 与 `mcps/` 都是**热**分区，所以档位并不特殊：改一个档位，下一轮就生效，
+跟这个分区里的任何别的键一样。策略表随快照一起重建，于是闸门从下一轮起读到新档位 ——
+不用重启，也没有那个工具还留着旧档位的陈旧窗口。
+
+★ 重载唯一要顾对的是**客户端**：快照换代时，stdio 的子进程被拆掉、新的被拉起来
+（`docs/mcp-design.md` §5.4）。一个资源重建不出来的热分区，就是一个谎称自己是热的分区。
 
 #### ★ `tools/filesystem.yaml` —— 文件系统工具集（★ 提案 2026-11-06，**未实施**）
 
@@ -1491,9 +1534,8 @@ MCP 服务器的配置。**一个 server 一个文件**：
 | | `headers` | `map[string]string` | `{}` | http 专用：每次请求都带的头 |
 | | `timeout` | `LenientDuration` | `30s` | 连接 + 初始化 + 取工具清单的上限 |
 | | `call_timeout` | `LenientDuration` | `60s` | **一次工具调用**的上限 —— ★ 没有它，一个永不回答的服务器会占着调用锁，同 server 的其它调用全排在它后面 |
-| | `tools` | `[]string` | `[]`→全部 | 暴露出去的工具名白名单；★ 空 = 全部（不是「一个都不挂」） |
-| | `tools` | `[]string` | `[]`→全部 | ★ **暴露集合** —— 这个 server 自己的、要提供的工具名；不写 = 全部 |
-| | `tier` | `string` | `allow` | 这个 server 提供的每个工具的档位 —— ★ **包括它还没提供的那些**；`allow` \| `ask` |
+| | `tools` | `[]string` | `[]`→全部 | ★ **暴露集合** —— 这个 server 要提供的那些**原始**工具名（不是带命名空间的那个）；不写 = 全部 |
+| | `tier` | `string` | `ask` | 这个 server 提供的每个工具的档位 —— ★ **包括它还没提供的那些**；`allow` \| `ask` |
 | | `ask` | `[]string` | `[]` | 这个 server **自己的**工具名里要先点头的那些 |
 
 ★ `timeout` 是**宽松**时长：写错退回默认并记 `deferred`，
@@ -1668,7 +1710,7 @@ Agent 池与审批链见 `agent-design.md (upstream)`；agent 装配 API 见
 | 目录 | 热更新 | 理由 |
 |---|---|---|
 | `llm/` `agents/` `policy/` `tools/` | ✅ | 已在 `agentkit/spec/reload.go` 实施：`HotDirs` + 轮询 + 换代 |
-| `mcps/` | ✅（★ 决策已定，**未实施**） | 见 §6.7 —— 改一个 server 的命令或超时，下一轮就该生效，不必重启 |
+| `mcps/` | ✅（★ 决策已定，**未实施**） | 见 §6.7 —— 改一个 server 的命令、它的超时**或它的档位**，下一轮就该生效，不必重启 |
 | `server/` | ❌ | 配进程自身（listen / 静态目录），改了要重启 |
 
 ★ 这条边界**有测试守着**（`TestWatchIgnoresServerDir`，

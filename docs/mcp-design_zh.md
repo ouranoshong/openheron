@@ -294,8 +294,8 @@ MCP 服务器按服务器一个文件来配：
 | `headers` | `map[string]string` | `{}` | 仅 http：每次请求都带的头 |
 | `timeout` | `LenientDuration` | `30s` | 连接 + 初始化 + 取工具清单的上限 |
 | `call_timeout` | `LenientDuration` | `60s` | **一次工具调用**的上限（§6.5） |
-| `tools` | `[]string` | `[]`→全部 | ★ **暴露集合** —— 这个 server 自己的、要提供的工具名；不写 = 全部 |
-| `tier` | `string` | `allow` | 这个 server 提供的每一个工具的档位 —— ★ 包括那些它**还没提供**的工具；`allow` \| `ask` |
+| `tools` | `[]string` | `[]`→全部 | ★ **暴露集合** —— 这个 server 要提供的那些**原始**工具名（不是带命名空间的那个）；不写 = 全部 |
+| `tier` | `string` | `ask` | 这个 server 提供的每一个工具的档位 —— ★ 包括那些它**还没提供**的工具；`allow` \| `ask` |
 | `ask` | `[]string` | `[]` | 这个 server **自己的**工具名里，哪些要先点头 |
 
 ★ 这几个键在 `tools/` 与 `mcps/` 的每一个文件里都是同一个意思，
@@ -521,6 +521,21 @@ tier: ask                       # every tool of this server asks first
 ★ **装配发生在 `agentkit/build`，不在 `agentkit/spec`。** 只有 provider 知道
   自己文件的词儿，以及它背后的对外名字；而 `agentkit/spec` 不得 import `kb`
   （那条铁律），也不得 import eino（文件系统工具的名字住在那里）。
+
+★ **一个 server 的缺省档位是 `ask`。** 内置那些组有**已知**的缺省 ——
+  openheron 知道 `write_file` 会写文件、`execute` 会跑命令，所以它知道哪些该问。
+  而一个 server 的工具是**运行期才发现**的：openheron 无从知道 `delete_repo` 做什么，
+  而在 stdio 之下，那个 server 是带着 agent 自己权限的**子进程**（§7.2）。
+  ⇒ 猜错的代价是不对称的 —— 多一次点击，换掉的是一次没人看见的破坏性调用。
+  用户信得过的 server 说**一次**就够了：
+
+```yaml
+tier: allow
+```
+
+★ **档位改动下一轮就生效。** `mcps/` 是**热**分区，所以档位并不特殊：
+  策略表随快照一起重建，闸门从下一轮起读到新档位。重载唯一要顾对的是
+  **客户端**：stdio 的子进程被拆掉、新的被拉起来（§5.4）。
 
 ★ **文件系统工具也有自己的文件** —— `tools/filesystem.yaml` —— 这样它们的档位
   写在它们旁边，这个集合也可以被收窄。见 `docs/config-design.md` §6.6。
