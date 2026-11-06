@@ -305,10 +305,10 @@ not to the tool.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `transport` | `string` | `stdio` | `stdio` or `http`; an **unknown value is a hard error** — no silent fallback to stdio |
+| `transport` | `string` | `stdio` | `stdio` or `http`; an **unknown value is a hard error** — no silent fallback to stdio. ★ `http` means **streamable HTTP**; SSE is not supported (§5.7) |
 | `command` | `string` | — | stdio only, **required**: the executable to run |
 | `args` | `[]string` | `[]` | stdio only: its arguments |
-| `env` | `map[string]string` | `{}` | variables **layered over** the inherited environment (§5.5); values are expanded like every other value |
+| `env` | `map[string]string` | `{}` | stdio only: variables **layered over** the inherited environment (§5.5); values are expanded like every other value. ★ an http server with `env:` is a **load-time hard error** (§5.7) |
 | `url` | `string` | — | http only, **required**: the server address |
 | `headers` | `map[string]string` | `{}` | http only: sent on every request |
 | `timeout` | `LenientDuration` | `30s` | the ceiling for connect + initialize + list tools |
@@ -347,6 +347,26 @@ starting.
 be indistinguishable from a missing key — and it is a **filter** on what the server
 offers (§5.3), not a switch.
 
+★ **`http` is streamable HTTP, and only that.** `mcp-go` ships two HTTP clients —
+`client.NewStreamableHttpClient` and `client.NewSSEMCPClient` — and one `transport`
+value cannot pick between them. ⇒ `http` means the **streamable** one, the transport
+the MCP specification now defines; openheron does not speak SSE. ★ The alternative (a
+third `transport` value) would put a legacy transport into the configuration of every
+user who never wants it, and the second value would have to be *the* value for the
+people who do.
+
+★ **`env:` has no meaning on an http server, so it is an error there.** An http server
+is a remote process, and this process's environment is not its environment. ⇒ an http
+server that declares `env:` is a **load-time hard error** (§5.7), not a key that is
+quietly ignored. ★ A key that does nothing is worse than a refusal: the user would
+believe the server runs with that variable set.
+
+★ **Two of the fields are the component's own.** `tools:` is the component's
+`ToolNameList` — the server's **own** names to keep out of the ones it has — and
+`headers:` is its `CustomHeaders` (§2.2). ★ Both are written in the server's own
+vocabulary, and the component takes them in that same vocabulary, so nothing has to be
+translated.
+
 ### 5.3 The file defines the server
 
 There is no `enabled` field. A server is **defined** because its file exists; removing
@@ -369,6 +389,17 @@ has not narrowed its list gets it.
 the whole snapshot** (§1.1). The answer is in §11.3: the agent's **table**, where
 `disabled_tools` already narrows the tools.
 
+★ **A sub-agent has a list of its own, like its own `disabled_tools`.**
+`decl.SubAgentSpec` carries `DisabledTools` and `Skills` of its own
+(`agentkit/spec/decl/decl.go:427`), so it carries an `mcps:` list of its own too. ⇒ the
+list is read from **the agent that is running** — the root, or the sub-agent the turn
+is in — and not from the root's list.
+
+★ **A name that does not exist is a load-time hard error.** An agent that lists
+`githbu` would silently get no MCP server at all, and a tool that is missing because of
+a typo looks exactly like a tool that is missing because the server is down. ⇒ the
+loader refuses the name (§5.7).
+
 ★ The server name is the file name without `.yaml`, and it is the namespace segment
 (§3.1). A file name that does not match `^[a-z0-9]+(_[a-z0-9]+)*$` is a **load-time
 hard error** — we wrote it, so we can fix it.
@@ -386,6 +417,9 @@ partition whose resources cannot be rebuilt is a partition that lies about being
 
 ★ **The child's environment is openheron's own environment, overlaid with the `env:`
 map.** Same name: the configuration wins.
+
+★ **The environment is stdio's business.** An http server has no child process, so
+`env:` is not a field it may declare at all (§5.2, §5.7).
 
 The child is a child process of this one, so it starts from the environment this
 process has — including everything the sandbox runtime injected into the container.
@@ -512,6 +546,25 @@ allows: [get]
 | `openheron init` | ★ an **example** — and an example cannot be a live `.yaml`: the file **defines** the server (§5.3), so a live one would make every agent that does not narrow its list try to start a server that is not installed. ⇒ `mcps/example.yaml.disabled`: the shape is right there, the name says it is not a configuration yet, and renaming it is the act of defining it |
 | the config editor | ★ the same template, through its "new file" dialog — the editor can write `mcps/` |
 
+### 5.7 What fails loudly
+
+★ **Our own configuration fails at load time; somebody else's content is dropped with a
+notice.** That is the line §3.2 draws, and it is the line this table follows.
+
+| Case | When | Why |
+|---|---|---|
+| an unknown `transport` | load time | no silent fallback to stdio — a typo must not run a different server |
+| `command` missing on a stdio server | load time | there is nothing to run |
+| `url` missing on an http server | load time | there is nothing to talk to |
+| `env:` on an http server | load time | an http server has no child to hand an environment to (§5.2) |
+| an agent's `mcps:` naming a server that does not exist | load time | a typo would silently narrow the agent to nothing (§5.3) |
+| `tools:` naming a tool the server does not have | runtime | the server's list is only known once it is up — the provider warns (§6.1) and offers the rest |
+
+★ **A load-time hard error stops the process**, and that is the point: these are
+mistakes in a file somebody wrote by hand, and the next start has to say so. ★ The
+runtime row is the exception because the server's tool list is not ours — the same line
+§3.2 draws for a tool whose name cannot be composed.
+
 ## 6. The assembly path
 
 ### 6.1 The provider
@@ -542,6 +595,13 @@ sync with the first, and it would answer a question the warning already answers.
 The warning and the view read the same state — the manager's client — so they cannot
 disagree about a server.
 
+★ **A name the file asks for and the server does not have is a warning too.** The
+file's `tools:` lists the server's **own** names, and the server's list is only known
+once it is up (§5.7). ⇒ the provider warns — it names the server, the name the file
+asked for, and what the server actually offers — and it offers the rest. ★ Silently
+offering less than the file asked for is the same "a feature seems to be missing"
+symptom the design refuses.
+
 ### 6.2 The client lifecycle
 
 The component does not own it (§2.2), so **the manager** does (§6.6) — the provider asks
@@ -549,7 +609,7 @@ it for the tools and gets them:
 
 | Step | stdio | http |
 |---|---|---|
-| create | `client.NewStdioMCPClient` | `client.NewStreamableHttpClient` / `client.NewSSEMCPClient` |
+| create | `client.NewStdioMCPClient` | `client.NewStreamableHttpClient` |
 | start | the child process is spawned | the HTTP session opens |
 | initialize | `Initialize` with the protocol version and the client info | the same |
 | list tools | `GetTools` → `ListTools` | the same |
@@ -558,6 +618,11 @@ it for the tools and gets them:
 ★ The initialization result is **discardable**: the provider only needs the tool list.
 A failure to initialize is the same failure as an unreachable server — the server does
 not contribute tools, and it says so.
+
+★ **The http column is one client, not two.** `mcp-go` ships `client.NewSSEMCPClient`
+as well, and openheron does not call it: §5.2 says `http` means **streamable HTTP**,
+and a transport that the configuration cannot ask for is a transport that would have to
+be maintained without ever being used.
 
 ### 6.3 The tool batch
 
@@ -638,6 +703,7 @@ does this snapshot have"; the manager is what a client outlives.
 | **one client per server** | a server is one connection, and for stdio one child process |
 | **start only what an agent asked for** | the manager starts the servers in the `mcps:` lists of the agents (§5.3) — a server no agent lists is never started, and never becomes a child process. ★ the list is the **union**, because the snapshot's tool set is shared by every agent (§11.3) |
 | **start lazily** | a server is started when a turn first needs it, not at boot |
+| **start once** | ★ the start is **single-flight**: two callers asking for the same server get the **one** client (§6.8) |
 | **restart a crashed child** | a stdio server that dies is started again on the next call — a crash is not a configuration error, and a dead server that stays dead is the worst outcome |
 | **notice a changed tool list** | the manager re-lists the tools; when the list changed, the **generation is bumped** and the tools are rebuilt, exactly like a configuration reload (§6.7) |
 | **tear down on the snapshot swap** | when the snapshot is replaced, the old generation's clients are closed and their children killed (§5.4) |
@@ -646,6 +712,29 @@ does this snapshot have"; the manager is what a client outlives.
 discovered at runtime, so a snapshot that froze them would need a restart to see a tool
 the server added yesterday. ⇒ the manager polls, and a change re-enters the same path a
 configuration change takes.
+
+★ **The re-list happens before the turn's agent is assembled, not inside the batch
+build.** The batch is built once per generation, and the generation moves only when a
+list changes — so a re-list *inside* the build would never run. ⇒ the builder asks the
+manager first, and a change bumps the generation through the **same hook the config
+reloader uses** (`main.go`'s `agentConfig.set`, the one place the generation moves), so
+the snapshot is rebuilt before the agent is assembled.
+
+★ **The builder needs a way to move the generation.** `ConfigManager` is read-only
+(`agentkit/build/manager.go:12` — it has `Current()` and nothing else), so the builder
+grows a **bump** callback beside it, and `main.go` wires that to the same
+`agentConfig.set` the reloader uses. ★ A second way to move the generation would be a
+second way to be wrong about it.
+
+★ **The interval is 30 s, and it is not a configuration key.** The manager re-lists a
+server when a turn asks for it and the previous listing is older than **30 s** — so an
+idle openheron re-lists nothing, and no turn runs on a list that is more than one
+interval old. ★ A knob nobody turns is a knob nobody tests, and a server's tool list
+changes on the scale of days.
+
+★ **A background ticker was the other option, and it was rejected.** It would keep
+polling servers nobody is using, for ever, and it would need a goroutine with a
+lifecycle of its own — for a list that changes on the scale of days.
 
 ### 6.7 From a file to one tool call
 
@@ -708,6 +797,28 @@ on — no restart, and no window where a tool keeps its old tier.
 ★ **And a server that changed its own tool list takes the same path.** The manager polls
 the list (§6.6); when it changed, the generation is bumped and the tools are rebuilt —
 the same road a configuration change takes, and the same absence of a restart.
+
+### 6.8 One start, one client
+
+★ **Two callers ask for the same server.** The provider asks when it builds the batch
+(§6.1), and the panel asks when the user opens it (§11.2). Both are ordinary requests
+that can arrive at the same moment — a turn starting while the `/mcps` dialog is open.
+
+⇒ **The start is single-flight per server.** The manager keeps one entry per server
+name; the first caller starts the client, and every other caller waits for that same
+start and gets the same client. ★ This is the invariant §6.5 protects for the calls —
+one server, one client — and the failure it prevents is the same kind: two writers on
+one connection.
+
+★ **Two child processes for one server would be worse than a slow start.** The second
+process would hold a second pipe to a server the user configured once, and the two
+could report different tool lists — so the tools the model sees would depend on which
+process answered.
+
+★ **The wait is bounded by the deadline the start already has** (§5.2): connect,
+initialize and list tools are one operation with one deadline. A caller that waits
+longer than that gets the failure the start reports — the same failure it would have
+got by starting the server itself.
 
 ## 7. The gate and the tiers
 
@@ -795,6 +906,19 @@ trusts names its exceptions **once**:
 ```yaml
 allows: [read_issue, list_issues]
 ```
+
+★ **The tier table is assembled from the configuration, not from the server.** The
+`allows:` list is in the file, and the exposed name of a name in it is composed from
+the file's own vocabulary — so the entry `mcp__github__read_issue → allow` can be
+assembled **before the server is even up**. ⇒ the tier of a tool is answerable at any
+time, including while the server is unreachable (§6.1), and the gate's lookup never
+waits for a connection.
+
+★ **And the default covers the names the file does not name.** A tool that is in
+neither the file's `allows:` nor anywhere else is `ask` — so a tool the server adds
+tomorrow asks on its first day, and the configuration does not have to be touched. ★
+This is the same rule an empty `allows:` states in one line (§4); a non-empty one is
+that same rule with a few exceptions carved out.
 
 ★ **A tier change takes effect on the next turn.** `mcps/` is a **hot** partition, so a
 tier is not special: the policy table is rebuilt with the snapshot and the gate reads the
@@ -925,14 +1049,21 @@ the VM is readable by the agent's own tools, and it is the user who chose that.
 |---|---|---|
 | `agentkit/spec/decl` | the **declarations**: `MCPServerCfg`, the namespace constants, and the agent's `MCPServers` field | any behaviour — it is the pure declaration layer (`AGENTS.md`'s dependency iron rules) |
 | `agentkit/spec` | the **loader**: reads `mcps/<server>.yaml`, validates the file name and the fields, expands `${ENV}` / `@file:` | the MCP client, eino, `kb` — it may not import them |
-| `agentkit/build/mcptools.go` | the **provider** and the **wrappers**: the naming, the tier mapping, the per-server mutex, the output cap | the loader's file walking — it receives the declarations |
-| `agentkit/build/mcpmanager.go` | the **manager**: one client per server, the lazy start, the restart of a crashed child, the tool-list poll, the teardown on the snapshot swap | the naming and the tiers — those belong to the provider |
+| `agentkit/build/mcptools.go` | the **provider** and the **wrappers**: the plan (`mcpPlan`), the per-server mutex, the output cap | the loader's file walking — it receives the declarations |
+| `agentkit/build/mcpmanager.go` | the **manager**: one client per server, the single-flight start (§6.8), the lazy start, the restart of a crashed child, the tool-list re-list, the teardown on the snapshot swap | the naming and the tiers — those belong to the provider |
 | `agentkit/build/tools.go` | the **registry**: `toolProvider`, `defaultToolRegistry`, the reserved names | the MCP specifics — it knows only the interface (§1.2) |
 | `agentkit/build/policy.go` | the **tier lookup**: `Policy.TierOf`, `Table.Blocked` | which file a tool came from — it sees names only |
-| `agentkit/build/mcpstatus.go` | the **projection**: the manager's state, the provider's naming, the boundary's verdict — one row per server (§11.2) | any decision of its own — it reads, it does not evaluate |
+| `agentkit/build/mcpstatus.go` | the **projection**: the manager's state, the plan, the boundary's verdict — one row per server (§11.2) | any decision of its own — it reads, it does not evaluate |
 
 ★ **The direction is one-way**: `spec` → `build`. The declaration layer never imports
 the assembly layer, and the assembly layer never walks the config directory itself.
+
+★ **The plan is a free function, not a method.** The naming and the tier mapping are
+needed by **two** callers — the provider, which turns them into eino tools, and the
+projection, which reports them (§11.2). ⇒ they live in `mcpPlan`, a function of the
+file's declaration and the server's own tool list, and both callers call it. ★ A method
+on the provider would make the projection reach for the provider instance, and a second
+copy of the mapping would be a second truth about a tool's name and a tool's tier.
 
 ### 9.2 The types
 
@@ -941,26 +1072,30 @@ the assembly layer, and the assembly layer never walks the config directory itse
 | `decl.MCPServerCfg` | `agentkit/spec/decl/decl.go` | one server's declaration: the transport, the command, the environment, the tier keys, the whitelist, the two timeouts |
 | `decl.MCPFiles` | `agentkit/spec/decl/decl.go` | the partition's holder: `map[string]*MCPServerCfg` keyed by the server name |
 | `decl.Agent.MCPServers` | `agentkit/spec/decl/decl.go` | the agent's own list of servers: ★ a **pointer**, so the key absent means every configured server and `[]` means none — the same shape `Skills` already has |
+| `decl.SubAgentSpec.MCPServers` | `agentkit/spec/decl/decl.go` | the same list for a sub-agent, next to its `DisabledTools` and `Skills` (§5.3) |
 | `spec.Config.MCPs` | `agentkit/spec/config.go` | where the loader puts them |
 | `mcpToolProvider` | `agentkit/build/mcptools.go` | the `toolProvider` implementation (§1.2) |
 | `mcpManager` | `agentkit/build/mcpmanager.go` | the owner of the clients: one per server, keyed by the server name, living across snapshots (§6.6) |
 | `mcpTool` | `agentkit/build/mcptools.go` | one tool: the eino tool plus the server it belongs to |
+| `mcpPlan` | `agentkit/build/mcptools.go` | the shared mapping: the file's declaration plus the server's own tool list → the exposed names, the tiers, and the skips (§9.1) |
 | `serialTool` | `agentkit/build/mcptools.go` | the wrapper that serializes the calls of one stdio server (§6.5) |
 | `build.Policy` | `agentkit/build/policy.go` | the assembled table: name → tier. **Unchanged in shape** — only where the entries come from changes (§7.3) |
 | `MCPServerState` | `agentkit/build/mcpstatus.go` | one server's row: the name, the transport, the state, the error, the tools |
+| `run.MCPServers` | `agentkit/run/runrow.go` | the servers one run touched (§7.4) |
 
 ### 9.3 Where each piece of the design lands
 
 | The design | The code |
 |---|---|
-| the namespace (§3) | `mcpToolProvider.Provide` — the one place that composes `mcp__<server>__<tool>` |
+| the namespace (§3) | `mcpPlan` — the one place that composes `mcp__<server>__<tool>` |
 | the skip-and-warn (§3.2) | the same function — the name is checked before the tool is kept |
-| the file's own tier (§7.3) | the same function — the provider maps the file's names to the exposed ones |
+| the file's own tier (§7.3) | the same function — the file's names are mapped to the exposed ones |
 | the serialization (§6.5) | `serialTool` — a wrapper, the same shape as `cappedTool` in `nettools.go` |
 | the output cap (§6.4) | the same wrapper family — the component's `ToolCallResultHandler` |
 | the client's life (§6.2, §6.6) | the manager — `Start` / `Initialize` / `GetTools`, the lazy start, the restart of a crashed child, and the teardown on the snapshot swap |
 | the hot reload (§5.4) | `agentkit/spec/reload.go` — the partition is hot, and the snapshot swap rebuilds the tools |
-| a changed tool list (§6.6) | the manager — the poll, and the generation bump that rebuilds the tools |
+| a changed tool list (§6.6) | the manager — the re-list, and the generation bump that rebuilds the tools |
+| one start, one client (§6.8) | the manager — the single-flight start |
 | the servers a run touched (§7.4) | `agentkit/run/runrow.go` — the run's row names them |
 | the example and the editor's template (§5.6) | `agentkit/spec/write.go` (`spec.Template`) and `initcfg/templates/` |
 | which servers an agent loads (§5.3) | `agentkit/spec/decl` (the field) → `agentkit/build/mcpmanager.go` (the start) |
@@ -968,9 +1103,14 @@ the assembly layer, and the assembly layer never walks the config directory itse
 | the `/mcps` view (§11.2) | `agentkit/build/mcpstatus.go` — the manager's state, the provider's naming, and the boundary's verdict, in one projection |
 
 ★ **One function does three things**: the namespace, the skip-and-warn, and the tier
-mapping all live in `mcpToolProvider.Provide`, because they all need the same two
-inputs — the server's own tool list and the file that describes it. Splitting them
-would mean passing the same two things around.
+mapping all live in `mcpPlan`, because they all need the same two inputs — the server's
+own tool list and the file that describes it. Splitting them would mean passing the
+same two things around.
+
+★ **And it is a free function, because there are two callers.** The provider turns the
+plan into eino tools; the projection reports it (§11.2). ★ A second copy of the
+mapping would be a second truth about a tool's name and a tool's tier — and the whole
+point of the projection is that it is not a second truth.
 
 ## 10. The change list
 
@@ -983,27 +1123,28 @@ through.
 |---|---|---|
 | 1 | `go.mod` | add `github.com/cloudwego/eino-ext/components/tool/mcp` and `github.com/mark3labs/mcp-go` |
 | 2 | `agentkit/spec/config.go` | `DirMCP = "mcps"` and a `Categories` entry, hot (`hotDirList` at `:77` picks it up) |
-| 3 | `agentkit/spec/decl/decl.go` | the `MCPServerCfg` declaration struct, the `MCPFiles` holder, the namespace constants; `call_timeout`; ★ the agent's `MCPServers` field (§5.3) |
-| 4 | `agentkit/spec/load.go` | the loader for `mcps/<server>.yaml`, with the file-name and field validation of §3.1 and §5.2 |
+| 3 | `agentkit/spec/decl/decl.go` | the `MCPServerCfg` declaration struct, the `MCPFiles` holder, the namespace constants; `call_timeout`; ★ the agent's `MCPServers` field, on the agent **and** on a sub-agent (§5.3) |
+| 4 | `agentkit/spec/load.go` | the loader for `mcps/<server>.yaml`, with the file-name and field validation of §3.1 and §5.2, and the load-time hard errors of §5.7 |
 | 5 | `agentkit/spec/defaults.go` | `EnabledToolNames` gains the namespaced MCP tools; the default tier of a server (`ask`) |
 | 6 | `agentkit/spec/write.go` | the scaffold for a new `mcps/` file |
 | 7 | `agentkit/build/tools.go` | `mcpToolProvider`, registered at the placeholder line `:35` |
 | 8 | `agentkit/build/policy.go` | the prefix matcher for `Blocked`, **and** the tier **assembly**: the providers contribute (exposed name → tier) from their own file's declarations (§7.3) |
 | 9 | `api/v2_settings.go` | the editable section for `mcps/` |
 | 10 | `agentkit/build/nettools.go` | the output cap, applied to the MCP batch |
-| 11 | `agentkit/build/mcptools.go` | the provider's naming and tier mapping (§6.3, §7.3), the per-server mutex that serializes the stdio calls (§6.5), and the environment assembly for the child process (§5.5) |
-| 12 | `agentkit/build/mcpmanager.go` | the manager: one client per server, the lazy start **of the servers that agent asked for** (§5.3), the restart of a crashed child, the tool-list poll that bumps the generation, and the teardown on the snapshot swap (§6.6) |
+| 11 | `agentkit/build/mcptools.go` | `mcpPlan` — the shared naming and tier mapping (§9.1), the per-server mutex that serializes the stdio calls (§6.5), and the environment assembly for the child process (§5.5) |
+| 12 | `agentkit/build/mcpmanager.go` | the manager: one client per server, the **single-flight start** (§6.8), the lazy start **of the servers some agent asked for** (§5.3), the restart of a crashed child, the tool-list re-list that bumps the generation, and the teardown on the snapshot swap (§6.6) |
 | 13 | `agentkit/run/runrow.go` | the run's row records which MCP servers the run touched (§7.4) |
 | 14 | `initcfg/templates/` and `spec.Template` | the `mcps/example.yaml.disabled` example, and the editor's template for a new `mcps/` file — the editor's manifest is filled per category, so a new category gets its scaffold for free (§5.6) |
 | 15 | `api/commands.go` | the `mcps` action command and `commandActionOpenMCPs` (§11.1) |
 | 16 | `api/v2_mcps.go` | `GET /v2/mcps` — the view (§11.4) |
-| 17 | `api/v2_introspect.go` | the `MCPSource` interface and `SetMCPSource`: the API layer asks the builder, it does not read the manager (§11.2) |
+| 17 | `api/v2_introspect.go` | the `MCPSource` interface and `SetMCPSource`: the API layer asks the builder, it does not read the manager (§11.2); ★ and the configured servers in the configuration view (§11.4) |
 | 18 | `agentkit/build/mcpstatus.go` | `Builder.MCPServers(agentID)` — the projection of the manager's state (§11.2) |
 | 19 | `agentkit/build/policy.go` | the agent's `mcps:` list in the table: the denied namespace prefixes, and the reason that goes with them (§11.3) |
 | 20 | `main.go` | the wiring, next to `SetToolsSource` (`main.go:271`) (§11.2) |
 | 21 | `web/src/lib/api.ts` | the `open_mcps` action and `listMCPServers` (§11.5) |
 | 22 | `web/src/components/mcp-panel.tsx` | the panel (§11.5) |
 | 23 | `web/src/components/composer.tsx` | the action case that opens the panel (§11.5) |
+| 24 | `agentkit/build/builder.go` and `agentkit/build/manager.go` | the turn's first step: ask the manager whether a server's tool list changed, and take the new snapshot when it did; the **bump** callback that moves the generation (§6.6) |
 
 ### 10.2 The tests
 
@@ -1016,6 +1157,10 @@ through.
 | Matching | `mcp*foo` and a lone `*` are load-time errors |
 | Matching | an agent's `disabled_tools` removes the tool for that agent only |
 | Provider | an unreachable server drops its tools, warns with the server's name, and leaves the other providers' tools alone |
+| Provider | a name the file's `tools:` asks for and the server does not have is a warning, and the rest is offered (§5.7) |
+| Loading | an unknown `transport` is a load-time error, and there is no fallback to stdio |
+| Loading | `env:` on an http server is a load-time error (§5.7) |
+| Loading | an agent's `mcps:` naming a server that does not exist is a load-time error (§5.7) |
 | Lifecycle | a hot reload replaces the client, and the old stdio child is gone |
 | Concurrency | two concurrent calls to one **stdio** server are serialized — the second waits for the first, and neither corrupts the other's request |
 | Concurrency | two concurrent calls to one **http** server are not serialized |
@@ -1025,8 +1170,12 @@ through.
 | Credentials | a `credential@1` sentinel reaches the child through the inherited environment, with no field in the configuration naming it |
 | Tier | an empty `allows:` covers the tools a server has **not offered yet** |
 | Tier | a file's `allows:` names what runs without a nod; everything else asks |
+| Tier | the tier of a tool is answerable while the server is unreachable (§7.3) |
 | Manager | a crashed stdio child is started again on the next call |
 | Manager | a changed tool list bumps the generation and rebuilds the tools, with no restart |
+| Manager | the re-list happens **before** the turn's agent is assembled (§6.6) |
+| Manager | a listing younger than 30 s is not re-listed |
+| Manager | two callers asking for the same server get **one** client and **one** child process (§6.8) |
 | Manager | the snapshot swap closes the old generation's clients and kills their children |
 | Command | a `command` that is not on the PATH is a warning, and the workspace never resolves it |
 | Ledger | a run's row names the MCP servers it touched |
@@ -1034,6 +1183,7 @@ through.
 | Tier | the file's `allows:` is written in the server's own vocabulary and reaches the gate under the composed name |
 | Servers | an agent that does not list a server in `mcps:` does not get it, and the server is never started |
 | Servers | an absent `mcps:` means every configured server, `[]` means none |
+| Servers | a sub-agent's own `mcps:` list narrows its own tools, and the root's list does not (§5.3) |
 | Command | `/mcps` is an action, and it never reaches the model as a prompt |
 | Command | the panel asks the manager, and the manager starts the servers the agent uses (§11.2) |
 | View | the agent parameter is optional, and an unknown agent is a 404 |
@@ -1041,6 +1191,8 @@ through.
 | View | an unreachable server reports the error and its last listing |
 | View | a server the agent does not use is `unused`, not missing |
 | View | the tool rows are the verdicts the agents view reports, not a second evaluation |
+| View | the reason is `mcps` when the server is not in the list, and `disabled_tools` when the tool is (§11.4) |
+| View | the configuration view lists the configured servers, and the panel their state (§11.4) |
 | Narrowing | the agent's `mcps:` list removes the other servers' tools from that agent's run |
 | Narrowing | the table denies the namespace **prefix**, and `mcp__github__` does not reach `mcp__github_x__` |
 | Narrowing | a server no agent lists is never started |
@@ -1093,7 +1245,7 @@ One sentence, and every row of the panel follows from it:
 |---|---|
 | is the server up? | the manager's client (§6.6) |
 | what did it offer? | the manager's listing (§6.6) |
-| what is the tool called? | the provider's naming function (§9.3) |
+| what is the tool called? | the plan — `mcpPlan` (§9.3) |
 | will it ask me? | `Policy.TierOf` — the gate's own lookup (§1.3) |
 | can this agent reach it? | the agent's table (§11.3) |
 
@@ -1114,6 +1266,11 @@ the same start the first turn would do for this agent, and no more. ★ The alte
 strictly read-only panel that reports "not started") cannot answer the question the user
 typed the command for: "is my server broken?" — and the answer would be "run a turn and
 find out".
+
+★ **The panel's ask goes through the same single-flight start** (§6.8). The panel and a
+turn can ask at the same moment, and they get **one** client — ★ two callers racing into
+the start would be two child processes for one server, and the tools the model sees
+would depend on which one answered.
 
 ### 11.3 The per-agent narrowing, and where it lands
 
@@ -1146,6 +1303,12 @@ that **some** agent lists: a server no agent lists is never started, and a serve
 `task` lists is started — but `main` cannot reach its tools. ★ The alternative (a tool
 set per agent) would mean rebuilding the tool list for every agent, and the tool list
 is what the snapshot freezes (§1.1).
+
+★ **The union is over the agents that can run, sub-agents included.** A sub-agent has a
+list of its own (§5.3), and it may run inside a turn the root did not ask for. ⇒ the
+union is taken over every agent and every sub-agent that the configuration declares —
+a server only a sub-agent lists is started, because that sub-agent may be the one
+running.
 
 ### 11.4 The endpoint
 
@@ -1190,6 +1353,22 @@ not be cached for the tab's lifetime the way the agents list is
 | `servers[].tools[].tier` | the gate's verdict for that name (§1.3) |
 | `servers[].tools[].status` | `available` — this agent reaches it; `skipped` — the server offered it and it was not exposed (§3.2); `blocked` — exposed, but this agent does not reach it |
 | `servers[].tools[].reason` | why it is not available: `disabled_tools`, `mcps`, `name_too_long` or `name_collision` |
+
+★ **The server narrowing is the coarser one, and it is reported first.** A tool can be
+blocked by two things at once — the server is not in this agent's `mcps:` list, **and**
+the tool is in its `disabled_tools`. ⇒ the reason is `mcps`: the server is not there at
+all, and the finer rule would have said nothing about it. ★ The other order would
+report a tool rule for a server the agent does not have.
+
+★ **The configuration view lists the servers too.** `GET /v2/config` gains the
+configured servers' names and transports: the configuration says **what exists**, the
+panel says **what is up**. ★ A configuration view that hid the `mcps/` partition would
+leave the settings UI with nothing to show.
+
+★ **A swap in the middle of the request is not a mixture.** The manager's clients
+belong to a generation (§5.4), and the panel's ask goes through the same start a
+turn's does (§6.8) — so it gets the **current** generation's client, or the failure
+of starting it. ★ The answer is one generation's state, never a mixture of two.
 
 ★ **Both vocabularies are shown.** The file says `allows: [read_issue]`; the model sees
 `mcp__github__read_issue`. A panel that shows only the exposed name leaves the user
@@ -1237,7 +1416,9 @@ not the place for it. A **Refresh** button re-reads it, because the user fixes a
 server and wants to see the fix without closing the dialog.
 
 ★ The agent is the session's agent (`web/src/lib/store/selectors.ts:13`), and the title
-says which one — the servers of `task` are not the servers of `main`.
+says which one — the servers of `task` are not the servers of `main`. ★ The list that
+applies to a turn is the one of the agent **that is running** (§5.3); the panel shows
+the one the next turn runs as.
 
 ## 12. What is not in this design
 
@@ -1250,6 +1431,7 @@ says which one — the servers of `task` are not the servers of `main`.
 | A credential that is not a header | `inject` is a header injection; a key in a query parameter, a cookie or a non-HTTP protocol has to enter the sandbox instead (§8.1) |
 | A mixin that installs a host-side MCP server | a mixin is a declaration; content belongs to the workload (`sandbox-kit-design.md` §2.3) |
 | The panel as a live view | the panel reads the manager's state when it opens; it does not subscribe, and it does not retry (§11.5) |
+| The SSE transport | `http` means **streamable HTTP**; SSE is the older transport, and openheron does not speak it (§5.2) |
 
 ★ Every entry in this document that describes code names a file and a line. When the
 code moves, the line moves with it — that is the contract this repository keeps for
