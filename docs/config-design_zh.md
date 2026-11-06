@@ -59,6 +59,7 @@
 | 16 | 策略匹配 | 某个 agent 的 `disabled_tools` 接受精确名 **+** 尾部 `*` 的前缀模式 | **提案，尚未实现**（见 §6.3）。档位搬进了工具自己的文件，于是仅剩的那句关于**命名空间**而不是关于某个工具的话是「这个 agent 不要任何 MCP 工具」—— 而前缀正是给命名空间起名的那个东西。今天的表是**精确匹配**（`agentkit/build/policy.go:39-47`、`agentkit/build/policy.go:94-105`） |
 | 17 | 档位写在哪 | **跟着工具走**：每个文件的 `allows:` 点名**不用点头**的那些，其余一律要点头；★ **不再有任何全局清单** —— `policy/permissions.yaml` 消失 | **提案 —— 未实施**（见 §6.3、§6.6）。★ 档位是关于**某一个工具**的一句话，所以就该待在那个工具的文件里 —— 而且在那里用的是**同一套词汇**（`http.yaml` 说 `post`，所以它能说 `allows: [post]`；中心那份文件却不得不点名内部名字 `request_post`）。★ 全局 `deny` 跟着一起走：「不被暴露」已经说了两遍（文件的清单、agent 的 `disabled_tools`），第三处就多一处要同步的地方 —— 而它是唯一必须说暴露名的那处 |
 | 18 | 缺省档位 | **到处都是 `ask`** —— 代码带着一份 allow 清单，给它知道是只读的那些工具；而文件的 `allows:` 就它提供的那些工具替换掉这份清单 | ★ 全体同一条规则：文件系统工具、HTTP 工具与一个 MCP server 行为一致，也没有需要记的分组缺省。★ 代码那份清单之所以存在，是因为 `task` —— 委派工具 —— **没有自己的文件**，而一个不点一下就不能委派的 agent 等于不能委派。MCP server 的工具是**运行期才发现**的：openheron 不知道 `delete_repo` 做什么，而 stdio 之下 server 是带着 agent 自己权限的子进程 ⇒ 默认点头是这场交易里安全的那一侧 |
+| 19 | 一个 agent 加载哪些 MCP server | agent 自己的 `mcps:` 清单，写在它的 frontmatter 里 | 一个 server 是**能力**，而能力属于用到它的那个 agent —— 研究员不需要部署 server。★ 键缺失 = 全部已配置的 server，`[]` = 一个都不加载（与 `skills` 一样的指针做法），所以常见情况只写**一处**：写好 server 文件，没有收窄清单的 agent 就都拿到它 |
 
 ### 「一实体一文件」而非单文件分区表
 
@@ -895,6 +896,7 @@ max_iterations: 20                # 0 = not declared; eino's own default (20) th
 subagents: [researcher]           # references other file names; the order is the order of the task description
 disabled_tools: [execute]         # affects this agent only; stored separately from the global deny, never merged
 skills: [refactor]                # the skills this agent may use; absent = every skill, [] = none
+mcps: [github]                    # the MCP servers this agent loads; absent = every configured server, [] = none
 
 temperature: 0.2                  # this call's intent (the same model should use different parameters in different agents)
 max_tokens: 8192
@@ -915,10 +917,21 @@ The body is the Instruction. Leave it empty to use deep.New's built-in prompt.
 | `subagents` | `[]string` | | 引用其他 agent 文件名；引用不存在或成环 ⇒ 启动期报错 |
 | `disabled_tools` | `[]string` | | **内层**：只影响本 agent。`ask` 档的工具写在这里仍需人批，只是本 agent 根本拿不到 |
 | `skills` | `*[]string` | | 技能允许清单。**指针就是重点**：键不存在（`nil`）= 目录下的全部技能，`[]` = 一个都不要（`agentkit/spec/decl/decl.go:94-105`） |
+| `mcps` | `*[]string` | | 这个 agent 加载的 MCP server，按**server 名**（`mcps/` 下的文件名）。★ **指针就是重点**，与 `skills` 同理：键不存在（`nil`）= 全部已配置的 server，`[]` = 一个都不加载 |
 | `temperature` | `*float32` | | 指针：0 与「没配」是两件事 |
 | `max_tokens` | `*int` | | 同上 |
 | `reasoning` | `string` | | 档位名；不在模型词汇表里 ⇒ 不注入，且**不出声**（见 §6.1） |
 | `summarize_at` | `Threshold` | | 这个 agent 的压缩阈值：token 数、模型窗口的百分比，或 `off`（`agentkit/spec/decl/decl.go:120-146`） |
+
+★ **为什么 server 清单是每个 agent 各有一份。** 一个 server 是**能力**，而能力属于用到它的
+那个 agent：研究员不需要部署 server，部署 agent 也不需要 GitHub。⇒ `mcps/<server>.yaml`
+文件说 **server 是什么**（它的命令、它的传输方式、它的档位），agent 的 `mcps:` 说 **谁拿
+它**。
+
+★ **两份清单是两种粒度，而且可以叠加。** `mcps:` 选**服务器**；`disabled_tools` 选**工具**
+—— 而它接受前缀，所以 `disabled_tools: [mcp__github__*]` 能把一个 server 的工具从同时加载
+两个 server 的 agent 里摘掉。★ 两者都不是「全局 deny」：都只属于一个 agent，而这正是全局
+清单不需要的原因（§6.3）。
 
 ★ **`description` 为什么重要**：它被渲染进 `task` 工具描述
 （`eino@v0.9.22/adk/prebuilt/deep/task_tool.go:177-190`，`:182` 那行写出
@@ -1526,6 +1539,11 @@ MCP 服务器的配置。**一个 server 一个文件**：
 
 ★ 架构层面的完整设计（装配路径、客户端生命周期、与闸门的关系、沙箱里的落法）
 见 `docs/mcp-design.md`。本节只管**配置面**。
+
+★ **文件说 server 是什么；agent 说谁拿它。** `mcps/<server>.yaml` 描述这个 server ——
+它的命令、它的传输方式、它的档位。★ 哪些 agent 加载它，看的是 agent 自己的 `mcps:` 清单
+（§6.2）：键缺失 = 全部已配置的 server，`[]` = 一个都不加载。
+⇒ 常见情况只写**一处**：写好 server 文件，没有收窄清单的 agent 就都拿到它。
 
 #### 字段全集
 

@@ -57,6 +57,7 @@
 | 16 | Policy matching | an agent's `disabled_tools` accepts an exact name **+** a trailing `*` prefix pattern | **proposal — not implemented** (see §6.3). The tiers moved into the tools' own files, so the one statement left that is about a **namespace** rather than a tool is "this agent gets no MCP tools" — and a prefix is what names a namespace. Today the tables match **exactly** (`agentkit/build/policy.go:39-47`, `agentkit/build/policy.go:94-105`) |
 | 17 | Where a tier is written | **with the tool**: each file's `allows:` names what runs **without a nod**, and everything else asks; ★ there is **no global list** any more — `policy/permissions.yaml` disappears | **proposal — not implemented** (see §6.3, §6.6). ★ a tier is a statement about **one tool**, so it belongs in that tool's file — and there it uses **the same vocabulary** (`http.yaml` says `post`, so it can say `allows: [post]`; the central file had to name the internal `request_post`). ★ the global `deny` goes with it: "not exposed" is said twice already (a file's whitelist, an agent's `disabled_tools`), and a third place is one more to keep in sync — and it was the only one that had to speak the exposed names |
 | 18 | The default tier | **`ask`, everywhere** — the code carries one allow list for the tools it knows are read-only, and a file's `allows:` replaces it for the tools that file provides | ★ one rule for everything: the filesystem tools, the HTTP tool and an MCP server behave the same way, and there is no per-group default to remember. ★ the code's list exists because `task` — the delegation tool — has **no file of its own**, and an agent that cannot delegate without a click cannot delegate at all. An MCP server's tools are **discovered at runtime**: openheron cannot know what `delete_repo` does, and under stdio the server is a child process with the agent's own privileges ⇒ asking by default is the safe side of the trade |
+| 19 | Which MCP servers an agent loads | the agent's own `mcps:` list, in its frontmatter | a server is a **capability**, and a capability belongs to the agent that uses it — the researcher does not need the deploy server. ★ absent = every configured server, `[]` = none (the same pointer trick as `skills`), so the common case is **one** place: write the server file, and every agent that has not narrowed its list gets it |
 
 ### "One entity, one file" rather than a single-file partition table
 
@@ -916,6 +917,7 @@ max_iterations: 20                # 0 = not declared; eino's own default (20) th
 subagents: [researcher]           # references other file names; the order is the order of the task description
 disabled_tools: [execute]         # affects this agent only; stored separately from the global deny, never merged
 skills: [refactor]                # the skills this agent may use; absent = every skill, [] = none
+mcps: [github]                    # the MCP servers this agent loads; absent = every configured server, [] = none
 
 temperature: 0.2                  # this call's intent (the same model should use different parameters in different agents)
 max_tokens: 8192
@@ -936,10 +938,23 @@ The body is the Instruction. Leave it empty to use deep.New's built-in prompt.
 | `subagents` | `[]string` | | References other agent file names; a reference that does not exist or a cycle ⇒ an error at startup |
 | `disabled_tools` | `[]string` | | **The inner layer**: it affects this agent only. A tool in the `ask` tier that is written here still needs a human, it is just that this agent never gets it at all |
 | `skills` | `*[]string` | | The allow-list of skills. **The pointer is the point**: the key absent (`nil`) = every skill in the directory, `[]` = none (`agentkit/spec/decl/decl.go:94-105`) |
+| `mcps` | `*[]string` | | The MCP servers this agent loads, by **server name** (the file name under `mcps/`). ★ **The pointer is the point**, the same way it is for `skills`: the key absent (`nil`) = every configured server, `[]` = none |
 | `temperature` | `*float32` | | A pointer: 0 and "not configured" are two different things |
 | `max_tokens` | `*int` | | The same |
 | `reasoning` | `string` | | A tier name; a tier that is not in the model's vocabulary ⇒ nothing is injected, **silently** (see §6.1) |
 | `summarize_at` | `Threshold` | | This agent's compaction threshold: a token count, a percentage of the model's window, or `off` (`agentkit/spec/decl/decl.go:120-146`) |
+
+★ **Why the server list is per agent.** A server is a **capability**, and a capability
+belongs to the agent that uses it: the researcher does not need the deploy server, and
+the deploy agent does not need GitHub. ⇒ the `mcps/<server>.yaml` file says **what a
+server is** (its command, its transport, its tier), and the agent's `mcps:` says **who
+gets it**.
+
+★ **The two lists are different granularities, and they compose.** `mcps:` picks the
+**servers**; `disabled_tools` picks the **tools** — and it accepts a prefix, so
+`disabled_tools: [mcp__github__*]` removes one server's tools from an agent that loads
+two. ★ Neither of them is a "global deny": both belong to one agent, and that is
+exactly why the global list was not needed (§6.3).
 
 ★ **Why `description` matters**: it is rendered into the `task` tool description
 (`eino@v0.9.22/adk/prebuilt/deep/task_tool.go:177-190`, the line at `:182` writes
@@ -1633,6 +1648,12 @@ file is replaced, there is no way to say which server changed.
 ★ The complete architectural design (the assembly path, the client lifecycle, the relation
 to the gate, where it lands in the sandbox) is in `docs/mcp-design.md`. This section covers
 the **configuration surface** only.
+
+★ **The file says what a server is; the agent says who gets it.** `mcps/<server>.yaml`
+describes the server — its command, its transport, its tier. ★ Which agents load it is
+the agent's own `mcps:` list (§6.2): absent = every configured server, `[]` = none.
+⇒ the common case is **one** place: write the server file, and every agent that has
+not narrowed its list gets it.
 
 #### The whole field set
 

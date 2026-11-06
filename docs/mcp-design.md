@@ -353,6 +353,12 @@ the file removes the server. This is the rule `tools/` already follows, and it k
 switch in one place instead of splitting it between "the file is there" and "the flag
 inside it says on".
 
+★ **The file says what a server is; the agent says who gets it.** Which agents load a
+server is the agent's own `mcps:` list in its frontmatter: ★ **absent = every configured
+server, `[]` = none** — the same pointer trick `skills` already uses, for the same
+reason: the common case is **one** place. Write the server file, and every agent that
+has not narrowed its list gets it.
+
 ★ The server name is the file name without `.yaml`, and it is the namespace segment
 (§3.1). A file name that does not match `^[a-z0-9]+(_[a-z0-9]+)*$` is a **load-time
 hard error** — we wrote it, so we can fix it.
@@ -614,6 +620,7 @@ does this snapshot have"; the manager is what a client outlives.
 | Responsibility | What it means |
 |---|---|
 | **one client per server** | a server is one connection, and for stdio one child process |
+| **start only what the agent asked for** | the manager starts the servers in that agent's `mcps:` list (§5.3) — a server nobody lists is never started, and never becomes a child process |
 | **start lazily** | a server is started when a turn first needs it, not at boot |
 | **restart a crashed child** | a stdio server that dies is started again on the next call — a crash is not a configuration error, and a dead server that stays dead is the worst outcome |
 | **notice a changed tool list** | the manager re-lists the tools; when the list changed, the **generation is bumped** and the tools are rebuilt, exactly like a configuration reload (§6.7) |
@@ -900,7 +907,7 @@ the VM is readable by the agent's own tools, and it is the user who chose that.
 
 | Package | What it holds | What it must not hold |
 |---|---|---|
-| `agentkit/spec/decl` | the **declarations**: `MCPServerCfg` and the namespace constants | any behaviour — it is the pure declaration layer (`AGENTS.md`'s dependency iron rules) |
+| `agentkit/spec/decl` | the **declarations**: `MCPServerCfg`, the namespace constants, and the agent's `MCPServers` field | any behaviour — it is the pure declaration layer (`AGENTS.md`'s dependency iron rules) |
 | `agentkit/spec` | the **loader**: reads `mcps/<server>.yaml`, validates the file name and the fields, expands `${ENV}` / `@file:` | the MCP client, eino, `kb` — it may not import them |
 | `agentkit/build/mcptools.go` | the **provider** and the **wrappers**: the naming, the tier mapping, the per-server mutex, the output cap | the loader's file walking — it receives the declarations |
 | `agentkit/build/mcpmanager.go` | the **manager**: one client per server, the lazy start, the restart of a crashed child, the tool-list poll, the teardown on the snapshot swap | the naming and the tiers — those belong to the provider |
@@ -916,6 +923,7 @@ the assembly layer, and the assembly layer never walks the config directory itse
 |---|---|---|
 | `decl.MCPServerCfg` | `agentkit/spec/decl/decl.go` | one server's declaration: the transport, the command, the environment, the tier keys, the whitelist, the two timeouts |
 | `decl.MCPFiles` | `agentkit/spec/decl/decl.go` | the partition's holder: `map[string]*MCPServerCfg` keyed by the server name |
+| `decl.Agent.MCPServers` | `agentkit/spec/decl/decl.go` | the agent's own list of servers: ★ a **pointer**, so the key absent means every configured server and `[]` means none — the same shape `Skills` already has |
 | `spec.Config.MCPs` | `agentkit/spec/config.go` | where the loader puts them |
 | `mcpToolProvider` | `agentkit/build/mcptools.go` | the `toolProvider` implementation (§1.2) |
 | `mcpManager` | `agentkit/build/mcpmanager.go` | the owner of the clients: one per server, keyed by the server name, living across snapshots (§6.6) |
@@ -937,6 +945,7 @@ the assembly layer, and the assembly layer never walks the config directory itse
 | a changed tool list (§6.6) | the manager — the poll, and the generation bump that rebuilds the tools |
 | the servers a run touched (§7.4) | `agentkit/run/runrow.go` — the run's row names them |
 | the example and the editor's template (§5.6) | `agentkit/spec/write.go` (`spec.Template`) and `initcfg/templates/` |
+| which servers an agent loads (§5.3) | `agentkit/spec/decl` (the field) → `agentkit/build/mcpmanager.go` (the start) |
 
 ★ **One function does three things**: the namespace, the skip-and-warn, and the tier
 mapping all live in `mcpToolProvider.Provide`, because they all need the same two
@@ -954,7 +963,7 @@ through.
 |---|---|---|
 | 1 | `go.mod` | add `github.com/cloudwego/eino-ext/components/tool/mcp` and `github.com/mark3labs/mcp-go` |
 | 2 | `agentkit/spec/config.go` | `DirMCP = "mcps"` and a `Categories` entry, hot (`hotDirList` at `:77` picks it up) |
-| 3 | `agentkit/spec/decl/decl.go` | the `MCPServerCfg` declaration struct, the `MCPFiles` holder, the namespace constants; `call_timeout` |
+| 3 | `agentkit/spec/decl/decl.go` | the `MCPServerCfg` declaration struct, the `MCPFiles` holder, the namespace constants; `call_timeout`; ★ the agent's `MCPServers` field (§5.3) |
 | 4 | `agentkit/spec/load.go` | the loader for `mcps/<server>.yaml`, with the file-name and field validation of §3.1 and §5.2 |
 | 5 | `agentkit/spec/defaults.go` | `EnabledToolNames` gains the namespaced MCP tools; the default tier of a server (`ask`) |
 | 6 | `agentkit/spec/write.go` | the scaffold for a new `mcps/` file |
@@ -963,7 +972,7 @@ through.
 | 9 | `api/v2_settings.go` | the editable section for `mcps/` |
 | 10 | `agentkit/build/nettools.go` | the output cap, applied to the MCP batch |
 | 11 | `agentkit/build/mcptools.go` | the provider's naming and tier mapping (§6.3, §7.3), the per-server mutex that serializes the stdio calls (§6.5), and the environment assembly for the child process (§5.5) |
-| 12 | `agentkit/build/mcpmanager.go` | the manager: one client per server, the lazy start, the restart of a crashed child, the tool-list poll that bumps the generation, and the teardown on the snapshot swap (§6.6) |
+| 12 | `agentkit/build/mcpmanager.go` | the manager: one client per server, the lazy start **of the servers that agent asked for** (§5.3), the restart of a crashed child, the tool-list poll that bumps the generation, and the teardown on the snapshot swap (§6.6) |
 | 13 | `agentkit/run/runrow.go` | the run's row records which MCP servers the run touched (§7.4) |
 | 14 | `initcfg/templates/` and `spec.Template` | the `mcps/example.yaml.disabled` example, and the editor's template for a new `mcps/` file — the editor's manifest is filled per category, so a new category gets its scaffold for free (§5.6) |
 
@@ -993,7 +1002,9 @@ through.
 | Command | a `command` that is not on the PATH is a warning, and the workspace never resolves it |
 | Ledger | a run's row names the MCP servers it touched |
 | Editor | the config editor can create a file under `mcps/` |
-| Tier | the file's `ask:` is written in the server's own vocabulary and reaches the gate under the composed name |
+| Tier | the file's `allows:` is written in the server's own vocabulary and reaches the gate under the composed name |
+| Servers | an agent that does not list a server in `mcps:` does not get it, and the server is never started |
+| Servers | an absent `mcps:` means every configured server, `[]` means none |
 
 ### 10.3 The documentation
 

@@ -332,6 +332,12 @@ MCP 服务器按服务器一个文件来配：
 这条规则 `tools/` 已经在用，它让开关只待在一个地方，
 而不是一半在「文件在不在」、另一半在「文件里那个标志说开不开」。
 
+★ **文件说服务器是什么；agent 说谁拿它。** 哪些 agent 加载一个服务器，
+  取决于它 frontmatter 里自己的 `mcps:` 清单：★ **缺失 = 全部已配置的服务器，
+  `[]` = 一个都没有** —— 与 `skills` 已经在用的那个指针技巧同一个形状，
+  出于同一个理由：常见情形是**一个**地方。写好服务器文件，
+  每一个没有把自己的清单收窄的 agent 就都拿到它。
+
 ★ server 名就是文件名去掉 `.yaml`，它就是命名空间的那一段（§3.1）。
   不匹配 `^[a-z0-9]+(_[a-z0-9]+)*$` 的文件名是**加载期硬错误** ——
   是我们自己写的，我们自己修。
@@ -572,6 +578,7 @@ if _, err := c.stdin.Write(requestBytes); err != nil {   // ← no lock
 | 职责 | 意思 |
 |---|---|
 | **一个 server 一个客户端** | 一个 server 就是一条连接，对 stdio 来说还是一个子进程 |
+| **只起这个 agent 要的 server** | 管理者只启动那个 agent 的 `mcps:` 清单里的服务器（§5.3）—— 谁都没点名的 server 永远不会被启动，也永远不会变成子进程 |
 | **懒启动** | 一个 server 在第一轮要用它时才被拉起来，不是在启动时 |
 | **崩了的子进程自动重启** | 一个死掉的 stdio server 在下一次调用时被重新拉起 —— 崩了不是配置错误，而一个死掉的 server 就那么死着才是最糟的结果 |
 | **发现工具清单变了** | 管理者重新列举工具；清单变了就**推进代际**、工具重建 —— 与配置重载是同一条路（§6.7） |
@@ -843,7 +850,7 @@ headers:
 
 | 包 | 装什么 | 装不得什么 |
 |---|---|---|
-| `agentkit/spec/decl` | **声明**：`MCPServerCfg` 与命名空间常量 | 任何行为 —— 它是纯声明层（`AGENTS.md` 的依赖铁律） |
+| `agentkit/spec/decl` | **声明**：`MCPServerCfg`、命名空间常量，以及 agent 的 `MCPServers` 字段 | 任何行为 —— 它是纯声明层（`AGENTS.md` 的依赖铁律） |
 | `agentkit/spec` | **加载器**：读 `mcps/<server>.yaml`，校验文件名与字段，展开 `${ENV}` / `@file:` | MCP 客户端、eino、`kb` —— 它不得 import 它们 |
 | `agentkit/build/mcptools.go` | **provider** 与**包装层**：命名、档位映射、per-server 互斥锁、输出封顶 | 加载器的文件遍历 —— 它拿到的是声明 |
 | `agentkit/build/mcpmanager.go` | **管理者**：一个 server 一个客户端、懒启动、崩掉的子进程重启、工具清单轮询、快照换代时的拆解 | 命名与档位 —— 那属于 provider |
@@ -859,6 +866,7 @@ headers:
 |---|---|---|
 | `decl.MCPServerCfg` | `agentkit/spec/decl/decl.go` | 一个服务器的声明：传输方式、命令、环境、那几个档位键、白名单、两个超时 |
 | `decl.MCPFiles` | `agentkit/spec/decl/decl.go` | 这个分区的持有者：`map[string]*MCPServerCfg`，按服务器名做键 |
+| `decl.Agent.MCPServers` | `agentkit/spec/decl/decl.go` | agent 自己的服务器清单：★ 一个**指针**，所以键缺失意味着全部已配置的服务器，`[]` 意味着一个都没有 —— 与 `Skills` 已经是的那个形状一样 |
 | `spec.Config.MCPs` | `agentkit/spec/config.go` | 加载器把它们放在这儿 |
 | `mcpToolProvider` | `agentkit/build/mcptools.go` | `toolProvider` 的那个实现（§1.2） |
 | `mcpManager` | `agentkit/build/mcpmanager.go` | 客户端的属主：每个 server 一个，按服务器名做键，跨快照活着（§6.6） |
@@ -880,6 +888,7 @@ headers:
 | 工具清单变了（§6.6） | 管理者 —— 轮询，以及推进代际并重建工具 |
 | 一次 run 碰过的 server（§7.4） | `agentkit/run/runrow.go` —— run 的那一行点名它们 |
 | 示例与编辑器的模板（§5.6） | `agentkit/spec/write.go`（`spec.Template`）与 `initcfg/templates/` |
+| 一个 agent 加载哪些服务器（§5.3） | `agentkit/spec/decl`（那个字段）→ `agentkit/build/mcpmanager.go`（那次启动） |
 
 ★ **一个函数干三件事**：命名空间、跳过并警告、档位映射都住在
   `mcpToolProvider.Provide` 里，因为它们要的都是同样两样输入 ——
@@ -896,7 +905,7 @@ headers:
 |---|---|---|
 | 1 | `go.mod` | 加 `github.com/cloudwego/eino-ext/components/tool/mcp` 与 `github.com/mark3labs/mcp-go` |
 | 2 | `agentkit/spec/config.go` | `DirMCP = "mcps"` 与一条 `Categories` 条目，热更新（`hotDirList` 在 `:77` 会自动带上它） |
-| 3 | `agentkit/spec/decl/decl.go` | `MCPServerCfg` 声明结构体、`MCPFiles` 持有者、命名空间常量；`call_timeout` |
+| 3 | `agentkit/spec/decl/decl.go` | `MCPServerCfg` 声明结构体、`MCPFiles` 持有者、命名空间常量；`call_timeout`；★ agent 的 `MCPServers` 字段（§5.3） |
 | 4 | `agentkit/spec/load.go` | `mcps/<server>.yaml` 的加载器，带 §3.1 与 §5.2 的文件名与字段校验 |
 | 5 | `agentkit/spec/defaults.go` | `EnabledToolNames` 加上带命名空间的 MCP 工具；一个服务器的缺省档位（`ask`） |
 | 6 | `agentkit/spec/write.go` | 新建 `mcps/` 文件的脚手架 |
@@ -905,7 +914,7 @@ headers:
 | 9 | `api/v2_settings.go` | `mcps/` 的可编辑分区 |
 | 10 | `agentkit/build/nettools.go` | 输出封顶，套到 MCP 批次上 |
 | 11 | `agentkit/build/mcptools.go` | provider 的命名与档位映射（§6.3、§7.3），把 stdio 调用串行化的 per-server 互斥锁（§6.5），以及子进程的环境装配（§5.5） |
-| 12 | `agentkit/build/mcpmanager.go` | 管理者：一个 server 一个客户端、懒启动、崩了的子进程重启、推进代际的工具清单轮询，以及快照换代时的拆解（§6.6） |
+| 12 | `agentkit/build/mcpmanager.go` | 管理者：一个 server 一个客户端、**只懒启动那个 agent 要的**那些服务器（§5.3）、崩了的子进程重启、推进代际的工具清单轮询，以及快照换代时的拆解（§6.6） |
 | 13 | `agentkit/run/runrow.go` | run 的那一行记下这次 run 碰过哪些 MCP server（§7.4） |
 | 14 | `initcfg/templates/` 与 `spec.Template` | `mcps/example.yaml.disabled` 这个示例，以及新建 `mcps/` 文件时编辑器用的模板 —— 编辑器的清单是按类别填的，所以新类别白拿一份脚手架（§5.6） |
 
@@ -935,7 +944,9 @@ headers:
 | 命令 | 一个不在 PATH 上的 `command` 只是一条警告，而工作区永远不参与解析 |
 | 账本 | 一个 run 的那一行点名它碰过的 MCP server |
 | 编辑器 | 配置编辑器能在 `mcps/` 下面新建文件 |
-| 档位 | 文件里的 `ask:` 用 server 自己的词儿写，到闸门时用的是合成后的名字 |
+| 档位 | 文件里的 `allows:` 用 server 自己的词儿写，到闸门时用的是合成后的名字 |
+| 服务器 | 一个没有在 `mcps:` 里点名某个 server 的 agent 拿不到它，而那个 server 也永远不会被启动 |
+| 服务器 | `mcps:` 缺失意味着全部已配置的服务器，`[]` 意味着一个都没有 |
 
 ### 10.3 文档
 
