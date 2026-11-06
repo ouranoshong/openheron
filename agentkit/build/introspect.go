@@ -39,6 +39,8 @@ func reasonOf(l Layer) string {
 		return "policy.deny"
 	case LayerDisable:
 		return "disabled_tools"
+	case LayerMCPScope:
+		return "mcps"
 	default:
 		return ""
 	}
@@ -100,7 +102,7 @@ func (b *Builder) PolicyTools() []ToolVerdict {
 	obs := observedOf(rootTable)
 	names := toolNameUniverse(newBoundary(policy, rootTable), snap.cfg.EnabledToolNames(), subs, obs)
 
-	flat := newBoundary(policy, specTable(Policy{}, decl.SubAgentSpec{}))
+	flat := newBoundary(policy, specTable(Policy{}, decl.SubAgentSpec{}, nil))
 	out := make([]ToolVerdict, 0, len(names))
 	for _, n := range names {
 		out = append(out, verdictOf(flat, n, obs))
@@ -135,6 +137,13 @@ func toolNameUniverse(b boundary, enabled []string, subs []decl.SubAgentSpec, ob
 	add(policy.Ask)
 	add(policy.Deny)
 	add(enabled)
+	// ★ The names the servers' files allow are known from the
+	//   configuration alone, so they are part of the universe before the
+	//   server is ever up. The rest of a server's tools join it once they
+	//   have been observed.
+	for name := range policy.mcpAllow {
+		add([]string{name})
+	}
 	for name := range reservedToolNames {
 		add([]string{name})
 	}

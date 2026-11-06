@@ -131,6 +131,11 @@ func (rt *Runtime) makeOnAgentEvents(sess storage.Session, turn *Turn) func(cont
 		}
 		turn.holdPending(artifacts.Pending)
 
+		// ★ The ledger names the servers this run touched, so a
+		//   post-mortem can answer "which server was this" without
+		//   reading the whole transcript.
+		turn.row.noteMCPServers(mcpServersOf(artifacts.Intermediates))
+
 		rt.archive(sess, turn, out)
 		// ★ The messages are on disk: the turn is finished with the
 		//   session's history, and the client may go on.

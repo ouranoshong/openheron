@@ -159,6 +159,13 @@ type Run struct {
 	ErrorCode string `json:"error_code,omitempty"`
 	// ErrorMessage is the failure's message.
 	ErrorMessage string `json:"error_message,omitempty"`
+	// MCPServers are the MCP servers the run touched.
+	//
+	// ★ The row is a run's public record: a post-mortem can answer "which
+	//   server was this, and was it the reason the run failed" without
+	//   reading the whole transcript. The individual calls are in the
+	//   transcript — the row says which servers were involved.
+	MCPServers []string `json:"mcp_servers,omitempty"`
 }
 
 // RunLedger is the durable record of the runs of one session.

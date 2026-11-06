@@ -26,13 +26,20 @@ type toolRegistry struct {
 	providers []toolProvider
 }
 
-func defaultToolRegistry() *toolRegistry {
+// defaultToolRegistry assembles the providers.
+//
+// ★ The MCP provider is registered here, and it is the only provider that
+//
+//	needs a manager: an MCP client outlives the batch the provider
+//	returns, so the manager — not the provider — owns it.
+func defaultToolRegistry(mgr *mcpManager) *toolRegistry {
 	return &toolRegistry{providers: []toolProvider{
 		kbToolProvider{},
 		httpRequestToolProvider{},
 		webSearchToolProvider{},
 		wikipediaToolProvider{},
-		// mcpToolProvider{}, projectToolsProvider{}, ...
+		mcpToolProvider{mgr: mgr},
+		// projectToolsProvider{}, ...
 	}}
 }
 

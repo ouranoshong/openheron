@@ -23,6 +23,7 @@ const (
 	DirState   = "state"
 	DirTools   = "tools"
 	DirKBIndex = "kb"
+	DirMCP     = "mcps"
 )
 
 type Category struct {
@@ -63,6 +64,15 @@ var Categories = []Category{
 		Editable: true, hot: true,
 		loader: (*Config).loadTool,
 	},
+	{
+		// ★ One MCP server, one file. The partition is hot: changing a
+		//   server's command or timeout takes effect on the next turn,
+		//   without a restart — which means the client has to be rebuilt
+		//   with it.
+		ID: DirMCP, Label: "MCP servers", Dir: DirMCP, Ext: ".yaml",
+		Editable: true, hot: true,
+		loader: (*Config).loadMCP,
+	},
 }
 
 func CategoryByDir(dir string) (Category, bool) {
@@ -100,6 +110,13 @@ type Config struct {
 	Limits decl.Limits   `yaml:"-"`
 	KB     decl.KB       `yaml:"-"`
 	Tools  decl.ToolsCfg `yaml:"-"`
+
+	// MCPs is the mcps/ partition: one entry per server, keyed by the
+	// server's name.
+	//
+	// ★ The file's presence is the definition — there is no "enabled" key,
+	//   because whether a server exists belongs in one place.
+	MCPs decl.MCPFiles `yaml:"-"`
 
 	Providers map[string]*decl.Provider `yaml:"-"`
 	Models    map[string]*decl.Model    `yaml:"-"`

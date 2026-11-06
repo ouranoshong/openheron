@@ -23,8 +23,13 @@ type Builder struct {
 	projectRoot, dataDir string
 	models               modelFactory
 	tools                *toolRegistry
-	mu                   sync.Mutex
-	snap                 *snapshot
+	// mcp owns the MCP clients. They outlive the snapshot — that is what
+	// the provider's batch does not.
+	mcp *mcpManager
+	// bump moves the generation when a server's tool list changed.
+	bump func()
+	mu   sync.Mutex
+	snap *snapshot
 }
 
 type Option func(*Builder)
@@ -37,16 +42,35 @@ func WithPaths(projectRoot, dataDir string) Option {
 }
 
 func NewBuilder(mgr ConfigManager, opts ...Option) *Builder {
+	mcpMgr := newMCPManager()
 	b := &Builder{
 		mgr:    mgr,
 		pool:   newPool(),
 		models: defaultModelFactory,
-		tools:  defaultToolRegistry(),
+		mcp:    mcpMgr,
+		tools:  defaultToolRegistry(mcpMgr),
 	}
 	for _, o := range opts {
 		o(b)
 	}
 	return b
+}
+
+// SetGenerationBump wires the callback that moves the generation.
+//
+// ★ A server's tool list can change while the configuration stands still,
+//
+//	and the tools have to be rebuilt for it. The rebuild is the same road
+//	a configuration change takes, so the generation moves through the same
+//	hook — a second way to move it would be a second way to be wrong
+//	about it.
+func (b *Builder) SetGenerationBump(fn func()) { b.bump = fn }
+
+// Close tears the MCP clients down.
+func (b *Builder) Close() {
+	if b.mcp != nil {
+		b.mcp.Close()
+	}
 }
 
 func (b *Builder) currentSnapshot() *snapshot {
@@ -73,6 +97,16 @@ func (b *Builder) Build(ctx context.Context, _ string, agentID string,
 		return nil, errors.New("agent: no config manager is wired")
 	}
 	cfg, gen := b.mgr.Current()
+
+	// ★ The re-list happens before the turn's agent is assembled, not
+	//   inside the batch build: the batch is built once per generation,
+	//   and the generation moves only when a list changes — so a re-list
+	//   inside the build would never run.
+	if b.mcp != nil && b.mcp.Refresh(ctx, cfg) && b.bump != nil {
+		b.bump()
+		cfg, gen = b.mgr.Current()
+	}
+
 	snap, err := b.snapshotFor(cfg, gen)
 	if err != nil {
 		return nil, err

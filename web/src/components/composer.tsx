@@ -2,6 +2,7 @@ import { Loader2Icon, PaperclipIcon, XIcon } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 
 import { AgentPicker } from "@/components/agent-picker"
+import { MCPPanel } from "@/components/mcp-panel"
 import { SkillPicker } from "@/components/skill-picker"
 import { ComposerMeta } from "@/components/composer-meta"
 import { ComposerPopup, type PopupItem } from "@/components/composer-popup"
@@ -56,6 +57,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
   const [picker, setPicker] = useState<{ open: boolean; filter?: string; error?: string }>({
     open: false,
   })
+  const [mcpPanel, setMcpPanel] = useState(false)
   const [skillPicker, setSkillPicker] = useState<{ open: boolean; filter?: string; error?: string }>({
     open: false,
   })
@@ -258,6 +260,11 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         break
       case "open_agents":
         setPicker({ open: true })
+        break
+      case "open_mcps":
+        // ★ The panel reads the runtime's state; it does not write a
+        //   message into the transcript. A status readout is not a turn.
+        setMcpPanel(true)
         break
       case "compact":
         // The compaction runs on the server: it summarizes the history and
@@ -625,6 +632,10 @@ export function Composer({ inset = true }: { inset?: boolean }) {
             taRef.current?.focus()
           }}
         />
+      ) : null}
+
+      {mcpPanel ? (
+        <MCPPanel open onClose={() => setMcpPanel(false)} agentId={activeAgentId} />
       ) : null}
 
       {picker.open ? (

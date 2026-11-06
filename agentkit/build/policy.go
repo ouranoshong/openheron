@@ -4,9 +4,12 @@ import (
 	"context"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/cloudwego/eino/components/tool"
+
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
 
 type Tier string
@@ -22,6 +25,13 @@ type Policy struct {
 	Deny []string
 
 	ask map[string]bool
+
+	// mcpAllow holds the exposed names a server's own file allows.
+	//
+	// ★ It is a map of names and not a list of tiers: the tier of an MCP
+	//   tool is assembled from the configuration, so "mcp__github__read_issue
+	//   → allow" can be built before the server is even up.
+	mcpAllow map[string]bool
 }
 
 func NewPolicy(ask, deny []string) Policy {
@@ -41,6 +51,16 @@ func (p Policy) TierOf(name string) Tier {
 	case slices.Contains(p.Deny, name):
 		return TierDeny
 	case p.ask[name]:
+		return TierAsk
+	case strings.HasPrefix(name, decl.MCPToolPrefix):
+		// ★ The namespace's default is ask. A server's tools are
+		//   discovered at runtime, and under stdio the server is a child
+		//   process with the agent's own privileges — so the cost of
+		//   guessing wrong is asymmetric: one extra click against a
+		//   destructive call nobody saw.
+		if p.mcpAllow[name] {
+			return TierAllow
+		}
 		return TierAsk
 	default:
 		return TierAllow
@@ -72,6 +92,17 @@ type Table struct {
 	denied   map[string]bool
 	disabled map[string]bool
 	observed map[string]bool
+
+	// denyMCP holds the namespace prefixes of the servers this agent does
+	// not use, and disablePrefix the trailing-* patterns of the agent's
+	// disabled_tools.
+	//
+	// ★ Both are prefixes and never parsed names: the composed name is
+	//   never split back into its two halves, and a server name may not
+	//   contain a run of underscores — so "mcp__github__" cannot reach
+	//   "mcp__github_x__".
+	denyMCP       []string
+	disablePrefix []string
 }
 
 func newTable(name string, deny, disable []string) *Table {
@@ -86,9 +117,45 @@ func newTable(name string, deny, disable []string) *Table {
 		t.denied[n] = true
 	}
 	for _, n := range disable {
-		t.disabled[n] = true
+		prefix, isPattern, err := decl.ParseToolNamePattern(n)
+		if err != nil {
+			// ★ The loader refuses these shapes, so a pattern that does
+			//   not parse can only come from a caller that did not go
+			//   through the loader. Treat it as an exact name rather than
+			//   dropping the rule silently.
+			t.disabled[n] = true
+			continue
+		}
+		if isPattern {
+			t.disablePrefix = append(t.disablePrefix, prefix)
+			continue
+		}
+		t.disabled[prefix] = true
 	}
 	return t
+}
+
+// denyMCPNamespaces denies the servers this agent does not use.
+//
+// ★ The narrowing lands here, in the agent's table, exactly where
+//
+//	disabled_tools already narrows the tools: the tool set is one set for
+//	the whole snapshot, and the model never sees a tool the table removes.
+func (t *Table) denyMCPNamespaces(list *[]string, servers []string) {
+	if t == nil || list == nil {
+		// ★ An absent list means every configured server.
+		return
+	}
+	allowed := make(map[string]bool, len(*list))
+	for _, n := range *list {
+		allowed[n] = true
+	}
+	for _, s := range servers {
+		if allowed[s] {
+			continue
+		}
+		t.denyMCP = append(t.denyMCP, decl.MCPToolPrefix+s+decl.MCPSeparator)
+	}
 }
 
 func (t *Table) Blocked(toolName string) Layer {
@@ -98,8 +165,18 @@ func (t *Table) Blocked(toolName string) Layer {
 	if t.denied[toolName] {
 		return LayerDeny
 	}
+	for _, p := range t.denyMCP {
+		if strings.HasPrefix(toolName, p) {
+			return LayerMCPScope
+		}
+	}
 	if t.disabled[toolName] {
 		return LayerDisable
+	}
+	for _, p := range t.disablePrefix {
+		if strings.HasPrefix(toolName, p) {
+			return LayerDisable
+		}
 	}
 	return LayerNone
 }
@@ -165,4 +242,7 @@ const (
 	LayerNone    Layer = ""
 	LayerDeny    Layer = "deny"
 	LayerDisable Layer = "disable"
+	// LayerMCPScope is the agent's own mcps: list: the server is not
+	// there at all, so the finer rules would have said nothing about it.
+	LayerMCPScope Layer = "mcps"
 )

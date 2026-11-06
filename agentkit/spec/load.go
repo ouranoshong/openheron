@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -89,8 +90,29 @@ func (c *Config) loadAgent(file string, data []byte) error {
 	if _, err := ParseRef(a.ModelRef); err != nil {
 		return fmt.Errorf("%s: %w", id, err)
 	}
+	if err := validateDisabledTools(id, a.DisabledTools); err != nil {
+		return err
+	}
 
 	c.Agents[id] = &a
+	return nil
+}
+
+// validateDisabledTools refuses the disabled_tools entries that read like
+// wildcards but are not ones.
+//
+// ★ Only a trailing "*" is a pattern, and a lone "*" is not one at all:
+//
+//	"mcp*foo" reads like a wildcard and is not one, and "disabled_tools:
+//	["*"]" would take the agent's own tools away too. A rule whose reach
+//	differs from what it reads as is a silent mismatch, so both are
+//	refused here — at load time, where the file that says them is known.
+func validateDisabledTools(agentID string, tools []string) error {
+	for _, entry := range tools {
+		if _, _, err := decl.ParseToolNamePattern(entry); err != nil {
+			return fmt.Errorf("agent %s: disabled_tools %w", agentID, err)
+		}
+	}
 	return nil
 }
 
@@ -222,6 +244,156 @@ func (c *Config) loadPolicy(file string, data []byte) error {
 	}
 }
 
+// ── mcps/<server>.yaml ──────────────────────────────────────────────────
+
+// loadMCP loads one mcps/<server>.yaml file.
+//
+// ★ The file's name is the server's name, and it is the namespace segment
+//
+//	of that server's tools: mcp__<server>__<tool>. A name that does not
+//	match the pattern is a load-time error — we wrote it, so we can fix
+//	it, and a name with a run of underscores could not be read back.
+func (c *Config) loadMCP(file string, data []byte) error {
+	name := strings.TrimSuffix(file, ".yaml")
+	if !decl.ValidMCPServerName(name) {
+		return fmt.Errorf("mcps/%s: the server name %q must match %s", file, name, decl.MCPServerNamePattern)
+	}
+
+	var s decl.MCPServerCfg
+	if err := decodeStrict(data, &s); err != nil {
+		return err
+	}
+	s.Name = name
+
+	transport := strings.TrimSpace(s.Transport)
+	if transport == "" {
+		transport = decl.MCPTransportStdio
+	}
+	switch transport {
+	case decl.MCPTransportStdio, decl.MCPTransportHTTP:
+	default:
+		// ★ No silent fallback to stdio: a typo in the transport must not
+		//   run a different server than the one the file names.
+		return fmt.Errorf("mcps/%s: unknown transport %q (supported: %s, %s)",
+			file, s.Transport, decl.MCPTransportStdio, decl.MCPTransportHTTP)
+	}
+	s.Transport = transport
+
+	if transport == decl.MCPTransportHTTP {
+		if strings.TrimSpace(s.URL) == "" {
+			return fmt.Errorf("mcps/%s: url is required for an http server", file)
+		}
+		// ★ An http server is a remote process: this process's environment
+		//   is not its environment, so there is nothing to hand it. A key
+		//   that does nothing is worse than a refusal — the user would
+		//   believe the server runs with that variable set.
+		if yamlHasKey(data, "env") {
+			return fmt.Errorf("mcps/%s: env is not allowed on an http server — "+
+				"it has no child process to hand an environment to", file)
+		}
+	} else if strings.TrimSpace(s.Command) == "" {
+		return fmt.Errorf("mcps/%s: command is required for a stdio server", file)
+	}
+
+	env, err := c.expandMCPMaps(file, "env", s.Env)
+	if err != nil {
+		return err
+	}
+	s.Env = env
+
+	headers, err := c.expandMCPMaps(file, "headers", s.Headers)
+	if err != nil {
+		return err
+	}
+	s.Headers = headers
+
+	c.resolveMCPDuration(file, "timeout", &s.Timeout, decl.DefaultMCPTimeout)
+	c.resolveMCPDuration(file, "call_timeout", &s.CallTimeout, decl.DefaultMCPCallTimeout)
+
+	if c.MCPs == nil {
+		c.MCPs = decl.MCPFiles{}
+	}
+	c.MCPs[name] = &s
+	return nil
+}
+
+// expandMCPMaps expands the ${ENV} / @file: references of one map.
+//
+// ★ A variable that is not set is not fatal: it is recorded in `deferred`
+//
+//	and the entry is left out, so the server starts with the inherited
+//	environment instead of an empty one. A missing value is a downgrade,
+//	not a reason to keep the process from starting.
+func (c *Config) expandMCPMaps(file, key string, in map[string]string) (map[string]string, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		val, resolved, err := expandValue(v)
+		if err != nil {
+			return nil, fmt.Errorf("mcps/%s: %s %s: %w", file, key, k, err)
+		}
+		if !resolved {
+			c.deferKey("mcps/%s.yaml: %s %s refers to %s, which is not set; the entry is left out",
+				file, key, k, envVarName(v))
+			continue
+		}
+		out[k] = val
+	}
+	return out, nil
+}
+
+// resolveMCPDuration applies the default to a duration that could not be
+// parsed.
+//
+// ★ The timeout decides how long we wait, not what happens — a wrong value
+//
+//	must not keep the server from starting.
+func (c *Config) resolveMCPDuration(file, key string, d *decl.MCPDuration, def time.Duration) {
+	if !d.Declared {
+		d.Value = def
+		return
+	}
+	if d.Bad {
+		c.deferKey("mcps/%s.yaml: %s %q is not a duration; using the default %s",
+			file, key, d.Raw, def)
+		d.Value = def
+		return
+	}
+	if d.Value <= 0 {
+		d.Value = def
+	}
+}
+
+// yamlHasKey reports whether the document's top-level mapping carries a key.
+//
+// ★ The decoder cannot answer this: an `env:` with no value decodes into a
+//
+//	nil map, and "the key is there and empty" has to be different from
+//	"the key is absent" — an http server may not declare env: at all.
+func yamlHasKey(data []byte, key string) bool {
+	var node yaml.Node
+	if err := yaml.Unmarshal(data, &node); err != nil {
+		return false
+	}
+	if node.Kind == yaml.DocumentNode {
+		if len(node.Content) == 0 {
+			return false
+		}
+		node = *node.Content[0]
+	}
+	if node.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return true
+		}
+	}
+	return false
+}
+
 func mergeLimits(a, b decl.Limits) decl.Limits {
 	return decl.Limits{
 		Agent: decl.AgentLimit{MaxDepth: tighter(a.Agent.MaxDepth, b.Agent.MaxDepth)},
@@ -310,8 +482,85 @@ func (c *Config) validate() error {
 	if err := c.validateKB(); err != nil {
 		return err
 	}
+	if err := c.validateMCP(); err != nil {
+		return err
+	}
 	c.noticeCompactionWindows(ids)
 	return c.validateDepth(ids)
+}
+
+// validateMCP checks the agents' mcps: lists.
+//
+// ★ A name that does not exist is a load-time error: a typo would
+//
+//	silently narrow the agent to no server at all, and a tool that is
+//	missing because of a typo looks exactly like a tool that is missing
+//	because the server is down.
+func (c *Config) validateMCP() error {
+	known := make([]string, 0, len(c.MCPs))
+	for name := range c.MCPs {
+		known = append(known, name)
+	}
+	sort.Strings(known)
+
+	for _, id := range c.AgentNames() {
+		a := c.Agents[id]
+		if a == nil || a.MCPServers == nil {
+			continue
+		}
+		for _, name := range *a.MCPServers {
+			if _, ok := c.MCPs[name]; ok {
+				continue
+			}
+			return fmt.Errorf("agent %s lists the MCP server %q, which is not declared under %s/ (declared: %s)",
+				id, name, DirMCP, strings.Join(known, ", "))
+		}
+	}
+	return nil
+}
+
+// MCPServersInUse returns the servers some agent lists.
+//
+// ★ The list is the **union**: the snapshot's tool set is shared by every
+//
+//	agent, so the manager starts the servers some agent lists. A server
+//	no agent lists is never started, and a server only a sub-agent lists
+//	is started — that sub-agent may be the one running.
+func (c *Config) MCPServersInUse() []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(c.MCPs))
+	for _, id := range c.AgentNames() {
+		a := c.Agents[id]
+		if a == nil {
+			continue
+		}
+		for _, name := range c.mcpServersOf(a.MCPServers) {
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// mcpServersOf resolves one agent's list.
+//
+// ★ An absent list means every configured server and an empty list means
+//
+//	none — the pointer tells the two apart.
+func (c *Config) mcpServersOf(list *[]string) []string {
+	if list == nil {
+		out := make([]string, 0, len(c.MCPs))
+		for name := range c.MCPs {
+			out = append(out, name)
+		}
+		sort.Strings(out)
+		return out
+	}
+	return *list
 }
 
 // noticeCompactionWindows reports the agents whose automatic compaction

@@ -299,6 +299,9 @@ func TestNothingIsWrittenWhenEverythingIsAlreadyThere(t *testing.T) {
 	e.write("policy/permissions.yaml", userPolicyYAML)
 	e.write("policy/limits.yaml", "agent:\n  max_depth: 0\n")
 	e.write("server/config.yaml", "listen_addr: \":8080\"\n")
+	// ★ The MCP example is written as a .disabled file: it is a shape to
+	//   copy, not a server to start.
+	e.write("mcps/example.yaml.disabled", "# example\n")
 
 	p := e.plan(Options{})
 	if len(p.Files) != 0 {

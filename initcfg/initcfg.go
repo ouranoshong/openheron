@@ -179,6 +179,19 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 		}
 	}
 
+	// ── mcps ────────────────────────────────────────────────────────────
+	//
+	// ★ The example is written as `example.yaml.disabled`, not as a live
+	//   file: a file under mcps/ **defines** a server, so a live example
+	//   would make every agent that does not narrow its list try to start
+	//   a server that is not installed. Renaming it is the act of
+	//   defining that server.
+	content, err := renderTemplate("mcps/example.yaml.disabled", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	p.add("mcps/example.yaml.disabled", content)
+
 	// ── server ──────────────────────────────────────────────────────────
 	//
 	// ★ server/ is not hot-reloaded and the config editor may not write it,
@@ -213,9 +226,13 @@ func (p *Plan) Apply(svc *spec.Service) error {
 	//   directly. The direct write happens **after** the merge of everything
 	//   else has been checked, so a rejected configuration leaves nothing
 	//   behind.
+	//
+	// ★ The MCP example is direct for the same kind of reason: its name
+	//   says it is not a configuration yet, and the editor only accepts
+	//   <server>.yaml under mcps/.
 	var editable, direct []spec.File
 	for _, f := range p.Files {
-		if path.Dir(f.Rel) == spec.DirServer {
+		if isDirectWrite(f) {
 			direct = append(direct, f)
 			continue
 		}
@@ -233,6 +250,21 @@ func (p *Plan) Apply(svc *spec.Service) error {
 		}
 	}
 	return nil
+}
+
+// isDirectWrite reports whether a file bypasses the configuration editor.
+//
+// ★ Two kinds of file do: the ones under server/, which is not
+//
+//	hot-reloaded, and the MCP example, whose name says it is not a
+//	configuration yet — the editor only accepts <server>.yaml under
+//	mcps/.
+func isDirectWrite(f spec.File) bool {
+	if path.Dir(f.Rel) == spec.DirServer {
+		return true
+	}
+	return path.Dir(f.Rel) == spec.DirMCP &&
+		!strings.HasSuffix(path.Base(f.Rel), ".yaml")
 }
 
 func (p *Plan) add(rel string, content []byte) {

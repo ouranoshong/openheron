@@ -214,7 +214,7 @@ func TestUnknownToolScopeIsRegisteredAfterTheFilter(t *testing.T) {
 	snap := mustSnapshot(t, b)
 	policy, table, maxDepth := snap.agentSpec.policy, snap.tableFor(snap.agentSpec.defaultAgent), snap.agentSpec.maxDepth
 	check(t, "root", toolChain(newBoundary(policy, table), maxDepth))
-	check(t, "sub-agent", subHandlers(NewPolicy(nil, nil), decl.SubAgentSpec{ID: "x"}, 1))
+	check(t, "sub-agent", subHandlers(NewPolicy(nil, nil), decl.SubAgentSpec{ID: "x"}, 1, nil))
 }
 
 func TestUnknownToolsReplyIsSafeWithoutToolNames(t *testing.T) {

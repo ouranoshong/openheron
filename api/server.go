@@ -58,6 +58,11 @@ type Server struct {
 	// compaction. Optional: without it the endpoint reports that no
 	// compactor is wired.
 	compactorFn CompactorSource
+	// mcpFn reports the MCP servers of one agent. Optional for the same
+	// reason as the tools source, but with a sharper edge: the view asks
+	// the manager to start the servers it reports, so recomputing it here
+	// would be the very duplication this injection exists to prevent.
+	mcpFn MCPSource
 	// startTimeoutFn reads server.start_timeout. A function for the same
 	// reason as cfgFn: the value is configuration, not a constant.
 	startTimeoutFn func() time.Duration

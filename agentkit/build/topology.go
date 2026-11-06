@@ -61,10 +61,19 @@ func (g *depthGuard) BeforeAgent(ctx context.Context, runCtx *adk.ChatModelAgent
 	return next, runCtx, nil
 }
 
-func specTable(policy Policy, agentSpec decl.SubAgentSpec) *Table {
-	return newTable(agentSpec.ID, policy.Deny, agentSpec.DisabledTools)
+// specTable builds the tool table of one agent.
+//
+// ★ The agent's own mcps: list narrows the servers here, in the same
+//
+//	table that disabled_tools uses: the tool set is one set for the whole
+//	snapshot, and the model never sees a tool the table removes.
+func specTable(policy Policy, agentSpec decl.SubAgentSpec, servers []string) *Table {
+	t := newTable(agentSpec.ID, policy.Deny, agentSpec.DisabledTools)
+	t.denyMCPNamespaces(agentSpec.MCPServers, servers)
+	return t
 }
 
-func subHandlers(policy Policy, agentSpec decl.SubAgentSpec, maxDepth int) []adk.TypedChatModelAgentMiddleware[*schema.Message] {
-	return toolChain(newBoundary(policy, specTable(policy, agentSpec)), maxDepth)
+func subHandlers(policy Policy, agentSpec decl.SubAgentSpec, maxDepth int,
+	servers []string) []adk.TypedChatModelAgentMiddleware[*schema.Message] {
+	return toolChain(newBoundary(policy, specTable(policy, agentSpec, servers)), maxDepth)
 }

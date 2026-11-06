@@ -98,7 +98,7 @@ func TestEffectiveToolsMatchesTheAssembledTable(t *testing.T) {
 	agentSpec := decl.SubAgentSpec{ID: "worker", DisabledTools: []string{"write_file", "mystery"}}
 	b := introspectBuilder(t, p, []string{"execute"}, []decl.SubAgentSpec{agentSpec})
 
-	assembled := specTable(p, agentSpec)
+	assembled := specTable(p, agentSpec, nil)
 	reported := verdicts(t, b.EffectiveTools("worker"))
 
 	universe := append(append([]string{}, p.Ask...), p.Deny...)

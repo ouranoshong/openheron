@@ -43,7 +43,8 @@ func (c *Config) agentSpecOf(id string) (decl.SubAgentSpec, error) {
 		MaxIter:       a.MaxIterations,
 		ModelRef:      a.ModelRef,
 		DisabledTools: append([]string(nil), a.DisabledTools...),
-		Skills:        cloneSkills(a.Skills),
+		Skills:        cloneList(a.Skills),
+		MCPServers:    cloneList(a.MCPServers),
 		Reasoning:     a.Reasoning,
 		Temperature:   a.Temperature,
 		MaxTokens:     a.MaxTokens,
@@ -52,15 +53,15 @@ func (c *Config) agentSpecOf(id string) (decl.SubAgentSpec, error) {
 	}, nil
 }
 
-// cloneSkills copies the allow-list so that the spec nobody else holds cannot
+// cloneList copies an allow-list so that the spec nobody else holds cannot
 // be changed through the agent it was built from.
 //
-// ★ The pointer is copied as a pointer on purpose: nil (the key is absent) and
+// ★ The pointer is copied as a pointer on purpose: nil (the key is absent)
 //
-//	an empty list (the key is there, the list is empty) mean different
+//	and an empty list (the key is there, the list is empty) mean different
 //	things, and a copy that lost that distinction would silently widen the
-//	scope back to "every skill".
-func cloneSkills(s *[]string) *[]string {
+//	scope back to "every skill" or "every server".
+func cloneList(s *[]string) *[]string {
 	if s == nil {
 		return nil
 	}
@@ -91,6 +92,8 @@ func (c *Config) specsBelow(id string, depth, maxDepth int) ([]decl.SubAgentSpec
 			MaxIter:       sa.MaxIterations,
 			ModelRef:      sa.ModelRef,
 			DisabledTools: append([]string(nil), sa.DisabledTools...),
+			Skills:        cloneList(sa.Skills),
+			MCPServers:    cloneList(sa.MCPServers),
 			Reasoning:     sa.Reasoning,
 			Temperature:   sa.Temperature,
 			MaxTokens:     sa.MaxTokens,

@@ -127,7 +127,7 @@ func TestSubAgentsAreBuilt(t *testing.T) {
 
 func TestSubAgentsCarryTheirOwnApprovalMiddleware(t *testing.T) {
 	policy := NewPolicy([]string{"write_file"}, nil)
-	handlers := subHandlers(policy, subSpec("writer"), 1)
+	handlers := subHandlers(policy, subSpec("writer"), 1, nil)
 
 	if !chainGatesWriteFile(t, handlers) {
 		t.Fatal("★ the sub-agent middleware chain has no gate - it could write files without approval")
@@ -136,7 +136,7 @@ func TestSubAgentsCarryTheirOwnApprovalMiddleware(t *testing.T) {
 
 func TestSubHandlersApplyItsOwnDeny(t *testing.T) {
 	policy := NewPolicy([]string{"write_file"}, []string{"execute"})
-	handlers := subHandlers(policy, decl.SubAgentSpec{ID: "w", DisabledTools: []string{"write_file"}}, 1)
+	handlers := subHandlers(policy, decl.SubAgentSpec{ID: "w", DisabledTools: []string{"write_file"}}, 1, nil)
 
 	fw := findFilter(t, handlers)
 	if fw == nil {

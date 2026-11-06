@@ -9,11 +9,13 @@ require (
 	github.com/cloudwego/eino v0.9.22
 	github.com/cloudwego/eino-ext/components/tool/duckduckgo/v2 v2.0.0-20261019121619-eee37f63ff95
 	github.com/cloudwego/eino-ext/components/tool/httprequest v0.0.0-20261019121619-eee37f63ff95
+	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.9
 	github.com/cloudwego/eino-ext/components/tool/wikipedia v0.0.0-20261019121619-eee37f63ff95
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.17
 	github.com/cloudwego/hertz v0.10.6
 	github.com/google/uuid v1.6.0
 	github.com/hertz-contrib/sse v0.1.0
+	github.com/mark3labs/mcp-go v0.43.0
 	github.com/meguminnnnnnnnn/go-openai v0.1.6
 	github.com/tidwall/sjson v1.2.5
 	golang.org/x/sys v0.49.0
@@ -36,6 +38,7 @@ require (
 	github.com/evanphx/json-patch v0.5.2 // indirect
 	github.com/fsnotify/fsnotify v1.5.4 // indirect
 	github.com/goph/emperror v0.17.2 // indirect
+	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
@@ -46,12 +49,14 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/slongfield/pyfmt v0.0.0-20220222012616-ea85ff4c361f // indirect
+	github.com/spf13/cast v1.7.1 // indirect
 	github.com/tidwall/gjson v1.14.4 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/yargevad/filepathx v1.0.0 // indirect
+	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/arch v0.11.0 // indirect
 	golang.org/x/exp v0.0.0-20230713183714-613f0c0eb8a1 // indirect
 	golang.org/x/net v0.39.0 // indirect

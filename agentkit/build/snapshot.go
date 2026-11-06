@@ -86,7 +86,7 @@ func newSnapshot(gen uint64, cfg *spec.Config, projectRoot, dataDir string,
 		models = defaultModelFactory
 	}
 	if tools == nil {
-		tools = defaultToolRegistry()
+		tools = defaultToolRegistry(nil)
 	}
 	tables := tablesOf(sp)
 	return &snapshot{

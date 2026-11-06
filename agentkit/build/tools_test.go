@@ -170,12 +170,12 @@ func TestRegistryToolObeysDisabledTools(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root := specTable(NewPolicy(nil, nil), decl.SubAgentSpec{ID: "main"})
+	root := specTable(NewPolicy(nil, nil), decl.SubAgentSpec{ID: "main"}, nil)
 	if kept, _ := root.Filter(tools); len(kept) != 1 {
 		t.Fatalf("the root must see the tool, kept %v", namesOf(kept))
 	}
 	sub := specTable(NewPolicy(nil, nil),
-		decl.SubAgentSpec{ID: "worker", DisabledTools: []string{"new_tool"}})
+		decl.SubAgentSpec{ID: "worker", DisabledTools: []string{"new_tool"}}, nil)
 	if kept, removed := sub.Filter(tools); len(kept) != 0 || removed[LayerDisable] != 1 {
 		t.Fatalf("the sub-agent must not see it: kept %v removed %v", namesOf(kept), removed)
 	}
@@ -192,7 +192,7 @@ func TestRegistryToolObeysPolicyTiers(t *testing.T) {
 	if got := p.TierOf("new_tool"); got != TierAllow {
 		t.Fatalf("tier = %q, want allow", got)
 	}
-	deny := specTable(NewPolicy(nil, []string{"new_tool"}), decl.SubAgentSpec{ID: "main"})
+	deny := specTable(NewPolicy(nil, []string{"new_tool"}), decl.SubAgentSpec{ID: "main"}, nil)
 	if kept, removed := deny.Filter(tools); len(kept) != 0 || removed[LayerDeny] != 1 {
 		t.Fatalf("deny must remove it at the filter stage: kept %v removed %v", namesOf(kept), removed)
 	}

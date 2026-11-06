@@ -13,6 +13,9 @@ type agentSpec struct {
 	defaultAgent string
 	policy       Policy
 	maxDepth     int
+	// mcpServers are the configured servers, sorted. The agent's own
+	// mcps: list is read against them.
+	mcpServers []string
 }
 
 func specOf(cfg *spec.Config, projectRoot string) (agentSpec, error) {
@@ -40,11 +43,14 @@ func specOf(cfg *spec.Config, projectRoot string) (agentSpec, error) {
 		defaultAgent: defaultAgent,
 		policy:       policyOf(cfg),
 		maxDepth:     cfg.MaxDepth(),
+		mcpServers:   mcpServersOfConfig(cfg),
 	}, nil
 }
 
 func policyOf(cfg *spec.Config) Policy {
-	return NewPolicy(cfg.Policy.Ask, cfg.Policy.Deny)
+	p := NewPolicy(cfg.Policy.Ask, cfg.Policy.Deny)
+	p.mcpAllow = mcpAllowedNames(cfg.MCPs)
+	return p
 }
 
 func (s *agentSpec) agentSpec(id string) (decl.SubAgentSpec, bool) {
@@ -95,7 +101,7 @@ func (s *snapshot) tableFor(agentID string) *Table {
 func tablesOf(sp agentSpec) map[string]*Table {
 	out := make(map[string]*Table, len(sp.agents))
 	for id, as := range sp.agents {
-		out[id] = specTable(sp.policy, as)
+		out[id] = specTable(sp.policy, as, sp.mcpServers)
 	}
 	return out
 }

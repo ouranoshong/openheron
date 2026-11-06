@@ -60,6 +60,7 @@ func (s *Server) registerV2Routes() {
 	h.GET("/v2/skills", s.v2Skills)
 	h.GET("/v2/agents", s.v2Agents)
 	h.GET("/v2/agents/:agentId", s.v2AgentDetail)
+	h.GET("/v2/mcps", s.v2MCPServers)
 	h.GET("/v2/config", s.v2Config)
 	h.GET("/v2/health", s.v2Health)
 	h.GET("/v2/runtime", s.v2Runtime)

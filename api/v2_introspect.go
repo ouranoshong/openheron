@@ -362,6 +362,9 @@ type configView struct {
 	Providers    []providerView `json:"providers"`
 	Skills       []SkillView    `json:"skills"`
 	Server       serverView     `json:"server"`
+	// MCPServers are the configured MCP servers: the configuration says
+	// what exists, and the panel says what is up.
+	MCPServers []mcpServerBrief `json:"mcpServers"`
 }
 
 func (s *Server) v2Config(_ context.Context, c *app.RequestContext) {
@@ -380,8 +383,9 @@ func (s *Server) v2Config(_ context.Context, c *app.RequestContext) {
 			Deny:        nonNil(cfg.Policy.Deny),
 			DefaultTier: string(decl.TierAllow),
 		},
-		Tools:  s.toolTiers(),
-		Agents: s.agentViews(cfg, false),
+		Tools:      s.toolTiers(),
+		Agents:     s.agentViews(cfg, false),
+		MCPServers: configuredMCP(cfg),
 		Server: serverView{
 			StartTimeout:  cfg.Server.StartTimeout.Duration().String(),
 			MaxRetries:    cfg.MaxRetries(),

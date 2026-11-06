@@ -19,7 +19,7 @@ func TestRootAndSubAgentShareTheSameToolChain(t *testing.T) {
 	policy, table, maxDepth := snap.agentSpec.policy, snap.tableFor(snap.agentSpec.defaultAgent), snap.agentSpec.maxDepth
 
 	root := toolChain(newBoundary(policy, table), maxDepth)
-	sub := subHandlers(policy, decl.SubAgentSpec{ID: "x"}, maxDepth)
+	sub := subHandlers(policy, decl.SubAgentSpec{ID: "x"}, maxDepth, nil)
 
 	if len(root) != len(sub) {
 		t.Fatalf("root chain has %d middlewares, sub-agent has %d — "+

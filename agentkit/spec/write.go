@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"github.com/ouranoshong/openheron/persist"
 )
 
@@ -103,6 +104,16 @@ func validateFileName(cat Category, rel string) error {
 				"tools/ only accepts http.yaml, web_search.yaml, wikipedia.yaml and kb.yaml; "+
 					"other files here are rejected at load time")
 		}
+	case DirMCP:
+		// ★ The file's name is the server's name, and it is the namespace
+		//   segment of that server's tools: a name that does not match the
+		//   pattern could not be read back.
+		name := strings.TrimSuffix(base, ".yaml")
+		if name == base || !decl.ValidMCPServerName(name) {
+			return writeErrf(ErrPathInvalid, rel,
+				"mcps/ accepts <server>.yaml, and the server name must match %s", decl.MCPServerNamePattern)
+		}
+		return nil
 	}
 	return nil
 }
@@ -175,6 +186,34 @@ func Template(catDir string, modelRefs []string) string {
 			"#   the file's presence IS the switch — turning a tool off = deleting that file.\n" +
 			"#\n" +
 			"# ★ tools/ is hot-reloaded: the change takes effect on the next turn, no process restart.\n"
+	case DirMCP:
+		// ★ The scaffold is nearly valid and says what is missing: a file
+		//   under mcps/ **defines** a server, so a half-written one would
+		//   make every agent that does not narrow its list try to start a
+		//   server that is not there. The save names the missing field.
+		return "# mcps/ one file = one MCP server. The file's name is the server's name.\n" +
+			"#\n" +
+			"# ★ transport: stdio (a child process) or http (streamable HTTP). There is\n" +
+			"#   no SSE transport, and an unknown transport is a load-time error.\n" +
+			"transport: stdio\n" +
+			"# ★ command is required for a stdio server, and it is resolved in the\n" +
+			"#   sandbox's PATH — never against the project root.\n" +
+			"command: \"\"\n" +
+			"args: []\n" +
+			"# ★ env is stdio only: the child's environment is this process's\n" +
+			"#   environment with these variables layered on top. An http server may\n" +
+			"#   not declare it at all.\n" +
+			"env: {}\n" +
+			"# ★ timeout bounds connect + initialize + list tools; call_timeout bounds\n" +
+			"#   one tool call.\n" +
+			"timeout: 30s\n" +
+			"call_timeout: 60s\n" +
+			"# ★ The tools to offer, by the server's own names. Absent or empty means all\n" +
+			"#   of them, and the list never adds a tool the server does not have.\n" +
+			"tools: []\n" +
+			"# ★ The default is ask, so the list names the exceptions: these tools run\n" +
+			"#   without a nod, and everything else this server offers asks.\n" +
+			"allows: []\n"
 	default:
 		return ""
 	}

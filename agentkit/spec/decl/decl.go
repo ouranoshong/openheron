@@ -2,6 +2,7 @@ package decl
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -103,6 +104,14 @@ type Agent struct {
 	//   user sees in the directory tree; the frontmatter name is the identity
 	//   the model sees in the tool.
 	Skills *[]string `yaml:"skills"`
+
+	// MCPServers is the allow-list of MCP servers this agent may use.
+	//
+	// ★ A nil list — the key is absent — means every configured server,
+	//   and an empty list means none. The pointer tells the two apart, the
+	//   same way it does for Skills: the common case is **one** place, and
+	//   writing the server file is enough.
+	MCPServers *[]string `yaml:"mcps"`
 
 	Temperature *float32 `yaml:"temperature"`
 	MaxTokens   *int     `yaml:"max_tokens"`
@@ -315,6 +324,183 @@ type AgentCfg struct {
 	MaxDepth int `yaml:"max_depth"`
 }
 
+// ── mcps/<server>.yaml ──────────────────────────────────────────────────
+
+// MCPToolPrefix is the namespace every MCP tool is exposed under.
+//
+// ★ The prefix is what makes a namespace usable: a rule that says
+//
+//	"mcp__github__*" reaches exactly the tools of one server, because the
+//	boundary between the server and the tool is unambiguous — a server name
+//	may not contain a run of underscores.
+const MCPToolPrefix = "mcp__"
+
+// MCPSeparator is what stands between the server and the tool in an
+// exposed name.
+//
+// ★ It is two underscores and not one, because a server name may not
+//
+//	contain a run of underscores: the boundary has to be unambiguous, or
+//	"mcp__a__b__x" could not be read back.
+const MCPSeparator = "__"
+
+// MCPServerNamePattern is the shape a server name may take.
+//
+// ★ A server name may not contain a run of underscores: otherwise
+//
+//	"mcp__a__b__x" cannot be read back — is that server "a" with the tool
+//	"b__x", or server "a__b" with the tool "x"?
+const MCPServerNamePattern = `^[a-z0-9]+(_[a-z0-9]+)*$`
+
+var mcpServerNameRE = regexp.MustCompile(MCPServerNamePattern)
+
+// ValidMCPServerName reports whether a server name may be used.
+func ValidMCPServerName(name string) bool {
+	return mcpServerNameRE.MatchString(name)
+}
+
+// ParseToolNamePattern reads one entry of an agent's disabled_tools.
+//
+// ★ Only a **trailing** "*" is a pattern, and a lone "*" is not one at
+//
+//	all: "mcp*foo" reads like a wildcard and is not one, and a rule whose
+//	reach differs from what it reads as is a silent mismatch. The loader
+//	refuses both; the builder only ever sees the shapes that are left.
+func ParseToolNamePattern(entry string) (prefix string, isPattern bool, err error) {
+	if !strings.Contains(entry, "*") {
+		return entry, false, nil
+	}
+	if entry == "*" {
+		return "", false, fmt.Errorf(
+			"\"*\" is a wildcard, not a prefix pattern; write the tools out, " +
+				"or use a server prefix such as \"mcp__github__*\"")
+	}
+	if !strings.HasSuffix(entry, "*") {
+		return "", false, fmt.Errorf(
+			"\"%s\" may only use a trailing \"*\"; \"mcp*foo\" reads like a wildcard but is not one",
+			entry)
+	}
+	if strings.Count(entry, "*") > 1 {
+		return "", false, fmt.Errorf(
+			"\"%s\" holds more than one \"*\"; only a trailing \"*\" is a pattern", entry)
+	}
+	return strings.TrimSuffix(entry, "*"), true, nil
+}
+
+// The two transports an MCP server may speak.
+//
+// ★ "http" is streamable HTTP and only that: SSE is the older transport,
+//
+//	and a transport the configuration cannot ask for is a transport that
+//	would have to be maintained without ever being used.
+const (
+	MCPTransportStdio = "stdio"
+	MCPTransportHTTP  = "http"
+)
+
+// MCPMaxExposedNameLen is the longest name an MCP tool may be exposed under.
+//
+// ★ A longer name is skipped rather than truncated: truncating collides,
+//
+//	and the collision drops exactly the part that tells two tools apart.
+const MCPMaxExposedNameLen = 64
+
+// The default ceilings of an MCP server.
+const (
+	DefaultMCPTimeout     = 30 * time.Second
+	DefaultMCPCallTimeout = 60 * time.Second
+)
+
+// MCPDuration is a duration that degrades instead of failing the load.
+//
+// ★ A wrong timeout changes *how long we wait*, not *what happens* — it
+//
+//	must not keep a server from starting. The bad value is kept so the
+//	loader can name the file and the key: the package-level list every
+//	other lenient duration uses carries no source at all.
+type MCPDuration struct {
+	// Value is the resolved duration.
+	Value time.Duration
+	// Declared reports whether the key was present in the file at all.
+	Declared bool
+	// Bad reports that the written value could not be parsed.
+	Bad bool
+	// Raw is the value as written.
+	Raw string
+}
+
+func (d *MCPDuration) UnmarshalYAML(n *yamlNode) error {
+	d.Declared = true
+	d.Raw = n.Value
+	var s string
+	if err := n.Decode(&s); err != nil {
+		d.Bad = true
+		return nil
+	}
+	v, err := time.ParseDuration(strings.TrimSpace(s))
+	if err != nil || v < 0 {
+		d.Bad = true
+		return nil
+	}
+	d.Value = v
+	return nil
+}
+
+// MCPServerCfg is one server's declaration.
+//
+// ★ The file is the server: the file's name is the server's name, and
+//
+//	removing the file removes the definition. There is no "enabled" key.
+type MCPServerCfg struct {
+	// Name is the server's name — the file name without the extension.
+	Name string `yaml:"-"`
+
+	// Transport is "stdio" or "http". An unknown value is a load-time
+	// error: a typo must not run a different server.
+	Transport string `yaml:"transport"`
+
+	// Command is the executable to run. Stdio only, and required.
+	Command string `yaml:"command"`
+
+	// Args are the command's arguments. Stdio only.
+	Args []string `yaml:"args"`
+
+	// Env is the child's environment, layered over the inherited one.
+	//
+	// ★ It is stdio's business: an http server has no child process, so
+	//   this process's environment is not its environment — declaring it
+	//   there is a load-time error rather than a key that does nothing.
+	Env map[string]string `yaml:"env"`
+
+	// URL is the server's address. Http only, and required.
+	URL string `yaml:"url"`
+
+	// Headers are sent on every request. Http only.
+	Headers map[string]string `yaml:"headers"`
+
+	// Timeout is the ceiling for connect, initialize and list tools.
+	Timeout MCPDuration `yaml:"timeout"`
+
+	// CallTimeout is the ceiling for one tool call.
+	CallTimeout MCPDuration `yaml:"call_timeout"`
+
+	// Tools filters the server's own tools to the ones worth offering.
+	//
+	// ★ It is a filter, not a switch: an absent or empty list means all of
+	//   them, and the list never adds a tool the server does not have.
+	Tools []string `yaml:"tools"`
+
+	// Allows names the server's own tools that run without a nod.
+	//
+	// ★ Everything else this server offers asks — including the tools it
+	//   has not offered yet. The names are the server's own, not the
+	//   exposed ones: a file speaks its own vocabulary.
+	Allows []string `yaml:"allows"`
+}
+
+// MCPFiles is the mcps/ partition: one entry per server, keyed by its name.
+type MCPFiles map[string]*MCPServerCfg
+
 type Watch struct {
 	Enabled  *bool           `yaml:"enabled"`
 	Debounce LenientDuration `yaml:"debounce"`
@@ -433,7 +619,14 @@ type SubAgentSpec struct {
 	DisabledTools []string
 	// Skills is the agent's skill allow-list. A nil list means every skill in
 	// the skills directory; an empty list means none.
-	Skills      *[]string
+	Skills *[]string
+	// MCPServers is the agent's MCP server allow-list. A nil list means every
+	// configured server; an empty list means none.
+	//
+	// ★ A sub-agent carries a list of its own, next to its DisabledTools
+	//   and its Skills: the list is read from the agent that is running,
+	//   not from the root's.
+	MCPServers  *[]string
 	Reasoning   string
 	Temperature *float32
 	MaxTokens   *int

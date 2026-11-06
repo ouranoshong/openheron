@@ -51,7 +51,7 @@ func TestServerDirIsNotHot(t *testing.T) {
 			t.Fatal("a change under server/ needs a restart and must not take part in hot reload")
 		}
 	}
-	want := []string{DirAgent, DirLLM, DirPolicy, DirTools}
+	want := []string{DirAgent, DirLLM, DirMCP, DirPolicy, DirTools}
 	if len(HotDirs) != len(want) {
 		t.Fatalf("hot dirs = %v, want exactly %v", HotDirs, want)
 	}
