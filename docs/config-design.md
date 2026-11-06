@@ -55,7 +55,7 @@
 | 14 | Sub-agent spec | lives in `decl.SubAgentSpec`, the assembly layer uses it directly | `agentkit/build → agentkit/spec` is an allowed one-way dependency anyway; a second copy would "compile fine and be one value short at runtime" (`agentkit/spec/decl/decl.go:412-430`, `agentkit/spec/subagent.go:18-28`, `agentkit/build/spec.go:22`) |
 | 15 | MCP tool naming | every name exposed to the model is namespaced `mcp__<server>__<tool>` | **proposal — not implemented** (see §6.7). MCP tool names are **decided by the remote server**: they collide with reserved tool names (`ls` / `execute`) and often carry dots (`github.create_issue`) — the latter does not pass the provider's function-name character set. The namespace turns "a collision" into "impossible". The only trace in the tree is the placeholder comment at `agentkit/build/tools.go:35` |
 | 16 | Policy matching | exact name **+** a trailing `*` for prefix matching | **proposal — not implemented** (see §6.3). The MCP tool set is only known at runtime, so naming each one is impossible; a single `mcp__github__*` would tier a whole server. Today the tables match **exactly** (`agentkit/build/policy.go:39-47`, `agentkit/build/policy.go:94-105`) |
-| 17 | Where a tier is written | **with the tool**: the `ask` tier lives in the tool's own file (`tools/*.yaml`, `mcps/*.yaml`); `policy/permissions.yaml` keeps the global `deny` | ★ a tier is a statement about **one tool**, so it belongs in that tool's file — and there it uses **the same vocabulary** (`http.yaml` says `post`, so it can say `ask: [post]`; the central file had to name the internal `request_post`). A `deny` is a different kind of statement — the boundary itself — and it must be expressible for the tools that have no file of their own |
+| 17 | Where a tier is written | **with the tool**: the `ask` tier lives in the tool's own file (`tools/*.yaml`, `mcps/*.yaml`); `policy/permissions.yaml` keeps the global `deny` | **proposal — not implemented** (see §6.3, §6.6). ★ a tier is a statement about **one tool**, so it belongs in that tool's file — and there it uses **the same vocabulary** (`http.yaml` says `post`, so it can say `ask: [post]`; the central file had to name the internal `request_post`). A `deny` is a different kind of statement — the boundary itself — and it must be expressible for the tools that have no file of their own |
 
 ### "One entity, one file" rather than a single-file partition table
 
@@ -997,22 +997,69 @@ about twenty lines (`agentkit/spec/expand.go:48-65`).
 
 ### 6.3 `policy/permissions.yaml`
 
-The outer boundary. ★ **The file holds `deny:` and nothing else** — the `ask` tiers moved
-into the tool's own file, next to the tool they are about (§6.6, §6.7):
+The approval tiers. The whole file is two lists, and the code's own default is:
 
 ```yaml
 # The factory default (spec.defaultPolicy)
+ask:   [write_file, edit_file, execute, kb_index]
 deny:  []
 ```
 
-★ **Why `ask` moved and `deny` stayed.** A tier is a statement about **one tool**: "this
-one asks first". That statement belongs in the tool's own file — and putting it there
+`defaultPolicy` is `agentkit/spec/defaults.go:9-14`, and the shipped template writes the same
+list out (`initcfg/templates/policy/permissions.yaml`) — the file is visible and editable rather
+than implied.
+
+★ openheron asks for **four** tools by default, not three: `write_file`, `edit_file`, `execute`
+— and **`kb_index`**, because indexing the knowledge base writes to the index on disk. As far as
+the policy is concerned it is an ordinary tool, so it goes into the list like the others.
+
+| Field | What the loader does with it | Why |
+|---|---|---|
+| `deny` | unioned with what is already there | it is the security boundary |
+| `ask` | **replaced wholesale** | it is a preference, not a security boundary |
+
+The two rules live in the loader (`agentkit/spec/load.go:196-197`); `decl.Policy` itself is only
+two string slices (`agentkit/spec/decl/decl.go:210-213`). ★ With a single `policy/` directory
+there is only one `permissions.yaml`, so the union is a no-op today — but it is the rule the
+loader implements, and the union is what a second layer would have to live with.
+
+★ The matching order is `deny → ask → **the allow fallback**`. **Only `ask` / `deny` stop
+anything** ✅ — a tool that is not named goes straight through ✅ (nudging for "read a file" or
+"list a directory" every single time makes the agent unusable ✅).
+
+★ **There is no `allow` column** ✅ — a tool that is not named is already allowed, so a column
+that says "direct" would only suggest the opposite ("not in `allow` means not allowed") ✅ —
+and the fact is the opposite ✅ ✅.
+
+The gate is `agentkit/build/gate.go:65-83`: `allow` returns the endpoint untouched, `deny`
+replaces it with an error, `ask` interrupts the turn for a human. The tiers (`allow` / `ask` /
+`deny`) and the two-layer tool table are described in `docs/architecture.md` §3.4; the full
+upstream design is in `agent-design.md` (upstream) §5.
+
+#### ★ The tier moves to the tool (★ proposal 2026-11-06, **not implemented**)
+
+★ Everything in this subsection is a **proposal**. Today the file above holds both lists, and
+the loader reads them exactly as §11.6 records it. The proposal moves the `ask` tier into
+each tool's own file (§6.6, §6.7) and leaves this file with `deny:` only:
+
+```yaml
+# The proposed file (today it also carries `ask:`)
+deny:  []
+```
+
+★ **Why `ask` would move and `deny` would stay.** A tier is a statement about **one tool**:
+"this one asks first". That statement belongs in the tool's own file — and putting it there
 also puts it in **the same vocabulary**: `http.yaml` says `post`, so `http.yaml` can say
 `ask: [post]`, where the central file had to name the internal tool name `request_post`
 (§6.6). A `deny` is a different kind of statement: "this must never run, anywhere". It is
 not about a tool's configuration, it is about the boundary itself — and it has to be
 expressible for the tools that have **no** file of their own (the framework's `task` /
 `write_todos` / `skill`).
+
+★ **It is also the only place that says "never".** A tool that a file offers can still be
+denied here, and no file's whitelist can offer it back. The two levels do not duplicate
+each other: the file says **what this file offers**, the global file says **what never
+runs**.
 
 ★ **`ask:` in this file is a load-time error**, with a message that names the new home.
 A key that is silently ignored is the "configured but not in effect" case §4.3 is about.
@@ -1029,22 +1076,9 @@ reads. The `ask` half of the assembled policy is **not** filled by the loader:
 provider knows its file's vocabulary and the exposed names behind it, and `agentkit/spec`
 may not import `kb` (the iron rule) nor eino (where the filesystem tool names live).
 
-★ The matching order is `deny → ask → **the allow fallback**`. **Only `ask` / `deny` stop
-anything** ✅ — a tool that is not named goes straight through ✅ (nudging for "read a file"
-or "list a directory" every single time makes the agent unusable ✅).
-
-★ **There is no `allow` column** ✅ — a tool that is not named is already allowed, so a column
-that says "direct" would only suggest the opposite ("not in `allow` means not allowed") ✅ —
-and the fact is the opposite ✅ ✅.
-
-The gate is `agentkit/build/gate.go:65-83`: `allow` returns the endpoint untouched, `deny`
-replaces it with an error, `ask` interrupts the turn for a human. The tiers (`allow` / `ask` /
-`deny`) and the two-layer tool table are described in `docs/architecture.md` §3.4; the full
-upstream design is in `agent-design.md` (upstream) §5.
-
 #### ★ Prefix matching (★ decided 2026-11-06, **not implemented**)
 
-`ask` / `deny` / each agent's `disabled_tools` would accept, in addition to an **exact tool
+`deny` / each agent's `disabled_tools` would accept, in addition to an **exact tool
 name**, a **prefix pattern with a trailing `*`**:
 
 | Entry | Matches |
@@ -1302,7 +1336,7 @@ wholesale), now they are unrelated.
 did not move**: it lives in the runtime data (`state/kb/<index>/`,
 `agentkit/build/kb.go:42`), and it lives and dies with the corpus.
 
-#### ★ The names each file speaks — and the names the model sees
+#### ★ The names each file speaks — and the names the model sees (★ proposal 2026-11-06, **not implemented**)
 
 A file declares its tiers in **its own vocabulary**, and the provider maps that to the
 name the model sees. The two are not the same, and that is the point:
@@ -1322,32 +1356,35 @@ column while the tool's own file spoke the second, so `http.yaml` said `post` an
 mismatch waiting to happen, and a mistyped name is invisible until the tool behaves
 differently than the file says.
 
-⇒ **A file's `tier:` / `ask:` / `deny:` are written in the second column.** The provider
+⇒ **A file's `tools:` / `tier:` / `ask:` are written in the second column.** The provider
 translates; nothing else has to know the exposed name.
 
 (The exposed names are `agentkit/spec/decl/decl.go:279-286`, `kb/tools.go:16-17` and eino's
 `adk/middlewares/filesystem/filesystem.go:38-46`.)
 
-#### ★ The tier keys every file carries
+#### ★ The keys every file carries (★ proposal 2026-11-06, **not implemented**)
 
-Every file in `tools/` and in `mcps/` carries the same three keys, and they mean the same
+Every file in `tools/` and in `mcps/` carries the same keys, and they mean the same
 thing everywhere:
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `tier` | `string` | `allow` | the tier for everything this file provides: `allow` \| `ask` \| `deny` |
-| `ask` | `[]string` | `[]` | the items — **in this file's vocabulary** — that ask first |
-| `deny` | `[]string` | `[]` | the items — in this file's vocabulary — that are **not exposed** |
+| `tools` | `[]string` | all of them | **the exposed set** — the names, in this file's own vocabulary, that this file offers. Absent = all of them |
+| `tier` | `string` | `allow` | the tier for the exposed ones: `allow` \| `ask` |
+| `ask` | `[]string` | `[]` | the exposed ones that ask first — **in this file's vocabulary** |
 
-★ **`deny` means "not exposed", not "exposed and broken".** The tool table filter drops
-the denied tools (`agentkit/build/policy.go:107`), so a denied tool is not in the model's
-tool list at all — the model does not know it exists. That is what `disabled_tools` does
-for one agent, which is why the global `deny` (§6.3) and a file's `deny` are the same kind
-of statement.
+★ **There is no `deny` in a file, and that is deliberate.** "Not exposed" is already
+expressed by the **whitelist**: a name that is not in it is not offered. Each file calls
+the whitelist what fits it — `methods:` for HTTP (`http.yaml`), `tools:` for the rest.
+⇒ **one mechanism per level, one vocabulary per level.**
 
-★ **The order inside a file**: `deny` beats `ask`, and both beat `tier`. So
-`tier: ask` + `deny: [delete_repo]` means "everything of this server asks, except that
-one, which is not offered at all".
+★ **The one place that says "never" is the global `deny`** (§6.3) — and it is not a
+second way to do the same thing at the file's level: it is the **outer boundary**, it
+speaks the **exposed** names, and it beats every file's whitelist. It is also the only
+way to write "all of this server but not that one" without listing the rest.
+
+★ **The order inside a file**: `ask` beats `tier`. So `tier: allow` + `ask: [post]` means
+"only post asks", and `tier: ask` alone means "everything this file provides asks".
 
 ★ **`tier` is what lets an MCP server's tier cover tools it has not offered yet.** A
 server's tool list is only known at runtime, so a rule that named the tools could not
@@ -1359,7 +1396,7 @@ the built-in groups: the filesystem tools ask for `write_file`, `edit_file` and 
 and `kb_index` asks. ⇒ the factory templates write the same constants out, so the file
 and the default cannot drift.
 
-#### ★ `tools/filesystem.yaml` — the filesystem tool set
+#### ★ `tools/filesystem.yaml` — the filesystem tool set (★ proposal 2026-11-06, **not implemented**)
 
 The filesystem tools come from the framework's middleware rather than from a provider, so
 until now they had **no file of their own**: their tiers lived in `permissions.yaml`, and
@@ -1380,8 +1417,14 @@ optional integration — the same reason the knowledge base is switched by its c
 than by its file. ★ `openheron init` writes it anyway, so the tiers are **visible and
 editable** rather than implied.
 
-★ **`deny` here is how a read-only agent is spelled.** `deny: [execute]` takes the shell
-away, and `deny: [execute, write_file, edit_file]` leaves a reader.
+★ **The whitelist is how a read-only agent is spelled** — the tools that are not in it
+are simply not offered:
+
+```yaml
+# .openheron/tools/filesystem.yaml
+tools: [ls, read_file, glob, grep]
+tier: allow
+```
 
 #### ★ Migration (what about the old configuration)
 
@@ -1493,7 +1536,7 @@ thing twice).
 
 | Who decides | What it governs |
 |---|---|
-| the file in `tools/` | **whether the capability is on** (the file is not there = the tool does not exist) **and the tier of what it provides** (`tier` / `ask` / `deny`) |
+| the file in `tools/` | **whether the capability is on** (the file is not there = the tool does not exist), **which of its tools are offered** (the whitelist), **and the tier of those** (`tier` / `ask`) |
 | `policy/permissions.yaml` | the **outer boundary**: `deny` — these run nowhere, whatever any file says |
 | each agent's `disabled_tools` | **narrowing**: this one agent does not use this tool (the inner layer, it can control that) |
 
@@ -1540,10 +1583,9 @@ the **configuration surface** only.
 | | `headers` | `map[string]string` | `{}` | http only: sent on every request |
 | | `timeout` | `LenientDuration` | `30s` | the ceiling for connect + initialize + list tools |
 | | `call_timeout` | `LenientDuration` | `60s` | the ceiling for **one tool call** — ★ without it, a server that never answers holds the call lock and every other call of that server queues behind it |
-| | `tools` | `[]string` | `[]` → all | a whitelist of the tool names to expose; ★ empty = all (not "nothing at all") |
-| | `tier` | `string` | `allow` | the tier for every tool this server offers — ★ including the ones it has **not offered yet** |
+| | `tools` | `[]string` | `[]` → all | ★ **the exposed set** — the server's own tool names to offer; absent = all of them |
+| | `tier` | `string` | `allow` | the tier for every tool this server offers — ★ including the ones it has **not offered yet**; `allow` \| `ask` |
 | | `ask` | `[]string` | `[]` | the server's **own** tool names that ask first |
-| | `deny` | `[]string` | `[]` | the server's **own** tool names that are **not exposed** |
 
 ★ `timeout` is a **lenient** duration: a wrong value degrades to the default and is
 recorded in `deferred`, exactly like `debounce` and `start_timeout`. A wrong timeout
@@ -1592,7 +1634,6 @@ server's own vocabulary — the typical form:
 ```yaml
 # .openheron/mcps/github.yaml
 tier: ask                       # every tool of this server asks first
-deny: [delete_repo]             # …except this one, which is not offered at all
 ```
 
 ★ "Writing `tier: ask`" means "every tool this server offers needs a nod" — a whole
@@ -1602,6 +1643,14 @@ deny: [delete_repo]             # …except this one, which is not offered at al
 known only at runtime, so a rule that named the tools could not cover a tool the server
 adds tomorrow. The prefix syntax in §6.3 could never do that for the `ask` tier — it
 survives there only for the **global deny** (`mcp__*` = no MCP tool, ever).
+
+★ **To take one tool out of a server, the global `deny` names it** — in the exposed
+vocabulary, which is the only place that speaks it:
+
+```yaml
+# .openheron/policy/permissions.yaml
+deny: [mcp__github__delete_repo]
+```
 
 ★ **The permissions of a stdio server are the permissions of the process**: the MCP server
 is a child process that openheron starts, it can write files and it can reach the network.

@@ -309,15 +309,17 @@ not to the tool.
 | `headers` | `map[string]string` | `{}` | http only: sent on every request |
 | `timeout` | `LenientDuration` | `30s` | the ceiling for connect + initialize + list tools |
 | `call_timeout` | `LenientDuration` | `60s` | the ceiling for **one tool call** (§6.5) |
-| `tools` | `[]string` | `[]` → all | a whitelist of tool names to expose |
-| `tier` | `string` | `allow` | the tier for every tool this server offers — ★ including the ones it has **not offered yet** |
+| `tools` | `[]string` | `[]` → all | ★ **the exposed set** — the server's own tool names to offer; absent = all of them |
+| `tier` | `string` | `allow` | the tier for every tool this server offers — ★ including the ones it has **not offered yet**; `allow` \| `ask` |
 | `ask` | `[]string` | `[]` | the server's **own** tool names that ask first |
-| `deny` | `[]string` | `[]` | the server's **own** tool names that are **not exposed** |
 
-★ The three tier keys mean the same thing in every file of `tools/` and `mcps/`, and
-they are written in **that file's own vocabulary**: `ask: [create_issue]` here is the
-server's own name, not the composed one. The provider translates it to the name the
-model sees (§7.3).
+★ The tier keys mean the same thing in every file of `tools/` and `mcps/`, and they are
+written in **that file's own vocabulary**: `ask: [create_issue]` here is the server's own
+name, not the composed one. The provider translates it to the name the model sees (§7.3).
+
+★ **There is no `deny` in a file.** "Not exposed" is already the whitelist's job: a tool
+that is not in `tools:` is not offered. The one place that says "never" is the **global**
+`deny` (§4) — a different level, not a second way to do the same thing here.
 
 ★ `timeout` is a **lenient** duration: a wrong value degrades to the default and is
 recorded in `deferred`, exactly like `debounce` and `start_timeout`. A wrong timeout
@@ -492,9 +494,9 @@ A tool named `mcp__github__create_issue` is looked up exactly like any other:
 Policy.TierOf("mcp__github__create_issue")
 ```
 
-and lands in `ask` if `mcp__github__*` is in the `ask` list, or in `deny` if
-`mcp__github__*` is in the `deny` list. The gate code does not change at all: it reads
-the tier and acts (§1.3).
+and lands in `ask` if the server's file says `tier: ask` (§7.3), or in `deny` if
+`mcp__github__*` is in the global `deny` list. The gate code does not change at all: it
+reads the tier and acts (§1.3).
 
 ★ **This is the whole point of the namespace.** The gate, the tables, the API's
 `EffectiveTools` view and the per-agent narrowing all work on names. A name that is
@@ -522,7 +524,6 @@ next to the tool it is about:
 ```yaml
 # .openheron/mcps/github.yaml
 tier: ask                       # every tool of this server asks first
-deny: [delete_repo]             # …except this one, which is not offered at all
 ```
 
 ★ **Why the file's own vocabulary.** A tier is a statement about **one tool**, so it
@@ -533,12 +534,17 @@ mistyped name stays invisible until the tool behaves differently than the file s
 
 | Where | Vocabulary | Decides |
 |---|---|---|
-| the global `deny` (`policy/permissions.yaml`) | **exposed** names (`mcp__github__delete_repo`) | never runs, anywhere — beats everything |
-| a file's `tier` / `ask` / `deny` | **the file's own** names (`create_issue`) | the tier of what this file provides |
+| the global `deny` (`policy/permissions.yaml`) | **exposed** names (`mcp__github__delete_repo`) | never runs, anywhere — beats every file's whitelist |
+| a file's `tools` / `tier` / `ask` | **the file's own** names (`create_issue`) | what this file offers, and the tier of those |
 | an agent's `disabled_tools` | exposed names | this agent does not get these tools |
 
 ★ **The order**: the global `deny` first — it wins — then the file that provides the
 tool.
+
+★ **A file has no `deny` of its own**, and that is deliberate: "not exposed" is already
+the whitelist's job. The two levels do not duplicate each other — the file says **what
+this file offers**, the global file says **what never runs** — and the global one is also
+the only way to write "all of this server but not that one" without listing the rest.
 
 ★ **The assembled policy keeps its shape.** `build.Policy` and `TierOf`
 (`agentkit/build/policy.go:39`) still take a name and answer a tier; what changed is

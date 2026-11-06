@@ -294,15 +294,18 @@ MCP 服务器按服务器一个文件来配：
 | `headers` | `map[string]string` | `{}` | 仅 http：每次请求都带的头 |
 | `timeout` | `LenientDuration` | `30s` | 连接 + 初始化 + 取工具清单的上限 |
 | `call_timeout` | `LenientDuration` | `60s` | **一次工具调用**的上限（§6.5） |
-| `tools` | `[]string` | `[]`→全部 | 暴露出去的工具名白名单 |
-| `tier` | `string` | `allow` | 这个 server 提供的每一个工具的档位 —— ★ 包括那些它**还没提供**的工具 |
+| `tools` | `[]string` | `[]`→全部 | ★ **暴露集合** —— 这个 server 自己的、要提供的工具名；不写 = 全部 |
+| `tier` | `string` | `allow` | 这个 server 提供的每一个工具的档位 —— ★ 包括那些它**还没提供**的工具；`allow` \| `ask` |
 | `ask` | `[]string` | `[]` | 这个 server **自己的**工具名里，哪些要先点头 |
-| `deny` | `[]string` | `[]` | 这个 server **自己的**工具名里，哪些**不暴露** |
 
-★ 这三个档位键在 `tools/` 与 `mcps/` 的每一个文件里都是同一个意思，
+★ 这几个键在 `tools/` 与 `mcps/` 的每一个文件里都是同一个意思，
   而且它们是用**那个文件自己的词儿**写的：这里的 `ask: [create_issue]` 是
   server 自己的名字，不是合成出来的那个名字。provider 会把它翻译成模型看到的
   那个名字（§7.3）。
+
+★ **文件里没有 `deny`。** 「不被暴露」本来就是清单的活：不在 `tools:` 里的工具
+  不被提供。唯一说「永不」的地方是**全局**的 `deny`（§4）—— 那是另一层，
+  不是在这里把同一件事做两遍。
 
 ★ `timeout` 是**宽松**时长：写错就退回默认并记进 `deferred`，
   与 `debounce`、`start_timeout` 完全一样。写错 timeout 改变的是「等多久」，
@@ -460,8 +463,8 @@ if _, err := c.stdin.Write(requestBytes); err != nil {   // ← no lock
 Policy.TierOf("mcp__github__create_issue")
 ```
 
-`ask` 里有 `mcp__github__*` 就落进 `ask` 档，`deny` 里有 `mcp__github__*`
-就落进 `deny` 档。闸门代码一个字都不用改：它读档位，然后动作（§1.3）。
+当 server 的文件写着 `tier: ask`（§7.3）时它落进 `ask` 档，当 `mcp__github__*`
+在全局 `deny` 清单里时它落进 `deny` 档。闸门代码一个字都不用改：它读档位，然后动作（§1.3）。
 
 ★ **这正是命名空间的意义。** 闸门、各张表、API 的 `EffectiveTools` 视图
   与每个 agent 的收窄，全都在名字上工作。
@@ -489,7 +492,6 @@ Policy.TierOf("mcp__github__create_issue")
 ```yaml
 # .openheron/mcps/github.yaml
 tier: ask                       # every tool of this server asks first
-deny: [delete_repo]             # …except this one, which is not offered at all
 ```
 
 ★ **为什么要用文件自己的词儿。** 档位是关于**一个工具**的陈述，
@@ -500,11 +502,16 @@ deny: [delete_repo]             # …except this one, which is not offered at al
 
 | 位置 | 词儿 | 决定什么 |
 |---|---|---|
-| 全局 `deny`（`policy/permissions.yaml`） | **对外的**名字（`mcp__github__delete_repo`） | 哪儿都不跑 —— 压过一切 |
-| 某个文件的 `tier` / `ask` / `deny` | **那个文件自己的**名字（`create_issue`） | 这个文件提供的东西的档位 |
+| 全局 `deny`（`policy/permissions.yaml`） | **对外的**名字（`mcp__github__delete_repo`） | 哪儿都不跑 —— 压过每个文件的清单 |
+| 某个文件的 `tools` / `tier` / `ask` | **那个文件自己的**名字（`create_issue`） | 这个文件提供什么，以及那些的档位 |
 | 某个 agent 的 `disabled_tools` | 对外的名字 | 这个 agent 拿不到这些工具 |
 
 ★ **顺序**：先全局 `deny` —— 它赢 —— 然后是提供这个工具的文件。
+
+★ **文件自己没有 `deny`，而这是刻意的。** 「不被暴露」本来就是清单的活：
+  不在 `tools:` 里的工具不被提供。那两层不是彼此重复 —— 文件说**这个文件提供什么**，
+  全局那份说**什么永远不许跑** —— 而全局那一份也是唯一一种能写
+  「这个 server 的一切，只是不要那一个」而不必把其余都列出来的办法。
 
 ★ **装配出来的策略形状不变。** `build.Policy` 与 `TierOf`
 （`agentkit/build/policy.go:39`）仍然是收一个名字、答一个档位；变的是条目的来源：

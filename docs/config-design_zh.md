@@ -57,7 +57,7 @@
 | 14 | 子 agent 规格 | 放 `decl.SubAgentSpec`，装配层直接用 | `agentkit/build → agentkit/spec` 本就是允许的单向依赖；另立一份会「编译不报错、运行期少个值」（`agentkit/spec/decl/decl.go:412-430`、`agentkit/spec/subagent.go:18-28`、`agentkit/build/spec.go:22`） |
 | 15 | MCP 工具命名 | 暴露给模型的名字一律加命名空间 `mcp__<server>__<tool>` | **提案，尚未实现**（见 §6.7）。MCP 工具名**由远端服务器定**：会撞保留工具名（`ls` / `execute`），也常带点号（`github.create_issue`）—— 后者过不了 provider 的 function name 字符集。命名空间把「撞名」变成「不可能」。树上唯一的痕迹是 `agentkit/build/tools.go:35` 的占位注释 |
 | 16 | 策略匹配 | 精确名 **+** 尾部 `*` 前缀匹配 | **提案，尚未实现**（见 §6.3）。MCP 工具集是运行期才知道的，逐个点名写不完；`mcp__github__*` 一条就能给一整个 server 定档。今天的表是**精确匹配**（`agentkit/build/policy.go:39-47`、`agentkit/build/policy.go:94-105`） |
-| 17 | 档位写在哪 | **跟着工具走**：`ask` 档住在工具自己的文件里（`tools/*.yaml`、`mcps/*.yaml`）；`policy/permissions.yaml` 只留全局 `deny` | ★ 档位是关于**某一个工具**的一句话，所以就该待在那个工具的文件里 —— 而且在那里用的是**同一套词汇**（`http.yaml` 说 `post`，所以它能说 `ask: [post]`；中心那份文件却不得不点名内部名字 `request_post`）。`deny` 是另一种话 —— 它是边界本身 —— 而且必须能对那些没有自己文件的工具表达出来 |
+| 17 | 档位写在哪 | **跟着工具走**：`ask` 档住在工具自己的文件里（`tools/*.yaml`、`mcps/*.yaml`）；`policy/permissions.yaml` 只留全局 `deny` | **提案 —— 未实施**（见 §6.3、§6.6）。★ 档位是关于**某一个工具**的一句话，所以就该待在那个工具的文件里 —— 而且在那里用的是**同一套词汇**（`http.yaml` 说 `post`，所以它能说 `ask: [post]`；中心那份文件却不得不点名内部名字 `request_post`）。`deny` 是另一种话 —— 它是边界本身 —— 而且必须能对那些没有自己文件的工具表达出来 |
 
 ### 「一实体一文件」而非单文件分区表
 
@@ -972,20 +972,61 @@ eino 的 `parseFrontmatter` 在 `eino@v0.9.22/adk/middlewares/skill/filesystem_b
 
 ### 6.3 `policy/permissions.yaml`
 
-外层边界。★ **这个文件只装 `deny:`，别的什么都不装** —— `ask` 档已经搬进工具自己的文件，
-就摆在它所针对的那个工具旁边（§6.6、§6.7）：
+审批档位。整个文件就是两张清单，而代码自己的缺省是：
 
 ```yaml
 # The factory default (spec.defaultPolicy)
+ask:   [write_file, edit_file, execute, kb_index]
 deny:  []
 ```
 
-★ **为什么 `ask` 搬走了而 `deny` 留下。** 档位是关于**某一个工具**的一句话：「这个要先点头」。
+`defaultPolicy` 在 `agentkit/spec/defaults.go:9-14`，而随包发布的模板把同样这张清单写出来
+（`initcfg/templates/policy/permissions.yaml`）—— 这个文件是看得见、改得动的，而不是靠约定隐含的。
+
+★ openheron 缺省要**四**个工具，不是三个：`write_file`、`edit_file`、`execute`
+—— 以及 **`kb_index`**，因为给知识库建索引会往磁盘上的索引里写。就策略而言它是个普通工具，
+所以和其它几个一样进这张清单。
+
+| 字段 | 加载器怎么处理它 | 理由 |
+|---|---|---|
+| `deny` | 与已有的那份**取并集** | 它是安全边界 |
+| `ask` | **整体替换** | 它是一种偏好，不是安全边界 |
+
+这两条规则住在加载器里（`agentkit/spec/load.go:196-197`）；`decl.Policy` 本身只是两个字符串切片
+（`agentkit/spec/decl/decl.go:210-213`）。★ 只有一个 `policy/` 目录时只有一份 `permissions.yaml`，
+所以那个并集今天是空转 —— 但它是加载器实现的规则，而且并集正是第二层必须面对的东西。
+
+★ 匹配顺序是 `deny → ask → **兜底 allow**`。**只有 `ask` / `deny` 拦得住东西** ✅ —— 未点名的工具
+直接放行 ✅（「读文件」「列目录」每次都要点头，用不了 ✅）。
+
+★ **没有 `allow` 那一列** ✅ —— 未点名的工具本来就是放行的，一列写着「直接放行」只会让人以为相反
+（「不在 `allow` 里就是不让用」）✅ —— 而事实恰恰相反 ✅ ✅。
+
+闸门在 `agentkit/build/gate.go:65-83`：`allow` 原样放行，`deny` 把它换成一个错误，`ask` 打断这一轮
+等人。档位（`allow` / `ask` / `deny`）与两层工具表的语义见 `docs/architecture.md` §3.4；完整的上游
+设计见 `agent-design.md`（上游）§5。
+
+#### ★ 档位搬到工具那里（★ 提案 2026-11-06，**未实施**）
+
+★ 这一小节讲的全是**提案**。今天上面那个文件里两张清单都有，而加载器读它们的方式就是
+§11.6 记着的那个样子。这个提案把 `ask` 档搬进每个工具自己的文件（§6.6、§6.7），
+而这个文件只留 `deny:`：
+
+```yaml
+# The proposed file (today it also carries `ask:`)
+deny:  []
+```
+
+★ **为什么 `ask` 要搬走而 `deny` 留下。** 档位是关于**某一个工具**的一句话：「这个要先点头」。
 这句话该待在那个工具自己的文件里 —— 而把它放在那里，同时也把它放进了**同一套词汇**里：
 `http.yaml` 说 `post`，所以 `http.yaml` 能说 `ask: [post]`，而中心那份文件却不得不点名内部
 工具名 `request_post`（§6.6）。`deny` 是另一种话：「这个永远不许跑，任何地方都不行」。它不是
 关于某个工具的配置，它是关于边界本身 —— 而且它必须能对那些**没有**自己文件的工具表达出来
 （框架自带的 `task` / `write_todos` / `skill`）。
+
+★ **它也是唯一说「永不」的地方。** 一个文件提供了的工具，在这里仍然可以被 deny，
+  而任何文件的清单都再也供不回来。这两层不是彼此重复：文件说**这个文件提供什么**，
+  全局那份说**什么永远不许跑**。
 
 ★ **这个文件里的 `ask:` 是加载期错误**，报错信息会指出新家在哪儿。一个被静默忽略的键，
 正是 §4.3 说的「配了没用」那一类。
@@ -1000,16 +1041,6 @@ deny:  []
 ★ **装配发生在 `agentkit/build`，不在 `agentkit/spec`** —— 只有 provider 知道自己文件的词汇
 和它背后的暴露名，而 `agentkit/spec` 不得 import `kb`（铁律），也不得 import eino
 （文件系统工具名住在那里）。
-
-★ 匹配顺序是 `deny → ask → **兜底 allow**`。**只有 `ask` / `deny` 拦得住东西** ✅ —— 未点名的工具
-直接放行 ✅（「读文件」「列目录」每次都要点头，用不了 ✅）。
-
-★ **没有 `allow` 那一列** ✅ —— 未点名的工具本来就是放行的，一列写着「直接放行」只会让人以为相反
-（「不在 `allow` 里就是不让用」）✅ —— 而事实恰恰相反 ✅ ✅。
-
-闸门在 `agentkit/build/gate.go:65-83`：`allow` 原样放行，`deny` 把它换成一个错误，`ask` 打断这一轮
-等人。档位（`allow` / `ask` / `deny`）与两层工具表的语义见 `docs/architecture.md` §3.4；完整的上游
-设计见 `agent-design.md`（上游）§5。
 
 #### ★ 前缀匹配（★ 2026-11-06 决策，**未实施**）
 
@@ -1242,7 +1273,7 @@ skills are not enabled
 ★ 知识库的 `kb.yaml` 从原来的 `kb/config.yaml` 搬来。**索引目录没搬**：它在运行数据里
 （`state/kb/<index>/`，`agentkit/build/kb.go:42`），与语料同生共死。
 
-#### ★ 每个文件说的名字 —— 以及模型看到的名字
+#### ★ 每个文件说的名字 —— 以及模型看到的名字（★ 提案 2026-11-06，**未实施**）
 
 一个文件用**自己的词汇**声明它的档位，而 provider 负责把那个词汇映射成模型看到的名字。
 两者不是一回事，而这正是要点：
@@ -1260,30 +1291,32 @@ skills are not enabled
 `http.yaml` 说 `post`，`permissions.yaml` 却不得不说 `request_post`。★ 一个工具两套词汇，
 就是等着发生的错配；而名字拼错了，在工具的表现与文件所写不一致之前根本看不出来。
 
-⇒ **一个文件的 `tier:` / `ask:` / `deny:` 写在第二列里。** 由 provider 来翻译；别的任何东西
+⇒ **一个文件的 `tools:` / `tier:` / `ask:` 写在第二列里。** 由 provider 来翻译；别的任何东西
 都不必知道暴露名。
 
 （暴露名在 `agentkit/spec/decl/decl.go:279-286`、`kb/tools.go:16-17` 与 eino 的
 `adk/middlewares/filesystem/filesystem.go:38-46`。）
 
-#### ★ 每个文件都带的那三个档位键
+#### ★ 每个文件都带的那几个键（★ 提案 2026-11-06，**未实施**）
 
-`tools/` 与 `mcps/` 里的每个文件都带同样这三个键，而且它们在任何地方都是同一个意思：
+`tools/` 与 `mcps/` 里的每个文件都带同样这几个键，而且它们在任何地方都是同一个意思：
 
 | 键 | 类型 | 缺省 | 含义 |
 |---|---|---|---|
-| `tier` | `string` | `allow` | 这个文件提供的一切的档位：`allow` \| `ask` \| `deny` |
-| `ask` | `[]string` | `[]` | —— **用这个文件自己的词汇** —— 要先点头的那些条目 |
-| `deny` | `[]string` | `[]` | 用这个文件自己的词汇、**不被暴露**的那些条目 |
+| `tools` | `[]string` | 全部 | ★ **暴露集合** —— 用这个文件自己的词汇写的、这个文件要提供的那些名字。不写 = 全部 |
+| `tier` | `string` | `allow` | 被暴露的那些的档位：`allow` \| `ask` |
+| `ask` | `[]string` | `[]` | 被暴露的那些里要先点头的 —— **用这个文件自己的词汇** |
 
-★ **`deny` 的意思是「不暴露」，不是「暴露了但坏了」。** 工具表的过滤器会把被 deny 的工具
-丢掉（`agentkit/build/policy.go:107`），所以一个被 deny 的工具压根不在模型的工具清单里 ——
-模型不知道它存在。这正是 `disabled_tools` 对单个 agent 做的事，所以全局 `deny`（§6.3）
-与一个文件自己的 `deny` 是同一类话。
+★ **文件里没有 `deny`，而这是刻意的。** 「不被暴露」这件事**清单已经说了**：
+  不在清单里的名字就是不被提供。每个文件把清单叫成合口的名字 —— HTTP 用 `methods:`，
+  其余用 `tools:`。⇒ **每一层一个机制，每一层一套词汇。**
 
-★ **一个文件内部的顺序**：`deny` 压过 `ask`，而两者都压过 `tier`。所以
-`tier: ask` + `deny: [delete_repo]` 的意思是「这个 server 的一切都要点头，只是那个例外 ——
-它根本不被提供」。
+★ **唯一说「永不」的地方是全局 `deny`**（§6.3）—— 而它不是在文件这一层把同一件事
+  做两遍：它是**外层边界**，它说的是**暴露名**，而且它压过每个文件的清单。它也是唯一
+  一种能写「这个 server 的一切，只是不要那一个」而不必把其余都列出来的办法。
+
+★ **一个文件内部的顺序**：`ask` 压过 `tier`。所以 `tier: allow` + `ask: [post]` 的意思是
+「只有 post 要点头」，而单写 `tier: ask` 的意思是「这个文件提供的一切都要点头」。
 
 ★ **`tier` 正是让 MCP server 的档位能覆盖它还没提供的工具的东西。** server 的工具清单只有
 运行期才知道，所以一条点名了工具的规则覆盖不了 server 明天才加的工具。`tier: ask` 覆盖
@@ -1293,7 +1326,7 @@ server 将来会提供的每一个工具 —— 这正是前缀规则对 `ask` �
 对 `write_file`、`edit_file` 与 `execute` 要点头，`kb_index` 也要点头。⇒ 出厂模板把同一批
 常量原样写出来，于是文件与缺省值不会走偏。
 
-#### ★ `tools/filesystem.yaml` —— 文件系统工具集
+#### ★ `tools/filesystem.yaml` —— 文件系统工具集（★ 提案 2026-11-06，**未实施**）
 
 文件系统工具来自框架的中间件，而不是来自某个 provider，所以直到现在它们**没有自己的文件**：
 它们的档位住在 `permissions.yaml` 里，而且没有任何办法能把这一套收窄。这个文件给它们一个家：
@@ -1311,8 +1344,13 @@ ask:  [write_file, edit_file, execute]
 文件系统工具是 agent 的核心能力，不是可选集成 —— 知识库由语料而不是由文件来开关，也是同一个
 理由。★ `openheron init` 照样会写它，所以这些档位是**看得见、改得动**的，而不是靠约定隐含的。
 
-★ **这里的 `deny` 就是「只读 agent」这三个字的写法。** `deny: [execute]` 把 shell 拿走，
-`deny: [execute, write_file, edit_file]` 就留下一个读者。
+★ **「只读 agent」这三个字现在靠清单来写** —— 不在清单里的工具就是不被提供：
+
+```yaml
+# .openheron/tools/filesystem.yaml
+tools: [ls, read_file, glob, grep]
+tier: allow
+```
 
 #### ★ 迁移（旧配置怎么办）
 
@@ -1409,7 +1447,7 @@ server 是 openheron 的**子进程** —— 它能写文件、能联网，「�
 
 | 谁来定 | 管什么 |
 |---|---|
-| `tools/` 里的文件 | **开不开**这个能力（文件不在 = 工具根本不存在）**以及它提供的东西的档位**（`tier` / `ask` / `deny`） |
+| `tools/` 里的文件 | **开不开**这个能力（文件不在 = 工具根本不存在）、**它提供的那一套里暴露哪些**（清单）、**以及那些的档位**（`tier` / `ask`） |
 | `policy/permissions.yaml` | **外层边界**：`deny` —— 无论任何文件怎么写，这些都不许跑 |
 | 每个 agent 的 `disabled_tools` | **细粒度收窄**：某一个 agent 不用这个工具（内层，它管得住） |
 
@@ -1454,9 +1492,9 @@ MCP 服务器的配置。**一个 server 一个文件**：
 | | `timeout` | `LenientDuration` | `30s` | 连接 + 初始化 + 取工具清单的上限 |
 | | `call_timeout` | `LenientDuration` | `60s` | **一次工具调用**的上限 —— ★ 没有它，一个永不回答的服务器会占着调用锁，同 server 的其它调用全排在它后面 |
 | | `tools` | `[]string` | `[]`→全部 | 暴露出去的工具名白名单；★ 空 = 全部（不是「一个都不挂」） |
-| | `tier` | `string` | `allow` | 这个 server 提供的每个工具的档位 —— ★ **包括它还没提供的那些** |
+| | `tools` | `[]string` | `[]`→全部 | ★ **暴露集合** —— 这个 server 自己的、要提供的工具名；不写 = 全部 |
+| | `tier` | `string` | `allow` | 这个 server 提供的每个工具的档位 —— ★ **包括它还没提供的那些**；`allow` \| `ask` |
 | | `ask` | `[]string` | `[]` | 这个 server **自己的**工具名里要先点头的那些 |
-| | `deny` | `[]string` | `[]` | 这个 server **自己的**工具名里**不被暴露**的那些 |
 
 ★ `timeout` 是**宽松**时长：写错退回默认并记 `deferred`，
   与 `debounce` / `start_timeout` 同理。写错 timeout 改变的是「等多久」，
@@ -1502,7 +1540,6 @@ mcp__<server>__<tool>
 ```yaml
 # .openheron/mcps/github.yaml
 tier: ask                       # every tool of this server asks first
-deny: [delete_repo]             # …except this one, which is not offered at all
 ```
 
 ★ 「写 `tier: ask`」就是「这个 server 提供的每个工具都要点头」—— 给**一整类**外部工具定档，
@@ -1511,6 +1548,14 @@ deny: [delete_repo]             # …except this one, which is not offered at al
 ★ **而且它覆盖 server 还没提供的工具。** server 的工具清单只有运行期才知道，所以一条点名了
 工具的规则覆盖不了 server 明天才加的工具。§6.3 的前缀语法对 `ask` 档永远做不到这件事 ——
 它在那里只剩**全局 deny** 的用武之地（`mcp__*` = 一个 MCP 工具都不要，永远不要）。
+
+★ **要把 server 里的某一个工具拿掉，用全局 `deny` 点名它** —— 用暴露名，因为只有那一层
+  说的是暴露名：
+
+```yaml
+# .openheron/policy/permissions.yaml
+deny: [mcp__github__delete_repo]
+```
 
 ★ **stdio server 的权限就是进程的权限**：MCP server 是 openheron 拉起的子进程，
   它能写文件、能联网。§6.6 给 HTTP 工具定的「只连公网」在它身上**不成立**
