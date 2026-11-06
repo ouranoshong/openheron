@@ -329,6 +329,11 @@ install, the **config** says how to invoke it (`command` plus `args`). The confi
 written in **that file's own vocabulary**: `ask: [create_issue]` here is the server's own
 name, not the composed one. The provider translates it to the name the model sees (§7.3).
 
+★ **A key that repeats the default says nothing.** The filesystem's default tier is
+`allow`, so `tools/filesystem.yaml` needs only its `ask:` list — the templates write the
+tier only where it is **not** the code's default (the MCP server's `tier: ask`, which
+also covers the tools the server has not offered yet). See `docs/config-design.md` §6.6.
+
 ★ **There is no `deny` in a file, and there is no global one either** (§4). "Not
 exposed" is said in exactly two places: this file's **whitelist** — a tool that is not
 in `tools:` is not offered — and an agent's **`disabled_tools`**.
@@ -451,7 +456,9 @@ and that is the `headers:` map (§8.1).
 # .openheron/tools/filesystem.yaml
 #
 # ★ The filesystem tool set. These tools are always there — this file tunes them.
-tier: allow
+#
+# ★ The default tier here is allow, so only the ones that ask are named. Writing
+#   "tier: allow" would say nothing.
 ask: [write_file, edit_file, execute]
 # tools: [ls, read_file, glob, grep]   # uncomment for a read-only agent
 ```

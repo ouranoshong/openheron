@@ -311,6 +311,11 @@ MCP 服务器按服务器一个文件来配：
   server 自己的名字，不是合成出来的那个名字。provider 会把它翻译成模型看到的
   那个名字（§7.3）。
 
+★ **把缺省再写一遍的那一行，什么也没说。** 文件系统那组的缺省档位是 `allow`，
+  所以 `tools/filesystem.yaml` 只需要它的 `ask:` 清单 —— 模板只在**缺省不是代码的缺省**
+  时才写档位（MCP server 的 `tier: ask`，那一行同时盖住了服务器还没提供的那些工具）。
+  见 `docs/config-design.md` §6.6。
+
 ★ **文件里没有 `deny`，全局的也没有**（§4）。「不被暴露」只说两处：这个文件的
   **清单** —— 不在 `tools:` 里的工具不被提供 —— 与某个 agent 的 **`disabled_tools`**。
 
@@ -421,7 +426,9 @@ call_timeout: 60s
 # .openheron/tools/filesystem.yaml
 #
 # ★ The filesystem tool set. These tools are always there — this file tunes them.
-tier: allow
+#
+# ★ The default tier here is allow, so only the ones that ask are named. Writing
+#   "tier: allow" would say nothing.
 ask: [write_file, edit_file, execute]
 # tools: [ls, read_file, glob, grep]   # uncomment for a read-only agent
 ```

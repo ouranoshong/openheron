@@ -1366,8 +1366,18 @@ and an agent's **`disabled_tools`**.
 only one that had to speak the **exposed** names while the tools' own files speak
 theirs. ⇒ **one mechanism per level, one vocabulary per level.**
 
+★ **The three keys answer three different questions, and none of them subsumes
+another:** `tools:` says **what is offered**, `ask:` says **which of those ask first**,
+and `tier:` says **what the rest do** (`allow` or `ask`).
+
 ★ **The order inside a file**: `ask` beats `tier`. So `tier: allow` + `ask: [post]` means
 "only post asks", and `tier: ask` alone means "everything this file provides asks".
+
+★ **A key that repeats the default says nothing.** In `tools/filesystem.yaml` the
+default tier is `allow`, so `tier: allow` is a line that changes nothing — the file
+needs only its `ask:` list. ⇒ the templates write the tier only where it is **not** the
+code's default: the MCP server's `tier: ask`, where the line also covers the tools the
+server has not offered yet.
 
 ★ **`tier` is what lets an MCP server's tier cover tools it has not offered yet.** A
 server's tool list is only known at runtime, so a rule that named the tools could not
