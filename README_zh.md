@@ -162,7 +162,7 @@ frontmatter 是**严格解码**的 —— 写错一个键就是启动错误，�
 ## 知识库
 
 `kb` 是一个**可选**的本地语料检索层：一批 markdown 文档，索引存在 `<data-dir>/kb/<index>/`。
-在 `tools/kb.yaml` 里配置（**不配 `corpus` 就是关闭**），用 `openheron kb index` 建索引，
+在 `tools/kb.yaml` 里配置（**不配 `corpus_dir` 就是关闭**），用 `openheron kb index` 建索引，
 agent 用 `kb_search` 检索。`kb_index` 默认落在 `ask` 档 —— 让 agent 自己重建索引需要人点头。
 
 ## 开发

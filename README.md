@@ -187,7 +187,7 @@ disturbed, and nothing about it is discarded.
 ## The knowledge base
 
 `kb` is an **optional** local corpus retrieval layer: a set of markdown documents indexed
-under `<data-dir>/kb/<index>/`. Configure it in `tools/kb.yaml` (no `corpus` means the
+under `<data-dir>/kb/<index>/`. Configure it in `tools/kb.yaml` (no `corpus_dir` means the
 knowledge base is off), build the index with `openheron kb index`, and let agents
 retrieve with `kb_search`. `kb_index` defaults to the `ask` tier — letting an agent
 rebuild the index needs a human nod.

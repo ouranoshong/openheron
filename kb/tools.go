@@ -58,13 +58,13 @@ Each result carries the source file, its title and summary, its headings with li
 // ── kb_index ─────────────────────────────────────────────────────────────
 
 type IndexInput struct {
-	Paths []string `json:"paths" jsonschema:"required" jsonschema_description:"Files to re-index, as paths relative to the project root (the same base as the corpus setting), e.g. docs/config-design.md. Must not be empty — a full rebuild is not something this tool does."`
+	Paths []string `json:"paths" jsonschema:"required" jsonschema_description:"Files to re-index, as paths relative to the project root (the same base as the corpus_dir setting), e.g. docs/config-design.md. Must not be empty — a full rebuild is not something this tool does."`
 }
 
 type IndexToolConfig struct {
 	Store       *Store
 	Indexer     *FileIndexer
-	Corpus      string
+	CorpusDir   string
 	ProjectRoot string
 	Headers     map[string]string
 }
@@ -76,8 +76,8 @@ func NewIndexTool(cfg IndexToolConfig) (tool.InvokableTool, error) {
 	if cfg.Indexer == nil {
 		return nil, fmt.Errorf("kb: indexer not provided for %s", ToolIndex)
 	}
-	if cfg.Corpus == "" {
-		return nil, fmt.Errorf("kb: corpus not provided for %s", ToolIndex)
+	if cfg.CorpusDir == "" {
+		return nil, fmt.Errorf("kb: corpus directory not provided for %s", ToolIndex)
 	}
 	const desc = `Re-index specific files into the project's knowledge base so that later searches see the current text.
 
@@ -94,7 +94,7 @@ The result reports how many files were touched, how many documents were re-embed
 					"corpus and must not run inside an agent turn; run `openheron kb index` instead " +
 					"(it prints progress and is resumable)")
 			}
-			rel, err := CorpusRel(cfg.ProjectRoot, cfg.Corpus, in.Paths)
+			rel, err := CorpusRel(cfg.ProjectRoot, cfg.CorpusDir, in.Paths)
 			if err != nil {
 				return "", err
 			}
@@ -106,8 +106,8 @@ The result reports how many files were touched, how many documents were re-embed
 			defer stop()
 
 			res, err := Index(ctx, cfg.Indexer, IndexOptions{
-				Corpus:  cfg.Corpus,
-				Headers: cfg.Headers,
+				CorpusDir: cfg.CorpusDir,
+				Headers:   cfg.Headers,
 			}, rel)
 			if err != nil {
 				return "", err
@@ -120,7 +120,14 @@ The result reports how many files were touched, how many documents were re-embed
 		})
 }
 
-func CorpusRel(projectRoot, corpus string, paths []string) ([]string, error) {
+// CorpusRel resolves paths against the corpus directory and returns them
+// relative to it.
+//
+// ★ The corpus directory is the **root** the index is allowed to touch: a
+//
+//	path that escapes it is refused, because indexing it would put
+//	documents in the index that the corpus does not contain.
+func CorpusRel(projectRoot, corpusDir string, paths []string) ([]string, error) {
 	out := make([]string, 0, len(paths))
 	for _, p := range paths {
 		abs := p
@@ -128,13 +135,13 @@ func CorpusRel(projectRoot, corpus string, paths []string) ([]string, error) {
 			abs = filepath.Join(projectRoot, p)
 		}
 		abs = filepath.Clean(abs)
-		rel, err := filepath.Rel(corpus, abs)
+		rel, err := filepath.Rel(corpusDir, abs)
 		if err != nil {
-			return nil, fmt.Errorf("kb: %s is not under the corpus %s", p, corpus)
+			return nil, fmt.Errorf("kb: %s is not under the corpus %s", p, corpusDir)
 		}
 		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return nil, fmt.Errorf("kb: %s is outside the corpus %s; "+
-				"only files under the corpus can be indexed", p, corpus)
+				"only files under the corpus can be indexed", p, corpusDir)
 		}
 		out = append(out, filepath.ToSlash(rel))
 	}

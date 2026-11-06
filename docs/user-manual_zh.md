@@ -340,7 +340,7 @@ deny: []
 | `wikipedia.yaml` | 百科查询 |
 | `kb.yaml` | 知识库（见 §7） |
 
-★ 知识库是唯一的例外：它的文件只承载设置 —— 真正开关它的是**非空 `corpus`**，而不是
+★ 知识库是唯一的例外：它的文件只承载设置 —— 真正开关它的是**非空 `corpus_dir`**，而不是
 文件在不在。
 
 ★ `tools/` 下**只认这四个文件名**，写别的名字会**启动报错**，不会被静默忽略。
@@ -574,18 +574,22 @@ This session is running in another window — stop it to take over
 
 知识库是**可选**的本地语料检索层：把一批 markdown 文档变成 Agent 能检索的资料。
 
+★ **「corpus」是什么意思。** 「corpus」是信息检索里对「检索系统据以作答的那批文档」的叫法；
+在这里它就是**一个目录**。`corpus_dir` 是知识库要索引的那个目录 —— 一条相对项目根的路径，
+而只有它下面的 `.md` 文件会被索引（`kb/index.go:21`）。
+
 ### 7.1 开启
 
 ```yaml
 # .openheron/tools/kb.yaml
-corpus: docs          # 相对项目根的目录
+corpus_dir: docs      # a directory relative to the project root
 index: default
 model: openai/text-embedding-3-small
 top_k: 8
 ```
 
-- `corpus` **不配就是关闭**。
-- `corpus` **必须是相对项目根的路径**。写绝对路径会**启动报错** ——
+- `corpus_dir` **不配就是关闭**。
+- `corpus_dir` **必须是相对项目根的路径**。写绝对路径会**启动报错** ——
   索引和语料必须同生共死，放到系统目录里的语料会让索引失去意义。
 - `model` 必填，且必须指向一个声明了 `kind: embedding` 的模型，
   否则启动报错（`kb.model ... is not an embedding model`）。

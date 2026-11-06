@@ -477,7 +477,7 @@ allows: [ls, read_file, glob, grep]
 
 ```yaml
 # .openheron/tools/kb.yaml
-corpus: ""
+corpus_dir: ""
 index: default
 model: ""
 query_instruction: ""

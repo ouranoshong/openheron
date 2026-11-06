@@ -95,7 +95,7 @@ dependency chain along.
 
 **Validating** the knowledge-base config (`tools/kb.yaml`) needs to know whether the
 corpus path is relative, whether the model is declared at all, and whether it is
-declared as `kind: embedding` (`agentkit/spec/load.go:171` `loadKB`, `load.go:331`
+declared as `kind: embedding` (`agentkit/spec/load.go:173` `loadKB`, `load.go:345`
 `validateKB`).
 
 ★ All three answers live in the **declarations** (`decl.Model.IsEmbedding`,
@@ -442,7 +442,7 @@ use a module-level constant or a selector from the store.
 
 `kb` is an **optional** local corpus retrieval layer.
 
-- The corpus is a set of markdown documents; the directory comes from `corpus` in
+- The corpus is a set of markdown documents; the directory comes from `corpus_dir` in
   `tools/kb.yaml` (relative to the project root).
 - The index lands in `<data-dir>/kb/<index>/` (`build/kb.go:42`), with a `catalog.md`
   index page.

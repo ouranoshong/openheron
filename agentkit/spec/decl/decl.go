@@ -350,7 +350,22 @@ type RetryCfg struct {
 }
 
 type KB struct {
-	Corpus string `yaml:"corpus"`
+	// CorpusDir is the directory the knowledge base indexes.
+	//
+	// ★ It was called `corpus` before 2026-11-06. The name followed the
+	//   information-retrieval term, but the value is a **directory**, and
+	//   every other directory in the configuration says so: `data_dir`,
+	//   `static_dir`. A user who does not know the term should still be
+	//   able to read the key.
+	CorpusDir string `yaml:"corpus_dir"`
+
+	// CorpusLegacy is the old spelling, read once so an existing
+	// configuration does not break on the rename.
+	//
+	// ★ It is **not** part of the configuration's shape: the loader keeps
+	//   it only to say "this key moved" in `deferred`. Nothing else reads
+	//   it.
+	CorpusLegacy string `yaml:"corpus"`
 
 	Index string `yaml:"index"`
 

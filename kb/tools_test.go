@@ -30,7 +30,7 @@ func mustIndexTool(t *testing.T, st *Store, ix *FileIndexer, corpus, projectRoot
 	tl, err := NewIndexTool(IndexToolConfig{
 		Store:       st,
 		Indexer:     ix,
-		Corpus:      corpus,
+		CorpusDir:   corpus,
 		ProjectRoot: projectRoot,
 		Headers:     map[string]string{"##": "section", "###": "subsection"},
 	})
@@ -246,10 +246,10 @@ func TestToolsValidateTheirConfig(t *testing.T) {
 	}
 	st := newTestStore(t)
 	ix := newTestIndexer(t, st, newFakeEmbedder(4), 10)
-	if _, err := NewIndexTool(IndexToolConfig{Indexer: ix, Corpus: "x"}); err == nil {
+	if _, err := NewIndexTool(IndexToolConfig{Indexer: ix, CorpusDir: "x"}); err == nil {
 		t.Error("kb_index accepted a nil store")
 	}
-	if _, err := NewIndexTool(IndexToolConfig{Store: st, Corpus: "x"}); err == nil {
+	if _, err := NewIndexTool(IndexToolConfig{Store: st, CorpusDir: "x"}); err == nil {
 		t.Error("kb_index accepted a nil indexer")
 	}
 	if _, err := NewIndexTool(IndexToolConfig{Store: st, Indexer: ix}); err == nil {

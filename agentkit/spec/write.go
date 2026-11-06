@@ -201,11 +201,11 @@ func ToolTemplates() map[string]string {
 			"language: zh\n" +
 			"timeout: 15s\n" +
 			"base_url: \"\"\n",
-		DirTools + "/kb.yaml": "# Knowledge base. The file holds its settings; the corpus turns it on.\n" +
+		DirTools + "/kb.yaml": "# Knowledge base. The file holds its settings; the corpus directory turns it on.\n" +
 			"#\n" +
-			"# ★ corpus is the **corpus directory**, relative to the project root. Empty string = knowledge base off.\n" +
+			"# ★ corpus_dir is the **corpus directory**, relative to the project root. Empty string = knowledge base off.\n" +
 			"#   It lives and dies with the index: change the directory without rebuilding the index and it will confidently return unrelated answers.\n" +
-			"corpus: \"\"\n" +
+			"corpus_dir: \"\"\n" +
 			"index: default\n" +
 			"# model must point at a model with kind: embedding in llm/*.yaml; empty = pure lexical retrieval.\n" +
 			"model: \"\"\n" +

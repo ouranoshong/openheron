@@ -10,8 +10,8 @@ import (
 
 func testIndexOpts(corpus string) IndexOptions {
 	return IndexOptions{
-		Corpus:  corpus,
-		Headers: map[string]string{"##": "section", "###": "subsection"},
+		CorpusDir: corpus,
+		Headers:   map[string]string{"##": "section", "###": "subsection"},
 	}
 }
 

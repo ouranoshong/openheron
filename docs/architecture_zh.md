@@ -87,8 +87,8 @@
 ### 2.2 `agentkit/spec` 为什么**不**引 `kb`
 
 知识库配置（`tools/kb.yaml`）的**校验**需要知道语料路径是不是相对路径、模型有没有被声明、
-以及它是不是声明为 `kind: embedding`（`agentkit/spec/load.go:171` 的 `loadKB`、
-`load.go:331` 的 `validateKB`）。
+以及它是不是声明为 `kind: embedding`（`agentkit/spec/load.go:173` 的 `loadKB`、
+`load.go:345` 的 `validateKB`）。
 
 ★ 这三个答案都在**声明**里（`decl.Model.IsEmbedding`、`decl.Model.Dimensions`），
   所以配置层根本不引知识库 —— 只有测试文件引（`agentkit/spec/policy_contract_test.go:7`）。
@@ -395,7 +395,7 @@ selector 里不要写 `?? []`；用模块级常量或 store 里的 selector。
 
 `kb` 是一个**可选**的本地语料检索层。
 
-- 语料是一批 markdown 文档，目录由 `tools/kb.yaml` 的 `corpus` 指定（相对项目根）。
+- 语料是一批 markdown 文档，目录由 `tools/kb.yaml` 的 `corpus_dir` 指定（相对项目根）。
 - 索引落在 `<data-dir>/kb/<index>/`（`build/kb.go:42`），含 `catalog.md` 目录页。
 - **检索是混合打分**：`kb/score.go:53` 的 `scoreDoc` 在有向量时算
   `0.5*词法分 + 0.5*余弦相似度`，无向量时**纯词法**（所以 `kb status` 会报

@@ -108,9 +108,9 @@ func assemble(ctx context.Context, configDir string) (*kbEnv, error) {
 	for _, d := range cfg.Deferred() {
 		obs.Logger().Info("[kb] config notice", "notice", d)
 	}
-	if cfg.KB.Corpus == "" {
-		return nil, fmt.Errorf("kb.corpus is not set in %s/spec.yaml; "+
-			"nothing to index (this also means the knowledge base is off)", spec.DirKBIndex)
+	if cfg.KB.CorpusDir == "" {
+		return nil, fmt.Errorf("kb.corpus_dir is not set in %s/%s.yaml; "+
+			"nothing to index (this also means the knowledge base is off)", spec.DirTools, "kb")
 	}
 
 	ref, _ := spec.ParseRef(cfg.KB.Model)
@@ -145,7 +145,7 @@ func assemble(ctx context.Context, configDir string) (*kbEnv, error) {
 	}
 	return &kbEnv{
 		cfg: cfg, svc: svc, store: st, idx: ix,
-		corpus:  svc.ResolveDir(cfg.KB.Corpus),
+		corpus:  svc.ResolveDir(cfg.KB.CorpusDir),
 		model:   ref.String(),
 		batch:   cfg.KB.BatchSize,
 		headers: cfg.KB.Splitter.Headers,
@@ -158,7 +158,7 @@ func kbIndex(ctx context.Context, paths []string, configDir string, stdout io.Wr
 		return err
 	}
 
-	fmt.Fprintf(stdout, "corpus: %s\nindex:  %s\nmodel:  %s\n\n",
+	fmt.Fprintf(stdout, "corpus_dir: %s\nindex:  %s\nmodel:  %s\n\n",
 		env.corpus, filepath.Join(env.store.Dir()), env.model)
 
 	rel, err := kb.CorpusRel(env.svc.ProjectRoot(), env.corpus, paths)
@@ -174,8 +174,8 @@ func kbIndex(ctx context.Context, paths []string, configDir string, stdout io.Wr
 	defer stop()
 
 	res, err := kb.Index(ctx, env.idx, kb.IndexOptions{
-		Corpus:  env.corpus,
-		Headers: env.headers,
+		CorpusDir: env.corpus,
+		Headers:   env.headers,
 	}, rel)
 	if err != nil {
 		return err
@@ -214,8 +214,8 @@ func kbSearch(ctx context.Context, args []string, configDir string, stdout io.Wr
 	if err != nil {
 		return fmt.Errorf("config: load %s: %w", svc.Root(), err)
 	}
-	if cfg.KB.Corpus == "" {
-		return fmt.Errorf("kb.corpus is not set; the knowledge base is off")
+	if cfg.KB.CorpusDir == "" {
+		return fmt.Errorf("kb.corpus_dir is not set; the knowledge base is off")
 	}
 	env, err := assembleSearch(ctx, svc, cfg)
 	if err != nil {
@@ -314,8 +314,8 @@ func kbStatus(ctx context.Context, configDir string, stdout io.Writer, asJSON bo
 	if err != nil {
 		return fmt.Errorf("config: load %s: %w", svc.Root(), err)
 	}
-	if cfg.KB.Corpus == "" {
-		fmt.Fprintln(stdout, "knowledge base is off (kb.corpus is not set)")
+	if cfg.KB.CorpusDir == "" {
+		fmt.Fprintln(stdout, "knowledge base is off (kb.corpus_dir is not set)")
 		return nil
 	}
 	stateDir, err := svc.DataDir(cfg.Server.DataDir)
@@ -344,7 +344,7 @@ func kbStatus(ctx context.Context, configDir string, stdout io.Writer, asJSON bo
 
 	if asJSON {
 		return json.NewEncoder(stdout).Encode(struct {
-			Corpus     string   `json:"corpus"`
+			CorpusDir  string   `json:"corpus_dir"`
 			Index      string   `json:"index"`
 			Model      string   `json:"model"`
 			Dim        int      `json:"dim"`
@@ -358,13 +358,13 @@ func kbStatus(ctx context.Context, configDir string, stdout io.Writer, asJSON bo
 			Warnings   []string `json:"warnings,omitempty"`
 			Sources    []string `json:"sources"`
 			HeadersOff bool     `json:"splitter_headers_ineffective"`
-		}{svc.ResolveDir(cfg.KB.Corpus), st.Dir(), der.Model, der.Dim,
+		}{svc.ResolveDir(cfg.KB.CorpusDir), st.Dir(), der.Model, der.Dim,
 			len(entries), countSections(entries), countVectors(der),
 			stale, truncated, cat.Header.Revision, cat.Header.IndexVersion,
 			cat.Warnings, sources, len(cfg.KB.Splitter.Headers) > 0})
 	}
 
-	fmt.Fprintf(stdout, "corpus: %s\nindex:  %s\n", svc.ResolveDir(cfg.KB.Corpus), st.Dir())
+	fmt.Fprintf(stdout, "corpus_dir: %s\nindex:  %s\n", svc.ResolveDir(cfg.KB.CorpusDir), st.Dir())
 	fmt.Fprintf(stdout, "model:  %s\n", orDash(der.Model))
 	fmt.Fprintf(stdout, "dim:    %d", der.Dim)
 	if der.Dim == 0 {

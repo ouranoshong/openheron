@@ -366,7 +366,7 @@ writing the file is what turns the tool on. Four file names are recognised today
 | `kb.yaml` | The knowledge base (see §7) |
 
 ★ The knowledge base is the one exception: its file only holds the settings — it is
-switched on by a **non-empty `corpus`**, not by the file's presence.
+switched on by a **non-empty `corpus_dir`**, not by the file's presence.
 
 ★ **Only these four file names are accepted** under `tools/`; any other name is a
 **startup error** and is never silently ignored.
@@ -627,18 +627,23 @@ is there for the times when it is not.
 The knowledge base is an **optional** local corpus retrieval layer: it turns a set of
 markdown documents into material an agent can search.
 
+★ **What "corpus" means.** "Corpus" is the information-retrieval term for the collection of
+documents a search answers from; here it is **one directory**. `corpus_dir` is the directory the
+knowledge base indexes — a path relative to the project root, and only the `.md` files under it
+are indexed (`kb/index.go:21`).
+
 ### 7.1 Turning it on
 
 ```yaml
 # .openheron/tools/kb.yaml
-corpus: docs          # a directory relative to the project root
+corpus_dir: docs      # a directory relative to the project root
 index: default
 model: openai/text-embedding-3-small
 top_k: 8
 ```
 
-- **Not configuring `corpus` means it is off.**
-- `corpus` **must be a path relative to the project root**. An absolute path is a
+- **Not configuring `corpus_dir` means it is off.**
+- `corpus_dir` **must be a path relative to the project root**. An absolute path is a
   **startup error** — the index and its corpus must have the same lifetime, and a corpus
   living in a system directory would rob the index of meaning.
 - `model` is required and must point at a model declared with `kind: embedding`;

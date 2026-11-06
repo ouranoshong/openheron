@@ -43,21 +43,22 @@
 | 2 | Partitions | `server/` `llm/` `agents/` `policy/` `tools/` (loaded), `skills/` (skills), `state/` (runtime data) | one file set per kind of configuration (`agentkit/spec/config.go:18-26`, `agentkit/spec/config.go:40-66`) |
 | 3 | Format | **YAML** — plus YAML frontmatter for `agents/*.md` | isomorphic to the agents' frontmatter ⇒ the whole `.openheron/` speaks one dialect (`agentkit/spec/expand.go:48-65`, `agentkit/spec/load.go:71-95`) |
 | 4 | Granularity | **one entity, one file** | `llm/<provider>.yaml`, `agents/<id>.md` (`agentkit/spec/load.go:16-17`, `agentkit/spec/load.go:71-72`) |
-| 5 | Overriding | not applicable — there is only one configuration, so there is no "who overrides whom" | a field-level merge makes the source of a value unreadable. ★ One exception: the depth and retry caps resolve to **the stricter of the two** (`agentkit/spec/load.go:204`, `agentkit/spec/load.go:409-421`) |
+| 5 | Overriding | not applicable — there is only one configuration, so there is no "who overrides whom" | a field-level merge makes the source of a value unreadable. ★ One exception: the depth and retry caps resolve to **the stricter of the two** (`agentkit/spec/load.go:209`, `agentkit/spec/load.go:421-433`) |
 | 6 | Precedence | built-in defaults < config root < environment variables (★ **only a handful of variables really do this**, see §4.4) | an env var is a one-off override, a file is the project's own management under version control (`main.go:217-219`) |
 | 7 | Unknown fields | **hard error, with the line number** | `max_retry` misspelled as `max_retries` must surface at startup (`agentkit/spec/config.go:398-408`, `yaml.v3@v3.0.1/decode.go:944`) |
 | 8 | Runtime data | `.openheron/state/` | the configuration and the data share one root, so one ignore rule covers both (`agentkit/spec/defaults.go:62`, `agentkit/spec/config.go:224-236`) |
 | 9 | skills | `.openheron/skills/` by default — resolved by `$EINO_EXT_SKILLS_DIR`, otherwise by an upward search for `.openheron/skills` | ★ this is a **different rule** from the config root: a skill is a directory tree, and reusing one from a parent directory is harmless, whereas the config root is a set of entities (`agentkit/build/skill.go:188-227`) |
 | 10 | Root resolution | `--config-dir` → `$OPENHERON_CONFIG_DIR` → `<projectRoot>/.openheron` | ★ **no upward search** — a root that depends on the working directory makes the same command read a different configuration (`agentkit/spec/config.go:144-156`) |
-| 11 | Multiple models | one provider file holds `models[]`, referenced as `<provider>/<model>` | "a strong model for the entry agent, weak models for the sub-agents" is the commonest ask; it also matches the `model:` reference form of `agents/*.md` (`agentkit/spec/load.go:52-65`, `agentkit/spec/load.go:251-260`) |
+| 11 | Multiple models | one provider file holds `models[]`, referenced as `<provider>/<model>` | "a strong model for the entry agent, weak models for the sub-agents" is the commonest ask; it also matches the `model:` reference form of `agents/*.md` (`agentkit/spec/load.go:52-65`, `agentkit/spec/load.go:263-272`) |
 | 12 | Model construction | **one instance per agent** (granularity = provider × model × reasoning tier × endpoint field shape × timeout) | ★ **corrected during implementation**: the original text said "one instance per provider", on the grounds that "the connection pool is naturally shared". The second half does not hold — `FromConfig` builds a new `http.Client` every time (`agentkit/build/provider.go:40`, `agentkit/build/provider.go:47`), and each agent declares its own model and reasoning tier in the first place, so they are independent to begin with (`agentkit/build/provider.go:81-95`) |
 | 13 | Durations in two tiers | the `timeout` in `llm/*.yaml` is a hard error; `debounce` / `start_timeout` / the `tools/` timeouts fall back and are recorded in `deferred` | a wrong `timeout` makes the timeout behaviour unpredictable; a wrong `debounce` only affects "how long to wait" and must not stop the program. **The fallback must be audible** (`agentkit/spec/decl/decl.go:27`, `agentkit/spec/decl/decl.go:325-334`, `agentkit/spec/reload.go:80-84`) |
-| 14 | Sub-agent spec | lives in `decl.SubAgentSpec`, the assembly layer uses it directly | `agentkit/build → agentkit/spec` is an allowed one-way dependency anyway; a second copy would "compile fine and be one value short at runtime" (`agentkit/spec/decl/decl.go:412-430`, `agentkit/spec/subagent.go:18-28`, `agentkit/build/spec.go:22`) |
+| 14 | Sub-agent spec | lives in `decl.SubAgentSpec`, the assembly layer uses it directly | `agentkit/build → agentkit/spec` is an allowed one-way dependency anyway; a second copy would "compile fine and be one value short at runtime" (`agentkit/spec/decl/decl.go:427-445`, `agentkit/spec/subagent.go:18-28`, `agentkit/build/spec.go:22`) |
 | 15 | MCP tool naming | every name exposed to the model is namespaced `mcp__<server>__<tool>` | **proposal — not implemented** (see §6.7). MCP tool names are **decided by the remote server**: they collide with reserved tool names (`ls` / `execute`) and often carry dots (`github.create_issue`) — the latter does not pass the provider's function-name character set. The namespace turns "a collision" into "impossible". The only trace in the tree is the placeholder comment at `agentkit/build/tools.go:35` |
 | 16 | Policy matching | an agent's `disabled_tools` accepts an exact name **+** a trailing `*` prefix pattern | **proposal — not implemented** (see §6.3). The tiers moved into the tools' own files, so the one statement left that is about a **namespace** rather than a tool is "this agent gets no MCP tools" — and a prefix is what names a namespace. Today the tables match **exactly** (`agentkit/build/policy.go:39-47`, `agentkit/build/policy.go:94-105`) |
 | 17 | Where a tier is written | **with the tool**: each file's `allows:` names what runs **without a nod**, and everything else asks; ★ there is **no global list** any more — `policy/permissions.yaml` disappears | **proposal — not implemented** (see §6.3, §6.6). ★ a tier is a statement about **one tool**, so it belongs in that tool's file — and there it uses **the same vocabulary** (`http.yaml` says `post`, so it can say `allows: [post]`; the central file had to name the internal `request_post`). ★ the global `deny` goes with it: "not exposed" is said twice already (a file's whitelist, an agent's `disabled_tools`), and a third place is one more to keep in sync — and it was the only one that had to speak the exposed names |
 | 18 | The default tier | **`ask`, everywhere** — the code carries one allow list for the tools it knows are read-only, and a file's `allows:` replaces it for the tools that file provides | ★ one rule for everything: the filesystem tools, the HTTP tool and an MCP server behave the same way, and there is no per-group default to remember. ★ the code's list exists because `task` — the delegation tool — has **no file of its own**, and an agent that cannot delegate without a click cannot delegate at all. An MCP server's tools are **discovered at runtime**: openheron cannot know what `delete_repo` does, and under stdio the server is a child process with the agent's own privileges ⇒ asking by default is the safe side of the trade |
 | 19 | Which MCP servers an agent loads | the agent's own `mcps:` list, in its frontmatter | a server is a **capability**, and a capability belongs to the agent that uses it — the researcher does not need the deploy server. ★ absent = every configured server, `[]` = none (the same pointer trick as `skills`), so the common case is **one** place: write the server file, and every agent that has not narrowed its list gets it |
+| 20 | The knowledge base's directory key | **`corpus_dir`**, not `corpus` | ★ the value is a **directory**, and every other directory in the configuration says so: `data_dir`, `static_dir`. "Corpus" is the information-retrieval term for the collection of documents a search answers from — a user who does not know the term should still be able to read the key. ★ the old key still loads, so the rename does not break a working configuration; it says so in `deferred` (`agentkit/spec/decl/decl.go:352-368`, `agentkit/spec/load.go:187-198`) |
 
 ### "One entity, one file" rather than a single-file partition table
 
@@ -211,7 +212,7 @@ func decodeStrict(data []byte, v any) error {
 }
 ```
 
-Every partition goes through it (`agentkit/spec/load.go:23`, `agentkit/spec/load.go:79`, `agentkit/spec/load.go:99`, `agentkit/spec/load.go:193`, `agentkit/spec/load.go:201`, `agentkit/spec/load.go:128`).
+Every partition goes through it (`agentkit/spec/load.go:23`, `agentkit/spec/load.go:79`, `agentkit/spec/load.go:99`, `agentkit/spec/load.go:207`, `agentkit/spec/load.go:215`, `agentkit/spec/load.go:130`).
 
 **Why strict**: in a lenient mode a misspelled field name **silently falls back to the default**, and "why did my configuration not take effect" is the most expensive class of problem to diagnose. yaml.v3's error carries the line number itself (`yaml.v3@v3.0.1/decode.go:944`): `line N: field X not found in type Y`.
 
@@ -241,9 +242,9 @@ Every entry is produced by `Config.deferKey` (`agentkit/spec/config.go:134-136`)
 |---|---|
 | `agentkit/spec/load.go:41` | the `${ENV}` of `api_key` is not set — the call fails with 401 when it is made |
 | `agentkit/spec/load.go:60` | `models[].summarize_at` is no longer read — the threshold belongs to the agent |
-| `agentkit/spec/load.go:325` | the model declares no `context_window` — automatic compaction is inactive for that agent |
-| `agentkit/spec/load.go:442` | a cap in `policy/limits.yaml` is looser than the global baseline — it has no effect |
-| `agentkit/spec/load.go:447` | the same, for `retry.max_retries` |
+| `agentkit/spec/load.go:337` | the model declares no `context_window` — automatic compaction is inactive for that agent |
+| `agentkit/spec/load.go:437` | a cap in `policy/limits.yaml` is looser than the global baseline — it has no effect |
+| `agentkit/spec/load.go:444` | the same, for `retry.max_retries` |
 | `agentkit/spec/reload.go:82` | a lenient duration did not parse and fell back to the default |
 
 ★ **The last message names `watch.debounce` for every lenient duration.** The bad durations are collected in one global list (`agentkit/spec/decl/decl.go:338-346`) and reported at one place (`agentkit/spec/reload.go:80-84`), so a wrong `tools/http.yaml` timeout also shows up under `watch.debounce`. Read the message as "a lenient duration was wrong", not as "the debounce was wrong".
@@ -403,7 +404,7 @@ greps and globs in the wrong directory.
 |---|---|---|
 | `server.data_dir` (relative) | the **config root** | `agentkit/spec/config.go:229-231` |
 | `server.static_dir` (relative) | the **project root** | `agentkit/spec/config.go:238-244`, used at `main.go:341` |
-| `kb.corpus` (relative) | the **project root** | `kbcmd.go:148` |
+| `kb.corpus_dir` (relative) | the **project root** | `kbcmd.go:148` |
 
 ★ **The split is deliberate: state travels with the configuration, the working tree travels with
 the project.** A relative `data_dir` follows the configuration when the configuration moves
@@ -549,8 +550,8 @@ it: `build.FromConfig` assembles the `common.Config` without a header
 | Field | Type | Description |
 |---|---|---|
 | `id` | `string` | Required (`agentkit/spec/load.go:56-58`). The model identifier handed to the endpoint |
-| `kind` | `string` | `chat` (the default) or `embedding` (`agentkit/spec/decl/decl.go:374-381`). An embedding model cannot be built as a chat model (`agentkit/build/provider.go:26-29`), and the knowledge base refuses to point at anything but an embedding model (`agentkit/spec/load.go:348-351`) |
-| `dimensions` | `int` | The embedding dimension; `0` = unknown, learned at index time (`agentkit/spec/load.go:352-355`) |
+| `kind` | `string` | `chat` (the default) or `embedding` (`agentkit/spec/decl/decl.go:389-396`). An embedding model cannot be built as a chat model (`agentkit/build/provider.go:26-29`), and the knowledge base refuses to point at anything but an embedding model (`agentkit/spec/load.go:362-368`) |
+| `dimensions` | `int` | The embedding dimension; `0` = unknown, learned at index time (`agentkit/spec/load.go:364-367`) |
 | `context_window` | `int` | **0 = unknown** (not "unlimited"). It is the denominator of the compaction threshold — see below |
 | `summarize_at` | `Threshold` | ★ **Deprecated**: still parsed so an old configuration keeps loading, but nothing reads it. The threshold belongs to the agent now (`agentkit/spec/decl/decl.go:45-52`), and the loader says so out loud (`agentkit/spec/load.go:59-63`) |
 | `timeout` | `Duration` | Overrides the provider level. **It has to be allowed** — the provider level can only accommodate the slowest model, and that takes the timeout protection away from the fast ones |
@@ -567,7 +568,7 @@ window is what the agent's `summarize_at` percentage is measured against
 the resolved threshold is above zero (`agentkit/build/summarize.go:36-40`). A model that
 declares no window therefore has **no** threshold: a percentage of nothing is nothing,
 automatic compaction never fires, and openheron says so instead of doing nothing
-quietly (`agentkit/spec/load.go:310-329`).
+quietly (`agentkit/spec/load.go:322-341`).
 
 #### Multiple models: one provider declares several
 
@@ -584,7 +585,7 @@ model: openai/gpt-4o-mini   # the cheap retrieval tier
 
 It parses into `Ref{ProviderID, ModelID}`: `ParseRef` takes the **first** `/`, and
 neither side may be empty — a reference without a `/` is an error
-(`agentkit/spec/load.go:251-260`). The normalized form is the key of `Config.Models`
+(`agentkit/spec/load.go:263-272`). The normalized form is the key of `Config.Models`
 (`agentkit/spec/load.go:64`), and the provider id is the **file name** without the
 extension (`agentkit/spec/load.go:17`).
 
@@ -687,7 +688,7 @@ transport (`llm/common/model.go:60-64`). So:
 	}
 ```
 
-(`agentkit/spec/load.go:280-291`.)
+(`agentkit/spec/load.go:292-303`.)
 
 **Why there is no silent fallback**: a sub-agent that silently inherits the main model
 is a **cost incident**. The same discipline holds here — **a mistyped model name has to
@@ -845,7 +846,7 @@ null pointer a few hundred lines away.
 factory decides the default), not "timeout 0".
 
 > **The trap**: `timeout: 60` (no unit) must be **rejected**, not read as 60 seconds.
-> The custom `Duration` type enforces the string form (`agentkit/spec/decl/decl.go:385-406`):
+> The custom `Duration` type enforces the string form (`agentkit/spec/decl/decl.go:400-421`):
 > a non-string tag is an error — "duration must be a string with a unit (e.g. 60s / 5m);
 > bare numbers are not allowed".
 
@@ -982,10 +983,10 @@ agent:
 ```
 
 The cap lives in **two** places — `server/config.yaml` and `policy/limits.yaml` — and the
-effective one is the **tighter** of the two (`agentkit/spec/load.go:409-414`,
+effective one is the **tighter** of the two (`agentkit/spec/load.go:421-426`,
 `:218-229`); the default is `1` (`agentkit/spec/decl/decl.go:228`).
 
-**The validation happens at startup** (`validateDepth`, `agentkit/spec/load.go:359-375`),
+**The validation happens at startup** (`validateDepth`, `agentkit/spec/load.go:371-387`),
 and it is an **error** rather than a truncation at run time. The assembly layer uses the
 same criterion and simply **does not construct** the next level when the cap is reached
 (`agentkit/build/assemble.go:82`) — two lines of defence: the assembly side is based on
@@ -1034,7 +1035,7 @@ the policy is concerned it is an ordinary tool, so it goes into the list like th
 | `deny` | unioned with what is already there | it is the security boundary |
 | `ask` | **replaced wholesale** | it is a preference, not a security boundary |
 
-The two rules live in the loader (`agentkit/spec/load.go:196-197`); `decl.Policy` itself is only
+The two rules live in the loader (`agentkit/spec/load.go:210-211`); `decl.Policy` itself is only
 two string slices (`agentkit/spec/decl/decl.go:210-213`). ★ With a single `policy/` directory
 there is only one `permissions.yaml`, so the union is a no-op today — but it is the rule the
 loader implements, and the union is what a second layer would have to live with.
@@ -1132,7 +1133,7 @@ written out in `docs/mcp-design.md` §4.
 | `permissions.yaml` | ★ **gone in the proposal** — the tiers moved into the tools' own files, and the global `deny` went with them. Today it is the file above |
 | any other file name | **an error** — a file-name whitelist is stronger than a key-level check: a typo is "the file does not exist", and it fails the moment it is written, instead of surfacing when some key is finally read |
 
-The whitelist is `agentkit/spec/load.go:207`: `policy/ only accepts permissions.yaml and limits.yaml` — in the proposal it would accept `limits.yaml` only.
+The whitelist is `agentkit/spec/load.go:221`: `policy/ only accepts permissions.yaml and limits.yaml` — in the proposal it would accept `limits.yaml` only.
 
 ### 6.4 `server/config.yaml`
 
@@ -1178,7 +1179,7 @@ watch:
 
 Both have to carry a unit (`5m` / `60s`) — `timeout: 300` is rejected, because yaml can
 "successfully" decode an `!!int` node into a string, and only looking at `Decode`'s error would
-miss it (`agentkit/spec/decl/decl.go:385-392`).
+miss it (`agentkit/spec/decl/decl.go:400-407`).
 
 ★ **A downgrade has to make noise**: the broken entry goes into `deferred` and is printed at
 startup together with the other downgrades. Falling back to the default silently is "configured
@@ -1202,7 +1203,7 @@ parse", not as "the watcher misfired".
 | `data_dir` | `string` | `state` | relative to the **config root** (`Service.DataDir`), not the project root, not cwd; an empty string means `state`; the directory is created when it does not exist |
 | `start_timeout` | `LenientDuration` | `60s` | the same value as `agentkit/run.DefaultStartTimeout` (`agentkit/run/runtime.go:26`) |
 | `lease_ttl` | `LenientDuration` | `10m` | how long a run's lease survives without progress; it must be **longer than the provider's own timeout**, or a slow but alive model is fenced out while it is thinking (`agentkit/run/lease.go:20`) |
-| `retry.max_retries` | `int` | `5` | passing 0 uses the default — "not configured" and "configured as 0" are two different things (`agentkit/spec/load.go:430-435`) |
+| `retry.max_retries` | `int` | `5` | passing 0 uses the default — "not configured" and "configured as 0" are two different things (`agentkit/spec/load.go:442-447`) |
 | `agent.max_depth` | `int` | `1` | see §6.2 |
 | `watch.enabled` | `*bool` | `nil` → on | a pointer, to tell "not written" from "written as false" (`agentkit/spec/reload.go:86-91`) |
 | `watch.debounce` | `LenientDuration` | `200ms` | the polling interval is half of it, with a floor of 20ms (`agentkit/spec/reload.go:141-149`) |
@@ -1529,12 +1530,14 @@ ignored:
 | the `tools:` section in `server/config.yaml` | split into `tools/http.yaml` `tools/web_search.yaml` `tools/wikipedia.yaml` | a startup error: `field tools not found in type decl.Server` |
 | `kb/config.yaml` | `tools/kb.yaml` | **silent** — the knowledge base is no longer read, `kb_search` disappears and nothing says so |
 | `ask:` in `policy/permissions.yaml` | the tiers move into the tool's own file: `tools/filesystem.yaml` and `tools/kb.yaml` name what runs **without a nod** in their `allows:` lists | a startup error that names the new home — ★ deliberately **not** silent: a tier that stopped being read would flip those tools from "asks" to "does not ask", which is the wrong way to fail |
+| the `corpus` key in `tools/kb.yaml` | `corpus_dir` | ★ **not silent**: the old key still loads and `deferred` carries a rename notice at startup — ★ the knowledge base keeps working until the key is renamed, so nothing goes dark (`agentkit/spec/load.go:187-198`) |
 
 ★ That "silent" one is the part of this move to watch. `kb/` is not one of the loaded categories
-(`agentkit/spec/config.go:40-66`), so an old `kb/config.yaml` is simply never read: `corpus`
-looks "not configured" — and an empty corpus = the knowledge base off. The symptom is "`kb_search`
-is gone", and the startup log does not say a word. ⇒ when migrating, **`mv` the file first, then
-start** — do not expect the startup error to remind you.
+(`agentkit/spec/config.go:40-66`), so an old `kb/config.yaml` is simply never read: its `corpus`
+key (now `corpus_dir` — see the table above) looks "not configured" — and an empty corpus = the
+knowledge base off. The symptom is "`kb_search` is gone", and the startup log does not say a
+word. ⇒ when migrating, **`mv` the file first, then start** — do not expect the startup error to
+remind you.
 
 #### The full field list
 
@@ -1551,9 +1554,9 @@ start** — do not expect the startup error to remind you.
 | `wikipedia.yaml` | `language` | `string` | `zh` | the language of the wiki |
 | `wikipedia.yaml` | `timeout` | `LenientDuration` | `15s` | the cap on one lookup |
 | `wikipedia.yaml` | `base_url` | `string` | `""` → the official one | the API endpoint (for a self-hosted mirror) |
-| `kb.yaml` | `corpus` | `string` | `""` → off | the corpus directory, **relative to the project root**; an absolute path is rejected (the index and the corpus live and die together) |
+| `kb.yaml` | `corpus_dir` | `string` | `""` → off | the corpus directory, **relative to the project root**; an absolute path is rejected (the index and the corpus live and die together) |
 | `kb.yaml` | `index` | `string` | `default` | the index directory name, landing in `state/kb/<index>/` |
-| `kb.yaml` | `model` | `string` | `""` | the embedding model, `<provider>/<model>`; it must be `kind: embedding`; **required** when `corpus` is non-empty |
+| `kb.yaml` | `model` | `string` | `""` | the embedding model, `<provider>/<model>`; it must be `kind: embedding`; **required** when `corpus_dir` is non-empty |
 | `kb.yaml` | `query_instruction` | `string` | `""` | an instruction prefix added on the query side only |
 | `kb.yaml` | `batch_size` | `int` | `10` | how many entries one embedding request carries at most |
 | `kb.yaml` | `max_batch_chars` | `int` | `1200` | the character cap of one batch's text |
@@ -1574,8 +1577,8 @@ the `web_search.yaml` template mentions a second provider, `searxng`
 (`agentkit/spec/write.go:193`), but the code accepts `duckduckgo` and nothing else — a `searxng`
 value is rejected as an unknown provider (`agentkit/build/nettools.go:204-208`); and the
 `kb.yaml` template says an empty `model` means pure lexical retrieval
-(`agentkit/spec/write.go:209`), but the loader rejects it: `kb.model is required when kb.corpus
-is set` (`agentkit/spec/load.go:339-342`).
+(`agentkit/spec/write.go:210`), but the loader rejects it: `kb.model is required when kb.corpus_dir
+is set` (`agentkit/spec/load.go:360`).
 
 ★ The file name is a **whitelist** (`http.yaml` / `web_search.yaml` / `wikipedia.yaml` /
 `kb.yaml`): an unknown file name is a **hard error at load time**
@@ -1643,8 +1646,8 @@ tool for that agent and nothing else.
 interrupts the turn for a human ✅ ✅. The code's own allow list is what keeps the
 read-only tools and the framework's `task` from asking every single time ✅.
 
-★ The knowledge base (`kb.corpus`) is **not** switched on by the file's presence but by a
-non-empty `corpus` (`agentkit/build/kb.go:15`), and its two tools go through the tiers like
+★ The knowledge base (`kb.corpus_dir`) is **not** switched on by the file's presence but by a
+non-empty `corpus_dir` (`agentkit/build/kb.go:15`), and its two tools go through the tiers like
 everything else: `kb_search` is in `allows:`, and `kb_index` — a write operation — asks
 by default (`tools/kb.yaml`).
 
@@ -1821,7 +1824,7 @@ SKILL.md frontmatter
 
 **`ModelHub` and `agents/*.md` share one reference syntax**: eino passes the raw
 frontmatter string as `name`, and openheron's `Get` splits it with `ParseRef`
-(`agentkit/spec/load.go:251`) into `<provider>/<model>` and looks it up in `Config.Models`
+(`agentkit/spec/load.go:263`) into `<provider>/<model>` and looks it up in `Config.Models`
 (`agentkit/build/provider.go:58-73`). So "which model an agent uses" and "which model a
 skill uses" are the same reference syntax — the user does not have to learn two of them.
 
@@ -2145,13 +2148,13 @@ The verification of the rows that are not obvious from the code:
 | # | Verified by |
 |---|---|
 | 1 | `decodeStrict` decodes file by file onto the **prefilled** struct (`agentkit/spec/config.go:398`), and the process reads exactly **one** configuration root (`agentkit/spec/config.go:157`) |
-| 2 | `server.data_dir` resolves against the **configuration root** (`agentkit/spec/config.go:224` `DataDir`); `server.static_dir` and `kb.corpus` resolve against the **project root** (`agentkit/spec/config.go:238` `ResolveDir`). ★ Two bases, each named in §6 — a single "project root" rule would be wrong for `data_dir` |
+| 2 | `server.data_dir` resolves against the **configuration root** (`agentkit/spec/config.go:224` `DataDir`); `server.static_dir` and `kb.corpus_dir` resolve against the **project root** (`agentkit/spec/config.go:238` `ResolveDir`). ★ Two bases, each named in §6 — a single "project root" rule would be wrong for `data_dir` |
 | 3 | the write gate rejects a literal `api_key` (`agentkit/spec/write.go:473` `checkSecret`) |
 | 4 | `decodeStrict` turns on `yaml.Decoder.KnownFields` (`agentkit/spec/config.go:398`) |
 | 5 | `main.go:198` prints every entry on load; the entries come from `Config.deferKey` (`agentkit/spec/config.go:134`) |
 | 6 | `llm/<provider>.yaml`'s `type` is only checked for non-emptiness (`agentkit/spec/load.go:28`), and `extra` is handed straight to the OpenAI-compatible ACL (`llm/common/option.go:20`) — there is only **one** endpoint dialect here, so "an unsupported provider" cannot occur |
-| 7 | the **defaulted** configuration root is created when it is absent (`agentkit/spec/config.go:187`); the absence of `agents/main.md` **is** a startup error (`agentkit/spec/load.go:270`) |
-| 8 | `ParseRef` (`agentkit/spec/load.go:251`) and `validate` (`agentkit/spec/load.go:269`) |
+| 7 | the **defaulted** configuration root is created when it is absent (`agentkit/spec/config.go:187`); the absence of `agents/main.md` **is** a startup error (`agentkit/spec/load.go:282`) |
+| 8 | `ParseRef` (`agentkit/spec/load.go:263`) and `validate` (`agentkit/spec/load.go:281`) |
 | 9 | `model.WithModel` is a request option (`llm/common/request.go:32`); the instance cache is keyed by agent name + generation (`agentkit/build/pool.go:31`) |
 
 ---
@@ -2264,8 +2267,8 @@ cannot be missed.
 | `agents[].reasoning` | ✅ | — | ✅ | ★ but **a gear name that is not in the vocabulary is not an error, and it is not reported either** — `LevelFields` simply finds nothing (`agentkit/spec/decl/decl.go:67`), so the thinking parameters quietly do not take effect. This is the one remaining "configured but not in effect, and invisible" (§12.1) |
 | `models[].reasoning_default` | ✅ | — | ✅ | when the agent declares no `reasoning`, `RequestOptionsFor` falls back to it (`agentkit/build/provider.go:100`) |
 | `models[].reasoning_field` / `models[].reasoning_field_from` | ✅ | — | ✅ | the endpoint's own field name and where it reads the value from (`agentkit/build/provider.go:146`) |
-| `models[].context_window` | ✅ | ✅ | ✅ | ★ **openheron made it take effect**: it is the denominator of the compaction threshold — `SummarizeAt` takes a percentage of the window (`agentkit/spec/summarize.go:25`). The threshold belongs to the agent, the window to the model; the model also declares no window ⇒ the agent's compaction is inactive, and that is reported in `deferred` (`agentkit/spec/load.go:310`). It is also visible in the introspection response (`api/v2_introspect.go:265`) |
-| `models[].kind` / `models[].dimensions` | ✅ | ✅ | ✅ | they only matter to the knowledge base: `kind: embedding` and the dimension count are validated when `tools/kb.yaml` sets a corpus (`agentkit/spec/load.go:331`) |
+| `models[].context_window` | ✅ | ✅ | ✅ | ★ **openheron made it take effect**: it is the denominator of the compaction threshold — `SummarizeAt` takes a percentage of the window (`agentkit/spec/summarize.go:25`). The threshold belongs to the agent, the window to the model; the model also declares no window ⇒ the agent's compaction is inactive, and that is reported in `deferred` (`agentkit/spec/load.go:322`). It is also visible in the introspection response (`api/v2_introspect.go:265`) |
+| `models[].kind` / `models[].dimensions` | ✅ | ✅ | ✅ | they only matter to the knowledge base: `kind: embedding` and the dimension count are validated when `tools/kb.yaml` sets a corpus directory (`agentkit/spec/load.go:362-368`) |
 | `models[].summarize_at` | ✅ | — | ❌ | **deprecated**: the threshold belongs to the agent, not to the model. The key is still parsed so that an old configuration keeps loading, and it lands in `deferred` with a pointer to the agent's own file (`agentkit/spec/load.go:60`) |
 | `llm/<provider>.yaml`'s `header:` | ✅ | — | ❌ | parsed (`agentkit/spec/decl/decl.go:25`) and **never consumed** — `FromConfig` does not hand it to the endpoint (`agentkit/build/provider.go:36`). Nothing in the tree reads it (§12.1) |
 | `server.data_dir` | ✅ | ✅ | ✅ | resolved against the **configuration root** (`state` → `<root>/.openheron/state`, `agentkit/spec/config.go:224`); an absolute path is returned as-is; the directory is created when it does not exist |
@@ -2329,7 +2332,7 @@ retry:
 
 Strict parsing: **an unknown key errors** (the same discipline as every other
 partition), and an unknown file name in the directory errors too
-(`agentkit/spec/load.go:207`).
+(`agentkit/spec/load.go:221`).
 
 #### ★ Merge semantics: it can only tighten, never relax
 
@@ -2371,8 +2374,8 @@ hardest class of problem to track down.
 | Location | What was done |
 |---|---|
 | `agentkit/spec/decl/decl.go` | `Limits` / `AgentLimit` / `RetryLimit`; `DefaultMaxDepth` / `DefaultMaxRetries` (`agentkit/spec/decl/decl.go:215`) |
-| `agentkit/spec/load.go` | the `limits` branch of `loadPolicy`: **take the stricter** when merging (`agentkit/spec/load.go:199`, `agentkit/spec/load.go:211`); `MaxDepth()` / `MaxRetries()` report the effective value (`agentkit/spec/load.go:409`); `collectNoopLimits()` sends the no-ops to `deferred` (`agentkit/spec/load.go:437`) |
-| `agentkit/spec/load.go` | a tightened depth that conflicts with the declared topology ⇒ **the load fails** (`agentkit/spec/load.go:359` `validateDepth`) |
+| `agentkit/spec/load.go` | the `limits` branch of `loadPolicy`: **take the stricter** when merging (`agentkit/spec/load.go:218`, `agentkit/spec/load.go:227`); `MaxDepth()` / `MaxRetries()` report the effective value (`agentkit/spec/load.go:423`); `collectNoopLimits()` sends the no-ops to `deferred` (`agentkit/spec/load.go:451`) |
+| `agentkit/spec/load.go` | a tightened depth that conflicts with the declared topology ⇒ **the load fails** (`agentkit/spec/load.go:371` `validateDepth`) |
 | `agentkit/spec/write.go` | the write gate **lets `limits.yaml` through** (`agentkit/spec/write.go:91`); `LimitsTemplate()` is for the editor (`agentkit/spec/write.go:218`) |
 | `api/v2_settings.go` | the template table of `/v2/settings` gains one **path-based** key `policy/limits.yaml` (the two file shapes under `policy/` do not fit in one section template) (`api/v2_settings.go:143`) |
 | `api/v2_introspect.go` | `server.maxRetries` / `server.maxDepth` of `/v2/config` report the **effective** value, not the raw one (`api/v2_introspect.go:387`) |
@@ -2436,9 +2439,9 @@ but only two actually run" is the hardest class of problem to track down.
 | the number of packages carrying tests in the root module | `go list -f '{{.ImportPath}} {{len .TestGoFiles}} {{len .XTestGoFiles}}' ./... \| awk '$2+$3>0' \| wc -l` → **20** |
 | the whole test suite is green | `go test ./...` → every package `ok` |
 | `-race` is green now | `go test -race ./...` → every package is `ok`; §11.5 records what each of the four races was |
-| `policy/limits.yaml` only tightens | read `mergeLimits` / `tighter` (`agentkit/spec/load.go:211`) + the cases `TestLimitsTightenButNeverLoosen` and `TestLimitsCannotLoosenTheGlobalBaseline` |
-| a no-op limit goes into `deferred` | `collectNoopLimits` (`agentkit/spec/load.go:437`) + `TestLooserLimitIsReportedAsDeferred` |
-| the effective depth and retry count | `MaxDepth()` / `MaxRetries()` (`agentkit/spec/load.go:409`) + the cases in `agentkit/spec/config_test.go` |
+| `policy/limits.yaml` only tightens | read `mergeLimits` / `tighter` (`agentkit/spec/load.go:218`) + the cases `TestLimitsTightenButNeverLoosen` and `TestLimitsCannotLoosenTheGlobalBaseline` |
+| a no-op limit goes into `deferred` | `collectNoopLimits` (`agentkit/spec/load.go:451`) + `TestLooserLimitIsReportedAsDeferred` |
+| the effective depth and retry count | `MaxDepth()` / `MaxRetries()` (`agentkit/spec/load.go:423`) + the cases in `agentkit/spec/config_test.go` |
 | `models[].context_window` really takes effect | `SummarizeAt` (`agentkit/spec/summarize.go:25`) + `TestSummarizeAtResolvesAgainstTheWindow` |
 | `models[].summarize_at` is deprecated but still parsed | the comment on `decl.Model.SummarizeAt` (`agentkit/spec/decl/decl.go:45`) + the `deferred` entry (`agentkit/spec/load.go:60`) + `TestTheOldModelThresholdIsReportedNotFatal` |
 | `llm/<provider>.yaml`'s `header:` has no consumer | `decl.Provider.Header` (`agentkit/spec/decl/decl.go:25`) and `FromConfig` (`agentkit/build/provider.go:36`) — nothing in the tree reads the field |
@@ -2464,19 +2467,19 @@ but only two actually run" is the hardest class of problem to track down.
 | Three-level configuration-root resolution (explicit → env → the project root's own directory) | ✅ | `agentkit/spec/config.go:144` |
 | **No upward search** | ✅ | the `NewService` comment (`agentkit/spec/config.go:152`); `TestTheConfigRootIsNeverSearchedForUpwards` |
 | `${ENV}` missing ⇒ a reminder (does not block) + `@file:` | ✅ | `agentkit/spec/expand.go:9` `expandValue`, `agentkit/spec/load.go:41` |
-| `Duration` requires a unit | ✅ | `agentkit/spec/decl/decl.go:385` |
+| `Duration` requires a unit | ✅ | `agentkit/spec/decl/decl.go:400` |
 | `LenientDuration` degrades + records `deferred` | ✅ | `agentkit/spec/decl/decl.go:325`, `agentkit/spec/reload.go:80` |
 | frontmatter splitting | ✅ | `agentkit/spec/expand.go:48` `splitFrontmatter` |
-| model reference validation (no silent degradation) | ✅ | `agentkit/spec/load.go:251` `ParseRef`, `agentkit/spec/load.go:269` `validate` |
-| `subagents` graph validation (a dangling reference + a cycle) | ✅ | `agentkit/spec/load.go:453` `validateAgentGraph`, `agentkit/spec/load.go:470` `detectCycle` |
-| `deny` is the union; `ask` is **replaced** | ✅ | `agentkit/spec/load.go:196` (the `union` of `deny`) and `agentkit/spec/load.go:197` (`ask` is assigned, not merged) |
+| model reference validation (no silent degradation) | ✅ | `agentkit/spec/load.go:263` `ParseRef`, `agentkit/spec/load.go:281` `validate` |
+| `subagents` graph validation (a dangling reference + a cycle) | ✅ | `agentkit/spec/load.go:467` `validateAgentGraph`, `agentkit/spec/load.go:484` `detectCycle` |
+| `deny` is the union; `ask` is **replaced** | ✅ | `agentkit/spec/load.go:210` (the `union` of `deny`) and `agentkit/spec/load.go:211` (`ask` is assigned, not merged) |
 | the fallback `allow` | ✅ | `decl.Policy.TierOf` (`agentkit/spec/decl/decl.go:240`) |
 | `envOr` → `cfg.*` | ✅ | `main.go:459` `override` (used at `main.go:341`) |
 | `.openheron/state/` replaces `./data` | ✅ | `config.Service.DataDir("")` (`agentkit/spec/config.go:224`) |
-| `MaxRetries` is configurable | ✅ | `decl.RetryCfg.MaxRetries` (`agentkit/spec/decl/decl.go:348`) → `Config.MaxRetries()` (`agentkit/spec/load.go:416`) |
+| `MaxRetries` is configurable | ✅ | `decl.RetryCfg.MaxRetries` (`agentkit/spec/decl/decl.go:348`) → `Config.MaxRetries()` (`agentkit/spec/load.go:428`) |
 | skills auto-detect `.openheron/skills` | ✅ | `agentkit/build/skill.go:188` `resolveSkillsDir` / `probeProjectSkills` |
 | the write gate rejects a literal secret | ✅ | `agentkit/spec/write.go:473` `checkSecret` |
-| `policy/limits.yaml` (the limit rules) | ✅ | `agentkit/spec/load.go:199`, `agentkit/spec/decl/decl.go:215` |
+| `policy/limits.yaml` (the limit rules) | ✅ | `agentkit/spec/load.go:218`, `agentkit/spec/decl/decl.go:215` |
 | ~~`chatmodel.New` reads the environment directly~~ | ✅ deleted | the package is gone; it is `llm/common` now |
 | the `mcps/` partition + the MCP provider | ❌ **not implemented** | the design is in [mcp-design.md](mcp-design.md); the configuration surface is §6.7 of this document |
 | policy prefix matching (a trailing `*`) | ❌ **not implemented** | the matching semantics are §6.3 of this document |

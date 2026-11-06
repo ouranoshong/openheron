@@ -184,6 +184,18 @@ func (c *Config) loadKB(data []byte) error {
 	if err := decodeTool(data, &k, toolHints["kb"]); err != nil {
 		return err
 	}
+	// ★ The old `corpus` key still loads — a rename must not break a
+	//   working configuration. It only says so, in `deferred`, and the
+	//   new key wins when both are present.
+	if k.CorpusLegacy != "" {
+		c.deferKey("tools/kb.yaml: the key `corpus` was renamed to `corpus_dir` — " +
+			"the value is a directory, and every other directory key says so " +
+			"(`data_dir`, `static_dir`); rename it to keep the notice away")
+		if k.CorpusDir == "" {
+			k.CorpusDir = k.CorpusLegacy
+		}
+	}
+	k.CorpusLegacy = ""
 	c.KB = k
 	return nil
 }
@@ -331,15 +343,15 @@ func (c *Config) noticeCompactionWindows(ids []string) {
 }
 
 func (c *Config) validateKB() error {
-	if c.KB.Corpus == "" {
+	if c.KB.CorpusDir == "" {
 		return nil
 	}
-	if filepath.IsAbs(c.KB.Corpus) {
-		return fmt.Errorf("kb.corpus must be relative to the project root, got an absolute path %q; "+
-			"the index and its corpus must have the same lifetime", c.KB.Corpus)
+	if filepath.IsAbs(c.KB.CorpusDir) {
+		return fmt.Errorf("kb.corpus_dir must be relative to the project root, got an absolute path %q; "+
+			"the index and its corpus must have the same lifetime", c.KB.CorpusDir)
 	}
 	if c.KB.Model == "" {
-		return fmt.Errorf("kb.model is required when kb.corpus is set; "+
+		return fmt.Errorf("kb.model is required when kb.corpus_dir is set; "+
 			"it must reference a model declared with kind: embedding under %s/", DirLLM)
 	}
 	ref, _ := ParseRef(c.KB.Model)
