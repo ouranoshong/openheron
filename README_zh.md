@@ -55,8 +55,9 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 `policy/permissions.yaml`、`policy/limits.yaml` 和 `server/config.yaml`。已存在的文件
 **保留不覆盖**（除非加 `--force`），所以在一个已经配好的项目里跑它是安全的。
 
-`tools/` 默认**不写** —— 文件存在即启用，用哪些工具得由你来定；加 `--tools` 才会写
-`tools/http.yaml`、`tools/web_search.yaml`、`tools/wikipedia.yaml` 和 `tools/kb.yaml`。
+`tools/` 默认**不写** —— 配置缺失的 provider 什么都不挂，所以写下这个文件才是把工具挂上去
+的那一步，用哪些工具得由你来定；加 `--tools` 才会写 `tools/http.yaml`、
+`tools/web_search.yaml`、`tools/wikipedia.yaml` 和 `tools/kb.yaml`。
 
 ## 命令行
 
@@ -87,7 +88,7 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 | `agents/` | 每个 agent 一个 `.md`：frontmatter + 正文（正文就是提示词） | ✅ |
 | `llm/` | 每个厂商一个 `.yaml`：端点、密钥、模型清单、思考档位表 | ✅ |
 | `policy/` | `permissions.yaml`（审批档位）、`limits.yaml`（配额上限） | ✅ |
-| `tools/` | 外部工具与知识库配置 —— **文件存在即启用** | ✅ |
+| `tools/` | 外部工具与知识库配置 —— 配置缺失的 provider 什么都不挂 | ✅ |
 | `skills/` | `<name>/SKILL.md`，eino 原生 skill 约定 | ❌ |
 | `server/` | 进程自身参数：监听地址、目录、超时、深度上限 | ❌ 需重启 |
 | `state/` | 会话与 checkpoint（自动创建，**不要提交**） | — |

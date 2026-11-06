@@ -66,9 +66,10 @@ you run? Download `install.sh` from the
 `server/config.yaml`. Existing files are **kept, not overwritten** (unless you pass
 `--force`), so running it in an already-configured project is safe.
 
-`tools/` is **not** written by default — a file's presence is the switch that turns a
-tool on, so which tools exist is yours to decide. Pass `--tools` to get
-`tools/http.yaml`, `tools/web_search.yaml`, `tools/wikipedia.yaml` and `tools/kb.yaml`.
+`tools/` is **not** written by default — a provider whose configuration is absent mounts
+nothing, so writing the file is what turns the tool on, and which tools exist is yours to
+decide. Pass `--tools` to get `tools/http.yaml`, `tools/web_search.yaml`,
+`tools/wikipedia.yaml` and `tools/kb.yaml`.
 
 ## Command line
 
@@ -100,7 +101,7 @@ not silently grow an empty configuration tree.
 | `agents/` | One `.md` per agent: frontmatter + body (the body is the prompt) | ✅ |
 | `llm/` | One `.yaml` per vendor: endpoint, secret, model list, reasoning tier table | ✅ |
 | `policy/` | `permissions.yaml` (approval tiers), `limits.yaml` (quota caps) | ✅ |
-| `tools/` | External tools and the knowledge-base config — **enabled by the file's presence** | ✅ |
+| `tools/` | External tools and the knowledge-base config — a provider without a configuration mounts nothing | ✅ |
 | `skills/` | `<name>/SKILL.md`, eino's native skill convention | ❌ |
 | `server/` | The process's own parameters: listen address, directories, timeouts, depth cap | ❌ needs a restart |
 | `state/` | Sessions and checkpoints (auto-created, **do not commit**) | — |

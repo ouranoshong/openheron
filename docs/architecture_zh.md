@@ -262,7 +262,8 @@ skills 目录下文件夹的白名单，它以 `scopedSkillBackend`（`agentkit/
 | 知识库 | `build/kb.go` | `kb_search` `kb_index` |
 | 百科 | `build/nettools.go:236` | `wikipedia` |
 
-对外的网络工具是**文件存在即启用**（`tools/*.yaml`），不需要改代码。★ 文件系统中间件是
+对外的网络工具**不用改代码**：配置缺失的 provider 什么都不挂，所以写下这个文件才是把工具
+挂上去的那一步（`tools/*.yaml`）。★ 文件系统中间件是
 例外 —— `fsx.New` 无条件挂载它（`agentkit/build/snapshot.go:56`），知识库则是由它的
 **corpus** 开关，而不是由文件开关。
 ★ 注意 `openheron init` **默认不写** `tools/` 下的任何文件 —— 那一整个目录要用户自己写；

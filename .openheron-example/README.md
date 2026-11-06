@@ -13,7 +13,7 @@ cp -r .openheron-example/{agents,llm,policy,skills} /your/project/.openheron/
 | `policy/permissions.yaml` | approval tiers — `ask` / `deny` (**anything not named is allowed**) |
 | `server/config.yaml` | process parameters — listen address / directories / timeouts / **not hot-reloaded** |
 | `skills/<name>/SKILL.md` | eino native skill convention |
-| `tools/<tool>.yaml` | external tools and the knowledge base — **the file's presence = enabled** (this sample ships none; external tools are all off by default) |
+| `tools/<tool>.yaml` | external tools and the knowledge base — **a provider without a configuration mounts nothing** (this sample ships none; external tools are all off by default) |
 
 `state/` (sessions and checkpoints) is created automatically on first startup —
 **do not** commit it.

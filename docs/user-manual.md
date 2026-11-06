@@ -355,8 +355,8 @@ loosen.
 
 ### 4.4 External tools (`tools/`)
 
-**Enabled by the presence of the file** — no code change needed. Four file names are
-recognised today:
+**No code change needed** — a provider whose configuration is absent mounts nothing, so
+writing the file is what turns the tool on. Four file names are recognised today:
 
 | File | Provides |
 |---|---|

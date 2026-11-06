@@ -25,7 +25,7 @@ func initCmd(args []string, stdout io.Writer) error {
 	baseURL := fs.String("base-url", "", "endpoint for a new provider file")
 	env := fs.String("env", "", "environment variable holding the api key")
 	noPolicy := fs.Bool("no-policy", false, "do not write the policy/ section (permissions.yaml and limits.yaml)")
-	tools := fs.Bool("tools", false, "also write the tool configurations under tools/ (the file's presence enables the tool)")
+	tools := fs.Bool("tools", false, "also write the tool configurations under tools/ (a provider without a configuration mounts nothing)")
 	force := fs.Bool("force", false, "overwrite files that already exist")
 	dryRun := fs.Bool("dry-run", false, "report what would be written, write nothing")
 	asJSON := fs.Bool("json", false, "machine-readable output")
