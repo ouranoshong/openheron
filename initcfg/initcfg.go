@@ -2,9 +2,11 @@ package initcfg
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -68,14 +70,12 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 		p.Notes = append(p.Notes, fmt.Sprintf(
 			"agent %q is already declared; it is kept as is", spec.DefaultAgentID))
 	} else {
-		for _, rel := range []string{"agents/main.md", "agents/task.md"} {
-			content, err := renderTemplate(rel, map[string]string{
-				"model": choice.Ref,
-			}, nil)
-			if err != nil {
-				return nil, err
-			}
-			p.add(rel, content)
+		// ★ The whole partition, not a list of files: the templates package
+		//   holds the files, and a new one comes along on its own.
+		if err := copySection(p, spec.DirAgent, map[string]string{
+			"model": choice.Ref,
+		}); err != nil {
+			return nil, err
 		}
 	}
 
@@ -128,23 +128,8 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 	if !opts.Tools {
 		p.Notes = append(p.Notes, "tools/ was skipped (--tools writes the tool configurations)")
 	} else {
-		tpls := spec.ToolTemplates()
-		rels := make([]string, 0, len(tpls))
-		for rel := range tpls {
-			rels = append(rels, rel)
-		}
-		sort.Strings(rels)
-		for _, rel := range rels {
-			has, err := rootHas(svc, spec.DirTools, path.Base(rel))
-			if err != nil {
-				return nil, err
-			}
-			if has {
-				p.Notes = append(p.Notes,
-					fmt.Sprintf("%s is already declared; it is kept as is", rel))
-				continue
-			}
-			p.add(rel, []byte(tpls[rel]))
+		if err := copySection(p, spec.DirTools, nil); err != nil {
+			return nil, err
 		}
 	}
 
@@ -160,34 +145,53 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 	//   editor hands out its own copy (the editor is served by the API,
 	//   and the API cannot import this package — it would be a cycle),
 	//   and a test pins the two against each other.
-	content, err := renderTemplate("mcps/example.yaml", nil, nil)
-	if err != nil {
+	if err := copySection(p, spec.DirMCP, nil); err != nil {
 		return nil, err
 	}
-	p.add("mcps/example.yaml", content)
 
 	// ── server ──────────────────────────────────────────────────────────
 	//
 	// ★ server/ is not hot-reloaded and the config editor may not write it,
 	//   so init writes it directly (see Apply). The values are the code's own
 	//   defaults: writing them changes nothing, it only makes them visible.
-	hasServer, err := rootHas(svc, spec.DirServer, "config.yaml")
-	if err != nil {
+	if err := copySection(p, spec.DirServer, nil); err != nil {
 		return nil, err
 	}
-	if hasServer {
-		p.Notes = append(p.Notes, "server/config.yaml is already declared; it is kept as is")
-	} else {
-		content, err := renderTemplate("server/config.yaml", nil, nil)
-		if err != nil {
-			return nil, err
-		}
-		p.add("server/config.yaml", content)
-		p.Notes = append(p.Notes,
-			"server/ is not hot-reloaded — it configures the process, so it takes effect on the next start")
-	}
+	p.Notes = append(p.Notes,
+		"server/ is not hot-reloaded — it configures the process, so it takes effect on the next start")
 
 	return p, nil
+}
+
+// copySection copies one partition's templates into the plan.
+//
+// ★ The **templates package** decides which files a partition holds; this
+//
+//	function decides what to do with them. ★ A file name is the template's
+//	business: adding a template to the package must not mean adding a
+//	name here.
+//
+// ★ The existence check is p.add's: a file that is already there is
+//
+//	skipped and reported, never overwritten.
+//
+// ★ The llm/ partition is the one that does not come here: its files are
+//
+//	alternatives — the provider's own template and the generic fallback —
+//	and a partition of alternatives is not a partition to copy.
+func copySection(p *Plan, dir string, placeholders map[string]string) error {
+	files, err := templates.Dir(dir)
+	if err != nil {
+		return err
+	}
+	for _, rel := range slices.Sorted(maps.Keys(files)) {
+		content, err := renderTemplate(rel, placeholders, nil)
+		if err != nil {
+			return err
+		}
+		p.add(rel, content)
+	}
+	return nil
 }
 
 func (p *Plan) Apply(svc *spec.Service) error {

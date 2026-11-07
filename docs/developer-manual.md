@@ -259,6 +259,14 @@ Say you want a new `mcps/` directory:
    (the agents' frontmatter carries the available models) stay in
    `spec.Template(catDir, …)`.
 
+   ★ **init copies a partition by its directory, not by a list of file names.**
+   `initcfg`'s `copySection` asks the templates package what the partition holds
+   and copies what comes back — ★ so a template file that appears in
+   `agentkit/templates/files/<dir>/` is written by init without a line of Go
+   changing. ★ The llm/ partition is the one exception: its files are
+   alternatives (the provider's own template and the generic fallback), and a
+   partition of alternatives is not a partition to copy.
+
 #### The `mcps/` partition
 
 The `mcps/` partition is one file per MCP server, and the file's presence **is** the
