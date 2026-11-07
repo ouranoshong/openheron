@@ -405,9 +405,15 @@ methods: [get]
 allows: [request_get]
 ```
 
-★ 没有自己文件的内置工具 —— 文件系统的只读工具、委派工具、
-skill 读取器 —— 直接放行，代码认得它们。别的都要问：
-`write_file`、`edit_file`、`execute`。
+★ 代码自带一份**缺省**清单 —— 文件系统的读取类、委派类、skill 读取器
+直接放行，而文件只能往上加。别的都要问：
+`write_file`、`edit_file`、`execute`。★ 这三个也有自己的文件，想留给一个
+没人盯着的 agent，就在那里放宽它们：
+
+```yaml
+# tools/filesystem.yaml
+allows: [write_file, edit_file, execute]
+```
 
 ★ **「不被暴露」只说两处**：工具自己文件的 `allows:` 清单，
 以及某个 agent 自己的 `disabled_tools`。要收窄**某一个** agent，

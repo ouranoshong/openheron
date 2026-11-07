@@ -430,9 +430,15 @@ methods: [get]
 allows: [request_get]
 ```
 
-★ The built-in tools that have no file of their own — the filesystem readers,
-the delegation tools, the skill reader — run without a nod; the code knows
-them. Everything else asks: `write_file`, `edit_file`, `execute`.
+★ The code carries a **default** list — the filesystem readers, the delegation
+tools and the skill reader run without a nod, and a file only ever adds to it.
+Everything else asks: `write_file`, `edit_file`, `execute`. ★ Those three have
+a file too, and it is where you widen them for an agent you leave alone:
+
+```yaml
+# tools/filesystem.yaml
+allows: [write_file, edit_file, execute]
+```
 
 ★ **"Not exposed" is said in exactly two places**: a tool's own `allows:` list
 and an agent's own `disabled_tools`. To narrow down **one** agent, use its
