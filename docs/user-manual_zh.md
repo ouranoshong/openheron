@@ -120,8 +120,8 @@ HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
 - **配置**也落在那儿：`.openheron/` 在第一次启动时写好，
   从此它就是你的文件，你随便改。
 - **密钥**留在宿主上，沙箱里只有哨兵值。
-- **审批**照旧，而且策略是你的：工作区里的 `policy/permissions.yaml`
-  决定哪些工具先问一声。
+- **审批**照旧，而且策略是你的：工作区里的一份 `policy/permissions.yaml`
+  决定哪些工具先问一声；没有它就用代码的缺省。
 
 ★ 分步教程见
 [`sandbox-kit/TUTORIAL.md`](../sandbox-kit/TUTORIAL.md)（中文：
@@ -146,7 +146,7 @@ openheron
 
 打开 <http://localhost:8080>。
 
-`openheron init` 会写七个文件：
+`openheron init` 会写五个文件：
 
 ```
 your/project/
@@ -158,14 +158,15 @@ your/project/
     │   └── deepseek.yaml    # 模型档案
     ├── mcps/
     │   └── example.yaml      # 一个 MCP 服务器的示例（它的 command 是占位符）
-    ├── policy/
-    │   ├── permissions.yaml # 审批策略
-    │   └── limits.yaml      # 配额上限
     └── server/
         └── config.yaml      # 进程自身参数（不热重载）
 ```
 
 ★ `mcps/` 下那个文件是**示例**，不是配置 —— 见 §4.7。
+
+★ **没有 `policy/` 下的文件。** 审批档位与配额上限都有缺省值，而一份「说的就是代码已经在做的事」
+的文件是噪音 —— ★ 配置树里的噪音会被当成意思读。要自己定档位，就自己写
+`policy/permissions.yaml`（§4.3）。
 
 ★ **已存在的文件不会被覆盖**（除非加 `--force`），所以在一个已经配好的项目里跑它是安全的。
 
@@ -178,7 +179,6 @@ your/project/
 | `--model <name>` | 选模型，默认 `deepseek-flash` |
 | `--base-url <url>` | 厂商端点（**含路径**，从厂商文档抄） |
 | `--env <NAME>` | 密钥的环境变量名，默认 `<PROVIDER>_API_KEY` |
-| `--no-policy` | 不生成 `policy/` 目录（`permissions.yaml` 与 `limits.yaml`） |
 | `--tools` | 同时生成 `tools/` 下的工具配置 |
 | `--force` | 覆盖已存在的文件 |
 | `--dry-run` | 只打印要写什么，不落盘 |

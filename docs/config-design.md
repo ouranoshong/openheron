@@ -144,8 +144,9 @@ Its `README.md` lists the three rules that trip people up most: an unset `${ENV}
 >   With `--config-dir` it writes there, otherwise under `<target>/.openheron`.
 >   The design is in `init-design.md` (upstream).
 >
-> What it writes: `agents/main.md`, `agents/task.md`, `llm/<provider>.yaml`, `policy/permissions.yaml`, `policy/limits.yaml`, `server/config.yaml` — and, with `--tools`, the tool configurations under `tools/` (`initcmd.go:142-154`, `initcfg/initcfg.go:77-86`, `initcfg/initcfg.go:110`, `initcfg/initcfg.go:124-151`, `initcfg/initcfg.go:161-178`).
+> What it writes: `agents/main.md`, `agents/task.md`, `llm/<provider>.yaml`, `mcps/example.yaml`, `server/config.yaml` — and, with `--tools`, the tool configurations under `tools/` (`initcmd.go:138-150`, `initcfg/initcfg.go:77-86`, `initcfg/initcfg.go:110`, `initcfg/initcfg.go:167`, `initcfg/initcfg.go:185`).
 > ★ **The `tools/` section is opt-in**: `init` does not write it unless `--tools` is given — a provider whose configuration is absent returns nothing, so writing the file is what mounts the tool (`agentkit/build/nettools.go`).
+> ★ **There is no `policy/` section**: `permissions.yaml` would list exactly the tiers the code already defaults to, and `limits.yaml` writes 0, which means "no limit — fall back to the global value". ★ A file that says what the code already does is noise, and noise in a configuration tree is read as meaning. The partition stays — a user who wants a tier of their own writes the file, and the configuration editor scaffolds it.
 
 ---
 
@@ -1036,9 +1037,11 @@ ask:   [write_file, edit_file, execute, kb_index]
 deny:  []
 ```
 
-`defaultPolicy` is `agentkit/spec/defaults.go:9-14`, and the shipped template writes the same
-list out (`initcfg/templates/policy/permissions.yaml`) — the file is visible and editable rather
-than implied.
+`defaultPolicy` is `agentkit/spec/defaults.go:9-14`, and `openheron init` writes **no**
+`policy/permissions.yaml`: the file would say exactly what the code already does, and a file
+that says nothing is read as meaning. ★ The partition is still there — the configuration
+editor scaffolds the file (`agentkit/spec/write.go:160`), and a user who wants a tier of their
+own writes it by hand.
 
 ★ openheron asks for **four** tools by default, not three: `write_file`, `edit_file`, `execute`
 — and **`kb_index`**, because indexing the knowledge base writes to the index on disk. As far as

@@ -169,12 +169,16 @@ cp -r .openheron-example/{agents,llm,policy,skills} /your/project/.openheron/
 >   给了 `--config-dir` 就写到那儿，否则写 `<目标目录>/.openheron`。
 >   方案见 `init-design.md`（upstream）。
 >
-> 它写什么：`agents/main.md`、`agents/task.md`、`llm/<provider>.yaml`、`policy/permissions.yaml`、
-> `policy/limits.yaml`、`server/config.yaml` —— 加上 `--tools` 时才写 `tools/` 下的工具配置
-> （`initcmd.go:142-154`、`initcfg/initcfg.go:77-86`、`initcfg/initcfg.go:110`、
-> `initcfg/initcfg.go:124-151`、`initcfg/initcfg.go:161-178`）。
+> 它写什么：`agents/main.md`、`agents/task.md`、`llm/<provider>.yaml`、`mcps/example.yaml`、
+> `server/config.yaml` —— 加上 `--tools` 时才写 `tools/` 下的工具配置
+> （`initcmd.go:138-150`、`initcfg/initcfg.go:77-86`、`initcfg/initcfg.go:110`、
+> `initcfg/initcfg.go:167`、`initcfg/initcfg.go:185`）。
 > ★ **`tools/` 这一段是可选的**：没有 `--tools` 时 `init` 不写它 —— 配置缺失的 provider 返回空，
 > 所以写下这个文件才是把工具挂上去的那一步（`agentkit/build/nettools.go`）。
+> ★ **没有 `policy/` 这一段**：`permissions.yaml` 列的正好是代码已经默认的那几个档位，
+> 而 `limits.yaml` 写 0，意思是「不限 —— 回落到全局值」。★ 一份「说的就是代码已经在做的事」
+> 的文件是噪音，而配置树里的噪音会被当成意思读。分区还在 —— 要自己定档位就自己写那个文件，
+> 配置编辑器也给它备了脚手架。
 
 ---
 
@@ -1008,8 +1012,10 @@ ask:   [write_file, edit_file, execute, kb_index]
 deny:  []
 ```
 
-`defaultPolicy` 在 `agentkit/spec/defaults.go:9-14`，而随包发布的模板把同样这张清单写出来
-（`initcfg/templates/policy/permissions.yaml`）—— 这个文件是看得见、改得动的，而不是靠约定隐含的。
+`defaultPolicy` 在 `agentkit/spec/defaults.go:9-14`，而 `openheron init` **不写**
+`policy/permissions.yaml`：那个文件说的正好就是代码已经在做的事，而一份什么都不说的文件会被
+当成意思读。★ 分区还在 —— 配置编辑器给它备了脚手架（`agentkit/spec/write.go:160`），
+要自己定档位就自己写。
 
 ★ openheron 缺省要**四**个工具，不是三个：`write_file`、`edit_file`、`execute`
 —— 以及 **`kb_index`**，因为给知识库建索引会往磁盘上的索引里写。就策略而言它是个普通工具，

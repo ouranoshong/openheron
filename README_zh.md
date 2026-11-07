@@ -64,7 +64,7 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 | 命令 | 作用 |
 |---|---|
 | `openheron [--config-dir <path>] [--project-root <path>]` | 启动服务 |
-| `openheron init [--dir] [--model] [--provider] [--base-url] [--env] [--no-policy] [--tools] [--force] [--dry-run] [--json]` | 生成最小可运行配置 |
+| `openheron init [--dir] [--model] [--provider] [--base-url] [--env] [--tools] [--force] [--dry-run] [--json]` | 生成最小可运行配置 |
 | `openheron kb index [--config-dir] [--json] [files...]` | 给知识库建索引 |
 | `openheron kb search [--config-dir] <query>` | 检索知识库 |
 | `openheron kb status [--config-dir] [--json]` | 看索引现状 |

@@ -76,7 +76,7 @@ decide. Pass `--tools` to get `tools/http.yaml`, `tools/web_search.yaml`,
 | Command | Effect |
 |---|---|
 | `openheron [--config-dir <path>] [--project-root <path>]` | Start the server |
-| `openheron init [--dir] [--model] [--provider] [--base-url] [--env] [--no-policy] [--tools] [--force] [--dry-run] [--json]` | Generate a minimal runnable configuration |
+| `openheron init [--dir] [--model] [--provider] [--base-url] [--env] [--tools] [--force] [--dry-run] [--json]` | Generate a minimal runnable configuration |
 | `openheron kb index [--config-dir] [--json] [files...]` | Build the knowledge-base index |
 | `openheron kb search [--config-dir] <query>` | Search the knowledge base |
 | `openheron kb status [--config-dir] [--json]` | Inspect the index |

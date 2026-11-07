@@ -149,7 +149,7 @@ func TestInitInAnEmptyDirProducesARunnableConfig(t *testing.T) {
 	e := newEnv(t)
 	p := e.plan(Options{})
 
-	want := []string{"agents/main.md", "agents/task.md", "llm/deepseek.yaml", "policy/permissions.yaml"}
+	want := []string{"agents/main.md", "agents/task.md", "llm/deepseek.yaml", "mcps/example.yaml"}
 	got := rels(p)
 	for _, w := range want {
 		if !hasRel(got, w) {
@@ -276,6 +276,24 @@ func TestAnExistingPolicyIsNotOverwritten(t *testing.T) {
 	}
 }
 
+// ★ init writes no policy/ file at all: both of them would say what the
+// code already does, and a file that says nothing is read as meaning.
+func TestInitWritesNoPolicyFile(t *testing.T) {
+	e := newEnv(t)
+	p := e.plan(Options{})
+	for _, rel := range []string{"policy/permissions.yaml", "policy/limits.yaml"} {
+		if hasRel(rels(p), rel) {
+			t.Fatalf("%s must not be written: %v", rel, rels(p))
+		}
+	}
+	if err := p.Apply(e.svc()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(e.root, "policy")); err == nil {
+		t.Fatal("policy/ must not be created")
+	}
+}
+
 func TestAnExistingPolicyKeepsItsOwnAskList(t *testing.T) {
 	e := newEnv(t)
 	e.write("policy/permissions.yaml", userPolicyYAML)
@@ -296,8 +314,6 @@ func TestNothingIsWrittenWhenEverythingIsAlreadyThere(t *testing.T) {
 	e := newEnv(t)
 	e.write("llm/openai.yaml", userProviderYAML)
 	e.write("agents/main.md", userAgentMD)
-	e.write("policy/permissions.yaml", userPolicyYAML)
-	e.write("policy/limits.yaml", "agent:\n  max_depth: 0\n")
 	e.write("server/config.yaml", "listen_addr: \":8080\"\n")
 	// ★ The MCP example is a loadable file: a file under mcps/ defines a
 	//   server, so an example that cannot be parsed is a configuration
@@ -326,8 +342,8 @@ func TestOnlyTheMissingFilesAreWritten(t *testing.T) {
 	if hasRel(got, "agents/main.md") {
 		t.Fatalf("the existing agent must not be rewritten: %v", got)
 	}
-	if !hasRel(got, "policy/permissions.yaml") {
-		t.Fatalf("the missing policy must be written: %v", got)
+	if !hasRel(got, "mcps/example.yaml") {
+		t.Fatalf("the missing MCP example must be written: %v", got)
 	}
 	if hasRel(got, "llm/openai.yaml") {
 		t.Fatalf("the existing provider must be reused, not copied: %v", got)
@@ -571,43 +587,6 @@ func TestTheServerConfigurationIsWrittenEvenThoughTheEditorMayNotWriteIt(t *test
 	}
 	if _, err := spec.ValidatePath("server/config.yaml"); err == nil {
 		t.Fatal("the config editor must still refuse to write server/")
-	}
-}
-
-// ── the limits ──────────────────────────────────────────────────────────────
-
-func TestTheLimitsAreWritten(t *testing.T) {
-	e := newEnv(t)
-	p := e.plan(Options{})
-	if !hasRel(rels(p), "policy/limits.yaml") {
-		t.Fatalf("the limits must be written: %v", rels(p))
-	}
-	if err := p.Apply(e.svc()); err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-	got, err := os.ReadFile(filepath.Join(e.root, "policy", "limits.yaml"))
-	if err != nil {
-		t.Fatalf("read the limits: %v", err)
-	}
-	// ★ One source of truth: the config editor scaffolds the same file.
-	if string(got) != spec.LimitsTemplate() {
-		t.Fatalf("the written limits differ from the canonical template:\n%s", got)
-	}
-}
-
-func TestNoPolicySkipsTheWholePolicySection(t *testing.T) {
-	e := newEnv(t)
-	p := e.plan(Options{NoPolicy: true})
-	for _, rel := range []string{"policy/permissions.yaml", "policy/limits.yaml"} {
-		if hasRel(rels(p), rel) {
-			t.Fatalf("%s must be skipped: %v", rel, rels(p))
-		}
-	}
-	if err := p.Apply(e.svc()); err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(e.root, "policy")); err == nil {
-		t.Fatal("policy/ must not be created")
 	}
 }
 

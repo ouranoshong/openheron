@@ -131,8 +131,9 @@ same agent.
 - The **configuration** lands in that workspace too: `.openheron/` is written
   on the first start, and it is yours to edit from then on.
 - The **key** stays on the host; the sandbox holds a sentinel.
-- **Approvals** still apply, and the policy is yours:
-  `policy/permissions.yaml` in the workspace decides which tools ask first.
+- **Approvals** still apply, and the policy is yours: a
+  `policy/permissions.yaml` in the workspace decides which tools ask first, and
+  without one the code's defaults apply.
 
 ★ The step-by-step guide is
 [`sandbox-kit/TUTORIAL.md`](../sandbox-kit/TUTORIAL.md) (Chinese:
@@ -157,7 +158,7 @@ openheron
 
 Open <http://localhost:8080>.
 
-`openheron init` writes seven files:
+`openheron init` writes five files:
 
 ```
 your/project/
@@ -169,14 +170,15 @@ your/project/
     │   └── deepseek.yaml    # model profile
     ├── mcps/
     │   └── example.yaml      # an MCP server example (its command is a placeholder)
-    ├── policy/
-    │   ├── permissions.yaml # approval policy
-    │   └── limits.yaml      # caps on quantities
     └── server/
         └── config.yaml      # process parameters (not hot-reloaded)
 ```
 
 ★ The file under `mcps/` is an **example**, not a configuration — see §4.7.
+
+★ **There is no `policy/` file.** The approval tiers and the caps have defaults, and a file
+that says what the code already does is noise — ★ noise in a configuration tree is read as
+meaning. Write `policy/permissions.yaml` yourself when you want a tier of your own (§4.3).
 
 ★ **Existing files are not overwritten** (unless you pass `--force`), so running it in
 an already-configured project is safe.
@@ -190,7 +192,6 @@ Other `init` options:
 | `--model <name>` | Choose the model, default `deepseek-flash` |
 | `--base-url <url>` | The vendor endpoint (**with the path**, copy it from their docs) |
 | `--env <NAME>` | The environment variable holding the secret, default `<PROVIDER>_API_KEY` |
-| `--no-policy` | Do not generate the `policy/` section (`permissions.yaml` and `limits.yaml`) |
 | `--tools` | Also generate the tool configurations under `tools/` |
 | `--force` | Overwrite existing files |
 | `--dry-run` | Print what would be written, write nothing |

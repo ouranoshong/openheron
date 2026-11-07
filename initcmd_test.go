@@ -38,16 +38,14 @@ func TestInitJSONOutputIsValidJSON(t *testing.T) {
 	if out.Dir == "" || out.Model == "" {
 		t.Fatalf("dir and model must be reported: %+v", out)
 	}
-	if len(out.Created) != 7 {
-		t.Fatalf("created = %v, want seven files", out.Created)
+	if len(out.Created) != 5 {
+		t.Fatalf("created = %v, want five files", out.Created)
 	}
 	for _, want := range []string{
 		".openheron/agents/main.md",
 		".openheron/agents/task.md",
 		".openheron/llm/deepseek.yaml",
 		".openheron/mcps/example.yaml",
-		".openheron/policy/permissions.yaml",
-		".openheron/policy/limits.yaml",
 		".openheron/server/config.yaml",
 	} {
 		found := false
@@ -131,8 +129,7 @@ func TestInitWritesIntoTheGivenDirectory(t *testing.T) {
 		".openheron/agents/main.md",
 		".openheron/agents/task.md",
 		".openheron/llm/deepseek.yaml",
-		".openheron/policy/permissions.yaml",
-		".openheron/policy/limits.yaml",
+		".openheron/mcps/example.yaml",
 		".openheron/server/config.yaml",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {

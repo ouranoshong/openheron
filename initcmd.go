@@ -24,7 +24,6 @@ func initCmd(args []string, stdout io.Writer) error {
 	provider := fs.String("provider", "", "provider template to use (default: deepseek)")
 	baseURL := fs.String("base-url", "", "endpoint for a new provider file")
 	env := fs.String("env", "", "environment variable holding the api key")
-	noPolicy := fs.Bool("no-policy", false, "do not write the policy/ section (permissions.yaml and limits.yaml)")
 	tools := fs.Bool("tools", false, "also write the tool configurations under tools/ (a provider without a configuration mounts nothing)")
 	force := fs.Bool("force", false, "overwrite files that already exist")
 	dryRun := fs.Bool("dry-run", false, "report what would be written, write nothing")
@@ -72,7 +71,6 @@ func initCmd(args []string, stdout io.Writer) error {
 		Provider: *provider,
 		BaseURL:  *baseURL,
 		Env:      *env,
-		NoPolicy: *noPolicy,
 		Tools:    *tools,
 		Force:    *force,
 	})
@@ -140,7 +138,7 @@ func reportInit(plan *initcfg.Plan, root string, dryRun, asJSON bool, stdout io.
 
 func printInitUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "usage: openheron init [--dir <path>] [--model <provider>/<model>] [--provider <id>]")
-	fmt.Fprintln(stdout, "                [--base-url <url>] [--env <NAME>] [--no-policy] [--tools]")
+	fmt.Fprintln(stdout, "                [--base-url <url>] [--env <NAME>] [--tools]")
 	fmt.Fprintln(stdout, "                [--force] [--dry-run] [--json]")
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Creates a minimal, runnable project-level configuration in <dir>/.openheron.")

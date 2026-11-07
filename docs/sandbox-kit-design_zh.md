@@ -170,7 +170,7 @@ agent 在一个目录里干活，配置却从另一个目录读。
 ★ `openheron init` 是非交互且幂等的 —— 这正是它能当启动步骤用的原因：
 
 - 每个输入都是一个参数（`initcmd.go:16-42`）：`--dir`、`--config-dir`、
-  `--model`、`--provider`、`--base-url`、`--env`、`--no-policy`、`--tools`、
+  `--model`、`--provider`、`--base-url`、`--env`、`--tools`、
   `--force`、`--dry-run`、`--json`；
 - 它只写缺的东西，其余报为保留（`initcmd.go:120`、`initcmd.go:147-148`）；
 - 它写进 `<dir>/.openheron`，而且**从不读 `$OPENHERON_CONFIG_DIR`**

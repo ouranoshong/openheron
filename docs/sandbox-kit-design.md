@@ -195,7 +195,7 @@ one directory, the configuration is read from another.
 usable as a startup step:
 
 - every input is a flag (`initcmd.go:16-42`): `--dir`, `--config-dir`,
-  `--model`, `--provider`, `--base-url`, `--env`, `--no-policy`, `--tools`,
+  `--model`, `--provider`, `--base-url`, `--env`, `--tools`,
   `--force`, `--dry-run`, `--json`;
 - it writes only what is missing and reports the rest as kept
   (`initcmd.go:120`, `initcmd.go:147-148`);

@@ -29,7 +29,6 @@ type Options struct {
 	Provider string
 	BaseURL  string
 	Env      string
-	NoPolicy bool
 	// Tools writes the tool configurations under tools/.
 	//
 	// ★ A provider whose configuration is absent mounts nothing, so writing
@@ -117,40 +116,16 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 
 	// ── policy ──────────────────────────────────────────────────────────
 	//
-	// ★ --no-policy skips the whole section: the approval tiers and the caps
-	//   are one policy, and half of it is not a policy.
-	if opts.NoPolicy {
-		p.Notes = append(p.Notes, "policy/ was skipped (--no-policy)")
-	} else {
-		has, err := rootHas(svc, spec.DirPolicy, "permissions.yaml")
-		if err != nil {
-			return nil, err
-		}
-		if has {
-			p.Notes = append(p.Notes,
-				"policy/permissions.yaml is already declared; it is kept as is")
-		} else {
-			content, err := renderTemplate("policy/permissions.yaml", nil, nil)
-			if err != nil {
-				return nil, err
-			}
-			p.add("policy/permissions.yaml", content)
-		}
-
-		hasLimits, err := rootHas(svc, spec.DirPolicy, "limits.yaml")
-		if err != nil {
-			return nil, err
-		}
-		if hasLimits {
-			p.Notes = append(p.Notes,
-				"policy/limits.yaml is already declared; it is kept as is")
-		} else {
-			// ★ The caps live in agentkit/spec, not in this package: the config
-			//   editor scaffolds the very same file, and two copies of one
-			//   file's content are two copies that drift.
-			p.add("policy/limits.yaml", []byte(spec.LimitsTemplate()))
-		}
-	}
+	// ★ init does not write the policy/ section at all, and the reason is
+	//   that both of its files would say nothing: `permissions.yaml` lists
+	//   exactly the tiers the code already defaults to, and `limits.yaml`
+	//   writes 0, which means "no limit — fall back to the global value".
+	//   ★ A file that says what the code already does is noise, and noise
+	//   in a configuration tree is read as meaning.
+	//
+	//   The partition stays: a user who wants a tier of their own writes
+	//   policy/permissions.yaml by hand, and the configuration editor
+	//   scaffolds it.
 
 	// ── tools ───────────────────────────────────────────────────────────
 	//
