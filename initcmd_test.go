@@ -45,7 +45,7 @@ func TestInitJSONOutputIsValidJSON(t *testing.T) {
 		".openheron/agents/main.md",
 		".openheron/agents/task.md",
 		".openheron/llm/deepseek.yaml",
-		".openheron/mcps/example.yaml.disabled",
+		".openheron/mcps/example.yaml",
 		".openheron/policy/permissions.yaml",
 		".openheron/policy/limits.yaml",
 		".openheron/server/config.yaml",

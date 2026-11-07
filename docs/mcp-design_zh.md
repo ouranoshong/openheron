@@ -574,7 +574,7 @@ allows: [get]
 | 谁来写 | 写什么 |
 |---|---|
 | 用户 | 手写 `mcps/<server>.yaml` 这些文件 |
-| `openheron init` | ★ 一个**示例** —— 而示例不能是一份活的 `.yaml`：文件**定义**了 server（§5.3），所以一份活文件会让每个没有收窄自己清单的 agent 去启动一个没装的 server。⇒ `mcps/example.yaml.disabled`：形状在那儿，名字说明它还不是一份配置，改名就是定义它（`initcfg/initcfg.go:193`） |
+| `openheron init` | ★ 一个**示例** —— `mcps/example.yaml`，而且是**能加载**的那份：文件**定义**了 server（§5.3），所以一份解析不了的文件不是「server 关着」，而是「配置加载不了」。它的 `command` 是一个没装的占位符，于是 server 起不来，**日志里说一句，agent 照跑**。把它复制成 `mcps/<server>.yaml` 并填上你自己的 command，就是定义它（`initcfg/initcfg.go:184`） |
 | 配置编辑器 | ★ 同一份模板，走它的「新建文件」对话框 —— 编辑器**能写** `mcps/`（`agentkit/spec/write.go:189`），而且它拒绝不是一个可读回服务器名的文件（`agentkit/spec/write.go:107`） |
 
 ### 5.7 什么会大声失败
@@ -1126,7 +1126,7 @@ headers:
 | 工具清单变了（§6.6） | 管理者 —— 重新列举（`agentkit/build/mcpmanager.go:118`），以及推进代际并重建工具（`agentkit/build/builder.go:105`） |
 | 一次启动，一个客户端（§6.8） | 管理者 —— 单飞启动（`agentkit/build/mcpmanager.go:215`） |
 | 一次 run 碰过的 server（§7.4） | `agentkit/run/runrow.go:84` 与 `storage/runledger.go:168` —— run 的那一行点名它们 |
-| 示例与编辑器的模板（§5.6） | `agentkit/spec/write.go:189`（`spec.Template`）、`initcfg/templates/mcps/example.yaml.disabled` 与 `initcfg/initcfg.go:193` |
+| 示例与编辑器的模板（§5.6） | `agentkit/spec/write.go:216`（`mcpServerTemplate`，经由 `spec.Template`）、`initcfg/initcfg.go:191`（init 把它写成 `mcps/example.yaml`） |
 | 一个 agent 加载哪些服务器（§5.3） | `agentkit/spec/decl:114`（那个字段）→ `agentkit/spec/load.go:529`（那个并集）→ `agentkit/build/mcpmanager.go`（那次启动） |
 | agent 的收窄（§11.3） | `agentkit/build/policy.go:144` —— 表里那些被拒的命名空间前缀 |
 | `/mcps` 那个视图（§11.2） | `agentkit/build/mcpstatus.go:64` —— 管理者的状态、那份计划、边界的判定，合成一处投影 |
@@ -1169,7 +1169,7 @@ headers:
 | 11 | `agentkit/build/mcptools.go` | `mcpPlan` —— 那份共享的命名与档位映射（§9.1），把 stdio 调用串行化的 per-server 互斥锁（§6.5），以及子进程的环境装配（§5.5） | **已完成** —— `agentkit/build/mcptools.go:67`、`:334`；★ 环境装配在管理者里（`agentkit/build/mcpmanager.go:458`） |
 | 12 | `agentkit/build/mcpmanager.go` | 管理者：一个 server 一个客户端、**单飞启动**（§6.8）、**只懒启动某个 agent 要的**那些服务器（§5.3）、崩了的子进程重启、推进代际的工具清单重新列举，以及快照换代时的拆解（§6.6） | **已完成** —— `agentkit/build/mcpmanager.go:42`；★ 拆解发生在**声明**上（`:229`）与进程退出时（`:150`），而不是快照换代时（§6.6） |
 | 13 | `agentkit/run/runrow.go` | run 的那一行记下这次 run 碰过哪些 MCP server（§7.4） | **已完成** —— `agentkit/run/runrow.go:84`、`storage/runledger.go:168` |
-| 14 | `initcfg/templates/` 与 `spec.Template` | `mcps/example.yaml.disabled` 这个示例，以及新建 `mcps/` 文件时编辑器用的模板 —— 编辑器的清单是按类别填的，所以新类别白拿一份脚手架（§5.6） | **已完成** —— `initcfg/templates/mcps/example.yaml.disabled`、`initcfg/initcfg.go:193`、`agentkit/spec/write.go:189` |
+| 14 | `spec.Template` 与 `initcfg` | `mcps/example.yaml` 这个示例，以及新建 `mcps/` 文件时编辑器用的模板 —— ★ **同一个来源**：编辑器那份脚手架就是同一份内容，两处不会漂（§5.6） | **已完成** —— `agentkit/spec/write.go:216`（`mcpServerTemplate`）、`initcfg/initcfg.go:191` |
 | 15 | `api/commands.go` | `mcps` 这个 action 命令与 `commandActionOpenMCPs`（§11.1） | **已完成** —— `api/commands.go:31`、`:61` |
 | 16 | `api/v2_mcps.go` | `GET /v2/mcps` —— 那个视图（§11.4） | **已完成** —— `api/v2_mcps.go:74`，路由在 `api/v2_files.go:63` |
 | 17 | `api/v2_introspect.go` | `MCPSource` 接口与 `SetMCPSource`：API 层去问 builder，它不直接读管理者（§11.2）；★ 以及配置面视图里那些已配置的服务器（§11.4） | ★ **拆开了** —— 接口与 `SetMCPSource` 在 `api/v2_mcps.go:18`、`:41`；配置面视图列出那些服务器在 `api/v2_introspect.go:388` |

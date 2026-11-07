@@ -187,36 +187,91 @@ func Template(catDir string, modelRefs []string) string {
 			"#\n" +
 			"# ★ tools/ is hot-reloaded: the change takes effect on the next turn, no process restart.\n"
 	case DirMCP:
-		// ★ The scaffold is nearly valid and says what is missing: a file
-		//   under mcps/ **defines** a server, so a half-written one would
-		//   make every agent that does not narrow its list try to start a
-		//   server that is not there. The save names the missing field.
-		return "# mcps/ one file = one MCP server. The file's name is the server's name.\n" +
-			"#\n" +
-			"# ★ transport: stdio (a child process) or http (streamable HTTP). There is\n" +
-			"#   no SSE transport, and an unknown transport is a load-time error.\n" +
-			"transport: stdio\n" +
-			"# ★ command is required for a stdio server, and it is resolved in the\n" +
-			"#   sandbox's PATH — never against the project root.\n" +
-			"command: \"\"\n" +
-			"args: []\n" +
-			"# ★ env is stdio only: the child's environment is this process's\n" +
-			"#   environment with these variables layered on top. An http server may\n" +
-			"#   not declare it at all.\n" +
-			"env: {}\n" +
-			"# ★ timeout bounds connect + initialize + list tools; call_timeout bounds\n" +
-			"#   one tool call.\n" +
-			"timeout: 30s\n" +
-			"call_timeout: 60s\n" +
-			"# ★ The tools to offer, by the server's own names. Absent or empty means all\n" +
-			"#   of them, and the list never adds a tool the server does not have.\n" +
-			"tools: []\n" +
-			"# ★ The default is ask, so the list names the exceptions: these tools run\n" +
-			"#   without a nod, and everything else this server offers asks.\n" +
-			"allows: []\n"
+		return mcpServerTemplate()
 	default:
 		return ""
 	}
+}
+
+// mcpServerTemplate is the scaffold of one `mcps/<server>.yaml`.
+//
+// ★ It is **one source**: the configuration editor offers it for a new
+//
+//	file, and `openheron init` writes the very same content as
+//	`mcps/example.yaml` — two copies of one file's content are two copies
+//	that drift.
+//
+// ★ The content has to **load**: the file's presence is the definition, so
+//
+//	a file that cannot be parsed is not a server that is off, it is a
+//	configuration that does not load. The optional fields are therefore
+//	written as comments — the shape is there, and the loader sees a
+//	server it can read.
+//
+// ★ The command is a placeholder that is not installed: the server does not
+//
+//	come up, the log says so, and the agent carries on. ★ That is the
+//	whole difference between an example and a mistake: an example that
+//	fails loudly would keep the process from starting.
+func mcpServerTemplate() string {
+	return `# mcps/ one file = one MCP server. The file's name is the server's name,
+# and it is the namespace segment of that server's tools: mcp__<server>__<tool>.
+# A server name may not contain a run of underscores — "mcp__a__b__x" could not be
+# read back.
+#
+# ★ This file **defines** a server: the file's presence is the definition, there is
+#   no "enabled" key. So it has to hold a server that is worth having — put the
+#   executable you want in command, and the server is defined.
+#
+# ── the fields ───────────────────────────────────────────────────────────
+#
+# transport    stdio (a child process) or http (streamable HTTP). There is no SSE
+#              transport, and an unknown transport is a load-time error: a typo
+#              must not run a different server than the file names.
+# command      required for a stdio server; resolved in the sandbox's PATH, never
+#              against the project root. ★ the workspace does not get to choose
+#              what runs.
+# args         the command's arguments.
+# env          stdio only. The child's environment is this process's environment
+#              with these variables layered on top — the same name, the
+#              configuration wins. An http server may not declare it at all: it
+#              has no child to hand an environment to.
+# url          required for an http server.
+# headers      http only; sent on every request.
+# timeout      the ceiling for connect + initialize + list tools.
+# call_timeout the ceiling for one tool call.
+# tools        a filter: the server's own tool names to offer out of the ones it
+#              has. Absent or empty means all of them.
+# allows       the server's own tool names that run without a nod. ★ The default
+#              is ask, so an empty list means "every tool of this server asks" —
+#              including the tools it has not offered yet.
+transport: stdio
+command: mcp-example-server
+args: []
+timeout: 30s
+call_timeout: 60s
+
+# ★ The other transport, in the file's own vocabulary — uncomment it and delete
+#   the four lines above when the server speaks HTTP:
+#
+# transport: http
+# url: https://mcp.example.com/mcp
+# headers:
+#   Authorization: Bearer ${REMOTE_TOKEN}
+#
+# ★ The child's environment, when the server needs more than it inherits:
+#
+# env:
+#   GITHUB_TOKEN: ${GITHUB_TOKEN}
+#
+# ★ The tools to offer, by the server's own names:
+#
+# tools: [create_issue, list_issues]
+#
+# ★ The exceptions: these run without a nod, everything else asks:
+#
+# allows: [read_issue, list_issues]
+`
 }
 
 func ToolTemplates() map[string]string {

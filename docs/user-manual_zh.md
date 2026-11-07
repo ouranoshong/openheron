@@ -157,7 +157,7 @@ your/project/
     ├── llm/
     │   └── deepseek.yaml    # 模型档案
     ├── mcps/
-    │   └── example.yaml.disabled   # 一个 MCP 服务器的示例，不是活的服务器
+    │   └── example.yaml      # 一个 MCP 服务器的示例（它的 command 是占位符）
     ├── policy/
     │   ├── permissions.yaml # 审批策略
     │   └── limits.yaml      # 配额上限
@@ -440,9 +440,11 @@ call_timeout: 60s
 暴露出来的名字 `mcp__a__b__x` 以后没法反解回来 —— 那是服务器 `a` 带工具 `b__x`，
 还是服务器 `a__b` 带工具 `x`？
 
-★ **`openheron init` 写的是 `mcps/example.yaml.disabled`** —— 那是**示例**，不是配置。
-**把它改名成 `mcps/<server>.yaml`，这个动作本身就是定义这个服务器。**
-一个活的 `example.yaml` 会让每个没有收窄名单的 Agent 去启动一个根本没装的服务器。
+★ **`openheron init` 写的是 `mcps/example.yaml`** —— 那是**示例**，而且是一份**能加载**的
+示例：`mcps/` 下的文件**定义**一台服务器，所以一份解析不了的文件不是「服务器关着」，
+而是「配置加载不了」。★ 它的 `command` 是一个没装的占位符，于是服务器起不来，
+**日志里说一句，Agent 照跑**。**把它复制成 `mcps/<server>.yaml` 并填上你自己的
+command，这个动作本身就是定义那台服务器。**
 
 ★ **会在启动时报错的**：写了不认识的 `transport`；stdio 服务器没有 `command`；
 http 服务器没有 `url`；http 服务器上写了 `env:`；Agent 点名了一个不存在的服务器。

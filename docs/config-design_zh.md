@@ -1764,15 +1764,14 @@ allow 清单说*其中哪些*直接放行。
 #### 模板
 
 ★ **配置编辑器提供脚手架。** `Template(spec.DirMCP, …)`（`agentkit/spec/write.go:189`）
-写出一份几乎有效、并说明缺了什么的文件 —— `mcps/` 下的文件**定义**一个 server，所以一份
-写了一半的文件会让每个没有收窄清单的 agent 去试着启动一个并不存在的 server。写入门拒绝
-名字不是 `<server>.yaml`、或者 server 名不合法的文件（`agentkit/spec/write.go:107`）。
+写出一份**能加载**、并说明缺了什么的文件 —— `mcps/` 下的文件**定义**一个 server，所以一份
+解析不了的文件不是「server 关着」，而是「配置加载不了」。写入门拒绝名字不是
+`<server>.yaml`、或者 server 名不合法的文件（`agentkit/spec/write.go:107`）。
 
-★ **出厂样例是一个 `.disabled` 文件。** `openheron init` 写下
-`initcfg/templates/mcps/example.yaml.disabled` —— ★ 文件名就说明了这一点，而这一点是要紧的：
-`mcps/` 下的文件**定义**一个 server，所以一份活的 `example.yaml` 会让每个没有收窄清单的
-agent 去试着启动一个并没有安装的 server。把它改名成 `<server>.yaml`，就是定义那个 server
-这个动作。
+★ **出厂样例也是一份能加载的文件。** `openheron init` 写下 `mcps/example.yaml` ——
+★ 内容跟编辑器那份脚手架**同一个来源**（一份内容一处，两个地方不会漂）。它的 `command`
+是一个没装的占位符：server 起不来，日志里说一句，agent 照跑。★ **把它复制成
+`mcps/<server>.yaml` 并填上你自己的 command，就是定义那个 server 这个动作。**
 
 #### 实施状态
 

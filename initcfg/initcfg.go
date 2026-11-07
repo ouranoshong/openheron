@@ -181,16 +181,15 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 
 	// ── mcps ────────────────────────────────────────────────────────────
 	//
-	// ★ The example is written as `example.yaml.disabled`, not as a live
-	//   file: a file under mcps/ **defines** a server, so a live example
-	//   would make every agent that does not narrow its list try to start
-	//   a server that is not installed. Renaming it is the act of
-	//   defining that server.
-	content, err := renderTemplate("mcps/example.yaml.disabled", nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	p.add("mcps/example.yaml.disabled", content)
+	// ★ The example is a **loadable** file: a file under mcps/ defines a
+	//   server, so a file that cannot be parsed is not a server that is
+	//   off — it is a configuration that does not load. The content is
+	//   the configuration editor's own scaffold (one source, so the two
+	//   cannot drift), and its command is a placeholder that is not
+	//   installed: the server does not come up, the log says so, and the
+	//   agent carries on.
+	content := spec.Template(spec.DirMCP, nil)
+	p.add("mcps/example.yaml", []byte(content))
 
 	// ── server ──────────────────────────────────────────────────────────
 	//
@@ -254,17 +253,16 @@ func (p *Plan) Apply(svc *spec.Service) error {
 
 // isDirectWrite reports whether a file bypasses the configuration editor.
 //
-// ★ Two kinds of file do: the ones under server/, which is not
+// ★ Only the files under server/ do: that section is not hot-reloaded,
 //
-//	hot-reloaded, and the MCP example, whose name says it is not a
-//	configuration yet — the editor only accepts <server>.yaml under
-//	mcps/.
+//	and the editor refuses to write it.
+//
+// ★ Everything else goes through the editor — the MCP example included.
+//
+//	A file under mcps/ has to **load**, and the editor's trial load is
+//	what proves it does.
 func isDirectWrite(f spec.File) bool {
-	if path.Dir(f.Rel) == spec.DirServer {
-		return true
-	}
-	return path.Dir(f.Rel) == spec.DirMCP &&
-		!strings.HasSuffix(path.Base(f.Rel), ".yaml")
+	return path.Dir(f.Rel) == spec.DirServer
 }
 
 func (p *Plan) add(rel string, content []byte) {

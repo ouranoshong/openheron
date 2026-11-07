@@ -252,8 +252,10 @@ Say you want a new `mcps/` directory:
 7. **Factory template**: `openheron init` writes the minimum runnable configuration, so
    a new partition needs one too. Either add a file under `initcfg/templates/<dir>/` —
    for the files only init produces — or reuse the scaffold the config editor already
-   has (`spec.ToolTemplates()` / `spec.LimitsTemplate()`). ★ **One file's content has
-   one source**: two copies of the same file are two copies that drift.
+   has (`spec.ToolTemplates()` / `spec.LimitsTemplate()` /
+   `spec.Template(catDir, …)`). ★ **One file's content has one source**: two copies of
+   the same file are two copies that drift. ★ The `mcps/` partition takes the second
+   road: the editor's scaffold **is** the file `openheron init` writes.
 
 #### The `mcps/` partition
 
@@ -274,8 +276,11 @@ definition — there is no `enabled` key.
   name is a valid server name (`agentkit/spec/write.go:107`) — the file's name is the
   server's name, and the server's name is the namespace segment of that server's tools.
 - **The scaffold** is `Template` (`agentkit/spec/write.go:160`), and the `mcps/` branch
-  (`agentkit/spec/write.go:189`) is nearly valid: it names the missing field instead of
-  failing at load time.
+  (`agentkit/spec/write.go:189`) writes a **loadable** file: ★ a file under `mcps/`
+  **defines** a server, so a file that cannot be parsed is not a server that is off, it
+  is a configuration that does not load. The optional fields are written as comments,
+  and the `command` is a placeholder that is not installed — so the server does not come
+  up, the log says so, and the agent carries on.
 
 ### 3.3 Adding an API route
 

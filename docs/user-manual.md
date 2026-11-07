@@ -168,7 +168,7 @@ your/project/
     ├── llm/
     │   └── deepseek.yaml    # model profile
     ├── mcps/
-    │   └── example.yaml.disabled   # an MCP server example, not a live server
+    │   └── example.yaml      # an MCP server example (its command is a placeholder)
     ├── policy/
     │   ├── permissions.yaml # approval policy
     │   └── limits.yaml      # caps on quantities
@@ -470,10 +470,12 @@ call_timeout: 60s
 underscores is refused: the exposed name `mcp__a__b__x` could not be read back later —
 is that the server `a` with the tool `b__x`, or the server `a__b` with the tool `x`?
 
-★ **`openheron init` writes `mcps/example.yaml.disabled`** — an *example*, not a
-configuration. **Renaming it to `mcps/<server>.yaml` is the act of defining that server.**
-A live `example.yaml` would make every agent that does not narrow its list try to start
-a server that is not installed.
+★ **`openheron init` writes `mcps/example.yaml`** — an *example*, and a **loadable**
+one: a file under `mcps/` **defines** a server, so a file that cannot be parsed is not a
+server that is off, it is a configuration that does not load. ★ Its `command` is a
+placeholder that is not installed, so the server does not come up, **the log says so,
+and the agent carries on**. **Copying it to `mcps/<server>.yaml` and putting your own
+command in it is the act of defining that server.**
 
 ★ **What fails at startup:** an unknown `transport`; a stdio server with no `command`; an
 http server with no `url`; `env:` on an http server; an agent naming a server that does

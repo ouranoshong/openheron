@@ -225,8 +225,10 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
 
 7. **出厂模板**：`openheron init` 要写出最小可运行配置，新分区也得有模板。要么在
    `initcfg/templates/<dir>/` 下加一个文件（只由 init 产出的那些文件），要么复用
-   配置编辑器已有的脚手架（`spec.ToolTemplates()` / `spec.LimitsTemplate()`）。
+   配置编辑器已有的脚手架（`spec.ToolTemplates()` / `spec.LimitsTemplate()` /
+   `spec.Template(catDir, …)`）。
    ★ **一份文件的内容只有一个来源**：同一个文件的两份拷贝，就是两份会漂移的拷贝。
+   ★ `mcps/` 分区走的是第二条路：编辑器那份脚手架**就是** `openheron init` 写下的文件。
 
 #### `mcps/` 分区
 
@@ -247,8 +249,10 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
   （`agentkit/spec/write.go:107`）—— 文件名就是服务器名，而服务器名就是这台服务器
   工具的命名空间段。
 - **脚手架**是 `Template`（`agentkit/spec/write.go:160`），其中 `mcps/` 那一支
-  （`agentkit/spec/write.go:189`）几乎就是合法的：它点名缺哪个字段，而不是在装载期
-  报错。
+  （`agentkit/spec/write.go:189`）写出的是一份**能加载**的文件：★ `mcps/` 下的文件
+  **定义**一台 server，所以一份解析不了的文件不是「server 关着」，而是「配置加载不了」。
+  可选的那些字段写成注释，而 `command` 是一个没装的占位符 —— 于是 server 起不来，
+  日志里说一句，agent 照跑。
 
 ### 3.3 加一条 API 路由
 

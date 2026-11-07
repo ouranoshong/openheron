@@ -618,7 +618,7 @@ allows: [get]
 | Writer | What it writes |
 |---|---|
 | the user | the `mcps/<server>.yaml` files, by hand |
-| `openheron init` | ★ an **example** — and an example cannot be a live `.yaml`: the file **defines** the server (§5.3), so a live one would make every agent that does not narrow its list try to start a server that is not installed. ⇒ `mcps/example.yaml.disabled`: the shape is right there, the name says it is not a configuration yet, and renaming it is the act of defining it (`initcfg/initcfg.go:193`) |
+| `openheron init` | ★ an **example** — `mcps/example.yaml`, and a **loadable** one: the file **defines** the server (§5.3), so a file that cannot be parsed is not a server that is off, it is a configuration that does not load. Its `command` is a placeholder that is not installed, so the server does not come up, **the log says so, and the agent carries on**. Copying it to `mcps/<server>.yaml` and putting your own command in it is the act of defining that server (`initcfg/initcfg.go:184`) |
 | the config editor | ★ the same template, through its "new file" dialog — the editor can write `mcps/` (`agentkit/spec/write.go:189`), and it refuses a file name that is not a readable server name (`agentkit/spec/write.go:107`) |
 
 ### 5.7 What fails loudly
@@ -1213,7 +1213,7 @@ copy of the mapping would be a second truth about a tool's name and a tool's tie
 | a changed tool list (§6.6) | the manager — the re-list (`agentkit/build/mcpmanager.go:118`), and the generation bump that rebuilds the tools (`agentkit/build/builder.go:105`) |
 | one start, one client (§6.8) | the manager — the single-flight start (`agentkit/build/mcpmanager.go:215`) |
 | the servers a run touched (§7.4) | `agentkit/run/runrow.go:84` and `storage/runledger.go:168` — the run's row names them |
-| the example and the editor's template (§5.6) | `agentkit/spec/write.go:189` (`spec.Template`), `initcfg/templates/mcps/example.yaml.disabled` and `initcfg/initcfg.go:193` |
+| the example and the editor's template (§5.6) | `agentkit/spec/write.go:216` (`mcpServerTemplate`, reached through `spec.Template`), and `initcfg/initcfg.go:191` (the init writes it as `mcps/example.yaml`) |
 | which servers an agent loads (§5.3) | `agentkit/spec/decl:114` (the field) → `agentkit/spec/load.go:529` (the union) → `agentkit/build/mcpmanager.go` (the start) |
 | the agent's narrowing (§11.3) | `agentkit/build/policy.go:144` — the table's denied namespace prefixes |
 | the `/mcps` view (§11.2) | `agentkit/build/mcpstatus.go:64` — the manager's state, the provider's naming, and the boundary's verdict, in one projection |
@@ -1259,7 +1259,7 @@ documents moved with it.
 | 11 | `agentkit/build/mcptools.go` | `mcpPlan` — the shared naming and tier mapping (§9.1), the per-server mutex that serializes the stdio calls (§6.5), and the environment assembly for the child process (§5.5) | **done** — `agentkit/build/mcptools.go:67`, `:334`; ★ the environment assembly is in the manager (`agentkit/build/mcpmanager.go:458`) |
 | 12 | `agentkit/build/mcpmanager.go` | the manager: one client per server, the **single-flight start** (§6.8), the lazy start **of the servers some agent asked for** (§5.3), the restart of a crashed child, the tool-list re-list that bumps the generation, and the teardown on the snapshot swap (§6.6) | **done** — `agentkit/build/mcpmanager.go:42`; ★ the teardown is on the **declaration** (`:229`) and on the process going away (`:150`), not on the snapshot swap (§6.6) |
 | 13 | `agentkit/run/runrow.go` | the run's row records which MCP servers the run touched (§7.4) | **done** — `agentkit/run/runrow.go:84`, `storage/runledger.go:168` |
-| 14 | `initcfg/templates/` and `spec.Template` | the `mcps/example.yaml.disabled` example, and the editor's template for a new `mcps/` file — the editor's manifest is filled per category, so a new category gets its scaffold for free (§5.6) | **done** — `initcfg/templates/mcps/example.yaml.disabled`, `initcfg/initcfg.go:193`, `agentkit/spec/write.go:189` |
+| 14 | `spec.Template` and `initcfg` | the `mcps/example.yaml` example, and the editor's template for a new `mcps/` file — ★ **one source**: the editor's scaffold is the very same content, so the two cannot drift (§5.6) | **done** — `agentkit/spec/write.go:216` (`mcpServerTemplate`), `initcfg/initcfg.go:191` |
 | 15 | `api/commands.go` | the `mcps` action command and `commandActionOpenMCPs` (§11.1) | **done** — `api/commands.go:31`, `:61` |
 | 16 | `api/v2_mcps.go` | `GET /v2/mcps` — the view (§11.4) | **done** — `api/v2_mcps.go:74`, the route at `api/v2_files.go:63` |
 | 17 | `api/v2_introspect.go` | the `MCPSource` interface and `SetMCPSource`: the API layer asks the builder, it does not read the manager (§11.2); ★ and the configured servers in the configuration view (§11.4) | ★ **split** — the interface and `SetMCPSource` are in `api/v2_mcps.go:18`, `:41`; the configuration view lists the servers at `api/v2_introspect.go:388` |

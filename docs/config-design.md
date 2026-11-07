@@ -1903,17 +1903,18 @@ substitutes it, and the cases where the mechanism does not reach — is in
 #### The template
 
 ★ **The configuration editor offers the scaffold.** `Template(spec.DirMCP, …)`
-(`agentkit/spec/write.go:189`) writes a nearly valid file and says what is missing — a
-file under `mcps/` **defines** a server, so a half-written one would make every agent
-that does not narrow its list try to start a server that is not there. The write gate
-refuses a file whose name is not `<server>.yaml` with a valid server name
+(`agentkit/spec/write.go:189`) writes a **loadable** file and says what is missing — a
+file under `mcps/` **defines** a server, so a file that cannot be parsed is not a server
+that is off, it is a configuration that does not load. The write gate refuses a file
+whose name is not `<server>.yaml` with a valid server name
 (`agentkit/spec/write.go:107`).
 
-★ **The factory sample is a `.disabled` file.** `openheron init` writes
-`initcfg/templates/mcps/example.yaml.disabled` — ★ the file's name says so, and that
-matters: a file under `mcps/` **defines** a server, so a live `example.yaml` would make
-every agent that does not narrow its list try to start a server that is not installed.
-Renaming it to `<server>.yaml` is the act of defining that server.
+★ **The factory sample is a loadable file, too.** `openheron init` writes
+`mcps/example.yaml` — ★ the very same content the editor scaffolds (one source, so the
+two cannot drift). Its `command` is a placeholder that is not installed: the server does
+not come up, the log says so, and the agent carries on. ★ **Copying it to
+`mcps/<server>.yaml` and putting your own command in it is the act of defining that
+server.**
 
 #### Implementation status
 
