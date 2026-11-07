@@ -1504,7 +1504,7 @@ replaced, the stdio child process is torn down and a new one is started (§5.4 o
 `docs/mcp-design.md`). A hot partition whose resources cannot be rebuilt is a partition
 that lies about being hot.
 
-#### ★ The filesystem tools: their exceptions live in the code
+#### ★ The filesystem tools: a tuner, and the code's default
 
 The filesystem tools come from the framework's middleware rather than from a provider, so
 the middleware mounts them and no file switches them on — so their file is a **tuner**
@@ -1925,9 +1925,9 @@ table and the editor's scaffold are all in the tree; the cases are in
 ★ **The whole model is implemented, and so is its neighbourhood.** The global tier list
 is gone (§6.3), the default is `ask`, and the exceptions are named by the file that
 **provides** the tool — the server's own file for MCP (§6.7), the `tools/` files for the
-rest (§6.6). ★ The one thing that is still **not** implemented is a file of the
-filesystem tools' own: their exceptions live in the code, because they have no file to
-live in (§6.6).
+rest (§6.6). ★ Nothing in the tier model is left as a proposal: the filesystem tools got
+their file too (§6.6), and it is a tuner rather than a switch because the middleware
+mounts those tools whatever the configuration says.
 
 ## 7. AgentHub / ModelHub: eino gives the interfaces only
 
