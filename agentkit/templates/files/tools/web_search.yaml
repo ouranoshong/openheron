@@ -1,0 +1,7 @@
+# Web search. Writing this file enables it.
+#
+# ★ provider has only two options: duckduckgo (zero config, zero key) and searxng (self-hosted).
+provider: duckduckgo
+max_results: 10
+timeout: 60s
+region: ""

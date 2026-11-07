@@ -590,7 +590,7 @@ difference.** A model that takes four minutes to answer reports no progress
 to renew on, so a 30-second TTL would fence it out while it is working
 perfectly. The remedy is a **TTL longer than the provider's own timeout**,
 not a timer that lies: the provider's timeout
-(`initcfg/templates/llm/_generic.yaml:10`, 5m by default) ends a call that
+(`agentkit/templates/files/llm/_generic.yaml:10`, 5m by default) ends a call that
 is hung, and the TTL only has to outlast a call that is **slow but alive**.
 Both are configuration.
 

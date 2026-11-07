@@ -223,12 +223,12 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
 
 6. **默认值**：`agentkit/spec/defaults.go`。
 
-7. **出厂模板**：`openheron init` 要写出最小可运行配置，新分区也得有模板。要么在
-   `initcfg/templates/<dir>/` 下加一个文件（只由 init 产出的那些文件），要么复用
-   配置编辑器已有的脚手架（`spec.ToolTemplates()` / `spec.LimitsTemplate()` /
-   `spec.Template(catDir, …)`）。
-   ★ **一份文件的内容只有一个来源**：同一个文件的两份拷贝，就是两份会漂移的拷贝。
-   ★ `mcps/` 分区走的是第二条路：编辑器那份脚手架**就是** `openheron init` 写下的文件。
+7. **出厂模板**：`openheron init` 要写出最小可运行配置，新分区也得有模板。把文件放进
+   `agentkit/templates/files/<dir>/` —— ★ 那是命令层（`initcfg`）与配置层
+   （`agentkit/spec`，它供给编辑器）**都能依赖**的**叶子**包 —— 然后从那儿读。
+   ★ **一份文件的内容只有一个来源**：同一个文件的两份拷贝，就是两份会漂移的拷贝，而拷贝
+   正是原先的依赖形状逼出来的。那些不是磁盘文件的分区骨架（agents 的 frontmatter 带着
+   可用的模型列表）留在 `spec.Template(catDir, …)`。
 
 #### `mcps/` 分区
 
@@ -253,11 +253,10 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
   **定义**一台 server，所以一份解析不了的文件不是「server 关着」，而是「配置加载不了」。
   可选的那些字段写成注释，而 `command` 是一个没装的占位符 —— 于是 server 起不来，
   日志里说一句，agent 照跑。
-- ★ **示例是两份拷贝，由一条测试钉住。** `openheron init` 写模板文件
-  `initcfg/templates/mcps/example.yaml`；编辑器给的是它自己那份
-  （`agentkit/spec/write.go:217` 的 `mcpServerTemplate`）—— 编辑器由 API 供给，而 API 不能
-  import `initcfg`（那是循环）。★ 同一个文件的两份拷贝就是两份会漂移的拷贝，所以
-  `initcfg/initcfg_test.go:656` 在两者不同时会失败。
+- ★ **示例是一个文件，两层读它。** `agentkit/templates/files/mcps/example.yaml` 既是
+  `openheron init` 写下的模板（`initcfg/initcfg.go`），也是配置编辑器给出的脚手架
+  （`agentkit/spec/write.go`）。★ 编辑器由 API 供给，而 API 不能 import `initcfg` ——
+  那是循环 —— 所以文件住在一个**两边都能依赖的叶子包** `agentkit/templates` 里。★ 拷贝会漂移。
 
 ### 3.3 加一条 API 路由
 

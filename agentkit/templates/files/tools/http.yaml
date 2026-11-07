@@ -1,0 +1,7 @@
+# HTTP tool. Writing this file enables it.
+#
+# ★ methods defaults to get only — write methods (post/put/delete) must be named
+#   explicitly, otherwise "just adding a POST" turns into an outbound channel.
+methods: [get]
+headers: {}
+timeout: 30s

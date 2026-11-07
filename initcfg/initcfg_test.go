@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/ouranoshong/openheron/agentkit/spec"
-	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/agentkit/templates"
 )
 
 const userProviderYAML = `type: openai_compat
@@ -123,11 +123,11 @@ func TestEveryProviderTemplateRenders(t *testing.T) {
 	for _, provider := range []string{"openai", "deepseek"} {
 		t.Run(provider, func(t *testing.T) {
 			e := newEnv(t)
-			raw, err := templates.ReadFile(templatesRoot + "/llm/" + provider + ".yaml")
+			raw, err := templates.File("llm/" + provider + ".yaml")
 			if err != nil {
 				t.Fatalf("read template: %v", err)
 			}
-			model := templateDefault(string(raw), "model")
+			model := templates.Default(string(raw), "model")
 			if model == "" {
 				t.Fatalf("the %s template has no default model", provider)
 			}
@@ -200,7 +200,7 @@ func TestTheTwoFactoryAgentsAreWrittenAsOneSet(t *testing.T) {
 func TestTheFactoryAgentNamesTheSkillKey(t *testing.T) {
 	// ★ The factory file is where a user learns which keys exist: a field
 	//   nobody can find is a field nobody uses.
-	raw, err := templates.ReadFile(templatesRoot + "/agents/main.md")
+	raw, err := templates.File("agents/main.md")
 	if err != nil {
 		t.Fatalf("read the factory agent: %v", err)
 	}
@@ -642,55 +642,5 @@ func TestARejectedMergeLeavesNoServerFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(e.root, "server", "config.yaml")); err == nil {
 		t.Fatal("the server file must not be written when the merge is rejected")
-	}
-}
-
-// ── the MCP example ───────────────────────────────────────────────────────
-
-// ★ The init template file and the configuration editor's own copy are two
-//
-//	copies of one file's content — and two copies are two copies that
-//	drift. The editor cannot read the init package's file (the API serves
-//	it, and the API cannot import initcfg without a cycle), so this test
-//	is what keeps them the same.
-func TestTheMCPExampleAndTheEditorsCopyAreTheSame(t *testing.T) {
-	onDisk, err := renderTemplate("mcps/example.yaml", nil, nil)
-	if err != nil {
-		t.Fatalf("read the template: %v", err)
-	}
-	if got, want := string(onDisk), spec.Template(spec.DirMCP, nil); got != want {
-		t.Fatalf("the two copies of the MCP example have drifted:\n"+
-			"--- initcfg/templates/mcps/example.yaml\n%s\n--- the editor's copy\n%s",
-			got, want)
-	}
-}
-
-// ★ The example has to **load**: a file under mcps/ defines a server, so a
-//
-//	file that cannot be parsed is a configuration that does not load.
-func TestTheMCPExampleLoads(t *testing.T) {
-	content, err := renderTemplate("mcps/example.yaml", nil, nil)
-	if err != nil {
-		t.Fatalf("read the template: %v", err)
-	}
-	e := newEnv(t)
-	e.write("llm/openai.yaml", userProviderYAML)
-	e.write("agents/main.md", userAgentMD)
-	e.write("mcps/example.yaml", string(content))
-
-	svc, err := spec.NewService(e.root, filepath.Dir(e.root))
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := svc.Load()
-	if err != nil {
-		t.Fatalf("the example must load: %v", err)
-	}
-	srv, ok := cfg.MCPs["example"]
-	if !ok {
-		t.Fatalf("the file's name is the server's name: %v", cfg.MCPs)
-	}
-	if srv.Transport != decl.MCPTransportStdio {
-		t.Fatalf("transport = %q, want stdio", srv.Transport)
 	}
 }

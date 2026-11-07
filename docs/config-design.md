@@ -311,7 +311,7 @@ configuration running in production are not the same" while neither side can see
 for the scenario that needs it.
 
 ★ **The supported way to inject a secret is a reference, not an override.** `api_key` may only
-be `${ENV_VAR}` or `@file:/path` (`agentkit/spec/write.go:533`); the value is expanded at load
+be `${ENV_VAR}` or `@file:/path` (`agentkit/spec/write.go:490`); the value is expanded at load
 time by `expandValue` (`agentkit/spec/expand.go:9`), and a `${ENV}` that is not set does **not**
 stop the startup — it goes into `deferred[]` ("calls to this endpoint will fail with 401
 Unauthorized", `agentkit/spec/load.go:42`). That is §4.3's third form: the value is missing at
@@ -529,7 +529,7 @@ models:                            # ★ multiple models: several models under o
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `type` | `string` | ✅ | **Display only** — no code branches on it. It must be non-empty (`agentkit/spec/load.go:28-30`), but the value itself is free-form: `openai_compat` is what the factory template ships (`initcfg/templates/llm/openai.yaml`) |
+| `type` | `string` | ✅ | **Display only** — no code branches on it. It must be non-empty (`agentkit/spec/load.go:28-30`), but the value itself is free-form: `openai_compat` is what the factory template ships (`agentkit/templates/files/llm/openai.yaml`) |
 | `base_url` | `string` | ✅ | Host (a path prefix is allowed). **Do not write `/chat/completions`** |
 | `api_key` | `string` | | `${ENV}` / `@file:`; empty = no authentication (a self-hosted gateway, a local ollama). **An unset `${ENV}` does not block startup**, it only records a reminder; the request comes back 401 |
 | `timeout` | `Duration` | | Default `5m` (`agentkit/build/provider.go:31-34`). **Do not rely on the SDK's implicit default** — the endpoint decides how long it is willing to think |
@@ -738,7 +738,7 @@ completely silent.** `RequestOptionsFor` simply skips the level it does not know
 (`agentkit/build/provider.go:110`: `if lvl, ok := m.LevelFields(level); ok`); the `!ok`
 branch injects nothing and reports nothing. There is **no** `deferred` entry for it.
 The upstream design wanted a reminder here, and the factory template says so plainly
-(`initcfg/templates/llm/deepseek.yaml`): "a tier the endpoint does not declare is
+(`agentkit/templates/files/llm/deepseek.yaml`): "a tier the endpoint does not declare is
 **silently ignored**". ⇒ **The vocabulary table is not optional**: an agent writes
 `reasoning: high` while the model has no `high`, which means "no thinking at all", with
 no error and no message. Declaring the table is what makes `high` / `low` take effect.
@@ -1913,14 +1913,14 @@ whose name is not `<server>.yaml` with a valid server name
 (`agentkit/spec/write.go:107`).
 
 ★ **The factory sample is a loadable file, too.** `openheron init` writes
-`mcps/example.yaml`, from the template file `initcfg/templates/mcps/example.yaml` — ★ the
-editor scaffolds its **own copy** of it (`agentkit/spec/write.go:217`
-`mcpServerTemplate`), because the editor is served by the API and the API cannot import
-`initcfg` without a cycle. ★ Two copies of one file's content are two copies that drift,
-so a test pins them against each other (`initcfg/initcfg_test.go:656`). Its `command` is a
-placeholder that is not installed: the server does not come up, the log says so, and the
-agent carries on. ★ **Copying it to `mcps/<server>.yaml` and putting your own command in
-it is the act of defining that server.**
+`mcps/example.yaml`, from the template file `agentkit/templates/files/mcps/example.yaml` —
+★ **one file, two readers**: the configuration editor scaffolds it
+(`agentkit/spec/write.go`) and `openheron init` writes it (`initcfg/initcfg.go`). ★ Both
+live in different layers, so the file lives in a **leaf package** they can both depend
+on — a copy would drift, and the copy is what the dependency shape used to force. Its
+`command` is a placeholder that is not installed: the server does not come up, the log
+says so, and the agent carries on. ★ **Copying it to `mcps/<server>.yaml` and putting your
+own command in it is the act of defining that server.**
 
 #### Implementation status
 

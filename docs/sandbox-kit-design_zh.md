@@ -51,7 +51,7 @@ Web UI 在**二进制里**：`main.go:35` 内嵌了 `all:web/dist`，`main.go:33
 Ask:  []string{"write_file", "edit_file", "execute", "kb_index"},
 ```
 
-而工厂的 `main` agent 直接把它关掉（`initcfg/templates/agents/main.md:7`）：
+而工厂的 `main` agent 直接把它关掉（`agentkit/templates/files/agents/main.md:7`）：
 
 ```
 disabled_tools: [write_file, edit_file, execute]
@@ -701,9 +701,9 @@ microVM 已经把 agent 与宿主隔开了。沙箱里再筑一道墙，
 openheron 自己的出站需求不因这个而改变：
 
 - **模型 API 主机** —— 来自 provider 配置的 `base_url`。
-  工厂模板把它也做成了模板变量：`initcfg/templates/llm/deepseek.yaml`
+  工厂模板把它也做成了模板变量：`agentkit/templates/files/llm/deepseek.yaml`
   渲染出 `base_url: https://api.deepseek.com`，
-  `initcfg/templates/llm/openai.yaml` 渲染出 `https://api.openai.com/v1`，
+  `agentkit/templates/files/llm/openai.yaml` 渲染出 `https://api.openai.com/v1`，
   而 `openheron init` 会问用户填哪个（`initcfg/initcfg.go:100-106`）。
   `inject` 规则按 **domain** 匹配，所以 `base_url` 里带不带路径不影响（§2.8）；
 - **工具**够到的一切 —— HTTP 工具（`agentkit/spec/defaults.go:16-27` 注册了

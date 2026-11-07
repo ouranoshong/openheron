@@ -250,12 +250,14 @@ Say you want a new `mcps/` directory:
 6. **Defaults**: `agentkit/spec/defaults.go`.
 
 7. **Factory template**: `openheron init` writes the minimum runnable configuration, so
-   a new partition needs one too. Either add a file under `initcfg/templates/<dir>/` —
-   for the files only init produces — or reuse the scaffold the config editor already
-   has (`spec.ToolTemplates()` / `spec.LimitsTemplate()` /
-   `spec.Template(catDir, …)`). ★ **One file's content has one source**: two copies of
-   the same file are two copies that drift. ★ The `mcps/` partition takes the second
-   road: the editor's scaffold **is** the file `openheron init` writes.
+   a new partition needs one too. Put the file under
+   `agentkit/templates/files/<dir>/` — ★ the **leaf** package both the command layer
+   (`initcfg`) and the configuration layer (`agentkit/spec`, which serves the editor)
+   can depend on — and read it from there. ★ **One file's content has one source**: two
+   copies of the same file are two copies that drift, and the copy is what the
+   dependency shape used to force. The section skeletons that are not files on disk
+   (the agents' frontmatter carries the available models) stay in
+   `spec.Template(catDir, …)`.
 
 #### The `mcps/` partition
 
@@ -281,11 +283,11 @@ definition — there is no `enabled` key.
   is a configuration that does not load. The optional fields are written as comments,
   and the `command` is a placeholder that is not installed — so the server does not come
   up, the log says so, and the agent carries on.
-- ★ **The example is two copies, and a test pins them.** `openheron init` writes the
-  template file `initcfg/templates/mcps/example.yaml`; the editor hands out its own copy
-  (`agentkit/spec/write.go:217` `mcpServerTemplate`) — the editor is served by the API,
-  and the API cannot import `initcfg` without a cycle. ★ Two copies of one file's content
-  are two copies that drift, so `initcfg/initcfg_test.go:656` fails when the two differ.
+- ★ **The example is one file, read by two layers.** `agentkit/templates/files/mcps/example.yaml`
+  is the template `openheron init` writes (`initcfg/initcfg.go`) and the skeleton the
+  configuration editor hands out (`agentkit/spec/write.go`). ★ The editor is served by the
+  API and the API cannot import `initcfg` — it would be a cycle — so the file lives in
+  `agentkit/templates`, a **leaf** both can depend on. ★ A copy would drift.
 
 ### 3.3 Adding an API route
 

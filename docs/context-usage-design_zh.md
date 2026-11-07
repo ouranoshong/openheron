@@ -31,7 +31,7 @@ openheron 手里已经握有两个足以回答「这个会话是不是快撑爆�
 ContextWindow int `yaml:"context_window"`
 ```
 
-出厂模板带着它 —— OpenAI 是 `128000`（`initcfg/templates/llm/openai.yaml:16`），DeepSeek 是 `131072`（`initcfg/templates/llm/deepseek.yaml:15`），通用模板是 `0`，留给用户自己填（`initcfg/templates/llm/_generic.yaml:14`）。
+出厂模板带着它 —— OpenAI 是 `128000`（`agentkit/templates/files/llm/openai.yaml:16`），DeepSeek 是 `131072`（`agentkit/templates/files/llm/deepseek.yaml:15`），通用模板是 `0`，留给用户自己填（`agentkit/templates/files/llm/_generic.yaml:14`）。
 
 它只流到一个地方：`GET /v2/config` 的厂商列表（`api/v2_introspect.go:276`，在 `api/v2_introspect.go:364` 填入）。**运行时没有任何代码读它。** 前端真正用的 agent 视图（`api/v2_introspect.go:77`，由 `modelOf` 在 `api/v2_introspect.go:197` 构造）并不带它，所以浏览器连「我正在对话的这个 agent 的窗口有多大」都拿不到。
 
@@ -109,7 +109,7 @@ used(A) = Usage.TotalTokens            （退化时取 Usage.PromptTokens + Usag
 
 ### 2.3 窗口未知的时候比想象中多
 
-`context_window: 0` 的意思是*没配置* —— 通用模板出厂就是这样（`initcfg/templates/llm/_generic.yaml:14`）。窗口是用户声明的逐模型事实，openheron 不猜，界面也不该猜：
+`context_window: 0` 的意思是*没配置* —— 通用模板出厂就是这样（`agentkit/templates/files/llm/_generic.yaml:14`）。窗口是用户声明的逐模型事实，openheron 不猜，界面也不该猜：
 
 - 窗口未知 → 显示 `≈12k tokens`，不画条，tooltip 说明窗口未配置；
 - 窗口已知 → 显示 `12k / 128k (10 %)`。

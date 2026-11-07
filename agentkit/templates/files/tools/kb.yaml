@@ -1,0 +1,12 @@
+# Knowledge base. The file holds its settings; the corpus directory turns it on.
+#
+# ★ corpus_dir is the **corpus directory**, relative to the project root. Empty string = knowledge base off.
+#   It lives and dies with the index: change the directory without rebuilding the index and it will confidently return unrelated answers.
+corpus_dir: ""
+index: default
+# model must point at a model with kind: embedding in llm/*.yaml; empty = pure lexical retrieval.
+model: ""
+query_instruction: ""
+batch_size: 10
+max_batch_chars: 1200
+top_k: 8

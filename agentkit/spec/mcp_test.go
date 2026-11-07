@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/agentkit/templates"
 )
 
 // ── the partition ───────────────────────────────────────────────────────
@@ -345,5 +346,40 @@ func TestTheEditorRefusesAServerNameThatCouldNotBeReadBack(t *testing.T) {
 	_, _, err := svc.Write("mcps/github__x.yaml", []byte("transport: stdio\ncommand: npx\n"), "")
 	if err == nil {
 		t.Fatal("the editor must refuse a name that could not be read back")
+	}
+}
+
+// ★ The MCP example has to **load**: a file under mcps/ defines a server,
+//
+//	so a file that cannot be parsed is not a server that is off — it is a
+//	configuration that does not load.
+//
+// ★ The test lives here and not in the templates package: the templates
+//
+//	package is a leaf, and a leaf's test may not reach up into the layer
+//	that depends on it.
+func TestTheMCPExampleLoads(t *testing.T) {
+	content, err := templates.File("mcps/example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newFixture(t)
+	f.seedMinimal(t)
+	f.write(t, "mcps/example.yaml", content)
+
+	svc, err := NewService(f.root, filepath.Dir(f.root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := svc.Load()
+	if err != nil {
+		t.Fatalf("the example must load: %v", err)
+	}
+	srv, ok := cfg.MCPs["example"]
+	if !ok {
+		t.Fatalf("the file's name is the server's name: %v", cfg.MCPs)
+	}
+	if srv.Transport != decl.MCPTransportStdio {
+		t.Fatalf("transport = %q, want stdio", srv.Transport)
 	}
 }

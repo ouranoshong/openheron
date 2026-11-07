@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/agentkit/templates"
 	"github.com/ouranoshong/openheron/persist"
 )
 
@@ -187,143 +188,43 @@ func Template(catDir string, modelRefs []string) string {
 			"#\n" +
 			"# ★ tools/ is hot-reloaded: the change takes effect on the next turn, no process restart.\n"
 	case DirMCP:
-		return mcpServerTemplate()
+		// ★ The MCP example is one file, in the templates package: the
+		//   configuration editor and `openheron init` both read it from
+		//   there, so the two cannot drift.
+		tpl, err := templates.File("mcps/example.yaml")
+		if err != nil {
+			return ""
+		}
+		return tpl
 	default:
 		return ""
 	}
 }
 
-// mcpServerTemplate is the **configuration editor's** scaffold of one
-// `mcps/<server>.yaml`.
+// ToolTemplates are the per-file skeletons of the tools/ partition.
 //
-// ★ It is the editor's own copy: `openheron init` writes the template file
-// `initcfg/templates/mcps/example.yaml`, and the editor cannot read it —
-// the editor is served by the API, and the API cannot import `initcfg`
-// without a cycle. ★ Two copies of one file's content are two copies that
-// drift, so a test pins them against each other.
+// ★ They come from the templates package, so the configuration editor and
 //
-// ★ The content has to **load**: the file's presence is the definition, so
-//
-//	a file that cannot be parsed is not a server that is off, it is a
-//	configuration that does not load. The optional fields are therefore
-//	written as comments — the shape is there, and the loader sees a
-//	server it can read.
-//
-// ★ The command is a placeholder that is not installed: the server does not
-//
-//	come up, the log says so, and the agent carries on. ★ That is the
-//	whole difference between an example and a mistake: an example that
-//	fails loudly would keep the process from starting.
-func mcpServerTemplate() string {
-	return `# mcps/ one file = one MCP server. The file's name is the server's name,
-# and it is the namespace segment of that server's tools: mcp__<server>__<tool>.
-# A server name may not contain a run of underscores — "mcp__a__b__x" could not be
-# read back.
-#
-# ★ This file **defines** a server: the file's presence is the definition, there is
-#   no "enabled" key. So it has to hold a server that is worth having — put the
-#   executable you want in command, and the server is defined.
-#
-# ── the fields ───────────────────────────────────────────────────────────
-#
-# transport    stdio (a child process) or http (streamable HTTP). There is no SSE
-#              transport, and an unknown transport is a load-time error: a typo
-#              must not run a different server than the file names.
-# command      required for a stdio server; resolved in the sandbox's PATH, never
-#              against the project root. ★ the workspace does not get to choose
-#              what runs.
-# args         the command's arguments.
-# env          stdio only. The child's environment is this process's environment
-#              with these variables layered on top — the same name, the
-#              configuration wins. An http server may not declare it at all: it
-#              has no child to hand an environment to.
-# url          required for an http server.
-# headers      http only; sent on every request.
-# timeout      the ceiling for connect + initialize + list tools.
-# call_timeout the ceiling for one tool call.
-# tools        a filter: the server's own tool names to offer out of the ones it
-#              has. Absent or empty means all of them.
-# allows       the server's own tool names that run without a nod. ★ The default
-#              is ask, so an empty list means "every tool of this server asks" —
-#              including the tools it has not offered yet.
-transport: stdio
-command: mcp-example-server
-args: []
-timeout: 30s
-call_timeout: 60s
-
-# ★ The other transport, in the file's own vocabulary — uncomment it and delete
-#   the four lines above when the server speaks HTTP:
-#
-# transport: http
-# url: https://mcp.example.com/mcp
-# headers:
-#   Authorization: Bearer ${REMOTE_TOKEN}
-#
-# ★ The child's environment, when the server needs more than it inherits:
-#
-# env:
-#   GITHUB_TOKEN: ${GITHUB_TOKEN}
-#
-# ★ The tools to offer, by the server's own names:
-#
-# tools: [create_issue, list_issues]
-#
-# ★ The exceptions: these run without a nod, everything else asks:
-#
-# allows: [read_issue, list_issues]
-`
-}
-
+//	`openheron init --tools` hand out the very same files.
 func ToolTemplates() map[string]string {
-	return map[string]string{
-		DirTools + "/http.yaml": "# HTTP tool. Writing this file enables it.\n" +
-			"#\n" +
-			"# ★ methods defaults to get only — write methods (post/put/delete) must be named\n" +
-			"#   explicitly, otherwise \"just adding a POST\" turns into an outbound channel.\n" +
-			"methods: [get]\n" +
-			"headers: {}\n" +
-			"timeout: 30s\n",
-		DirTools + "/web_search.yaml": "# Web search. Writing this file enables it.\n" +
-			"#\n" +
-			"# ★ provider has only two options: duckduckgo (zero config, zero key) and searxng (self-hosted).\n" +
-			"provider: duckduckgo\n" +
-			"max_results: 10\n" +
-			"timeout: 60s\n" +
-			"region: \"\"\n",
-		DirTools + "/wikipedia.yaml": "# Wikipedia lookup. Writing this file enables it.\n" +
-			"top_k: 3\n" +
-			"language: zh\n" +
-			"timeout: 15s\n" +
-			"base_url: \"\"\n",
-		DirTools + "/kb.yaml": "# Knowledge base. The file holds its settings; the corpus directory turns it on.\n" +
-			"#\n" +
-			"# ★ corpus_dir is the **corpus directory**, relative to the project root. Empty string = knowledge base off.\n" +
-			"#   It lives and dies with the index: change the directory without rebuilding the index and it will confidently return unrelated answers.\n" +
-			"corpus_dir: \"\"\n" +
-			"index: default\n" +
-			"# model must point at a model with kind: embedding in llm/*.yaml; empty = pure lexical retrieval.\n" +
-			"model: \"\"\n" +
-			"query_instruction: \"\"\n" +
-			"batch_size: 10\n" +
-			"max_batch_chars: 1200\n" +
-			"top_k: 8\n",
+	out, err := templates.Dir(DirTools)
+	if err != nil {
+		return map[string]string{}
 	}
+	return out
 }
 
+// LimitsTemplate is the skeleton of policy/limits.yaml.
+//
+// ★ It comes from the templates package, so the configuration editor and
+//
+//	`openheron init` hand out the very same file.
 func LimitsTemplate() string {
-	return "# Limit rules: caps on quantities.\n" +
-		"#\n" +
-		"# ★ They can only **tighten** — to relax a cap, change server/config.yaml (requires a restart).\n" +
-		"#   Tightening takes effect immediately: policy/ is hot-reloaded.\n" +
-		"# ★ 0 = no limit, fall back to the global value in server/config.yaml.\n" +
-		"#\n" +
-		"# agent.max_depth   max nesting depth (the entry agent is level 0)\n" +
-		"# retry.max_retries max retries for model calls\n" +
-		"agent:\n" +
-		"  max_depth: 0\n" +
-		"retry:\n" +
-		"  max_retries: 0\n"
+	tpl, err := templates.File(DirPolicy + "/limits.yaml")
+	if err != nil {
+		return ""
+	}
+	return tpl
 }
 
 func (c *Config) ModelRefs() []string {

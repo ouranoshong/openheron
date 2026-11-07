@@ -50,11 +50,12 @@ counting `grep '"github.com/ouranoshong/openheron/'` hits per package:
 | | `llm/common` | none | Vendor protocol layer (zero openheron dependencies) |
 | | `webui` | none | Embedded frontend assets |
 | | `agentkit/fsx` | none | **The filesystem backend**: a bounded local backend — writes confined to the project root, ignore rules, result caps (see [fs-backend-design.md](fs-backend-design.md)) |
+| | `agentkit/templates` | none | **The configuration templates**: the files `openheron init` writes and the config editor scaffolds. ★ It is a leaf so that both the configuration layer and the command layer can read the **same** file — a copy would drift |
 | **L1** | `agentkit/spec/decl` | none | **Pure declarations** (where the yaml tags live) |
 | | `agentkit/emit` | `obs`, `approval`, `contract`, `helpers`, `message` | The derivation: agent events → the run's facts |
 | | `storage` | `contract` | Interfaces for sessions/messages/pending approvals |
 | | `kb` | `obs`, `persist` | Knowledge base: corpus, index, retrieval, scoring |
-| | `agentkit/spec` | `obs`, `decl`, `persist` | Config loading, validation, hot reload, write gates |
+| | `agentkit/spec` | `obs`, `decl`, `persist`, `templates` | Config loading, validation, hot reload, write gates |
 | **L2** | `agentkit/build` | `obs`, `spec`, `decl`, `approval`, `contract`, `helpers`, `kb`, `llm/common`, `message` | Agent assembly, tool assembly, policy gates |
 | | `agentkit/run` | `emit`, `obs`, `approval`, `contract`, `decl`, `message`, `storage` | Run loop, input construction, event consumption |
 | | `storage/filestore` | `obs`, `contract`, `message`, `persist`, `storage` | File store implementation |

@@ -47,11 +47,12 @@
 | | `llm/common` | 无 | 厂商协议层（零 openheron 依赖） |
 | | `webui` | 无 | 嵌入式前端资源 |
 | | `agentkit/fsx` | 无 | **文件系统后端**：有界的本地后端 —— 写收敛在项目根、忽略规则、结果上限（见 [fs-backend-design_zh.md](fs-backend-design_zh.md)） |
+| | `agentkit/templates` | 无 | **配置模板**：`openheron init` 写下的文件、配置编辑器给出的脚手架。★ 它是叶子包，配置层与命令层才能读到**同一个**文件 —— 拷贝会漂移 |
 | **L1** | `agentkit/spec/decl` | 无 | **纯声明**结构体（yaml tag 集中处） |
 | | `agentkit/emit` | `obs`, `approval`, `contract`, `helpers`, `message` | 推导层：agent 事件 → run 的事实 |
 | | `storage` | `contract` | 会话/消息/待审批的接口 |
 | | `kb` | `obs`, `persist` | 知识库：语料、索引、检索、评分 |
-| | `agentkit/spec` | `obs`, `decl`, `persist` | 配置装载、校验、热重载、写入闸门 |
+| | `agentkit/spec` | `obs`, `decl`, `persist`, `templates` | 配置装载、校验、热重载、写入闸门 |
 | **L2** | `agentkit/build` | `obs`, `spec`, `decl`, `approval`, `contract`, `helpers`, `kb`, `llm/common`, `message` | Agent 装配、工具装配、策略闸门 |
 | | `agentkit/run` | `emit`, `obs`, `approval`, `contract`, `decl`, `message`, `storage` | 运行循环、输入构造、事件消费 |
 | | `storage/filestore` | `obs`, `contract`, `message`, `persist`, `storage` | 文件存储实现 |

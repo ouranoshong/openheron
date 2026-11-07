@@ -361,7 +361,7 @@ agent 直接报错 —— "must declare model (no inheritance, no fallback)"
 场景再说。
 
 ★ **注入密钥的正规做法是引用，不是覆盖。** `api_key` 只能写 `${ENV_VAR}` 或 `@file:/path`
-（`agentkit/spec/write.go:533`），值在加载时由 `expandValue` 展开
+（`agentkit/spec/write.go:490`），值在加载时由 `expandValue` 展开
 （`agentkit/spec/expand.go:9`）；而没设的 `${ENV}` **不会**拦住启动 —— 它进 `deferred[]`
 （"calls to this endpoint will fail with 401 Unauthorized"，`agentkit/spec/load.go:42`）。
 那正是 §4.3 的第三形态：缺的是运行期状态，不是写错。
@@ -553,7 +553,7 @@ models:                            # ★ multiple models: several models under o
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `type` | `string` | ✅ | **只用于显示** —— 代码里没有按它分支的地方。它不能为空（`agentkit/spec/load.go:28-30`），但取值自由：`openai_compat` 是出厂模板写的（`initcfg/templates/llm/openai.yaml`） |
+| `type` | `string` | ✅ | **只用于显示** —— 代码里没有按它分支的地方。它不能为空（`agentkit/spec/load.go:28-30`），但取值自由：`openai_compat` 是出厂模板写的（`agentkit/templates/files/llm/openai.yaml`） |
 | `base_url` | `string` | ✅ | 主机（可带前缀）。**不要写 `/chat/completions`** |
 | `api_key` | `string` | | `${ENV}` / `@file:`；空 = 无鉴权（自建网关、本地 ollama）。**`${ENV}` 未设不阻塞启动**，只记提醒，请求时返回 401 |
 | `timeout` | `Duration` | | 缺省 `5m`（`agentkit/build/provider.go:31-34`）。**不能依赖 SDK 隐式默认** —— 端点愿意想多久是它说了算 |
@@ -746,7 +746,7 @@ reasoning: high          # ★ only the tier name — it does not need to know w
 `RequestOptionsFor` 干脆跳过它不认识的档位（`agentkit/build/provider.go:110`：
 `if lvl, ok := m.LevelFields(level); ok`）；`!ok` 那条分支什么都不注入，也什么都不报告。
 **没有**对应的 `deferred` 条目。上游设计想在这里留一条提醒，出厂模板把话说得很直白
-（`initcfg/templates/llm/deepseek.yaml`）：「端点没有声明的档位是**静默忽略**的」。
+（`agentkit/templates/files/llm/deepseek.yaml`）：「端点没有声明的档位是**静默忽略**的」。
 ⇒ **这张词汇表不是可选的**：agent 写着 `reasoning: high` 而模型根本没有 `high`，
 意思就是「完全不思考」，没有错误也没有消息。正是这张表让 `high` / `low` 真的生效。
 
@@ -1775,10 +1775,10 @@ allow 清单说*其中哪些*直接放行。
 `<server>.yaml`、或者 server 名不合法的文件（`agentkit/spec/write.go:107`）。
 
 ★ **出厂样例也是一份能加载的文件。** `openheron init` 写下 `mcps/example.yaml` ——
-★ 模板文件是 `initcfg/templates/mcps/example.yaml`。编辑器另有一份**自己的拷贝**
-（`agentkit/spec/write.go:217` 的 `mcpServerTemplate`）—— 编辑器由 API 供给，而 API 不能
-import `initcfg`（那是循环）。★ 同一个文件的两份拷贝就是两份会漂移的拷贝，所以有一条
-测试把两者钉在一起（`initcfg/initcfg_test.go:656`）。它的 `command` 是一个没装的占位符：
+★ 模板文件是 `agentkit/templates/files/mcps/example.yaml` —— ★ **一个文件，两个读者**：
+配置编辑器拿它当脚手架（`agentkit/spec/write.go`），`openheron init` 把它写下去
+（`initcfg/initcfg.go`）。★ 两边在不同层，所以文件住在一个**两边都能依赖的叶子包**里 ——
+拷贝会漂移，而拷贝正是原先的依赖形状逼出来的。它的 `command` 是一个没装的占位符：
 server 起不来，日志里说一句，agent 照跑。★ **把它复制成 `mcps/<server>.yaml` 并填上你
 自己的 command，就是定义那个 server 这个动作。**
 

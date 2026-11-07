@@ -57,7 +57,7 @@ Ask:  []string{"write_file", "edit_file", "execute", "kb_index"},
 ```
 
 and the factory `main` agent turns it off outright
-(`initcfg/templates/agents/main.md:7`):
+(`agentkit/templates/files/agents/main.md:7`):
 
 ```
 disabled_tools: [write_file, edit_file, execute]
@@ -796,9 +796,9 @@ inject domain is changed to match.
 openheron's own outbound needs are unchanged by this:
 
 - the **model API host** — from the provider config's `base_url`. The factory
-  templates make it a template variable too: `initcfg/templates/llm/deepseek.yaml`
+  templates make it a template variable too: `agentkit/templates/files/llm/deepseek.yaml`
   renders `base_url: https://api.deepseek.com` and
-  `initcfg/templates/llm/openai.yaml` renders `https://api.openai.com/v1`,
+  `agentkit/templates/files/llm/openai.yaml` renders `https://api.openai.com/v1`,
   and `openheron init` asks for it (`initcfg/initcfg.go:100-106`). The `inject`
   rule matches by **domain**, so the path in `base_url` does not matter (§2.8);
 - whatever the **tools** reach — the HTTP tool

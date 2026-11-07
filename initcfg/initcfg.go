@@ -1,23 +1,17 @@
 package initcfg
 
 import (
-	"embed"
 	"fmt"
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/templates"
 	"github.com/ouranoshong/openheron/persist"
 )
-
-//go:embed all:templates
-var templates embed.FS
-
-const templatesRoot = "templates"
 
 // initTmpSuffix is the temporary-file suffix of a direct write. It matches
 // the one the configuration service uses, so a half-written file is never
@@ -319,14 +313,14 @@ func (c *choice) fillTemplate(opts Options) error {
 		return err
 	}
 	c.Template = name
-	raw, err := templates.ReadFile(templatesRoot + "/" + name)
+	raw, err := templates.File(name)
 	if err != nil {
 		return fmt.Errorf("init: read template %s: %w", name, err)
 	}
 	if c.Model == "" {
-		c.Model = templateDefault(string(raw), "model")
+		c.Model = templates.Default(string(raw), "model")
 	}
-	c.EnvName = templateDefault(string(raw), "api_key_env")
+	c.EnvName = templates.Default(string(raw), "api_key_env")
 	if c.EnvName == "" {
 		c.EnvName = defaultEnvName(c.Provider)
 	}
@@ -381,72 +375,38 @@ func providerDefaultModel(provider string) string {
 	if err != nil {
 		return ""
 	}
-	raw, err := templates.ReadFile(templatesRoot + "/" + name)
+	raw, err := templates.File(name)
 	if err != nil {
 		return ""
 	}
-	return templateDefault(string(raw), "model")
+	return templates.Default(string(raw), "model")
 }
 
 func templateFor(provider string) (string, error) {
 	name := "llm/" + provider + ".yaml"
-	if _, err := templates.ReadFile(templatesRoot + "/" + name); err == nil {
+	if templates.Has(name) {
 		return name, nil
 	}
-	if _, err := templates.ReadFile(templatesRoot + "/llm/_generic.yaml"); err == nil {
+	if templates.Has("llm/_generic.yaml") {
 		return "llm/_generic.yaml", nil
 	}
 	return "", fmt.Errorf("init: no provider template for %q", provider)
 }
 
-func templateDefault(content, key string) string {
-	for _, g := range phRe.FindAllStringSubmatch(content, -1) {
-		if g[1] == key && g[2] != "" {
-			return g[2]
-		}
-	}
-	return ""
-}
-
-var phRe = regexp.MustCompile(`\{\{([a-z_]+)(?:\|([^}]*))?\}\}`)
-
-var renderers = map[string]func(string) string{
-	"model":       func(v string) string { return v },
-	"base_url":    func(v string) string { return v },
-	"api_key_env": func(v string) string { return "${" + v + "}" },
-}
-
+// renderTemplate renders one template file.
+//
+// ★ The rendering itself lives in the templates package — the placeholders
+//
+//	and the way a value is written into a file are the package's business,
+//	and the editor's scaffolds go through the same rules.
 func renderTemplate(rel string, values, fallbacks map[string]string) ([]byte, error) {
-	raw, err := templates.ReadFile(templatesRoot + "/" + rel)
+	raw, err := templates.File(rel)
 	if err != nil {
 		return nil, fmt.Errorf("init: read template %s: %w", rel, err)
 	}
-	if values == nil {
-		values = map[string]string{}
+	out, err := templates.Render(raw, values, fallbacks)
+	if err != nil {
+		return nil, fmt.Errorf("init: template %s: %w", rel, err)
 	}
-	if fallbacks == nil {
-		fallbacks = map[string]string{}
-	}
-	var missing []string
-	out := phRe.ReplaceAllFunc(raw, func(m []byte) []byte {
-		g := phRe.FindSubmatch(m)
-		key := string(g[1])
-		v := values[key]
-		if v == "" {
-			v = string(g[2])
-		}
-		if v == "" {
-			v = fallbacks[key]
-		}
-		render, ok := renderers[key]
-		if v == "" || !ok {
-			missing = append(missing, key)
-			return m
-		}
-		return []byte(render(v))
-	})
-	if len(missing) > 0 {
-		return nil, fmt.Errorf("init: template %s needs a value for %q; pass the matching flag", rel, missing[0])
-	}
-	return out, nil
+	return []byte(out), nil
 }

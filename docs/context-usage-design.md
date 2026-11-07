@@ -31,7 +31,7 @@ And it closes the loop the meter opens: when the context really does run out of 
 ContextWindow int `yaml:"context_window"`
 ```
 
-The factory templates ship it — `128000` for OpenAI (`initcfg/templates/llm/openai.yaml:16`), `131072` for DeepSeek (`initcfg/templates/llm/deepseek.yaml:15`), and `0` for the generic template, where the user must fill it in (`initcfg/templates/llm/_generic.yaml:14`).
+The factory templates ship it — `128000` for OpenAI (`agentkit/templates/files/llm/openai.yaml:16`), `131072` for DeepSeek (`agentkit/templates/files/llm/deepseek.yaml:15`), and `0` for the generic template, where the user must fill it in (`agentkit/templates/files/llm/_generic.yaml:14`).
 
 It reaches exactly one place: the provider listing of `GET /v2/config` (`api/v2_introspect.go:276`, filled at `api/v2_introspect.go:364`). **No run-time code reads it.** The agent view that the frontend actually uses (`api/v2_introspect.go:77`, built by `modelOf` at `api/v2_introspect.go:197`) does not carry it, so the browser cannot even learn the window of the agent it is talking to.
 
@@ -110,7 +110,7 @@ window to measure against — and the second scale is then simply not shown.
 
 ### 2.3 The window is unknown more often than not
 
-`context_window: 0` means *not configured* — the generic template ships exactly that (`initcfg/templates/llm/_generic.yaml:14`). The window is a per-model fact the user declares; openheron does not guess it, and neither should the UI:
+`context_window: 0` means *not configured* — the generic template ships exactly that (`agentkit/templates/files/llm/_generic.yaml:14`). The window is a per-model fact the user declares; openheron does not guess it, and neither should the UI:
 
 - window unknown → show `≈12k tokens` and no bar, with a tooltip saying the window is not configured;
 - window known → show `12k / 128k (10 %)`.

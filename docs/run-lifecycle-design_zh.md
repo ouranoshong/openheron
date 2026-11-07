@@ -529,7 +529,7 @@ token 抢一次锁，白白地。
 ★ **慢模型不是停滞的 run —— 但 TTL 得知道这个区别。** 一个要四分钟才回话的
 模型没有进展可报，30 秒的 TTL 会在它好好干活的时候把它 fence 掉。解法是
 **一个比 provider 自己的超时更长的 TTL**，不是一个说谎的定时器：provider
-的超时（`initcfg/templates/llm/_generic.yaml:10`，出厂 5m）负责收拾真正挂死的
+的超时（`agentkit/templates/files/llm/_generic.yaml:10`，出厂 5m）负责收拾真正挂死的
 调用，TTL 只需要比「**慢但活着**的调用」撑得更久。两者都是配置。
 
 ★ **租约管的是一轮，不是一个会话的空档。** 一个以抛审批结束的 run 会释放
