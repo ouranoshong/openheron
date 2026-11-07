@@ -24,7 +24,7 @@ make build
 只想快速试一下：
 
 ```bash
-make build-go     # backend only (no UI) — faster while iterating on Go code
+make build-go     # 只构建后端（不含界面），迭代 Go 代码时更快
 ```
 
 ★ **或者一条命令装上发布出来的二进制。** 每个 `v*` tag 都会发布同样的单文件可执行程序，
@@ -139,8 +139,8 @@ sha256sum -c checksums.txt --ignore-missing
 
 ```bash
 cd /your/project
-openheron init                      # generate the configuration in the current directory
-export DEEPSEEK_API_KEY=sk-...     # secrets are read from the environment only
+openheron init                      # 在当前目录下生成配置
+export DEEPSEEK_API_KEY=sk-...     # 密钥只从环境变量读
 openheron
 ```
 
@@ -152,17 +152,17 @@ openheron
 your/project/
 └── .openheron/
     ├── agents/
-    │   ├── main.md          # entry agent: understand, split, delegate, verify
-    │   └── task.md          # executor agent: does the actual work
+    │   ├── main.md          # 入口 Agent：理解需求、拆任务、委派、验收
+    │   └── task.md          # 执行 Agent：真正动手干活
     ├── llm/
-    │   └── deepseek.yaml    # model profile
+    │   └── deepseek.yaml    # 模型档案
     ├── mcps/
-    │   └── example.yaml.disabled   # an MCP server example, not a live server
+    │   └── example.yaml.disabled   # 一个 MCP 服务器的示例，不是活的服务器
     ├── policy/
-    │   ├── permissions.yaml # approval policy
-    │   └── limits.yaml      # caps on quantities
+    │   ├── permissions.yaml # 审批策略
+    │   └── limits.yaml      # 配额上限
     └── server/
-        └── config.yaml      # process parameters (not hot-reloaded)
+        └── config.yaml      # 进程自身参数（不热重载）
 ```
 
 ★ `mcps/` 下那个文件是**示例**，不是配置 —— 见 §4.7。
@@ -787,7 +787,7 @@ openheron version                                         print the version
 | POST/GET | `/v2/sessions/:id/files` | 上传 / 列会话工作区文件（单文件上限 32 MiB） |
 | GET | `/v2/project/files` | 列项目根文件（`?q=` `?limit=`） |
 | GET | `/v2/commands` | 斜杠命令清单 |
-| POST | `/v2/run` | **SSE 入口**：提问，或回复审批 |
+| POST | `/v2/run` | **SSE 入口**：提问，或回复审批（见 §6.7） |
 | GET | `/v2/skills` | 技能清单 |
 | GET | `/v2/agents` `/v2/agents/:agentId` | Agent 及其生效工具表 |
 | GET | `/v2/mcps` | 某个 Agent 的 MCP 服务器（`?agent=`）；见 §6.8 |

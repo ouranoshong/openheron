@@ -114,8 +114,9 @@ forever and the session permanently busy. `Abort` is the only escape
 `running` that nobody owns — but it does not lift it: the gate still refuses
 the session. Lifting it is §5's lease and §7's pipeline.
 (An ordinary client disconnect is *not* this case: the handler keeps running
-and the drain continues, because `transport/transport.go:611-623` only stops
-*emitting* after a write error — the accumulation at lines 167/174/182 goes on.)
+and the drain continues, because `transport/transport.go:160-172` only stops
+*emitting* after a write error — the accumulation in the deriver's loop
+(`agentkit/emit/emit.go:168`) goes on.)
 
 **C4 — A live run is invisible to a second surface.**
 `turn.events` is a single-consumer `*adk.AsyncIterator`

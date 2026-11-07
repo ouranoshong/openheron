@@ -143,35 +143,101 @@ answer and the runtime's answer stop agreeing.
 4. **The gate works on its own.** `agentkit/build/gate.go` filters the tool table with
    the outer policy plus the inner `disabled_tools`. You write no permission code.
 
-5. **Do not collide with a reserved name.** `reservedToolNames` at `tools.go:39` lists
+5. **Do not collide with a reserved name.** `reservedToolNames` at `tools.go:46` lists
    `ls` `read_file` `write_file` `edit_file` `glob` `grep` `execute` `task`
    `write_todos` `skill`. A collision fails at `Build` time.
    The tool name is also the key in the policy table — a collision would point the
    policy at the wrong tool.
 
-6. **A collision across providers also fails**: `validateBatch` at `tools.go:76` tracks
+   ★ **A name that comes from a server is namespaced.** An MCP tool is exposed under
+   `decl.MCPToolPrefix` (`agentkit/spec/decl/decl.go:336`) and
+   `decl.MCPSeparator` (`agentkit/spec/decl/decl.go:345`), so the policy table
+   narrows a whole server with a prefix instead of a list of names. ★ The composed
+   name is never parsed back: `Table.Blocked` (`agentkit/build/policy.go:161`)
+   matches prefixes, so nothing has to split a name to learn which server it
+   belongs to.
+
+6. **A collision across providers also fails**: `validateBatch` at `tools.go:83` tracks
    names in `seen`, so two providers offering the same tool name fail at startup
    instead of one silently overwriting the other.
+
+#### The MCP provider
+
+`mcpToolProvider` is registered like any other provider — `defaultToolRegistry`
+at `agentkit/build/tools.go:35` — and it answers the same `toolProvider` contract
+at `agentkit/build/tools.go:19`. Four things about it are not generic:
+
+- **The client outlives the batch.** ★ The batch is built once per snapshot:
+  `buildHeavy` runs under a `sync.Once` (`agentkit/build/snapshot.go:41`), so a
+  client owned by the provider would be torn down with the snapshot. The
+  **manager** owns the clients (`agentkit/build/mcpmanager.go:42`), and the
+  provider asks the manager for them (`agentkit/build/mcpmanager.go:89`).
+- **The names are namespaced, and composed in one place.** `mcpPlan`
+  (`agentkit/build/mcptools.go:68`) maps the server's own tool names to the
+  exposed names and their tiers, and the name itself is composed once, in
+  `mcpExposedName` (`agentkit/build/mcptools.go:141`). The provider and the
+  `/mcps` projection both go through `mcpPlan`, so they cannot disagree about
+  what a tool is called.
+- **The provider is optional, and the warning is the only notice.** An
+  unreachable server must not keep the agent down, so `Provide`
+  (`agentkit/build/mcptools.go:201`) logs a warning that names the server, the
+  transport and the error (`agentkit/build/mcptools.go:217`), and carries on
+  without that server's tools. ★ The warning is the only notice — the tools are
+  simply missing from the table, and the user sees "this feature seems to be
+  missing".
+- **The output is capped, and the stdio calls are serialized.** The cap lives in
+  the component's result handler (`agentkit/build/mcptools.go:376`), and the
+  calls of one stdio server go through `serialTool`
+  (`agentkit/build/mcptools.go:335`), which takes a per-server mutex and a call
+  deadline.
+
+#### The MCP client lifecycle
+
+For a developer who has to debug it:
+
+- **One client per server.** The manager holds one entry per server
+  (`agentkit/build/mcpmanager.go:42`), and the entry owns that server's client,
+  its listing and its per-server mutex.
+- **The start is single-flight.** `ensure`
+  (`agentkit/build/mcpmanager.go:215`) starts the client under a lock, so the
+  provider and the `/mcps` panel asking at the same moment get the same client
+  and the same child process. Two child processes for one server would make the
+  tools the model sees depend on which process answered.
+- **A crashed child is started again on the next call.** `markBroken`
+  (`agentkit/build/mcpmanager.go:290`) closes the client when the pipe broke,
+  and the next call starts a new one. ★ A call that runs out of time is **not**
+  a broken connection: the server may simply be slow, so a deadline gives up
+  without tearing the client down (`agentkit/build/mcptools.go:358`).
+- **The tool list is re-listed when a turn asks for it**, and the previous
+  listing is older than 30 seconds (`agentkit/build/mcpmanager.go:34`,
+  `mcpRelistInterval`). ★ That interval is a fixed value, not a configuration
+  key: a knob nobody turns is a knob nobody tests, and a server's tool list
+  changes on the scale of days.
+- **A changed list bumps the generation.** `Refresh`
+  (`agentkit/build/mcpmanager.go:118`) reports whether a listing changed, and the
+  builder bumps the generation through the same hook the configuration reloader
+  uses (`agentkit/build/builder.go:67`). The refresh happens before the turn's
+  agent is assembled (`agentkit/build/builder.go:105`), because the batch is
+  built once per generation — a re-list inside the build would never run.
 
 ### 3.2 Adding a new configuration partition
 
 Say you want a new `mcps/` directory:
 
-★ That directory is not hypothetical — `docs/mcp-design.md` designs it (a proposal:
-  nothing from its §2 onwards is in the tree). The recipe below is the one that
-  partition would follow.
+★ That directory is no longer hypothetical — `docs/mcp-design.md` designs it, and
+  the partition is in the tree. The recipe below is the one it followed.
 
 1. **`agentkit/spec/config.go`**: add the directory constant `DirMCP = "mcps"` and an entry
    in `Categories` (with `ID`, `Label`, `Dir`, `Ext`). Keep **hot-reloaded** and
    **non-hot-reloaded** directories clearly apart — whether a directory is hot changes
    what users expect.
 
-2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`config.go:296`) and
+2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`config.go:314`) and
    implement `loadXXX`.
 
 3. **`agentkit/spec/decl/decl.go`**: add the plain declaration struct.
 
-4. **Hot reload comes for free**: `hotDirList()` at `agentkit/spec/config.go:76` filters
+4. **Hot reload comes for free**: `hotDirList()` at `agentkit/spec/config.go:87` filters
    the `Categories` whose `Hot()` is true — mark the category hot in step 1 and the
    watched set includes it automatically. **You do not** need to register it by hand in
    `reload.go` (and forgetting to would mean "config changes do not take effect, with
@@ -188,6 +254,28 @@ Say you want a new `mcps/` directory:
    for the files only init produces — or reuse the scaffold the config editor already
    has (`spec.ToolTemplates()` / `spec.LimitsTemplate()`). ★ **One file's content has
    one source**: two copies of the same file are two copies that drift.
+
+#### The `mcps/` partition
+
+The `mcps/` partition is one file per MCP server, and the file's presence **is** the
+definition — there is no `enabled` key.
+
+- **Declared** by the constant `DirMCP = "mcps"` (`agentkit/spec/config.go:26`) and the
+  `Categories` entry (`agentkit/spec/config.go:72`), which is editable, hot and
+  `.yaml`.
+- **Loaded** by `loadMCP` (`agentkit/spec/load.go:256`): one file, one server.
+- ★ **"Hot" for this partition means the client is rebuilt.** The declaration is the
+  server's identity, so a changed declaration means a changed server: the old client
+  is torn down and a new one is started (`agentkit/build/mcpmanager.go:215`), keyed on
+  the declaration's fingerprint (`agentkit/build/mcpmanager.go:330`). ★ A hot partition
+  whose resources are not rebuilt lies about being hot.
+- **The write gate** refuses a name that could not be read back:
+  `validateFileName` (`agentkit/spec/write.go:87`) accepts only a `<server>.yaml` whose
+  name is a valid server name (`agentkit/spec/write.go:107`) — the file's name is the
+  server's name, and the server's name is the namespace segment of that server's tools.
+- **The scaffold** is `Template` (`agentkit/spec/write.go:160`), and the `mcps/` branch
+  (`agentkit/spec/write.go:189`) is nearly valid: it names the missing field instead of
+  failing at load time.
 
 ### 3.3 Adding an API route
 
@@ -328,7 +416,7 @@ and the message list draws a divider in place of the chat bubble
 (`web/src/components/message-list.tsx:101`, drawn by
 `web/src/components/compaction-divider.tsx`). A compaction that happens **mid-turn** is
 announced on the stream instead: the transport emits a `CUSTOM "context_compacted"` event
-(`transport/transport.go:590`) and the reducer puts a boundary into the list at once
+(`transport/transport.go:208`) and the reducer puts a boundary into the list at once
 (`web/src/lib/events.ts:412`).
 
 ★ The live event carries **no numbers**. The numbers — how many messages were superseded, how

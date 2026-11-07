@@ -100,8 +100,8 @@ transcript 是渲染器写的（§7）。那一行记录了 run 发生过，但�
 ★ 账本让这个卡死变得**看得见**——扫描会显示一个处于 `running` 却没有主人的
 run——但它并不能解开：闸门照样拒这个会话。解开它要靠 §5 的租约和 §7 的管线。
 （普通的客户端断开**不属于**这一类：处理器会继续跑，抽干也会继续，因为
-`transport/transport.go:611-623` 只在写失败之后停止**发帧**——第 167、174、
-182 行那份累积照走不误。）
+`transport/transport.go:160-172` 只在写失败之后停止**发帧**——deriver 那个循环
+（`agentkit/emit/emit.go:168`）里的累积照走不误。）
 
 **C4 —— 活着的 run 对第二个界面是不可见的。**
 `turn.events` 是单消费者的 `*adk.AsyncIterator`（`agentkit/run/turn.go:33`），

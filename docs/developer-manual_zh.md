@@ -109,22 +109,22 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
 
    ```go
    type toolProvider interface {
-       // ID 返回 provider 名，用于日志与错误信息。
+       // ID returns the provider name, used in logs and error messages.
        ID() string
-       // Optional 决定这个 provider 失败时是「跳过」还是「整个服务起不来」。
+       // Optional decides whether a failure means "skip" or "the whole service cannot start".
        Optional() bool
-       // Provide 返回该 provider 提供的工具批次。
+       // Provide returns the batch of tools this provider supplies.
        Provide(ctx context.Context, env toolEnv) ([]tool.BaseTool, error)
    }
    ```
 
    注意 `Provide` 返回的是**一批**工具 —— 一个 provider 可以提供多个。
 
-2. **注册**。在 `agentkit/build/tools.go:29` 的 `defaultToolRegistry` 里加上你的
+2. **注册**。在 `agentkit/build/tools.go:35` 的 `defaultToolRegistry` 里加上你的
    provider。位置决定顺序，也决定「可选工具」与「必需工具」的区分。
 
 3. **可选性由 `Optional()` 决定**，不是由返回 error 决定。`Optional() == true` 的
-   provider 失败时会打一条 Warn 然后跳过（`tools.go:58-60`）——
+   provider 失败时会打一条 Warn 然后跳过（`tools.go:65-67`）——
    缺 API key 不该让整个服务起不来。
    ★ 但注意这条 Warn 之外**没有别的提示**：工具静默不进表，用户在界面上只会发现
    「这个功能好像没有」。新增可选 provider 时要想清楚这条 Warn 够不够。
@@ -132,31 +132,87 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
 4. **闸门自动生效**。`agentkit/build/gate.go` 会用外层 policy + 内层
    `disabled_tools` 过滤工具表。你不需要写任何权限代码。
 
-5. **名字不能撞保留名**。`tools.go:39` 的 `reservedToolNames` 列出了
+5. **名字不能撞保留名**。`tools.go:46` 的 `reservedToolNames` 列出了
    `ls` `read_file` `write_file` `edit_file` `glob` `grep` `execute`
    `task` `write_todos` `skill`。撞上会在 `Build` 时报错。
    工具名同时是策略表里的键 —— 撞名会让策略表指向错误的工具。
 
-6. **跨 provider 撞名也会报错**：`tools.go:76` 的 `validateBatch` 用 `seen` 跟踪，
+   ★ **来自服务器的名字是带命名空间的。** MCP 工具挂在 `decl.MCPToolPrefix`
+   （`agentkit/spec/decl/decl.go:336`）与 `decl.MCPSeparator`
+   （`agentkit/spec/decl/decl.go:345`）之下，于是策略表用一个前缀就能收窄一整个
+   服务器，而不必列出它所有工具的名字。★ **拼出来的名字从不被解析回去**：
+   `Table.Blocked`（`agentkit/build/policy.go:161`）匹配的是前缀，所以没有任何代码
+   需要把一个名字拆开才能知道它属于哪个服务器。
+
+6. **跨 provider 撞名也会报错**：`tools.go:83` 的 `validateBatch` 用 `seen` 跟踪，
    所以两个 provider 提供同名工具会在启动时失败，而不是谁先谁后地覆盖。
+
+#### MCP provider
+
+`mcpToolProvider` 的注册方式与其他 provider 一样 —— 在
+`agentkit/build/tools.go:35` 的 `defaultToolRegistry` 里 —— 它也遵守
+`agentkit/build/tools.go:19` 的同一份 `toolProvider` 契约。但它有四处不是通用的：
+
+- **客户端活得比这一批工具久。** ★ 这一批工具每个快照只建一次：
+  `buildHeavy` 跑在一个 `sync.Once` 之下（`agentkit/build/snapshot.go:41`），
+  所以由 provider 持有的客户端会随快照一起被拆掉。**管理器**才持有这些客户端
+  （`agentkit/build/mcpmanager.go:42`），provider 是向管理器要它们的
+  （`agentkit/build/mcpmanager.go:89`）。
+- **名字带命名空间，而且只在一处拼装。** `mcpPlan`
+  （`agentkit/build/mcptools.go:68`）把服务器自己的工具名映射成暴露出来的名字与
+  它们的档位；名字本身只在 `mcpExposedName`
+  （`agentkit/build/mcptools.go:141`）里拼一次。provider 与 `/mcps` 投影都走
+  `mcpPlan`，所以两者不可能对「一个工具叫什么」有分歧。
+- **这个 provider 是可选的，而那条 Warn 是唯一的提示。** 够不着的服务器不该把
+  agent 拖垮，所以 `Provide`（`agentkit/build/mcptools.go:201`）打一条 Warn，
+  里面写明服务器、传输方式与错误（`agentkit/build/mcptools.go:217`），然后
+  带着其余服务器的工具继续走。★ 那条 Warn 是**唯一**的提示 —— 工具根本没进表，
+  用户看到的只是「这个功能好像没有」。
+- **输出有上限，stdio 调用被串行化。** 上限放在组件的结果处理器里
+  （`agentkit/build/mcptools.go:376`）；同一台 stdio 服务器的调用走 `serialTool`
+  （`agentkit/build/mcptools.go:335`），它带一把按服务器的互斥锁和一个调用截止时间。
+
+#### MCP 客户端的生命周期
+
+给需要调试它的人：
+
+- **一个服务器一个客户端。** 管理器为每个服务器持有一个条目
+  （`agentkit/build/mcpmanager.go:42`），这个条目拥有该服务器的客户端、它的工具
+  列表，以及它那把按服务器的互斥锁。
+- **启动是单飞的。** `ensure`（`agentkit/build/mcpmanager.go:215`）在锁下启动
+  客户端，所以同时来问的 provider 与 `/mcps` 面板拿到的是同一个客户端、同一个子
+  进程。★ 一个服务器跑两个子进程，会让模型看到的工具取决于哪个进程先应答。
+- **崩掉的子进程会在下一次调用时重新拉起。** 管道断了时 `markBroken`
+  （`agentkit/build/mcpmanager.go:290`）关掉客户端，下一次调用重新起一个。
+  ★ **超时不是连接断了**：服务器可能只是慢，所以截止时间到了就放弃，不会拆掉
+  客户端（`agentkit/build/mcptools.go:358`）。
+- **工具列表在一轮来要时重新列出**，条件是上一次列出的时间超过 30 秒
+  （`agentkit/build/mcpmanager.go:34`，`mcpRelistInterval`）。
+  ★ 这个间隔是写死的值，不是配置项：没人动的旋钮就是没人测的旋钮，而服务器
+  的工具列表是以「天」为尺度变化的。
+- **列表变了就推一代。** `Refresh`（`agentkit/build/mcpmanager.go:118`）报告列表
+  是否变化，builder 通过与配置重载器同一个钩子推一代
+  （`agentkit/build/builder.go:67`）。这次重列发生在该轮 agent 装配**之前**
+  （`agentkit/build/builder.go:105`），因为这一批工具每代只建一次 —— 把重列放进
+  构建里就永远不会跑到了。
 
 ### 3.2 加一个新的配置分区
 
 比如新增 `mcps/` 目录：
 
-★ 这个目录不是假设 —— `docs/mcp-design.md` 就是在设计它（一份提案：
-  它 §2 往后的东西都还不在树上）。下面这份配方就是那个分区要走的路子。
+★ 这个目录不再只是假设 —— `docs/mcp-design.md` 设计了它，而且这个分区已经在树上。
+  下面这份配方就是它走的路子。
 
 1. **`agentkit/spec/config.go`**：加目录常量 `DirMCP = "mcps"`，并在
    `Categories` 里加一项（含 `ID`、`Label`、`Dir`、`Ext`）。**热重载目录**和
    **非热重载目录**要分清楚 —— 改一个目录的语义（热不热）影响用户预期。
 
-2. **`agentkit/spec/load.go`**：加 `loaderFor` 的分支（`config.go:296` 的
+2. **`agentkit/spec/load.go`**：加 `loaderFor` 的分支（`config.go:314` 的
    `loaderFor`），并实现 `loadXXX`。
 
 3. **`agentkit/spec/decl/decl.go`**：加纯声明结构体。
 
-4. **热重载自动生效**：`agentkit/spec/config.go:76` 的 `hotDirList()` 是从
+4. **热重载自动生效**：`agentkit/spec/config.go:87` 的 `hotDirList()` 是从
    `Categories` 里筛出 `Hot()` 为真的目录 —— 你在第 1 步把分类标成热重载，
    监听集合就自动有了。**不需要**再去 `reload.go` 里手工登记一遍
    （漏登记的后果是「改配置不生效且无任何提示」）。
@@ -171,6 +227,28 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
    `initcfg/templates/<dir>/` 下加一个文件（只由 init 产出的那些文件），要么复用
    配置编辑器已有的脚手架（`spec.ToolTemplates()` / `spec.LimitsTemplate()`）。
    ★ **一份文件的内容只有一个来源**：同一个文件的两份拷贝，就是两份会漂移的拷贝。
+
+#### `mcps/` 分区
+
+`mcps/` 分区是一个 MCP 服务器一个文件，而且**文件的存在本身就是定义** ——
+没有 `enabled` 这个键。
+
+- **声明**由常量 `DirMCP = "mcps"`（`agentkit/spec/config.go:26`）与
+  `Categories` 里那一项（`agentkit/spec/config.go:72`）给出 —— 可编辑、热重载、
+  `.yaml`。
+- **装载**由 `loadMCP`（`agentkit/spec/load.go:256`）完成：一个文件，一个服务器。
+- ★ **这个分区的「热」意味着客户端会被重建。** 声明就是服务器的身份，所以声明变了
+  就是服务器变了：旧客户端被拆掉，重新起一个新的
+  （`agentkit/build/mcpmanager.go:215`），依据是那份声明的指纹
+  （`agentkit/build/mcpmanager.go:330`）。★ 一个资源没有跟着重建的热分区，就是在
+  撒谎说自己热。
+- **写入闸门**拒绝一个读不回来的名字：`validateFileName`
+  （`agentkit/spec/write.go:87`）只接受 `<server>.yaml` 且服务器名合法
+  （`agentkit/spec/write.go:107`）—— 文件名就是服务器名，而服务器名就是这台服务器
+  工具的命名空间段。
+- **脚手架**是 `Template`（`agentkit/spec/write.go:160`），其中 `mcps/` 那一支
+  （`agentkit/spec/write.go:189`）几乎就是合法的：它点名缺哪个字段，而不是在装载期
+  报错。
 
 ### 3.3 加一条 API 路由
 
@@ -294,7 +372,7 @@ Messages(effective bool) []*schema.Message
 出来（`web/src/lib/store/history.ts:14`），消息列表在气泡该在的位置上画一条分隔线
 （`web/src/components/message-list.tsx:101`，由 `web/src/components/compaction-divider.tsx`
 绘制）。**轮内**发生的压缩改走事件流通知：transport 发一个 `CUSTOM "context_compacted"` 事件
-（`transport/transport.go:590`），reducer 当场把边界插进列表（`web/src/lib/events.ts:412`）。
+（`transport/transport.go:208`），reducer 当场把边界插进列表（`web/src/lib/events.ts:412`）。
 
 ★ 实时事件**不带数字**。数字 —— 顶替了多少条消息、摘要省下了多少 token —— 是拿记录量出来的，
 而记录要等这一轮结束才写；transport 手里没有记录可量。所以实时分隔线写的是*「earlier messages ·
