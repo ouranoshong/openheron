@@ -337,9 +337,21 @@ Agent。模型档案里留着的 `summarize_at` 不再被读，openheron 加载�
 「哪些工具谁都不能用」。文件点自己的例外，Agent 点自己的例外，两者从不合并 ——
 于是一个 Agent 的生效工具表，永远只靠配置就能回答。
 
-★ **内置工具的例外写在代码里，不在文件里。** 读取类（`ls` `read_file` `glob` `grep`）
-与委派类（`task` `write_todos` `skill`）不用问。其余没有自己文件的工具 ——
-`write_file`、`edit_file`、`execute` —— 都要问。
+★ **代码自带一份缺省清单，文件只能往上加。** 读取类（`ls` `read_file` `glob` `grep`）
+与委派类（`task` `write_todos` `skill`）永远不用问 —— 没有任何文件能把它拿走。
+其余的一律要问，直到有文件点了名。
+
+★ **改机器的那三个工具也有自己的文件。** `write_file`、`edit_file`、`execute` 缺省要问，
+而放宽它们的地方就是 `tools/filesystem.yaml`：
+
+```yaml
+# .openheron/tools/filesystem.yaml
+allows: [write_file, edit_file, execute]
+```
+
+★ 那个文件是**调音旋钮，不是开关**：文件系统工具一直都在，所以它既不能加一个也不能删一个，
+只能挪它们的档位。**放宽是文件的活，收窄是 agent 的活**（`disabled_tools`）—— 因为收窄是
+按 agent 来的，而放宽是关于这个工具本身的决定。
 
 有自己文件的工具，在那个文件里说：
 

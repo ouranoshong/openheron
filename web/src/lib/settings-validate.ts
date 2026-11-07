@@ -23,11 +23,19 @@ export type KnownSection = "agents" | "llm" | "server" | "tools" | "mcps"
 
 export type Section = KnownSection | (string & {})
 
+// ★ An empty list means "no closed set": agents/, llm/ and mcps/ accept any
+//   valid name, so only these two sections restrict the file name.
+//
+// ★ This list is a **mirror** of the loader's whitelist
+//   (`agentkit/spec.ToolFileNames`), and the server stays the authority —
+//   its refusal is the one that cannot drift. The mirror exists for one
+//   reason only: the check runs on every keystroke in the new-file dialog,
+//   and a round trip per character is not a validator.
 const ALLOWED_FILES: Partial<Record<KnownSection, readonly string[]>> = {
   agents: [],
   llm: [],
   server: ["config.yaml"],
-  tools: ["http.yaml", "web_search.yaml", "wikipedia.yaml", "kb.yaml"],
+  tools: ["filesystem.yaml", "http.yaml", "kb.yaml", "web_search.yaml", "wikipedia.yaml"],
   mcps: [],
 }
 

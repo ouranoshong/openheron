@@ -55,8 +55,12 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 **保留不覆盖**（除非加 `--force`），所以在一个已经配好的项目里跑它是安全的。
 
 `tools/` 默认**不写** —— 配置缺失的 provider 什么都不挂，所以写下这个文件才是把工具挂上去
-的那一步，用哪些工具得由你来定；加 `--tools` 才会写 `tools/http.yaml`、
-`tools/web_search.yaml`、`tools/wikipedia.yaml` 和 `tools/kb.yaml`。
+的那一步，用哪些工具得由你来定；加 `--tools` 才会写 `tools/filesystem.yaml`、
+`tools/http.yaml`、`tools/web_search.yaml`、`tools/wikipedia.yaml` 和 `tools/kb.yaml`。
+
+★ **`tools/filesystem.yaml` 是唯一一个什么都不打开的。** 文件系统工具一直都在，所以那个
+文件只调它们的档位：写 `allows: [write_file, edit_file, execute]` 就是「让这个 agent 自己
+改文件、自己跑命令」的写法。不写，则读取器直接放行、写入器要问。
 
 ★ **MCP 那个例子是样本，不是能跑起来的服务器** —— 它的 `command` 是个没装的占位符。
 文件本身合法：它**能加载**，而起不来的服务器只赔上它自己的工具，别的什么都不影响。

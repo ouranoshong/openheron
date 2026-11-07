@@ -58,7 +58,7 @@
 | 15 | MCP 工具命名 | 暴露给模型的名字一律加命名空间 `mcp__<server>__<tool>` | **已实施**（见 §6.7）。MCP 工具名**由远端服务器定**：会撞保留工具名（`ls` / `execute`），也常带点号（`github.create_issue`）—— 后者过不了 provider 的 function name 字符集。命名空间把「撞名」变成「不可能」。前缀与分隔符是常量（`agentkit/spec/decl/decl.go:336`、`:345`），暴露名只在一处合成（`agentkit/build/mcptools.go:140`），provider 注册在工具注册表里（`agentkit/build/tools.go:35`、`:41`） |
 | 16 | 前缀匹配 | 某个 agent 的 `disabled_tools` 接受精确名 **+** 尾部 `*` 的前缀模式 | **已实施**（见 §6.3）：`newTable` 留着前缀模式（`agentkit/build/policy.go:98`），`Table.Blocked` 匹配它们（`agentkit/build/policy.go:146`）。★ **全局 deny** 跟着分区一起没了，所以已经没有第二层可供匹配 —— 前缀语法是它**唯一**的所在。agent 的 `mcps:` 清单落在同一张表里，形式是一个命名空间前缀（`agentkit/build/policy.go:129` `denyMCPNamespaces`） |
 | 17 | 档位写在哪 | **跟着工具走**：每个文件的 `allows:` 点名**不用点头**的那些，其余一律要点头；★ 已经**不再有任何全局清单** —— `policy/permissions.yaml` 没了 | **已实施**（见 §6.3、§6.6）：server 自己的文件用 server 自己的词汇点名它的例外，`tools/` 下的文件点名自己的例外，而那张表是从配置装配出来的。★ 档位是关于**某一个工具**的一句话，所以就该待在那个工具的文件里 —— 而且在那里用的是**同一套词汇**（`http.yaml` 说 `post`，所以它能说 `allows: [post]`；中心那份文件却不得不点名内部名字 `request_post`）。★ 全局清单跟着一起走了：「不被暴露」已经说了两遍（文件的清单、agent 的 `disabled_tools`），第三处就多一处要同步的地方 —— 而它是唯一必须说暴露名的那处 |
-| 18 | 缺省档位 | **到处都是 `ask`** —— 代码只给那些**没有自己的文件**的工具带一份 allow 清单，而文件的 `allows:` 点名它提供的那些工具的例外 | ★ **已实施**（见 §6.3）：缺省是 `ask`（`agentkit/build/policy.go:55` `TierOf`），代码那份清单正好覆盖没有文件的那些工具（`agentkit/build/tools.go:61` `builtinAllowedTools`），而那张表是从配置装配出来的，所以档位在 server 还没起来之前就能回答（`agentkit/build/mcptools.go:172` `mcpAllowedNames`）。★ 全体同一条规则：文件系统工具、HTTP 工具与一个 MCP server 行为一致，也没有需要记的分组缺省。★ 代码那份清单之所以存在，是因为 `task` —— 委派工具 —— **没有自己的文件**，而一个不点一下就不能委派的 agent 等于不能委派。MCP server 的工具是**运行期才发现**的：openheron 不知道 `delete_repo` 做什么，而 stdio 之下 server 是带着 agent 自己权限的子进程 ⇒ 默认点头是这场交易里安全的那一侧 |
+| 18 | 缺省档位 | **到处都是 `ask`** —— 代码带一份**缺省** allow 清单，而文件的 `allows:` 对它覆盖的那些工具**加进**去 | ★ **已实施**（见 §6.3）：缺省是 `ask`（`agentkit/build/policy.go:55` `TierOf`），代码那份清单是**地板**（`agentkit/build/tools.go:61` `builtinAllowedTools`），文件只能往上加；那张表是从配置装配出来的，所以档位在 server 还没起来之前就能回答（`agentkit/build/mcptools.go:172` `mcpAllowedNames`）。★ 全体同一条规则：文件系统工具、HTTP 工具与一个 MCP server 行为一致，也没有需要记的分组缺省。★ 代码那份清单之所以存在，是因为 `task` —— 委派工具 —— **没有自己的文件**，而一个不点一下就不能委派的 agent 等于不能委派。MCP server 的工具是**运行期才发现**的：openheron 不知道 `delete_repo` 做什么，而 stdio 之下 server 是带着 agent 自己权限的子进程 ⇒ 默认点头是这场交易里安全的那一侧 |
 | 19 | 一个 agent 加载哪些 MCP server | agent 自己的 `mcps:` 清单，写在它的 frontmatter 里 | **已实施**。★ 一个 server 是**能力**，而能力属于用到它的那个 agent —— 研究员不需要部署 server。★ 键缺失 = 全部已配置的 server，`[]` = 一个都不加载（与 `skills` 一样的指针做法），所以常见情况只写**一处**：写好 server 文件，没有收窄清单的 agent 就都拿到它（`agentkit/spec/decl/decl.go:114`、`agentkit/spec/load.go:554` `mcpServersOf`） |
 | 20 | 知识库的目录键 | **`corpus_dir`**，不是 `corpus` | ★ 它的值是一个**目录**，而配置里别的目录键都这么说：`data_dir`、`static_dir`。「corpus」是信息检索里对「检索系统据以作答的那批文档」的叫法 —— 不懂这个词的人也该读得懂这个键。★ 旧键仍然能加载，所以这次改名不会弄坏一份能用的配置；它会在 `deferred` 里说出来（`agentkit/spec/decl/decl.go:541-554`、`agentkit/spec/load.go:209-215`） |
 
@@ -1016,7 +1016,7 @@ eino 的 `parseFrontmatter` 在 `eino@v0.9.22/adk/middlewares/skill/filesystem_b
 | | |
 |---|---|
 | 缺省档位 | **`ask`** —— 没人点名的工具先问一句 |
-| 例外 | **被点名**：由提供该工具的那个文件点名（`allows:`），而**没有自己的文件**的工具由代码点名 |
+| 例外 | **被点名**：代码带一份缺省清单，而文件的 `allows:` 对它**加进**去 —— 文件里的任何东西都缩不了它 |
 
 ★ **为什么缺省是 `ask`。** 猜错的代价不对称：多一次点击，对上的是没人看见的一次破坏性调用。
 没人点名的工具，就是 openheron 不敢替它担保的工具 —— 一个 MCP server 的工具是**运行期才发现**的，
@@ -1027,7 +1027,7 @@ eino 的 `parseFrontmatter` 在 `eino@v0.9.22/adk/middlewares/skill/filesystem_b
 
 | 来源 | 它点名的是什么 | 用的词汇 |
 |---|---|---|
-| `agentkit/build/tools.go:61` `builtinAllowedTools` | 那些**没有自己的文件**的内置工具：文件系统读取器（`ls` `read_file` `glob` `grep`）、委派工具（`task` `write_todos`）与技能读取器（`skill`） | 暴露名 |
+| `agentkit/build/tools.go:61` `builtinAllowedTools` | **缺省**那一份：文件系统读取器（`ls` `read_file` `glob` `grep`）、委派工具（`task` `write_todos`）与技能读取器（`skill`）。★ 它永远生效 —— 文件是往上加，所以要把一个名字从里面去掉，得改这张表 | 暴露名 |
 | `agentkit/spec/load.go:235` `AllowedTools` | **确实写了**的那些文件的工具 —— `tools/http.yaml` 说 `allows: [request_get]`，`tools/kb.yaml` 说 `allows: [kb_search]` | **文件自己的** |
 | `agentkit/build/mcptools.go:172` `mcpAllowedNames` | 一个 MCP server 自己的工具 | **server 自己的** |
 
@@ -1248,6 +1248,7 @@ skills are not enabled
 ├─ http.yaml             → decl.HTTPToolsCfg
 ├─ web_search.yaml       → decl.WebSearchCfg
 ├─ wikipedia.yaml        → decl.WikipediaCfg
+├─ filesystem.yaml       → decl.FilesystemCfg (the filesystem tools' tiers)
 └─ kb.yaml               → decl.KB (the knowledge base)
 ```
 
@@ -1261,8 +1262,8 @@ skills are not enabled
 ★ 今天这两件事在三个族上恰好重合：`httpRequestToolProvider`、`webSearchToolProvider` 与
 `wikipediaToolProvider` 在配置缺失时返回**空**（`agentkit/build/nettools.go`：
 `if cfg == nil { return nil, nil }`），所以对它们来说「文件在不在」碰巧成了开关。★ 那是 **provider
-的决定**，不是文件形状蕴含的 —— 而文件系统工具是另一种情况：它们**一直都在**，而且**没有自己的
-文件**，所以它们的档位住在代码里（§6.3）。加载器自己的规矩 —— 文件名是白名单，
+的决定**，不是文件形状蕴含的 —— 而文件系统工具是另一种情况：它们**一直都在**，所以它们的文件
+（见下文 §6.6）调的是它们的档位，没法把它们开起来或关掉。加载器自己的规矩 —— 文件名是白名单，
 未知文件名是启动错误（`agentkit/spec/load.go:165-193`）—— 说的是**读哪些文件**，不是哪些工具存在。
 
 ★ 空文件会被拒绝，并给出一条提示、告诉用户该写什么（`agentkit/spec/load.go:151-158`）：文件的内容
@@ -1291,10 +1292,11 @@ skills are not enabled
 | `web_search.yaml` | 后端：`duckduckgo` | `duckduckgo_search` |
 | `wikipedia.yaml` | ——（一个工具） | `wikipedia_search` |
 | `kb.yaml` | `kb_search` `kb_index` | 同左 |
+| `filesystem.yaml` | ——（一个工具） | `ls` `read_file` … 同左 |
 | `mcps/<server>.yaml` | server 自己的名字：`create_issue` | `mcp__github__create_issue` |
 
-★ **文件系统工具没有行，而这正是要点。** 它们来自框架的中间件而不是来自某个 provider，
-所以**没有自己的文件** —— 它们的例外住在代码里（§6.3），而且只住在那里。
+★ **文件系统工具那一行是唯一不需要翻译的一行。** 它们来自框架的中间件而不是来自某个 provider，
+而中间件的名字本来就是暴露名 —— 所以它们的文件说的就是模型看到的那套词汇。
 
 ★ **拆分之前，这张表并不存在** —— 策略文件说的是第三列，而工具自己的文件说的是第二列，于是
 `http.yaml` 说 `post`，`permissions.yaml` 却不得不说 `request_post`。★ 一个工具两套词汇，
@@ -1323,16 +1325,18 @@ skills are not enabled
 ★ **缺省是 `ask`，而 `allows:` 是例外。** 除非有别的东西说话，否则每个工具都要先点头。
 没有分组缺省，也没有特例：同一条规则盖住文件系统工具、HTTP 工具与一个 MCP server。
 
-★ **代码自带一份 allow 清单**，给那些**没有自己的文件**的工具 ——
-`ls`、`read_file`、`glob`、`grep`、`task`、`write_todos`、`skill`
-（`agentkit/build/tools.go:61` `builtinAllowedTools`）。★ 委派工具在里面，是因为一个不点一下
-就不能委派的 agent 等于不能委派；而文件系统的读取器在里面，是因为它们只读。
+★ **代码带一份缺省 allow 清单** —— `ls`、`read_file`、`glob`、`grep`、`task`、
+`write_todos`、`skill`（`agentkit/build/tools.go:61` `builtinAllowedTools`）。★ 它永远生效：文件是
+往它上面**加**，而文件里的任何东西都拿不走一个名字。委派工具在里面，是因为一个不点一下
+就不能委派的 agent 等于不能委派；而读取器在里面，是因为它们只读。
 
 ★ **文件的 `allows:` 点名的是它提供的那些工具的例外**，用那个文件自己的词汇 ——
-`tools/http.yaml` 说 `allows: [request_get]`，`tools/kb.yaml` 说 `allows: [kb_search]`。
+`tools/http.yaml` 说 `allows: [request_get]`，`tools/kb.yaml` 说 `allows: [kb_search]`，而
+`tools/filesystem.yaml` 正是 `write_file` / `edit_file` / `execute` 被放宽的地方。
 加载器把它们收集起来（`agentkit/spec/load.go:235` `AllowedTools`），而那张表是三份清单的并集：
-这份、代码那份、以及各 server 那份（§6.3）。★ 一个**不在**的文件什么都不贡献：那个工具也没被挂上，
-所以没有档位可回答。
+这份、代码那份、以及各 server 那份（§6.3）。★ 对各个 provider 来说，一个**不在**的文件什么都不贡献：
+那个工具也没被挂上，所以没有档位可回答。★ 文件系统工具是例外：它们不管文件在不在都会被挂上，
+所以文件不在只是让代码那份缺省原样留着。
 
 ★ **文件里没有 `deny`，而且已经没有全局清单了**（§6.3）。「不被暴露」只说两处：这个
   文件的**清单** —— 每个文件把清单叫成合口的名字，HTTP 用 `methods:`（`http.yaml`），其余用 `tools:` ——
@@ -1408,8 +1412,9 @@ allows: [read_issue, list_issues]
 
 #### ★ 文件系统工具：它们的例外住在代码里
 
-文件系统工具来自框架的中间件，而不是来自某个 provider，所以它们**没有自己的文件** ——
-而这正是它们的例外住在代码里的原因（`agentkit/build/tools.go:61` `builtinAllowedTools`）。
+文件系统工具来自框架的中间件，而不是来自某个 provider，所以是中间件把它们挂上、没有任何文件能
+把它们打开 —— 于是它们的文件是一个**调音旋钮**（`tools/filesystem.yaml`），而文件不在时生效的
+是代码那份缺省清单（`agentkit/build/tools.go:61` `builtinAllowedTools`）。
 
 这一套就是 eino 的文件系统中间件：`ls`、`read_file`、`write_file`、`edit_file`、
 `glob`、`grep`、`execute`（`eino@v0.9.22/adk/middlewares/filesystem/filesystem.go:38-46`）。
@@ -1421,17 +1426,29 @@ ls  read_file  glob  grep
 ★ **读取器直接放行，写入器要点头。** `write_file`、`edit_file` 与 `execute` 不在清单里，
 所以它们会为一个人打断这一轮 —— 这个方向是对的：它们正是那三个会改动这台机器的工具。
 
-★ **给它们一份自己的文件，那是调音旋钮，不是开关** —— 文件系统工具是 agent 的核心能力，
-不是可选集成。★ **`tools/filesystem.yaml` 没有实施，也不会实施**：`tools/` 只接受 `http.yaml`、
-`web_search.yaml`、`wikipedia.yaml` 与 `kb.yaml`，别的都不接受（`agentkit/spec/load.go:191`），
-所以写那个文件是一个**加载期错误**，不是静默的空操作。★ 收窄本来就能表达，而且写在管它的地方：
-某个 agent 的 `disabled_tools`（§6.2）。
+★ **它们有自己的文件了，而那是一个调音旋钮，不是开关** —— 文件系统工具是 agent 的核心能力，
+中间件无条件把它们挂上，所以 `tools/filesystem.yaml` 加不了也删不了一个工具。它只带 `allows:`
+一样东西（§6.6 的字段清单），而这恰恰是档位模型需要的：给一个不属于任何 provider 文件的工具，
+留一处点名例外的位置。
 
-★ **后果就说白了吧**：`write_file`、`edit_file` 与 `execute` 没有自己的文件，所以**没有任何地方
-能把它们写进 `allows:` 清单** —— 它们永远要问（`agentkit/build/tools.go:61` 是代码里一份封闭的
-清单）。想要一个不盯着、能自己跑命令的 agent，今天做不到；能动的杠杆比 `policy/permissions.yaml`
-那会儿**更少** —— 那时还能把 `execute` 移出 `ask`。这是一个**已知的缺口**，不是一个可写进文档的
-特性：agent 自己的 `disabled_tools` 只能把工具拿走，没有任何东西能把它还回来。
+★ **这个文件里的 `allows:` 是加法的。** 写在这里的名字是加进代码那份缺省清单
+（`agentkit/build/tools.go:61`）—— 它从来拿不走一个名字：
+
+```yaml
+# .openheron/tools/filesystem.yaml
+#
+# ★ 三个写入工具，不用点头 —— 一个自己动手改文件、跑命令的 agent。
+#   文件不在（或 `allows: []`）时它们要点头，那就是缺省。
+allows: [write_file, edit_file, execute]
+```
+
+★ **于是这个文件放宽，`disabled_tools` 收窄。** 这就是那条分工，而且是刻意的：放宽是关于**工具**
+的一个决定（它该待在工具旁边），收窄是关于**某一个 agent** 的决定（它该待在那个 agent 的文件里）。
+两个机制、两套词汇、不重叠 —— 也没有第三处能把同一个决定再做一遍。
+
+★ **它说的工具名就是中间件自己的名字** —— `ls`、`read_file`、`write_file`、
+`edit_file`、`glob`、`grep`、`execute`（`eino@v0.9.22/adk/middlewares/filesystem/filesystem.go:38-46`）。
+它们同时也是暴露名，所以这里没有翻译，不像一个 MCP server 自己的词汇那样（§6.7）。
 
 #### ★ 迁移（旧配置怎么办）
 
@@ -1485,6 +1502,7 @@ ls  read_file  glob  grep
 | `web_search.yaml` | `allows` | `[]string` | `[]` | 同上：`duckduckgo_search` |
 | `wikipedia.yaml` | `allows` | `[]string` | `[]` | 同上：`wikipedia_search` |
 | `kb.yaml` | `allows` | `[]string` | `[]` | 同上：`kb_search` —— `kb_index` 要写索引，所以要点头 |
+| `filesystem.yaml` | `allows` | `[]string` | `[]` | ★ 同上，而且是**加法**：`write_file` / `edit_file` / `execute` 在这里点名后就不用点头。它**没有别的键** —— 工具是中间件挂上的，所以除了档位没有可配的东西 |
 
 ★ **这些字段的缺省值住在读它们的 provider 里，不在 `decl` 里。** 声明结构体只带形状
 （三个工具配置在 `agentkit/spec/decl/decl.go:303-321`，知识库在
@@ -1499,9 +1517,11 @@ provider `searxng`（`agentkit/spec/write.go:233`），而代码只认 `duckduck
 词法检索（`agentkit/spec/write.go:249`），而加载器会拒掉它：`kb.model is required when kb.corpus_dir is
 set`（`agentkit/spec/load.go:603`）。
 
-★ 文件名是**白名单**（`http.yaml` / `web_search.yaml` / `wikipedia.yaml` / `kb.yaml`）：未知文件名在
-**加载期**就是硬错误（`agentkit/spec/load.go:191` —— `tools/ only accepts http.yaml, web_search.yaml,
-wikipedia.yaml and kb.yaml`）—— 写进去一个永远不生效的段落，症状是「我明明写了却不生效」，极难查。
+★ 文件名是**白名单**（`filesystem.yaml` / `http.yaml` / `kb.yaml` / `web_search.yaml` /
+`wikipedia.yaml`）：未知文件名在**加载期**就是硬错误（`agentkit/spec/load.go:191`，那条消息由
+`ToolFileNames` 拼出来）—— 写进去一个永远不生效的段落，症状是「我明明写了却不生效」，极难查。
+★ 这份清单**只有一个**家：`toolHints`（`agentkit/spec/load.go:137`），加载器、写入门与两条错误
+消息都读它，所以编辑器存不下一个加载器会拒掉的文件。
 
 #### ★ 「连到外面去」的三类工具
 
@@ -1545,7 +1565,7 @@ server 是 openheron 的**子进程** —— 它能写文件、能联网，「�
 |---|---|
 | ★ **provider**（`defaultToolRegistry`、`fsx.New`） | ★ **工具集本身** —— 到底哪些工具存在 |
 | `tools/` 里的文件 | 那些工具的**参数**，以及**其中哪些不用点头**（`allows:`）。★ 对 MCP 它还承载 server 的定义 —— `tools:` 从 server 提供的工具里挑要暴露的 |
-| ★ **代码**（`builtinAllowedTools`） | **没有自己的文件**的工具的例外 —— 文件系统的读取器与框架自带的 `task`（§6.3） |
+| ★ **代码**（`builtinAllowedTools`） | **缺省**的那些例外 —— 读取器、委派工具与技能读取器。文件往这份清单上加；只有代码能缩它（§6.3） |
 | 每个 agent 的 `mcps:` | **这个 agent 加载哪些 server**（§6.2） |
 | 每个 agent 的 `disabled_tools` | **收窄**：这个 agent 干脆不拿这些工具（内层，它自己能控制） |
 
@@ -1760,8 +1780,8 @@ server 起不来，日志里说一句，agent 照跑。★ **把它复制成 `mc
 
 ★ **整个模型都已实施，它周边的东西也一样。** 全局档位清单没了（§6.3），缺省是 `ask`，
 而例外由**提供**该工具的那个文件点名 —— 对 MCP 是 server 自己的文件（§6.7），其余的是
-`tools/` 下的文件（§6.6）。★ 唯一仍然**没有**实施的是文件系统工具自己那份文件：
-它们的例外住在代码里，因为它们没有文件可住（§6.6）。
+`tools/` 下的文件（§6.6）。★ 文件系统工具也有了自己的文件（`tools/filesystem.yaml`），
+而它是一个**调音旋钮**：中间件不管那个文件在不在都把工具挂上，所以它只能放宽、不能开关（§6.6）。
 
 ## 7. AgentHub / ModelHub：eino 只给接口
 
@@ -2065,7 +2085,7 @@ agentkit/spec/write.go:persist.AtomicWrite
 | 10 | ✅ **已实施** MCP 工具一律带 `mcp__` 命名空间，且**只有** MCP 工具能用这个前缀 | 没有命名空间，一个暴露 `ls` 的 server 会让整个 agent 起不来（撞上保留工具名即在加载期报错）；没有「只有 MCP 能用」这一半，内置工具就能占了这个命名空间，某个 agent 的 `disabled_tools` 里的前缀规则会悄悄盖住它 |
 | 11 | ✅ **已实施** 某个 agent 的 `disabled_tools` 只支持**尾部** `*` 的前缀模式，其余写法加载期报错 | 一条读起来与实际覆盖范围不同的规则，就是一次静默的错配 |
 | 12 | ✅ **已实施** 档位写在**工具自己的文件与自己的词汇里** —— 文件的 `allows:` 点名哪些不用点头，而且**没有全局清单**能与它矛盾 | 一个工具的权限就是一处的一个事实；一个说 `post` 的文件就说 `allows: [post]`，不必在两套词汇之间来回翻译 |
-| 13 | ❌ **已撤回** —— 文件系统工具**不会**有自己的文件；它们的例外住在代码里（`agentkit/build/tools.go:61`） | ★ 那个文件当初是按**调音旋钮**提的，但旋钮只有在能放宽也能收紧时才值得存在，而它许诺的放宽恰恰是档位模型现在对「没有文件的工具」表达不了的。★ `tools/` 只接受四个固定文件名（`agentkit/spec/load.go:191`），所以那个文件会是加载期错误；它本来要服务的收窄，就是某个 agent 的 `disabled_tools`（§6.2、§6.6） |
+| 13 | ✅ **已实施** —— 文件系统工具有自己的文件 `tools/filesystem.yaml`，而它是一个**调音旋钮**：`allows:` 点名它们的例外，而中间件不管文件在不在都把工具挂上 | ★ 这些工具是 agent 的核心能力，所以那个文件不能有权把它们关掉 —— 它也不能收窄，因为收窄是按 agent 的（§6.2）。★ 它的 `allows:` 是**加法**的，于是文件放宽、`disabled_tools` 收窄：每一层一个机制（`decl.FilesystemCfg`、`agentkit/spec/load.go:235` `AllowedTools`） |
 
 ★ **第 10、11 两行已实施。** 命名空间只在一处合成
 （`agentkit/build/mcptools.go:140`），前缀语法由 `decl.ParseToolNamePattern`

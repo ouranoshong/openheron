@@ -364,10 +364,24 @@ none where you list the tools nobody may use. A file names its own exceptions, a
 names its own, and the two never merge — so the effective tool table of an agent is
 always answerable from the configuration alone.
 
-★ **The exceptions a built-in tool has are in the code, not in a file.** The readers
+★ **The code carries a default list, and a file only adds to it.** The readers
 (`ls` `read_file` `glob` `grep`) and the delegation tools (`task` `write_todos`
-`skill`) run without a nod. Everything else that has no file of its own — `write_file`,
-`edit_file`, `execute` — asks.
+`skill`) run without a nod, always — no file can take that away. Everything else asks
+until a file names it.
+
+★ **The three tools that change the machine have a file too.** `write_file`,
+`edit_file` and `execute` ask by default, and `tools/filesystem.yaml` is where you widen
+them:
+
+```yaml
+# .openheron/tools/filesystem.yaml
+allows: [write_file, edit_file, execute]
+```
+
+★ That file is a **tuner, not a switch**: the filesystem tools are always mounted, so the
+file cannot add or remove one — it only moves their tier. **Widening is the file's job;
+narrowing is the agent's** (`disabled_tools`), because narrowing is per agent and
+widening is a decision about the tool.
 
 The tools that come with a file of their own say so in that file:
 

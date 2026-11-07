@@ -89,14 +89,16 @@ func validateFileName(cat Category, rel string) error {
 	base := path.Base(filepath.ToSlash(rel))
 	switch cat.Dir {
 	case DirTools:
-		switch base {
-		case "http.yaml", "web_search.yaml", "wikipedia.yaml", "kb.yaml":
-			return nil
-		default:
-			return writeErrf(ErrPathInvalid, rel,
-				"tools/ only accepts http.yaml, web_search.yaml, wikipedia.yaml and kb.yaml; "+
-					"other files here are rejected at load time")
+		// ★ One list, shared with the loader: a second copy here would let
+		//   the editor save a file the loader then rejects.
+		for _, name := range ToolFileNames() {
+			if base == name {
+				return nil
+			}
 		}
+		return writeErrf(ErrPathInvalid, rel,
+			"tools/ only accepts %s; other files here are rejected at load time",
+			strings.Join(ToolFileNames(), ", "))
 	case DirMCP:
 		// ★ The file's name is the server's name, and it is the namespace
 		//   segment of that server's tools: a name that does not match the

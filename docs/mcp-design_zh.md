@@ -540,24 +540,21 @@ call_timeout: 60s
 ★ **宿主**持有那把 key、由代理替换它，所以容器永远看不到它 —— 但宿主上的一个 http
   服务器仍然可能需要沙箱向*它*做认证，而那就是 `headers:` 这张表（§8.1）。
 
-#### ★ `tools/filesystem.yaml` —— 一份提案，不在树上
+#### ★ `tools/filesystem.yaml` —— 同一种形状，换了一族工具
 
 ```yaml
 # .openheron/tools/filesystem.yaml
 #
-# ★ The filesystem tool set. These tools are always there — this file tunes them.
-#
-# ★ The default is ask, so the list names the exceptions: the read-only tools
-#   run straight through, and write_file / edit_file / execute ask.
-allows: [ls, read_file, glob, grep]
-# tools: [ls, read_file, glob, grep]   # uncomment for a read-only agent
+# ★ The filesystem tool set. These tools are always mounted — this file tunes them.
+allows: [write_file, edit_file, execute]
 ```
 
-★ **文件系统工具还没有自己的文件。** 它们来自框架的中间件，而不是来自一个 provider，
-  所以它们的例外是**代码自己**的那份清单（`agentkit/build/tools.go:61`）：
-  读的那几个 `ls` `read_file` `glob` `grep`，委派的那几个 `task` `write_todos`，
-  以及读技能的 `skill`。上面那个文件就是给它们一个家、让这个集合可以被收窄的东西 ——
-  它**没有实现**。见 `docs/config-design.md` §6.6。
+★ **文件系统工具来自框架的中间件，不是来自一个 provider** —— 所以它们的文件既不能把它们
+  打开也不能关掉，里面只有 `allows:`。这跟一个 MCP server 的文件在它们共有的那一个问题
+  上是同一种形状：*这些工具里哪些不用点头*。★ 它们的 `allows:` 是**叠加的** —— 加在代码
+  那份缺省清单上（`agentkit/build/tools.go:61`：读的那几个 `ls` `read_file` `glob` `grep`，
+  委派的那几个 `task` `write_todos`，读技能的 `skill`），并不能把名字拿走。放宽是文件的活，
+  收窄是某个 agent 的 `disabled_tools`。见 `docs/config-design.md` §6.6。
 
 #### `tools/kb.yaml`
 
@@ -970,10 +967,10 @@ allows: [read_issue, list_issues]
   策略表随快照一起重建，闸门从下一轮起读到新档位。重载唯一要顾对的是
   **客户端**：声明变了的那台服务器拿到新的客户端（§5.4）。
 
-★ **文件系统工具也有自己的文件** —— `tools/filesystem.yaml` —— 这样它们的档位
-  写在它们旁边，这个集合也可以被收窄。★ 那个文件是一份**提案**，不在树上：
-  今天内置那些例外是代码自己的清单（`agentkit/build/tools.go:61`）。
-  见 `docs/config-design.md` §6.6。
+★ **文件系统工具也有自己的文件** —— `tools/filesystem.yaml` —— 于是它们的档位是被写下来的，
+  不再只是隐含的。★ 它是**调音旋钮**，不是开关：中间件无条件挂上那些工具，所以这个文件放宽
+  它们的例外，而某个 agent 的 `disabled_tools` 收窄它们（`agentkit/build/tools.go:61` 是它
+  往上加的那份缺省）。见 `docs/config-design.md` §6.6。
 
 ### 7.4 run ledger 说什么
 

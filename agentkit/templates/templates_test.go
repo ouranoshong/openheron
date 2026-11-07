@@ -13,6 +13,7 @@ func TestEveryTemplateIsThere(t *testing.T) {
 		"llm/openai.yaml",
 		"mcps/example.yaml",
 		"server/config.yaml",
+		"tools/filesystem.yaml",
 		"tools/http.yaml",
 		"tools/web_search.yaml",
 		"tools/wikipedia.yaml",

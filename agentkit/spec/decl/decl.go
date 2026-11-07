@@ -258,9 +258,25 @@ const (
 )
 
 type ToolsCfg struct {
-	HTTP      *HTTPToolsCfg `yaml:"http"`
-	WebSearch *WebSearchCfg `yaml:"web_search"`
-	Wikipedia *WikipediaCfg `yaml:"wikipedia"`
+	HTTP       *HTTPToolsCfg  `yaml:"http"`
+	WebSearch  *WebSearchCfg  `yaml:"web_search"`
+	Wikipedia  *WikipediaCfg  `yaml:"wikipedia"`
+	Filesystem *FilesystemCfg `yaml:"filesystem"`
+}
+
+// FilesystemCfg is the filesystem tool set's own configuration.
+//
+// ★ The tools are **always mounted** — the middleware provides them and no
+//
+//	file switches them on. So this file is a **tuner**, not a switch: it can
+//	only name exceptions, never remove a tool. Removing one is an agent's
+//	`disabled_tools`, which is a narrowing and belongs to the agent.
+//
+// ★ `allows:` is **additive**: a name here joins the exceptions the code
+//
+//	already carries (`builtinAllowedTools`), and it never takes one away.
+type FilesystemCfg struct {
+	Allows []string `yaml:"allows"`
 }
 
 // HTTPToolsCfg is the HTTP tool's own configuration.

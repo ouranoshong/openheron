@@ -584,25 +584,23 @@ call_timeout: 60s
 it — but an http server on the host may still need the sandbox to authenticate *to it*,
 and that is the `headers:` map (§8.1).
 
-#### ★ `tools/filesystem.yaml` — a proposal, not in the tree
+#### ★ `tools/filesystem.yaml` — the same shape, one family over
 
 ```yaml
 # .openheron/tools/filesystem.yaml
 #
-# ★ The filesystem tool set. These tools are always there — this file tunes them.
-#
-# ★ The default is ask, so the list names the exceptions: the read-only tools
-#   run straight through, and write_file / edit_file / execute ask.
-allows: [ls, read_file, glob, grep]
-# tools: [ls, read_file, glob, grep]   # uncomment for a read-only agent
+# ★ The filesystem tool set. These tools are always mounted — this file tunes them.
+allows: [write_file, edit_file, execute]
 ```
 
-★ **The filesystem tools have no file of their own yet.** They come from the
-framework's middleware, not from a provider, so their exceptions are the **code's**
-own list (`agentkit/build/tools.go:61`): the readers `ls` `read_file` `glob` `grep`,
-the delegation tools `task` `write_todos`, and the skill reader `skill`. The file
-above is what would give them a home and let the set be narrowed — it is **not
-implemented**. See `docs/config-design.md` §6.6.
+★ **The filesystem tools come from the framework's middleware, not from a provider** —
+so their file cannot switch them on or off, and it carries `allows:` and nothing else.
+That is the same shape an MCP server's file has for the one question they share: *which
+of these tools run without a nod*. ★ Their `allows:` is **additive** — it joins the
+code's default list (`agentkit/build/tools.go:61`: the readers `ls` `read_file` `glob`
+`grep`, the delegation tools `task` `write_todos`, the skill reader `skill`) and cannot
+remove a name. Widening is the file's job; narrowing is an agent's `disabled_tools`.
+See `docs/config-design.md` §6.6.
 
 #### `tools/kb.yaml`
 
@@ -1047,10 +1045,11 @@ tier is not special: the policy table is rebuilt with the snapshot and the gate 
 new tier from the next turn on. The one thing the reload has to get right is the
 **client**: a server whose declaration changed gets a new client (§5.4).
 
-★ **The filesystem tools get a file too** — `tools/filesystem.yaml` — so their tiers are
-written next to them and the set can be narrowed. ★ That file is a **proposal**, not in
-the tree: today the built-in exceptions are the code's own list
-(`agentkit/build/tools.go:61`). See `docs/config-design.md` §6.6.
+★ **The filesystem tools have a file too** — `tools/filesystem.yaml` — so their tiers are
+written down instead of only implied. ★ It is a **tuner**, not a switch: the middleware
+mounts those tools unconditionally, so the file widens their exceptions and an agent's
+`disabled_tools` narrows them (`agentkit/build/tools.go:61` is the default it adds to).
+See `docs/config-design.md` §6.6.
 
 ### 7.4 What the run ledger says
 

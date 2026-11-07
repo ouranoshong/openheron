@@ -1164,6 +1164,7 @@ export function startFakeServer(port = 0): FakeServer {
       //   FILE's template — this is the shape the bug lived in.
       tools:
         "# tools/ one file = one tool:\n" +
+        "#   filesystem.yaml   the filesystem tools' tiers (always mounted)\n" +
         "#   http.yaml         request_get / request_post / request_put / request_delete\n" +
         "#   web_search.yaml   duckduckgo_search\n" +
         "#   wikipedia.yaml    wikipedia_search\n" +
@@ -1173,6 +1174,13 @@ export function startFakeServer(port = 0): FakeServer {
         "#   Whether the file exists IS the switch — turning a tool off = deleting that file.\n" +
         "#\n" +
         "# ★ tools/ is hot-reloaded: the change takes effect on the next turn, no process restart.\n",
+      "tools/filesystem.yaml":
+        "# The filesystem tools. ★ They are **always mounted** — this file does not\n" +
+        "#   switch them on, it tunes their tiers.\n" +
+        "#\n" +
+        "# ★ `allows:` here is **additive**: a name joins the exceptions, and it never\n" +
+        "#   takes one away.\n" +
+        "allows: []\n",
       "tools/http.yaml":
         "# HTTP tool. Writing this file enables it.\n" +
         "#\n" +

@@ -25,6 +25,7 @@ describe("validatePath", () => {
       "llm/deepseek.yaml",
       "agents/main.md",
       "tools/http.yaml",
+      "tools/filesystem.yaml",
       "mcps/github.yaml",
     ]) {
       expect(validatePath(p)).toEqual([])

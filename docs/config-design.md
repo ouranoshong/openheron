@@ -56,7 +56,7 @@
 | 15 | MCP tool naming | every name exposed to the model is namespaced `mcp__<server>__<tool>` | **implemented** (see §6.7). MCP tool names are **decided by the remote server**: they collide with reserved tool names (`ls` / `execute`) and often carry dots (`github.create_issue`) — the latter does not pass the provider's function-name character set. The namespace turns "a collision" into "impossible". The prefix and the separator are constants (`agentkit/spec/decl/decl.go:336`, `:345`), the exposed name is composed in one place (`agentkit/build/mcptools.go:140`), and the provider is registered in the tool registry (`agentkit/build/tools.go:35`, `:41`) |
 | 16 | Prefix matching | an agent's `disabled_tools` accepts an exact name **+** a trailing `*` prefix pattern | **implemented** (see §6.3): `newTable` keeps the prefix patterns (`agentkit/build/policy.go:98`) and `Table.Blocked` matches them (`agentkit/build/policy.go:146`). ★ The **global deny** is gone with the partition, so there is no second layer left to match — the prefix syntax is the **only** place it lives. The agent's `mcps:` list lands in the same table as a namespace prefix (`agentkit/build/policy.go:129` `denyMCPNamespaces`) |
 | 17 | Where a tier is written | **with the tool**: each file's `allows:` names what runs **without a nod**, and everything else asks; ★ there is **no global list** any more — `policy/permissions.yaml` is gone | **implemented** (see §6.3, §6.6): the server's own file names its exceptions in the server's own vocabulary, the `tools/` files name theirs, and the table is assembled from the configuration. ★ a tier is a statement about **one tool**, so it belongs in that tool's file — and there it uses **the same vocabulary** (`http.yaml` says `post`, so it can say `allows: [post]`; the central file had to name the internal `request_post`). ★ the global list went with it: "not exposed" is said twice already (a file's whitelist, an agent's `disabled_tools`), and a third place is one more to keep in sync — and it was the only one that had to speak the exposed names |
-| 18 | The default tier | **`ask`, everywhere** — the code carries one allow list for the tools that have **no file of their own**, and a file's `allows:` names the exceptions for the tools that file provides | ★ **implemented** (see §6.3): the default is `ask` (`agentkit/build/policy.go:55` `TierOf`), the code's list covers exactly the tools without a file (`agentkit/build/tools.go:61` `builtinAllowedTools`), and the table is assembled from the configuration, so the tier is answerable before the server is even up (`agentkit/build/mcptools.go:172` `mcpAllowedNames`). ★ one rule for everything: the filesystem tools, the HTTP tool and an MCP server behave the same way, and there is no per-group default to remember. ★ the code's list exists because `task` — the delegation tool — has **no file of its own**, and an agent that cannot delegate without a click cannot delegate at all. An MCP server's tools are **discovered at runtime**: openheron cannot know what `delete_repo` does, and under stdio the server is a child process with the agent's own privileges ⇒ asking by default is the safe side of the trade |
+| 18 | The default tier | **`ask`, everywhere** — the code carries one default allow list, and a file's `allows:` **adds** to it for the tools that file covers | ★ **implemented** (see §6.3): the default is `ask` (`agentkit/build/policy.go:55` `TierOf`), the code's list is the floor (`agentkit/build/tools.go:61` `builtinAllowedTools`) and a file can only add to it, and the table is assembled from the configuration, so the tier is answerable before the server is even up (`agentkit/build/mcptools.go:172` `mcpAllowedNames`). ★ one rule for everything: the filesystem tools, the HTTP tool and an MCP server behave the same way, and there is no per-group default to remember. ★ the code's list exists because `task` — the delegation tool — has **no file of its own**, and an agent that cannot delegate without a click cannot delegate at all. An MCP server's tools are **discovered at runtime**: openheron cannot know what `delete_repo` does, and under stdio the server is a child process with the agent's own privileges ⇒ asking by default is the safe side of the trade |
 | 19 | Which MCP servers an agent loads | the agent's own `mcps:` list, in its frontmatter | **implemented**. ★ a server is a **capability**, and a capability belongs to the agent that uses it — the researcher does not need the deploy server. ★ absent = every configured server, `[]` = none (the same pointer trick as `skills`), so the common case is **one** place: write the server file, and every agent that has not narrowed its list gets it (`agentkit/spec/decl/decl.go:114`, `agentkit/spec/load.go:554` `mcpServersOf`) |
 | 20 | The knowledge base's directory key | **`corpus_dir`**, not `corpus` | ★ the value is a **directory**, and every other directory in the configuration says so: `data_dir`, `static_dir`. "Corpus" is the information-retrieval term for the collection of documents a search answers from — a user who does not know the term should still be able to read the key. ★ the old key still loads, so the rename does not break a working configuration; it says so in `deferred` (`agentkit/spec/decl/decl.go:541-554`, `agentkit/spec/load.go:209-215`) |
 
@@ -1048,7 +1048,7 @@ the **default is `ask`**. Two facts, one rule:
 | | |
 |---|---|
 | the default tier | **`ask`** — a tool nobody names asks first |
-| the exceptions | **named**: by the file that provides the tool (`allows:`), and — for the tools that have no file of their own — by the code |
+| the exceptions | **named**: the code carries a default list, and a file's `allows:` **adds** to it — nothing in a file can shrink it |
 
 ★ **Why `ask` is the default.** The cost of guessing wrong is asymmetric: one extra click
 against a destructive call nobody saw. A tool nobody names is a tool openheron cannot vouch
@@ -1061,7 +1061,7 @@ reason: an agent that cannot delegate at all cannot do its work.
 
 | Source | What it names | Vocabulary |
 |---|---|---|
-| `agentkit/build/tools.go:61` `builtinAllowedTools` | the built-in tools that have no file of their own: the filesystem readers (`ls` `read_file` `glob` `grep`), the delegation tools (`task` `write_todos`) and the skill reader (`skill`) | the exposed names |
+| `agentkit/build/tools.go:61` `builtinAllowedTools` | the **default**: the filesystem readers (`ls` `read_file` `glob` `grep`), the delegation tools (`task` `write_todos`) and the skill reader (`skill`). ★ It always applies — a file adds to it, so removing a name from it means editing this table | the exposed names |
 | `agentkit/spec/load.go:235` `AllowedTools` | the tools of the files that **are** written — `tools/http.yaml` says `allows: [request_get]`, `tools/kb.yaml` says `allows: [kb_search]` | **the file's own** |
 | `agentkit/build/mcptools.go:172` `mcpAllowedNames` | an MCP server's own tools | **the server's own** |
 
@@ -1308,6 +1308,7 @@ relative to the **config root** — `.openheron/` when it is the default one):
 ├─ http.yaml             → decl.HTTPToolsCfg
 ├─ web_search.yaml       → decl.WebSearchCfg
 ├─ wikipedia.yaml        → decl.WikipediaCfg
+├─ filesystem.yaml       → decl.FilesystemCfg (the filesystem tools' tiers)
 └─ kb.yaml               → decl.KB (the knowledge base)
 ```
 
@@ -1326,8 +1327,8 @@ from the code: the providers registered in `defaultToolRegistry`
 configuration is absent (`agentkit/build/nettools.go`: `if cfg == nil { return nil, nil }`),
 so for them "the file is there" happens to be the switch. ★ That is the **provider's**
 decision, not something the file's shape implies — and the filesystem tools show the
-other case: they are **always** there, and they have **no file of their own**, so their
-tiers live in the code (§6.3). The loader's own rule — the file name
+other case: they are **always** there, so their file (§6.6 below) tunes their tiers and
+cannot switch them on or off. The loader's own rule — the file name
 is a whitelist, an unknown name is a startup error (`agentkit/spec/load.go:165-193`) —
 is about **which files are read**, not about which tools exist.
 
@@ -1362,11 +1363,12 @@ name the model sees. The two are not the same, and that is the point:
 | `web_search.yaml` | the provider: `duckduckgo` | `duckduckgo_search` |
 | `wikipedia.yaml` | — (one tool) | `wikipedia_search` |
 | `kb.yaml` | `kb_search` `kb_index` | the same |
+| `filesystem.yaml` | — (one tool) | `ls` `read_file` … the same |
 | `mcps/<server>.yaml` | the server's own name: `create_issue` | `mcp__github__create_issue` |
 
-★ **The filesystem tools have no row, and that is the point.** They come from the
-framework's middleware rather than from a provider, so they have **no file of their
-own** — their exceptions live in the code (§6.3), and only there.
+★ **The filesystem tools' row is the only one with no translation.** They come from the
+framework's middleware rather than from a provider, and the middleware's names are
+already the exposed ones — so their file speaks the same vocabulary the model sees.
 
 ★ **Before the split, this table did not exist** — the policy file spoke the third
 column while the tool's own file spoke the second, so `http.yaml` said `post` and
@@ -1400,18 +1402,21 @@ thing everywhere:
 something says otherwise. There is no per-group default and no special case: the same
 rule covers the filesystem tools, the HTTP tool and an MCP server.
 
-★ **The code ships one allow list**, for the tools that have **no file of their own** —
-`ls`, `read_file`, `glob`, `grep`, `task`, `write_todos`, `skill`
-(`agentkit/build/tools.go:61` `builtinAllowedTools`). ★ The delegation tools are in it
-because an agent that cannot delegate without a click cannot delegate at all, and the
-filesystem readers are in it because they only read.
+★ **The code ships one default allow list** — `ls`, `read_file`, `glob`, `grep`, `task`,
+`write_todos`, `skill` (`agentkit/build/tools.go:61` `builtinAllowedTools`). ★ It always
+applies: a file **adds** to it and nothing in a file can take a name away. The
+delegation tools are in it because an agent that cannot delegate without a click cannot
+delegate at all, and the readers because they only read.
 
 ★ **A file's `allows:` names the exceptions for the tools that file provides**, in that
 file's own vocabulary — `tools/http.yaml` says `allows: [request_get]`,
-`tools/kb.yaml` says `allows: [kb_search]`. The loader collects them
+`tools/kb.yaml` says `allows: [kb_search]`, and `tools/filesystem.yaml` is where
+`write_file` / `edit_file` / `execute` are widened. The loader collects them
 (`agentkit/spec/load.go:235` `AllowedTools`), and the table is the union of that list,
-the code's list and the servers' lists (§6.3). ★ A file that is **absent** contributes
-nothing: the tool is not mounted either, so there is no tier to answer.
+the code's list and the servers' lists (§6.3). ★ For the providers, a file that is
+**absent** contributes nothing — the tool is not mounted either, so there is no tier to
+answer. ★ The filesystem tools are the exception: they are mounted regardless, so an
+absent file simply leaves the code's default in place.
 
 ★ **There is no `deny` in a file, and there is no global list any more** (§6.3). "Not
 exposed" is said in exactly two places: the file's **whitelist** — each file calls it
@@ -1502,8 +1507,9 @@ that lies about being hot.
 #### ★ The filesystem tools: their exceptions live in the code
 
 The filesystem tools come from the framework's middleware rather than from a provider, so
-they have **no file of their own** — and that is exactly why their exceptions live in
-the code (`agentkit/build/tools.go:61` `builtinAllowedTools`).
+the middleware mounts them and no file switches them on — so their file is a **tuner**
+(`tools/filesystem.yaml`), and the code's default list
+(`agentkit/build/tools.go:61` `builtinAllowedTools`) is what applies when it is absent.
 
 The set is eino's filesystem middleware: `ls`, `read_file`, `write_file`, `edit_file`,
 `glob`, `grep`, `execute` (`eino@v0.9.22/adk/middlewares/filesystem/filesystem.go:38-46`).
@@ -1516,20 +1522,32 @@ ls  read_file  glob  grep
 `execute` are not in the list, so they interrupt the turn for a human — which is the
 right way round: they are the three tools that change the machine.
 
-★ **A file of their own would be a tuner, not a switch** — the filesystem tools are the
-agent's core capability, not an optional integration. ★ **`tools/filesystem.yaml` is not
-implemented and is not going to be**: `tools/` accepts `http.yaml`, `web_search.yaml`,
-`wikipedia.yaml` and `kb.yaml` and nothing else (`agentkit/spec/load.go:191`), so writing
-that file is a **load-time error**, not a silent no-op. ★ The narrowing is already
-expressible, and in the place that owns it: an agent's `disabled_tools` (§6.2).
+★ **They have a file of their own, and it is a tuner, not a switch** — the filesystem
+tools are the agent's core capability and the middleware mounts them unconditionally, so
+`tools/filesystem.yaml` cannot add or remove a tool. It carries `allows:` and nothing
+else (§6.6's field list), and that is exactly what the tier model needs: a place to name
+an exception for a tool that no provider file owns.
 
-★ **The consequence, stated plainly**: `write_file`, `edit_file` and `execute` have no
-file, so **nothing can name them in an `allows:` list** — they ask, always
-(`agentkit/build/tools.go:61` is a closed list in the code). A user who wants an
-unattended agent that runs commands cannot get one today; the levers are narrower than
-they were under `policy/permissions.yaml`, which could move `execute` out of `ask`. That
-is a **known gap**, not a documented feature — an agent's own `disabled_tools` can take a
-tool away and nothing can hand one back.
+★ **`allows:` in this file is additive.** A name here joins the code's default list
+(`agentkit/build/tools.go:61`) — it never takes one away:
+
+```yaml
+# .openheron/tools/filesystem.yaml
+#
+# ★ The writers, without a nod — an agent that edits and runs commands on its
+#   own. Absent (or `allows: []`) they ask, which is the default.
+allows: [write_file, edit_file, execute]
+```
+
+★ **So the file widens and `disabled_tools` narrows.** That is the split, and it is
+deliberate: widening is a decision about the tool (it belongs beside the tool), and
+narrowing is a decision about **one agent** (it belongs in that agent's file). Two
+mechanisms, two vocabularies, no overlap — and no third place where the same decision can
+be made again.
+
+★ **The tool names it speaks are the middleware's own** — `ls`, `read_file`, `write_file`,
+`edit_file`, `glob`, `grep`, `execute` (`eino@v0.9.22/adk/middlewares/filesystem/filesystem.go:38-46`). They are also the exposed
+names, so there is no translation here unlike an MCP server's own vocabulary (§6.7).
 
 #### ★ Migration (what about the old configuration)
 
@@ -1587,6 +1605,7 @@ file that **provides** the tool (§6.6).
 | `web_search.yaml` | `allows` | `[]string` | `[]` | the same: `duckduckgo_search` |
 | `wikipedia.yaml` | `allows` | `[]string` | `[]` | the same: `wikipedia_search` |
 | `kb.yaml` | `allows` | `[]string` | `[]` | the same: `kb_search` — `kb_index` writes the index and asks |
+| `filesystem.yaml` | `allows` | `[]string` | `[]` | ★ the same, and **additive**: `write_file` / `edit_file` / `execute` run without a nod when named here. It has **no other key** — the middleware mounts the tools, so there is nothing to configure but the tier |
 
 ★ **The defaults of these fields live in the provider that reads them, not in `decl`.** The
 declaration structs carry the shape only (`agentkit/spec/decl/decl.go:303-321` for the three tool
@@ -1605,11 +1624,13 @@ value is rejected as an unknown provider (`agentkit/build/nettools.go:204-208`);
 (`agentkit/spec/write.go:249`), but the loader rejects it: `kb.model is required when kb.corpus_dir
 is set` (`agentkit/spec/load.go:603`).
 
-★ The file name is a **whitelist** (`http.yaml` / `web_search.yaml` / `wikipedia.yaml` /
-`kb.yaml`): an unknown file name is a **hard error at load time**
-(`agentkit/spec/load.go:191` — `tools/ only accepts http.yaml, web_search.yaml, wikipedia.yaml and
-kb.yaml`) — writing a section that will never take effect has the symptom "I wrote it and it did
-not take effect", which is extremely hard to debug.
+★ The file name is a **whitelist** (`filesystem.yaml` / `http.yaml` / `kb.yaml` /
+`web_search.yaml` / `wikipedia.yaml`): an unknown file name is a **hard error at load time**
+(`agentkit/spec/load.go:191`, the message built from `ToolFileNames`) — writing a section that
+will never take effect has the symptom "I wrote it and it did not take effect", which is
+extremely hard to debug. ★ The list has **one** home: `toolHints`
+(`agentkit/spec/load.go:137`), which the loader, the write gate and both error messages read,
+so the editor cannot save a file the loader would reject.
 
 #### ★ The three kinds of tools that reach outside
 
@@ -1660,7 +1681,7 @@ file's own `allows:`.
 |---|---|
 | ★ **the provider** (`defaultToolRegistry`, `fsx.New`) | ★ **the tool set itself** — which tools exist at all |
 | the file in `tools/` | the **parameters** of those tools, and **which of them run without a nod** (`allows:`). ★ For MCP it also carries the server's definition — and `tools:` picks the ones to offer out of what the server offers |
-| ★ **the code** (`builtinAllowedTools`) | the exceptions for the tools that have **no file of their own** — the filesystem readers and the framework's `task` (§6.3) |
+| ★ **the code** (`builtinAllowedTools`) | the **default** exceptions — the readers, the delegation tools and the skill reader. A file adds to this list; nothing but the code can shrink it (§6.3) |
 | each agent's `mcps:` | **which servers this agent loads** (§6.2) |
 | each agent's `disabled_tools` | **narrowing**: this one agent does not get these tools at all (the inner layer, it can control that) |
 
@@ -2248,7 +2269,7 @@ agentkit/spec/write.go:persist.AtomicWrite
 | 10 | ✅ **implemented** MCP tools always carry the `mcp__` namespace, and **only** MCP tools may use that prefix | without the namespace, a server that exposes `ls` takes the whole agent down (it collides with a reserved tool name, which is a load-time error); without the "only MCP" half, a built-in tool could take the namespace and a prefix rule in an agent's `disabled_tools` would quietly shadow it |
 | 11 | ✅ **implemented** An agent's `disabled_tools` supports only a **trailing** `*` prefix pattern; every other spelling errors at load time | a rule that reads differently from what it actually covers is a silent mismatch |
 | 12 | ✅ **implemented** A tier is written **in the tool's own file and vocabulary** — the file's `allows:` names what runs without a nod, and there is **no global list** to contradict it | one tool's permission is one fact in one place; a file that says `post` says `allows: [post]`, and nothing has to translate between two vocabularies |
-| 13 | ❌ **withdrawn** — the filesystem tools do **not** get a file of their own; their exceptions live in the code (`agentkit/build/tools.go:61`) | ★ the file was proposed as a **tuner**, but a tuner is only worth having if it can widen as well as narrow, and the widening it promised is exactly what the tier model now cannot express for a file-less tool. ★ `tools/` accepts four fixed names (`agentkit/spec/load.go:191`), so the file would be a load-time error; the narrowing it was for is an agent's `disabled_tools` (§6.2, §6.6) |
+| 13 | ✅ **implemented** — the filesystem tools have a file of their own, `tools/filesystem.yaml`, and it is a **tuner**: `allows:` names their exceptions, and the middleware mounts the tools regardless | ★ the tools are the agent's core capability, so the file must not be able to switch them off — and it must not be able to narrow either, because narrowing is per agent (§6.2). ★ Its `allows:` is **additive**, so the file widens and `disabled_tools` narrows: one mechanism per level (`decl.FilesystemCfg`, `agentkit/spec/load.go:235` `AllowedTools`) |
 
 ★ **Rows 10 and 11 are implemented.** The namespace is composed in one place
 (`agentkit/build/mcptools.go:140`), the prefix syntax is parsed by

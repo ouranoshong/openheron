@@ -238,6 +238,27 @@ test.describe("the new file dialog", () => {
     await expect(page.locator(NEW_CREATE)).toBeDisabled()
   })
 
+  // ★ The filesystem tools are mounted regardless, so their file is a **tuner**:
+  //   it can only name exceptions. It is the one tools file whose skeleton must
+  //   not look like a switch — a user who wrote "enabled: false" would be
+  //   writing a key the loader rejects.
+  test("the filesystem tool file is a tuner, and its skeleton says so", async ({ page }) => {
+    await openNewFile(page)
+    await nameToolsFile(page, "filesystem.yaml")
+
+    await expect(page.locator(NEW_CONTENT)).toHaveValue(/allows: \[\]/)
+    await expect(page.locator(NEW_CONTENT)).not.toHaveValue(/enabled/)
+  })
+
+  test("a filesystem file is created and lands in the editor", async ({ page }) => {
+    await openNewFile(page)
+    await nameToolsFile(page, "filesystem.yaml")
+    await page.click(NEW_CREATE)
+
+    await expect(page.locator(EDITOR)).toContainText("allows")
+    await expect(page.locator(STATUS)).not.toContainText(/only accepts/i)
+  })
+
   test("a tools file with no YAML content is refused before the round trip", async ({ page }) => {
     await openNewFile(page)
     await nameToolsFile(page, "http.yaml")

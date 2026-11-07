@@ -135,10 +135,26 @@ func (c *Config) loadServer(file string, data []byte) error {
 //	tool is on, with nothing configured" — which is never what the user
 //	meant, and the hint says what to write instead.
 var toolHints = map[string]string{
+	"filesystem": "the filesystem tool set's tiers (allows)",
 	"http":       "the HTTP tool's configuration (methods, headers, timeout)",
 	"web_search": "the web search configuration (provider, max_results, timeout)",
 	"wikipedia":  "the Wikipedia configuration (top_k, language, timeout)",
 	"kb":         "the knowledge base configuration (corpus, index, model)",
+}
+
+// ToolFileNames are the file names tools/ accepts, sorted.
+//
+// ★ The loader, the write gate and the two error messages all read this one
+//
+//	list. Two copies of a whitelist is two answers to "may I write this file",
+//	and the day they disagree the editor saves a file the loader rejects.
+func ToolFileNames() []string {
+	out := make([]string, 0, len(toolHints))
+	for name := range toolHints {
+		out = append(out, name+".yaml")
+	}
+	sort.Strings(out)
+	return out
 }
 
 // decodeTool decodes one tools/ file.
@@ -185,10 +201,18 @@ func (c *Config) loadTool(file string, data []byte) error {
 		}
 		c.Tools.Wikipedia = &t
 		return nil
+	case "filesystem":
+		var t decl.FilesystemCfg
+		if err := decodeTool(data, &t, toolHints["filesystem"]); err != nil {
+			return err
+		}
+		c.Tools.Filesystem = &t
+		return nil
 	case "kb":
 		return c.loadKB(data)
 	default:
-		return fmt.Errorf("tools/ only accepts http.yaml, web_search.yaml, wikipedia.yaml and kb.yaml; unknown file %q", file)
+		return fmt.Errorf("tools/ only accepts %s; unknown file %q",
+			strings.Join(ToolFileNames(), ", "), file)
 	}
 }
 
@@ -251,6 +275,9 @@ func (c *Config) AllowedTools() []string {
 		add(t.Allows)
 	}
 	if t := c.Tools.Wikipedia; t != nil {
+		add(t.Allows)
+	}
+	if t := c.Tools.Filesystem; t != nil {
 		add(t.Allows)
 	}
 	add(c.KB.Allows)

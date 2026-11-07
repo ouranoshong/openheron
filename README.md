@@ -67,8 +67,13 @@ already-configured project is safe.
 
 `tools/` is **not** written by default — a provider whose configuration is absent mounts
 nothing, so writing the file is what turns the tool on, and which tools exist is yours to
-decide. Pass `--tools` to get `tools/http.yaml`, `tools/web_search.yaml`,
-`tools/wikipedia.yaml` and `tools/kb.yaml`.
+decide. Pass `--tools` to get `tools/filesystem.yaml`, `tools/http.yaml`,
+`tools/web_search.yaml`, `tools/wikipedia.yaml` and `tools/kb.yaml`.
+
+★ **`tools/filesystem.yaml` is the one that does not switch anything on.** The filesystem
+tools are always mounted, so that file only tunes their tiers: `allows:
+[write_file, edit_file, execute]` is how an agent that edits and runs commands on its own
+is spelled. Absent, the readers run without a nod and the writers ask.
 
 ★ **The MCP example is a sample, not a running server** — its `command` is a placeholder
 that is not installed. The file is still valid: it **loads**, and a server that cannot

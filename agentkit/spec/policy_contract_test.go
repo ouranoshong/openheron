@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ouranoshong/openheron/kb"
@@ -68,5 +69,60 @@ func TestOnlyTheNamedToolsRunWithoutANod(t *testing.T) {
 	}
 	if allowed["request_post"] {
 		t.Fatal("request_post must ask — nobody named it")
+	}
+}
+
+// ★ The filesystem tools are mounted unconditionally, so `tools/filesystem.yaml`
+//
+//	is a **tuner**: it contributes exceptions and nothing else.
+func TestTheFilesystemFileCarriesItsOwnExceptions(t *testing.T) {
+	f := newFixture(t)
+	f.seedMinimal(t)
+
+	base, err := f.load(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := base.AllowedTools(); len(got) != 0 {
+		t.Fatalf("an absent file contributes nothing, got %v", got)
+	}
+
+	f.write(t, "tools/filesystem.yaml", "allows: [write_file, edit_file, execute]\n")
+	cfg, err := f.load(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.AllowedTools()
+	want := []string{"write_file", "edit_file", "execute"}
+	if len(got) != len(want) {
+		t.Fatalf("AllowedTools = %v, want %v", got, want)
+	}
+	for _, w := range want {
+		found := false
+		for _, g := range got {
+			if g == w {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s is missing from %v", w, got)
+		}
+	}
+}
+
+// ★ An unknown file name is rejected, and the message lists the real set —
+//
+//	which now includes filesystem.yaml.
+func TestToolsRejectAnUnknownFileName(t *testing.T) {
+	f := newFixture(t)
+	f.seedMinimal(t)
+	f.write(t, "tools/nonsense.yaml", "allows: []\n")
+
+	_, err := f.load(t)
+	if err == nil {
+		t.Fatal("an unknown file under tools/ must be a load-time error")
+	}
+	if !strings.Contains(err.Error(), "filesystem.yaml") {
+		t.Fatalf("the message must list the accepted files, got %q", err)
 	}
 }
