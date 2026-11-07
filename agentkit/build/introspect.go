@@ -35,8 +35,6 @@ func (o Observed) Has(name string) bool {
 
 func reasonOf(l Layer) string {
 	switch l {
-	case LayerDeny:
-		return "policy.deny"
 	case LayerDisable:
 		return "disabled_tools"
 	case LayerMCPScope:
@@ -118,7 +116,9 @@ func verdictOf(b boundary, name string, obs Observed) ToolVerdict {
 		ObservedKnown: obs.Known,
 	}
 	if l := b.Table().Blocked(name); l != LayerNone {
-		v.Tier, v.Blocked = TierDeny, l
+		// ★ The tier stays what it is: a tool the agent does not get still
+		//   asks — it is this agent that cannot have it.
+		v.Blocked = l
 		v.Reason = reasonOf(l)
 	}
 	return v
@@ -126,7 +126,7 @@ func verdictOf(b boundary, name string, obs Observed) ToolVerdict {
 
 func toolNameUniverse(b boundary, enabled []string, subs []decl.SubAgentSpec, obs Observed) []string {
 	policy := b.Policy()
-	seen := make(map[string]bool, len(policy.Ask)+len(policy.Deny)+len(enabled))
+	seen := make(map[string]bool, len(policy.Allow)+len(enabled))
 	add := func(list []string) {
 		for _, n := range list {
 			if n != "" {
@@ -134,16 +134,12 @@ func toolNameUniverse(b boundary, enabled []string, subs []decl.SubAgentSpec, ob
 			}
 		}
 	}
-	add(policy.Ask)
-	add(policy.Deny)
+	// ★ The names that run without a nod are known from the configuration
+	//   alone, so they are part of the universe before the server is ever
+	//   up. The rest of a server's tools join it once they have been
+	//   observed.
+	add(policy.Allow)
 	add(enabled)
-	// ★ The names the servers' files allow are known from the
-	//   configuration alone, so they are part of the universe before the
-	//   server is ever up. The rest of a server's tools join it once they
-	//   have been observed.
-	for name := range policy.mcpAllow {
-		add([]string{name})
-	}
 	for name := range reservedToolNames {
 		add([]string{name})
 	}

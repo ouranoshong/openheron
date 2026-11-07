@@ -5,3 +5,7 @@
 methods: [get]
 headers: {}
 timeout: 30s
+
+# ★ The tools that run **without a nod**. Everything else this file provides
+#   asks — the default is ask, and the exceptions are named.
+allows: [request_get]

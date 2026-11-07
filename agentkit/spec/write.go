@@ -88,14 +88,6 @@ func ValidatePath(rel string) (Category, error) {
 func validateFileName(cat Category, rel string) error {
 	base := path.Base(filepath.ToSlash(rel))
 	switch cat.Dir {
-	case DirPolicy:
-		switch base {
-		case "permissions.yaml", "limits.yaml":
-			return nil
-		default:
-			return writeErrf(ErrPathInvalid, rel,
-				"policy/ only accepts permissions.yaml and limits.yaml; other files here are rejected at load time")
-		}
 	case DirTools:
 		switch base {
 		case "http.yaml", "web_search.yaml", "wikipedia.yaml", "kb.yaml":
@@ -158,10 +150,14 @@ func (s *Service) ListFiles(cat Category) ([]string, error) {
 	return names, nil
 }
 
-func Template(catDir string, modelRefs []string) string {
+// Skeleton returns the starting point for a **new** file of one partition.
+//
+// ★ It is not the partition's files: it is what a user starts from when
+//
+//	they create a file the configuration does not have yet. The files
+//	themselves are in Templates.
+func Skeleton(catDir string, modelRefs []string) string {
 	switch catDir {
-	case DirPolicy:
-		return "ask: []\ndeny: []\n"
 	case DirLLM:
 		return "type: openai\nbase_url: \napi_key: ${}\nmodels: []\n"
 	case DirAgent:
@@ -207,24 +203,7 @@ func Template(catDir string, modelRefs []string) string {
 //
 //	`openheron init --tools` hand out the very same files.
 func ToolTemplates() map[string]string {
-	out, err := templates.Dir(DirTools)
-	if err != nil {
-		return map[string]string{}
-	}
-	return out
-}
-
-// LimitsTemplate is the skeleton of policy/limits.yaml.
-//
-// ★ It comes from the templates package, so the configuration editor and
-//
-//	`openheron init` hand out the very same file.
-func LimitsTemplate() string {
-	tpl, err := templates.File(DirPolicy + "/limits.yaml")
-	if err != nil {
-		return ""
-	}
-	return tpl
+	return Templates(DirTools)
 }
 
 func (c *Config) ModelRefs() []string {

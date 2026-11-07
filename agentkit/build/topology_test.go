@@ -11,6 +11,7 @@ import (
 
 	"github.com/cloudwego/eino/adk/prebuilt/deep"
 
+	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
 
@@ -25,8 +26,7 @@ func subSpec(id string, subs ...decl.SubAgentSpec) decl.SubAgentSpec {
 
 func buildSubtree(t *testing.T, specs []decl.SubAgentSpec, maxDepth int) *buildCount {
 	t.Helper()
-	cfg := configFromSpecs("test/model", nil,
-		decl.Policy{Ask: []string{"write_file"}}, specs)
+	cfg := configFromSpecs("test/model", nil, nil, specs)
 	b := newTestBuilderWithConfig(t, cfg)
 	snap, err := b.snapshotFor(cfg, 1)
 	if err != nil {
@@ -126,7 +126,9 @@ func TestSubAgentsAreBuilt(t *testing.T) {
 }
 
 func TestSubAgentsCarryTheirOwnApprovalMiddleware(t *testing.T) {
-	policy := NewPolicy([]string{"write_file"}, nil)
+	// ★ write_file is not on the exception list, so it asks — and the
+	//   sub-agent's chain has to carry that gate.
+	policy := NewPolicy(nil)
 	handlers := subHandlers(policy, subSpec("writer"), 1, nil)
 
 	if !chainGatesWriteFile(t, handlers) {
@@ -134,16 +136,16 @@ func TestSubAgentsCarryTheirOwnApprovalMiddleware(t *testing.T) {
 	}
 }
 
-func TestSubHandlersApplyItsOwnDeny(t *testing.T) {
-	policy := NewPolicy([]string{"write_file"}, []string{"execute"})
+func TestSubHandlersApplyItsOwnDisabledTools(t *testing.T) {
+	policy := NewPolicy(nil)
 	handlers := subHandlers(policy, decl.SubAgentSpec{ID: "w", DisabledTools: []string{"write_file"}}, 1, nil)
 
 	fw := findFilter(t, handlers)
 	if fw == nil {
 		t.Fatal("the middleware chain has no filter")
 	}
-	if got := fw.table.Blocked("execute"); got != LayerDeny {
-		t.Fatalf("* the global deny must hold on sub-agents too, got %q", got)
+	if got := fw.table.Blocked("execute"); got != LayerNone {
+		t.Fatalf("a tool the sub-agent does not disable must stay reachable, got %q", got)
 	}
 	if got := fw.table.Blocked("write_file"); got != LayerDisable {
 		t.Fatalf("its own disabled_tools must be handled as the inner layer, got %q", got)
@@ -181,8 +183,8 @@ func TestEveryNestedSubAgentCarriesTheApprovalGate(t *testing.T) {
 }
 
 func TestDefaultMaxDepthBlocksFurtherNesting(t *testing.T) {
-	if decl.DefaultMaxDepth != 1 {
-		t.Fatalf("the default depth must be 1 (only root delegates), got %d", decl.DefaultMaxDepth)
+	if spec.DefaultMaxDepth != 1 {
+		t.Fatalf("the default depth must be 1 (only root delegates), got %d", spec.DefaultMaxDepth)
 	}
 }
 

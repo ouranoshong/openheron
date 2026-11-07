@@ -28,7 +28,7 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
   const modelRefs = useSettings((s) => s.manifest?.modelRefs)
   const newFile = useSettings((s) => s.newFile)
 
-  const [section, setSection] = useState<Section>("policy")
+  const [section, setSection] = useState<Section>("agents")
   const [name, setName] = useState("")
   const [content, setContent] = useState("")
   // edited records that the user has typed in the content box. Until then the
@@ -40,7 +40,7 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
   const pathIssues = path ? validatePath(path, editable) : [{ line: 1, message: "enter a file name" }]
 
   const reset = () => {
-    setSection("policy")
+    setSection("agents")
     setName("")
     setContent("")
     setEdited(false)
@@ -111,9 +111,11 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
                   ? "researcher"
                   : section === "llm"
                     ? "deepseek"
-                    : section === "policy"
-                      ? "permissions / limits"
-                      : "config"
+                    : section === "mcps"
+                      ? "github"
+                      : section === "tools"
+                        ? "http"
+                        : "config"
               }
               className="bg-background rounded-md border px-2 py-1.5 font-mono text-xs"
               data-testid="new-file-name"

@@ -2,7 +2,6 @@ package build
 
 import (
 	"context"
-	"slices"
 	"testing"
 
 	"github.com/cloudwego/eino/adk"
@@ -24,11 +23,13 @@ func (s *stubAgent) Run(context.Context, *adk.TypedAgentInput[*schema.Message], 
 	return iter
 }
 
+// defaultTestPolicy is the tier table the assembly tests run against.
+//
+// ★ The default is ask, so the **allow list** is what the read-only tools
+//
+//	are on — everything else asks.
 func defaultTestPolicy() Policy {
-	return NewPolicy(
-		[]string{"write_file", "edit_file", "execute"},
-		nil,
-	)
+	return NewPolicy([]string{"read_file", "ls", "glob", "grep"})
 }
 
 func TestNewBuilderDefersEverythingToBuild(t *testing.T) {
@@ -45,7 +46,7 @@ func TestNewBuilderDefersEverythingToBuild(t *testing.T) {
 func TestApprovalMiddlewareOnlyGatesMutatingTools(t *testing.T) {
 	mw := newApprovalMiddleware(defaultTestPolicy())
 
-	for _, name := range defaultTestPolicy().Ask {
+	for _, name := range []string{"write_file", "edit_file", "execute"} {
 		tCtx := &adk.ToolContext{Name: name}
 		wrapped, err := mw.WrapInvokableToolCall(context.Background(), passthroughEndpoint, tCtx)
 		if err != nil {
@@ -77,7 +78,7 @@ func TestGatedToolSetMatchesBuiltinNames(t *testing.T) {
 			t.Errorf("%s should not be gated", name)
 		}
 	}
-	if !slices.Contains(defaultTestPolicy().Ask, "execute") {
+	if defaultTestPolicy().TierOf("execute") != TierAsk {
 		t.Error("execute must be covered by the gate")
 	}
 }

@@ -11,7 +11,6 @@ import {
 import { NewFileButton } from "@/components/settings/new-file-dialog"
 
 const LABEL: Record<string, string> = {
-  policy: "Approval policy",
   agents: "Agents",
   llm: "Providers",
   server: "Server",

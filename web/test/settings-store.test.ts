@@ -220,9 +220,11 @@ describe("editing", () => {
     s().edit("api_key: sk-leak\n")
     expect(s().issues.some((i) => i.message.includes("reference"))).toBe(true)
 
-    await s().select("policy/permissions.yaml")
-    s().edit("api_key: sk-leak\n")
-    expect(s().issues.some((i) => i.message.includes("unknown key"))).toBe(true)
+    // ★ The rules follow the section: the agents' own rules, not the
+    //   provider's.
+    await s().select("agents/x.md")
+    s().edit("no frontmatter here\n")
+    expect(s().issues.some((i) => i.message.includes("frontmatter"))).toBe(true)
   })
 
   test("editing clears the previous verdict", async () => {

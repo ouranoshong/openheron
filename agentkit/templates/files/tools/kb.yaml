@@ -10,3 +10,7 @@ query_instruction: ""
 batch_size: 10
 max_batch_chars: 1200
 top_k: 8
+
+# ★ The tools that run **without a nod** — the search reads; the index
+#   writes to the index on disk, so it asks.
+allows: [kb_search]

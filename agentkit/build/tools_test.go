@@ -156,9 +156,9 @@ func TestToolRegistryIsAtomicPerProvider(t *testing.T) {
 	}
 }
 
-func TestRegistryToolDefaultsToAllow(t *testing.T) {
-	if got := NewPolicy(nil, nil).TierOf("brand_new_tool"); got != TierAllow {
-		t.Fatalf("an unlisted registry tool = %q, want the allow fallback", got)
+func TestRegistryToolDefaultsToAsk(t *testing.T) {
+	if got := NewPolicy(nil).TierOf("brand_new_tool"); got != TierAsk {
+		t.Fatalf("an unlisted registry tool = %q, want ask", got)
 	}
 }
 
@@ -170,11 +170,11 @@ func TestRegistryToolObeysDisabledTools(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root := specTable(NewPolicy(nil, nil), decl.SubAgentSpec{ID: "main"}, nil)
+	root := specTable(NewPolicy(nil), decl.SubAgentSpec{ID: "main"}, nil)
 	if kept, _ := root.Filter(tools); len(kept) != 1 {
 		t.Fatalf("the root must see the tool, kept %v", namesOf(kept))
 	}
-	sub := specTable(NewPolicy(nil, nil),
+	sub := specTable(NewPolicy(nil),
 		decl.SubAgentSpec{ID: "worker", DisabledTools: []string{"new_tool"}}, nil)
 	if kept, removed := sub.Filter(tools); len(kept) != 0 || removed[LayerDisable] != 1 {
 		t.Fatalf("the sub-agent must not see it: kept %v removed %v", namesOf(kept), removed)
@@ -188,13 +188,17 @@ func TestRegistryToolObeysPolicyTiers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := NewPolicy(nil, nil)
-	if got := p.TierOf("new_tool"); got != TierAllow {
-		t.Fatalf("tier = %q, want allow", got)
+	p := NewPolicy(nil)
+	if got := p.TierOf("new_tool"); got != TierAsk {
+		t.Fatalf("tier = %q, want ask — the default is ask", got)
 	}
-	deny := specTable(NewPolicy(nil, []string{"new_tool"}), decl.SubAgentSpec{ID: "main"}, nil)
-	if kept, removed := deny.Filter(tools); len(kept) != 0 || removed[LayerDeny] != 1 {
-		t.Fatalf("deny must remove it at the filter stage: kept %v removed %v", namesOf(kept), removed)
+	// ★ The only way a tool does not reach the model is the agent's own
+	//   disabled_tools.
+	blocked := specTable(NewPolicy(nil),
+		decl.SubAgentSpec{ID: "main", DisabledTools: []string{"new_tool"}}, nil)
+	if kept, removed := blocked.Filter(tools); len(kept) != 0 || removed[LayerDisable] != 1 {
+		t.Fatalf("disabled_tools must remove it at the filter stage: kept %v removed %v",
+			namesOf(kept), removed)
 	}
 }
 

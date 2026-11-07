@@ -81,11 +81,7 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 
 	// ── provider ────────────────────────────────────────────────────────
 	if choice.NeedProvider {
-		exists, err := rootHas(svc, spec.DirLLM, choice.Provider+".yaml")
-		if err != nil {
-			return nil, err
-		}
-		if exists {
+		if svc.Has(spec.DirLLM, choice.Provider+".yaml") {
 			return nil, fmt.Errorf(
 				"init: llm/%s.yaml already exists and does not declare %s; writing it here would replace it wholesale — "+
 					"pick a model that file already declares, or rename that file",
@@ -349,23 +345,6 @@ func usableModels(merged *spec.Config) []string {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-func rootHas(svc *spec.Service, dir, name string) (bool, error) {
-	cat, ok := spec.CategoryByDir(dir)
-	if !ok {
-		return false, fmt.Errorf("init: unknown config section %q", dir)
-	}
-	names, err := svc.ListFiles(cat)
-	if err != nil {
-		return false, fmt.Errorf("init: list %s: %w", dir, err)
-	}
-	for _, n := range names {
-		if n == name {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func defaultEnvName(provider string) string {

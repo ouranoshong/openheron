@@ -267,18 +267,10 @@ func TestAnExistingProviderIsUntouched(t *testing.T) {
 	}
 }
 
-func TestAnExistingPolicyIsNotOverwritten(t *testing.T) {
-	e := newEnv(t)
-	e.write("policy/permissions.yaml", userPolicyYAML)
-
-	p := e.plan(Options{})
-	if hasRel(rels(p), "policy/permissions.yaml") {
-		t.Fatalf("the existing policy/permissions.yaml must not be rewritten: %v", rels(p))
-	}
-}
-
-// ★ init writes no policy/ file at all: both of them would say what the
-// code already does, and a file that says nothing is read as meaning.
+// ★ The policy/ partition is gone: the tiers live in the files that
+//
+//	provide the tools, and the caps live in server/config.yaml. A file
+//	that says what the code already does is noise.
 func TestInitWritesNoPolicyFile(t *testing.T) {
 	e := newEnv(t)
 	p := e.plan(Options{})
@@ -295,10 +287,23 @@ func TestInitWritesNoPolicyFile(t *testing.T) {
 	}
 }
 
-func TestAnExistingPolicyKeepsItsOwnAskList(t *testing.T) {
+// ★ The exceptions live in the file that provides the tool, and init
+//
+//	leaves an existing one alone.
+func TestAnExistingToolsFileIsNotOverwritten(t *testing.T) {
 	e := newEnv(t)
-	e.write("policy/permissions.yaml", userPolicyYAML)
-	p := e.plan(Options{})
+	e.write("tools/http.yaml", "methods: [get]\nallows: [request_get]\n")
+
+	p := e.plan(Options{Tools: true})
+	if hasRel(rels(p), "tools/http.yaml") {
+		t.Fatalf("the existing tools/http.yaml must not be rewritten: %v", rels(p))
+	}
+}
+
+func TestTheExistingExceptionsSurvive(t *testing.T) {
+	e := newEnv(t)
+	e.write("tools/http.yaml", "methods: [get]\nallows: [request_get]\n")
+	p := e.plan(Options{Tools: true})
 	if err := p.Apply(e.svc()); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -306,8 +311,14 @@ func TestAnExistingPolicyKeepsItsOwnAskList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadUnchecked: %v", err)
 	}
-	if len(cfg.Policy.Ask) != 1 || cfg.Policy.Ask[0] != "execute" {
-		t.Fatalf("the existing ask list must survive: %v", cfg.Policy.Ask)
+	found := false
+	for _, n := range cfg.AllowedTools() {
+		if n == "request_get" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the existing exceptions must survive: %v", cfg.AllowedTools())
 	}
 }
 
@@ -319,7 +330,7 @@ func TestNothingIsWrittenWhenEverythingIsAlreadyThere(t *testing.T) {
 	// ★ The MCP example is a loadable file: a file under mcps/ defines a
 	//   server, so an example that cannot be parsed is a configuration
 	//   that does not load.
-	e.write("mcps/example.yaml", spec.Template(spec.DirMCP, nil))
+	e.write("mcps/example.yaml", spec.Templates(spec.DirMCP)["mcps/example.yaml"])
 
 	p := e.plan(Options{})
 	if len(p.Files) != 0 {

@@ -68,7 +68,7 @@ func (g *depthGuard) BeforeAgent(ctx context.Context, runCtx *adk.ChatModelAgent
 //	table that disabled_tools uses: the tool set is one set for the whole
 //	snapshot, and the model never sees a tool the table removes.
 func specTable(policy Policy, agentSpec decl.SubAgentSpec, servers []string) *Table {
-	t := newTable(agentSpec.ID, policy.Deny, agentSpec.DisabledTools)
+	t := newTable(agentSpec.ID, agentSpec.DisabledTools)
 	t.denyMCPNamespaces(agentSpec.MCPServers, servers)
 	return t
 }

@@ -88,15 +88,23 @@ func managerOf(t *testing.T, b *Builder) *fakeManager {
 	return m
 }
 
+// configFromSpecs builds a configuration for the assembly tests.
+//
+// ★ The **allow list** is the configuration's own: the tier table is
+//
+//	assembled from the configuration, so a test that wants a tool to run
+//	without a nod says so in the configuration.
 func configFromSpecs(rootRef string, mainDisabled []string,
-	policy decl.Policy, subs []decl.SubAgentSpec) *spec.Config {
+	allow []string, subs []decl.SubAgentSpec) *spec.Config {
 
 	cfg := &spec.Config{
 		Agents:    map[string]*decl.Agent{},
 		Models:    map[string]*decl.Model{"test/model": {ID: "model", Kind: string(decl.ModelKindChat)}},
 		Providers: map[string]*decl.Provider{},
-		Policy:    policy,
 		Server:    decl.Server{Agent: decl.AgentCfg{MaxDepth: specDepth(subs)}},
+	}
+	if len(allow) > 0 {
+		cfg.Tools.HTTP = &decl.HTTPToolsCfg{Allows: allow}
 	}
 	cfg.Agents[spec.DefaultAgentID] = &decl.Agent{
 		ID:            spec.DefaultAgentID,
@@ -135,7 +143,7 @@ func specDepth(specs []decl.SubAgentSpec) int {
 		}
 	}
 	if best == 0 {
-		return decl.DefaultMaxDepth
+		return spec.DefaultMaxDepth
 	}
 	return best
 }

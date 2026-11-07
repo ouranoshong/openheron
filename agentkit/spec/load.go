@@ -222,26 +222,39 @@ func (c *Config) loadKB(data []byte) error {
 	return nil
 }
 
-func (c *Config) loadPolicy(file string, data []byte) error {
-	switch strings.TrimSuffix(file, ".yaml") {
-	case "permissions":
-		var p decl.Policy
-		if err := decodeStrict(data, &p); err != nil {
-			return err
-		}
-		c.Policy.Deny = union(c.Policy.Deny, p.Deny)
-		c.Policy.Ask = p.Ask
+// AllowedTools returns the built-in tools that run **without a nod**.
+//
+// ★ The default is ask, and the exceptions are named: by the file that
+//
+//	provides the tool (`allows:`), and — for the tools that have no file
+//	of their own — by the code.
+//
+// ★ The list is the built-in half only: an MCP server's exceptions live in
+//
+//	the server's own file, in the server's own vocabulary.
+func (c *Config) AllowedTools() []string {
+	if c == nil {
 		return nil
-	case "limits":
-		var l decl.Limits
-		if err := decodeStrict(data, &l); err != nil {
-			return err
-		}
-		c.Limits = mergeLimits(c.Limits, l)
-		return nil
-	default:
-		return fmt.Errorf("policy/ only accepts permissions.yaml and limits.yaml; unknown file %q", file)
 	}
+	var out []string
+	add := func(names []string) {
+		for _, n := range names {
+			if n != "" {
+				out = append(out, n)
+			}
+		}
+	}
+	if t := c.Tools.HTTP; t != nil {
+		add(t.Allows)
+	}
+	if t := c.Tools.WebSearch; t != nil {
+		add(t.Allows)
+	}
+	if t := c.Tools.Wikipedia; t != nil {
+		add(t.Allows)
+	}
+	add(c.KB.Allows)
+	return out
 }
 
 // ── mcps/<server>.yaml ──────────────────────────────────────────────────
@@ -392,26 +405,6 @@ func yamlHasKey(data []byte, key string) bool {
 		}
 	}
 	return false
-}
-
-func mergeLimits(a, b decl.Limits) decl.Limits {
-	return decl.Limits{
-		Agent: decl.AgentLimit{MaxDepth: tighter(a.Agent.MaxDepth, b.Agent.MaxDepth)},
-		Retry: decl.RetryLimit{MaxRetries: tighter(a.Retry.MaxRetries, b.Retry.MaxRetries)},
-	}
-}
-
-func tighter(a, b int) int {
-	switch {
-	case a <= 0:
-		return b
-	case b <= 0:
-		return a
-	case a < b:
-		return a
-	default:
-		return b
-	}
 }
 
 func union(a, b []string) []string {
@@ -669,48 +662,25 @@ func (c *Config) teamDepth(id string) (int, bool) {
 	return deepest, true
 }
 
+// MaxDepth is the depth cap of the agent tree.
+//
+// ★ The cap lives in **server/config.yaml**: one place, one value. It is
+//
+//	not hot-reloaded — a change takes effect on the next start — and that
+//	is the price of not having a second copy of the same number.
 func (c *Config) MaxDepth() int {
-	if c == nil {
-		return decl.DefaultMaxDepth
-	}
-	return tighter(c.globalMaxDepth(), c.Limits.Agent.MaxDepth)
-}
-
-func (c *Config) MaxRetries() int {
-	if c == nil {
-		return decl.DefaultMaxRetries
-	}
-	return tighter(c.globalMaxRetries(), c.Limits.Retry.MaxRetries)
-}
-
-func (c *Config) globalMaxDepth() int {
 	if c == nil || c.Server.Agent.MaxDepth <= 0 {
-		return decl.DefaultMaxDepth
+		return DefaultMaxDepth
 	}
 	return c.Server.Agent.MaxDepth
 }
 
-func (c *Config) globalMaxRetries() int {
+// MaxRetries is the cap on the model calls one turn makes.
+func (c *Config) MaxRetries() int {
 	if c == nil || c.Server.Retry.MaxRetries <= 0 {
-		return decl.DefaultMaxRetries
+		return DefaultMaxRetries
 	}
 	return c.Server.Retry.MaxRetries
-}
-
-func (c *Config) collectNoopLimits() {
-	if c == nil {
-		return
-	}
-	if v := c.Limits.Agent.MaxDepth; v > c.globalMaxDepth() {
-		c.deferKey("policy/limits.yaml agent.max_depth: %d is looser than the global baseline (%d); "+
-			"it has no effect — raise server/config.yaml agent.max_depth to widen the limit",
-			v, c.globalMaxDepth())
-	}
-	if v := c.Limits.Retry.MaxRetries; v > c.globalMaxRetries() {
-		c.deferKey("policy/limits.yaml retry.max_retries: %d is looser than the global baseline (%d); "+
-			"it has no effect — raise server/config.yaml retry.max_retries to widen the limit",
-			v, c.globalMaxRetries())
-	}
 }
 
 func (c *Config) validateAgentGraph(sorted []string) error {

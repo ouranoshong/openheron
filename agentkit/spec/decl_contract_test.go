@@ -8,22 +8,15 @@ import (
 )
 
 func TestCategoryTemplatesDecodeStrictly(t *testing.T) {
-	t.Run("policy", func(t *testing.T) {
-		var p decl.Policy
-		if err := decodeStrict([]byte(Template(DirPolicy, nil)), &p); err != nil {
-			t.Fatalf("the policy template must decode with the loader's own decoder: %v", err)
-		}
-	})
-
 	t.Run("llm", func(t *testing.T) {
 		var pr decl.Provider
-		if err := decodeStrict([]byte(Template(DirLLM, nil)), &pr); err != nil {
+		if err := decodeStrict([]byte(Skeleton(DirLLM, nil)), &pr); err != nil {
 			t.Fatalf("the llm template must decode with the loader's own decoder: %v", err)
 		}
 	})
 
 	t.Run("agent", func(t *testing.T) {
-		fm, _, err := splitFrontmatter([]byte(Template(DirAgent, nil)))
+		fm, _, err := splitFrontmatter([]byte(Skeleton(DirAgent, nil)))
 		if err != nil {
 			t.Fatalf("the agent template must have a frontmatter: %v", err)
 		}
@@ -39,7 +32,7 @@ func TestCategoryTemplatesDecodeStrictly(t *testing.T) {
 //	has to name the skill key: a field nobody can find is a field nobody
 //	uses.
 func TestTheAgentTemplateNamesTheSkillKey(t *testing.T) {
-	fm, _, err := splitFrontmatter([]byte(Template(DirAgent, nil)))
+	fm, _, err := splitFrontmatter([]byte(Skeleton(DirAgent, nil)))
 	if err != nil {
 		t.Fatalf("the agent template must have a frontmatter: %v", err)
 	}
@@ -53,8 +46,6 @@ func TestDeclarationsDecodeWithTheirOwnTags(t *testing.T) {
 		provider decl.Provider
 		model    decl.Model
 		agent    decl.Agent
-		policy   decl.Policy
-		limits   decl.Limits
 		server   decl.Server
 		kb       decl.KB
 	)
@@ -65,8 +56,6 @@ func TestDeclarationsDecodeWithTheirOwnTags(t *testing.T) {
 		{"provider", &provider},
 		{"model", &model},
 		{"agent", &agent},
-		{"policy", &policy},
-		{"limits", &limits},
 		{"server", &server},
 		{"kb", &kb},
 	} {

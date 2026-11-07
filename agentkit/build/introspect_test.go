@@ -17,9 +17,8 @@ var (
 	modelB = &stubModel{}
 )
 
-func toConfigPolicy(p Policy) decl.Policy {
-	return decl.Policy{Ask: p.Ask, Deny: p.Deny}
-}
+// allowOf is the exception list of a policy — the configuration's own half.
+func allowOf(p Policy) []string { return p.Allow }
 
 func verdicts(t *testing.T, in []ToolVerdict) map[string]ToolVerdict {
 	t.Helper()
@@ -34,45 +33,45 @@ func introspectBuilder(t *testing.T, p Policy, rootDisabled []string,
 	subs []decl.SubAgentSpec) *Builder {
 
 	t.Helper()
-	cfg := configFromSpecs("test/model", rootDisabled, toConfigPolicy(p), subs)
+	cfg := configFromSpecs("test/model", rootDisabled, allowOf(p), subs)
 	b := newTestBuilderWithConfig(t, cfg)
 	mustSnapshot(t, b)
 	return b
 }
 
-func TestEffectiveToolsDenyBeatsDisable(t *testing.T) {
-	p := NewPolicy(
-		[]string{"write_file", "execute"},
-		[]string{"execute"},
-	)
+// ★ The tool table reports the tier the gate would use, and the layer
+//
+//	that took the tool away from this agent.
+func TestEffectiveToolsReportTheTierAndTheBlockingLayer(t *testing.T) {
+	p := NewPolicy([]string{"read_file"})
 	b := introspectBuilder(t, p, []string{"execute", "rm_rf"}, nil)
 
 	got := verdicts(t, b.EffectiveTools("main"))
 
 	ex := got["execute"]
-	if ex.Tier != TierDeny || ex.Blocked != LayerDeny {
-		t.Fatalf("execute = %+v, want deny blocked by the deny layer", ex)
+	if ex.Tier != TierAsk || ex.Blocked != LayerDisable {
+		t.Fatalf("execute = %+v, want ask, blocked by the disable layer", ex)
 	}
 	rm := got["rm_rf"]
-	if rm.Tier != TierDeny || rm.Blocked != LayerDisable {
-		t.Fatalf("rm_rf = %+v, want deny blocked by the disable layer", rm)
+	if rm.Tier != TierAsk || rm.Blocked != LayerDisable {
+		t.Fatalf("rm_rf = %+v, want ask, blocked by the disable layer", rm)
 	}
 	if got["read_file"].Tier != TierAllow {
 		t.Fatalf("read_file = %+v, want allow", got["read_file"])
 	}
 }
 
-func TestVerdictOfFallsBackToAllow(t *testing.T) {
-	p := NewPolicy([]string{"execute"}, nil)
-	v := verdictOf(newBoundary(p, newTable("main", nil, nil)), "brand_new_write_tool", Observed{})
+func TestVerdictOfFallsBackToAsk(t *testing.T) {
+	p := NewPolicy(nil)
+	v := verdictOf(newBoundary(p, newTable("main", nil)), "brand_new_write_tool", Observed{})
 
-	if v.Tier != TierAllow || v.Blocked != LayerNone || !v.Reached() {
-		t.Fatalf("unlisted tool = %+v, want allow and reachable", v)
+	if v.Tier != TierAsk || v.Blocked != LayerNone || !v.Reached() {
+		t.Fatalf("unlisted tool = %+v, want ask and reachable", v)
 	}
 }
 
 func TestEffectiveToolsPerAgentTable(t *testing.T) {
-	p := NewPolicy([]string{"write_file"}, nil)
+	p := NewPolicy(nil)
 	subs := []decl.SubAgentSpec{{
 		ID:            "writer",
 		DisabledTools: []string{"write_file"},
@@ -85,8 +84,8 @@ func TestEffectiveToolsPerAgentTable(t *testing.T) {
 	}
 
 	writer := verdicts(t, b.EffectiveTools("writer"))
-	if v := writer["write_file"]; v.Tier != TierDeny || v.Blocked != LayerDisable {
-		t.Fatalf("writer write_file = %+v, want deny via disable", v)
+	if v := writer["write_file"]; v.Tier != TierAsk || v.Blocked != LayerDisable {
+		t.Fatalf("writer write_file = %+v, want ask, blocked by the disable layer", v)
 	}
 	if v := writer["read_file"]; v.Tier != TierAllow {
 		t.Fatalf("writer read_file = %+v, want allow (the disable list is per-agent)", v)
@@ -94,14 +93,14 @@ func TestEffectiveToolsPerAgentTable(t *testing.T) {
 }
 
 func TestEffectiveToolsMatchesTheAssembledTable(t *testing.T) {
-	p := NewPolicy([]string{"write_file"}, []string{"rm_rf"})
+	p := NewPolicy([]string{"write_file"})
 	agentSpec := decl.SubAgentSpec{ID: "worker", DisabledTools: []string{"write_file", "mystery"}}
 	b := introspectBuilder(t, p, []string{"execute"}, []decl.SubAgentSpec{agentSpec})
 
 	assembled := specTable(p, agentSpec, nil)
 	reported := verdicts(t, b.EffectiveTools("worker"))
 
-	universe := append(append([]string{}, p.Ask...), p.Deny...)
+	universe := append([]string{}, p.Allow...)
 	universe = append(universe, agentSpec.DisabledTools...)
 	for _, name := range universe {
 		if got, want := reported[name].Blocked, assembled.Blocked(name); got != want {
@@ -116,7 +115,7 @@ func TestEffectiveToolsMatchesTheAssembledTable(t *testing.T) {
 }
 
 func TestPolicyToolsExcludesEveryAgentsDisable(t *testing.T) {
-	p := NewPolicy([]string{"write_file"}, nil)
+	p := NewPolicy(nil)
 	b := introspectBuilder(t, p, []string{"execute"}, []decl.SubAgentSpec{
 		{ID: "worker", DisabledTools: []string{"write_file"}},
 	})
@@ -126,13 +125,14 @@ func TestPolicyToolsExcludesEveryAgentsDisable(t *testing.T) {
 		t.Fatalf("policy view of write_file = %+v, want ask and reachable", v)
 	}
 
-	if v := verdicts(t, b.EffectiveTools("worker"))["write_file"]; v.Tier != TierDeny {
-		t.Fatalf("worker view of write_file = %+v, want deny", v)
+	if v := verdicts(t, b.EffectiveTools("worker"))["write_file"]; v.Tier != TierAsk ||
+		v.Blocked != LayerDisable {
+		t.Fatalf("worker view of write_file = %+v, want ask, blocked by the disable layer", v)
 	}
 }
 
 func TestPolicyToolsListsDisabledOnlyNames(t *testing.T) {
-	p := NewPolicy(nil, nil)
+	p := NewPolicy(nil)
 	b := introspectBuilder(t, p, []string{"oddly_named"}, []decl.SubAgentSpec{
 		{ID: "worker", DisabledTools: []string{"declared_downstream"}},
 	})
@@ -143,20 +143,21 @@ func TestPolicyToolsListsDisabledOnlyNames(t *testing.T) {
 	if !ok {
 		t.Fatalf("oddly_named missing from %+v", got)
 	}
-	if v.Tier != TierAllow || !v.Reached() {
-		t.Fatalf("policy view of oddly_named = %+v, want allow and reachable", v)
+	if v.Tier != TierAsk || !v.Reached() {
+		t.Fatalf("policy view of oddly_named = %+v, want ask and reachable", v)
 	}
 	if _, ok := got["declared_downstream"]; !ok {
 		t.Fatalf("declared_downstream missing from %+v", got)
 	}
 
-	if v := verdicts(t, b.EffectiveTools("worker"))["declared_downstream"]; v.Tier != TierDeny {
-		t.Fatalf("worker view = %+v, want deny", v)
+	if v := verdicts(t, b.EffectiveTools("worker"))["declared_downstream"]; v.Tier != TierAsk ||
+		v.Blocked != LayerDisable {
+		t.Fatalf("worker view = %+v, want ask, blocked by the disable layer", v)
 	}
 }
 
 func TestEffectiveToolsIsSorted(t *testing.T) {
-	p := NewPolicy([]string{"zeta"}, []string{"beta"})
+	p := NewPolicy([]string{"zeta"})
 	b := introspectBuilder(t, p, nil, nil)
 
 	first := b.EffectiveTools("main")
@@ -177,7 +178,7 @@ func TestEffectiveToolsIsSorted(t *testing.T) {
 }
 
 func TestEffectiveToolsUnknownAgentFallsBackToRoot(t *testing.T) {
-	p := NewPolicy(nil, nil)
+	p := NewPolicy(nil)
 	b := introspectBuilder(t, p, nil, nil)
 
 	got := verdicts(t, b.EffectiveTools("nope"))
@@ -187,35 +188,35 @@ func TestEffectiveToolsUnknownAgentFallsBackToRoot(t *testing.T) {
 }
 
 func TestEffectiveToolsFindsNestedSubAgents(t *testing.T) {
-	p := NewPolicy(nil, nil)
+	p := NewPolicy(nil)
 	b := introspectBuilder(t, p, nil, []decl.SubAgentSpec{{
 		ID:  "mid",
 		Sub: []decl.SubAgentSpec{{ID: "leaf", DisabledTools: []string{"read_file"}}},
 	}})
 
 	v := verdicts(t, b.EffectiveTools("leaf"))["read_file"]
-	if v.Tier != TierDeny || v.Blocked != LayerDisable {
-		t.Fatalf("leaf read_file = %+v, want deny via disable", v)
+	if v.Tier != TierAllow || v.Blocked != LayerDisable {
+		t.Fatalf("leaf read_file = %+v, want allow, blocked by the disable layer", v)
 	}
 }
 
 func TestNewGenerationRebindsPolicyAndTable(t *testing.T) {
-	b := introspectBuilder(t, NewPolicy(nil, nil), nil, nil)
+	b := introspectBuilder(t, NewPolicy(nil), []string{"brand_new_tool"}, nil)
 
-	if v := verdicts(t, b.EffectiveTools("main"))["read_file"]; v.Tier != TierAllow {
-		t.Fatalf("before: read_file = %+v, want allow", v)
+	if v := verdicts(t, b.EffectiveTools("main"))["brand_new_tool"]; v.Tier != TierAsk {
+		t.Fatalf("before: brand_new_tool = %+v, want ask", v)
 	}
 
 	next := configFromSpecs("test/model", nil,
-		toConfigPolicy(NewPolicy([]string{"read_file"}, nil)), nil)
+		allowOf(NewPolicy([]string{"brand_new_tool"})), nil)
 	managerOf(t, b).set(next)
-	if v := verdicts(t, b.EffectiveTools("main"))["read_file"]; v.Tier != TierAsk {
-		t.Fatalf("after: read_file = %+v, want ask", v)
+	if v := verdicts(t, b.EffectiveTools("main"))["brand_new_tool"]; v.Tier != TierAllow {
+		t.Fatalf("after: brand_new_tool = %+v, want allow", v)
 	}
 }
 
 func TestNewGenerationBumpsTheGeneration(t *testing.T) {
-	b := introspectBuilder(t, NewPolicy(nil, nil), nil, nil)
+	b := introspectBuilder(t, NewPolicy(nil), nil, nil)
 	before := mustSnapshot(t, b).gen
 
 	managerOf(t, b).set(minimalTestConfig())
@@ -266,15 +267,15 @@ func TestNewGenerationRebindsTheChatModel(t *testing.T) {
 }
 
 func TestSnapshotNeverRegresses(t *testing.T) {
-	b := introspectBuilder(t, NewPolicy(nil, nil), nil, nil)
+	b := introspectBuilder(t, NewPolicy(nil), nil, nil)
 	newer := configFromSpecs("test/model", nil,
-		toConfigPolicy(NewPolicy(nil, nil)), nil)
+		allowOf(NewPolicy(nil)), nil)
 
 	if _, err := b.snapshotFor(newer, 7); err != nil {
 		t.Fatal(err)
 	}
 	old := configFromSpecs("test/model", nil,
-		toConfigPolicy(NewPolicy(nil, nil)), nil)
+		allowOf(NewPolicy(nil)), nil)
 	got, err := b.snapshotFor(old, 3)
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +289,7 @@ func TestSnapshotNeverRegresses(t *testing.T) {
 }
 
 func TestSnapshotForReadsTheGenerationUnderTheLock(t *testing.T) {
-	b := introspectBuilder(t, NewPolicy(nil, nil), nil, nil)
+	b := introspectBuilder(t, NewPolicy(nil), nil, nil)
 	mgr := managerOf(t, b)
 	if _, err := mustSnapshot(t, b).heavyDepsOf(context.Background()); err != nil {
 		t.Fatal(err)
@@ -319,7 +320,7 @@ func TestSnapshotForReadsTheGenerationUnderTheLock(t *testing.T) {
 }
 
 func TestGenerationChangeIsSafeUnderConcurrency(t *testing.T) {
-	b := introspectBuilder(t, NewPolicy(nil, nil), nil, nil)
+	b := introspectBuilder(t, NewPolicy(nil), nil, nil)
 	mgr := managerOf(t, b)
 
 	var wg sync.WaitGroup
@@ -328,7 +329,7 @@ func TestGenerationChangeIsSafeUnderConcurrency(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			mgr.set(configFromSpecs("test/model", nil,
-				toConfigPolicy(NewPolicy([]string{"read_file"}, nil)), nil))
+				allowOf(NewPolicy([]string{"read_file"})), nil))
 		}()
 		go func() {
 			defer wg.Done()
@@ -356,7 +357,6 @@ func TestDescriptionVerdictsFlagEmptyAndDuplicates(t *testing.T) {
 		Agents:    map[string]*decl.Agent{},
 		Models:    map[string]*decl.Model{"test/model": {ID: "model", Kind: string(decl.ModelKindChat)}},
 		Providers: map[string]*decl.Provider{},
-		Policy:    decl.Policy{},
 		Server:    decl.Server{Agent: decl.AgentCfg{MaxDepth: 2}},
 	}
 	cfg.Agents["main"] = &decl.Agent{
@@ -403,7 +403,6 @@ func TestDescriptionVerdictsDoNotFlagDistinctDescriptions(t *testing.T) {
 		Agents:    map[string]*decl.Agent{},
 		Models:    map[string]*decl.Model{"test/model": {ID: "model", Kind: string(decl.ModelKindChat)}},
 		Providers: map[string]*decl.Provider{},
-		Policy:    decl.Policy{},
 		Server:    decl.Server{Agent: decl.AgentCfg{MaxDepth: 2}},
 	}
 	cfg.Agents["main"] = &decl.Agent{ID: "main", ModelRef: "test/model", MaxIterations: 1,

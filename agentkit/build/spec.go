@@ -47,10 +47,20 @@ func specOf(cfg *spec.Config, projectRoot string) (agentSpec, error) {
 	}, nil
 }
 
+// policyOf assembles the tier table.
+//
+// ★ The exceptions come from two places, and both of them are the
+//
+//	configuration: a tool's own file names the ones that run without a
+//	nod (`allows:`), and an MCP server's file names its own — in the
+//	server's own vocabulary, translated to the exposed names here.
 func policyOf(cfg *spec.Config) Policy {
-	p := NewPolicy(cfg.Policy.Ask, cfg.Policy.Deny)
-	p.mcpAllow = mcpAllowedNames(cfg.MCPs)
-	return p
+	allow := builtinAllowedTools()
+	allow = append(allow, cfg.AllowedTools()...)
+	for name := range mcpAllowedNames(cfg.MCPs) {
+		allow = append(allow, name)
+	}
+	return NewPolicy(allow)
 }
 
 func (s *agentSpec) agentSpec(id string) (decl.SubAgentSpec, bool) {

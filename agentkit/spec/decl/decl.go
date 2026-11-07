@@ -214,29 +214,7 @@ func (t *Threshold) parseString(s string) error {
 	return nil
 }
 
-// ── policy/permissions.yaml ──────────────────────────────────────────────
-
-type Policy struct {
-	Ask  []string `yaml:"ask"`
-	Deny []string `yaml:"deny"`
-}
-
-type Limits struct {
-	Agent AgentLimit `yaml:"agent"`
-	Retry RetryLimit `yaml:"retry"`
-}
-
-type AgentLimit struct {
-	MaxDepth int `yaml:"max_depth"`
-}
-
-type RetryLimit struct {
-	MaxRetries int `yaml:"max_retries"`
-}
-
-const DefaultMaxDepth = 1
-
-const DefaultMaxRetries = 5
+// ── the tiers ────────────────────────────────────────────────────────────
 
 type Tier string
 
@@ -245,25 +223,6 @@ const (
 	TierAsk   Tier = "ask"
 	TierDeny  Tier = "deny"
 )
-
-func (p Policy) TierOf(tool string) Tier {
-	if contains(p.Deny, tool) {
-		return TierDeny
-	}
-	if contains(p.Ask, tool) {
-		return TierAsk
-	}
-	return TierAllow
-}
-
-func contains(list []string, v string) bool {
-	for _, s := range list {
-		if s == v {
-			return true
-		}
-	}
-	return false
-}
 
 // ── server/config.yaml ───────────────────────────────────────────────────
 
@@ -300,10 +259,17 @@ type ToolsCfg struct {
 	Wikipedia *WikipediaCfg `yaml:"wikipedia"`
 }
 
+// HTTPToolsCfg is the HTTP tool's own configuration.
+//
+// ★ Allows names the tools that run **without a nod**, in this file's own
+//
+//	vocabulary. ★ Everything else this file provides asks — the default
+//	is ask, and the exceptions are named.
 type HTTPToolsCfg struct {
 	Methods []string          `yaml:"methods"`
 	Headers map[string]string `yaml:"headers"`
 	Timeout LenientDuration   `yaml:"timeout"`
+	Allows  []string          `yaml:"allows"`
 }
 
 type WebSearchCfg struct {
@@ -311,6 +277,7 @@ type WebSearchCfg struct {
 	MaxResults int             `yaml:"max_results"`
 	Timeout    LenientDuration `yaml:"timeout"`
 	Region     string          `yaml:"region"`
+	Allows     []string        `yaml:"allows"`
 }
 
 type WikipediaCfg struct {
@@ -318,6 +285,7 @@ type WikipediaCfg struct {
 	Language string          `yaml:"language"`
 	Timeout  LenientDuration `yaml:"timeout"`
 	BaseURL  string          `yaml:"base_url"`
+	Allows   []string        `yaml:"allows"`
 }
 
 type AgentCfg struct {
@@ -564,6 +532,9 @@ type KB struct {
 	MaxBatchChars int `yaml:"max_batch_chars"`
 
 	TopK int `yaml:"top_k"`
+
+	// Allows names the tools of this file that run **without a nod**.
+	Allows []string `yaml:"allows"`
 
 	Splitter KBSplitter `yaml:"splitter"`
 }

@@ -11,7 +11,7 @@ import (
 )
 
 func TestSubagentEventsAreForwardedToTheParentStream(t *testing.T) {
-	cfg := configFromSpecs("test/model", nil, decl.Policy{}, []decl.SubAgentSpec{
+	cfg := configFromSpecs("test/model", nil, nil, []decl.SubAgentSpec{
 		{ID: "main", ModelRef: "test/model", Description: "根", Sub: []decl.SubAgentSpec{
 			{ID: "task", ModelRef: "test/model", Description: "专家"},
 		}},

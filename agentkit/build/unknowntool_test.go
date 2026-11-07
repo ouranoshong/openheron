@@ -80,12 +80,17 @@ func (m *scriptModel) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel,
 	return m, nil
 }
 
-func runScripted(t *testing.T, unknownName string, deny ...string) [][]*schema.Message {
+// runScripted runs a scripted model and returns the history.
+//
+// ★ The second argument names the tools the agent does **not** get: they
+//
+//	are the agent's own disabled_tools, and a model that calls one has to
+//	be told it is not available.
+func runScripted(t *testing.T, unknownName string, disabled ...string) [][]*schema.Message {
 	t.Helper()
 
 	m := &scriptModel{}
-	cfg := configFromSpecs("test/model", nil,
-		toConfigPolicy(NewPolicy(nil, deny)), nil)
+	cfg := configFromSpecs("test/model", disabled, nil, nil)
 	cfg.Agents[spec.DefaultAgentID].Instruction = "you are a test agent"
 	cfg.Agents[spec.DefaultAgentID].MaxIterations = 3
 
@@ -144,7 +149,7 @@ func TestUnknownToolCallDoesNotKillTheRun(t *testing.T) {
 }
 
 func TestUnknownToolScopeNamesOnlySurvivingTools(t *testing.T) {
-	filter := newFilterMiddleware(newTable("main", []string{"grep"}, nil))
+	filter := newFilterMiddleware(newTable("main", []string{"grep"}))
 	scope := newUnknownToolScope()
 
 	runCtx := &adk.ChatModelAgentContext{
@@ -214,7 +219,7 @@ func TestUnknownToolScopeIsRegisteredAfterTheFilter(t *testing.T) {
 	snap := mustSnapshot(t, b)
 	policy, table, maxDepth := snap.agentSpec.policy, snap.tableFor(snap.agentSpec.defaultAgent), snap.agentSpec.maxDepth
 	check(t, "root", toolChain(newBoundary(policy, table), maxDepth))
-	check(t, "sub-agent", subHandlers(NewPolicy(nil, nil), decl.SubAgentSpec{ID: "x"}, 1, nil))
+	check(t, "sub-agent", subHandlers(NewPolicy(nil), decl.SubAgentSpec{ID: "x"}, 1, nil))
 }
 
 func TestUnknownToolsReplyIsSafeWithoutToolNames(t *testing.T) {

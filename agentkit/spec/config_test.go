@@ -19,7 +19,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	root := t.TempDir()
 	f := &fixture{root: filepath.Join(root, ".openheron")}
-	for _, sub := range []string{DirLLM, DirAgent, DirServer, DirPolicy, DirTools} {
+	for _, sub := range []string{DirLLM, DirAgent, DirServer, DirTools, DirMCP} {
 		if err := os.MkdirAll(filepath.Join(f.root, sub), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -148,39 +148,25 @@ models:
 	}
 }
 
-func TestDenyAndAskComeFromTheSameFile(t *testing.T) {
+// ★ The exceptions come from the file that provides the tool.
+func TestTheExceptionsComeFromTheToolsOwnFile(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
-	f.write(t, "policy/permissions.yaml", "deny: [execute]\nask: [write_file]\n")
+	f.write(t, "tools/http.yaml", "methods: [get]\nallows: [request_get]\n")
 
 	cfg, err := f.load(t)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Policy.TierOf("execute"); got != decl.TierDeny {
-		t.Fatalf("execute must be denied, got %q", got)
+	allowed := map[string]bool{}
+	for _, n := range cfg.AllowedTools() {
+		allowed[n] = true
 	}
-	if got := cfg.Policy.TierOf("write_file"); got != decl.TierAsk {
-		t.Fatalf("write_file must be in the ask tier, got %q", got)
+	if !allowed["request_get"] {
+		t.Fatal("request_get must run without a nod — the file names it")
 	}
-}
-
-func TestUnlistedToolDefaultsToAllow(t *testing.T) {
-	f := newFixture(t)
-	f.seedMinimal(t)
-	p := defaultPolicy()
-	for _, tool := range []string{"ls", "read_file", "glob", "grep", "write_todos", "task"} {
-		if got := p.TierOf(tool); got != decl.TierAllow {
-			t.Errorf("the built-in read-only tool %s must default to allow, got %q", tool, got)
-		}
-	}
-	for _, tool := range []string{"write_file", "edit_file", "execute"} {
-		if got := p.TierOf(tool); got != decl.TierAsk {
-			t.Errorf("the mutating tool %s must default to ask, got %q", tool, got)
-		}
-	}
-	if got := p.TierOf("brand_new_tool"); got != decl.TierAllow {
-		t.Fatalf("* an unlisted tool must fall back to allow, got %q", got)
+	if allowed["request_post"] {
+		t.Fatal("request_post must ask — the file does not name it")
 	}
 }
 
@@ -397,9 +383,13 @@ func TestDeferredIsCollected(t *testing.T) {
 	}
 }
 
-// ── policy/limits.yaml ───────────────────────────────────────────────────
+// ── the caps ─────────────────────────────────────────────────────────────
+//
+// ★ The cap lives in server/config.yaml: one place, one value. It is not
+//   hot-reloaded — a change takes effect on the next start — and that is
+//   the price of not having a second copy of the same number.
 
-func limitsGlobal(t *testing.T, f *fixture, depth, retries int) {
+func capsGlobal(t *testing.T, f *fixture, depth, retries int) {
 	t.Helper()
 	f.write(t, "server/config.yaml",
 		"agent:\n  max_depth: "+itoa(depth)+"\nretry:\n  max_retries: "+itoa(retries)+"\n")
@@ -407,127 +397,61 @@ func limitsGlobal(t *testing.T, f *fixture, depth, retries int) {
 
 func itoa(n int) string { return strconv.Itoa(n) }
 
-func TestLimitsTightenTheGlobalBaseline(t *testing.T) {
+func TestTheCapsComeFromTheServerConfiguration(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
-	limitsGlobal(t, f, 3, 4)
-	f.write(t, "policy/limits.yaml", "agent:\n  max_depth: 2\nretry:\n  max_retries: 1\n")
+	capsGlobal(t, f, 3, 4)
 
 	cfg, err := f.load(t)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.MaxDepth(); got != 2 {
-		t.Fatalf("MaxDepth = %d, want 2 (limits.yaml tightens the global 3)", got)
+	if got := cfg.MaxDepth(); got != 3 {
+		t.Fatalf("MaxDepth = %d, want 3", got)
 	}
-	if got := cfg.MaxRetries(); got != 1 {
-		t.Fatalf("MaxRetries = %d, want 1 (limits.yaml tightens the global 4)", got)
-	}
-	for _, d := range cfg.Deferred() {
-		if strings.Contains(d, "limits.yaml") {
-			t.Fatalf("limits.yaml is implemented now, it must not be deferred: %q", d)
-		}
+	if got := cfg.MaxRetries(); got != 4 {
+		t.Fatalf("MaxRetries = %d, want 4", got)
 	}
 }
 
-func TestLimitsTightenButNeverLoosen(t *testing.T) {
+func TestTheCapsFallBackToTheDefaults(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
-	limitsGlobal(t, f, 9, 9)
-	f.write(t, "policy/limits.yaml", "agent:\n  max_depth: 3\nretry:\n  max_retries: 4\n")
-	f.write(t, "policy/limits.yaml", "agent:\n  max_depth: 1\nretry:\n  max_retries: 2\n")
+	f.write(t, "server/config.yaml", "agent:\n  max_depth: 0\nretry:\n  max_retries: 0\n")
 
 	cfg, err := f.load(t)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.MaxDepth(); got != 1 {
-		t.Fatalf("MaxDepth = %d, want 1 (the stricter of the two levels)", got)
+	if got := cfg.MaxDepth(); got != DefaultMaxDepth {
+		t.Fatalf("MaxDepth = %d, want the default %d (0 = the default)", got, DefaultMaxDepth)
 	}
-	if got := cfg.MaxRetries(); got != 2 {
-		t.Fatalf("MaxRetries = %d, want 2 (the stricter of the two levels)", got)
-	}
-}
-
-func TestLimitsCannotLoosenTheGlobalBaseline(t *testing.T) {
-	f := newFixture(t)
-	f.seedMinimal(t)
-	limitsGlobal(t, f, 1, 5)
-	f.write(t, "policy/limits.yaml", "agent:\n  max_depth: 5\nretry:\n  max_retries: 99\n")
-
-	cfg, err := f.load(t)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := cfg.MaxDepth(); got != 1 {
-		t.Fatalf("MaxDepth = %d, want 1 (the global baseline must not be loosened)", got)
-	}
-	if got := cfg.MaxRetries(); got != 5 {
-		t.Fatalf("MaxRetries = %d, want 5 (the global baseline must not be loosened)", got)
+	if got := cfg.MaxRetries(); got != DefaultMaxRetries {
+		t.Fatalf("MaxRetries = %d, want the default %d (0 = the default)", got, DefaultMaxRetries)
 	}
 }
 
-func TestLooserLimitIsReportedAsDeferred(t *testing.T) {
+func TestTheCapsRejectUnknownKeys(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
-	limitsGlobal(t, f, 1, 5)
-	f.write(t, "policy/limits.yaml", "agent:\n  max_depth: 5\n")
-
-	cfg, err := f.load(t)
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, d := range cfg.Deferred() {
-		if strings.Contains(d, "max_depth") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("a looser-than-baseline limit must be reported in deferred, got %v", cfg.Deferred())
-	}
-}
-
-func TestLimitsZeroMeansInherit(t *testing.T) {
-	f := newFixture(t)
-	f.seedMinimal(t)
-	limitsGlobal(t, f, 2, 7)
-	f.write(t, "policy/limits.yaml", "agent:\n  max_depth: 0\nretry:\n  max_retries: 0\n")
-
-	cfg, err := f.load(t)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := cfg.MaxDepth(); got != 2 {
-		t.Fatalf("MaxDepth = %d, want 2 (0 = inherit the global)", got)
-	}
-	if got := cfg.MaxRetries(); got != 7 {
-		t.Fatalf("MaxRetries = %d, want 7 (0 = inherit the global)", got)
-	}
-}
-
-func TestLimitsRejectsUnknownKeys(t *testing.T) {
-	f := newFixture(t)
-	f.seedMinimal(t)
-	f.write(t, "policy/limits.yaml", "agent:\n  max_tokens: 100\n")
+	f.write(t, "server/config.yaml", "agent:\n  max_tokens: 100\n")
 
 	if _, err := f.load(t); err == nil {
 		t.Fatal("an unknown key must be an error (strict parsing), not silently ignored")
 	}
 }
 
-func TestLimitsDepthBelowTopologyFailsValidation(t *testing.T) {
+func TestADepthAboveTheCapFailsValidation(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 	f.write(t, "agents/researcher.md",
 		"---\ndescription: R\nmodel: openai/fast\nsubagents: [grandchild]\n---\n")
 	f.write(t, "agents/grandchild.md", "---\ndescription: G\nmodel: openai/fast\n---\n")
 	f.write(t, "agents/main.md", "---\nmodel: openai/fast\nsubagents: [researcher]\n---\n")
-	limitsGlobal(t, f, 3, 5)
-	f.write(t, "policy/limits.yaml", "agent:\n  max_depth: 1\n")
+	capsGlobal(t, f, 1, 5)
 
 	if _, err := f.load(t); err == nil {
-		t.Fatal("a declared depth above the tightened limit must be an error")
+		t.Fatal("a declared depth above the cap must be an error")
 	}
 }
 

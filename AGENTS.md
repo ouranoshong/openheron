@@ -44,16 +44,16 @@ one — change one and change the other.
 > `docs/fs-backend-design.md` describes the **filesystem backend** — the bounded fork of
 > `eino-ext`'s local backend (§5) and the confinement rule every tool passes through — and it is
 > **implemented**: `agentkit/fsx` is wired in at both call sites.
-> `docs/mcp-design.md` is a **proposal** too: its §1 describes the code as it is — the tool
-> assembly path, the provider contract, and the exact-match policy tables — while its §2 onwards
-> describe what would be built: an `mcps/` config partition, the `mcp__<server>__<tool>` namespace,
-> the tier that lives with the tool, and prefix matching in the global deny. **Nothing from §2
-> onwards is in the tree.**
+> `docs/mcp-design.md` describes the **MCP integration** — the `mcps/` config partition, the
+> `mcp__<server>__<tool>` namespace, the tier that lives with the server's own file, and the
+> `/mcps` view. **It is implemented**: the partition, the provider, the manager and the endpoint
+> are all in the tree. ★ §8 — how a sandbox Kit packages an MCP server — is still a proposal.
 > `docs/config-design.md` describes the **configuration system** — the config root and its
 > three levels, the partitions and their file specs, loading and precedence, hot reload, and
 > the dependency iron rules. **Its body describes the code as it is**; the `mcps/` partition
-> (§6.7), the tier that lives with the tool (§6.6), and the prefix matching in the global
-> deny (§6.3) are labeled as proposals, because they are not implemented.
+> (§6.7) and the tier that lives with the tool (§6.6) are implemented. ★ The prefix matching
+> in a **global deny** (§6.3) is gone with the deny list itself: "not exposed" is said by a
+> file's `allows:` and by an agent's `disabled_tools`.
 >
 > ★ One directory is not a document set: **`sandbox-kit/`** holds the Docker Sandbox Kits that
 > package openheron as a sandbox workload — `openheron/` (the workload: descriptor, content
@@ -95,7 +95,7 @@ notifications, and **interface copy**.
 | Notification | English | `c.deferKey("watch.debounce fell back to default: %s", msg)` |
 | API response body | English | `c.JSON(400, map[string]string{"error": "thread not found"})` |
 | **Interface copy** | **English** | `"Run in a separate agent"` |
-| **Content written into user configuration** | **English** | the header of `catalog.md`, the comment block of `policy/limits.yaml`, the comment block of `tools/filesystem.yaml` |
+| **Content written into user configuration** | **English** | the header of `catalog.md`, the comment block of `server/config.yaml`, the comment block of `tools/http.yaml` |
 
 ### Code comments
 
@@ -164,8 +164,10 @@ zero openheron dependencies, and importing `obs` would break that iron rule
 - **Archival comes before presentation** — when the SSE sink breaks, stop rendering but keep
   consuming the event stream, otherwise `Outcome.Intermediates` is incomplete and the history
   has holes.
-- **`deny` beats `disabled_tools`** — the outer policy is the one guarantee a sub-agent cannot
-  relax.
+- **The default tier is `ask`** — a tool nobody names asks, and the exceptions are the tools
+  that run without a nod: the ones a file names in its own `allows:` list, and the built-in
+  readers the code knows. ★ "Not exposed" is said in exactly **two** places — a file's own
+  allow-list, and an agent's `disabled_tools`. There is no global deny any more.
 - Before changing configuration semantics, read `docs/config-design.md`; before changing
   an interface, read `docs/api-design.md`; before adding a `/v2` endpoint, read
   `docs/api-v2-design.md`; before touching the frontend, read `docs/frontend-design.md`; before
@@ -283,8 +285,9 @@ cd web && bun run smoke:hitl               # approval resume works end to end
   pretending the wiring is broken. Do not use retry counts to cover it up.
 - ★ **`smoke:hitl` has a prerequisite; without it the script fails 100% of the time (that is not
   "flaky")**: for **the agent that actually calls the tool**, its `write_file` must land in the
-  `ask` tier (neither globally `deny`-ed nor disabled by its own `disabled_tools`) — otherwise
-  the model cannot call that tool at all, and no approval can be triggered.
+  `ask` tier (not named in its own file's `allows:` and not disabled by its own
+  `disabled_tools`) — otherwise the model cannot call that tool at all, and no approval can
+  be triggered.
   ★ Do not stare at `main`: the factory config does list
   `disabled_tools: [write_file, edit_file, execute]` for `main`, but `main` only orchestrates and
   **delegates** the work to `task`, whose `write_file` sits in the `ask` tier — the approval

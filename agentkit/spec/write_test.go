@@ -37,7 +37,7 @@ func TestLoadWithNilEqualsLoad(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 	f.write(t, "server/config.yaml", "listen_addr: \":9999\"\n")
-	f.write(t, "policy/permissions.yaml", "ask: [read_file, write_file]\n")
+	f.write(t, "tools/http.yaml", "methods: [get]\nallows: [read_file, write_file]\n")
 
 	s := f.service(t)
 
@@ -56,8 +56,8 @@ func TestLoadWithNilEqualsLoad(t *testing.T) {
 	if withNil.Server.ListenAddr != plain.Server.ListenAddr {
 		t.Fatalf("listen_addr = %q, want %q", withNil.Server.ListenAddr, plain.Server.ListenAddr)
 	}
-	if strings.Join(withNil.Policy.Ask, ",") != strings.Join(plain.Policy.Ask, ",") {
-		t.Fatalf("ask = %v, want %v", withNil.Policy.Ask, plain.Policy.Ask)
+	if strings.Join(withNil.AllowedTools(), ",") != strings.Join(plain.AllowedTools(), ",") {
+		t.Fatalf("the exception list = %v, want %v", withNil.AllowedTools(), plain.AllowedTools())
 	}
 	if len(withNil.Agents) != len(plain.Agents) {
 		t.Fatalf("agents = %d, want %d", len(withNil.Agents), len(plain.Agents))
@@ -67,23 +67,23 @@ func TestLoadWithNilEqualsLoad(t *testing.T) {
 func TestLoadWithReplacesExistingContent(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
-	f.write(t, "policy/permissions.yaml", "ask: [read_file]\n")
+	f.write(t, "tools/http.yaml", "methods: [get]\nallows: [read_file]\n")
 
 	s := f.service(t)
 	cfg, err := s.loadWith(&mutation{
-		Rel:     "policy/permissions.yaml",
-		Content: []byte("deny: [execute]\n"),
+		Rel:     "tools/http.yaml",
+		Content: []byte("methods: [get]\nallows: [execute]\n"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Policy.Ask) != 0 {
-		t.Fatalf("ask = %v, want empty (wholesale replace)", cfg.Policy.Ask)
+	if got := cfg.AllowedTools(); len(got) != 1 || got[0] != "execute" {
+		t.Fatalf("the exception list = %v, want [execute] — the file is replaced wholesale", got)
 	}
-	if got := cfg.Policy.Deny; len(got) != 1 || got[0] != "execute" {
-		t.Fatalf("deny = %v, want [execute]", got)
+	if got := cfg.AllowedTools(); len(got) != 1 || got[0] != "execute" {
+		t.Fatalf("the exception list = %v, want [execute]", got)
 	}
-	if got := f.read(t, "policy/permissions.yaml"); !strings.Contains(got, "read_file") {
+	if got := f.read(t, "tools/http.yaml"); !strings.Contains(got, "read_file") {
 		t.Fatalf("disk was modified: %q", got)
 	}
 }
@@ -170,7 +170,7 @@ func TestLoadWithRejectsUnknownYAMLFieldWithLineNumber(t *testing.T) {
 
 	s := f.service(t)
 	_, err := s.loadWith(&mutation{
-		Rel:     "policy/permissions.yaml",
+		Rel:     "tools/http.yaml",
 		Content: []byte("allow: [read_file]\nmax_retry: 3\n"),
 	})
 	if err == nil {
@@ -182,7 +182,7 @@ func TestLoadWithRejectsUnknownYAMLFieldWithLineNumber(t *testing.T) {
 	if !strings.Contains(err.Error(), "line 2") {
 		t.Fatalf("the error must carry a line number, got %q", err)
 	}
-	if !strings.Contains(err.Error(), "policy/permissions.yaml") {
+	if !strings.Contains(err.Error(), "tools/http.yaml") {
 		t.Fatalf("the error must name the file by its relative path, got %q", err)
 	}
 	if strings.Contains(err.Error(), f.root) || strings.Contains(err.Error(), f.root) {
@@ -193,19 +193,19 @@ func TestLoadWithRejectsUnknownYAMLFieldWithLineNumber(t *testing.T) {
 func TestTheCandidateOnlyAffectsItsOwnFile(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
-	f.write(t, "policy/permissions.yaml", "ask: [on_disk]\n")
+	f.write(t, "tools/http.yaml", "methods: [get]\nallows: [on_disk]\n")
 	f.write(t, "server/config.yaml", "listen_addr: \":9999\"\n")
 
 	s := f.service(t)
 	cfg, err := s.loadWith(&mutation{
-		Rel:     "policy/permissions.yaml",
-		Content: []byte("ask: [candidate]\n"),
+		Rel:     "tools/http.yaml",
+		Content: []byte("methods: [get]\nallows: [candidate]\n"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Policy.Ask) != 1 || cfg.Policy.Ask[0] != "candidate" {
-		t.Fatalf("ask = %v, want [candidate]", cfg.Policy.Ask)
+	if got := cfg.AllowedTools(); len(got) != 1 || got[0] != "candidate" {
+		t.Fatalf("the exception list = %v, want [candidate]", got)
 	}
 	if cfg.Server.ListenAddr != ":9999" {
 		t.Fatalf("an unrelated file must not be affected: listen_addr = %q", cfg.Server.ListenAddr)
@@ -242,22 +242,22 @@ func TestLoadWithCreatesIntoAMissingDirectory(t *testing.T) {
 	f.seedMinimal(t)
 	t.Setenv("TEST_LLM_KEY", "sk-test")
 
-	if _, err := os.Stat(filepath.Join(cfgRoot, DirPolicy)); err == nil {
-		t.Fatal("precondition: policy/ must not exist yet")
+	if _, err := os.Stat(filepath.Join(cfgRoot, DirTools)); err == nil {
+		t.Fatal("precondition: tools/ must not exist yet")
 	}
 
 	s := f.service(t)
 	cfg, err := s.loadWith(&mutation{
-		Rel:     "policy/permissions.yaml",
-		Content: []byte("ask: [execute]\n"),
+		Rel:     "tools/http.yaml",
+		Content: []byte("methods: [get]\nallows: [execute]\n"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Policy.Ask) != 1 || cfg.Policy.Ask[0] != "execute" {
-		t.Fatalf("ask = %v, want [execute]", cfg.Policy.Ask)
+	if got := cfg.AllowedTools(); len(got) != 1 || got[0] != "execute" {
+		t.Fatalf("the exception list = %v, want [execute]", got)
 	}
-	if _, err := os.Stat(filepath.Join(cfgRoot, DirPolicy)); err == nil {
+	if _, err := os.Stat(filepath.Join(cfgRoot, DirTools)); err == nil {
 		t.Fatal("trial merge created a directory on disk")
 	}
 }
@@ -275,7 +275,6 @@ func TestCategoriesCoverExactlyWhatTheLoaderReads(t *testing.T) {
 			Models:    map[string]*decl.Model{},
 			Agents:    map[string]*decl.Agent{},
 			Server:    defaultServer(),
-			Policy:    defaultPolicy(),
 		}
 		if cfg.loaderFor(c) == nil {
 			t.Fatalf("category %q has no loader", c.Dir)
@@ -333,7 +332,7 @@ func TestDecodeStrictReportsAnEmptyDocument(t *testing.T) {
 		"empty":         "",
 		"blank lines":   "\n\n  \n",
 		"comments only": "# HTTP tool. Writing this file enables it.\n",
-		"section tmpl":  Template(DirTools, nil),
+		"section tmpl":  Skeleton(DirTools, nil),
 	} {
 		var v decl.HTTPToolsCfg
 		err := decodeStrict([]byte(content), &v)
@@ -359,7 +358,7 @@ func TestWriteToolFileWithNoDocumentIsRejectedWithAReadableError(t *testing.T) {
 	f.seedMinimal(t)
 	s := f.service(t)
 
-	_, _, err := s.Write("tools/http.yaml", []byte(Template(DirTools, nil)), "")
+	_, _, err := s.Write("tools/http.yaml", []byte(Skeleton(DirTools, nil)), "")
 	if err == nil {
 		t.Fatal("a tools file with no YAML document must be rejected")
 	}

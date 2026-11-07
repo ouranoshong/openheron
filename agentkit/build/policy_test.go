@@ -35,16 +35,14 @@ func namesOf(tools []tool.BaseTool) []string {
 	return out
 }
 
+// ★ The tier model: the default is ask, and the exceptions are named.
 func TestPolicyTierOrder(t *testing.T) {
-	p := NewPolicy(
-		[]string{"write_file", "execute"},
-		[]string{"execute"},
-	)
+	p := NewPolicy([]string{"read_file", "ls"})
 	cases := map[string]Tier{
 		"read_file":  TierAllow,
 		"ls":         TierAllow,
 		"write_file": TierAsk,
-		"execute":    TierDeny,
+		"execute":    TierAsk,
 	}
 	for name, want := range cases {
 		if got := p.TierOf(name); got != want {
@@ -53,28 +51,24 @@ func TestPolicyTierOrder(t *testing.T) {
 	}
 }
 
-func TestPolicyFallsBackToAllow(t *testing.T) {
-	p := NewPolicy([]string{"write_file"}, nil)
+func TestPolicyFallsBackToAsk(t *testing.T) {
+	p := NewPolicy([]string{"read_file"})
 	for _, name := range []string{"brand_new_tool", "shell", "delete_everything"} {
-		if got := p.TierOf(name); got != TierAllow {
-			t.Errorf("the unlisted %q must fall back to allow, got %q", name, got)
+		if got := p.TierOf(name); got != TierAsk {
+			t.Errorf("the unlisted %q must fall back to ask, got %q", name, got)
 		}
 	}
-	if got := p.TierOf("write_file"); got != TierAsk {
-		t.Errorf("the listed %q must stay ask, got %q", "write_file", got)
+	if got := p.TierOf("read_file"); got != TierAllow {
+		t.Errorf("the listed %q must run without a nod, got %q", "read_file", got)
 	}
 }
 
-func TestDenyBeatsDisable(t *testing.T) {
+func TestTheDisableLayerRemovesTheTool(t *testing.T) {
 	tbl := newTable("main",
-		[]string{"execute"},
 		[]string{"execute", "write_file"},
 	)
-	if got := tbl.Blocked("execute"); got != LayerDeny {
-		t.Fatalf("a tool present in both layers must resolve to deny, got %q", got)
-	}
-	if got := tbl.Blocked("write_file"); got != LayerDisable {
-		t.Fatalf("a tool disabled only at the disable layer must report %q, got %q", LayerDisable, got)
+	if got := tbl.Blocked("execute"); got != LayerDisable {
+		t.Fatalf("a tool the agent does not get must report %q, got %q", LayerDisable, got)
 	}
 	if got := tbl.Blocked("read_file"); got != LayerNone {
 		t.Fatalf("an unlisted tool must not be blocked, got %q", got)
@@ -83,8 +77,7 @@ func TestDenyBeatsDisable(t *testing.T) {
 
 func TestFilterRemovesByLayer(t *testing.T) {
 	tbl := newTable("main",
-		[]string{"execute"},
-		[]string{"write_file", "write_todos"},
+		[]string{"execute", "write_file", "write_todos"},
 	)
 	tools := []tool.BaseTool{
 		&stubTool{name: "read_file"},
@@ -99,33 +92,14 @@ func TestFilterRemovesByLayer(t *testing.T) {
 	if got != "read_file" {
 		t.Fatalf("read_file must be the one kept, got %q", got)
 	}
-	if removed[LayerDeny] != 1 {
-		t.Errorf("the outer layer must remove 1, got %d", removed[LayerDeny])
-	}
-	if removed[LayerDisable] != 2 {
-		t.Errorf("the inner layer must remove 2, got %d", removed[LayerDisable])
-	}
-}
-
-func TestDeniedToolStaysDeniedForSubAgents(t *testing.T) {
-	globalDeny := []string{"execute"}
-
-	parent := newTable("main", globalDeny, nil)
-	child := newTable("writer", globalDeny, []string{"write_todos"})
-
-	tools := []tool.BaseTool{&stubTool{name: "execute"}, &stubTool{name: "read_file"}}
-
-	for _, tbl := range []*Table{parent, child} {
-		kept, _ := tbl.Filter(tools)
-		if names := namesOf(kept); strings.Contains(strings.Join(names, ","), "execute") {
-			t.Fatalf("* agent %q regained execute despite the global deny: %v", tbl.Name, names)
-		}
+	if removed[LayerDisable] != 3 {
+		t.Errorf("the disable layer must remove 3, got %d", removed[LayerDisable])
 	}
 }
 
 func TestDisableIsScopedToItsOwnAgent(t *testing.T) {
-	writer := newTable("writer", nil, []string{"write_file"})
-	reader := newTable("reader", nil, nil)
+	writer := newTable("writer", []string{"write_file"})
+	reader := newTable("reader", nil)
 
 	tools := []tool.BaseTool{&stubTool{name: "write_file"}}
 
@@ -138,7 +112,7 @@ func TestDisableIsScopedToItsOwnAgent(t *testing.T) {
 }
 
 func TestFilterIsNoopWithoutRules(t *testing.T) {
-	tbl := newTable("main", nil, nil)
+	tbl := newTable("main", nil)
 	tools := []tool.BaseTool{&stubTool{name: "read_file"}}
 	kept, removed := tbl.Filter(tools)
 	if len(kept) != 1 || removed != nil {
@@ -147,7 +121,7 @@ func TestFilterIsNoopWithoutRules(t *testing.T) {
 }
 
 func TestFilterKeepsToolsThatCannotReportName(t *testing.T) {
-	tbl := newTable("main", []string{"mystery"}, nil)
+	tbl := newTable("main", []string{"mystery"})
 	kept, _ := tbl.Filter([]tool.BaseTool{&brokenTool{}})
 	if len(kept) != 1 {
 		t.Fatal("a tool that cannot report its name must be kept (over-keeping beats wrongly stripping)")
@@ -167,7 +141,7 @@ type brokenErr struct{}
 func (*brokenErr) Error() string { return "cannot describe itself" }
 
 func TestFilterMiddlewareDropsDeniedToolInBeforeAgent(t *testing.T) {
-	tbl := newTable("main", []string{"execute"}, nil)
+	tbl := newTable("main", []string{"execute"})
 	mw := newFilterMiddleware(tbl)
 
 	runCtx := &adk.ChatModelAgentContext{
@@ -182,8 +156,8 @@ func TestFilterMiddlewareDropsDeniedToolInBeforeAgent(t *testing.T) {
 	}
 }
 
-func TestApprovalMiddlewareRefusesDeniedToolEvenIfFilterMissed(t *testing.T) {
-	p := NewPolicy([]string{"write_file"}, []string{"execute"})
+func TestApprovalMiddlewareAsksEvenIfFilterMissed(t *testing.T) {
+	p := NewPolicy([]string{"write_file"})
 	mw := newApprovalMiddleware(p)
 
 	endpoint := func(context.Context, string, ...tool.Option) (string, error) {
@@ -195,13 +169,13 @@ func TestApprovalMiddlewareRefusesDeniedToolEvenIfFilterMissed(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, runErr := wrapped(context.Background(), "{}")
-	if runErr == nil || !strings.Contains(runErr.Error(), "denied by policy") {
-		t.Fatalf("a denied tool must error out immediately, got %v", runErr)
+	if runErr == nil {
+		t.Fatal("a tool that asks must not run without a nod")
 	}
 }
 
 func TestApprovalMiddlewareLetsAllowTierThrough(t *testing.T) {
-	p := NewPolicy([]string{"write_file"}, nil)
+	p := NewPolicy([]string{"read_file"})
 	mw := newApprovalMiddleware(p)
 
 	called := false

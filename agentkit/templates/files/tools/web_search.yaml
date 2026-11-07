@@ -5,3 +5,6 @@ provider: duckduckgo
 max_results: 10
 timeout: 60s
 region: ""
+
+# ★ The tools that run **without a nod**.
+allows: [duckduckgo_search]

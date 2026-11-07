@@ -65,7 +65,7 @@ export function ConfigEditor({ path, value, onChange, readOnly = false, dark = f
     const lang: Extension[] =
       section === "agents"
         ? [yamlFrontmatter({ content: markdown() })]
-        : section === "llm" || section === "policy"
+        : section === "llm"
           ? [yaml()]
           : []
 

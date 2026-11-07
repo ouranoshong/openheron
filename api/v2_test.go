@@ -793,8 +793,9 @@ func TestV2ConfigSurfacesPolicyAndModels(t *testing.T) {
 	if view.DefaultAgent != "main" {
 		t.Fatalf("defaultAgent = %q", view.DefaultAgent)
 	}
-	if view.Policy.DefaultTier != string(decl.TierAllow) {
-		t.Fatalf("defaultTier = %q, want allow", view.Policy.DefaultTier)
+	// ★ The default is ask: a tool nobody names asks.
+	if view.Policy.DefaultTier != string(decl.TierAsk) {
+		t.Fatalf("defaultTier = %q, want ask", view.Policy.DefaultTier)
 	}
 	if len(view.Providers) != 1 || view.Providers[0].ID != "test" {
 		t.Fatalf("providers = %+v", view.Providers)

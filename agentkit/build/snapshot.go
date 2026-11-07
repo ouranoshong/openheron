@@ -80,7 +80,7 @@ func newSnapshot(gen uint64, cfg *spec.Config, projectRoot, dataDir string,
 		return nil, err
 	}
 	if sp.maxDepth <= 0 {
-		sp.maxDepth = decl.DefaultMaxDepth
+		sp.maxDepth = spec.DefaultMaxDepth
 	}
 	if models == nil {
 		models = defaultModelFactory

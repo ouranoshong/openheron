@@ -18,7 +18,6 @@ const (
 	DirAgent   = "agents"
 	DirLLM     = "llm"
 	DirServer  = "server"
-	DirPolicy  = "policy"
 	DirSkills  = "skills"
 	DirState   = "state"
 	DirTools   = "tools"
@@ -48,11 +47,6 @@ var Categories = []Category{
 		ID: DirAgent, Label: "Agents", Dir: DirAgent, Ext: ".md",
 		Editable: true, hot: true,
 		loader: (*Config).loadAgent,
-	},
-	{
-		ID: DirPolicy, Label: "Approval policy", Dir: DirPolicy, Ext: ".yaml",
-		Editable: true, hot: true,
-		loader: (*Config).loadPolicy,
 	},
 	{
 		ID: DirServer, Label: "decl.Server", Dir: DirServer, Ext: ".yaml",
@@ -106,8 +100,6 @@ const DefaultBaseDirName = ".openheron"
 
 type Config struct {
 	Server decl.Server   `yaml:"server"`
-	Policy decl.Policy   `yaml:"-"`
-	Limits decl.Limits   `yaml:"-"`
 	KB     decl.KB       `yaml:"-"`
 	Tools  decl.ToolsCfg `yaml:"-"`
 
@@ -294,7 +286,6 @@ func (s *Service) loadOnly(ms map[string]*mutation) (*Config, error) {
 		Agents:     map[string]*decl.Agent{},
 		ConfigRoot: s.root,
 		Server:     defaultServer(),
-		Policy:     defaultPolicy(),
 		KB:         defaultKB(),
 	}
 
@@ -307,7 +298,6 @@ func (s *Service) loadOnly(ms map[string]*mutation) (*Config, error) {
 	}
 
 	cfg.collectBadDurations()
-	cfg.collectNoopLimits()
 	return cfg, nil
 }
 

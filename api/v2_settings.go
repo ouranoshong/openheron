@@ -138,14 +138,12 @@ func (s *Server) v2SettingsManifest(_ context.Context, c *app.RequestContext) {
 			view.Note = "not hot-reloaded; changes apply on restart"
 		}
 		manifest.Categories = append(manifest.Categories, view)
-		manifest.Templates[cat.Dir] = spec.Template(cat.Dir, refs)
-		if cat.Dir == spec.DirPolicy {
-			manifest.Templates[spec.DirPolicy+"/limits.yaml"] = spec.LimitsTemplate()
-		}
-		if cat.Dir == spec.DirTools {
-			for rel, tpl := range spec.ToolTemplates() {
-				manifest.Templates[rel] = tpl
-			}
+		manifest.Templates[cat.Dir] = spec.Skeleton(cat.Dir, refs)
+		// ★ The per-file templates: the file's own skeleton wins over the
+		//   section's, because a section skeleton may be nothing but
+		//   comments and a file built from it has no YAML document at all.
+		for rel, tpl := range spec.Templates(cat.Dir) {
+			manifest.Templates[rel] = tpl
 		}
 
 		names, err := svc.ListFiles(cat)

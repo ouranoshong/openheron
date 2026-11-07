@@ -16,15 +16,12 @@ import {
 const provider = (content: string): Issue[] => validateContent("llm/x.yaml", content)
 const agent = (content: string, catalog: ReasoningCatalog = {}): Issue[] =>
   validateContent("agents/x.md", content, catalog)
-const policy = (content: string): Issue[] => validateContent("policy/permissions.yaml", content)
-const limits = (content: string): Issue[] => validateContent("policy/limits.yaml", content)
 
 const lines = (issues: { line: number; message: string }[]) => issues.map((i) => i.line)
 
 describe("validatePath", () => {
   test("accepts the editable sections", () => {
     for (const p of [
-      "policy/permissions.yaml",
       "llm/deepseek.yaml",
       "agents/main.md",
       "tools/http.yaml",
@@ -39,9 +36,9 @@ describe("validatePath", () => {
   //   manifest's categories in, so a partition added on the server is
   //   editable the moment the manifest says so.
   test("the editable sections come from the manifest", () => {
-    expect(validatePath("mcps/github.yaml", ["policy", "mcps"])).toEqual([])
-    expect(validatePath("mcps/github.yaml", ["policy"])[0]!.message).toContain("not editable")
-    expect(validatePath("tools/http.yaml", ["policy", "mcps"])[0]!.message).toContain("not editable")
+    expect(validatePath("mcps/github.yaml", ["agents", "mcps"])).toEqual([])
+    expect(validatePath("mcps/github.yaml", ["agents"])[0]!.message).toContain("not editable")
+    expect(validatePath("tools/http.yaml", ["agents", "mcps"])[0]!.message).toContain("not editable")
   })
 
   // ★ The file's name IS the server's name, and a name with a run of
@@ -60,15 +57,9 @@ describe("validatePath", () => {
   })
 
   test("rejects escapes and absolute paths", () => {
-    for (const p of ["", "  ", "/etc/passwd", "../x.yaml", "policy/../x.yaml", "a/b/c"]) {
+    for (const p of ["", "  ", "/etc/passwd", "../x.yaml", "tools/../x.yaml", "a/b/c"]) {
       expect(validatePath(p).length).toBeGreaterThan(0)
     }
-  })
-
-  test("enforces the policy/ file whitelist", () => {
-    expect(validatePath("policy/permissions.yaml")).toHaveLength(0)
-    expect(validatePath("policy/limits.yaml")).toHaveLength(0)
-    expect(validatePath("policy/whatever.yaml")[0]!.message).toContain("permissions.yaml")
   })
 
   test("enforces the tools/ file whitelist", () => {
@@ -84,7 +75,6 @@ describe("validatePath", () => {
   })
 
   test("isEditable matches the documented set", () => {
-    expect(isEditable("policy")).toBe(true)
     expect(isEditable("agents")).toBe(true)
     expect(isEditable("llm")).toBe(true)
     expect(isEditable("tools")).toBe(true)
@@ -101,12 +91,6 @@ describe("suggestPath", () => {
   })
 
   test("leaves a correct name alone", () => {
-    expect(suggestPath("permissions.yaml", "policy")).toBe("policy/permissions.yaml")
-  })
-
-  test("completes the policy file names", () => {
-    expect(suggestPath("limits", "policy")).toBe("policy/limits.yaml")
-    expect(suggestPath("permissions", "policy")).toBe("policy/permissions.yaml")
   })
 
   test("returns empty for a blank name", () => {
@@ -238,87 +222,6 @@ describe("validateAgent", () => {
   })
 })
 
-// ── policy/permissions.yaml ───────────────────────────────────────────────
-
-describe("validatePolicy", () => {
-  test("accepts the factory default", () => {
-    expect(policy("allow: [ls, read_file]\nask: [write_file]\ndeny: []\n")).toEqual([])
-  })
-
-  test("rejects an unknown key", () => {
-    const issues = policy("allow: [ls]\naskk: [write_file]\n")
-    expect(issues).toHaveLength(1)
-    expect(issues[0]!.line).toBe(2)
-    expect(issues[0]!.message).toContain("unknown key")
-  })
-
-  test("flags a tool listed in two tiers", () => {
-    const issues = policy("allow: [execute]\nask: [execute]\n")
-    expect(issues).toHaveLength(1)
-    expect(issues[0]!.message).toContain("already listed in allow")
-  })
-
-  test("flags a tool listed twice inside one tier", () => {
-    const issues = policy("ask: [execute, execute]\n")
-    expect(issues.some((i) => i.message.includes("already listed"))).toBe(true)
-  })
-
-  test("accepts an empty document", () => {
-    expect(policy("")).toEqual([])
-  })
-})
-
-describe("validateLimits", () => {
-  test("accepts the two known sections with their keys", () => {
-    expect(limits("agent:\n  max_depth: 2\n")).toHaveLength(0)
-    expect(limits("retry:\n  max_retries: 3\n")).toHaveLength(0)
-    expect(limits("agent:\n  max_depth: 2\nretry:\n  max_retries: 0\n")).toHaveLength(0)
-  })
-
-  test("treats 0 as a meaningful value, not an error", () => {
-    expect(limits("agent:\n  max_depth: 0\n")).toHaveLength(0)
-  })
-
-  test("ignores comments and blank lines", () => {
-    expect(limits("# 上限\n\nagent:\n  # 根是第 0 层\n  max_depth: 2\n")).toHaveLength(0)
-  })
-
-  test("rejects an unknown section", () => {
-    const issues = limits("budget:\n  max_depth: 2\n")
-    expect(issues.length).toBeGreaterThan(0)
-    expect(issues[0]!.message).toContain("unknown section")
-  })
-
-  test("rejects an unknown key inside a known section", () => {
-    const issues = limits("agent:\n  max_tokens: 100\n")
-    expect(issues.length).toBeGreaterThan(0)
-    expect(issues[0]!.message).toContain("unknown key")
-  })
-
-  test("a section name used as a key says it looks like a new section", () => {
-    const issues = limits("agent:\n  max_depth: 1\n  retry:\n  max_retries: 2\n")
-    expect(issues.length).toBeGreaterThan(0)
-    expect(issues[0]!.message).toContain("looks like a new section")
-  })
-
-  test("rejects a non-integer or negative value", () => {
-    expect(limits("agent:\n  max_depth: abc\n").length).toBeGreaterThan(0)
-    expect(limits("agent:\n  max_depth: -1\n").length).toBeGreaterThan(0)
-    expect(limits("retry:\n  max_retries: 1.5\n").length).toBeGreaterThan(0)
-  })
-
-  test("rejects an indented key with no section above it", () => {
-    const issues = limits("  max_depth: 2\n")
-    expect(issues.length).toBeGreaterThan(0)
-    expect(issues[0]!.message).toContain("without a section")
-  })
-
-  test("does not apply the permissions rules to it", () => {
-    expect(limits("allow: [ls]\n").length).toBeGreaterThan(0)
-    expect(limits("agent:\n  max_depth: 1\n").length).toBe(0)
-  })
-})
-
 describe("check", () => {
   test("a bad path short-circuits before content is examined", () => {
     const r = check("server/config.yaml", "anything at all")
@@ -327,7 +230,7 @@ describe("check", () => {
   })
 
   test("a clean local pass still asks the server", () => {
-    const r = check("policy/permissions.yaml", "allow: [ls]\n")
+    const r = check("tools/http.yaml", "methods: [get]\n")
     expect(r.ok).toBe(true)
     expect(r.needsServer).toBe(true)
   })
@@ -339,7 +242,7 @@ describe("check", () => {
   })
 
   test("is total over every editable section", () => {
-    const sections: Section[] = ["policy", "agents", "llm"]
+    const sections: Section[] = ["agents", "llm", "mcps"]
     for (const s of sections) {
       expect(() => check(`${s}/probe`, "")).not.toThrow()
     }
@@ -354,7 +257,6 @@ describe("check", () => {
 
 describe("validateContent dispatch", () => {
   test("each section routes to its own rules", () => {
-    expect(validateContent("policy/permissions.yaml", "nope: [x]\n").length).toBeGreaterThan(0)
     expect(validateContent("agents/x.md", "no frontmatter here").length).toBeGreaterThan(0)
     expect(validateContent("llm/x.yaml", "api_key: sk-x\n").length).toBeGreaterThan(0)
     expect(validateContent("server/config.yaml", "whatever")).toEqual([])
@@ -364,8 +266,7 @@ describe("validateContent dispatch", () => {
     const isSecretRule = (i: Issue) => i.message.includes("must be a reference")
     expect(validateContent("llm/x.yaml", "type: o\nbase_url: https://x\napi_key: sk-x\nmodels: []\n")
       .some(isSecretRule)).toBe(true)
-    expect(validateContent("policy/permissions.yaml", "api_key: sk-x\n").some(isSecretRule)).toBe(false)
-    expect(validateContent("policy/limits.yaml", "api_key: sk-x\n").some(isSecretRule)).toBe(false)
+    expect(validateContent("tools/http.yaml", "api_key: sk-x\n").some(isSecretRule)).toBe(false)
     expect(validateContent("agents/x.md", "---\nmodel: a/b\napi_key: sk-x\n---\n").some(isSecretRule)).toBe(false)
   })
 })

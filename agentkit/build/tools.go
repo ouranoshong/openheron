@@ -43,6 +43,29 @@ func defaultToolRegistry(mgr *mcpManager) *toolRegistry {
 	}}
 }
 
+// builtinAllowedTools are the built-in tools that run without a nod.
+//
+// ★ The default is ask, so the exceptions are named: the tools that only
+//
+//	read, and the delegation tools.
+//
+// ★ A tool that has a file of its own (the HTTP, search and knowledge-base
+//
+//	tools) names its own exceptions in that file — this list is the
+//	fallback for the tools that have no file.
+//
+// ★ `task` is in it because an agent that cannot delegate without a nod
+//
+//	cannot delegate at all, and delegation is how a session gets work
+//	done.
+var builtinAllowedTools = func() []string {
+	return []string{
+		"ls", "read_file", "glob", "grep", // the filesystem's readers
+		"task", "write_todos", // the delegation tools
+		"skill", // the skill reader
+	}
+}
+
 var reservedToolNames = map[string]string{
 	"ls": "filesystem middleware", "read_file": "filesystem middleware",
 	"write_file": "filesystem middleware", "edit_file": "filesystem middleware",

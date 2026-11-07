@@ -3,3 +3,6 @@ top_k: 3
 language: zh
 timeout: 15s
 base_url: ""
+
+# ★ The tools that run **without a nod**.
+allows: [wikipedia_search]

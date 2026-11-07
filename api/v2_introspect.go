@@ -301,10 +301,15 @@ func (s *Server) policyTools() []toolView {
 
 // ── GET /v2/config ───────────────────────────────────────────────────────
 
+// policyView is the tier model as the configuration states it.
+//
+// ★ There is no ask list and no deny list any more: the default is ask,
+//
+//	and the exceptions are the tools that run without a nod — named by
+//	the file that provides them.
 type policyView struct {
-	Ask         []string `json:"ask"`
-	Deny        []string `json:"deny"`
 	DefaultTier string   `json:"defaultTier"`
+	Allow       []string `json:"allow"`
 }
 
 type providerView struct {
@@ -379,9 +384,8 @@ func (s *Server) v2Config(_ context.Context, c *app.RequestContext) {
 		DefaultAgent: cfg.DefaultAgent(),
 		MaxDepth:     cfg.MaxDepth(),
 		Policy: policyView{
-			Ask:         nonNil(cfg.Policy.Ask),
-			Deny:        nonNil(cfg.Policy.Deny),
-			DefaultTier: string(decl.TierAllow),
+			DefaultTier: string(decl.TierAsk),
+			Allow:       nonNil(cfg.AllowedTools()),
 		},
 		Tools:      s.toolTiers(),
 		Agents:     s.agentViews(cfg, false),

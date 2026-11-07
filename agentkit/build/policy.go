@@ -2,7 +2,6 @@ package build
 
 import (
 	"context"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -20,51 +19,45 @@ const (
 	TierDeny  Tier = "deny"
 )
 
+// Policy is the assembled tier table: a name → a tier.
+//
+// ★ The default is **ask**, and the exceptions are named. ★ There is no
+//
+//	global deny any more: "not exposed" is said in exactly two places —
+//	a file's own `allows:` list, and an agent's own `disabled_tools`.
+//
+// ★ The table is assembled from the **configuration**, so the tier of a
+//
+//	tool is answerable before its server is even up.
 type Policy struct {
-	Ask  []string
-	Deny []string
+	// Allow lists the tools that run without a nod.
+	Allow []string
 
-	ask map[string]bool
-
-	// mcpAllow holds the exposed names a server's own file allows.
-	//
-	// ★ It is a map of names and not a list of tiers: the tier of an MCP
-	//   tool is assembled from the configuration, so "mcp__github__read_issue
-	//   → allow" can be built before the server is even up.
-	mcpAllow map[string]bool
+	allow map[string]bool
 }
 
-func NewPolicy(ask, deny []string) Policy {
+// NewPolicy builds the table from the names that run without a nod.
+func NewPolicy(allow []string) Policy {
 	p := Policy{
-		Ask:  append([]string(nil), ask...),
-		Deny: append([]string(nil), deny...),
-		ask:  make(map[string]bool, len(ask)),
+		Allow: append([]string(nil), allow...),
+		allow: make(map[string]bool, len(allow)),
 	}
-	for _, n := range ask {
-		p.ask[n] = true
+	for _, n := range allow {
+		p.allow[n] = true
 	}
 	return p
 }
 
+// TierOf answers the tier of one tool name.
+//
+// ★ The default is ask, because the cost of guessing wrong is asymmetric:
+//
+//	one extra click against a destructive call nobody saw.
 func (p Policy) TierOf(name string) Tier {
-	switch {
-	case slices.Contains(p.Deny, name):
-		return TierDeny
-	case p.ask[name]:
-		return TierAsk
-	case strings.HasPrefix(name, decl.MCPToolPrefix):
-		// ★ The namespace's default is ask. A server's tools are
-		//   discovered at runtime, and under stdio the server is a child
-		//   process with the agent's own privileges — so the cost of
-		//   guessing wrong is asymmetric: one extra click against a
-		//   destructive call nobody saw.
-		if p.mcpAllow[name] {
-			return TierAllow
-		}
-		return TierAsk
-	default:
+	if p.allow[name] {
 		return TierAllow
 	}
+	return TierAsk
 }
 
 type Layer string
@@ -85,11 +78,9 @@ func (b boundary) Table() *Table { return b.table }
 type Table struct {
 	mu sync.RWMutex
 
-	Deny    []string
 	Disable []string
 	Name    string
 
-	denied   map[string]bool
 	disabled map[string]bool
 	observed map[string]bool
 
@@ -105,16 +96,11 @@ type Table struct {
 	disablePrefix []string
 }
 
-func newTable(name string, deny, disable []string) *Table {
+func newTable(name string, disable []string) *Table {
 	t := &Table{
 		Name:     name,
-		Deny:     append([]string(nil), deny...),
 		Disable:  append([]string(nil), disable...),
-		denied:   make(map[string]bool, len(deny)),
 		disabled: make(map[string]bool, len(disable)),
-	}
-	for _, n := range deny {
-		t.denied[n] = true
 	}
 	for _, n := range disable {
 		prefix, isPattern, err := decl.ParseToolNamePattern(n)
@@ -162,9 +148,6 @@ func (t *Table) Blocked(toolName string) Layer {
 	if t == nil {
 		return LayerNone
 	}
-	if t.denied[toolName] {
-		return LayerDeny
-	}
 	for _, p := range t.denyMCP {
 		if strings.HasPrefix(toolName, p) {
 			return LayerMCPScope
@@ -187,7 +170,7 @@ func (t *Table) Filter(tools []tool.BaseTool) ([]tool.BaseTool, map[Layer]int) {
 	}
 	t.observe(tools)
 
-	if len(t.denied) == 0 && len(t.disabled) == 0 {
+	if len(t.disabled) == 0 && len(t.denyMCP) == 0 {
 		return tools, nil
 	}
 	kept := make([]tool.BaseTool, 0, len(tools))
@@ -240,7 +223,6 @@ func (t *Table) Observed() (names []string, ok bool) {
 
 const (
 	LayerNone    Layer = ""
-	LayerDeny    Layer = "deny"
 	LayerDisable Layer = "disable"
 	// LayerMCPScope is the agent's own mcps: list: the server is not
 	// there at all, so the finer rules would have said nothing about it.

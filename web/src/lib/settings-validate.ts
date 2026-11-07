@@ -19,12 +19,11 @@ export function blocking(issues: readonly Issue[]): Issue[] {
 //   the client says it does not exist. So the callers pass the manifest's
 //   editable categories in, and these are only the fallback for a caller
 //   that has no manifest yet.
-export type KnownSection = "policy" | "agents" | "llm" | "server" | "tools" | "mcps"
+export type KnownSection = "agents" | "llm" | "server" | "tools" | "mcps"
 
 export type Section = KnownSection | (string & {})
 
 const ALLOWED_FILES: Partial<Record<KnownSection, readonly string[]>> = {
-  policy: ["permissions.yaml", "limits.yaml"],
   agents: [],
   llm: [],
   server: ["config.yaml"],
@@ -32,7 +31,7 @@ const ALLOWED_FILES: Partial<Record<KnownSection, readonly string[]>> = {
   mcps: [],
 }
 
-export const EDITABLE_SECTIONS: readonly string[] = ["policy", "agents", "llm", "tools", "mcps"]
+export const EDITABLE_SECTIONS: readonly string[] = ["agents", "llm", "tools", "mcps"]
 
 export function isEditable(section: string, editable: readonly string[] = EDITABLE_SECTIONS): boolean {
   return editable.includes(section)
@@ -105,7 +104,6 @@ export function suggestPath(fileName: string, section: Section): string {
   if (!name) return ""
   if (section === "agents" && !name.endsWith(".md")) name = `${name}.md`
   if (section === "llm" && !name.endsWith(".yaml")) name = `${name}.yaml`
-  if (section === "policy" && !name.endsWith(".yaml")) name = `${name}.yaml`
   if (section === "tools" && !name.endsWith(".yaml")) name = `${name}.yaml`
   if (section === "mcps" && !name.endsWith(".yaml")) name = `${name}.yaml`
   return `${section}/${name}`
@@ -152,8 +150,6 @@ export function validateContent(
       return validateProvider(content)
     case "agents":
       return validateAgent(content, catalog)
-    case "policy":
-      return path.endsWith("limits.yaml") ? validateLimits(content) : validatePolicy(content)
     case "tools":
       return validateTool(path, content)
     case "mcps":
@@ -370,133 +366,6 @@ function validateAgent(content: string, catalog: ReasoningCatalog = {}): Issue[]
   if (!sawModel) {
     issues.push({ line: 1, message: "model is required — pick one from the available list; it is never inherited" })
   }
-  return issues
-}
-
-// ── policy/permissions.yaml ───────────────────────────────────────────────
-
-const TIERS = new Set(["allow", "ask", "deny"])
-
-function validatePolicy(content: string): Issue[] {
-  const issues: Issue[] = []
-  const seen = new Map<string, string>()
-
-  content.split("\n").forEach((raw, i) => {
-    const trimmed = raw.trim()
-    if (!trimmed || trimmed.startsWith("#")) return
-
-    const m = /^([a-z_]+):\s*(.*)$/.exec(trimmed)
-    if (!m) return
-    const key = m[1]!
-    if (!TIERS.has(key)) {
-      issues.push({ line: i + 1, message: `unknown key "${key}" — expected allow, ask or deny` })
-      return
-    }
-
-    for (const name of listItems(m[2] ?? "")) {
-      const prev = seen.get(name)
-      if (prev !== undefined) {
-        issues.push({
-          line: i + 1,
-          message: `"${name}" is already listed in ${prev} — deny wins, but this is probably a typo`,
-        })
-      } else {
-        seen.set(name, key)
-      }
-    }
-  })
-
-  return issues
-}
-
-function listItems(raw: string): string[] {
-  const t = raw.trim()
-  if (!t.startsWith("[")) return []
-  const inner = t.replace(/^\[/, "").replace(/\]$/, "")
-  return inner
-    .split(",")
-    .map((s) => s.trim().replace(/^["']|["']$/g, ""))
-    .filter(Boolean)
-}
-
-// ── policy/limits.yaml ────────────────────────────────────────────────────
-
-const LIMIT_SECTIONS = new Set(["agent", "retry"])
-
-const LIMIT_KEYS: Record<string, ReadonlySet<string>> = {
-  agent: new Set(["max_depth"]),
-  retry: new Set(["max_retries"]),
-}
-
-function validateLimits(content: string): Issue[] {
-  const issues: Issue[] = []
-  let current: string | null = null
-
-  content.split("\n").forEach((raw, i) => {
-    const trimmed = raw.trim()
-    if (!trimmed || trimmed.startsWith("#")) return
-
-    const line = i + 1
-    const indented = /^\s/.test(raw)
-
-    if (!indented) {
-      const sec = /^([a-z_]+):\s*(.*)$/.exec(trimmed)
-      if (!sec) {
-        issues.push({ line, message: "cannot parse this line" })
-        return
-      }
-      const key = sec[1]!
-      if (!LIMIT_SECTIONS.has(key)) {
-        issues.push({
-          line,
-          message: `unknown section "${key}" — expected agent or retry`,
-        })
-        return
-      }
-      current = key
-      if ((sec[2] ?? "").trim() !== "") {
-        issues.push({
-          line,
-          message: `"${key}" is a section, not a value — put its keys on the next lines`,
-        })
-      }
-      return
-    }
-
-    const kv = /^\s+([a-z_]+):\s*(.*)$/.exec(raw)
-    if (!kv) {
-      issues.push({ line, message: "cannot parse this line" })
-      return
-    }
-    if (current === null) {
-      issues.push({ line, message: "indented key without a section — add `agent:` or `retry:` first" })
-      return
-    }
-    const key = kv[1]!
-    const allowed = LIMIT_KEYS[current]!
-    if (!allowed.has(key)) {
-      if (LIMIT_SECTIONS.has(key)) {
-        issues.push({
-          line,
-          message: `"${key}" looks like a new section — it must start at the left margin (no indentation)`,
-        })
-        return
-      }
-      issues.push({
-        line,
-        message: `unknown key "${key}" in ${current} — expected ${[...allowed].join(" or ")}`,
-      })
-      return
-    }
-    const rawValue = (kv[2] ?? "").trim()
-    if (!/^\d+$/.test(rawValue)) {
-      issues.push({
-        line,
-        message: `"${key}" must be a non-negative integer (0 = no limit), got "${rawValue}"`,
-      })
-    }
-  })
-
   return issues
 }
 

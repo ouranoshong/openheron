@@ -41,14 +41,15 @@
 > `docs/fs-backend-design.md` 讲的是**文件系统后端** —— `eino-ext` local 后端的有界分支
 > （§5）以及每个工具都要经过的那条收敛规则 —— 它**已实现**：`agentkit/fsx` 已在两处
 > 调用点接上。
-> `docs/mcp-design.md` 也是一份**提案**：§1 讲代码现状 —— 工具装配路径、provider 契约、
-> 以及只做精确匹配的策略表 —— §2 往后讲要建成什么样：一个新的 `mcps/` 配置分区、
-> `mcp__<server>__<tool>` 命名空间、住在工具旁边的档位，以及全局 deny 里的前缀匹配。
-> **§2 往后的东西都还不在树上。**
+> `docs/mcp-design.md` 讲的是 **MCP 接入** —— `mcps/` 配置分区、
+> `mcp__<server>__<tool>` 命名空间、住在 server 自己文件里的档位，以及 `/mcps` 视图。
+> **它已实现**：分区、provider、管理器与端点都在树上。★ §8 —— 沙箱 Kit 怎么打包一个
+> MCP server —— 仍然是提案。
 > `docs/config-design.md` 讲的是**配置系统** —— 配置根与它的三级解析、各个分区与它们的
 > 文件规格、加载与优先级、热更新，以及依赖铁律。**正文讲的是代码现状**；
-> `mcps/` 分区（§6.7）、住在工具旁边的档位（§6.6）与全局 deny 里的前缀匹配（§6.3）
-> 标成了提案，因为它们还没实现。
+> `mcps/` 分区（§6.7）与住在工具旁边的档位（§6.6）**已实施**。★ **全局 deny** 里的
+> 前缀匹配（§6.3）跟着 deny 清单一起没了：「不被暴露」现在只由文件的 `allows:` 与 agent
+> 的 `disabled_tools` 两处说。
 >
 > ★ 有一个目录不是文档组：**`sandbox-kit/`** 装着把 openheron 打包成沙箱 workload 的
 > Docker Sandbox Kit —— `openheron/`（workload：描述文件、内容配方、入口脚本），
@@ -86,7 +87,7 @@
 | 消息提醒 | 英文 | `c.deferKey("watch.debounce fell back to default: %s", msg)` |
 | 接口响应体 | 英文 | `c.JSON(400, map[string]string{"error": "thread not found"})` |
 | **界面文案** | **英文** | `"Run in a separate agent"` |
-| **写入用户配置的文件内容** | **英文** | `catalog.md` 的表头、`policy/limits.yaml` 的注释段、`tools/filesystem.yaml` 的注释段 |
+| **写入用户配置的文件内容** | **英文** | `catalog.md` 的表头、`server/config.yaml` 的注释段、`tools/http.yaml` 的注释段 |
 
 ### 代码注释
 
@@ -141,7 +142,9 @@
   配置根一旦依赖「进程从哪启动」，同一条命令换个目录就读到另一份配置，
   测试实例也会因此读到开发配置。要换配置根就指名，别加新的查找规则。
 - **归档优先于呈现** —— SSE sink 断裂后要停止渲染但继续消费事件流，否则 `Outcome.Intermediates` 不完整，历史会缺。
-- **`deny` 优先于 `disabled_tools`** —— 外层策略是子 agent 无法放松的唯一保证。
+- **缺省档位是 `ask`** —— 没人点名的工具一律要问；例外是那些不用点头就能跑的：
+  文件在自己的 `allows:` 里点名的，以及代码知道的那些内置只读工具。★「不被暴露」现在
+  只在**两处**说 —— 文件自己的允许清单，和 agent 的 `disabled_tools`。**没有全局 deny 了。**
 - 改配置语义前先读 `docs/config-design.md`；改接口前先读 `docs/api-design.md`；
   新增 `/v2` 接口读 `docs/api-v2-design.md`；动前端读 `docs/frontend-design.md`；
   动测试环境（端口 / 隔离目录）读 `docs/frontend-design.md` §11.2 与
@@ -246,8 +249,8 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
   才能触发审批。那是模型的自由，不是代码回归；脚本会重试，全都不触发时
   **明确报错**，不伪装成接线有问题。别用重试次数掩盖它。
 - ★ **`smoke:hitl` 有一个前置条件，缺了它会 100% 失败（不是「抖」）**：
-  **真正调工具的那个 agent**，其 `write_file` 必须落在 `ask` 档（既没被全局 `deny`，
-  也没被它自己的 `disabled_tools` 禁用）—— 否则模型根本调不出那个工具，
+  **真正调工具的那个 agent**，其 `write_file` 必须落在 `ask` 档（既没被它自己文件的
+  `allows:` 点名，也没被它自己的 `disabled_tools` 禁用）—— 否则模型根本调不出那个工具，
   自然没有审批可触发。
   ★ 别盯着 `main`：出厂配置里 `main` 确实写着
   `disabled_tools: [write_file, edit_file, execute]`，但它只做编排，会把活**委派**给

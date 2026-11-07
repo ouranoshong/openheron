@@ -1,6 +1,7 @@
 package build
 
 import (
+	"sort"
 	"strings"
 	"testing"
 
@@ -141,8 +142,7 @@ func TestAnEmptyAllowsListCoversTheToolsTheServerHasNotOfferedYet(t *testing.T) 
 	}
 	// And a tool the server adds tomorrow asks on its first day: the
 	// namespace's default is ask, and the file names nothing.
-	p := NewPolicy(nil, nil)
-	p.mcpAllow = mcpAllowedNames(decl.MCPFiles{"github": mcpCfg("github")})
+	p := NewPolicy(allowList(mcpAllowedNames(decl.MCPFiles{"github": mcpCfg("github")})))
 	if got := p.TierOf("mcp__github__added_tomorrow"); got != TierAsk {
 		t.Fatalf("a tool nobody allows must ask, got %q", got)
 	}
@@ -152,8 +152,7 @@ func TestTheTierIsAnswerableWhileTheServerIsUnreachable(t *testing.T) {
 	files := decl.MCPFiles{"github": mcpCfg("github", func(c *decl.MCPServerCfg) {
 		c.Allows = []string{"read_issue"}
 	})}
-	p := NewPolicy(nil, nil)
-	p.mcpAllow = mcpAllowedNames(files)
+	p := NewPolicy(allowList(mcpAllowedNames(files)))
 
 	if got := p.TierOf("mcp__github__read_issue"); got != TierAllow {
 		t.Fatalf("tier = %q, want allow", got)
@@ -163,17 +162,28 @@ func TestTheTierIsAnswerableWhileTheServerIsUnreachable(t *testing.T) {
 	}
 }
 
-func TestAnMCPNameInTheGlobalDenyStaysDenied(t *testing.T) {
-	p := NewPolicy(nil, []string{"mcp__github__delete_repo"})
-	if got := p.TierOf("mcp__github__delete_repo"); got != TierDeny {
-		t.Fatalf("tier = %q, want deny", got)
+// ★ There is no global deny any more: a tool nobody names asks.
+func TestAnMCPNameNobodyNamesAsks(t *testing.T) {
+	p := NewPolicy(nil)
+	if got := p.TierOf("mcp__github__delete_repo"); got != TierAsk {
+		t.Fatalf("tier = %q, want ask", got)
 	}
+}
+
+// allowList turns a set of names into the exception list.
+func allowList(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for n := range set {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ── the agent's narrowing ───────────────────────────────────────────────
 
 func TestAnAbsentServerListMeansEveryConfiguredServer(t *testing.T) {
-	tbl := newTable("main", nil, nil)
+	tbl := newTable("main", nil)
 	tbl.denyMCPNamespaces(nil, []string{"github", "files"})
 	if len(tbl.denyMCP) != 0 {
 		t.Fatalf("an absent list must not deny anything, denied %v", tbl.denyMCP)
@@ -182,7 +192,7 @@ func TestAnAbsentServerListMeansEveryConfiguredServer(t *testing.T) {
 
 func TestAnEmptyServerListDeniesEveryConfiguredServer(t *testing.T) {
 	empty := []string{}
-	tbl := newTable("main", nil, nil)
+	tbl := newTable("main", nil)
 	tbl.denyMCPNamespaces(&empty, []string{"github", "files"})
 	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerMCPScope {
 		t.Fatalf("blocked = %q, want %q", got, LayerMCPScope)
@@ -191,7 +201,7 @@ func TestAnEmptyServerListDeniesEveryConfiguredServer(t *testing.T) {
 
 func TestTheServerNarrowingDeniesTheNamespacePrefixOnly(t *testing.T) {
 	list := []string{"github_x"}
-	tbl := newTable("main", nil, nil)
+	tbl := newTable("main", nil)
 	tbl.denyMCPNamespaces(&list, []string{"github", "github_x"})
 
 	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerMCPScope {
@@ -206,7 +216,7 @@ func TestTheServerNarrowingDeniesTheNamespacePrefixOnly(t *testing.T) {
 
 func TestTheServerNarrowingIsReportedBeforeTheToolRule(t *testing.T) {
 	list := []string{"other"}
-	tbl := newTable("main", nil, []string{"mcp__github__read_issue"})
+	tbl := newTable("main", []string{"mcp__github__read_issue"})
 	tbl.denyMCPNamespaces(&list, []string{"github"})
 
 	got := tbl.Blocked("mcp__github__read_issue")
@@ -221,7 +231,7 @@ func TestTheServerNarrowingIsReportedBeforeTheToolRule(t *testing.T) {
 // ── the prefix patterns ─────────────────────────────────────────────────
 
 func TestAPrefixRuleReachesTheToolsOfOneServerOnly(t *testing.T) {
-	tbl := newTable("main", nil, []string{"mcp__github__*"})
+	tbl := newTable("main", []string{"mcp__github__*"})
 	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerDisable {
 		t.Fatalf("blocked = %q, want %q", got, LayerDisable)
 	}
@@ -231,7 +241,7 @@ func TestAPrefixRuleReachesTheToolsOfOneServerOnly(t *testing.T) {
 }
 
 func TestAWildcardPrefixReachesEveryMCPTool(t *testing.T) {
-	tbl := newTable("main", nil, []string{"mcp__*"})
+	tbl := newTable("main", []string{"mcp__*"})
 	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerDisable {
 		t.Fatalf("blocked = %q, want %q", got, LayerDisable)
 	}
@@ -244,7 +254,7 @@ func TestAWildcardPrefixReachesEveryMCPTool(t *testing.T) {
 }
 
 func TestAnExactEntryStillRemovesTheTool(t *testing.T) {
-	tbl := newTable("main", nil, []string{"mcp__github__read_issue"})
+	tbl := newTable("main", []string{"mcp__github__read_issue"})
 	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerDisable {
 		t.Fatalf("blocked = %q, want %q", got, LayerDisable)
 	}

@@ -24,7 +24,7 @@ func TestValidatePathRejectsEscapes(t *testing.T) {
 		"policy/../../etc/passwd",
 		"policy/../llm/x.yaml",
 		"/etc/passwd",
-		"/policy/permissions.yaml",
+		"/tools/http.yaml",
 		"state/anything.yaml",
 		"nope/x.yaml",
 		"skills/foo/SKILL.md",
@@ -52,10 +52,10 @@ func TestValidatePathRejectsNonEditableSection(t *testing.T) {
 }
 
 func TestValidatePathEnforcesPolicyFileNameWhitelist(t *testing.T) {
-	if _, err := ValidatePath("policy/permissions.yaml"); err != nil {
+	if _, err := ValidatePath("tools/http.yaml"); err != nil {
 		t.Fatalf("permissions.yaml must be valid: %v", err)
 	}
-	if _, err := ValidatePath("policy/limits.yaml"); err != nil {
+	if _, err := ValidatePath("tools/kb.yaml"); err != nil {
 		t.Fatalf("limits.yaml must be valid: %v", err)
 	}
 	if _, err := ValidatePath("policy/whatever.yaml"); err == nil {
@@ -65,7 +65,7 @@ func TestValidatePathEnforcesPolicyFileNameWhitelist(t *testing.T) {
 
 func TestValidatePathAcceptsTheEditableSections(t *testing.T) {
 	good := []string{
-		"policy/permissions.yaml",
+		"tools/http.yaml",
 		"llm/deepseek.yaml",
 		"agents/main.md",
 		"agents/my-agent.md",
@@ -88,9 +88,9 @@ func TestValidatePathRejectsDotfiles(t *testing.T) {
 // ── revision ──────────────────────────────────────────────────────────────
 
 func TestRevisionIsStableAndContentAddressed(t *testing.T) {
-	a := Revision([]byte("ask: [ls]\n"))
-	b := Revision([]byte("ask: [ls]\n"))
-	c := Revision([]byte("ask: [ls, glob]\n"))
+	a := Revision([]byte("methods: [get]\nallows: [ls]\n"))
+	b := Revision([]byte("methods: [get]\nallows: [ls]\n"))
+	c := Revision([]byte("methods: [get]\nallows: [ls, glob]\n"))
 
 	if a == "" || len(a) != revisionLen {
 		t.Fatalf("revision %q has the wrong length", a)
@@ -170,8 +170,8 @@ func TestWriteLandsAndReportsPostWriteRevision(t *testing.T) {
 	f.seedMinimal(t)
 	s := f.service(t)
 
-	content := []byte("ask: [read_file, write_file]\n")
-	rev, cfg, err := s.Write("policy/permissions.yaml", content, "")
+	content := []byte("methods: [get]\nallows: [read_file, write_file]\n")
+	rev, cfg, err := s.Write("tools/http.yaml", content, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,11 +179,11 @@ func TestWriteLandsAndReportsPostWriteRevision(t *testing.T) {
 	if rev != Revision(content) {
 		t.Fatalf("rev = %q, want %q", rev, Revision(content))
 	}
-	if got := f.read(t, "policy/permissions.yaml"); got != string(content) {
+	if got := f.read(t, "tools/http.yaml"); got != string(content) {
 		t.Fatalf("on disk = %q, want %q", got, content)
 	}
-	if len(cfg.Policy.Ask) != 2 || cfg.Policy.Ask[0] != "read_file" {
-		t.Fatalf("the returned config must reflect the write: %v", cfg.Policy.Ask)
+	if got := cfg.AllowedTools(); len(got) != 2 || got[0] != "read_file" {
+		t.Fatalf("the returned config must reflect the write: %v", got)
 	}
 }
 
@@ -192,7 +192,7 @@ func TestWriteLeavesNoTempFile(t *testing.T) {
 	f.seedMinimal(t)
 	s := f.service(t)
 
-	if _, _, err := s.Write("policy/permissions.yaml", []byte("ask: [execute]\n"), ""); err != nil {
+	if _, _, err := s.Write("tools/http.yaml", []byte("methods: [get]\nallows: [execute]\n"), ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(f.root, "policy", "permissions.yaml.tmp")); err == nil {
@@ -214,11 +214,11 @@ func TestWriteCreatesFirstConfigInAnEmptyProject(t *testing.T) {
 	if _, _, err := s.WriteMany([]File{
 		{Rel: "llm/openai.yaml", Content: []byte(minimalLLM)},
 		{Rel: "agents/main.md", Content: []byte("---\nmodel: openai/fast\n---\n你是助手。\n")},
-		{Rel: "policy/permissions.yaml", Content: []byte("ask: [execute]\n")},
+		{Rel: "tools/http.yaml", Content: []byte("methods: [get]\nallows: [execute]\n")},
 	}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.read(t, "policy/permissions.yaml"); !strings.Contains(got, "execute") {
+	if got := f.read(t, "tools/http.yaml"); !strings.Contains(got, "execute") {
 		t.Fatalf("content = %q", got)
 	}
 	if !f.exists(t, "agents/main.md") {
@@ -229,20 +229,20 @@ func TestWriteCreatesFirstConfigInAnEmptyProject(t *testing.T) {
 func TestWriteRejectsStaleRevision(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
-	f.write(t, "policy/permissions.yaml", "ask: [execute]\n")
+	f.write(t, "tools/http.yaml", "methods: [get]\nallows: [execute]\n")
 	s := f.service(t)
 
-	stale := Revision([]byte("ask: [execute]\n"))
-	f.write(t, "policy/permissions.yaml", "ask: [execute, write_file]\n")
+	stale := Revision([]byte("methods: [get]\nallows: [execute]\n"))
+	f.write(t, "tools/http.yaml", "methods: [get]\nallows: [execute, write_file]\n")
 
-	_, _, err := s.Write("policy/permissions.yaml", []byte("ask: [ls]\n"), stale)
+	_, _, err := s.Write("tools/http.yaml", []byte("methods: [get]\nallows: [ls]\n"), stale)
 	if err == nil {
 		t.Fatal("a stale baseRev must be rejected")
 	}
 	if writeErrKind(err) != ErrConflict {
 		t.Fatalf("kind = %v, want ErrConflict", err)
 	}
-	if got := f.read(t, "policy/permissions.yaml"); !strings.Contains(got, "write_file") {
+	if got := f.read(t, "tools/http.yaml"); !strings.Contains(got, "write_file") {
 		t.Fatalf("a rejected write must not overwrite: %q", got)
 	}
 }
@@ -250,12 +250,12 @@ func TestWriteRejectsStaleRevision(t *testing.T) {
 func TestWriteAcceptsCurrentRevision(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
-	original := "ask: [execute]\n"
-	f.write(t, "policy/permissions.yaml", original)
+	original := "methods: [get]\nallows: [execute]\n"
+	f.write(t, "tools/http.yaml", original)
 	s := f.service(t)
 
-	if _, _, err := s.Write("policy/permissions.yaml",
-		[]byte("ask: [execute, write_file]\n"), Revision([]byte(original))); err != nil {
+	if _, _, err := s.Write("tools/http.yaml",
+		[]byte("methods: [get]\nallows: [execute, write_file]\n"), Revision([]byte(original))); err != nil {
 		t.Fatalf("a matching baseRev must be accepted: %v", err)
 	}
 }
@@ -265,7 +265,7 @@ func TestWriteOnMissingFileTreatsEmptyRevisionAsCreate(t *testing.T) {
 	f.seedMinimal(t)
 	s := f.service(t)
 
-	if _, _, err := s.Write("policy/permissions.yaml", []byte("ask: [execute]\n"), ""); err != nil {
+	if _, _, err := s.Write("tools/http.yaml", []byte("methods: [get]\nallows: [execute]\n"), ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -328,7 +328,7 @@ func TestReadFileReportsMissingAsEmptyNotError(t *testing.T) {
 		t.Fatalf("an existing file must return content and a revision (rev=%q)", rev)
 	}
 
-	content, rev, err = s.ReadFile("policy/permissions.yaml")
+	content, rev, err = s.ReadFile("tools/http.yaml")
 	if err != nil {
 		t.Fatalf("a missing file is not an error: %v", err)
 	}

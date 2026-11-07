@@ -29,7 +29,7 @@ func settingsEnvWithWatch(t *testing.T, watch bool) (*Server, *spec.Service, str
 	root := t.TempDir()
 	cfgRoot := filepath.Join(root, spec.DefaultBaseDirName)
 
-	for _, sub := range []string{spec.DirLLM, spec.DirAgent, spec.DirPolicy, spec.DirServer} {
+	for _, sub := range []string{spec.DirLLM, spec.DirAgent, spec.DirTools, spec.DirServer} {
 		if err := os.MkdirAll(filepath.Join(cfgRoot, sub), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -46,7 +46,7 @@ func settingsEnvWithWatch(t *testing.T, watch bool) (*Server, *spec.Service, str
 		"  - id: fast\n    reasoning_default: off\n    reasoning:\n      off: { reasoning_effort: none }\n      high: { reasoning_effort: high }\n"+
 		"  - id: plain\n    context_window: 8192\n")
 	write("agents/main.md", "---\nmodel: openai/fast\ndescription: root\nreasoning: high  # level\n---\nbody\n")
-	write("policy/permissions.yaml", "ask: [read_file]\n")
+	write("tools/http.yaml", "methods: [get]\nallows: [read_file]\n")
 	write("server/spec.yaml", "listen_addr: \":9099\"\n"+
 		"watch:\n  enabled: "+map[bool]string{true: "true", false: "false"}[watch]+"\n")
 
@@ -95,9 +95,6 @@ func TestSettingsManifestListsEveryCategory(t *testing.T) {
 	}
 	if byID[spec.DirServer].Note == "" {
 		t.Fatal("a read-only category must say why")
-	}
-	if !byID[spec.DirPolicy].Editable || !byID[spec.DirPolicy].Hot {
-		t.Fatalf("policy must be editable and hot: %+v", byID[spec.DirPolicy])
 	}
 	if !byID[spec.DirTools].Editable || !byID[spec.DirTools].Hot {
 		t.Fatalf("tools must be editable and hot: %+v", byID[spec.DirTools])
@@ -188,7 +185,7 @@ func TestSettingsManifestListsEachFileOnce(t *testing.T) {
 	for i := range m.Items {
 		it := m.Items[i]
 		seen[it.Path]++
-		if it.Path == "policy/permissions.yaml" {
+		if it.Path == "tools/http.yaml" {
 			policy = &m.Items[i]
 		}
 	}
@@ -209,7 +206,7 @@ func TestSettingsManifestOmitsRevisionForMissingFiles(t *testing.T) {
 	srv, _, _ := settingsEnv(t)
 	got := callJSON(t, srv, "GET", "/v2/settings", nil)
 
-	if strings.Contains(got.body, `"path":"policy/limits.yaml"`) {
+	if strings.Contains(got.body, `"path":"tools/kb.yaml"`) {
 		t.Fatalf("a file that does not exist must not be listed: %s", got.body)
 	}
 }
@@ -217,7 +214,7 @@ func TestSettingsManifestOmitsRevisionForMissingFiles(t *testing.T) {
 func TestSettingsItemReturnsContent(t *testing.T) {
 	srv, _, _ := settingsEnv(t)
 
-	got := callJSON(t, srv, "GET", "/v2/settings/item?path=policy/permissions.yaml", nil)
+	got := callJSON(t, srv, "GET", "/v2/settings/item?path=tools/http.yaml", nil)
 	if got.code != consts.StatusOK {
 		t.Fatalf("= %d (%s)", got.code, got.body)
 	}
@@ -230,13 +227,13 @@ func TestSettingsItemReturnsContent(t *testing.T) {
 		t.Fatalf("content = %q", item.Content)
 	}
 	if !item.Hot {
-		t.Fatal("policy/ is hot")
+		t.Fatal("tools/ is hot")
 	}
 }
 
 func TestSettingsItemMissingFileIs200WithEmptyContent(t *testing.T) {
 	srv, _, _ := settingsEnv(t)
-	got := callJSON(t, srv, "GET", "/v2/settings/item?path=policy/limits.yaml", nil)
+	got := callJSON(t, srv, "GET", "/v2/settings/item?path=tools/kb.yaml", nil)
 
 	if got.code != consts.StatusOK {
 		t.Fatalf("= %d (%s)", got.code, got.body)
@@ -269,10 +266,10 @@ func TestSettingsItemRejectsBadInput(t *testing.T) {
 
 func TestSettingsItemAcceptsLimitsYaml(t *testing.T) {
 	srv, _, _ := settingsEnv(t)
-	got := callJSON(t, srv, "GET", "/v2/settings/item?path=policy/limits.yaml", nil)
+	got := callJSON(t, srv, "GET", "/v2/settings/item?path=tools/kb.yaml", nil)
 
 	if got.code != consts.StatusOK {
-		t.Fatalf("policy/limits.yaml must be a valid path: = %d (%s)", got.code, got.body)
+		t.Fatalf("tools/kb.yaml must be a valid path: = %d (%s)", got.code, got.body)
 	}
 }
 
@@ -323,11 +320,11 @@ func TestSettingsRefusesAnUnreadableServerName(t *testing.T) {
 func TestSettingsSaveLands(t *testing.T) {
 	srv, svc, cfgRoot := settingsEnv(t)
 	_ = svc
-	_, orig, _ := svc.ReadFile("policy/permissions.yaml")
+	_, orig, _ := svc.ReadFile("tools/http.yaml")
 
 	body := settingsWriteBody{
-		Path:    "policy/permissions.yaml",
-		Content: "ask: [execute]\n", BaseRevision: orig,
+		Path:    "tools/http.yaml",
+		Content: "methods: [get]\nallows: [execute]\n", BaseRevision: orig,
 	}
 	got := callJSON(t, srv, "PUT", "/v2/settings/item", body)
 	if got.code != consts.StatusOK {
@@ -339,13 +336,13 @@ func TestSettingsSaveLands(t *testing.T) {
 		t.Fatal("the response must carry the new revision")
 	}
 	if !res.Applied {
-		t.Fatalf("policy/ is hot and the watcher is on, so it must report applied: %+v", res)
+		t.Fatalf("tools/ is hot and the watcher is on, so it must report applied: %+v", res)
 	}
-	onDisk, err := os.ReadFile(filepath.Join(cfgRoot, "policy", "permissions.yaml"))
+	onDisk, err := os.ReadFile(filepath.Join(cfgRoot, "tools", "http.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(onDisk) != "ask: [execute]\n" {
+	if string(onDisk) != "methods: [get]\nallows: [execute]\n" {
 		t.Fatalf("on disk = %q", onDisk)
 	}
 }
@@ -354,7 +351,7 @@ func TestSettingsSaveReportsNotAppliedWhenWatchIsOff(t *testing.T) {
 	srv, _, _ := settingsEnvNoWatch(t)
 
 	got := callJSON(t, srv, "PUT", "/v2/settings/item", settingsWriteBody{
-		Path: "policy/permissions.yaml", Content: "ask: [execute]\n",
+		Path: "tools/http.yaml", Content: "methods: [get]\nallows: [execute]\n",
 	})
 	if got.code != consts.StatusOK {
 		t.Fatalf("= %d (%s)", got.code, got.body)
@@ -401,8 +398,8 @@ func TestSettingsSaveBrokenMergeIs422(t *testing.T) {
 func TestSettingsSaveStaleRevisionIs409(t *testing.T) {
 	srv, _, _ := settingsEnv(t)
 	got := callJSON(t, srv, "PUT", "/v2/settings/item", settingsWriteBody{
-		Path:    "policy/permissions.yaml",
-		Content: "ask: [execute]\n", BaseRevision: "deadbeef",
+		Path:    "tools/http.yaml",
+		Content: "methods: [get]\nallows: [execute]\n", BaseRevision: "deadbeef",
 	})
 	if got.code != consts.StatusConflict {
 		t.Fatalf("= %d, want 409 (%s)", got.code, got.body)
@@ -414,11 +411,11 @@ func TestSettingsSaveStaleRevisionIs409(t *testing.T) {
 
 func TestSettingsDeleteRemovesTheFile(t *testing.T) {
 	srv, svc, cfgRoot := settingsEnv(t)
-	got := call(t, srv, "DELETE", "/v2/settings/item?path="+url.QueryEscape("policy/permissions.yaml"), "")
+	got := call(t, srv, "DELETE", "/v2/settings/item?path="+url.QueryEscape("tools/http.yaml"), "")
 	if got.code != consts.StatusOK {
 		t.Fatalf("= %d (%s)", got.code, got.body)
 	}
-	if _, err := os.Stat(filepath.Join(cfgRoot, "policy", "permissions.yaml")); err == nil {
+	if _, err := os.Stat(filepath.Join(cfgRoot, "tools", "http.yaml")); err == nil {
 		t.Fatal("the file is still there")
 	}
 	res := decodeSettings[settingsWriteResult](t, got)
@@ -447,10 +444,10 @@ func TestSettingsValidateAgreesWithSave(t *testing.T) {
 		name, path, content string
 		wantOK              bool
 	}{
-		{"valid policy", "policy/permissions.yaml", "ask: [execute]\n", true},
+		{"valid tools file", "tools/http.yaml", "methods: [get]\nallows: [execute]\n", true},
 		{"literal secret", "llm/openai.yaml", "type: openai\nbase_url: https://x\napi_key: sk-x\nmodels: []\n", false},
 		{"dangling ref", "agents/main.md", "---\nmodel: openai/nope\n---\nx\n", false},
-		{"bad yaml", "policy/permissions.yaml", "allow: [\n", false},
+		{"bad yaml", "tools/http.yaml", "methods: [\n", false},
 	}
 	for _, c := range cases {
 		got := callJSON(t, srv, "POST", "/v2/settings/validate", settingsValidateBody{
@@ -472,7 +469,7 @@ func TestSettingsValidateAgreesWithSave(t *testing.T) {
 
 func TestSettingsWithoutServiceIs503(t *testing.T) {
 	srv := newV2Server(t)
-	for _, p := range []string{"/v2/settings", "/v2/settings/item?path=policy/permissions.yaml"} {
+	for _, p := range []string{"/v2/settings", "/v2/settings/item?path=tools/http.yaml"} {
 		got := callJSON(t, srv, "GET", p, nil)
 		if got.code != consts.StatusServiceUnavailable {
 			t.Errorf("%s: = %d, want 503 (%s)", p, got.code, got.body)
@@ -482,7 +479,7 @@ func TestSettingsWithoutServiceIs503(t *testing.T) {
 
 func TestSettingsRoutesBeatTheStaticCatchAll(t *testing.T) {
 	srv, _, _ := settingsEnv(t)
-	for _, p := range []string{"/v2/settings", "/v2/settings/item?path=policy/permissions.yaml"} {
+	for _, p := range []string{"/v2/settings", "/v2/settings/item?path=tools/http.yaml"} {
 		got := callJSON(t, srv, "GET", p, nil)
 		if got.code == consts.StatusNotFound || got.code == consts.StatusOK {
 			continue

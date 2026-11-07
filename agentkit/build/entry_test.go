@@ -10,7 +10,7 @@ import (
 )
 
 func TestTheEntryAgentBuildsItsOwnTree(t *testing.T) {
-	cfg := configFromSpecs("test/model", nil, decl.Policy{},
+	cfg := configFromSpecs("test/model", nil, nil,
 		[]decl.SubAgentSpec{{ID: "worker", ModelRef: "test/model"}})
 	cfg.Agents[spec.DefaultAgentID].SubAgents = []string{"worker"}
 	cfg.Agents["worker"].SubAgents = nil
@@ -50,7 +50,7 @@ func entryName(bc *buildCount) string {
 }
 
 func TestTheDefaultAgentNeedsNoConfiguration(t *testing.T) {
-	cfg := configFromSpecs("test/model", nil, decl.Policy{},
+	cfg := configFromSpecs("test/model", nil, nil,
 		[]decl.SubAgentSpec{{ID: "worker", ModelRef: "test/model"}})
 	b := newTestBuilderWithConfig(t, cfg)
 
