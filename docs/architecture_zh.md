@@ -53,7 +53,7 @@
 | | `storage` | `contract` | 会话/消息/待审批的接口 |
 | | `kb` | `obs`, `persist` | 知识库：语料、索引、检索、评分 |
 | | `agentkit/spec` | `obs`, `decl`, `persist`, `templates` | 配置装载、校验、热重载、写入闸门 |
-| **L2** | `agentkit/build` | `obs`, `spec`, `decl`, `approval`, `contract`, `helpers`, `kb`, `llm/common`, `message` | Agent 装配、工具装配、策略闸门 |
+| **L2** | `agentkit/build` | `obs`, `spec`, `decl`, `approval`, `contract`, `helpers`, `kb`, `llm/common`, `message` | Agent 装配、工具装配、档位表（`agentkit/build/policy.go`）与审批闸门 |
 | | `agentkit/run` | `emit`, `obs`, `approval`, `contract`, `decl`, `message`, `storage` | 运行循环、输入构造、事件消费 |
 | | `storage/filestore` | `obs`, `contract`, `message`, `persist`, `storage` | 文件存储实现 |
 | | `storage/memarbit` | `storage` | 内存租约仲裁器 |
@@ -131,12 +131,17 @@
 |---|---|---|---|
 | `agents/` | `spec.DirAgent` | ✅ | 每个 Agent 一个 `.md` |
 | `llm/` | `spec.DirLLM` | ✅ | 每个厂商一个 `.yaml` |
-| `policy/` | `spec.DirPolicy` | ✅ | `permissions.yaml` + `limits.yaml` |
 | `tools/` | `spec.DirTools` | ✅ | `http.yaml` / `web_search.yaml` / `wikipedia.yaml` / `kb.yaml` |
 | `mcps/` | `spec.DirMCP` | ✅ | 每个 MCP server 一个 `.yaml` |
 | `server/` | `spec.DirServer` | ❌ | 进程参数，需重启 |
 | `state/` | `spec.DirState` | — | 会话与 checkpoint，自动创建 |
 | `skills/` | — | ❌ | **独立解析**（见 §3.6） |
+
+★ **没有 `policy/` 这个分区。** 五个分区是 `llm/` `agents/` `server/` `tools/` `mcps/`
+（`agentkit/spec/config.go:40`），而旧配置遗留下来的 `policy/` 目录会被**静默忽略** ——
+没人读它，也没有任何告警。它当年承载的档位模型如今住进了工具文件与 Agent 文件
+（§3.4），所以一个过期的 `policy/` 目录不是能从日志里查出来的错误：它只是一个不再
+意味着任何东西的目录。
 
 `tools/` 下的文件名是**白名单**：`agentkit/spec/load.go:191` 对未知文件直接报错，
 不会静默忽略 —— 「我写了 kb.yaml 但它没生效」是最难查的一类问题。
@@ -158,7 +163,7 @@ frontmatter 可用键（`agentkit/spec/decl/decl.go:78` 的 `decl.Agent`）：
 | `model` | `model` | `<provider>/<model>`，**不继承、不回退** |
 | `max_iterations` | `max_iterations` | 工具循环轮数上限 |
 | `subagents` | `subagents` | 可委派的子 Agent 列表 |
-| `disabled_tools` | `disabled_tools` | 对本 Agent 生效的工具禁用表 |
+| `disabled_tools` | `disabled_tools` | 这个 Agent **不能**用的工具 —— 它们压根不在它的工具表里 |
 | `mcps` | `mcps` | 本 Agent 可用的 MCP server —— 不写表示所有已配置的 server，写空列表表示一个都不用（`agentkit/spec/decl/decl.go:114`） |
 | `temperature` | `temperature` | 采样温度 |
 | `max_tokens` | `max_tokens` | 采样上限 |
@@ -169,30 +174,48 @@ frontmatter 可用键（`agentkit/spec/decl/decl.go:78` 的 `decl.Agent`）：
 
 正文就是提示词本身（`Instruction`）。
 
-### 3.4 权限：两层，永不合并
+### 3.4 档位模型：默认 `ask`，例外被点名
 
-| 层 | 位置 | 作用域 |
+档位只有**两个**，而默认是安全的那一个：
+
+| 档位 | 含义 |
+|---|---|
+| `allow` | 工具直接跑，不需要人点头 |
+| `ask` | 工具打断这一轮，等一个人的决定 |
+
+`build.Policy.TierOf`（`agentkit/build/policy.go:55`）回答一个工具名的档位：名字在
+allow 表里就是 `allow`，**其余一律是 `ask`**。镜像的声明 `decl.Tier`
+（`agentkit/spec/decl/decl.go:219`）只有 `TierAllow` 与 `TierAsk`，再没有第三个档位。
+
+★ **默认是 `ask`，因为猜错的代价是不对称的**：多点一次，换来的是一次没人看见的破坏性
+调用不被执行。旧模型 —— 一份全局清单，没被列名的工具即放行 —— 恰好是相反的默认值，
+而它错在了会伤人的那一侧。
+
+**例外是被点名的**，而且由提供这个工具的文件来点：
+
+| 来源 | 它点名什么 | 装配位置 |
 |---|---|---|
-| 外层 | `policy/permissions.yaml` 的 `deny` | 所有 Agent |
-| 内层 | `agents/*.md` 的 `disabled_tools` | 只影响这一个 Agent |
+| 没有自己文件的内置工具 | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill` | `agentkit/build/tools.go:61` `builtinAllowedTools` |
+| 工具自己的文件 —— `tools/*.yaml` 与知识库 | 那个文件的 `allows:` | `agentkit/spec/load.go:235` `AllowedTools` |
+| MCP server 自己的文件 | 那个 server 的 `allows:`，用它自己的词汇，翻译成暴露出来的名字 | `agentkit/build/mcptools.go:173` `mcpAllowedNames` |
 
-两者**分开存储、从不合并** —— 合并就丢掉了「是哪一层拦的」这个信息。
-外层 `deny` 优先，是子 Agent 唯一放松不了的保证。
+`agentkit/build/spec.go:57` 的 `policyOf` 把三处合成一张表，`Policy.TierOf` 读这张表。
+★ 这张表由**配置**装配，所以一个工具的档位在它的 server 起来之前就能回答。
 
-档位只有两列（`build.Policy.TierOf`，`agentkit/build/policy.go:49`；镜像的
-`decl.Policy.TierOf` 在 `agentkit/spec/decl/decl.go:249`，未被使用）：`deny` →
-`ask` → 否则 `allow`。**未被点名的工具默认 `allow`（直接放行）**。
-要让某个工具每次都要人点头，把它列进 `ask`。
-
-★ **一个例外：MCP 命名空间默认落在 `ask`**（`agentkit/build/policy.go:49`）。
-名字以 `mcp__` 开头的工具要人点头 —— 除非 server 自己的文件在 `allows:` 里点了它：
-server 的工具是运行时才发现的，而 stdio 下的 server 是一个与 agent 同权限的子进程，
-猜错的代价是不对称的。
+★ **现在只有两处说了算，全局清单没有了。** 「哪些工具不用问」由提供工具的那个文件
+说了算 —— 它的 `allows:`；「这个 Agent 根本不能碰哪些工具」由那个 Agent 的
+`disabled_tools` 说了算（`decl.SubAgentSpec`）。被挡住的工具**保留自己的档位**，并在
+`reason` 里说清原因；原因只有两个：`disabled_tools` 与 `mcps`
+（`agentkit/build/introspect.go:36` 的 `reasonOf`）。
 
 ### 3.5 深度上限与拓扑校验
 
-`server/config.yaml` 的 `agent.max_depth`（默认 `1`）与 `policy/limits.yaml` 的同名项
-**取更严的**（`spec/load.go:686` 的 `globalMaxDepth`）。
+委派深度的上限是 `server/config.yaml` 里的 `agent.max_depth`（默认 `1`），
+`retry.max_retries` 就在它旁边。
+
+★ **上限只住在 `server/config.yaml` 里。** `policy/limits.yaml` 那一半 —— 同样键名的第二份
+拷贝，只能*收紧*文件里的值 —— 没有了，而 `server/` **不是**热分区
+（`agentkit/spec/config.go:52`），所以改上限要重启才生效。
 
 声明的拓扑超过上限是**启动错误**（`spec/load.go:622` 的 `validateDepth`），
 不静默截断。子 agent 引用不存在的 agent、拓扑成环，也都是启动错误
@@ -248,7 +271,8 @@ skills 目录下文件夹的白名单，它以 `scopedSkillBackend`（`agentkit/
 
 1. 取 agent 的 `model` 引用，用 `build.Resolve`（`provider.go:58`）解出
    `(provider, model)`；解不出就是启动错误。
-2. 按 `disabled_tools` + 外层 policy 算出**生效工具表**。
+2. 算出**生效工具表**：档位表（§3.4），再加上这个 Agent 自己的 `disabled_tools`
+   与 `mcps:` 收窄。
 3. 按 `subagents` 递归装配子树，把 `SubAgents` 填进 eino ADK 的 `deep.Config`
    （`assemble.go:97`）。
 4. `WithoutGeneralSubAgent: true`（`assemble.go:25` 的 `baseConfig`，
@@ -264,26 +288,38 @@ skills 目录下文件夹的白名单，它以 `scopedSkillBackend`（`agentkit/
 
 `agentkit/build/gate.go` 实现「工具能不能用」：
 
-- 外层 `deny` → 工具根本**不注册**给这个 agent，模型看不见它。
-- 外层 `ask` → 工具注册，但调用前**中断**，等人工决定。
-- 内层 `disabled_tools` → 对该 agent 同样不注册。
+- 名字在 allow 表里 → 工具直接跑，闸门原样放行（`agentkit/build/gate.go:67`）。
+- 名字不在 → 调用**中断**，等一个人的决定（流式那条路是 `agentkit/build/gate.go:99`，
+  它是同一道闸门）。
+- 这个 Agent 根本不能用的工具**压根不在它的工具表里** —— 表先把它摘掉，闸门连看都
+  看不到，模型自然也看不见。
 
-被拒绝时，工具返回的是**一句拒绝说明**（带可选理由），**不是**一个错误 ——
+★ **没有 `deny` 这一支。** 一个 Agent 拿不到的工具不会注册给它，闸门因此从来不需要
+拒绝谁：「这个 Agent 不能用它」是关于这个 Agent 的工具表的事实，不是关于这个工具的事实。
+
+人拒绝一次调用时，工具返回的是**一句拒绝说明**（带可选理由），**不是**一个错误 ——
 模型看到的是「被拒了，理由是 X」，于是可以据此调整。
 
 ★ MCP 工具走的是**同一道**闸门：它们和其它工具一样**按名字**查
-（`agentkit/build/policy.go:49` 的 `TierOf`），所以 `mcp__<server>__<tool>` 同样会被
-拒、要人点头或直接放行。闸门没变 —— 变的只是命名空间。
+（`agentkit/build/policy.go:55` 的 `TierOf`），所以 `mcp__<server>__<tool>` 同样是要人
+点头或直接放行。闸门没变 —— 变的只是命名空间。
 
 ### 4.3 工具来源
 
 | 来源 | 装配位置 | 例子 |
 |---|---|---|
-| 文件系统中间件 | `build/tools.go:45` | `ls` `read_file` `write_file` `edit_file` `execute` |
+| 文件系统中间件 | `agentkit/build/snapshot.go:56` | `ls` `read_file` `write_file` `edit_file` `execute` |
 | 网络工具 | `build/nettools.go` | `web_search` `http` |
 | 知识库 | `build/kb.go` | `kb_search` `kb_index` |
 | 百科 | `build/nettools.go:236` | `wikipedia` |
-| MCP server | `build/mcptools.go:193` | `mcp__<server>__<tool>` |
+| MCP server | `agentkit/build/mcptools.go:195` | `mcp__<server>__<tool>` |
+
+★ **一个工具的档位由提供它的那个文件决定。** 文件自己的 `allows:` 点名那些不用问的
+工具 —— `tools/http.yaml` 点 `request_get`，`tools/kb.yaml` 点 `kb_search` ——
+而**这个文件提供的其余一切都问**。没有自己文件的内置工具由代码点名
+（`agentkit/build/tools.go:61`）：读取类（`ls` `read_file` `glob` `grep`）与委派类
+（`task` `write_todos` `skill`）。MCP server 用**它自己的词汇**说这件事 —— server
+自己的工具名，不是暴露出来的那些。
 
 对外的网络工具**不用改代码**：配置缺失的 provider 什么都不挂，所以写下这个文件才是把工具
 挂上去的那一步（`tools/*.yaml`）。★ 文件系统中间件是
@@ -296,13 +332,13 @@ skills 目录下文件夹的白名单，它以 `scopedSkillBackend`（`agentkit/
 工具的来路都一样：
 
 `tools/*.yaml` → `spec.loadTool`（`agentkit/spec/load.go:165`）→ `decl.ToolsCfg` →
-`toolRegistry.Build`（`agentkit/build/tools.go:55`）→ `snapshot.buildHeavy`
+`toolRegistry.Build`（`agentkit/build/tools.go:78`）→ `snapshot.buildHeavy`
 （`agentkit/build/snapshot.go:47`）→ `applyToolConfig`（`agentkit/build/assemble.go:31`）→
 `deep.Config.ToolsConfig.Tools` → `deep.New`（`agentkit/build/assemble.go:40`）。
 
 MCP 这一支在注册表处并进来：`mcps/<server>.yaml` → `spec.loadMCP`
-（`agentkit/spec/load.go:256`）→ `decl.MCPServerCfg` → MCP provider
-（`agentkit/build/mcptools.go:193`），注册在 `agentkit/build/tools.go:41` → 同一个
+（`agentkit/spec/load.go:269`）→ `decl.MCPServerCfg` → MCP provider
+（`agentkit/build/mcptools.go:195`），注册在 `agentkit/build/tools.go:41` → 同一个
 `toolRegistry.Build` → 同一个 `applyToolConfig`。
 
 ★ **MCP 客户端是这条路径上唯一不属于 snapshot 的资源。** 重依赖只构建一次，

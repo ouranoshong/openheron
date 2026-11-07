@@ -104,8 +104,8 @@ validation, reloading, writing).
 
 When you need "the effective tool table of some agent", let `agent.Builder` expose a
 read-only query. **Do not** recompute `Table.Blocked` / `Policy.TierOf` in the API
-layer. The reason is plain: recomputation drifts — change the policy once and the API's
-answer and the runtime's answer stop agreeing.
+layer. The reason is plain: recomputation drifts — change the tier table once and the
+API's answer and the runtime's answer stop agreeing.
 
 ## 3. Development recipes
 
@@ -135,29 +135,33 @@ answer and the runtime's answer stop agreeing.
 
 3. **Optionality is decided by `Optional()`, not by returning an error.** A provider
    with `Optional() == true` logs a Warn and is skipped when it fails
-   (`tools.go:65-67`) — a missing API key must not stop the whole service from starting.
+   (`tools.go:89`) — a missing API key must not stop the whole service from starting.
    ★ But note that this Warn is the **only** notice: the tool silently does not enter
    the table, and the user will only notice that "this feature seems to be missing".
    Think hard about whether that Warn is enough when adding an optional provider.
 
 4. **The gate works on its own.** `agentkit/build/gate.go` filters the tool table with
-   the outer policy plus the inner `disabled_tools`. You write no permission code.
+   the agent's own `disabled_tools` and `mcps:` list, and wraps **every tool the allow
+   list does not name** behind an approval. ★ The default tier is `ask`, so the
+   exceptions are the named ones: the built-in tools the code knows
+   (`agentkit/build/tools.go:61`) and the ones a file's own `allows:` lists. You write
+   no permission code.
 
-5. **Do not collide with a reserved name.** `reservedToolNames` at `tools.go:46` lists
+5. **Do not collide with a reserved name.** `reservedToolNames` at `tools.go:69` lists
    `ls` `read_file` `write_file` `edit_file` `glob` `grep` `execute` `task`
    `write_todos` `skill`. A collision fails at `Build` time.
-   The tool name is also the key in the policy table — a collision would point the
-   policy at the wrong tool.
+   The tool name is also the key in the tier table — a collision would point the
+   table at the wrong tool.
 
    ★ **A name that comes from a server is namespaced.** An MCP tool is exposed under
-   `decl.MCPToolPrefix` (`agentkit/spec/decl/decl.go:336`) and
-   `decl.MCPSeparator` (`agentkit/spec/decl/decl.go:345`), so the policy table
+   `decl.MCPToolPrefix` (`agentkit/spec/decl/decl.go:308`) and
+   `decl.MCPSeparator` (`agentkit/spec/decl/decl.go:317`), so the agent's table
    narrows a whole server with a prefix instead of a list of names. ★ The composed
-   name is never parsed back: `Table.Blocked` (`agentkit/build/policy.go:161`)
+   name is never parsed back: `Table.Blocked` (`agentkit/build/policy.go:146`)
    matches prefixes, so nothing has to split a name to learn which server it
    belongs to.
 
-6. **A collision across providers also fails**: `validateBatch` at `tools.go:83` tracks
+6. **A collision across providers also fails**: `validateBatch` at `tools.go:106` tracks
    names in `seen`, so two providers offering the same tool name fail at startup
    instead of one silently overwriting the other.
 
@@ -228,24 +232,27 @@ Say you want a new `mcps/` directory:
   the partition is in the tree. The recipe below is the one it followed.
 
 1. **`agentkit/spec/config.go`**: add the directory constant `DirMCP = "mcps"` and an entry
-   in `Categories` (with `ID`, `Label`, `Dir`, `Ext`). Keep **hot-reloaded** and
-   **non-hot-reloaded** directories clearly apart — whether a directory is hot changes
-   what users expect.
+   in `Categories` (with `ID`, `Label`, `Dir`, `Ext`, `Editable`). Keep **hot-reloaded**
+   and **non-hot-reloaded** directories clearly apart — whether a directory is hot
+   changes what users expect.
 
-2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`config.go:314`) and
+2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`config.go:304`) and
    implement `loadXXX`.
 
 3. **`agentkit/spec/decl/decl.go`**: add the plain declaration struct.
 
-4. **Hot reload comes for free**: `hotDirList()` at `agentkit/spec/config.go:87` filters
+4. **Hot reload comes for free**: `hotDirList()` at `agentkit/spec/config.go:81` filters
    the `Categories` whose `Hot()` is true — mark the category hot in step 1 and the
    watched set includes it automatically. **You do not** need to register it by hand in
    `reload.go` (and forgetting to would mean "config changes do not take effect, with
    no notice at all").
 
-5. **Write gate**: add it to the editable-section list in `api/v2_settings.go`.
-   A non-hot-reloaded section **must not** be in the editable list — otherwise the user
-   changes it in the UI, it only takes effect after a restart, and the UI says nothing.
+5. **Write gate**: mark the entry `Editable: true` in step 1 — ★ the **manifest** is
+   the truth, and the settings endpoint reads that flag (`api/v2_settings.go`); the
+   client takes the editable categories from the manifest rather than keeping a list
+   of its own. A non-hot-reloaded section **must not** be editable — otherwise the
+   user changes it in the UI, it only takes effect after a restart, and the UI says
+   nothing.
 
 6. **Defaults**: `agentkit/spec/defaults.go`.
 
@@ -257,7 +264,7 @@ Say you want a new `mcps/` directory:
    copies of the same file are two copies that drift, and the copy is what the
    dependency shape used to force. The section skeletons that are not files on disk
    (the agents' frontmatter carries the available models) stay in
-   `spec.Template(catDir, …)`.
+   `spec.Skeleton(catDir, …)`.
 
    ★ **init copies a partition by its directory, not by a list of file names.**
    `initcfg`'s `copySection` asks the templates package what the partition holds
@@ -272,21 +279,21 @@ Say you want a new `mcps/` directory:
 The `mcps/` partition is one file per MCP server, and the file's presence **is** the
 definition — there is no `enabled` key.
 
-- **Declared** by the constant `DirMCP = "mcps"` (`agentkit/spec/config.go:26`) and the
-  `Categories` entry (`agentkit/spec/config.go:72`), which is editable, hot and
+- **Declared** by the constant `DirMCP = "mcps"` (`agentkit/spec/config.go:25`) and the
+  `Categories` entry (`agentkit/spec/config.go:66`), which is editable, hot and
   `.yaml`.
-- **Loaded** by `loadMCP` (`agentkit/spec/load.go:256`): one file, one server.
+- **Loaded** by `loadMCP` (`agentkit/spec/load.go:269`): one file, one server.
 - ★ **"Hot" for this partition means the client is rebuilt.** The declaration is the
   server's identity, so a changed declaration means a changed server: the old client
   is torn down and a new one is started (`agentkit/build/mcpmanager.go:215`), keyed on
   the declaration's fingerprint (`agentkit/build/mcpmanager.go:330`). ★ A hot partition
   whose resources are not rebuilt lies about being hot.
 - **The write gate** refuses a name that could not be read back:
-  `validateFileName` (`agentkit/spec/write.go:87`) accepts only a `<server>.yaml` whose
+  `validateFileName` (`agentkit/spec/write.go:88`) accepts only a `<server>.yaml` whose
   name is a valid server name (`agentkit/spec/write.go:107`) — the file's name is the
   server's name, and the server's name is the namespace segment of that server's tools.
-- **The scaffold** is `Template` (`agentkit/spec/write.go:160`), and the `mcps/` branch
-  (`agentkit/spec/write.go:189`) writes a **loadable** file: ★ a file under `mcps/`
+- **The scaffold** is `Skeleton` (`agentkit/spec/write.go:159`), and the `mcps/` branch
+  (`agentkit/spec/write.go:186`) writes a **loadable** file: ★ a file under `mcps/`
   **defines** a server, so a file that cannot be parsed is not a server that is off, it
   is a configuration that does not load. The optional fields are written as comments,
   and the `command` is a placeholder that is not installed — so the server does not come
@@ -880,7 +887,7 @@ make test-env-sync      # ★ must be run after you change the development-side 
 ```
 
 ★ **`make test-env-sync` is mandatory, not optional** — the test instance's
-`agents/ llm/ policy/ skills/` are **copied** from the development side, so change an
+`agents/ llm/ tools/ skills/` are **copied** from the development side, so change an
 agent without syncing and you are still testing the old definition.
 
 ★ **The smokes need a model that answers.** They run a real turn against the
@@ -906,7 +913,7 @@ cd web && bun run smoke:hitl               # the approval resume path works
 | Package | Contract it pins |
 |---|---|
 | `agentkit/spec` | Config root resolution, strict frontmatter decoding, depth validation, cycle detection, write gates |
-| `agentkit/build` | Tool assembly, policy tiers, the gate, topology, nested resume, the skill scope |
+| `agentkit/build` | Tool assembly, the allow/ask tier table, the gate, topology, nested resume, the skill scope |
 | `agentkit/run` | Input construction (a sub-agent's messages do not mix into the parent's history), event bridging |
 | `api` | Routing, SSE frames, the error envelope, `threadId` being required |
 | `kb` | Indexing, scoring, the catalog format (including legacy Chinese header compatibility) |
@@ -1050,8 +1057,9 @@ call `write_file` in order to trigger an approval. That is the model's freedom, 
 code regression; the script retries, and when nothing triggers it **reports an error
 explicitly** rather than pretending the wiring is broken.
 ★ It has a **precondition**: the agent that actually calls the tool must have
-`write_file` in the `ask` tier — neither globally denied nor disabled by its own
-`disabled_tools`. With the tool out of reach there is no approval to trigger.
+`write_file` in the `ask` tier — ★ that is the **default**: no file names it in an
+`allows:` list, and the agent's own `disabled_tools` does not disable it. With the tool
+out of reach there is no approval to trigger.
 ★ Do not look at `main` for this. The factory configuration does give `main`
 `disabled_tools: [write_file, edit_file, execute]`, but `main` only orchestrates: it
 **delegates** the work to `task`, and `task`'s `write_file` is in the `ask` tier — so
@@ -1174,8 +1182,9 @@ someone measures that the default misses something.
 | Symptom | Check first |
 |---|---|
 | Startup reports a missing configuration | The `config root` line in the startup log — it prints the root actually used and the project root |
-| A config change does not take effect | Is that partition hot-reloaded? `server/` and `skills/` need a restart |
-| An agent cannot call a tool | `GET /v2/agents/:agentId` for the effective tool table; then decide whether it is an inner disable or an outer `deny` |
+| A config change does not take effect | Is that partition hot-reloaded? `llm/` `agents/` `tools/` `mcps/` are hot; `server/` and `skills/` need a restart |
+| An agent cannot call a tool | `GET /v2/agents/:agentId` for the effective tool table; then read the tool's `reason` — `disabled_tools`, `mcps`, or the default `ask` tier, which asks |
+| A file under `policy/` is ignored | The partition is gone: the tiers live in the files that provide the tools, and the default tier is `ask` |
 | `reasoning` seems to do nothing | Is that tier declared in the model profile? Undeclared means silently ignored |
 | An approval cannot resume | Is the checkpoint still there? Check `pendingApprovals` on `/v2/sessions/:id` |
 | White screen + `Maximum update depth exceeded` | Is some selector returning a new array/object? |
@@ -1201,6 +1210,7 @@ the current state of the code, not a to-do list** — fixing one is a separate c
 | **Four runtime dependencies sit in `devDependencies`** | `web/package.json` | `lucide-react` (imported by 10 files), `clsx`, `tailwind-merge` and `class-variance-authority` are all imported by `src/` and bundled into `web/dist`. The build passes (Vite resolves them at build time), but the manifest is wrong. |
 | **`web/scripts/interop-check.ts` is out of date** | lines 16-20 and 41-45 of that script | It POSTs to `/v2/run` **without a `threadId`**, while the server now requires a session first (`POST /v2/sessions`, see `api/v2_run.go:78`). So that item of `make smoke` fails (measured: 400 `threadId is required`). `web/scripts/hitl-smoke.ts` and `web/scripts/no-undefined-url-check.ts` already follow the new contract. |
 | **The comment at `api/server.go:75` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
+| **A leftover `policy/` directory is ignored without a word** | the loader walks the five partitions (`agentkit/spec/config.go:40-71`) — nothing scans the config root for unknown directories | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** and **not reported** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. The settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:72`). Delete the directory. |
 
 ## 8. Before committing
 

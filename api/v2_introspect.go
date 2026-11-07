@@ -372,11 +372,34 @@ type configView struct {
 	MCPServers []mcpServerBrief `json:"mcpServers"`
 }
 
+// allowNames picks the tools that run without a nod out of the tier table.
+//
+// ★ The table is the truth about the tiers, so the allow list is read off
+//
+//	it — a second source would be a second answer.
+func allowNames(tiers []toolView) []string {
+	out := make([]string, 0, len(tiers))
+	for _, t := range tiers {
+		if t.Tier == string(decl.TierAllow) && t.Reason == "" {
+			out = append(out, t.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (s *Server) v2Config(_ context.Context, c *app.RequestContext) {
 	cfg := s.requireConfig(c)
 	if cfg == nil {
 		return
 	}
+
+	// ★ The tier table comes from the builder, not from the configuration:
+	//   the allow list is assembled from three places (the code's own
+	//   built-in readers, a file's `allows:`, an MCP server's `allows:`),
+	//   and recomputing half of it here would make this view contradict the
+	//   tool table it carries next to it.
+	tiers := s.toolTiers()
 
 	out := configView{
 		Version:      cfg.Version,
@@ -385,9 +408,9 @@ func (s *Server) v2Config(_ context.Context, c *app.RequestContext) {
 		MaxDepth:     cfg.MaxDepth(),
 		Policy: policyView{
 			DefaultTier: string(decl.TierAsk),
-			Allow:       nonNil(cfg.AllowedTools()),
+			Allow:       allowNames(tiers),
 		},
-		Tools:      s.toolTiers(),
+		Tools:      tiers,
 		Agents:     s.agentViews(cfg, false),
 		MCPServers: configuredMCP(cfg),
 		Server: serverView{

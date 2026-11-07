@@ -56,7 +56,7 @@ counting `grep '"github.com/ouranoshong/openheron/'` hits per package:
 | | `storage` | `contract` | Interfaces for sessions/messages/pending approvals |
 | | `kb` | `obs`, `persist` | Knowledge base: corpus, index, retrieval, scoring |
 | | `agentkit/spec` | `obs`, `decl`, `persist`, `templates` | Config loading, validation, hot reload, write gates |
-| **L2** | `agentkit/build` | `obs`, `spec`, `decl`, `approval`, `contract`, `helpers`, `kb`, `llm/common`, `message` | Agent assembly, tool assembly, policy gates |
+| **L2** | `agentkit/build` | `obs`, `spec`, `decl`, `approval`, `contract`, `helpers`, `kb`, `llm/common`, `message` | Agent assembly, tool assembly, the tier table (`agentkit/build/policy.go`) and the approval gate |
 | | `agentkit/run` | `emit`, `obs`, `approval`, `contract`, `decl`, `message`, `storage` | Run loop, input construction, event consumption |
 | | `storage/filestore` | `obs`, `contract`, `message`, `persist`, `storage` | File store implementation |
 | | `storage/memarbit` | `storage` | The in-memory lease arbiter |
@@ -146,12 +146,18 @@ write the new configuration somewhere the user did not point at.
 |---|---|---|---|
 | `agents/` | `spec.DirAgent` | ✅ | One `.md` per agent |
 | `llm/` | `spec.DirLLM` | ✅ | One `.yaml` per vendor |
-| `policy/` | `spec.DirPolicy` | ✅ | `permissions.yaml` + `limits.yaml` |
 | `tools/` | `spec.DirTools` | ✅ | `http.yaml` / `web_search.yaml` / `wikipedia.yaml` / `kb.yaml` |
 | `mcps/` | `spec.DirMCP` | ✅ | One `.yaml` per MCP server |
 | `server/` | `spec.DirServer` | ❌ | Process parameters; needs a restart |
 | `state/` | `spec.DirState` | — | Sessions and checkpoints; auto-created |
 | `skills/` | — | ❌ | **Resolved independently** (see §3.6) |
+
+★ **There is no `policy/` partition.** The five partitions are `llm/` `agents/`
+`server/` `tools/` `mcps/` (`agentkit/spec/config.go:40`), and a `policy/` directory
+left over from an older configuration is **silently ignored** — nothing reads it and
+nothing warns. The tier model it used to carry now lives in the tool files and the
+agent files instead (§3.4), so a stale `policy/` directory is not an error you can
+diagnose from the log: it is a directory that stopped meaning anything.
 
 File names under `tools/` are a **whitelist**: `agentkit/spec/load.go:191` errors out on
 an unknown file instead of ignoring it — "I wrote kb.yaml and it did not take effect" is
@@ -176,7 +182,7 @@ Available frontmatter keys (`agentkit/spec/decl/decl.go:78`'s `decl.Agent`):
 | `model` | `model` | `<provider>/<model>`; **never inherited, never falls back** |
 | `max_iterations` | `max_iterations` | Cap on tool-loop iterations |
 | `subagents` | `subagents` | The sub-agents it may delegate to |
-| `disabled_tools` | `disabled_tools` | Tool deny-list effective for this agent |
+| `disabled_tools` | `disabled_tools` | Tools this agent may **not** use at all — they are not even in its tool set |
 | `mcps` | `mcps` | The MCP servers this agent may use — absent means every configured server, an empty list means none (`agentkit/spec/decl/decl.go:114`) |
 | `temperature` | `temperature` | Sampling temperature |
 | `max_tokens` | `max_tokens` | Sampling cap |
@@ -187,33 +193,53 @@ loader fills them in; they are **not** frontmatter keys.
 
 The body is the prompt itself (`Instruction`).
 
-### 3.4 Permissions: two layers, never merged
+### 3.4 The tier model: `ask` by default, the exceptions named
 
-| Layer | Where | Scope |
+There are **two** tiers, and the default is the safe one:
+
+| Tier | Meaning |
+|---|---|
+| `allow` | The tool runs without a nod |
+| `ask` | The tool interrupts the run and waits for a human decision |
+
+`build.Policy.TierOf` (`agentkit/build/policy.go:55`) answers the tier of one tool
+name: a name in the allow list is `allow`, and **every other name is `ask`**. The
+mirrored declaration `decl.Tier` (`agentkit/spec/decl/decl.go:219`) holds `TierAllow`
+and `TierAsk` and nothing else — there is no third tier.
+
+★ **The default is `ask` because the cost of guessing wrong is asymmetric**: one extra
+click against a destructive call nobody saw. The old model — a global list where an
+unlisted tool was allowed — had the opposite default, and it was wrong in the
+direction that hurts.
+
+The **exceptions are named**, and they are named by the file that provides the tool:
+
+| Source | What it names | Assembled at |
 |---|---|---|
-| Outer | `deny` in `policy/permissions.yaml` | Every agent |
-| Inner | `disabled_tools` in `agents/*.md` | This one agent only |
+| The built-in tools that have no file of their own | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill` | `agentkit/build/tools.go:61` `builtinAllowedTools` |
+| A tool's own file — `tools/*.yaml` and the knowledge base | that file's `allows:` | `agentkit/spec/load.go:235` `AllowedTools` |
+| An MCP server's own file | that server's `allows:`, in the server's own vocabulary, translated to the exposed names | `agentkit/build/mcptools.go:173` `mcpAllowedNames` |
 
-The two are **stored separately and never merged** — merging would destroy the
-information about *which* layer blocked a tool. The outer `deny` wins, and it is the
-one guarantee a sub-agent cannot relax.
+`agentkit/build/spec.go:57` `policyOf` puts the three together and `Policy.TierOf`
+reads the result. ★ The table is assembled from the **configuration**, so the tier of
+a tool is answerable before its server is even up.
 
-There are only two columns of tiers (`build.Policy.TierOf`, `agentkit/build/policy.go:49`;
-the mirrored `decl.Policy.TierOf` at `agentkit/spec/decl/decl.go:249` is unused): `deny` →
-`ask` → otherwise `allow`. **A tool that is not named defaults to `allow` (straight
-through)**. To make a tool require a human every time, list it under `ask`.
-
-★ **One exception: the MCP namespace defaults to `ask`** (`agentkit/build/policy.go:49`).
-A tool whose name starts with `mcp__` asks, unless the server's own file names it in
-`allows:` — a server's tools are discovered at runtime, and under stdio the server is a
-child process with the agent's own privileges, so the cost of guessing wrong is
-asymmetric.
+★ **Two places decide, and there is no global list any more.** "Which tools run without
+a nod" is said by the file that provides the tool — its `allows:` — and "which tools
+this agent may not use at all" is said by that agent's `disabled_tools`
+(`decl.SubAgentSpec`). A tool that is blocked **keeps its own tier** and says why in
+its `reason`; the only two reasons are `disabled_tools` and `mcps`
+(`agentkit/build/introspect.go:36` `reasonOf`).
 
 ### 3.5 Depth cap and topology validation
 
-`agent.max_depth` in `server/config.yaml` (default `1`) and the same key in
-`policy/limits.yaml` **resolve to the stricter of the two**
-(`spec/load.go:686`'s `globalMaxDepth`).
+`agent.max_depth` in `server/config.yaml` (default `1`) is the cap on delegation depth,
+and `retry.max_retries` sits next to it.
+
+★ **The caps live in `server/config.yaml` only.** The `policy/limits.yaml` half — a
+second copy of the same keys that could only *tighten* the file — is gone, and
+`server/` is **not** a hot partition (`agentkit/spec/config.go:52`), so a cap change
+takes effect after a restart.
 
 A declared topology that exceeds the cap is a **startup error**
 (`spec/load.go:622`'s `validateDepth`) — never a silent truncation. A sub-agent
@@ -278,7 +304,8 @@ The write path of the config editor (`/v2/settings`) has several gates:
 1. Take the agent's `model` reference and resolve it with `build.Resolve`
    (`provider.go:58`) into a `(provider, model)` pair; failing to resolve is a startup
    error.
-2. Compute the **effective tool table** from `disabled_tools` plus the outer policy.
+2. Compute the **effective tool table**: the tier table (§3.4), then the agent's own
+   `disabled_tools` and `mcps:` narrowing.
 3. Recursively assemble the sub-tree declared by `subagents` and fill `SubAgents` into
    eino ADK's `deep.Config` (`assemble.go:97`).
 4. `WithoutGeneralSubAgent: true` (`assemble.go:25`'s `baseConfig`, and `hub.go:162`) —
@@ -295,29 +322,42 @@ copying the parent's.
 
 `agentkit/build/gate.go` implements "may this tool be used":
 
-- Outer `deny` → the tool is **never registered** for this agent, and the model cannot
-  see it.
-- Outer `ask` → the tool is registered, but a call **interrupts** and waits for a human
-  decision.
-- Inner `disabled_tools` → likewise not registered for that agent.
+- The name is in the allow list → the tool runs, and the gate returns the endpoint
+  untouched (`agentkit/build/gate.go:67`).
+- The name is not → the call **interrupts** and waits for a human decision
+  (`agentkit/build/gate.go:99` for the streaming path, which is the same gate).
+- A tool the agent may not use is **not in its tool set at all** — the table removes it
+  before the gate ever sees it, so the model cannot even see it.
 
-When a call is denied, the tool returns **a denial message** (with an optional reason),
-**not** an error — the model sees "denied, the reason is X" and can adjust accordingly.
+★ **There is no `deny` branch.** A tool an agent may not have is not registered for it,
+so the gate never has to refuse one: "this agent may not use it" is a fact about the
+agent's tool set, not about the tool.
+
+When a human denies a call, the tool returns **a denial message** (with an optional
+reason), **not** an error — the model sees "denied, the reason is X" and can adjust
+accordingly.
 
 ★ The MCP tools go through the **same** gate: they are looked up **by name** like every
-other tool (`agentkit/build/policy.go:49`'s `TierOf`), so `mcp__<server>__<tool>` is
-denied, asked or allowed exactly like any other name. The gate does not change — only the
-namespace does.
+other tool (`agentkit/build/policy.go:55`'s `TierOf`), so `mcp__<server>__<tool>` asks
+or runs exactly like any other name. The gate does not change — only the namespace does.
 
 ### 4.3 Where tools come from
 
 | Source | Assembled at | Examples |
 |---|---|---|
-| Filesystem middleware | `build/tools.go:45` | `ls` `read_file` `write_file` `edit_file` `execute` |
+| Filesystem middleware | `agentkit/build/snapshot.go:56` | `ls` `read_file` `write_file` `edit_file` `execute` |
 | Network tools | `build/nettools.go` | `web_search` `http` |
 | Knowledge base | `build/kb.go` | `kb_search` `kb_index` |
 | Encyclopedia | `build/nettools.go:236` | `wikipedia` |
-| MCP servers | `build/mcptools.go:193` | `mcp__<server>__<tool>` |
+| MCP servers | `agentkit/build/mcptools.go:195` | `mcp__<server>__<tool>` |
+
+★ **The tier of a tool is decided by the file that provides it.** A file's own
+`allows:` names the tools that run without a nod — `tools/http.yaml` names
+`request_get`, `tools/kb.yaml` names `kb_search` — and **everything else that file
+provides asks**. The built-in tools that have no file of their own are named in the
+code (`agentkit/build/tools.go:61`): the readers (`ls` `read_file` `glob` `grep`) and
+the delegation tools (`task` `write_todos` `skill`). An MCP server says it in **its
+own vocabulary** — the server's tool names, not the exposed ones.
 
 The external network tools need **no code change**: a provider whose configuration is
 absent mounts nothing, so writing the file is what turns the tool on (`tools/*.yaml`).
@@ -332,13 +372,13 @@ configuration files.
 The path a tool takes is the same for every source:
 
 `tools/*.yaml` → `spec.loadTool` (`agentkit/spec/load.go:165`) → `decl.ToolsCfg` →
-`toolRegistry.Build` (`agentkit/build/tools.go:55`) → `snapshot.buildHeavy`
+`toolRegistry.Build` (`agentkit/build/tools.go:78`) → `snapshot.buildHeavy`
 (`agentkit/build/snapshot.go:47`) → `applyToolConfig` (`agentkit/build/assemble.go:31`) →
 `deep.Config.ToolsConfig.Tools` → `deep.New` (`agentkit/build/assemble.go:40`).
 
 The MCP branch joins it at the registry: `mcps/<server>.yaml` → `spec.loadMCP`
-(`agentkit/spec/load.go:256`) → `decl.MCPServerCfg` → the MCP provider
-(`agentkit/build/mcptools.go:193`), registered at `agentkit/build/tools.go:41` → the same
+(`agentkit/spec/load.go:269`) → `decl.MCPServerCfg` → the MCP provider
+(`agentkit/build/mcptools.go:195`), registered at `agentkit/build/tools.go:41` → the same
 `toolRegistry.Build` → the same `applyToolConfig`.
 
 ★ **The MCP client is the one resource on this path that does not belong to the

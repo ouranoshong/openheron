@@ -131,9 +131,9 @@ same agent.
 - The **configuration** lands in that workspace too: `.openheron/` is written
   on the first start, and it is yours to edit from then on.
 - The **key** stays on the host; the sandbox holds a sentinel.
-- **Approvals** still apply, and the policy is yours: a
-  `policy/permissions.yaml` in the workspace decides which tools ask first, and
-  without one the code's defaults apply.
+- **Approvals** still apply, and the default is the safe one: every tool asks
+  first, and the files under `.openheron/tools/` and `.openheron/mcps/` name the
+  exceptions (see §4.3).
 
 ★ The step-by-step guide is
 [`sandbox-kit/TUTORIAL.md`](../sandbox-kit/TUTORIAL.md) (Chinese:
@@ -176,9 +176,10 @@ your/project/
 
 ★ The file under `mcps/` is an **example**, not a configuration — see §4.7.
 
-★ **There is no `policy/` file.** The approval tiers and the caps have defaults, and a file
-that says what the code already does is noise — ★ noise in a configuration tree is read as
-meaning. Write `policy/permissions.yaml` yourself when you want a tier of your own (§4.3).
+★ **There is no `policy/` file.** The tiers have a default and the exceptions are
+named where the tool comes from (§4.3), so a file that says what the code already
+does is noise — ★ noise in a configuration tree is read as meaning. Name your
+exceptions in the tool's own file instead.
 
 ★ **Existing files are not overwritten** (unless you pass `--force`), so running it in
 an already-configured project is safe.
@@ -250,7 +251,7 @@ Available frontmatter keys:
 | `max_iterations` | Cap on tool-loop iterations |
 | `summarize_at` | When this agent's context is **compacted** into a summary: `80%` of the model's window (the default), an absolute token count (`104858`), or `0` for never |
 | `subagents` | Whom it may delegate to (see §5) |
-| `disabled_tools` | Tool deny-list effective for **this agent** (an MCP tool may also be named by a prefix — see §4.8) |
+| `disabled_tools` | Tools **this agent may not use at all** — the model does not even see them (an MCP tool may also be named by a prefix — see §4.8) |
 | `skills` | The skills this agent may use — an allow-list of the folders under `skills/` (**not declared means every skill**, an empty list means none) |
 | `mcps` | The MCP servers this agent may use — **not declared means every server**, an empty list means none (see §4.8) |
 | `temperature` / `max_tokens` | Sampling parameters |
@@ -338,26 +339,62 @@ survive the cut: the summary keeps them.
 missing from the table is silently ignored, so "I turned on high and it still does not
 think" shows up in the most hidden way possible.
 
-### 4.3 The approval policy (`policy/permissions.yaml`)
+### 4.3 Which tools ask
+
+**You do not have to decide.** A tool nobody names **asks** first: the run pauses and an
+approval card appears (see §6.2). The default is the safe one — one extra click
+against a destructive call nobody saw.
+
+There are only two tiers:
+
+| Tier | Meaning |
+|---|---|
+| `allow` | The tool runs without asking |
+| `ask` | The tool waits for your nod |
+
+**Two places name the exceptions**, and that is all of them:
+
+| Where | What it decides |
+|---|---|
+| The `allows:` line of the file that provides the tool | Which of that file's tools run **without** asking; everything else the file provides asks |
+| The `disabled_tools:` line of an agent | Which tools that agent may not use **at all** — they are not in its tool set, so the model does not even see them |
+
+★ **There is no global list.** There is no file where you list the tools that ask, and
+none where you list the tools nobody may use. A file names its own exceptions, an agent
+names its own, and the two never merge — so the effective tool table of an agent is
+always answerable from the configuration alone.
+
+★ **The exceptions a built-in tool has are in the code, not in a file.** The readers
+(`ls` `read_file` `glob` `grep`) and the delegation tools (`task` `write_todos`
+`skill`) run without a nod. Everything else that has no file of its own — `write_file`,
+`edit_file`, `execute` — asks.
+
+The tools that come with a file of their own say so in that file:
 
 ```yaml
-ask:
-  - write_file
-  - edit_file
-  - execute
-  - kb_index
-deny: []
+# .openheron/tools/http.yaml
+methods: [get]
+allows: [request_get]
 ```
 
-There are only two columns, and the semantics are plain:
+`request_get` runs without asking; a `request_post` asks — and it is not even offered
+unless `methods` names `post`. The knowledge base says the same thing: `kb.yaml` allows
+`kb_search` — searching reads, while `kb_index` writes to the index on disk, so it
+asks.
 
-- **Listed under `ask`**: every call needs **your nod**.
-- **Listed under `deny`**: **nobody may use it**.
-- **Listed in neither**: defaults to `allow` (straight through).
+An MCP server says it in its own file and in **its own vocabulary** — the server's own
+tool names, not the exposed ones (see §4.7):
 
-★ `deny` is **global**. The `disabled_tools` in `agents/*.md` only affects that one
-agent and **cannot relax the outer `deny`**. It is the one guarantee a sub-agent cannot
-loosen.
+```yaml
+# .openheron/mcps/github.yaml
+allows: [read_issue, list_issues]
+```
+
+★ **A tier is not a verdict about the tool.** A tool an agent may not use keeps its own
+tier and says why: the effective tool table of an agent reports `blocked` with the
+reason `disabled_tools` or `mcps` (§4.8). There is no third tier and no global
+refusal — a tool is either available to that agent, or it is not in that agent's tool
+set at all.
 
 ### 4.4 External tools (`tools/`)
 
@@ -381,6 +418,10 @@ switched on by a **non-empty `corpus_dir`**, not by the file's presence.
 yours to write. Pass `--tools` and it writes the four files above. Not writing a file
 means not enabled: the tool does not appear in the agent's tool table, and the model
 cannot see it.
+
+★ **The file's `allows:` line decides what runs without asking** — `tools/http.yaml`
+names `request_get`, `tools/kb.yaml` names `kb_search`. Everything else that file
+provides asks (§4.3).
 
 ### 4.5 Process parameters (`server/config.yaml`)
 
@@ -555,20 +596,21 @@ silent truncation.
 
 ### 5.2 The depth cap
 
-The cap is decided by `agent.max_depth` in `server/config.yaml` together with the same
-key in `policy/limits.yaml`, and **the stricter one wins**. The default `1` means "only
-the entry agent may delegate; a sub-agent may not spawn children".
+The cap is `agent.max_depth` in `server/config.yaml`. The default `1` means "only the
+entry agent may delegate; a sub-agent may not spawn children".
 
 For a deeper delegation chain:
 
 ```yaml
-# policy/limits.yaml
+# .openheron/server/config.yaml
 agent:
   max_depth: 3
 ```
 
 ★ A declared topology that exceeds the cap is a **startup error**, not "truncate to the
 cap and carry on". The latter would make the depth protection meaningless.
+
+★ **`server/` is not hot-reloaded** (§4.5) — a deeper cap needs a restart.
 
 ### 5.3 Several agents in one session
 
@@ -626,7 +668,7 @@ silently starting a fresh turn.
 
 ### 6.3 The config editor
 
-`/settings` opens it. It can edit `llm/`, `agents/`, `policy/`, `tools/` and `mcps/`.
+`/settings` opens it. It can edit `llm/`, `agents/`, `tools/` and `mcps/`.
 
 The write path has several gates:
 
@@ -756,7 +798,7 @@ The dialog is titled "MCP servers" and holds one block per configured server:
 - the server's name, its transport (`stdio` or `http`), and its state — `ready`,
   `unreachable` or `unused`;
 - one row per tool: the server's own name, the exposed name (`mcp__github__create_issue`),
-  the tier (`allow`, `ask` or `deny`), and the state.
+  the tier (`allow` or `ask`), and the state.
 
 A configuration with no server says "No MCP servers are configured".
 
@@ -862,7 +904,7 @@ publicly, or narrow `listen_addr` to `127.0.0.1`.
 | GET | `/v2/skills` | The skill list |
 | GET | `/v2/agents` `/v2/agents/:agentId` | Agents and their effective tool tables |
 | GET | `/v2/mcps` | The MCP servers of one agent (`?agent=`); see §6.8 |
-| GET | `/v2/config` | The effective configuration |
+| GET | `/v2/config` | The effective configuration (its `policy` field carries the default tier and the names that run without a nod) |
 | GET | `/v2/health` | Health check (includes `deferred` notices) |
 | GET | `/v2/runtime` | Runtime status |
 | GET | `/v2/settings` | The list of editable items |
@@ -934,19 +976,19 @@ Run `openheron kb status` first: `lexical-only retrieval` means there are no vec
 and the hybrid score is not in effect. Configure an embedding model and re-index.
 
 **Q: An agent cannot call `write_file`?**
-Two possibilities: it is disabled for that agent by `disabled_tools`, or it is denied
-globally by `deny`. Check `GET /v2/agents/:agentId` for the effective tool table. By
-default `main` has `write_file`/`edit_file`/`execute` disabled — in the factory
-configuration it only orchestrates.
+Two possibilities: it is disabled for that agent by `disabled_tools` — then the model does
+not even see it — or it is simply an `ask` tool and nobody answered the approval card.
+Check `GET /v2/agents/:agentId` for the effective tool table. By default `main` has
+`write_file`/`edit_file`/`execute` disabled — in the factory configuration it only
+orchestrates.
 
 **Q: `/v2/run` says `threadId is required`**
 Create the session with `POST /v2/sessions` first.
 
 **Q: The model does not see the MCP server's tools?**
 Open `/mcps` (see §6.8). A server the agent does not use reads `unused`; a tool the agent
-cannot reach reads `blocked`, and the reason names `disabled_tools`, `mcps` or
-`policy.deny`. A server that reads `unreachable` carries the error that says why it could
-not be started.
+cannot reach reads `blocked`, and the reason names `disabled_tools` or `mcps`. A server
+that reads `unreachable` carries the error that says why it could not be started.
 
 **Q: An MCP server does not start?**
 The startup error names the file and the field. `mcps/` is hot, so a fix takes effect on

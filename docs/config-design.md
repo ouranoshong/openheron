@@ -1,6 +1,6 @@
 # Configuration System Design
 
-> Status: this document describes **openheron's configuration system as it is**. The `mcps/` partition is **implemented** (§6.7), and so is the **prefix pattern in an agent's `disabled_tools`** (§6.3). ★ Two halves are **still proposals**: the **global deny** list still matches **exactly**, and moving the **built-in** tools' tiers into their own files has not happened (§6.6). Documents that live in the upstream repository are marked "upstream".
+> Status: this document describes **openheron's configuration system as it is**. The `mcps/` partition is **implemented** (§6.7), the **prefix pattern in an agent's `disabled_tools`** is implemented (§6.3), and so is the **retirement of the `policy/` partition**: the default tier is `ask`, and the exceptions are named by the file that **provides** the tool (§6.3, §6.6). ★ There is **no global tier list** any more — "not exposed" is said in exactly two places. Documents that live in the upstream repository are marked "upstream".
 > Scope: in scope — the config root, the partitions, the file specs, loading and precedence, hot reload, and the dependency iron rules. Out of scope — the HTTP API surface (see `docs/api-v2-design.md` (upstream)) and the frontend.
 > Framework versions: eino `v0.9.22` (`go.mod:9`), `gopkg.in/yaml.v3 v3.0.1` (`go.mod:20`).
 
@@ -31,7 +31,7 @@
 - ❌ **No upward search for the config root.** The upstream design searched ancestor directories; openheron does not, on purpose (`agentkit/spec/config.go:161-173`).
 - ❌ **No home-directory layer.** `~/.openheron` is never picked up on its own — if one exists and is not the root in use, the runtime says so and asks for it to be named (`main.go:109-126`).
 - ❌ **The configuration does not carry the secret itself.** The loader tolerates a literal key (`agentkit/spec/expand.go:35-37`), but the editor rejects one (`agentkit/spec/write.go:513-533`) — the two paths are deliberately not symmetric.
-- ❌ **`server/` does not take part in hot reload** (it configures the process itself, so a change needs a restart). `llm/` `agents/` `policy/` `tools/` `mcps/` **do** hot-reload — see §8.
+- ❌ **`server/` does not take part in hot reload** (it configures the process itself, so a change needs a restart). `llm/` `agents/` `tools/` `mcps/` **do** hot-reload — see §8. ★ The **depth and retry caps** live in `server/` for exactly that reason: there is one copy of each number, and it is not swapped at runtime (§12.2).
 
 ---
 
@@ -40,10 +40,10 @@
 | # | Item | Decision | Reason |
 |---|---|---|---|
 | 1 | Directory name | `.openheron` | short, unambiguous, may enter version control (`agentkit/spec/config.go:105`) |
-| 2 | Partitions | `server/` `llm/` `agents/` `policy/` `tools/` `mcps/` (loaded), `skills/` (skills), `state/` (runtime data) | one file set per kind of configuration (`agentkit/spec/config.go:18-26`, `agentkit/spec/config.go:41-76`) |
+| 2 | Partitions | `server/` `llm/` `agents/` `tools/` `mcps/` (loaded), `skills/` (skills), `state/` (runtime data) | one file set per kind of configuration (`agentkit/spec/config.go:18-26`, `agentkit/spec/config.go:41-76`) |
 | 3 | Format | **YAML** — plus YAML frontmatter for `agents/*.md` | isomorphic to the agents' frontmatter ⇒ the whole `.openheron/` speaks one dialect (`agentkit/spec/expand.go:48-65`, `agentkit/spec/load.go:72-95`) |
 | 4 | Granularity | **one entity, one file** | `llm/<provider>.yaml`, `agents/<id>.md` (`agentkit/spec/load.go:17`, `agentkit/spec/load.go:72`) |
-| 5 | Overriding | not applicable — there is only one configuration, so there is no "who overrides whom" | a field-level merge makes the source of a value unreadable. ★ One exception: the depth and retry caps resolve to **the stricter of the two** (`agentkit/spec/load.go:397`, `agentkit/spec/load.go:672-684`) |
+| 5 | Overriding | not applicable — there is only one configuration, so there is no "who overrides whom" | a field-level merge makes the source of a value unreadable. ★ There is **no** "the stricter of the two" rule any more: the depth and retry caps have **one** home (`server/config.yaml`), so there is nothing to reconcile (`agentkit/spec/load.go:671-684`) |
 | 6 | Precedence | built-in defaults < config root < environment variables (★ **only a handful of variables really do this**, see §4.4) | an env var is a one-off override, a file is the project's own management under version control (`main.go:217-219`) |
 | 7 | Unknown fields | **hard error, with the line number** | `max_retry` misspelled as `max_retries` must surface at startup (`agentkit/spec/config.go:415-425`, `yaml.v3@v3.0.1/decode.go:944`) |
 | 8 | Runtime data | `.openheron/state/` | the configuration and the data share one root, so one ignore rule covers both (`agentkit/spec/defaults.go:62`, `agentkit/spec/config.go:241-253`) |
@@ -54,9 +54,9 @@
 | 13 | Durations in two tiers | the `timeout` in `llm/*.yaml` is a hard error; `debounce` / `start_timeout` / the `tools/` timeouts fall back and are recorded in `deferred` | a wrong `timeout` makes the timeout behaviour unpredictable; a wrong `debounce` only affects "how long to wait" and must not stop the program. **The fallback must be audible** (`agentkit/spec/decl/decl.go:584`, `agentkit/spec/decl/decl.go:509-518`, `agentkit/spec/reload.go:80-84`) |
 | 14 | Sub-agent spec | lives in `decl.SubAgentSpec`, the assembly layer uses it directly | `agentkit/build → agentkit/spec` is an allowed one-way dependency anyway; a second copy would "compile fine and be one value short at runtime" (`agentkit/spec/decl/decl.go:613-631`, `agentkit/spec/subagent.go:18-28`, `agentkit/build/spec.go:22`) |
 | 15 | MCP tool naming | every name exposed to the model is namespaced `mcp__<server>__<tool>` | **implemented** (see §6.7). MCP tool names are **decided by the remote server**: they collide with reserved tool names (`ls` / `execute`) and often carry dots (`github.create_issue`) — the latter does not pass the provider's function-name character set. The namespace turns "a collision" into "impossible". The prefix and the separator are constants (`agentkit/spec/decl/decl.go:336`, `:345`), the exposed name is composed in one place (`agentkit/build/mcptools.go:140`), and the provider is registered in the tool registry (`agentkit/build/tools.go:35`, `:41`) |
-| 16 | Policy matching | an agent's `disabled_tools` accepts an exact name **+** a trailing `*` prefix pattern | **implemented for the agent's `disabled_tools`** (see §6.3): `newTable` keeps the prefix patterns (`agentkit/build/policy.go:108`) and `Table.Blocked` matches them (`agentkit/build/policy.go:161`). ★ The **global deny** still matches **exactly** — that half is **still a proposal**. The agent's `mcps:` list lands in the same table as a namespace prefix (`agentkit/build/policy.go:144` `denyMCPNamespaces`) |
-| 17 | Where a tier is written | **with the tool**: each file's `allows:` names what runs **without a nod**, and everything else asks; ★ there is **no global list** any more — `policy/permissions.yaml` disappears | **implemented for MCP servers** (see §6.7): the server's own file names its exceptions in the server's own vocabulary, and the table is assembled from the configuration. ★ The **built-in** tools' half is **still a proposal** (see §6.3, §6.6) — the global `deny` is still there, and it still matches exactly. ★ a tier is a statement about **one tool**, so it belongs in that tool's file — and there it uses **the same vocabulary** (`http.yaml` says `post`, so it can say `allows: [post]`; the central file had to name the internal `request_post`). ★ the global `deny` goes with it: "not exposed" is said twice already (a file's whitelist, an agent's `disabled_tools`), and a third place is one more to keep in sync — and it was the only one that had to speak the exposed names |
-| 18 | The default tier | **`ask`, everywhere** — the code carries one allow list for the tools it knows are read-only, and a file's `allows:` replaces it for the tools that file provides | ★ the **MCP half is implemented**: the namespace's default is `ask` (`agentkit/build/policy.go:49` `TierOf`), and the table is assembled from the configuration, so the tier is answerable before the server is even up (`agentkit/build/mcptools.go:172` `mcpAllowedNames`). ★ the **built-in** tools' half — a file's `allows:` replacing the code's list — is **still a proposal** (§6.6). ★ one rule for everything: the filesystem tools, the HTTP tool and an MCP server behave the same way, and there is no per-group default to remember. ★ the code's list exists because `task` — the delegation tool — has **no file of its own**, and an agent that cannot delegate without a click cannot delegate at all. An MCP server's tools are **discovered at runtime**: openheron cannot know what `delete_repo` does, and under stdio the server is a child process with the agent's own privileges ⇒ asking by default is the safe side of the trade |
+| 16 | Prefix matching | an agent's `disabled_tools` accepts an exact name **+** a trailing `*` prefix pattern | **implemented** (see §6.3): `newTable` keeps the prefix patterns (`agentkit/build/policy.go:98`) and `Table.Blocked` matches them (`agentkit/build/policy.go:146`). ★ The **global deny** is gone with the partition, so there is no second layer left to match — the prefix syntax is the **only** place it lives. The agent's `mcps:` list lands in the same table as a namespace prefix (`agentkit/build/policy.go:129` `denyMCPNamespaces`) |
+| 17 | Where a tier is written | **with the tool**: each file's `allows:` names what runs **without a nod**, and everything else asks; ★ there is **no global list** any more — `policy/permissions.yaml` is gone | **implemented** (see §6.3, §6.6): the server's own file names its exceptions in the server's own vocabulary, the `tools/` files name theirs, and the table is assembled from the configuration. ★ a tier is a statement about **one tool**, so it belongs in that tool's file — and there it uses **the same vocabulary** (`http.yaml` says `post`, so it can say `allows: [post]`; the central file had to name the internal `request_post`). ★ the global list went with it: "not exposed" is said twice already (a file's whitelist, an agent's `disabled_tools`), and a third place is one more to keep in sync — and it was the only one that had to speak the exposed names |
+| 18 | The default tier | **`ask`, everywhere** — the code carries one allow list for the tools that have **no file of their own**, and a file's `allows:` names the exceptions for the tools that file provides | ★ **implemented** (see §6.3): the default is `ask` (`agentkit/build/policy.go:55` `TierOf`), the code's list covers exactly the tools without a file (`agentkit/build/tools.go:61` `builtinAllowedTools`), and the table is assembled from the configuration, so the tier is answerable before the server is even up (`agentkit/build/mcptools.go:172` `mcpAllowedNames`). ★ one rule for everything: the filesystem tools, the HTTP tool and an MCP server behave the same way, and there is no per-group default to remember. ★ the code's list exists because `task` — the delegation tool — has **no file of its own**, and an agent that cannot delegate without a click cannot delegate at all. An MCP server's tools are **discovered at runtime**: openheron cannot know what `delete_repo` does, and under stdio the server is a child process with the agent's own privileges ⇒ asking by default is the safe side of the trade |
 | 19 | Which MCP servers an agent loads | the agent's own `mcps:` list, in its frontmatter | **implemented**. ★ a server is a **capability**, and a capability belongs to the agent that uses it — the researcher does not need the deploy server. ★ absent = every configured server, `[]` = none (the same pointer trick as `skills`), so the common case is **one** place: write the server file, and every agent that has not narrowed its list gets it (`agentkit/spec/decl/decl.go:114`, `agentkit/spec/load.go:554` `mcpServersOf`) |
 | 20 | The knowledge base's directory key | **`corpus_dir`**, not `corpus` | ★ the value is a **directory**, and every other directory in the configuration says so: `data_dir`, `static_dir`. "Corpus" is the information-retrieval term for the collection of documents a search answers from — a user who does not know the term should still be able to read the key. ★ the old key still loads, so the rename does not break a working configuration; it says so in `deferred` (`agentkit/spec/decl/decl.go:541-554`, `agentkit/spec/load.go:209-215`) |
 
@@ -78,14 +78,15 @@ In openheron the unit is "one provider, one file" (`agentkit/spec/load.go:17`), 
 <projectRoot>/.openheron/
 ├─ agents/main.md            ← agent: frontmatter + body (the body is the prompt)
 ├─ llm/<provider>.yaml       ← vendor profile: base_url / api_key / models[]
-├─ policy/permissions.yaml   ← deny
-├─ policy/limits.yaml        ← the caps (depth, retries)
-├─ server/config.yaml        ← the process itself: address / dirs / timeouts
+├─ server/config.yaml        ← the process itself: address / dirs / timeouts / the caps
 ├─ tools/<tool>.yaml         ← http / web_search / wikipedia / kb
 ├─ mcps/<server>.yaml        ← one MCP server: command / transport / tier
 ├─ skills/<name>/SKILL.md    ← skills (resolved by their own rule, see below)
 └─ state/                    ← runtime data, never committed
 ```
+
+★ **There is no `policy/` directory.** The partition is gone: the tiers live in the files that
+**provide** the tools, and the caps live in `server/config.yaml` (§6.3, §12.2).
 
 The empty directories are **not** created automatically: a missing directory simply means "nothing to load" (`agentkit/spec/config.go:336-338`). ★ The **config root itself** is the exception — the defaulted root is created when it does not exist (`agentkit/spec/config.go:200-207`), because "no configuration yet" and "the directory is not there" are the same state.
 
@@ -133,7 +134,7 @@ The other way round, the configuration is **recommended** to enter version contr
 `.openheron-example/` in the repository root is a configuration that **loads successfully** (it declares a sub-agent team and a reasoning tier table):
 
 ```bash
-cp -r .openheron-example/{agents,llm,policy,skills} /your/project/.openheron/
+cp -r .openheron-example/{agents,llm,skills} /your/project/.openheron/
 ```
 
 Its `README.md` lists the three rules that trip people up most: an unset `${ENV}` **reminds** at startup (it does not block), `model` must carry the `<provider>/` prefix, and a duration must carry a unit.
@@ -146,7 +147,10 @@ Its `README.md` lists the three rules that trip people up most: an unset `${ENV}
 >
 > What it writes: `agents/main.md`, `agents/task.md`, `llm/<provider>.yaml`, `mcps/example.yaml`, `server/config.yaml` — and, with `--tools`, the tool configurations under `tools/` (`initcmd.go:138-150`, `initcfg/initcfg.go:77-86`, `initcfg/initcfg.go:110`, `initcfg/initcfg.go:167`, `initcfg/initcfg.go:185`).
 > ★ **The `tools/` section is opt-in**: `init` does not write it unless `--tools` is given — a provider whose configuration is absent returns nothing, so writing the file is what mounts the tool (`agentkit/build/nettools.go`).
-> ★ **There is no `policy/` section**: `permissions.yaml` would list exactly the tiers the code already defaults to, and `limits.yaml` writes 0, which means "no limit — fall back to the global value". ★ A file that says what the code already does is noise, and noise in a configuration tree is read as meaning. The partition stays — a user who wants a tier of their own writes the file, and the configuration editor scaffolds it.
+> ★ **There is no `policy/` section — the partition is gone.** The tiers are named by the
+> files that **provide** the tools (§6.3, §6.6), and the caps are already written into
+> `server/config.yaml` (§12.2). ★ A file that says what the code already does is noise,
+> and noise in a configuration tree is read as meaning.
 
 ---
 
@@ -176,7 +180,7 @@ environment variables        highest
 
 ### 4.1 Defaults come from "pre-filling the struct, then decoding"
 
-The loader **pre-fills** the configuration struct with the built-in defaults and then decodes each file on top of it (`agentkit/spec/config.go:291-299`): the `server/` section starts from `defaultServer()` (`agentkit/spec/defaults.go:58-69`), the policy from `defaultPolicy()` (`agentkit/spec/defaults.go:9-14`), the knowledge base from `defaultKB()` (`agentkit/spec/defaults.go:49-56`). `loadServer` decodes into a **copy** of the pre-filled struct (`agentkit/spec/load.go:97-104`), so a key that is absent from the file keeps its default.
+The loader **pre-fills** the configuration struct with the built-in defaults and then decodes each file on top of it (`agentkit/spec/config.go:291-299`): the `server/` section starts from `defaultServer()` (`agentkit/spec/defaults.go:58-69`), the knowledge base from `defaultKB()` (`agentkit/spec/defaults.go:49-56`). ★ There is no third prefill: the tier table is **not** a configuration section any more — it is assembled from the files that provide the tools (§6.3). `loadServer` decodes into a **copy** of the pre-filled struct (`agentkit/spec/load.go:97-104`), so a key that is absent from the file keeps its default.
 
 That "only the keys that appear are written" behaviour is not openheron's own code — it is yaml.v3's. `mappingStruct` (`yaml.v3@v3.0.1/decode.go:878`) walks the keys of the document and writes only the fields it finds:
 
@@ -244,9 +248,10 @@ Every entry is produced by `Config.deferKey` (`agentkit/spec/config.go:151-153`)
 |---|---|
 | `agentkit/spec/load.go:42` | the `${ENV}` of `api_key` is not set — the call fails with 401 when it is made |
 | `agentkit/spec/load.go:61` | `models[].summarize_at` is no longer read — the threshold belongs to the agent |
-| `agentkit/spec/load.go:337` | the model declares no `context_window` — automatic compaction is inactive for that agent |
-| `agentkit/spec/load.go:437` | a cap in `policy/limits.yaml` is looser than the global baseline — it has no effect |
-| `agentkit/spec/load.go:444` | the same, for `retry.max_retries` |
+| `agentkit/spec/load.go:213` | the key `corpus` in `tools/kb.yaml` was renamed to `corpus_dir` — the old key still loads |
+| `agentkit/spec/load.go:351` | an `${ENV}` in an MCP server's `env:` is not set — the entry is left out |
+| `agentkit/spec/load.go:372` | an MCP server's timeout is not a duration — the default is used |
+| `agentkit/spec/load.go:581` | the model declares no `context_window` — automatic compaction is inactive for that agent |
 | `agentkit/spec/reload.go:82` | a lenient duration did not parse and fell back to the default |
 
 ★ **The last message names `watch.debounce` for every lenient duration.** The bad durations are collected in one global list (`agentkit/spec/decl/decl.go:338-346`) and reported at one place (`agentkit/spec/reload.go:80-84`), so a wrong `tools/http.yaml` timeout also shows up under `watch.debounce`. Read the message as "a lenient duration was wrong", not as "the debounce was wrong".
@@ -473,8 +478,8 @@ on "a probe that happens to stop here", it depends on a named root
 configuration tree, and the first error would be "agents/main.md does not exist or could not be
 parsed" — which reads like a lost file rather than a misconfigured environment.
 
-★ **`agents/ llm/ policy/ skills/ tools/` are copied, not symlinked.** They are **inputs** (agent
-definitions, vendor protocols, permissions, tool configuration), so the test instance needs real
+★ **`agents/ llm/ skills/ tools/` are copied, not symlinked.** They are **inputs** (agent
+definitions, vendor protocols, tool configuration), so the test instance needs real
 agents to get through a whole turn; copying rather than symlinking means a crashing test cannot
 damage the development configuration (`scripts/test-backend.sh:49-73`). `server/` and `state/` are
 deliberately **not** copied — the script manages those itself.
@@ -918,7 +923,7 @@ description: Management role              # goes into the task tool description,
 model: openai/gpt-4o              # a missing model is an error — no inheritance, no fallback
 max_iterations: 20                # 0 = not declared; eino's own default (20) then applies
 subagents: [researcher]           # references other file names; the order is the order of the task description
-disabled_tools: [execute]         # affects this agent only; stored separately from the global deny, never merged
+disabled_tools: [execute]         # affects this agent only; the tool is simply not there for this agent
 skills: [refactor]                # the skills this agent may use; absent = every skill, [] = none
 mcps: [github]                    # the MCP servers this agent loads; absent = every configured server, [] = none
 
@@ -956,8 +961,9 @@ gets it**.
 ★ **The two lists are different granularities, and they compose.** `mcps:` picks the
 **servers**; `disabled_tools` picks the **tools** — and it accepts a prefix, so
 `disabled_tools: [mcp__github__*]` removes one server's tools from an agent that loads
-two (§6.3). ★ Neither of them is a "global deny": both belong to one agent — and the
-global `deny` list still matches whole names exactly (§6.3).
+two (§6.3). ★ Neither of them is a global list: both belong to one agent — and there is
+no global list left to contradict them, because "not exposed" is said in exactly two
+places (§6.3).
 
 ★ **A server that does not exist is a load-time error.** An agent naming a server under
 `mcps/` that no file declares ⇒ the load fails, and the message lists the servers that
@@ -997,9 +1003,12 @@ agent:
   max_depth: 1        # the root agent is level 0; only d < max_depth may spawn children
 ```
 
-The cap lives in **two** places — `server/config.yaml` and `policy/limits.yaml` — and the
-effective one is the **tighter** of the two (`agentkit/spec/load.go:672`,
-`:218-229`); the default is `1` (`agentkit/spec/decl/decl.go:237`).
+The cap lives in **one** place — `server/config.yaml` — and the default is `1`
+(`agentkit/spec/defaults.go:11`). ★ There is no second copy to reconcile and no "the
+stricter of the two" rule any more: `MaxDepth()` reads the server's own value
+(`agentkit/spec/load.go:671`). ★ The price is that the cap is **not hot-reloaded** —
+`server/` is a cold partition, so a change to the cap takes effect on the next start
+(§12.2).
 
 **The validation happens at startup** (`validateDepth`, `agentkit/spec/load.go:622-638`),
 and it is an **error** rather than a truncation at run time. The assembly layer uses the
@@ -1027,91 +1036,60 @@ about twenty lines (`agentkit/spec/expand.go:48-65`).
 `eino@v0.9.22/adk/middlewares/skill/skill.go:47-56`), so openheron's `agents/*.md` is
 **isomorphic** to eino's native markdown convention, not a separate set of rules.
 
-### 6.3 `policy/permissions.yaml`
+### 6.3 ★ The tiers: no partition, no global list (✅ implemented 2026-11-07)
 
-The approval tiers. The whole file is two lists, and the code's own default is:
+★ **There is no `policy/` partition.** The tiers live in the files that **provide** the tools, and
+the **default is `ask`**. Two facts, one rule:
 
-```yaml
-# The factory default (spec.defaultPolicy)
-ask:   [write_file, edit_file, execute, kb_index]
-deny:  []
-```
+| | |
+|---|---|
+| the default tier | **`ask`** — a tool nobody names asks first |
+| the exceptions | **named**: by the file that provides the tool (`allows:`), and — for the tools that have no file of their own — by the code |
 
-`defaultPolicy` is `agentkit/spec/defaults.go:9-14`, and `openheron init` writes **no**
-`policy/permissions.yaml`: the file would say exactly what the code already does, and a file
-that says nothing is read as meaning. ★ The partition is still there — the configuration
-editor scaffolds the file (`agentkit/spec/write.go:160`), and a user who wants a tier of their
-own writes it by hand.
+★ **Why `ask` is the default.** The cost of guessing wrong is asymmetric: one extra click
+against a destructive call nobody saw. A tool nobody names is a tool openheron cannot vouch
+for — an MCP server's tools are **discovered at runtime**, and under stdio the server is a
+child process with the agent's own privileges. ★ The cost of the other default is an agent
+that cannot delegate without a click, and `task` is in the code's list for exactly that
+reason: an agent that cannot delegate at all cannot do its work.
 
-★ openheron asks for **four** tools by default, not three: `write_file`, `edit_file`, `execute`
-— and **`kb_index`**, because indexing the knowledge base writes to the index on disk. As far as
-the policy is concerned it is an ordinary tool, so it goes into the list like the others.
+#### Where the exceptions come from
 
-| Field | What the loader does with it | Why |
+| Source | What it names | Vocabulary |
 |---|---|---|
-| `deny` | unioned with what is already there | it is the security boundary |
-| `ask` | **replaced wholesale** | it is a preference, not a security boundary |
+| `agentkit/build/tools.go:61` `builtinAllowedTools` | the built-in tools that have no file of their own: the filesystem readers (`ls` `read_file` `glob` `grep`), the delegation tools (`task` `write_todos`) and the skill reader (`skill`) | the exposed names |
+| `agentkit/spec/load.go:235` `AllowedTools` | the tools of the files that **are** written — `tools/http.yaml` says `allows: [request_get]`, `tools/kb.yaml` says `allows: [kb_search]` | **the file's own** |
+| `agentkit/build/mcptools.go:172` `mcpAllowedNames` | an MCP server's own tools | **the server's own** |
 
-The two rules live in the loader (`agentkit/spec/load.go:232-233`); `decl.Policy` itself is only
-two string slices (`agentkit/spec/decl/decl.go:219-222`). ★ With a single `policy/` directory
-there is only one `permissions.yaml`, so the union is a no-op today — but it is the rule the
-loader implements, and the union is what a second layer would have to live with.
+★ **A file speaks its own vocabulary.** `http.yaml` says `request_get` because that is what
+the file is about; the HTTP tool's own names are the exposed ones
+(`agentkit/spec/decl/decl.go:248-253`). An MCP server says `create_issue` — not
+`mcp__github__create_issue` — and the translation to the exposed name happens **once**,
+where the tool is mounted (`agentkit/build/mcptools.go:66` `mcpPlan`).
 
-★ The matching order is `deny → ask → **the allow fallback**`. **Only `ask` / `deny` stop
-anything** ✅ — a tool that is not named goes straight through ✅ (nudging for "read a file" or
-"list a directory" every single time makes the agent unusable ✅).
+★ **The table is assembled from the configuration**, so the tier of a tool is answerable
+**before its server is even up** (`agentkit/build/spec.go:57` `policyOf`,
+`agentkit/build/policy.go:55` `TierOf`). That is what lets the configuration editor answer
+"what tier does this tool have" for a server that is not running.
 
-★ **There is no `allow` column** ✅ — a tool that is not named is already allowed, so a column
-that says "direct" would only suggest the opposite ("not in `allow` means not allowed") ✅ —
-and the fact is the opposite ✅ ✅.
+#### "Not exposed" is said in exactly two places
 
-The gate is `agentkit/build/gate.go:65-83`: `allow` returns the endpoint untouched, `deny`
-replaces it with an error, `ask` interrupts the turn for a human. The tiers (`allow` / `ask` /
-`deny`) and the two-layer tool table are described in `docs/architecture.md` §3.4; the full
-upstream design is in `agent-design.md` (upstream) §5.
+- a **file's own `allows:` list** — what that file offers without a nod (§6.6, §6.7);
+- an **agent's `disabled_tools`** — what that agent does not get at all (§6.2).
 
-#### ★ The tier moves to the tool — and the global deny goes with it (★ proposal 2026-11-06, **not implemented** for the built-in tools; the MCP half **is implemented** — §6.7)
+⇒ A third, global list is one more place to keep in sync — and it was the worst of the
+three: the only one that had to name the tools in the **exposed** vocabulary while the
+tools' own files speak theirs.
 
-★ Everything in this subsection is a **proposal**. Today the file above holds both lists,
-and the loader reads them exactly as §11.6 records it. The proposal moves the `ask` tier
-into each tool's own file (§6.6, §6.7) — and **removes the global `deny` altogether**, so
-`policy/permissions.yaml` **disappears** and the partition holds `limits.yaml` only.
+★ **There is no `deny` tier.** The global deny list is gone with the partition
+(`agentkit/build/policy.go:15-20` — only `allow` and `ask` exist), and a tool an agent may
+not use **keeps its own tier** and says why in its `reason`: it is **this agent** that
+cannot have it, not that the tool is illegal (`agentkit/build/introspect.go:111` `verdictOf`).
 
-★ **One half of it has landed: the MCP one.** A server's own file names its exceptions
-in the server's own vocabulary, and the tier is answered from the configuration alone
-(`agentkit/build/mcptools.go:172` `mcpAllowedNames`, `agentkit/build/policy.go:49`
-`TierOf`) — §6.7. ★ The **built-in** tools' half — their tiers moving into
-`tools/filesystem.yaml` — is **still a proposal** (§6.6), and the global `deny` is
-**still there**, matching whole names exactly.
-
-★ **Why `ask` would move.** A tier is a statement about **one tool**: "this one asks
-first". That statement belongs in the tool's own file — and putting it there also puts it
-in **the same vocabulary**: `http.yaml` says `post`, so `http.yaml` can say `allows: [post]`,
-where the central file had to name the internal tool name `request_post` (§6.6).
-
-★ **Why the global `deny` would go with it.** "Not exposed" is already expressible twice,
-and neither needs a central list:
-- a **file's whitelist** picks the ones to offer out of what the provider gives (§6.6), and
-- an **agent's `disabled_tools`** says what that agent does not get (§6.2).
-
-⇒ A third place for the same decision is one more place to keep in sync — and the
-central one is the worst of the three: it is the only one that has to name the tools in
-the **exposed** vocabulary while the tools' own files speak theirs.
-
-★ **What goes with it: the outer boundary.** There is no longer a layer that a sub-agent
-cannot relax — the guarantee "the outer `deny` beats `disabled_tools`" (which today's code
-has, and which `AGENTS.md` records) has **no counterpart** in the proposal. What remains
-is a narrowing the agent's own author wrote. ⇒ a tool that must be gone **everywhere**
-comes out of the file that offers it.
-
-★ **`ask:` and `deny:` in this file would be load-time errors**, with messages that name
-the new homes. A key that is silently ignored is the "configured but not in effect" case
-§4.3 is about.
-
-★ The assembled policy keeps **one** list (`allow` / `ask`), and the `ask` half is filled
-by the providers — in `agentkit/build`, not in `agentkit/spec`: only the provider knows its
-file's vocabulary and the exposed names behind it, and `agentkit/spec` may not import `kb`
-(the iron rule) nor eino (where the filesystem tool names live).
+★ **The gate wraps everything the exception list does not name**
+(`agentkit/build/gate.go:43` `newApprovalMiddleware`): `allow` returns the endpoint
+untouched, `ask` interrupts the turn for a human. There is no third branch — a tool that
+is not in the agent's tool set never reaches the gate.
 
 #### ★ Prefix matching (★ decided 2026-11-06, ✅ implemented for an agent's `disabled_tools`)
 
@@ -1133,22 +1111,16 @@ file's vocabulary and the exposed names behind it, and `agentkit/spec` may not i
 
 ★ **Where it lives.** The loader refuses the shapes that are not patterns
 (`agentkit/spec/load.go:110` `validateDisabledTools`, the syntax itself in
-`agentkit/spec/decl/decl.go:369` `ParseToolNamePattern`); the table keeps the prefix
-patterns next to the exact names (`agentkit/build/policy.go:108` `newTable`), and
-`Table.Blocked` matches them (`agentkit/build/policy.go:161`).
+`agentkit/spec/decl/decl.go:341` `ParseToolNamePattern`); the table keeps the prefix
+patterns next to the exact names (`agentkit/build/policy.go:98` `newTable`), and
+`Table.Blocked` matches them (`agentkit/build/policy.go:146`).
 
 ★ **The agent's `mcps:` list lands in the same table, as a namespace prefix.** A server
 the agent does not list is denied by the prefix `mcp__<server>__`
-(`agentkit/build/policy.go:144` `denyMCPNamespaces`), and the reason it reports is
-`mcps` (`agentkit/build/policy.go:247` `LayerMCPScope`). ★ The narrowing is reported
+(`agentkit/build/policy.go:129` `denyMCPNamespaces`), and the reason it reports is
+`mcps` (`agentkit/build/policy.go:228` `LayerMCPScope`). ★ The narrowing is reported
 **before** the tool rule: the server is not there at all, so the finer rules would have
 said nothing about it.
-
-★ **The global `deny` list still matches exactly.** The prefix syntax belongs to an
-agent's `disabled_tools`; `policy/permissions.yaml`'s `deny` is still a list of whole
-names, and the table looks it up by name (`agentkit/build/policy.go:161` — the `denied`
-map is a lookup, not a prefix match). ⇒ **"the prefix pattern" means one thing only
-today: the inner layer.**
 
 ★ **This is the one remaining place the prefix syntax earns its keep.** The MCP tier
 lives in the server's own file, where a file's own `allows:` covers a whole class
@@ -1157,19 +1129,6 @@ MCP tools" is the one statement that is about a **namespace** rather than about 
 
 ★ **It adds no tier and reorders none** — the pattern only decides **whether an entry
 matches a name**.
-
-★ **`policy/limits.yaml` is not part of this** — it holds counts, not tool names, so its
-matching semantics stay as they are.
-
-#### Which files `policy/` accepts
-
-| File | What happens |
-|---|---|
-| `limits.yaml` | ✅ **the limit rules** (caps on counts), see §12.2 |
-| `permissions.yaml` | ★ **gone in the proposal** — the tiers moved into the tools' own files, and the global `deny` went with them. ★ It is **still there today**, and it still matches whole names exactly |
-| any other file name | **an error** — a file-name whitelist is stronger than a key-level check: a typo is "the file does not exist", and it fails the moment it is written, instead of surfacing when some key is finally read |
-
-The whitelist is `agentkit/spec/load.go:243`: `policy/ only accepts permissions.yaml and limits.yaml` — in the proposal it would accept `limits.yaml` only.
 
 ### 6.4 `server/config.yaml`
 
@@ -1246,8 +1205,8 @@ parse", not as "the watcher misfired".
 
 > **★ The project root vs the config root**: `Service.ProjectRoot()` (`agentkit/spec/config.go:239`)
 > is the directory the static assets and the agent's working directory live in;
-> `Service.Root()` (`agentkit/spec/config.go:229`) is the configuration root — `policy/`, `tools/`
-> and `state/` are under it. **They are different**: `static_dir` resolves against the former,
+> `Service.Root()` (`agentkit/spec/config.go:229`) is the configuration root — `tools/`
+> `mcps/` and `state/` are under it. **They are different**: `static_dir` resolves against the former,
 > `state/` against the latter. Mixing them up is exactly what "the front end 404s" and "the agent
 > is told to work inside `.openheron`" come from.
 
@@ -1255,7 +1214,7 @@ parse", not as "the watcher misfired".
 `DATA_DIR`, `PROJECT_ROOT`, `FRONTEND_MODE`, `STATIC_DIR` (`main.go:217-219`, `main.go:327`,
 `main.go:341`); §4.4 lists the whole set.
 
-★ **Unlike `tools/` and `policy/`, `server/` has no file-name whitelist.** Every `.yaml` under it
+★ **Unlike `tools/` and `mcps/`, `server/` has no file-name whitelist.** Every `.yaml` under it
 is decoded into the same `decl.Server` struct (`agentkit/spec/load.go:97-104`), so a stray
 `server/typo.yaml` is merged into the configuration rather than rejected. `server/config.yaml` is
 the convention, not a rule the loader enforces.
@@ -1389,19 +1348,22 @@ wholesale), now they are unrelated.
 did not move**: it lives in the runtime data (`state/kb/<index>/`,
 `agentkit/build/kb.go:42`), and it lives and dies with the corpus.
 
-#### ★ The names each file speaks — and the names the model sees (★ the built-in half is a proposal 2026-11-06, **not implemented**; the `mcps/` row **is implemented** — §6.7)
+#### ★ The names each file speaks — and the names the model sees (✅ implemented)
 
 A file declares its tiers in **its own vocabulary**, and the provider maps that to the
 name the model sees. The two are not the same, and that is the point:
 
 | File | The vocabulary the file speaks | The names the model sees |
 |---|---|---|
-| `filesystem.yaml` | `write_file` `execute` … | the same |
 | `http.yaml` | the method: `post` | `request_post` |
 | `web_search.yaml` | the provider: `duckduckgo` | `duckduckgo_search` |
 | `wikipedia.yaml` | — (one tool) | `wikipedia_search` |
 | `kb.yaml` | `kb_search` `kb_index` | the same |
 | `mcps/<server>.yaml` | the server's own name: `create_issue` | `mcp__github__create_issue` |
+
+★ **The filesystem tools have no row, and that is the point.** They come from the
+framework's middleware rather than from a provider, so they have **no file of their
+own** — their exceptions live in the code (§6.3), and only there.
 
 ★ **Before the split, this table did not exist** — the policy file spoke the third
 column while the tool's own file spoke the second, so `http.yaml` said `post` and
@@ -1412,15 +1374,13 @@ differently than the file says.
 ⇒ **A file's `tools:` and `allows:` are written in the second column.** The provider
 translates; nothing else has to know the exposed name.
 
-★ **The last row is the one that is implemented today.** The MCP provider composes the
-exposed name in exactly one place (`agentkit/build/mcptools.go:140` `mcpExposedName`),
-so the provider and the projection cannot disagree about what a tool is called — and
-the file's own `allows:` names the server's **own** tools, never the exposed ones
-(`agentkit/build/mcptools.go:122` `mcpOffers`). ★ The rows above it are still the
-proposal: the built-in tools' tiers live in one central list today (§6.6's
-`tools/filesystem.yaml`).
+★ **The MCP provider composes the exposed name in exactly one place**
+(`agentkit/build/mcptools.go:140` `mcpExposedName`), so the provider and the projection
+cannot disagree about what a tool is called — and the file's own `allows:` names the
+server's **own** tools, never the exposed ones
+(`agentkit/build/mcptools.go:122` `mcpOffers`).
 
-(The exposed names are `agentkit/spec/decl/decl.go:289-294`, `kb/tools.go:16-17` and eino's
+(The exposed names are `agentkit/spec/decl/decl.go:252-257`, `kb/tools.go:16-17` and eino's
 `adk/middlewares/filesystem/filesystem.go:38-46`.)
 
 #### ★ The keys every file carries (★ the built-in half is a proposal 2026-11-06, **not implemented**; the `mcps/` half **is implemented** — §6.7)
