@@ -2,9 +2,11 @@ package build
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -403,4 +405,88 @@ func findTool(t *testing.T, batch []tool.BaseTool, name string) tool.BaseTool {
 	}
 	t.Fatalf("%s is missing from the batch: %v", name, toolNames(batch))
 	return nil
+}
+
+// TestTheServerFileOnDiskIsWhatTheLoaderProduces loads a real
+// `mcps/<server>.yaml` through the real loader.
+//
+// ★ The other end-to-end test builds its configuration in Go, because the
+//
+//	command has to name the test binary's own path and the environment has
+//	to carry the flag that turns the child into a server — neither exists
+//	before the test runs. This one writes the file and lets the loader
+//	read it, so the file's name, its fields and the loader's validation
+//	are all part of what is proved.
+func TestTheServerFileOnDiskIsWhatTheLoaderProduces(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("the test binary's path: %v", err)
+	}
+
+	root := t.TempDir()
+	base := filepath.Join(root, ".openheron")
+	writeFile(t, filepath.Join(base, "llm", "test.yaml"),
+		"type: openai\nbase_url: https://example.invalid\nmodels:\n  - id: small\n")
+	writeFile(t, filepath.Join(base, "agents", "main.md"),
+		"---\nmodel: test/small\n---\nbody\n")
+	writeFile(t, filepath.Join(base, "mcps", "demo.yaml"), fmt.Sprintf(
+		"transport: stdio\n"+
+			"command: %s\n"+
+			"args: [\"-test.run=TestNothingRunsInTheChild\"]\n"+
+			"env:\n  %s: \"1\"\n"+
+			"allows: [read_issue]\n"+
+			"timeout: 30s\n"+
+			"call_timeout: 60s\n",
+		self, mcpServerEnv))
+
+	svc, err := spec.NewService(base, root)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	cfg, err := svc.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	srv, ok := cfg.MCPs["demo"]
+	if !ok {
+		t.Fatalf("the file's name is the server's name: %v", cfg.MCPs)
+	}
+	if srv.Transport != decl.MCPTransportStdio {
+		t.Fatalf("transport = %q, want stdio", srv.Transport)
+	}
+	if srv.Timeout.Value != 30*time.Second {
+		t.Fatalf("timeout = %s, want 30s", srv.Timeout.Value)
+	}
+	if srv.CallTimeout.Value != 60*time.Second {
+		t.Fatalf("call_timeout = %s, want 60s", srv.CallTimeout.Value)
+	}
+	if len(srv.Allows) != 1 || srv.Allows[0] != "read_issue" {
+		t.Fatalf("allows = %v, want the server's own name", srv.Allows)
+	}
+
+	// ★ The file's tier reaches the gate under the composed name.
+	b := newTestBuilderWithConfig(t, cfg)
+	if got := b.mustPolicy(t).TierOf("mcp__demo__read_issue"); got != TierAllow {
+		t.Fatalf("tier = %q, want allow", got)
+	}
+	if got := b.mustPolicy(t).TierOf("mcp__demo__delete_repo"); got != TierAsk {
+		t.Fatalf("tier = %q, want ask", got)
+	}
+
+	batch, err := b.tools.Build(context.Background(), toolEnv{cfg: cfg})
+	if err != nil {
+		t.Fatalf("the provider must not fail on a reachable server: %v", err)
+	}
+	findTool(t, batch, "mcp__demo__read_issue")
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
