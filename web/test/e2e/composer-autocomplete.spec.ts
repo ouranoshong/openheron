@@ -194,8 +194,12 @@ test("键盘移动超出可视区时列表自动跟随", async ({ page }) => {
   await box.click()
   await page.keyboard.type("/")
   const options = page.locator(COMPOSER_OPTION)
-  // Every command but /stop, which only makes sense while a run is live.
-  await expect(options).toHaveCount(10)
+  // Every command but /stop, which only makes sense while a run is live:
+  // new, attach, settings, agents, mcps, compact, skill, review, test,
+  // explain, fix — eleven. ★ This count is a **fixed expectation**: adding a
+  // command means adding one here, which is the point (a command that
+  // silently stops being offered would otherwise go unnoticed).
+  await expect(options).toHaveCount(11)
 
   for (let i = 0; i < 8; i++) await page.keyboard.press("ArrowDown")
   await expect(options.nth(8)).toHaveAttribute("aria-selected", "true")
