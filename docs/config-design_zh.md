@@ -2196,7 +2196,7 @@ agentkit/spec/write.go:persist.AtomicWrite
 
 ### 11.5 回归
 
-★ **`go test ./...` 是绿的**：根模块里 **971** 条顶层用例，**20** 个包有测试。
+★ **`go test ./...` 是绿的**：根模块里 **977** 条顶层用例，**20** 个包有测试。
 
 ★ **`go test -race ./...` 也是绿的** —— 它曾经不是，而检测器报出的那四处竞态值得写
 下来，因为它们是同一个错误的不同形态：**锁就在那儿，只有一条路径没走它。**
@@ -2438,7 +2438,7 @@ retry:
 | 未知字段报错 | `decodeStrict` 打开 `yaml.Decoder.KnownFields`（`agentkit/spec/config.go:415`） |
 | `deferred` 列表在启动时被打印 | `main.go:198` |
 | `agentkit/spec` 的顶层用例数 | `grep -rhoP '^func \KTest\w+' agentkit/spec/ \| sort -u \| wc -l` → **164** |
-| 全仓顶层用例数 | `grep -rhoP '^func \KTest\w+' --include='*_test.go' . \| sort -u \| wc -l` → **972**，其中一条属于嵌套模块 `sandbox-kit/examples/demo-project` ⇒ 根模块里是 **971** |
+| 全仓顶层用例数 | `grep -rhoP '^func \KTest\w+' --include='*_test.go' . \| sort -u \| wc -l` → **978**，其中一条属于嵌套模块 `sandbox-kit/examples/demo-project` ⇒ 根模块里是 **977** |
 | 根模块里有测试的包数 | `go list -f '{{.ImportPath}} {{len .TestGoFiles}} {{len .XTestGoFiles}}' ./... \| awk '$2+$3>0' \| wc -l` → **20** |
 | 整个测试套件是绿的 | `go test ./...` → 每个包都是 `ok` |
 | `-race` 现在是绿的 | `go test -race ./...` → 每个包都是 `ok`；修复过程见 §11.5 |

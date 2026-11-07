@@ -946,9 +946,16 @@ the contract on its own — the extractor does not read one language to help the
 
 ### 5.5 Frontend unit tests
 
-`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **14 test files, 271
+`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **21 test files, 327
 cases**, covering the pure layers: `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
 `thinking.ts` / `turns.ts` / `approval.ts` / `settings-validate.ts` and friends.
+
+★ **The client keeps no list of the sections it may edit.** The **manifest** is the
+truth — the server owns the partition table (`agentkit/spec/config.go`'s `Categories`) —
+and the client passes the manifest's editable categories into the validator
+(`web/src/lib/settings-validate.ts`'s `validatePath(path, editable)`). ★ A client that
+keeps its own list is a second truth, and the day a partition is added the client says
+it does not exist: that is where "mcps/ is not editable" came from.
 
 ★ `store.test.ts` exercises the **whole zustand store**, so it stubs
 `globalThis.localStorage` and `globalThis.fetch` before running
@@ -961,7 +968,7 @@ do not touch" assertions.
 
 ### 5.6 E2E
 
-`make test-e2e` → `playwright test`, **8 specs, 124 cases**: `chat` `multi-agent`
+`make test-e2e` → `playwright test`, **12 specs, 152 cases**: `chat` `multi-agent`
 `agents` `composer-meta` `composer-autocomplete` `settings` `history` `scroll`.
 
 Playwright starts two servers itself (`webServer` in `playwright.config.ts`): the fake

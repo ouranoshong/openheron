@@ -4,8 +4,9 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { SectionPicker } from "@/components/settings/file-list"
-import { useSettings } from "@/lib/settings-store"
+import { selectEditableSections, useSettings } from "@/lib/settings-store"
 import { fileTemplate, resolveTemplate, suggestPath, validatePath, type Section } from "@/lib/settings-validate"
+import { useShallow } from "zustand/react/shallow"
 
 export function NewFileButton() {
   const [open, setOpen] = useState(false)
@@ -21,6 +22,9 @@ export function NewFileButton() {
 
 export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenChange?: (v: boolean) => void }) {
   const templates = useSettings((s) => s.manifest?.templates)
+  // ★ The manifest says which sections may be edited — the server owns the
+  //   partition table, and a client that keeps its own list drifts from it.
+  const editable = useSettings(useShallow(selectEditableSections))
   const modelRefs = useSettings((s) => s.manifest?.modelRefs)
   const newFile = useSettings((s) => s.newFile)
 
@@ -33,7 +37,7 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
   const [edited, setEdited] = useState(false)
 
   const path = suggestPath(name, section)
-  const pathIssues = path ? validatePath(path) : [{ line: 1, message: "enter a file name" }]
+  const pathIssues = path ? validatePath(path, editable) : [{ line: 1, message: "enter a file name" }]
 
   const reset = () => {
     setSection("policy")

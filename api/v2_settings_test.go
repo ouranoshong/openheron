@@ -276,6 +276,50 @@ func TestSettingsItemAcceptsLimitsYaml(t *testing.T) {
 	}
 }
 
+// ★ The mcps/ partition is editable, and it does not have to exist yet:
+//
+//	the write creates the directory, so a user who never had an MCP server
+//	can still add one from the editor.
+func TestSettingsCreatesTheMCPPartition(t *testing.T) {
+	srv, _, cfgRoot := settingsEnvNoWatch(t)
+
+	if _, err := os.Stat(filepath.Join(cfgRoot, spec.DirMCP)); err == nil {
+		t.Fatal("the partition must not exist yet")
+	}
+
+	body := settingsWriteBody{
+		Path:    "mcps/github.yaml",
+		Content: "transport: stdio\ncommand: npx\n",
+	}
+	got := callJSON(t, srv, "PUT", "/v2/settings/item", body)
+	if got.code != consts.StatusOK {
+		t.Fatalf("= %d (%s)", got.code, got.body)
+	}
+	onDisk, err := os.ReadFile(filepath.Join(cfgRoot, "mcps", "github.yaml"))
+	if err != nil {
+		t.Fatalf("the file must be there: %v", err)
+	}
+	if !strings.Contains(string(onDisk), "command: npx") {
+		t.Fatalf("the file = %q", onDisk)
+	}
+}
+
+// ★ The file's name IS the server's name, so a name that could not be
+//
+//	read back is refused.
+func TestSettingsRefusesAnUnreadableServerName(t *testing.T) {
+	srv, _, _ := settingsEnvNoWatch(t)
+
+	body := settingsWriteBody{
+		Path:    "mcps/github__x.yaml",
+		Content: "transport: stdio\ncommand: npx\n",
+	}
+	got := callJSON(t, srv, "PUT", "/v2/settings/item", body)
+	if got.code == consts.StatusOK {
+		t.Fatalf("a server name with a run of underscores must be refused: %s", got.body)
+	}
+}
+
 func TestSettingsSaveLands(t *testing.T) {
 	srv, svc, cfgRoot := settingsEnv(t)
 	_ = svc

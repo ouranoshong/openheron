@@ -841,8 +841,14 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 ### 5.5 前端单元测试
 
 `cd web && bun run test:unit`（`bun test test/*.test.ts`）——
-**14 个测试文件、271 个用例**，覆盖 `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
+**21 个测试文件、327 个用例**，覆盖 `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
 `thinking.ts` / `turns.ts` / `approval.ts` / `settings-validate.ts` 等纯函数层。
+
+★ **客户端自己不留「哪些分区可编辑」的清单。** 真相是 **manifest** —— 分区表归服务端
+所有（`agentkit/spec/config.go` 的 `Categories`）—— 客户端把 manifest 里可编辑的分区
+传给校验器（`web/src/lib/settings-validate.ts` 的 `validatePath(path, editable)`）。
+★ 客户端自己留一份清单就是**第二份真相**：分区一加上来，客户端就说它不存在 ——
+「mcps/ is not editable」就是这么来的。
 
 ★ `store.test.ts` 测的是**整个 zustand store**，所以它在跑之前会
 stub 掉 `globalThis.localStorage` 和 `globalThis.fetch`（`store.test.ts:35-84`）。
@@ -853,7 +859,7 @@ Bun 本身没有 `localStorage`，不 stub 会炸。
 
 ### 5.6 E2E
 
-`make test-e2e` → `playwright test`，**8 个 spec、124 个用例**：
+`make test-e2e` → `playwright test`，**12 个 spec、152 个用例**：
 `chat` `multi-agent` `agents` `composer-meta` `composer-autocomplete`
 `settings` `history` `scroll`。
 

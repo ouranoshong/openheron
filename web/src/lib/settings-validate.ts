@@ -11,23 +11,41 @@ export function blocking(issues: readonly Issue[]): Issue[] {
   return issues.filter((i) => (i.severity ?? "error") === "error")
 }
 
-export type Section = "policy" | "agents" | "llm" | "server" | "tools"
+// The sections the client knows how to validate.
+//
+// ★ The **manifest** is the truth about which sections exist and which
+//   ones are editable — the server owns the partition table. A client that
+//   keeps its own list is a second truth, and the day a partition is added
+//   the client says it does not exist. So the callers pass the manifest's
+//   editable categories in, and these are only the fallback for a caller
+//   that has no manifest yet.
+export type KnownSection = "policy" | "agents" | "llm" | "server" | "tools" | "mcps"
 
-const ALLOWED_FILES: Record<Section, readonly string[]> = {
+export type Section = KnownSection | (string & {})
+
+const ALLOWED_FILES: Partial<Record<KnownSection, readonly string[]>> = {
   policy: ["permissions.yaml", "limits.yaml"],
   agents: [],
   llm: [],
   server: ["config.yaml"],
   tools: ["http.yaml", "web_search.yaml", "wikipedia.yaml", "kb.yaml"],
+  mcps: [],
 }
 
-export const EDITABLE_SECTIONS: readonly Section[] = ["policy", "agents", "llm", "tools"]
+export const EDITABLE_SECTIONS: readonly string[] = ["policy", "agents", "llm", "tools", "mcps"]
 
-export function isEditable(section: string): boolean {
-  return (EDITABLE_SECTIONS as readonly string[]).includes(section)
+export function isEditable(section: string, editable: readonly string[] = EDITABLE_SECTIONS): boolean {
+  return editable.includes(section)
 }
 
-export function validatePath(path: string): Issue[] {
+// The server name is the file's name without the extension.
+//
+// ★ It may not contain a run of underscores: the exposed name
+//   "mcp__a__b__x" could not be read back — is that the server "a" with
+//   the tool "b__x", or the server "a__b" with the tool "x"?
+const MCP_SERVER_NAME = /^[a-z0-9]+(_[a-z0-9]+)*$/
+
+export function validatePath(path: string, editable: readonly string[] = EDITABLE_SECTIONS): Issue[] {
   const issues: Issue[] = []
   const at = (line: number, message: string) => issues.push({ line, message })
 
@@ -51,7 +69,7 @@ export function validatePath(path: string): Issue[] {
   }
 
   const [section, file] = segments as [string, string]
-  if (!isEditable(section)) {
+  if (!isEditable(section, editable)) {
     at(1, `${section}/ is not editable${section === "server" ? " — changes need a restart" : ""}`)
     return issues
   }
@@ -60,7 +78,7 @@ export function validatePath(path: string): Issue[] {
     return issues
   }
 
-  const allowed = ALLOWED_FILES[section as Section] ?? []
+  const allowed = ALLOWED_FILES[section as KnownSection] ?? []
   if (allowed.length > 0 && !allowed.includes(file)) {
     at(1, `${section}/ only accepts ${allowed.join(", ")}`)
   }
@@ -69,6 +87,15 @@ export function validatePath(path: string): Issue[] {
   }
   if (section === "llm" && !file.endsWith(".yaml")) {
     at(1, "llm/ files must end with .yaml")
+  }
+  if (section === "mcps") {
+    // ★ The file's name IS the server's name, so it has to be a name that
+    //   could be read back.
+    if (!file.endsWith(".yaml")) {
+      at(1, "mcps/ files must end with .yaml")
+    } else if (!MCP_SERVER_NAME.test(file.slice(0, -".yaml".length))) {
+      at(1, "the server name must match ^[a-z0-9]+(_[a-z0-9]+)*$ — a run of underscores could not be read back")
+    }
   }
   return issues
 }
@@ -80,6 +107,7 @@ export function suggestPath(fileName: string, section: Section): string {
   if (section === "llm" && !name.endsWith(".yaml")) name = `${name}.yaml`
   if (section === "policy" && !name.endsWith(".yaml")) name = `${name}.yaml`
   if (section === "tools" && !name.endsWith(".yaml")) name = `${name}.yaml`
+  if (section === "mcps" && !name.endsWith(".yaml")) name = `${name}.yaml`
   return `${section}/${name}`
 }
 
@@ -128,9 +156,27 @@ export function validateContent(
       return path.endsWith("limits.yaml") ? validateLimits(content) : validatePolicy(content)
     case "tools":
       return validateTool(path, content)
+    case "mcps":
+      return validateMCP(content)
     default:
       return []
   }
+}
+
+// ── mcps/<server>.yaml ────────────────────────────────────────────────────
+
+function validateMCP(content: string): Issue[] {
+  const issues: Issue[] = []
+  if (!hasYamlDocument(content)) {
+    // ★ A file under mcps/ **defines** a server, so a file with no
+    //   document is not a server that is off — it is a configuration that
+    //   does not load.
+    issues.push({
+      line: 1,
+      message: "the file has no YAML content — a file under mcps/ defines a server, so it has to hold one",
+    })
+  }
+  return issues
 }
 
 // ── tools/<tool>.yaml ─────────────────────────────────────────────────────
@@ -464,8 +510,9 @@ export function check(
   path: string,
   content: string,
   catalog: ReasoningCatalog = {},
+  editable: readonly string[] = EDITABLE_SECTIONS,
 ): ValidationResult {
-  const pathIssues = validatePath(path)
+  const pathIssues = validatePath(path, editable)
   if (pathIssues.length > 0) {
     return { ok: false, issues: pathIssues, needsServer: false }
   }

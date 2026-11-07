@@ -1141,6 +1141,10 @@ export function startFakeServer(port = 0): FakeServer {
       { id: "llm", label: "Providers", editable: true, hot: true },
       { id: "server", label: "Server", editable: false, hot: false, note: "not hot-reloaded; changes apply on restart" },
       { id: "tools", label: "Tools", editable: true, hot: true },
+      // ★ The MCP partition, exactly as the real server ships it: editable
+      //   and hot. The client's own list of editable sections is a second
+      //   truth — it is what made "mcps/ is not editable" appear.
+      { id: "mcps", label: "MCP servers", editable: true, hot: true },
     ],
     items: [
       { path: "policy/permissions.yaml", exists: true, hot: true, revision: "r1" },
@@ -1155,6 +1159,7 @@ export function startFakeServer(port = 0): FakeServer {
         "# 限制规则：数量上的上限。\n# 只能收紧；放宽请改 server/config.yaml。\nagent:\n  max_depth: 0\nretry:\n  max_retries: 0\n",
       agents: "---\nmodel: \ndescription: \n---\n\n# available models: deepseek/flash\n",
       llm: "type: openai\nbase_url: \napi_key: ${}\nmodels: []\n",
+      mcps: "transport: stdio\ncommand: mcp-example-server\nargs: []\ntimeout: 30s\ncall_timeout: 60s\n",
       // ★ The tools section template is **nothing but comments**, exactly as
       //   the real server ships it. A file built from it has no YAML
       //   document at all, so the skeleton the dialog must offer is the

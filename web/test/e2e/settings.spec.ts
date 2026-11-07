@@ -267,6 +267,32 @@ test.describe("the new file dialog", () => {
     await expect(page.locator(STATUS)).not.toContainText(/EOF/)
   })
 
+  // ★ The MCP partition is editable and hot, and the **manifest** says so.
+  //   A client that keeps its own list of editable sections is a second
+  //   truth — and the day a partition is added, the client says it does
+  //   not exist. That is exactly the bug this spec pins down.
+  test("a file under mcps/ can be created, and the directory is created with it", async ({ page }) => {
+    await openNewFile(page)
+    await page.getByRole("button", { name: "MCP servers", exact: true }).click()
+    await page.locator(NEW_NAME).fill("github")
+
+    // ★ The path is the server's name: the file's name IS the server's name.
+    await expect(page.locator(NEW_NAME).locator("xpath=..")).toContainText("mcps/github.yaml")
+    await expect(page.locator(NEW_CREATE)).toBeEnabled()
+
+    await page.click(NEW_CREATE)
+    await expect(page.locator(EDITOR)).toContainText("transport: stdio")
+  })
+
+  test("a server name that could not be read back is refused", async ({ page }) => {
+    await openNewFile(page)
+    await page.getByRole("button", { name: "MCP servers", exact: true }).click()
+    await page.locator(NEW_NAME).fill("github__x")
+
+    await expect(page.locator(NEW_DIALOG)).toContainText(/could not be read back/i)
+    await expect(page.locator(NEW_CREATE)).toBeDisabled()
+  })
+
   test("a tools file with no YAML content is refused before the round trip", async ({ page }) => {
     await openNewFile(page)
     await nameToolsFile(page, "http.yaml")

@@ -11,7 +11,7 @@ import {
   type SettingsItem,
   type SettingsManifest,
 } from "@/lib/settings-api"
-import { blocking, check, type Issue, type ReasoningCatalog } from "@/lib/settings-validate"
+import { blocking, check, EDITABLE_SECTIONS, type Issue, type ReasoningCatalog } from "@/lib/settings-validate"
 
 export type SaveState =
   | "idle"
@@ -96,7 +96,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   edit(text) {
     set((s) => ({
       draft: text,
-      issues: s.selected ? check(s.selected, text, catalogOf(s)).issues : [],
+      issues: s.selected ? check(s.selected, text, catalogOf(s), editableOf(s)).issues : [],
       saveState: "idle",
       saveError: undefined,
       conflict: undefined,
@@ -190,6 +190,14 @@ function catalogOf(s: SettingsState): ReasoningCatalog {
   return s.manifest?.reasoningLevels ?? NO_CATALOG
 }
 
+// editableOf is the manifest's own answer to "which sections may be
+// edited" — the server owns the partition table.
+function editableOf(s: SettingsState): readonly string[] {
+  const cats = s.manifest?.categories
+  if (!cats) return EDITABLE_SECTIONS
+  return cats.filter((c) => c.editable).map((c) => c.id)
+}
+
 function applyItem(set: Set, path: string, item: SettingsItemBody): void {
   set((s) => ({
     saved: item.content,
@@ -197,7 +205,7 @@ function applyItem(set: Set, path: string, item: SettingsItemBody): void {
     revision: item.revision ?? "",
     exists: item.exists,
     hot: item.hot,
-    issues: item.exists ? check(path, item.content, catalogOf(s)).issues : [],
+    issues: item.exists ? check(path, item.content, catalogOf(s), editableOf(s)).issues : [],
     serverIssues: [],
     saveState: "idle",
     saveError: undefined,
@@ -235,6 +243,22 @@ export function selectItems(s: SettingsState): SettingsItem[] {
 
 export function selectCategories(s: SettingsState): SettingsCategory[] {
   return s.manifest?.categories ?? EMPTY_CATEGORIES
+}
+
+/**
+ * The sections the client may edit.
+ *
+ * ★ The **manifest** is the truth: the server owns the partition table, and
+ *   a client that keeps its own list is a second truth — the day a
+ *   partition is added, the client says it does not exist.
+ *
+ * The returned array is new on every call, so a component that selects it
+ * needs `useShallow`.
+ */
+export function selectEditableSections(s: SettingsState): readonly string[] {
+  const cats = s.manifest?.categories
+  if (!cats) return EDITABLE_SECTIONS
+  return cats.filter((c) => c.editable).map((c) => c.id)
 }
 
 export function selectSelectedItem(s: SettingsState): SettingsItem | undefined {

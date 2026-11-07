@@ -2380,7 +2380,7 @@ not exist is worse than not listing it.
 
 ### 11.5 Regression
 
-★ **`go test ./...` is green**: **971** top-level cases in the root module, **20**
+★ **`go test ./...` is green**: **977** top-level cases in the root module, **20**
 packages carry tests.
 
 ★ **`go test -race ./...` is green as well** — it was not, and the four races it
@@ -2645,7 +2645,7 @@ but only two actually run" is the hardest class of problem to track down.
 | unknown fields error | `decodeStrict` turns on `yaml.Decoder.KnownFields` (`agentkit/spec/config.go:415`) |
 | the `deferred` list is printed at startup | `main.go:198` |
 | the number of top-level cases in `agentkit/spec` | `grep -rhoP '^func \KTest\w+' agentkit/spec/ \| sort -u \| wc -l` → **164** |
-| the number of top-level cases in the whole repository | `grep -rhoP '^func \KTest\w+' --include='*_test.go' . \| sort -u \| wc -l` → **972**, of which one belongs to the nested module `sandbox-kit/examples/demo-project` ⇒ **971** in the root module |
+| the number of top-level cases in the whole repository | `grep -rhoP '^func \KTest\w+' --include='*_test.go' . \| sort -u \| wc -l` → **978**, of which one belongs to the nested module `sandbox-kit/examples/demo-project` ⇒ **977** in the root module |
 | the number of packages carrying tests in the root module | `go list -f '{{.ImportPath}} {{len .TestGoFiles}} {{len .XTestGoFiles}}' ./... \| awk '$2+$3>0' \| wc -l` → **20** |
 | the whole test suite is green | `go test ./...` → every package `ok` |
 | `-race` is green now | `go test -race ./...` → every package is `ok`; §11.5 records what each of the four races was |

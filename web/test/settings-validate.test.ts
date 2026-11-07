@@ -28,9 +28,29 @@ describe("validatePath", () => {
       "llm/deepseek.yaml",
       "agents/main.md",
       "tools/http.yaml",
+      "mcps/github.yaml",
     ]) {
       expect(validatePath(p)).toEqual([])
     }
+  })
+
+  // ★ The **manifest** is the truth about which sections are editable —
+  //   the server owns the partition table. The client passes the
+  //   manifest's categories in, so a partition added on the server is
+  //   editable the moment the manifest says so.
+  test("the editable sections come from the manifest", () => {
+    expect(validatePath("mcps/github.yaml", ["policy", "mcps"])).toEqual([])
+    expect(validatePath("mcps/github.yaml", ["policy"])[0]!.message).toContain("not editable")
+    expect(validatePath("tools/http.yaml", ["policy", "mcps"])[0]!.message).toContain("not editable")
+  })
+
+  // ★ The file's name IS the server's name, and a name with a run of
+  //   underscores could not be read back.
+  test("the server name has to be one that could be read back", () => {
+    expect(validatePath("mcps/github.yaml")).toEqual([])
+    expect(validatePath("mcps/github__x.yaml")[0]!.message).toContain("read back")
+    expect(validatePath("mcps/GitHub.yaml")[0]!.message).toContain("read back")
+    expect(validatePath("mcps/github.txt")[0]!.message).toContain(".yaml")
   })
 
   test("rejects server/ with the reason attached", () => {
@@ -68,6 +88,7 @@ describe("validatePath", () => {
     expect(isEditable("agents")).toBe(true)
     expect(isEditable("llm")).toBe(true)
     expect(isEditable("tools")).toBe(true)
+    expect(isEditable("mcps")).toBe(true)
     expect(isEditable("server")).toBe(false)
     expect(isEditable("skills")).toBe(false)
   })

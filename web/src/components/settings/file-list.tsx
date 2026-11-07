@@ -16,6 +16,7 @@ const LABEL: Record<string, string> = {
   llm: "Providers",
   server: "Server",
   tools: "Tools",
+  mcps: "MCP servers",
 }
 
 export function SettingsFileList() {
