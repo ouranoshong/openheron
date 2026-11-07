@@ -20,9 +20,20 @@
 > `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md`（Docker Sandbox Kit 打包设计方案）、
 > `docs/mcp-design.md` / `docs/mcp-design_zh.md`（MCP 接入设计方案）、
 > `docs/config-design.md` / `docs/config-design_zh.md`（配置系统设计说明）。
+> **另有一篇只有中文的设计文档**：`docs/tool-surface-design.md`（工具面 ——
+> 一个 agent 拿到哪些工具，以及配置怎么被管理；是一份**提案**）。
 > **`docs/` 下其余设计文档仍在上游仓库** ——
-> 下面凡引用 `docs/xxx.md` 而这几组之外的，都是上游那份。改语义前若拿不到它，
-> 先问，别凭印象改配置或接口。
+> 下面凡引用 `docs/xxx.md` 而这几组之外、又不是上面那篇中文文档的，都是上游那份。
+> 改语义前若拿不到它，先问，别凭印象改配置或接口。
+>
+> ★ **新写的架构与代码设计类文档只写中文。** 讲代码怎么搭起来的文档 —— 分层、
+> 某个子系统的设计、一次重构方案 —— 没有第二个读者：读它的人读中文，而手工维护的
+> 英文对照版是一份会漂移的第二拷贝。`docs/tool-surface-design.md` 是按这条规则写的
+> 第一篇。
+> ★ **仍然要双语的是给用户或集成方读的东西**：`README.md` 与 `docs/user-manual.md`。
+> 不假定他们的读者读中文。
+> ★ **这条规则不退休上面那十一组。** 它们已经存在，照旧维护；规则管的是从现在起
+> 新写的文档。
 >
 > ★ 前面四组讲的是**代码面已经是什么样**；`docs/context-usage-design.md`
 > 讲的是**上下文占用与压缩** —— 占用仪表盘（§2、§4、§5）、压缩及其持久化（§7）、
@@ -321,8 +332,9 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 | `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` | **文件系统后端设计方案** —— 为什么把 `eino-ext` 的 local 后端分叉成 `agentkit/fsx`、路径如何收敛在项目根之内、`ls`/`glob` 如何被封顶（**已实现**） |
 | `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` | **run 生命周期设计方案** —— 今天一轮为什么绑在一条 SSE 连接上，以及 run 怎么变成一行持久事实、配上租约与 fence，好让连接降级为订阅者（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
 | `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` | **Docker Sandbox Kit 打包设计方案** —— openheron 进程今天是什么样、一个把整个进程带进 microVM 的 v3 workload Kit、模型密钥如何留在宿主，以及必须实测的 SSE 这条路（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
-| `docs/mcp-design.md` / `docs/mcp-design_zh.md` | **MCP 接入设计方案** —— 今天的工具装配路径、MCP 客户端给它带来什么、`mcp__<server>__<tool>` 命名空间、策略表里的前缀匹配，以及 MCP 服务器在 Kit 里跑在哪（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
+| `docs/mcp-design.md` / `docs/mcp-design_zh.md` | **MCP 接入设计方案** —— 工具装配路径、MCP 客户端给它带来什么、`mcp__<server>__<tool>` 命名空间、工具表里的前缀匹配，以及 MCP 服务器在 Kit 里会跑在哪（**已实施**；例外是 §8 —— 沙箱 Kit 怎么打包一台 MCP 服务器 —— 那部分仍是提案） |
 | `docs/config-design.md` / `docs/config-design_zh.md` | **配置系统设计说明** —— 配置根与它的三级解析、各个分区与它们的文件规格、加载与优先级、热更新，以及依赖铁律（**正文讲的是代码现状**；`mcps/` 分区与前缀匹配是提案） |
+| `docs/tool-surface-design.md` | **工具面设计**（只有中文）—— 一个 agent 拿到哪些工具（`tools:` / `mcps:` / `skills:`）、MCP 命名空间的三段、配置面收敛成一个核心，以及六个 `config_*` 工具（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
 
 ★ 无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。
 

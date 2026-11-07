@@ -26,6 +26,13 @@ PAIRS = [
     ("developer-manual.md", "developer-manual_zh.md"),
 ]
 
+# ★ Architecture and code-design documents written from 2026-11-08 on are
+#   **Chinese only** (AGENTS.md): their audience is the people who read
+#   Chinese, and a hand-maintained English twin is a second copy that drifts.
+#   A `_zh` twin for one of these is a mistake, not a mirror — this catches it
+#   before it becomes a pair nobody updates.
+CHINESE_ONLY = ["tool-surface-design.md"]
+
 IDENT = re.compile(r"`[a-zA-Z0-9_./:$-]+`")
 SECTION = re.compile(r"§[0-9]+(\.[0-9]+)?")
 
@@ -80,6 +87,12 @@ def sections(text: str) -> list[str]:
 
 def main() -> int:
     fail = 0
+
+    for name in CHINESE_ONLY:
+        twin = DOCS / name.replace(".md", "_zh.md")
+        if twin.exists():
+            print(f"{name}: Chinese only, but {twin.name} exists — delete the twin")
+            fail = 1
     for en, zh in PAIRS:
         a = (DOCS / en).read_text()
         b = (DOCS / zh).read_text()

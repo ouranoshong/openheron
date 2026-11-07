@@ -20,10 +20,23 @@ one — change one and change the other.
 > `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` (Docker Sandbox Kit packaging),
 > `docs/mcp-design.md` / `docs/mcp-design_zh.md` (MCP integration design),
 > `docs/config-design.md` / `docs/config-design_zh.md` (configuration system design).
+> **and one Chinese-only design document**: `docs/tool-surface-design.md` (the tool
+> surface — which tools an agent gets, and how the configuration is administered; a
+> **proposal**).
 > **Every other design document under `docs/` still lives in the upstream repository** ——
-> any `docs/xxx.md` reference below that is not one of these eleven is the upstream copy.
-> If you cannot get hold of it before changing semantics, ask first; do not change
-> configuration or interfaces from memory.
+> any `docs/xxx.md` reference below that is not one of these eleven, and is not the
+> Chinese-only document above, is the upstream copy. If you cannot get hold of it before
+> changing semantics, ask first; do not change configuration or interfaces from memory.
+>
+> ★ **A new architecture or code-design document is written in Chinese only.** A document
+> that says how the code is built — layering, a subsystem's design, a refactoring
+> proposal — has no second audience: it is read by the people who read Chinese, and a
+> hand-maintained English twin is a second copy that drifts. `docs/tool-surface-design.md`
+> is the first one written under this rule.
+> ★ **What stays bilingual is what a user or an integrator reads**: `README.md` and
+> `docs/user-manual.md`. Their audience is not assumed to read Chinese.
+> ★ **This rule does not retire the eleven pairs above.** They exist and are maintained
+> as they are; the rule governs documents written from now on.
 >
 > ★ The first four sets describe **what the code surface already is**; `docs/context-usage-design.md`
 > covers **context usage and compaction** — the usage dashboard (§2, §4, §5), compaction and its
@@ -363,8 +376,9 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 | `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` | **Filesystem backend design** — why `eino-ext`'s local backend was forked into `agentkit/fsx`, how paths are confined to the project root, and how `ls`/`glob` are bounded (**implemented**) |
 | `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` | **Run lifecycle design** — why a turn is bound to one SSE connection today, and how a run becomes a durable row with a lease and a fence, so the connection can be demoted to a subscriber (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
 | `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` | **Docker Sandbox Kit packaging** — the openheron process as it is, a v3 workload Kit that would carry the whole process into a microVM, how the model key stays on the host, and the SSE path that has to be measured (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
-| `docs/mcp-design.md` / `docs/mcp-design_zh.md` | **MCP integration design** — the tool assembly path as it is, what an MCP client adds to it, the `mcp__<server>__<tool>` namespace, prefix matching in the policy tables, and where an MCP server runs inside the Kit (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
+| `docs/mcp-design.md` / `docs/mcp-design_zh.md` | **MCP integration design** — the tool assembly path, what an MCP client adds to it, the `mcp__<server>__<tool>` namespace, prefix matching in the tool tables, and where an MCP server would run inside the Kit (**implemented**, except §8 — how a sandbox Kit packages an MCP server — which is still a proposal) |
 | `docs/config-design.md` / `docs/config-design_zh.md` | **Configuration system design** — the config root and its three levels, the partitions and their file specs, loading and precedence, hot reload, and the dependency iron rules (**the body describes the code as it is**; the `mcps/` partition and the prefix matching are proposals) |
+| `docs/tool-surface-design.md` | **Tool-surface design** (Chinese only) — what tools an agent gets (`tools:` / `mcps:` / `skills:`), the MCP namespace's three segments, the configuration surface collapsed into one core, and the six `config_*` tools (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
 
 ★ The file without a suffix is the **English main version**; `_zh` is the Chinese version; the two
 correspond one to one — change one and change the other.
