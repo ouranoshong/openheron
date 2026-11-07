@@ -383,12 +383,65 @@ func TestDeferredIsCollected(t *testing.T) {
 	}
 }
 
+// ── a retired partition ──────────────────────────────────────────────────
+
+// ★ The `policy/` partition is gone. A configuration that still carries it
+//
+//	loads — the rest of it may be perfectly good — but the directory is
+//	**not read**, and a user who believes their tiers still apply has to
+//	be told.
+func TestALeftOverPolicyDirectoryIsReported(t *testing.T) {
+	f := newFixture(t)
+	f.seedMinimal(t)
+	f.write(t, "policy/permissions.yaml", "ask: [write_file]\ndeny: [execute]\n")
+
+	cfg, err := f.load(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, d := range cfg.Deferred() {
+		if strings.Contains(d, "policy/") {
+			found = true
+			// ★ The notice has to say where the tiers went, or it is only
+			//   half a message.
+			if !strings.Contains(d, "server/config.yaml") {
+				t.Errorf("the notice must name the new home, got %q", d)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("★ a dropped partition must leave a word, got %v", cfg.Deferred())
+	}
+}
+
+// ★ An empty directory is not a configuration: it carries nothing that was
+//
+//	dropped, so it must not raise a notice the user cannot act on.
+func TestAnEmptyRetiredDirectoryIsNotReported(t *testing.T) {
+	f := newFixture(t)
+	f.seedMinimal(t)
+	if err := os.MkdirAll(filepath.Join(f.root, "policy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := f.load(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range cfg.Deferred() {
+		if strings.Contains(d, "policy/") {
+			t.Fatalf("an empty directory carries nothing that was dropped, got %q", d)
+		}
+	}
+}
+
 // ── the caps ─────────────────────────────────────────────────────────────
 //
 // ★ The cap lives in server/config.yaml: one place, one value. It is not
-//   hot-reloaded — a change takes effect on the next start — and that is
-//   the price of not having a second copy of the same number.
-
+//
+//	hot-reloaded — a change takes effect on the next start — and that is
+//	the price of not having a second copy of the same number.
 func capsGlobal(t *testing.T, f *fixture, depth, retries int) {
 	t.Helper()
 	f.write(t, "server/config.yaml",

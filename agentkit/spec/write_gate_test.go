@@ -51,15 +51,20 @@ func TestValidatePathRejectsNonEditableSection(t *testing.T) {
 	}
 }
 
-func TestValidatePathEnforcesPolicyFileNameWhitelist(t *testing.T) {
+func TestValidatePathEnforcesTheToolsFileNameWhitelist(t *testing.T) {
 	if _, err := ValidatePath("tools/http.yaml"); err != nil {
-		t.Fatalf("permissions.yaml must be valid: %v", err)
+		t.Fatalf("http.yaml must be valid: %v", err)
 	}
 	if _, err := ValidatePath("tools/kb.yaml"); err != nil {
-		t.Fatalf("limits.yaml must be valid: %v", err)
+		t.Fatalf("kb.yaml must be valid: %v", err)
 	}
+	if _, err := ValidatePath("tools/whatever.yaml"); err == nil {
+		t.Fatal("an unknown tools file must be rejected")
+	}
+	// ★ The `policy/` partition is gone: a path into it is refused like any
+	//   other unknown section.
 	if _, err := ValidatePath("policy/whatever.yaml"); err == nil {
-		t.Fatal("an unknown policy file must be rejected")
+		t.Fatal("a path into a retired partition must be rejected")
 	}
 }
 

@@ -297,8 +297,44 @@ func (s *Service) loadOnly(ms map[string]*mutation) (*Config, error) {
 		}
 	}
 
+	cfg.noteRetiredDirs(s.root)
 	cfg.collectBadDurations()
 	return cfg, nil
+}
+
+// retiredDirs are the partitions that used to be there.
+//
+// ★ The `policy/` partition is gone: the tiers live in the files that
+//
+//	provide the tools, and the caps live in `server/config.yaml`. A
+//	configuration that still carries the directory is **dropped**, and a
+//	dropped configuration that says nothing is the worst kind — the user
+//	reads "it started fine" and believes their tiers still apply.
+var retiredDirs = []struct {
+	Dir   string
+	Where string
+}{
+	{Dir: "policy", Where: "the tiers live in the file that provides each tool (`allows:`), " +
+		"and the caps live in server/config.yaml"},
+}
+
+// noteRetiredDirs tells the user that a retired partition is still on disk.
+//
+// ★ This is a **notice**, not an error: the directory is not ours to
+//
+//	refuse — the rest of the configuration may be perfectly good, and a
+//	broken file elsewhere would keep it from loading. So the process
+//	starts, the notice is in `deferred` (and so in the startup log), and
+//	the user can act on it.
+func (c *Config) noteRetiredDirs(root string) {
+	for _, r := range retiredDirs {
+		dir := filepath.Join(root, r.Dir)
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) == 0 {
+			continue
+		}
+		c.deferKey("%s/ is gone and was not read — %s", r.Dir, r.Where)
+	}
 }
 
 func (c *Config) loaderFor(cat Category) func(name string, data []byte) error {
