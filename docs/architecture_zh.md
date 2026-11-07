@@ -138,15 +138,17 @@
 | `skills/` | — | ❌ | **独立解析**（见 §3.6） |
 
 ★ **没有 `policy/` 这个分区。** 五个分区是 `llm/` `agents/` `server/` `tools/` `mcps/`
-（`agentkit/spec/config.go:40`），而旧配置遗留下来的 `policy/` 目录会被**静默忽略** ——
-没人读它，也没有任何告警。它当年承载的档位模型如今住进了工具文件与 Agent 文件
-（§3.4），所以一个过期的 `policy/` 目录不是能从日志里查出来的错误：它只是一个不再
-意味着任何东西的目录。
+（`agentkit/spec/config.go:40`），而旧配置遗留下来的 `policy/` 目录**不会被读** ——
+没人加载它。它当年承载的档位模型如今住进了工具文件与 Agent 文件
+（§3.4）。★ 配置**照样能起来**：其余部分可能完全没问题，而别处一个坏文件会让整份配置
+根本加载不了。但这个目录会留下一条**提示**（`agentkit/spec/config.go:329`
+`noteRetiredDirs`），并说清新家在哪儿 —— 被丢掉却一声不吭的配置是最糟的一种：
+进程起来得好好的，而那个设置已经没了。
 
 `tools/` 下的文件名是**白名单**：`agentkit/spec/load.go:191` 对未知文件直接报错，
 不会静默忽略 —— 「我写了 kb.yaml 但它没生效」是最难查的一类问题。
 
-★ `mcps/` 分区**一个 server 一个文件**（`agentkit/spec/config.go:26` 的 `spec.DirMCP`）：
+★ `mcps/` 分区**一个 server 一个文件**（`agentkit/spec/config.go:25` 的 `spec.DirMCP`）：
 文件在，定义就在 —— 没有 `enabled` 键 —— 而且文件名就是 server 的名字，也就是这个 server
 工具的命名空间那一段。
 

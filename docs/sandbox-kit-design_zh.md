@@ -45,11 +45,10 @@ Web UI 在**二进制里**：`main.go:35` 内嵌了 `all:web/dist`，`main.go:33
 - 同一个内核、同一份文件系统、同一个网络命名空间；
 - 与持有模型凭据的是同一个进程。
 
-`agentkit/spec/defaults.go:11` 把 `execute` 放进 `ask` 档：
-
-```go
-Ask:  []string{"write_file", "edit_file", "execute", "kb_index"},
-```
+默认档位是 **`ask`**（`agentkit/build/policy.go:55`）：没人点名的工具先问一句，
+例外都是被点名的那些 —— 代码认识的内置工具（`agentkit/build/tools.go:61`），
+以及某个文件自己的 `allows:` 列出的那些。所以 `execute` 会问，`write_file` 与
+`edit_file` 也一样。
 
 而工厂的 `main` agent 直接把它关掉（`agentkit/templates/files/agents/main.md:7`）：
 
@@ -153,9 +152,9 @@ openheron 解析三个根，而且是在三个不同时刻解析的。沙箱三�
 
 | 根 | 怎么解析 | 位置 |
 |---|---|---|
-| 项目根 | `--project-root`，否则取**工作目录** | `agentkit/spec/config.go:157-164` |
-| 配置根 | `--config-dir`，否则 `$OPENHERON_CONFIG_DIR`，否则 `<projectRoot>/.openheron` | `agentkit/spec/config.go:170-177` |
-| 数据目录 | `$DATA_DIR`，否则 `<configRoot>/state` | `main.go:218`、`agentkit/spec/config.go:224-232` |
+| 项目根 | `--project-root`，否则取**工作目录** | `agentkit/spec/config.go:166-177` |
+| 配置根 | `--config-dir`，否则 `$OPENHERON_CONFIG_DIR`，否则 `<projectRoot>/.openheron` | `agentkit/spec/config.go:179-191` |
+| 数据目录 | `$DATA_DIR`，否则 `<configRoot>/state` | `main.go:218`、`agentkit/spec/config.go:233-245` |
 
 ★ **工作目录是项目根的默认值，而配置根跟着它走。** 在哪个目录启动的进程，
 就是以那个目录为根的进程：`cd` 进工作区，配置就落在 `<工作区>/.openheron`。
@@ -172,7 +171,7 @@ agent 在一个目录里干活，配置却从另一个目录读。
 - 每个输入都是一个参数（`initcmd.go:16-42`）：`--dir`、`--config-dir`、
   `--model`、`--provider`、`--base-url`、`--env`、`--tools`、
   `--force`、`--dry-run`、`--json`；
-- 它只写缺的东西，其余报为保留（`initcmd.go:120`、`initcmd.go:147-148`）；
+- 它只写缺的东西，其余报为保留（`initcmd.go:120`、`initcmd.go:118`）；
 - 它写进 `<dir>/.openheron`，而且**从不读 `$OPENHERON_CONFIG_DIR`**
   （`initcmd.go:57-65`）。
 
@@ -358,7 +357,7 @@ error: resolve kits: kit "…": fetch manifest: Get "https://…/v2/…/manifest
 ★ **mixin 不带初始化 hook** —— 这是实测结论，不是偏好。
 `openheron init` 每个配置根只维护**一份** provider 配置：
 一旦根里已有可用的模型，它就复用它并忽略 `--provider`、`--env`、`--base-url`
-（`initcfg/initcfg.go:278-286`）。
+（`initcfg/initcfg.go:271-278`）。
 所以一份想种下第二个 provider 的 hook 会被无视，日志也这么说：
 
 ```
@@ -523,11 +522,11 @@ openheron 是 **headless**：没有交互模式要声明，`interactive` 字段�
 ★ **Kit 一个 openheron 环境变量都没设。** 入口脚本 `cd` 进工作区，
 openheron 自己的默认值从那里落到了正确的位置：
 
-- `PROJECT_ROOT` —— 默认是工作目录（`agentkit/spec/config.go:157-164`）。
+- `PROJECT_ROOT` —— 默认是工作目录（`agentkit/spec/config.go:166-177`）。
   入口脚本的 `cd` 把它放在挂载上。
-- 配置根 —— 默认 `<projectRoot>/.openheron`（`agentkit/spec/config.go:170-177`），
+- 配置根 —— 默认 `<projectRoot>/.openheron`（`agentkit/spec/config.go:179-191`），
   所以就是工作区自己的 `.openheron`，在挂载上。
-- `DATA_DIR` —— 默认是配置根下的 `state`（`agentkit/spec/config.go:224-232`），
+- `DATA_DIR` —— 默认是配置根下的 `state`（`agentkit/spec/config.go:233-245`），
   所以会话也住在挂载上（§2.9）。
 - `LISTEN_ADDR` —— 默认取服务配置的 `ListenAddr`（`main.go:217`）：`:8080`。
 
@@ -578,7 +577,7 @@ openheron 自己的默认值从那里落到了正确的位置：
 ```
 
 ★ 用 `|| echo ...` 而不是 `&&`：当已有的 provider 文件声明了另一个模型时，
-`init` 会失败（`initcfg/initcfg.go:94-99`），
+`init` 会失败（`initcfg/initcfg.go:84-89`），
 而那是一份该保留的配置，不是拒绝服务的理由。
 
 ★ **待决的问题是：入口脚本怎么知道工作区路径。** hook 看得到 `WORKSPACE_DIR`；
@@ -595,7 +594,6 @@ openheron 自己的默认值从那里落到了正确的位置：
 
 ★ 两种形态下入口脚本都还是两行，区别只在其中一行。
 §4 的第一个问题是按哪种形态来建；§5 的第二个问题是怎么观测出答案。
-那是 §4 的第一个问题。
 
 ★ **实测：第一种形态。** workload 的环境带 `WORKSPACE_DIR`（§6.3），
 所以入口脚本自己就能干完，hook 是冗余而不是依赖。
@@ -704,10 +702,10 @@ openheron 自己的出站需求不因这个而改变：
   工厂模板把它也做成了模板变量：`agentkit/templates/files/llm/deepseek.yaml`
   渲染出 `base_url: https://api.deepseek.com`，
   `agentkit/templates/files/llm/openai.yaml` 渲染出 `https://api.openai.com/v1`，
-  而 `openheron init` 会问用户填哪个（`initcfg/initcfg.go:100-106`）。
+  而 `openheron init` 会问用户填哪个（`initcfg/initcfg.go:90-96`）。
   `inject` 规则按 **domain** 匹配，所以 `base_url` 里带不带路径不影响（§2.8）；
-- **工具**够到的一切 —— HTTP 工具（`agentkit/spec/defaults.go:16-27` 注册了
-  `http_get` / `http_post` / …）、MCP server，以及 agent 装包时用的仓库。
+- **工具**够到的一切 —— HTTP 工具（`agentkit/spec/defaults.go:15-44` 注册了
+  `request_get` / `request_post` / …）、MCP server，以及 agent 装包时用的仓库。
   ★ 有了 `allow: ["*"]`，它们与别的东西走同一份放行 ——
   而它们正是"允许列表不该写短"的原因。
 
@@ -822,7 +820,7 @@ agent 可以从环境里把它读出来，它跑的任何东西都能把它发�
 ### 2.9 沙箱拆除之后的状态
 
 会话与 checkpoint 是数据目录下的文件（`main.go:224`、`main.go:229-232`），
-而数据目录的默认值是 `<configRoot>/state`（`agentkit/spec/config.go:224-232`）。
+而数据目录的默认值是 `<configRoot>/state`（`agentkit/spec/config.go:233-245`）。
 既然配置根是 `<工作区>/.openheron`（§1.7），默认的数据目录就是
 **`<工作区>/.openheron/state`** —— 在挂载上。
 
@@ -843,7 +841,7 @@ agent 可以从环境里把它读出来，它跑的任何东西都能把它发�
 在 volume 上它不碍事，但也在用户够不着的地方。
 
 ★ `DATA_DIR`（`main.go:218`）就是那个开关：绝对路径优先于默认值
-（`agentkit/spec/config.go:229-232`），
+（`agentkit/spec/config.go:233-245`），
 所以 Kit 可以把数据目录指到 volume 上，而不必碰配置。
 
 ★ 默认值有一个后果：状态落在用户自己的目录树里，在 `<工作区>/.openheron`。
@@ -872,7 +870,7 @@ agent 可以从环境里把它读出来，它跑的任何东西都能把它发�
 
 边界往外挪，这正是它便宜的原因。**Go 代码一行不改。** 下面这些一个都不动：
 
-- agent 模型、策略档位（`agentkit/spec/defaults.go:11`）、审批流程、checkpoint store；
+- agent 模型、档位表（`agentkit/build/policy.go:55`）、审批流程、checkpoint store；
 - 文件工具及其收敛（`agentkit/fsx/fsx.go:194`）；
 - API 面（`api/v2_files.go:34-72`）；
 - 前端，它是内嵌的（`main.go:35`）；
@@ -1074,15 +1072,14 @@ agent 在工作区里写下的文件，在宿主视角下属于 uid `1000`，
 ## 6. 实测
 
 ★ 2026-11-04 在真实沙箱上实测：`sbx` v0.51.0、Docker Engine 29.9.2、
-Linux on WSL2，Kit 由 `sandbox-kit/` 构建（二进制本地烤入 ——
-它指名的那个 release 还没发布，见 §2.9）。
+Linux on WSL2，Kit 由 `sandbox-kit/` 构建（二进制本地烤入）。
 workload 自己的环境是从沙箱内部抓的，宿主上读的。
 
 | 问题 | 答案 |
 |---|---|
 | workload 的环境带不带 `WORKSPACE_DIR`？ | **带** —— `/home/you/my-project`：宿主的路径，也是工作区挂载的路径 |
 | 进程是不是从工作区启动的？ | **是** —— `PWD` 与 `OLDPWD` 都是工作区 |
-| 配置是不是落在挂载上？ | **是** —— `.openheron/{agents,llm,policy,server,state}` 在宿主上，会话也在 |
+| 配置是不是落在挂载上？ | **是** —— `.openheron/{agents,llm,mcps,server,state}` 在宿主上，会话也在 |
 | 凭据到不到模型？ | **到** —— 容器里是 `DEEPSEEK_API_KEY=proxy-managed`；代理换上真值，调用返回了 "ok" |
 | 发布版配方构建得出来吗？ | **能** —— `make kit` 用 container-driver builder 产出 `openheron-kit:0.0.6`，里面的二进制自报 `v0.0.6` |
 | workload 能与 credential mixin 组合吗？ | **能** —— 容器里是 `DEEPSEEK_API_KEY=proxy-managed`，配置在挂载上，模型答了 |
@@ -1100,6 +1097,10 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
 | 运行时会把声明的端口发布出来吗？ | **会** —— `✓ http — published localhost:32772 -> 8080/tcp`，临时的回环端口 |
 | detached 起得来服务吗？ | **起不来** —— 入口脚本是 agent 的启动命令，而 `--detach` 不开会话（§2.5） |
 | 服务比客户端活得久吗？ | **活得久** —— `long-running@1` 留着它；客户端走了健康检查照样回 200 |
+
+★ **那次实测之后，目录集合变了。** `policy/` 分区在 2026-11-07 退役了 ——
+档位现在住在提供工具的那些文件里（§1.2）—— 所以今天写出来的配置里没有
+`policy/` 目录。答案本身不变：配置落在挂载上。
 
 ★ **两条凭据路都实测过。** 用占位符时（`--placeholder proxy-managed`），
 容器里是 `DEEPSEEK_API_KEY=proxy-managed`，代理换上真值；
@@ -1169,10 +1170,10 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
   路，而 shell 的 `execute` 是 filesystem 那批工具里**唯一的流式**工具
   （`adk/middlewares/filesystem/filesystem.go:512` 用
   `newStreamingExecuteTool` 建它，另外六个走 `InferTool`）。闸门只实现了
-  同步那条，于是策略点名在 `ask` 列的工具没经过人的决策就跑了。
-  修复前的实测：`execute` 在 `ask` 列，一次调用它的 run **直接执行了**并返回
-  输出，没有触发审批。其余那几个 filesystem 工具一直是被覆盖的 —— 这也是
-  验收跑批里 `edit_file` 的审批一直正常的原因。修法是给闸门补上流式那条包装，
+  同步那条，于是档位表留在默认值（`ask`）上的工具没经过人的决策就跑了。
+  修复前的实测：`execute` 没人点名 —— 而默认档位就是 `ask` —— 一次调用它的 run
+  **直接执行了**并返回输出，没有触发审批。其余那几个 filesystem 工具一直是被覆盖的
+  —— 这也是验收跑批里 `edit_file` 的审批一直正常的原因。修法是给闸门补上流式那条包装，
   两条路共用同一个决策（`agentkit/build/gate.go`）：要跑的参数取自中断时
   存下的那一份，而拒绝是模型读得到的一条消息，不是终结这一轮的错误。
   这是 openheron 的缺陷，不是 Kit 的。
@@ -1329,9 +1330,9 @@ agent 读了文件、跑了那个失败的测试、**在动手改之前先问了
 改动落在宿主上，因为工作区*就是*宿主上的一个目录，
 而宿主自己跑的 `go test` 之后是绿的。
 
-★ 那一轮**只问了一次**，因为工作区自带一份策略，把 `execute` 留在了 `ask`
-列之外。示例项目现在**不再自带**了 —— `openheron init` 在第一次启动时写出
-整份配置，而默认策略把 `execute` 与文件工具一起列进了 `ask`。
+★ 那一轮**只问了一次**，因为工作区自带一份策略，让 `execute` 不用点头就跑。
+示例项目现在**不再自带**了 —— `openheron init` 在第一次启动时写出整份配置，
+而默认档位就是 `ask`，所以 `execute` 跟文件工具一样会问。
 
 ★ 那一轮还挖出一个值得记下的陷阱：`openheron init` 对配置是全有或全无，
 所以一个只带了一份 agent 文件、却漏了它点名的 subagent 的工作区，
@@ -1394,10 +1395,12 @@ URLs"），而且实测过：把两个 OCI 引用换成 `../../openheron` 与
 created .openheron/agents/main.md
 created .openheron/agents/task.md
 created .openheron/llm/deepseek.yaml
-created .openheron/policy/permissions.yaml
-created .openheron/policy/limits.yaml
+created .openheron/mcps/example.yaml
 created .openheron/server/config.yaml
 ```
+
+★ **这份集合是五个文件，里面没有 `policy/`。** 那个分区在 2026-11-07 退役了
+（§1.2），所以今天写出来的配置把档位放在提供工具的那些文件里，而不是一份中心清单里。
 
 ★ **所以示例项目什么配置都不带。** 工作区里放着项目与环境文件，其余的由
 运行时在第一次启动时写出来。

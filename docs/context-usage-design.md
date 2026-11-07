@@ -25,7 +25,7 @@ And it closes the loop the meter opens: when the context really does run out of 
 
 ### 1.1 The context window is configured, and then ignored
 
-`context_window` is part of the model declaration (`agentkit/spec/decl/decl.go:42`):
+`context_window` is part of the model declaration (`agentkit/spec/decl/decl.go:44`):
 
 ```go
 ContextWindow int `yaml:"context_window"`
@@ -33,7 +33,7 @@ ContextWindow int `yaml:"context_window"`
 
 The factory templates ship it — `128000` for OpenAI (`agentkit/templates/files/llm/openai.yaml:16`), `131072` for DeepSeek (`agentkit/templates/files/llm/deepseek.yaml:15`), and `0` for the generic template, where the user must fill it in (`agentkit/templates/files/llm/_generic.yaml:14`).
 
-It reaches exactly one place: the provider listing of `GET /v2/config` (`api/v2_introspect.go:276`, filled at `api/v2_introspect.go:364`). **No run-time code reads it.** The agent view that the frontend actually uses (`api/v2_introspect.go:77`, built by `modelOf` at `api/v2_introspect.go:197`) does not carry it, so the browser cannot even learn the window of the agent it is talking to.
+It reaches exactly one place: the provider listing of `GET /v2/config` (`api/v2_introspect.go:315`, filled at `api/v2_introspect.go:425-452`). **No run-time code reads it.** The agent view that the frontend actually uses (`api/v2_introspect.go:97`, built by `modelOf` at `api/v2_introspect.go:239`) does not carry it, so the browser cannot even learn the window of the agent it is talking to.
 
 ### 1.2 Token usage is already on disk — but it is a total, not an occupancy
 
@@ -68,7 +68,7 @@ Its default counter is the fact this design builds on:
 - messages produced after that baseline are estimated at roughly four characters per token (`estimateTokenCount`, `adk/middlewares/summarization/summarization.go:476`);
 - the threshold is `Trigger.ContextTokens`, defaulting to 160000 (`getTriggerContextTokens`, `adk/middlewares/summarization/summarization.go:373`); the upstream documentation recommends setting it to 80–90 % of the model's window.
 
-openheron imports none of it: there is no `summarization` reference anywhere in the repository, and `deep.Config.Handlers` — where such a middleware would be mounted (`agentkit/build/assemble.go:110`, `adk/prebuilt/deep/deep.go:97`) — carries only openheron's own gate handlers (`agentkit/build/gate.go:105`).
+openheron imports none of it: there is no `summarization` reference anywhere in the repository, and `deep.Config.Handlers` — where such a middleware would be mounted (`agentkit/build/assemble.go:110`, `adk/prebuilt/deep/deep.go:97`) — carries only openheron's own gate handlers (`agentkit/build/gate.go:167`).
 
 ---
 
@@ -316,7 +316,7 @@ The history is computed with the same function as the live path: walk the transc
 
 ### 4.6 The agent view learns the window
 
-The frontend needs the window of the agent it is talking to. `modelView` (`api/v2_introspect.go:77`) gains one field:
+The frontend needs the window of the agent it is talking to. `modelView` (`api/v2_introspect.go:97`) gains one field:
 
 ```go
 type modelView struct {
@@ -331,7 +331,7 @@ type modelView struct {
 }
 ```
 
-`modelOf` already resolves the model through `build.Resolve` (`api/v2_introspect.go:197`), so the window is one field read away.
+`modelOf` already resolves the model through `build.Resolve` (`api/v2_introspect.go:239`), so the window is one field read away.
 
 ### 4.7 Optional: the AG-UI standard `usage[]`
 
@@ -666,7 +666,7 @@ P0 and P1 are the meter. P2 is the part that makes the meter mean something: wit
 
 P2 is the only phase that touches the session format, so it is split into steps that are each independently shippable:
 
-1. **The middleware, mounted but not persisted.** `deep.Config.Handlers` takes `adk.TypedChatModelAgentMiddleware` values (`adk/prebuilt/deep/deep.go:97`), which is what the summarization middleware is (`adk/middlewares/summarization/summarization.go:272`); openheron already appends its gate handlers there (`agentkit/build/assemble.go:110`, `agentkit/build/gate.go:105`). With the middleware in place, a long **turn** survives a window it would not have survived. The conversation still grows — nothing is persisted yet.
+1. **The middleware, mounted but not persisted.** `deep.Config.Handlers` takes `adk.TypedChatModelAgentMiddleware` values (`adk/prebuilt/deep/deep.go:97`), which is what the summarization middleware is (`adk/middlewares/summarization/summarization.go:272`); openheron already appends its gate handlers there (`agentkit/build/assemble.go:110`, `agentkit/build/gate.go:167`). With the middleware in place, a long **turn** survives a window it would not have survived. The conversation still grows — nothing is persisted yet.
 2. **The compacted message.** The finalizer returns the summary alone (§7.2), the callback appends it to the transcript with the `ExtraCompaction` marker (§7.3), and the boundary is read back from it.
 3. **The effective history.** `Session.Messages(effective)`, and the run loop asking for the effective view (§7.4). From here the conversation stops growing across turns.
 4. **The UI.** The marker in the message list, the compaction count on the meter, the live `context_compacted` event (§7.7).

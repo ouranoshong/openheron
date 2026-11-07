@@ -102,3 +102,7 @@ probe*.txt
 # work directory before every task).
 /.openheron-bench/
 /benchmarks/out/
+
+# Python's bytecode cache (the document checker is a Python script).
+__pycache__/
+*.pyc

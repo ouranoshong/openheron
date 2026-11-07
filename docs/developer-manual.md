@@ -236,7 +236,7 @@ Say you want a new `mcps/` directory:
    and **non-hot-reloaded** directories clearly apart — whether a directory is hot
    changes what users expect.
 
-2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`config.go:304`) and
+2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`config.go:340`) and
    implement `loadXXX`.
 
 3. **`agentkit/spec/decl/decl.go`**: add the plain declaration struct.
@@ -1184,7 +1184,7 @@ someone measures that the default misses something.
 | Startup reports a missing configuration | The `config root` line in the startup log — it prints the root actually used and the project root |
 | A config change does not take effect | Is that partition hot-reloaded? `llm/` `agents/` `tools/` `mcps/` are hot; `server/` and `skills/` need a restart |
 | An agent cannot call a tool | `GET /v2/agents/:agentId` for the effective tool table; then read the tool's `reason` — `disabled_tools`, `mcps`, or the default `ask` tier, which asks |
-| A file under `policy/` is ignored | The partition is gone: the tiers live in the files that provide the tools, and the default tier is `ask` |
+| A leftover `policy/` directory still seems to carry your old tiers | The partition was retired: the tiers live in the files that provide the tools, and the default tier is `ask`. The startup log says so — the notice lands in `deferred` |
 | `reasoning` seems to do nothing | Is that tier declared in the model profile? Undeclared means silently ignored |
 | An approval cannot resume | Is the checkpoint still there? Check `pendingApprovals` on `/v2/sessions/:id` |
 | White screen + `Maximum update depth exceeded` | Is some selector returning a new array/object? |
@@ -1210,7 +1210,7 @@ the current state of the code, not a to-do list** — fixing one is a separate c
 | **Four runtime dependencies sit in `devDependencies`** | `web/package.json` | `lucide-react` (imported by 10 files), `clsx`, `tailwind-merge` and `class-variance-authority` are all imported by `src/` and bundled into `web/dist`. The build passes (Vite resolves them at build time), but the manifest is wrong. |
 | **`web/scripts/interop-check.ts` is out of date** | lines 16-20 and 41-45 of that script | It POSTs to `/v2/run` **without a `threadId`**, while the server now requires a session first (`POST /v2/sessions`, see `api/v2_run.go:78`). So that item of `make smoke` fails (measured: 400 `threadId is required`). `web/scripts/hitl-smoke.ts` and `web/scripts/no-undefined-url-check.ts` already follow the new contract. |
 | **The comment at `api/server.go:75` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
-| **A leftover `policy/` directory is ignored without a word** | the loader walks the five partitions (`agentkit/spec/config.go:40-71`) — nothing scans the config root for unknown directories | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** and **not reported** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. The settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:72`). Delete the directory. |
+| **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the five partitions (`agentkit/spec/config.go:40-71`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:329`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:72`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |
 
 ## 8. Before committing
 

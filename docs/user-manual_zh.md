@@ -120,8 +120,8 @@ HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
 - **配置**也落在那儿：`.openheron/` 在第一次启动时写好，
   从此它就是你的文件，你随便改。
 - **密钥**留在宿主上，沙箱里只有哨兵值。
-- **审批**照旧，而且策略是你的：工作区里的一份 `policy/permissions.yaml`
-  决定哪些工具先问一声；没有它就用代码的缺省。
+- **审批**照旧，而且默认是安全的那一档：每个工具都要先问一声，
+  而 `.openheron/tools/` 与 `.openheron/mcps/` 下的文件点名例外（见 §4.3）。
 
 ★ 分步教程见
 [`sandbox-kit/TUTORIAL.md`](../sandbox-kit/TUTORIAL.md)（中文：
@@ -164,9 +164,9 @@ your/project/
 
 ★ `mcps/` 下那个文件是**示例**，不是配置 —— 见 §4.7。
 
-★ **没有 `policy/` 下的文件。** 审批档位与配额上限都有缺省值，而一份「说的就是代码已经在做的事」
-的文件是噪音 —— ★ 配置树里的噪音会被当成意思读。要自己定档位，就自己写
-`policy/permissions.yaml`（§4.3）。
+★ **没有 `policy/` 下的文件。** 档位有缺省，例外由工具的来处点名（§4.3），
+而一份「说的就是代码已经在做的事」的文件是噪音 —— ★ 配置树里的噪音会被当成意思读。
+要自己点例外，就写在那个工具自己的文件里。
 
 ★ **已存在的文件不会被覆盖**（除非加 `--force`），所以在一个已经配好的项目里跑它是安全的。
 
@@ -234,7 +234,7 @@ frontmatter 可用键：
 | `max_iterations` | 工具循环的轮数上限 |
 | `summarize_at` | 这个 Agent 的上下文什么时候被**压缩**成摘要：模型窗口的 `80%`（默认）、绝对 token 数（`104858`）、或 `0` 表示永不 |
 | `subagents` | 它能委派给谁（见 §5） |
-| `disabled_tools` | 对**这个 Agent** 生效的工具禁用表（MCP 的工具可以按前缀写 —— 见 §4.8） |
+| `disabled_tools` | **这个 Agent** 根本不能用的工具 —— 模型连看都看不见（MCP 的工具可以按前缀写 —— 见 §4.8） |
 | `skills` | 这个 Agent 能用的技能 —— `skills/` 下文件夹的白名单（**不写就是全部**，写空列表就是一个都没有） |
 | `mcps` | 这个 Agent 能用的 MCP 服务器 —— **不写就是全部**，写空列表就是一个都没有（见 §4.8） |
 | `temperature` / `max_tokens` | 采样参数 |
@@ -313,25 +313,58 @@ Agent。模型档案里留着的 `summarize_at` 不再被读，openheron 加载�
 「这个端点怎么表达 high」之间的翻译层。表里没有的档位会被静默忽略，
 于是「开了 high 档却不思考」这个坑会以最隐蔽的方式出现。
 
-### 4.3 审批策略（`policy/permissions.yaml`）
+### 4.3 哪些工具要问
+
+**你不用去决定。** 没人点名的工具**一律先问**：这一轮暂停，界面上出现审批卡片
+（见 §6.2）。默认是安全的那一档 —— 多点一次，换来的是一次没人看见的破坏性调用
+不被执行。
+
+档位只有两个：
+
+| 档位 | 含义 |
+|---|---|
+| `allow` | 直接跑，不问 |
+| `ask` | 等你点头 |
+
+**例外只有两处来点**，就这两处：
+
+| 位置 | 它决定什么 |
+|---|---|
+| 提供这个工具的那个文件里的 `allows:` 行 | 这个文件提供的哪些工具**不用**问；其余一律问 |
+| Agent 里的 `disabled_tools:` 行 | 这个 Agent 根本不能用的工具 —— 它们不在它的工具表里，模型连看都看不见 |
+
+★ **没有全局清单。** 没有一份文件让你列出「哪些工具要问」，也没有一份让你列出
+「哪些工具谁都不能用」。文件点自己的例外，Agent 点自己的例外，两者从不合并 ——
+于是一个 Agent 的生效工具表，永远只靠配置就能回答。
+
+★ **内置工具的例外写在代码里，不在文件里。** 读取类（`ls` `read_file` `glob` `grep`）
+与委派类（`task` `write_todos` `skill`）不用问。其余没有自己文件的工具 ——
+`write_file`、`edit_file`、`execute` —— 都要问。
+
+有自己文件的工具，在那个文件里说：
 
 ```yaml
-ask:
-  - write_file
-  - edit_file
-  - execute
-  - kb_index
-deny: []
+# .openheron/tools/http.yaml
+methods: [get]
+allows: [request_get]
 ```
 
-只有两列，语义很直接：
+`request_get` 不用问；`request_post` 要问 —— 而且 `methods` 不点 `post` 的话它压根
+不会被提供。知识库说的是同一件事：`kb.yaml` 放行 `kb_search` —— 检索是读，而
+`kb_index` 要往磁盘上的索引里写，所以要问。
 
-- **在 `ask` 里**：每次调用都要**你点头**。
-- **在 `deny` 里**：**谁都不能用**。
-- **不在任何一列里**：默认 `allow`（直接放行）。
+MCP server 在它自己的文件里说，用的是**它自己的词汇** —— server 自己的工具名，
+不是暴露出来的那些（见 §4.7）：
 
-★ `deny` 是**全局**的。`agents/*.md` 里的 `disabled_tools` 只影响那一个 Agent，
-**放松不了外层的 `deny`**。这是子 Agent 唯一放松不了的保证。
+```yaml
+# .openheron/mcps/github.yaml
+allows: [read_issue, list_issues]
+```
+
+★ **档位不是对工具的判决。** 一个 Agent 根本用不了的工具保留自己的档位，并在理由里
+说清：Agent 的生效工具表会报 `blocked`，理由是 `disabled_tools` 或 `mcps`（§4.8）。
+没有第三档，也没有全局拒绝 —— 一个工具要么对这个 Agent 可用，要么压根不在它的
+工具表里。
 
 ### 4.4 外部工具（`tools/`）
 
@@ -353,6 +386,9 @@ deny: []
 ★ **`openheron init` 默认不写 `tools/` 下的任何文件** —— 这一整个目录要你自己写；加
 `--tools` 才会把上面那四个文件写出来。没写就是没启用：对应的工具不会出现在 agent 的
 工具表里，模型也看不见它。
+
+★ **这个文件的 `allows:` 行决定哪些不用问** —— `tools/http.yaml` 点 `request_get`，
+`tools/kb.yaml` 点 `kb_search`。这个文件提供的其余一切都问（§4.3）。
 
 ### 4.5 进程参数（`server/config.yaml`）
 
@@ -518,19 +554,21 @@ subagents: [task]
 
 ### 5.2 深度上限
 
-深度上限由 `server/config.yaml` 的 `agent.max_depth` 和 `policy/limits.yaml` 的同名项
-共同决定，**取更严的**。默认 `1`，意思是「只有入口 Agent 能委派，子 Agent 不能再生子」。
+深度上限就是 `server/config.yaml` 里的 `agent.max_depth`。默认 `1`，意思是「只有入口
+Agent 能委派，子 Agent 不能再生子」。
 
 想跑更深的委派链：
 
 ```yaml
-# policy/limits.yaml
+# .openheron/server/config.yaml
 agent:
   max_depth: 3
 ```
 
 ★ 声明的拓扑超过上限是**启动错误**，不是「截断到上限然后继续跑」。
 后者会让深度保护形同虚设。
+
+★ **`server/` 不热重载**（§4.5）—— 上限调深要重启才生效。
 
 ### 5.3 一次会话能同时跑多个 Agent
 
@@ -585,7 +623,7 @@ agent:
 
 ### 6.3 配置编辑器
 
-`/settings` 打开。它能改：`llm/` `agents/` `policy/` `tools/` `mcps/`。
+`/settings` 打开。它能改：`llm/` `agents/` `tools/` `mcps/`。
 
 写入有几道闸门：
 
@@ -697,7 +735,7 @@ This session is running in another window — stop it to take over
 - 服务器的名字、它的传输方式（`stdio` 或 `http`）、以及它的状态 —— `ready`、
   `unreachable` 或 `unused`；
 - 每个工具一行：服务器自己的名字、暴露出来的名字（`mcp__github__create_issue`）、
-  档位（`allow`、`ask` 或 `deny`）、以及状态。
+  档位（`allow` 或 `ask`）、以及状态。
 
 一个服务器都没配时，对话框说的是 "No MCP servers are configured"。
 
@@ -793,7 +831,7 @@ openheron version                                         print the version
 | GET | `/v2/skills` | 技能清单 |
 | GET | `/v2/agents` `/v2/agents/:agentId` | Agent 及其生效工具表 |
 | GET | `/v2/mcps` | 某个 Agent 的 MCP 服务器（`?agent=`）；见 §6.8 |
-| GET | `/v2/config` | 生效配置 |
+| GET | `/v2/config` | 生效配置（其中的 `policy` 字段带着缺省档位与那些不用问的工具名） |
 | GET | `/v2/health` | 健康检查（含 `deferred` 告警） |
 | GET | `/v2/runtime` | 运行时状态 |
 | GET | `/v2/settings` | 可编辑项清单 |
@@ -860,8 +898,9 @@ curl -N -X POST localhost:8080/v2/run \
 混合打分没生效。配好 embedding 模型后重新 `kb index`。
 
 **Q：Agent 调不动 `write_file`？**
-两种可能：它被这个 Agent 的 `disabled_tools` 禁了，或者被全局 `deny` 禁了。
-查 `GET /v2/agents/:agentId` 看生效工具表。默认 `main` 是禁用了
+两种可能：它被这个 Agent 的 `disabled_tools` 禁了 —— 那模型连看都看不见 —— 或者它
+本来就只是个 `ask` 档工具，而那张审批卡片没人答。查
+`GET /v2/agents/:agentId` 看生效工具表。默认 `main` 是禁用了
 `write_file`/`edit_file`/`execute` 的 —— 出厂配置里它只做编排。
 
 **Q：`/v2/run` 报 `threadId is required`**
@@ -869,7 +908,7 @@ curl -N -X POST localhost:8080/v2/run \
 
 **Q：模型看不见 MCP 服务器的工具？**
 打开 `/mcps`（见 §6.8）。这个 Agent 没用到的服务器写着 `unused`；够不着的工具写着
-`blocked`，括号里的理由会点名 `disabled_tools`、`mcps` 或 `policy.deny`。
+`blocked`，括号里的理由会点名 `disabled_tools` 或 `mcps`。
 写着 `unreachable` 的服务器旁边带着出错原因，说清它为什么起不来。
 
 **Q：MCP 服务器起不来？**

@@ -50,13 +50,12 @@ Everything above runs in one process, as one user, on one kernel:
 - the same kernel, the same filesystem, the same network namespace;
 - the same process as the one holding the model credentials.
 
-`agentkit/spec/defaults.go:11` puts `execute` in the `ask` tier:
+The default tier is **`ask`** (`agentkit/build/policy.go:55`): a tool nobody names
+asks first, and the exceptions are the named ones — the built-in tools the code
+knows (`agentkit/build/tools.go:61`) and the ones a file's own `allows:` lists. So
+`execute` asks, and so do `write_file` and `edit_file`.
 
-```go
-Ask:  []string{"write_file", "edit_file", "execute", "kb_index"},
-```
-
-and the factory `main` agent turns it off outright
+The factory `main` agent turns it off outright
 (`agentkit/templates/files/agents/main.md:7`):
 
 ```
@@ -174,9 +173,9 @@ touches all three, so it is worth stating where each one comes from:
 
 | Root | Resolved by | Line |
 |---|---|---|
-| project root | `--project-root`, else the **working directory** | `agentkit/spec/config.go:157-164` |
-| config root | `--config-dir`, else `$OPENHERON_CONFIG_DIR`, else `<projectRoot>/.openheron` | `agentkit/spec/config.go:170-177` |
-| data dir | `$DATA_DIR`, else `<configRoot>/state` | `main.go:218`, `agentkit/spec/config.go:224-232` |
+| project root | `--project-root`, else the **working directory** | `agentkit/spec/config.go:166-177` |
+| config root | `--config-dir`, else `$OPENHERON_CONFIG_DIR`, else `<projectRoot>/.openheron` | `agentkit/spec/config.go:179-191` |
+| data dir | `$DATA_DIR`, else `<configRoot>/state` | `main.go:218`, `agentkit/spec/config.go:233-245` |
 
 ★ **The working directory is the default project root, and the config root
 follows it.** A process started in a directory *is* a process rooted there:
@@ -198,7 +197,7 @@ usable as a startup step:
   `--model`, `--provider`, `--base-url`, `--env`, `--tools`,
   `--force`, `--dry-run`, `--json`;
 - it writes only what is missing and reports the rest as kept
-  (`initcmd.go:120`, `initcmd.go:147-148`);
+  (`initcmd.go:120`, `initcmd.go:118`);
 - it writes to `<dir>/.openheron` and **never reads `$OPENHERON_CONFIG_DIR`**
   (`initcmd.go:57-65`).
 
@@ -403,7 +402,7 @@ error: resolve kits: kit "…": fetch manifest: Get "https://…/v2/…/manifest
 conclusion rather than a preference. `openheron init` maintains **one**
 provider configuration per configuration root: once the root holds a usable
 model, it reuses it and ignores `--provider`, `--env` and `--base-url`
-(`initcfg/initcfg.go:278-286`). A mixin whose hook tried to seed a second
+(`initcfg/initcfg.go:271-278`). A mixin whose hook tried to seed a second
 provider would therefore be ignored, and the log says so:
 
 ```
@@ -589,13 +588,13 @@ The environment the container gets — and what the Kit does **not** set:
 from there:
 
 - `PROJECT_ROOT` — the working directory, by default
-  (`agentkit/spec/config.go:157-164`). The entrypoint's `cd` is what puts it on
+  (`agentkit/spec/config.go:166-177`). The entrypoint's `cd` is what puts it on
   the mount.
 - the config root — `<projectRoot>/.openheron`, by default
-  (`agentkit/spec/config.go:170-177`), so it is the workspace's own
+  (`agentkit/spec/config.go:179-191`), so it is the workspace's own
   `.openheron`, on the mount.
 - `DATA_DIR` — `state` under the config root, by default
-  (`agentkit/spec/config.go:224-232`), so the sessions live on the mount too
+  (`agentkit/spec/config.go:233-245`), so the sessions live on the mount too
   (§2.9).
 - `LISTEN_ADDR` — the server configuration's `ListenAddr`, by default
   (`main.go:217`): `:8080`.
@@ -653,7 +652,7 @@ the agent could not write to them).
 ```
 
 ★ `|| echo ...` rather than `&&`: `init` fails when an existing provider file
-declares a different model (`initcfg/initcfg.go:94-99`), and that is a
+declares a different model (`initcfg/initcfg.go:84-89`), and that is a
 configuration to keep, not a reason to refuse to serve it.
 
 ★ **The open question is how the entrypoint learns the workspace path.** The
@@ -799,10 +798,10 @@ openheron's own outbound needs are unchanged by this:
   templates make it a template variable too: `agentkit/templates/files/llm/deepseek.yaml`
   renders `base_url: https://api.deepseek.com` and
   `agentkit/templates/files/llm/openai.yaml` renders `https://api.openai.com/v1`,
-  and `openheron init` asks for it (`initcfg/initcfg.go:100-106`). The `inject`
+  and `openheron init` asks for it (`initcfg/initcfg.go:90-96`). The `inject`
   rule matches by **domain**, so the path in `base_url` does not matter (§2.8);
 - whatever the **tools** reach — the HTTP tool
-  (`agentkit/spec/defaults.go:16-27` registers `http_get` / `http_post` /
+  (`agentkit/spec/defaults.go:15-44` registers `request_get` / `request_post` /
   …), MCP servers, and package registries the agent installs from. ★ With
   `allow: ["*"]` these ride the same grant as everything else; they were the
   reason a short allow list would have been the wrong shape.
@@ -936,7 +935,7 @@ runs both ways.
 
 The sessions and the checkpoints are files under the data dir (`main.go:224`,
 `main.go:229-232`), and the data dir's default is `<configRoot>/state`
-(`agentkit/spec/config.go:224-232`). Since the config root is
+(`agentkit/spec/config.go:233-245`). Since the config root is
 `<workspace>/.openheron` (§1.7), the default data dir is
 **`<workspace>/.openheron/state`** — on the mount.
 
@@ -958,7 +957,7 @@ they can read it, back it up, or delete it with the rest. On a volume it is
 out of the way, and out of the user's reach.
 
 ★ `DATA_DIR` (`main.go:218`) is the switch: an absolute path wins over the
-default (`agentkit/spec/config.go:229-232`), so the Kit can point the data dir
+default (`agentkit/spec/config.go:233-245`), so the Kit can point the data dir
 at a volume without touching the configuration.
 
 ★ One consequence of the default: the state lands in the user's own tree, in
@@ -994,7 +993,7 @@ backend, which is why the E2E suite cannot answer this question (§5).
 The outward boundary is what makes this cheap. **No Go code changes.** Not one
 of these moves:
 
-- the agent model, the policy tiers (`agentkit/spec/defaults.go:11`), the
+- the agent model, the tier table (`agentkit/build/policy.go:55`), the
   approval flow, the checkpoint store;
 - the file tools and their confinement (`agentkit/fsx/fsx.go:194`);
 - the API surface (`api/v2_files.go:34-72`);
@@ -1235,7 +1234,7 @@ environment was captured from inside the sandbox and read on the host.
 |---|---|
 | Does the workload's environment carry `WORKSPACE_DIR`? | **Yes** — `/home/you/my-project`: the host's path, and the path the workspace is mounted at |
 | Does the process start in the workspace? | **Yes** — `PWD` and `OLDPWD` are both the workspace |
-| Does the configuration land on the mount? | **Yes** — `.openheron/{agents,llm,policy,server,state}` is on the host, and the sessions with it |
+| Does the configuration land on the mount? | **Yes** — `.openheron/{agents,llm,mcps,server,state}` is on the host, and the sessions with it |
 | Does the credential reach the model? | **Yes** — the container held `DEEPSEEK_API_KEY=proxy-managed`; the proxy substituted the real value and the call returned "ok" |
 | Does the published recipe build? | **Yes** — `make kit` with the container-driver builder produces `openheron-kit:0.0.6`, and the binary inside reports `v0.0.6` |
 | Does the workload compose with the credential mixin? | **Yes** — the container held `DEEPSEEK_API_KEY=proxy-managed`, the configuration was on the mount, and the model answered |
@@ -1253,6 +1252,11 @@ environment was captured from inside the sandbox and read on the host.
 | Does the runtime publish the declared port? | **Yes** — `✓ http — published localhost:32772 -> 8080/tcp`, on an ephemeral loopback port |
 | Does a detached run start the server? | **No** — the entrypoint is the agent's launch command, and `--detach` opens no session (§2.5) |
 | Does the server outlive its client? | **Yes** — `long-running@1` keeps it up; the health endpoint still answered 200 after the client was gone |
+
+★ **The directory set changed after that measurement.** The `policy/` partition was
+retired on 2026-11-07 — the tiers live in the files that provide the tools now
+(§1.2) — so a configuration written today carries no `policy/` directory. The
+answer itself stands: the configuration lands on the mount.
 
 ★ **Both credential routes were measured.** With the placeholder
 (`--placeholder proxy-managed`) the container held `DEEPSEEK_API_KEY=proxy-managed`
@@ -1333,15 +1337,15 @@ model; only the first keeps the key out of the VM (§2.8).
   `execute` is the one filesystem tool that is a *streaming* tool
   (`adk/middlewares/filesystem/filesystem.go:512` builds it with
   `newStreamingExecuteTool`, while the other six use `InferTool`). The gate
-  implemented only the synchronous wrapper, so a tool the policy named in the
-  `ask` column ran without a human decision. Measured before the fix: with
-  `execute` in the `ask` column, a run that called it executed it and returned
-  its output, with no approval raised. The other filesystem tools were
-  covered all along — which is why the acceptance run's `edit_file` approval
-  had always worked. The fix gives the gate the streaming wrapper too, with
-  both paths sharing one decision (`agentkit/build/gate.go`): the arguments
-  to run are the ones the interrupted call stored, and a refusal is a
-  message the model reads rather than an error that ends the turn. This was
+  implemented only the synchronous wrapper, so a tool the tier table left at the
+  default (`ask`) ran without a human decision. Measured before the fix: with
+  `execute` unnamed — and the default tier being `ask` — a run that called it
+  executed it and returned its output, with no approval raised. The other
+  filesystem tools were covered all along — which is why the acceptance run's
+  `edit_file` approval had always worked. The fix gives the gate the streaming
+  wrapper too, with both paths sharing one decision (`agentkit/build/gate.go`):
+  the arguments to run are the ones the interrupted call stored, and a refusal is
+  a message the model reads rather than an error that ends the turn. This was
   an openheron defect, not a Kit one.
 
   Measured after the fix, in a sandbox running the rebuilt binary:
@@ -1517,11 +1521,10 @@ character, and ran the test again. The change landed on the host, because the
 workspace *is* a directory on the host, and the host's own `go test` was green
 afterwards.
 
-★ That run asked **once**, because the workspace carried a policy of its own
-that left `execute` out of the `ask` column. The example project does not
-carry one any more — `openheron init` writes the whole configuration on the
-first start, and the default policy names `execute` alongside the file
-tools.
+★ That run asked **once**, because the workspace carried a policy of its own that
+let `execute` run without a nod. The example project does not carry one any more
+— `openheron init` writes the whole configuration on the first start, and the
+default tier is `ask`, so `execute` asks like the file tools do.
 
 ★ That run also found a trap worth naming: `openheron init` writes the
 configuration all or nothing, so a workspace that ships one agent file and
@@ -1595,10 +1598,13 @@ and the log inside the sandbox shows the whole set written:
 created .openheron/agents/main.md
 created .openheron/agents/task.md
 created .openheron/llm/deepseek.yaml
-created .openheron/policy/permissions.yaml
-created .openheron/policy/limits.yaml
+created .openheron/mcps/example.yaml
 created .openheron/server/config.yaml
 ```
+
+★ **The set is five files, and there is no `policy/` in it.** The partition was
+retired on 2026-11-07 (§1.2), so a configuration written today names its tiers in
+the files that provide the tools rather than in a central list.
 
 ★ **So the example project ships no configuration at all.** The workspace
 holds the project and the environment file, and the runtime writes the rest

@@ -96,7 +96,7 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
 
 需要读「某个 agent 的生效工具表」时，由 `agent.Builder` 暴露只读查询，
 **不要**在 API 层重算一遍 `Table.Blocked` / `Policy.TierOf`。
-理由很直接：重算就会漂移 —— 策略改一次，API 的答案和运行时的答案就对不上了。
+理由很直接：重算就会漂移 —— 档位表改一次，API 的答案和运行时的答案就对不上了。
 
 ## 3. 开发配方
 
@@ -124,27 +124,30 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
    provider。位置决定顺序，也决定「可选工具」与「必需工具」的区分。
 
 3. **可选性由 `Optional()` 决定**，不是由返回 error 决定。`Optional() == true` 的
-   provider 失败时会打一条 Warn 然后跳过（`tools.go:65-67`）——
+   provider 失败时会打一条 Warn 然后跳过（`tools.go:89`）——
    缺 API key 不该让整个服务起不来。
    ★ 但注意这条 Warn 之外**没有别的提示**：工具静默不进表，用户在界面上只会发现
    「这个功能好像没有」。新增可选 provider 时要想清楚这条 Warn 够不够。
 
-4. **闸门自动生效**。`agentkit/build/gate.go` 会用外层 policy + 内层
-   `disabled_tools` 过滤工具表。你不需要写任何权限代码。
+4. **闸门自动生效**。`agentkit/build/gate.go` 会用 agent 自己的 `disabled_tools`
+   与 `mcps:` 过滤工具表，并且把**凡是允许名单没有点名的工具**都裹进审批里。
+   ★ 默认档位是 `ask`，所以例外都是被点名的那些：代码认识的那些内置工具
+   （`agentkit/build/tools.go:61`），以及某个文件自己的 `allows:` 列出的那些。
+   你不需要写任何权限代码。
 
-5. **名字不能撞保留名**。`tools.go:46` 的 `reservedToolNames` 列出了
+5. **名字不能撞保留名**。`tools.go:69` 的 `reservedToolNames` 列出了
    `ls` `read_file` `write_file` `edit_file` `glob` `grep` `execute`
    `task` `write_todos` `skill`。撞上会在 `Build` 时报错。
-   工具名同时是策略表里的键 —— 撞名会让策略表指向错误的工具。
+   工具名同时是档位表里的键 —— 撞名会让档位表指向错误的工具。
 
    ★ **来自服务器的名字是带命名空间的。** MCP 工具挂在 `decl.MCPToolPrefix`
-   （`agentkit/spec/decl/decl.go:336`）与 `decl.MCPSeparator`
-   （`agentkit/spec/decl/decl.go:345`）之下，于是策略表用一个前缀就能收窄一整个
+   （`agentkit/spec/decl/decl.go:308`）与 `decl.MCPSeparator`
+   （`agentkit/spec/decl/decl.go:317`）之下，于是 agent 的表用一个前缀就能收窄一整个
    服务器，而不必列出它所有工具的名字。★ **拼出来的名字从不被解析回去**：
-   `Table.Blocked`（`agentkit/build/policy.go:161`）匹配的是前缀，所以没有任何代码
+   `Table.Blocked`（`agentkit/build/policy.go:146`）匹配的是前缀，所以没有任何代码
    需要把一个名字拆开才能知道它属于哪个服务器。
 
-6. **跨 provider 撞名也会报错**：`tools.go:83` 的 `validateBatch` 用 `seen` 跟踪，
+6. **跨 provider 撞名也会报错**：`tools.go:106` 的 `validateBatch` 用 `seen` 跟踪，
    所以两个 provider 提供同名工具会在启动时失败，而不是谁先谁后地覆盖。
 
 #### MCP provider
@@ -204,22 +207,23 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
   下面这份配方就是它走的路子。
 
 1. **`agentkit/spec/config.go`**：加目录常量 `DirMCP = "mcps"`，并在
-   `Categories` 里加一项（含 `ID`、`Label`、`Dir`、`Ext`）。**热重载目录**和
+   `Categories` 里加一项（含 `ID`、`Label`、`Dir`、`Ext`、`Editable`）。**热重载目录**和
    **非热重载目录**要分清楚 —— 改一个目录的语义（热不热）影响用户预期。
 
-2. **`agentkit/spec/load.go`**：加 `loaderFor` 的分支（`config.go:314` 的
+2. **`agentkit/spec/load.go`**：加 `loaderFor` 的分支（`config.go:340` 的
    `loaderFor`），并实现 `loadXXX`。
 
 3. **`agentkit/spec/decl/decl.go`**：加纯声明结构体。
 
-4. **热重载自动生效**：`agentkit/spec/config.go:87` 的 `hotDirList()` 是从
+4. **热重载自动生效**：`agentkit/spec/config.go:81` 的 `hotDirList()` 是从
    `Categories` 里筛出 `Hot()` 为真的目录 —— 你在第 1 步把分类标成热重载，
    监听集合就自动有了。**不需要**再去 `reload.go` 里手工登记一遍
    （漏登记的后果是「改配置不生效且无任何提示」）。
 
-5. **写入闸门**：`api/v2_settings.go` 的可编辑 section 列表要加。
-   不热重载的 section **不能**放进可编辑列表 —— 否则用户在界面上改了，
-   重启才生效，而界面上没有任何提示。
+5. **写入闸门**：在第 1 步把那一项标成 `Editable: true` —— ★ **清单**才是真相，
+   settings 接口读的就是这个标志（`api/v2_settings.go`）；客户端从清单里拿可编辑的
+   分类，而不是自己维护一份列表。不热重载的 section **不能**可编辑 —— 否则用户在
+   界面上改了，重启才生效，而界面上没有任何提示。
 
 6. **默认值**：`agentkit/spec/defaults.go`。
 
@@ -228,7 +232,7 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
    （`agentkit/spec`，它供给编辑器）**都能依赖**的**叶子**包 —— 然后从那儿读。
    ★ **一份文件的内容只有一个来源**：同一个文件的两份拷贝，就是两份会漂移的拷贝，而拷贝
    正是原先的依赖形状逼出来的。那些不是磁盘文件的分区骨架（agents 的 frontmatter 带着
-   可用的模型列表）留在 `spec.Template(catDir, …)`。
+   可用的模型列表）留在 `spec.Skeleton(catDir, …)`。
 
    ★ **init 按目录复制一个分区，不按文件名清单。** `initcfg` 的 `copySection` 问模板包
    这个分区有哪些文件，然后把拿到的都复制过去 —— ★ 所以
@@ -241,21 +245,21 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
 `mcps/` 分区是一个 MCP 服务器一个文件，而且**文件的存在本身就是定义** ——
 没有 `enabled` 这个键。
 
-- **声明**由常量 `DirMCP = "mcps"`（`agentkit/spec/config.go:26`）与
-  `Categories` 里那一项（`agentkit/spec/config.go:72`）给出 —— 可编辑、热重载、
+- **声明**由常量 `DirMCP = "mcps"`（`agentkit/spec/config.go:25`）与
+  `Categories` 里那一项（`agentkit/spec/config.go:66`）给出 —— 可编辑、热重载、
   `.yaml`。
-- **装载**由 `loadMCP`（`agentkit/spec/load.go:256`）完成：一个文件，一个服务器。
+- **装载**由 `loadMCP`（`agentkit/spec/load.go:269`）完成：一个文件，一个服务器。
 - ★ **这个分区的「热」意味着客户端会被重建。** 声明就是服务器的身份，所以声明变了
   就是服务器变了：旧客户端被拆掉，重新起一个新的
   （`agentkit/build/mcpmanager.go:215`），依据是那份声明的指纹
   （`agentkit/build/mcpmanager.go:330`）。★ 一个资源没有跟着重建的热分区，就是在
   撒谎说自己热。
 - **写入闸门**拒绝一个读不回来的名字：`validateFileName`
-  （`agentkit/spec/write.go:87`）只接受 `<server>.yaml` 且服务器名合法
+  （`agentkit/spec/write.go:88`）只接受 `<server>.yaml` 且服务器名合法
   （`agentkit/spec/write.go:107`）—— 文件名就是服务器名，而服务器名就是这台服务器
   工具的命名空间段。
-- **脚手架**是 `Template`（`agentkit/spec/write.go:160`），其中 `mcps/` 那一支
-  （`agentkit/spec/write.go:189`）写出的是一份**能加载**的文件：★ `mcps/` 下的文件
+- **脚手架**是 `Skeleton`（`agentkit/spec/write.go:159`），其中 `mcps/` 那一支
+  （`agentkit/spec/write.go:186`）写出的是一份**能加载**的文件：★ `mcps/` 下的文件
   **定义**一台 server，所以一份解析不了的文件不是「server 关着」，而是「配置加载不了」。
   可选的那些字段写成注释，而 `command` 是一个没装的占位符 —— 于是 server 起不来，
   日志里说一句，agent 照跑。
@@ -776,7 +780,7 @@ make test-env-reset     # 只重建测试目录，不启动
 make test-env-sync      # ★ 改过开发侧的 agent 定义后必须跑
 ```
 
-★ **`make test-env-sync` 是必须的，不是可选的** —— 测试实例里的 `agents/ llm/ policy/ skills/`
+★ **`make test-env-sync` 是必须的，不是可选的** —— 测试实例里的 `agents/ llm/ tools/ skills/`
 是从开发侧**复制**的，改完 agent 不同步，测的还是旧定义。
 
 ★ **冒烟脚本需要一个答得上话的模型。** 它们对着测试实例真跑一轮，而测试实例的
@@ -800,7 +804,7 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 | 包 | 锁住的契约 |
 |---|---|
 | `agentkit/spec` | 配置根解析、frontmatter 严格解码、深度校验、环检测、写入闸门 |
-| `agentkit/build` | 工具装配、策略档位、闸门、拓扑、嵌套恢复、技能范围 |
+| `agentkit/build` | 工具装配、allow/ask 档位表、闸门、拓扑、嵌套恢复、技能范围 |
 | `agentkit/run` | 输入构造（子 Agent 消息不混入父历史）、事件桥接 |
 | `api` | 路由、SSE 帧、错误信封、`threadId` 必填 |
 | `kb` | 索引、评分、目录格式（含旧中文表头兼容） |
@@ -921,8 +925,8 @@ E2E 共享一个假后端状态，并行会互相污染。
 **（七）`smoke:hitl` 会抖，约 5 次里 1 次** —— 它依赖模型*选择*调 `write_file` 才能触发审批。
 那是模型的自由，不是代码回归；脚本会重试，全都不触发时**明确报错**，不伪装成接线有问题。
 ★ 它有一个**前置条件**：**真正调工具的那个 agent**，其 `write_file` 必须落在 `ask` 档
-（既没被全局 `deny`，也没被它自己的 `disabled_tools` 禁用）—— 工具够不着，
-自然没有审批可触发。
+—— ★ 而那就是**默认值**：没有任何文件在 `allows:` 里点到它，它自己的
+`disabled_tools` 也没有禁掉它。工具够不着，自然没有审批可触发。
 ★ 别只盯着 `main`：出厂配置里 `main` 确实写着
 `disabled_tools: [write_file, edit_file, execute]`，但它只做编排，会把活**委派**给
 `task`，而 `task` 的 `write_file` 在 `ask` 档 —— 审批照样触发。
@@ -1031,8 +1035,9 @@ gitleaks 报的**提交数**比 git 报的低；但内容照样扫到了，因�
 | 症状 | 先查 |
 |---|---|
 | 启动报配置缺失 | 启动日志里的 `config root` 那行 —— 它打印了实际用的根和项目根 |
-| 改配置不生效 | 该分区热重载吗？`server/`、`skills/` 要重启 |
-| Agent 调不动某工具 | `GET /v2/agents/:agentId` 看生效工具表；再查是内层禁用还是外层 `deny` |
+| 改配置不生效 | 该分区热重载吗？`llm/`、`agents/`、`tools/`、`mcps/` 是热的；`server/`、`skills/` 要重启 |
+| Agent 调不动某工具 | `GET /v2/agents/:agentId` 看生效工具表；再读工具的 `reason` —— `disabled_tools`、`mcps`，或者默认的 `ask` 档（它会问） |
+| 残留的 `policy/` 目录好像还在管你的旧档位 | 这个分区退役了：档位住在提供工具的那些文件里，而默认档位是 `ask`。启动日志里会说明 —— 那条提示落在 `deferred` 里 |
 | `reasoning` 像是没用 | 模型档案里声明这个档位了吗？没声明 = 静默忽略 |
 | 审批恢复不了 | checkpoint 还在吗？`/v2/sessions/:id` 看 `pendingApprovals` |
 | 界面白屏 + `Maximum update depth exceeded` | 有 selector 返回了新数组/新对象吗？ |
@@ -1057,6 +1062,7 @@ gitleaks 报的**提交数**比 git 报的低；但内容照样扫到了，因�
 | **四个运行时依赖被放在 `devDependencies`** | `web/package.json` | `lucide-react`（10 个文件引）、`clsx`、`tailwind-merge`、`class-variance-authority` 都被 `src/` 引用并打进 `web/dist`。构建能过（Vite 在构建期解析），但清单是错的。 |
 | **`web/scripts/interop-check.ts` 已过时** | 该脚本第 16-20、41-45 行 | 它直接 POST `/v2/run` 且**不带 `threadId`**，而服务端现在要求先 `POST /v2/sessions`（`api/v2_run.go:78`）。所以 `make smoke` 里的这一项会失败（实测报 400 `threadId is required`）。`web/scripts/hitl-smoke.ts` 与 `web/scripts/no-undefined-url-check.ts` 已按新契约写。 |
 | **`api/server.go:75` 的注释指向不存在的路由** | 该行 | 注释写的是「GET /v2/spec」，但 `SetSkillsSource` 实际喂的是 `/v2/skills`。 |
+| **残留的 `policy/` 目录被丢弃了 —— 而配置照样加载** | 装载器只走五个分区（`agentkit/spec/config.go:40-71`）；退役的目录只被「注意到」，不会被读（`noteRetiredDirs`，`agentkit/spec/config.go:329`） | `policy/` 分区在 2026-11-07 退役了：档位住在提供工具的那些文件里，而默认档位是 `ask`。从前留下的 `policy/permissions.yaml` **不会被读** —— 以前被禁的工具现在会问，以前不用点头就过的工具现在也会问。★ 那条提示落在 `deferred` 里（启动日志与 `/v2/health` 都带着它），并说清新档位在哪儿；配置编辑器直接拒绝这个路径（「unknown config section」，`agentkit/spec/write.go:72`）。★ **空的** `policy/` 目录不报任何东西 —— 它里面本来就没有被丢掉的东西。 |
 
 ## 8. 提交前
 

@@ -153,18 +153,21 @@ write the new configuration somewhere the user did not point at.
 | `skills/` | — | ❌ | **Resolved independently** (see §3.6) |
 
 ★ **There is no `policy/` partition.** The five partitions are `llm/` `agents/`
-`server/` `tools/` `mcps/` (`agentkit/spec/config.go:40`), and a `policy/` directory
-left over from an older configuration is **silently ignored** — nothing reads it and
-nothing warns. The tier model it used to carry now lives in the tool files and the
-agent files instead (§3.4), so a stale `policy/` directory is not an error you can
-diagnose from the log: it is a directory that stopped meaning anything.
+`server/` `tools/` `mcps/` (`agentkit/spec/config.go:40`). A `policy/` directory left over
+from an older configuration is **not read** — nothing loads it — and the tier model it used
+to carry now lives in the tool files and the agent files instead (§3.4). ★ The
+configuration **still starts**: the rest of it may be perfectly good, and a broken file
+elsewhere would keep it from loading at all. But the directory raises a **notice**
+(`agentkit/spec/config.go:329` `noteRetiredDirs`) that names its new home — a dropped
+configuration that says nothing is the worst kind, because the process starts fine and the
+setting is gone.
 
 File names under `tools/` are a **whitelist**: `agentkit/spec/load.go:191` errors out on
 an unknown file instead of ignoring it — "I wrote kb.yaml and it did not take effect" is
 one of the hardest classes of problem to debug.
 
 ★ The `mcps/` partition holds **one file per server**
-(`agentkit/spec/config.go:26`'s `spec.DirMCP`): the file's presence **is** the definition
+(`agentkit/spec/config.go:25`'s `spec.DirMCP`): the file's presence **is** the definition
 — there is no `enabled` key — and the file's name is the server's name, which is also the
 namespace segment of that server's tools.
 

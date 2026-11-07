@@ -25,7 +25,7 @@ openheron 手里已经握有两个足以回答「这个会话是不是快撑爆�
 
 ### 1.1 上下文窗口配了，然后被忽略
 
-`context_window` 是模型声明的一部分（`agentkit/spec/decl/decl.go:42`）：
+`context_window` 是模型声明的一部分（`agentkit/spec/decl/decl.go:44`）：
 
 ```go
 ContextWindow int `yaml:"context_window"`
@@ -33,7 +33,7 @@ ContextWindow int `yaml:"context_window"`
 
 出厂模板带着它 —— OpenAI 是 `128000`（`agentkit/templates/files/llm/openai.yaml:16`），DeepSeek 是 `131072`（`agentkit/templates/files/llm/deepseek.yaml:15`），通用模板是 `0`，留给用户自己填（`agentkit/templates/files/llm/_generic.yaml:14`）。
 
-它只流到一个地方：`GET /v2/config` 的厂商列表（`api/v2_introspect.go:276`，在 `api/v2_introspect.go:364` 填入）。**运行时没有任何代码读它。** 前端真正用的 agent 视图（`api/v2_introspect.go:77`，由 `modelOf` 在 `api/v2_introspect.go:197` 构造）并不带它，所以浏览器连「我正在对话的这个 agent 的窗口有多大」都拿不到。
+它只流到一个地方：`GET /v2/config` 的厂商列表（`api/v2_introspect.go:315`，在 `api/v2_introspect.go:425-452` 填入）。**运行时没有任何代码读它。** 前端真正用的 agent 视图（`api/v2_introspect.go:97`，由 `modelOf` 在 `api/v2_introspect.go:239` 构造）并不带它，所以浏览器连「我正在对话的这个 agent 的窗口有多大」都拿不到。
 
 ### 1.2 token 用量早就落盘了 —— 但那是总和，不是占用
 
@@ -68,7 +68,7 @@ eino v0.9.21 有 `adk/middlewares/summarization`（eino v0.8.0 引入；见[上�
 - 该基线之后新增的消息按大约四字符一个 token 估算（`estimateTokenCount`，`adk/middlewares/summarization/summarization.go:476`）；
 - 阈值是 `Trigger.ContextTokens`，默认 160000（`getTriggerContextTokens`，`adk/middlewares/summarization/summarization.go:373`）；上游文档建议把它设成模型窗口的 80–90%。
 
-openheron 一点都没引：仓库里没有任何 `summarization` 引用，而它本该挂载的 `deep.Config.Handlers`（`agentkit/build/assemble.go:110`，`adk/prebuilt/deep/deep.go:97`）上只有 openheron 自己的闸门处理器（`agentkit/build/gate.go:105`）。
+openheron 一点都没引：仓库里没有任何 `summarization` 引用，而它本该挂载的 `deep.Config.Handlers`（`agentkit/build/assemble.go:110`，`adk/prebuilt/deep/deep.go:97`）上只有 openheron 自己的闸门处理器（`agentkit/build/gate.go:167`）。
 
 ---
 
@@ -315,7 +315,7 @@ res, streamErr := transport.Stream(stream, turn, transport.Options{
 
 ### 4.6 agent 视图认得窗口了
 
-前端需要知道自己对话的那个 agent 的窗口。`modelView`（`api/v2_introspect.go:77`）加一个字段：
+前端需要知道自己对话的那个 agent 的窗口。`modelView`（`api/v2_introspect.go:97`）加一个字段：
 
 ```go
 type modelView struct {
@@ -330,7 +330,7 @@ type modelView struct {
 }
 ```
 
-`modelOf` 本来就通过 `build.Resolve` 解析模型（`api/v2_introspect.go:197`），窗口只是一个字段的距离。
+`modelOf` 本来就通过 `build.Resolve` 解析模型（`api/v2_introspect.go:239`），窗口只是一个字段的距离。
 
 ### 4.7 可选：AG-UI 标准 `usage[]`
 
@@ -659,7 +659,7 @@ P0 与 P1 是仪表盘。P2 是让仪表盘有意义的那部分：没有它，�
 
 P2 是唯一会动会话格式的阶段，所以拆成各自都能独立发布的几步：
 
-1. **挂上中间件，先不持久化。** `deep.Config.Handlers` 接受 `adk.TypedChatModelAgentMiddleware`（`adk/prebuilt/deep/deep.go:97`），摘要中间件正是它（`adk/middlewares/summarization/summarization.go:272`）；openheron 已经把自己的闸门处理器追加在那里（`agentkit/build/assemble.go:110`，`agentkit/build/gate.go:105`）。中间件挂上之后，一轮里长得撑爆窗口的活儿能扛住。对话还会变长 —— 还没落盘。
+1. **挂上中间件，先不持久化。** `deep.Config.Handlers` 接受 `adk.TypedChatModelAgentMiddleware`（`adk/prebuilt/deep/deep.go:97`），摘要中间件正是它（`adk/middlewares/summarization/summarization.go:272`）；openheron 已经把自己的闸门处理器追加在那里（`agentkit/build/assemble.go:110`，`agentkit/build/gate.go:167`）。中间件挂上之后，一轮里长得撑爆窗口的活儿能扛住。对话还会变长 —— 还没落盘。
 2. **压缩消息。** finalizer 只返回摘要（§7.2），callback 把它带 `ExtraCompaction` 标记追加进记录（§7.3），边界再从它读回来。
 3. **有效历史。** `Session.Messages(effective)`，运行循环改问有效视图（§7.4）。到这一步，对话跨轮也不长了。
 4. **界面。** 消息列表里的标记、仪表盘上的压缩次数、实时的 `context_compacted` 事件（§7.7）。
