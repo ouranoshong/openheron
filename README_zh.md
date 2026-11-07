@@ -59,7 +59,10 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 `tools/web_search.yaml`、`tools/wikipedia.yaml` 和 `tools/kb.yaml`。
 
 ★ **MCP 那个例子是样本，不是能跑起来的服务器** —— 它的 `command` 是个没装的占位符。
-文件本身合法、也能加载；服务器起不来，openheron 只在日志里说一句，不会拒绝启动。
+文件本身合法：它**能加载**，而起不来的服务器只赔上它自己的工具，别的什么都不影响。
+★ 面板会说 —— `/mcps` 把那个服务器显示成 `unreachable` 并带上原因 —— 而第一个真正装配
+agent 的回合会往日志里写 `[mcp] the server is unreachable`。启动是懒的，所以开机时什么都
+不会去试。
 
 ## 命令行
 

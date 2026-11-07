@@ -71,8 +71,11 @@ decide. Pass `--tools` to get `tools/http.yaml`, `tools/web_search.yaml`,
 `tools/wikipedia.yaml` and `tools/kb.yaml`.
 
 ★ **The MCP example is a sample, not a running server** — its `command` is a placeholder
-that is not installed. The file is still valid and loads; the server simply does not come
-up, and openheron says so in the log rather than refusing to start.
+that is not installed. The file is still valid: it **loads**, and a server that cannot
+be started costs that server's tools and nothing else. ★ The panel reports it — `/mcps`
+shows the server as `unreachable` with the reason — and the first turn that builds the
+agent writes `[mcp] the server is unreachable` to the log. Starting a server is lazy, so
+nothing is attempted at boot.
 
 ## Command line
 
