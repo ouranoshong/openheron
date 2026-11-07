@@ -3,7 +3,7 @@ description: Write code — change files per the given conclusions, run tests. N
 model: openai/gpt-4o
 max_iterations: 30
 # write_file / edit_file are not disabled — that is the whole point of this role.
-# execute is not disabled either, but running a test has to pass the global ask tier (a human nod first).
+# execute is not disabled either, but running a test has to pass the ask tier (a human nod first).
 disabled_tools: []
 ---
 

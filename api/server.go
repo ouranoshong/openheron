@@ -36,8 +36,8 @@ type Server struct {
 	// have no socket); defaults to transport.New.
 	newStream func(*app.RequestContext) *transport.SSEStream
 	// cfgFn reads the live configuration for the introspection endpoints.
-	// A function, not a pointer: openheron hot-reloads llm/, agents/ and policy/,
-	// and a captured value would serve stale agent topology after every reload.
+	// A function, not a pointer: openheron hot-reloads llm/, agents/, tools/ and
+	// mcps/, and a captured value would serve stale agent topology after every reload.
 	cfgFn ConfigSource
 	// cfgSvc is the config Service itself, for /v2/settings — reading needs
 	// only the merged Config, writing needs the files behind it.

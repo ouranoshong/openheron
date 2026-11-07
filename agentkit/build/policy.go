@@ -16,7 +16,6 @@ type Tier string
 const (
 	TierAllow Tier = "allow"
 	TierAsk   Tier = "ask"
-	TierDeny  Tier = "deny"
 )
 
 // Policy is the assembled tier table: a name → a tier.

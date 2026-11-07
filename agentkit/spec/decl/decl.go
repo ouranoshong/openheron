@@ -221,8 +221,12 @@ type Tier string
 const (
 	TierAllow Tier = "allow"
 	TierAsk   Tier = "ask"
-	TierDeny  Tier = "deny"
 )
+
+// ★ There is no `deny` tier: the global deny list is gone, and a tool an
+//
+//	agent may not use keeps its own tier and says why in its `reason` —
+//	it is this agent that cannot have it, not that the tool is illegal.
 
 // ── server/config.yaml ───────────────────────────────────────────────────
 

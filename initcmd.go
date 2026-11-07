@@ -146,7 +146,7 @@ func printInitUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "exist at the user level are inherited, never replaced.")
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Written: agents/main.md, agents/task.md, llm/<provider>.yaml,")
-	fmt.Fprintln(stdout, "        policy/permissions.yaml, policy/limits.yaml, server/config.yaml.")
+	fmt.Fprintln(stdout, "        mcps/example.yaml, server/config.yaml.")
 	fmt.Fprintln(stdout, "--tools adds the tool configurations under tools/ — a provider without")
 	fmt.Fprintln(stdout, "a configuration mounts nothing, so that is opt-in.")
 }

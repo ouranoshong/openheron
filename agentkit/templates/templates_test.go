@@ -12,7 +12,6 @@ func TestEveryTemplateIsThere(t *testing.T) {
 		"llm/deepseek.yaml",
 		"llm/openai.yaml",
 		"mcps/example.yaml",
-		"policy/limits.yaml",
 		"server/config.yaml",
 		"tools/http.yaml",
 		"tools/web_search.yaml",

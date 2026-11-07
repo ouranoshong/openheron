@@ -104,19 +104,6 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 			"model %q is already declared; it is reused as is", choice.Ref))
 	}
 
-	// ── policy ──────────────────────────────────────────────────────────
-	//
-	// ★ init does not write the policy/ section at all, and the reason is
-	//   that both of its files would say nothing: `permissions.yaml` lists
-	//   exactly the tiers the code already defaults to, and `limits.yaml`
-	//   writes 0, which means "no limit — fall back to the global value".
-	//   ★ A file that says what the code already does is noise, and noise
-	//   in a configuration tree is read as meaning.
-	//
-	//   The partition stays: a user who wants a tier of their own writes
-	//   policy/permissions.yaml by hand, and the configuration editor
-	//   scaffolds it.
-
 	// ── tools ───────────────────────────────────────────────────────────
 	//
 	// ★ A provider whose configuration is absent mounts nothing, so init does

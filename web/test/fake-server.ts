@@ -1126,8 +1126,7 @@ export function startFakeServer(port = 0): FakeServer {
     settingsDisk.length = 0
     settingsRev = 0
     const put = (path: string, body: string) => settingsDisk.push({ path, body, rev: nextRev() })
-    put("policy/permissions.yaml", "allow: [ls, read_file]\nask: [write_file]\ndeny: []\n")
-    put("policy/limits.yaml", "agent:\n  max_depth: 2\nretry:\n  max_retries: 1\n")
+    put("tools/http.yaml", "methods: [get]\nallows: [request_get]\n")
     put("agents/main.md", "---\nmodel: deepseek/flash\ndescription: root\n---\nbody\n")
     put("llm/deepseek.yaml", "type: openai\nbase_url: https://x\napi_key: ${KEY}\nmodels:\n  - id: flash\n")
     put("server/config.yaml", 'listen_addr: ":8080"\n')
@@ -1135,10 +1134,13 @@ export function startFakeServer(port = 0): FakeServer {
   seedSettings()
 
   const SETTINGS_MANIFEST = {
+    // ★ The order mirrors the real server's partition table
+    //   (spec.Categories): llm, agents, server, tools, mcps. The client picks
+    //   the **first editable** item when the dialog opens, so a fake with a
+    //   different order tests a different file than the real one does.
     categories: [
-      { id: "policy", label: "Approval policy", editable: true, hot: true },
-      { id: "agents", label: "Agents", editable: true, hot: true },
       { id: "llm", label: "Providers", editable: true, hot: true },
+      { id: "agents", label: "Agents", editable: true, hot: true },
       { id: "server", label: "Server", editable: false, hot: false, note: "not hot-reloaded; changes apply on restart" },
       { id: "tools", label: "Tools", editable: true, hot: true },
       // ★ The MCP partition, exactly as the real server ships it: editable
@@ -1147,16 +1149,12 @@ export function startFakeServer(port = 0): FakeServer {
       { id: "mcps", label: "MCP servers", editable: true, hot: true },
     ],
     items: [
-      { path: "policy/permissions.yaml", exists: true, hot: true, revision: "r1" },
-      { path: "policy/limits.yaml", exists: true, hot: true, revision: "r6" },
-      { path: "agents/main.md", exists: true, hot: true, revision: "r3" },
       { path: "llm/deepseek.yaml", exists: true, hot: true, revision: "r4" },
+      { path: "agents/main.md", exists: true, hot: true, revision: "r3" },
       { path: "server/config.yaml", exists: true, hot: false, revision: "r5" },
+      { path: "tools/http.yaml", exists: true, hot: true, revision: "r1" },
     ],
     templates: {
-      policy: "allow: []\nask: []\ndeny: []\n",
-      "policy/limits.yaml":
-        "# 限制规则：数量上的上限。\n# 只能收紧；放宽请改 server/config.yaml。\nagent:\n  max_depth: 0\nretry:\n  max_retries: 0\n",
       agents: "---\nmodel: \ndescription: \n---\n\n# available models: deepseek/flash\n",
       llm: "type: openai\nbase_url: \napi_key: ${}\nmodels: []\n",
       mcps: "transport: stdio\ncommand: mcp-example-server\nargs: []\ntimeout: 30s\ncall_timeout: 60s\n",

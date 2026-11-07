@@ -15,8 +15,8 @@ import (
 // ConfigSource supplies the effective configuration to the introspection
 // endpoints.
 //
-//	live value: openheron hot-reloads llm/, agents/ and policy/, and a captured
-//	pointer would serve stale agent topology after every reload.
+//	live value: openheron hot-reloads llm/, agents/, tools/ and mcps/, and a
+//	captured pointer would serve stale agent topology after every reload.
 type ConfigSource func() *spec.Config
 
 // SetConfigSource wires /v2/config, /v2/agents, /v2/health and /v2/runtime.

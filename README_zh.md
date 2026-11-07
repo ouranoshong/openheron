@@ -11,13 +11,12 @@
 
 「谁能干什么」变成几条硬规则：
 
-- **工具权限分两层，永不合并** —— 外层 `policy/permissions.yaml` 定全局 `ask`/`deny`，
-  内层每个 agent 用自己的 `disabled_tools` 收窄。外层的 `deny` 优先，
-  **子 agent 放松不了它**。
+- **工具权限是点名的，缺省是要问** —— 没人点名的工具先问一声；例外由提供工具的那个文件的
+  `allows:` 点名，内层每个 agent 再用自己的 `disabled_tools` 收窄。
 - **委派有深度上限** —— 入口 agent 是第 0 层，深度 `d` 的 agent 当且仅当 `d < max_depth`
   才能再生子 agent；拓扑超限**启动期就报错**，不静默截断。
 - **一个会话能同时跑多个 agent** —— 互不依赖的活并行分派。
-- **配置是文件** —— 模型档案、提示词、审批策略都是能读能改的文件。
+- **配置是文件** —— 模型档案、提示词、工具档位都是能读能改的文件。
 - **一个二进制，扔哪都能跑** —— 前端嵌进单文件，跨平台静态编译。
 
 ★ 边界先说清楚：省 token 在**可分解、工具输出冗长**的任务上最显著 —— 顺序依赖强的任务，
@@ -51,13 +50,16 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 想先看一眼再执行，就从[发布页](https://github.com/ouranoshong/openheron/releases/latest)
 把 `install.sh` 下载下来读一遍。
 
-`openheron init` 写六个文件：`agents/main.md`、`agents/task.md`、`llm/<provider>.yaml`、
-`policy/permissions.yaml`、`policy/limits.yaml` 和 `server/config.yaml`。已存在的文件
+`openheron init` 写五个文件：`agents/main.md`、`agents/task.md`、`llm/<provider>.yaml`、
+`mcps/example.yaml` 和 `server/config.yaml`。已存在的文件
 **保留不覆盖**（除非加 `--force`），所以在一个已经配好的项目里跑它是安全的。
 
 `tools/` 默认**不写** —— 配置缺失的 provider 什么都不挂，所以写下这个文件才是把工具挂上去
 的那一步，用哪些工具得由你来定；加 `--tools` 才会写 `tools/http.yaml`、
 `tools/web_search.yaml`、`tools/wikipedia.yaml` 和 `tools/kb.yaml`。
+
+★ **MCP 那个例子是样本，不是能跑起来的服务器** —— 它的 `command` 是个没装的占位符。
+文件本身合法、也能加载；服务器起不来，openheron 只在日志里说一句，不会拒绝启动。
 
 ## 命令行
 
@@ -87,8 +89,8 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 |---|---|---|
 | `agents/` | 每个 agent 一个 `.md`：frontmatter + 正文（正文就是提示词） | ✅ |
 | `llm/` | 每个厂商一个 `.yaml`：端点、密钥、模型清单、思考档位表 | ✅ |
-| `policy/` | `permissions.yaml`（审批档位）、`limits.yaml`（配额上限） | ✅ |
-| `tools/` | 外部工具与知识库配置 —— 配置缺失的 provider 什么都不挂 | ✅ |
+| `tools/` | 外部工具与知识库配置 —— 配置缺失的 provider 什么都不挂。每个文件的 `allows:` 点名哪些工具不用点头 | ✅ |
+| `mcps/` | 每个 MCP 服务器一个 `.yaml`：传输方式、command 或 URL、超时，以及服务器自己的 `allows:` | ✅ |
 | `skills/` | `<name>/SKILL.md`，eino 原生 skill 约定 | ❌ |
 | `server/` | 进程自身参数：监听地址、目录、超时、深度上限 | ❌ 需重启 |
 | `state/` | 会话与 checkpoint（自动创建，**不要提交**） | — |
@@ -120,23 +122,30 @@ frontmatter 是**严格解码**的 —— 写错一个键就是启动错误，�
   各厂商不同的字段。**这张表不填，档位就被静默忽略** —— agent 写着 `reasoning: high` 而
   端点没有 `high`，等于「完全不思考」，且没有任何报错。
 
-### 权限两层
+### 权限模型
 
-| 层 | 位置 | 作用范围 |
+没人点名的工具**要问** —— 那一轮会先中断、等一个人点头。例外是那些不用点头的工具，
+而每一个例外都由**提供它的那个文件**点名：
+
+| 位置 | 点名什么 | 作用范围 |
 |---|---|---|
-| 外层 | `policy/permissions.yaml` 的 `deny` | 所有 agent |
-| 内层 | `agents/*.md` 的 `disabled_tools` | 只影响这一个 agent |
+| `tools/*.yaml` 与 `mcps/<server>.yaml` 的 `allows:` | 那个文件（或那个服务器）里不用点头的工具 | 所有 agent |
+| `agents/*.md` 的 `disabled_tools` | 这个 agent 根本拿不到的工具 | 只影响这一个 agent |
 
-两层**分开存储、从不合并** —— 合并就丢掉了「是哪一层拦的」这个信息。外层 `deny` 优先，
-是子 agent 唯一放松不了的保证。
+★ 两处**分开存储、从不合并** —— 合并就丢掉了「是哪一层拦的」这个信息。档位表是共享的，
+`disabled_tools` 只能把工具拿走，永远不会还回来。
 
-未被点名的工具默认 `allow`（直接放行）。加进 `ask` 就要人每次点头 —— 那一轮会先中断、
-等决定；加进 `deny` 就是彻底禁用。
+★ **文件说自己的词汇。** `tools/http.yaml` 说 `request_get`，MCP 服务器说 `create_issue`
+—— 不是 `mcp__github__create_issue`。翻译成模型看见的名字，只发生一次，就在工具挂载的地方。
+
+★ **没有全局 deny 清单。** 「不被暴露」只说两处：文件自己的 `allows:` 清单，和 agent 的
+`disabled_tools`。再来一张全局表就多一处要同步的东西 —— 而且那是唯一一张必须说「暴露后的
+名字」的表，而工具自己的文件说的是它们自己的词汇。
 
 ### 深度上限
 
-`server/config.yaml` 的 `agent.max_depth`（默认 `1`，即只有入口 agent 能委派）与
-`policy/limits.yaml` 的同名项**取更严的**。声明的拓扑超过上限是**启动错误**，不静默截断。
+`server/config.yaml` 的 `agent.max_depth`（默认 `1`，即只有入口 agent 能委派）。
+声明的拓扑超过上限是**启动错误**，不静默截断。
 
 ## HTTP 接口
 

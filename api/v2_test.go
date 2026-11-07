@@ -662,11 +662,13 @@ func sampleTools() stubTools {
 		byAgent: map[string][]ToolVerdict{
 			"main": {
 				{Name: "read_file", Tier: string(decl.TierAllow)},
-				{Name: "execute", Tier: string(decl.TierDeny), Reason: "disabled_tools"},
+				// ★ A blocked tool keeps its own tier — it is this agent
+				//   that cannot have it, not that the tool is illegal.
+				{Name: "execute", Tier: string(decl.TierAsk), Reason: "disabled_tools"},
 			},
 			"worker": {
 				{Name: "read_file", Tier: string(decl.TierAllow)},
-				{Name: "execute", Tier: string(decl.TierDeny), Reason: "disabled_tools"},
+				{Name: "execute", Tier: string(decl.TierAsk), Reason: "disabled_tools"},
 			},
 		},
 		policy: []ToolVerdict{
@@ -696,8 +698,8 @@ func TestEffectiveToolsRendersTheInjectedVerdict(t *testing.T) {
 	}
 	if tool, ok := byName["execute"]; !ok {
 		t.Fatalf("execute must appear in the tool table, got %+v", byName)
-	} else if tool.Tier != string(decl.TierDeny) || tool.Reason != "disabled_tools" {
-		t.Fatalf("execute = %+v, want deny via disabled_tools", tool)
+	} else if tool.Tier != string(decl.TierAsk) || tool.Reason != "disabled_tools" {
+		t.Fatalf("execute = %+v, want ask via disabled_tools", tool)
 	}
 	if tool := byName["read_file"]; tool.Tier != string(decl.TierAllow) || tool.Reason != "" {
 		t.Fatalf("read_file = %+v, want allow with no reason", tool)
@@ -711,7 +713,7 @@ func TestRuntimeToolsAreRenderedSeparately(t *testing.T) {
 	}
 	stub.byAgent["worker"] = []ToolVerdict{
 		{Name: "read_file", Tier: string(decl.TierAllow), Present: true, ObservedKnown: true},
-		{Name: "grep_search", Tier: string(decl.TierDeny), Reason: "policy.deny", ObservedKnown: true},
+		{Name: "grep_search", Tier: string(decl.TierAsk), Reason: "disabled_tools", ObservedKnown: true},
 	}
 
 	srv := newV2Server(t)

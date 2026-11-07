@@ -622,7 +622,7 @@ func (c *Config) validateDepth(sorted []string) error {
 		if d > max {
 			return fmt.Errorf(
 				"agent %s has a team nested to depth %d, hitting the cap of %d; "+
-					"raise server/config.yaml agent.max_depth (or policy/limits.yaml agent.max_depth) "+
+					"raise server/config.yaml agent.max_depth "+
 					"or reduce the subagents nesting",
 				id, d, max)
 		}

@@ -1,9 +1,9 @@
 ---
 description: Read-only retrieval — locate implementations, trace call chains, summarize facts. Does not change files.
 model: openai/gpt-4o
-# Affects this one agent only. Stored **separately from the global deny, never merged** —
-# merging would throw away "who is in the outer layer", and that is the one guarantee
-# a sub-agent cannot use to re-enable a banned tool.
+# Affects this one agent only. The tier table is **shared**, the narrowing is
+# **per agent** — so an agent that disables a tool cannot re-enable another
+# agent's, and vice versa.
 disabled_tools: [execute, write_file, edit_file]
 ---
 

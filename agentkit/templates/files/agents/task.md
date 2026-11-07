@@ -65,5 +65,6 @@ modifications.
 > says anything).
 >
 > ★ `disabled_tools: [kb_index]` narrows **only this one agent**: it affects task
-> only, not main, and it **cannot relax** the global `deny` in
-> `policy/permissions.yaml`.
+> only, not main, and it **cannot relax** what another agent's own file allows —
+> "not exposed" is said in exactly two places: the file that provides a tool
+> (`allows:`) and an agent's own `disabled_tools`.

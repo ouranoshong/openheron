@@ -14,15 +14,14 @@ synthesises — tokens are spent where they actually matter.
 
 "who may do what" becomes a few hard rules:
 
-- **Tool permissions have two layers and are never merged** — the outer
-  `policy/permissions.yaml` sets the global `ask`/`deny`, each inner agent narrows it
-  with its own `disabled_tools`. The outer `deny` wins, and **a sub agent cannot relax
-  it**.
+- **Tool permissions are named, and the default is to ask** — a tool nobody names asks
+  first; the exceptions are the ones a file's own `allows:` list names, and each inner
+  agent narrows further with its own `disabled_tools`.
 - **Delegation has a depth cap** — the entry agent is level 0, an agent at depth `d` may
   spawn children if and only if `d < max_depth`; a topology over the cap is a **startup
   error**, never a silent truncation.
 - **One session can run several agents** — independent work is dispatched in parallel.
-- **Configuration is files** — model profiles, prompts and approval policy are files you
+- **Configuration is files** — model profiles, prompts and tool tiers are files you
   can read and edit.
 - **One binary, runs anywhere** — the frontend is embedded into a single file, compiled
   statically across platforms.
@@ -61,15 +60,19 @@ change that). Pin a version with `OPENHERON_VERSION=v0.1.0`. Prefer to look befo
 you run? Download `install.sh` from the
 [releases page](https://github.com/ouranoshong/openheron/releases/latest) and read it.
 
-`openheron init` writes six files: `agents/main.md`, `agents/task.md`,
-`llm/<provider>.yaml`, `policy/permissions.yaml`, `policy/limits.yaml` and
-`server/config.yaml`. Existing files are **kept, not overwritten** (unless you pass
-`--force`), so running it in an already-configured project is safe.
+`openheron init` writes five files: `agents/main.md`, `agents/task.md`,
+`llm/<provider>.yaml`, `mcps/example.yaml` and `server/config.yaml`. Existing files are
+**kept, not overwritten** (unless you pass `--force`), so running it in an
+already-configured project is safe.
 
 `tools/` is **not** written by default — a provider whose configuration is absent mounts
 nothing, so writing the file is what turns the tool on, and which tools exist is yours to
 decide. Pass `--tools` to get `tools/http.yaml`, `tools/web_search.yaml`,
 `tools/wikipedia.yaml` and `tools/kb.yaml`.
+
+★ **The MCP example is a sample, not a running server** — its `command` is a placeholder
+that is not installed. The file is still valid and loads; the server simply does not come
+up, and openheron says so in the log rather than refusing to start.
 
 ## Command line
 
@@ -100,8 +103,8 @@ not silently grow an empty configuration tree.
 |---|---|---|
 | `agents/` | One `.md` per agent: frontmatter + body (the body is the prompt) | ✅ |
 | `llm/` | One `.yaml` per vendor: endpoint, secret, model list, reasoning tier table | ✅ |
-| `policy/` | `permissions.yaml` (approval tiers), `limits.yaml` (quota caps) | ✅ |
-| `tools/` | External tools and the knowledge-base config — a provider without a configuration mounts nothing | ✅ |
+| `tools/` | External tools and the knowledge-base config — a provider without a configuration mounts nothing. Each file's `allows:` names the tools that run without a nod | ✅ |
+| `mcps/` | One `.yaml` per MCP server: transport, command or URL, timeouts, and the server's own `allows:` | ✅ |
 | `skills/` | `<name>/SKILL.md`, eino's native skill convention | ❌ |
 | `server/` | The process's own parameters: listen address, directories, timeouts, depth cap | ❌ needs a restart |
 | `state/` | Sessions and checkpoints (auto-created, **do not commit**) | — |
@@ -138,26 +141,34 @@ silently ignored. Available keys: `description`, `model`, `max_iterations`,
   missing, the tier is silently ignored** — an agent says `reasoning: high` while the
   endpoint has no `high`, which means "no thinking at all", with no error at all.
 
-### The two permission layers
+### The permission model
 
-| Layer | Where | Scope |
+A tool that nobody names **asks** — the run interrupts and waits for a human. The
+exceptions are the tools that run without a nod, and each one is named by **the file that
+provides it**:
+
+| Where | What it names | Scope |
 |---|---|---|
-| Outer | `deny` in `policy/permissions.yaml` | Every agent |
-| Inner | `disabled_tools` in `agents/*.md` | This one agent only |
+| `allows:` in `tools/*.yaml` and `mcps/<server>.yaml` | the tools of that file (or that server) that run without a nod | Every agent |
+| `disabled_tools` in `agents/*.md` | the tools this agent does not get at all | This one agent only |
 
-The two are **stored separately and never merged** — merging would destroy the
-information about *which* layer blocked something. The outer `deny` wins, and it is the
-one guarantee a sub agent cannot relax.
+★ The two are **stored separately and never merged** — merging would destroy the
+information about *which* layer blocked something. The tier table is shared, and
+`disabled_tools` can only take a tool away, never hand one back.
 
-A tool that is not named defaults to `allow` (straight through). Name it under `ask` to
-make it need a human every time — the run interrupts and waits for the decision — and
-under `deny` to disable it outright.
+★ **A file speaks its own vocabulary.** `tools/http.yaml` says `request_get`, and an MCP
+server says `create_issue` — not `mcp__github__create_issue`. The translation to the name
+the model sees happens once, where the tool is mounted.
+
+★ There is **no global deny list**. "Not exposed" is said in exactly two places: a file's
+own `allows:` list, and an agent's `disabled_tools`. A third list would be one more thing
+to keep in sync — and it was the only one that had to speak the exposed names while the
+tools' own files speak theirs.
 
 ### The depth cap
 
 `agent.max_depth` in `server/config.yaml` (default `1`, meaning only the entry agent may
-delegate) and the same key in `policy/limits.yaml` **resolve to the stricter of the
-two**. A declared topology over the cap is a **startup error**, never a silent
+delegate). A declared topology over the cap is a **startup error**, never a silent
 truncation.
 
 ## The HTTP API

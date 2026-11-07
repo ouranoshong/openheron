@@ -3,14 +3,13 @@
 Copy these directories into the project root's `.openheron/`:
 
 ```bash
-cp -r .openheron-example/{agents,llm,policy,skills} /your/project/.openheron/
+cp -r .openheron-example/{agents,llm,skills} /your/project/.openheron/
 ```
 
 | Directory | Contents |
 |---|---|
 | `agents/main.md` | agent declaration — frontmatter (`model` / `max_iterations` …) + **the body is the prompt** |
 | `llm/openai.yaml` | vendor profile — `base_url` / `api_key` / `models[]` / thinking tier table |
-| `policy/permissions.yaml` | approval tiers — `ask` / `deny` (**anything not named is allowed**) |
 | `server/config.yaml` | process parameters — listen address / directories / timeouts / **not hot-reloaded** |
 | `skills/<name>/SKILL.md` | eino native skill convention |
 | `tools/<tool>.yaml` | external tools and the knowledge base — **a provider without a configuration mounts nothing** (this sample ships none; external tools are all off by default) |
@@ -22,7 +21,7 @@ cp -r .openheron-example/{agents,llm,policy,skills} /your/project/.openheron/
 
 | Directory | Hot reload | Why |
 |---|---|---|
-| `llm/` `agents/` `policy/` `tools/` | ✅ | the new configuration is used from the next turn |
+| `llm/` `agents/` `tools/` `mcps/` | ✅ | the new configuration is used from the next turn |
 | `server/` | ❌ | it configures the process itself, so a change needs a restart |
 
 A broken configuration **does not kill the process** — the previous one is kept and
@@ -95,7 +94,7 @@ builds its own model instance from its own `model:`.
 | Switch | Location | Effect |
 |---|---|---|
 | `agent.max_depth` | `server/config.yaml` | max nesting depth (the entry is level 0). The default `1` = only the entry agent may delegate |
-| `disabled_tools` | `agents/*.md` | affects this one agent only. Stored **separately from the global `deny`, never merged** |
+| `disabled_tools` | `agents/*.md` | affects this one agent only. The tier table itself is **shared** — the narrowing is per agent |
 
 A declared topology that exceeds `max_depth` is **an error at startup**; it is never
 silently truncated.
@@ -111,12 +110,13 @@ silently truncated.
 
 "Who may write" is controlled by **two** layers, and neither may be missing:
 
-- **Outer**: the `deny` in `policy/permissions.yaml` — nobody may use it;
+- **Outer**: the tier table — a tool the configuration does not name **asks**;
 - **Inner**: each agent's own `disabled_tools` — affects that one agent only.
 
-★ The outer `deny` takes precedence over the inner `disabled_tools`: it is the one
-  guarantee a sub-agent **cannot relax**. The two layers are stored separately and
-  never merged — merging them would throw away "who is in the outer layer".
+★ The two layers are stored separately and never merged — merging them would
+  throw away "who narrowed what". The outer layer is the one guarantee a
+  sub-agent **cannot relax**: `disabled_tools` can only remove a tool, never
+  hand one back.
 
 ### Parallel delegation
 
@@ -143,12 +143,26 @@ message so that they run at the same time:
 
 ## Default approval tiers
 
-**The fallback for an unlisted tool is `allow` (straight through)** — the policy file
-has only the `ask` / `deny` columns, so not being named means being allowed. A newly
-added tool is therefore directly usable by default; to make it **require a human nod
-every time**, add its name to `ask` in `policy/permissions.yaml`; to make it
-**completely unusable**, add it to `deny`.
+**The default tier is `ask`** — a tool nobody names asks first. The exceptions
+are named, and each one is named by **the file that provides the tool**:
 
-★ The outer `deny` takes precedence over the inner `disabled_tools` — it is the one
-  guarantee a sub-agent cannot relax. To narrow down **one** agent's capabilities,
-  use its own `disabled_tools`, not the global policy.
+```yaml
+# tools/http.yaml
+allows: [request_get]
+```
+
+The built-in tools that have **no file of their own** — the filesystem readers
+(`ls` `read_file` `glob` `grep`), the delegation tools (`task` `write_todos`) and
+the skill reader — run without a nod; the code knows them. Everything else
+asks: `write_file`, `edit_file`, `execute`, and any MCP tool the server's own
+file does not name.
+
+★ A tool a file names in its `allows:` uses **that file's own vocabulary** — an
+  MCP server says `create_issue`, not `mcp__github__create_issue`, and the
+  translation happens once, where the tool is mounted.
+
+★ **"Not exposed" is said in exactly two places**: a tool's own `allows:` list
+  (what runs without a nod) and an agent's `disabled_tools` (what that agent
+  may not touch at all). There is no third, global list to keep in sync.
+
+★ To narrow down **one** agent's capabilities, use its own `disabled_tools`.

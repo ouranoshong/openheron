@@ -57,7 +57,11 @@ test.describe("opening", () => {
 
   test("selecting the first file shows its real content", async ({ page }) => {
     await openSettings(page)
-    await expect(page.locator(EDITOR)).toContainText("read_file")
+    // ★ The first **editable** file — llm/deepseek.yaml, because the real
+    //   server's partition table starts with llm/. The content is the file's
+    //   own, not a template: the point is that the editor shows what is on
+    //   disk.
+    await expect(page.locator(EDITOR)).toContainText("base_url")
   })
 
   test("CodeMirror renders rather than a plain textarea", async ({ page }) => {
@@ -77,13 +81,13 @@ test.describe("opening", () => {
 test.describe("the one config root", () => {
   test("no file claims to be overridden", async ({ page }) => {
     await openSettings(page)
-    await selectFile(page, "policy/permissions.yaml")
+    await selectFile(page, "tools/http.yaml")
     await expect(page.getByText(/overridden at the project level/i)).toHaveCount(0)
   })
 
   test("the list carries no shadowed badge", async ({ page }) => {
     await openSettings(page)
-    const row = page.locator(LIST).getByRole("button", { name: /policy\/permissions\.yaml/ }).first()
+    const row = page.locator(LIST).getByRole("button", { name: /tools\/http\.yaml/ }).first()
     await expect(row.getByLabel(/overridden at project level/)).toHaveCount(0)
   })
 
@@ -121,10 +125,10 @@ test.describe("read-only sections", () => {
 test.describe("editing and saving", () => {
   test("a clean edit saves and reports that it applied", async ({ page }) => {
     await openSettings(page)
-    await selectFile(page, "policy/permissions.yaml")
+    await selectFile(page, "tools/http.yaml")
     await page.locator(EDITOR).click()
     await page.keyboard.press("Control+a")
-    await page.keyboard.type("allow: [glob]\n")
+    await page.keyboard.type("methods: [get]\nallows: [glob]\n")
 
     await expect(page.locator(STATUS)).toContainText("Unsaved changes")
     await page.click(SAVE)
@@ -133,18 +137,21 @@ test.describe("editing and saving", () => {
 
   test("a literal api_key is rejected and the draft survives", async ({ page }) => {
     await openSettings(page)
-    await selectFile(page, "policy/permissions.yaml")
+    // ★ `api_key` belongs to **llm/** — that is the partition that declares
+    //   it, so that is where the rule applies. A tools file has no api_key,
+    //   and a file that carries one is not a file with a bad api_key.
+    await selectFile(page, "llm/deepseek.yaml")
     await page.locator(EDITOR).click()
     await page.keyboard.press("Control+a")
-    await page.keyboard.type("type: openai\napi_key: sk-oops\n")
+    await page.keyboard.type("type: openai\nbase_url: https://x\napi_key: sk-oops\nmodels:\n  - id: flash\n")
 
-    await expect(page.locator(STATUS)).toContainText(/api_key|unknown key/i)
+    await expect(page.locator(STATUS)).toContainText(/api_key/i)
     await expect(page.locator(EDITOR)).toContainText("sk-oops")
   })
 
   test("a broken merge surfaces the server's verdict", async ({ page }) => {
     await openSettings(page)
-    await selectFile(page, "policy/permissions.yaml")
+    await selectFile(page, "tools/http.yaml")
     await page.locator(EDITOR).click()
     await page.keyboard.press("Control+a")
     await page.keyboard.type("BROKEN")
@@ -156,75 +163,13 @@ test.describe("editing and saving", () => {
 
   test("saving while hot reload is off says restart is required", async ({ page }) => {
     await openSettings(page)
-    await selectFile(page, "policy/permissions.yaml")
+    await selectFile(page, "tools/http.yaml")
     await page.locator(EDITOR).click()
     await page.keyboard.press("Control+a")
-    await page.keyboard.type("NO_WATCH\nallow: [ls]\n")
+    await page.keyboard.type("NO_WATCH\nmethods: [get]\n")
 
     await page.click(SAVE)
     await expect(page.locator(STATUS)).toContainText(/restart openheron to apply/)
-  })
-})
-
-test.describe("policy/limits.yaml", () => {
-  test("it is listed and editable alongside permissions.yaml", async ({ page }) => {
-    await openSettings(page)
-    await expect(page.locator(LIST)).toContainText("policy/limits.yaml")
-    await selectFile(page, "policy/limits.yaml")
-    await expect(page.locator(EDITOR)).toContainText("max_depth")
-  })
-
-  test("a valid limits file saves without a local complaint", async ({ page }) => {
-    await openSettings(page)
-    await selectFile(page, "policy/limits.yaml")
-    await page.locator(EDITOR).click()
-    await page.keyboard.press("Control+a")
-    await page.keyboard.type("agent:")
-    await page.keyboard.press("Enter")
-    await page.keyboard.type("  max_depth: 1")
-    await page.keyboard.press("Enter")
-    await page.keyboard.press("Shift+Tab")
-    await page.keyboard.type("retry:")
-    await page.keyboard.press("Enter")
-    await page.keyboard.type("  max_retries: 2")
-
-    await expect(page.locator(STATUS)).not.toContainText(/unknown key|looks like a new section|unknown section/i)
-    await page.click(SAVE)
-    await expect(page.locator(STATUS)).toContainText(/Saved .* applied/)
-  })
-
-  test("a section indented under another one says what to do", async ({ page }) => {
-    await openSettings(page)
-    await selectFile(page, "policy/limits.yaml")
-    await page.locator(EDITOR).click()
-    await page.keyboard.press("Control+a")
-    await page.keyboard.type("agent:")
-    await page.keyboard.press("Enter")
-    await page.keyboard.type("  max_depth: 1")
-    await page.keyboard.press("Enter")
-    await page.keyboard.type("retry:")
-
-    await expect(page.locator(STATUS)).toContainText(/looks like a new section/i)
-  })
-
-  test("an unknown key in limits.yaml is caught locally", async ({ page }) => {
-    await openSettings(page)
-    await selectFile(page, "policy/limits.yaml")
-    await page.locator(EDITOR).click()
-    await page.keyboard.press("Control+a")
-    await page.keyboard.type("agent:\n  max_tokens: 100\n")
-
-    await expect(page.locator(STATUS)).toContainText(/unknown key/i)
-  })
-
-  test("the permissions rules do not apply to it", async ({ page }) => {
-    await openSettings(page)
-    await selectFile(page, "policy/limits.yaml")
-    await page.locator(EDITOR).click()
-    await page.keyboard.press("Control+a")
-    await page.keyboard.type("allow: [ls]\n")
-
-    await expect(page.locator(STATUS)).toContainText(/unknown section/i)
   })
 })
 
@@ -313,7 +258,7 @@ test.describe("the new file dialog", () => {
 test.describe("closing", () => {
   test("closing and reopening discards an unsaved draft", async ({ page }) => {
     await openSettings(page)
-    await selectFile(page, "policy/permissions.yaml")
+    await selectFile(page, "tools/http.yaml")
     await page.locator(EDITOR).click()
     await page.keyboard.press("Control+a")
     await page.keyboard.type("allow: [draft-marker]\n")

@@ -100,7 +100,7 @@ func printServerUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "Reads exactly one configuration root: --config-dir, else $OPENHERON_CONFIG_DIR,")
 	fmt.Fprintln(stdout, "else <project-root>/.openheron (created when missing).")
 	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout, "  --config-dir   the config root (llm/ agents/ policy/ server/ tools/ live here)")
+	fmt.Fprintln(stdout, "  --config-dir   the config root (llm/ agents/ mcps/ server/ tools/ live here)")
 	fmt.Fprintln(stdout, "  --project-root the project root: agent workdir and relative-path base")
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Other commands: openheron init, openheron kb, openheron version")
