@@ -927,7 +927,7 @@ The body is the Instruction. Leave it empty to use deep.New's built-in prompt.
 | `description` | `string` | | 进 `task` 工具描述。schema 不把它设成必填 —— 描述为空只是让那份描述里多一条空条目 |
 | `max_iterations` | `int` | | `0` = 没声明，此时走 eino 自己的缺省 20（`eino@v0.9.22/adk/react.go:345-348`） |
 | `subagents` | `[]string` | | 引用其他 agent 文件名；引用不存在或成环 ⇒ 启动期报错 |
-| `disabled_tools` | `[]string` | | **内层**：只影响本 agent。`ask` 档的工具写在这里仍需人批，只是本 agent 根本拿不到 |
+| `disabled_tools` | `[]string` | | 只影响本 agent。`ask` 档的工具写在这里仍需人批，只是本 agent 根本拿不到 —— 而外层已经没有了，它不需要再当「内层」 |
 | `skills` | `*[]string` | | 技能允许清单。**指针就是重点**：键不存在（`nil`）= 目录下的全部技能，`[]` = 一个都不要（`agentkit/spec/decl/decl.go:95-106`） |
 | `mcps` | `*[]string` | | 这个 agent 加载的 MCP server，按**server 名**（`mcps/` 下的文件名）。★ **指针就是重点**，与 `skills` 同理：键不存在（`nil`）= 全部已配置的 server，`[]` = 一个都不加载（`agentkit/spec/decl/decl.go:114`、`agentkit/spec/load.go:554` `mcpServersOf`） |
 | `temperature` | `*float32` | | 指针：0 与「没配」是两件事 |
@@ -1245,7 +1245,6 @@ skills are not enabled
 
 ```
 .openheron/tools/
-├─ filesystem.yaml       → decl.FilesystemCfg (the filesystem tool set)
 ├─ http.yaml             → decl.HTTPToolsCfg
 ├─ web_search.yaml       → decl.WebSearchCfg
 ├─ wikipedia.yaml        → decl.WikipediaCfg
@@ -1262,8 +1261,8 @@ skills are not enabled
 ★ 今天这两件事在三个族上恰好重合：`httpRequestToolProvider`、`webSearchToolProvider` 与
 `wikipediaToolProvider` 在配置缺失时返回**空**（`agentkit/build/nettools.go`：
 `if cfg == nil { return nil, nil }`），所以对它们来说「文件在不在」碰巧成了开关。★ 那是 **provider
-的决定**，不是文件形状蕴含的 —— 而文件系统工具是另一种情况：它们**一直都在**，于是下面为它们
-提议的那个文件（`tools/filesystem.yaml`）只调它们的档位。加载器自己的规矩 —— 文件名是白名单，
+的决定**，不是文件形状蕴含的 —— 而文件系统工具是另一种情况：它们**一直都在**，而且**没有自己的
+文件**，所以它们的档位住在代码里（§6.3）。加载器自己的规矩 —— 文件名是白名单，
 未知文件名是启动错误（`agentkit/spec/load.go:165-193`）—— 说的是**读哪些文件**，不是哪些工具存在。
 
 ★ 空文件会被拒绝，并给出一条提示、告诉用户该写什么（`agentkit/spec/load.go:151-158`）：文件的内容
@@ -1423,10 +1422,16 @@ ls  read_file  glob  grep
 所以它们会为一个人打断这一轮 —— 这个方向是对的：它们正是那三个会改动这台机器的工具。
 
 ★ **给它们一份自己的文件，那是调音旋钮，不是开关** —— 文件系统工具是 agent 的核心能力，
-不是可选集成。★ **`tools/filesystem.yaml` 没有实施**：`tools/` 只接受 `http.yaml`、
+不是可选集成。★ **`tools/filesystem.yaml` 没有实施，也不会实施**：`tools/` 只接受 `http.yaml`、
 `web_search.yaml`、`wikipedia.yaml` 与 `kb.yaml`，别的都不接受（`agentkit/spec/load.go:191`），
 所以写那个文件是一个**加载期错误**，不是静默的空操作。★ 收窄本来就能表达，而且写在管它的地方：
 某个 agent 的 `disabled_tools`（§6.2）。
+
+★ **后果就说白了吧**：`write_file`、`edit_file` 与 `execute` 没有自己的文件，所以**没有任何地方
+能把它们写进 `allows:` 清单** —— 它们永远要问（`agentkit/build/tools.go:61` 是代码里一份封闭的
+清单）。想要一个不盯着、能自己跑命令的 agent，今天做不到；能动的杠杆比 `policy/permissions.yaml`
+那会儿**更少** —— 那时还能把 `execute` 移出 `ask`。这是一个**已知的缺口**，不是一个可写进文档的
+特性：agent 自己的 `disabled_tools` 只能把工具拿走，没有任何东西能把它还回来。
 
 #### ★ 迁移（旧配置怎么办）
 
@@ -1443,7 +1448,7 @@ ls  read_file  glob  grep
 ★ 那条「静默」是这次搬动里最需要当心的一处：`kb/` 不在加载的分区清单里
 （`agentkit/spec/config.go:40-70`），所以旧的 `kb/config.yaml` 根本不会被读：它那个 `corpus`
 键（现在是 `corpus_dir` —— 见上面那张表）像是「没配」一样 —— 而语料为空 = 知识库关闭。症状是
-「kb_search 没了」，但启动日志一个字都不说。
+「`kb_search` 没了」，但启动日志一个字都不说。
 ⇒ 迁移时**先 `mv` 再启动**，别指望启动报错提醒你。
 
 ★ **`policy/` 也一样** —— 一个留下来的 `policy/` 目录**不会被读**，但它**也不沉默**：
@@ -2060,7 +2065,7 @@ agentkit/spec/write.go:persist.AtomicWrite
 | 10 | ✅ **已实施** MCP 工具一律带 `mcp__` 命名空间，且**只有** MCP 工具能用这个前缀 | 没有命名空间，一个暴露 `ls` 的 server 会让整个 agent 起不来（撞上保留工具名即在加载期报错）；没有「只有 MCP 能用」这一半，内置工具就能占了这个命名空间，某个 agent 的 `disabled_tools` 里的前缀规则会悄悄盖住它 |
 | 11 | ✅ **已实施** 某个 agent 的 `disabled_tools` 只支持**尾部** `*` 的前缀模式，其余写法加载期报错 | 一条读起来与实际覆盖范围不同的规则，就是一次静默的错配 |
 | 12 | ✅ **已实施** 档位写在**工具自己的文件与自己的词汇里** —— 文件的 `allows:` 点名哪些不用点头，而且**没有全局清单**能与它矛盾 | 一个工具的权限就是一处的一个事实；一个说 `post` 的文件就说 `allows: [post]`，不必在两套词汇之间来回翻译 |
-| 13 | （提案，**未实施**）文件系统工具有了自己的文件 `tools/filesystem.yaml`，而它是**调音旋钮** —— 文件不在意味着用默认那套工具与默认那些档位 | 文件系统工具是 agent 的核心能力，不是可选集成；这个文件让它们的档位看得见、改得动，又不让它们变成可选项 |
+| 13 | ❌ **已撤回** —— 文件系统工具**不会**有自己的文件；它们的例外住在代码里（`agentkit/build/tools.go:61`） | ★ 那个文件当初是按**调音旋钮**提的，但旋钮只有在能放宽也能收紧时才值得存在，而它许诺的放宽恰恰是档位模型现在对「没有文件的工具」表达不了的。★ `tools/` 只接受四个固定文件名（`agentkit/spec/load.go:191`），所以那个文件会是加载期错误；它本来要服务的收窄，就是某个 agent 的 `disabled_tools`（§6.2、§6.6） |
 
 ★ **第 10、11 两行已实施。** 命名空间只在一处合成
 （`agentkit/build/mcptools.go:140`），前缀语法由 `decl.ParseToolNamePattern`
@@ -2356,10 +2361,6 @@ retry:
 还有两个**刻意保留的环境变量**：`build.ConfigFromEnv` 是过渡形态（主路径走
 `FromConfig`），而 `EINO_EXT_SKILLS_DIR` 被降级成 `.openheron/skills` 的一处覆盖。
 
-★ **实施时新增的一项**：`server/config.yaml` 有了 `agent.max_depth`（缺省 1）。声明的
-拓扑深度超过上限时它**在启动期报错**，而不是运行时截断 ——「配了三层但实际只跑两层」
-是最难查的一类问题。
-
 ### 12.1 已知待收敛项（★ 实施时暴露，均非阻塞）
 
 | 项 | 现状 | 建议 |
@@ -2398,13 +2399,12 @@ retry:
 | 未知字段报错 | `decodeStrict` 打开 `yaml.Decoder.KnownFields`（`agentkit/spec/config.go:415`） |
 | `deferred` 列表在启动时被打印 | `main.go:198` |
 | `agentkit/spec` 的顶层用例数 | `grep -rhoP '^func \KTest\w+' agentkit/spec/ \| sort -u \| wc -l` → **164** |
-| 全仓顶层用例数 | `grep -rhoP '^func \KTest\w+' --include='*_test.go' . \| sort -u \| wc -l` → **978**，其中一条属于嵌套模块 `sandbox-kit/examples/demo-project` ⇒ 根模块里是 **977** |
-| 根模块里有测试的包数 | `go list -f '{{.ImportPath}} {{len .TestGoFiles}} {{len .XTestGoFiles}}' ./... \| awk '$2+$3>0' \| wc -l` → **20** |
+| 全仓顶层用例数 | `grep -rhoP '^func \KTest\w+' --include='*_test.go' . \| sort -u \| wc -l` → **981**，其中一条属于嵌套模块 `sandbox-kit/examples/demo-project` ⇒ 根模块里是 **980** |
+| 根模块里有测试的包数 | `go list -f '{{.ImportPath}} {{len .TestGoFiles}} {{len .XTestGoFiles}}' ./... \| awk '$2+$3>0' \| wc -l` → **21** |
 | 整个测试套件是绿的 | `go test ./...` → 每个包都是 `ok` |
 | `-race` 现在是绿的 | `go test -race ./...` → 每个包都是 `ok`；修复过程见 §11.5 |
-| `policy/limits.yaml` 只能收紧 | 读 `mergeLimits` / `tighter`（`agentkit/spec/load.go:397`）+ 用例 `TestLimitsTightenButNeverLoosen` 与 `TestLimitsCannotLoosenTheGlobalBaseline` |
-| 空操作的上限会进 `deferred` | `collectNoopLimits`（`agentkit/spec/load.go:700`）+ `TestLooserLimitIsReportedAsDeferred` |
-| 生效的深度与重试次数 | `MaxDepth()` / `MaxRetries()`（`agentkit/spec/load.go:672`）+ `agentkit/spec/config_test.go` 里的用例 |
+| 上限只来自 `server/config.yaml`，没有别处 | `MaxDepth()` / `MaxRetries()`（`agentkit/spec/load.go:671`、`:679`）+ `agentkit/spec/config_test.go` 里的用例 |
+| 遗留的 `policy/` 目录会被报出来 | `noteRetiredDirs`（`agentkit/spec/config.go:329`）+ `TestALeftOverPolicyDirectoryIsReported` 与 `TestAnEmptyRetiredDirectoryIsNotReported` |
 | `models[].context_window` 真的生效 | `SummarizeAt`（`agentkit/spec/summarize.go:25`）+ `TestSummarizeAtResolvesAgainstTheWindow` |
 | `models[].summarize_at` 已废弃但仍被解析 | `decl.Model.SummarizeAt` 上的注释（`agentkit/spec/decl/decl.go:46`）+ 那条 `deferred`（`agentkit/spec/load.go:61`）+ `TestTheOldModelThresholdIsReportedNotFatal` |
 | `llm/<provider>.yaml` 的 `header:` 没有消费方 | `decl.Provider.Header`（`agentkit/spec/decl/decl.go:26`）与 `FromConfig`（`agentkit/build/provider.go:36`）—— 全仓没有任何地方读这个字段 |
@@ -2420,8 +2420,7 @@ retry:
 | `spec` → `run` 的破例在这里从未存在 | `git grep -n "agentkit/run" fa7131a -- agentkit/spec` → 一条注释，别无其它 |
 | MCP 命名空间只在一处合成 | `mcpExposedName`（`agentkit/build/mcptools.go:140`）+ 前缀与分隔符常量（`agentkit/spec/decl/decl.go:336`、`:345`） |
 | 某个 agent 的 `disabled_tools` 前缀模式 | `decl.ParseToolNamePattern`（`agentkit/spec/decl/decl.go:369`）+ 加载器的拒绝（`agentkit/spec/load.go:110` `validateDisabledTools`）+ 留着并匹配那些模式的那张表（`agentkit/build/policy.go:108` `newTable`、`:161` `Table.Blocked`） |
-| 不等 server 起来就能回答 MCP 档位 | `mcpAllowedNames`（`agentkit/build/mcptools.go:172`）+ 命名空间的缺省（`agentkit/build/policy.go:49` `TierOf`）+ 用例 `TestTheTierIsAnswerableWhileTheServerIsUnreachable` |
-| 全局 `deny` 仍然是精确匹配整名 | `Table.Blocked`（`agentkit/build/policy.go:161`）—— 那张 `denied` map 是一次查表，不是一次前缀匹配 + 用例 `TestAnMCPNameInTheGlobalDenyStaysDenied` |
+| 不等 server 起来就能回答 MCP 档位 | `mcpAllowedNames`（`agentkit/build/mcptools.go:172`）+ 缺省档位（`agentkit/build/policy.go:55` `TierOf`）+ 用例 `TestTheTierIsAnswerableWhileTheServerIsUnreachable` |
 | `mcps/` 分区是热的 | 那个 `mcps` 分类带着 `hot: true`（`agentkit/spec/config.go:61-69`）+ `hotDirList()`（`agentkit/spec/config.go:87`）→ `HotDirs`（`agentkit/spec/reload.go:21`） |
 
 ## 附录 B：实施状态

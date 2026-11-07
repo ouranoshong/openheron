@@ -948,7 +948,7 @@ The body is the Instruction. Leave it empty to use deep.New's built-in prompt.
 | `description` | `string` | | Goes into the `task` tool description. The schema does not make it mandatory — an empty description simply produces an empty entry in that description |
 | `max_iterations` | `int` | | `0` = not declared, and then eino's own default of 20 applies (`eino@v0.9.22/adk/react.go:345-348`) |
 | `subagents` | `[]string` | | References other agent file names; a reference that does not exist or a cycle ⇒ an error at startup |
-| `disabled_tools` | `[]string` | | **The inner layer**: it affects this agent only. A tool in the `ask` tier that is written here still needs a human, it is just that this agent never gets it at all |
+| `disabled_tools` | `[]string` | | it affects this agent only. A tool in the `ask` tier that is written here still needs a human, it is just that this agent never gets it at all — and there is no outer layer left for this one to be inner to |
 | `skills` | `*[]string` | | The allow-list of skills. **The pointer is the point**: the key absent (`nil`) = every skill in the directory, `[]` = none (`agentkit/spec/decl/decl.go:95-106`) |
 | `mcps` | `*[]string` | | The MCP servers this agent loads, by **server name** (the file name under `mcps/`). ★ **The pointer is the point**, the same way it is for `skills`: the key absent (`nil`) = every configured server, `[]` = none (`agentkit/spec/decl/decl.go:114`, `agentkit/spec/load.go:554` `mcpServersOf`) |
 | `temperature` | `*float32` | | A pointer: 0 and "not configured" are two different things |
@@ -1305,7 +1305,6 @@ relative to the **config root** — `.openheron/` when it is the default one):
 
 ```
 .openheron/tools/
-├─ filesystem.yaml       → decl.FilesystemCfg (the filesystem tool set)
 ├─ http.yaml             → decl.HTTPToolsCfg
 ├─ web_search.yaml       → decl.WebSearchCfg
 ├─ wikipedia.yaml        → decl.WikipediaCfg
@@ -1327,8 +1326,8 @@ from the code: the providers registered in `defaultToolRegistry`
 configuration is absent (`agentkit/build/nettools.go`: `if cfg == nil { return nil, nil }`),
 so for them "the file is there" happens to be the switch. ★ That is the **provider's**
 decision, not something the file's shape implies — and the filesystem tools show the
-other case: they are **always** there, so the file proposed for them below
-(`tools/filesystem.yaml`) tunes only their tiers. The loader's own rule — the file name
+other case: they are **always** there, and they have **no file of their own**, so their
+tiers live in the code (§6.3). The loader's own rule — the file name
 is a whitelist, an unknown name is a startup error (`agentkit/spec/load.go:165-193`) —
 is about **which files are read**, not about which tools exist.
 
@@ -1519,10 +1518,18 @@ right way round: they are the three tools that change the machine.
 
 ★ **A file of their own would be a tuner, not a switch** — the filesystem tools are the
 agent's core capability, not an optional integration. ★ **`tools/filesystem.yaml` is not
-implemented**: `tools/` accepts `http.yaml`, `web_search.yaml`, `wikipedia.yaml` and
-`kb.yaml` and nothing else (`agentkit/spec/load.go:191`), so writing that file is a
-**load-time error**, not a silent no-op. ★ The narrowing is already expressible, and in
-the place that owns it: an agent's `disabled_tools` (§6.2).
+implemented and is not going to be**: `tools/` accepts `http.yaml`, `web_search.yaml`,
+`wikipedia.yaml` and `kb.yaml` and nothing else (`agentkit/spec/load.go:191`), so writing
+that file is a **load-time error**, not a silent no-op. ★ The narrowing is already
+expressible, and in the place that owns it: an agent's `disabled_tools` (§6.2).
+
+★ **The consequence, stated plainly**: `write_file`, `edit_file` and `execute` have no
+file, so **nothing can name them in an `allows:` list** — they ask, always
+(`agentkit/build/tools.go:61` is a closed list in the code). A user who wants an
+unattended agent that runs commands cannot get one today; the levers are narrower than
+they were under `policy/permissions.yaml`, which could move `execute` out of `ask`. That
+is a **known gap**, not a documented feature — an agent's own `disabled_tools` can take a
+tool away and nothing can hand one back.
 
 #### ★ Migration (what about the old configuration)
 
@@ -2241,7 +2248,7 @@ agentkit/spec/write.go:persist.AtomicWrite
 | 10 | ✅ **implemented** MCP tools always carry the `mcp__` namespace, and **only** MCP tools may use that prefix | without the namespace, a server that exposes `ls` takes the whole agent down (it collides with a reserved tool name, which is a load-time error); without the "only MCP" half, a built-in tool could take the namespace and a prefix rule in an agent's `disabled_tools` would quietly shadow it |
 | 11 | ✅ **implemented** An agent's `disabled_tools` supports only a **trailing** `*` prefix pattern; every other spelling errors at load time | a rule that reads differently from what it actually covers is a silent mismatch |
 | 12 | ✅ **implemented** A tier is written **in the tool's own file and vocabulary** — the file's `allows:` names what runs without a nod, and there is **no global list** to contradict it | one tool's permission is one fact in one place; a file that says `post` says `allows: [post]`, and nothing has to translate between two vocabularies |
-| 13 | (proposal, **not implemented**) The filesystem tools have a file of their own, `tools/filesystem.yaml`, and it is a **tuner** — an absent file means the default set with the default tiers | the filesystem tools are the agent's core capability, not an optional integration; the file makes their tiers visible and editable without making them optional |
+| 13 | ❌ **withdrawn** — the filesystem tools do **not** get a file of their own; their exceptions live in the code (`agentkit/build/tools.go:61`) | ★ the file was proposed as a **tuner**, but a tuner is only worth having if it can widen as well as narrow, and the widening it promised is exactly what the tier model now cannot express for a file-less tool. ★ `tools/` accepts four fixed names (`agentkit/spec/load.go:191`), so the file would be a load-time error; the narrowing it was for is an agent's `disabled_tools` (§6.2, §6.6) |
 
 ★ **Rows 10 and 11 are implemented.** The namespace is composed in one place
 (`agentkit/build/mcptools.go:140`), the prefix syntax is parsed by
@@ -2556,11 +2563,6 @@ There are also two **deliberately retained environment variables**:
 `FromConfig`), and `EINO_EXT_SKILLS_DIR` is demoted to an override of
 `.openheron/skills`.
 
-★ **One added during implementation**: `server/config.yaml` gained
-`agent.max_depth` (default 1). When the declared topology depth exceeds the cap it
-**errors at startup** rather than truncating at runtime — "you configured three levels
-but only two actually run" is the hardest class of problem to track down.
-
 ### 12.1 Known convergence items (★ exposed during implementation, none blocking)
 
 | Item | Current state | Suggestion |
@@ -2603,9 +2605,8 @@ but only two actually run" is the hardest class of problem to track down.
 | the number of packages carrying tests in the root module | `go list -f '{{.ImportPath}} {{len .TestGoFiles}} {{len .XTestGoFiles}}' ./... \| awk '$2+$3>0' \| wc -l` → **21** |
 | the whole test suite is green | `go test ./...` → every package `ok` |
 | `-race` is green now | `go test -race ./...` → every package is `ok`; §11.5 records what each of the four races was |
-| `policy/limits.yaml` only tightens | read `mergeLimits` / `tighter` (`agentkit/spec/load.go:397`) + the cases `TestLimitsTightenButNeverLoosen` and `TestLimitsCannotLoosenTheGlobalBaseline` |
-| a no-op limit goes into `deferred` | `collectNoopLimits` (`agentkit/spec/load.go:700`) + `TestLooserLimitIsReportedAsDeferred` |
-| the effective depth and retry count | `MaxDepth()` / `MaxRetries()` (`agentkit/spec/load.go:672`) + the cases in `agentkit/spec/config_test.go` |
+| the caps come from `server/config.yaml` and nothing else | `MaxDepth()` / `MaxRetries()` (`agentkit/spec/load.go:671`, `:679`) + the cases in `agentkit/spec/config_test.go` |
+| a leftover `policy/` directory is reported | `noteRetiredDirs` (`agentkit/spec/config.go:329`) + `TestALeftOverPolicyDirectoryIsReported` and `TestAnEmptyRetiredDirectoryIsNotReported` |
 | `models[].context_window` really takes effect | `SummarizeAt` (`agentkit/spec/summarize.go:25`) + `TestSummarizeAtResolvesAgainstTheWindow` |
 | `models[].summarize_at` is deprecated but still parsed | the comment on `decl.Model.SummarizeAt` (`agentkit/spec/decl/decl.go:46`) + the `deferred` entry (`agentkit/spec/load.go:61`) + `TestTheOldModelThresholdIsReportedNotFatal` |
 | `llm/<provider>.yaml`'s `header:` has no consumer | `decl.Provider.Header` (`agentkit/spec/decl/decl.go:26`) and `FromConfig` (`agentkit/build/provider.go:36`) — nothing in the tree reads the field |
@@ -2621,8 +2622,7 @@ but only two actually run" is the hardest class of problem to track down.
 | the `spec` → `run` exception never existed here | `git grep -n "agentkit/run" fa7131a -- agentkit/spec` → a comment, and nothing else |
 | the MCP namespace is composed in one place | `mcpExposedName` (`agentkit/build/mcptools.go:140`) + the prefix and the separator constants (`agentkit/spec/decl/decl.go:336`, `:345`) |
 | an agent's `disabled_tools` prefix pattern | `decl.ParseToolNamePattern` (`agentkit/spec/decl/decl.go:369`) + the loader's refusal (`agentkit/spec/load.go:110` `validateDisabledTools`) + the table that keeps and matches the patterns (`agentkit/build/policy.go:108` `newTable`, `:161` `Table.Blocked`) |
-| the MCP tier is answerable without the server | `mcpAllowedNames` (`agentkit/build/mcptools.go:172`) + the namespace's default (`agentkit/build/policy.go:49` `TierOf`) + the case `TestTheTierIsAnswerableWhileTheServerIsUnreachable` |
-| the global `deny` still matches whole names | `Table.Blocked` (`agentkit/build/policy.go:161`) — the `denied` map is a lookup, not a prefix match + the case `TestAnMCPNameInTheGlobalDenyStaysDenied` |
+| the MCP tier is answerable without the server | `mcpAllowedNames` (`agentkit/build/mcptools.go:172`) + the default tier (`agentkit/build/policy.go:55` `TierOf`) + the case `TestTheTierIsAnswerableWhileTheServerIsUnreachable` |
 | the `mcps/` partition is hot | the `mcps` category carries `hot: true` (`agentkit/spec/config.go:61-69`) + `hotDirList()` (`agentkit/spec/config.go:87`) → `HotDirs` (`agentkit/spec/reload.go:21`) |
 
 ## Appendix B: Implementation status
