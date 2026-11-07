@@ -200,7 +200,9 @@ func TestWriteLeavesNoTempFile(t *testing.T) {
 	if _, _, err := s.Write("tools/http.yaml", []byte("methods: [get]\nallows: [execute]\n"), ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(f.root, "policy", "permissions.yaml.tmp")); err == nil {
+	// ★ The temp file lands **next to the file being written**, so looking
+	//   for it in another directory would pass no matter what the write did.
+	if _, err := os.Stat(filepath.Join(f.root, "tools", "http.yaml.tmp")); err == nil {
 		t.Fatal("a temp file was left behind")
 	}
 }

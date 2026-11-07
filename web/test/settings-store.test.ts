@@ -13,13 +13,13 @@ import {
 } from "../src/lib/settings-store"
 import type { SettingsItem, SettingsManifest } from "../src/lib/settings-api"
 
-const POLICY = "allow: [read_file]\n"
+const HTTP = "methods: [get]\nallows: [request_get]\n"
 const PROVIDER = "type: openai\nbase_url: https://x\napi_key: ${KEY}\nmodels:\n  - id: fast\n"
 
 const MAIN_MD = "---\nmodel: deepseek/flash\ndescription: root\nreasoning: high  # level\n---\nbody\n"
 
 const ON_DISK: Record<string, string> = {
-  "policy/permissions.yaml": POLICY,
+  "tools/http.yaml": HTTP,
   "agents/main.md": MAIN_MD,
   "llm/deepseek.yaml": PROVIDER,
   "server/config.yaml": "listen_addr: \":9099\"\n",
@@ -35,18 +35,18 @@ const item = (path: string, over: Partial<SettingsItem> = {}): SettingsItem => (
 
 const manifest: SettingsManifest = {
   categories: [
-    { id: "policy", editable: true, hot: true },
+    { id: "tools", editable: true, hot: true },
     { id: "agents", editable: true, hot: true },
     { id: "llm", editable: true, hot: true },
     { id: "server", editable: false, hot: false, note: "not hot-reloaded; changes apply on restart" },
   ],
   items: [
-    item("policy/permissions.yaml"),
+    item("tools/http.yaml"),
     item("agents/main.md"),
     item("llm/deepseek.yaml"),
     item("server/config.yaml", { hot: false }),
   ],
-  templates: { policy: "allow: []\nask: []\ndeny: []\n", agents: "---\nmodel: \n---\n" },
+  templates: { tools: "# one file = one tool\n", agents: "---\nmodel: \n---\n" },
   modelRefs: ["deepseek/flash"],
   reasoningLevels: { "deepseek/flash": ["off", "low", "high", "max"] },
   configVersion: "v1",
@@ -145,7 +145,7 @@ describe("opening", () => {
     await s().openSettings()
     expect(s().open).toBe(true)
     expect(s().manifest?.items).toHaveLength(4)
-    expect(s().selected).toBe("policy/permissions.yaml")
+    expect(s().selected).toBe("tools/http.yaml")
   })
 
   test("records a load failure instead of throwing", async () => {
@@ -177,7 +177,7 @@ describe("the one config root", () => {
   test("reading a file asks for the path only — there is no level to pass", async () => {
     await s().openSettings()
     const lastGet = calls.filter((c) => c.url.startsWith("/v2/settings/item?")).at(-1)
-    expect(lastGet?.url).toContain("path=policy%2Fpermissions.yaml")
+    expect(lastGet?.url).toContain("path=tools%2Fhttp.yaml")
     expect(lastGet?.url).not.toContain("level=")
   })
 
@@ -186,7 +186,7 @@ describe("the one config root", () => {
     s().edit("ask: [execute]\n")
     await s().save()
     const put = calls.find((c) => c.method === "PUT")
-    expect(put?.body.path).toBe("policy/permissions.yaml")
+    expect(put?.body.path).toBe("tools/http.yaml")
     expect(put?.body.level).toBeUndefined()
   })
 })
@@ -359,7 +359,7 @@ describe("deleting", () => {
     await s().remove()
     expect(s().saveState).toBe("error")
     expect(s().serverIssues.join()).toContain("openai/fast")
-    expect(s().selected).toBe("policy/permissions.yaml")
+    expect(s().selected).toBe("tools/http.yaml")
   })
 })
 
@@ -385,7 +385,7 @@ describe("selectors", () => {
 
   test("selectSelectedItem finds the selected path", async () => {
     await s().openSettings()
-    expect(selectSelectedItem(s())?.path).toBe("policy/permissions.yaml")
+    expect(selectSelectedItem(s())?.path).toBe("tools/http.yaml")
   })
 
   test("selectIsEditable reads the category, not the item", async () => {

@@ -623,7 +623,6 @@ models:
 `)
 	write("agents/main.md", "---\ndescription: root\nmodel: test/small\nsubagents: [worker]\n---\nbody\n")
 	write("agents/worker.md", "---\ndescription: worker\nmodel: test/big\ndisabled_tools: [execute]\n---\nbody\n")
-	write("policy/permissions.yaml", "ask:\n  - execute\n  - read_file\ndeny:\n  - rm_rf\n")
 
 	// base is the user-level dir, root is the project root — both arguments
 	// matter: leaving projectRoot empty makes the loader look for .openheron

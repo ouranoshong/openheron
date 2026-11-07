@@ -30,7 +30,6 @@ models:
 	write("agents/main.md", "---\ndescription: Root\nmodel: test/small\nsubagents: [lead]\n---\nbody\n")
 	write("agents/lead.md", "---\ndescription: Lead\nmodel: test/small\nsubagents: [coder]\n---\nbody\n")
 	write("agents/coder.md", "---\ndescription: Coder\nmodel: test/small\n---\nbody\n")
-	write("policy/permissions.yaml", "ask:\n  - execute\ndeny: []\n")
 
 	svc, err := spec.NewService(base, root)
 	if err != nil {
@@ -97,7 +96,6 @@ models:
   - id: small
 `)
 	write("agents/main.md", "---\ndescription: Root\nmodel: test/small\n---\nbody\n")
-	write("policy/permissions.yaml", "ask:\n  - execute\ndeny: []\n")
 
 	svc, err := spec.NewService(base, root)
 	if err != nil {

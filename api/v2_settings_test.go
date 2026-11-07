@@ -181,12 +181,12 @@ func TestSettingsManifestListsEachFileOnce(t *testing.T) {
 	m := decodeSettings[settingsManifest](t, got)
 
 	seen := map[string]int{}
-	var policy *settingsItem
+	var httpFile *settingsItem
 	for i := range m.Items {
 		it := m.Items[i]
 		seen[it.Path]++
 		if it.Path == "tools/http.yaml" {
-			policy = &m.Items[i]
+			httpFile = &m.Items[i]
 		}
 	}
 	for p, n := range seen {
@@ -194,10 +194,10 @@ func TestSettingsManifestListsEachFileOnce(t *testing.T) {
 			t.Fatalf("%s is listed %d times, want exactly 1", p, n)
 		}
 	}
-	if policy == nil {
-		t.Fatal("policy/permissions.yaml is missing from the manifest")
+	if httpFile == nil {
+		t.Fatal("tools/http.yaml is missing from the manifest")
 	}
-	if policy.Revision == "" {
+	if httpFile.Revision == "" {
 		t.Fatal("an existing file must carry a revision")
 	}
 }
@@ -254,7 +254,7 @@ func TestSettingsItemRejectsBadInput(t *testing.T) {
 		{"missing path", "/v2/settings/item", codeConfigPathInvalid},
 		{"escape", "/v2/settings/item?path=" + url.QueryEscape("../x.yaml"), codeConfigPathInvalid},
 		{"non-editable", "/v2/settings/item?path=server/spec.yaml", codeConfigPathInvalid},
-		{"policy whitelist", "/v2/settings/item?path=policy/whatever.yaml", codeConfigPathInvalid},
+		{"a retired partition", "/v2/settings/item?path=policy/whatever.yaml", codeConfigPathInvalid},
 	}
 	for _, c := range cases {
 		got := callJSON(t, srv, "GET", c.path, nil)
