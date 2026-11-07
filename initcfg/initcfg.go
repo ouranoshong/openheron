@@ -158,13 +158,19 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 	//
 	// ★ The example is a **loadable** file: a file under mcps/ defines a
 	//   server, so a file that cannot be parsed is not a server that is
-	//   off — it is a configuration that does not load. The content is
-	//   the configuration editor's own scaffold (one source, so the two
-	//   cannot drift), and its command is a placeholder that is not
-	//   installed: the server does not come up, the log says so, and the
-	//   agent carries on.
-	content := spec.Template(spec.DirMCP, nil)
-	p.add("mcps/example.yaml", []byte(content))
+	//   off — it is a configuration that does not load. Its command is a
+	//   placeholder that is not installed: the server does not come up,
+	//   the log says so, and the agent carries on.
+	//
+	// ★ The content is this package's own template file. The configuration
+	//   editor hands out its own copy (the editor is served by the API,
+	//   and the API cannot import this package — it would be a cycle),
+	//   and a test pins the two against each other.
+	content, err := renderTemplate("mcps/example.yaml", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	p.add("mcps/example.yaml", content)
 
 	// ── server ──────────────────────────────────────────────────────────
 	//

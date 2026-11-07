@@ -1775,9 +1775,12 @@ allow 清单说*其中哪些*直接放行。
 `<server>.yaml`、或者 server 名不合法的文件（`agentkit/spec/write.go:107`）。
 
 ★ **出厂样例也是一份能加载的文件。** `openheron init` 写下 `mcps/example.yaml` ——
-★ 内容跟编辑器那份脚手架**同一个来源**（一份内容一处，两个地方不会漂）。它的 `command`
-是一个没装的占位符：server 起不来，日志里说一句，agent 照跑。★ **把它复制成
-`mcps/<server>.yaml` 并填上你自己的 command，就是定义那个 server 这个动作。**
+★ 模板文件是 `initcfg/templates/mcps/example.yaml`。编辑器另有一份**自己的拷贝**
+（`agentkit/spec/write.go:217` 的 `mcpServerTemplate`）—— 编辑器由 API 供给，而 API 不能
+import `initcfg`（那是循环）。★ 同一个文件的两份拷贝就是两份会漂移的拷贝，所以有一条
+测试把两者钉在一起（`initcfg/initcfg_test.go:656`）。它的 `command` 是一个没装的占位符：
+server 起不来，日志里说一句，agent 照跑。★ **把它复制成 `mcps/<server>.yaml` 并填上你
+自己的 command，就是定义那个 server 这个动作。**
 
 #### 实施状态
 

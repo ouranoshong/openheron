@@ -1,0 +1,57 @@
+# mcps/ one file = one MCP server. The file's name is the server's name,
+# and it is the namespace segment of that server's tools: mcp__<server>__<tool>.
+# A server name may not contain a run of underscores — "mcp__a__b__x" could not be
+# read back.
+#
+# ★ This file **defines** a server: the file's presence is the definition, there is
+#   no "enabled" key. So it has to hold a server that is worth having — put the
+#   executable you want in command, and the server is defined.
+#
+# ── the fields ───────────────────────────────────────────────────────────
+#
+# transport    stdio (a child process) or http (streamable HTTP). There is no SSE
+#              transport, and an unknown transport is a load-time error: a typo
+#              must not run a different server than the file names.
+# command      required for a stdio server; resolved in the sandbox's PATH, never
+#              against the project root. ★ the workspace does not get to choose
+#              what runs.
+# args         the command's arguments.
+# env          stdio only. The child's environment is this process's environment
+#              with these variables layered on top — the same name, the
+#              configuration wins. An http server may not declare it at all: it
+#              has no child to hand an environment to.
+# url          required for an http server.
+# headers      http only; sent on every request.
+# timeout      the ceiling for connect + initialize + list tools.
+# call_timeout the ceiling for one tool call.
+# tools        a filter: the server's own tool names to offer out of the ones it
+#              has. Absent or empty means all of them.
+# allows       the server's own tool names that run without a nod. ★ The default
+#              is ask, so an empty list means "every tool of this server asks" —
+#              including the tools it has not offered yet.
+transport: stdio
+command: mcp-example-server
+args: []
+timeout: 30s
+call_timeout: 60s
+
+# ★ The other transport, in the file's own vocabulary — uncomment it and delete
+#   the four lines above when the server speaks HTTP:
+#
+# transport: http
+# url: https://mcp.example.com/mcp
+# headers:
+#   Authorization: Bearer ${REMOTE_TOKEN}
+#
+# ★ The child's environment, when the server needs more than it inherits:
+#
+# env:
+#   GITHUB_TOKEN: ${GITHUB_TOKEN}
+#
+# ★ The tools to offer, by the server's own names:
+#
+# tools: [create_issue, list_issues]
+#
+# ★ The exceptions: these run without a nod, everything else asks:
+#
+# allows: [read_issue, list_issues]

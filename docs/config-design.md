@@ -1913,11 +1913,14 @@ whose name is not `<server>.yaml` with a valid server name
 (`agentkit/spec/write.go:107`).
 
 ★ **The factory sample is a loadable file, too.** `openheron init` writes
-`mcps/example.yaml` — ★ the very same content the editor scaffolds (one source, so the
-two cannot drift). Its `command` is a placeholder that is not installed: the server does
-not come up, the log says so, and the agent carries on. ★ **Copying it to
-`mcps/<server>.yaml` and putting your own command in it is the act of defining that
-server.**
+`mcps/example.yaml`, from the template file `initcfg/templates/mcps/example.yaml` — ★ the
+editor scaffolds its **own copy** of it (`agentkit/spec/write.go:217`
+`mcpServerTemplate`), because the editor is served by the API and the API cannot import
+`initcfg` without a cycle. ★ Two copies of one file's content are two copies that drift,
+so a test pins them against each other (`initcfg/initcfg_test.go:656`). Its `command` is a
+placeholder that is not installed: the server does not come up, the log says so, and the
+agent carries on. ★ **Copying it to `mcps/<server>.yaml` and putting your own command in
+it is the act of defining that server.**
 
 #### Implementation status
 

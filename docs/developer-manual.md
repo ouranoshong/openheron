@@ -281,6 +281,11 @@ definition — there is no `enabled` key.
   is a configuration that does not load. The optional fields are written as comments,
   and the `command` is a placeholder that is not installed — so the server does not come
   up, the log says so, and the agent carries on.
+- ★ **The example is two copies, and a test pins them.** `openheron init` writes the
+  template file `initcfg/templates/mcps/example.yaml`; the editor hands out its own copy
+  (`agentkit/spec/write.go:217` `mcpServerTemplate`) — the editor is served by the API,
+  and the API cannot import `initcfg` without a cycle. ★ Two copies of one file's content
+  are two copies that drift, so `initcfg/initcfg_test.go:656` fails when the two differ.
 
 ### 3.3 Adding an API route
 

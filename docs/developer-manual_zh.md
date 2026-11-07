@@ -253,6 +253,11 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
   **定义**一台 server，所以一份解析不了的文件不是「server 关着」，而是「配置加载不了」。
   可选的那些字段写成注释，而 `command` 是一个没装的占位符 —— 于是 server 起不来，
   日志里说一句，agent 照跑。
+- ★ **示例是两份拷贝，由一条测试钉住。** `openheron init` 写模板文件
+  `initcfg/templates/mcps/example.yaml`；编辑器给的是它自己那份
+  （`agentkit/spec/write.go:217` 的 `mcpServerTemplate`）—— 编辑器由 API 供给，而 API 不能
+  import `initcfg`（那是循环）。★ 同一个文件的两份拷贝就是两份会漂移的拷贝，所以
+  `initcfg/initcfg_test.go:656` 在两者不同时会失败。
 
 ### 3.3 加一条 API 路由
 

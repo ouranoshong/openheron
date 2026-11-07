@@ -193,13 +193,14 @@ func Template(catDir string, modelRefs []string) string {
 	}
 }
 
-// mcpServerTemplate is the scaffold of one `mcps/<server>.yaml`.
+// mcpServerTemplate is the **configuration editor's** scaffold of one
+// `mcps/<server>.yaml`.
 //
-// ★ It is **one source**: the configuration editor offers it for a new
-//
-//	file, and `openheron init` writes the very same content as
-//	`mcps/example.yaml` — two copies of one file's content are two copies
-//	that drift.
+// ★ It is the editor's own copy: `openheron init` writes the template file
+// `initcfg/templates/mcps/example.yaml`, and the editor cannot read it —
+// the editor is served by the API, and the API cannot import `initcfg`
+// without a cycle. ★ Two copies of one file's content are two copies that
+// drift, so a test pins them against each other.
 //
 // ★ The content has to **load**: the file's presence is the definition, so
 //
