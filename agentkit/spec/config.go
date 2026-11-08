@@ -118,10 +118,46 @@ type Config struct {
 
 	ConfigRoot string `yaml:"-"`
 
-	deferred []string
+	notices []Notice
 }
 
-func (c *Config) Deferred() []string { return c.deferred }
+// Notice is one deferred problem, and the file it is about.
+//
+// ★ The path is a separate field because the message used to carry it as
+//
+//	text — "llm/deepseek.yaml: api_key env X is not set" — and a text is not
+//	a path. The editor has to know **which file** a notice belongs to, or it
+//	shows every notice of the tree under the file the user happens to be
+//	editing. `Deferred()` puts the two back together for the log, so the
+//	startup line reads exactly as it did.
+type Notice struct {
+	// Path is relative to the configuration root. Empty when the notice is
+	// not about one file — a retired partition, a watch setting.
+	Path string
+
+	Message string
+}
+
+// Deferred returns the notices as sentences.
+//
+// ★ The path is prefixed back onto the message: the log line is what a user
+//
+//	pastes into a bug report, and "the api_key env is not set" without the
+//	file it is about is half a sentence.
+func (c *Config) Deferred() []string {
+	out := make([]string, 0, len(c.notices))
+	for _, n := range c.notices {
+		if n.Path == "" {
+			out = append(out, n.Message)
+			continue
+		}
+		out = append(out, n.Path+": "+n.Message)
+	}
+	return out
+}
+
+// Notices returns the notices with the file each one is about.
+func (c *Config) Notices() []Notice { return c.notices }
 
 // DefaultAgent returns the id of the agent a new session runs as.
 // Named with a call because the package already exports the DefaultAgentID
@@ -140,8 +176,21 @@ func (c *Config) DefaultAgent() string {
 	return names[0]
 }
 
+// deferKey records a notice that is not about one file.
 func (c *Config) deferKey(format string, args ...any) {
-	c.deferred = append(c.deferred, fmt.Sprintf(format, args...))
+	c.notices = append(c.notices, Notice{Message: fmt.Sprintf(format, args...)})
+}
+
+// deferFile records a notice about one file.
+//
+// ★ The path is the file's own, relative to the configuration root — and it
+//
+//	is the **whole** path, extension included. An earlier version put the
+//	path in the message text and the call sites assembled it from a name
+//	that already carried its extension, so the notice said
+//	"mcps/memory.yaml.yaml".
+func (c *Config) deferFile(path, format string, args ...any) {
+	c.notices = append(c.notices, Notice{Path: path, Message: fmt.Sprintf(format, args...)})
 }
 
 type Service struct {
@@ -361,7 +410,8 @@ func (s *Service) loadDir(dir, ext, cat string, ms map[string]*mutation,
 				continue
 			}
 			if err := loader(name, m.Content); err != nil {
-				return fmt.Errorf("config: parse %s: %w", m.Rel, err)
+				return fmt.Errorf("config: parse %s: %w", m.Rel,
+					&FileError{Path: m.Rel, Err: err})
 			}
 		}
 		return nil
@@ -400,7 +450,8 @@ func (s *Service) loadDir(dir, ext, cat string, ms map[string]*mutation,
 				continue
 			}
 			if err := loader(name, m.Content); err != nil {
-				return fmt.Errorf("config: parse %s: %w", m.Rel, err)
+				return fmt.Errorf("config: parse %s: %w", m.Rel,
+					&FileError{Path: m.Rel, Err: err})
 			}
 			continue
 		}
@@ -412,7 +463,11 @@ func (s *Service) loadDir(dir, ext, cat string, ms map[string]*mutation,
 			// ★ The path, not the bare name: two partitions can hold a file
 			//   called web_search.yaml, and "parse web_search.yaml" would not
 			//   say which one. The same wording as the write path's errors.
-			return fmt.Errorf("config: parse %s: %w", cat+"/"+name, err)
+			//
+			//   The path is also carried by the error itself, so a reader can
+			//   ask which file is broken without taking it out of the text.
+			return fmt.Errorf("config: parse %s: %w", cat+"/"+name,
+				&FileError{Path: cat + "/" + name, Err: err})
 		}
 	}
 

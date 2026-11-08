@@ -1166,6 +1166,9 @@ export function startFakeServer(port = 0): FakeServer {
     //   no item to select, and "mcps/ is not highlighted" cannot be seen.
     put("mcps/filesystem.yaml", "transport: stdio\ncommand: npx\nargs:\n  - mcp-server-filesystem\ntimeout: 30s\n")
     put("agents/main.md", "---\nmodel: deepseek/flash\ndescription: root\n---\nbody\n")
+    // ★ A second agent, so an issue about another file has a file to be
+    //   about — and so the editor's link to it goes somewhere.
+    put("agents/agent-expert.md", "---\nmodel: openai/gpt-4o-mini\ndescription: expert\n---\nexpert body\n")
     put("llm/deepseek.yaml", "type: openai\nbase_url: https://x\napi_key: ${KEY}\nmodels:\n  - id: flash\n")
     put("server/config.yaml", 'listen_addr: ":8080"\n')
   }
@@ -1189,13 +1192,14 @@ export function startFakeServer(port = 0): FakeServer {
     items: [
       { path: "llm/deepseek.yaml", exists: true, hot: true, revision: "r4" },
       { path: "agents/main.md", exists: true, hot: true, revision: "r3" },
+      { path: "agents/agent-expert.md", exists: true, hot: true, revision: "r3" },
       { path: "server/config.yaml", exists: true, hot: false, revision: "r5" },
       { path: "tools/http.yaml", exists: true, hot: true, revision: "r1" },
+      { path: "mcps/filesystem.yaml", exists: true, hot: true, revision: "r1" },
     ],
     templates: {
       agents: "---\nmodel: \ndescription: \n---\n\n# available models: deepseek/flash\n",
       llm: "type: openai\nbase_url: \napi_key: ${}\nmodels: []\n",
-      { path: "mcps/filesystem.yaml", exists: true, hot: true, revision: "r1" },
       mcps: "transport: stdio\ncommand: mcp-example-server\nargs: []\ntimeout: 30s\ncall_timeout: 60s\n",
       // ★ The tools section template is **nothing but comments**, exactly as
       //   the real server ships it. A file built from it has no YAML
@@ -1279,6 +1283,7 @@ export function startFakeServer(port = 0): FakeServer {
     })
     if (!hasDocument) {
       issues.push({
+        path,
         line: 0,
         severity: "error",
         message: "the file is empty (or contains only comments)",
@@ -1296,6 +1301,26 @@ export function startFakeServer(port = 0): FakeServer {
             "api_key must be a reference, not a literal: use ${ENV_VAR} or @file:/path so the secret stays out of the repository",
         })
       }
+    }
+    // ★ The tree's own problems: they belong to **another** file, and the
+    //   editor has to show them under that file's name. This is the shape of
+    //   the bug that put an agent's missing model on the screen of a user
+    //   editing a different agent's file.
+    if (path === "agents/main.md" && content.includes("model: deepseek/gone")) {
+      issues.push({
+        path: "agents/agent-expert.md",
+        line: 0,
+        severity: "error",
+        message:
+          "agent agent-expert (agents/agent-expert.md) references model openai/gpt-4o-mini which is not declared under llm/",
+      })
+      issues.push({
+        path: "mcps/memory.yaml",
+        line: 0,
+        severity: "hint",
+        message:
+          "env MEMORY_FILE_PATH refers to OPENHERON_MCP_MEMORY_FILE, which is not set; the entry is left out",
+      })
     }
     return issues
   }

@@ -226,7 +226,7 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
    `Categories` 里加一项（含 `ID`、`Label`、`Dir`、`Ext`、`Editable`）。**热重载目录**和
    **非热重载目录**要分清楚 —— 改一个目录的语义（热不热）影响用户预期。
 
-2. **`agentkit/spec/load.go`**：加 `loaderFor` 的分支（`config.go:340` 的
+2. **`agentkit/spec/load.go`**：加 `loaderFor` 的分支（`agentkit/spec/config.go:389` 的
    `loaderFor`），并实现 `loadXXX`。
 
 3. **`agentkit/spec/decl/decl.go`**：加纯声明结构体。
@@ -264,7 +264,7 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
 - **声明**由常量 `DirMCP = "mcps"`（`agentkit/spec/config.go:25`）与
   `Categories` 里那一项（`agentkit/spec/config.go:66`）给出 —— 可编辑、热重载、
   `.yaml`。
-- **装载**由 `loadMCP`（`agentkit/spec/load.go:306`）完成：一个文件，一个服务器。
+- **装载**由 `loadMCP`（`agentkit/spec/load.go:309`）完成：一个文件，一个服务器。
 - ★ **这个分区的「热」意味着客户端会被重建。** 声明就是服务器的身份，所以声明变了
   就是服务器变了：旧客户端被拆掉，重新起一个新的
   （`agentkit/build/mcpmanager.go:215`），依据是那份声明的指纹
@@ -323,7 +323,7 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
 | `mcps` | 这个 agent **挂载**的 MCP server —— 每一个都会起一个子进程 | 没有 server |
 
 ★ **不要写 `disabled_tools`。** 它与 `tools` 的含义**正好相反** —— 一个删工具，另一个
-点名工具 —— 所以装载器**拒绝**这个文件（`agentkit/spec/load.go:96`），而不是把键改个名：
+点名工具 —— 所以装载器**拒绝**这个文件（`agentkit/spec/load.go:98`），而不是把键改个名：
 只改名字就等于把黑名单悄悄变成了白名单。那条消息会说清两者的方向是反的。★ **没有
 别名**：一个仍按旧义工作的别名会让黑名单继续活着，一个按新义工作的别名则等于替用户把
 黑名单翻成白名单。
@@ -337,13 +337,13 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
 ★ **MCP 有两层。** `mcps:` 说哪些 server 被**挂载**；`tools:` 说它那些工具里哪些被
 agent **看见** —— `mcp__<server>__<tool>`，或者模式 `mcp__<server>__*`。★ `mcps: [github]`
 而 `tools:` 里没有 `mcp__github__*`，那是把 server 起起来，agent 一个都看不见。
-★ 两层互相矛盾是**装载期错误**（`agentkit/spec/load.go:643` 的 `checkAgentMCPNames`）：
+★ 两层互相矛盾是**装载期错误**（`agentkit/spec/load.go:656` 的 `checkAgentMCPNames`）：
 点了 `mcp__github__*` 而 `mcps:` 里没有 `github`，这条规则永远不可能命中。
 
 #### 两条提示
 
 两条都是**提示**，不是错误 —— 配置是合法的，只是没有说出作者的本意
-（`agentkit/spec/load.go:540` 的 `noticeAgentTools`）：
+（`agentkit/spec/load.go:550` 的 `noticeAgentTools`）：
 
 | 提示 | 它意味着什么 | 该怎么办 |
 |---|---|---|
@@ -956,7 +956,7 @@ loader 写的是 `corpus_dir`。`settings-validate.ts` 现在只剩字符串整�
 直接丢掉 —— 否则两张答案赛跑，赢的是慢的那张，也就是关于用户已经改过的文本的那张。
 
 ★ **有一条规则是「搬到服务端」而不是「删掉」。** agent 的 `reasoning` 档位现在在
-`agentkit/spec/load.go:553` 的 `checkReasoning` 里，拿模型的词汇表检查 —— 检查的是
+`agentkit/spec/load.go:563` 的 `checkReasoning` 里，拿模型的词汇表检查 —— 检查的是
 **每一个**文件，不只是在这个编辑器里改过的那些。
 ★ 删一条客户端规则，只有在服务端已经有它的时候才叫简化；下一条规则该先问这一句。
 
@@ -1151,14 +1151,15 @@ gitleaks 报的**提交数**比 git 报的低；但内容照样扫到了，因�
 |---|---|
 | 启动报配置缺失 | 启动日志里的 `config root` 那行 —— 它打印了实际用的根和项目根 |
 | 改配置不生效 | 该分区热重载吗？`llm/`、`agents/`、`tools/`、`mcps/` 是热的；`server/`、`skills/` 要重启 |
-| 启动时报 `disabled_tools` was renamed to `tools` | ★ 两者含义**正好相反** —— 一个删工具，另一个点名工具。删掉 `disabled_tools`，在 `tools:` 里列出这个 agent 该有的工具（`agentkit/spec/load.go:96`） |
-| 启动时报 `names the MCP tool` … `but does not mount the server` | ★ 挂载与可见是两层：把那个 server 加进 `mcps:`，或者把那个工具从 `tools:` 里去掉（`agentkit/spec/load.go:643`） |
+| 启动时报 `disabled_tools` was renamed to `tools` | ★ 两者含义**正好相反** —— 一个删工具，另一个点名工具。删掉 `disabled_tools`，在 `tools:` 里列出这个 agent 该有的工具（`agentkit/spec/load.go:98`） |
+| 启动时报 `names the MCP tool` … `but does not mount the server` | ★ 挂载与可见是两层：把那个 server 加进 `mcps:`，或者把那个工具从 `tools:` 里去掉（`agentkit/spec/load.go:656`） |
 | 提示说 `tools` 点名了一个不存在的工具 | 内置工具就是 `decl.BuiltinToolNames` 里那些（`agentkit/spec/decl/decl.go:291`）；某个 provider 的工具只有在 `tools/` 下写了它的文件时才存在 |
 | 提示说 `tools` 点名了 `skill` 工具，而 `skills` 是空的 | 配置合法但自相矛盾：在 `skills:` 里点名那个技能，或者把 `skill` 从 `tools:` 里去掉 |
 | Agent 调不动某工具 | `GET /v2/agents/:agentId` 看生效工具表；再读工具的 `reason` —— `tools`，或者默认的 `ask` 档（它会问） |
 | 某个 agent **一个**工具都没有 | ★ 工具清单是白名单，而且**默认一个都没有**：不写 `tools:` 就是没有工具。列出这个 agent 该有的工具 |
 | 残留的 `policy/` 目录好像还在管你的旧档位 | 这个分区退役了：档位住在提供工具的那些文件里，而默认档位是 `ask`。启动日志里会说明 —— 那条提示落在 `deferred` 里 |
 | `reasoning` 像是没用 | 模型档案里声明这个档位了吗？没声明 = 静默忽略 |
+| 编辑器把**别的**文件的问题算在你正在改的这个文件头上 | ★ 每条 issue 都点明它说的是哪个文件（`Issue.Path`），别的文件的问题显示在**那个**文件的名字下面，而且是个能跳过去的链接。★ 但整棵树要装得起来：哪儿坏了一个文件，这次保存照样被拒，所以先修那个文件 |
 | 审批恢复不了 | checkpoint 还在吗？`/v2/sessions/:id` 看 `pendingApprovals` |
 | 界面白屏 + `Maximum update depth exceeded` | 有 selector 返回了新数组/新对象吗？ |
 | E2E 报 `already used` | 上轮被强杀的孤儿占着端口，清掉再跑 |
@@ -1182,7 +1183,7 @@ gitleaks 报的**提交数**比 git 报的低；但内容照样扫到了，因�
 | **四个运行时依赖被放在 `devDependencies`** | `web/package.json` | `lucide-react`（10 个文件引）、`clsx`、`tailwind-merge`、`class-variance-authority` 都被 `src/` 引用并打进 `web/dist`。构建能过（Vite 在构建期解析），但清单是错的。 |
 | **`web/scripts/interop-check.ts` 已过时** | 该脚本第 16-20、41-45 行 | 它直接 POST `/v2/run` 且**不带 `threadId`**，而服务端现在要求先 `POST /v2/sessions`（`api/v2_run.go:78`）。所以 `make smoke` 里的这一项会失败（实测报 400 `threadId is required`）。`web/scripts/hitl-smoke.ts` 与 `web/scripts/no-undefined-url-check.ts` 已按新契约写。 |
 | **`api/server.go:75` 的注释指向不存在的路由** | 该行 | 注释写的是「GET /v2/spec」，但 `SetSkillsSource` 实际喂的是 `/v2/skills`。 |
-| **残留的 `policy/` 目录被丢弃了 —— 而配置照样加载** | 装载器只走五个分区（`agentkit/spec/config.go:40-71`）；退役的目录只被「注意到」，不会被读（`noteRetiredDirs`，`agentkit/spec/config.go:329`） | `policy/` 分区在 2026-11-07 退役了：档位住在提供工具的那些文件里，而默认档位是 `ask`。从前留下的 `policy/permissions.yaml` **不会被读** —— 以前被禁的工具现在会问，以前不用点头就过的工具现在也会问。★ 那条提示落在 `deferred` 里（启动日志与 `/v2/health` 都带着它），并说清新档位在哪儿；配置编辑器直接拒绝这个路径（「unknown config section」，`agentkit/spec/write.go:72`）。★ **空的** `policy/` 目录不报任何东西 —— 它里面本来就没有被丢掉的东西。 |
+| **残留的 `policy/` 目录被丢弃了 —— 而配置照样加载** | 装载器只走五个分区（`agentkit/spec/config.go:40-71`）；退役的目录只被「注意到」，不会被读（`noteRetiredDirs`，`agentkit/spec/config.go:378`） | `policy/` 分区在 2026-11-07 退役了：档位住在提供工具的那些文件里，而默认档位是 `ask`。从前留下的 `policy/permissions.yaml` **不会被读** —— 以前被禁的工具现在会问，以前不用点头就过的工具现在也会问。★ 那条提示落在 `deferred` 里（启动日志与 `/v2/health` 都带着它），并说清新档位在哪儿；配置编辑器直接拒绝这个路径（「unknown config section」，`agentkit/spec/write.go:72`）。★ **空的** `policy/` 目录不报任何东西 —— 它里面本来就没有被丢掉的东西。 |
 
 ## 8. 提交前
 

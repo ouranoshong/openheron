@@ -113,12 +113,26 @@ func (s *Service) diagnose(rel string, ms map[string]*mutation) *Diagnostics {
 	}
 	if err := cfg.validate(); err != nil {
 		d.OK = false
+		// ★ The file the error is about, not the file being edited. The
+		//   editor used to be told that the file in front of it was broken
+		//   because **another** file was: an agent whose model is not
+		//   declared is a problem of that agent's file, and saying so is
+		//   the difference between a message the user can act on and one
+		//   they cannot.
 		d.Issues = append(d.Issues, Issue{
-			Path: rel, Severity: SeverityError, Message: err.Error(),
+			Path:     fileErrorPath(err),
+			Severity: SeverityError,
+			Message:  err.Error(),
 		})
 	}
-	for _, note := range cfg.Deferred() {
-		d.Issues = append(d.Issues, Issue{Severity: SeverityHint, Message: note})
+	for _, n := range cfg.Notices() {
+		// ★ A notice belongs to the file it names. Showing it under the
+		//   file being edited is the same mistake as the error above.
+		d.Issues = append(d.Issues, Issue{
+			Path:     n.Path,
+			Severity: SeverityHint,
+			Message:  n.Message,
+		})
 	}
 	d.ConfigVersion = s.Fingerprint()
 	return d
@@ -155,6 +169,13 @@ func parseIssues(rel string, err error) []Issue {
 	var ps *parseShift
 	if errors.As(err, &ps) {
 		shift = ps.lines
+	}
+
+	// ★ The file the error names, not the file that was edited. A draft can
+	//   be perfectly good while another file of the tree is broken, and the
+	//   reader has to be sent to the broken one.
+	if p := fileErrorPath(err); p != "" {
+		rel = p
 	}
 
 	base := err

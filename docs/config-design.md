@@ -13,7 +13,7 @@
 运行数据一律不进库；厂商知识进 `llm/*.yaml`，Go 代码里零厂商知识；**只有一份配置生效**，让「这份配置到底是什么」一眼可辨。
 
 ★ 只有一份的理由不是整洁：一旦配置根取决于「进程是从哪儿启动的」，同一条命令换个目录跑就会读到另一份配置，
-测试实例也会读到开发者自己的配置（`agentkit/spec/config.go:161-173`）。
+测试实例也会读到开发者自己的配置（`agentkit/spec/config.go:210-222`）。
 
 ---
 
@@ -23,15 +23,15 @@
 
 | # | 目标 | 可验证判据 |
 |---|---|---|
-| 1 | **一个**配置根（项目级路径，或显式指定） | 任一时刻只有一份配置生效，且没有继承链（`agentkit/spec/config.go:161-167`） |
+| 1 | **一个**配置根（项目级路径，或显式指定） | 任一时刻只有一份配置生效，且没有继承链（`agentkit/spec/config.go:210-216`） |
 | 2 | 按功能分区 | 新增一类配置不改已有文件布局（`agentkit/spec/config.go:40-70`） |
 | 3 | 零新增依赖 | `go.mod` 只把已在缓存的 `gopkg.in/yaml.v3` 转 direct（`go.mod:20`）—— YAML 这一层就是全部成本 |
-| 4 | 「配了没用」必须可见 | 未知字段报错；认识但未兑现的键进 `deferred` 并**强制打印**（`agentkit/spec/config.go:415-425`、`main.go:198-200`） |
+| 4 | 「配了没用」必须可见 | 未知字段报错；认识但未兑现的键进 `deferred` 并**强制打印**（`agentkit/spec/config.go:466-480`、`main.go:198-200`） |
 | 5 | 密钥不入库 | 档案只存 `${ENV}` 引用或 `@file:` 路径 —— 配置编辑器拒绝保存明文（`agentkit/spec/expand.go:9-38`、`agentkit/spec/write.go:441-533`） |
 
 ### 非目标
 
-- ❌ **配置根不做上溯搜索。** 上游设计会向祖先目录查找；openheron 故意不做（`agentkit/spec/config.go:161-173`）。
+- ❌ **配置根不做上溯搜索。** 上游设计会向祖先目录查找；openheron 故意不做（`agentkit/spec/config.go:210-222`）。
 - ❌ **没有家目录那一层。** `~/.openheron` 永远不会被自动认领 —— 若它存在而不在用，运行时会把话说明白，请你显式指名（`main.go:109-126`）。
 - ❌ **不让配置承载密钥本体。** 加载器容忍明文密钥（`agentkit/spec/expand.go:35-37`），但编辑器拒绝保存明文（`agentkit/spec/write.go:441-533`）—— 两条路径故意不对称。
 - ❌ 不让 **`server/`** 参与热更新（它配的是进程自身，改了要重启）。`llm/` `agents/` `tools/` `mcps/` **已实施**热更新，见 §8。★ **深度与重试上限**正是为此住在 `server/` 里：每个数字只有一份，而且不在运行时被换掉（§12.2）。
@@ -44,15 +44,15 @@
 |---|---|---|---|
 | 1 | 目录名 | `.openheron` | 短、无歧义、可入版本库（`agentkit/spec/config.go:105`） |
 | 2 | 分区 | `server/` `llm/` `agents/` `tools/` `mcps/`（会被加载）、`skills/`（技能）、`state/`（运行数据） | 一类配置一个文件集合（`agentkit/spec/config.go:18-26`、`agentkit/spec/config.go:40-70`） |
-| 3 | 格式 | **YAML** —— `agents/*.md` 用 YAML frontmatter | 与 agents 的 frontmatter 同构 ⇒ `.openheron/` 全域统一（`agentkit/spec/expand.go:48-65`、`agentkit/spec/load.go:72-95`） |
-| 4 | 粒度 | **一实体一文件** | `llm/<provider>.yaml`、`agents/<id>.md`（`agentkit/spec/load.go:17`、`agentkit/spec/load.go:72`） |
-| 5 | 覆盖 | 不适用 —— 只有一份配置，没有「谁覆盖谁」 | 字段级合并让配置来源不可辨。★ 已经**没有**「两者取更严」这条规则：深度与重试上限只有**一个**家（`server/config.yaml`），所以没有什么要对账（`agentkit/spec/load.go:671-684`） |
+| 3 | 格式 | **YAML** —— `agents/*.md` 用 YAML frontmatter | 与 agents 的 frontmatter 同构 ⇒ `.openheron/` 全域统一（`agentkit/spec/expand.go:48-65`、`agentkit/spec/load.go:74-97`） |
+| 4 | 粒度 | **一实体一文件** | `llm/<provider>.yaml`、`agents/<id>.md`（`agentkit/spec/load.go:17`、`agentkit/spec/load.go:74`） |
+| 5 | 覆盖 | 不适用 —— 只有一份配置，没有「谁覆盖谁」 | 字段级合并让配置来源不可辨。★ 已经**没有**「两者取更严」这条规则：深度与重试上限只有**一个**家（`server/config.yaml`），所以没有什么要对账（`agentkit/spec/load.go:684-697`） |
 | 6 | 优先级 | `默认 < 配置根 < 环境变量`（★ **只有少数几个变量真做到**，见 §4.4） | env 是一次性覆盖，文件是可提交的本项目管理（`main.go:217-219`） |
-| 7 | 未知字段 | **严格报错**，带行号 | `max_retry` 拼成 `max_retries` 应在启动期暴露（`agentkit/spec/config.go:415-425`、`yaml.v3@v3.0.1/decode.go:944`） |
-| 8 | 运行数据 | `.openheron/state/` | 配置与数据同根，一条忽略规则一处生效（`agentkit/spec/defaults.go:62`、`agentkit/spec/config.go:241-253`） |
+| 7 | 未知字段 | **严格报错**，带行号 | `max_retry` 拼成 `max_retries` 应在启动期暴露（`agentkit/spec/config.go:466-480`、`yaml.v3@v3.0.1/decode.go:944`） |
+| 8 | 运行数据 | `.openheron/state/` | 配置与数据同根，一条忽略规则一处生效（`agentkit/spec/defaults.go:62`、`agentkit/spec/config.go:290-302`） |
 | 9 | skills | 默认在 `.openheron/skills/` —— 由 `$EINO_EXT_SKILLS_DIR` 决定，否则从工作目录上溯找 `.openheron/skills` | ★ 这条规则与配置根**不同**：技能是一棵目录树，从上级目录复用一个无害，而配置根是一组实体（`agentkit/build/skill.go:188-227`） |
-| 10 | 根探测 | `--config-dir` → `$OPENHERON_CONFIG_DIR` → `<projectRoot>/.openheron` | ★ **不做上溯搜索** —— 取决于工作目录的根会让同一条命令读到另一份配置（`agentkit/spec/config.go:161-173`） |
-| 11 | 多模型 | 一个 provider 文件持 `models[]`，引用 `<provider>/<model>` | 「入口 agent 强模型 + 下属弱模型」是最常见诉求；且与 `agents/*.md` 的 `model:` 引用形式一致（`agentkit/spec/load.go:53-65`、`agentkit/spec/load.go:437-446`） |
+| 10 | 根探测 | `--config-dir` → `$OPENHERON_CONFIG_DIR` → `<projectRoot>/.openheron` | ★ **不做上溯搜索** —— 取决于工作目录的根会让同一条命令读到另一份配置（`agentkit/spec/config.go:210-222`） |
+| 11 | 多模型 | 一个 provider 文件持 `models[]`，引用 `<provider>/<model>` | 「入口 agent 强模型 + 下属弱模型」是最常见诉求；且与 `agents/*.md` 的 `model:` 引用形式一致（`agentkit/spec/load.go:54-67`、`agentkit/spec/load.go:442-451`） |
 | 12 | 模型构造 | **每个 agent 一个实例**（粒度 = provider × model × reasoning 档位 × 端点字段形状 × timeout） | ★ **实施时更正**：原写「一个 provider 一个实例」，理由是「连接池天然共享」。后半句不成立 —— `FromConfig` 每次新建 `http.Client`（`agentkit/build/provider.go:40`、`agentkit/build/provider.go:47`），而 agent 各自声明模型与思考档位，本就是彼此独立的（`agentkit/build/provider.go:81-95`） |
 | 13 | 时长分两档 | `llm/*.yaml` 里的 `timeout` 严格报错；`debounce` / `start_timeout` / `tools/` 下的时长降级并记 `deferred` | 前者写错会让超时行为不可预测；后者只影响「等多久」，不该让程序起不来。**降级必须出声**（`agentkit/spec/decl/decl.go:584`、`agentkit/spec/decl/decl.go:509-518`、`agentkit/spec/reload.go:80-84`） |
 | 14 | 子 agent 规格 | 放 `decl.SubAgentSpec`，装配层直接用 | `agentkit/build → agentkit/spec` 本就是允许的单向依赖；另立一份会「编译不报错、运行期少个值」（`agentkit/spec/decl/decl.go:613-631`、`agentkit/spec/subagent.go:18-28`、`agentkit/build/spec.go:22`） |
@@ -61,7 +61,7 @@
 | 17 | 档位写在哪 | **跟着工具走**：每个文件的 `allows:` 点名**不用点头**的那些，其余一律要点头；★ 已经**不再有任何全局清单** —— `policy/permissions.yaml` 没了 | **已实施**（见 §6.3、§6.6）：server 自己的文件用 server 自己的词汇点名它的例外，`tools/` 下的文件点名自己的例外，而那张表是从配置装配出来的。★ 档位是关于**某一个工具**的一句话，所以就该待在那个工具的文件里 —— 而且在那里用的是**同一套词汇**（`http.yaml` 说 `post`，所以它能说 `allows: [post]`；中心那份文件却不得不点名内部名字 `request_post`）。★ 全局清单跟着一起走了：「不被暴露」已经说了两遍（文件的 `allows:`、agent 的 `tools:`），第三处就多一处要同步的地方 —— 而它是唯一必须说暴露名的那处 |
 | 18 | 缺省档位 | **到处都是 `ask`** —— 代码带一份**缺省** allow 清单，而文件的 `allows:` 对它覆盖的那些工具**加进**去 | ★ **已实施**（见 §6.3）：缺省是 `ask`（`agentkit/build/policy.go:55` `TierOf`），代码那份清单是**地板**（`agentkit/build/tools.go:61` `builtinAllowedTools`），文件只能往上加；那张表是从配置装配出来的，所以档位在 server 还没起来之前就能回答（`agentkit/build/mcptools.go:172` `mcpAllowedNames`）。★ 全体同一条规则：文件系统工具、HTTP 工具与一个 MCP server 行为一致，也没有需要记的分组缺省。★ 代码那份清单之所以存在，是因为 `task` —— 委派工具 —— **没有自己的文件**，而一个不点一下就不能委派的 agent 等于不能委派。MCP server 的工具是**运行期才发现**的：openheron 不知道 `delete_repo` 做什么，而 stdio 之下 server 是带着 agent 自己权限的子进程 ⇒ 默认点头是这场交易里安全的那一侧 |
 | 19 | 一个 agent 加载哪些 MCP server | agent 自己的 `mcps:` 清单，写在它的 frontmatter 里 | **已实施**。★ 一个 server 是**能力**，而能力属于用到它的那个 agent —— 研究员不需要部署 server。★ **键缺失 = 不加载任何 server**，`[]` = 不加载任何 server —— 这两件事现在是同一件事，而且同一件事的意思是**什么都没有**：那个用来分辨「没声明」与「声明为空」的指针没了，因为这两者现在意思相同（`agentkit/spec/decl/decl.go:135`）。⇒ 挂载一个 server 是**写下来**的决定：server 文件说 server *是什么*，agent 的 `mcps:` 说**谁启动它** |
-| 20 | 知识库的目录键 | **`corpus_dir`**，不是 `corpus` | ★ 它的值是一个**目录**，而配置里别的目录键都这么说：`data_dir`、`static_dir`。「corpus」是信息检索里对「检索系统据以作答的那批文档」的叫法 —— 不懂这个词的人也该读得懂这个键。★ 旧键仍然能加载，所以这次改名不会弄坏一份能用的配置；它会在 `deferred` 里说出来（`agentkit/spec/decl/decl.go:541-554`、`agentkit/spec/load.go:209-215`） |
+| 20 | 知识库的目录键 | **`corpus_dir`**，不是 `corpus` | ★ 它的值是一个**目录**，而配置里别的目录键都这么说：`data_dir`、`static_dir`。「corpus」是信息检索里对「检索系统据以作答的那批文档」的叫法 —— 不懂这个词的人也该读得懂这个键。★ 旧键仍然能加载，所以这次改名不会弄坏一份能用的配置；它会在 `deferred` 里说出来（`agentkit/spec/decl/decl.go:541-554`、`agentkit/spec/load.go:211-217`） |
 
 ### 「一实体一文件」而非单文件分区表
 
@@ -71,7 +71,7 @@
 - 一个 provider 一份文件，`git log` 里能直接看到「谁改了哪个厂商」；
 - 与 `agents/*.md` 同一原则，加 agent 不必改既有文件结构。
 
-在 openheron 里，实体单位是「一个 provider 一份文件」（`agentkit/spec/load.go:17`），文件里的每个模型同样是一个实体（`agentkit/spec/load.go:53-65`）——
+在 openheron 里，实体单位是「一个 provider 一份文件」（`agentkit/spec/load.go:17`），文件里的每个模型同样是一个实体（`agentkit/spec/load.go:54-67`）——
 这正是模型用 `<provider>/<model>` 引用、而不是用路径引用的原因。
 
 ---
@@ -92,14 +92,14 @@
 ★ **没有 `policy/` 目录。** 那个分区已经没了：档位住在**提供**工具的那些文件里，而上限住在
 `server/config.yaml`（§6.3、§12.2）。★ 一份仍然带着这个目录的配置**不会被读** —— 但它
 **也不沉默**：加载器把这个退役的分区记进 `deferred`，并说明它的内容去了哪儿
-（`agentkit/spec/config.go:305-338` `noteRetiredDirs`）。
+（`agentkit/spec/config.go:354-387` `noteRetiredDirs`）。
 
-空的子目录**不自动创建**：目录不存在就当「没有东西可加载」（`agentkit/spec/config.go:377-381`）。
-★ **配置根本身是例外** —— 缺省的那份根不存在时会被建出来（`agentkit/spec/config.go:200-207`），
+空的子目录**不自动创建**：目录不存在就当「没有东西可加载」（`agentkit/spec/config.go:427-431`）。
+★ **配置根本身是例外** —— 缺省的那份根不存在时会被建出来（`agentkit/spec/config.go:249-256`），
 因为「还没有配置」和「目录不在」本来就是同一件事。
 
 ★ **`tools/` 是自成一区的分区** —— 它装着外部工具的配置（`http.yaml`、`web_search.yaml`、`wikipedia.yaml`）
-与知识库的配置（`kb.yaml`）（`agentkit/spec/load.go:165-193`），并且**进**热更新（`agentkit/spec/config.go:56-60`），
+与知识库的配置（`kb.yaml`）（`agentkit/spec/load.go:167-195`），并且**进**热更新（`agentkit/spec/config.go:56-60`），
 而 `server/` 不进（`agentkit/spec/config.go:51-55`）。拆分的理由是热更新：`server/` 配的是进程自身、运行期换不掉，
 而「改一个工具的超时」本该下一轮就生效。知识库的*索引*是运行数据，落在 `state/kb/<index>`（`kbcmd.go:130`）。
 
@@ -108,7 +108,7 @@
 带着过期 `baseRevision` 的写入会被判为冲突（`agentkit/spec/write.go:439-456`）。不需要锁文件，所以也没有锁文件。
 （样例的忽略规则里仍列着 `.config.lock` —— 那是一处遗留，见下面的忽略规则。）编辑器的设计见 `config-editor-design.md`（upstream）。
 
-`state/` 取代了旧的 `DATA_DIR=./data`，由 `Service.DataDir("")` 创建（`agentkit/spec/config.go:241-253`）：
+`state/` 取代了旧的 `DATA_DIR=./data`，由 `Service.DataDir("")` 创建（`agentkit/spec/config.go:290-302`）：
 
 ```
 .openheron/state/
@@ -200,15 +200,15 @@ environment variables        highest
 | 顺序 | 来源 | 说明 |
 |---|---|---|
 | 1 | `--config-dir <path>` | 指向**配置根本身**（里面直接有 `llm/` `agents/`）—— `main.go:84-85` |
-| 2 | `OPENHERON_CONFIG_DIR` | 同上 —— `agentkit/spec/config.go:103`、`agentkit/spec/config.go:189` |
-| 3 | 兜底 | `<projectRoot>/.openheron` —— `agentkit/spec/config.go:192`；项目根是 `--project-root` 或工作目录（`main.go:86-87`、`agentkit/spec/config.go:175-185`） |
+| 2 | `OPENHERON_CONFIG_DIR` | 同上 —— `agentkit/spec/config.go:103`、`agentkit/spec/config.go:238` |
+| 3 | 兜底 | `<projectRoot>/.openheron` —— `agentkit/spec/config.go:241`；项目根是 `--project-root` 或工作目录（`main.go:86-87`、`agentkit/spec/config.go:224-234`） |
 
 ★ **兜底的那份根会被创建；指名的不会。** 只有缺省根在不存在时才会被建出来
-（`agentkit/spec/config.go:200-207`）：`--config-dir` 或 `$OPENHERON_CONFIG_DIR` 指向一个不存在的地方是用户笔误，
+（`agentkit/spec/config.go:249-256`）：`--config-dir` 或 `$OPENHERON_CONFIG_DIR` 指向一个不存在的地方是用户笔误，
 它不能变成一棵悄悄空着的配置树。
 
 ★ **不做上溯搜索 —— 而且 openheron 从来没有做过。** 上游设计会从工作目录向上找 `.heron/`；
-这条规则是被**故意去掉**的（`agentkit/spec/config.go:161-173`）：一旦配置根取决于「进程是从哪儿启动的」，
+这条规则是被**故意去掉**的（`agentkit/spec/config.go:210-222`）：一旦配置根取决于「进程是从哪儿启动的」，
 同一条命令换个目录跑就会读到另一份配置，测试实例也会读到开发者自己的配置。
 家目录里的配置同样**不是**兜底层：若 `~/.openheron` 存在而不在用，运行时会把话说明白，请你显式指名（`main.go:109-126`）。
 
@@ -218,11 +218,11 @@ environment variables        highest
 
 ### 4.1 缺省值靠「预填充结构体再 decode」
 
-加载器先用内置缺省值**预填充**配置结构体，再把每个文件 decode 到它上面（`agentkit/spec/config.go:291-299`）：
+加载器先用内置缺省值**预填充**配置结构体，再把每个文件 decode 到它上面（`agentkit/spec/config.go:340-348`）：
 `server/` 段从 `defaultServer()` 起步（`agentkit/spec/defaults.go:58-69`），知识库从 `defaultKB()`
 （`agentkit/spec/defaults.go:49-56`）。★ 没有第三份预填充：档位表**不再**是一个配置段 ——
 它由提供工具的那些文件装配而成（§6.3）。
-`loadServer` 是 decode 到预填充结构体的一份**副本**上（`agentkit/spec/load.go:97-104`），
+`loadServer` 是 decode 到预填充结构体的一份**副本**上（`agentkit/spec/load.go:99-106`），
 于是文件里没出现的键保留缺省值。
 
 「只写文档里出现过的键」这个行为不是 openheron 自己写的 —— 它是 yaml.v3 的。
@@ -264,27 +264,27 @@ func decodeStrict(data []byte, v any) error {
 }
 ```
 
-每个分区都走它（`agentkit/spec/load.go:23`、`agentkit/spec/load.go:79`、`agentkit/spec/load.go:99`、
-`agentkit/spec/load.go:207`、`agentkit/spec/load.go:215`、`agentkit/spec/load.go:130`）。
+每个分区都走它（`agentkit/spec/load.go:23`、`agentkit/spec/load.go:81`、`agentkit/spec/load.go:101`、
+`agentkit/spec/load.go:209`、`agentkit/spec/load.go:217`、`agentkit/spec/load.go:132`）。
 
 **为什么严格**：宽松模式下拼错字段名会**静默用默认值**，而「为什么我的配置没生效」是排障成本最高的一类问题。
 yaml.v3 的报错自带行号（`yaml.v3@v3.0.1/decode.go:944`）：`line N: field X not found in type Y`。
 
 ★ **空文档不是解析错误。** 解码器把一份没有 YAML 的文件报成 `io.EOF` —— 这话是真的，却毫无用处：
 「EOF」没告诉用户该做什么。openheron 把它换成 `ErrEmptyDocument`
-（「the file is empty (or contains only comments)」）（`agentkit/spec/config.go:400-413`），
-因为「只有注释的模板」是一种真实存在的文件形状：照着模板建出来的 `tools/` 文件根本没有文档（`agentkit/spec/load.go:106-133`）。
+（「the file is empty (or contains only comments)」）（`agentkit/spec/config.go:450-464`），
+因为「只有注释的模板」是一种真实存在的文件形状：照着模板建出来的 `tools/` 文件根本没有文档（`agentkit/spec/load.go:108-135`）。
 
 ### 4.3 「配了没用」的三种形态
 
 | 形态 | 处理 | 例子 |
 |---|---|---|
 | **不认识的键** | 硬报错，带行号 | `max_retry`（拼错）—— `yaml.v3@v3.0.1/decode.go:944` |
-| **认识但本版不兑现** | 进 `deferred[]`，**启动必须逐条打印** | `models[].summarize_at` 仍会被解析，但不再被读 —— 阈值归 agent 管（`agentkit/spec/load.go:59-63`） |
+| **认识但本版不兑现** | 进 `deferred[]`，**启动必须逐条打印** | `models[].summarize_at` 仍会被解析，但不再被读 —— 阈值归 agent 管（`agentkit/spec/load.go:60-64`） |
 | **认识但此刻缺运行期前提** | 同上，且**不阻塞启动** | `api_key` 的 `${ENV}` 未设 —— 请求该端点时才 401（`agentkit/spec/load.go:39-42`） |
 
 ```go
-func (c *Config) Deferred() []string { return c.deferred }        // agentkit/spec/config.go:115
+func (c *Config) Deferred() []string                                  // agentkit/spec/config.go:147
 ```
 
 ```go
@@ -293,18 +293,32 @@ for _, d := range c.Deferred() {
 }                                                                  // main.go:198-200
 ```
 
-每一条都由 `Config.deferKey` 产生（`agentkit/spec/config.go:151-153`），今天全部的产生者就这些：
+★ **一条提示带着它属于哪个文件。** 内部存的是 `Notice{Path, Message}`
+（`agentkit/spec/config.go:124-160`），`Deferred()` 把路径拼回消息 —— 启动日志那一行因此
+**一个字都没有变**，而诊断接口能拿到结构化的路径。
 
-| 产生者 | 它说的是什么 |
-|---|---|
-| `agentkit/spec/load.go:42` | `api_key` 的 `${ENV}` 未设 —— 真正发请求时会 401 |
-| `agentkit/spec/load.go:61` | `models[].summarize_at` 不再被读 —— 阈值归 agent 管 |
-| `agentkit/spec/load.go:213` | `tools/kb.yaml` 里的键 `corpus` 已改名为 `corpus_dir` —— 旧键仍然能加载 |
-| `agentkit/spec/load.go:351` | MCP server 的 `env:` 里某个 `${ENV}` 未设 —— 这一条被略掉 |
-| `agentkit/spec/load.go:372` | MCP server 的超时不是时长 —— 用缺省值 |
-| `agentkit/spec/load.go:581` | 该模型没有声明 `context_window` —— 该 agent 的自动压缩不会发生 |
-| `agentkit/spec/config.go:329` | 磁盘上还留着一个退役的分区（`policy/`）—— 它**没有被读**，而这条提示说明它的内容去了哪儿 |
-| `agentkit/spec/reload.go:82` | 某个宽松时长解析不了，退回了缺省值 |
+产生提示的有两个入口：`Config.deferFile`（有文件）与 `Config.deferKey`（没有文件，
+比如退役的分区、watch 的设置）（`agentkit/spec/config.go:179-193`）。
+
+★ **路径是一个字段，不是消息的前缀。** 以前路径是拼进消息里的，于是调用点要自己把
+文件名和扩展名拼起来 —— 而那个文件名**已经带着扩展名**了，所以提示写成了
+`mcps/memory.yaml.yaml`。现在路径由调用点原样给出（`agentkit/spec/load.go:398`），
+消息里不再有它。
+
+今天全部的产生者就这些：
+
+| 产生者 | 它说的是什么 | 属于哪个文件 |
+|---|---|---|
+| `agentkit/spec/load.go:42` | `api_key` 的 `${ENV}` 未设 —— 真正发请求时会 401 | `llm/<provider>.yaml` |
+| `agentkit/spec/load.go:62` | `models[].summarize_at` 不再被读 —— 阈值归 agent 管 | `llm/<provider>.yaml` |
+| `agentkit/spec/load.go:256` | 键 `corpus` 已改名为 `corpus_dir` —— 旧键仍然能加载 | `tools/kb.yaml` |
+| `agentkit/spec/load.go:398` | MCP server 的 `env:` 里某个 `${ENV}` 未设 —— 这一条被略掉 | `mcps/<server>.yaml` |
+| `agentkit/spec/load.go:420` | MCP server 的超时不是时长 —— 用缺省值 | `mcps/<server>.yaml` |
+| `agentkit/spec/load.go:632` | `tools:` 点名了一个不存在的工具 | `agents/<id>.md` |
+| `agentkit/spec/load.go:640` | 点了 `skill` 工具却没有 `skills` —— 技能一个也没有 | `agents/<id>.md` |
+| `agentkit/spec/load.go:795` | 该模型没有声明 `context_window` —— 该 agent 的自动压缩不会发生 | `llm/<provider>.yaml` |
+| `agentkit/spec/config.go:385` | 磁盘上还留着一个退役的分区（`policy/`）—— 它**没有被读**，而这条提示说明它的内容去了哪儿 | — |
+| `agentkit/spec/reload.go:82` | 某个宽松时长解析不了，退回了缺省值 | — |
 
 ★ **最后这条消息对所有宽松时长都写 `watch.debounce`。** 写坏的长时被收进同一个全局列表
 （`agentkit/spec/decl/decl.go:338-346`），又在同一处上报（`agentkit/spec/reload.go:80-84`），
@@ -326,7 +340,7 @@ CI 里还没 export），不是配置写错。写错的东西（拼错的键、�
 
 | 环境变量 | 覆盖什么 | 在哪里读 |
 |---|---|---|
-| `OPENHERON_CONFIG_DIR` | **配置根**（唯一的那一份） | `agentkit/spec/config.go:189`（名字是常量 `ConfigDirEnv`，`agentkit/spec/config.go:103`） |
+| `OPENHERON_CONFIG_DIR` | **配置根**（唯一的那一份） | `agentkit/spec/config.go:238`（名字是常量 `ConfigDirEnv`，`agentkit/spec/config.go:103`） |
 | `LISTEN_ADDR` | `server.listen_addr` | `main.go:217` |
 | `DATA_DIR` | 解析后的数据目录（会话、checkpoint） | `main.go:218` |
 | `PROJECT_ROOT` | 交给 agent 的项目根 | `main.go:219` |
@@ -360,7 +374,7 @@ server 侧那五个走同一个辅助函数 —— `override`（`main.go:459`）
 `ConfigFromEnv` 现在只是 `buildModel` 在「入口 agent 没声明模型」时的兜底
 （`agentkit/build/snapshot.go:126`、`agentkit/build/snapshot.go:139`），而加载器对没声明模型的
 agent 直接报错 —— "must declare model (no inheritance, no fallback)"
-（`agentkit/spec/load.go:87`）—— 所以**一份合法的配置根本走不到那里**。
+（`agentkit/spec/load.go:89`）—— 所以**一份合法的配置根本走不到那里**。
 
 这是刻意的取舍：模型档案是**要被 review 和提交**的东西（它决定花谁的钱、存不存数据）。给它一个
 进程外的高优先级通道，等于允许「repo 里的配置和线上跑的不一样」而两边都看不出来。留给需要它的
@@ -376,6 +390,38 @@ agent 直接报错 —— "must declare model (no inheritance, no fallback)"
 （`kb/corpus_test.go:12`）、`OPENHERON_LOCK_HELPER` 与 `OPENHERON_LOCK_PATH`
 （`persist/filelock_test.go:128`）。
 
+### 4.5 诊断的回答归属到文件
+
+★ **一条 issue 说的是哪个文件，就是哪个文件。** `Issue.Path` 是配置根相对的路径
+（`agentkit/spec/diag.go:26`），为空只表示「这条规则不针对某一个文件」。
+
+以前的诊断把**整棵树**的失败都记在被编辑的文件头上（`agentkit/spec/diag.go:123` 那一行
+无条件写 `Path: rel`）。于是用户在编辑 `agents/main.md` 时，看到的是
+
+```
+agent agent-expert (agents/agent-expert.md) references model openai/gpt-4o-mini which is not declared under llm/
+```
+
+—— 一条**别的文件**的问题，挂在**当前**文件上，而当前文件里根本没有它能改的地方。
+
+现在归属是这样定的：
+
+| 问题的来源 | `Issue.Path` |
+|---|---|
+| 某个文件解析不出来（YAML 报错、缺必填键） | 那个文件（`FileError`，`agentkit/spec/fileerr.go:20`） |
+| 某个 agent 的模型没在 `llm/` 里声明 | **那个 agent 的文件**（`agentkit/spec/load.go:529`） |
+| 某个 agent 的 `reasoning:` 档位没被声明 | 那个 agent 的文件（`agentkit/spec/load.go:581`） |
+| 知识库的配置不对 | `tools/kb.yaml`（`agentkit/spec/load.go:808` `kbErr`） |
+| 跨文件的规则（委派图成环、嵌套深度超限） | 空 —— 消息里点名了涉及的文件 |
+| 一条提示（`deferred`） | 它属于的那个文件（§4.3 的 `Notice.Path`） |
+
+★ **归属要能在界面上兑现。** 前端按 `Issue.Path` 把问题分成三处：本文件、整棵树、
+别的文件（`web/src/lib/settings-validate.ts` `groupIssues`）—— 别的文件的问题**以那个
+文件的名字显示**，而且是**一个链接**：点一下就跳到那个文件去改。
+
+⚠ **但树坏了就是坏了。** 别的文件里有一个错误，整棵树就装不起来，这次保存也会被服务端
+拒绝（写入门要试装一次）。所以 Save 仍然是禁用的 —— 只是理由现在写在**它该在的地方**。
+
 ## 5. 配置根：三级，没有探测
 
 配置得先知道项目根才能读任何东西，而项目根本身又是配置项 —— 鸡生蛋问题。openheron 的解法是
@@ -385,34 +431,34 @@ agent 直接报错 —— "must declare model (no inheritance, no fallback)"
 ① resolve the config root (nothing can be read yet)
    --config-dir                main.go:84
      ↓ unset
-   $OPENHERON_CONFIG_DIR       agentkit/spec/config.go:172
+   $OPENHERON_CONFIG_DIR       agentkit/spec/config.go:221
      ↓ unset
-   <project-root>/.openheron   agentkit/spec/config.go:175, created when missing
+   <project-root>/.openheron   agentkit/spec/config.go:224, created when missing
 ```
 
 **上游设计怎么做，以及 openheron 为什么不这么做。** 上游设计从工作目录**向上**找第一个含
 `.heron/` 的祖先目录 —— `cd cmd/server && heron` 时 cwd 在子目录，但用户的心智模型是「这是那个
 项目」。openheron **刻意丢掉了上溯**：配置根一旦取决于「进程是从哪儿启动的」，同一条命令换个
 目录跑就读到另一份配置，而测试实例最终会读到开发者的配置。这条规则写在 `NewService` 的文档注释
-里（`agentkit/spec/config.go:161-173`），也写在仓库的 `AGENTS.md` 里。
+里（`agentkit/spec/config.go:210-222`），也写在仓库的 `AGENTS.md` 里。
 
-★ 差别在代码的形状上就看得见：`NewService`（`agentkit/spec/config.go:174`）是**三个**分支、
-**没有循环** —— `root` → `os.Getenv(ConfigDirEnv)`（`agentkit/spec/config.go:189`）→
-`filepath.Join(projectRoot, DefaultBaseDirName)`（`agentkit/spec/config.go:192`）。整个文件里
+★ 差别在代码的形状上就看得见：`NewService`（`agentkit/spec/config.go:223`）是**三个**分支、
+**没有循环** —— `root` → `os.Getenv(ConfigDirEnv)`（`agentkit/spec/config.go:238`）→
+`filepath.Join(projectRoot, DefaultBaseDirName)`（`agentkit/spec/config.go:241`）。整个文件里
 没有任何一处沿着祖先目录往上走。
 
 **为何环境变量压过推导出来的默认值。** `$OPENHERON_CONFIG_DIR` 是显式指定，语义上应压过一切
 推导。★ 而 `--config-dir` 又压过环境变量（`main.go:84`）—— 命令行是最直接的一次性指定。
 
 ★ **只有默认出来的那个根才会被创建。** `NewService` 只在自己推导出根的时候创建目录
-（`agentkit/spec/config.go:200-207`）；显式的 `--config-dir`、或者指向空处的
+（`agentkit/spec/config.go:249-256`）；显式的 `--config-dir`、或者指向空处的
 `$OPENHERON_CONFIG_DIR`，都是笔误，而笔误不能悄悄长出一棵空配置树。`Service.RootIsDefaulted`
-（`agentkit/spec/config.go:237`）就是为了把两者分开 —— `main.go:135-141` 给出的是
+（`agentkit/spec/config.go:286`）就是为了把两者分开 —— `main.go:135-141` 给出的是
 "no configuration at <root>: run `openheron init` to create one"，而不是
 "agents/main.md does not exist"。
 
 ★ **还有第二个入口，给 `init` 用。** `openheron init` 走 `spec.NewServiceAt`
-（`agentkit/spec/config.go:211`），不走 `NewService`：init 往它被指到的目录里写，从不读
+（`agentkit/spec/config.go:260`），不走 `NewService`：init 往它被指到的目录里写，从不读
 `$OPENHERON_CONFIG_DIR`（`initcmd.go:61-65`）。否则 init 会把新配置写到用户没指的地方去。
 
 ★ **家目录也不是兜底。** 如果 `~/.openheron/` 存在却不是正在用的配置根，进程会在启动时说一声
@@ -424,17 +470,17 @@ agent 直接报错 —— "must declare model (no inheritance, no fallback)"
 
 | 方法 | 值 | 用途 |
 |---|---|---|
-| `Service.Root()`（`agentkit/spec/config.go:229`） | 配置根本身 —— 默认是 `<project-root>/.openheron` | 读配置；`state/` 住在它下面 |
-| `Service.ProjectRoot()`（`agentkit/spec/config.go:239`） | 项目根 —— `--project-root`，否则是工作目录（`agentkit/spec/config.go:175-185`） | agent 的工作目录；相对路径的解析基准 |
-| `Service.DataDir(v)`（`agentkit/spec/config.go:241`） | `v` 是绝对路径就原样返回，否则落在**配置根**下（`agentkit/spec/config.go:247`）；不存在则创建 | 会话与 checkpoint |
-| `Service.ResolveDir(v)`（`agentkit/spec/config.go:255`） | `v` 是绝对路径就原样返回，否则落在**项目根**下（`agentkit/spec/config.go:260`） | `static_dir`、知识库语料 |
+| `Service.Root()`（`agentkit/spec/config.go:278`） | 配置根本身 —— 默认是 `<project-root>/.openheron` | 读配置；`state/` 住在它下面 |
+| `Service.ProjectRoot()`（`agentkit/spec/config.go:288`） | 项目根 —— `--project-root`，否则是工作目录（`agentkit/spec/config.go:224-234`） | agent 的工作目录；相对路径的解析基准 |
+| `Service.DataDir(v)`（`agentkit/spec/config.go:290`） | `v` 是绝对路径就原样返回，否则落在**配置根**下（`agentkit/spec/config.go:296`）；不存在则创建 | 会话与 checkpoint |
+| `Service.ResolveDir(v)`（`agentkit/spec/config.go:304`） | `v` 是绝对路径就原样返回，否则落在**项目根**下（`agentkit/spec/config.go:309`） | `static_dir`、知识库语料 |
 
 ★ **两者是解耦的。** `--config-dir /etc/openheron-cfg` 把配置放到别处，而 `--project-root`
 （默认：工作目录）仍然是 agent 干活的地方。不解耦的话，「配置根的父目录」就会变成 `/etc` ——
 agent 去那儿 grep/glob。
 
 ★ **默认的项目根是工作目录，不是配置根的父目录。** 上游设计是从配置根的父目录推出来的；
-openheron 改从 `--project-root` 或 cwd 取（`main.go:86-87`、`agentkit/spec/config.go:175-185`）。
+openheron 改从 `--project-root` 或 cwd 取（`main.go:86-87`、`agentkit/spec/config.go:224-234`）。
 配置根取默认值时两者恰好重合（`<cwd>/.openheron` 的父目录就是 `<cwd>`），但配置根一旦被点名，
 两者就不再重合。
 
@@ -447,8 +493,8 @@ openheron 改从 `--project-root` 或 cwd 取（`main.go:86-87`、`agentkit/spec
 
 | 路径 | 基准 | 代码 |
 |---|---|---|
-| `server.data_dir`（相对） | **配置根** | `agentkit/spec/config.go:246-248` |
-| `server.static_dir`（相对） | **项目根** | `agentkit/spec/config.go:255-261`，用在 `main.go:341` |
+| `server.data_dir`（相对） | **配置根** | `agentkit/spec/config.go:295-297` |
+| `server.static_dir`（相对） | **项目根** | `agentkit/spec/config.go:304-310`，用在 `main.go:341` |
 | `kb.corpus_dir`（相对） | **项目根** | `kbcmd.go:148` |
 
 ★ **这个划分是刻意的：状态跟着配置走，工作树跟着项目走。** 相对的 `data_dir` 在配置被搬走时
@@ -497,7 +543,7 @@ openheron 的测试环境集中定义在一处：仓库根的 `.env.test`（已�
 
 ★ **端口与状态必须一起隔离。** 换个端口不等于数据隔离：openheron 把会话写在配置根下的
 `state/`，测试写在那里就污染了真实历史（`AGENTS.md` 的 "Rules"）。测试实例是**点名**自己的
-配置根的，而配置根**从不上溯**（`agentkit/spec/config.go:169`），所以仓库根那个 `.openheron/`
+配置根的，而配置根**从不上溯**（`agentkit/spec/config.go:218`），所以仓库根那个 `.openheron/`
 **结构上就够不着** —— 隔离靠的不是「一次恰好停在那里的探测」，而是一个被点名的根
 （`scripts/test-backend.sh:38-42`）。
 
@@ -570,7 +616,7 @@ models:                            # ★ multiple models: several models under o
 
 ★ **`header:` 是个坑：它解析得过去，然后什么也不会发生。** schema 声明了它
 （`agentkit/spec/decl/decl.go:26`），加载器也接受它 —— 严格模式下未知键直接报错
-（`agentkit/spec/config.go:415-425`）—— 但从此以后没有任何代码路径读它：
+（`agentkit/spec/config.go:466-480`）—— 但从此以后没有任何代码路径读它：
 `build.FromConfig` 组装 `common.Config` 时根本没带 header
 （`agentkit/build/provider.go:36-43`），而 `common.Config` 里压根没有 header 这个字段
 （`llm/common/model.go:28-44`）。本来能承载它的 option 是有的
@@ -581,11 +627,11 @@ models:                            # ★ multiple models: several models under o
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `id` | `string` | 必填（`agentkit/spec/load.go:56-58`）。传给端点的模型标识 |
-| `kind` | `string` | `chat`（缺省）或 `embedding`（`agentkit/spec/decl/decl.go:575-579`）。embedding 模型不能当聊天模型建（`agentkit/build/provider.go:26-29`），知识库也只认 embedding 模型（`agentkit/spec/load.go:611-615`） |
-| `dimensions` | `int` | embedding 的维度；`0` = 未知，建索引时学出来（`agentkit/spec/load.go:364-367`） |
+| `id` | `string` | 必填（`agentkit/spec/load.go:57-59`）。传给端点的模型标识 |
+| `kind` | `string` | `chat`（缺省）或 `embedding`（`agentkit/spec/decl/decl.go:575-579`）。embedding 模型不能当聊天模型建（`agentkit/build/provider.go:26-29`），知识库也只认 embedding 模型（`agentkit/spec/load.go:622-626`） |
+| `dimensions` | `int` | embedding 的维度；`0` = 未知，建索引时学出来（`agentkit/spec/load.go:367-370`） |
 | `context_window` | `int` | **0 = 未知**（不是「无限制」）。它是压缩阈值的分母 —— 见下 |
-| `summarize_at` | `Threshold` | ★ **已废弃**：仍然解析，好让旧配置继续加载，但没有任何代码读它。阈值现在归 agent（`agentkit/spec/decl/decl.go:46-53`），加载器会明确说出来（`agentkit/spec/load.go:59-63`） |
+| `summarize_at` | `Threshold` | ★ **已废弃**：仍然解析，好让旧配置继续加载，但没有任何代码读它。阈值现在归 agent（`agentkit/spec/decl/decl.go:46-53`），加载器会明确说出来（`agentkit/spec/load.go:60-64`） |
 | `timeout` | `Duration` | 覆盖 provider 级。**要允许** —— provider 级只能容纳最慢的那个，那会让快模型失去超时保护 |
 | `extra` | `map[string]any` | 覆盖 provider 级同名键 |
 | `reasoning` | `map[string]map[string]any` | **档位词汇表**：档位名 → 该端点把它发成什么字段。为空 = 该模型不思考 |
@@ -598,7 +644,7 @@ openheron **有** summarization。窗口就是 agent 的 `summarize_at` 百分�
 （`agentkit/spec/summarize.go:25-39`），而压缩中间件只有在解析出来的阈值大于零时才建
 （`agentkit/build/summarize.go:36-40`）。所以没声明窗口的模型**没有**阈值：零的百分之多少
 还是零，自动压缩永远不触发 —— openheron 会把这件事说出来，而不是安静地什么都不做
-（`agentkit/spec/load.go:322-341`）。
+（`agentkit/spec/load.go:325-344`）。
 
 #### 多模型：一个 provider 声明多个模型
 
@@ -614,8 +660,8 @@ model: openai/gpt-4o-mini   # the cheap retrieval tier
 ```
 
 解析成 `Ref{ProviderID, ModelID}`：`ParseRef` 取**第一个** `/`，两侧都不得为空 ——
-没有 `/` 的引用直接报错（`agentkit/spec/load.go:437-446`）。归一化后作为 `Config.Models`
-的键（`agentkit/spec/load.go:64`），而 provider id 就是**去掉扩展名的文件名**
+没有 `/` 的引用直接报错（`agentkit/spec/load.go:442-451`）。归一化后作为 `Config.Models`
+的键（`agentkit/spec/load.go:66`），而 provider id 就是**去掉扩展名的文件名**
 （`agentkit/spec/load.go:17`）。
 
 #### 请求级 `model` 覆盖
@@ -709,7 +755,7 @@ deepseek/deepseek-chat      used by researcher  → ChatModel B + http.Client B
 	}
 ```
 
-（`agentkit/spec/load.go:292-303`。）
+（`agentkit/spec/load.go:295-306`。）
 
 **为何不静默兜底**：子 agent 静默继承主模型是**成本事故**。同一条纪律在这里同样成立 ——
 **拼错的模型名必须在启动期炸出来**。
@@ -828,7 +874,7 @@ func expandValue(v string) (value string, resolved bool, err error) {
 （`agentkit/spec/expand.go:9-38`。）
 
 **★ 缺 `${ENV}` 不致命**：环境变量未设置时返回空值 + `resolved=false`，**不阻塞启动**，
-只在启动日志里记一条提醒（`agentkit/spec/load.go:39-45`）。真正的失败点移到**调用该端点**
+只在启动日志里记一条提醒（`agentkit/spec/load.go:39-46`）。真正的失败点移到**调用该端点**
 那一刻 —— 空 `api_key` 会让端点明确回 401，协议层归成 `auth` 错误并提示「检查 api_key
 是否设置、是否过期、是否有该模型的权限」（`llm/common/error.go:18`，`:72-73`，`:159-175`）。
 
@@ -868,7 +914,7 @@ func expandValue(v string) (value string, resolved bool, err error) {
 | `yes`/`no`/`on`/`off` | **作为字符串字段的值没有风险** —— yaml.v3 走 YAML 1.2 core schema，解析器认的布尔只有 `true/True/TRUE/false/False/FALSE`（`yaml.v3@v3.0.1/resolve.go:52-53`），其余落成字符串。★ **但当目标字段是 `bool` 时，yaml.v3 为了兼容还会额外接受 YAML 1.1 的写法**（`yaml.v3@v3.0.1/decode.go:683-693`）—— `watch.enabled: off` 的意思是 `false`，而且在那里没法写出字符串 "off" |
 | `listen_addr: :8080` | **不需要加引号** —— yaml.v3 把它解析成纯标量 `":8080"`。分隔符是「冒号 + 空格」，`: 8080`（带空格）才是解析错误 |
 | `base_url: https://...` | 无需引号 —— 分隔符是「冒号 + 空格」，`://` 安全 |
-| 缩进 | 唯一实质代价，靠严格模式兜底：缩进错会报行号而非静默误读。加载器整体是严格的 —— `KnownFields(true)`（`agentkit/spec/config.go:415-425`），所以拼错的键是错误而不是沉默：旧的 `thinking:` 与 `effort:` 键正是这样被拒掉的（`agentkit/spec/config_test.go:864`） |
+| 缩进 | 唯一实质代价，靠严格模式兜底：缩进错会报行号而非静默误读。加载器整体是严格的 —— `KnownFields(true)`（`agentkit/spec/config.go:466-480`），所以拼错的键是错误而不是沉默：旧的 `thinking:` 与 `effort:` 键正是这样被拒掉的（`agentkit/spec/config_test.go:864`） |
 
 #### `extra` 与 provider 能力矩阵（★ 关键坑，已实施后修订）
 
@@ -943,7 +989,7 @@ The body is the Instruction. Leave it empty to use deep.New's built-in prompt.
 
 ★ **`disabled_tools` 是被拒绝的，不是被改名的。** 旧键仍然能解析 —— 它必须能，加载器才能
 抓住它 —— 但加载会**失败**，报错信息说明这两个键的意思**正好相反**
-（`agentkit/spec/load.go:93`）：`tools` 说这个 agent **拿到**哪些工具，`disabled_tools`
+（`agentkit/spec/load.go:95`）：`tools` 说这个 agent **拿到**哪些工具，`disabled_tools`
 说的是它**不拿**哪些。★ **没有别名**：别名会让旧键继续以旧意生效，或者 —— 更糟 —— 突然
 以新意生效。
 
@@ -956,17 +1002,17 @@ The body is the Instruction. Leave it empty to use deep.New's built-in prompt.
 agent 能看见的工具** —— 而它接受前缀，所以 `tools: [mcp__github__*]` 能让一个挂了两个
 server 的 agent 只看见其中一个的工具（§6.3）。★ **两层都得写**：`mcps: [github]` 说
 「启动它」，而一份没有 `mcp__github__*` 的 `tools:` 说这个 agent 看不见它的任何东西。
-★ 两层之间矛盾就是**加载期错误**（`agentkit/spec/load.go:643` `checkAgentMCPNames`）：
+★ 两层之间矛盾就是**加载期错误**（`agentkit/spec/load.go:656` `checkAgentMCPNames`）：
 在 `tools:` 里点名 `mcp__github__*` 而 `mcps:` 里没有 `github`，永远不可能匹配得上 ——
 一条永远匹配不上的规则不是规则，是笔误。
 
 ★ **不存在的 server 是加载期错误。** 某个 agent 点名了一个 `mcps/` 下没有文件声明的
 server ⇒ 加载失败，报错信息会列出**确实**声明过的那些 server
-（`agentkit/spec/load.go:608` `validateMCP`）。★ 理由：一个因为拼写错误而缺失的工具，
+（`agentkit/spec/load.go:619` `validateMCP`）。★ 理由：一个因为拼写错误而缺失的工具，
 和一个因为 server 挂了而缺失的工具长得一模一样 —— 而这两者里只有一个是配置错误。
 
 ★ **被启动的那份清单是并集。** 工具集对整次装配只有一份，所以管理器启动的是**某个**
-agent 列出的那些 server（`agentkit/spec/load.go:682` `MCPServersInUse`）；只有子 agent
+agent 列出的那些 server（`agentkit/spec/load.go:695` `MCPServersInUse`）；只有子 agent
 列出的 server 也会被启动 —— 那个子 agent 可能正是跑起来的那一个。★ 子 agent 带着**自己**
 的清单（`agentkit/spec/decl/decl.go:670` `SubAgentSpec.MCPServers`），而**它**的清单收窄的
 是**它自己**那张表，不是它父 agent 的。
@@ -997,10 +1043,10 @@ agent:
 
 这个上限只住在**一处** —— `server/config.yaml` —— 缺省是 `1`
 （`agentkit/spec/defaults.go:11`）。★ 没有第二份拷贝要对账，也没有「两者取更严」这条规则了：
-`MaxDepth()` 直接读 server 自己的值（`agentkit/spec/load.go:671`）。★ 代价是这个上限**不进
+`MaxDepth()` 直接读 server 自己的值（`agentkit/spec/load.go:684`）。★ 代价是这个上限**不进
 热更新** —— `server/` 是冷分区，所以改这个上限下一次启动才生效（§12.2）。
 
-**校验在启动期**（`validateDepth`，`agentkit/spec/load.go:622-638`），且是**报错**而非运行时
+**校验在启动期**（`validateDepth`，`agentkit/spec/load.go:634-651`），且是**报错**而非运行时
 截断。装配层用同一判据，在到顶时**根本不构造**下一层（`agentkit/build/assemble.go:82`）——
 双保险：装配期基于配置，运行期 `depthGuard` 基于**实际**嵌套
 （`agentkit/build/topology.go:28-62`，挂在链上于 `agentkit/build/gate.go:172-178`）。
@@ -1010,7 +1056,7 @@ agent:
 | 输入 | 行为 |
 |---|---|
 | `---` … `---` + 正文 | frontmatter 解出字段，正文（去掉分隔符后全部）成为 `Instruction` |
-| 无 frontmatter 的纯 `.md` | ★ **在 openheron 里是错误** —— 加载器去解一份空的 frontmatter，报「文件是空的（或者只有注释）」（`agentkit/spec/config.go:413`，`agentkit/spec/load.go:79-81`）。上游设计让纯提示词草稿先过去、随后因缺 `model` 报错；openheron 更早炸，而且消息更清楚 |
+| 无 frontmatter 的纯 `.md` | ★ **在 openheron 里是错误** —— 加载器去解一份空的 frontmatter，报「文件是空的（或者只有注释）」（`agentkit/spec/config.go:464`，`agentkit/spec/load.go:81-83`）。上游设计让纯提示词草稿先过去、随后因缺 `model` 报错；openheron 更早炸，而且消息更清楚 |
 | 有 `---` 开头但缺结束分隔符 | **错误**：无法判断正文从哪开始 —— "frontmatter closing delimiter not found"（`agentkit/spec/expand.go:48-65`） |
 
 #### frontmatter 解析必须自写
@@ -1043,7 +1089,7 @@ eino 的 `parseFrontmatter` 在 `eino@v0.9.22/adk/middlewares/skill/filesystem_b
 | 来源 | 它点名的是什么 | 用的词汇 |
 |---|---|---|
 | `agentkit/build/tools.go:62` `builtinAllowedTools` | **缺省**那一份：文件系统读取器（`ls` `read_file` `glob` `grep`）、委派工具（`task` `write_todos`）与技能读取器（`skill`）。★ 它永远生效 —— 文件是往上加，所以要把一个名字从里面去掉，得改这张表 | 暴露名 |
-| `agentkit/spec/load.go:269` `AllowedTools` | **确实写了**的那些文件的工具 —— `tools/http.yaml` 说 `allows: [request_get]`，`tools/kb.yaml` 说 `allows: [kb_search]` | **文件自己的** |
+| `agentkit/spec/load.go:272` `AllowedTools` | **确实写了**的那些文件的工具 —— `tools/http.yaml` 说 `allows: [request_get]`，`tools/kb.yaml` 说 `allows: [kb_search]` | **文件自己的** |
 | `agentkit/build/mcptools.go:173` `mcpAllowedNames` | 一个 MCP server 自己的工具 | **server 自己的** |
 
 ★ **一个文件说自己的词汇。** `http.yaml` 说 `request_get`，因为那个文件讲的就是这件事；
@@ -1107,7 +1153,7 @@ agent 能不能用它」。一个工具可以是 `allow` 而仍然不在某个 a
 | 4 | 精确条目与前缀条目**等价** —— 命中就是这个 agent 拿到这个工具 | 这里没有档位可选；这份清单说的就是这个 agent 有什么 |
 
 ★ **它住在哪儿。** 加载器拒绝那些不是模式的写法
-（`agentkit/spec/load.go:120` `validateAgentTools`，语法本身在
+（`agentkit/spec/load.go:122` `validateAgentTools`，语法本身在
 `agentkit/spec/decl/decl.go:406` `ParseToolNamePattern`）；那张表把前缀模式与精确名放
 在一起留着（`agentkit/build/policy.go:100` `newTable`），而 `Table.Blocked` 匹配它们
 （`agentkit/build/policy.go:130`）。
@@ -1194,13 +1240,13 @@ string，只看 `Decode` 的错误会漏掉它（`agentkit/spec/decl/decl.go:584
 | `data_dir` | `string` | `state` | 相对**配置根**解析（`Service.DataDir`），非项目根、非 cwd；空串等同 `state`；目录不存在时创建 |
 | `start_timeout` | `LenientDuration` | `60s` | 与 `agentkit/run.DefaultStartTimeout` 同值（`agentkit/run/runtime.go:26`） |
 | `lease_ttl` | `LenientDuration` | `10m` | 一个 run 的租约在无进展的情况下能存活多久；它必须**长于 provider 自己的超时**，否则一个慢但活着的模型会在思考途中被 fence 掉（`agentkit/run/lease.go:20`） |
-| `retry.max_retries` | `int` | `5` | 传 0 也用默认 ——「不配」与「配成 0」是两件事（`agentkit/spec/load.go:442-447`） |
+| `retry.max_retries` | `int` | `5` | 传 0 也用默认 ——「不配」与「配成 0」是两件事（`agentkit/spec/load.go:447-452`） |
 | `agent.max_depth` | `int` | `1` | 见 §6.2 |
 | `watch.enabled` | `*bool` | `nil`→开 | 用指针区分「没写」与「写了 false」（`agentkit/spec/reload.go:86-91`） |
 | `watch.debounce` | `LenientDuration` | `200ms` | 轮询间隔取其一半，下限 20ms（`agentkit/spec/reload.go:141-149`） |
 
-> **★ 项目根 vs 配置根**：`Service.ProjectRoot()`（`agentkit/spec/config.go:239`）是静态资源与
-> agent 工作目录所在的那一层；`Service.Root()`（`agentkit/spec/config.go:229`）是配置根 ——
+> **★ 项目根 vs 配置根**：`Service.ProjectRoot()`（`agentkit/spec/config.go:288`）是静态资源与
+> agent 工作目录所在的那一层；`Service.Root()`（`agentkit/spec/config.go:278`）是配置根 ——
 > `tools/`、`mcps/` 与 `state/` 都在它下面。**两者不同**：`static_dir` 按前者解析，`state/` 按后者。
 > 把二者混用正是「前端 404 / agent 被告知在 `.openheron` 里工作」的根因。
 
@@ -1208,7 +1254,7 @@ string，只看 `Decode` 的错误会漏掉它（`agentkit/spec/decl/decl.go:584
 `FRONTEND_MODE`、`STATIC_DIR`（`main.go:217-219`、`main.go:327`、`main.go:341`）；全集见 §4.4。
 
 ★ **与 `tools/` 和 `mcps/` 不同，`server/` 没有文件名白名单。** 它下面的每一个 `.yaml` 都被解进
-同一个 `decl.Server` 结构（`agentkit/spec/load.go:97-104`），所以一个手滑的 `server/typo.yaml`
+同一个 `decl.Server` 结构（`agentkit/spec/load.go:99-106`），所以一个手滑的 `server/typo.yaml`
 会被并进配置，而不是被拒掉。`server/config.yaml` 是约定，不是加载器强制的规则。
 
 ### 6.5 `skills/<name>/SKILL.md`
@@ -1275,7 +1321,7 @@ skills are not enabled
 各文件夹的白名单。★ **缺省是一个都没有**，与 `tools:` 同一条规则 —— agent 没点名的 skill
 不是它的 skill（`agentkit/spec/decl/decl.go:125`）。★ 它只在 agent 压根儿有 `skill` 工具时
 才有意义：`tools:` 点名了 `skill` 而 `skills:` 是空的，加载器会说出来
-（`agentkit/spec/load.go:540` `noticeAgentTools`）—— 那是一份合法但自相矛盾的配置。这个范围
+（`agentkit/spec/load.go:550` `noticeAgentTools`）—— 那是一份合法但自相矛盾的配置。这个范围
 过滤的是两半（`agentkit/build/skill.go:147-180`）：`List`，也就是模型**看得见**的；`Get`，
 也就是它真能**加载**的。只过滤一半，会留下一个模型记得名字就能加载的 skill。
 
@@ -1305,9 +1351,9 @@ skills are not enabled
 `if cfg == nil { return nil, nil }`），所以对它们来说「文件在不在」碰巧成了开关。★ 那是 **provider
 的决定**，不是文件形状蕴含的 —— 而文件系统工具是另一种情况：它们**一直都在**，所以它们的文件
 （见下文 §6.6）调的是它们的档位，没法把它们开起来或关掉。加载器自己的规矩 —— 文件名是白名单，
-未知文件名是启动错误（`agentkit/spec/load.go:165-193`）—— 说的是**读哪些文件**，不是哪些工具存在。
+未知文件名是启动错误（`agentkit/spec/load.go:167-195`）—— 说的是**读哪些文件**，不是哪些工具存在。
 
-★ 空文件会被拒绝，并给出一条提示、告诉用户该写什么（`agentkit/spec/load.go:151-158`）：文件的内容
+★ 空文件会被拒绝，并给出一条提示、告诉用户该写什么（`agentkit/spec/load.go:153-160`）：文件的内容
 **就是**这个工具的配置，所以「这里没有配置」才是用户用得上的那句话。
 
 ★ **它进热更新**：改一个工具的超时、换一个搜索后端、给知识库换个语料目录，写完**下一轮就生效**，
@@ -1374,7 +1420,7 @@ skills are not enabled
 ★ **文件的 `allows:` 点名的是它提供的那些工具的例外**，用那个文件自己的词汇 ——
 `tools/http.yaml` 说 `allows: [request_get]`，`tools/kb.yaml` 说 `allows: [kb_search]`，而
 `tools/filesystem.yaml` 正是 `write_file` / `edit_file` / `execute` 被放宽的地方。
-加载器把它们收集起来（`agentkit/spec/load.go:235` `AllowedTools`），而那张表是三份清单的并集：
+加载器把它们收集起来（`agentkit/spec/load.go:237` `AllowedTools`），而那张表是三份清单的并集：
 这份、代码那份、以及各 server 那份（§6.3）。★ 对各个 provider 来说，一个**不在**的文件什么都不贡献：
 那个工具也没被挂上，所以没有档位可回答。★ 文件系统工具是例外：它们不管文件在不在都会被挂上，
 所以文件不在只是让代码那份缺省原样留着。
@@ -1505,10 +1551,10 @@ agent 有没有这个工具。一个没点名 `write_file` 的 agent 压根儿�
 |---|---|---|
 | `server/config.yaml` 里的 `tools:` 段 | 拆成 `tools/http.yaml` `tools/web_search.yaml` `tools/wikipedia.yaml` | 启动报错 `field tools not found in type decl.Server` |
 | `kb/config.yaml` | `tools/kb.yaml` | **静默** —— 知识库不再被读到，`kb_search` 消失但没有任何报错 |
-| `policy/permissions.yaml` 里的 `ask:` | 档位住在**提供**工具的那些文件里：`tools/http.yaml` `tools/web_search.yaml` `tools/wikipedia.yaml` `tools/kb.yaml` 与 `mcps/<server>.yaml` 各自点名自己的 `allows:` | ★ **不静默**：退役的目录被记进 `deferred` 并在启动时打印 —— 「policy/ 没了，没有被读」，连同它的内容去了哪儿（`agentkit/spec/config.go:329`） |
-| `policy/limits.yaml` | 上限住在 `server/config.yaml`：`agent.max_depth` 与 `retry.max_retries` | ★ **同一份提示** —— 而比上限更深的拓扑是一次**启动错误**，不是静默截断（`agentkit/spec/load.go:615` `validateDepth`） |
-| `tools/kb.yaml` 里的 `corpus` 键 | `corpus_dir` | ★ **不静默**：旧键仍然能加载，启动时 `deferred` 里带着一条改名提示 —— ★ 在键被改名之前知识库照常工作，所以不会「黑掉」（`agentkit/spec/load.go:209-215`） |
-| `agents/<id>.md` 里的 `disabled_tools:` | `tools:` —— ★ 意思**正好相反**：旧键说的是这个 agent **不拿**哪些工具，新键说的是它**拿**哪些 | ★ **启动即报错**，而且报错信息会说明（`agentkit/spec/load.go:93`）：「删掉 `disabled_tools`，把这个 agent 该有的工具列出来」。**没有别名**：别名会让旧键继续以旧意生效，或者 —— 更糟 —— 突然以新意生效 |
+| `policy/permissions.yaml` 里的 `ask:` | 档位住在**提供**工具的那些文件里：`tools/http.yaml` `tools/web_search.yaml` `tools/wikipedia.yaml` `tools/kb.yaml` 与 `mcps/<server>.yaml` 各自点名自己的 `allows:` | ★ **不静默**：退役的目录被记进 `deferred` 并在启动时打印 —— 「policy/ 没了，没有被读」，连同它的内容去了哪儿（`agentkit/spec/config.go:378`） |
+| `policy/limits.yaml` | 上限住在 `server/config.yaml`：`agent.max_depth` 与 `retry.max_retries` | ★ **同一份提示** —— 而比上限更深的拓扑是一次**启动错误**，不是静默截断（`agentkit/spec/load.go:626` `validateDepth`） |
+| `tools/kb.yaml` 里的 `corpus` 键 | `corpus_dir` | ★ **不静默**：旧键仍然能加载，启动时 `deferred` 里带着一条改名提示 —— ★ 在键被改名之前知识库照常工作，所以不会「黑掉」（`agentkit/spec/load.go:211-217`） |
+| `agents/<id>.md` 里的 `disabled_tools:` | `tools:` —— ★ 意思**正好相反**：旧键说的是这个 agent **不拿**哪些工具，新键说的是它**拿**哪些 | ★ **启动即报错**，而且报错信息会说明（`agentkit/spec/load.go:95`）：「删掉 `disabled_tools`，把这个 agent 该有的工具列出来」。**没有别名**：别名会让旧键继续以旧意生效，或者 —— 更糟 —— 突然以新意生效 |
 | 缺失的 `mcps:`（过去表示「全部已配置的 server」） | 一份显式清单 —— ★ **现在缺失表示不挂载任何 server** | ★ **不静默，而且会咬人**：agent 失去了它过去继承来的每一个 MCP 工具，工具表把它们报成被挡下。`skills:` 同理 —— 过去缺失表示全部技能，现在表示一个都没有 |
 | 缺失的 `tools:`（过去表示「没有被 disable 的全部工具」） | 一份显式清单 —— ★ **现在缺失表示一个工具都没有** | ★ **不静默，而且咬得最狠**：一个没有 `tools:` 这一行的 agent 有一张**空**的工具表。`Table.Filter` 再也没有「无事可做」的捷径（`agentkit/build/policy.go:145`）—— 一份空的允许清单摘掉一切 |
 
@@ -1520,7 +1566,7 @@ agent 有没有这个工具。一个没点名 `write_file` 的 agent 压根儿�
 
 ★ **`policy/` 也一样** —— 一个留下来的 `policy/` 目录**不会被读**，但它**也不沉默**：
 加载器把这个退役的分区记进 `deferred`，并说明它的内容去了哪儿
-（`agentkit/spec/config.go:305-338` `noteRetiredDirs`），所以那条提示会在启动时打印出来。
+（`agentkit/spec/config.go:354-387` `noteRetiredDirs`），所以那条提示会在启动时打印出来。
 ★ 这个改动的方向是安全的那一侧：没人点名的工具**要点头**，而代码自己那份清单把读取器与
 委派工具让开。但旧文件批出去的那些*豁免* —— 一个搜索后端、一个 HTTP GET —— 跟着它一起没了，
 替代品是**提供**该工具的那个文件里的一行（§6.6）。
@@ -1565,12 +1611,12 @@ agent 有没有这个工具。一个没点名 `write_file` 的 agent 压根儿�
 provider `searxng`（`agentkit/spec/write.go:233`），而代码只认 `duckduckgo` —— 写 `searxng` 会被当作
 未知 provider 拒掉（`agentkit/build/nettools.go:204-208`）；`kb.yaml` 的模板说 `model` 留空就是纯
 词法检索（`agentkit/spec/write.go:249`），而加载器会拒掉它：`kb.model is required when kb.corpus_dir is
-set`（`agentkit/spec/load.go:603`）。
+set`（`agentkit/spec/load.go:614`）。
 
 ★ 文件名是**白名单**（`filesystem.yaml` / `http.yaml` / `kb.yaml` / `web_search.yaml` /
-`wikipedia.yaml`）：未知文件名在**加载期**就是硬错误（`agentkit/spec/load.go:191`，那条消息由
+`wikipedia.yaml`）：未知文件名在**加载期**就是硬错误（`agentkit/spec/load.go:193`，那条消息由
 `ToolFileNames` 拼出来）—— 写进去一个永远不生效的段落，症状是「我明明写了却不生效」，极难查。
-★ 这份清单**只有一个**家：`toolHints`（`agentkit/spec/load.go:137`），加载器、写入门与两条错误
+★ 这份清单**只有一个**家：`toolHints`（`agentkit/spec/load.go:139`），加载器、写入门与两条错误
 消息都读它，所以编辑器存不下一个加载器会拒掉的文件。
 
 #### ★ 「连到外面去」的三类工具
@@ -1689,15 +1735,15 @@ MCP 服务器的配置。**一个 server 一个文件**：
 
 | 写错的地方 | 它说什么 |
 |---|---|
-| server 名不匹配 `^[a-z0-9]+(_[a-z0-9]+)*$` | 文件名**就是**server 名，而一个读不回来的名字会被拒（`agentkit/spec/load.go:256` `loadMCP`） |
+| server 名不匹配 `^[a-z0-9]+(_[a-z0-9]+)*$` | 文件名**就是**server 名，而一个读不回来的名字会被拒（`agentkit/spec/load.go:259` `loadMCP`） |
 | `transport:` 写了未知值 | 不静默退回 stdio —— 一个拼写错误不该跑起另一个 server，而不是文件指名的那个 |
 | stdio server 没有 `command` | `command is required for a stdio server` |
 | http server 没有 `url` | `url is required for an http server` |
-| http server 声明了 `env:` | ★ **哪怕这个 map 是空的**：http server 是远端进程，本进程的环境不是它的环境，而一个不起作用的键比一次拒绝更糟（`agentkit/spec/load.go:375` `yamlHasKey` —— 解码器答不了这个问题，因为一个没有值的 `env:` 会解成 nil map） |
+| http server 声明了 `env:` | ★ **哪怕这个 map 是空的**：http server 是远端进程，本进程的环境不是它的环境，而一个不起作用的键比一次拒绝更糟（`agentkit/spec/load.go:378` `yamlHasKey` —— 解码器答不了这个问题，因为一个没有值的 `env:` 会解成 nil map） |
 | 未知键 | 与其它分区同一套严格解码 |
 
 ★ **某个 agent 点名一个不存在的 server，也是加载期错误** —— 那一条属于 agent 的文件，
-不属于 server 的（§6.2，`agentkit/spec/load.go:499` `validateMCP`）。
+不属于 server 的（§6.2，`agentkit/spec/load.go:504` `validateMCP`）。
 
 #### 热更新
 
@@ -1804,7 +1850,7 @@ allow 清单说*其中哪些*直接放行。
 
 ★ **这个文件唯一带的环境相关的东西就是环境本身** —— `env:` 是点名 server 自己那些变量的
 地方，而一个没设的 `${ENV}` 是**延后处理**而不是致命错误：那一项被略掉，server 带着继承
-来的环境启动（`agentkit/spec/load.go:327` `expandMCPMaps`）。★ 一个缺值是一次降级，
+来的环境启动（`agentkit/spec/load.go:330` `expandMCPMaps`）。★ 一个缺值是一次降级，
 不是让进程起不来的理由。
 
 完整路径 —— 声明凭据的 mixin、换上真值的宿主侧代理、以及机制够不着的情况 ——
@@ -1854,7 +1900,7 @@ SKILL.md frontmatter
 | `ModelHub` | `model.BaseModel[*schema.Message]` | frontmatter 声明了 `model:` |
 
 **`ModelHub` 与 `agents/*.md` 共用同一套解析**：eino 传的 `name` 是 frontmatter 里的
-原字符串，openheron 侧的 `Get` 内部按 `ParseRef`（`agentkit/spec/load.go:437`）拆成
+原字符串，openheron 侧的 `Get` 内部按 `ParseRef`（`agentkit/spec/load.go:442`）拆成
 `<provider>/<model>`，查 `Config.Models`（`agentkit/build/provider.go:58-73`）。这样
 **「agent 用哪个模型」与「skill 用哪个模型」是同一套引用语法**，不需要用户记两套。
 
@@ -1975,7 +2021,7 @@ Reloader.Reload() (at runtime)
 ### 8.4 指纹与 `Config.Version`
 
 `Service.Fingerprint()` 算出热更新目录的指纹，`Load()` 结束时写入 `Config.Version`
-（`agentkit/spec/config.go:282`，在 `agentkit/spec/config.go:280` 的校验之后）。
+（`agentkit/spec/config.go:331`，在 `agentkit/spec/config.go:329` 的校验之后）。
 
 **指纹怎么算的**：对 `HotDirs` 里的每个目录（都在配置根之下），喂进 sha256 的是
 
@@ -2022,7 +2068,7 @@ spec.Reloader.Reload() succeeds
 ```
 
 ★ **失败不回调**：`Service.Load` 的语法 / 模型引用 / 拓扑校验失败时
-（`agentkit/spec/config.go:280`），`Reloader` 不调用 `onChange`，管理器保留旧一代
+（`agentkit/spec/config.go:329`），`Reloader` 不调用 `onChange`，管理器保留旧一代
 （`agentkit/spec/reload.go:111-127`）。因此不需要另写 `validateModels`，也不会出现
 「接口报 A 代、运行跑 B 代」。
 
@@ -2138,20 +2184,20 @@ agentkit/spec/write.go:persist.AtomicWrite
 | 10 | ✅ **已实施** MCP 工具一律带 `mcp__` 命名空间，且**只有** MCP 工具能用这个前缀 | 没有命名空间，一个暴露 `ls` 的 server 会让整个 agent 起不来（撞上保留工具名即在加载期报错）；没有「只有 MCP 能用」这一半，内置工具就能占了这个命名空间，某个 agent 的 `tools:` 里的前缀规则会悄悄盖住它 |
 | 11 | ✅ **已实施** 某个 agent 的 `tools` 只支持**尾部** `*` 的前缀模式，其余写法加载期报错 | 一条读起来与实际覆盖范围不同的规则，就是一次静默的错配 |
 | 12 | ✅ **已实施** 档位写在**工具自己的文件与自己的词汇里** —— 文件的 `allows:` 点名哪些不用点头，而且**没有全局清单**能与它矛盾 | 一个工具的权限就是一处的一个事实；一个说 `post` 的文件就说 `allows: [post]`，不必在两套词汇之间来回翻译 |
-| 13 | ✅ **已实施** —— 文件系统工具有自己的文件 `tools/filesystem.yaml`，而它是一个**调音旋钮**：`allows:` 点名它们的例外，而中间件不管文件在不在都把工具挂上 | ★ 这些工具是 agent 的核心能力，所以那个文件不能有权把它们关掉 —— 它也不能收窄，因为收窄是按 agent 的（§6.2）。★ 它的 `allows:` 是**加法**的，于是文件放宽档位、agent 的 `tools:` 收窄可见性：每一层一个机制（`decl.FilesystemCfg`、`agentkit/spec/load.go:269` `AllowedTools`） |
-| 14 | ✅ **已实施** agent 的工具清单是**允许清单**，而且缺省是**没有** —— `skills` 与 `mcps` 同理 | 一个继承「除了这些以外都要」的 agent，离「跑了一个没人挑过的工具」只有一步配置之遥；★ 而旧键的两个意思**正好相反**，所以只改名字会把一份黑名单变成白名单、还不吭声 —— 于是旧键被拒绝（`agentkit/spec/load.go:93`） |
+| 13 | ✅ **已实施** —— 文件系统工具有自己的文件 `tools/filesystem.yaml`，而它是一个**调音旋钮**：`allows:` 点名它们的例外，而中间件不管文件在不在都把工具挂上 | ★ 这些工具是 agent 的核心能力，所以那个文件不能有权把它们关掉 —— 它也不能收窄，因为收窄是按 agent 的（§6.2）。★ 它的 `allows:` 是**加法**的，于是文件放宽档位、agent 的 `tools:` 收窄可见性：每一层一个机制（`decl.FilesystemCfg`、`agentkit/spec/load.go:272` `AllowedTools`） |
+| 14 | ✅ **已实施** agent 的工具清单是**允许清单**，而且缺省是**没有** —— `skills` 与 `mcps` 同理 | 一个继承「除了这些以外都要」的 agent，离「跑了一个没人挑过的工具」只有一步配置之遥；★ 而旧键的两个意思**正好相反**，所以只改名字会把一份黑名单变成白名单、还不吭声 —— 于是旧键被拒绝（`agentkit/spec/load.go:95`） |
 
 ★ **第 10、11 两行已实施。** 命名空间只在一处合成
 （`agentkit/build/mcptools.go:141`），前缀语法由 `decl.ParseToolNamePattern`
 （`agentkit/spec/decl/decl.go:406`）解析、被加载器拒绝
-（`agentkit/spec/load.go:120` `validateAgentTools`），那张表留着这些模式
+（`agentkit/spec/load.go:122` `validateAgentTools`），那张表留着这些模式
 （`agentkit/build/policy.go:100` `newTable`）并匹配它们
 （`agentkit/build/policy.go:130` `Table.Blocked`）。
 ★ 已经**没有一份全局清单**让前缀语法归属于它 —— 它是唯一一处按前缀匹配名字的地方（§6.3）。
 
 ★ **第 12 行完整成立。** MCP 那一半：server 自己的文件用 server 自己的词汇点名它的例外，
 而那张表是从配置装配出来的（`agentkit/build/mcptools.go:173` `mcpAllowedNames`）。
-`tools/` 那一半：每个文件点名自己的例外（`agentkit/spec/load.go:269` `AllowedTools`）。
+`tools/` 那一半：每个文件点名自己的例外（`agentkit/spec/load.go:272` `AllowedTools`）。
 ★ 而那些**没有自己的文件**的工具，正是代码能表达的例外
 （`agentkit/build/tools.go:62` `builtinAllowedTools`）—— 这就是为什么缺省是
 `ask`、而例外要被点名（§6.3）。
@@ -2166,19 +2212,19 @@ agentkit/spec/write.go:persist.AtomicWrite
 
 | # | 怎么核实的 |
 |---|---|
-| 1 | `decodeStrict` 逐文件解到**预填充**的结构体上（`agentkit/spec/config.go:415`），而整个进程只读**一个**配置根（`agentkit/spec/config.go:174`） |
-| 2 | `server.data_dir` 按**配置根**解析（`agentkit/spec/config.go:241` `DataDir`）；`server.static_dir` 与 `kb.corpus_dir` 按**项目根**解析（`agentkit/spec/config.go:255` `ResolveDir`）。★ 两个基准，各自写明在 §6 —— 笼统写成「一律按项目根」对 `data_dir` 是错的 |
+| 1 | `decodeStrict` 逐文件解到**预填充**的结构体上（`agentkit/spec/config.go:466`），而整个进程只读**一个**配置根（`agentkit/spec/config.go:223`） |
+| 2 | `server.data_dir` 按**配置根**解析（`agentkit/spec/config.go:290` `DataDir`）；`server.static_dir` 与 `kb.corpus_dir` 按**项目根**解析（`agentkit/spec/config.go:304` `ResolveDir`）。★ 两个基准，各自写明在 §6 —— 笼统写成「一律按项目根」对 `data_dir` 是错的 |
 | 3 | 写入门拒绝字面量 `api_key`（`agentkit/spec/write.go:441` `checkSecret`） |
-| 4 | `decodeStrict` 打开了 `yaml.Decoder.KnownFields`（`agentkit/spec/config.go:415`） |
-| 5 | `main.go:198` 在加载时逐条打印；这些条目由 `Config.deferKey` 产生（`agentkit/spec/config.go:151`） |
+| 4 | `decodeStrict` 打开了 `yaml.Decoder.KnownFields`（`agentkit/spec/config.go:466`） |
+| 5 | `main.go:198` 在加载时逐条打印；这些条目由 `Config.deferKey` 产生（`agentkit/spec/config.go:200`） |
 | 6 | `llm/<provider>.yaml` 的 `type` 只检查非空（`agentkit/spec/load.go:29-30`），`extra` 直接交给 OpenAI 兼容的 ACL（`llm/common/option.go:20`）—— 这里只有**一种**端点方言，所以「不支持的 provider」根本不会发生 |
-| 7 | **默认**的配置根不存在时会被创建（`agentkit/spec/config.go:200-207`）；而 `agents/main.md` 缺失**是**启动期错误（`agentkit/spec/load.go:456-458`） |
-| 8 | `ParseRef`（`agentkit/spec/load.go:437`）与 `validate`（`agentkit/spec/load.go:455`） |
+| 7 | **默认**的配置根不存在时会被创建（`agentkit/spec/config.go:249-256`）；而 `agents/main.md` 缺失**是**启动期错误（`agentkit/spec/load.go:461-463`） |
+| 8 | `ParseRef`（`agentkit/spec/load.go:442`）与 `validate`（`agentkit/spec/load.go:460`） |
 | 9 | `model.WithModel` 是一个请求级选项（`llm/common/request.go:32`）；实例缓存以 agent 名 + 代际为键（`agentkit/build/pool.go:31`） |
 | 10 | 命名空间只在一处合成（`agentkit/build/mcptools.go:141` `mcpExposedName`），前缀与分隔符是常量（`agentkit/spec/decl/decl.go:373`、`:382`） |
-| 11 | `decl.ParseToolNamePattern`（`agentkit/spec/decl/decl.go:406`）+ 加载器的拒绝（`agentkit/spec/load.go:120` `validateAgentTools`）+ 留着并匹配那些模式的那张表（`agentkit/build/policy.go:100` `newTable`、`:130` `Table.Blocked`） |
-| 12 | MCP 那一半：`mcpAllowedNames`（`agentkit/build/mcptools.go:173`）；`tools/` 那一半：`AllowedTools`（`agentkit/spec/load.go:269`）；没有文件的工具：`builtinAllowedTools`（`agentkit/build/tools.go:62`）—— 以及缺省（`agentkit/build/policy.go:55` `TierOf`） |
-| 14 | 三份清单都是裸切片，所以「键缺失」与「空清单」是同一件事（`agentkit/spec/decl/decl.go:104`、`:125`、`:135`）；旧键被拒绝（`agentkit/spec/load.go:93`）；清单是允许清单（`agentkit/build/policy.go:85` `Table.Load`），而 `Filter` 没有「无事可做」的捷径（`agentkit/build/policy.go:145`） |
+| 11 | `decl.ParseToolNamePattern`（`agentkit/spec/decl/decl.go:406`）+ 加载器的拒绝（`agentkit/spec/load.go:122` `validateAgentTools`）+ 留着并匹配那些模式的那张表（`agentkit/build/policy.go:100` `newTable`、`:130` `Table.Blocked`） |
+| 12 | MCP 那一半：`mcpAllowedNames`（`agentkit/build/mcptools.go:173`）；`tools/` 那一半：`AllowedTools`（`agentkit/spec/load.go:272`）；没有文件的工具：`builtinAllowedTools`（`agentkit/build/tools.go:62`）—— 以及缺省（`agentkit/build/policy.go:55` `TierOf`） |
+| 14 | 三份清单都是裸切片，所以「键缺失」与「空清单」是同一件事（`agentkit/spec/decl/decl.go:104`、`:125`、`:135`）；旧键被拒绝（`agentkit/spec/load.go:95`）；清单是允许清单（`agentkit/build/policy.go:85` `Table.Load`），而 `Filter` 没有「无事可做」的捷径（`agentkit/build/policy.go:145`） |
 
 ---
 
@@ -2194,7 +2240,7 @@ agentkit/spec/write.go:persist.AtomicWrite
 | `DefaultsSurviveWhenFileOmitsKeys` | 只写 `listen_addr` 时，`max_retries` / `debounce` / `lease_ttl` 仍保留默认（**预填充生效的直接体现**） |
 | `TheOnlyFileInTheRootIsTheOneThatCounts` | 配置根里那份文件说了算，`models` 不与别处合并 |
 | `MissingConfigDirectoryIsNotAnError` | 无 `.openheron/` 时加载不崩 —— 它是校验失败，而且错误**点名缺失的 `agents/main.md`** |
-| `RelativePathsResolveAgainstProjectDir` | `resolvePath` 按**配置根**解析（`agentkit/spec/config.go:441`）；绝对路径原样。★ 这个函数今天**没有生产调用方**（`DataDir` 自己拼路径，`agentkit/spec/config.go:241`）—— 它钉的是规则，不是一条活的路径 |
+| `RelativePathsResolveAgainstProjectDir` | `resolvePath` 按**配置根**解析（`agentkit/spec/config.go:496`）；绝对路径原样。★ 这个函数今天**没有生产调用方**（`DataDir` 自己拼路径，`agentkit/spec/config.go:290`）—— 它钉的是规则，不是一条活的路径 |
 | `ProjectRootAndResolveDir` | `ProjectRoot()` 是 `.openheron` 的父目录，与 `Root()` 不同；`ResolveDir` 相对项目根解析，绝对路径原样，空串原样 |
 | `TheConfigRootIsNeverSearchedForUpwards` | ★ 配置根**不**上溯：从子目录出发不会命中祖先那份 `.openheron/`，根就是项目根自己的那个目录 |
 | `AnExplicitRootWinsOverTheEnvironment` | 显式的 `--config-dir` 压过 `$OPENHERON_CONFIG_DIR`，而且它**不存在时不会被创建** |
@@ -2282,16 +2328,16 @@ agentkit/spec/write.go:persist.AtomicWrite
 | `agents[].reasoning` | ✅ | — | ✅ | ★ 但**档位不在词汇表时不报错，也没有任何报告** —— `LevelFields` 什么也没找到（`agentkit/spec/decl/decl.go:68`），思考参数就悄悄不生效。这是**唯一一个**「配了不生效、而且看不见」的残留（§12.1） |
 | `models[].reasoning_default` | ✅ | — | ✅ | agent 没写 `reasoning` 时由 `RequestOptionsFor` 兜底（`agentkit/build/provider.go:100`） |
 | `models[].reasoning_field` / `models[].reasoning_field_from` | ✅ | — | ✅ | 端点自己的字段名，以及值从哪里读（`agentkit/build/provider.go:146`） |
-| `models[].context_window` | ✅ | ✅ | ✅ | ★ **openheron 把它接上了**：它是压缩阈值的分母 —— `SummarizeAt` 取窗口的一个百分比（`agentkit/spec/summarize.go:25`）。阈值属于 agent，窗口属于模型；模型不声明窗口 ⇒ 该 agent 的压缩不生效，这件事会进 `deferred`（`agentkit/spec/load.go:588`）。它也出现在自省响应里（`api/v2_introspect.go:265`） |
-| `models[].kind` / `models[].dimensions` | ✅ | ✅ | ✅ | 只对知识库有意义：`tools/kb.yaml` 配了语料目录时，`kind: embedding` 与维度数会被校验（`agentkit/spec/load.go:611-615`） |
-| `models[].summarize_at` | ✅ | — | ❌ | **已废弃**：阈值属于 agent，不属于模型。这个键仍被解析，好让旧配置继续能加载，并且它会进 `deferred`，并指向 agent 自己的文件（`agentkit/spec/load.go:61`） |
+| `models[].context_window` | ✅ | ✅ | ✅ | ★ **openheron 把它接上了**：它是压缩阈值的分母 —— `SummarizeAt` 取窗口的一个百分比（`agentkit/spec/summarize.go:25`）。阈值属于 agent，窗口属于模型；模型不声明窗口 ⇒ 该 agent 的压缩不生效，这件事会进 `deferred`（`agentkit/spec/load.go:599`）。它也出现在自省响应里（`api/v2_introspect.go:265`） |
+| `models[].kind` / `models[].dimensions` | ✅ | ✅ | ✅ | 只对知识库有意义：`tools/kb.yaml` 配了语料目录时，`kind: embedding` 与维度数会被校验（`agentkit/spec/load.go:622-626`） |
+| `models[].summarize_at` | ✅ | — | ❌ | **已废弃**：阈值属于 agent，不属于模型。这个键仍被解析，好让旧配置继续能加载，并且它会进 `deferred`，并指向 agent 自己的文件（`agentkit/spec/load.go:62`） |
 | `llm/<provider>.yaml` 的 `header:` | ✅ | — | ❌ | 被解析（`agentkit/spec/decl/decl.go:26`）却**从不被消费** —— `FromConfig` 没有把它交给端点（`agentkit/build/provider.go:36`）。全仓没有任何地方读它（§12.1） |
-| `server.data_dir` | ✅ | ✅ | ✅ | 相对**配置根**解析（`state` → `<root>/.openheron/state`，`agentkit/spec/config.go:241`），绝对路径原样；目录不存在时创建 |
-| `server.static_dir` | ✅ | ✅ | ✅ | 经 `Service.ResolveDir` 按**项目根**解析（`agentkit/spec/config.go:255`）—— 既不是 cwd，也不是配置根；目录不存在只打一条日志（`main.go:347`） |
+| `server.data_dir` | ✅ | ✅ | ✅ | 相对**配置根**解析（`state` → `<root>/.openheron/state`，`agentkit/spec/config.go:290`），绝对路径原样；目录不存在时创建 |
+| `server.static_dir` | ✅ | ✅ | ✅ | 经 `Service.ResolveDir` 按**项目根**解析（`agentkit/spec/config.go:304`）—— 既不是 cwd，也不是配置根；目录不存在只打一条日志（`main.go:347`） |
 | `server.lease_ttl` | ✅ | ✅ | ✅ | 一次运行的租约在无进展时能存活多久；它必须**长于 provider 自己的超时** —— provider 的超时结束的是一次卡死的调用，租约只需要比一次慢调用活得久（`agentkit/spec/decl/decl.go:282`） |
 | `agents[].skills` | ✅ | ✅ | ✅ | 这个 agent 可用的技能白名单；★ **不写表示一个技能都没有**，而**写空列表**意思相同 —— 那个用来区分两者的指针没了（`agentkit/spec/decl/decl.go:125`） |
-| `agents[].tools` | ✅ | ✅ | ✅ | 这个 agent 可用的工具白名单；★ **不写表示一个工具都没有**（`agentkit/spec/decl/decl.go:104`）。名字是暴露名；一个不存在的名字是一条**提示**，不是错误（`agentkit/spec/load.go:540` `noticeAgentTools`） |
-| `agents[].mcps` | ✅ | ✅ | ✅ | 这个 agent 挂载的 server；★ **不写表示一个 server 都不挂载**（`agentkit/spec/decl/decl.go:135`）。`tools:` 里点名了一个这个 agent 没挂载的 server，是一次**加载期错误**（`agentkit/spec/load.go:643`） |
+| `agents[].tools` | ✅ | ✅ | ✅ | 这个 agent 可用的工具白名单；★ **不写表示一个工具都没有**（`agentkit/spec/decl/decl.go:104`）。名字是暴露名；一个不存在的名字是一条**提示**，不是错误（`agentkit/spec/load.go:550` `noticeAgentTools`） |
+| `agents[].mcps` | ✅ | ✅ | ✅ | 这个 agent 挂载的 server；★ **不写表示一个 server 都不挂载**（`agentkit/spec/decl/decl.go:135`）。`tools:` 里点名了一个这个 agent 没挂载的 server，是一次**加载期错误**（`agentkit/spec/load.go:656`） |
 | `SKILL.md` 的 `agent:` / `model:` | ✅ | — | ✅ | 由 `agentkit/build` 包的 `ModelHub` / `AgentHub` 实现，见 §7。它们不是 openheron 配置项，而是 skill 自己的 frontmatter（`agentkit/build/hub.go:64`、`agentkit/build/hub.go:106`） |
 
 **仍然不生效的**
@@ -2425,7 +2471,7 @@ retry:
 #### 拓扑超过上限 ⇒ 启动期报错
 
 当声明的拓扑嵌套得比 `agent.max_depth` 更深时，**加载失败**
-（`agentkit/spec/load.go:615` `validateDepth`）—— 它永远不会是运行时的静默截断。
+（`agentkit/spec/load.go:626` `validateDepth`）—— 它永远不会是运行时的静默截断。
 「配了三层但实际只跑两层」是最难查的一类问题。
 
 #### 落地清单
@@ -2433,10 +2479,10 @@ retry:
 | 位置 | 它是什么 |
 |---|---|
 | `agentkit/spec/decl/decl.go` | `Server.Agent.MaxDepth` 与 `Server.Retry.MaxRetries` |
-| `agentkit/spec/load.go:671` | `MaxDepth()` 读 server 里的值 —— 已经没有任何合并 |
-| `agentkit/spec/load.go:679` | `MaxRetries()` 读 server 里的值 |
-| `agentkit/spec/load.go:615` | `validateDepth` —— 声明出来的拓扑超过上限是一次**加载错误** |
-| `agentkit/spec/config.go:329` | `noteRetiredDirs` —— 留着的 `policy/` 目录被记进 `deferred`，所以启动日志会说明它的内容去了哪儿 |
+| `agentkit/spec/load.go:684` | `MaxDepth()` 读 server 里的值 —— 已经没有任何合并 |
+| `agentkit/spec/load.go:692` | `MaxRetries()` 读 server 里的值 |
+| `agentkit/spec/load.go:626` | `validateDepth` —— 声明出来的拓扑超过上限是一次**加载错误** |
+| `agentkit/spec/config.go:378` | `noteRetiredDirs` —— 留着的 `policy/` 目录被记进 `deferred`，所以启动日志会说明它的内容去了哪儿 |
 | `api/v2_introspect.go` | `/v2/config` 的 `server.maxRetries` / `server.maxDepth` 报的是**生效值** |
 
 ★ **server 仍然是模板与语义的唯一事实来源**：前端只知道「这个文件该长什么样」，而
@@ -2478,19 +2524,19 @@ retry:
 | `kb` 只碰持久化原语 | `grep -rhoP 'persist\.\w+' kb/ \| sort -u` → `persist.AtomicWrite`、`persist.ErrLocked`、`persist.FileLock`、`persist.OpenFileLock`、`persist.RunLockPath` |
 | `persist` 是叶子包 | `persist/atomicfile.go:3` 的 import → `fmt` / `os` / `path/filepath` |
 | checkpoint 用的是共用的原子写 | `storage/filestore/checkpoint.go:232` |
-| 配置根不上溯 | 读 `NewService` 的注释（`agentkit/spec/config.go:144`）+ 用例 `TestTheConfigRootIsNeverSearchedForUpwards` 与 `TestNewServiceDoesNotProbeUpwards` |
+| 配置根不上溯 | 读 `NewService` 的注释（`agentkit/spec/config.go:181`）+ 用例 `TestTheConfigRootIsNeverSearchedForUpwards` 与 `TestNewServiceDoesNotProbeUpwards` |
 | `agentkit/spec` 不牵进任何框架 —— 只有标准库加 `yaml.v3` | `agentkit/spec/config.go:3` 的 import |
-| 未知字段报错 | `decodeStrict` 打开 `yaml.Decoder.KnownFields`（`agentkit/spec/config.go:415`） |
+| 未知字段报错 | `decodeStrict` 打开 `yaml.Decoder.KnownFields`（`agentkit/spec/config.go:466`） |
 | `deferred` 列表在启动时被打印 | `main.go:198` |
 | `agentkit/spec` 的顶层用例数 | `grep -rhoP '^func \KTest\w+' agentkit/spec/ \| sort -u \| wc -l` → **180** |
 | 全仓顶层用例数 | `grep -rhoP '^func \KTest\w+' --include='*_test.go' . \| sort -u \| wc -l` → **1014**，其中一条属于嵌套模块 `sandbox-kit/examples/demo-project` ⇒ 根模块里是 **1013** |
 | 根模块里有测试的包数 | `go list -f '{{.ImportPath}} {{len .TestGoFiles}} {{len .XTestGoFiles}}' ./... \| awk '$2+$3>0' \| wc -l` → **21** |
 | 整个测试套件是绿的 | `go test ./...` → 每个包都是 `ok` |
 | `-race` 现在是绿的 | `go test -race ./...` → 每个包都是 `ok`；修复过程见 §11.5 |
-| 上限只来自 `server/config.yaml`，没有别处 | `MaxDepth()` / `MaxRetries()`（`agentkit/spec/load.go:671`、`:679`）+ `agentkit/spec/config_test.go` 里的用例 |
-| 遗留的 `policy/` 目录会被报出来 | `noteRetiredDirs`（`agentkit/spec/config.go:329`）+ `TestALeftOverPolicyDirectoryIsReported` 与 `TestAnEmptyRetiredDirectoryIsNotReported` |
+| 上限只来自 `server/config.yaml`，没有别处 | `MaxDepth()` / `MaxRetries()`（`agentkit/spec/load.go:684`、`:679`）+ `agentkit/spec/config_test.go` 里的用例 |
+| 遗留的 `policy/` 目录会被报出来 | `noteRetiredDirs`（`agentkit/spec/config.go:378`）+ `TestALeftOverPolicyDirectoryIsReported` 与 `TestAnEmptyRetiredDirectoryIsNotReported` |
 | `models[].context_window` 真的生效 | `SummarizeAt`（`agentkit/spec/summarize.go:25`）+ `TestSummarizeAtResolvesAgainstTheWindow` |
-| `models[].summarize_at` 已废弃但仍被解析 | `decl.Model.SummarizeAt` 上的注释（`agentkit/spec/decl/decl.go:46`）+ 那条 `deferred`（`agentkit/spec/load.go:61`）+ `TestTheOldModelThresholdIsReportedNotFatal` |
+| `models[].summarize_at` 已废弃但仍被解析 | `decl.Model.SummarizeAt` 上的注释（`agentkit/spec/decl/decl.go:46`）+ 那条 `deferred`（`agentkit/spec/load.go:62`）+ `TestTheOldModelThresholdIsReportedNotFatal` |
 | `llm/<provider>.yaml` 的 `header:` 没有消费方 | `decl.Provider.Header`（`agentkit/spec/decl/decl.go:26`）与 `FromConfig`（`agentkit/build/provider.go:36`）—— 全仓没有任何地方读这个字段 |
 | 模型实例是每 agent 一个，不是每模型一个 | pool 的键（`agentkit/build/pool.go:31` `GetOrBuild(ctx, name, gen, fn)`） |
 | `AgentHub` / `ModelHub` 已实施 | `agentkit/build/hub.go:64`（`skillModelHub`）与 `agentkit/build/hub.go:106`（`skillAgentHub`） |
@@ -2499,14 +2545,14 @@ retry:
 | 那六条 `/v2/settings` 路由 | `api/v2_files.go:67` |
 | manifest 只在一处装配，在 `spec` 里 | `(s *Service) Manifest`（`agentkit/spec/manifest.go:68`）与只负责序列化它的 handler（`api/v2_settings.go:91`） |
 | 校验回的是一组带行号的 issue | `Issue`（`agentkit/spec/diag.go:26`）、`(s *Service) Diagnostics`（`agentkit/spec/diag.go:71`） |
-| 行号能穿过 frontmatter 块 | `parseShift`（`agentkit/spec/diag.go:143`）+ `splitFrontmatter` 返回的起始行（`agentkit/spec/expand.go:48`） |
+| 行号能穿过 frontmatter 块 | `parseShift`（`agentkit/spec/diag.go:157`）+ `splitFrontmatter` 返回的起始行（`agentkit/spec/expand.go:48`） |
 | 编辑器问服务端，而不是自己校验 | `scheduleValidate`（`web/src/lib/settings-store.ts:240`）与它用的防抖（`:201`） |
 | 前端优先按路径取模板 | `resolveTemplate`（`web/src/lib/settings-validate.ts:94`），由 `web/src/components/settings/new-file-dialog.tsx` 调用 |
 | `context_window` 在自省响应里可见 | `api/v2_introspect.go:265` |
 | `spec` → `run` 的破例在这里从未存在 | `git grep -n "agentkit/run" fa7131a -- agentkit/spec` → 一条注释，别无其它 |
 | MCP 命名空间只在一处合成 | `mcpExposedName`（`agentkit/build/mcptools.go:140`）+ 前缀与分隔符常量（`agentkit/spec/decl/decl.go:336`、`:345`） |
-| 某个 agent 的 `tools` 前缀模式 | `decl.ParseToolNamePattern`（`agentkit/spec/decl/decl.go:406`）+ 加载器的拒绝（`agentkit/spec/load.go:120` `validateAgentTools`）+ 留着并匹配那些模式的那张表（`agentkit/build/policy.go:100` `newTable`、`:130` `Table.Blocked`） |
-| 旧的 `disabled_tools` 键被拒绝 | 加载器的拒绝（`agentkit/spec/load.go:93`）—— 这个字段存在，只是为了能抓住那个还在写它的文件（`agentkit/spec/decl/decl.go:113`） |
+| 某个 agent 的 `tools` 前缀模式 | `decl.ParseToolNamePattern`（`agentkit/spec/decl/decl.go:406`）+ 加载器的拒绝（`agentkit/spec/load.go:122` `validateAgentTools`）+ 留着并匹配那些模式的那张表（`agentkit/build/policy.go:100` `newTable`、`:130` `Table.Blocked`） |
+| 旧的 `disabled_tools` 键被拒绝 | 加载器的拒绝（`agentkit/spec/load.go:95`）—— 这个字段存在，只是为了能抓住那个还在写它的文件（`agentkit/spec/decl/decl.go:113`） |
 | agent 的三份清单缺省都是「没有」 | `decl.Agent.Tools` / `.Skills` / `.MCPServers` 都是裸切片（`agentkit/spec/decl/decl.go:104`、`:125`、`:135`）—— 「没声明」与「声明为空」现在是同一件事 |
 | 不等 server 起来就能回答 MCP 档位 | `mcpAllowedNames`（`agentkit/build/mcptools.go:172`）+ 缺省档位（`agentkit/build/policy.go:55` `TierOf`）+ 用例 `TestTheTierIsAnswerableWhileTheServerIsUnreachable` |
 | `mcps/` 分区是热的 | 那个 `mcps` 分类带着 `hot: true`（`agentkit/spec/config.go:61-69`）+ `hotDirList()`（`agentkit/spec/config.go:87`）→ `HotDirs`（`agentkit/spec/reload.go:21`） |
@@ -2515,29 +2561,29 @@ retry:
 
 | 项 | 状态 | 位置 |
 |---|---|---|
-| 单根加载 | ✅ | `agentkit/spec/config.go:174` `NewService`，`agentkit/spec/config.go:290` `loadOnly` |
-| 预填结构体逐层 decode（默认值存活） | ✅ | `agentkit/spec/config.go:296-298`（`defaultServer()` / `defaultPolicy()` / `defaultKB()` 预填） |
-| 严格模式（未知字段带行号报错） | ✅ | `agentkit/spec/config.go:415` `decodeStrict` |
-| `deferred` + 强制打印 | ✅ | `Config.Deferred()`（`agentkit/spec/config.go:132`），`main.go:198` 启动时逐条打 |
-| 配置根三级解析（显式 → env → 项目根自己的目录） | ✅ | `agentkit/spec/config.go:144` |
-| **不上溯** | ✅ | `NewService` 的注释（`agentkit/spec/config.go:169`）；`TestTheConfigRootIsNeverSearchedForUpwards` |
+| 单根加载 | ✅ | `agentkit/spec/config.go:223` `NewService`，`agentkit/spec/config.go:339` `loadOnly` |
+| 预填结构体逐层 decode（默认值存活） | ✅ | `agentkit/spec/config.go:345-347`（`defaultServer()` / `defaultPolicy()` / `defaultKB()` 预填） |
+| 严格模式（未知字段带行号报错） | ✅ | `agentkit/spec/config.go:466` `decodeStrict` |
+| `deferred` + 强制打印 | ✅ | `Config.Deferred()`（`agentkit/spec/config.go:168`），`main.go:198` 启动时逐条打 |
+| 配置根三级解析（显式 → env → 项目根自己的目录） | ✅ | `agentkit/spec/config.go:181` |
+| **不上溯** | ✅ | `NewService` 的注释（`agentkit/spec/config.go:218`）；`TestTheConfigRootIsNeverSearchedForUpwards` |
 | `${ENV}` 缺则提醒（不阻塞）+ `@file:` | ✅ | `agentkit/spec/expand.go:9` `expandValue`，`agentkit/spec/load.go:42` |
 | `Duration` 强制带单位 | ✅ | `agentkit/spec/decl/decl.go:584` |
 | `LenientDuration` 降级并记 `deferred` | ✅ | `agentkit/spec/decl/decl.go:509`，`agentkit/spec/reload.go:80` |
 | frontmatter 切分 | ✅ | `agentkit/spec/expand.go:48` `splitFrontmatter` |
-| 模型引用校验（不静默退化） | ✅ | `agentkit/spec/load.go:437` `ParseRef`，`agentkit/spec/load.go:455` `validate` |
-| `subagents` 图校验（缺引用 + 成环） | ✅ | `agentkit/spec/load.go:716` `validateAgentGraph`，`agentkit/spec/load.go:733` `detectCycle` |
-| 缺省档是 `ask`，而文件的 `allows:` 是例外 | ✅ | `Policy.TierOf`（`agentkit/build/policy.go:55`）；例外来自 `builtinAllowedTools`（`agentkit/build/tools.go:61`）、`Config.AllowedTools`（`agentkit/spec/load.go:235`）与 `mcpAllowedNames`（`agentkit/build/mcptools.go:172`），由 `policyOf`（`agentkit/build/spec.go:57`）装配 |
+| 模型引用校验（不静默退化） | ✅ | `agentkit/spec/load.go:442` `ParseRef`，`agentkit/spec/load.go:460` `validate` |
+| `subagents` 图校验（缺引用 + 成环） | ✅ | `agentkit/spec/load.go:729` `validateAgentGraph`，`agentkit/spec/load.go:746` `detectCycle` |
+| 缺省档是 `ask`，而文件的 `allows:` 是例外 | ✅ | `Policy.TierOf`（`agentkit/build/policy.go:55`）；例外来自 `builtinAllowedTools`（`agentkit/build/tools.go:61`）、`Config.AllowedTools`（`agentkit/spec/load.go:237`）与 `mcpAllowedNames`（`agentkit/build/mcptools.go:172`），由 `policyOf`（`agentkit/build/spec.go:57`）装配 |
 | `envOr` → `cfg.*` | ✅ | `main.go:459` `override`（用在 `main.go:341`） |
-| `.openheron/state/` 取代 `./data` | ✅ | `config.Service.DataDir("")`（`agentkit/spec/config.go:241`） |
-| `MaxRetries` 配置化 | ✅ | `decl.RetryCfg.MaxRetries`（`agentkit/spec/decl/decl.go:534`）→ `Config.MaxRetries()`（`agentkit/spec/load.go:679`） |
+| `.openheron/state/` 取代 `./data` | ✅ | `config.Service.DataDir("")`（`agentkit/spec/config.go:290`） |
+| `MaxRetries` 配置化 | ✅ | `decl.RetryCfg.MaxRetries`（`agentkit/spec/decl/decl.go:534`）→ `Config.MaxRetries()`（`agentkit/spec/load.go:692`） |
 | skills 自动探测 `.openheron/skills` | ✅ | `agentkit/build/skill.go:188` `resolveSkillsDir` / `probeProjectSkills` |
 | 写入门拒绝字面量密钥 | ✅ | `agentkit/spec/write.go:441` `checkSecret` |
 | ~~`chatmodel.New` 直读 env~~ | ✅ 已删 | 包已移除，改 `llm/common` |
-| `mcps/` 分区 + MCP provider | ✅ | 那个分区（`agentkit/spec/config.go:61-69`）、加载器（`agentkit/spec/load.go:269` `loadMCP`）、provider（`agentkit/build/tools.go:78`）与档位表（`agentkit/build/mcptools.go:172`）—— 配置面见本文件 §6.7 |
-| 前缀匹配（尾部 `*`） | ✅ **对某个 agent 的 `tools` 而言** | 加载器的拒绝（`agentkit/spec/load.go:120` `validateAgentTools`）、留着那些模式的表（`agentkit/build/policy.go:100` `newTable`）与匹配它们的那张表（`agentkit/build/policy.go:130` `Table.Blocked`）—— 匹配语义见本文件 §6.3 |
-| agent 的工具清单是允许清单 | ✅ | `Table.Load`（`agentkit/build/policy.go:85`）、`Table.Blocked`（`agentkit/build/policy.go:130`）、`Table.Filter`（`agentkit/build/policy.go:145`）—— 三份清单（`tools` `skills` `mcps`）缺省都是「没有」，而旧键被拒绝（`agentkit/spec/load.go:93`） |
-| `server/config.yaml` 里的上限 | ✅ | `MaxDepth()` / `MaxRetries()` 读 server 里的值（`agentkit/spec/load.go:671`、`:679`）；拓扑超过上限是一次加载错误（`agentkit/spec/load.go:615` `validateDepth`）—— §12.2 |
+| `mcps/` 分区 + MCP provider | ✅ | 那个分区（`agentkit/spec/config.go:61-69`）、加载器（`agentkit/spec/load.go:272` `loadMCP`）、provider（`agentkit/build/tools.go:78`）与档位表（`agentkit/build/mcptools.go:172`）—— 配置面见本文件 §6.7 |
+| 前缀匹配（尾部 `*`） | ✅ **对某个 agent 的 `tools` 而言** | 加载器的拒绝（`agentkit/spec/load.go:122` `validateAgentTools`）、留着那些模式的表（`agentkit/build/policy.go:100` `newTable`）与匹配它们的那张表（`agentkit/build/policy.go:130` `Table.Blocked`）—— 匹配语义见本文件 §6.3 |
+| agent 的工具清单是允许清单 | ✅ | `Table.Load`（`agentkit/build/policy.go:85`）、`Table.Blocked`（`agentkit/build/policy.go:130`）、`Table.Filter`（`agentkit/build/policy.go:145`）—— 三份清单（`tools` `skills` `mcps`）缺省都是「没有」，而旧键被拒绝（`agentkit/spec/load.go:95`） |
+| `server/config.yaml` 里的上限 | ✅ | `MaxDepth()` / `MaxRetries()` 读 server 里的值（`agentkit/spec/load.go:684`、`:679`）；拓扑超过上限是一次加载错误（`agentkit/spec/load.go:626` `validateDepth`）—— §12.2 |
 
 **已落地**：`AgentHub` / `ModelHub`（§7）—— 实现在 `agentkit/build/hub.go`
 （`skillAgentHub` / `skillModelHub`），由 `agentkit/build/skill.go` 接线；`context: fork`
@@ -2554,7 +2600,7 @@ retry:
 
 | 上游的说法 | openheron 的实际 | 原因 |
 |---|---|---|
-| 配置根按「env → 上溯 → 自身」解析 | 它恰好按**三级**解析：显式 `--config-dir` → `$OPENHERON_CONFIG_DIR` → `<projectRoot>/.openheron`（不存在则创建），并且**刻意没有**上溯祖先目录（`agentkit/spec/config.go:144`） | 一旦配置根取决于「进程是从哪儿启动的」，同一条命令换个目录跑就会读到另一份配置 —— 测试实例也会读到开发者的那份（见 `AGENTS.md`） |
+| 配置根按「env → 上溯 → 自身」解析 | 它恰好按**三级**解析：显式 `--config-dir` → `$OPENHERON_CONFIG_DIR` → `<projectRoot>/.openheron`（不存在则创建），并且**刻意没有**上溯祖先目录（`agentkit/spec/config.go:181`） | 一旦配置根取决于「进程是从哪儿启动的」，同一条命令换个目录跑就会读到另一份配置 —— 测试实例也会读到开发者的那份（见 `AGENTS.md`） |
 | 测试实例靠「预置一份 `.heron/`」来隔离 | 隔离靠 `.env.test` 加 `make test-env-backend` / `test-env-reset` / `test-env-sync` 三个目标：实例跑在 `:18099`，**自带配置根与自带会话目录** | 端口不同不等于数据隔离 —— openheron 把会话写在 `.openheron/state/` 下，一个写在那儿的测试会污染真实历史 |
 | `agentkit/spec` 包有 **115** 个 `Test` 函数 | 它有 **180** 个 | 包随代码一起长大；上表列的是真正存在的用例 |
 | 模块路径是 `heron/...` | 是 `github.com/ouranoshong/openheron/...` | `go.mod` |

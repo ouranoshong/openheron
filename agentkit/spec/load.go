@@ -39,8 +39,9 @@ func (c *Config) loadProvider(file string, data []byte) error {
 	}
 	if !resolved {
 		p.APIKey = ""
-		c.deferKey("llm/%s.yaml: api_key env %s is not set; calls to this endpoint will fail with 401 Unauthorized",
-			id, envVarName(rawKey))
+		c.deferFile(DirLLM+"/"+id+".yaml",
+			"api_key env %s is not set; calls to this endpoint will fail with 401 Unauthorized",
+			envVarName(rawKey))
 	} else {
 		p.APIKey = key
 	}
@@ -58,9 +59,10 @@ func (c *Config) loadProvider(file string, data []byte) error {
 			return fmt.Errorf("models[%d]: missing id", i)
 		}
 		if m.SummarizeAt.Declared {
-			c.deferKey("llm/%s.yaml: models[%s].summarize_at is no longer read — the compaction "+
-				"threshold belongs to the agent; set summarize_at in the agent's own file "+
-				"(agents/<id>.md), and use 0 to keep compaction off", id, m.ID)
+			c.deferFile(DirLLM+"/"+id+".yaml",
+				"models[%s].summarize_at is no longer read — the compaction "+
+					"threshold belongs to the agent; set summarize_at in the agent's own file "+
+					"(agents/<id>.md), and use 0 to keep compaction off", m.ID)
 		}
 		c.Models[id+"/"+m.ID] = m
 	}
@@ -251,9 +253,10 @@ func (c *Config) loadKB(data []byte) error {
 	//   working configuration. It only says so, in `deferred`, and the
 	//   new key wins when both are present.
 	if k.CorpusLegacy != "" {
-		c.deferKey("tools/kb.yaml: the key `corpus` was renamed to `corpus_dir` — " +
-			"the value is a directory, and every other directory key says so " +
-			"(`data_dir`, `static_dir`); rename it to keep the notice away")
+		c.deferFile(DirTools+"/kb.yaml",
+			"the key `corpus` was renamed to `corpus_dir` — "+
+				"the value is a directory, and every other directory key says so "+
+				"(`data_dir`, `static_dir`); rename it to keep the notice away")
 		if k.CorpusDir == "" {
 			k.CorpusDir = k.CorpusLegacy
 		}
@@ -392,8 +395,9 @@ func (c *Config) expandMCPMaps(file, key string, in map[string]string) (map[stri
 			return nil, fmt.Errorf("mcps/%s: %s %s: %w", file, key, k, err)
 		}
 		if !resolved {
-			c.deferKey("mcps/%s.yaml: %s %s refers to %s, which is not set; the entry is left out",
-				file, key, k, envVarName(v))
+			c.deferFile(DirMCP+"/"+file,
+				"%s %s refers to %s, which is not set; the entry is left out",
+				key, k, envVarName(v))
 			continue
 		}
 		out[k] = val
@@ -413,8 +417,9 @@ func (c *Config) resolveMCPDuration(file, key string, d *decl.MCPDuration, def t
 		return
 	}
 	if d.Bad {
-		c.deferKey("mcps/%s.yaml: %s %q is not a duration; using the default %s",
-			file, key, d.Raw, def)
+		c.deferFile(DirMCP+"/"+file,
+			"%s %q is not a duration; using the default %s",
+			key, d.Raw, def)
 		d.Value = def
 		return
 	}
@@ -505,7 +510,8 @@ func (c *Config) validate() error {
 	c.noticeAgentTools(ids)
 
 	if _, ok := c.Agents[DefaultAgentID]; !ok {
-		return fmt.Errorf("agents/%s.md does not exist or could not be parsed", DefaultAgentID)
+		return &FileError{Path: DirAgent + "/" + DefaultAgentID + ".md", Err: fmt.Errorf(
+			"agents/%s.md does not exist or could not be parsed", DefaultAgentID)}
 	}
 
 	for _, id := range ids {
@@ -517,8 +523,12 @@ func (c *Config) validate() error {
 			if where == "" {
 				where = DirAgent + "/" + id + ".md"
 			}
-			return fmt.Errorf("agent %s (%s) references model %s which is not declared under llm/",
-				id, where, a.ModelRef)
+			// ★ The file is carried by the error, not only named in it: the
+			//   editor has to know **which** file is broken, or it puts this
+			//   on the file the user happens to be editing.
+			return &FileError{Path: where, Err: fmt.Errorf(
+				"agent %s (%s) references model %s which is not declared under llm/",
+				id, where, a.ModelRef)}
 		}
 		if err := checkReasoning(id, a, m); err != nil {
 			return err
@@ -568,8 +578,9 @@ func checkReasoning(id string, a *decl.Agent, m *decl.Model) error {
 	if where == "" {
 		where = DirAgent + "/" + id + ".md"
 	}
-	return fmt.Errorf("%s: reasoning %q is not declared by %s — the model declares: %s",
-		where, a.Reasoning, a.ModelRef, strings.Join(levels, ", "))
+	return &FileError{Path: where, Err: fmt.Errorf(
+		"%s: reasoning %q is not declared by %s — the model declares: %s",
+		where, a.Reasoning, a.ModelRef, strings.Join(levels, ", "))}
 }
 
 // containsName reports whether the list carries the name.
@@ -618,16 +629,18 @@ func (c *Config) noticeAgentTools(ids []string) {
 			if known[prefix] {
 				continue
 			}
-			c.deferKey("agents/%s.md: tools names %q, which is not a tool that exists — "+
-				"the built-in tools are %s, and a provider's tool exists only when its "+
-				"file under tools/ is written", id, prefix, strings.Join(decl.BuiltinToolNames, ", "))
+			c.deferFile(DirAgent+"/"+id+".md",
+				"tools names %q, which is not a tool that exists — "+
+					"the built-in tools are %s, and a provider's tool exists only when its "+
+					"file under tools/ is written", prefix, strings.Join(decl.BuiltinToolNames, ", "))
 		}
 		// ★ The skill tool without a skill is a contradiction: the agent
 		//   can ask for a skill and there is none to load.
 		if len(a.Skills) == 0 && containsName(a.Tools, decl.ToolNameSkill) {
-			c.deferKey("agents/%s.md: tools names the %q tool but skills is empty — "+
-				"the agent can ask for a skill and there is none to load",
-				id, decl.ToolNameSkill)
+			c.deferFile(DirAgent+"/"+id+".md",
+				"tools names the %q tool but skills is empty — "+
+					"the agent can ask for a skill and there is none to load",
+				decl.ToolNameSkill)
 		}
 	}
 }
@@ -779,10 +792,21 @@ func (c *Config) noticeCompactionWindows(ids []string) {
 		if !ok || m == nil || m.ContextWindow > 0 {
 			continue
 		}
-		c.deferKey("llm/%s.yaml: the model %s declares no context_window — automatic compaction is "+
-			"inactive for agent %s; declare context_window, or set summarize_at to an absolute token count",
-			ProviderIDOf(a.ModelRef), a.ModelRef, id)
+		c.deferFile(DirLLM+"/"+ProviderIDOf(a.ModelRef)+".yaml",
+			"the model %s declares no context_window — automatic compaction is "+
+				"inactive for agent %s; declare context_window, or set summarize_at to an absolute token count",
+			a.ModelRef, id)
 	}
+}
+
+// kbErr attributes a knowledge-base complaint to the file that carries it.
+//
+// ★ The knowledge base lives in `tools/kb.yaml`, and every one of these
+//
+//	rules is about what that file says — the model it names is declared
+//	elsewhere, but the file that names it is this one.
+func kbErr(format string, args ...any) error {
+	return &FileError{Path: DirTools + "/kb.yaml", Err: fmt.Errorf(format, args...)}
 }
 
 func (c *Config) validateKB() error {
@@ -790,24 +814,24 @@ func (c *Config) validateKB() error {
 		return nil
 	}
 	if filepath.IsAbs(c.KB.CorpusDir) {
-		return fmt.Errorf("kb.corpus_dir must be relative to the project root, got an absolute path %q; "+
+		return kbErr("kb.corpus_dir must be relative to the project root, got an absolute path %q; "+
 			"the index and its corpus must have the same lifetime", c.KB.CorpusDir)
 	}
 	if c.KB.Model == "" {
-		return fmt.Errorf("kb.model is required when kb.corpus_dir is set; "+
+		return kbErr("kb.model is required when kb.corpus_dir is set; "+
 			"it must reference a model declared with kind: embedding under %s/", DirLLM)
 	}
 	ref, _ := ParseRef(c.KB.Model)
 	m, ok := c.Models[ref.String()]
 	if !ok {
-		return fmt.Errorf("kb.model %s is not declared under %s/", c.KB.Model, DirLLM)
+		return kbErr("kb.model %s is not declared under %s/", c.KB.Model, DirLLM)
 	}
 	if !m.IsEmbedding() {
-		return fmt.Errorf("kb.model %s is not an embedding model; add `kind: embedding` to it "+
+		return kbErr("kb.model %s is not an embedding model; add `kind: embedding` to it "+
 			"(a chat endpoint has no %s endpoint)", c.KB.Model, "/embeddings")
 	}
 	if m.Dimensions < 0 {
-		return fmt.Errorf("kb.model %s declares dimensions: %d; it must be a positive count or "+
+		return kbErr("kb.model %s declares dimensions: %d; it must be a positive count or "+
 			"omitted (0 = unknown, learned at index time)", c.KB.Model, m.Dimensions)
 	}
 	return nil

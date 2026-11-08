@@ -750,6 +750,10 @@ The write path has several gates:
 - **Nothing is checked in the browser any more.** The editor sends the draft to the
   server and shows the server's answer — each issue with the line it is on. Typing is
   debounced by 250 ms, and an answer that belongs to an older draft is dropped.
+- **Every issue names the file it is about.** A problem in another file is shown under
+  **that** file's name — and it is a link: click it and the editor opens that file. Your
+  own file's problems stay on your own file. ★ The tree still has to load, so a broken
+  file elsewhere still blocks the save; the status line says which file is the reason.
 - `server/` is **not editable** (not hot-reloaded, so a change needs a restart).
 - **Literal secrets are rejected** — `api_key must be a reference, not a literal`. Use
   `${ENV_VAR}` or `@file:/path`.

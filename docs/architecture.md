@@ -113,7 +113,7 @@ would read as "that tool does not exist".
 
 **Validating** the knowledge-base config (`tools/kb.yaml`) needs to know whether the
 corpus path is relative, whether the model is declared at all, and whether it is
-declared as `kind: embedding` (`agentkit/spec/load.go:229` `loadKB`, `load.go:730`
+declared as `kind: embedding` (`agentkit/spec/load.go:231` `loadKB`, `agentkit/spec/load.go:743`
 `validateKB`).
 
 ★ All three answers live in the **declarations** (`decl.Model.IsEmbedding`,
@@ -142,7 +142,7 @@ searched** — once the config root depends on "where the process was started fr
 same command run from a different directory reads a different configuration, and a test
 instance would read the development configuration too.
 
-Only a **defaulted** root is created automatically (`config.go:196`'s `os.MkdirAll`). An
+Only a **defaulted** root is created automatically (`agentkit/spec/config.go:245`'s `os.MkdirAll`). An
 explicit root or an env root pointing nowhere is **not** created: a typo must not silently
 grow an empty configuration tree.
 
@@ -168,11 +168,11 @@ from an older configuration is **not read** — nothing loads it — and the tie
 to carry now lives in the tool files and the agent files instead (§3.4). ★ The
 configuration **still starts**: the rest of it may be perfectly good, and a broken file
 elsewhere would keep it from loading at all. But the directory raises a **notice**
-(`agentkit/spec/config.go:329` `noteRetiredDirs`) that names its new home — a dropped
+(`agentkit/spec/config.go:378` `noteRetiredDirs`) that names its new home — a dropped
 configuration that says nothing is the worst kind, because the process starts fine and the
 setting is gone.
 
-File names under `tools/` are a **whitelist**: `agentkit/spec/load.go:191` errors out on
+File names under `tools/` are a **whitelist**: `agentkit/spec/load.go:193` errors out on
 an unknown file instead of ignoring it — "I wrote kb.yaml and it did not take effect" is
 one of the hardest classes of problem to debug.
 
@@ -184,7 +184,7 @@ namespace segment of that server's tools.
 ### 3.3 Agent definitions
 
 An agent is a markdown file: **frontmatter + body**. The frontmatter is **strictly
-decoded** (`agentkit/spec/load.go:72`'s `loadAgent`) — a single wrong key is a startup
+decoded** (`agentkit/spec/load.go:74`'s `loadAgent`) — a single wrong key is a startup
 error.
 
 Available frontmatter keys (`agentkit/spec/decl/decl.go:78`'s `decl.Agent`):
@@ -218,7 +218,7 @@ empty" now mean the same thing — nothing.
 ★ **The old key is refused, not renamed.** `disabled_tools` was the **opposite** of
 `tools` — one removed tools, the other names them — so renaming it alone would have
 turned a blacklist into a whitelist without saying so. The loader therefore **refuses**
-the file (`agentkit/spec/load.go:96`) and says that the meaning is the other way
+the file (`agentkit/spec/load.go:98`) and says that the meaning is the other way
 round. ★ **There is no alias**: an alias that still worked with the old meaning would
 keep the blacklist alive, and an alias that worked with the new one would turn a
 blacklist into a whitelist on the user's behalf — the exact confusion the refusal
@@ -229,7 +229,7 @@ exists to prevent.
 that server's tools the agent **sees**, by the exposed name `mcp__<server>__<tool>` or
 by the pattern `mcp__<server>__*`. ★ `mcps: [github]` without `mcp__github__*` in
 `tools:` says "start it" and nothing else: the agent sees none of it. ★ A contradiction
-between the two is a **load-time error** (`agentkit/spec/load.go:643`
+between the two is a **load-time error** (`agentkit/spec/load.go:656`
 `checkAgentMCPNames`): naming `mcp__github__*` in `tools:` while `mcps:` leaves
 `github` out can never match, so the loader says so instead of letting the rule
 quietly do nothing.
@@ -258,7 +258,7 @@ The **exceptions are named**, and they are named by the file that provides the t
 | Source | What it names | Assembled at |
 |---|---|---|
 | The built-in tools that have no file of their own | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill`, plus the five config tools that only read | `agentkit/build/tools.go:68` `builtinAllowedTools` |
-| A tool's own file — `tools/*.yaml` and the knowledge base | that file's `allows:` | `agentkit/spec/load.go:276` `AllowedTools` |
+| A tool's own file — `tools/*.yaml` and the knowledge base | that file's `allows:` | `agentkit/spec/load.go:279` `AllowedTools` |
 | An MCP server's own file | that server's `allows:`, in the server's own vocabulary, translated to the exposed names | `agentkit/build/mcptools.go:173` `mcpAllowedNames` |
 
 `agentkit/build/spec.go:57` `policyOf` puts the three together and `Policy.TierOf`
@@ -297,9 +297,9 @@ second copy of the same keys that could only *tighten* the file — is gone, and
 takes effect after a restart.
 
 A declared topology that exceeds the cap is a **startup error**
-(`spec/load.go:758`'s `validateDepth`) — never a silent truncation. A sub-agent
+(`spec/agentkit/spec/load.go:771`'s `validateDepth`) — never a silent truncation. A sub-agent
 referencing an unknown agent and a cyclic topology are startup errors too
-(`load.go:829` `validateAgentGraph`, `load.go:869`).
+(`agentkit/spec/load.go:853` `validateAgentGraph`, `agentkit/spec/load.go:893`).
 
 ### 3.6 skills resolve by a different rule
 
@@ -333,8 +333,8 @@ so there the list has nothing to filter.
 
 ### 3.7 Two loading modes and "deferred"
 
-`spec.Service.Load()` (`config.go:255`) validates strictly — a failure is a startup
-failure. `LoadUnchecked()` (`config.go:278`) skips validation.
+`spec.Service.Load()` (`agentkit/spec/config.go:304`) validates strictly — a failure is a startup
+failure. `LoadUnchecked()` (`agentkit/spec/config.go:327`) skips validation.
 
 `Config.Deferred()` (`config.go:124`) collects **non-fatal** problems (a duration string
 that will not parse, for instance), and surfaces them as a `deferred` array in
@@ -441,13 +441,13 @@ configuration files.
 
 The path a tool takes is the same for every source:
 
-`tools/*.yaml` → `spec.loadTool` (`agentkit/spec/load.go:191`) → `decl.ToolsCfg` →
+`tools/*.yaml` → `spec.loadTool` (`agentkit/spec/load.go:193`) → `decl.ToolsCfg` →
 `toolRegistry.Build` (`agentkit/build/tools.go:90`) → `snapshot.buildHeavy`
 (`agentkit/build/snapshot.go:47`) → `applyToolConfig` (`agentkit/build/assemble.go:31`) →
 `deep.Config.ToolsConfig.Tools` → `deep.New` (`agentkit/build/assemble.go:40`).
 
 The MCP branch joins it at the registry: `mcps/<server>.yaml` → `spec.loadMCP`
-(`agentkit/spec/load.go:306`) → `decl.MCPServerCfg` → the MCP provider
+(`agentkit/spec/load.go:309`) → `decl.MCPServerCfg` → the MCP provider
 (`agentkit/build/mcptools.go:194`), registered at `agentkit/build/tools.go:42` → the same
 `toolRegistry.Build` → the same `applyToolConfig`.
 

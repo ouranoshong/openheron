@@ -258,7 +258,7 @@ Say you want a new `mcps/` directory:
    and **non-hot-reloaded** directories clearly apart — whether a directory is hot
    changes what users expect.
 
-2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`config.go:340`) and
+2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`agentkit/spec/config.go:389`) and
    implement `loadXXX`.
 
 3. **`agentkit/spec/decl/decl.go`**: add the plain declaration struct.
@@ -304,7 +304,7 @@ definition — there is no `enabled` key.
 - **Declared** by the constant `DirMCP = "mcps"` (`agentkit/spec/config.go:25`) and the
   `Categories` entry (`agentkit/spec/config.go:66`), which is editable, hot and
   `.yaml`.
-- **Loaded** by `loadMCP` (`agentkit/spec/load.go:306`): one file, one server.
+- **Loaded** by `loadMCP` (`agentkit/spec/load.go:309`): one file, one server.
 - ★ **"Hot" for this partition means the client is rebuilt.** The declaration is the
   server's identity, so a changed declaration means a changed server: the old client
   is torn down and a new one is started (`agentkit/build/mcpmanager.go:215`), keyed on
@@ -369,7 +369,7 @@ none** — an absent key and an empty list mean the same thing, and they mean "n
 
 ★ **Do not write `disabled_tools`.** It was the **opposite** of `tools` — one removed
 tools, the other names them — so the loader **refuses** the file
-(`agentkit/spec/load.go:96`) rather than renaming the key: renaming it alone would
+(`agentkit/spec/load.go:98`) rather than renaming the key: renaming it alone would
 have turned a blacklist into a whitelist without saying so. The message says which way
 round the two mean. ★ **There is no alias**: an alias that still worked with the old
 meaning would keep the blacklist alive, and an alias that worked with the new one would
@@ -385,13 +385,13 @@ the list removed. ★ **There is no "nothing to do" shortcut**
 which of that server's tools the agent **sees** — `mcp__<server>__<tool>`, or the
 pattern `mcp__<server>__*`. ★ `mcps: [github]` without `mcp__github__*` in `tools:`
 starts the server and shows the agent nothing. ★ A contradiction between the two is a
-**load-time error** (`agentkit/spec/load.go:643` `checkAgentMCPNames`): naming
+**load-time error** (`agentkit/spec/load.go:656` `checkAgentMCPNames`): naming
 `mcp__github__*` while `mcps:` leaves `github` out can never match.
 
 #### The two notices
 
 Both are **notices**, not errors — the configuration is legal, it just does not say
-what the author meant (`agentkit/spec/load.go:540` `noticeAgentTools`):
+what the author meant (`agentkit/spec/load.go:550` `noticeAgentTools`):
 
 | Notice | What it means | What to do |
 |---|---|---|
@@ -1090,7 +1090,7 @@ about text the user has already changed.
 
 ★ **A rule that was the client's moved to the server rather than disappearing.** An
 agent's `reasoning` level is checked against the model's declared vocabulary in
-`agentkit/spec/load.go:553` `checkReasoning` — where every file passes, not only the
+`agentkit/spec/load.go:563` `checkReasoning` — where every file passes, not only the
 edits made in the settings editor. ★ Deleting a client rule is only a simplification if
 the server already has it; that is the question to ask of the next one.
 
@@ -1322,14 +1322,15 @@ someone measures that the default misses something.
 |---|---|
 | Startup reports a missing configuration | The `config root` line in the startup log — it prints the root actually used and the project root |
 | A config change does not take effect | Is that partition hot-reloaded? `llm/` `agents/` `tools/` `mcps/` are hot; `server/` and `skills/` need a restart |
-| Startup fails with `disabled_tools` was renamed to `tools` | ★ The two mean **opposite** things — one removed tools, the other names them. Delete `disabled_tools` and list the tools the agent should have in `tools:` (`agentkit/spec/load.go:96`) |
-| Startup fails with `names the MCP tool` … `but does not mount the server` | ★ Mounting and visibility are two levels: add the server to `mcps:`, or drop the tool from `tools:` (`agentkit/spec/load.go:643`) |
+| Startup fails with `disabled_tools` was renamed to `tools` | ★ The two mean **opposite** things — one removed tools, the other names them. Delete `disabled_tools` and list the tools the agent should have in `tools:` (`agentkit/spec/load.go:98`) |
+| Startup fails with `names the MCP tool` … `but does not mount the server` | ★ Mounting and visibility are two levels: add the server to `mcps:`, or drop the tool from `tools:` (`agentkit/spec/load.go:656`) |
 | A notice says `tools` names a tool that does not exist | The built-in tools are the ones in `decl.BuiltinToolNames` (`agentkit/spec/decl/decl.go:291`); a provider's tool exists only when its file under `tools/` is written |
 | A notice says `tools` names the `skill` tool but `skills` is empty | The configuration is legal but self-contradictory: name the skill in `skills:`, or drop `skill` from `tools:` |
 | An agent cannot call a tool | `GET /v2/agents/:agentId` for the effective tool table; then read the tool's `reason` — `tools`, or the default `ask` tier, which asks |
 | An agent has **no** tools at all | ★ The tool list is an allow-list and it **defaults to none**: an absent `tools:` means no tool. List the tools the agent should have |
 | A leftover `policy/` directory still seems to carry your old tiers | The partition was retired: the tiers live in the files that provide the tools, and the default tier is `ask`. The startup log says so — the notice lands in `deferred` |
 | `reasoning` seems to do nothing | Is that tier declared in the model profile? Undeclared means silently ignored |
+| The editor blames the file you are editing for a problem in **another** file | ★ Every issue names the file it is about (`Issue.Path`), and the editor shows another file's issue under **that** file's name — as a link that opens it. ★ But the tree has to load: a broken file anywhere still refuses the save, so fix that file first |
 | An approval cannot resume | Is the checkpoint still there? Check `pendingApprovals` on `/v2/sessions/:id` |
 | White screen + `Maximum update depth exceeded` | Is some selector returning a new array/object? |
 | E2E reports `already used` | An orphan from the previous force-killed run holds the port; clear it and retry |
@@ -1354,7 +1355,7 @@ the current state of the code, not a to-do list** — fixing one is a separate c
 | **Four runtime dependencies sit in `devDependencies`** | `web/package.json` | `lucide-react` (imported by 10 files), `clsx`, `tailwind-merge` and `class-variance-authority` are all imported by `src/` and bundled into `web/dist`. The build passes (Vite resolves them at build time), but the manifest is wrong. |
 | **`web/scripts/interop-check.ts` is out of date** | lines 16-20 and 41-45 of that script | It POSTs to `/v2/run` **without a `threadId`**, while the server now requires a session first (`POST /v2/sessions`, see `api/v2_run.go:78`). So that item of `make smoke` fails (measured: 400 `threadId is required`). `web/scripts/hitl-smoke.ts` and `web/scripts/no-undefined-url-check.ts` already follow the new contract. |
 | **The comment at `api/server.go:75` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
-| **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the five partitions (`agentkit/spec/config.go:40-71`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:329`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:72`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |
+| **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the five partitions (`agentkit/spec/config.go:40-71`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:378`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:72`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |
 
 ## 8. Before committing
 

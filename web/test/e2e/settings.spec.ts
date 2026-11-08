@@ -242,6 +242,35 @@ test.describe("editing and saving", () => {
   })
 })
 
+// ★ A problem in another file is **that** file's problem. The editor used
+//   to put it on the file being edited: a user editing agents/main.md saw
+//   the model of agents/agent-expert.md on their screen, and there was
+//   nothing they could do about it from there.
+test.describe("another file's problems", () => {
+  async function breakTheTree(page: Page): Promise<void> {
+    await openSettings(page)
+    await selectFile(page, "agents/main.md")
+    await page.locator(EDITOR).click()
+    await page.keyboard.press("Control+a")
+    await page.keyboard.type("---\nmodel: deepseek/gone\n---\nbody\n")
+  }
+
+  test("an issue about another file is shown under that file's name", async ({ page }) => {
+    await breakTheTree(page)
+    const status = page.locator(STATUS)
+    await expect(status).toContainText("agents/agent-expert.md")
+    await expect(status).toContainText("mcps/memory.yaml")
+  })
+
+  test("the other file's problem is a link to that file", async ({ page }) => {
+    await breakTheTree(page)
+    await page.locator(STATUS).getByRole("button", { name: /agents\/agent-expert\.md/ }).click()
+
+    await expect(page.locator(DIALOG)).toContainText("agents/agent-expert.md")
+    await expect(page.locator(EDITOR)).toContainText("expert body")
+  })
+})
+
 test.describe("the new file dialog", () => {
   const NEW_FILE = '[data-testid="settings-new-file"]'
   const NEW_DIALOG = '[data-testid="new-file-dialog"]'
@@ -259,6 +288,20 @@ test.describe("the new file dialog", () => {
     await page.getByRole("button", { name: "Tools", exact: true }).click()
     await page.locator(NEW_NAME).fill(file)
   }
+
+  // ★ At 32rem a YAML skeleton folded every key onto two lines — the editor
+  //   was a column that fought the file it was meant to show. The dialog is
+  //   three-quarter-width now, and it scrolls inside the window instead of
+  //   growing past it.
+  test("the new file dialog is wide enough for a YAML skeleton", async ({ page }) => {
+    await openNewFile(page)
+    const box = await page.locator(NEW_DIALOG).boundingBox()
+    expect(box).toBeTruthy()
+    expect(box!.width).toBeGreaterThan(600)
+
+    const overflow = await page.locator(NEW_DIALOG).evaluate((el) => getComputedStyle(el).overflowY)
+    expect(overflow).toBe("auto")
+  })
 
   // ★ The skeleton follows the FILE, not the section. The tools/ section
   //   template is nothing but comments, and a file built from it has no YAML
@@ -289,20 +332,6 @@ test.describe("the new file dialog", () => {
     await openNewFile(page)
     await page.getByRole("button", { name: "MCP servers", exact: true }).click()
     await page.locator(NEW_NAME).fill("github")
-  // ★ At 32rem a YAML skeleton folded every key onto two lines — the editor
-  //   was a column that fought the file it was meant to show. The dialog is
-  //   three-quarter-width now, and it scrolls inside the window instead of
-  //   growing past it.
-  test("the new file dialog is wide enough for a YAML skeleton", async ({ page }) => {
-    await openNewFile(page)
-    const box = await page.locator(NEW_DIALOG).boundingBox()
-    expect(box).toBeTruthy()
-    expect(box!.width).toBeGreaterThan(600)
-
-    const overflow = await page.locator(NEW_DIALOG).evaluate((el) => getComputedStyle(el).overflowY)
-    expect(overflow).toBe("auto")
-  })
-
 
     // ★ The path is the server's name: the file's name IS the server's name.
     await expect(page.locator(NEW_NAME).locator("xpath=..")).toContainText("mcps/github.yaml")
