@@ -61,10 +61,32 @@ var childPeak = &peakTracker{}
 //	arrives through the very `env:` map the configuration describes.
 const mcpServerEnv = "OPENHERON_TEST_MCP_SERVER"
 
+// The environment variable that turns this test binary into a server that
+// starts and then says nothing.
+//
+// ★ It is the shape of a server that is still installing its own package:
+//
+//	the child is alive, it ignores its stdin, and it never answers the
+//	handshake. The teardown waits for such a child to exit — so the start
+//	must not wait for the teardown.
+const mcpSilentEnv = "OPENHERON_TEST_MCP_SILENT"
+
+// howLongTheSilentChildLives is how long the silent child stays alive.
+//
+// ★ It has to outlast the test: a child that exits early would hide the
+//
+//	regression, because a teardown that waits for a child that is about to
+//	die returns quickly.
+const howLongTheSilentChildLives = 2 * time.Minute
+
 func TestMain(m *testing.M) {
 	if os.Getenv(mcpServerEnv) == "1" {
 		runFakeMCPServer()
 		return
+	}
+	if os.Getenv(mcpSilentEnv) == "1" {
+		time.Sleep(howLongTheSilentChildLives)
+		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }

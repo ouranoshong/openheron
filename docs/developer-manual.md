@@ -233,6 +233,15 @@ For a developer who has to debug it:
   and the next call starts a new one. ★ A call that runs out of time is **not**
   a broken connection: the server may simply be slow, so a deadline gives up
   without tearing the client down (`agentkit/build/mcptools.go:358`).
+- **A failed start does not hold the build.** The teardown of a failed start
+  waits for the child to exit, and a child that is still installing its own
+  package does not exit because its stdin closed — so `startStdioClient`
+  (`agentkit/build/mcpmanager.go:432`) kills the child
+  (`agentkit/build/mcpmanager.go:485`) and bounds the teardown
+  (`agentkit/build/mcpmanager.go:501`). ★ A build waits for a server, not for a
+  server's corpse: without the kill, a server that cannot be started takes the
+  turn down with it, and the client is told "turn start timeout" — a symptom
+  that names neither the server nor the reason.
 - **The tool list is re-listed when a turn asks for it**, and the previous
   listing is older than 30 seconds (`agentkit/build/mcpmanager.go:34`,
   `mcpRelistInterval`). ★ That interval is a fixed value, not a configuration

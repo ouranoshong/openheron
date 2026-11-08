@@ -3,6 +3,8 @@ package build
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -256,5 +258,87 @@ func TestAnUnreachableServerSaysSoAndKeepsTheOtherServersAlive(t *testing.T) {
 		t.Fatalf("Tools: %v", err)
 	} else if len(own) != 1 {
 		t.Fatalf("tools = %v, want the reachable server's tool", own)
+	}
+}
+
+// silentMCPCfg is a server whose child starts and then says nothing.
+//
+// ★ The child is this test binary in its silent mode: it stays alive and
+//
+//	ignores its stdin, which is what a server that is still installing its
+//	own package looks like from the outside.
+func silentMCPCfg(t *testing.T) *decl.MCPServerCfg {
+	t.Helper()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("the test binary's path: %v", err)
+	}
+	return mcpCfg("silent", func(c *decl.MCPServerCfg) {
+		c.Command = self
+		c.Args = []string{"-test.run=TestNothingRunsInTheChild"}
+		c.Env = map[string]string{mcpSilentEnv: "1"}
+		c.Timeout = decl.MCPDuration{Value: 2 * time.Second}
+	})
+}
+
+// TestAServerThatNeverAnswersDoesNotHoldTheBuild is the regression test for
+// the hang.
+//
+// ★ The teardown waits for the child to exit, and this child does not exit
+//
+//	because its stdin closed — so a start that waits for the teardown waits
+//	for the child's whole life, and the turn dies with a start timeout that
+//	names neither the server nor the reason.
+func TestAServerThatNeverAnswersDoesNotHoldTheBuild(t *testing.T) {
+	cfg := silentMCPCfg(t)
+
+	life, cancelLife := context.WithCancel(context.Background())
+	defer cancelLife()
+
+	begin := time.Now()
+	_, err := startStdioClient(context.Background(), life, cfg)
+	elapsed := time.Since(begin)
+
+	if err == nil {
+		t.Fatal("a server that never answers must report the failure")
+	}
+	if !strings.Contains(err.Error(), "initialize") {
+		t.Fatalf("the error must name the handshake that failed, got %v", err)
+	}
+	if elapsed > 20*time.Second {
+		t.Fatalf("the start took %s: a failed server must not hold the build", elapsed)
+	}
+}
+
+// TestTheSilentServerDoesNotTakeTheOthersDownWithIt is the same failure one
+// level up: the manager.
+func TestTheSilentServerDoesNotTakeTheOthersDownWithIt(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("the test binary's path: %v", err)
+	}
+
+	m := newMCPManager()
+	begin := time.Now()
+	if _, _, err := m.Tools(context.Background(), silentMCPCfg(t)); err == nil {
+		t.Fatal("a server that never answers must report the failure")
+	}
+	elapsed := time.Since(begin)
+	if elapsed > 20*time.Second {
+		t.Fatalf("the manager took %s: a failed server must not hold the build", elapsed)
+	}
+
+	// ★ The other server still answers: one broken server is a degradation,
+	//   not the end of the tool surface.
+	good := mcpCfg("fake", func(c *decl.MCPServerCfg) {
+		c.Command = self
+		c.Args = []string{"-test.run=TestNothingRunsInTheChild"}
+		c.Env = map[string]string{mcpServerEnv: "1"}
+		c.Timeout = decl.MCPDuration{Value: 30 * time.Second}
+	})
+	if _, own, err := m.Tools(context.Background(), good); err != nil {
+		t.Fatalf("Tools: %v", err)
+	} else if len(own) == 0 {
+		t.Fatal("the reachable server must still offer its tools")
 	}
 }

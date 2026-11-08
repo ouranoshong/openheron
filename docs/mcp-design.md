@@ -605,6 +605,7 @@ allows: [request_get]
 | http 服务器缺 `url` | 加载期 | 没有东西可谈 |
 | http 服务器上的 `env:` | 加载期 | http 服务器没有子进程可以交给一份环境（§5.2） |
 | agent 的 `mcps:` 点名一个不存在的服务器 | 加载期 | 一个笔误会悄悄把这个 agent 收窄成什么都没有（§5.3） |
+| MCP server 起不来（命令不在 PATH 上、握手超时） | 运行期 | provider 警告，它不贡献工具，这一轮照常跑 —— ★ 装配等的是一个 server，不是一个 server 的尸体（§6.8） |
 | `tools:` 点名一个 server 没有的工具 | 运行期 | server 的清单只有它起来之后才知道 —— provider 警告（§6.1），其余的工具照给 |
 
 ★ **加载期硬错误会让进程停下来，而这正是要点**：这些是有人手写的文件里的错误，
@@ -862,6 +863,16 @@ Policy.TierOf(name):
 ★ **等待的界限就是这次启动本来就有的那个期限**（§5.2）：连接、初始化与取工具清单
   是一个带一个期限的操作。等得更久的调用方拿到的是这次启动报出来的失败 ——
   与它自己去启动这个 server 会拿到的是同一个失败。
+
+★ **失败的启动不能拖住装配。** 初始化失败之后的拆解要**等子进程退出**，
+  而一个还在装自己依赖的子进程不会因为 stdin 关了就退出 —— `uvx` 第一次拉起
+  `mcp-server-fetch` 时正在下 `lxml`，就是这个样子。
+  ⇒ 装配会一直等到那个子进程自己活完，而那一轮以 `turn_start_timeout` 收场：
+  它既不点名是哪个 server，也不说为什么。
+  ⇒ 所以失败路径**先杀掉子进程**（`agentkit/build/mcpmanager.go:485`）再拆解，
+  而拆解本身也有一个上限（`agentkit/build/mcpmanager.go:501`）——
+  ★ 装配等的是一个 server，不是一个 server 的尸体。
+  ⇒ 而失败照旧是**一次降级**：那个 server 不贡献工具，其余的工具照给（§5.7）。
 
 ## 7. 闸门与档位
 
@@ -1147,6 +1158,7 @@ headers:
 | 热重载（§5.4） | `agentkit/spec/reload.go` —— 这个分区是热的（`agentkit/spec/config.go:66`），而声明变了就会换掉客户端（`agentkit/build/mcpmanager.go:229`） |
 | 工具清单变了（§6.6） | 管理者 —— 重新列举（`agentkit/build/mcpmanager.go:118`），以及推进代际并重建工具（`agentkit/build/builder.go:105`） |
 | 一次启动，一个客户端（§6.8） | 管理者 —— 单飞启动（`agentkit/build/mcpmanager.go:215`） |
+| 失败的启动不拖住装配（§6.8） | `startStdioClient`（`agentkit/build/mcpmanager.go:432`）—— 先杀子进程（`agentkit/build/mcpmanager.go:485`），再拆解，而拆解有上限（`agentkit/build/mcpmanager.go:501`） |
 | 一次 run 碰过的 server（§7.4） | `agentkit/run/runrow.go:84` 与 `storage/runledger.go:168` —— run 的那一行点名它们 |
 | 示例与编辑器的模板（§5.6） | `agentkit/templates/files/mcps/example.yaml` —— ★ **一个文件，两个读者**：init 把它写成 `mcps/example.yaml`（`initcfg/initcfg.go:131`），编辑器拿它当脚手架（`agentkit/spec/write.go:190`，经由 `spec.Template`） |
 | 一个 agent 加载哪些服务器（§5.3） | `agentkit/spec/decl/decl.go:114`（那个字段）→ `agentkit/spec/load.go:806`（那个并集 —— ★ 留在树外的 agent 不计入，它本来也跑不起来）→ `agentkit/build/mcpmanager.go`（那次启动） |

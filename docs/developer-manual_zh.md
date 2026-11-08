@@ -205,6 +205,14 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
   （`agentkit/build/mcpmanager.go:290`）关掉客户端，下一次调用重新起一个。
   ★ **超时不是连接断了**：服务器可能只是慢，所以截止时间到了就放弃，不会拆掉
   客户端（`agentkit/build/mcptools.go:358`）。
+- **起不来的服务器不会拖住装配。** 启动失败之后的拆解要等子进程退出，而一个还在
+  装自己依赖的子进程不会因为 stdin 关了就退出 —— 所以 `startStdioClient`
+  （`agentkit/build/mcpmanager.go:432`）先杀掉子进程
+  （`agentkit/build/mcpmanager.go:485`），拆解也有上限
+  （`agentkit/build/mcpmanager.go:501`）。
+  ★ 装配等的是一个 server，不是一个 server 的尸体：不杀它，一个起不来的服务器会
+  把这一轮一起拖下水，而客户端收到的是「turn start timeout」——
+  一个既不点名是哪个 server、也不说为什么的症状。
 - **工具列表在一轮来要时重新列出**，条件是上一次列出的时间超过 30 秒
   （`agentkit/build/mcpmanager.go:34`，`mcpRelistInterval`）。
   ★ 这个间隔是写死的值，不是配置项：没人动的旋钮就是没人测的旋钮，而服务器

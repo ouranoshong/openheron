@@ -15,6 +15,7 @@ import (
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
@@ -403,6 +404,19 @@ func startMCPClient(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (mcp
 	}
 }
 
+// mcpTeardownGrace is how long the teardown of a **failed** server may take
+// before the caller stops waiting for it.
+//
+// ★ It is not a timeout on the server: the server's own deadline is the
+//
+//	file's `timeout:` (the ceiling for connect, initialize and list tools).
+//	This one bounds the **corpse** — how long a child that will not answer may
+//	keep the teardown waiting. ★ A build waits for a server, not for a
+//	server's corpse: a child that is still installing its own package does
+//	not exit because its stdin closed, and a teardown that waits for it
+//	waits for ever.
+const mcpTeardownGrace = 5 * time.Second
+
 // startStdioClient starts the server as a child process.
 //
 // ★ The child inherits this process's environment, with the file's env:
@@ -425,10 +439,16 @@ func startStdioClient(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (m
 	//   start's deadline: the client outlives the start that created it,
 	//   and a child bound to the start would be killed the moment the
 	//   start returned.
+	//
+	//   ★ The handle to the child is kept, because the failure path below
+	//   has to end it: the teardown waits for the child to exit, and a
+	//   child that will not answer may not exit on its own.
+	var child *exec.Cmd
 	tr := transport.NewStdioWithOptions(cfg.Command, env, cfg.Args,
 		transport.WithCommandFunc(func(ctx context.Context, command string, _ []string, args []string) (*exec.Cmd, error) {
 			cmd := exec.CommandContext(ctx, command, args...)
 			cmd.Env = env
+			child = cmd
 			return cmd, nil
 		}))
 	if err := tr.Start(lifeCtx); err != nil {
@@ -436,10 +456,60 @@ func startStdioClient(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (m
 	}
 	cli := client.NewClient(tr)
 	if err := initializeMCPClient(opCtx, cli); err != nil {
-		_ = tr.Close()
+		// ★ A server that will not answer must not hold the build.
+		//
+		//	The teardown waits for the child to exit, and a child that is
+		//	still installing its own package does not exit because its
+		//	stdin closed — so the wait would last as long as the
+		//	install, and the turn would die with a start timeout that
+		//	names neither the server nor the reason. The child is
+		//	killed first, and the teardown is bounded anyway: a build
+		//	waits for a server, not for a server's corpse.
+		//
+		//	★ The server does not contribute tools and the build goes on
+		//	without it — the caller reports it as unreachable, and the
+		//	tools it would have brought are simply not there.
+		killMCPChild(child)
+		closeMCPClient(tr)
 		return nil, err
 	}
 	return cli, nil
+}
+
+// killMCPChild ends a child that outlived its own start.
+//
+// ★ The kill is what makes the teardown finish: closing the pipes asks the
+//
+//	child to leave, and a child that is busy installing has no reason to
+//	look at its stdin.
+func killMCPChild(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		obs.Logger().Warn("[mcp] the child did not die",
+			"pid", cmd.Process.Pid, "err", err)
+	}
+}
+
+// closeMCPClient tears a client down without waiting for ever.
+//
+// ★ The close runs in the background and the wait is bounded: the child is
+//
+//	already dead, so the wait is short — but a child that ignores the kill
+//	must not turn a failed server into a failed turn.
+func closeMCPClient(tr *transport.Stdio) {
+	done := make(chan struct{})
+	go func() {
+		_ = tr.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(mcpTeardownGrace):
+		obs.Logger().Warn("[mcp] the teardown did not finish in time",
+			"grace", mcpTeardownGrace.String())
+	}
 }
 
 // mcpChildEnv assembles the child's environment.

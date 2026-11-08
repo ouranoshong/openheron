@@ -484,6 +484,12 @@ because a stdio server is a **child process**, and a child process started for o
 must still be there for the next one. The provider is **optional** — an unreachable server
 is skipped with a warning, never an error, so one dead server cannot keep the agent down.
 
+★ **A server that will not answer must not take the agent down with it.** The teardown of
+a failed start waits for the child to exit, and a child that is still installing its own
+package does not exit because its stdin closed — so the child is killed first and the
+teardown is bounded (`agentkit/build/mcpmanager.go:485`, `agentkit/build/mcpmanager.go:501`).
+A build waits for a server, not for a server's corpse.
+
 ★ The exposed name is `mcp__<server>__<tool>`, composed in exactly one place
 (`agentkit/build/mcptools.go:141`). The server's own name is the namespace segment, and
 the agent's `tools:` list names the exposed names — a whole server with the pattern

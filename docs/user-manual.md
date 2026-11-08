@@ -569,6 +569,13 @@ placeholder that is not installed, so the server does not come up, **the log say
 and the agent carries on**. **Copying it to `mcps/<server>.yaml` and putting your own
 command in it is the act of defining that server.**
 
+★ **The first start of a stdio server may be slow, and `timeout:` is the ceiling for
+it.** The command is often a package runner (`npx`, `uvx`), and the first run installs
+the server — that install is part of the start, so a server that needs a minute to
+install does not come up within `timeout: 30s`. ★ It then does not come up at all, and
+the turn carries on without its tools: run the command once by hand to warm the cache,
+or give the file a longer `timeout:`.
+
 ★ **What fails at startup:** an unknown `transport`; a stdio server with no `command`; an
 http server with no `url`; `env:` on an http server; an agent naming a server that does
 not exist.
@@ -931,6 +938,10 @@ A configuration with no server says "No MCP servers are configured".
 ★ **Opening the dialog starts the servers it asks about**, so it can answer "is my server
 broken?" — otherwise the answer would be "run a turn and find out". A server the agent
 does not use is `unused` and carries no tool rows.
+
+★ **A server that cannot start does not stop the turn.** The agent runs without that
+server's tools — the rest of the tool surface is unaffected — and the panel carries the
+reason next to the server. The only thing a broken server costs you is its own tools.
 
 The **Refresh** button re-reads the state, so you can fix a server and see the fix without
 closing the dialog.

@@ -419,6 +419,11 @@ MCP 这一支在注册表处并进来：`mcps/<server>.yaml` → `spec.loadMCP`
 **子进程**，为一轮启动的子进程下一轮还得在。provider 是**可选**的 —— 连不上的 server
 只跳过并告警，绝不报错，所以一个死掉的 server 不能把 agent 拖下水。
 
+★ **一个不答话的 server 也不能把 agent 拖下水。** 启动失败之后的拆解要等子进程退出，
+而一个还在装自己依赖的子进程不会因为 stdin 关了就退出 —— 所以先杀掉子进程，拆解也有
+上限（`agentkit/build/mcpmanager.go:485`、`agentkit/build/mcpmanager.go:501`）。
+装配等的是一个 server，不是一个 server 的尸体。
+
 ★ 暴露出来的名字是 `mcp__<server>__<tool>`，只在一处拼装（`agentkit/build/mcptools.go:141`）。
 server 自己的名字就是命名空间那一段，而 agent 的 `tools:` 清单点的是暴露出来的那些名字 ——
 整个 server 用模式 `mcp__<server>__*` 一把点。★ **这个前缀模式是安全的**：server 名里
