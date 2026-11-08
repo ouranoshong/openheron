@@ -853,6 +853,7 @@ make test-env-sync      # ★ 改过开发侧的 agent 定义后必须跑
 cd web && bun run smoke:interop            # SSE 分帧、拼接、历史水合
 cd web && bun run smoke:no-undefined-url   # 不会发出拼错的 URL
 cd web && bun run smoke:hitl               # 审批 resume 走通
+cd web && bun run smoke:config             # config_write 的审批往返（见下面第（八）条）
 ```
 
 ### 5.3 Go 单元测试
@@ -1006,7 +1007,24 @@ E2E 共享一个假后端状态，并行会互相污染。
 要确认某档是否可达，看**每个** agent 的生效工具表：`GET /v2/agents` 与
 `GET /v2/agents/task` 会给出每个工具的 tier 与 reason。
 
-**（八）改界面必须浏览器验证。** 「我改了，测试也绿了」不构成验收依据 ——
+**（八）`smoke:config` 需要一份不可能作为出厂默认的配置。**
+`config_write` 刻意不在任何模板里 —— 把改自己配置的那支笔交给 agent 是个决定，不是默认
+—— 所以出厂就没有哪个 agent 能调它，这一轮的冒烟会没有任何东西可触发。因此脚本
+**先检查自己的前置条件**，缺了就带着该补的那一行以 `2` 退出，而不是看起来像「抖」：
+
+```yaml
+# .openheron/agents/main.md
+tools: [..., config_write]
+```
+
+然后 `make test-env-sync`。★ 当 `config_write` **不在** `ask` 档时它也拒绝运行：
+allow 档的 `config_write` 会在没有审批的情况下写好文件，而那正是这条冒烟存在要抓的东西。
+这也是它叫 `make smoke-config`、而不进 `make smoke` 的原因 —— 出厂安装上它永远不可能通过。
+
+★ 它会把树放回去：探针文件最后通过 API 删掉，并断言它确实没了。留下一个 agent 文件的
+冒烟会改变下一次跑的东西。
+
+**（九）改界面必须浏览器验证。** 「我改了，测试也绿了」不构成验收依据 ——
 脚本级测试看不见渲染层。
 
 ### 5.8 ★ 成本基准

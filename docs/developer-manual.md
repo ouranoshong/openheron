@@ -970,6 +970,7 @@ Individual smoke scripts (they connect to :18099 by default, so **you do not wri
 cd web && bun run smoke:interop            # SSE framing, concatenation, history hydration
 cd web && bun run smoke:no-undefined-url   # no malformed URLs are emitted
 cd web && bun run smoke:hitl               # the approval resume path works
+cd web && bun run smoke:config             # config_write's approval round trip (see (8) below)
 ```
 
 ### 5.3 Go unit tests
@@ -1152,7 +1153,28 @@ so the approval fires anyway. Measured event stream:
 To check whether a tier is reachable, look at **each** agent's effective tool table:
 `GET /v2/agents` and `GET /v2/agents/task` report the tier and the reason per tool.
 
-**(8) Changing the interface requires browser verification.** "I changed it and the tests
+**(8) `smoke:config` needs a configuration that could not ship as a default.**
+`config_write` is absent from every template on purpose — handing an agent the pen that
+edits its own configuration is a decision — so no shipped agent can call it, and the
+smoke's turn would have nothing to trigger. The script therefore **checks its own
+precondition first** and exits `2` with the line to add, instead of looking flaky:
+
+```yaml
+# .openheron/agents/main.md
+tools: [..., config_write]
+```
+
+then `make test-env-sync`. ★ It refuses to run when `config_write` is **not** in the
+`ask` tier either: an allow-tier `config_write` would have written the file without an
+approval, which is the one thing the smoke exists to catch. That is also why the target
+is `make smoke-config` and not a step of `make smoke` — it can never pass on a default
+install.
+
+★ It puts the tree back: the probe file is deleted through the API at the end, and the
+script asserts it is gone. A smoke that leaves an agent file behind changes what the
+next run tests.
+
+**(9) Changing the interface requires browser verification.** "I changed it and the tests
 are green" is not evidence — script-level tests cannot see the rendering layer.
 
 ### 5.8 ★ The cost benchmark

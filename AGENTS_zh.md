@@ -252,6 +252,7 @@ make test-env-sync      # ★ 改过开发侧的 agent 定义后必须跑
 cd web && bun run smoke:interop            # SSE 分帧、拼接、历史水合
 cd web && bun run smoke:no-undefined-url   # 不会发出拼错的 URL
 cd web && bun run smoke:hitl               # 审批 resume 走通
+cd web && bun run smoke:config             # config_write 的审批往返（有前置条件，见下）
 ```
 
 ### 规则

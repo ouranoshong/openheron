@@ -287,6 +287,7 @@ Single smoke scripts (they connect to :18099 by default, **no need to write `OPE
 cd web && bun run smoke:interop            # SSE framing, concatenation, history hydration
 cd web && bun run smoke:no-undefined-url   # never sends a malformed URL
 cd web && bun run smoke:hitl               # approval resume works end to end
+cd web && bun run smoke:config             # config_write's approval round trip (needs a prerequisite, below)
 ```
 
 ### Rules
