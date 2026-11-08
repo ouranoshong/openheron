@@ -208,6 +208,10 @@ func ToolTemplates() map[string]string {
 	return Templates(DirTools)
 }
 
+// ★ The nil guard comes first, before `len(c.Models)`: a nil *Config is a
+// legal value here (a process that has not loaded a tree yet still asks for
+// the vocabulary), and reading a field through a nil receiver panics. The
+// `if c == nil` that used to sit after the `make` did not protect anything.
 func (c *Config) ModelRefs() []string {
 	if c == nil {
 		return nil
@@ -221,10 +225,10 @@ func (c *Config) ModelRefs() []string {
 }
 
 func (c *Config) ReasoningLevels() map[string][]string {
-	out := make(map[string][]string, len(c.Models))
 	if c == nil {
-		return out
+		return map[string][]string{}
 	}
+	out := make(map[string][]string, len(c.Models))
 	for ref, m := range c.Models {
 		if m == nil || len(m.Reasoning) == 0 {
 			continue

@@ -49,7 +49,7 @@ var Categories = []Category{
 		loader: (*Config).loadAgent,
 	},
 	{
-		ID: DirServer, Label: "decl.Server", Dir: DirServer, Ext: ".yaml",
+		ID: DirServer, Label: "Server", Dir: DirServer, Ext: ".yaml",
 		Editable: false, hot: false,
 		loader: (*Config).loadServer,
 	},

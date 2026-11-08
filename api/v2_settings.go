@@ -17,29 +17,6 @@ const (
 	codeConfigWriteConflict = "config_write_conflict"
 )
 
-type settingsCategory struct {
-	ID       string `json:"id"`
-	Editable bool   `json:"editable"`
-	Hot      bool   `json:"hot"`
-	Note     string `json:"note,omitempty"`
-}
-
-type settingsItem struct {
-	Path     string `json:"path"`
-	Exists   bool   `json:"exists"`
-	Hot      bool   `json:"hot"`
-	Revision string `json:"revision,omitempty"`
-}
-
-type settingsManifest struct {
-	Categories      []settingsCategory  `json:"categories"`
-	Items           []settingsItem      `json:"items"`
-	Templates       map[string]string   `json:"templates"`
-	ModelRefs       []string            `json:"modelRefs"`
-	ReasoningLevels map[string][]string `json:"reasoningLevels"`
-	ConfigVersion   string              `json:"configVersion"`
-}
-
 type settingsItemBody struct {
 	Path     string `json:"path"`
 	Content  string `json:"content"`
@@ -122,46 +99,15 @@ func (s *Server) v2SettingsManifest(_ context.Context, c *app.RequestContext) {
 	if svc == nil {
 		return
 	}
-	live := s.liveConfig()
-	refs := live.ModelRefs()
-
-	manifest := settingsManifest{
-		Categories:      make([]settingsCategory, 0, len(spec.Categories)),
-		Items:           []settingsItem{},
-		Templates:       map[string]string{},
-		ModelRefs:       refs,
-		ReasoningLevels: live.ReasoningLevels(),
+	// ★ The manifest is assembled in spec, not here: `openheron init` and
+	//   the config_* tools ask the same question, and three assemblies of
+	//   "which files are there" is how the CLI and the editor drift.
+	m, err := svc.Manifest(s.liveConfig())
+	if err != nil {
+		settingsFail(c, err)
+		return
 	}
-	for _, cat := range spec.Categories {
-		view := settingsCategory{ID: cat.Dir, Editable: cat.Editable, Hot: cat.Hot()}
-		if !cat.Editable {
-			view.Note = "not hot-reloaded; changes apply on restart"
-		}
-		manifest.Categories = append(manifest.Categories, view)
-		manifest.Templates[cat.Dir] = spec.Skeleton(cat.Dir, refs)
-		// ★ The per-file templates: the file's own skeleton wins over the
-		//   section's, because a section skeleton may be nothing but
-		//   comments and a file built from it has no YAML document at all.
-		for rel, tpl := range spec.Templates(cat.Dir) {
-			manifest.Templates[rel] = tpl
-		}
-
-		names, err := svc.ListFiles(cat)
-		if err != nil {
-			settingsFail(c, err)
-			return
-		}
-		for _, name := range names {
-			rel := cat.Dir + "/" + name
-			item := settingsItem{Path: rel, Exists: true, Hot: cat.Hot()}
-			if _, rev, err := svc.ReadFile(rel); err == nil {
-				item.Revision = rev
-			}
-			manifest.Items = append(manifest.Items, item)
-		}
-	}
-	manifest.ConfigVersion = svc.Fingerprint()
-	c.JSON(consts.StatusOK, manifest)
+	c.JSON(consts.StatusOK, m)
 }
 
 // ── GET /v2/settings/item ─────────────────────────────────────────────────

@@ -81,12 +81,12 @@ func TestSettingsManifestListsEveryCategory(t *testing.T) {
 	if got.code != consts.StatusOK {
 		t.Fatalf("= %d (%s)", got.code, got.body)
 	}
-	m := decodeSettings[settingsManifest](t, got)
+	m := decodeSettings[spec.Manifest](t, got)
 
 	if len(m.Categories) != len(spec.Categories) {
 		t.Fatalf("categories = %d, want %d", len(m.Categories), len(spec.Categories))
 	}
-	byID := map[string]settingsCategory{}
+	byID := map[string]spec.ManifestCategory{}
 	for _, c := range m.Categories {
 		byID[c.ID] = c
 	}
@@ -111,10 +111,34 @@ func TestSettingsManifestListsEveryCategory(t *testing.T) {
 	}
 }
 
+// ★ The manifest's wire shape used to be pinned by decoding into a struct
+// the API declared itself. It now decodes into spec.Manifest — the struct
+// that produced it — so a renamed json tag would decode into itself and no
+// assertion would notice. The keys are therefore checked against the raw
+// body: the browser reads these names, not Go field names.
+func TestSettingsManifestKeepsItsWireNames(t *testing.T) {
+	srv, _, _ := settingsEnv(t)
+	got := callJSON(t, srv, "GET", "/v2/settings", nil)
+
+	for _, key := range []string{
+		`"categories"`, `"items"`, `"templates"`,
+		`"modelRefs"`, `"reasoningLevels"`, `"configVersion"`,
+		`"id"`, `"editable"`, `"hot"`, `"note"`,
+		`"path"`, `"exists"`, `"revision"`,
+	} {
+		if !strings.Contains(got.body, key) {
+			t.Fatalf("the manifest no longer carries %s: %s", key, got.body)
+		}
+	}
+	if strings.Contains(got.body, `"Label"`) || strings.Contains(got.body, `"ModelRefs"`) {
+		t.Fatalf("a Go field name leaked into the wire shape: %s", got.body)
+	}
+}
+
 func TestSettingsManifestCarriesTheReasoningVocabulary(t *testing.T) {
 	srv, _, _ := settingsEnv(t)
 	got := callJSON(t, srv, "GET", "/v2/settings", nil)
-	m := decodeSettings[settingsManifest](t, got)
+	m := decodeSettings[spec.Manifest](t, got)
 
 	if len(m.ModelRefs) == 0 {
 		t.Fatal("precondition failed: no models in this env")
@@ -156,7 +180,7 @@ func TestSettingsManifestCarriesTheReasoningVocabulary(t *testing.T) {
 func TestSettingsManifestOmitsSkills(t *testing.T) {
 	srv, _, _ := settingsEnv(t)
 	got := callJSON(t, srv, "GET", "/v2/settings", nil)
-	m := decodeSettings[settingsManifest](t, got)
+	m := decodeSettings[spec.Manifest](t, got)
 
 	// ★ The check is about the **structure**, not about the word: the
 	// manifest carries the templates it hands out, and the agent template
@@ -178,10 +202,10 @@ func TestSettingsManifestListsEachFileOnce(t *testing.T) {
 	srv, _, _ := settingsEnv(t)
 
 	got := callJSON(t, srv, "GET", "/v2/settings", nil)
-	m := decodeSettings[settingsManifest](t, got)
+	m := decodeSettings[spec.Manifest](t, got)
 
 	seen := map[string]int{}
-	var httpFile *settingsItem
+	var httpFile *spec.ManifestItem
 	for i := range m.Items {
 		it := m.Items[i]
 		seen[it.Path]++
