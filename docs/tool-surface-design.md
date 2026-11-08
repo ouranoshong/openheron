@@ -16,23 +16,29 @@
 
 ### 1.1 工具归属：四把钥匙，两种风格
 
-一个 agent 的工具面今天由四个地方共同决定，其中三个在 agent 自己的 frontmatter 里，一个在工具自己的文件里：
+改造前，一个 agent 的工具面由四个地方共同决定，其中三个在 agent 自己的 frontmatter 里，
+一个在工具自己的文件里：
 
-| 键 | 位置 | 缺省 | 现在做什么 |
+| 键 | 位置 | 缺省 | 当时做什么 |
 |---|---|---|---|
-| `disabled_tools` | `agents/<id>.md` | 空 = 全给 | **减法**：从全集里拿掉这些（`agentkit/spec/decl/decl.go:93`） |
-| `skills` | `agents/<id>.md` | 不写 = 全部 | 三态：不写 = 全部，`[]` = 没有，有名 = 这些（`agentkit/spec/decl/decl.go:106`） |
-| `mcps` | `agents/<id>.md` | 不写 = 全部 | 三态：不写 = 全部服务器，`[]` = 不挂（`agentkit/spec/decl/decl.go:114`） |
+| `disabled_tools` | `agents/<id>.md` | 空 = 全给 | **减法**：从全集里拿掉这些 |
+| `skills` | `agents/<id>.md` | 不写 = 全部 | 三态：不写 = 全部，`[]` = 没有，有名 = 这些 |
+| `mcps` | `agents/<id>.md` | 不写 = 全部 | 三态：不写 = 全部服务器，`[]` = 不挂 |
 | `allows` | `tools/*.yaml`、`mcps/<server>.yaml` | 代码的缺省清单 | **加法**：点名不用审批的 |
 
-★ **两种风格混在一起是这里的主要问题。** 三个键里两个是"缺省全给"，一个是减法；第四个（`allows`）又是加法。一个读者要在脑子里同时维持四套缺省。
+★ **两种风格混在一起是这里的主要问题。** 三个键里两个是「缺省全给」，一个是减法；
+第四个（`allows`）又是加法。一个读者要在脑子里同时维持四套缺省。
 
-配套的装配在：
+★ **而三态是靠指针实现的**：`Skills *[]string`、`MCPServers *[]string`，`nil` 与 `[]`
+是两件事。于是每个消费方都得自己展开一次 —— `mcpServersOf`（nil → 全部）、
+`skillScopeOf`（nil → 全部）、`cloneList`（连指针一起复制）。三处各自的注释都在解释
+同一个取舍，而那只是同一个问题的三个副本。
 
-- 白名单化之后的档位表：`agentkit/build/spec.go:57` `policyOf`，缺省清单在 `agentkit/build/tools.go:61` `builtinAllowedTools`；
+配套的装配在（这些**今天仍在**，只是喂给它的东西变了）：
+
+- 档位表：`agentkit/build/spec.go:57` `policyOf`，缺省清单在 `agentkit/build/tools.go:61` `builtinAllowedTools`；
 - 每个工具文件的 `allows:` 汇总：`agentkit/spec/load.go:259` `AllowedTools`；
-- 服务端文件里的 `allows:` 翻译成暴露名：`agentkit/build/mcptools.go:173` `mcpAllowedNames`；
-- 三态的展开：`agentkit/spec/load.go:574` `mcpServersOf`（nil → 全部）、`agentkit/build/skill.go:62` `skillScopeOf`（nil → 全部）。
+- 服务端文件里的 `allows:` 翻译成暴露名：`agentkit/build/mcptools.go:173` `mcpAllowedNames`。
 
 ### 1.2 MCP 的名字：三段，各管一件事
 
