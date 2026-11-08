@@ -1224,18 +1224,70 @@ export function startFakeServer(port = 0): FakeServer {
 
   const hotFor = (path: string) => !path.startsWith("server/")
 
-  const writeSettingOnProbe = (body: any): Response | null => {
-    const path: string = body.path ?? ""
-    const content: string = body.content ?? ""
-    if (path.startsWith("llm/") && /^api_key:\s*(?!\$\{|@file:)/m.test(content)) {
-      return fail(400, "api_key must be a ${ENV} or @file: reference", "config_secret_literal")
+  // validateProbe answers `/v2/settings/validate` the way the loader answers
+  // Diagnostics: a list of issues, each with a line when it has one.
+  //
+  // ★ The editor asks the server now instead of running its own copy of the
+  //   rules, so the fake has to model the two findings the specs are about:
+  //   a key written out in plain text, and a file with no YAML document at
+  //   all. Everything else validates — which is what "the fake is not a
+  //   loader" means, and the real loader's own cases live in Go.
+  const validateProbe = (path: string, content: string) => {
+    const issues: { path?: string; line: number; severity: "error" | "hint"; message: string }[] = []
+    const hasDocument = content.split("\n").some((l) => {
+      const t = l.trim()
+      return t !== "" && !t.startsWith("#")
+    })
+    if (!hasDocument) {
+      issues.push({
+        line: 0,
+        severity: "error",
+        message: "the file is empty (or contains only comments)",
+      })
+      return issues
     }
-    if (content.includes("BROKEN")) {
-      return fail(
-        422,
-        "agents/main.md references model deepseek/gone which is not declared under llm/",
-        "config_would_break_merge",
-      )
+    if (path.startsWith("llm/")) {
+      const m = /^api_key:\s*(?!\$\{|@file:)/m.exec(content)
+      if (m) {
+        issues.push({
+          path,
+          line: content.slice(0, m.index).split("\n").length,
+          severity: "error",
+          message:
+            "api_key must be a reference, not a literal: use ${ENV_VAR} or @file:/path so the secret stays out of the repository",
+        })
+      }
+    }
+    return issues
+  }
+
+  // pathProbe stands in for `spec.ValidatePath` in the two refusals the specs
+  // are about: a file name a partition does not accept, and a server name that
+  // could not be read back.
+  //
+  // ★ This is the **server** side of the fake, so it may hold a copy of the
+  //   rules — that is what a fake is for. The client holds none.
+  const pathProbe = (path: string): Response | null => {
+    const [section = "", file = ""] = path.split("/")
+    const editable = ["agents", "llm", "tools", "mcps"]
+    if (!file || !editable.includes(section)) {
+      return fail(400, `unknown config section ${section}`, "config_path_invalid")
+    }
+    if (section === "tools") {
+      const known = ["filesystem.yaml", "http.yaml", "kb.yaml", "web_search.yaml", "wikipedia.yaml"]
+      if (!known.includes(file)) {
+        return fail(400, `tools/ only accepts ${known.join(", ")}; other files here are rejected at load time`, "config_path_invalid")
+      }
+    }
+    if (section === "mcps") {
+      const name = file.endsWith(".yaml") ? file.slice(0, -".yaml".length) : ""
+      if (!/^[a-z0-9]+(_[a-z0-9]+)*$/.test(name)) {
+        return fail(
+          400,
+          `mcps/ accepts <server>.yaml, and the server name must match ^[a-z0-9]+(_[a-z0-9]+)*$`,
+          "config_path_invalid",
+        )
+      }
     }
     return null
   }
@@ -1564,12 +1616,12 @@ export function startFakeServer(port = 0): FakeServer {
 
       if (path === "/v2/settings/validate" && req.method === "POST") {
         const body = (await readJSON(req))
-        const probe = writeSettingOnProbe(body)
-        if (probe) return probe
-        // ★ The shape the real server answers with, `issues` and all: a fake
-        //   that omits the field lets the client code for its absence go
-        //   untested until it meets a real loader.
-        return json({ ok: true, issues: [], configVersion: "fake-v1" })
+        const issues = validateProbe(body.path ?? "", body.content ?? "")
+        return json({
+          ok: !issues.some((i) => i.severity === "error"),
+          issues,
+          configVersion: "fake-v1",
+        })
       }
 
       if (path === "/v2/settings/item") {
@@ -1585,6 +1637,8 @@ export function startFakeServer(port = 0): FakeServer {
           })
         }
         if (req.method === "POST" || req.method === "PUT") {
+          const refused = pathProbe(body.path ?? "")
+          if (refused) return refused
           return writeSetting(body.path, body.content ?? "", body.baseRevision)
         }
         if (req.method === "DELETE") {

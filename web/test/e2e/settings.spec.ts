@@ -229,13 +229,19 @@ test.describe("the new file dialog", () => {
     await expect(page.locator(EDITOR)).toContainText("transport: stdio")
   })
 
-  test("a server name that could not be read back is refused", async ({ page }) => {
+  // ★ The client keeps no copy of the path rules any more: the refusal is
+  //   `spec.ValidatePath`'s, and the dialog shows the server's sentence and
+  //   **stays open** — closing it on a refused create sends the user back to a
+  //   list that does not contain the file, with the reason behind the dialog.
+  test("a server name that could not be read back is refused by the server, and the dialog stays open", async ({ page }) => {
     await openNewFile(page)
     await page.getByRole("button", { name: "MCP servers", exact: true }).click()
     await page.locator(NEW_NAME).fill("github__x")
+    await page.click(NEW_CREATE)
 
-    await expect(page.locator(NEW_DIALOG)).toContainText(/could not be read back/i)
-    await expect(page.locator(NEW_CREATE)).toBeDisabled()
+    await expect(page.locator(NEW_DIALOG)).toBeVisible()
+    await expect(page.locator(NEW_DIALOG)).toContainText(/server name must match/i)
+    await expect(page.locator(NEW_NAME)).toHaveValue("github__x")
   })
 
   // ★ The filesystem tools are mounted regardless, so their file is a **tuner**:
@@ -259,7 +265,11 @@ test.describe("the new file dialog", () => {
     await expect(page.locator(STATUS)).not.toContainText(/only accepts/i)
   })
 
-  test("a tools file with no YAML content is refused before the round trip", async ({ page }) => {
+  // ★ Validation is the server's answer now, so this is a round trip: the
+  //   editor asks after the pause, the loader's own sentence comes back, and
+  //   the save is blocked on it. The client no longer has a rule of its own to
+  //   fire first.
+  test("a tools file with no YAML content is refused by the server", async ({ page }) => {
     await openNewFile(page)
     await nameToolsFile(page, "http.yaml")
     await page.click(NEW_CREATE)
@@ -269,10 +279,19 @@ test.describe("the new file dialog", () => {
     await page.keyboard.press("Control+a")
     await page.keyboard.type("# only a comment\n")
 
-    await expect(page.locator(STATUS)).toContainText(/no YAML content/i)
-    // ★ The save is blocked **locally**: the button is disabled, so the
-    //   request never leaves the browser. Clicking it would wait forever.
+    await expect(page.locator(STATUS)).toContainText(/file is empty/i)
     await expect(page.locator(SAVE)).toBeDisabled()
+  })
+
+  // ★ A create the server refuses keeps the dialog open with the draft, and
+  //   says why in the dialog — not in the status line behind it.
+  test("a tools file name the server does not accept keeps the dialog open", async ({ page }) => {
+    await openNewFile(page)
+    await nameToolsFile(page, "whatever.yaml")
+    await page.click(NEW_CREATE)
+
+    await expect(page.locator(NEW_DIALOG)).toBeVisible()
+    await expect(page.locator(NEW_DIALOG)).toContainText(/only accepts/i)
   })
 })
 

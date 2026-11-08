@@ -258,3 +258,53 @@ func TestCheckReportsTheTreeOnDisk(t *testing.T) {
 		t.Fatalf("message = %q", iss.Message)
 	}
 }
+
+// ★ The reasoning vocabulary is the model's, and the check belongs where
+// every file is read — not in the editor, which saw only the edits made in it.
+func TestAnUndeclaredReasoningLevelIsRefused(t *testing.T) {
+	f := newFixture(t)
+	f.write(t, "llm/openai.yaml", `
+type: openai_compat
+base_url: https://api.example.com
+api_key: ${TEST_LLM_KEY}
+models:
+  - id: fast
+    reasoning:
+      off: { reasoning_effort: none }
+      high: { reasoning_effort: high }
+`)
+	f.write(t, "agents/main.md", "---\nmodel: openai/fast\nreasoning: ultra\n---\nbody\n")
+
+	s := f.service(t)
+	d := s.Check()
+	if d.OK {
+		t.Fatal("a level the model does not declare must not load")
+	}
+	iss := findIssue(d, SeverityError)
+	if iss == nil {
+		t.Fatalf("no error issue: %+v", d.Issues)
+	}
+	for _, want := range []string{"agents/main.md", "ultra", "high, off"} {
+		if !strings.Contains(iss.Message, want) {
+			t.Fatalf("the message must carry %q: %q", want, iss.Message)
+		}
+	}
+}
+
+// A model that declares no vocabulary has no closed set to check against:
+// the level passes through to the vendor as written.
+func TestAModelWithoutAVocabularyAcceptsAnyLevel(t *testing.T) {
+	f := newFixture(t)
+	f.write(t, "llm/openai.yaml", `
+type: openai_compat
+base_url: https://api.example.com
+api_key: ${TEST_LLM_KEY}
+models:
+  - id: fast
+`)
+	f.write(t, "agents/main.md", "---\nmodel: openai/fast\nreasoning: anything\n---\nbody\n")
+
+	if d := f.service(t).Check(); !d.OK {
+		t.Fatalf("a model with no table must not restrict the level: %+v", d.Issues)
+	}
+}

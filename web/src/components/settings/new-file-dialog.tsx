@@ -4,9 +4,8 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { SectionPicker } from "@/components/settings/file-list"
-import { selectEditableSections, useSettings } from "@/lib/settings-store"
-import { fileTemplate, resolveTemplate, suggestPath, validatePath, type Section } from "@/lib/settings-validate"
-import { useShallow } from "zustand/react/shallow"
+import { useSettings } from "@/lib/settings-store"
+import { fileTemplate, resolveTemplate, suggestPath, type Section } from "@/lib/settings-validate"
 
 export function NewFileButton() {
   const [open, setOpen] = useState(false)
@@ -22,9 +21,6 @@ export function NewFileButton() {
 
 export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenChange?: (v: boolean) => void }) {
   const templates = useSettings((s) => s.manifest?.templates)
-  // ★ The manifest says which sections may be edited — the server owns the
-  //   partition table, and a client that keeps its own list drifts from it.
-  const editable = useSettings(useShallow(selectEditableSections))
   const modelRefs = useSettings((s) => s.manifest?.modelRefs)
   const newFile = useSettings((s) => s.newFile)
 
@@ -35,25 +31,39 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
   // content is still the template, and a new file name may replace it with
   // that file's own template.
   const [edited, setEdited] = useState(false)
+  // ★ The refusal is the **server's sentence**, kept here rather than derived
+  //   from a copy of its rules. The name is not checked in this file at all:
+  //   `spec.ValidatePath` is the only thing that knows the tools/ whitelist
+  //   and the MCP server-name pattern, and a second copy here drifts.
+  const [refusal, setRefusal] = useState<string | undefined>()
 
   const path = suggestPath(name, section)
-  const pathIssues = path ? validatePath(path, editable) : [{ line: 1, message: "enter a file name" }]
+  const named = name.trim() !== ""
 
   const reset = () => {
     setSection("agents")
     setName("")
     setContent("")
     setEdited(false)
+    setRefusal(undefined)
   }
 
   const seed = (s: Section) => {
     setSection(s)
     setContent(templates?.[s] ?? "")
     setEdited(false)
+    setRefusal(undefined)
   }
 
   const submit = async () => {
-    await newFile(path, content)
+    const reason = await newFile(path, content)
+    // ★ A refused create keeps the dialog open with everything the user
+    //   typed. Closing it on failure sends them back to a list that does not
+    //   contain the file, with the reason in a status line behind the dialog.
+    if (reason !== undefined) {
+      setRefusal(reason)
+      return
+    }
     reset()
     onOpenChange?.(false)
   }
@@ -120,11 +130,13 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
               className="bg-background rounded-md border px-2 py-1.5 font-mono text-xs"
               data-testid="new-file-name"
             />
-            {path && pathIssues.length === 0 && (
+            {path && (
               <span className="text-muted-foreground font-mono text-[11px]">{path}</span>
             )}
-            {pathIssues.length > 0 && (
-              <span className="text-destructive text-[11px]">{pathIssues[0]!.message}</span>
+            {refusal !== undefined && (
+              <span className="text-destructive text-[11px]" data-testid="new-file-refusal">
+                {refusal}
+              </span>
             )}
           </div>
 
@@ -166,7 +178,7 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
           <Button type="button" variant="ghost" onClick={() => onOpenChange?.(false)}>
             Cancel
           </Button>
-          <Button type="button" disabled={pathIssues.length > 0 || !path} onClick={() => void submit()} data-testid="new-file-create">
+          <Button type="button" disabled={!named} onClick={() => void submit()} data-testid="new-file-create">
             Create
           </Button>
         </DialogFooter>

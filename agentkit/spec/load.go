@@ -511,13 +511,17 @@ func (c *Config) validate() error {
 	for _, id := range ids {
 		a := c.Agents[id]
 		ref, _ := ParseRef(a.ModelRef)
-		if _, ok := c.Models[ref.String()]; !ok {
+		m, ok := c.Models[ref.String()]
+		if !ok {
 			where := a.File
 			if where == "" {
 				where = DirAgent + "/" + id + ".md"
 			}
 			return fmt.Errorf("agent %s (%s) references model %s which is not declared under llm/",
 				id, where, a.ModelRef)
+		}
+		if err := checkReasoning(id, a, m); err != nil {
+			return err
 		}
 	}
 
@@ -531,6 +535,41 @@ func (c *Config) validate() error {
 		return err
 	}
 	return c.validateDepth(ids)
+}
+
+// checkReasoning refuses a level the model does not declare.
+//
+// ★ The vocabulary belongs to the **model**, not to the agent: the table under
+// `reasoning:` in llm/<provider>.yaml is what a level turns into at that
+// vendor. A level the table does not carry is not "a level that means
+// nothing" — the request goes out with no reasoning configured at all, so
+// `reasoning: max` on a model that declares off/low/high silently thinks not
+// at all. That is why the declaration is checked instead of tolerated.
+//
+// ★ The check used to live in the settings editor, where it covered only the
+// edits made in that editor. Every other way of writing the file — an editor,
+// a generated file, a copy from another machine, an agent's own config_write —
+// went unchecked, which is the wrong half to cover.
+func checkReasoning(id string, a *decl.Agent, m *decl.Model) error {
+	// ★ An agent that names no level inherits the model's reasoning_default,
+	//   and a model with no table has no closed vocabulary to check against.
+	if a == nil || m == nil || a.Reasoning == "" || len(m.Reasoning) == 0 {
+		return nil
+	}
+	if _, ok := m.Reasoning[a.Reasoning]; ok {
+		return nil
+	}
+	levels := make([]string, 0, len(m.Reasoning))
+	for level := range m.Reasoning {
+		levels = append(levels, level)
+	}
+	sort.Strings(levels)
+	where := a.File
+	if where == "" {
+		where = DirAgent + "/" + id + ".md"
+	}
+	return fmt.Errorf("%s: reasoning %q is not declared by %s — the model declares: %s",
+		where, a.Reasoning, a.ModelRef, strings.Join(levels, ", "))
 }
 
 // containsName reports whether the list carries the name.

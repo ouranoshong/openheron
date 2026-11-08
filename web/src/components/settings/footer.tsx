@@ -1,6 +1,6 @@
 
 import { useSettings, selectCanSave, selectServerIssues } from "@/lib/settings-store"
-import type { Issue } from "@/lib/settings-validate"
+import { issueLine, type Issue } from "@/lib/settings-validate"
 import { Button } from "@/components/ui/button"
 
 export function SettingsFooter() {
@@ -88,12 +88,12 @@ function Status({
       <ul className="flex flex-col gap-0.5">
         {errors.map((i, idx) => (
           <li key={`e${idx}`} className="text-destructive">
-            line {i.line}: {i.message}
+            {issueLine(i)}
           </li>
         ))}
         {hints.map((i, idx) => (
           <li key={`h${idx}`} className="text-muted-foreground">
-            line {i.line}: {i.message}
+            {issueLine(i)}
           </li>
         ))}
       </ul>

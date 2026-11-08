@@ -98,7 +98,27 @@ function install(): void {
       if (body.content!.includes("BROKEN_MERGE")) {
         return json({ error: "agents/main.md references model x/y not declared", code: "config_would_break_merge", retryable: false }, 422)
       }
-      return json({ ok: true, configVersion: "v1" })
+      // ★ Two findings, so the store can be tested for what it does with a
+      //   verdict — render it, block the write, replace it on the next
+      //   answer. Which findings a real loader produces is agentkit/spec's
+      //   business and is tested there.
+      const issues: { line: number; severity: string; message: string }[] = []
+      if (/^api_key:\s*sk-/m.test(body.content!)) {
+        issues.push({
+          line: 3,
+          severity: "error",
+          message: "api_key must be a reference, not a literal: use ${ENV_VAR} or @file:/path",
+        })
+      }
+      const level = /^reasoning:\s*([a-z]+)/m.exec(body.content!)?.[1]
+      if (level === "ultra") {
+        issues.push({
+          line: 4,
+          severity: "error",
+          message: 'reasoning "ultra" is not declared by deepseek/flash — the model declares: high, low, max, off',
+        })
+      }
+      return json({ ok: issues.length === 0, issues, configVersion: "v1" })
     }
 
     if (url === "/v2/settings/item") {
@@ -120,6 +140,9 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // ★ A debounced validation that is still pending would fire during the
+  //   next test, against that test's fetch. closeSettings is what cancels it.
+  s().closeSettings()
   useSettings.setState({
     open: false,
     manifest: undefined,
@@ -201,40 +224,62 @@ describe("editing", () => {
     expect(selectDirty(s())).toBe(false)
   })
 
-  test("a local failure blocks saving without touching the network", async () => {
+  test("a server verdict blocks the write, and the PUT never goes out", async () => {
     await s().openSettings()
     await s().select("llm/deepseek.yaml")
-    const before = calls.length
     s().edit("type: openai\nbase_url: https://x\napi_key: sk-leak\nmodels: []\n")
 
-    expect(s().issues.length).toBeGreaterThan(0)
-    expect(selectCanSave(s())).toBe(false)
     await s().save()
-    expect(calls.length).toBe(before)
+    expect(s().saveState).toBe("error")
     expect(s().saveError).toContain("reference")
+    expect(s().issues.some((i) => i.message.includes("reference"))).toBe(true)
+    expect(calls.some((c) => c.method === "PUT")).toBe(false)
   })
 
-  test("the rules follow the section of the selected file", async () => {
+  // ★ Validation is a round trip now, so it is debounced. Two keystrokes
+  //   inside the window are one question — the answer is about the draft, and
+  //   the draft has moved on.
+  test("a burst of edits asks the server once, after the pause", async () => {
+    await s().openSettings()
+    await s().select("llm/deepseek.yaml")
+    const before = calls.filter((c) => c.url === "/v2/settings/validate").length
+
+    s().edit("type: openai\n")
+    s().edit("type: openai\nbase_url: https://x\n")
+    s().edit(PROVIDER)
+    await new Promise((r) => setTimeout(r, 400))
+
+    const validated = calls.filter((c) => c.url === "/v2/settings/validate").slice(before)
+    expect(validated).toHaveLength(1)
+    expect(validated[0]!.body.content).toBe(PROVIDER)
+  })
+
+  test("the answer replaces the previous verdict", async () => {
     await s().openSettings()
     await s().select("llm/deepseek.yaml")
     s().edit("api_key: sk-leak\n")
+    await new Promise((r) => setTimeout(r, 400))
     expect(s().issues.some((i) => i.message.includes("reference"))).toBe(true)
 
-    // ★ The rules follow the section: the agents' own rules, not the
-    //   provider's.
-    await s().select("agents/x.md")
-    s().edit("no frontmatter here\n")
-    expect(s().issues.some((i) => i.message.includes("frontmatter"))).toBe(true)
-  })
-
-  test("editing clears the previous verdict", async () => {
-    await s().openSettings()
-    await s().select("llm/deepseek.yaml")
-    s().edit("api_key: sk-leak\n")
-    expect(s().issues.length).toBeGreaterThan(0)
     s().edit(PROVIDER)
+    await new Promise((r) => setTimeout(r, 400))
     expect(s().issues).toEqual([])
     expect(s().serverIssues).toEqual([])
+  })
+
+  // ★ A save clicked inside the debounce window must not write on the
+  //   strength of a verdict about older text: it asks again, now, and the
+  //   pending question is cancelled so the two answers cannot cross.
+  test("saving cancels the pending question and asks its own", async () => {
+    await s().openSettings()
+    s().edit("ask: [execute]\n")
+    const before = calls.filter((c) => c.url === "/v2/settings/validate").length
+    await s().save()
+    await new Promise((r) => setTimeout(r, 400))
+
+    const validated = calls.filter((c) => c.url === "/v2/settings/validate").slice(before)
+    expect(validated).toHaveLength(1)
+    expect(s().saveState).toBe("saved")
   })
 })
 
@@ -258,7 +303,7 @@ describe("saving", () => {
 
     expect(s().saveState).toBe("error")
     expect(s().saveError).toContain("ultra")
-    expect(s().saveError).toContain("off, low, high, max")
+    expect(s().saveError).toContain("high, low, max, off")
     expect(calls.some((c) => c.method === "PUT")).toBe(false)
   })
 

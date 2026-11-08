@@ -11,7 +11,7 @@ import {
   type SettingsItem,
   type SettingsManifest,
 } from "@/lib/settings-api"
-import { blocking, check, EDITABLE_SECTIONS, type Issue, type ReasoningCatalog } from "@/lib/settings-validate"
+import { blocking, EDITABLE_SECTIONS, issueLine, type Issue } from "@/lib/settings-validate"
 
 export type SaveState =
   | "idle"
@@ -50,7 +50,11 @@ export interface SettingsState {
   reloadFromDisk(): Promise<void>
   save(): Promise<void>
   remove(): Promise<void>
-  newFile(path: string, content: string): Promise<void>
+  // newFile resolves to the server's sentence when the file was refused, and
+  // to undefined when it was created. ★ The dialog needs the difference: it
+  // must stay open on a refusal, and the reason for the refusal is the
+  // server's (`spec.ValidatePath`), not a copy of it kept here.
+  newFile(path: string, content: string): Promise<string | undefined>
   clearMessages(): void
 }
 
@@ -80,27 +84,24 @@ export const useSettings = create<SettingsState>((set, get) => ({
   },
 
   closeSettings() {
+    cancelPendingValidate()
     set({ open: false, selected: undefined, draft: "", saved: "", revision: "", issues: [], serverIssues: [], saveState: "idle" })
   },
 
   async select(path) {
+    cancelPendingValidate()
     set({ selected: path, serverIssues: [], saveState: "idle", saveError: undefined })
     try {
       const item = await settingsApi.item(path)
-      applyItem(set, path, item)
+      applyItem(set, item)
     } catch (e) {
       set({ saveState: "error", saveError: describe(e) })
     }
   },
 
   edit(text) {
-    set((s) => ({
-      draft: text,
-      issues: s.selected ? check(s.selected, text, catalogOf(s), editableOf(s)).issues : [],
-      saveState: "idle",
-      saveError: undefined,
-      conflict: undefined,
-    }))
+    set({ draft: text, saveState: "idle", saveError: undefined, conflict: undefined })
+    scheduleValidate(set, get)
   },
 
   async reloadFromDisk() {
@@ -109,23 +110,31 @@ export const useSettings = create<SettingsState>((set, get) => ({
   },
 
   async save() {
-    const { selected, draft, revision, issues } = get()
+    const { selected, draft, revision } = get()
     if (!selected) return
+
+    // ★ The debounced verdict may be older than the draft, or may not have
+    //   arrived at all — a save clicked inside the debounce window would
+    //   otherwise write whatever the last keystroke said was fine. So the
+    //   save asks again, now, and cancels whatever was in flight.
+    cancelPendingValidate()
+    const seq = validateSeq
+
+    set({ saveState: "validating", serverIssues: [], saveError: undefined })
+    let issues: Issue[]
+    try {
+      const res = await settingsApi.validate(selected, draft)
+      issues = res.issues ?? []
+    } catch (e) {
+      set({ saveState: "error", serverIssues: [describe(e)], saveError: undefined })
+      return
+    }
+    if (seq !== validateSeq || get().selected !== selected) return
+    set({ issues })
 
     const errors = blocking(issues)
     if (errors.length > 0) {
-      set({
-        saveState: "error",
-        saveError: errors.map((i) => `line ${i.line}: ${i.message}`).join("\n"),
-      })
-      return
-    }
-
-    set({ saveState: "validating", serverIssues: [], saveError: undefined })
-    try {
-      await settingsApi.validate(selected, draft)
-    } catch (e) {
-      set({ saveState: "error", serverIssues: [describe(e)], saveError: undefined })
+      set({ saveState: "error", saveError: errors.map(issueLine).join("\n") })
       return
     }
 
@@ -172,8 +181,11 @@ export const useSettings = create<SettingsState>((set, get) => ({
       await settingsApi.create(path, content)
       await refreshManifest()
       await get().select(path)
+      return undefined
     } catch (e) {
-      set({ saveState: "error", saveError: describe(e) })
+      const reason = describe(e)
+      set({ saveState: "error", saveError: reason })
+      return reason
     }
   },
 
@@ -184,33 +196,77 @@ export const useSettings = create<SettingsState>((set, get) => ({
 
 type Set = (partial: Partial<SettingsState> | ((s: SettingsState) => Partial<SettingsState>)) => void
 
-const NO_CATALOG: ReasoningCatalog = {}
+// ── validation is a round trip ────────────────────────────────────────────
 
-function catalogOf(s: SettingsState): ReasoningCatalog {
-  return s.manifest?.reasoningLevels ?? NO_CATALOG
-}
+const VALIDATE_DEBOUNCE_MS = 250
 
-// editableOf is the manifest's own answer to "which sections may be
-// edited" — the server owns the partition table.
-function editableOf(s: SettingsState): readonly string[] {
-  const cats = s.manifest?.categories
-  if (!cats) return EDITABLE_SECTIONS
-  return cats.filter((c) => c.editable).map((c) => c.id)
-}
-
-function applyItem(set: Set, path: string, item: SettingsItemBody): void {
-  set((s) => ({
+// ★ A file that just loaded from disk is clean by construction: the tree it
+// came from is the tree the process is running. Asking the server to say so
+// again would spend a round trip per file opened, and the answer would be the
+// same. The first keystroke is what can make it dirty.
+function applyItem(set: Set, item: SettingsItemBody): void {
+  set({
     saved: item.content,
     draft: item.content,
     revision: item.revision ?? "",
     exists: item.exists,
     hot: item.hot,
-    issues: item.exists ? check(path, item.content, catalogOf(s), editableOf(s)).issues : [],
+    issues: [],
     serverIssues: [],
     saveState: "idle",
     saveError: undefined,
     conflict: undefined,
-  }))
+  })
+}
+
+// validateSeq stamps every request; validateTimer is the one pending.
+//
+// ★ Both exist for the same reason: the answer to "is this file valid" is
+//   about a **draft**, and by the time it arrives the draft may be gone. A
+//   reply is applied only if it is still the newest (seq) and still about the
+//   selected file (path). Without the stamp the slower of two replies wins,
+//   which is the one about the older text.
+let validateSeq = 0
+let validateTimer: ReturnType<typeof setTimeout> | undefined
+
+function cancelPendingValidate(): void {
+  validateSeq++
+  if (validateTimer !== undefined) {
+    clearTimeout(validateTimer)
+    validateTimer = undefined
+  }
+}
+
+function scheduleValidate(set: Set, get: () => SettingsState): void {
+  const path = get().selected
+  if (!path) return
+  cancelPendingValidate()
+  const seq = validateSeq
+  validateTimer = setTimeout(() => {
+    validateTimer = undefined
+    void requestValidate(set, get, path, seq)
+  }, VALIDATE_DEBOUNCE_MS)
+}
+
+async function requestValidate(
+  set: Set,
+  get: () => SettingsState,
+  path: string,
+  seq: number,
+): Promise<void> {
+  const content = get().draft
+  let issues: Issue[]
+  try {
+    const res = await settingsApi.validate(path, content)
+    issues = res.issues ?? []
+  } catch (e) {
+    // ★ A refusal the endpoint itself could not take — a path outside the
+    //   tree, most of all — is still an answer about this draft. Reporting it
+    //   as an issue keeps one shape for "why can this not be saved".
+    issues = [{ line: 0, message: describe(e), severity: "error" }]
+  }
+  if (seq !== validateSeq || get().selected !== path) return
+  set({ issues })
 }
 
 function firstEditable(manifest: SettingsManifest | undefined): string | undefined {
