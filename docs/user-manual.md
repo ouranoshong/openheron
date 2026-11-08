@@ -694,12 +694,19 @@ In the interface:
 
 | Element | What it does |
 |---|---|
-| **Sidebar** | Session list, agent filter, status dot (lights up when an approval is pending) |
+| **Header** | The agent filter (with each agent's context occupancy), the theme switch, and the status of the current turn |
+| **Sidebar** | The session list, the "New thread" button, the settings entry |
 | **Composer** | Ask a question; `/` opens the slash commands; supports drag/paste attachments |
 | **Message list** | Assistant replies, reasoning, tool-call cards, sub-agent output (with attribution) |
 | **Approval card** | Appears when your nod is needed: approve / deny (with an optional reason) |
 | **Tool card** | The arguments and result of each tool call |
 | **Settings** | Entry point to the config editor |
+
+★ The **theme switch** is in the header: light or dark. It follows your desktop until you
+pick one, and the choice is remembered.
+★ A **table** in a reply has a width of its own: it fills the column, a long cell wraps
+inside it, and a table with many columns scrolls inside its own frame instead of pushing
+the page sideways.
 
 ### 6.1 Slash commands
 

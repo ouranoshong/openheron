@@ -162,7 +162,7 @@ function ContextMeter({ usage }: { usage: ContextUsage }) {
               ratio >= 0.95
                 ? "bg-destructive absolute inset-y-0 left-0"
                 : ratio >= 0.8
-                  ? "bg-amber-500 absolute inset-y-0 left-0"
+                  ? "bg-warning absolute inset-y-0 left-0"
                   : "bg-muted-foreground/60 absolute inset-y-0 left-0"
             }
             style={{ width: `${Math.round(ratio * 100)}%` }}

@@ -606,6 +606,15 @@ array/object on every call makes `Object.is` decide "it changed" forever, which 
 as a `Maximum update depth exceeded` white screen. Never write `?? []` in a selector;
 use a module-level constant or a selector from the store.
 
+★ The **width** of the chat is one token, not a number repeated in six places:
+`--chat-column` (the column), `--prose-column` (the text inside it) and `--chat-gutter`
+live in `web/src/index.css`. The column is wide so that a table fits whole, and the prose
+stops earlier — a paragraph of sixty characters is a hard read.
+
+★ The **theme** is decided before the first paint, by a script in `web/index.html`, and read
+from one place (`web/src/lib/theme.ts`). The light and the dark palette are the same token
+set with two values, so a color that exists in one exists in the other.
+
 ## 9. The knowledge base
 
 `kb` is an **optional** local corpus retrieval layer.

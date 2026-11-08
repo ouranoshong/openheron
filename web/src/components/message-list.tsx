@@ -1,7 +1,6 @@
 import { ArrowDownIcon, SquareIcon } from "lucide-react"
 import { memo, useEffect, useMemo, useRef, useState } from "react"
 
-import { AgentFilter } from "@/components/agent-filter"
 import { BrandMark } from "@/components/brand-mark"
 import { CompactionDivider } from "@/components/compaction-divider"
 import { MessageParts } from "@/components/message-parts"
@@ -142,7 +141,6 @@ export function MessageList() {
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <AgentFilter />
       <div
         ref={scrollRef}
         data-testid="message-list"
@@ -227,7 +225,7 @@ function StatusLine({ status }: { status: TurnStatus }) {
   if (status === "running") {
     return (
       <p className="text-muted-foreground mt-4 flex items-center gap-1.5 text-xs" role="status">
-        <span className="bg-sky-500 size-1.5 animate-pulse rounded-full" />
+        <span className="bg-info size-1.5 animate-pulse rounded-full" />
         Working…
       </p>
     )

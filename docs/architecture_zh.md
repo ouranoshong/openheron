@@ -531,6 +531,13 @@ React 19 + Vite + zustand，构建产物 `web/dist` 通过 `go:embed` 打进二�
 `Object.is` 永远判定「变了」，表现为 `Maximum update depth exceeded` 白屏。
 selector 里不要写 `?? []`；用模块级常量或 store 里的 selector。
 
+★ 对话的**宽度**是一个 token,不是同一个数字抄六遍：`--chat-column`（那一列）、
+`--prose-column`（里面的文字）与 `--chat-gutter`（两侧留白）住在
+`web/src/index.css`。列要宽,宽表才看得全；正文停得更早 —— 六十个字符长的一段话是难读的。
+
+★ **主题**在首屏之前就定了,由 `web/index.html` 里的一段脚本决定,并且只从一处读：
+`web/src/lib/theme.ts`。浅色与暗色是同一套 token 的两组取值,一边有的颜色另一边也有。
+
 ## 9. 知识库
 
 `kb` 是一个**可选**的本地语料检索层。

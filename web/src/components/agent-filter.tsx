@@ -5,7 +5,7 @@ import { selectActiveContext, selectActiveUsage, selectMessages, useStore } from
 import type { ContextUsage } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-export function AgentFilter() {
+export function AgentFilter({ className }: { className?: string }) {
   const usage = useStore(selectActiveUsage)
   const context = useStore(selectActiveContext)
   const messages = useStore(selectMessages)
@@ -19,7 +19,12 @@ export function AgentFilter() {
   return (
     <div
       data-testid="agent-filter"
-      className="border-border/60 flex shrink-0 items-center gap-1.5 overflow-x-auto border-b px-4 py-2"
+      // ★ It lives in the header now, so it has to be able to give way: the
+      //   row shrinks and scrolls, the chips inside it do not.
+      className={cn(
+        "flex min-w-0 shrink items-center gap-1.5 overflow-x-auto",
+        className,
+      )}
     >
       <span className="text-muted-foreground shrink-0 text-xs">Agent</span>
       <FilterChip

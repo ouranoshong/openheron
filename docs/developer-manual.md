@@ -910,6 +910,36 @@ the DOM is not the problem and virtualization would buy nothing.
 - `web/dist` is embedded into the binary with `go:embed` (`webui/webui.go`).
 - `make build` builds the frontend first, then the Go binary.
 
+### 4.6 ★ The layout tokens and the theme
+
+★ **The width of the chat is one token, not a number repeated in six places.**
+`web/src/index.css` defines three:
+
+| Token | What it is |
+|---|---|
+| `--chat-column` | the column the conversation lives in (64rem) |
+| `--prose-column` | the width the **text** inside it stops at (46rem) |
+| `--chat-gutter` | the space on both sides of the column |
+
+★ The two widths are different **on purpose**. The column is wide so that a table or a code
+block fits whole; a paragraph of sixty characters is a hard read, so the prose stops
+earlier. The **blocks** take the whole column and only the text is held back — which is why
+the cap sits on the text elements (`markdown.tsx`'s `PROSE`) and not on the message bubble.
+
+★ A table has **two** limits, and they answer different questions: a **floor** of 7rem per
+column is what makes a table of many columns overflow and scroll inside its own wrapper, and
+a **ceiling** of 28rem per cell is what makes a long sentence wrap inside its cell instead of
+stretching the table. ★ A table with no ceiling is a table as wide as its longest cell, and a
+cell with no floor is a column squeezed into a sliver.
+
+★ The **theme** is decided **before the first paint**, by a script in `web/index.html`, and
+read from one place — `web/src/lib/theme.ts`. A component that needs it subscribes with
+`useSyncExternalStore`; the settings editor's CodeMirror theme follows it too, so a switch
+while the editor is open repaints it. ★ The light and the dark palette are **the same token
+set with two values**, so a color that exists in one exists in the other — and a hard-coded
+`sky-500` in a component is a bug: the status colors are `--info`, `--warning` and
+`--success`.
+
 ## 5. Testing
 
 ### 5.1 Port and state isolation
@@ -1036,7 +1066,7 @@ the contract on its own — the extractor does not read one language to help the
 
 ### 5.5 Frontend unit tests
 
-`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **21 test files, 271
+`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **21 test files, 272
 cases**, covering the pure layers: `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
 `thinking.ts` / `turns.ts` / `approval.ts` / `settings-store.ts` and friends.
 
@@ -1071,9 +1101,9 @@ do not touch" assertions.
 
 ### 5.6 E2E
 
-`make test-e2e` → `playwright test`, **12 specs, 150 cases**: `agents` `chat`
+`make test-e2e` → `playwright test`, **13 specs, 157 cases**: `agents` `chat`
 `compaction` `composer-autocomplete` `composer-meta` `history` `mcps` `multi-agent`
-`reattach` `scroll` `session-busy` `settings`.
+`reattach` `scroll` `session-busy` `settings` `theme`.
 
 Playwright starts two servers itself (`webServer` in `playwright.config.ts`): the fake
 backend (`web/test/serve.ts`) and Vite (`--mode test`).

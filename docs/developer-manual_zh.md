@@ -797,6 +797,30 @@ const selectMessages = (s: State) => s.convo?.messages ?? EMPTY
 - `web/dist` 由 `go:embed` 打进二进制（`webui/webui.go`）。
 - `make build` 会先构建前端再构建 Go。
 
+### 4.6 ★ 版式的几个 token 与主题
+
+★ **对话的宽度是一个 token,不是同一个数字抄六遍。** `web/src/index.css` 里定义三个：
+
+| token | 是什么 |
+|---|---|
+| `--chat-column` | 对话所在的那一列（64rem） |
+| `--prose-column` | 里面的**文字**停在哪（46rem） |
+| `--chat-gutter` | 这一列两侧的留白 |
+
+★ 两个宽度**故意不一样**：列要宽，宽表与宽代码才看得全；而六十个字符长的一段话是难读的，
+所以正文停得更早。**块级内容**吃满整列，只有文字被按住 —— 这也是为什么这个上限挂在
+文字元素上（`markdown.tsx` 的 `PROSE`），而不是挂在消息气泡上。
+
+★ 表格有**两个**上限，各回答一个问题：每列 **7rem 的下限**让列多的表撑出去、在自己的框里
+横向滚动；每格 **28rem 的上限**让长句在格子里换行，而不是把表格撑宽。
+★ 没有上限的表格，宽度等于最长单元格；没有下限的列，会被挤成一条缝。
+
+★ **主题**在**首屏之前**就定了 —— 由 `web/index.html` 里的一段脚本决定，
+并且只从一处读：`web/src/lib/theme.ts`。需要主题的组件用 `useSyncExternalStore` 订阅；
+设置里的 CodeMirror 主题也跟着走，所以编辑开着时切换主题会重绘它。
+★ 浅色与暗色是**同一套 token 的两组取值**，一边有的颜色另一边也有 ——
+组件里写死的 `sky-500` 是 bug：状态色是 `--info`、`--warning` 与 `--success`。
+
 ## 5. 测试
 
 ### 5.1 端口与状态隔离
@@ -914,7 +938,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（见�
 ### 5.5 前端单元测试
 
 `cd web && bun run test:unit`（`bun test test/*.test.ts`）——
-**21 个测试文件、271 个用例**，覆盖 `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
+**21 个测试文件、272 个用例**，覆盖 `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
 `thinking.ts` / `turns.ts` / `approval.ts` / `settings-store.ts` 等层。
 
 ★ **客户端一条配置规则都不留了。** 它从前留了一整套：分区表的副本、tools/ 的文件白名单、
@@ -942,9 +966,9 @@ Bun 本身没有 `localStorage`，不 stub 会炸。
 
 ### 5.6 E2E
 
-`make test-e2e` → `playwright test`，**12 个 spec、150 个用例**：
+`make test-e2e` → `playwright test`，**13 个 spec、157 个用例**：
 `agents` `chat` `compaction` `composer-autocomplete` `composer-meta` `history` `mcps`
-`multi-agent` `reattach` `scroll` `session-busy` `settings`。
+`multi-agent` `reattach` `scroll` `session-busy` `settings` `theme`。
 
 Playwright 自己起两个服务（`playwright.config.ts` 的 `webServer`）：
 假后端（`web/test/serve.ts`）+ Vite（`--mode test`）。

@@ -2,29 +2,54 @@ import { PanelLeftIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { ApprovalCard } from "@/components/approval-card"
+import { AgentFilter } from "@/components/agent-filter"
 import { BrandMark } from "@/components/brand-mark"
 import { Composer } from "@/components/composer"
 import { EmptyHero, MessageList } from "@/components/message-list"
 import { Sidebar } from "@/components/sidebar"
+import { ThemeToggle } from "@/components/theme-toggle"
 import { selectIsEmptyView, selectStatus, useStore } from "@/lib/store"
 import { cn } from "@/lib/utils"
 
 type Dot = { className: string; label: string }
 
+const SIDEBAR_KEY = "openheron.sidebar.collapsed"
+
 const DOT: Record<string, Dot> = {
   idle: { className: "bg-muted-foreground/40", label: "Idle" },
-  running: { className: "bg-sky-500 animate-pulse", label: "Running" },
+  running: { className: "bg-info animate-pulse", label: "Running" },
   "awaiting-approval": { className: "bg-warning", label: "Waiting for approval" },
   error: { className: "bg-destructive", label: "Failed" },
 }
 
 export function Shell() {
-  const [collapsed, setCollapsed] = useState(false)
+  // ★ The sidebar's collapsed state is remembered. A reload that brings the
+  //   sidebar back is a small thing that happens every session, and the
+  //   state is a preference, not a fact about the conversation.
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_KEY) === "1"
+    } catch {
+      // A browser that refuses storage still gets a working sidebar.
+      return false
+    }
+  })
   const status = useStore(selectStatus)
   const isEmptyView = useStore(selectIsEmptyView)
   const refreshList = useStore((s) => s.refreshList)
   const openSession = useStore((s) => s.openSession)
   const activeId = useStore((s) => s.activeId)
+
+  const toggleSidebar = () =>
+    setCollapsed((v) => {
+      const next = !v
+      try {
+        localStorage.setItem(SIDEBAR_KEY, next ? "1" : "0")
+      } catch {
+        // Not being able to remember is not a reason to break the toggle.
+      }
+      return next
+    })
 
   useEffect(() => {
     void refreshList()
@@ -34,15 +59,19 @@ export function Shell() {
   const dot = DOT[status] ?? DOT.idle!
 
   return (
-    <div className="bg-muted/30 flex h-dvh flex-col overflow-hidden p-2">
-      <div className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg md:flex-row">
+    // ★ The frame is for the small screens only. On a desktop the window is
+    //   the frame, and a grey border around the whole app makes the content
+    //   look narrower than it is — which is the opposite of what a wider
+    //   column is for.
+    <div className="bg-muted/30 flex h-dvh flex-col overflow-hidden p-2 md:p-0">
+      <div className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg md:rounded-none md:flex-row">
         {!collapsed && <Sidebar />}
 
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-12 shrink-0 items-center gap-2 px-4">
             <button
               type="button"
-              onClick={() => setCollapsed((v) => !v)}
+              onClick={toggleSidebar}
               className="hover:bg-accent hover:text-accent-foreground grid size-8 shrink-0 place-items-center rounded-md"
               aria-label={collapsed ? "Show sidebar" : "Hide sidebar"}
             >
@@ -57,6 +86,11 @@ export function Shell() {
               aria-label={dot.label}
               role="status"
             />
+            <ThemeToggle />
+            {/* ★ The agent filter and the context occupancy moved into the
+                header: they were a second horizontal bar of their own, and
+                a chat is mostly text. */}
+            <AgentFilter className="ml-auto" />
           </header>
 
           {isEmptyView ? (
