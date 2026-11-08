@@ -60,7 +60,18 @@ func policyOf(cfg *spec.Config) Policy {
 	for name := range mcpAllowedNames(cfg.MCPs) {
 		allow = append(allow, name)
 	}
-	return NewPolicy(allow)
+
+	// ★ The merge happens first, the removal last. A file's `allows:` list is
+	//   one of the sources above, so checking the names before the merge
+	//   would let the file grant the tool that rewrites the file.
+	kept := allow[:0]
+	for _, name := range allow {
+		if alwaysAsk[name] {
+			continue
+		}
+		kept = append(kept, name)
+	}
+	return NewPolicy(kept)
 }
 
 func (s *agentSpec) agentSpec(id string) (decl.SubAgentSpec, bool) {

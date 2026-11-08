@@ -635,11 +635,17 @@ func (c *Config) noticeAgentTools(ids []string) {
 // knownToolNames is every tool name that exists right now: the built-in
 // ones and the ones the written providers offer.
 func (c *Config) knownToolNames() map[string]bool {
-	out := make(map[string]bool, len(decl.BuiltinToolNames)+8)
+	out := make(map[string]bool, len(decl.BuiltinToolNames)+len(decl.ConfigToolNames)+8)
 	for _, n := range decl.BuiltinToolNames {
 		out[n] = true
 	}
 	for _, n := range c.EnabledToolNames() {
+		out[n] = true
+	}
+	// ★ The config tools exist whenever the process is running: they answer
+	//   from the configuration service, not from a file. A name the loader
+	//   does not know is reported as a typo, so they have to be here.
+	for _, n := range decl.ConfigToolNames {
 		out[n] = true
 	}
 	// ★ The knowledge base's own tools exist whenever its file is written.

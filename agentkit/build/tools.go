@@ -15,6 +15,11 @@ type toolEnv struct {
 	cfg         *spec.Config
 	projectRoot string
 	dataDir     string
+
+	// svc is the configuration service itself — the only thing that knows
+	// where the tree is and how to write it safely. The config_* tools
+	// answer through it, so they answer the same way the editor does.
+	svc *spec.Service
 }
 
 type toolProvider interface {
@@ -35,6 +40,7 @@ type toolRegistry struct {
 //	returns, so the manager — not the provider — owns it.
 func defaultToolRegistry(mgr *mcpManager) *toolRegistry {
 	return &toolRegistry{providers: []toolProvider{
+		configToolProvider{},
 		kbToolProvider{},
 		httpRequestToolProvider{},
 		webSearchToolProvider{},
@@ -64,7 +70,28 @@ var builtinAllowedTools = func() []string {
 		"ls", "read_file", "glob", "grep", // the filesystem's readers
 		"task", "write_todos", // the delegation tools
 		"skill", // the skill reader
+
+		// ★ The config tools that only read. They join this list for the
+		//   same reason `task` does: they belong to no file, so no file can
+		//   name them as an exception — and a question about the
+		//   configuration should not cost an approval. `config_write` is
+		//   **absent on purpose**: it edits the files this list comes from.
+		decl.ToolNameConfigGet,
+		decl.ToolNameConfigValidate,
+		decl.ToolNameConfigTemplate,
+		decl.ToolNameConfigNotices,
+		decl.ToolNameConfigTier,
 	}
+}
+
+// alwaysAsk are the tools no configuration may turn into an exception.
+//
+// ★ One name, one rule: `config_write` edits the configuration — including
+// the file whose `allows:` list would grant it. A file that could grant it
+// grants itself, so the exception is removed here, after every source has
+// been merged, rather than trusted to stay absent.
+var alwaysAsk = map[string]bool{
+	decl.ToolNameConfigWrite: true,
 }
 
 // reservedToolNames maps a built-in tool's name to what provides it.

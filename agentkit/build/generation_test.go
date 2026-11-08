@@ -32,7 +32,7 @@ func TestFirstGenerationAndLaterOnesDeriveTheSameTable(t *testing.T) {
 func TestMaxDepthDefaultsInOnePlace(t *testing.T) {
 	cfg := minimalTestConfig()
 	cfg.Server.Agent.MaxDepth = 0
-	snap, err := newSnapshot(1, cfg, "", "", nil, nil)
+	snap, err := newSnapshot(1, cfg, nil, "", "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestMaxDepthDefaultsInOnePlace(t *testing.T) {
 
 	cfg2 := minimalTestConfig()
 	cfg2.Server.Agent.MaxDepth = 3
-	snap2, err := newSnapshot(1, cfg2, "", "", nil, nil)
+	snap2, err := newSnapshot(1, cfg2, nil, "", "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

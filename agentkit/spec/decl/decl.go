@@ -306,6 +306,38 @@ const (
 	ToolNameKBIndex  = "kb_index"
 )
 
+// The config tools read and edit the very configuration the process runs
+// from.
+//
+// ★ They are listed here even though no middleware provides them: this list
+// is "the names that exist", and the loader reports any other name in an
+// agent's `tools:` as a typo. A real tool the loader does not know about is
+// reported as a mistake the author did not make.
+//
+// ★ `config_write` is the only one that changes anything. It is deliberately
+// **not** in build's exception list, so it always asks — and the tier
+// assembly strips it from any file's `allows:`, because a file that could
+// grant it would be granting the tool that rewrites that file.
+const (
+	ToolNameConfigGet      = "config_get"
+	ToolNameConfigValidate = "config_validate"
+	ToolNameConfigTemplate = "config_template"
+	ToolNameConfigNotices  = "config_notices"
+	ToolNameConfigTier     = "config_tier"
+	ToolNameConfigWrite    = "config_write"
+)
+
+// ConfigToolNames are the config tools, in the order a reader wants them:
+// read, check, scaffold, notices, tiers, and last the one that writes.
+var ConfigToolNames = []string{
+	ToolNameConfigGet,
+	ToolNameConfigValidate,
+	ToolNameConfigTemplate,
+	ToolNameConfigNotices,
+	ToolNameConfigTier,
+	ToolNameConfigWrite,
+}
+
 type ToolsCfg struct {
 	HTTP       *HTTPToolsCfg  `yaml:"http"`
 	WebSearch  *WebSearchCfg  `yaml:"web_search"`

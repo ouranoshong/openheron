@@ -33,6 +33,28 @@ func Templates(dir string) map[string]string {
 	}
 }
 
+// TemplateFor returns the skeleton a new file at rel starts from.
+//
+// ★ The file's own template wins over the section's — the same rule the
+//
+//	editor applies, said once here for the callers that are not the editor
+//	(the config_template tool, and `openheron init`). A section template can
+//	be nothing but comments, and a file built from one holds no YAML
+//	document at all.
+func TemplateFor(rel string, modelRefs []string) (string, error) {
+	cat, err := ValidatePath(rel)
+	if err != nil {
+		return "", err
+	}
+	// ★ The path's own extension decides the name; a path the partition does
+	//   not accept is refused above, so asking a second time here would be a
+	//   second rule.
+	if tpl, ok := Templates(cat.Dir)[rel]; ok {
+		return tpl, nil
+	}
+	return Skeleton(cat.Dir, modelRefs), nil
+}
+
 // Has reports whether one file of a partition is already declared.
 //
 // ★ It is the question "is this file there?", asked of the configuration

@@ -14,6 +14,8 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+
+	"github.com/ouranoshong/openheron/agentkit/spec"
 )
 
 // Builder satisfies agentkit/run.AgentBuilder.
@@ -26,6 +28,10 @@ type Builder struct {
 	// mcp owns the MCP clients. They outlive the snapshot — that is what
 	// the provider's batch does not.
 	mcp *mcpManager
+	// svc is the configuration service: where the tree is, how to read it
+	// and how to write it without leaving half a file behind. The config_*
+	// tools answer through it rather than growing a second way in.
+	svc *spec.Service
 	// bump moves the generation when a server's tool list changed.
 	bump func()
 	mu   sync.Mutex
@@ -33,6 +39,17 @@ type Builder struct {
 }
 
 type Option func(*Builder)
+
+// WithConfigService wires the configuration service.
+//
+// ★ Optional: without it the config_* tools are simply not offered, which is
+// what a builder assembled by a test wants. Passing it is what makes an agent
+// able to read and edit the configuration it runs from.
+func WithConfigService(svc *spec.Service) Option {
+	return func(b *Builder) {
+		b.svc = svc
+	}
+}
 
 func WithPaths(projectRoot, dataDir string) Option {
 	return func(b *Builder) {

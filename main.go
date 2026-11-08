@@ -236,7 +236,9 @@ func setupRuntime(ctx context.Context, st *startup) error {
 
 	// The filesystem tools take paths, and the agent has no other way to learn
 	// where the code lives. It arrives through WithPaths, not the spec.
-	builder := build.NewBuilder(st.mgr, build.WithPaths(st.projectRoot, st.dataDir))
+	builder := build.NewBuilder(st.mgr,
+		build.WithPaths(st.projectRoot, st.dataDir),
+		build.WithConfigService(st.cfgSvc))
 	st.builder = builder
 
 	// ★ A server's tool list can change while the configuration stands
