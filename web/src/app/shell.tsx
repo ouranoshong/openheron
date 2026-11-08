@@ -86,11 +86,12 @@ export function Shell() {
               aria-label={dot.label}
               role="status"
             />
-            <ThemeToggle />
             {/* ★ The agent filter and the context occupancy moved into the
                 header: they were a second horizontal bar of their own, and
-                a chat is mostly text. */}
+                a chat is mostly text. The theme switch sits at the far end
+                of the row, after the filter. */}
             <AgentFilter className="ml-auto" />
+            <ThemeToggle />
           </header>
 
           {isEmptyView ? (
