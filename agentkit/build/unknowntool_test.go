@@ -84,7 +84,7 @@ func (m *scriptModel) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel,
 //
 // ★ The second argument names the tools the agent does **not** get: they
 //
-//	are the agent's own disabled_tools, and a model that calls one has to
+//	are the agent's own tools list, and a model that calls one has to
 //	be told it is not available.
 //
 // runScripted builds an agent whose tools: list is everything except the

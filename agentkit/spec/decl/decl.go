@@ -318,8 +318,8 @@ type ToolsCfg struct {
 // ★ The tools are **always mounted** — the middleware provides them and no
 //
 //	file switches them on. So this file is a **tuner**, not a switch: it can
-//	only name exceptions, never remove a tool. Removing one is an agent's
-//	`disabled_tools`, which is a narrowing and belongs to the agent.
+//	only name exceptions, never remove a tool. Removing one is an agent's own
+//	`tools` list, which belongs to the agent.
 //
 // ★ `allows:` is **additive**: a name here joins the exceptions the code
 //
@@ -396,7 +396,7 @@ func ValidMCPServerName(name string) bool {
 	return mcpServerNameRE.MatchString(name)
 }
 
-// ParseToolNamePattern reads one entry of an agent's disabled_tools.
+// ParseToolNamePattern reads one entry of an agent's tools list.
 //
 // ★ Only a **trailing** "*" is a pattern, and a lone "*" is not one at
 //

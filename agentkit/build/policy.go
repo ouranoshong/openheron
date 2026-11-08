@@ -23,7 +23,7 @@ const (
 // ★ The default is **ask**, and the exceptions are named. ★ There is no
 //
 //	global deny any more: "not exposed" is said in exactly two places —
-//	a file's own `allows:` list, and an agent's own `disabled_tools`.
+//	a file's own `allows:` list, and an agent's own `tools` list.
 //
 // ★ The table is assembled from the **configuration**, so the tier of a
 //

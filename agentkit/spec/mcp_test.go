@@ -281,7 +281,7 @@ func TestASubAgentsOwnListIsReadFromTheSubAgent(t *testing.T) {
 	}
 }
 
-// ── the disabled_tools patterns ─────────────────────────────────────────
+// ── the tools patterns ──────────────────────────────────────────────────
 
 func TestAWildcardThatIsNotAPrefixPatternIsALoadTimeError(t *testing.T) {
 	f := newFixture(t)

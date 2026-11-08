@@ -148,7 +148,7 @@ func TestSubHandlersApplyItsOwnToolList(t *testing.T) {
 		t.Fatalf("a tool the sub-agent names must stay reachable, got %q", got)
 	}
 	if got := fw.table.Blocked("write_file"); got != LayerNotLoaded {
-		t.Fatalf("its own disabled_tools must be handled as the inner layer, got %q", got)
+		t.Fatalf("its own tools list must be applied to its own table, got %q", got)
 	}
 }
 

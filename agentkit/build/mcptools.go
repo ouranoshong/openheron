@@ -21,9 +21,9 @@ import (
 
 // The reasons a tool is not exposed, as the wire reports them.
 //
-// ★ The reasons are tokens and the copy is the panel's: "disabled_tools"
+// ★ The reasons are tokens and the copy is the panel's: "name_too_long" and
 //
-//	and "mcps" are machine values, like the code of an error body.
+//	"name_collision" are machine values, like the code of an error body.
 const (
 	MCPSkipNameTooLong   = "name_too_long"
 	MCPSkipNameCollision = "name_collision"
