@@ -52,15 +52,30 @@ POST /v2/run
   │    └─ agentkit/run/loop.go:119  emit.Derive(events, …)   ← the run reads its own events
   │         └─ agentkit/emit/emit.go:150  src.Next()       ← the ONLY consumer
   │         └─ agentkit/emit/emit.go:…    publishes contract.RunEvent to the subscribers
-  │    └─ agentkit/run/loop.go:134  rt.archive(sess, turn, out)
+  │    └─ agentkit/run/loop.go:139  rt.archive(sess, turn, out)
   │         └─ agentkit/run/loop.go:…    sess.Append(msg)   ← the transcript
-  │    └─ agentkit/run/loop.go:166  rt.finishRun(turn, out)  ← the terminal row
+  │    └─ agentkit/run/loop.go:143  rt.finishRun(turn, out)  ← the terminal row
+  │    └─ agentkit/run/loop.go:203  markTurnDone(turn)       ← the slot is free
   │
-  └─ api/v2_run.go:157  turn.Subscribe()      (the connection subscribes)
-       api/v2_run.go:160  transport.Render(stream, sess.ID(), turn.RunID, sub.Events())
+  └─ api/v2_run.go:167  turn.Subscribe()      (the connection subscribes)
+       api/v2_run.go:170  transport.Render(stream, sess.ID(), turn.RunID, sub.Events())
             └─ transport/transport.go:60   Render: contract.RunEvent → AG-UI frames
-       api/v2_run.go:165  turn.WaitArchived()   (the response waits for the archive)
+       api/v2_run.go:175  turn.WaitArchived()   (the response waits for the archive)
+       api/v2_run.go:183  turn.WaitReleased()   (…and for the slot: two barriers, not one)
 ```
+
+★ **The response waits for two things, and they are not the same moment.**
+`archived` closes when the messages are on disk; the pointer the admission
+gate reads is cleared a step later, after the terminal row is written. A
+response that ended in between handed the client a session it could not use:
+its next message came back `session_busy` about the run it had just finished.
+`released` closes where that pointer is cleared (`markTurnDone`,
+`agentkit/run/bridge.go:51`) and nowhere else — in particular **not** at the
+loop's exit, because a loop outlives its turn, waiting for the next item.
+
+★ Two barriers where one would do is the shape §3 exists to remove: a scan
+that says "no run is live" answers both questions at once, and neither
+channel has to be kept in step with anything.
 
 ★ **The persistence path no longer runs through the rendering path.** The run
 reads the agent's events itself (`agentkit/run/loop.go:119`), derives what
@@ -442,9 +457,11 @@ scan.** A stream that ends without a scan leaves the flag as it was.
 ★ Why this matters more than it looks: the current client can be wrong in the
 **dangerous direction**. If the server is still finalizing a run and the client
 assumes "idle", the next message is sent into a session the server considers
-busy — and the previous round had to paper over exactly that with the archive
-wait. With the scan as the only way to clear the flag, the class of bug
-disappears instead of being timed around.
+busy — and that is not hypothetical: it cost a **second** barrier in the
+response path (§1: `WaitArchived` was not enough, because archiving is not
+releasing). Two channels, each of which has to be kept in step with the
+pointer, is what "timed around" looks like. With the scan as the only way to
+clear the flag, the class of bug disappears instead of being guarded twice.
 
 ### 4.3 What the scan answers
 
