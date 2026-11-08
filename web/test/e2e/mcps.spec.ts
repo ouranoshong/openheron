@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test"
 import {
   COMPOSER,
   MARKER_A,
+  STOP_BUTTON,
   openApp,
   resetBackend,
   sendMessage,
@@ -22,13 +23,32 @@ test.beforeEach(async () => {
 test("/mcps 打开面板，列出服务器的两种名字与档位", async ({ page }) => {
   await openApp(page)
   await sendMessage(page, `${MARKER_A} hello`)
+
+  // ★ The baseline has to be taken on a **settled** transcript, and "settled"
+  //   has to be proved, not assumed. A count read while the first turn is
+  //   still streaming cannot tell "the command wrote into the transcript" from
+  //   "the answer arrived" — and the difference is the whole assertion. Under
+  //   load the answer landed between the two reads and the test reported a
+  //   leak that never happened.
+  //
+  // ★ Two waits, and the order matters: waiting only for "not busy" passes
+  //   instantly **before** the run starts (the send button is still there and
+  //   no stop button has rendered yet), which is the same race wearing a
+  //   different hat. The answer must be in the transcript first.
+  await expect
+    .poll(async () => page.locator('[data-testid="message"]').count(), { timeout: 10_000 })
+    .toBeGreaterThan(1)
+  await expect(page.locator(STOP_BUTTON)).toHaveCount(0)
   const before = await page.locator('[data-testid="message"]').count()
 
   await sendMessage(page, "/mcps")
   await expect(page.locator(PANEL)).toBeVisible()
 
   // The panel is a dialog: it must not write into the transcript.
-  expect(await page.locator('[data-testid="message"]').count()).toBe(before)
+  // ★ Web-first, not a sampled count: if the client ever shows the command as
+  //   an optimistic bubble and rolls it back, sampling fails on the frame it
+  //   was there; waiting for the count asks the question the test means.
+  await expect(page.locator('[data-testid="message"]')).toHaveCount(before)
 
   const servers = page.locator(SERVER)
   await expect(servers).toHaveCount(3)
@@ -96,5 +116,5 @@ test("/mcps 不进模型，也不建会话", async ({ page }) => {
   await sendMessage(page, "/mcps")
   await expect(page.locator(PANEL)).toBeVisible()
   await expect(page.locator(COMPOSER)).toHaveValue("")
-  expect(await page.locator('[data-testid="message"]').count()).toBe(before)
+  await expect(page.locator('[data-testid="message"]')).toHaveCount(before)
 })
