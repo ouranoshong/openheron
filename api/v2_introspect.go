@@ -111,13 +111,13 @@ type agentView struct {
 	Model         modelView `json:"model"`
 	MaxIterations int       `json:"maxIterations"`
 	Subagents     []string  `json:"subagents"`
-	DisabledTools []string  `json:"disabledTools"`
-	// Skills is the agent's skill allow-list.
-	Skills []string `json:"skills"`
-	// SkillsRestricted reports that the list above is an allow-list. When it
-	// is false the agent says nothing about skills, so it gets every skill in
-	// the skills directory.
-	SkillsRestricted      bool       `json:"skillsRestricted"`
+	// Tools is the agent's tool allow-list: the tools it may use.
+	//
+	// ★ The default is none — an absent list and an empty list mean the
+	//   same thing, so there is nothing else to report.
+	Tools []string `json:"tools"`
+	// Skills is the agent's skill allow-list. The default is none.
+	Skills                []string   `json:"skills"`
 	EffectiveTools        []toolView `json:"effectiveTools,omitempty"`
 	RuntimeTools          []string   `json:"runtimeTools,omitempty"`
 	RuntimeToolsKnown     bool       `json:"runtimeToolsKnown"`
@@ -191,20 +191,17 @@ func (s *Server) agentViews(cfg *spec.Config, withTools bool) []agentView {
 			Description:   a.Description,
 			MaxIterations: a.MaxIterations,
 			Subagents:     a.SubAgents,
-			DisabledTools: a.DisabledTools,
+			Tools:         a.Tools,
 			Model:         modelOf(cfg, a),
 			SummarizeAt:   contexts[id].SummarizeAt,
 		}
 		if v.Subagents == nil {
 			v.Subagents = []string{}
 		}
-		if v.DisabledTools == nil {
-			v.DisabledTools = []string{}
+		if v.Tools == nil {
+			v.Tools = []string{}
 		}
-		if a.Skills != nil {
-			v.Skills = append([]string{}, *a.Skills...)
-			v.SkillsRestricted = true
-		}
+		v.Skills = append([]string{}, a.Skills...)
 		if v.Skills == nil {
 			v.Skills = []string{}
 		}

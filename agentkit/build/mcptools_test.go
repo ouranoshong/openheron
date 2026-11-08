@@ -182,49 +182,41 @@ func allowList(set map[string]bool) []string {
 
 // ── the agent's narrowing ───────────────────────────────────────────────
 
-func TestAnAbsentServerListMeansEveryConfiguredServer(t *testing.T) {
+// ★ The list is an **allow-list**, so "the agent may use these" is the
+//
+//	whole answer, and a tool it does not name is blocked.
+func TestAnEmptyListBlocksEveryTool(t *testing.T) {
 	tbl := newTable("main", nil)
-	tbl.denyMCPNamespaces(nil, []string{"github", "files"})
-	if len(tbl.denyMCP) != 0 {
-		t.Fatalf("an absent list must not deny anything, denied %v", tbl.denyMCP)
+	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerNotLoaded {
+		t.Fatalf("blocked = %q, want %q", got, LayerNotLoaded)
+	}
+	if got := tbl.Blocked("read_file"); got != LayerNotLoaded {
+		t.Fatalf("blocked = %q, want %q", got, LayerNotLoaded)
 	}
 }
 
-func TestAnEmptyServerListDeniesEveryConfiguredServer(t *testing.T) {
-	empty := []string{}
-	tbl := newTable("main", nil)
-	tbl.denyMCPNamespaces(&empty, []string{"github", "files"})
-	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerMCPScope {
-		t.Fatalf("blocked = %q, want %q", got, LayerMCPScope)
+func TestAListedToolIsNotBlocked(t *testing.T) {
+	tbl := newTable("main", []string{"mcp__github__read_issue"})
+	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerNone {
+		t.Fatalf("blocked = %q, want none", got)
+	}
+	// ★ The list is exact: a tool it does not name is still blocked.
+	if got := tbl.Blocked("mcp__github__write_issue"); got != LayerNotLoaded {
+		t.Fatalf("blocked = %q, want %q", got, LayerNotLoaded)
 	}
 }
 
+// ★ A server name may not contain a run of underscores, so the prefix of
+//
+//	one server cannot reach another one.
 func TestTheServerNarrowingDeniesTheNamespacePrefixOnly(t *testing.T) {
-	list := []string{"github_x"}
-	tbl := newTable("main", nil)
-	tbl.denyMCPNamespaces(&list, []string{"github", "github_x"})
+	tbl := newTable("main", []string{"mcp__github_x__read_issue"})
 
-	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerMCPScope {
-		t.Fatalf("blocked = %q, want %q", got, LayerMCPScope)
-	}
-	// ★ A server name may not contain a run of underscores, so the prefix
-	//   of one server cannot reach another one.
 	if got := tbl.Blocked("mcp__github_x__read_issue"); got != LayerNone {
 		t.Fatalf("blocked = %q, want none", got)
 	}
-}
-
-func TestTheServerNarrowingIsReportedBeforeTheToolRule(t *testing.T) {
-	list := []string{"other"}
-	tbl := newTable("main", []string{"mcp__github__read_issue"})
-	tbl.denyMCPNamespaces(&list, []string{"github"})
-
-	got := tbl.Blocked("mcp__github__read_issue")
-	if got != LayerMCPScope {
-		t.Fatalf("blocked = %q, want %q — the server narrowing is the coarser one", got, LayerMCPScope)
-	}
-	if reasonOf(got) != "mcps" {
-		t.Fatalf("reason = %q, want mcps", reasonOf(got))
+	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerNotLoaded {
+		t.Fatalf("blocked = %q, want %q", got, LayerNotLoaded)
 	}
 }
 
@@ -232,30 +224,36 @@ func TestTheServerNarrowingIsReportedBeforeTheToolRule(t *testing.T) {
 
 func TestAPrefixRuleReachesTheToolsOfOneServerOnly(t *testing.T) {
 	tbl := newTable("main", []string{"mcp__github__*"})
-	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerDisable {
-		t.Fatalf("blocked = %q, want %q", got, LayerDisable)
-	}
-	if got := tbl.Blocked("mcp__files__read_file"); got != LayerNone {
+	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerNone {
 		t.Fatalf("blocked = %q, want none", got)
+	}
+	if got := tbl.Blocked("mcp__files__read_file"); got != LayerNotLoaded {
+		t.Fatalf("blocked = %q, want %q", got, LayerNotLoaded)
 	}
 }
 
 func TestAWildcardPrefixReachesEveryMCPTool(t *testing.T) {
 	tbl := newTable("main", []string{"mcp__*"})
-	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerDisable {
-		t.Fatalf("blocked = %q, want %q", got, LayerDisable)
+	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerNone {
+		t.Fatalf("blocked = %q, want none", got)
 	}
-	if got := tbl.Blocked("mcp__files__read_file"); got != LayerDisable {
-		t.Fatalf("blocked = %q, want %q", got, LayerDisable)
+	if got := tbl.Blocked("mcp__files__read_file"); got != LayerNone {
+		t.Fatalf("blocked = %q, want none", got)
 	}
-	if got := tbl.Blocked("execute"); got != LayerNone {
-		t.Fatalf("blocked = %q, want none — the pattern is the MCP namespace", got)
+	if got := tbl.Blocked("execute"); got != LayerNotLoaded {
+		t.Fatalf("blocked = %q, want %q — the pattern is the MCP namespace", got, LayerNotLoaded)
 	}
 }
 
-func TestAnExactEntryStillRemovesTheTool(t *testing.T) {
+// ★ An **exact** entry names one tool — so it reaches that tool and nothing
+//
+//	else.
+func TestAnExactEntryReachesThatToolOnly(t *testing.T) {
 	tbl := newTable("main", []string{"mcp__github__read_issue"})
-	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerDisable {
-		t.Fatalf("blocked = %q, want %q", got, LayerDisable)
+	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerNone {
+		t.Fatalf("blocked = %q, want none", got)
+	}
+	if got := tbl.Blocked("mcp__github__write_issue"); got != LayerNotLoaded {
+		t.Fatalf("blocked = %q, want %q", got, LayerNotLoaded)
 	}
 }

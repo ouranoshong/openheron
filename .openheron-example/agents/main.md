@@ -3,9 +3,13 @@ description: Management role
 model: openai/gpt-4o
 max_iterations: 30
 # reasoning: high      ← tier name, taken from a key of models[].reasoning
-# disabled_tools: []   ← affects this agent only; the tier table itself is shared
 # skills: [refactor]   ← the skills this agent may use; the names are the folders under skills/
 subagents: [researcher, coder, reviewer]
+# ★ tools is the allow-list: the names are the ones the model sees, and
+#   **the default is none**. main plans and delegates, so it keeps the
+#   readers and the delegation tool — the writers are the sub-agents'.
+tools: [ls, read_file, glob, grep, task, write_todos, skill]
+mcps: []
 ---
 
 You work in a Go repository.

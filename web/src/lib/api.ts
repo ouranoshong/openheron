@@ -190,7 +190,9 @@ export interface AgentView {
   model: AgentModelView
   maxIterations: number
   subagents: string[]
-  disabledTools: string[]
+  // ★ tools is the agent's tool allow-list. The default is none — an
+  //   absent list and an empty list mean the same thing.
+  tools: string[]
   // summarizeAt is the compaction threshold of this agent, in tokens. Zero
   // means it never compacts — either because it says so, or because the
   // model declares no window to measure against.

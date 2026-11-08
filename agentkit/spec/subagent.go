@@ -37,37 +37,20 @@ func (c *Config) agentSpecOf(id string) (decl.SubAgentSpec, error) {
 		return decl.SubAgentSpec{}, err
 	}
 	return decl.SubAgentSpec{
-		ID:            a.ID,
-		Description:   a.Description,
-		Instruction:   a.Instruction,
-		MaxIter:       a.MaxIterations,
-		ModelRef:      a.ModelRef,
-		DisabledTools: append([]string(nil), a.DisabledTools...),
-		Skills:        cloneList(a.Skills),
-		MCPServers:    cloneList(a.MCPServers),
-		Reasoning:     a.Reasoning,
-		Temperature:   a.Temperature,
-		MaxTokens:     a.MaxTokens,
-		SummarizeAt:   a.SummarizeAt,
-		Sub:           subs,
+		ID:          a.ID,
+		Description: a.Description,
+		Instruction: a.Instruction,
+		MaxIter:     a.MaxIterations,
+		ModelRef:    a.ModelRef,
+		Tools:       append([]string(nil), a.Tools...),
+		Skills:      append([]string(nil), a.Skills...),
+		MCPServers:  append([]string(nil), a.MCPServers...),
+		Reasoning:   a.Reasoning,
+		Temperature: a.Temperature,
+		MaxTokens:   a.MaxTokens,
+		SummarizeAt: a.SummarizeAt,
+		Sub:         subs,
 	}, nil
-}
-
-// cloneList copies an allow-list so that the spec nobody else holds cannot
-// be changed through the agent it was built from.
-//
-// ★ The pointer is copied as a pointer on purpose: nil (the key is absent)
-//
-//	and an empty list (the key is there, the list is empty) mean different
-//	things, and a copy that lost that distinction would silently widen the
-//	scope back to "every skill" or "every server".
-func cloneList(s *[]string) *[]string {
-	if s == nil {
-		return nil
-	}
-	out := make([]string, len(*s))
-	copy(out, *s)
-	return &out
 }
 
 func (c *Config) specsBelow(id string, depth, maxDepth int) ([]decl.SubAgentSpec, error) {
@@ -86,19 +69,19 @@ func (c *Config) specsBelow(id string, depth, maxDepth int) ([]decl.SubAgentSpec
 			return nil, fmt.Errorf("agent %q subagents references unknown agent %q", id, sub)
 		}
 		spec := decl.SubAgentSpec{
-			ID:            sa.ID,
-			Description:   sa.Description,
-			Instruction:   sa.Instruction,
-			MaxIter:       sa.MaxIterations,
-			ModelRef:      sa.ModelRef,
-			DisabledTools: append([]string(nil), sa.DisabledTools...),
-			Skills:        cloneList(sa.Skills),
-			MCPServers:    cloneList(sa.MCPServers),
-			Reasoning:     sa.Reasoning,
-			Temperature:   sa.Temperature,
-			MaxTokens:     sa.MaxTokens,
-			SummarizeAt:   sa.SummarizeAt,
-			Sub:           []decl.SubAgentSpec{},
+			ID:          sa.ID,
+			Description: sa.Description,
+			Instruction: sa.Instruction,
+			MaxIter:     sa.MaxIterations,
+			ModelRef:    sa.ModelRef,
+			Tools:       append([]string(nil), sa.Tools...),
+			Skills:      append([]string(nil), sa.Skills...),
+			MCPServers:  append([]string(nil), sa.MCPServers...),
+			Reasoning:   sa.Reasoning,
+			Temperature: sa.Temperature,
+			MaxTokens:   sa.MaxTokens,
+			SummarizeAt: sa.SummarizeAt,
+			Sub:         []decl.SubAgentSpec{},
 		}
 		if depth < maxDepth && len(sa.SubAgents) > 0 {
 			nested, err := c.specsBelow(sub, depth+1, maxDepth)

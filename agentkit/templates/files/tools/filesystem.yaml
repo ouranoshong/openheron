@@ -10,7 +10,7 @@
 #   takes one away. So this file is a **widening** knob — it is how a
 #   deliberately unattended agent is spelled.
 #
-# ★ To narrow **one** agent, use that agent's own `disabled_tools`. It is the
+# ★ To narrow **one** agent, use that agent's own `tools:` list. It is the
 #   only place a tool is taken away, and it is per agent on purpose: removing
 #   a tool for everybody is a decision about the tool, and that lives in the
 #   code.

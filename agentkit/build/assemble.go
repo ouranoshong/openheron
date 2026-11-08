@@ -187,13 +187,12 @@ func (b *Builder) skillHandlers(ctx context.Context, backend fsapi.Backend, hubs
 
 // scopeOf reads the skill allow-list of an agent.
 //
-// ★ A nil spec means no restriction: an agent that says nothing about skills
+// ★ The default is none: an agent that says nothing about skills gets no
 //
-//	gets every skill in the directory, which is what it got before the field
-//	existed.
+//	skill, the same rule as every other list on an agent.
 func scopeOf(sp *decl.SubAgentSpec) skillScope {
 	if sp == nil {
-		return skillScope{all: true}
+		return skillScope{names: map[string]bool{}}
 	}
 	return skillScopeOf(sp.Skills)
 }

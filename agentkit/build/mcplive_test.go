@@ -118,7 +118,15 @@ func liveMCPConfig(t *testing.T) *spec.Config {
 	}
 	return &spec.Config{
 		Agents: map[string]*decl.Agent{
-			spec.DefaultAgentID: {ID: spec.DefaultAgentID, ModelRef: "test/model"},
+			// ★ The agent mounts the server and names its tools: with the
+			//   default being "none" on both lists, an agent that says
+			//   nothing gets nothing.
+			spec.DefaultAgentID: {
+				ID:         spec.DefaultAgentID,
+				ModelRef:   "test/model",
+				MCPServers: []string{"fake"},
+				Tools:      []string{"mcp__fake__*"},
+			},
 		},
 		Models: map[string]*decl.Model{"test/model": {ID: "model"}},
 		MCPs: decl.MCPFiles{
@@ -282,7 +290,14 @@ func TestTheHTTPCallsOfOneServerAreNotSerialized(t *testing.T) {
 
 	cfg := &spec.Config{
 		Agents: map[string]*decl.Agent{
-			spec.DefaultAgentID: {ID: spec.DefaultAgentID, ModelRef: "test/model"},
+			// ★ The agent mounts the server and names its tools: the
+			//   default on both lists is "none".
+			spec.DefaultAgentID: {
+				ID:         spec.DefaultAgentID,
+				ModelRef:   "test/model",
+				MCPServers: []string{"files"},
+				Tools:      []string{"mcp__files__*"},
+			},
 		},
 		Models: map[string]*decl.Model{"test/model": {ID: "model"}},
 		MCPs: decl.MCPFiles{
@@ -427,8 +442,10 @@ func TestTheServerFileOnDiskIsWhatTheLoaderProduces(t *testing.T) {
 	base := filepath.Join(root, ".openheron")
 	writeFile(t, filepath.Join(base, "llm", "test.yaml"),
 		"type: openai\nbase_url: https://example.invalid\nmodels:\n  - id: small\n")
+	// ★ The agent mounts the server and names its tools: the default on
+	//   both lists is "none", so an agent that says nothing gets nothing.
 	writeFile(t, filepath.Join(base, "agents", "main.md"),
-		"---\nmodel: test/small\n---\nbody\n")
+		"---\nmodel: test/small\nmcps: [demo]\ntools: [mcp__demo__*]\n---\nbody\n")
 	writeFile(t, filepath.Join(base, "mcps", "demo.yaml"), fmt.Sprintf(
 		"transport: stdio\n"+
 			"command: %s\n"+

@@ -90,7 +90,16 @@ func (c *Config) loadAgent(file string, data []byte) error {
 	if _, err := ParseRef(a.ModelRef); err != nil {
 		return fmt.Errorf("%s: %w", id, err)
 	}
-	if err := validateDisabledTools(id, a.DisabledTools); err != nil {
+	// ★ The old key is refused rather than renamed: the two mean
+	//   **opposite** things, and renaming the key alone would turn a
+	//   blacklist into a whitelist without saying so.
+	if len(a.DisabledTools) > 0 {
+		return fmt.Errorf("%s: `disabled_tools` was renamed to `tools`, and the meaning is "+
+			"the other way round: `tools` says which tools this agent **gets**, "+
+			"and `disabled_tools` said which ones it does not. Delete `disabled_tools` and "+
+			"list the tools the agent should have", id)
+	}
+	if err := validateAgentTools(id, a.Tools); err != nil {
 		return err
 	}
 
@@ -98,19 +107,20 @@ func (c *Config) loadAgent(file string, data []byte) error {
 	return nil
 }
 
-// validateDisabledTools refuses the disabled_tools entries that read like
-// wildcards but are not ones.
+// validateAgentTools refuses the tools entries that read like wildcards but
+// are not ones.
 //
 // ★ Only a trailing "*" is a pattern, and a lone "*" is not one at all:
 //
-//	"mcp*foo" reads like a wildcard and is not one, and "disabled_tools:
-//	["*"]" would take the agent's own tools away too. A rule whose reach
-//	differs from what it reads as is a silent mismatch, so both are
-//	refused here — at load time, where the file that says them is known.
-func validateDisabledTools(agentID string, tools []string) error {
+//	"mcp*foo" reads like a wildcard and is not one, and "tools: ["*"]" would
+//	name every tool there is — which is the opposite of what a pattern
+//	usually means. A rule whose reach differs from what it reads as is a
+//	silent mismatch, so both are refused here — at load time, where the file
+//	that says them is known.
+func validateAgentTools(agentID string, tools []string) error {
 	for _, entry := range tools {
 		if _, _, err := decl.ParseToolNamePattern(entry); err != nil {
-			return fmt.Errorf("agent %s: disabled_tools %w", agentID, err)
+			return fmt.Errorf("agent %s: tools %w", agentID, err)
 		}
 	}
 	return nil
@@ -506,7 +516,86 @@ func (c *Config) validate() error {
 		return err
 	}
 	c.noticeCompactionWindows(ids)
+	c.noticeAgentTools(ids)
 	return c.validateDepth(ids)
+}
+
+// containsName reports whether the list carries the name.
+func containsName(list []string, name string) bool {
+	for _, n := range list {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// noticeAgentTools reports the two things an agent's tools: list can get
+// wrong without breaking anything.
+//
+// ★ Both are **notices**, not errors: the configuration is legal, it just
+//
+//	does not say what the author meant. A tool that does not exist is a
+//	typo; a skill tool with no skills is a contradiction.
+func (c *Config) noticeAgentTools(ids []string) {
+	known := c.knownToolNames()
+	for _, id := range ids {
+		a := c.Agents[id]
+		if a == nil {
+			continue
+		}
+		for _, entry := range a.Tools {
+			if entry == "" {
+				continue
+			}
+			// ★ An MCP tool is discovered at runtime, so the server's own
+			//   names are not knowable here: a name it does not have
+			//   yet is not a typo. Every other name is checkable, and
+			//   checkable exactly — a provider's tool exists only when
+			//   its file is written.
+			if strings.HasPrefix(entry, decl.MCPToolPrefix) {
+				continue
+			}
+			prefix, isPattern, err := decl.ParseToolNamePattern(entry)
+			if err != nil {
+				continue
+			}
+			if isPattern {
+				continue
+			}
+			if known[prefix] {
+				continue
+			}
+			c.deferKey("agents/%s.md: tools names %q, which is not a tool that exists — "+
+				"the built-in tools are %s, and a provider's tool exists only when its "+
+				"file under tools/ is written", id, prefix, strings.Join(decl.BuiltinToolNames, ", "))
+		}
+		// ★ The skill tool without a skill is a contradiction: the agent
+		//   can ask for a skill and there is none to load.
+		if len(a.Skills) == 0 && containsName(a.Tools, decl.ToolNameSkill) {
+			c.deferKey("agents/%s.md: tools names the %q tool but skills is empty — "+
+				"the agent can ask for a skill and there is none to load",
+				id, decl.ToolNameSkill)
+		}
+	}
+}
+
+// knownToolNames is every tool name that exists right now: the built-in
+// ones and the ones the written providers offer.
+func (c *Config) knownToolNames() map[string]bool {
+	out := make(map[string]bool, len(decl.BuiltinToolNames)+8)
+	for _, n := range decl.BuiltinToolNames {
+		out[n] = true
+	}
+	for _, n := range c.EnabledToolNames() {
+		out[n] = true
+	}
+	// ★ The knowledge base's own tools exist whenever its file is written.
+	if c.KB.CorpusDir != "" || c.KB.CorpusLegacy != "" {
+		out[decl.ToolNameKBSearch] = true
+		out[decl.ToolNameKBIndex] = true
+	}
+	return out
 }
 
 // validateMCP checks the agents' mcps: lists.
@@ -525,16 +614,60 @@ func (c *Config) validateMCP() error {
 
 	for _, id := range c.AgentNames() {
 		a := c.Agents[id]
-		if a == nil || a.MCPServers == nil {
+		if a == nil {
 			continue
 		}
-		for _, name := range *a.MCPServers {
+		for _, name := range a.MCPServers {
 			if _, ok := c.MCPs[name]; ok {
 				continue
 			}
 			return fmt.Errorf("agent %s lists the MCP server %q, which is not declared under %s/ (declared: %s)",
 				id, name, DirMCP, strings.Join(known, ", "))
 		}
+		if err := c.checkAgentMCPNames(id, a); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkAgentMCPNames refuses a tools: list that names a server the agent
+// does not mount.
+//
+// ★ Mounting and visibility are **two levels**: `mcps:` says which servers
+//
+//	are started, `tools:` says which of their tools the agent sees. A
+//	`tools:` entry that names a server the agent does not mount can never
+//	match — the tool does not exist — so it is a load-time error rather
+//	than a rule that quietly does nothing.
+func (c *Config) checkAgentMCPNames(agentID string, a *decl.Agent) error {
+	if len(a.Tools) == 0 || len(a.MCPServers) == 0 {
+		return nil
+	}
+	mounted := make(map[string]bool, len(a.MCPServers))
+	for _, n := range a.MCPServers {
+		mounted[n] = true
+	}
+	for _, entry := range a.Tools {
+		prefix, isPattern, err := decl.ParseToolNamePattern(entry)
+		if err != nil {
+			continue
+		}
+		prefix = strings.TrimSuffix(prefix, "*")
+		if !strings.HasPrefix(prefix, decl.MCPToolPrefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(prefix, decl.MCPToolPrefix)
+		server, _, ok := strings.Cut(rest, decl.MCPSeparator)
+		if !ok || server == "" {
+			continue
+		}
+		if mounted[server] {
+			continue
+		}
+		_ = isPattern
+		return fmt.Errorf("agent %s names the MCP tool %q but does not mount the server %q — "+
+			"add %q to mcps:, or drop the tool from tools:", agentID, entry, server, server)
 	}
 	return nil
 }
@@ -554,7 +687,7 @@ func (c *Config) MCPServersInUse() []string {
 		if a == nil {
 			continue
 		}
-		for _, name := range c.mcpServersOf(a.MCPServers) {
+		for _, name := range a.MCPServers {
 			if seen[name] {
 				continue
 			}
@@ -564,23 +697,6 @@ func (c *Config) MCPServersInUse() []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// mcpServersOf resolves one agent's list.
-//
-// ★ An absent list means every configured server and an empty list means
-//
-//	none — the pointer tells the two apart.
-func (c *Config) mcpServersOf(list *[]string) []string {
-	if list == nil {
-		out := make([]string, 0, len(c.MCPs))
-		for name := range c.MCPs {
-			out = append(out, name)
-		}
-		sort.Strings(out)
-		return out
-	}
-	return *list
 }
 
 // noticeCompactionWindows reports the agents whose automatic compaction

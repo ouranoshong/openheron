@@ -410,7 +410,7 @@ const FAKE_AGENTS = {
       },
       maxIterations: 20,
       subagents: [],
-      disabledTools: [],
+      tools: [],
     },
     {
       id: "main",
@@ -425,7 +425,7 @@ const FAKE_AGENTS = {
       },
       maxIterations: 40,
       subagents: ["worker"],
-      disabledTools: [],
+      tools: [],
     },
   ],
 }
@@ -441,7 +441,7 @@ const FAKE_AGENTS_MULTI = {
       model: { provider: "openai", model: "fast", reasoning: "low", reasoningAvailable: ["low"], reasoningDefault: "low" },
       maxIterations: 20,
       subagents: [],
-      disabledTools: [],
+      tools: [],
     },
     {
       id: "lead",
@@ -449,7 +449,7 @@ const FAKE_AGENTS_MULTI = {
       model: { provider: "deepseek", model: "deepseek-v4", reasoning: "high", reasoningAvailable: ["high", "off"], reasoningDefault: "off" },
       maxIterations: 40,
       subagents: ["coder"],
-      disabledTools: [],
+      tools: [],
     },
     {
       id: "main",
@@ -457,7 +457,7 @@ const FAKE_AGENTS_MULTI = {
       model: { provider: "deepseek", model: "deepseek-v4", reasoning: "high", reasoningAvailable: ["high", "off"], reasoningDefault: "off" },
       maxIterations: 40,
       subagents: ["lead"],
-      disabledTools: [],
+      tools: [],
     },
   ],
 }
@@ -472,7 +472,7 @@ const FAKE_AGENTS_MANY = {
     model: { provider: "openai", model: "fast", reasoning: "low", reasoningAvailable: ["low"], reasoningDefault: "low" },
     maxIterations: 20,
     subagents: [],
-    disabledTools: [],
+    tools: [],
   })),
 }
 
@@ -488,7 +488,7 @@ const FAKE_AGENTS_GREW = {
       model: { provider: "openai", model: "fast", reasoning: "low", reasoningAvailable: ["low"], reasoningDefault: "low" },
       maxIterations: 20,
       subagents: [],
-      disabledTools: [],
+      tools: [],
     },
   ],
 }

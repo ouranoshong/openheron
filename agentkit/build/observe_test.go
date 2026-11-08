@@ -16,7 +16,9 @@ func verdictsByName(t *testing.T, vs []ToolVerdict) map[string]ToolVerdict {
 }
 
 func TestFilterObservesEvenWithoutAnyBlocking(t *testing.T) {
-	tbl := newTable("main", nil)
+	// ★ The list names both tools, so nothing is blocked — and the
+	//   observation still happens.
+	tbl := newTable("main", []string{"read_file", "task"})
 	tools := []tool.BaseTool{
 		&stubTool{name: "read_file"},
 		&stubTool{name: "task"},
@@ -36,12 +38,12 @@ func TestFilterObservesEvenWithoutAnyBlocking(t *testing.T) {
 }
 
 func TestFilterObservesBeforeRemoving(t *testing.T) {
-	tbl := newTable("main", []string{"grep"})
+	tbl := newTable("main", []string{"read_file"})
 	kept, removed := tbl.Filter([]tool.BaseTool{
 		&stubTool{name: "grep"},
 		&stubTool{name: "read_file"},
 	})
-	if len(kept) != 1 || removed[LayerDisable] != 1 {
+	if len(kept) != 1 || removed[LayerNotLoaded] != 1 {
 		t.Fatalf("kept %d removed %v", len(kept), removed)
 	}
 
@@ -113,17 +115,20 @@ func TestRuntimeOnlyToolsAppearInEffectiveTools(t *testing.T) {
 }
 
 func TestNamedButAbsentToolIsMarked(t *testing.T) {
-	// ★ A name the agent's own disabled_tools carries is part of the
+	// ★ A name the agent's own tools: list carries is part of the
 	//   universe even when no provider ever registers it — the model has to
-	//   be told that the tool it asked for is not available.
+	//   be told that the tool it asked for is not there.
+	//
+	// ★ And it is **not blocked**: the agent named it, so it has it. What
+	//   it lacks is the provider — the loader says so, as a notice.
 	cfg := configFromSpecs("test/model", []string{"grep_search"}, nil, nil)
 	b := newTestBuilderWithConfig(t, cfg)
 	mustSnapshot(t, b).tableFor(mustSnapshot(t, b).agentSpec.defaultAgent).Filter([]tool.BaseTool{&stubTool{name: "grep"}})
 
 	got := verdictsByName(t, b.EffectiveTools("main"))
 	typo := got["grep_search"]
-	if typo.Tier != TierAsk || typo.Blocked != LayerDisable {
-		t.Fatalf("grep_search = %+v, want ask, blocked by the disable layer", typo)
+	if typo.Tier != TierAsk || typo.Blocked != LayerNone {
+		t.Fatalf("grep_search = %+v, want ask and not blocked — the agent named it", typo)
 	}
 	if !typo.ObservedKnown {
 		t.Fatal("ObservedKnown should be true after a turn")

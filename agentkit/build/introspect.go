@@ -35,10 +35,8 @@ func (o Observed) Has(name string) bool {
 
 func reasonOf(l Layer) string {
 	switch l {
-	case LayerDisable:
-		return "disabled_tools"
-	case LayerMCPScope:
-		return "mcps"
+	case LayerNotLoaded:
+		return "tools"
 	default:
 		return ""
 	}
@@ -100,7 +98,10 @@ func (b *Builder) PolicyTools() []ToolVerdict {
 	obs := observedOf(rootTable)
 	names := toolNameUniverse(newBoundary(policy, rootTable), snap.cfg.EnabledToolNames(), subs, obs)
 
-	flat := newBoundary(policy, specTable(Policy{}, decl.SubAgentSpec{}, nil))
+	// ★ The policy view carries **no agent's narrowing**: it is the tier
+	//   table on its own. ★ A nil table is what says "nothing is narrowed
+	//   here" — with an allow-list, an empty one would say the opposite.
+	flat := newBoundary(policy, nil)
 	out := make([]ToolVerdict, 0, len(names))
 	for _, n := range names {
 		out = append(out, verdictOf(flat, n, obs))
@@ -144,10 +145,10 @@ func toolNameUniverse(b boundary, enabled []string, subs []decl.SubAgentSpec, ob
 		add([]string{name})
 	}
 	if table := b.Table(); table != nil {
-		add(table.Disable)
+		add(table.Load)
 	}
 	for _, s := range subs {
-		addSpecDisabled(add, s)
+		addSpecTools(add, s)
 	}
 	add(obs.Names)
 
@@ -159,10 +160,10 @@ func toolNameUniverse(b boundary, enabled []string, subs []decl.SubAgentSpec, ob
 	return out
 }
 
-func addSpecDisabled(add func([]string), agentSpec decl.SubAgentSpec) {
-	add(agentSpec.DisabledTools)
+func addSpecTools(add func([]string), agentSpec decl.SubAgentSpec) {
+	add(agentSpec.Tools)
 	for _, s := range agentSpec.Sub {
-		addSpecDisabled(add, s)
+		addSpecTools(add, s)
 	}
 }
 

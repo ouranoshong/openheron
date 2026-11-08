@@ -622,7 +622,7 @@ models:
     reasoning_default: high
 `)
 	write("agents/main.md", "---\ndescription: root\nmodel: test/small\nsubagents: [worker]\n---\nbody\n")
-	write("agents/worker.md", "---\ndescription: worker\nmodel: test/big\ndisabled_tools: [execute]\n---\nbody\n")
+	write("agents/worker.md", "---\ndescription: worker\nmodel: test/big\ntools: [ls, read_file]\n---\nbody\n")
 
 	// base is the user-level dir, root is the project root — both arguments
 	// matter: leaving projectRoot empty makes the loader look for .openheron
@@ -663,11 +663,11 @@ func sampleTools() stubTools {
 				{Name: "read_file", Tier: string(decl.TierAllow)},
 				// ★ A blocked tool keeps its own tier — it is this agent
 				//   that cannot have it, not that the tool is illegal.
-				{Name: "execute", Tier: string(decl.TierAsk), Reason: "disabled_tools"},
+				{Name: "execute", Tier: string(decl.TierAsk), Reason: "tools"},
 			},
 			"worker": {
 				{Name: "read_file", Tier: string(decl.TierAllow)},
-				{Name: "execute", Tier: string(decl.TierAsk), Reason: "disabled_tools"},
+				{Name: "execute", Tier: string(decl.TierAsk), Reason: "tools"},
 			},
 		},
 		policy: []ToolVerdict{
@@ -697,8 +697,8 @@ func TestEffectiveToolsRendersTheInjectedVerdict(t *testing.T) {
 	}
 	if tool, ok := byName["execute"]; !ok {
 		t.Fatalf("execute must appear in the tool table, got %+v", byName)
-	} else if tool.Tier != string(decl.TierAsk) || tool.Reason != "disabled_tools" {
-		t.Fatalf("execute = %+v, want ask via disabled_tools", tool)
+	} else if tool.Tier != string(decl.TierAsk) || tool.Reason != "tools" {
+		t.Fatalf("execute = %+v, want ask via tools", tool)
 	}
 	if tool := byName["read_file"]; tool.Tier != string(decl.TierAllow) || tool.Reason != "" {
 		t.Fatalf("read_file = %+v, want allow with no reason", tool)
@@ -712,7 +712,7 @@ func TestRuntimeToolsAreRenderedSeparately(t *testing.T) {
 	}
 	stub.byAgent["worker"] = []ToolVerdict{
 		{Name: "read_file", Tier: string(decl.TierAllow), Present: true, ObservedKnown: true},
-		{Name: "grep_search", Tier: string(decl.TierAsk), Reason: "disabled_tools", ObservedKnown: true},
+		{Name: "grep_search", Tier: string(decl.TierAsk), Reason: "tools", ObservedKnown: true},
 	}
 
 	srv := newV2Server(t)

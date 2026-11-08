@@ -692,7 +692,7 @@ func TestSubagentGraphIsAccepted(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 	f.write(t, "agents/researcher.md",
-		"---\ndescription: 只读检索\nmodel: openai/fast\ndisabled_tools: [execute]\n---\n只读。\n")
+		"---\ndescription: 只读检索\nmodel: openai/fast\ntools: [ls, read_file, glob, grep]\n---\n只读。\n")
 	f.write(t, "agents/main.md",
 		"---\nmodel: openai/strong\nsubagents: [researcher]\n---\n主。\n")
 
@@ -701,7 +701,7 @@ func TestSubagentGraphIsAccepted(t *testing.T) {
 		t.Fatalf("a valid sub-agent declaration must not be rejected: %v", err)
 	}
 	r := cfg.Agents["researcher"]
-	if r == nil || len(r.DisabledTools) != 1 {
+	if r == nil || len(r.Tools) != 4 {
 		t.Fatalf("the sub-agent declaration was not loaded: %+v", r)
 	}
 }
@@ -756,7 +756,7 @@ func TestSubAgentSpecsMirrorTopology(t *testing.T) {
 	f.seedMinimal(t)
 	f.write(t, "server/config.yaml", "agent:\n  max_depth: 2\n")
 	f.write(t, "agents/researcher.md",
-		"---\ndescription: R\nmodel: openai/fast\ndisabled_tools: [execute]\nreasoning: low\ntemperature: 0.3\nmax_tokens: 128\nsubagents: [grandchild]\n---\nR 正文\n")
+		"---\ndescription: R\nmodel: openai/fast\ntools: [ls, read_file]\nreasoning: low\ntemperature: 0.3\nmax_tokens: 128\nsubagents: [grandchild]\n---\nR 正文\n")
 	f.write(t, "agents/grandchild.md", "---\ndescription: G\nmodel: openai/fast\n---\nG 正文\n")
 	f.write(t, "agents/main.md", "---\nmodel: openai/fast\nsubagents: [researcher]\n---\n")
 
@@ -772,8 +772,8 @@ func TestSubAgentSpecsMirrorTopology(t *testing.T) {
 	if len(specs) != 1 || specs[0].ID != "researcher" {
 		t.Fatalf("the top level of the spec tree is wrong: %+v", specs)
 	}
-	if len(specs[0].DisabledTools) != 1 || specs[0].DisabledTools[0] != "execute" {
-		t.Fatalf("disabled_tools was not carried over: %+v", specs[0].DisabledTools)
+	if len(specs[0].Tools) != 2 || specs[0].Tools[0] != "ls" {
+		t.Fatalf("tools was not carried over: %+v", specs[0].Tools)
 	}
 	if specs[0].Reasoning != "low" {
 		t.Fatalf("the reasoning gear name was not carried over: %q", specs[0].Reasoning)

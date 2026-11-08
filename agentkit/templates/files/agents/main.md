@@ -4,15 +4,32 @@ model: {{model}}
 max_iterations: 30
 reasoning: high
 subagents: [task]
-disabled_tools: [write_file, edit_file, execute]
+
+# ★ tools is the allow-list of tools this agent may use — the names are the
+#   ones the model sees. **The default is none**: a tool this list does not
+#   name is not this agent's tool, so the list is the whole answer.
+#
+#   ★ main orchestrates: it reads and plans, and it delegates the writing
+#   and the running to task. So it keeps the readers and the delegation
+#   tool, and it does not keep the writers — those are task's.
+tools: [ls, read_file, glob, grep, task, write_todos]
+
+# ★ mcps is the list of MCP servers this agent mounts. **The default is
+#   none**: mounting a server starts a child process, so it is written down,
+#   never assumed.
+mcps: []
 
 # ★ skills is the allow-list of skills this agent may use — the names are the
 #   folders under the skills directory (.openheron/skills/ by default). A skill
 #   outside the list is not advertised to the model and cannot be loaded by
 #   name.
 #
-#   ★ Leave the key out and the agent gets every skill in the directory;
-#   write an empty list and it gets none.
+#   ★ The default is none, like every other list here: write the skills this
+#   agent may load, or leave the key out and it loads none.
+#
+#   ★ The `skill` tool and the `skills` list go together: the tool without a
+#   skill to load is a contradiction, and the loader says so. Add `skill` to
+#   `tools` above when you write a skill here.
 # skills: [refactor]
 
 # ★ summarize_at is the point at which this agent's context is compacted into

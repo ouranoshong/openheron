@@ -84,16 +84,25 @@ func (p *publisher) Publish(ev contract.RunEvent) {
 //
 //	sees every event exactly once: the ones from the window, then the ones
 //	that follow.
+//
+// ★ A subscriber that arrives **after** the run closed still gets the
+//
+//	window. The connection subscribes after the turn signals ready, and
+//	the run may finish in between — an approval raised in that window
+//	would otherwise be dropped, and the client would see a run that
+//	finished without ever having asked.
 func (p *publisher) Subscribe() *subscription {
 	sub := &subscription{p: p, ch: make(chan contract.RunEvent, subscriberQueue)}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.closed {
-		sub.close()
-		return sub
-	}
 	for _, ev := range p.window {
 		sub.ch <- ev
+	}
+	if p.closed {
+		// ★ The run is over: no more events will come, so the channel
+		//   closes — but the ones in the window are already in it.
+		sub.close()
+		return sub
 	}
 	p.subs[sub] = struct{}{}
 	return sub
@@ -111,14 +120,16 @@ func (p *publisher) remove(sub *subscription) {
 
 // Close ends the run's publishing.
 //
-// ★ The window goes with it: the run is over, and a late subscriber gets
+// ★ The window **stays**: a subscriber that arrives after the run closed
 //
-//	nothing rather than a tail that no longer has a run to belong to.
+//	still needs the events that were published — the approval the run
+//	raised, above all, because that is the one the client cannot do
+//	without. ★ The subscribers themselves are closed: the run is over, and
+//	no more events will come for them.
 func (p *publisher) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.closed = true
-	p.window = nil
 	for sub := range p.subs {
 		delete(p.subs, sub)
 		sub.close()

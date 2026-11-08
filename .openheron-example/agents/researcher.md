@@ -1,10 +1,11 @@
 ---
 description: Read-only retrieval — locate implementations, trace call chains, summarize facts. Does not change files.
 model: openai/gpt-4o
-# Affects this one agent only. The tier table is **shared**, the narrowing is
-# **per agent** — so an agent that disables a tool cannot re-enable another
-# agent's, and vice versa.
-disabled_tools: [execute, write_file, edit_file]
+# ★ tools is the allow-list, and **the default is none**: a tool this list
+#   does not name is not this agent's tool. The researcher reads, so it keeps
+#   the readers and nothing else.
+tools: [ls, read_file, glob, grep]
+mcps: []
 ---
 
 You are the read-only retrieval agent.

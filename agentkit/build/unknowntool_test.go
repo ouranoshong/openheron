@@ -86,11 +86,14 @@ func (m *scriptModel) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel,
 //
 //	are the agent's own disabled_tools, and a model that calls one has to
 //	be told it is not available.
-func runScripted(t *testing.T, unknownName string, disabled ...string) [][]*schema.Message {
+//
+// runScripted builds an agent whose tools: list is everything except the
+// named ones — so the model calls a tool the agent does not have.
+func runScripted(t *testing.T, unknownName string, without ...string) [][]*schema.Message {
 	t.Helper()
 
 	m := &scriptModel{}
-	cfg := configFromSpecs("test/model", disabled, nil, nil)
+	cfg := configFromSpecs("test/model", allToolsExcept(without...), nil, nil)
 	cfg.Agents[spec.DefaultAgentID].Instruction = "you are a test agent"
 	cfg.Agents[spec.DefaultAgentID].MaxIterations = 3
 
@@ -149,7 +152,9 @@ func TestUnknownToolCallDoesNotKillTheRun(t *testing.T) {
 }
 
 func TestUnknownToolScopeNamesOnlySurvivingTools(t *testing.T) {
-	filter := newFilterMiddleware(newTable("main", []string{"grep"}))
+	// ★ The list names the two tools that survive; `grep` is not among
+	//   them, so the filter drops it.
+	filter := newFilterMiddleware(newTable("main", []string{"ls", "read_file"}))
 	scope := newUnknownToolScope()
 
 	runCtx := &adk.ChatModelAgentContext{

@@ -185,8 +185,11 @@ func TestTheFilesOwnExceptionsWinOverTheDefault(t *testing.T) {
 	}
 }
 
-func TestDisabledToolsStillRemoveTheEnabledTools(t *testing.T) {
-	cfg := configFromSpecs("test/model", []string{decl.ToolNameWebSearch}, nil, nil)
+// ★ The agent's own tools: list decides what it may use — a provider's
+//
+//	tool is reachable only when the agent names it.
+func TestTheToolsListDecidesWhetherTheEnabledToolsAreReachable(t *testing.T) {
+	cfg := configFromSpecs("test/model", allToolsExcept(decl.ToolNameWebSearch), nil, nil)
 	cfg.Tools.WebSearch = &decl.WebSearchCfg{}
 
 	snap := mustSnapshot(t, newTestBuilderWithConfig(t, cfg))
@@ -194,8 +197,8 @@ func TestDisabledToolsStillRemoveTheEnabledTools(t *testing.T) {
 	if table == nil {
 		t.Fatal("the default agent must have a table")
 	}
-	if got := table.Blocked(decl.ToolNameWebSearch); got != LayerDisable {
-		t.Fatalf("the agent's disabled_tools must still remove it, got %q", got)
+	if got := table.Blocked(decl.ToolNameWebSearch); got != LayerNotLoaded {
+		t.Fatalf("the agent's tools list must decide it, got %q", got)
 	}
 }
 

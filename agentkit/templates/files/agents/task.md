@@ -3,7 +3,18 @@ description: "task: the concrete executor. Writes files per the task order, runs
 model: {{model}}
 max_iterations: 50
 reasoning: low
-disabled_tools: [kb_index]
+
+# ★ tools is the allow-list of tools this agent may use — the names are the
+#   ones the model sees. **The default is none**: a tool this list does not
+#   name is not this agent's tool.
+#
+#   ★ task is the executor: it writes the files and runs the commands, so
+#   it keeps the writers. It does not keep `skill` — the skill reader
+#   belongs to the agent that plans, not to the one that executes.
+tools: [ls, read_file, write_file, edit_file, glob, grep, execute, write_todos]
+
+# ★ mcps is the list of MCP servers this agent mounts. The default is none.
+mcps: []
 
 # ★ summarize_at is the point at which this agent's context is compacted into
 #   a summary. It belongs to the agent, not to the model: the window belongs
@@ -64,7 +75,8 @@ modifications.
 > not declare that tier it is **silently ignored** (it neither blocks startup nor
 > says anything).
 >
-> ★ `disabled_tools: [kb_index]` narrows **only this one agent**: it affects task
-> only, not main, and it **cannot relax** what another agent's own file allows —
-> "not exposed" is said in exactly two places: the file that provides a tool
-> (`allows:`) and an agent's own `disabled_tools`.
+> ★ `tools:` is **this one agent's** list: it affects task only, not main. And it
+> cannot hand a tool back — the file that provides a tool says what runs without
+> a nod (`allows:`), and the agent's own list says what this agent may use at
+> all. "Not exposed" is said in exactly two places, and neither of them is a
+> third one.

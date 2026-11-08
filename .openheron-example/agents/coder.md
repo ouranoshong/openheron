@@ -2,9 +2,14 @@
 description: Write code — change files per the given conclusions, run tests. No research, no review.
 model: openai/gpt-4o
 max_iterations: 30
-# write_file / edit_file are not disabled — that is the whole point of this role.
-# execute is not disabled either, but running a test has to pass the ask tier (a human nod first).
-disabled_tools: []
+# ★ tools is the allow-list: the names are the ones the model sees, and
+#   **the default is none** — a tool this list does not name is not this
+#   agent's tool.
+#
+# ★ The coder writes — that is the whole point of this role — so it keeps the
+#   writers. Running a test still passes the ask tier (a human nod first).
+tools: [ls, read_file, write_file, edit_file, glob, grep, execute, write_todos]
+mcps: []
 ---
 
 You are the implementer.

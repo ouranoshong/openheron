@@ -63,14 +63,14 @@ func (g *depthGuard) BeforeAgent(ctx context.Context, runCtx *adk.ChatModelAgent
 
 // specTable builds the tool table of one agent.
 //
-// ★ The agent's own mcps: list narrows the servers here, in the same
+// ★ The agent's own tools: list is the **whole** answer: the tool set is one
 //
-//	table that disabled_tools uses: the tool set is one set for the whole
-//	snapshot, and the model never sees a tool the table removes.
+//	set for the whole snapshot, and the model never sees a tool the table
+//	removes. ★ An MCP server's tools are named by their composed names —
+//	`mcp__<server>__<tool>`, or the pattern `mcp__<server>__*` — so the
+//	namespace is what keeps two servers' `ls` apart.
 func specTable(policy Policy, agentSpec decl.SubAgentSpec, servers []string) *Table {
-	t := newTable(agentSpec.ID, agentSpec.DisabledTools)
-	t.denyMCPNamespaces(agentSpec.MCPServers, servers)
-	return t
+	return newTable(agentSpec.ID, agentSpec.Tools)
 }
 
 func subHandlers(policy Policy, agentSpec decl.SubAgentSpec, maxDepth int,

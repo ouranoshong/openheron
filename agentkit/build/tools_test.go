@@ -162,7 +162,10 @@ func TestRegistryToolDefaultsToAsk(t *testing.T) {
 	}
 }
 
-func TestRegistryToolObeysDisabledTools(t *testing.T) {
+// ★ The list is an **allow-list**: a tool the agent does not name is not its
+//
+//	tool, and a tool it names is — whoever else may or may not have it.
+func TestRegistryToolObeysTheAgentsAllowList(t *testing.T) {
 	tools, err := buildRegistry(t, registryOf(
 		&fakeProvider{id: "a", tools: []tool.BaseTool{&stubTool{name: "new_tool"}}},
 	))
@@ -170,13 +173,13 @@ func TestRegistryToolObeysDisabledTools(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root := specTable(NewPolicy(nil), decl.SubAgentSpec{ID: "main"}, nil)
+	root := specTable(NewPolicy(nil), decl.SubAgentSpec{ID: "main", Tools: []string{"new_tool"}}, nil)
 	if kept, _ := root.Filter(tools); len(kept) != 1 {
 		t.Fatalf("the root must see the tool, kept %v", namesOf(kept))
 	}
 	sub := specTable(NewPolicy(nil),
-		decl.SubAgentSpec{ID: "worker", DisabledTools: []string{"new_tool"}}, nil)
-	if kept, removed := sub.Filter(tools); len(kept) != 0 || removed[LayerDisable] != 1 {
+		decl.SubAgentSpec{ID: "worker", Tools: []string{"read_file"}}, nil)
+	if kept, removed := sub.Filter(tools); len(kept) != 0 || removed[LayerNotLoaded] != 1 {
 		t.Fatalf("the sub-agent must not see it: kept %v removed %v", namesOf(kept), removed)
 	}
 }
@@ -193,11 +196,11 @@ func TestRegistryToolObeysPolicyTiers(t *testing.T) {
 		t.Fatalf("tier = %q, want ask — the default is ask", got)
 	}
 	// ★ The only way a tool does not reach the model is the agent's own
-	//   disabled_tools.
+	//   tools: list — it does not name it.
 	blocked := specTable(NewPolicy(nil),
-		decl.SubAgentSpec{ID: "main", DisabledTools: []string{"new_tool"}}, nil)
-	if kept, removed := blocked.Filter(tools); len(kept) != 0 || removed[LayerDisable] != 1 {
-		t.Fatalf("disabled_tools must remove it at the filter stage: kept %v removed %v",
+		decl.SubAgentSpec{ID: "main", Tools: []string{"read_file"}}, nil)
+	if kept, removed := blocked.Filter(tools); len(kept) != 0 || removed[LayerNotLoaded] != 1 {
+		t.Fatalf("the allow-list must remove it at the filter stage: kept %v removed %v",
 			namesOf(kept), removed)
 	}
 }

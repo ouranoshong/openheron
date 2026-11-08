@@ -90,28 +90,49 @@ type Agent struct {
 
 	SubAgents []string `yaml:"subagents"`
 
+	// Tools is the allow-list of tools this agent may use.
+	//
+	// ★ **The default is none.** A list that names a tool makes it visible;
+	//   a list that does not name it makes it invisible. There is no
+	//   "everything" and no "everything except" — the list is the whole
+	//   answer, and an absent key is an empty list.
+	//
+	// ★ The names are the **exposed** names — the ones the model sees. For
+	//   an MCP server's tool that is `mcp__<server>__<tool>`, and a
+	//   trailing "*" is a prefix pattern (`mcp__github__*` is every tool of
+	//   the server named `github`).
+	Tools []string `yaml:"tools"`
+
+	// DisabledTools is the **old** key, kept only so the loader can say
+	// what happened.
+	//
+	// ★ It is not read: the field exists to catch the file that still says
+	//   it, because the two mean **opposite** things — one removes, the
+	//   other names — and renaming the key alone would silently turn a
+	//   blacklist into a whitelist.
 	DisabledTools []string `yaml:"disabled_tools"`
 
 	// Skills is the allow-list of skills this agent may use.
 	//
-	// ★ A nil list — the key is absent — means every skill in the skills
-	//   directory: that is what an agent got before this field existed. An
-	//   empty list means none. The pointer is what tells the two apart, the
-	//   same way Threshold tells "not declared" from "declared off".
+	// ★ **The default is none**, the same rule as Tools: a skill the agent
+	//   does not name is not its skill. (It only matters when the agent has
+	//   the `skill` tool at all — see Tools.)
 	//
 	// ★ The names are the **folders** under skills/ (the skill's own
 	//   frontmatter name is accepted as well). The folder is the identity the
 	//   user sees in the directory tree; the frontmatter name is the identity
 	//   the model sees in the tool.
-	Skills *[]string `yaml:"skills"`
+	Skills []string `yaml:"skills"`
 
-	// MCPServers is the allow-list of MCP servers this agent may use.
+	// MCPServers is the list of MCP servers this agent mounts.
 	//
-	// ★ A nil list — the key is absent — means every configured server,
-	//   and an empty list means none. The pointer tells the two apart, the
-	//   same way it does for Skills: the common case is **one** place, and
-	//   writing the server file is enough.
-	MCPServers *[]string `yaml:"mcps"`
+	// ★ **The default is none**: an absent list mounts no server, the same
+	//   as an empty one. Mounting a server starts a child process, so it is
+	//   a decision that is written down, never a default.
+	//
+	// ★ The names are the servers' **own** names — the file names under
+	//   mcps/ without the extension.
+	MCPServers []string `yaml:"mcps"`
 
 	Temperature *float32 `yaml:"temperature"`
 	MaxTokens   *int     `yaml:"max_tokens"`
@@ -255,6 +276,34 @@ const (
 	ToolNameHTTPDelete = "request_delete"
 	ToolNameWebSearch  = "duckduckgo_search"
 	ToolNameWikipedia  = "wikipedia_search"
+)
+
+// BuiltinToolNames are the tools openheron's own middleware provides.
+//
+// ★ They live here, not in the build package, because **both** halves need
+//
+//	them: the builder refuses a provider that claims one of these names,
+//	and the loader checks the names an agent's `tools:` list mentions.
+//
+// ★ A provider's tool may not take one of these names: it would shadow a
+//
+//	built-in tool, and the model would see two tools with one name.
+var BuiltinToolNames = []string{
+	"ls", "read_file", "write_file", "edit_file", "glob", "grep", "execute",
+	"task", "write_todos",
+	"skill",
+}
+
+// The names of the tools that are not built in but that the configuration
+// itself can bring into being.
+const (
+	// ToolNameSkill is the skill reader — a built-in, but one that only
+	// does anything when the agent also names a skill.
+	ToolNameSkill = "skill"
+	// ToolNameKBSearch and ToolNameKBIndex are the knowledge base's own
+	// two tools: one reads, one writes to the index on disk.
+	ToolNameKBSearch = "kb_search"
+	ToolNameKBIndex  = "kb_index"
 )
 
 type ToolsCfg struct {
@@ -602,22 +651,23 @@ func (d Duration) MarshalYAML() (any, error) { return time.Duration(d).String(),
 func (d Duration) Duration() time.Duration { return time.Duration(d) }
 
 type SubAgentSpec struct {
-	ID            string
-	Description   string
-	Instruction   string
-	MaxIter       int
-	ModelRef      string
-	DisabledTools []string
-	// Skills is the agent's skill allow-list. A nil list means every skill in
-	// the skills directory; an empty list means none.
-	Skills *[]string
-	// MCPServers is the agent's MCP server allow-list. A nil list means every
-	// configured server; an empty list means none.
+	ID          string
+	Description string
+	Instruction string
+	MaxIter     int
+	ModelRef    string
+	// Tools is the allow-list of tools this agent may use. The default is
+	// none: a tool the agent does not name is not its tool.
+	Tools []string
+	// Skills is the agent's skill allow-list. The default is none.
+	Skills []string
+	// MCPServers is the list of MCP servers this agent mounts. The default
+	// is none: an absent list mounts no server.
 	//
-	// ★ A sub-agent carries a list of its own, next to its DisabledTools
-	//   and its Skills: the list is read from the agent that is running,
-	//   not from the root's.
-	MCPServers  *[]string
+	// ★ A sub-agent carries a list of its own, next to its Tools and its
+	//   Skills: the list is read from the agent that is running, not from
+	//   the root's.
+	MCPServers  []string
 	Reasoning   string
 	Temperature *float32
 	MaxTokens   *int

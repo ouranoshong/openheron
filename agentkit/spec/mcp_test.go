@@ -224,7 +224,7 @@ func TestAnAgentNamingAServerThatDoesNotExistIsALoadTimeError(t *testing.T) {
 	}
 }
 
-func TestAnAbsentServerListMeansEveryConfiguredServer(t *testing.T) {
+func TestAnAbsentServerListMeansNoServerAtAll(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 	f.write(t, "mcps/github.yaml", "transport: stdio\ncommand: npx\n")
@@ -233,9 +233,11 @@ func TestAnAbsentServerListMeansEveryConfiguredServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// ★ The default is **none**: mounting a server starts a child process,
+	//   so it is never assumed.
 	inUse := cfg.MCPServersInUse()
-	if len(inUse) != 1 || inUse[0] != "github" {
-		t.Fatalf("servers in use = %v, want [github]", inUse)
+	if len(inUse) != 0 {
+		t.Fatalf("servers in use = %v, want none", inUse)
 	}
 }
 
@@ -270,11 +272,11 @@ func TestASubAgentsOwnListIsReadFromTheSubAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := specs["main"]
-	if root.MCPServers != nil {
-		t.Fatalf("the root's list must stay absent, got %v", *root.MCPServers)
+	if len(root.MCPServers) != 0 {
+		t.Fatalf("the root's list must stay empty, got %v", root.MCPServers)
 	}
 	sub := specs["main"].Sub[0]
-	if sub.MCPServers == nil || len(*sub.MCPServers) != 1 || (*sub.MCPServers)[0] != "github" {
+	if len(sub.MCPServers) != 1 || sub.MCPServers[0] != "github" {
 		t.Fatalf("the sub-agent's own list must be carried, got %v", sub.MCPServers)
 	}
 }
@@ -285,7 +287,7 @@ func TestAWildcardThatIsNotAPrefixPatternIsALoadTimeError(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 	f.write(t, "agents/main.md",
-		"---\nmodel: openai/fast\ndisabled_tools: [\"mcp*foo\"]\n---\n\n你是助手。\n")
+		"---\nmodel: openai/fast\ntools: [\"mcp*foo\"]\n---\n\n你是助手。\n")
 
 	_, err := f.load(t)
 	if err == nil {
@@ -300,7 +302,7 @@ func TestALoneWildcardIsALoadTimeError(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 	f.write(t, "agents/main.md",
-		"---\nmodel: openai/fast\ndisabled_tools: [\"*\"]\n---\n\n你是助手。\n")
+		"---\nmodel: openai/fast\ntools: [\"*\"]\n---\n\n你是助手。\n")
 
 	_, err := f.load(t)
 	if err == nil {
@@ -315,7 +317,7 @@ func TestATrailingStarIsAPrefixPattern(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 	f.write(t, "agents/main.md",
-		"---\nmodel: openai/fast\ndisabled_tools: [\"mcp__github__*\"]\n---\n\n你是助手。\n")
+		"---\nmodel: openai/fast\ntools: [\"mcp__github__*\"]\n---\n\n你是助手。\n")
 
 	if _, err := f.load(t); err != nil {
 		t.Fatalf("a trailing star must be accepted: %v", err)

@@ -136,18 +136,18 @@ func TestSubAgentsCarryTheirOwnApprovalMiddleware(t *testing.T) {
 	}
 }
 
-func TestSubHandlersApplyItsOwnDisabledTools(t *testing.T) {
+func TestSubHandlersApplyItsOwnToolList(t *testing.T) {
 	policy := NewPolicy(nil)
-	handlers := subHandlers(policy, decl.SubAgentSpec{ID: "w", DisabledTools: []string{"write_file"}}, 1, nil)
+	handlers := subHandlers(policy, decl.SubAgentSpec{ID: "w", Tools: allToolsExcept("write_file")}, 1, nil)
 
 	fw := findFilter(t, handlers)
 	if fw == nil {
 		t.Fatal("the middleware chain has no filter")
 	}
 	if got := fw.table.Blocked("execute"); got != LayerNone {
-		t.Fatalf("a tool the sub-agent does not disable must stay reachable, got %q", got)
+		t.Fatalf("a tool the sub-agent names must stay reachable, got %q", got)
 	}
-	if got := fw.table.Blocked("write_file"); got != LayerDisable {
+	if got := fw.table.Blocked("write_file"); got != LayerNotLoaded {
 		t.Fatalf("its own disabled_tools must be handled as the inner layer, got %q", got)
 	}
 }

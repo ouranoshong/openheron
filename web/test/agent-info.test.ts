@@ -24,7 +24,7 @@ function makeAgent(id: string, model: Partial<AgentModelView> = {}): AgentView {
     },
     maxIterations: 10,
     subagents: [],
-    disabledTools: [],
+    tools: [],
   }
 }
 

@@ -150,7 +150,7 @@ func TestAFreshListingIsNotReListed(t *testing.T) {
 
 	cfg := &spec.Config{
 		MCPs:   decl.MCPFiles{"github": mcpCfg("github")},
-		Agents: map[string]*decl.Agent{spec.DefaultAgentID: {ID: spec.DefaultAgentID}},
+		Agents: map[string]*decl.Agent{spec.DefaultAgentID: {ID: spec.DefaultAgentID, MCPServers: []string{"github"}}},
 	}
 	if changed := m.Refresh(context.Background(), cfg); changed {
 		t.Fatal("nothing changed, the refresh must not report a change")
@@ -168,7 +168,7 @@ func TestAChangedToolListIsReportedByTheRefresh(t *testing.T) {
 
 	cfg := &spec.Config{
 		MCPs:   decl.MCPFiles{"github": mcpCfg("github")},
-		Agents: map[string]*decl.Agent{spec.DefaultAgentID: {ID: spec.DefaultAgentID}},
+		Agents: map[string]*decl.Agent{spec.DefaultAgentID: {ID: spec.DefaultAgentID, MCPServers: []string{"github"}}},
 	}
 	if _, _, err := m.Tools(context.Background(), cfg.MCPs["github"]); err != nil {
 		t.Fatalf("Tools: %v", err)

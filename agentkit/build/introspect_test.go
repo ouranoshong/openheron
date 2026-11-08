@@ -29,11 +29,11 @@ func verdicts(t *testing.T, in []ToolVerdict) map[string]ToolVerdict {
 	return out
 }
 
-func introspectBuilder(t *testing.T, p Policy, rootDisabled []string,
+func introspectBuilder(t *testing.T, p Policy, rootTools []string,
 	subs []decl.SubAgentSpec) *Builder {
 
 	t.Helper()
-	cfg := configFromSpecs("test/model", rootDisabled, allowOf(p), subs)
+	cfg := configFromSpecs("test/model", rootTools, allowOf(p), subs)
 	b := newTestBuilderWithConfig(t, cfg)
 	mustSnapshot(t, b)
 	return b
@@ -44,39 +44,43 @@ func introspectBuilder(t *testing.T, p Policy, rootDisabled []string,
 //	that took the tool away from this agent.
 func TestEffectiveToolsReportTheTierAndTheBlockingLayer(t *testing.T) {
 	p := NewPolicy([]string{"read_file"})
-	b := introspectBuilder(t, p, []string{"execute", "rm_rf"}, nil)
+	b := introspectBuilder(t, p, allToolsExcept("execute", "write_file"), nil)
 
 	got := verdicts(t, b.EffectiveTools("main"))
 
 	ex := got["execute"]
-	if ex.Tier != TierAsk || ex.Blocked != LayerDisable {
-		t.Fatalf("execute = %+v, want ask, blocked by the disable layer", ex)
+	if ex.Tier != TierAsk || ex.Blocked != LayerNotLoaded {
+		t.Fatalf("execute = %+v, want ask, blocked by the allow-list", ex)
 	}
-	rm := got["rm_rf"]
-	if rm.Tier != TierAsk || rm.Blocked != LayerDisable {
-		t.Fatalf("rm_rf = %+v, want ask, blocked by the disable layer", rm)
+	rm := got["write_file"]
+	if rm.Tier != TierAsk || rm.Blocked != LayerNotLoaded {
+		t.Fatalf("write_file = %+v, want ask, blocked by the allow-list", rm)
 	}
 	if got["read_file"].Tier != TierAllow {
 		t.Fatalf("read_file = %+v, want allow", got["read_file"])
 	}
 }
 
+// ★ A tool the agent's list names but the tier table does not **asks** — the
+//
+//	default is ask, and the allow-list says nothing about the tier.
 func TestVerdictOfFallsBackToAsk(t *testing.T) {
 	p := NewPolicy(nil)
-	v := verdictOf(newBoundary(p, newTable("main", nil)), "brand_new_write_tool", Observed{})
+	v := verdictOf(newBoundary(p, newTable("main", []string{"brand_new_write_tool"})),
+		"brand_new_write_tool", Observed{})
 
 	if v.Tier != TierAsk || v.Blocked != LayerNone || !v.Reached() {
-		t.Fatalf("unlisted tool = %+v, want ask and reachable", v)
+		t.Fatalf("a named tool = %+v, want ask and reachable", v)
 	}
 }
 
 func TestEffectiveToolsPerAgentTable(t *testing.T) {
 	p := NewPolicy(nil)
 	subs := []decl.SubAgentSpec{{
-		ID:            "writer",
-		DisabledTools: []string{"write_file"},
+		ID:    "writer",
+		Tools: allToolsExcept("write_file"),
 	}}
-	b := introspectBuilder(t, p, nil, subs)
+	b := introspectBuilder(t, p, allTools(), subs)
 
 	root := verdicts(t, b.EffectiveTools("main"))
 	if v := root["write_file"]; v.Tier != TierAsk || !v.Reached() {
@@ -84,7 +88,7 @@ func TestEffectiveToolsPerAgentTable(t *testing.T) {
 	}
 
 	writer := verdicts(t, b.EffectiveTools("writer"))
-	if v := writer["write_file"]; v.Tier != TierAsk || v.Blocked != LayerDisable {
+	if v := writer["write_file"]; v.Tier != TierAsk || v.Blocked != LayerNotLoaded {
 		t.Fatalf("writer write_file = %+v, want ask, blocked by the disable layer", v)
 	}
 	if v := writer["read_file"]; v.Tier != TierAllow {
@@ -94,14 +98,14 @@ func TestEffectiveToolsPerAgentTable(t *testing.T) {
 
 func TestEffectiveToolsMatchesTheAssembledTable(t *testing.T) {
 	p := NewPolicy([]string{"write_file"})
-	agentSpec := decl.SubAgentSpec{ID: "worker", DisabledTools: []string{"write_file", "mystery"}}
-	b := introspectBuilder(t, p, []string{"execute"}, []decl.SubAgentSpec{agentSpec})
+	agentSpec := decl.SubAgentSpec{ID: "worker", Tools: allToolsExcept("write_file", "mystery")}
+	b := introspectBuilder(t, p, allToolsExcept("execute"), []decl.SubAgentSpec{agentSpec})
 
 	assembled := specTable(p, agentSpec, nil)
 	reported := verdicts(t, b.EffectiveTools("worker"))
 
 	universe := append([]string{}, p.Allow...)
-	universe = append(universe, agentSpec.DisabledTools...)
+	universe = append(universe, agentSpec.Tools...)
 	for _, name := range universe {
 		if got, want := reported[name].Blocked, assembled.Blocked(name); got != want {
 			t.Fatalf("%s: reported block %q, assembled %q", name, got, want)
@@ -117,7 +121,7 @@ func TestEffectiveToolsMatchesTheAssembledTable(t *testing.T) {
 func TestPolicyToolsExcludesEveryAgentsDisable(t *testing.T) {
 	p := NewPolicy(nil)
 	b := introspectBuilder(t, p, []string{"execute"}, []decl.SubAgentSpec{
-		{ID: "worker", DisabledTools: []string{"write_file"}},
+		{ID: "worker", Tools: allToolsExcept("write_file")},
 	})
 
 	policy := verdicts(t, b.PolicyTools())
@@ -126,15 +130,20 @@ func TestPolicyToolsExcludesEveryAgentsDisable(t *testing.T) {
 	}
 
 	if v := verdicts(t, b.EffectiveTools("worker"))["write_file"]; v.Tier != TierAsk ||
-		v.Blocked != LayerDisable {
+		v.Blocked != LayerNotLoaded {
 		t.Fatalf("worker view of write_file = %+v, want ask, blocked by the disable layer", v)
 	}
 }
 
-func TestPolicyToolsListsDisabledOnlyNames(t *testing.T) {
+// ★ The policy view is the tier table on its own: it carries **no
+//
+//	agent's narrowing**, so every tool it lists is reachable there.
+func TestPolicyToolsCarriesNoAgentsNarrowing(t *testing.T) {
 	p := NewPolicy(nil)
-	b := introspectBuilder(t, p, []string{"oddly_named"}, []decl.SubAgentSpec{
-		{ID: "worker", DisabledTools: []string{"declared_downstream"}},
+	// ★ The root names a tool the worker does not: the policy view must
+	//   show it as reachable, and the worker's own view must block it.
+	b := introspectBuilder(t, p, append(allTools(), "oddly_named"), []decl.SubAgentSpec{
+		{ID: "worker", Tools: allToolsExcept("write_file")},
 	})
 
 	got := verdicts(t, b.PolicyTools())
@@ -146,13 +155,14 @@ func TestPolicyToolsListsDisabledOnlyNames(t *testing.T) {
 	if v.Tier != TierAsk || !v.Reached() {
 		t.Fatalf("policy view of oddly_named = %+v, want ask and reachable", v)
 	}
-	if _, ok := got["declared_downstream"]; !ok {
-		t.Fatalf("declared_downstream missing from %+v", got)
+	if _, ok := got["write_file"]; !ok {
+		t.Fatalf("write_file missing from %+v", got)
 	}
 
-	if v := verdicts(t, b.EffectiveTools("worker"))["declared_downstream"]; v.Tier != TierAsk ||
-		v.Blocked != LayerDisable {
-		t.Fatalf("worker view = %+v, want ask, blocked by the disable layer", v)
+	// ★ The agent's own view is the one that narrows.
+	if v := verdicts(t, b.EffectiveTools("worker"))["write_file"]; v.Tier != TierAsk ||
+		v.Blocked != LayerNotLoaded {
+		t.Fatalf("worker view = %+v, want ask, blocked by the allow-list", v)
 	}
 }
 
@@ -191,23 +201,23 @@ func TestEffectiveToolsFindsNestedSubAgents(t *testing.T) {
 	p := NewPolicy(nil)
 	b := introspectBuilder(t, p, nil, []decl.SubAgentSpec{{
 		ID:  "mid",
-		Sub: []decl.SubAgentSpec{{ID: "leaf", DisabledTools: []string{"read_file"}}},
+		Sub: []decl.SubAgentSpec{{ID: "leaf", Tools: allToolsExcept("read_file")}},
 	}})
 
 	v := verdicts(t, b.EffectiveTools("leaf"))["read_file"]
-	if v.Tier != TierAllow || v.Blocked != LayerDisable {
+	if v.Tier != TierAllow || v.Blocked != LayerNotLoaded {
 		t.Fatalf("leaf read_file = %+v, want allow, blocked by the disable layer", v)
 	}
 }
 
 func TestNewGenerationRebindsPolicyAndTable(t *testing.T) {
-	b := introspectBuilder(t, NewPolicy(nil), []string{"brand_new_tool"}, nil)
+	b := introspectBuilder(t, NewPolicy(nil), append(allTools(), "brand_new_tool"), nil)
 
 	if v := verdicts(t, b.EffectiveTools("main"))["brand_new_tool"]; v.Tier != TierAsk {
 		t.Fatalf("before: brand_new_tool = %+v, want ask", v)
 	}
 
-	next := configFromSpecs("test/model", nil,
+	next := configFromSpecs("test/model", append(allTools(), "brand_new_tool"),
 		allowOf(NewPolicy([]string{"brand_new_tool"})), nil)
 	managerOf(t, b).set(next)
 	if v := verdicts(t, b.EffectiveTools("main"))["brand_new_tool"]; v.Tier != TierAllow {

@@ -63,21 +63,24 @@ func TestPolicyFallsBackToAsk(t *testing.T) {
 	}
 }
 
-func TestTheDisableLayerRemovesTheTool(t *testing.T) {
+// ★ The list is an **allow-list**: a tool it names is reachable, and a tool
+//
+//	it does not name is not the agent's tool at all.
+func TestTheAllowListDecidesWhatTheAgentHas(t *testing.T) {
 	tbl := newTable("main",
 		[]string{"execute", "write_file"},
 	)
-	if got := tbl.Blocked("execute"); got != LayerDisable {
-		t.Fatalf("a tool the agent does not get must report %q, got %q", LayerDisable, got)
+	if got := tbl.Blocked("execute"); got != LayerNone {
+		t.Fatalf("a tool the agent names must not be blocked, got %q", got)
 	}
-	if got := tbl.Blocked("read_file"); got != LayerNone {
-		t.Fatalf("an unlisted tool must not be blocked, got %q", got)
+	if got := tbl.Blocked("read_file"); got != LayerNotLoaded {
+		t.Fatalf("a tool the agent does not name must report %q, got %q", LayerNotLoaded, got)
 	}
 }
 
 func TestFilterRemovesByLayer(t *testing.T) {
 	tbl := newTable("main",
-		[]string{"execute", "write_file", "write_todos"},
+		[]string{"read_file"},
 	)
 	tools := []tool.BaseTool{
 		&stubTool{name: "read_file"},
@@ -92,31 +95,37 @@ func TestFilterRemovesByLayer(t *testing.T) {
 	if got != "read_file" {
 		t.Fatalf("read_file must be the one kept, got %q", got)
 	}
-	if removed[LayerDisable] != 3 {
-		t.Errorf("the disable layer must remove 3, got %d", removed[LayerDisable])
+	if removed[LayerNotLoaded] != 3 {
+		t.Errorf("the allow-list must remove 3, got %d", removed[LayerNotLoaded])
 	}
 }
 
-func TestDisableIsScopedToItsOwnAgent(t *testing.T) {
-	writer := newTable("writer", []string{"write_file"})
-	reader := newTable("reader", nil)
+// ★ The list is per agent, and it is an **allow-list**: what one agent may
+//
+//	use says nothing about another's.
+func TestTheToolsListIsScopedToItsOwnAgent(t *testing.T) {
+	writer := newTable("writer", []string{"read_file"})
+	reader := newTable("reader", []string{"write_file"})
 
 	tools := []tool.BaseTool{&stubTool{name: "write_file"}}
 
 	if kept, _ := writer.Filter(tools); len(kept) != 0 {
-		t.Errorf("the writer must drop write_file, still has %v", namesOf(kept))
+		t.Errorf("the writer must not have write_file, still has %v", namesOf(kept))
 	}
 	if kept, _ := reader.Filter(tools); len(kept) != 1 {
-		t.Errorf("* the reader must be unaffected by the writer's disable, got %v", namesOf(kept))
+		t.Errorf("* the reader must be unaffected by the writer's list, got %v", namesOf(kept))
 	}
 }
 
-func TestFilterIsNoopWithoutRules(t *testing.T) {
+// ★ An **empty** list is not "no rules": it is "no tools". The shortcut the
+//
+//	blacklist could afford is exactly the case the allow-list must not have.
+func TestAnEmptyListRemovesEverything(t *testing.T) {
 	tbl := newTable("main", nil)
 	tools := []tool.BaseTool{&stubTool{name: "read_file"}}
 	kept, removed := tbl.Filter(tools)
-	if len(kept) != 1 || removed != nil {
-		t.Fatalf("with no rules it must return unchanged, got %v / %v", namesOf(kept), removed)
+	if len(kept) != 0 || removed[LayerNotLoaded] != 1 {
+		t.Fatalf("an empty list must remove everything, got %v / %v", namesOf(kept), removed)
 	}
 }
 
@@ -140,8 +149,8 @@ type brokenErr struct{}
 
 func (*brokenErr) Error() string { return "cannot describe itself" }
 
-func TestFilterMiddlewareDropsDeniedToolInBeforeAgent(t *testing.T) {
-	tbl := newTable("main", []string{"execute"})
+func TestFilterMiddlewareDropsTheToolsTheAgentDoesNotHave(t *testing.T) {
+	tbl := newTable("main", []string{"read_file"})
 	mw := newFilterMiddleware(tbl)
 
 	runCtx := &adk.ChatModelAgentContext{

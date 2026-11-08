@@ -8,6 +8,7 @@ import (
 
 	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
 
 type toolEnv struct {
@@ -66,14 +67,25 @@ var builtinAllowedTools = func() []string {
 	}
 }
 
-var reservedToolNames = map[string]string{
-	"ls": "filesystem middleware", "read_file": "filesystem middleware",
-	"write_file": "filesystem middleware", "edit_file": "filesystem middleware",
-	"glob": "filesystem middleware", "grep": "filesystem middleware",
-	"execute": "filesystem middleware",
-	"task":    "DeepAgent", "write_todos": "DeepAgent",
-	"skill": "skill middleware",
-}
+// reservedToolNames maps a built-in tool's name to what provides it.
+//
+// ★ The **names** live in decl (one list, so the loader and the builder
+//
+//	cannot disagree about what exists); only the owner is build's business.
+var reservedToolNames = func() map[string]string {
+	out := make(map[string]string, len(decl.BuiltinToolNames))
+	for _, n := range decl.BuiltinToolNames {
+		switch n {
+		case "task", "write_todos":
+			out[n] = "DeepAgent"
+		case "skill":
+			out[n] = "skill middleware"
+		default:
+			out[n] = "filesystem middleware"
+		}
+	}
+	return out
+}()
 
 func (r *toolRegistry) Build(ctx context.Context, env toolEnv) ([]tool.BaseTool, error) {
 	if r == nil {

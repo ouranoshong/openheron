@@ -10,13 +10,24 @@ import (
 )
 
 // mcpViewConfig is a configuration with two servers and one agent.
-func mcpViewConfig(agentServers *[]string) *spec.Config {
+//
+// ★ The agent names the mounted servers' tools: with the default being
+//
+//	"none" on both lists, an agent that says nothing gets nothing — and a
+//	panel that showed every tool as blocked would say nothing about the
+//	server.
+func mcpViewConfig(agentServers []string) *spec.Config {
+	tools := make([]string, 0, len(agentServers))
+	for _, srv := range agentServers {
+		tools = append(tools, decl.MCPToolPrefix+srv+decl.MCPSeparator+"*")
+	}
 	return &spec.Config{
 		Agents: map[string]*decl.Agent{
 			spec.DefaultAgentID: {
 				ID:         spec.DefaultAgentID,
 				ModelRef:   "test/model",
 				MCPServers: agentServers,
+				Tools:      tools,
 			},
 		},
 		Models: map[string]*decl.Model{"test/model": {ID: "model"}},
@@ -28,7 +39,7 @@ func mcpViewConfig(agentServers *[]string) *spec.Config {
 }
 
 func TestEveryConfiguredServerAppearsExactlyOnce(t *testing.T) {
-	b := newTestBuilderWithConfig(t, mcpViewConfig(nil))
+	b := newTestBuilderWithConfig(t, mcpViewConfig([]string{"github", "files"}))
 	views := b.MCPServers(context.Background(), spec.DefaultAgentID)
 	if len(views) != 2 {
 		t.Fatalf("servers = %d, want 2", len(views))
@@ -44,7 +55,7 @@ func TestEveryConfiguredServerAppearsExactlyOnce(t *testing.T) {
 
 func TestAServerTheAgentDoesNotUseIsUnusedAndHasNoToolRows(t *testing.T) {
 	list := []string{"github"}
-	b := newTestBuilderWithConfig(t, mcpViewConfig(&list))
+	b := newTestBuilderWithConfig(t, mcpViewConfig(list))
 	views := b.MCPServers(context.Background(), spec.DefaultAgentID)
 
 	byName := map[string]MCPServerView{}
@@ -61,7 +72,7 @@ func TestAServerTheAgentDoesNotUseIsUnusedAndHasNoToolRows(t *testing.T) {
 }
 
 func TestAnUnreachableServerReportsTheErrorAndKeepsItsLastListing(t *testing.T) {
-	b := newTestBuilderWithConfig(t, mcpViewConfig(nil))
+	b := newTestBuilderWithConfig(t, mcpViewConfig([]string{"github", "files"}))
 	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg) (mcpClient, error) {
 		return nil, errors.New("the command is not on the PATH")
 	}
@@ -77,32 +88,32 @@ func TestAnUnreachableServerReportsTheErrorAndKeepsItsLastListing(t *testing.T) 
 	}
 }
 
-func TestTheServerNarrowingIsTheReasonTheAgentsViewReports(t *testing.T) {
-	list := []string{"other"}
-	cfg := mcpViewConfig(&list)
-	cfg.Agents[spec.DefaultAgentID].DisabledTools = []string{"mcp__github__read_issue"}
+// ★ The agent's own list is the whole answer for what it may use: a tool
+//
+//	it does not name is blocked, and the reason says so.
+func TestTheAgentsViewReportsTheToolsListAsTheReason(t *testing.T) {
+	cfg := mcpViewConfig([]string{"github"})
+	// ★ The agent mounts the server but names **no** tool of it: the
+	//   server's tools are in the universe (the tier table knows them), and
+	//   the agent does not have them.
+	cfg.Agents[spec.DefaultAgentID].Tools = []string{"read_file"}
 	cfg.MCPs["github"].Allows = []string{"read_issue"}
 	b := newTestBuilderWithConfig(t, cfg)
 
-	// ★ The panel shows the agent's own servers, and a server the agent
-	//   does not use has no tool rows at all. The scope reason belongs to
-	//   the agents view, which walks every name.
 	reason := ""
 	for _, v := range b.EffectiveTools(spec.DefaultAgentID) {
 		if v.Name == "mcp__github__read_issue" {
 			reason = v.Reason
 		}
 	}
-	if reason != "mcps" {
-		t.Fatalf("reason = %q, want mcps — the server is not there at all, and the finer "+
-			"rule would have said nothing about it", reason)
+	if reason != "tools" {
+		t.Fatalf("reason = %q, want tools — the agent's list is what decides", reason)
 	}
 }
 
 func TestTheReasonIsTheToolRuleWhenTheServerIsThere(t *testing.T) {
-	list := []string{"github"}
-	cfg := mcpViewConfig(&list)
-	cfg.Agents[spec.DefaultAgentID].DisabledTools = []string{"mcp__github__read_issue"}
+	cfg := mcpViewConfig([]string{"github"})
+	cfg.Agents[spec.DefaultAgentID].Tools = []string{"mcp__github__read_issue"}
 	b := newTestBuilderWithConfig(t, cfg)
 
 	views := b.MCPServers(context.Background(), spec.DefaultAgentID)
@@ -110,14 +121,14 @@ func TestTheReasonIsTheToolRuleWhenTheServerIsThere(t *testing.T) {
 		if v.Name != "github" || len(v.Tools) == 0 {
 			continue
 		}
-		if v.Tools[0].Reason != "disabled_tools" {
-			t.Fatalf("reason = %q, want disabled_tools", v.Tools[0].Reason)
+		if v.Tools[0].Reason != "tools" {
+			t.Fatalf("reason = %q, want tools", v.Tools[0].Reason)
 		}
 	}
 }
 
 func TestThePanelAsksTheManagerAndTheManagerStartsTheServer(t *testing.T) {
-	b := newTestBuilderWithConfig(t, mcpViewConfig(nil))
+	b := newTestBuilderWithConfig(t, mcpViewConfig([]string{"github", "files"}))
 	started := 0
 	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg) (mcpClient, error) {
 		started++
@@ -156,7 +167,7 @@ func TestThePanelAsksTheManagerAndTheManagerStartsTheServer(t *testing.T) {
 
 func TestThePanelShowsTheTierTheGateWouldUse(t *testing.T) {
 	list := []string{"github"}
-	cfg := mcpViewConfig(&list)
+	cfg := mcpViewConfig(list)
 	cfg.MCPs["github"].Allows = []string{"read_issue"}
 	b := newTestBuilderWithConfig(t, cfg)
 	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg) (mcpClient, error) {
