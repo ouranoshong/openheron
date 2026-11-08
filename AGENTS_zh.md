@@ -60,8 +60,9 @@
 > 调用点接上。
 > `docs/mcp-design.md` 讲的是 **MCP 接入** —— `mcps/` 配置分区、
 > `mcp__<server>__<tool>` 命名空间、住在 server 自己文件里的档位，以及 `/mcps` 视图。
-> **它已实现**：分区、provider、管理器与端点都在树上。★ §8 —— 沙箱 Kit 怎么打包一个
-> MCP server —— 仍然是提案。
+> **它已实现**：分区、provider、管理器与端点都在树上。★ 有两节仍然是提案：§8 ——
+> 沙箱 Kit 怎么打包一个 MCP server —— 与 §13 —— 非阻塞的 MCP 启动（每台 server 各自
+> 维护一个状态，起来了就在下一轮把工具带进来）。
 > `docs/config-design.md` 讲的是**配置系统** —— 配置根与它的三级解析、各个分区与它们的
 > 文件规格、加载与优先级、热更新，以及依赖铁律。**正文讲的是代码现状**；
 > `mcps/` 分区（§6.7）与住在工具旁边的档位（§6.6）**已实施**。★ **全局 deny** 里的
@@ -363,7 +364,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
 | `docs/fs-backend-design.md` | **文件系统后端设计方案** —— 为什么把 `eino-ext` 的 local 后端分叉成 `agentkit/fsx`、路径如何收敛在项目根之内、`ls`/`glob` 如何被封顶（**已实现**） |
 | `docs/run-lifecycle-design.md` | **run 生命周期设计方案** —— 一轮为什么曾绑在一条 SSE 连接上，以及 run 怎么变成一行持久事实、配上租约与 fence，好让连接降级为订阅者（**§3-§9 已实现**：账本、租约、fence、扫描与前端都在树上） |
 | `docs/sandbox-kit-design.md` | **Docker Sandbox Kit 打包设计方案** —— openheron 进程今天是什么样、一个把整个进程带进 microVM 的 v3 workload Kit、模型密钥如何留在宿主，以及当初必须实测的那条 SSE 路（**Kit 已建成并发布**；§4.2 还有三条没定） |
-| `docs/mcp-design.md` | **MCP 接入设计方案** —— 工具装配路径、MCP 客户端给它带来什么、`mcp__<server>__<tool>` 命名空间、工具表里的前缀匹配，以及 MCP 服务器在 Kit 里会跑在哪（**已实施**；例外是 §8 —— 沙箱 Kit 怎么打包一台 MCP 服务器 —— 那部分仍是提案） |
+| `docs/mcp-design.md` | **MCP 接入设计方案** —— 工具装配路径、MCP 客户端给它带来什么、`mcp__<server>__<tool>` 命名空间、工具表里的前缀匹配，以及 MCP 服务器在 Kit 里会跑在哪（**已实施**；有两节仍是提案：§8 —— 沙箱 Kit 怎么打包一台 MCP 服务器 —— 与 §13 —— 非阻塞的 MCP 启动） |
 | `docs/config-design.md` | **配置系统设计说明** —— 配置根与它的三级解析、各个分区与它们的文件规格、加载与优先级、热更新，以及依赖铁律（**正文讲的是代码现状**；`mcps/` 分区与住在工具旁边的档位已实施） |
 | `docs/tool-surface-design.md` | **工具面设计** —— 一个 agent 拿到哪些工具（`tools:` / `mcps:` / `skills:`）、MCP 命名空间的三段、配置面收敛成一个核心，以及六个 `config_*` 工具（**§2-§5 已实现**） |
 

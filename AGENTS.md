@@ -71,7 +71,9 @@ one — change one and change the other.
 > `docs/mcp-design.md` describes the **MCP integration** — the `mcps/` config partition, the
 > `mcp__<server>__<tool>` namespace, the tier that lives with the server's own file, and the
 > `/mcps` view. **It is implemented**: the partition, the provider, the manager and the endpoint
-> are all in the tree. ★ §8 — how a sandbox Kit packages an MCP server — is still a proposal.
+> are all in the tree. ★ Two sections are still proposals: §8 — how a sandbox Kit packages an
+> MCP server — and §13 — a non-blocking MCP start, where every server keeps a state and the
+> tools join the next turn once the server is up.
 > `docs/config-design.md` describes the **configuration system** — the config root and its
 > three levels, the partitions and their file specs, loading and precedence, hot reload, and
 > the dependency iron rules. **Its body describes the code as it is**; the `mcps/` partition
@@ -414,7 +416,7 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 | `docs/fs-backend-design.md` | **Filesystem backend design** — why `eino-ext`'s local backend was forked into `agentkit/fsx`, how paths are confined to the project root, and how `ls`/`glob` are bounded (**implemented**) |
 | `docs/run-lifecycle-design.md` | **Run lifecycle design** — why a turn was bound to one SSE connection, and how a run became a durable row with a lease and a fence, so the connection could be demoted to a subscriber (**§3-§9 are implemented**: the ledger, the lease, the fence, the scan and the frontend) |
 | `docs/sandbox-kit-design.md` | **Docker Sandbox Kit packaging** — the openheron process as it is, a v3 workload Kit that carries the whole process into a microVM, how the model key stays on the host, and the SSE path that had to be measured (**the Kit is built and published**; §4.2 still holds three open decisions) |
-| `docs/mcp-design.md` | **MCP integration design** — the tool assembly path, what an MCP client adds to it, the `mcp__<server>__<tool>` namespace, prefix matching in the tool tables, and where an MCP server would run inside the Kit (**implemented**, except §8 — how a sandbox Kit packages an MCP server — which is still a proposal) |
+| `docs/mcp-design.md` | **MCP integration design** — the tool assembly path, what an MCP client adds to it, the `mcp__<server>__<tool>` namespace, prefix matching in the tool tables, and where an MCP server would run inside the Kit (**implemented**; two sections are still proposals: §8 — how a sandbox Kit packages an MCP server — and §13 — a non-blocking MCP start) |
 | `docs/config-design.md` | **Configuration system design** — the config root and its three levels, the partitions and their file specs, loading and precedence, hot reload, and the dependency iron rules (**the body describes the code as it is**; the `mcps/` partition and the tier that lives with the tool are implemented) |
 | `docs/tool-surface-design.md` | **Tool-surface design** — what tools an agent gets (`tools:` / `mcps:` / `skills:`), the MCP namespace's three segments, the configuration surface collapsed into one core, and the six `config_*` tools (**§2-§5 are implemented**) |
 
