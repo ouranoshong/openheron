@@ -266,6 +266,15 @@ configuration that fails silently is far harder to debug than one that fails lou
 sub-agents — every agent has to name its own. That is exactly where "expert gets expert
 model" lands.
 
+★ **A model nobody declares leaves that agent out — it does not stop openheron.** The
+agent is dropped from the tree and from every parent's `subagents:`, and the reason is
+said in four places: the startup log, `/v2/health`, a grey notice on that agent's own
+file in the config editor (§6.3), and the error a session gets if it asks for it.
+★ The default agent is no exception: with no usable model, `main` is left out too, and
+until you fix it **no session can start** — but openheron does start, which is what lets
+you open the editor and fix the file. ★ The editor refuses the change that would cause
+it: pointing a working agent at a model that does not exist is rejected at save time.
+
 ★ **A `reasoning` tier only works if the model profile declares it.** An undeclared tier
 is **silently ignored**: an agent says `reasoning: high`, the endpoint has no `high`, and
 the effect is "no thinking at all" — with no error and no message. See §4.2.
@@ -752,8 +761,18 @@ The write path has several gates:
   debounced by 250 ms, and an answer that belongs to an older draft is dropped.
 - **Every issue names the file it is about.** A problem in another file is shown under
   **that** file's name — and it is a link: click it and the editor opens that file. Your
-  own file's problems stay on your own file. ★ The tree still has to load, so a broken
-  file elsewhere still blocks the save; the status line says which file is the reason.
+  own file's problems stay on your own file. ★ A file that does not even parse still takes
+  the whole tree with it, so a broken file elsewhere still blocks the save; the status
+  line says which file is the reason.
+- **A grey line is a hint, a red line is an error.** A hint says "this tree is short
+  something" and does not block anything; an error is what keeps Save disabled. An agent
+  whose model is not declared is a **hint** on that agent's own file: the tree loads
+  without it (see §4.1), so the file in front of you can be perfectly fine.
+- **A change that would take a working agent out of the tree is refused.** Repointing an
+  agent at a model nobody declares would otherwise make it disappear without a word. The
+  refusal is shown on the file you are editing — that is the change being made — and Save
+  stays disabled until the agent is back in the tree. Adding an agent, or editing
+  something unrelated, is never refused this way.
 - `server/` is **not editable** (not hot-reloaded, so a change needs a restart).
 - **Literal secrets are rejected** — `api_key must be a reference, not a literal`. Use
   `${ENV_VAR}` or `@file:/path`.

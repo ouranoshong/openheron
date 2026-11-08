@@ -111,9 +111,17 @@ function Status({
   ]
   const hints = [...groups.own.filter(isHint), ...groups.elsewhere.filter(isHint)]
 
-  if (errors.length > 0 || hints.length > 0) {
+  // ★ Three kinds of line, and the order is the order of the questions the
+  //   user is asking: what did the save I just pressed do, what is wrong with
+  //   this draft, and what is the tree short of. A **hint** is the last one
+  //   and it hides nothing — it says "the tree is short something", which is
+  //   true whatever else is on screen, and the file can save cleanly while it
+  //   stands there.
+  const state = saveStateLine(saveState, saveError, applied, dirty)
+  if (state || errors.length > 0 || hints.length > 0) {
     return (
       <ul className="flex flex-col gap-0.5">
+        {state && <li className={state.className}>{state.text}</li>}
         {errors.map((i, idx) => (
           <li key={`e${idx}`} className="text-destructive">
             <IssueLine issue={i} selected={selected} known={known} onOpen={onOpen} />
@@ -127,21 +135,34 @@ function Status({
       </ul>
     )
   }
+  return <span className="text-muted-foreground">Valid</span>
+}
+
+// ★ The line that says what the save did.
+//
+// ★ It is its own line because a **hint** must not hide it. The tree can be
+//   short an agent and the file can still save cleanly — and "Saved" is the
+//   answer to the question the user just asked by pressing the button.
+function saveStateLine(
+  saveState: string,
+  saveError: string | undefined,
+  applied: boolean,
+  dirty: boolean,
+): { text: string; className: string } | null {
   if (saveState === "error" && saveError) {
-    return <span className="text-destructive whitespace-pre-line">{saveError}</span>
+    return { text: saveError, className: "text-destructive whitespace-pre-line" }
   }
   if (saveState === "conflict") {
-    return <span className="text-warning">This file changed on disk — reload or overwrite.</span>
+    return { text: "This file changed on disk — reload or overwrite.", className: "text-warning" }
   }
   if (saveState === "saved") {
-    return (
-      <span className={applied ? "text-muted-foreground" : "text-warning"}>
-        {applied ? "Saved · applied" : "Saved · restart openheron to apply"}
-      </span>
-    )
+    return {
+      text: applied ? "Saved · applied" : "Saved · restart openheron to apply",
+      className: applied ? "text-muted-foreground" : "text-warning",
+    }
   }
-  if (dirty) return <span className="text-muted-foreground">Unsaved changes</span>
-  return <span className="text-muted-foreground">Valid</span>
+  if (dirty) return { text: "Unsaved changes", className: "text-muted-foreground" }
+  return null
 }
 
 // ★ A problem in another file is a link: the file it is in is one click

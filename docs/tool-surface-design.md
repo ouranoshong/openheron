@@ -42,8 +42,8 @@
 
 配套的装配在（这些**今天仍在**，只是喂给它的东西变了）：
 
-- 档位表：`agentkit/build/spec.go:57` `policyOf`，缺省清单在 `agentkit/build/tools.go:61` `builtinAllowedTools`；
-- 每个工具文件的 `allows:` 汇总：`agentkit/spec/load.go:262` `AllowedTools`；
+- 档位表：`agentkit/build/spec.go:64` `policyOf`，缺省清单在 `agentkit/build/tools.go:61` `builtinAllowedTools`；
+- 每个工具文件的 `allows:` 汇总：`agentkit/spec/load.go:280` `AllowedTools`；
 - 服务端文件里的 `allows:` 翻译成暴露名：`agentkit/build/mcptools.go:173` `mcpAllowedNames`。
 
 ### 1.2 MCP 的名字：三段，各管一件事
@@ -110,7 +110,7 @@ mcp__github__ls
 | 现在 | 之后 |
 |---|---|
 | `Agent.Skills *[]string` / `MCPServers *[]string` | `[]string`（指针消失） |
-| `mcpServersOf(list *[]string)`：nil → 全部（`agentkit/spec/load.go:585`） | **整个函数删掉**，直接用 `a.MCPServers` |
+| `mcpServersOf(list *[]string)`：nil → 全部（`agentkit/spec/load.go:638`） | **整个函数删掉**，直接用 `a.MCPServers` |
 | `skillScopeOf(list *[]string)` 的 nil 分支（`agentkit/build/skill.go:62`） | 删掉 |
 | `cloneList` 的 nil 语义与「指针是为了区分没写和空」的注释 | 删掉 |
 | 三处指针的文档 | 一行规则 |
@@ -239,7 +239,7 @@ HTTP、CLI 和工具都只调它们，没有第二个装配点。下面三刀是
 是 frontmatter —— 两块只在 `---` 位于第 1 行时才对齐。文件以空行开头时整体偏移，且是
 **静默**偏移：一个笃定地指错地方的题注，比没有题注更糟。所以
 `splitFrontmatter` 多返回一个起始行（`agentkit/spec/expand.go`），`parseShift`
-（`agentkit/spec/diag.go:157`）把偏移带到最外层。
+（`agentkit/spec/diag.go:188`）把偏移带到最外层。
 
 ★ **解析失败就没有 hint。** hint 挂在 `*Config` 上，而解析失败就没有这个对象 —— 这是
 边界，不是遗漏。所以 `validate()` 把 notice 的收集挪到硬规则**之前**：一条规则失败不该
@@ -247,7 +247,7 @@ HTTP、CLI 和工具都只调它们，没有第二个装配点。下面三刀是
 
 **刀三：档位的出口（✅，但与提案不同）。** 提案是给 `build` 加一个 `Tiers(agentID)`
 薄封装；落地时不需要它 —— `config_tier` 与档位装配在同一个包里，直接调
-`policyOf(cfg)`（`agentkit/build/spec.go:57`）拿到 `Policy`，再 `TierOf`。多加一层
+`policyOf(cfg)`（`agentkit/build/spec.go:64`）拿到 `Policy`，再 `TierOf`。多加一层
 封装只会多一个和 `policyOf` 抢位置的东西。
 
 ### 3.3 前端后端化：删什么、留什么（✅）
@@ -274,7 +274,7 @@ HTTP、CLI 和工具都只调它们，没有第二个装配点。下面三刀是
 
 ★ **一条规则是「搬到服务端」而不是「删掉」。** 前端原本拿模型的 `reasoning` 词汇表检查
 agent 的档位，而 loader 不检查 —— 于是 vendor 没有的档位能一路加载成功，发出去就是
-「一点思考都没有」。现在它在 `validate()` 里（`agentkit/spec/load.go:563`
+「一点思考都没有」。现在它在 `validate()` 里（`agentkit/spec/load.go:616`
 `checkReasoning`），检查的是**每一个**文件，不只是在这个编辑器里改过的那些。
 
 ### 3.4 CLI 统一（✅）

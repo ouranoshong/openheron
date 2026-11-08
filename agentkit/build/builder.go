@@ -134,7 +134,7 @@ func (b *Builder) Build(ctx context.Context, _ string, agentID string,
 		name = snap.agentSpec.defaultAgent
 	}
 	if _, ok := snap.agentSpec.agentSpec(name); !ok {
-		return nil, fmt.Errorf("%w: %q", errAgentNotDeclared, name)
+		return nil, b.agentUnavailable(name, snap)
 	}
 	e, err := b.pooledRoot(ctx, snap, name)
 	if err != nil {
@@ -143,11 +143,44 @@ func (b *Builder) Build(ctx context.Context, _ string, agentID string,
 	return e.agent, nil
 }
 
+// agentUnavailable says why an agent is not there.
+//
+// ★ Two different reasons, and the difference matters to the reader: an agent
+//
+//	that was never declared is a typo, and an agent that was **left out**
+//	(its model is not declared under llm/) is a configuration that loads and
+//	runs without it. The second one is why the tree is short an agent, and
+//	saying only "not declared" sends the reader looking in the wrong place.
+func (b *Builder) agentUnavailable(name string, snap *snapshot) error {
+	if msg := leftOutMessage(snap.cfg, name); msg != "" {
+		return errors.New(msg)
+	}
+	return fmt.Errorf("%w: %q", errAgentNotDeclared, name)
+}
+
+// leftOutMessage says that an agent was left out of the tree, and why.
+//
+// ★ One sentence, in one place: the builder says it when a session asks for
+//
+//	the agent, and the spec says it when the tree has no default agent.
+//	Two copies would drift, and the second one to drift is the one nobody
+//	reads.
+func leftOutMessage(cfg *spec.Config, name string) string {
+	if cfg == nil {
+		return ""
+	}
+	why := cfg.LeftOut()[name]
+	if why == "" {
+		return ""
+	}
+	return fmt.Sprintf("agent %q is left out of the tree: %s", name, why)
+}
+
 func (b *Builder) pooledRoot(ctx context.Context, snap *snapshot, name string) (*entry, error) {
 
 	sp, ok := snap.agentSpec.agentSpec(name)
 	if !ok {
-		return nil, fmt.Errorf("%w: %q", errAgentNotDeclared, name)
+		return nil, b.agentUnavailable(name, snap)
 	}
 	table := snap.tableFor(name)
 	if table == nil {

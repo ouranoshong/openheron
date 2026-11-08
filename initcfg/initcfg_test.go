@@ -368,7 +368,11 @@ func TestARejectedMergeWritesNothing(t *testing.T) {
 
 	svc := e.svc()
 	_, _, err := svc.WriteMany([]spec.File{
-		{Rel: "agents/broken.md", Content: []byte("---\nmodel: openai/nope\n---\n\n坏的。\n")},
+		// ★ A file that does not parse — a **hard** failure, not a
+		//   degradation. An agent whose model is not declared is left out
+		//   of the tree and the tree still loads; a file that does not
+		//   parse takes the tree down, and that is what is refused here.
+		{Rel: "agents/broken.md", Content: []byte("---\nnot_a_key: 1\n---\n\n坏的。\n")},
 	}, "")
 	if err == nil {
 		t.Fatal("the batch write must be rejected")
@@ -644,7 +648,13 @@ func TestTheToolsAreWrittenOnRequest(t *testing.T) {
 // which is written outside the merge.
 func TestARejectedMergeLeavesNoServerFile(t *testing.T) {
 	e := newEnv(t)
-	e.write("agents/main.md", "---\nmodel: openai/nope\n---\n\n坏的。\n")
+	// ★ The files parse, but the tree does not hold together: two agents
+	//   delegate to each other. (An agent whose model is not declared is a
+	//   different thing — that one is left out of the tree, and the tree
+	//   still loads.)
+	e.write("agents/main.md", "---\nmodel: openai/gpt-4o\nsubagents: [a]\n---\n\n正文。\n")
+	e.write("agents/a.md", "---\nmodel: openai/gpt-4o\nsubagents: [b]\n---\n\nA。\n")
+	e.write("agents/b.md", "---\nmodel: openai/gpt-4o\nsubagents: [a]\n---\n\nB。\n")
 	e.write("llm/openai.yaml", userProviderYAML)
 
 	p := e.plan(Options{})

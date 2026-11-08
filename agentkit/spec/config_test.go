@@ -302,12 +302,23 @@ func TestUnknownModelRefDoesNotFallBack(t *testing.T) {
 	f.seedMinimal(t)
 	f.write(t, "agents/main.md", "---\nmodel: openai/nonexistent\n---\n")
 
-	_, err := f.load(t)
-	if err == nil {
-		t.Fatal("★ a reference to an undeclared model must be an error, not a silent fallback to the default model")
+	cfg, err := f.load(t)
+	if err != nil {
+		t.Fatalf("★ an undeclared model must not take the tree down: %v", err)
 	}
-	if !strings.Contains(err.Error(), "nonexistent") {
-		t.Fatalf("the error must name the model: %v", err)
+	// ★ And it must not **fall back** either: the agent is left out, not
+	//   quietly pointed at some other model.
+	if _, ok := cfg.Agents["main"]; ok {
+		t.Fatal("★ an agent whose model is not declared must be left out, not given another model")
+	}
+	var said bool
+	for _, d := range cfg.Deferred() {
+		if strings.Contains(d, "nonexistent") {
+			said = true
+		}
+	}
+	if !said {
+		t.Fatalf("the notice must name the model: %v", cfg.Deferred())
 	}
 }
 

@@ -96,13 +96,13 @@ tools: [ls, read_file, glob, grep, task, write_todos]
 
 ### 1.4 凭据模型现状
 
-openheron 已经拒绝字面量密钥。写配置的人看到的是 `agentkit/spec/write.go:493`：
+openheron 已经拒绝字面量密钥。写配置的人看到的是 `agentkit/spec/write.go:580`：
 
 ```
 api_key must be a reference, not a literal: use ${ENV_VAR} or @file:/path so the secret stays out of the repository
 ```
 
-`agentkit/spec/load.go:34-46` 在加载时把引用解析掉：
+`agentkit/spec/load.go:35-47` 在加载时把引用解析掉：
 
 ```go
 rawKey := p.APIKey
@@ -171,9 +171,9 @@ openheron 解析三个根，而且是在三个不同时刻解析的。沙箱三�
 
 | 根 | 怎么解析 | 位置 |
 |---|---|---|
-| 项目根 | `--project-root`，否则取**工作目录** | `agentkit/spec/config.go:215-226` |
-| 配置根 | `--config-dir`，否则 `$OPENHERON_CONFIG_DIR`，否则 `<projectRoot>/.openheron` | `agentkit/spec/config.go:228-240` |
-| 数据目录 | `$DATA_DIR`，否则 `<configRoot>/state` | `main.go:218`、`agentkit/spec/config.go:282-294` |
+| 项目根 | `--project-root`，否则取**工作目录** | `agentkit/spec/config.go:247-258` |
+| 配置根 | `--config-dir`，否则 `$OPENHERON_CONFIG_DIR`，否则 `<projectRoot>/.openheron` | `agentkit/spec/config.go:260-272` |
+| 数据目录 | `$DATA_DIR`，否则 `<configRoot>/state` | `main.go:218`、`agentkit/spec/config.go:314-326` |
 
 ★ **工作目录是项目根的默认值，而配置根跟着它走。** 在哪个目录启动的进程，
 就是以那个目录为根的进程：`cd` 进工作区，配置就落在 `<工作区>/.openheron`。
@@ -541,11 +541,11 @@ openheron 是 **headless**：没有交互模式要声明，`interactive` 字段�
 ★ **Kit 一个 openheron 环境变量都没设。** 入口脚本 `cd` 进工作区，
 openheron 自己的默认值从那里落到了正确的位置：
 
-- `PROJECT_ROOT` —— 默认是工作目录（`agentkit/spec/config.go:215-226`）。
+- `PROJECT_ROOT` —— 默认是工作目录（`agentkit/spec/config.go:247-258`）。
   入口脚本的 `cd` 把它放在挂载上。
-- 配置根 —— 默认 `<projectRoot>/.openheron`（`agentkit/spec/config.go:228-240`），
+- 配置根 —— 默认 `<projectRoot>/.openheron`（`agentkit/spec/config.go:260-272`），
   所以就是工作区自己的 `.openheron`，在挂载上。
-- `DATA_DIR` —— 默认是配置根下的 `state`（`agentkit/spec/config.go:282-294`），
+- `DATA_DIR` —— 默认是配置根下的 `state`（`agentkit/spec/config.go:314-326`），
   所以会话也住在挂载上（§2.9）。
 - `LISTEN_ADDR` —— 默认取服务配置的 `ListenAddr`（`main.go:217`）：`:8080`。
 
@@ -757,7 +757,7 @@ openheron 的客户端走的正是它：`llm/common/model.go:60-63` 建的是一
 
 这正是 openheron 现在的形状：
 
-1. `agentkit/spec/load.go:34-46` 通过 `agentkit/spec/expand.go:24-33` 解析
+1. `agentkit/spec/load.go:35-47` 通过 `agentkit/spec/expand.go:24-33` 解析
    `api_key` —— 那段代码把 `${...}` 里的名字在进程环境里查出来；
 2. `llm/common/model.go:66-72` 把它作为 bearer token 发出去。
 
@@ -839,7 +839,7 @@ agent 可以从环境里把它读出来，它跑的任何东西都能把它发�
 ### 2.9 沙箱拆除之后的状态
 
 会话与 checkpoint 是数据目录下的文件（`main.go:224`、`main.go:229-232`），
-而数据目录的默认值是 `<configRoot>/state`（`agentkit/spec/config.go:282-294`）。
+而数据目录的默认值是 `<configRoot>/state`（`agentkit/spec/config.go:314-326`）。
 既然配置根是 `<工作区>/.openheron`（§1.7），默认的数据目录就是
 **`<工作区>/.openheron/state`** —— 在挂载上。
 
@@ -860,7 +860,7 @@ agent 可以从环境里把它读出来，它跑的任何东西都能把它发�
 在 volume 上它不碍事，但也在用户够不着的地方。
 
 ★ `DATA_DIR`（`main.go:218`）就是那个开关：绝对路径优先于默认值
-（`agentkit/spec/config.go:282-294`），
+（`agentkit/spec/config.go:314-326`），
 所以 Kit 可以把数据目录指到 volume 上，而不必碰配置。
 
 ★ 默认值有一个后果：状态落在用户自己的目录树里，在 `<工作区>/.openheron`。
@@ -1175,7 +1175,7 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
   v1/v2 的产物格式 —— 并且拒绝 v3 的 Kit 目录。
   所以 v3 的 Kit 是以 OCI 镜像或目录的形式流传的，不是 ZIP。
 - ★ **`openheron init` 对配置是全有或全无。** 它会对合并后的结果做一次试加载，
-  拒绝写下一个加载不了的配置（`agentkit/spec/write.go:341-344`）。
+  拒绝写下一个加载不了的配置（`agentkit/spec/write.go:413-416`）。
   预置的 agent 引用了一个谁也没定义的 subagent —— `subagents: [task]` 而没有
   `agents/task.md` —— 正是这种情况：什么都不会被写，
   服务随后以 "no configuration at …" 拒绝启动（`main.go:135-143`）。

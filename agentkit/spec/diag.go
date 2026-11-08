@@ -73,7 +73,7 @@ func (s *Service) Diagnostics(rel string, content []byte) (*Diagnostics, error) 
 	if err != nil {
 		return nil, err
 	}
-	d := s.diagnose(rel, map[string]*mutation{rel: {Rel: rel, Content: content}})
+	trial, d := s.diagnose(rel, map[string]*mutation{rel: {Rel: rel, Content: content}})
 	if cat.Dir == DirLLM {
 		if line := secretLiteralLine(content); line > 0 {
 			// ★ Ahead of the rest, not instead of it: the key makes the file
@@ -85,6 +85,31 @@ func (s *Service) Diagnostics(rel string, content []byte) (*Diagnostics, error) 
 				Message: secretLiteralMessage,
 			}}, d.Issues...)
 		}
+	}
+	// ★ The gate the write path has, in the editor's own terms: a change
+	//   that would take a **working** agent out of the tree is refused, and
+	//   the user has to hear it while they are typing — not when they press
+	//   Save.
+	//
+	//   The issue is on the file being edited: it is **this** change that
+	//   is refused. The agent that would be lost is named in the message.
+	lost := s.agentsLostByChange(trial)
+	if len(lost) > 0 {
+		d.OK = false
+		issues := make([]Issue, 0, len(lost))
+		for _, id := range lost {
+			issues = append(issues, Issue{
+				Path:     rel,
+				Severity: SeverityError,
+				Message:  lostAgentMessage(id, trial),
+			})
+		}
+		// ★ **After** the file's own problems, not before them. The file's
+		//   own problem is what the user can fix right here; the lost agent
+		//   is the consequence. A reader who sees the consequence first
+		//   cannot act on it, and a reader who sees only the consequence
+		//   cannot act on it either.
+		d.Issues = append(d.Issues, issues...)
 	}
 	return d, nil
 }
@@ -98,10 +123,11 @@ func (s *Service) Diagnostics(rel string, content []byte) (*Diagnostics, error) 
 // change than the one this answers — and editing a configuration is one file
 // at a time anyway.
 func (s *Service) Check() *Diagnostics {
-	return s.diagnose("", nil)
+	_, d := s.diagnose("", nil)
+	return d
 }
 
-func (s *Service) diagnose(rel string, ms map[string]*mutation) *Diagnostics {
+func (s *Service) diagnose(rel string, ms map[string]*mutation) (*Config, *Diagnostics) {
 	d := &Diagnostics{OK: true, Issues: []Issue{}}
 
 	cfg, err := s.loadOnly(ms)
@@ -109,7 +135,7 @@ func (s *Service) diagnose(rel string, ms map[string]*mutation) *Diagnostics {
 		d.OK = false
 		d.Issues = append(d.Issues, parseIssues(rel, err)...)
 		d.ConfigVersion = s.Fingerprint()
-		return d
+		return nil, d
 	}
 	if err := cfg.validate(); err != nil {
 		d.OK = false
@@ -124,6 +150,11 @@ func (s *Service) diagnose(rel string, ms map[string]*mutation) *Diagnostics {
 			Severity: SeverityError,
 			Message:  err.Error(),
 		})
+		// ★ The tree did not settle, so there is nothing to compare the
+		//   disk against: the error above says what is wrong, and the gate
+		//   would only say it a second way.
+		d.ConfigVersion = s.Fingerprint()
+		return nil, d
 	}
 	for _, n := range cfg.Notices() {
 		// ★ A notice belongs to the file it names. Showing it under the
@@ -135,7 +166,7 @@ func (s *Service) diagnose(rel string, ms map[string]*mutation) *Diagnostics {
 		})
 	}
 	d.ConfigVersion = s.Fingerprint()
-	return d
+	return cfg, d
 }
 
 // lineRe matches what yaml.v3 puts in front of the line it objects to, in

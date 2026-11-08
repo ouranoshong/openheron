@@ -296,6 +296,74 @@ func (s *Service) ReadFile(rel string) (content []byte, rev string, err error) {
 	return b, Revision(b), nil
 }
 
+// agentsLostBy returns the agents the tree on disk can run and the trial
+// tree cannot.
+//
+// ★ A change may **add** to the tree, and it may leave an agent that was
+//
+//	already broken exactly as it was. What it may not do is take a
+//	**working** agent out of it: that is how a worker disappears without
+//	anybody deciding that it should.
+//
+// ★ The comparison is between the two **settled** trees — the ones that
+//
+//	dropped the agents they cannot run. An agent that was already out is
+//	out on both sides, so a change that leaves it alone costs nothing.
+func agentsLostBy(before, after *Config) []string {
+	if before == nil || after == nil {
+		return nil
+	}
+	var lost []string
+	for id := range before.Agents {
+		if _, ok := after.Agents[id]; !ok {
+			lost = append(lost, id)
+		}
+	}
+	sort.Strings(lost)
+	return lost
+}
+
+// lostAgentMessage says which agent a change would take out, and why.
+func lostAgentMessage(id string, after *Config) string {
+	why := ""
+	if after != nil {
+		why = after.LeftOut()[id]
+	}
+	if why == "" {
+		why = "it is no longer in the tree"
+	}
+	return fmt.Sprintf("the change would leave the agent %q out of the tree: %s", id, why)
+}
+
+// agentsLostByChange returns the agents a change would take out of the tree.
+//
+// ★ ★ The tree as it is **cannot** be loaded when some file on disk does not
+//
+//	parse: then nothing is known to be working, and the change may only
+//	add. (That is also how a broken file gets fixed — the editor's draft
+//	replaces it, so the trial tree is the one that parses.)
+func (s *Service) agentsLostByChange(after *Config) []string {
+	before, err := s.loadWithMany(nil)
+	if err != nil {
+		return nil
+	}
+	return agentsLostBy(before, after)
+}
+
+// checkNoAgentLost refuses a change that would take a working agent out of
+// the tree.
+func (s *Service) checkNoAgentLost(after *Config, rel string) error {
+	lost := s.agentsLostByChange(after)
+	if len(lost) == 0 {
+		return nil
+	}
+	return &WriteError{
+		Kind:    ErrMergeRejected,
+		Rel:     rel,
+		Message: lostAgentMessage(lost[0], after),
+	}
+}
+
 func (s *Service) Write(rel string, content []byte, baseRev string) (rev string, cfg *Config, err error) {
 	if _, err := ValidatePath(rel); err != nil {
 		return "", nil, err
@@ -312,6 +380,12 @@ func (s *Service) Write(rel string, content []byte, baseRev string) (rev string,
 	trial, err := s.loadWith(m)
 	if err != nil {
 		return "", nil, &WriteError{Kind: ErrMergeRejected, Rel: rel, Message: err.Error(), Err: err}
+	}
+	// ★ The gate the tree needs: a change may not take a working agent out
+	//   of it. The trial tree loads either way — an agent that cannot run is
+	//   left out — so without this the gate would have no teeth.
+	if err := s.checkNoAgentLost(trial, rel); err != nil {
+		return "", nil, err
 	}
 
 	if s.root == "" {
@@ -351,6 +425,15 @@ func (s *Service) WriteMany(files []File, baseRev string) (rev string, cfg *Conf
 	trial, err := s.loadWithMany(ms)
 	if err != nil {
 		return "", nil, &WriteError{Kind: ErrMergeRejected, Rel: relsOf(files), Message: err.Error(), Err: err}
+	}
+	// ★ The same gate as the single-file write: a batch may not take a
+	//   working agent out of the tree either.
+	if lost := s.agentsLostByChange(trial); len(lost) > 0 {
+		return "", nil, &WriteError{
+			Kind:    ErrMergeRejected,
+			Rel:     relsOf(files),
+			Message: lostAgentMessage(lost[0], trial),
+		}
 	}
 
 	if s.root == "" {
@@ -414,6 +497,12 @@ func (s *Service) Delete(rel string) (cfg *Config, err error) {
 	trial, err := s.loadWith(m)
 	if err != nil {
 		return nil, &WriteError{Kind: ErrMergeRejected, Rel: rel, Message: err.Error(), Err: err}
+	}
+	// ★ The gate, on the delete path too: removing the provider that an
+	//   agent names takes that agent out of the tree just as surely as
+	//   pointing it at a model that does not exist.
+	if err := s.checkNoAgentLost(trial, rel); err != nil {
+		return nil, err
 	}
 
 	if s.root == "" {

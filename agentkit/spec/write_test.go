@@ -108,21 +108,27 @@ func TestLoadWithAddsANewFile(t *testing.T) {
 	}
 }
 
-func TestLoadWithDeleteCatchesDanglingModelRef(t *testing.T) {
+func TestLoadWithDeleteLeavesTheDanglingAgentOutOfTheTree(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 
 	s := f.service(t)
-	_, err := s.loadWith(&mutation{Rel: "llm/openai.yaml", Delete: true})
+	cfg, err := s.loadWith(&mutation{Rel: "llm/openai.yaml", Delete: true})
 
-	if err == nil {
-		t.Fatal("deleting the only provider that main references must fail the trial merge")
+	// ★ The trial merge does not fail: an agent whose model is not declared
+	//   is **left out**, and the tree still holds together. What refuses the
+	//   delete is the gate — see the delete tests.
+	if err != nil {
+		t.Fatalf("the trial merge must hold together: %v", err)
 	}
-	if !strings.Contains(err.Error(), "openai/fast") {
-		t.Fatalf("the error must name the dangling reference, got %q", err)
+	if _, ok := cfg.Agents["main"]; ok {
+		t.Fatal("the agent must be left out of the tree")
+	}
+	if why := cfg.LeftOut()["main"]; why == "" {
+		t.Fatalf("the reason must be recorded: %v", cfg.LeftOut())
 	}
 	if f.exists(t, "llm/openai.yaml") != true {
-		t.Fatal("a failed trial merge must not delete anything on disk")
+		t.Fatal("a trial merge must not delete anything on disk")
 	}
 }
 
@@ -144,23 +150,27 @@ func TestLoadWithDeleteSucceedsWhenNothingDangles(t *testing.T) {
 	}
 }
 
-func TestLoadWithRejectsUnresolvableModelRef(t *testing.T) {
+func TestLoadWithLeavesAnUnresolvableModelRefOutOfTheTree(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 
 	s := f.service(t)
-	_, err := s.loadWith(&mutation{
+	cfg, err := s.loadWith(&mutation{
 		Rel:     "agents/main.md",
 		Content: []byte("---\nmodel: openai/nope\n---\nbody\n"),
 	})
-	if err == nil {
-		t.Fatal("an unresolvable model ref must fail the trial merge")
+
+	// ★ The trial merge holds together and the agent is left out — with the
+	//   reason recorded, because a degradation that is silent is the worst
+	//   kind.
+	if err != nil {
+		t.Fatalf("the trial merge must hold together: %v", err)
 	}
-	if !strings.Contains(err.Error(), "agents/main.md") {
-		t.Fatalf("the error must name the file to edit, got %q", err)
+	if _, ok := cfg.Agents["main"]; ok {
+		t.Fatal("the agent must be left out of the tree")
 	}
-	if !strings.Contains(err.Error(), "openai/nope") {
-		t.Fatalf("the error must name the ref, got %q", err)
+	if why := cfg.LeftOut()["main"]; !strings.Contains(why, "openai/nope") {
+		t.Fatalf("the reason must name the model: %q", why)
 	}
 }
 

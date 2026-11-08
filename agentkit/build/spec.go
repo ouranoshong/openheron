@@ -1,6 +1,7 @@
 package build
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -36,6 +37,12 @@ func specOf(cfg *spec.Config, projectRoot string) (agentSpec, error) {
 	}
 	defaultAgent := cfg.DefaultAgent()
 	if _, ok := agents[defaultAgent]; !ok {
+		// ★ An agent that was **left out** is not "not declared": it is
+		//   declared, and the reason it cannot run is known. Saying which
+		//   one it is saves the reader from looking in the wrong place.
+		if msg := leftOutMessage(cfg, defaultAgent); msg != "" {
+			return agentSpec{}, errors.New(msg)
+		}
 		return agentSpec{}, fmt.Errorf("agent: the default agent %q is not declared", defaultAgent)
 	}
 	return agentSpec{

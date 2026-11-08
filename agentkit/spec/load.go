@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -494,6 +495,68 @@ func ProviderIDOf(ref string) string {
 	return ref
 }
 
+// leaveOutUndeclaredModels takes the agents whose model is not declared out
+// of the tree.
+//
+// ★ **One agent's model is not the whole tree's business to die for.** The
+//
+//	rest of the configuration is perfectly good, and a process that refuses
+//	to start is a process that cannot be told what is wrong with it — the
+//	editor that would fix it lives in that process.
+//
+// ★ The agent is **left out**, not half-built: it is dropped from the tree
+//
+//	and from every parent's `subagents:` list, so the delegation tool does
+//	not offer a worker that cannot run. The reason is said out loud — the
+//	startup log, `/v2/health` and the configuration editor all carry it.
+//
+// ★ **The default agent is left out too.** There is no session without it,
+//
+//	but a session is not the process: the process is also the config editor,
+//	and an editor that cannot start is an editor that cannot be used to fix
+//	the very thing that keeps it from starting. The session says why when
+//	it asks for an agent that is not there.
+func (c *Config) leaveOutUndeclaredModels(ids []string) {
+	dropped := map[string]bool{}
+	for _, id := range ids {
+		a := c.Agents[id]
+		if a == nil {
+			continue
+		}
+		ref, _ := ParseRef(a.ModelRef)
+		if _, ok := c.Models[ref.String()]; ok {
+			continue
+		}
+		where := a.File
+		if where == "" {
+			where = DirAgent + "/" + id + ".md"
+		}
+		reason := fmt.Sprintf("the model %s is not declared under %s/", a.ModelRef, DirLLM)
+		// ★ The file is the notice's `Path`, not part of its message. The old
+		//   hard error carried it in the text because the error had nowhere
+		//   else to put it; a notice does, and repeating it here makes the
+		//   editor print it twice — "agents/x.md · agent x (agents/x.md) …".
+		c.deferFile(where,
+			"agent %s references model %s which is not declared under %s/; the agent is left out",
+			id, a.ModelRef, DirLLM)
+		if c.leftOut == nil {
+			c.leftOut = map[string]string{}
+		}
+		c.leftOut[id] = reason
+		dropped[id] = true
+		delete(c.Agents, id)
+	}
+	if len(dropped) == 0 {
+		return
+	}
+	for _, id := range c.AgentNames() {
+		a := c.Agents[id]
+		a.SubAgents = slices.DeleteFunc(a.SubAgents, func(name string) bool {
+			return dropped[name]
+		})
+	}
+}
+
 func (c *Config) validate() error {
 	ids := make([]string, 0, len(c.Agents))
 	for id := range c.Agents {
@@ -514,22 +577,18 @@ func (c *Config) validate() error {
 			"agents/%s.md does not exist or could not be parsed", DefaultAgentID)}
 	}
 
+	// ★ One agent's undeclared model leaves **that agent** out; it does not
+	//   take the tree down with it. The rest of the configuration is good,
+	//   and a process that will not start is a process that cannot be told
+	//   what is wrong with it — the editor that would fix it lives in that
+	//   process.
+	c.leaveOutUndeclaredModels(ids)
+	ids = c.AgentNames()
+
 	for _, id := range ids {
 		a := c.Agents[id]
 		ref, _ := ParseRef(a.ModelRef)
-		m, ok := c.Models[ref.String()]
-		if !ok {
-			where := a.File
-			if where == "" {
-				where = DirAgent + "/" + id + ".md"
-			}
-			// ★ The file is carried by the error, not only named in it: the
-			//   editor has to know **which** file is broken, or it puts this
-			//   on the file the user happens to be editing.
-			return &FileError{Path: where, Err: fmt.Errorf(
-				"agent %s (%s) references model %s which is not declared under llm/",
-				id, where, a.ModelRef)}
-		}
+		m := c.Models[ref.String()]
 		if err := checkReasoning(id, a, m); err != nil {
 			return err
 		}

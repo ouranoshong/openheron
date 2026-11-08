@@ -1302,24 +1302,40 @@ export function startFakeServer(port = 0): FakeServer {
         })
       }
     }
-    // ★ The tree's own problems: they belong to **another** file, and the
-    //   editor has to show them under that file's name. This is the shape of
-    //   the bug that put an agent's missing model on the screen of a user
-    //   editing a different agent's file.
-    if (path === "agents/main.md" && content.includes("model: deepseek/gone")) {
+    // ★ An agent whose model is not declared is **left out of the tree**: the
+    //   tree still loads, the reason is said out loud, and the problem lands
+    //   on **that agent's own file** — not on the file being edited. The
+    //   notice belongs to the tree, so it is there whichever file is open.
+    const expertStillBroken =
+      path !== "agents/agent-expert.md" || content.includes("model: openai/gpt-4o-mini")
+    if (expertStillBroken) {
       issues.push({
         path: "agents/agent-expert.md",
         line: 0,
-        severity: "error",
-        message:
-          "agent agent-expert (agents/agent-expert.md) references model openai/gpt-4o-mini which is not declared under llm/",
-      })
-      issues.push({
-        path: "mcps/memory.yaml",
-        line: 0,
         severity: "hint",
         message:
-          "env MEMORY_FILE_PATH refers to OPENHERON_MCP_MEMORY_FILE, which is not set; the entry is left out",
+          "agent agent-expert references model openai/gpt-4o-mini which is not declared under llm/; the agent is left out",
+      })
+    }
+    // ★ The same shape for the MCP server: an unset environment variable
+    //   leaves its entry out, and the notice is on the server's own file.
+    issues.push({
+      path: "mcps/memory.yaml",
+      line: 0,
+      severity: "hint",
+      message:
+        "env MEMORY_FILE_PATH refers to OPENHERON_MCP_MEMORY_FILE, which is not set; the entry is left out",
+    })
+    // ★ **The gate.** A change that would take a **working** agent out of the
+    //   tree is refused — and the refusal is on the file being edited, because
+    //   that is the change being made. The agent that would be lost is named.
+    if (path === "agents/main.md" && content.includes("model: deepseek/gone")) {
+      issues.push({
+        path,
+        line: 0,
+        severity: "error",
+        message:
+          'the change would leave the agent "main" out of the tree: the model deepseek/gone is not declared under llm/',
       })
     }
     return issues
@@ -1363,7 +1379,7 @@ export function startFakeServer(port = 0): FakeServer {
     if (body.includes("BROKEN")) {
       return fail(
         422,
-        "agents/main.md references model deepseek/gone which is not declared under llm/",
+        'the change would leave the agent "main" out of the tree: the model deepseek/gone is not declared under llm/',
         "config_would_break_merge",
       )
     }

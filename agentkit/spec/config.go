@@ -119,6 +119,28 @@ type Config struct {
 	ConfigRoot string `yaml:"-"`
 
 	notices []Notice
+
+	// leftOut holds the agents that are not in the tree, and why.
+	//
+	// ★ An agent whose model is not declared cannot run, and a tree that
+	//   carries it cannot be built. The agent is **left out** — dropped from
+	//   the tree, with the reason kept here — so the rest of the
+	//   configuration still runs. The reason is not a decoration: the
+	//   builder says it when a session asks for that agent, and the write
+	//   gate says it when a change would take the agent out.
+	leftOut map[string]string
+}
+
+// LeftOut returns the agents that were left out of the tree, and why.
+//
+// ★ The map is **not** nil when nothing was left out — a caller that asks
+//
+//	"is this agent usable?" must be able to tell "no" from "not asked".
+func (c *Config) LeftOut() map[string]string {
+	if c.leftOut == nil {
+		return map[string]string{}
+	}
+	return c.leftOut
 }
 
 // Notice is one deferred problem, and the file it is about.
@@ -162,11 +184,21 @@ func (c *Config) Notices() []Notice { return c.notices }
 // DefaultAgent returns the id of the agent a new session runs as.
 // Named with a call because the package already exports the DefaultAgentID
 // constant, and an identifier cannot be both.
+//
+// ★ The default agent is **"main" by declaration**, not by survival. An agent
+//
+//	that was left out of the tree is still the agent the configuration names
+//	as the default — falling back to another one would run a session under an
+//	agent nobody asked for, and say nothing about why the one they did ask
+//	for is missing.
 func (c *Config) DefaultAgent() string {
 	if c == nil {
 		return DefaultAgentID
 	}
 	if _, ok := c.Agents[DefaultAgentID]; ok {
+		return DefaultAgentID
+	}
+	if _, ok := c.leftOut[DefaultAgentID]; ok {
 		return DefaultAgentID
 	}
 	names := c.AgentNames()

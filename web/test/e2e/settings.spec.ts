@@ -271,6 +271,40 @@ test.describe("another file's problems", () => {
   })
 })
 
+// ★ **An agent whose model is not declared is left out of the tree.** The
+//   tree still loads, the reason is said out loud, and the problem is on
+//   that agent's own file — as a **hint**, because nothing is broken: the
+//   tree is short one worker, and a hint is what says so.
+test.describe("an agent left out of the tree", () => {
+  test("its reason is a hint on its own file, and the save is not blocked", async ({ page }) => {
+    await openSettings(page)
+    await selectFile(page, "agents/agent-expert.md")
+    await page.locator(EDITOR).click()
+    await page.keyboard.press("Control+a")
+    await page.keyboard.type("---\nmodel: openai/gpt-4o-mini\ndescription: expert v2\n---\nexpert body\n")
+
+    const status = page.locator(STATUS)
+    await expect(status).toContainText("left out")
+    // ★ A hint does not block: the tree loads without that agent.
+    await expect(page.locator(SAVE)).toBeEnabled()
+  })
+
+  // ★ **The gate.** A change that would take a **working** agent out of the
+  //   tree is refused — and the refusal is on the file being edited, because
+  //   that is the change being made.
+  test("a change that takes a working agent out is refused on that file", async ({ page }) => {
+    await openSettings(page)
+    await selectFile(page, "agents/main.md")
+    await page.locator(EDITOR).click()
+    await page.keyboard.press("Control+a")
+    await page.keyboard.type("---\nmodel: deepseek/gone\n---\nbody\n")
+
+    const status = page.locator(STATUS)
+    await expect(status).toContainText(/would leave the agent "main" out of the tree/)
+    await expect(page.locator(SAVE)).toBeDisabled()
+  })
+})
+
 test.describe("the new file dialog", () => {
   const NEW_FILE = '[data-testid="settings-new-file"]'
   const NEW_DIALOG = '[data-testid="new-file-dialog"]'
