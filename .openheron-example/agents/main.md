@@ -3,13 +3,16 @@ description: Management role
 model: openai/gpt-4o
 max_iterations: 30
 # reasoning: high      ← tier name, taken from a key of models[].reasoning
-# skills: [refactor]   ← the skills this agent may use; the names are the folders under skills/
 subagents: [researcher, coder, reviewer]
 # ★ tools is the allow-list: the names are the ones the model sees, and
 #   **the default is none**. main plans and delegates, so it keeps the
 #   readers and the delegation tool — the writers are the sub-agents'.
 tools: [ls, read_file, glob, grep, task, write_todos, skill]
 mcps: []
+# ★ skills is the allow-list of skills, and **the default is none**. The
+#   `skill` tool and this list go together: the tool without a skill to load
+#   is a contradiction, and the loader says so.
+skills: [refactor]
 ---
 
 You work in a Go repository.
