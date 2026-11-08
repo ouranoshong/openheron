@@ -344,14 +344,43 @@ func TestReadFileReportsMissingAsEmptyNotError(t *testing.T) {
 	}
 }
 
+// ★ Reading and writing ask different questions, and the read is allowed to be
+// the looser one: `server/` cannot be written (it is not hot-reloaded), and
+// that is a fact about writing. A reader that cannot look at the configuration
+// the process is running from is a reader with a hole in it — and the hole was
+// exactly one third of the tree, reported as "changes would need a restart"
+// for a call that changes nothing.
+func TestReadFileReadsAPartitionItMayNotWrite(t *testing.T) {
+	f := newFixture(t)
+	f.write(t, "server/config.yaml", "listen_addr: \":9999\"\n")
+	s := f.service(t)
+
+	content, rev, err := s.ReadFile("server/config.yaml")
+	if err != nil {
+		t.Fatalf("server/ is readable: %v", err)
+	}
+	if !strings.Contains(string(content), "9999") || rev == "" {
+		t.Fatalf("content = %q, revision = %q", content, rev)
+	}
+
+	// ★ The write gate did not move: the same path is still refused.
+	if _, _, err := s.Write("server/config.yaml", []byte("listen_addr: \":1\"\n"), rev); err == nil {
+		t.Fatal("server/ must still refuse to be written")
+	}
+	if _, err := s.Delete("server/config.yaml"); err == nil {
+		t.Fatal("server/ must still refuse to be deleted")
+	}
+}
+
 func TestReadFileRejectsBadPaths(t *testing.T) {
 	f := newFixture(t)
 	s := f.service(t)
 
-	if _, _, err := s.ReadFile("../escape.yaml"); err == nil {
-		t.Fatal("ReadFile must apply the same path validation as Write")
-	}
-	if _, _, err := s.ReadFile("server/config.yaml"); err == nil {
-		t.Fatal("ReadFile must reject non-editable sections too, so the UI cannot show a read path that has no write path")
+	// ★ The shape checks are shared with the writer: a path that leaves the
+	//   root, or names a partition that does not exist, is not readable either.
+	for _, rel := range []string{"../escape.yaml", "/etc/passwd", "policy/whatever.yaml", "tools/whatever.yaml"} {
+		if _, _, err := s.ReadFile(rel); err == nil {
+			t.Fatalf("ReadFile(%q) must be refused", rel)
+		}
 	}
 }

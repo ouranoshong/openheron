@@ -114,10 +114,24 @@ test.describe("read-only sections", () => {
     await expect(row.getByLabel(/requires a restart/)).toBeVisible()
   })
 
-  test("a non-hot section is not editable", async ({ page }) => {
+  // ★ Readable, not writable — two different questions, and the editor has to
+  //   answer both in the same screen. It used to answer neither: the read was
+  //   refused with a message about restarts, so the file simply never opened
+  //   and Save was disabled because the draft was empty.
+  test("a non-hot section opens, and is a view rather than a form", async ({ page }) => {
     await openSettings(page)
     await selectFile(page, "server/config.yaml")
+
     await expect(page.getByText(/not hot-reloaded/i)).toBeVisible()
+    // ★ The read path is open: the content is the file's own. Before the read
+    //   gate was split, this file never loaded at all, and Save was disabled
+    //   because the draft was empty — the right answer for the wrong reason.
+    await expect(page.locator(EDITOR)).toContainText("listen_addr")
+
+    // ★ And the write path is closed, in the editor itself: not a disabled
+    //   button the user can wonder about, but a document they cannot type
+    //   into. Two protections, because the one that matters is the server's.
+    await expect(page.locator(EDITOR)).toHaveAttribute("contenteditable", "false")
     await expect(page.locator(SAVE)).toBeDisabled()
   })
 })

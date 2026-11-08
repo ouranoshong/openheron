@@ -277,13 +277,54 @@ func TestSettingsItemRejectsBadInput(t *testing.T) {
 	}{
 		{"missing path", "/v2/settings/item", codeConfigPathInvalid},
 		{"escape", "/v2/settings/item?path=" + url.QueryEscape("../x.yaml"), codeConfigPathInvalid},
-		{"non-editable", "/v2/settings/item?path=server/spec.yaml", codeConfigPathInvalid},
 		{"a retired partition", "/v2/settings/item?path=policy/whatever.yaml", codeConfigPathInvalid},
 	}
 	for _, c := range cases {
 		got := callJSON(t, srv, "GET", c.path, nil)
 		if code := decodeCode(t, got.body); code != c.want {
 			t.Errorf("%s: code = %q, want %q (%d %s)", c.name, code, c.want, got.code, got.body)
+		}
+	}
+}
+
+// ★ A read-only partition is **readable**. It is the file that configures the
+// process, so it is the one a reader most wants to look at; refusing the read
+// because the write needs a restart was answering the wrong question. What
+// stays refused is the write — and that is what the next case pins.
+func TestSettingsItemReadsAReadOnlyPartition(t *testing.T) {
+	srv, _, _ := settingsEnv(t)
+
+	got := callJSON(t, srv, "GET", "/v2/settings/item?path=server/spec.yaml", nil)
+	if got.code != consts.StatusOK {
+		t.Fatalf("server/ must be readable: = %d (%s)", got.code, got.body)
+	}
+	item := decodeSettings[settingsItemBody](t, got)
+	if !item.Exists || !strings.Contains(item.Content, "listen_addr") {
+		t.Fatalf("the content must be the file's own: %+v", item)
+	}
+	if item.Revision == "" {
+		t.Fatal("a file that exists has a revision; an empty one says it does not exist")
+	}
+	if item.Hot {
+		t.Fatal("server/ is not hot-reloaded, and the answer must say so")
+	}
+
+	// The read path is open; the write path is not.
+	for _, method := range []string{"PUT", "POST", "DELETE"} {
+		var wrote result
+		switch method {
+		case "DELETE":
+			wrote = call(t, srv, method, "/v2/settings/item?path=server/spec.yaml", "")
+		default:
+			wrote = callJSON(t, srv, method, "/v2/settings/item", settingsWriteBody{
+				Path: "server/spec.yaml", Content: "listen_addr: \":1\"\n", BaseRevision: item.Revision,
+			})
+		}
+		if wrote.code == consts.StatusOK {
+			t.Fatalf("%s server/spec.yaml must be refused, got %d (%s)", method, wrote.code, wrote.body)
+		}
+		if code := decodeCode(t, wrote.body); code != codeConfigPathInvalid {
+			t.Fatalf("%s: code = %q, want %q", method, code, codeConfigPathInvalid)
 		}
 	}
 }

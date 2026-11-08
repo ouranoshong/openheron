@@ -433,6 +433,19 @@ describe("selectors", () => {
     expect(selectSelectedItem(s())?.path).toBe("tools/http.yaml")
   })
 
+  // ★ A dirty draft on a partition this client may not write must not make
+  //   Save reachable. The editor also refuses to type into it; this is the
+  //   second lock, and the one that survives a change to the first.
+  test("a non-editable partition is never saveable, however dirty the draft", async () => {
+    await s().openSettings()
+    useSettings.setState({ selected: "server/config.yaml", saved: "a\n", draft: "b\n" })
+    expect(selectDirty(s())).toBe(true)
+    expect(selectCanSave(s())).toBe(false)
+
+    useSettings.setState({ selected: "tools/http.yaml", saved: "a\n", draft: "b\n" })
+    expect(selectCanSave(s())).toBe(true)
+  })
+
   test("selectIsEditable reads the category, not the item", async () => {
     await s().openSettings()
     useSettings.setState({ selected: "server/config.yaml" })

@@ -330,8 +330,19 @@ export function selectDirty(s: SettingsState): boolean {
   return s.draft !== s.saved
 }
 
+/**
+ * Whether the Save button is offered.
+ *
+ * ★ A partition this client may not write is not saveable, **however clean the
+ *   draft looks**. `server/` is now readable (§ the read gate), so its content
+ *   arrives in the editor and a keystroke would otherwise make `draft !==
+ *   saved` and light up a button whose request the server refuses — an error
+ *   the user did nothing to deserve. The category says which it is; the server
+ *   is the one that decides, and it says "not editable".
+ */
 export function selectCanSave(s: SettingsState): boolean {
   return (
+    selectIsEditable(s) &&
     s.draft !== s.saved &&
     blocking(s.issues).length === 0 &&
     s.saveState !== "saving" &&

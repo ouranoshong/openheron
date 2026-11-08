@@ -54,7 +54,39 @@ func (e *WriteError) Is(target error) bool {
 	return ok && other.Kind == e.Kind
 }
 
+// ValidatePath answers "may a caller WRITE this path?".
+//
+// ★ Reading and writing ask different questions, and this function used to
+// answer both. The shape (a known partition, a name that partition accepts) is
+// the same for either; the **editable** rule is not: `server/` configures the
+// process itself, so a change there needs a restart and the editor must not
+// save it. That says nothing about reading it — and refusing the read made the
+// tool that reads the configuration unable to read a third of it, with a
+// message about restarts for a call that changes nothing.
+//
+// ★ The write gate keeps this name because every existing caller of it is a
+// writer, and a caller that got the stricter answer by mistake is safe; a
+// writer that got the looser one is a file it should not have touched.
 func ValidatePath(rel string) (Category, error) {
+	cat, err := ValidateReadPath(rel)
+	if err != nil {
+		return Category{}, err
+	}
+	if !cat.Editable {
+		return Category{}, writeErrf(ErrPathInvalid, rel,
+			"section %q is not editable: it is not hot-reloaded, so changes would need a restart", cat.Dir)
+	}
+	return cat, nil
+}
+
+// ValidateReadPath answers "may a caller READ this path?".
+//
+// ★ Shape only, and it is the same shape the writer checks: a path outside the
+// root, an unknown partition, or a file name the partition does not accept is
+// not readable either. What it does not ask is whether the partition is
+// editable — that is a question about writing, and a read-only partition is
+// exactly the one a reader most wants to look at.
+func ValidateReadPath(rel string) (Category, error) {
 	if strings.TrimSpace(rel) == "" {
 		return Category{}, writeErrf(ErrPathInvalid, rel, "path is empty")
 	}
@@ -71,10 +103,6 @@ func ValidatePath(rel string) (Category, error) {
 	if !ok {
 		return Category{}, writeErrf(ErrPathInvalid, rel,
 			"unknown config section %q; known sections are %s", path.Dir(slash), knownDirs())
-	}
-	if !cat.Editable {
-		return Category{}, writeErrf(ErrPathInvalid, rel,
-			"section %q is not editable: it is not hot-reloaded, so changes would need a restart", cat.Dir)
 	}
 	if name := path.Base(slash); name == "" || name == "." || strings.HasPrefix(name, ".") {
 		return Category{}, writeErrf(ErrPathInvalid, rel, "file name must not start with a dot")
@@ -251,7 +279,7 @@ func Revision(content []byte) string {
 }
 
 func (s *Service) ReadFile(rel string) (content []byte, rev string, err error) {
-	if _, err := ValidatePath(rel); err != nil {
+	if _, err := ValidateReadPath(rel); err != nil {
 		return nil, "", err
 	}
 	if s.root == "" {
