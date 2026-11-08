@@ -51,7 +51,7 @@ counting `grep '"github.com/ouranoshong/openheron/'` hits per package:
 | | `webui` | none | Embedded frontend assets |
 | | `agentkit/fsx` | none | **The filesystem backend**: a bounded local backend — writes confined to the project root, ignore rules, result caps (see [fs-backend-design.md](fs-backend-design.md)) |
 | | `agentkit/templates` | none | **The configuration templates**: the files `openheron init` writes and the config editor scaffolds. ★ It is a leaf so that both the configuration layer and the command layer can read the **same** file — a copy would drift |
-| **L1** | `agentkit/spec/decl` | none | **Pure declarations** (where the yaml tags live) |
+| **L1** | `agentkit/spec/decl` | none | **Pure declarations** (where the yaml tags live) **and the shared vocabulary** — the built-in tool names and the MCP namespace (§2.1) |
 | | `agentkit/emit` | `obs`, `approval`, `contract`, `helpers`, `message` | The derivation: agent events → the run's facts |
 | | `storage` | `contract` | Interfaces for sessions/messages/pending approvals |
 | | `kb` | `obs`, `persist` | Knowledge base: corpus, index, retrieval, scoring |
@@ -93,17 +93,27 @@ dependencies, and importing `obs` there would break the "the protocol layer does
 depend on the runtime" rule, so it uses the standard logger. Any openheron-internal
 import inside `llm/common` is a regression.
 
-**(2) Declaration and behaviour are separate.** `agentkit/spec/decl` holds **only plain
+**(2) Declaration and behaviour are separate.** `agentkit/spec/decl` holds **plain
 structs** and yaml tags (`agentkit/spec/decl/decl.go`) and imports no other package;
 `agentkit/spec` holds the **behaviour** (loading, validation, reloading, writing). That
 way `decl` can be passed freely between `build`, `api` and `initcfg` without dragging a
 dependency chain along.
 
+★ **The vocabulary the two halves share lives in `decl` too, and that is a
+dependency-direction fact, not a convenience.** The built-in tool names
+(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:291`) are read by **both** ends:
+the loader checks the names an agent's `tools:` list mentions against them, and the
+builder refuses a provider that claims one of them (`reservedToolNames`,
+`agentkit/build/tools.go:75`). Neither end may import the other — the loader sits
+below the builder — so the list cannot live in either of them: it lives **below both**,
+in the leaf package. ★ A second copy would be two lists that drift, and the drift
+would read as "that tool does not exist".
+
 ### 2.2 Why `agentkit/spec` does **not** import `kb`
 
 **Validating** the knowledge-base config (`tools/kb.yaml`) needs to know whether the
 corpus path is relative, whether the model is declared at all, and whether it is
-declared as `kind: embedding` (`agentkit/spec/load.go:195` `loadKB`, `load.go:594`
+declared as `kind: embedding` (`agentkit/spec/load.go:229` `loadKB`, `load.go:730`
 `validateKB`).
 
 ★ All three answers live in the **declarations** (`decl.Model.IsEmbedding`,
@@ -132,7 +142,7 @@ searched** — once the config root depends on "where the process was started fr
 same command run from a different directory reads a different configuration, and a test
 instance would read the development configuration too.
 
-Only a **defaulted** root is created automatically (`config.go:204`'s `os.MkdirAll`). An
+Only a **defaulted** root is created automatically (`config.go:196`'s `os.MkdirAll`). An
 explicit root or an env root pointing nowhere is **not** created: a typo must not silently
 grow an empty configuration tree.
 
@@ -185,8 +195,9 @@ Available frontmatter keys (`agentkit/spec/decl/decl.go:78`'s `decl.Agent`):
 | `model` | `model` | `<provider>/<model>`; **never inherited, never falls back** |
 | `max_iterations` | `max_iterations` | Cap on tool-loop iterations |
 | `subagents` | `subagents` | The sub-agents it may delegate to |
-| `disabled_tools` | `disabled_tools` | Tools this agent may **not** use at all — they are not even in its tool set |
-| `mcps` | `mcps` | The MCP servers this agent may use — absent means every configured server, an empty list means none (`agentkit/spec/decl/decl.go:114`) |
+| `tools` | `tools` | The tools this agent may use — the **exposed** names, the ones the model sees. ★ **Absent means none** (`agentkit/spec/decl/decl.go:104`) |
+| `skills` | `skills` | The skills this agent may load — the folders under `skills/`. ★ **Absent means none** (`agentkit/spec/decl/decl.go:125`) |
+| `mcps` | `mcps` | The MCP servers this agent **mounts** — each one starts a child process. ★ **Absent means no server** (`agentkit/spec/decl/decl.go:135`) |
 | `temperature` | `temperature` | Sampling temperature |
 | `max_tokens` | `max_tokens` | Sampling cap |
 | `reasoning` | `reasoning` | Reasoning tier name (`low`/`high`/`max`…) |
@@ -195,6 +206,33 @@ Available frontmatter keys (`agentkit/spec/decl/decl.go:78`'s `decl.Agent`):
 loader fills them in; they are **not** frontmatter keys.
 
 The body is the prompt itself (`Instruction`).
+
+★ **All three lists default to none, and an absent key is an empty list.** The rule is
+one line: **only what is listed**. There is no "everything" and no "everything except"
+— a tool the list does not name is not the agent's tool, a skill it does not name is
+not its skill, a server it does not name is not mounted. ★ The three lists are plain
+slices (`decl.Agent.Tools`, `decl.Agent.Skills`, `decl.Agent.MCPServers`), not
+pointers: the pointers went away with the change, because "not declared" and "declared
+empty" now mean the same thing — nothing.
+
+★ **The old key is refused, not renamed.** `disabled_tools` was the **opposite** of
+`tools` — one removed tools, the other names them — so renaming it alone would have
+turned a blacklist into a whitelist without saying so. The loader therefore **refuses**
+the file (`agentkit/spec/load.go:96`) and says that the meaning is the other way
+round. ★ **There is no alias**: an alias that still worked with the old meaning would
+keep the blacklist alive, and an alias that worked with the new one would turn a
+blacklist into a whitelist on the user's behalf — the exact confusion the refusal
+exists to prevent.
+
+★ **MCP has two levels, and both have to be written.** `mcps:` says which servers are
+**mounted** — mounting a server starts a child process — and `tools:` says which of
+that server's tools the agent **sees**, by the exposed name `mcp__<server>__<tool>` or
+by the pattern `mcp__<server>__*`. ★ `mcps: [github]` without `mcp__github__*` in
+`tools:` says "start it" and nothing else: the agent sees none of it. ★ A contradiction
+between the two is a **load-time error** (`agentkit/spec/load.go:643`
+`checkAgentMCPNames`): naming `mcp__github__*` in `tools:` while `mcps:` leaves
+`github` out can never match, so the loader says so instead of letting the rule
+quietly do nothing.
 
 ### 3.4 The tier model: `ask` by default, the exceptions named
 
@@ -207,7 +245,7 @@ There are **two** tiers, and the default is the safe one:
 
 `build.Policy.TierOf` (`agentkit/build/policy.go:55`) answers the tier of one tool
 name: a name in the allow list is `allow`, and **every other name is `ask`**. The
-mirrored declaration `decl.Tier` (`agentkit/spec/decl/decl.go:219`) holds `TierAllow`
+mirrored declaration `decl.Tier` (`agentkit/spec/decl/decl.go:240`) holds `TierAllow`
 and `TierAsk` and nothing else — there is no third tier.
 
 ★ **The default is `ask` because the cost of guessing wrong is asymmetric**: one extra
@@ -219,20 +257,28 @@ The **exceptions are named**, and they are named by the file that provides the t
 
 | Source | What it names | Assembled at |
 |---|---|---|
-| The built-in tools that have no file of their own | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill` | `agentkit/build/tools.go:61` `builtinAllowedTools` |
-| A tool's own file — `tools/*.yaml` and the knowledge base | that file's `allows:` | `agentkit/spec/load.go:235` `AllowedTools` |
+| The built-in tools that have no file of their own | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill` | `agentkit/build/tools.go:62` `builtinAllowedTools` |
+| A tool's own file — `tools/*.yaml` and the knowledge base | that file's `allows:` | `agentkit/spec/load.go:269` `AllowedTools` |
 | An MCP server's own file | that server's `allows:`, in the server's own vocabulary, translated to the exposed names | `agentkit/build/mcptools.go:173` `mcpAllowedNames` |
 
 `agentkit/build/spec.go:57` `policyOf` puts the three together and `Policy.TierOf`
 reads the result. ★ The table is assembled from the **configuration**, so the tier of
 a tool is answerable before its server is even up.
 
-★ **Two places decide, and there is no global list any more.** "Which tools run without
-a nod" is said by the file that provides the tool — its `allows:` — and "which tools
-this agent may not use at all" is said by that agent's `disabled_tools`
-(`decl.SubAgentSpec`). A tool that is blocked **keeps its own tier** and says why in
-its `reason`; the only two reasons are `disabled_tools` and `mcps`
-(`agentkit/build/introspect.go:36` `reasonOf`).
+★ **Two questions, and they are kept apart.** "Does this tool need a human?" is the
+**tier table** — `Policy.TierOf` — and it is **shared**: every agent reads the same
+table. "May this agent use this tool at all?" is the **agent's own list** —
+`Table.Blocked` (`agentkit/build/policy.go:130`), the list the agent carries as
+`decl.SubAgentSpec` — and it is **per agent**: a tool the list does not name is not in
+that agent's tool set, so the model never sees it.
+
+★ **A blocked tool keeps its own tier**, and says why in its `reason` — and there is
+now exactly **one** reason: `tools` (`agentkit/build/introspect.go:36` `reasonOf`).
+★ The second reason is gone with the layer it named: a server the agent does not
+mount has no tools to block, and one it does mount but does not name is blocked by
+this very list. So `Table.Blocked` answers `LayerNotLoaded`
+(`agentkit/build/policy.go:212`) and nothing else — the MCP scope layer
+(`LayerMCPScope`) is deleted.
 
 ### 3.5 Depth cap and topology validation
 
@@ -245,14 +291,14 @@ second copy of the same keys that could only *tighten* the file — is gone, and
 takes effect after a restart.
 
 A declared topology that exceeds the cap is a **startup error**
-(`spec/load.go:622`'s `validateDepth`) — never a silent truncation. A sub-agent
+(`spec/load.go:758`'s `validateDepth`) — never a silent truncation. A sub-agent
 referencing an unknown agent and a cyclic topology are startup errors too
-(`load.go:726`, `load.go:733`).
+(`load.go:829` `validateAgentGraph`, `load.go:869`).
 
 ### 3.6 skills resolve by a different rule
 
 `skills/` is **not** "a partition of the config root"; it is resolved independently
-(`agentkit/build/skill.go:188`): `$EINO_EXT_SKILLS_DIR` first, and only if that is unset
+(`agentkit/build/skill.go:172`): `$EINO_EXT_SKILLS_DIR` first, and only if that is unset
 does it search **upwards** from the current directory for `.openheron/skills`.
 
 ★ This is a different rule from "the config root never searches upwards". Skills are a
@@ -262,14 +308,18 @@ read different configurations.
 
 ★ **Which skills an agent may use is a scoped backend.** The `skills` key in
 `agents/<name>.md` is an allow-list of the folders under the skills directory, and it
-reaches the middleware as `scopedSkillBackend` (`agentkit/build/skill.go`). The scope
-filters both halves: `List` — the skill tool's description is rendered from it, so it is
-what the model **sees** — and `Get` — what the model can actually **load**. Filtering
+reaches the middleware as `scopedSkillBackend` (`agentkit/build/skill.go:76`). The scope
+filters both halves: `List` (`agentkit/build/skill.go:147`) — the skill tool's
+description is rendered from it, so it is what the model **sees** — and `Get`
+(`agentkit/build/skill.go:161`) — what the model can actually **load**. Filtering
 only one half would leave a skill that a model remembers the name of loadable.
 
-★ The list is carried as a **pointer** (`decl.Agent.Skills`), because "not declared"
-and "declared and empty" mean different things: the first is every skill, the second is
-none.
+★ **The list is a plain slice, and the default is none.** `decl.Agent.Skills`
+(`agentkit/spec/decl/decl.go:125`) is `[]string`, not a pointer: "not declared" and
+"declared and empty" now mean the same thing — no skill — so there is nothing left to
+distinguish. ★ A skill the list does not name is not the agent's skill, and the skill
+tool is only worth naming when there is a skill to load — which the loader says so
+when the two contradict each other (§3.3).
 
 ★ The skill middleware is attached to the **entry agent** — the one the session
 selected (`agentkit/build/assemble.go`). A sub-agent does not get the skill tool at all,
@@ -277,10 +327,10 @@ so there the list has nothing to filter.
 
 ### 3.7 Two loading modes and "deferred"
 
-`spec.Service.Load()` (`config.go:263`) validates strictly — a failure is a startup
-failure. `LoadUnchecked()` (`config.go:286`) skips validation.
+`spec.Service.Load()` (`config.go:255`) validates strictly — a failure is a startup
+failure. `LoadUnchecked()` (`config.go:278`) skips validation.
 
-`Config.Deferred()` (`config.go:132`) collects **non-fatal** problems (a duration string
+`Config.Deferred()` (`config.go:124`) collects **non-fatal** problems (a duration string
 that will not parse, for instance), and surfaces them as a `deferred` array in
 `/v2/health` and `/v2/config`. The dividing line is: **anything that would make runtime
 behaviour wrong is fatal; anything that is merely a hint is deferred.**
@@ -307,8 +357,13 @@ The write path of the config editor (`/v2/settings`) has several gates:
 1. Take the agent's `model` reference and resolve it with `build.Resolve`
    (`provider.go:58`) into a `(provider, model)` pair; failing to resolve is a startup
    error.
-2. Compute the **effective tool table**: the tier table (§3.4), then the agent's own
-   `disabled_tools` and `mcps:` narrowing.
+2. Compute the **effective tool table**: the snapshot's tool set is **one set for the
+   whole snapshot**, and each agent narrows it with its own `tools:` allow-list
+   (`agentkit/build/topology.go:72` `specTable`). The tier table (§3.4) then decides
+   which of the tools that survive ask a human. ★ **There is no "nothing to do"
+   shortcut** (`agentkit/build/policy.go:145`): the list is an allow-list, so an
+   **empty** list removes **everything** — the shortcut a blacklist could afford
+   ("no rules, keep everything") is exactly the case an allow-list must not have.
 3. Recursively assemble the sub-tree declared by `subagents` and fill `SubAgents` into
    eino ADK's `deep.Config` (`assemble.go:97`).
 4. `WithoutGeneralSubAgent: true` (`assemble.go:25`'s `baseConfig`, and `hub.go:162`) —
@@ -316,7 +371,7 @@ The write path of the config editor (`/v2/settings`) has several gates:
    model invent sub-agents out of thin air and bypass our own topology and depth
    validation.
 
-★ One more thing in `assemble.go:145-148` that is easy to miss: `base.SubAgents = nil`
+★ One more thing in `assemble.go:157-158` that is easy to miss: `base.SubAgents = nil`
 and `base.Name/Description/Instruction` are cleared — that is the **per-node** assembly
 stripping the inherited sub-agent list, so each node hangs its own subtree instead of
 copying the parent's.
@@ -329,8 +384,8 @@ copying the parent's.
   untouched (`agentkit/build/gate.go:67`).
 - The name is not → the call **interrupts** and waits for a human decision
   (`agentkit/build/gate.go:99` for the streaming path, which is the same gate).
-- A tool the agent may not use is **not in its tool set at all** — the table removes it
-  before the gate ever sees it, so the model cannot even see it.
+- A tool the agent's `tools:` list does not name is **not in its tool set at all** — the
+  table removes it before the gate ever sees it, so the model cannot even see it.
 
 ★ **There is no `deny` branch.** A tool an agent may not have is not registered for it,
 so the gate never has to refuse one: "this agent may not use it" is a fact about the
@@ -352,13 +407,13 @@ or runs exactly like any other name. The gate does not change — only the names
 | Network tools | `build/nettools.go` | `web_search` `http` |
 | Knowledge base | `build/kb.go` | `kb_search` `kb_index` |
 | Encyclopedia | `build/nettools.go:236` | `wikipedia` |
-| MCP servers | `agentkit/build/mcptools.go:195` | `mcp__<server>__<tool>` |
+| MCP servers | `agentkit/build/mcptools.go:194` | `mcp__<server>__<tool>` |
 
 ★ **The tier of a tool is decided by the file that provides it.** A file's own
 `allows:` names the tools that run without a nod — `tools/http.yaml` names
 `request_get`, `tools/kb.yaml` names `kb_search` — and **everything else that file
 provides asks**. The built-in tools that have no file of their own are named in the
-code (`agentkit/build/tools.go:61`): the readers (`ls` `read_file` `glob` `grep`) and
+code (`agentkit/build/tools.go:62`): the readers (`ls` `read_file` `glob` `grep`) and
 the delegation tools (`task` `write_todos` `skill`). An MCP server says it in **its
 own vocabulary** — the server's tool names, not the exposed ones.
 
@@ -374,29 +429,30 @@ configuration files.
 
 The path a tool takes is the same for every source:
 
-`tools/*.yaml` → `spec.loadTool` (`agentkit/spec/load.go:165`) → `decl.ToolsCfg` →
-`toolRegistry.Build` (`agentkit/build/tools.go:78`) → `snapshot.buildHeavy`
+`tools/*.yaml` → `spec.loadTool` (`agentkit/spec/load.go:191`) → `decl.ToolsCfg` →
+`toolRegistry.Build` (`agentkit/build/tools.go:90`) → `snapshot.buildHeavy`
 (`agentkit/build/snapshot.go:47`) → `applyToolConfig` (`agentkit/build/assemble.go:31`) →
 `deep.Config.ToolsConfig.Tools` → `deep.New` (`agentkit/build/assemble.go:40`).
 
 The MCP branch joins it at the registry: `mcps/<server>.yaml` → `spec.loadMCP`
-(`agentkit/spec/load.go:269`) → `decl.MCPServerCfg` → the MCP provider
-(`agentkit/build/mcptools.go:195`), registered at `agentkit/build/tools.go:41` → the same
+(`agentkit/spec/load.go:306`) → `decl.MCPServerCfg` → the MCP provider
+(`agentkit/build/mcptools.go:194`), registered at `agentkit/build/tools.go:42` → the same
 `toolRegistry.Build` → the same `applyToolConfig`.
 
 ★ **The MCP client is the one resource on this path that does not belong to the
 snapshot.** The heavy dependencies are built once, under a `sync.Once`
 (`agentkit/build/snapshot.go:41`), and the provider answers a single question — "what
 tools does this snapshot have" — and returns a **batch** of them. The client behind that
-batch outlives the batch: it is owned by the manager (`agentkit/build/mcpmanager.go:41`),
+batch outlives the batch: it is owned by the manager (`agentkit/build/mcpmanager.go:42`),
 because a stdio server is a **child process**, and a child process started for one turn
 must still be there for the next one. The provider is **optional** — an unreachable server
 is skipped with a warning, never an error, so one dead server cannot keep the agent down.
 
 ★ The exposed name is `mcp__<server>__<tool>`, composed in exactly one place
-(`agentkit/build/mcptools.go:140`). The server's own name is the namespace segment, and
-the agent's `mcps:` list narrows the servers **in the agent's own table** — the same place
-where `disabled_tools` narrows the tools.
+(`agentkit/build/mcptools.go:141`). The server's own name is the namespace segment, and
+the agent's `tools:` list names the exposed names — a whole server with the pattern
+`mcp__<server>__*`. ★ **The prefix pattern is safe**: a server name may not contain a
+run of underscores, so the prefix of one server cannot reach another.
 
 ## 5. The run loop
 
@@ -508,6 +564,10 @@ only `state.json` and never opens the transcript — so listing is cheap.
   never swallow an API path.
 - **No authentication and no CORS.** The default `:8080` binds every interface; set
   `listen_addr` explicitly to narrow it.
+- The agent view (`api/v2_introspect.go:118`) reports an agent's tool allow-list as
+  **`tools`** — the list itself, not the tools it removes. ★ `skillsRestricted` is
+  gone: it existed only because an absent list and an empty one differed, and they no
+  longer do.
 
 `threadId` is **required** by `POST /v2/run` (`api/v2_run.go:113`) — create the session
 with `POST /v2/sessions` first, then start the run.

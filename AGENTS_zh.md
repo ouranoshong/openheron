@@ -60,7 +60,7 @@
 > 文件规格、加载与优先级、热更新，以及依赖铁律。**正文讲的是代码现状**；
 > `mcps/` 分区（§6.7）与住在工具旁边的档位（§6.6）**已实施**。★ **全局 deny** 里的
 > 前缀匹配（§6.3）跟着 deny 清单一起没了：「不被暴露」现在只由文件的 `allows:` 与 agent
-> 的 `disabled_tools` 两处说。
+> 的 `tools` 两处说。
 >
 > ★ 有一个目录不是文档组：**`sandbox-kit/`** 装着把 openheron 打包成沙箱 workload 的
 > Docker Sandbox Kit —— `openheron/`（workload：描述文件、内容配方、入口脚本），
@@ -155,7 +155,12 @@
 - **归档优先于呈现** —— SSE sink 断裂后要停止渲染但继续消费事件流，否则 `Outcome.Intermediates` 不完整，历史会缺。
 - **缺省档位是 `ask`** —— 没人点名的工具一律要问；例外是那些不用点头就能跑的：
   文件在自己的 `allows:` 里点名的，以及代码知道的那些内置只读工具。★「不被暴露」现在
-  只在**两处**说 —— 文件自己的允许清单，和 agent 的 `disabled_tools`。**没有全局 deny 了。**
+  只在**两处**说 —— 文件自己的允许清单，和 agent 的 `tools` 清单。**没有全局 deny 了。**
+- ★ **agent 自己的几张清单都是白名单，缺省什么都没有。** `tools:` 说这个 agent 能用哪些
+  工具，`mcps:` 说它挂载哪些服务器，`skills:` 说它能加载哪些技能 —— 键不写与写空列表是
+  同一件事。★ **档位表是另一个问题，而且是共享的**：文件的 `allows:` 说什么不用点头，
+  agent 的 `tools` 说什么这个 agent 能用。★ 旧的 `disabled_tools` 键会被**拒绝**，
+  而且提示说清两个方向正好相反 —— 只把键名一改，就把黑名单变成了白名单。
 - 改配置语义前先读 `docs/config-design.md`；改接口前先读 `docs/api-design.md`；
   新增 `/v2` 接口读 `docs/api-v2-design.md`；动前端读 `docs/frontend-design.md`；
   动测试环境（端口 / 隔离目录）读 `docs/frontend-design.md` §11.2 与
@@ -260,17 +265,16 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
   才能触发审批。那是模型的自由，不是代码回归；脚本会重试，全都不触发时
   **明确报错**，不伪装成接线有问题。别用重试次数掩盖它。
 - ★ **`smoke:hitl` 有一个前置条件，缺了它会 100% 失败（不是「抖」）**：
-  **真正调工具的那个 agent**，其 `write_file` 必须落在 `ask` 档（既没被它自己文件的
-  `allows:` 点名，也没被它自己的 `disabled_tools` 禁用）—— 否则模型根本调不出那个工具，
-  自然没有审批可触发。
-  ★ 别盯着 `main`：出厂配置里 `main` 确实写着
-  `disabled_tools: [write_file, edit_file, execute]`，但它只做编排，会把活**委派**给
-  `task`，而 `task` 的 `write_file` 在 `ask` 档 —— 审批照样触发。
+  **真正调工具的那个 agent**，其 `write_file` 必须落在 `ask` 档（没被它自己文件的
+  `allows:` 点名）**而且**在那个 agent 自己的 `tools:` 清单里 —— 否则模型根本调不出那个
+  工具，自然没有审批可触发。
+  ★ 别盯着 `main`：出厂配置里 `main` 拿到的是读取类工具与委派工具，
+  但它只做编排，会把活**委派**给 `task`，而 `task` 的 `write_file` 在 `ask` 档 —— 审批照样触发。
   2026-10-29 实测的事件流：`TOOL_CALL_START name=task`（子 agent 是以工具形态被调的），
   随后 `TOOL_CALL_START name=write_file subagentRunId=task`，
   中断的 `subagentRunId` 也是 `task`。
   要确认某档是否可达，看**每个** agent 的生效工具表：
-  `curl -s :18099/v2/agents | grep -A3 disabledTools` 与
+  `curl -s :18099/v2/agents | grep -A3 tools` 与
   `curl -s :18099/v2/agents/task`（里面 `effectiveTools` 会给出 tier 与 reason）。
   ★ `.openheron/` 是**本地未跟踪**的配置，改它会影响你自己的真实 agent
   （放开 `write_file` 意味着那个 agent 真能写文件）—— 要改先问自己一句。

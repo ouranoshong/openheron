@@ -94,7 +94,7 @@ builds its own model instance from its own `model:`.
 | Switch | Location | Effect |
 |---|---|---|
 | `agent.max_depth` | `server/config.yaml` | max nesting depth (the entry is level 0). The default `1` = only the entry agent may delegate |
-| `disabled_tools` | `agents/*.md` | affects this one agent only. The tier table itself is **shared** — the narrowing is per agent |
+| `tools` | `agents/*.md` | the tools this agent may use. **Absent = none** — the list is the whole answer. The tier table itself is **shared**; this list is per agent |
 
 A declared topology that exceeds `max_depth` is **an error at startup**; it is never
 silently truncated.
@@ -110,13 +110,14 @@ silently truncated.
 
 "Who may write" is controlled by **two** layers, and neither may be missing:
 
-- **Outer**: the tier table — a tool the configuration does not name **asks**;
-- **Inner**: each agent's own `disabled_tools` — affects that one agent only.
+- **The tier table**: a tool nobody names **asks**; a file's `allows:` names the
+  exceptions, and that list is **shared** by every agent;
+- **Each agent's own `tools`**: the tools *that* agent may use at all.
 
-★ The two layers are stored separately and never merged — merging them would
-  throw away "who narrowed what". The outer layer is the one guarantee a
-  sub-agent **cannot relax**: `disabled_tools` can only remove a tool, never
-  hand one back.
+★ The two are stored separately and never merged — merging them would throw
+  away "who narrowed what". ★ A file's `allows:` only **adds** to the tier
+  table; an agent's `tools` list can only take a tool away, never hand one
+  back.
 
 ### Parallel delegation
 
@@ -162,7 +163,9 @@ file does not name.
   translation happens once, where the tool is mounted.
 
 ★ **"Not exposed" is said in exactly two places**: a tool's own `allows:` list
-  (what runs without a nod) and an agent's `disabled_tools` (what that agent
-  may not touch at all). There is no third, global list to keep in sync.
+  (what runs without a nod) and an agent's `tools` list (what that agent may
+  use at all). There is no third, global list to keep in sync.
 
-★ To narrow down **one** agent's capabilities, use its own `disabled_tools`.
+★ To narrow down **one** agent's capabilities, use its own `tools` list. ★ And
+  to widen them — to let an agent write and run commands unattended — name the
+  tools in that same list, or in the file that provides them.

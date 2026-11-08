@@ -65,7 +65,7 @@ one. The measured internal import graph:
 | Layer | Packages | Internal dependencies |
 |---|---|---|
 | **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `agentkit/fsx` `llm/common` `webui` | none |
-| **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` none; `storage`→`contract`; `kb`→`obs`,`persist`; `spec`→`obs`,`decl`,`kb`,`persist`; `emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
+| **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` none; `storage`→`contract`; `kb`→`obs`,`persist`; `spec`→`obs`,`decl`,`templates`,`persist`; `emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
 | **L2** | `agentkit/build` `agentkit/run` `storage/filestore` `storage/memarbit` `transport` `llm` `initcfg` | see architecture.md §2 |
 | **L3** | `api` | almost all of them |
 
@@ -100,12 +100,27 @@ regression.
 structs and imports no other package; `agentkit/spec` holds the behaviour (loading,
 validation, reloading, writing).
 
+★ **The vocabulary the two halves share lives in `decl` too, and that is a
+dependency-direction fact, not a convenience.** The built-in tool names
+(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:291`) are read by **both** ends:
+the loader checks the names an agent's `tools:` list mentions against them, and the
+builder refuses a provider that claims one of them (`reservedToolNames`,
+`agentkit/build/tools.go:75`). Neither end may import the other — the loader sits
+below the builder — so the list cannot live in either of them: it lives **below both**,
+in the leaf package. ★ A second copy would be two lists that drift, and the drift
+would read as "that tool does not exist".
+
 ### 2.2 Do not duplicate assembly logic in the API layer
 
 When you need "the effective tool table of some agent", let `agent.Builder` expose a
 read-only query. **Do not** recompute `Table.Blocked` / `Policy.TierOf` in the API
 layer. The reason is plain: recomputation drifts — change the tier table once and the
 API's answer and the runtime's answer stop agreeing.
+
+★ **The two answer different questions, and the API layer must keep them apart.**
+`Policy.TierOf` answers "does this tool need a human?" and is the **same for every
+agent**; `Table.Blocked` answers "may this agent use it at all?" and is **per agent**.
+Recomputing either one is the same mistake twice.
 
 ## 3. Development recipes
 
@@ -114,7 +129,7 @@ API's answer and the runtime's answer stop agreeing.
 `agentkit/build/nettools.go` is the complete worked example, using `web_search`.
 
 1. **Implement the provider.** A tool provider is the `toolProvider` interface at
-   `agentkit/build/tools.go:19`:
+   `agentkit/build/tools.go:20`:
 
    ```go
    type toolProvider interface {
@@ -130,46 +145,52 @@ API's answer and the runtime's answer stop agreeing.
    Note that `Provide` returns a **batch** — one provider may supply several tools.
 
 2. **Register it.** Add your provider to `defaultToolRegistry` at
-   `agentkit/build/tools.go:35`. The position determines the order, and it also
+   `agentkit/build/tools.go:36`. The position determines the order, and it also
    determines how optional and required providers are told apart.
 
 3. **Optionality is decided by `Optional()`, not by returning an error.** A provider
    with `Optional() == true` logs a Warn and is skipped when it fails
-   (`tools.go:89`) — a missing API key must not stop the whole service from starting.
+   (`tools.go:101`) — a missing API key must not stop the whole service from starting.
    ★ But note that this Warn is the **only** notice: the tool silently does not enter
    the table, and the user will only notice that "this feature seems to be missing".
    Think hard about whether that Warn is enough when adding an optional provider.
 
 4. **The gate works on its own.** `agentkit/build/gate.go` filters the tool table with
-   the agent's own `disabled_tools` and `mcps:` list, and wraps **every tool the allow
-   list does not name** behind an approval. ★ The default tier is `ask`, so the
-   exceptions are the named ones: the built-in tools the code knows
-   (`agentkit/build/tools.go:61`) and the ones a file's own `allows:` lists. You write
-   no permission code.
+   the agent's own `tools:` allow-list — the list that says which tools the agent may
+   use at all — and wraps **every tool the tier table does not name** behind an
+   approval. ★ The two are **different questions**: the allow-list is per agent, the
+   tier table is shared by every agent. ★ The default tier is `ask`, so the exceptions
+   are the named ones: the built-in tools the code knows (`agentkit/build/tools.go:62`)
+   and the ones a file's own `allows:` lists. You write no permission code.
 
-5. **Do not collide with a reserved name.** `reservedToolNames` at `tools.go:69` lists
-   `ls` `read_file` `write_file` `edit_file` `glob` `grep` `execute` `task`
-   `write_todos` `skill`. A collision fails at `Build` time.
+5. **Do not collide with a reserved name.** The names live in `decl.BuiltinToolNames`
+   (`agentkit/spec/decl/decl.go:291`): `ls` `read_file` `write_file` `edit_file` `glob`
+   `grep` `execute` `task` `write_todos` `skill`. A collision fails at `Build` time.
+   ★ **They live in `decl` and not in the build package because both halves need
+   them**: the builder refuses a provider that claims one of these names
+   (`reservedToolNames`, `agentkit/build/tools.go:75`), and the loader checks the
+   names an agent's `tools:` list mentions. Neither may import the other, so the list
+   lives below both.
    The tool name is also the key in the tier table — a collision would point the
    table at the wrong tool.
 
    ★ **A name that comes from a server is namespaced.** An MCP tool is exposed under
-   `decl.MCPToolPrefix` (`agentkit/spec/decl/decl.go:308`) and
-   `decl.MCPSeparator` (`agentkit/spec/decl/decl.go:317`), so the agent's table
+   `decl.MCPToolPrefix` (`agentkit/spec/decl/decl.go:373`) and
+   `decl.MCPSeparator` (`agentkit/spec/decl/decl.go:382`), so the agent's table
    narrows a whole server with a prefix instead of a list of names. ★ The composed
-   name is never parsed back: `Table.Blocked` (`agentkit/build/policy.go:146`)
+   name is never parsed back: `Table.Blocked` (`agentkit/build/policy.go:130`)
    matches prefixes, so nothing has to split a name to learn which server it
    belongs to.
 
-6. **A collision across providers also fails**: `validateBatch` at `tools.go:106` tracks
+6. **A collision across providers also fails**: `validateBatch` at `tools.go:118` tracks
    names in `seen`, so two providers offering the same tool name fail at startup
    instead of one silently overwriting the other.
 
 #### The MCP provider
 
 `mcpToolProvider` is registered like any other provider — `defaultToolRegistry`
-at `agentkit/build/tools.go:35` — and it answers the same `toolProvider` contract
-at `agentkit/build/tools.go:19`. Four things about it are not generic:
+at `agentkit/build/tools.go:36` — and it answers the same `toolProvider` contract
+at `agentkit/build/tools.go:20`. Four things about it are not generic:
 
 - **The client outlives the batch.** ★ The batch is built once per snapshot:
   `buildHeavy` runs under a `sync.Once` (`agentkit/build/snapshot.go:41`), so a
@@ -282,7 +303,7 @@ definition — there is no `enabled` key.
 - **Declared** by the constant `DirMCP = "mcps"` (`agentkit/spec/config.go:25`) and the
   `Categories` entry (`agentkit/spec/config.go:66`), which is editable, hot and
   `.yaml`.
-- **Loaded** by `loadMCP` (`agentkit/spec/load.go:269`): one file, one server.
+- **Loaded** by `loadMCP` (`agentkit/spec/load.go:306`): one file, one server.
 - ★ **"Hot" for this partition means the client is rebuilt.** The declaration is the
   server's identity, so a changed declaration means a changed server: the old client
   is torn down and a new one is started (`agentkit/build/mcpmanager.go:215`), keyed on
@@ -292,7 +313,7 @@ definition — there is no `enabled` key.
   `validateFileName` (`agentkit/spec/write.go:88`) accepts only a `<server>.yaml` whose
   name is a valid server name (`agentkit/spec/write.go:107`) — the file's name is the
   server's name, and the server's name is the namespace segment of that server's tools.
-- **The scaffold** is `Skeleton` (`agentkit/spec/write.go:159`), and the `mcps/` branch
+- **The scaffold** is `Skeleton` (`agentkit/spec/write.go:161`), and the `mcps/` branch
   (`agentkit/spec/write.go:186`) writes a **loadable** file: ★ a file under `mcps/`
   **defines** a server, so a file that cannot be parsed is not a server that is off, it
   is a configuration that does not load. The optional fields are written as comments,
@@ -333,6 +354,51 @@ Editing `agents/*.md` is enough; no code change is needed. But keep in mind:
 
 The assembly logic is in `agentkit/build/assemble.go`; the validation logic is in
 `agentkit/spec/load.go`.
+
+#### The three lists on an agent
+
+`tools:`, `skills:` and `mcps:` are **allow-lists**, and **all three default to
+none** — an absent key and an empty list mean the same thing, and they mean "nothing".
+
+| Key | What it names | Absent means |
+|---|---|---|
+| `tools` | the tools the agent may use — the **exposed** names, the ones the model sees | no tool |
+| `skills` | the skills the agent may load — the folders under `skills/` | no skill |
+| `mcps` | the MCP servers the agent **mounts** — each one starts a child process | no server |
+
+★ **Do not write `disabled_tools`.** It was the **opposite** of `tools` — one removed
+tools, the other names them — so the loader **refuses** the file
+(`agentkit/spec/load.go:96`) rather than renaming the key: renaming it alone would
+have turned a blacklist into a whitelist without saying so. The message says which way
+round the two mean. ★ **There is no alias**: an alias that still worked with the old
+meaning would keep the blacklist alive, and an alias that worked with the new one would
+flip the agent's tool set on the user's behalf.
+
+★ **The tool set is the snapshot's, and the list narrows it.** The snapshot's tools are
+one set for the whole snapshot; each agent's `tools:` list removes what that agent may
+not use (`agentkit/build/topology.go:72` `specTable`), and the model never sees a tool
+the list removed. ★ **There is no "nothing to do" shortcut**
+(`agentkit/build/policy.go:145`): an **empty** list removes **everything**.
+
+★ **MCP has two levels.** `mcps:` says which servers are **mounted**; `tools:` says
+which of that server's tools the agent **sees** — `mcp__<server>__<tool>`, or the
+pattern `mcp__<server>__*`. ★ `mcps: [github]` without `mcp__github__*` in `tools:`
+starts the server and shows the agent nothing. ★ A contradiction between the two is a
+**load-time error** (`agentkit/spec/load.go:643` `checkAgentMCPNames`): naming
+`mcp__github__*` while `mcps:` leaves `github` out can never match.
+
+#### The two notices
+
+Both are **notices**, not errors — the configuration is legal, it just does not say
+what the author meant (`agentkit/spec/load.go:540` `noticeAgentTools`):
+
+| Notice | What it means | What to do |
+|---|---|---|
+| `tools` names a tool that does not exist | the built-in tools are the ones in `decl.BuiltinToolNames`, and a provider's tool exists only when its file under `tools/` is written | check the spelling; write the `tools/` file if the provider is missing |
+| `tools` names the `skill` tool but `skills` is empty | the agent can ask for a skill and there is none to load | name the skill in `skills:`, or drop `skill` from `tools:` |
+
+★ **An `mcp__*` name is skipped by the check**: a server's tools are discovered at
+runtime, so a name it does not have yet is not a typo.
 
 ### 3.5 Adding a vendor / model
 
@@ -1058,12 +1124,14 @@ code regression; the script retries, and when nothing triggers it **reports an e
 explicitly** rather than pretending the wiring is broken.
 ★ It has a **precondition**: the agent that actually calls the tool must have
 `write_file` in the `ask` tier — ★ that is the **default**: no file names it in an
-`allows:` list, and the agent's own `disabled_tools` does not disable it. With the tool
-out of reach there is no approval to trigger.
-★ Do not look at `main` for this. The factory configuration does give `main`
-`disabled_tools: [write_file, edit_file, execute]`, but `main` only orchestrates: it
-**delegates** the work to `task`, and `task`'s `write_file` is in the `ask` tier — so
-the approval fires anyway. Measured event stream:
+`allows:` list — **and** the agent's own `tools:` list must name it, or the tool is
+not in the agent's tool set at all. With the tool out of reach there is no approval to
+trigger.
+★ Do not look at `main` for this. The factory configuration gives `main`
+`tools: [ls, read_file, glob, grep, task, write_todos]` — the readers and the
+delegation tool, no writers — but `main` only orchestrates: it **delegates** the work
+to `task`, and `task`'s `tools:` list names `write_file`, which is in the `ask` tier —
+so the approval fires anyway. Measured event stream:
 `TOOL_CALL_START name=task` (a sub-agent is invoked as a tool), then
 `TOOL_CALL_START name=write_file subagentRunId=task`, and the interrupt's
 `subagentRunId` is `task` too.
@@ -1183,7 +1251,12 @@ someone measures that the default misses something.
 |---|---|
 | Startup reports a missing configuration | The `config root` line in the startup log — it prints the root actually used and the project root |
 | A config change does not take effect | Is that partition hot-reloaded? `llm/` `agents/` `tools/` `mcps/` are hot; `server/` and `skills/` need a restart |
-| An agent cannot call a tool | `GET /v2/agents/:agentId` for the effective tool table; then read the tool's `reason` — `disabled_tools`, `mcps`, or the default `ask` tier, which asks |
+| Startup fails with `disabled_tools` was renamed to `tools` | ★ The two mean **opposite** things — one removed tools, the other names them. Delete `disabled_tools` and list the tools the agent should have in `tools:` (`agentkit/spec/load.go:96`) |
+| Startup fails with `names the MCP tool` … `but does not mount the server` | ★ Mounting and visibility are two levels: add the server to `mcps:`, or drop the tool from `tools:` (`agentkit/spec/load.go:643`) |
+| A notice says `tools` names a tool that does not exist | The built-in tools are the ones in `decl.BuiltinToolNames` (`agentkit/spec/decl/decl.go:291`); a provider's tool exists only when its file under `tools/` is written |
+| A notice says `tools` names the `skill` tool but `skills` is empty | The configuration is legal but self-contradictory: name the skill in `skills:`, or drop `skill` from `tools:` |
+| An agent cannot call a tool | `GET /v2/agents/:agentId` for the effective tool table; then read the tool's `reason` — `tools`, or the default `ask` tier, which asks |
+| An agent has **no** tools at all | ★ The tool list is an allow-list and it **defaults to none**: an absent `tools:` means no tool. List the tools the agent should have |
 | A leftover `policy/` directory still seems to carry your old tiers | The partition was retired: the tiers live in the files that provide the tools, and the default tier is `ask`. The startup log says so — the notice lands in `deferred` |
 | `reasoning` seems to do nothing | Is that tier declared in the model profile? Undeclared means silently ignored |
 | An approval cannot resume | Is the checkpoint still there? Check `pendingApprovals` on `/v2/sessions/:id` |

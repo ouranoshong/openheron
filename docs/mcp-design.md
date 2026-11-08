@@ -87,12 +87,11 @@ The tool name is the key of every table that decides what a tool may do:
 | `Builder.EffectiveTools` | `agentkit/build/introspect.go:47` | what the API reports |
 
 ★ **Every one of those lookups is a name lookup, and the name is the whole contract.**
-`TierOf` is one map lookup; `Blocked` is a map lookup plus two prefix scans
-(`agentkit/build/policy.go:150`, `:158`). ★ The two prefix scans are the ones MCP
-brought: the agent's `mcps:` list removes a **namespace prefix**, and an agent's
-`disabled_tools` accepts a **trailing `*` pattern** (§4). Everything else is an exact
-match — and the tier of an MCP tool is answerable **before the server is even up**
-(§7.3).
+`TierOf` is one map lookup; `Blocked` is a map lookup plus one prefix scan
+(`agentkit/build/policy.go:130`). ★ The prefix scan is the one MCP brought: an agent's
+`tools` accepts a **trailing `*` pattern**, which is how a whole namespace is named
+(§4). Everything else is an exact match — and the tier of an MCP tool is answerable
+**before the server is even up** (§7.3).
 
 The gate itself needs no permission code — it reads the tier and acts:
 
@@ -108,7 +107,7 @@ The gate itself needs no permission code — it reads the tier and acts:
 | Partition | Where | Notes |
 |---|---|---|
 | `tools/` | `agentkit/spec/config.go:57` | one file per tool, **name is a whitelist** (`agentkit/spec/load.go:165`), hot |
-| `agents/` | `agentkit/spec/config.go:47` | frontmatter, incl. `disabled_tools` and `mcps:`, hot |
+| `agents/` | `agentkit/spec/config.go:47` | frontmatter, incl. `tools`, `skills` and `mcps`, hot |
 | `mcps/` | `agentkit/spec/config.go:66` | one file per server, **the file's presence is the definition**, hot |
 
 ★ **There is no `policy/` partition.** The tiers live with the tools they are about
@@ -259,10 +258,10 @@ rule of its own:
 Without it, a built-in tool could claim the namespace and a prefix rule written for MCP
 would quietly cover it.
 
-## 4. Prefix matching in an agent's `disabled_tools`
+## 4. Prefix matching in an agent's `tools`
 
-★ An agent's `disabled_tools` accepts a **prefix pattern** in addition to an exact
-name.
+★ An agent's `tools` accepts a **prefix pattern** in addition to an exact name, and it
+is an **allow-list**: a pattern names what the agent **gets**.
 
 | Entry | Matches |
 |---|---|
@@ -278,26 +277,26 @@ has **not offered yet**.
 
 ★ **There is no global list, and there is no third tier.** ★ "Not exposed" is said in
 exactly **two** places: a file's own **`allows:`** — which says what that file offers
-without a nod — and an agent's **`disabled_tools`**, which says what that agent does
-not get at all. A third, global list would be one more place to keep in sync, and it
-was the worst of the three: the only one that had to name the tools in the **exposed**
-vocabulary while the tools' own files speak theirs. ★ A tool an agent may not use
-**keeps its own tier** and says why in its `reason`
-(`agentkit/build/introspect.go:111` `verdictOf`) — it is **this agent** that cannot
-have it, not that the tool is illegal.
+without a nod — and an agent's **`tools`**, which says what that agent may use at all.
+A third, global list would be one more place to keep in sync, and it was the worst of
+the three: the only one that had to name the tools in the **exposed** vocabulary while
+the tools' own files speak theirs. ★ A tool an agent may not use **keeps its own tier**
+and says why in its `reason` (`agentkit/build/introspect.go:112` `verdictOf`) — it is
+**this agent** that cannot have it, not that the tool is illegal.
 
-★ The narrowing that is left is the statement that is about a **namespace** rather than
-about a tool — "this agent gets no MCP tools" — and a prefix is what names a
-namespace.
+★ **The default is `none`**, so the list is the whole answer: a tool the agent does not
+name is not in its tool set. ★ A pattern is what names a whole **namespace** —
+`mcp__github__*` is every tool of one server, and that is the unit an agent usually
+thinks in.
 
 ### 4.1 The syntax rules
 
 | # | Rule | Reason |
 |---|---|---|
 | 1 | Only a **trailing** `*` is a prefix pattern; a `*` anywhere else is a **load-time hard error** | `mcp*foo` looks like a wildcard and is not one — a rule whose reach differs from what it reads as is a silent mismatch |
-| 2 | A lone `*` is a **load-time hard error** | `disabled_tools: ["*"]` would take the agent's own tools away as well; that is a decision to write out, not a wildcard |
+| 2 | A lone `*` is a **load-time hard error** | `tools: ["*"]` is a way of saying "everything" in a list whose whole point is to say what is there — and an absent list already means nothing, so the wildcard would be the one entry that means the opposite of what it reads as |
 | 3 | The part before `*` must not be empty | rule 2 |
-| 4 | An exact entry and a prefix entry are **equivalent** — any match removes the tool for that agent | there is no tier to choose here: the tool is simply not there for that agent |
+| 4 | An exact entry and a prefix entry are **equivalent** — any match gives the agent the tool | there is no tier to choose here: the tool is either in that agent's set or it is not |
 
 ### 4.2 The prefix syntax adds no tier
 
@@ -309,18 +308,17 @@ allow (if the file's allows list names it) → ask (everything else)
 ```
 
 ★ **A tool an agent may not use keeps its own tier.** The tier is about the **tool**;
-the narrowing is about the **agent**. ⇒ the tool is still `allow` or `ask` in the
-table, and the agent's narrowing is reported beside it, as the `reason`
-(`agentkit/build/introspect.go:111` `verdictOf`, and `agentkit/build/introspect.go:36`
-`reasonOf` — the only two reasons are `disabled_tools` and `mcps`). ★ A third tier
-would have to say "illegal", and nothing here is illegal: a tool the agent may not
-use is simply not in that agent's tool set.
+the list is about the **agent**. ⇒ the tool is still `allow` or `ask` in the table, and
+the agent's list is reported beside it, as the `reason`
+(`agentkit/build/introspect.go:112` `verdictOf`, and `agentkit/build/introspect.go:36`
+`reasonOf` — there is now **one** reason, `tools`). ★ A third tier would have to say
+"illegal", and nothing here is illegal: a tool the agent may not use is simply not in
+that agent's tool set.
 
 ★ The prefix syntax only decides **whether an entry matches a name** — it adds no tier,
-and it reorders none. ★ **And the two narrowings are independent**: the agent's `mcps:`
-list is matched first (`agentkit/build/policy.go:150`), so a server the agent does not
-use says `mcps` even when the tool is in its `disabled_tools` too — the server is not
-there at all, and the finer rule would have said nothing about it.
+and it reorders none. ★ **And the mounting is a separate level**: a server the agent
+does not mount has no tools to block, and one it mounts but does not name is blocked by
+this very list. So there is nothing to order between two narrowings — there is one.
 
 ★ **The counts are not part of this.** The caps — the depth and the retry count — live
 in `server/config.yaml`, and they hold no tool names, so nothing about them is a
@@ -330,7 +328,7 @@ matching rule.
 
 | Place | Where it is written | Meaning |
 |---|---|---|
-| an agent's `disabled_tools` | `agentkit/build/topology.go:70` | this agent does not get these tools |
+| an agent's `tools` | `agentkit/build/topology.go:73` | this agent may use these tools, and nothing else |
 
 ★ It speaks in **exposed** names (`mcp__github__delete_repo`), because that is what the
 tool table looks up. The per-file tiers do not (§7.3): a file speaks its own vocabulary,
@@ -338,10 +336,10 @@ and the provider translates.
 
 ### 4.4 What it costs
 
-★ A prefix rule is a **blunt instrument**: `disabled_tools: ["mcp__*"]` takes every MCP
-tool away from that agent. That is usually the intent, but it is one line, and it is easy
-to write by accident. A rule that names a single server (`mcp__github__*`) is the one
-worth reaching for first.
+★ A prefix rule is a **blunt instrument**: `tools: ["mcp__*"]` gives that agent every MCP
+tool of every server. That is usually the intent, but it is one line, and it is easy to
+write by accident. A rule that names a single server (`mcp__github__*`) is the one worth
+reaching for first.
 
 ## 5. The `mcps/<server>.yaml` partition
 
@@ -401,8 +399,8 @@ server. See `docs/config-design.md` §6.6.
 
 ★ **There is no third list.** "Not exposed" is said in exactly two places: this file's
 own **`allows:`** list, which names the tools that run without a nod, and an agent's
-**`disabled_tools`** (§4.2). ★ The file's `tools:` is a **filter**, not a tier: it says
-what the file offers at all (§5.3).
+**`tools`** (§4.2). ★ The file's `tools:` is a **filter**, not a tier: it says what the
+file offers at all (§5.3).
 
 ★ `timeout` is a **lenient** duration: a wrong value degrades to the default and is
 recorded in `deferred`, exactly like `debounce` and `start_timeout`. A wrong timeout
@@ -459,13 +457,12 @@ reason: the common case is **one** place. Write the server file, and every agent
 has not narrowed its list gets it.
 
 ★ **Where that narrowing happens is not free**, because the tool set is **one set for
-the whole snapshot** (§1.1). The answer is in §11.3: the agent's **table**, where
-`disabled_tools` already narrows the tools.
+the whole snapshot** (§1.1). The answer is in §11.3: the agent's **table**, where its
+`tools` list already decides what it may use.
 
-★ **A sub-agent has a list of its own, like its own `disabled_tools`.**
-`decl.SubAgentSpec` carries `DisabledTools` and `Skills` of its own
-(`agentkit/spec/decl/decl.go:594`), so it carries an `mcps:` list of its own too
-(`agentkit/spec/decl/decl.go:604`). ⇒ the list is read from **the agent that is
+★ **A sub-agent has a list of its own, like its own `tools`.** `decl.SubAgentSpec`
+carries `Tools`, `Skills` and `MCPServers` of its own
+(`agentkit/spec/decl/decl.go:653`), so the list is read from **the agent that is
 running** — the root, or the sub-agent the turn is in — and not from the root's list.
 
 ★ **A name that does not exist is a load-time hard error.** An agent that lists
@@ -521,8 +518,8 @@ other missing value.
 things: `read_file` reads the project, and `execute` runs a command in this
 environment. An MCP server that sees the environment sees nothing the agent could not
 already see. The difference is only that `execute` is not in the `allows:` list and
-an MCP tool may not be. ⇒ If that asymmetry matters to you, put `mcp__*` in that
-agent's `disabled_tools` (§4).
+an MCP tool may not be. ⇒ If that asymmetry matters to you, leave `mcp__*` out of that
+agent's `tools` (§4).
 
 ★ The configuration's `env:` does not **replace** the inherited environment, it
 **layers on top** of it. A configuration with an empty `env:` still produces a child
@@ -599,7 +596,7 @@ That is the same shape an MCP server's file has for the one question they share:
 of these tools run without a nod*. ★ Their `allows:` is **additive** — it joins the
 code's default list (`agentkit/build/tools.go:61`: the readers `ls` `read_file` `glob`
 `grep`, the delegation tools `task` `write_todos`, the skill reader `skill`) and cannot
-remove a name. Widening is the file's job; narrowing is an agent's `disabled_tools`.
+remove a name. Widening is the file's job; narrowing is an agent's `tools`.
 See `docs/config-design.md` §6.6.
 
 #### `tools/kb.yaml`
@@ -973,7 +970,7 @@ says "every tool from this server asks first" (§7.3).
 ★ **A tool's tier is written in the tool's own file, in that file's own vocabulary.**
 There is **no global list** any more (§4): the **default** is `ask`, and the exceptions
 are named by the file that provides the tool — so "not exposed" is said in exactly two
-places, a file's own `allows:` and an agent's `disabled_tools`:
+places, a file's own `allows:` and an agent's `tools`:
 
 ```yaml
 # .openheron/mcps/github.yaml
@@ -993,10 +990,11 @@ invisible until the tool behaves differently than the file says.
 | Where | Vocabulary | Decides |
 |---|---|---|
 | a file's `tools` / `allows` | **the file's own** names (`create_issue`) | which of the server's tools to offer, and which of those need no nod |
-| an agent's `disabled_tools` | exposed names | this agent does not get these tools |
+| an agent's `tools` | exposed names | this agent may use these tools, and nothing else |
 
-★ **The order**: the file that provides the tool first, then the agent's narrowing —
-which removes the tool for that agent and nothing else.
+★ **The order**: the file that provides the tool first, then the agent's list — which
+decides what that agent sees and nothing else. ★ **Mounting comes before both**: a server
+the agent does not mount has no tools for either rule to talk about.
 
 ★ **A file has no tier of its own beyond that one key**, and that is deliberate: "not
 exposed" is already the `allows:` list's job. ★ And there is **no third list** — the
@@ -1048,7 +1046,8 @@ new tier from the next turn on. The one thing the reload has to get right is the
 ★ **The filesystem tools have a file too** — `tools/filesystem.yaml` — so their tiers are
 written down instead of only implied. ★ It is a **tuner**, not a switch: the middleware
 mounts those tools unconditionally, so the file widens their exceptions and an agent's
-`disabled_tools` narrows them (`agentkit/build/tools.go:61` is the default it adds to).
+`tools` list decides what it may use (`agentkit/build/tools.go:61` is the default the
+file adds to).
 See `docs/config-design.md` §6.6.
 
 ### 7.4 What the run ledger says
@@ -1344,7 +1343,7 @@ snapshots, and what replaces a client is a changed **declaration** (§6.6).
 | View | the configuration view lists the configured servers | `api/v2_mcps_test.go` `TestV2ConfigListsTheConfiguredServers` |
 | View | every configured server appears exactly once, and a server the agent does not use is `unused` with no tool rows | `agentkit/build/mcpstatus_test.go` `TestEveryConfiguredServerAppearsExactlyOnce`, `TestAServerTheAgentDoesNotUseIsUnusedAndHasNoToolRows` |
 | View | an unreachable server reports the error and keeps its last listing | `agentkit/build/mcpstatus_test.go` `TestAnUnreachableServerReportsTheErrorAndKeepsItsLastListing` |
-| View | the reason is `mcps` when the server is not in the list, and `disabled_tools` when the tool is | `agentkit/build/mcpstatus_test.go` `TestTheServerNarrowingIsTheReasonTheAgentsViewReports`, `TestTheReasonIsTheToolRuleWhenTheServerIsThere` |
+| View | the reason is `tools` — the agent's own list is what decides | `agentkit/build/mcpstatus_test.go` `TestTheAgentsViewReportsTheToolsListAsTheReason`, `TestTheReasonIsTheToolRuleWhenTheServerIsThere` |
 | View | the panel asks the manager, and the manager starts the server; the tier is the gate's own | `agentkit/build/mcpstatus_test.go` `TestThePanelAsksTheManagerAndTheManagerStartsTheServer`, `TestThePanelShowsTheTierTheGateWouldUse` |
 | Panel | the panel shows both names and the tier, and it says what it cannot reach | `web/test/e2e/mcps.spec.ts` |
 | Panel | the empty state says that no server is configured | `web/test/e2e/mcps.spec.ts` |
@@ -1366,7 +1365,7 @@ of the pipe, and a fake client would have proved neither.
 | Document | What changed |
 |---|---|
 | `docs/architecture.md` | the tool assembly path gains the MCP provider; the `mcps/` partition and the agent's `mcps:` key enter the configuration tables |
-| `docs/config-design.md` | the `mcps/` partition (§6.7) and the prefix pattern in an agent's `disabled_tools` (§6.3) become **implemented**; ★ and the **global deny list goes with the `policy/` partition** — §6.3 is now the whole tier model: no partition, no global list, `ask` as the default |
+| `docs/config-design.md` | the `mcps/` partition (§6.7) and the prefix pattern in an agent's `tools` (§6.3) are **implemented**; ★ and the **global deny list goes with the `policy/` partition** — §6.3 is now the whole tier model: no partition, no global list, `ask` as the default. ★ The agent's own lists are allow-lists and default to **none** |
 | `docs/user-manual.md` | how to configure a server, what the names in the interface look like, and what the `/mcps` command shows (§11.5) |
 | `docs/developer-manual.md` | the "adding a partition" recipe gains the `mcps/` case |
 | `README.md` | the HTTP reference gains `GET /v2/mcps` |
@@ -1448,9 +1447,11 @@ answer is not free: the tool set is **one set for the whole snapshot**
 (`agentkit/build/snapshot.go:40-45` — `buildHeavy` runs under a `sync.Once`), and every
 agent shares it.
 
-⇒ **The narrowing happens in the agent's table**, exactly where `disabled_tools` already
-narrows the tools (`agentkit/build/gate.go:33` — `Table.Filter` drops the tools from
-`runCtx.Tools` before the agent runs, so the model never sees them).
+⇒ **The narrowing happens in the agent's table**, exactly where its `tools` list
+already decides (`agentkit/build/gate.go:33` — `Table.Filter` drops the tools from
+`runCtx.Tools` before the agent runs, so the model never sees them). ★ And it has **no
+"nothing to do" shortcut**: the list is an allow-list, so an empty one removes
+everything.
 
 The table gets the agent's server list, and a server the agent does not use is denied
 **by its namespace prefix**:
@@ -1520,13 +1521,13 @@ not be cached for the tab's lifetime the way the agents list is
 | `servers[].tools[].exposedName` | the name the model sees (§3) |
 | `servers[].tools[].tier` | the gate's verdict for that name (§1.3) |
 | `servers[].tools[].status` | `available` — this agent reaches it; `skipped` — the server offered it and it was not exposed (§3.2); `blocked` — exposed, but this agent does not reach it |
-| `servers[].tools[].reason` | why it is not available: `disabled_tools`, `mcps`, `name_too_long` or `name_collision` |
+| `servers[].tools[].reason` | why it is not available: `tools`, `name_too_long` or `name_collision` |
 
-★ **The server narrowing is the coarser one, and it is reported first.** A tool can be
-blocked by two things at once — the server is not in this agent's `mcps:` list, **and**
-the tool is in its `disabled_tools`. ⇒ the reason is `mcps`: the server is not there at
-all, and the finer rule would have said nothing about it. ★ The other order would
-report a tool rule for a server the agent does not have.
+★ **There is one reason a tool is not reachable, and it is the agent's own list.** The
+old `mcps` reason is gone with the layer that produced it: a server the agent does not
+mount has no tools to block, so there is nothing for a coarser rule to say. ★ The
+`name_too_long` and `name_collision` reasons are a different kind of thing — they are
+about **the name** the server chose, not about the agent (§3.2).
 
 ★ **The configuration view lists the servers too.** `GET /v2/config` gains the
 configured servers' names and transports (`api/v2_introspect.go:392`): the
@@ -1561,9 +1562,9 @@ listing says what the server offers.
 table does not remove the tool* — not *the call would succeed*. A downed server's rows
 are the tools it had; whether the call would work is the server's status to say.
 
-★ **The reasons are tokens, the copy is the panel's.** `disabled_tools` and `mcps` are
-machine values, like the `code` of an error body; the English sentence that explains
-them belongs to the interface, not to the wire.
+★ **The reasons are tokens, the copy is the panel's.** `tools` is a machine value, like
+the `code` of an error body; the English sentence that explains it belongs to the
+interface, not to the wire.
 
 ### 11.5 The panel
 

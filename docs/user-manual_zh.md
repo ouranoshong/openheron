@@ -215,7 +215,8 @@ description: "task: the concrete executor. Writes files per the task order."
 model: deepseek/deepseek-flash
 max_iterations: 50
 reasoning: low
-disabled_tools: [kb_index]
+tools: [ls, read_file, write_file, edit_file, glob, grep, execute, write_todos]
+mcps: []
 summarize_at: 80%
 ---
 
@@ -234,9 +235,9 @@ frontmatter 可用键：
 | `max_iterations` | 工具循环的轮数上限 |
 | `summarize_at` | 这个 Agent 的上下文什么时候被**压缩**成摘要：模型窗口的 `80%`（默认）、绝对 token 数（`104858`）、或 `0` 表示永不 |
 | `subagents` | 它能委派给谁（见 §5） |
-| `disabled_tools` | **这个 Agent** 根本不能用的工具 —— 模型连看都看不见（MCP 的工具可以按前缀写 —— 见 §4.8） |
-| `skills` | 这个 Agent 能用的技能 —— `skills/` 下文件夹的白名单（**不写就是全部**，写空列表就是一个都没有） |
-| `mcps` | 这个 Agent 能用的 MCP 服务器 —— **不写就是全部**，写空列表就是一个都没有（见 §4.8） |
+| `tools` | **这个 Agent 能用的工具** —— 就是模型看见的那些名字。★ **不写就是一个工具都没有**：这张清单就是全部答案。MCP 的工具按组合名写，或按前缀写（`mcp__github__*`，见 §4.8） |
+| `skills` | 这个 Agent 能加载的技能 —— `skills/` 下文件夹的白名单。**不写就是没有技能**，写空列表也一样 |
+| `mcps` | 这个 Agent **挂载**的 MCP 服务器 —— **不写就是不起任何服务器**，写空列表也一样。挂载一个就是起一个子进程（见 §4.8） |
 | `temperature` / `max_tokens` | 采样参数 |
 | `reasoning` | 思考档位：`off` / `low` / `high` / `max`（名字由厂商档案定义） |
 
@@ -331,7 +332,7 @@ Agent。模型档案里留着的 `summarize_at` 不再被读，openheron 加载�
 | 位置 | 它决定什么 |
 |---|---|
 | 提供这个工具的那个文件里的 `allows:` 行 | 这个文件提供的哪些工具**不用**问；其余一律问 |
-| Agent 里的 `disabled_tools:` 行 | 这个 Agent 根本不能用的工具 —— 它们不在它的工具表里，模型连看都看不见 |
+| Agent 里的 `tools:` 行 | 这个 Agent **能用的**工具 —— 不在里面的工具就不在它的工具表里，模型连看都看不见 |
 
 ★ **没有全局清单。** 没有一份文件让你列出「哪些工具要问」，也没有一份让你列出
 「哪些工具谁都不能用」。文件点自己的例外，Agent 点自己的例外，两者从不合并 ——
@@ -350,7 +351,7 @@ allows: [write_file, edit_file, execute]
 ```
 
 ★ 那个文件是**调音旋钮，不是开关**：文件系统工具一直都在，所以它既不能加一个也不能删一个，
-只能挪它们的档位。**放宽是文件的活，收窄是 agent 的活**（`disabled_tools`）—— 因为收窄是
+只能挪它们的档位。**放宽是文件的活，收窄是 agent 的活**（`tools`）—— 因为收窄是
 按 agent 来的，而放宽是关于这个工具本身的决定。
 
 有自己文件的工具，在那个文件里说：
@@ -374,7 +375,7 @@ allows: [read_issue, list_issues]
 ```
 
 ★ **档位不是对工具的判决。** 一个 Agent 根本用不了的工具保留自己的档位，并在理由里
-说清：Agent 的生效工具表会报 `blocked`，理由是 `disabled_tools` 或 `mcps`（§4.8）。
+说清：Agent 的生效工具表会报 `blocked`，理由是 `tools`（§4.8）。
 没有第三档，也没有全局拒绝 —— 一个工具要么对这个 Agent 可用，要么压根不在它的
 工具表里。
 
@@ -526,17 +527,31 @@ mcps: [github]
 
 | `mcps:` 这个键 | 含义 |
 |---|---|
-| 不写 | **全部**已配置的服务器 |
+| 不写 | **不起**任何服务器 |
 | `[]` | **一个都没有** |
 | `[github]` | 正好这些服务器 |
 
-★ 子 Agent 有**自己**的名单，和它自己的 `skills`、`disabled_tools` 并排 —— 读的是
-正在跑的那个 Agent 的名单，不是根 Agent 的。
+★ 子 Agent 有**自己**的名单，和它自己的 `skills`、`tools` 并排 —— 读的是正在跑的
+那个 Agent 的名单，不是根 Agent 的。
 
-**第二根杠杆是 `disabled_tools`。** 它接受一个精确的工具名，和一个**结尾**的 `*` 前缀：
+★ **挂载不等于看得见。** `mcps:` 说哪些服务器被**拉起来**；`tools:` 说这个 Agent 看得见
+其中哪些工具。两处都要写：
 
 ```yaml
-disabled_tools: [mcp__github__*]
+---
+model: deepseek/deepseek-flash
+mcps: [github]                  # 把 github 拉起来
+tools: [ls, mcp__github__*]     # 再让这个 Agent 看见它的工具
+---
+```
+
+★ 点了 `mcp__github__*` 而 `mcps:` 排除了 `github`，是**启动错误**：那个前缀永远匹配不到
+东西，而一条永远匹配不到的规则是错误，不是规则。
+
+**第二根杠杆是 `tools`，而且它接受前缀。** 一个精确的名字，或一个**结尾**的 `*`：
+
+```yaml
+tools: [ls, read_file, mcp__github__*]
 ```
 
 - `mcp__github__*` —— `github` 这个服务器的全部工具。
@@ -544,8 +559,8 @@ disabled_tools: [mcp__github__*]
 - `mcp__github__create_issue` —— 就那一个工具。
 
 ★ **`mcp*foo` 和单独一个 `*` 会在启动时报错。** 只有**结尾**的 `*` 才是前缀模式，
-而单独一个 `*` 会把这个 Agent 自己的工具也一起端掉：一条作用范围和字面读法不一致的
-规则，就是一次无声的错配。
+而单独一个 `*` 等于在一张「说明有什么」的清单里写「什么都有」：一条作用范围和字面读法
+不一致的规则，就是一次无声的错配。
 
 ## 5. 多 Agent 与委派
 
@@ -910,7 +925,7 @@ curl -N -X POST localhost:8080/v2/run \
 混合打分没生效。配好 embedding 模型后重新 `kb index`。
 
 **Q：Agent 调不动 `write_file`？**
-两种可能：它被这个 Agent 的 `disabled_tools` 禁了 —— 那模型连看都看不见 —— 或者它
+两种可能：它不在这个 Agent 的 `tools:` 清单里 —— 那模型连看都看不见 —— 或者它
 本来就只是个 `ask` 档工具，而那张审批卡片没人答。查
 `GET /v2/agents/:agentId` 看生效工具表。默认 `main` 是禁用了
 `write_file`/`edit_file`/`execute` 的 —— 出厂配置里它只做编排。
@@ -920,7 +935,7 @@ curl -N -X POST localhost:8080/v2/run \
 
 **Q：模型看不见 MCP 服务器的工具？**
 打开 `/mcps`（见 §6.8）。这个 Agent 没用到的服务器写着 `unused`；够不着的工具写着
-`blocked`，括号里的理由会点名 `disabled_tools` 或 `mcps`。
+`blocked`，括号里的理由会点名 `tools` —— 这个 Agent 自己的清单没覆盖它。
 写着 `unreachable` 的服务器旁边带着出错原因，说清它为什么起不来。
 
 **Q：MCP 服务器起不来？**

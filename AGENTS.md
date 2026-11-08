@@ -66,7 +66,7 @@ one — change one and change the other.
 > the dependency iron rules. **Its body describes the code as it is**; the `mcps/` partition
 > (§6.7) and the tier that lives with the tool (§6.6) are implemented. ★ The prefix matching
 > in a **global deny** (§6.3) is gone with the deny list itself: "not exposed" is said by a
-> file's `allows:` and by an agent's `disabled_tools`.
+> file's `allows:` and by an agent's `tools`.
 >
 > ★ One directory is not a document set: **`sandbox-kit/`** holds the Docker Sandbox Kits that
 > package openheron as a sandbox workload — `openheron/` (the workload: descriptor, content
@@ -180,7 +180,14 @@ zero openheron dependencies, and importing `obs` would break that iron rule
 - **The default tier is `ask`** — a tool nobody names asks, and the exceptions are the tools
   that run without a nod: the ones a file names in its own `allows:` list, and the built-in
   readers the code knows. ★ "Not exposed" is said in exactly **two** places — a file's own
-  allow-list, and an agent's `disabled_tools`. There is no global deny any more.
+  allow-list, and an agent's `tools` list. There is no global deny any more.
+- ★ **An agent's own lists are allow-lists, and they default to nothing.** `tools:` says
+  which tools the agent may use, `mcps:` which servers it mounts, `skills:` which skills it
+  loads — an absent key and an empty list mean the same thing. ★ The **tier table** is a
+  separate question and it is shared: a file's `allows:` says what runs without a nod, and
+  an agent's `tools` says what that agent may use at all. ★ The old `disabled_tools` key is
+  **refused** with a message that says which way round the two are — the meaning is
+  opposite, so renaming it alone would have turned a blacklist into a whitelist.
 - Before changing configuration semantics, read `docs/config-design.md`; before changing
   an interface, read `docs/api-design.md`; before adding a `/v2` endpoint, read
   `docs/api-v2-design.md`; before touching the frontend, read `docs/frontend-design.md`; before
@@ -298,17 +305,16 @@ cd web && bun run smoke:hitl               # approval resume works end to end
   pretending the wiring is broken. Do not use retry counts to cover it up.
 - ★ **`smoke:hitl` has a prerequisite; without it the script fails 100% of the time (that is not
   "flaky")**: for **the agent that actually calls the tool**, its `write_file` must land in the
-  `ask` tier (not named in its own file's `allows:` and not disabled by its own
-  `disabled_tools`) — otherwise the model cannot call that tool at all, and no approval can
-  be triggered.
-  ★ Do not stare at `main`: the factory config does list
-  `disabled_tools: [write_file, edit_file, execute]` for `main`, but `main` only orchestrates and
-  **delegates** the work to `task`, whose `write_file` sits in the `ask` tier — the approval
-  still triggers. Observed event stream on 2026-10-29: `TOOL_CALL_START name=task` (the
-  sub-agent is invoked as a tool), then `TOOL_CALL_START name=write_file subagentRunId=task`;
-  the interrupted `subagentRunId` is `task` too.
+  `ask` tier (not named in its own file's `allows:`) **and** be in that agent's own `tools:`
+  list — otherwise the model cannot call that tool at all, and no approval can be triggered.
+  ★ Do not stare at `main`: the factory config gives `main` the readers and the delegation
+  tool, but `main` only orchestrates and **delegates** the work to `task`, whose `write_file`
+  sits in the `ask` tier — the approval still triggers. Observed event stream on 2026-10-29:
+  `TOOL_CALL_START name=task` (the sub-agent is invoked as a tool), then
+  `TOOL_CALL_START name=write_file subagentRunId=task`; the interrupted `subagentRunId` is
+  `task` too.
   To check whether a tier is reachable, look at **each** agent's effective tool table:
-  `curl -s :18099/v2/agents | grep -A3 disabledTools` and
+  `curl -s :18099/v2/agents | grep -A3 tools` and
   `curl -s :18099/v2/agents/task` (`effectiveTools` gives the tier and the reason).
   ★ `.openheron/` is **local untracked** configuration; changing it affects your own real
   agents (opening up `write_file` means that agent really can write files) — ask yourself

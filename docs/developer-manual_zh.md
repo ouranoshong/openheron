@@ -62,7 +62,7 @@ openheron/
 | 层 | 包 | 内部依赖 |
 |---|---|---|
 | **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `agentkit/fsx` `llm/common` `webui` | 无 |
-| **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` 无；`storage`→`contract`；`kb`→`obs`,`persist`；`spec`→`obs`,`decl`,`kb`,`persist`；`emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
+| **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` 无；`storage`→`contract`；`kb`→`obs`,`persist`；`spec`→`obs`,`decl`,`templates`,`persist`；`emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
 | **L2** | `agentkit/build` `agentkit/run` `storage/filestore` `storage/memarbit` `transport` `llm` `initcfg` | 见 architecture.md §2 |
 | **L3** | `api` | 几乎全部 |
 
@@ -92,11 +92,23 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
 **（二）声明与行为分离。** `agentkit/spec/decl` 只放纯结构体，不引任何其它包；
 `agentkit/spec` 放行为（装载、校验、重载、写入）。
 
+★ **两边共用的那套词汇也住在 `decl` 里，而这是依赖方向的事实，不是图方便。** 内置工具名
+（`decl.BuiltinToolNames`，`agentkit/spec/decl/decl.go:291`）被**两端**读：装载器拿它核对
+Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些名字的 provider
+（`reservedToolNames`，`agentkit/build/tools.go:75`）。两端互相不能引 —— 装载器在装配器
+下层 —— 所以这份清单不能住在其中任何一边：它住在**两边之下**，那个叶子包里。★ 抄一份
+就是两份会漂移的清单，而漂移读起来就是「那个工具不存在」。
+
 ### 2.2 别在 API 层复制业务装配逻辑
 
 需要读「某个 agent 的生效工具表」时，由 `agent.Builder` 暴露只读查询，
 **不要**在 API 层重算一遍 `Table.Blocked` / `Policy.TierOf`。
 理由很直接：重算就会漂移 —— 档位表改一次，API 的答案和运行时的答案就对不上了。
+
+★ **这两个回答的是不同的问题，而 API 层必须把它们分开。**
+`Policy.TierOf` 回答「这个工具要不要人点头？」，**每个 agent 都一样**；
+`Table.Blocked` 回答「这个 agent 到底能不能用它？」，**逐 agent 而定**。
+重算其中任何一个，都是同一个错误犯两遍。
 
 ## 3. 开发配方
 
@@ -104,7 +116,7 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
 
 以 `web_search` 为例，`agentkit/build/nettools.go` 是完整范本。
 
-1. **实现 provider**。工具 provider 是 `agentkit/build/tools.go:19` 的
+1. **实现 provider**。工具 provider 是 `agentkit/build/tools.go:20` 的
    `toolProvider` 接口：
 
    ```go
@@ -120,41 +132,45 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
 
    注意 `Provide` 返回的是**一批**工具 —— 一个 provider 可以提供多个。
 
-2. **注册**。在 `agentkit/build/tools.go:35` 的 `defaultToolRegistry` 里加上你的
+2. **注册**。在 `agentkit/build/tools.go:36` 的 `defaultToolRegistry` 里加上你的
    provider。位置决定顺序，也决定「可选工具」与「必需工具」的区分。
 
 3. **可选性由 `Optional()` 决定**，不是由返回 error 决定。`Optional() == true` 的
-   provider 失败时会打一条 Warn 然后跳过（`tools.go:89`）——
+   provider 失败时会打一条 Warn 然后跳过（`tools.go:101`）——
    缺 API key 不该让整个服务起不来。
    ★ 但注意这条 Warn 之外**没有别的提示**：工具静默不进表，用户在界面上只会发现
    「这个功能好像没有」。新增可选 provider 时要想清楚这条 Warn 够不够。
 
-4. **闸门自动生效**。`agentkit/build/gate.go` 会用 agent 自己的 `disabled_tools`
-   与 `mcps:` 过滤工具表，并且把**凡是允许名单没有点名的工具**都裹进审批里。
-   ★ 默认档位是 `ask`，所以例外都是被点名的那些：代码认识的那些内置工具
-   （`agentkit/build/tools.go:61`），以及某个文件自己的 `allows:` 列出的那些。
+4. **闸门自动生效**。`agentkit/build/gate.go` 会用 agent 自己的 `tools:` 白名单过滤
+   工具表 —— 那份清单说的是这个 agent 到底能用哪些工具 —— 并且把**凡是档位表没有点名的
+   工具**都裹进审批里。★ 这是**两个不同的问题**：白名单逐 agent 而定，档位表则是每个
+   agent 共享的。★ 默认档位是 `ask`，所以例外都是被点名的那些：代码认识的那些内置工具
+   （`agentkit/build/tools.go:62`），以及某个文件自己的 `allows:` 列出的那些。
    你不需要写任何权限代码。
 
-5. **名字不能撞保留名**。`tools.go:69` 的 `reservedToolNames` 列出了
-   `ls` `read_file` `write_file` `edit_file` `glob` `grep` `execute`
-   `task` `write_todos` `skill`。撞上会在 `Build` 时报错。
+5. **名字不能撞保留名**。名字住在 `decl.BuiltinToolNames`
+   （`agentkit/spec/decl/decl.go:291`）：`ls` `read_file` `write_file` `edit_file` `glob`
+   `grep` `execute` `task` `write_todos` `skill`。撞上会在 `Build` 时报错。
+   ★ **它们住在 `decl` 而不是 build 包里，是因为两边都要用**：装配器拒绝冒用这些名字的
+   provider（`reservedToolNames`，`agentkit/build/tools.go:75`），装载器则核对 Agent 的
+   `tools:` 列表里点到的名字。两边互相不能引，所以这份清单住在两边之下。
    工具名同时是档位表里的键 —— 撞名会让档位表指向错误的工具。
 
    ★ **来自服务器的名字是带命名空间的。** MCP 工具挂在 `decl.MCPToolPrefix`
-   （`agentkit/spec/decl/decl.go:308`）与 `decl.MCPSeparator`
-   （`agentkit/spec/decl/decl.go:317`）之下，于是 agent 的表用一个前缀就能收窄一整个
+   （`agentkit/spec/decl/decl.go:373`）与 `decl.MCPSeparator`
+   （`agentkit/spec/decl/decl.go:382`）之下，于是 agent 的表用一个前缀就能收窄一整个
    服务器，而不必列出它所有工具的名字。★ **拼出来的名字从不被解析回去**：
-   `Table.Blocked`（`agentkit/build/policy.go:146`）匹配的是前缀，所以没有任何代码
+   `Table.Blocked`（`agentkit/build/policy.go:130`）匹配的是前缀，所以没有任何代码
    需要把一个名字拆开才能知道它属于哪个服务器。
 
-6. **跨 provider 撞名也会报错**：`tools.go:106` 的 `validateBatch` 用 `seen` 跟踪，
+6. **跨 provider 撞名也会报错**：`tools.go:118` 的 `validateBatch` 用 `seen` 跟踪，
    所以两个 provider 提供同名工具会在启动时失败，而不是谁先谁后地覆盖。
 
 #### MCP provider
 
 `mcpToolProvider` 的注册方式与其他 provider 一样 —— 在
-`agentkit/build/tools.go:35` 的 `defaultToolRegistry` 里 —— 它也遵守
-`agentkit/build/tools.go:19` 的同一份 `toolProvider` 契约。但它有四处不是通用的：
+`agentkit/build/tools.go:36` 的 `defaultToolRegistry` 里 —— 它也遵守
+`agentkit/build/tools.go:20` 的同一份 `toolProvider` 契约。但它有四处不是通用的：
 
 - **客户端活得比这一批工具久。** ★ 这一批工具每个快照只建一次：
   `buildHeavy` 跑在一个 `sync.Once` 之下（`agentkit/build/snapshot.go:41`），
@@ -248,7 +264,7 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
 - **声明**由常量 `DirMCP = "mcps"`（`agentkit/spec/config.go:25`）与
   `Categories` 里那一项（`agentkit/spec/config.go:66`）给出 —— 可编辑、热重载、
   `.yaml`。
-- **装载**由 `loadMCP`（`agentkit/spec/load.go:269`）完成：一个文件，一个服务器。
+- **装载**由 `loadMCP`（`agentkit/spec/load.go:306`）完成：一个文件，一个服务器。
 - ★ **这个分区的「热」意味着客户端会被重建。** 声明就是服务器的身份，所以声明变了
   就是服务器变了：旧客户端被拆掉，重新起一个新的
   （`agentkit/build/mcpmanager.go:215`），依据是那份声明的指纹
@@ -258,7 +274,7 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
   （`agentkit/spec/write.go:88`）只接受 `<server>.yaml` 且服务器名合法
   （`agentkit/spec/write.go:107`）—— 文件名就是服务器名，而服务器名就是这台服务器
   工具的命名空间段。
-- **脚手架**是 `Skeleton`（`agentkit/spec/write.go:159`），其中 `mcps/` 那一支
+- **脚手架**是 `Skeleton`（`agentkit/spec/write.go:161`），其中 `mcps/` 那一支
   （`agentkit/spec/write.go:186`）写出的是一份**能加载**的文件：★ `mcps/` 下的文件
   **定义**一台 server，所以一份解析不了的文件不是「server 关着」，而是「配置加载不了」。
   可选的那些字段写成注释，而 `command` 是一个没装的占位符 —— 于是 server 起不来，
@@ -294,6 +310,48 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
 - 深度超过 `max_depth` 是**启动错误**，不静默截断。
 
 装配逻辑在 `agentkit/build/assemble.go`，校验逻辑在 `agentkit/spec/load.go`。
+
+#### Agent 身上的三张清单
+
+`tools:`、`skills:` 与 `mcps:` 都是**白名单**，而且**三张默认都是一个都没有** ——
+「不写」与「写空」是一回事，而它们的意思是「什么都没有」。
+
+| 键 | 它点名什么 | 不写表示 |
+|---|---|---|
+| `tools` | 这个 agent 可用的工具 —— **暴露出来**的名字，模型看见的那些 | 没有工具 |
+| `skills` | 这个 agent 可加载的技能 —— `skills/` 下的文件夹 | 没有技能 |
+| `mcps` | 这个 agent **挂载**的 MCP server —— 每一个都会起一个子进程 | 没有 server |
+
+★ **不要写 `disabled_tools`。** 它与 `tools` 的含义**正好相反** —— 一个删工具，另一个
+点名工具 —— 所以装载器**拒绝**这个文件（`agentkit/spec/load.go:96`），而不是把键改个名：
+只改名字就等于把黑名单悄悄变成了白名单。那条消息会说清两者的方向是反的。★ **没有
+别名**：一个仍按旧义工作的别名会让黑名单继续活着，一个按新义工作的别名则等于替用户把
+黑名单翻成白名单。
+
+★ **工具集是 snapshot 的，而清单负责收窄它。** snapshot 的工具是整个 snapshot 共用的一套；
+每个 agent 的 `tools:` 清单移除这个 agent 不许用的东西
+（`agentkit/build/topology.go:72` 的 `specTable`），模型永远看不见被清单移除的工具。
+★ **这里没有「没事可做」的捷径**（`agentkit/build/policy.go:145`）：**空**清单意味着
+**全部**移除。
+
+★ **MCP 有两层。** `mcps:` 说哪些 server 被**挂载**；`tools:` 说它那些工具里哪些被
+agent **看见** —— `mcp__<server>__<tool>`，或者模式 `mcp__<server>__*`。★ `mcps: [github]`
+而 `tools:` 里没有 `mcp__github__*`，那是把 server 起起来，agent 一个都看不见。
+★ 两层互相矛盾是**装载期错误**（`agentkit/spec/load.go:643` 的 `checkAgentMCPNames`）：
+点了 `mcp__github__*` 而 `mcps:` 里没有 `github`，这条规则永远不可能命中。
+
+#### 两条提示
+
+两条都是**提示**，不是错误 —— 配置是合法的，只是没有说出作者的本意
+（`agentkit/spec/load.go:540` 的 `noticeAgentTools`）：
+
+| 提示 | 它意味着什么 | 该怎么办 |
+|---|---|---|
+| `tools` 点名了一个不存在的工具 | 内置工具就是 `decl.BuiltinToolNames` 里那些，而某个 provider 的工具只有在 `tools/` 下写了它的文件时才存在 | 核对拼写；provider 缺失就去写那个 `tools/` 文件 |
+| `tools` 点名了 `skill` 工具，而 `skills` 是空的 | 配置合法，但自相矛盾：agent 能要一个技能，却没有技能可加载 | 在 `skills:` 里点名那个技能，或者把 `skill` 从 `tools:` 里去掉 |
+
+★ **`mcp__*` 名字会被这项检查跳过**：server 的工具是运行时才发现的，所以它现在还没有的
+名字不算拼错。
 
 ### 3.5 加一个厂商 / 模型
 
@@ -925,11 +983,13 @@ E2E 共享一个假后端状态，并行会互相污染。
 **（七）`smoke:hitl` 会抖，约 5 次里 1 次** —— 它依赖模型*选择*调 `write_file` 才能触发审批。
 那是模型的自由，不是代码回归；脚本会重试，全都不触发时**明确报错**，不伪装成接线有问题。
 ★ 它有一个**前置条件**：**真正调工具的那个 agent**，其 `write_file` 必须落在 `ask` 档
-—— ★ 而那就是**默认值**：没有任何文件在 `allows:` 里点到它，它自己的
-`disabled_tools` 也没有禁掉它。工具够不着，自然没有审批可触发。
-★ 别只盯着 `main`：出厂配置里 `main` 确实写着
-`disabled_tools: [write_file, edit_file, execute]`，但它只做编排，会把活**委派**给
-`task`，而 `task` 的 `write_file` 在 `ask` 档 —— 审批照样触发。
+—— ★ 而那就是**默认值**：没有任何文件在 `allows:` 里点到它 —— 并且这个 agent 自己的
+`tools:` 清单必须点到它，否则这个工具压根不在它的工具集里。工具够不着，自然没有审批
+可触发。
+★ 别只盯着 `main`：出厂配置里 `main` 的是
+`tools: [ls, read_file, glob, grep, task, write_todos]` —— 读取类与委派工具，没有写入类
+—— 但它只做编排，会把活**委派**给 `task`，而 `task` 的 `tools:` 清单点了 `write_file`，
+它在 `ask` 档 —— 审批照样触发。
 2026-10-29 实测的事件流：`TOOL_CALL_START name=task`（子 agent 是以工具形态被调的），
 随后 `TOOL_CALL_START name=write_file subagentRunId=task`，
 中断的 `subagentRunId` 也是 `task`。
@@ -1036,7 +1096,12 @@ gitleaks 报的**提交数**比 git 报的低；但内容照样扫到了，因�
 |---|---|
 | 启动报配置缺失 | 启动日志里的 `config root` 那行 —— 它打印了实际用的根和项目根 |
 | 改配置不生效 | 该分区热重载吗？`llm/`、`agents/`、`tools/`、`mcps/` 是热的；`server/`、`skills/` 要重启 |
-| Agent 调不动某工具 | `GET /v2/agents/:agentId` 看生效工具表；再读工具的 `reason` —— `disabled_tools`、`mcps`，或者默认的 `ask` 档（它会问） |
+| 启动时报 `disabled_tools` was renamed to `tools` | ★ 两者含义**正好相反** —— 一个删工具，另一个点名工具。删掉 `disabled_tools`，在 `tools:` 里列出这个 agent 该有的工具（`agentkit/spec/load.go:96`） |
+| 启动时报 `names the MCP tool` … `but does not mount the server` | ★ 挂载与可见是两层：把那个 server 加进 `mcps:`，或者把那个工具从 `tools:` 里去掉（`agentkit/spec/load.go:643`） |
+| 提示说 `tools` 点名了一个不存在的工具 | 内置工具就是 `decl.BuiltinToolNames` 里那些（`agentkit/spec/decl/decl.go:291`）；某个 provider 的工具只有在 `tools/` 下写了它的文件时才存在 |
+| 提示说 `tools` 点名了 `skill` 工具，而 `skills` 是空的 | 配置合法但自相矛盾：在 `skills:` 里点名那个技能，或者把 `skill` 从 `tools:` 里去掉 |
+| Agent 调不动某工具 | `GET /v2/agents/:agentId` 看生效工具表；再读工具的 `reason` —— `tools`，或者默认的 `ask` 档（它会问） |
+| 某个 agent **一个**工具都没有 | ★ 工具清单是白名单，而且**默认一个都没有**：不写 `tools:` 就是没有工具。列出这个 agent 该有的工具 |
 | 残留的 `policy/` 目录好像还在管你的旧档位 | 这个分区退役了：档位住在提供工具的那些文件里，而默认档位是 `ask`。启动日志里会说明 —— 那条提示落在 `deferred` 里 |
 | `reasoning` 像是没用 | 模型档案里声明这个档位了吗？没声明 = 静默忽略 |
 | 审批恢复不了 | checkpoint 还在吗？`/v2/sessions/:id` 看 `pendingApprovals` |

@@ -15,8 +15,8 @@ synthesises — tokens are spent where they actually matter.
 "who may do what" becomes a few hard rules:
 
 - **Tool permissions are named, and the default is to ask** — a tool nobody names asks
-  first; the exceptions are the ones a file's own `allows:` list names, and each inner
-  agent narrows further with its own `disabled_tools`.
+  first; the exceptions are the ones a file's own `allows:` list names, and each agent
+  says which of them it may use at all.
 - **Delegation has a depth cap** — the entry agent is level 0, an agent at depth `d` may
   spawn children if and only if `d < max_depth`; a topology over the cap is a **startup
   error**, never a silent truncation.
@@ -129,21 +129,27 @@ description: "task: the concrete executor. Writes files per the task order…"
 model: deepseek/deepseek-flash
 max_iterations: 50
 reasoning: low
-disabled_tools: [kb_index]
+tools: [ls, read_file, write_file, edit_file, glob, grep, execute, write_todos]
+mcps: []
 ---
 ```
 
 The frontmatter is **strictly decoded** — one wrong key is a startup error, never
 silently ignored. Available keys: `description`, `model`, `max_iterations`,
-`subagents`, `disabled_tools`, `skills`, `temperature`, `max_tokens`, `reasoning`.
+`subagents`, `tools`, `mcps`, `skills`, `temperature`, `max_tokens`, `reasoning`.
 
 - `model` is required, in the form `<provider>/<model>`, and is **never inherited and
   never falls back** — failing to resolve it is a startup error.
 - `subagents` declares the topology; every referenced agent must exist and the graph
   **must not contain a cycle**.
+- `tools` is the allow-list of the tools this agent may use; the names are the ones the
+  model sees. **Not declaring it means no tools at all** — the list is the whole answer.
+- `mcps` is the list of MCP servers this agent mounts; mounting one starts a child
+  process, so **not declaring it means no server**. A server's tools are named by their
+  composed names (`mcp__<server>__<tool>`, or the pattern `mcp__<server>__*`).
 - `skills` is the allow-list of skills this agent may use; the names are the folders
-  under `skills/`. **Not declaring it means every skill**, and declaring an empty list
-  means none.
+  under `skills/`. **Not declaring it means no skill**, and declaring an empty list
+  means the same.
 - `reasoning` names a **tier** (such as `high`), which `models[].reasoning` in
   `llm/*.yaml` translates into the differing fields each vendor uses. **If that table is
   missing, the tier is silently ignored** — an agent says `reasoning: high` while the
@@ -158,20 +164,24 @@ provides it**:
 | Where | What it names | Scope |
 |---|---|---|
 | `allows:` in `tools/*.yaml` and `mcps/<server>.yaml` | the tools of that file (or that server) that run without a nod | Every agent |
-| `disabled_tools` in `agents/*.md` | the tools this agent does not get at all | This one agent only |
+| `tools` in `agents/*.md` | the tools this agent may use at all | This one agent only |
 
 ★ The two are **stored separately and never merged** — merging would destroy the
-information about *which* layer blocked something. The tier table is shared, and
-`disabled_tools` can only take a tool away, never hand one back.
+information about *which* layer blocked something. The tier table is shared and a file's
+`allows:` only **adds** to it; an agent's own `tools` list decides what that agent sees.
 
 ★ **A file speaks its own vocabulary.** `tools/http.yaml` says `request_get`, and an MCP
 server says `create_issue` — not `mcp__github__create_issue`. The translation to the name
 the model sees happens once, where the tool is mounted.
 
 ★ There is **no global deny list**. "Not exposed" is said in exactly two places: a file's
-own `allows:` list, and an agent's `disabled_tools`. A third list would be one more thing
+own `allows:` list, and an agent's `tools` list. A third list would be one more thing
 to keep in sync — and it was the only one that had to speak the exposed names while the
 tools' own files speak theirs.
+
+★ **The old `disabled_tools` key is refused**, with a message that says which way round
+the two are: `tools` says which tools an agent **gets**. Renaming the key alone would
+have turned a blacklist into a whitelist without saying so.
 
 ### The depth cap
 

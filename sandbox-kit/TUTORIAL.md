@@ -441,8 +441,8 @@ allows: [write_file, edit_file, execute]
 ```
 
 ★ **"Not exposed" is said in exactly two places**: a tool's own `allows:` list
-and an agent's own `disabled_tools`. To narrow down **one** agent, use its
-`disabled_tools`.
+and an agent's own `tools` list. To narrow down **one** agent, use its
+`tools` list — and to widen it, name the tools there too.
 
 ★ **`server/config.yaml`** is the process's own settings — the listen address,
 the data directory, the retry count, the agent depth cap. It is **not**

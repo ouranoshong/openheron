@@ -50,11 +50,14 @@ Web UI 在**二进制里**：`main.go:35` 内嵌了 `all:web/dist`，`main.go:33
 以及某个文件自己的 `allows:` 列出的那些。所以 `execute` 会问，`write_file` 与
 `edit_file` 也一样。
 
-而工厂的 `main` agent 直接把它关掉（`agentkit/templates/files/agents/main.md:7`）：
+而工厂的 `main` agent 压根不带它们（`agentkit/templates/files/agents/main.md:15`）：
 
 ```
-disabled_tools: [write_file, edit_file, execute]
+tools: [ls, read_file, glob, grep, task, write_todos]
 ```
+
+★ 不是「关掉」—— `tools` 是**白名单**，它没点名的工具就不在那个 agent 的工具集里。
+写这件事归 `task`。
 
 ★ 审批是**策略**边界，不是**技术**边界。批一旦给了，这条命令就拥有 openheron 进程的
 全部权限 —— 而 `read_file` 连问都不问。`docs/fs-backend-design.md:166-171` 把道理写得很直白：

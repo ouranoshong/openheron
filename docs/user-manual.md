@@ -232,7 +232,8 @@ description: "task: the concrete executor. Writes files per the task order."
 model: deepseek/deepseek-flash
 max_iterations: 50
 reasoning: low
-disabled_tools: [kb_index]
+tools: [ls, read_file, write_file, edit_file, glob, grep, execute, write_todos]
+mcps: []
 summarize_at: 80%
 ---
 
@@ -251,9 +252,9 @@ Available frontmatter keys:
 | `max_iterations` | Cap on tool-loop iterations |
 | `summarize_at` | When this agent's context is **compacted** into a summary: `80%` of the model's window (the default), an absolute token count (`104858`), or `0` for never |
 | `subagents` | Whom it may delegate to (see §5) |
-| `disabled_tools` | Tools **this agent may not use at all** — the model does not even see them (an MCP tool may also be named by a prefix — see §4.8) |
-| `skills` | The skills this agent may use — an allow-list of the folders under `skills/` (**not declared means every skill**, an empty list means none) |
-| `mcps` | The MCP servers this agent may use — **not declared means every server**, an empty list means none (see §4.8) |
+| `tools` | Tools **this agent may use** — the names the model sees. ★ **Not declared means no tools at all**: the list is the whole answer, and an MCP tool is named by its composed name or by a prefix (`mcp__github__*`, see §4.8) |
+| `skills` | The skills this agent may load — an allow-list of the folders under `skills/`. **Not declared means no skill**, and so does an empty list |
+| `mcps` | The MCP servers this agent **mounts** — **not declared means no server**, and so does an empty list. Mounting one starts a child process (see §4.8) |
 | `temperature` / `max_tokens` | Sampling parameters |
 | `reasoning` | Reasoning tier: `off` / `low` / `high` / `max` (names defined by the vendor profile) |
 
@@ -357,7 +358,7 @@ There are only two tiers:
 | Where | What it decides |
 |---|---|
 | The `allows:` line of the file that provides the tool | Which of that file's tools run **without** asking; everything else the file provides asks |
-| The `disabled_tools:` line of an agent | Which tools that agent may not use **at all** — they are not in its tool set, so the model does not even see them |
+| The `tools:` line of an agent | Which tools that agent **may use** — a tool that is not in it is not in its tool set, so the model does not even see it |
 
 ★ **There is no global list.** There is no file where you list the tools that ask, and
 none where you list the tools nobody may use. A file names its own exceptions, an agent
@@ -380,7 +381,7 @@ allows: [write_file, edit_file, execute]
 
 ★ That file is a **tuner, not a switch**: the filesystem tools are always mounted, so the
 file cannot add or remove one — it only moves their tier. **Widening is the file's job;
-narrowing is the agent's** (`disabled_tools`), because narrowing is per agent and
+narrowing is the agent's** (`tools`), because narrowing is per agent and
 widening is a decision about the tool.
 
 The tools that come with a file of their own say so in that file:
@@ -406,7 +407,7 @@ allows: [read_issue, list_issues]
 
 ★ **A tier is not a verdict about the tool.** A tool an agent may not use keeps its own
 tier and says why: the effective tool table of an agent reports `blocked` with the
-reason `disabled_tools` or `mcps` (§4.8). There is no third tier and no global
+reason `tools` (§4.8). There is no third tier and no global
 refusal — a tool is either available to that agent, or it is not in that agent's tool
 set at all.
 
@@ -568,18 +569,32 @@ mcps: [github]
 
 | The `mcps:` key | Means |
 |---|---|
-| absent | **every** configured server |
+| absent | **no** server |
 | `[]` | **none** |
 | `[github]` | exactly those servers |
 
-★ A sub-agent carries a list of its **own**, next to its own `skills` and
-`disabled_tools` — the list is read from the agent that is running, not from the root's.
+★ A sub-agent carries a list of its **own**, next to its own `skills` and `tools` — the
+list is read from the agent that is running, not from the root's.
 
-**`disabled_tools` is the second lever.** It takes an exact tool name and a **trailing**
-`*` prefix:
+★ **Mounting is not the same as seeing.** `mcps:` says which servers are **started**;
+`tools:` says which of their tools the agent sees. Both have to be written:
 
 ```yaml
-disabled_tools: [mcp__github__*]
+---
+model: deepseek/deepseek-flash
+mcps: [github]                  # start github
+tools: [ls, mcp__github__*]     # and let this agent see its tools
+---
+```
+
+★ Naming `mcp__github__*` while `mcps:` excludes `github` is a **startup error**: the
+prefix could never match, and a rule that can never match is a mistake.
+
+**`tools` is the second lever, and it takes a prefix.** An exact name, or a **trailing**
+`*`:
+
+```yaml
+tools: [ls, read_file, mcp__github__*]
 ```
 
 - `mcp__github__*` — every tool of the `github` server.
@@ -587,8 +602,8 @@ disabled_tools: [mcp__github__*]
 - `mcp__github__create_issue` — exactly that one tool.
 
 ★ **`mcp*foo` and a lone `*` are refused at startup.** Only a *trailing* `*` is a pattern,
-and a lone `*` would take the agent's own tools away as well: a rule whose reach differs
-from what it reads as is a silent mismatch.
+and a lone `*` would be a way of saying "everything" in a list whose whole point is to say
+what is there: a rule whose reach differs from what it reads as is a silent mismatch.
 
 ## 5. Multiple agents and delegation
 
@@ -990,19 +1005,20 @@ Run `openheron kb status` first: `lexical-only retrieval` means there are no vec
 and the hybrid score is not in effect. Configure an embedding model and re-index.
 
 **Q: An agent cannot call `write_file`?**
-Two possibilities: it is disabled for that agent by `disabled_tools` — then the model does
-not even see it — or it is simply an `ask` tool and nobody answered the approval card.
-Check `GET /v2/agents/:agentId` for the effective tool table. By default `main` has
-`write_file`/`edit_file`/`execute` disabled — in the factory configuration it only
-orchestrates.
+Two possibilities: it is not in that agent's `tools:` list — then the model does not even
+see it — or it is an `ask` tool and nobody answered the approval card. Check
+`GET /v2/agents/:agentId` for the effective tool table. In the factory configuration
+`main` keeps only the readers and the delegation tool, because it orchestrates and hands
+the writing to `task`.
 
 **Q: `/v2/run` says `threadId is required`**
 Create the session with `POST /v2/sessions` first.
 
 **Q: The model does not see the MCP server's tools?**
 Open `/mcps` (see §6.8). A server the agent does not use reads `unused`; a tool the agent
-cannot reach reads `blocked`, and the reason names `disabled_tools` or `mcps`. A server
-that reads `unreachable` carries the error that says why it could not be started.
+cannot reach reads `blocked`, and the reason names `tools` — the agent's own list does
+not cover it. A server that reads `unreachable` carries the error that says why it could
+not be started.
 
 **Q: An MCP server does not start?**
 The startup error names the file and the field. `mcps/` is hot, so a fix takes effect on

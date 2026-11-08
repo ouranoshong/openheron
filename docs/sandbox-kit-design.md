@@ -55,12 +55,15 @@ asks first, and the exceptions are the named ones — the built-in tools the cod
 knows (`agentkit/build/tools.go:61`) and the ones a file's own `allows:` lists. So
 `execute` asks, and so do `write_file` and `edit_file`.
 
-The factory `main` agent turns it off outright
-(`agentkit/templates/files/agents/main.md:7`):
+The factory `main` agent does not carry them at all
+(`agentkit/templates/files/agents/main.md:15`):
 
 ```
-disabled_tools: [write_file, edit_file, execute]
+tools: [ls, read_file, glob, grep, task, write_todos]
 ```
+
+★ It is not that they are switched off — `tools` is an **allow-list**, so a tool it
+does not name is not in that agent's tool set. The writing belongs to `task`.
 
 ★ An approval is a **policy** boundary, not a **technical** one. Once the approval
 is granted, the command has the full authority of the openheron process — and so

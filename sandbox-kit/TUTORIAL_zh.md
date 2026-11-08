@@ -416,8 +416,8 @@ allows: [write_file, edit_file, execute]
 ```
 
 ★ **「不被暴露」只说两处**：工具自己文件的 `allows:` 清单，
-以及某个 agent 自己的 `disabled_tools`。要收窄**某一个** agent，
-就用它的 `disabled_tools`。
+以及某个 agent 自己的 `tools` 清单。要收窄**某一个** agent，
+就用它的 `tools` 清单 —— 要放宽，同样在那里点名。
 
 ★ **`server/config.yaml`** 是进程自己的设置 —— 监听地址、数据目录、
 重试次数、agent 深度上限。它**不**热重载：它配置的是进程本身，

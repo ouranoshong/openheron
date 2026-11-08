@@ -85,9 +85,9 @@ type toolProvider interface {
 
 ★ **上面每一条查找都是按名字查的，而名字就是全部契约。**
   `TierOf` 是一次 map 查找；`Blocked` 是一次 map 查找
-  加两次前缀扫描（`agentkit/build/policy.go:150`、`:158`）。
+  加一次前缀扫描（`agentkit/build/policy.go:130`）。
   ★ 那两次前缀扫描正是 MCP 带来的：agent 的 `mcps:` 清单按**命名空间前缀**收窄，
-  agent 的 `disabled_tools` 接受**结尾的 `*` 模式**（§4）。
+  某个 agent 的 `tools` 接受**结尾的 `*` 模式**，那是给一整个命名空间起名的写法（§4）。
   其余全是精确匹配 —— 而一个 MCP 工具的档位**在服务器还没起来之前**就能回答（§7.3）。
 
 闸门本身不需要写任何权限代码 —— 它读档位然后动作：
@@ -104,7 +104,7 @@ type toolProvider interface {
 | 分区 | 位置 | 备注 |
 |---|---|---|
 | `tools/` | `agentkit/spec/config.go:57` | 一个工具一个文件，**文件名是白名单**（`agentkit/spec/load.go:165`），热更新 |
-| `agents/` | `agentkit/spec/config.go:47` | frontmatter，含 `disabled_tools` 与 `mcps:`，热更新 |
+| `agents/` | `agentkit/spec/config.go:47` | frontmatter，含 `tools`、`skills` 与 `mcps`，热更新 |
 | `mcps/` | `agentkit/spec/config.go:66` | 一个服务器一个文件，**文件在就是定义**，热更新 |
 
 ★ **没有 `policy/` 分区。** 档位住在它们所说的那些工具旁边（§7.3），
@@ -245,9 +245,10 @@ mcp__<server>__<tool>
 
 否则一个内置工具就能占了命名空间，而为 MCP 写的前缀规则会悄悄盖住它。
 
-## 4. 某个 agent 的 `disabled_tools` 里的前缀匹配
+## 4. 某个 agent 的 `tools` 里的前缀匹配
 
-★ 某个 agent 的 `disabled_tools` 除了精确名字，还接受一种**前缀模式**。
+★ 某个 agent 的 `tools` 除了精确名字，还接受一种**前缀模式**，而它是一张
+**白名单**：模式点的是这个 agent **拿到**什么。
 
 | 条目 | 匹配 |
 |---|---|
@@ -262,24 +263,25 @@ mcp__<server>__<tool>
 
 ★ **没有全局清单，也没有第三档。** ★ 「不被暴露」恰好在**两个**地方说：
   一个文件自己的 **`allows:`** —— 它说这个文件提供的东西里哪些不用点头 ——
-  以及某个 agent 的 **`disabled_tools`**，它说这个 agent 压根拿不到什么。
+  以及某个 agent 的 **`tools`**，它说这个 agent 能用什么。
   第三份全局清单只会多一个要同步的地方，而它偏偏是三份里最糟的那一份：
   只有它必须用**对外的**词儿点名工具，而工具自己的文件讲的是它们自己的词儿。
   ★ 一个 agent 不许用的工具**保住自己的档位**，并在它的 `reason` 里说清为什么
-  （`agentkit/build/introspect.go:111` `verdictOf`）——
+  （`agentkit/build/introspect.go:112` `verdictOf`）——
   不能拥有它的是**这个 agent**，不是这个工具不合法。
 
-★ 剩下的那种收窄，是那句**关于命名空间**而不是关于工具的陈述 ——
-  「这个 agent 不要任何 MCP 工具」—— 而前缀正是给一个命名空间起名的写法。
+★ **缺省是 `none`**，所以这张清单就是全部答案：agent 没点名的工具就不在它的
+  工具集里。★ 模式是给一整个**命名空间**起名的写法 —— `mcp__github__*` 就是某个
+  server 的全部工具，而那正是 agent 通常思考的单位。
 
 ### 4.1 语法规则
 
 | # | 规则 | 理由 |
 |---|---|---|
 | 1 | 只有**结尾**的 `*` 是前缀模式；`*` 出现在别处是**加载期硬错误** | `mcp*foo` 看着像通配符而其实不是 —— 一条读起来与实际覆盖范围不同的规则，就是一次静默的错配 |
-| 2 | 单独一个 `*` 是**加载期硬错误** | `disabled_tools: ["*"]` 会把 agent 自己的工具也一起拿走；那是要写出来的一个决定，不是一个通配符 |
+| 2 | 单独一个 `*` 是**加载期硬错误** | `tools: ["*"]` 是在一张「说明有什么」的清单里写「什么都有」—— 而不写本来就等于什么都没有，所以这个通配符会是唯一一条意思与字面相反的条目 |
 | 3 | `*` 前面不能为空 | 规则 2 |
-| 4 | 精确条目与前缀条目**等价** —— 命中任一即把这个工具从那个 agent 那里摘掉 | 这里没有档位可选：那个工具对那个 agent 就是不在 |
+| 4 | 精确条目与前缀条目**等价** —— 命中任一即让那个 agent 拿到这个工具 | 这里没有档位可选：那个工具要么在那个 agent 的集合里，要么不在 |
 
 ### 4.2 前缀语法不新增档位
 
@@ -291,18 +293,16 @@ allow (if the file's allows list names it) → ask (everything else)
 ```
 
 ★ **一个 agent 不许用的工具保住自己的档位。** 档位是关于**工具**的；
-  收窄是关于**agent** 的。⇒ 那个工具在表里仍然是 `allow` 或 `ask`，
-  而 agent 的收窄被并排报出来，作为那个 `reason`
-  （`agentkit/build/introspect.go:111` `verdictOf`，以及
-  `agentkit/build/introspect.go:36` `reasonOf` —— 理由只有 `disabled_tools`
-  与 `mcps` 两个）。★ 第三档就得说「不合法」，而这里没有什么是不合法的：
+  清单是关于**agent** 的。⇒ 那个工具在表里仍然是 `allow` 或 `ask`，
+  而 agent 的清单被并排报出来，作为那个 `reason`
+  （`agentkit/build/introspect.go:112` `verdictOf`，以及
+  `agentkit/build/introspect.go:36` `reasonOf` —— 现在只有**一个**理由，`tools`）。
+  ★ 第三档就得说「不合法」，而这里没有什么是不合法的：
   一个 agent 不许用的工具，只是压根不在那个 agent 的工具集里。
 
 ★ 前缀语法只决定**一条条目是否匹配某个名字** —— 它不新增档位，也不重排任何档位。
-  ★ **而且两种收窄是各自独立的**：agent 的 `mcps:` 清单先被匹配
-  （`agentkit/build/policy.go:150`），所以一个这个 agent 不用的服务器报的是 `mcps`，
-  哪怕那个工具也在它的 `disabled_tools` 里 —— 那个服务器压根不在，
-  而更细的那条规则对它本来也说不着什么。
+  ★ **而挂载是另一层**：agent 没挂载的 server 根本没有工具可挡，挂载了却没点名的
+  工具则由这张清单来挡。所以没有两条收窄之间的先后顺序 —— 只有一条。
 
 ★ **那些数量上限不参与。** 上限 —— 深度与重试次数 —— 住在 `server/config.yaml` 里，
   而它们不含工具名，所以关于它们没有任何一条匹配规则。
@@ -311,15 +311,15 @@ allow (if the file's allows list names it) → ask (everything else)
 
 | 位置 | 写在哪 | 含义 |
 |---|---|---|
-| 某个 agent 的 `disabled_tools` | `agentkit/build/topology.go:70` | 这个 agent 拿不到这些工具 |
+| 某个 agent 的 `tools` | `agentkit/build/topology.go:73` | 这个 agent 能用这些工具，别的都不行 |
 
 ★ 它用的是**对外的**名字（`mcp__github__delete_repo`），因为工具表查的就是它。
   按文件写的档位不是这样（§7.3）：一个文件讲自己的词儿，由 provider 去翻译。
 
 ### 4.4 代价是什么
 
-★ 前缀规则是一件**钝器**：`disabled_tools: ["mcp__*"]` 把每一个 MCP 工具
-  都从那个 agent 那里拿走。这通常正是本意，但它只有一行，而且很容易顺手写下来。
+★ 前缀规则是一件**钝器**：`tools: ["mcp__*"]` 让那个 agent 拿到每一个 server 的
+  每一个 MCP 工具。这通常正是本意，但它只有一行，而且很容易顺手写下来。
   真正值得先够的是点名单个 server 的那条规则（`mcp__github__*`）。
 
 ## 5. `mcps/<server>.yaml` 分区
@@ -378,7 +378,7 @@ MCP 服务器按服务器一个文件来配：
 
 ★ **没有第三份清单。** 「不被暴露」恰好在两个地方说：这个文件自己的
   **`allows:`** 清单（点名那些不用点头就跑的工具），以及某个 agent 的
-  **`disabled_tools`**（§4.2）。★ 文件的 `tools:` 是**过滤器**，不是档位：
+  **`tools`**（§4.2）。★ 文件的 `tools:` 是**过滤器**，不是档位：
   它说的是这个文件到底提供什么（§5.3）。
 
 ★ `timeout` 是**宽松**时长：写错就退回默认并记进 `deferred`，
@@ -429,10 +429,10 @@ MCP 服务器按服务器一个文件来配：
   每一个没有把自己的清单收窄的 agent 就都拿到它。
 
 ★ **这个收窄落在哪里不是白给的**，因为工具集是**整个快照一份**（§1.1）。
-  答案在 §11.3：agent 的**表**，也就是 `disabled_tools` 已经在收窄工具的那个地方。
+  答案在 §11.3：agent 的**表**，也就是它的 `tools` 清单已经在决定一切的那个地方。
 
-★ **子 agent 有自己的一份清单，就像它自己的 `disabled_tools`。**
-  `decl.SubAgentSpec` 自带 `DisabledTools` 与 `Skills`（`agentkit/spec/decl/decl.go:594`），
+★ **子 agent 有自己的一份清单，就像它自己的 `tools`。**
+  `decl.SubAgentSpec` 自带 `Tools`、`Skills` 与 `MCPServers`（`agentkit/spec/decl/decl.go:653`），
   所以它也自带一份 `mcps:` 清单（`agentkit/spec/decl/decl.go:604`）。
   ⇒ 清单是从**正在跑的那个 agent** 读的 —— 根 agent，或者这一轮所在的那个子 agent ——
   而不是从根 agent 的清单读的。
@@ -481,7 +481,7 @@ MCP 服务器按服务器一个文件来配：
 ★ **继承不是新增的暴露面。** agent 自己的工具读的是同一批东西：`read_file` 读项目，
   `execute` 在这个环境里跑命令。一个看得见环境的 MCP server，看不见任何 agent 看不见的
   东西。区别只在于 `execute` 不在 `allows:` 清单里，而 MCP 工具未必在。
-  ⇒ 若这个不对称对你重要，就把 `mcp__*` 放进那个 agent 的 `disabled_tools`（§4）。
+  ⇒ 若这个不对称对你重要，就别把 `mcp__*` 放进那个 agent 的 `tools`（§4）。
 
 ★ 配置里的 `env:` **不替换**继承来的环境，而是**叠在它上面**。
   `env:` 为空的配置，产出的子进程仍然有一个完整的环境。
@@ -554,7 +554,7 @@ allows: [write_file, edit_file, execute]
   上是同一种形状：*这些工具里哪些不用点头*。★ 它们的 `allows:` 是**叠加的** —— 加在代码
   那份缺省清单上（`agentkit/build/tools.go:61`：读的那几个 `ls` `read_file` `glob` `grep`，
   委派的那几个 `task` `write_todos`，读技能的 `skill`），并不能把名字拿走。放宽是文件的活，
-  收窄是某个 agent 的 `disabled_tools`。见 `docs/config-design.md` §6.6。
+  收窄是某个 agent 的 `tools`。见 `docs/config-design.md` §6.6。
 
 #### `tools/kb.yaml`
 
@@ -899,7 +899,7 @@ Policy.TierOf("mcp__github__create_issue")
 ★ **一个工具的档位写在它自己的文件里，用那个文件自己的词儿。**
 现在**没有全局清单**了（§4）：**缺省**是 `ask`，而例外由**提供**那个工具的文件点名 ——
   所以「不被暴露」恰好在两个地方说：一个文件自己的 `allows:`，
-  以及某个 agent 的 `disabled_tools`：
+  以及某个 agent 的 `tools`：
 
 ```yaml
 # .openheron/mcps/github.yaml
@@ -919,10 +919,11 @@ allows: [read_issue, list_issues]
 | 位置 | 词儿 | 决定什么 |
 |---|---|---|
 | 某个文件的 `tools` / `allows` | **那个文件自己的**名字（`create_issue`） | 从 server 提供的工具里暴露哪些，以及其中哪些不用点头 |
-| 某个 agent 的 `disabled_tools` | 对外的名字 | 这个 agent 拿不到这些工具 |
+| 某个 agent 的 `tools` | 对外的名字 | 这个 agent 能用这些工具，别的都不行 |
 
-★ **顺序**：先提供这个工具的文件，然后是 agent 的收窄 ——
-  收窄只把这个工具从那个 agent 那里摘掉，别的一概不管。
+★ **顺序**：先提供这个工具的文件，然后是 agent 的清单 ——
+  它决定的是那个 agent 看得见什么，别的都不动。★ **挂载排在两者之前**：
+  agent 没挂载的 server，两条规则都没有工具可谈。
 
 ★ **文件除了那一个键之外没有自己的档位**，而这是刻意的：「不被暴露」
   本来就是 `allows:` 清单的活。★ 而且**没有第三份清单** —— 全局那份跟着
@@ -969,7 +970,7 @@ allows: [read_issue, list_issues]
 
 ★ **文件系统工具也有自己的文件** —— `tools/filesystem.yaml` —— 于是它们的档位是被写下来的，
   不再只是隐含的。★ 它是**调音旋钮**，不是开关：中间件无条件挂上那些工具，所以这个文件放宽
-  它们的例外，而某个 agent 的 `disabled_tools` 收窄它们（`agentkit/build/tools.go:61` 是它
+  它们的例外，而某个 agent 的 `tools` 清单决定它能用哪些（`agentkit/build/tools.go:61` 是它
   往上加的那份缺省）。见 `docs/config-design.md` §6.6。
 
 ### 7.4 run ledger 说什么
@@ -1251,7 +1252,7 @@ headers:
 | 视图 | 配置面视图列出已配置的服务器 | `api/v2_mcps_test.go` `TestV2ConfigListsTheConfiguredServers` |
 | 视图 | 每个已配置的服务器恰好出现一次，而 agent 不用的那个 server 是 `unused` 且没有工具行 | `agentkit/build/mcpstatus_test.go` `TestEveryConfiguredServerAppearsExactlyOnce`、`TestAServerTheAgentDoesNotUseIsUnusedAndHasNoToolRows` |
 | 视图 | 一个够不着的服务器报出错误并留住它上一次成功的清单 | `agentkit/build/mcpstatus_test.go` `TestAnUnreachableServerReportsTheErrorAndKeepsItsLastListing` |
-| 视图 | server 不在清单里时理由是 `mcps`，工具被禁时是 `disabled_tools` | `agentkit/build/mcpstatus_test.go` `TestTheServerNarrowingIsTheReasonTheAgentsViewReports`、`TestTheReasonIsTheToolRuleWhenTheServerIsThere` |
+| 视图 | 理由是 `tools` —— 决定它的是 agent 自己的清单 | `agentkit/build/mcpstatus_test.go` `TestTheAgentsViewReportsTheToolsListAsTheReason`、`TestTheReasonIsTheToolRuleWhenTheServerIsThere` |
 | 视图 | 面板去问管理者，而管理者会启动那个服务器；档位就是闸门自己的那个 | `agentkit/build/mcpstatus_test.go` `TestThePanelAsksTheManagerAndTheManagerStartsTheServer`、`TestThePanelShowsTheTierTheGateWouldUse` |
 | 面板 | 面板把两个名字与档位都显示出来，也照实说它够不着什么 | `web/test/e2e/mcps.spec.ts` |
 | 面板 | 空状态说的是没有配置任何服务器 | `web/test/e2e/mcps.spec.ts` |
@@ -1272,7 +1273,7 @@ headers:
 | 文档 | 改了什么 |
 |---|---|
 | `docs/architecture.md` | 工具装配路径加上 MCP provider；`mcps/` 分区与 agent 的 `mcps:` 键进入配置表 |
-| `docs/config-design.md` | `mcps/` 分区（§6.7）与 agent 的 `disabled_tools` 里的前缀模式（§6.3）变成**已实现**；★ 而且**全局 deny 清单跟着 `policy/` 分区一起走了** —— §6.3 现在讲的就是整个档位模型：没有分区、没有全局清单、缺省是 `ask` |
+| `docs/config-design.md` | `mcps/` 分区（§6.7）与 agent 的 `tools` 里的前缀模式（§6.3）**已实施**；★ 而且**全局 deny 清单跟着 `policy/` 分区一起走了** —— §6.3 现在讲的就是整个档位模型：没有分区、没有全局清单、缺省是 `ask`。★ agent 自己的几张清单都是白名单，缺省**什么都没有** |
 | `docs/user-manual.md` | 怎么配一个服务器、界面上看到的名字长什么样，以及 `/mcps` 命令显示什么（§11.5） |
 | `docs/developer-manual.md` | 「加一个分区」的配方加上 `mcps/` 这一例 |
 | `README.md` | HTTP 参考加上 `GET /v2/mcps` |
@@ -1347,7 +1348,7 @@ headers:
   工具集是**整个快照一份**（`agentkit/build/snapshot.go:40-45` ——
   `buildHeavy` 跑在一个 `sync.Once` 底下），每个 agent 共享它。
 
-⇒ **收窄发生在 agent 的表里**，也就是 `disabled_tools` 已经在收窄工具的那个地方
+⇒ **收窄发生在 agent 的表里**，也就是它的 `tools` 清单已经在决定一切的那个地方
   （`agentkit/build/gate.go:33` —— `Table.Filter` 在 agent 开跑之前就把工具从
   `runCtx.Tools` 里摘掉，所以模型从来看不见它们）。
 
@@ -1414,13 +1415,12 @@ headers:
 | `servers[].tools[].exposedName` | 模型看到的那一个名字（§3） |
 | `servers[].tools[].tier` | 那个名字在闸门那儿的判定（§1.3） |
 | `servers[].tools[].status` | `available` —— 这个 agent 拿得到；`skipped` —— server 提供了它而它没有被暴露（§3.2）；`blocked` —— 暴露了，但这个 agent 拿不到 |
-| `servers[].tools[].reason` | 它为什么拿不到：`disabled_tools`、`mcps`、`name_too_long` 或 `name_collision` |
+| `servers[].tools[].reason` | 它为什么拿不到：`tools`、`name_too_long` 或 `name_collision` |
 
-★ **server 那一层更粗，而且它先报。** 一个工具可能同时被两件事挡住 ——
-  这个 server 不在这个 agent 的 `mcps:` 清单里，**而且**这个工具在它的
-  `disabled_tools` 里。⇒ 理由是 `mcps`：那个 server 压根不在，而更细的那条规则
-  对它本来也说不着什么。★ 换个顺序，就会为一个 agent 根本没有的 server 报一条
-  工具级的规则。
+★ **拿不到的理由只剩一个，就是 agent 自己的清单。** 旧的 `mcps` 理由跟着产生它的
+  那一层一起走了：agent 没挂载的 server 根本没有工具可挡，所以没有更粗的规则可说。
+  ★ `name_too_long` 与 `name_collision` 是另一类 —— 它们说的是 server 选的**名字**，
+  不是这个 agent（§3.2）。
 
 ★ **配置面视图也列出那些服务器。** `GET /v2/config` 加上已配置服务器的名字与传输方式
   （`api/v2_introspect.go:392`）：配置说**什么存在**，面板说**什么起来了**。
@@ -1451,7 +1451,7 @@ headers:
   这个工具*，而不是*这次调用会成功*。一个倒下的服务器的那几行是它曾经有的工具；
   这次调用通不通，那是服务器的状态该说的。
 
-★ **理由是记号，解释是面板的事。** `disabled_tools` 与 `mcps` 是机器值，
+★ **理由是记号，解释是面板的事。** `tools` 是机器值，
   与错误体里的 `code` 一样；解释它们的那句英文属于界面，不属于线缆。
 
 ### 11.5 那个面板

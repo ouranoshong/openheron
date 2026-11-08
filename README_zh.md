@@ -12,7 +12,7 @@
 「谁能干什么」变成几条硬规则：
 
 - **工具权限是点名的，缺省是要问** —— 没人点名的工具先问一声；例外由提供工具的那个文件的
-  `allows:` 点名，内层每个 agent 再用自己的 `disabled_tools` 收窄。
+  `allows:` 点名，每个 agent 再说明自己能用其中哪些。
 - **委派有深度上限** —— 入口 agent 是第 0 层，深度 `d` 的 agent 当且仅当 `d < max_depth`
   才能再生子 agent；拓扑超限**启动期就报错**，不静默截断。
 - **一个会话能同时跑多个 agent** —— 互不依赖的活并行分派。
@@ -113,18 +113,24 @@ description: "task: the concrete executor. Writes files per the task order…"
 model: deepseek/deepseek-flash
 max_iterations: 50
 reasoning: low
-disabled_tools: [kb_index]
+tools: [ls, read_file, write_file, edit_file, glob, grep, execute, write_todos]
+mcps: []
 ---
 ```
 
 frontmatter 是**严格解码**的 —— 写错一个键就是启动错误，不会被忽略。可用键：
-`description`、`model`、`max_iterations`、`subagents`、`disabled_tools`、`skills`、
+`description`、`model`、`max_iterations`、`subagents`、`tools`、`mcps`、`skills`、
 `temperature`、`max_tokens`、`reasoning`。
 
 - `model` 必填，格式 `<provider>/<model>`，**不继承、不回退** —— 解析不了就在启动时报错。
 - `subagents` 声明拓扑；引用的 agent 必须存在，且**不能成环**。
+- `tools` 是这个 agent 能用的工具白名单，名字就是模型看见的那些。
+  **不写就是一个工具都没有** —— 这张清单就是全部答案。
+- `mcps` 是这个 agent 挂载的 MCP 服务器清单；挂载一个就是起一个子进程，所以
+  **不写就是不起任何服务器**。服务器的工具按组合名点名（`mcp__<server>__<tool>`，
+  或通配 `mcp__<server>__*`）。
 - `skills` 是这个 agent 能用的技能白名单，名字就是 `skills/` 下的文件夹名。
-  **不写就是全部技能**，写空列表就是**一个都没有**。
+  **不写就是没有技能**，写空列表也一样。
 - `reasoning` 写的是**档位名**（如 `high`），由 `llm/*.yaml` 的 `models[].reasoning` 表翻译成
   各厂商不同的字段。**这张表不填，档位就被静默忽略** —— agent 写着 `reasoning: high` 而
   端点没有 `high`，等于「完全不思考」，且没有任何报错。
@@ -137,17 +143,20 @@ frontmatter 是**严格解码**的 —— 写错一个键就是启动错误，�
 | 位置 | 点名什么 | 作用范围 |
 |---|---|---|
 | `tools/*.yaml` 与 `mcps/<server>.yaml` 的 `allows:` | 那个文件（或那个服务器）里不用点头的工具 | 所有 agent |
-| `agents/*.md` 的 `disabled_tools` | 这个 agent 根本拿不到的工具 | 只影响这一个 agent |
+| `agents/*.md` 的 `tools` | 这个 agent 能用的工具 | 只影响这一个 agent |
 
 ★ 两处**分开存储、从不合并** —— 合并就丢掉了「是哪一层拦的」这个信息。档位表是共享的，
-`disabled_tools` 只能把工具拿走，永远不会还回来。
+文件的 `allows:` 只往上**加**；某个 agent 能用哪些，由它自己的 `tools` 清单决定。
 
 ★ **文件说自己的词汇。** `tools/http.yaml` 说 `request_get`，MCP 服务器说 `create_issue`
 —— 不是 `mcp__github__create_issue`。翻译成模型看见的名字，只发生一次，就在工具挂载的地方。
 
 ★ **没有全局 deny 清单。** 「不被暴露」只说两处：文件自己的 `allows:` 清单，和 agent 的
-`disabled_tools`。再来一张全局表就多一处要同步的东西 —— 而且那是唯一一张必须说「暴露后的
+`tools` 清单。再来一张全局表就多一处要同步的东西 —— 而且那是唯一一张必须说「暴露后的
 名字」的表，而工具自己的文件说的是它们自己的词汇。
+
+★ **旧的 `disabled_tools` 键会被拒绝**，而且提示说清了两个方向正好相反：`tools` 说的是
+一个 agent **拿到**哪些工具。只把键名一改，就把黑名单变成了白名单，且一声不吭。
 
 ### 深度上限
 
