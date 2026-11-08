@@ -440,19 +440,31 @@ the durable side now decides the phase.
 
 ### 4.2 The client side
 
-★ **The busy flag becomes a scanned fact, not a stream-derived inference.**
-Today the client infers "the session is free" from the stream ending. Under
-the new contract:
+★ **Implemented**, and it is one sentence: **the client may only clear `busy`
+on the word of a scan.** A stream that ends without a scan leaves the flag as
+it was.
 
-| Today | Proposed |
+| Where the flag used to come from | Where it comes from now |
 |---|---|
-| stream ends → `onDone` → assume idle (`web/src/lib/store/actions.ts:271-275`) | stream ends → **re-scan** → decide |
-| `stop()` sets `busy: false` optimistically (`web/src/lib/store/actions.ts:339`) | `stop()` → abort → **re-scan** → decide |
-| 409 `session_busy` → `markBusy` (`web/src/lib/store/actions.ts:464-485`) | unchanged — but the message is backed by a scanned fact |
-| page load → `seedFromHistory` reads `state` (`web/src/lib/store/history.ts:100-112`) | unchanged — now a scan of the ledger |
+| stream ends → `onDone` → assume idle | stream ends → **re-scan** (`scanBusy`, `web/src/lib/store/actions.ts`) |
+| `stop()` sets `busy: false` optimistically | `stop()` → abort → **re-scan** → decide |
+| 409 `session_busy` → `markBusy` | unchanged — the message is now backed by a scanned fact |
+| page load → `seedFromHistory` reads `state` | unchanged — a scan of the ledger |
 
-The rule is one sentence: **the client may only clear `busy` on the word of a
-scan.** A stream that ends without a scan leaves the flag as it was.
+★ **Four cases hold the rule** (`web/test/store-busy.test.ts`): another
+surface's run reads as busy, no active run reads as free, the surface's own
+run is not "busy", and a **failed scan leaves the flag alone** — guessing is
+what the scan exists to stop.
+
+★ **"Replace the barrier with a scan" stops at the client, and it has to.**
+The barrier in the response path answers a different question: "may a caller
+that has just read the end of this response immediately send the next one?" The
+ledger cannot answer that faster than the barrier does, because the terminal
+row is written **after** the archive (§3.4) — the row that says "this run is
+over" lands at the same instant the barrier opens. A scan-based gate would
+therefore refuse the next message in exactly the same window. What the scan
+does buy is that a client never has to *infer* idleness from a stream; what it
+cannot buy is a server-side promise no server-side wait establishes.
 
 ★ Why this matters more than it looks: the current client can be wrong in the
 **dangerous direction**. If the server is still finalizing a run and the client
