@@ -655,3 +655,96 @@ func TestARejectedMergeLeavesNoServerFile(t *testing.T) {
 		t.Fatal("the server file must not be written when the merge is rejected")
 	}
 }
+
+// ★ `openheron init` and the settings editor's "New file" must hand out the
+// same skeleton. They used to reach it by two roads — this package walked the
+// templates directory, the editor asked the manifest — and two roads to one
+// answer is one road too many: the day they disagree, the file that works
+// from the editor is not the file that works from the terminal.
+func TestInitWritesWhatTheManifestSays(t *testing.T) {
+	e := newEnv(t)
+	p := e.plan(Options{Model: "deepseek/deepseek-flash", Tools: true})
+
+	svc := e.svc()
+	m, err := svc.Manifest(nil)
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+
+	planned := map[string]string{}
+	for _, f := range p.Files {
+		planned[f.Rel] = string(f.Content)
+	}
+
+	for _, dir := range []string{spec.DirTools, spec.DirMCP, spec.DirServer} {
+		var checked int
+		for rel, tpl := range m.Templates {
+			if !strings.HasPrefix(rel, dir+"/") {
+				continue
+			}
+			checked++
+			got, ok := planned[rel]
+			if !ok {
+				t.Fatalf("the manifest ships %s and init did not write it: %v", rel, rels(p))
+			}
+			// ★ These partitions carry no placeholders, so the planned file
+			//   is the template verbatim. agents/ does carry them (`{{model}}`)
+			//   and is compared through spec.TemplateFor instead.
+			if got != tpl {
+				t.Fatalf("%s differs between the manifest and init", rel)
+			}
+			// ★ TemplateFor answers for the files a reader may create, so it
+			//   refuses a partition that is not editable — server/ is written
+			//   by init and by nothing else. The manifest is the wider answer.
+			if _, err := spec.ValidatePath(rel); err == nil {
+				viaSpec, err := spec.TemplateFor(rel, nil)
+				if err != nil {
+					t.Fatalf("TemplateFor(%s): %v", rel, err)
+				}
+				if viaSpec != tpl {
+					t.Fatalf("spec.TemplateFor(%s) disagrees with the manifest", rel)
+				}
+			}
+		}
+		if checked == 0 {
+			t.Fatalf("no template under %s/; the partition would not be created", dir)
+		}
+	}
+}
+
+// ★ The skip list is the manifest's too: a file that is already there is
+// reported, not overwritten, and the answer must not depend on the working
+// directory or on a second traversal of the disk.
+func TestInitKeepsWhatIsAlreadyThere(t *testing.T) {
+	e := newEnv(t)
+	first := e.plan(Options{Model: "deepseek/deepseek-flash", Tools: true})
+	if err := first.Apply(e.svc()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	before := map[string]string{}
+	for _, rel := range []string{"tools/http.yaml", "mcps/example.yaml"} {
+		b, err := os.ReadFile(filepath.Join(e.root, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		before[rel] = string(b)
+	}
+
+	second := e.plan(Options{Model: "deepseek/deepseek-flash", Tools: true})
+	for _, rel := range rels(second) {
+		t.Fatalf("%s was planned a second time", rel)
+	}
+	for _, rel := range []string{"tools/http.yaml", "mcps/example.yaml"} {
+		if !hasRel(second.Skipped, rel) {
+			t.Fatalf("%s must be reported as kept, got %v", rel, second.Skipped)
+		}
+		b, err := os.ReadFile(filepath.Join(e.root, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if string(b) != before[rel] {
+			t.Fatalf("%s was rewritten", rel)
+		}
+	}
+}

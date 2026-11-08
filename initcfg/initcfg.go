@@ -2,8 +2,6 @@ package initcfg
 
 import (
 	"fmt"
-	"maps"
-	"os"
 	"path"
 	"path/filepath"
 	"slices"
@@ -43,6 +41,10 @@ type Plan struct {
 	Model   string
 	EnvHint string
 	force   bool
+
+	// existing is the manifest's answer to "which files are there": the
+	// same answer the settings editor gets, asked once for the whole plan.
+	existing map[string]bool
 }
 
 func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
@@ -51,6 +53,19 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 	merged, readErr := svc.LoadUnchecked()
 	if readErr != nil {
 		return nil, fmt.Errorf("init: read the configuration: %w", readErr)
+	}
+	// ★ One manifest for the whole plan. It answers the two questions init
+	//   asks — which files are already there (the skip list) and what a new
+	//   file starts from (the content) — and the settings editor asks it the
+	//   same ones. A second traversal of the templates package here is how
+	//   `init` and "New file" drift apart.
+	manifest, err := svc.Manifest(merged)
+	if err != nil {
+		return nil, fmt.Errorf("init: read the configuration tree: %w", err)
+	}
+	p.existing = make(map[string]bool, len(manifest.Items))
+	for _, it := range manifest.Items {
+		p.existing[it.Path] = it.Exists
 	}
 	if _, err := svc.Load(); err != nil {
 		if merged.Agents[spec.DefaultAgentID] != nil {
@@ -72,7 +87,7 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 	} else {
 		// ★ The whole partition, not a list of files: the templates package
 		//   holds the files, and a new one comes along on its own.
-		if err := copySection(p, spec.DirAgent, map[string]string{
+		if err := copySection(p, manifest.Templates, spec.DirAgent, map[string]string{
 			"model": choice.Ref,
 		}); err != nil {
 			return nil, err
@@ -111,7 +126,7 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 	if !opts.Tools {
 		p.Notes = append(p.Notes, "tools/ was skipped (--tools writes the tool configurations)")
 	} else {
-		if err := copySection(p, spec.DirTools, nil); err != nil {
+		if err := copySection(p, manifest.Templates, spec.DirTools, nil); err != nil {
 			return nil, err
 		}
 	}
@@ -128,7 +143,7 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 	//   editor hands out its own copy (the editor is served by the API,
 	//   and the API cannot import this package — it would be a cycle),
 	//   and a test pins the two against each other.
-	if err := copySection(p, spec.DirMCP, nil); err != nil {
+	if err := copySection(p, manifest.Templates, spec.DirMCP, nil); err != nil {
 		return nil, err
 	}
 
@@ -137,7 +152,7 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 	// ★ server/ is not hot-reloaded and the config editor may not write it,
 	//   so init writes it directly (see Apply). The values are the code's own
 	//   defaults: writing them changes nothing, it only makes them visible.
-	if err := copySection(p, spec.DirServer, nil); err != nil {
+	if err := copySection(p, manifest.Templates, spec.DirServer, nil); err != nil {
 		return nil, err
 	}
 	p.Notes = append(p.Notes,
@@ -148,11 +163,10 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 
 // copySection copies one partition's templates into the plan.
 //
-// ★ The **templates package** decides which files a partition holds; this
+// ★ The **manifest** decides which files a partition holds; this function
 //
-//	function decides what to do with them. ★ A file name is the template's
-//	business: adding a template to the package must not mean adding a
-//	name here.
+//	decides what to do with them. Adding a template to the templates
+//	package must not mean adding a name here.
 //
 // ★ The existence check is p.add's: a file that is already there is
 //
@@ -161,14 +175,27 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 // ★ The llm/ partition is the one that does not come here: its files are
 //
 //	alternatives — the provider's own template and the generic fallback —
-//	and a partition of alternatives is not a partition to copy.
-func copySection(p *Plan, dir string, placeholders map[string]string) error {
-	files, err := templates.Dir(dir)
-	if err != nil {
-		return err
+//	and a partition of alternatives is not a partition to copy, which is
+//	why the manifest carries no llm/ templates at all.
+func copySection(p *Plan, files map[string]string, dir string,
+	placeholders map[string]string) error {
+
+	prefix := dir + "/"
+	rels := make([]string, 0, len(files))
+	for rel := range files {
+		if strings.HasPrefix(rel, prefix) {
+			rels = append(rels, rel)
+		}
 	}
-	for _, rel := range slices.Sorted(maps.Keys(files)) {
-		content, err := renderTemplate(rel, placeholders, nil)
+	if len(rels) == 0 {
+		// ★ Loud, not silent: a partition that ships no template would
+		//   otherwise be a directory init quietly does not create, and the
+		//   first symptom would be a configuration that does not load.
+		return fmt.Errorf("init: the manifest ships no template for %s/", dir)
+	}
+	slices.Sort(rels)
+	for _, rel := range rels {
+		content, err := renderOne(rel, files[rel], placeholders, nil)
 		if err != nil {
 			return err
 		}
@@ -228,8 +255,7 @@ func isDirectWrite(f spec.File) bool {
 }
 
 func (p *Plan) add(rel string, content []byte) {
-	dst := filepath.Join(p.Dir, filepath.FromSlash(rel))
-	if _, err := os.Stat(dst); err == nil && !p.force {
+	if p.existing[rel] && !p.force {
 		p.Skipped = append(p.Skipped, rel)
 		return
 	}
@@ -329,11 +355,6 @@ func usableModels(merged *spec.Config) []string {
 	return out
 }
 
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
 func defaultEnvName(provider string) string {
 	return strings.ToUpper(strings.ReplaceAll(provider, "-", "_")) + "_API_KEY"
 }
@@ -374,6 +395,17 @@ func renderTemplate(rel string, values, fallbacks map[string]string) ([]byte, er
 	if err != nil {
 		return nil, fmt.Errorf("init: read template %s: %w", rel, err)
 	}
+	return renderOne(rel, raw, values, fallbacks)
+}
+
+// renderOne substitutes the placeholders in one template already in hand.
+//
+// ★ The content comes from the caller — the manifest for a partition, the
+//
+//	templates package for an llm/ provider — and only the substitution rules
+//	are shared. Those are the ones that have to agree: how a value is
+//	written into a file is not a decision two callers may take separately.
+func renderOne(rel, raw string, values, fallbacks map[string]string) ([]byte, error) {
 	out, err := templates.Render(raw, values, fallbacks)
 	if err != nil {
 		return nil, fmt.Errorf("init: template %s: %w", rel, err)
