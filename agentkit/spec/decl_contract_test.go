@@ -16,7 +16,7 @@ func TestCategoryTemplatesDecodeStrictly(t *testing.T) {
 	})
 
 	t.Run("agent", func(t *testing.T) {
-		fm, _, err := splitFrontmatter([]byte(Skeleton(DirAgent, nil)))
+		fm, _, _, err := splitFrontmatter([]byte(Skeleton(DirAgent, nil)))
 		if err != nil {
 			t.Fatalf("the agent template must have a frontmatter: %v", err)
 		}
@@ -32,7 +32,7 @@ func TestCategoryTemplatesDecodeStrictly(t *testing.T) {
 //	has to name the skill key: a field nobody can find is a field nobody
 //	uses.
 func TestTheAgentTemplateNamesTheSkillKey(t *testing.T) {
-	fm, _, err := splitFrontmatter([]byte(Skeleton(DirAgent, nil)))
+	fm, _, _, err := splitFrontmatter([]byte(Skeleton(DirAgent, nil)))
 	if err != nil {
 		t.Fatalf("the agent template must have a frontmatter: %v", err)
 	}

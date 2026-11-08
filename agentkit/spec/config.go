@@ -400,7 +400,7 @@ func (s *Service) loadDir(dir, ext, cat string, ms map[string]*mutation,
 				continue
 			}
 			if err := loader(name, m.Content); err != nil {
-				return fmt.Errorf("config: parse %s: %w", name, err)
+				return fmt.Errorf("config: parse %s: %w", m.Rel, err)
 			}
 			continue
 		}
@@ -409,7 +409,10 @@ func (s *Service) loadDir(dir, ext, cat string, ms map[string]*mutation,
 			return fmt.Errorf("config: read %s: %w", filepath.Join(dir, name), err)
 		}
 		if err := loader(name, data); err != nil {
-			return fmt.Errorf("config: parse %s: %w", filepath.Join(dir, name), err)
+			// ★ The path, not the bare name: two partitions can hold a file
+			//   called web_search.yaml, and "parse web_search.yaml" would not
+			//   say which one. The same wording as the write path's errors.
+			return fmt.Errorf("config: parse %s: %w", cat+"/"+name, err)
 		}
 	}
 

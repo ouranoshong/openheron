@@ -1566,7 +1566,10 @@ export function startFakeServer(port = 0): FakeServer {
         const body = (await readJSON(req))
         const probe = writeSettingOnProbe(body)
         if (probe) return probe
-        return json({ ok: true, configVersion: "fake-v1" })
+        // ★ The shape the real server answers with, `issues` and all: a fake
+        //   that omits the field lets the client code for its absence go
+        //   untested until it meets a real loader.
+        return json({ ok: true, issues: [], configVersion: "fake-v1" })
       }
 
       if (path === "/v2/settings/item") {

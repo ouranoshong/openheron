@@ -1,0 +1,200 @@
+package spec
+
+import (
+	"errors"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+// The two severities a Diagnostic may carry.
+//
+// ★ The split is not about how bad the problem is but about **who decides**:
+//
+//	an error means the configuration will not load, and there is nothing to
+//	discuss; a hint means it loads, and the author is told something they
+//	probably did not intend. Merging the two would force a caller to parse
+//	prose to find out whether it may save the file.
+const (
+	SeverityError = "error"
+	SeverityHint  = "hint"
+)
+
+// Issue is one thing wrong with a configuration file, and where it is.
+type Issue struct {
+	// Path is relative to the configuration root. Empty when the problem is
+	// not attributable to one file — a cross-file rule names the files in its
+	// message instead of pretending to point at one.
+	Path string `json:"path,omitempty"`
+
+	// Line is 1-based, and 0 when the issue is about the file as a whole or
+	// about a combination of files. ★ 0 is not "line 0": it means "no line",
+	// and a client must not render a marker for it.
+	Line int `json:"line"`
+
+	Severity string `json:"severity"`
+	Message  string `json:"message"`
+}
+
+// Diagnostics is the answer to "would this tree, or this file, load?".
+type Diagnostics struct {
+	OK            bool    `json:"ok"`
+	Issues        []Issue `json:"issues"`
+	ConfigVersion string  `json:"configVersion"`
+}
+
+// Diagnostics reports what is wrong with a candidate file.
+//
+// The path and the content are checked apart from the tree first, because
+// those two failures are not about loading at all: a path outside the
+// configuration root, or an API key written out in plain text, is refused
+// before anything is read. They are returned as an error, which the HTTP
+// layer turns into a 400 — they are not "issues" a user could fix by
+// editing what they typed into this form.
+//
+// What remains is the trial merge, and it fails in three shapes that a
+// reader needs told apart:
+//
+//  1. the YAML did not decode — yaml.v3 says which line, and it survives
+//     being carried up here;
+//  2. the tree no longer holds together — a cross-file rule, no line;
+//  3. it loads, but something in it is probably not what was meant —
+//     `Deferred()` already collects those, and they become hints.
+//
+// ★ The trial is run at the `loadOnly` + `validate` level rather than
+// through loadWithMany, because loadWithMany discards the config it built
+// when validate fails — and the hints live on that config. A diagnostics
+// endpoint that goes quiet about hints the moment one rule breaks would
+// report strictly less than the loader knows.
+func (s *Service) Diagnostics(rel string, content []byte) (*Diagnostics, error) {
+	cat, err := ValidatePath(rel)
+	if err != nil {
+		return nil, err
+	}
+	d := s.diagnose(rel, map[string]*mutation{rel: {Rel: rel, Content: content}})
+	if cat.Dir == DirLLM {
+		if line := secretLiteralLine(content); line > 0 {
+			// ★ Ahead of the rest, not instead of it: the key makes the file
+			//   unsavable, but hiding the other issues behind it would send
+			//   the user round the loop twice.
+			d.OK = false
+			d.Issues = append([]Issue{{
+				Path: rel, Line: line, Severity: SeverityError,
+				Message: secretLiteralMessage,
+			}}, d.Issues...)
+		}
+	}
+	return d, nil
+}
+
+// Check reports what is wrong with the tree as it is on disk.
+//
+// ★ Whole-tree checking is fail-fast: the loader stops at the first file it
+// cannot read, so this reports that one error plus whatever hints were
+// collected before it. Reporting *every* broken file would mean turning the
+// loader from "return an error" into "accumulate issues", which is a larger
+// change than the one this answers — and editing a configuration is one file
+// at a time anyway.
+func (s *Service) Check() *Diagnostics {
+	return s.diagnose("", nil)
+}
+
+func (s *Service) diagnose(rel string, ms map[string]*mutation) *Diagnostics {
+	d := &Diagnostics{OK: true, Issues: []Issue{}}
+
+	cfg, err := s.loadOnly(ms)
+	if err != nil {
+		d.OK = false
+		d.Issues = append(d.Issues, parseIssues(rel, err)...)
+		d.ConfigVersion = s.Fingerprint()
+		return d
+	}
+	if err := cfg.validate(); err != nil {
+		d.OK = false
+		d.Issues = append(d.Issues, Issue{
+			Path: rel, Severity: SeverityError, Message: err.Error(),
+		})
+	}
+	for _, note := range cfg.Deferred() {
+		d.Issues = append(d.Issues, Issue{Severity: SeverityHint, Message: note})
+	}
+	d.ConfigVersion = s.Fingerprint()
+	return d
+}
+
+// lineRe matches what yaml.v3 puts in front of the line it objects to, in
+// both shapes it uses: "  line 2: field x not found" inside a TypeError's
+// list, and "yaml: line 3: could not find expected ':'" as a bare error.
+var lineRe = regexp.MustCompile(`(?:^|\s)line (\d+): (.*)$`)
+
+// parseShift records how many lines were cut off before the block the YAML
+// decoder was given.
+//
+// ★ An agent file is decoded from its frontmatter, not from the whole file,
+//
+//	so "line 2" means the second line **of the frontmatter** — the opening
+//	`---` is line 1 of the file and an empty line 1 of the block, so the two
+//	happen to agree until someone leaves a blank line above the `---`. Then
+//	they silently disagree, and a line number that is quietly off by two is
+//	worse than none: it sends the reader to the wrong place with full
+//	confidence.
+type parseShift struct {
+	lines int
+	err   error
+}
+
+func (e *parseShift) Error() string { return e.err.Error() }
+
+func (e *parseShift) Unwrap() error { return e.err }
+
+// parseIssues turns a load failure into issues a reader can act on.
+func parseIssues(rel string, err error) []Issue {
+	shift := 0
+	var ps *parseShift
+	if errors.As(err, &ps) {
+		shift = ps.lines
+	}
+
+	base := err
+	for {
+		next := errors.Unwrap(base)
+		if next == nil {
+			break
+		}
+		base = next
+	}
+
+	// ★ The innermost error, not the outermost message: the wrappers add
+	//   "config: parse agents/main.md: main: frontmatter:" — true, and noise
+	//   in front of the one sentence the user needs.
+	var te *yaml.TypeError
+	if errors.As(base, &te) {
+		out := make([]Issue, 0, len(te.Errors))
+		for _, line := range te.Errors {
+			out = append(out, yamlIssue(rel, line, shift))
+		}
+		return out
+	}
+	return []Issue{yamlIssue(rel, base.Error(), shift)}
+}
+
+func yamlIssue(rel, text string, shift int) Issue {
+	msg := strings.TrimSpace(text)
+	line := 0
+	if m := lineRe.FindStringSubmatch(msg); m != nil {
+		if n, err := strconv.Atoi(m[1]); err == nil {
+			line = n
+		}
+		msg = m[2]
+	}
+	msg = strings.TrimPrefix(msg, "yaml: ")
+	msg = strings.TrimSpace(msg)
+	// ★ An empty message would render as a marker with nothing beside it;
+	//   say what happened instead of leaving the row blank.
+	if msg == "" {
+		msg = "the file could not be read as YAML"
+	}
+	return Issue{Path: rel, Line: line + shift, Severity: SeverityError, Message: msg}
+}

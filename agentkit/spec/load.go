@@ -71,14 +71,21 @@ func (c *Config) loadProvider(file string, data []byte) error {
 
 func (c *Config) loadAgent(file string, data []byte) error {
 	id := strings.TrimSuffix(file, ".md")
-	fm, body, err := splitFrontmatter(data)
+	fm, body, fmLine, err := splitFrontmatter(data)
 	if err != nil {
 		return fmt.Errorf("%s: %w", id, err)
 	}
 
 	var a decl.Agent
 	if err := decodeStrict(fm, &a); err != nil {
-		return fmt.Errorf("%s: frontmatter: %w", id, err)
+		// ★ The decoder counted lines inside the frontmatter block; the
+		//   reader is looking at the file. The shift is what makes the two
+		//   agree, and it is zero for the ordinary file that opens with `---`.
+		shift := 0
+		if fmLine > 0 {
+			shift = fmLine - 1
+		}
+		return &parseShift{lines: shift, err: fmt.Errorf("%s: frontmatter: %w", id, err)}
 	}
 	a.ID = id
 	a.File = DirAgent + "/" + file
@@ -483,15 +490,23 @@ func ProviderIDOf(ref string) string {
 }
 
 func (c *Config) validate() error {
-	if _, ok := c.Agents[DefaultAgentID]; !ok {
-		return fmt.Errorf("agents/%s.md does not exist or could not be parsed", DefaultAgentID)
-	}
-
 	ids := make([]string, 0, len(c.Agents))
 	for id := range c.Agents {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+
+	// ★ Notices are collected before the hard rules, not after the ones that
+	//   happen to pass. A notice says "you probably did not mean this", and a
+	//   rule that fails elsewhere must not hide it: Diagnostics reports the
+	//   two together, and today's order made a typo'd tool name vanish
+	//   whenever the file also named a model that does not exist.
+	c.noticeCompactionWindows(ids)
+	c.noticeAgentTools(ids)
+
+	if _, ok := c.Agents[DefaultAgentID]; !ok {
+		return fmt.Errorf("agents/%s.md does not exist or could not be parsed", DefaultAgentID)
+	}
 
 	for _, id := range ids {
 		a := c.Agents[id]
@@ -515,8 +530,6 @@ func (c *Config) validate() error {
 	if err := c.validateMCP(); err != nil {
 		return err
 	}
-	c.noticeCompactionWindows(ids)
-	c.noticeAgentTools(ids)
 	return c.validateDepth(ids)
 }
 

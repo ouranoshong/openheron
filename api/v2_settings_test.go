@@ -480,13 +480,13 @@ func TestSettingsValidateAgreesWithSave(t *testing.T) {
 		if got.code != consts.StatusOK {
 			t.Fatalf("%s: validate = %d (%s)", c.name, got.code, got.body)
 		}
-		res := decodeSettings[settingsValidateResult](t, got)
+		res := decodeSettings[spec.Diagnostics](t, got)
 		if res.OK != c.wantOK {
-			t.Errorf("%s: validate ok = %v, want %v (%v)", c.name, res.OK, c.wantOK, res.Errors)
+			t.Errorf("%s: validate ok = %v, want %v (%v)", c.name, res.OK, c.wantOK, res.Issues)
 			continue
 		}
-		if !c.wantOK && len(res.Errors) == 0 {
-			t.Errorf("%s: a failure must carry an error message", c.name)
+		if !c.wantOK && len(res.Issues) == 0 {
+			t.Errorf("%s: a failure must carry at least one issue", c.name)
 		}
 	}
 }
@@ -514,5 +514,44 @@ func TestSettingsRoutesBeatTheStaticCatchAll(t *testing.T) {
 	}
 	if got := callJSON(t, srv, "GET", "/v2/settings", nil); got.code != consts.StatusOK {
 		t.Fatalf("GET /v2/settings = %d, want 200 (%s)", got.code, got.body)
+	}
+}
+
+// ★ The reason this endpoint answers with issues instead of one string: the
+// parser already knows the line, and the editor puts a marker beside it. A
+// response that flattens that back into prose throws away the only thing the
+// round trip bought.
+func TestSettingsValidateReportsIssuesWithLines(t *testing.T) {
+	srv, _, _ := settingsEnv(t)
+
+	got := callJSON(t, srv, "POST", "/v2/settings/validate", settingsValidateBody{
+		Path:    "agents/main.md",
+		Content: "---\nmodel: openai/fast\nbogus_key: 1\n---\nbody\n",
+	})
+	if got.code != consts.StatusOK {
+		t.Fatalf("= %d (%s)", got.code, got.body)
+	}
+	for _, key := range []string{`"ok"`, `"issues"`, `"configVersion"`, `"line"`, `"severity"`, `"message"`, `"path"`} {
+		if !strings.Contains(got.body, key) {
+			t.Fatalf("the answer no longer carries %s: %s", key, got.body)
+		}
+	}
+	if strings.Contains(got.body, `"errors"`) {
+		t.Fatalf("the string list is gone, replaced by issues: %s", got.body)
+	}
+
+	res := decodeSettings[spec.Diagnostics](t, got)
+	if res.OK {
+		t.Fatalf("an unknown key must not validate: %s", got.body)
+	}
+	if len(res.Issues) != 1 {
+		t.Fatalf("issues = %+v, want exactly the unknown key", res.Issues)
+	}
+	iss := res.Issues[0]
+	if iss.Line != 3 || iss.Severity != spec.SeverityError || iss.Path != "agents/main.md" {
+		t.Fatalf("issue = %+v, want line 3 of agents/main.md as an error", iss)
+	}
+	if !strings.Contains(iss.Message, "bogus_key") {
+		t.Fatalf("message = %q", iss.Message)
 	}
 }

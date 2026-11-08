@@ -336,7 +336,7 @@ func TestUnknownSubagentIsRejected(t *testing.T) {
 // ── frontmatter ──────────────────────────────────────────────────────────
 
 func TestFrontmatterAndBodySplit(t *testing.T) {
-	fm, body, err := splitFrontmatter([]byte("---\nmodel: a/b\ndescription: x\n---\n你是助手。\n\n第二段。\n"))
+	fm, body, _, err := splitFrontmatter([]byte("---\nmodel: a/b\ndescription: x\n---\n你是助手。\n\n第二段。\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +349,7 @@ func TestFrontmatterAndBodySplit(t *testing.T) {
 }
 
 func TestFrontmatterUnterminatedIsError(t *testing.T) {
-	if _, _, err := splitFrontmatter([]byte("---\nmodel: a/b\n")); err == nil {
+	if _, _, _, err := splitFrontmatter([]byte("---\nmodel: a/b\n")); err == nil {
 		t.Fatal("a missing closing delimiter must be an error")
 	}
 }

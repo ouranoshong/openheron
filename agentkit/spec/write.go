@@ -404,20 +404,6 @@ func (s *Service) Delete(rel string) (cfg *Config, err error) {
 	return trial, nil
 }
 
-func (s *Service) Validate(rel string, content []byte) error {
-	if _, err := ValidatePath(rel); err != nil {
-		return err
-	}
-	if err := s.checkSecretFor(rel, content); err != nil {
-		return err
-	}
-	m := &mutation{Rel: rel, Content: content}
-	if _, err := s.loadWith(m); err != nil {
-		return &WriteError{Kind: ErrMergeRejected, Rel: rel, Message: err.Error(), Err: err}
-	}
-	return nil
-}
-
 func (s *Service) checkRevision(rel, baseRev string) error {
 	if baseRev == "" {
 		return nil
@@ -444,6 +430,12 @@ func orNone(rev string) string {
 	return rev
 }
 
+// secretLiteralMessage is the one sentence both callers say about a key
+// written out in plain text: the save refuses it, and the editor shows it
+// before the save is attempted.
+const secretLiteralMessage = "api_key must be a reference, not a literal: " +
+	"use ${ENV_VAR} or @file:/path so the secret stays out of the repository"
+
 func (s *Service) checkSecretFor(rel string, content []byte) error {
 	cat, ok := CategoryByDir(path.Dir(path.Clean(filepath.ToSlash(rel))))
 	if !ok {
@@ -456,7 +448,24 @@ func (s *Service) checkSecret(cat Category, rel string, content []byte) error {
 	if cat.Dir != DirLLM {
 		return nil
 	}
-	for _, line := range strings.Split(string(content), "\n") {
+	if secretLiteralLine(content) == 0 {
+		return nil
+	}
+	return writeErrf(ErrSecretLiteral, rel, "%s", secretLiteralMessage)
+}
+
+// secretLiteralLine reports the 1-based line of a literal api_key, or 0 when
+// there is none.
+//
+// ★ A literal key is not something the YAML decoder objects to: by the time
+//
+//	it is a "problem" the file has already parsed, and the tree has already
+//	loaded. It is refused for a reason that belongs to the repository, not to
+//	the parser — which is exactly why it needs its own line number instead of
+//	riding on a parse error, and why the editor can show it while the user is
+//	still typing.
+func secretLiteralLine(content []byte) int {
+	for i, line := range strings.Split(string(content), "\n") {
 		key, val, ok := splitYAMLLine(line)
 		if !ok || key != "api_key" {
 			continue
@@ -471,10 +480,9 @@ func (s *Service) checkSecret(cat Category, rel string, content []byte) error {
 		if strings.HasPrefix(v, "@file:") {
 			continue
 		}
-		return writeErrf(ErrSecretLiteral, rel,
-			"api_key must be a reference, not a literal: use ${ENV_VAR} or @file:/path so the secret stays out of the repository")
+		return i + 1
 	}
-	return nil
+	return 0
 }
 
 func splitYAMLLine(line string) (key, val string, ok bool) {

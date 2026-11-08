@@ -45,12 +45,6 @@ type settingsValidateBody struct {
 	Content string `json:"content"`
 }
 
-type settingsValidateResult struct {
-	OK            bool     `json:"ok"`
-	Errors        []string `json:"errors,omitempty"`
-	ConfigVersion string   `json:"configVersion"`
-}
-
 // SetConfigService wires /v2/settings.
 // Optional: without it the endpoints answer 503. Config is still fully
 // readable through /v2/config, so a caller that only wants to inspect does
@@ -196,13 +190,12 @@ func (s *Server) v2SettingsValidate(_ context.Context, c *app.RequestContext) {
 		return
 	}
 
-	res := settingsValidateResult{OK: true}
-	if err := svc.Validate(rel, []byte(body.Content)); err != nil {
-		res.OK = false
-		res.Errors = []string{err.Error()}
+	d, err := svc.Diagnostics(rel, []byte(body.Content))
+	if err != nil {
+		settingsFail(c, err)
+		return
 	}
-	res.ConfigVersion = svc.Fingerprint()
-	c.JSON(consts.StatusOK, res)
+	c.JSON(consts.StatusOK, d)
 }
 
 func (s *Server) pathArg(c *app.RequestContext, rel string) (string, bool) {
