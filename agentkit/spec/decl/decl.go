@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -590,11 +591,40 @@ func (d *LenientDuration) UnmarshalYAML(n *yamlNode) error {
 
 func (d LenientDuration) Duration() time.Duration { return time.Duration(d) }
 
-var badDurations []string
+// badDurations is the sink for durations that did not parse.
+//
+// ★ It is package-level because `UnmarshalYAML` is handed a node and nothing
+// else: the decoder calls into here while walking the document, so there is no
+// caller to hand a collector to. That makes it **shared between every load in
+// the process**, and loads are not serialised — a configuration editor asks
+// `/v2/settings/validate` while a save runs its own trial merge, and both walk
+// the tree. Without the lock those two appends are a data race.
+//
+// ★ A mutex makes the append safe; it does not make the *contents* per-load. A
+// message about one tree can be drained into another tree's `deferred` when
+// the two overlap. That is a hint attributed to the wrong file, not a wrong
+// decision, and the alternative — threading a collector through a decoder API
+// that offers no place for one — buys correctness at the cost of a second way
+// to parse every file.
+var (
+	badDurationMu sync.Mutex
+	badDurations  []string
+)
 
-func recordBadDuration(msg string) { badDurations = append(badDurations, msg) }
+func recordBadDuration(msg string) {
+	badDurationMu.Lock()
+	defer badDurationMu.Unlock()
+	badDurations = append(badDurations, msg)
+}
 
+// BadDurations drains the sink.
+//
+// ★ Draining under the same lock as the append is what makes "take everything
+// that was recorded" one step: a reader that copied and then cleared would
+// lose whatever landed in between.
 func BadDurations() []string {
+	badDurationMu.Lock()
+	defer badDurationMu.Unlock()
 	out := append([]string(nil), badDurations...)
 	badDurations = nil
 	return out
