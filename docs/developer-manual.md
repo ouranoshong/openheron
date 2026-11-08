@@ -935,10 +935,14 @@ cell with no floor is a column squeezed into a sliver.
 ★ The **theme** is decided **before the first paint**, by a script in `web/index.html`, and
 read from one place — `web/src/lib/theme.ts`. A component that needs it subscribes with
 `useSyncExternalStore`; the settings editor's CodeMirror theme follows it too, so a switch
-while the editor is open repaints it. ★ The light and the dark palette are **the same token
-set with two values**, so a color that exists in one exists in the other — and a hard-coded
-`sky-500` in a component is a bug: the status colors are `--info`, `--warning` and
-`--success`.
+while the editor is open repaints it.
+★ The CodeMirror editor is given `theme="none"` on purpose: the library's default is
+`theme="light"`, which paints the editor **white**, and that rule sits **after** ours in the
+stylesheet — so it won, and the dark theme had white text on a white background. The editor
+takes its colors from the app's tokens instead.
+★ The light and the dark palette are **the same token set with two values**, so a color that
+exists in one exists in the other — and a hard-coded `sky-500` in a component is a bug: the
+status colors are `--info`, `--warning` and `--success`.
 
 ## 5. Testing
 
@@ -1101,7 +1105,7 @@ do not touch" assertions.
 
 ### 5.6 E2E
 
-`make test-e2e` → `playwright test`, **13 specs, 157 cases**: `agents` `chat`
+`make test-e2e` → `playwright test`, **13 specs, 158 cases**: `agents` `chat`
 `compaction` `composer-autocomplete` `composer-meta` `history` `mcps` `multi-agent`
 `reattach` `scroll` `session-busy` `settings` `theme`.
 
@@ -1342,7 +1346,7 @@ the current state of the code, not a to-do list** — fixing one is a separate c
 
 | Symptom | Where | Explanation |
 |---|---|---|
-| **Usage on a live stream is not accounted per agent** | `contract.Usage` has no `byAgent` field; the frontend's `toUsage` at `events.ts:479` maps only flat counts | `usage.byAgent` **exists only with history hydration**. So in a fresh turn the agent filter chips show no cumulative token counts — they appear once you reload (pulling history). The **context occupancy** is live (§3.7): it arrives as its own `context_usage` event. E2E missed the gap because it tests a **seeded history thread**. |
+| **Usage on a live stream is not accounted per agent** | `contract.Usage` has no `byAgent` field; the frontend's `toUsage` at `events.ts:479` maps only flat counts | `usage.byAgent` **exists only with history hydration**. So in a fresh turn the agent filter's tooltips show no cumulative token counts — they appear once you reload (pulling history). The **context occupancy** is live (§3.7): it arrives as its own `context_usage` event. E2E missed the gap because it tests a **seeded history thread**. |
 | **A broken SSE stream does not reconnect** | `web/src/lib/api.ts` | A broken stream is simply broken: it goes to `onError` → the error panel, and the user has to resend. There is no reconnect and no resume-from-offset. |
 | **The conflict dialog does not show the on-disk version** | `web/src/components/settings/conflict-dialog.tsx:18-23` | It shows only your stale `baseRevision` plus a hard-coded "changed by someone else", and **never fetches the disk version**. There is no "overwrite anyway" button either — "Keep editing" merely clears the conflict marker, so the next save resends the same stale revision and conflicts again. |
 | **`web/index.html` declares `lang="zh-CN"`** | `web/index.html:2` | The interface is entirely in English (a hard requirement in AGENTS.md), but the `lang` declaration is still Chinese. It affects what a screen reader reads. |

@@ -694,7 +694,7 @@ In the interface:
 
 | Element | What it does |
 |---|---|
-| **Header** | The agent filter (with each agent's context occupancy), the theme switch, and the status of the current turn |
+| **Header** | The agent filter (each chip names an agent; hover it for its context occupancy and spend), the theme switch, and the status of the current turn |
 | **Sidebar** | The session list, the "New thread" button, the settings entry |
 | **Composer** | Ask a question; `/` opens the slash commands; supports drag/paste attachments |
 | **Message list** | Assistant replies, reasoning, tool-call cards, sub-agent output (with attribution) |

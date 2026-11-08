@@ -818,6 +818,9 @@ const selectMessages = (s: State) => s.convo?.messages ?? EMPTY
 ★ **主题**在**首屏之前**就定了 —— 由 `web/index.html` 里的一段脚本决定，
 并且只从一处读：`web/src/lib/theme.ts`。需要主题的组件用 `useSyncExternalStore` 订阅；
 设置里的 CodeMirror 主题也跟着走，所以编辑开着时切换主题会重绘它。
+★ CodeMirror 那个编辑器特意给了 `theme="none"`：库的默认是 `theme="light"`，
+它会把编辑器刷成**白色**，而那条规则在样式表里排在我们的**后面** —— 所以它赢了，
+于是暗色下成了白字白底。编辑器改成吃应用自己的 token。
 ★ 浅色与暗色是**同一套 token 的两组取值**，一边有的颜色另一边也有 ——
 组件里写死的 `sky-500` 是 bug：状态色是 `--info`、`--warning` 与 `--success`。
 
@@ -966,7 +969,7 @@ Bun 本身没有 `localStorage`，不 stub 会炸。
 
 ### 5.6 E2E
 
-`make test-e2e` → `playwright test`，**13 个 spec、157 个用例**：
+`make test-e2e` → `playwright test`，**13 个 spec、158 个用例**：
 `agents` `chat` `compaction` `composer-autocomplete` `composer-meta` `history` `mcps`
 `multi-agent` `reattach` `scroll` `session-busy` `settings` `theme`。
 
@@ -1171,7 +1174,7 @@ gitleaks 报的**提交数**比 git 报的低；但内容照样扫到了，因�
 
 | 现象 | 位置 | 说明 |
 |---|---|---|
-| **活跃流的用量没有按 Agent 分账** | `contract.Usage` 没有 `byAgent` 字段；前端 `events.ts:479` 的 `toUsage` 只映射扁平计数 | `usage.byAgent` **只在历史水合时才有**。所以新开的一轮里，Agent 过滤条上的累计 token 数是空的 —— 刷新一下（拉历史）才会出现。**上下文占用**是实时的（§3.7）：它走自己的 `context_usage` 事件。E2E 之所以没发现这个缺口，是因为它测的是**带种子的历史线程**。 |
+| **活跃流的用量没有按 Agent 分账** | `contract.Usage` 没有 `byAgent` 字段；前端 `events.ts:479` 的 `toUsage` 只映射扁平计数 | `usage.byAgent` **只在历史水合时才有**。所以新开的一轮里，Agent 过滤条提示里的累计 token 数是空的 —— 刷新一下（拉历史）才会出现。**上下文占用**是实时的（§3.7）：它走自己的 `context_usage` 事件。E2E 之所以没发现这个缺口，是因为它测的是**带种子的历史线程**。 |
 | **SSE 断了不会自动重连** | `web/src/lib/api.ts` | 流断掉就是断掉：走 `onError` → 错误面板，用户得自己重发。没有重连、没有断点续传。 |
 | **冲突对话框不显示磁盘上的版本** | `web/src/components/settings/conflict-dialog.tsx:18-23` | 它只显示你那个陈旧的 `baseRevision` 加一句写死的「changed by someone else」，**没有真去取磁盘版本**。也没有「强行覆盖」按钮 —— 「Keep editing」只是清掉冲突标记，下次保存会带着同样的陈旧 revision 再冲突一次。 |
 | **`web/index.html` 声明 `lang="zh-CN"`** | `web/index.html:2` | 界面文案全是英文（AGENTS.md 的硬性要求），`lang` 声明却还是中文。会影响读屏软件的朗读语言。 |

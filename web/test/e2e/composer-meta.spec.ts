@@ -103,12 +103,19 @@ test("模型没声明窗口时只报绝对 token 数，不报比例", async ({ p
   await expect(ctx).toHaveAttribute("title", /no context window/)
 })
 
-test("agent 过滤器按 agent 显示各自的占用", async ({ page }) => {
+test("agent 过滤器按 agent 报出各自的占用", async ({ page }) => {
   await openApp(page)
   await openThread(page, "Multi agent conversation")
 
-  await expect(page.locator('[data-testid="agent-filter-main-context"]')).toHaveText("18k/131k")
-  await expect(page.locator('[data-testid="agent-filter-coder-context"]')).toHaveText("6.1k/8.2k")
+  // ★ The occupancy is in the tooltip: the chip itself only names the agent.
+  await expect(page.locator('[data-testid="agent-filter-main"]')).toHaveAttribute(
+    "title",
+    /Context: ≈18k \/ 131k/,
+  )
+  await expect(page.locator('[data-testid="agent-filter-coder"]')).toHaveAttribute(
+    "title",
+    /Context: ≈6.1k \/ 8.2k/,
+  )
 })
 
 // The threshold is the agent's own: the chip says where its context gets cut.

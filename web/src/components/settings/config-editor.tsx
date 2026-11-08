@@ -16,7 +16,11 @@ import { cn } from "@/lib/utils"
 function theTheme(dark: boolean) {
   return EditorView.theme(
     {
-      "&": { color: "var(--color-foreground)", backgroundColor: "transparent", height: "100%" },
+      "&": {
+        color: "var(--color-foreground)",
+        backgroundColor: "var(--color-background)",
+        height: "100%",
+      },
       ".cm-content": { caretColor: "var(--color-foreground)", fontFamily: "var(--font-mono, monospace)" },
       ".cm-gutters": { backgroundColor: "transparent", color: "var(--color-muted-foreground)", border: "none" },
       ".cm-activeLine": { backgroundColor: dark ? "rgb(255 255 255 / 0.04)" : "rgb(0 0 0 / 0.04)" },
@@ -96,6 +100,13 @@ export function ConfigEditor({ path, value, onChange, readOnly = false, dark = f
         value={value}
         onChange={onChange}
         extensions={extensions}
+        // ★ `theme="none"` is the fix. The library's default is
+        //   `theme="light"`, which paints the editor **white** — and that
+        //   rule sits after our own theme in the stylesheet, so it won.
+        //   In the dark theme the editor was white text on a white
+        //   background. The editor takes its colors from the app's own
+        //   tokens (see `theTheme` below), so it follows the theme.
+        theme="none"
         editable={!readOnly}
         basicSetup={{
           lineNumbers: true,

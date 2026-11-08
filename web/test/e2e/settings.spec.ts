@@ -76,6 +76,27 @@ test.describe("opening", () => {
     await expect(page.locator(EDITOR)).toContainText("model: deepseek/flash")
     await expect(page.locator(EDITOR)).toContainText("body")
   })
+
+  // ★ The editor used to paint itself white: the library's default theme
+  //   does, and its rule sat after ours. In the dark theme that was white
+  //   text on a white background.
+  test("★ 配置编辑器跟着主题走", async ({ page }) => {
+    await page.goto("/")
+    await page.click(ENTRY)
+    await expect(page.locator(EDITOR)).toBeVisible()
+    const background = () =>
+      page.locator('[data-testid="config-editor"] .cm-editor').evaluate((el) =>
+        getComputedStyle(el).backgroundColor,
+      )
+
+    const light = await background()
+    await page.getByRole("button", { name: "Close settings" }).click()
+    await page.locator('[data-testid="theme-toggle"]').click()
+    await page.click(ENTRY)
+    await expect(page.locator(EDITOR)).toBeVisible()
+
+    expect(await background(), "the editor should follow the theme").not.toBe(light)
+  })
 })
 
 test.describe("the one config root", () => {
