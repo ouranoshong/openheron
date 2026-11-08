@@ -637,9 +637,11 @@ read; the third changes the configuration and always interrupts for approval. An
 that can validate but not write is a useful reviewer; an agent that can only write is a
 loader error waiting to happen.
 
-★ **`config_write` cannot write `server/`.** That partition configures the process
-itself and is not hot-reloaded, so it needs a restart — and the write path refuses it
-rather than saving something that silently does nothing.
+★ **`config_write` cannot write `server/`, and `config_get` can still read it.** The
+partition configures the process itself and is not hot-reloaded, so a change needs a
+restart — the write path refuses it rather than saving something that silently does
+nothing. Reading is a different question, and it is the one an agent asks when it wants
+to know what the process is actually running with.
 
 ## 5. Multiple agents and delegation
 

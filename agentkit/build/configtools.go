@@ -88,7 +88,10 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 			if in.Path == "" {
 				return configOverview(svc, cfg)
 			}
-			cat, err := spec.ValidatePath(in.Path)
+			// ★ The read gate, not the write gate: a partition the agent may
+			//   not edit is exactly the one it needs to read — the answer to
+			//   "what am I actually running with" lives in server/.
+			cat, err := spec.ValidateReadPath(in.Path)
 			if err != nil {
 				return nil, err
 			}

@@ -204,8 +204,24 @@ func TestConfigGetRefusesAPathOutsideTheTree(t *testing.T) {
 	if _, err := callTool(t, tools, decl.ToolNameConfigGet, `{"path":"../secrets.yaml"}`); err == nil {
 		t.Fatal("a path outside the config root must be refused")
 	}
-	if _, err := callTool(t, tools, decl.ToolNameConfigGet, `{"path":"server/config.yaml"}`); err == nil {
-		t.Fatal("a partition that is not editable must be refused, not silently written to")
+	// ★ A partition the agent may not write is still readable: the file that
+	//   says what the process is running with is the one worth reading.
+	read := callToolJSON[struct {
+		Exists  bool   `json:"exists"`
+		Hot     bool   `json:"hot"`
+		Content string `json:"content"`
+	}](t, tools, decl.ToolNameConfigGet, `{"path":"server/config.yaml"}`)
+	if !read.Exists || !strings.Contains(read.Content, "listen_addr") {
+		t.Fatalf("server/config.yaml must be readable: %+v", read)
+	}
+	if read.Hot {
+		t.Fatal("server/ is not hot-reloaded, and the answer must say so")
+	}
+
+	// ★ And the write gate did not move.
+	if _, err := callTool(t, tools, decl.ToolNameConfigWrite,
+		`{"path":"server/config.yaml","content":"listen_addr: \":1\"\n"}`); err == nil {
+		t.Fatal("server/ must still refuse to be written")
 	}
 }
 

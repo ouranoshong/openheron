@@ -591,8 +591,9 @@ tools: [ls, read_file, glob, grep, task, write_todos, config_get, config_validat
 改配置，而且每次都会停下来等审批。能校验不能写的 Agent 是个有用的审阅者；只会写的
 Agent 是一次迟早要来的加载错误。
 
-★ **`config_write` 写不了 `server/`。** 那一节配置的是进程自己，不热加载，改了要重启 ——
-所以写入路径直接拒绝它，而不是存下去一个悄悄不生效的值。
+★ **`config_write` 写不了 `server/`，而 `config_get` 读得了。** 那一节配置的是进程自己，
+不热加载，改了要重启 —— 所以写入路径直接拒绝它，而不是存下去一个悄悄不生效的值。
+读是另一个问题，而且正是 agent 想知道「进程到底跑着什么」时会问的那个。
 
 ## 5. 多 Agent 与委派
 
