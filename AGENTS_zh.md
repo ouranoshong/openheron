@@ -7,48 +7,54 @@
 
 > ★ **本仓库是代码面**：Go 后端 + React 前端 + 构建配置。
 >
-> 本仓库自带**十一组**中英双语文档，随代码面一起维护
-> （**英文是主版本，`_zh` 后缀是中文版**）：
+> 本仓库自带**四组**中英双语文档，随代码面一起维护
+> （**英文是主版本，`_zh` 后缀是中文版**；Kit 的那两份指南也是双语的，
+> 它们在 `sandbox-kit/` 里 —— 见下）：
 > `README.md` / `README_zh.md`、
 > `docs/architecture.md` / `docs/architecture_zh.md`（架构设计说明）、
 > `docs/user-manual.md` / `docs/user-manual_zh.md`（用户使用说明）、
-> `docs/developer-manual.md` / `docs/developer-manual_zh.md`（开发者说明）、
-> `docs/context-usage-design.md` / `docs/context-usage-design_zh.md`（上下文使用预估设计方案）、
-> `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md`（会话并发设计方案）、
-> `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md`（run 生命周期设计方案）、
-> `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md`（文件系统后端设计方案）、
-> `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md`（Docker Sandbox Kit 打包设计方案）、
-> `docs/mcp-design.md` / `docs/mcp-design_zh.md`（MCP 接入设计方案）、
-> `docs/config-design.md` / `docs/config-design_zh.md`（配置系统设计说明）。
-> **另有一篇只有中文的设计文档**：`docs/tool-surface-design.md`（工具面 ——
-> 一个 agent 拿到哪些工具，以及配置怎么被管理；是一份**提案**）。
+> `docs/developer-manual.md` / `docs/developer-manual_zh.md`（开发者说明）。
+>
+> **另有八篇只有中文的文档**在 `docs/` 下 —— 架构与代码设计那一类。
+> ★ 它们的中文内容**接管了原文件名**：`docs/config-design.md` **就是**那篇中文文档 ——
+> 既没有 `_zh` 副本，也没有英文版：
+> `docs/context-usage-design.md`（上下文使用预估设计方案）、
+> `docs/session-concurrency-design.md`（会话并发设计方案）、
+> `docs/run-lifecycle-design.md`（run 生命周期设计方案）、
+> `docs/fs-backend-design.md`（文件系统后端设计方案）、
+> `docs/sandbox-kit-design.md`（Docker Sandbox Kit 打包设计方案）、
+> `docs/mcp-design.md`（MCP 接入设计方案）、
+> `docs/config-design.md`（配置系统设计说明）、
+> `docs/tool-surface-design.md`（工具面 —— 一个 agent 拿到哪些工具，以及配置怎么被管理）。
 > **`docs/` 下其余设计文档仍在上游仓库** ——
-> 下面凡引用 `docs/xxx.md` 而这几组之外、又不是上面那篇中文文档的，都是上游那份。
+> 下面凡引用 `docs/xxx.md` 而这十二篇之外的，都是上游那份。
 > 改语义前若拿不到它，先问，别凭印象改配置或接口。
 >
-> ★ **新写的架构与代码设计类文档只写中文。** 讲代码怎么搭起来的文档 —— 分层、
+> ★ **设计类文档只写中文。** 讲代码怎么搭起来的文档 —— 分层、
 > 某个子系统的设计、一次重构方案 —— 没有第二个读者：读它的人读中文，而手工维护的
-> 英文对照版是一份会漂移的第二拷贝。`docs/tool-surface-design.md` 是按这条规则写的
-> 第一篇。
-> ★ **仍然要双语的是给用户或集成方读的东西**：`README.md` 与 `docs/user-manual.md`。
-> 不假定他们的读者读中文。
-> ★ **这条规则不退休上面那十一组。** 它们已经存在，照旧维护；规则管的是从现在起
-> 新写的文档。
+> 英文对照版是一份会漂移的第二拷贝。★ 上面那八篇在 2026-11-08 退了双语：中文内容
+> 接管了原文件名，所以指向 `docs/config-design.md` 的链接照样解析 —— 解析到的是中文那篇。
+> ★ **仍然要双语的是给用户或集成方读的东西**：`README.md`、`docs/user-manual.md`，
+> 以及 —— 因为总得有人能在这个树里干活 —— `docs/architecture.md` 与
+> `docs/developer-manual.md`。不假定他们的读者读中文。Kit 的那两份指南
+> （`sandbox-kit/TUTORIAL.md` 与 `sandbox-kit/BUILDING.md`）出于同样的理由保持双语。
 >
 > ★ 前面四组讲的是**代码面已经是什么样**；`docs/context-usage-design.md`
 > 讲的是**上下文占用与压缩** —— 占用仪表盘（§2、§4、§5）、压缩及其持久化（§7）、
 > 以及压缩标记的界面渲染（§7.7）都已在代码里。
 > `docs/session-concurrency-design.md` 讲的是**会话并发** —— 一个会话一轮的准入闸门
 > （§5）、跨客户端的 409（§5.2）、以及前端的忙态处理（§5.4-§5.6）都已在代码里。
-> `docs/run-lifecycle-design.md` 是个例外：它是一份**提案**，不是描述。
-> 它的 §1 讲的是代码现状 —— 今天一轮绑在一条 SSE 连接上 —— §2 往后讲的是
-> 要建成什么样：run 变成一行持久事实、租约配 fence、连接降级为订阅者。
-> **§2 往后的东西都还不在树上。**
-> `docs/sandbox-kit-design.md` 也是一份**提案**：§1 讲 openheron 进程今天是什么样 ——
-> 一个进程，一对 HTTP/SSE 服务，文件工具与 shell 工具共用同一个后端；
-> §2 往后讲把**整个进程**打包成 Docker Sandbox Kit，于是边界往外挪而不是往里挪，
-> 读路径也被罩住了。
-> **§2 往后的东西都还不在树上。**
+> `docs/run-lifecycle-design.md` 讲的是**run 生命周期** —— run 变成一行持久事实、
+> 租约配 fence、连接降级为订阅者。★ **那一份落地了**：§3-§9 都在树上
+> （`storage/runledger.go`、`storage/lease.go`、`storage/memarbit/arbiter.go`、
+> `agentkit/emit/`），扫描才是真相，通知只是提示。§1 讲的仍是当年的代码 ——
+> 一轮绑在一条 SSE 连接上 —— 读起来像一段历史。
+> `docs/sandbox-kit-design.md` 讲的是**Docker Sandbox Kit** —— openheron 进程今天是什么样 ——
+> 一个进程，一对 HTTP/SSE 服务，文件工具与 shell 工具共用同一个后端 ——
+> 打包成 Kit，于是边界往外挪而不是往里挪，读路径也被罩住了。
+> ★ **那一份也落地了**：描述文件、内容配方、入口脚本与每个厂商一份的 mixin 都在
+> `sandbox-kit/` 里，`make kit` 构建它们，CI 的 `kit` job 发布它们。§4.2 仍有三条
+> 留给 owner 决定。
 > `docs/fs-backend-design.md` 讲的是**文件系统后端** —— `eino-ext` local 后端的有界分支
 > （§5）以及每个工具都要经过的那条收敛规则 —— 它**已实现**：`agentkit/fsx` 已在两处
 > 调用点接上。
@@ -79,9 +85,13 @@
 > 要提新东西的设计文档可以写到代码之外 —— 但必须说清哪里是描述、哪里是提案，
 > 并把提案标成「尚未实现」。
 >
-> ★ **两版必须同步**：改英文版就同时改 `_zh` 版，反之亦然。
+> ★ **双语文档的两版必须同步**：改英文版就同时改 `_zh` 版，反之亦然。
+> 这条只管双语的那一组 —— `README.md`、`docs/architecture.md`、
+> `docs/user-manual.md`、`docs/developer-manual.md`、`sandbox-kit/TUTORIAL.md` 与
+> `sandbox-kit/BUILDING.md` —— 别的没有可同步的：只有中文的那些文档就一个版本。
 > 两版的代码标识符、行号引用、命令与路径应当一一对应 ——
-> 可以用 `grep -oP '`[a-zA-Z0-9_./:$-]+`' | sort -u` 逐组比对。
+> `make lint-docs` 检查这六对，也可以用
+> `grep -oP '`[a-zA-Z0-9_./:$-]+`' | sort -u` 逐组比对。
 > ★ 注意**反引号范围也要一致**：`` `POST /v2/run` `` 与 `` `POST` `/v2/run` `` 讲的
 > 是同一件事，但标识符集合不同 —— 比对会报差异。别让「写法不同」掩盖「内容不同」。
 
@@ -326,22 +336,29 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
 
 ### 本仓库自带（随代码面一起维护）
 
+★ **双语**的那一组 —— 英文在前，`_zh` 在后，两版一一对应：
+
 | 文档 | 内容 |
 |---|---|
 | `README.md` / `README_zh.md` | **项目说明** —— 定位、快速开始、命令、配置速览、HTTP 速查 |
 | `docs/architecture.md` / `docs/architecture_zh.md` | **架构设计说明** —— 分层与依赖方向、配置系统、装配、运行循环、存储、HTTP、前端、知识库 |
 | `docs/user-manual.md` / `docs/user-manual_zh.md` | **用户使用说明** —— 安装、配置、界面操作（面向使用者，不含内部设计） |
 | `docs/developer-manual.md` / `docs/developer-manual_zh.md` | **开发者说明** —— 分层、依赖铁律、开发配方、测试与排障、已知问题 |
-| `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` | **上下文使用预估设计方案** —— 占用口径、数据流、后端与前端改动、压缩结果的持久化与有效历史（**占用仪表盘与压缩持久化已实现**） |
-| `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` | **会话并发设计方案** —— 跨客户端抢占的成因、「一个会话一轮」的规则与实现、以及前端怎么知道会话正忙（**准入闸门与 409 已实现**） |
-| `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` | **文件系统后端设计方案** —— 为什么把 `eino-ext` 的 local 后端分叉成 `agentkit/fsx`、路径如何收敛在项目根之内、`ls`/`glob` 如何被封顶（**已实现**） |
-| `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` | **run 生命周期设计方案** —— 今天一轮为什么绑在一条 SSE 连接上，以及 run 怎么变成一行持久事实、配上租约与 fence，好让连接降级为订阅者（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
-| `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` | **Docker Sandbox Kit 打包设计方案** —— openheron 进程今天是什么样、一个把整个进程带进 microVM 的 v3 workload Kit、模型密钥如何留在宿主，以及必须实测的 SSE 这条路（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
-| `docs/mcp-design.md` / `docs/mcp-design_zh.md` | **MCP 接入设计方案** —— 工具装配路径、MCP 客户端给它带来什么、`mcp__<server>__<tool>` 命名空间、工具表里的前缀匹配，以及 MCP 服务器在 Kit 里会跑在哪（**已实施**；例外是 §8 —— 沙箱 Kit 怎么打包一台 MCP 服务器 —— 那部分仍是提案） |
-| `docs/config-design.md` / `docs/config-design_zh.md` | **配置系统设计说明** —— 配置根与它的三级解析、各个分区与它们的文件规格、加载与优先级、热更新，以及依赖铁律（**正文讲的是代码现状**；`mcps/` 分区与前缀匹配是提案） |
-| `docs/tool-surface-design.md` | **工具面设计**（只有中文）—— 一个 agent 拿到哪些工具（`tools:` / `mcps:` / `skills:`）、MCP 命名空间的三段、配置面收敛成一个核心，以及六个 `config_*` 工具（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
 
-★ 无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。
+★ **只有中文**的那一组 —— 各一个版本，文件名不带后缀：
+
+| 文档 | 内容 |
+|---|---|
+| `docs/context-usage-design.md` | **上下文使用预估设计方案** —— 占用口径、数据流、后端与前端改动、压缩结果的持久化与有效历史（**占用仪表盘与压缩持久化已实现**） |
+| `docs/session-concurrency-design.md` | **会话并发设计方案** —— 跨客户端抢占的成因、「一个会话一轮」的规则与实现、以及前端怎么知道会话正忙（**准入闸门与 409 已实现**） |
+| `docs/fs-backend-design.md` | **文件系统后端设计方案** —— 为什么把 `eino-ext` 的 local 后端分叉成 `agentkit/fsx`、路径如何收敛在项目根之内、`ls`/`glob` 如何被封顶（**已实现**） |
+| `docs/run-lifecycle-design.md` | **run 生命周期设计方案** —— 一轮为什么曾绑在一条 SSE 连接上，以及 run 怎么变成一行持久事实、配上租约与 fence，好让连接降级为订阅者（**§3-§9 已实现**：账本、租约、fence、扫描与前端都在树上） |
+| `docs/sandbox-kit-design.md` | **Docker Sandbox Kit 打包设计方案** —— openheron 进程今天是什么样、一个把整个进程带进 microVM 的 v3 workload Kit、模型密钥如何留在宿主，以及当初必须实测的那条 SSE 路（**Kit 已建成并发布**；§4.2 还有三条没定） |
+| `docs/mcp-design.md` | **MCP 接入设计方案** —— 工具装配路径、MCP 客户端给它带来什么、`mcp__<server>__<tool>` 命名空间、工具表里的前缀匹配，以及 MCP 服务器在 Kit 里会跑在哪（**已实施**；例外是 §8 —— 沙箱 Kit 怎么打包一台 MCP 服务器 —— 那部分仍是提案） |
+| `docs/config-design.md` | **配置系统设计说明** —— 配置根与它的三级解析、各个分区与它们的文件规格、加载与优先级、热更新，以及依赖铁律（**正文讲的是代码现状**；`mcps/` 分区与住在工具旁边的档位已实施） |
+| `docs/tool-surface-design.md` | **工具面设计** —— 一个 agent 拿到哪些工具（`tools:` / `mcps:` / `skills:`）、MCP 命名空间的三段、配置面收敛成一个核心，以及六个 `config_*` 工具（**§2-§5 已实现**） |
+
+★ 双语那一组里，无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。
 
 ### 上游仓库（不随本仓库分发）
 

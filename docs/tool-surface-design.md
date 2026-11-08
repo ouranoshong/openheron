@@ -85,6 +85,8 @@ mcp__github__ls
 
 ★ **这张表不写行号**（理由见本节开头）：它记的是改造**之前**的代码，「实现位置」一列给的是
 **符号名**，它们在改动里存活了下来，所以还查得到。
+★ 一处要补一句：路径闸门后来**拆成了两把** —— `ValidateReadPath`（只管形状）与
+`ValidatePath`（形状 + 可编辑），见 §4.4。改造前只有后者。
 
 ★ 一个关键事实：**`yaml.v3` 的 `KnownFields` 报错自带行号**（实测：`line 2: field bogus_key not found in type decl.Server`）。前端那套逐键扫描要给的「第几行」，服务端拿得到 —— 所以那份 TS 规则是可以整体删掉的，不是搬过去。
 
@@ -290,7 +292,8 @@ agent 的档位，而 loader 不检查 —— 于是 vendor 没有的档位能�
 ## 4. 决定三：六个 config 工具（✅ 已实施）
 
 放在 `agentkit/build/configtools.go`，与其他 provider 一样注册进 `defaultToolRegistry`
-（`agentkit/build/tools.go`）。全部只认 `ValidatePath` 放行的路径，没有新的逃逸口。
+（`agentkit/build/tools.go`）。★ 读的那几个只认 `ValidateReadPath` 放行的路径，
+写的那一个只认 `ValidatePath` 放行的路径 —— 两把闸门，没有新的逃逸口（§4.4）。
 
 | 工具 | 输入 | 输出 | 复用 | 档位 |
 |---|---|---|---|---|
@@ -336,7 +339,24 @@ baseRevision → 拒明文 → 原子替换 → 试合并 → 失败回滚」。
 `applied` / `requiresRestart` 说明这次到底生效了没有，不做额外禁止 —— 禁止的收益抵不上
 规则复杂度。
 
-★ 它**不能**写 `server/`：那一节不是热加载的，`ValidatePath` 连读都拒绝。
+★ 它**不能**写 `server/`：那一节不是热加载的，写闸门直接拒绝。
+★ 但它**读得了** `server/` —— 读与写是两把闸门：`ValidateReadPath` 只管路径形状，
+不问这一节能不能编辑，而只读的那一节恰恰是读的人最想看的（§4.4）。
+
+### 4.4 读与写是两把闸门
+
+★ `agentkit/spec/write.go` 现在有**两个**校验入口，它们回答的不是同一个问题：
+
+| 入口 | 管什么 | 谁在用 |
+|---|---|---|
+| `ValidateReadPath` | **路径形状**：在配置根之外、分区不存在、文件名这一分区不接受 —— 读也不认 | `config_get`，API 的读路径（`api/v2_settings.go` 的 `readPath`） |
+| `ValidatePath` | 形状 **+ 可编辑**：只读分区（`server/`）直接拒 | `config_write`，API 的写路径（`writePath`） |
+
+★ 写闸门**保留原名** `ValidatePath`：它的既有调用者**全是写者**，而一个写者拿到更严的
+答案是安全的，一个写者拿到更松的答案就是动了不该动的文件。
+★ 拆开的原因是只读的那一节恰恰是读的人最想看的：`server/` 那一节不是热加载的，
+读它不是为了改它，是为了知道**进程手里是什么** —— 而写闸门连读都拒绝，
+所以「能读不能写」这件事以前在代码里根本没有位置。
 
 ## 5. 阶段
 

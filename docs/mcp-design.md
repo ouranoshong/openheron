@@ -1,25 +1,26 @@
-# MCP Integration Design — a runtime tool set, a fixed policy table
+# MCP 接入设计 —— 运行期才定下来的工具集，与一张静态的策略表
 
-> Status: **implemented** — the feature this document designed is in the tree. The
-> dependencies `github.com/cloudwego/eino-ext/components/tool/mcp` (v0.0.9) and
-> `github.com/mark3labs/mcp-go` (v0.43.0) are in `go.mod`; the `mcps/` partition, the
-> MCP provider, the namespace, the per-file tiers, the manager and the `/mcps` endpoint
-> all landed. §1 describes the code as it is; §2 onwards describes the same feature as
-> it was designed, and every claim still names a file and a line. ★ The **tier model**
-> is implemented on **both** halves: the MCP half names its exceptions in the server's
-> own file (§7.3), the built-in half in the code's own list
-> (`agentkit/build/tools.go:61`) — and the `policy/` partition and the global deny list
-> went **with** them (§1.4). ★ One half is **still a proposal**: the **sandbox Kit**
-> (§8) does not package MCP servers yet.
+> 状态：**已实现** —— 这份文档设计的功能已经在树里了。
+> 依赖 `github.com/cloudwego/eino-ext/components/tool/mcp`（v0.0.9）与
+> `github.com/mark3labs/mcp-go`（v0.43.0）进了 `go.mod`；`mcps/` 分区、MCP provider、
+> 命名空间、写在文件里的档位、manager 与 `/mcps` 端点全都落地了。
+> §1 讲的是代码现状；§2 往后讲的是同一个功能当初是怎么设计的，
+> 而每一句话仍然都指着一个文件和一个行号。★ **档位模型**在**两半**上都已实现：
+> MCP 那一半把例外写在自己服务器的文件里（§7.3），内置那一半写在代码自己的清单里
+> （`agentkit/build/tools.go:61`）—— 而 `policy/` 分区与全局 deny 清单
+> **跟着**它们一起走了（§1.4）。★ 还有一半**仍然是提案**：**沙箱 Kit**（§8）
+> 还没有打包 MCP 服务器。
 >
-> Scope: how an MCP (Model Context Protocol) server becomes a set of tools an openheron
-> agent can call, how those tools are named, and how the policy layer decides whether
-> they may run. Not in scope: the MCP protocol itself, the transport implementations
-> (they belong to `mcp-go`), and the sandbox packaging (see `sandbox-kit-design.md` §2.3).
+> 范围：MCP（Model Context Protocol）服务器如何变成 openheron agent 可以调用的工具集，
+> 这些工具叫什么名字，以及策略层如何决定它们能不能跑。
+> 不在范围内：MCP 协议本身、传输方式的实现（那属于 `mcp-go`）、
+> 以及沙箱打包（见 `sandbox-kit-design.md` §2.3）。
+>
+> 本文按 AGENTS.md 的文档语言规则**只有中文版** —— 架构与代码设计类文档不做双语。
 
-## 1. The code as it is
+## 1. 代码现状
 
-### 1.1 Where the tools come from
+### 1.1 工具从哪来
 
 ```
 mcps/*.yaml → spec.loadMCP → decl.MCPServerCfg
@@ -30,28 +31,28 @@ mcps/*.yaml → spec.loadMCP → decl.MCPServerCfg
   → deep.New → the eino agent
 ```
 
-| Step | Where |
+| 步骤 | 位置 |
 |---|---|
-| Load one `mcps/` file | `agentkit/spec/load.go:269` `loadMCP` |
-| The declaration struct | `agentkit/spec/decl/decl.go:426` `MCPServerCfg` |
-| Read one server's tools | `agentkit/build/mcpmanager.go:89` `mcpManager.Tools` |
-| Build every provider's batch | `agentkit/build/tools.go:78` `toolRegistry.Build` |
-| Materialize it, once per snapshot | `agentkit/build/snapshot.go:47` `buildHeavy` |
-| Hand it to eino | `agentkit/build/assemble.go:31` `applyToolConfig` |
+| 加载一个 `mcps/` 文件 | `agentkit/spec/load.go:269` `loadMCP` |
+| 声明结构体 | `agentkit/spec/decl/decl.go:426` `MCPServerCfg` |
+| 读一个服务器的工具 | `agentkit/build/mcpmanager.go:89` `mcpManager.Tools` |
+| 构造每个 provider 的那一批 | `agentkit/build/tools.go:78` `toolRegistry.Build` |
+| 物化，一个快照一次 | `agentkit/build/snapshot.go:47` `buildHeavy` |
+| 交给 eino | `agentkit/build/assemble.go:31` `applyToolConfig` |
 
-★ `buildHeavy` runs under a `sync.Once` (`agentkit/build/snapshot.go:40-45`). The tool
-set is therefore **fixed for the lifetime of one snapshot** — it is rebuilt when the
-snapshot generation changes, not when a tool's behaviour changes.
+★ `buildHeavy` 跑在一个 `sync.Once` 之下（`agentkit/build/snapshot.go:40-45`）。
+  于是工具集在一个快照的生命周期里是**固定的** —— 它在快照换代时重建，
+  而不是在一个工具的行为变化时重建。
 
-★ **The MCP provider is the reason the generation can move without a configuration
-change.** A server may add a tool on its own, and the snapshot that froze the list
-would need a restart to see it. ⇒ the builder asks the manager before it assembles the
-turn's agent, and a changed listing moves the generation through the same place a
-configuration change moves it (`agentkit/build/builder.go:67`, `:105`).
+★ **MCP provider 是「没有配置变化也能让换代号动起来」的原因。**
+  一个服务器可以自己加一个工具，而把清单冻住的快照要看到它就得重启。
+  ⇒ builder 在组装这一轮的 agent 之前先问 manager 一声，
+  而清单变了就通过与配置变化同一个地方推进换代号
+  （`agentkit/build/builder.go:67`、`:105`）。
 
-### 1.2 The provider contract
+### 1.2 provider 契约
 
-`agentkit/build/tools.go:19` is the whole extension point:
+`agentkit/build/tools.go:19` 就是全部的扩展点：
 
 ```go
 type toolProvider interface {
@@ -61,93 +62,88 @@ type toolProvider interface {
 }
 ```
 
-The registry is `defaultToolRegistry` (`agentkit/build/tools.go:35`), and it carries
-the MCP provider:
+注册表是 `defaultToolRegistry`（`agentkit/build/tools.go:35`），里面带着 MCP provider：
 
 ```go
 		mcpToolProvider{mgr: mgr},
 		// projectToolsProvider{}, ...
 ```
 
-★ The MCP provider is the **only** one that needs a manager: an MCP client outlives
-the batch the provider returns, so the manager — not the provider — owns it
-(`agentkit/build/tools.go:31-34`, `agentkit/build/mcpmanager.go:42`). ★ The other
-providers mount a tool set and are done; a server is a **connection**, and a connection
-has a life.
+★ MCP provider 是**唯一**一个需要 manager 的 provider：一个 MCP 客户端活得比
+  provider 返回的那一批工具更久，所以客户端归 manager 管，而不是归 provider 管
+  （`agentkit/build/tools.go:31-34`、`agentkit/build/mcpmanager.go:42`）。
+  ★ 别的 provider 挂上一批工具就完事了；服务器是**一条连接**，而连接有生命。
 
-### 1.3 The names are the policy
+### 1.3 名字就是策略
 
-The tool name is the key of every table that decides what a tool may do:
+工具名是每一张决定「这个工具能干什么」的表的键：
 
-| Table | Where | What it decides |
+| 表 | 位置 | 决定什么 |
 |---|---|---|
 | `Policy.TierOf` | `agentkit/build/policy.go:55` | `allow` / `ask` |
-| `Table.Blocked` | `agentkit/build/policy.go:146` | the namespace the agent does not use (outer) / the tools the agent does not get (inner) |
-| `Table.Filter` | `agentkit/build/policy.go:166` | drops the tools from `runCtx.Tools` |
-| `Builder.EffectiveTools` | `agentkit/build/introspect.go:47` | what the API reports |
+| `Table.Blocked` | `agentkit/build/policy.go:146` | 这个 agent 不用的命名空间（外层）/ 这个 agent 拿不到的工具（内层） |
+| `Table.Filter` | `agentkit/build/policy.go:166` | 把工具从 `runCtx.Tools` 里摘掉 |
+| `Builder.EffectiveTools` | `agentkit/build/introspect.go:47` | API 报告什么 |
 
-★ **Every one of those lookups is a name lookup, and the name is the whole contract.**
-`TierOf` is one map lookup; `Blocked` is a map lookup plus one prefix scan
-(`agentkit/build/policy.go:130`). ★ The prefix scan is the one MCP brought: an agent's
-`tools` accepts a **trailing `*` pattern**, which is how a whole namespace is named
-(§4). Everything else is an exact match — and the tier of an MCP tool is answerable
-**before the server is even up** (§7.3).
+★ **上面每一条查找都是按名字查的，而名字就是全部契约。**
+  `TierOf` 是一次 map 查找；`Blocked` 是一次 map 查找
+  加一次前缀扫描（`agentkit/build/policy.go:130`）。
+  ★ 那两次前缀扫描正是 MCP 带来的：agent 的 `mcps:` 清单按**命名空间前缀**收窄，
+  某个 agent 的 `tools` 接受**结尾的 `*` 模式**，那是给一整个命名空间起名的写法（§4）。
+  其余全是精确匹配 —— 而一个 MCP 工具的档位**在服务器还没起来之前**就能回答（§7.3）。
 
-The gate itself needs no permission code — it reads the tier and acts:
+闸门本身不需要写任何权限代码 —— 它读档位然后动作：
 
-| Piece | Where |
+| 构件 | 位置 |
 |---|---|
-| The synchronous path | `agentkit/build/gate.go:55` `WrapInvokableToolCall` |
-| The streaming path | `agentkit/build/gate.go:89` `WrapStreamableToolCall` |
-| The one decision both share | `agentkit/build/gate.go:126` `decide` |
-| The chain | `agentkit/build/gate.go:167` `toolChain` |
+| 同步那条路 | `agentkit/build/gate.go:55` `WrapInvokableToolCall` |
+| 流式那条路 | `agentkit/build/gate.go:89` `WrapStreamableToolCall` |
+| 两条路共用的那一个决策 | `agentkit/build/gate.go:126` `decide` |
+| 整条链 | `agentkit/build/gate.go:167` `toolChain` |
 
-### 1.4 The config partitions
+### 1.4 配置分区
 
-| Partition | Where | Notes |
+| 分区 | 位置 | 备注 |
 |---|---|---|
-| `tools/` | `agentkit/spec/config.go:57` | one file per tool, **name is a whitelist** (`agentkit/spec/load.go:165`), hot |
-| `agents/` | `agentkit/spec/config.go:47` | frontmatter, incl. `tools`, `skills` and `mcps`, hot |
-| `mcps/` | `agentkit/spec/config.go:66` | one file per server, **the file's presence is the definition**, hot |
+| `tools/` | `agentkit/spec/config.go:57` | 一个工具一个文件，**文件名是白名单**（`agentkit/spec/load.go:165`），热更新 |
+| `agents/` | `agentkit/spec/config.go:47` | frontmatter，含 `tools`、`skills` 与 `mcps`，热更新 |
+| `mcps/` | `agentkit/spec/config.go:66` | 一个服务器一个文件，**文件在就是定义**，热更新 |
 
-★ **There is no `policy/` partition.** The tiers live with the tools they are about
-(§7.3), so there is no directory that holds them: a tool's own file names the ones that
-run **without a nod**, and every other tool asks. ★ The counts that used to sit beside
-the tiers — the depth and the retry caps — are in `server/config.yaml` now, and that
-partition is **cold**: the caps configure the process itself, so they take effect on
-the next start.
+★ **没有 `policy/` 分区。** 档位住在它们所说的那些工具旁边（§7.3），
+  所以没有一个目录装着它们：一个工具自己的文件点名那些**不用点头**就跑的工具，
+  其余一切都要先点头。★ 过去与档位并排放着的那些数量上限 ——
+  深度与重试上限 —— 现在在 `server/config.yaml` 里，而那个分区是**冷的**：
+  这些上限配置的是进程自己，所以下一次启动才生效。
 
-★ **`mcps/` is a partition of its own, and it is hot.** `agentkit/spec/config.go:66`
-registers it with `Editable: true` and `hot: true`: the configuration editor can write
-it, the reloader watches it, and the loader puts the servers into `Config.MCPs`
-(`agentkit/spec/config.go:111`). ★ A hot partition whose resources cannot be rebuilt is
-a partition that lies about being hot — so the client's life is tied to the
-declaration's fingerprint (`agentkit/build/mcpmanager.go:330`).
+★ **`mcps/` 自成一个分区，而且是热的。** `agentkit/spec/config.go:66`
+  把它登记成 `Editable: true` 与 `hot: true`：配置编辑器可以写它，热重载盯着它，
+  加载器把服务器放进 `Config.MCPs`（`agentkit/spec/config.go:111`）。
+  ★ 一个资源重建不回来的热分区，就是一个谎称自己是热的分区 ——
+  所以客户端的生命挂在声明的指纹上（`agentkit/build/mcpmanager.go:330`）。
 
-## 2. What an MCP server changes
+## 2. MCP 服务器改变了什么
 
-### 2.1 Two things an MCP client owns
+### 2.1 MCP 客户端占有的两样东西
 
-An MCP server differs from every tool openheron has today in exactly two ways.
+MCP 服务器与 openheron 今天的每一个工具，差别恰好在两处。
 
-| # | What | Why the current code assumes otherwise |
+| # | 是什么 | 现有代码为什么假定不是这样 |
 |---|---|---|
-| 1 | **A long-lived connection** — a child process (stdio) or an HTTP session | `Provide` returns a batch and returns; nothing in `toolProvider` has a lifetime. `buildHeavy` runs once per snapshot (`agentkit/build/snapshot.go:47`), so a client has to outlive the call that created it |
-| 2 | **A tool set decided at runtime** — the server decides which tools it offers | The policy table is keyed by tool name, and every name in it is known when the config is written |
+| 1 | **一条长连接** —— 一个子进程（stdio）或一个 HTTP 会话 | `Provide` 返回一批就返回；`toolProvider` 里没有任何东西有生命周期。`buildHeavy` 一个快照跑一次（`agentkit/build/snapshot.go:47`），于是客户端必须活得比创建它的那次调用更久 |
+| 2 | **运行期才定下来的工具集** —— 服务器决定它提供哪些工具 | 策略表以工具名为键，而表里的每个名字在写配置时就已经知道了 |
 
-★ The second one is the load-bearing one. The policy layer is a **static table keyed by
-name**, and an MCP server's names are not known until the connection is up.
+★ 第二条才是承重的那条。策略层是一张**以名字为键的静态表**，
+  而 MCP 服务器的名字要等连接建立之后才知道。
 
-### 2.2 The component: what it is, and what it is not
+### 2.2 这个组件：是什么，不是什么
 
-`github.com/cloudwego/eino-ext/components/tool/mcp` (v0.0.9) is the adapter. Its entire
-surface:
+`github.com/cloudwego/eino-ext/components/tool/mcp`（v0.0.9）是那层适配器。它的全部接口：
 
 ```go
 func GetTools(ctx context.Context, conf *Config) ([]tool.BaseTool, error)
 ```
 
-and the struct it takes:
+以及它接受的那个结构体：
 
 ```go
 type Config struct {
@@ -159,383 +155,349 @@ type Config struct {
 }
 ```
 
-★ **The component's own README is out of date.** Its `Config` block lists only `Cli` and
-`ToolNameList`; the source has five fields. The three it omits are the useful ones:
-`ToolCallResultHandler` is the only place a result can be inspected or rewritten before
-it reaches the model, and `CustomHeaders` / `Meta` are how a server is addressed.
-Read the source, not the README.
+★ **这个组件自己的 README 是过时的。** 它的 `Config` 只列了 `Cli` 与 `ToolNameList`，
+  源码里有五个字段。少掉的那三个恰好是有用的：`ToolCallResultHandler` 是结果进入模型
+  之前唯一能被检查或改写的地方，而 `CustomHeaders` / `Meta` 决定怎么寻址一个服务器。
+  读源码，别读 README。
 
-What the component does **not** do:
+这个组件**不**做的事：
 
-| Not done | Consequence for openheron |
+| 没做 | 对 openheron 的后果 |
 |---|---|
-| No client lifecycle — no spawn, no `Start`, no `Initialize`, no `Close` | openheron owns the connection: the manager creates it, initializes it, keeps it alive, and tears it down when the process goes away (`agentkit/build/mcpmanager.go:395`) |
-| No transport choice | stdio / SSE / streamable HTTP are `mcp-go`'s `client` constructors; openheron picks one (`agentkit/build/mcpmanager.go:418`, `:472`) |
-| No configuration format | the schema is §5 — `mcps/<server>.yaml`, one file per server (`agentkit/spec/load.go:269`) |
-| No streaming | the wrapper implements `Info` and `InvokableRun` only, so the tool is a `tool.InvokableTool`, never a `tool.StreamableTool`. The whole result arrives as one JSON blob |
+| 不管客户端生命周期 —— 不拉起、不 `Start`、不 `Initialize`、不 `Close` | 连接归 openheron 管：manager 建它、初始化它、养着它，进程退出时拆掉它（`agentkit/build/mcpmanager.go:395`） |
+| 不选传输方式 | stdio / SSE / streamable HTTP 是 `mcp-go` 的 `client` 构造器；openheron 挑一个（`agentkit/build/mcpmanager.go:418`、`:472`） |
+| 没有配置格式 | schema 就是 §5 —— `mcps/<server>.yaml`，一个服务器一个文件（`agentkit/spec/load.go:269`） |
+| 不支持流式 | 那层包装只实现了 `Info` 与 `InvokableRun`，所以它是 `tool.InvokableTool`，永远不是 `tool.StreamableTool`。整个结果作为一块 JSON 回来 |
 
-★ **The component is the adapter, not the feature.** openheron brings the lifecycle,
-the naming, the tiers and the policy; the component brings the protocol. The provider
-calls exactly one function of it (`agentkit/build/mcptools.go:256`), and everything
-around that call is openheron's own code.
+★ **这个组件是适配器，不是功能本身。** 生命周期、命名、档位与策略都是 openheron 自己的，
+  协议才是组件带来的。provider 只调用它的一个函数（`agentkit/build/mcptools.go:256`），
+  而那个调用周围的一切都是 openheron 自己的代码。
 
-★ The dependency versions are compatible. The component's own `go.mod` pins
-`github.com/cloudwego/eino v0.6.0`, but the APIs it uses still exist in v0.9.22
-(`schema.NewParamsOneOfByJSONSchema`, `eino@v0.9.22/schema/tool.go:297`). Verified by
-compiling `components/tool/mcp v0.0.9` against `eino v0.9.22` with
-`github.com/mark3labs/mcp-go v0.43.0`.
+★ 依赖版本是兼容的。这个组件自己的 `go.mod` 钉的是
+  `github.com/cloudwego/eino v0.6.0`，但它用到的 API 在 v0.9.22 里还在
+  （`schema.NewParamsOneOfByJSONSchema`，`eino@v0.9.22/schema/tool.go:297`）。
+  已实测：把 `components/tool/mcp v0.0.9` 与 `eino v0.9.22` 、
+  `github.com/mark3labs/mcp-go v0.43.0` 一起编译通过。
 
-### 2.3 The three problems that decide this design
+### 2.3 决定这份设计的三个问题
 
-| # | Problem | Where it bites | Resolved by |
+| # | 问题 | 咬在哪里 | 由什么解决 |
 |---|---|---|---|
-| 1 | **A server's tool name can collide with a reserved name** — an MCP server that offers `ls` or `grep` | `agentkit/build/tools.go:121` — `validateBatch` returns an error, `Build` propagates it (`agentkit/build/tools.go:96`), and the **whole agent fails to start**. Not "this tool is dropped" — the process is down | §3 — `mcp__<server>__ls` |
-| 2 | **A server's tool name can be illegal for the provider** — server-prefixed names such as `github.create_issue` are common | the model provider's function-name character set does not accept `.`; the call fails at the model, not at load time | §3 — `sanitizeMCPToolName` (`agentkit/build/mcptools.go:151`) |
-| 3 | **A runtime tool set cannot be named in a static policy** — the policy is a table keyed by name, and the names are not known until the connection is up | `agentkit/build/policy.go:55` and `:146` — a name lookup only. A tool nobody names falls back to the table's default, and that default has to be **ask**: an MCP tool runs an arbitrary process | §4 and §7.3 — the namespace's default is `ask` (`agentkit/build/policy.go:55`) |
+| 1 | **服务器的工具名可能撞上保留名** —— 一个提供 `ls` 或 `grep` 的 MCP 服务器 | `agentkit/build/tools.go:121` —— `validateBatch` 返回错误，`Build` 往上抛（`agentkit/build/tools.go:96`），于是**整个 agent 起不来**。不是「这个工具被丢掉」—— 是进程没了 | §3 —— `mcp__<server>__ls` |
+| 2 | **服务器的工具名可能对 provider 非法** —— 带服务器前缀的名字很常见，比如 `github.create_issue` | 模型 provider 的 function name 字符集不收 `.`；失败发生在调模型的时候，而不是加载的时候 | §3 —— `sanitizeMCPToolName`（`agentkit/build/mcptools.go:151`） |
+| 3 | **运行期才有的工具集没法写进静态策略** —— 策略是以名字为键的表，而名字要等连接建立才拿到 | `agentkit/build/policy.go:55` 与 `:146` —— 只按名字查。没有人点名的工具落进那张表的缺省档，而那个缺省只能是 **ask**：一个 MCP 工具能执行任意进程 | §4 与 §7.3 —— 命名空间的缺省是 `ask`（`agentkit/build/policy.go:55`） |
 
-★ **All three are closed in the tree.** Problem 1 by the namespace, problem 2 by the
-sanitizer, problem 3 by the per-file tier: an MCP tool is `allow` only when its own
-server's file names it in `allows:`, and `ask` otherwise.
+★ **三条在树里都关上了。** 问题 1 靠命名空间，问题 2 靠规整函数，
+  问题 3 靠写在文件里的档位：一个 MCP 工具只有在它自己服务器的文件用 `allows:`
+  点名时才 `allow`，其余一律 `ask`。
 
-★ Problem 3 is the reason a namespace (§3) and a tier that lives with the tool (§7.3)
-are two halves of one decision rather than two conveniences: **the namespace is what
-makes a prefix meaningful**, because a prefix only separates cleanly if the prefix
-boundary is unambiguous — and the per-file tier is what makes the namespace usable,
-because a file can speak about its own tools without knowing their exposed names.
+★ 问题 3 是「命名空间（§3）」与「住在工具旁边的档位（§7.3）」是同一个决定的两个半边、
+  而不是两件方便事的原因：**命名空间让前缀才有意义** ——
+  因为前缀要切得干净，前缀的边界就不能有歧义 ——
+  而「按文件写的档位」是让命名空间变得可用的那半边：
+  一个文件可以在不知道自己那些工具对外叫什么名字的情况下，谈它自己的工具。
 
-## 3. The namespace: `mcp__<server>__<tool>`
+## 3. 命名空间：`mcp__<server>__<tool>`
 
-Every MCP tool is exposed to the model under a namespaced name:
+每个 MCP 工具都以带命名空间的名字暴露给模型：
 
 ```
 mcp__<server>__<tool>
 ```
 
-### 3.1 The rules
+### 3.1 规则
 
-| Segment | Who decides | Rule |
+| 段 | 谁定 | 规则 |
 |---|---|---|
-| `server` | **we do** — the `<server>.yaml` file name | must match `^[a-z0-9]+(_[a-z0-9]+)*$`; a violation is a **load-time hard error** (`agentkit/spec/load.go:272`) |
-| `tool` | **the server does** | characters outside `[A-Za-z0-9_-]` are replaced with `_`; case is preserved (`agentkit/build/mcptools.go:151`) |
+| `server` | **我们定** —— `<server>.yaml` 的文件名 | 必须匹配 `^[a-z0-9]+(_[a-z0-9]+)*$`；不匹配是**加载期硬错误**（`agentkit/spec/load.go:272`） |
+| `tool` | **服务器定** | `[A-Za-z0-9_-]` 之外的字符替换成 `_`；大小写保持原样（`agentkit/build/mcptools.go:151`） |
 
-★ **The server name may not contain a run of underscores.** Otherwise
-`mcp__a__b__x` cannot be read back — is that server `a` with tool `b__x`, or server
-`a__b` with tool `x`? The prefix syntax in §4 cuts on `mcp__<server>__`, so an
-ambiguous boundary would silently widen a rule.
+★ **server 名里不许出现连续的下划线。** 否则 `mcp__a__b__x` 读不回来 ——
+  那是 server `a` 的工具 `b__x`，还是 server `a__b` 的工具 `x`？
+  §4 的前缀语法正是按 `mcp__<server>__` 切的，边界有歧义就会把一条规则悄悄放大。
 
-★ **The composed name is never parsed back.** Nothing splits `mcp__github__create_issue`
-into its two halves again — the policy layer matches whole names and prefixes only.
-That is what lets the tool segment keep its original case and characters.
+★ **合成名永远不被读回来。** 没有任何地方把 `mcp__github__create_issue` 拆回两半 ——
+  策略层只做整名与前缀匹配。这正是工具段能保留原始大小写与字符的原因。
 
-### 3.2 The three outcomes for a tool that cannot be named
+### 3.2 名字不合法的三种归宿
 
-| Case | Rule | Why not the alternative |
+| 情况 | 规则 | 为什么不用另一种做法 |
 |---|---|---|
-| Composed name longer than 64 characters | **skip the tool, warn** | truncating collides and drops exactly the part that distinguishes the tool |
-| Two tools of one server sanitize to the same name | **skip the second, warn** | the first one wins silently, and the model would call the wrong tool with the other's arguments |
-| The name is otherwise legal | expose it | — |
+| 合成名超过 64 个字符 | **跳过该工具 + 警告** | 截断会撞名，而且丢掉的正是区分它的那一截 |
+| 同一服务器里两个工具规整后同名 | **跳过第二个 + 警告** | 否则第一个悄悄赢，模型会拿着另一个的参数去调它 |
+| 其余情况 | 暴露出去 | — |
 
-★ **Skip and warn, never fail the process.** The tool name is chosen by a **remote
-server**; the user cannot rename it. A server that adds one odd tool should cost that
-tool, not the whole agent. The line is the same one `tools/` draws (§1.4): **our own
-configuration fails loudly at load time, somebody else's content is dropped with a
-notice.**
+★ **跳过并警告，绝不让进程起不来。** 工具名是**远端服务器**定的，用户改不了。
+  一个多出一个怪工具的服务器，应该只赔掉那个工具，不该赔掉整个 agent。
+  这条线与 `tools/` 划的那条一样（§1.4）：**自己写的配置在加载期大声报错，
+  别人给的内容掉了要出声。**
 
-★ A skipped tool must be **visible**: the warning names the server, the original tool
-name, and the composed name it would have had. "A feature seems to be missing" is the
-symptom this design refuses to produce. ⇒ the provider logs the three
-(`agentkit/build/mcptools.go:236`), and the panel shows the tool as `skipped` with its
-reason (`agentkit/build/mcpstatus.go:145`).
+★ 被跳过的工具必须**看得见**：警告里要写清服务器名、原始工具名，
+  以及它本来会有的合成名。「某个功能好像不见了」是这份设计拒绝出现的症状。
+  ⇒ provider 把这三样都写进日志（`agentkit/build/mcptools.go:236`），
+  而面板把它显示成 `skipped` 并带上原因（`agentkit/build/mcpstatus.go:145`）。
 
-### 3.3 The namespace closes problem 1 as well
+### 3.3 命名空间顺带把问题 1 也关上了
 
-A server that offers `ls` now offers `mcp__<server>__ls`, which does not collide with
-`reservedToolNames` (`agentkit/build/tools.go:69`). The reverse follows, and it is a
-rule of its own:
+一个提供 `ls` 的服务器现在提供的是 `mcp__<server>__ls`，
+不再与 `reservedToolNames`（`agentkit/build/tools.go:69`）相撞。
+反过来也成立，而且它本身就是一条规则：
 
-> **Only MCP tools may use the `mcp__` prefix.**
+> **只有 MCP 工具可以用 `mcp__` 前缀。**
 
-Without it, a built-in tool could claim the namespace and a prefix rule written for MCP
-would quietly cover it.
+否则一个内置工具就能占了命名空间，而为 MCP 写的前缀规则会悄悄盖住它。
 
-## 4. Prefix matching in an agent's `tools`
+## 4. 某个 agent 的 `tools` 里的前缀匹配
 
-★ An agent's `tools` accepts a **prefix pattern** in addition to an exact name, and it
-is an **allow-list**: a pattern names what the agent **gets**.
+★ 某个 agent 的 `tools` 除了精确名字，还接受一种**前缀模式**，而它是一张
+**白名单**：模式点的是这个 agent **拿到**什么。
 
-| Entry | Matches |
+| 条目 | 匹配 |
 |---|---|
-| `execute` | exactly the tool named `execute` |
-| `mcp__github__*` | every tool of the server named `github` |
-| `mcp__*` | every MCP tool, from any server |
+| `execute` | 名字正好是 `execute` 的那个工具 |
+| `mcp__github__*` | server 名为 `github` 的每一个工具 |
+| `mcp__*` | 来自任何 server 的每一个 MCP 工具 |
 
-★ **The tiers are not in this list at all.** A tier is said by the file that **provides**
-the tool (§7.3), and a file speaks **its own vocabulary** — so "every tool of this
-server asks" is an **empty** `allows:` in `mcps/<server>.yaml`, not a pattern in a
-shared list. That form is **stronger** than a pattern: it covers the tools the server
-has **not offered yet**.
+★ **档位根本不在这张表里。** 档位由**提供**那个工具的文件来说（§7.3），
+  而一个文件讲的是**自己的词儿** —— 所以「这个 server 的每个工具都要先点头」
+  是 `mcps/<server>.yaml` 里一个**空的** `allows:`，不是共享表里的一个模式。
+  那种写法比模式**更强**：它覆盖服务器**还没提供**的工具。
 
-★ **There is no global list, and there is no third tier.** ★ "Not exposed" is said in
-exactly **two** places: a file's own **`allows:`** — which says what that file offers
-without a nod — and an agent's **`tools`**, which says what that agent may use at all.
-A third, global list would be one more place to keep in sync, and it was the worst of
-the three: the only one that had to name the tools in the **exposed** vocabulary while
-the tools' own files speak theirs. ★ A tool an agent may not use **keeps its own tier**
-and says why in its `reason` (`agentkit/build/introspect.go:112` `verdictOf`) — it is
-**this agent** that cannot have it, not that the tool is illegal.
+★ **没有全局清单，也没有第三档。** ★ 「不被暴露」恰好在**两个**地方说：
+  一个文件自己的 **`allows:`** —— 它说这个文件提供的东西里哪些不用点头 ——
+  以及某个 agent 的 **`tools`**，它说这个 agent 能用什么。
+  第三份全局清单只会多一个要同步的地方，而它偏偏是三份里最糟的那一份：
+  只有它必须用**对外的**词儿点名工具，而工具自己的文件讲的是它们自己的词儿。
+  ★ 一个 agent 不许用的工具**保住自己的档位**，并在它的 `reason` 里说清为什么
+  （`agentkit/build/introspect.go:112` `verdictOf`）——
+  不能拥有它的是**这个 agent**，不是这个工具不合法。
 
-★ **The default is `none`**, so the list is the whole answer: a tool the agent does not
-name is not in its tool set. ★ A pattern is what names a whole **namespace** —
-`mcp__github__*` is every tool of one server, and that is the unit an agent usually
-thinks in.
+★ **缺省是 `none`**，所以这张清单就是全部答案：agent 没点名的工具就不在它的
+  工具集里。★ 模式是给一整个**命名空间**起名的写法 —— `mcp__github__*` 就是某个
+  server 的全部工具，而那正是 agent 通常思考的单位。
 
-### 4.1 The syntax rules
+### 4.1 语法规则
 
-| # | Rule | Reason |
+| # | 规则 | 理由 |
 |---|---|---|
-| 1 | Only a **trailing** `*` is a prefix pattern; a `*` anywhere else is a **load-time hard error** | `mcp*foo` looks like a wildcard and is not one — a rule whose reach differs from what it reads as is a silent mismatch |
-| 2 | A lone `*` is a **load-time hard error** | `tools: ["*"]` is a way of saying "everything" in a list whose whole point is to say what is there — and an absent list already means nothing, so the wildcard would be the one entry that means the opposite of what it reads as |
-| 3 | The part before `*` must not be empty | rule 2 |
-| 4 | An exact entry and a prefix entry are **equivalent** — any match gives the agent the tool | there is no tier to choose here: the tool is either in that agent's set or it is not |
+| 1 | 只有**结尾**的 `*` 是前缀模式；`*` 出现在别处是**加载期硬错误** | `mcp*foo` 看着像通配符而其实不是 —— 一条读起来与实际覆盖范围不同的规则，就是一次静默的错配 |
+| 2 | 单独一个 `*` 是**加载期硬错误** | `tools: ["*"]` 是在一张「说明有什么」的清单里写「什么都有」—— 而不写本来就等于什么都没有，所以这个通配符会是唯一一条意思与字面相反的条目 |
+| 3 | `*` 前面不能为空 | 规则 2 |
+| 4 | 精确条目与前缀条目**等价** —— 命中任一即让那个 agent 拿到这个工具 | 这里没有档位可选：那个工具要么在那个 agent 的集合里，要么不在 |
 
-### 4.2 The prefix syntax adds no tier
+### 4.2 前缀语法不新增档位
 
-★ The tiers live in the tools' own files now (§7.3), and an MCP tool gets one of
-**two** — there is no third:
+★ 档位现在住在工具自己的文件里（§7.3），而一个 MCP 工具拿到的是**两档**之一 ——
+  没有第三档：
 
 ```
 allow (if the file's allows list names it) → ask (everything else)
 ```
 
-★ **A tool an agent may not use keeps its own tier.** The tier is about the **tool**;
-the list is about the **agent**. ⇒ the tool is still `allow` or `ask` in the table, and
-the agent's list is reported beside it, as the `reason`
-(`agentkit/build/introspect.go:112` `verdictOf`, and `agentkit/build/introspect.go:36`
-`reasonOf` — there is now **one** reason, `tools`). ★ A third tier would have to say
-"illegal", and nothing here is illegal: a tool the agent may not use is simply not in
-that agent's tool set.
+★ **一个 agent 不许用的工具保住自己的档位。** 档位是关于**工具**的；
+  清单是关于**agent** 的。⇒ 那个工具在表里仍然是 `allow` 或 `ask`，
+  而 agent 的清单被并排报出来，作为那个 `reason`
+  （`agentkit/build/introspect.go:112` `verdictOf`，以及
+  `agentkit/build/introspect.go:36` `reasonOf` —— 现在只有**一个**理由，`tools`）。
+  ★ 第三档就得说「不合法」，而这里没有什么是不合法的：
+  一个 agent 不许用的工具，只是压根不在那个 agent 的工具集里。
 
-★ The prefix syntax only decides **whether an entry matches a name** — it adds no tier,
-and it reorders none. ★ **And the mounting is a separate level**: a server the agent
-does not mount has no tools to block, and one it mounts but does not name is blocked by
-this very list. So there is nothing to order between two narrowings — there is one.
+★ 前缀语法只决定**一条条目是否匹配某个名字** —— 它不新增档位，也不重排任何档位。
+  ★ **而挂载是另一层**：agent 没挂载的 server 根本没有工具可挡，挂载了却没点名的
+  工具则由这张清单来挡。所以没有两条收窄之间的先后顺序 —— 只有一条。
 
-★ **The counts are not part of this.** The caps — the depth and the retry count — live
-in `server/config.yaml`, and they hold no tool names, so nothing about them is a
-matching rule.
+★ **那些数量上限不参与。** 上限 —— 深度与重试次数 —— 住在 `server/config.yaml` 里，
+  而它们不含工具名，所以关于它们没有任何一条匹配规则。
 
-### 4.3 Where the prefix syntax applies
+### 4.3 前缀语法用在哪
 
-| Place | Where it is written | Meaning |
+| 位置 | 写在哪 | 含义 |
 |---|---|---|
-| an agent's `tools` | `agentkit/build/topology.go:73` | this agent may use these tools, and nothing else |
+| 某个 agent 的 `tools` | `agentkit/build/topology.go:73` | 这个 agent 能用这些工具，别的都不行 |
 
-★ It speaks in **exposed** names (`mcp__github__delete_repo`), because that is what the
-tool table looks up. The per-file tiers do not (§7.3): a file speaks its own vocabulary,
-and the provider translates.
+★ 它用的是**对外的**名字（`mcp__github__delete_repo`），因为工具表查的就是它。
+  按文件写的档位不是这样（§7.3）：一个文件讲自己的词儿，由 provider 去翻译。
 
-### 4.4 What it costs
+### 4.4 代价是什么
 
-★ A prefix rule is a **blunt instrument**: `tools: ["mcp__*"]` gives that agent every MCP
-tool of every server. That is usually the intent, but it is one line, and it is easy to
-write by accident. A rule that names a single server (`mcp__github__*`) is the one worth
-reaching for first.
+★ 前缀规则是一件**钝器**：`tools: ["mcp__*"]` 让那个 agent 拿到每一个 server 的
+  每一个 MCP 工具。这通常正是本意，但它只有一行，而且很容易顺手写下来。
+  真正值得先够的是点名单个 server 的那条规则（`mcp__github__*`）。
 
-## 5. The `mcps/<server>.yaml` partition
+## 5. `mcps/<server>.yaml` 分区
 
-### 5.1 Why a partition of its own
+### 5.1 为什么要单独一个分区
 
-MCP servers are configured one file per server:
+MCP 服务器按服务器一个文件来配：
 
 ```
 .openheron/mcps/
 └─ github.yaml
 ```
 
-★ **It is not a file inside `tools/`.** `tools/` is "one file = one tool"
-(`agentkit/spec/load.go:165` whitelists the file names), and the entity in MCP is the
-**server**: one server has one command, one argument list, one environment, one
-transport and one lifecycle. Putting N servers in one file means a nested list under a
-partition whose rule is "the file content is the configuration, with no wrapper key" —
-and when the file is replaced wholesale, there is no way to say which server changed.
-★ `mcps/` follows the same rule, one file per server, and the loader keys the partition
-by the file name (`agentkit/spec/load.go:269`).
+★ **它不是 `tools/` 里的一个文件。** `tools/` 的规则是「一个文件 = 一个工具」
+  （`agentkit/spec/load.go:165` 把文件名列成白名单），而 MCP 里的实体是**服务器**：
+  一个服务器有一个命令、一份参数、一个环境、一种传输和一条生命周期。
+  把 N 个服务器塞进一个文件，就要在「文件内容就是配置、不带外层包装键」这个分区规则
+  之下再套一层列表；而整份文件替换时，也说不清是哪个服务器变了。
+  ★ `mcps/` 遵守同一条规则，一个服务器一个文件，加载器用文件名给这个分区建键
+  （`agentkit/spec/load.go:269`）。
 
-The rule from §2 of the config design — *one entity, one file* — applies to the server,
-not to the tool.
+配置设计 §2 的那条规则 —— *一实体一文件* —— 落在服务器上，不是落在工具上。
 
-### 5.2 The fields
+### 5.2 字段
 
-| Field | Type | Default | Meaning |
+| 字段 | 类型 | 缺省 | 含义 |
 |---|---|---|---|
-| `transport` | `string` | `stdio` | `stdio` or `http`; an **unknown value is a hard error** — no silent fallback to stdio. ★ `http` means **streamable HTTP**; SSE is not supported (§5.7) |
-| `command` | `string` | — | stdio only, **required**: the executable to run |
-| `args` | `[]string` | `[]` | stdio only: its arguments |
-| `env` | `map[string]string` | `{}` | stdio only: variables **layered over** the inherited environment (§5.5); values are expanded like every other value. ★ an http server with `env:` is a **load-time hard error** (§5.7) |
-| `url` | `string` | — | http only, **required**: the server address |
-| `headers` | `map[string]string` | `{}` | http only: sent on every request |
-| `timeout` | `MCPDuration` | `30s` | the ceiling for connect + initialize + list tools |
-| `call_timeout` | `MCPDuration` | `60s` | the ceiling for **one tool call** (§6.5) |
-| `tools` | `[]string` | `[]` → all | ★ **a filter, not a switch** — the server's **raw** tool names to offer **out of the ones it has** (not the namespaced ones); absent = all of them |
-| `allows` | `[]string` | `[]` | the server's **own** tool names that run **without a nod** — ★ everything else this server offers asks, including the tools it has **not offered yet** |
+| `transport` | `string` | `stdio` | `stdio` 或 `http`；**未知值是硬错误**，不静默退回 stdio。★ `http` 的意思是 **streamable HTTP**；不支持 SSE（§5.7） |
+| `command` | `string` | — | 仅 stdio，**必填**：要执行的命令 |
+| `args` | `[]string` | `[]` | 仅 stdio：它的参数 |
+| `env` | `map[string]string` | `{}` | 仅 stdio：**叠加**在继承来的环境之上的变量（§5.5）；取值与其他配置一样展开。★ http 服务器写 `env:` 是**加载期硬错误**（§5.7） |
+| `url` | `string` | — | 仅 http，**必填**：服务器地址 |
+| `headers` | `map[string]string` | `{}` | 仅 http：每次请求都带的头 |
+| `timeout` | `MCPDuration` | `30s` | 连接 + 初始化 + 取工具清单的上限 |
+| `call_timeout` | `MCPDuration` | `60s` | **一次工具调用**的上限（§6.5） |
+| `tools` | `[]string` | `[]`→全部 | ★ **过滤器，不是开关** —— 从这个 server **自己有的**工具里挑出来要提供的那些**原始**工具名（不是带命名空间的那个）；不写 = 全部 |
+| `allows` | `[]string` | `[]` | 这个 server **自己的**工具名里，哪些**不用点头**就跑 —— ★ 这个 server 提供的其余一切都要先点头，包括那些它**还没提供**的工具 |
 
-★ **`command` is resolved in the sandbox's PATH, never against the project root.** The
-workspace must not get to choose what runs: a command resolved against the project root
-would let a checkout decide which executable the agent runs, with the agent's
-privileges. ⇒ the executable comes from **the Kit** — the mixin's install hook puts it
-there (§8) — and outside a Kit the user installs it themselves.
+★ **`command` 在沙箱的 PATH 里解析，绝不相对项目根。** 工作区不许决定跑什么：
+  一个相对项目根解析的命令，等于让一次 checkout 决定 agent 跑哪个可执行文件，
+  还带着 agent 的权限。⇒ 可执行文件来自 **Kit** —— mixin 的安装钩子把它放进去（§8）——
+  不在 Kit 里的话，就由用户自己装。
 
-★ So the two sides describe one server from their own angles: the **mixin** says what to
-install, the **config** says how to invoke it (`command` plus `args`). The config's
-`command` names what the Kit laid down.
+★ 所以两边各说各的，从各自的角度描述同一个 server：**mixin** 说装什么，
+  **配置**说怎么调用它（`command` 加 `args`）。配置里的 `command`
+  点名的正是 Kit 铺下的那个东西。
 
-★ The keys mean the same thing in every file of `tools/` and `mcps/`, and they are written
-in **that file's own vocabulary**: `allows: [create_issue]` here is the server's own name,
-not the composed one. The provider translates it to the name the model sees (§7.3).
+★ 这几个键在 `tools/` 与 `mcps/` 的每一个文件里都是同一个意思，
+  而且它们是用**那个文件自己的词儿**写的：这里的 `allows: [create_issue]` 是
+  server 自己的名字，不是合成出来的那个名字。provider 会把它翻译成模型看到的
+  那个名字（§7.3）。
 
-★ **The default is `ask`, and `allows:` is the exception.** There is no second key and no
-per-group default — the same rule covers the filesystem tools, the HTTP tool and an MCP
-server. See `docs/config-design.md` §6.6.
+★ **缺省是 `ask`，`allows:` 是那个例外。** 没有第二个键，也没有按组的缺省 ——
+  同一条规则盖住文件系统工具、HTTP 工具与一个 MCP server。
+  见 `docs/config-design.md` §6.6。
 
-★ **There is no third list.** "Not exposed" is said in exactly two places: this file's
-own **`allows:`** list, which names the tools that run without a nod, and an agent's
-**`tools`** (§4.2). ★ The file's `tools:` is a **filter**, not a tier: it says what the
-file offers at all (§5.3).
+★ **没有第三份清单。** 「不被暴露」恰好在两个地方说：这个文件自己的
+  **`allows:`** 清单（点名那些不用点头就跑的工具），以及某个 agent 的
+  **`tools`**（§4.2）。★ 文件的 `tools:` 是**过滤器**，不是档位：
+  它说的是这个文件到底提供什么（§5.3）。
 
-★ `timeout` is a **lenient** duration: a wrong value degrades to the default and is
-recorded in `deferred`, exactly like `debounce` and `start_timeout`. A wrong timeout
-changes *how long we wait*, not *what happens* — it must not keep the process from
-starting.
+★ `timeout` 是**宽松**时长：写错就退回默认并记进 `deferred`，
+  与 `debounce`、`start_timeout` 完全一样。写错 timeout 改变的是「等多久」，
+  不是「会发生什么」—— 它不该让进程起不来。
 
-★ **The type is `decl.MCPDuration`, not the package-level `LenientDuration` this
-design named.** The difference is the **source**: the package-level list every other
-lenient duration uses carries no file and no key, so it cannot say **which** value was
-wrong. `MCPDuration` keeps the raw text and whether the key was there at all, so the
-deferred entry can name the file and the key (`agentkit/spec/decl/decl.go:393`,
-`agentkit/spec/load.go:372`).
+★ **类型是 `decl.MCPDuration`，而不是这份设计里写的那个包级 `LenientDuration`。**
+  差别在**来源**：别的宽松时长用的那份包级清单不带文件也不带键，
+  所以它说不出**是哪一个**值写错了。`MCPDuration` 留着原文，
+  也留着「这个键到底写没写」，所以 `deferred` 那一条能点出文件与键
+  （`agentkit/spec/decl/decl.go:393`、`agentkit/spec/load.go:372`）。
 
-★ `tools: []` means **all**, not **none**. An empty whitelist that meant "nothing" would
-be indistinguishable from a missing key — and it is a **filter** on what the server
-offers (§5.3), not a switch.
+★ `tools: []` 的意思是**全部**，不是**一个都没有**。
+  一个表示「什么也没有」的空白名单会与「键缺失」分不出来 —— 而它是对 server 提供什么的
+  **过滤器**（§5.3），不是开关。
 
-★ **`http` is streamable HTTP, and only that.** `mcp-go` ships two HTTP clients —
-`client.NewStreamableHttpClient` and `client.NewSSEMCPClient` — and one `transport`
-value cannot pick between them. ⇒ `http` means the **streamable** one, the transport
-the MCP specification now defines; openheron does not speak SSE. ★ The alternative (a
-third `transport` value) would put a legacy transport into the configuration of every
-user who never wants it, and the second value would have to be *the* value for the
-people who do.
+★ **`http` 就是 streamable HTTP，而且只是它。** `mcp-go` 带着两个 HTTP 客户端 ——
+  `client.NewStreamableHttpClient` 与 `client.NewSSEMCPClient` —— 而一个 `transport`
+  的取值没法在它们之间做选择。⇒ `http` 指的是**可流式**的那个，是 MCP 规范现在定义的
+  那一个；openheron 不说 SSE。★ 另一条路（再加一个 `transport` 取值）会把一个遗留的
+  传输方式塞进每一个根本不想要它的用户的配置里，而第二个取值还得是*那些*想要它的人的
+  那个值。
 
-★ **`env:` has no meaning on an http server, so it is an error there.** An http server
-is a remote process, and this process's environment is not its environment. ⇒ an http
-server that declares `env:` is a **load-time hard error** (§5.7), not a key that is
-quietly ignored. ★ A key that does nothing is worse than a refusal: the user would
-believe the server runs with that variable set.
+★ **`env:` 在 http 服务器上没有意义，所以那儿它是错误。** http 服务器是一个远端进程，
+  而本进程的环境不是它的环境。⇒ 声明了 `env:` 的 http 服务器是**加载期硬错误**
+  （§5.7），不是一个被悄悄忽略的键。★ 一个什么也不做的键比一次拒绝更糟：
+  用户会以为那个服务器是带着这个变量跑的。
 
-★ **Two of the fields are the component's own.** `tools:` is the component's
-`ToolNameList` — the server's **own** names to keep out of the ones it has — and
-`headers:` is its `CustomHeaders` (§2.2). ★ Both are written in the server's own
-vocabulary, and the component takes them in that same vocabulary, so nothing has to be
-translated.
+★ **有两个字段就是组件自己的。** `tools:` 是组件的 `ToolNameList` ——
+  从 server **自己有的**工具里挑出来要留下的那些名字 —— 而 `headers:` 是它的
+  `CustomHeaders`（§2.2）。★ 两者都用 server 自己的词儿写，而组件收的也是同一套词儿，
+  所以不需要任何翻译。
 
-### 5.3 The file defines the server
+### 5.3 文件定义 server
 
-There is no `enabled` field. A server is **defined** because its file exists; removing
-the file removes the definition. This is the rule `tools/` already follows for the tools
-whose provider reads a configuration file — ★ and it keeps **whether the server exists**
-in one place, instead of splitting it between "the file is there" and "the flag inside it
-says on".
+没有 `enabled` 字段。服务器是被**定义**的，因为它的文件存在；删掉文件就是删掉这个定义。
+这条规则 `tools/` 已经在那些 provider 会读配置文件的工具上遵守了 —— ★ 而且它让
+**server 存不存在**只待在一个地方，而不是拆成「文件在不在」和「文件里那个标志说开不开」
+两处。
 
-★ **The file defines the server; it does not decide what the server offers.** The tools
-a server has come from the server itself, and the file's `tools:` picks the ones worth
-offering out of them (§5.2).
+★ **文件定义 server；它不决定 server 提供什么。** server 有哪些工具来自 server 自己，
+文件的 `tools:` 只是从里面挑出值得暴露的（§5.2）。
 
-★ **The file says what a server is; the agent says who gets it.** Which agents load a
-server is the agent's own `mcps:` list in its frontmatter: ★ **absent = every configured
-server, `[]` = none** — the same pointer trick `skills` already uses, for the same
-reason: the common case is **one** place. Write the server file, and every agent that
-has not narrowed its list gets it.
+★ **文件说服务器是什么；agent 说谁拿它。** 哪些 agent 加载一个服务器，
+  取决于它 frontmatter 里自己的 `mcps:` 清单：★ **缺失 = 全部已配置的服务器，
+  `[]` = 一个都没有** —— 与 `skills` 已经在用的那个指针技巧同一个形状，
+  出于同一个理由：常见情形是**一个**地方。写好服务器文件，
+  每一个没有把自己的清单收窄的 agent 就都拿到它。
 
-★ **Where that narrowing happens is not free**, because the tool set is **one set for
-the whole snapshot** (§1.1). The answer is in §11.3: the agent's **table**, where its
-`tools` list already decides what it may use.
+★ **这个收窄落在哪里不是白给的**，因为工具集是**整个快照一份**（§1.1）。
+  答案在 §11.3：agent 的**表**，也就是它的 `tools` 清单已经在决定一切的那个地方。
 
-★ **A sub-agent has a list of its own, like its own `tools`.** `decl.SubAgentSpec`
-carries `Tools`, `Skills` and `MCPServers` of its own
-(`agentkit/spec/decl/decl.go:653`), so the list is read from **the agent that is
-running** — the root, or the sub-agent the turn is in — and not from the root's list.
+★ **子 agent 有自己的一份清单，就像它自己的 `tools`。**
+  `decl.SubAgentSpec` 自带 `Tools`、`Skills` 与 `MCPServers`（`agentkit/spec/decl/decl.go:653`），
+  所以它也自带一份 `mcps:` 清单（`agentkit/spec/decl/decl.go:604`）。
+  ⇒ 清单是从**正在跑的那个 agent** 读的 —— 根 agent，或者这一轮所在的那个子 agent ——
+  而不是从根 agent 的清单读的。
 
-★ **A name that does not exist is a load-time hard error.** An agent that lists
-`githbu` would silently get no MCP server at all, and a tool that is missing because of
-a typo looks exactly like a tool that is missing because the server is down. ⇒ the
-loader refuses the name (§5.7, `agentkit/spec/load.go:508`).
+★ **一个不存在的名字是加载期硬错误。** 一个写着 `githbu` 的 agent 会安安静静地
+  一个 MCP 服务器都拿不到，而「因为笔误而少掉的工具」与「因为服务器倒了而少掉的工具」
+  长得一模一样。⇒ 加载器拒绝这个名字（§5.7，`agentkit/spec/load.go:508`）。
 
-★ The server name is the file name without `.yaml`, and it is the namespace segment
-(§3.1). A file name that does not match `^[a-z0-9]+(_[a-z0-9]+)*$` is a **load-time
-hard error** — we wrote it, so we can fix it. ★ The configuration editor refuses the
-same names (`agentkit/spec/write.go:107`), so a file written through the editor cannot
-break the rule either.
+★ server 名就是文件名去掉 `.yaml`，它就是命名空间的那一段（§3.1）。
+  不匹配 `^[a-z0-9]+(_[a-z0-9]+)*$` 的文件名是**加载期硬错误** ——
+  是我们自己写的，我们自己修。★ 配置编辑器也拒绝同样的名字
+  （`agentkit/spec/write.go:107`），所以经编辑器写出来的文件也不会破坏这条规则。
 
-### 5.4 The partition is hot
+### 5.4 这个分区是热的
 
-`mcps/` joins the hot partitions, next to `tools/`: changing a server's command or
-timeout should take effect on the next turn, without a restart. ★ The hot
-directories are collected from the categories themselves
-(`agentkit/spec/reload.go:21`), and `mcps/` is one of them because it says so
-(`agentkit/spec/config.go:66`).
+`mcps/` 与 `tools/` 一起进热更新：改一个服务器的命令或超时，
+下一轮就该生效，不必重启。★ 热目录是从分类本身收集起来的
+（`agentkit/spec/reload.go:21`），而 `mcps/` 在里面，是因为它自己这么说
+（`agentkit/spec/config.go:66`）。
 
-★ This means the client lifecycle has to survive a reload: when the snapshot is
-replaced, the stdio child process is torn down and a new one is started. A hot
-partition whose resources cannot be rebuilt is a partition that lies about being hot.
-⇒ the client is rebuilt when the **declaration** changes, not when the snapshot does:
-the fingerprint is the declaration's own (`agentkit/build/mcpmanager.go:330`), and the
-start replaces the old client (`agentkit/build/mcpmanager.go:229`).
+★ 这意味着客户端生命周期要扛得住一次重载：快照换代时，
+  stdio 的子进程被拆掉、新的被拉起来。
+  一个资源无法重建的热分区，就是一个谎称自己是热的分区。
+  ⇒ 客户端在**声明**变了的时候被重建，而不是在快照变了的时候：
+  指纹就是声明自己的那份（`agentkit/build/mcpmanager.go:330`），
+  而拉起会换掉旧客户端（`agentkit/build/mcpmanager.go:229`）。
 
-### 5.5 The child's environment
+### 5.5 子进程的环境
 
-★ **The child's environment is openheron's own environment, overlaid with the `env:`
-map.** Same name: the configuration wins.
+★ **子进程的环境 = openheron 自己的环境，被配置里的 `env:` 覆盖同名项。**
 
-★ **The environment is stdio's business.** An http server has no child process, so
-`env:` is not a field it may declare at all (§5.2, §5.7).
+★ **环境是 stdio 的事。** http 服务器没有子进程，所以 `env:` 压根不是它可以声明的字段
+  （§5.2、§5.7）。
 
-The child is a child process of this one, so it starts from the environment this
-process has — including everything the sandbox runtime injected into the container.
+子进程是本进程的子进程，所以它从本进程的环境起步 —— 包括沙箱运行时注入到容器里的
+那些东西。
 
-★ **That inheritance is what makes the credential path work without configuration**
-(§8.1): the runtime puts a **sentinel** into the container's variable, and the MCP
-server reads it from there. A configuration that had to name every variable would
-force the user to write down the credential's variable name — a fact that belongs to
-the MCP server, not to openheron.
+★ **正是这份继承让凭据路径不需要任何配置**（§8.1）：运行时把**哨兵**放进容器里的那个
+  变量，MCP server 从那儿读到它。若要配置把每个变量都点名，用户就得把凭据的变量名写下来
+  —— 而那是 **MCP server 的事**，不是 openheron 的。
 
-The `env:` map is for the variables the MCP server needs **beyond** that: a log level,
-a feature flag, a second token the server expects under its own name. Its values go
-through the same expansion as everything else in the configuration (`${ENV}` /
-`@file:`), and an unset `${ENV}` is not fatal — it is recorded in `deferred`, like every
-other missing value.
+`env:` 这张表是给 MCP server **除此之外**需要的变量用的：一个日志级别、一个特性开关、
+第二个它按自己名字找的令牌。取值与其他配置一样展开（`${ENV}` / `@file:`），
+而 `${ENV}` 未设**不致命** —— 与其他缺失值一样记进 `deferred`。
 
-★ **Inheritance is not a new exposure.** The agent's own tools already read the same
-things: `read_file` reads the project, and `execute` runs a command in this
-environment. An MCP server that sees the environment sees nothing the agent could not
-already see. The difference is only that `execute` is not in the `allows:` list and
-an MCP tool may not be. ⇒ If that asymmetry matters to you, leave `mcp__*` out of that
-agent's `tools` (§4).
+★ **继承不是新增的暴露面。** agent 自己的工具读的是同一批东西：`read_file` 读项目，
+  `execute` 在这个环境里跑命令。一个看得见环境的 MCP server，看不见任何 agent 看不见的
+  东西。区别只在于 `execute` 不在 `allows:` 清单里，而 MCP 工具未必在。
+  ⇒ 若这个不对称对你重要，就别把 `mcp__*` 放进那个 agent 的 `tools`（§4）。
 
-★ The configuration's `env:` does not **replace** the inherited environment, it
-**layers on top** of it. A configuration with an empty `env:` still produces a child
-with a full environment. ⇒ the child gets `os.Environ()` and the file's entries are
-appended (`agentkit/build/mcpmanager.go:458`).
+★ 配置里的 `env:` **不替换**继承来的环境，而是**叠在它上面**。
+  `env:` 为空的配置，产出的子进程仍然有一个完整的环境。
+  ⇒ 子进程拿到的是 `os.Environ()`，而文件里的那些条目追加在后面
+  （`agentkit/build/mcpmanager.go:458`）。
 
-★ The `PATH` in that environment is the inherited one, unchanged: the command is
-resolved in the sandbox's PATH and never against the project root
-(`agentkit/build/mcpmanager.go:418`).
+★ 那份环境里的 `PATH` 就是继承来的那个，没有被改动：命令在沙箱的 PATH 里解析，
+  绝不相对项目根（`agentkit/build/mcpmanager.go:418`）。
 
-### 5.6 The configuration templates
+### 5.6 配置模板
 
-★ **The comments in a template are English**, because a template is content that lands
-in the user's configuration (`AGENTS.md`).
+★ **模板里的注释是英文**，因为模板是写进用户配置里的内容（`AGENTS.md`）。
 
-#### `mcps/<server>.yaml` — a server over stdio
+#### `mcps/<server>.yaml` —— 一个走 stdio 的服务器
 
 ```yaml
 # .openheron/mcps/github.yaml
@@ -565,7 +527,7 @@ tools: [create_issue, list_issues, search_issues]
 #   the server offers; it never adds a tool the server does not have.
 ```
 
-#### `mcps/<server>.yaml` — a server over http
+#### `mcps/<server>.yaml` —— 一个走 http 的服务器
 
 ```yaml
 # .openheron/mcps/files.yaml
@@ -577,11 +539,10 @@ timeout: 30s
 call_timeout: 60s
 ```
 
-★ The **host** holds the key and the proxy substitutes it, so the container never sees
-it — but an http server on the host may still need the sandbox to authenticate *to it*,
-and that is the `headers:` map (§8.1).
+★ **宿主**持有那把 key、由代理替换它，所以容器永远看不到它 —— 但宿主上的一个 http
+  服务器仍然可能需要沙箱向*它*做认证，而那就是 `headers:` 这张表（§8.1）。
 
-#### ★ `tools/filesystem.yaml` — the same shape, one family over
+#### ★ `tools/filesystem.yaml` —— 同一种形状，换了一族工具
 
 ```yaml
 # .openheron/tools/filesystem.yaml
@@ -590,14 +551,12 @@ and that is the `headers:` map (§8.1).
 allows: [write_file, edit_file, execute]
 ```
 
-★ **The filesystem tools come from the framework's middleware, not from a provider** —
-so their file cannot switch them on or off, and it carries `allows:` and nothing else.
-That is the same shape an MCP server's file has for the one question they share: *which
-of these tools run without a nod*. ★ Their `allows:` is **additive** — it joins the
-code's default list (`agentkit/build/tools.go:61`: the readers `ls` `read_file` `glob`
-`grep`, the delegation tools `task` `write_todos`, the skill reader `skill`) and cannot
-remove a name. Widening is the file's job; narrowing is an agent's `tools`.
-See `docs/config-design.md` §6.6.
+★ **文件系统工具来自框架的中间件，不是来自一个 provider** —— 所以它们的文件既不能把它们
+  打开也不能关掉，里面只有 `allows:`。这跟一个 MCP server 的文件在它们共有的那一个问题
+  上是同一种形状：*这些工具里哪些不用点头*。★ 它们的 `allows:` 是**叠加的** —— 加在代码
+  那份缺省清单上（`agentkit/build/tools.go:61`：读的那几个 `ls` `read_file` `glob` `grep`，
+  委派的那几个 `task` `write_todos`，读技能的 `skill`），并不能把名字拿走。放宽是文件的活，
+  收窄是某个 agent 的 `tools`。见 `docs/config-design.md` §6.6。
 
 #### `tools/kb.yaml`
 
@@ -626,140 +585,128 @@ timeout: 30s
 allows: [request_get]
 ```
 
-#### ★ Who writes these files
+#### ★ 谁写这些文件
 
-| Writer | What it writes |
+| 谁来写 | 写什么 |
 |---|---|
-| the user | the `mcps/<server>.yaml` files, by hand |
-| `openheron init` | ★ an **example** — `mcps/example.yaml`, and a **loadable** one: the file **defines** the server (§5.3), so a file that cannot be parsed is not a server that is off, it is a configuration that does not load. Its `command` is a placeholder that is not installed, so the server does not come up, **the log says so, and the agent carries on**. Copying it to `mcps/<server>.yaml` and putting your own command in it is the act of defining that server (`initcfg/initcfg.go:131`) |
-| the config editor | ★ the same template, through its "new file" dialog — the editor can write `mcps/` (`agentkit/spec/write.go:190`), and it refuses a file name that is not a readable server name (`agentkit/spec/write.go:107`) |
+| 用户 | 手写 `mcps/<server>.yaml` 这些文件 |
+| `openheron init` | ★ 一个**示例** —— `mcps/example.yaml`，而且是**能加载**的那份：文件**定义**了 server（§5.3），所以一份解析不了的文件不是「server 关着」，而是「配置加载不了」。它的 `command` 是一个没装的占位符，于是 server 起不来，**日志里说一句，agent 照跑**。把它复制成 `mcps/<server>.yaml` 并填上你自己的 command，就是定义它（`initcfg/initcfg.go:131`） |
+| 配置编辑器 | ★ 同一份模板，走它的「新建文件」对话框 —— 编辑器**能写** `mcps/`（`agentkit/spec/write.go:190`），而且它拒绝不是一个可读回服务器名的文件（`agentkit/spec/write.go:107`） |
 
-### 5.7 What fails loudly
+### 5.7 什么会大声失败
 
-★ **Our own configuration fails at load time; somebody else's content is dropped with a
-notice.** That is the line §3.2 draws, and it is the line this table follows.
+★ **我们自己的配置在加载期就失败；别人家的内容被丢掉并留个话儿。** 这就是 §3.2 画下的
+  那条线，而这张表沿着它走。
 
-| Case | When | Why |
+| 情况 | 什么时候 | 为什么 |
 |---|---|---|
-| an unknown `transport` | load time | no silent fallback to stdio — a typo must not run a different server |
-| `command` missing on a stdio server | load time | there is nothing to run |
-| `url` missing on an http server | load time | there is nothing to talk to |
-| `env:` on an http server | load time | an http server has no child to hand an environment to (§5.2) |
-| an agent's `mcps:` naming a server that does not exist | load time | a typo would silently narrow the agent to nothing (§5.3) |
-| `tools:` naming a tool the server does not have | runtime | the server's list is only known once it is up — the provider warns (§6.1) and offers the rest |
+| 不认识的 `transport` | 加载期 | 不静默退回 stdio —— 一个笔误不该跑起另一个 server |
+| stdio 服务器缺 `command` | 加载期 | 没有东西可跑 |
+| http 服务器缺 `url` | 加载期 | 没有东西可谈 |
+| http 服务器上的 `env:` | 加载期 | http 服务器没有子进程可以交给一份环境（§5.2） |
+| agent 的 `mcps:` 点名一个不存在的服务器 | 加载期 | 一个笔误会悄悄把这个 agent 收窄成什么都没有（§5.3） |
+| `tools:` 点名一个 server 没有的工具 | 运行期 | server 的清单只有它起来之后才知道 —— provider 警告（§6.1），其余的工具照给 |
 
-★ **A load-time hard error stops the process**, and that is the point: these are
-mistakes in a file somebody wrote by hand, and the next start has to say so. ★ The
-runtime row is the exception because the server's tool list is not ours — the same line
-§3.2 draws for a tool whose name cannot be composed.
+★ **加载期硬错误会让进程停下来，而这正是要点**：这些是有人手写的文件里的错误，
+  下一次启动必须说出来。★ 那一行运行期是例外，因为 server 的工具清单不是我们的 ——
+  与 §3.2 对一个合不出名字的工具画的线是同一条。
 
-## 6. The assembly path
+## 6. 装配路径
 
-### 6.1 The provider
+### 6.1 provider
 
-The provider follows the contract of §1.2 and registers in the registry
-(`agentkit/build/tools.go:41`):
+provider 照 §1.2 的契约写，注册在注册表里（`agentkit/build/tools.go:41`）：
 
-| Piece | What it does |
+| 构件 | 做什么 |
 |---|---|
-| `mcpToolProvider.ID` | the provider name in logs and errors |
-| `mcpToolProvider.Optional` | **true** — an unreachable server must not keep the agent down |
-| `mcpToolProvider.Provide` | ask the manager for each configured server, list its tools, namespace and sanitize the names, return the batch |
+| `mcpToolProvider.ID` | 日志与错误里的 provider 名 |
+| `mcpToolProvider.Optional` | **true** —— 一个连不上的服务器不该把 agent 拖住 |
+| `mcpToolProvider.Provide` | 向 manager 要每个配置好的服务器，取工具清单，给名字加命名空间并规整，返回那一批 |
 
-★ **The provider walks the servers some agent asked for**, not the whole partition:
-`Provide` iterates `Config.MCPServersInUse()` (`agentkit/build/mcptools.go:210`), and
-that list is the **union** over the agents and the sub-agents (§5.3, §11.3). ⇒ a
-server no agent lists is never started, and never becomes a child process.
+★ **provider 走的是「某个 agent 要过的」那批服务器**，而不是整个分区：
+  `Provide` 遍历 `Config.MCPServersInUse()`（`agentkit/build/mcptools.go:210`），
+  而那份清单是 agent 与子 agent 之间的**并集**（§5.3、§11.3）。
+  ⇒ 没有 agent 要的服务器永远不会被拉起，也永远不会变成一个子进程。
 
-★ `Optional() == true` has a price, and `developer-manual.md` §3.1 step 3 says so
-plainly: the provider's `Warn` is the **only** notice — the tools do not enter the
-table, and the user sees "this feature seems to be missing". For an MCP server that is
-exactly the wrong symptom to leave unexplained, so the warning must name the server,
-the transport and the error.
+★ `Optional() == true` 是有代价的，`developer-manual.md` §3.1 第 3 步说得很直白：
+  provider 那条 `Warn` 是**唯一**的通知 —— 工具不进表，
+  用户看到的是「某个功能好像不见了」。
+  对一个 MCP 服务器来说，那恰好是最不该留下的症状，
+  所以警告里必须写清服务器名、传输方式与错误。
 
-★ **An unreachable server is a warning, not a row.** The **configuration** views do
-**not** expose the servers that are configured but unreachable. The user learns from the
-warning and from the tools that are missing; an endpoint that listed "the server you
-configured is not there" as part of the configuration would be a second truth to keep in
-sync with the first, and it would answer a question the warning already answers.
+★ **够不着的服务器是一条警告，不是 API 里的一行。** **配置面**的那些视图**不**暴露
+  那些配了却够不着的服务器。用户从警告、从缺失的那些工具就知道；那样一个端点会成为
+  要跟第一处同步的第二份真相，而它回答的问题警告已经回答过了。
 
-★ **The `/mcps` view is the exception, and it is not a second truth** (§11.2): it is a
-**projection of the manager's live state**, and it exists because the user asked for it.
-The warning and the view read the same state — the manager's client — so they cannot
-disagree about a server.
+★ **`/mcps` 那个视图是例外，而且它不是第二份真相**（§11.2）：它是**管理者实时状态的
+  投影**，而且它存在是因为用户问了。警告与视图读的是同一份状态 —— 管理者的客户端 ——
+  所以两者不可能对某个服务器各说一套。
 
-★ **A name the file asks for and the server does not have is a warning too.** The
-file's `tools:` lists the server's **own** names, and the server's list is only known
-once it is up (§5.7). ⇒ the provider warns — it names the server, the name the file
-asked for, and what the server actually offers — and it offers the rest
-(`agentkit/build/mcptools.go:241`). ★ Silently offering less than the file asked for is
-the same "a feature seems to be missing" symptom the design refuses.
+★ **文件点名而 server 没有的名字，也是一条警告。** 文件的 `tools:` 列的是 server
+  **自己**的名字，而那份清单只有它起来之后才知道（§5.7）。⇒ provider 会警告 ——
+  它写清服务器、文件要的那个名字，以及 server 实际提供什么 —— 并且把其余的工具照给
+  （`agentkit/build/mcptools.go:241`）。
+  ★ 悄悄给得比文件要的更少，就是这份设计拒绝的那个「某个功能好像不见了」的症状。
 
-### 6.2 The client lifecycle
+### 6.2 客户端生命周期
 
-The component does not own it (§2.2), so **the manager** does (§6.6) — the provider asks
-it for the tools and gets them:
+组件不管它（§2.2），所以由**管理器**管（§6.6）—— provider 向它要工具，然后拿到：
 
-| Step | stdio | http |
+| 步骤 | stdio | http |
 |---|---|---|
-| create | `transport.NewStdio` + `client.NewClient` | `transport.NewStreamableHTTP` + `client.NewClient` |
-| start | the child process is spawned | the HTTP session opens |
-| initialize | `Initialize` with the protocol version and the client info | the same |
-| list tools | `ListTools` | the same |
-| teardown | the child process is killed when the declaration changes, or when the process goes away | the session closes |
+| 建立 | `transport.NewStdio` + `client.NewClient` | `transport.NewStreamableHTTP` + `client.NewClient` |
+| 启动 | 子进程被拉起 | HTTP 会话打开 |
+| 初始化 | 用协议版本与客户端信息 `Initialize` | 同样 |
+| 取工具清单 | `ListTools` | 同样 |
+| 拆掉 | 声明变了或进程退出时子进程被杀掉 | 会话关闭 |
 
-★ The manager uses the **transport** constructors and `client.NewClient` on top of
-them, not `client.NewStdioMCPClient` / `client.NewStreamableHttpClient`: the lower
-level is where the child's environment and the arguments are set
-(`agentkit/build/mcpmanager.go:418`, `:472`), and the initialization is one function
-for both transports (`agentkit/build/mcpmanager.go:492`).
+★ manager 用的是**传输层**的构造器，再在它上面套 `client.NewClient`，
+  而不是 `client.NewStdioMCPClient` / `client.NewStreamableHttpClient`：
+  更低的那一层才是设置子进程环境与参数的地方
+  （`agentkit/build/mcpmanager.go:418`、`:472`），
+  而初始化对两种传输来说是同一个函数（`agentkit/build/mcpmanager.go:492`）。
 
-★ The initialization result is **discardable**: the provider only needs the tool list.
-A failure to initialize is the same failure as an unreachable server — the server does
-not contribute tools, and it says so.
+★ 初始化的结果**可以丢掉**：provider 只要工具清单。
+  初始化失败与「服务器连不上」是同一种失败 —— 这个服务器不贡献工具，并且说出来。
 
-★ **The http column is one client, not two.** `mcp-go` ships `client.NewSSEMCPClient`
-as well, and openheron does not call it: §5.2 says `http` means **streamable HTTP**,
-and a transport that the configuration cannot ask for is a transport that would have to
-be maintained without ever being used.
+★ **http 那一列是一个客户端，不是两个。** `mcp-go` 还带着 `client.NewSSEMCPClient`，
+  而 openheron 不调它：§5.2 说 `http` 的意思是 **streamable HTTP**，
+  而一个配置问不出来的传输方式，是一个永远用不上却还得一直维护的传输方式。
 
-### 6.3 The tool batch
+### 6.3 工具批次
 
-Each tool the server offers becomes an eino tool:
+服务器提供的每个工具变成一个 eino 工具：
 
-| Property | Value |
+| 属性 | 值 |
 |---|---|
-| Name | `mcp__<server>__<tool>` (§3) |
-| Description | the server's description |
-| Parameters | the server's JSON Schema, converted with `schema.NewParamsOneOfByJSONSchema` |
-| Kind | `tool.InvokableTool` — the component implements `InvokableRun` only |
+| 名字 | `mcp__<server>__<tool>`（§3） |
+| 描述 | 服务器给的描述 |
+| 参数 | 服务器的 JSON Schema，用 `schema.NewParamsOneOfByJSONSchema` 转换 |
+| 种类 | `tool.InvokableTool` —— 组件只实现了 `InvokableRun` |
 
-★ The kind matters once: the gate's synchronous path (`agentkit/build/gate.go:55`)
-covers it, and the streaming path (`agentkit/build/gate.go:89`) is not needed. **The
-streaming gap that the filesystem tools had does not exist here** — but only because the
-component never produces a streaming tool.
+★ 这个种类只在一处要紧：闸门的同步那条路（`agentkit/build/gate.go:55`）罩得住它，
+  流式那条路（`agentkit/build/gate.go:89`）不需要。
+  **文件系统工具曾经有的那个流式缺口在这里不存在** ——
+  但那只是因为这个组件从不产出流式工具。
 
-### 6.4 The output cap
+### 6.4 输出封顶
 
-`tools/` caps every tool's output at 20000 bytes (`agentkit/build/nettools.go:26`,
-`cappedTool` at `:98`, `capTool` at `:115`). The cap exists because a tool's output
-**goes into the model's context verbatim**, and a 10MB page breaks the turn — it reads
-as "the model suddenly starts making things up", not as an error.
+`tools/` 把每个工具的输出封在 20000 字节（`agentkit/build/nettools.go:26`，
+`cappedTool` 在 `:98`，`capTool` 在 `:115`）。
+这个封顶存在的原因是工具的输出**原样进模型上下文**，
+而一个 10MB 的页面会把这一轮撑爆 —— 表现是「模型突然开始胡说」，不是报错。
 
-★ An MCP tool's output is no different: it is somebody else's text, entering the
-context unfiltered. The cap applies to MCP tools too, and the component's
-`ToolCallResultHandler` is where it is implemented — the hook the component's README
-never mentions (§2.2, `agentkit/build/mcptools.go:376`).
+★ MCP 工具的输出没有不同：它也是别人的文本，未经滤就进了上下文。
+  封顶对 MCP 工具同样适用，而实现它的位置就是组件的 `ToolCallResultHandler` ——
+  那个组件 README 从没提过的钩子（§2.2，`agentkit/build/mcptools.go:376`）。
 
-### 6.5 One client per server, and the calls are serialized
+### 6.5 一个 server 一个 client，且调用串行化
 
-★ **One client per server.** The eino-ext component wraps a single
-`client.MCPClient`, and every tool of that server shares it. One server is one
-connection — and, for stdio, one child process.
+★ **一个 server 一个 client。** eino-ext 那个组件包的是单个 `client.MCPClient`，
+  该 server 的所有工具共用它。一个 server 就是一条连接 —— 对 stdio 来说，是一个子进程。
 
-★ **The calls to one stdio server are serialized.** This is a correctness decision,
-not a performance one. `mcp-go`'s stdio transport writes the request straight to the
-child's stdin:
+★ **同一个 stdio server 的调用被串行化。** 这是**正确性**决定，不是性能决定。
+  `mcp-go` 的 stdio 传输把请求直接写进子进程的 stdin：
 
 ```go
 // mcp-go@v0.43.0, client/transport/stdio.go — SendRequest
@@ -768,86 +715,77 @@ c.mu.Lock(); c.responses[idKey] = responseChan; c.mu.Unlock()
 if _, err := c.stdin.Write(requestBytes); err != nil {   // ← no lock
 ```
 
-`c.stdin` is the pipe from `cmd.StdinPipe()`. POSIX makes a pipe write atomic only up
-to `PIPE_BUF` — 4096 bytes on Linux — so a larger JSON-RPC line can be **interleaved
-with another call's line**, and the server reads a corrupted frame.
+`c.stdin` 是 `cmd.StdinPipe()` 给的管道。POSIX 只保证不超过 `PIPE_BUF`
+（Linux 上 4096 字节）的管道写是原子的 —— 更大的 JSON-RPC 行会**与另一次调用的行交错**，
+服务器读到的是一个坏掉的帧。
 
-★ And openheron does call tools concurrently: two sessions run at the same time, and
-an agent instance is reusable concurrently (`session-concurrency-design.md` §2.5). Two
-sessions hitting the same MCP server are two concurrent writes to the same pipe.
+★ 而 openheron 确实会并发调工具：两个会话同时跑，agent 实例也可并发复用
+  （`session-concurrency-design.md` §2.5）。两个会话打同一个 MCP server，
+  就是对同一条管道的两次并发写。
 
-⇒ **The provider wraps the stdio tools of one server with a per-server mutex**, and
-that wrapper is what the gate and the cap see — the same shape as `cappedTool` in
-`nettools.go`. The mutex **waits**; it does not fail the second call. The cost is
-head-of-line blocking inside one server, which is the cheaper of the two: the
-alternative is a child process per call.
+⇒ **provider 给同一 server 的 stdio 工具包一把 per-server 的互斥锁**，
+  而闸门与封顶看到的正是这个包装层 —— 与 `nettools.go` 里 `cappedTool` 同一个形状。
+  这把锁是**等**，不是让第二次调用失败。代价是同一 server 内的队头阻塞，
+  而这是两种代价里较便宜的一种：另一种是每次调用开一个子进程。
 
-★ **http servers are not serialized.** Each request stands on its own, and an MCP tool
-that waits on a slow API should not block the other tools of the same server. The
-serialization is a property of the **transport**, not of MCP.
+★ **http server 不串行化。** 每个请求彼此独立，而一个等慢 API 的 MCP 工具
+  不该把同 server 的其它工具一起堵住。串行化是**传输方式**的属性，不是 MCP 的属性。
 
-★ **A call has a deadline.** A mutex without one is a way to hang a turn: an MCP
-server that never answers would hold the lock for ever, and every other call of that
-server would queue behind it. ⇒ `call_timeout` (`MCPDuration`, default `60s`) bounds
-one tool call. It is lenient, like every other duration that only decides *how long we
-wait*.
+★ **调用有截止时间。** 没有截止时间的互斥锁就是一条把轮次挂死的路：
+  一个永不回答的 MCP server 会永远占着锁，同 server 的其它调用全排在它后面。
+  ⇒ `call_timeout`（`MCPDuration`，缺省 `60s`）给一次工具调用封顶。
+  它是宽松的，与其他只决定「等多久」的时长一样。
 
-### 6.6 The mcps manager
+### 6.6 mcps 管理器
 
-★ **One manager owns the clients**, not the provider. The provider answers "what tools
-does this snapshot have"; the manager is what a client outlives.
+★ **客户端归一个管理者拥有**，不归 provider。provider 回答的是「这个快照有哪些工具」；
+  而客户端活得过 provider，靠的就是管理者。
 
-| Responsibility | What it means |
+| 职责 | 意思 |
 |---|---|
-| **one client per server** | a server is one connection, and for stdio one child process |
-| **start only what an agent asked for** | the manager starts the servers in the `mcps:` lists of the agents (§5.3) — a server no agent lists is never started, and never becomes a child process. ★ the list is the **union**, because the snapshot's tool set is shared by every agent (§11.3) |
-| **start lazily** | a server is started when a turn first needs it, not at boot |
-| **start once** | ★ the start is **single-flight**: two callers asking for the same server get the **one** client (§6.8) |
-| **restart a crashed child** | a stdio server that dies is started again on the next call — a crash is not a configuration error, and a dead server that stays dead is the worst outcome |
-| **notice a changed tool list** | the manager re-lists the tools; when the list changed, the **generation is bumped** and the tools are rebuilt, exactly like a configuration reload (§6.7) |
-| **replace a server that changed** | a declaration that no longer matches the running client's fingerprint closes the old client and starts a new one (`agentkit/build/mcpmanager.go:229`) |
-| **tear down when the process goes away** | the manager closes every client on shutdown (`agentkit/build/mcpmanager.go:150`, `main.go:384`) |
+| **一个 server 一个客户端** | 一个 server 就是一条连接，对 stdio 来说还是一个子进程 |
+| **只起某个 agent 要的 server** | 管理者只启动那些 agent 的 `mcps:` 清单里的服务器（§5.3）—— 没有任何 agent 点名的 server 永远不会被启动，也永远不会变成子进程。★ 这份清单是**并集**，因为快照的工具集是所有 agent 共享的（§11.3） |
+| **懒启动** | 一个 server 在第一轮要用它时才被拉起来，不是在启动时 |
+| **只启动一次** | ★ 这次启动是**单飞**的：两个调用方要同一个 server，拿到的是**那一个**客户端（§6.8） |
+| **崩了的子进程自动重启** | 一个死掉的 stdio server 在下一次调用时被重新拉起 —— 崩了不是配置错误，而一个死掉的 server 就那么死着才是最糟的结果 |
+| **发现工具清单变了** | 管理者重新列举工具；清单变了就**推进代际**、工具重建 —— 与配置重载是同一条路（§6.7） |
+| **服务器变了就换掉它** | 一份不再匹配运行中客户端指纹的声明会关掉旧客户端并拉起新的（`agentkit/build/mcpmanager.go:229`） |
+| **进程退出时拆掉** | 管理者在关闭时关掉每一个客户端（`agentkit/build/mcpmanager.go:150`、`main.go:384`） |
 
-★ **The tool list is the manager's business, not the snapshot's.** A server's tools are
-discovered at runtime, so a snapshot that froze them would need a restart to see a tool
-the server added yesterday. ⇒ the manager re-lists, and a change re-enters the same
-path a configuration change takes.
+★ **工具清单是管理者的活，不是快照的。** server 的工具是运行期才发现的，
+  所以一份把它们冻住的快照，要看得见 server 昨天加的那个工具，就得重启。
+  ⇒ 管理者去重新列举，而一次变化重新走配置变化走的那条路。
 
-★ **The client outlives the snapshot — and the implementation keeps it that way.** This
-design put the teardown on the snapshot swap; the tree does not, and the reason is the
-manager itself: it is registered once and it owns the clients across snapshots, so a
-configuration change that does not touch a server leaves that server's child running.
-★ What replaces the client is the **declaration** — the fingerprint is the
-declaration's own (`agentkit/build/mcpmanager.go:330`) — and the only other teardown
-is the process going away.
+★ **客户端活得过快照 —— 实现就是这样。** 这份设计原本把拆解放在快照换代时；
+  树上没有这么做，理由就是管理者本身：它只注册一次，跨快照拥有那些客户端，
+  所以一次没碰某个服务器的配置变化，会让那个服务器的子进程继续跑着。
+  ★ 换掉客户端的是**声明** —— 指纹就是声明自己的那份
+  （`agentkit/build/mcpmanager.go:330`）—— 而另一个拆解时机就是进程退出。
 
-★ **The re-list happens before the turn's agent is assembled, not inside the batch
-build.** The batch is built once per generation, and the generation moves only when a
-list changes — so a re-list *inside* the build would never run. ⇒ the builder asks the
-manager first, and a change moves the generation in `main.go`'s own `agentConfig` — the
-same place a configuration change moves it (`main.go:511` `bump`, `main.go:498` `set`) —
-so the snapshot is rebuilt before the agent is assembled.
+★ **重新列举发生在这一轮装配 agent 之前，而不是在批次构建里面。** 批次是每一代构建
+  一次，而代际只在清单变了的时候才动 —— 所以*在*构建里重新列举就永远轮不到跑。
+  ⇒ builder 先问管理者，而一次变化在 `main.go` 自己的 `agentConfig` 里推进代际 ——
+  与配置变化推进它的地方是同一个（`main.go:511` `bump`、`main.go:498` `set`）——
+  于是快照在 agent 装配之前就被重建了。
 
-★ **The builder needs a way to move the generation.** `ConfigManager` is read-only
-(`agentkit/build/manager.go:12` — it has `Current()` and nothing else), so the builder
-grows a **bump** callback beside it (`agentkit/build/builder.go:67`), and `main.go`
-wires that to the same `agentConfig.bump` the reloader uses (`main.go:247`,
-`main.go:511`). ★ A second way to move the generation would be a second way to be
-wrong about it.
+★ **builder 需要一条推进代际的路。** `ConfigManager` 是只读的
+  （`agentkit/build/manager.go:12` —— 它只有 `Current()`，别的都没有），
+  所以 builder 在它旁边长出一个 **bump** 回调（`agentkit/build/builder.go:67`），
+  而 `main.go` 把那个回调接到重载器用的同一个 `agentConfig.bump` 上
+  （`main.go:247`、`main.go:511`）。
+  ★ 推进代际的第二条路，就是关于它出错方式的第二条路。
 
-★ **The interval is 30 s, and it is not a configuration key.** The manager re-lists a
-server when a turn asks for it and the previous listing is older than **30 s** — so an
-idle openheron re-lists nothing, and no turn runs on a list that is more than one
-interval old. ★ A knob nobody turns is a knob nobody tests, and a server's tool list
-changes on the scale of days.
+★ **间隔是 30 秒，而且它不是一个配置键。** 某一轮来要一个 server、而上一份清单已经
+  比 **30 秒**更老时，管理者才重新列举它 —— 所以一个闲着的 openheron 什么都不列举，
+  而没有一轮会跑在一份超过一个间隔老的清单上。
+  ★ 没人拧的旋钮就是没人测的旋钮，而一个 server 的工具清单是以天为尺度变化的。
 
-★ **A background ticker was the other option, and it was rejected.** It would keep
-polling servers nobody is using, for ever, and it would need a goroutine with a
-lifecycle of its own — for a list that changes on the scale of days.
+★ **另一条路是后台定时器，它被否掉了。** 它会永远去轮询没人用的 server，
+  而且需要一个自带生命周期的 goroutine —— 换一份以天为尺度变化的清单，不值。
 
-### 6.7 From a file to one tool call
+### 6.7 从一个文件到一次工具调用
 
-The whole path, from the file on disk to the gate's decision:
+整条路径，从磁盘上那个文件一路走到闸门的那一个决定：
 
 ```
 .openheron/mcps/github.yaml
@@ -882,8 +820,8 @@ the gate: Policy.TierOf("mcp__github__create_issue")
   └─ ask   → the turn is interrupted for a human → resumed
 ```
 
-★ **The tier resolution** is one lookup, and the gate never asks which file a tool
-came from — the assembly fills the table with the **exposed** names:
+★ **档位的解析**是一次查找，而闸门从不去问一个工具来自哪个文件 ——
+  装配时填进表里的就是**对外的**名字：
 
 ```
 Policy.TierOf(name):
@@ -891,86 +829,79 @@ Policy.TierOf(name):
   2. otherwise                                      → ask
 ```
 
-★ **The allow list is assembled from the configuration** (§7.3), from the files that
-**provide** the tools — so the entry `mcp__github__read_issue → allow` is in the table
-before the server is even up.
+★ **那份 allow 清单是从配置装配出来的**（§7.3），从**提供**那些工具的文件来 ——
+  所以 `mcp__github__read_issue → allow` 这一条在 server 还没起来之前就已经在表里了。
 
-★ **The assembly happens in `agentkit/build`, not in `agentkit/spec`** (§7.3): only the
-provider knows its file's vocabulary and the exposed names behind it, and `agentkit/spec`
-may not import `kb` (the iron rule) nor eino (where the filesystem tool names live).
+★ **装配发生在 `agentkit/build`，不在 `agentkit/spec`**（§7.3）：只有 provider 知道
+  自己文件的词儿，以及它背后的对外名字；而 `agentkit/spec` 不得 import `kb`
+  （那条铁律），也不得 import eino（文件系统工具的名字住在那里）。
 
-★ **The reload is part of the flow.** `mcps/` is a hot partition, so the whole chain
-above runs again on the next turn after a change: the loader re-reads the file, the
-snapshot is replaced, a server whose declaration changed gets a new client, and the
-tier table is rebuilt with the exposed names. The gate reads the new tier from the
-next turn on — no restart, and no window where a tool keeps its old tier.
+★ **重载是这条流程的一部分。** `mcps/` 是热分区，所以改动之后，上面整条链在下一轮
+  重跑一遍：加载器重新读文件，快照换代，声明变了的那台服务器拿到新的客户端，
+  而档位表用对外的名字重建。闸门从下一轮起读到新档位 —— 不用重启，
+  也不会出现「一个工具还揣着旧档位」的空窗期。
 
-★ **And a server that changed its own tool list takes the same path.** The manager polls
-the list (§6.6); when it changed, the generation is bumped and the tools are rebuilt —
-the same road a configuration change takes, and the same absence of a restart.
+★ **而一个自己改了工具清单的 server 走的是同一条路。** 管理者轮询那份清单（§6.6）；
+  清单变了就推进代际、工具重建 —— 与配置变化走同一条路，同样不需要重启。
 
-### 6.8 One start, one client
+### 6.8 一次启动，一个客户端
 
-★ **Two callers ask for the same server.** The provider asks when it builds the batch
-(§6.1), and the panel asks when the user opens it (§11.2). Both are ordinary requests
-that can arrive at the same moment — a turn starting while the `/mcps` dialog is open.
+★ **两个调用方要同一个 server。** provider 在构建批次时要（§6.1），
+  面板在用户打开它时也要（§11.2）。两个都是普通请求，可能在同一刻到达 ——
+  `/mcps` 对话框开着的时候，一轮对话开始。
 
-⇒ **The start is single-flight per server.** The manager keeps one entry per server
-name; the first caller starts the client, and every other caller waits for that same
-start and gets the same client. ★ This is the invariant §6.5 protects for the calls —
-one server, one client — and the failure it prevents is the same kind: two writers on
-one connection.
+⇒ **启动是按 server 单飞的。** 管理者按服务器名保存一份；第一个调用方启动客户端，
+  其余调用方等着那一次启动，拿到同一个客户端。
+  ★ 这与 §6.5 为调用守住的是同一条不变量 —— 一个 server，一个客户端 ——
+  而它防住的失败也是同一类：一条连接上的两个写者。
 
-★ **Two child processes for one server would be worse than a slow start.** The second
-process would hold a second pipe to a server the user configured once, and the two
-could report different tool lists — so the tools the model sees would depend on which
-process answered.
+★ **一个 server 两个子进程，比一次慢的启动更糟。** 第二个进程会对着一个用户只配过
+  一次的 server 握着第二根管道，而两者报出的工具清单可能不同 ——
+  于是模型看到的工具就取决于哪个进程答的。
 
-★ **The wait is bounded by the deadline the start already has** (§5.2): connect,
-initialize and list tools are one operation with one deadline. A caller that waits
-longer than that gets the failure the start reports — the same failure it would have
-got by starting the server itself.
+★ **等待的界限就是这次启动本来就有的那个期限**（§5.2）：连接、初始化与取工具清单
+  是一个带一个期限的操作。等得更久的调用方拿到的是这次启动报出来的失败 ——
+  与它自己去启动这个 server 会拿到的是同一个失败。
 
-## 7. The gate and the tiers
+## 7. 闸门与档位
 
-### 7.1 The tiers apply unchanged
+### 7.1 档位照旧适用
 
-A tool named `mcp__github__create_issue` is looked up exactly like any other:
+一个叫 `mcp__github__create_issue` 的工具被查起来与其它工具一模一样：
 
 ```
 Policy.TierOf("mcp__github__create_issue")
 ```
 
-and lands in `ask` unless the server's file names it in `allows:` (§7.3) — which is
-the same rule every tool follows. The gate code does not change at all: it reads the
-tier and acts (§1.3). ★ The namespace's default is `ask`, and it is a **fallthrough
-branch** of the tier lookup, not a special case: `Policy.TierOf` answers `ask` for any
-name under `mcp__` that the files do not allow
-(`agentkit/build/policy.go:55`).
+除非 server 的文件在 `allows:` 里点了它的名（§7.3），否则它落进 `ask` 档 ——
+而这正是每一个工具都遵守的同一条规则。闸门代码一个字都不用改：它读档位，然后动作（§1.3）。
+★ 命名空间的缺省是 `ask`，而它是档位查找里的一个**兜底分支**，不是一个特例：
+  `Policy.TierOf` 对任何 `mcp__` 之下、而文件没有允许的名字都答 `ask`
+  （`agentkit/build/policy.go:55`）。
 
-★ **This is the whole point of the namespace.** The gate, the tables, the API's
-`EffectiveTools` view and the per-agent narrowing all work on names. A name that is
-namespaced is a name they already understand — no new concept has to travel through the
-policy layer, the API or the frontend.
+★ **这正是命名空间的意义。** 闸门、各张表、API 的 `EffectiveTools` 视图
+  与每个 agent 的收窄，全都在名字上工作。
+  一个带命名空间的名字，是它们本来就懂的名字 ——
+  策略层、API 与前端都不需要接一个新概念。
 
-### 7.2 The stdio privilege problem
+### 7.2 stdio 的权限问题
 
-★ Under stdio, the MCP server is a **child process of openheron**: it can write files,
-reach the network and read anything openheron can read. The "only public networks"
-rule that §6.6 of the config design sets for the HTTP tools **does not apply** — it
-bounds what the *tool* may reach, not what the *server* may do.
+★ stdio 之下，MCP 服务器是 openheron 的**子进程**：它能写文件、能联网，
+  能读到 openheron 读得到的一切。
+  配置设计 §6.6 给 HTTP 工具定的「只连公网」**在这里不适用** ——
+  那条限制的是*工具*能碰到什么，不是*服务器*能做什么。
 
-This is the strongest argument for the namespace and for giving each server its own
-list: they are how a class of external tools gets a tier **before** anyone has
-enumerated its members. An **empty** `allows:` in `mcps/<server>.yaml` is one line that
-says "every tool from this server asks first" (§7.3).
+这是命名空间与「给每个 server 自己的档位」合起来的最强理由：
+它们是「在有人把成员列出来之前，先给一类外部工具定档」的办法。
+`mcps/<server>.yaml` 里一个**空的** `allows:` 是一行字，
+意思是「这个 server 的每个工具都要先点头」（§7.3）。
 
-### 7.3 The tier lives with the tool
+### 7.3 档位住在工具旁边
 
-★ **A tool's tier is written in the tool's own file, in that file's own vocabulary.**
-There is **no global list** any more (§4): the **default** is `ask`, and the exceptions
-are named by the file that provides the tool — so "not exposed" is said in exactly two
-places, a file's own `allows:` and an agent's `tools`:
+★ **一个工具的档位写在它自己的文件里，用那个文件自己的词儿。**
+现在**没有全局清单**了（§4）：**缺省**是 `ask`，而例外由**提供**那个工具的文件点名 ——
+  所以「不被暴露」恰好在两个地方说：一个文件自己的 `allows:`，
+  以及某个 agent 的 `tools`：
 
 ```yaml
 # .openheron/mcps/github.yaml
@@ -980,136 +911,126 @@ places, a file's own `allows:` and an agent's `tools`:
 allows: [read_issue, list_issues]
 ```
 
-★ **Why the file's own vocabulary.** A tier is a statement about **one tool**, so it
-belongs in that tool's file — and there it can use the names that file already uses. The
-old central file had to name the tool in the **exposed** vocabulary
-(`mcp__github__create_issue`) while the tool's own file said `create_issue`; ★ two
-vocabularies for one tool is a mismatch waiting to happen, and a mistyped name stays
-invisible until the tool behaves differently than the file says.
+★ **为什么要用文件自己的词儿。** 档位是关于**一个工具**的陈述，
+  所以它属于那个工具的文件 —— 而在那里它可以用那个文件已经在用的名字。
+  原来那个中心文件必须用**对外的**词儿点名那个工具
+  （`mcp__github__create_issue`），而工具自己的文件说的是 `create_issue`；
+  ★ 一个工具两套词儿，就是一处等着发生的错配，而一个拼错的名字
+  在工具的行为与文件所说的不一致之前，一直是看不见的。
 
-| Where | Vocabulary | Decides |
+| 位置 | 词儿 | 决定什么 |
 |---|---|---|
-| a file's `tools` / `allows` | **the file's own** names (`create_issue`) | which of the server's tools to offer, and which of those need no nod |
-| an agent's `tools` | exposed names | this agent may use these tools, and nothing else |
+| 某个文件的 `tools` / `allows` | **那个文件自己的**名字（`create_issue`） | 从 server 提供的工具里暴露哪些，以及其中哪些不用点头 |
+| 某个 agent 的 `tools` | 对外的名字 | 这个 agent 能用这些工具，别的都不行 |
 
-★ **The order**: the file that provides the tool first, then the agent's list — which
-decides what that agent sees and nothing else. ★ **Mounting comes before both**: a server
-the agent does not mount has no tools for either rule to talk about.
+★ **顺序**：先提供这个工具的文件，然后是 agent 的清单 ——
+  它决定的是那个 agent 看得见什么，别的都不动。★ **挂载排在两者之前**：
+  agent 没挂载的 server，两条规则都没有工具可谈。
 
-★ **A file has no tier of its own beyond that one key**, and that is deliberate: "not
-exposed" is already the `allows:` list's job. ★ And there is **no third list** — the
-global one went with the `policy/` partition (§1.4), and the configuration design's
-§6.3 now describes the model that replaced it. The two places do not duplicate each
-other: the file says **which of the server's tools run without a nod**, the agent says
-**what this agent does not get**.
+★ **文件除了那一个键之外没有自己的档位**，而这是刻意的：「不被暴露」
+  本来就是 `allows:` 清单的活。★ 而且**没有第三份清单** —— 全局那份跟着
+  `policy/` 分区一起走了（§1.4），而配置设计的 §6.3 现在讲的就是取代它的那个模型。
+  这两个地方并不重复：文件说**server 的哪些工具不用点头**，
+  agent 说**这个 agent 拿不到什么**。
 
-★ **The assembled policy keeps its shape.** `build.Policy` and `TierOf`
-(`agentkit/build/policy.go:55`) still take a name and answer a tier; what changed is
-where the entries come from: the providers assemble them, each from its own file's
-declarations and its own vocabulary. ⇒ the gate, the tables, the API's
-`EffectiveTools` view and the frontend do not learn a new concept.
+★ **装配出来的策略形状不变。** `build.Policy` 与 `TierOf`
+（`agentkit/build/policy.go:55`）仍然是收一个名字、答一个档位；变的是条目的来源：
+  provider 各自从自己文件里的声明、用它自己的词儿装配出来。⇒ 闸门、各张表、
+  API 的 `EffectiveTools` 视图与前端都不必学一个新概念。
 
-★ **The assembly happens in `agentkit/build`, not in `agentkit/spec`.** Only the provider
-knows its file's vocabulary and the exposed names behind it, and `agentkit/spec` may not
-import `kb` (the iron rule) nor eino (where the filesystem tool names live).
+★ **装配发生在 `agentkit/build`，不在 `agentkit/spec`。** 只有 provider 知道
+  自己文件的词儿，以及它背后的对外名字；而 `agentkit/spec` 不得 import `kb`
+  （那条铁律），也不得 import eino（文件系统工具的名字住在那里）。
 
-★ **The default is `ask` for a server — and for everything else.** The built-in groups
-are not the exception any more: the code ships an allow list for the tools it knows are
-read-only (`agentkit/build/tools.go:61`), and every other tool asks. A server's tools
-are **discovered at runtime**: openheron cannot know what `delete_repo` does, and under
-stdio the server is a **child process** with the agent's own privileges (§7.2). ⇒ the
-cost of guessing wrong is asymmetric — one extra click against a destructive call
-nobody saw. A server the user trusts names its exceptions **once**:
+★ **缺省是 `ask` —— 对 server 如此，对别的一切也如此。** 内置那些组不再是例外：
+  代码里带着一份它知道的只读工具的 allow 清单（`agentkit/build/tools.go:61`），
+  其余一切都要先点头。
+  而一个 server 的工具是**运行期才发现**的：openheron 无从知道 `delete_repo` 做什么，
+  而在 stdio 之下，那个 server 是带着 agent 自己权限的**子进程**（§7.2）。
+  ⇒ 猜错的代价是不对称的 —— 多一次点击，换掉的是一次没人看见的破坏性调用。
+  用户信得过的 server 点名它的例外，**一次**就够了：
 
 ```yaml
 allows: [read_issue, list_issues]
 ```
 
-★ **The tier table is assembled from the configuration, not from the server.** The
-`allows:` list is in the file, and the exposed name of a name in it is composed from
-the file's own vocabulary — so the entry `mcp__github__read_issue → allow` can be
-assembled **before the server is even up** (`agentkit/build/mcptools.go:173`). ⇒ the
-tier of a tool is answerable at any time, including while the server is unreachable
-(§6.1), and the gate's lookup never waits for a connection.
+★ **档位表是从配置装配出来的，不是从 server 装配出来的。** `allows:` 清单在文件里，
+  而清单里一个名字的对外名字，是用那个文件自己的词儿合成的 —— 所以
+  `mcp__github__read_issue → allow` 这一条**在 server 还没起来之前**就能装配出来
+  （`agentkit/build/mcptools.go:173`）。
+  ⇒ 一个工具的档位任何时候都答得出来，包括 server 够不着的时候（§6.1），
+  而闸门那次查找从不为等一条连接而停下。
 
-★ **And the default covers the names the file does not name.** A tool that is in
-neither the file's `allows:` nor anywhere else is `ask` — so a tool the server adds
-tomorrow asks on its first day, and the configuration does not have to be touched. ★
-This is the same rule an empty `allows:` states in one line (§4); a non-empty one is
-that same rule with a few exceptions carved out.
+★ **缺省盖住文件没有点名的那些名字。** 既不在文件的 `allows:` 里、也不在任何别处的
+  工具，是 `ask` —— 所以 server 明天加的工具，在第一天就要点头，配置一个字都不用动。
+  ★ 这与一个空的 `allows:` 用一行说出的是同一条规则（§4）；
+  非空的那份就是同一条规则挖掉了几个例外。
 
-★ **A tier change takes effect on the next turn.** `mcps/` is a **hot** partition, so a
-tier is not special: the policy table is rebuilt with the snapshot and the gate reads the
-new tier from the next turn on. The one thing the reload has to get right is the
-**client**: a server whose declaration changed gets a new client (§5.4).
+★ **档位改动下一轮就生效。** `mcps/` 是**热**分区，所以档位并不特殊：
+  策略表随快照一起重建，闸门从下一轮起读到新档位。重载唯一要顾对的是
+  **客户端**：声明变了的那台服务器拿到新的客户端（§5.4）。
 
-★ **The filesystem tools have a file too** — `tools/filesystem.yaml` — so their tiers are
-written down instead of only implied. ★ It is a **tuner**, not a switch: the middleware
-mounts those tools unconditionally, so the file widens their exceptions and an agent's
-`tools` list decides what it may use (`agentkit/build/tools.go:61` is the default the
-file adds to).
-See `docs/config-design.md` §6.6.
+★ **文件系统工具也有自己的文件** —— `tools/filesystem.yaml` —— 于是它们的档位是被写下来的，
+  不再只是隐含的。★ 它是**调音旋钮**，不是开关：中间件无条件挂上那些工具，所以这个文件放宽
+  它们的例外，而某个 agent 的 `tools` 清单决定它能用哪些（`agentkit/build/tools.go:61` 是它
+  往上加的那份缺省）。见 `docs/config-design.md` §6.6。
 
-### 7.4 What the run ledger says
+### 7.4 run ledger 说什么
 
-★ An MCP tool call is an ordinary tool call, so it already reaches the transcript and
-the event stream like any other. What the **ledger** adds is the server: a run's row
-records which MCP servers the run touched (`storage/runledger.go:168`), so a
-post-mortem can answer "which server was this, and was it the reason the run failed"
-without reading the whole transcript. ★ The names are read out of the namespaced tool
-names the run made (`agentkit/run/runrow.go:84`), so the row does not need the tools
-to be tracked separately.
+★ 一次 MCP 工具调用就是一次普通工具调用，所以它本来就跟别的调用一样进 transcript、
+  进事件流。**ledger** 多出来的是 server：一个 run 的行记下这次 run 碰过哪些 MCP server
+  （`storage/runledger.go:168`），于是事后复盘能回答「这是哪个 server、
+  是不是它把这次 run 弄失败的」，而不必读完整个 transcript。
+  ★ 这些名字是从这次 run 用过的带命名空间的工具名里读出来的
+  （`agentkit/run/runrow.go:84`），所以那一行不需要单独跟踪工具。
 
-★ The ledger stays a **run** ledger: it holds the run's state transitions, not one row
-per call. The individual calls are in the transcript; the row says which servers were
-involved.
+★ ledger 仍然是 **run** 的账本：它装的是这个 run 的状态迁移，不是一次调用一行。
+  那一次次的调用在 transcript 里；那一行说的是哪些 server 卷了进来。
 
-## 8. The sandbox Kit
+## 8. 沙箱 Kit
 
-> Status: **a proposal.** The Kit does not package MCP servers yet — nothing in §8 is in
-> the tree. The MCP feature itself is implemented (§1 to §7, §9 to §11); what is missing
-> is the packaging half, and the reasoning below is why that half should look the way
-> it describes.
+> 状态：**一份提案。** Kit 还没有打包 MCP 服务器 —— §8 里没有一行在树上。
+> MCP 功能本身是已实现的（§1 到 §7、§9 到 §11）；缺的是打包的那一半，
+> 而下面这些理由说的是为什么那一半应该长成这个样子。
 
-The Kit (`sandbox-kit-design.md`) packages the openheron process as a v3 workload. MCP
-fits into it in two different ways, and they are not symmetric.
+Kit（`sandbox-kit-design.md`）把 openheron 进程打包成一个 v3 workload。
+MCP 落进它有两种方式，而且这两者并不对称。
 
-| Transport | Where the server runs | What the Kit needs |
+| 传输 | 服务器跑在哪 | Kit 需要什么 |
 |---|---|---|
-| stdio | **inside** the sandbox, as a child of the openheron process | the server's binary or its package must be **in the workload image** — it is part of what the workload runs |
-| http | **on the host** | a mixin network rule that lets the sandbox reach the host's port, and a host-side service to reach |
+| stdio | **沙箱内**，作为 openheron 进程的子进程 | 服务器的二进制或它的包必须**在 workload 镜像里** —— 它是 workload 所跑内容的一部分 |
+| http | **宿主上** | 一条让沙箱够得到宿主端口的 mixin 网络规则，以及一个够得着的宿主侧服务 |
 
-★ The mixin model decides this cleanly: a mixin is a **declaration** (a credential and
-its network rule), and the workload is the **content**. An MCP server that runs inside
-the sandbox is workload content; an MCP server that runs on the host and is reached over
-http is a mixin's business — its network rule is the thing that has to change.
+★ mixin 模型在这里把界线划得很干净：mixin 是**声明**
+  （一份凭据与它的网络规则），workload 是**内容**。
+  跑在沙箱里的 MCP 服务器是 workload 内容；
+  跑在宿主上、通过 http 够到的 MCP 服务器是 mixin 的事 ——
+  要变的是它的网络规则。
 
-★ A third option exists and is deliberately **not** in this design: a mixin that
-**installs** a host-side MCP server. That would make the mixin carry content, which is
-the boundary `sandbox-kit-design.md` §2.3 draws.
+★ 还有第三种选择，**故意不**在这份设计里：一种**安装**宿主侧 MCP 服务器的 mixin。
+  那会让 mixin 带上内容，而内容属于 workload —— 这是 `sandbox-kit-design.md` §2.3
+  划的那条边界。
 
-### 8.1 The credential path
+### 8.1 凭据路径
 
-An MCP server that needs an authorization key is a different problem from one that
-needs none, and the Kit's existing mechanism answers most of it.
+需要授权 key 的 MCP 服务器与不需要的，是两个不同的问题 —— 而 Kit 已有的机制
+答得出大部分。
 
-★ **The openheron half of this path is implemented; the Kit half is not.** The child
-process inherits this process's environment (§5.5, `agentkit/build/mcpmanager.go:458`),
-so a sentinel the runtime put into the container's variable reaches the MCP server with
-no field in the configuration naming it — that half is in the tree. What is not in the
-tree is the Kit that puts the sentinel there: the packaging below is still a proposal.
+★ **这条路径的 openheron 那一半已经实现；Kit 那一半还没有。**
+  子进程继承本进程的环境（§5.5，`agentkit/build/mcpmanager.go:458`），
+  所以运行时放进容器变量里的那个哨兵，不需要配置里任何字段点它的名就能到达
+  MCP 服务器 —— 那一半在树上。还没有的是把哨兵放进去的那个 Kit：
+  下面的打包仍然是一份提案。
 
-#### The mechanism
+#### 机制
 
-The Kit already injects the **model** credential without letting it into the sandbox:
-the mixin declares a `credential@1` with `proxyManaged: true`, the runtime puts the
-sentinel `proxy-managed` into the container's variable, the host holds the real value,
-and the **host-side proxy** substitutes it on the way out.
+Kit 已经能在**不让密钥进沙箱**的前提下注入**模型**凭据：mixin 声明一个
+`proxyManaged: true` 的 `credential@1`，运行时把哨兵 `proxy-managed` 放进容器的变量，
+宿主持真值，而**宿主侧的代理**在出站时把它换掉。
 
-★ **The substitution happens on the outbound request, and the proxy does not know who
-sent it.** It matches on the destination domain and the header name. An MCP server is
-therefore just another client of that proxy: it sends the sentinel the way it would
-send a token, and the proxy swaps in the real value.
+★ **替换发生在出站请求上，而代理不知道请求是谁发的。** 它匹配的是目标域名与头名。
+  所以 MCP 服务器不过是那个代理的另一个客户端：它照发令牌的样子把哨兵发出去，
+  代理再把真值换上去。
 
 ```
 the host holds the real key
@@ -1123,264 +1044,252 @@ the MCP server reads it and sends Authorization: Bearer proxy-managed
 the host proxy substitutes the real key ──► api.github.com
 ```
 
-★ **Nothing in `mcps/<server>.yaml` has to mention the key.** The sentinel is injected
-into the **container**, and §5.5 passes the environment through — so the MCP server
-finds the variable under the name it expects. The credential's variable name is the
-**MCP server's** business, and openheron never learns it.
+★ **`mcps/<server>.yaml` 里一个字段都不用为它写。** 哨兵注入的是**容器**，
+  而 §5.5 把环境透传下去 —— 于是 MCP server 按它自己的约定就找到了那个变量。
+  凭据的变量名是 **MCP server 的事**，openheron 不需要知道。
 
-★ **The http transport takes the same path.** The `headers:` map goes through the same
-expansion as everything else, so it can name an environment variable:
+★ **http 传输走的是同一条路。** `headers:` 这张表与其他一切一样展开，
+  所以它能引用一个环境变量：
 
 ```yaml
 headers:
   Authorization: Bearer ${MCP_TOKEN}
 ```
 
-★ In a sandbox that variable holds the **sentinel**, and the host proxy substitutes the
-real token on the way out — the same mechanism, the same mixin shape, and the same
-`Authorization: Bearer <access_token>` form the mixin's `inject` rule declares. ⇒ There is
-**one** credential path, and the transport does not change it.
+★ 在沙箱里那个变量装的是**哨兵**，宿主代理在出站时把真令牌换上去 ——
+  同一套机制、同一个 mixin 形状、同样是 mixin 的 `inject` 规则所声明的
+  `Authorization: Bearer <access_token>` 那种形式。⇒ 凭据路径只有**一条**，
+  传输方式不改它。
 
-#### What a mixin declares
+#### mixin 要声明什么
 
-| Capability | What it carries |
+| 能力 | 装什么 |
 |---|---|
-| `network-policy@1` | the upstream domains — the runtime checks that every inject domain appears literally in the allow list for the same phase, so the credential's domain has to be named |
-| `credential@1` | the credential: `service`, `apiKey.name`, `proxyManaged: true`, and the `inject` rule (domain, header, format) |
-| `lifecycle@1` | optional: an install hook that puts the server's binary in the sandbox |
+| `network-policy@1` | 上游域名 —— 运行时会检查每个注入域名都**字面**出现在同一阶段的允许列表里，所以凭据的域名必须被点名 |
+| `credential@1` | 凭据本身：`service`、`apiKey.name`、`proxyManaged: true`，以及 `inject` 规则（域名、头名、格式） |
+| `lifecycle@1` | 可选：一个把服务器二进制装进沙箱的安装钩子 |
 
-★ **The mixin's granularity is the upstream, not the MCP server.** A credential has one
-owner per (service, phase), and the environment is injected into the **container** — so
-one credential declaration serves every server in that sandbox that reads the variable.
-Two MCP servers that both talk to GitHub need **one** credential mixin and **one**
-binding, not two.
+★ **mixin 的粒度是上游，不是 MCP 服务器。** 一份凭据在（service, 阶段）上只有一个属主，
+  而环境是注入到**容器**的 —— 所以一份凭据声明就服务沙箱里所有读那个变量的服务器。
+  两个都跟 GitHub 打交道的 MCP 服务器，需要**一份**凭据 mixin 与**一次**绑定，不是两份。
 
-★ **A mixin may install the MCP server into the sandbox.** The server's binary has to
-be there, and the workload image is openheron's own — it cannot carry every MCP
-server. The mixin declares the install as a `lifecycle@1` **install** hook (which
-registry, which package), and its network rule allows that registry. The mixin still
-carries no content: the runtime fetches the bytes, the mixin does not hold them.
+★ **mixin 可以把 MCP 服务器装进沙箱。** 服务器的二进制得在沙箱里，而 workload 镜像是
+  openheron 自己的 —— 它装不下每一个 MCP 服务器。mixin 把这件事声明成一个
+  `lifecycle@1` 的 **install** 钩子（哪个 registry、哪个包），它的网络规则放行那个
+  registry。mixin 本身仍然不带内容：字节是运行时去取的，不是 mixin 揣着的。
 
-★ This is not the option the paragraph above refuses. That one is a mixin that
-installs a **host-side** server, which would make the mixin define a service. This
-one installs a **guest-side** binary from a registry the mixin names — a declaration
-of what to fetch, executed by the runtime.
+★ 这与上面那段拒绝的选项不是一回事。那一个是把**宿主侧**服务器装起来，那会让 mixin
+  定义一个服务；这一个是从 mixin 点名的 registry 把**客侧**二进制取下来 ——
+  一句「取什么」的声明，由运行时去执行。
 
-#### When the mechanism does not reach
+#### 机制够不着的时候
 
-| Case | What happens |
+| 情况 | 会怎样 |
 |---|---|
-| the key goes in a header | ★ the mechanism covers it — `inject` says which header and which format |
-| the key goes in a URL query parameter, a cookie, or a non-HTTP protocol | ★ **not expressible**: `inject` is a header injection. The real key has to enter the sandbox (`sbx run --env …`), and then it is the agent's to protect |
-| no mixin at all | the variable is simply not set, and the server's own error (a 401) reaches the model as the tool's result |
+| key 放在头里 | ★ 机制覆盖它 —— `inject` 说明是哪个头、什么格式 |
+| key 放在 URL query、cookie 或非 HTTP 协议里 | ★ **表达不了**：`inject` 是头注入。真值只能进沙箱（`sbx run --env …`），此后它就是 agent 要保护的东西 |
+| 根本没有 mixin | 那个变量就是没设，服务器自己的错误（401）作为工具结果到达模型 |
 
-★ **The fallback is a real downgrade, and it should be said out loud.** A key inside
-the VM is readable by the agent's own tools, and it is the user who chose that.
+★ **兜底那一条是真的降级，而且应该说出来。** 落在 VM 里的 key 能被 agent 自己的工具读到，
+  而这是用户自己选的。
 
-## 9. The core code architecture
+## 9. 核心代码架构
 
-### 9.1 The packages
+### 9.1 那些包
 
-| Package | What it holds | What it must not hold |
+| 包 | 装什么 | 装不得什么 |
 |---|---|---|
-| `agentkit/spec/decl` | the **declarations**: `MCPServerCfg`, the namespace constants, and the agent's `MCPServers` field | any behaviour — it is the pure declaration layer (`AGENTS.md`'s dependency iron rules) |
-| `agentkit/spec` | the **loader**: reads `mcps/<server>.yaml`, validates the file name and the fields, expands `${ENV}` / `@file:` | the MCP client, eino, `kb` — it may not import them |
-| `agentkit/build/mcptools.go` | the **provider** and the **wrappers**: the plan (`mcpPlan`), the per-server mutex, the output cap | the loader's file walking — it receives the declarations |
-| `agentkit/build/mcpmanager.go` | the **manager**: one client per server, the single-flight start (§6.8), the lazy start, the restart of a crashed child, the tool-list re-list, the teardown when the server changes and when the process goes away | the naming and the tiers — those belong to the provider |
-| `agentkit/build/tools.go` | the **registry**: `toolProvider`, `defaultToolRegistry`, the reserved names | the MCP specifics — it knows only the interface (§1.2) |
-| `agentkit/build/policy.go` | the **tier lookup**: `Policy.TierOf`, `Table.Blocked` | which file a tool came from — it sees names only |
-| `agentkit/build/mcpstatus.go` | the **projection**: the manager's state, the plan, the boundary's verdict — one row per server (§11.2) | any decision of its own — it reads, it does not evaluate |
+| `agentkit/spec/decl` | **声明**：`MCPServerCfg`、命名空间常量，以及 agent 的 `MCPServers` 字段 | 任何行为 —— 它是纯声明层（`AGENTS.md` 的依赖铁律） |
+| `agentkit/spec` | **加载器**：读 `mcps/<server>.yaml`，校验文件名与字段，展开 `${ENV}` / `@file:` | MCP 客户端、eino、`kb` —— 它不得 import 它们 |
+| `agentkit/build/mcptools.go` | **provider** 与**包装层**：那份计划（`mcpPlan`）、per-server 互斥锁、输出封顶 | 加载器的文件遍历 —— 它拿到的是声明 |
+| `agentkit/build/mcpmanager.go` | **管理者**：一个 server 一个客户端、单飞启动（§6.8）、懒启动、崩掉的子进程重启、工具清单重新列举、服务器变了与进程退出时的拆解 | 命名与档位 —— 那属于 provider |
+| `agentkit/build/tools.go` | **注册表**：`toolProvider`、`defaultToolRegistry`、保留名 | MCP 特有的东西 —— 它只认那个接口（§1.2） |
+| `agentkit/build/policy.go` | **档位查找**：`Policy.TierOf`、`Table.Blocked` | 一个工具来自哪个文件 —— 它只看得到名字 |
+| `agentkit/build/mcpstatus.go` | **投影**：管理者的状态、那份计划、边界的判定 —— 每个 server 一行（§11.2） | 任何自己的判断 —— 它只读，不评判 |
 
-★ **The direction is one-way**: `spec` → `build`. The declaration layer never imports
-the assembly layer, and the assembly layer never walks the config directory itself.
+★ **方向是单向的**：`spec` → `build`。声明层从不 import 装配层，
+  而装配层也从不自己去遍历配置目录。
 
-★ **The plan is a free function, not a method.** The naming and the tier mapping are
-needed by **two** callers — the provider, which turns them into eino tools, and the
-projection, which reports them (§11.2). ⇒ they live in `mcpPlan`, a function of the
-file's declaration and the server's own tool list, and both callers call it. ★ A method
-on the provider would make the projection reach for the provider instance, and a second
-copy of the mapping would be a second truth about a tool's name and a tool's tier.
+★ **计划是一个自由函数，不是一个方法。** 命名与档位映射有**两个**调用方 ——
+  把它们变成 eino 工具的 provider，以及报出它们的投影（§11.2）。
+  ⇒ 它们住在 `mcpPlan` 里：一个以文件的声明与 server 自己的工具清单为参数的函数，
+  两个调用方都调它。★ provider 上的方法会让投影去够 provider 的实例，
+  而映射的第二份拷贝就是关于工具名字与工具档位的第二份真相。
 
-### 9.2 The types
+### 9.2 那些类型
 
-| Type | Where | What it is |
+| 类型 | 在哪 | 是什么 |
 |---|---|---|
-| `decl.MCPServerCfg` | `agentkit/spec/decl/decl.go:426` | one server's declaration: the transport, the command, the environment, the tier keys, the whitelist, the two timeouts |
-| `decl.MCPFiles` | `agentkit/spec/decl/decl.go:474` | the partition's holder: `map[string]*MCPServerCfg` keyed by the server name |
-| `decl.Agent.MCPServers` | `agentkit/spec/decl/decl.go:114` | the agent's own list of servers: ★ a **pointer**, so the key absent means every configured server and `[]` means none — the same shape `Skills` already has |
-| `decl.SubAgentSpec.MCPServers` | `agentkit/spec/decl/decl.go:604` | the same list for a sub-agent, next to its `DisabledTools` and `Skills` (§5.3) |
-| `spec.Config.MCPs` | `agentkit/spec/config.go:111` | where the loader puts them |
-| `mcpToolProvider` | `agentkit/build/mcptools.go:194` | the `toolProvider` implementation (§1.2) |
-| `mcpManager` | `agentkit/build/mcpmanager.go:42` | the owner of the clients: one per server, keyed by the server name, living across snapshots (§6.6) |
-| `mcpTool` | `agentkit/build/mcptools.go:312` | one tool: the eino tool plus the server it belongs to |
-| `mcpPlan` | `agentkit/build/mcptools.go:68` | the shared mapping: the file's declaration plus the server's own tool list → the exposed names, the tiers, and the skips (§9.1) |
-| `serialTool` | `agentkit/build/mcptools.go:335` | the wrapper that serializes the calls of one stdio server (§6.5) |
-| `build.Policy` | `agentkit/build/policy.go:31` | the assembled table: name → tier. **Unchanged in shape** — only where the entries come from changes (§7.3) |
-| `MCPServerView` | `agentkit/build/mcpstatus.go:43` | one server's row: the name, the transport, the state, the error, the tools |
-| `run.MCPServers` | `storage/runledger.go:168` | the servers one run touched (§7.4) |
+| `decl.MCPServerCfg` | `agentkit/spec/decl/decl.go:426` | 一个服务器的声明：传输方式、命令、环境、那几个档位键、白名单、两个超时 |
+| `decl.MCPFiles` | `agentkit/spec/decl/decl.go:474` | 这个分区的持有者：`map[string]*MCPServerCfg`，按服务器名做键 |
+| `decl.Agent.MCPServers` | `agentkit/spec/decl/decl.go:114` | agent 自己的服务器清单：★ 一个**指针**，所以键缺失意味着全部已配置的服务器，`[]` 意味着一个都没有 —— 与 `Skills` 已经是的那个形状一样 |
+| `decl.SubAgentSpec.MCPServers` | `agentkit/spec/decl/decl.go:604` | 子 agent 的同一份清单，就在它自己的 `DisabledTools` 与 `Skills` 旁边（§5.3） |
+| `spec.Config.MCPs` | `agentkit/spec/config.go:111` | 加载器把它们放在这儿 |
+| `mcpToolProvider` | `agentkit/build/mcptools.go:194` | `toolProvider` 的那个实现（§1.2） |
+| `mcpManager` | `agentkit/build/mcpmanager.go:42` | 客户端的属主：每个 server 一个，按服务器名做键，跨快照活着（§6.6） |
+| `mcpTool` | `agentkit/build/mcptools.go:312` | 一个工具：eino 工具加上它归属的那个服务器 |
+| `mcpPlan` | `agentkit/build/mcptools.go:68` | 那份共享的映射：文件的声明加上 server 自己的工具清单 → 对外的名字、档位，以及被跳过的那些（§9.1） |
+| `serialTool` | `agentkit/build/mcptools.go:335` | 把同一个 stdio 服务器的调用串行化起来的那个包装层（§6.5） |
+| `build.Policy` | `agentkit/build/policy.go:31` | 装配出来的表：名字 → 档位。**形状不变** —— 变的只是条目从哪儿来（§7.3） |
+| `MCPServerView` | `agentkit/build/mcpstatus.go:43` | 一个 server 的一行：名字、传输方式、状态、错误、工具 |
+| `run.MCPServers` | `storage/runledger.go:168` | 一次 run 碰过的那些服务器（§7.4） |
 
-### 9.3 Where each piece of the design landed
+### 9.3 设计的哪一块落在了哪一行代码
 
-| The design | The code |
+| 设计 | 代码 |
 |---|---|
-| the namespace (§3) | `mcpPlan` (`agentkit/build/mcptools.go:68`) — the one place that composes `mcp__<server>__<tool>` (`agentkit/build/mcptools.go:141`) |
-| the skip-and-warn (§3.2) | the same function — the name is checked before the tool is kept (`agentkit/build/mcptools.go:89`) |
-| the file's own tier (§7.3) | the same function — the file's names are mapped to the exposed ones, and the table is assembled from the configuration (`agentkit/build/mcptools.go:173`) |
-| the serialization (§6.5) | `serialTool` (`agentkit/build/mcptools.go:335`) — a wrapper, the same shape as `cappedTool` in `nettools.go` |
-| the output cap (§6.4) | the same wrapper family — the component's `ToolCallResultHandler` (`agentkit/build/mcptools.go:376`) |
-| the client's life (§6.2, §6.6) | the manager — `Start` / `Initialize` / `ListTools`, the lazy start, the restart of a crashed child (`agentkit/build/mcpmanager.go:290`), and the teardown when the process goes away (`agentkit/build/mcpmanager.go:150`) |
-| the hot reload (§5.4) | `agentkit/spec/reload.go` — the partition is hot (`agentkit/spec/config.go:66`), and a changed declaration replaces the client (`agentkit/build/mcpmanager.go:229`) |
-| a changed tool list (§6.6) | the manager — the re-list (`agentkit/build/mcpmanager.go:118`), and the generation bump that rebuilds the tools (`agentkit/build/builder.go:105`) |
-| one start, one client (§6.8) | the manager — the single-flight start (`agentkit/build/mcpmanager.go:215`) |
-| the servers a run touched (§7.4) | `agentkit/run/runrow.go:84` and `storage/runledger.go:168` — the run's row names them |
-| the example and the editor's template (§5.6) | `agentkit/templates/files/mcps/example.yaml` — ★ **one file, two readers**: the init writes it as `mcps/example.yaml` (`initcfg/initcfg.go:131`), and the editor scaffolds it (`agentkit/spec/write.go:190`, reached through `spec.Template`) |
-| which servers an agent loads (§5.3) | `agentkit/spec/decl/decl.go:114` (the field) → `agentkit/spec/load.go:522` (the union) → `agentkit/build/mcpmanager.go` (the start) |
-| the agent's narrowing (§11.3) | `agentkit/build/policy.go:129` — the table's namespace prefixes |
-| the `/mcps` view (§11.2) | `agentkit/build/mcpstatus.go:64` — the manager's state, the provider's naming, and the boundary's verdict, in one projection |
-| the tier table itself (§7.3) | `agentkit/build/spec.go:57` — the assembly: the built-in list, the `tools/` files' `allows:`, and each MCP server's own |
+| 命名空间（§3） | `mcpPlan`（`agentkit/build/mcptools.go:68`）—— 唯一一处拼出 `mcp__<server>__<tool>` 的地方（`agentkit/build/mcptools.go:141`） |
+| 跳过并警告（§3.2） | 同一个函数 —— 名字在工具被留下之前先检查一遍（`agentkit/build/mcptools.go:89`） |
+| 文件自己的档位（§7.3） | 同一个函数 —— 文件里的名字被映射到对外的那些，而那张表是从配置装配出来的（`agentkit/build/mcptools.go:173`） |
+| 串行化（§6.5） | `serialTool`（`agentkit/build/mcptools.go:335`）—— 一个包装层，与 `nettools.go` 里的 `cappedTool` 同一个形状 |
+| 输出封顶（§6.4） | 同一族包装层 —— 组件的 `ToolCallResultHandler`（`agentkit/build/mcptools.go:376`） |
+| 客户端的生命（§6.2、§6.6） | 管理者 —— `Start` / `Initialize` / `ListTools`，懒启动、崩掉的子进程重启（`agentkit/build/mcpmanager.go:290`），以及进程退出时的拆解（`agentkit/build/mcpmanager.go:150`） |
+| 热重载（§5.4） | `agentkit/spec/reload.go` —— 这个分区是热的（`agentkit/spec/config.go:66`），而声明变了就会换掉客户端（`agentkit/build/mcpmanager.go:229`） |
+| 工具清单变了（§6.6） | 管理者 —— 重新列举（`agentkit/build/mcpmanager.go:118`），以及推进代际并重建工具（`agentkit/build/builder.go:105`） |
+| 一次启动，一个客户端（§6.8） | 管理者 —— 单飞启动（`agentkit/build/mcpmanager.go:215`） |
+| 一次 run 碰过的 server（§7.4） | `agentkit/run/runrow.go:84` 与 `storage/runledger.go:168` —— run 的那一行点名它们 |
+| 示例与编辑器的模板（§5.6） | `agentkit/templates/files/mcps/example.yaml` —— ★ **一个文件，两个读者**：init 把它写成 `mcps/example.yaml`（`initcfg/initcfg.go:131`），编辑器拿它当脚手架（`agentkit/spec/write.go:190`，经由 `spec.Template`） |
+| 一个 agent 加载哪些服务器（§5.3） | `agentkit/spec/decl/decl.go:114`（那个字段）→ `agentkit/spec/load.go:522`（那个并集）→ `agentkit/build/mcpmanager.go`（那次启动） |
+| agent 的收窄（§11.3） | `agentkit/build/policy.go:129` —— 表里那些命名空间前缀 |
+| `/mcps` 那个视图（§11.2） | `agentkit/build/mcpstatus.go:64` —— 管理者的状态、那份计划、边界的判定，合成一处投影 |
+| 档位表本身（§7.3） | `agentkit/build/spec.go:57` —— 那次装配：内置清单、`tools/` 各文件的 `allows:`，以及每个 MCP server 自己那份 |
 
-★ **One row moved.** The change list (§10.1) put the namespaced MCP names into
-`spec.Config.EnabledToolNames`; they went into the **build** layer instead — the tool
-name universe (`agentkit/build/introspect.go:127`, `:141`) — because the composition of
-a name belongs to the build layer and `agentkit/spec` must not import it. ★ The
-observable behaviour is the same: the API's `EffectiveTools` reports the MCP names
-(`agentkit/build/introspect.go:47`), and it reports them from the configuration alone,
-before a server is up.
+★ **有一行搬了家。** 改动清单（§10.1）本来要把带命名空间的 MCP 名字放进
+  `spec.Config.EnabledToolNames`；它们进了**装配**层 —— 工具名的全域
+  （`agentkit/build/introspect.go:127`、`:141`）—— 因为名字的合成属于装配层，
+  而 `agentkit/spec` 不得 import 它。★ 可观察到的行为是一样的：
+  API 的 `EffectiveTools` 会报出那些 MCP 名字（`agentkit/build/introspect.go:47`），
+  而且它是仅凭配置报出来的，在服务器起来之前就报。
 
-★ **One function does three things**: the namespace, the skip-and-warn, and the tier
-mapping all live in `mcpPlan`, because they all need the same two inputs — the server's
-own tool list and the file that describes it. Splitting them would mean passing the
-same two things around.
+★ **一个函数干三件事**：命名空间、跳过并警告、档位映射都住在
+  `mcpPlan` 里，因为它们要的都是同样两样输入 ——
+  服务器自己的工具清单，与描述它的那个文件。拆开它们就意味着
+  把同样这两样东西到处传。
 
-★ **And it is a free function, because there are two callers.** The provider turns the
-plan into eino tools; the projection reports it (§11.2). ★ A second copy of the
-mapping would be a second truth about a tool's name and a tool's tier — and the whole
-point of the projection is that it is not a second truth.
+★ **而且它是一个自由函数，因为有两个调用方。** provider 把这份计划变成 eino 工具；
+  投影把它报出来（§11.2）。★ 映射的第二份拷贝就是关于工具名字与工具档位的第二份
+  真相 —— 而整个投影的卖点恰恰是它不是第二份真相。
 
-## 10. The change list
+## 10. 改动清单
 
-Everything below **landed**. This section is the record of what the implementation
-round did: where each piece of the design went, what the tests cover, and which
-documents moved with it.
+下面这些**全都落地了**。这一节是那一轮实现做过什么的记录：设计的每一块去了哪里、
+测试覆盖了什么、以及哪些文档跟着动了。
 
-### 10.1 The code
+### 10.1 代码
 
-| # | File | Change | Where it landed |
+| # | 文件 | 改动 | 落在哪儿 |
 |---|---|---|---|
-| 1 | `go.mod` | add `github.com/cloudwego/eino-ext/components/tool/mcp` and `github.com/mark3labs/mcp-go` | **done** — `go.mod:12`, `go.mod:18` |
-| 2 | `agentkit/spec/config.go` | `DirMCP = "mcps"` and a `Categories` entry, hot | **done** — `agentkit/spec/config.go:25`, `:66` |
-| 3 | `agentkit/spec/decl/decl.go` | the `MCPServerCfg` declaration struct, the `MCPFiles` holder, the namespace constants; `call_timeout`; ★ the agent's `MCPServers` field, on the agent **and** on a sub-agent (§5.3) | **done** — `agentkit/spec/decl/decl.go:426`, `:474`, `:308`, `:317`, `:457`, `:114`, `:604` |
-| 4 | `agentkit/spec/load.go` | the loader for `mcps/<server>.yaml`, with the file-name and field validation of §3.1 and §5.2, and the load-time hard errors of §5.7 | **done** — `agentkit/spec/load.go:269`, `:508` |
-| 5 | `agentkit/spec/defaults.go` | `EnabledToolNames` gains the namespaced MCP tools; the default tier of a server (`ask`) | ★ **moved** — the names went into the **build** layer's tool name universe (`agentkit/build/introspect.go:127`), because the composition of a name belongs there and `agentkit/spec` must not import it; the default tier is now the **table's** fallback for every tool, not a rule of the namespace's (`agentkit/build/policy.go:55`) |
-| 6 | `agentkit/spec/write.go` | the scaffold for a new `mcps/` file | **done** — `agentkit/spec/write.go:190`, and the server-name check at `:107` |
-| 7 | `agentkit/build/tools.go` | `mcpToolProvider`, registered in the registry | **done** — `agentkit/build/tools.go:41`, the provider at `agentkit/build/mcptools.go:194` |
-| 8 | `agentkit/build/policy.go` | the prefix matcher for `Blocked`, **and** the tier **assembly**: the providers contribute (exposed name → tier) from their own file's declarations (§7.3) | **done** — ★ the **assembly** is `agentkit/build/spec.go:57` (the built-in list, the `tools/` files, the MCP servers' own); the prefix matcher is `agentkit/build/policy.go:98`, and `Table.Blocked` is `:146` |
-| 9 | `api/v2_settings.go` | the editable section for `mcps/` | ★ **generic** — the manifest walks `spec.Categories` (`api/v2_settings.go:135`), and `mcps/` is an editable category (`agentkit/spec/config.go:66`), so no dedicated section was needed |
-| 10 | `agentkit/build/nettools.go` | the output cap, applied to the MCP batch | ★ **elsewhere** — the cap sits in the component's result handler (`agentkit/build/mcptools.go:376`) and reuses the same constant (`agentkit/build/nettools.go:26`) |
-| 11 | `agentkit/build/mcptools.go` | `mcpPlan` — the shared naming and tier mapping (§9.1), the per-server mutex that serializes the stdio calls (§6.5), and the environment assembly for the child process (§5.5) | **done** — `agentkit/build/mcptools.go:68`, `:335`; ★ the environment assembly is in the manager (`agentkit/build/mcpmanager.go:458`) |
-| 12 | `agentkit/build/mcpmanager.go` | the manager: one client per server, the **single-flight start** (§6.8), the lazy start **of the servers some agent asked for** (§5.3), the restart of a crashed child, the tool-list re-list that bumps the generation, and the teardown on the snapshot swap (§6.6) | **done** — `agentkit/build/mcpmanager.go:42`; ★ the teardown is on the **declaration** (`:229`) and on the process going away (`:150`), not on the snapshot swap (§6.6) |
-| 13 | `agentkit/run/runrow.go` | the run's row records which MCP servers the run touched (§7.4) | **done** — `agentkit/run/runrow.go:84`, `storage/runledger.go:168` |
-| 14 | `agentkit/templates` and `spec.Template` | the `mcps/example.yaml` example, and the editor's template for a new `mcps/` file — ★ **one file, two readers**: the editor cannot read the init package's file (the API serves it, and the API cannot import `initcfg` without a cycle), so the file lives in `agentkit/templates`, a **leaf** both can depend on (§5.6) | **done** — `agentkit/templates/files/mcps/example.yaml`, `initcfg/initcfg.go:131`, `agentkit/spec/write.go:190` |
-| 15 | `api/commands.go` | the `mcps` action command and `commandActionOpenMCPs` (§11.1) | **done** — `api/commands.go:31`, `:61` |
-| 16 | `api/v2_mcps.go` | `GET /v2/mcps` — the view (§11.4) | **done** — `api/v2_mcps.go:74`, the route at `api/v2_files.go:63` |
-| 17 | `api/v2_introspect.go` | the `MCPSource` interface and `SetMCPSource`: the API layer asks the builder, it does not read the manager (§11.2); ★ and the configured servers in the configuration view (§11.4) | ★ **split** — the interface and `SetMCPSource` are in `api/v2_mcps.go:18`, `:41`; the configuration view lists the servers at `api/v2_introspect.go:392` |
-| 18 | `agentkit/build/mcpstatus.go` | `Builder.MCPServers(agentID)` — the projection of the manager's state (§11.2) | **done** — `agentkit/build/mcpstatus.go:64` |
-| 19 | `agentkit/build/policy.go` | the agent's `mcps:` list in the table: the namespace prefixes, and the reason that goes with them (§11.3) | **done** — `agentkit/build/policy.go:129`, wired at `agentkit/build/topology.go:70` |
-| 20 | `main.go` | the wiring, next to `SetToolsSource` (`main.go:278`) (§11.2) | **done** — `main.go:247` (the bump), `:279` (`SetMCPSource`), `:384` (the close) |
-| 21 | `web/src/lib/api.ts` | the `open_mcps` action and `listMCPServers` (§11.5) | **done** — `web/src/lib/api.ts:136`, `:329` |
-| 22 | `web/src/components/mcp-panel.tsx` | the panel (§11.5) | **done** |
-| 23 | `web/src/components/composer.tsx` | the action case that opens the panel (§11.5) | **done** — `web/src/components/composer.tsx:282` |
-| 24 | `agentkit/build/builder.go` and `agentkit/build/manager.go` | the turn's first step: ask the manager whether a server's tool list changed, and take the new snapshot when it did; the **bump** callback that moves the generation (§6.6) | **done** — `agentkit/build/builder.go:67`, `:105`; ★ the config manager stays read-only (`agentkit/build/manager.go:12`) |
+| 1 | `go.mod` | 加 `github.com/cloudwego/eino-ext/components/tool/mcp` 与 `github.com/mark3labs/mcp-go` | **已完成** —— `go.mod:12`、`go.mod:18` |
+| 2 | `agentkit/spec/config.go` | `DirMCP = "mcps"` 与一条 `Categories` 条目，热更新 | **已完成** —— `agentkit/spec/config.go:25`、`:66` |
+| 3 | `agentkit/spec/decl/decl.go` | `MCPServerCfg` 声明结构体、`MCPFiles` 持有者、命名空间常量；`call_timeout`；★ agent 的 `MCPServers` 字段，agent 与子 agent 各有一份（§5.3） | **已完成** —— `agentkit/spec/decl/decl.go:426`、`:474`、`:308`、`:317`、`:457`、`:114`、`:604` |
+| 4 | `agentkit/spec/load.go` | `mcps/<server>.yaml` 的加载器，带 §3.1 与 §5.2 的文件名与字段校验，以及 §5.7 的那些加载期硬错误 | **已完成** —— `agentkit/spec/load.go:269`、`:508` |
+| 5 | `agentkit/spec/defaults.go` | `EnabledToolNames` 加上带命名空间的 MCP 工具；一个服务器的缺省档位（`ask`） | ★ **搬了家** —— 那些名字进了**装配**层的工具名全域（`agentkit/build/introspect.go:127`），因为名字的合成属于那一层，而 `agentkit/spec` 不得 import 它；缺省档位现在是**每一个**工具都走那张表的兜底，而不再是命名空间的一条规则（`agentkit/build/policy.go:55`） |
+| 6 | `agentkit/spec/write.go` | 新建 `mcps/` 文件的脚手架 | **已完成** —— `agentkit/spec/write.go:190`，服务器名校验在 `:107` |
+| 7 | `agentkit/build/tools.go` | `mcpToolProvider`，注册在注册表里 | **已完成** —— `agentkit/build/tools.go:41`，provider 在 `agentkit/build/mcptools.go:194` |
+| 8 | `agentkit/build/policy.go` | `Blocked` 的前缀匹配器，**以及**档位的**装配**：各 provider 从自己文件里的声明贡献（对外名字 → 档位）（§7.3） | **已完成** —— ★ **装配**在 `agentkit/build/spec.go:57`（内置清单、`tools/` 各文件、MCP server 自己那份）；前缀匹配器在 `agentkit/build/policy.go:98`，而 `Table.Blocked` 在 `:146` |
+| 9 | `api/v2_settings.go` | `mcps/` 的可编辑分区 | ★ **通用** —— 那份清单走的是 `spec.Categories`（`api/v2_settings.go:135`），而 `mcps/` 是一个可编辑分类（`agentkit/spec/config.go:66`），所以不需要专门的一段 |
+| 10 | `agentkit/build/nettools.go` | 输出封顶，套到 MCP 批次上 | ★ **在别处** —— 封顶落在组件的结果处理器里（`agentkit/build/mcptools.go:376`），用的是同一个常量（`agentkit/build/nettools.go:26`） |
+| 11 | `agentkit/build/mcptools.go` | `mcpPlan` —— 那份共享的命名与档位映射（§9.1），把 stdio 调用串行化的 per-server 互斥锁（§6.5），以及子进程的环境装配（§5.5） | **已完成** —— `agentkit/build/mcptools.go:68`、`:335`；★ 环境装配在管理者里（`agentkit/build/mcpmanager.go:458`） |
+| 12 | `agentkit/build/mcpmanager.go` | 管理者：一个 server 一个客户端、**单飞启动**（§6.8）、**只懒启动某个 agent 要的**那些服务器（§5.3）、崩了的子进程重启、推进代际的工具清单重新列举，以及快照换代时的拆解（§6.6） | **已完成** —— `agentkit/build/mcpmanager.go:42`；★ 拆解发生在**声明**上（`:229`）与进程退出时（`:150`），而不是快照换代时（§6.6） |
+| 13 | `agentkit/run/runrow.go` | run 的那一行记下这次 run 碰过哪些 MCP server（§7.4） | **已完成** —— `agentkit/run/runrow.go:84`、`storage/runledger.go:168` |
+| 14 | `agentkit/templates` 与 `spec.Template` | `mcps/example.yaml` 这个示例，以及新建 `mcps/` 文件时编辑器用的模板 —— ★ **一个文件，两个读者**：编辑器读不到 init 包里那个文件（编辑器由 API 供给，而 API 不能 import `initcfg`，那是循环），所以文件住在 `agentkit/templates` —— 一个**两边都能依赖的叶子包**（§5.6） | **已完成** —— `agentkit/templates/files/mcps/example.yaml`、`initcfg/initcfg.go:131`、`agentkit/spec/write.go:190` |
+| 15 | `api/commands.go` | `mcps` 这个 action 命令与 `commandActionOpenMCPs`（§11.1） | **已完成** —— `api/commands.go:31`、`:61` |
+| 16 | `api/v2_mcps.go` | `GET /v2/mcps` —— 那个视图（§11.4） | **已完成** —— `api/v2_mcps.go:74`，路由在 `api/v2_files.go:63` |
+| 17 | `api/v2_introspect.go` | `MCPSource` 接口与 `SetMCPSource`：API 层去问 builder，它不直接读管理者（§11.2）；★ 以及配置面视图里那些已配置的服务器（§11.4） | ★ **拆开了** —— 接口与 `SetMCPSource` 在 `api/v2_mcps.go:18`、`:41`；配置面视图列出那些服务器在 `api/v2_introspect.go:392` |
+| 18 | `agentkit/build/mcpstatus.go` | `Builder.MCPServers(agentID)` —— 管理者状态的投影（§11.2） | **已完成** —— `agentkit/build/mcpstatus.go:64` |
+| 19 | `agentkit/build/policy.go` | 表里 agent 的 `mcps:` 清单：那些命名空间前缀，以及跟着它们的理由（§11.3） | **已完成** —— `agentkit/build/policy.go:129`，接在 `agentkit/build/topology.go:70` |
+| 20 | `main.go` | 那根接线，紧挨着 `SetToolsSource`（`main.go:278`）（§11.2） | **已完成** —— `main.go:247`（那个 bump）、`:279`（`SetMCPSource`）、`:384`（那个 close） |
+| 21 | `web/src/lib/api.ts` | `open_mcps` 这个 action 与 `listMCPServers`（§11.5） | **已完成** —— `web/src/lib/api.ts:136`、`:329` |
+| 22 | `web/src/components/mcp-panel.tsx` | 那个面板（§11.5） | **已完成** |
+| 23 | `web/src/components/composer.tsx` | 打开面板的那个 action 分支（§11.5） | **已完成** —— `web/src/components/composer.tsx:282` |
+| 24 | `agentkit/build/builder.go` 与 `agentkit/build/manager.go` | 这一轮的第一步：问管理者某个 server 的工具清单有没有变，变了就取新的快照；以及推进代际的那个 **bump** 回调（§6.6） | **已完成** —— `agentkit/build/builder.go:67`、`:105`；★ 配置管理器仍然是只读的（`agentkit/build/manager.go:12`） |
 
-★ **Three rows moved, and one did not land as written.** The tool name universe went
-to the build layer (row 5), the output cap went into the component's result handler
-(row 10), and the API's MCP interface went into `api/v2_mcps.go` (row 17). The teardown
-on the snapshot swap (row 12) did not happen: the manager owns the clients across
-snapshots, and what replaces a client is a changed **declaration** (§6.6).
+★ **有三行搬了家，还有一行没有照写落地。** 工具名全域搬到了装配层（第 5 行），
+  输出封顶搬进了组件的结果处理器（第 10 行），API 那个 MCP 接口搬进了
+  `api/v2_mcps.go`（第 17 行）。快照换代时的拆解（第 12 行）没有发生：
+  管理者跨快照拥有那些客户端，换掉客户端的是**声明**变了（§6.6）。
 
-### 10.2 The tests
+### 10.2 测试
 
-| Area | What it proves | The test |
+| 领域 | 要证明什么 | 测试 |
 |---|---|---|
-| Naming | a server offering `ls` yields `mcp__<server>__ls` | `agentkit/build/mcptools_test.go` `TestAnMCPNameIsTheServersOwnNameUnderTheNamespace` |
-| Naming | the characters the model provider refuses become `_` | `agentkit/build/mcptools_test.go` `TestAnMCPNameReplacesTheCharactersTheModelRefuses` |
-| Naming | the server's own case is kept | `agentkit/build/mcptools_test.go` `TestAnMCPNameKeepsTheServersOwnCase` |
-| Naming | the 64-character boundary, and the skip-and-warn path above it | `agentkit/build/mcptools_test.go` `TestAnMCPNameAtTheBoundaryIsKept`, `TestAnMCPNameOverTheBoundaryIsSkipped` |
-| Naming | two tools of one server that sanitize alike — the second is skipped | `agentkit/build/mcptools_test.go` `TestTwoToolsThatSanitizeAlikeLeaveTheSecondOneSkipped` |
-| Matching | the file's `tools:` lists the server's **own** names, and an absent list means all | `agentkit/build/mcptools_test.go` `TestTheFileAsksForItsOwnToolsAndNotTheExposedOnes`, `TestAnAbsentToolListMeansEveryTool` |
-| Matching | a prefix rule hits the tools of one server and only those | `agentkit/build/mcptools_test.go` `TestAPrefixRuleReachesTheToolsOfOneServerOnly` |
-| Matching | `mcp__*` reaches every MCP tool, and an exact entry still removes one tool | `agentkit/build/mcptools_test.go` `TestAWildcardPrefixReachesEveryMCPTool`, `TestAnExactEntryStillRemovesTheTool` |
-| Matching | `mcp*foo` and a lone `*` are load-time errors | `agentkit/spec/mcp_test.go` `TestAWildcardThatIsNotAPrefixPatternIsALoadTimeError`, `TestALoneWildcardIsALoadTimeError`, `TestATrailingStarIsAPrefixPattern` |
-| Tier | everything asks, and the file names the exceptions | `agentkit/build/mcptools_test.go` `TestEverythingAsksAndTheFileNamesTheExceptions` |
-| Tier | an empty `allows:` covers the tools a server has **not offered yet** | `agentkit/build/mcptools_test.go` `TestAnEmptyAllowsListCoversTheToolsTheServerHasNotOfferedYet` |
-| Tier | the tier of a tool is answerable while the server is unreachable | `agentkit/build/mcptools_test.go` `TestTheTierIsAnswerableWhileTheServerIsUnreachable` |
-| Tier | a name nobody names asks | `agentkit/build/mcptools_test.go` `TestAnMCPNameNobodyNamesAsks` |
-| Tier | the file's `allows:` reaches the gate under the composed name | `agentkit/build/mcplive_test.go` `TestTheProviderMountsTheToolsOfARealServer` |
-| Servers | an absent `mcps:` means every configured server, `[]` means none | `agentkit/build/mcptools_test.go` `TestAnAbsentServerListMeansEveryConfiguredServer`, `TestAnEmptyServerListDeniesEveryConfiguredServer`; `agentkit/spec/mcp_test.go` `TestAnAbsentServerListMeansEveryConfiguredServer`, `TestAnEmptyServerListMeansNoServerAtAll` |
-| Servers | a sub-agent's own `mcps:` list is read from the sub-agent | `agentkit/spec/mcp_test.go` `TestASubAgentsOwnListIsReadFromTheSubAgent` |
-| Narrowing | the table denies the namespace **prefix**, and `mcp__github__` does not reach `mcp__github_x__` | `agentkit/build/mcptools_test.go` `TestTheServerNarrowingDeniesTheNamespacePrefixOnly` |
-| Narrowing | the server narrowing is reported before the tool rule | `agentkit/build/mcptools_test.go` `TestTheServerNarrowingIsReportedBeforeTheToolRule` |
-| Loading | an unknown `transport` is a load-time error, and there is no fallback to stdio | `agentkit/spec/mcp_test.go` `TestAnUnknownTransportIsALoadTimeError` |
-| Loading | a stdio server needs a `command`, an http server needs a `url` | `agentkit/spec/mcp_test.go` `TestAStdioServerNeedsACommand`, `TestAnHTTPServerNeedsAURL` |
-| Loading | `env:` on an http server is a load-time error, even when it is empty | `agentkit/spec/mcp_test.go` `TestAnHTTPServerMayNotDeclareAnEnvironment`, `TestAnEmptyEnvironmentOnAnHTTPServerIsStillRefused` |
-| Loading | an unknown key is refused | `agentkit/spec/mcp_test.go` `TestAnUnknownKeyIsRefused` |
-| Loading | the server name is the file name, and it must be readable back | `agentkit/spec/mcp_test.go` `TestTheMCPFileNameIsTheServerName`, `TestTheServerNameMustBeReadableBack` |
-| Loading | an agent's `mcps:` naming a server that does not exist is a load-time error | `agentkit/spec/mcp_test.go` `TestAnAgentNamingAServerThatDoesNotExistIsALoadTimeError` |
-| Loading | the timeouts have defaults, and a bad one degrades and is noticed | `agentkit/spec/mcp_test.go` `TestTheTimeoutsHaveDefaults`, `TestABadTimeoutDegradesAndIsNoticed` |
-| Environment | an unset `${ENV}` in `env:` is deferred, not fatal; a set one is expanded | `agentkit/spec/mcp_test.go` `TestAnUnsetVariableInTheEnvironmentIsDeferredAndNotFatal`, `TestASetVariableInTheEnvironmentIsExpanded` |
-| Environment | the child sees openheron's environment, with `env:` overriding the same names | `agentkit/build/mcpmanager_test.go` `TestTheChildEnvironmentIsTheProcessesOwnWithTheFileOnTop` |
-| Command | a `command` that is not on the PATH is a warning, and the workspace never resolves it | `agentkit/build/mcpmanager_test.go` `TestTheCommandIsNeverResolvedAgainstTheProjectRoot` |
-| Provider | an unreachable server says so, and the other servers stay alive | `agentkit/build/mcpmanager_test.go` `TestAnUnreachableServerSaysSoAndKeepsTheOtherServersAlive` |
-| Provider | the tools of a **real** server are mounted under the namespace, and a call reaches the server and comes back | `agentkit/build/mcplive_test.go` `TestTheProviderMountsTheToolsOfARealServer`, `TestAMCPtoolCallReachesTheServer` |
-| Lifecycle | a changed declaration replaces the client | `agentkit/build/mcpmanager_test.go` `TestAChangedDeclarationReplacesTheClient` |
-| Manager | a crashed stdio child is started again on the next call | `agentkit/build/mcpmanager_test.go` `TestACrashedChildIsStartedAgainOnTheNextCall` |
-| Manager | a changed tool list is reported by the refresh, and a fresh listing is not re-listed | `agentkit/build/mcpmanager_test.go` `TestAChangedToolListIsReportedByTheRefresh`, `TestAFreshListingIsNotReListed` |
-| Manager | two callers asking for the same server get **one** client | `agentkit/build/mcpmanager_test.go` `TestTwoCallersAskingForTheSameServerGetOneClient` |
-| Ledger | a run's row names the MCP servers it touched, and the names come out of the namespaced tool names | `agentkit/run/runrow_mcp_test.go` `TestARunRowNamesTheMCPServersItTouched`, `TestTheServersAreReadOutOfTheNamespacedToolNames` |
-| Editor | the config editor can create a file under `mcps/`, and refuses a server name that could not be read back | `agentkit/spec/mcp_test.go` `TestTheEditorAcceptsAFileUnderMCPS`, `TestTheEditorRefusesAServerNameThatCouldNotBeReadBack` |
-| Command | `/mcps` is an action, and it never reaches the model as a prompt | `api/v2_mcps_test.go` `TestTheMCPCommandIsAnAction`, `TestTheMCPCommandNeverReachesTheModel` |
-| View | the agent parameter is optional, and an unknown agent is a 404 | `api/v2_mcps_test.go` `TestV2MCPServersReportsTheServersOfTheAgent`, `TestV2MCPServersTakesTheAgentParameter`, `TestV2MCPServersRefusesAnUnknownAgent` |
-| View | the configuration view lists the configured servers | `api/v2_mcps_test.go` `TestV2ConfigListsTheConfiguredServers` |
-| View | every configured server appears exactly once, and a server the agent does not use is `unused` with no tool rows | `agentkit/build/mcpstatus_test.go` `TestEveryConfiguredServerAppearsExactlyOnce`, `TestAServerTheAgentDoesNotUseIsUnusedAndHasNoToolRows` |
-| View | an unreachable server reports the error and keeps its last listing | `agentkit/build/mcpstatus_test.go` `TestAnUnreachableServerReportsTheErrorAndKeepsItsLastListing` |
-| View | the reason is `tools` — the agent's own list is what decides | `agentkit/build/mcpstatus_test.go` `TestTheAgentsViewReportsTheToolsListAsTheReason`, `TestTheReasonIsTheToolRuleWhenTheServerIsThere` |
-| View | the panel asks the manager, and the manager starts the server; the tier is the gate's own | `agentkit/build/mcpstatus_test.go` `TestThePanelAsksTheManagerAndTheManagerStartsTheServer`, `TestThePanelShowsTheTierTheGateWouldUse` |
-| Panel | the panel shows both names and the tier, and it says what it cannot reach | `web/test/e2e/mcps.spec.ts` |
-| Panel | the empty state says that no server is configured | `web/test/e2e/mcps.spec.ts` |
-| Panel | the panel re-reads every time it opens, and **Refresh** re-reads it | `web/test/e2e/mcps.spec.ts` |
-| Panel | `/mcps` never reaches the model and never opens a session | `web/test/e2e/mcps.spec.ts` |
-| Serialization | the calls of one stdio server are serialized, and the http ones are not | `agentkit/build/mcplive_test.go` `TestTheStdioCallsOfOneServerAreSerialized`, `TestTheHTTPCallsOfOneServerAreNotSerialized` |
-| Deadline | a call that runs out of time gives up and releases the lock | `agentkit/build/mcplive_test.go` `TestACallThatExceedsTheTimeoutGivesUpAndReleasesTheLock` |
-| Missing | the file asks for a tool the server does not have, and it is noticed | `agentkit/build/mcplive_test.go` `TestTheFileAskingForAToolTheServerLacksIsNoticed` |
+| 命名 | 一个提供 `ls` 的服务器产出 `mcp__<server>__ls` | `agentkit/build/mcptools_test.go` `TestAnMCPNameIsTheServersOwnNameUnderTheNamespace` |
+| 命名 | 模型 provider 不收的那些字符变成 `_` | `agentkit/build/mcptools_test.go` `TestAnMCPNameReplacesTheCharactersTheModelRefuses` |
+| 命名 | server 自己的大小写被保留 | `agentkit/build/mcptools_test.go` `TestAnMCPNameKeepsTheServersOwnCase` |
+| 命名 | 64 字符的边界，以及越界之后的「跳过 + 警告」这条路 | `agentkit/build/mcptools_test.go` `TestAnMCPNameAtTheBoundaryIsKept`、`TestAnMCPNameOverTheBoundaryIsSkipped` |
+| 命名 | 同一服务器里两个规整后同名的工具 —— 第二个被跳过 | `agentkit/build/mcptools_test.go` `TestTwoToolsThatSanitizeAlikeLeaveTheSecondOneSkipped` |
+| 匹配 | 文件的 `tools:` 列的是 server **自己**的名字，而缺失意味着全部 | `agentkit/build/mcptools_test.go` `TestTheFileAsksForItsOwnToolsAndNotTheExposedOnes`、`TestAnAbsentToolListMeansEveryTool` |
+| 匹配 | 一条前缀规则命中一个 server 的工具，且只命中它的 | `agentkit/build/mcptools_test.go` `TestAPrefixRuleReachesTheToolsOfOneServerOnly` |
+| 匹配 | `mcp__*` 够到每一个 MCP 工具，而精确条目仍然摘掉一个工具 | `agentkit/build/mcptools_test.go` `TestAWildcardPrefixReachesEveryMCPTool`、`TestAnExactEntryStillRemovesTheTool` |
+| 匹配 | `mcp*foo` 与单独的 `*` 是加载期错误 | `agentkit/spec/mcp_test.go` `TestAWildcardThatIsNotAPrefixPatternIsALoadTimeError`、`TestALoneWildcardIsALoadTimeError`、`TestATrailingStarIsAPrefixPattern` |
+| 档位 | 一切都先点头，而文件点名它的例外 | `agentkit/build/mcptools_test.go` `TestEverythingAsksAndTheFileNamesTheExceptions` |
+| 档位 | 一个空的 `allows:` 覆盖 server **还没提供**的工具 | `agentkit/build/mcptools_test.go` `TestAnEmptyAllowsListCoversTheToolsTheServerHasNotOfferedYet` |
+| 档位 | server 够不着的时候，一个工具的档位也答得出来 | `agentkit/build/mcptools_test.go` `TestTheTierIsAnswerableWhileTheServerIsUnreachable` |
+| 档位 | 没有人点名的名字要先点头 | `agentkit/build/mcptools_test.go` `TestAnMCPNameNobodyNamesAsks` |
+| 档位 | 文件里的 `allows:` 以合成后的名字到达闸门 | `agentkit/build/mcplive_test.go` `TestTheProviderMountsTheToolsOfARealServer` |
+| 服务器 | `mcps:` 缺失意味着全部已配置的服务器，`[]` 意味着一个都没有 | `agentkit/build/mcptools_test.go` `TestAnAbsentServerListMeansEveryConfiguredServer`、`TestAnEmptyServerListDeniesEveryConfiguredServer`；`agentkit/spec/mcp_test.go` `TestAnAbsentServerListMeansEveryConfiguredServer`、`TestAnEmptyServerListMeansNoServerAtAll` |
+| 服务器 | 子 agent 自己的 `mcps:` 清单是从子 agent 读的 | `agentkit/spec/mcp_test.go` `TestASubAgentsOwnListIsReadFromTheSubAgent` |
+| 收窄 | 表拒的是命名空间**前缀**，而 `mcp__github__` 够不到 `mcp__github_x__` | `agentkit/build/mcptools_test.go` `TestTheServerNarrowingDeniesTheNamespacePrefixOnly` |
+| 收窄 | 服务器的收窄先于工具规则被报出来 | `agentkit/build/mcptools_test.go` `TestTheServerNarrowingIsReportedBeforeTheToolRule` |
+| 加载 | 不认识的 `transport` 是加载期错误，而且不退回 stdio | `agentkit/spec/mcp_test.go` `TestAnUnknownTransportIsALoadTimeError` |
+| 加载 | stdio 服务器要 `command`，http 服务器要 `url` | `agentkit/spec/mcp_test.go` `TestAStdioServerNeedsACommand`、`TestAnHTTPServerNeedsAURL` |
+| 加载 | http 服务器上的 `env:` 是加载期错误，哪怕它是空的 | `agentkit/spec/mcp_test.go` `TestAnHTTPServerMayNotDeclareAnEnvironment`、`TestAnEmptyEnvironmentOnAnHTTPServerIsStillRefused` |
+| 加载 | 不认识的键被拒绝 | `agentkit/spec/mcp_test.go` `TestAnUnknownKeyIsRefused` |
+| 加载 | 服务器名就是文件名，而且它必须读得回来 | `agentkit/spec/mcp_test.go` `TestTheMCPFileNameIsTheServerName`、`TestTheServerNameMustBeReadableBack` |
+| 加载 | agent 的 `mcps:` 点名一个不存在的服务器是加载期错误 | `agentkit/spec/mcp_test.go` `TestAnAgentNamingAServerThatDoesNotExistIsALoadTimeError` |
+| 加载 | 两个超时各有缺省，而写坏的那个降级并被记下来 | `agentkit/spec/mcp_test.go` `TestTheTimeoutsHaveDefaults`、`TestABadTimeoutDegradesAndIsNoticed` |
+| 环境 | `env:` 里未设的 `${ENV}` 进 `deferred`，不致命；设了的会被展开 | `agentkit/spec/mcp_test.go` `TestAnUnsetVariableInTheEnvironmentIsDeferredAndNotFatal`、`TestASetVariableInTheEnvironmentIsExpanded` |
+| 环境 | 子进程看得见 openheron 的环境，`env:` 覆盖同名项 | `agentkit/build/mcpmanager_test.go` `TestTheChildEnvironmentIsTheProcessesOwnWithTheFileOnTop` |
+| 命令 | 一个不在 PATH 上的 `command` 只是一条警告，而工作区永远不参与解析 | `agentkit/build/mcpmanager_test.go` `TestTheCommandIsNeverResolvedAgainstTheProjectRoot` |
+| provider | 一个够不着的服务器说得出问题，而其它服务器照活 | `agentkit/build/mcpmanager_test.go` `TestAnUnreachableServerSaysSoAndKeepsTheOtherServersAlive` |
+| provider | 一个**真实**服务器的工具以命名空间挂上来，而且一次调用到达服务器并带回它的答案 | `agentkit/build/mcplive_test.go` `TestTheProviderMountsTheToolsOfARealServer`、`TestAMCPtoolCallReachesTheServer` |
+| 生命周期 | 声明变了就换掉客户端 | `agentkit/build/mcpmanager_test.go` `TestAChangedDeclarationReplacesTheClient` |
+| 管理者 | 崩掉的 stdio 子进程在下一次调用时被重新拉起 | `agentkit/build/mcpmanager_test.go` `TestACrashedChildIsStartedAgainOnTheNextCall` |
+| 管理者 | 工具清单变了会被 refresh 报出来，而新鲜的那份不会被重新列举 | `agentkit/build/mcpmanager_test.go` `TestAChangedToolListIsReportedByTheRefresh`、`TestAFreshListingIsNotReListed` |
+| 管理者 | 两个调用方要同一个 server，拿到的是**一个**客户端 | `agentkit/build/mcpmanager_test.go` `TestTwoCallersAskingForTheSameServerGetOneClient` |
+| 账本 | 一个 run 的那一行点名它碰过的 MCP server，而名字是从带命名空间的工具名里读出来的 | `agentkit/run/runrow_mcp_test.go` `TestARunRowNamesTheMCPServersItTouched`、`TestTheServersAreReadOutOfTheNamespacedToolNames` |
+| 编辑器 | 配置编辑器能在 `mcps/` 下面新建文件，并拒绝读不回来的服务器名 | `agentkit/spec/mcp_test.go` `TestTheEditorAcceptsAFileUnderMCPS`、`TestTheEditorRefusesAServerNameThatCouldNotBeReadBack` |
+| 命令 | `/mcps` 是一个 action，而它永远不会以 prompt 的形式到达模型 | `api/v2_mcps_test.go` `TestTheMCPCommandIsAnAction`、`TestTheMCPCommandNeverReachesTheModel` |
+| 视图 | agent 参数可省略，而一个不存在的 agent 是 404 | `api/v2_mcps_test.go` `TestV2MCPServersReportsTheServersOfTheAgent`、`TestV2MCPServersTakesTheAgentParameter`、`TestV2MCPServersRefusesAnUnknownAgent` |
+| 视图 | 配置面视图列出已配置的服务器 | `api/v2_mcps_test.go` `TestV2ConfigListsTheConfiguredServers` |
+| 视图 | 每个已配置的服务器恰好出现一次，而 agent 不用的那个 server 是 `unused` 且没有工具行 | `agentkit/build/mcpstatus_test.go` `TestEveryConfiguredServerAppearsExactlyOnce`、`TestAServerTheAgentDoesNotUseIsUnusedAndHasNoToolRows` |
+| 视图 | 一个够不着的服务器报出错误并留住它上一次成功的清单 | `agentkit/build/mcpstatus_test.go` `TestAnUnreachableServerReportsTheErrorAndKeepsItsLastListing` |
+| 视图 | 理由是 `tools` —— 决定它的是 agent 自己的清单 | `agentkit/build/mcpstatus_test.go` `TestTheAgentsViewReportsTheToolsListAsTheReason`、`TestTheReasonIsTheToolRuleWhenTheServerIsThere` |
+| 视图 | 面板去问管理者，而管理者会启动那个服务器；档位就是闸门自己的那个 | `agentkit/build/mcpstatus_test.go` `TestThePanelAsksTheManagerAndTheManagerStartsTheServer`、`TestThePanelShowsTheTierTheGateWouldUse` |
+| 面板 | 面板把两个名字与档位都显示出来，也照实说它够不着什么 | `web/test/e2e/mcps.spec.ts` |
+| 面板 | 空状态说的是没有配置任何服务器 | `web/test/e2e/mcps.spec.ts` |
+| 面板 | 面板每次打开都重新读，而 **Refresh** 会再读一次 | `web/test/e2e/mcps.spec.ts` |
+| 面板 | `/mcps` 永远到不了模型，也不会开一个会话 | `web/test/e2e/mcps.spec.ts` |
+| 串行化 | 同一个 server 的调用被串行化，而 http 的那些不是 | `agentkit/build/mcplive_test.go` `TestTheStdioCallsOfOneServerAreSerialized`、`TestTheHTTPCallsOfOneServerAreNotSerialized` |
+| 截止时间 | 一次调用跑过了时间就放弃，并且放开那把锁 | `agentkit/build/mcplive_test.go` `TestACallThatExceedsTheTimeoutGivesUpAndReleasesTheLock` |
+| 缺失 | 文件点名的那个工具 server 没有，而这件事被说出来 | `agentkit/build/mcplive_test.go` `TestTheFileAskingForAToolTheServerLacksIsNoticed` |
 
-★ **The three cases the design asked for now have their tests.** The serialization of
-one stdio server's calls (§6.5), the `call_timeout` deadline, and the warning for a
-name the file's `tools:` asks for and the server does not have (§6.1) are all covered
-now — ★ and they are covered against a **real** server, in
-`agentkit/build/mcplive_test.go`, because the first two are properties of the wire and
-of the pipe, and a fake client would have proved neither.
+★ **这份设计要的三个用例现在都有测试了。** 同一个 stdio 服务器的调用被串行化（§6.5）、
+  `call_timeout` 的截止时间，以及「文件的 `tools:` 点名而 server 没有的名字」那条
+  警告（§6.1）—— 现在都有覆盖了。★ 而且它们是对着一个**真实**服务器覆盖的，
+  在 `agentkit/build/mcplive_test.go` 里 —— 因为前两者是线路与管道的性质，
+  一个假客户端两样都证明不了。
 
-### 10.3 The documentation
+### 10.3 文档
 
-| Document | What changed |
+| 文档 | 改了什么 |
 |---|---|
-| `docs/architecture.md` | the tool assembly path gains the MCP provider; the `mcps/` partition and the agent's `mcps:` key enter the configuration tables |
-| `docs/config-design.md` | the `mcps/` partition (§6.7) and the prefix pattern in an agent's `tools` (§6.3) are **implemented**; ★ and the **global deny list goes with the `policy/` partition** — §6.3 is now the whole tier model: no partition, no global list, `ask` as the default. ★ The agent's own lists are allow-lists and default to **none** |
-| `docs/user-manual.md` | how to configure a server, what the names in the interface look like, and what the `/mcps` command shows (§11.5) |
-| `docs/developer-manual.md` | the "adding a partition" recipe gains the `mcps/` case |
-| `README.md` | the HTTP reference gains `GET /v2/mcps` |
-| `docs/mcp-design.md` | this document — the status header, §1 and §10 are rewritten to describe the code as it is |
+| `docs/architecture.md` | 工具装配路径加上 MCP provider；`mcps/` 分区与 agent 的 `mcps:` 键进入配置表 |
+| `docs/config-design.md` | `mcps/` 分区（§6.7）与 agent 的 `tools` 里的前缀模式（§6.3）**已实施**；★ 而且**全局 deny 清单跟着 `policy/` 分区一起走了** —— §6.3 现在讲的就是整个档位模型：没有分区、没有全局清单、缺省是 `ask`。★ agent 自己的几张清单都是白名单，缺省**什么都没有** |
+| `docs/user-manual.md` | 怎么配一个服务器、界面上看到的名字长什么样，以及 `/mcps` 命令显示什么（§11.5） |
+| `docs/developer-manual.md` | 「加一个分区」的配方加上 `mcps/` 这一例 |
+| `README.md` | HTTP 参考加上 `GET /v2/mcps` |
+| `docs/mcp-design.md` | 本文档 —— 状态头、§1 与 §10 被改写成描述代码现状 |
 
-## 11. The `/mcps` command: the MCP servers in the interface
+## 11. `/mcps` 命令：界面里的 MCP 服务器
 
-★ The interface has to answer a question the log cannot: **which MCP servers does this
-agent have, are they up, and what will they cost me when they run?** The manager knows
-all three. The panel must not compute a verdict of its own.
+★ 界面必须回答一个日志回答不了的问题：**这个 agent 有哪些 MCP 服务器，
+  它们起来了吗，跑起来的时候会让我付出什么？** 这三样管理者都知道。
+  面板自己不许下一个判断。
 
-### 11.1 It is an action, not a prompt
+### 11.1 它是一个 action，不是一个 prompt
 
-`/mcps` is registered in the server's command table (`api/commands.go:61`) as an
-**action**:
+`/mcps` 在服务端的命令表（`api/commands.go:61`）里注册为一个 **action**：
 
 ```go
 {
@@ -1389,106 +1298,93 @@ all three. The panel must not compute a verdict of its own.
 },
 ```
 
-★ **An action, not a prompt**, for the reason `/compact` is one (`api/commands.go:69`):
-a prompt would ask the **model** to describe the servers, and the model's answer would
-be a second, lossy truth about a fact the **runtime** holds. The status is read, not
-generated.
+★ **是 action，不是 prompt**，理由与 `/compact` 是 action 一样（`api/commands.go:69`）：
+  prompt 会去问**模型**那些服务器的事，而模型的回答会是关于一个**运行时**掌握的事实
+  的第二份、且有损的真相。状态是被读出来的，不是被生成出来的。
 
-★ The action opens a panel; it does not write a message into the transcript. A status
-readout is not a turn, and a `/mcps` in the middle of a dialogue would read as if the
-agent had said something.
+★ 这个 action 打开一个面板；它不往对话记录里写一条消息。状态播报不是一轮，
+  而一段对话中间夹一个 `/mcps`，读起来就像 agent 说过什么话。
 
-### 11.2 The rule
+### 11.2 那条规则
 
-> **`/mcps` asks the manager what this agent would get from its servers.**
+> **`/mcps` 去问管理者：这个 agent 能从它的服务器上拿到什么。**
 
-One sentence, and every row of the panel follows from it:
+一句话，面板的每一行都由它推出：
 
-| The question | The answer comes from |
+| 问题 | 答案来自哪儿 |
 |---|---|
-| is the server up? | the manager's client (§6.6) |
-| what did it offer? | the manager's listing (§6.6) |
-| what is the tool called? | the plan — `mcpPlan` (§9.3) |
-| will it ask me? | `Policy.TierOf` — the gate's own lookup (§1.3) |
-| can this agent reach it? | the agent's table (§11.3) |
+| 服务器起来了吗？ | 管理者的客户端（§6.6） |
+| 它提供了什么？ | 管理者的清单（§6.6） |
+| 这个工具叫什么？ | 那份计划 —— `mcpPlan`（§9.3） |
+| 它会问我吗？ | `Policy.TierOf` —— 闸门自己那次查找（§1.3） |
+| 这个 agent 能拿到它吗？ | agent 的表（§11.3） |
 
-★ All five answers come out of **one** function, `Builder.MCPServers`
-(`agentkit/build/mcpstatus.go:64`), and the API layer only forwards what it returns
-(`api/v2_mcps.go:74`).
+★ 这五个答案都出自**同一个**函数 `Builder.MCPServers`
+  （`agentkit/build/mcpstatus.go:64`），而 API 层只转发它返回的东西
+  （`api/v2_mcps.go:74`）。
 
-★ **The panel derives nothing.** Every value it shows is one the runtime already holds.
-A panel that re-decides anything becomes a second truth, and the first thing that
-breaks is the tier: the panel would say `ask` while the gate says `allow`.
+★ **面板什么都不推导。** 它显示的每一个值，运行时早就有了。
+  一个重新判断任何东西的面板就成了一份第二真相，而最先坏掉的正是档位：
+  面板会说 `ask`，而闸门说 `allow`。
 
-★ **The tool rows are the verdicts the agents view already reports.** The per-tool
-verdict is computed by the same function (`agentkit/build/introspect.go:111`), over the
-same boundary, so `/mcps` and `/v2/agents/<id>` cannot report two different tiers for
-one tool. ★ The only difference is the **name universe**: the agents view walks the
-observed tools, the panel walks the manager's listing — so a server that is down still
-shows what it offered.
+★ **工具那几行就是 agents 视图已经报出来的判定。** 每个工具的判定由同一个函数算出
+  （`agentkit/build/introspect.go:111`），用的是同一条边界，所以 `/mcps` 与
+  `/v2/agents/<id>` 不可能对同一个工具报出两个不同的档位。
+  ★ 唯一的差别是**名字的全集**：agents 视图走的是观察到的工具，
+  面板走的是管理者的清单 —— 所以一个倒下的服务器仍然能显示它提供过什么。
 
-★ **Asking starts the servers.** The manager starts a server when it is asked for, and
-the panel asks. So `/mcps` before the first turn starts the servers **this agent** uses —
-the same start the first turn would do for this agent, and no more. ★ The alternative (a
-strictly read-only panel that reports "not started") cannot answer the question the user
-typed the command for: "is my server broken?" — and the answer would be "run a turn and
-find out".
+★ **一问就会启动服务器。** 管理者在被问到时才启动一个服务器，而面板就是那个问的人。
+  所以第一轮之前敲 `/mcps`，会启动**这个 agent** 要用的那些服务器 ——
+  与第一轮本来会为这个 agent 做的那次启动一模一样，不多不少。
+  ★ 另一条路（一个严格只读、只报「还没启动」的面板）回答不了用户敲这条命令时
+  真正想问的问题：「我的服务器坏了吗？」—— 而答案会变成「跑一轮就知道了」。
 
-★ **The panel's ask goes through the same single-flight start** (§6.8). The panel and a
-turn can ask at the same moment, and they get **one** client — ★ two callers racing into
-the start would be two child processes for one server, and the tools the model sees
-would depend on which one answered.
+★ **面板的那一问走的是同一个单飞启动**（§6.8）。面板与一轮对话可能同一刻开口，
+  而它们拿到的是**一个**客户端 —— ★ 两个调用方抢进那次启动，就是一个 server 两个
+  子进程，而模型看到的工具就取决于哪个答的。
 
-### 11.3 The per-agent narrowing, and where it lands
+### 11.3 agent 的收窄，以及它落在哪里
 
-★ §5.3 says the agent's `mcps:` list decides who gets a server, and §6.6 says a server
-no agent lists is never started. Neither says **where** the narrowing happens, and the
-answer is not free: the tool set is **one set for the whole snapshot**
-(`agentkit/build/snapshot.go:40-45` — `buildHeavy` runs under a `sync.Once`), and every
-agent shares it.
+★ §5.3 说 agent 的 `mcps:` 清单决定谁拿到一个服务器，§6.6 说没有任何 agent 点名的
+  server 永远不会被启动。两者都没说这个收窄**发生在哪儿**，而这个答案不是白给的：
+  工具集是**整个快照一份**（`agentkit/build/snapshot.go:40-45` ——
+  `buildHeavy` 跑在一个 `sync.Once` 底下），每个 agent 共享它。
 
-⇒ **The narrowing happens in the agent's table**, exactly where its `tools` list
-already decides (`agentkit/build/gate.go:33` — `Table.Filter` drops the tools from
-`runCtx.Tools` before the agent runs, so the model never sees them). ★ And it has **no
-"nothing to do" shortcut**: the list is an allow-list, so an empty one removes
-everything.
+⇒ **收窄发生在 agent 的表里**，也就是它的 `tools` 清单已经在决定一切的那个地方
+  （`agentkit/build/gate.go:33` —— `Table.Filter` 在 agent 开跑之前就把工具从
+  `runCtx.Tools` 里摘掉，所以模型从来看不见它们）。
 
-The table gets the agent's server list, and a server the agent does not use is denied
-**by its namespace prefix**:
+表拿到这个 agent 的服务器清单，而这个 agent 不用的服务器，被拒的方式是
+**按它的命名空间前缀**：
 
-| The agent's `mcps:` | The table denies |
+| 这个 agent 的 `mcps:` | 表拒掉什么 |
 |---|---|
-| absent | nothing — every configured server |
-| `[github]` | the prefix of every configured server except `github` |
-| `[]` | the prefix of every configured server |
+| 缺失 | 什么都不拒 —— 全部已配置的服务器 |
+| `[github]` | 除 `github` 以外每个已配置服务器的前缀 |
+| `[]` | 每个已配置服务器的前缀 |
 
-★ **The prefix, not the parsed name.** §3.1 says the composed name is never split back
-into its two halves; the table matches `mcp__<server>__` as a **prefix string** it
-already knows from the configuration. ★ And a server name may not contain a run of
-underscores (§3.1), so `mcp__github__` cannot reach `mcp__github_x__`.
+★ **是前缀，不是把名字拆开。** §3.1 说合成后的名字从不被拆回两半；
+  表匹配的是 `mcp__<server>__` 这个**前缀字符串**，而它是从配置里已经知道的。
+  ★ 而且服务器名里不许有连续的下划线（§3.1），所以 `mcp__github__` 够不到
+  `mcp__github_x__`。
 
-★ **The start is the union.** The snapshot is shared, so the manager starts the servers
-that **some** agent lists: a server no agent lists is never started, and a server only
-`task` lists is started — but `main` cannot reach its tools. ★ The alternative (a tool
-set per agent) would mean rebuilding the tool list for every agent, and the tool list
-is what the snapshot freezes (§1.1).
+★ **启动的是并集。** 快照是共享的，所以管理者启动的是**某个** agent 点名的那些服务器：
+  没有任何 agent 点名的 server 永远不会被启动；而只有 `task` 点名的 server 会被启动
+  —— 但 `main` 够不到它的工具。★ 另一条路（每个 agent 一份工具集）意味着要给每个
+  agent 重建一遍工具清单，而工具清单正是快照冻住的东西（§1.1）。
 
-★ **The union is over the agents that can run, sub-agents included.** A sub-agent has a
-list of its own (§5.3), and it may run inside a turn the root did not ask for. ⇒ the
-union is taken over every agent and every sub-agent that the configuration declares —
-a server only a sub-agent lists is started, because that sub-agent may be the one
-running.
+★ **并集取遍那些能跑的 agent，子 agent 也在内。** 子 agent 有自己的一份清单（§5.3），
+  而它可能在一轮根 agent 并没有发起的对话里跑起来。⇒ 并集取遍配置声明的每一个 agent
+  与每一个子 agent —— 只有子 agent 点名的 server 也会被启动，因为跑起来可能就是它。
 
-### 11.4 The endpoint
+### 11.4 那个端点
 
-`GET /v2/mcps?agent=<agentId>` — `agent` is optional, and absent means the config's
-default agent.
+`GET /v2/mcps?agent=<agentId>` —— `agent` 可省略，省略就是配置里的缺省 agent。
 
-★ The endpoint is **new**, not an extension of `/v2/agents`: the agents view is a
-**configuration** view (it is built from the config, `api/v2_introspect.go:183`), and
-the MCP status is **runtime** state — it changes when a child process dies, and it must
-not be cached for the tab's lifetime the way the agents list is
-(`web/src/lib/agent-info.ts:48`).
+★ 这个端点是**新的**，不是 `/v2/agents` 的延伸：agents 视图是**配置面**的视图
+  （它是从配置搭出来的，`api/v2_introspect.go:183`），而 MCP 状态是**运行时**状态 ——
+  子进程一死它就变，而且它不能像 agents 列表那样在标签页的生命周期里被缓存
+  （`web/src/lib/agent-info.ts:48`）。
 
 ```json
 {
@@ -1513,98 +1409,90 @@ not be cached for the tab's lifetime the way the agents list is
 }
 ```
 
-| Field | Meaning |
+| 字段 | 意思 |
 |---|---|
-| `servers[].status` | `ready` — the client is up; `unreachable` — the last start failed, and `error` says why; `unused` — this agent does not list the server |
-| `servers[].error` | the failure text of the last start |
-| `servers[].tools[].name` | the server's **own** name — the vocabulary of the file (§5.2) |
-| `servers[].tools[].exposedName` | the name the model sees (§3) |
-| `servers[].tools[].tier` | the gate's verdict for that name (§1.3) |
-| `servers[].tools[].status` | `available` — this agent reaches it; `skipped` — the server offered it and it was not exposed (§3.2); `blocked` — exposed, but this agent does not reach it |
-| `servers[].tools[].reason` | why it is not available: `tools`, `name_too_long` or `name_collision` |
+| `servers[].status` | `ready` —— 客户端起来了；`unreachable` —— 上一次启动失败，`error` 说明为什么；`unused` —— 这个 agent 没有点名这个服务器 |
+| `servers[].error` | 上一次启动的失败文本 |
+| `servers[].tools[].name` | server **自己**的名字 —— 文件的词儿（§5.2） |
+| `servers[].tools[].exposedName` | 模型看到的那一个名字（§3） |
+| `servers[].tools[].tier` | 那个名字在闸门那儿的判定（§1.3） |
+| `servers[].tools[].status` | `available` —— 这个 agent 拿得到；`skipped` —— server 提供了它而它没有被暴露（§3.2）；`blocked` —— 暴露了，但这个 agent 拿不到 |
+| `servers[].tools[].reason` | 它为什么拿不到：`tools`、`name_too_long` 或 `name_collision` |
 
-★ **There is one reason a tool is not reachable, and it is the agent's own list.** The
-old `mcps` reason is gone with the layer that produced it: a server the agent does not
-mount has no tools to block, so there is nothing for a coarser rule to say. ★ The
-`name_too_long` and `name_collision` reasons are a different kind of thing — they are
-about **the name** the server chose, not about the agent (§3.2).
+★ **拿不到的理由只剩一个，就是 agent 自己的清单。** 旧的 `mcps` 理由跟着产生它的
+  那一层一起走了：agent 没挂载的 server 根本没有工具可挡，所以没有更粗的规则可说。
+  ★ `name_too_long` 与 `name_collision` 是另一类 —— 它们说的是 server 选的**名字**，
+  不是这个 agent（§3.2）。
 
-★ **The configuration view lists the servers too.** `GET /v2/config` gains the
-configured servers' names and transports (`api/v2_introspect.go:392`): the
-configuration says **what exists**, the panel says **what is up**. ★ A configuration
-view that hid the `mcps/` partition would leave the settings UI with nothing to show.
+★ **配置面视图也列出那些服务器。** `GET /v2/config` 加上已配置服务器的名字与传输方式
+  （`api/v2_introspect.go:392`）：配置说**什么存在**，面板说**什么起来了**。
+  ★ 一个把 `mcps/` 分区藏起来的配置面视图，会让设置界面没东西可显示。
 
-★ **A swap in the middle of the request is not a mixture.** The manager's clients
-belong to a generation (§5.4), and the panel's ask goes through the same start a
-turn's does (§6.8) — so it gets the **current** generation's client, or the failure
-of starting it. ★ The answer is one generation's state, never a mixture of two.
+★ **请求正中的换代不是一份混合物。** 管理者的客户端属于某一代（§5.4），
+  而面板的那一问走的是与一轮对话同一次启动（§6.8）—— 所以它拿到的是**当前**这一代的
+  客户端，或者是启动它的失败。★ 答案是某一代的状态，绝不是两代的混合。
 
-★ **Both vocabularies are shown.** The file says `allows: [read_issue]`; the model sees
-`mcp__github__read_issue`. A panel that shows only the exposed name leaves the user
-unable to connect a row to their own file, and a panel that shows only the own name
-hides what the model can call.
+★ **两套词儿都显示。** 文件里写的是 `allows: [read_issue]`；模型看到的是
+  `mcp__github__read_issue`。只显示对外名字的面板，用户没法把某一行和自己的文件对上；
+  只显示自己名字的面板，则把模型能调的东西藏起来了。
 
-★ **Every configured server appears, exactly once.** A server the agent does not use is
-`unused` — not missing. ★ A server that is absent from the list and a server the agent
-does not use look the same to the reader, and only one of them is a problem.
+★ **每一个已配置的服务器都出现，且只出现一次。** 这个 agent 不用的服务器是
+  `unused` —— 不是不见了。★ 在列表里缺席的服务器，与这个 agent 不用的服务器，
+  在读者眼里长得一样，而它们里头只有一个是问题。
 
-★ **An `unused` server has no tool rows.** The panel is about **this agent's** servers,
-and the tools of a server it does not use are not its tools — listing them would put
-rows in front of the user that no call can ever reach.
+★ **`unused` 的服务器没有工具行。** 面板讲的是**这个 agent** 的服务器，
+  而这个 agent 不用的服务器的工具不是它的工具 —— 把它们列出来，
+  就是把几行永远调不到的东西摆到用户面前。
 
-★ **The tools of an unreachable server are its last listing.** The manager keeps the
-last successful list (§6.6 — a crashed child is started again on the next call, and the
-list comes back with it), so the panel can say "github — unreachable — these are the
-tools it had when it was last up". The status says whether the listing is current; the
-listing says what the server offers.
+★ **够不着的服务器，它的工具是上一次成功的那份清单。** 管理者留着上一次成功的清单
+  （§6.6 —— 崩掉的子进程会在下一次调用时被重新拉起，清单也跟着回来），
+  所以面板能说「github —— 够不着 —— 这些是它上次还在时有的工具」。
+  状态说明这份清单是不是当前的；清单说明这个 server 提供什么。
 
-★ **And `available` is about the agent, not about liveness.** It means *this agent's
-table does not remove the tool* — not *the call would succeed*. A downed server's rows
-are the tools it had; whether the call would work is the server's status to say.
+★ **而 `available` 说的是 agent，不是生死。** 它的意思是*这个 agent 的表没有摘掉
+  这个工具*，而不是*这次调用会成功*。一个倒下的服务器的那几行是它曾经有的工具；
+  这次调用通不通，那是服务器的状态该说的。
 
-★ **The reasons are tokens, the copy is the panel's.** `tools` is a machine value, like
-the `code` of an error body; the English sentence that explains it belongs to the
-interface, not to the wire.
+★ **理由是记号，解释是面板的事。** `tools` 是机器值，
+  与错误体里的 `code` 一样；解释它们的那句英文属于界面，不属于线缆。
 
-### 11.5 The panel
+### 11.5 那个面板
 
-★ It is a **dialog**, like the agent picker (`web/src/components/agent-picker.tsx:68`):
-the content is a table of servers, the answer is transient, and the transcript is not
-the place for it.
+★ 它是一个**对话框**，与 agent 选择器一样（`web/src/components/agent-picker.tsx:68`）：
+  内容是一张服务器表，答案是短暂的，而对话记录不是它该待的地方。
 
-| Element | What it shows |
+| 元素 | 显示什么 |
 |---|---|
-| the title | "MCP servers", and the agent they belong to |
-| one block per server | the name, the transport, the status, the error line |
-| one row per tool | the own name, the exposed name, the tier |
-| the empty state | "No MCP servers are configured" |
+| 标题 | 「MCP servers」，以及它们属于哪个 agent |
+| 每个 server 一块 | 名字、传输方式、状态、错误那一行 |
+| 每个工具一行 | 自己那个名字、对外那个名字、档位 |
+| 空状态 | 「No MCP servers are configured」 |
 
-★ The panel fetches when it opens, every time — the status is live state, and the
-tab's caches (the command table at `web/src/lib/commands.ts:9`, the agents list) are
-not the place for it. A **Refresh** button re-reads it, because the user fixes a
-server and wants to see the fix without closing the dialog.
+★ 面板每次打开都去取一次 —— 状态是实时状态，而这个标签页的缓存
+  （`web/src/lib/commands.ts:9` 那个命令表、agents 列表）不是它该待的地方。
+  一个 **Refresh** 按钮重新读一次，因为用户修好一个服务器之后，
+  想不关掉对话框就看到结果。
 
-★ The agent is the session's agent (`web/src/lib/store/selectors.ts:13`), and the title
-says which one — the servers of `task` are not the servers of `main`. ★ The list that
-applies to a turn is the one of the agent **that is running** (§5.3); the panel shows
-the one the next turn runs as.
+★ 那个 agent 是这一轮的 agent（`web/src/lib/store/selectors.ts:13`），
+  而标题会写明是哪一个 —— `task` 的服务器不是 `main` 的服务器。
+  ★ 决定一轮的是**正在跑的那个** agent 的清单（§5.3）；面板显示的是下一轮会作为
+  根 agent 跑的那个。
 
-## 12. What is not in this design
+## 12. 这份设计不管什么
 
-| Not covered | Why |
+| 没覆盖 | 为什么 |
 |---|---|
-| The MCP protocol, and the transports | they belong to `mcp-go`; openheron picks a client and configures it |
-| A server registry with discovery, health checks and retries | one file per server is enough to start; a registry is a second round |
-| MCP resources, prompts and sampling | the eino-ext component exposes **tools** only |
-| Per-tool rate limits and quotas | the caps in `server/config.yaml` are per agent and per category; they have no tool-name dimension |
-| A credential that is not a header | `inject` is a header injection; a key in a query parameter, a cookie or a non-HTTP protocol has to enter the sandbox instead (§8.1) |
-| A mixin that installs a host-side MCP server | a mixin is a declaration; content belongs to the workload (`sandbox-kit-design.md` §2.3) |
-| ★ **The Kit packaging MCP servers** | the whole of §8 is still a proposal: the Kit does not carry an MCP server yet |
-| ★ **A third tier that says "illegal"** | there is none: the tiers are `allow` and `ask`, and a tool an agent may not use keeps its own tier and says why in its `reason` (§4.2) |
-| A panel that subscribes | the panel reads the manager's state when it opens; it does not subscribe, and it does not retry (§11.5) |
-| The SSE transport | `http` means **streamable HTTP**; SSE is the older transport, and openheron does not speak it (§5.2) |
+| MCP 协议与各种传输 | 它们属于 `mcp-go`；openheron 只挑一个客户端并配它 |
+| 带发现、健康检查与重试的 server 注册表 | 一个服务器一个文件，够起步了；注册表是下一轮的事 |
+| MCP 的 resources、prompts 与 sampling | eino-ext 那个组件**只**暴露工具 |
+| 按工具计的速率限制与配额 | `server/config.yaml` 里的那些上限是按 agent 与按类别算的；它们没有工具名这一维 |
+| 不是放在头里的凭据 | `inject` 是头注入；放在 query、cookie 或非 HTTP 协议里的 key 只能进沙箱（§8.1） |
+| 一种安装宿主侧 MCP 服务器的 mixin | mixin 是声明；内容属于 workload（`sandbox-kit-design.md` §2.3） |
+| ★ **Kit 打包 MCP 服务器** | §8 整节仍然是一份提案：Kit 里还没有带一个 MCP 服务器 |
+| ★ **说「不合法」的第三档** | 没有：档位只有 `allow` 与 `ask`，而一个 agent 不许用的工具保住自己的档位，并在它的 `reason` 里说清为什么（§4.2） |
+| 一个会订阅的面板 | 面板在打开时读一次管理者的状态；它不订阅，也不重试（§11.5） |
+| SSE 传输方式 | `http` 的意思是 **streamable HTTP**；SSE 是那个旧的传输方式，openheron 不说它（§5.2） |
 
-★ Every entry in this document that describes code names a file and a line. When the
-code moves, the line moves with it — that is the contract this repository keeps for
-every other design document, and it is the reason the table in §10.1 is a record of
-locations rather than a list of intentions.
+★ 这份文档里每一条描述代码的地方都点了文件名与行号。代码动了，行号跟着动 ——
+  这是本仓库对每一份其它设计文档守着的契约，
+  也是 §10.1 那张表是一份**位置**记录而不是一份**意图**清单的原因。

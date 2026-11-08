@@ -241,8 +241,7 @@ sandbox-kit/acceptance/run.sh
 ★ 它把整件事跑一遍 —— 前置检查、干净的沙箱、挂载上的配置、凭据、
 一次真实模型调用、流的形状、客户端的离去，以及从每个视角看端口 ——
 任何一项不过就非零退出。它跑出来的数字在
-[`docs/sandbox-kit-design_zh.md`](../docs/sandbox-kit-design_zh.md) §6.6
-（英文版是 [`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md)）。
+[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md) §6.6。
 
 ★ **跑批的那份记录不进版本库。** 它是运行产物：绝对路径、临时端口、
 帧数、模型自己的话 —— 每重跑一次都会与文档引用的数字对不上。
@@ -266,4 +265,5 @@ sandbox-kit/acceptance/run.sh
 ---
 
 这一切背后的设计，以及它依赖的每一条假设，都在
-[`docs/sandbox-kit-design_zh.md`](../docs/sandbox-kit-design_zh.md) 里。
+[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md) 里 —— 那篇文档只有中文，
+本仓库的设计文档都是这样。

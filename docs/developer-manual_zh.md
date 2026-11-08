@@ -219,8 +219,8 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
 
 比如新增 `mcps/` 目录：
 
-★ 这个目录不再只是假设 —— `docs/mcp-design.md` 设计了它，而且这个分区已经在树上。
-  下面这份配方就是它走的路子。
+★ 这个目录不再只是假设 —— `docs/mcp-design.md` 设计了它（本仓库的设计文档只有中文），
+  而且这个分区已经在树上。下面这份配方就是它走的路子。
 
 1. **`agentkit/spec/config.go`**：加目录常量 `DirMCP = "mcps"`，并在
    `Categories` 里加一项（含 `ID`、`Label`、`Dir`、`Ext`、`Editable`）。**热重载目录**和

@@ -49,7 +49,7 @@ counting `grep '"github.com/ouranoshong/openheron/'` hits per package:
 | | `agentkit/obs` | none | **The log sink** (the only `Logger()`) |
 | | `llm/common` | none | Vendor protocol layer (zero openheron dependencies) |
 | | `webui` | none | Embedded frontend assets |
-| | `agentkit/fsx` | none | **The filesystem backend**: a bounded local backend — writes confined to the project root, ignore rules, result caps (see [fs-backend-design.md](fs-backend-design.md)) |
+| | `agentkit/fsx` | none | **The filesystem backend**: a bounded local backend — writes confined to the project root, ignore rules, result caps (see [fs-backend-design.md](fs-backend-design.md) — that document is Chinese only) |
 | | `agentkit/templates` | none | **The configuration templates**: the files `openheron init` writes and the config editor scaffolds. ★ It is a leaf so that both the configuration layer and the command layer can read the **same** file — a copy would drift |
 | **L1** | `agentkit/spec/decl` | none | **Pure declarations** (where the yaml tags live) **and the shared vocabulary** — the built-in tool names and the MCP namespace (§2.1) |
 | | `agentkit/emit` | `obs`, `approval`, `contract`, `helpers`, `message` | The derivation: agent events → the run's facts |

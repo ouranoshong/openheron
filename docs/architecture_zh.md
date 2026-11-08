@@ -46,7 +46,7 @@
 | | `agentkit/obs` | 无 | **日志出口**（唯一的 `Logger()`） |
 | | `llm/common` | 无 | 厂商协议层（零 openheron 依赖） |
 | | `webui` | 无 | 嵌入式前端资源 |
-| | `agentkit/fsx` | 无 | **文件系统后端**：有界的本地后端 —— 写收敛在项目根、忽略规则、结果上限（见 [fs-backend-design_zh.md](fs-backend-design_zh.md)） |
+| | `agentkit/fsx` | 无 | **文件系统后端**：有界的本地后端 —— 写收敛在项目根、忽略规则、结果上限（见 [fs-backend-design.md](fs-backend-design.md)，只有中文） |
 | | `agentkit/templates` | 无 | **配置模板**：`openheron init` 写下的文件、配置编辑器给出的脚手架。★ 它是叶子包，配置层与命令层才能读到**同一个**文件 —— 拷贝会漂移 |
 | **L1** | `agentkit/spec/decl` | 无 | **纯声明**结构体（yaml tag 集中处）**以及两边都要读的那套词汇** —— 内置工具名与 MCP 命名空间（§2.1） |
 | | `agentkit/emit` | `obs`, `approval`, `contract`, `helpers`, `message` | 推导层：agent 事件 → run 的事实 |

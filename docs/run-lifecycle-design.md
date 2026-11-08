@@ -1,41 +1,36 @@
-# Run Lifecycle Design — a turn outlives its connection
+# Run 生命周期设计 —— 一轮比连接活得久
 
-> openheron binds one round of conversation to one HTTP connection: the
-> connection is what drains the event stream, and the archive is what the
-> connection hands back. This document breaks that binding — the run becomes
-> a durable object with its own identity, ownership and truth, and the SSE
-> connection becomes one optional view of it.
+> openheron 把一轮对话绑在一条 HTTP 连接上：连接负责抽干事件流，
+> 落盘靠连接回吐的东西。本文拆掉这根绑定——run 变成一个自带身份、
+> 所有权和真相的持久对象，SSE 连接退化成它的一个可选视图。
 >
-> ★ **Section 1 describes the code as it is.** Every claim there points at a
-> line in the tree. **The proposal is marked per section**, because it is now
-> half built:
+> ★ **第 1 节描述的是代码现状**，那里的每条结论都指着树上的一行。
+>   **提案逐节标注**，因为它现在已经落地了一半：
 >
-> | Section | Status |
+> | 节 | 状态 |
 > |---|---|
-> | §1 What "one turn" means today | **as it is** |
-> | §2 The target model | the shape §3-§9 now have |
-> | §3 D1 — a run is a row of facts | **implemented** |
-> | §4 D2 — notification is a hint, the scan is the truth | **implemented** — the server scans, the client asks |
-> | §5 D3 — lease and fence | **implemented** — the arbiter, the progress-driven renewal and the read-side fence |
-> | §6 D4 — the driver is pluggable | **implemented** — the interfaces, the file driver and the memory arbiter |
-> | §7 The event pipeline | **implemented** — the derivation moved to `agentkit/emit`, the run owns its consumption |
-> | §8 The API surface | **implemented** — the scan routes and the attach |
-> | §9 The frontend | **implemented** — the attach and the scanned busy flag |
+> | §1 今天的「一轮」是什么 | **代码现状** |
+> | §2 目标模型 | §3-§9 已经长出来的形状 |
+> | §3 D1 —— run 是一行事实 | **已实现** |
+> | §4 D2 —— 通知是提示，扫描才是真相 | **已实现** —— 服务端扫，客户端问 |
+> | §5 D3 —— 租约与 fence | **已实现** —— 仲裁器、进展驱动的续租、读侧的 fence |
+> | §6 D4 —— 驱动可插拔 | **已实现** —— 接口、文件驱动、内存仲裁器 |
+> | §7 事件管线 | **已实现** —— 推导搬进 `agentkit/emit`，run 自己消费 |
+> | §8 API 表面 | **已实现** —— 扫描路由与挂上 |
+> | §9 前端 | **已实现** —— 挂上与扫描出来的 busy 标记 |
 >
-> A design document that blurs "what is" into "what would be" is how
-> documentation drift starts.
+> 把「是什么」和「要做什么」混在一份设计里，文档漂移就是这么开始的。
 
-> 中文版：[run-lifecycle-design_zh.md](run-lifecycle-design_zh.md)
+> 本文按 AGENTS.md 的文档语言规则**只有中文版** —— 架构与代码设计类文档不做双语。
 >
 > 关联文档：[session-concurrency-design.md](session-concurrency-design.md)
 > 描述了「一个会话一轮」的准入闸门——本文是它的**继任方案**，不是它的补充。
 
-## 1. What "one turn" means today
+## 1. 今天的「一轮」是什么
 
-### 1.1 The custody chain
+### 1.1 保管链
 
-A user message travels this path today. Every arrow is a real function call in
-the tree:
+一条用户消息今天走的路径如下，图中每个箭头都是树里真实存在的函数调用：
 
 ```
 POST /v2/run
@@ -52,118 +47,89 @@ POST /v2/run
   │    └─ agentkit/run/loop.go:119  emit.Derive(events, …)   ← the run reads its own events
   │         └─ agentkit/emit/emit.go:150  src.Next()       ← the ONLY consumer
   │         └─ agentkit/emit/emit.go:…    publishes contract.RunEvent to the subscribers
-  │    └─ agentkit/run/loop.go:139  rt.archive(sess, turn, out)
+  │    └─ agentkit/run/loop.go:134  rt.archive(sess, turn, out)
   │         └─ agentkit/run/loop.go:…    sess.Append(msg)   ← the transcript
-  │    └─ agentkit/run/loop.go:143  rt.finishRun(turn, out)  ← the terminal row
-  │    └─ agentkit/run/loop.go:203  markTurnDone(turn)       ← the slot is free
+  │    └─ agentkit/run/loop.go:166  rt.finishRun(turn, out)  ← the terminal row
   │
-  └─ api/v2_run.go:167  turn.Subscribe()      (the connection subscribes)
-       api/v2_run.go:170  transport.Render(stream, sess.ID(), turn.RunID, sub.Events())
+  └─ api/v2_run.go:157  turn.Subscribe()      (the connection subscribes)
+       api/v2_run.go:160  transport.Render(stream, sess.ID(), turn.RunID, sub.Events())
             └─ transport/transport.go:60   Render: contract.RunEvent → AG-UI frames
-       api/v2_run.go:175  turn.WaitArchived()   (the response waits for the archive)
-       api/v2_run.go:183  turn.WaitReleased()   (…and for the slot: two barriers, not one)
+       api/v2_run.go:165  turn.WaitArchived()   (the response waits for the archive)
 ```
 
-★ **The response waits for two things, and they are not the same moment.**
-`archived` closes when the messages are on disk; the pointer the admission
-gate reads is cleared a step later, after the terminal row is written. A
-response that ended in between handed the client a session it could not use:
-its next message came back `session_busy` about the run it had just finished.
-`released` closes where that pointer is cleared (`markTurnDone`,
-`agentkit/run/bridge.go:51`) and nowhere else — in particular **not** at the
-loop's exit, because a loop outlives its turn, waiting for the next item.
+★ **落盘路径不再穿过渲染路径。** run 自己读 agent 的事件
+（`agentkit/run/loop.go:119`），推导它们的含义，归档结果。连接订阅 run 发布
+的东西（`api/v2_run.go:157`）并把它渲染出来——它是 run 的一个视图，不是它的
+产出管线。连接死了不再会拖住归档。
 
-★ Two barriers where one would do is the shape §3 exists to remove: a scan
-that says "no run is live" answers both questions at once, and neither
-channel has to be kept in step with anything.
+★ 账本的那一行同样由 run 自己的 goroutine 写：`openRunRow` 在 loop 启动之前
+写下它，终态行由 `rt.finishRun` 写。这一行是关于 run 的事实，transcript 是
+关于对话的事实。
 
-★ **The persistence path no longer runs through the rendering path.** The run
-reads the agent's events itself (`agentkit/run/loop.go:119`), derives what
-they mean, and archives the result. The connection subscribes to what the run
-publishes (`api/v2_run.go:157`) and renders it — it is a view of the run, not
-its output pipeline. A connection that dies no longer stops the archive.
+### 1.2 五个后果
 
-★ The ledger's row is written by the run's own goroutine as well:
-`openRunRow` writes it before the loop starts, and the terminal row is
-written by `rt.finishRun`. The row is a fact about the run; the transcript is
-a fact about the conversation.
+★ 其中两个已经被 §3 部分解决——行存在了，于是 run 有了痕迹和身份；另外三个
+原封不动。下面逐条标出状态，读者才知道提案的哪一部分还在承重。
 
-### 1.2 Five consequences
+**C1 —— run 没有持久身份。** —— *§3 已部分解决*
+`Turn.RunID`（`agentkit/run/turn.go:31`）现在在 turn 被认领时被赋值
+（`agentkit/run/runtime.go:214`），API 也把自己那一层铸的 id 传下去
+（`api/v2_run.go:218`），于是 SSE 帧里的 id 和账本行里的 id 是同一个。
+`Runtime.StatusOf` 从扫描里把它读回来，所以
+`GET /v2/sessions/{threadId}` 返回的是一个真实的 `runId`
+（`api/v2_sessions.go:94`），不再是空字符串。**还缺的是：**客户端从来不传
+`runId`（`web/src/lib/store/actions.ts:250-254`），所以「挂回一个你知道的
+run」还不存在——那是 §8。
 
-★ Two of them are already partly addressed by §3 — the row exists, so the run
-has a trace and an identity. The other three are untouched. The consequences
-are listed with their status so that the reader knows which part of the
-proposal is still load-bearing.
+**C2 —— 崩溃会静默地丢掉这一轮。** —— *§3 已部分解决*
+run 的那一行在 loop 启动之前就写好了（`agentkit/run/runtime.go:259`），所以
+崩溃会留下痕迹：那一行还开着，启动时的对账把它收成 `interrupted`
+（`storage/filestore/manager.go:245`）。会话不再读起来像「从没跑过」——
+它读起来像「有一轮被中断了」。**还缺的是：**消息仍然随崩溃一起丢了，因为
+transcript 是渲染器写的（§7）。那一行记录了 run 发生过，但不记录它说了什么。
 
-**C1 — A run has no durable identity.** — *partly addressed by §3*
-`Turn.RunID` (`agentkit/run/turn.go:31`) is now assigned when the turn is
-claimed (`agentkit/run/runtime.go:214`), and the API hands its own id down
-(`api/v2_run.go:218`) so that the id in the SSE frames and the id in the
-ledger's rows are the same one. `Runtime.StatusOf` reads it back from the
-scan, so `GET /v2/sessions/{threadId}` returns a real `runId`
-(`api/v2_sessions.go:94`) instead of an empty string. **What is still
-missing:** the client never sends one (`web/src/lib/store/actions.ts:250-254`),
-so "re-attach to a run you know" does not exist yet — that is §8.
+**C3 —— 处理器死了会把会话卡死。**
+`agentkit/run/runtime.go:326` 把 run 与请求解绑：
+`context.WithCancel(context.WithoutCancel(ctx))`。存下来的 `turn.cancel`
+只在一个地方被调用——`agentkit/run/bridge.go:129`，而且是在 loop 退出**之后**。
+但只要 `agentkit/run/loop.go:120` 阻塞在 `turn.done` 上，loop 就退不出来；
+而 `turn.done` 只有 `Complete`（处理器）或 `fail`（`agentkit/run/turn.go:194`）
+会喂。所以一个没调 `Complete` 就死掉的处理器——panic、worker 被杀——会让 run
+的 goroutine 永远阻塞，会话永远 busy。`Abort` 是唯一的逃生口
+（`agentkit/run/runtime.go:565`），而没有任何东西会自动调用它。
+★ 账本让这个卡死变得**看得见**——扫描会显示一个处于 `running` 却没有主人的
+run——但它并不能解开：闸门照样拒这个会话。解开它要靠 §5 的租约和 §7 的管线。
+（普通的客户端断开**不属于**这一类：处理器会继续跑，抽干也会继续，因为
+`transport/transport.go:160-172` 只在写失败之后停止**发帧**——deriver 那个循环
+（`agentkit/emit/emit.go:168`）里的累积照走不误。）
 
-**C2 — A crash loses the run silently.** — *partly addressed by §3*
-The run's row is written before the loop starts
-(`agentkit/run/runtime.go:259`), so a crash leaves a trace: the row is still
-open, and the startup pass closes it as `interrupted`
-(`storage/filestore/manager.go:245`). The session no longer reads as "never
-ran" — it reads as "a run was interrupted". **What is still missing:** the
-messages are still lost with the crash, because the transcript is written by
-the renderer (§7). The row records that the run happened; it does not record
-what it said.
+**C4 —— 活着的 run 对第二个界面是不可见的。**
+`turn.events` 是单消费者的 `*adk.AsyncIterator`（`agentkit/run/turn.go:33`），
+谁先抽干谁就占住它。第二个浏览器无法挂到一个正在跑的 turn 上，而
+`GET /v2/sessions/{threadId}/messages`（`api/v2_sessions.go:269`）只显示已经
+归档的部分——于是新开的页面看到一段说到一半的对话，却完全没有 indication
+说还有东西在跑。
 
-**C3 — A dead handler wedges the session.**
-`agentkit/run/runtime.go:326` detaches the run from the request:
-`context.WithCancel(context.WithoutCancel(ctx))`. The stored `turn.cancel` is
-called from exactly one place — `agentkit/run/bridge.go:129`, *after* the loop
-exits. But the loop cannot exit while `agentkit/run/loop.go:120` is blocked on
-`turn.done`, and `turn.done` is only fed by `Complete` (the handler) or `fail`
-(`agentkit/run/turn.go:194`). So a handler that dies without calling
-`Complete` — a panic, a killed worker — leaves the run goroutine blocked
-forever and the session permanently busy. `Abort` is the only escape
-(`agentkit/run/runtime.go:565`), and nothing calls it automatically.
-★ The ledger makes the wedge **visible** — the scan shows a run in state
-`running` that nobody owns — but it does not lift it: the gate still refuses
-the session. Lifting it is §5's lease and §7's pipeline.
-(An ordinary client disconnect is *not* this case: the handler keeps running
-and the drain continues, because `transport/transport.go:160-172` only stops
-*emitting* after a write error — the accumulation in the deriver's loop
-(`agentkit/emit/emit.go:168`) goes on.)
+**C5 —— 所有权是先到先得，而且没有「活着」这回事。**
+`claimTurn`（`agentkit/run/runtime.go:207-241`）就是一把互斥锁：谁先拿到锁，
+谁就占住这个会话直到自己跑完。run 现在带着一个 epoch
+（`agentkit/run/runtime.go:259`），账本因此能给两个主人排序——但没有租约、
+没有过期，也没有办法区分「持有者正在推进」和「持有者卡住了」。今天存在的那些
+内存态身份检查——`markTurnDone`（`agentkit/run/bridge.go:51`）和 `loopExited`
+里的 loop 身份检查（`agentkit/run/bridge.go:115-124`）——是手写的、建立在
+指针之上的 fence。它们在一个进程内有效，出了这个进程就不作数。
 
-**C4 — A live run is invisible to a second surface.**
-`turn.events` is a single-consumer `*adk.AsyncIterator`
-(`agentkit/run/turn.go:33`). Whoever drains it first owns it. A second browser
-cannot attach to a running turn, and `GET /v2/sessions/{threadId}/messages`
-(`api/v2_sessions.go:269`) shows only what is already archived — so a fresh
-page shows a conversation that stops mid-thought with no indication that
-something is still running.
+### 1.3 上一轮的闸门
 
-**C5 — Ownership is first-come-first-served, with no notion of liveness.**
-`claimTurn` (`agentkit/run/runtime.go:207-241`) is a mutex: whoever gets the
-lock first owns the session until it finishes. The run now carries an epoch
-(`agentkit/run/runtime.go:259`), so the ledger can order two owners — but
-there is no lease, no expiry, and no way to distinguish "the owner is making
-progress" from "the owner is stalled". The in-memory identity checks that
-exist today — `markTurnDone` (`agentkit/run/bridge.go:51`) and the
-loop-identity check in `loopExited` (`agentkit/run/bridge.go:115-124`) — are
-hand-rolled fences over pointers. They work inside one process and nowhere
-else.
+[session-concurrency-design.md](session-concurrency-design.md) 定下了规则：
+一个会话一轮；第二条 query 被 409 `session_busy` 拒掉
+（`api/v2_types.go:48`、`api/v2_types.go:110-116`）；抢占被彻底移除。
+这条规则保留。这里改变的是**闸门由什么构成**——指针上的互斥锁换成带 fence
+的租约，而 busy 状态不再是内存投影，变成扫描出来的事实。
 
-### 1.3 The gate from the previous round
+## 2. 目标模型
 
-[session-concurrency-design.md](session-concurrency-design.md) established the
-rule: one session, one turn; a second query is refused with 409
-`session_busy` (`api/v2_types.go:48`, `api/v2_types.go:110-116`); preemption is
-gone. That rule stays. What changes here is **what the gate is made of** — a
-mutex over a pointer becomes a lease with a fence, and the busy state stops
-being an in-memory projection and becomes a scanned fact.
-
-## 2. The target model
-
-### 2.1 The run is the unit; the connection is a view
+### 2.1 run 是单位，连接是视图
 
 ```
                      POST /v2/run  (runId = the client's run id)
@@ -188,11 +154,10 @@ being an in-memory projection and becomes a scanned fact.
    POST /v2/run (same runId) ── attach ─▶  subscribe to the run's events
 ```
 
-### 2.2 The data flow
+### 2.2 数据流
 
-The control flow above says who calls whom. This one says **where the data
-goes** — and the shape it draws is the proposal's whole point: three sinks,
-one owner, one source of truth.
+上面的控制流说的是谁调用谁。这张图说的是**数据往哪走**——它画出来的形状就是
+整个提案的主张：三个出口、一个所有者、一个真相。
 
 ```
   ① events — the model's stream, readable exactly once
@@ -234,50 +199,41 @@ one owner, one source of truth.
               └────────────────────┘
 ```
 
-★ **Three sinks, one owner.** The run's own goroutine is the only thing that
-reads the model's stream, and it feeds three sinks: the **transcript** (what
-happened), the **subscribers** (whoever is watching) and the **ledger** (what
-is true right now). The connection is one window onto the third — not the
-thing that owns the output.
+★ **三个出口，一个所有者。** run 自己的 goroutine 是唯一读模型流的东西，它喂
+三个出口：**transcript**（发生过什么）、**订阅者**（谁在看）、**账本**（现在什么
+为真）。连接只是第三个出口上的一扇窗——而不是那个拥有产出的人。
 
-★ **The ledger takes two writes.** The run's own row at every transition, and
-the **terminal row** (5) — written *after* the archive lands, so "the run is
-over" and "the messages are on disk" become the same statement (§3.4). That
-one ordering is what makes the busy flag honest without a timeout.
+★ **账本收两次写。** 一次是 run 在每次状态迁移时写自己那一行，另一次是**终态
+行**（5）——它写在归档落地**之后**，于是「这一轮结束了」和「消息已经落盘」成了
+同一句话（§3.4）。就这一个次序，让忙标记不用任何超时也保持诚实。
 
-★ **(6) and (7) are the other half of the design.** The truth is a scan of the
-ledger, and the client may only clear its busy flag on the word of that scan
-(§4.2). The stream is a hint; the ledger is the record.
+★ **(6) 和 (7) 是设计的另一半。** 真相是扫账本，而客户端只有在这次扫描发话时
+才可以清掉忙标记（§4.2）。流是提示，账本是记录。
 
-### 2.3 Four rules
+### 2.3 四条规则
 
-**R1 — A run is a durable object.** It has an identity (the run id), a
-lifecycle (a state machine), and a ledger row. It exists whether or not
-anybody is watching it, and it survives a restart as a trace.
+**R1 —— run 是一个持久对象。** 它有身份（run id）、有生命周期（一个状态机）、
+有一行账本记录。不管有没有人在看它，它都存在；它能以痕迹的形式活过重启。
 
-**R2 — The connection is a subscriber, not the owner.** It may attach, detach,
-and re-attach. Its death does not stop the run and does not change what gets
-archived.
+**R2 —— 连接是订阅者，不是所有者。** 它可以挂上、摘下、再挂上。它的死不会
+让 run 停下来，也不会改变落盘的内容。
 
-**R3 — Notification is a hint; the scan is the truth.** The SSE stream may be
-late, incomplete, duplicated or lost. Any question about "what is happening"
-is answered by scanning the ledger, never by trusting a push.
+**R3 —— 通知是提示，扫描才是真相。** SSE 流可能迟到、不完整、重复或者干脆
+丢。任何关于「现在在干什么」的问题都由扫描账本回答，绝不靠相信推送。
 
-**R4 — Ownership is a lease, and every durable write carries a fence.** The
-lease says who may run; the fence says who may record. Both are arbitrated by
-a pluggable driver, so the protocol survives the move from one process to
-several.
+**R4 —— 所有权是租约，每一次持久写入都带 fence。** 租约说「谁可以跑」，
+fence 说「谁可以记账」。两者都由可插拔的驱动裁决，于是这套协议能一路从
+单进程搬到多进程。
 
-## 3. D1 — A run is a row of facts
+## 3. D1 —— run 是一行事实
 
-★ **This section is implemented.** `storage/runledger.go` holds the contract,
-`storage/filestore/runledger.go` holds the file driver, and
-`agentkit/run/runrow.go` writes the rows.
+★ **本节已实现。** 契约在 `storage/runledger.go`，文件驱动在
+`storage/filestore/runledger.go`，写行在 `agentkit/run/runrow.go`。
 
-### 3.1 The row
+### 3.1 那一行
 
-A run's record is a **lifecycle**, not a payload. The transcript already owns
-the content and the numbers; the row owns the timing and the ownership.
+run 的记录是**生命周期**，不是载荷。transcript 已经管着内容与数字；这一行
+管的是时序与所有权。
 
 ```go
 // storage/runledger.go
@@ -299,8 +255,8 @@ const (
 // Run is one row of the run ledger.
 //
 // ★ It carries lifecycle facts only. Usage, message counts and the transcript
-// itself belong to the session's messages — keeping them here would give the
-// numbers two homes, and the dashboard would eventually disagree with itself.
+//   itself belong to the session's messages — keeping them here would give the
+//   numbers two homes, and the dashboard would eventually disagree with itself.
 type Run struct {
     RunID     string
     SessionID string
@@ -318,11 +274,11 @@ type Run struct {
 }
 ```
 
-★ The states are written on the wire as names, not numbers
-(`storage/runledger.go` — `RunState.MarshalJSON`). A ledger that outlives the
-binary has to stay readable when the constants are renumbered.
+★ 状态在线上是**名字**而不是数字（`storage/runledger.go`——
+`RunState.MarshalJSON`）。一份比二进制活得更久的账本，必须在常量重新编号之后
+仍然读得懂。
 
-### 3.2 The ledger
+### 3.2 账本
 
 ```go
 // storage/runledger.go
@@ -344,140 +300,118 @@ type RunLedger interface {
 }
 ```
 
-★ **Why a snapshot per line and not a delta.** A delta log makes every reader
-carry the fold. A snapshot log makes every line readable on its own, and makes
-a torn last line droppable (the run falls back to its previous state, which is
-a state it was really in). The cost is repeated fields — irrelevant at this
-size.
+★ **为什么每行是快照而不是增量。** 增量日志要求每个读者自己做折叠；快照
+日志让每一行都能独立读懂，也让最后一行被截断时可以直接丢弃（run 退回它
+上一刻真正处于的状态）。代价是字段重复——在这个量级上无关紧要。
 
-★ **Why "highest epoch among open runs wins" and not "last row wins".** The
-last row wins *within* one run (`storage.FoldRuns`). *Across* runs, the epoch
-decides (`storage.ActiveRun`): a zombie owner from epoch 3 that wakes up after
-epoch 4 took over writes a row, but the reader still sees epoch 4 as the
-owner. This is the fence doing its work on the read side, where it is cheap
-and needs no lock.
+★ **为什么是「未结束的 run 里 epoch 最高的赢」，而不是「最后一行赢」。**
+「最后一行赢」是**同一个 run 内部**的规则（`storage.FoldRuns`）；**跨 run**
+时由 epoch 裁决（`storage.ActiveRun`）：一个来自 epoch 3 的僵尸持有者在
+epoch 4 接管之后醒来写了一行，读者仍然认为 epoch 4 是持有者。这就是 fence
+在读侧起作用——那里既便宜又不需要锁。
 
-★ **The epoch is allocated by the ledger, not by the arbiter.** The epoch has
-to be monotonic across restarts, so it cannot live in a volatile structure —
-and the ledger is the durable thing that outlives the process. §5's lease
-carries the epoch the ledger handed out; the lease itself is about liveness,
-the epoch is about order. Two homes for one number would be two truths.
+★ **epoch 由账本分配，不由仲裁器分配。** epoch 必须跨重启单调，而它不能住在
+一个易失的结构里——账本才是活得比进程久的那个东西。§5 的租约带着账本发出来
+的 epoch；租约管的是「还活着吗」，epoch 管的是「谁在前」。一个数字两个家，
+就是两个真相。
 
-### 3.3 Where the row lives
+### 3.3 这一行放在哪
 
-Next to the session's other files, in the session directory
-(`storage/filestore/session.go` defines the current names):
+放在会话目录里，和会话的其它文件作伴（`storage/filestore/session.go`
+定义了现有的文件名）：
 
 ```
 <root>/<sessionId>/session.jsonl     the transcript (append-only)
 <root>/<sessionId>/state.json        the session state (rewritten atomically)
-<root>/<sessionId>/runs.jsonl        the run ledger (append-only)
+<root>/<sessionId>/runs.jsonl        the run ledger (append-only)  ← new
 ```
 
-★ **`runs.jsonl` is not `state.json`.** `state.json` is rewritten whole on
-every change; a growing list of runs inside it would mean rewriting the whole
-history of the session on every transition. An append-only ledger matches the
-transcript's shape, reuses the same append machinery, and makes the ledger's
-own write the durability barrier.
+★ **`runs.jsonl` 不是 `state.json`。** `state.json` 每次变更都是整体重写；
+把一份会变长的 run 列表塞进去，
+意味着每次状态迁移都要重写这个会话的全部历史。追加式账本与 transcript 同形，
+复用同一套追加机制，而且账本自己的写入就是那道持久性屏障。
 
-★ **The ledger is bounded.** A ledger that grows forever is a leak. The file
-driver trims to the last N rows (N = 200, `storage/filestore/runledger.go` —
-`maxRunLedgerRows`) with the same atomic rewrite `state.json` uses, keeping
-the file append-only in the common case and bounded in the worst.
+★ **账本是有界的。** 一个无限增长的账本就是泄漏。文件驱动默认保留最后 N 行
+（N = 200，`storage/filestore/runledger.go`——`maxRunLedgerRows`），用
+`state.json` 同一套原子重写来裁剪：常见情况下文件仍然是追加式的，最坏情况下
+它有上界。
 
-### 3.4 The row is the archive barrier
+### 3.4 这一行就是归档屏障
 
-★ **The terminal row is written after the archive lands.** That single
-ordering gives the busy flag its honesty for free:
+★ **终态行写在归档落地之后。** 单是这个次序，就让 busy 标记天然诚实：
 
 ```
 run goroutine:  … archive → transcript  →  ledger.Append(state: completed)
 scan:           sees "completed" ⟹ the messages are on disk
 ```
 
-★ The implementation is `rt.finishRun` (`agentkit/run/loop.go:145`), called
-from the archive site (`agentkit/run/loop.go:130`). One exception: a run that
-ended by raising an interrupt waits for the loop's exit, because that is where
-the approval and the checkpoint are written
-(`agentkit/run/bridge.go:152`) — a scan must not be able to call the run over
-before the question the user has to answer is on disk.
+★ 实现是 `rt.finishRun`（`agentkit/run/loop.go:145`），调用点在归档处
+（`agentkit/run/loop.go:130`）。有一个例外：以抛审批结束的 run 要等 loop 退出
+——审批和 checkpoint 是在那里写的（`agentkit/run/bridge.go:152`）——因为扫描
+不能比「用户要答的那个问题已经落盘」更早地宣布这一轮结束。
 
-★ **The terminal state is the run's own truth, not the absence of an error.**
-The error the consumer saw is carried into the outcome
-(`api/v2_run.go` — `Outcome.Err`), so a run whose model timed out reads
-`failed` and a run the user stopped reads `aborted`. Without that, the ledger
-would be the one place that lies: it would call a turn that died mid-flight
-`completed`. A cancelled turn is also **not** the session's last error — the
-user stopping a run is not a failure of the session.
+★ **终态是 run 自己的真相，不是「没报错」。** 消费者看到的那个错误会被带进
+outcome（`api/v2_run.go`——`Outcome.Err`），所以模型超时的 run 记作 `failed`，
+用户停掉的 run 记作 `aborted`。少了这一步，账本就成了唯一会撒谎的地方：它会把
+一个中途死掉的 turn 记成 `completed`。被取消的 turn 也**不是**会话的最后一个
+错误——用户停掉一轮，不等于会话出了故障。
 
-Today the same guarantee costs a 30-second wait channel
-(`agentkit/run/turn.go:156-165`, `agentkit/run/turn.go:173`), because the
-archive is downstream of the connection. With the row in place, the wait
-disappears: *the row is the barrier*, and there is nothing to time out.
+今天同样的保证要靠一条 30 秒的等待通道来买
+（`agentkit/run/turn.go:156-165`、`agentkit/run/turn.go:173`），因为归档在
+连接的下游。有了这一行，等待就消失了：***这一行就是那道屏障***，没有超时
+需要设。
 
-## 4. D2 — Notification is a hint, the scan is the truth
+## 4. D2 —— 通知是提示，扫描才是真相
 
-### 4.1 The server side
+### 4.1 服务端
 
-★ **This half is implemented.** The SSE stream keeps its shape — it is still
-AG-UI frames over one HTTP response. What changes is its authority:
+★ **这一半已实现。** SSE 流的形状不变——还是一条 HTTP 响应上的 AG-UI 帧。
+变的是它的权威：
 
-- The run's goroutine writes the terminal row **whether or not anybody is
-  subscribed**. The stream's end is not the run's end.
-- `GET /v2/sessions/{threadId}/runs` scans the ledger and answers "what
-  happened, what is happening" (`api/v2_sessions.go:423`).
-- `GET /v2/sessions/{threadId}` reports `state` from the scan, not from the
-  volatile map: `stateOf` (`api/v2_sessions.go:506`) asks `StatusOf`
-  (`agentkit/run/runtime.go:711`), and `StatusOf` asks the ledger
-  (`agentkit/run/runtime.go:749` — `activeRun`).
+- run 的 goroutine **无论有没有订阅者**都会写终态行。流的结束不是 run 的结束。
+- `GET /v2/sessions/{threadId}/runs` 扫描账本，回答「发生过什么、正在发生什么」
+  （`api/v2_sessions.go:423`）。
+- `GET /v2/sessions/{threadId}` 的 `state` 来自扫描，而不是来自易失的 map：
+  `stateOf`（`api/v2_sessions.go:506`）问的是 `StatusOf`
+  （`agentkit/run/runtime.go:711`），而 `StatusOf` 问的是账本
+  （`agentkit/run/runtime.go:749`——`activeRun`）。
 
-★ **The volatile map became a cache.** `sessionState`
-(`agentkit/run/bridge.go:30-39`) stays — it holds the live loop and the live
-turn, which are genuinely in-memory things — but it is no longer the *truth*.
-`StatusOf` mixes a volatile source (the map's timestamps) with durable ones
-(the pending approval from the session file, the active run from the ledger);
-the durable side now decides the phase.
+★ **易失的 map 降级为缓存。** `sessionState`
+（`agentkit/run/bridge.go:30-39`）留着——它持有活的 loop 和活的 turn，这两样
+本来就是内存里的东西——但它不再是**真相**。`StatusOf` 混着一个易失来源
+（map 里的时间戳）和两个持久来源（会话文件里的待审批、账本里的活动 run）；
+现在由持久的那一边决定阶段。
 
-### 4.2 The client side
+### 4.2 客户端
 
-★ **Implemented**, and it is one sentence: **the client may only clear `busy`
-on the word of a scan.** A stream that ends without a scan leaves the flag as
-it was.
+★ **已实现**，而且就一句话：**客户端只有在扫描发话时才可以清掉 `busy`。**
+一个没有伴随扫描就结束的流，让标记保持原样。
 
-| Where the flag used to come from | Where it comes from now |
+| 标记从前从哪来 | 标记现在从哪来 |
 |---|---|
-| stream ends → `onDone` → assume idle | stream ends → **re-scan** (`scanBusy`, `web/src/lib/store/actions.ts`) |
-| `stop()` sets `busy: false` optimistically | `stop()` → abort → **re-scan** → decide |
-| 409 `session_busy` → `markBusy` | unchanged — the message is now backed by a scanned fact |
-| page load → `seedFromHistory` reads `state` | unchanged — a scan of the ledger |
+| 流结束 → `onDone` → 假定空闲 | 流结束 → **重新扫描**（`scanBusy`，`web/src/lib/store/actions.ts`） |
+| `stop()` 乐观地置 `busy: false` | `stop()` → 发 abort → **重新扫描** → 再决定 |
+| 409 `session_busy` → `markBusy` | 不变——但这条消息背后现在是一个扫描出来的事实 |
+| 页面加载 → `seedFromHistory` 读 `state` | 不变——扫的是账本 |
 
-★ **Four cases hold the rule** (`web/test/store-busy.test.ts`): another
-surface's run reads as busy, no active run reads as free, the surface's own
-run is not "busy", and a **failed scan leaves the flag alone** — guessing is
-what the scan exists to stop.
+★ **四条用例钉住这条规则**（`web/test/store-busy.test.ts`）：别的界面的 run 读作
+busy、没有活跃 run 读作空闲、本界面自己的 run 不算 busy、**扫描失败时标记保持不动**
+—— 猜测正是扫描存在的原因。
 
-★ **"Replace the barrier with a scan" stops at the client, and it has to.**
-The barrier in the response path answers a different question: "may a caller
-that has just read the end of this response immediately send the next one?" The
-ledger cannot answer that faster than the barrier does, because the terminal
-row is written **after** the archive (§3.4) — the row that says "this run is
-over" lands at the same instant the barrier opens. A scan-based gate would
-therefore refuse the next message in exactly the same window. What the scan
-does buy is that a client never has to *infer* idleness from a stream; what it
-cannot buy is a server-side promise no server-side wait establishes.
+★ **「栅栏换扫描」到客户端为止，而且只能到客户端为止。** 响应路径上那道栅栏回答的是
+另一个问题：「一个刚读完这个响应结尾的调用方，能不能立刻发下一条？」账本回答不了得比
+栅栏更快，因为终态行写在**归档之后**（§3.4）—— 那句「这一轮结束了」落地的那一刻，正是
+栅栏打开的那一刻。所以换成扫描的准入闸门会**在同一个窗口里**拒绝下一条消息。扫描买到的是
+「客户端不必再从流里去推断空闲」；它买不到「服务端不用等就能给出的服务端承诺」。
 
-★ Why this matters more than it looks: the current client can be wrong in the
-**dangerous direction**. If the server is still finalizing a run and the client
-assumes "idle", the next message is sent into a session the server considers
-busy — and that is not hypothetical: it cost a **second** barrier in the
-response path (§1: `WaitArchived` was not enough, because archiving is not
-releasing). Two channels, each of which has to be kept in step with the
-pointer, is what "timed around" looks like. With the scan as the only way to
-clear the flag, the class of bug disappears instead of being guarded twice.
+★ 为什么这件事比看上去重要：今天的客户端可能在**危险的方向**上出错。如果
+服务端还在收尾而客户端自行假定「空闲」，下一条消息就会发进一个服务端认为
+busy 的会话——上一轮正是用归档等待把这事糊过去的。有了「只有扫描能清标记」
+这条规则，这一类 bug 是**消失**，而不是被计时器绕过去。
 
-### 4.3 What the scan answers
+### 4.3 扫描回答什么
 
-★ **Implemented**, and this is the wire shape (`api/v2_types.go` — `runsView`):
+★ **已实现**，这就是线上的形状（`api/v2_types.go`——`runsView`）：
 
 ```
 GET /v2/sessions/{threadId}/runs
@@ -492,49 +426,42 @@ GET /v2/sessions/{threadId}/runs
 }
 ```
 
-★ `error` appears only when the run failed, and `activeRunId` only when there
-is an active run — an idle session scans as `{"items": []}`. A field that is
-always there and always empty is noise a client has to learn to ignore.
+★ `error` 只在 run 失败时出现，`activeRunId` 只在有活动 run 时出现——空闲会话
+扫出来是 `{"items": []}`。一个永远存在却永远为空的字段，是客户端还得学会
+忽略的噪音。
 
-`activeRunId` is the one field the UI needs most: it is what makes a run
-**attachable** (§8.1) and what replaces the empty `runId` that
-`GET /v2/sessions/{threadId}` used to return (`api/v2_sessions.go:94` — it
-returns the active run's id now).
+`activeRunId` 是 UI 最需要的那个字段：它让一个 run **可以被挂上**（§8.1），
+也顶替了今天 `GET /v2/sessions/{threadId}` 返回的那个空 `runId`
+（`api/v2_sessions.go:94`——现在它返回活动 run 的 id）。
 
-## 5. D3 — Lease and fence instead of first-come-first-served
+## 5. D3 —— 用租约和 fence 取代先到先得
 
-★ **Implemented.** The epoch was already real (§3.2); now the lease is too.
+★ **已实现。** epoch 早就是真的了（§3.2），现在租约也是。
 
-### 5.1 Why the mutex is not enough
+### 5.1 为什么互斥锁不够
 
-The mutex in `claimTurn` (`agentkit/run/runtime.go:207-241`) answers "who got
-here first". It does not answer "who is still alive". Three failures follow:
+`claimTurn`（`agentkit/run/runtime.go:207-241`）里的互斥锁回答的是「谁先到」。
+它不回答「谁还活着」。于是有三个失效模式：
 
-1. **A stalled owner.** The owner holds the lock but is not progressing — a
-   hung model call, a GC pause, a bug in the loop. Nobody else can take over;
-   the session is stuck, and the only way out is `Abort`.
-2. **A zombie owner.** The owner was paused (VM freeze, laptop sleep, a
-   debugger breakpoint) and wakes up later. Its `loopExited`
-   (`agentkit/run/bridge.go:115-143`) will clear state it no longer owns —
-   today that is caught by a pointer-identity check, which is a fence that
-   happens to be free.
-3. **A second process.** The moment two openheron processes can see the same
-   session directory, the mutex protects nothing: it is a lock in one
-   address space guarding a resource in another.
+1. **持有者停滞。** 持有者攥着锁却没有推进——模型调用挂住、GC 停顿、loop 里
+   有 bug。别人接管不了，会话卡死，唯一的出路是 `Abort`。
+2. **持有者变僵尸。** 持有者被暂停过（虚拟机冻结、笔记本休眠、调试器断点）
+   然后醒来。它的 `loopExited`（`agentkit/run/bridge.go:115-143`）会去清
+   早已不属于它的状态——今天靠指针身份检查兜住，那是一道恰好免费的 fence。
+3. **第二个进程。** 一旦有两个 openheron 进程能看到同一个会话目录，互斥锁
+   就什么都保护不了：它是一把在某个地址空间里的锁，守护的却是另一个地址
+   空间里的资源。
 
-★ **A stall comes in two kinds, and they do not have the same remedy.** A
-**process-level** stall — a long GC pause, a frozen VM, a suspended laptop —
-stops everything, renewal included, so the lease simply expires. A
-**run-level** stall — a hung model call, a bug in the loop, a write that never
-returns — stops only the run's own work, and a renewal that ticks on a timer
-cannot see it: the ticker does not care what the run is doing.
+★ **停滞有两种，治法不一样。** **进程级**的停滞——一次漫长的 GC 停顿、虚拟机
+冻结、笔记本休眠——会停住一切，包括续租，于是租约自然过期。**run 级**的停滞
+——模型调用挂住、loop 里的 bug、一次永不返回的写——只停住 run 自己的活儿；
+靠定时器续的租约看不见它，因为定时器不关心 run 在干什么。
 
-★ So the fence fixes 2, the arbiter fixes 3, and 1 needs **progress-driven
-renewal** (§5.2) on top of the lease. A timer-driven lease would make the
-process-level half work and leave the run-level half exactly as stuck as it
-is today.
+★ 所以 fence 治 2，仲裁者治 3，而 1 需要在租约之上加一层**进展驱动的续租**
+（§5.2）。靠定时器的租约只能让进程级那一半成立，run 级那一半今天怎么卡的，
+将来还怎么卡。
 
-### 5.2 The lease
+### 5.2 租约
 
 ```go
 // storage/lease.go
@@ -578,214 +505,181 @@ type LeaseArbiter interface {
 }
 ```
 
-★ **The lease is what makes the gate say "stalled" instead of "busy".** The
-admission gate asks whether the session is busy; the answer used to come from
-the turn slot — "a turn is live" — and a stalled owner keeps its slot for ever.
-Now the gate asks the arbiter as well: an owner whose lease ran out is not
-holding the session any more, and the run may take it over
-(`agentkit/run/runtime.go` — `leaseExpired`). The epoch says which of the two
-is the owner from now on.
+★ **正是租约让闸门说得出「停滞」而不只是「忙」。** 准入闸门问的是会话忙不忙；
+答案过去来自轮次槽位——「有一轮在跑」——而一个停滞的持有者会把那个槽位一直
+占着。现在闸门也问仲裁器：租约过期的持有者已经不再占着这个会话，别的 run
+可以接手（`agentkit/run/runtime.go`——`leaseExpired`）；而 epoch 说得出此后
+两个里谁才是持有者。
 
-★ **The arbiter is the in-memory one** (`storage/memarbit`). It arbitrates
-inside one process, and nothing survives a restart — the ledger's reconciler
-closes the runs a crash left open (§3.3), and the next run allocates a fresh
-epoch.
+★ **仲裁器是内存的那个**（`storage/memarbit`）。它在一个进程内裁决，什么都
+活不过重启——账本的对账器会收掉崩溃留下的 run（§3.3），下一轮拿一个新的
+epoch。
 
-★ **The run renews — on progress, not on a timer.** The lease is renewed when
-the run **reports progress**: the run publishes its events, and every publish
-is a progress report. The TTL (10 minutes by default,
-`agentkit/run/lease.go` — `DefaultLeaseTTL`) is the **budget**, not the
-schedule: a run that has reported nothing for TTL loses the lease, however
-alive it is. The renewal is throttled to a quarter of the TTL: a streaming
-model reports progress on every token, and a renewal per token would be a
-lock per token for nothing.
+★ **run 会续租 —— 靠进展，不是靠定时器。** 租约在 run **报告进展**时续：
+run 发布它的事件，每发布一次就是一次进展报告。TTL（默认 10 分钟，
+`agentkit/run/lease.go`——`DefaultLeaseTTL`）是**预算**，不是日程：一次 TTL
+之内什么都没报告的 run 丢掉租约，不管它是不是活着的。续租被节流到 TTL 的
+四分之一：流式模型每个 token 都报一次进展，每个 token 续一次租约等于每个
+token 抢一次锁，白白地。
 
-★ **The TTL is a configuration item** (`server.lease_ttl`, 10m by default).
-It has to be **longer than the provider's own timeout** — the provider's
-timeout ends a call that is hung, and the lease only has to outlast a call
-that is slow — but the two live in different files (`llm/<id>.yaml` per
-endpoint), so the relation is the operator's to keep, not the code's to
-enforce. `server/` is not hot-reloaded: a change needs a restart.
+★ **TTL 是配置项**（`server.lease_ttl`，默认 10m）。它必须**长于 provider
+自己的超时**——provider 的超时负责收拾真正挂死的调用，租约只需要比「慢但
+活着」的调用撑得更久——但两者住在不同的地方（超时按端点在 `llm/<id>.yaml`
+里），所以这个关系是运维要守的，不是代码能强制的。`server/` 不热重载：改了
+要重启。
 
-★ **Why not a timer.** A timer-driven renewal keeps the lease alive for a run
-stuck in a hung model call, because the renewal goroutine does not care what
-the run is doing — it keeps saying "still here". That is precisely the
-failure §5.1 calls a stalled owner, and a timer cannot see it.
-Progress-driven renewal can: no progress, no renewal, the lease expires, and
-the session becomes available to somebody else.
+★ **为什么不靠定时器。** 定时器续租会让一个卡在模型调用里的 run 一直攥着
+租约——续租的 goroutine 不关心 run 在干什么，它只是一遍遍说「我还活着」。
+而这正是 §5.1 说的「持有者停滞」，定时器看不见它。进展驱动的续租能看见：
+没有进展就没有续租，租约过期，会话就能被别人接手。
 
-★ **A slow model is not a stalled run — and the TTL has to know the
-difference.** A model that takes four minutes to answer reports no progress
-to renew on, so a 30-second TTL would fence it out while it is working
-perfectly. The remedy is a **TTL longer than the provider's own timeout**,
-not a timer that lies: the provider's timeout
-(`agentkit/templates/files/llm/_generic.yaml:10`, 5m by default) ends a call that
-is hung, and the TTL only has to outlast a call that is **slow but alive**.
-Both are configuration.
+★ **慢模型不是停滞的 run —— 但 TTL 得知道这个区别。** 一个要四分钟才回话的
+模型没有进展可报，30 秒的 TTL 会在它好好干活的时候把它 fence 掉。解法是
+**一个比 provider 自己的超时更长的 TTL**，不是一个说谎的定时器：provider
+的超时（`agentkit/templates/files/llm/_generic.yaml:10`，出厂 5m）负责收拾真正挂死的
+调用，TTL 只需要比「**慢但活着**的调用」撑得更久。两者都是配置。
 
-★ **The lease covers a run, not a session's idle state.** A run that ends by
-raising an interrupt releases its lease — the run is over. What keeps the
-session from accepting a new query is the **pending approval**, which is a
-durable session-level fact rather than a lease
-(`agentkit/run/runtime.go:348-353`). Two locks, two scopes: the lease says
-"this run owns the session right now", the approval says "this session owes
-the user an answer".
+★ **租约管的是一轮，不是一个会话的空档。** 一个以抛审批结束的 run 会释放
+它的租约——那一轮已经结束。让会话不接新 query 的是**待审批**，那是会话级的
+持久事实，不是租约（`agentkit/run/runtime.go:348-353`）。两把锁，两个作用域：
+租约说「这一轮现在占着会话」，审批说「这个会话欠用户一个答复」。
 
-★ **Losing the lease fences the run out.** If a renewal fails because
-somebody else holds the lease, the run cancels its own context and stops. It
-does not keep writing "running" rows for a session it no longer owns — the
-fence makes those writes harmless, but stopping is better.
+★ **丢租约等于把自己 fence 掉。** 如果续租失败是因为别人持有着租约，这个
+run 就取消自己的上下文并停下。它不会继续为一个自己已经不拥有的会话写
+「running」行——fence 让这些写入无害，但停下来更好。
 
-### 5.3 The fence
+### 5.3 fence
 
-The fence is a per-session, monotonically increasing integer. It answers one
-question: **is this write from the current owner?**
+fence 是一个按会话单调递增的整数。它只回答一个问题：**这次写入来自当前
+持有者吗？**
 
-It is enforced in two places, and nowhere else:
+它在两个地方被强制执行，别处没有：
 
-1. **On read** (§3.2): among the open runs, the one with the highest epoch is
-   the owner. A stale row cannot take the lead.
-2. **On write** (optional but recommended): `ledger.Append` refuses a row
-   whose epoch is below the session's current epoch.
+1. **读侧**（§3.2）：在未结束的 run 里，epoch 最高的那个是持有者。一条
+   过期的行抢不了头。
+2. **写侧**（可选但推荐）：`ledger.Append` 拒绝 epoch 低于会话当前 epoch 的行。
 
-★ **The fence's job is ordering, not durability.** A crashed process's rows
-are still on disk; what tells you they are stale is the *lease*, not the
-epoch. Keeping the two separate is what makes the ledger's read rule simple:
-"highest epoch wins" needs no knowledge of liveness, and "the lease expired"
-needs no knowledge of write order.
+★ **fence 的职责是排序，不是持久性。** 一个崩掉的进程留下的行还在盘上；告诉你
+它们过期的是**租约**，不是 epoch。把两者分开，正是账本读规则能保持简单的
+原因：「epoch 最高者胜」不需要知道谁还活着，「租约过期了」也不需要知道写入
+顺序。
 
-### 5.4 Lease and fence do different jobs
+### 5.4 租约和 fence 干的是两件不同的事
 
-| | Lease | Fence |
+| | 租约 | fence |
 |---|---|---|
-| Question | Who may run right now? | Who may record this fact? |
-| Lifetime | Time-bounded, renewed on progress | Monotonic, never reused |
-| Failure mode it prevents | A stalled owner holds the session forever | A zombie owner corrupts the record |
-| Enforced by | The arbiter (renewal, expiry) | The epoch comparison (read and write) |
+| 回答的问题 | 现在谁可以跑？ | 这条事实谁可以记？ |
+| 生命周期 | 有时限，靠进展续租 | 单调递增，绝不复用 |
+| 它防住的失效 | 停滞的持有者永远占着会话 | 僵尸持有者污染记录 |
+| 由谁强制 | 仲裁者（续租、过期） | epoch 比较（读与写） |
 
-★ **What the lease detects is "the owner stopped reporting", not "the owner
-stopped thinking".** With progress-driven renewal the two kinds of stall
-separate cleanly: a process that froze reports nothing and loses the lease; a
-model that is slow but alive also reports nothing — and is protected by a TTL
-longer than the provider's timeout, not by the lease. The lease answers "may
-I take this session over", so it has to be able to say yes without a human.
+★ **租约检测的是「持有者不再上报」，不是「持有者不再思考」。** 有了进展驱动
+的续租，两种停滞就分得开：进程冻住了 → 什么也不报 → 丢租约；模型慢但活着
+→ 同样什么也不报 → 靠一个比 provider 超时更长的 TTL 兜住，而不是靠租约。
+租约回答的是「这个会话我能接手吗」，所以它必须能在没有人参与的情况下回答
+「能」。
 
-★ The current code has the fence and not the lease: the epoch is real
-(`storage.RunLedger.NextEpoch` allocates it, `storage.ActiveRun` compares it),
-but ownership is still decided by a mutex. The pointer-identity checks in
-`markTurnDone` (`agentkit/run/bridge.go:51`) and `loopExited`
-(`agentkit/run/bridge.go:119-124`) are fences over addresses — they work
-inside one process and nowhere else. The lease replaces them.
+★ 今天代码里有 fence、没有租约：epoch 是真的
+（`storage.RunLedger.NextEpoch` 分配它，`storage.ActiveRun` 比较它），但所有权
+仍然由一把互斥锁决定。`markTurnDone`（`agentkit/run/bridge.go:51`）和
+`loopExited`（`agentkit/run/bridge.go:119-124`）里的指针身份检查是建立在地址上
+的 fence——它们在一个进程内有效，出了这个进程就不作数。租约来取代它们。
 
-## 6. D4 — The driver is pluggable
+## 6. D4 —— 驱动可插拔
 
-### 6.1 The interfaces live in `storage`
+### 6.1 接口住在 `storage`
 
-`storage` (L1 in [architecture.md](architecture.md)'s layering table) is
-already the package that owns session and pending-approval interfaces
-(`storage/storage.go`). The run ledger and the lease arbiter belong
-there too, for the same reason: `agentkit/run` (L2) must depend on interfaces
-only, and the API layer (L3) must not assemble business logic
-(AGENTS.md's iron rule).
+`storage`（[architecture.md](architecture.md) 分层表里的 L1）本来就是持有
+会话与待审批接口的包（`storage/storage.go`）。run 账本和租约仲裁者
+也该住在那里，理由相同：`agentkit/run`（L2）只能依赖接口，而 API 层（L3）
+不许装配业务逻辑（AGENTS.md 的铁律）。
 
-★ **The ledger half is implemented.** The lease half is not.
+★ **账本这一半已实现，租约那一半还没有。**
 
 ```go
 // storage — interfaces and value types
-type RunLedger interface { … }      // storage/runledger.go   ← implemented
-type LeaseArbiter interface { … }   // storage/lease.go       ← not there yet
-type Run struct { … }               // storage/runledger.go   ← implemented
-type Lease struct { … }             // storage/lease.go       ← not there yet
+type RunLedger interface { … }      // storage/runledger.go   ← 已实现
+type LeaseArbiter interface { … }   // storage/lease.go       ← 还不存在
+type Run struct { … }               // storage/runledger.go   ← 已实现
+type Lease struct { … }             // storage/lease.go       ← 还不存在
 
 var ErrLeaseHeld  = errors.New("lease held by another run")
 var ErrFenceStale = errors.New("the run's fence is stale")   ← storage/runledger.go
 ```
 
-★ `ErrFenceStale` is already defined, next to the ledger's contract, because
-the fence is already a fact in the ledger: the epoch is allocated there and
-compared there. The error is what the *optional* write-side check will
-return once the arbiter exists.
+★ `ErrFenceStale` 已经定义在账本的契约旁边，因为 fence 已经是账本里的一个
+事实：epoch 在那里分配、也在那里比较。这个错误码是**可选的**写侧检查在仲裁器
+出现之后要返回的东西。
 
-### 6.2 The drivers, in the order they arrive
+### 6.2 驱动，按到达顺序
 
-| Order | Driver | Ledger | Arbiter | What it buys |
+| 次序 | 驱动 | 账本 | 仲裁者 | 它换来什么 |
 |---|---|---|---|---|
-| 1 | `storage/memarbit` | in-memory | in-memory | The protocol, exercised, single process. Nothing survives a restart. |
-| 2 | `storage/filestore` | `runs.jsonl` | in-memory | Durability: a crash leaves a trace, and the reconciler can close it. |
-| 3 | a database driver | a table | a table, with the epoch allocated by `UPDATE … SET epoch = epoch + 1` | Several processes over one session store. |
+| 1 | `storage/memarbit` | 内存 | 内存 | 协议本身，单进程跑通。什么都不活过重启。 |
+| 2 | `storage/filestore` | `runs.jsonl` | 内存 | 持久性：崩溃留下痕迹，对账器能把它收尾。 |
+| 3 | 数据库驱动 | 一张表 | 一张表，epoch 由 `UPDATE … SET epoch = epoch + 1` 分配 | 多个进程共用一个会话存储。 |
 
-★ **The file driver's ledger is implemented** (`storage/filestore/runledger.go`),
-so the middle row is half true today: the ledger is the file, the arbiter does
-not exist yet. The epoch comes from the ledger, not from the arbiter — §3.2
-explains why, and the database row would have to hand it out the same way.
+★ **「先内存后 DB」这句话的诚实读法。** 本仓库根本没有数据库——整个存储就是
+文件（`storage/filestore`）。引入 DB 驱动不是「以后调一调」，而是新增一个
+依赖和一套部署故事。而中间那一步——**文件**——在这里几乎是白捡的：
+transcript 本来就是一个追加式的 JSONL 文件，`persist` 本来就有原子重写和
+文件锁。
 
-★ **The honest reading of "memory first, database later".** This repository has
-no database at all — the whole store is files (`storage/filestore`). Introducing
-a DB driver is not a "later" tweak; it is a new dependency and a new
-deployment story. The middle step — **files** — is nearly free here: the
-transcript is already an append-only JSONL file, and `persist` already does
-atomic rewrites and file locks.
+★ 所以实际的次序是**内存 → 文件 → 数据库**，而内存驱动不是一次性用品：它是
+那个不依赖任何 IO 就把**协议**（租约、fence、对账、订阅）证明掉的东西。文件
+驱动随后用一个每会话一个新文件换来持久性。
 
-★ So the practical order is **memory → file → database**, and the memory driver
-is not a throwaway: it is the one that proves the *protocol* (lease, fence,
-reconcile, subscribe) without any IO. The file driver then adds durability
-with one new file per session.
+★ **文件驱动的账本已经实现**（`storage/filestore/runledger.go`），所以表中
+第二行今天有一半是真的：账本就是那个文件，仲裁器还不存在。epoch 来自账本而
+不是仲裁器——§3.2 讲了为什么，而数据库那一行也得用同样的办法发号。
 
-### 6.3 What the memory driver costs
+### 6.3 内存驱动的代价
 
-If the ledger is only in memory, then:
+如果账本只在内存里，那么：
 
-- A crash loses the run record → C2 is not fixed. The reconciler has nothing
-  to reconcile.
-- A restart cannot tell "was running" from "never ran" → the sidebar dot lies
-  again, exactly as it did before the previous round.
+- 崩溃会丢掉 run 记录 → C2 没被修掉，对账器没有任何东西可对。
+- 重启分不清「本来在跑」和「从没跑过」→ 侧栏那个点又开始说谎，
+  和上一轮之前一模一样。
 
-★ That is why the file driver is not optional in the proposal. "Memory first"
-is the right order for the *protocol* and the wrong one for the *ledger*. The
-proposal keeps them apart: the **ledger** ships durable (file), the
-**arbiter** ships in memory and is the thing that becomes a database row
-later.
+★ 这就是为什么在本提案里文件驱动不是可选项。「先内存」对**协议**是对的次序，
+对**账本**是错的次序。提案把两者分开：**账本**随包就持久（文件），
+**仲裁者**随包是内存的，而它是以后变成数据库行的那个东西。
 
-## 7. The event pipeline: one consumer becomes publish/subscribe
+## 7. 事件管线：从单消费者到发布订阅
 
-★ **This section is a proposal.** Nothing of it is in the tree.
+★ **本节已实现**（除了 §8.1 的 attach）。推导搬进了 `agentkit/emit`，run
+自己消费自己的事件，连接退化成订阅者。
 
-### 7.1 Why the old pipeline forced the coupling
+### 7.1 为什么原来的管线把耦合焊死了
 
-The transport's `streamEvents` did two jobs at once:
+transport 的 `streamEvents` 一次干两件事：
 
-- it **rendered** AG-UI frames (`e.emit…`), and
-- it **derived** the archive payload — the intermediates, the interrupts, the
-  compaction, the usage.
+- 它**渲染** AG-UI 帧（`e.emit…`），
+- 它**推导**归档载荷——中间产物、审批、压缩与用量。
 
-★ The derivation cannot be done twice: the streaming branch calls
-`mo.MessageStream.Recv()` on the model's stream and folds the chunks into one
-message. **A second reader would split the chunks.** So the renderer was
-necessarily the single consumer — and since the renderer was the SSE sink, the
-sink owned the run's output. A dead connection meant a turn that never
-archived.
+★ 推导没法做两遍：流式分支要在模型的流上调用 `mo.MessageStream.Recv()`，
+再把分片折成一条消息。**第二个读者会把分片劈开。** 于是渲染器必然是唯一
+消费者——而渲染器就是 SSE 的出口，于是出口拥有了 run 的产出。连接一死，
+这一轮就永远归档不了。
 
-### 7.2 The split
+### 7.2 拆分
 
-★ **Implemented.** Two responsibilities, two packages:
+★ **已实现。** 两件事，两个包：
 
-| Before | Now |
+| 之前 | 现在 |
 |---|---|
-| `transport` — derive + render, in one pass | `agentkit/emit` — derive only: eino event → archive artifacts + `contract.RunEvent` |
-| `transport` — the AG-UI emitter | `transport` — render only: `contract.RunEvent` → AG-UI frames → SSE |
+| `transport` —— 一趟做完推导与渲染 | `agentkit/emit` —— 只推导：eino event → 归档产物 + `contract.RunEvent` |
+| `transport` —— AG-UI 发射器 | `transport` —— 只渲染：`contract.RunEvent` → AG-UI 帧 → SSE |
 
-`agentkit/emit` is an L1 package: it depends on `contract`, `message`,
-`approval`, `helpers` and `obs`, and nothing above it. `agentkit/run` calls
-it; `transport` does not need to — the transport receives `contract.RunEvent`s
-and renders them.
+`agentkit/emit` 是一个 L1 包：它只依赖 `contract`、`message`、`approval`、
+`helpers` 和 `obs`，不依赖任何上层。`agentkit/run` 调它；`transport` 不需要
+调——transport 收到 `contract.RunEvent` 然后渲染。
 
-★ The wire did not change: the frames are the same, one for one. What changed
-is who derives them. The transport's own contract tests
-(`transport/transport_test.go`) still assert the frame sequences, and they
-drive the derivation and the rendering together — the split must not be
-visible on the wire.
+★ 线上没变：帧还是一个对一个的。变的是**谁在推导**。transport 自己的契约测试
+（`transport/transport_test.go`）仍然断言那些帧序列，它同时驱动推导与渲染
+——这次拆分不该在网线上看得见。
 
-### 7.3 The run's event vocabulary
+### 7.3 run 的事件词汇表
 
 ```go
 // contract/runevent.go
@@ -837,21 +731,19 @@ type RunEvent struct {
 }
 ```
 
-★ There is no `RunEventMessage` and no `RunEventDone`. The archived messages
-are the derivation's **artifacts** — they come back with the derivation, not
-through the event stream, because they are facts about the run rather than
-things that happened in front of a watcher. And "done" is not an event: it is
-the **closing of the subscription's channel** (§7.4).
+★ 没有 `RunEventMessage`，也没有 `RunEventDone`。归档的消息是推导的**产物**
+——它们随推导一起回来，而不是从事件流里过，因为它们是关于 run 的事实，不是
+发生在观看者面前的事。而「结束」不是一个事件：它是**订阅通道的关闭**
+（§7.4）。
 
-★ Why not reuse AG-UI's event types directly: `contract` is an L0 leaf
-([architecture.md](architecture.md)'s layering table) and AG-UI is a transport
-concern. Putting AG-UI types in `contract` would make the domain depend on the
-wire. The mapping is one-to-one in practice, which keeps `transport` thin.
+★ 为什么不直接复用 AG-UI 的事件类型：`contract` 是 L0 叶子（见
+[architecture.md](architecture.md) 的分层表），而 AG-UI 是传输层的关注点。
+把 AG-UI 的类型放进 `contract`，等于让领域层依赖线上格式。这层映射实际上
+是一一对应的，因此 `transport` 保持很薄。
 
-### 7.4 The subscriber
+### 7.4 订阅者
 
-★ **Implemented.** The run publishes to its subscribers; the subscriber is the
-SSE connection.
+★ **已实现。** run 向它的订阅者发布；订阅者就是那条 SSE 连接。
 
 ```go
 // agentkit/run/publish.go
@@ -863,407 +755,343 @@ type publisher struct {
 }
 ```
 
-- A subscriber that is slow gets a **bounded** channel; when it overflows, the
-  run **drops the subscriber**. A slow reader must never slow the run — that
-  is the old "the sink blocks the loop" trap.
-- ★ **A subscriber that is *stuck* is the case that matters, and it is not the
-  same as one that is slow.** A slow reader drains its channel eventually. A
-  stuck one has a socket write that never returns: the peer vanished without
-  a reset, and the kernel keeps accepting bytes into a buffer nobody reads.
-  The publisher must therefore **never block on a full channel** — it drops
-  the subscriber instead of waiting for it, and the run carries on. Before the
-  split the same situation stalled the run, because the run was the one
-  writing to the socket.
-- A subscriber that disappears takes nothing with it. The run keeps going and
-  keeps archiving.
-- ★ **The run's event log is a bounded window, not the turn's history.** A
-  client that attaches mid-run gets the events from the window, so it can
-  render the tail of the turn without waiting for the turn to end. The window
-  holds the last N events (N = 1000, `agentkit/run/publish.go` —
-  `windowSize`) and drops the oldest, so a long turn costs a **fixed** amount of
-  memory rather than one that grows with the output. The run drops the window
-  when it ends.
+- 慢的订阅者拿到一个**有界**通道；通道满了，run 就**踢掉这个订阅者**。慢的
+  读者绝不能拖慢 run——那就是从前「出口卡住循环」的坑。
+- ★ **被卡住的订阅者才是要紧的那一种，它和「慢」不是一回事。** 慢的读者终究
+  会把通道排空；卡住的那个是 socket 写永不返回：对端消失了却没发 RST，内核
+  还在往一个没人读的缓冲区里塞字节。所以发布方**绝不能在满通道上等**——它
+  踢掉订阅者而不是等它，run 继续走。拆分之前，同一种情况会卡住 run，因为写
+  socket 的就是 run 自己。
+- 消失的订阅者什么也带不走。run 继续跑，继续归档。
+- ★ **run 的事件日志是有界的窗口，不是这一轮的历史。** 中途挂上来的客户端从
+  窗口里拿到那些事件，于是它能渲染这一轮的尾巴，不必等这一轮结束。窗口留
+  最后 N 个事件（N = 1000，`agentkit/run/publish.go`——`windowSize`），最老的
+  被丢掉，于是长的一轮花的是**固定**的内存，而不是一个随输出变长的内存。run
+  结束时把窗口丢掉。
 
-★ **The window's replay and the registration happen under one lock**, so a
-subscriber sees every event exactly once: the ones from the window, then the
-ones that follow.
+★ **窗口的回放与登记在同一把锁里**，所以一个订阅者每个事件恰好看一次：先是
+窗口里的那些，然后是随后来的那些。
 
-★ **The run closes its subscription when the RUN is over — and a run that ended
-by raising an interrupt is not over until the approval is on disk.** This is
-not a detail: the client learns about the interrupt from the closing channel
-(the renderer writes `RUN_FINISHED` when the channel closes), so a channel
-that closed before the approval was persisted would invite the client to
-answer an approval the server cannot find yet — and the answer would be
-refused with `no_pending_interrupt`, for no reason the user can see. The
-approval is written when the loop exits (the checkpoint it resumes from must
-exist first), so that run's publisher closes there instead
-(`agentkit/run/bridge.go`).
+★ **run 在这一轮**结束**时才关掉订阅——而一个以抛审批结束的这一轮，在审批
+落盘之前不算结束。** 这不是细节：客户端是从通道关闭那一刻知道「有审批」的
+（渲染器在通道关闭时写 `RUN_FINISHED`），所以一个在审批落盘之前就关掉的通道，
+等于邀请客户端去回答一个服务端还找不到的审批——那个答复会被
+`no_pending_interrupt` 拒掉，而用户看不出理由。审批是在 loop 退出时写的（它
+要恢复的那个检查点必须先在），所以那一轮的发布方改在那里关。
 
-★ **Two jobs, two stores.** "Coming back later" is the **transcript's** job: a
-client that opens a session hydrates from `GET /v2/sessions/{id}/messages` and
-sees the **finished** turn (`web/src/lib/store/actions.ts:86` →
-`seedFromHistory`). The log serves only "attaching while it is still running"
-— a live view, never a final one.
+★ **两件事，两个存储。** 「以后再回来」是 **transcript** 的活：客户端打开一个
+会话时从 `GET /v2/sessions/{id}/messages` 水合，看到的是**已经结束**的那一轮
+（`web/src/lib/store/actions.ts:86` → `seedFromHistory`）。日志只服务「它还在
+跑的时候挂上来」——一个实时视图，永远不是最终视图。
 
-★ **So the window is filled whether or not anyone is watching**, and there is
-no branch to decide. Its size is a bound, so an unwatched turn pays a
-**constant** cost for a log nobody reads — while the run's real output, the
-transcript, was going to be written either way. The alternative, building the
-window only once somebody attaches, would mean guessing — and it would miss
-the case that matters most: a client that attaches halfway through.
+★ **所以窗口无论有没有人看都会被填满**，没有分支需要判断。它的大小是一个
+上界，于是没人看的一轮为一份没人读的日志付**恒定**的代价——而 run 真正的
+产出（transcript）反正都要写。另一种做法（等有人挂上来再开始建窗口）意味着
+猜——而且会漏掉最要紧的那种情况：挂到一半的客户端。
 
-★ **Persisting it is a separate decision** — see §13 Q1. In memory for now.
+★ **要不要持久化是另一个决定**——见 §13 Q1。目前只在内存里。
 
-### 7.5 What is deliberately not built
+### 7.5 刻意不做的事
 
-- **No multi-subscriber protocol.** Two browsers may both attach to a run
-  (that is just two subscribers), but the run does not arbitrate between them
-  beyond the bounded channel.
-- **No persisted event log.** See §13 Q1.
-- **No change to the AG-UI wire format.** The frames are the same; only their
-  producer changes. The transport's contract tests assert the sequences.
+- **不做多订阅者协议。** 两个浏览器可以同时挂到一个 run 上（那只是两个
+  订阅者），但 run 除了那条有界通道之外不为他们做仲裁。
+- **不做持久化的事件日志。** 见 §13 Q1。
+- **不改 AG-UI 的线上格式。** 帧还是那些帧，只是换了个生产者。
 
-## 8. The API surface
+## 8. API 表面
 
-### 8.1 Changed routes
+### 8.1 改动的路由
 
-**`POST /v2/run`** — three cases, decided by the `runId` the client sends:
+**`POST /v2/run`** —— 三种情况，由客户端送来的 `runId` 决定：
 
-| The session has | The request carries | Result |
+| 会话有 | 请求带 | 结果 |
 |---|---|---|
-| no live run | a `runId` (or none — the server mints one) | **create** the run; the response streams it |
-| a live run with **that** id | the same `runId`, **and no question** | **attach**: subscribe to the live run, replaying its window |
-| a live run with a **different** id | any `runId` | **409 `session_busy`** — unchanged from today |
+| 没有活着的 run | 一个 `runId`（或者没有——服务端自己铸） | **创建**这个 run；响应里流出它 |
+| 有一个活着的 run，id **正是**它 | 同一个 `runId`，**而且没有问题** | **挂上**：订阅这个活着的 run，并回放它的窗口 |
+| 有一个活着的 run，id **不同** | 任意 `runId` | **409 `session_busy`**——与今天一致 |
 
-★ The first row is **implemented**: the server mints the id when the client
-sends none (`api/v2_run.go`), and hands it down to the runtime
-(`api/v2_run.go:218`) so the id in the frames and the id in the ledger's rows
-are one id.
+★ 第一行**已实现**：客户端不发 run id 时由服务端铸一个
+（`api/v2_run.go`），并把它传给运行时（`api/v2_run.go:218`），于是帧里的 id
+和账本行里的 id 是同一个。
 
-★ The second row is **implemented** (server side). The request that asks for
-it carries **no question**: a question would mean "start a new run", and
-starting one here would silently run the user's message a second time. The
-server looks the live run up by id (`agentkit/run/runtime.go` — `LiveRun`),
-subscribes to it and renders its window — so a client that arrives late sees
-the tail of the turn instead of an empty stream.
+★ 第二行**已实现**（服务端）。要挂上的那个请求**不带问题**：带问题就意味着
+「开始一轮新的」，在这里开始一轮新的等于把用户那句话悄悄跑第二遍。服务端按
+id 找到那个活着的 run（`agentkit/run/runtime.go`——`LiveRun`），订阅它并渲染
+它的窗口——于是晚到的客户端看到的是这一轮的尾巴，不是一条空流。
 
-★ **A run that is over cannot be attached to.** The client has to hydrate from
-the transcript; the run's own facts are in the scan. The server refuses with
-**404 `run_not_live`** rather than starting a new run — the client's answer to
-that refusal is "load the history", and it must be able to tell it apart from
-a session it may retry.
+★ **结束的 run 挂不上。** 客户端只能从 transcript 水合；这一轮自己的事实在
+扫描里。服务端回 **404 `run_not_live`**，而不是开始一轮新的——客户端对这个
+拒绝的回答是「去加载历史」，它必须能把它和「会话可以重试」分得开。
 
-★ The second row is the new capability: a reconnect. Today the client cannot
-resume a stream it lost (`web/src/lib/store/actions.ts:250-254` sends no
-`runId` at all), so a dropped connection loses the turn's output. With the
-run id known, the client asks for the same run and gets the rest of it.
+★ 第二行是新增的能力：重连。今天客户端无法续上它弄丢的流
+（`web/src/lib/store/actions.ts:250-254` 压根不发 `runId`），所以连接一断，
+这一轮的输出就没了。有了已知的 run id，客户端要同一个 run，就能拿到剩下的
+部分。
 
-★ The client must therefore **keep the run id**. The scan returns it
-(`activeRunId`), and the SSE frames already carry it (AG-UI's `runId`).
+★ 因此客户端必须**留着 run id**。扫描会返回它（`activeRunId`），SSE 帧里本来
+就带着它（AG-UI 的 `runId`）。
 
-**`GET /v2/sessions/{threadId}`** — `state` comes from the scan. ★
-**Implemented**: `stateOf` (`api/v2_sessions.go:506`) asks `StatusOf`, and
-`StatusOf` reads the ledger. The `runId` that `api/v2_sessions.go:94` returns
-is no longer empty — it is the active run's id, the same value the scan
-reports as `activeRunId`. ★ **Not** a second field: one value, one name.
+**`GET /v2/sessions/{threadId}`** —— `state` 来自扫描。★ **已实现**：
+`stateOf`（`api/v2_sessions.go:506`）问的是 `StatusOf`，而 `StatusOf` 读的是
+账本。`api/v2_sessions.go:94` 返回的 `runId` 不再是空的——它是活动 run 的 id，
+也就是扫描报作 `activeRunId` 的同一个值。★ **不是**第二个字段：一个值，
+一个名字。
 
-**`POST /v2/sessions/{threadId}/abort`** — aborts the **run**, not the loop.
-It cancels the run's context, waits (bounded) for the terminal row, and
-returns the run id it aborted. ★ The run id is **implemented**
-(`api/v2_sessions.go:405`). The rest is a proposal: the current implementation
-(`api/v2_sessions.go:385` → `agentkit/run/runtime.go:565`) manipulates the
-loop directly; under the proposal the run's own cleanup writes the row, so
-the abort is "stop this run" and the row follows.
+**`POST /v2/sessions/{threadId}/abort`** —— 中止的是**run**，不是 loop。
+它取消 run 的上下文，（有界地）等终态行落地，并返回它中止的那个 run id。
+★ run id **已实现**（`api/v2_sessions.go:405`）。其余是提案：现在的实现
+（`api/v2_sessions.go:385` → `agentkit/run/runtime.go:565`）是直接操纵
+loop；在提案下，run 自己的收尾会写那一行，所以中止就是「停掉这个 run」，
+那一行随后而来。
 
-### 8.2 New routes
+### 8.2 新增的路由
 
-★ **Implemented.**
+★ **已实现。**
 
 ```
 GET /v2/sessions/{threadId}/runs              the scan: every run of the session
 GET /v2/sessions/{threadId}/runs/{runId}      one run
 ```
 
-Both read the ledger (`api/v2_sessions.go:423`). Neither ever writes.
+两个都读账本（`api/v2_sessions.go:423`）。两个都不写。
 
-### 8.3 The error envelope
+### 8.3 错误信封
 
-No new codes. The existing ones carry the meaning:
+不新增错误码。现有的那些已经能表达意思：
 
-| Code | Where it is produced | Meaning |
+| 码 | 在哪儿产生 | 含义 |
 |---|---|---|
-| `session_busy` | `api/v2_types.go:48` | another run owns the session |
-| `run_not_live` | `api/v2_types.go` | the attach asked for a run that is not running |
-| `no_pending_interrupt` | `api/v2_types.go:36` | the approval was already answered |
-| `turn_superseded` | `api/v2_types.go:49` | kept for compatibility; the superseding path is gone |
-| `turn_start_timeout` | `api/v2_types.go:50` | the run never became streamable |
+| `session_busy` | `api/v2_types.go:48` | 另一个 run 占着这个会话 |
+| `run_not_live` | `api/v2_types.go` | 挂上的那一轮已经不在跑了 |
+| `no_pending_interrupt` | `api/v2_types.go:36` | 这个审批已经被答过了 |
+| `turn_superseded` | `api/v2_types.go:49` | 为兼容保留；抢占那条路已经没有了 |
+| `turn_start_timeout` | `api/v2_types.go:50` | 这个 run 始终没能变得可流出 |
 
-★ `turn_superseded` stays because removing it would break clients that branch
-on it — but under the proposal it is only ever produced by the start-timeout
-path's sibling, never by a takeover. The concurrency design's §6.3 already noted
-this; the proposal does not change it.
+★ `turn_superseded` 留着，因为删掉它会打断按它分支的客户端——但在提案下，
+它只可能由启动超时那条路的兄弟产生，绝不会由接管产生。会话并发设计文档的 §6.3
+已经提过这一点；本提案不改变它。
 
-★ `run_not_live` is the one new code, and it exists because the attach needs
-one. "The run you asked for is gone" is neither "the session is busy" nor "no
-such run": the client's answer to it is "load the history", and it has to be
-able to tell that apart from a session it may retry.
+★ `run_not_live` 是唯一新增的错误码，而它存在是因为挂上需要它。「你要的那一
+轮已经没了」既不是「会话忙」也不是「没有这个 run」：客户端对它的回答是「去
+加载历史」，它必须能把这和「会话可以重试」分得开。
 
-## 9. The frontend
+## 9. 前端
 
-★ **Implemented.** The re-attach (§9.2) and the scanned busy flag (§9.1) are both
-in the tree: the server tells the truth, and the client asks it.
+★ **已实现。** 重新挂上（§9.2）与扫描出来的 busy 标记（§9.1）都在树里：服务端
+说真话，客户端去问。
 
-### 9.1 The busy flag becomes a scanned fact
+### 9.1 busy 标记变成扫描出来的事实
 
-★ **Implemented.** `ConversationState.busy` (`web/src/lib/types.ts`) means "the
-session has a live turn that this surface does not own". It is **set and
-cleared only by a scan**:
+★ **已实现。** `ConversationState.busy`（`web/src/lib/types.ts`）的含义是
+「这个会话有一个本界面不拥有的活着的 turn」。它**只由扫描设置和清除**：
 
-- **Set**: the scan reports an `activeRunId` that this surface does not own.
-- **Cleared**: the scan reports no active run.
+- **置上**：扫描报出一个本界面不拥有的 `activeRunId`。
+- **清掉**：扫描报出没有活跃的 run。
 
-★ `stop()` (`web/src/lib/store/actions.ts`) changed shape: it sends the abort,
-then **re-scans**, instead of setting `busy: false` itself. Setting it
-optimistically is exactly the "trust the notification" mistake the design
-removes — the abort says "I asked", the scan says "the session is free".
+★ `stop()`（`web/src/lib/store/actions.ts`）改了形状：它发 abort，然后
+**重新扫描**，而不是自己去置 `busy: false`。乐观地置它，正是这个设计要消灭的
+「相信通知」式的错误——abort 说「我问了」，扫描说「会话空了」。
 
-★ The stream's end is the other place: a stream that ends says nothing about
-the session (another surface's turn may be running), so the client re-scans
-there too.
+★ 流的结束是另一处：流结束什么也说明不了这个会话（别的界面可能正在跑），
+所以客户端在那里也重新扫一次。
 
-★ **A failed scan leaves the flag alone.** Guessing is what the scan exists to
-stop: a scan that cannot be made must not clear the busy line, because the
-busy line is the only thing standing between the user and a refused message.
+★ **扫描失败就让标记留在原样。** 猜正是扫描要治的病：扫不出来的时候不能把
+忙标记清掉——那行字是用户和「被拒的消息」之间唯一的挡板。
 
-★ The run this surface owns is not "busy". The scan compares the active run's
-id with the conversation's own run id ✓.
+★ 本界面自己拥有的那一轮不算「忙」。扫描拿活动 run 的 id 和会话自己的 run id
+比 ✓。
 
-### 9.2 Attach
+### 9.2 挂上
 
-★ **Implemented.** The store keeps the run id of the run it started (the
-`RUN_STARTED` frame carries it, and the reducer keeps it). When the stream
-ends **without a terminal frame**, the connection died — not the run — and the
-client asks the scan whether that run is still live:
+★ **已实现。** store 记着自己启动的那个 run 的 id（`RUN_STARTED` 帧带着它，
+归约器把它留下来）。当流**没有以终止帧结束**时，是连接死了——不是 run 死
+了——客户端于是问扫描：这个 run 还活着吗？
 
-- live → re-`POST /v2/run` with the same `runId` and **no question** →
-  **attach**, and the rest of the turn renders.
-- not live → the run is over; the transcript is the truth; load it.
+- 活着 → 用同一个 `runId`、**不带问题**再 `POST /v2/run` → **挂上**，这一轮
+  剩下的部分渲染出来。
+- 不活着 → run 结束了，transcript 就是真相，把它加载进来。
 
-★ **A stream that ends without a terminal frame is the signal.** `RUN_FINISHED`
-means the run is over and `RUN_ERROR` means it broke; a stream that ends with
-neither means the connection died. That is a protocol-level fact, and it is
-the only one the client needs.
+★ **「流没有以终止帧结束」就是这个信号。** `RUN_FINISHED` 说 run 结束了，
+`RUN_ERROR` 说它坏了；两者都没有的流结束，说的是连接断了。这是协议层的事
+实，也是客户端唯一需要的那一个。
 
-★ This is the visible payoff of the whole design: **a second tab can watch a
-running turn instead of being refused**, and a dropped connection can be
-resumed instead of losing the output.
+★ 这是整个设计看得见的回报：**第二个标签页可以围观一个正在跑的 turn，
+而不是被拒之门外**；掉线的连接可以续上，而不是丢掉输出。
 
-### 9.3 The store
+### 9.3 store
 
-The store's shape barely changes — the reducer stays a pure function, the
-selectors stay reference-stable (AGENTS.md's rules). What changes is the
-**source** of two values:
+store 的形状几乎不变——reducer 仍然是纯函数，选择器仍然返回引用稳定的值
+（AGENTS.md 的规矩）。变的是两个值的**来源**：
 
-| Value | Today | Proposed |
+| 值 | 今天 | 提案 |
 |---|---|---|
-| `busy` | inferred from the stream's end and from 409s | scanned |
-| the run id | ✓ kept (`web/src/lib/events.ts` — the reducer) and sent on re-attach | kept, and sent on re-attach |
+| `busy` | 从流的结束和 409 推断出来 | 扫描 |
+| run id | ✓ 留着了（`web/src/lib/events.ts` —— 归约器），并在重新挂上时发出去 | 留着，并在重新挂上时发出去 |
 
-## 10. What changes where
+## 10. 改动落点
 
-★ **✓ = landed.** The rest is still a proposal.
+★ **✓ = 已落地**，其余仍是提案。
 
-| File | Change |
+| 文件 | 改动 |
 |---|---|
-| `storage/runledger.go` | ✓ **new** — `Run`, `RunState`, `RunLedger`, `FoldRuns`, `ActiveRun` |
-| `storage/lease.go` | ✓ **new** — `Lease`, `LeaseArbiter`, `ErrLeaseHeld` |
-| `storage/memarbit/arbiter.go` | ✓ **new** — the in-memory arbiter |
-| `storage/filestore/runledger.go` | ✓ **new** — the `runs.jsonl` driver |
-| `storage/filestore/session.go` | ✓ the session directory gains `runs.jsonl`; the `FileSession` gains a ledger handle |
-| `storage/filestore/manager.go` | ✓ the startup pass reconciles the open runs |
-| `agentkit/emit/` | ✓ **new** — the derivation split out of `transport` |
-| `contract/runevent.go` | ✓ **new** — `RunEvent`, `RunEventKind` |
-| `agentkit/run/runtime.go` | ✓ `Submit`/`Resume` carry the run id; `claimTurn` opens the row; `StatusOf` reads the scan. **Later:** `claimTurn` becomes a lease claim |
-| `agentkit/run/publish.go` | ✓ **new** — the publisher, the subscriptions and the window |
-| `agentkit/run/turn.go` | ✓ `RunID` is assigned; the turn closes its own row. **Later:** `Turn` becomes a `Run` with subscribers |
-| `agentkit/run/loop.go` | ✓ the terminal row is written after the archive; the run derives and archives its own events. **Later:** the lease |
-| `agentkit/run/bridge.go` | ✓ the loop's exit closes the row and the publisher; `sessionState` becomes a cache |
-| `agentkit/run/lease.go` | ✓ **new** — the run's lease, the progress-driven renewal |
-| `agentkit/run/errors.go` | ✓ `ErrSessionBusy` stays; the lease errors map onto it |
-| `transport/transport.go` | ✓ becomes a renderer: `contract.RunEvent` → AG-UI frames |
-| `api/v2_run.go` | ✓ the run id is minted once and handed down; the handler subscribes instead of draining. **Later:** attach |
-| `api/v2_sessions.go` | ✓ `state` comes from the scan; the two scan routes; the abort names the run it stopped |
-| `api/v2_files.go` | ✓ the two new routes |
-| `web/src/lib/store/actions.ts` | ✓ keep the run id; ✓ re-attach after a dropped stream; re-scan instead of assuming |
-| `web/src/lib/store/history.ts` | `busy` from the scan |
-| `web/src/lib/api.ts` | ✓ `runId` on the run request; ✓ the runs scan |
-| `web/src/lib/events.ts` | ✓ the reducer keeps the run id |
-| `web/src/lib/types.ts` | `activeRunId` on the session meta |
+| `storage/runledger.go` | ✓ **新增** —— `Run`、`RunState`、`RunLedger`、`FoldRuns`、`ActiveRun` |
+| `storage/lease.go` | ✓ **新增** —— `Lease`、`LeaseArbiter`、`ErrLeaseHeld` |
+| `storage/memarbit/arbiter.go` | ✓ **新增** —— 内存仲裁器 |
+| `storage/filestore/runledger.go` | ✓ **新增** —— `runs.jsonl` 驱动 |
+| `storage/filestore/session.go` | ✓ 会话目录多出 `runs.jsonl`；`FileSession` 多一个账本句柄 |
+| `storage/filestore/manager.go` | ✓ 启动时的巡检给未结束的 run 收尾 |
+| `agentkit/emit/` | ✓ **新增** —— 从 `transport` 里拆出来的推导层 |
+| `contract/runevent.go` | ✓ **新增** —— `RunEvent`、`RunEventKind` |
+| `agentkit/run/runtime.go` | ✓ `Submit`/`Resume` 带着 run id；`claimTurn` 打开那一行并申领租约；`StatusOf` 读扫描 |
+| `agentkit/run/publish.go` | ✓ **新增** —— 发布方、订阅与窗口 |
+| `agentkit/run/turn.go` | ✓ `RunID` 被赋值；turn 自己收掉自己那一行。**往后：** `Turn` 变成带订阅者的 `Run` |
+| `agentkit/run/loop.go` | ✓ 终态行写在归档之后；run 自己推导并归档。**往后：** 租约 |
+| `agentkit/run/bridge.go` | ✓ loop 退出时收掉那一行与发布方；`sessionState` 降级为缓存 |
+| `agentkit/run/lease.go` | ✓ **新增** —— run 的租约、进展驱动的续租 |
+| `agentkit/run/errors.go` | ✓ `ErrSessionBusy` 保留；租约错误映射到它 |
+| `transport/transport.go` | ✓ 变成渲染器：`contract.RunEvent` → AG-UI 帧 |
+| `api/v2_run.go` | ✓ run id 只铸一次并往下传；处理器订阅而不是抽干。**往后：** 挂上 |
+| `api/v2_sessions.go` | ✓ `state` 来自扫描；两条扫描路由；中止报出它停掉的 run |
+| `api/v2_files.go` | ✓ 两条新路由 |
+| `web/src/lib/store/actions.ts` | ✓ 留住 run id；✓ 流断了之后重新挂上；重新扫描而不是假定 |
+| `web/src/lib/store/history.ts` | `busy` 来自扫描 |
+| `web/src/lib/api.ts` | ✓ run 请求带上 `runId`；✓ 加上 runs 扫描 |
+| `web/src/lib/events.ts` | ✓ 归约器留住 run id |
+| `web/src/lib/types.ts` | 会话 meta 上加 `activeRunId` |
 
-## 11. Testing
+## 11. 测试
 
-★ **✓ = the test exists.** The rest is the plan.
+★ **✓ = 测试已存在**，其余是计划。
 
-**Go — the ledger** (`storage/filestore`, `storage/filestore/runledger_test.go`):
-- ✓ a run's row survives a restart of the store;
-- ✓ the last row per run id wins;
-- ✓ among open runs, the highest epoch is the owner, even when the lower-epoch
-  run wrote later;
-- ✓ a torn last line is dropped and the run falls back to its previous state;
-- ✓ the epoch never repeats, not even across a restart;
-- ✓ the ledger stays within its bound.
+**Go —— 账本**（`storage/filestore`、`storage/filestore/runledger_test.go`）：
+- ✓ 一行 run 记录能活过存储的重启；
+- ✓ 每个 run id 取最后一行；
+- ✓ 在未结束的 run 里，epoch 最高的那个是持有者，哪怕 epoch 更低的那个写得更晚；
+- ✓ 被截断的最后一行被丢弃，run 退回它上一刻的状态；
+- ✓ epoch 从不复用，连重启也不复用；
+- ✓ 账本始终在自己的上界之内。
 
-**Go — the arbiter** (`storage/memarbit/arbiter_test.go`):
-- ✓ a second claim on a live lease fails with `ErrLeaseHeld`;
-- ✓ an expired lease can be claimed, and the new epoch is higher;
-- ✓ a renewal by a fenced-out holder fails;
-- ✓ a run that **reports progress** keeps its lease;
-- ✓ a run that reports **nothing** loses the lease even while it is alive — the
-  run-level stall §5.1 describes;
-- ✓ a stale release does not free the new holder's lease;
-- ✓ the fence reports the holder's epoch.
+**Go —— 仲裁者**（`storage/memarbit/arbiter_test.go`）：
+- ✓ 对一把活着的租约二次申领失败，报 `ErrLeaseHeld`；
+- ✓ 过期的租约可以被申领，新的 epoch 更高；
+- ✓ 被 fence 掉的持有者续租失败；
+- ✓ **报告了进展**的 run 保住租约；
+- ✓ **什么都没报告**的 run 丢掉租约——哪怕它活着。这就是 §5.1 说的 run 级停滞；
+- ✓ 一次过期的释放不会把新持有者的租约放掉；
+- ✓ fence 报出持有者的 epoch。
 
-**Go — the runtime** (`agentkit/run/lease_test.go`):
-- ✓ a live owner holds the session: a second run is refused;
-- ✓ **a stalled owner does not hold the session for ever** — the lease is a
-  budget, and the gate asks it;
-- ✓ a run that reports progress keeps its lease.
+**Go —— runtime**（`agentkit/run/lease_test.go`）：
+- ✓ 活着的持有者占着会话：第二个 run 被拒；
+- ✓ **停滞的持有者不会永远占着会话**——租约是预算，闸门问的就是它；
+- ✓ 报告了进展的 run 保住租约。
 
-**Go — the runtime** (`agentkit/run`, `agentkit/run/runrow_test.go`,
-`agentkit/run/publish_test.go`):
-- ✓ a run with **no subscriber attached** still archives — the direct test of
-  "a turn outlives its connection";
-- ✓ a subscriber that vanishes does not stop the run;
-- ✓ a subscriber whose queue overflows is **dropped** and the run keeps
-  archiving — the stuck subscriber of §7.4;
-- ✓ the run's event window stays **within its bound** — the cost of an unwatched
-  turn is bounded;
-- ✓ a late subscriber gets the window replayed, then the live events;
-- ✓ the run is recorded before it is handed out;
-- ✓ the terminal row lands after the archive (the transcript already holds the
-  answer when the row says `completed`);
-- ✓ a turn that never starts closes its own row;
-- ✓ the scan names the active run, and stops naming it once the run is over;
-- ✓ a resume names the run it answers;
-- ✓ `StatusOf` reports the active run's id;
-- the run archives its messages **with no subscriber attached** — the direct
-  test of "a turn outlives its connection";
-- a subscriber that vanishes does not stop the run;
-- **a subscriber whose channel overflows is dropped and the run keeps
-  archiving** — the stuck subscriber of §7.4, where the socket write never
-  returns;
-- a run whose handler dies still writes its terminal row (the C3 case);
-- a run that loses its lease stops and does not write a `running` row;
-- a run nobody attached to keeps its event log **within the window's size** —
-  the cost of an unwatched turn is bounded (§7.4).
+**Go —— runtime**（`agentkit/run`、`agentkit/run/runrow_test.go`、
+`agentkit/run/publish_test.go`）：
+- ✓ **没有任何订阅者**时，run 依然归档——这是「一轮比连接活得久」的直接检验；
+- ✓ 订阅者消失不影响 run；
+- ✓ 队列溢出的订阅者被**踢掉**，run 继续归档——§7.4 那个卡住的订阅者；
+- ✓ run 的事件窗口**不超出它的上界**——没人看的轮次，代价是有界的；
+- ✓ 晚到的订阅者先拿到窗口的回放，再拿到实时事件；
+- ✓ run 在被交出去之前就已经入账；
+- ✓ 终态行落在归档之后（账本说 `completed` 时，transcript 里已经有答案）；
+- ✓ 没能启动的 turn 自己收掉自己那一行；
+- ✓ 扫描报出活动 run，run 结束后就不再报它；
+- ✓ resume 点名它答复的那一个 run；
+- ✓ `StatusOf` 报出活动 run 的 id；
+- **没有任何订阅者**时，run 依然归档它的消息——这是「一轮比连接活得久」的
+  直接检验；
+- 订阅者消失不影响 run；
+- **通道溢出的订阅者被踢掉，run 继续归档**——这就是 §7.4 那个 socket 写永不
+  返回的「卡住的订阅者」；
+- 处理器死掉的 run 依然写出终态行（C3 那一幕）；
+- 丢了租约的 run 会停下，并且不写 `running` 行；
+- 没人挂上来的 run，它的**事件日志不超出窗口大小**——没人看的轮次，代价是有界的
+  （§7.4）。
 
-**Go — the reconciler** (`storage/filestore/runledger_test.go`):
-- ✓ a run left `running` by a crash is closed as `interrupted` at startup,
-  before the server accepts requests (the hook already exists:
-  `storage/storage.go` — `SessionManager.Inspect`).
+**Go —— 对账器**（`storage/filestore/runledger_test.go`）：
+- ✓ 崩溃时留下的 `running` run 会在启动时被收成 `interrupted`，且发生在服务
+  开始接受请求之前（钩子已经存在：`storage/storage.go`——
+  `SessionManager.Inspect`）。
 
-**Go — the API** (`api/v2_runs_test.go`):
-- ✓ the scan lists the runs and names the active one;
-- ✓ the session's own route carries the active run's id;
-- ✓ one run by id, and 404 for an unknown one;
-- ✓ an idle session scans as an empty list.
+**Go —— API**（`api/v2_runs_test.go`）：
+- ✓ 扫描列出所有 run 并报出活动的那一个；
+- ✓ 会话自己的路由带着活动 run 的 id；
+- ✓ 按 id 取一个 run，不认识的 id 报 404；
+- ✓ 空闲会话扫出来是空列表。
 
-**Frontend — unit**:
-- `busy` is cleared only by a scan, not by a stream's end;
-- `stop()` re-scans;
-- a re-attach keeps the run id.
+**前端 —— 单测**：
+- `busy` 只由扫描清除，不由流的结束清除；
+- `stop()` 会重新扫描；
+- 重新挂上时 run id 不变。
 
-**E2E** (the fake backend, `web/test/e2e/`):
-- ✓ a dropped connection re-attaches and receives the rest of the turn
-  (`web/test/e2e/reattach.spec.ts`);
-- ✓ the re-attach carries the run's id and no question;
-- a second tab attaches to a running turn and sees its output;
-- a 409 still rolls back the optimistic bubble (the previous round's
-  behaviour must survive the change).
+**E2E**（假后端，`web/test/e2e/`）：
+- ✓ 掉线的连接重新挂上并收到这一轮剩下的部分（`web/test/e2e/reattach.spec.ts`）；
+- ✓ 重新挂上时带着 run 的 id，且不带问题；
+- 第二个标签页挂上一个正在跑的 turn 并看到它的输出；
+- 409 仍然回滚乐观气泡（上一轮的行为必须活过这次改动）。
 
-## 12. Staging
+## 12. 分期
 
-**Stage 1 — the run becomes a fact.** ✓ **landed.** The ledger, the row, the
-scan route, the reconciler. The SSE still drives the run, but the run's **row**
-is written independently of the connection, so a crash leaves a trace. This
-stage fixes C1 and C2 and gives the frontend something true to scan.
+**第 1 期 —— run 变成一个事实。** ✓ **已落地。** 账本、那一行、扫描路由、
+对账器。SSE 仍然驱动着 run，但 run 的**那一行**已经独立于连接被写下，于是
+崩溃会留下痕迹。这一期修掉 C1 和 C2，并给前端一个真的可以扫的东西。
 
-**Stage 2 — the run owns its consumption.** ✓ **landed.** The
-`agentkit/emit` split, the subscribers, the run's event window, and the
-**attach**. The run reads its own events, derives what they mean, and archives
-the result; the connection subscribes to what the run publishes, and a client
-that lost its connection comes back with the run's id and gets the rest of the
-turn. This fixes C3 and C4 — the coupling itself. It is also the stage where a
-**stuck subscriber stops being a scenario**: the run owns no socket, so a
-wedged connection cannot reach the run at all.
+**第 2 期 —— run 自己消费。** ✓ **已落地。** `agentkit/emit` 的拆分、订阅者、
+run 的事件窗口，以及**挂上**。run 自己读自己的事件，推导含义，归档结果；连接
+订阅 run 发布的东西，而掉了线的客户端带着 run 的 id 回来，就能拿到这一轮剩下
+的部分。这一期修掉 C3 和 C4——耦合本身。它也是「**卡住的订阅者不再是一种
+场景**」的那一期：run 不再拥有 socket，wedge 住的连接根本够不着 run。
 
-**Stage 3 — the lease replaces the mutex.** ✓ **landed.** The arbiter, the
-**progress-driven renewal**, the fence. The gate's behaviour is unchanged (still
-"one session, one turn", still 409); only its internals move. This stage fixes
-**both** kinds of stalled owner — the process-level one because the lease
-expires when the process stops reporting, the run-level one because the
-renewal is driven by progress — and it prepares the ground for a second
-process.
+**第 3 期 —— 租约取代互斥锁。** ✓ **已落地。** 仲裁者、**进展驱动的续租**、
+fence。闸门的行为不变（仍然是「一个会话一轮」，仍然是 409）；只是内部换掉了。
+这一期治好了**两种**持有者停滞——进程级那一半靠「进程一停，租约就过期」，run
+级那一半靠「续租由进展驱动」——并为第二个进程铺路。
 
-★ **Stage 3 can come only after Stage 2, and the reason is the renewal.** A
-progress-driven renewal needs the run to see its own progress, and before
-Stage 2 the run saw nothing: the transport drained the events and handed back
-the archive payload. A renewal driven by the connection's progress would
-expire the lease of a run whose connection died — exactly the coupling the
-lease is meant to remove.
+★ **第 3 期只能排在第 2 期后面，理由就是那个续租。** 进展驱动的续租要求 run
+能看见自己的进展，而在第 2 期之前 run 什么也看不见：是 transport 抽干事件、
+再把归档载荷回吐。由连接进度驱动的续租会把「连接断了但 run 还活着」的租约
+判死——而那正是租约要拆掉的耦合。
 
-★ **The order changed while Stage 1 was being built, and the reason is worth
-writing down.** The original plan put the lease second. It cannot go second:
-**progress-driven renewal needs the run to see its own progress**, and today
-the run does not see the events — the transport drains them and hands back the
-archive payload (`agentkit/run/loop.go:115`). A renewal driven by the
-connection's progress would expire the lease of a run whose connection died,
-which is exactly the coupling the lease is meant to remove. So the pipeline has
-to be split before the lease can be honest.
+★ **次序是在第 1 期施工期间改的，理由值得写下来。** 原计划把租约放在第 2 期。
+它不能放在第 2 期：**进展驱动的续租要求 run 能看见自己的进展**，而今天 run
+看不见那些事件——是 transport 抽干它们，再把归档的产物回吐（`agentkit/run/loop.go:115`）。
+一个由连接进度驱动的续租，会把「连接断了但 run 还活着」的租约判死，而这正是
+租约要拆掉的那根耦合。所以管线必须先拆，租约才能诚实。
 
-★ The upside of the new order: **Stage 1 depends on neither.** It is a fact
-about the run, written by the run's own goroutine, and it is the stage that
-makes the other two possible — the lease needs a durable epoch, and the epoch
-is the ledger's.
+★ 新次序的好处是：**第 1 期不依赖任何一期**。它是关于 run 的一个事实，由 run
+自己的 goroutine 写下；而它也是另外两期的地基——租约需要一个持久的 epoch，
+而 epoch 是账本给的。
 
-★ **Stage 2 is the expensive one** and it is the only one that truly unbinds
-the turn from the connection. Stages 1 and 3 are worth doing on their own:
-Stage 1 makes the run observable, Stage 3 makes its ownership bounded — a much
-better place to be than today.
+★ **第 2 期是最贵的一期**，也是唯一真正把 turn 与连接解绑的一期。第 1、3 期
+单独做也值得：第 1 期让 run 的事实成真，第 3 期让所有权有界——那比今天好得多。
 
-## 13. Open questions
+## 13. 待决问题
 
-**Q1 — Should the run's event log be persisted, and how big is the window?**
-A third file per session (`events.jsonl`) would let a client that reconnects
-hours later replay the deltas of a turn, not just its final transcript. The
-transcript already gives a correct final view, so this is a nicety. Cost: a
-third file, a third trim policy, a third thing to corrupt.
+**Q1 —— run 的事件日志要不要持久化？窗口又该多大？**
+每会话第三个文件（`events.jsonl`）能让一个几小时后才重连的客户端回放这一轮
+的增量，而不只是它的最终 transcript。transcript 已经给出一个正确的最终
+视图，所以这是锦上添花。代价是第三个文件、第三套裁剪策略、第三样会坏掉的
+东西。
 
-★ The second half of the question matters more than the first, and it has
-**nothing to do with persistence**: **the size of the window** (§7.4). A log that
-grows with the turn is a memory leak that only shows up under load, so the
-size is a **bound** rather than a default — the same kind of bound the ledger
-already has (§3.3).
+★ 这个问题的后半截比前半截要紧，而且**跟持久化无关**：**窗口有多大**
+（§7.4）。一个随轮次一起长的日志是个只在高负载下才显形的内存泄漏，所以这个
+大小是一道**上界**而不是一个默认值——和账本已有的那道上界一个性质（§3.3）。
 
-**Q2 — Is a second process in scope?**
-The lease and fence are designed for it, but the memory arbiter cannot enforce
-anything across processes — it is a protocol, not a lock. The question is
-whether the DB driver is a real requirement or a preparation.
+**Q2 —— 第二个进程在范围内吗？**
+租约和 fence 是为它设计的，但内存仲裁者跨进程什么也强制不了——它是一套
+协议，不是一把锁。问题是：DB 驱动是真实需求，还是仅仅做准备。
 
-**Q3 — Who may answer an approval?**
-A pending approval is session-level (`storage/storage.go:104`), so two
-surfaces can both try. `TakePendingApproval` is atomic, so the second one gets
-`ErrNoPendingInterrupt` (`agentkit/run/runtime.go:482`) — correct, but the
-UX needs to say "someone else already answered". Should the second surface be
-told *who* answered?
+**Q3 —— 谁可以回答审批？**
+待审批是会话级的（`storage/storage.go:104`），所以两个界面都可能尝试。
+`TakePendingApproval` 是原子的，于是第二个会拿到 `ErrNoPendingInterrupt`
+（`agentkit/run/runtime.go:482`）——这是对的，但 UX 需要说明「别人已经
+答过了」。要不要告诉第二个界面是**谁**答的？
 
-**Q4 — Should the run's row carry the usage totals?**
-Deliberately left out (§3.1): the transcript owns the numbers. But a run list
-that shows "what did that turn cost" would have to read the transcript per
-run, which is a range scan over the message log. A cached total in the row
-would be a second home for a number that is currently derived — the exact
-duplication AGENTS.md warns about.
+**Q4 —— run 的那一行要不要带上用量合计？**
+这里刻意不放（§3.1）：数字归 transcript 管。但一份「这一轮花了多少」的
+run 列表，就得对 message log 做一次范围扫描。往行里缓存一个合计，就是给一个
+目前是推导出来的数字安了第二个家——正是 AGENTS.md 警告的那种重复。
 
-**Q5 — What happens to `turn_superseded`?**
-Kept for compatibility (§8.3). Once the code has shipped, the superseding path
-it names no longer exists. It can be retired after a deprecation window.
+**Q5 —— `turn_superseded` 怎么办？**
+为兼容保留（§8.3）。等代码上线之后，它所命名的抢占路径已经不存在了。经过
+一个弃用窗口就可以退休。

@@ -7,53 +7,64 @@ one — change one and change the other.
 
 > ★ **This repository is the code surface**: Go backend + React frontend + build configuration.
 >
-> It ships **eleven** bilingual document sets, maintained alongside the code
-> (**English is the main version; the `_zh` suffix marks the Chinese version**):
+> It ships **four** bilingual document sets, maintained alongside the code
+> (**English is the main version; the `_zh` suffix marks the Chinese version**; the
+> Kit's two guides are bilingual too, and they live in `sandbox-kit/` — see below):
 > `README.md` / `README_zh.md`,
 > `docs/architecture.md` / `docs/architecture_zh.md` (architecture),
 > `docs/user-manual.md` / `docs/user-manual_zh.md` (user guide),
-> `docs/developer-manual.md` / `docs/developer-manual_zh.md` (developer guide),
-> `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` (context-usage estimation design),
-> `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` (session concurrency design),
-> `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` (run lifecycle design),
-> `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` (filesystem backend design),
-> `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` (Docker Sandbox Kit packaging),
-> `docs/mcp-design.md` / `docs/mcp-design_zh.md` (MCP integration design),
-> `docs/config-design.md` / `docs/config-design_zh.md` (configuration system design).
-> **and one Chinese-only design document**: `docs/tool-surface-design.md` (the tool
-> surface — which tools an agent gets, and how the configuration is administered; a
-> **proposal**).
+> `docs/developer-manual.md` / `docs/developer-manual_zh.md` (developer guide).
+>
+> **and eight Chinese-only documents** under `docs/` — the architecture and code-design
+> ones. ★ Their Chinese content **took over the plain name**: `docs/config-design.md`
+> **is** the Chinese document — there is no `_zh` twin and no English one:
+> `docs/context-usage-design.md` (context-usage estimation design),
+> `docs/session-concurrency-design.md` (session concurrency design),
+> `docs/run-lifecycle-design.md` (run lifecycle design),
+> `docs/fs-backend-design.md` (filesystem backend design),
+> `docs/sandbox-kit-design.md` (Docker Sandbox Kit packaging),
+> `docs/mcp-design.md` (MCP integration design),
+> `docs/config-design.md` (configuration system design),
+> `docs/tool-surface-design.md` (the tool surface — which tools an agent gets, and how
+> the configuration is administered).
 > **Every other design document under `docs/` still lives in the upstream repository** ——
-> any `docs/xxx.md` reference below that is not one of these eleven, and is not the
-> Chinese-only document above, is the upstream copy. If you cannot get hold of it before
-> changing semantics, ask first; do not change configuration or interfaces from memory.
+> any `docs/xxx.md` reference below that is not one of these twelve, is the upstream copy.
+> If you cannot get hold of it before changing semantics, ask first; do not change
+> configuration or interfaces from memory.
 >
-> ★ **A new architecture or code-design document is written in Chinese only.** A document
-> that says how the code is built — layering, a subsystem's design, a refactoring
-> proposal — has no second audience: it is read by the people who read Chinese, and a
-> hand-maintained English twin is a second copy that drifts. `docs/tool-surface-design.md`
-> is the first one written under this rule.
-> ★ **What stays bilingual is what a user or an integrator reads**: `README.md` and
-> `docs/user-manual.md`. Their audience is not assumed to read Chinese.
-> ★ **This rule does not retire the eleven pairs above.** They exist and are maintained
-> as they are; the rule governs documents written from now on.
+> ★ **A design document is written in Chinese only.** A document that says how the code
+> is built — layering, a subsystem's design, a refactoring proposal — has no second
+> audience: it is read by the people who read Chinese, and a hand-maintained English
+> twin is a second copy that drifts. ★ The eight documents above were retired from
+> bilingual on 2026-11-08: their Chinese content took over the plain name, so a link to
+> `docs/config-design.md` still resolves — it resolves to the Chinese document now.
+> ★ **What stays bilingual is what a user or an integrator reads**: `README.md`,
+> `docs/user-manual.md`, and — because somebody has to be able to work in this tree —
+> `docs/architecture.md` and `docs/developer-manual.md`. Their audience is not assumed
+> to read Chinese. The Kit's two guides (`sandbox-kit/TUTORIAL.md` and
+> `sandbox-kit/BUILDING.md`) are bilingual for the same reason.
 >
-> ★ The first four sets describe **what the code surface already is**; `docs/context-usage-design.md`
+> ★ The four bilingual sets describe **what the code surface already is**; the Chinese-only
+> designs say the same about their own subject: `docs/context-usage-design.md`
 > covers **context usage and compaction** — the usage dashboard (§2, §4, §5), compaction and its
 > persistence (§7), and the rendering of compaction markers in the interface (§7.7) are all
 > already in the code.
 > `docs/session-concurrency-design.md` covers **session concurrency** — the admission gate for
 > one turn per session (§5), the cross-client 409 (§5.2), and the frontend busy-state handling
 > (§5.4-§5.6) are all already in the code.
-> `docs/run-lifecycle-design.md` is the odd one out: it is a **proposal**, not a description.
-> Its §1 describes the code as it is — a turn is bound to one SSE connection today — while its
-> §2 onwards describe what would be built: a run as a durable row, a lease with a fence, and the
-> connection demoted to a subscriber. **Nothing from §2 onwards is in the tree.**
-> `docs/sandbox-kit-design.md` is a **proposal** as well: its §1 describes the openheron process
-> as it is — one process with an HTTP/SSE server, the file tools and the shell tool sharing one
-> backend — while its §2 onwards describe packaging that whole process as a Docker Sandbox Kit,
-> so the boundary moves outward instead of inward and the read path is covered too.
-> **Nothing from §2 onwards is in the tree.**
+> `docs/run-lifecycle-design.md` covers the **run lifecycle** — a run as a durable row, a
+> lease with a fence, and the connection demoted to a subscriber. ★ **That one landed**:
+> §3-§9 are in the tree (`storage/runledger.go`, `storage/lease.go`,
+> `storage/memarbit/arbiter.go`, `agentkit/emit/`), the scan is the truth and the
+> notification is only a hint. §1 still describes the code as it was — a turn bound to one
+> SSE connection — so it reads as history.
+> `docs/sandbox-kit-design.md` describes the **Docker Sandbox Kit** — the openheron process
+> as it is (one process with an HTTP/SSE server, the file tools and the shell tool sharing
+> one backend) packaged as a Kit, so the boundary moves outward instead of inward and the
+> read path is covered too. ★ **That one landed as well**: the descriptors, the content
+> recipe, the entrypoint and the vendor mixins are in `sandbox-kit/`, `make kit` builds
+> them and the CI `kit` job publishes them. §4.2 still lists three decisions that are the
+> owner's to make.
 > `docs/fs-backend-design.md` describes the **filesystem backend** — the bounded fork of
 > `eino-ext`'s local backend (§5) and the confinement rule every tool passes through — and it is
 > **implemented**: `agentkit/fsx` is wired in at both call sites.
@@ -87,10 +98,14 @@ one — change one and change the other.
 > A design that proposes something new may go past the code — but it must say so where the
 > description stops and the proposal starts, and label the proposal as not implemented.
 >
-> ★ **Both versions must stay in sync**: editing the English version means editing the `_zh`
-> version too, and vice versa. Code identifiers, line references, commands and paths must
-> correspond one to one — you can compare them set by set with
-> `grep -oP '`[a-zA-Z0-9_./:$-]+`' | sort -u`.
+> ★ **Both versions of a bilingual document must stay in sync**: editing the English version
+> means editing the `_zh` version too, and vice versa. That applies to the bilingual set —
+> `README.md`, `docs/architecture.md`, `docs/user-manual.md`,
+> `docs/developer-manual.md`, `sandbox-kit/TUTORIAL.md` and `sandbox-kit/BUILDING.md` —
+> and to nothing else: the Chinese-only documents have one version, so there is nothing to
+> keep in sync with. Code identifiers, line references, commands and paths must
+> correspond one to one — `make lint-docs` checks all six pairs, and you can compare them
+> set by set with `grep -oP '`[a-zA-Z0-9_./:$-]+`' | sort -u`.
 > ★ Note that the **backtick span has to match too**: `` `POST /v2/run` `` and `` `POST` `/v2/run` ``
 > say the same thing but yield different identifier sets — the comparison will report a
 > difference. Do not let "different phrasing" hide "different content".
@@ -372,23 +387,30 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 
 ### Shipped here (maintained alongside the code surface)
 
+★ The **bilingual** set — English first, `_zh` second, and the two correspond one to one:
+
 | Document | Content |
 |---|---|
 | `README.md` / `README_zh.md` | **Project overview** — positioning, quick start, commands, configuration at a glance, HTTP reference |
 | `docs/architecture.md` / `docs/architecture_zh.md` | **Architecture** — layering and dependency direction, configuration system, assembly, run loop, storage, HTTP, frontend, knowledge base |
 | `docs/user-manual.md` / `docs/user-manual_zh.md` | **User guide** — installation, configuration, interface operation (for users, no internal design) |
 | `docs/developer-manual.md` / `docs/developer-manual_zh.md` | **Developer guide** — layering, dependency iron rules, development recipes, testing and troubleshooting, known issues |
-| `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` | **Context-usage estimation design** — accounting rules, data flow, backend and frontend changes, persistence of compaction results and effective history (**the usage dashboard and compaction persistence are implemented**) |
-| `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` | **Session concurrency design** — why cross-client preemption happened, the "one turn per session" rule and its implementation, and how the frontend learns that a session is busy (**the admission gate and the 409 are implemented**) |
-| `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` | **Filesystem backend design** — why `eino-ext`'s local backend was forked into `agentkit/fsx`, how paths are confined to the project root, and how `ls`/`glob` are bounded (**implemented**) |
-| `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` | **Run lifecycle design** — why a turn is bound to one SSE connection today, and how a run becomes a durable row with a lease and a fence, so the connection can be demoted to a subscriber (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
-| `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` | **Docker Sandbox Kit packaging** — the openheron process as it is, a v3 workload Kit that would carry the whole process into a microVM, how the model key stays on the host, and the SSE path that has to be measured (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
-| `docs/mcp-design.md` / `docs/mcp-design_zh.md` | **MCP integration design** — the tool assembly path, what an MCP client adds to it, the `mcp__<server>__<tool>` namespace, prefix matching in the tool tables, and where an MCP server would run inside the Kit (**implemented**, except §8 — how a sandbox Kit packages an MCP server — which is still a proposal) |
-| `docs/config-design.md` / `docs/config-design_zh.md` | **Configuration system design** — the config root and its three levels, the partitions and their file specs, loading and precedence, hot reload, and the dependency iron rules (**the body describes the code as it is**; the `mcps/` partition and the prefix matching are proposals) |
-| `docs/tool-surface-design.md` | **Tool-surface design** (Chinese only) — what tools an agent gets (`tools:` / `mcps:` / `skills:`), the MCP namespace's three segments, the configuration surface collapsed into one core, and the six `config_*` tools (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
 
-★ The file without a suffix is the **English main version**; `_zh` is the Chinese version; the two
-correspond one to one — change one and change the other.
+★ The **Chinese-only** set — one version each, and the file name carries no suffix:
+
+| Document | Content |
+|---|---|
+| `docs/context-usage-design.md` | **Context-usage estimation design** — accounting rules, data flow, backend and frontend changes, persistence of compaction results and effective history (**the usage dashboard and compaction persistence are implemented**) |
+| `docs/session-concurrency-design.md` | **Session concurrency design** — why cross-client preemption happened, the "one turn per session" rule and its implementation, and how the frontend learns that a session is busy (**the admission gate and the 409 are implemented**) |
+| `docs/fs-backend-design.md` | **Filesystem backend design** — why `eino-ext`'s local backend was forked into `agentkit/fsx`, how paths are confined to the project root, and how `ls`/`glob` are bounded (**implemented**) |
+| `docs/run-lifecycle-design.md` | **Run lifecycle design** — why a turn was bound to one SSE connection, and how a run became a durable row with a lease and a fence, so the connection could be demoted to a subscriber (**§3-§9 are implemented**: the ledger, the lease, the fence, the scan and the frontend) |
+| `docs/sandbox-kit-design.md` | **Docker Sandbox Kit packaging** — the openheron process as it is, a v3 workload Kit that carries the whole process into a microVM, how the model key stays on the host, and the SSE path that had to be measured (**the Kit is built and published**; §4.2 still holds three open decisions) |
+| `docs/mcp-design.md` | **MCP integration design** — the tool assembly path, what an MCP client adds to it, the `mcp__<server>__<tool>` namespace, prefix matching in the tool tables, and where an MCP server would run inside the Kit (**implemented**, except §8 — how a sandbox Kit packages an MCP server — which is still a proposal) |
+| `docs/config-design.md` | **Configuration system design** — the config root and its three levels, the partitions and their file specs, loading and precedence, hot reload, and the dependency iron rules (**the body describes the code as it is**; the `mcps/` partition and the tier that lives with the tool are implemented) |
+| `docs/tool-surface-design.md` | **Tool-surface design** — what tools an agent gets (`tools:` / `mcps:` / `skills:`), the MCP namespace's three segments, the configuration surface collapsed into one core, and the six `config_*` tools (**§2-§5 are implemented**) |
+
+★ For the bilingual set, the file without a suffix is the **English main version**; `_zh` is the
+Chinese version; the two correspond one to one — change one and change the other.
 
 ### Upstream repository (not distributed with this repository)
 

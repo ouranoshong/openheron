@@ -138,7 +138,8 @@ same agent.
 ★ The step-by-step guide is
 [`sandbox-kit/TUTORIAL.md`](../sandbox-kit/TUTORIAL.md) (Chinese:
 [`sandbox-kit/TUTORIAL_zh.md`](../sandbox-kit/TUTORIAL_zh.md)), and the design
-behind it is in [`docs/sandbox-kit-design.md`](sandbox-kit-design.md).
+behind it is in [`docs/sandbox-kit-design.md`](sandbox-kit-design.md) — that document is
+Chinese only, like every design document in this repository.
 
 ```bash
 sha256sum -c checksums.txt --ignore-missing

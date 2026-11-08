@@ -205,7 +205,7 @@ make check      # lint + test
 
 ## 关联文档
 
-本仓库自带九组文档，随代码面一起维护，每组中英一式两份
+本仓库自带**四组双语文档**，随代码面一起维护
 （**英文是主版本，`_zh` 后缀是中文版**）：
 
 | 文档 | 内容 |
@@ -213,11 +213,20 @@ make check      # lint + test
 | [docs/architecture.md](docs/architecture.md) · [中文](docs/architecture_zh.md) | **架构设计说明** —— 分层与依赖方向、配置系统、装配、运行循环、存储、HTTP、前端 |
 | [docs/user-manual.md](docs/user-manual.md) · [中文](docs/user-manual_zh.md) | **用户使用说明** —— 安装、配置、界面操作 |
 | [docs/developer-manual.md](docs/developer-manual.md) · [中文](docs/developer-manual_zh.md) | **开发者说明** —— 分层、依赖铁律、开发配方、测试与排障 |
-| [docs/context-usage-design.md](docs/context-usage-design.md) · [中文](docs/context-usage-design_zh.md) | **上下文使用预估设计方案** —— 占用口径、数据流，以及压缩后的对话如何持久化（已实现） |
-| [docs/session-concurrency-design.md](docs/session-concurrency-design.md) · [中文](docs/session-concurrency-design_zh.md) | **会话并发设计方案** —— 「一个会话一轮」的规则，以及前端怎么知道会话正忙（已实现） |
-| [docs/run-lifecycle-design.md](docs/run-lifecycle-design.md) · [中文](docs/run-lifecycle-design_zh.md) | **run 生命周期设计方案** —— run 怎么才能变成一行持久事实、配上租约与 fence（提案：只有 §1 讲的是代码现状） |
-| [docs/fs-backend-design.md](docs/fs-backend-design.md) · [中文](docs/fs-backend-design_zh.md) | **文件系统后端设计方案** —— `agentkit/fsx` 这个分叉，与每个工具都要经过的路径收敛（已实现） |
-| [docs/sandbox-kit-design.md](docs/sandbox-kit-design.md) · [中文](docs/sandbox-kit-design_zh.md) | **Docker Sandbox Kit 打包设计方案** —— 整个进程作为 v3 workload Kit 进 microVM、模型密钥如何留在宿主，以及 SSE 这条路（提案：只有 §1 讲的是代码现状） |
+
+★ 另有**八篇只有中文的文档** —— 架构与代码设计那一类。它们的中文内容接管了原文件名，
+所以下面的链接就是它们唯一的入口：
+
+| 文档 | 内容 |
+|---|---|
+| [docs/context-usage-design.md](docs/context-usage-design.md) | **上下文使用预估设计方案** —— 占用口径、数据流，以及压缩后的对话如何持久化（已实现） |
+| [docs/session-concurrency-design.md](docs/session-concurrency-design.md) | **会话并发设计方案** —— 「一个会话一轮」的规则，以及前端怎么知道会话正忙（已实现） |
+| [docs/run-lifecycle-design.md](docs/run-lifecycle-design.md) | **run 生命周期设计方案** —— run 变成一行持久事实、配上租约与 fence，好让连接降级为订阅者（§3-§9 已实现） |
+| [docs/fs-backend-design.md](docs/fs-backend-design.md) | **文件系统后端设计方案** —— `agentkit/fsx` 这个分叉，与每个工具都要经过的路径收敛（已实现） |
+| [docs/sandbox-kit-design.md](docs/sandbox-kit-design.md) | **Docker Sandbox Kit 打包设计方案** —— 整个进程作为 v3 workload Kit 进 microVM、模型密钥如何留在宿主，以及 SSE 这条路（Kit 已建成并发布） |
+| [docs/mcp-design.md](docs/mcp-design.md) | **MCP 接入设计方案** —— 工具装配路径、工具命名空间，以及 MCP 服务器在 Kit 里会跑在哪（已实现，例外是 §8） |
+| [docs/config-design.md](docs/config-design.md) | **配置系统设计说明** —— 配置根与它的三级解析、各个分区、加载与优先级、热更新（正文讲的是代码现状） |
+| [docs/tool-surface-design.md](docs/tool-surface-design.md) | **工具面设计** —— 一个 agent 拿到哪些工具（`tools:` / `mcps:` / `skills:`）与六个 `config_*` 工具（§2-§5 已实现） |
 
 ★ 把 openheron 打包成沙箱 workload 的 **Docker Sandbox Kit** 在
 [`sandbox-kit/`](sandbox-kit/) 里 —— 描述文件、内容配方与入口脚本。

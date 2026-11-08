@@ -8,6 +8,9 @@
   commands, the paths and the code itself. The Chinese version keeps its
   own comments — that is the repository's convention, and AGENTS.md and
   README.md do it too.
+
+★ Only the **bilingual** documents are checked here. Everything in
+  `CHINESE_ONLY` has no English twin to mirror — see AGENTS.md.
 """
 
 import re
@@ -18,20 +21,33 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
 
+# ★ The bilingual set, and it is the whole bilingual set: what a user or an
+#   integrator reads. Everything else under `docs/` is Chinese only.
 PAIRS = [
-    ("config-design.md", "config-design_zh.md"),
-    ("mcp-design.md", "mcp-design_zh.md"),
-    ("architecture.md", "architecture_zh.md"),
-    ("user-manual.md", "user-manual_zh.md"),
-    ("developer-manual.md", "developer-manual_zh.md"),
+    ("README.md", "README_zh.md"),
+    ("docs/architecture.md", "docs/architecture_zh.md"),
+    ("docs/user-manual.md", "docs/user-manual_zh.md"),
+    ("docs/developer-manual.md", "docs/developer-manual_zh.md"),
+    ("sandbox-kit/TUTORIAL.md", "sandbox-kit/TUTORIAL_zh.md"),
+    ("sandbox-kit/BUILDING.md", "sandbox-kit/BUILDING_zh.md"),
 ]
 
-# ★ Architecture and code-design documents written from 2026-11-08 on are
-#   **Chinese only** (AGENTS.md): their audience is the people who read
-#   Chinese, and a hand-maintained English twin is a second copy that drifts.
-#   A `_zh` twin for one of these is a mistake, not a mirror — this catches it
-#   before it becomes a pair nobody updates.
-CHINESE_ONLY = ["tool-surface-design.md"]
+# ★ Architecture and code-design documents are **Chinese only** (AGENTS.md):
+#   their audience is the people who read Chinese, and a hand-maintained
+#   English twin is a second copy that drifts. The Chinese document took
+#   over the plain name — `docs/config-design.md` **is** the Chinese one —
+#   so a `_zh` twin for any of these is a mistake, not a mirror. This
+#   catches it before it becomes a pair nobody updates.
+CHINESE_ONLY = [
+    "config-design.md",
+    "context-usage-design.md",
+    "fs-backend-design.md",
+    "mcp-design.md",
+    "run-lifecycle-design.md",
+    "sandbox-kit-design.md",
+    "session-concurrency-design.md",
+    "tool-surface-design.md",
+]
 
 IDENT = re.compile(r"`[a-zA-Z0-9_./:$-]+`")
 SECTION = re.compile(r"§[0-9]+(\.[0-9]+)?")
@@ -94,8 +110,8 @@ def main() -> int:
             print(f"{name}: Chinese only, but {twin.name} exists — delete the twin")
             fail = 1
     for en, zh in PAIRS:
-        a = (DOCS / en).read_text()
-        b = (DOCS / zh).read_text()
+        a = (ROOT / en).read_text()
+        b = (ROOT / zh).read_text()
 
         id_diff = [x for x in identifiers(a) if x not in set(identifiers(b))]
         id_diff += [x for x in identifiers(b) if x not in set(identifiers(a))]
@@ -131,7 +147,9 @@ def main() -> int:
     print("── the line references ──")
     bad = 0
     refs = set()
-    for md in DOCS.glob("*.md"):
+    # ★ The READMEs carry no line references today, but they are documents
+    #   too — the scan reads them so that a new reference cannot slip past.
+    for md in list(DOCS.glob("*.md")) + [ROOT / "README.md", ROOT / "README_zh.md"]:
         for m in re.findall(r"`([a-zA-Z0-9_./-]+\.(?:go|ts|tsx|md)):(\d+)", md.read_text()):
             refs.add((m[0], int(m[1])))
     external = 0

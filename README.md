@@ -238,19 +238,28 @@ environment and the traps around them are in
 
 ## Related documents
 
-This repository ships nine document sets, maintained alongside the code, each in English
-and Chinese (**English is the primary version, `_zh` the Chinese one**):
+This repository ships **four bilingual document sets**, maintained alongside the code
+(**English is the primary version, `_zh` the Chinese one**):
 
 | Document | Contents |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) · [中文](docs/architecture_zh.md) | **Architecture** — layering and dependency direction, the configuration system, assembly, the run loop, storage, HTTP, the frontend |
 | [docs/user-manual.md](docs/user-manual.md) · [中文](docs/user-manual_zh.md) | **User manual** — installation, configuration, operating the interface |
 | [docs/developer-manual.md](docs/developer-manual.md) · [中文](docs/developer-manual_zh.md) | **Developer manual** — layering, the dependency rules, development recipes, testing and troubleshooting |
-| [docs/context-usage-design.md](docs/context-usage-design.md) · [中文](docs/context-usage-design_zh.md) | **Context usage estimate — design** — the occupancy metric, the data flow, and how the compacted conversation is persisted (implemented) |
-| [docs/session-concurrency-design.md](docs/session-concurrency-design.md) · [中文](docs/session-concurrency-design_zh.md) | **Session concurrency — design** — the one-turn-per-session rule and how the frontend learns that a session is busy (implemented) |
-| [docs/run-lifecycle-design.md](docs/run-lifecycle-design.md) · [中文](docs/run-lifecycle-design_zh.md) | **Run lifecycle — design** — how a run could become a durable row with a lease and a fence (a proposal: only §1 describes the code) |
-| [docs/fs-backend-design.md](docs/fs-backend-design.md) · [中文](docs/fs-backend-design_zh.md) | **Filesystem backend — design** — the `agentkit/fsx` fork and the path confinement every tool passes through (implemented) |
-| [docs/sandbox-kit-design.md](docs/sandbox-kit-design.md) · [中文](docs/sandbox-kit-design_zh.md) | **Docker Sandbox Kit packaging — design** — the whole process as a v3 workload Kit inside a microVM, how the model key stays on the host, and the SSE path (a proposal: only §1 describes the code) |
+
+★ And **eight Chinese-only documents** — the architecture and code-design ones. Their Chinese
+content took over the plain name, so the link below is the only entry there is:
+
+| Document | Contents |
+|---|---|
+| [docs/context-usage-design.md](docs/context-usage-design.md) | **Context usage estimate — design** — the occupancy metric, the data flow, and how the compacted conversation is persisted (implemented) |
+| [docs/session-concurrency-design.md](docs/session-concurrency-design.md) | **Session concurrency — design** — the one-turn-per-session rule and how the frontend learns that a session is busy (implemented) |
+| [docs/run-lifecycle-design.md](docs/run-lifecycle-design.md) | **Run lifecycle — design** — a run as a durable row, a lease with a fence, and the connection demoted to a subscriber (§3-§9 are implemented) |
+| [docs/fs-backend-design.md](docs/fs-backend-design.md) | **Filesystem backend — design** — the `agentkit/fsx` fork and the path confinement every tool passes through (implemented) |
+| [docs/sandbox-kit-design.md](docs/sandbox-kit-design.md) | **Docker Sandbox Kit packaging — design** — the whole process as a v3 workload Kit inside a microVM, how the model key stays on the host, and the SSE path (the Kit is built and published) |
+| [docs/mcp-design.md](docs/mcp-design.md) | **MCP integration — design** — the tool assembly path, the tool namespace, and where an MCP server would run inside the Kit (implemented, except §8) |
+| [docs/config-design.md](docs/config-design.md) | **Configuration system — design** — the config root and its three levels, the partitions, loading and precedence, hot reload (the body describes the code as it is) |
+| [docs/tool-surface-design.md](docs/tool-surface-design.md) | **Tool surface — design** — which tools an agent gets (`tools:` / `mcps:` / `skills:`) and the six `config_*` tools (§2-§5 are implemented) |
 
 ★ The **Docker Sandbox Kit** that packages openheron as a sandbox workload lives in
 [`sandbox-kit/`](sandbox-kit/) — the descriptor, the content recipe and the entrypoint.

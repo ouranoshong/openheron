@@ -249,8 +249,9 @@ For a developer who has to debug it:
 
 Say you want a new `mcps/` directory:
 
-★ That directory is no longer hypothetical — `docs/mcp-design.md` designs it, and
-  the partition is in the tree. The recipe below is the one it followed.
+★ That directory is no longer hypothetical — `docs/mcp-design.md` designs it (that
+  document is Chinese only, like every design document here), and the partition is in
+  the tree. The recipe below is the one it followed.
 
 1. **`agentkit/spec/config.go`**: add the directory constant `DirMCP = "mcps"` and an entry
    in `Categories` (with `ID`, `Label`, `Dir`, `Ext`, `Editable`). Keep **hot-reloaded**

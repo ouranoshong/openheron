@@ -126,7 +126,8 @@ HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
 ★ 分步教程见
 [`sandbox-kit/TUTORIAL.md`](../sandbox-kit/TUTORIAL.md)（中文：
 [`sandbox-kit/TUTORIAL_zh.md`](../sandbox-kit/TUTORIAL_zh.md)），
-背后的设计见 [`docs/sandbox-kit-design.md`](sandbox-kit-design_zh.md)。
+背后的设计见 [`docs/sandbox-kit-design.md`](sandbox-kit-design.md) —— 那篇文档只有中文，
+本仓库的设计文档都是这样。
 
 ```bash
 sha256sum -c checksums.txt --ignore-missing
