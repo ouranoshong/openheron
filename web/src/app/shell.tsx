@@ -88,10 +88,13 @@ export function Shell() {
             />
             {/* ★ The agent filter and the context occupancy moved into the
                 header: they were a second horizontal bar of their own, and
-                a chat is mostly text. The theme switch sits at the far end
-                of the row, after the filter. */}
-            <AgentFilter className="ml-auto" />
-            <ThemeToggle />
+                a chat is mostly text. ★ The filter sits **left**, next to the
+                title it belongs to — the numbers on the chips are about the
+                conversation you are reading, and the eye reaches for them
+                there, not across the window. The theme switch takes the far
+                end of the row. */}
+            <AgentFilter />
+            <ThemeToggle className="ml-auto" />
           </header>
 
           {isEmptyView ? (
