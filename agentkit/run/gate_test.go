@@ -269,3 +269,74 @@ func TestAbortClearsTheVoidApproval(t *testing.T) {
 		t.Fatalf("the session must be usable after the abort: %v", err)
 	}
 }
+
+// ★ A response that ends before the session is released hands the client a
+// session it cannot use: it reads the end of the stream, sends its next
+// message, and is told "a turn is already running" about the turn it just
+// finished — a false 409, which is the one thing a busy signal must never be.
+//
+// ★ `archived` is not that moment. The archive lands inside the loop's own
+// callback; the pointer the gate reads is cleared a step later, after the
+// run's row is written. `released` is the channel that says "the pointer is
+// gone", and it has to be closed by the same code that clears it.
+func TestTheSessionIsReleasedBeforeTheResponseCanEnd(t *testing.T) {
+	b := &fakeBuilder{agent: func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
+		return &fakeAgent{script: func(ctx context.Context, emit func(*adk.TypedAgentEvent[*schema.Message]) bool) {
+			emit(textEvent("working"))
+			emit(exitEvent())
+		}}
+	}}
+	rt, sm := newTestRuntime(t, b)
+	ctx := context.Background()
+	sess := mustSession(t, sm)
+
+	turn, err := rt.Submit(ctx, sess.ID(), "", "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := turn.Wait(5 * time.Second); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	drain(t, turn)
+	turn.WaitArchived()
+
+	// This is what the HTTP handler does before it flushes.
+	released := make(chan struct{})
+	go func() { turn.WaitReleased(); close(released) }()
+	select {
+	case <-released:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the turn was archived but the session was never released; " +
+			"the client's next message would be refused as busy")
+	}
+
+	// And the thing the client actually does next.
+	if _, err := rt.Submit(ctx, sess.ID(), "", "second"); err != nil {
+		t.Fatalf("the session must accept the next turn once the response may end: %v", err)
+	}
+}
+
+// A turn that can never run must release the waiter too: the start-timeout
+// path closes the archive channel for exactly this reason, and `released`
+// must not be the one that is forgotten.
+func TestAFailedTurnReleasesItsWaiter(t *testing.T) {
+	b := &fakeBuilder{err: errors.New("boom")}
+	rt, sm := newTestRuntime(t, b)
+	sess := mustSession(t, sm)
+
+	turn, err := rt.Submit(context.Background(), sess.ID(), "", "never starts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := turn.Wait(100 * time.Millisecond); !errors.Is(err, ErrStartTimeout) {
+		t.Fatalf("Wait = %v, want ErrStartTimeout", err)
+	}
+
+	released := make(chan struct{})
+	go func() { turn.WaitReleased(); close(released) }()
+	select {
+	case <-released:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a failed turn kept its waiter blocked")
+	}
+}

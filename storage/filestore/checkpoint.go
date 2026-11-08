@@ -62,7 +62,19 @@ func (s *fileCheckpointStore) setID(id string) {
 }
 
 // dir is where this session's checkpoints live.
+//
+// ★ The lock is not decoration. `setID` repoints the store at another session
+// while the run loop is loading a checkpoint — a GET /v2/sessions/:id reads
+// the transcript header and, if it disagrees with the directory, calls here.
+// A plain read of `s.id` while that write is in flight is a data race, and
+// the two goroutines hold different locks (`FileSession.mu` on one side), so
+// nothing else serialises them.
+//
+// ★ It is safe to lock here: every caller resolves its path **before** taking
+// s.mu, so the two never nest.
 func (s *fileCheckpointStore) dir() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return filepath.Join(s.root, s.id, ckptDir)
 }
 

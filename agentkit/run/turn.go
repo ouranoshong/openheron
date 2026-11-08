@@ -101,6 +101,22 @@ type Turn struct {
 	//   busy — and be refused, wrongly. Complete waits on this channel so
 	//   the two cannot drift apart.
 	archived chan struct{}
+
+	// released is closed once the turn no longer holds the session's slot.
+	//
+	// ★ `archived` is **not** that, and the gap between them is the whole
+	//   reason this exists. After the archive lands, the run still writes
+	//   its terminal row and then clears the pointer the admission gate
+	//   reads (markTurnDone). The archive closing first is not a detail: a
+	//   client that reads the end of a response and immediately sends its
+	//   next message would be told "a turn is already running" about the
+	//   turn it just finished — a false 409, under load, which is exactly
+	//   when a scripted client sends that message.
+	//
+	// ★ It is not the loop's exit either: a loop outlives its turn, waiting
+	//   for the next item, so waiting for it would wait for minutes.
+	released    chan struct{}
+	releaseOnce sync.Once
 }
 
 // Outcome is what the run produced.
@@ -203,6 +219,29 @@ func (t *Turn) markArchived() {
 	t.archiveOnce.Do(func() { close(t.archived) })
 }
 
+// markReleased frees whoever waits in WaitReleased: the session's slot is
+// clear, and the next turn may be admitted.
+func (t *Turn) markReleased() {
+	t.releaseOnce.Do(func() { close(t.released) })
+}
+
+// WaitReleased blocks until the turn no longer holds the session.
+//
+// ★ A response that ends before this has ended hands the client a session it
+//
+//	cannot use. Waiting here is what makes "the run is over" and "the session
+//	is free" the same moment from the client's side.
+//
+// ★ Bounded for the same reason WaitArchived is: clearing the slot is the
+//
+//	run's own work, and a bug there must not hang the request.
+func (t *Turn) WaitReleased() {
+	select {
+	case <-t.released:
+	case <-time.After(archiveWaitTimeout):
+	}
+}
+
 // WaitArchived blocks until the turn's messages are on disk.
 //
 // ★ The wait is bounded. The archive is the run's own work, and a bug
@@ -242,6 +281,11 @@ func (t *Turn) fail(err error) {
 	//   archived channel from the archive path. Release it here or a
 	//   caller waiting in Complete waits forever.
 	t.markArchived()
+	// ★ A turn that never ran will never reach markTurnDone either, and the
+	//   comment on the start-timeout path already promises that failing
+	//   releases the session's slot. Keep the promise where a waiter reads
+	//   it.
+	t.markReleased()
 	// ★ The turn is over, and the loop may never reach the archive: the
 	//   input generator can fail before a single event is produced. The
 	//   row has to be closed here, or the run stays open in the ledger and
