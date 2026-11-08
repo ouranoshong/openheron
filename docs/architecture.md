@@ -375,6 +375,16 @@ The write path of the config editor (`/v2/settings`) has several gates:
   ${ENV_VAR} or @file:/path` — this keeps secrets out of the repository.
 - Optimistic concurrency: the write carries `baseRevision`; a mismatch with the revision
   on disk is reported as a conflict.
+- A change may not take a **working agent** out of the tree (`agentkit/spec/write.go:470`
+  `checkNoAgentLost`): the settled tree on disk is compared with the settled trial tree,
+  and a write, a batch or a delete that would drop an agent that used to work is
+  refused. ★ An agent that was already out of the tree is out on both sides, so an
+  unrelated edit is never counted as taking it out.
+- A **delete** that something still names is refused (`agentkit/spec/write.go:706`
+  `checkNotReferenced`), and the refusal names the referrer: which file still names the
+  deleted one, and what to remove. ★ The gate runs before the trial load, because the
+  trial load's error is the symptom it replaces — it names the deleted file and hides
+  the real reason somewhere else.
 
 ## 4. Agent assembly
 

@@ -378,13 +378,25 @@ Editing `agents/*.md` is enough; no code change is needed. But keep in mind:
   dangling reference, because the settled tree no longer mentions it.
 - Exceeding `max_depth` is a **startup error**, never a silent truncation.
 
-★ **The write gate is the other half of "left out".** `agentkit/spec/write.go:353`
+★ **The write gate is the other half of "left out".** `agentkit/spec/write.go:470`
 `checkNoAgentLost` compares the **settled** tree on disk with the **settled** trial tree and
 refuses a write, a batch or a delete that would take a working agent out. Without it,
 repointing an agent at a nonexistent model would remove it silently — which is exactly the
 failure the load-time rule stopped being. ★ Do not "simplify" it by comparing the raw
 file set: an agent that was already broken is out on both sides, and counting it as lost
 would make every unrelated edit fail.
+
+★ **The delete gate runs before the trial load.** `checkNotReferenced`
+(`agentkit/spec/write.go:706`) reads the tree as it is **now**, so it can refuse a delete
+that something still names — and the refusal names **who names it** and what to remove.
+★ It runs before the trial load because the trial load's error is the symptom it replaces:
+that error names the deleted file and hides the real reason somewhere else. ★ What the user
+has to change is the reference, not the deleted file.
+
+★ **An agent the change removes on purpose is not "lost"** (the `removed` parameter of
+`agentsLostBy`) — the gate asks "does an agent that used to work still work", and a user
+deleting an agent on purpose is another thing; without the two apart, no agent file could
+ever be deleted.
 
 The assembly logic is in `agentkit/build/assemble.go`; the validation logic is in
 `agentkit/spec/load.go`.

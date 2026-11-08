@@ -408,12 +408,24 @@ func (s *Service) ReadFile(rel string) (content []byte, rev string, err error) {
 //
 //	dropped the agents they cannot run. An agent that was already out is
 //	out on both sides, so a change that leaves it alone costs nothing.
-func agentsLostBy(before, after *Config) []string {
+func agentsLostBy(before, after *Config, removed []string) []string {
 	if before == nil || after == nil {
 		return nil
 	}
+	// ★ An agent the change **removes on purpose** is not lost. The gate
+	//   exists for the other case: an agent that used to work and no longer
+	//   does because its model, its tools or its parent went away. A user
+	//   who deletes agents/task.md meant to delete it — refusing that would
+	//   make the file undeletable.
+	onPurpose := make(map[string]bool, len(removed))
+	for _, id := range removed {
+		onPurpose[id] = true
+	}
 	var lost []string
 	for id := range before.Agents {
+		if onPurpose[id] {
+			continue
+		}
 		if _, ok := after.Agents[id]; !ok {
 			lost = append(lost, id)
 		}
@@ -441,18 +453,22 @@ func lostAgentMessage(id string, after *Config) string {
 //	parse: then nothing is known to be working, and the change may only
 //	add. (That is also how a broken file gets fixed — the editor's draft
 //	replaces it, so the trial tree is the one that parses.)
-func (s *Service) agentsLostByChange(after *Config) []string {
+//
+// ★ `removed` names the agents the change deletes on purpose — they are not
+//
+//	lost, they are gone because the user said so.
+func (s *Service) agentsLostByChange(after *Config, removed []string) []string {
 	before, err := s.loadWithMany(nil)
 	if err != nil {
 		return nil
 	}
-	return agentsLostBy(before, after)
+	return agentsLostBy(before, after, removed)
 }
 
 // checkNoAgentLost refuses a change that would take a working agent out of
 // the tree.
-func (s *Service) checkNoAgentLost(after *Config, rel string) error {
-	lost := s.agentsLostByChange(after)
+func (s *Service) checkNoAgentLost(after *Config, rel string, removed []string) error {
+	lost := s.agentsLostByChange(after, removed)
 	if len(lost) == 0 {
 		return nil
 	}
@@ -483,7 +499,7 @@ func (s *Service) Write(rel string, content []byte, baseRev string) (rev string,
 	// ★ The gate the tree needs: a change may not take a working agent out
 	//   of it. The trial tree loads either way — an agent that cannot run is
 	//   left out — so without this the gate would have no teeth.
-	if err := s.checkNoAgentLost(trial, rel); err != nil {
+	if err := s.checkNoAgentLost(trial, rel, nil); err != nil {
 		return "", nil, err
 	}
 
@@ -527,7 +543,7 @@ func (s *Service) WriteMany(files []File, baseRev string) (rev string, cfg *Conf
 	}
 	// ★ The same gate as the single-file write: a batch may not take a
 	//   working agent out of the tree either.
-	if lost := s.agentsLostByChange(trial); len(lost) > 0 {
+	if lost := s.agentsLostByChange(trial, nil); len(lost) > 0 {
 		return "", nil, &WriteError{
 			Kind:    ErrMergeRejected,
 			Rel:     relsOf(files),
@@ -587,8 +603,174 @@ func relsOf(files []File) string {
 	return strings.Join(out, ", ")
 }
 
+// deletedAgent names the agent a deleted path removes, and "" when the path
+// is not an agent file.
+//
+// ★ Deleting an agent **on purpose** is not the gate's business: the gate
+//
+//	exists for the agent that stops working by accident. Without this, no
+//	agent file could ever be deleted.
+func deletedAgent(rel string) []string {
+	dir, base := path.Split(rel)
+	if dir != DirAgent+"/" {
+		return nil
+	}
+	return []string{strings.TrimSuffix(base, ".md")}
+}
+
+// reference is one thing in the tree that names a file, and how it names it.
+type reference struct {
+	// file is the file that holds the reference.
+	file string
+	// what says it in the user's terms: `mcps: [fetch]`, `model: openai/fast`.
+	what string
+}
+
+// referencesTo returns the files in the tree that still name rel.
+//
+// ★ The three partitions that are named by others, and what names them:
+//
+//	`mcps/<server>.yaml` ← an agent's `mcps:` list
+//	`llm/<provider>.yaml` ← an agent's `model:`
+//	`agents/<id>.md` ← another agent's `subagents:` list
+//
+//	Nothing else is named: a `tools/` file is named by the tool registry, and
+//	an agent's `tools:` list names **tools**, not files.
+func (c *Config) referencesTo(rel string) []reference {
+	dir, base := path.Split(rel)
+	var out []reference
+	switch dir {
+	case DirMCP + "/":
+		server := strings.TrimSuffix(base, ".yaml")
+		for _, id := range c.AgentNames() {
+			a := c.Agents[id]
+			if a == nil {
+				continue
+			}
+			for _, name := range a.MCPServers {
+				if name == server {
+					out = append(out, reference{
+						file: agentFile(a, id),
+						what: fmt.Sprintf("mcps: [%s]", server),
+					})
+				}
+			}
+		}
+	case DirLLM + "/":
+		provider := strings.TrimSuffix(base, ".yaml")
+		for _, id := range c.AgentNames() {
+			a := c.Agents[id]
+			if a == nil {
+				continue
+			}
+			ref, _ := ParseRef(a.ModelRef)
+			if ref.ProviderID == provider {
+				out = append(out, reference{
+					file: agentFile(a, id),
+					what: fmt.Sprintf("model: %s", a.ModelRef),
+				})
+			}
+		}
+	case DirAgent + "/":
+		id := strings.TrimSuffix(base, ".md")
+		for _, other := range c.AgentNames() {
+			a := c.Agents[other]
+			if a == nil {
+				continue
+			}
+			for _, sub := range a.SubAgents {
+				if sub == id {
+					out = append(out, reference{
+						file: agentFile(a, other),
+						what: fmt.Sprintf("subagents: [%s]", id),
+					})
+				}
+			}
+		}
+	}
+	return out
+}
+
+// checkNotReferenced refuses a deletion that something else still names.
+//
+// ★ The tree is read as it is **now**, not as it would be after the delete:
+//
+//	the references live in files that the deletion does not touch. And the
+//	tree that is read is the one on disk — when it does not load, nothing is
+//	known to be referring to anything, and the trial load's own error is the
+//	only answer there is.
+//
+// ★ The refusal names the **referrer** and what to do about it. "The tree
+//
+//	does not load" is a symptom, and a user cannot act on a symptom.
+func (s *Service) checkNotReferenced(rel string) error {
+	before, err := s.loadWithMany(nil)
+	if err != nil {
+		return nil
+	}
+	refs := before.referencesTo(rel)
+	if len(refs) == 0 {
+		// ★ The default agent is not "referenced" by anybody, but a tree
+		//   needs one: removing it leaves a tree that cannot be loaded, and
+		//   the load error ("agents/main.md does not exist") reads like a
+		//   broken file rather than a refused deletion.
+		if base := path.Base(rel); base == DefaultAgentID+".md" &&
+			path.Dir(rel) == DirAgent {
+			return &WriteError{
+				Kind:    ErrMergeRejected,
+				Rel:     rel,
+				Message: "the default agent cannot be deleted: a tree needs one",
+			}
+		}
+		return nil
+	}
+	return &WriteError{
+		Kind: ErrMergeRejected,
+		Rel:  rel,
+		Message: fmt.Sprintf("it is still referenced: %s; remove %s first, then delete this file",
+			describeReferences(refs), referenceSubject(refs)),
+	}
+}
+
+// describeReferences names the files that still hold a reference.
+//
+// ★ The path of the deleted file is **not** repeated: the envelope carries
+//
+//	it as a field (`WriteError.Rel`), and a message that names it too makes
+//	the reader read it twice.
+func describeReferences(refs []reference) string {
+	parts := make([]string, 0, len(refs))
+	for _, r := range refs {
+		parts = append(parts, fmt.Sprintf("%s (%s)", r.file, r.what))
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return fmt.Sprintf("%d files still name it — %s", len(parts), strings.Join(parts, ", "))
+}
+
+// referenceSubject says what has to be removed.
+func referenceSubject(refs []reference) string {
+	if len(refs) == 1 {
+		return "that reference"
+	}
+	return "those references"
+}
+
 func (s *Service) Delete(rel string) (cfg *Config, err error) {
 	if _, err := s.validateWritable(rel); err != nil {
+		return nil, err
+	}
+	// ★ **The gate that names the referrer.** It runs *before* the trial
+	//   load, because the trial load's error is exactly the symptom this
+	//   replaces: deleting `mcps/fetch.yaml` while an agent mounts "fetch"
+	//   makes the tree fail to load, and the load error reads like "your
+	//   configuration is broken" — with the deleted file's name in front
+	//   of it and the agent's nowhere in it.
+	//
+	//   What the user can act on is the reference: "agents/task.md still
+	//   lists this server — remove it there first".
+	if err := s.checkNotReferenced(rel); err != nil {
 		return nil, err
 	}
 	m := &mutation{Rel: rel, Delete: true}
@@ -600,7 +782,7 @@ func (s *Service) Delete(rel string) (cfg *Config, err error) {
 	// ★ The gate, on the delete path too: removing the provider that an
 	//   agent names takes that agent out of the tree just as surely as
 	//   pointing it at a model that does not exist.
-	if err := s.checkNoAgentLost(trial, rel); err != nil {
+	if err := s.checkNoAgentLost(trial, rel, deletedAgent(rel)); err != nil {
 		return nil, err
 	}
 

@@ -800,6 +800,11 @@ The write path has several gates:
   refusal is shown on the file you are editing — that is the change being made — and Save
   stays disabled until the agent is back in the tree. Adding an agent, or editing
   something unrelated, is never refused this way.
+- **A delete that something still names is refused, and the refusal names the referrer.**
+  Deleting `mcps/fetch.yaml` while an agent still mounts it would leave that agent
+  pointing at a server that is not there. The message says **which file still names it**
+  and **what to remove** — remove that reference first, then delete the file. The same
+  goes for a model profile an agent uses and for an agent another agent delegates to.
 - `server/` is **not editable** (not hot-reloaded, so a change needs a restart).
 - **Literal secrets are rejected** — `api_key must be a reference, not a literal`. Use
   `${ENV_VAR}` or `@file:/path`.

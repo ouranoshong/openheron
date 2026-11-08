@@ -93,7 +93,7 @@ func (s *Service) Diagnostics(rel string, content []byte) (*Diagnostics, error) 
 	//
 	//   The issue is on the file being edited: it is **this** change that
 	//   is refused. The agent that would be lost is named in the message.
-	lost := s.agentsLostByChange(trial)
+	lost := s.agentsLostByChange(trial, nil)
 	if len(lost) > 0 {
 		d.OK = false
 		issues := make([]Issue, 0, len(lost))

@@ -751,14 +751,29 @@ func (c *Config) validateMCP() error {
 			if _, ok := c.MCPs[name]; ok {
 				continue
 			}
-			return fmt.Errorf("agent %s lists the MCP server %q, which is not declared under %s/ (declared: %s)",
-				id, name, DirMCP, strings.Join(known, ", "))
+			// ★ The error belongs to the **agent's** file, not to the
+			//   server that is missing: the agent is where the reference
+			//   lives, and it is the only place the user can remove it. A
+			//   path-less error lands on the tree in the editor, and a
+			//   reader there cannot click their way to the fix.
+			return &FileError{Path: agentFile(a, id), Err: fmt.Errorf(
+				"agent %s lists the MCP server %q, which is not declared under %s/ (declared: %s)",
+				id, name, DirMCP, strings.Join(known, ", "))}
 		}
 		if err := c.checkAgentMCPNames(id, a); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// agentFile is the path of an agent's file, with the default the loader
+// would have used.
+func agentFile(a *decl.Agent, id string) string {
+	if a != nil && a.File != "" {
+		return a.File
+	}
+	return DirAgent + "/" + id + ".md"
 }
 
 // checkAgentMCPNames refuses a tools: list that names a server the agent

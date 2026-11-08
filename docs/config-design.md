@@ -491,18 +491,18 @@ agent 上，而且完全不提原来那个为什么不见了。代价是没有�
 `model:` 改成一个不存在的模型，就会**静默**让 `main` 消失。这正是用户看不见的那种退化。
 
 ```go
-// agentkit/spec/write.go:385 / :502 —— 写与删除各有一次试装，各有一道闸门
-if err := s.checkNoAgentLost(trial, rel); err != nil {
+// agentkit/spec/write.go:502 / :785 —— 写与删除各有一次试装，各有一道闸门
+if err := s.checkNoAgentLost(trial, rel, nil); err != nil {
 	return "", nil, err
 }
 ```
 
 批写那道是同一个判断，写在原地而不是包成一次调用 —— 它的错误要带上**整批**路径
-（`agentkit/spec/write.go:431` `relsOf(files)`），而不是其中一个文件：
-`if lost := s.agentsLostByChange(trial); len(lost) > 0 { … }`。
+（`agentkit/spec/write.go:598` `relsOf(files)`），而不是其中一个文件：
+`if lost := s.agentsLostByChange(trial, nil); len(lost) > 0 { … }`。
 
 规则是一条：**可以往树里加，可以放着已经坏的不动，不可以把一个本来能跑的 agent 拿出去。**
-比较的是**两边都 settle 过**的树（`agentkit/spec/write.go:311` `agentsLostBy`）—— 一个本来
+比较的是**两边都 settle 过**的树（`agentkit/spec/write.go:411` `agentsLostBy`）—— 一个本来
 就已经在树外的 agent 在两边都不在，改动不碰它就不该算在改动头上。
 
 ★ **磁盘上的树装不上时，只许增不许减**（`agentkit/spec/write.go:343` `agentsLostByChange`
@@ -512,6 +512,49 @@ if err := s.checkNoAgentLost(trial, rel); err != nil {
 ★ 诊断里也有一道，落在**被编辑的文件**上（`agentkit/spec/diag.go:96`）：用户应该在**打字的时候**
 听到它，而不是在按下 Save 之后。它排在那个文件自身问题的**后面** —— 本文件的问题是用户此刻
 能改的，掉出树是它的**后果**；先读后果的人无从下手。
+
+#### 删除门：谁还指着它
+
+★ 删除一个**别人还指着**的文件是一次降级，与写入门是同一条纪律：树里少了一个被点名的
+server / provider / agent，于是它不再被加载，而那份引用变成了一个「指向不存在的东西」的指针。
+
+★ **闸门跑在试装之前**（`agentkit/spec/write.go:773` `checkNotReferenced`）。试装的装载错误
+正是要取代的症状：它点名被删掉的那个文件，把真正的原因藏在别处 ——
+`mcps/fetch.yaml: agent task lists the MCP server "fetch", which is not declared under mcps/ (declared: deepwiki, time)`。
+★ 用户要动手改的是**引用它的那一处**，不是那个被删的文件。
+
+⇒ 拒绝的文案点名**谁引用了它**与**移除什么**：
+
+```
+mcps/fetch.yaml: it is still referenced: agents/task.md (mcps: [fetch]); remove that reference first, then delete this file
+```
+
+★ 路径是**一个字段**，不是消息的前缀 —— `WriteError.Rel` 由 API 拼成
+`rel + ": " + message`（`api/v2_settings.go:65` `settingsFail`），消息自己再说一遍路径，
+读者就要读两遍。
+
+★ 被引用的分区只有三个，各有各的引用者（`agentkit/spec/write.go:639` `referencesTo`）：
+
+| 被删的文件 | 谁引用它 |
+|---|---|
+| `mcps/<server>.yaml` | 一个 agent 的 `mcps:` 清单 |
+| `llm/<provider>.yaml` | 一个 agent 的 `model:` |
+| `agents/<id>.md` | 另一个 agent 的 `subagents:` 清单 |
+
+★ **有意删掉的 agent 不算「掉出树」**（`agentsLostBy` 的第三个参数 `removed`，
+`agentkit/spec/write.go:411`）：写入门问的是「本来能跑的 agent 是不是不再能跑了」，
+而用户**主动**删掉一个 agent 是另一件事 —— 不然的话任何 agent 文件都删不掉。
+
+★ **默认 agent 单独一条拒绝**：`the default agent cannot be deleted: a tree needs one`
+—— 树总得有一个默认 agent，而试装的装载错误说的是「agents/main.md does not exist」，
+那读起来像一个坏文件，而不是一次被拒绝的删除。
+
+★ **磁盘上的树装不上时，删除闸门退化为试装的错误** —— 与「只许增不许减」同一纪律：
+不知道谁引用了什么的时候，不能凭猜测拒绝。
+
+★ **装载期那个错误落在引用它的那个文件上**（`agentkit/spec/load.go:738` `validateMCP`
+返回 `&FileError{Path: agentFile(a, id)}`，路径由 `agentkit/spec/load.go:772` 给出）：
+诊断落在「整棵树」上时，用户点不进去。
 
 ## 5. 配置根：三级，没有探测
 
@@ -2408,6 +2451,13 @@ agentkit/spec/write.go:persist.AtomicWrite
 | `AWriteThatWouldTakeAWorkingAgentOutIsRefused` | ★ 写入把 `main` 指向未声明的模型 ⇒ `ErrMergeRejected`，磁盘不动（`agentkit/spec/write_gate_agent_test.go:16`） |
 | `ABatchThatWouldTakeAWorkingAgentOutIsRefused` | 批写同样被拒，整批一个字节都不落盘 |
 | `ADeleteThatWouldTakeAWorkingAgentOutIsRefused` | 删掉 agent 引用的 provider 文件 ⇒ 同样被拒 |
+| `TestDeletingAMountedServerNamesTheAgentThatMountsIt` | ★ 删除闸门点名**引用它的那个 agent 文件**与移除什么（§4.6） |
+| `TestDeletingAMountedServerNamesEveryAgentThatMountsIt` | 两个引用者 ⇒ 两个都点名 |
+| `TestDeletingAProviderNamesTheAgentsThatUseIt` | provider 同理，`model:` 一并点名 |
+| `TestDeletingADelegatedAgentNamesItsParent` | 被委派的 agent 同理，`subagents:` 一并点名 |
+| `TestDeletingTheDefaultAgentIsRefusedWithItsOwnReason` | ★ 默认 agent 单独一条拒绝，不靠装载错误说事 |
+| `TestDeletingAnAgentNobodyNamesIsAllowed` | 没人引用的 agent 删得掉 |
+| `TestTheUndeclaredServerErrorLandsOnTheAgentsFile` | ★ 装载期的错误落在**引用它的那个 agent 文件**上 |
 | `AWriteThatBringsAnAgentIntoTheTreeIsAccepted` | 把 agent **带进**树里的改动放行 —— 闸门只管往外拿 |
 | `AChangeUnrelatedToABrokenAgentIsAccepted` | 树里本来就有一个坏的 agent 时，无关改动放行（比的是 settle 后的树） |
 | `DiagnosticsRefuseAChangeThatWouldTakeAWorkingAgentOut` | 诊断里也拦，且 issue 落在**被编辑的文件**上 |

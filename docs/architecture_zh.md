@@ -323,6 +323,14 @@ Agent 的技能；而技能工具只有在确实有技能可加载时才值得�
 - 密钥字面量被拒：`api_key must be a reference, not a literal: use ${ENV_VAR} or @file:/path`
   —— 防止密钥进了仓库。
 - 乐观并发：带 `baseRevision`，与磁盘上的 revision 不符就报冲突。
+- 一次改动不许把一个**本来能跑的 Agent** 带出树外（`agentkit/spec/write.go:470`
+  `checkNoAgentLost`）：拿磁盘上 settle 后的树与试装后 settle 的树比，写、批写或删除
+  里凡是会把一个本来能跑的 Agent 弄丢的都拒绝。★ 本来就在树外的 Agent 两边都不在，
+  所以一次无关的编辑永远不会被算成「把它弄丢」。
+- **还有东西指着它**的删除被拒（`agentkit/spec/write.go:706` `checkNotReferenced`），
+  而且拒绝点名是谁在指：是哪个文件还在指着被删的那个、要移除什么。★ 这道闸门跑在
+  试装之前，因为试装的装载错误正是它要取代的症状 —— 那个错误点名被删掉的文件，
+  把真正的原因藏在别处。
 
 ## 4. Agent 装配
 
