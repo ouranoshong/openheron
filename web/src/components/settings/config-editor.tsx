@@ -61,18 +61,33 @@ function sectionOf(path: string): string {
   return i < 0 ? "" : path.slice(0, i)
 }
 
+/**
+ * The language of one file, decided by what the file **is**.
+ *
+ * ★ The suffix wins, not the partition name. The partition says where the
+ *   file lives; the suffix says what it is written in. An earlier version
+ *   matched the section name and only knew two of them, so `tools/` and
+ *   `mcps/` came up with no language extension at all — the editor showed
+ *   them as flat text while `llm/` was colored. Both partitions ship YAML,
+ *   exactly like `llm/`.
+ *
+ * ★ `agents/` is the exception: an agent file is a YAML frontmatter block
+ *   (what the server parses) followed by a Markdown body (the prompt). Both
+ *   halves are colored, so the frontmatter reads as YAML and the body as
+ *   prose.
+ */
+function languageOf(path: string): Extension[] {
+  const section = sectionOf(path)
+  if (section === "agents") return [yamlFrontmatter({ content: markdown() })]
+  if (path.endsWith(".md")) return [markdown()]
+  if (path.endsWith(".yaml") || path.endsWith(".yml")) return [yaml()]
+  return []
+}
+
 export function ConfigEditor({ path, value, onChange, readOnly = false, dark = false }: ConfigEditorProps) {
   const ref = useMemo(() => ({ current: null as ReactCodeMirrorRef | null }), [])
 
   const extensions = useMemo(() => {
-    const section = sectionOf(path)
-    const lang: Extension[] =
-      section === "agents"
-        ? [yamlFrontmatter({ content: markdown() })]
-        : section === "llm"
-          ? [yaml()]
-          : []
-
     return [
       lineNumbers(),
       highlightActiveLine(),
@@ -83,7 +98,7 @@ export function ConfigEditor({ path, value, onChange, readOnly = false, dark = f
       syntaxHighlighting(theHighlight(dark)),
       theTheme(dark),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
-      ...lang,
+      ...languageOf(path),
       EditorView.lineWrapping,
       EditorState.readOnly.of(readOnly),
       EditorView.editable.of(!readOnly),

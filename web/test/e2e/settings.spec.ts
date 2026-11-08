@@ -20,6 +20,22 @@ async function selectFile(page: Page, path: string): Promise<void> {
   await page.locator(`${LIST} button`, { hasText: path }).first().click()
 }
 
+/**
+ * How many tokens in the editor carry a color of their own.
+ *
+ * ★ The editor's base color is the app's foreground; a syntax-highlighted
+ *   token is a span whose computed color differs from it. Flat text has
+ *   zero. This is how "the file is colored" is checked without pinning the
+ *   exact palette — the palette is a theme decision, the coloring is not.
+ */
+async function coloredTokens(page: Page): Promise<number> {
+  const base = await page.locator(EDITOR).evaluate((el) => getComputedStyle(el).color)
+  return page.locator(`${EDITOR} span`).evaluateAll(
+    (els, b) => els.filter((e) => getComputedStyle(e).color !== (b as string)).length,
+    base,
+  )
+}
+
 test.beforeEach(async () => {
   await resetBackend()
 })
@@ -75,6 +91,24 @@ test.describe("opening", () => {
     await selectFile(page, "agents/main.md")
     await expect(page.locator(EDITOR)).toContainText("model: deepseek/flash")
     await expect(page.locator(EDITOR)).toContainText("body")
+  })
+
+  // ★ The editor used to color the file by the **section name**, and it knew
+  //   only two names. tools/ and mcps/ ship YAML exactly like llm/ does, and
+  //   they came up with no language at all — flat text in a column where the
+  //   neighboring file was colored. The language follows the file now.
+  test("a file under tools/ is colored as YAML", async ({ page }) => {
+    await openSettings(page)
+    await selectFile(page, "tools/http.yaml")
+    await expect(page.locator(EDITOR)).toContainText("methods")
+    expect(await coloredTokens(page)).toBeGreaterThan(0)
+  })
+
+  test("a file under mcps/ is colored as YAML", async ({ page }) => {
+    await openSettings(page)
+    await selectFile(page, "mcps/filesystem.yaml")
+    await expect(page.locator(EDITOR)).toContainText("transport")
+    expect(await coloredTokens(page)).toBeGreaterThan(0)
   })
 
   // ★ The editor used to paint itself white: the library's default theme

@@ -1161,6 +1161,10 @@ export function startFakeServer(port = 0): FakeServer {
     settingsRev = 0
     const put = (path: string, body: string) => settingsDisk.push({ path, body, rev: nextRev() })
     put("tools/http.yaml", "methods: [get]\nallows: [request_get]\n")
+    // ★ An mcps/ file on disk, so the editor can be opened on the partition
+    //   that carries YAML like tools/ does. Without it the MCP partition has
+    //   no item to select, and "mcps/ is not highlighted" cannot be seen.
+    put("mcps/filesystem.yaml", "transport: stdio\ncommand: npx\nargs:\n  - mcp-server-filesystem\ntimeout: 30s\n")
     put("agents/main.md", "---\nmodel: deepseek/flash\ndescription: root\n---\nbody\n")
     put("llm/deepseek.yaml", "type: openai\nbase_url: https://x\napi_key: ${KEY}\nmodels:\n  - id: flash\n")
     put("server/config.yaml", 'listen_addr: ":8080"\n')
@@ -1191,6 +1195,7 @@ export function startFakeServer(port = 0): FakeServer {
     templates: {
       agents: "---\nmodel: \ndescription: \n---\n\n# available models: deepseek/flash\n",
       llm: "type: openai\nbase_url: \napi_key: ${}\nmodels: []\n",
+      { path: "mcps/filesystem.yaml", exists: true, hot: true, revision: "r1" },
       mcps: "transport: stdio\ncommand: mcp-example-server\nargs: []\ntimeout: 30s\ncall_timeout: 60s\n",
       // ★ The tools section template is **nothing but comments**, exactly as
       //   the real server ships it. A file built from it has no YAML
