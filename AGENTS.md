@@ -243,6 +243,15 @@ docs(readme): drop the API table, it lives in the user manual
   or a selector in the store.
 - **Every interface change needs a Playwright spec** (reasons and acceptance requirements are in
   the "Testing" section below).
+- **The chat's width is one token, not a number repeated in six places.** `--chat-column`,
+  `--prose-column` and `--chat-gutter` live in `web/src/index.css`: the **blocks** (tables,
+  code, tool cards) take the whole column and the **prose** stops earlier, because a paragraph
+  of sixty characters is a hard read. ★ A table has a **floor** (7rem per column — that is
+  what makes a table of many columns scroll inside its own wrapper) and a **ceiling** (28rem
+  per cell — that is what makes a long sentence wrap instead of stretching the table).
+- **A color is a token, never a literal.** `sky-500` in a component is a bug: the status
+  colors are `--info`, `--warning` and `--success`, and the light and the dark palette are
+  **the same token set with two values** — so a color that exists in one exists in the other.
 
 ## Testing
 

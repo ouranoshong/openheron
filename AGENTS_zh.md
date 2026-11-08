@@ -205,6 +205,15 @@ docs(readme): drop the API table, it lives in the user manual
 - **zustand 的 selector 与组件里都不要写 `?? []`**。造新数组/新对象会让
   快照永远「变了」→ 无限重渲染 → 白屏。用模块级常量或 store 里的 selector。
 - **界面改动必须配 Playwright spec**（理由与验收要求见下节「测试」）。
+- **对话的宽度是一个 token,不是同一个数字抄六遍。** `--chat-column`、
+  `--prose-column` 与 `--chat-gutter` 住在 `web/src/index.css`：
+  **块级内容**（表格、代码、工具卡）吃满整列，**正文**停得更早 ——
+  六十个字符长的一段话是难读的。★ 表格有**下限**（每列 7rem ——
+  列多的表因此在自己的框里滚动）与**上限**（每格 28rem —— 长句因此换行，
+  而不是把表格撑宽）。
+- **颜色是 token,不是字面量。** 组件里写 `sky-500` 是 bug：状态色是
+  `--info`、`--warning` 与 `--success`；浅色与暗色是**同一套 token 的两组取值** ——
+  一边有的颜色另一边也有。
 
 ## 测试
 
