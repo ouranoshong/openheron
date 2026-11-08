@@ -1034,16 +1034,29 @@ the contract on its own — the extractor does not read one language to help the
 
 ### 5.5 Frontend unit tests
 
-`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **21 test files, 327
+`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **21 test files, 271
 cases**, covering the pure layers: `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
-`thinking.ts` / `turns.ts` / `approval.ts` / `settings-validate.ts` and friends.
+`thinking.ts` / `turns.ts` / `approval.ts` / `settings-store.ts` and friends.
 
-★ **The client keeps no list of the sections it may edit.** The **manifest** is the
-truth — the server owns the partition table (`agentkit/spec/config.go`'s `Categories`) —
-and the client passes the manifest's editable categories into the validator
-(`web/src/lib/settings-validate.ts`'s `validatePath(path, editable)`). ★ A client that
-keeps its own list is a second truth, and the day a partition is added the client says
-it does not exist: that is where "mcps/ is not editable" came from.
+★ **The client keeps no configuration rules at all.** It used to: a copy of the
+partition table, the tools/ file whitelist, the MCP server-name pattern, and a per-key
+scan of every file, written when validation was synchronous. The server has always known
+the line numbers — yaml.v3 reports them — so the copy earned nothing but drift, and it
+had drifted (`corpus` where the loader says `corpus_dir`). `settings-validate.ts` is now
+string shaping and rendering: `issueLine`, `suggestPath`, `resolveTemplate`.
+
+★ **What replaced it is a round trip with a stamp.** An edit schedules one question 250 ms
+after the typing stops (`web/src/lib/settings-store.ts:240` `scheduleValidate`), and a
+save asks again immediately and cancels the pending one. Every reply is stamped
+(`:229` `validateSeq`): a reply that is no longer the newest, or no longer about the
+selected file, is dropped — otherwise the slower of two answers wins, which is the one
+about text the user has already changed.
+
+★ **A rule that was the client's moved to the server rather than disappearing.** An
+agent's `reasoning` level is checked against the model's declared vocabulary in
+`agentkit/spec/load.go:553` `checkReasoning` — where every file passes, not only the
+edits made in the settings editor. ★ Deleting a client rule is only a simplification if
+the server already has it; that is the question to ask of the next one.
 
 ★ `store.test.ts` exercises the **whole zustand store**, so it stubs
 `globalThis.localStorage` and `globalThis.fetch` before running
@@ -1056,8 +1069,9 @@ do not touch" assertions.
 
 ### 5.6 E2E
 
-`make test-e2e` → `playwright test`, **12 specs, 152 cases**: `chat` `multi-agent`
-`agents` `composer-meta` `composer-autocomplete` `settings` `history` `scroll`.
+`make test-e2e` → `playwright test`, **12 specs, 150 cases**: `agents` `chat`
+`compaction` `composer-autocomplete` `composer-meta` `history` `mcps` `multi-agent`
+`reattach` `scroll` `session-busy` `settings`.
 
 Playwright starts two servers itself (`webServer` in `playwright.config.ts`): the fake
 backend (`web/test/serve.ts`) and Vite (`--mode test`).

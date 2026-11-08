@@ -2378,7 +2378,7 @@ The verification of the rows that are not obvious from the code:
 ## 11. Test matrix
 
 ★ The table below lists **cases that actually exist** (the `agentkit/spec` package has
-**164** `Test` functions), not a plan. A case that never landed has been removed or
+**180** `Test` functions), not a plan. A case that never landed has been removed or
 replaced by the real case that covers the same behaviour — listing a test that does
 not exist is worse than not listing it.
 
@@ -2448,7 +2448,7 @@ not exist is worse than not listing it.
 
 ### 11.5 Regression
 
-★ **`go test ./...` is green**: **980** top-level cases in the root module, **21**
+★ **`go test ./...` is green**: **1013** top-level cases in the root module, **21**
 packages carry tests.
 
 ★ **`go test -race ./...` is green as well** — it was not, and the four races it
@@ -2692,8 +2692,8 @@ There are also two **deliberately retained environment variables**:
 | `agentkit/spec` pulls in no framework — only the standard library plus `yaml.v3` | the imports of `agentkit/spec/config.go:3` |
 | unknown fields error | `decodeStrict` turns on `yaml.Decoder.KnownFields` (`agentkit/spec/config.go:415`) |
 | the `deferred` list is printed at startup | `main.go:198` |
-| the number of top-level cases in `agentkit/spec` | `grep -rhoP '^func \KTest\w+' agentkit/spec/ \| sort -u \| wc -l` → **164** |
-| the number of top-level cases in the whole repository | `grep -rhoP '^func \KTest\w+' --include='*_test.go' . \| sort -u \| wc -l` → **981**, of which one belongs to the nested module `sandbox-kit/examples/demo-project` ⇒ **980** in the root module |
+| the number of top-level cases in `agentkit/spec` | `grep -rhoP '^func \KTest\w+' agentkit/spec/ \| sort -u \| wc -l` → **180** |
+| the number of top-level cases in the whole repository | `grep -rhoP '^func \KTest\w+' --include='*_test.go' . \| sort -u \| wc -l` → **1014**, of which one belongs to the nested module `sandbox-kit/examples/demo-project` ⇒ **1013** in the root module |
 | the number of packages carrying tests in the root module | `go list -f '{{.ImportPath}} {{len .TestGoFiles}} {{len .XTestGoFiles}}' ./... \| awk '$2+$3>0' \| wc -l` → **21** |
 | the whole test suite is green | `go test ./...` → every package `ok` |
 | `-race` is green now | `go test -race ./...` → every package is `ok`; §11.5 records what each of the four races was |
@@ -2707,9 +2707,11 @@ There are also two **deliberately retained environment variables**:
 | `ConfigFromEnv` lives in `agentkit/build` | `agentkit/build/config.go:15` |
 | `EINO_EXT_SKILLS_DIR` is only a fallback | `resolveSkillsDir` (`agentkit/build/skill.go:188`) |
 | the six `/v2/settings` routes | `api/v2_files.go:67` |
-| the `policy/limits.yaml` template key | `api/v2_settings.go:143` |
-| the frontend dispatches the validation by path | `web/src/lib/settings-validate.ts:128` |
-| the frontend prefers the template by path | `resolveTemplate` (`web/src/lib/settings-validate.ts:108`), called from `web/src/components/settings/new-file-dialog.tsx:134` |
+| the manifest is assembled once, in `spec` | `(s *Service) Manifest` (`agentkit/spec/manifest.go:68`) and the handler that only serialises it (`api/v2_settings.go:91`) |
+| validation answers with issues that carry a line | `Issue` (`agentkit/spec/diag.go:26`), `(s *Service) Diagnostics` (`agentkit/spec/diag.go:71`) |
+| a line number survives the frontmatter block | `parseShift` (`agentkit/spec/diag.go:143`) + `splitFrontmatter`'s start line (`agentkit/spec/expand.go:48`) |
+| the editor asks the server instead of validating itself | `scheduleValidate` (`web/src/lib/settings-store.ts:240`) and the debounce it uses (`:201`) |
+| the frontend prefers the template by path | `resolveTemplate` (`web/src/lib/settings-validate.ts:94`), called from `web/src/components/settings/new-file-dialog.tsx` |
 | `context_window` is visible in the introspection response | `api/v2_introspect.go:265` |
 | the `spec` → `run` exception never existed here | `git grep -n "agentkit/run" fa7131a -- agentkit/spec` → a comment, and nothing else |
 | the MCP namespace is composed in one place | `mcpExposedName` (`agentkit/build/mcptools.go:140`) + the prefix and the separator constants (`agentkit/spec/decl/decl.go:336`, `:345`) |
@@ -2768,7 +2770,7 @@ but only two actually run" is the hardest class of problem to track down.
 |---|---|---|
 | the configuration root is resolved by "env → probing upwards → itself" | it is resolved in exactly **three** levels: an explicit `--config-dir` → `$OPENHERON_CONFIG_DIR` → `<projectRoot>/.openheron` (created when missing), and there is deliberately **no upward search** of ancestor directories (`agentkit/spec/config.go:144`) | once the configuration root depends on "where the process was started from", the same command run from another directory reads a different configuration — and a test run ends up reading the developer's own configuration too (see `AGENTS.md`) |
 | the test instance is isolated by "pre-seeding a `.heron/`" | the isolation is `.env.test` plus the `make test-env-backend` / `test-env-reset` / `test-env-sync` targets: the instance runs on `:18099` with **its own configuration root and its own session directory** | different ports are not data isolation — openheron writes the sessions under `.openheron/state/`, so a test that writes there pollutes the real history |
-| the `agentkit/spec` package has **115** `Test` functions | it has **164** | the package grew with the code; the table above lists the cases that actually exist |
+| the `agentkit/spec` package has **115** `Test` functions | it has **180** | the package grew with the code; the table above lists the cases that actually exist |
 | the module path is `heron/...` | it is `github.com/ouranoshong/openheron/...` | `go.mod` |
 | the only heron dependency of `agentkit/spec` is `persist` | there are **four**: `agentkit/obs`, `agentkit/spec/decl`, `persist` and itself | `obs` is the one log sink, and the split of "declaration" (`decl`) from "behaviour" (`spec`) is openheron's own — see [architecture.md](architecture.md) §2.1 |
 | [architecture.md](architecture.md) §2.2 says `agentkit/spec` imports `kb` | the **production** code does not — only the case file `agentkit/spec/policy_contract_test.go:7` does | validating the knowledge-base configuration only needs the declaration (`decl.Model.IsEmbedding`), not the `kb` package itself; the dependency list in §2 of that document counts the test |

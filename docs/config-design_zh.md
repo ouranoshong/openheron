@@ -2183,7 +2183,7 @@ agentkit/spec/write.go:persist.AtomicWrite
 
 ## 11. 测试矩阵
 
-★ 下表是**实际存在的用例**（`agentkit/spec` 包 **164 个** `Test` 函数），不是计划。从未
+★ 下表是**实际存在的用例**（`agentkit/spec` 包 **180 个** `Test` 函数），不是计划。从未
 落地的用例已被删掉或换成真正覆盖同一行为的那个 —— 列一个不存在的测试比不列更糟。
 
 ### 11.1 分层与优先级
@@ -2481,8 +2481,8 @@ retry:
 | `agentkit/spec` 不牵进任何框架 —— 只有标准库加 `yaml.v3` | `agentkit/spec/config.go:3` 的 import |
 | 未知字段报错 | `decodeStrict` 打开 `yaml.Decoder.KnownFields`（`agentkit/spec/config.go:415`） |
 | `deferred` 列表在启动时被打印 | `main.go:198` |
-| `agentkit/spec` 的顶层用例数 | `grep -rhoP '^func \KTest\w+' agentkit/spec/ \| sort -u \| wc -l` → **164** |
-| 全仓顶层用例数 | `grep -rhoP '^func \KTest\w+' --include='*_test.go' . \| sort -u \| wc -l` → **981**，其中一条属于嵌套模块 `sandbox-kit/examples/demo-project` ⇒ 根模块里是 **980** |
+| `agentkit/spec` 的顶层用例数 | `grep -rhoP '^func \KTest\w+' agentkit/spec/ \| sort -u \| wc -l` → **180** |
+| 全仓顶层用例数 | `grep -rhoP '^func \KTest\w+' --include='*_test.go' . \| sort -u \| wc -l` → **1014**，其中一条属于嵌套模块 `sandbox-kit/examples/demo-project` ⇒ 根模块里是 **1013** |
 | 根模块里有测试的包数 | `go list -f '{{.ImportPath}} {{len .TestGoFiles}} {{len .XTestGoFiles}}' ./... \| awk '$2+$3>0' \| wc -l` → **21** |
 | 整个测试套件是绿的 | `go test ./...` → 每个包都是 `ok` |
 | `-race` 现在是绿的 | `go test -race ./...` → 每个包都是 `ok`；修复过程见 §11.5 |
@@ -2496,9 +2496,11 @@ retry:
 | `ConfigFromEnv` 住在 `agentkit/build` | `agentkit/build/config.go:15` |
 | `EINO_EXT_SKILLS_DIR` 只是一个兜底 | `resolveSkillsDir`（`agentkit/build/skill.go:188`） |
 | 那六条 `/v2/settings` 路由 | `api/v2_files.go:67` |
-| `policy/limits.yaml` 的模板键 | `api/v2_settings.go:143` |
-| 前端按路径分派校验 | `web/src/lib/settings-validate.ts:128` |
-| 前端优先按路径取模板 | `resolveTemplate`（`web/src/lib/settings-validate.ts:108`），由 `web/src/components/settings/new-file-dialog.tsx:134` 调用 |
+| manifest 只在一处装配，在 `spec` 里 | `(s *Service) Manifest`（`agentkit/spec/manifest.go:68`）与只负责序列化它的 handler（`api/v2_settings.go:91`） |
+| 校验回的是一组带行号的 issue | `Issue`（`agentkit/spec/diag.go:26`）、`(s *Service) Diagnostics`（`agentkit/spec/diag.go:71`） |
+| 行号能穿过 frontmatter 块 | `parseShift`（`agentkit/spec/diag.go:143`）+ `splitFrontmatter` 返回的起始行（`agentkit/spec/expand.go:48`） |
+| 编辑器问服务端，而不是自己校验 | `scheduleValidate`（`web/src/lib/settings-store.ts:240`）与它用的防抖（`:201`） |
+| 前端优先按路径取模板 | `resolveTemplate`（`web/src/lib/settings-validate.ts:94`），由 `web/src/components/settings/new-file-dialog.tsx` 调用 |
 | `context_window` 在自省响应里可见 | `api/v2_introspect.go:265` |
 | `spec` → `run` 的破例在这里从未存在 | `git grep -n "agentkit/run" fa7131a -- agentkit/spec` → 一条注释，别无其它 |
 | MCP 命名空间只在一处合成 | `mcpExposedName`（`agentkit/build/mcptools.go:140`）+ 前缀与分隔符常量（`agentkit/spec/decl/decl.go:336`、`:345`） |
@@ -2553,7 +2555,7 @@ retry:
 |---|---|---|
 | 配置根按「env → 上溯 → 自身」解析 | 它恰好按**三级**解析：显式 `--config-dir` → `$OPENHERON_CONFIG_DIR` → `<projectRoot>/.openheron`（不存在则创建），并且**刻意没有**上溯祖先目录（`agentkit/spec/config.go:144`） | 一旦配置根取决于「进程是从哪儿启动的」，同一条命令换个目录跑就会读到另一份配置 —— 测试实例也会读到开发者的那份（见 `AGENTS.md`） |
 | 测试实例靠「预置一份 `.heron/`」来隔离 | 隔离靠 `.env.test` 加 `make test-env-backend` / `test-env-reset` / `test-env-sync` 三个目标：实例跑在 `:18099`，**自带配置根与自带会话目录** | 端口不同不等于数据隔离 —— openheron 把会话写在 `.openheron/state/` 下，一个写在那儿的测试会污染真实历史 |
-| `agentkit/spec` 包有 **115** 个 `Test` 函数 | 它有 **164** 个 | 包随代码一起长大；上表列的是真正存在的用例 |
+| `agentkit/spec` 包有 **115** 个 `Test` 函数 | 它有 **180** 个 | 包随代码一起长大；上表列的是真正存在的用例 |
 | 模块路径是 `heron/...` | 是 `github.com/ouranoshong/openheron/...` | `go.mod` |
 | `agentkit/spec` 的 heron 依赖只有 `persist` | 有**四个**：`agentkit/obs`、`agentkit/spec/decl`、`persist` 与它自己 | `obs` 是唯一的日志出口；「声明」（`decl`）与「行为」（`spec`）的拆分是 openheron 自己的设计 —— 见 [architecture.md](architecture.md) §2.1 |
 | [architecture.md](architecture.md) §2.2 说 `agentkit/spec` import `kb` | **生产代码**并没有 —— 只有用例文件 `agentkit/spec/policy_contract_test.go:7` 这么做 | 校验知识库配置只需要声明（`decl.Model.IsEmbedding`），不需要 `kb` 包本身；那份文档 §2 的依赖表把测试算进去了 |

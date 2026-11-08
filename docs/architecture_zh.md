@@ -225,12 +225,17 @@ allow 表里就是 `allow`，**其余一律是 `ask`**。镜像的声明 `decl.T
 
 | 来源 | 它点名什么 | 装配位置 |
 |---|---|---|
-| 没有自己文件的内置工具 | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill` | `agentkit/build/tools.go:62` `builtinAllowedTools` |
-| 工具自己的文件 —— `tools/*.yaml` 与知识库 | 那个文件的 `allows:` | `agentkit/spec/load.go:269` `AllowedTools` |
+| 没有自己文件的内置工具 | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill`，外加五个只读的 config 工具 | `agentkit/build/tools.go:68` `builtinAllowedTools` |
+| 工具自己的文件 —— `tools/*.yaml` 与知识库 | 那个文件的 `allows:` | `agentkit/spec/load.go:276` `AllowedTools` |
 | MCP server 自己的文件 | 那个 server 的 `allows:`，用它自己的词汇，翻译成暴露出来的名字 | `agentkit/build/mcptools.go:173` `mcpAllowedNames` |
 
 `agentkit/build/spec.go:57` 的 `policyOf` 把三处合成一张表，`Policy.TierOf` 读这张表。
 ★ 这张表由**配置**装配，所以一个工具的档位在它的 server 起来之前就能回答。
+
+★ **有一个名字是在合并之后被摘掉的，不是一开始就不在里面。** `config_write` 改的是配置
+本身，包括那个 `allows:` 列表会授予它的文件 —— 一个能授予它的文件授的是自己。
+`alwaysAsk`（`agentkit/build/tools.go:93`）在合并之后把它摘掉，于是例外来自三处，而能拿走
+一个例外的只有一处。
 
 ★ **两个问题，而且分开摆着。** 「这个工具要不要人点头？」是**档位表** ——
 `Policy.TierOf` —— 它是**共享的**：每个 Agent 读同一张表。「这个 Agent 到底能不能用这个
@@ -356,7 +361,12 @@ Agent 的技能；而技能工具只有在确实有技能可加载时才值得�
 | 网络工具 | `build/nettools.go` | `web_search` `http` |
 | 知识库 | `build/kb.go` | `kb_search` `kb_index` |
 | 百科 | `build/nettools.go:236` | `wikipedia` |
+| 配置本身 | `agentkit/build/configtools.go:62` | `config_get` `config_validate` `config_template` `config_notices` `config_tier` `config_write` |
 | MCP server | `agentkit/build/mcptools.go:194` | `mcp__<server>__<tool>` |
+
+★ **config 工具总是被挂上，但几乎从不可见。** 它们进每个 Agent 的批次，一个 Agent 只看见
+自己 `tools:` 清单点名的那些 —— 与其它工具一样。其中五个只读，在代码的例外清单里；
+`config_write` 不在里面，且文件加不进去（§6.3）。
 
 ★ **一个工具的档位由提供它的那个文件决定。** 文件自己的 `allows:` 点名那些不用问的
 工具 —— `tools/http.yaml` 点 `request_get`，`tools/kb.yaml` 点 `kb_search` ——

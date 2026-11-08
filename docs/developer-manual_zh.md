@@ -913,14 +913,24 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 ### 5.5 前端单元测试
 
 `cd web && bun run test:unit`（`bun test test/*.test.ts`）——
-**21 个测试文件、327 个用例**，覆盖 `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
-`thinking.ts` / `turns.ts` / `approval.ts` / `settings-validate.ts` 等纯函数层。
+**21 个测试文件、271 个用例**，覆盖 `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
+`thinking.ts` / `turns.ts` / `approval.ts` / `settings-store.ts` 等层。
 
-★ **客户端自己不留「哪些分区可编辑」的清单。** 真相是 **manifest** —— 分区表归服务端
-所有（`agentkit/spec/config.go` 的 `Categories`）—— 客户端把 manifest 里可编辑的分区
-传给校验器（`web/src/lib/settings-validate.ts` 的 `validatePath(path, editable)`）。
-★ 客户端自己留一份清单就是**第二份真相**：分区一加上来，客户端就说它不存在 ——
-「mcps/ is not editable」就是这么来的。
+★ **客户端一条配置规则都不留了。** 它从前留了一整套：分区表的副本、tools/ 的文件白名单、
+MCP server 名的正则，和一整份逐键扫描 —— 那是在校验还同步的年代写的。服务端一直都拿着
+行号（yaml.v3 会报），所以那份副本什么也没挣到，只挣到了漂移，而且已经漂了：它写 `corpus`，
+loader 写的是 `corpus_dir`。`settings-validate.ts` 现在只剩字符串整形与渲染：
+`issueLine`、`suggestPath`、`resolveTemplate`。
+
+★ **换来的是「带落款的往返」。** 一次编辑在打字停下 250 ms 后发一个问题
+（`web/src/lib/settings-store.ts:240` `scheduleValidate`），保存则立刻再问一次并取消挂起的
+那个。每个回包都带落款（`:229` `validateSeq`）：不再是最新的、或不再是选中的那个文件的，
+直接丢掉 —— 否则两张答案赛跑，赢的是慢的那张，也就是关于用户已经改过的文本的那张。
+
+★ **有一条规则是「搬到服务端」而不是「删掉」。** agent 的 `reasoning` 档位现在在
+`agentkit/spec/load.go:553` 的 `checkReasoning` 里，拿模型的词汇表检查 —— 检查的是
+**每一个**文件，不只是在这个编辑器里改过的那些。
+★ 删一条客户端规则，只有在服务端已经有它的时候才叫简化；下一条规则该先问这一句。
 
 ★ `store.test.ts` 测的是**整个 zustand store**，所以它在跑之前会
 stub 掉 `globalThis.localStorage` 和 `globalThis.fetch`（`store.test.ts:35-84`）。
@@ -931,9 +941,9 @@ Bun 本身没有 `localStorage`，不 stub 会炸。
 
 ### 5.6 E2E
 
-`make test-e2e` → `playwright test`，**12 个 spec、152 个用例**：
-`chat` `multi-agent` `agents` `composer-meta` `composer-autocomplete`
-`settings` `history` `scroll`。
+`make test-e2e` → `playwright test`，**12 个 spec、150 个用例**：
+`agents` `chat` `compaction` `composer-autocomplete` `composer-meta` `history` `mcps`
+`multi-agent` `reattach` `scroll` `session-busy` `settings`。
 
 Playwright 自己起两个服务（`playwright.config.ts` 的 `webServer`）：
 假后端（`web/test/serve.ts`）+ Vite（`--mode test`）。

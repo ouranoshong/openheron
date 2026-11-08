@@ -411,6 +411,11 @@ reason `tools` (§4.8). There is no third tier and no global
 refusal — a tool is either available to that agent, or it is not in that agent's tool
 set at all.
 
+★ **The one exception cannot be widened.** `config_write` (§4.9) edits the
+configuration itself, including the file whose `allows:` list would grant it — so a file
+that could name it would be granting the tool that rewrites that file. It always asks,
+whatever any file says.
+
 ### 4.4 External tools (`tools/`)
 
 **No code change needed** — a provider whose configuration is absent mounts nothing, so
@@ -605,6 +610,37 @@ tools: [ls, read_file, mcp__github__*]
 and a lone `*` would be a way of saying "everything" in a list whose whole point is to say
 what is there: a rule whose reach differs from what it reads as is a silent mismatch.
 
+### 4.9 The configuration tools
+
+Six tools let an agent read and change the configuration it runs from. They are always
+mounted and, like every other tool, only **visible** to the agents whose `tools:` list
+names them:
+
+| Tool | What it answers | Tier |
+|---|---|---|
+| `config_get` | One file (`{path}`: its text, revision, and whether it is hot), or `{}`: the partitions, the files that exist, and what the running process holds | allow |
+| `config_validate` | `{path, content}`: would this file load, and where exactly is it wrong — the server reports the line. `{}`: check the tree on disk | allow |
+| `config_template` | `{path}`: the skeleton that file starts from. `{section}`: that partition's templates. Neither: an index of what to ask for | allow |
+| `config_notices` | What the loader noticed but did not refuse: renamed keys, retired directories, values that fell back to a default | allow |
+| `config_tier` | `{tool}`: whether it asks. `{agent}`: that agent's tools and their tiers. Neither: the default tier and the whole exception list | allow |
+| `config_write` | Writes a file: checked against the tree, checked against the revision you read, and refused whole if the merge breaks. Takes effect on the next turn | **ask** |
+
+```markdown
+---
+# .openheron/agents/main.md
+tools: [ls, read_file, glob, grep, task, write_todos, config_get, config_validate]
+---
+```
+
+★ **Give `config_get` and `config_validate` before `config_write`.** The first two only
+read; the third changes the configuration and always interrupts for approval. An agent
+that can validate but not write is a useful reviewer; an agent that can only write is a
+loader error waiting to happen.
+
+★ **`config_write` cannot write `server/`.** That partition configures the process
+itself and is not hot-reloaded, so it needs a restart — and the write path refuses it
+rather than saving something that silently does nothing.
+
 ## 5. Multiple agents and delegation
 
 ### 5.1 Who may delegate to whom
@@ -701,6 +737,9 @@ silently starting a fresh turn.
 
 The write path has several gates:
 
+- **Nothing is checked in the browser any more.** The editor sends the draft to the
+  server and shows the server's answer — each issue with the line it is on. Typing is
+  debounced by 250 ms, and an answer that belongs to an older draft is dropped.
 - `server/` is **not editable** (not hot-reloaded, so a change needs a restart).
 - **Literal secrets are rejected** — `api_key must be a reference, not a literal`. Use
   `${ENV_VAR}` or `@file:/path`.
@@ -711,6 +750,11 @@ The write path has several gates:
   the pattern of §4.7 — any other name is refused at save time.
 - **Optimistic concurrency**: if the file changed elsewhere, saving reports a conflict
   and lets you choose to overwrite or to back off.
+- **A new file whose name the server refuses keeps the dialog open**, with what you typed
+  still there and the server's sentence beside the field — the file name rules are the
+  server's (`server/` is read-only, `tools/` takes five names, `mcps/` takes
+  `<server>.yaml`), so the refusal comes back from the server, not from a copy in the
+  dialog.
 
 ### 6.4 The context meter
 

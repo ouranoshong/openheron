@@ -257,13 +257,19 @@ The **exceptions are named**, and they are named by the file that provides the t
 
 | Source | What it names | Assembled at |
 |---|---|---|
-| The built-in tools that have no file of their own | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill` | `agentkit/build/tools.go:62` `builtinAllowedTools` |
-| A tool's own file — `tools/*.yaml` and the knowledge base | that file's `allows:` | `agentkit/spec/load.go:269` `AllowedTools` |
+| The built-in tools that have no file of their own | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill`, plus the five config tools that only read | `agentkit/build/tools.go:68` `builtinAllowedTools` |
+| A tool's own file — `tools/*.yaml` and the knowledge base | that file's `allows:` | `agentkit/spec/load.go:276` `AllowedTools` |
 | An MCP server's own file | that server's `allows:`, in the server's own vocabulary, translated to the exposed names | `agentkit/build/mcptools.go:173` `mcpAllowedNames` |
 
 `agentkit/build/spec.go:57` `policyOf` puts the three together and `Policy.TierOf`
 reads the result. ★ The table is assembled from the **configuration**, so the tier of
 a tool is answerable before its server is even up.
+
+★ **One name is removed after the merge, not left out of it.** `config_write` edits the
+configuration, including the file whose `allows:` list would grant it — a file that
+could grant it grants itself. `alwaysAsk` (`agentkit/build/tools.go:93`) strips it from
+the assembled list, so the exceptions come from three sources and there is exactly one
+place that can take one away.
 
 ★ **Two questions, and they are kept apart.** "Does this tool need a human?" is the
 **tier table** — `Policy.TierOf` — and it is **shared**: every agent reads the same
@@ -407,7 +413,13 @@ or runs exactly like any other name. The gate does not change — only the names
 | Network tools | `build/nettools.go` | `web_search` `http` |
 | Knowledge base | `build/kb.go` | `kb_search` `kb_index` |
 | Encyclopedia | `build/nettools.go:236` | `wikipedia` |
+| The configuration itself | `agentkit/build/configtools.go:62` | `config_get` `config_validate` `config_template` `config_notices` `config_tier` `config_write` |
 | MCP servers | `agentkit/build/mcptools.go:194` | `mcp__<server>__<tool>` |
+
+★ **The config tools are always mounted and almost never visible.** They join the batch
+for every agent, and an agent sees the ones its own `tools:` list names — like every
+other tool. Five of them only read and are in the code's exception list; `config_write`
+is not, and cannot be added to it from a file (§6.3).
 
 ★ **The tier of a tool is decided by the file that provides it.** A file's own
 `allows:` names the tools that run without a nod — `tools/http.yaml` names
