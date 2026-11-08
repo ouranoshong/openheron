@@ -66,4 +66,7 @@ export function CodeBlock({
   )
 }
 
-const BASE = "bg-muted overflow-x-auto rounded-lg p-3 text-xs"
+// ★ `text-[13px]` rather than `text-xs`: 12px is small on a hidpi screen, and
+//   a code block is the one place where the reader is looking at characters
+//   rather than words. `max-w-full` keeps it inside the column it lives in.
+const BASE = "bg-muted max-w-full overflow-x-auto rounded-lg p-3 text-[13px]"

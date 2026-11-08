@@ -217,6 +217,8 @@ export const SCENARIOS = {
 
   table: ["A"],
 
+  wideTable: ["A"],
+
   lists: ["A"],
 
   typography: ["A"],
@@ -899,6 +901,38 @@ function eventsFor(
         "| --- | --- |",
         `| timeout | ${"a deliberately long description that must not widen the page ".repeat(4)} |`,
         "| retries | three |",
+      ].join("\n")
+      return [
+        started(threadId, runId),
+        textStart("m-1", "assistant"),
+        textDelta("m-1", md),
+        textEnd("m-1"),
+        finished(threadId, runId),
+      ]
+    }
+
+    case "wideTable": {
+      // ★ Twelve columns, so the table's floor (7rem per column) is wider
+      //   than the chat column: this is the case where the table is
+      //   **meant** to overflow and scroll inside its own wrapper.
+      const cols = [
+        "alpha",
+        "bravo",
+        "charlie",
+        "delta",
+        "echo",
+        "foxtrot",
+        "golf",
+        "hotel",
+        "india",
+        "juliet",
+        "kilo",
+        "lima",
+      ]
+      const md = [
+        `| ${cols.join(" | ")} |`,
+        `| ${cols.map(() => "---").join(" | ")} |`,
+        `| ${cols.map((c) => `${c}-value`).join(" | ")} |`,
       ].join("\n")
       return [
         started(threadId, runId),

@@ -62,7 +62,7 @@ export function Shell() {
           {isEmptyView ? (
             <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 pb-[8vh]">
-                <div className="w-full max-w-3xl">
+                <div className="w-full max-w-[var(--chat-column)]">
                   <EmptyHero />
                   <Composer inset={false} />
                 </div>

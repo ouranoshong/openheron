@@ -571,7 +571,7 @@ test.describe("markdown 与语法高亮", () => {
     expect(blockText).not.toContain("panic()")
   })
 
-  test("★ GFM 表格有边框且横向滚动留在消息列内", async ({ page }) => {
+  test("★ GFM 表格有边框，且不撑破消息列", async ({ page }) => {
     await setScenario("table")
     await openApp(page)
     await sendMessage(page, `${MARKER_A} show me a table`)
@@ -586,11 +586,44 @@ test.describe("markdown 与语法高亮", () => {
     expect(await th.evaluate((el) => getComputedStyle(el).borderTopWidth)).not.toBe("0px")
     expect(await th.evaluate((el) => getComputedStyle(el).paddingLeft)).not.toBe("0px")
 
+    // ★ The table has a **width limit** now: it fills the column and stops
+    //   there, and a long cell wraps inside its own cell instead of
+    //   stretching the table. What used to be asserted here — that the
+    //   table is wider than its wrapper — was the old behaviour, and
+    //   keeping it would keep the bug.
     const widths = await wrap.evaluate((el) => ({
       wrapper: el.clientWidth,
       table: (el.firstElementChild as HTMLElement).scrollWidth,
     }))
-    expect(widths.table, "the table in the scenario is not wide enough to measure horizontal overflow").toBeGreaterThan(widths.wrapper)
+    expect(
+      widths.table,
+      "the table should not be wider than the column it sits in",
+    ).toBeLessThanOrEqual(widths.wrapper + 1)
+    const listWidth = await page
+      .locator('[data-testid="message-list"]')
+      .evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }))
+    expect(listWidth.scroll).toBeLessThanOrEqual(listWidth.client + 1)
+  })
+
+  test("★ 列很多的表在自己的框里横向滚动，不撑破消息列", async ({ page }) => {
+    await setScenario("wideTable")
+    await openApp(page)
+    await sendMessage(page, `${MARKER_A} show me a wide table`)
+
+    const wrap = page.locator('[data-testid="markdown-table"]')
+    await expect(wrap).toBeVisible()
+
+    // ★ The floor (7rem per column) is what makes this case overflow: twelve
+    //   columns are wider than the chat column, so the table scrolls inside
+    //   its wrapper — and the message column itself stays put.
+    const widths = await wrap.evaluate((el) => ({
+      wrapper: el.clientWidth,
+      table: (el.firstElementChild as HTMLElement).scrollWidth,
+    }))
+    expect(widths.table, "a table of twelve columns is meant to overflow").toBeGreaterThan(
+      widths.wrapper,
+    )
+    expect(await wrap.evaluate((el) => getComputedStyle(el).overflowX)).toBe("auto")
     const listWidth = await page
       .locator('[data-testid="message-list"]')
       .evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }))
@@ -778,6 +811,17 @@ test.describe("空状态的版式", () => {
 })
 
 test.describe("消息卡片的宽度", () => {
+  // ★ The width of a token, in pixels. The column and the prose have their
+  //   own widths, and the tests read them from the document rather than
+  //   repeating the numbers — a test that hard-codes 1024 would keep
+  //   passing after the token changed.
+  async function cssRem(page: import("@playwright/test").Page, name: string): Promise<number> {
+    return page.evaluate((n) => {
+      const raw = getComputedStyle(document.documentElement).getPropertyValue(n).trim()
+      return Math.round(parseFloat(raw) * 16)
+    }, name)
+  }
+
   async function widths(page: import("@playwright/test").Page) {
     return page.evaluate(() => {
       const w = (el: Element | null) =>
@@ -788,12 +832,30 @@ test.describe("消息卡片的宽度", () => {
         tool: w(row.querySelector('[data-testid="tool-card"]')),
         reasoning: w(row.querySelector('[data-testid="reasoning"]')),
         code: w(row.querySelector('[data-testid="code-block"]')),
-        text: w(row.querySelector("p")),
+        // ★ The paragraph **inside the body**: the role label above it is
+        //   also a <p>, and it is not prose.
+        prose: w(row.querySelector('[data-testid="message-body"] p')),
       }))
     })
   }
 
-  test("★ 同一条消息里，工具卡与正文等宽", async ({ page }) => {
+  test("★ 消息列就是那个宽度 token，输入框与它同宽", async ({ page }) => {
+    // ★ A viewport wide enough that the column is not clamped by the window:
+    //   otherwise the test would measure the window, not the token.
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await setScenario("simple")
+    await openApp(page)
+    await sendMessage(page, `${MARKER_A} hi`)
+    await expect(page.getByText(/scripted answer/).first()).toBeVisible({ timeout: 7000 })
+
+    const chat = await cssRem(page, "--chat-column")
+    const column = await page.locator('[data-testid="message-list"] > div').first().boundingBox()
+    expect(Math.round(column!.width), "the message column should be the chat token").toBe(chat)
+    const composer = await page.locator('[data-testid="composer-box"]').boundingBox()
+    expect(Math.round(composer!.width), "the composer should be as wide as the column").toBe(chat)
+  })
+
+  test("★ 同一条消息里，工具卡与气泡等宽，正文停在正文列上", async ({ page }) => {
     await setScenario("approval")
     await openApp(page)
     await openThread(page, "Alpha conversation")
@@ -804,7 +866,11 @@ test.describe("消息卡片的宽度", () => {
     const withTool = rows.find((r) => r.tool !== null)
     expect(withTool, "the scenario should contain a tool card").toBeDefined()
     expect(withTool!.tool).toBe(withTool!.bubble)
-    expect(withTool!.text).toBe(withTool!.bubble)
+    // ★ The prose has a width of its own: the column is wide so that a table
+    //   fits whole, but a paragraph of sixty characters is a hard read.
+    const prose = await cssRem(page, "--prose-column")
+    expect(withTool!.prose, "the paragraph should stop at the prose column").toBe(prose)
+    expect(withTool!.prose!).toBeLessThanOrEqual(withTool!.bubble!)
   })
 
   test("★ 所有 assistant 消息宽度一致", async ({ page }) => {

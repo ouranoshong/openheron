@@ -7,9 +7,22 @@
 :root {
   --radius: 0.625rem;
 
-  /* assistant-ui's thread/composer corner radius gets a variable of its own:
-     changing it only affects the chat surface, not the global radius */
-  --radius-thread: 1.5rem;
+  /* ★ The chat column is **one token**, so "wider" is one edit and not six.
+     Six places used to carry `max-w-3xl` each, and a change to the width had
+     to be made six times — which is how they drift apart.
+
+     64rem is what a 1280-wide screen can give: the sidebar takes 256, the
+     gutter takes the rest, and a column wider than that starts to push the
+     content past the edge of the window.
+
+     The prose column is narrower on purpose. A paragraph of about 45
+     characters is comfortable to read; 60 is not. So the **blocks** — tables,
+     code, tool cards — take the whole column, and only the prose is held
+     back. Widening the conversation is about seeing a wide table whole, not
+     about making every sentence a long line. */
+  --chat-column: 64rem;
+  --chat-gutter: clamp(1rem, 2.5vw, 2rem);
+  --prose-column: 46rem;
 
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);

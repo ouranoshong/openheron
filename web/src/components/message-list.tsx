@@ -149,7 +149,7 @@ export function MessageList() {
         aria-busy={loading || undefined}
         className="min-h-0 flex-1 overflow-y-auto"
       >
-        <div className="mx-auto max-w-3xl px-4 py-6">
+        <div className="mx-auto w-full max-w-[var(--chat-column)] px-[var(--chat-gutter)] py-8">
           {loading && messages.length === 0 && <MessageSkeleton />}
 
           {!loading && messages.length === 0 && !error && <Welcome />}

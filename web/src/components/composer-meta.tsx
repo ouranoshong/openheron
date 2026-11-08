@@ -5,7 +5,7 @@ import type { ContextUsage } from "@/lib/types"
 import { Loader2Icon } from "lucide-react"
 
 const META =
-  "text-muted-foreground mx-auto mt-1.5 flex min-h-4 max-w-3xl flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[11px]"
+  "text-muted-foreground mx-auto mt-1.5 flex min-h-4 w-full max-w-[var(--chat-column)] flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[11px]"
 
 export function ComposerMeta({
   badge,

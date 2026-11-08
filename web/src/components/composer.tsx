@@ -475,7 +475,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
   return (
     <div className={inset ? "shrink-0 px-4 pb-3" : undefined}>
       {attachments.length > 0 && (
-        <ul data-testid="attachments" className="mx-auto mb-1.5 flex max-w-3xl flex-wrap gap-1.5">
+        <ul data-testid="attachments" className="mx-auto mb-1.5 flex w-full max-w-[var(--chat-column)] flex-wrap gap-1.5">
           {attachments.map((f) => (
             <li
               key={f.path}
@@ -498,7 +498,10 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         </ul>
       )}
 
-      <div className="border-input focus-within:border-ring focus-within:ring-ring/40 mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border px-3 py-2 focus-within:ring-3">
+      <div
+        data-testid="composer-box"
+        className="border-input focus-within:border-ring focus-within:ring-ring/40 mx-auto flex w-full max-w-[var(--chat-column)] items-end gap-2 rounded-2xl border px-3 py-2 focus-within:ring-3"
+      >
         <input
           ref={fileRef}
           type="file"
