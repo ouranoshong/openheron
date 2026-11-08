@@ -34,6 +34,13 @@ import (
 const (
 	CodeTurnSuperseded   = "turn_superseded"
 	CodeTurnStartTimeout = "turn_start_timeout"
+	// CodeAgentUnavailable says the agent could not be built.
+	//
+	// ★ It is not the start timeout: a timeout names a symptom, and this
+	//   names the configuration problem behind it — the model that is not
+	//   declared, the file that does not parse. The client shows the
+	//   message; the code says "fix a file, do not retry".
+	CodeAgentUnavailable = "agent_unavailable"
 )
 
 // Render writes the run's events as AG-UI frames.

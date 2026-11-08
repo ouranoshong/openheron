@@ -866,10 +866,16 @@ GET /v2/sessions/{threadId}/runs/{runId}      one run
 | `no_pending_interrupt` | `api/v2_types.go:36` | 这个审批已经被答过了 |
 | `turn_superseded` | `api/v2_types.go:49` | 为兼容保留；抢占那条路已经没有了 |
 | `turn_start_timeout` | `api/v2_types.go:50` | 这个 run 始终没能变得可流出 |
+| `agent_unavailable` | `transport/transport.go:43` | ★ 这个 agent 装不起来 —— 配置坏了，不是这一轮坏了 |
 
 ★ `turn_superseded` 留着，因为删掉它会打断按它分支的客户端——但在提案下，
 它只可能由启动超时那条路的兄弟产生，绝不会由接管产生。会话并发设计文档的 §6.3
 已经提过这一点；本提案不改变它。
+
+★ `agent_unavailable` 是本设计之后才加的（2026-11-08），而它存在是因为**启动超时不能
+代替原因**：装配 agent 失败时（模型没声明、文件解析不了），那一轮从未变得可流出，于是超时的
+症状顶了上来 —— 用户看到「turn start timeout」，看不到是哪个文件、哪个模型。所以装配失败
+自己成为一个错误码，消息是装配器自己的原话，客户端的下一个动作也据此不同：改文件，而不是重试。
 
 ★ `run_not_live` 是唯一新增的错误码，而它存在是因为挂上需要它。「你要的那一
 轮已经没了」既不是「会话忙」也不是「没有这个 run」：客户端对它的回答是「去

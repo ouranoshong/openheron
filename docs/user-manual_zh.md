@@ -255,6 +255,11 @@ frontmatter 可用键：
 **没有会话能跑** —— 但 openheron 照常起来，这正是你能打开编辑器改这个文件的原因。
 ★ 编辑器会拦下造成这种结果的改动：把一个本来能跑的 Agent 指向一个不存在的模型，保存时就被拒。
 
+★ **跑不起来的那条消息说的是原因，不是「超时」。** 如果你要对话的那个 Agent 装不起来，
+聊天里给出的就是原因本身 —— `agent "main" is left out of the tree: the model
+openai/gpt-4o-mini is not declared under llm/` —— 这一轮以 `agent_unavailable` 这个码结束。
+★ 这个码意味着「你的配置坏了」，所以该做的是打开编辑器改文件，而不是把消息再发一遍。
+
 ★ **`reasoning` 档位必须在模型档案里声明过才有效**。没声明的档位会被**静默忽略**：
 Agent 写着 `reasoning: high`，而端点没有 `high`，实际效果是「完全不思考」，且没有任何报错。
 详见 §4.2。

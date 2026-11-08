@@ -240,6 +240,11 @@ func (s *Server) reportRunStartFailure(stream *transport.SSEStream, err error) {
 		code = transport.CodeTurnSuperseded
 	case errors.Is(err, run.ErrNoCheckpoint):
 		code = codeNoCheckpoint
+	case errors.Is(err, run.ErrAgentUnavailable):
+		// ★ The agent could not be built: the message is the reason (which
+		//   model is missing, which file does not parse), so the code only
+		//   has to say what kind of answer this is.
+		code = transport.CodeAgentUnavailable
 	default:
 		code = codeInternal
 	}

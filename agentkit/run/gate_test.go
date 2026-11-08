@@ -25,6 +25,25 @@ func blockingAgent(started chan struct{}) func(int, contract.TurnKind) adk.Typed
 	}
 }
 
+// slowBuild is a builder that takes its time.
+//
+// ★ The turn becomes ready when the agent **starts**, not when it emits
+//
+//	(see `makeOnAgentEvents`), so an agent that stays quiet is still a ready
+//	turn. The only way to reach the start timeout is a build that has not
+//	come back yet — and that is what this is.
+//
+// ★ It does come back, eventually: the loop then runs and exits, and the
+//
+//	session is free again. A build that hung for ever would leave the
+//	loop alive, and the session busy, which is a different story.
+func slowBuild(delay time.Duration) func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
+	return func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
+		time.Sleep(delay)
+		return &fakeAgent{}
+	}
+}
+
 // A second Submit on a session with a live turn must be refused, and the
 // refusal must change nothing: not the running turn, not the transcript,
 // not the checkpoint, not the pending approval.
@@ -199,9 +218,14 @@ func TestSubmitIsNotRefusedWhileTheTurnIsArchiving(t *testing.T) {
 // A turn that never becomes streamable must not hold the session forever.
 // The start timeout fails the turn, which releases the slot.
 func TestAStartTimeoutReleasesTheSession(t *testing.T) {
-	// The agent cannot be built, so the loop never starts and the turn
-	// never becomes ready.
-	b := &fakeBuilder{err: errors.New("boom")}
+	// ★ The agent is built but never produces an event, so the turn never
+	//   becomes ready — a **genuine** start timeout.
+	//
+	//   It used to be a builder that failed, which was a different thing
+	//   wearing the same coat: that path now reports its own reason (see
+	//   `TestBuilderFailureSurfacesAsLoopError`), so a test that wanted the
+	//   timeout had to stop borrowing it.
+	b := &fakeBuilder{agent: slowBuild(300 * time.Millisecond)}
 	rt, sm := newTestRuntime(t, b)
 	ctx := context.Background()
 	sess := mustSession(t, sm)
@@ -320,7 +344,9 @@ func TestTheSessionIsReleasedBeforeTheResponseCanEnd(t *testing.T) {
 // path closes the archive channel for exactly this reason, and `released`
 // must not be the one that is forgotten.
 func TestAFailedTurnReleasesItsWaiter(t *testing.T) {
-	b := &fakeBuilder{err: errors.New("boom")}
+	// ★ A turn that never becomes ready — the genuine timeout path, for the
+	//   reason spelled out in `TestAStartTimeoutReleasesTheSession`.
+	b := &fakeBuilder{agent: slowBuild(300 * time.Millisecond)}
 	rt, sm := newTestRuntime(t, b)
 	sess := mustSession(t, sm)
 

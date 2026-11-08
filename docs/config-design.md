@@ -471,6 +471,20 @@ agent 上，而且完全不提原来那个为什么不见了。代价是没有�
 ★ **编辑器里是 hint，不是 error。** hint 说的是「这棵树少了一样东西」，文件本身没坏，保存
 照常可以按；error 说的是「现在按不下去」。把降级说成 error，用户会以为自己的文件坏了。
 
+★ **会话要跑那个 agent 时，它说的是那句话 —— 而不是「turn start timeout」。**
+装配 agent 失败时（模型没声明、文件解析不了），那一轮**从未变得可流出**，于是超时的症状顶了
+上来：用户看到「turn start timeout」，看不到是哪个文件、哪个模型。这是「降级必须出声」的最后一环：
+降级的原因要一路走到用户眼前。
+
+所以装配失败自己成为一个错误码（`agent_unavailable`，`transport/transport.go:43`），消息是装配器
+自己的原话（`agentkit/run/errors.go:57` 的 `agentUnavailable`），而 run 层把这条错误交那一轮
+（`agentkit/run/loop.go:108` 的 `makePrepareAgent`）—— 之前它**哪儿都没去**：框架记下了错误、
+停了循环，可没有人告诉那一轮「你失败了」，于是等待方一直等到启动超时。
+
+★ **那个超时的用法也变了。** 一轮什么时候会「迟迟不变为可流出」？装配一直不回来的时候。
+一轮**装配失败**不再走那条路 —— 它有自己的错误码，而客户端的下一步也随之不同：
+改一个文件，而不是重试。
+
 #### 写入门：一次改动不许把能跑的 agent 带出树外
 
 ★ 降级一旦成立，写入门就**必须**补上牙：既然「模型没声明」不再报错，那么把 `main` 的
@@ -2565,6 +2579,11 @@ agentkit/spec/write.go:persist.AtomicWrite
 | `TestSettingsManifestListsSkillsAsNestedItems` | 清单里 skills 是分区、路径两层；只有 `SKILL.md` 的文件夹才算一个技能 |
 | `a row is indented under its folder`（浏览器） | 树：分区是标题、文件缩进在它下面，行的可访问名字仍是整条路径 |
 | `a skill is editable › …`（浏览器） | 技能能打开、能保存；新建对话框问的是**技能名**，显示的是 `skills/<name>/SKILL.md` |
+| `TestTheBuildFailureReachesTheWaiter` | ★ 装配失败到达等待方时**不是**启动超时，而是装配器自己的理由 |
+| `TestAFailedBuildReleasesTheSession` | 装配失败也要释放会话 —— 否则它永远忙着 |
+| `TestTheBuildFailureIsReadable` | 消息一字不改：哨兵只分类，不做前缀 |
+| `TestARunThatCannotStartCarriesTheReason`（api） | ★ 客户端拿到 `agent_unavailable` 与那条原因，而不是 `turn_start_timeout` |
+| `装不起来的 Agent 把原因说清楚`（浏览器） | 聊天里看得见原因，且**不含** timeout |
 
 ---
 

@@ -213,6 +213,11 @@ export const SCENARIOS = {
 
   error: ["A"],
 
+  // ★ agentUnavailable: the agent could not be built — the configuration is
+  //   broken, not the turn. The client must show the reason, because the
+  //   answer is "fix a file", not "send it again".
+  agentUnavailable: ["A"],
+
   code: ["A"],
 
   table: ["A"],
@@ -992,6 +997,15 @@ function eventsFor(
         textDelta("m-1", "starting"),
         textEnd("m-1"),
         runError("upstream_error", "upstream provider is unavailable"),
+      ]
+
+    case "agentUnavailable":
+      return [
+        started(threadId, runId),
+        runError(
+          "agent_unavailable",
+          'agent "main" is left out of the tree: the model openai/gpt-4o-mini is not declared under llm/',
+        ),
       ]
 
     case "reasoningDone": {

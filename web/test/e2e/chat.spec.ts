@@ -183,6 +183,23 @@ test.describe("审批（HITL）", () => {
 
     await expect(page.getByText(/unavailable|error|failed/i).first()).toBeVisible({ timeout: 7000 })
   })
+
+  // ★ **The reason has to reach the user.** An agent that cannot be built
+  //   used to arrive as "turn start timeout" — a symptom naming neither the
+  //   file nor the model. The chat must show the reason itself, because the
+  //   answer is "fix the configuration", not "send the message again".
+  test("装不起来的 Agent 把原因说清楚", async ({ page }) => {
+    await setScenario("agentUnavailable")
+    await openApp(page)
+
+    await sendMessage(page, `${MARKER_A} trigger error`)
+
+    const error = page.locator('[data-testid="run-error"]')
+    await expect(error).toBeVisible({ timeout: 7000 })
+    await expect(error).toContainText("is not declared under llm/")
+    // ★ And it must not be the timeout: that was the symptom that hid it.
+    await expect(error).not.toContainText("timeout")
+  })
 })
 
 test.describe("多个待批", () => {

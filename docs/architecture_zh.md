@@ -443,13 +443,13 @@ server 自己的名字就是命名空间那一段，而 agent 的 `tools:` 清�
 
 | 事件 | 发射点 | 含义 |
 |---|---|---|
-| `RUN_STARTED` | `transport.go:54` | 本轮开始，带 `threadId` |
-| `TEXT_MESSAGE_START/CONTENT/END` | `transport.go:239-256` | 助手正文增量 |
-| `REASONING_*` | `transport.go:262-273` | 思考过程 |
-| `TOOL_CALL_START/ARGS/END/RESULT` | `transport.go:276-306` | 工具调用 |
-| `CUSTOM`（`model_retry`） | `transport.go:220` | 模型重试提示 |
-| `RUN_FINISHED` | `transport.go:62`, `:68` | 本轮结束，带结果与用量 |
-| `RUN_ERROR` | `transport.go:233` | 失败 |
+| `RUN_STARTED` | `transport.go:61` | 本轮开始，带 `threadId` |
+| `TEXT_MESSAGE_START/CONTENT/END` | `transport.go:246-263` | 助手正文增量 |
+| `REASONING_*` | `transport.go:269-280` | 思考过程 |
+| `TOOL_CALL_START/ARGS/END/RESULT` | `transport.go:283-314` | 工具调用 |
+| `CUSTOM`（`model_retry`） | `transport.go:232` | 模型重试提示 |
+| `RUN_FINISHED` | `transport.go:69`, `:75` | 本轮结束，带结果与用量 |
+| `RUN_ERROR` | `transport.go:240`, `api/v2_run.go:251` | 失败 —— ★ 码说明是哪一类，消息说明为什么（见 `docs/run-lifecycle-design.md` §8.3） |
 
 子 Agent 的产出**通过事件上的 `subagentRunId` 归属**，而不是另开事件类型 ——
 这让前端能用同一套 reducer 处理所有 Agent 的输出。

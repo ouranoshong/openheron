@@ -380,6 +380,21 @@ would make every unrelated edit fail.
 The assembly logic is in `agentkit/build/assemble.go`; the validation logic is in
 `agentkit/spec/load.go`.
 
+#### ★ When the agent cannot be built, the turn has to be told
+
+`agentkit/run/loop.go:108` `makePrepareAgent` is where the builder is asked for this
+turn's agent — and where a configuration problem becomes a runtime one. ★ The error
+has to be handed to the turn (`turn.fail`): the framework records it and stops the
+loop, but nobody else marks the turn failed, so the waiter sat until the **start
+timeout** and the client was told "turn start timeout" — a symptom naming neither the
+file nor the model.
+
+The failure carries its own code (`agent_unavailable`, `transport/transport.go:43`) and the
+builder's own message (`agentkit/run/errors.go:57` `agentUnavailable`): the sentinel
+classifies, it does not prefix, so the user reads the reason once. ★ The same rule
+applies to the input assembly in `makeGenInput` — an error the framework records but
+nobody hands to the turn is an error the client never sees.
+
 #### The three lists on an agent
 
 `tools:`, `skills:` and `mcps:` are **allow-lists**, and **all three default to

@@ -275,6 +275,12 @@ until you fix it **no session can start** — but openheron does start, which is
 you open the editor and fix the file. ★ The editor refuses the change that would cause
 it: pointing a working agent at a model that does not exist is rejected at save time.
 
+★ **A message that cannot start says why, not "timed out".** If the agent you are talking
+to cannot be built, the chat shows the reason itself — `agent "main" is left out of the
+tree: the model openai/gpt-4o-mini is not declared under llm/` — and the run ends with
+the code `agent_unavailable`. ★ That code means "your configuration is broken", so the
+answer is to open the editor and fix the file, not to send the message again.
+
 ★ **A `reasoning` tier only works if the model profile declares it.** An undeclared tier
 is **silently ignored**: an agent says `reasoning: high`, the endpoint has no `high`, and
 the effect is "no thinking at all" — with no error and no message. See §4.2.

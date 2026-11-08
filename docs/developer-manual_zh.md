@@ -329,6 +329,18 @@ Agent 在两边都不在，把它算成「被弄丢」会让任何一次无关�
 
 装配逻辑在 `agentkit/build/assemble.go`，校验逻辑在 `agentkit/spec/load.go`。
 
+#### ★ Agent 装不起来时，那一轮必须被告知
+
+`agentkit/run/loop.go:108` 的 `makePrepareAgent` 是向 builder 要这一轮的 agent 的地方 ——
+也是配置问题变成运行期问题的地方。★ 这个错误必须交给那一轮（`turn.fail`）：框架会记下它、
+停下循环，可没有人告诉那一轮「你失败了」，于是等待方一直等到**启动超时**，客户端拿到的是
+「turn start timeout」—— 一个既不点名文件也不点名的症状。
+
+这个失败有自己的码（`agent_unavailable`，`transport/transport.go:43`）与装配器自己的原话
+（`agentkit/run/errors.go:57` 的 `agentUnavailable`）：哨兵只负责分类，不做前缀，所以用户只读
+一遍原因。★ 同一条规矩也适用于 `makeGenInput` 里的输入装配 —— 框架记下、却没人交给那一轮
+的错误，就是客户端永远看不到的错误。
+
 #### Agent 身上的三张清单
 
 `tools:`、`skills:` 与 `mcps:` 都是**白名单**，而且**三张默认都是一个都没有** ——

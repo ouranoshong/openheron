@@ -511,13 +511,13 @@ The event types come from the `ag-ui-protocol/ag-ui` Go SDK. The frames are rend
 
 | Event | Emitted at | Meaning |
 |---|---|---|
-| `RUN_STARTED` | `transport.go:54` | The turn began; carries `threadId` |
-| `TEXT_MESSAGE_START/CONTENT/END` | `transport.go:239-256` | Assistant body, incrementally |
-| `REASONING_*` | `transport.go:262-273` | Reasoning process |
-| `TOOL_CALL_START/ARGS/END/RESULT` | `transport.go:276-306` | Tool calls |
-| `CUSTOM` (`model_retry`) | `transport.go:220` | Model-retry notice |
-| `RUN_FINISHED` | `transport.go:62`, `:68` | The turn ended; carries result and usage |
-| `RUN_ERROR` | `transport.go:233` | Failure |
+| `RUN_STARTED` | `transport.go:61` | The turn began; carries `threadId` |
+| `TEXT_MESSAGE_START/CONTENT/END` | `transport.go:246-263` | Assistant body, incrementally |
+| `REASONING_*` | `transport.go:269-280` | Reasoning process |
+| `TOOL_CALL_START/ARGS/END/RESULT` | `transport.go:283-314` | Tool calls |
+| `CUSTOM` (`model_retry`) | `transport.go:232` | Model-retry notice |
+| `RUN_FINISHED` | `transport.go:69`, `:75` | The turn ended; carries result and usage |
+| `RUN_ERROR` | `transport.go:240`, `api/v2_run.go:251` | Failure — ★ the code says which kind, and the message says why (see `docs/run-lifecycle-design.md` §8.3) |
 
 A sub-agent's output is **attributed through `subagentRunId` on the event** rather than
 through a separate event type — that lets the frontend handle every agent's output with

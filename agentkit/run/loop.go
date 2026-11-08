@@ -22,7 +22,7 @@ import (
 func (rt *Runtime) newLoop(ctx context.Context, sess storage.Session, turn *Turn) *adk.TurnLoop[loopItem, *schema.Message] {
 	cfg := adk.TurnLoopConfig[loopItem, *schema.Message]{
 		GenInput:      rt.makeGenInput(sess, turn),
-		PrepareAgent:  rt.makePrepareAgent(sess),
+		PrepareAgent:  rt.makePrepareAgent(sess, turn),
 		OnAgentEvents: rt.makeOnAgentEvents(sess, turn),
 	}
 	if store, _ := sess.GetCheckPointStore(); store != nil {
@@ -73,7 +73,14 @@ func (rt *Runtime) makeGenInput(sess storage.Session, turn *Turn) func(context.C
 			Workspace: sess.Workspace(),
 		}, queryItem.Query)
 		if err != nil {
-			return nil, fmt.Errorf("assemble turn input: %w", err)
+			// ★ Same rule as the build: an error the framework records but
+			//   nobody hands to the turn is an error the client never sees.
+			//   The input assembly can fail on the user's own files (a
+			//   workspace path that does not resolve), and "turn start
+			//   timeout" would name none of that.
+			fail := fmt.Errorf("assemble turn input: %w", err)
+			turn.fail(fail)
+			return nil, fail
 		}
 
 		return &adk.GenInputResult[loopItem, *schema.Message]{
@@ -86,12 +93,35 @@ func (rt *Runtime) makeGenInput(sess storage.Session, turn *Turn) func(context.C
 
 // makePrepareAgent asks the injected builder for this turn's agent. The
 // Runtime never imports the agent package, so tests can inject a fake.
-func (rt *Runtime) makePrepareAgent(sess storage.Session) func(context.Context, *adk.TurnLoop[loopItem, *schema.Message], []loopItem) (adk.TypedAgent[*schema.Message], error) {
+//
+// ★ **A build failure has to fail the turn.** The builder is where a
+//
+//	configuration problem becomes a runtime one — an agent whose model is
+//	not declared, a skill that cannot be read back, a provider file that
+//	does not parse. The framework records the error and stops the loop, but
+//	nothing ever marked the turn failed: `Wait` sat until the start
+//	timeout, and the client was told "turn start timeout" — a symptom that
+//	names neither the file nor the reason.
+//
+//	So the error is handed to the turn here, and the turn's failure is what
+//	the client sees: the reason, in the builder's own words.
+func (rt *Runtime) makePrepareAgent(sess storage.Session, turn *Turn) func(context.Context, *adk.TurnLoop[loopItem, *schema.Message], []loopItem) (adk.TypedAgent[*schema.Message], error) {
 	return func(ctx context.Context, _ *adk.TurnLoop[loopItem, *schema.Message], _ []loopItem) (adk.TypedAgent[*schema.Message], error) {
 		if rt.cfg.AgentBuilder == nil {
-			return nil, errors.New("openheronrt: no AgentBuilder configured")
+			err := errors.New("openheronrt: no AgentBuilder configured")
+			turn.fail(agentUnavailable{reason: err})
+			return nil, err
 		}
-		return rt.cfg.AgentBuilder.Build(ctx, sess.ID(), sess.AgentID(), contract.TurnQuery)
+		agent, err := rt.cfg.AgentBuilder.Build(ctx, sess.ID(), sess.AgentID(), contract.TurnQuery)
+		if err != nil {
+			// ★ The reason is wrapped, not replaced: the client's message is
+			//   the builder's, and the sentinel is what lets the transport
+			//   tell "your configuration is broken" from "something went
+			//   wrong inside".
+			turn.fail(agentUnavailable{reason: err})
+			return nil, err
+		}
+		return agent, nil
 	}
 }
 
