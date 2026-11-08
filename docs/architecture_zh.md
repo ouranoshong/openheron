@@ -277,8 +277,14 @@ allow 表里就是 `allow`，**其余一律是 `ask`**。镜像的声明 `decl.T
 ### 3.6 skills 的解析是另一套
 
 `skills/` **不是**「配置根下的一个分区」，而是独立解析的
-（`agentkit/build/skill.go:172`）：先看 `$EINO_EXT_SKILLS_DIR`，
+（`agentkit/build/skill.go:182` 的 `ResolveSkillsDir`）：先看 `$EINO_EXT_SKILLS_DIR`，
 没有才从当前目录**向上**找 `.openheron/skills`。
+
+★ **编辑器也得问这个问题，而且不许自己猜。** 它写的是 `<配置根>/skills/`，而那个目录只有在
+探针正好落在那里时才是生效的那一个；不是的话，保存会落进一棵没人读的树。所以解析结果在启动时
+被推进配置层（`spec.Service.SetSkillsDir`，`agentkit/spec/config.go:284`），指向别处时保存被拒
+（`agentkit/spec/write.go:150` 的 `validateWritable`），清单里那个分区标成只读并点名真正的目录。
+★ 这条规则只住在 `build` 里：在 `spec` 里再写一份，就是「到底加载了哪些技能」的第二个答案。
 
 ★ 这跟「配置根不向上查找」是两条不同的规则。skills 是目录树，
 向上找是为了能复用用户家目录里的技能；配置根是实体集合，向上找会让同一命令读到不同配置。

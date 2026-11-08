@@ -272,7 +272,13 @@ func TestLoadWithCreatesIntoAMissingDirectory(t *testing.T) {
 	}
 }
 
-func TestCategoriesCoverExactlyWhatTheLoaderReads(t *testing.T) {
+// ★ Categories is the configuration **surface**, and a loader is what the
+// loader reads — the two are no longer the same set. `skills/` belongs to the
+// surface (the editor lists it, the path rules cover it, the manifest carries
+// it) and not to the loader: skills are read by the runtime's own backend, so
+// a category with no loader is not a bug, it is the one partition that is not
+// this package's business.
+func TestCategoriesCoverTheSurfaceAndEveryLoaderIsComplete(t *testing.T) {
 	seen := map[string]bool{}
 	for _, c := range Categories {
 		if seen[c.Dir] {
@@ -286,12 +292,28 @@ func TestCategoriesCoverExactlyWhatTheLoaderReads(t *testing.T) {
 			Agents:    map[string]*decl.Agent{},
 			Server:    defaultServer(),
 		}
-		if cfg.loaderFor(c) == nil {
+		loaded := cfg.loaderFor(c) != nil
+		if c.Dir == DirSkills {
+			if loaded {
+				t.Fatal("★ skills must have no loader: the config layer does not read skill files, " +
+					"and a loader here would put a second reader next to the runtime's backend")
+			}
+			if !c.Nested {
+				t.Fatal("skills/ is the nested partition: skills/<name>/SKILL.md")
+			}
+			continue
+		}
+		if !loaded {
 			t.Fatalf("category %q has no loader", c.Dir)
 		}
+		if c.Nested {
+			t.Fatalf("category %q must not be nested: its files sit directly in the partition", c.Dir)
+		}
 	}
-	if seen[DirSkills] {
-		t.Fatal("skills must stay out of Categories: it is a directory tree, not flat entity files")
+	for _, d := range []string{DirLLM, DirAgent, DirServer, DirTools, DirMCP, DirSkills} {
+		if !seen[d] {
+			t.Fatalf("partition %q is missing from Categories", d)
+		}
 	}
 }
 

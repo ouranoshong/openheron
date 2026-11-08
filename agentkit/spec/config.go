@@ -23,6 +23,14 @@ const (
 	DirTools   = "tools"
 	DirKBIndex = "kb"
 	DirMCP     = "mcps"
+
+	// SkillFileName is the one file a skill folder holds.
+	//
+	// ★ The name is fixed by the skill backend, not chosen here: a folder
+	//   under skills/ is a skill only when it holds this file, which is why
+	//   the editor's path for a skill is `skills/<name>/SKILL.md` and never
+	//   `skills/<name>.md`.
+	SkillFileName = "SKILL.md"
 )
 
 type Category struct {
@@ -33,6 +41,16 @@ type Category struct {
 	Editable bool
 	hot      bool
 	loader   func(c *Config, name string, data []byte) error
+
+	// Nested says the partition is one directory deeper than the rest:
+	// `skills/<name>/SKILL.md` instead of `agents/<name>.md`.
+	//
+	// ★ It is a property of the partition, not of the path parser: a
+	//   partition either holds entity files directly (one file, one entity)
+	//   or holds a folder per entity. Allowing depth everywhere would let
+	//   `agents/sub/main.md` through, and the loader reads one level —
+	//   a file two levels down would be saved and never loaded.
+	Nested bool
 }
 
 func (c Category) Hot() bool { return c.hot }
@@ -66,6 +84,21 @@ var Categories = []Category{
 		ID: DirMCP, Label: "MCP servers", Dir: DirMCP, Ext: ".yaml",
 		Editable: true, hot: true,
 		loader: (*Config).loadMCP,
+	},
+	{
+		// ★ A skill is a **folder**: `skills/<name>/SKILL.md`, and the folder
+		//   name is what an agent writes in `skills:`. So this is the one
+		//   nested partition, and the one with no loader: skills are read by
+		//   the runtime's own backend, not by this package (see
+		//   `agentkit/build/skill.go` `ResolveSkillsDir`). The entry exists
+		//   for the **surface** — the manifest, the path rules, the editor —
+		//   which is why `loader` is nil and the load loop skips it.
+		//
+		// ★ Hot: editing a SKILL.md has to take effect on the next turn, and
+		//   the fingerprint is what makes the snapshot rebuild (the walk is
+		//   recursive, so a file two levels down counts).
+		ID: DirSkills, Label: "Skills", Dir: DirSkills, Ext: ".md",
+		Editable: true, hot: true, Nested: true,
 	},
 }
 
@@ -229,6 +262,66 @@ type Service struct {
 	root        string
 	projectRoot string
 	defaulted   bool
+
+	// skillsDir is the directory the **runtime** reads skills from, as
+	// resolved by `agentkit/build` — see `SetSkillsDir`.
+	//
+	// ★ It is pushed in from outside, and it is not derived here, because
+	//   the rule that resolves it (`$EINO_EXT_SKILLS_DIR`, then an upward
+	//   probe from the working directory) belongs to the skill backend, and
+	//   a second copy of it in this package would be a second answer to
+	//   "which skills are loaded". Empty means "the runtime found none".
+	skillsDir string
+}
+
+// SetSkillsDir tells the service where the runtime actually reads skills.
+//
+// ★ The editor writes `<config root>/skills/`, and that is only the same
+//
+//	directory as the one the runtime reads when the probe happens to land
+//	there. When it does not, an edit would be saved into a tree nobody reads
+//	— the exact silent degradation this project refuses — so the partition
+//	says where the real one is and refuses the write.
+func (s *Service) SetSkillsDir(dir string) {
+	if dir != "" {
+		if abs, err := filepath.Abs(dir); err == nil {
+			dir = abs
+		}
+	}
+	s.skillsDir = dir
+}
+
+// skillsElsewhere reports the runtime's skills directory when it is not the
+// one this service writes, and "" when there is nothing to warn about.
+//
+// ★ "Nothing found" is not "somewhere else": a process that resolved no
+//
+//	skills directory at all has not looked, and the tree the editor is about
+//	to write is the one the probe would find next time it starts.
+func (s *Service) skillsElsewhere() string {
+	if s.skillsDir == "" || s.root == "" {
+		return ""
+	}
+	mine := filepath.Join(s.root, DirSkills)
+	if samePath(s.skillsDir, mine) {
+		return ""
+	}
+	return s.skillsDir
+}
+
+func samePath(a, b string) bool {
+	if a == b {
+		return true
+	}
+	aa, err := filepath.Abs(a)
+	if err != nil {
+		return false
+	}
+	bb, err := filepath.Abs(b)
+	if err != nil {
+		return false
+	}
+	return aa == bb
 }
 
 // NewService resolves the configuration root and the project root.
@@ -372,6 +465,13 @@ func (s *Service) loadOnly(ms map[string]*mutation) (*Config, error) {
 
 	for _, cat := range Categories {
 		cat := cat
+		// ★ A partition with no loader is not read into `Config`: skills are
+		//   the runtime's own backend's business. The entry exists for the
+		//   surface (manifest, path rules, editor), and `loadDir` with a nil
+		//   loader would panic on the first file it found.
+		if cat.loader == nil {
+			continue
+		}
 		if err := s.loadDir(filepath.Join(s.root, cat.Dir), cat.Ext, cat.Dir, ms,
 			cfg.loaderFor(cat)); err != nil {
 			return nil, err

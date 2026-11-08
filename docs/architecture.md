@@ -318,8 +318,18 @@ referencing an unknown agent and a cyclic topology are startup errors too
 ### 3.6 skills resolve by a different rule
 
 `skills/` is **not** "a partition of the config root"; it is resolved independently
-(`agentkit/build/skill.go:172`): `$EINO_EXT_SKILLS_DIR` first, and only if that is unset
-does it search **upwards** from the current directory for `.openheron/skills`.
+(`agentkit/build/skill.go:182` `ResolveSkillsDir`): `$EINO_EXT_SKILLS_DIR` first, and only
+if that is unset does it search **upwards** from the current directory for
+`.openheron/skills`.
+
+★ **The editor has to ask this question too, and the answer is not assumed.** It
+writes `<config root>/skills/`, which is the directory in force only when the probe
+landed there; when it did not, a save would land in a tree nobody reads. So the
+resolved path is pushed into the config layer at startup (`spec.Service.SetSkillsDir`,
+`agentkit/spec/config.go:284`), the write is refused when it points elsewhere
+(`agentkit/spec/write.go:150` `validateWritable`), and the manifest marks the section
+read-only with a note naming the real directory. ★ The rule lives in `build` only: a
+second copy in `spec` would be a second answer to "which skills are loaded".
 
 ★ This is a different rule from "the config root never searches upwards". Skills are a
 directory tree, and searching upwards lets you reuse skills from your home directory;

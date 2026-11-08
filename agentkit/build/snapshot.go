@@ -51,7 +51,7 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 	// The session workspace (uploads) and the skills directory may live outside the
 	// project root; everything else is off limits.
 	roots := []string{s.dataDir}
-	if dir, ok := resolveSkillsDir(); ok {
+	if dir, ok := ResolveSkillsDir(); ok {
 		roots = append(roots, dir)
 	}
 	local, err := fsx.New(fsx.Config{Root: s.projectRoot, ExtraRoots: roots})

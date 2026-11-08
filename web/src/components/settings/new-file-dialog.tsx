@@ -101,7 +101,7 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
 
           <div className="flex flex-col gap-1.5">
             <label htmlFor="new-file-name" className="text-xs font-medium">
-              File name
+              {section === "skills" ? "Skill name (its folder)" : "File name"}
             </label>
             <input
               id="new-file-name"
@@ -130,9 +130,11 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
                     ? "deepseek"
                     : section === "mcps"
                       ? "github"
-                      : section === "tools"
-                        ? "http"
-                        : "config"
+                      : section === "skills"
+                        ? "code-review"
+                        : section === "tools"
+                          ? "http"
+                          : "config"
               }
               className="bg-background rounded-md border px-2 py-1.5 font-mono text-xs"
               data-testid="new-file-name"

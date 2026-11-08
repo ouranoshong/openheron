@@ -20,7 +20,7 @@ import (
 func skillChain(ctx context.Context, backend fsapi.Backend, hubs *skillHubs, scope skillScope) (
 	adk.TypedChatModelAgentMiddleware[*schema.Message], error) {
 
-	dir, ok := resolveSkillsDir()
+	dir, ok := ResolveSkillsDir()
 	if !ok {
 		return nil, nil
 	}
@@ -169,7 +169,19 @@ func (b *scopedSkillBackend) Get(ctx context.Context, name string) (skill.Skill,
 	return loaded, nil
 }
 
-func resolveSkillsDir() (string, bool) {
+// ResolveSkillsDir answers where the runtime reads skills from.
+//
+// ★ Exported because the configuration editor has to know: it writes
+//
+//	`<config root>/skills/`, and that is only the directory in force when
+//	this probe happens to land there. `$EINO_EXT_SKILLS_DIR` and the upward
+//	probe can both point elsewhere, and an editor that did not know would
+//	save a skill nobody loads.
+//
+// ★ The rule lives here and nowhere else: a second copy of it in the config
+//
+//	layer would be a second answer to "which skills are loaded".
+func ResolveSkillsDir() (string, bool) {
 	dir := strings.TrimSpace(os.Getenv("EINO_EXT_SKILLS_DIR"))
 	if dir == "" {
 		if found, ok := probeProjectSkills(); ok {
@@ -220,7 +232,7 @@ type SkillInfo struct {
 }
 
 func Skills(ctx context.Context) []SkillInfo {
-	dir, ok := resolveSkillsDir()
+	dir, ok := ResolveSkillsDir()
 	if !ok {
 		return nil
 	}

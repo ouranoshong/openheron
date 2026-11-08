@@ -185,6 +185,13 @@ func setupConfig(flags serverFlags) (*startup, error) {
 	if err != nil {
 		return nil, err
 	}
+	// ★ The editor writes <config root>/skills/, and the runtime reads
+	//   whatever its own probe resolved. Tell the config layer where that is,
+	//   so a skill written into a directory nobody loads is refused instead
+	//   of saved in silence.
+	if dir, ok := build.ResolveSkillsDir(); ok {
+		cfgSvc.SetSkillsDir(dir)
+	}
 	warnUnusedHomeConfig(cfgSvc.Root())
 
 	obs.Logger().Info("[main] openheron", "version", version)

@@ -493,6 +493,20 @@ means **none**. A skill outside the list is not advertised to the model, and ask
 it by name fails — a model cannot load what it cannot see. A name that is not in the
 directory is reported in the log when the agent is built, rather than ignored.
 
+★ **A skill is a folder, and that is what the editor asks for.** `/settings` lists each
+partition as a folder in a file tree, so a skill appears as `skills/code-review/SKILL.md`:
+type the skill's name, and the file inside it is always `SKILL.md`. The name is the same
+one you write in an agent's `skills:` list, and it has to be readable back —
+lowercase letters and digits, single `-` or `_` separators, so `code-review` and
+`code_review` stay two different skills.
+
+★ **When openheron reads skills from somewhere else, the section says so and refuses the
+save.** The rule above means the directory in force can be a different one from
+`<config root>/skills/`. Writing into the one nobody loads would change nothing, so the
+editor shows what the process actually reads and keeps the section read-only. A process
+that found no skills directory at all is not that case: `<config root>/skills/` is then
+where the next start will look, and creating the first skill there works.
+
 ### 4.7 MCP servers (`mcps/`)
 
 An MCP server is a program that offers tools to a model. openheron mounts **one server

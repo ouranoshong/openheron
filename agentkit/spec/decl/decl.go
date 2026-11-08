@@ -429,6 +429,22 @@ func ValidMCPServerName(name string) bool {
 	return mcpServerNameRE.MatchString(name)
 }
 
+// SkillNamePattern is the shape a skill's folder name may take.
+//
+// ★ A skill's name **is** its folder name, and it is what an agent writes in
+// `skills:` — so the name has to be writable as a path segment and readable
+// back. One hyphen or one underscore, never a run: `code-review` and
+// `code_review` are two different skills, and a name that could be read two
+// ways would make "which skill did I load" unanswerable.
+const SkillNamePattern = `^[a-z0-9]+([_-][a-z0-9]+)*$`
+
+var skillNameRE = regexp.MustCompile(SkillNamePattern)
+
+// ValidSkillName reports whether a skill folder name may be used.
+func ValidSkillName(name string) bool {
+	return skillNameRE.MatchString(name)
+}
+
 // ParseToolNamePattern reads one entry of an agent's tools list.
 //
 // ★ Only a **trailing** "*" is a pattern, and a lone "*" is not one at

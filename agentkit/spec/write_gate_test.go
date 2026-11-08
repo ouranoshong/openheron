@@ -27,7 +27,12 @@ func TestValidatePathRejectsEscapes(t *testing.T) {
 		"/tools/http.yaml",
 		"state/anything.yaml",
 		"nope/x.yaml",
-		"skills/foo/SKILL.md",
+		// ★ Depth is the partition's, not the caller's: one level too deep
+		//   outside skills/ would be saved and never loaded.
+		"agents/sub/main.md",
+		"skills/SKILL.md",
+		"skills/foo/bar/SKILL.md",
+		"skills/foo/README.md",
 	}
 	for _, rel := range bad {
 		if _, err := ValidatePath(rel); err == nil {

@@ -50,7 +50,7 @@
 | 6 | 优先级 | `默认 < 配置根 < 环境变量`（★ **只有少数几个变量真做到**，见 §4.4） | env 是一次性覆盖，文件是可提交的本项目管理（`main.go:217-219`） |
 | 7 | 未知字段 | **严格报错**，带行号 | `max_retry` 拼成 `max_retries` 应在启动期暴露（`agentkit/spec/config.go:531-545`、`yaml.v3@v3.0.1/decode.go:944`） |
 | 8 | 运行数据 | `.openheron/state/` | 配置与数据同根，一条忽略规则一处生效（`agentkit/spec/defaults.go:62`、`agentkit/spec/config.go:314-326`） |
-| 9 | skills | 默认在 `.openheron/skills/` —— 由 `$EINO_EXT_SKILLS_DIR` 决定，否则从工作目录上溯找 `.openheron/skills` | ★ 这条规则与配置根**不同**：技能是一棵目录树，从上级目录复用一个无害，而配置根是一组实体（`agentkit/build/skill.go:188-227`） |
+| 9 | skills | 默认在 `.openheron/skills/` —— 由 `$EINO_EXT_SKILLS_DIR` 决定，否则从工作目录上溯找 `.openheron/skills` | ★ 这条规则与配置根**不同**：技能是一棵目录树，从上级目录复用一个无害，而配置根是一组实体（`agentkit/build/skill.go:182`）。★ 也正因为两个根可能不同，编辑器保存 skill 前要问一次**运行时**从哪儿读（§6.5） |
 | 10 | 根探测 | `--config-dir` → `$OPENHERON_CONFIG_DIR` → `<projectRoot>/.openheron` | ★ **不做上溯搜索** —— 取决于工作目录的根会让同一条命令读到另一份配置（`agentkit/spec/config.go:242-254`） |
 | 11 | 多模型 | 一个 provider 文件持 `models[]`，引用 `<provider>/<model>` | 「入口 agent 强模型 + 下属弱模型」是最常见诉求；且与 `agents/*.md` 的 `model:` 引用形式一致（`agentkit/spec/load.go:55-68`、`agentkit/spec/load.go:480-489`） |
 | 12 | 模型构造 | **每个 agent 一个实例**（粒度 = provider × model × reasoning 档位 × 端点字段形状 × timeout） | ★ **实施时更正**：原写「一个 provider 一个实例」，理由是「连接池天然共享」。后半句不成立 —— `FromConfig` 每次新建 `http.Client`（`agentkit/build/provider.go:40`、`agentkit/build/provider.go:47`），而 agent 各自声明模型与思考档位，本就是彼此独立的（`agentkit/build/provider.go:81-95`） |
@@ -346,14 +346,14 @@ CI 里还没 export），不是配置写错。写错的东西（拼错的键、�
 | `PROJECT_ROOT` | 交给 agent 的项目根 | `main.go:219` |
 | `STATIC_DIR` | `server.static_dir` | `main.go:341` |
 | `FRONTEND_MODE` | `server.frontend_mode` | `main.go:327` |
-| `EINO_EXT_SKILLS_DIR` | skills 目录 | `agentkit/build/skill.go:189` |
+| `EINO_EXT_SKILLS_DIR` | skills 目录 | `agentkit/build/skill.go:185` |
 
 server 侧那五个走同一个辅助函数 —— `override`（`main.go:459`）在环境变量非空时返回环境值，
 否则返回配置值。
 
 ★ **server 侧那五个覆盖只在启动时读一次。** `server/` 不参与热重载（server 分类带 `hot: false`，
 `agentkit/spec/config.go:51-55`），所以环境变量覆盖不是活旋钮 —— 改了要重启。
-`EINO_EXT_SKILLS_DIR` 是例外：每次解析 skills 目录都会重新读它（`agentkit/build/skill.go:189`），
+`EINO_EXT_SKILLS_DIR` 是例外：每次解析 skills 目录都会重新读它（`agentkit/build/skill.go:185`），
 所以改动会在 agent 池重建时生效。
 
 ★ 另有两个环境变量，**不在上表里**，因为它们不碰配置：
@@ -1369,25 +1369,54 @@ frontmatter 的 schema 是 eino 的，不是 openheron 的
 （`eino@v0.9.22/adk/middlewares/skill/skill.go:40-45`），其余任何值 —— 包括空值，也包括写错的
 值 —— 都落进 inline 分支（`eino@v0.9.22/adk/middlewares/skill/skill.go:430-440`）。所以
 `context: inline` 能用，但拼错不会大声报错：它悄悄地就是 inline。openheron 自己的清单把空模式报成
-`inline`（`agentkit/build/skill.go:246-251`）。
+`inline`（`agentkit/build/skill.go:255-267`）。
 
 #### 目录怎么定位
 
 ```
 EINO_EXT_SKILLS_DIR environment variable    ← the override, the highest one
    ↓ unset
-look for .openheron/skills/ upward from cwd  ← agentkit/build/skill.go:212 probeProjectSkills
+look for .openheron/skills/ upward from cwd  ← agentkit/build/skill.go:208 probeProjectSkills
    ↓ not found
 skills are not enabled
 ```
 
 ★ **显式配了却不存在会打日志**：由 `EINO_EXT_SKILLS_DIR` 指名的目录不存在会被报出来
-（`agentkit/build/skill.go:201-208`）。静默返回「未启用」会让「我配了 skills 怎么没生效」变成一个
+（`agentkit/build/skill.go:197-204`）。静默返回「未启用」会让「我配了 skills 怎么没生效」变成一个
 查不出原因的问题 —— 属 §4.3 说的「配了没用」。
 
 ★ **这次向上找不是配置根那套规则。** 配置根从不向上找（`docs/architecture.md` §3.1），而 skills 目录
 会：skills 是一棵目录树，向上找能复用家目录里的 skills；配置根是一组实体，向上找会让同一条命令读到
 另一份配置。
+
+#### 编辑器里怎么改（★ 2026-11-08，✅ 已实施）
+
+★ **skills 是唯一嵌套的分区**：`skills/<name>/SKILL.md`。理由不是好看 —— skill 的名字**就是**
+文件夹名，agent 在 `skills:` 里写的就是它；一个 skill 就是「一个文件夹 + 一个固定文件名」，所以
+它的路径天生比别的分区深一层。别的分区写深一层会被**拒掉**：加载器只读一层，
+`agents/sub/main.md` 这样的文件会被保存、然后永远不被加载。
+
+| 规则 | 在哪 |
+|---|---|
+| 只有这一个分区允许两层 | `agentkit/spec/write.go:136` `shapeHint`；拒绝在 `ValidateReadPath` 里 |
+| 里面的文件名固定 `SKILL.md` | `agentkit/spec/config.go:33` `SkillFileName` |
+| 文件夹名要能被读回来：`^[a-z0-9]+([_-][a-z0-9]+)*$` | `agentkit/spec/decl/decl.go:439` `SkillNamePattern` |
+| 只列**有 `SKILL.md`** 的文件夹 | `agentkit/spec/write.go:256` `listNested` |
+| 新建时文件夹跟着建、删除时空文件夹一起删 | `agentkit/spec/write.go:189` 与 `Delete` 里那一支 |
+| 热更新：改一个 `SKILL.md`，下一轮生效 | `Category{hot: true}`（`agentkit/spec/config.go:100`）；指纹的遍历是**递归**的，两层下的文件也算 |
+
+★ **`skills/` 是唯一没有 loader 的分区。** skill 文件不是配置层读的 —— 运行时自己的 backend 读它
+（`agentkit/build/skill.go:23`）。配置层要这一项只是为了**表面**：清单、路径规则、编辑器，
+所以加载循环跳过 `loader == nil` 的分区，而不是给它一个空 loader。
+
+★ **写入门在这里多一道别处没有的拒绝。** 运行时从哪个目录读 skill 由 `ResolveSkillsDir()`
+（`agentkit/build/skill.go:182`）回答：`$EINO_EXT_SKILLS_DIR`，否则从工作目录向上找
+`.openheron/skills`。它**可以不是**配置根下的 `skills/`。当它不是的时候，编辑器写进来的文件
+根本不会被加载 —— 于是保存被拒，清单里这一分区标成只读并**点名真正的目录**
+（`agentkit/spec/write.go:150` `validateWritable`、`agentkit/spec/config.go:299` `skillsElsewhere`）。
+
+★ 反过来说：进程启动时**一个 skills 目录都没找到**，不算这种情况。那时配置根下的 `skills/` 正是
+探针下次会找到的地方，保存照常 —— 否则「从零建起第一个 skill」这件事就没有入口。
 
 #### `agent:` / `model:` 的落地
 
@@ -2519,6 +2548,24 @@ agentkit/spec/write.go:persist.AtomicWrite
 | `ApprovalMiddlewareLetsAllowTierThrough` | `allow` 档的工具不用点头就放行（`agentkit/build/policy_test.go:177`） |
 | `VerdictOfFallsBackToAsk` | 未列名的工具是 `ask`，而且仍然够得着（`agentkit/build/introspect_test.go:64`） |
 
+### 11.9 ★ 配置表面：文件树与 skills
+
+配置编辑器不是「几个 YAML 表单」，而是**一棵文件树**；`skills/` 是它唯一的嵌套分区
+（§6.5）。这一节的用例钉的就是这两件事。
+
+| 用例 | 断言 |
+|---|---|
+| `TestCategoriesCoverTheSurfaceAndEveryLoaderIsComplete` | ★ 每个分区要么有 loader，要么是那个嵌套且无 loader 的 `skills` —— 表面与「加载器读什么」不再是同一个集合 |
+| `TestASkillIsWrittenIntoItsOwnFolder` | 写 `skills/x/SKILL.md` 会建出文件夹，清单里回的是 `x/SKILL.md` |
+| `TestDeletingASkillRemovesItsFolder` | 删掉之后空文件夹一起消失 —— 留下来就是谁都看不见、谁都删不掉的技能 |
+| `TestASkillNameThatCannotBeReadBackIsRefused` | 空格、大写、连续下划线都被拒，消息说的是**名字** |
+| `TestOnlySkillsIsTwoLevelsDeep` | 别的分区写深一层被拒（`agents/sub/main.md` 会被保存、然后永远不会被加载） |
+| `TestSkillsWrittenWhereTheProcessDoesNotReadThemAreRefused` | ★ 运行时从别处读技能时，保存被拒，清单里该分区标只读并点名那个目录 |
+| `TestSkillsAreWritableWhenTheProcessResolvedNone` | 反过来的那一面：一个目录都没找到时，写配置根下的 `skills/` 是**建起第一个技能**的唯一入口 |
+| `TestSettingsManifestListsSkillsAsNestedItems` | 清单里 skills 是分区、路径两层；只有 `SKILL.md` 的文件夹才算一个技能 |
+| `a row is indented under its folder`（浏览器） | 树：分区是标题、文件缩进在它下面，行的可访问名字仍是整条路径 |
+| `a skill is editable › …`（浏览器） | 技能能打开、能保存；新建对话框问的是**技能名**，显示的是 `skills/<name>/SKILL.md` |
+
 ---
 
 ## 12. 不在本轮范围
@@ -2630,7 +2677,7 @@ retry:
 | 模型实例是每 agent 一个，不是每模型一个 | pool 的键（`agentkit/build/pool.go:31` `GetOrBuild(ctx, name, gen, fn)`） |
 | `AgentHub` / `ModelHub` 已实施 | `agentkit/build/hub.go:64`（`skillModelHub`）与 `agentkit/build/hub.go:106`（`skillAgentHub`） |
 | `ConfigFromEnv` 住在 `agentkit/build` | `agentkit/build/config.go:15` |
-| `EINO_EXT_SKILLS_DIR` 只是一个兜底 | `resolveSkillsDir`（`agentkit/build/skill.go:188`） |
+| `EINO_EXT_SKILLS_DIR` 只是一个兜底 | `ResolveSkillsDir`（`agentkit/build/skill.go:184`） |
 | 那六条 `/v2/settings` 路由 | `api/v2_files.go:67` |
 | manifest 只在一处装配，在 `spec` 里 | `(s *Service) Manifest`（`agentkit/spec/manifest.go:68`）与只负责序列化它的 handler（`api/v2_settings.go:91`） |
 | 校验回的是一组带行号的 issue | `Issue`（`agentkit/spec/diag.go:26`）、`(s *Service) Diagnostics`（`agentkit/spec/diag.go:71`） |
@@ -2666,7 +2713,7 @@ retry:
 | `envOr` → `cfg.*` | ✅ | `main.go:459` `override`（用在 `main.go:341`） |
 | `.openheron/state/` 取代 `./data` | ✅ | `config.Service.DataDir("")`（`agentkit/spec/config.go:314`） |
 | `MaxRetries` 配置化 | ✅ | `decl.RetryCfg.MaxRetries`（`agentkit/spec/decl/decl.go:534`）→ `Config.MaxRetries()`（`agentkit/spec/load.go:961`） |
-| skills 自动探测 `.openheron/skills` | ✅ | `agentkit/build/skill.go:188` `resolveSkillsDir` / `probeProjectSkills` |
+| skills 自动探测 `.openheron/skills` | ✅ | `agentkit/build/skill.go:184` `ResolveSkillsDir` / `:208` `probeProjectSkills` |
 | 写入门拒绝字面量密钥 | ✅ | `agentkit/spec/write.go:562` `checkSecret` |
 | ~~`chatmodel.New` 直读 env~~ | ✅ 已删 | 包已移除，改 `llm/common` |
 | `mcps/` 分区 + MCP provider | ✅ | 那个分区（`agentkit/spec/config.go:61-69`）、加载器（`agentkit/spec/load.go:317` `loadMCP`）、provider（`agentkit/build/tools.go:78`）与档位表（`agentkit/build/mcptools.go:172`）—— 配置面见本文件 §6.7 |

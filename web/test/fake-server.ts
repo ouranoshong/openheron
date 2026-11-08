@@ -1170,6 +1170,9 @@ export function startFakeServer(port = 0): FakeServer {
     //   about — and so the editor's link to it goes somewhere.
     put("agents/agent-expert.md", "---\nmodel: openai/gpt-4o-mini\ndescription: expert\n---\nexpert body\n")
     put("llm/deepseek.yaml", "type: openai\nbase_url: https://x\napi_key: ${KEY}\nmodels:\n  - id: flash\n")
+    // ★ A skill, so the tree has a folder that is two levels deep — the one
+    //   partition whose path is not `<section>/<file>`.
+    put("skills/code-review/SKILL.md", "---\ndescription: reviews a diff\n---\nbody\n")
     put("server/config.yaml", 'listen_addr: ":8080"\n')
   }
   seedSettings()
@@ -1188,6 +1191,8 @@ export function startFakeServer(port = 0): FakeServer {
       //   and hot. The client's own list of editable sections is a second
       //   truth — it is what made "mcps/ is not editable" appear.
       { id: "mcps", label: "MCP servers", editable: true, hot: true },
+      // ★ A skill is a folder: skills/<name>/SKILL.md. Nested, editable, hot.
+      { id: "skills", label: "Skills", editable: true, hot: true },
     ],
     items: [
       { path: "llm/deepseek.yaml", exists: true, hot: true, revision: "r4" },
@@ -1196,11 +1201,13 @@ export function startFakeServer(port = 0): FakeServer {
       { path: "server/config.yaml", exists: true, hot: false, revision: "r5" },
       { path: "tools/http.yaml", exists: true, hot: true, revision: "r1" },
       { path: "mcps/filesystem.yaml", exists: true, hot: true, revision: "r1" },
+      { path: "skills/code-review/SKILL.md", exists: true, hot: true, revision: "r1" },
     ],
     templates: {
       agents: "---\nmodel: \ndescription: \n---\n\n# available models: deepseek/flash\n",
       llm: "type: openai\nbase_url: \napi_key: ${}\nmodels: []\n",
       mcps: "transport: stdio\ncommand: mcp-example-server\nargs: []\ntimeout: 30s\ncall_timeout: 60s\n",
+      skills: "---\ndescription: \n---\n\n# Instructions\n",
       // ★ The tools section template is **nothing but comments**, exactly as
       //   the real server ships it. A file built from it has no YAML
       //   document at all, so the skeleton the dialog must offer is the
@@ -1348,10 +1355,28 @@ export function startFakeServer(port = 0): FakeServer {
   // ★ This is the **server** side of the fake, so it may hold a copy of the
   //   rules — that is what a fake is for. The client holds none.
   const pathProbe = (path: string): Response | null => {
-    const [section = "", file = ""] = path.split("/")
-    const editable = ["agents", "llm", "tools", "mcps"]
+    const [section = "", file = "", extra = ""] = path.split("/")
+    const editable = ["agents", "llm", "tools", "mcps", "skills"]
     if (!file || !editable.includes(section)) {
       return fail(400, `unknown config section ${section}`, "config_path_invalid")
+    }
+    if (section === "skills") {
+      // ★ A skill is a folder: skills/<name>/SKILL.md, and the folder name is
+      //   the skill's name.
+      if (!extra || extra !== "SKILL.md") {
+        return fail(400, "skills/ accepts <name>/SKILL.md", "config_path_invalid")
+      }
+      if (!/^[a-z0-9]+([_-][a-z0-9]+)*$/.test(file)) {
+        return fail(
+          400,
+          "the skill name is its folder name and must match ^[a-z0-9]+([_-][a-z0-9]+)*$",
+          "config_path_invalid",
+        )
+      }
+      return null
+    }
+    if (extra) {
+      return fail(400, `${section}/ holds <name>`, "config_path_invalid")
     }
     if (section === "tools") {
       const known = ["filesystem.yaml", "http.yaml", "kb.yaml", "web_search.yaml", "wikipedia.yaml"]

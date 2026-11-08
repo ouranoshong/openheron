@@ -82,6 +82,21 @@ func (s *Service) Manifest(live *Config) (*Manifest, error) {
 		if !cat.Editable {
 			view.Note = "not hot-reloaded; changes apply on restart"
 		}
+		// ★ The one partition whose **location** can move: skills are read by
+		//   the runtime's own backend, which honours `$EINO_EXT_SKILLS_DIR`
+		//   and otherwise probes upwards. When it resolved somewhere else,
+		//   the tree here is not the one in force, and a save would land in a
+		//   directory nobody reads — so the section is read-only and says
+		//   where the real one is.
+		if cat.Dir == DirSkills {
+			if elsewhere := s.skillsElsewhere(); elsewhere != "" {
+				view.Editable = false
+				view.Note = "this process reads skills from " + elsewhere +
+					"; files under this root's " + DirSkills + "/ are not loaded"
+			} else if s.skillsDir == "" {
+				view.Note = "no skills directory is loaded yet; a skill written here is read on the next start"
+			}
+		}
 		m.Categories = append(m.Categories, view)
 		m.Templates[cat.Dir] = Skeleton(cat.Dir, refs)
 		for rel, tpl := range Templates(cat.Dir) {

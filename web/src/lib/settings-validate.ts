@@ -101,7 +101,7 @@ export type Section = KnownSection | (string & {})
  *   client that keeps its own list drifts from it the day a partition is
  *   added.
  */
-export const EDITABLE_SECTIONS: readonly string[] = ["agents", "llm", "tools", "mcps"]
+export const EDITABLE_SECTIONS: readonly string[] = ["agents", "llm", "tools", "mcps", "skills"]
 
 export function isEditable(section: string, editable: readonly string[] = EDITABLE_SECTIONS): boolean {
   return editable.includes(section)
@@ -116,6 +116,16 @@ export function isEditable(section: string, editable: readonly string[] = EDITAB
  *   it when the file is created. The dialog shows the path it would create,
  *   so the guess is visible instead of silent.
  */
+/**
+ * KNOWN_FILE_NAME says the one file a nested partition holds.
+ *
+ * ★ A skill is a folder whose name is the skill; the file inside it is always
+ *   `SKILL.md`. Typing the file name is therefore not a choice, and asking the
+ *   user to type it would invite `skills/x/README.md` — a file the server
+ *   refuses and the runtime would never read.
+ */
+export const SKILL_FILE_NAME = "SKILL.md"
+
 export function suggestPath(fileName: string, section: Section): string {
   let name = fileName.trim()
   if (!name) return ""
@@ -123,6 +133,12 @@ export function suggestPath(fileName: string, section: Section): string {
   if (section === "llm" && !name.endsWith(".yaml")) name = `${name}.yaml`
   if (section === "tools" && !name.endsWith(".yaml")) name = `${name}.yaml`
   if (section === "mcps" && !name.endsWith(".yaml")) name = `${name}.yaml`
+  if (section === "skills") {
+    // The typed name is the **folder**; a user who types the file name out of
+    // habit gets the folder they meant rather than `name/SKILL.md/SKILL.md`.
+    const folder = name.replace(/\/+$/, "").replace(/\/SKILL\.md$/, "")
+    return `${section}/${folder}/${SKILL_FILE_NAME}`
+  }
   return `${section}/${name}`
 }
 

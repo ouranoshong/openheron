@@ -177,24 +177,50 @@ func TestSettingsManifestCarriesTheReasoningVocabulary(t *testing.T) {
 	}
 }
 
-func TestSettingsManifestOmitsSkills(t *testing.T) {
-	srv, _, _ := settingsEnv(t)
+// ★ `skills/` **is** a partition of the surface, and a nested one: a skill is
+// a folder holding SKILL.md, and the folder name is the name an agent writes in
+// `skills:`. This asserts the shape the editor depends on — the section exists,
+// the item path is two levels deep, and a folder without SKILL.md is not
+// offered (the runtime would not load it either).
+func TestSettingsManifestListsSkillsAsNestedItems(t *testing.T) {
+	srv, _, cfgRoot := settingsEnv(t)
+
+	skill := filepath.Join(cfgRoot, spec.DirSkills, "code-review", spec.SkillFileName)
+	if err := os.MkdirAll(filepath.Dir(skill), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skill, []byte("---\ndescription: reviews a diff\n---\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A folder with no SKILL.md is not a skill.
+	if err := os.MkdirAll(filepath.Join(cfgRoot, spec.DirSkills, "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	got := callJSON(t, srv, "GET", "/v2/settings", nil)
 	m := decodeSettings[spec.Manifest](t, got)
 
-	// ★ The check is about the **structure**, not about the word: the
-	// manifest carries the templates it hands out, and the agent template
-	// mentions the `skills` key on purpose. What must not exist is a skills
-	// **section** — skills are a directory tree, not flat entity files.
-	for _, c := range m.Categories {
-		if c.ID == spec.DirSkills {
-			t.Fatal("skills must not be a category")
+	var cat *spec.ManifestCategory
+	for i := range m.Categories {
+		if m.Categories[i].ID == spec.DirSkills {
+			cat = &m.Categories[i]
 		}
 	}
+	if cat == nil {
+		t.Fatal("skills must be a category: the editor shows it as a folder in the tree")
+	}
+	if !cat.Editable {
+		t.Fatalf("skills must be editable, note = %q", cat.Note)
+	}
+
+	var paths []string
 	for _, it := range m.Items {
 		if strings.HasPrefix(it.Path, spec.DirSkills+"/") {
-			t.Fatalf("skills must not be an editable item: %s", it.Path)
+			paths = append(paths, it.Path)
 		}
+	}
+	if len(paths) != 1 || paths[0] != spec.DirSkills+"/code-review/"+spec.SkillFileName {
+		t.Fatalf("skills items = %v, want exactly skills/code-review/SKILL.md", paths)
 	}
 }
 

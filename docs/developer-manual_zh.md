@@ -226,12 +226,19 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
    `Categories` 里加一项（含 `ID`、`Label`、`Dir`、`Ext`、`Editable`）。**热重载目录**和
    **非热重载目录**要分清楚 —— 改一个目录的语义（热不热）影响用户预期。
 
-2. **`agentkit/spec/load.go`**：加 `loaderFor` 的分支（`agentkit/spec/config.go:421` 的
+2. **`agentkit/spec/load.go`**：加 `loaderFor` 的分支（`agentkit/spec/config.go:521` 的
    `loaderFor`），并实现 `loadXXX`。
+
+   ★ **`skills/` 之前没有的两种形状。** 一个分区可以**不被加载**：`loader` 留 nil，加载循环跳过它
+   —— 那是给「文件由配置层之外的东西读」的分区准备的（技能由 skill backend 读 `SKILL.md`），这时
+   `Categories` 是**表面**（清单、路径规则、编辑器），而不是加载器的清单。一个分区也可以是
+   **嵌套的**（`Category.Nested`）：`skills/<name>/SKILL.md`，一个实体一个文件夹，文件夹名就是
+   实体的名字。★ 深度不是随便给的：别的分区写深一层会被 `ValidateReadPath` 拒掉，因为加载器只读
+   一层，两层下的文件会被保存、然后永远不被加载。
 
 3. **`agentkit/spec/decl/decl.go`**：加纯声明结构体。
 
-4. **热重载自动生效**：`agentkit/spec/config.go:81` 的 `hotDirList()` 是从
+4. **热重载自动生效**：`agentkit/spec/config.go:114` 的 `hotDirList()` 是从
    `Categories` 里筛出 `Hot()` 为真的目录 —— 你在第 1 步把分类标成热重载，
    监听集合就自动有了。**不需要**再去 `reload.go` 里手工登记一遍
    （漏登记的后果是「改配置不生效且无任何提示」）。

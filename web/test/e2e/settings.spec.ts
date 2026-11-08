@@ -17,7 +17,9 @@ async function openSettings(page: Page): Promise<void> {
 }
 
 async function selectFile(page: Page, path: string): Promise<void> {
-  await page.locator(`${LIST} button`, { hasText: path }).first().click()
+  // ★ The tree shows a file's own name under its folder, so the row's
+  //   accessible name is what carries the path.
+  await page.locator(LIST).getByRole("button", { name: path, exact: true }).click()
 }
 
 /**
@@ -302,6 +304,94 @@ test.describe("an agent left out of the tree", () => {
     const status = page.locator(STATUS)
     await expect(status).toContainText(/would leave the agent "main" out of the tree/)
     await expect(page.locator(SAVE)).toBeDisabled()
+  })
+})
+
+// ★ The list is a **file tree**, not a flat list of paths. Six partitions and
+//   a folder per skill read as a tree in every file browser the user already
+//   uses; a list of `skills/code-review/SKILL.md` strings does not.
+test.describe("the file list is a tree", () => {
+  test("each partition is a folder, and its files sit under it", async ({ page }) => {
+    await openSettings(page)
+
+    const agents = page.locator('[data-testid="settings-tree-folder-agents"]')
+    await expect(agents).toBeVisible()
+    // ★ The folder is a heading, not a button: a row that can be clicked but
+    //   does not open anything is a lie about what it does.
+    await expect(agents.getByRole("button")).toHaveCount(2)
+    await expect(agents.getByRole("button", { name: "agents/main.md" })).toBeVisible()
+  })
+
+  test("a skill is a folder of its own, two levels deep", async ({ page }) => {
+    await openSettings(page)
+
+    const skills = page.locator('[data-testid="settings-tree-folder-skills"]')
+    await expect(skills).toBeVisible()
+    // skills > code-review > SKILL.md
+    const folder = page.locator('[data-testid="settings-tree-folder-skills/code-review"]')
+    await expect(folder).toBeVisible()
+    await expect(
+      folder.getByRole("button", { name: "skills/code-review/SKILL.md" }),
+    ).toBeVisible()
+  })
+
+  test("a row is indented under its folder", async ({ page }) => {
+    await openSettings(page)
+    // ★ Where the **text** starts, not where the box starts: both the heading
+    //   and the row are full-width blocks, so their boxes share a left edge
+    //   whatever the indentation is. The indent is inside them.
+    const textLeft = (sel: string) =>
+      page.locator(sel).evaluate((el) => {
+        const node = el.firstChild
+        if (!node) return -1
+        const range = document.createRange()
+        range.selectNodeContents(node)
+        return range.getBoundingClientRect().left
+      })
+
+    const folder = await textLeft('[data-testid="settings-tree-folder-agents"] > div')
+    const row = await textLeft(`${LIST} [aria-label="agents/main.md"]`)
+    expect(folder).toBeGreaterThan(0)
+    expect(row).toBeGreaterThan(folder)
+  })
+})
+
+test.describe("a skill is editable", () => {
+  test("it opens, and what is typed is what the server receives", async ({ page }) => {
+    await openSettings(page)
+    await selectFile(page, "skills/code-review/SKILL.md")
+    await expect(page.locator(EDITOR)).toContainText("reviews a diff")
+
+    await page.locator(EDITOR).click()
+    await page.keyboard.press("Control+a")
+    await page.keyboard.type("---\ndescription: reviews harder\n---\nbody\n")
+    await expect(page.locator(STATUS)).toContainText("Unsaved changes")
+    await page.click(SAVE)
+    await expect(page.locator(STATUS)).toContainText(/Saved .* applied/)
+  })
+
+  // ★ The name is the **folder**, and the file inside it is always SKILL.md.
+  //   Asking for a file name would invite `skills/x/README.md` — a file the
+  //   server refuses and the runtime would never read.
+  test("the new file dialog asks for a skill name and shows the folder", async ({ page }) => {
+    await openSettings(page)
+    await page.click('[data-testid="settings-new-file"]')
+    await page.getByRole("button", { name: "Skills", exact: true }).click()
+    await page.locator('[data-testid="new-file-name"]').fill("spec-check")
+
+    await expect(page.getByText("Skill name (its folder)")).toBeVisible()
+    await expect(page.getByText("skills/spec-check/SKILL.md")).toBeVisible()
+  })
+
+  test("a skill name the server cannot read back keeps the dialog open", async ({ page }) => {
+    await openSettings(page)
+    await page.click('[data-testid="settings-new-file"]')
+    await page.getByRole("button", { name: "Skills", exact: true }).click()
+    await page.locator('[data-testid="new-file-name"]').fill("Code Review")
+    await page.click('[data-testid="new-file-create"]')
+
+    await expect(page.locator('[data-testid="new-file-dialog"]')).toBeVisible()
+    await expect(page.locator('[data-testid="new-file-refusal"]')).toContainText("skill name")
   })
 })
 

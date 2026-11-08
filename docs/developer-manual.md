@@ -258,12 +258,22 @@ Say you want a new `mcps/` directory:
    and **non-hot-reloaded** directories clearly apart — whether a directory is hot
    changes what users expect.
 
-2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`agentkit/spec/config.go:421`) and
+2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`agentkit/spec/config.go:521`) and
    implement `loadXXX`.
+
+   ★ **Two shapes the recipe did not have before `skills/`.** A partition may be
+   **not loaded**: leave `loader` nil and the load loop skips it — that is for files read
+   by something other than the config layer (the skill backend reads `SKILL.md`), and
+   `Categories` is then the *surface* (manifest, path rules, editor) rather than the
+   loader's list. And a partition may be **nested** (`Category.Nested`):
+   `skills/<name>/SKILL.md`, one folder per entity, the folder name being the entity's
+   name. ★ Depth is not a free-for-all: `ValidateReadPath` refuses a path one level too
+   deep in every other partition, because the loader reads exactly one level and a file
+   two levels down would be saved and never loaded.
 
 3. **`agentkit/spec/decl/decl.go`**: add the plain declaration struct.
 
-4. **Hot reload comes for free**: `hotDirList()` at `agentkit/spec/config.go:81` filters
+4. **Hot reload comes for free**: `hotDirList()` at `agentkit/spec/config.go:114` filters
    the `Categories` whose `Hot()` is true — mark the category hot in step 1 and the
    watched set includes it automatically. **You do not** need to register it by hand in
    `reload.go` (and forgetting to would mean "config changes do not take effect, with

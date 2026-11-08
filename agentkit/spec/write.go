@@ -99,16 +99,66 @@ func ValidateReadPath(rel string) (Category, error) {
 	}
 	slash = path.Clean(slash)
 
-	cat, ok := CategoryByDir(path.Dir(slash))
+	// ★ The depth is the **partition's** property, not a free-for-all. Every
+	//   partition but one holds its entity files directly; `skills/` holds a
+	//   folder per skill, because the folder name is the skill's name. A path
+	//   one level too deep elsewhere is refused rather than saved: the loader
+	//   reads one level, so a file at `agents/sub/main.md` would be written
+	//   and never loaded.
+	segs := strings.Split(slash, "/")
+	if len(segs) < 2 {
+		return Category{}, writeErrf(ErrPathInvalid, rel,
+			"path must name a file inside a config section, like agents/main.md")
+	}
+	cat, ok := CategoryByDir(segs[0])
 	if !ok {
 		return Category{}, writeErrf(ErrPathInvalid, rel,
-			"unknown config section %q; known sections are %s", path.Dir(slash), knownDirs())
+			"unknown config section %q; known sections are %s", segs[0], knownDirs())
 	}
-	if name := path.Base(slash); name == "" || name == "." || strings.HasPrefix(name, ".") {
+	want := 2
+	if cat.Nested {
+		want = 3
+	}
+	if len(segs) != want {
+		return Category{}, writeErrf(ErrPathInvalid, rel,
+			"%s/ holds %s", cat.Dir, shapeHint(cat))
+	}
+	if name := segs[len(segs)-1]; name == "" || name == "." || strings.HasPrefix(name, ".") {
 		return Category{}, writeErrf(ErrPathInvalid, rel, "file name must not start with a dot")
 	}
 	if err := validateFileName(cat, rel); err != nil {
 		return Category{}, err
+	}
+	return cat, nil
+}
+
+// shapeHint says what the files of a partition look like.
+func shapeHint(cat Category) string {
+	if cat.Nested {
+		return fmt.Sprintf("<name>/%s", SkillFileName)
+	}
+	return "<name>" + cat.Ext
+}
+
+// validateWritable is ValidatePath plus the one refusal that needs the service
+// rather than the path: `skills/` is a partition the process may not read.
+//
+// ★ Silent success is the failure this guards against. The editor writes
+//
+//	`<config root>/skills/`, the runtime reads whatever its own probe found,
+//	and when those differ the save would succeed and change nothing — the
+//	user would be editing a tree nobody reads, with no error to tell them.
+func (s *Service) validateWritable(rel string) (Category, error) {
+	cat, err := ValidatePath(rel)
+	if err != nil {
+		return Category{}, err
+	}
+	if cat.Dir == DirSkills {
+		if elsewhere := s.skillsElsewhere(); elsewhere != "" {
+			return Category{}, writeErrf(ErrPathInvalid, rel,
+				"this process reads skills from %s, not from <config root>/%s; "+
+					"a file written here would never be loaded", elsewhere, DirSkills)
+		}
 	}
 	return cat, nil
 }
@@ -137,6 +187,20 @@ func validateFileName(cat Category, rel string) error {
 				"mcps/ accepts <server>.yaml, and the server name must match %s", decl.MCPServerNamePattern)
 		}
 		return nil
+	case DirSkills:
+		// ★ The last segment is always SKILL.md; the skill's name is its
+		//   folder, and an agent writes that name in `skills:`. A name the
+		//   runtime cannot read back is refused here, at the moment somebody
+		//   types it, rather than discovered as a skill that never loads.
+		if base != SkillFileName {
+			return writeErrf(ErrPathInvalid, rel, "skills/ accepts <name>/%s", SkillFileName)
+		}
+		name := strings.Split(filepath.ToSlash(rel), "/")[1]
+		if !decl.ValidSkillName(name) {
+			return writeErrf(ErrPathInvalid, rel,
+				"the skill name is its folder name and must match %s", decl.SkillNamePattern)
+		}
+		return nil
 	}
 	return nil
 }
@@ -162,12 +226,16 @@ func (s *Service) ListFiles(cat Category) ([]string, error) {
 	if s.root == "" {
 		return nil, nil
 	}
-	entries, err := os.ReadDir(filepath.Join(s.root, cat.Dir))
+	dir := filepath.Join(s.root, cat.Dir)
+	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	if cat.Nested {
+		return listNested(dir, entries), nil
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -178,6 +246,29 @@ func (s *Service) ListFiles(cat Category) ([]string, error) {
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+// listNested lists `skills/<name>/SKILL.md` for every folder that holds one.
+//
+// ★ A folder without the file is **not** a skill: the runtime decides that by
+//
+//	looking for exactly this file, so listing the folder would offer the user
+//	something that will never load. The names come back as `<name>/SKILL.md`,
+//	which is the path the rest of the surface already speaks.
+func listNested(dir string, entries []os.DirEntry) []string {
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		fi, err := os.Stat(filepath.Join(dir, e.Name(), SkillFileName))
+		if err != nil || fi.IsDir() {
+			continue
+		}
+		names = append(names, e.Name()+"/"+SkillFileName)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Skeleton returns the starting point for a **new** file of one partition.
@@ -222,6 +313,14 @@ func Skeleton(catDir string, modelRefs []string) string {
 			return ""
 		}
 		return tpl
+	case DirSkills:
+		// ★ `name` is not in this frontmatter on purpose: the folder name is
+		//   the skill's name, and a second copy of it inside the file is a
+		//   second thing that can disagree. What the file carries is what the
+		//   list shows — a description, and the instructions themselves.
+		return "---\ndescription: \n---\n\n# Instructions\n\n" +
+			"What this skill does, and when to use it. The body is what the agent\n" +
+			"reads when it loads the skill.\n"
 	default:
 		return ""
 	}
@@ -365,7 +464,7 @@ func (s *Service) checkNoAgentLost(after *Config, rel string) error {
 }
 
 func (s *Service) Write(rel string, content []byte, baseRev string) (rev string, cfg *Config, err error) {
-	if _, err := ValidatePath(rel); err != nil {
+	if _, err := s.validateWritable(rel); err != nil {
 		return "", nil, err
 	}
 	if err := s.checkSecretFor(rel, content); err != nil {
@@ -410,7 +509,7 @@ func (s *Service) WriteMany(files []File, baseRev string) (rev string, cfg *Conf
 	}
 	ms := map[string]*mutation{}
 	for _, f := range files {
-		if _, err := ValidatePath(f.Rel); err != nil {
+		if _, err := s.validateWritable(f.Rel); err != nil {
 			return "", nil, err
 		}
 		if err := s.checkSecretFor(f.Rel, f.Content); err != nil {
@@ -489,7 +588,7 @@ func relsOf(files []File) string {
 }
 
 func (s *Service) Delete(rel string) (cfg *Config, err error) {
-	if _, err := ValidatePath(rel); err != nil {
+	if _, err := s.validateWritable(rel); err != nil {
 		return nil, err
 	}
 	m := &mutation{Rel: rel, Delete: true}
@@ -508,7 +607,8 @@ func (s *Service) Delete(rel string) (cfg *Config, err error) {
 	if s.root == "" {
 		return nil, writeErrf(ErrPathInvalid, rel, "no config root")
 	}
-	if err := os.Remove(filepath.Join(s.root, filepath.FromSlash(rel))); err != nil {
+	dst := filepath.Join(s.root, filepath.FromSlash(rel))
+	if err := os.Remove(dst); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, &WriteError{
 				Kind:    ErrPathInvalid,
@@ -517,6 +617,13 @@ func (s *Service) Delete(rel string) (cfg *Config, err error) {
 			}
 		}
 		return nil, err
+	}
+	// ★ A skill is its folder: `skills/name/SKILL.md` is the skill, and an
+	//   empty folder left behind is a skill that shows up in nobody's list
+	//   and cannot be deleted from the editor. Remove the folder when the
+	//   deleted file was the last thing in it.
+	if cat, err := ValidateReadPath(rel); err == nil && cat.Nested {
+		_ = os.Remove(filepath.Dir(dst))
 	}
 	return trial, nil
 }
