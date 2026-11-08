@@ -81,7 +81,30 @@ func NewBuilder(mgr ConfigManager, opts ...Option) *Builder {
 //	a configuration change takes, so the generation moves through the same
 //	hook — a second way to move it would be a second way to be wrong
 //	about it.
-func (b *Builder) SetGenerationBump(fn func()) { b.bump = fn }
+func (b *Builder) SetGenerationBump(fn func()) {
+	b.bump = fn
+	// ★ The manager needs the same hook: a server that comes up changes
+	//   the tool surface, and the surface is rebuilt once per
+	//   generation — so the generation has to move when that happens,
+	//   not when a turn happens to ask.
+	if b.mcp != nil {
+		b.mcp.SetBump(fn)
+	}
+}
+
+// Warm starts every mounted MCP server in the background.
+//
+// ★ It is the pre-warm: the servers some agent mounts are started as soon
+//
+//	as the configuration is known, so the first turn usually finds them
+//	up. ★ A server that is not up yet is not a reason to hold the turn —
+//	its tools join the next one.
+func (b *Builder) Warm(cfg *spec.Config) {
+	if b.mcp == nil {
+		return
+	}
+	b.mcp.Warm(cfg)
+}
 
 // Close tears the MCP clients down.
 func (b *Builder) Close() {

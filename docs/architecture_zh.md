@@ -432,6 +432,11 @@ MCP 这一支在注册表处并进来：`mcps/<server>.yaml` → `spec.loadMCP`
 上限（`agentkit/build/mcpmanager.go:485`、`agentkit/build/mcpmanager.go:501`）。
 装配等的是一个 server，不是一个 server 的尸体。
 
+★ **启动不站在那一轮的关键路径上。** 配置一被读到，所有挂载的 server 就在**后台**
+起起来（`agentkit/build/mcpmanager.go:123` `Warm`），而每台 server 各自有一个状态 ——
+`not_started`、`starting`、`ready` 或 `failed`。还没起来的 server 不贡献工具，
+那一轮照跑；它起来之后工具面变了，代际推进，于是**下一轮**就有它的工具。
+
 ★ 暴露出来的名字是 `mcp__<server>__<tool>`，只在一处拼装（`agentkit/build/mcptools.go:141`）。
 server 自己的名字就是命名空间那一段，而 agent 的 `tools:` 清单点的是暴露出来的那些名字 ——
 整个 server 用模式 `mcp__<server>__*` 一把点。★ **这个前缀模式是安全的**：server 名里

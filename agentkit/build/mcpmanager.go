@@ -57,10 +57,82 @@ type mcpManager struct {
 	//   the start that created it, so a child spawned under the start's
 	//   deadline would be killed the moment the start returned.
 	start func(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error)
+
+	// bump moves the generation when the tool surface changes.
+	//
+	// ★ A server that comes up changes what the model can call, and the
+	//   tools are rebuilt once per generation — so the generation has to
+	//   move when the surface changes, not when a turn happens to ask.
+	//   ★ It is the same hook the configuration reloader uses: a second
+	//   way to move the generation would be a second way to be wrong
+	//   about it.
+	bump func()
+
+	// ctx is the manager's own lifetime: the background starts hang off
+	// it, so the process going away takes them with it.
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func newMCPManager() *mcpManager {
-	return &mcpManager{entries: map[string]*mcpEntry{}, start: startMCPClient}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &mcpManager{
+		entries: map[string]*mcpEntry{},
+		start:   startMCPClient,
+		ctx:     ctx,
+		cancel:  cancel,
+	}
+}
+
+// SetBump wires the hook that moves the generation when the surface changes.
+func (m *mcpManager) SetBump(fn func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.bump = fn
+}
+
+// bumpGeneration moves the generation, if the hook is wired.
+//
+// ★ It reads the hook under the lock: the hook is wired after the manager
+//
+//	is built, and a background job may read it while that happens.
+func (m *mcpManager) bumpGeneration() {
+	m.mu.Lock()
+	fn := m.bump
+	m.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+// Warm starts every mounted server in the background.
+//
+// ★ The traversal is the point: the servers the tree wants are the ones
+// some agent mounts, and that set is the union of the agents' lists
+// (spec.Config.MCPServersInUse) — ★ a server nobody mounts is never
+// started, not even in the background.
+//
+// ★ It is **one job**: the traversal decides *what* to start, and each
+// start is its own goroutine — three servers that each take a minute must
+// not take three minutes.
+//
+// ★ The warm is not the only way a server starts: a demand (the provider
+// or the panel) starts one too, through the same single-flight. That is
+// what makes a failed start retry — with the file's own deadline as the
+// backoff — without a second mechanism.
+func (m *mcpManager) Warm(cfg *spec.Config) {
+	if cfg == nil {
+		return
+	}
+	go func() {
+		for _, name := range cfg.MCPServersInUse() {
+			scfg := cfg.MCPs[name]
+			if scfg == nil {
+				continue
+			}
+			m.entry(name).dispatch(m.ctx, scfg, m.start)
+		}
+	}()
 }
 
 func (m *mcpManager) entry(name string) *mcpEntry {
@@ -68,7 +140,10 @@ func (m *mcpManager) entry(name string) *mcpEntry {
 	defer m.mu.Unlock()
 	e := m.entries[name]
 	if e == nil {
-		e = &mcpEntry{name: name}
+		// ★ The entry tells the manager when the surface changed: the
+		//   job that brings a server up does not know what a generation
+		//   is, and the manager does.
+		e = &mcpEntry{name: name, onChange: m.bumpGeneration}
 		m.entries[name] = e
 	}
 	return e
@@ -81,22 +156,23 @@ func (m *mcpManager) entry(name string) *mcpEntry {
 //	tools are discovered at runtime, so a snapshot that froze them would
 //	need a restart to see a tool the server added yesterday.
 //
+// ★ **It does not wait.** The start is a background job: a server that is
+//
+//	still installing its own package must not decide whether a turn can
+//	start — that budget belongs to the model. The caller is told the
+//	server is on its way (errMCPStarting), and the tools it brings join
+//	the **next** turn.
+//
 // ★ The start is single-flight: the first caller starts the client and
 //
-//	every other caller waits for that same start and gets the same client.
-//	Two child processes for one server would be worse than a slow start —
-//	the two could report different tool lists, and the tools the model
-//	sees would depend on which process answered.
+//	every other caller finds the same job in flight. Two child processes
+//	for one server would be worse than a slow start — the two could
+//	report different tool lists, and the tools the model sees would
+//	depend on which process answered.
 func (m *mcpManager) Tools(ctx context.Context, cfg *decl.MCPServerCfg) (mcpClient, []string, error) {
 	e := m.entry(cfg.Name)
-	if err := e.ensure(ctx, cfg, m.start); err != nil {
-		return nil, e.lastTools(), err
-	}
-	names, err := e.list(ctx)
-	if err != nil {
-		return e.client(), e.lastTools(), err
-	}
-	return e.client(), names, nil
+	e.dispatch(ctx, cfg, m.start)
+	return e.view()
 }
 
 // callMutex returns the mutex that serializes one stdio server's calls.
@@ -149,6 +225,10 @@ func (m *mcpManager) Refresh(ctx context.Context, cfg *spec.Config) bool {
 //
 //	process is going away.
 func (m *mcpManager) Close() {
+	// ★ The manager's own lifetime ends first: the background starts hang
+	//   off it, and a process that goes away must not leave a child
+	//   behind.
+	m.cancel()
 	m.mu.Lock()
 	entries := make([]*mcpEntry, 0, len(m.entries))
 	for _, e := range m.entries {
@@ -174,8 +254,29 @@ type mcpEntry struct {
 	err         error
 	serial      bool
 
+	// state is where the server is in its own lifecycle.
+	//
+	// ★ It is a field and not a pair of booleans, because the four
+	//
+	//	states answer different questions: "not up yet" and "up and
+	//	broken" are different facts, and a reader who cannot tell them
+	//	apart reads both as "unreachable" — which is a verdict about the
+	//	server, not about a moment in its life.
+	state mcpState
+
+	// lastAttempt is when the last start was tried.
+	//
+	// ★ It is the backoff's clock: a server that just failed is not
+	//	asked again until the file's own deadline has passed, so a
+	//	server that cannot start is not spawned in a loop.
+	lastAttempt time.Time
+
 	// cancel ends the child's lifetime. It is the entry's, because the
 	// client outlives the snapshot it was built for.
+	//
+	// ★ It is stored **when the start begins**, not when it succeeds: a
+	//   start that is in flight has a child process too, and a process
+	//   that goes away must not leave it behind.
 	cancel context.CancelFunc
 
 	// startMu makes the start single-flight.
@@ -183,6 +284,55 @@ type mcpEntry struct {
 
 	// callMu serializes the calls of a stdio server.
 	callMu sync.Mutex
+
+	// onChange is called when the tool surface changed — a server that
+	// came up, or one that lost its tools.
+	//
+	// ★ It is a hook and not a call to the builder: the entry does not
+	//   know what a generation is, and the manager does.
+	onChange func()
+}
+
+// mcpState is where one server is in its own lifecycle.
+type mcpState string
+
+const (
+	// mcpNotStarted: declared, and nobody has asked for it yet.
+	mcpNotStarted mcpState = "not_started"
+	// mcpStarting: a start is in flight.
+	mcpStarting mcpState = "starting"
+	// mcpReady: the client is up and the listing is in hand.
+	mcpReady mcpState = "ready"
+	// mcpFailed: the last start failed, and the reason is kept.
+	mcpFailed mcpState = "failed"
+)
+
+// errMCPStarting says the server is on its way.
+//
+// ★ It is not a failure: a caller that treats it as one warns about a
+//
+//	server that is doing exactly what it was asked to do.
+var errMCPStarting = errors.New("the server is starting")
+
+// errMCPNotStarted says nobody has asked for the server yet.
+var errMCPNotStarted = errors.New("the server is not started")
+
+// mcpStartTimeout is the ceiling for one start.
+//
+// ★ It is the file's own deadline, and a file that names none gets the
+//
+//	default — the same default the loader applies
+//	(decl.DefaultMCPTimeout). ★ The backoff reuses it, so a server that
+//	cannot start is not asked again before the deadline it was given
+//	has passed.
+func mcpStartTimeout(cfg *decl.MCPServerCfg) time.Duration {
+	if cfg == nil {
+		return decl.DefaultMCPTimeout
+	}
+	if cfg.Timeout.Value > 0 {
+		return cfg.Timeout.Value
+	}
+	return decl.DefaultMCPTimeout
 }
 
 func (e *mcpEntry) client() mcpClient {
@@ -197,6 +347,26 @@ func (e *mcpEntry) lastTools() []string {
 	return append([]string(nil), e.tools...)
 }
 
+// view is the entry's state as a caller sees it.
+//
+// ★ The client comes with the state: a caller that got a client for a
+//
+//	server that is not ready would call a server that is not there.
+func (e *mcpEntry) view() (mcpClient, []string, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	switch e.state {
+	case mcpReady:
+		return e.cli, append([]string(nil), e.tools...), nil
+	case mcpStarting:
+		return nil, append([]string(nil), e.tools...), errMCPStarting
+	case mcpFailed:
+		return nil, append([]string(nil), e.tools...), e.err
+	default:
+		return nil, nil, errMCPNotStarted
+	}
+}
+
 // stale reports whether the listing is old enough to be re-listed.
 func (e *mcpEntry) stale() bool {
 	e.mu.Lock()
@@ -207,47 +377,124 @@ func (e *mcpEntry) stale() bool {
 	return time.Since(e.listedAt) >= mcpRelistInterval
 }
 
-// ensure starts the client if it is not up, or if the declaration changed.
+// dispatch starts the client if it is not up, and returns at once.
 //
-// ★ A changed declaration means a changed server: the old client is stale,
+// ★ The start is a **background job**: the caller never waits for it. A
 //
-//	and a hot partition whose resources are not rebuilt lies about being
-//	hot.
-func (e *mcpEntry) ensure(ctx context.Context, cfg *decl.MCPServerCfg,
-	start func(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error)) error {
+//	server that is still installing its own package must not decide
+//	whether a turn can start — that budget belongs to the model.
+//
+// ★ The decision is single-flight: the first caller starts it, every
+//
+//	other caller finds the same job in flight and goes on. Two child
+//	processes for one server would be worse than a slow start.
+//
+// ★ A changed declaration means a changed server: the old client is
+//
+//	stale, and a hot partition whose resources are not rebuilt lies about
+//	being hot.
+func (e *mcpEntry) dispatch(ctx context.Context, cfg *decl.MCPServerCfg,
+	start func(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error)) {
+
 	e.startMu.Lock()
 	defer e.startMu.Unlock()
 
 	want := mcpFingerprint(cfg)
 	e.mu.Lock()
-	cli, fp := e.cli, e.fingerprint
+	cli, fp, state, last := e.cli, e.fingerprint, e.state, e.lastAttempt
 	e.mu.Unlock()
 
-	if cli != nil && fp == want {
-		return nil
+	if cli != nil && fp == want && state == mcpReady {
+		return
+	}
+	if state == mcpStarting {
+		return
+	}
+	if state == mcpFailed && time.Since(last) < mcpStartTimeout(cfg) {
+		// ★ The backoff is the file's own deadline: a server that just
+		//   failed to start is not asked again before that deadline has
+		//   passed — so a server that cannot start is not spawned in a
+		//   loop, and one that can start is not given up on.
+		return
 	}
 	if cli != nil {
 		e.close()
 	}
 
-	life, cancel := context.WithCancel(context.Background())
-	started, err := start(ctx, life, cfg)
-	if err != nil {
-		cancel()
-		e.mu.Lock()
-		e.err = err
-		e.mu.Unlock()
-		return err
-	}
+	life, cancel := context.WithCancel(ctx)
 	e.mu.Lock()
-	if e.cancel != nil {
-		e.cancel()
-	}
 	e.cancel = cancel
-	e.cli, e.fingerprint, e.err = started, want, nil
-	e.serial = cfg.Transport == decl.MCPTransportStdio
+	e.state = mcpStarting
+	e.err = nil
 	e.mu.Unlock()
-	return nil
+
+	obs.Logger().Info("[mcp] the server is starting",
+		"server", cfg.Name, "transport", cfg.Transport)
+
+	go e.runStart(life, cancel, cfg, want, start)
+}
+
+// runStart is the background job: it starts the client, lists its tools,
+// and records what came of it.
+//
+// ★ The listing is part of the job, not a separate step: a server that is
+//
+//	up but not listed yet is a server whose tools nobody can name, and the
+//	job is what makes both true at once.
+//
+// ★ The comparison is against the listing **before** the job, because the
+//
+//	question is whether the surface changed — and the surface is the
+//	tool list the model sees. ★ A server that comes up with tools it did
+//	not have is exactly the change that has to move the generation.
+func (e *mcpEntry) runStart(life context.Context, cancel context.CancelFunc,
+	cfg *decl.MCPServerCfg, want string,
+	start func(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error)) {
+
+	opCtx, opCancel := context.WithTimeout(life, mcpStartTimeout(cfg))
+	defer opCancel()
+
+	e.mu.Lock()
+	prev := append([]string(nil), e.tools...)
+	e.mu.Unlock()
+
+	cli, err := start(opCtx, life, cfg)
+	var names []string
+	if err == nil {
+		names, err = e.listClient(opCtx, cli, cfg.Transport == decl.MCPTransportStdio)
+	}
+
+	e.mu.Lock()
+	changed := false
+	if err != nil {
+		e.state, e.err, e.lastAttempt = mcpFailed, err, time.Now()
+		e.cli, e.tools, e.listedAt = nil, nil, time.Time{}
+		// ★ The client is gone, so its tools are gone with it — that is a
+		//   changed surface when it had one.
+		changed = len(prev) > 0
+		e.cancel = nil
+	} else {
+		e.state, e.err, e.lastAttempt = mcpReady, nil, time.Now()
+		e.cli, e.tools, e.listedAt = cli, names, time.Now()
+		e.fingerprint, e.serial = want, cfg.Transport == decl.MCPTransportStdio
+		changed = !sameStrings(prev, names)
+	}
+	e.mu.Unlock()
+
+	if err != nil {
+		// ★ The child is over: a failed start leaves no process behind.
+		cancel()
+		obs.Logger().Warn("[mcp] the server did not start",
+			"server", cfg.Name, "transport", cfg.Transport, "err", err)
+		return
+	}
+
+	obs.Logger().Info("[mcp] the server is up",
+		"server", cfg.Name, "transport", cfg.Transport, "tools", len(names))
+
+	if changed && e.onChange != nil {
+		e.onChange()
+	}
 }
 
 // list reads the server's own tool names.
@@ -264,7 +511,26 @@ func (e *mcpEntry) list(ctx context.Context) ([]string, error) {
 	if cli == nil {
 		return nil, errors.New("the server is not started")
 	}
+	names, err := e.listClient(ctx, cli, serial)
+	if err != nil {
+		return nil, err
+	}
+	e.mu.Lock()
+	e.tools, e.listedAt = names, time.Now()
+	e.mu.Unlock()
+	return names, nil
+}
 
+// listClient reads the tool names of one client.
+//
+// ★ The client is a parameter because the background job lists **before**
+//
+//	the client is the entry's: a server that is up but not listed yet is a
+//	server whose tools nobody can name.
+func (e *mcpEntry) listClient(ctx context.Context, cli mcpClient, serial bool) ([]string, error) {
+	if cli == nil {
+		return nil, errors.New("the server is not started")
+	}
 	if serial {
 		e.callMu.Lock()
 		defer e.callMu.Unlock()
@@ -277,9 +543,6 @@ func (e *mcpEntry) list(ctx context.Context) ([]string, error) {
 	for _, t := range res.Tools {
 		names = append(names, t.Name)
 	}
-	e.mu.Lock()
-	e.tools, e.listedAt = names, time.Now()
-	e.mu.Unlock()
 	return names, nil
 }
 
@@ -293,6 +556,10 @@ func (e *mcpEntry) markBroken() {
 	cli := e.cli
 	cancel := e.cancel
 	e.cli, e.cancel, e.tools, e.listedAt = nil, nil, nil, time.Time{}
+	// ★ The server is not "ready" any more, and it is not "failed" either:
+	//   nobody asked it to do anything and it died — so it is back to
+	//   "not started", and the next demand starts it again.
+	e.state = mcpNotStarted
 	e.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -313,6 +580,9 @@ func (e *mcpEntry) close() {
 	cli := e.cli
 	cancel := e.cancel
 	e.cli, e.cancel, e.tools, e.listedAt = nil, nil, nil, time.Time{}
+	// ★ A closed server is not "ready", and it is not "failed" either: it
+	//   is one nobody has asked for yet.
+	e.state = mcpNotStarted
 	e.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -432,7 +702,7 @@ const mcpTeardownGrace = 5 * time.Second
 func startStdioClient(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error) {
 	env := mcpChildEnv(cfg)
 
-	opCtx, cancel := context.WithTimeout(opCtx, cfg.Timeout.Value)
+	opCtx, cancel := context.WithTimeout(opCtx, mcpStartTimeout(cfg))
 	defer cancel()
 
 	// ★ The child is spawned under the **lifetime** context, not under the
@@ -540,7 +810,7 @@ func mcpChildEnv(cfg *decl.MCPServerCfg) []string {
 //	a transport the configuration cannot ask for is a transport that would
 //	have to be maintained without ever being used.
 func startHTTPClient(ctx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error) {
-	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout.Value)
+	ctx, cancel := context.WithTimeout(ctx, mcpStartTimeout(cfg))
 	defer cancel()
 
 	tr, err := transport.NewStreamableHTTP(cfg.URL, transport.WithHTTPHeaders(cfg.Headers))

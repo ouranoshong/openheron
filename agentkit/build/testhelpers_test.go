@@ -31,6 +31,18 @@ func (m *fakeManager) set(cfg *spec.Config) {
 	m.gen++
 }
 
+// bump moves the generation without changing the configuration.
+//
+// ★ It is what the real configuration manager does when a server's tool
+//
+//	list changes, and the test needs the same hook: the tools are rebuilt
+//	once per generation.
+func (m *fakeManager) bump() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.gen++
+}
+
 func minimalTestConfig() *spec.Config {
 	return &spec.Config{
 		Agents: map[string]*decl.Agent{

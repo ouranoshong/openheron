@@ -343,6 +343,16 @@ const FAKE_MCP_SERVERS = [
   },
 ]
 
+// ★ A server that is on its way: it carries no error, because there is no
+// error yet — it is starting, and the tools it brings join the next turn.
+const FAKE_MCP_STARTING_SERVER = {
+  name: "pending",
+  transport: "stdio",
+  status: "starting",
+  error: "",
+  tools: [],
+}
+
 const FAKE_COMMANDS = [
   { name: "new", description: "Start a new thread", kind: "action", action: "new_thread" },
   { name: "stop", description: "Stop the current run", kind: "action", action: "stop_run" },
@@ -1118,7 +1128,7 @@ export function startFakeServer(port = 0): FakeServer {
   let seq = 0
   let scenario: ScenarioName = "simple"
   let agentsMode: "default" | "multi" | "many" | "grew" = "default"
-  let mcpMode: "default" | "empty" = "default"
+  let mcpMode: "default" | "empty" | "starting" = "default"
   let defaultRoot = "main"
 
   const find = (id: string) => threads.find((t) => t.threadId === id)
@@ -1658,7 +1668,15 @@ export function startFakeServer(port = 0): FakeServer {
       }
       if (path === "/v2/mcps" && req.method === "GET") {
         const agent = url.searchParams.get("agent") ?? "main"
-        return json({ agent, servers: mcpMode === "empty" ? [] : FAKE_MCP_SERVERS })
+        // ★ "starting" is a state of its own: the server is on its way,
+        //   and the panel has to tell it apart from a broken one.
+        const servers =
+          mcpMode === "empty"
+            ? []
+            : mcpMode === "starting"
+              ? [...FAKE_MCP_SERVERS, FAKE_MCP_STARTING_SERVER]
+              : FAKE_MCP_SERVERS
+        return json({ agent, servers })
       }
       if (path === "/v2/health") return json({ ok: true })
 
@@ -1683,7 +1701,7 @@ export function startFakeServer(port = 0): FakeServer {
       }
       if (path === "/__fake/mcp-mode" && req.method === "POST") {
         const mode = url.searchParams.get("mode") ?? "default"
-        mcpMode = mode === "empty" ? "empty" : "default"
+        mcpMode = mode === "empty" ? "empty" : mode === "starting" ? "starting" : "default"
         return json({ ok: true, mode: mcpMode })
       }
       if (path === "/__fake/threads/clear" && req.method === "POST") {

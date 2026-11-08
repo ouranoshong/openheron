@@ -242,6 +242,18 @@ For a developer who has to debug it:
   server's corpse: without the kill, a server that cannot be started takes the
   turn down with it, and the client is told "turn start timeout" — a symptom
   that names neither the server nor the reason.
+- **The start is a background job, and every server has a state.** The manager
+  starts the servers in the background (`Warm`, `agentkit/build/mcpmanager.go:123`)
+  and each entry carries one of four states (`mcpState`,
+  `agentkit/build/mcpmanager.go:297`): `not_started`, `starting`, `ready` or
+  `failed`. ★ `Tools` never waits — it answers `errMCPStarting` while the job is
+  in flight, and the provider skips the server **without** a warning: a server
+  on its way is not a broken server. ★ The tools a server brings join the
+  **next** turn: the job compares the listing before and after and moves the
+  generation when it changed (`runStart`, `agentkit/build/mcpmanager.go:450`).
+  ★ A failed start is retried, but not before the file's own `timeout:` has
+  passed (`mcpStartTimeout`, `agentkit/build/mcpmanager.go:328`) — a server that
+  cannot start must not be spawned in a loop.
 - **The tool list is re-listed when a turn asks for it**, and the previous
   listing is older than 30 seconds (`agentkit/build/mcpmanager.go:34`,
   `mcpRelistInterval`). ★ That interval is a fixed value, not a configuration

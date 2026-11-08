@@ -213,6 +213,16 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
   ★ 装配等的是一个 server，不是一个 server 的尸体：不杀它，一个起不来的服务器会
   把这一轮一起拖下水，而客户端收到的是「turn start timeout」——
   一个既不点名是哪个 server、也不说为什么的症状。
+- **启动是一个后台作业，每台 server 各自有一个状态。** 管理器在后台起那些服务器
+  （`Warm`，`agentkit/build/mcpmanager.go:123`），每个条目带四态之一
+  （`mcpState`，`agentkit/build/mcpmanager.go:297`）：`not_started`、`starting`、
+  `ready`、`failed`。★ `Tools` 从不等 —— 作业在飞时它答 `errMCPStarting`，
+  而 provider 跳过那台 server 而且**不告警**：正在起不等于坏了。
+  ★ 一台 server 带来的工具在**下一轮**进来：作业拿落地前后的清单比，
+  变了就推进代际（`runStart`，`agentkit/build/mcpmanager.go:450`）。
+  ★ 失败的启动会重试，但不会早于文件自己的 `timeout:`
+  （`mcpStartTimeout`，`agentkit/build/mcpmanager.go:328`）——
+  起不来的 server 不能被拉成热循环。
 - **工具列表在一轮来要时重新列出**，条件是上一次列出的时间超过 30 秒
   （`agentkit/build/mcpmanager.go:34`，`mcpRelistInterval`）。
   ★ 这个间隔是写死的值，不是配置项：没人动的旋钮就是没人测的旋钮，而服务器

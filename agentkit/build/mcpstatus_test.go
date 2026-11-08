@@ -3,7 +3,9 @@ package build
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
@@ -32,8 +34,14 @@ func mcpViewConfig(agentServers []string) *spec.Config {
 		},
 		Models: map[string]*decl.Model{"test/model": {ID: "model"}},
 		MCPs: decl.MCPFiles{
-			"github": {Name: "github", Transport: decl.MCPTransportStdio, Command: "true"},
-			"files":  {Name: "files", Transport: decl.MCPTransportHTTP, URL: "https://example.invalid/mcp"},
+			// ★ The commands are placeholders that cannot answer, so the
+			//   tests here are about the states around a start — and the
+			//   deadline is short, because a dead child is only noticed
+			//   when the deadline arrives.
+			"github": {Name: "github", Transport: decl.MCPTransportStdio, Command: "true",
+				Timeout: decl.MCPDuration{Value: 2 * time.Second}},
+			"files": {Name: "files", Transport: decl.MCPTransportHTTP, URL: "https://example.invalid/mcp",
+				Timeout: decl.MCPDuration{Value: 2 * time.Second}},
 		},
 	}
 }
@@ -78,6 +86,11 @@ func TestAnUnreachableServerReportsTheErrorAndKeepsItsLastListing(t *testing.T) 
 	}
 
 	views := b.MCPServers(context.Background(), spec.DefaultAgentID)
+	// ★ The start is a background job, so the first read says "starting";
+	//   the failure is what the panel reports once the job is over.
+	waitForMCPSettled(t, b.mcp, "github")
+	waitForMCPSettled(t, b.mcp, "files")
+	views = b.MCPServers(context.Background(), spec.DefaultAgentID)
 	for _, v := range views {
 		if v.Status != MCPServerUnreachable {
 			t.Fatalf("%s status = %q, want unreachable", v.Name, v.Status)
@@ -113,32 +126,56 @@ func TestTheAgentsViewReportsTheToolsListAsTheReason(t *testing.T) {
 
 func TestTheReasonIsTheToolRuleWhenTheServerIsThere(t *testing.T) {
 	cfg := mcpViewConfig([]string{"github"})
-	cfg.Agents[spec.DefaultAgentID].Tools = []string{"mcp__github__read_issue"}
+	// ★ The agent names **no** tool of the server: the server is there
+	//   and offers one, and the agent's own list is what keeps it away.
+	cfg.Agents[spec.DefaultAgentID].Tools = []string{"read_file"}
 	b := newTestBuilderWithConfig(t, cfg)
+	// ★ The server has to be up for the question to be about the agent's
+	//   list: a server that is not up has no tools to argue about.
+	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg) (mcpClient, error) {
+		return &fakeMCPClient{tools: []string{"read_issue"}}, nil
+	}
 
+	// ★ The panel's ask is what starts the server, so the wait comes
+	//   after it — and the second read is the one that has the tools.
+	b.MCPServers(context.Background(), spec.DefaultAgentID)
+	waitForMCPSettled(t, b.mcp, "github")
 	views := b.MCPServers(context.Background(), spec.DefaultAgentID)
+	found := false
 	for _, v := range views {
 		if v.Name != "github" || len(v.Tools) == 0 {
 			continue
 		}
+		found = true
 		if v.Tools[0].Reason != "tools" {
 			t.Fatalf("reason = %q, want tools", v.Tools[0].Reason)
 		}
+	}
+	if !found {
+		t.Fatal("the server has no tool rows — the assertion would pass for nothing")
 	}
 }
 
 func TestThePanelAsksTheManagerAndTheManagerStartsTheServer(t *testing.T) {
 	b := newTestBuilderWithConfig(t, mcpViewConfig([]string{"github", "files"}))
-	started := 0
+	// ★ The counter is atomic: the starts are background jobs, and two
+	//   servers come up at once.
+	var started int32
 	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg) (mcpClient, error) {
-		started++
+		atomic.AddInt32(&started, 1)
 		return &fakeMCPClient{tools: []string{"read_issue"}}, nil
 	}
 
 	views := b.MCPServers(context.Background(), spec.DefaultAgentID)
-	if started == 0 {
+	// ★ The panel starts the servers it asks about, and the start is a
+	//   background job: the panel says "starting" first and the tools
+	//   are there on the next read.
+	waitForMCPSettled(t, b.mcp, "github")
+	waitForMCPSettled(t, b.mcp, "files")
+	if atomic.LoadInt32(&started) == 0 {
 		t.Fatal("the panel must start the servers it asks about")
 	}
+	views = b.MCPServers(context.Background(), spec.DefaultAgentID)
 	for _, v := range views {
 		if v.Name != "github" {
 			continue
@@ -174,6 +211,10 @@ func TestThePanelShowsTheTierTheGateWouldUse(t *testing.T) {
 		return &fakeMCPClient{tools: []string{"read_issue", "delete_repo"}}, nil
 	}
 
+	// ★ The panel's ask starts the server; the tools are there on the
+	//   next read.
+	b.MCPServers(context.Background(), spec.DefaultAgentID)
+	waitForMCPSettled(t, b.mcp, "github")
 	for _, v := range b.MCPServers(context.Background(), spec.DefaultAgentID) {
 		if v.Name != "github" {
 			continue

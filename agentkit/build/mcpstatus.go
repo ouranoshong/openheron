@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"errors"
 
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
@@ -16,6 +17,13 @@ const (
 	MCPServerReady       = "ready"
 	MCPServerUnreachable = "unreachable"
 	MCPServerUnused      = "unused"
+	// MCPServerStarting says the server is on its way.
+	//
+	// ★ It is a state of its own, not another face of "unreachable": a
+	//   server that is starting is doing what it was asked to do, and a
+	//   reader who cannot tell the two apart reads a server on its way
+	//   as a broken one.
+	MCPServerStarting = "starting"
 )
 
 // The states one MCP tool is in.
@@ -99,6 +107,15 @@ func (b *Builder) MCPServers(ctx context.Context, agentID string) []MCPServerVie
 
 		own, err := b.mcpTools(ctx, scfg)
 		if err != nil {
+			// ★ A server on its way is not a broken server: the panel
+			//   says so, and it does not carry an error — there is no
+			//   error yet.
+			if errors.Is(err, errMCPStarting) || errors.Is(err, errMCPNotStarted) {
+				view.Status = MCPServerStarting
+				view.Tools = mcpToolViews(policy, table, mcpPlan(scfg, own))
+				out = append(out, view)
+				continue
+			}
 			view.Status = MCPServerUnreachable
 			view.Error = err.Error()
 			// ★ The tools of an unreachable server are its last listing:

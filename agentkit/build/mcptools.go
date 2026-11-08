@@ -214,6 +214,14 @@ func (p mcpToolProvider) Provide(ctx context.Context, env toolEnv) ([]tool.BaseT
 		}
 		cli, own, err := p.mgr.Tools(ctx, scfg)
 		if err != nil {
+			// ★ "On its way" is not a failure: the server is doing
+			//   exactly what it was asked to do, and the tools it brings
+			//   join the next turn. ★ Warning about it would put a
+			//   warning in the log for every turn a server spends
+			//   starting.
+			if errors.Is(err, errMCPStarting) || errors.Is(err, errMCPNotStarted) {
+				continue
+			}
 			obs.Logger().Warn("[mcp] the server is unreachable",
 				"server", name, "transport", scfg.Transport, "err", err)
 			continue

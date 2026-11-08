@@ -76,6 +76,25 @@ test("面板照实报出够不着的服务器与断掉的服务器", async ({ pa
   await expect(unused.locator(TOOL)).toHaveCount(0)
 })
 
+test("正在启动的服务器与起不来的服务器是两回事", async ({ page }) => {
+  await setMCPMode("starting")
+  await openApp(page)
+  await sendMessage(page, "/mcps")
+  await expect(page.locator(PANEL)).toBeVisible()
+
+  // ★ "starting" is its own state: a server that is on its way is doing
+  //   what it was asked to do, and it carries no error — there is no error
+  //   yet.
+  const starting = page.locator(SERVER).filter({ hasText: "pending" })
+  await expect(starting).toHaveAttribute("data-status", "starting")
+  await expect(starting).toContainText("starting")
+  await expect(starting.locator(ERROR)).toHaveCount(0)
+
+  // ★ And it is not the broken one: that one still says so.
+  const unreachable = page.locator(SERVER).filter({ hasText: "files" })
+  await expect(unreachable).toHaveAttribute("data-status", "unreachable")
+})
+
 test("一个服务器都没配时，面板说没有", async ({ page }) => {
   await setMCPMode("empty")
   await openApp(page)

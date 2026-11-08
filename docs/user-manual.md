@@ -934,7 +934,7 @@ holds.
 The dialog is titled "MCP servers" and holds one block per configured server:
 
 - the server's name, its transport (`stdio` or `http`), and its state — `ready`,
-  `unreachable` or `unused`;
+  `starting`, `unreachable` or `unused`;
 - one row per tool: the server's own name, the exposed name (`mcp__github__create_issue`),
   the tier (`allow` or `ask`), and the state.
 
@@ -947,6 +947,11 @@ does not use is `unused` and carries no tool rows.
 ★ **A server that cannot start does not stop the turn.** The agent runs without that
 server's tools — the rest of the tool surface is unaffected — and the panel carries the
 reason next to the server. The only thing a broken server costs you is its own tools.
+
+★ **A server on its way is a state of its own: `starting`.** The servers are started in
+the background as soon as the configuration is known, so the first turn usually finds
+them up. A server that is still starting says `starting` and carries **no error** —
+there is no error yet, it is on its way. The tools it brings join the **next** turn.
 
 The **Refresh** button re-reads the state, so you can fix a server and see the fix without
 closing the dialog.
@@ -1136,6 +1141,10 @@ not be started.
 **Q: An MCP server does not start?**
 The startup error names the file and the field. `mcps/` is hot, so a fix takes effect on
 the next turn — no restart.
+
+**Q: The panel says a server is `starting`?**
+It is on its way: the servers are started in the background when the configuration is
+known. The tools it brings join the **next** turn — press **Refresh** to see them.
 
 **Q: The port is taken / the interface will not open?**
 Change the port in `listen_addr`, or override it with the `LISTEN_ADDR` environment

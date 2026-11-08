@@ -146,14 +146,18 @@ export interface SlashCommand {
 
 // MCPServerView is one MCP server, as the runtime holds it.
 //
-// The status is about the server ("ready", "unreachable", "unused") and the
-// tool rows are about this agent: a tool can be available, skipped (the
-// server offered it and it could not be exposed) or blocked (this agent
-// does not reach it).
+// The status is about the server ("ready", "starting", "unreachable",
+// "unused") and the tool rows are about this agent: a tool can be
+// available, skipped (the server offered it and it could not be exposed)
+// or blocked (this agent does not reach it).
+//
+// ★ "starting" is its own state: a server that is on its way is doing what
+//   it was asked to do, and a reader who cannot tell it from "unreachable"
+//   reads a server on its way as a broken one.
 export interface MCPServerView {
   name: string
   transport: string
-  status: "ready" | "unreachable" | "unused"
+  status: "ready" | "starting" | "unreachable" | "unused"
   error: string
   tools: MCPToolView[]
 }

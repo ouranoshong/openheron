@@ -847,7 +847,7 @@ This session is running in another window — stop it to take over
 对话框标题是 "MCP servers"，每个已配置的服务器一块：
 
 - 服务器的名字、它的传输方式（`stdio` 或 `http`）、以及它的状态 —— `ready`、
-  `unreachable` 或 `unused`；
+  `starting`、`unreachable` 或 `unused`；
 - 每个工具一行：服务器自己的名字、暴露出来的名字（`mcp__github__create_issue`）、
   档位（`allow` 或 `ask`）、以及状态。
 
@@ -859,6 +859,10 @@ This session is running in another window — stop it to take over
 ★ **起不来的服务器不会让这一轮停掉。** 这个 Agent 照跑，只是没有那个服务器的工具 ——
 其余的工具不受影响 —— 而对话框里那个服务器旁边就带着原因。
 一个坏掉的服务器，代价只有它自己那些工具。
+
+★ **「正在启动」是它自己的一态：`starting`。** 服务器在配置一被读到时就在后台起起来，
+所以第一轮通常赶得上。一台还在起的服务器写着 `starting`，而且**不带错误** ——
+还没有错误，它正在路上。它带来的工具在**下一轮**进来。
 
 **Refresh** 按钮会重读一次状态，所以你改完服务器不用关掉对话框就能看到效果。
 
@@ -1031,6 +1035,10 @@ curl -N -X POST localhost:8080/v2/run \
 
 **Q：MCP 服务器起不来？**
 启动报错会点名是哪个文件的哪个字段。`mcps/` 是热的，所以改完下一轮就生效 —— 不用重启。
+
+**Q：面板说某台服务器 `starting`？**
+它正在起：配置一被读到，服务器就在后台起起来。它带来的工具在**下一轮**进来 ——
+按 **Refresh** 就看得见。
 
 **Q：端口被占 / 界面打不开？**
 `listen_addr` 改端口，或用环境变量 `LISTEN_ADDR` 覆盖。

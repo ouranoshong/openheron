@@ -17,7 +17,7 @@ export async function setAgentsMode(mode: "default" | "multi" | "many" | "grew")
   if (!r.ok) throw new Error(`failed to set agents mode ${mode}: ${r.status}`)
 }
 
-export async function setMCPMode(mode: "default" | "empty"): Promise<void> {
+export async function setMCPMode(mode: "default" | "empty" | "starting"): Promise<void> {
   const r = await fetch(`${FAKE_URL}/__fake/mcp-mode?mode=${mode}`, { method: "POST" })
   if (!r.ok) throw new Error(`failed to set the MCP mode ${mode}: ${r.status}`)
 }

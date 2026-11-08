@@ -78,6 +78,37 @@ func newFakeMCPManager(starts *int32, cli *fakeMCPClient) *mcpManager {
 	return m
 }
 
+// waitForMCPSettled waits until the server is no longer on its way.
+//
+// ★ The start is a background job, so a caller that asks right after the
+//
+//	ask sees the server on its way. A test that asserts on the finished
+//	state has to wait for it — the way a reader of the panel presses
+//	Refresh, and the way a second turn finds the tools.
+func waitForMCPSettled(t *testing.T, m *mcpManager, name string) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		e := m.entry(name)
+		e.mu.Lock()
+		state := e.state
+		e.mu.Unlock()
+		if state == mcpReady || state == mcpFailed {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("the server %q never settled", name)
+}
+
+// mcpStateOf reads the server's state, for a test that has to name it.
+func mcpStateOf(m *mcpManager, name string) mcpState {
+	e := m.entry(name)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.state
+}
+
 func TestTwoCallersAskingForTheSameServerGetOneClient(t *testing.T) {
 	var starts int32
 	cli := &fakeMCPClient{tools: []string{"read_issue"}}
@@ -89,12 +120,16 @@ func TestTwoCallersAskingForTheSameServerGetOneClient(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, _, err := m.Tools(context.Background(), cfg); err != nil {
+			// ★ "On its way" is an answer, not a failure: the callers
+			//   that arrive while the job is in flight are told so.
+			if _, _, err := m.Tools(context.Background(), cfg); err != nil &&
+				!errors.Is(err, errMCPStarting) {
 				t.Errorf("Tools: %v", err)
 			}
 		}()
 	}
 	wg.Wait()
+	waitForMCPSettled(t, m, "github")
 
 	if got := atomic.LoadInt32(&starts); got != 1 {
 		t.Fatalf("the server was started %d times, want 1 — one server is one client", got)
@@ -107,18 +142,22 @@ func TestACrashedChildIsStartedAgainOnTheNextCall(t *testing.T) {
 	m := newFakeMCPManager(&starts, cli)
 	cfg := mcpCfg("github")
 
-	if _, _, err := m.Tools(context.Background(), cfg); err != nil {
+	if _, _, err := m.Tools(context.Background(), cfg); err != nil &&
+		!errors.Is(err, errMCPStarting) {
 		t.Fatalf("Tools: %v", err)
 	}
+	waitForMCPSettled(t, m, "github")
 	// The child died: the manager closes it, and the next call starts a
 	// new one.
 	m.entry("github").markBroken()
 	if !cli.isClosed() {
 		t.Fatal("the dead client must be closed")
 	}
-	if _, _, err := m.Tools(context.Background(), cfg); err != nil {
+	if _, _, err := m.Tools(context.Background(), cfg); err != nil &&
+		!errors.Is(err, errMCPStarting) {
 		t.Fatalf("Tools: %v", err)
 	}
+	waitForMCPSettled(t, m, "github")
 	if got := atomic.LoadInt32(&starts); got != 2 {
 		t.Fatalf("the server was started %d times, want 2 — a crash is not a configuration error", got)
 	}
@@ -130,13 +169,18 @@ func TestAChangedDeclarationReplacesTheClient(t *testing.T) {
 	m := newFakeMCPManager(&starts, cli)
 
 	cfg := mcpCfg("github")
-	if _, _, err := m.Tools(context.Background(), cfg); err != nil {
+	if _, _, err := m.Tools(context.Background(), cfg); err != nil &&
+		!errors.Is(err, errMCPStarting) {
 		t.Fatalf("Tools: %v", err)
 	}
+	waitForMCPSettled(t, m, "github")
+
 	changed := mcpCfg("github", func(c *decl.MCPServerCfg) { c.Command = "other" })
-	if _, _, err := m.Tools(context.Background(), changed); err != nil {
+	if _, _, err := m.Tools(context.Background(), changed); err != nil &&
+		!errors.Is(err, errMCPStarting) {
 		t.Fatalf("Tools: %v", err)
 	}
+	waitForMCPSettled(t, m, "github")
 	if got := atomic.LoadInt32(&starts); got != 2 {
 		t.Fatalf("the server was started %d times, want 2 — a changed declaration is a changed server", got)
 	}
@@ -172,9 +216,11 @@ func TestAChangedToolListIsReportedByTheRefresh(t *testing.T) {
 		MCPs:   decl.MCPFiles{"github": mcpCfg("github")},
 		Agents: map[string]*decl.Agent{spec.DefaultAgentID: {ID: spec.DefaultAgentID, MCPServers: []string{"github"}}},
 	}
-	if _, _, err := m.Tools(context.Background(), cfg.MCPs["github"]); err != nil {
+	if _, _, err := m.Tools(context.Background(), cfg.MCPs["github"]); err != nil &&
+		!errors.Is(err, errMCPStarting) {
 		t.Fatalf("Tools: %v", err)
 	}
+	waitForMCPSettled(t, m, "github")
 	before := cli.listCount()
 
 	// The listing is younger than the interval, so it is not re-listed.
@@ -251,9 +297,19 @@ func TestAnUnreachableServerSaysSoAndKeepsTheOtherServersAlive(t *testing.T) {
 		return cli, nil
 	}
 
+	if _, _, err := m.Tools(context.Background(), mcpCfg("broken")); err != nil &&
+		!errors.Is(err, errMCPStarting) {
+		t.Fatalf("Tools: %v", err)
+	}
+	waitForMCPSettled(t, m, "broken")
 	if _, _, err := m.Tools(context.Background(), mcpCfg("broken")); err == nil {
 		t.Fatal("an unreachable server must report the failure")
 	}
+	if _, _, err := m.Tools(context.Background(), mcpCfg("github")); err != nil &&
+		!errors.Is(err, errMCPStarting) {
+		t.Fatalf("Tools: %v", err)
+	}
+	waitForMCPSettled(t, m, "github")
 	if _, own, err := m.Tools(context.Background(), mcpCfg("github")); err != nil {
 		t.Fatalf("Tools: %v", err)
 	} else if len(own) != 1 {
@@ -320,22 +376,30 @@ func TestTheSilentServerDoesNotTakeTheOthersDownWithIt(t *testing.T) {
 
 	m := newMCPManager()
 	begin := time.Now()
-	if _, _, err := m.Tools(context.Background(), silentMCPCfg(t)); err == nil {
-		t.Fatal("a server that never answers must report the failure")
-	}
+	_, _, err = m.Tools(context.Background(), silentMCPCfg(t))
 	elapsed := time.Since(begin)
-	if elapsed > 20*time.Second {
-		t.Fatalf("the manager took %s: a failed server must not hold the build", elapsed)
+	// ★ The manager answers at once: the server is on its way, and the
+	//   caller is not held by it.
+	if !errors.Is(err, errMCPStarting) {
+		t.Fatalf("the manager must say the server is starting, got %v", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("the manager took %s: a server on its way must not hold the build", elapsed)
 	}
 
-	// ★ The other server still answers: one broken server is a degradation,
-	//   not the end of the tool surface.
+	// ★ The other server still answers: one server on its way is a
+	//   degradation, not the end of the tool surface.
 	good := mcpCfg("fake", func(c *decl.MCPServerCfg) {
 		c.Command = self
 		c.Args = []string{"-test.run=TestNothingRunsInTheChild"}
 		c.Env = map[string]string{mcpServerEnv: "1"}
 		c.Timeout = decl.MCPDuration{Value: 30 * time.Second}
 	})
+	if _, _, err := m.Tools(context.Background(), good); err != nil &&
+		!errors.Is(err, errMCPStarting) {
+		t.Fatalf("Tools: %v", err)
+	}
+	waitForMCPSettled(t, m, "fake")
 	if _, own, err := m.Tools(context.Background(), good); err != nil {
 		t.Fatalf("Tools: %v", err)
 	} else if len(own) == 0 {

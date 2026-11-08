@@ -170,9 +170,23 @@ func liveMCPConfig(t *testing.T) *spec.Config {
 // nothing: the child is the MCP server, not a test run.
 func TestNothingRunsInTheChild(t *testing.T) {}
 
+// startLiveServer starts a server and waits for it.
+//
+// ★ The start is a background job, so a build that asks for the tools
+//
+//	right after the ask sees the server on its way — and the tools it
+//	brings join the **next** turn. A test that wants the tools has to
+//	wait for the server, the way a second turn would.
+func startLiveServer(t *testing.T, b *Builder, cfg *spec.Config, name string) {
+	t.Helper()
+	b.Warm(cfg)
+	waitForMCPSettled(t, b.mcp, name)
+}
+
 func TestTheProviderMountsTheToolsOfARealServer(t *testing.T) {
 	cfg := liveMCPConfig(t)
 	b := newTestBuilderWithConfig(t, cfg)
+	startLiveServer(t, b, cfg, "fake")
 
 	batch, err := b.tools.Build(context.Background(), toolEnv{cfg: cfg})
 	if err != nil {
@@ -208,6 +222,7 @@ func TestTheProviderMountsTheToolsOfARealServer(t *testing.T) {
 func TestAMCPtoolCallReachesTheServer(t *testing.T) {
 	cfg := liveMCPConfig(t)
 	b := newTestBuilderWithConfig(t, cfg)
+	startLiveServer(t, b, cfg, "fake")
 
 	batch, err := b.tools.Build(context.Background(), toolEnv{cfg: cfg})
 	if err != nil {
@@ -263,6 +278,7 @@ func toolNames(batch []tool.BaseTool) []string {
 func TestTheStdioCallsOfOneServerAreSerialized(t *testing.T) {
 	cfg := liveMCPConfig(t)
 	b := newTestBuilderWithConfig(t, cfg)
+	startLiveServer(t, b, cfg, "fake")
 
 	batch, err := b.tools.Build(context.Background(), toolEnv{cfg: cfg})
 	if err != nil {
@@ -333,6 +349,7 @@ func TestTheHTTPCallsOfOneServerAreNotSerialized(t *testing.T) {
 		},
 	}
 	b := newTestBuilderWithConfig(t, cfg)
+	startLiveServer(t, b, cfg, "files")
 
 	batch, err := b.tools.Build(context.Background(), toolEnv{cfg: cfg})
 	if err != nil {
@@ -373,6 +390,7 @@ func TestACallThatExceedsTheTimeoutGivesUpAndReleasesTheLock(t *testing.T) {
 	cfg := liveMCPConfig(t)
 	cfg.MCPs["fake"].CallTimeout = decl.MCPDuration{Value: 300 * time.Millisecond}
 	b := newTestBuilderWithConfig(t, cfg)
+	startLiveServer(t, b, cfg, "fake")
 
 	batch, err := b.tools.Build(context.Background(), toolEnv{cfg: cfg})
 	if err != nil {
@@ -411,6 +429,7 @@ func TestTheFileAskingForAToolTheServerLacksIsNoticed(t *testing.T) {
 	defer obs.SetLogger(old)
 
 	b := newTestBuilderWithConfig(t, cfg)
+	startLiveServer(t, b, cfg, "fake")
 	if _, err := b.tools.Build(context.Background(), toolEnv{cfg: cfg}); err != nil {
 		t.Fatalf("the provider must not fail on a reachable server: %v", err)
 	}
@@ -513,6 +532,7 @@ func TestTheServerFileOnDiskIsWhatTheLoaderProduces(t *testing.T) {
 		t.Fatalf("tier = %q, want ask", got)
 	}
 
+	startLiveServer(t, b, cfg, "demo")
 	batch, err := b.tools.Build(context.Background(), toolEnv{cfg: cfg})
 	if err != nil {
 		t.Fatalf("the provider must not fail on a reachable server: %v", err)

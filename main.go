@@ -255,6 +255,15 @@ func setupRuntime(ctx context.Context, st *startup) error {
 	//   would be a second way to be wrong about it.
 	builder.SetGenerationBump(st.mgr.bump)
 
+	// ★ The pre-warm: every server some agent mounts is started in the
+	//   background as soon as the configuration is known — so the first
+	//   turn usually finds them up. ★ It does not wait for them: a
+	//   server that is still installing its own package must not decide
+	//   whether a turn can start, and the tools it brings join the next
+	//   turn.
+	st.mgr.setWarm(func(c *spec.Config) { builder.Warm(c) })
+	builder.Warm(st.cfg)
+
 	rt := run.New(run.Config{
 		AgentBuilder:   builder,
 		SessionManager: fm,
@@ -492,10 +501,31 @@ func (a toolsAdapter) RuntimeTools(agentID string) api.Observed {
 	return api.Observed{Names: o.Names, Known: o.Known}
 }
 
+// agentConfig holds the configuration the process runs on.
+//
+// ★ The generation moves in exactly one place, and this is it: a server's
+//
+//	tool list can change while the configuration stands still, and the
+//	tools have to be rebuilt for it.
 type agentConfig struct {
 	mu  sync.RWMutex
 	cfg *spec.Config
 	gen uint64
+
+	// warm starts the mounted MCP servers in the background.
+	//
+	// ★ It is a hook because the builder does not exist yet when the
+	//   configuration is first loaded — and the pre-warm has to happen
+	//   for that first load too, so the first turn usually finds the
+	//   servers up.
+	warm func(*spec.Config)
+}
+
+// setWarm wires the pre-warm.
+func (c *agentConfig) setWarm(fn func(*spec.Config)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.warm = fn
 }
 
 func (c *agentConfig) Current() (*spec.Config, uint64) {
@@ -506,9 +536,16 @@ func (c *agentConfig) Current() (*spec.Config, uint64) {
 
 func (c *agentConfig) set(cfg *spec.Config) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.cfg = cfg
 	c.gen++
+	warm := c.warm
+	c.mu.Unlock()
+	// ★ The pre-warm is outside the lock: it starts child processes, and
+	//   a lock held across that would block every reader of the
+	//   configuration.
+	if warm != nil {
+		warm(cfg)
+	}
 }
 
 // bump moves the generation without changing the configuration.
