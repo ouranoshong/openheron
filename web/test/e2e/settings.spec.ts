@@ -289,6 +289,20 @@ test.describe("the new file dialog", () => {
     await openNewFile(page)
     await page.getByRole("button", { name: "MCP servers", exact: true }).click()
     await page.locator(NEW_NAME).fill("github")
+  // ★ At 32rem a YAML skeleton folded every key onto two lines — the editor
+  //   was a column that fought the file it was meant to show. The dialog is
+  //   three-quarter-width now, and it scrolls inside the window instead of
+  //   growing past it.
+  test("the new file dialog is wide enough for a YAML skeleton", async ({ page }) => {
+    await openNewFile(page)
+    const box = await page.locator(NEW_DIALOG).boundingBox()
+    expect(box).toBeTruthy()
+    expect(box!.width).toBeGreaterThan(600)
+
+    const overflow = await page.locator(NEW_DIALOG).evaluate((el) => getComputedStyle(el).overflowY)
+    expect(overflow).toBe("auto")
+  })
+
 
     // ★ The path is the server's name: the file's name IS the server's name.
     await expect(page.locator(NEW_NAME).locator("xpath=..")).toContainText("mcps/github.yaml")

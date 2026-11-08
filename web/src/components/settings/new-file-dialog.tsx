@@ -72,7 +72,14 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg" data-testid="new-file-dialog">
+      <DialogContent
+        // ★ Wider than a form needs to be: the skeleton of an agent file is
+        //   a dozen lines of YAML, and at 32rem it was edited in a column
+        //   that folded every key onto two lines. ★ The height cap keeps it
+        //   inside the window — the dialog scrolls, the page does not.
+        className="sm:max-w-3xl max-h-[85vh] overflow-y-auto"
+        data-testid="new-file-dialog"
+      >
         <DialogHeader>
           <DialogTitle>New file</DialogTitle>
           <DialogDescription>
@@ -162,7 +169,7 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
                 setContent(e.target.value)
                 setEdited(true)
               }}
-              rows={8}
+              rows={12}
               spellCheck={false}
               className="bg-background rounded-md border p-2 font-mono text-xs"
               data-testid="new-file-content"
