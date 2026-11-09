@@ -555,7 +555,7 @@ this one left off.
 
 ★ **A project that does something is the whole demonstration.** The repository
 carries one: [`examples/demo-project`](examples/demo-project) is a tiny Go
-program with a bug in it — `make test` fails, and the fix is one character.
+program with a bug in it — `task test` fails, and the fix is one character.
 
 ★ **Run it from the repository root**, where the paths below resolve.
 
@@ -571,7 +571,7 @@ sbx run docker.io/ouranoshong/openheron-kit:latest \
 the files on disk:
 
 ```sh
-make kit    # once: it builds the binary and copies it beside the recipe
+task kit    # once: it builds the binary and copies it beside the recipe
 
 sbx run ./sandbox-kit/openheron \
     --kit ./sandbox-kit/examples/demo-project/openheron-deepseek \
@@ -580,11 +580,11 @@ sbx run ./sandbox-kit/openheron \
 
 ★ That second form is the one to use when you are **changing** the Kit: the
 runtime rebuilds it from the files you just edited, with no image and no
-registry in between. It needs `make kit` once, because that is what copies
+registry in between. It needs `task kit` once, because that is what copies
 the binary next to the recipe where the build can reach it. The first form
 is the one a user takes, and it needs nothing but `sbx`.
 
-Ask it to fix the failing test. The agent reads the files, runs `make test`,
+Ask it to fix the failing test. The agent reads the files, runs `task test`,
 **asks you before it acts** — approve it — and the change lands on your host,
 because the workspace is a directory on your host.
 

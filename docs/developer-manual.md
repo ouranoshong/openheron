@@ -19,11 +19,11 @@
 | Ports | see `.env.test` (repository root, committed) |
 
 ```bash
-make init          # create .openheron/ — the configuration the server reads (once per clone)
-make build-go     # backend only (no UI) — fastest while iterating on Go code
-make web-dev      # Vite dev server (:5173, proxies /v2 to :8080)
-make dev          # air: rebuild and restart the Go binary automatically
-make check        # lint + test — run this before committing
+task init          # create .openheron/ — the configuration the server reads (once per clone)
+task build-go     # backend only (no UI) — fastest while iterating on Go code
+task web-dev      # Vite dev server (:5173, proxies /v2 to :8080)
+task dev          # air: rebuild and restart the Go binary automatically
+task check        # lint + test — run this before committing
 ```
 
 ★ **The server refuses to start without a configuration**: it reads exactly one
@@ -31,7 +31,7 @@ config root — `$OPENHERON_CONFIG_DIR`, else `<project-root>/.openheron` — an
 reports `no configuration at <root>: run openheron init to create one` when it
 is empty. The repository ships `.openheron-example/` (the sample) but not
 `.openheron/` (the real one: it holds your own model and API key, so it is
-git-ignored). **`make init` is therefore the first command on a fresh clone.**
+git-ignored). **`task init` is therefore the first command on a fresh clone.**
 It writes only the files that are missing and keeps the ones already there, so
 running it twice changes nothing.
 
@@ -706,12 +706,12 @@ the install gate in front of it.
 
 | Job | What it runs | Needs |
 |---|---|---|
-| `go` | `make lint-go` + `make test` + `make test-race` | Go |
-| `web` | `make lint-web` + `bun run test:unit` | bun |
-| `e2e` | `make test-e2e` — the fake backend it ships with | bun + chromium |
+| `go` | `task lint-go` + `task test` + `task test-race` | Go |
+| `web` | `task lint-web` + `bun run test:unit` | bun |
+| `e2e` | `task test-e2e` — the fake backend it ships with | bun + chromium |
 | `secrets` | gitleaks over the whole history (§5.9) | — |
-| `install-script` | `make test-install` — the installer against a local fake release | — |
-| `release` | `make release`, then a **draft** GitHub Release | the four checks |
+| `install-script` | `task test-install` — the installer against a local fake release | — |
+| `release` | `task release`, then a **draft** GitHub Release | the four checks |
 | `install` | installs the assets of that draft on every platform we ship for | `release` |
 | `publish` | turns the draft into the public release | `install` |
 
@@ -726,14 +726,14 @@ assets the `release` job built, on every platform we publish for, and only then 
 readable with admin rights alone, while an annotation is readable from the API by
 anyone.
 
-★ **The smokes are not in CI.** `make smoke` needs a model that answers, and a model
+★ **The smokes are not in CI.** `task smoke` needs a model that answers, and a model
 that answers is not reproducible on a runner — a failure there would be noise, not a
 signal. The E2E is the deterministic half, and it is the half that can gate a release.
 
-★ **The commands are the repo's own.** CI calls `make lint-go` / `make test` /
-`make test-race` / `make test-e2e` — the commands §5.2 lists — so the recipe lives in
-the Makefile and nowhere else. `make lint-go` and `make lint-web` are the two halves of
-`make lint`, split so that a job installs only the toolchain it needs.
+★ **The commands are the repo's own.** CI calls `task lint-go` / `task test` /
+`task test-race` / `task test-e2e` — the commands §5.2 lists — so the recipe lives in
+the Taskfile and nowhere else. `task lint-go` and `task lint-web` are the two halves of
+`task lint`, split so that a job installs only the toolchain it needs.
 
 ★ **The race detector is a step of the `go` job, not a job of its own.** The branch
 protection already requires that job's name, so a step inside it is covered by the
@@ -798,7 +798,7 @@ To publish an existing tag again, run the workflow by hand and give it the tag.
 
 The two installers (`scripts/install.sh`, `scripts/install.ps1`) travel with the
 release, so `releases/latest/download/install.sh` always refers to the script
-that belongs to the binaries next to it. `make test-install` checks the installer
+that belongs to the binaries next to it. `task test-install` checks the installer
 against a local fake release: the download, the checksum gate (including a
 corrupted archive, which must install nothing), the install and the version
 check.
@@ -832,24 +832,24 @@ merge means "the code is on `main`", not "a binary exists".
 
 #### The Kit's version
 
-★ **The version lives in one place: `KIT_VERSION` in the Makefile.** Everything
+★ **The version lives in one place: `KIT_VERSION` in the Taskfile.** Everything
 else either gets it from there or does not name it:
 
 | Where | How it gets the version |
 |---|---|
-| `Makefile` — `KIT_VERSION ?= …` | **the source** |
+| `Taskfile.yml` — `KIT_VERSION: …` | **the source** |
 | `sandbox-kit/openheron/openheron.yaml` — `args.version.default` | stamped in by the build (`sed` on the staged copy) |
-| the published image tag | `$(KIT_VERSION)` |
+| the published image tag | `{{.KIT_VERSION}}` |
 | the guide (`sandbox-kit/TUTORIAL.md`) | it names `latest`, which CI points at the release |
 
 ★ **So a release is a pull request that touches two lines.** Open one that
-changes `KIT_VERSION` in the Makefile and `args.version.default` in the
+changes `KIT_VERSION` in the Taskfile and `args.version.default` in the
 descriptor, and nothing else: the guide says `latest`, and CI derives the tag
 from the version you tag.
 
 ```sh
 # the whole contract of a release pull request — $NEXT is the version you tag
-sed -i "s/^KIT_VERSION ?= .*/KIT_VERSION ?= $NEXT/" Makefile
+sed -i "s/^  KIT_VERSION: .*/  KIT_VERSION: $NEXT/" Taskfile.yml
 sed -i "s|^    default: .*|    default: \"$NEXT\"|" sandbox-kit/openheron/openheron.yaml
 ```
 
@@ -992,7 +992,7 @@ the DOM is not the problem and virtualization would buy nothing.
 - `vite.config.ts`: `@` → `src`; dev port `5173` (`15173` in test mode),
   `strictPort: true`; `/v2` is proxied to `OPENHERON_API_TARGET`.
 - `web/dist` is embedded into the binary with `go:embed` (`webui/webui.go`).
-- `make build` builds the frontend first, then the Go binary.
+- `task build` builds the frontend first, then the Go binary.
 
 ### 4.6 ★ The layout tokens and the theme
 
@@ -1053,25 +1053,25 @@ To change a port, change only that one file.
 
 | Command | Covers | Requires |
 |---|---|---|
-| `make test` | All of Go (`go test ./...`) | — |
-| `make test-race` | The same suite under the race detector (`go test -race -count=1 ./...`) | — |
+| `task test` | All of Go (`go test ./...`) | — |
+| `task test-race` | The same suite under the race detector (`go test -race -count=1 ./...`) | — |
 | `cd web && bun run test:unit` | The pure layers (reducer / framing / store / highlighting) | — |
-| `make test-e2e` | A real browser + a deterministic fake backend | nothing (it brings its own fake backend) |
-| `make smoke` | Real-backend integration: SSE framing, history replay, approval wiring | **the test instance running, and a reachable model** |
-| `make lint` | Go vet + gofmt + oxlint + tsc | — |
-| `make lint-go` / `make lint-web` | The two halves of `make lint`, for a job that only has one toolchain | — |
-| `make check` | `lint` + `test` — run this before committing | — |
-| `make install-hooks` | Install the pre-commit hooks (gitleaks + gofmt) | `pre-commit` |
+| `task test-e2e` | A real browser + a deterministic fake backend | nothing (it brings its own fake backend) |
+| `task smoke` | Real-backend integration: SSE framing, history replay, approval wiring | **the test instance running, and a reachable model** |
+| `task lint` | Go vet + gofmt + oxlint + tsc | — |
+| `task lint-go` / `task lint-web` | The two halves of `task lint`, for a job that only has one toolchain | — |
+| `task check` | `lint` + `test` — run this before committing | — |
+| `task install-hooks` | Install the pre-commit hooks (gitleaks + gofmt) | `pre-commit` |
 
 To start the test instance:
 
 ```bash
-make test-env-backend   # foreground, :18099, its own config + its own session directory
-make test-env-reset     # only rebuild the test directories, do not start
-make test-env-sync      # ★ must be run after you change the development-side agent definitions
+task test-env-backend   # foreground, :18099, its own config + its own session directory
+task test-env-reset     # only rebuild the test directories, do not start
+task test-env-sync      # ★ must be run after you change the development-side agent definitions
 ```
 
-★ **`make test-env-sync` is mandatory, not optional** — the test instance's
+★ **`task test-env-sync` is mandatory, not optional** — the test instance's
 `agents/ llm/ tools/ skills/` are **copied** from the development side, so change an
 agent without syncing and you are still testing the old definition.
 
@@ -1108,7 +1108,7 @@ cd web && bun run smoke:config             # config_write's approval round trip 
 | `initcfg` | The completeness of the factory templates |
 | `agentkit/fsx` | The write boundary (including symlink escapes), the `ls`/`glob`/`grep` caps, and absolute glob patterns |
 
-★ **Run the race detector too**: `make test-race` (`go test -race ./...`). The plain
+★ **Run the race detector too**: `task test-race` (`go test -race ./...`). The plain
   suite is green while the detector is red more often than one would like — a race
   needs two goroutines to meet, and the plain suite does not care when they do.
   The three production races it caught (2026-11-06) were all the same mistake:
@@ -1189,7 +1189,7 @@ do not touch" assertions.
 
 ### 5.6 E2E
 
-`make test-e2e` → `playwright test`, **13 specs, 158 cases**: `agents` `chat`
+`task test-e2e` → `playwright test`, **13 specs, 158 cases**: `agents` `chat`
 `compaction` `composer-autocomplete` `composer-meta` `history` `mcps` `multi-agent`
 `reattach` `scroll` `session-busy` `settings` `theme`.
 
@@ -1216,7 +1216,7 @@ exercise "how does the interface behave when the stream stalls".
 depends on the model cooperating, so a failure cannot tell you whether the interface is
 broken or the model misbehaved; turn on `retries` and failures become noise that nobody
 reads after the third round. Protocol-level verification against a real backend is
-`make smoke`'s job — the two are complementary.
+`task smoke`'s job — the two are complementary.
 
 **(2) Let a busy port fail loudly.** `reuseExistingServer: false` in
 `playwright.config.ts` and `strictPort: true` in Vite are both deliberate: reusing the
@@ -1283,10 +1283,10 @@ precondition first** and exits `2` with the line to add, instead of looking flak
 tools: [..., config_write]
 ```
 
-then `make test-env-sync`. ★ It refuses to run when `config_write` is **not** in the
+then `task test-env-sync`. ★ It refuses to run when `config_write` is **not** in the
 `ask` tier either: an allow-tier `config_write` would have written the file without an
 approval, which is the one thing the smoke exists to catch. That is also why the target
-is `make smoke-config` and not a step of `make smoke` — it can never pass on a default
+is `task smoke-config` and not a step of `task smoke` — it can never pass on a default
 install.
 
 ★ It puts the tree back: the probe file is deleted through the API at the end, and the
@@ -1361,7 +1361,7 @@ Two layers, because they see different things:
 written. The CI job is the one that finds what the hook cannot: a secret that was
 committed before the hook existed, or on a machine without it.
 
-Install the hooks with `make install-hooks` (it needs `pre-commit` — `pipx install
+Install the hooks with `task install-hooks` (it needs `pre-commit` — `pipx install
 pre-commit`). The gitleaks revision is **pinned** in `.pre-commit-config.yaml`, so
 a new upstream rule cannot turn every commit red on a day nobody touched the
 security setup.
@@ -1437,14 +1437,14 @@ the current state of the code, not a to-do list** — fixing one is a separate c
 | **`web/index.html` declares `lang="zh-CN"`** | `web/index.html:2` | The interface is entirely in English (a hard requirement in AGENTS.md), but the `lang` declaration is still Chinese. It affects what a screen reader reads. |
 | **`tw-shimmer` is a ghost dependency** | `web/package.json:39` | The only mention of it in the whole repository is the manifest; no source, style or HTML file references it. |
 | **Four runtime dependencies sit in `devDependencies`** | `web/package.json` | `lucide-react` (imported by 10 files), `clsx`, `tailwind-merge` and `class-variance-authority` are all imported by `src/` and bundled into `web/dist`. The build passes (Vite resolves them at build time), but the manifest is wrong. |
-| **`web/scripts/interop-check.ts` is out of date** | lines 16-20 and 41-45 of that script | It POSTs to `/v2/run` **without a `threadId`**, while the server now requires a session first (`POST /v2/sessions`, see `api/v2_run.go:78`). So that item of `make smoke` fails (measured: 400 `threadId is required`). `web/scripts/hitl-smoke.ts` and `web/scripts/no-undefined-url-check.ts` already follow the new contract. |
+| **`web/scripts/interop-check.ts` is out of date** | lines 16-20 and 41-45 of that script | It POSTs to `/v2/run` **without a `threadId`**, while the server now requires a session first (`POST /v2/sessions`, see `api/v2_run.go:78`). So that item of `task smoke` fails (measured: 400 `threadId is required`). `web/scripts/hitl-smoke.ts` and `web/scripts/no-undefined-url-check.ts` already follow the new contract. |
 | **The comment at `api/server.go:75` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
 | **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the five partitions (`agentkit/spec/config.go:40-71`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:410`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:72`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |
 
 ## 8. Before committing
 
 ```bash
-make check        # lint + test
+task check        # lint + test
 ```
 
 - `gofmt -l .` must print nothing.

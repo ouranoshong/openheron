@@ -17,17 +17,17 @@ You need **Go 1.27.1+** (to build).
 ```bash
 git clone https://github.com/ouranoshong/openheron
 cd openheron
-make build
+task build
 ```
 
-`make build` builds the frontend and **embeds the interface into the binary**, producing
+`task build` builds the frontend and **embeds the interface into the binary**, producing
 `bin/openheron` — a self-contained executable that runs on any machine (cross-compile
 for platforms other than your build host).
 
 If you just want to try it quickly:
 
 ```bash
-make build-go     # backend only (no UI) — faster while iterating on Go code
+task build-go     # backend only (no UI) — faster while iterating on Go code
 ```
 
 ★ **Or install a released binary.** Every `v*` tag publishes the same self-contained

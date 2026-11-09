@@ -105,4 +105,9 @@ probe*.txt
 
 # Python's bytecode cache (the document checker is a Python script).
 __pycache__/
+
+# The assistant's own working data — memory files and the like. It is not the
+# repository's, and a commit that carries it would put a machine's notes into
+# the history.
+/.workbuddy/
 *.pyc

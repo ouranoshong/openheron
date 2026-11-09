@@ -356,7 +356,7 @@ func setupFrontend(st *startup) error {
 	switch mode {
 	case "embed", "":
 		if aerr != nil || !webui.Available(assets) {
-			obs.Logger().Warn("[main] frontend disabled: no web/dist build found; run `make web` to embed the UI")
+			obs.Logger().Warn("[main] frontend disabled: no web/dist build found; run `task web` to embed the UI")
 			return nil
 		}
 		if err := st.srv.SetEmbeddedFrontend(assets, "/"); err != nil {

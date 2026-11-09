@@ -27,7 +27,7 @@
 ## 快速开始
 
 ```bash
-make build                           # 构建（前端 + 含界面的单文件二进制）
+task build                           # 构建（前端 + 含界面的单文件二进制）
 cd /your/project && openheron init   # 在你的项目里生成最小可运行配置
 export DEEPSEEK_API_KEY=sk-...       # 密钥只从环境变量读
 openheron                            # 启动，打开 http://localhost:8080
@@ -196,13 +196,13 @@ agent 用 `kb_search` 检索。`kb_index` 默认落在 `ask` 档 —— 让 agen
 ## 开发
 
 ```bash
-make build-go   # 只构建后端（不重建前端，用于快速迭代 Go 代码）
-make web-dev    # Vite dev server（:5173，代理 /v2 到 :8080）
-make dev        # Go 自动重建重启（air）
-make check      # lint + test
+task build-go   # 只构建后端（不重建前端，用于快速迭代 Go 代码）
+task web-dev    # Vite dev server（:5173，代理 /v2 到 :8080）
+task dev        # Go 自动重建重启（air）
+task check      # lint + test
 ```
 
-`make test-e2e` 用真实浏览器打确定性假后端；`make smoke` 跑真后端，需要一个连得上的模型。
+`task test-e2e` 用真实浏览器打确定性假后端；`task smoke` 跑真后端，需要一个连得上的模型。
 端口、测试环境与其中的坑见 [docs/developer-manual_zh.md](docs/developer-manual_zh.md) §5。
 
 ## 关联文档

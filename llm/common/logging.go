@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// OPENHERON_LOG_LLM_REQUESTS=1 make dev
+// OPENHERON_LOG_LLM_REQUESTS=1 task dev
 const LogRequestsEnv = "OPENHERON_LOG_LLM_REQUESTS"
 
 // stdlog writes the request log.

@@ -364,13 +364,13 @@ baseRevision → 拒明文 → 原子替换 → 试合并 → 失败回滚」。
 
 | 阶段 | 内容 | 判据 | 状态 |
 |---|---|---|---|
-| **P0** | 工具归属翻转：`disabled_tools` → `tools`，三张表统一「列出来的才有」，MCP 两级，删 `denyMCP`/`LayerMCPScope`，模板全显式 | `make check` 绿；`init` 产物能加载；用例见 §5.1 | ✅ `a805473` |
+| **P0** | 工具归属翻转：`disabled_tools` → `tools`，三张表统一「列出来的才有」，MCP 两级，删 `denyMCP`/`LayerMCPScope`，模板全显式 | `task check` 绿；`init` 产物能加载；用例见 §5.1 | ✅ `a805473` |
 | **P1** | `Service.Manifest()` 下沉，`api/v2_settings.go` 变薄 | 现有 e2e 全绿，零行为变化 | ✅ |
 | **P2** | `Service.Diagnostics`（带行号），`/v2/settings/validate` 返回 `issues[]` | 新用例：未知键 → `line: 3` | ✅ |
 | **P3** | 前端删规则、改防抖 | e2e 绿；单测 311 → 271（规则用例搬去 Go） | ✅ |
 | **P4** | `build/configtools.go` 六个工具 | 端到端：模型真的调 `config_tier` 并拿到 `{"tool":"config_write","tier":"ask"}` | ✅ |
 | **P5** | `initcfg` 改吃 manifest | `init` 产物逐字节不变 | ✅ |
-| **P6** | 文档同步 | `make lint-docs` 绿 | ✅ |
+| **P6** | 文档同步 | `task lint-docs` 绿 | ✅ |
 
 P1 必须先于 P2/P3（manifest 是 Diagnostics 的输入）；P4 必须晚于 P2（工具复用
 Diagnostics）。这条顺序是真实的：P3 的 `issues` 就是 P2 的形状。

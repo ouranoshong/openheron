@@ -382,5 +382,5 @@ func (s *Local) globPattern(base, pattern string) (string, error)
 ## 9. 落地
 
 单个提交，无需迁移：这个包是内部的，磁盘上的会话不动，两个调用点在构建时创建后端。
-`make check` 加上 §7 的清单就是全部的闸门。上游同步靠对
+`task check` 加上 §7 的清单就是全部的闸门。上游同步靠对
 `eino-ext/adk/backend/local@v0.2.2` 做手工 diff；`fsx.go` 的文件头写着要对账的版本。

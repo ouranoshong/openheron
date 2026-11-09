@@ -62,7 +62,7 @@ one — change one and change the other.
 > as it is (one process with an HTTP/SSE server, the file tools and the shell tool sharing
 > one backend) packaged as a Kit, so the boundary moves outward instead of inward and the
 > read path is covered too. ★ **That one landed as well**: the descriptors, the content
-> recipe, the entrypoint and the vendor mixins are in `sandbox-kit/`, `make kit` builds
+> recipe, the entrypoint and the vendor mixins are in `sandbox-kit/`, `task kit` builds
 > them and the CI `kit` job publishes them. §4.2 still lists three decisions that are the
 > owner's to make.
 > `docs/fs-backend-design.md` describes the **filesystem backend** — the bounded fork of
@@ -89,9 +89,9 @@ one — change one and change the other.
 > build it, change the descriptor, publish a version (`TUTORIAL_zh.md` and
 > `BUILDING_zh.md` are the Chinese versions), `sandbox-kit/acceptance/run.sh` is the
 > acceptance run — every claim the design makes, as a check that fails the script.
-> They are a **separate artifact**: `make release` still produces the six static
+> They are a **separate artifact**: `task release` still produces the six static
 > binaries and nothing else. Their design is `docs/sandbox-kit-design.md`, and
-> `make kit` builds them.
+> `task kit` builds them.
 >
 > Write these documents **from the code, not from imagination**: every conclusion must point at a
 > line in the code. When the code changes, the documents change with it — documentation drift is
@@ -106,7 +106,7 @@ one — change one and change the other.
 > `docs/developer-manual.md`, `sandbox-kit/TUTORIAL.md` and `sandbox-kit/BUILDING.md` —
 > and to nothing else: the Chinese-only documents have one version, so there is nothing to
 > keep in sync with. Code identifiers, line references, commands and paths must
-> correspond one to one — `make lint-docs` checks all six pairs, and you can compare them
+> correspond one to one — `task lint-docs` checks all six pairs, and you can compare them
 > set by set with `grep -oP '`[a-zA-Z0-9_./:$-]+`' | sort -u`.
 > ★ Note that the **backtick span has to match too**: `` `POST /v2/run` `` and `` `POST` `/v2/run` ``
 > say the same thing but yield different identifier sets — the comparison will report a
@@ -273,18 +273,18 @@ file.
 
 | Command | Covers | Requires |
 |---|---|---|
-| `make test` | Full Go suite (`go test ./...`) | — |
-| `make test-race` | The same suite under the race detector (`go test -race ./...`) | — |
+| `task test` | Full Go suite (`go test ./...`) | — |
+| `task test-race` | The same suite under the race detector (`go test -race ./...`) | — |
 | `cd web && bun run test:unit` | Pure-function layers (reducer / framing / store / highlighting) | — |
-| `make test-e2e` | Real browser + deterministic fake backend | nothing (it ships its own fake backend) |
-| `make test-install` | The release installer against a local fake release | nothing |
-| `make smoke` | Real-backend integration: SSE framing, history replay, approval wiring | **the test instance must be running** |
-| `make lint` | Go vet + gofmt + oxlint + tsc | — |
-| `make lint-go` / `make lint-web` | The two halves of `make lint`, for a job with only one toolchain | — |
-| `make check` | `lint` + `test` + `test-race`; run this before committing | — |
+| `task test-e2e` | Real browser + deterministic fake backend | nothing (it ships its own fake backend) |
+| `task test-install` | The release installer against a local fake release | nothing |
+| `task smoke` | Real-backend integration: SSE framing, history replay, approval wiring | **the test instance must be running** |
+| `task lint` | Go vet + gofmt + oxlint + tsc | — |
+| `task lint-go` / `task lint-web` | The two halves of `task lint`, for a job with only one toolchain | — |
+| `task check` | `lint` + `test` + `test-race`; run this before committing | — |
 
-★ **CI runs the repo's own commands**: `make lint-go` + `make test` + `make test-race`,
-`make lint-web` + `bun run test:unit`, `make test-e2e`. The smokes are **not** in CI — they
+★ **CI runs the repo's own commands**: `task lint-go` + `task test` + `task test-race`,
+`task lint-web` + `bun run test:unit`, `task test-e2e`. The smokes are **not** in CI — they
 need a model that answers, and that is not reproducible on a runner. A `v*` tag publishes a
 release only after all three checks are green (developer-manual §3.9).
 
@@ -292,19 +292,19 @@ release only after all three checks are green (developer-manual §3.9).
 checks — the secret scan included — and then pushes the workload and every mixin to
 Docker Hub. It needs the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets.
 
-★ **Secrets are scanned twice.** The pre-commit hook (`make install-hooks`) scans the
+★ **Secrets are scanned twice.** The pre-commit hook (`task install-hooks`) scans the
 staged diff; the `secrets` CI job scans the whole history. A key that was committed
 before the hook existed is still in the history — only the CI scan finds that one.
 
 ★ **Never push to `main`.** It is protected: push a branch, open a pull request, and the
 owner merges. A merge publishes nothing — only a `v*` tag does.
 
-Start the test instance (a prerequisite of `make smoke`):
+Start the test instance (a prerequisite of `task smoke`):
 
 ```bash
-make test-env-backend   # foreground, :18099, separate config + separate session directory
-make test-env-reset     # rebuild the test directories only, do not start
-make test-env-sync      # ★ must run after you change agent definitions on the dev side
+task test-env-backend   # foreground, :18099, separate config + separate session directory
+task test-env-reset     # rebuild the test directories only, do not start
+task test-env-sync      # ★ must run after you change agent definitions on the dev side
 ```
 
 Single smoke scripts (they connect to :18099 by default, **no need to write `OPENHERON_BASE`**):
@@ -324,7 +324,7 @@ cd web && bun run smoke:config             # config_write's approval round trip 
 - **E2E uses the fake backend — do not switch it to the real backend.** The real backend depends
   on model cooperation, and when it fails you cannot tell a broken interface from a model that
   did not obey; with `retries` on, failures become noise and after three rounds nobody reads
-  them. Protocol-level verification against the real backend is `make smoke`'s job; the two
+  them. Protocol-level verification against the real backend is `task smoke`'s job; the two
   complement each other.
 - **`smoke:hitl` is flaky, about 1 in 5** — it depends on the model *choosing* to call
   `write_file` to trigger an approval. That is the model's freedom, not a code regression; the
@@ -352,7 +352,7 @@ cd web && bun run smoke:config             # config_write's approval round trip 
   names the config root with `OPENHERON_CONFIG_DIR` — the config root **does not search
   upward**, so the one at the repository root is structurally unreachable. Ports and state must
   be isolated **together**.
-- **`make test-env-sync` is mandatory, not optional.** The test instance's
+- **`task test-env-sync` is mandatory, not optional.** The test instance's
   `agents/ llm/ policy/ skills/` are **copied** from the dev side; without syncing, a changed
   agent definition is not what gets tested.
 - **`pkill` needs `-x`; do not use `-f "bin/openheron"`.** `-f` matches the full command line

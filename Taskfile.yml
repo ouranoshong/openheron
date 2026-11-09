@@ -5,17 +5,17 @@
 # frontend before go build. The other way round silently produces a binary with
 # no interface on the first build — the interface part is fixed at compile time.
 #
-# ★ `deps` run in parallel in Task, while Make ran prerequisites in order.
-#   Every prerequisite here is independent of its siblings, and all of them
-#   finish before a task's own `cmds` start, so the build order still holds.
-# ★ `silent: true` on the multi-line recipes takes the place of Make's `@`.
-#   Commands still print their own output; only the echoed script is hidden.
+# ★ `deps` run in parallel in Task. Every prerequisite here is independent of
+#   its siblings, and all of them finish before a task's own `cmds` start, so
+#   the build order still holds.
+# ★ `silent: true` on the multi-line recipes hides the echoed script.
+#   Commands still print their own output; only the echo is suppressed.
 # ★ Variables live at the root on purpose: a caller can override them on the
 #   CLI with `task build VERSION=1.2.3`. Task vars are NOT exported to the
 #   shell, so recipes read them through `{{.NAME}}` templates, never `$NAME`.
-# ★ Make gave each recipe line its own shell, so `cd` did not leak into the
-#   next line. A multi-line `cmds` entry is ONE shell: every `cd` below is
-#   wrapped in a subshell so the following commands keep running at the root.
+# ★ A multi-line `cmds` entry is ONE shell, so every `cd` below is wrapped
+#   in a subshell — otherwise the following commands would keep running in
+#   the directory the `cd` moved to.
 # ★ Platform handling is deliberate:
 #   - `OS` is Task's own template function, not a shell variable. EXE, BIN,
 #     PREFIX and INSTALL_NAME resolve against the OS the `task` binary was
@@ -46,18 +46,18 @@ vars:
 
   # ★ The repository root, derived from this file's own path: the Kit's build
   #   context is the root, because the recipe copies the binary the root's
-  #   `task build` produced. The Makefile declared REPO_ROOT but never used it;
-  #   Task exposes the same value as the built-in `ROOT_DIR` variable, which is
-  #   also the default working directory for every task in this file.
+  #   `task build` produced. Task exposes that value as the built-in
+  #   `ROOT_DIR` variable, which is also the default working directory for
+  #   every task in this file.
 
   # Version: taken from the environment when set, otherwise from git describe
   # (a short hash with -dirty when there is no tag). Override with
   # `task build VERSION=1.2.3` or by exporting VERSION.
-  # ★ The Makefile used `?=`, where the environment WINS over the default.
-  #   Task resolves global vars after the process environment, so a plain
-  #   `sh:` variable would overwrite the CI's VERSION with git describe and
-  #   stamp a release with the wrong version. A template `default` reads the
-  #   value already resolved from the environment instead.
+  # ★ Task resolves global vars **after** the process environment, so the
+  #   environment wins — but a plain `sh:` variable would overwrite the CI's
+  #   VERSION with git describe and stamp a release with the wrong version.
+  #   A template `default` reads the value already resolved from the
+  #   environment instead, so ENV / CLI / the git fallback all work.
   VERSION_FROM_GIT:
     sh: git describe --tags --always --dirty 2>/dev/null || echo dev
   VERSION: '{{.VERSION | default .VERSION_FROM_GIT}}'
@@ -107,15 +107,15 @@ vars:
   INIT_ARGS: '{{if .OPENHERON_CONFIG_DIR}}--config-dir "{{.OPENHERON_CONFIG_DIR}}"{{else}}--dir "{{.ROOT_DIR}}"{{end}}'
 
 tasks:
-  # The Makefile's first target was `help`, so a bare `make` printed the help.
-  # Task has no "first target" rule; `default` keeps that behaviour explicit.
+  # A bare `task` has no "first target" rule; `default` keeps that behaviour
+  # explicit — it lists the tasks, the way the help output should be reached.
   default:
     desc: 'List available tasks (the bare-command default)'
     cmds:
       - task: help
 
-  # --list shows only tasks with a desc, exactly like the Makefile's grep of
-  # `##` comments; it needs no awk/grep pipeline of its own.
+  # --list shows only tasks with a desc — the description is the one thing
+  # every target has to carry, so it needs no pipeline of its own.
   help:
     desc: 'List available tasks'
     silent: true
@@ -561,6 +561,17 @@ tasks:
       - '{{.BUN}} run smoke:interop'
       - '{{.BUN}} run smoke:no-undefined-url'
       - '{{.BUN}} run smoke:hitl'
+
+  # ★ Not part of `task smoke`, on purpose. `config_write` is absent from every
+  #   shipped template — handing an agent the pen that edits its own
+  #   configuration is a decision — so this target needs an agent that names it,
+  #   and a default install does not have one. The script says so itself and
+  #   exits 2 rather than pretending to be flaky.
+  smoke-config:
+    desc: "config_write's approval round trip (needs an agent whose tools: names config_write)"
+    dir: web
+    cmds:
+      - '{{.BUN}} run smoke:config'
 
   test-e2e:
     desc: 'Browser E2E (brings its own fake backend, uses :15173/:18180, never takes the development ports)'

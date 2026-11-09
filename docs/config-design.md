@@ -649,7 +649,7 @@ openheron 改从 `--project-root` 或 cwd 取（`main.go:86-87`、`agentkit/spec
 
 ### 5.2 测试实例靠「点名的配置根」隔离
 
-openheron 的测试环境集中定义在一处：仓库根的 `.env.test`（已提交），加上 Makefile 的目标。
+openheron 的测试环境集中定义在一处：仓库根的 `.env.test`（已提交），加上 Taskfile.yml 的目标。
 
 | | 开发 | 测试 |
 |---|---|---|
@@ -659,13 +659,13 @@ openheron 的测试环境集中定义在一处：仓库根的 `.env.test`（已�
 
 （`.env.test:25-38`；同一张表也见 `docs/developer-manual.md` §5.1。）
 
-测试实例由 `scripts/test-backend.sh` 启动，挂在三个 Makefile 目标后面：
+测试实例由 `scripts/test-backend.sh` 启动，挂在三个 Taskfile.yml 目标后面：
 
 | 命令 | 做什么 |
 |---|---|
-| `make test-env-backend` | 前台启动测试实例（`Makefile:312-314`） |
-| `make test-env-reset` | 只重建测试目录，不启动（`Makefile:316-318`） |
-| `make test-env-sync` | 把开发侧的定义重新复制进测试环境（`Makefile:320-322`） |
+| `task test-env-backend` | 前台启动测试实例（`Taskfile.yml:529-533`） |
+| `task test-env-reset` | 只重建测试目录，不启动（`Taskfile.yml:535-538`） |
+| `task test-env-sync` | 把开发侧的定义重新复制进测试环境（`Taskfile.yml:540-543`） |
 
 脚本点名了必须隔离的三个环境变量，并把工作目录挪过去（`scripts/test-backend.sh:37-45`）：
 
@@ -699,7 +699,7 @@ openheron 的测试环境集中定义在一处：仓库根的 `.env.test`（已�
 漏掉它意味着 HTTP/搜索工具在测试实例里永远开着 —— 或永远关着 —— 那跟开发侧不是一回事
 （`scripts/test-backend.sh:55-59`）。
 
-★ **`make test-env-sync` 是必须的，不是可选的。** 改了开发侧的 agent 定义，不重新复制定义，
+★ **`task test-env-sync` 是必须的，不是可选的。** 改了开发侧的 agent 定义，不重新复制定义，
 测试实例跑的还是旧的（`AGENTS.md` 的 "Rules"；`docs/developer-manual.md` §5.2）。
 
 ★ **端口表只在一个文件里。** `.env.test` 装着测试环境的全部约定；Vite、Playwright 和各个
@@ -2811,7 +2811,7 @@ retry:
 | 上游的说法 | openheron 的实际 | 原因 |
 |---|---|---|
 | 配置根按「env → 上溯 → 自身」解析 | 它恰好按**三级**解析：显式 `--config-dir` → `$OPENHERON_CONFIG_DIR` → `<projectRoot>/.openheron`（不存在则创建），并且**刻意没有**上溯祖先目录（`agentkit/spec/config.go:213`） | 一旦配置根取决于「进程是从哪儿启动的」，同一条命令换个目录跑就会读到另一份配置 —— 测试实例也会读到开发者的那份（见 `AGENTS.md`） |
-| 测试实例靠「预置一份 `.heron/`」来隔离 | 隔离靠 `.env.test` 加 `make test-env-backend` / `test-env-reset` / `test-env-sync` 三个目标：实例跑在 `:18099`，**自带配置根与自带会话目录** | 端口不同不等于数据隔离 —— openheron 把会话写在 `.openheron/state/` 下，一个写在那儿的测试会污染真实历史 |
+| 测试实例靠「预置一份 `.heron/`」来隔离 | 隔离靠 `.env.test` 加 `task test-env-backend` / `test-env-reset` / `test-env-sync` 三个目标：实例跑在 `:18099`，**自带配置根与自带会话目录** | 端口不同不等于数据隔离 —— openheron 把会话写在 `.openheron/state/` 下，一个写在那儿的测试会污染真实历史 |
 | `agentkit/spec` 包有 **115** 个 `Test` 函数 | 它有 **180** 个 | 包随代码一起长大；上表列的是真正存在的用例 |
 | 模块路径是 `heron/...` | 是 `github.com/ouranoshong/openheron/...` | `go.mod` |
 | `agentkit/spec` 的 heron 依赖只有 `persist` | 有**四个**：`agentkit/obs`、`agentkit/spec/decl`、`persist` 与它自己 | `obs` 是唯一的日志出口；「声明」（`decl`）与「行为」（`spec`）的拆分是 openheron 自己的设计 —— 见 [architecture.md](architecture.md) §2.1 |

@@ -1,12 +1,18 @@
 # greet
 
-A tiny Go program with one bug in it. `make test` fails, and the agent's job
-is to make it pass.
+A tiny Go program with one bug in it. `go test ./...` fails, and the agent's
+job is to make it pass.
 
 ## The task
 
-Run `make test`, read what it says, and fix `Greeting` so that the test
+Run `go test ./...`, read what it says, and fix `Greeting` so that the test
 passes. Do not change the test.
+
+★ **The test command is `go test ./...`, not a build tool's target.** This
+project runs **inside the sandbox**, and the base image owes the platform
+only `bash`, `git` and a CA bundle — no `task`, and no `make` either. The
+demo therefore asks for the toolchain the program itself needs (Go), which
+the image has because the agent has to edit Go code to do the job at all.
 
 ## Why it exists
 
@@ -72,7 +78,7 @@ its own tool configurations just carries those files — this one does not need 
 
 ★ **What the default tier means for the demonstration.** `write_file`,
 `edit_file` and `execute` are tools nobody names, so they ask — the agent asks
-before it writes a file and before it runs a command, and running `make test`
-is a command. **Approve them** and the agent continues. A demonstration that
+before it writes a file and before it runs a command, and running
+`go test ./...` is a command. **Approve them** and the agent continues. A demonstration that
 needs nobody at the keyboard would name `execute` in a tool file's `allows:`
 list, and that is the user's call, not the repository's.

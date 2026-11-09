@@ -33,7 +33,7 @@ tmp_dir = "tmp"
 [build]
   # The binary goes into tmp/ rather than bin/: bin/ is the release artifact
   # directory and should not be overwritten by a half-finished dev build —
-  # mixing `make build`'s output with the debug output is confusing.
+  # mixing `task build`'s output with the debug output is confusing.
   bin = "tmp/openheron-dev.exe"
   cmd = "go build -o tmp/openheron-dev.exe ."
   # A package containing test files recompiles as soon as it changes: much of
@@ -54,7 +54,7 @@ tmp_dir = "tmp"
   # So today editing a _test.go **does** trigger a rebuild — which is the
   # behaviour the include_ext comment above wants. It costs ~1.1s, and
   # `go build` does not compile test files at all, so the binary it produces
-  # is identical; running the tests is `make test`'s job, not air's.
+  # is identical; running the tests is `task test`'s job, not air's.
   #
   # docs/ and .md are not in include_ext, so they never trigger a rebuild —
   # no need to declare them again.

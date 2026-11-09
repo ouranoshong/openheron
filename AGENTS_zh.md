@@ -53,7 +53,7 @@
 > 一个进程，一对 HTTP/SSE 服务，文件工具与 shell 工具共用同一个后端 ——
 > 打包成 Kit，于是边界往外挪而不是往里挪，读路径也被罩住了。
 > ★ **那一份也落地了**：描述文件、内容配方、入口脚本与每个厂商一份的 mixin 都在
-> `sandbox-kit/` 里，`make kit` 构建它们，CI 的 `kit` job 发布它们。§4.2 仍有三条
+> `sandbox-kit/` 里，`task kit` 构建它们，CI 的 `kit` job 发布它们。§4.2 仍有三条
 > 留给 owner 决定。
 > `docs/fs-backend-design.md` 讲的是**文件系统后端** —— `eino-ext` local 后端的有界分支
 > （§5）以及每个工具都要经过的那条收敛规则 —— 它**已实现**：`agentkit/fsx` 已在两处
@@ -77,8 +77,8 @@
 > （中文版是 `TUTORIAL_zh.md` 与 `BUILDING_zh.md`），
 > `sandbox-kit/acceptance/run.sh` 是验收跑批 —— 设计里的每条断言都是一项检查，
 > 有一项不过脚本就非零退出。
-> 它们是**独立产物**：`make release` 仍然只产出那六个静态二进制，别的一概没有。
-> 设计见 `docs/sandbox-kit-design.md`，构建用 `make kit`。
+> 它们是**独立产物**：`task release` 仍然只产出那六个静态二进制，别的一概没有。
+> 设计见 `docs/sandbox-kit-design.md`，构建用 `task kit`。
 >
 > 写这几组文档时**照代码写**，别照想象写：每个结论都要能在代码里指到行。
 > 代码改了，文档跟着改 —— 文档漂移比没有文档更贵。
@@ -91,7 +91,7 @@
 > `docs/user-manual.md`、`docs/developer-manual.md`、`sandbox-kit/TUTORIAL.md` 与
 > `sandbox-kit/BUILDING.md` —— 别的没有可同步的：只有中文的那些文档就一个版本。
 > 两版的代码标识符、行号引用、命令与路径应当一一对应 ——
-> `make lint-docs` 检查这六对，也可以用
+> `task lint-docs` 检查这六对，也可以用
 > `grep -oP '`[a-zA-Z0-9_./:$-]+`' | sort -u` 逐组比对。
 > ★ 注意**反引号范围也要一致**：`` `POST /v2/run` `` 与 `` `POST` `/v2/run` `` 讲的
 > 是同一件事，但标识符集合不同 —— 比对会报差异。别让「写法不同」掩盖「内容不同」。
@@ -233,37 +233,37 @@ docs(readme): drop the API table, it lives in the user manual
 
 | 命令 | 覆盖 | 需要前置 |
 |---|---|---|
-| `make test` | Go 全量（`go test ./...`） | — |
-| `make test-race` | 同一套在竞态检测器下跑（`go test -race ./...`） | — |
+| `task test` | Go 全量（`go test ./...`） | — |
+| `task test-race` | 同一套在竞态检测器下跑（`go test -race ./...`） | — |
 | `cd web && bun run test:unit` | 纯函数层（reducer / 分帧 / store / 高亮） | — |
-| `make test-e2e` | 真实浏览器 + 确定性假后端 | 无（自带假后端） |
-| `make test-install` | 发版安装脚本对着一个本地假发布 | 无 |
-| `make smoke` | 真后端联调：SSE 分帧、历史回放、审批接线 | **测试实例在跑** |
-| `make lint` | Go vet + gofmt + oxlint + tsc | — |
-| `make lint-go` / `make lint-web` | `make lint` 的两半，给只装了一种工具链的 job 用 | — |
-| `make check` | `lint` + `test` + `test-race`，提交前跑这个 | — |
+| `task test-e2e` | 真实浏览器 + 确定性假后端 | 无（自带假后端） |
+| `task test-install` | 发版安装脚本对着一个本地假发布 | 无 |
+| `task smoke` | 真后端联调：SSE 分帧、历史回放、审批接线 | **测试实例在跑** |
+| `task lint` | Go vet + gofmt + oxlint + tsc | — |
+| `task lint-go` / `task lint-web` | `task lint` 的两半，给只装了一种工具链的 job 用 | — |
+| `task check` | `lint` + `test` + `test-race`，提交前跑这个 | — |
 
-★ **CI 跑的就是仓库自己的命令**：`make lint-go` + `make test` + `make test-race`、
-`make lint-web` + `bun run test:unit`、`make test-e2e`。冒烟**不在** CI 里 —— 它需要一个答得上话的模型，
+★ **CI 跑的就是仓库自己的命令**：`task lint-go` + `task test` + `task test-race`、
+`task lint-web` + `bun run test:unit`、`task test-e2e`。冒烟**不在** CI 里 —— 它需要一个答得上话的模型，
 而那在 runner 上不可复现。`v*` tag 只有在三项检查全绿之后才发版（见 developer-manual §3.9）。
 
 ★ **`v*` tag 也会发布沙箱 Kit。** `kit` job 等的是同一批检查（含密钥扫描），
 然后把 workload 与每一份 mixin 推到 Docker Hub。它需要 `DOCKERHUB_USERNAME` 与
 `DOCKERHUB_TOKEN` 两个 secret。
 
-★ **密钥扫两遍。** pre-commit 的钩子（`make install-hooks`）扫暂存区；CI 的
+★ **密钥扫两遍。** pre-commit 的钩子（`task install-hooks`）扫暂存区；CI 的
 `secrets` job 扫全历史。★ 钩子存在之前提交进去的密钥还在历史里 —— 只有 CI 那遍
 找得到它。
 
 ★ **不要直接推 `main`。** 它受保护：推一个分支、开一个 PR、由仓库主人合并。合并不会发布
 任何东西 —— 只有 `v*` tag 才会。
 
-起测试实例（`make smoke` 的前置）：
+起测试实例（`task smoke` 的前置）：
 
 ```bash
-make test-env-backend   # 前台起，:18099，独立配置 + 独立会话目录
-make test-env-reset     # 只重建测试目录，不启动
-make test-env-sync      # ★ 改过开发侧的 agent 定义后必须跑
+task test-env-backend   # 前台起，:18099，独立配置 + 独立会话目录
+task test-env-reset     # 只重建测试目录，不启动
+task test-env-sync      # ★ 改过开发侧的 agent 定义后必须跑
 ```
 
 单个冒烟脚本（默认就连 :18099，**不需要手写 `OPENHERON_BASE`**）：
@@ -281,7 +281,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
   脚本级测试看不见渲染层，上一轮 10 个冒烟全绿而界面是坏的。
 - **E2E 用假后端，不要改成真后端**。真后端依赖模型配合，失败时分不清是
   界面坏了还是模型没听话；`retries` 一开，失败变成噪音，三轮后没人看。
-  与真实后端的协议层验证由 `make smoke` 负责，两者互补。
+  与真实后端的协议层验证由 `task smoke` 负责，两者互补。
 - **`smoke:hitl` 会抖，约 5 次里 1 次** —— 它依赖模型*选择*调 `write_file`
   才能触发审批。那是模型的自由，不是代码回归；脚本会重试，全都不触发时
   **明确报错**，不伪装成接线有问题。别用重试次数掩盖它。
@@ -303,7 +303,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
   进去就污染真实历史。测试实例把 `.openheron-test/project` 当项目根并**预置
   自己的 `.openheron/`**，再用 `OPENHERON_CONFIG_DIR` 指名配置根 —— 配置根
   **不向上查找**，所以仓库根那份结构上就读不到。端口与状态必须**一起**隔离。
-- **`make test-env-sync` 是必须的，不是可选的**。测试实例里的
+- **`task test-env-sync` 是必须的，不是可选的**。测试实例里的
   `agents/ llm/ policy/ skills/` 是从开发侧**复制**的，改完 agent 不
   同步，测的还是旧定义。
 - **`pkill` 要用 `-x`，不要用 `-f "bin/openheron"`**。`-f` 匹配完整命令行，

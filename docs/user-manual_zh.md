@@ -15,16 +15,16 @@
 ```bash
 git clone https://github.com/ouranoshong/openheron
 cd openheron
-make build
+task build
 ```
 
-`make build` 会构建前端并把界面**嵌进二进制**，产物是 `bin/openheron` —— 一个自包含的可执行
+`task build` 会构建前端并把界面**嵌进二进制**，产物是 `bin/openheron` —— 一个自包含的可执行
 文件，扔到哪台机器上都能跑（目标平台之外的机器用交叉编译）。
 
 只想快速试一下：
 
 ```bash
-make build-go     # 只构建后端（不含界面），迭代 Go 代码时更快
+task build-go     # 只构建后端（不含界面），迭代 Go 代码时更快
 ```
 
 ★ **或者一条命令装上发布出来的二进制。** 每个 `v*` tag 都会发布同样的单文件可执行程序，

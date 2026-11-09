@@ -17,18 +17,18 @@
 | 端口 | 见 `.env.test`（仓库根，已提交） |
 
 ```bash
-make init          # 创建 .openheron/ —— 服务端读的配置（每个克隆只需一次）
-make build-go     # 只构建后端（不含界面），迭代 Go 代码时最快
-make web-dev      # Vite dev server（:5173，代理 /v2 到 :8080）
-make dev          # air：Go 自动重建重启
-make check        # lint + test，提交前跑这个
+task init          # 创建 .openheron/ —— 服务端读的配置（每个克隆只需一次）
+task build-go     # 只构建后端（不含界面），迭代 Go 代码时最快
+task web-dev      # Vite dev server（:5173，代理 /v2 到 :8080）
+task dev          # air：Go 自动重建重启
+task check        # lint + test，提交前跑这个
 ```
 
 ★ **没有配置，服务端就不启动**：它只读一个配置根 —— `$OPENHERON_CONFIG_DIR`，
 否则 `<项目根>/.openheron` —— 为空时报 `no configuration at <root>: run
 openheron init to create one`。仓库里带的是 `.openheron-example/`（样例），
 不是 `.openheron/`（真正那份：里面是你的模型和 API key，所以被 git 忽略了）。
-**所以新克隆之后第一个命令就是 `make init`。** 它只写缺的文件，已经在的保留，
+**所以新克隆之后第一个命令就是 `task init`。** 它只写缺的文件，已经在的保留，
 跑两遍不会有任何变化。
 
 ## 2. 仓库结构
@@ -613,12 +613,12 @@ composer 必须读**服务端**的答案，而不是自己的内存：
 
 | job | 跑什么 | 需要 |
 |---|---|---|
-| `go` | `make lint-go` + `make test` + `make test-race` | Go |
-| `web` | `make lint-web` + `bun run test:unit` | bun |
-| `e2e` | `make test-e2e` —— 用它自带的假后端 | bun + chromium |
+| `go` | `task lint-go` + `task test` + `task test-race` | Go |
+| `web` | `task lint-web` + `bun run test:unit` | bun |
+| `e2e` | `task test-e2e` —— 用它自带的假后端 | bun + chromium |
 | `secrets` | gitleaks 扫整个历史（§5.9） | — |
-| `install-script` | `make test-install` —— 用本地假发布测安装脚本 | — |
-| `release` | `make release`，然后建一份**草稿** GitHub Release | 上面四个检查 |
+| `install-script` | `task test-install` —— 用本地假发布测安装脚本 | — |
+| `release` | `task release`，然后建一份**草稿** GitHub Release | 上面四个检查 |
 | `install` | 在我们发布的每个平台上装那份草稿里的产物 | `release` |
 | `publish` | 把草稿转成公开的 release | `install` |
 
@@ -630,13 +630,13 @@ composer 必须读**服务端**的答案，而不是自己的内存：
 装得上的二进制，不该先发布出去。★ **失败的那条腿把原因写在注解里**，不只是写在日志
 里：job 日志要管理员权限才读得到，注解谁都能从 API 读到。
 
-★ **冒烟不在 CI 里。** `make smoke` 需要一个答得上话的模型，而答得上话的模型在 runner
+★ **冒烟不在 CI 里。** `task smoke` 需要一个答得上话的模型，而答得上话的模型在 runner
 上不可复现 —— 在那里失败是噪声，不是信号。E2E 才是确定的那一半，也是能给发布当闸门的
 那一半。
 
-★ **跑的就是仓库自己的命令。** CI 调的是 `make lint-go` / `make test` /
-`make test-race` / `make test-e2e` —— §5.2 列的那些命令 —— 所以配方只在 Makefile 里
-有一份。`make lint-go` 与 `make lint-web` 是 `make lint` 的两半，拆开是为了让每个 job
+★ **跑的就是仓库自己的命令。** CI 调的是 `task lint-go` / `task test` /
+`task test-race` / `task test-e2e` —— §5.2 列的那些命令 —— 所以配方只在 Taskfile.yml 里
+有一份。`task lint-go` 与 `task lint-web` 是 `task lint` 的两半，拆开是为了让每个 job
 只装自己需要的工具链。
 
 ★ **竞态检测器是 `go` 这个 job 里的一个 step，不是单独的 job。** 分支保护本来就要求
@@ -696,7 +696,7 @@ git push origin v0.1.0
 
 两个安装脚本（`scripts/install.sh`、`scripts/install.ps1`）随 release 一起发布，
 所以 `releases/latest/download/install.sh` 指向的永远是跟旁边那些二进制同一版本的脚本。
-`make test-install` 用一个本地假发布测安装脚本：下载、校验和这道闸（含一个被破坏的
+`task test-install` 用一个本地假发布测安装脚本：下载、校验和这道闸（含一个被破坏的
 产物 —— 它必须什么都装不上）、安装，以及版本核对。
 
 ★ **假发布必须长得像真的 —— 包括 URL 形状。** API 和网页不在一个主机上
@@ -725,23 +725,23 @@ ruleset 要在同一件事里一起改。
 
 #### Kit 的版本号
 
-★ **版本号只住在一处：Makefile 里的 `KIT_VERSION`。** 其它地方要么从那里拿，
+★ **版本号只住在一处：Taskfile.yml 里的 `KIT_VERSION`。** 其它地方要么从那里拿，
 要么根本不写版本号：
 
 | 位置 | 版本号从哪来 |
 |---|---|
-| `Makefile` 的 `KIT_VERSION ?= …` | **源头** |
+| `Taskfile.yml` 的 `KIT_VERSION: …` | **源头** |
 | `sandbox-kit/openheron/openheron.yaml` 的 `args.version.default` | 构建时盖进去（对暂存副本 `sed`） |
-| 发布出来的镜像 tag | `$(KIT_VERSION)` |
+| 发布出来的镜像 tag | `{{.KIT_VERSION}}` |
 | 指南（`sandbox-kit/TUTORIAL.md`） | 它写的是 `latest`，CI 把它指向那次发布 |
 
-★ **所以一次发版就是一个只动两行的 PR。** 开一个 PR，改 Makefile 里的
+★ **所以一次发版就是一个只动两行的 PR。** 开一个 PR，改 Taskfile.yml 里的
 `KIT_VERSION` 与描述文件里的 `args.version.default`，别的都不用动：指南写的是
 `latest`，而 CI 从你打的 tag 推导版本。
 
 ```sh
 # the whole contract of a release pull request — $NEXT is the version you tag
-sed -i "s/^KIT_VERSION ?= .*/KIT_VERSION ?= $NEXT/" Makefile
+sed -i "s/^  KIT_VERSION: .*/  KIT_VERSION: $NEXT/" Taskfile.yml
 sed -i "s|^    default: .*|    default: \"$NEXT\"|" sandbox-kit/openheron/openheron.yaml
 ```
 ★ **既然构建总会覆盖它，描述文件里为什么还要写版本号。** 那份值是个占位 ——
@@ -862,7 +862,7 @@ const selectMessages = (s: State) => s.convo?.messages ?? EMPTY
 - `vite.config.ts`：`@` → `src`；dev 端口 `5173`（test 模式 `15173`），
   `strictPort: true`；`/v2` 代理到 `OPENHERON_API_TARGET`。
 - `web/dist` 由 `go:embed` 打进二进制（`webui/webui.go`）。
-- `make build` 会先构建前端再构建 Go。
+- `task build` 会先构建前端再构建 Go。
 
 ### 4.6 ★ 版式的几个 token 与主题
 
@@ -914,25 +914,25 @@ const selectMessages = (s: State) => s.convo?.messages ?? EMPTY
 
 | 命令 | 覆盖 | 前置 |
 |---|---|---|
-| `make test` | Go 全量（`go test ./...`） | — |
-| `make test-race` | 同一套在竞态检测器下跑（`go test -race -count=1 ./...`） | — |
+| `task test` | Go 全量（`go test ./...`） | — |
+| `task test-race` | 同一套在竞态检测器下跑（`go test -race -count=1 ./...`） | — |
 | `cd web && bun run test:unit` | 纯函数层（reducer / 分帧 / store / 高亮） | — |
-| `make test-e2e` | 真实浏览器 + 确定性假后端 | 无（自带假后端） |
-| `make smoke` | 真后端联调：SSE 分帧、历史回放、审批接线 | **测试实例在跑，且模型可达** |
-| `make lint` | Go vet + gofmt + oxlint + tsc | — |
-| `make lint-go` / `make lint-web` | `make lint` 的两半，给只装了一种工具链的 job 用 | — |
-| `make check` | `lint` + `test`，提交前跑这个 | — |
-| `make install-hooks` | 装 pre-commit 钩子（gitleaks + gofmt） | `pre-commit` |
+| `task test-e2e` | 真实浏览器 + 确定性假后端 | 无（自带假后端） |
+| `task smoke` | 真后端联调：SSE 分帧、历史回放、审批接线 | **测试实例在跑，且模型可达** |
+| `task lint` | Go vet + gofmt + oxlint + tsc | — |
+| `task lint-go` / `task lint-web` | `task lint` 的两半，给只装了一种工具链的 job 用 | — |
+| `task check` | `lint` + `test`，提交前跑这个 | — |
+| `task install-hooks` | 装 pre-commit 钩子（gitleaks + gofmt） | `pre-commit` |
 
 起测试实例：
 
 ```bash
-make test-env-backend   # 前台起，:18099，独立配置 + 独立会话目录
-make test-env-reset     # 只重建测试目录，不启动
-make test-env-sync      # ★ 改过开发侧的 agent 定义后必须跑
+task test-env-backend   # 前台起，:18099，独立配置 + 独立会话目录
+task test-env-reset     # 只重建测试目录，不启动
+task test-env-sync      # ★ 改过开发侧的 agent 定义后必须跑
 ```
 
-★ **`make test-env-sync` 是必须的，不是可选的** —— 测试实例里的 `agents/ llm/ tools/ skills/`
+★ **`task test-env-sync` 是必须的，不是可选的** —— 测试实例里的 `agents/ llm/ tools/ skills/`
 是从开发侧**复制**的，改完 agent 不同步，测的还是旧定义。
 
 ★ **冒烟脚本需要一个答得上话的模型。** 它们对着测试实例真跑一轮，而测试实例的
@@ -966,7 +966,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（见�
 | `initcfg` | 出厂模板的完整性 |
 | `agentkit/fsx` | 写边界（含符号链接逃逸）、`ls`/`glob`/`grep` 的上限、绝对 glob pattern |
 
-★ **竞态检测器也要跑**：`make test-race`（`go test -race ./...`）。普通套件是绿的而
+★ **竞态检测器也要跑**：`task test-race`（`go test -race ./...`）。普通套件是绿的而
   检测器是红的，这种事比人们以为的更常见 —— 竞态要两个 goroutine 碰面才成立，而
   普通套件不在乎它们什么时候碰上。它抓到的那三个生产竞态（2026-11-06）是同一个错误：
   **锁就在那儿，只有一条路径没走它。** 放在结构体中间的互斥锁读起来就是「它护下面
@@ -1036,7 +1036,7 @@ Bun 本身没有 `localStorage`，不 stub 会炸。
 
 ### 5.6 E2E
 
-`make test-e2e` → `playwright test`，**13 个 spec、158 个用例**：
+`task test-e2e` → `playwright test`，**13 个 spec、158 个用例**：
 `agents` `chat` `compaction` `composer-autocomplete` `composer-meta` `history` `mcps`
 `multi-agent` `reattach` `scroll` `session-busy` `settings` `theme`。
 
@@ -1058,7 +1058,7 @@ E2E 共享一个假后端状态，并行会互相污染。
 
 **（一）E2E 用假后端，不要改成真后端。** 真后端依赖模型配合，
 失败时分不清是界面坏了还是模型没听话；`retries` 一开，失败变成噪音，三轮后没人看。
-与真实后端的协议层验证由 `make smoke` 负责，两者互补。
+与真实后端的协议层验证由 `task smoke` 负责，两者互补。
 
 **（二）端口被占时让它响亮地失败。** `playwright.config.ts` 的
 `reuseExistingServer: false` 与 Vite 的 `strictPort: true` 都是刻意的：
@@ -1111,9 +1111,9 @@ E2E 共享一个假后端状态，并行会互相污染。
 tools: [..., config_write]
 ```
 
-然后 `make test-env-sync`。★ 当 `config_write` **不在** `ask` 档时它也拒绝运行：
+然后 `task test-env-sync`。★ 当 `config_write` **不在** `ask` 档时它也拒绝运行：
 allow 档的 `config_write` 会在没有审批的情况下写好文件，而那正是这条冒烟存在要抓的东西。
-这也是它叫 `make smoke-config`、而不进 `make smoke` 的原因 —— 出厂安装上它永远不可能通过。
+这也是它叫 `task smoke-config`、而不进 `task smoke` 的原因 —— 出厂安装上它永远不可能通过。
 
 ★ 它会把树放回去：探针文件最后通过 API 删掉，并断言它确实没了。留下一个 agent 文件的
 冒烟会改变下一次跑的东西。
@@ -1179,7 +1179,7 @@ abort 是幂等的，所以对已经结束的 run 调用它也安全。
 ★ 钩子是便宜的那一层，也是拦住一个密钥被写进去的那一层。CI 那一层找的是钩子
 找不到的东西：★ 钩子存在之前提交进去的密钥，或者在没有钩子的机器上提交的那次。
 
-装钩子用 `make install-hooks`（需要 `pre-commit` —— `pipx install pre-commit
+装钩子用 `task install-hooks`（需要 `pre-commit` —— `pipx install pre-commit
 `）。★ gitleaks 的版本在 `.pre-commit-config.yaml` 里**钉死** —— ★★ 上游新增
 一条规则，不该在某天把所有人的提交都变红。
 
@@ -1248,14 +1248,14 @@ gitleaks 报的**提交数**比 git 报的低；但内容照样扫到了，因�
 | **`web/index.html` 声明 `lang="zh-CN"`** | `web/index.html:2` | 界面文案全是英文（AGENTS.md 的硬性要求），`lang` 声明却还是中文。会影响读屏软件的朗读语言。 |
 | **`tw-shimmer` 是幽灵依赖** | `web/package.json:39` | 全仓库只有清单里这一处提到它，源码、样式、HTML 都没引用。 |
 | **四个运行时依赖被放在 `devDependencies`** | `web/package.json` | `lucide-react`（10 个文件引）、`clsx`、`tailwind-merge`、`class-variance-authority` 都被 `src/` 引用并打进 `web/dist`。构建能过（Vite 在构建期解析），但清单是错的。 |
-| **`web/scripts/interop-check.ts` 已过时** | 该脚本第 16-20、41-45 行 | 它直接 POST `/v2/run` 且**不带 `threadId`**，而服务端现在要求先 `POST /v2/sessions`（`api/v2_run.go:78`）。所以 `make smoke` 里的这一项会失败（实测报 400 `threadId is required`）。`web/scripts/hitl-smoke.ts` 与 `web/scripts/no-undefined-url-check.ts` 已按新契约写。 |
+| **`web/scripts/interop-check.ts` 已过时** | 该脚本第 16-20、41-45 行 | 它直接 POST `/v2/run` 且**不带 `threadId`**，而服务端现在要求先 `POST /v2/sessions`（`api/v2_run.go:78`）。所以 `task smoke` 里的这一项会失败（实测报 400 `threadId is required`）。`web/scripts/hitl-smoke.ts` 与 `web/scripts/no-undefined-url-check.ts` 已按新契约写。 |
 | **`api/server.go:75` 的注释指向不存在的路由** | 该行 | 注释写的是「GET /v2/spec」，但 `SetSkillsSource` 实际喂的是 `/v2/skills`。 |
 | **残留的 `policy/` 目录被丢弃了 —— 而配置照样加载** | 装载器只走五个分区（`agentkit/spec/config.go:40-71`）；退役的目录只被「注意到」，不会被读（`noteRetiredDirs`，`agentkit/spec/config.go:410`） | `policy/` 分区在 2026-11-07 退役了：档位住在提供工具的那些文件里，而默认档位是 `ask`。从前留下的 `policy/permissions.yaml` **不会被读** —— 以前被禁的工具现在会问，以前不用点头就过的工具现在也会问。★ 那条提示落在 `deferred` 里（启动日志与 `/v2/health` 都带着它），并说清新档位在哪儿；配置编辑器直接拒绝这个路径（「unknown config section」，`agentkit/spec/write.go:72`）。★ **空的** `policy/` 目录不报任何东西 —— 它里面本来就没有被丢掉的东西。 |
 
 ## 8. 提交前
 
 ```bash
-make check        # lint + test
+task check        # lint + test
 ```
 
 - `gofmt -l .` 必须为空。

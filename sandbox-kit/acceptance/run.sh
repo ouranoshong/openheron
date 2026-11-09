@@ -9,7 +9,7 @@
 #
 # ★ What it does NOT do: it does not build the Kit. Building is a separate,
 #   slower step (a clean build pulls a 100 MB base image), and the Kit under
-#   test is whatever `make kit` last produced. Pass --build to do both.
+#   test is whatever `task kit` last produced. Pass --build to do both.
 #
 # Usage:
 #   sandbox-kit/acceptance/run.sh [--build] [--out FILE] [--keep]
@@ -132,7 +132,11 @@ if [ "$DO_BUILD" = "1" ]; then
 	# A builder of its own means an empty build cache: the base image and the
 	# release asset are fetched again, so the recipe is proven to work from
 	# scratch rather than from whatever a previous round left behind.
-	make -C "$REPO_ROOT" kit kit-mixin KIT_BUILDER=kit-acceptance \
+	#
+	# ★ `-d` is Task's "run in this directory" — the equivalent of `make -C`.
+	#   The CLI variable applies to every task in the one invocation, so both
+	#   the workload and the mixins are built against the same builder.
+	task -d "$REPO_ROOT" kit kit-mixin KIT_BUILDER=kit-acceptance \
 		&& say "  built" || { say "  build failed"; exit 1; }
 fi
 

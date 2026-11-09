@@ -1,7 +1,8 @@
 # Demo project commands for the Docker Sandbox Kit example.
 #
-# ★ The Makefile's first target was `test`, so a bare `make` ran the tests.
-#   Task has no "first target" rule: `default` keeps that behaviour explicit.
+# ★ These targets are for the **host**: the agent inside the sandbox runs
+#   `go test ./...` directly (see README.md), because the base image owes
+#   the platform only bash, git and a CA bundle — no task, and no make.
 
 version: '3'
 

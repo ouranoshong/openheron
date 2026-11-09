@@ -524,7 +524,7 @@ sbx rm openheron
 
 ★ **一件能干活的事，就是整个演示。** 仓库里带了一个：
 [`examples/demo-project`](examples/demo-project) 是一个带 bug 的小 Go 程序 ——
-`make test` 是失败的，而修好它只需要一个字符。
+`task test` 是失败的，而修好它只需要一个字符。
 
 ★ **在仓库根目录跑**，下面那些路径才解析得到。
 
@@ -539,7 +539,7 @@ sbx run docker.io/ouranoshong/openheron-kit:latest \
 ★ **或者从源码树**，运行时直接用磁盘上的文件把两个 Kit 组装出来：
 
 ```sh
-make kit    # once: it builds the binary and copies it beside the recipe
+task kit    # once: it builds the binary and copies it beside the recipe
 
 sbx run ./sandbox-kit/openheron \
     --kit ./sandbox-kit/examples/demo-project/openheron-deepseek \
@@ -547,11 +547,11 @@ sbx run ./sandbox-kit/openheron \
 ```
 
 ★ 第二种是你**改** Kit 时该用的那条：运行时拿你刚编辑过的文件重新构建，
-中间没有镜像、也没有 registry。它需要先跑一次 `make kit` ——
+中间没有镜像、也没有 registry。它需要先跑一次 `task kit` ——
 因为正是那一步把二进制复制到了构建够得着的配方旁边。
 第一种是用户走的那条，除了 `sbx` 什么都不需要。
 
-让它修好那个失败的测试。agent 会读文件、跑 `make test`、
+让它修好那个失败的测试。agent 会读文件、跑 `task test`、
 **在动手之前先问你** —— 批了它 —— 然后改动落在你宿主上，
 因为工作区就是你宿主上的一个目录。
 

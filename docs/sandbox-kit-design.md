@@ -3,7 +3,7 @@
 > **状态：§2 往后已经建成了 —— 树里就是它。**
 > §1 讲的是**动手之前**的代码样子（那时 openheron 只是一个进程），
 > 所以它读起来像一段历史；§2 往后讲的是**建成的样子**：三份描述文件、
-> 内容配方与入口脚本都在 `sandbox-kit/` 里，`make kit` 构建它们，
+> 内容配方与入口脚本都在 `sandbox-kit/` 里，`task kit` 构建它们，
 > CI 的 `kit` job 随同一个 release tag 一起发布。
 > ★ **逐节的状态**：
 >
@@ -30,7 +30,7 @@
 
 ### 1.1 openheron 是一个进程、三对外表面
 
-openheron 交付为单个静态二进制（`Makefile:96`、`Makefile:108`）。运行时它是
+openheron 交付为单个静态二进制（`Taskfile.yml:81`、`Taskfile.yml:248-263`）。运行时它是
 **一个进程**，对外开三对表面：
 
 - **HTTP/SSE 服务**。`main.go:265` 把它建起来：
@@ -48,7 +48,7 @@ openheron 交付为单个静态二进制（`Makefile:96`、`Makefile:108`）。�
 - **模型 API**。`llm/common/model.go:66-72` 把 provider 配置交给 `acl.NewClient`。
 
 Web UI 在**二进制里**：`main.go:35` 内嵌了 `all:web/dist`，`main.go:337` 把它挂在 `/`。
-`main.go:333` 是前端没构建时你会看到的警告（`make web`，`Makefile:29-31`）。
+`main.go:333` 是前端没构建时你会看到的警告（`task web`，`Taskfile.yml:127-131`）。
 
 ★ 由此得出的结论：openheron **不是**一个 CLI 编码 agent。它没有 TUI，没有终端里的
 逐命令确认，没有会话选择器。它是一个**浏览器去连的服务**。
@@ -152,13 +152,13 @@ if c.BaseURL == "" {
 
 ### 1.6 发布模型约束了这次集成
 
-`Makefile:96` 列了六个发布目标：
+`Taskfile.yml:81` 列了六个发布目标：
 
 ```
 linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 ```
 
-`Makefile:108` 用 `CGO_ENABLED=0` 构建它们。发布产物是静态、无依赖的二进制，
+`Taskfile.yml:248-263` 用 `CGO_ENABLED=0` 构建它们。发布产物是静态、无依赖的二进制，
 在 Linux 上交叉编译产出 —— runner 上没有 C 工具链能给 `darwin/*` 或 `windows/*` 用。
 
 ★ 任何需要 cgo 的集成都会破坏发布模型。Kit 不会：Kit 就是一个镜像，
@@ -454,7 +454,7 @@ FROM docker/sandbox-templates:shell
 
 USER root
 
-# ★ The binary `make build` produced. It is a local build, so it carries the
+# ★ The binary `task build` produced. It is a local build, so it carries the
 #   host's architecture — a Kit built on an amd64 host is an amd64 image.
 COPY openheron /usr/local/bin/openheron
 RUN chmod 0755 /usr/local/bin/openheron
@@ -495,16 +495,16 @@ exec openheron
 
 - 基础镜像**必须**满足平台底线：uid `1000` 的 `agent` 用户、`/home/agent`、
   `bash`、`git`、CA 证书库。规范说，workload 不满足这条就是"构建顺利，启动时失败"。
-- **二进制是从这个仓库构建出来的，不是下载来的。** `make kit` 先跑
-  `make build`，把产物复制到这份配方旁边，配方再把它拷进镜像。
+- **二进制是从这个仓库构建出来的，不是下载来的。** `task kit` 先跑
+  `task build`，把产物复制到这份配方旁边，配方再把它拷进镜像。
   于是这个 Kit 带的是**当前源码**而不是某个 release，
   构建也不需要基础镜像之外的任何网络。
 - ★ **那个二进制是动态链接的**，而发布出来的二进制是静态的
-  （`CGO_ENABLED=0`，`Makefile:108`）。基础镜像是 Ubuntu，
+  （`CGO_ENABLED=0`，`Taskfile.yml:248-263`）。基础镜像是 Ubuntu，
   所以它要的 libc 在里面；代价是二进制更大，
   而且这个 Kit 绑在基础镜像的 libc 上。
 - ★ **它带的是宿主的架构。** amd64 宿主上构建出来的 Kit 就是 amd64 镜像 ——
-  六个目标是 `make release` 的事。
+  六个目标是 `task release` 的事。
 - ★ **把产物复制到配方旁边，正是本地那条路能通的原因。**
   构建上下文够不到它被给到的目录之外，所以仓库根的 `bin/openheron` 够不着：
   二进制被复制进 Kit 自己的目录，`sbx run ./sandbox-kit/openheron` 就从那里构建。
@@ -882,7 +882,7 @@ agent 可以从环境里把它读出来，它跑的任何东西都能把它发�
 若它确实缓冲，可选项是换一种会 flush 的转发配置，
 或者换一条浏览器与沙箱之间的传输方式。
 
-这与浏览器在 `make smoke` 里已经面对的是同一个风险 —— 穿过真服务的真 SSE 流 ——
+这与浏览器在 `task smoke` 里已经面对的是同一个风险 —— 穿过真服务的真 SSE 流 ——
 而它在 E2E 的假后端里**不存在**，所以 E2E 套件回答不了这个问题（§5）。
 
 ### 2.11 它不改变什么
@@ -893,7 +893,7 @@ agent 可以从环境里把它读出来，它跑的任何东西都能把它发�
 - 文件工具及其收敛（`agentkit/fsx/fsx.go:194`）；
 - API 面（`api/v2_files.go:34-72`）；
 - 前端，它是内嵌的（`main.go:35`）；
-- 发布模型（`Makefile:96`、`Makefile:108`）。
+- 发布模型（`Taskfile.yml:81`、`Taskfile.yml:248-263`）。
 
 ★ 变的是**进程跑在哪里**，以及因此宿主能看见什么。
 这是这次变更最便宜的一种形态，也正是这份文档值得在写任何代码之前写的原因。
@@ -1100,9 +1100,9 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
 | 进程是不是从工作区启动的？ | **是** —— `PWD` 与 `OLDPWD` 都是工作区 |
 | 配置是不是落在挂载上？ | **是** —— `.openheron/{agents,llm,mcps,server,state}` 在宿主上，会话也在 |
 | 凭据到不到模型？ | **到** —— 容器里是 `DEEPSEEK_API_KEY=proxy-managed`；代理换上真值，调用返回了 "ok" |
-| 发布版配方构建得出来吗？ | **能** —— `make kit` 用 container-driver builder 产出 `openheron-kit:0.0.6`，里面的二进制自报 `v0.0.6` |
+| 发布版配方构建得出来吗？ | **能** —— `task kit` 用 container-driver builder 产出 `openheron-kit:0.0.6`，里面的二进制自报 `v0.0.6` |
 | workload 能与 credential mixin 组合吗？ | **能** —— 容器里是 `DEEPSEEK_API_KEY=proxy-managed`，配置在挂载上，模型答了 |
-| 纯声明的 mixin 没有 Dockerfile 也构建得出来吗？ | **能** —— `make kit-mixin` 只靠描述文件就产出镜像 |
+| 纯声明的 mixin 没有 Dockerfile 也构建得出来吗？ | **能** —— `task kit-mixin` 只靠描述文件就产出镜像 |
 | 发布版 Kit 在沙箱里跑得起来吗？ | **能** —— startup hook 把配置写到挂载上，服务在自己的数据目录里建出了 state |
 | 两个厂商 mixin 能组合吗？ | **能** —— 两个哨兵都在容器里，DeepSeek 那边回了 200 |
 | 两个同 service 的 mixin 能组合吗？ | **不能** —— "one credential has one owner" |
@@ -1146,9 +1146,9 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
   一个失效的端口映射，看起来和"workload 死了"一模一样。
 - ★ **`default` builder 会把 Kit 的 manifest annotation 丢掉。**
   镜像构建成功，而它已经不是 Kit 了：描述文件 annotation 没了。
-  container driver 的 builder 才保得住，所以 `make kit` 指定了它。
+  container driver 的 builder 才保得住，所以 `task kit` 指定了它。
 - ★ **那个 builder 还需要 `--load`。** 不给的话结果留在构建缓存里，
-  本地没有镜像可供校验 —— `make kit-check` 会去找一个从没导出的镜像。
+  本地没有镜像可供校验 —— `task kit-check` 会去找一个从没导出的镜像。
 - ★ **凭据和它的网络规则必须一起声明。**
   只带凭据的 mixin 组合不上：运行时要 inject 域名逐字出现在 allow 列表里，
   而 workload 的裸 `*` 不满足。mixin 于是把主机名一并加上，两张 allow 列表取并集（§2.3）。
@@ -1168,7 +1168,7 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
   改了 Kit 要 `sbx rm` 再 `sbx run` —— 重启会悄悄留着旧镜像，
   于是探针看起来像"没跑"。
 - ★ **配方是从这个仓库构建的**，所以这个 Kit 带的是当前源码：
-  `make kit` 跑 `make build` 并把二进制拷进去。镜像里的二进制自报它的版本 ——
+  `task kit` 跑 `task build` 并把二进制拷进去。镜像里的二进制自报它的版本 ——
   `git describe` 的结果，而不是 release tag；
   而且它是动态链接的，而发布出来的二进制是静态的。
 - ★ **`sbx kit pack` 是另一套语法。** 它要的是 `spec.yaml` ——

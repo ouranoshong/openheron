@@ -30,7 +30,7 @@ root filesystem, the mixins carry declarations and no content.
 ```sh
 sbx --version      # 0.42.0 or later
 docker --version
-bun --version      # the frontend toolchain: make kit runs make build
+bun --version      # the frontend toolchain: task kit runs task build
 ```
 
 ★ The version floor is not cosmetic: 0.42.0 fixed `CVE-2026-77179` and
@@ -41,7 +41,7 @@ documents is a mode openheron cannot use (§2.14 of the design).
 builder, and every Kit target creates one if it is missing:
 
 ```sh
-make kit-builder
+task kit-builder
 ```
 
 ★ **Why not the default builder.** The `docker` driver with the classic
@@ -54,20 +54,20 @@ them.
 ## 2. Build
 
 ```sh
-make kit         # the workload: openheron-kit:<version>
-make kit-mixin   # every mixin: openheron-kit-<vendor>:<version>
+task kit         # the workload: openheron-kit:<version>
+task kit-mixin   # every mixin: openheron-kit-<vendor>:<version>
 ```
 
-★ **`<version>` is `KIT_VERSION` in the Makefile** — the one place the
+★ **`<version>` is `KIT_VERSION` in the Taskfile** — the one place the
 version lives. The build stamps it into the descriptor and into the image
 tag, so the image you get locally is the one the release publishes.
 
 ★ Both export into the local docker store. Without the export there is no
-local image to validate, and `make kit-check` would look for an image that
+local image to validate, and `task kit-check` would look for an image that
 was never exported.
 
-★ **The binary is built on the host, not in the image.** `make kit` runs
-`make build` first — the frontend, the embedded binary, the same code this
+★ **The binary is built on the host, not in the image.** `task kit` runs
+`task build` first — the frontend, the embedded binary, the same code this
 repository builds — and copies the result beside the recipe:
 
 ```dockerfile
@@ -78,7 +78,7 @@ RUN chmod 0755 /usr/local/bin/openheron
 ★ **Two consequences.** The Kit carries the **current source**, not a
 release: there is no release to wait for, and the binary inside reports
 `git describe` rather than a release tag. And the build needs the **frontend
-toolchain** — `make build` runs vite — so building a Kit takes more than
+toolchain** — `task build` runs vite — so building a Kit takes more than
 docker does.
 
 ★ **The binary is copied beside the recipe** because a build context cannot
@@ -96,7 +96,7 @@ libc.
 ## 3. Validate
 
 ```sh
-make kit-check   # kit-tck validate against the specification
+task kit-check   # kit-tck validate against the specification
 ```
 
 ★ `kit-tck` is the conformance suite from the specification's repository. It
@@ -113,7 +113,7 @@ sbx run ./sandbox-kit/openheron \
 ```
 
 ★ A local directory is a valid Kit reference, and the runtime builds it on
-demand — so this path needs no `make kit` at all. It is how you test a
+demand — so this path needs no `task kit` at all. It is how you test a
 descriptor change before publishing it.
 
 ★ **`--kit` takes a directory here, not an image.** A mixin directory holds
@@ -131,7 +131,7 @@ keeps it running afterwards.
 ## 5. Publish
 
 ```sh
-make kit-push kit-push-mixin
+task kit-push kit-push-mixin
 ```
 
 ★ **The mixins live in their own repositories**, and they have to: a Kit is
@@ -177,7 +177,7 @@ organization token — not the account password.
 
 ★ **The image is tagged without the `v`**: the release is `v0.1.0` and the Kit
 is `0.1.0`, so the reference in the guide is the tag. The version reaches the
-**published descriptor** as well, because `make kit` builds in a copy of the
+**published descriptor** as well, because `task kit` builds in a copy of the
 Kit's directory with the version written into it — the working tree is never
 left modified.
 
@@ -187,7 +187,7 @@ A multi-platform Kit would need a cross-compiled binary, and the current one
 is dynamically linked.
 
 ★ **The tag is the version, and the version is the release.** The Kit's
-`version` argument is the release tag it installs, and `make kit-push` tags
+`version` argument is the release tag it installs, and `task kit-push` tags
 the image with that same version. A Kit that names a release nobody
 published is a Kit nobody can build — so publish the release first, then push
 the Kit that names it.
@@ -284,7 +284,7 @@ wherever you want it.
 | `kit-tck` finds no image to validate | the build did not export — `--load` is required, and it is in the recipe |
 | the image builds but the runtime does not recognise it as a Kit | the manifest annotations are gone — use a container-driver builder |
 | the download 404s during the build | the version names a release that was never published |
-| `openheron: not found` during the build | the binary was not copied in — `make kit` does that, so build the Kit with `make kit` and not with buildx directly |
+| `openheron: not found` during the build | the binary was not copied in — `task kit` does that, so build the Kit with `task kit` and not with buildx directly |
 | `family "dual" is not supported yet` | the runtime does not implement it; omit the field |
 | `spec.yaml (or spec.yml) is required` | `sbx kit pack` is the **v1/v2** artifact grammar; a v3 Kit travels as an OCI image or a directory |
 | `KVM error: Permission denied` | the daemon serving the socket is not the one with `/dev/kvm` access — see §6.2 of the design |

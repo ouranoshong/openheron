@@ -125,7 +125,7 @@ fi
 
 BIN="${OPENHERON_BIN:-$REPO_ROOT/bin/openheron}"
 if [[ ! -x "$BIN" ]]; then
-  echo "[test-backend] binary not found: $BIN (run 'make build-go' first)" >&2
+  echo "[test-backend] binary not found: $BIN (run 'task build-go' first)" >&2
   exit 1
 fi
 

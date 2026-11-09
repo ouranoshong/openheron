@@ -36,7 +36,7 @@ neither zero latency nor unlimited concurrency.
 ## Quick start
 
 ```bash
-make build                           # build (frontend + a single binary with the UI embedded)
+task build                           # build (frontend + a single binary with the UI embedded)
 cd /your/project && openheron init   # generate a minimal runnable configuration in your project
 export DEEPSEEK_API_KEY=sk-...       # secrets are read from the environment only
 openheron                            # start, then open http://localhost:8080
@@ -225,13 +225,13 @@ rebuild the index needs a human nod.
 ## Development
 
 ```bash
-make build-go   # backend only (no frontend rebuild) — fastest while iterating on Go code
-make web-dev    # Vite dev server (:5173, proxies /v2 to :8080)
-make dev        # rebuild and restart the Go binary automatically (air)
-make check      # lint + test
+task build-go   # backend only (no frontend rebuild) — fastest while iterating on Go code
+task web-dev    # Vite dev server (:5173, proxies /v2 to :8080)
+task dev        # rebuild and restart the Go binary automatically (air)
+task check      # lint + test
 ```
 
-`make test-e2e` drives a real browser against a deterministic fake backend; `make smoke`
+`task test-e2e` drives a real browser against a deterministic fake backend; `task smoke`
 runs against the test instance and needs a reachable model. The ports, the test
 environment and the traps around them are in
 [docs/developer-manual.md](docs/developer-manual.md) §5.
