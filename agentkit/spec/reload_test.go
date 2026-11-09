@@ -51,7 +51,11 @@ func TestServerDirIsNotHot(t *testing.T) {
 			t.Fatal("a change under server/ needs a restart and must not take part in hot reload")
 		}
 	}
-	want := []string{DirAgent, DirLLM, DirPolicy, DirTools}
+	// ★ skills/ is hot for the same reason the other four are: a SKILL.md is
+	//   content the agent reads, so editing one has to reach the next turn
+	//   without a restart. The walk is recursive — a file two levels down is
+	//   what a skill actually is.
+	want := []string{DirAgent, DirLLM, DirMCP, DirSkills, DirTools}
 	if len(HotDirs) != len(want) {
 		t.Fatalf("hot dirs = %v, want exactly %v", HotDirs, want)
 	}
@@ -59,6 +63,31 @@ func TestServerDirIsNotHot(t *testing.T) {
 		if HotDirs[i] != d {
 			t.Fatalf("hot dirs = %v, want exactly %v", HotDirs, want)
 		}
+	}
+}
+
+// ★ The fingerprint walks the tree **recursively**, and a skill is the case
+// that needs it: `skills/<name>/SKILL.md` edits the file, not the folder, so a
+// one-level walk saw an unchanged directory and the saved skill never reached
+// the next turn.
+func TestEditingASkillChangesTheVersion(t *testing.T) {
+	f := newFixture(t)
+	f.seedMinimal(t)
+	seedSkill(t, f, "code-review", "---\ndescription: one\n---\nbody\n")
+
+	s, err := NewService(f.root, filepath.Dir(f.root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := s.Fingerprint()
+	if before == "" {
+		t.Fatal("the fingerprint must not be empty")
+	}
+
+	// Same name, same folder, same size class — only the content moves.
+	seedSkill(t, f, "code-review", "---\ndescription: two\n---\nbody\n")
+	if got := s.Fingerprint(); got == before {
+		t.Fatal("★ editing skills/<name>/SKILL.md must change the fingerprint, or the change never lands")
 	}
 }
 

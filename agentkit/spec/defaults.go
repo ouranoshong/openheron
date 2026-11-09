@@ -6,12 +6,11 @@ import (
 	"time"
 )
 
-func defaultPolicy() decl.Policy {
-	return decl.Policy{
-		Ask:  []string{"write_file", "edit_file", "execute", "kb_index"},
-		Deny: nil,
-	}
-}
+// The caps' defaults, for the configuration that does not name them.
+const (
+	DefaultMaxDepth   = 1
+	DefaultMaxRetries = 5
+)
 
 func (c *Config) EnabledToolNames() []string {
 	if c == nil {

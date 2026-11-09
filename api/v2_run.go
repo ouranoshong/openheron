@@ -173,6 +173,14 @@ func (s *Server) v2Run(ctx context.Context, c *app.RequestContext) {
 	//   client's next message must find a complete history, or the next
 	//   turn's input is built from a half-written one.
 	turn.WaitArchived()
+	// ★ And it waits for the **slot**. Archiving is not releasing: after the
+	//   messages are on disk the run still writes its terminal row and
+	//   clears the pointer the admission gate reads. A response that ends
+	//   in between leaves the client holding a session it cannot use — its
+	//   next message comes back "a turn is already running" about the turn
+	//   it just finished. Under load that window is milliseconds wide,
+	//   which is exactly when a scripted client sends that message.
+	turn.WaitReleased()
 	stream.Flush()
 }
 
@@ -216,6 +224,7 @@ func (s *Server) attachRun(ctx context.Context, c *app.RequestContext, sess stor
 
 	transport.Render(stream, sess.ID(), turn.RunID, sub.Events())
 	turn.WaitArchived()
+	turn.WaitReleased()
 	stream.Flush()
 }
 
@@ -231,6 +240,11 @@ func (s *Server) reportRunStartFailure(stream *transport.SSEStream, err error) {
 		code = transport.CodeTurnSuperseded
 	case errors.Is(err, run.ErrNoCheckpoint):
 		code = codeNoCheckpoint
+	case errors.Is(err, run.ErrAgentUnavailable):
+		// ★ The agent could not be built: the message is the reason (which
+		//   model is missing, which file does not parse), so the code only
+		//   has to say what kind of answer this is.
+		code = transport.CodeAgentUnavailable
 	default:
 		code = codeInternal
 	}

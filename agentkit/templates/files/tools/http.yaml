@@ -1,0 +1,11 @@
+# HTTP tool. Writing this file enables it.
+#
+# ★ methods defaults to get only — write methods (post/put/delete) must be named
+#   explicitly, otherwise "just adding a POST" turns into an outbound channel.
+methods: [get]
+headers: {}
+timeout: 30s
+
+# ★ The tools that run **without a nod**. Everything else this file provides
+#   asks — the default is ask, and the exceptions are named.
+allows: [request_get]

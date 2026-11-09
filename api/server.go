@@ -36,8 +36,8 @@ type Server struct {
 	// have no socket); defaults to transport.New.
 	newStream func(*app.RequestContext) *transport.SSEStream
 	// cfgFn reads the live configuration for the introspection endpoints.
-	// A function, not a pointer: openheron hot-reloads llm/, agents/ and policy/,
-	// and a captured value would serve stale agent topology after every reload.
+	// A function, not a pointer: openheron hot-reloads llm/, agents/, tools/ and
+	// mcps/, and a captured value would serve stale agent topology after every reload.
 	cfgFn ConfigSource
 	// cfgSvc is the config Service itself, for /v2/settings — reading needs
 	// only the merged Config, writing needs the files behind it.
@@ -58,6 +58,11 @@ type Server struct {
 	// compaction. Optional: without it the endpoint reports that no
 	// compactor is wired.
 	compactorFn CompactorSource
+	// mcpFn reports the MCP servers of one agent. Optional for the same
+	// reason as the tools source, but with a sharper edge: the view asks
+	// the manager to start the servers it reports, so recomputing it here
+	// would be the very duplication this injection exists to prevent.
+	mcpFn MCPSource
 	// startTimeoutFn reads server.start_timeout. A function for the same
 	// reason as cfgFn: the value is configuration, not a constant.
 	startTimeoutFn func() time.Duration

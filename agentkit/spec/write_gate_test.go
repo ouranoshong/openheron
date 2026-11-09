@@ -24,10 +24,15 @@ func TestValidatePathRejectsEscapes(t *testing.T) {
 		"policy/../../etc/passwd",
 		"policy/../llm/x.yaml",
 		"/etc/passwd",
-		"/policy/permissions.yaml",
+		"/tools/http.yaml",
 		"state/anything.yaml",
 		"nope/x.yaml",
-		"skills/foo/SKILL.md",
+		// ★ Depth is the partition's, not the caller's: one level too deep
+		//   outside skills/ would be saved and never loaded.
+		"agents/sub/main.md",
+		"skills/SKILL.md",
+		"skills/foo/bar/SKILL.md",
+		"skills/foo/README.md",
 	}
 	for _, rel := range bad {
 		if _, err := ValidatePath(rel); err == nil {
@@ -51,21 +56,26 @@ func TestValidatePathRejectsNonEditableSection(t *testing.T) {
 	}
 }
 
-func TestValidatePathEnforcesPolicyFileNameWhitelist(t *testing.T) {
-	if _, err := ValidatePath("policy/permissions.yaml"); err != nil {
-		t.Fatalf("permissions.yaml must be valid: %v", err)
+func TestValidatePathEnforcesTheToolsFileNameWhitelist(t *testing.T) {
+	if _, err := ValidatePath("tools/http.yaml"); err != nil {
+		t.Fatalf("http.yaml must be valid: %v", err)
 	}
-	if _, err := ValidatePath("policy/limits.yaml"); err != nil {
-		t.Fatalf("limits.yaml must be valid: %v", err)
+	if _, err := ValidatePath("tools/kb.yaml"); err != nil {
+		t.Fatalf("kb.yaml must be valid: %v", err)
 	}
+	if _, err := ValidatePath("tools/whatever.yaml"); err == nil {
+		t.Fatal("an unknown tools file must be rejected")
+	}
+	// ★ The `policy/` partition is gone: a path into it is refused like any
+	//   other unknown section.
 	if _, err := ValidatePath("policy/whatever.yaml"); err == nil {
-		t.Fatal("an unknown policy file must be rejected")
+		t.Fatal("a path into a retired partition must be rejected")
 	}
 }
 
 func TestValidatePathAcceptsTheEditableSections(t *testing.T) {
 	good := []string{
-		"policy/permissions.yaml",
+		"tools/http.yaml",
 		"llm/deepseek.yaml",
 		"agents/main.md",
 		"agents/my-agent.md",
@@ -88,9 +98,9 @@ func TestValidatePathRejectsDotfiles(t *testing.T) {
 // ── revision ──────────────────────────────────────────────────────────────
 
 func TestRevisionIsStableAndContentAddressed(t *testing.T) {
-	a := Revision([]byte("ask: [ls]\n"))
-	b := Revision([]byte("ask: [ls]\n"))
-	c := Revision([]byte("ask: [ls, glob]\n"))
+	a := Revision([]byte("methods: [get]\nallows: [ls]\n"))
+	b := Revision([]byte("methods: [get]\nallows: [ls]\n"))
+	c := Revision([]byte("methods: [get]\nallows: [ls, glob]\n"))
 
 	if a == "" || len(a) != revisionLen {
 		t.Fatalf("revision %q has the wrong length", a)
@@ -170,8 +180,8 @@ func TestWriteLandsAndReportsPostWriteRevision(t *testing.T) {
 	f.seedMinimal(t)
 	s := f.service(t)
 
-	content := []byte("ask: [read_file, write_file]\n")
-	rev, cfg, err := s.Write("policy/permissions.yaml", content, "")
+	content := []byte("methods: [get]\nallows: [read_file, write_file]\n")
+	rev, cfg, err := s.Write("tools/http.yaml", content, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,11 +189,11 @@ func TestWriteLandsAndReportsPostWriteRevision(t *testing.T) {
 	if rev != Revision(content) {
 		t.Fatalf("rev = %q, want %q", rev, Revision(content))
 	}
-	if got := f.read(t, "policy/permissions.yaml"); got != string(content) {
+	if got := f.read(t, "tools/http.yaml"); got != string(content) {
 		t.Fatalf("on disk = %q, want %q", got, content)
 	}
-	if len(cfg.Policy.Ask) != 2 || cfg.Policy.Ask[0] != "read_file" {
-		t.Fatalf("the returned config must reflect the write: %v", cfg.Policy.Ask)
+	if got := cfg.AllowedTools(); len(got) != 2 || got[0] != "read_file" {
+		t.Fatalf("the returned config must reflect the write: %v", got)
 	}
 }
 
@@ -192,10 +202,12 @@ func TestWriteLeavesNoTempFile(t *testing.T) {
 	f.seedMinimal(t)
 	s := f.service(t)
 
-	if _, _, err := s.Write("policy/permissions.yaml", []byte("ask: [execute]\n"), ""); err != nil {
+	if _, _, err := s.Write("tools/http.yaml", []byte("methods: [get]\nallows: [execute]\n"), ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(f.root, "policy", "permissions.yaml.tmp")); err == nil {
+	// ★ The temp file lands **next to the file being written**, so looking
+	//   for it in another directory would pass no matter what the write did.
+	if _, err := os.Stat(filepath.Join(f.root, "tools", "http.yaml.tmp")); err == nil {
 		t.Fatal("a temp file was left behind")
 	}
 }
@@ -214,11 +226,11 @@ func TestWriteCreatesFirstConfigInAnEmptyProject(t *testing.T) {
 	if _, _, err := s.WriteMany([]File{
 		{Rel: "llm/openai.yaml", Content: []byte(minimalLLM)},
 		{Rel: "agents/main.md", Content: []byte("---\nmodel: openai/fast\n---\n你是助手。\n")},
-		{Rel: "policy/permissions.yaml", Content: []byte("ask: [execute]\n")},
+		{Rel: "tools/http.yaml", Content: []byte("methods: [get]\nallows: [execute]\n")},
 	}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.read(t, "policy/permissions.yaml"); !strings.Contains(got, "execute") {
+	if got := f.read(t, "tools/http.yaml"); !strings.Contains(got, "execute") {
 		t.Fatalf("content = %q", got)
 	}
 	if !f.exists(t, "agents/main.md") {
@@ -229,20 +241,20 @@ func TestWriteCreatesFirstConfigInAnEmptyProject(t *testing.T) {
 func TestWriteRejectsStaleRevision(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
-	f.write(t, "policy/permissions.yaml", "ask: [execute]\n")
+	f.write(t, "tools/http.yaml", "methods: [get]\nallows: [execute]\n")
 	s := f.service(t)
 
-	stale := Revision([]byte("ask: [execute]\n"))
-	f.write(t, "policy/permissions.yaml", "ask: [execute, write_file]\n")
+	stale := Revision([]byte("methods: [get]\nallows: [execute]\n"))
+	f.write(t, "tools/http.yaml", "methods: [get]\nallows: [execute, write_file]\n")
 
-	_, _, err := s.Write("policy/permissions.yaml", []byte("ask: [ls]\n"), stale)
+	_, _, err := s.Write("tools/http.yaml", []byte("methods: [get]\nallows: [ls]\n"), stale)
 	if err == nil {
 		t.Fatal("a stale baseRev must be rejected")
 	}
 	if writeErrKind(err) != ErrConflict {
 		t.Fatalf("kind = %v, want ErrConflict", err)
 	}
-	if got := f.read(t, "policy/permissions.yaml"); !strings.Contains(got, "write_file") {
+	if got := f.read(t, "tools/http.yaml"); !strings.Contains(got, "write_file") {
 		t.Fatalf("a rejected write must not overwrite: %q", got)
 	}
 }
@@ -250,12 +262,12 @@ func TestWriteRejectsStaleRevision(t *testing.T) {
 func TestWriteAcceptsCurrentRevision(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
-	original := "ask: [execute]\n"
-	f.write(t, "policy/permissions.yaml", original)
+	original := "methods: [get]\nallows: [execute]\n"
+	f.write(t, "tools/http.yaml", original)
 	s := f.service(t)
 
-	if _, _, err := s.Write("policy/permissions.yaml",
-		[]byte("ask: [execute, write_file]\n"), Revision([]byte(original))); err != nil {
+	if _, _, err := s.Write("tools/http.yaml",
+		[]byte("methods: [get]\nallows: [execute, write_file]\n"), Revision([]byte(original))); err != nil {
 		t.Fatalf("a matching baseRev must be accepted: %v", err)
 	}
 }
@@ -265,7 +277,7 @@ func TestWriteOnMissingFileTreatsEmptyRevisionAsCreate(t *testing.T) {
 	f.seedMinimal(t)
 	s := f.service(t)
 
-	if _, _, err := s.Write("policy/permissions.yaml", []byte("ask: [execute]\n"), ""); err != nil {
+	if _, _, err := s.Write("tools/http.yaml", []byte("methods: [get]\nallows: [execute]\n"), ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -328,7 +340,7 @@ func TestReadFileReportsMissingAsEmptyNotError(t *testing.T) {
 		t.Fatalf("an existing file must return content and a revision (rev=%q)", rev)
 	}
 
-	content, rev, err = s.ReadFile("policy/permissions.yaml")
+	content, rev, err = s.ReadFile("tools/http.yaml")
 	if err != nil {
 		t.Fatalf("a missing file is not an error: %v", err)
 	}
@@ -337,14 +349,43 @@ func TestReadFileReportsMissingAsEmptyNotError(t *testing.T) {
 	}
 }
 
+// ★ Reading and writing ask different questions, and the read is allowed to be
+// the looser one: `server/` cannot be written (it is not hot-reloaded), and
+// that is a fact about writing. A reader that cannot look at the configuration
+// the process is running from is a reader with a hole in it — and the hole was
+// exactly one third of the tree, reported as "changes would need a restart"
+// for a call that changes nothing.
+func TestReadFileReadsAPartitionItMayNotWrite(t *testing.T) {
+	f := newFixture(t)
+	f.write(t, "server/config.yaml", "listen_addr: \":9999\"\n")
+	s := f.service(t)
+
+	content, rev, err := s.ReadFile("server/config.yaml")
+	if err != nil {
+		t.Fatalf("server/ is readable: %v", err)
+	}
+	if !strings.Contains(string(content), "9999") || rev == "" {
+		t.Fatalf("content = %q, revision = %q", content, rev)
+	}
+
+	// ★ The write gate did not move: the same path is still refused.
+	if _, _, err := s.Write("server/config.yaml", []byte("listen_addr: \":1\"\n"), rev); err == nil {
+		t.Fatal("server/ must still refuse to be written")
+	}
+	if _, err := s.Delete("server/config.yaml"); err == nil {
+		t.Fatal("server/ must still refuse to be deleted")
+	}
+}
+
 func TestReadFileRejectsBadPaths(t *testing.T) {
 	f := newFixture(t)
 	s := f.service(t)
 
-	if _, _, err := s.ReadFile("../escape.yaml"); err == nil {
-		t.Fatal("ReadFile must apply the same path validation as Write")
-	}
-	if _, _, err := s.ReadFile("server/config.yaml"); err == nil {
-		t.Fatal("ReadFile must reject non-editable sections too, so the UI cannot show a read path that has no write path")
+	// ★ The shape checks are shared with the writer: a path that leaves the
+	//   root, or names a partition that does not exist, is not readable either.
+	for _, rel := range []string{"../escape.yaml", "/etc/passwd", "policy/whatever.yaml", "tools/whatever.yaml"} {
+		if _, _, err := s.ReadFile(rel); err == nil {
+			t.Fatalf("ReadFile(%q) must be refused", rel)
+		}
 	}
 }

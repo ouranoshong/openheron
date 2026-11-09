@@ -2,9 +2,14 @@ package run
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/cloudwego/eino/schema"
+
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"github.com/ouranoshong/openheron/storage"
 )
 
@@ -68,6 +73,77 @@ func (rw *runRow) finish(state storage.RunState, code, message string) {
 	rw.run.ErrorMessage = message
 	rw.closed = true
 	rw.writeLocked()
+}
+
+// noteMCPServers records the MCP servers the run touched.
+//
+// ★ The names are the servers' own, and the ledger holds them once: a run
+//
+//	touches a server many times, and the row says which servers were
+//	involved, not how often.
+func (rw *runRow) noteMCPServers(names []string) {
+	if rw == nil || len(names) == 0 {
+		return
+	}
+	rw.mu.Lock()
+	defer rw.mu.Unlock()
+	if rw.closed {
+		return
+	}
+	seen := make(map[string]bool, len(rw.run.MCPServers))
+	for _, n := range rw.run.MCPServers {
+		seen[n] = true
+	}
+	for _, n := range names {
+		if n == "" || seen[n] {
+			continue
+		}
+		seen[n] = true
+		rw.run.MCPServers = append(rw.run.MCPServers, n)
+	}
+	sort.Strings(rw.run.MCPServers)
+	rw.run.UpdatedAt = time.Now().UTC()
+	rw.writeLocked()
+}
+
+// mcpServersOf names the MCP servers the messages touched.
+//
+// ★ The tool name is namespaced, and the namespace's first segment is the
+//
+//	server: mcp__<server>__<tool>. ★ A server name may not contain a run
+//	of underscores, so the boundary is unambiguous and the name does not
+//	have to be parsed back into anything else.
+func mcpServersOf(msgs []*schema.Message) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range msgs {
+		if m == nil {
+			continue
+		}
+		for _, tc := range m.ToolCalls {
+			name, ok := mcpServerOf(tc.Function.Name)
+			if !ok || seen[name] {
+				continue
+			}
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// mcpServerOf reads the server out of an exposed tool name.
+func mcpServerOf(tool string) (string, bool) {
+	if !strings.HasPrefix(tool, decl.MCPToolPrefix) {
+		return "", false
+	}
+	rest := tool[len(decl.MCPToolPrefix):]
+	i := strings.Index(rest, decl.MCPSeparator)
+	if i <= 0 {
+		return "", false
+	}
+	return rest[:i], true
 }
 
 // isClosed reports whether the row already carries a terminal state.

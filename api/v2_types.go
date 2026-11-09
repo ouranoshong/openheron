@@ -14,6 +14,7 @@ import (
 	"github.com/ouranoshong/openheron/agentkit/run"
 	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/storage"
+	"github.com/ouranoshong/openheron/transport"
 )
 
 // rfc3339Nano is the timestamp shape every v2 field uses.
@@ -130,6 +131,12 @@ func v2FailErr(c *app.RequestContext, err error) {
 		v2Fail(c, consts.StatusConflict, codeNoCheckpoint,
 			"this approval can no longer be resumed: its checkpoint is gone. Send a new message to continue.",
 			false)
+	case errors.Is(err, run.ErrAgentUnavailable):
+		// ★ The configuration is broken, not the turn. Retrying does not
+		//   help — the user has to fix a file — so this is not a conflict
+		//   and it is not "internal": the message names the agent and the
+		//   reason it could not be built.
+		v2Fail(c, consts.StatusUnprocessableEntity, transport.CodeAgentUnavailable, err.Error(), false)
 	case errors.Is(err, run.ErrStartTimeout):
 		v2Fail(c, consts.StatusConflict, codeTurnStartTimeout, err.Error(), true)
 	case errors.Is(err, run.ErrSuperseded):

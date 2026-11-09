@@ -2,6 +2,7 @@ import { Loader2Icon, PaperclipIcon, XIcon } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 
 import { AgentPicker } from "@/components/agent-picker"
+import { MCPPanel } from "@/components/mcp-panel"
 import { SkillPicker } from "@/components/skill-picker"
 import { ComposerMeta } from "@/components/composer-meta"
 import { ComposerPopup, type PopupItem } from "@/components/composer-popup"
@@ -56,6 +57,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
   const [picker, setPicker] = useState<{ open: boolean; filter?: string; error?: string }>({
     open: false,
   })
+  const [mcpPanel, setMcpPanel] = useState(false)
   const [skillPicker, setSkillPicker] = useState<{ open: boolean; filter?: string; error?: string }>({
     open: false,
   })
@@ -93,6 +95,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
   const switchBlocked = busy || blocked
   const focusAfterSettings = useRef(false)
   const pickerWasOpen = useRef(false)
+  const mcpWasOpen = useRef(false)
   const addFiles = useStore((s) => s.addFiles)
   const removeFile = useStore((s) => s.removeFile)
 
@@ -214,6 +217,23 @@ export function Composer({ inset = true }: { inset?: boolean }) {
   }, [settingsOpen])
 
   useEffect(() => {
+    if (mcpPanel) {
+      mcpWasOpen.current = true
+      return
+    }
+    if (!mcpWasOpen.current) return
+    mcpWasOpen.current = false
+    const focusComposer = () => {
+      const el = taRef.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(el.value.length, el.value.length)
+    }
+    focusComposer()
+    requestAnimationFrame(focusComposer)
+  }, [mcpPanel])
+
+  useEffect(() => {
     if (picker.open) {
       pickerWasOpen.current = true
       return
@@ -258,6 +278,11 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         break
       case "open_agents":
         setPicker({ open: true })
+        break
+      case "open_mcps":
+        // ★ The panel reads the runtime's state; it does not write a
+        //   message into the transcript. A status readout is not a turn.
+        setMcpPanel(true)
         break
       case "compact":
         // The compaction runs on the server: it summarizes the history and
@@ -450,7 +475,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
   return (
     <div className={inset ? "shrink-0 px-4 pb-3" : undefined}>
       {attachments.length > 0 && (
-        <ul data-testid="attachments" className="mx-auto mb-1.5 flex max-w-3xl flex-wrap gap-1.5">
+        <ul data-testid="attachments" className="mx-auto mb-1.5 flex w-full max-w-[var(--chat-column)] flex-wrap gap-1.5">
           {attachments.map((f) => (
             <li
               key={f.path}
@@ -473,7 +498,10 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         </ul>
       )}
 
-      <div className="border-input focus-within:border-ring focus-within:ring-ring/40 mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border px-3 py-2 focus-within:ring-3">
+      <div
+        data-testid="composer-box"
+        className="border-input focus-within:border-ring focus-within:ring-ring/40 mx-auto flex w-full max-w-[var(--chat-column)] items-end gap-2 rounded-2xl border px-3 py-2 focus-within:ring-3"
+      >
         <input
           ref={fileRef}
           type="file"
@@ -625,6 +653,10 @@ export function Composer({ inset = true }: { inset?: boolean }) {
             taRef.current?.focus()
           }}
         />
+      ) : null}
+
+      {mcpPanel ? (
+        <MCPPanel open onClose={() => setMcpPanel(false)} agentId={activeAgentId} />
       ) : null}
 
       {picker.open ? (

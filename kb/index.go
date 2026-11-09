@@ -21,7 +21,13 @@ const (
 var corpusExt = ".md"
 
 type IndexOptions struct {
-	Corpus string
+	// CorpusDir is the directory to index.
+	//
+	// ★ It is a **path**, not the corpus itself: the corpus is the set of
+	//   documents under it, and the name of that set is derived from this
+	//   path's last segment (see corpusName). The configuration key says
+	//   the same thing — `corpus_dir`.
+	CorpusDir string
 
 	Headers map[string]string
 }
@@ -52,14 +58,14 @@ func Index(ctx context.Context, ix *FileIndexer, opts IndexOptions, paths []stri
 		prevFiles[e.Path] = e
 	}
 
-	targets, cerr := collect(opts.Corpus, paths)
+	targets, cerr := collect(opts.CorpusDir, paths)
 	if cerr != nil {
 		return nil, cerr
 	}
 
 	fresh := make([]Entry, 0, len(targets))
 	for _, t := range targets {
-		rel := relPath(opts.Corpus, t.path)
+		rel := relPath(opts.CorpusDir, t.path)
 
 		if old, ok := prevFiles[rel]; ok && old.MTime == t.mtime.UnixNano() && old.Size == t.size {
 			res.Skipped++
@@ -76,7 +82,7 @@ func Index(ctx context.Context, ix *FileIndexer, opts IndexOptions, paths []stri
 	res.Files = len(fresh)
 
 	res2, err := ix.Reconcile(ctx, ReconcileRequest{
-		Corpus: corpusName(opts.Corpus),
+		Corpus: corpusName(opts.CorpusDir),
 		Fresh:  fresh,
 		Scope:  paths,
 	}, nil)
@@ -131,25 +137,25 @@ type corpusFile struct {
 	size  int64
 }
 
-func collect(corpus string, paths []string) ([]corpusFile, error) {
-	if corpus == "" {
-		return nil, fmt.Errorf("kb: corpus is empty")
+func collect(corpusDir string, paths []string) ([]corpusFile, error) {
+	if corpusDir == "" {
+		return nil, fmt.Errorf("kb: corpus directory is empty")
 	}
-	info, err := os.Stat(corpus)
+	info, err := os.Stat(corpusDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("kb: stat corpus %s: %w", corpus, err)
+		return nil, fmt.Errorf("kb: stat corpus directory %s: %w", corpusDir, err)
 	}
 	if !info.IsDir() {
-		return nil, fmt.Errorf("kb: corpus %s is not a directory", corpus)
+		return nil, fmt.Errorf("kb: corpus directory %s is not a directory", corpusDir)
 	}
 
 	if len(paths) > 0 {
 		out := make([]corpusFile, 0, len(paths))
 		for _, p := range paths {
-			abs := filepath.Join(corpus, filepath.Clean("/"+p))
+			abs := filepath.Join(corpusDir, filepath.Clean("/"+p))
 			fi, err := os.Stat(abs)
 			if err != nil {
 				return nil, fmt.Errorf("kb: stat %s: %w", p, err)
@@ -160,12 +166,12 @@ func collect(corpus string, paths []string) ([]corpusFile, error) {
 	}
 
 	var out []corpusFile
-	err = filepath.WalkDir(corpus, func(p string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(corpusDir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
-			if p != corpus && strings.HasPrefix(d.Name(), ".") {
+			if p != corpusDir && strings.HasPrefix(d.Name(), ".") {
 				return fs.SkipDir
 			}
 			return nil
@@ -181,14 +187,14 @@ func collect(corpus string, paths []string) ([]corpusFile, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("kb: walk corpus %s: %w", corpus, err)
+		return nil, fmt.Errorf("kb: walk corpus directory %s: %w", corpusDir, err)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].path < out[j].path })
 	return out, nil
 }
 
-func relPath(corpus, p string) string {
-	r, err := filepath.Rel(corpus, p)
+func relPath(corpusDir, p string) string {
+	r, err := filepath.Rel(corpusDir, p)
 	if err != nil {
 		return filepath.ToSlash(p)
 	}

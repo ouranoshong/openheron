@@ -292,5 +292,5 @@ wherever you want it.
 ---
 
 The design behind all of this, and every assumption it rests on, is in
-[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md) (the Chinese version is
-[`docs/sandbox-kit-design_zh.md`](../docs/sandbox-kit-design_zh.md)).
+[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md) — that document is Chinese
+only, like every other design document in this repository.

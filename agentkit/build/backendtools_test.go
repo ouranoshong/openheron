@@ -84,8 +84,8 @@ func newModelBuilder(t *testing.T, cfg *spec.Config, fallback model.BaseModel[*s
 
 func TestFilesystemToolsAreActuallyWired(t *testing.T) {
 	m := &plainModel{}
-	cfg := configFromSpecs("test/model", nil,
-		toConfigPolicy(NewPolicy(nil, nil)), nil)
+	cfg := configFromSpecs("test/model", allTools(),
+		allowOf(NewPolicy(nil)), nil)
 	cfg.Agents[spec.DefaultAgentID].Instruction = "you are a test"
 	cfg.Agents[spec.DefaultAgentID].MaxIterations = 2
 	b := newModelBuilder(t, cfg, m, nil)
@@ -108,10 +108,9 @@ func TestFilesystemToolsAreActuallyWired(t *testing.T) {
 }
 
 func TestFilesystemToolsSurviveTheAgentsRootSwitch(t *testing.T) {
-	child := &toolCallingModel{tool: "read_file", args: `{"file_path":"/tmp/x"}`}
-	cfg := configFromSpecs("test/model", nil,
-		toConfigPolicy(NewPolicy([]string{"read_file"}, nil)),
-		[]decl.SubAgentSpec{{ID: "task", ModelRef: "child/model"}})
+	child := &toolCallingModel{tool: "write_file", args: `{"file_path":"/tmp/x"}`}
+	cfg := configFromSpecs("test/model", allTools(), nil,
+		[]decl.SubAgentSpec{{ID: "task", ModelRef: "child/model", Tools: allTools()}})
 	cfg.Agents[spec.DefaultAgentID].Instruction = "you are a test"
 	cfg.Agents[spec.DefaultAgentID].MaxIterations = 2
 	b := newModelBuilder(t, cfg, &plainModel{}, map[string]model.BaseModel[*schema.Message]{
@@ -124,17 +123,18 @@ func TestFilesystemToolsSurviveTheAgentsRootSwitch(t *testing.T) {
 	}
 
 	if !runUntilInterrupt(t, a) {
-		t.Fatal("★ the read_file call was not gated — the tool is probably not wired")
+		t.Fatal("★ the write_file call was not gated — the tool is probably not wired")
 	}
 }
 
 func TestSubAgentsAlsoGetTheFilesystemTools(t *testing.T) {
-	child := &toolCallingModel{tool: "read_file", args: `{"file_path":"/tmp/x"}`}
-	root := &toolCallingModel{tool: "task", args: `{"subagent_type":"task","description":"read it"}`}
+	// ★ write_file, not read_file: the readers run without a nod, so only
+	//   a mutating tool reaches the gate.
+	child := &toolCallingModel{tool: "write_file", args: `{"file_path":"/tmp/x"}`}
+	root := &toolCallingModel{tool: "task", args: `{"subagent_type":"task","description":"write it"}`}
 
-	cfg := configFromSpecs("test/model", nil,
-		toConfigPolicy(NewPolicy([]string{"read_file"}, nil)),
-		[]decl.SubAgentSpec{{ID: "task", ModelRef: "child/model"}})
+	cfg := configFromSpecs("test/model", allTools(), nil,
+		[]decl.SubAgentSpec{{ID: "task", ModelRef: "child/model", Tools: allTools()}})
 	cfg.Agents[spec.DefaultAgentID].Instruction = "you are a test"
 	cfg.Agents[spec.DefaultAgentID].MaxIterations = 4
 	b := newModelBuilder(t, cfg, root, map[string]model.BaseModel[*schema.Message]{
@@ -146,7 +146,7 @@ func TestSubAgentsAlsoGetTheFilesystemTools(t *testing.T) {
 		t.Fatalf("build agent: %v", err)
 	}
 	if !runUntilInterrupt(t, a) {
-		t.Fatal("★ the sub agent's read_file was not gated — it probably has no filesystem tools")
+		t.Fatal("★ the sub agent's write_file was not gated — it probably has no filesystem tools")
 	}
 }
 
@@ -186,10 +186,12 @@ func runUntilInterrupt(t *testing.T, a adk.TypedAgent[*schema.Message]) bool {
 	}
 }
 
-func TestDenyRemovesTheFilesystemToolsFromTheModel(t *testing.T) {
+// ★ There is no global deny any more: the agent's own tools: list is
+//
+//	what takes a tool away from the model.
+func TestTheToolListRemovesTheFilesystemToolsFromTheModel(t *testing.T) {
 	m := &scriptModel{tool: "write_file"}
-	cfg := configFromSpecs("test/model", nil,
-		toConfigPolicy(NewPolicy(nil, []string{"write_file"})), nil)
+	cfg := configFromSpecs("test/model", allToolsExcept("write_file"), nil, nil)
 	cfg.Agents[spec.DefaultAgentID].Instruction = "you are a test"
 	cfg.Agents[spec.DefaultAgentID].MaxIterations = 3
 	b := newModelBuilder(t, cfg, m, nil)

@@ -1,8 +1,8 @@
 # ★ The process's own configuration.
 #
 #   ★ server/ is **not hot-reloaded** — it configures the process itself, so a
-#     change here needs a restart. Every other section (llm/ agents/ policy/
-#     tools/) is picked up from the next turn.
+#     change here needs a restart. Every other section (llm/ agents/ tools/
+#     mcps/) is picked up from the next turn.
 #
 #   ★ The values below are the **code's own defaults**, written out so that
 #     they are visible and editable. Writing them changes nothing by itself —
@@ -42,7 +42,7 @@ retry:
 agent:
   max_depth: 1
 
-# ★ Configuration watching: a change under llm/ agents/ policy/ tools/ is
+# ★ Configuration watching: a change under llm/ agents/ tools/ mcps/ is
 #   discovered automatically and swaps the generation from the next turn.
 #   The watcher is on by default; set enabled to false to turn it off.
 watch:

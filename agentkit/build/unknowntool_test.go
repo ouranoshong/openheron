@@ -80,12 +80,20 @@ func (m *scriptModel) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel,
 	return m, nil
 }
 
-func runScripted(t *testing.T, unknownName string, deny ...string) [][]*schema.Message {
+// runScripted runs a scripted model and returns the history.
+//
+// ★ The second argument names the tools the agent does **not** get: they
+//
+//	are the agent's own tools list, and a model that calls one has to
+//	be told it is not available.
+//
+// runScripted builds an agent whose tools: list is everything except the
+// named ones — so the model calls a tool the agent does not have.
+func runScripted(t *testing.T, unknownName string, without ...string) [][]*schema.Message {
 	t.Helper()
 
 	m := &scriptModel{}
-	cfg := configFromSpecs("test/model", nil,
-		toConfigPolicy(NewPolicy(nil, deny)), nil)
+	cfg := configFromSpecs("test/model", allToolsExcept(without...), nil, nil)
 	cfg.Agents[spec.DefaultAgentID].Instruction = "you are a test agent"
 	cfg.Agents[spec.DefaultAgentID].MaxIterations = 3
 
@@ -144,7 +152,9 @@ func TestUnknownToolCallDoesNotKillTheRun(t *testing.T) {
 }
 
 func TestUnknownToolScopeNamesOnlySurvivingTools(t *testing.T) {
-	filter := newFilterMiddleware(newTable("main", []string{"grep"}, nil))
+	// ★ The list names the two tools that survive; `grep` is not among
+	//   them, so the filter drops it.
+	filter := newFilterMiddleware(newTable("main", []string{"ls", "read_file"}))
 	scope := newUnknownToolScope()
 
 	runCtx := &adk.ChatModelAgentContext{
@@ -214,7 +224,7 @@ func TestUnknownToolScopeIsRegisteredAfterTheFilter(t *testing.T) {
 	snap := mustSnapshot(t, b)
 	policy, table, maxDepth := snap.agentSpec.policy, snap.tableFor(snap.agentSpec.defaultAgent), snap.agentSpec.maxDepth
 	check(t, "root", toolChain(newBoundary(policy, table), maxDepth))
-	check(t, "sub-agent", subHandlers(NewPolicy(nil, nil), decl.SubAgentSpec{ID: "x"}, 1))
+	check(t, "sub-agent", subHandlers(NewPolicy(nil), decl.SubAgentSpec{ID: "x"}, 1, nil))
 }
 
 func TestUnknownToolsReplyIsSafeWithoutToolNames(t *testing.T) {

@@ -15,8 +15,8 @@ import (
 // ConfigSource supplies the effective configuration to the introspection
 // endpoints.
 //
-//	live value: openheron hot-reloads llm/, agents/ and policy/, and a captured
-//	pointer would serve stale agent topology after every reload.
+//	live value: openheron hot-reloads llm/, agents/, tools/ and mcps/, and a
+//	captured pointer would serve stale agent topology after every reload.
 type ConfigSource func() *spec.Config
 
 // SetConfigSource wires /v2/config, /v2/agents, /v2/health and /v2/runtime.
@@ -60,6 +60,7 @@ func (s *Server) registerV2Routes() {
 	h.GET("/v2/skills", s.v2Skills)
 	h.GET("/v2/agents", s.v2Agents)
 	h.GET("/v2/agents/:agentId", s.v2AgentDetail)
+	h.GET("/v2/mcps", s.v2MCPServers)
 	h.GET("/v2/config", s.v2Config)
 	h.GET("/v2/health", s.v2Health)
 	h.GET("/v2/runtime", s.v2Runtime)

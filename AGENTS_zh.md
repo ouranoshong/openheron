@@ -7,48 +7,67 @@
 
 > ★ **本仓库是代码面**：Go 后端 + React 前端 + 构建配置。
 >
-> 本仓库自带**十一组**中英双语文档，随代码面一起维护
-> （**英文是主版本，`_zh` 后缀是中文版**）：
+> 本仓库自带**四组**中英双语文档，随代码面一起维护
+> （**英文是主版本，`_zh` 后缀是中文版**；Kit 的那两份指南也是双语的，
+> 它们在 `sandbox-kit/` 里 —— 见下）：
 > `README.md` / `README_zh.md`、
 > `docs/architecture.md` / `docs/architecture_zh.md`（架构设计说明）、
 > `docs/user-manual.md` / `docs/user-manual_zh.md`（用户使用说明）、
-> `docs/developer-manual.md` / `docs/developer-manual_zh.md`（开发者说明）、
-> `docs/context-usage-design.md` / `docs/context-usage-design_zh.md`（上下文使用预估设计方案）、
-> `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md`（会话并发设计方案）、
-> `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md`（run 生命周期设计方案）、
-> `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md`（文件系统后端设计方案）、
-> `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md`（Docker Sandbox Kit 打包设计方案）、
-> `docs/mcp-design.md` / `docs/mcp-design_zh.md`（MCP 接入设计方案）、
-> `docs/config-design.md` / `docs/config-design_zh.md`（配置系统设计说明）。
+> `docs/developer-manual.md` / `docs/developer-manual_zh.md`（开发者说明）。
+>
+> **另有八篇只有中文的文档**在 `docs/` 下 —— 架构与代码设计那一类。
+> ★ 它们的中文内容**接管了原文件名**：`docs/config-design.md` **就是**那篇中文文档 ——
+> 既没有 `_zh` 副本，也没有英文版：
+> `docs/context-usage-design.md`（上下文使用预估设计方案）、
+> `docs/session-concurrency-design.md`（会话并发设计方案）、
+> `docs/run-lifecycle-design.md`（run 生命周期设计方案）、
+> `docs/fs-backend-design.md`（文件系统后端设计方案）、
+> `docs/sandbox-kit-design.md`（Docker Sandbox Kit 打包设计方案）、
+> `docs/mcp-design.md`（MCP 接入设计方案）、
+> `docs/config-design.md`（配置系统设计说明）、
+> `docs/tool-surface-design.md`（工具面 —— 一个 agent 拿到哪些工具，以及配置怎么被管理）。
 > **`docs/` 下其余设计文档仍在上游仓库** ——
-> 下面凡引用 `docs/xxx.md` 而这几组之外的，都是上游那份。改语义前若拿不到它，
-> 先问，别凭印象改配置或接口。
+> 下面凡引用 `docs/xxx.md` 而这十二篇之外的，都是上游那份。
+> 改语义前若拿不到它，先问，别凭印象改配置或接口。
+>
+> ★ **设计类文档只写中文。** 讲代码怎么搭起来的文档 —— 分层、
+> 某个子系统的设计、一次重构方案 —— 没有第二个读者：读它的人读中文，而手工维护的
+> 英文对照版是一份会漂移的第二拷贝。★ 上面那八篇在 2026-11-08 退了双语：中文内容
+> 接管了原文件名，所以指向 `docs/config-design.md` 的链接照样解析 —— 解析到的是中文那篇。
+> ★ **仍然要双语的是给用户或集成方读的东西**：`README.md`、`docs/user-manual.md`，
+> 以及 —— 因为总得有人能在这个树里干活 —— `docs/architecture.md` 与
+> `docs/developer-manual.md`。不假定他们的读者读中文。Kit 的那两份指南
+> （`sandbox-kit/TUTORIAL.md` 与 `sandbox-kit/BUILDING.md`）出于同样的理由保持双语。
 >
 > ★ 前面四组讲的是**代码面已经是什么样**；`docs/context-usage-design.md`
 > 讲的是**上下文占用与压缩** —— 占用仪表盘（§2、§4、§5）、压缩及其持久化（§7）、
 > 以及压缩标记的界面渲染（§7.7）都已在代码里。
 > `docs/session-concurrency-design.md` 讲的是**会话并发** —— 一个会话一轮的准入闸门
 > （§5）、跨客户端的 409（§5.2）、以及前端的忙态处理（§5.4-§5.6）都已在代码里。
-> `docs/run-lifecycle-design.md` 是个例外：它是一份**提案**，不是描述。
-> 它的 §1 讲的是代码现状 —— 今天一轮绑在一条 SSE 连接上 —— §2 往后讲的是
-> 要建成什么样：run 变成一行持久事实、租约配 fence、连接降级为订阅者。
-> **§2 往后的东西都还不在树上。**
-> `docs/sandbox-kit-design.md` 也是一份**提案**：§1 讲 openheron 进程今天是什么样 ——
-> 一个进程，一对 HTTP/SSE 服务，文件工具与 shell 工具共用同一个后端；
-> §2 往后讲把**整个进程**打包成 Docker Sandbox Kit，于是边界往外挪而不是往里挪，
-> 读路径也被罩住了。
-> **§2 往后的东西都还不在树上。**
+> `docs/run-lifecycle-design.md` 讲的是**run 生命周期** —— run 变成一行持久事实、
+> 租约配 fence、连接降级为订阅者。★ **那一份落地了**：§3-§9 都在树上
+> （`storage/runledger.go`、`storage/lease.go`、`storage/memarbit/arbiter.go`、
+> `agentkit/emit/`），扫描才是真相，通知只是提示。§1 讲的仍是当年的代码 ——
+> 一轮绑在一条 SSE 连接上 —— 读起来像一段历史。
+> `docs/sandbox-kit-design.md` 讲的是**Docker Sandbox Kit** —— openheron 进程今天是什么样 ——
+> 一个进程，一对 HTTP/SSE 服务，文件工具与 shell 工具共用同一个后端 ——
+> 打包成 Kit，于是边界往外挪而不是往里挪，读路径也被罩住了。
+> ★ **那一份也落地了**：描述文件、内容配方、入口脚本与每个厂商一份的 mixin 都在
+> `sandbox-kit/` 里，`make kit` 构建它们，CI 的 `kit` job 发布它们。§4.2 仍有三条
+> 留给 owner 决定。
 > `docs/fs-backend-design.md` 讲的是**文件系统后端** —— `eino-ext` local 后端的有界分支
 > （§5）以及每个工具都要经过的那条收敛规则 —— 它**已实现**：`agentkit/fsx` 已在两处
 > 调用点接上。
-> `docs/mcp-design.md` 也是一份**提案**：§1 讲代码现状 —— 工具装配路径、provider 契约、
-> 以及只做精确匹配的策略表 —— §2 往后讲要建成什么样：一个新的 `mcps/` 配置分区、
-> `mcp__<server>__<tool>` 命名空间、住在工具旁边的档位，以及全局 deny 里的前缀匹配。
-> **§2 往后的东西都还不在树上。**
+> `docs/mcp-design.md` 讲的是 **MCP 接入** —— `mcps/` 配置分区、
+> `mcp__<server>__<tool>` 命名空间、住在 server 自己文件里的档位，以及 `/mcps` 视图。
+> **它已实现**：分区、provider、管理器与端点都在树上。★ §13 —— 非阻塞的 MCP 启动
+> （每台 server 各自维护一个状态，起来了就在下一轮把工具带进来）—— 也已实施。
+> ★ §8 —— 沙箱 Kit 怎么打包一个 MCP server —— 仍然是提案。
 > `docs/config-design.md` 讲的是**配置系统** —— 配置根与它的三级解析、各个分区与它们的
 > 文件规格、加载与优先级、热更新，以及依赖铁律。**正文讲的是代码现状**；
-> `mcps/` 分区（§6.7）、住在工具旁边的档位（§6.6）与全局 deny 里的前缀匹配（§6.3）
-> 标成了提案，因为它们还没实现。
+> `mcps/` 分区（§6.7）与住在工具旁边的档位（§6.6）**已实施**。★ **全局 deny** 里的
+> 前缀匹配（§6.3）跟着 deny 清单一起没了：「不被暴露」现在只由文件的 `allows:` 与 agent
+> 的 `tools` 两处说。
 >
 > ★ 有一个目录不是文档组：**`sandbox-kit/`** 装着把 openheron 打包成沙箱 workload 的
 > Docker Sandbox Kit —— `openheron/`（workload：描述文件、内容配方、入口脚本），
@@ -67,9 +86,13 @@
 > 要提新东西的设计文档可以写到代码之外 —— 但必须说清哪里是描述、哪里是提案，
 > 并把提案标成「尚未实现」。
 >
-> ★ **两版必须同步**：改英文版就同时改 `_zh` 版，反之亦然。
+> ★ **双语文档的两版必须同步**：改英文版就同时改 `_zh` 版，反之亦然。
+> 这条只管双语的那一组 —— `README.md`、`docs/architecture.md`、
+> `docs/user-manual.md`、`docs/developer-manual.md`、`sandbox-kit/TUTORIAL.md` 与
+> `sandbox-kit/BUILDING.md` —— 别的没有可同步的：只有中文的那些文档就一个版本。
 > 两版的代码标识符、行号引用、命令与路径应当一一对应 ——
-> 可以用 `grep -oP '`[a-zA-Z0-9_./:$-]+`' | sort -u` 逐组比对。
+> `make lint-docs` 检查这六对，也可以用
+> `grep -oP '`[a-zA-Z0-9_./:$-]+`' | sort -u` 逐组比对。
 > ★ 注意**反引号范围也要一致**：`` `POST /v2/run` `` 与 `` `POST` `/v2/run` `` 讲的
 > 是同一件事，但标识符集合不同 —— 比对会报差异。别让「写法不同」掩盖「内容不同」。
 
@@ -86,7 +109,7 @@
 | 消息提醒 | 英文 | `c.deferKey("watch.debounce fell back to default: %s", msg)` |
 | 接口响应体 | 英文 | `c.JSON(400, map[string]string{"error": "thread not found"})` |
 | **界面文案** | **英文** | `"Run in a separate agent"` |
-| **写入用户配置的文件内容** | **英文** | `catalog.md` 的表头、`policy/limits.yaml` 的注释段、`tools/filesystem.yaml` 的注释段 |
+| **写入用户配置的文件内容** | **英文** | `catalog.md` 的表头、`server/config.yaml` 的注释段、`tools/http.yaml` 的注释段 |
 
 ### 代码注释
 
@@ -141,7 +164,14 @@
   配置根一旦依赖「进程从哪启动」，同一条命令换个目录就读到另一份配置，
   测试实例也会因此读到开发配置。要换配置根就指名，别加新的查找规则。
 - **归档优先于呈现** —— SSE sink 断裂后要停止渲染但继续消费事件流，否则 `Outcome.Intermediates` 不完整，历史会缺。
-- **`deny` 优先于 `disabled_tools`** —— 外层策略是子 agent 无法放松的唯一保证。
+- **缺省档位是 `ask`** —— 没人点名的工具一律要问；例外是那些不用点头就能跑的：
+  文件在自己的 `allows:` 里点名的，以及代码知道的那些内置只读工具。★「不被暴露」现在
+  只在**两处**说 —— 文件自己的允许清单，和 agent 的 `tools` 清单。**没有全局 deny 了。**
+- ★ **agent 自己的几张清单都是白名单，缺省什么都没有。** `tools:` 说这个 agent 能用哪些
+  工具，`mcps:` 说它挂载哪些服务器，`skills:` 说它能加载哪些技能 —— 键不写与写空列表是
+  同一件事。★ **档位表是另一个问题，而且是共享的**：文件的 `allows:` 说什么不用点头，
+  agent 的 `tools` 说什么这个 agent 能用。★ 旧的 `disabled_tools` 键会被**拒绝**，
+  而且提示说清两个方向正好相反 —— 只把键名一改，就把黑名单变成了白名单。
 - 改配置语义前先读 `docs/config-design.md`；改接口前先读 `docs/api-design.md`；
   新增 `/v2` 接口读 `docs/api-v2-design.md`；动前端读 `docs/frontend-design.md`；
   动测试环境（端口 / 隔离目录）读 `docs/frontend-design.md` §11.2 与
@@ -176,6 +206,15 @@ docs(readme): drop the API table, it lives in the user manual
 - **zustand 的 selector 与组件里都不要写 `?? []`**。造新数组/新对象会让
   快照永远「变了」→ 无限重渲染 → 白屏。用模块级常量或 store 里的 selector。
 - **界面改动必须配 Playwright spec**（理由与验收要求见下节「测试」）。
+- **对话的宽度是一个 token,不是同一个数字抄六遍。** `--chat-column`、
+  `--prose-column` 与 `--chat-gutter` 住在 `web/src/index.css`：
+  **块级内容**（表格、代码、工具卡）吃满整列，**正文**停得更早 ——
+  六十个字符长的一段话是难读的。★ 表格有**下限**（每列 7rem ——
+  列多的表因此在自己的框里滚动）与**上限**（每格 28rem —— 长句因此换行，
+  而不是把表格撑宽）。
+- **颜色是 token,不是字面量。** 组件里写 `sky-500` 是 bug：状态色是
+  `--info`、`--warning` 与 `--success`；浅色与暗色是**同一套 token 的两组取值** ——
+  一边有的颜色另一边也有。
 
 ## 测试
 
@@ -233,6 +272,7 @@ make test-env-sync      # ★ 改过开发侧的 agent 定义后必须跑
 cd web && bun run smoke:interop            # SSE 分帧、拼接、历史水合
 cd web && bun run smoke:no-undefined-url   # 不会发出拼错的 URL
 cd web && bun run smoke:hitl               # 审批 resume 走通
+cd web && bun run smoke:config             # config_write 的审批往返（有前置条件，见下）
 ```
 
 ### 规则
@@ -246,17 +286,16 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
   才能触发审批。那是模型的自由，不是代码回归；脚本会重试，全都不触发时
   **明确报错**，不伪装成接线有问题。别用重试次数掩盖它。
 - ★ **`smoke:hitl` 有一个前置条件，缺了它会 100% 失败（不是「抖」）**：
-  **真正调工具的那个 agent**，其 `write_file` 必须落在 `ask` 档（既没被全局 `deny`，
-  也没被它自己的 `disabled_tools` 禁用）—— 否则模型根本调不出那个工具，
-  自然没有审批可触发。
-  ★ 别盯着 `main`：出厂配置里 `main` 确实写着
-  `disabled_tools: [write_file, edit_file, execute]`，但它只做编排，会把活**委派**给
-  `task`，而 `task` 的 `write_file` 在 `ask` 档 —— 审批照样触发。
+  **真正调工具的那个 agent**，其 `write_file` 必须落在 `ask` 档（没被它自己文件的
+  `allows:` 点名）**而且**在那个 agent 自己的 `tools:` 清单里 —— 否则模型根本调不出那个
+  工具，自然没有审批可触发。
+  ★ 别盯着 `main`：出厂配置里 `main` 拿到的是读取类工具与委派工具，
+  但它只做编排，会把活**委派**给 `task`，而 `task` 的 `write_file` 在 `ask` 档 —— 审批照样触发。
   2026-10-29 实测的事件流：`TOOL_CALL_START name=task`（子 agent 是以工具形态被调的），
   随后 `TOOL_CALL_START name=write_file subagentRunId=task`，
   中断的 `subagentRunId` 也是 `task`。
   要确认某档是否可达，看**每个** agent 的生效工具表：
-  `curl -s :18099/v2/agents | grep -A3 disabledTools` 与
+  `curl -s :18099/v2/agents | grep -A3 tools` 与
   `curl -s :18099/v2/agents/task`（里面 `effectiveTools` 会给出 tier 与 reason）。
   ★ `.openheron/` 是**本地未跟踪**的配置，改它会影响你自己的真实 agent
   （放开 `write_file` 意味着那个 agent 真能写文件）—— 要改先问自己一句。
@@ -307,21 +346,29 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 
 ### 本仓库自带（随代码面一起维护）
 
+★ **双语**的那一组 —— 英文在前，`_zh` 在后，两版一一对应：
+
 | 文档 | 内容 |
 |---|---|
 | `README.md` / `README_zh.md` | **项目说明** —— 定位、快速开始、命令、配置速览、HTTP 速查 |
 | `docs/architecture.md` / `docs/architecture_zh.md` | **架构设计说明** —— 分层与依赖方向、配置系统、装配、运行循环、存储、HTTP、前端、知识库 |
 | `docs/user-manual.md` / `docs/user-manual_zh.md` | **用户使用说明** —— 安装、配置、界面操作（面向使用者，不含内部设计） |
 | `docs/developer-manual.md` / `docs/developer-manual_zh.md` | **开发者说明** —— 分层、依赖铁律、开发配方、测试与排障、已知问题 |
-| `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` | **上下文使用预估设计方案** —— 占用口径、数据流、后端与前端改动、压缩结果的持久化与有效历史（**占用仪表盘与压缩持久化已实现**） |
-| `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` | **会话并发设计方案** —— 跨客户端抢占的成因、「一个会话一轮」的规则与实现、以及前端怎么知道会话正忙（**准入闸门与 409 已实现**） |
-| `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` | **文件系统后端设计方案** —— 为什么把 `eino-ext` 的 local 后端分叉成 `agentkit/fsx`、路径如何收敛在项目根之内、`ls`/`glob` 如何被封顶（**已实现**） |
-| `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` | **run 生命周期设计方案** —— 今天一轮为什么绑在一条 SSE 连接上，以及 run 怎么变成一行持久事实、配上租约与 fence，好让连接降级为订阅者（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
-| `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` | **Docker Sandbox Kit 打包设计方案** —— openheron 进程今天是什么样、一个把整个进程带进 microVM 的 v3 workload Kit、模型密钥如何留在宿主，以及必须实测的 SSE 这条路（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
-| `docs/mcp-design.md` / `docs/mcp-design_zh.md` | **MCP 接入设计方案** —— 今天的工具装配路径、MCP 客户端给它带来什么、`mcp__<server>__<tool>` 命名空间、策略表里的前缀匹配，以及 MCP 服务器在 Kit 里跑在哪（**这是一份提案：§1 讲代码现状，§2 往后的东西还不存在**） |
-| `docs/config-design.md` / `docs/config-design_zh.md` | **配置系统设计说明** —— 配置根与它的三级解析、各个分区与它们的文件规格、加载与优先级、热更新，以及依赖铁律（**正文讲的是代码现状**；`mcps/` 分区与前缀匹配是提案） |
 
-★ 无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。
+★ **只有中文**的那一组 —— 各一个版本，文件名不带后缀：
+
+| 文档 | 内容 |
+|---|---|
+| `docs/context-usage-design.md` | **上下文使用预估设计方案** —— 占用口径、数据流、后端与前端改动、压缩结果的持久化与有效历史（**占用仪表盘与压缩持久化已实现**） |
+| `docs/session-concurrency-design.md` | **会话并发设计方案** —— 跨客户端抢占的成因、「一个会话一轮」的规则与实现、以及前端怎么知道会话正忙（**准入闸门与 409 已实现**） |
+| `docs/fs-backend-design.md` | **文件系统后端设计方案** —— 为什么把 `eino-ext` 的 local 后端分叉成 `agentkit/fsx`、路径如何收敛在项目根之内、`ls`/`glob` 如何被封顶（**已实现**） |
+| `docs/run-lifecycle-design.md` | **run 生命周期设计方案** —— 一轮为什么曾绑在一条 SSE 连接上，以及 run 怎么变成一行持久事实、配上租约与 fence，好让连接降级为订阅者（**§3-§9 已实现**：账本、租约、fence、扫描与前端都在树上） |
+| `docs/sandbox-kit-design.md` | **Docker Sandbox Kit 打包设计方案** —— openheron 进程今天是什么样、一个把整个进程带进 microVM 的 v3 workload Kit、模型密钥如何留在宿主，以及当初必须实测的那条 SSE 路（**Kit 已建成并发布**；§4.2 还有三条没定） |
+| `docs/mcp-design.md` | **MCP 接入设计方案** —— 工具装配路径、MCP 客户端给它带来什么、`mcp__<server>__<tool>` 命名空间、工具表里的前缀匹配，以及 MCP 服务器在 Kit 里会跑在哪（**已实施**；§13 —— 非阻塞的 MCP 启动 —— 也已实施；§8 —— 沙箱 Kit 怎么打包一台 MCP 服务器 —— 仍是提案） |
+| `docs/config-design.md` | **配置系统设计说明** —— 配置根与它的三级解析、各个分区与它们的文件规格、加载与优先级、热更新，以及依赖铁律（**正文讲的是代码现状**；`mcps/` 分区与住在工具旁边的档位已实施） |
+| `docs/tool-surface-design.md` | **工具面设计** —— 一个 agent 拿到哪些工具（`tools:` / `mcps:` / `skills:`）、MCP 命名空间的三段、配置面收敛成一个核心，以及六个 `config_*` 工具（**§2-§5 已实现**） |
+
+★ 双语那一组里，无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。
 
 ### 上游仓库（不随本仓库分发）
 

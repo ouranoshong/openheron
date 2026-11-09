@@ -49,7 +49,7 @@ func (w wordEmbedder) Dimensions() int { return w.dim }
 func kbConfig(corpus, model string) *spec.Config {
 	c := &spec.Config{Models: map[string]*decl.Model{}}
 	c.KB = decl.KB{
-		Corpus:        corpus,
+		CorpusDir:     corpus,
 		Index:         "test",
 		Model:         model,
 		BatchSize:     10,
@@ -135,7 +135,7 @@ func TestKBToolsShareOneStoreAcrossProcesses(t *testing.T) {
 		t.Fatalf("indexer: %v", err)
 	}
 	if _, err := kb.Index(context.Background(), otherIx, kb.IndexOptions{
-		Corpus: corpus, Headers: c.KB.Splitter.Headers,
+		CorpusDir: corpus, Headers: c.KB.Splitter.Headers,
 	}, []string{"a.md"}); err != nil {
 		t.Fatalf("out-of-process index: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestKBToolsShareOneStoreAcrossProcesses(t *testing.T) {
 
 func TestBuildKBToolsOffWhenCorpusUnset(t *testing.T) {
 	c := &spec.Config{Models: map[string]*decl.Model{}}
-	c.KB.Corpus = ""
+	c.KB.CorpusDir = ""
 	tools, err := buildKBToolsWithEmbedder(context.Background(), c, wordEmbedder{dim: 8}, t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("buildKBToolsWithEmbedder: %v", err)
@@ -192,7 +192,7 @@ func TestBuildKBToolsDetectsModelChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := kb.Index(context.Background(), ix, kb.IndexOptions{
-		Corpus: corpus, Headers: c.KB.Splitter.Headers,
+		CorpusDir: corpus, Headers: c.KB.Splitter.Headers,
 	}, nil); err != nil {
 		t.Fatal(err)
 	}

@@ -279,7 +279,7 @@ install-hooks: ## Install the pre-commit hooks (gitleaks + gofmt)
 	pre-commit install
 
 .PHONY: lint
-lint: lint-go lint-web ## Go vet + gofmt + frontend oxlint + TypeScript type check
+lint: lint-go lint-web lint-docs ## Go vet + gofmt + frontend oxlint + TypeScript type check + the bilingual document pairs
 
 # ★ The two halves are separate targets so that a job that only needs one of
 #   them does not have to install the other's toolchain: the CI runs
@@ -298,6 +298,14 @@ lint-go: ## Go vet + gofmt (no frontend toolchain needed)
 lint-web: ## Frontend oxlint + TypeScript type check (no Go toolchain needed)
 	cd web && $(BUN) run lint
 	cd web && $(BUN) x tsc -b
+
+# ★ The bilingual pairs are checked by a script, not by a human's eye: the
+#   identifier sets have to be byte-identical, and the code blocks have to
+#   agree on every command and path. The Chinese version keeps its own
+#   comments — the repository's convention, and AGENTS.md does it too.
+.PHONY: lint-docs
+lint-docs: ## The bilingual document pairs: identifier sets, code blocks, line references
+	python3 scripts/check-doc-pairs.py
 
 # ── Test environment ───────────────────────────────────────────────────────
 #
@@ -342,6 +350,15 @@ smoke: ## Integration smoke tests (against the test instance :18099; override th
 	cd web && $(BUN) run smoke:interop
 	cd web && $(BUN) run smoke:no-undefined-url
 	cd web && $(BUN) run smoke:hitl
+
+# ★ Not part of `make smoke`, on purpose. `config_write` is absent from every
+#   shipped template — handing an agent the pen that edits its own
+#   configuration is a decision — so this target needs an agent that names it,
+#   and a default install does not have one. The script says so itself and
+#   exits 2 rather than pretending to be flaky.
+.PHONY: smoke-config
+smoke-config: ## config_write's approval round trip (needs an agent whose tools: names config_write)
+	cd web && $(BUN) run smoke:config
 
 .PHONY: test-e2e
 test-e2e: ## Browser E2E (brings its own fake backend, uses :15173/:18180, never takes the development ports)

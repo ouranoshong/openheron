@@ -14,8 +14,8 @@ import (
 )
 
 func TestFirstGenerationAndLaterOnesDeriveTheSameTable(t *testing.T) {
-	p := NewPolicy([]string{"write_file"}, []string{"execute"})
-	cfg := configFromSpecs("test/model", []string{"disable_me"}, toConfigPolicy(p), nil)
+	p := NewPolicy([]string{"write_file"})
+	cfg := configFromSpecs("test/model", []string{"disable_me"}, allowOf(p), nil)
 	b := newTestBuilderWithConfig(t, cfg)
 
 	first := mustSnapshot(t, b)
@@ -32,17 +32,17 @@ func TestFirstGenerationAndLaterOnesDeriveTheSameTable(t *testing.T) {
 func TestMaxDepthDefaultsInOnePlace(t *testing.T) {
 	cfg := minimalTestConfig()
 	cfg.Server.Agent.MaxDepth = 0
-	snap, err := newSnapshot(1, cfg, "", "", nil, nil)
+	snap, err := newSnapshot(1, cfg, nil, "", "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snap.agentSpec.maxDepth != decl.DefaultMaxDepth {
-		t.Fatalf("maxDepth = %d, want %d", snap.agentSpec.maxDepth, decl.DefaultMaxDepth)
+	if snap.agentSpec.maxDepth != spec.DefaultMaxDepth {
+		t.Fatalf("maxDepth = %d, want %d", snap.agentSpec.maxDepth, spec.DefaultMaxDepth)
 	}
 
 	cfg2 := minimalTestConfig()
 	cfg2.Server.Agent.MaxDepth = 3
-	snap2, err := newSnapshot(1, cfg2, "", "", nil, nil)
+	snap2, err := newSnapshot(1, cfg2, nil, "", "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestMaxDepthDefaultsInOnePlace(t *testing.T) {
 
 func TestIntrospectionWorksBeforeFirstBuild(t *testing.T) {
 	cfg := configFromSpecs("test/model", nil,
-		toConfigPolicy(NewPolicy(nil, nil)), nil)
+		allowOf(NewPolicy(nil)), nil)
 	b := newTestBuilderWithConfig(t, cfg)
 	if b.snap != nil {
 		t.Fatal("NewBuilder must not pre-derive a snapshot")
@@ -120,7 +120,7 @@ func TestModelIsResolvedAtBuildTime(t *testing.T) {
 }
 
 func TestSwitchedRootUsesItsOwnModel(t *testing.T) {
-	cfg := configFromSpecs("root/model", nil, decl.Policy{}, []decl.SubAgentSpec{
+	cfg := configFromSpecs("root/model", nil, nil, []decl.SubAgentSpec{
 		{ID: "worker", ModelRef: "worker/model"},
 	})
 	b := newTestBuilderWithConfig(t, cfg)
@@ -161,7 +161,7 @@ func TestSwitchedRootUsesItsOwnModel(t *testing.T) {
 }
 
 func TestRootOnlyPhasesStayAtRoot(t *testing.T) {
-	cfg := configFromSpecs("root/model", nil, decl.Policy{}, []decl.SubAgentSpec{
+	cfg := configFromSpecs("root/model", nil, nil, []decl.SubAgentSpec{
 		{ID: "worker", ModelRef: "worker/model"},
 	})
 	b := newTestBuilderWithConfig(t, cfg)
@@ -177,7 +177,7 @@ func TestRootOnlyPhasesStayAtRoot(t *testing.T) {
 }
 
 func TestSubAgentWithoutModelFallsBackToTheBase(t *testing.T) {
-	cfg := configFromSpecs("root/model", nil, decl.Policy{}, []decl.SubAgentSpec{
+	cfg := configFromSpecs("root/model", nil, nil, []decl.SubAgentSpec{
 		{ID: "worker"},
 	})
 	b := newTestBuilderWithConfig(t, cfg)

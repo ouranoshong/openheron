@@ -24,8 +24,7 @@ func initCmd(args []string, stdout io.Writer) error {
 	provider := fs.String("provider", "", "provider template to use (default: deepseek)")
 	baseURL := fs.String("base-url", "", "endpoint for a new provider file")
 	env := fs.String("env", "", "environment variable holding the api key")
-	noPolicy := fs.Bool("no-policy", false, "do not write the policy/ section (permissions.yaml and limits.yaml)")
-	tools := fs.Bool("tools", false, "also write the tool configurations under tools/ (the file's presence enables the tool)")
+	tools := fs.Bool("tools", false, "also write the tool configurations under tools/ (a provider without a configuration mounts nothing)")
 	force := fs.Bool("force", false, "overwrite files that already exist")
 	dryRun := fs.Bool("dry-run", false, "report what would be written, write nothing")
 	asJSON := fs.Bool("json", false, "machine-readable output")
@@ -72,7 +71,6 @@ func initCmd(args []string, stdout io.Writer) error {
 		Provider: *provider,
 		BaseURL:  *baseURL,
 		Env:      *env,
-		NoPolicy: *noPolicy,
 		Tools:    *tools,
 		Force:    *force,
 	})
@@ -140,7 +138,7 @@ func reportInit(plan *initcfg.Plan, root string, dryRun, asJSON bool, stdout io.
 
 func printInitUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "usage: openheron init [--dir <path>] [--model <provider>/<model>] [--provider <id>]")
-	fmt.Fprintln(stdout, "                [--base-url <url>] [--env <NAME>] [--no-policy] [--tools]")
+	fmt.Fprintln(stdout, "                [--base-url <url>] [--env <NAME>] [--tools]")
 	fmt.Fprintln(stdout, "                [--force] [--dry-run] [--json]")
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Creates a minimal, runnable project-level configuration in <dir>/.openheron.")
@@ -148,7 +146,7 @@ func printInitUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "exist at the user level are inherited, never replaced.")
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Written: agents/main.md, agents/task.md, llm/<provider>.yaml,")
-	fmt.Fprintln(stdout, "        policy/permissions.yaml, policy/limits.yaml, server/config.yaml.")
-	fmt.Fprintln(stdout, "--tools adds the tool configurations under tools/ — a file's presence is")
-	fmt.Fprintln(stdout, "the switch that turns a tool on, so that is opt-in.")
+	fmt.Fprintln(stdout, "        mcps/example.yaml, server/config.yaml.")
+	fmt.Fprintln(stdout, "--tools adds the tool configurations under tools/ — a provider without")
+	fmt.Fprintln(stdout, "a configuration mounts nothing, so that is opt-in.")
 }

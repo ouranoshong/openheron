@@ -1,15 +1,29 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* shadcn/ui semantic colors are driven by CSS variables; assistant-ui's elements read the same set of tokens */
+/* shadcn/ui semantic colors are driven by CSS variables; every element in the
+   app reads the same set of tokens */
 @custom-variant dark (&:is(.dark *));
 
 :root {
   --radius: 0.625rem;
 
-  /* assistant-ui's thread/composer corner radius gets a variable of its own:
-     changing it only affects the chat surface, not the global radius */
-  --radius-thread: 1.5rem;
+  /* ★ The chat column is **one token**, so "wider" is one edit and not six.
+     Six places used to carry `max-w-3xl` each, and a change to the width had
+     to be made six times — which is how they drift apart.
+
+     64rem is what a 1280-wide screen can give: the sidebar takes 256, the
+     gutter takes the rest, and a column wider than that starts to push the
+     content past the edge of the window.
+
+     The prose column is narrower on purpose. A paragraph of about 45
+     characters is comfortable to read; 60 is not. So the **blocks** — tables,
+     code, tool cards — take the whole column, and only the prose is held
+     back. Widening the conversation is about seeing a wide table whole, not
+     about making every sentence a long line. */
+  --chat-column: 64rem;
+  --chat-gutter: clamp(1rem, 2.5vw, 2rem);
+  --prose-column: 46rem;
 
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -17,19 +31,25 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  /* ★ The palette was pure grey — every token had a chroma of zero, so the
+     app looked like a document and nothing on the screen said what it was.
+     The brand color is a low-chroma blue: enough to tell the primary action
+     from the rest, not enough to turn the interface into a poster. */
+  --primary: oklch(0.26 0.025 255);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
+  --secondary-foreground: oklch(0.26 0.025 255);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --accent: oklch(0.955 0.012 255);
+  --accent-foreground: oklch(0.26 0.025 255);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  /* ★ The focus ring was grey, so a keyboard user could not see where the
+     focus was. It is the one color that has to be unmistakable. */
+  --ring: oklch(0.62 0.11 255);
 
   /* openheron's extended semantic colors — carrying over the original A2UI visual language:
      amber = awaiting approval, green = tool success. See docs/frontend-design.md §10 */
@@ -37,6 +57,10 @@
   --warning-foreground: oklch(0.25 0.08 60);
   --success: oklch(0.72 0.15 150);
   --success-foreground: oklch(0.24 0.06 150);
+  /* ★ "running" had a hard-coded `sky-500` in two places and `amber-500` in
+     a third: three colors that the theme could not change. */
+  --info: oklch(0.62 0.14 235);
+  --info-foreground: oklch(0.24 0.06 235);
 
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
@@ -52,24 +76,26 @@
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
+  --primary: oklch(0.92 0.02 255);
+  --primary-foreground: oklch(0.24 0.025 255);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
   --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
+  --accent: oklch(0.28 0.02 255);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --ring: oklch(0.66 0.12 255);
 
   --warning: oklch(0.82 0.14 70);
   --warning-foreground: oklch(0.28 0.08 60);
   --success: oklch(0.75 0.13 150);
   --success-foreground: oklch(0.26 0.06 150);
+  --info: oklch(0.72 0.13 235);
+  --info-foreground: oklch(0.24 0.06 235);
 
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
@@ -114,6 +140,8 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
 
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);

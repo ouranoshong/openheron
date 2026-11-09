@@ -110,7 +110,7 @@ func (b *Builder) buildNode(ctx context.Context, snap *snapshot, n node) (
 		cfg.Handlers = append(handlers, toolChain(boundary, snap.agentSpec.maxDepth)...)
 		hubs.agent.bindRoot(cfg)
 	} else if sp != nil {
-		cfg.Handlers = subHandlers(snap.agentSpec.policy, *sp, snap.agentSpec.maxDepth)
+		cfg.Handlers = subHandlers(snap.agentSpec.policy, *sp, snap.agentSpec.maxDepth, snap.agentSpec.mcpServers)
 	}
 
 	// The compaction middleware goes on every agent that declares a
@@ -187,13 +187,12 @@ func (b *Builder) skillHandlers(ctx context.Context, backend fsapi.Backend, hubs
 
 // scopeOf reads the skill allow-list of an agent.
 //
-// ★ A nil spec means no restriction: an agent that says nothing about skills
+// ★ The default is none: an agent that says nothing about skills gets no
 //
-//	gets every skill in the directory, which is what it got before the field
-//	existed.
+//	skill, the same rule as every other list on an agent.
 func scopeOf(sp *decl.SubAgentSpec) skillScope {
 	if sp == nil {
-		return skillScope{all: true}
+		return skillScope{names: map[string]bool{}}
 	}
 	return skillScopeOf(sp.Skills)
 }

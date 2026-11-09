@@ -1,5 +1,6 @@
 
 import { XIcon } from "lucide-react"
+import { useSyncExternalStore } from "react"
 import { useShallow } from "zustand/react/shallow"
 
 import { Button } from "@/components/ui/button"
@@ -17,6 +18,7 @@ import { SettingsFooter } from "@/components/settings/footer"
 import { ConflictDialog } from "@/components/settings/conflict-dialog"
 import { useSettings } from "@/lib/settings-store"
 import { selectCategories, selectIsEditable } from "@/lib/settings-store"
+import { isDark, subscribeTheme } from "@/lib/theme"
 
 export function SettingsDialog() {
   const open = useSettings((s) => s.open)
@@ -30,7 +32,10 @@ export function SettingsDialog() {
   const categories = useSettings(useShallow(selectCategories))
   const isEditable = useSettings(selectIsEditable)
 
-  const dark = document.documentElement.classList.contains("dark")
+  // ★ The editor's colors follow the theme, so this has to be a **live**
+  //   read: a toggle that happened while the dialog was open would
+  //   otherwise leave the editor on the old palette.
+  const dark = useSyncExternalStore(subscribeTheme, isDark, isDark)
 
   return (
     <>

@@ -20,7 +20,7 @@ import (
 func skillChain(ctx context.Context, backend fsapi.Backend, hubs *skillHubs, scope skillScope) (
 	adk.TypedChatModelAgentMiddleware[*schema.Message], error) {
 
-	dir, ok := resolveSkillsDir()
+	dir, ok := ResolveSkillsDir()
 	if !ok {
 		return nil, nil
 	}
@@ -45,26 +45,19 @@ func skillChain(ctx context.Context, backend fsapi.Backend, hubs *skillHubs, sco
 
 // skillScope is one agent's allow-list of skills.
 //
-// ★ A nil scope means "every skill in the skills directory" — that is what an
+// ★ The default is **none**, like every other list on an agent: a skill the
 //
-//	agent got before the `skills` field existed. An empty scope means none.
-//	The distinction is the whole point of the field, so it is carried as a
-//	pointer all the way from the frontmatter.
+//	agent does not name is not its skill. There is no "all" case, so there
+//	is no pointer either — an absent list and an empty list mean the same
+//	thing, which is what lets the field be a plain slice.
 type skillScope struct {
-	all   bool
 	names map[string]bool
 }
 
 // skillScopeOf reads the allow-list of an agent's frontmatter.
-//
-// A nil list is "not declared" and means no restriction; an empty list is
-// "declared, and empty" and means the agent gets no skill at all.
-func skillScopeOf(list *[]string) skillScope {
-	if list == nil {
-		return skillScope{all: true}
-	}
+func skillScopeOf(list []string) skillScope {
 	s := skillScope{names: map[string]bool{}}
-	for _, n := range *list {
+	for _, n := range list {
 		n = strings.TrimSpace(n)
 		if n != "" {
 			s.names[n] = true
@@ -94,9 +87,6 @@ func newScopedSkillBackend(ctx context.Context, inner skill.Backend, scope skill
 	*scopedSkillBackend, error) {
 
 	b := &scopedSkillBackend{inner: inner, scope: scope}
-	if scope.all {
-		return b, nil
-	}
 	matters, err := inner.List(ctx)
 	if err != nil {
 		return nil, err
@@ -148,9 +138,6 @@ func (b *scopedSkillBackend) missingSkills() []string {
 //	a skill by the folder they see in the directory tree, the model names it
 //	by the frontmatter.
 func (b *scopedSkillBackend) allows(name string) bool {
-	if b.scope.all {
-		return true
-	}
 	if b.scope.names[name] {
 		return true
 	}
@@ -161,9 +148,6 @@ func (b *scopedSkillBackend) List(ctx context.Context) ([]skill.FrontMatter, err
 	matters, err := b.inner.List(ctx)
 	if err != nil {
 		return nil, err
-	}
-	if b.scope.all {
-		return matters, nil
 	}
 	out := make([]skill.FrontMatter, 0, len(matters))
 	for _, m := range matters {
@@ -185,7 +169,19 @@ func (b *scopedSkillBackend) Get(ctx context.Context, name string) (skill.Skill,
 	return loaded, nil
 }
 
-func resolveSkillsDir() (string, bool) {
+// ResolveSkillsDir answers where the runtime reads skills from.
+//
+// ★ Exported because the configuration editor has to know: it writes
+//
+//	`<config root>/skills/`, and that is only the directory in force when
+//	this probe happens to land there. `$EINO_EXT_SKILLS_DIR` and the upward
+//	probe can both point elsewhere, and an editor that did not know would
+//	save a skill nobody loads.
+//
+// ★ The rule lives here and nowhere else: a second copy of it in the config
+//
+//	layer would be a second answer to "which skills are loaded".
+func ResolveSkillsDir() (string, bool) {
 	dir := strings.TrimSpace(os.Getenv("EINO_EXT_SKILLS_DIR"))
 	if dir == "" {
 		if found, ok := probeProjectSkills(); ok {
@@ -236,7 +232,7 @@ type SkillInfo struct {
 }
 
 func Skills(ctx context.Context) []SkillInfo {
-	dir, ok := resolveSkillsDir()
+	dir, ok := ResolveSkillsDir()
 	if !ok {
 		return nil
 	}

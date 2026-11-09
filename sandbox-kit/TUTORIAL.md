@@ -368,7 +368,7 @@ workspace — the startup hook does it, before the server comes up:
   agents/main.md      the entry agent
   agents/task.md      the executor agent
   llm/deepseek.yaml   the model profile
-  policy/             permissions and limits
+  mcps/example.yaml   an MCP server (a sample — the command is a placeholder)
   server/             the server's own settings
   state/              the sessions
 ```
@@ -421,19 +421,28 @@ models:
 understands the request, splits it, delegates and verifies; the executor one
 does the work. They are ordinary Markdown with instructions in them.
 
-★ **`policy/permissions.yaml`** decides which tools ask first:
+★ **Which tools ask first** is decided by the file that provides the tool —
+there is no global list. A tool nobody names **asks**:
 
 ```yaml
-# ★ There are only two columns, ask and deny — **any tool not named is allowed**.
-#   Name the tools that really have consequences here: ask (a nod every time) or
-#   deny (unavailable).
-ask:   [write_file, edit_file, execute, kb_index]
-deny:  []
-
-# ★ The outer deny takes precedence over each agent's own disabled_tools — that
-#   is the one guarantee a sub-agent cannot relax. To narrow down **one**
-#   agent, use its own disabled_tools.
+# tools/http.yaml
+methods: [get]
+allows: [request_get]
 ```
+
+★ The code carries a **default** list — the filesystem readers, the delegation
+tools and the skill reader run without a nod, and a file only ever adds to it.
+Everything else asks: `write_file`, `edit_file`, `execute`. ★ Those three have
+a file too, and it is where you widen them for an agent you leave alone:
+
+```yaml
+# tools/filesystem.yaml
+allows: [write_file, edit_file, execute]
+```
+
+★ **"Not exposed" is said in exactly two places**: a tool's own `allows:` list
+and an agent's own `tools` list. To narrow down **one** agent, use its
+`tools` list — and to widen it, name the tools there too.
 
 ★ **`server/config.yaml`** is the process's own settings — the listen address,
 the data directory, the retry count, the agent depth cap. It is **not**
@@ -577,8 +586,9 @@ because the workspace is a directory on your host.
 
 ★ The project carries **no** `.openheron/`: `openheron init` writes the whole
 configuration on the first start. A project that *does* ship its own agents or
-its own policy keeps them — `init` writes what is missing and keeps what is
-there, so the files you ship win and the ones you leave out arrive.
+its own tool configurations keeps them — `init` writes what is missing and
+keeps what is there, so the files you ship win and the ones you leave out
+arrive.
 
 ---
 

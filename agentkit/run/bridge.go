@@ -48,11 +48,21 @@ func (st *sessionState) markStarted(t time.Time) {
 // markTurnDone releases the turn pointer once its consumer has reported.
 // Only the matching handle is cleared, so a turn superseded in the meantime
 // is not disturbed.
+//
+// ★ It also releases whoever waits on the handle. The pointer is what the
+// admission gate reads: the moment it is nil the session is free, however
+// long its loop lives on waiting for the next item. Clearing it and
+// releasing the waiter are one step on purpose — an HTTP response that ends
+// in between hands the client a session it cannot use, and the client is
+// told "a turn is already running" about the turn it just finished.
 func (st *sessionState) markTurnDone(done *Turn) {
 	st.mu.Lock()
-	defer st.mu.Unlock()
 	if st.turn == done {
 		st.turn = nil
+	}
+	st.mu.Unlock()
+	if done != nil {
+		done.markReleased()
 	}
 }
 
@@ -264,6 +274,7 @@ func newTurnHandle(sessionID string, kind contract.TurnKind) *Turn {
 		Kind:      kind,
 		ready:     make(chan struct{}),
 		archived:  make(chan struct{}),
+		released:  make(chan struct{}),
 		abort:     make(chan struct{}),
 		publisher: newPublisher(),
 	}

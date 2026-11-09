@@ -1,6 +1,7 @@
+import { useMemo } from "react"
 
 import { useSettings, selectCanSave, selectServerIssues } from "@/lib/settings-store"
-import type { Issue } from "@/lib/settings-validate"
+import { groupIssues, issueLabel, type Issue } from "@/lib/settings-validate"
 import { Button } from "@/components/ui/button"
 
 export function SettingsFooter() {
@@ -15,6 +16,13 @@ export function SettingsFooter() {
   const dirty = useSettings((s) => s.draft !== s.saved)
   const selected = useSettings((s) => s.selected)
   const exists = useSettings((s) => s.exists)
+  const select = useSettings((s) => s.select)
+  const items = useSettings((s) => s.manifest?.items)
+
+  // ★ The set is built here, not in a selector: a selector that returns a
+  //   fresh Set on every call reports "changed" every time, and the store
+  //   would re-render forever.
+  const known = useMemo(() => new Set((items ?? []).map((i) => i.path)), [items])
 
   const busy = saveState === "saving" || saveState === "validating"
 
@@ -28,6 +36,9 @@ export function SettingsFooter() {
           issues={issues}
           serverIssues={serverIssues}
           dirty={dirty}
+          selected={selected}
+          known={known}
+          onOpen={(path) => void select(path)}
         />
       </div>
 
@@ -61,6 +72,9 @@ function Status({
   issues,
   serverIssues,
   dirty,
+  selected,
+  known,
+  onOpen,
 }: {
   saveState: string
   applied: boolean
@@ -68,6 +82,9 @@ function Status({
   issues: Issue[]
   serverIssues: string[]
   dirty: boolean
+  selected?: string
+  known: ReadonlySet<string>
+  onOpen: (path: string) => void
 }) {
   if (saveState === "validating") return <span className="text-muted-foreground">Validating…</span>
   if (saveState === "saving") return <span className="text-muted-foreground">Saving…</span>
@@ -81,39 +98,110 @@ function Status({
       </ul>
     )
   }
-  if (issues.length > 0) {
-    const errors = issues.filter((i) => (i.severity ?? "error") === "error")
-    const hints = issues.filter((i) => i.severity === "hint")
+
+  // ★ Three places an issue can belong to, and they are shown apart. The
+  //   file being edited is the user's file; a problem in another file is
+  //   that file's, and saying so under its own name is the difference
+  //   between a message the user can act on and one they cannot.
+  const groups = groupIssues(issues, selected)
+  const errors = [
+    ...groups.own.filter(isError),
+    ...groups.tree.filter(isError),
+    ...groups.elsewhere.filter(isError),
+  ]
+  const hints = [...groups.own.filter(isHint), ...groups.elsewhere.filter(isHint)]
+
+  // ★ Three kinds of line, and the order is the order of the questions the
+  //   user is asking: what did the save I just pressed do, what is wrong with
+  //   this draft, and what is the tree short of. A **hint** is the last one
+  //   and it hides nothing — it says "the tree is short something", which is
+  //   true whatever else is on screen, and the file can save cleanly while it
+  //   stands there.
+  const state = saveStateLine(saveState, saveError, applied, dirty)
+  if (state || errors.length > 0 || hints.length > 0) {
     return (
       <ul className="flex flex-col gap-0.5">
+        {state && <li className={state.className}>{state.text}</li>}
         {errors.map((i, idx) => (
           <li key={`e${idx}`} className="text-destructive">
-            line {i.line}: {i.message}
+            <IssueLine issue={i} selected={selected} known={known} onOpen={onOpen} />
           </li>
         ))}
         {hints.map((i, idx) => (
           <li key={`h${idx}`} className="text-muted-foreground">
-            line {i.line}: {i.message}
+            <IssueLine issue={i} selected={selected} known={known} onOpen={onOpen} />
           </li>
         ))}
       </ul>
     )
   }
+  return <span className="text-muted-foreground">Valid</span>
+}
+
+// ★ The line that says what the save did.
+//
+// ★ It is its own line because a **hint** must not hide it. The tree can be
+//   short an agent and the file can still save cleanly — and "Saved" is the
+//   answer to the question the user just asked by pressing the button.
+function saveStateLine(
+  saveState: string,
+  saveError: string | undefined,
+  applied: boolean,
+  dirty: boolean,
+): { text: string; className: string } | null {
   if (saveState === "error" && saveError) {
-    return <span className="text-destructive whitespace-pre-line">{saveError}</span>
+    return { text: saveError, className: "text-destructive whitespace-pre-line" }
   }
   if (saveState === "conflict") {
-    return <span className="text-warning">This file changed on disk — reload or overwrite.</span>
+    return { text: "This file changed on disk — reload or overwrite.", className: "text-warning" }
   }
   if (saveState === "saved") {
-    return (
-      <span className={applied ? "text-muted-foreground" : "text-warning"}>
-        {applied ? "Saved · applied" : "Saved · restart openheron to apply"}
-      </span>
-    )
+    return {
+      text: applied ? "Saved · applied" : "Saved · restart openheron to apply",
+      className: applied ? "text-muted-foreground" : "text-warning",
+    }
   }
-  if (dirty) return <span className="text-muted-foreground">Unsaved changes</span>
-  return <span className="text-muted-foreground">Valid</span>
+  if (dirty) return { text: "Unsaved changes", className: "text-muted-foreground" }
+  return null
+}
+
+// ★ A problem in another file is a link: the file it is in is one click
+//   away, and the click is what turns "somebody else's file is broken"
+//   into something the user can go and fix.
+function IssueLine({
+  issue,
+  selected,
+  known,
+  onOpen,
+}: {
+  issue: Issue
+  selected?: string
+  known: ReadonlySet<string>
+  onOpen: (path: string) => void
+}) {
+  const label = issueLabel(issue, selected)
+  const path = issue.path
+  if (!path || path === selected || !known.has(path)) {
+    return <>{label}</>
+  }
+  return (
+    <button
+      type="button"
+      className="hover:underline text-left"
+      onClick={() => onOpen(path)}
+      title={`Open ${path}`}
+    >
+      {label}
+    </button>
+  )
+}
+
+function isError(i: Issue): boolean {
+  return (i.severity ?? "error") === "error"
+}
+
+function isHint(i: Issue): boolean {
+  return i.severity === "hint"
 }
 
 import { useShallow } from "zustand/react/shallow"

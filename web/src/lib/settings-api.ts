@@ -1,5 +1,6 @@
 
 import { ApiError } from "@/lib/api"
+import type { Issue as SettingsIssue } from "@/lib/settings-validate"
 
 export interface SettingsCategory {
   id: string
@@ -43,7 +44,9 @@ export interface SettingsWriteResult {
 
 export interface SettingsValidateResult {
   ok: boolean
-  errors?: string[]
+  // ★ `issues`, not a list of strings: the server says which line, and a
+  //   client that only gets sentences cannot put a marker beside it.
+  issues?: SettingsIssue[]
   configVersion: string
 }
 

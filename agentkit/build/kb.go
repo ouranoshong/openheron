@@ -12,7 +12,7 @@ import (
 )
 
 func buildKBTools(ctx context.Context, c *spec.Config, projectRoot, dataDir string) ([]tool.BaseTool, error) {
-	if c == nil || c.KB.Corpus == "" {
+	if c == nil || c.KB.CorpusDir == "" {
 		return nil, nil
 	}
 	prov, mdl, err := Resolve(c, c.KB.Model)
@@ -29,7 +29,7 @@ func buildKBTools(ctx context.Context, c *spec.Config, projectRoot, dataDir stri
 func buildKBToolsWithEmbedder(ctx context.Context, c *spec.Config, emb embedding.Embedder,
 	projectRoot, dataDir string) ([]tool.BaseTool, error) {
 
-	if c == nil || c.KB.Corpus == "" {
+	if c == nil || c.KB.CorpusDir == "" {
 		return nil, nil
 	}
 
@@ -37,7 +37,7 @@ func buildKBToolsWithEmbedder(ctx context.Context, c *spec.Config, emb embedding
 	if indexName == "" {
 		indexName = "default"
 	}
-	corpus := filepath.Join(projectRoot, c.KB.Corpus)
+	corpus := filepath.Join(projectRoot, c.KB.CorpusDir)
 
 	store, err := kb.NewStore(filepath.Join(dataDir, spec.DirKBIndex, indexName))
 	if err != nil {
@@ -82,7 +82,7 @@ func buildKBToolsWithEmbedder(ctx context.Context, c *spec.Config, emb embedding
 	index, err := kb.NewIndexTool(kb.IndexToolConfig{
 		Store:       store,
 		Indexer:     ix,
-		Corpus:      corpus,
+		CorpusDir:   corpus,
 		ProjectRoot: projectRoot,
 		Headers:     c.KB.Splitter.Headers,
 	})

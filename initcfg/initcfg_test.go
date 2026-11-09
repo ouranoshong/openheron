@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/agentkit/templates"
 )
 
 const userProviderYAML = `type: openai_compat
@@ -122,11 +123,11 @@ func TestEveryProviderTemplateRenders(t *testing.T) {
 	for _, provider := range []string{"openai", "deepseek"} {
 		t.Run(provider, func(t *testing.T) {
 			e := newEnv(t)
-			raw, err := templates.ReadFile(templatesRoot + "/llm/" + provider + ".yaml")
+			raw, err := templates.File("llm/" + provider + ".yaml")
 			if err != nil {
 				t.Fatalf("read template: %v", err)
 			}
-			model := templateDefault(string(raw), "model")
+			model := templates.Default(string(raw), "model")
 			if model == "" {
 				t.Fatalf("the %s template has no default model", provider)
 			}
@@ -149,7 +150,7 @@ func TestInitInAnEmptyDirProducesARunnableConfig(t *testing.T) {
 	e := newEnv(t)
 	p := e.plan(Options{})
 
-	want := []string{"agents/main.md", "agents/task.md", "llm/deepseek.yaml", "policy/permissions.yaml"}
+	want := []string{"agents/main.md", "agents/task.md", "llm/deepseek.yaml", "mcps/example.yaml"}
 	got := rels(p)
 	for _, w := range want {
 		if !hasRel(got, w) {
@@ -199,7 +200,7 @@ func TestTheTwoFactoryAgentsAreWrittenAsOneSet(t *testing.T) {
 func TestTheFactoryAgentNamesTheSkillKey(t *testing.T) {
 	// ★ The factory file is where a user learns which keys exist: a field
 	//   nobody can find is a field nobody uses.
-	raw, err := templates.ReadFile(templatesRoot + "/agents/main.md")
+	raw, err := templates.File("agents/main.md")
 	if err != nil {
 		t.Fatalf("read the factory agent: %v", err)
 	}
@@ -266,20 +267,43 @@ func TestAnExistingProviderIsUntouched(t *testing.T) {
 	}
 }
 
-func TestAnExistingPolicyIsNotOverwritten(t *testing.T) {
+// ★ The policy/ partition is gone: the tiers live in the files that
+//
+//	provide the tools, and the caps live in server/config.yaml. A file
+//	that says what the code already does is noise.
+func TestInitWritesNoPolicyFile(t *testing.T) {
 	e := newEnv(t)
-	e.write("policy/permissions.yaml", userPolicyYAML)
-
 	p := e.plan(Options{})
-	if hasRel(rels(p), "policy/permissions.yaml") {
-		t.Fatalf("the existing policy/permissions.yaml must not be rewritten: %v", rels(p))
+	for _, rel := range []string{"policy/permissions.yaml", "policy/limits.yaml"} {
+		if hasRel(rels(p), rel) {
+			t.Fatalf("%s must not be written: %v", rel, rels(p))
+		}
+	}
+	if err := p.Apply(e.svc()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(e.root, "policy")); err == nil {
+		t.Fatal("policy/ must not be created")
 	}
 }
 
-func TestAnExistingPolicyKeepsItsOwnAskList(t *testing.T) {
+// ★ The exceptions live in the file that provides the tool, and init
+//
+//	leaves an existing one alone.
+func TestAnExistingToolsFileIsNotOverwritten(t *testing.T) {
 	e := newEnv(t)
-	e.write("policy/permissions.yaml", userPolicyYAML)
-	p := e.plan(Options{})
+	e.write("tools/http.yaml", "methods: [get]\nallows: [request_get]\n")
+
+	p := e.plan(Options{Tools: true})
+	if hasRel(rels(p), "tools/http.yaml") {
+		t.Fatalf("the existing tools/http.yaml must not be rewritten: %v", rels(p))
+	}
+}
+
+func TestTheExistingExceptionsSurvive(t *testing.T) {
+	e := newEnv(t)
+	e.write("tools/http.yaml", "methods: [get]\nallows: [request_get]\n")
+	p := e.plan(Options{Tools: true})
 	if err := p.Apply(e.svc()); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -287,8 +311,14 @@ func TestAnExistingPolicyKeepsItsOwnAskList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadUnchecked: %v", err)
 	}
-	if len(cfg.Policy.Ask) != 1 || cfg.Policy.Ask[0] != "execute" {
-		t.Fatalf("the existing ask list must survive: %v", cfg.Policy.Ask)
+	found := false
+	for _, n := range cfg.AllowedTools() {
+		if n == "request_get" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the existing exceptions must survive: %v", cfg.AllowedTools())
 	}
 }
 
@@ -296,9 +326,11 @@ func TestNothingIsWrittenWhenEverythingIsAlreadyThere(t *testing.T) {
 	e := newEnv(t)
 	e.write("llm/openai.yaml", userProviderYAML)
 	e.write("agents/main.md", userAgentMD)
-	e.write("policy/permissions.yaml", userPolicyYAML)
-	e.write("policy/limits.yaml", "agent:\n  max_depth: 0\n")
 	e.write("server/config.yaml", "listen_addr: \":8080\"\n")
+	// ★ The MCP example is a loadable file: a file under mcps/ defines a
+	//   server, so an example that cannot be parsed is a configuration
+	//   that does not load.
+	e.write("mcps/example.yaml", spec.Templates(spec.DirMCP)["mcps/example.yaml"])
 
 	p := e.plan(Options{})
 	if len(p.Files) != 0 {
@@ -322,8 +354,8 @@ func TestOnlyTheMissingFilesAreWritten(t *testing.T) {
 	if hasRel(got, "agents/main.md") {
 		t.Fatalf("the existing agent must not be rewritten: %v", got)
 	}
-	if !hasRel(got, "policy/permissions.yaml") {
-		t.Fatalf("the missing policy must be written: %v", got)
+	if !hasRel(got, "mcps/example.yaml") {
+		t.Fatalf("the missing MCP example must be written: %v", got)
 	}
 	if hasRel(got, "llm/openai.yaml") {
 		t.Fatalf("the existing provider must be reused, not copied: %v", got)
@@ -336,7 +368,11 @@ func TestARejectedMergeWritesNothing(t *testing.T) {
 
 	svc := e.svc()
 	_, _, err := svc.WriteMany([]spec.File{
-		{Rel: "agents/broken.md", Content: []byte("---\nmodel: openai/nope\n---\n\n坏的。\n")},
+		// ★ A file that does not parse — a **hard** failure, not a
+		//   degradation. An agent whose model is not declared is left out
+		//   of the tree and the tree still loads; a file that does not
+		//   parse takes the tree down, and that is what is refused here.
+		{Rel: "agents/broken.md", Content: []byte("---\nnot_a_key: 1\n---\n\n坏的。\n")},
 	}, "")
 	if err == nil {
 		t.Fatal("the batch write must be rejected")
@@ -570,43 +606,6 @@ func TestTheServerConfigurationIsWrittenEvenThoughTheEditorMayNotWriteIt(t *test
 	}
 }
 
-// ── the limits ──────────────────────────────────────────────────────────────
-
-func TestTheLimitsAreWritten(t *testing.T) {
-	e := newEnv(t)
-	p := e.plan(Options{})
-	if !hasRel(rels(p), "policy/limits.yaml") {
-		t.Fatalf("the limits must be written: %v", rels(p))
-	}
-	if err := p.Apply(e.svc()); err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-	got, err := os.ReadFile(filepath.Join(e.root, "policy", "limits.yaml"))
-	if err != nil {
-		t.Fatalf("read the limits: %v", err)
-	}
-	// ★ One source of truth: the config editor scaffolds the same file.
-	if string(got) != spec.LimitsTemplate() {
-		t.Fatalf("the written limits differ from the canonical template:\n%s", got)
-	}
-}
-
-func TestNoPolicySkipsTheWholePolicySection(t *testing.T) {
-	e := newEnv(t)
-	p := e.plan(Options{NoPolicy: true})
-	for _, rel := range []string{"policy/permissions.yaml", "policy/limits.yaml"} {
-		if hasRel(rels(p), rel) {
-			t.Fatalf("%s must be skipped: %v", rel, rels(p))
-		}
-	}
-	if err := p.Apply(e.svc()); err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(e.root, "policy")); err == nil {
-		t.Fatal("policy/ must not be created")
-	}
-}
-
 // ── the tools ───────────────────────────────────────────────────────────────
 
 func TestTheToolsAreNotWrittenByDefault(t *testing.T) {
@@ -649,7 +648,13 @@ func TestTheToolsAreWrittenOnRequest(t *testing.T) {
 // which is written outside the merge.
 func TestARejectedMergeLeavesNoServerFile(t *testing.T) {
 	e := newEnv(t)
-	e.write("agents/main.md", "---\nmodel: openai/nope\n---\n\n坏的。\n")
+	// ★ The files parse, but the tree does not hold together: two agents
+	//   delegate to each other. (An agent whose model is not declared is a
+	//   different thing — that one is left out of the tree, and the tree
+	//   still loads.)
+	e.write("agents/main.md", "---\nmodel: openai/gpt-4o\nsubagents: [a]\n---\n\n正文。\n")
+	e.write("agents/a.md", "---\nmodel: openai/gpt-4o\nsubagents: [b]\n---\n\nA。\n")
+	e.write("agents/b.md", "---\nmodel: openai/gpt-4o\nsubagents: [a]\n---\n\nB。\n")
 	e.write("llm/openai.yaml", userProviderYAML)
 
 	p := e.plan(Options{})
@@ -658,5 +663,98 @@ func TestARejectedMergeLeavesNoServerFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(e.root, "server", "config.yaml")); err == nil {
 		t.Fatal("the server file must not be written when the merge is rejected")
+	}
+}
+
+// ★ `openheron init` and the settings editor's "New file" must hand out the
+// same skeleton. They used to reach it by two roads — this package walked the
+// templates directory, the editor asked the manifest — and two roads to one
+// answer is one road too many: the day they disagree, the file that works
+// from the editor is not the file that works from the terminal.
+func TestInitWritesWhatTheManifestSays(t *testing.T) {
+	e := newEnv(t)
+	p := e.plan(Options{Model: "deepseek/deepseek-flash", Tools: true})
+
+	svc := e.svc()
+	m, err := svc.Manifest(nil)
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+
+	planned := map[string]string{}
+	for _, f := range p.Files {
+		planned[f.Rel] = string(f.Content)
+	}
+
+	for _, dir := range []string{spec.DirTools, spec.DirMCP, spec.DirServer} {
+		var checked int
+		for rel, tpl := range m.Templates {
+			if !strings.HasPrefix(rel, dir+"/") {
+				continue
+			}
+			checked++
+			got, ok := planned[rel]
+			if !ok {
+				t.Fatalf("the manifest ships %s and init did not write it: %v", rel, rels(p))
+			}
+			// ★ These partitions carry no placeholders, so the planned file
+			//   is the template verbatim. agents/ does carry them (`{{model}}`)
+			//   and is compared through spec.TemplateFor instead.
+			if got != tpl {
+				t.Fatalf("%s differs between the manifest and init", rel)
+			}
+			// ★ TemplateFor answers for the files a reader may create, so it
+			//   refuses a partition that is not editable — server/ is written
+			//   by init and by nothing else. The manifest is the wider answer.
+			if _, err := spec.ValidatePath(rel); err == nil {
+				viaSpec, err := spec.TemplateFor(rel, nil)
+				if err != nil {
+					t.Fatalf("TemplateFor(%s): %v", rel, err)
+				}
+				if viaSpec != tpl {
+					t.Fatalf("spec.TemplateFor(%s) disagrees with the manifest", rel)
+				}
+			}
+		}
+		if checked == 0 {
+			t.Fatalf("no template under %s/; the partition would not be created", dir)
+		}
+	}
+}
+
+// ★ The skip list is the manifest's too: a file that is already there is
+// reported, not overwritten, and the answer must not depend on the working
+// directory or on a second traversal of the disk.
+func TestInitKeepsWhatIsAlreadyThere(t *testing.T) {
+	e := newEnv(t)
+	first := e.plan(Options{Model: "deepseek/deepseek-flash", Tools: true})
+	if err := first.Apply(e.svc()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	before := map[string]string{}
+	for _, rel := range []string{"tools/http.yaml", "mcps/example.yaml"} {
+		b, err := os.ReadFile(filepath.Join(e.root, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		before[rel] = string(b)
+	}
+
+	second := e.plan(Options{Model: "deepseek/deepseek-flash", Tools: true})
+	for _, rel := range rels(second) {
+		t.Fatalf("%s was planned a second time", rel)
+	}
+	for _, rel := range []string{"tools/http.yaml", "mcps/example.yaml"} {
+		if !hasRel(second.Skipped, rel) {
+			t.Fatalf("%s must be reported as kept, got %v", rel, second.Skipped)
+		}
+		b, err := os.ReadFile(filepath.Join(e.root, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if string(b) != before[rel] {
+			t.Fatalf("%s was rewritten", rel)
+		}
 	}
 }

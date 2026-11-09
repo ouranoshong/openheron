@@ -133,6 +133,7 @@ export type CommandAction =
   | "attach_files"
   | "open_settings"
   | "open_agents"
+  | "open_mcps"
   | "compact"
 
 export interface SlashCommand {
@@ -141,6 +142,39 @@ export interface SlashCommand {
   argumentHint?: string
   kind: "action" | "prompt"
   action?: CommandAction
+}
+
+// MCPServerView is one MCP server, as the runtime holds it.
+//
+// The status is about the server ("ready", "starting", "unreachable",
+// "unused") and the tool rows are about this agent: a tool can be
+// available, skipped (the server offered it and it could not be exposed)
+// or blocked (this agent does not reach it).
+//
+// ★ "starting" is its own state: a server that is on its way is doing what
+//   it was asked to do, and a reader who cannot tell it from "unreachable"
+//   reads a server on its way as a broken one.
+export interface MCPServerView {
+  name: string
+  transport: string
+  status: "ready" | "starting" | "unreachable" | "unused"
+  error: string
+  tools: MCPToolView[]
+}
+
+export interface MCPToolView {
+  // name is the server's own name — the vocabulary of the file.
+  name: string
+  // exposedName is the name the model sees.
+  exposedName: string
+  tier: string
+  status: "available" | "skipped" | "blocked"
+  reason: string
+}
+
+export interface MCPServersView {
+  agent: string
+  servers: MCPServerView[]
 }
 
 export interface AgentModelView {
@@ -160,7 +194,9 @@ export interface AgentView {
   model: AgentModelView
   maxIterations: number
   subagents: string[]
-  disabledTools: string[]
+  // ★ tools is the agent's tool allow-list. The default is none — an
+  //   absent list and an empty list mean the same thing.
+  tools: string[]
   // summarizeAt is the compaction threshold of this agent, in tokens. Zero
   // means it never compacts — either because it says so, or because the
   // model declares no window to measure against.
@@ -289,6 +325,18 @@ export const api = {
   listAgents: () => call<AgentsView>("/v2/agents", { cache: "no-store" }),
 
   listSkills: () => call<{ skills: SkillView[] }>("/v2/skills", { cache: "no-store" }),
+
+  // listMCPServers reads the MCP servers of one agent. The agent is
+  // optional and defaults to the configuration's default agent.
+  //
+  // ★ It is never cached: the status is live state — it changes when a
+  //   child process dies — and the tab's caches are the place for
+  //   configuration, not for liveness.
+  listMCPServers: (agent?: string) =>
+    call<MCPServersView>(
+      agent ? `/v2/mcps?agent=${encodeURIComponent(agent)}` : "/v2/mcps",
+      { cache: "no-store" },
+    ),
 
   async uploadFiles(id: string, files: readonly File[]): Promise<UploadResult> {
     const form = new FormData()

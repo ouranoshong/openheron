@@ -65,7 +65,7 @@ one. The measured internal import graph:
 | Layer | Packages | Internal dependencies |
 |---|---|---|
 | **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `agentkit/fsx` `llm/common` `webui` | none |
-| **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` none; `storage`→`contract`; `kb`→`obs`,`persist`; `spec`→`obs`,`decl`,`kb`,`persist`; `emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
+| **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` none; `storage`→`contract`; `kb`→`obs`,`persist`; `spec`→`obs`,`decl`,`templates`,`persist`; `emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
 | **L2** | `agentkit/build` `agentkit/run` `storage/filestore` `storage/memarbit` `transport` `llm` `initcfg` | see architecture.md §2 |
 | **L3** | `api` | almost all of them |
 
@@ -100,12 +100,27 @@ regression.
 structs and imports no other package; `agentkit/spec` holds the behaviour (loading,
 validation, reloading, writing).
 
+★ **The vocabulary the two halves share lives in `decl` too, and that is a
+dependency-direction fact, not a convenience.** The built-in tool names
+(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:291`) are read by **both** ends:
+the loader checks the names an agent's `tools:` list mentions against them, and the
+builder refuses a provider that claims one of them (`reservedToolNames`,
+`agentkit/build/tools.go:75`). Neither end may import the other — the loader sits
+below the builder — so the list cannot live in either of them: it lives **below both**,
+in the leaf package. ★ A second copy would be two lists that drift, and the drift
+would read as "that tool does not exist".
+
 ### 2.2 Do not duplicate assembly logic in the API layer
 
 When you need "the effective tool table of some agent", let `agent.Builder` expose a
 read-only query. **Do not** recompute `Table.Blocked` / `Policy.TierOf` in the API
-layer. The reason is plain: recomputation drifts — change the policy once and the API's
-answer and the runtime's answer stop agreeing.
+layer. The reason is plain: recomputation drifts — change the tier table once and the
+API's answer and the runtime's answer stop agreeing.
+
+★ **The two answer different questions, and the API layer must keep them apart.**
+`Policy.TierOf` answers "does this tool need a human?" and is the **same for every
+agent**; `Table.Blocked` answers "may this agent use it at all?" and is **per agent**.
+Recomputing either one is the same mistake twice.
 
 ## 3. Development recipes
 
@@ -114,7 +129,7 @@ answer and the runtime's answer stop agreeing.
 `agentkit/build/nettools.go` is the complete worked example, using `web_search`.
 
 1. **Implement the provider.** A tool provider is the `toolProvider` interface at
-   `agentkit/build/tools.go:19`:
+   `agentkit/build/tools.go:20`:
 
    ```go
    type toolProvider interface {
@@ -130,64 +145,217 @@ answer and the runtime's answer stop agreeing.
    Note that `Provide` returns a **batch** — one provider may supply several tools.
 
 2. **Register it.** Add your provider to `defaultToolRegistry` at
-   `agentkit/build/tools.go:29`. The position determines the order, and it also
+   `agentkit/build/tools.go:36`. The position determines the order, and it also
    determines how optional and required providers are told apart.
 
 3. **Optionality is decided by `Optional()`, not by returning an error.** A provider
    with `Optional() == true` logs a Warn and is skipped when it fails
-   (`tools.go:58-60`) — a missing API key must not stop the whole service from starting.
+   (`tools.go:101`) — a missing API key must not stop the whole service from starting.
    ★ But note that this Warn is the **only** notice: the tool silently does not enter
    the table, and the user will only notice that "this feature seems to be missing".
    Think hard about whether that Warn is enough when adding an optional provider.
 
 4. **The gate works on its own.** `agentkit/build/gate.go` filters the tool table with
-   the outer policy plus the inner `disabled_tools`. You write no permission code.
+   the agent's own `tools:` allow-list — the list that says which tools the agent may
+   use at all — and wraps **every tool the tier table does not name** behind an
+   approval. ★ The two are **different questions**: the allow-list is per agent, the
+   tier table is shared by every agent. ★ The default tier is `ask`, so the exceptions
+   are the named ones: the built-in tools the code knows (`agentkit/build/tools.go:62`)
+   and the ones a file's own `allows:` lists. You write no permission code.
 
-5. **Do not collide with a reserved name.** `reservedToolNames` at `tools.go:39` lists
-   `ls` `read_file` `write_file` `edit_file` `glob` `grep` `execute` `task`
-   `write_todos` `skill`. A collision fails at `Build` time.
-   The tool name is also the key in the policy table — a collision would point the
-   policy at the wrong tool.
+5. **Do not collide with a reserved name.** The names live in `decl.BuiltinToolNames`
+   (`agentkit/spec/decl/decl.go:291`): `ls` `read_file` `write_file` `edit_file` `glob`
+   `grep` `execute` `task` `write_todos` `skill`. A collision fails at `Build` time.
+   ★ **They live in `decl` and not in the build package because both halves need
+   them**: the builder refuses a provider that claims one of these names
+   (`reservedToolNames`, `agentkit/build/tools.go:75`), and the loader checks the
+   names an agent's `tools:` list mentions. Neither may import the other, so the list
+   lives below both.
+   The tool name is also the key in the tier table — a collision would point the
+   table at the wrong tool.
 
-6. **A collision across providers also fails**: `validateBatch` at `tools.go:76` tracks
+   ★ **A name that comes from a server is namespaced.** An MCP tool is exposed under
+   `decl.MCPToolPrefix` (`agentkit/spec/decl/decl.go:373`) and
+   `decl.MCPSeparator` (`agentkit/spec/decl/decl.go:382`), so the agent's table
+   narrows a whole server with a prefix instead of a list of names. ★ The composed
+   name is never parsed back: `Table.Blocked` (`agentkit/build/policy.go:130`)
+   matches prefixes, so nothing has to split a name to learn which server it
+   belongs to.
+
+6. **A collision across providers also fails**: `validateBatch` at `tools.go:118` tracks
    names in `seen`, so two providers offering the same tool name fail at startup
    instead of one silently overwriting the other.
+
+#### The MCP provider
+
+`mcpToolProvider` is registered like any other provider — `defaultToolRegistry`
+at `agentkit/build/tools.go:36` — and it answers the same `toolProvider` contract
+at `agentkit/build/tools.go:20`. Four things about it are not generic:
+
+- **The client outlives the batch.** ★ The batch is built once per snapshot:
+  `buildHeavy` runs under a `sync.Once` (`agentkit/build/snapshot.go:41`), so a
+  client owned by the provider would be torn down with the snapshot. The
+  **manager** owns the clients (`agentkit/build/mcpmanager.go:42`), and the
+  provider asks the manager for them (`agentkit/build/mcpmanager.go:89`).
+- **The names are namespaced, and composed in one place.** `mcpPlan`
+  (`agentkit/build/mcptools.go:68`) maps the server's own tool names to the
+  exposed names and their tiers, and the name itself is composed once, in
+  `mcpExposedName` (`agentkit/build/mcptools.go:141`). The provider and the
+  `/mcps` projection both go through `mcpPlan`, so they cannot disagree about
+  what a tool is called.
+- **The provider is optional, and the warning is the only notice.** An
+  unreachable server must not keep the agent down, so `Provide`
+  (`agentkit/build/mcptools.go:201`) logs a warning that names the server, the
+  transport and the error (`agentkit/build/mcptools.go:217`), and carries on
+  without that server's tools. ★ The warning is the only notice — the tools are
+  simply missing from the table, and the user sees "this feature seems to be
+  missing".
+- **The output is capped, and the stdio calls are serialized.** The cap lives in
+  the component's result handler (`agentkit/build/mcptools.go:376`), and the
+  calls of one stdio server go through `serialTool`
+  (`agentkit/build/mcptools.go:335`), which takes a per-server mutex and a call
+  deadline.
+
+#### The MCP client lifecycle
+
+For a developer who has to debug it:
+
+- **One client per server.** The manager holds one entry per server
+  (`agentkit/build/mcpmanager.go:42`), and the entry owns that server's client,
+  its listing and its per-server mutex.
+- **The start is single-flight.** `ensure`
+  (`agentkit/build/mcpmanager.go:215`) starts the client under a lock, so the
+  provider and the `/mcps` panel asking at the same moment get the same client
+  and the same child process. Two child processes for one server would make the
+  tools the model sees depend on which process answered.
+- **A crashed child is started again on the next call.** `markBroken`
+  (`agentkit/build/mcpmanager.go:290`) closes the client when the pipe broke,
+  and the next call starts a new one. ★ A call that runs out of time is **not**
+  a broken connection: the server may simply be slow, so a deadline gives up
+  without tearing the client down (`agentkit/build/mcptools.go:358`).
+- **A failed start does not hold the build.** The teardown of a failed start
+  waits for the child to exit, and a child that is still installing its own
+  package does not exit because its stdin closed — so `startStdioClient`
+  (`agentkit/build/mcpmanager.go:432`) kills the child
+  (`agentkit/build/mcpmanager.go:485`) and bounds the teardown
+  (`agentkit/build/mcpmanager.go:501`). ★ A build waits for a server, not for a
+  server's corpse: without the kill, a server that cannot be started takes the
+  turn down with it, and the client is told "turn start timeout" — a symptom
+  that names neither the server nor the reason.
+- **The start is a background job, and every server has a state.** The manager
+  starts the servers in the background (`Warm`, `agentkit/build/mcpmanager.go:123`)
+  and each entry carries one of four states (`mcpState`,
+  `agentkit/build/mcpmanager.go:297`): `not_started`, `starting`, `ready` or
+  `failed`. ★ `Tools` never waits — it answers `errMCPStarting` while the job is
+  in flight, and the provider skips the server **without** a warning: a server
+  on its way is not a broken server. ★ The tools a server brings join the
+  **next** turn: the job compares the listing before and after and moves the
+  generation when it changed (`runStart`, `agentkit/build/mcpmanager.go:450`).
+  ★ A failed start is retried, but not before the file's own `timeout:` has
+  passed (`mcpStartTimeout`, `agentkit/build/mcpmanager.go:328`) — a server that
+  cannot start must not be spawned in a loop.
+- **The tool list is re-listed when a turn asks for it**, and the previous
+  listing is older than 30 seconds (`agentkit/build/mcpmanager.go:34`,
+  `mcpRelistInterval`). ★ That interval is a fixed value, not a configuration
+  key: a knob nobody turns is a knob nobody tests, and a server's tool list
+  changes on the scale of days.
+- **A changed list bumps the generation.** `Refresh`
+  (`agentkit/build/mcpmanager.go:118`) reports whether a listing changed, and the
+  builder bumps the generation through the same hook the configuration reloader
+  uses (`agentkit/build/builder.go:67`). The refresh happens before the turn's
+  agent is assembled (`agentkit/build/builder.go:105`), because the batch is
+  built once per generation — a re-list inside the build would never run.
 
 ### 3.2 Adding a new configuration partition
 
 Say you want a new `mcps/` directory:
 
-★ That directory is not hypothetical — `docs/mcp-design.md` designs it (a proposal:
-  nothing from its §2 onwards is in the tree). The recipe below is the one that
-  partition would follow.
+★ That directory is no longer hypothetical — `docs/mcp-design.md` designs it (that
+  document is Chinese only, like every design document here), and the partition is in
+  the tree. The recipe below is the one it followed.
 
 1. **`agentkit/spec/config.go`**: add the directory constant `DirMCP = "mcps"` and an entry
-   in `Categories` (with `ID`, `Label`, `Dir`, `Ext`). Keep **hot-reloaded** and
-   **non-hot-reloaded** directories clearly apart — whether a directory is hot changes
-   what users expect.
+   in `Categories` (with `ID`, `Label`, `Dir`, `Ext`, `Editable`). Keep **hot-reloaded**
+   and **non-hot-reloaded** directories clearly apart — whether a directory is hot
+   changes what users expect.
 
-2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`config.go:296`) and
+2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`agentkit/spec/config.go:521`) and
    implement `loadXXX`.
+
+   ★ **Two shapes the recipe did not have before `skills/`.** A partition may be
+   **not loaded**: leave `loader` nil and the load loop skips it — that is for files read
+   by something other than the config layer (the skill backend reads `SKILL.md`), and
+   `Categories` is then the *surface* (manifest, path rules, editor) rather than the
+   loader's list. And a partition may be **nested** (`Category.Nested`):
+   `skills/<name>/SKILL.md`, one folder per entity, the folder name being the entity's
+   name. ★ Depth is not a free-for-all: `ValidateReadPath` refuses a path one level too
+   deep in every other partition, because the loader reads exactly one level and a file
+   two levels down would be saved and never loaded.
 
 3. **`agentkit/spec/decl/decl.go`**: add the plain declaration struct.
 
-4. **Hot reload comes for free**: `hotDirList()` at `agentkit/spec/config.go:76` filters
+4. **Hot reload comes for free**: `hotDirList()` at `agentkit/spec/config.go:114` filters
    the `Categories` whose `Hot()` is true — mark the category hot in step 1 and the
    watched set includes it automatically. **You do not** need to register it by hand in
    `reload.go` (and forgetting to would mean "config changes do not take effect, with
    no notice at all").
 
-5. **Write gate**: add it to the editable-section list in `api/v2_settings.go`.
-   A non-hot-reloaded section **must not** be in the editable list — otherwise the user
-   changes it in the UI, it only takes effect after a restart, and the UI says nothing.
+5. **Write gate**: mark the entry `Editable: true` in step 1 — ★ the **manifest** is
+   the truth, and the settings endpoint reads that flag (`api/v2_settings.go`); the
+   client takes the editable categories from the manifest rather than keeping a list
+   of its own. A non-hot-reloaded section **must not** be editable — otherwise the
+   user changes it in the UI, it only takes effect after a restart, and the UI says
+   nothing.
 
 6. **Defaults**: `agentkit/spec/defaults.go`.
 
 7. **Factory template**: `openheron init` writes the minimum runnable configuration, so
-   a new partition needs one too. Either add a file under `initcfg/templates/<dir>/` —
-   for the files only init produces — or reuse the scaffold the config editor already
-   has (`spec.ToolTemplates()` / `spec.LimitsTemplate()`). ★ **One file's content has
-   one source**: two copies of the same file are two copies that drift.
+   a new partition needs one too. Put the file under
+   `agentkit/templates/files/<dir>/` — ★ the **leaf** package both the command layer
+   (`initcfg`) and the configuration layer (`agentkit/spec`, which serves the editor)
+   can depend on — and read it from there. ★ **One file's content has one source**: two
+   copies of the same file are two copies that drift, and the copy is what the
+   dependency shape used to force. The section skeletons that are not files on disk
+   (the agents' frontmatter carries the available models) stay in
+   `spec.Skeleton(catDir, …)`.
+
+   ★ **init copies a partition by its directory, not by a list of file names.**
+   `initcfg`'s `copySection` asks the templates package what the partition holds
+   and copies what comes back — ★ so a template file that appears in
+   `agentkit/templates/files/<dir>/` is written by init without a line of Go
+   changing. ★ The llm/ partition is the one exception: its files are
+   alternatives (the provider's own template and the generic fallback), and a
+   partition of alternatives is not a partition to copy.
+
+#### The `mcps/` partition
+
+The `mcps/` partition is one file per MCP server, and the file's presence **is** the
+definition — there is no `enabled` key.
+
+- **Declared** by the constant `DirMCP = "mcps"` (`agentkit/spec/config.go:25`) and the
+  `Categories` entry (`agentkit/spec/config.go:66`), which is editable, hot and
+  `.yaml`.
+- **Loaded** by `loadMCP` (`agentkit/spec/load.go:310`): one file, one server.
+- ★ **"Hot" for this partition means the client is rebuilt.** The declaration is the
+  server's identity, so a changed declaration means a changed server: the old client
+  is torn down and a new one is started (`agentkit/build/mcpmanager.go:215`), keyed on
+  the declaration's fingerprint (`agentkit/build/mcpmanager.go:330`). ★ A hot partition
+  whose resources are not rebuilt lies about being hot.
+- **The write gate** refuses a name that could not be read back:
+  `validateFileName` (`agentkit/spec/write.go:116`) accepts only a `<server>.yaml` whose
+  name is a valid server name (`agentkit/spec/write.go:107`) — the file's name is the
+  server's name, and the server's name is the namespace segment of that server's tools.
+- **The scaffold** is `Skeleton` (`agentkit/spec/write.go:189`), and the `mcps/` branch
+  (`agentkit/spec/write.go:186`) writes a **loadable** file: ★ a file under `mcps/`
+  **defines** a server, so a file that cannot be parsed is not a server that is off, it
+  is a configuration that does not load. The optional fields are written as comments,
+  and the `command` is a placeholder that is not installed — so the server does not come
+  up, the log says so, and the agent carries on.
+- ★ **The example is one file, read by two layers.** `agentkit/templates/files/mcps/example.yaml`
+  is the template `openheron init` writes (`initcfg/initcfg.go`) and the skeleton the
+  configuration editor hands out (`agentkit/spec/write.go`). ★ The editor is served by the
+  API and the API cannot import `initcfg` — it would be a cycle — so the file lives in
+  `agentkit/templates`, a **leaf** both can depend on. ★ A copy would drift.
 
 ### 3.3 Adding an API route
 
@@ -211,13 +379,99 @@ Say you want a new `mcps/` directory:
 
 Editing `agents/*.md` is enough; no code change is needed. But keep in mind:
 
-- `model` is **required** and never inherited. A wrong value is a startup error.
+- `model` is **required** and never inherited. ★ A model **nobody declares** is no longer
+  a startup error: the agent is **left out of the tree** and everything else loads
+  (`docs/config-design.md` §4.6). That includes the default agent — no session can start
+  until it is fixed, but the process does, and the editor that fixes it lives there.
 - An agent referenced by `subagents` must exist and must not form a cycle — both are
-  **startup errors**.
+  **startup errors**. ★ A sub-agent that was left out is dropped from its parents'
+  `subagents:` (`agentkit/spec/load.go:546`), so the delegation tool never offers a worker
+  that cannot run — and a `subagents:` entry pointing at such an agent is not a cycle or a
+  dangling reference, because the settled tree no longer mentions it.
 - Exceeding `max_depth` is a **startup error**, never a silent truncation.
+
+★ **The write gate is the other half of "left out".** `agentkit/spec/write.go:470`
+`checkNoAgentLost` compares the **settled** tree on disk with the **settled** trial tree and
+refuses a write, a batch or a delete that would take a working agent out. Without it,
+repointing an agent at a nonexistent model would remove it silently — which is exactly the
+failure the load-time rule stopped being. ★ Do not "simplify" it by comparing the raw
+file set: an agent that was already broken is out on both sides, and counting it as lost
+would make every unrelated edit fail.
+
+★ **The delete gate runs before the trial load.** `checkNotReferenced`
+(`agentkit/spec/write.go:706`) reads the tree as it is **now**, so it can refuse a delete
+that something still names — and the refusal names **who names it** and what to remove.
+★ It runs before the trial load because the trial load's error is the symptom it replaces:
+that error names the deleted file and hides the real reason somewhere else. ★ What the user
+has to change is the reference, not the deleted file.
+
+★ **An agent the change removes on purpose is not "lost"** (the `removed` parameter of
+`agentsLostBy`) — the gate asks "does an agent that used to work still work", and a user
+deleting an agent on purpose is another thing; without the two apart, no agent file could
+ever be deleted.
 
 The assembly logic is in `agentkit/build/assemble.go`; the validation logic is in
 `agentkit/spec/load.go`.
+
+#### ★ When the agent cannot be built, the turn has to be told
+
+`agentkit/run/loop.go:108` `makePrepareAgent` is where the builder is asked for this
+turn's agent — and where a configuration problem becomes a runtime one. ★ The error
+has to be handed to the turn (`turn.fail`): the framework records it and stops the
+loop, but nobody else marks the turn failed, so the waiter sat until the **start
+timeout** and the client was told "turn start timeout" — a symptom naming neither the
+file nor the model.
+
+The failure carries its own code (`agent_unavailable`, `transport/transport.go:43`) and the
+builder's own message (`agentkit/run/errors.go:57` `agentUnavailable`): the sentinel
+classifies, it does not prefix, so the user reads the reason once. ★ The same rule
+applies to the input assembly in `makeGenInput` — an error the framework records but
+nobody hands to the turn is an error the client never sees.
+
+#### The three lists on an agent
+
+`tools:`, `skills:` and `mcps:` are **allow-lists**, and **all three default to
+none** — an absent key and an empty list mean the same thing, and they mean "nothing".
+
+| Key | What it names | Absent means |
+|---|---|---|
+| `tools` | the tools the agent may use — the **exposed** names, the ones the model sees | no tool |
+| `skills` | the skills the agent may load — the folders under `skills/` | no skill |
+| `mcps` | the MCP servers the agent **mounts** — each one starts a child process | no server |
+
+★ **Do not write `disabled_tools`.** It was the **opposite** of `tools` — one removed
+tools, the other names them — so the loader **refuses** the file
+(`agentkit/spec/load.go:99`) rather than renaming the key: renaming it alone would
+have turned a blacklist into a whitelist without saying so. The message says which way
+round the two mean. ★ **There is no alias**: an alias that still worked with the old
+meaning would keep the blacklist alive, and an alias that worked with the new one would
+flip the agent's tool set on the user's behalf.
+
+★ **The tool set is the snapshot's, and the list narrows it.** The snapshot's tools are
+one set for the whole snapshot; each agent's `tools:` list removes what that agent may
+not use (`agentkit/build/topology.go:72` `specTable`), and the model never sees a tool
+the list removed. ★ **There is no "nothing to do" shortcut**
+(`agentkit/build/policy.go:145`): an **empty** list removes **everything**.
+
+★ **MCP has two levels.** `mcps:` says which servers are **mounted**; `tools:` says
+which of that server's tools the agent **sees** — `mcp__<server>__<tool>`, or the
+pattern `mcp__<server>__*`. ★ `mcps: [github]` without `mcp__github__*` in `tools:`
+starts the server and shows the agent nothing. ★ A contradiction between the two is a
+**load-time error** (`agentkit/spec/load.go:771` `checkAgentMCPNames`): naming
+`mcp__github__*` while `mcps:` leaves `github` out can never match.
+
+#### The two notices
+
+Both are **notices**, not errors — the configuration is legal, it just does not say
+what the author meant (`agentkit/spec/load.go:660` `noticeAgentTools`):
+
+| Notice | What it means | What to do |
+|---|---|---|
+| `tools` names a tool that does not exist | the built-in tools are the ones in `decl.BuiltinToolNames`, and a provider's tool exists only when its file under `tools/` is written | check the spelling; write the `tools/` file if the provider is missing |
+| `tools` names the `skill` tool but `skills` is empty | the agent can ask for a skill and there is none to load | name the skill in `skills:`, or drop `skill` from `tools:` |
+
+★ **An `mcp__*` name is skipped by the check**: a server's tools are discovered at
+runtime, so a name it does not have yet is not a typo.
 
 ### 3.5 Adding a vendor / model
 
@@ -328,7 +582,7 @@ and the message list draws a divider in place of the chat bubble
 (`web/src/components/message-list.tsx:101`, drawn by
 `web/src/components/compaction-divider.tsx`). A compaction that happens **mid-turn** is
 announced on the stream instead: the transport emits a `CUSTOM "context_compacted"` event
-(`transport/transport.go:590`) and the reducer puts a boundary into the list at once
+(`transport/transport.go:208`) and the reducer puts a boundary into the list at once
 (`web/src/lib/events.ts:412`).
 
 ★ The live event carries **no numbers**. The numbers — how many messages were superseded, how
@@ -728,6 +982,40 @@ the DOM is not the problem and virtualization would buy nothing.
 - `web/dist` is embedded into the binary with `go:embed` (`webui/webui.go`).
 - `make build` builds the frontend first, then the Go binary.
 
+### 4.6 ★ The layout tokens and the theme
+
+★ **The width of the chat is one token, not a number repeated in six places.**
+`web/src/index.css` defines three:
+
+| Token | What it is |
+|---|---|
+| `--chat-column` | the column the conversation lives in (64rem) |
+| `--prose-column` | the width the **text** inside it stops at (46rem) |
+| `--chat-gutter` | the space on both sides of the column |
+
+★ The two widths are different **on purpose**. The column is wide so that a table or a code
+block fits whole; a paragraph of sixty characters is a hard read, so the prose stops
+earlier. The **blocks** take the whole column and only the text is held back — which is why
+the cap sits on the text elements (`markdown.tsx`'s `PROSE`) and not on the message bubble.
+
+★ A table has **two** limits, and they answer different questions: a **floor** of 7rem per
+column is what makes a table of many columns overflow and scroll inside its own wrapper, and
+a **ceiling** of 28rem per cell is what makes a long sentence wrap inside its cell instead of
+stretching the table. ★ A table with no ceiling is a table as wide as its longest cell, and a
+cell with no floor is a column squeezed into a sliver.
+
+★ The **theme** is decided **before the first paint**, by a script in `web/index.html`, and
+read from one place — `web/src/lib/theme.ts`. A component that needs it subscribes with
+`useSyncExternalStore`; the settings editor's CodeMirror theme follows it too, so a switch
+while the editor is open repaints it.
+★ The CodeMirror editor is given `theme="none"` on purpose: the library's default is
+`theme="light"`, which paints the editor **white**, and that rule sits **after** ours in the
+stylesheet — so it won, and the dark theme had white text on a white background. The editor
+takes its colors from the app's tokens instead.
+★ The light and the dark palette are **the same token set with two values**, so a color that
+exists in one exists in the other — and a hard-coded `sky-500` in a component is a bug: the
+status colors are `--info`, `--warning` and `--success`.
+
 ## 5. Testing
 
 ### 5.1 Port and state isolation
@@ -772,7 +1060,7 @@ make test-env-sync      # ★ must be run after you change the development-side 
 ```
 
 ★ **`make test-env-sync` is mandatory, not optional** — the test instance's
-`agents/ llm/ policy/ skills/` are **copied** from the development side, so change an
+`agents/ llm/ tools/ skills/` are **copied** from the development side, so change an
 agent without syncing and you are still testing the old definition.
 
 ★ **The smokes need a model that answers.** They run a real turn against the
@@ -789,6 +1077,7 @@ Individual smoke scripts (they connect to :18099 by default, so **you do not wri
 cd web && bun run smoke:interop            # SSE framing, concatenation, history hydration
 cd web && bun run smoke:no-undefined-url   # no malformed URLs are emitted
 cd web && bun run smoke:hitl               # the approval resume path works
+cd web && bun run smoke:config             # config_write's approval round trip (see (8) below)
 ```
 
 ### 5.3 Go unit tests
@@ -798,7 +1087,7 @@ cd web && bun run smoke:hitl               # the approval resume path works
 | Package | Contract it pins |
 |---|---|
 | `agentkit/spec` | Config root resolution, strict frontmatter decoding, depth validation, cycle detection, write gates |
-| `agentkit/build` | Tool assembly, policy tiers, the gate, topology, nested resume, the skill scope |
+| `agentkit/build` | Tool assembly, the allow/ask tier table, the gate, topology, nested resume, the skill scope |
 | `agentkit/run` | Input construction (a sub-agent's messages do not mix into the parent's history), event bridging |
 | `api` | Routing, SSE frames, the error envelope, `threadId` being required |
 | `kb` | Indexing, scoring, the catalog format (including legacy Chinese header compatibility) |
@@ -853,9 +1142,29 @@ the contract on its own — the extractor does not read one language to help the
 
 ### 5.5 Frontend unit tests
 
-`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **14 test files, 271
+`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **21 test files, 272
 cases**, covering the pure layers: `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
-`thinking.ts` / `turns.ts` / `approval.ts` / `settings-validate.ts` and friends.
+`thinking.ts` / `turns.ts` / `approval.ts` / `settings-store.ts` and friends.
+
+★ **The client keeps no configuration rules at all.** It used to: a copy of the
+partition table, the tools/ file whitelist, the MCP server-name pattern, and a per-key
+scan of every file, written when validation was synchronous. The server has always known
+the line numbers — yaml.v3 reports them — so the copy earned nothing but drift, and it
+had drifted (`corpus` where the loader says `corpus_dir`). `settings-validate.ts` is now
+string shaping and rendering: `issueLine`, `suggestPath`, `resolveTemplate`.
+
+★ **What replaced it is a round trip with a stamp.** An edit schedules one question 250 ms
+after the typing stops (`web/src/lib/settings-store.ts:240` `scheduleValidate`), and a
+save asks again immediately and cancels the pending one. Every reply is stamped
+(`:229` `validateSeq`): a reply that is no longer the newest, or no longer about the
+selected file, is dropped — otherwise the slower of two answers wins, which is the one
+about text the user has already changed.
+
+★ **A rule that was the client's moved to the server rather than disappearing.** An
+agent's `reasoning` level is checked against the model's declared vocabulary in
+`agentkit/spec/load.go:616` `checkReasoning` — where every file passes, not only the
+edits made in the settings editor. ★ Deleting a client rule is only a simplification if
+the server already has it; that is the question to ask of the next one.
 
 ★ `store.test.ts` exercises the **whole zustand store**, so it stubs
 `globalThis.localStorage` and `globalThis.fetch` before running
@@ -868,8 +1177,9 @@ do not touch" assertions.
 
 ### 5.6 E2E
 
-`make test-e2e` → `playwright test`, **8 specs, 124 cases**: `chat` `multi-agent`
-`agents` `composer-meta` `composer-autocomplete` `settings` `history` `scroll`.
+`make test-e2e` → `playwright test`, **13 specs, 158 cases**: `agents` `chat`
+`compaction` `composer-autocomplete` `composer-meta` `history` `mcps` `multi-agent`
+`reattach` `scroll` `session-busy` `settings` `theme`.
 
 Playwright starts two servers itself (`webServer` in `playwright.config.ts`): the fake
 backend (`web/test/serve.ts`) and Vite (`--mode test`).
@@ -935,19 +1245,43 @@ call `write_file` in order to trigger an approval. That is the model's freedom, 
 code regression; the script retries, and when nothing triggers it **reports an error
 explicitly** rather than pretending the wiring is broken.
 ★ It has a **precondition**: the agent that actually calls the tool must have
-`write_file` in the `ask` tier — neither globally denied nor disabled by its own
-`disabled_tools`. With the tool out of reach there is no approval to trigger.
-★ Do not look at `main` for this. The factory configuration does give `main`
-`disabled_tools: [write_file, edit_file, execute]`, but `main` only orchestrates: it
-**delegates** the work to `task`, and `task`'s `write_file` is in the `ask` tier — so
-the approval fires anyway. Measured event stream:
+`write_file` in the `ask` tier — ★ that is the **default**: no file names it in an
+`allows:` list — **and** the agent's own `tools:` list must name it, or the tool is
+not in the agent's tool set at all. With the tool out of reach there is no approval to
+trigger.
+★ Do not look at `main` for this. The factory configuration gives `main`
+`tools: [ls, read_file, glob, grep, task, write_todos]` — the readers and the
+delegation tool, no writers — but `main` only orchestrates: it **delegates** the work
+to `task`, and `task`'s `tools:` list names `write_file`, which is in the `ask` tier —
+so the approval fires anyway. Measured event stream:
 `TOOL_CALL_START name=task` (a sub-agent is invoked as a tool), then
 `TOOL_CALL_START name=write_file subagentRunId=task`, and the interrupt's
 `subagentRunId` is `task` too.
 To check whether a tier is reachable, look at **each** agent's effective tool table:
 `GET /v2/agents` and `GET /v2/agents/task` report the tier and the reason per tool.
 
-**(8) Changing the interface requires browser verification.** "I changed it and the tests
+**(8) `smoke:config` needs a configuration that could not ship as a default.**
+`config_write` is absent from every template on purpose — handing an agent the pen that
+edits its own configuration is a decision — so no shipped agent can call it, and the
+smoke's turn would have nothing to trigger. The script therefore **checks its own
+precondition first** and exits `2` with the line to add, instead of looking flaky:
+
+```yaml
+# .openheron/agents/main.md
+tools: [..., config_write]
+```
+
+then `make test-env-sync`. ★ It refuses to run when `config_write` is **not** in the
+`ask` tier either: an allow-tier `config_write` would have written the file without an
+approval, which is the one thing the smoke exists to catch. That is also why the target
+is `make smoke-config` and not a step of `make smoke` — it can never pass on a default
+install.
+
+★ It puts the tree back: the probe file is deleted through the API at the end, and the
+script asserts it is gone. A smoke that leaves an agent file behind changes what the
+next run tests.
+
+**(9) Changing the interface requires browser verification.** "I changed it and the tests
 are green" is not evidence — script-level tests cannot see the rendering layer.
 
 ### 5.8 ★ The cost benchmark
@@ -1059,9 +1393,16 @@ someone measures that the default misses something.
 | Symptom | Check first |
 |---|---|
 | Startup reports a missing configuration | The `config root` line in the startup log — it prints the root actually used and the project root |
-| A config change does not take effect | Is that partition hot-reloaded? `server/` and `skills/` need a restart |
-| An agent cannot call a tool | `GET /v2/agents/:agentId` for the effective tool table; then decide whether it is an inner disable or an outer `deny` |
+| A config change does not take effect | Is that partition hot-reloaded? `llm/` `agents/` `tools/` `mcps/` are hot; `server/` and `skills/` need a restart |
+| Startup fails with `disabled_tools` was renamed to `tools` | ★ The two mean **opposite** things — one removed tools, the other names them. Delete `disabled_tools` and list the tools the agent should have in `tools:` (`agentkit/spec/load.go:99`) |
+| Startup fails with `names the MCP tool` … `but does not mount the server` | ★ Mounting and visibility are two levels: add the server to `mcps:`, or drop the tool from `tools:` (`agentkit/spec/load.go:771`) |
+| A notice says `tools` names a tool that does not exist | The built-in tools are the ones in `decl.BuiltinToolNames` (`agentkit/spec/decl/decl.go:291`); a provider's tool exists only when its file under `tools/` is written |
+| A notice says `tools` names the `skill` tool but `skills` is empty | The configuration is legal but self-contradictory: name the skill in `skills:`, or drop `skill` from `tools:` |
+| An agent cannot call a tool | `GET /v2/agents/:agentId` for the effective tool table; then read the tool's `reason` — `tools`, or the default `ask` tier, which asks |
+| An agent has **no** tools at all | ★ The tool list is an allow-list and it **defaults to none**: an absent `tools:` means no tool. List the tools the agent should have |
+| A leftover `policy/` directory still seems to carry your old tiers | The partition was retired: the tiers live in the files that provide the tools, and the default tier is `ask`. The startup log says so — the notice lands in `deferred` |
 | `reasoning` seems to do nothing | Is that tier declared in the model profile? Undeclared means silently ignored |
+| The editor blames the file you are editing for a problem in **another** file | ★ Every issue names the file it is about (`Issue.Path`), and the editor shows another file's issue under **that** file's name — as a link that opens it. ★ But the tree has to load: a broken file anywhere still refuses the save, so fix that file first |
 | An approval cannot resume | Is the checkpoint still there? Check `pendingApprovals` on `/v2/sessions/:id` |
 | White screen + `Maximum update depth exceeded` | Is some selector returning a new array/object? |
 | E2E reports `already used` | An orphan from the previous force-killed run holds the port; clear it and retry |
@@ -1078,7 +1419,7 @@ the current state of the code, not a to-do list** — fixing one is a separate c
 
 | Symptom | Where | Explanation |
 |---|---|---|
-| **Usage on a live stream is not accounted per agent** | `contract.Usage` has no `byAgent` field; the frontend's `toUsage` at `events.ts:479` maps only flat counts | `usage.byAgent` **exists only with history hydration**. So in a fresh turn the agent filter chips show no cumulative token counts — they appear once you reload (pulling history). The **context occupancy** is live (§3.7): it arrives as its own `context_usage` event. E2E missed the gap because it tests a **seeded history thread**. |
+| **Usage on a live stream is not accounted per agent** | `contract.Usage` has no `byAgent` field; the frontend's `toUsage` at `events.ts:479` maps only flat counts | `usage.byAgent` **exists only with history hydration**. So in a fresh turn the agent filter's tooltips show no cumulative token counts — they appear once you reload (pulling history). The **context occupancy** is live (§3.7): it arrives as its own `context_usage` event. E2E missed the gap because it tests a **seeded history thread**. |
 | **A broken SSE stream does not reconnect** | `web/src/lib/api.ts` | A broken stream is simply broken: it goes to `onError` → the error panel, and the user has to resend. There is no reconnect and no resume-from-offset. |
 | **The conflict dialog does not show the on-disk version** | `web/src/components/settings/conflict-dialog.tsx:18-23` | It shows only your stale `baseRevision` plus a hard-coded "changed by someone else", and **never fetches the disk version**. There is no "overwrite anyway" button either — "Keep editing" merely clears the conflict marker, so the next save resends the same stale revision and conflicts again. |
 | **`web/index.html` declares `lang="zh-CN"`** | `web/index.html:2` | The interface is entirely in English (a hard requirement in AGENTS.md), but the `lang` declaration is still Chinese. It affects what a screen reader reads. |
@@ -1086,6 +1427,7 @@ the current state of the code, not a to-do list** — fixing one is a separate c
 | **Four runtime dependencies sit in `devDependencies`** | `web/package.json` | `lucide-react` (imported by 10 files), `clsx`, `tailwind-merge` and `class-variance-authority` are all imported by `src/` and bundled into `web/dist`. The build passes (Vite resolves them at build time), but the manifest is wrong. |
 | **`web/scripts/interop-check.ts` is out of date** | lines 16-20 and 41-45 of that script | It POSTs to `/v2/run` **without a `threadId`**, while the server now requires a session first (`POST /v2/sessions`, see `api/v2_run.go:78`). So that item of `make smoke` fails (measured: 400 `threadId is required`). `web/scripts/hitl-smoke.ts` and `web/scripts/no-undefined-url-check.ts` already follow the new contract. |
 | **The comment at `api/server.go:75` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
+| **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the five partitions (`agentkit/spec/config.go:40-71`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:410`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:72`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |
 
 ## 8. Before committing
 

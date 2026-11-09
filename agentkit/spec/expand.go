@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
 )
 
 func expandValue(v string) (value string, resolved bool, err error) {
@@ -45,21 +46,37 @@ func envVarName(v string) string {
 	return ""
 }
 
-func splitFrontmatter(data []byte) ([]byte, string, error) {
-	text := strings.TrimSpace(string(data))
+// splitFrontmatter separates an agent file into its frontmatter block and its
+// body, and reports the line of the file the block starts on.
+//
+// ★ The third return value exists for line numbers. The frontmatter is
+// decoded as a block of its own, so a YAML error counts from the block —
+// and the block starts at line 1 only when the `---` does. A file that
+// opens with a blank line shifts every line by one, silently.
+func splitFrontmatter(data []byte) (fm []byte, body string, startLine int, err error) {
+	raw := string(data)
+	text := strings.TrimSpace(raw)
 	if text == "" {
-		return nil, "", nil
+		return nil, "", 0, nil
 	}
 	if !strings.HasPrefix(text, "---") {
-		return nil, text, nil
+		return nil, text, 0, nil
 	}
+
+	startLine = 1 + strings.Count(trimmedLeft(raw), "\n")
 
 	rest := text[3:]
 	end := strings.Index(rest, "\n---")
 	if end < 0 {
-		return nil, "", fmt.Errorf("frontmatter closing delimiter not found")
+		return nil, "", startLine, fmt.Errorf("frontmatter closing delimiter not found")
 	}
-	fm := rest[:end]
-	body := strings.TrimLeft(rest[end+4:], "\n")
-	return []byte(fm), body, nil
+	fm = []byte(rest[:end])
+	body = strings.TrimLeft(rest[end+4:], "\n")
+	return fm, body, startLine, nil
+}
+
+// trimmedLeft is what strings.TrimSpace cut from the front of raw: counting
+// its newlines is the whole of the line shift.
+func trimmedLeft(raw string) string {
+	return raw[:len(raw)-len(strings.TrimLeftFunc(raw, unicode.IsSpace))]
 }

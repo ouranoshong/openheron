@@ -16,11 +16,11 @@ boundary, with the host reachable only through the workspace directory.
 
 ## What the agent will do to it
 
-The agent asks before it acts: `write_file`, `edit_file` and `execute` are in
-the `ask` column of the default policy, so the sandbox asks you first — once
-per command, and once before it edits. **Approve them** and the agent
-finishes the job — the file changes on your host, because the workspace *is* a
-directory on your host.
+The agent asks before it acts: `write_file`, `edit_file` and `execute` are
+tools nobody names, and the default tier is **ask** — so the sandbox asks you
+first, once per command, and once before it edits. **Approve them** and the
+agent finishes the job — the file changes on your host, because the workspace
+*is* a directory on your host.
 
 ```
 $ diff -u main.go ~/demo-ws/main.go
@@ -63,15 +63,16 @@ because it declares what runs on your host.
 
 ★ **None — and that is the point.** There is no `.openheron/` in this
 directory, and `openheron init` writes the whole thing on the first start:
-the two agents, the policy, the model configuration and the server settings.
+the two agents, the model configuration, the MCP example and the server
+settings.
 
 ★ **A project that ships its own configuration keeps it.** `init` writes what
 is missing and keeps what is there, so a project that wants its own agents or
-its own approval policy just carries those files — this one does not need to.
+its own tool configurations just carries those files — this one does not need to.
 
-★ **What the default policy means for the demonstration.** `write_file`,
-`edit_file` and `execute` are in the `ask` column, so the agent asks before it
-writes a file and before it runs a command — and running `make test` is a
-command. **Approve them** and the agent continues. A demonstration that needs
-nobody at the keyboard would move `execute` out of the `ask` column, and that
-is the user's call, not the repository's.
+★ **What the default tier means for the demonstration.** `write_file`,
+`edit_file` and `execute` are tools nobody names, so they ask — the agent asks
+before it writes a file and before it runs a command, and running `make test`
+is a command. **Approve them** and the agent continues. A demonstration that
+needs nobody at the keyboard would name `execute` in a tool file's `allows:`
+list, and that is the user's call, not the repository's.

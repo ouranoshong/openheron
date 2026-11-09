@@ -403,13 +403,13 @@ tasks:
     cmds:
       - '{{.GO}} test ./...'
 
+  # ★ -count=1 is not optional: `go test` caches the **result**, so a run that
+  #   happened not to trip a race is cached as "ok" and every later run replays
+  #   that verdict instead of testing anything. The detector only helps if the
+  #   tests really run.
   test-race:
     desc: 'The full Go test suite under the race detector'
     cmds:
-      # ★ -count=1 is not optional: `go test` caches the **result**, so a run
-      #   that happened not to trip a race is cached as "ok" and every later
-      #   run replays that verdict instead of testing anything. The detector
-      #   only helps if the tests really run.
       - '{{.GO}} test -race -count=1 ./...'
 
   test-install:

@@ -21,6 +21,7 @@ type snapshot struct {
 	gen uint64
 
 	cfg                  *spec.Config
+	svc                  *spec.Service
 	projectRoot, dataDir string
 	agentSpec            agentSpec
 	tables               map[string]*Table
@@ -50,7 +51,7 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 	// The session workspace (uploads) and the skills directory may live outside the
 	// project root; everything else is off limits.
 	roots := []string{s.dataDir}
-	if dir, ok := resolveSkillsDir(); ok {
+	if dir, ok := ResolveSkillsDir(); ok {
 		roots = append(roots, dir)
 	}
 	local, err := fsx.New(fsx.Config{Root: s.projectRoot, ExtraRoots: roots})
@@ -62,6 +63,7 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 
 	tools, err := s.tools.Build(ctx, toolEnv{
 		cfg:         s.cfg,
+		svc:         s.svc,
 		projectRoot: s.projectRoot,
 		dataDir:     s.dataDir,
 	})
@@ -72,26 +74,28 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 	return out, nil
 }
 
-func newSnapshot(gen uint64, cfg *spec.Config, projectRoot, dataDir string,
-	models modelFactory, tools *toolRegistry) (*snapshot, error) {
+func newSnapshot(gen uint64, cfg *spec.Config, svc *spec.Service,
+	projectRoot, dataDir string, models modelFactory,
+	tools *toolRegistry) (*snapshot, error) {
 
 	sp, err := specOf(cfg, projectRoot)
 	if err != nil {
 		return nil, err
 	}
 	if sp.maxDepth <= 0 {
-		sp.maxDepth = decl.DefaultMaxDepth
+		sp.maxDepth = spec.DefaultMaxDepth
 	}
 	if models == nil {
 		models = defaultModelFactory
 	}
 	if tools == nil {
-		tools = defaultToolRegistry()
+		tools = defaultToolRegistry(nil)
 	}
 	tables := tablesOf(sp)
 	return &snapshot{
 		gen:         gen,
 		cfg:         cfg,
+		svc:         svc,
 		projectRoot: projectRoot,
 		dataDir:     dataDir,
 		agentSpec:   sp,
@@ -107,7 +111,7 @@ func (b *Builder) snapshotFor(cfg *spec.Config, gen uint64) (*snapshot, error) {
 	if b.snap != nil && b.snap.gen >= gen {
 		return b.snap, nil
 	}
-	snap, err := newSnapshot(gen, cfg, b.projectRoot, b.dataDir, b.models, b.tools)
+	snap, err := newSnapshot(gen, cfg, b.svc, b.projectRoot, b.dataDir, b.models, b.tools)
 	if err != nil {
 		return nil, err
 	}

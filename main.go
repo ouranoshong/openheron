@@ -100,7 +100,7 @@ func printServerUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "Reads exactly one configuration root: --config-dir, else $OPENHERON_CONFIG_DIR,")
 	fmt.Fprintln(stdout, "else <project-root>/.openheron (created when missing).")
 	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout, "  --config-dir   the config root (llm/ agents/ policy/ server/ tools/ live here)")
+	fmt.Fprintln(stdout, "  --config-dir   the config root (llm/ agents/ mcps/ server/ tools/ live here)")
 	fmt.Fprintln(stdout, "  --project-root the project root: agent workdir and relative-path base")
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Other commands: openheron init, openheron kb, openheron version")
@@ -185,6 +185,13 @@ func setupConfig(flags serverFlags) (*startup, error) {
 	if err != nil {
 		return nil, err
 	}
+	// ★ The editor writes <config root>/skills/, and the runtime reads
+	//   whatever its own probe resolved. Tell the config layer where that is,
+	//   so a skill written into a directory nobody loads is refused instead
+	//   of saved in silence.
+	if dir, ok := build.ResolveSkillsDir(); ok {
+		cfgSvc.SetSkillsDir(dir)
+	}
 	warnUnusedHomeConfig(cfgSvc.Root())
 
 	obs.Logger().Info("[main] openheron", "version", version)
@@ -236,8 +243,26 @@ func setupRuntime(ctx context.Context, st *startup) error {
 
 	// The filesystem tools take paths, and the agent has no other way to learn
 	// where the code lives. It arrives through WithPaths, not the spec.
-	builder := build.NewBuilder(st.mgr, build.WithPaths(st.projectRoot, st.dataDir))
+	builder := build.NewBuilder(st.mgr,
+		build.WithPaths(st.projectRoot, st.dataDir),
+		build.WithConfigService(st.cfgSvc))
 	st.builder = builder
+
+	// ★ A server's tool list can change while the configuration stands
+	//   still, and the tools have to be rebuilt for it. The rebuild is the
+	//   same road a configuration change takes, so the generation moves
+	//   through the same hook the reloader uses — a second way to move it
+	//   would be a second way to be wrong about it.
+	builder.SetGenerationBump(st.mgr.bump)
+
+	// ★ The pre-warm: every server some agent mounts is started in the
+	//   background as soon as the configuration is known — so the first
+	//   turn usually finds them up. ★ It does not wait for them: a
+	//   server that is still installing its own package must not decide
+	//   whether a turn can start, and the tools it brings join the next
+	//   turn.
+	st.mgr.setWarm(func(c *spec.Config) { builder.Warm(c) })
+	builder.Warm(st.cfg)
 
 	rt := run.New(run.Config{
 		AgentBuilder:   builder,
@@ -269,6 +294,7 @@ func setupRuntime(ctx context.Context, st *startup) error {
 	})
 	st.srv.SetConfigService(st.cfgSvc)
 	st.srv.SetToolsSource(toolsAdapter{b: builder})
+	st.srv.SetMCPSource(mcpAdapter{b: builder})
 	st.srv.SetContextSource(contextsAdapter{b: builder})
 	st.srv.SetCompactorSource(compactorAdapter{b: builder})
 	st.srv.SetStartTimeoutSource(func() time.Duration {
@@ -369,6 +395,12 @@ func serve(ctx context.Context, st *startup) error {
 		if err := st.rt.Shutdown(shutdownCtx); err != nil {
 			obs.Logger().Error("[main] shutdown failed", "err", err)
 		}
+		// ★ The MCP clients outlive the snapshot, so something has to end
+		//   them: the process is going away, and a stdio child is a
+		//   child process of this one.
+		if st.builder != nil {
+			st.builder.Close()
+		}
 		return nil
 	}
 }
@@ -392,6 +424,38 @@ type compactorAdapter struct{ b *build.Builder }
 
 func (a compactorAdapter) Summarizer(ctx context.Context, agentID string) (run.Summarizer, error) {
 	return a.b.SummarizerFor(ctx, agentID)
+}
+
+// mcpAdapter exposes the builder's MCP projection to the API layer.
+//
+// The builder owns the projection, and the projection owns the rule that
+// matters: the panel derives nothing — every value it shows is one the
+// runtime already holds.
+type mcpAdapter struct{ b *build.Builder }
+
+func (a mcpAdapter) MCPServers(ctx context.Context, agentID string) []api.MCPServerView {
+	views := a.b.MCPServers(ctx, agentID)
+	out := make([]api.MCPServerView, 0, len(views))
+	for _, v := range views {
+		view := api.MCPServerView{
+			Name:      v.Name,
+			Transport: v.Transport,
+			Status:    v.Status,
+			Error:     v.Error,
+			Tools:     make([]api.MCPToolView, 0, len(v.Tools)),
+		}
+		for _, t := range v.Tools {
+			view.Tools = append(view.Tools, api.MCPToolView{
+				Name:        t.Name,
+				ExposedName: t.ExposedName,
+				Tier:        t.Tier,
+				Status:      t.Status,
+				Reason:      t.Reason,
+			})
+		}
+		out = append(out, view)
+	}
+	return out
 }
 
 type toolsAdapter struct{ b *build.Builder }
@@ -437,10 +501,31 @@ func (a toolsAdapter) RuntimeTools(agentID string) api.Observed {
 	return api.Observed{Names: o.Names, Known: o.Known}
 }
 
+// agentConfig holds the configuration the process runs on.
+//
+// ★ The generation moves in exactly one place, and this is it: a server's
+//
+//	tool list can change while the configuration stands still, and the
+//	tools have to be rebuilt for it.
 type agentConfig struct {
 	mu  sync.RWMutex
 	cfg *spec.Config
 	gen uint64
+
+	// warm starts the mounted MCP servers in the background.
+	//
+	// ★ It is a hook because the builder does not exist yet when the
+	//   configuration is first loaded — and the pre-warm has to happen
+	//   for that first load too, so the first turn usually finds the
+	//   servers up.
+	warm func(*spec.Config)
+}
+
+// setWarm wires the pre-warm.
+func (c *agentConfig) setWarm(fn func(*spec.Config)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.warm = fn
 }
 
 func (c *agentConfig) Current() (*spec.Config, uint64) {
@@ -451,8 +536,27 @@ func (c *agentConfig) Current() (*spec.Config, uint64) {
 
 func (c *agentConfig) set(cfg *spec.Config) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.cfg = cfg
+	c.gen++
+	warm := c.warm
+	c.mu.Unlock()
+	// ★ The pre-warm is outside the lock: it starts child processes, and
+	//   a lock held across that would block every reader of the
+	//   configuration.
+	if warm != nil {
+		warm(cfg)
+	}
+}
+
+// bump moves the generation without changing the configuration.
+//
+// ★ The generation moves in exactly one place, and this is it: a server's
+//
+//	tool list can change while the configuration stands still, and the
+//	tools have to be rebuilt for it.
+func (c *agentConfig) bump() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.gen++
 }
 

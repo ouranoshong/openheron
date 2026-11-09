@@ -1,0 +1,26 @@
+# The filesystem tools. ★ They are **always mounted** — this file does not
+#   switch them on, it tunes their tiers.
+#
+# ★ Absent, the code's own list applies: the readers (`ls` `read_file` `glob`
+#   `grep`) and the delegation tools (`task` `write_todos` `skill`) run
+#   without a nod. Everything this middleware provides that is not named there
+#   asks: `write_file`, `edit_file`, `execute`.
+#
+# ★ `allows:` here is **additive**: a name joins the exceptions, and it never
+#   takes one away. So this file is a **widening** knob — it is how a
+#   deliberately unattended agent is spelled.
+#
+# ★ To narrow **one** agent, use that agent's own `tools:` list. It is the
+#   only place a tool is taken away, and it is per agent on purpose: removing
+#   a tool for everybody is a decision about the tool, and that lives in the
+#   code.
+#
+# The tools this middleware provides:
+#   ls  read_file  write_file  edit_file  glob  grep  execute
+#
+# ★ Let the write half run without a nod (an agent that edits and runs
+#   commands on its own). Delete the `allows: []` below and use this line:
+#
+# allows: [write_file, edit_file, execute]
+
+allows: []

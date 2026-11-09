@@ -574,11 +574,18 @@ func TestBuilderFailureSurfacesAsLoopError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The turn may never become ready when PrepareAgent fails; Wait must not
-	// hang forever, it must time out or report the failure.
+	// ★ The build's reason must reach the waiter, in the builder's own
+	//   words. It used to arrive as a start timeout, which named a symptom
+	//   and hid the file and the model behind it.
 	waitErr := turn.Wait(2 * time.Second)
-	if waitErr != nil && !errors.Is(waitErr, ErrStartTimeout) {
-		t.Fatalf("unexpected wait error: %v", waitErr)
+	if waitErr == nil {
+		t.Fatal("a turn whose agent cannot be built must not report success")
+	}
+	if !errors.Is(waitErr, ErrAgentUnavailable) {
+		t.Fatalf("wait error = %v, want ErrAgentUnavailable", waitErr)
+	}
+	if !errors.Is(waitErr, errBoom) {
+		t.Fatalf("the builder's own reason must survive, got %v", waitErr)
 	}
 }
 

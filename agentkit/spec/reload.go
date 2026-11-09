@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -48,25 +47,39 @@ func (s *Service) HotDirFingerprints() map[string]string {
 	return out
 }
 
+// dirEntryLines fingerprints a directory **tree**: every file under it, by
+// relative path, size and modification time.
+//
+// ★ One level was not enough once `skills/` became a partition: a skill is
+//
+//	`skills/<name>/SKILL.md`, and editing that file changes neither the name
+//	nor the size of the folder above it — the old walk saw a directory and
+//	moved on, so a saved skill never reached the next turn. The walk is
+//	recursive for every partition now; the flat ones simply have nothing
+//	below them.
 func dirEntryLines(full string) []byte {
-	entries, err := os.ReadDir(full)
-	if err != nil {
-		return nil
-	}
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		names = append(names, e.Name())
-	}
-	sort.Strings(names)
-
 	var buf bytes.Buffer
-	for _, n := range names {
-		info, err := fs.Stat(os.DirFS(full), n)
+	// ★ filepath.WalkDir visits in lexical order and does not follow
+	//   symlinks — the fingerprint only has to be stable, and a symlink loop
+	//   would make it endless.
+	_ = filepath.WalkDir(full, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			continue
+			return nil
 		}
-		fmt.Fprintf(&buf, "%s %d %d\n", n, info.Size(), info.ModTime().UnixNano())
-	}
+		rel, rerr := filepath.Rel(full, path)
+		if rerr != nil {
+			return nil
+		}
+		if rel == "." {
+			return nil
+		}
+		info, ierr := d.Info()
+		if ierr != nil {
+			return nil
+		}
+		fmt.Fprintf(&buf, "%s %d %d\n", filepath.ToSlash(rel), info.Size(), info.ModTime().UnixNano())
+		return nil
+	})
 	return buf.Bytes()
 }
 

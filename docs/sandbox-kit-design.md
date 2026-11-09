@@ -1,104 +1,108 @@
-# Openheron as a Docker Sandbox Kit — Design
+# 把 openheron 打成 Docker Sandbox Kit —— 设计方案
 
-> **Status: a proposal. Nothing in §2 or later exists in the tree.**
-> §1 describes the code as it actually is; §2 onward describes what *would* be built.
-> The decision this document records: openheron's **whole process** runs inside a
-> microVM, and the host keeps nothing but a forwarded HTTP/SSE port.
+> **状态：§2 往后已经建成了 —— 树里就是它。**
+> §1 讲的是**动手之前**的代码样子（那时 openheron 只是一个进程），
+> 所以它读起来像一段历史；§2 往后讲的是**建成的样子**：三份描述文件、
+> 内容配方与入口脚本都在 `sandbox-kit/` 里，`make kit` 构建它们，
+> CI 的 `kit` job 随同一个 release tag 一起发布。
+> ★ **逐节的状态**：
 >
-> The reasons are in §2.1 and §3; the short version is that this is the only
-> isolation level that also covers the **read path**, and it costs openheron
-> **no code change at all** — the boundary moves outward instead of inward.
+> | 节 | 状态 |
+> |---|---|
+> | §1 代码现状（动手之前） | **历史** —— openheron 今天仍然是一个进程，只是它现在能进沙箱 |
+> | §2 目标与形态 | **已建成** —— `sandbox-kit/` 里的描述文件、配方、入口脚本与每厂商一份的 mixin |
+> | §3 另一条接缝 | **已定** —— 往里那条（只隔离 `execute`）已经放弃 |
+> | §4 决策 | §4.1 的六条**照着建了**；§4.2 的三条**仍未定**（owner 的决定） |
+> | §5 验收 | `sandbox-kit/acceptance/run.sh` —— 每一句结论都有一个会失败的检查 |
+> | §6 实测 | **已跑** —— 转发层确实不缓冲，工作区路径确实被注入 |
+>
+> 这份文档记录的决定是：**openheron 的整个进程**跑在 microVM 里，
+> 宿主只留一条转发出来的 HTTP/SSE 端口。
+>
+> 理由在 §2.1 和 §3；短版本是：这是唯一一层**连读路径一起罩住**的隔离，
+> 而且对 openheron **一行代码都不用改** —— 边界是往外挪的，不是往里挪的。
+>
+> 本文按 AGENTS.md 的文档语言规则**只有中文版** —— 架构与代码设计类文档不做双语。
 
 ---
 
-## 1. The code as it is
+## 1. 代码现状
 
-### 1.1 openheron is one process with three surfaces
+### 1.1 openheron 是一个进程、三对外表面
 
-openheron ships as a single static binary (`Makefile:96`, `Makefile:108`). At
-runtime it is **one process** that opens three surfaces to the outside:
+openheron 交付为单个静态二进制（`Makefile:96`、`Makefile:108`）。运行时它是
+**一个进程**，对外开三对表面：
 
-- **An HTTP/SSE server.** `main.go:265` builds it:
-  `api.New(rt, fm, hserver.WithHostPorts(st.addr))`. The listen address comes
-  from `main.go:217`: `override("LISTEN_ADDR", cfg.Server.ListenAddr)`.
-  `POST /v2/run` (`api/v2_files.go:58`) is the turn endpoint; it answers with an
-  SSE stream (`api/v2_run.go:146`, `stream := s.newStream(c)`) that flushes as it
-  goes (`api/v2_run.go:155`, `api/v2_run.go:176`; `transport/sse.go:91`).
-- **The file tools and the shell tool.** `agentkit/build/snapshot.go:56` builds
-  one backend, `fsx.New(fsx.Config{Root: s.projectRoot, ExtraRoots: roots})`, and
-  `agentkit/build/snapshot.go:60-61` hands the same value to two roles:
-  `out.backend = local` (the file tools) and `out.streamingShell = local` (the
-  `execute` tool). The shell side runs
-  `exec.CommandContext(ctx, "/bin/sh", "-c", command)` with `cmd.Dir = s.root`
-  (`agentkit/fsx/fsx.go:747`, `agentkit/fsx/fsx.go:750`).
-- **The model API.** `llm/common/model.go:66-72` hands the provider config to
-  `acl.NewClient`.
+- **HTTP/SSE 服务**。`main.go:265` 把它建起来：
+  `api.New(rt, fm, hserver.WithHostPorts(st.addr))`。监听地址来自 `main.go:217`：
+  `override("LISTEN_ADDR", cfg.Server.ListenAddr)`。
+  `POST /v2/run`（`api/v2_files.go:58`）是回合入口；它以 SSE 流应答
+  （`api/v2_run.go:146`，`stream := s.newStream(c)`），边跑边 flush
+  （`api/v2_run.go:155`、`api/v2_run.go:176`；`transport/sse.go:91`）。
+- **文件工具与 shell 工具**。`agentkit/build/snapshot.go:56` 建出同一个后端
+  `fsx.New(fsx.Config{Root: s.projectRoot, ExtraRoots: roots})`，
+  `agentkit/build/snapshot.go:60-61` 把同一个值交给两个角色：
+  `out.backend = local`（文件工具）与 `out.streamingShell = local`（`execute` 工具）。
+  shell 那侧跑的是 `exec.CommandContext(ctx, "/bin/sh", "-c", command)`，
+  并且 `cmd.Dir = s.root`（`agentkit/fsx/fsx.go:747`、`agentkit/fsx/fsx.go:750`）。
+- **模型 API**。`llm/common/model.go:66-72` 把 provider 配置交给 `acl.NewClient`。
 
-The web UI is **inside the binary**: `main.go:35` embeds `all:web/dist`, and
-`main.go:337` mounts it at `/`. `main.go:333` is the warning you get when the
-frontend was not built (`make web`, `Makefile:29-31`).
+Web UI 在**二进制里**：`main.go:35` 内嵌了 `all:web/dist`，`main.go:337` 把它挂在 `/`。
+`main.go:333` 是前端没构建时你会看到的警告（`make web`，`Makefile:29-31`）。
 
-★ Consequence: openheron is **not** a CLI coding agent. It has no TUI, no
-per-command approval prompt in the terminal, no session picker. It is a server
-that a browser talks to.
+★ 由此得出的结论：openheron **不是**一个 CLI 编码 agent。它没有 TUI，没有终端里的
+逐命令确认，没有会话选择器。它是一个**浏览器去连的服务**。
 
-### 1.2 The process is the isolation unit today
+### 1.2 今天隔离的单位是"进程"
 
-Everything above runs in one process, as one user, on one kernel:
+上面这些全都跑在同一个进程里、同一个用户下、同一个内核上：
 
-- the same user as whoever started the server;
-- the same kernel, the same filesystem, the same network namespace;
-- the same process as the one holding the model credentials.
+- 与启动服务的是同一个用户；
+- 同一个内核、同一份文件系统、同一个网络命名空间；
+- 与持有模型凭据的是同一个进程。
 
-`agentkit/spec/defaults.go:11` puts `execute` in the `ask` tier:
+默认档位是 **`ask`**（`agentkit/build/policy.go:55`）：没人点名的工具先问一句，
+例外都是被点名的那些 —— 代码认识的内置工具（`agentkit/build/tools.go:61`），
+以及某个文件自己的 `allows:` 列出的那些。所以 `execute` 会问，`write_file` 与
+`edit_file` 也一样。
 
-```go
-Ask:  []string{"write_file", "edit_file", "execute", "kb_index"},
-```
-
-and the factory `main` agent turns it off outright
-(`initcfg/templates/agents/main.md:7`):
+而工厂的 `main` agent 压根不带它们（`agentkit/templates/files/agents/main.md:15`）：
 
 ```
-disabled_tools: [write_file, edit_file, execute]
+tools: [ls, read_file, glob, grep, task, write_todos]
 ```
 
-★ An approval is a **policy** boundary, not a **technical** one. Once the approval
-is granted, the command has the full authority of the openheron process — and so
-does `read_file`, which never asks at all. `docs/fs-backend-design.md:166-171`
-states the reasoning outright: reads are not confined because `execute` can
-already `cat` any file the process can read, so confining `read_file` would buy
-no safety.
+★ 不是「关掉」—— `tools` 是**白名单**，它没点名的工具就不在那个 agent 的工具集里。
+写这件事归 `task`。
 
-### 1.3 The two possible seams
+★ 审批是**策略**边界，不是**技术**边界。批一旦给了，这条命令就拥有 openheron 进程的
+全部权限 —— 而 `read_file` 连问都不问。`docs/fs-backend-design.md:166-171` 把道理写得很直白：
+读不做收敛，因为 `execute` 本来就能 `cat` 进程读得到的任何文件，收敛 `read_file` 换不来安全。
 
-There are exactly two places an isolation boundary could go, and this document
-picks one:
+### 1.3 只有两个可能的接缝
 
-- **Inward** — keep the server on the host and move only the `execute` tool
-  into an isolation unit. It replaces the `StreamingShell` value and nothing
-  else, so the server, the file tools and the state store stay on the host.
-  ★ **That seam was dropped** (§3): a boundary around one tool leaves the read
-  path open, and a boundary around the process closes it for the same work.
-- **Outward** — move the **whole process** into an isolation unit. Then the
-  file tools, the shell tool, the model client and the state store are all
-  inside, and the host keeps only a forwarded port.
+隔离边界只有两个可去的地方，这份文档选其中一个：
 
-★ The outward seam is the one this document takes, because it is the only one
-that closes the read path. `read_file` is served by the same `fsx.Local`
-(`agentkit/build/snapshot.go:60`); if the process is inside the VM, the read is
-inside the VM too.
+- **往里** —— 服务留在宿主，只把 `execute` 工具搬进隔离单元。
+  它只换掉 `StreamingShell` 这一个值，服务、文件工具与状态存储都留在宿主。
+  ★ **那条接缝已经放弃**（§3）：围着单个工具的边界留着读路径敞着，
+  而围着进程的边界花同样的功夫就把它关上了。
+- **往外** —— 把**整个进程**搬进隔离单元。于是文件工具、shell 工具、模型客户端、
+  状态存储全在里面，宿主只留一条转发端口。
 
-### 1.4 The credential model as it is
+★ 这份文档取的是往里之外的那条：**往外的接缝**。因为只有它能关上读路径。
+`read_file` 由同一个 `fsx.Local` 提供（`agentkit/build/snapshot.go:60`）；进程在 VM 里，
+这次读也在 VM 里。
 
-openheron already refuses a literal key. `agentkit/spec/write.go:493` is the
-error a writer sees:
+### 1.4 凭据模型现状
+
+openheron 已经拒绝字面量密钥。写配置的人看到的是 `agentkit/spec/write.go:580`：
 
 ```
 api_key must be a reference, not a literal: use ${ENV_VAR} or @file:/path so the secret stays out of the repository
 ```
 
-`agentkit/spec/load.go:34-45` resolves the reference at load time:
+`agentkit/spec/load.go:35-47` 在加载时把引用解析掉：
 
 ```go
 rawKey := p.APIKey
@@ -113,17 +117,14 @@ if !resolved {
 }
 ```
 
-`agentkit/spec/expand.go:13` is the `@file:` branch; `agentkit/spec/expand.go:40`
-is `envVarName`.
+`agentkit/spec/expand.go:13` 是 `@file:` 分支；`agentkit/spec/expand.go:40` 是 `envVarName`。
 
-★ Two facts follow, and §2.8 depends on both:
+★ 由此得到两个事实，§2.8 全靠它们：
 
-1. The key is a **reference** in the config, and the resolved value lives in the
-   **process memory** of whatever runs the provider.
-2. **An unresolved reference is not fatal.** `p.APIKey = ""` and the config still
-   loads; the failure surfaces later, as a 401.
+1. 配置里密钥是一个**引用**，解析出来的值活在跑 provider 的那个进程的**内存**里。
+2. **引用解析不出来不是致命错误**。`p.APIKey = ""`，配置照样加载；失败延后表现为 401。
 
-`llm/common/model.go:56-58` only requires a base URL —
+`llm/common/model.go:56-58` 只要求有 base URL ——
 
 ```go
 if c.BaseURL == "" {
@@ -131,147 +132,126 @@ if c.BaseURL == "" {
 }
 ```
 
-— and hands `APIKey` through to `acl.NewClient` (`llm/common/model.go:66-72`)
-without requiring it to be non-empty. `llm/common/logging.go:157` redacts
-`apikey` and `authorization` headers from the logs.
+—— 然后把 `APIKey` 交给 `acl.NewClient`（`llm/common/model.go:66-72`），
+并不要求它非空。`llm/common/logging.go:157` 会在日志里把 `apikey` 与 `authorization` 头抹掉。
 
-### 1.5 The paths that would move into the VM
+### 1.5 会搬进 VM 的那些路径
 
-The config root has exactly three levels (`AGENTS.md`): `--config-dir` →
-`$OPENHERON_CONFIG_DIR` → `<projectRoot>/.openheron`. `main.go:184` builds the
-service from the two flags parsed at `main.go:80-95`.
+配置根只有三级（`AGENTS.md`）：`--config-dir` → `$OPENHERON_CONFIG_DIR` →
+`<projectRoot>/.openheron`。`main.go:184` 用 `main.go:80-95` 解析出来的两个参数建服务。
 
-Inside the process:
+进程内部：
 
-- the **project root** — `main.go:219`, `override("PROJECT_ROOT", cfgSvc.ProjectRoot())`;
-  it is the root every path in a shell command is relative to
-  (`agentkit/fsx/fsx.go:750`) and the root the file tools are confined to
-  (`agentkit/fsx/fsx.go:194`, `agentkit/fsx/fsx.go:219`);
-- the **data dir** — `main.go:218`, `override("DATA_DIR", cfgDataDir)`; sessions
-  live at `main.go:224` (`sessionsRoot := filepath.Join(st.dataDir, "sessions")`)
-  and checkpoints next to them (`main.go:229-232`);
-- the **skills dir**, added as a second root at `agentkit/build/snapshot.go:52-54`.
+- **项目根** —— `main.go:219`，`override("PROJECT_ROOT", cfgSvc.ProjectRoot())`；
+  它是 shell 命令里相对路径的基准（`agentkit/fsx/fsx.go:750`），
+  也是文件工具收敛的边界（`agentkit/fsx/fsx.go:194`、`agentkit/fsx/fsx.go:219`）；
+- **数据目录** —— `main.go:218`，`override("DATA_DIR", cfgDataDir)`；
+  会话在 `main.go:224`（`sessionsRoot := filepath.Join(st.dataDir, "sessions")`），
+  checkpoint 在它旁边（`main.go:229-232`）；
+- **skills 目录** —— 作为第二个根加进来，见 `agentkit/build/snapshot.go:52-54`。
 
-### 1.6 The release model constrains the integration
+### 1.6 发布模型约束了这次集成
 
-`Makefile:96` names the six shipping targets:
+`Makefile:96` 列了六个发布目标：
 
 ```
 linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 ```
 
-and `Makefile:108` builds them with `CGO_ENABLED=0`. The release artifacts are
-static, dependency-free binaries produced by a cross-compile on Linux — no C
-toolchain is available on the runner for `darwin/*` or `windows/*`.
+`Makefile:108` 用 `CGO_ENABLED=0` 构建它们。发布产物是静态、无依赖的二进制，
+在 Linux 上交叉编译产出 —— runner 上没有 C 工具链能给 `darwin/*` 或 `windows/*` 用。
 
-★ Any integration that needs cgo breaks the release model. A Kit does not: a
-Kit is an image, and openheron goes into it as the same static binary.
+★ 任何需要 cgo 的集成都会破坏发布模型。Kit 不会：Kit 就是一个镜像，
+openheron 以同一份静态二进制进到里面。
 
-### 1.7 The startup chain, and where each root comes from
+### 1.7 启动链路，以及每个根从哪里来
 
-openheron resolves three roots, at three different moments. The sandbox
-touches all three, so it is worth stating where each one comes from:
+openheron 解析三个根，而且是在三个不同时刻解析的。沙箱三个都会碰到，
+所以每个的来源值得写清楚：
 
-| Root | Resolved by | Line |
+| 根 | 怎么解析 | 位置 |
 |---|---|---|
-| project root | `--project-root`, else the **working directory** | `agentkit/spec/config.go:157-164` |
-| config root | `--config-dir`, else `$OPENHERON_CONFIG_DIR`, else `<projectRoot>/.openheron` | `agentkit/spec/config.go:170-177` |
-| data dir | `$DATA_DIR`, else `<configRoot>/state` | `main.go:218`, `agentkit/spec/config.go:224-232` |
+| 项目根 | `--project-root`，否则取**工作目录** | `agentkit/spec/config.go:247-258` |
+| 配置根 | `--config-dir`，否则 `$OPENHERON_CONFIG_DIR`，否则 `<projectRoot>/.openheron` | `agentkit/spec/config.go:260-272` |
+| 数据目录 | `$DATA_DIR`，否则 `<configRoot>/state` | `main.go:218`、`agentkit/spec/config.go:314-326` |
 
-★ **The working directory is the default project root, and the config root
-follows it.** A process started in a directory *is* a process rooted there:
-`cd` into the workspace, and the configuration lands in
-`<workspace>/.openheron`.
+★ **工作目录是项目根的默认值，而配置根跟着它走。** 在哪个目录启动的进程，
+就是以那个目录为根的进程：`cd` 进工作区，配置就落在 `<工作区>/.openheron`。
 
-★ **`$PROJECT_ROOT` does not move the config root.** `main.go:184` builds the
-service from the two **flags** — `spec.NewService(flags.configDir, flags.projectRoot)` —
-and only afterwards does `main.go:219` apply the `PROJECT_ROOT` override, which
-reaches the agent's workdir and the filesystem backend's root
-(`agentkit/build/snapshot.go:56`) but not the config root. A container that
-sets `$PROJECT_ROOT` alone ends up with two different roots: the agent works in
-one directory, the configuration is read from another.
+★ **`$PROJECT_ROOT` 挪不动配置根。** `main.go:184` 用两个**参数**建服务 ——
+`spec.NewService(flags.configDir, flags.projectRoot)` —— 之后 `main.go:219`
+才应用 `PROJECT_ROOT` 这个环境变量覆盖；它够得着 agent 的工作目录与文件后端的根
+（`agentkit/build/snapshot.go:56`），却够不着配置根。
+一个只设了 `$PROJECT_ROOT` 的容器会得到两个不同的根：
+agent 在一个目录里干活，配置却从另一个目录读。
 
-★ `openheron init` is non-interactive and idempotent, which is what makes it
-usable as a startup step:
+★ `openheron init` 是非交互且幂等的 —— 这正是它能当启动步骤用的原因：
 
-- every input is a flag (`initcmd.go:16-42`): `--dir`, `--config-dir`,
-  `--model`, `--provider`, `--base-url`, `--env`, `--no-policy`, `--tools`,
-  `--force`, `--dry-run`, `--json`;
-- it writes only what is missing and reports the rest as kept
-  (`initcmd.go:120`, `initcmd.go:147-148`);
-- it writes to `<dir>/.openheron` and **never reads `$OPENHERON_CONFIG_DIR`**
-  (`initcmd.go:57-65`).
+- 每个输入都是一个参数（`initcmd.go:16-42`）：`--dir`、`--config-dir`、
+  `--model`、`--provider`、`--base-url`、`--env`、`--tools`、
+  `--force`、`--dry-run`、`--json`；
+- 它只写缺的东西，其余报为保留（`initcmd.go:120`、`initcmd.go:118`）；
+- 它写进 `<dir>/.openheron`，而且**从不读 `$OPENHERON_CONFIG_DIR`**
+  （`initcmd.go:57-65`）。
 
-★ That last point is a trap for the sandbox: `init` and the server must agree
-on the config root, and the only way they agree by default is by sharing the
-**directory** — `init --dir <workspace>` puts the configuration at
-`<workspace>/.openheron`, which is exactly where the server looks when its
-working directory is that workspace.
+★ 最后这一条是沙箱里的一个坑：`init` 与服务必须对配置根达成一致，
+而默认情况下唯一的达成方式就是**共用同一个目录** ——
+`init --dir <工作区>` 把配置放在 `<工作区>/.openheron`，
+那正是工作目录为该工作区时服务要找的地方。
 
 ---
 
-## 2. What would be built
+## 2. 建成的样子
 
-### 2.1 Goal
+### 2.1 目标
 
-Run the **whole openheron process** inside a microVM, with the project
-directory bind-mounted, so that a turn that misbehaves — a malicious
-instruction pulled from a web page, a dependency install script, an agent that
-has been talked into "clean up the workspace" — damages the project directory
-and nothing else.
+让**整个 openheron 进程**跑在 microVM 里，把项目目录 bind mount 进去，
+这样一次跑偏的回合 —— 从网页里捞进来的一条恶意指令、一个依赖安装脚本、
+一个被说成"把工作区清理一下"的 agent —— 能损坏的只有项目目录，别的什么都碰不到。
 
-The host keeps exactly one thing: a forwarded port for the HTTP/SSE server.
+宿主只留一样东西：给 HTTP/SSE 服务转发的一条端口。
 
-Non-goals: replacing the approval flow, changing the agent model, changing
-the API, or making openheron faster.
+非目标：替换审批流程、改 agent 模型、改 API、或者让 openheron 变快。
 
-★ **The difference from the inward seam (§1.3) is the whole point.** Keeping
-the server on the host and moving only `execute` into the VM hardens the
-command path and leaves the read path open. Here the read path is inside too,
-because the process that serves it is inside.
+★ 与**往里那条接缝**（§1.3）的差别正是重点。把服务留在宿主、
+只把 `execute` 搬进 VM，加固的是命令路径，读路径照旧敞着。
+这里读路径也在里面，因为提供读的服务进程本身就在里面。
 
-### 2.2 The shape: a v3 workload Kit
+### 2.2 形态：一个 v3 workload Kit
 
-Docker's Kit specification (v3) is the packaging format. The facts that matter,
-taken from the specification itself:
+Docker 的 Kit 规范（v3）是打包格式。真正要紧的事实，都取自规范本身：
 
-- A Kit is **one OCI image**. Its manifest annotation
-  `vnd.docker.sandbox.kit.descriptor` carries the descriptor; its layers carry
-  the content. There is no kit-specific media type: an engine that does not
-  read the annotation runs it as an ordinary image.
-- There are exactly two published kinds. A **`workload`** supplies a root
-  filesystem and the launch config (entrypoint, cmd, env, user, workdir); a
-  **`mixin`** supplies an overlay. Exactly one workload per composition.
-- The descriptor is authored in YAML; the content recipe is ordinary
-  Dockerfile text. The default authoring form is the **companion pair**:
-  `<stem>.yaml` beside `<stem>.dockerfile`, found by the filename-stem
-  convention.
-- Decoding is **strict**: any unrecognized field anywhere is an error, because
-  a misspelled key silently ignored would be a policy silently absent.
-- A published Kit **stages its own sources** at
-  `/usr/share/sandbox/kit/<stem>/kit.yaml` and
-  `/usr/share/sandbox/kit/<stem>/kit.dockerfile`.
-- The runtime guarantees a platform floor: `bash`, `sh`, `curl`, `git`, a
-  populated CA store, and a non-root default user named `agent`, uid `1000`,
-  home `/home/agent`.
+- Kit 就是**一个 OCI 镜像**。它的 manifest annotation
+  `vnd.docker.sandbox.kit.descriptor` 带着描述文件；镜像层带着内容。
+  没有 Kit 专属的 media type：不读这个 annotation 的引擎就当普通镜像跑。
+- 已发布的 Kit 只有两种。**`workload`** 提供根文件系统与启动契约
+  （entrypoint、cmd、env、user、workdir）；**`mixin`** 提供一层叠加。
+  一次组合里有且仅有一个 workload。
+- 描述文件用 YAML 写；内容配方是普通 Dockerfile 文本。默认的写法是**配对文件**：
+  `<stem>.yaml` 与 `<stem>.dockerfile` 并排放，靠文件名主干约定互相找到。
+- 解码是**严格**的：任何位置的任何不认识的字段都是错误 —— 一个拼错的键被静静忽略，
+  就等于一份策略被静静漏掉。
+- 已发布的 Kit 会**把自己的源文件放进镜像**，位置在
+  `/usr/share/sandbox/kit/<stem>/kit.yaml` 与
+  `/usr/share/sandbox/kit/<stem>/kit.dockerfile`。
+- 运行时保证一条平台底线：`bash`、`sh`、`curl`、`git`、一份装好的 CA 证书库，
+  以及一个非 root 的默认用户 `agent`，uid `1000`，家目录 `/home/agent`。
 
-openheron is a **workload**, not a mixin: its layers are the root filesystem of
-the machine the agent works in.
+openheron 是 **workload**，不是 mixin：它的层就是 agent 干活那台机器的根文件系统。
 
-★ A workload's image config carries the launch contract, and the specification
-is explicit that the descriptor duplicates none of it. That is what keeps §2.5
-short.
+★ workload 的镜像配置承载启动契约，而规范明确说描述文件不重复它。
+这就是 §2.5 能那么短的原因。
 
-### 2.3 The descriptors
+### 2.3 三个描述文件
 
-There are three, and the split is the point. The real files are
-**`sandbox-kit/openheron/openheron.yaml`** — the workload — and
-**`sandbox-kit/openheron-deepseek/openheron-deepseek.yaml`** /
-**`sandbox-kit/openheron-openai/openheron-openai.yaml`** — the mixins, one
-per vendor. Each sits beside its own recipe where it has one; a mixin has
-none, because it carries declarations rather than content.
+有三个，而这个切分正是重点。真正的文件是
+**`sandbox-kit/openheron/openheron.yaml`** —— workload ——
+与 **`sandbox-kit/openheron-deepseek/openheron-deepseek.yaml`** /
+**`sandbox-kit/openheron-openai/openheron-openai.yaml`** —— 每厂商一份 mixin。
+各自配一份自己的配方（若有）；mixin 没有配方，
+因为它带的是声明而不是内容。
 
-The workload:
+workload：
 
 ```yaml
 # syntax=docker/sandbox-kit:3
@@ -311,13 +291,12 @@ capabilities:
           env: [WORKSPACE_DIR]
 ```
 
-★ **The snippet is a copy; the descriptor is the truth.** It is trimmed here —
-the comments and the `description` fields are left out — so it reads as a
-sketch rather than as the file itself. When the two disagree, the file wins.
+★ **这段是抄的，描述文件才是准的。** 这里做了裁剪 —— 注释与 `description`
+字段都省掉了 —— 所以它读起来是一份草图，而不是文件本身。两者不一致时以文件
+为准。
 
-A mixin — declaration only, one per vendor. `openheron-deepseek/` and
-`openheron-openai/` differ only in the vendor's names: the host, the service,
-the variable and the two description strings.
+mixin —— 纯声明，每个厂商一份。`openheron-deepseek/` 与 `openheron-openai/`
+只差厂商名：主机、service、变量名和两处描述字符串。
 
 ```yaml
 # syntax=docker/sandbox-kit:3
@@ -346,10 +325,9 @@ capabilities:
           - {domain: api.deepseek.com, header: Authorization, format: "Bearer %s"}
 ```
 
-★ **Any number of vendor mixins compose onto one workload**, and they do not
-interfere: the allow lists union per phase, and each mixin's credential has
-its own service name. Two mixins that claim the **same** service do not
-compose — the runtime refuses them:
+★ **任意多个厂商 mixin 都可以叠到同一个 workload 上**，而且互不干扰：
+allow 列表按阶段取并集，每份 mixin 的凭据有自己的 service 名。
+★ 但两个声称**同一个 service** 的 mixin 合不了 —— 运行时会拒绝：
 
 ```
 error: resolve kits: merge: .../openheron-deepseek (capabilities[1]) and
@@ -357,54 +335,49 @@ error: resolve kits: merge: .../openheron-deepseek (capabilities[1]) and
   one credential has one owner
 ```
 
-★ **A mixin is a file, not an image.** The descriptor is the whole content: a
-directory holding one YAML file is a complete mixin, and the runtime builds
-the declaration-only image from it. That is what makes a mixin usable by a
-user who has never built anything — there is no Dockerfile, no `make`, and no
-registry to publish to. Measured: a hand-written directory was consumed
-exactly like a built one (§6).
+★ **mixin 是一个文件，不是一镜像。** 描述文件就是它的全部内容：
+一个只放着一个 YAML 文件的目录，就是一份完整的 mixin，
+运行时自己把这份纯声明构建成镜像。这正是 mixin 能被从没构建过任何东西的
+用户用起来的原因 —— 没有 Dockerfile，没有 `make`，也没有 registry 可推。
+实测：手写的目录与构建出来的镜像被同样地消费（§6）。
 
-★ **Three things the runtime insists on**, all measured:
+★ **运行时坚持的三件事**，都是实测的：
 
-- **A directory, not a file.** `--kit ./mixin.yaml` is refused —
-  `artifact zip "./mixin.yaml": zip: not a valid zip file`: the path is taken
-  as an archive.
-- **The directory name is the file name's stem.** The frontend finds the
-  descriptor by that convention (§3.1 of the specification).
-- **A v3 mixin is not a ZIP.** Zipping the directory is refused with
-  `artifact: spec.yaml (or spec.yml) is required` — that is the older kit
-  grammar, where a kit is a `spec.yaml` and an optional `files/` directory.
+- **要目录，不要文件。** `--kit ./mixin.yaml` 会被拒 ——
+  `artifact zip "./mixin.yaml": zip: not a valid zip file`：
+  那个路径被当成了压缩包。
+- **目录名就是文件名的词干。** 前端按这个约定找描述文件
+  （规范的 §3.1）。
+- **v3 的 mixin 不是 ZIP。** 把目录打包会被拒：
+  `artifact: spec.yaml (or spec.yml) is required` —— 那是更老的 kit 语法，
+  一个 kit 是一个 `spec.yaml` 加一个可选的 `files/` 目录。
 
-★ So the file form is the one a **user** can take: copy one YAML, edit one
-line to point at their own endpoint, and compose it. The image form is the
-one that is **measured and versioned**.
+★ 所以文件形态是**用户**能拿的那一种：复制一个 YAML，
+改一行指向自己的端点，然后组合起来。而镜像形态是**被实测过、版本固定**的那一种。
 
-★ **Where a Kit may come from is a policy, not a detail.** The runtime keeps
-an allowlist of Kit sources, and by default it holds two entries:
+★ **Kit 能从哪来是策略，不是细节。** 运行时维护一份 Kit 来源的允许列表，
+默认只有两项：
 
 ```
 ["docker.io/","dhi.io/"]
 ```
 
-★ A Kit from anywhere else is refused, and the refusal names the command that
-would allow it. That is deliberate in both directions: a Kit is executable
-content, so where it comes from is a decision the host makes — and the user
-who wants a Kit from their own registry needs an administrator, not a flag.
+★ 别的来源会被拒，而拒绝的报错里就写着想放行它的命令。
+这在两个方向上都是有意的：Kit 是可执行的内容，所以它从哪来是宿主做的决定 ——
+而想用自家 registry 的用户需要的是管理员，而不是一个开关。
 
-★ **A registry has to serve HTTPS.** There is no plain-HTTP option, and the
-failure says so:
+★ **registry 必须提供 HTTPS。** 没有明文 HTTP 的选项，失败信息也会这么讲：
 
 ```
 error: resolve kits: kit "…": fetch manifest: Get "https://…/v2/…/manifests/…":
   http: server gave HTTP response to HTTPS client
 ```
 
-★ **A mixin carries no initialization hook**, and that is a measured
-conclusion rather than a preference. `openheron init` maintains **one**
-provider configuration per configuration root: once the root holds a usable
-model, it reuses it and ignores `--provider`, `--env` and `--base-url`
-(`initcfg/initcfg.go:278-286`). A mixin whose hook tried to seed a second
-provider would therefore be ignored, and the log says so:
+★ **mixin 不带初始化 hook** —— 这是实测结论，不是偏好。
+`openheron init` 每个配置根只维护**一份** provider 配置：
+一旦根里已有可用的模型，它就复用它并忽略 `--provider`、`--env`、`--base-url`
+（`initcfg/initcfg.go:271-278`）。
+所以一份想种下第二个 provider 的 hook 会被无视，日志也这么说：
 
 ```
 > 003-startup-openheron-openai/000-cmd.sh
@@ -412,20 +385,16 @@ note: model "deepseek/deepseek-flash" is already declared; it is reused as is
 nothing to do: /home/you/my-project is already covered by the existing configuration
 ```
 
-★ So the **second vendor's configuration is the user's to write** —
-`llm/openai.yaml` on the mount, by hand or through the configuration editor.
-The workload's own hook seeds the default provider; the mixins add the
-credentials and the network rules for the others.
+★ 所以**第二个厂商的配置归用户写** —— 挂载上的 `llm/openai.yaml`，
+手写或用配置编辑器都行。
+workload 自己的 hook 种下默认 provider；mixin 补上别家的凭据与网络规则。
 
-★ **The workload declares no credential.** Which provider, which endpoint and
-which variable name are the user's business, and a workload that ships
-openheron has no business choosing them for the user. The credentials move
-into the **mixins** — overlays that land on a workload and carry
-declarations rather than content.
+★ **workload 不声明任何凭据。** 用哪家 provider、哪个端点、哪个变量名，
+都是用户的事；而一个只负责交付 openheron 的 workload，没资格替用户挑。
+凭据因此移进 **mixin** —— 叠加在 workload 上、带声明而不带内容的覆盖层，每个厂商一份。
 
-★ **The network rule travels with the credential.** The runtime checks that
-every inject domain appears **literally** in the allow list for the same
-phase, and the workload's bare `*` does not satisfy that check:
+★ **网络规则和凭据必须一起走。** 运行时要每个 inject 域名**逐字**出现在同阶段的
+allow 列表里，而 workload 的裸 `*` 不满足这条检查：
 
 ```
 error: resolve kits: kit ".../openheron-deepseek": effective v3 descriptor:
@@ -433,51 +402,44 @@ error: resolve kits: kit ".../openheron-deepseek": effective v3 descriptor:
   inject domain "api.deepseek.com" is not in the network policy's runtime allow list
 ```
 
-So the mixin names the host outright, and the two allow lists union per
-phase: the workload keeps `*` — "this Kit does not restrict" — and the mixin
-adds the host it needs. That is a mixin doing exactly what mixins are for.
+所以 mixin 把主机名写实，而两张 allow 列表按阶段取并集：
+workload 保留 `*`（"这个 Kit 不限制"），mixin 补上它需要的主机。
+这正是 mixin 该干的事。
 
-★ **The mixins are optional, and that is the point of the split.**
+★ **mixin 是可选的（要用几家就组合几家），而这正是切分的意义。**
 
-| | the container holds | does the real key enter the VM |
+| | 容器里是什么 | 真密钥进不进 VM |
 |---|---|---|
-| workload **+** credential mixin | `proxy-managed` | no |
-| workload alone, key injected | `sk-…` | **yes** |
+| workload **+** credential mixin | `proxy-managed` | 不进 |
+| 只有 workload，密钥自己注入 | `sk-…` | **进** |
 
-★ And the sentinel appears whether or not the key is bound: the container always
-learns which variable to use, and only the **real value** needs a binding. A
-vendor mixin with no binding is a 401 away, not a broken sandbox.
+★ 而且哨兵值**有没有绑定都在**：容器总是知道自己该用哪个变量，
+只有**真值**才需要绑定。没有绑定的厂商 mixin 差一个 401，不是一个坏掉的沙箱。
 
-★ The points that are not decoration:
+★ 几处不是装饰的地方：
 
-- **`com.docker.sandbox/sbx@1`** declares that the workload is prepared for
-  the host to launch the agent's way, and it is the capability that carries
-  the launch contract — the shells and the user account the base image has to
-  provide.
-- **`com.docker.sandbox/long-running@1`** keeps the workload running
-  independently of attached sessions. openheron is a server, not a session: it
-  has to come up, serve, and stay up.
-- **`com.docker.sandbox/network-policy@1` with `allow: ["*"]`** says that the
-  workload itself places **no restriction** on what the agent may reach (§2.7).
-  ★ The "everything" pattern is the portable form of that: an absent phase
-  block grants nothing at all, so saying nothing is the opposite of saying
-  "open".
-- **`com.docker.sandbox/lifecycle@1`** is where the initialization lives (§2.5):
-  a `startup` hook, so it runs on every boot as uid `1000` and may rely on
-  `openheron init` being idempotent. The hook environment is deny by
-  default, so the name it reads is declared.
-- **The version argument is the only argument.** The provider, the model API
-  host and the name of the api key environment variable are openheron's own
-  rules (§2.7) — and they live in the mixins now, not in the workload.
-- **No `agent-context@2`.** openheron's own instructions live in the config
-  root (`agents/main.md`, `agents/task.md`), so the runtime has nothing to hand
-  over — and a Kit that declares it has to survive a runtime that does not
-  implement it.
+- **`com.docker.sandbox/sbx@1`** 声明这个 workload 是准备好让宿主按 agent 的方式启动的，
+  而承载启动契约的正是它 —— 基础镜像必须提供的 shell 与用户账户。
+- **`com.docker.sandbox/long-running@1`** 让 workload 不依赖挂着的会话而持续运行。
+  openheron 是服务，不是会话：它得起来、得服务、得一直活着。
+- **`com.docker.sandbox/network-policy@1` 带 `allow: ["*"]`** 说的是这个 workload
+  自己**不限制** agent 能够到什么地方（§2.7）。
+  ★ "什么"就是"不限制"的可移植写法：某个阶段整块省略等于那个阶段什么都没有，
+  所以"什么都不写"恰恰是"不写放开"的反面。
+- **`com.docker.sandbox/lifecycle@1`** 是初始化待的地方（§2.5）：
+  一个 `startup` hook，所以它每次启动都跑、以 uid `1000` 跑，
+  并且可以依赖 `openheron init` 的幂等。
+  hook 的环境默认拒绝，所以它读的那个名字要声明出来。
+- **版本参数是唯一的参数。** provider、模型 API 的主机、以及 api key 环境变量的名字
+  都是 openheron 自己的规则（§2.7）—— 而它们现在住在 mixin 里，不在 workload 里。
+- **没有 `agent-context@2`。** openheron 自己的说明在配置根里
+  （`agents/main.md`、`agents/task.md`），运行时没什么可交给它的 ——
+  而且声明了它的 Kit 还得扛得住一个不实现它的运行时。
 
-### 2.4 The Dockerfile
+### 2.4 Dockerfile
 
-The recipe's job is small: provide the platform floor, put openheron in, and
-say how to start it. The real file is **`sandbox-kit/openheron/openheron.dockerfile`**:
+配方的活儿很小：提供平台底线，把 openheron 放进去，说明怎么启动。
+真正的文件是 **`sandbox-kit/openheron/openheron.dockerfile`**：
 
 ```dockerfile
 # syntax=docker/dockerfile:1
@@ -508,7 +470,7 @@ EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/openheron-entrypoint"]
 ```
 
-and the entrypoint it copies is **`sandbox-kit/openheron/entrypoint.sh`**:
+它拷进去的入口脚本是 **`sandbox-kit/openheron/entrypoint.sh`**：
 
 ```sh
 #!/bin/sh
@@ -529,119 +491,100 @@ openheron init --dir "$PWD" || \
 exec openheron
 ```
 
-Points:
+几点：
 
-- The base **must** be a platform-floor image: the `agent` user at uid `1000`,
-  `/home/agent`, `bash`, `git`, a CA store. The specification says a workload
-  that ignores this "builds fine and fails at agent launch".
-- **The binary is built from this repository, not downloaded.** `make kit`
-  runs `make build` and copies the result beside this recipe, and the recipe
-  copies it in. The Kit therefore carries **the current source** rather than a
-  release, and the build needs no network beyond the base image.
-- ★ **That binary is dynamically linked**, where the release binaries are
-  static (`CGO_ENABLED=0`, `Makefile:108`). The base image is Ubuntu, so it
-  has the libc the binary wants; the cost is a larger binary and a Kit bound
-  to its base image's libc.
-- ★ **It carries the host's architecture.** A Kit built on an amd64 host is an
-  amd64 image — `make release` is what produces the six targets.
-- ★ **The copy beside the recipe is what makes the local path work.** A build
-  context cannot reach outside the directory it is given, so `bin/openheron` at
-  the repository root is out of reach: the binary is copied into the Kit's own
-  directory, and `sbx run ./sandbox-kit/openheron` builds from there.
-- The CA store matters: the model client talks TLS, and
-  `llm/common/error.go:133` tells the user to check that "network and TLS are
-  healthy".
-- **`cd` first, then everything else follows**: the working directory is the
-  project root (§1.7), and the config root is `<cwd>/.openheron`.
-- **The entrypoint repeats the initialization on purpose.** `openheron init`
-  is idempotent, so running it in both the startup hook and the entrypoint
-  costs one extra no-op and removes the dependency on the hooks' position
-  relative to the entrypoint (§2.5).
-- **`EXPOSE 8080`** declares the port, and the `port@1` capability asks for it
-  to be published (§2.3); the runtime allocates the host side.
+- 基础镜像**必须**满足平台底线：uid `1000` 的 `agent` 用户、`/home/agent`、
+  `bash`、`git`、CA 证书库。规范说，workload 不满足这条就是"构建顺利，启动时失败"。
+- **二进制是从这个仓库构建出来的，不是下载来的。** `make kit` 先跑
+  `make build`，把产物复制到这份配方旁边，配方再把它拷进镜像。
+  于是这个 Kit 带的是**当前源码**而不是某个 release，
+  构建也不需要基础镜像之外的任何网络。
+- ★ **那个二进制是动态链接的**，而发布出来的二进制是静态的
+  （`CGO_ENABLED=0`，`Makefile:108`）。基础镜像是 Ubuntu，
+  所以它要的 libc 在里面；代价是二进制更大，
+  而且这个 Kit 绑在基础镜像的 libc 上。
+- ★ **它带的是宿主的架构。** amd64 宿主上构建出来的 Kit 就是 amd64 镜像 ——
+  六个目标是 `make release` 的事。
+- ★ **把产物复制到配方旁边，正是本地那条路能通的原因。**
+  构建上下文够不到它被给到的目录之外，所以仓库根的 `bin/openheron` 够不着：
+  二进制被复制进 Kit 自己的目录，`sbx run ./sandbox-kit/openheron` 就从那里构建。
+- CA 证书库是要紧的：模型客户端走 TLS，`llm/common/error.go:133` 告诉用户去查
+  "network and TLS are healthy"。
+- **先 `cd`，其余都跟着来**：工作目录就是项目根（§1.7），
+  配置根是 `<cwd>/.openheron`。
+- **入口脚本故意再初始化一遍**。`openheron init` 是幂等的，
+  所以在 startup hook 与入口脚本里各跑一次，代价是一次空操作，
+  却把"hook 与入口脚本谁先谁后"这个依赖去掉了（§2.5）。
+- **`EXPOSE 8080`** 声明端口，而 `port@1` capability 申请把它发布出去（§2.3）；
+  宿主侧由运行时分配。
 
-### 2.5 The launch contract
+### 2.5 启动契约
 
-The image config carries the launch contract; the descriptor duplicates none
-of it. The specification's launch modes:
+启动契约由镜像配置承载；描述文件不重复它。规范里的两种启动模式：
 
-| Mode | Argv |
+| 模式 | Argv |
 |---|---|
-| Default (headless / task) | image `Entrypoint` + image `Cmd` |
-| Interactive (TTY) | image `Entrypoint` + lifecycle `interactive` |
+| 默认（headless / task） | 镜像 `Entrypoint` + 镜像 `Cmd` |
+| 交互式（TTY） | 镜像 `Entrypoint` + lifecycle `interactive` |
 
-openheron is **headless**: there is no interactive mode to declare, and the
-`interactive` field is left alone.
+openheron 是 **headless**：没有交互模式要声明，`interactive` 字段留空即可。
 
-★ **The workspace is mounted at the same absolute path inside the VM — but the
-workload does not start there.** The image config owns `workdir`, and a
-workload Kit owns those fields outright. The "the agent starts in the
-workspace" behaviour belongs to the **built-in** agents; a Kit workload runs
-where its image says it runs.
+★ **工作区是挂在 VM 里的同一个绝对路径上 —— 但 workload 并不从那里启动。**
+镜像配置拥有 `workdir`，而一个 workload Kit 完全拥有这些字段。
+"agent 从工作区启动"是**内置** agent 的行为，Kit workload 跑在它镜像说的地方。
 
-★ So the Kit has one job the Dockerfile alone cannot do: make the process
-**start in the workspace**. Everything else in this section follows from that.
+★ 所以 Kit 有一件 Dockerfile 自己做不了的活：让进程**从工作区启动**。
+下面其余内容都是这一件事的推论。
 
-The environment the container gets — and what the Kit does **not** set:
+容器拿到的环境变量 —— 以及 Kit **没有**设的那些：
 
-★ **The Kit sets no openheron environment variable at all.** The entrypoint
-`cd`s into the workspace, and openheron's own defaults land where they belong
-from there:
+★ **Kit 一个 openheron 环境变量都没设。** 入口脚本 `cd` 进工作区，
+openheron 自己的默认值从那里落到了正确的位置：
 
-- `PROJECT_ROOT` — the working directory, by default
-  (`agentkit/spec/config.go:157-164`). The entrypoint's `cd` is what puts it on
-  the mount.
-- the config root — `<projectRoot>/.openheron`, by default
-  (`agentkit/spec/config.go:170-177`), so it is the workspace's own
-  `.openheron`, on the mount.
-- `DATA_DIR` — `state` under the config root, by default
-  (`agentkit/spec/config.go:224-232`), so the sessions live on the mount too
-  (§2.9).
-- `LISTEN_ADDR` — the server configuration's `ListenAddr`, by default
-  (`main.go:217`): `:8080`.
+- `PROJECT_ROOT` —— 默认是工作目录（`agentkit/spec/config.go:247-258`）。
+  入口脚本的 `cd` 把它放在挂载上。
+- 配置根 —— 默认 `<projectRoot>/.openheron`（`agentkit/spec/config.go:260-272`），
+  所以就是工作区自己的 `.openheron`，在挂载上。
+- `DATA_DIR` —— 默认是配置根下的 `state`（`agentkit/spec/config.go:314-326`），
+  所以会话也住在挂载上（§2.9）。
+- `LISTEN_ADDR` —— 默认取服务配置的 `ListenAddr`（`main.go:217`）：`:8080`。
 
-★ The variables that come from the **runtime** rather than from the Kit:
-`HTTPS_PROXY` and `HTTP_PROXY` (openheron honors them, §2.7, and they are
-what makes the credential swap work, §2.8), and `WORKSPACE_DIR` — the path
-the workspace is mounted at. `WORKSPACE_DIR` is also what the startup hook
-declares (§2.5).
+★ 来自**运行时**（而不是来自 Kit）的变量：`HTTPS_PROXY` 与 `HTTP_PROXY`
+（openheron 认它们，§2.7；凭据替换正是靠它们，§2.8），以及 `WORKSPACE_DIR` ——
+工作区挂载的路径。`WORKSPACE_DIR` 也是启动 hook 声明的那个名字（§2.5）。
 
-★ **`main.go:459-464` (`override`) is what makes the other arrangement
-possible.** `LISTEN_ADDR`, `DATA_DIR` and `PROJECT_ROOT` are read from the
-environment **before** the config file, so a user who wants the sessions on a
-volume (§2.9) sets `DATA_DIR` and nothing else changes.
+★ **`main.go:459-464`（`override`）是另一种摆法能成立的原因。**
+`LISTEN_ADDR`、`DATA_DIR` 与 `PROJECT_ROOT` 都**先**从环境变量读、
+**后**从配置文件读，所以想换成别的摆法（比如把会话放到 volume 上，§2.9），
+用户只要设 `DATA_DIR`，别的都不用改。
 
-★ **`$PROJECT_ROOT` is deliberately absent from what the Kit sets.** It does
-not move the config root (§1.7), so setting it would give the container two
-roots instead of one.
+★ **`$PROJECT_ROOT` 刻意不在 Kit 设的那几项里。** 它挪不动配置根（§1.7），
+设了反而会让容器有两个根。
 
-#### The first run: initialization
+#### 第一次运行：初始化
 
-A fresh workspace has no configuration, and the server refuses to start
-without one (`main.go:135-143`). So the Kit has to seed the configuration
-before the server comes up — and it has to do it in the **workspace**, as
-uid `1000`, because the workspace belongs to the user.
+一个空工作区没有配置，而服务没有配置就不肯启动（`main.go:135-143`）。
+所以 Kit 必须在服务起来之前把配置种下去 —— 而且要种在**工作区**里、
+以 uid `1000` 种，因为工作区属于用户。
 
-`openheron init` is non-interactive and idempotent (§1.7), so it fits. It needs
-to know one thing: where the workspace is. Which provider and which env var
-name to write are openheron's own rules (§2.7), so the hook asks for neither.
+`openheron init` 是非交互且幂等的（§1.7），正好合适。
+它只需要知道一件事：工作区在哪儿。
+写哪个 provider、哪个环境变量名，都是 openheron 自己的规则（§2.7），所以 hook 两个都不问。
 
-★ **`lifecycle@1` is where the workspace path comes from.** The capability's
-hooks run with an environment that is **deny by default** — a hook sees only
-the names it declares — and the specification's own example passes
-`WORKSPACE_DIR` to a hook by that name. The rules that matter here:
+★ **`lifecycle@1` 就是工作区路径的来源。** 这个 capability 的 hook
+环境是**默认拒绝**的 —— hook 只看得到自己声明的名字 ——
+而规范自己的示例就是按 `WORKSPACE_DIR` 这个名字把它传给 hook 的。
+这里要紧的规则是：
 
-- `install` hooks run **once per sandbox** and default to **root**;
-- `startup` hooks run **on every boot** and default to the **agent user
-  (uid 1000)**;
-- hook authors must make `startup` hooks idempotent — every boot means every
-  boot, which is exactly what `openheron init` is.
+- `install` hook 每个沙箱**只跑一次**，默认以 **root** 运行；
+- `startup` hook **每次启动都跑**，默认以 **agent 用户（uid `1000`）** 运行；
+- startup hook 的作者必须让它幂等 —— 每次启动都跑，说的就是每次启动 ——
+  而 `openheron init` 正是如此。
 
-★ So the initialization belongs in a **`startup` hook**: uid `1000` by default,
-every boot, idempotent by construction. An `install` hook is the wrong phase
-twice over — it runs once (a recreated sandbox would find nothing to seed) and
-it runs as root (the files would land on the user's mount owned by root, and
-the agent could not write to them).
+★ 所以初始化该待在 **`startup` hook** 里：默认 uid `1000`、每次启动都跑、
+天生幂等。`install` hook 在两个维度上都是错的阶段 ——
+它只跑一次（重建的沙箱就没东西可种了），而且它以 root 运行
+（文件会以 root 的身份落在用户的挂载上，agent 反而写不进去）。
 
 ```yaml
   - type: com.docker.sandbox/lifecycle@1
@@ -652,218 +595,186 @@ the agent could not write to them).
           description: Seed the project configuration in the workspace
 ```
 
-★ `|| echo ...` rather than `&&`: `init` fails when an existing provider file
-declares a different model (`initcfg/initcfg.go:94-99`), and that is a
-configuration to keep, not a reason to refuse to serve it.
+★ 用 `|| echo ...` 而不是 `&&`：当已有的 provider 文件声明了另一个模型时，
+`init` 会失败（`initcfg/initcfg.go:84-89`），
+而那是一份该保留的配置，不是拒绝服务的理由。
 
-★ **The open question is how the entrypoint learns the workspace path.** The
-hook sees `WORKSPACE_DIR`; the workload's own environment may or may not
-carry it, and the specification does not say. Two shapes follow:
+★ **待决的问题是：入口脚本怎么知道工作区路径。** hook 看得到 `WORKSPACE_DIR`；
+而 workload 自己的环境里带不带它，规范没有说。于是有两种形态：
 
-- **The workload's environment carries `WORKSPACE_DIR`** — then the entrypoint
-  alone does everything: it seeds the configuration, `cd`s into the workspace,
-  and exports `OPENHERON_CONFIG_DIR`. No hook, no ordering question.
-- **It does not** — then a hook has to hand the path to the entrypoint (a file
-  it writes), and the hooks' position relative to the entrypoint has to hold.
-  The specification requires the **install** hooks to finish before the
-  entrypoint first runs and describes the **startup** hooks as part of every
-  boot, but it does not state the startup hooks' position relative to the
-  entrypoint.
+- **workload 的环境带 `WORKSPACE_DIR`** —— 那入口脚本一个人就能干完：
+  种下配置、`cd` 进工作区、导出 `OPENHERON_CONFIG_DIR`。不需要 hook，
+  也没有顺序问题。
+- **不带** —— 那就得由 hook 把路径交给入口脚本（hook 写一个文件），
+  于是 hook 与入口脚本的先后顺序必须成立。
+  规范要求 **install** hook 必须在入口脚本首次运行前跑完，
+  也把 **startup** hook 描述为每次启动的一部分，
+  但没有说明 startup hook 相对入口脚本的位置。
 
-★ Either way the entrypoint stays a two-line script, and the difference
-between the two shapes is one line in it. §4's first question is which shape
-to build against; §5's second question is how to observe the answer.
+★ 两种形态下入口脚本都还是两行，区别只在其中一行。
+§4 的第一个问题是按哪种形态来建；§5 的第二个问题是怎么观测出答案。
 
-★ **Measured: the first shape.** The workload's environment carries
-`WORKSPACE_DIR` (§6.3), so the entrypoint does everything on its own and the
-hook is a redundancy, not a dependency.
+★ **实测：第一种形态。** workload 的环境带 `WORKSPACE_DIR`（§6.3），
+所以入口脚本自己就能干完，hook 是冗余而不是依赖。
 
-#### The port the server answers on
+#### 服务答在哪个端口上
 
-★ **A workload that serves has to declare the port.** `com.docker.sandbox/port@1`
-is the capability that says "there is a service here"; without it the runtime
-has no service to forward to, and the sandbox is reachable but silent.
+★ **要对外服务的 workload 必须声明端口。** `com.docker.sandbox/port@1`
+就是那句"这儿有个服务"；没有它，运行时没有可转发的服务，
+沙箱是起来的，只是没人应答。
 
 ```
 error: resolve kits: kit "./sandbox-kit/openheron": effective v3 descriptor:
   capabilities[2].config.container: 8080 is required
 ```
 
-★ The declaration is four lines, and the host side is **not** among them: the
-runtime allocates the host port itself, on an ephemeral loopback port, at
-start time. A Kit cannot pin a host port — two Kits asking for the same one
-would collide — so the user reads the port from `sbx ports` instead of
-choosing it.
+★ 这份声明只有四行，而宿主侧**不**在其中：宿主端口由运行时自己分配，
+在启动时给一个临时的回环端口。Kit 不能钉死宿主端口 ——
+两个 Kit 要同一个就会撞 —— 所以端口是用户从 `sbx ports` 里读出来的，
+而不是他选的。
 
 ```
 ✓ http — published localhost:32772 -> 8080/tcp
 ```
 
-★ **The family is left out, and the omission is the truth.** The default is
-`ipv4`; openheron listens on `[::]:8080`, a dual-stack socket that accepts
-IPv4 connections too, so a client reaching the published IPv4 binding reaches
-the service. Declaring `dual` says the same thing and is refused:
+★ **family 留空，而留空就是实话。** 默认值是 `ipv4`；openheron 监听的是
+`[::]:8080`，那是双栈套接字，IPv4 连接也进得去，
+所以客户端够到发布的 IPv4 绑定就等于够到了服务。声明 `dual` 说的是同一件事，
+但会被拒：
 
 ```
 error: resolve kits: kit "./sandbox-kit/openheron": port 8080: family "dual"
   is not supported yet; omit it
 ```
 
-★ **A descriptor the runtime rejects is a sandbox that never starts**, so the
-Kit declares what the runtime implements today and the capability's page
-remains the place where the difference is recorded.
+★ **被运行时拒掉的描述文件意味着沙箱根本起不来**，所以 Kit 声明的是运行时
+今天实现得了的那一份，而两者的差异记在该能力的说明页里。
 
-#### What actually starts the server
+#### 到底是什么把服务拉起来的
 
-★ **The entrypoint is the agent's launch command, and an agent session is
-what launches it.** The specification is explicit: `sbx@1` requires the host
-not to let the image's entrypoint become PID 1, and to read the entrypoint as
-the command it runs later. So:
+★ **入口脚本就是 agent 的启动命令，而拉起它的是一次 agent 会话。**
+规范说得很明确：`sbx@1` 要求宿主不要让镜像的入口脚本成为 PID 1，
+而要把它读成"稍后要跑的命令"。于是：
 
-- `sbx run … --detach` creates the sandbox, runs the startup hooks, and opens
-  **no agent session** — so nothing starts the server. The sandbox comes up
-  configured and silent.
-- `sbx run …` without `--detach` opens the agent session, and the server
-  starts.
+- `sbx run … --detach` 建起沙箱、跑完启动 hook，却**不开 agent 会话** ——
+  所以没有东西把服务拉起来。沙箱是配好的，也是哑的。
+- 不带 `--detach` 的 `sbx run …` 会开 agent 会话，服务随之启动。
 
-★ **And it keeps running.** `long-running@1` is what makes that true: the
-runtime must not stop a sandbox that holds it merely because no session
-remains attached. So the client may detach — the interactive session has a
-detach gesture for exactly that — and the server stays up, serving, until the
-sandbox is stopped or removed.
+★ **而且它会一直活着。** 靠的是 `long-running@1`：运行时不得仅因为没有会话
+挂着就停掉持有它的沙箱。于是客户端可以分离 ——
+交互会话本身就有一个分离手势 —— 而服务继续在跑、继续应答，
+直到沙箱被停掉或删掉。
 
-★ This is the whole shape of running openheron as a sandbox workload: **the
-session starts it, the capability keeps it.** A user who wants the service up
-and unattended opens the session once and detaches from it.
+★ 这就是把 openheron 当沙箱 workload 跑的整个形状：**会话把它拉起来，
+能力把它留住。** 想要服务一直在线的用户，开一次会话然后从它分离。
 
-### 2.6 Path semantics inside the VM
+### 2.6 VM 里的路径语义
 
-The workspace is mounted at the **same absolute path** it has on the host, and
-the Kit makes the process start **in** it (§2.5). Then:
+工作区挂在与宿主**同一个绝对路径**上，而 Kit 让进程从它**里面**启动（§2.5）。于是：
 
-- `cmd.Dir = s.root` (`agentkit/fsx/fsx.go:750`) keeps its meaning: the guest's
-  working directory is the same directory, spelled the same way;
-- a relative path in a shell command still means the project root;
-- the config root is `<workspace>/.openheron` — the same place the user edits
-  on the host, and the same place `openheron init` writes (§1.7);
-- error messages that quote a path still match the paths the user sees.
+- `cmd.Dir = s.root`（`agentkit/fsx/fsx.go:750`）含义不变：guest 的工作目录
+  还是同一个目录，拼写方式也一样；
+- shell 命令里的相对路径仍然指项目根；
+- 配置根是 `<工作区>/.openheron` —— 既是用户在宿主上编辑的那个地方，
+  也是 `openheron init` 写入的那个地方（§1.7）；
+- 报错里引用的路径，仍然是用户看到的那几个路径。
 
-★ If the guest path differs from the host path, every path the model has been
-told about (`docs/user-manual.md`, the agent prompts) becomes wrong in the one
-place where being wrong is expensive. ★ And the configuration would stop being
-user-managed: a config root outside the mount is a config root that vanishes
-with the sandbox.
+★ guest 路径一旦和宿主路径不同，模型被告知过的每一个路径
+（`docs/user-manual.md`、agent 提示词）都会在**最不该错的地方**错掉。
+★ 而且配置就不再是用户管的了：落在挂载之外的配置根，是会随沙箱一起消失的配置根。
 
-★ **This is the step that has no fallback.** The path is dynamic — it is
-whatever the user's directory happens to be — so it cannot be baked into the
-image, and the image's `workdir` is a fixed path that would put the
-configuration inside the VM. The runtime has to tell the process where the
-workspace is, and the mechanism it documents is `WORKSPACE_DIR` (§2.5).
+★ **这一步没有退路。** 路径是动态的 —— 它就是用户那个目录 ——
+所以它没法烤进镜像里，而镜像的 `workdir` 是一个固定路径，
+用它就会把配置关在 VM 内部。运行时必须告诉进程工作区在哪儿，
+而它记录下来的机制就是 `WORKSPACE_DIR`（§2.5）。
 
-### 2.7 The network surface
+### 2.7 网络面
 
-★ **The rule this Kit follows: the boundary is the isolation, not the allow
-list.** The microVM already separates the agent from the host. A second wall
-inside the sandbox mostly buys friction, not safety — an agent that cannot
-install a dependency or reach its own MCP server cannot do the job it was
-given. So the Kit's `network-policy@1` grants the runtime phase `*`: the Kit
-imposes no egress restriction of its own.
+★ **这个 Kit 守的规矩：边界是隔离，不是允许列表。**
+microVM 已经把 agent 与宿主隔开了。沙箱里再筑一道墙，
+买到的多半是摩擦而不是安全 —— 一个装不了依赖、连不上自己 MCP server 的 agent，
+干不了它被交付的那份活。所以 Kit 的 `network-policy@1` 给运行阶段放 `*`：
+**这个 Kit 自己不对出网设任何限制。**
 
-★ **"Saying nothing" is not the same as saying "open."** The runtime is
-deny-by-default, and "an absent phase block grants nothing for that phase" —
-so a Kit that omitted the capability would grant the agent **no** egress at
-all. The `*` is what expresses the choice.
+★ **"什么都不写"不等于"放开"。** 运行时是默认拒绝的，
+而"某个阶段整块省略 = 那个阶段什么都没有" ——
+所以省略掉这项 capability，agent 反而**一点出网都没有**。
+`*` 才是把"我不管"这件事表达出来的写法。
 
-What still decides what the agent reaches:
+真正决定 agent 能到哪里的，是：
 
-- the **host's policy** — `sbx policy`, and the preset chosen at sign-in
-  (Open, Balanced, Locked Down). That is the user's lever, and it applies on
-  top of whatever the Kit asks for.
-- the **organization's rules**, where they apply — and there the Kit's and the
-  local allow rules are inactive: only the organization's rules grant, while
-  denies still apply.
-- the **sandbox's own network posture** — the private ranges, the loopback and
-  the link-local addresses are unreachable, and non-HTTP protocols are refused
-  at the network layer. That is the runtime's, not the Kit's.
+- **宿主的策略** —— `sbx policy`，以及登录时选的档（Open / Balanced / Locked Down）。
+  那是用户的旋钮，且它作用在 Kit 的请求之上。
+- **组织的规则**（若有）—— 那里 kit 与本地允许规则都不生效，
+  只有组织规则放行，而 deny 始终生效。
+- **沙箱自身的网络姿态** —— 私有网段、回环与链路本地地址都不可达，
+  非 HTTP 协议在网络层就被拒。那是运行时的，不是 Kit 的。
 
-★ **The one thing the Kit does name is where the secret goes.** The
-credential's inject domain is the model API host — that is the host's proxy
-swapping the real key into the request, not a limit on the agent's reach. A
-configuration the user edits to point elsewhere reaches that host fine; it
-just does not carry the model key there, so the call comes back 401 until the
-inject domain is changed to match.
+★ **Kit 唯一指名的是密钥该落在哪儿。** 凭据的 inject 域名是模型 API 主机 ——
+那是宿主的代理往请求里换真密钥的地方，不是对 agent 触及范围的限制。
+用户把配置改到别的主机，那个主机照样够得到 —— 只是模型密钥不会被带过去，
+于是那次调用会以 401 收场，除非把 inject 域名一并改成对应的。
 
-openheron's own outbound needs are unchanged by this:
+openheron 自己的出站需求不因这个而改变：
 
-- the **model API host** — from the provider config's `base_url`. The factory
-  templates make it a template variable too: `initcfg/templates/llm/deepseek.yaml`
-  renders `base_url: https://api.deepseek.com` and
-  `initcfg/templates/llm/openai.yaml` renders `https://api.openai.com/v1`,
-  and `openheron init` asks for it (`initcfg/initcfg.go:100-106`). The `inject`
-  rule matches by **domain**, so the path in `base_url` does not matter (§2.8);
-- whatever the **tools** reach — the HTTP tool
-  (`agentkit/spec/defaults.go:16-27` registers `http_get` / `http_post` /
-  …), MCP servers, and package registries the agent installs from. ★ With
-  `allow: ["*"]` these ride the same grant as everything else; they were the
-  reason a short allow list would have been the wrong shape.
+- **模型 API 主机** —— 来自 provider 配置的 `base_url`。
+  工厂模板把它也做成了模板变量：`agentkit/templates/files/llm/deepseek.yaml`
+  渲染出 `base_url: https://api.deepseek.com`，
+  `agentkit/templates/files/llm/openai.yaml` 渲染出 `https://api.openai.com/v1`，
+  而 `openheron init` 会问用户填哪个（`initcfg/initcfg.go:90-96`）。
+  `inject` 规则按 **domain** 匹配，所以 `base_url` 里带不带路径不影响（§2.8）；
+- **工具**够到的一切 —— HTTP 工具（`agentkit/spec/defaults.go:15-44` 注册了
+  `request_get` / `request_post` / …）、MCP server，以及 agent 装包时用的仓库。
+  ★ 有了 `allow: ["*"]`，它们与别的东西走同一份放行 ——
+  而它们正是"允许列表不该写短"的原因。
 
-★ **The host's policy log is the diagnostic**, not the Kit. It shows what was
-refused, and under a host policy narrower than `*` that log is where the
-missing hosts show up.
+★ **诊断要看宿主的策略日志**，不是看 Kit。它显示什么被拒了；
+在比 `*` 更窄的宿主策略下，缺哪些主机就在那里露出来。
 
-★ **The proxy is the whole model.** Every packet leaves through a host-side
-proxy that enforces the policy and injects the credentials — so "the network
-policy" and "the proxy" are one thing, not two. openheron's client goes
-through it: `llm/common/model.go:60-63` builds a plain `http.Client` with no
-transport of its own, `llm/common/logging.go:36-38` falls back to
-`http.DefaultTransport`, and `llm/common/logging.go:77` delegates the round
-trip to it — and `http.DefaultTransport` reads `HTTPS_PROXY` and `HTTP_PROXY`
-from the environment.
+★ **代理就是全部的模型。** 每个数据包都从宿主侧的代理出去，
+代理既执行策略也注入凭据 —— 所以"网络策略"和"代理"是一件事，不是两件事。
+openheron 的客户端走的正是它：`llm/common/model.go:60-63` 建的是一个
+没有自带 transport 的普通 `http.Client`，`llm/common/logging.go:36-38`
+回退到 `http.DefaultTransport`，`llm/common/logging.go:77` 把往返委派给它 ——
+而 `http.DefaultTransport` 会从环境变量读 `HTTPS_PROXY` 与 `HTTP_PROXY`。
 
-★ That is what makes the credential swap work (§2.8), and it is also the
-failure mode to watch: a client that ignores the proxy sends the **sentinel**
-straight to the API, and the API rejects it with a 401 that reads like a bad
-key.
+★ 这正是凭据替换能成立的原因（§2.8），也是要盯着的失败形态：
+一个忽略代理的客户端会把**哨兵值**直接送到 API，
+而 API 回一个看起来像"密钥无效"的 401。
 
-### 2.8 The credential path — two ways to run it
+### 2.8 凭据这条路 —— 两种跑法
 
-★ The mechanism a Kit uses is `credential@1` with `apiKey.proxyManaged: true`,
-and the specification is precise about what it does:
+★ Kit 用的机制是 `credential@1` 带 `apiKey.proxyManaged: true`，
+规范对它做了什么说得很精确：
 
-- `apiKey.name` is the **in-container env var name**;
-- with `proxyManaged: true` the real value **stays on the host**, and the
-  container sees a **sentinel** — `proxy-managed`, a non-empty placeholder,
-  not the secret;
-- the boundary (the host-side proxy) substitutes the real credential on
-  outbound requests that match the `inject` rules;
-- the host's secret store is the only source — the specification puts it
-  as "a Kit declares the need, the user's bindings answer it", and "host
-  environment variables never auto-inject; a Kit cannot name where a secret
-  lives, only what it needs."
+- `apiKey.name` 是**容器内的环境变量名**；
+- 有了 `proxyManaged: true`，真值**留在宿主**，容器看到的是**哨兵值** ——
+  `proxy-managed`，一个非空的占位符，不是密钥；
+- 边界（宿主侧的代理）在出站请求命中 `inject` 规则时把真凭据换上去；
+- 宿主的密钥库是唯一的来源 —— 规范的措辞是"a Kit declares the need, the
+  user's bindings answer it"，并且"host environment variables never
+  auto-inject; a Kit cannot name where a secret lives, only what it needs"。
 
-That is exactly the shape openheron already has:
+这正是 openheron 现在的形状：
 
-1. `agentkit/spec/load.go:34-45` resolves `api_key` through
-   `agentkit/spec/expand.go:24-33`, which looks the `${...}` name up in the
-   process environment, and
-2. `llm/common/model.go:66-72` sends it as the bearer token.
+1. `agentkit/spec/load.go:35-47` 通过 `agentkit/spec/expand.go:24-33` 解析
+   `api_key` —— 那段代码把 `${...}` 里的名字在进程环境里查出来；
+2. `llm/common/model.go:66-72` 把它作为 bearer token 发出去。
 
-★ **Two ways to run it.** They differ in exactly one thing — what the
-container ends up holding — and that one thing decides whether the agent can
-read the key. Both were measured (§6). The credential itself lives in the
-mixin (§2.3), so the first way is "compose the mixin" and the second is
-"do not compose it".
+★ **两种跑法。** 它们只差一件事 —— 容器最后拿着什么 ——
+而那件事决定了 agent 能不能读到密钥。两种都实测过（§6）。
+凭据本身住在 mixin 里（§2.3），所以第一种跑法是"组合 mixin"，
+第二种是"不组合"。
 
-| | the container holds | does the real key enter the VM |
+| | 容器里是什么 | 真密钥进不进 VM |
 |---|---|---|
-| **the placeholder** | `proxy-managed` | no |
-| **the key itself** | `sk-…` | **yes** |
+| **占位符** | `proxy-managed` | 不进 |
+| **真密钥** | `sk-…` | **进** |
 
-#### 2.8.1 The placeholder the runtime injects
+#### 2.8.1 运行时注入的占位符
 
-The runtime puts the sentinel into the container; the host holds the real
-value, and the two have to agree on the placeholder. They agree after **one
-command**:
+运行时把哨兵值放进容器；宿主拿着真值，两边得对上占位符。
+一条命令就够了：
 
 ```sh
 printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
@@ -871,17 +782,15 @@ printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
     --placeholder proxy-managed --value-stdin
 ```
 
-★ `--placeholder proxy-managed` is the whole trick: it makes the host's
-placeholder **the same string** the runtime injects, so the two agree without
-the user passing an environment variable at all (§6.4). The container ends up
-holding `DEEPSEEK_API_KEY=proxy-managed`, and the host-side proxy swaps in
-the real value on the way out. `--value-stdin` keeps the key out of the
-process arguments and out of the shell history.
+★ `--placeholder proxy-managed` 就是全部机关：它让宿主那边的占位符
+**与运行时注入的是同一个字符串**，两边自动对上，用户完全不必再传环境变量（§6.4）。
+容器里最后是 `DEEPSEEK_API_KEY=proxy-managed`，
+宿主侧的代理在出站路上把真值换上去。
+`--value-stdin` 让密钥既不进进程参数，也不进 shell history。
 
-★ The alternative to the custom secret is a **service binding**, and it takes
-two steps instead of one: the stored secret is only the *value*, while the
-*authorization* lives in a second file. The mixin's `service` name is the key
-that binding would use.
+★ custom secret 的替代是 **service 绑定**，而它要两步而不是一步：
+存下来的密钥只是**值**，**授权**在另一个文件里。
+mixin 里的 `service` 名就是那份绑定要用的键。
 
 ```sh
 sbx secret set deepseek      # the value
@@ -896,537 +805,471 @@ bindings:
         - api.deepseek.com
 ```
 
-Without the binding the sandbox still starts and every model call comes back
-401 — the `optional: true` degradation of §2.3, arriving earlier than
-expected.
+没有那个绑定，沙箱照样起来，而每次模型调用都是 401 ——
+§2.3 那个 `optional: true` 的降级，比预期来得早。
 
-#### 2.8.2 The key itself, injected as a plain variable
+#### 2.8.2 真密钥本身，当作普通变量注入
 
-The other way skips the credential machinery: let the runtime carry the key.
+另一种跑法是跳过凭据机制：让运行时带着密钥走。
 
 ```sh
 sbx run --detach --name openheron --env DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
     ./openheron.yaml .
 ```
 
-A runtime variable carries whatever it is given, so this puts the **real key
-inside the VM** — where the agent reads it out of the environment, and where
-anything it runs can send it anywhere. The model call then works without the
-proxy substituting anything: the container already holds the right bearer
-token, and the proxy forwards it unchanged because it is not the placeholder.
+运行时变量给什么就是什么，所以这会把**真密钥放进 VM** ——
+agent 可以从环境里把它读出来，它跑的任何东西都能把它发到任何地方。
+于是模型调用照样成功 —— 容器里已经是正确的 bearer token 了，
+代理发现它不是占位符，就原样转发。
 
-★ The Kit's `credential@1` entry does not get in the way: the injected value
-wins over the sentinel the capability would have installed, so the same Kit
-runs both ways.
+★ Kit 的 `credential@1` 声明不会挡路：注入的值盖过了这个 capability
+本来要装进去的哨兵，所以同一个 Kit 两种跑法都能用。
 
-#### 2.8.3 What the two have in common
+#### 2.8.3 两者共有的部分
 
-- The credential's purpose remains in the permission surface (§2.14) either
-  way — in the mixin when the mixin is composed, in the workload's absence of
-  it when it is not.
-- The **inject domain is not a limit on the agent**: it says where the
-  **secret** belongs. A configuration pointing at another host reaches that
-  host fine; it just does not carry the model key there, so that call comes
-  back 401 unless the inject domain is changed to match (§2.3).
-- One credential per sandbox: a credential has one owner per (service,
-  phase), so two vendors cannot share a service name. A second vendor needs
-  a second service name, and therefore a second Kit or a mixin.
+- 凭据的用途始终在权限面里（§2.14）—— 组合 mixin 时在 mixin 里，
+  不组合时在 workload 的"没有它"里。
+- **inject 域名不是对 agent 的限制**：它说的是**密钥**该落在哪儿。
+  用户把配置改到别的主机，那个主机照样够得到 —— 只是模型密钥不会被带过去，
+  于是那次调用会以 401 收场，除非把 inject 域名一并改成对应的（§2.3）。
+- 一个沙箱一条凭据：一个 (service, phase) 只有一个主人，
+  所以两个厂商不能共用一个 service 名。要第二家，就得换 service 名，
+  也就得第二个 Kit 或一个 mixin。
 
-### 2.9 State across sandbox teardown
+### 2.9 沙箱拆除之后的状态
 
-The sessions and the checkpoints are files under the data dir (`main.go:224`,
-`main.go:229-232`), and the data dir's default is `<configRoot>/state`
-(`agentkit/spec/config.go:224-232`). Since the config root is
-`<workspace>/.openheron` (§1.7), the default data dir is
-**`<workspace>/.openheron/state`** — on the mount.
+会话与 checkpoint 是数据目录下的文件（`main.go:224`、`main.go:229-232`），
+而数据目录的默认值是 `<configRoot>/state`（`agentkit/spec/config.go:314-326`）。
+既然配置根是 `<工作区>/.openheron`（§1.7），默认的数据目录就是
+**`<工作区>/.openheron/state`** —— 在挂载上。
 
-★ That is worth stating plainly: **the default already persists.** The mount
-belongs to the user and outlives the sandbox, so the conversations survive a
-sandbox that is stopped, recreated, or removed. The specification's
-`volume@1` capability is not needed for that.
+★ 这一点值得直说：**默认就已经是持久的。** 挂载属于用户、比沙箱活得久，
+所以对话能挺过沙箱的停止、重建，甚至移除。
+规范里的 `volume@1` capability 在这件事上并不需要。
 
-Two places to put the state, and they behave differently:
+状态有两个落处，行为不一样：
 
-| Where the data dir lives | The sessions survive |
+| 数据目录在哪 | 会话能挺过 |
 |---|---|
-| on the mount (the default) | a stop, a recreate, **and** a removal |
-| on a `volume@1` instance | a stop and a recreate, but not a removal |
+| 在挂载上（默认） | 停止、重建，**以及**移除 |
+| 在 `volume@1` 实例上 | 停止与重建，但挺不过移除 |
 
-★ The trade is not "persist or not" — it is **where the state lives**. On the
-mount, the state sits in the user's own directory, next to their code, where
-they can read it, back it up, or delete it with the rest. On a volume it is
-out of the way, and out of the user's reach.
+★ 这笔账不是"持久还是不持久"，而是**状态放在哪**。
+在挂载上，状态待在用户自己的目录里、和他的代码放在一起，
+他可以读它、备份它，或者连同其余文件一起删掉。
+在 volume 上它不碍事，但也在用户够不着的地方。
 
-★ `DATA_DIR` (`main.go:218`) is the switch: an absolute path wins over the
-default (`agentkit/spec/config.go:229-232`), so the Kit can point the data dir
-at a volume without touching the configuration.
+★ `DATA_DIR`（`main.go:218`）就是那个开关：绝对路径优先于默认值
+（`agentkit/spec/config.go:314-326`），
+所以 Kit 可以把数据目录指到 volume 上，而不必碰配置。
 
-★ One consequence of the default: the state lands in the user's own tree, in
-`<workspace>/.openheron`. That directory has no business being in version
-control.
+★ 默认值有一个后果：状态落在用户自己的目录树里，在 `<工作区>/.openheron`。
+那个目录没有理由进版本库。
 
-### 2.10 The SSE path — the risk
+### 2.10 SSE 这条路 —— 风险所在
 
-This is where the whole design is most likely to break, and it is worth stating
-plainly rather than burying.
+这是整套设计最可能塌掉的地方，值得直说而不是埋起来。
 
-The turn stream is an SSE response. `api/v2_run.go:146` creates the stream,
-`api/v2_run.go:155` and `api/v2_run.go:176` flush it, and
-`transport/sse.go:104` keeps the connection alive with keepalives. The browser
-holds that connection open for the length of a turn.
+回合流是一个 SSE 响应。`api/v2_run.go:146` 建流，`api/v2_run.go:155` 与
+`api/v2_run.go:176` flush，`transport/sse.go:104` 用 keepalive 维持连接。
+浏览器会在整个回合期间持有这条连接。
 
-The path the browser takes is: browser → **host port** → sandbox → openheron's
-hertz server. If the forwarding layer between the host and the sandbox
-**buffers** the response body, the model stops streaming: the user sees
-nothing until the turn ends, and then everything at once.
+浏览器走的那条路是：浏览器 → **宿主端口** → 沙箱 → openheron 的 hertz 服务。
+如果宿主与沙箱之间的转发层**缓冲**了响应体，模型就不再流式输出：
+用户什么都看不到，直到回合结束，然后一次性全部涌出。
 
-★ Nothing in this repository decides that. It is a property of the forwarding
-layer, and it has to be **measured** (§5), not assumed. If it buffers, the
-options are a forwarding configuration that flushes, or a different transport
-between the browser and the sandbox.
+★ 这件事不由本仓库决定。它是转发层的属性，必须**实测**（§5），不能假设。
+若它确实缓冲，可选项是换一种会 flush 的转发配置，
+或者换一条浏览器与沙箱之间的传输方式。
 
-This is the same risk the browser already lives with in `make smoke` — a real
-SSE stream through a real server — and it is **not** present in the E2E fake
-backend, which is why the E2E suite cannot answer this question (§5).
+这与浏览器在 `make smoke` 里已经面对的是同一个风险 —— 穿过真服务的真 SSE 流 ——
+而它在 E2E 的假后端里**不存在**，所以 E2E 套件回答不了这个问题（§5）。
 
-### 2.11 What it does not change
+### 2.11 它不改变什么
 
-The outward boundary is what makes this cheap. **No Go code changes.** Not one
-of these moves:
+边界往外挪，这正是它便宜的原因。**Go 代码一行不改。** 下面这些一个都不动：
 
-- the agent model, the policy tiers (`agentkit/spec/defaults.go:11`), the
-  approval flow, the checkpoint store;
-- the file tools and their confinement (`agentkit/fsx/fsx.go:194`);
-- the API surface (`api/v2_files.go:34-72`);
-- the frontend, which is embedded (`main.go:35`);
-- the release model (`Makefile:96`, `Makefile:108`).
+- agent 模型、档位表（`agentkit/build/policy.go:55`）、审批流程、checkpoint store；
+- 文件工具及其收敛（`agentkit/fsx/fsx.go:194`）；
+- API 面（`api/v2_files.go:34-72`）；
+- 前端，它是内嵌的（`main.go:35`）；
+- 发布模型（`Makefile:96`、`Makefile:108`）。
 
-★ What changes is **where the process runs**, and therefore what the host can
-see. That is the cheapest possible form of this change, and it is the reason
-this document is worth writing before any code is written.
+★ 变的是**进程跑在哪里**，以及因此宿主能看见什么。
+这是这次变更最便宜的一种形态，也正是这份文档值得在写任何代码之前写的原因。
 
-### 2.12 Platform matrix
+### 2.12 平台矩阵
 
-| Host | Docker Sandboxes | Consequence |
+| 宿主 | Docker Sandboxes | 后果 |
 |---|---|---|
-| `linux/amd64`, `linux/arm64` | KVM required | works on a server or a Linux workstation with `/dev/kvm` |
-| `darwin/arm64` | Apple Silicon + Hypervisor.framework | works |
-| `darwin/amd64` | **not supported** | Intel Macs have no microVM path |
-| `windows/amd64`, `windows/arm64` | Windows Hypervisor Platform | supported, with caveats |
+| `linux/amd64`、`linux/arm64` | 需要 KVM | 在服务器或有 `/dev/kvm` 的 Linux 工作站上可用 |
+| `darwin/arm64` | Apple Silicon + Hypervisor.framework | 可用 |
+| `darwin/amd64` | **不支持** | Intel Mac 没有 microVM 这条路 |
+| `windows/amd64`、`windows/arm64` | Windows Hypervisor Platform | 可用，但有注意事项 |
 
-★ Intel Mac has no microVM path at all, and that is a property of the
-platform rather than of this document: the release matrix has six targets and
-microVM isolation reaches five of them.
+★ Intel Mac 根本没有 microVM 这条路，而这是平台的属性，不是这份文档的属性：
+发布矩阵有六个目标，microVM 隔离够得着五个。
 
-The difference is what fills the hole. The inward seam (§1.3) would leave the
-server on the host, so on Intel Mac the **host path** still works and only the
-`execute` isolation is unavailable. Here the whole process is inside the VM,
-so there is nothing to fall back to: on Intel Mac, openheron-as-a-Kit does not
-run at all.
+差别在于谁来填这个洞。往里那条接缝（§1.3）把服务留在宿主，
+所以在 Intel Mac 上**宿主那条路仍然能用**，缺的只是 `execute` 的隔离。
+这里整个进程都在 VM 里，于是没有退路：在 Intel Mac 上，
+openheron-as-a-Kit 根本跑不起来。
 
-★ That is a real trade, and it is the one to weigh against §2.11's "no code
-changes". A user on an Intel Mac keeps the plain binary; a user in a Kit gets
-the whole boundary.
+★ 这是个真实的取舍，要拿它去和 §2.11 的"不用改代码"对照。
+Intel Mac 上的用户继续用普通二进制；进 Kit 的用户拿到完整的边界。
 
-### 2.13 Distribution
+### 2.13 分发
 
-- The Kit is a **registry artifact**. `sbx run <image>` consumes it; the
-  published descriptor is what the signature covers and what the permission
-  gate judges.
-- ★ **A `v*` tag publishes it**, and the same tag publishes the release: the
-  `kit` job in CI builds the workload and every mixin and pushes them to
-  Docker Hub, after the same checks the release waits for. The image is
-  tagged without the `v` — the release is `v0.1.0` and the Kit is `0.1.0` —
-  and the version reaches the published descriptor as well, so the reference
-  and the descriptor agree.
-- ★ **The set is three repositories, not one.** The workload and each vendor's
-  mixin are separate references, and the runtime resolves each of them
-  separately — so a user who takes the workload without a mixin gets a sandbox
-  that starts and then answers every model call with a 401. They are published
-  together: `docker.io/ouranoshong/openheron-kit:latest`,
-  `docker.io/ouranoshong/openheron-kit-deepseek:latest`,
-  `docker.io/ouranoshong/openheron-kit-openai:latest`.
-- The Kit needs the `sbx` CLI on the host. That is a new install step for an
-  openheron user — and, unlike microsandbox, it comes with a **Docker sign-in**
-  and a license that is free for individual and commercial use but prices
-  organization-wide governance separately.
-- The permission surface is a **reviewable diff**: the specification's gate
-  stops any widening — a new allowed domain, a new credential, a removed deny
-  entry — and asks. For an agent that runs arbitrary commands, that diff is
-  the artifact a security review should look at.
+- Kit 是一个 **registry 产物**。`sbx run <image>` 消费它；
+  已发布的描述文件是签名覆盖的对象，也是权限闸门评判的对象。
+- ★ **`v*` tag 会发布它**，而且是同一个 tag 发布 release：CI 里的 `kit` job
+  构建 workload 与每一份 mixin 并推到 Docker Hub，
+  等的是 release 等的那同一批检查。镜像的 tag 不带 `v` ——
+  release 是 `v0.1.0`，Kit 是 `0.1.0` —— 版本同时进到已发布的描述文件里，
+  所以引用与描述文件说的是同一件事。
+- ★ **这套东西是三个仓库，不是一个。** workload 与每个厂商的 mixin 是
+  各自独立的引用，而运行时是分别解析它们的 —— 所以只拿 workload 而没拿
+  mixin 的用户，会得到一个起得来、然后每个模型调用都回 401 的沙箱。
+  它们是一起发布的：`docker.io/ouranoshong/openheron-kit:latest`、
+  `docker.io/ouranoshong/openheron-kit-deepseek:latest`、
+  `docker.io/ouranoshong/openheron-kit-openai:latest`。
+- Kit 要求宿主上装了 `sbx` CLI。这对 openheron 用户是一个新的安装步骤 ——
+  而且与 microsandbox 不同，它还带来一次 **Docker 登录**，
+  以及一份对个人与商用免费、但对组织级治理单独计价的许可。
+- 权限面是一份**可评审的 diff**：规范的闸门会拦住任何扩权 ——
+  新增允许域名、新增凭据、删掉一条 deny —— 并转人工确认。
+  对一个能跑任意命令的 agent 来说，那份 diff 正是安全评审该看的东西。
 
-### 2.14 The boundary's own risk
+### 2.14 边界自身的风险
 
-★ Everything above describes what the boundary **buys**. This section is about
-what it **costs**, because a design that only accounts for the first is not
-accounting.
+★ 上面说的都是边界**买到**什么。这一节讲它**付出**什么 ——
+只算前者的设计，不算账。
 
-**The boundary has had published escapes.** Docker's own security
-announcements page records two flaws in Docker Sandboxes, both fixed in the
-`0.42.0` release on 2026-09-07 and published on 2026-09-15:
+**这条边界有过已公开的逃逸。** Docker 自己的安全公告页记着 Docker Sandboxes 的两个缺陷，
+两者都在 2026-09-07 的 `0.42.0` 版里修好，并于 2026-09-15 公开：
 
-- `CVE-2026-77179` (CVSS 9.4, critical) — on macOS, the virtio-fs host server
-  followed symlinks when reopening an unlinked file from a stored path. A
-  malicious guest could replace a parent directory with a symlink, escape the
-  shared workspace, and read or modify arbitrary host files as the VMM user,
-  potentially reaching host code execution. Affected `0.28.0` up to but not
-  including `0.42.0`.
-- `CVE-2026-79994` (high) — a time-of-check to time-of-use race in the Unix
-  socket relay: a guest could make the host connect to an `AF_UNIX` socket
-  outside the shared workspace. Affected `0.37.0` up to but not including
-  `0.42.0`.
+- `CVE-2026-77179`（CVSS 9.4，严重）—— 在 macOS 上，virtio-fs 宿主服务
+  在按存下的路径重开一个已 unlink 的文件时会跟随符号链接。
+  恶意 guest 可以把父目录换成符号链接，逃出共享工作区，
+  以 VMM 用户身份读写宿主的任意文件，可能进一步达成宿主代码执行。
+  受影响版本 `0.28.0` 起、到 `0.42.0` 之前为止。
+- `CVE-2026-79994`（高危）—— Unix socket 中继里的一个
+  time-of-check to time-of-use 竞态：guest 可以让宿主去连
+  共享工作区之外的 `AF_UNIX` socket。受影响版本 `0.37.0` 起、到 `0.42.0` 之前为止。
 
-★ The documented mitigation for both is **clone mode and no read-write host
-mounts** — which is exactly what openheron cannot use: the agent has to write
-into the workspace, and it has to write into the configuration the user edits.
-So for this workload the mitigation is unavailable, and the answer is the
-version floor: **`sbx` 0.42.0 or later**, checked before the Kit is published.
+★ 官方给这两条的缓解办法是**clone 模式并且不要加读写主机挂载** ——
+而这恰恰是 openheron 用不了的：agent 必须往工作区里写，
+也必须往用户要编辑的那份配置里写。
+所以对这个负载来说，缓解办法不可用，答案只能是版本下限：
+**`sbx` 0.42.0 或更新**，在发布 Kit 之前就查。
 
-★ The boundary is a strong boundary, not an absolute one, and it moves fast.
-The same announcements page also records a certificate-authority compromise that
-forced the built-in kit images to be rebuilt — so a Kit's base image is a
-supply-chain item that has to be refreshed, not a constant.
+★ 这条边界是强边界，不是绝对边界，而且它跑得很快。
+同一份公告页还记着一次证书机构被攻破，迫使内置 kit 镜像重建 ——
+所以 Kit 的基础镜像是需要刷新的供应链产物，不是一个常量。
 
-★ **The files the agent creates are owned by uid `1000` on the host.** The
-workload runs as the `agent` user at uid `1000`, and the mount carries no uid
-mapping that openheron can rely on: a file the agent writes inside the
-workspace belongs to uid `1000` in the host's view, which is some unrelated
-account on most Linux hosts. The user can read it; they may have to `chown` it
-before editing. This one is worth verifying rather than assuming (§5).
+★ **agent 造出来的文件在宿主上归 uid `1000` 所有。**
+workload 以 `agent` 用户（uid `1000`）运行，而挂载并不带 openheron 能依赖的 uid 映射：
+agent 在工作区里写下的文件，在宿主视角下属于 uid `1000`，
+而那在多数 Linux 宿主上是另一个毫不相干的账号。用户读得了；
+要改之前可能得先 `chown`。这一条值得实测而不是假设（§5）。
 
 ---
 
-## 3. The other seam, and why this one
+## 3. 另一条接缝，以及为什么取这条
 
-Two seams were on the table (§1.3). They have the same goal and different shapes:
+桌上摆过两条接缝（§1.3）。它们目标相同，形状不同：
 
-| | the inward seam | this document |
+| | 往里那条 | 本文档 |
 |---|---|---|
-| What is isolated | the `execute` tool | the whole process |
-| Where the server runs | on the host | inside the microVM |
-| Code change | replace `StreamingShell` | none |
-| The read path | still on the host, still unbounded | inside the boundary |
-| Intel Mac | the host path still works | nothing to fall back to |
-| Runtime | microsandbox (Apache-2.0, self-hosted) | Docker Sandboxes (`sbx`, Docker sign-in) |
-| Distribution | openheron ships or requires `msb` | a registry artifact plus `sbx` |
+| 隔离的是什么 | `execute` 工具 | 整个进程 |
+| 服务跑在哪 | 宿主 | microVM 里 |
+| 代码改动 | 换掉 `StreamingShell` | 没有 |
+| 读路径 | 仍在宿主，仍不收敛 | 在边界之内 |
+| Intel Mac | 宿主那条路仍能用 | 没有退路 |
+| 运行时 | microsandbox（Apache-2.0，自托管） | Docker Sandboxes（`sbx`，需 Docker 登录） |
+| 分发 | openheron 自带或要求装 `msb` | 一个 registry 产物加 `sbx` |
 
-★ **The inward seam was dropped.** It is a **narrower** boundary that openheron
-could adopt without moving anything; this one is a **wider** boundary that
-costs no code. ★ And the two are not worth composing: **the Kit is the outer
-boundary, so a microVM inside it is not needed** — the sandbox already
-provides the isolation the `execute` tool was going to ask for. Two isolation
-layers for one command path is one too many.
+★ **往里那条接缝已经放弃。** 它是**更窄**的边界，openheron 不挪任何东西就能采纳；
+这一条是**更宽**的边界，代价是零代码。★ 而且这两条不值得叠起来：
+**Kit 是外层边界，里面就不需要 microVM 了** ——
+沙箱已经提供了 `execute` 工具本来打算去要的那层隔离。
+一条命令路径上叠两层隔离，多了一层。
 
-★ So there is one boundary, and it is the whole process. openheron does not
-run a microVM of its own: the Kit is the isolation, and the host's own policy
-(`sbx policy`) is what governs what happens inside it (§2.7).
+★ 所以边界只有一道，而且是整个进程那道。openheron 不自己跑 microVM：
+隔离由 Kit 提供，沙箱里面发生什么由宿主自己的策略（`sbx policy`）管（§2.7）。
 
 ---
 
-## 4. Decisions
+## 4. 决策
 
-### 4.1 Settled
+### 4.1 已定
 
-These are decided; the Kit in `sandbox-kit/` is built on them.
+这几条定了；`sandbox-kit/` 里的 Kit 就是照它们建的。
 
-1. **The initialization carrier.** A `lifecycle@1` **startup hook** plus the
-   entrypoint's repeat of the same command (§2.5). Two carriers rather than
-   one, because `openheron init` is idempotent and the redundancy costs a
-   no-op while removing the dependency on the hooks' position relative to the
-   entrypoint. **No Go change.**
-2. **Where the state lives.** On the **mount** (§2.9): the data dir stays at
-   its default, `<workspace>/.openheron/state`, so the conversations survive
-   a sandbox that is stopped, recreated, or removed, and the user can read
-   them. **No `volume@1` is declared**; `DATA_DIR` stays free for a user who
-   wants the other arrangement.
-3. **The provider is openheron's own; the credential is bound with one
-   command.** The provider — which file `openheron init` writes — is decided by
-   the factory template and is not an argument (§2.3). The credential is bound
-   on the host with `sbx secret set-custom … --placeholder proxy-managed`, which
-   makes the host's placeholder the same string the runtime injects: the
-   container holds the sentinel, the key never enters the VM, and the user runs
-   one command (§2.8). The Kit keeps the `credential@1` declaration, so the
-   credential's purpose stays in the descriptor — and therefore in the
-   permission surface (§2.14).
-4. **Egress.** The Kit **does not restrict** what the agent may reach: the
-   runtime phase is granted `*` (§2.7). The microVM is the boundary; the
-   host's policy and the organization's rules are the levers, and they sit
-   above the Kit in the enforcement order. A Kit that restricted egress would
-   buy friction rather than safety — and the friction lands on the agent.
-5. **The port is declared, and the host side is the runtime's.** The workload
-   declares `com.docker.sandbox/port@1` for container port `8080` (§2.5). The
-   runtime publishes it on an ephemeral loopback port at start time; the user
-   reads it from `sbx ports`. A Kit cannot pin a host port, and the Kit does
-   not need one. **The family is left at its default**, because the runtime
-   does not implement `dual` yet and a rejected descriptor is a sandbox that
-   never starts.
-6. **The session starts the server; the capability keeps it.** The entrypoint
-   is the agent's launch command, so a detached `sbx run` leaves the sandbox
-   configured and silent (§2.5). `long-running@1` is what lets the client
-   detach afterwards without the server going down with it.
+1. **初始化的载体**。一个 `lifecycle@1` 的 **startup hook**，
+   加上入口脚本里对同一条命令的重复（§2.5）。之所以用两个载体而不是一个：
+   `openheron init` 是幂等的，这份冗余的代价是一次空操作，
+   却去掉了"hook 相对入口脚本的位置"这个依赖。**不改 Go。**
+2. **状态放哪**。放在**挂载上**（§2.9）：数据目录保持默认的
+   `<工作区>/.openheron/state`，于是对话能挺过沙箱的停止、重建，甚至移除，
+   而且用户读得到。**不声明 `volume@1`**；
+   `DATA_DIR` 留给想要另一种安排的用户。
+3. **provider 是 openheron 自己的；凭据用一条命令绑定。** provider ——
+   `openheron init` 写哪个文件 —— 由工厂模板决定，不是参数（§2.3）。
+   凭据在宿主上用 `sbx secret set-custom … --placeholder proxy-managed` 绑定，
+   这让宿主那边的占位符与运行时注入的是同一个字符串：容器里是哨兵值，
+   密钥不进 VM，用户只跑一条命令（§2.8）。
+   Kit 保留 `credential@1` 声明，所以凭据的用途仍在描述文件里 ——
+   也就仍在权限面里（§2.14）。
+4. **出网。** 这个 Kit **不限制** agent 能够到什么地方：运行阶段放行 `*`（§2.7）。
+   边界是 microVM；宿主的策略与组织的规则才是旋钮，
+   而它们在执行顺序上位于 Kit 之上。
+   一个限制出网的 Kit 买到的是摩擦而不是安全 —— 而摩擦落在 agent 身上。
+5. **端口要声明，宿主侧归运行时。** workload 为容器端口 `8080` 声明
+   `com.docker.sandbox/port@1`（§2.5）。运行时在启动时把它发布到一个临时的
+   回环端口上；用户从 `sbx ports` 里读端口。Kit 不能钉死宿主端口，
+   也不需要。**family 留在默认值**，因为运行时还没实现 `dual`，
+   而被拒的描述文件意味着沙箱根本起不来。
+6. **会话把服务拉起来，能力把它留住。** 入口脚本就是 agent 的启动命令，
+   所以 detached 的 `sbx run` 只会得到一个配好的、哑的沙箱（§2.5）。
+   靠 `long-running@1`，客户端之后分离也不会把服务一起带走。
 
-### 4.2 Still open
+### 4.2 仍未定
 
-These are the owner's calls. The two questions §6 measured are settled: the
-workspace path **is** injected, and the forwarding layer does **not** buffer.
+这些是 owner 的决定。§6 实测过的两个问题已有结论：工作区路径**确实**被注入，
+转发层**确实**不缓冲。
 
-1. **The published registry.** Does openheron publish the Kit to a registry it
-   controls, or does each user build it from the source tree?
-2. **The skills directory.** `agentkit/build/snapshot.go:52-54` adds it as a
-   second root. Where does it live inside the VM — the workspace, or the
-   volume?
-3. **The `sbx` version floor.** `0.42.0` or later, because the documented
-   mitigation for the published escapes is a mode openheron cannot use
-   (§2.14). Does the Kit declare the floor, or does the installer check it?
+1. **发布的 registry**。openheron 是把 Kit 发到自己控制的 registry，
+   还是每个用户从源码树自己构建？
+2. **skills 目录**。`agentkit/build/snapshot.go:52-54` 把它加为第二个根。
+   它在 VM 里该放哪 —— 工作区，还是 volume？
+3. **`sbx` 版本下限**。`0.42.0` 或更新 —— 因为已公开逃逸的官方缓解办法
+   是 openheron 用不了的那种模式（§2.14）。
+   是由 Kit 声明这个下限，还是由安装器去检查？
 
 ---
 
-## 5. How this would be verified
+## 5. 这件事要怎么验收
 
-A boundary that is not a unit test has to be verified behaviourally.
+一个不是单元测试的边界，只能靠行为验收。
 
-1. **Escape test.** A turn that reads `~/.ssh` and writes outside the project
-   root must fail, and the failure must be visible in the tool output.
-2. **Read-path test.** ★ The one the microsandbox route cannot pass: a turn
-   that asks `read_file` for a file outside the project root must fail. If it
-   succeeds, the boundary is not where this document says it is.
-3. **SSE test.** A turn must stream to the browser **as it happens**, not in
-   one burst at the end (§2.10). This is the acceptance criterion most likely
-   to fail first, and it cannot be checked against the E2E fake backend — that
-   backend has no real forwarding layer in front of it.
-4. **Network test.** A command that opens a socket to a host outside the allow
-   list must fail.
-5. **State test.** Restart the sandbox: the session must still be there.
-   Remove it: with the data dir on the mount (§2.9), the session must still be
-   there, and the files must be readable by the user on the host.
-6. **Degradation test.** With the credential not provided, the sandbox must
-   still start and the model calls must fail with a clear 401 — not a crash.
-7. **Credential test.** The real key must appear nowhere inside the sandbox —
-   not in the environment, not in the config root, not in a process dump.
-   The container sees a sentinel, and the model calls still succeed (§2.8).
-8. **Proxy test.** ★ The model call must actually traverse the sandbox
-   proxy: the policy log has to show it on the proxied path, and the
-   container's env var must hold the sentinel rather than a real key. A client
-   that bypasses the proxy ships the sentinel to the API and gets a 401.
-   openheron's client honors `HTTPS_PROXY` (`llm/common/logging.go:77`
-   delegates to `http.DefaultTransport`), but that has to be observed, not
-   assumed.
-9. **Initialization test.** An empty workspace must come up configured: the
-   initialization writes the configuration, the server starts, and the config
-   root is the one the user sees on the host. A second start must keep the
-   existing configuration and change nothing. ★ And the configuration must
-   land on the **mount**, not inside the VM — that is the whole point of
-   §2.6, and it is the one thing a running sandbox can get wrong quietly.
-10. **Ownership test.** The files the agent wrote inside the workspace must be
-    readable by the user on the host, and their ownership must be something
-    the user can live with (§2.14).
-11. **Cost test.** Ten turns in one sandbox must pay one boot, not ten.
+1. **逃逸测试**。一次读 `~/.ssh` 并往项目根之外写的回合必须失败，
+   而且失败要能在工具输出里看见。
+2. **读路径测试**。★ microsandbox 那条路通不过的那一条：
+   一次向项目根之外的文件要 `read_file` 的回合必须失败。
+   若它成功了，边界就不在本文档所说的位置。
+3. **SSE 测试**。一个回合必须**边发生边**流到浏览器，
+   而不是回合结束时一次性涌出（§2.10）。
+   这条验收标准最可能第一个失败，而且没法对着 E2E 的假后端查 ——
+   那个后端前面没有真的转发层。
+4. **网络测试**。一条去打开允许列表之外主机 socket 的命令必须失败。
+5. **状态测试**。重启沙箱：会话必须还在。
+   移除沙箱：在数据目录位于挂载上时（§2.9），会话必须还在，
+   而且文件必须能被宿主上的用户读到。
+6. **降级测试**。凭据没提供时，沙箱必须照样起来，
+   模型调用必须以明确的 401 失败 —— 而不是崩掉。
+7. **凭据测试**。真密钥在沙箱里必须哪儿都不出现 ——
+   环境里没有、配置根里没有、进程 dump 里也没有。
+   容器里只有哨兵值，而模型调用照常成功（§2.8）。
+8. **代理测试**。★ 模型调用必须真的穿过沙箱代理：
+   策略日志里要看到它走在代理路径上，而容器里的环境变量
+   装的是哨兵值而不是真密钥。
+   一个绕过代理的客户端会把哨兵值送到 API，然后收到一个 401。
+   openheron 的客户端认 `HTTPS_PROXY`（`llm/common/logging.go:77`
+   委派给 `http.DefaultTransport`），但这一点要被观测到，而不是被假设。
+9. **初始化测试**。一个空工作区必须带着配置起来：
+   初始化写出配置、服务启动、配置根就是用户在宿主上看到的那一个。
+   第二次启动必须保留已有配置，不改任何东西。
+   ★ 而且配置必须落在**挂载**上，而不是 VM 内部 ——
+   这正是 §2.6 的全部意义，也是运行中的沙箱唯一会悄悄搞错的一件事。
+10. **归属测试**。agent 在工作区里写下的文件，用户在宿主上必须读得到，
+    归属也必须是用户能接受的那种（§2.14）。
+11. **成本测试**。一个沙箱里的十个回合只付一次启动，不是十次。
 
 ---
 
-## 6. Measured
+## 6. 实测
 
-★ Measured on 2026-11-04, on a real sandbox: `sbx` v0.51.0, Docker Engine
-29.9.2, Linux on WSL2, the Kit built from `sandbox-kit/` with the binary baked
-locally. The workload's own
-environment was captured from inside the sandbox and read on the host.
+★ 2026-11-04 在真实沙箱上实测：`sbx` v0.51.0、Docker Engine 29.9.2、
+Linux on WSL2，Kit 由 `sandbox-kit/` 构建（二进制本地烤入）。
+workload 自己的环境是从沙箱内部抓的，宿主上读的。
 
-| Question | Answer |
+| 问题 | 答案 |
 |---|---|
-| Does the workload's environment carry `WORKSPACE_DIR`? | **Yes** — `/home/you/my-project`: the host's path, and the path the workspace is mounted at |
-| Does the process start in the workspace? | **Yes** — `PWD` and `OLDPWD` are both the workspace |
-| Does the configuration land on the mount? | **Yes** — `.openheron/{agents,llm,policy,server,state}` is on the host, and the sessions with it |
-| Does the credential reach the model? | **Yes** — the container held `DEEPSEEK_API_KEY=proxy-managed`; the proxy substituted the real value and the call returned "ok" |
-| Does the published recipe build? | **Yes** — `make kit` with the container-driver builder produces `openheron-kit:0.0.6`, and the binary inside reports `v0.0.6` |
-| Does the workload compose with the credential mixin? | **Yes** — the container held `DEEPSEEK_API_KEY=proxy-managed`, the configuration was on the mount, and the model answered |
-| Does a declaration-only mixin build without a Dockerfile? | **Yes** — `make kit-mixin` produces it from the descriptor alone |
-| Does the published Kit run in a sandbox? | **Yes** — the startup hook writes the configuration onto the mount and the server creates its data directory there |
-| Do two vendor mixins compose? | **Yes** — both sentinels were in the container, and the DeepSeek call returned 200 |
-| Do two mixins with the same service compose? | **No** — "one credential has one owner" |
-| Can a mixin be a plain YAML file? | **Yes** — a hand-written directory was consumed exactly like a built image |
-| Can a packaged Kit be consumed by OCI reference? | **Yes** — Docker's own published v3 Kit was pulled and ran |
-| Is a Kit from another registry allowed by default? | **No** — `kit.allowedSources` holds `docker.io/` and `dhi.io/` |
-| Does a registry reference have to be HTTPS? | **Yes** — "http: server gave HTTP response to HTTPS client" |
-| Does the port forwarding buffer the SSE stream? | **No** — 1339 frames over 10.3 s, the first at +21 ms |
-| Who owns the files the agent writes? | The host user — the VM's uid `1000` is the host's uid `1000` (§2.14) |
-| Does the Kit declare the port it serves on? | **No — that was the defect.** §6.5 |
-| Does the runtime publish the declared port? | **Yes** — `✓ http — published localhost:32772 -> 8080/tcp`, on an ephemeral loopback port |
-| Does a detached run start the server? | **No** — the entrypoint is the agent's launch command, and `--detach` opens no session (§2.5) |
-| Does the server outlive its client? | **Yes** — `long-running@1` keeps it up; the health endpoint still answered 200 after the client was gone |
+| workload 的环境带不带 `WORKSPACE_DIR`？ | **带** —— `/home/you/my-project`：宿主的路径，也是工作区挂载的路径 |
+| 进程是不是从工作区启动的？ | **是** —— `PWD` 与 `OLDPWD` 都是工作区 |
+| 配置是不是落在挂载上？ | **是** —— `.openheron/{agents,llm,mcps,server,state}` 在宿主上，会话也在 |
+| 凭据到不到模型？ | **到** —— 容器里是 `DEEPSEEK_API_KEY=proxy-managed`；代理换上真值，调用返回了 "ok" |
+| 发布版配方构建得出来吗？ | **能** —— `make kit` 用 container-driver builder 产出 `openheron-kit:0.0.6`，里面的二进制自报 `v0.0.6` |
+| workload 能与 credential mixin 组合吗？ | **能** —— 容器里是 `DEEPSEEK_API_KEY=proxy-managed`，配置在挂载上，模型答了 |
+| 纯声明的 mixin 没有 Dockerfile 也构建得出来吗？ | **能** —— `make kit-mixin` 只靠描述文件就产出镜像 |
+| 发布版 Kit 在沙箱里跑得起来吗？ | **能** —— startup hook 把配置写到挂载上，服务在自己的数据目录里建出了 state |
+| 两个厂商 mixin 能组合吗？ | **能** —— 两个哨兵都在容器里，DeepSeek 那边回了 200 |
+| 两个同 service 的 mixin 能组合吗？ | **不能** —— "one credential has one owner" |
+| mixin 能就是一个 YAML 文件吗？ | **能** —— 手写的目录与构建出来的镜像被同样地消费 |
+| 打包好的 Kit 能按 OCI 引用消费吗？ | **能** —— Docker 官方发布的 v3 Kit 被拉取并跑起来 |
+| 默认允许来自别的 registry 的 Kit 吗？ | **不允许** —— `kit.allowedSources` 只有 `docker.io/` 与 `dhi.io/` |
+| registry 引用必须是 HTTPS 吗？ | **是** —— "http: server gave HTTP response to HTTPS client" |
+| 端口转发会不会缓冲 SSE？ | **不会** —— 10.3 秒里 1339 帧，首帧 +21ms |
+| agent 写出的文件归谁？ | 归宿主用户 —— VM 的 uid `1000` 就是宿主的 uid `1000`（§2.14） |
+| Kit 声明了它服务的那个端口吗？ | **没有 —— 那就是缺陷本身。** §6.5 |
+| 运行时会把声明的端口发布出来吗？ | **会** —— `✓ http — published localhost:32772 -> 8080/tcp`，临时的回环端口 |
+| detached 起得来服务吗？ | **起不来** —— 入口脚本是 agent 的启动命令，而 `--detach` 不开会话（§2.5） |
+| 服务比客户端活得久吗？ | **活得久** —— `long-running@1` 留着它；客户端走了健康检查照样回 200 |
 
-★ **Both credential routes were measured.** With the placeholder
-(`--placeholder proxy-managed`) the container held `DEEPSEEK_API_KEY=proxy-managed`
-and the proxy substituted the real value; with the key injected directly
-(`--env DEEPSEEK_API_KEY=…`) the container held the key and the proxy
-forwarded it unchanged because it was not the placeholder. Both reached the
-model; only the first keeps the key out of the VM (§2.8).
+★ **那次实测之后，目录集合变了。** `policy/` 分区在 2026-11-07 退役了 ——
+档位现在住在提供工具的那些文件里（§1.2）—— 所以今天写出来的配置里没有
+`policy/` 目录。答案本身不变：配置落在挂载上。
 
-### 6.1 What the measurement changed in this document
+★ **两条凭据路都实测过。** 用占位符时（`--placeholder proxy-managed`），
+容器里是 `DEEPSEEK_API_KEY=proxy-managed`，代理换上真值；
+用真密钥直接注入时（`--env DEEPSEEK_API_KEY=…`），容器里是密钥，
+代理发现它不是占位符就原样转发。两条都打到了模型，
+只有第一条把密钥挡在 VM 之外（§2.8）。
 
-- §2.5 and §2.6 are no longer a hypothesis: `WORKSPACE_DIR` is injected, so
-  the entrypoint's `cd "${WORKSPACE_DIR:-$PWD}"` lands on the mount, and the
-  configuration root is `<workspace>/.openheron`.
-- §2.10's risk did not materialize: the forwarding layer does not buffer.
-- §2.14's ownership worry is resolved for a host whose uid `1000` is the user's
-  — the agent's files are the user's files.
-- ★ The recipe changed: the base image already carries a populated CA store,
-  so the `apt-get` step was removed — it was redundant *and* it was the only
-  thing in the build that needed a package mirror.
+### 6.1 实测改动了本文档的哪些地方
 
-### 6.2 Operational findings, none of them in the Kit
+- §2.5 与 §2.6 不再是假设：`WORKSPACE_DIR` 确实被注入，
+  于是入口脚本的 `cd "${WORKSPACE_DIR:-$PWD}"` 落在挂载上，
+  配置根就是 `<工作区>/.openheron`。
+- §2.10 的风险没有发生：转发层不缓冲。
+- §2.14 的归属担心消解了 —— 宿主上 uid `1000` 是用户本人的话，
+  agent 写出的文件就是用户的文件。
+- ★ 配方改了：基础镜像本来就带着装好的 CA 证书库，
+  那个 `apt-get` 步骤被删掉 —— 它既多余，又是整个构建里唯一需要包镜像的地方。
 
-- ★ **`sbx rm` takes the published ports with it.** After recreating a
-  sandbox, `sbx ports` reports "No published ports" and the forwarding does
-  not come back by itself; `sbx ports <name> --publish 8080:8080` has to be
-  repeated. A stale published port looks exactly like a dead workload.
-- ★ **The `default` buildx builder drops the Kit's manifest annotations.** The
-  image builds, and it is no longer a Kit: the descriptor annotation is gone.
-  A container-driver builder keeps it, so `make kit` names one.
-- ★ **That builder also needs `--load`.** Without it the result stays in the
-  build cache and there is no local image to validate — `make kit-check` would
-  look for an image that was never exported.
-- ★ **The credential and its network rule have to be declared together.**
-  A mixin that carries only the credential does not compose: the runtime wants
-  the inject domain to appear literally in the allow list, and the workload's
-  bare `*` does not satisfy that. The mixin adds the host as well, and the two
-  allow lists union (§2.3).
-- ★ **`openheron init` maintains one provider configuration per root.** A
-  second vendor's `llm/*.yaml` is written by the user, not by a Kit hook
-  (§2.3).
-- ★ **The port forwarding is unreliable on a WSL2 host.** The proxy dials the
-  bridge gateway (`172.17.0.1:8080`) and gets a connection refused, while the
-  workload is up: the same Kit answered 1339 SSE frames earlier in the same
-  session and stopped answering later, with no change to the Kit. Re-publishing
-  the port sometimes brings it back. It is a host-side symptom, and the Kit
-  must not be read as the cause. ★ **This entry was wrong.** §6.5 measures the
-  same symptom and gives it a different cause: the Kit declared no
-  `port@1`, so there was no service for the runtime to forward to. The
-  forwarding layer was never the problem.
-- ★ **The host needs `/dev/kvm`,** so the user has to be in the `kvm` group.
-  The daemon is the process that opens it, not the CLI.
-- ★ **`sbx run --name` restarts the sandbox; it does not rebuild the
-  container from a changed Kit.** Kit changes need `sbx rm` and a new
-  `sbx run` — a restart silently keeps the old image, which makes a probe look
-  like it did not run.
-- ★ **The recipe builds from this repository**, so the Kit carries the current
-  source: `make kit` runs `make build` and copies the binary in. The binary
-  inside reports its own version — `git describe`, not a release tag — and it
-  is dynamically linked where the release binaries are static.
-- ★ **`sbx kit pack` is the other grammar.** It wants a `spec.yaml` — the
-  v1/v2 artifact — and refuses a v3 Kit directory. So a v3 Kit travels as an
-  OCI image or as a directory, not as a ZIP.
-- ★ **`openheron init` writes the configuration all or nothing.** It trial-loads
-  the merged result and refuses to write a configuration that does not load
-  (`agentkit/spec/write.go:341-344`). A pre-seeded agent that references a
-  subagent nobody defines — `subagents: [task]` with no `agents/task.md` — is
-  exactly that case: nothing is written, and the server then refuses to start
-  with "no configuration at …" (`main.go:135-143`). The startup hook swallowed
-  the failure, so the sandbox came up and looked healthy with nothing
-  listening on the port. The Kit's message now says what actually happened.
-- ★ **The daemon that serves the socket is the one that needs `/dev/kvm`.**
-  The CLI starts a daemon of its own when it cannot reach one, and that one
-  inherits the invoking user's groups — so on a host where the KVM device is
-  group-owned and the CLI's user is not in that group, the sandboxes fail
-  with "KVM error: Permission denied" while the daemon itself looks healthy.
-- ★ **The approval gate did not cover `execute`, and now it does.** The
-  framework reaches a tool through one of two wrappers, and the shell's
-  `execute` is the one filesystem tool that is a *streaming* tool
-  (`adk/middlewares/filesystem/filesystem.go:512` builds it with
-  `newStreamingExecuteTool`, while the other six use `InferTool`). The gate
-  implemented only the synchronous wrapper, so a tool the policy named in the
-  `ask` column ran without a human decision. Measured before the fix: with
-  `execute` in the `ask` column, a run that called it executed it and returned
-  its output, with no approval raised. The other filesystem tools were
-  covered all along — which is why the acceptance run's `edit_file` approval
-  had always worked. The fix gives the gate the streaming wrapper too, with
-  both paths sharing one decision (`agentkit/build/gate.go`): the arguments
-  to run are the ones the interrupted call stored, and a refusal is a
-  message the model reads rather than an error that ends the turn. This was
-  an openheron defect, not a Kit one.
+### 6.2 操作层面的发现，都不在 Kit 里
 
-  Measured after the fix, in a sandbox running the rebuilt binary:
+- ★ **`sbx rm` 会把已发布的端口一起带走。** 重建沙箱后，
+  `sbx ports` 报 "No published ports"，转发不会自己回来；
+  必须重新 `sbx ports <name> --publish 8080:8080`。
+  一个失效的端口映射，看起来和"workload 死了"一模一样。
+- ★ **`default` builder 会把 Kit 的 manifest annotation 丢掉。**
+  镜像构建成功，而它已经不是 Kit 了：描述文件 annotation 没了。
+  container driver 的 builder 才保得住，所以 `make kit` 指定了它。
+- ★ **那个 builder 还需要 `--load`。** 不给的话结果留在构建缓存里，
+  本地没有镜像可供校验 —— `make kit-check` 会去找一个从没导出的镜像。
+- ★ **凭据和它的网络规则必须一起声明。**
+  只带凭据的 mixin 组合不上：运行时要 inject 域名逐字出现在 allow 列表里，
+  而 workload 的裸 `*` 不满足。mixin 于是把主机名一并加上，两张 allow 列表取并集（§2.3）。
+- ★ **`openheron init` 每个配置根只维护一份 provider 配置。**
+  第二个厂商的 `llm/*.yaml` 由用户写，不由 Kit 的 hook 写（§2.3）。
+- ★ **端口转发在 WSL2 宿主上不可靠。** 代理拨的是 bridge 网关
+  （`172.17.0.1:8080`），拿到 connection refused，而 workload 是活的：
+  同一个 Kit 在同一次会话的早些时候回了 1339 帧 SSE，之后就不回了，
+  Kit 本身没变。重发端口有时能救回来。这是宿主侧的症状，
+  不能把账记在 Kit 上。
+  ★ **这一条当时是错的。** §6.5 实测了同一个症状，给出的是另一个原因：
+  Kit 根本没声明 `port@1`，于是运行时没有可转发的服务。
+  转发层从来不是问题所在。
+- ★ **宿主需要 `/dev/kvm`**，所以用户得在 `kvm` 组里。
+  开这个设备的是守护进程，不是 CLI。
+- ★ **`sbx run --name` 是重启沙箱，不会用改过的 Kit 重建容器。**
+  改了 Kit 要 `sbx rm` 再 `sbx run` —— 重启会悄悄留着旧镜像，
+  于是探针看起来像"没跑"。
+- ★ **配方是从这个仓库构建的**，所以这个 Kit 带的是当前源码：
+  `make kit` 跑 `make build` 并把二进制拷进去。镜像里的二进制自报它的版本 ——
+  `git describe` 的结果，而不是 release tag；
+  而且它是动态链接的，而发布出来的二进制是静态的。
+- ★ **`sbx kit pack` 是另一套语法。** 它要的是 `spec.yaml` ——
+  v1/v2 的产物格式 —— 并且拒绝 v3 的 Kit 目录。
+  所以 v3 的 Kit 是以 OCI 镜像或目录的形式流传的，不是 ZIP。
+- ★ **`openheron init` 对配置是全有或全无。** 它会对合并后的结果做一次试加载，
+  拒绝写下一个加载不了的配置（`agentkit/spec/write.go:413-416`）。
+  预置的 agent 引用了一个谁也没定义的 subagent —— `subagents: [task]` 而没有
+  `agents/task.md` —— 正是这种情况：什么都不会被写，
+  服务随后以 "no configuration at …" 拒绝启动（`main.go:135-143`）。
+  而启动 hook 把这个失败吞了，于是沙箱起来了、看着一切正常，
+  端口上却没人听。Kit 的提示语现在说的是实际发生的事。
+- ★ **服务那个 socket 的守护进程，才是需要 `/dev/kvm` 的那一个。**
+  CLI 在够不着守护进程时会自己拉起一个，而它继承的是调用者的用户组 ——
+  于是在一个 KVM 设备按组授权、而 CLI 的用户不在该组里的宿主上，
+  沙箱会报 "KVM error: Permission denied"，而守护进程自己看着一切正常。
+- ★ **审批闸门以前管不到 `execute`，现在管得到了。** 框架有两条包装工具调用的
+  路，而 shell 的 `execute` 是 filesystem 那批工具里**唯一的流式**工具
+  （`adk/middlewares/filesystem/filesystem.go:512` 用
+  `newStreamingExecuteTool` 建它，另外六个走 `InferTool`）。闸门只实现了
+  同步那条，于是档位表留在默认值（`ask`）上的工具没经过人的决策就跑了。
+  修复前的实测：`execute` 没人点名 —— 而默认档位就是 `ask` —— 一次调用它的 run
+  **直接执行了**并返回输出，没有触发审批。其余那几个 filesystem 工具一直是被覆盖的
+  —— 这也是验收跑批里 `edit_file` 的审批一直正常的原因。修法是给闸门补上流式那条包装，
+  两条路共用同一个决策（`agentkit/build/gate.go`）：要跑的参数取自中断时
+  存下的那一份，而拒绝是模型读得到的一条消息，不是终结这一轮的错误。
+  这是 openheron 的缺陷，不是 Kit 的。
 
-  | Step | Result |
+  修复后实测，用重建过二进制的沙箱：
+
+  | 步骤 | 结果 |
   |---|---|
-  | a run calls `execute` | the session goes to `waiting_approval`, `hasPendingApproval: true`, and the tool does **not** run |
-  | the approval's shape | `toolName: execute`, `arguments: {"command": "echo \"task execution test\""}`, `requestedByAgent: task` |
-  | the human approves | `TOOL_CALL_RESULT` carries `task execution test\n` — the stored command, not a fresh one |
-  | the turn | ends with `RUN_FINISHED` |
+  | 一次 run 调用 `execute` | 会话进入 `waiting_approval`，`hasPendingApproval: true`，工具**没有**执行 |
+  | 审批的形状 | `toolName: execute`、`arguments: {"command": "echo \"task execution test\""}`、`requestedByAgent: task` |
+  | 人批了 | `TOOL_CALL_RESULT` 带着 `task execution test\n` —— 是存下的那条命令，不是新生成的 |
+  | 这一轮 | 以 `RUN_FINISHED` 结束 |
 
-### 6.3 How `WORKSPACE_DIR` arrives
+### 6.3 `WORKSPACE_DIR` 是怎么来的
 
-★ It is a **sandbox-level environment variable that the runtime injects** — not
-the Kit's, and not the image's. Three pieces of evidence:
+★ 它是**运行时注入的沙箱级环境变量** —— 不是 Kit 给的，也不是镜像给的。
+三条证据：
 
-- The Kit's Dockerfile does not set it, and the workload container has it.
-- `sbx exec` starts a **different** container in the same sandbox, and it has
-  the same value — so it belongs to the sandbox, not to the workload.
-- The `sbx` binary contains the spec templates it generates for the built-in
-  agent kits, and they read it the same way:
-  `ws="${WORKSPACE_DIR:-/}"` with `env: [WORKSPACE_DIR]` declared on the
-  hook.
+- Kit 的 Dockerfile 没有设它，而 workload 容器里却有；
+- `sbx exec` 在同一个沙箱里起的是**另一个**容器，值完全一样 ——
+  所以它属于沙箱，不属于 workload；
+- `sbx` 二进制里带着它为内置 agent kit 生成的 spec 模板，
+  而那些模板读它的方式一模一样：`ws="${WORKSPACE_DIR:-/}"`，
+  并且 hook 上声明了 `env: [WORKSPACE_DIR]`。
 
-The runtime injects a whole set of sandbox variables, not just this one:
-`SANDBOX_ID`, `SANDBOX_NAME`, `SANDBOX_VM_ID`, `SBX_AGENT`,
-`MCP_GATEWAY_URL`, `MCP_SENTINEL_TOKEN_NAME`, `SBX_CRED_<SERVICE>_MODE`,
-and the proxy settings (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`,
-`NODE_USE_ENV_PROXY`, `JAVA_TOOL_OPTIONS`, `SSL_CERT_FILE`).
+运行时注入的是一整批沙箱变量，不止这一个：
+`SANDBOX_ID`、`SANDBOX_NAME`、`SANDBOX_VM_ID`、`SBX_AGENT`、
+`MCP_GATEWAY_URL`、`MCP_SENTINEL_TOKEN_NAME`、`SBX_CRED_<SERVICE>_MODE`，
+以及代理相关的那一组（`HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`、
+`NODE_USE_ENV_PROXY`、`JAVA_TOOL_OPTIONS`、`SSL_CERT_FILE`）。
 
-★ **There are two ways to read it, and they are not symmetric.** The workload's
-environment is unrestricted, so the entrypoint reads `${WORKSPACE_DIR:-$PWD}`
-directly (§2.5). A hook's environment is **deny by default**, so the hook has
-to declare the name — `env: [WORKSPACE_DIR]` — and that declaration is exactly
-what the built-in kits do.
+★ **读它有两条路，而且不对称。** workload 的环境不设限，
+所以入口脚本直接 `${WORKSPACE_DIR:-$PWD}`（§2.5）。
+hook 的环境是**默认拒绝**的，所以 hook 必须声明这个名字 —— `env: [WORKSPACE_DIR]` ——
+而这正是内置 kit 做的事。
 
-★ The Kit therefore uses the same mechanism as Docker's own agent kits: a
-startup hook that materialises the workspace path into the agent's own
-configuration, and an entrypoint that starts in the same directory.
+★ 所以这个 Kit 用的就是 Docker 自带 agent kit 的同一套机制：
+一个 startup hook 把工作区路径落进 agent 自己的配置，
+一个入口脚本从同一个目录启动。
 
-### 6.4 Injecting variables
+### 6.4 变量的注入
 
-★ Four channels, and they are not interchangeable:
+★ 四条通道，彼此不等价：
 
-| Channel | Scope | Where the value comes from |
+| 通道 | 作用范围 | 值从哪来 |
 |---|---|---|
-| the image's `ENV` | every container of that image | the Dockerfile — static, the same for everyone |
-| a Kit **argument** with `env:` | the container, at create | the installer, expanded into the effective descriptor |
-| `sbx run -e` / `--env-file` | the sandbox | the host — a bare name takes the host's value |
-| `sbx secret set-custom --host --env` | the sandbox | the host's secret store — the sandbox sees a placeholder |
+| 镜像的 `ENV` | 该镜像的每个容器 | Dockerfile —— 静态，人人一样 |
+| Kit **参数**带 `env:` | 容器，创建时 | 安装者，展开进生效描述文件 |
+| `sbx run -e` / `--env-file` | 沙箱 | 宿主 —— 裸名则取宿主上的值 |
+| `sbx secret set-custom --host --env` | 沙箱 | 宿主的密钥库 —— 沙箱里只看到占位符 |
 
-Measured on the sandbox: `sbx exec -e INJECT_TEST=custom-value` put
-`custom-value` into the exec'd process, `sbx run --env MY_RUN_VAR=hello-from-run`
-put it into the sandbox — where it stayed until the sandbox was recreated —
-and the runtime's own variables arrived in the workload's environment (§6.3).
-★ A value injected with `--env` **overrides** what a capability would have
-installed in the same variable, which is what makes §2.8.2 work with the same
-Kit.
+实测：`sbx exec -e INJECT_TEST=custom-value` 把 `custom-value` 放进那次 exec 的进程，
+`sbx run --env MY_RUN_VAR=hello-from-run` 把它放进沙箱 —— 一直待到沙箱被重建为止；
+运行时自己的那批变量也出现在 workload 的环境里（§6.3）。
+★ 用 `--env` 注入的值**会盖过**capability 本来要装进同一个变量的东西 ——
+这正是 §2.8.2 能用同一个 Kit 跑通的原因。
 
-★ **A hook's `env:` list is not a fifth channel.** The hook environment is
-deny by default, so declaring a name only grants *visibility* of a value that
-is already there — it never introduces one. A hook that needs a custom
-variable gets it from the host (`-e`) and declares the name; the Kit's
-arguments are visible to a hook the same way.
+★ **hook 的 `env:` 列表不是第五条通道。** hook 的环境默认拒绝，
+所以声明一个名字只是**授权可见**一个已经存在的值 —— 它不会引入新值。
+hook 需要自定义变量，就得从宿主拿（`-e`）再声明那个名字；
+Kit 的参数对 hook 也是这样可见的。
 
-★ **A sandbox-level variable and a session-level one are not the same
-lifetime.** A variable baked in at create stays with the sandbox; one applied
-to a session applies to that session only. Recreating the sandbox drops the
-former and keeps the latter's own rules.
+★ **沙箱级变量与会话级变量的生命周期不同。** 创建时烘焙进去的变量跟着沙箱走；
+施加在某个会话上的变量只对这个会话有效。重建沙箱会丢掉前者。
 
 
-### 6.5 The port path, measured
+### 6.5 端口路径，实测
 
-★ **This is where the earlier round went wrong, and the correction is the most
-useful thing this section has to say.** A previous run reported the port
-forwarding as "unreliable on a WSL2 host": the proxy dialed the bridge
-gateway, got a connection refused, and the same Kit answered 1339 SSE frames
-earlier in the same session. That reading blamed the host. It was wrong, and
-the Kit was the cause.
+★ **上一轮就是在这里走偏的，而这次纠正大概是本节最有用的东西。**
+上一轮把端口转发报成"在 WSL2 宿主上不可靠"：代理拨 bridge 网关，
+拿到 connection refused，而同一个 Kit 在同一次会话的早些时候回了 1339 帧 SSE。
+那个读法怪的是宿主。它是错的，而原因在 Kit 这一侧。
 
-★ **The Kit declared no `port@1`.** The workload serves HTTP on `8080` and
-never said so. Without the capability the runtime has no service to forward
-to, so it published nothing, and a hand-made `sbx ports --publish` could only
-bind a host socket with nothing behind it — which is exactly what a client
-sees as "connected, then nothing":
+★ **Kit 根本没声明 `port@1`。** workload 在 `8080` 上服务 HTTP，却从没说出口。
+没有这个能力，运行时没有可转发的服务，于是它什么都不发布；
+手工 `sbx ports --publish` 只能绑一个背后没有东西的宿主套接字 ——
+客户端看到的正是"连上了，然后什么也没有"：
 
 ```
 HTTP/1.1 501 Not Implemented
@@ -1435,37 +1278,32 @@ Content-Length: 0
 Content-Type: application/json
 ```
 
-★ **Two things had to be true for the port to work**, and the second one is
-the part the first round never tested:
+★ **端口要通，得同时满足两件事**，而第二件正是上一轮从没测过的那件：
 
-1. **The Kit declares the port.** `com.docker.sandbox/port@1`, container `8080`
-   (§2.5). With it, the runtime publishes the service itself, on an ephemeral
-   loopback port, at start time — no `sbx ports --publish` step, because a
-   Kit cannot pin a host port.
-2. **An agent session has been opened.** The entrypoint is the agent's launch
-   command (§2.5), and `--detach` opens no session — so a detached sandbox is
-   configured and silent. The server starts when the session opens, and
-   `long-running@1` keeps it running when the client detaches afterwards.
+1. **Kit 声明端口。** `com.docker.sandbox/port@1`，容器端口 `8080`（§2.5）。
+   有了它，运行时自己在启动时把这个服务发布到一个临时回环端口上 ——
+   不需要 `sbx ports --publish`，因为 Kit 不能钉死宿主端口。
+2. **开过一次 agent 会话。** 入口脚本就是 agent 的启动命令（§2.5），
+   而 `--detach` 不开会话 —— 所以 detached 的沙箱是配好的、也是哑的。
+   会话一开，服务就启动；而客户端之后分离，靠 `long-running@1` 把它留住。
 
-★ **The measurement, from the host, on the same published port:**
+★ **宿主侧、在同一个已发布端口上的实测：**
 
-| Path | Result |
+| 路径 | 结果 |
 |---|---|
-| host shell, `127.0.0.1:32769` | **200** |
-| host shell, `[::1]:32769` | **200** |
-| the daemon's own network namespace, `127.0.0.1:32769` | **200** |
-| the daemon's own namespace, `172.17.0.1:32769` | refused |
-| the host's Docker bridge gateway, `172.17.0.1:32769` | **502** |
+| 宿主 shell，`127.0.0.1:32769` | **200** |
+| 宿主 shell，`[::1]:32769` | **200** |
+| 守护进程自己的网络命名空间，`127.0.0.1:32769` | **200** |
+| 守护进程自己的命名空间，`172.17.0.1:32769` | refused |
+| 宿主的 Docker bridge 网关，`172.17.0.1:32769` | **502** |
 
-★ **The last two rows are not failures; they are two different address
-spaces.** `172.17.0.1` is the Docker bridge gateway in the namespace the
-daemon runs in, and the daemon resolves the sandbox's service address in its
-own namespace — not in the guest's. The guest's own forwarder answers 502
-when it has no backend, which is what a client sees when it reaches the wrong
-`172.17.0.1`. The published loopback port is the supported path, and all
-three rows above it agree.
+★ **最后两行不是失败，是两个不同的地址空间。** `172.17.0.1` 是守护进程所在
+命名空间里的 Docker bridge 网关，而守护进程是在**它自己**的命名空间里解析
+沙箱的服务地址，不是在 guest 的命名空间里。guest 自己的转发器在没有后端时
+回 502 —— 客户端够到错的 `172.17.0.1` 时看到的就是这个。
+已发布的回环端口才是受支持的路径，上面那三行对它的看法是一致的。
 
-★ **The runtime's log names the hop**, which is how the diagnosis was made:
+★ **运行时日志会点名那一跳**，诊断就是这么做的：
 
 ```
 "msg":"TCP proxy failed to dial backend","host_address":"127.0.0.1:32768",
@@ -1473,72 +1311,61 @@ three rows above it agree.
 "error":"connect tcp 172.17.0.1:8080: connection was refused"
 ```
 
-★ Eight such failures belonged to the sandbox whose server was never started;
-the sandbox that actually served logged **none**. So the counter is the
-diagnostic: "the forwarding layer is flaky" and "nothing is listening behind
-the binding" look identical from the client, and only the log separates them.
+★ 那八条失败属于服务从未启动的那个沙箱；而真正在服务的那个沙箱**一条都没有**。
+所以计数器就是诊断手段："转发层不稳定"和"绑定后面没有东西在听"，
+从客户端看一模一样，只有日志能把它们分开。
 
-### 6.6 The acceptance run
+### 6.6 验收跑批
 
-★ **The measurement is a script, not a transcript.** `sandbox-kit/acceptance/run.sh`
-runs the whole thing — preflight, a clean sandbox, the mount, the credential,
-a model call, the stream's shape, the client's departure, and the port from
-every vantage point — and exits non-zero if any check fails. It is the
-repeatable form of everything in this section.
+★ **这份实测是脚本，不是记录稿。** `sandbox-kit/acceptance/run.sh`
+把整件事跑一遍 —— 前置检查、干净的沙箱、挂载、凭据、一次模型调用、
+流的形状、客户端的离去，以及从每个视角看端口 —— 任何一项不过就非零退出。
+它是本节全部内容的可重复形式。
 
-★ Two runs went through it — the single vendor case and the two-mixin case.
-Both were **21 checks, 21 passed**. The numbers they carried:
+★ 有两轮跑批走过它：单厂商与两个 mixin。
+两轮都是 **21 项检查、21 项通过**。它们带的数字：
 
-| | single vendor | two mixins |
+| | 单厂商 | 两个 mixin |
 |---|---|---|
-| SSE frames | 772 | 933 |
-| first frame | +15 ms | +16 ms |
-| last frame | +7795 ms | +8615 ms |
-| frame span | 7780 ms | 8599 ms |
-| model call | answered | answered |
-| server after the client left | 200 | 200 |
+| SSE 帧数 | 772 | 933 |
+| 首帧 | +15 ms | +16 ms |
+| 末帧 | +7795 ms | +8615 ms |
+| 帧间跨度 | 7780 ms | 8599 ms |
+| 模型调用 | 答了 | 答了 |
+| 客户端走掉之后 | 200 | 200 |
 
-★ **The run's own transcript is not part of the tree.** It is a run artifact:
-absolute paths, an ephemeral port, frame counts, the model's own words — and
-every rerun would contradict the numbers above. The script is what belongs
-here; `--out` writes the transcript wherever the reader wants it.
+★ **跑批自己的那份记录不进版本库。** 它是运行产物：绝对路径、
+临时端口、帧数、模型自己的话 —— 每重跑一次都会与上面那些数字对不上。
+该留在树里的是脚本；`--out` 把记录写到读者想放的地方。
 
-★ **The frame span is the acceptance criterion that matters.** A span of
-several seconds with the first frame at a few milliseconds means the frames
-arrived as the answer was generated. A short span with a late last frame would
-mean the forwarder held the whole body and released it at the end — the
-failure §2.10 is about.
+★ **帧间跨度才是要紧的验收标准。** 几秒的跨度配上几毫秒的首帧，
+意味着帧是随着答案生成陆续到的。若跨度很短而末帧很晚，
+就说明转发层把整个响应体攥在手里到最后才放出来 —— 那正是 §2.10 说的失败。
 
-★ **And the boundary holds an agent to its work.** The repository carries a
-workspace to point a sandbox at: `sandbox-kit/examples/demo-project`, a tiny Go
-program with a bug in it. The agent read the files, ran the failing test,
-**asked before it edited** — one approval, on `edit_file` — changed one
-character, and ran the test again. The change landed on the host, because the
-workspace *is* a directory on the host, and the host's own `go test` was green
-afterwards.
+★ **而且边界真的把 agent 约束在它的活儿里。** 仓库带了一个可以指给沙箱的
+工作区：`sandbox-kit/examples/demo-project`，一个带 bug 的小 Go 程序。
+agent 读了文件、跑了那个失败的测试、**在动手改之前先问了一句** ——
+一次审批，问的是 `edit_file` —— 改掉了一个字符，又跑了一遍测试。
+改动落在宿主上，因为工作区*就是*宿主上的一个目录，
+而宿主自己跑的 `go test` 之后是绿的。
 
-★ That run asked **once**, because the workspace carried a policy of its own
-that left `execute` out of the `ask` column. The example project does not
-carry one any more — `openheron init` writes the whole configuration on the
-first start, and the default policy names `execute` alongside the file
-tools.
+★ 那一轮**只问了一次**，因为工作区自带一份策略，让 `execute` 不用点头就跑。
+示例项目现在**不再自带**了 —— `openheron init` 在第一次启动时写出整份配置，
+而默认档位就是 `ask`，所以 `execute` 跟文件工具一样会问。
 
-★ That run also found a trap worth naming: `openheron init` writes the
-configuration all or nothing, so a workspace that ships one agent file and
-leaves out the subagent it names leaves the server with **no** configuration at
-all — and the sandbox still comes up (§6.2).
+★ 那一轮还挖出一个值得记下的陷阱：`openheron init` 对配置是全有或全无，
+所以一个只带了一份 agent 文件、却漏了它点名的 subagent 的工作区，
+会让服务**完全没有**配置 —— 而沙箱照样起来（§6.2）。
 
-★ **The clean build is part of it.** The recorded run used a Kit built from a
-fresh clone of `develop` with a **builder of its own**, so the build cache was
-empty: the 105 MB base image was fetched again, and the recipe was proven to
-work from scratch rather than from whatever a previous round left in the cache.
-★ The binary in that image was the clone's own build, which is the point of
-building from the source.
+★ **干净构建是其中一环。** 记录下来的这一轮，用的是从 `develop` 全新克隆、
+**自带 builder** 构建出来的 Kit，于是构建缓存是空的：105 MB 的基础镜像
+重新拉了一遍，配方是从零跑得通的，而不是靠上一轮留在缓存里的东西。
+★ 那个镜像里的二进制就是这份克隆自己的构建 —— 这正是"从源码构建"的意义。
 
-### 6.7 The declarative file, and what proves it works
+### 6.7 声明文件，以及它有效的依据
 
-★ Measured on 2026-11-05. **The sandbox is declared by an `sbxenv.yaml`** —
-Docker Sandboxes' own environment file, not an openheron invention.
+★ 2026-11-05 实测。**沙箱由一份 `sbxenv.yaml` 声明** —— 它是 Docker
+Sandboxes 自己的环境文件，不是 openheron 的发明。
 
 ```yaml
 schemaVersion: "1"
@@ -1551,67 +1378,57 @@ workspace:
   path: .
 ```
 
-★ **What proves the file is valid is that every key in it is a documented
-key.** Docker publishes the
-[environment file reference](https://docs.docker.com/ai/sandboxes/configuration/environment-files/),
-and it lists these fields: `schemaVersion` (whose only supported value is
-`"1"`), `name`, `agent`, `kits`, and `workspace` — with `workspace` taking
-either a path string or an object with a `path` field. The example uses the
-object form, and the reference documents it.
+★ **证明这份文件有效的，是它里面的每一个键都是文档里的键。** Docker 公开了
+[环境文件参考](https://docs.docker.com/ai/sandboxes/configuration/environment-files/)，
+里面列着这些字段：`schemaVersion`（唯一支持的值是 `"1"`）、`name`、`agent`、
+`kits` 与 `workspace` —— 而 `workspace` 既可以是路径字符串，也可以是带
+`path` 字段的对象。这个例子用的是对象形式，参考文档里有。
 
-★ **The reference also documents the v3 shape this file uses.** Its "Add v3
-kits" section shows a file that lists a v3 workload *and* a v3 mixin in
-`kits`, with `agent` set to the workload's name — which is exactly what
-`openheron-kit` is here: the last component of the workload's repository
-name.
+★ **参考文档也正好讲了这个文件所用的 v3 形态。** 它的「Add v3 kits」一节
+给的例子，`kits` 里同时列一个 v3 workload 和一个 v3 mixin，`agent` 设成
+workload 的名字 —— 这里正是 `openheron-kit`：workload 仓库名的最后一段。
 
-★ **`kits` takes a local directory as well as a reference.** The reference
-says so ("`kits` accepts local directories, ZIP archives, OCI registry
-references, and Git URLs"), and it was measured: replacing the two OCI
-references with `../../openheron` and `./openheron-deepseek` produces a
-plan that resolves both to their directories on disk. The example keeps the
-published images, because that is the form a user can run without building
-anything first.
+★ **`kits` 除了引用也接受本地目录。** 参考文档就是这么写的（"`kits`
+accepts local directories, ZIP archives, OCI registry references, and Git
+URLs"），而且实测过：把两个 OCI 引用换成 `../../openheron` 与
+`./openheron-deepseek`，计划里两者都解析成了磁盘上的目录。这个例子保留
+已发布的镜像，因为那是用户不必先构建任何东西就能跑的形式。
 
-★ **The commands are the documented ones too:** `sbx env plan` shows the
-change without applying it, `sbx env create` applies it, and `sbx env run`
-does both and attaches to the agent.
+★ **命令也都是文档里的那些：** `sbx env plan` 看不施加会改什么，
+`sbx env create` 施加，`sbx env run` 两件都做，并接上 agent。
 
-★ **Measured, on this exact file:**
+★ **在这份文件上实测：**
 
-| Step | Result |
+| 步骤 | 结果 |
 |---|---|
-| `sbx env plan` | the plan lists the sandbox, both Kits and the workspace, and asks for approval |
-| `sbx env create --force` | `✓ Created sandbox openheron-demo`, the port published on an ephemeral loopback port |
-| the sandbox's own state | the workspace is mounted at its host path, and `openheron-demo` is the agent |
-| `sbx env run --force` | the agent session opens and the server starts |
-| the server | `/v2/health` answers `status: ok`, `/v2/agents` lists the two agents, and a `POST /v2/run` streams the model's frames |
+| `sbx env plan` | 计划列出沙箱、两个 Kit 与工作区，并要求批准 |
+| `sbx env create --force` | `✓ Created sandbox openheron-demo`，端口发布在临时回环端口上 |
+| 沙箱自身的状态 | 工作区挂在它的宿主路径上，agent 是 `openheron-demo` |
+| `sbx env run --force` | agent 会话打开，服务启动 |
+| 服务 | `/v2/health` 回答 `status: ok`，`/v2/agents` 列出两个 agent，一次 `POST /v2/run` 流出模型的帧 |
 
-★ **The startup hook writes the configuration onto the mount.** The Kit's
-`lifecycle@1` startup command runs `openheron init --dir "$WORKSPACE_DIR"`,
-and the log inside the sandbox shows the whole set written:
+★ **startup hook 把配置写在挂载上。** Kit 的 `lifecycle@1` 启动命令跑的是
+`openheron init --dir "$WORKSPACE_DIR"`，沙箱里的日志显示整套都写了出来：
 
 ```
 created .openheron/agents/main.md
 created .openheron/agents/task.md
 created .openheron/llm/deepseek.yaml
-created .openheron/policy/permissions.yaml
-created .openheron/policy/limits.yaml
+created .openheron/mcps/example.yaml
 created .openheron/server/config.yaml
 ```
 
-★ **So the example project ships no configuration at all.** The workspace
-holds the project and the environment file, and the runtime writes the rest
-on the first start.
+★ **这份集合是五个文件，里面没有 `policy/`。** 那个分区在 2026-11-07 退役了
+（§1.2），所以今天写出来的配置把档位放在提供工具的那些文件里，而不是一份中心清单里。
 
-★ **A Compose file is not the way to declare this, and the reason is that
-there is no documented format for it.** Docker Compose v5 supports
-*provider-backed* services — a service whose lifecycle an external binary
-owns — and `sbx` implements that protocol. It works: `docker compose up`
-creates the sandbox and publishes its port. But the format is not
-documented anywhere on the Compose or Sandboxes side, `provider.options`
-turns out to be a dead channel (Compose only forwards an option when the
-provider's metadata declares that parameter, and `sbx compose metadata`
-declares none), and the provider refuses a `volumes:` section outright — so
-the workspace, the one thing that matters here, cannot be declared that way.
-An undocumented path is not something to build a tutorial on.
+★ **所以示例项目什么配置都不带。** 工作区里放着项目与环境文件，其余的由
+运行时在第一次启动时写出来。
+
+★ **Compose 文件不是声明这件事的方式，原因是那种格式没有文档。** Docker
+Compose v5 支持 *provider 支撑的* 服务 —— 生命周期交给外部二进制管的服务 ——
+而 `sbx` 实现了这个协议。它是能用的：`docker compose up` 会建出沙箱并发布
+端口。但这个格式在 Compose 侧与 Sandboxes 侧都没有任何文档，
+`provider.options` 事实证明是死通道（只有当 provider 的 metadata 声明了某个
+参数，Compose 才会转发对应的 option，而 `sbx compose metadata` 一个都没声明），
+而且 provider 直接拒绝 `volumes:` —— 于是这里唯一要紧的那件事（工作区）
+没法用那种方式声明。一条没有文档的路，不值得写教程。

@@ -38,15 +38,14 @@ func TestInitJSONOutputIsValidJSON(t *testing.T) {
 	if out.Dir == "" || out.Model == "" {
 		t.Fatalf("dir and model must be reported: %+v", out)
 	}
-	if len(out.Created) != 6 {
-		t.Fatalf("created = %v, want six files", out.Created)
+	if len(out.Created) != 5 {
+		t.Fatalf("created = %v, want five files", out.Created)
 	}
 	for _, want := range []string{
 		".openheron/agents/main.md",
 		".openheron/agents/task.md",
 		".openheron/llm/deepseek.yaml",
-		".openheron/policy/permissions.yaml",
-		".openheron/policy/limits.yaml",
+		".openheron/mcps/example.yaml",
 		".openheron/server/config.yaml",
 	} {
 		found := false
@@ -130,15 +129,14 @@ func TestInitWritesIntoTheGivenDirectory(t *testing.T) {
 		".openheron/agents/main.md",
 		".openheron/agents/task.md",
 		".openheron/llm/deepseek.yaml",
-		".openheron/policy/permissions.yaml",
-		".openheron/policy/limits.yaml",
+		".openheron/mcps/example.yaml",
 		".openheron/server/config.yaml",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
 			t.Fatalf("%s must exist: %v", rel, err)
 		}
 	}
-	// ★ The file's presence is the switch that turns a tool on, so init does
+	// ★ A provider whose configuration is absent mounts nothing, so init does
 	//   not open an outbound channel on its own.
 	if _, err := os.Stat(filepath.Join(dir, ".openheron", "tools")); err == nil {
 		t.Fatal("tools/ must not be written unless --tools is given")

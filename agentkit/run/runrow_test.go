@@ -111,8 +111,10 @@ func TestATurnThatNeverStartsClosesItsRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := turn.Wait(100 * time.Millisecond); !errors.Is(err, ErrStartTimeout) {
-		t.Fatalf("Wait = %v, want ErrStartTimeout", err)
+	// ★ The build's own reason, not a start timeout: the turn knows why it
+	//   never ran, and the row below carries the same reason.
+	if err := turn.Wait(100 * time.Millisecond); !errors.Is(err, ErrAgentUnavailable) {
+		t.Fatalf("Wait = %v, want ErrAgentUnavailable", err)
 	}
 
 	waitFor(t, func() bool {

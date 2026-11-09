@@ -178,7 +178,7 @@ check "/v2/health answers 200 from the host" "200" "$HEALTH"
 
 head2 "Configuration on the mount"
 
-for d in agents llm policy server state; do
+for d in agents llm mcps server state; do
 	check "the mount holds .openheron/$d" "yes" \
 		"$([ -d "$WORKSPACE/.openheron/$d" ] && echo yes || echo no)"
 done
