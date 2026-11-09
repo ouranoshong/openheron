@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -144,7 +145,10 @@ func TestWriteAcceptsSecretReferences(t *testing.T) {
 
 	cases := []struct{ label, key string }{
 		{"env ref", "${TEST_LLM_KEY}"},
-		{"at-file ref", `"@file:` + secretFile + `"`},
+		// ★ Quoted through strconv: a Windows path contains backslashes, and
+		//   pasting it into a double-quoted YAML scalar would make \U an
+		//   escape sequence instead of a path separator.
+		{"at-file ref", strconv.Quote("@file:" + secretFile)},
 		{"no auth", ""},
 	}
 	for _, c := range cases {

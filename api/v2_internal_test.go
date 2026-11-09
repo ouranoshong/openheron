@@ -52,7 +52,10 @@ func TestV2InternalErrorCarriesTheCauseToTheLog(t *testing.T) {
 	}
 
 	logged := buf.String()
-	if !strings.Contains(logged, dir) {
+	// ★ The text handler quotes the value, so a Windows path appears with its
+	//   separators escaped. Compare against the quoted form.
+	quoted := strings.ReplaceAll(dir, `\`, `\\`)
+	if !strings.Contains(logged, quoted) {
 		t.Fatalf("the log must name the path that failed; got:\n%s", logged)
 	}
 	if !strings.Contains(logged, "/v2/sessions") {

@@ -32,7 +32,10 @@ func TestProjectFilesListsRelativePathsAndRanks(t *testing.T) {
 
 	link := filepath.Join(root, "link.tsx")
 	if err := os.Symlink(filepath.Join(root, "web/src/components/composer.tsx"), link); err != nil {
-		t.Fatal(err)
+		// ★ Windows needs developer mode (or an elevated process) to create a
+		//   symlink. Without it the fixture cannot be built, and the ranking
+		//   rule it exists to prove is not reachable at all.
+		t.Skipf("this fixture needs symlink support: %v", err)
 	}
 
 	get := func(rawQuery string) projectFileList {

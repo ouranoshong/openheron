@@ -3,15 +3,15 @@ package spec
 import (
 	"errors"
 	"fmt"
-	"github.com/ouranoshong/openheron/agentkit/obs"
-	"github.com/ouranoshong/openheron/agentkit/spec/decl"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/ouranoshong/openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
 
 type yamlNode = yaml.Node
@@ -914,7 +914,7 @@ func (c *Config) validateKB() error {
 	if c.KB.CorpusDir == "" {
 		return nil
 	}
-	if filepath.IsAbs(c.KB.CorpusDir) {
+	if isAbsPath(c.KB.CorpusDir) {
 		return kbErr("kb.corpus_dir must be relative to the project root, got an absolute path %q; "+
 			"the index and its corpus must have the same lifetime", c.KB.CorpusDir)
 	}

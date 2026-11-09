@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -27,6 +28,7 @@ type snapshot struct {
 	svc                  *spec.Service
 	projectRoot, dataDir string
 	log                  *slog.Logger
+	track                func(io.Closer)
 	agentSpec            agentSpec
 	tables               map[string]*Table
 	models               modelFactory
@@ -71,6 +73,7 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 		projectRoot: s.projectRoot,
 		dataDir:     s.dataDir,
 		log:         s.log,
+		track:       s.track,
 	})
 	if err != nil {
 		return out, err
@@ -81,7 +84,7 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 
 func newSnapshot(gen uint64, cfg *spec.Config, svc *spec.Service,
 	projectRoot, dataDir string, models modelFactory,
-	tools *toolRegistry, log *slog.Logger) (*snapshot, error) {
+	tools *toolRegistry, log *slog.Logger, track func(io.Closer)) (*snapshot, error) {
 
 	sp, err := specOf(cfg, projectRoot)
 	if err != nil {
@@ -99,6 +102,7 @@ func newSnapshot(gen uint64, cfg *spec.Config, svc *spec.Service,
 	tables := tablesOf(sp)
 	return &snapshot{
 		log:         log,
+		track:       track,
 		gen:         gen,
 		cfg:         cfg,
 		svc:         svc,
@@ -117,7 +121,7 @@ func (b *Builder) snapshotFor(cfg *spec.Config, gen uint64) (*snapshot, error) {
 	if b.snap != nil && b.snap.gen >= gen {
 		return b.snap, nil
 	}
-	snap, err := newSnapshot(gen, cfg, b.svc, b.projectRoot, b.dataDir, b.models, b.tools, b.log)
+	snap, err := newSnapshot(gen, cfg, b.svc, b.projectRoot, b.dataDir, b.models, b.tools, b.log, b.track)
 	if err != nil {
 		return nil, err
 	}

@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"path/filepath"
 
@@ -13,7 +14,7 @@ import (
 )
 
 func buildKBTools(ctx context.Context, c *spec.Config, projectRoot, dataDir string,
-	log *slog.Logger) ([]tool.BaseTool, error) {
+	log *slog.Logger, track func(io.Closer)) ([]tool.BaseTool, error) {
 	if c == nil || c.KB.CorpusDir == "" {
 		return nil, nil
 	}
@@ -25,11 +26,11 @@ func buildKBTools(ctx context.Context, c *spec.Config, projectRoot, dataDir stri
 	if err != nil {
 		return nil, err
 	}
-	return buildKBToolsWithEmbedder(ctx, c, emb, projectRoot, dataDir)
+	return buildKBToolsWithEmbedder(ctx, c, emb, projectRoot, dataDir, track)
 }
 
 func buildKBToolsWithEmbedder(ctx context.Context, c *spec.Config, emb embedding.Embedder,
-	projectRoot, dataDir string) ([]tool.BaseTool, error) {
+	projectRoot, dataDir string, track func(io.Closer)) ([]tool.BaseTool, error) {
 
 	if c == nil || c.KB.CorpusDir == "" {
 		return nil, nil
@@ -45,6 +46,19 @@ func buildKBToolsWithEmbedder(ctx context.Context, c *spec.Config, emb embedding
 	if err != nil {
 		return nil, err
 	}
+	// ★ The store holds the run lock file open. Nothing else owns the store,
+	//   so register it here or the handle outlives the build.
+	if track != nil {
+		track(store)
+	}
+	// ★ A failure below leaves no tools behind, so nobody would ever close
+	//   the store those tools would have owned.
+	built := false
+	defer func() {
+		if !built {
+			_ = store.Close()
+		}
+	}()
 	dim := 0
 	if d, ok := emb.(interface{ Dimensions() int }); ok {
 		dim = d.Dimensions()
@@ -91,5 +105,6 @@ func buildKBToolsWithEmbedder(ctx context.Context, c *spec.Config, emb embedding
 	if err != nil {
 		return nil, err
 	}
+	built = true
 	return []tool.BaseTool{search, index}, nil
 }

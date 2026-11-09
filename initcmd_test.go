@@ -66,7 +66,9 @@ func TestInitJSONOutputIsValidJSON(t *testing.T) {
 	} {
 		found := false
 		for _, c := range out.Created {
-			if c == want {
+			// ★ The payload joins with the platform separator; the expectation
+			//   is written with slashes so it reads the same everywhere.
+			if filepath.ToSlash(c) == want {
 				found = true
 				break
 			}

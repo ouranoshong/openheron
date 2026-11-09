@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -192,6 +193,11 @@ func TestResolveRejectsEscapes(t *testing.T) {
 func TestResolveWriteFailsClosed(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: permissions do not block the walk")
+	}
+	if runtime.GOOS == "windows" {
+		// ★ Windows has no POSIX permission bits on directories: Chmod below
+		//   succeeds but does not stop the walk, so the fixture cannot exist.
+		t.Skip("directory permissions are a POSIX concept")
 	}
 	root := t.TempDir()
 	locked := filepath.Join(root, "locked")

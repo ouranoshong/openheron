@@ -47,6 +47,23 @@ func newTestServer(t *testing.T) (*Server, *filestore.FileManager) {
 
 // newStaticTestServer mirrors newTestServer but wires a static dir *before*
 // registerRoutes, since routes capture the FS at registration time.
+// staticDir is t.TempDir without the automatic cleanup.
+//
+// ★ hertz's StaticFS caches the served files open for ten seconds, so on
+//
+//	Windows index.html cannot be removed until that cache expires. t.TempDir
+//	would turn the failed removal into a test failure; this keeps the removal
+//	best-effort instead of reporting a framework cache as a broken test.
+func staticDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "openheron-static-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 func newStaticTestServer(t *testing.T, staticDir string) *Server {
 	t.Helper()
 
@@ -115,7 +132,7 @@ func TestUnsafeSessionIDsAreRejected(t *testing.T) {
 // IndexNames empty, so a request for the directory `/` is answered 403
 // ("cannot access directory without index page") and the page never loads.
 func TestStaticServesIndexAtRoot(t *testing.T) {
-	dir := t.TempDir()
+	dir := staticDir(t)
 	const marker = "<h1>openheron-frontend</h1>"
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<!doctype html>"+marker), 0o644); err != nil {
 		t.Fatal(err)
@@ -137,7 +154,7 @@ func TestStaticServesIndexAtRoot(t *testing.T) {
 
 // The static catch-all is registered last and must not shadow the API routes.
 func TestStaticDoesNotShadowAPIRoutes(t *testing.T) {
-	dir := t.TempDir()
+	dir := staticDir(t)
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("FRONTEND"), 0o644); err != nil {
 		t.Fatal(err)
 	}

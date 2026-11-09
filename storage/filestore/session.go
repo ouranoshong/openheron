@@ -74,6 +74,17 @@ type FileSession struct {
 
 // setLog installs the logger on the session and the two stores that live
 // inside it. Construction-time only: nothing else holds the session yet.
+// isAbsPath reports whether a cleaned name means "from the root".
+//
+// ★ filepath.IsAbs alone is not enough on Windows: IsAbs("\\abs.txt") is
+//
+//	false because a drive is missing, yet the name still reads as an
+//	absolute path to anyone who wrote it. A file named that way must be
+//	rejected on every platform rather than land in the workspace root.
+func isAbsPath(p string) bool {
+	return filepath.IsAbs(p) || strings.HasPrefix(p, "/") || strings.HasPrefix(p, "\\")
+}
+
 func (fs *FileSession) setLog(log *slog.Logger) {
 	fs.log = log
 	if fs.ckpt != nil {
@@ -579,7 +590,7 @@ func clonePending(p *storage.PendingApproval) *storage.PendingApproval {
 // safeJoin keeps uploaded names inside the workspace directory.
 func safeJoin(root, name string) (string, error) {
 	clean := filepath.Clean(name)
-	if clean == "." || filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
+	if clean == "." || isAbsPath(clean) || strings.HasPrefix(clean, "..") {
 		return "", fmt.Errorf("invalid workspace file name %q", name)
 	}
 	full := filepath.Join(root, clean)

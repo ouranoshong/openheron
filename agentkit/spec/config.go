@@ -654,8 +654,19 @@ func mergeExtra(outer, inner map[string]any) map[string]any {
 	return out
 }
 
+// isAbsPath reports whether a configured path means "from the root".
+//
+// ★ filepath.IsAbs alone is not enough on Windows: IsAbs(`\abs`) is false
+//
+//	because a drive is missing, so a configuration that said /usr/share/doc
+//	would be joined onto the project root and silently accepted. The prefix
+//	checks keep the meaning the author wrote, on either platform.
+func isAbsPath(p string) bool {
+	return filepath.IsAbs(p) || strings.HasPrefix(p, "/") || strings.HasPrefix(p, "\\")
+}
+
 func (s *Service) resolvePath(p string) string {
-	if p == "" || filepath.IsAbs(p) {
+	if p == "" || isAbsPath(p) {
 		return p
 	}
 	return filepath.Join(s.root, p)

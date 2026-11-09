@@ -531,8 +531,10 @@ func TestRelativePathsResolveAgainstProjectDir(t *testing.T) {
 	if a != b {
 		t.Fatalf("a relative path must resolve against project_dir: %q != %q", a, b)
 	}
-	abs := s.resolvePath("/var/lib/openheron")
-	if abs != "/var/lib/openheron" {
+	// ★ The absolute path is derived from the fixture, not hard-coded: "/x"
+	//   is absolute on Unix and not on Windows, where it needs a drive.
+	want := filepath.Join(f.root, "var", "lib", "openheron")
+	if abs := s.resolvePath(want); abs != want {
 		t.Fatalf("an absolute path must be returned as-is: %q", abs)
 	}
 }
@@ -553,7 +555,8 @@ func TestProjectRootAndResolveDir(t *testing.T) {
 	if got := s.ResolveDir("static"); got != filepath.Join(root, "static") {
 		t.Fatalf("a relative path must resolve against the project root: %q != %q", got, filepath.Join(root, "static"))
 	}
-	if got := s.ResolveDir("/abs/static"); got != "/abs/static" {
+	abs := filepath.Join(root, "abs", "static")
+	if got := s.ResolveDir(abs); got != abs {
 		t.Fatalf("an absolute path must be returned as-is: %q", got)
 	}
 	if got := s.ResolveDir("  "); got != "" {

@@ -17,10 +17,12 @@ func TestReconcileDoesNotLoseAnotherWritersEntries(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "docs")
 
 	a, err := NewStore(dir)
+	t.Cleanup(func() { _ = a.Close() })
 	if err != nil {
 		t.Fatal(err)
 	}
 	b, err := NewStore(dir)
+	t.Cleanup(func() { _ = b.Close() })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +47,9 @@ func TestReconcileDoesNotLoseAnotherWritersEntries(t *testing.T) {
 func TestReconcileDoesNotRevertAnotherWritersUpdate(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "docs")
 	a, _ := NewStore(dir)
+	t.Cleanup(func() { _ = a.Close() })
 	b, _ := NewStore(dir)
+	t.Cleanup(func() { _ = b.Close() })
 
 	reconcile(t, a, ReconcileRequest{Fresh: []Entry{ent("x.md", "t", "第一版")}})
 	reconcile(t, a, ReconcileRequest{Fresh: []Entry{ent("x.md", "t", "第二版")}})
@@ -66,10 +70,12 @@ func TestReconcileDoesNotRevertAnotherWritersUpdate(t *testing.T) {
 func TestReconcileSurvivesAConcurrentWriterMidFlight(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "docs")
 	a, err := NewStore(dir)
+	t.Cleanup(func() { _ = a.Close() })
 	if err != nil {
 		t.Fatal(err)
 	}
 	b, _ := NewStore(dir)
+	t.Cleanup(func() { _ = b.Close() })
 
 	reconcile(t, a, ReconcileRequest{Fresh: []Entry{ent("seed.md", "t", "种子")}})
 
@@ -193,6 +199,7 @@ func TestRunLockIsCancellable(t *testing.T) {
 func TestStartRunFailsFastWhileAnotherProcessIndexes(t *testing.T) {
 	st := newTestStore(t)
 	other, _ := NewStore(st.Dir())
+	t.Cleanup(func() { _ = other.Close() })
 
 	stop, err := st.StartRun()
 	if err != nil {

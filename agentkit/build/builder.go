@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -39,6 +40,11 @@ type Builder struct {
 	bump func()
 	mu   sync.Mutex
 	snap *snapshot
+	// closers are resources a snapshot opened and never hands back — the KB
+	// store's lock file is the one that matters on Windows, where an open
+	// handle keeps the directory from being removed.
+	closersMu sync.Mutex
+	closers   []io.Closer
 }
 
 type Option func(*Builder)
@@ -128,6 +134,25 @@ func (b *Builder) Close() {
 	if b.mcp != nil {
 		b.mcp.Close()
 	}
+	b.closersMu.Lock()
+	closers := b.closers
+	b.closers = nil
+	b.closersMu.Unlock()
+	for _, c := range closers {
+		_ = c.Close()
+	}
+}
+
+// track registers a resource to close when the builder closes. A snapshot may
+// be rebuilt many times; each KB store holds a lock file, and without this the
+// handles outlive every reload.
+func (b *Builder) track(c io.Closer) {
+	if b == nil || c == nil {
+		return
+	}
+	b.closersMu.Lock()
+	b.closers = append(b.closers, c)
+	b.closersMu.Unlock()
 }
 
 func (b *Builder) currentSnapshot() *snapshot {

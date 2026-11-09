@@ -127,11 +127,21 @@ The result reports how many files were touched, how many documents were re-embed
 //
 //	path that escapes it is refused, because indexing it would put
 //	documents in the index that the corpus does not contain.
+// isAbsPath reports whether a path was written as "from the root". On Windows
+// filepath.IsAbs("/x") is false because a drive is missing, but a caller that
+// wrote the leading separator meant an absolute path.
+func isAbsPath(p string) bool {
+	return filepath.IsAbs(p) || strings.HasPrefix(p, "/") || strings.HasPrefix(p, "\\")
+}
+
 func CorpusRel(projectRoot, corpusDir string, paths []string) ([]string, error) {
 	out := make([]string, 0, len(paths))
 	for _, p := range paths {
 		abs := p
-		if !filepath.IsAbs(abs) {
+		// ★ isAbsPath, not filepath.IsAbs: on Windows "/proj/docs/a.md" is
+		//   not absolute by the stdlib rule (no drive), yet joining it onto
+		//   the project root would put it under the corpus a second time.
+		if !isAbsPath(abs) {
 			abs = filepath.Join(projectRoot, p)
 		}
 		abs = filepath.Clean(abs)

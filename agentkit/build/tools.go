@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -17,6 +18,7 @@ type toolEnv struct {
 	projectRoot string
 	dataDir     string
 	log         *slog.Logger
+	track       func(io.Closer)
 
 	// svc is the configuration service itself — the only thing that knows
 	// where the tree is and how to write it safely. The config_* tools
@@ -195,5 +197,5 @@ func (kbToolProvider) ID() string     { return "kb" }
 func (kbToolProvider) Optional() bool { return true }
 
 func (kbToolProvider) Provide(ctx context.Context, env toolEnv) ([]tool.BaseTool, error) {
-	return buildKBTools(ctx, env.cfg, env.projectRoot, env.dataDir, env.logger())
+	return buildKBTools(ctx, env.cfg, env.projectRoot, env.dataDir, env.logger(), env.track)
 }
