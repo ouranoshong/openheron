@@ -263,11 +263,15 @@ func (s *Store) Reconcile(ctx context.Context, req ReconcileRequest) (*Reconcile
 	mdPath := filepath.Join(s.dir, catalogFile)
 
 	var lastWarnings []string
+	var lastReadErr error
 	for attempt := 1; attempt <= maxCommitAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		cur, warnings := s.readCatalog()
+		cur, warnings, err := s.readCatalog()
+		if err != nil {
+			return nil, err
+		}
 		lastWarnings = warnings
 
 		// ★ The derived state is snapshotted under the lock, and the snapshot
@@ -310,9 +314,14 @@ func (s *Store) Reconcile(ctx context.Context, req ReconcileRequest) (*Reconcile
 			s.afterWrite()
 		}
 
-		got, err := os.ReadFile(mdPath)
+		got, err := readFileRetry(mdPath)
 		if err != nil {
-			return nil, fmt.Errorf("kb: read back %s: %w", mdPath, err)
+			// ★ Same window as readFileRetry: our own rename can still be
+			//   holding the file. A read that did not happen is not a write
+			//   that did not land — retry the commit, and report the read error
+			//   only if every attempt failed.
+			lastReadErr = err
+			continue
 		}
 		if !bytes.Equal(got, body) {
 			continue
@@ -322,6 +331,9 @@ func (s *Store) Reconcile(ctx context.Context, req ReconcileRequest) (*Reconcile
 		res.Warnings = lastWarnings
 		s.install(merged, next, req, res)
 		return res, nil
+	}
+	if lastReadErr != nil {
+		return nil, fmt.Errorf("kb: read back %s: %w", mdPath, lastReadErr)
 	}
 	return nil, fmt.Errorf("kb: %s was modified while writing (%d attempts); "+
 		"your edit collided with an index run — re-run `openheron kb index`",
@@ -597,22 +609,51 @@ func (s *Store) saveSidecar() error {
 	return nil
 }
 
-func (s *Store) readCatalog() (Catalog, []string) {
-	b, err := os.ReadFile(filepath.Join(s.dir, catalogFile))
+func (s *Store) readCatalog() (Catalog, []string, error) {
+	path := filepath.Join(s.dir, catalogFile)
+	b, err := readFileRetry(path)
 	if err != nil {
-		return Catalog{Header: Header{IndexVersion: IndexVersion}}, nil
+		if os.IsNotExist(err) {
+			return Catalog{Header: Header{IndexVersion: IndexVersion}}, nil, nil
+		}
+		// ★ "Could not read it now" is not "there is no catalog yet". The
+		//   second reading starts the merge from an empty base and writes
+		//   that back, which is how a concurrent writer's entries disappear.
+		return Catalog{}, nil, fmt.Errorf("kb: read %s: %w", path, err)
 	}
 	c, err := ParseCatalog(b)
 	if err != nil {
 		s.logger().Error("[kb] catalog.md is unreadable, refusing to overwrite it", "err", err)
 		return Catalog{Header: Header{IndexVersion: IndexVersion}}, []string{
 			fmt.Sprintf("catalog.md is unreadable: %v", err),
-		}
+		}, nil
 	}
 	if c.Header.IndexVersion == 0 {
 		c.Header.IndexVersion = IndexVersion
 	}
-	return c, c.Warnings
+	return c, c.Warnings, nil
+}
+
+// readFileRetry reads path, riding out the moment a rename holds it.
+//
+// ★ Windows: MoveFileEx keeps the destination for the duration of the swap, so
+//
+//	a reader that arrives inside that window is refused with a sharing
+//	violation. Unix has no such window, and neither platform reports it as
+//	"no such file" — which is why the caller must not treat every error as a
+//	missing catalog. 20 × 2ms is longer than any rename and shorter than a
+//	user noticing a turn.
+func readFileRetry(path string) ([]byte, error) {
+	var err error
+	for attempt := 0; attempt < 20; attempt++ {
+		var b []byte
+		b, err = os.ReadFile(path)
+		if err == nil || os.IsNotExist(err) {
+			return b, err
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	return nil, err
 }
 
 // load reads the catalog and the sidecar into the store.

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
@@ -90,6 +91,24 @@ func mustSnapshot(t *testing.T, b *Builder) *snapshot {
 		t.Fatalf("snapshotFor: %v", err)
 	}
 	return s
+}
+
+// waitForGeneration waits until the builder's generation passed gen.
+//
+// ★ The manager marks a server ready and calls its bump at the end of the same
+// goroutine, so "ready" does not imply "the generation moved". A snapshot is
+// cached by generation, so a test that waited only for ready could be handed
+// the previous one — a false failure under load, not a missing bump.
+func waitForGeneration(t *testing.T, b *Builder, gen uint64) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, g := b.mgr.Current(); g > gen {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("the generation never moved past %d", gen)
 }
 
 func managerOf(t *testing.T, b *Builder) *fakeManager {

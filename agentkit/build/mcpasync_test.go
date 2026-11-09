@@ -112,8 +112,12 @@ func TestTheToolsJoinTheNextTurn(t *testing.T) {
 	}
 
 	// The server comes up.
+	firstGen := first.gen
 	close(blocked.release)
 	waitForMCPSettled(t, b.mcp, "github")
+	// ★ ready and bumped are two steps by one goroutine; the tools only join
+	//   once the generation moved, which is what the next turn reads.
+	waitForGeneration(t, b, firstGen)
 
 	// ★ The next turn's snapshot: a new generation, and the tools are
 	//   there.
