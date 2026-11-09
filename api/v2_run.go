@@ -66,6 +66,32 @@ type runInput struct {
 	// the agent that raised it, because switching the root mid-resume leaves
 	// the interrupt without its gate.
 	Resume []resumeEntry `json:"resume"`
+
+	// Attachments are the files that came with this question.
+	//
+	// ★ They carry a name **relative to the session's workspace**, never an
+	//   absolute path. The server joins the name against the session's own
+	//   workspace and refuses anything that escapes it, so a client cannot
+	//   name a file outside the workspace — there is no path for it to send.
+	Attachments []runAttachment `json:"attachments,omitempty"`
+}
+
+// runAttachment is one attachment as the client names it.
+//
+// ★ The size is the client's account of the file. The server does not trust
+//
+//	it: it resolves the path itself and reads the file's own metadata. It
+//	travels along so the transcript can record what the user sent without
+//	the server having to stat every file twice.
+//
+// ★ There is no content type on the wire. The server derives it from the
+//
+//	name — a client that called a text file "image/png" would otherwise
+//	have the server read it as a picture.
+type runAttachment struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Size int64  `json:"size,omitempty"`
 }
 
 // resumeEntry is one interrupt answer.
@@ -190,11 +216,17 @@ func (s *Server) v2Run(ctx context.Context, c *app.RequestContext) {
 //
 //	is a new run, whatever run id it carries; a request without one is the
 //	client coming back for a run it already started.
+//
+// ★ Attachments count as a question. A turn that carries files and no text
+//
+//	is still a new turn, and reading it as a re-attach would send the
+//	client to a run that does not exist.
 func isAttachRequest(in runInput) bool {
 	return strings.TrimSpace(in.RunID) != "" &&
 		strings.TrimSpace(in.Query) == "" &&
 		len(in.Messages) == 0 &&
-		len(in.Resume) == 0
+		len(in.Resume) == 0 &&
+		len(in.Attachments) == 0
 }
 
 // attachRun streams a live run to a connection that asked for it.
@@ -265,14 +297,25 @@ func (s *Server) startRun(ctx context.Context, sess storage.Session, in runInput
 		if query == "" {
 			query = lastUserText(in.Messages)
 		}
-		if query == "" {
+
+		// ★ The attachments are resolved **before** the turn starts: a
+		//   name that escapes the workspace, or a file that is not there,
+		//   must be refused while the client can still be told why.
+		atts, err := resolveAttachments(sess, in.Attachments)
+		if err != nil {
+			return nil, err
+		}
+
+		// ★ A turn with files and no text is still a turn. The question
+		//   may be entirely in the attachment.
+		if query == "" && len(atts) == 0 {
 			return nil, errEmptyMessage
 		}
 		expanded, err := expandCommand(query)
 		if err != nil {
 			return nil, err
 		}
-		return s.rt.Submit(ctx, sess.ID(), s.runIDOf(in), expanded)
+		return s.rt.Submit(ctx, sess.ID(), s.runIDOf(in), expanded, atts)
 	}
 
 	pending, err := sess.PendingApproval()

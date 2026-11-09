@@ -45,7 +45,7 @@ func TestTheModelAndTheTranscriptShareTheSameMessageID(t *testing.T) {
 	rt, sm := newTestRuntime(t, b)
 	sess := mustSession(t, sm)
 
-	if _, err := rt.Submit(context.Background(), sess.ID(), "", "hello"); err != nil {
+	if _, err := rt.Submit(context.Background(), sess.ID(), "", "hello", nil); err != nil {
 		t.Fatal(err)
 	}
 

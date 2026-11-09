@@ -60,7 +60,16 @@ var defaultRules = []string{
 // the history alone.
 func (c InputConfig) buildInput(ctx context.Context, p inputParams, query *schema.Message) (*adk.TypedAgentInput[*schema.Message], error) {
 	messages := make([]*schema.Message, 0, len(p.History)+2)
-	messages = append(messages, newSystem(c.contextPrompt(ctx, p.Workspace)))
+
+	// ★ The attachments are assembled **before** the prompt is written: the
+	//   prompt names the files the model is being given, and an image the
+	//   model cannot see must not be named as one it can.
+	note := ""
+	if query != nil {
+		note, _ = assembleAttachments(ctx, query, attachmentContext{workspace: p.Workspace})
+	}
+
+	messages = append(messages, newSystem(c.contextPrompt(ctx, p.Workspace, note)))
 
 	history := withoutSubagentMessages(p.History)
 	for _, msg := range normalizeHistory(history) {
@@ -98,7 +107,14 @@ func newUser(text string) *schema.Message {
 	return schema.UserMessage(text)
 }
 
-func (c InputConfig) contextPrompt(ctx context.Context, workspace string) string {
+// contextPrompt builds the transient context the model sees.
+//
+// ★ attachments is the note about the files that came with this turn. It is
+//
+//	part of the prompt because a file the model is not told about is a file
+//	the model cannot use: the workspace note says "files live there", which
+//	answers "where" but not "which ones".
+func (c InputConfig) contextPrompt(ctx context.Context, workspace, attachments string) string {
 	var lines []string
 	lines = append(lines, "[Context]")
 	lines = append(lines, "IMPORTANT RULES:")
@@ -137,6 +153,12 @@ func (c InputConfig) contextPrompt(ctx context.Context, workspace string) string
 			fmt.Sprintf("storage.Session workspace: %s", ws),
 			"  Files uploaded for this session live there. Use filesystem tools with this path.",
 		)
+	}
+
+	// ★ The attachments come last: they are what this turn is about, and
+	//   they are the one thing the workspace note cannot say on its own.
+	if attachments != "" {
+		lines = append(lines, strings.TrimSpace(attachments))
 	}
 
 	return strings.Join(lines, "\n")

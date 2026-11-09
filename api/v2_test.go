@@ -493,6 +493,11 @@ func TestV2UploadWithoutFileIs400(t *testing.T) {
 // the file lands INSIDE the workspace — assert that rather than a status
 // code, and keep a direct PutFile test below for the guard that actually
 // rejects traversal.
+//
+// ★ The path the client gets back is **relative** to the workspace: it is
+//
+//	the name the client sends back with the next question, and it has to
+//	be the name the server itself resolves.
 func TestV2UploadConfinesToWorkspace(t *testing.T) {
 	srv := newV2Server(t)
 	id := createThread(t, srv)
@@ -507,7 +512,11 @@ func TestV2UploadConfinesToWorkspace(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	for _, f := range out.Files {
-		if !strings.HasPrefix(f.Path, out.WorkspacePath+string(os.PathSeparator)) {
+		if filepath.IsAbs(f.Path) {
+			t.Fatalf("the path must be relative to the workspace, got %q", f.Path)
+		}
+		full := filepath.Join(out.WorkspacePath, f.Path)
+		if !strings.HasPrefix(full, out.WorkspacePath+string(os.PathSeparator)) {
 			t.Fatalf("file escaped the workspace: %s (workspace %s)", f.Path, out.WorkspacePath)
 		}
 		if strings.Contains(f.Name, "/") || strings.Contains(f.Name, "..") {
@@ -1125,7 +1134,7 @@ func TestV2AbortStopsARunningThread(t *testing.T) {
 	srv.SetConfigSource(func() *spec.Config { return testConfig(t) })
 
 	sess := mustCreate(t, srv)
-	if _, err := srv.rt.Submit(context.Background(), sess.ID(), "", "keep going"); err != nil {
+	if _, err := srv.rt.Submit(context.Background(), sess.ID(), "", "keep going", nil); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	if st, ok := srv.rt.StatusOf(context.Background(), sess.ID()); !ok || st.Phase != run.PhaseRunning {

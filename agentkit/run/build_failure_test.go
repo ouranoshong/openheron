@@ -29,7 +29,7 @@ func TestTheBuildFailureReachesTheWaiter(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestAFailedBuildReleasesTheSession(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestAFailedBuildReleasesTheSession(t *testing.T) {
 	}
 
 	waitFor(t, func() bool {
-		_, err := rt.Submit(ctx, sess.ID(), "", "again")
+		_, err := rt.Submit(ctx, sess.ID(), "", "again", nil)
 		return err == nil
 	})
 }
@@ -92,7 +92,7 @@ func TestTheBuildFailureIsReadable(t *testing.T) {
 	t.Cleanup(func() { _ = rt.Shutdown(context.Background()) })
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(context.Background(), sess.ID(), "", "hello")
+	turn, err := rt.Submit(context.Background(), sess.ID(), "", "hello", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

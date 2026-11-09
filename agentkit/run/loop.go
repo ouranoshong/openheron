@@ -67,6 +67,10 @@ func (rt *Runtime) makeGenInput(sess storage.Session, turn *Turn) func(context.C
 		userMsg := message.NewUser(queryItem.Query)
 		message.StampNow(userMsg)
 		message.StampMessageID(userMsg, uuid.NewString())
+		// ★ The attachment list belongs to the message, not to the session:
+		//   only a message-level binding can answer "that image you just
+		//   sent".
+		message.StampAttachments(userMsg, queryItem.Attachments)
 
 		// ★ Build first, persist second. The message the model sees is the
 		//   same object the transcript will hold, so anything stamped on it

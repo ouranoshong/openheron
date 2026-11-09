@@ -9,6 +9,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/message"
 	"github.com/ouranoshong/openheron/storage"
 )
 
@@ -16,6 +17,15 @@ import (
 // decision travels as a single item.
 type loopItem struct {
 	Query string
+
+	// Attachments are the files that came with this query.
+	//
+	// ★ They travel with the query because the attachment list belongs to
+	//   the **message**: the turn persists one user message, and that
+	//   message carries what it came with. A session-level list could only
+	//   answer "what does this session have" — not "that image you just
+	//   sent".
+	Attachments []message.Attachment
 
 	// Approvals maps an interrupt id to the decision for it. It is empty for
 	// a normal turn, and holds **every** outstanding decision for a resume

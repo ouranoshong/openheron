@@ -8,20 +8,35 @@ import {
   type RunHandle,
   type RunsView,
   type ThreadMeta,
+  type WorkspaceFile,
 } from "@/lib/api"
 import { readActiveThreadId, writeActiveThreadId } from "@/lib/active-thread"
 import { closeAllOpenParts, type AgEvent } from "@/lib/events"
-import { emptyConversation, type ConversationState, type Message, type TurnStatus } from "@/lib/types"
+import {
+  emptyConversation,
+  type ConversationState,
+  type Message,
+  type Part,
+  type TurnStatus,
+} from "@/lib/types"
 
 import { getCurrentRunKey, handleEvent, promote, setCurrentRunKey, withoutKey } from "./events"
 import { seedFromHistory } from "./history"
-import { MAIN_AGENT, type SessionEntry, type StoreState } from "./state"
+import { MAIN_AGENT, type Attachment, type SessionEntry, type StoreState } from "./state"
 
 function isThreadNotFound(e: unknown): boolean {
   return e instanceof ApiError && e.code === "thread_not_found"
 }
 
 let run: RunHandle | null = null
+
+// lastSentAttachments remembers the files that went out with the current
+// turn.
+//
+// ★ It is what the "session is busy" path needs: the server refused the
+//   run, so the message — and its files — never arrived. The files go back
+//   to the composer, or the user loses them.
+let lastSentAttachments: Attachment[] = []
 
 export const useStore = create<StoreState>((set, get) => ({
   sessions: {},
@@ -86,16 +101,21 @@ export const useStore = create<StoreState>((set, get) => ({
 
     try {
       const view = await api.getMessages(id)
+      const convo = seedFromHistory(view.messages, view.pendingApprovals, view.usage, view.state)
       set((s) => ({
         sessions: {
           ...s.sessions,
           [id]: {
             meta: { ...(s.sessions[id]?.meta ?? stubMeta(id)), state: view.state },
-            convo: seedFromHistory(view.messages, view.pendingApprovals, view.usage, view.state),
+            convo,
             loaded: true,
           },
         },
       }))
+      // ★ The files the user has not sent yet come back too. The workspace
+      //   is the server's account of them, and the client has none of its
+      //   own after a reload.
+      await restorePendingFiles(id, convo)
     } catch (e) {
       if (isThreadNotFound(e)) {
         writeActiveThreadId("")
@@ -199,13 +219,37 @@ export const useStore = create<StoreState>((set, get) => ({
     }
   },
 
-  async removeFile(sessionId, name) {
+  // removeFile takes a file out of the pending list — and off the disk.
+  //
+  // ★ The file is really deleted. The chip used to hide the file from the
+  //   client while the server kept it: the user was told the file was gone,
+  //   and it was not.
+  //
+  // ★ The granularity is the **file**. The attachment list of a message is
+  //   history — it says "this question came with that file" — and history
+  //   is not rewritten when a file is deleted.
+  async removeFile(sessionId, path) {
+    const before = get().attachments[sessionId] ?? []
     set((s) => ({
       attachments: {
         ...s.attachments,
-        [sessionId]: (s.attachments[sessionId] ?? []).filter((f) => f.name !== name),
+        [sessionId]: before.filter((f) => f.path !== path),
       },
     }))
+    try {
+      await api.deleteFile(sessionId, path)
+    } catch (e) {
+      // The file is still there, so the chip has to come back: a chip that
+      // hides a file the server still holds is a lie.
+      set((s) => ({
+        attachments: {
+          ...s.attachments,
+          [sessionId]: [...(s.attachments[sessionId] ?? []), ...before.filter((f) => f.path === path)],
+        },
+      }))
+      get().loadError(sessionId, (e as Error).message)
+      throw e
+    }
   },
 
   async send(text) {
@@ -215,6 +259,9 @@ export const useStore = create<StoreState>((set, get) => ({
 
     const { activeId, sessions, pendingAgentId } = get()
     const localKey = activeId ?? `pending:${Date.now()}`
+    // ★ The files that go with this question. They belong to the session the
+    //   user is in, so they are read before the thread may be created.
+    const pending = activeId ? (get().attachments[activeId] ?? []) : []
     const requested = activeId
       ? sessions[activeId]?.meta.agentId || MAIN_AGENT
       : (pendingAgentId ?? undefined)
@@ -230,7 +277,10 @@ export const useStore = create<StoreState>((set, get) => ({
         hasPendingApproval: false,
         agentId,
       },
-      convo: appendLocalUserMessage(sessions[localKey]?.convo ?? emptyConversation(), trimmed),
+      // ★ The optimistic bubble carries the files too: the user has to see
+      //   what they sent, and the bubble is the only thing on screen at the
+      //   moment they sent it.
+      convo: appendLocalUserMessage(sessions[localKey]?.convo ?? emptyConversation(), trimmed, pending),
       loaded: true,
     }
     set((s) => ({
@@ -255,10 +305,18 @@ export const useStore = create<StoreState>((set, get) => ({
       setCurrentRunKey(threadId)
     }
 
+    // ★ The files have left the composer: they belong to that question now.
+    //   Leaving them would send the same file again with the next message.
+    lastSentAttachments = pending
+    set((s) => ({
+      attachments: { ...s.attachments, [threadId]: [] },
+    }))
+
     run = runStream(
       {
         threadId,
         query: trimmed,
+        attachments: pending.map((a) => ({ name: a.name, path: a.path, size: a.size })),
       },
       {
         onEvent: (ev) => handleEvent(set, get, localKey, ev as AgEvent),
@@ -270,8 +328,10 @@ export const useStore = create<StoreState>((set, get) => ({
             // ★ The session has a live turn that this surface does not own.
             //   The message never reached the server, so the optimistic
             //   bubble must go back — otherwise the transcript claims a
-            //   message that was never sent.
+            //   message that was never sent. The files go back with it.
             get().markBusy(k, message)
+            restorePending(k, lastSentAttachments)
+            lastSentAttachments = []
             return
           }
           // ★ The connection died, not the run: the server archives the
@@ -282,6 +342,7 @@ export const useStore = create<StoreState>((set, get) => ({
         onDone: () => {
           run = null
           setCurrentRunKey(null)
+          lastSentAttachments = []
           // ★ The stream ended without a terminal frame: the connection
           //   died, not the run. The server archives the turn, not the
           //   stream — so come back to the run instead of losing the
@@ -410,16 +471,18 @@ export const useStore = create<StoreState>((set, get) => ({
   async reloadHistory(id: string) {
     try {
       const view = await api.getMessages(id)
+      const convo = seedFromHistory(view.messages, view.pendingApprovals, view.usage, view.state)
       set((s) => ({
         sessions: {
           ...s.sessions,
           [id]: {
             meta: { ...(s.sessions[id]?.meta ?? stubMeta(id)), state: view.state },
-            convo: seedFromHistory(view.messages, view.pendingApprovals, view.usage, view.state),
+            convo,
             loaded: true,
           },
         },
       }))
+      await restorePendingFiles(id, convo)
     } catch {
       // The history is unavailable; the conversation keeps what it has.
     }
@@ -670,11 +733,88 @@ function stubMeta(id: string): ThreadMeta {
 //   can be identified that way.
 const LOCAL_MESSAGE_PREFIX = "local:"
 
-function appendLocalUserMessage(convo: ConversationState, text: string): ConversationState {
+function appendLocalUserMessage(
+  convo: ConversationState,
+  text: string,
+  atts: Attachment[],
+): ConversationState {
+  const parts: Part[] = []
+  // ★ The files come first, the text after: the chips read as the
+  //   attachments of the question, and the question follows them.
+  for (const [i, a] of atts.entries()) {
+    parts.push({
+      kind: "attachment",
+      id: `a${i}`,
+      name: a.name,
+      path: a.path,
+      size: a.size,
+      mime: a.mime,
+    })
+  }
+  if (text) {
+    parts.push({ kind: "text", id: "t", text, complete: true })
+  }
   const msg: Message = {
     id: `${LOCAL_MESSAGE_PREFIX}${Date.now()}`,
     role: "user",
-    parts: [{ kind: "text", id: "t", text, complete: true }],
+    parts,
   }
   return { ...convo, messages: [...convo.messages, msg], status: "running", error: undefined }
+}
+
+// restorePending puts files back into the composer's list.
+//
+// ★ It is what a refused run needs: the server never got the question, so
+//   the files are still the user's, not the message's.
+function restorePending(sessionId: string, atts: Attachment[]) {
+  if (atts.length === 0) return
+  useStore.setState((s) => ({
+    attachments: {
+      ...s.attachments,
+      [sessionId]: [...(s.attachments[sessionId] ?? []), ...atts],
+    },
+  }))
+}
+
+// restorePendingFiles reads the session's workspace and fills the pending
+// list with the files no message has claimed.
+//
+// ★ The workspace is the server's own account of the files, so it is what
+//   the client falls back on after a reload — the client has no truth of
+//   its own to remember.
+//
+// ★ A file a message already carries is **not** pending: it went out with
+//   that question, and putting it back would send the same file again with
+//   the next one.
+//
+// ★ The list is merged, not replaced: a file the user has just uploaded is
+//   newer than the listing that is on its way.
+async function restorePendingFiles(sessionId: string, convo: ConversationState) {
+  let files: WorkspaceFile[]
+  try {
+    files = (await api.listFiles(sessionId)).files
+  } catch {
+    // The listing is a convenience; a session that cannot be listed keeps
+    // whatever the client already knows.
+    return
+  }
+
+  const claimed = new Set<string>()
+  for (const m of convo.messages) {
+    for (const p of m.parts) {
+      if (p.kind === "attachment") claimed.add(p.path)
+    }
+  }
+
+  useStore.setState((s) => {
+    const known = s.attachments[sessionId] ?? []
+    const seen = new Set(known.map((f) => f.path))
+    const merged = [...known]
+    for (const f of files) {
+      if (claimed.has(f.path) || seen.has(f.path)) continue
+      seen.add(f.path)
+      merged.push({ name: f.name, path: f.path, size: f.size, mime: f.mime })
+    }
+    return { attachments: { ...s.attachments, [sessionId]: merged } }
+  })
 }

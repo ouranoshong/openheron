@@ -1,6 +1,7 @@
 import { BrainIcon, ChevronRightIcon } from "lucide-react"
 import { memo, useState } from "react"
 
+import { AttachmentChip } from "@/components/attachment-chip"
 import { MarkdownText, MessageBody } from "@/components/markdown"
 import { ToolCard } from "@/components/tool-card"
 import { thinkingLabel } from "@/lib/thinking"
@@ -90,6 +91,20 @@ export const MessageParts = memo(function MessageParts({
 
           case "tool":
             return <ToolCard key={p.id} part={p} />
+
+          // ★ A file that came with the message. It has no remove button:
+          //   the list is history, and deleting the file would make the
+          //   message claim something that is no longer true.
+          case "attachment":
+            return (
+              <AttachmentChip
+                key={p.id}
+                name={p.name}
+                size={p.size}
+                testId="message-attachment"
+                className="mb-1.5"
+              />
+            )
         }
       })}
     </>

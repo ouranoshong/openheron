@@ -109,13 +109,31 @@ export interface CompactionResult {
 
 export interface UploadedFile {
   name: string
+  // path is relative to the session's workspace — it is the name the server
+  // resolves, and the name the client sends back with the next question.
   path: string
   size: number
+  // mime is the content type the server derived from the file's name.
+  mime: string
 }
 
 export interface UploadResult {
   files: UploadedFile[]
   workspacePath: string
+}
+
+// WorkspaceFile is one file in a session's workspace.
+export interface WorkspaceFile {
+  name: string
+  path: string
+  size: number
+  mime: string
+  modifiedAt: string
+}
+
+export interface WorkspaceFiles {
+  workspacePath: string
+  files: WorkspaceFile[]
 }
 
 export interface ProjectFile {
@@ -348,6 +366,22 @@ export const api = {
     }
     return (await res.json()) as UploadResult
   },
+
+  // listFiles reads what is in the session's workspace.
+  //
+  // ★ It is the server's own account of the files — the client has no
+  //   truth of its own to fall back on after a reload.
+  listFiles: (id: string) => call<WorkspaceFiles>(sessionPath(id, "/files")),
+
+  // deleteFile removes one file from the session's workspace.
+  //
+  // ★ The granularity is the **file**. The attachment list of a message is
+  //   history, and history is not rewritten when a file is deleted.
+  deleteFile: (id: string, path: string) =>
+    call<{ deleted: boolean; path: string }>(
+      `${sessionPath(id, "/files")}?path=${encodeURIComponent(path)}`,
+      { method: "DELETE" },
+    ),
 }
 
 // ── /v2/run ───────────────────────────────────────────────────────────────
@@ -358,10 +392,24 @@ export interface ResumeInput {
   reason?: string
 }
 
+// RunAttachment is one file the client names with its question.
+//
+// ★ The path is relative to the session's workspace. The server resolves it
+//   against the session's own workspace and refuses anything that escapes
+//   it, so there is no path a client could send to read a file outside.
+export interface RunAttachment {
+  name: string
+  path: string
+  size?: number
+}
+
 export interface RunInput {
   threadId: string
   query?: string
   resume?: ResumeInput[]
+  // attachments are the files that came with this question. They are
+  // recorded on the message, so the history can show them later.
+  attachments?: RunAttachment[]
   // runId asks for a specific run. With no query it means "attach to the
   // run I already know" — the server refuses a run that is not live.
   //
@@ -464,6 +512,7 @@ export function runStream(input: RunInput, handlers: RunHandlers): RunHandle {
         body: JSON.stringify({
           threadId: input.threadId,
           ...(input.query !== undefined ? { query: input.query } : {}),
+          ...(input.attachments !== undefined ? { attachments: input.attachments } : {}),
           ...(input.runId !== undefined ? { runId: input.runId } : {}),
           ...(input.resume
             ? { resume: input.resume.map((r) => ({ interruptId: r.interruptId, payload: { approved: r.approved, reason: r.reason ?? "" } })) }

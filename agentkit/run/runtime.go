@@ -19,6 +19,7 @@ import (
 
 	"github.com/ouranoshong/openheron/approval"
 	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/message"
 	"github.com/ouranoshong/openheron/storage"
 )
 
@@ -193,12 +194,18 @@ func (rt *Runtime) newRunID() string { return uuid.NewString() }
 //	a caller that already has one (a client re-attaching to a run it
 //	knows) hands it in, and the run carries it from the first row to the
 //	last.
-func (rt *Runtime) Submit(ctx context.Context, sessionID, runID, query string) (*Turn, error) {
+//
+// ★ attachments are the files that came with the question. They travel with
+//
+//	the query because the attachment list belongs to the **message**: the
+//	turn persists one user message, and that message carries what it came
+//	with.
+func (rt *Runtime) Submit(ctx context.Context, sessionID, runID, query string, atts []message.Attachment) (*Turn, error) {
 	sess, err := rt.cfg.SessionManager.Get(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	if query == "" {
+	if query == "" && len(atts) == 0 {
 		return nil, errors.New("query must not be empty")
 	}
 
@@ -222,7 +229,7 @@ func (rt *Runtime) Submit(ctx context.Context, sessionID, runID, query string) (
 		}
 	}
 
-	rt.runClaimedTurn(ctx, sess, turn, loop, prev, loopItem{Query: query})
+	rt.runClaimedTurn(ctx, sess, turn, loop, prev, loopItem{Query: query, Attachments: atts})
 	return turn, nil
 }
 

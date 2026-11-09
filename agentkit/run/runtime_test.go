@@ -59,7 +59,7 @@ func TestSubmitArchivesInOrder(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestUserMessageCarriesItsTimestamp(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestUserMessageCarriesItsTimestamp(t *testing.T) {
 
 func TestSubmitRejectsUnknownSession(t *testing.T) {
 	rt, _ := newTestRuntime(t, &fakeBuilder{})
-	if _, err := rt.Submit(context.Background(), "session-does-not-exist", "", "hi"); !errors.Is(err, ErrSessionNotFound) {
+	if _, err := rt.Submit(context.Background(), "session-does-not-exist", "", "hi", nil); !errors.Is(err, ErrSessionNotFound) {
 		t.Fatalf("want ErrSessionNotFound, got %v", err)
 	}
 }
@@ -124,7 +124,7 @@ func TestSubmitRejectsUnknownSession(t *testing.T) {
 func TestSubmitRejectsEmptyQuery(t *testing.T) {
 	rt, sm := newTestRuntime(t, &fakeBuilder{})
 	sess := mustSession(t, sm)
-	if _, err := rt.Submit(context.Background(), sess.ID(), "", ""); err == nil {
+	if _, err := rt.Submit(context.Background(), sess.ID(), "", "", nil); err == nil {
 		t.Fatal("expected an error for an empty query")
 	}
 }
@@ -145,7 +145,7 @@ func TestPrepareAgentPassesSessionAgentID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestStaleCheckpointDoesNotSwallowTheNextQuery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestInterruptLeavesACheckpointSoTheResumeIsNotRejected(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func TestInterruptRecordsPendingApproval(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +356,7 @@ func TestMultiplePendingApprovalsAreAnsweredAsAGroup(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +483,7 @@ func TestASecondSubmitIsRefusedWhileATurnRuns(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	first, err := rt.Submit(ctx, sess.ID(), "", "first")
+	first, err := rt.Submit(ctx, sess.ID(), "", "first", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,7 +494,7 @@ func TestASecondSubmitIsRefusedWhileATurnRuns(t *testing.T) {
 	firstDone := drainBounded(t, first)
 
 	// The second submit must be refused.
-	if _, err := rt.Submit(ctx, sess.ID(), "", "second"); !errors.Is(err, ErrSessionBusy) {
+	if _, err := rt.Submit(ctx, sess.ID(), "", "second", nil); !errors.Is(err, ErrSessionBusy) {
 		t.Fatalf("a second Submit must be refused with ErrSessionBusy, got %v", err)
 	}
 
@@ -542,7 +542,7 @@ func TestAbortStopsTheTurn(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "long running")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "long running", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -570,7 +570,7 @@ func TestBuilderFailureSurfacesAsLoopError(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hi")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hi", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -604,7 +604,7 @@ func TestStatusReportsKnownSessions(t *testing.T) {
 		t.Fatalf("no session should be active yet: %v", rt.Status())
 	}
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hi")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hi", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

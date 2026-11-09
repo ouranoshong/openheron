@@ -458,7 +458,7 @@ test.describe("附件", () => {
     expect(files.files.map((f: { name: string }) => f.name)).toContain("probe.txt")
   })
 
-  test("发送后附件仍在，且消息正常跑完", async ({ page }) => {
+  test("发送后附件跟着消息走，且消息正常跑完", async ({ page }) => {
     await setScenario("simple")
     await openApp(page)
     await openThread(page, "Alpha conversation")
@@ -471,10 +471,13 @@ test.describe("附件", () => {
     await sendMessage(page, `${MARKER_A} look at the attachment`)
 
     await expect(page.getByText(/scripted answer/).first()).toBeVisible({ timeout: 7000 })
-    await expect(page.locator('[data-testid="attachment-chip"]')).toHaveCount(1)
+    // ★ The file went out with the question, so it is on the message now
+    //   and no longer waiting in the composer.
+    await expect(page.locator('[data-testid="message-attachment"]')).toHaveCount(1)
+    await expect(page.locator('[data-testid="attachment-chip"]')).toHaveCount(0)
   })
 
-  test("chip 上的 × 能移除（只是不发给模型，不删服务端文件）", async ({ page }) => {
+  test("chip 上的 × 能移除，而且服务端文件也没了", async ({ page }) => {
     await openApp(page)
     await openThread(page, "Alpha conversation")
 
@@ -490,7 +493,9 @@ test.describe("附件", () => {
     const { items } = await res.json()
     const alpha = items.find((t: { title: string }) => t.title === "Alpha conversation")
     const files = await (await page.request.get(`/v2/sessions/${alpha.threadId}/files`)).json()
-    expect(files.files.map((f: { name: string }) => f.name)).toContain("removable.txt")
+    // ★ The file is really deleted. The chip used to hide it while the
+    //   server kept it — the user was told it was gone, and it was not.
+    expect(files.files.map((f: { name: string }) => f.name)).not.toContain("removable.txt")
   })
 })
 

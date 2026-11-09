@@ -67,6 +67,19 @@ func toAgUiMessage(m *schema.Message, index int) (types.Message, bool) {
 		}
 	}
 
+	// ★ The attachment list travels in the metadata, not in the content:
+	//
+	//	AG-UI's Content is either a string or a list of input content, and
+	//	the client already splits the content into parts. The list is
+	//	metadata about the message, not a piece of the message — and it is
+	//	what lets the history show "that image you just sent".
+	if atts, ok := message.ReadAttachments(m); ok && len(atts) > 0 {
+		if out.Metadata == nil {
+			out.Metadata = types.Metadata{}
+		}
+		out.Metadata["attachments"] = atts
+	}
+
 	switch m.Role {
 	case schema.User:
 		out.Role = types.RoleUser
@@ -90,8 +103,13 @@ func toAgUiMessage(m *schema.Message, index int) (types.Message, bool) {
 	// A compaction is worth showing even when it carries nothing else: the
 	// marker is the whole point of the message, and the summary behind it is
 	// an implementation detail.
+	//
+	// ★ A message that carries only attachments is worth showing too — the
+	//   question may be entirely in the file, and a bubble with no text and
+	//   no chip would look like nothing was sent.
 	if out.Content == "" && len(out.ToolCalls) == 0 && out.ToolCallID == "" &&
-		out.Metadata["reasoning"] == nil && out.Metadata["compaction"] == nil {
+		out.Metadata["reasoning"] == nil && out.Metadata["compaction"] == nil &&
+		out.Metadata["attachments"] == nil {
 		return types.Message{}, false
 	}
 	return out, true

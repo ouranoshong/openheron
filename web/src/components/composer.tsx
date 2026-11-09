@@ -1,7 +1,8 @@
-import { Loader2Icon, PaperclipIcon, XIcon } from "lucide-react"
+import { Loader2Icon, PaperclipIcon } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 
 import { AgentPicker } from "@/components/agent-picker"
+import { AttachmentChip } from "@/components/attachment-chip"
 import { MCPPanel } from "@/components/mcp-panel"
 import { SkillPicker } from "@/components/skill-picker"
 import { ComposerMeta } from "@/components/composer-meta"
@@ -35,6 +36,7 @@ import {
   useStore,
 } from "@/lib/store"
 import { useAgentBadge } from "@/lib/use-agent-badge"
+import { cn } from "@/lib/utils"
 
 interface MentionState {
   /** Query the cached items belong to; null = nothing loaded yet. */
@@ -62,6 +64,13 @@ export function Composer({ inset = true }: { inset?: boolean }) {
     open: false,
   })
   const [skills, setSkills] = useState<SkillView[]>([])
+  // dragging says a file is hovering over the composer.
+  //
+  // ★ It is a state and not a style alone: the drop handler has to know
+  //   that a drag is in flight, and the highlight has to go away when the
+  //   drag leaves — a stuck ring would tell the user the composer is
+  //   waiting for a file that is not coming.
+  const [dragging, setDragging] = useState(false)
   useEffect(() => {
     let alive = true
     void loadSkills()
@@ -98,6 +107,17 @@ export function Composer({ inset = true }: { inset?: boolean }) {
   const mcpWasOpen = useRef(false)
   const addFiles = useStore((s) => s.addFiles)
   const removeFile = useStore((s) => s.removeFile)
+
+  // acceptFiles hands a list of files to the store.
+  //
+  // ★ The three ways in — the picker, a drop, a paste — end here, so the
+  //   name rule lives in one place: a pasted screenshot may arrive with no
+  //   name of its own, and the server stores a file under its name.
+  const acceptFiles = (list: ArrayLike<File> | null | undefined) => {
+    const files = Array.from(list ?? []).map(withName)
+    if (files.length === 0) return
+    void addFiles(files).catch(() => {})
+  }
 
   const resize = useCallback(() => {
     const el = taRef.current
@@ -477,22 +497,19 @@ export function Composer({ inset = true }: { inset?: boolean }) {
       {attachments.length > 0 && (
         <ul data-testid="attachments" className="mx-auto mb-1.5 flex w-full max-w-[var(--chat-column)] flex-wrap gap-1.5">
           {attachments.map((f) => (
-            <li
-              key={f.path}
-              data-testid="attachment-chip"
-              className="bg-muted flex items-center gap-1.5 rounded-md px-2 py-1 text-xs"
-            >
-              <PaperclipIcon className="size-3 shrink-0 opacity-70" />
-              <span className="max-w-40 truncate">{f.name}</span>
-              <span className="text-muted-foreground opacity-70">{formatSize(f.size)}</span>
-              <button
-                type="button"
-                aria-label={`Remove ${f.name}`}
-                onClick={() => activeId && void removeFile(activeId, f.name)}
-                className="hover:bg-accent grid size-4 shrink-0 place-items-center rounded"
-              >
-                <XIcon className="size-3" />
-              </button>
+            <li key={f.path}>
+              <AttachmentChip
+                name={f.name}
+                size={f.size}
+                testId="attachment-chip"
+                onRemove={() => {
+                  if (!activeId) return
+                  // ★ The file is really deleted on the server — the chip
+                  //   used to hide it while the server kept it, and the
+                  //   user was told it was gone.
+                  void removeFile(activeId, f.path).catch(() => {})
+                }}
+              />
             </li>
           ))}
         </ul>
@@ -500,7 +517,28 @@ export function Composer({ inset = true }: { inset?: boolean }) {
 
       <div
         data-testid="composer-box"
-        className="border-input focus-within:border-ring focus-within:ring-ring/40 mx-auto flex w-full max-w-[var(--chat-column)] items-end gap-2 rounded-2xl border px-3 py-2 focus-within:ring-3"
+        onDragOver={(e) => {
+          // ★ The default action of a drag-over is to refuse the drop, so
+          //   the handler has to allow it — without this the drop event
+          //   never fires at all.
+          e.preventDefault()
+          setDragging(true)
+        }}
+        onDragLeave={(e) => {
+          // ★ Moving between the composer and its own children fires a
+          //   leave; only a leave that leaves the whole box ends the drag.
+          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+          setDragging(false)
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          setDragging(false)
+          acceptFiles(e.dataTransfer.files)
+        }}
+        className={cn(
+          "border-input focus-within:border-ring focus-within:ring-ring/40 mx-auto flex w-full max-w-[var(--chat-column)] items-end gap-2 rounded-2xl border px-3 py-2 focus-within:ring-3",
+          dragging && "border-ring ring-ring/40 ring-3",
+        )}
       >
         <input
           ref={fileRef}
@@ -511,7 +549,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
           onChange={(e) => {
             const files = Array.from(e.target.files ?? [])
             e.target.value = ""
-            if (files.length > 0) void addFiles(files).catch(() => {})
+            acceptFiles(files)
           }}
         />
         <button
@@ -556,6 +594,19 @@ export function Composer({ inset = true }: { inset?: boolean }) {
             onCompositionEnd={(e) => {
               composingRef.current = false
               syncTrigger(e.currentTarget.value, e.currentTarget.selectionStart)
+            }}
+            onPaste={(e) => {
+              // ★ A pasted screenshot is a file, and the file is what the
+              //   user meant to send — not text. The default paste would
+              //   put the image's name into the message instead.
+              const items = Array.from(e.clipboardData?.items ?? [])
+              const files = items
+                .filter((it) => it.kind === "file")
+                .map((it) => it.getAsFile())
+                .filter((f): f is File => f !== null)
+              if (files.length === 0) return
+              e.preventDefault()
+              acceptFiles(files)
             }}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing || composingRef.current) return
@@ -682,8 +733,14 @@ export function Composer({ inset = true }: { inset?: boolean }) {
   )
 }
 
-function formatSize(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+// withName gives a file a name when it has none.
+//
+// ★ A pasted screenshot arrives from the clipboard with no name of its own
+//   in some browsers, and the server stores a file under its name — so the
+//   name has to exist before the upload, or the upload is refused.
+function withName(file: File): File {
+  if (file.name) return file
+  const mime = file.type || "application/octet-stream"
+  const ext = mime.split("/")[1]?.split("+")[0] || "bin"
+  return new File([file], `pasted.${ext}`, { type: mime })
 }

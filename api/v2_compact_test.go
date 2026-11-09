@@ -134,7 +134,7 @@ func TestV2CompactRefusesWhileARunIsInProgress(t *testing.T) {
 	srv.SetCompactorSource(stubCompactor{content: "the conversation so far"})
 
 	sess := mustCreate(t, srv)
-	if _, err := srv.rt.Submit(context.Background(), sess.ID(), "", "keep going"); err != nil {
+	if _, err := srv.rt.Submit(context.Background(), sess.ID(), "", "keep going", nil); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 

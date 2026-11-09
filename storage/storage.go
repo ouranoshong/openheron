@@ -84,6 +84,30 @@ type Session interface {
 	Workspace() string
 	PutFile(name string, r io.Reader) (string, error)
 
+	// ResolveWorkspaceFile turns a name relative to this session's
+	// workspace into an absolute path inside it.
+	//
+	// ★ It is the **only** way the outside world may name a file in the
+	//   workspace. A name that escapes the workspace is refused, not
+	//   clamped: a clamped path would silently read a different file, and
+	//   the model would answer about the wrong thing.
+	//
+	// ★ The path is resolved, not checked for existence — the caller
+	//   decides what a missing file means.
+	ResolveWorkspaceFile(name string) (string, error)
+
+	// DeleteWorkspaceFile removes a file from this session's workspace.
+	//
+	// ★ The name is relative to the workspace, and a name that escapes it is
+	//   refused — the same rule as ResolveWorkspaceFile, and for the same
+	//   reason: a delete that lands outside would remove a file the session
+	//   never owned.
+	//
+	// ★ The granularity is the **file**, not the message. A file may be
+	//   referenced by several messages, and the attachment list of a
+	//   message is history — it is not a reference count to maintain.
+	DeleteWorkspaceFile(name string) error
+
 	Init(agentID string) error
 	Delete() error
 	Meta() Meta

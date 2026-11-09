@@ -30,7 +30,7 @@ func TestARunWithNoSubscriberStillArchives(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestASubscriberThatVanishesDoesNotStopTheRun(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestASubscriberThatStallsIsDroppedAndTheRunKeepsGoing(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

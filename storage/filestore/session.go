@@ -512,6 +512,39 @@ func (fs *FileSession) Workspace() string {
 	return workspacePath(fs.root, id)
 }
 
+// ResolveWorkspaceFile turns a name relative to the workspace into an
+// absolute path inside it.
+//
+// ★ It refuses a name that escapes the workspace rather than clamping it.
+//
+//	The clamp would resolve to a different file, and the model would answer
+//	about that file without anything saying so.
+func (fs *FileSession) ResolveWorkspaceFile(name string) (string, error) {
+	return safeJoin(fs.Workspace(), name)
+}
+
+// DeleteWorkspaceFile removes a file from the session's workspace.
+//
+// ★ It refuses a name that escapes the workspace, for the same reason
+//
+//	ResolveWorkspaceFile refuses one: the rule that keeps a read inside
+//	the session has to keep a delete inside it too.
+//
+// ★ A missing file is not an error. The caller asked for a file to be
+//
+//	gone, and it is gone — a second delete of the same file is a no-op,
+//	not a failure.
+func (fs *FileSession) DeleteWorkspaceFile(name string) error {
+	full, err := safeJoin(fs.Workspace(), name)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(full); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 func (fs *FileSession) PutFile(name string, r io.Reader) (string, error) {
 	if r == nil {
 		return "", errors.New("workspace upload needs a reader")

@@ -23,7 +23,7 @@ func TestTheQuestionIsPersistedAfterTheInputIsBuilt(t *testing.T) {
 	rt, sm := newTestRuntime(t, &fakeBuilder{})
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(context.Background(), sess.ID(), "", "hello")
+	turn, err := rt.Submit(context.Background(), sess.ID(), "", "hello", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestEachPersistedMessageGetsItsOwnID(t *testing.T) {
 	sess := mustSession(t, sm)
 
 	for _, q := range []string{"first", "second"} {
-		turn, err := rt.Submit(context.Background(), sess.ID(), "", q)
+		turn, err := rt.Submit(context.Background(), sess.ID(), "", q, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

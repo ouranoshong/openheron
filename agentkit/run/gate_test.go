@@ -54,7 +54,7 @@ func TestSubmitRefusalIsInert(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "first")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "first", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestSubmitRefusalIsInert(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := rt.Submit(ctx, sess.ID(), "", "second"); !errors.Is(err, ErrSessionBusy) {
+	if _, err := rt.Submit(ctx, sess.ID(), "", "second", nil); !errors.Is(err, ErrSessionBusy) {
 		t.Fatalf("want ErrSessionBusy, got %v", err)
 	}
 
@@ -109,7 +109,7 @@ func TestSubmitRefusesWhileAnApprovalIsPending(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := rt.Submit(ctx, sess.ID(), "", "hello"); !errors.Is(err, ErrSessionBusy) {
+	if _, err := rt.Submit(ctx, sess.ID(), "", "hello", nil); !errors.Is(err, ErrSessionBusy) {
 		t.Fatalf("want ErrSessionBusy while an approval is pending, got %v", err)
 	}
 }
@@ -150,7 +150,7 @@ func TestRefusedResumeKeepsTheApproval(t *testing.T) {
 	sess := mustSession(t, sm)
 
 	// A live QUERY turn holds the session.
-	turn, err := rt.Submit(ctx, sess.ID(), "", "first")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "first", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestSubmitIsNotRefusedWhileTheTurnIsArchiving(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "first")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "first", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestSubmitIsNotRefusedWhileTheTurnIsArchiving(t *testing.T) {
 		return st.turn == nil
 	})
 
-	if _, err := rt.Submit(ctx, sess.ID(), "", "second"); err != nil {
+	if _, err := rt.Submit(ctx, sess.ID(), "", "second", nil); err != nil {
 		t.Fatalf("the session must be free once the turn is archived: %v", err)
 	}
 }
@@ -230,7 +230,7 @@ func TestAStartTimeoutReleasesTheSession(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "never starts")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "never starts", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestAStartTimeoutReleasesTheSession(t *testing.T) {
 		return st.turn == nil
 	})
 
-	if _, err := rt.Submit(ctx, sess.ID(), "", "the next one"); err != nil {
+	if _, err := rt.Submit(ctx, sess.ID(), "", "the next one", nil); err != nil {
 		t.Fatalf("the session must be free after a start timeout: %v", err)
 	}
 }
@@ -267,7 +267,7 @@ func TestAbortClearsTheVoidApproval(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestAbortClearsTheVoidApproval(t *testing.T) {
 	}
 
 	// And the session is usable again.
-	if _, err := rt.Submit(ctx, sess.ID(), "", "something else"); err != nil {
+	if _, err := rt.Submit(ctx, sess.ID(), "", "something else", nil); err != nil {
 		t.Fatalf("the session must be usable after the abort: %v", err)
 	}
 }
@@ -314,7 +314,7 @@ func TestTheSessionIsReleasedBeforeTheResponseCanEnd(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "first")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "first", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +335,7 @@ func TestTheSessionIsReleasedBeforeTheResponseCanEnd(t *testing.T) {
 	}
 
 	// And the thing the client actually does next.
-	if _, err := rt.Submit(ctx, sess.ID(), "", "second"); err != nil {
+	if _, err := rt.Submit(ctx, sess.ID(), "", "second", nil); err != nil {
 		t.Fatalf("the session must accept the next turn once the response may end: %v", err)
 	}
 }
@@ -350,7 +350,7 @@ func TestAFailedTurnReleasesItsWaiter(t *testing.T) {
 	rt, sm := newTestRuntime(t, b)
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(context.Background(), sess.ID(), "", "never starts")
+	turn, err := rt.Submit(context.Background(), sess.ID(), "", "never starts", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

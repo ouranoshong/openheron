@@ -28,7 +28,7 @@ export interface FakeThread {
   pendings?: PendingApproval[]
   runs?: FakeRun[]
   usage?: Usage
-  files: { name: string; path: string; size: number }[]
+  files: { name: string; path: string; size: number; mime: string }[]
 }
 
 export interface FakeMessage {
@@ -1152,6 +1152,36 @@ export function startFakeServer(port = 0): FakeServer {
     return out
   }
 
+  // mimeOf guesses a content type from a file name.
+  //
+  // ★ The real server derives it the same way: from the **name**, not from
+  //   what the client said about the file.
+  function mimeOf(name: string): string {
+    const ext = name.slice(name.lastIndexOf(".")).toLowerCase()
+    switch (ext) {
+      case ".png":
+        return "image/png"
+      case ".jpg":
+      case ".jpeg":
+        return "image/jpeg"
+      case ".gif":
+        return "image/gif"
+      case ".webp":
+        return "image/webp"
+      case ".txt":
+        return "text/plain"
+      case ".md":
+      case ".markdown":
+        return "text/markdown"
+      case ".json":
+        return "application/json"
+      case ".pdf":
+        return "application/pdf"
+      default:
+        return "application/octet-stream"
+    }
+  }
+
   async function readJSON(req: Request): Promise<Record<string, any>> {
     const text = await req.text()
     if (!text) return {}
@@ -1461,6 +1491,7 @@ export function startFakeServer(port = 0): FakeServer {
       query?: string
       messages?: FakeMessage[]
       resume?: unknown[]
+      attachments?: { name: string; path: string; size?: number }[]
     }
     try {
       body = await req.json()
@@ -1519,7 +1550,16 @@ export function startFakeServer(port = 0): FakeServer {
     // ★ Attach: the client comes back for a run it already knows. The
     //   request carries the run's id and no question — a question would
     //   mean "start a new run".
-    if (body.runId && !(body.query ?? "").trim() && !body.messages?.length && !body.resume?.length) {
+    //
+    //   ★ Files count as a question: a turn that carries files and no text
+    //   is a new turn, not a re-attach.
+    if (
+      body.runId &&
+      !(body.query ?? "").trim() &&
+      !body.messages?.length &&
+      !body.resume?.length &&
+      !body.attachments?.length
+    ) {
       const run = (thread.runs ?? []).find((r) => r.runId === body.runId)
       if (!run || run.state !== "running") {
         return fail(404, "the run is no longer live; load the session's history instead", "run_not_live")
@@ -1552,11 +1592,35 @@ export function startFakeServer(port = 0): FakeServer {
     thread.state = "running"
 
     const query = (body.query ?? "").trim() || lastUserText(body.messages)
-    if (!query) return fail(400, "message must not be empty", "empty_message")
+    // ★ A turn with files and no text is still a turn: the question may be
+    //   entirely in the attachment.
+    const attachments = body.attachments ?? []
+    if (!query && attachments.length === 0) {
+      return fail(400, "message must not be empty", "empty_message")
+    }
 
     const marker = query.includes(MARKER_B) ? MARKER_B : MARKER_A
     const msgId = `m-${++seq}`
-    thread.messages.push({ id: `u-${seq}`, role: "user", content: query })
+    // ★ The files are recorded on the message, so the history can show
+    //   "that image you just sent" long after the turn is over.
+    const userMessage: FakeMessage = {
+      id: `u-${seq}`,
+      role: "user",
+      content: query,
+      ...(attachments.length > 0
+        ? {
+            metadata: {
+              attachments: attachments.map((a) => ({
+                name: a.name,
+                path: a.path,
+                size: a.size ?? 0,
+                mime: mimeOf(a.path),
+              })),
+            },
+          }
+        : {}),
+    }
+    thread.messages.push(userMessage)
     const assistantMsg: FakeMessage = { id: msgId, role: "assistant", content: "" }
     thread.messages.push(assistantMsg)
     if (thread.title === "New Session") thread.title = query.slice(0, 40)
@@ -1920,12 +1984,29 @@ export function startFakeServer(port = 0): FakeServer {
           const added = names
             .filter((f): f is File => f instanceof File)
             .map((f) => {
-              const entry = { name: f.name, path: `/workspace/${t!.threadId}/${f.name}`, size: f.size }
+              // ★ The path is **relative** to the workspace: it is the name
+              //   the client sends back with the next question, and it has
+              //   to be the name the server itself resolves.
+              const entry = {
+                name: f.name,
+                path: f.name,
+                size: f.size,
+                mime: mimeOf(f.name),
+              }
               t!.files.push(entry)
               return entry
             })
           if (added.length === 0) return fail(400, "file is required", "file_required")
           return json({ files: added, workspacePath: `/workspace/${t.threadId}` }, 201)
+        }
+        if (req.method === "DELETE") {
+          const target = url.searchParams.get("path") ?? ""
+          if (!target.trim()) {
+            return fail(400, "path is required", "invalid_file_name")
+          }
+          const i = t.files.findIndex((f) => f.path === target)
+          if (i >= 0) t.files.splice(i, 1)
+          return json({ deleted: true, path: target })
         }
         return json({ workspacePath: `/workspace/${t.threadId}`, files: t.files })
       }

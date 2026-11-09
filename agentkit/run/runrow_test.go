@@ -37,7 +37,7 @@ func TestTheRunIsRecordedBeforeItIsHandedOut(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestTheTerminalRowLandsAfterTheArchive(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestATurnThatNeverStartsClosesItsRow(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "never starts")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "never starts", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestTheScanNamesTheActiveRun(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestTheResumeNamesItsParentRun(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestAFailedRunIsNotRecordedAsCompleted(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestAStoppedRunIsRecordedAsAborted(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +313,7 @@ func TestStatusOfReportsTheActiveRunID(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

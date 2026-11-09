@@ -1,11 +1,38 @@
 import type { AgMessage, PendingApproval, ThreadMeta } from "@/lib/api"
 import {
   emptyConversation,
+  type AttachmentPart,
   type CompactionMark,
   type ConversationState,
   type Message,
   type Usage,
 } from "@/lib/types"
+
+// readAttachments reads the attachment list off the wire metadata.
+//
+// ★ The server stamps it on the message (api/v2_convert.go). The list is
+//   what lets the history answer "that image you just sent" — the files
+//   belong to the message, not to the session.
+function readAttachments(raw: unknown): AttachmentPart[] {
+  if (!Array.isArray(raw)) return []
+  const out: AttachmentPart[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue
+    const a = item as Record<string, unknown>
+    const name = typeof a.name === "string" ? a.name : ""
+    const path = typeof a.path === "string" ? a.path : ""
+    if (!name && !path) continue
+    out.push({
+      kind: "attachment",
+      id: "",
+      name,
+      path,
+      size: typeof a.size === "number" ? a.size : 0,
+      mime: typeof a.mime === "string" ? a.mime : "",
+    })
+  }
+  return out
+}
 
 // readCompaction reads the compaction marker off the wire metadata.
 //
@@ -57,6 +84,13 @@ export function seedFromHistory(
 
     const parts: Message["parts"] = []
     const meta = m.metadata ?? {}
+    // ★ The files come first, the text after — the same order the
+    //   optimistic bubble uses, so a message looks the same whether it was
+    //   just sent or read back from the transcript.
+    const attachments = readAttachments(meta.attachments)
+    for (const [i, a] of attachments.entries()) {
+      parts.push({ ...a, id: `${m.id}:a${i}` })
+    }
     const reasoning = typeof meta.reasoning === "string" ? meta.reasoning : ""
     if (reasoning) {
       const ms = typeof meta.reasoningMs === "number" ? meta.reasoningMs : undefined
