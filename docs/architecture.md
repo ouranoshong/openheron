@@ -74,8 +74,8 @@ ledger records the servers a turn touched.
 
 ### 2.1 Two dependency rules that must not be broken
 
-**(1) There is exactly one log sink.** All runtime logging goes through
-`agentkit/obs`'s `Logger()` (`agentkit/obs/logger.go:18`). Levels (Info/Warn/Error) and
+**(1) There is exactly one log sink.** All runtime logging goes through the
+`*slog.Logger` the composition root builds (`agentkit/obs`). Levels (Info/Warn/Error) and
 prefixes are defined in that one place, and the level decides whether a line shows up in
 the default output — so a business package calling `log.Printf` or
 `fmt.Fprintln(os.Stderr)` directly bypasses the switch.
@@ -88,10 +88,14 @@ microseconds, the caller's file and line, the level, then the message and the at
 2026/10/29 22:28:34.346459 main.go:189: [Info] [main] openheron version=dev
 ```
 
-**The only exception** is `llm/common`: it is a leaf package with zero openheron
-dependencies, and importing `obs` there would break the "the protocol layer does not
-depend on the runtime" rule, so it uses the standard logger. Any openheron-internal
-import inside `llm/common` is a regression.
+There is no exception any more: `llm/common` used to write the request log with the standard
+logger, and that code moved to `agentkit/obs/httplog` (`docs/logging-design.md` §6). Any
+openheron-internal import inside `llm/common` is still a regression.
+
+★ The logger is built at the composition root (`main.installLogger`) around a shared
+`slog.LevelVar`, so `server/config.yaml`'s `log_level` and `OPENHERON_LOG_LEVEL` can move the
+threshold after the handler exists. Every package takes a `*slog.Logger` parameter; there is
+no global to reach for.
 
 **(2) Declaration and behaviour are separate.** `agentkit/spec/decl` holds **plain
 structs** and yaml tags (`agentkit/spec/decl/decl.go`) and imports no other package;

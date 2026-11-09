@@ -11,7 +11,6 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
@@ -52,7 +51,7 @@ func (b *Builder) summarizationMiddleware(ctx context.Context, snap *snapshot,
 	if err != nil {
 		return nil, err
 	}
-	obs.Logger().Info("[agent] context compaction enabled", "agent", sp.ID, "summarizeAt", at)
+	b.logger().Info("[agent] context compaction enabled", "agent", sp.ID, "summarizeAt", at)
 	return mw, nil
 }
 
@@ -66,7 +65,7 @@ func (b *Builder) compactionMiddleware(ctx context.Context, snap *snapshot,
 
 	mw, err := b.summarizationMiddleware(ctx, snap, sp, mdl)
 	if err != nil {
-		obs.Logger().Warn("[agent] context compaction disabled", "agent", agentID(sp), "err", err)
+		b.logger().Warn("[agent] context compaction disabled", "agent", agentID(sp), "err", err)
 		return nil
 	}
 	return mw

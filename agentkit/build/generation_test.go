@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 
 	"github.com/cloudwego/eino/components/model"
@@ -32,7 +33,7 @@ func TestFirstGenerationAndLaterOnesDeriveTheSameTable(t *testing.T) {
 func TestMaxDepthDefaultsInOnePlace(t *testing.T) {
 	cfg := minimalTestConfig()
 	cfg.Server.Agent.MaxDepth = 0
-	snap, err := newSnapshot(1, cfg, nil, "", "", nil, nil)
+	snap, err := newSnapshot(1, cfg, nil, "", "", nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +43,7 @@ func TestMaxDepthDefaultsInOnePlace(t *testing.T) {
 
 	cfg2 := minimalTestConfig()
 	cfg2.Server.Agent.MaxDepth = 3
-	snap2, err := newSnapshot(1, cfg2, nil, "", "", nil, nil)
+	snap2, err := newSnapshot(1, cfg2, nil, "", "", nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +99,7 @@ func TestManagerGenerationIsMonotonic(t *testing.T) {
 func TestModelIsResolvedAtBuildTime(t *testing.T) {
 	b := newTestBuilder(t)
 	calls := 0
-	b.models = func(context.Context, *spec.Config, string, CallIntent) (
+	b.models = func(context.Context, *spec.Config, string, CallIntent, *slog.Logger) (
 		model.BaseModel[*schema.Message], error) {
 		calls++
 		return &stubModel{}, nil
@@ -125,7 +126,7 @@ func TestSwitchedRootUsesItsOwnModel(t *testing.T) {
 	})
 	b := newTestBuilderWithConfig(t, cfg)
 	b.models = func(_ context.Context, _ *spec.Config, ref string,
-		_ CallIntent) (model.BaseModel[*schema.Message], error) {
+		_ CallIntent, _ *slog.Logger) (model.BaseModel[*schema.Message], error) {
 
 		switch ref {
 		case "root/model":
@@ -182,7 +183,7 @@ func TestSubAgentWithoutModelFallsBackToTheBase(t *testing.T) {
 	})
 	b := newTestBuilderWithConfig(t, cfg)
 	b.models = func(_ context.Context, _ *spec.Config, ref string,
-		_ CallIntent) (model.BaseModel[*schema.Message], error) {
+		_ CallIntent, _ *slog.Logger) (model.BaseModel[*schema.Message], error) {
 
 		if ref == "root/model" {
 			return modelA, nil

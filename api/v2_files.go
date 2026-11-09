@@ -92,7 +92,7 @@ const maxUploadBytes = 32 << 20 // 32 MiB
 func (s *Server) v2UploadFiles(ctx context.Context, c *app.RequestContext) {
 	sess, err := s.session(ctx, c)
 	if err != nil {
-		v2FailErr(c, err)
+		s.v2FailErr(c, err)
 		return
 	}
 
@@ -100,7 +100,7 @@ func (s *Server) v2UploadFiles(ctx context.Context, c *app.RequestContext) {
 	// every other file the client attached.
 	form, err := c.MultipartForm()
 	if err != nil || form == nil {
-		v2Fail(c, consts.StatusBadRequest, codeFileRequired, "file is required", false)
+		s.v2Fail(c, consts.StatusBadRequest, codeFileRequired, "file is required", false)
 		return
 	}
 	headers := form.File["files"]
@@ -108,7 +108,7 @@ func (s *Server) v2UploadFiles(ctx context.Context, c *app.RequestContext) {
 		headers = form.File["file"] // tolerate the singular name
 	}
 	if len(headers) == 0 {
-		v2Fail(c, consts.StatusBadRequest, codeFileRequired, "file is required", false)
+		s.v2Fail(c, consts.StatusBadRequest, codeFileRequired, "file is required", false)
 		return
 	}
 
@@ -118,19 +118,19 @@ func (s *Server) v2UploadFiles(ctx context.Context, c *app.RequestContext) {
 	}
 	for _, fh := range headers {
 		if fh.Size > maxUploadBytes {
-			v2Fail(c, consts.StatusRequestEntityTooLarge, codeFileTooLarge,
+			s.v2Fail(c, consts.StatusRequestEntityTooLarge, codeFileTooLarge,
 				"file exceeds the 32 MiB limit", false)
 			return
 		}
 		f, err := fh.Open()
 		if err != nil {
-			v2Fail(c, consts.StatusBadRequest, codeFileRequired, "cannot read upload", false)
+			s.v2Fail(c, consts.StatusBadRequest, codeFileRequired, "cannot read upload", false)
 			return
 		}
 		path, putErr := sess.PutFile(fh.Filename, f)
 		_ = f.Close()
 		if putErr != nil {
-			v2Fail(c, consts.StatusBadRequest, codeInvalidFileName, putErr.Error(), false)
+			s.v2Fail(c, consts.StatusBadRequest, codeInvalidFileName, putErr.Error(), false)
 			return
 		}
 		out.Files = append(out.Files, uploadedFile{Name: fh.Filename, Path: path, Size: fh.Size})
@@ -143,12 +143,12 @@ func (s *Server) v2UploadFiles(ctx context.Context, c *app.RequestContext) {
 func (s *Server) v2ListFiles(ctx context.Context, c *app.RequestContext) {
 	sess, err := s.session(ctx, c)
 	if err != nil {
-		v2FailErr(c, err)
+		s.v2FailErr(c, err)
 		return
 	}
 	entries, err := listWorkspace(sess.Workspace())
 	if err != nil {
-		v2FailInternal(c, err)
+		s.v2FailInternal(c, err)
 		return
 	}
 	c.JSON(consts.StatusOK, map[string]any{

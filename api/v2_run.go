@@ -96,7 +96,7 @@ type resumeEntry struct {
 func (s *Server) v2Run(ctx context.Context, c *app.RequestContext) {
 	var in runInput
 	if err := c.Bind(&in); err != nil {
-		v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "invalid body", false)
+		s.v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "invalid body", false)
 		return
 	}
 
@@ -111,21 +111,21 @@ func (s *Server) v2Run(ctx context.Context, c *app.RequestContext) {
 	ctx = obs.WithRunID(ctx, runID)
 
 	if trimSpace(in.ThreadID) == "" {
-		v2Fail(c, consts.StatusBadRequest, codeInvalidBody,
+		s.v2Fail(c, consts.StatusBadRequest, codeInvalidBody,
 			"threadId is required; create the session with POST /v2/sessions first", false)
 		return
 	}
 
 	sess, err := s.sm.Get(ctx, trimSpace(in.ThreadID))
 	if err != nil {
-		v2FailErr(c, err)
+		s.v2FailErr(c, err)
 		return
 	}
 	in.ThreadID = sess.ID()
 
 	root := s.activeAgentID(sess)
 
-	obs.Logger().Info(obs.Prefix(ctx)+"run started",
+	s.logger().Info(obs.Prefix(ctx)+"run started",
 		"thread", in.ThreadID, "agent", root, "resume", len(in.Resume) > 0)
 
 	// ★ Attach: the client asks for a run it already knows. The request
@@ -139,7 +139,7 @@ func (s *Server) v2Run(ctx context.Context, c *app.RequestContext) {
 
 	turn, err := s.startRun(ctx, sess, in)
 	if err != nil {
-		v2FailErr(c, err)
+		s.v2FailErr(c, err)
 		return
 	}
 
@@ -209,7 +209,7 @@ func isAttachRequest(in runInput) bool {
 func (s *Server) attachRun(ctx context.Context, c *app.RequestContext, sess storage.Session, runID string) {
 	turn, ok := s.rt.LiveRun(sess.ID(), runID)
 	if !ok {
-		v2Fail(c, consts.StatusNotFound, codeRunNotLive,
+		s.v2Fail(c, consts.StatusNotFound, codeRunNotLive,
 			"the run is no longer live; load the session's history instead", false)
 		return
 	}
@@ -249,7 +249,7 @@ func (s *Server) reportRunStartFailure(stream *transport.SSEStream, err error) {
 		code = codeInternal
 	}
 	_ = stream.Publish(map[string]any{"type": "RUN_ERROR", "code": code, "message": err.Error()})
-	obs.Logger().Error("[api] run did not start", "code", code, "err", err)
+	s.logger().Error("[api] run did not start", "code", code, "err", err)
 }
 
 // startRun picks the branch: a question starts a turn, a resume answers one.

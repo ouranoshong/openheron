@@ -70,8 +70,8 @@
 
 ### 2.1 两条不能破的依赖铁律
 
-**（一）日志只有一个出口。** 所有运行时日志走 `agentkit/obs` 的 `Logger()`
-（`agentkit/obs/logger.go:18`）。级别（Info/Warn/Error）与前缀只在这一处定义，
+**（一）日志只有一个出口。** 所有运行时日志走组合根建的那个 `*slog.Logger`
+（`agentkit/obs`）。级别（Info/Warn/Error）与前缀只在这一处定义，
 而级别决定了一行会不会出现在默认输出里 —— 业务包直接调 `log.Printf` 或
 `fmt.Fprintln(os.Stderr)` 就会绕开这个开关。
 
@@ -82,9 +82,13 @@
 2026/10/29 22:28:34.346459 main.go:189: [Info] [main] openheron version=dev
 ```
 
-**唯一的例外**是 `llm/common`：它是零 openheron 依赖的叶子包，
-引 `obs` 就破了「协议层不依赖运行时」这条铁律，所以它用标准 logger。
-`llm/common` 里任何一处 import openheron 内部包都算回归。
+已经没有例外了：`llm/common` 原来用标准 logger 打请求日志，那段代码搬到了
+`agentkit/obs/httplog`（`docs/logging-design.md` §6）。`llm/common` 里任何一处
+import openheron 内部包都仍然算回归。
+
+★ logger 现在由组合根（`main.installLogger`）围绕一个共享的 `slog.LevelVar` 建起来，
+所以 `server/config.yaml` 的 `log_level` 与 `OPENHERON_LOG_LEVEL` 能在 handler 建好之后
+移动门限。每个包接收一个 `*slog.Logger` 形参；没有全局可回取。
 
 **（二）配置声明与配置行为分离。** `agentkit/spec/decl` 只放**纯结构体**和 yaml tag
 （`agentkit/spec/decl/decl.go`），不引任何其它包；`agentkit/spec` 放**行为**

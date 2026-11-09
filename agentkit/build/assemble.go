@@ -11,7 +11,6 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"github.com/ouranoshong/openheron/helpers"
 )
@@ -174,9 +173,9 @@ func (b *Builder) assemble(ctx context.Context, snap *snapshot,
 func (b *Builder) skillHandlers(ctx context.Context, backend fsapi.Backend, hubs *skillHubs,
 	scope skillScope) ([]adk.TypedChatModelAgentMiddleware[*schema.Message], error) {
 
-	mw, err := skillChain(ctx, backend, hubs, scope)
+	mw, err := skillChain(ctx, backend, hubs, scope, b.logger())
 	if err != nil {
-		obs.Logger().Warn("[agent] skill middleware disabled", "err", err)
+		b.logger().Warn("[agent] skill middleware disabled", "err", err)
 		return nil, nil
 	}
 	if mw == nil {

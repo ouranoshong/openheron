@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -70,8 +71,8 @@ func (c *fakeMCPClient) setTools(names []string) {
 
 // newFakeMCPManager returns a manager whose clients are fakes.
 func newFakeMCPManager(starts *int32, cli *fakeMCPClient) *mcpManager {
-	m := newMCPManager()
-	m.start = func(context.Context, context.Context, *decl.MCPServerCfg) (mcpClient, error) {
+	m := newMCPManager(nil)
+	m.start = func(context.Context, context.Context, *decl.MCPServerCfg, *slog.Logger) (mcpClient, error) {
 		atomic.AddInt32(starts, 1)
 		return cli, nil
 	}
@@ -288,8 +289,8 @@ func TestTheCommandIsNeverResolvedAgainstTheProjectRoot(t *testing.T) {
 func TestAnUnreachableServerSaysSoAndKeepsTheOtherServersAlive(t *testing.T) {
 	var starts int32
 	cli := &fakeMCPClient{tools: []string{"read_issue"}}
-	m := newMCPManager()
-	m.start = func(_ context.Context, _ context.Context, cfg *decl.MCPServerCfg) (mcpClient, error) {
+	m := newMCPManager(nil)
+	m.start = func(_ context.Context, _ context.Context, cfg *decl.MCPServerCfg, _ *slog.Logger) (mcpClient, error) {
 		atomic.AddInt32(&starts, 1)
 		if cfg.Name == "broken" {
 			return nil, errors.New("the command is not on the PATH")
@@ -352,7 +353,7 @@ func TestAServerThatNeverAnswersDoesNotHoldTheBuild(t *testing.T) {
 	defer cancelLife()
 
 	begin := time.Now()
-	_, err := startStdioClient(context.Background(), life, cfg)
+	_, err := startStdioClient(context.Background(), life, cfg, nil)
 	elapsed := time.Since(begin)
 
 	if err == nil {
@@ -374,7 +375,7 @@ func TestTheSilentServerDoesNotTakeTheOthersDownWithIt(t *testing.T) {
 		t.Fatalf("the test binary's path: %v", err)
 	}
 
-	m := newMCPManager()
+	m := newMCPManager(nil)
 	begin := time.Now()
 	_, _, err = m.Tools(context.Background(), silentMCPCfg(t))
 	elapsed := time.Since(begin)

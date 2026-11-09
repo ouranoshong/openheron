@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -29,11 +30,14 @@ type runRow struct {
 	ledger storage.RunLedger
 	run    storage.Run
 	closed bool
+
+	log *slog.Logger
 }
 
-// newRunRow wraps a run's first snapshot.
-func newRunRow(ledger storage.RunLedger, r storage.Run) *runRow {
-	return &runRow{ledger: ledger, run: r}
+// newRunRow wraps a run's first snapshot. log may be nil: the row then drops
+// the one warning it can write.
+func newRunRow(ledger storage.RunLedger, r storage.Run, log *slog.Logger) *runRow {
+	return &runRow{ledger: ledger, run: r, log: log}
 }
 
 // set writes a non-terminal state.
@@ -168,6 +172,6 @@ func (rw *runRow) writeLocked() {
 		return
 	}
 	if err := rw.ledger.Append(context.Background(), rw.run); err != nil {
-		logf("session=%s run=%s failed to write the run row: %v", rw.run.SessionID, rw.run.RunID, err)
+		logf(rw.log, "session=%s run=%s failed to write the run row: %v", rw.run.SessionID, rw.run.RunID, err)
 	}
 }

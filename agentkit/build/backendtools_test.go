@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -72,7 +73,7 @@ func newModelBuilder(t *testing.T, cfg *spec.Config, fallback model.BaseModel[*s
 	t.Helper()
 	b := newTestBuilderWithConfig(t, cfg)
 	b.models = func(_ context.Context, _ *spec.Config, ref string,
-		_ CallIntent) (model.BaseModel[*schema.Message], error) {
+		_ CallIntent, _ *slog.Logger) (model.BaseModel[*schema.Message], error) {
 
 		if m := byRef[ref]; m != nil {
 			return m, nil

@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -98,7 +99,7 @@ func runScripted(t *testing.T, unknownName string, without ...string) [][]*schem
 	cfg.Agents[spec.DefaultAgentID].MaxIterations = 3
 
 	b := newTestBuilderWithConfig(t, cfg)
-	b.models = func(context.Context, *spec.Config, string, CallIntent) (
+	b.models = func(context.Context, *spec.Config, string, CallIntent, *slog.Logger) (
 		model.BaseModel[*schema.Message], error) {
 		return m, nil
 	}

@@ -424,13 +424,11 @@ func TestTheFileAskingForAToolTheServerLacksIsNoticed(t *testing.T) {
 	cfg.MCPs["fake"].Tools = []string{"read_issue", "no_such_tool"}
 
 	var buf strings.Builder
-	old := obs.Logger()
-	obs.SetLogger(slog.New(obs.NewHandler(&buf, slog.LevelDebug)))
-	defer obs.SetLogger(old)
-
 	b := newTestBuilderWithConfig(t, cfg)
+	b.log = slog.New(obs.NewHandler(&buf, slog.LevelDebug))
+	b.mcp.log = b.log
 	startLiveServer(t, b, cfg, "fake")
-	if _, err := b.tools.Build(context.Background(), toolEnv{cfg: cfg}); err != nil {
+	if _, err := b.tools.Build(context.Background(), toolEnv{cfg: cfg, log: b.log}); err != nil {
 		t.Fatalf("the provider must not fail on a reachable server: %v", err)
 	}
 

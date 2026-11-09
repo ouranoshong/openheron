@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/cloudwego/eino/components/tool"
 
@@ -15,11 +16,19 @@ type toolEnv struct {
 	cfg         *spec.Config
 	projectRoot string
 	dataDir     string
+	log         *slog.Logger
 
 	// svc is the configuration service itself — the only thing that knows
 	// where the tree is and how to write it safely. The config_* tools
 	// answer through it, so they answer the same way the editor does.
 	svc *spec.Service
+}
+
+func (e toolEnv) logger() *slog.Logger {
+	if e.log == nil {
+		return obs.Discard()
+	}
+	return e.log
 }
 
 type toolProvider interface {
@@ -125,7 +134,7 @@ func (r *toolRegistry) Build(ctx context.Context, env toolEnv) ([]tool.BaseTool,
 		batch, err := p.Provide(ctx, env)
 		if err != nil {
 			if p.Optional() {
-				obs.Logger().Warn("[agent] tool provider disabled", "provider", p.ID(), "err", err)
+				env.logger().Warn("[agent] tool provider disabled", "provider", p.ID(), "err", err)
 				continue
 			}
 			return nil, fmt.Errorf("tool provider %s: %w", p.ID(), err)
@@ -186,5 +195,5 @@ func (kbToolProvider) ID() string     { return "kb" }
 func (kbToolProvider) Optional() bool { return true }
 
 func (kbToolProvider) Provide(ctx context.Context, env toolEnv) ([]tool.BaseTool, error) {
-	return buildKBTools(ctx, env.cfg, env.projectRoot, env.dataDir)
+	return buildKBTools(ctx, env.cfg, env.projectRoot, env.dataDir, env.logger())
 }

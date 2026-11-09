@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,10 +18,11 @@ import (
 	"github.com/ouranoshong/openheron/agentkit/obs"
 )
 
-func skillChain(ctx context.Context, backend fsapi.Backend, hubs *skillHubs, scope skillScope) (
+func skillChain(ctx context.Context, backend fsapi.Backend, hubs *skillHubs, scope skillScope,
+	log *slog.Logger) (
 	adk.TypedChatModelAgentMiddleware[*schema.Message], error) {
 
-	dir, ok := ResolveSkillsDir()
+	dir, ok := ResolveSkillsDir(log)
 	if !ok {
 		return nil, nil
 	}
@@ -31,7 +33,7 @@ func skillChain(ctx context.Context, backend fsapi.Backend, hubs *skillHubs, sco
 	if err != nil {
 		return nil, err
 	}
-	scoped, err := newScopedSkillBackend(ctx, skillBackend, scope)
+	scoped, err := newScopedSkillBackend(ctx, skillBackend, scope, log)
 	if err != nil {
 		return nil, err
 	}
@@ -76,6 +78,7 @@ func skillScopeOf(list []string) skillScope {
 type scopedSkillBackend struct {
 	inner skill.Backend
 	scope skillScope
+	log   *slog.Logger
 	// folders maps a skill's frontmatter name to the folder it lives in.
 	folders map[string]string
 	// known holds every name this backend answers to: the folders and the
@@ -83,10 +86,11 @@ type scopedSkillBackend struct {
 	known map[string]bool
 }
 
-func newScopedSkillBackend(ctx context.Context, inner skill.Backend, scope skillScope) (
+func newScopedSkillBackend(ctx context.Context, inner skill.Backend, scope skillScope,
+	log *slog.Logger) (
 	*scopedSkillBackend, error) {
 
-	b := &scopedSkillBackend{inner: inner, scope: scope}
+	b := &scopedSkillBackend{inner: inner, scope: scope, log: log}
 	matters, err := inner.List(ctx)
 	if err != nil {
 		return nil, err
@@ -113,7 +117,9 @@ func newScopedSkillBackend(ctx context.Context, inner skill.Backend, scope skill
 	//   an agent to nothing is the worst kind: the agent looks configured and
 	//   behaves as if it had no skill at all.
 	for _, name := range b.missingSkills() {
-		obs.Logger().Warn("[agent] the skill is not in the skills directory", "skill", name)
+		if b.log != nil {
+			b.log.Warn("[agent] the skill is not in the skills directory", "skill", name)
+		}
 	}
 	return b, nil
 }
@@ -181,7 +187,10 @@ func (b *scopedSkillBackend) Get(ctx context.Context, name string) (skill.Skill,
 // ★ The rule lives here and nowhere else: a second copy of it in the config
 //
 //	layer would be a second answer to "which skills are loaded".
-func ResolveSkillsDir() (string, bool) {
+func ResolveSkillsDir(log *slog.Logger) (string, bool) {
+	if log == nil {
+		log = obs.Discard()
+	}
 	dir := strings.TrimSpace(os.Getenv("EINO_EXT_SKILLS_DIR"))
 	if dir == "" {
 		if found, ok := probeProjectSkills(); ok {
@@ -197,7 +206,7 @@ func ResolveSkillsDir() (string, bool) {
 	fi, err := os.Stat(dir)
 	if err != nil || !fi.IsDir() {
 		if fromEnv := strings.TrimSpace(os.Getenv("EINO_EXT_SKILLS_DIR")); fromEnv != "" {
-			obs.Logger().Warn("[agent] EINO_EXT_SKILLS_DIR points at a missing dir, skills disabled",
+			log.Warn("[agent] EINO_EXT_SKILLS_DIR points at a missing dir, skills disabled",
 				"dir", fromEnv)
 		}
 		return "", false
@@ -231,14 +240,17 @@ type SkillInfo struct {
 	Model       string `json:"model,omitempty"`
 }
 
-func Skills(ctx context.Context) []SkillInfo {
-	dir, ok := ResolveSkillsDir()
+func Skills(ctx context.Context, log *slog.Logger) []SkillInfo {
+	if log == nil {
+		log = obs.Discard()
+	}
+	dir, ok := ResolveSkillsDir(log)
 	if !ok {
 		return nil
 	}
 	backend, err := fsx.New(fsx.Config{Root: dir})
 	if err != nil {
-		obs.Logger().Warn("[agent] failed to build the filesystem backend for the skill list", "err", err)
+		log.Warn("[agent] failed to build the filesystem backend for the skill list", "err", err)
 		return nil
 	}
 	skillBackend, err := skill.NewBackendFromFilesystem(ctx, &skill.BackendFromFilesystemConfig{
@@ -246,12 +258,12 @@ func Skills(ctx context.Context) []SkillInfo {
 		BaseDir: dir,
 	})
 	if err != nil {
-		obs.Logger().Warn("[agent] failed to build the skill backend", "err", err)
+		log.Warn("[agent] failed to build the skill backend", "err", err)
 		return nil
 	}
 	list, err := skillBackend.List(ctx)
 	if err != nil {
-		obs.Logger().Warn("[agent] failed to list the skills", "dir", dir, "err", err)
+		log.Warn("[agent] failed to list the skills", "dir", dir, "err", err)
 		return nil
 	}
 	out := make([]SkillInfo, 0, len(list))

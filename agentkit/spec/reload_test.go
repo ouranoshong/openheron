@@ -3,7 +3,7 @@ package spec
 import (
 	"context"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
-	"os"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -306,17 +306,40 @@ func TestWatchExitsOnContextCancel(t *testing.T) {
 	}
 }
 
-func TestLogReloadFailedIsSwappable(t *testing.T) {
-	orig := LogReloadFailed
-	var sb strings.Builder
-	LogReloadFailed = func(err error) { sb.WriteString(err.Error()) }
-	defer func() { LogReloadFailed = orig }()
-
-	LogReloadFailed(os.ErrNotExist)
-	if !strings.Contains(sb.String(), "not exist") {
-		t.Fatalf("the log sink was never called: %q", sb.String())
-	}
+// reloadNotice is what the hot-reload test reads out of the log.
+type reloadNotice struct {
+	version string
+	changed []string
 }
+
+// noticeHandler turns a log record into a reloadNotice. It never blocks: the
+// watcher must not wait for the test.
+type noticeHandler struct{ ch chan reloadNotice }
+
+func (h noticeHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h noticeHandler) Handle(_ context.Context, r slog.Record) error {
+	n := reloadNotice{}
+	r.Attrs(func(a slog.Attr) bool {
+		switch a.Key {
+		case "version":
+			n.version = a.Value.String()
+		case "changed":
+			if s := a.Value.String(); s != "" {
+				n.changed = strings.Split(s, ",")
+			}
+		}
+		return true
+	})
+	select {
+	case h.ch <- n:
+	default:
+	}
+	return nil
+}
+
+func (h noticeHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h noticeHandler) WithGroup(string) slog.Handler      { return h }
 
 func TestHotReloadLogsWhichPartitionsChanged(t *testing.T) {
 	f := newFixture(t)
@@ -330,25 +353,9 @@ func TestHotReloadLogsWhichPartitionsChanged(t *testing.T) {
 	//   variables: the hook runs on the watcher's goroutine, and a variable
 	//   it writes is read by the test goroutine — that is a race, and the
 	//   detector reports it as one.
-	type notice struct {
-		version string
-		changed []string
-	}
-	notices := make(chan notice, 1)
+	notices := make(chan reloadNotice, 1)
 
-	orig := LogReloaded
-	LogReloaded = func(version string, changed []string) {
-		// ★ The send never blocks: the watcher must not wait for the test.
-		select {
-		case notices <- notice{version: version, changed: changed}:
-		default:
-		}
-	}
-	// ★ The hook is restored last — after the watcher has stopped, because
-	//   the watcher reads this package-level variable.
-	defer func() { LogReloaded = orig }()
-
-	r, err := NewReloader(s, func(*Config) {})
+	r, err := NewReloader(s, func(*Config) {}, WithLogger(slog.New(noticeHandler{ch: notices})))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +376,7 @@ func TestHotReloadLogsWhichPartitionsChanged(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	f.write(t, "agents/main.md", "---\nmodel: openai/strong\n---\n改了\n")
 
-	var got notice
+	var got reloadNotice
 	deadline := time.After(3 * time.Second)
 	for len(got.changed) == 0 {
 		select {

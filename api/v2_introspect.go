@@ -30,13 +30,13 @@ var startupAt = time.Now().UTC()
 // requireConfig returns the live config or writes 503.
 func (s *Server) requireConfig(c *app.RequestContext) *spec.Config {
 	if s.cfgFn == nil {
-		v2Fail(c, consts.StatusServiceUnavailable, "config_unavailable",
+		s.v2Fail(c, consts.StatusServiceUnavailable, "config_unavailable",
 			"no config source is wired", false)
 		return nil
 	}
 	cfg := s.cfgFn()
 	if cfg == nil {
-		v2Fail(c, consts.StatusServiceUnavailable, "config_unavailable",
+		s.v2Fail(c, consts.StatusServiceUnavailable, "config_unavailable",
 			"config is not loaded yet", true)
 		return nil
 	}
@@ -170,7 +170,7 @@ func (s *Server) v2AgentDetail(_ context.Context, c *app.RequestContext) {
 			return
 		}
 	}
-	v2Fail(c, consts.StatusNotFound, "agent_not_found",
+	s.v2Fail(c, consts.StatusNotFound, "agent_not_found",
 		"agent "+id+" is not declared", false)
 }
 
@@ -351,6 +351,9 @@ type serverView struct {
 	MaxDepth      int    `json:"maxDepth"`
 	WatchEnabled  bool   `json:"watchEnabled"`
 	WatchDebounce string `json:"watchDebounce"`
+	// LogLevel is the level in effect, not the configured value: an env
+	// override has to be visible here or the field lies about the output.
+	LogLevel string `json:"logLevel"`
 }
 
 type configView struct {
@@ -416,6 +419,7 @@ func (s *Server) v2Config(_ context.Context, c *app.RequestContext) {
 			MaxDepth:      cfg.MaxDepth(),
 			WatchEnabled:  cfg.Server.Watch.Enabled == nil || *cfg.Server.Watch.Enabled,
 			WatchDebounce: cfg.Server.Watch.Debounce.Duration().String(),
+			LogLevel:      s.logLevel(),
 		},
 	}
 

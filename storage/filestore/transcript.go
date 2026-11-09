@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/schema"
-
-	"github.com/ouranoshong/openheron/agentkit/obs"
 )
 
 const (
@@ -63,7 +61,7 @@ func (fs *FileSession) transcriptLocked() error {
 		return err
 	}
 	if h.ID != fs.id {
-		obs.Logger().Warn("[session] transcript header id differs from its directory; "+
+		fs.logger().Warn("[session] transcript header id differs from its directory; "+
 			"later appends will go to the header's directory",
 			"session", fs.id, "headerID", h.ID, "path", path)
 	}
@@ -76,7 +74,7 @@ func (fs *FileSession) transcriptLocked() error {
 	msgs, skipped, err := readMessages(sc)
 	fs.messages = msgs
 	if skipped > 0 {
-		obs.Logger().Warn("[session] skipped malformed message lines",
+		fs.logger().Warn("[session] skipped malformed message lines",
 			"session", fs.id, "lines", skipped, "path", path)
 	}
 	return err

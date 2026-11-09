@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"testing"
 
@@ -73,7 +74,7 @@ func newTestBuilder(t *testing.T) *Builder {
 func newTestBuilderWithConfig(t *testing.T, cfg *spec.Config) *Builder {
 	t.Helper()
 	b := NewBuilder(testManager(cfg))
-	b.models = func(context.Context, *spec.Config, string, CallIntent) (
+	b.models = func(context.Context, *spec.Config, string, CallIntent, *slog.Logger) (
 		model.BaseModel[*schema.Message], error) {
 
 		return &stubModel{}, nil

@@ -7,6 +7,7 @@ import (
 	"encoding/gob"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -52,6 +53,10 @@ type Store struct {
 
 	run *persist.FileLock
 
+	// log is injected by the assembly layer. Nil drops the lines, which is
+	// what a test that does not care about them gets.
+	log *slog.Logger
+
 	// mu guards the store's three pieces of state: cat, der and stamp.
 	//
 	// ★ Two rules follow from the scope, and both of them were broken before
@@ -90,7 +95,24 @@ type fileStamp struct {
 	valid bool
 }
 
-func NewStore(dir string) (*Store, error) {
+// Option configures a Store at construction.
+type Option func(*Store)
+
+// WithLogger sets the logger the store writes through.
+func WithLogger(log *slog.Logger) Option {
+	return func(s *Store) { s.log = log }
+}
+
+func (s *Store) logger() *slog.Logger {
+	if s == nil || s.log == nil {
+		return discard
+	}
+	return s.log
+}
+
+var discard = obs.Discard()
+
+func NewStore(dir string, opts ...Option) (*Store, error) {
 	if dir == "" {
 		return nil, fmt.Errorf("kb: store dir must not be empty")
 	}
@@ -102,6 +124,9 @@ func NewStore(dir string) (*Store, error) {
 		return nil, err
 	}
 	s := &Store{dir: dir, run: run, der: Derived{IndexVersion: IndexVersion, Entries: map[string]DerivedEntry{}}}
+	for _, o := range opts {
+		o(s)
+	}
 	if err := s.load(); err != nil {
 		_ = run.Close()
 		return nil, err
@@ -536,7 +561,7 @@ func (s *Store) install(cat Catalog, next Derived, req ReconcileRequest, res *Re
 	s.mu.Unlock()
 
 	if err := s.saveSidecar(); err != nil {
-		obs.Logger().Warn("[kb] sidecar write failed, vectors will be rebuilt next run", "err", err)
+		s.logger().Warn("[kb] sidecar write failed, vectors will be rebuilt next run", "err", err)
 	}
 }
 
@@ -579,7 +604,7 @@ func (s *Store) readCatalog() (Catalog, []string) {
 	}
 	c, err := ParseCatalog(b)
 	if err != nil {
-		obs.Logger().Error("[kb] catalog.md is unreadable, refusing to overwrite it", "err", err)
+		s.logger().Error("[kb] catalog.md is unreadable, refusing to overwrite it", "err", err)
 		return Catalog{Header: Header{IndexVersion: IndexVersion}}, []string{
 			fmt.Sprintf("catalog.md is unreadable: %v", err),
 		}
@@ -632,14 +657,14 @@ func (s *Store) load() error {
 	}
 	var der Derived
 	if err := gob.NewDecoder(bytes.NewReader(sb)).Decode(&der); err != nil {
-		obs.Logger().Warn("[kb] sidecar is unreadable, vectors will be rebuilt next run", "err", err)
+		s.logger().Warn("[kb] sidecar is unreadable, vectors will be rebuilt next run", "err", err)
 		der = Derived{IndexVersion: IndexVersion, Entries: map[string]DerivedEntry{}}
 	}
 	if der.Entries == nil {
 		der.Entries = map[string]DerivedEntry{}
 	}
 	if der.IndexVersion != 0 && der.IndexVersion != IndexVersion {
-		obs.Logger().Warn("[kb] sidecar was written by another build; vectors will be rebuilt",
+		s.logger().Warn("[kb] sidecar was written by another build; vectors will be rebuilt",
 			"written_by_version", der.IndexVersion, "this_build_version", IndexVersion)
 		der = Derived{IndexVersion: IndexVersion, Entries: map[string]DerivedEntry{}}
 	}

@@ -5,17 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/ouranoshong/openheron/agentkit/build"
-	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/kb"
 )
 
-func kbCmd(ctx context.Context, args []string, stdout io.Writer) error {
+func kbCmd(ctx context.Context, args []string, stdout io.Writer, log *slog.Logger) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: openheron kb index [--config-dir <path>] [files...] | openheron kb status")
 	}
@@ -26,7 +26,7 @@ func kbCmd(ctx context.Context, args []string, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		return kbIndex(ctx, rest, configDir, stdout, asJSON)
+		return kbIndex(ctx, rest, configDir, stdout, asJSON, log)
 	case "status":
 		rest, asJSON := splitJSONFlag(args[1:])
 		rest, configDir, err := splitConfigDirFlag(rest)
@@ -96,7 +96,10 @@ type kbEnv struct {
 	headers map[string]string
 }
 
-func assemble(ctx context.Context, configDir string) (*kbEnv, error) {
+func assemble(ctx context.Context, configDir string, log *slog.Logger) (*kbEnv, error) {
+	if log == nil {
+		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
 	svc, err := spec.NewService(configDir, "")
 	if err != nil {
 		return nil, err
@@ -106,7 +109,7 @@ func assemble(ctx context.Context, configDir string) (*kbEnv, error) {
 		return nil, fmt.Errorf("config: load %s: %w", svc.Root(), err)
 	}
 	for _, d := range cfg.Deferred() {
-		obs.Logger().Info("[kb] config notice", "notice", d)
+		log.Info("[kb] config notice", "notice", d)
 	}
 	if cfg.KB.CorpusDir == "" {
 		return nil, fmt.Errorf("kb.corpus_dir is not set in %s/%s.yaml; "+
@@ -118,7 +121,7 @@ func assemble(ctx context.Context, configDir string) (*kbEnv, error) {
 	if err != nil {
 		return nil, err
 	}
-	emb, err := build.NewEmbedder(ctx, p, m)
+	emb, err := build.NewEmbedder(ctx, p, m, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -152,8 +155,9 @@ func assemble(ctx context.Context, configDir string) (*kbEnv, error) {
 	}, nil
 }
 
-func kbIndex(ctx context.Context, paths []string, configDir string, stdout io.Writer, asJSON bool) error {
-	env, err := assemble(ctx, configDir)
+func kbIndex(ctx context.Context, paths []string, configDir string, stdout io.Writer,
+	asJSON bool, log *slog.Logger) error {
+	env, err := assemble(ctx, configDir, log)
 	if err != nil {
 		return err
 	}
@@ -283,7 +287,7 @@ func assembleSearch(ctx context.Context, svc *spec.Service, cfg *spec.Config) (*
 	if err != nil {
 		return nil, err
 	}
-	emb, err := build.NewEmbedder(ctx, p, m)
+	emb, err := build.NewEmbedder(ctx, p, m, nil)
 	if err != nil {
 		return nil, err
 	}

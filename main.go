@@ -8,20 +8,23 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	hserver "github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/cloudwego/hertz/pkg/common/hlog"
 
 	"github.com/cloudwego/eino/callbacks"
 
 	"github.com/ouranoshong/openheron/agentkit/build"
 	"github.com/ouranoshong/openheron/agentkit/obs"
+	hertzlog "github.com/ouranoshong/openheron/agentkit/obs/hertz"
 	"github.com/ouranoshong/openheron/agentkit/obs/hook"
 	"github.com/ouranoshong/openheron/agentkit/run"
 	"github.com/ouranoshong/openheron/agentkit/spec"
@@ -38,17 +41,24 @@ var webAssets embed.FS
 var version = "dev"
 
 func main() {
+	// ★ A bootstrap logger, built before any branch: every early exit has to
+	//   report through the same envelope as the server does. runServer builds
+	//   its own and hands it to the two frameworks.
+	boot, _ := newLogger()
+
 	if len(os.Args) > 1 && os.Args[1] == "kb" {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
-		if err := kbCmd(ctx, os.Args[2:], os.Stdout); err != nil {
-			log.Fatalf("openheron kb: %v", err)
+		if err := kbCmd(ctx, os.Args[2:], os.Stdout, boot); err != nil {
+			boot.Error("openheron kb failed", "err", err)
+			os.Exit(1)
 		}
 		return
 	}
 	if len(os.Args) > 1 && os.Args[1] == "init" {
 		if err := initCmd(os.Args[2:], os.Stdout); err != nil {
-			log.Fatalf("openheron init: %v", err)
+			boot.Error("openheron init failed", "err", err)
+			os.Exit(1)
 		}
 		return
 	}
@@ -65,10 +75,12 @@ func main() {
 			printServerUsage(os.Stdout)
 			return
 		}
-		log.Fatalf("openheron: %v", err)
+		boot.Error("openheron failed", "err", err)
+		os.Exit(1)
 	}
 	if err := runServer(flags); err != nil {
-		log.Fatalf("openheron: %v", err)
+		boot.Error("openheron failed", "err", err)
+		os.Exit(1)
 	}
 }
 
@@ -106,7 +118,7 @@ func printServerUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "Other commands: openheron init, openheron kb, openheron version")
 }
 
-func warnUnusedHomeConfig(root string) {
+func warnUnusedHomeConfig(root string, log *slog.Logger) {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return
@@ -120,7 +132,7 @@ func warnUnusedHomeConfig(root string) {
 	}
 	// The config root is never searched for anymore, so a config in the home
 	// directory is never picked up on its own — it has to be named.
-	obs.Logger().Warn("[main] a config dir exists but is not the config root in use; "+
+	log.Warn("[main] a config dir exists but is not the config root in use; "+
 		"pass --config-dir or set $OPENHERON_CONFIG_DIR to use it",
 		"dir", homeCfg, "root", root)
 }
@@ -146,22 +158,67 @@ func runServer(flags serverFlags) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	installObserver()
+	log, level := installLogger()
 
-	st, err := setupConfig(flags)
+	st, err := setupConfig(flags, log, level)
 	if err != nil {
 		return err
 	}
-	if err := setupRuntime(ctx, st); err != nil {
+	st.log = log
+	st.level = level
+	if err := setupRuntime(ctx, st, log); err != nil {
 		return err
 	}
-	return serve(ctx, st)
+	return serve(ctx, st, log)
 }
 
-func installObserver() {
-	logger := obs.DefaultLogger(os.Stderr)
-	obs.SetLogger(logger)
-	callbacks.AppendGlobalHandlers(hook.New(logger))
+// installLogger builds the process logger and hands it to the two frameworks
+// that keep a process-global registry.
+//
+// ★ The LevelVar is created here and moves later, once the configuration is
+// read. That is why the handler reads a Leveler instead of a fixed level:
+// the logger has to exist before setupConfig can log anything, and its
+// threshold is not known until setupConfig has run.
+// newLogger builds the process logger and its level. It touches no framework:
+// main uses it for the early exits, installLogger adds the registrations.
+func newLogger() (*slog.Logger, *slog.LevelVar) {
+	level := new(slog.LevelVar)
+	// The bootstrap level: the environment only, because no file has been
+	// read yet. applyLogLevel replaces it with env > file > info.
+	if lv, err := obs.LevelFromEnv(); err == nil {
+		level.Set(lv)
+	}
+	return obs.New(os.Stderr, level), level
+}
+
+func installLogger() (*slog.Logger, *slog.LevelVar) {
+	log, level := newLogger()
+
+	// ★ Both registries are process-global and not safe to change once the
+	//   server runs: hlog.SetLogger must precede hserver.New, and eino's
+	//   handler list must be in place before the first turn.
+	hlog.SetLogger(hertzlog.New(log))
+	callbacks.AppendGlobalHandlers(hook.New(log))
+	return log, level
+}
+
+// applyLogLevel resolves env > server/config.yaml > info and moves the shared
+// LevelVar.
+func applyLogLevel(log *slog.Logger, level *slog.LevelVar, c *spec.Config) {
+	value := ""
+	if c != nil {
+		value = c.Server.LogLevel
+	}
+	if env := strings.TrimSpace(os.Getenv(obs.LevelEnv)); env != "" {
+		value = env
+	}
+	parsed, err := obs.ParseLevel(value)
+	if err != nil {
+		// ★ Warn before Set: if the fallback were error, the warning about
+		//   the bad value would be filtered out by the level it explains.
+		log.Warn("[main] log level fell back to info", "value", value, "err", err)
+	}
+	level.Set(parsed)
 }
 
 type startup struct {
@@ -178,9 +235,12 @@ type startup struct {
 	addr        string
 	dataDir     string
 	projectRoot string
+
+	log   *slog.Logger
+	level *slog.LevelVar
 }
 
-func setupConfig(flags serverFlags) (*startup, error) {
+func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar) (*startup, error) {
 	cfgSvc, err := spec.NewService(flags.configDir, flags.projectRoot)
 	if err != nil {
 		return nil, err
@@ -189,27 +249,35 @@ func setupConfig(flags serverFlags) (*startup, error) {
 	//   whatever its own probe resolved. Tell the config layer where that is,
 	//   so a skill written into a directory nobody loads is refused instead
 	//   of saved in silence.
-	if dir, ok := build.ResolveSkillsDir(); ok {
+	if dir, ok := build.ResolveSkillsDir(log); ok {
 		cfgSvc.SetSkillsDir(dir)
 	}
-	warnUnusedHomeConfig(cfgSvc.Root())
-
-	obs.Logger().Info("[main] openheron", "version", version)
-	obs.Logger().Info("[main] config root",
-		"root", cfgSvc.Root(), "projectRoot", cfgSvc.ProjectRoot())
+	warnUnusedHomeConfig(cfgSvc.Root(), log)
 
 	mgr := &agentConfig{}
 	reloader, err := spec.NewReloader(cfgSvc, func(c *spec.Config) {
 		mgr.set(c)
-		obs.Logger().Info("[main] config loaded", "version", short(c.Version))
+		// First: the configuration may name a level, and every line below
+		// should already obey it.
+		applyLogLevel(log, level, c)
+		log.Info("[main] config loaded", "version", short(c.Version))
 		for _, d := range c.Deferred() {
-			obs.Logger().Info("[main] config notice", "notice", d)
+			log.Info("[main] config notice", "notice", d)
 		}
 	})
 	if err != nil {
 		return nil, configLoadError(cfgSvc, err)
 	}
 	cfg, _ := mgr.Current()
+	applyLogLevel(log, level, cfg)
+
+	// ★ After the level is known, not before: these two lines are the "where
+	//   am I" note, and at error level they should be gone like every other
+	//   info line. Printing them first would leave a two-line hole in the
+	//   threshold that no configuration could close.
+	log.Info("[main] openheron", "version", version)
+	log.Info("[main] config root",
+		"root", cfgSvc.Root(), "projectRoot", cfgSvc.ProjectRoot())
 
 	cfgDataDir, err := cfgSvc.DataDir(cfg.Server.DataDir)
 	if err != nil {
@@ -227,7 +295,7 @@ func setupConfig(flags serverFlags) (*startup, error) {
 	}, nil
 }
 
-func setupRuntime(ctx context.Context, st *startup) error {
+func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 	sessionsRoot := filepath.Join(st.dataDir, "sessions")
 
 	// The session manager needs a teardown hook that only exists once the
@@ -280,14 +348,14 @@ func setupRuntime(ctx context.Context, st *startup) error {
 
 	// Inspection depends on both stores, so it runs after wiring and before the
 	// first request.
-	inspectSessions(ctx, st)
+	inspectSessions(ctx, st, log)
 
 	if st.cfg.WatchEnabled() {
 		go st.reloader.Watch(ctx)
-		obs.Logger().Info("[main] hot reload enabled", "watching", st.cfgSvc.DescribeHotDirs())
+		log.Info("[main] hot reload enabled", "watching", st.cfgSvc.DescribeHotDirs())
 	}
 
-	st.srv = api.New(rt, fm, hserver.WithHostPorts(st.addr))
+	st.srv = api.New(rt, fm, log, hserver.WithHostPorts(st.addr))
 	st.srv.SetConfigSource(func() *spec.Config {
 		c, _ := st.mgr.Current()
 		return c
@@ -297,6 +365,9 @@ func setupRuntime(ctx context.Context, st *startup) error {
 	st.srv.SetMCPSource(mcpAdapter{b: builder})
 	st.srv.SetContextSource(contextsAdapter{b: builder})
 	st.srv.SetCompactorSource(compactorAdapter{b: builder})
+	if st.level != nil {
+		st.srv.SetLogLevelSource(func() string { return obs.LevelName(st.level.Level()) })
+	}
 	st.srv.SetStartTimeoutSource(func() time.Duration {
 		c, _ := st.mgr.Current()
 		return startTimeout(c)
@@ -308,7 +379,7 @@ func setupRuntime(ctx context.Context, st *startup) error {
 		}
 	})
 	st.srv.SetSkillsSource(func() []api.SkillView {
-		list := build.Skills(context.Background())
+		list := build.Skills(context.Background(), st.log)
 		out := make([]api.SkillView, 0, len(list))
 		for _, s := range list {
 			out = append(out, api.SkillView{
@@ -322,66 +393,66 @@ func setupRuntime(ctx context.Context, st *startup) error {
 		return out
 	})
 
-	return setupFrontend(st)
+	return setupFrontend(st, log)
 }
 
-func inspectSessions(ctx context.Context, st *startup) {
+func inspectSessions(ctx context.Context, st *startup, log *slog.Logger) {
 	if h, m, size, gen := st.builder.Stats(); st.cfg.WatchEnabled() {
-		obs.Logger().Info("[main] agent pool", "gen", gen, "entries", size, "hits", h, "misses", m)
+		log.Info("[main] agent pool", "gen", gen, "entries", size, "hits", h, "misses", m)
 	}
 
 	report, err := st.fm.Inspect(ctx)
 	if err != nil {
-		obs.Logger().Error("[main] startup inspection failed", "err", err)
+		log.Error("[main] startup inspection failed", "err", err)
 		return
 	}
-	obs.Logger().Info("[main] inspection",
+	log.Info("[main] inspection",
 		"clean", report.Clean, "pending", report.PendingOK, "orphan", report.Orphan,
 		"ownerless", report.Ownerless, "skipped", report.SkippedBadJSON)
 	if report.Orphan > 0 {
-		obs.Logger().Warn("[main] sessions hold a pending approval with no checkpoint; "+
+		log.Warn("[main] sessions hold a pending approval with no checkpoint; "+
 			"the card stays visible but the round cannot be resumed",
 			"count", report.Orphan)
 	}
 	if report.Ownerless > 0 {
-		obs.Logger().Warn("[main] sessions hold a checkpoint with no pending approval and cannot be resumed",
+		log.Warn("[main] sessions hold a checkpoint with no pending approval and cannot be resumed",
 			"count", report.Ownerless)
 	}
 }
 
-func setupFrontend(st *startup) error {
+func setupFrontend(st *startup, log *slog.Logger) error {
 	mode := override("FRONTEND_MODE", st.cfg.Server.FrontendMode)
 	assets, aerr := fs.Sub(webAssets, "web/dist")
 
 	switch mode {
 	case "embed", "":
 		if aerr != nil || !webui.Available(assets) {
-			obs.Logger().Warn("[main] frontend disabled: no web/dist build found; run `task web` to embed the UI")
+			log.Warn("[main] frontend disabled: no web/dist build found; run `task web` to embed the UI")
 			return nil
 		}
 		if err := st.srv.SetEmbeddedFrontend(assets, "/"); err != nil {
 			return err
 		}
-		obs.Logger().Info("[main] frontend: embedded from web/dist")
+		log.Info("[main] frontend: embedded from web/dist")
 	case "dir":
 		dir := st.cfgSvc.ResolveDir(override("STATIC_DIR", st.cfg.Server.StaticDir))
 		if dir == "" {
-			obs.Logger().Warn("[main] frontend_mode=dir but static_dir is empty; set STATIC_DIR")
+			log.Warn("[main] frontend_mode=dir but static_dir is empty; set STATIC_DIR")
 			return nil
 		}
 		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
-			obs.Logger().Warn("[main] static dir does not exist, frontend disabled", "dir", dir)
+			log.Warn("[main] static dir does not exist, frontend disabled", "dir", dir)
 			return nil
 		}
 		st.srv.SetStaticDir(dir)
-		obs.Logger().Info("[main] frontend: static dir", "dir", dir)
+		log.Info("[main] frontend: static dir", "dir", dir)
 	default:
-		obs.Logger().Warn("[main] unknown frontend_mode; expected embed or dir", "mode", mode)
+		log.Warn("[main] unknown frontend_mode; expected embed or dir", "mode", mode)
 	}
 	return nil
 }
 
-func serve(ctx context.Context, st *startup) error {
+func serve(ctx context.Context, st *startup, log *slog.Logger) error {
 	errCh := make(chan error, 1)
 	go func() { errCh <- st.srv.Spin() }()
 
@@ -389,11 +460,11 @@ func serve(ctx context.Context, st *startup) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		obs.Logger().Info("[main] shutting down")
+		log.Info("[main] shutting down")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := st.rt.Shutdown(shutdownCtx); err != nil {
-			obs.Logger().Error("[main] shutdown failed", "err", err)
+			log.Error("[main] shutdown failed", "err", err)
 		}
 		// ★ The MCP clients outlive the snapshot, so something has to end
 		//   them: the process is going away, and a stdio child is a

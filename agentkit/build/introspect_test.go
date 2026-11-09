@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"testing"
 
@@ -241,7 +242,7 @@ func TestNewGenerationRebindsTheChatModel(t *testing.T) {
 	cfg.Agents[spec.DefaultAgentID].ModelRef = "ref/a"
 	b := newTestBuilderWithConfig(t, cfg)
 	b.models = func(_ context.Context, _ *spec.Config, ref string,
-		_ CallIntent) (model.BaseModel[*schema.Message], error) {
+		_ CallIntent, _ *slog.Logger) (model.BaseModel[*schema.Message], error) {
 
 		switch ref {
 		case "ref/a":

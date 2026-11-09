@@ -9,7 +9,7 @@ import (
 )
 
 func TestARunRowNamesTheMCPServersItTouched(t *testing.T) {
-	row := newRunRow(nil, storage.Run{RunID: "r1", SessionID: "s1"})
+	row := newRunRow(nil, storage.Run{RunID: "r1", SessionID: "s1"}, nil)
 	row.noteMCPServers([]string{"github", "files"})
 
 	if len(row.run.MCPServers) != 2 {

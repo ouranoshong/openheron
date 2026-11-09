@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -103,8 +104,26 @@ func (c *Config) WatchEnabled() bool {
 	return *c.Server.Watch.Enabled
 }
 
+// Option configures a Reloader.
+type Option func(*Reloader)
+
+// WithLogger sets the logger the watcher writes through. Nil drops the lines.
+func WithLogger(log *slog.Logger) Option {
+	return func(r *Reloader) { r.log = log }
+}
+
+var discard = obs.Discard()
+
+func (r *Reloader) logger() *slog.Logger {
+	if r == nil || r.log == nil {
+		return discard
+	}
+	return r.log
+}
+
 type Reloader struct {
 	svc *Service
+	log *slog.Logger
 
 	mu      sync.RWMutex
 	loaded  *Config
@@ -113,8 +132,11 @@ type Reloader struct {
 	onChange func(*Config)
 }
 
-func NewReloader(svc *Service, onChange func(*Config)) (*Reloader, error) {
+func NewReloader(svc *Service, onChange func(*Config), opts ...Option) (*Reloader, error) {
 	r := &Reloader{svc: svc, onChange: onChange}
+	for _, o := range opts {
+		o(r)
+	}
 	if _, err := r.Reload(); err != nil {
 		return nil, err
 	}
@@ -194,9 +216,10 @@ func (r *Reloader) Watch(ctx context.Context) {
 		prev = cur
 
 		if cfg, err := r.Reload(); err != nil {
-			LogReloadFailed(err)
+			r.logger().Error("[config] hot reload failed, keeping previous config", "err", err)
 		} else {
-			LogReloaded(cfg.Version, changedDirs(before, cur))
+			r.logger().Info("[config] hot reload applied",
+				"version", cfg.Version, "changed", strings.Join(changedDirs(before, cur), ","))
 		}
 		timer.Reset(poll)
 	}
@@ -223,15 +246,6 @@ func changedDirs(before, after map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-var LogReloaded = func(version string, changed []string) {
-	obs.Logger().Info("[config] hot reload applied",
-		"version", version, "changed", strings.Join(changed, ","))
-}
-
-var LogReloadFailed = func(err error) {
-	obs.Logger().Error("[config] hot reload failed, keeping previous config", "err", err)
 }
 
 func (s *Service) DescribeHotDirs() string {

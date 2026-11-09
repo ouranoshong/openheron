@@ -99,12 +99,12 @@ handler cannot produce it (its envelope is a list of attributes, and the source 
 another attribute). ★ The file and the line are the **caller's**: slog captures the call
 site's program counter in the record, and that is what the handler prints.
 
-**The only exception is `llm/common`** — it is a leaf package with zero openheron
-dependencies, and importing `obs` there would break the "the protocol layer does not
-depend on the runtime" rule, so it uses the standard logger with the same flags
-(`llm/common/logging.go`). Its lines have the same envelope but **no level tag**:
-that package has no levels. Any openheron-internal import inside `llm/common` is a
-regression.
+**There is no exception any more.** `llm/common` used to write the request log with the
+standard logger; that code moved to `agentkit/obs/httplog`, so the leaf logs nothing and every
+line carries a level. Any openheron-internal import inside `llm/common` is still a regression.
+
+★ The composition root builds the logger around a shared `slog.LevelVar` and passes it down.
+There is no global logger: a package that logs takes a `*slog.Logger` parameter.
 
 **(2) Declaration and behaviour are separate.** `agentkit/spec/decl` holds only plain
 structs and imports no other package; `agentkit/spec` holds the behaviour (loading,

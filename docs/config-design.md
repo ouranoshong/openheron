@@ -361,9 +361,11 @@ server 侧那五个走同一个辅助函数 —— `override`（`main.go:459`）
 
 ★ 另有两个环境变量，**不在上表里**，因为它们不碰配置：
 
-- `OPENHERON_LOG_LEVEL`（`agentkit/obs/logger.go:11`，读于 `agentkit/obs/logger.go:50`）—— 日志级别；
-- `OPENHERON_LOG_LLM_REQUESTS`（`llm/common/logging.go:16`，读于 `llm/common/logging.go:81`）——
-  是否打印请求体。
+- `OPENHERON_LOG_LEVEL`（`agentkit/obs/logger.go:11`，读于 `agentkit/obs/logger.go:71`）——
+  日志级别；它**覆盖** `server/config.yaml` 的 `log_level`（见 §6.4）；
+- `OPENHERON_LOG_LLM_REQUESTS`（`agentkit/obs/httplog/logging.go:25`，读于
+  `agentkit/obs/httplog/logging.go:103`）—— 是否打印请求体。★ 请求体本身现在还要
+  `log_level: debug` 才可见：这个变量只决定「读不读、脱不脱敏」。
 
 ★ 还有第三组确实从环境变量读配置，但**不在主路径上**：`MODEL_TYPE`、`MODEL_TIMEOUT`、
 `MODEL_EXTRA_JSON`、`OPENAI_BASE_URL`、`OPENAI_API_KEY`、`OPENAI_MODEL`、`OPENAI_MODEL_ID`、
@@ -1323,12 +1325,17 @@ agent 能不能用它」。一个工具可以是 `allow` 而仍然不在某个 a
 进程自身的配置。**它不进热更新** —— 改了要重启（见 §8）。server 分区带着 `hot: false`
 （`agentkit/spec/config.go:51-55`），配置编辑器干脆不写它（`agentkit/spec/write.go:74-77`）。
 
+★ `log_level` 默认 `info`，取值 `debug` / `info` / `warn` / `error`，由 `OPENHERON_LOG_LEVEL`
+覆盖。非法值不致命：`loadServer` 归一为 `info` 并记一条 `deferred`（`agentkit/spec/load.go`
+的 `normalizeLogLevel`）。和 `server/` 的其余字段一样，它改了要重启。
+
 ```yaml
 # The process's own configuration.
 listen_addr: ":8080"        # ★ it must be quoted: a value starting with : parses ambiguously
 frontend_mode: embed        # embed | dir — the UI compiled into the binary, or a directory on disk
 static_dir: web/dist        # relative to the **project root** (not the config root, not cwd)
 data_dir: state             # relative to the **config root**; an empty string means state/
+log_level: info             # debug | info | warn | error; $OPENHERON_LOG_LEVEL overrides it
 
 start_timeout: 60s          # the cap on one turn, from submission to entering the running state
                             # ⚠️ a lenient duration (see "durations come in two tiers" below)
@@ -1380,6 +1387,7 @@ string，只看 `Decode` 的错误会漏掉它（`agentkit/spec/decl/decl.go:584
 | `frontend_mode` | `string` | `embed` | `embed` 服务编译进二进制的界面；`dir` 服务磁盘上的一个目录，`static_dir` 指向它。值不认识时只记一条告警，前端不启用（`main.go:330-354`） |
 | `static_dir` | `string` | `web/dist` | 相对**项目根** `<root>` 解析（`Service.ResolveDir`），非 cwd、非配置根；只在 `frontend_mode: dir` 时才被读 |
 | `data_dir` | `string` | `state` | 相对**配置根**解析（`Service.DataDir`），非项目根、非 cwd；空串等同 `state`；目录不存在时创建 |
+| `log_level` | `string` | `info` | `debug` `info` `warn` `error`；非法值回退 `info` 并记 `deferred`；由 `OPENHERON_LOG_LEVEL` 覆盖 |
 | `start_timeout` | `LenientDuration` | `60s` | 与 `agentkit/run.DefaultStartTimeout` 同值（`agentkit/run/runtime.go:26`） |
 | `lease_ttl` | `LenientDuration` | `10m` | 一个 run 的租约在无进展的情况下能存活多久；它必须**长于 provider 自己的超时**，否则一个慢但活着的模型会在思考途中被 fence 掉（`agentkit/run/lease.go:20`） |
 | `retry.max_retries` | `int` | `5` | 传 0 也用默认 ——「不配」与「配成 0」是两件事（`agentkit/spec/load.go:448-453`） |

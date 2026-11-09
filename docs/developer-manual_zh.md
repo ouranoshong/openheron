@@ -92,10 +92,12 @@ openheron/
 handler 拼不出来（它的信封是一串属性，源码也只是又一个属性）。★ 文件与行号是**调用点**
 的：slog 把调用点的程序计数器记在记录里，handler 打印的就是它。
 
-**唯一的例外是 `llm/common`** —— 它是零 openheron 依赖的叶子包，
-引 `obs` 就破了「协议层不依赖运行时」这条铁律，所以它用带同样 flag 的标准 logger
-（`llm/common/logging.go`）。它那几行信封相同，但**没有级别标签**：那个包没有级别。
-`llm/common` 里出现任何一处 openheron 内部 import 都算回归。
+**已经没有例外了。** `llm/common` 原来用标准 logger 打请求日志，那段代码搬到了
+`agentkit/obs/httplog`，所以这个叶子包一行日志都没有，每一行都带级别。
+`llm/common` 里出现任何一处 openheron 内部 import 都仍然算回归。
+
+★ 组合根围绕一个共享的 `slog.LevelVar` 建 logger，并逐层传下去。没有全局 logger：
+需要记日志的包接收一个 `*slog.Logger` 形参。
 
 **（二）声明与行为分离。** `agentkit/spec/decl` 只放纯结构体，不引任何其它包；
 `agentkit/spec` 放行为（装载、校验、重载、写入）。

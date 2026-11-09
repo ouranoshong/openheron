@@ -448,12 +448,15 @@ allows: [read_issue, list_issues]
 | `start_timeout` | `60s` | 启动超时 |
 | `lease_ttl` | `10m` | 一轮在没有进展的情况下能持有多久的租约——**必须长于 provider 自己的超时** |
 | `agent.max_depth` | `1` | 委派深度上限 |
+| `log_level` | `info` | `debug`、`info`、`warn`、`error` —— 决定哪些行会进输出 |
 
 ★ **`server/` 不热重载** —— 改了要重启才生效。所以配置编辑器里它是**只读**的，
 提交会报 `section "server" is not editable`。
 
 以下环境变量可以覆盖进程参数，优先级高于配置文件：
-`LISTEN_ADDR`、`DATA_DIR`、`PROJECT_ROOT`、`FRONTEND_MODE`、`STATIC_DIR`。
+`LISTEN_ADDR`、`DATA_DIR`、`PROJECT_ROOT`、`FRONTEND_MODE`、`STATIC_DIR`、`OPENHERON_LOG_LEVEL`。
+
+★ `log_level` 不是这四个之一时回退 `info`；配置的 `deferred` 提示里带着原因。
 
 ### 4.6 技能（`skills/`）
 

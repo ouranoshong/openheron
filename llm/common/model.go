@@ -61,7 +61,9 @@ func New(ctx context.Context, c *Config) (*ChatModel, error) {
 	if hc == nil {
 		hc = &http.Client{Timeout: c.Timeout}
 	}
-	hc = WrapHTTPClient(hc, c.ProviderID)
+	// ★ The client arrives already wrapped by the assembly layer
+	// (agentkit/obs/httplog). Request logging is observation, not protocol,
+	// and this package keeps zero openheron dependencies.
 
 	cli, err := acl.NewClient(ctx, &acl.Config{
 		APIKey:      c.APIKey,

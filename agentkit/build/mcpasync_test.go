@@ -53,7 +53,8 @@ type blockedStart struct {
 // Starts is how many times the start was tried.
 func (s *blockedStart) Starts() int32 { return atomic.LoadInt32(&s.starts) }
 
-func (s *blockedStart) start(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error) {
+func (s *blockedStart) start(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg,
+	_ *slog.Logger) (mcpClient, error) {
 	atomic.AddInt32(&s.starts, 1)
 	<-s.release
 	return &fakeMCPClient{tools: []string{"read_issue"}}, nil
@@ -143,9 +144,8 @@ func TestTheProviderDoesNotWarnWhileAServerIsStarting(t *testing.T) {
 	b.mcp.start = blocked.start
 
 	var buf strings.Builder
-	old := obs.Logger()
-	obs.SetLogger(slog.New(obs.NewHandler(&buf, slog.LevelDebug)))
-	defer obs.SetLogger(old)
+	b.log = slog.New(obs.NewHandler(&buf, slog.LevelDebug))
+	b.mcp.log = b.log
 
 	if _, err := b.tools.Build(context.Background(), toolEnv{cfg: cfg}); err != nil {
 		t.Fatalf("the provider must not fail on a server that is starting: %v", err)
@@ -190,7 +190,7 @@ func TestAFailedStartIsRetriedAfterTheBackoff(t *testing.T) {
 	b := newTestBuilderWithConfig(t, cfg)
 
 	var starts int32
-	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg) (mcpClient, error) {
+	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg, *slog.Logger) (mcpClient, error) {
 		atomic.AddInt32(&starts, 1)
 		return nil, errors.New("the command is not on the PATH")
 	}

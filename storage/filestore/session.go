@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,6 +52,7 @@ type FileSession struct {
 	createdAt time.Time
 	updatedAt time.Time
 	root      string
+	log       *slog.Logger
 
 	ckpt *fileCheckpointStore
 	// ledger is this session's run ledger. It lives next to the transcript,
@@ -68,6 +70,25 @@ type FileSession struct {
 	count     int
 	agentID   string
 	decisions []storage.ApprovalRecord
+}
+
+// setLog installs the logger on the session and the two stores that live
+// inside it. Construction-time only: nothing else holds the session yet.
+func (fs *FileSession) setLog(log *slog.Logger) {
+	fs.log = log
+	if fs.ckpt != nil {
+		fs.ckpt.log = log
+	}
+	if fs.ledger != nil {
+		fs.ledger.log = log
+	}
+}
+
+func (fs *FileSession) logger() *slog.Logger {
+	if fs == nil || fs.log == nil {
+		return discard
+	}
+	return fs.log
 }
 
 // newSession assembles a session object without touching the disk.

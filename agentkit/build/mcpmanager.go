@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sort"
@@ -43,6 +44,7 @@ const mcpRelistInterval = 30 * time.Second
 type mcpManager struct {
 	mu      sync.Mutex
 	entries map[string]*mcpEntry
+	log     *slog.Logger
 
 	// start creates the client of one server.
 	//
@@ -56,7 +58,7 @@ type mcpManager struct {
 	//   lifetime context bounds the **child process**. The client outlives
 	//   the start that created it, so a child spawned under the start's
 	//   deadline would be killed the moment the start returned.
-	start func(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error)
+	start func(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg, log *slog.Logger) (mcpClient, error)
 
 	// bump moves the generation when the tool surface changes.
 	//
@@ -74,13 +76,17 @@ type mcpManager struct {
 	cancel context.CancelFunc
 }
 
-func newMCPManager() *mcpManager {
+func newMCPManager(log *slog.Logger) *mcpManager {
 	ctx, cancel := context.WithCancel(context.Background())
+	if log == nil {
+		log = obs.Discard()
+	}
 	return &mcpManager{
 		entries: map[string]*mcpEntry{},
 		start:   startMCPClient,
 		ctx:     ctx,
 		cancel:  cancel,
+		log:     log,
 	}
 }
 
@@ -143,7 +149,7 @@ func (m *mcpManager) entry(name string) *mcpEntry {
 		// ★ The entry tells the manager when the surface changed: the
 		//   job that brings a server up does not know what a generation
 		//   is, and the manager does.
-		e = &mcpEntry{name: name, onChange: m.bumpGeneration}
+		e = &mcpEntry{name: name, onChange: m.bumpGeneration, log: m.log}
 		m.entries[name] = e
 	}
 	return e
@@ -244,6 +250,7 @@ func (m *mcpManager) Close() {
 // mcpEntry is one server's client and its state.
 type mcpEntry struct {
 	name string
+	log  *slog.Logger
 
 	// mu guards the entry's own state.
 	mu          sync.Mutex
@@ -394,7 +401,7 @@ func (e *mcpEntry) stale() bool {
 //	stale, and a hot partition whose resources are not rebuilt lies about
 //	being hot.
 func (e *mcpEntry) dispatch(ctx context.Context, cfg *decl.MCPServerCfg,
-	start func(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error)) {
+	start func(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg, log *slog.Logger) (mcpClient, error)) {
 
 	e.startMu.Lock()
 	defer e.startMu.Unlock()
@@ -428,7 +435,7 @@ func (e *mcpEntry) dispatch(ctx context.Context, cfg *decl.MCPServerCfg,
 	e.err = nil
 	e.mu.Unlock()
 
-	obs.Logger().Info("[mcp] the server is starting",
+	e.log.Info("[mcp] the server is starting",
 		"server", cfg.Name, "transport", cfg.Transport)
 
 	go e.runStart(life, cancel, cfg, want, start)
@@ -449,7 +456,7 @@ func (e *mcpEntry) dispatch(ctx context.Context, cfg *decl.MCPServerCfg,
 //	not have is exactly the change that has to move the generation.
 func (e *mcpEntry) runStart(life context.Context, cancel context.CancelFunc,
 	cfg *decl.MCPServerCfg, want string,
-	start func(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error)) {
+	start func(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg, log *slog.Logger) (mcpClient, error)) {
 
 	opCtx, opCancel := context.WithTimeout(life, mcpStartTimeout(cfg))
 	defer opCancel()
@@ -458,7 +465,7 @@ func (e *mcpEntry) runStart(life context.Context, cancel context.CancelFunc,
 	prev := append([]string(nil), e.tools...)
 	e.mu.Unlock()
 
-	cli, err := start(opCtx, life, cfg)
+	cli, err := start(opCtx, life, cfg, e.log)
 	var names []string
 	if err == nil {
 		names, err = e.listClient(opCtx, cli, cfg.Transport == decl.MCPTransportStdio)
@@ -484,12 +491,12 @@ func (e *mcpEntry) runStart(life context.Context, cancel context.CancelFunc,
 	if err != nil {
 		// ★ The child is over: a failed start leaves no process behind.
 		cancel()
-		obs.Logger().Warn("[mcp] the server did not start",
+		e.log.Warn("[mcp] the server did not start",
 			"server", cfg.Name, "transport", cfg.Transport, "err", err)
 		return
 	}
 
-	obs.Logger().Info("[mcp] the server is up",
+	e.log.Info("[mcp] the server is up",
 		"server", cfg.Name, "transport", cfg.Transport, "tools", len(names))
 
 	if changed && e.onChange != nil {
@@ -663,10 +670,10 @@ func sameStrings(a, b []string) bool {
 //	tool list. A failure to initialize is the same failure as an
 //	unreachable server — the server does not contribute tools, and it says
 //	so.
-func startMCPClient(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error) {
+func startMCPClient(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg, log *slog.Logger) (mcpClient, error) {
 	switch cfg.Transport {
 	case decl.MCPTransportStdio:
-		return startStdioClient(opCtx, lifeCtx, cfg)
+		return startStdioClient(opCtx, lifeCtx, cfg, log)
 	case decl.MCPTransportHTTP:
 		return startHTTPClient(opCtx, cfg)
 	default:
@@ -699,7 +706,7 @@ const mcpTeardownGrace = 5 * time.Second
 // ★ The command is resolved in the sandbox's PATH, never against the
 //
 //	project root: the workspace must not get to choose what runs.
-func startStdioClient(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (mcpClient, error) {
+func startStdioClient(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg, log *slog.Logger) (mcpClient, error) {
 	env := mcpChildEnv(cfg)
 
 	opCtx, cancel := context.WithTimeout(opCtx, mcpStartTimeout(cfg))
@@ -739,8 +746,8 @@ func startStdioClient(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (m
 		//	★ The server does not contribute tools and the build goes on
 		//	without it — the caller reports it as unreachable, and the
 		//	tools it would have brought are simply not there.
-		killMCPChild(child)
-		closeMCPClient(tr)
+		killMCPChild(child, log)
+		closeMCPClient(tr, log)
 		return nil, err
 	}
 	return cli, nil
@@ -752,12 +759,12 @@ func startStdioClient(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg) (m
 //
 //	child to leave, and a child that is busy installing has no reason to
 //	look at its stdin.
-func killMCPChild(cmd *exec.Cmd) {
+func killMCPChild(cmd *exec.Cmd, log *slog.Logger) {
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
 	if err := cmd.Process.Kill(); err != nil {
-		obs.Logger().Warn("[mcp] the child did not die",
+		log.Warn("[mcp] the child did not die",
 			"pid", cmd.Process.Pid, "err", err)
 	}
 }
@@ -768,7 +775,7 @@ func killMCPChild(cmd *exec.Cmd) {
 //
 //	already dead, so the wait is short — but a child that ignores the kill
 //	must not turn a failed server into a failed turn.
-func closeMCPClient(tr *transport.Stdio) {
+func closeMCPClient(tr *transport.Stdio, log *slog.Logger) {
 	done := make(chan struct{})
 	go func() {
 		_ = tr.Close()
@@ -777,7 +784,7 @@ func closeMCPClient(tr *transport.Stdio) {
 	select {
 	case <-done:
 	case <-time.After(mcpTeardownGrace):
-		obs.Logger().Warn("[mcp] the teardown did not finish in time",
+		log.Warn("[mcp] the teardown did not finish in time",
 			"grace", mcpTeardownGrace.String())
 	}
 }

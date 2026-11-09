@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -81,7 +82,7 @@ func TestAServerTheAgentDoesNotUseIsUnusedAndHasNoToolRows(t *testing.T) {
 
 func TestAnUnreachableServerReportsTheErrorAndKeepsItsLastListing(t *testing.T) {
 	b := newTestBuilderWithConfig(t, mcpViewConfig([]string{"github", "files"}))
-	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg) (mcpClient, error) {
+	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg, *slog.Logger) (mcpClient, error) {
 		return nil, errors.New("the command is not on the PATH")
 	}
 
@@ -132,7 +133,7 @@ func TestTheReasonIsTheToolRuleWhenTheServerIsThere(t *testing.T) {
 	b := newTestBuilderWithConfig(t, cfg)
 	// ★ The server has to be up for the question to be about the agent's
 	//   list: a server that is not up has no tools to argue about.
-	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg) (mcpClient, error) {
+	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg, *slog.Logger) (mcpClient, error) {
 		return &fakeMCPClient{tools: []string{"read_issue"}}, nil
 	}
 
@@ -161,7 +162,7 @@ func TestThePanelAsksTheManagerAndTheManagerStartsTheServer(t *testing.T) {
 	// ★ The counter is atomic: the starts are background jobs, and two
 	//   servers come up at once.
 	var started int32
-	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg) (mcpClient, error) {
+	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg, *slog.Logger) (mcpClient, error) {
 		atomic.AddInt32(&started, 1)
 		return &fakeMCPClient{tools: []string{"read_issue"}}, nil
 	}
@@ -207,7 +208,7 @@ func TestThePanelShowsTheTierTheGateWouldUse(t *testing.T) {
 	cfg := mcpViewConfig(list)
 	cfg.MCPs["github"].Allows = []string{"read_issue"}
 	b := newTestBuilderWithConfig(t, cfg)
-	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg) (mcpClient, error) {
+	b.mcp.start = func(context.Context, context.Context, *decl.MCPServerCfg, *slog.Logger) (mcpClient, error) {
 		return &fakeMCPClient{tools: []string{"read_issue", "delete_repo"}}, nil
 	}
 

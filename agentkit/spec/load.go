@@ -3,6 +3,7 @@ package spec
 import (
 	"errors"
 	"fmt"
+	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"path/filepath"
 	"slices"
@@ -141,8 +142,34 @@ func (c *Config) loadServer(file string, data []byte) error {
 	if err := decodeStrict(data, &s); err != nil {
 		return err
 	}
+	// ★ A malformed level is not fatal: the process still has to start, so
+	//   it falls back to info and says so in deferred — the same rule as
+	//   frontend_mode. The normalised value is what the effective config
+	//   carries, so nothing downstream re-parses a spelling.
+	level, err := normalizeLogLevel(s.LogLevel)
+	if err != nil {
+		c.deferKey("log_level fell back to info: %v", err)
+	}
+	s.LogLevel = level
 	c.Server = s
 	return nil
+}
+
+// normalizeLogLevel returns the canonical spelling, or info plus the reason.
+func normalizeLogLevel(s string) (string, error) {
+	if _, err := obs.ParseLevel(s); err != nil {
+		return "info", err
+	}
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "debug":
+		return "debug", nil
+	case "warn", "warning":
+		return "warn", nil
+	case "error":
+		return "error", nil
+	default:
+		return "info", nil
+	}
 }
 
 // toolHints name what each tools/ file must carry.

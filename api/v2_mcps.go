@@ -82,7 +82,7 @@ func (s *Server) v2MCPServers(ctx context.Context, c *app.RequestContext) {
 		agent = cfg.DefaultAgent()
 	}
 	if _, ok := cfg.Agents[agent]; !ok {
-		v2Fail(c, consts.StatusNotFound, "agent_not_found",
+		s.v2Fail(c, consts.StatusNotFound, "agent_not_found",
 			"agent "+agent+" is not declared", false)
 		return
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -14,7 +15,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
@@ -222,18 +222,18 @@ func (p mcpToolProvider) Provide(ctx context.Context, env toolEnv) ([]tool.BaseT
 			if errors.Is(err, errMCPStarting) || errors.Is(err, errMCPNotStarted) {
 				continue
 			}
-			obs.Logger().Warn("[mcp] the server is unreachable",
+			env.logger().Warn("[mcp] the server is unreachable",
 				"server", name, "transport", scfg.Transport, "err", err)
 			continue
 		}
-		out = append(out, p.mount(ctx, scfg, cli, own)...)
+		out = append(out, p.mount(ctx, scfg, cli, own, env.logger())...)
 	}
 	return out, nil
 }
 
 // mount turns one server's tools into eino tools.
 func (p mcpToolProvider) mount(ctx context.Context, cfg *decl.MCPServerCfg,
-	cli mcpClient, own []string) []tool.BaseTool {
+	cli mcpClient, own []string, log *slog.Logger) []tool.BaseTool {
 
 	plan := mcpPlan(cfg, own)
 
@@ -241,12 +241,12 @@ func (p mcpToolProvider) mount(ctx context.Context, cfg *decl.MCPServerCfg,
 		if t.Reason == "" {
 			continue
 		}
-		obs.Logger().Warn("[mcp] tool skipped",
+		log.Warn("[mcp] tool skipped",
 			"server", cfg.Name, "tool", t.Own, "exposed", t.Exposed, "reason", t.Reason)
 	}
 	for _, want := range cfg.Tools {
 		if !containsString(own, want) {
-			obs.Logger().Warn("[mcp] the file asks for a tool the server does not have",
+			log.Warn("[mcp] the file asks for a tool the server does not have",
 				"server", cfg.Name, "tool", want, "offers", strings.Join(own, ","))
 		}
 	}
@@ -268,7 +268,7 @@ func (p mcpToolProvider) mount(ctx context.Context, cfg *decl.MCPServerCfg,
 		ToolCallResultHandler: capMCPToolResult(defaultToolOutputBytes),
 	})
 	if err != nil {
-		obs.Logger().Warn("[mcp] the server's tools could not be read",
+		log.Warn("[mcp] the server's tools could not be read",
 			"server", cfg.Name, "transport", cfg.Transport, "err", err)
 		return nil
 	}

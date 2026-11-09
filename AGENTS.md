@@ -15,7 +15,7 @@ one — change one and change the other.
 > `docs/user-manual.md` / `docs/user-manual_zh.md` (user guide),
 > `docs/developer-manual.md` / `docs/developer-manual_zh.md` (developer guide).
 >
-> **and eight Chinese-only documents** under `docs/` — the architecture and code-design
+> **and nine Chinese-only documents** under `docs/` — the architecture and code-design
 > ones. ★ Their Chinese content **took over the plain name**: `docs/config-design.md`
 > **is** the Chinese document — there is no `_zh` twin and no English one:
 > `docs/context-usage-design.md` (context-usage estimation design),
@@ -26,9 +26,12 @@ one — change one and change the other.
 > `docs/mcp-design.md` (MCP integration design),
 > `docs/config-design.md` (configuration system design),
 > `docs/tool-surface-design.md` (the tool surface — which tools an agent gets, and how
-> the configuration is administered).
+> the configuration is administered),
+> `docs/logging-design.md` (logging assembly refactor — **implemented**: a mutable level,
+> `log_level`, a composition-root logger, the hertz adapter, and the request log moved out
+> of `llm/common`).
 > **Every other design document under `docs/` still lives in the upstream repository** ——
-> any `docs/xxx.md` reference below that is not one of these twelve, is the upstream copy.
+> any `docs/xxx.md` reference below that is not one of these thirteen, is the upstream copy.
 > If you cannot get hold of it before changing semantics, ask first; do not change
 > configuration or interfaces from memory.
 >
@@ -80,6 +83,11 @@ one — change one and change the other.
 > (§6.7) and the tier that lives with the tool (§6.6) are implemented. ★ The prefix matching
 > in a **global deny** (§6.3) is gone with the deny list itself: "not exposed" is said by a
 > file's `allows:` and by an agent's `tools`.
+>
+> ★ `docs/logging-design.md` **is implemented**: the mutable level, `log_level`, the
+> composition root, the hertz adapter, the per-module injection and moving the request log
+> out of `llm/common` are all in the tree. §1 is the pre-change snapshot, kept to explain
+> why. It is a new Chinese-only document — unlike the eight above, it never had an English twin.
 >
 > ★ One directory is not a document set: **`sandbox-kit/`** holds the Docker Sandbox Kits that
 > package openheron as a sandbox workload — `openheron/` (the workload: descriptor, content
@@ -176,9 +184,14 @@ Do not call `log.Printf` / `fmt.Fprintln(os.Stderr)` directly in business packag
 (Info / Warn / Error) and the prefix are defined in one place, and the level decides whether a
 line shows up in the default output.
 
-There is exactly one exception: `llm/common` uses the standard logger — it is a leaf package with
-zero openheron dependencies, and importing `obs` would break that iron rule
-(`docs/architecture.md` §2.1, "the two dependency iron rules").
+There is no exception any more. `llm/common` used to write the request log with the standard
+logger; that code moved to `agentkit/obs/httplog` (`docs/logging-design.md` §6), so the leaf
+now logs nothing at all. Any openheron-internal import inside `llm/common` is still a regression.
+
+★ **There is no global logger.** `main.installLogger` builds one `*slog.Logger` around a shared
+`slog.LevelVar` and hands it to the frameworks and to every constructor. A package that needs to
+log takes a `*slog.Logger` parameter and defaults it to `obs.Discard()`; it does not reach for a
+package-level variable.
 
 ## Other conventions
 
@@ -419,6 +432,7 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 | `docs/mcp-design.md` | **MCP integration design** — the tool assembly path, what an MCP client adds to it, the `mcp__<server>__<tool>` namespace, prefix matching in the tool tables, and where an MCP server would run inside the Kit (**implemented**; §13 — the non-blocking start — is implemented too; §8 — how a sandbox Kit packages an MCP server — is still a proposal) |
 | `docs/config-design.md` | **Configuration system design** — the config root and its three levels, the partitions and their file specs, loading and precedence, hot reload, and the dependency iron rules (**the body describes the code as it is**; the `mcps/` partition and the tier that lives with the tool are implemented) |
 | `docs/tool-surface-design.md` | **Tool-surface design** — what tools an agent gets (`tools:` / `mcps:` / `skills:`), the MCP namespace's three segments, the configuration surface collapsed into one core, and the six `config_*` tools (**§2-§5 are implemented**) |
+| `docs/logging-design.md` | **Logging assembly refactor — design** — the composition root, a mutable `log_level`, injected loggers, taking over hertz's log output, and moving the request log out of `llm/common` (**a proposal, not implemented**) |
 
 ★ For the bilingual set, the file without a suffix is the **English main version**; `_zh` is the
 Chinese version; the two correspond one to one — change one and change the other.

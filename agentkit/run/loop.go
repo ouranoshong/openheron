@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -342,14 +343,20 @@ func (rt *Runtime) makeGenResume(sess storage.Session) func(context.Context, *ad
 }
 
 func (rt *Runtime) logf(format string, args ...any) {
-	logf(format, args...)
+	logf(rt.log, format, args...)
 }
 
-// logf writes a warning through the one log outlet.
+// logf writes a warning through the run's logger.
 //
-// ★ It is a package-level function because not every caller has a Runtime:
+// ★ It takes the logger explicitly because not every caller has a Runtime:
 //
-//	the run row is written by the turn handle, which does not.
-func logf(format string, args ...any) {
-	obs.Logger().Warn("[openheronrt] " + fmt.Sprintf(format, args...))
+//	the run row is written by the turn handle, which carries the logger
+//	the Runtime handed it. A nil logger drops the line.
+func logf(log *slog.Logger, format string, args ...any) {
+	if log == nil {
+		return
+	}
+	log.Warn("[openheronrt] " + fmt.Sprintf(format, args...))
 }
+
+var discard = obs.Discard()

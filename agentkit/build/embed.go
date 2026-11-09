@@ -3,14 +3,15 @@ package build
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
 	aclembed "github.com/cloudwego/eino-ext/libs/acl/openai"
 	"github.com/cloudwego/eino/components/embedding"
 
+	"github.com/ouranoshong/openheron/agentkit/obs/httplog"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
-	"github.com/ouranoshong/openheron/llm/common"
 )
 
 const embedTypeName = "OpenAICompat"
@@ -22,7 +23,8 @@ type Embedder struct {
 
 var _ embedding.Embedder = (*Embedder)(nil)
 
-func NewEmbedder(ctx context.Context, p *decl.Provider, m *decl.Model) (*Embedder, error) {
+func NewEmbedder(ctx context.Context, p *decl.Provider, m *decl.Model,
+	log *slog.Logger) (*Embedder, error) {
 	if p == nil {
 		return nil, fmt.Errorf("llm: provider is nil")
 	}
@@ -46,7 +48,7 @@ func NewEmbedder(ctx context.Context, p *decl.Provider, m *decl.Model) (*Embedde
 		APIKey:     p.APIKey,
 		BaseURL:    p.BaseURL,
 		Model:      m.ID,
-		HTTPClient: common.WrapHTTPClient(&http.Client{Timeout: timeout}, p.ID),
+		HTTPClient: httplog.Wrap(&http.Client{Timeout: timeout}, p.ID, log),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("llm: build embedder for %q: %w", m.ID, err)

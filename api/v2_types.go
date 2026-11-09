@@ -10,7 +10,6 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
-	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/agentkit/run"
 	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/storage"
@@ -80,25 +79,25 @@ type errBody struct {
 }
 
 // v2Err writes a structured error and logs it.
-func v2Err(c *app.RequestContext, status int, body errBody) {
+func (s *Server) v2Err(c *app.RequestContext, status int, body errBody) {
 	if status >= 500 {
 		detail := body.Error
 		if body.cause != nil {
 			detail = fmt.Sprintf("%s: %v", body.Error, body.cause)
 		}
-		obs.Logger().Error("[api] request failed",
+		s.logger().Error("[api] request failed",
 			"method", c.Request.Method(), "uri", c.Request.URI().String(),
 			"status", status, "code", body.Code, "detail", detail)
 	}
 	c.JSON(status, body)
 }
 
-func v2Fail(c *app.RequestContext, status int, code, msg string, retryable bool) {
-	v2Err(c, status, errBody{Error: msg, Code: code, Retryable: retryable})
+func (s *Server) v2Fail(c *app.RequestContext, status int, code, msg string, retryable bool) {
+	s.v2Err(c, status, errBody{Error: msg, Code: code, Retryable: retryable})
 }
 
-func v2FailInternal(c *app.RequestContext, err error) {
-	v2Err(c, consts.StatusInternalServerError, errBody{
+func (s *Server) v2FailInternal(c *app.RequestContext, err error) {
+	s.v2Err(c, consts.StatusInternalServerError, errBody{
 		Error: "internal error",
 		Code:  codeInternal,
 		cause: err,
@@ -106,29 +105,29 @@ func v2FailInternal(c *app.RequestContext, err error) {
 }
 
 // v2FailErr maps a agentkit/run sentinel onto the v2 envelope.
-func v2FailErr(c *app.RequestContext, err error) {
+func (s *Server) v2FailErr(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, errEmptyMessage):
-		v2Fail(c, consts.StatusBadRequest, codeEmptyMessage, err.Error(), false)
+		s.v2Fail(c, consts.StatusBadRequest, codeEmptyMessage, err.Error(), false)
 	case errors.Is(err, errCommandNotRunnable):
-		v2Fail(c, consts.StatusBadRequest, codeCommandNotRunnable, err.Error(), false)
+		s.v2Fail(c, consts.StatusBadRequest, codeCommandNotRunnable, err.Error(), false)
 	case errors.Is(err, errInterruptMismatch):
-		v2Fail(c, consts.StatusConflict, codeInterruptMismatch, err.Error(), false)
+		s.v2Fail(c, consts.StatusConflict, codeInterruptMismatch, err.Error(), false)
 	case errors.Is(err, errAgentNotFound):
-		v2Fail(c, consts.StatusBadRequest, codeAgentNotFound, err.Error(), false)
+		s.v2Fail(c, consts.StatusBadRequest, codeAgentNotFound, err.Error(), false)
 	case errors.Is(err, errAgentBusy):
-		v2Fail(c, consts.StatusConflict, codeSessionBusy, err.Error(), true)
+		s.v2Fail(c, consts.StatusConflict, codeSessionBusy, err.Error(), true)
 	case errors.Is(err, run.ErrSessionBusy):
 		// ★ The session has a live turn, or an approval is waiting. The
 		//   conflict clears on its own once the turn finishes, so a retry
 		//   later is meaningful.
-		v2Fail(c, consts.StatusConflict, codeSessionBusy, err.Error(), true)
+		s.v2Fail(c, consts.StatusConflict, codeSessionBusy, err.Error(), true)
 	case errors.Is(err, storage.ErrSessionNotFound):
-		v2Fail(c, consts.StatusNotFound, codeThreadNotFound, "session not found", false)
+		s.v2Fail(c, consts.StatusNotFound, codeThreadNotFound, "session not found", false)
 	case errors.Is(err, run.ErrNoPendingInterrupt):
-		v2Fail(c, consts.StatusConflict, codeInterruptMissing, "no pending approval", false)
+		s.v2Fail(c, consts.StatusConflict, codeInterruptMissing, "no pending approval", false)
 	case errors.Is(err, run.ErrNoCheckpoint):
-		v2Fail(c, consts.StatusConflict, codeNoCheckpoint,
+		s.v2Fail(c, consts.StatusConflict, codeNoCheckpoint,
 			"this approval can no longer be resumed: its checkpoint is gone. Send a new message to continue.",
 			false)
 	case errors.Is(err, run.ErrAgentUnavailable):
@@ -136,13 +135,13 @@ func v2FailErr(c *app.RequestContext, err error) {
 		//   help — the user has to fix a file — so this is not a conflict
 		//   and it is not "internal": the message names the agent and the
 		//   reason it could not be built.
-		v2Fail(c, consts.StatusUnprocessableEntity, transport.CodeAgentUnavailable, err.Error(), false)
+		s.v2Fail(c, consts.StatusUnprocessableEntity, transport.CodeAgentUnavailable, err.Error(), false)
 	case errors.Is(err, run.ErrStartTimeout):
-		v2Fail(c, consts.StatusConflict, codeTurnStartTimeout, err.Error(), true)
+		s.v2Fail(c, consts.StatusConflict, codeTurnStartTimeout, err.Error(), true)
 	case errors.Is(err, run.ErrSuperseded):
-		v2Fail(c, consts.StatusConflict, codeTurnSuperseded, err.Error(), true)
+		s.v2Fail(c, consts.StatusConflict, codeTurnSuperseded, err.Error(), true)
 	default:
-		v2FailInternal(c, err)
+		s.v2FailInternal(c, err)
 	}
 }
 

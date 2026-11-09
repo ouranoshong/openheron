@@ -59,6 +59,7 @@ func defaultServer() decl.Server {
 		ListenAddr:   ":8080",
 		StaticDir:    "web/dist",
 		DataDir:      DirState,
+		LogLevel:     "info",
 		StartTimeout: decl.LenientDuration(60 * time.Second),
 		LeaseTTL:     decl.LenientDuration(10 * time.Minute),
 		Agent:        decl.AgentCfg{MaxDepth: 1},

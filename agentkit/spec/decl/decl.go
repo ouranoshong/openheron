@@ -253,10 +253,14 @@ const (
 // ── server/config.yaml ───────────────────────────────────────────────────
 
 type Server struct {
-	ListenAddr   string          `yaml:"listen_addr"`
-	StaticDir    string          `yaml:"static_dir"`
-	DataDir      string          `yaml:"data_dir"`
-	FrontendMode string          `yaml:"frontend_mode"`
+	ListenAddr   string `yaml:"listen_addr"`
+	StaticDir    string `yaml:"static_dir"`
+	DataDir      string `yaml:"data_dir"`
+	FrontendMode string `yaml:"frontend_mode"`
+	// LogLevel is debug, info, warn or error. A plain string: the loader
+	// validates it, so a bad value becomes a deferred notice instead of a
+	// failed start. OPENHERON_LOG_LEVEL overrides it.
+	LogLevel     string          `yaml:"log_level"`
 	StartTimeout LenientDuration `yaml:"start_timeout"`
 	// LeaseTTL is how long a run's lease survives without progress.
 	//

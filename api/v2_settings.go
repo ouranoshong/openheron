@@ -54,7 +54,7 @@ func (s *Server) SetConfigService(svc *spec.Service) { s.cfgSvc = svc }
 // requireSettings returns the wired Service or writes 503.
 func (s *Server) requireSettings(c *app.RequestContext) *spec.Service {
 	if s.cfgSvc == nil {
-		v2Fail(c, consts.StatusServiceUnavailable, "config_unavailable",
+		s.v2Fail(c, consts.StatusServiceUnavailable, "config_unavailable",
 			"config writing is not wired on this server", false)
 		return nil
 	}
@@ -62,7 +62,7 @@ func (s *Server) requireSettings(c *app.RequestContext) *spec.Service {
 }
 
 // settingsFail maps a config write failure onto HTTP.
-func settingsFail(c *app.RequestContext, err error) {
+func (s *Server) settingsFail(c *app.RequestContext, err error) {
 	var we *spec.WriteError
 	if errors.As(err, &we) {
 		msg := we.Message
@@ -71,19 +71,19 @@ func settingsFail(c *app.RequestContext, err error) {
 		}
 		switch we.Kind {
 		case spec.ErrPathInvalid:
-			v2Fail(c, consts.StatusBadRequest, codeConfigPathInvalid, msg, false)
+			s.v2Fail(c, consts.StatusBadRequest, codeConfigPathInvalid, msg, false)
 		case spec.ErrSecretLiteral:
-			v2Fail(c, consts.StatusBadRequest, codeConfigSecretLiteral, msg, false)
+			s.v2Fail(c, consts.StatusBadRequest, codeConfigSecretLiteral, msg, false)
 		case spec.ErrMergeRejected:
-			v2Fail(c, consts.StatusUnprocessableEntity, codeConfigWouldBreak, msg, false)
+			s.v2Fail(c, consts.StatusUnprocessableEntity, codeConfigWouldBreak, msg, false)
 		case spec.ErrConflict:
-			v2Fail(c, consts.StatusConflict, codeConfigWriteConflict, msg, false)
+			s.v2Fail(c, consts.StatusConflict, codeConfigWriteConflict, msg, false)
 		default:
-			v2FailInternal(c, errors.New(msg))
+			s.v2FailInternal(c, errors.New(msg))
 		}
 		return
 	}
-	v2FailInternal(c, err)
+	s.v2FailInternal(c, err)
 }
 
 // ── GET /v2/settings ──────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ func (s *Server) v2SettingsManifest(_ context.Context, c *app.RequestContext) {
 	//   "which files are there" is how the CLI and the editor drift.
 	m, err := svc.Manifest(s.liveConfig())
 	if err != nil {
-		settingsFail(c, err)
+		s.settingsFail(c, err)
 		return
 	}
 	c.JSON(consts.StatusOK, m)
@@ -118,7 +118,7 @@ func (s *Server) v2SettingsItem(_ context.Context, c *app.RequestContext) {
 	}
 	body, rev, err := svc.ReadFile(rel)
 	if err != nil {
-		settingsFail(c, err)
+		s.settingsFail(c, err)
 		return
 	}
 
@@ -143,7 +143,7 @@ func (s *Server) v2SettingsSave(_ context.Context, c *app.RequestContext) {
 
 	rev, _, err := svc.Write(rel, content, baseRev)
 	if err != nil {
-		settingsFail(c, err)
+		s.settingsFail(c, err)
 		return
 	}
 	s.settingsApplied(c, svc, rel, rev)
@@ -162,7 +162,7 @@ func (s *Server) v2SettingsDelete(_ context.Context, c *app.RequestContext) {
 	}
 
 	if _, err := svc.Delete(rel); err != nil {
-		settingsFail(c, err)
+		s.settingsFail(c, err)
 		return
 	}
 	s.settingsApplied(c, svc, rel, "")
@@ -177,7 +177,7 @@ func (s *Server) v2SettingsValidate(_ context.Context, c *app.RequestContext) {
 	}
 	var body settingsValidateBody
 	if err := c.BindAndValidate(&body); err != nil {
-		v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "invalid body", false)
+		s.v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "invalid body", false)
 		return
 	}
 	rel := body.Path
@@ -187,7 +187,7 @@ func (s *Server) v2SettingsValidate(_ context.Context, c *app.RequestContext) {
 
 	d, err := svc.Diagnostics(rel, []byte(body.Content))
 	if err != nil {
-		settingsFail(c, err)
+		s.settingsFail(c, err)
 		return
 	}
 	c.JSON(consts.StatusOK, d)
@@ -201,7 +201,7 @@ func (s *Server) v2SettingsValidate(_ context.Context, c *app.RequestContext) {
 func (s *Server) readPath(c *app.RequestContext, rel string) (spec.Category, bool) {
 	cat, err := spec.ValidateReadPath(rel)
 	if err != nil {
-		settingsFail(c, err)
+		s.settingsFail(c, err)
 		return spec.Category{}, false
 	}
 	return cat, true
@@ -211,7 +211,7 @@ func (s *Server) readPath(c *app.RequestContext, rel string) (spec.Category, boo
 func (s *Server) writePath(c *app.RequestContext, rel string) (spec.Category, bool) {
 	cat, err := spec.ValidatePath(rel)
 	if err != nil {
-		settingsFail(c, err)
+		s.settingsFail(c, err)
 		return spec.Category{}, false
 	}
 	return cat, true
@@ -220,7 +220,7 @@ func (s *Server) writePath(c *app.RequestContext, rel string) (spec.Category, bo
 func (s *Server) settingsWriteArgs(c *app.RequestContext) (string, string, []byte, bool) {
 	var body settingsWriteBody
 	if err := c.BindAndValidate(&body); err != nil {
-		v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "invalid body", false)
+		s.v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "invalid body", false)
 		return "", "", nil, false
 	}
 	if _, ok := s.writePath(c, body.Path); !ok {

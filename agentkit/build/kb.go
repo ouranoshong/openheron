@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"log/slog"
 	"path/filepath"
 
 	"github.com/cloudwego/eino/components/embedding"
@@ -11,7 +12,8 @@ import (
 	"github.com/ouranoshong/openheron/kb"
 )
 
-func buildKBTools(ctx context.Context, c *spec.Config, projectRoot, dataDir string) ([]tool.BaseTool, error) {
+func buildKBTools(ctx context.Context, c *spec.Config, projectRoot, dataDir string,
+	log *slog.Logger) ([]tool.BaseTool, error) {
 	if c == nil || c.KB.CorpusDir == "" {
 		return nil, nil
 	}
@@ -19,7 +21,7 @@ func buildKBTools(ctx context.Context, c *spec.Config, projectRoot, dataDir stri
 	if err != nil {
 		return nil, err
 	}
-	emb, err := NewEmbedder(ctx, prov, mdl)
+	emb, err := NewEmbedder(ctx, prov, mdl, log)
 	if err != nil {
 		return nil, err
 	}

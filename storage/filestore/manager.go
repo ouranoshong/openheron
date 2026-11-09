@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -47,19 +48,40 @@ func NewFileManager(root string, opts Options) (*FileManager, error) {
 	}, nil
 }
 
+var discard = obs.Discard()
+
+func (fm *FileManager) logger() *slog.Logger {
+	if fm == nil || fm.opts.Logger == nil {
+		return discard
+	}
+	return fm.opts.Logger
+}
+
 // sessionOf assembles a session object without touching the disk.
 func (fm *FileManager) sessionOf(id string) *FileSession {
-	return newSession(fm.root, id, fm.legacyCkptRoot)
+	fs := newSession(fm.root, id, fm.legacyCkptRoot)
+	fs.setLog(fm.logger())
+	return fs
 }
 
 // open opens a session: it reads state.json and nothing else.
 func (fm *FileManager) open(id string) (*FileSession, error) {
-	return openSession(fm.root, id, fm.legacyCkptRoot)
+	fs, err := openSession(fm.root, id, fm.legacyCkptRoot)
+	if err != nil {
+		return nil, err
+	}
+	fs.setLog(fm.logger())
+	return fs, nil
 }
 
 // openFull opens a session and reads its transcript.
 func (fm *FileManager) openFull(id string) (*FileSession, error) {
-	return openFullSession(fm.root, id, fm.legacyCkptRoot)
+	fs, err := openFullSession(fm.root, id, fm.legacyCkptRoot)
+	if err != nil {
+		return nil, err
+	}
+	fs.setLog(fm.logger())
+	return fs, nil
 }
 
 // sessionIDs lists the ids of the session directories.
@@ -138,7 +160,7 @@ func (fm *FileManager) List(_ context.Context) ([]storage.Meta, error) {
 	for _, id := range ids {
 		fs, err := fm.open(id)
 		if err != nil {
-			obs.Logger().Warn("[session] skipping unreadable session", "session", id, "err", err)
+			fm.logger().Warn("[session] skipping unreadable session", "session", id, "err", err)
 			continue
 		}
 		metas = append(metas, fs.Meta())
@@ -206,7 +228,7 @@ func (fm *FileManager) Inspect(ctx context.Context) (storage.Report, error) {
 		if err != nil {
 			// A corrupt state.json must not be silently dropped; count it and
 			// leave the file alone for forensics.
-			obs.Logger().Warn("[session] unreadable state, skipping", "session", id, "err", err)
+			fm.logger().Warn("[session] unreadable state, skipping", "session", id, "err", err)
 			report.SkippedBadJSON++
 			continue
 		}
@@ -214,7 +236,7 @@ func (fm *FileManager) Inspect(ctx context.Context) (storage.Report, error) {
 		hasPending := fs.HasPending()
 		hasCheckpoint := false
 		if ckpt, err := fs.HasCheckpoint(ctx); err != nil {
-			obs.Logger().Warn("[session] checkpoint probe failed, assuming none", "session", id, "err", err)
+			fm.logger().Warn("[session] checkpoint probe failed, assuming none", "session", id, "err", err)
 		} else {
 			hasCheckpoint = ckpt
 		}
@@ -224,12 +246,12 @@ func (fm *FileManager) Inspect(ctx context.Context) (storage.Report, error) {
 			report.PendingOK++
 
 		case hasPending && !hasCheckpoint:
-			obs.Logger().Warn("[session] pending approval has no checkpoint; keeping it so the user can still answer",
+			fm.logger().Warn("[session] pending approval has no checkpoint; keeping it so the user can still answer",
 				"session", id)
 			report.Orphan++
 
 		case !hasPending && hasCheckpoint:
-			obs.Logger().Warn("[session] has a checkpoint but no pending approval; "+
+			fm.logger().Warn("[session] has a checkpoint but no pending approval; "+
 				"the interrupt id cannot be recovered, please re-ask", "session", id)
 			report.Ownerless++
 
@@ -248,11 +270,11 @@ func (fm *FileManager) Inspect(ctx context.Context) (storage.Report, error) {
 				// not fatal: the startup pass must not fail because one
 				// session's ledger is damaged — the rest of the server
 				// has to come up.
-				obs.Logger().Warn("[session] failed to reconcile the run ledger", "session", id, "err", err)
+				fm.logger().Warn("[session] failed to reconcile the run ledger", "session", id, "err", err)
 				continue
 			}
 			if closed > 0 {
-				obs.Logger().Warn("[session] closed the runs a crash left open",
+				fm.logger().Warn("[session] closed the runs a crash left open",
 					"session", id, "runs", closed)
 			}
 			report.InterruptedRuns += closed

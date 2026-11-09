@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -83,6 +84,8 @@ type Options struct {
 	// a token count into a ratio; it must not resolve model refs itself —
 	// the builder owns that lookup.
 	Contexts map[string]contract.AgentContext
+	// Logger is injected by the run. Nil drops the derivation's own lines.
+	Logger *slog.Logger
 }
 
 // Artifacts are what the run archives.
@@ -123,6 +126,15 @@ func Derive(src Source, opts Options, sink Sink, cancel <-chan struct{}) (Artifa
 	}
 	go d.pump(src, cancel)
 	return d.run(cancel)
+}
+
+var discard = obs.Discard()
+
+func (d *deriver) log() *slog.Logger {
+	if d == nil || d.opts.Logger == nil {
+		return discard
+	}
+	return d.opts.Logger
 }
 
 type deriver struct {
@@ -195,7 +207,7 @@ func (d *deriver) run(cancel <-chan struct{}) (Artifacts, error) {
 				return d.artifacts(), ev.Err
 			}
 			if helpers.IsModelRetryInProgress(ev.Err) {
-				obs.Logger().Warn("[emit] model retry", "err", ev.Err)
+				d.log().Warn("[emit] model retry", "err", ev.Err)
 				d.publish(contract.RunEvent{
 					Kind:  contract.RunEventRetry,
 					RunID: d.opts.RunID,
@@ -220,7 +232,7 @@ func (d *deriver) run(cancel <-chan struct{}) (Artifacts, error) {
 			// and that summary must never reach the transcript: it would cut
 			// the root's effective history at a sub-agent's summary.
 			if ownerOf(ev, mainAgent) == mainAgent {
-				if cm := compactionFrom(ev.Action.CustomizedAction); cm != nil {
+				if cm := compactionFrom(ev.Action.CustomizedAction, d.log()); cm != nil {
 					d.compaction = cm
 					d.publish(contract.RunEvent{
 						Kind:  contract.RunEventCompaction,
@@ -346,7 +358,7 @@ func (d *deriver) publish(ev contract.RunEvent) {
 //
 // The derivation is where the agent's events are read, so this is where the
 // compacted message is picked up on its way to the transcript.
-func compactionFrom(action any) *schema.Message {
+func compactionFrom(action any, log *slog.Logger) *schema.Message {
 	a, ok := action.(*summarization.TypedCustomizedAction[*schema.Message])
 	if !ok || a == nil || a.Type != summarization.ActionTypeAfterSummarize || a.After == nil {
 		return nil
@@ -364,7 +376,7 @@ func compactionFrom(action any) *schema.Message {
 			continue
 		}
 		if out != nil {
-			obs.Logger().Warn("[emit] compaction carried more than one message; " +
+			log.Warn("[emit] compaction carried more than one message; " +
 				"keeping the last one")
 		}
 		out = m
@@ -431,7 +443,7 @@ func (d *deriver) renderStream(mo *adk.TypedMessageVariant[*schema.Message], sub
 		}
 		if recvErr != nil {
 			if helpers.IsModelRetryInProgress(recvErr) {
-				obs.Logger().Warn("[emit] model retry", "err", recvErr)
+				d.log().Warn("[emit] model retry", "err", recvErr)
 				d.publish(contract.RunEvent{
 					Kind:  contract.RunEventRetry,
 					RunID: d.opts.RunID,
@@ -439,7 +451,7 @@ func (d *deriver) renderStream(mo *adk.TypedMessageVariant[*schema.Message], sub
 				})
 				return streamOutcome{}
 			}
-			obs.Logger().Error("[emit] stream recv failed", "err", recvErr)
+			d.log().Error("[emit] stream recv failed", "err", recvErr)
 			d.publish(contract.RunEvent{
 				Kind:  contract.RunEventError,
 				RunID: d.opts.RunID,

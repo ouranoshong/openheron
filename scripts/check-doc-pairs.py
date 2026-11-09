@@ -42,6 +42,7 @@ CHINESE_ONLY = [
     "config-design.md",
     "context-usage-design.md",
     "fs-backend-design.md",
+    "logging-design.md",
     "mcp-design.md",
     "run-lifecycle-design.md",
     "sandbox-kit-design.md",

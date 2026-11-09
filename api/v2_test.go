@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/ouranoshong/openheron/agentkit/obs"
 	"time"
 
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
@@ -852,7 +854,7 @@ func newV2RunServerWith(t *testing.T, builder run.AgentBuilder) (*Server, *bufEx
 	t.Cleanup(func() { _ = rt.Shutdown(context.Background()) })
 
 	engine := route.NewEngine(hertzconfig.NewOptions(nil))
-	srv := New(rt, fm)
+	srv := New(rt, fm, obs.Discard())
 	srv.h = engine
 	var captured bufExtWriter
 	srv.newStream = func(c *app.RequestContext) *transport.SSEStream {

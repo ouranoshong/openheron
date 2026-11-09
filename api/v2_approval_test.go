@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ouranoshong/openheron/agentkit/obs"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -39,7 +41,7 @@ func TestApprovalChainEndToEnd(t *testing.T) {
 	t.Cleanup(func() { _ = rt.Shutdown(ctx) })
 
 	engine := route.NewEngine(hertzconfig.NewOptions(nil))
-	srv := New(rt, fm)
+	srv := New(rt, fm, obs.Discard())
 	srv.h = engine
 	var captured bufExtWriter
 	srv.newStream = func(c *app.RequestContext) *transport.SSEStream {

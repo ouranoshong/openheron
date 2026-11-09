@@ -12,7 +12,6 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
 	"github.com/ouranoshong/openheron/agentkit/emit"
-	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/agentkit/run"
 	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/message"
@@ -37,7 +36,7 @@ func (s *Server) v2CreateSession(ctx context.Context, c *app.RequestContext) {
 	if id := trimSpace(body.AgentID); id != "" {
 		r, err := s.resolveAgentID(id)
 		if err != nil {
-			v2FailErr(c, err)
+			s.v2FailErr(c, err)
 			return
 		}
 		root = r
@@ -45,7 +44,7 @@ func (s *Server) v2CreateSession(ctx context.Context, c *app.RequestContext) {
 
 	sess, err := s.sm.Create(ctx, root)
 	if err != nil {
-		v2FailInternal(c, err)
+		s.v2FailInternal(c, err)
 		return
 	}
 
@@ -58,7 +57,7 @@ func (s *Server) v2CreateSession(ctx context.Context, c *app.RequestContext) {
 func (s *Server) v2ListSessions(ctx context.Context, c *app.RequestContext) {
 	metas, err := s.sm.List(ctx)
 	if err != nil {
-		v2FailInternal(c, err)
+		s.v2FailInternal(c, err)
 		return
 	}
 	out := threadList{Items: make([]threadMeta, 0, len(metas))}
@@ -80,12 +79,12 @@ func (s *Server) v2ListSessions(ctx context.Context, c *app.RequestContext) {
 func (s *Server) v2GetSession(ctx context.Context, c *app.RequestContext) {
 	sess, err := s.session(ctx, c)
 	if err != nil {
-		v2FailErr(c, err)
+		s.v2FailErr(c, err)
 		return
 	}
 	pending, err := sess.PendingApproval()
 	if err != nil {
-		v2FailInternal(c, err)
+		s.v2FailInternal(c, err)
 		return
 	}
 	status, _ := s.rt.StatusOf(ctx, sess.ID())
@@ -117,21 +116,21 @@ type renameReq struct {
 func (s *Server) v2RenameSession(ctx context.Context, c *app.RequestContext) {
 	sess, err := s.session(ctx, c)
 	if err != nil {
-		v2FailErr(c, err)
+		s.v2FailErr(c, err)
 		return
 	}
 	var req renameReq
 	if err := c.Bind(&req); err != nil {
-		v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "invalid body", false)
+		s.v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "invalid body", false)
 		return
 	}
 	title := trimTitle(req.Title)
 	if title == "" {
-		v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "title must not be empty", false)
+		s.v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "title must not be empty", false)
 		return
 	}
 	if err := sess.SetTitle(title); err != nil {
-		v2FailInternal(c, err)
+		s.v2FailInternal(c, err)
 		return
 	}
 	pending, _ := sess.PendingApproval()
@@ -172,31 +171,31 @@ type switchAgentReq struct {
 func (s *Server) v2SwitchAgent(ctx context.Context, c *app.RequestContext) {
 	sess, err := s.session(ctx, c)
 	if err != nil {
-		v2FailErr(c, err)
+		s.v2FailErr(c, err)
 		return
 	}
 
 	var req switchAgentReq
 	if err := c.Bind(&req); err != nil {
-		v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "invalid body", false)
+		s.v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "invalid body", false)
 		return
 	}
 	if trimSpace(req.AgentID) == "" {
-		v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "agentId must not be empty", false)
+		s.v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "agentId must not be empty", false)
 		return
 	}
 
 	id, err := s.resolveAgentID(req.AgentID)
 	if err != nil {
-		v2FailErr(c, err)
+		s.v2FailErr(c, err)
 		return
 	}
 	if err := s.ensureAgentIdle(ctx, sess); err != nil {
-		v2FailErr(c, err)
+		s.v2FailErr(c, err)
 		return
 	}
 	if err := sess.SetAgentID(id); err != nil {
-		v2FailInternal(c, err)
+		s.v2FailInternal(c, err)
 		return
 	}
 
@@ -240,7 +239,7 @@ func (s *Server) activeAgentID(sess storage.Session) string {
 		return ""
 	}
 	if err := sess.SetAgentID(id); err != nil {
-		obs.Logger().Warn("[api] persist the default root agent failed", "session", sess.ID(), "err", err)
+		s.logger().Warn("[api] persist the default root agent failed", "session", sess.ID(), "err", err)
 	}
 	return id
 }
@@ -252,12 +251,12 @@ func (s *Server) v2DeleteSession(ctx context.Context, c *app.RequestContext) {
 	// Look it up first: v2 answers 404 for an unknown thread while v1's
 	// delete reports success for anything.
 	if _, err := s.sm.Get(ctx, id); err != nil {
-		v2FailErr(c, err)
+		s.v2FailErr(c, err)
 		return
 	}
 	_ = s.rt.Cleanup(ctx, id)
 	if err := s.sm.Delete(ctx, id); err != nil {
-		v2FailInternal(c, err)
+		s.v2FailInternal(c, err)
 		return
 	}
 	c.JSON(consts.StatusOK, map[string]any{"threadId": id, "deleted": true})
@@ -269,7 +268,7 @@ func (s *Server) v2DeleteSession(ctx context.Context, c *app.RequestContext) {
 func (s *Server) v2Messages(ctx context.Context, c *app.RequestContext) {
 	sess, err := s.session(ctx, c)
 	if err != nil {
-		v2FailErr(c, err)
+		s.v2FailErr(c, err)
 		return
 	}
 	history := sess.Messages(false)
@@ -386,7 +385,7 @@ func sessionUsageByAgent(history []*schema.Message) map[string]contract.Usage {
 func (s *Server) v2Abort(ctx context.Context, c *app.RequestContext) {
 	id := c.Param("id")
 	if _, err := s.sm.Get(ctx, id); err != nil {
-		v2FailErr(c, err)
+		s.v2FailErr(c, err)
 		return
 	}
 	pending, _ := s.rt.StatusOf(ctx, id)
@@ -395,7 +394,7 @@ func (s *Server) v2Abort(ctx context.Context, c *app.RequestContext) {
 	// Abort is idempotent and always succeeds for a live session; an unknown
 	// one is the only error.
 	if err := s.rt.Abort(ctx, id); err != nil {
-		v2FailInternal(c, err)
+		s.v2FailInternal(c, err)
 		return
 	}
 	out := map[string]any{"threadId": id, "aborted": wasRunning}
@@ -423,12 +422,12 @@ func (s *Server) v2Abort(ctx context.Context, c *app.RequestContext) {
 func (s *Server) v2SessionRuns(ctx context.Context, c *app.RequestContext) {
 	sess, err := s.session(ctx, c)
 	if err != nil {
-		v2FailErr(c, err)
+		s.v2FailErr(c, err)
 		return
 	}
 	snap, err := s.rt.ScanRuns(ctx, sess.ID())
 	if err != nil {
-		v2FailInternal(c, err)
+		s.v2FailInternal(c, err)
 		return
 	}
 	out := runsView{Items: make([]runView, 0, len(snap.Runs)), ActiveRunID: snap.ActiveRunID}
@@ -444,17 +443,17 @@ func (s *Server) v2SessionRuns(ctx context.Context, c *app.RequestContext) {
 func (s *Server) v2SessionRun(ctx context.Context, c *app.RequestContext) {
 	sess, err := s.session(ctx, c)
 	if err != nil {
-		v2FailErr(c, err)
+		s.v2FailErr(c, err)
 		return
 	}
 	runID := trimSpace(c.Param("runId"))
 	if runID == "" {
-		v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "runId is required", false)
+		s.v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "runId is required", false)
 		return
 	}
 	snap, err := s.rt.ScanRuns(ctx, sess.ID())
 	if err != nil {
-		v2FailInternal(c, err)
+		s.v2FailInternal(c, err)
 		return
 	}
 	for _, r := range snap.Runs {
@@ -463,7 +462,7 @@ func (s *Server) v2SessionRun(ctx context.Context, c *app.RequestContext) {
 			return
 		}
 	}
-	v2Fail(c, consts.StatusNotFound, codeThreadNotFound, "run not found", false)
+	s.v2Fail(c, consts.StatusNotFound, codeThreadNotFound, "run not found", false)
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────

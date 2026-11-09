@@ -488,13 +488,17 @@ provides asks (§4.3).
 | `start_timeout` | `60s` | Startup timeout |
 | `lease_ttl` | `10m` | How long a run's lease survives without progress — **longer than the provider's own timeout** |
 | `agent.max_depth` | `1` | Cap on delegation depth |
+| `log_level` | `info` | `debug`, `info`, `warn` or `error` — decides which lines reach the output |
 
 ★ **`server/` is not hot-reloaded** — a change only takes effect after a restart. That is
 why it is **read-only** in the config editor, and submitting it fails with
 `section "server" is not editable`.
 
 These environment variables override the file and take precedence:
-`LISTEN_ADDR`, `DATA_DIR`, `PROJECT_ROOT`, `FRONTEND_MODE`, `STATIC_DIR`.
+`LISTEN_ADDR`, `DATA_DIR`, `PROJECT_ROOT`, `FRONTEND_MODE`, `STATIC_DIR`, `OPENHERON_LOG_LEVEL`.
+
+★ A `log_level` that is not one of the four falls back to `info`; the config's `deferred`
+notices carry the reason.
 
 ### 4.6 Skills (`skills/`)
 

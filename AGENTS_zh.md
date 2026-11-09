@@ -15,7 +15,7 @@
 > `docs/user-manual.md` / `docs/user-manual_zh.md`（用户使用说明）、
 > `docs/developer-manual.md` / `docs/developer-manual_zh.md`（开发者说明）。
 >
-> **另有八篇只有中文的文档**在 `docs/` 下 —— 架构与代码设计那一类。
+> **另有九篇只有中文的文档**在 `docs/` 下 —— 架构与代码设计那一类。
 > ★ 它们的中文内容**接管了原文件名**：`docs/config-design.md` **就是**那篇中文文档 ——
 > 既没有 `_zh` 副本，也没有英文版：
 > `docs/context-usage-design.md`（上下文使用预估设计方案）、
@@ -25,9 +25,11 @@
 > `docs/sandbox-kit-design.md`（Docker Sandbox Kit 打包设计方案）、
 > `docs/mcp-design.md`（MCP 接入设计方案）、
 > `docs/config-design.md`（配置系统设计说明）、
-> `docs/tool-surface-design.md`（工具面 —— 一个 agent 拿到哪些工具，以及配置怎么被管理）。
+> `docs/tool-surface-design.md`（工具面 —— 一个 agent 拿到哪些工具，以及配置怎么被管理）、
+> `docs/logging-design.md`（日志装配改造设计 —— **已实现**：可变等级、`log_level`、
+> 组合根 logger、hertz 适配器，以及把请求日志搬出 `llm/common`）。
 > **`docs/` 下其余设计文档仍在上游仓库** ——
-> 下面凡引用 `docs/xxx.md` 而这十二篇之外的，都是上游那份。
+> 下面凡引用 `docs/xxx.md` 而这十三篇之外的，都是上游那份。
 > 改语义前若拿不到它，先问，别凭印象改配置或接口。
 >
 > ★ **设计类文档只写中文。** 讲代码怎么搭起来的文档 —— 分层、
@@ -68,6 +70,10 @@
 > `mcps/` 分区（§6.7）与住在工具旁边的档位（§6.6）**已实施**。★ **全局 deny** 里的
 > 前缀匹配（§6.3）跟着 deny 清单一起没了：「不被暴露」现在只由文件的 `allows:` 与 agent
 > 的 `tools` 两处说。
+>
+> ★ `docs/logging-design.md` **已实现**：可变的等级、`log_level`、组合根、hertz 适配器、
+> 逐模块注入，以及把请求日志搬出 `llm/common` 都在树里。§1 是改造前的快照，留着解释
+> 为什么改。它是新建的中文单份文档 —— 与上面那八篇不同，从来没有过英文版。
 >
 > ★ 有一个目录不是文档组：**`sandbox-kit/`** 装着把 openheron 打包成沙箱 workload 的
 > Docker Sandbox Kit —— `openheron/`（workload：描述文件、内容配方、入口脚本），
@@ -153,8 +159,13 @@
 `log.Printf` / `fmt.Fprintln(os.Stderr)` —— 级别（Info / Warn / Error）与前缀
 只有一处定义，而级别决定了一行会不会出现在默认输出里。
 
-例外只有一个：`llm/common` 用标准 logger —— 它是零 openheron 依赖的叶子包，
-引 `obs` 就破了那条铁律（`docs/architecture.md` §2.1「两条不能破的依赖铁律」）。
+已经没有例外了。`llm/common` 原来用标准 logger 打请求日志，那段代码搬到了
+`agentkit/obs/httplog`（`docs/logging-design.md` §6），这个叶子包现在一行日志都没有。
+`llm/common` 里出现任何一处 openheron 内部 import 都仍然算回归。
+
+★ **没有全局 logger 了。** `main.installLogger` 围绕一个共享的 `slog.LevelVar` 建一个
+`*slog.Logger`，交给框架和每一个构造函数。需要记日志的包接收一个 `*slog.Logger` 形参，
+零值用 `obs.Discard()`，而不是回取包级变量。
 
 ## 其它约定
 
@@ -367,6 +378,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
 | `docs/mcp-design.md` | **MCP 接入设计方案** —— 工具装配路径、MCP 客户端给它带来什么、`mcp__<server>__<tool>` 命名空间、工具表里的前缀匹配，以及 MCP 服务器在 Kit 里会跑在哪（**已实施**；§13 —— 非阻塞的 MCP 启动 —— 也已实施；§8 —— 沙箱 Kit 怎么打包一台 MCP 服务器 —— 仍是提案） |
 | `docs/config-design.md` | **配置系统设计说明** —— 配置根与它的三级解析、各个分区与它们的文件规格、加载与优先级、热更新，以及依赖铁律（**正文讲的是代码现状**；`mcps/` 分区与住在工具旁边的档位已实施） |
 | `docs/tool-surface-design.md` | **工具面设计** —— 一个 agent 拿到哪些工具（`tools:` / `mcps:` / `skills:`）、MCP 命名空间的三段、配置面收敛成一个核心，以及六个 `config_*` 工具（**§2-§5 已实现**） |
+| `docs/logging-design.md` | **日志装配改造设计** —— 组合根、可变的 `log_level`、logger 注入、接管 hertz 的日志输出，以及把请求日志搬出 `llm/common`（**提案，尚未实现**） |
 
 ★ 双语那一组里，无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。
 

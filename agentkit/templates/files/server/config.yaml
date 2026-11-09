@@ -15,6 +15,12 @@ listen_addr: ":8080"
 #   A relative path resolves against the **config root** (<project>/.openheron).
 data_dir: state
 
+# ★ The process log level: debug | info | warn | error.
+#   Like everything else in server/, it takes effect after a restart.
+#   $OPENHERON_LOG_LEVEL overrides it. A value that is not one of the four
+#   falls back to info and is reported in the config's deferred notices.
+log_level: info
+
 # ★ The front end. "embed" — the default — serves the UI compiled into the
 #   binary; "dir" serves a directory on disk instead, and static_dir points
 #   at it.

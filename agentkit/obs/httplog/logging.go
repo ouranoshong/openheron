@@ -1,10 +1,17 @@
-package common
+// Package httplog wraps an http.Client so the model requests are written to
+// the process log.
+//
+// ★ This is observation, not protocol. It lives next to obs rather than in
+// llm/common so the protocol layer keeps zero openheron dependencies, and so
+// the lines carry a level and follow the process's log level like every other
+// line.
+package httplog
 
 import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -12,49 +19,58 @@ import (
 	"strings"
 )
 
-// OPENHERON_LOG_LLM_REQUESTS=1 task dev
+// LogRequestsEnv turns on the body dump. The summary line is controlled by
+// the log level instead; this variable only says whether the body is read,
+// redacted and printed at debug level.
 const LogRequestsEnv = "OPENHERON_LOG_LLM_REQUESTS"
 
-// stdlog writes the request log.
+// Wrap returns a copy of c whose transport logs the request.
 //
-// ★ This package cannot import obs — it is a leaf with zero openheron
-// dependencies — so it uses the standard logger. The flags are the ones
-// hertz's logger uses, so a line reads the same as the rest of the output:
-// the date, the time with microseconds, the caller's file and line.
-//
-// ★ There is no level tag here: this package has no levels. Everything it
-// writes is a note about a request.
-var stdlog = log.New(os.Stderr, "", log.LstdFlags|log.Lshortfile|log.Lmicroseconds)
-
-func WrapHTTPClient(c *http.Client, providerID string) *http.Client {
+// ★ The base falls back to http.DefaultTransport when the client has no
+// transport of its own: that is the link that reads HTTPS_PROXY and HTTP_PROXY
+// from the environment, and it is what makes the sandbox Kit's credential
+// substitution work.
+func Wrap(c *http.Client, providerID string, log *slog.Logger) *http.Client {
 	if c == nil {
 		c = &http.Client{}
 	}
-	if _, ok := c.Transport.(*requestLoggingTransport); ok {
-		return c
+	if log == nil {
+		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
+
 	base := c.Transport
+	if prev, ok := base.(*loggingTransport); ok {
+		if prev.log == log && prev.provider == providerID {
+			return c
+		}
+		// ★ Unwrap first: nesting two transports would log the same request
+		// twice, and the second copy would see an already-consumed body.
+		base = prev.base
+	}
 	if base == nil {
 		base = http.DefaultTransport
 	}
+
 	out := *c
-	out.Transport = &requestLoggingTransport{base: base, provider: providerID}
+	out.Transport = &loggingTransport{base: base, provider: providerID, log: log}
 	return &out
 }
 
-type requestLoggingTransport struct {
+type loggingTransport struct {
 	base     http.RoundTripper
 	provider string
+	log      *slog.Logger
 }
 
-func (t *requestLoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	full := fullRequestLogging()
 
 	var body []byte
 	if full && req.Body != nil {
 		b, err := io.ReadAll(req.Body)
 		if err != nil {
-			stdlog.Printf("[llm] request provider=%s body read failed: %v", providerName(t.provider), err)
+			t.log.Warn("[llm] request body read failed",
+				"provider", providerName(t.provider), "err", err)
 		} else {
 			body = b
 			_ = req.Body.Close()
@@ -63,14 +79,21 @@ func (t *requestLoggingTransport) RoundTrip(req *http.Request) (*http.Response, 
 		}
 	}
 
-	stdlog.Printf("[llm] request provider=%s method=%s url=%s bytes=%s",
-		providerName(t.provider), req.Method, safeRequestURL(req.URL), contentSize(req, body))
+	t.log.Info("[llm] request",
+		"provider", providerName(t.provider),
+		"method", req.Method,
+		"url", safeRequestURL(req.URL),
+		"bytes", contentSize(req, body))
 
 	if full {
 		if len(body) == 0 {
-			stdlog.Printf("[llm] request provider=%s body: <empty>", providerName(t.provider))
+			t.log.Debug("[llm] request body is empty", "provider", providerName(t.provider))
 		} else {
-			stdlog.Printf("[llm] request provider=%s body:\n%s", providerName(t.provider), redactedJSON(body))
+			// ★ The body stays in the message: obs's handler collapses the
+			// newlines into \n, which keeps the line parseable and keeps the
+			// redaction readable in one piece.
+			t.log.Debug("[llm] request body: "+redactedJSON(body),
+				"provider", providerName(t.provider))
 		}
 	}
 

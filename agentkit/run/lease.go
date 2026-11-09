@@ -2,10 +2,10 @@ package run
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 
-	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/storage"
 )
 
@@ -46,6 +46,7 @@ func (rt *Runtime) leaseExpired(sessionID string) bool {
 type runLease struct {
 	arbiter storage.LeaseArbiter
 	ttl     time.Duration
+	log     *slog.Logger
 
 	mu      sync.Mutex
 	lease   storage.Lease
@@ -58,11 +59,11 @@ type runLease struct {
 //
 //	did before the lease existed, which is what a caller that did not wire
 //	one expects.
-func newRunLease(arbiter storage.LeaseArbiter, ttl time.Duration) *runLease {
+func newRunLease(arbiter storage.LeaseArbiter, ttl time.Duration, log *slog.Logger) *runLease {
 	if ttl <= 0 {
 		ttl = DefaultLeaseTTL
 	}
-	return &runLease{arbiter: arbiter, ttl: ttl}
+	return &runLease{arbiter: arbiter, ttl: ttl, log: log}
 }
 
 // claim takes the session's lease.
@@ -136,7 +137,9 @@ func (l *runLease) release() {
 		return
 	}
 	if err := l.arbiter.Release(context.Background(), lease); err != nil {
-		obs.Logger().Warn("[openheronrt] failed to release the lease",
-			"session", lease.SessionID, "err", err)
+		if l.log != nil {
+			l.log.Warn("[openheronrt] failed to release the lease",
+				"session", lease.SessionID, "err", err)
+		}
 	}
 }

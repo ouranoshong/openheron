@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -166,7 +167,7 @@ func TestTheSummarizerProducesEinosSummary(t *testing.T) {
 			"main": {ID: "main", ModelRef: "test/model", MaxIterations: 1},
 		},
 	}))
-	b.models = func(context.Context, *spec.Config, string, CallIntent) (
+	b.models = func(context.Context, *spec.Config, string, CallIntent, *slog.Logger) (
 		model.BaseModel[*schema.Message], error) {
 		return &summarizingModel{}, nil
 	}
@@ -206,7 +207,7 @@ func TestTheSummarizerIgnoresTheThreshold(t *testing.T) {
 			},
 		},
 	}))
-	b.models = func(context.Context, *spec.Config, string, CallIntent) (
+	b.models = func(context.Context, *spec.Config, string, CallIntent, *slog.Logger) (
 		model.BaseModel[*schema.Message], error) {
 		return &summarizingModel{}, nil
 	}

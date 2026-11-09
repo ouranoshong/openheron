@@ -11,17 +11,14 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
-	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/storage"
 	"github.com/ouranoshong/openheron/storage/filestore"
 )
 
-func captureLog(t *testing.T) *bytes.Buffer {
+func captureLog(t *testing.T, srv *Server) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
-	prev := obs.Logger()
-	obs.SetLogger(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { obs.SetLogger(prev) })
+	srv.log = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	return &buf
 }
 
@@ -44,7 +41,7 @@ func breakSessionStore(t *testing.T) (storage.SessionManager, string) {
 // [api] GET /v2/sessions -> 500 internal: list sessions failed
 func TestV2InternalErrorCarriesTheCauseToTheLog(t *testing.T) {
 	srv := newV2Server(t)
-	buf := captureLog(t)
+	buf := captureLog(t, srv)
 
 	sm, dir := breakSessionStore(t)
 	srv.sm = sm
@@ -68,7 +65,7 @@ func TestV2InternalErrorCarriesTheCauseToTheLog(t *testing.T) {
 
 func TestV2FailInternalKeepsTheClientMessageGeneric(t *testing.T) {
 	srv := newV2Server(t)
-	_ = captureLog(t)
+	_ = captureLog(t, srv)
 
 	sm, dir := breakSessionStore(t)
 	srv.sm = sm

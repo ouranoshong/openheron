@@ -8,7 +8,6 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/storage"
 )
@@ -147,7 +146,7 @@ func (rt *Runtime) loopExited(sessionID string, turn *Turn, loop *adk.TurnLoop[l
 		return
 	}
 	if exit != nil && exit.ExitReason != nil {
-		obs.Logger().Info("[openheronrt] loop exited", "session", sessionID, "reason", exit.ExitReason)
+		rt.log.Info("[openheronrt] loop exited", "session", sessionID, "reason", exit.ExitReason)
 	}
 	// ★ The loop is gone: nobody holds the session any more.
 	turn.lease.release()

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/ouranoshong/openheron/agentkit/obs"
+
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 	"github.com/cloudwego/hertz/pkg/common/config"
@@ -36,7 +38,7 @@ func newTestServer(t *testing.T) (*Server, *filestore.FileManager) {
 	rt := run.New(run.Config{SessionManager: fm})
 
 	engine := route.NewEngine(config.NewOptions(nil))
-	srv := New(rt, fm)
+	srv := New(rt, fm, obs.Discard())
 	srv.h = engine
 	srv.registerRoutes()
 	t.Cleanup(func() { _ = engine.Close() })
@@ -55,7 +57,7 @@ func newStaticTestServer(t *testing.T, staticDir string) *Server {
 	rt := run.New(run.Config{SessionManager: fm})
 
 	engine := route.NewEngine(config.NewOptions(nil))
-	srv := New(rt, fm)
+	srv := New(rt, fm, obs.Discard())
 	srv.h = engine
 	srv.SetStaticDir(staticDir)
 	srv.registerRoutes()

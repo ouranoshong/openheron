@@ -7,7 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ouranoshong/openheron/contract"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -15,7 +15,9 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/contract"
 )
 
 // Builder satisfies agentkit/run.AgentBuilder.
@@ -23,6 +25,7 @@ type Builder struct {
 	mgr                  ConfigManager
 	pool                 *pool
 	projectRoot, dataDir string
+	log                  *slog.Logger
 	models               modelFactory
 	tools                *toolRegistry
 	// mcp owns the MCP clients. They outlive the snapshot — that is what
@@ -39,6 +42,20 @@ type Builder struct {
 }
 
 type Option func(*Builder)
+
+// WithLogger wires the logger the builder and its MCP manager write through.
+func WithLogger(log *slog.Logger) Option {
+	return func(b *Builder) { b.log = log }
+}
+
+// logger is what the builder's own helpers use; nil is a builder assembled by
+// a test that never called WithLogger.
+func (b *Builder) logger() *slog.Logger {
+	if b == nil || b.log == nil {
+		return obs.Discard()
+	}
+	return b.log
+}
 
 // WithConfigService wires the configuration service.
 //
@@ -59,17 +76,17 @@ func WithPaths(projectRoot, dataDir string) Option {
 }
 
 func NewBuilder(mgr ConfigManager, opts ...Option) *Builder {
-	mcpMgr := newMCPManager()
 	b := &Builder{
 		mgr:    mgr,
 		pool:   newPool(),
 		models: defaultModelFactory,
-		mcp:    mcpMgr,
-		tools:  defaultToolRegistry(mcpMgr),
+		log:    obs.Discard(),
 	}
 	for _, o := range opts {
 		o(b)
 	}
+	b.mcp = newMCPManager(b.log)
+	b.tools = defaultToolRegistry(b.mcp)
 	return b
 }
 
