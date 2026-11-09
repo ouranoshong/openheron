@@ -16,10 +16,47 @@ async function openSettings(page: Page): Promise<void> {
   await expect(page.locator(EDITOR)).toBeVisible()
 }
 
+// ★ Folders start closed, so a test that wants a row must open the way in.
+//   The tree's own rule is "everything closed except the selection", and a
+//   test that reaches past it would be asserting a tree no reader sees.
+const toggleOf = (path: string) => `[data-testid="settings-tree-toggle-${path}"]`
+const labelOf = (path: string) => `[data-testid="settings-tree-label-${path}"]`
+
+function ancestorsOf(path: string): string[] {
+  const segs = path.split("/")
+  return segs.slice(0, -1).map((_, i) => segs.slice(0, i + 1).join("/"))
+}
+
+async function expandTo(page: Page, path: string): Promise<void> {
+  for (const folder of ancestorsOf(path)) {
+    const toggle = page.locator(toggleOf(folder))
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click()
+  }
+}
+
+async function expandAll(page: Page): Promise<void> {
+  const closed = page.locator(`${LIST} [data-testid^="settings-tree-toggle-"][aria-expanded="false"]`)
+  // Opening one folder can reveal another; click until none is left.
+  for (let round = 0; round < 20 && (await closed.count()) > 0; round++) {
+    await closed.first().click()
+  }
+}
+
 async function selectFile(page: Page, path: string): Promise<void> {
   // ★ The tree shows a file's own name under its folder, so the row's
   //   accessible name is what carries the path.
+  await expandTo(page, path)
   await page.locator(LIST).getByRole("button", { name: path, exact: true }).click()
+}
+
+// ★ The tree's top-level folders carry the same words as the new file
+//   dialog's section picker — "Skills", "Tools", "MCP servers" — and both are
+//   in the DOM at once. The picker is the one inside the new file dialog.
+async function pickSection(page: Page, label: string): Promise<void> {
+  await page
+    .locator('[data-testid="new-file-dialog"]')
+    .getByRole("button", { name: label, exact: true })
+    .click()
 }
 
 /**
@@ -144,16 +181,21 @@ test.describe("the one config root", () => {
 
   test("the list carries no shadowed badge", async ({ page }) => {
     await openSettings(page)
+    await expandTo(page, "tools/http.yaml")
     const row = page.locator(LIST).getByRole("button", { name: /tools\/http\.yaml/ }).first()
     await expect(row.getByLabel(/overridden at project level/)).toHaveCount(0)
   })
 
   test("every file appears exactly once", async ({ page }) => {
     await openSettings(page)
-    const names = await page.locator(LIST).getByRole("button").evaluateAll((els) =>
-      els.map((e) => (e.textContent ?? "").trim()),
+    await expandAll(page)
+    // Only file rows: a folder's accessible name comes from its label, a
+    // file's from the whole path (`aria-label`).
+    const paths = await page.locator(`${LIST} button[aria-label]`).evaluateAll((els) =>
+      els.map((e) => e.getAttribute("aria-label") ?? ""),
     )
-    expect(new Set(names).size).toBe(names.length)
+    expect(paths.length).toBeGreaterThan(0)
+    expect(new Set(paths).size).toBe(paths.length)
   })
 })
 
@@ -167,6 +209,7 @@ test.describe("no level to switch", () => {
 test.describe("read-only sections", () => {
   test("server is listed but marked as needing a restart", async ({ page }) => {
     await openSettings(page)
+    await expandTo(page, "server/config.yaml")
     const row = page.locator(LIST).getByRole("button", { name: /server\/config\.yaml/ }).first()
     await expect(row.getByLabel(/requires a restart/)).toBeVisible()
   })
@@ -310,24 +353,67 @@ test.describe("an agent left out of the tree", () => {
 // ★ The list is a **file tree**, not a flat list of paths. Six partitions and
 //   a folder per skill read as a tree in every file browser the user already
 //   uses; a list of `skills/code-review/SKILL.md` strings does not.
+//
+// ★ Folders open **closed** — six rows instead of a scroll through every
+//   skill — with one exception: the ancestors of the file the dialog opened
+//   on, so the selection is never hidden behind a closed folder.
 test.describe("the file list is a tree", () => {
+  test("folders start closed", async ({ page }) => {
+    await openSettings(page)
+
+    await expect(page.locator(toggleOf("skills"))).toHaveAttribute("aria-expanded", "false")
+    await expect(page.locator(toggleOf("tools"))).toHaveAttribute("aria-expanded", "false")
+    // Closed means "not rendered", not "visually hidden": the row is absent
+    // from the document, so a screen reader does not read past a closed folder.
+    await expect(page.locator('[data-testid="settings-tree-folder-skills/code-review"]')).toHaveCount(0)
+    await expect(
+      page.locator(LIST).getByRole("button", { name: "skills/code-review/SKILL.md" }),
+    ).toHaveCount(0)
+  })
+
+  test("the file the dialog opened on is visible", async ({ page }) => {
+    await openSettings(page)
+    // `llm/deepseek.yaml` is the first editable file, and its folder is
+    // opened for it — otherwise the dialog opens on a selection it hides.
+    await expect(page.locator(toggleOf("llm"))).toHaveAttribute("aria-expanded", "true")
+    await expect(
+      page.locator(LIST).getByRole("button", { name: "llm/deepseek.yaml", exact: true }),
+    ).toBeVisible()
+  })
+
+  test("a folder opens and closes on click", async ({ page }) => {
+    await openSettings(page)
+    const skills = page.locator(toggleOf("skills"))
+    const nested = page.locator('[data-testid="settings-tree-folder-skills/code-review"]')
+
+    await skills.click()
+    await expect(skills).toHaveAttribute("aria-expanded", "true")
+    // The folder inside it is a row of its own, and it is still closed: a
+    // folder opens one level, not the whole way down.
+    await expect(nested).toBeVisible()
+    await expect(page.locator(toggleOf("skills/code-review"))).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    )
+
+    await skills.click()
+    await expect(skills).toHaveAttribute("aria-expanded", "false")
+    await expect(nested).toHaveCount(0)
+  })
+
   test("each partition is a folder, and its files sit under it", async ({ page }) => {
     await openSettings(page)
+    await expandTo(page, "agents/main.md")
 
     const agents = page.locator('[data-testid="settings-tree-folder-agents"]')
     await expect(agents).toBeVisible()
-    // ★ The folder is a heading, not a button: a row that can be clicked but
-    //   does not open anything is a lie about what it does.
-    await expect(agents.getByRole("button")).toHaveCount(2)
     await expect(agents.getByRole("button", { name: "agents/main.md" })).toBeVisible()
   })
 
   test("a skill is a folder of its own, two levels deep", async ({ page }) => {
     await openSettings(page)
+    await expandTo(page, "skills/code-review/SKILL.md")
 
-    const skills = page.locator('[data-testid="settings-tree-folder-skills"]')
-    await expect(skills).toBeVisible()
-    // skills > code-review > SKILL.md
     const folder = page.locator('[data-testid="settings-tree-folder-skills/code-review"]')
     await expect(folder).toBeVisible()
     await expect(
@@ -337,20 +423,19 @@ test.describe("the file list is a tree", () => {
 
   test("a row is indented under its folder", async ({ page }) => {
     await openSettings(page)
-    // ★ Where the **text** starts, not where the box starts: both the heading
-    //   and the row are full-width blocks, so their boxes share a left edge
-    //   whatever the indentation is. The indent is inside them.
+    await expandTo(page, "agents/main.md")
+    // ★ Where the **text** starts, not where the box starts: every row is a
+    //   full-width block, so their boxes share a left edge whatever the
+    //   indentation is. The indent is inside them.
     const textLeft = (sel: string) =>
       page.locator(sel).evaluate((el) => {
-        const node = el.firstChild
-        if (!node) return -1
         const range = document.createRange()
-        range.selectNodeContents(node)
+        range.selectNodeContents(el)
         return range.getBoundingClientRect().left
       })
 
-    const folder = await textLeft('[data-testid="settings-tree-folder-agents"] > div')
-    const row = await textLeft(`${LIST} [aria-label="agents/main.md"]`)
+    const folder = await textLeft(labelOf("agents"))
+    const row = await textLeft(labelOf("agents/main.md"))
     expect(folder).toBeGreaterThan(0)
     expect(row).toBeGreaterThan(folder)
   })
@@ -376,7 +461,7 @@ test.describe("a skill is editable", () => {
   test("the new file dialog asks for a skill name and shows the folder", async ({ page }) => {
     await openSettings(page)
     await page.click('[data-testid="settings-new-file"]')
-    await page.getByRole("button", { name: "Skills", exact: true }).click()
+    await pickSection(page, "Skills")
     await page.locator('[data-testid="new-file-name"]').fill("spec-check")
 
     await expect(page.getByText("Skill name (its folder)")).toBeVisible()
@@ -386,7 +471,7 @@ test.describe("a skill is editable", () => {
   test("a skill name the server cannot read back keeps the dialog open", async ({ page }) => {
     await openSettings(page)
     await page.click('[data-testid="settings-new-file"]')
-    await page.getByRole("button", { name: "Skills", exact: true }).click()
+    await pickSection(page, "Skills")
     await page.locator('[data-testid="new-file-name"]').fill("Code Review")
     await page.click('[data-testid="new-file-create"]')
 
@@ -409,7 +494,7 @@ test.describe("the new file dialog", () => {
   }
 
   async function nameToolsFile(page: Page, file: string): Promise<void> {
-    await page.getByRole("button", { name: "Tools", exact: true }).click()
+    await pickSection(page, "Tools")
     await page.locator(NEW_NAME).fill(file)
   }
 
@@ -454,7 +539,7 @@ test.describe("the new file dialog", () => {
   //   not exist. That is exactly the bug this spec pins down.
   test("a file under mcps/ can be created, and the directory is created with it", async ({ page }) => {
     await openNewFile(page)
-    await page.getByRole("button", { name: "MCP servers", exact: true }).click()
+    await pickSection(page, "MCP servers")
     await page.locator(NEW_NAME).fill("github")
 
     // ★ The path is the server's name: the file's name IS the server's name.
@@ -471,7 +556,7 @@ test.describe("the new file dialog", () => {
   //   list that does not contain the file, with the reason behind the dialog.
   test("a server name that could not be read back is refused by the server, and the dialog stays open", async ({ page }) => {
     await openNewFile(page)
-    await page.getByRole("button", { name: "MCP servers", exact: true }).click()
+    await pickSection(page, "MCP servers")
     await page.locator(NEW_NAME).fill("github__x")
     await page.click(NEW_CREATE)
 
