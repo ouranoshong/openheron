@@ -34,6 +34,10 @@ version: '3'
 vars:
   GO: go
   BUN: bun
+  # ★ Python is `python3` on Unix and `python` on Windows, where `python3` hits
+  #   the Microsoft Store alias and exits non-zero without running anything.
+  #   The bilingual document checker needs whichever one this machine has.
+  PY: '{{if eq (OS) "windows"}}python{{else}}python3{{end}}'
   # ★ Windows cannot execute an extension-less binary: Task's built-in shell
   #   resolves `bin/openheron` through Go's exec and reports "not found" even
   #   though `go build -o` produced a valid PE file. `go build` without -o
@@ -506,7 +510,7 @@ tasks:
   lint-docs:
     desc: 'The bilingual document pairs: identifier sets, code blocks, line references'
     cmds:
-      - python3 scripts/check-doc-pairs.py
+      - '{{.PY}} scripts/check-doc-pairs.py'
 
   # ── Test environment ───────────────────────────────────────────────────────
   #

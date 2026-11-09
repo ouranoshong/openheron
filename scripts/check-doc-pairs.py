@@ -103,6 +103,13 @@ def sections(text: str) -> list[str]:
 
 
 def main() -> int:
+    # ★ The output carries box-drawing characters and the document names. On
+    #   Windows the default stdout encoding is the console code page, so a piped
+    #   run turns them into mojibake — the check still passes, but the report
+    #   is unreadable.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     fail = 0
 
     for name in CHINESE_ONLY:
@@ -111,8 +118,8 @@ def main() -> int:
             print(f"{name}: Chinese only, but {twin.name} exists — delete the twin")
             fail = 1
     for en, zh in PAIRS:
-        a = (ROOT / en).read_text()
-        b = (ROOT / zh).read_text()
+        a = (ROOT / en).read_text(encoding="utf-8")
+        b = (ROOT / zh).read_text(encoding="utf-8")
 
         id_diff = [x for x in identifiers(a) if x not in set(identifiers(b))]
         id_diff += [x for x in identifiers(b) if x not in set(identifiers(a))]
@@ -151,7 +158,7 @@ def main() -> int:
     # ★ The READMEs carry no line references today, but they are documents
     #   too — the scan reads them so that a new reference cannot slip past.
     for md in list(DOCS.glob("*.md")) + [ROOT / "README.md", ROOT / "README_zh.md"]:
-        for m in re.findall(r"`([a-zA-Z0-9_./-]+\.(?:go|ts|tsx|md)):(\d+)", md.read_text()):
+        for m in re.findall(r"`([a-zA-Z0-9_./-]+\.(?:go|ts|tsx|md)):(\d+)", md.read_text(encoding="utf-8")):
             refs.add((m[0], int(m[1])))
     external = 0
     for path, line in sorted(refs):
@@ -172,7 +179,7 @@ def main() -> int:
             #   to the outside — eino's own source, the upstream documents.
             external += 1
             continue
-        if not any(c.is_file() and line <= len(c.read_text(errors="replace").splitlines())
+        if not any(c.is_file() and line <= len(c.read_text(encoding="utf-8", errors="replace").splitlines())
                    for c in candidates):
             print(f"  BROKEN       {path}:{line}")
             bad = 1
