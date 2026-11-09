@@ -19,6 +19,13 @@
 #   (config.Service.ResolveDir), not against the process cwd.
 #   Starting it elsewhere gives you
 #   `agents/main.md does not exist or could not be parsed`.
+#
+# ★ The .exe suffix on the dev binary is mandatory on Windows: air starts the
+#   binary through PowerShell, which refuses a path without it — the runner
+#   prints "CMD will not recognize non .exe file for execution". A bare
+#   `go build` appends the suffix on Windows, but `go build -o` uses the name
+#   exactly as given, so bin, cmd and full_bin all have to spell it out.
+#   Unix ignores the extension, so one config works on every platform.
 
 root = "."
 tmp_dir = "tmp"
@@ -27,8 +34,8 @@ tmp_dir = "tmp"
   # The binary goes into tmp/ rather than bin/: bin/ is the release artifact
   # directory and should not be overwritten by a half-finished dev build —
   # mixing `make build`'s output with the debug output is confusing.
-  bin = "tmp/openheron-dev"
-  cmd = "go build -o tmp/openheron-dev ."
+  bin = "tmp/openheron-dev.exe"
+  cmd = "go build -o tmp/openheron-dev.exe ."
   # A package containing test files recompiles as soon as it changes: much of
   # openheron's behaviour is written in _test.go (like the comments that pin
   # down counter-intuitive designs), and not recompiling after a test edit
@@ -65,7 +72,7 @@ tmp_dir = "tmp"
 [run]
   # Reuse the default port that Vite proxies to. During development the
   # frontend is on :5173 and the proxy points here.
-  full_bin = "tmp/openheron-dev"
+  full_bin = "tmp/openheron-dev.exe"
   # The frontend hot-reloads through Vite, so there is no need to watch the
   # static directory on every restart.
   include_dir = ["agents", "llm", "policy", "skills"]

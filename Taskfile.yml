@@ -1,0 +1,528 @@
+# openheron development commands.
+#
+# The frontend and the backend have a build-order dependency: web/dist is
+# embedded into the binary with go:embed, so `task build` must produce the
+# frontend before go build. The other way round silently produces a binary with
+# no interface on the first build — the interface part is fixed at compile time.
+#
+# ★ `deps` run in parallel in Task, while Make ran prerequisites in order.
+#   Every prerequisite here is independent of its siblings, and all of them
+#   finish before a task's own `cmds` start, so the build order still holds.
+# ★ `silent: true` on the multi-line recipes takes the place of Make's `@`.
+#   Commands still print their own output; only the echoed script is hidden.
+# ★ Variables live at the root on purpose: a caller can override them on the
+#   CLI with `task build VERSION=1.2.3`. Task vars are NOT exported to the
+#   shell, so recipes read them through `{{.NAME}}` templates, never `$NAME`.
+# ★ Make gave each recipe line its own shell, so `cd` did not leak into the
+#   next line. A multi-line `cmds` entry is ONE shell: every `cd` below is
+#   wrapped in a subshell so the following commands keep running at the root.
+# ★ Platform handling is deliberate:
+#   - `OS` is Task's own template function, not a shell variable. EXE, BIN,
+#     PREFIX and INSTALL_NAME resolve against the OS the `task` binary was
+#     built for — the same OS that `cmds.platforms` filters on. No `sh:` probe,
+#     and no dependence on an exported `$OS`.
+#   - Commands that genuinely differ per OS use `platforms:` branches, so the
+#     unselected branch is never run. Everything else is written in POSIX sh
+#     and runs under Task's built-in interpreter on every platform.
+#   - Packaging still calls POSIX utilities (tar, zip, sed, sha256sum, cp,
+#     rm, mkdir, basename). On Windows they have to be on PATH — Git for
+#     Windows ships them in usr/bin. Go, Bun, Docker and PowerShell are native
+#     to their own platform and need no shim.
+
+version: '3'
+
+vars:
+  GO: go
+  BUN: bun
+  # ★ Windows cannot execute an extension-less binary: Task's built-in shell
+  #   resolves `bin/openheron` through Go's exec and reports "not found" even
+  #   though `go build -o` produced a valid PE file. `go build` without -o
+  #   appends the suffix on Windows; with -o it uses the name exactly as given.
+  #   EXE covers both the local binary and the installed copy; the Kit's own
+  #   binary stays `openheron` because the sandbox image is Linux.
+  EXE: '{{if eq (OS) "windows"}}.exe{{end}}'
+  BIN: 'bin/openheron{{.EXE}}'
+  INSTALL_NAME: 'openheron{{.EXE}}'
+
+  # ★ The repository root, derived from this file's own path: the Kit's build
+  #   context is the root, because the recipe copies the binary the root's
+  #   `task build` produced. The Makefile declared REPO_ROOT but never used it;
+  #   Task exposes the same value as the built-in `ROOT_DIR` variable, which is
+  #   also the default working directory for every task in this file.
+
+  # Version: taken from the environment when set, otherwise from git describe
+  # (a short hash with -dirty when there is no tag). Override with
+  # `task build VERSION=1.2.3` or by exporting VERSION.
+  # ★ The Makefile used `?=`, where the environment WINS over the default.
+  #   Task resolves global vars after the process environment, so a plain
+  #   `sh:` variable would overwrite the CI's VERSION with git describe and
+  #   stamp a release with the wrong version. A template `default` reads the
+  #   value already resolved from the environment instead.
+  VERSION_FROM_GIT:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  VERSION: '{{.VERSION | default .VERSION_FROM_GIT}}'
+
+  # ldflags for release builds: inject the version and strip the symbol table
+  # (about half the size; the dev build for debugging does not strip).
+  RELEASE_LDFLAGS: '-s -w -X main.version={{.VERSION}}'
+
+  # ★ PREFIX follows each platform's own convention: Unix uses ~/.local/bin
+  #   (XDG, no root needed); Windows uses %LOCALAPPDATA%\Programs\openheron,
+  #   the same directory scripts/install.ps1 installs published binaries into.
+  #   `joinPath` emits the OS separator, so there are no mixed slashes, and
+  #   every use is quoted because a Windows path contains backslashes.
+  #   Override with `task install PREFIX=/usr/local/bin` where appropriate.
+  PREFIX: '{{if eq (OS) "windows"}}{{joinPath .LOCALAPPDATA "Programs" "openheron"}}{{else}}{{joinPath .HOME ".local" "bin"}}{{end}}'
+  # ★ INSTALL_PATH is joined with joinPath instead of "PREFIX/NAME": on
+  #   Windows a literal slash would copy to and print a mixed-separator path.
+  INSTALL_PATH: '{{joinPath .PREFIX .INSTALL_NAME}}'
+
+  RELEASE_DIR: dist
+  PLATFORMS: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
+  # No default on purpose: pass it in, e.g. task release-one PLATFORM=darwin/arm64.
+  PLATFORM: ''
+
+  KIT_DIR: sandbox-kit
+  KIT_WORKLOAD: '{{.KIT_DIR}}/openheron'
+  # ★ The build happens in a copy of the Kit's directory, so that the version
+  #   in the published descriptor can be set to the one being built without
+  #   leaving a modified file in the working tree.
+  KIT_STAGE: '{{.KIT_DIR}}/.stage-openheron'
+  KIT_MIXINS: '{{.KIT_DIR}}/openheron-deepseek {{.KIT_DIR}}/openheron-openai'
+  KIT_VERSION: 0.0.9
+  KIT_IMAGE: 'openheron-kit:{{.KIT_VERSION}}'
+  KIT_BUILDER: kit-builder
+  KIT_REPO: docker.io/ouranoshong/openheron-kit
+  # Only kit-push-mixin sets this, through the task call below.
+  MIXINS: ''
+
+tasks:
+  # The Makefile's first target was `help`, so a bare `make` printed the help.
+  # Task has no "first target" rule; `default` keeps that behaviour explicit.
+  default:
+    desc: 'List available tasks (the bare-command default)'
+    cmds:
+      - task: help
+
+  # --list shows only tasks with a desc, exactly like the Makefile's grep of
+  # `##` comments; it needs no awk/grep pipeline of its own.
+  help:
+    desc: 'List available tasks'
+    silent: true
+    cmds:
+      - '"{{.TASK_EXE}}" --list'
+
+  # ── Frontend ───────────────────────────────────────────────────────────────
+
+  web:
+    desc: 'Build the React frontend into web/dist (embedded with go:embed)'
+    dir: web
+    cmds:
+      - '{{.BUN}} install --frozen-lockfile'
+      - '{{.BUN}} run build'
+
+  dev:
+    desc: 'Automatic rebuild + restart for Go (air); use alongside task web-dev'
+    silent: true
+    cmds:
+      - |
+        set -e
+        command -v air >/dev/null || {
+          echo "air not found; install with: go install github.com/air-verse/air@latest";
+          exit 1;
+        }
+        air
+
+  web-dev:
+    desc: 'Start the Vite dev server (:5173, proxies /v2 to :8080)'
+    dir: web
+    cmds:
+      - '{{.BUN}} run dev'
+
+  # ── Backend ────────────────────────────────────────────────────────────────
+
+  build:
+    desc: 'Full build: the frontend + a single binary with the UI embedded'
+    deps: [web]
+    cmds:
+      - '{{.GO}} build -ldflags "-X main.version={{.VERSION}}" -o {{.BIN}} .'
+
+  build-go:
+    desc: 'Build the backend only (no frontend rebuild) — for fast iteration on Go code'
+    cmds:
+      - '{{.GO}} build -ldflags "-X main.version={{.VERSION}}" -o {{.BIN}} .'
+
+  run:
+    desc: 'Run the binary (the UI comes from the existing web/dist)'
+    deps: [build-go]
+    cmds:
+      - '{{.BIN}}'
+
+  # ── Install ────────────────────────────────────────────────────────────────
+  #
+  # The artifact is a **single binary** (the UI is already embedded with
+  # go:embed), so "installing" means putting it somewhere on PATH — there is no
+  # runtime dependency to install alongside it.
+
+  install:
+    desc: 'Install the binary into PREFIX (platform default); openheron is then runnable from anywhere'
+    deps: [build]
+    silent: true
+    cmds:
+      - cmd: |-
+          set -e
+          mkdir -p "{{.PREFIX}}"
+          install -m 0755 "{{.BIN}}" "{{.INSTALL_PATH}}"
+          echo "installed: {{.INSTALL_PATH}}"
+          command -v openheron >/dev/null 2>&1 || \
+            echo 'hint: {{.PREFIX}} is not on PATH — export PATH="{{.PREFIX}}:$PATH"'
+        platforms: [linux, darwin]
+      - cmd: |-
+          powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '{{.PREFIX}}' | Out-Null; Copy-Item -Force -Path '{{.BIN}}' -Destination '{{.INSTALL_PATH}}'; Write-Host 'installed: {{.INSTALL_PATH}}'; Write-Host 'hint: add {{.PREFIX}} to your user PATH if it is not there yet'"
+        platforms: [windows]
+
+  uninstall:
+    desc: 'Remove the installed binary from PREFIX'
+    silent: true
+    cmds:
+      - cmd: |-
+          rm -f "{{.INSTALL_PATH}}"
+          echo "removed: {{.INSTALL_PATH}}"
+        platforms: [linux, darwin]
+      - cmd: |-
+          powershell -NoProfile -Command "Remove-Item -Force -ErrorAction SilentlyContinue -Path '{{.INSTALL_PATH}}'; Write-Host 'removed: {{.INSTALL_PATH}}'"
+        platforms: [windows]
+
+  # ── Multi-platform release ─────────────────────────────────────────────────
+  #
+  # The artifact is a single binary (the UI is already embedded with go:embed), so
+  # "releasing" = cross-compiling + packaging. The UI is embedded at **compile
+  # time** ⇒ cross-compiling is unaffected, and every platform gets the same UI.
+  #
+  # ★ CGO_ENABLED=0: fully static, no dependency on the target's glibc / libc++.
+  #   openheron has no cgo dependencies (no sqlite in go.mod and the like), so
+  #   turning it off costs nothing — and it buys "one file that runs on any
+  #   machine".
+
+  release:
+    desc: 'Cross-compile every platform: archives and checksums land in dist/'
+    deps: [web]
+    silent: true
+    cmds:
+      - |
+        set -e
+        rm -rf {{.RELEASE_DIR}}
+        mkdir -p {{.RELEASE_DIR}}
+        for p in {{.PLATFORMS}}; do
+          os=${p%/*}; arch=${p#*/};
+          name="openheron_{{.VERSION}}_${os}_${arch}";
+          ext=""; if [ "$os" = "windows" ]; then ext=".exe"; fi;
+          echo "  → $p";
+          mkdir -p "{{.RELEASE_DIR}}/$name";
+          CGO_ENABLED=0 GOOS=$os GOARCH=$arch {{.GO}} build -trimpath \
+            -ldflags "{{.RELEASE_LDFLAGS}}" -o "{{.RELEASE_DIR}}/$name/openheron$ext" .;
+          if [ "$os" = "windows" ]; then
+            if command -v zip >/dev/null 2>&1; then
+              (cd {{.RELEASE_DIR}} && zip -qr "$name.zip" "$name");
+            elif command -v python3 >/dev/null 2>&1; then
+              (cd {{.RELEASE_DIR}} && python3 -m zipfile -c "$name.zip" "$name");
+            else
+              (cd {{.RELEASE_DIR}} && python -m zipfile -c "$name.zip" "$name");
+            fi;
+          else
+            tar -C {{.RELEASE_DIR}} -czf "{{.RELEASE_DIR}}/$name.tar.gz" "$name";
+          fi;
+          rm -rf "{{.RELEASE_DIR}}/$name";
+        done
+        (cd {{.RELEASE_DIR}} && (sha256sum *.tar.gz *.zip 2>/dev/null || shasum -a 256 *.tar.gz *.zip) > checksums.txt)
+        # The installers travel with the release: a user who wants the published
+        # binary should not have to know the asset naming rule, and the script
+        # that knows it must be the one from this version.
+        cp scripts/install.sh scripts/install.ps1 {{.RELEASE_DIR}}/
+        echo && ls -lh {{.RELEASE_DIR}}
+
+  release-one:
+    desc: 'Cross-compile a single platform: task release-one PLATFORM=darwin/arm64'
+    cmds:
+      - task: release
+        vars:
+          PLATFORMS: '{{.PLATFORM}}'
+
+  # ── Docker Sandbox Kit ──────────────────────────────────────────────────────
+  #
+  # ★ A separate artifact, not part of the release pipeline: `task release` still
+  #   produces the six static binaries and nothing else. The Kit packages
+  #   openheron as a Docker Sandboxes workload — its design is
+  #   docs/sandbox-kit-design.md.
+  #
+# The build context is sandbox-kit/, because the Kit specification finds the
+# content recipe by the descriptor's filename stem, beside it.
+#
+# ★ The binary copied into the Kit is named `openheron` and deliberately has
+#   no EXE suffix: the sandbox image runs Linux, so the host's Windows suffix
+#   does not apply. Only {{.BIN}}, the host-side build, is platform-dependent.
+
+  kit-builder:
+    desc: 'Make sure the container-driver builder exists'
+    silent: true
+    cmds:
+      - |
+        docker buildx inspect {{.KIT_BUILDER}} >/dev/null 2>&1 || \
+          docker buildx create --name {{.KIT_BUILDER}} --driver docker-container --bootstrap
+  # ★ Every Kit target needs this builder, and a fresh machine has none: the
+  #   `docker` driver is the default, and it is the one that drops the
+  #   manifest annotations — without which an image is not a Kit any more.
+  #   Creating it here rather than in one target is what lets `kit-push` run on
+  #   a CI runner, where nothing has been set up before it.
+
+  kit:
+    desc: 'Build the openheron workload Kit image (needs docker buildx)'
+    deps: [build, kit-builder]
+    silent: true
+    cmds:
+      - |
+        set -e
+        cp {{.BIN}} {{.KIT_WORKLOAD}}/openheron
+        rm -rf {{.KIT_STAGE}} && cp -r {{.KIT_WORKLOAD}} {{.KIT_STAGE}}
+        # `sed -i` is GNU-only: BSD/macOS sed reads the next argument as a
+        # backup suffix and silently leaves the descriptor untouched.
+        # Redirect + mv is POSIX and behaves the same on every platform.
+        sed 's|^    default: .*|    default: "{{.KIT_VERSION}}"|' {{.KIT_STAGE}}/openheron.yaml > {{.KIT_STAGE}}/openheron.yaml.new
+        mv {{.KIT_STAGE}}/openheron.yaml.new {{.KIT_STAGE}}/openheron.yaml
+        (cd {{.KIT_STAGE}} && docker buildx build --builder {{.KIT_BUILDER}} . -f openheron.yaml -t {{.KIT_IMAGE}} --load)
+        rm -rf {{.KIT_STAGE}}
+  # ★ --builder is not optional: the docker driver with the classic image store
+  #   drops the manifest annotations, and an image without the descriptor
+  #   annotation is not a Kit any more.
+  # ★ --load is not optional either: the container driver keeps the result in
+  #   its own build cache, and without it there is no local image to validate.
+  # ★ The binary is copied in beside the recipe before the build, because the
+  #   build context cannot reach outside the directory it is given -- and the
+  #   repository's bin/ is outside the Kit's directory. The copy is what makes
+  #   `sbx run ./sandbox-kit/openheron` work too: that path builds the Kit
+  #   from this same directory.
+
+  kit-mixin:
+    desc: 'Build the credential mixin images (declaration only, no content)'
+    deps: [kit-builder]
+    silent: true
+    cmds:
+      - |
+        set -e
+        for d in {{.KIT_MIXINS}}; do
+          name=$(basename $d);
+          vendor=${name#openheron-};
+          ( cd $d && docker buildx build --builder {{.KIT_BUILDER}} . -f $name.yaml \
+              -t openheron-kit-$vendor:{{.KIT_VERSION}} --load ) || exit 1;
+        done
+
+  kit-push:
+    desc: 'Publish the workload Kit to the registry (needs docker login)'
+    deps: [build, kit-builder]
+    silent: true
+    cmds:
+      - |
+        set -e
+        cp {{.BIN}} {{.KIT_WORKLOAD}}/openheron
+        rm -rf {{.KIT_STAGE}} && cp -r {{.KIT_WORKLOAD}} {{.KIT_STAGE}}
+        # `sed -i` is GNU-only: BSD/macOS sed reads the next argument as a
+        # backup suffix and silently leaves the descriptor untouched.
+        # Redirect + mv is POSIX and behaves the same on every platform.
+        sed 's|^    default: .*|    default: "{{.KIT_VERSION}}"|' {{.KIT_STAGE}}/openheron.yaml > {{.KIT_STAGE}}/openheron.yaml.new
+        mv {{.KIT_STAGE}}/openheron.yaml.new {{.KIT_STAGE}}/openheron.yaml
+        ( cd {{.KIT_STAGE}} && docker buildx build --builder {{.KIT_BUILDER}} . -f openheron.yaml \
+            -t {{.KIT_REPO}}:{{.KIT_VERSION}} --push )
+        rm -rf {{.KIT_STAGE}}
+      - task: kit-tag-latest
+
+  kit-push-mixin:
+    desc: 'Publish the credential mixin images to the registry'
+    deps: [kit-builder]
+    silent: true
+    cmds:
+      - |
+        set -e
+        for d in {{.KIT_MIXINS}}; do
+          name=$(basename $d);
+          vendor=${name#openheron-};
+          ( cd $d && docker buildx build --builder {{.KIT_BUILDER}} . -f $name.yaml \
+              -t {{.KIT_REPO}}-$vendor:{{.KIT_VERSION}} --push ) || exit 1;
+        done
+      - task: kit-tag-latest
+        vars:
+          MIXINS: 1
+
+  kit-tag-latest:
+    desc: 'Point the `latest` tag at the version just pushed'
+    silent: true
+    cmds:
+      - |
+        set -e;
+        if [ -n "{{.MIXINS}}" ]; then
+          for d in {{.KIT_MIXINS}}; do
+            name=$(basename $d);
+            vendor=${name#openheron-};
+            docker buildx imagetools create --tag "{{.KIT_REPO}}-$vendor:latest" \
+              "{{.KIT_REPO}}-$vendor:{{.KIT_VERSION}}";
+          done;
+        else
+          docker buildx imagetools create --tag "{{.KIT_REPO}}:latest" \
+            "{{.KIT_REPO}}:{{.KIT_VERSION}}";
+        fi
+  # ★ `latest` is what the guide points at, so the guide does not have to change
+  #   with every release. The version tag stays the exact one: it is what a
+  #   consumer pins when they want a reproducible sandbox, and it is what the
+  #   release job checks back after the push.
+  #
+  # ★ The tag is created from the pushed image rather than built twice: the
+  #   descriptor inside it carries the version, and a second build would carry
+  #   it too — but it would be a different image with the same contents, and
+  #   "the tag points at the image the release published" is a statement worth
+  #   being able to make.
+  #
+  # ★ Every mixin gets its own `latest`: the workload and a mixin are separate
+  #   repositories, and a mixin published without one leaves a user unable to
+  #   reach a model.
+  # ★ The mixins need their own repositories: a Kit is identified by its
+  #   reference, and the host resolves each one separately. A workload pushed
+  #   without its mixins leaves a user unable to reach a model -- the Kit runs,
+  #   and every call comes back 401.
+  #
+  # ★ The Kit set is one workload plus one mixin per vendor. Push all of them
+  #   together: task kit-push kit-push-mixin
+
+  kit-check:
+    desc: 'Validate the Kit against the specification (needs kit-tck)'
+    cmds:
+      - 'kit-tck validate {{.KIT_IMAGE}}'
+
+  # ── Verification ───────────────────────────────────────────────────────────
+
+  test:
+    desc: 'The full Go test suite'
+    cmds:
+      - '{{.GO}} test ./...'
+
+  test-race:
+    desc: 'The full Go test suite under the race detector'
+    cmds:
+      # ★ -count=1 is not optional: `go test` caches the **result**, so a run
+      #   that happened not to trip a race is cached as "ok" and every later
+      #   run replays that verdict instead of testing anything. The detector
+      #   only helps if the tests really run.
+      - '{{.GO}} test -race -count=1 ./...'
+
+  test-install:
+    desc: 'Test the release installer against a local fake release'
+    cmds:
+      - sh scripts/install_test.sh
+
+  install-hooks:
+    desc: 'Install the pre-commit hooks (gitleaks + gofmt)'
+    silent: true
+    cmds:
+      - |
+        set -e
+        command -v pre-commit >/dev/null || {
+          echo "pre-commit is not installed — pipx install pre-commit (or brew install pre-commit)";
+          exit 1;
+        }
+        pre-commit install
+
+  lint:
+    desc: 'Go vet + gofmt + frontend oxlint + TypeScript type check'
+    deps: [lint-go, lint-web]
+
+  # ★ The two halves are separate targets so that a job that only needs one of
+  #   them does not have to install the other's toolchain: the CI runs
+  #   lint-go without bun and lint-web without Go. The recipe stays in one
+  #   place — `task lint` is still both of them.
+
+  lint-go:
+    desc: 'Go vet + gofmt (no frontend toolchain needed)'
+    silent: true
+    cmds:
+      - |
+        set -e
+        {{.GO}} vet ./...
+        files=$(gofmt -l .); if [ -n "$files" ]; then
+          echo "gofmt: these files are not gofmt-clean (gofmt -w <file>):";
+          echo "$files";
+          exit 1;
+        fi
+
+  lint-web:
+    desc: 'Frontend oxlint + TypeScript type check (no Go toolchain needed)'
+    dir: web
+    cmds:
+      - '{{.BUN}} run lint'
+      - '{{.BUN}} x tsc -b'
+
+  # ── Test environment ───────────────────────────────────────────────────────
+  #
+  # ★ The tests use **another** set of configuration and ports, completely
+  #   separate from development (defined in .env.test):
+  #
+  #     Development   Test
+  #     :8080         :18099   openheron itself (its own config + session directory)
+  #     :5173         :15173   Vite
+  #     —             :18180   E2E fake backend
+  #
+  #   Different ports are only the first layer. **State** must be isolated too:
+  #   openheron writes its sessions under the config root's state/ directory,
+  #   and a test writing there pollutes the real session history. So test-backend
+  #   uses .openheron-test/ as the project root, pre-seeds its own .openheron/,
+  #   and names the config root with OPENHERON_CONFIG_DIR — the config root
+  #   **never searches upwards**, so it structurally cannot reach the
+  #   repository's copy.
+
+  test-env-backend:
+    desc: 'Start the test instance (:18099, its own config and sessions; foreground)'
+    deps: [build-go]
+    cmds:
+      - sh scripts/test-backend.sh --reset
+
+  test-env-reset:
+    desc: 'Only rebuild the test environment directories, do not start'
+    cmds:
+      - sh scripts/test-backend.sh --reset --prepare-only
+
+  test-env-sync:
+    desc: 'Sync the development-side agent definitions into the test environment'
+    cmds:
+      - sh scripts/test-backend.sh --sync --prepare-only
+
+  kb-index:
+    desc: 'Rebuild the knowledge base index (a full run takes on the order of ten minutes, see docs/kb-design.md §9.2)'
+    deps: [build-go]
+    cmds:
+      - '{{.BIN}} kb index'
+
+  kb-status:
+    desc: 'Inspect the knowledge base index (no embedding service needed)'
+    deps: [build-go]
+    cmds:
+      - '{{.BIN}} kb status'
+
+  smoke:
+    desc: 'Integration smoke tests (against the test instance :18099; override the target with OPENHERON_BASE)'
+    dir: web
+    cmds:
+      - '{{.BUN}} run smoke:interop'
+      - '{{.BUN}} run smoke:no-undefined-url'
+      - '{{.BUN}} run smoke:hitl'
+
+  test-e2e:
+    desc: 'Browser E2E (brings its own fake backend, uses :15173/:18180, never takes the development ports)'
+    dir: web
+    cmds:
+      - '{{.BUN}} x playwright test'
+
+  check:
+    desc: 'Full verification before committing'
+    deps: [lint, test, test-race]
+
+  clean:
+    desc: 'Remove the build artifacts'
+    cmds:
+      - 'rm -rf {{.BIN}} tmp web/dist {{.RELEASE_DIR}}'
