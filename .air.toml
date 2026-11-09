@@ -61,13 +61,41 @@ tmp_dir = "tmp"
   exclude_regex = []
   delay = 200
   stop_on_error = false
+  # ★ On Windows this setting changes nothing but the noise: the Windows path
+  #   always uses TASKKILL, and it says so on every restart
+  #   ("send_interrupt is not supported on Windows, using TASKKILL instead").
+  #   It is kept because the Unix path uses it for a **graceful** stop, and
+  #   openheron has state to flush when it goes down.
   send_interrupt = true
+  # ★ The delay between the interrupt and the hard kill — **on Unix only**.
+  #   air reads it in `util_unix.go` / `util_linux.go`; the Windows path
+  #   (`util_windows.go`) goes straight to TASKKILL and never looks at it.
+  #   So the "give the port time to come back" it buys is a Unix fact — the
+  #   Windows port race is handled by the sweep below.
   kill_delay = "500ms"
-  # Wait a little after the binary is rebuilt before starting it, giving air
-  # time to release the listening port. Without that you get an occasional
-  # "bind: address already in use" — which shows up as "I changed the code and
-  # the service did not start", and is easily misread as a build failure.
   post_cmd = []
+
+# ★ The Windows-only sweep, and why it exists.
+#
+#   On Windows the server is a **grandchild**: air starts it through
+#   PowerShell (`powershell -NoProfile -NonInteractive -Command ...`), and the
+#   kill targets that wrapper with `TASKKILL /F /T /PID`. The tree kill can
+#   miss the grandchild — and an orphan that still holds :8080 makes every
+#   later instance die with "listen tcp :8080: bind: Only one usage of each
+#   socket address", which reads like a build failure and is not one.
+#
+#   ★ air runs pre_cmd **after** it stopped the current instance and **before**
+#   it starts the new one, so this is the one window in which the port can be
+#   made sure to be free. By image name, so an orphan is caught whatever its
+#   parent was.
+#
+#   `exit 0` keeps the sweep quiet: nothing to kill is not an error, and air
+#   logs a failed pre_cmd on every build otherwise.
+#
+#   ★ It ends **every** openheron-dev on the machine, including one started by
+#   hand — only one of them can hold the port anyway.
+[build.windows]
+  pre_cmd = ["Get-Process openheron-dev -ErrorAction SilentlyContinue | Stop-Process -Force; exit 0"]
 
 [run]
   # Reuse the default port that Vite proxies to. During development the
