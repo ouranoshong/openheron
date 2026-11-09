@@ -80,6 +80,13 @@ func newTestBuilderWithConfig(t *testing.T, cfg *spec.Config) *Builder {
 
 		return &stubModel{}, nil
 	}
+	// ★ The builder owns the MCP clients, and a client owns a child process.
+	//   A test that starts a server and never closes the builder leaves that
+	//   child alive — on Linux it is an orphan nobody notices, on Windows it
+	//   keeps a handle on the test executable, and `go test` then cannot
+	//   delete it: "unlinkat ...build.test.exe: Access is denied" turns the
+	//   whole suite red over a test that passed.
+	t.Cleanup(b.Close)
 	return b
 }
 

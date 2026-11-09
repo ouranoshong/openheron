@@ -376,6 +376,14 @@ func TestTheSilentServerDoesNotTakeTheOthersDownWithIt(t *testing.T) {
 	}
 
 	m := newMCPManager(nil)
+	// ★ The manager owns the child processes it starts. This one starts a
+	//   silent child that stays alive for two minutes on purpose, and a
+	//   manager that is never closed leaves it running: on Linux it is an
+	//   orphan nobody notices, on Windows it keeps a handle on the test
+	//   executable and `go test` then fails to delete it —
+	//   "unlinkat ...build.test.exe: Access is denied" — over a test that
+	//   passed.
+	defer m.Close()
 	begin := time.Now()
 	_, _, err = m.Tools(context.Background(), silentMCPCfg(t))
 	elapsed := time.Since(begin)
