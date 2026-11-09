@@ -1,0 +1,29 @@
+# ★ All text files are stored and checked out as LF.
+#   The Git used on Windows here has core.autocrlf=true globally, so without
+#   this file a checkout rewrites every tracked text file to CRLF even though
+#   the committed blobs are LF. gofmt then reports every Go file as "not
+#   formatted" on Windows, and shell scripts lose their shebang on Unix —
+#   failures that have nothing to do with the code.
+#   `eol=lf` in .gitattributes outranks core.autocrlf / core.eol and applies
+#   to this repository only: no global git config is modified. `text=auto`
+#   keeps Git from trying to normalize binary payloads.
+
+* text=auto eol=lf
+
+# CMD batch files are the one exception: they genuinely need CRLF if added.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Never let text=auto guess wrong about binary payloads.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.zip binary
+*.gz binary
+*.exe binary
+*.wasm binary

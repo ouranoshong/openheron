@@ -1,0 +1,22 @@
+# Demo project commands for the Docker Sandbox Kit example.
+#
+# ★ The Makefile's first target was `test`, so a bare `make` ran the tests.
+#   Task has no "first target" rule: `default` keeps that behaviour explicit.
+
+version: '3'
+
+tasks:
+  default:
+    desc: 'Run the Go test suite (the bare-command default)'
+    cmds:
+      - task: test
+
+  test:
+    desc: 'Run the Go test suite'
+    cmds:
+      - go test ./...
+
+  run:
+    desc: 'Run the demo program'
+    cmds:
+      - go run .
