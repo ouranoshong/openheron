@@ -430,8 +430,8 @@ tasks:
         pre-commit install
 
   lint:
-    desc: 'Go vet + gofmt + frontend oxlint + TypeScript type check'
-    deps: [lint-go, lint-web]
+    desc: 'Go vet + gofmt + frontend oxlint + TypeScript type check + the bilingual document pairs'
+    deps: [lint-go, lint-web, lint-docs]
 
   # ★ The two halves are separate targets so that a job that only needs one of
   #   them does not have to install the other's toolchain: the CI runs
@@ -457,6 +457,15 @@ tasks:
     cmds:
       - '{{.BUN}} run lint'
       - '{{.BUN}} x tsc -b'
+
+  # ★ The bilingual pairs are checked by a script, not by a human's eye: the
+  #   identifier sets have to be byte-identical, and the code blocks have to
+  #   agree on every command and path. The Chinese version keeps its own
+  #   comments — the repository's convention, and AGENTS.md does it too.
+  lint-docs:
+    desc: 'The bilingual document pairs: identifier sets, code blocks, line references'
+    cmds:
+      - python3 scripts/check-doc-pairs.py
 
   # ── Test environment ───────────────────────────────────────────────────────
   #
