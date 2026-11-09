@@ -96,6 +96,16 @@ vars:
   # Only kit-push-mixin sets this, through the task call below.
   MIXINS: ''
 
+  # ★ The configuration root the **server** will read: $OPENHERON_CONFIG_DIR
+  #   when it is set, else <project-root>/.openheron. `openheron init` has to
+  #   write to that exact root, or the server starts and finds nothing — and
+  #   init deliberately ignores $OPENHERON_CONFIG_DIR (it writes where it is
+  #   pointed, so it never writes somewhere else than asked). So the
+  #   environment variable is passed through explicitly here.
+  #   CLI_ARGS comes after this in the init task, so a flag the caller gives
+  #   wins over this default.
+  INIT_ARGS: '{{if .OPENHERON_CONFIG_DIR}}--config-dir "{{.OPENHERON_CONFIG_DIR}}"{{else}}--dir "{{.ROOT_DIR}}"{{end}}'
+
 tasks:
   # The Makefile's first target was `help`, so a bare `make` printed the help.
   # Task has no "first target" rule; `default` keeps that behaviour explicit.
@@ -157,6 +167,37 @@ tasks:
     deps: [build-go]
     cmds:
       - '{{.BIN}}'
+
+  # ── Configuration ───────────────────────────────────────────────────────────
+  #
+  # ★ The server reads exactly one configuration root — $OPENHERON_CONFIG_DIR,
+  #   else <project-root>/.openheron — and refuses to start without one:
+  #   "no configuration at <root>: run `openheron init` to create one". The
+  #   repository ships .openheron-example/ (the sample) but not .openheron/
+  #   (the real one — it holds the developer's own model and API key, so it
+  #   is git-ignored). A fresh clone therefore cannot start the server at
+  #   all, and this is the command that makes it startable.
+  #
+  # ★ init writes only the files that are missing and keeps the ones that are
+  #   already there ("kept <file> (already exists)"), so it is **idempotent**:
+  #   running it on a configured tree changes nothing and exits 0. Running it
+  #   twice is therefore safe, and a half-written tree can be topped up by
+  #   running it again.
+  #
+  # ★ The binary is the one `init` lives in: `init` is a subcommand of
+  #   openheron, not a separate program. build-go is a dependency because
+  #   the subcommand has to be in a binary to be run.
+  #
+  # ★ Extra flags pass through: `task init -- --model deepseek/deepseek-chat`
+  #   reaches `openheron init` unchanged. CLI_ARGS is empty when there are
+  #   none, so the plain `task init` needs no quoting of its own.
+
+  init:
+    desc: 'Create the project configuration in .openheron/ (the files that are missing)'
+    deps: [build-go]
+    silent: true
+    cmds:
+      - '{{.BIN}} init {{.INIT_ARGS}} {{.CLI_ARGS}}'
 
   # ── Install ────────────────────────────────────────────────────────────────
   #

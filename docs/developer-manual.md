@@ -19,11 +19,21 @@
 | Ports | see `.env.test` (repository root, committed) |
 
 ```bash
+make init          # create .openheron/ — the configuration the server reads (once per clone)
 make build-go     # backend only (no UI) — fastest while iterating on Go code
 make web-dev      # Vite dev server (:5173, proxies /v2 to :8080)
 make dev          # air: rebuild and restart the Go binary automatically
 make check        # lint + test — run this before committing
 ```
+
+★ **The server refuses to start without a configuration**: it reads exactly one
+config root — `$OPENHERON_CONFIG_DIR`, else `<project-root>/.openheron` — and
+reports `no configuration at <root>: run openheron init to create one` when it
+is empty. The repository ships `.openheron-example/` (the sample) but not
+`.openheron/` (the real one: it holds your own model and API key, so it is
+git-ignored). **`make init` is therefore the first command on a fresh clone.**
+It writes only the files that are missing and keeps the ones already there, so
+running it twice changes nothing.
 
 ## 2. Repository layout
 

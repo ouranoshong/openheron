@@ -60,6 +60,20 @@ build-go: ## Build the backend only (no frontend rebuild) — for fast iteration
 run: build-go ## Run the binary (the UI comes from the existing web/dist)
 	$(BIN)
 
+# ★ The configuration the server reads: $OPENHERON_CONFIG_DIR when it is set,
+#   else <project-root>/.openheron. init has to write to that exact root, or
+#   the server starts and finds nothing — and `openheron init` deliberately
+#   ignores $OPENHERON_CONFIG_DIR (it writes where it is pointed, so it never
+#   writes somewhere else than asked). So the environment variable is passed
+#   through explicitly here.
+#   INIT_FLAGS carries the caller's own flags and comes last, so they win
+#   over this default: `make init INIT_FLAGS=--model deepseek/deepseek-chat`.
+INIT_ARGS := $(if $(OPENHERON_CONFIG_DIR),--config-dir "$(OPENHERON_CONFIG_DIR)",--dir "$(REPO_ROOT)")
+
+.PHONY: init
+init: build-go ## Create the project configuration in .openheron/ (the files that are missing)
+	$(BIN) init $(INIT_ARGS) $(INIT_FLAGS)
+
 # ── Install ────────────────────────────────────────────────────────────────
 #
 # The artifact is a **single binary** (the UI is already embedded with

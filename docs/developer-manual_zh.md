@@ -17,11 +17,19 @@
 | 端口 | 见 `.env.test`（仓库根，已提交） |
 
 ```bash
+make init          # 创建 .openheron/ —— 服务端读的配置（每个克隆只需一次）
 make build-go     # 只构建后端（不含界面），迭代 Go 代码时最快
 make web-dev      # Vite dev server（:5173，代理 /v2 到 :8080）
 make dev          # air：Go 自动重建重启
 make check        # lint + test，提交前跑这个
 ```
+
+★ **没有配置，服务端就不启动**：它只读一个配置根 —— `$OPENHERON_CONFIG_DIR`，
+否则 `<项目根>/.openheron` —— 为空时报 `no configuration at <root>: run
+openheron init to create one`。仓库里带的是 `.openheron-example/`（样例），
+不是 `.openheron/`（真正那份：里面是你的模型和 API key，所以被 git 忽略了）。
+**所以新克隆之后第一个命令就是 `make init`。** 它只写缺的文件，已经在的保留，
+跑两遍不会有任何变化。
 
 ## 2. 仓库结构
 
