@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/google/uuid"
 
 	"github.com/ouranoshong/openheron/message"
 	"github.com/ouranoshong/openheron/storage"
@@ -107,6 +108,9 @@ func Compact(ctx context.Context, sess storage.Session, sum Summarizer) (*Compac
 	if agent := sess.AgentID(); agent != "" {
 		message.StampAgent(summary, agent)
 	}
+	// ★ The boundary lands in the middle of the transcript, so it renumbers
+	//   its neighbours. It carries an id of its own for that reason.
+	message.StampMessageID(summary, uuid.NewString())
 	if err := sess.Append(summary); err != nil {
 		return nil, err
 	}

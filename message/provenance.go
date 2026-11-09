@@ -13,6 +13,17 @@ const (
 	ExtraReasoningMs = "openheron_reasoning_ms"
 	ExtraModel       = "openheron_model"
 	ExtraThinking    = "openheron_thinking"
+
+	// ExtraMessageID is the message's own identity.
+	//
+	// ★ It lives in Extra because eino's schema.Message has no id field, and
+	//   Extra is the one place a message can carry metadata that survives the
+	//   transcript's JSON round trip (see StampCompaction for the same shape).
+	//
+	// ★ It must be a **string**: the checkpoint encodes messages with gob,
+	//   and gob cannot encode an unregistered value in an interface — see
+	//   the type allow-list in provenance_gob_test.go.
+	ExtraMessageID = "openheron_message_id"
 )
 
 const tsLayout = "2006-01-02T15:04:05.000000000Z07:00"

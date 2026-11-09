@@ -41,7 +41,24 @@ var defaultRules = []string{
 
 // buildInput returns the agent input for one turn: a transient context prompt
 // followed by history. The context prompt is never persisted to the session.
-func (c InputConfig) buildInput(ctx context.Context, p inputParams, query string) (*adk.TypedAgentInput[*schema.Message], error) {
+//
+// ★ query is the turn's **user message object**, not its text.
+//
+//		The caller builds the message, hands it here, and persists it only after
+//		this succeeds. Two things fall out of that order:
+//
+//	  - The history does not carry the question yet, so the model sees it
+//	    exactly once. Appending the text again — as this function used to —
+//	    handed the model the same question twice.
+//
+//	  - The message the model sees is the **same object** the transcript
+//	    holds, so anything stamped on it (an attachment list, a provenance
+//	    stamp, a message id) reaches the model too. A copy rebuilt from the
+//	    text would carry none of it.
+//
+// A nil query means "no question this turn": the input is the context and
+// the history alone.
+func (c InputConfig) buildInput(ctx context.Context, p inputParams, query *schema.Message) (*adk.TypedAgentInput[*schema.Message], error) {
 	messages := make([]*schema.Message, 0, len(p.History)+2)
 	messages = append(messages, newSystem(c.contextPrompt(ctx, p.Workspace)))
 
@@ -51,8 +68,8 @@ func (c InputConfig) buildInput(ctx context.Context, p inputParams, query string
 			messages = append(messages, msg)
 		}
 	}
-	if query != "" {
-		messages = append(messages, newUser(query))
+	if query != nil {
+		messages = append(messages, query)
 	}
 
 	return &adk.TypedAgentInput[*schema.Message]{

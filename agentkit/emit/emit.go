@@ -663,6 +663,12 @@ func (s *streamState) finish() streamOutcome {
 	}
 	for _, m := range out.intermediates {
 		message.StampReasoningMs(m, s.reasoningMs(s.msgID))
+		// ★ The message carries the id the stream already used for it. The
+		//   client keys a message by that id, so a message that streams
+		//   under one id and lands in the transcript under another is two
+		//   messages to the client — the conversation rebuilds itself on
+		//   every reload.
+		message.StampMessageID(m, s.msgID)
 	}
 	return out
 }
@@ -796,6 +802,10 @@ func (d *deriver) emitMessage(msg *schema.Message, sub, owner string) []*schema.
 		})
 	}
 	if message.HasContent(msg) {
+		// ★ The message carries the id the stream used for it, so the
+		//   client sees one message rather than two — see the streaming
+		//   path for the same stamp.
+		message.StampMessageID(msg, msgID)
 		return []*schema.Message{msg}
 	}
 	return nil

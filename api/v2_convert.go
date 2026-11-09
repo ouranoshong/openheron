@@ -21,7 +21,7 @@ func toAgUiMessage(m *schema.Message, index int) (types.Message, bool) {
 	if m == nil {
 		return types.Message{}, false
 	}
-	out := types.Message{ID: stableID(m, index)}
+	out := types.Message{ID: messageIDOf(m, index)}
 
 	prov, _ := message.Read(m)
 
@@ -147,9 +147,33 @@ func firstToken(v string) string {
 	return string(out)
 }
 
+// messageIDOf returns the wire id of one message.
+//
+// ★ A message that carries its own id keeps it, whatever happens to the
+//
+//	transcript around it. The derived id (see stableID) mixes the content
+//	with the message's **position**, so inserting a compaction marker in
+//	front of it renumbers it — and the client, which keys its messages by
+//	this id, would rebuild the whole conversation on every compaction.
+//
+// ★ The fallback is what makes this safe to ship: a transcript written before
+//
+//	messages carried ids still gets a usable id, derived exactly as before.
+func messageIDOf(m *schema.Message, index int) string {
+	if id := message.MessageID(m); id != "" {
+		return id
+	}
+	return stableID(m, index)
+}
+
 // stableID derives a message id from content **and position**, so repeated
 // fetches of the same transcript produce the same ids and the client's reducer
 // keys stay stable across a reload.
+//
+// ★ It is the fallback for a message that carries no id of its own. Its id
+//
+//	depends on the message's position, so it is only stable while the
+//	transcript in front of the message stays the same.
 func stableID(m *schema.Message, index int) string {
 	var b []byte
 	b = append(b, []byte(string(m.Role))...)

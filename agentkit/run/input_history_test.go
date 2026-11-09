@@ -185,7 +185,7 @@ func TestBuildRunsHistoryThroughNormalize(t *testing.T) {
 			schema.UserMessage("q"),
 			assistantWithCalls("c1"),
 		},
-	}, "next")
+	}, schema.UserMessage("next"))
 	if err != nil {
 		t.Fatal(err)
 	}

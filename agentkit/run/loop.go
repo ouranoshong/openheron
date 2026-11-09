@@ -9,6 +9,7 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
+	"github.com/google/uuid"
 
 	"github.com/ouranoshong/openheron/agentkit/emit"
 	"github.com/ouranoshong/openheron/agentkit/obs"
@@ -65,14 +66,17 @@ func (rt *Runtime) makeGenInput(sess storage.Session, turn *Turn) func(context.C
 
 		userMsg := message.NewUser(queryItem.Query)
 		message.StampNow(userMsg)
-		if err := sess.Append(userMsg); err != nil {
-			rt.logf("session=%s failed to persist user message: %v", sess.ID(), err)
-		}
+		message.StampMessageID(userMsg, uuid.NewString())
 
+		// ★ Build first, persist second. The message the model sees is the
+		//   same object the transcript will hold, so anything stamped on it
+		//   — the id, an attachment list — reaches the model too. And a
+		//   build that fails leaves no half-written question behind: the
+		//   transcript only learns about the turn once the turn can start.
 		built, err := rt.cfg.Input.buildInput(ctx, inputParams{
 			History:   sess.Messages(true),
 			Workspace: sess.Workspace(),
-		}, queryItem.Query)
+		}, userMsg)
 		if err != nil {
 			// ★ Same rule as the build: an error the framework records but
 			//   nobody hands to the turn is an error the client never sees.
@@ -82,6 +86,13 @@ func (rt *Runtime) makeGenInput(sess storage.Session, turn *Turn) func(context.C
 			fail := fmt.Errorf("assemble turn input: %w", err)
 			turn.fail(fail)
 			return nil, fail
+		}
+
+		if err := sess.Append(userMsg); err != nil {
+			// ★ A failed write does not cost the model the question: the
+			//   input is already assembled and carries it. The transcript
+			//   loses the record, and the turn still answers.
+			rt.logf("session=%s failed to persist user message: %v", sess.ID(), err)
 		}
 
 		return &adk.GenInputResult[loopItem, *schema.Message]{
@@ -251,6 +262,11 @@ func (rt *Runtime) archive(sess storage.Session, turn *Turn, out Outcome) {
 	rt.archiveCompaction(sess, out)
 
 	for _, msg := range out.Intermediates {
+		// ★ Every archived message carries its own id, so the client can key
+		//   it no matter what the transcript looks like later. A message
+		//   that already has one keeps it — the stream may have stamped it
+		//   before it reached here.
+		message.StampMessageID(msg, uuid.NewString())
 		if err := sess.Append(msg); err != nil {
 			rt.logf("session=%s failed to archive intermediate message: %v", sess.ID(), err)
 		}
@@ -293,6 +309,10 @@ func (rt *Runtime) archiveCompaction(sess storage.Session, out Outcome) {
 	if agent := sess.AgentID(); agent != "" {
 		message.StampAgent(msg, agent)
 	}
+	// ★ The boundary is the one message that lands in the **middle** of the
+	//   transcript, so it is the one that renumbers its neighbours. It needs
+	//   an id of its own for the same reason every other message does.
+	message.StampMessageID(msg, uuid.NewString())
 	if err := sess.Append(msg); err != nil {
 		rt.logf("session=%s failed to persist the compacted message: %v", sess.ID(), err)
 	}
