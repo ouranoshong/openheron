@@ -196,6 +196,30 @@ type Attachment struct {
 `put()`（`message/provenance.go:60`）已经是「只写一次」的语义，
 `StampAttachments` 直接复用它。
 
+★ **清单在 `Extra` 里存的是 JSON 字节，不是 `[]Attachment`。**
+
+`Extra` 的值在 checkpoint 写入时走 **gob** 编码，而 gob 编不了
+interface 里没注册过的类型 —— `[]message.Attachment` 会让 checkpoint
+在 stop 的时候写失败（实测：`gob: type not registered for interface:
+[]message.Attachment`），留下一半写坏的审批。
+
+字节在白名单里（`string / int64 / int / bool / float64 / []byte`），
+而 JSON 本来就是 transcript 载它的形式。所以：
+
+```go
+// StampAttachments 把清单写成 JSON 字节。
+//
+// ★ 存的是字节，不是 []Attachment：Extra 在 checkpoint 写入时走 gob，
+//   而 gob 编不了 interface 里没注册过的类型 —— 一个 []Attachment 会
+//   让 checkpoint 在 stop 时写失败。字节在白名单里。
+func StampAttachments(msg *schema.Message, atts []Attachment)
+```
+
+★ **读的时候要认三种形态**（`ReadAttachments`）：本包写的 `[]byte`、
+JSON 往返之后变成的 **base64 字符串**（JSON 把 `[]byte` 编成字符串），
+以及调用方可能直接塞进去的 `[]Attachment`。JSON 往返之后的那种形态
+才是 transcript 真正载着的形态。
+
 ### 3.2 为什么用 `Extra` 而不是消息的正文
 
 ★ 因为**正文是给模型看的，`Extra` 是给程序看的**。
@@ -261,9 +285,18 @@ type runAttachment struct {
     Name string `json:"name"`
     Path string `json:"path"`   // 相对 session workspace
     Size int64  `json:"size"`
-    MIME string `json:"mime,omitempty"`
 }
 ```
+
+★ **线上没有 content type。** 内容类型由**服务端按文件名判定**
+（`message.MIMEOfExt`）：客户端要是把一个文本文件说成 `image/png`，
+服务端就会去把一段文本当图片读，模型于是对着它没有看见过的图片作答。
+判定不了的扩展名一律是 `application/octet-stream` —— 猜错的代价是模型
+读不到文件，诚实作答的代价只是「它当文本读」。
+
+★ **`Size` 是客户端的说法，服务端不信。** 服务端自己 `stat` 了一遍，
+清单里记的是文件自己的大小。留着这个字段是为了让「客户端的说法」与
+「文件的实情」有一处可以对照的地方，不是为了用它。
 
 ★ **`isAttachRequest` 要跟着改**（`api/v2_run.go:193`）：它现在用
 「没有 query、没有 messages、没有 resume」来判断「这是重连而不是新问题」。
@@ -295,6 +328,17 @@ func resolveAttachments(sess storage.Session, in []runAttachment) ([]message.Att
 ★ 顺带一提：`safeJoin` 在 `storage/filestore` 包内，是**未导出**的。
 `api` 包要用它，要么把它导出，要么在 `storage.Session` 上加一个方法。
 **建议后者** —— 见 §7.2。
+
+★ **落地时用的是后者**：`storage.Session` 上多了两个方法，
+`ResolveWorkspaceFile(name)` 与 `DeleteWorkspaceFile(name)`，
+`filestore` 里各自转调 `safeJoin`。★ **越界的名字是拒绝，不是夹取** ——
+夹取会解析到另一个文件，模型就会对着另一个文件作答，而且没有任何东西
+说它读错了。
+
+★ **路径必须是 workspace 里的相对路径，所以上传与列举接口返回的也是
+相对路径**（`POST/GET /v2/sessions/:id/files` 的 `path`）。
+客户端要把这个路径原样送回下一轮的问题里，它得是**服务端自己认得的
+那个名字**，而不是某台机器上的一个目录。
 
 ### 4.3 ★ 落盘：清单写进那条用户消息
 
@@ -378,35 +422,38 @@ eino 支持这条路（`schema.ChatMessagePartTypeImageURL`，
 OpenAI 的 acl 也支持（`eino-ext/libs/acl/openai@v0.1.17/chat_model.go`
 的 `toOpenAIMultiContent`）。
 
-所以一条带图片的用户消息是这样构造的：
+所以一条带图片的用户消息是这样构造的（`agentkit/run/attachments.go`
+的 `inlineImage`）：
 
 ```go
-func userMessageWithImages(text string, imgs []imageAttachment) (*schema.Message, error) {
-    msg := schema.UserMessage(text)
-    if len(imgs) == 0 {
-        return msg, nil
+func inlineImage(workspace string, att message.Attachment) (schema.MessageInputPart, error) {
+    // 现读盘，现编码
+    data, err := os.ReadFile(filepath.Join(workspace, att.Path))
+    if err != nil {
+        return schema.MessageInputPart{}, err
     }
-    parts := make([]schema.MessageInputPart, 0, len(imgs))
-    for _, img := range imgs {
-        b64, err := img.base64()   // 现读盘，现编码
-        if err != nil {
-            return nil, err
-        }
-        parts = append(parts, schema.MessageInputPart{
-            Type: schema.ChatMessagePartTypeImageURL,
-            Image: &schema.MessageInputImage{
-                MessagePartCommon: schema.MessagePartCommon{
-                    URL:     "data:" + img.MIME + ";base64," + b64,
-                    MIMEType: img.MIME,
-                },
-                Detail: schema.ImageURLDetailAuto,
+    if len(data) > maxInlineImageBytes {
+        return schema.MessageInputPart{}, fmt.Errorf(...)
+    }
+    b64 := base64.StdEncoding.EncodeToString(data)
+    return schema.MessageInputPart{
+        Type: schema.ChatMessagePartTypeImageURL,
+        Image: &schema.MessageInputImage{
+            MessagePartCommon: schema.MessagePartCommon{
+                // ★ 字节进 Base64Data，类型进 MIMEType —— eino 推荐的是
+                //   这个，不是 data: URL。
+                Base64Data: &b64,
+                MIMEType:   mime,
             },
-        })
-    }
-    msg.UserInputMultiContent = parts
-    return msg, nil
+            Detail: schema.ImageURLDetailAuto,
+        },
+    }, nil
 }
 ```
+
+★ **用 `Base64Data` 而不是 `data:` URL**：eino 的
+`MessagePartCommon` 两者都收，但推荐的是前者，openai 的适配器也是按
+它转成 provider 要的形状的。
 
 ★ **base64 现读现编，不落 transcript。** 这是 §2 决策 5 的兑现：
 transcript 里只有 `{"name":"shot.png","path":"shot.png","size":...,"mime":"image/png"}`，
@@ -724,6 +771,14 @@ async send(text) {
 所以 `GET /v2/sessions/{id}/files` **不能直接**用来还原消息上的清单。
 它只能还原**待发清单**（用户还没发出去的那些）。
 
+★ **落地时补了一条判据**：workspace 里**没有任何消息认领过**的文件才是
+「待发」。一条消息认领过的文件是**跟那条问题一起发出去的**，
+把它放回待发清单，下一个问题就会再发一次 —— 用户只问了一次。
+判据是拿文件清单和 transcript 里的消息级清单对一下
+（`web/src/lib/store/actions.ts` 的 `restorePendingFiles`）。
+
+★ 清单是**合并**而不是覆盖的：用户刚上传的文件比还在路上的那份列举新。
+
 ★ 真正的消息级清单在 **transcript 里**（§3.1 的 `Extra`），
 所以历史水合时它会跟着消息一起回来（§5.5）。
 
@@ -766,9 +821,15 @@ export type Part = TextPart | ReasoningPart | ToolPart | AttachmentPart
 另有三处按 `"tool"` 精确匹配（`:499`、`:508`、`:511` 附近）。
 漏一处就是附件渲染不出来。
 
+★ **落地时这四处都改了**，而且改法不止是「加一个 case」：
+`attachment` part **没有 `complete` 这个字段**，所以
+`p.kind === kind && p.complete === false` 这种写法在联合类型变宽之后
+**编译不过**（`kind` 是个变量，TypeScript 没法靠它收窄 `p`）。
+抽了一个 `isOpenPart(p, kind)` 出来做收窄，四个地方都用它。
+
 ### 5.6 「移除」的语义要说清楚
 
-★ 现在 `removeFile`（`web/src/lib/store/actions.ts:202`）只改前端 map，
+★ 原来 `removeFile`（`web/src/lib/store/actions.ts:202`）只改前端 map，
 服务端文件还在 —— **这是 bug**，但修的方向要小心：
 
 - **待发清单里的附件** → 移除 = 真的删掉 workspace 里的文件。
@@ -777,6 +838,14 @@ export type Part = TextPart | ReasoningPart | ToolPart | AttachmentPart
 
 ★ 所以「删除文件」这个动作的粒度是**文件**，而附件清单的粒度是**消息**。
 两个粒度不要混：一个文件可能被多条消息引用（用户可以两次引用同一个文件）。
+
+★ **落地时端点是 `DELETE /v2/sessions/:id/files?path=<相对路径>`**：
+`path` 是 workspace 里的相对名，越界的名字被拒（`DeleteWorkspaceFile`
+走的是 `safeJoin`）。★ **删一个不存在的文件不是错误** ——
+调用方要的是「这个文件没了」，而它确实没了。
+
+★ 前端删失败时**要把 chip 放回去**：一个把服务端还留着的文件藏起来的
+chip 是在说谎。
 
 ---
 
@@ -803,15 +872,15 @@ deepseek 的模型就不支持图片。§6 第 4 条的降级路径是**必须�
 
 | # | 文件 | 改动 |
 |---|---|---|
-| 1 | `message/attachment.go`（**新增**） | `Attachment` 类型、`ExtraAttachments` 键、`StampAttachments` / `ReadAttachments` |
-| 2 | `storage/storage.go` | `Session` 接口加 `PutAttachment` / `DeleteFile`（或复用 `PutFile` + 新增删除） |
-| 3 | `storage/filestore/session.go` | 实现新方法；★ `safeJoin` 保持未导出，让接口来封装 |
-| 4 | `api/v2_run.go` | `runInput.Attachments`、`isAttachRequest` 加附件判据、`resolveAttachments` |
-| 5 | `api/v2_files.go` | 加 `DELETE /v2/sessions/:id/files`（删单个文件） |
-| 6 | `agentkit/run/bridge.go` | `loopItem.Attachments` |
-| 7 | `agentkit/run/loop.go` | 落盘时 `StampAttachments`；★ 调用 `buildInput` 传**消息对象**（已做，见 §4.5） |
-| 8 | `agentkit/run/input.go` | ★ **重复的 query 追加（已修，见 §4.5）**；图片内联；文本清单进提示 |
-| 9 | `api/v2_convert.go` | `toAgUiMessage` 透出 `Metadata["attachments"]` |
+| 1 | `message/attachment.go`（**新增，已做**） | `Attachment` 类型、`ExtraAttachments` 键、`StampAttachments` / `ReadAttachments`；★ 清单存 JSON 字节（gob 白名单）；`MIMEOfExt` 按文件名判定类型 |
+| 2 | `storage/storage.go`（**已做**） | `Session` 接口加 `ResolveWorkspaceFile` / `DeleteWorkspaceFile` |
+| 3 | `storage/filestore/session.go`（**已做**） | 实现新方法；★ `safeJoin` 保持未导出，让接口来封装 |
+| 4 | `api/v2_run.go` + `api/v2_attachments.go`（**新增，已做**） | `runInput.Attachments`、`isAttachRequest` 加附件判据、`resolveAttachments` |
+| 5 | `api/v2_files.go`（**已做**） | `DELETE /v2/sessions/:id/files?path=`（删单个文件）；★ 上传与列举返回 **workspace 相对路径** |
+| 6 | `agentkit/run/bridge.go`（**已做**） | `loopItem.Attachments` |
+| 7 | `agentkit/run/loop.go`（**已做**） | 落盘时 `StampAttachments`；★ 调用 `buildInput` 传**消息对象**（见 §4.5） |
+| 8 | `agentkit/run/input.go` + `agentkit/run/attachments.go`（**新增，已做**） | ★ **重复的 query 追加（已修，见 §4.5）**；图片内联；文本清单进提示 |
+| 9 | `api/v2_convert.go`（**已做**） | `toAgUiMessage` 透出 `Metadata["attachments"]`；★ 只有附件没有正文的消息**不再被丢掉** |
 | 10 | `message/identity.go`（**新增，已做**） | ★ 消息 ID：`StampMessageID` / `MessageID`（见 §4.7） |
 | 11 | `agentkit/emit/emit.go`（**已做**） | ★ 流式消息盖上自己的 msgID（见 §4.7.3） |
 
@@ -819,13 +888,14 @@ deepseek 的模型就不支持图片。§6 第 4 条的降级路径是**必须�
 
 | # | 文件 | 改动 |
 |---|---|---|
-| 1 | `web/src/lib/types.ts` | `AttachmentPart` + `Part` 联合类型 |
-| 2 | `web/src/lib/store/state.ts` | `Attachment` 加 `mime` |
-| 3 | `web/src/lib/store/actions.ts` | `send` 带上附件；发完清空；`appendLocalUserMessage` 造附件 part；`removeFile` 调删除端点 |
-| 4 | `web/src/lib/api.ts` | `runStream` 请求体加 `attachments`；新增 `deleteFile` |
-| 5 | `web/src/components/composer.tsx` | ★ `onDrop` / `onDragOver` / `onPaste` |
-| 6 | `web/src/lib/events.ts` | 处理 `attachment` part；★ 检查所有 `switch (p.kind)` |
-| 7 | `web/src/components/message-list.tsx` | 渲染 `attachment` part |
+| 1 | `web/src/lib/types.ts`（**已做**） | `AttachmentPart` + `Part` 联合类型 |
+| 2 | `web/src/lib/store/state.ts`（**已做**） | `Attachment` 加 `mime` |
+| 3 | `web/src/lib/store/actions.ts`（**已做**） | `send` 带上附件；发完清空；`appendLocalUserMessage` 造附件 part；`removeFile` 调删除端点；★ 被拒的一轮把附件**还回**待发清单；★ 刷新后按 workspace 恢复待发清单 |
+| 4 | `web/src/lib/api.ts`（**已做**） | `runStream` 请求体加 `attachments`；新增 `deleteFile` / `listFiles` |
+| 5 | `web/src/components/composer.tsx`（**已做**） | ★ `onDrop` / `onDragOver` / `onPaste` |
+| 6 | `web/src/lib/events.ts`（**已做**） | ★ 检查所有 `switch (p.kind)`；`attachment` part 没有 `complete`，抽出 `isOpenPart` 做收窄 |
+| 7 | `web/src/lib/store/history.ts`（**已做**） | 从 `metadata.attachments` 重建 `attachment` part |
+| 8 | `web/src/components/message-parts.tsx` + `web/src/components/attachment-chip.tsx`（**新增，已做**） | 渲染 `attachment` part；★ 待发 chip 与历史 chip **是两个 test id** |
 
 ### 7.3 测试
 
@@ -837,14 +907,14 @@ deepseek 的模型就不支持图片。§6 第 4 条的降级路径是**必须�
 | 4 | `api/v2_message_id_test.go`（**已落地**） | ★ 压缩前后 ID 不变；无 ID 时退回派生的 |
 | 5 | `message/identity_test.go`（**已落地**） | ★ ID 扛得住 checkpoint 的 gob 编码 |
 | 6 | `agentkit/emit/identity_test.go`（**已落地**） | ★ 流式 ID 与归档 ID 一致 |
-| 7 | `agentkit/run/`（新增） | 附件清单随消息落盘，读回一致 |
-| 8 | `agentkit/run/`（新增） | 图片内联生成 `image_url` part；文本附件只给路径 |
-| 9 | `api/v2_runs_test.go` | 带附件的一轮**不被** `isAttachRequest` 误判 |
-| 10 | `api/v2_runs_test.go` | `..` 与绝对路径被拒（越权读文件） |
-| 11 | `web/test/e2e/`（新增 spec） | ★ 附件随消息发出、出现在历史里、刷新不丢 |
+| 7 | `message/attachment_test.go`（**已落地**） | ★ 清单存 JSON 字节；★ 三种形态都读得回来 |
+| 8 | `agentkit/run/attachments_test.go`（**已落地**） | 图片内联生成 `image_url` part；文本附件只给路径；★ 超大图片降级但**不静默**；★ 文件不在了**不**让整轮失败 |
+| 9 | `api/v2_attachments_test.go` + `api/v2_attachments_wire_test.go`（**已落地**） | 带附件的一轮**不被** `isAttachRequest` 误判；`..` 与绝对路径被拒；★ 清单从 metadata 透出；★ 上传路径是相对的；★ 删除端点 |
+| 10 | `web/test/store-attachments.test.ts`（**新增，已落地**） | ★ 请求体带附件；★ 发完清空；★ 被拒时还回；★ 刷新后恢复待发清单 |
+| 11 | `web/test/e2e/attachments.spec.ts`（**新增，已落地**） | ★ 附件随消息发出、出现在历史里、刷新不丢、拖拽、粘贴、★ × 删的是真文件 |
 
 ★ AGENTS.md 要求「**每一处界面改动都要有 Playwright 规格**」——
-拖拽、粘贴、chip 渲染三处都要。
+拖拽、粘贴、chip 渲染三处都有（`attachments.spec.ts`）。
 
 ---
 
@@ -888,16 +958,22 @@ deepseek 的模型就不支持图片。§6 第 4 条的降级路径是**必须�
    前端因此在每次压缩后重建整棵消息树。已落地：`message/identity.go`、
    `api/v2_convert.go`、`agentkit/emit/emit.go`。
 3. **§3 + §4.1-§4.3** —— 清单的模型与落盘。此时模型还看不见清单，
-   但 transcript 里已经有了 —— 可以用 `GET /v2/sessions/:id/messages` 验证。
-4. **§4.4** —— 装配：文本给路径、图片内联。模型第一次真的看见附件。
-5. **§5.5 + §7.2** —— 前端回看。历史里能看到附件 chip 了。
-6. **§5.1 + §5.3 + §7.3** —— 发送带附件、拖拽、粘贴、E2E。
-7. **§5.6 + §7.1(5)** —— 删除语义收尾。
+   但 transcript 里已经有了 —— 可以用 `GET /v2/sessions/:id/messages` 验证。**✅ 已完成。**
+4. **§4.4** —— 装配：文本给路径、图片内联。模型第一次真的看见附件。**✅ 已完成。**
+5. **§5.5 + §7.2** —— 前端回看。历史里能看到附件 chip 了。**✅ 已完成。**
+6. **§5.1 + §5.3 + §7.3** —— 发送带附件、拖拽、粘贴、E2E。**✅ 已完成。**
+7. **§5.6 + §7.1(5)** —— 删除语义收尾。**✅ 已完成。**
+   ★ 端点是 `DELETE /v2/sessions/:id/files?path=`，路径相对 workspace，
+   越界的名字被拒。
 
 ★ 前两刀单独切是有意的：**它们都不依赖任何附件的东西**，
 所以即使后面的设计被推翻，这两个 bug fix 依然成立。
 ★ 而且第 1 刀是第 3 步的**前提**：附件清单要挂在消息上，
 而「模型看到的那条」与「落盘的那条」必须是同一个对象。
+
+★ **落地时多走了一刀**：清单在 `Extra` 里存的是 **JSON 字节**而不是
+`[]Attachment`（gob 编不了没注册过的类型，checkpoint 会在 stop 时写失败）。
+见 §3.1。
 
 ---
 
@@ -916,20 +992,26 @@ deepseek 的模型就不支持图片。§6 第 4 条的降级路径是**必须�
 
 ## 12. 验收判据
 
-| # | 判据 | 怎么验 |
-|---|---|---|
-| 1 | ★ 用户消息在模型输入里**只出现一次** | `agentkit/run` 的回归用例 |
-| 2 | ★ 附件清单随消息落盘，读回一致 | transcript JSONL 里有 `openheron_attachments` |
-| 3 | ★ 文本附件让模型 `read_file` 读得到 | 冒烟：传一个 `.md`，模型引用它的内容 |
-| 4 | ★ 图片附件让模型**看得见** | 冒烟：传一张截图，问图里的字，模型答得对 |
-| 5 | ★ 带附件的一轮**不被**当成重连 | `api` 层用例 |
-| 6 | ★ 越权路径被拒 | `..` / 绝对路径的用例 |
-| 7 | ★ 刷新后历史里的附件还在 | Playwright |
-| 8 | ★ 拖拽与粘贴真的能用 | Playwright（假后端） |
-| 9 | ★ 超大图片降级为路径，**不静默** | 用例 |
-| 10 | ★ 不支持 vision 的模型不会让整轮失败 | 用例 |
+| # | 判据 | 怎么验 | 状态 |
+|---|---|---|---|
+| 1 | ★ 用户消息在模型输入里**只出现一次** | `agentkit/run` 的回归用例 | ✅ |
+| 2 | ★ 附件清单随消息落盘，读回一致 | transcript JSONL 里有 `openheron_attachments` | ✅ |
+| 3 | ★ 文本附件让模型 `read_file` 读得到 | 冒烟：传一个 `.md`，模型引用它的内容 | ⏳ 需真模型 |
+| 4 | ★ 图片附件让模型**看得见** | 冒烟：传一张截图，问图里的字，模型答得对 | ⏳ 需真模型 |
+| 5 | ★ 带附件的一轮**不被**当成重连 | `api` 层用例 | ✅ |
+| 6 | ★ 越权路径被拒 | `..` / 绝对路径的用例 | ✅ |
+| 7 | ★ 刷新后历史里的附件还在 | Playwright | ✅ |
+| 8 | ★ 拖拽与粘贴真的能用 | Playwright（假后端） | ✅ |
+| 9 | ★ 超大图片降级为路径，**不静默** | 用例 | ✅ |
+| 10 | ★ 不支持 vision 的模型不会让整轮失败 | 用例 | ✅ |
+| 11 | ★ 只有附件没有文字的一轮也是一轮 | `api` 层用例 | ✅ |
+| 12 | ★ 删一个附件删的是真文件 | `api` + Playwright | ✅ |
 
 ★ 第 3、4 条要**真的模型**才能验，所以它们属于 `task smoke` 而不是 CI
 （AGENTS.md：冒烟不进 CI，因为它们需要一个会回答的模型）。
-第 1、2、5、6、9、10 条是 Go 用例，进 CI。
+第 1、2、5、6、9、10、11、12 条是 Go 用例，进 CI。
 第 7、8 条是 Playwright，用假后端，进 CI。
+
+★ **第 10 条的落法**：内联失败**不**让整轮失败 —— 文件还在，
+模型可以把它当文本读或者用工具取。提示词里会写明「这个文件没有内联」，
+所以模型不会声称自己看见了一张没看见的图。

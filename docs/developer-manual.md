@@ -873,6 +873,45 @@ tells.
 ★ **The version tag is what a consumer pins.** `latest` moves; `0.0.7` does
 not. Both are published, and the tutorial says which to use when.
 
+### 3.10 ★ Putting something on a message
+
+A message carries more than its text: an id, a compaction marker, an attachment
+list. All of it rides in `message.Extra`, and there are **three rules** that
+are not obvious until they have bitten.
+
+**1. The value in `Extra` must be on gob's allow-list.** `Extra` is encoded
+with gob when the checkpoint is written, and gob cannot encode a value of an
+unregistered type inside an interface. A `[]message.Attachment` therefore fails
+the checkpoint write **at stop time** — long after the code that put it there
+looked fine — and leaves a half-written approval behind. The allow-list is
+`string` / `int64` / `int` / `bool` / `float64` / `[]byte`.
+
+★ **So a structured value is stored as JSON bytes**, and the reader accepts
+every shape it can meet: the bytes this package writes, the **base64 string**
+they become after a JSON round trip (JSON encodes `[]byte` as a string — and
+the transcript is JSON), and the struct slice a caller may have put there
+directly.
+
+**2. The stamp is written once.** `message.put` is write-once, deliberately: a
+message's identity is decided when it is born, and a message that is stamped
+again on its way through the pipeline keeps what it was born with.
+
+**3. The model must see the object the transcript holds.** The turn's user
+message is **built first and persisted second** (`agentkit/run/loop.go`):
+`buildInput` receives the message object, and `sess.Append` happens after it
+succeeds. ★ The other order has a hole — `Append` only logs its failure, so a
+failed append would leave the model with a question it never saw. The same
+ordering is what lets the attachment list reach the model: it is stamped on
+the one message, and the model is handed that one message.
+
+★ **A message has an id of its own** (`message/identity.go`). The derived id
+that `api/v2_convert.go` falls back to mixes the content with the message's
+**position**, so inserting a compaction marker in front of it renumbers it — and
+the frontend, which keys its messages by this id, would rebuild the whole
+conversation on every compaction. The fallback is what makes it safe to ship:
+a transcript written before messages carried ids still gets a usable id,
+derived exactly as before.
+
 ## 4. The frontend
 
 ### 4.1 The pure layers
@@ -1159,7 +1198,7 @@ the contract on its own — the extractor does not read one language to help the
 
 ### 5.5 Frontend unit tests
 
-`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **21 test files, 272
+`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **22 test files, 284
 cases**, covering the pure layers: `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
 `thinking.ts` / `turns.ts` / `approval.ts` / `settings-store.ts` and friends.
 
@@ -1194,7 +1233,7 @@ do not touch" assertions.
 
 ### 5.6 E2E
 
-`task test-e2e` → `playwright test`, **13 specs, 158 cases**: `agents` `chat`
+`task test-e2e` → `playwright test`, **14 specs, 185 cases**: `agents` `attachments` `chat`
 `compaction` `composer-autocomplete` `composer-meta` `history` `mcps` `multi-agent`
 `reattach` `scroll` `session-busy` `settings` `theme`.
 

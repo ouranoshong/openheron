@@ -783,7 +783,7 @@ the page sideways.
 |---|---|
 | `/new` | Start a new session |
 | `/stop` | Stop the current turn |
-| `/attach` | Attach files to the current session |
+| `/attach` | Attach files to the **next** message — see §6.9 |
 | `/settings` | Open the config editor |
 | `/agents` | Switch the session's agent |
 | `/mcps` | Show the MCP servers of this agent — see §6.8 |
@@ -988,6 +988,37 @@ there is no error yet, it is on its way. The tools it brings join the **next** t
 
 The **Refresh** button re-reads the state, so you can fix a server and see the fix without
 closing the dialog.
+
+### 6.9 Sending attachments
+
+Three ways in, and they all end in the same place — a row of chips above the composer:
+
+| How | What happens |
+|---|---|
+| The **paperclip** button | Opens the file picker |
+| **Dragging** files onto the composer | The composer highlights while the drag is over it |
+| **Pasting** | Ctrl+V with an image on the clipboard attaches it — no "save it as a file first" |
+
+★ **A file is attached to a *message*, not to a session.** The chips above the
+composer are waiting to go out with your **next** message; once you send, they
+leave the composer and appear on the message itself. A file that has been sent
+stays with that message — you can still see which one it was weeks later, after
+a reload.
+
+★ **The model really gets them.** A text file is handed to the model as a path
+it can read with `read_file`; an image is put into the request as an image, so
+the model *sees* it rather than reading bytes as text. ★ An image that is too
+large to inline falls back to a path — and the model is told it was not inlined,
+so it never claims to have seen a picture it did not see.
+
+★ **The × on a chip deletes the file.** Not just from the list: the file is
+removed from the session's workspace as well. ★ A file that already went out
+with a message is **not** deleted — that message says the file was part of the
+question, and deleting it would make the record lie.
+
+★ **A reload does not lose anything.** The files you have not sent yet come
+back (the server keeps them), and the files you already sent stay on their
+messages.
 
 ## 7. The knowledge base
 

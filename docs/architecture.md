@@ -631,6 +631,39 @@ disk** — that single ordering is what lets the busy flag be honest without a t
 A run that a crash left open is closed as `interrupted` during the startup pass, so
 a session never reads as busy for ever.
 
+### 5.4 ★ Attachments belong to a message, not to a session
+
+A file the user sends is bound to **the message it came with** — the list lives in
+the message's `Extra` (`message/attachment.go`), and the model sees it because the
+message the transcript holds is the very object the input is built from.
+
+★ **A session-level list could not answer the question that matters.** "What does
+this session have" is a different question from "that image you just sent", and
+only the second one is the one a user asks.
+
+The pieces:
+
+- `POST /v2/run` carries `attachments[]` — a name and a path **relative to the
+  session's workspace**. The server resolves it itself (`api/v2_attachments.go`)
+  and refuses a name that escapes the workspace; a name outside is rejected,
+  not clamped, because a clamped path would read a different file.
+- The list is stamped on the user message **as JSON bytes** — `Extra` is encoded
+  with gob when the checkpoint is written, and gob cannot encode a value of an
+  unregistered type inside an interface.
+- The assembly (`agentkit/run/attachments.go`) splits the list: a **text** file
+  becomes a path in the prompt, and the model reads it with `read_file`; an
+  **image** becomes a multimodal part, so the model *sees* it. ★ An image that
+  cannot be inlined (too large, or the model has no vision) falls back to a path
+  **and the model is told** — a silent fallback would have it claim to have
+  seen a picture it never saw.
+- `GET /v2/sessions/{id}/messages` carries the list back in the message's
+  metadata, so the history shows which file went with which question.
+
+★ **Deletion is per file, the binding is per message.** `DELETE
+/v2/sessions/{id}/files?path=` removes a file from the workspace; a file that
+already went out with a message stays with that message, because the message
+says the file was part of the question.
+
 ## 6. Storage
 
 `storage` defines the interfaces (`SessionManager` / `Session`); `storage/filestore`

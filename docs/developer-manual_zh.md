@@ -762,6 +762,36 @@ sed -i "s|^    default: .*|    default: \"$NEXT\"|" sandbox-kit/openheron/openhe
 ★ **版本 tag 是消费者钉住的那个。** `latest` 会走，`0.0.7` 不会。两个都发布，
 教程里说了什么时候用哪个。
 
+### 3.10 ★ 往消息上挂东西
+
+消息带的比正文多：一个 id、一个压缩标记、一份附件清单。它们全都挂在
+`message.Extra` 上，而有**三条规则**不到踩过坑是不知道的。
+
+**1. `Extra` 里的值必须在 gob 的白名单上。** 写 checkpoint 时 `Extra` 走 gob
+编码，而 gob 编不了 interface 里没注册过的类型。所以一个
+`[]message.Attachment` 会在 **stop 的时候**让 checkpoint 写失败 —— 离当初写下
+它的那段代码看起来没问题已经很久了 —— 并留下一份写坏的审批。白名单是
+`string` / `int64` / `int` / `bool` / `float64` / `[]byte`。
+
+★ **所以结构化的值存成 JSON 字节**，而读的那一侧要认得它可能遇到的每一种形态：
+本包写的字节、JSON 往返之后变成的 **base64 字符串**（JSON 把 `[]byte` 编成
+字符串 —— 而 transcript 就是 JSON），以及调用方可能直接塞进去的结构体切片。
+
+**2. 盖章只写一次。** `message.put` 是只写一次的，这是故意的：一条消息的身份在
+它出生时就定了，而它在管道里被再盖一次章时，留下的应该是它出生时带的那些。
+
+**3. 模型要看见 transcript 存着的那个对象。** 这一轮的用户消息是**先 build 后
+落盘**（`agentkit/run/loop.go`）：`buildInput` 收到的是消息对象本身，
+`sess.Append` 在它成功之后才发生。★ 另一个次序有个洞 —— `Append` 失败只记日志
+不中断，于是落盘失败会让模型完全看不到那个问题。同一个次序也是附件清单能到
+达模型的原因：它盖在那一条消息上，而模型拿到的就是那一条消息。
+
+★ **消息有自己的 id**（`message/identity.go`）。`api/v2_convert.go` 兜底用的
+派生 id 把内容与消息的**位置**混在一起，所以压缩标记插在它前面就会给它重新
+编号 —— 而前端是拿这个 id 给消息做 key 的，于是每次压缩都会重建整棵消息树。
+兜底是它能安全上线的原因：消息带 id 之前写的 transcript 仍然拿得到一个能用的
+id，而且派生方式与从前一模一样。
+
 ## 4. 前端
 
 ### 4.1 三层纯函数
@@ -1014,7 +1044,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（见�
 ### 5.5 前端单元测试
 
 `cd web && bun run test:unit`（`bun test test/*.test.ts`）——
-**21 个测试文件、272 个用例**，覆盖 `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
+**22 个测试文件、284 个用例**，覆盖 `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
 `thinking.ts` / `turns.ts` / `approval.ts` / `settings-store.ts` 等层。
 
 ★ **客户端一条配置规则都不留了。** 它从前留了一整套：分区表的副本、tools/ 的文件白名单、
@@ -1042,8 +1072,8 @@ Bun 本身没有 `localStorage`，不 stub 会炸。
 
 ### 5.6 E2E
 
-`task test-e2e` → `playwright test`，**13 个 spec、158 个用例**：
-`agents` `chat` `compaction` `composer-autocomplete` `composer-meta` `history` `mcps`
+`task test-e2e` → `playwright test`，**14 个 spec、185 个用例**：
+`agents` `attachments` `chat` `compaction` `composer-autocomplete` `composer-meta` `history` `mcps`
 `multi-agent` `reattach` `scroll` `session-busy` `settings` `theme`。
 
 Playwright 自己起两个服务（`playwright.config.ts` 的 `webServer`）：
