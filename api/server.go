@@ -158,16 +158,18 @@ func (s *Server) registerRoutes() {
 	}
 
 	if s.staticFS != "" && s.embedded == nil {
-		// ★ StaticFS is fasthttp's FS: it caches the served files, open, for
-		//   FSHandlerCacheDuration (ten seconds; a non-positive value is
-		//   normalised back to it) and closes them from a background tick.
-		//   That is fine for a server and visible in dir mode as "an edit
-		//   takes ten seconds to show"; on Windows it also means the files
-		//   cannot be deleted until the cache expires. The static tests own
-		//   their directory for that reason (see staticDir in server_test.go).
+		// ★ StaticFS is fasthttp's FS: it keeps the served files open and
+		//   reuses them, so a change on disk is invisible until the cache
+		//   expires — and on Windows an open handle also blocks deletion.
+		//   The default is ten seconds, which is a long time to stare at an
+		//   unchanged frontend in dir mode; one second is the compromise.
+		//   A non-positive value is normalised back to the default, so this
+		//   cannot be switched off (see staticDir in server_test.go for the
+		//   consequence in tests).
 		h.StaticFS("/", &app.FS{
-			Root:       s.staticFS,
-			IndexNames: []string{"index.html"},
+			Root:          s.staticFS,
+			IndexNames:    []string{"index.html"},
+			CacheDuration: time.Second,
 		})
 	}
 }

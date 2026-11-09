@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ouranoshong/openheron/agentkit/obs"
 
@@ -47,20 +48,23 @@ func newTestServer(t *testing.T) (*Server, *filestore.FileManager) {
 
 // newStaticTestServer mirrors newTestServer but wires a static dir *before*
 // registerRoutes, since routes capture the FS at registration time.
-// staticDir is t.TempDir without the automatic cleanup.
+// staticDir is t.TempDir that waits out hertz's file cache before removing.
 //
-// ★ hertz's StaticFS caches the served files open for ten seconds, so on
-//
-//	Windows index.html cannot be removed until that cache expires. t.TempDir
-//	would turn the failed removal into a test failure; this keeps the removal
-//	best-effort instead of reporting a framework cache as a broken test.
+// StaticFS keeps the served files open and sweeps them one cache duration
+// after their last use, every half duration. The server sets that to one
+// second, so two seconds cover the sweep. t.TempDir cannot be used: its
+// cleanup runs before this wait, and on Windows the still-open index.html
+// would turn a framework cache into a test failure.
 func staticDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "openheron-static-")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	t.Cleanup(func() {
+		time.Sleep(2 * time.Second)
+		_ = os.RemoveAll(dir)
+	})
 	return dir
 }
 
