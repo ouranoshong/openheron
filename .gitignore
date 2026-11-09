@@ -71,11 +71,11 @@ web/dist/*
 *.log
 probe*.txt
 
-# The binary `make kit` copies in beside the recipe, for the image to pick up.
+# The binary `task kit` copies in beside the recipe, for the image to pick up.
 # It is a build artifact: the image carries it, the tree does not.
 /sandbox-kit/openheron/openheron
 
-# The staging copy `make kit` builds in, so that the published descriptor can
+# The staging copy `task kit` builds in, so that the published descriptor can
 # carry the version being built without the working tree changing.
 /sandbox-kit/.stage-openheron/
 

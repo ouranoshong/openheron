@@ -33,7 +33,7 @@ export async function requireTestBackend(): Promise<void> {
         `  reason: ${err instanceof Error ? err.message : String(err)}`,
         "",
         "  start one (isolated config + isolated session directory, fully separate from the dev environment):",
-        "      make test-env-backend",
+        "      task test-env-backend",
         "",
         "  to connect somewhere else, set it explicitly:",
         "      OPENHERON_BASE=http://127.0.0.1:8080 bun run smoke:interop",

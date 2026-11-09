@@ -2,8 +2,8 @@
 #
 # The content recipe for the openheron workload Kit.
 #
-# ★ The binary is built on the **host**, not in here. `make kit` runs
-#   `make build` first, and this recipe copies the result. Two reasons: the
+# ★ The binary is built on the **host**, not in here. `task kit` runs
+#   `task build` first, and this recipe copies the result. Two reasons: the
 #   binary is then the one this repository builds — the frontend embedded,
 #   the same code — and the image carries no Go toolchain it would never
 #   run.
@@ -14,13 +14,13 @@
 #   bound to the base image's libc rather than to nothing at all.
 #
 # ★ The build context is **this directory**: the binary is copied in beside
-#   the recipe by `make kit`, next to the entrypoint it copies too.
+#   the recipe by `task kit`, next to the entrypoint it copies too.
 
 FROM docker/sandbox-templates:shell
 
 USER root
 
-# ★ The binary `make build` produced. It is a local build, so it carries the
+# ★ The binary `task build` produced. It is a local build, so it carries the
 #   host's architecture — a Kit built on an amd64 host is an amd64 image.
 COPY openheron /usr/local/bin/openheron
 RUN chmod 0755 /usr/local/bin/openheron

@@ -64,7 +64,7 @@ if (!verdict) {
       "  The tool is deliberately absent from every shipped template: handing an",
       "  agent the pen that edits its own configuration is a decision, not a",
       "  default. See docs/user-manual.md §4.9.",
-      "  After editing, run: make test-env-sync",
+      "  After editing, run: task test-env-sync",
     ].join("\n"),
   )
   process.exit(2)
