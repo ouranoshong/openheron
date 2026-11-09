@@ -489,16 +489,22 @@ provides asks (§4.3).
 | `lease_ttl` | `10m` | How long a run's lease survives without progress — **longer than the provider's own timeout** |
 | `agent.max_depth` | `1` | Cap on delegation depth |
 | `log_level` | `info` | `debug`, `info`, `warn` or `error` — decides which lines reach the output |
+| `log.file` | `""` | A file to write the log to, relative to the **config root** — empty means stderr only |
 
 ★ **`server/` is not hot-reloaded** — a change only takes effect after a restart. That is
 why it is **read-only** in the config editor, and submitting it fails with
 `section "server" is not editable`.
 
 These environment variables override the file and take precedence:
-`LISTEN_ADDR`, `DATA_DIR`, `PROJECT_ROOT`, `FRONTEND_MODE`, `STATIC_DIR`, `OPENHERON_LOG_LEVEL`.
+`LISTEN_ADDR`, `DATA_DIR`, `PROJECT_ROOT`, `FRONTEND_MODE`, `STATIC_DIR`, `OPENHERON_LOG_LEVEL`,
+`OPENHERON_LOG_FILE`.
 
 ★ A `log_level` that is not one of the four falls back to `info`; the config's `deferred`
 notices carry the reason.
+
+★ The log goes to the standard error unless `log.file` names a path — relative to the
+**config root**. The file is rotated by size, and a file that cannot be opened is a warning
+rather than a failed start: the process stays on the standard error and says why.
 
 ### 4.6 Skills (`skills/`)
 

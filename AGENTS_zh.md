@@ -109,7 +109,7 @@
 
 | 范围 | 规则 | 例子 |
 |---|---|---|
-| 日志 | 英文 | `obs.Logger().Info("[main] config updated", "version", v)` |
+| 日志 | 英文 | `log.Info("[main] config updated", "version", v)` |
 | 错误 | 英文 | `errors.New("query must not be empty")` |
 | 警告 | 英文 | `fmt.Fprintln(os.Stderr, "[config] hot reload failed, keeping previous config:", err)` |
 | 消息提醒 | 英文 | `c.deferKey("watch.debounce fell back to default: %s", msg)` |
@@ -155,11 +155,13 @@
 为什么：错误信息常被 grep、被日志采集、被 `llm/common` 的 `Kind` 分类消费；混语言会让排障时的检索与匹配失效，也让 `/v2/config` 的 `deferred` 字段混入两种语言。
 界面文案同理 —— 用户看的是界面，不是源码，中英混排会让「这是 bug 还是我配置错了」更难判断。
 
-**日志出口只有一个**：`obs.Logger()`（`github.com/ouranoshong/openheron/agentkit/obs`）。业务包里不要再直接
+**日志只有一处装配，而且它不是全局的**：`agentkit/obs`
+（`github.com/ouranoshong/openheron/agentkit/obs`）**造** logger —— `New`、`ParseLevel`、
+`Discard` —— 由组合根把它造好的那一个注入下去。业务包里不要再直接
 `log.Printf` / `fmt.Fprintln(os.Stderr)` —— 级别（Info / Warn / Error）与前缀
 只有一处定义，而级别决定了一行会不会出现在默认输出里。
 
-已经没有例外了。`llm/common` 原来用标准 logger 打请求日志，那段代码搬到了
+`llm/common` 原来用标准 logger 打请求日志，那段代码搬到了
 `agentkit/obs/httplog`（`docs/logging-design.md` §6），这个叶子包现在一行日志都没有。
 `llm/common` 里出现任何一处 openheron 内部 import 都仍然算回归。
 
@@ -382,7 +384,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
 | `docs/mcp-design.md` | **MCP 接入设计方案** —— 工具装配路径、MCP 客户端给它带来什么、`mcp__<server>__<tool>` 命名空间、工具表里的前缀匹配，以及 MCP 服务器在 Kit 里会跑在哪（**已实施**；§13 —— 非阻塞的 MCP 启动 —— 也已实施；§8 —— 沙箱 Kit 怎么打包一台 MCP 服务器 —— 仍是提案） |
 | `docs/config-design.md` | **配置系统设计说明** —— 配置根与它的三级解析、各个分区与它们的文件规格、加载与优先级、热更新，以及依赖铁律（**正文讲的是代码现状**；`mcps/` 分区与住在工具旁边的档位已实施） |
 | `docs/tool-surface-design.md` | **工具面设计** —— 一个 agent 拿到哪些工具（`tools:` / `mcps:` / `skills:`）、MCP 命名空间的三段、配置面收敛成一个核心，以及六个 `config_*` 工具（**§2-§5 已实现**） |
-| `docs/logging-design.md` | **日志装配改造设计** —— 组合根、可变的 `log_level`、logger 注入、接管 hertz 的日志输出，以及把请求日志搬出 `llm/common`（**提案，尚未实现**） |
+| `docs/logging-design.md` | **日志装配改造设计** —— 组合根、可变的 `log_level`、logger 注入、接管 hertz 的日志输出，以及把请求日志搬出 `llm/common`（**已实现**） |
 
 ★ 双语那一组里，无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。
 

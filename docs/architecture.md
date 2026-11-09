@@ -46,8 +46,8 @@ counting `grep '"github.com/ouranoshong/openheron/'` hits per package:
 | | `helpers` | none | Stateless helpers |
 | | `persist` | none | Atomic file writes |
 | | `approval` | none | Approval decisions: representation and validation |
-| | `agentkit/obs` | none | **The log sink** (the only `Logger()`) |
-| | `llm/common` | none | Vendor protocol layer (zero openheron dependencies) |
+| | `agentkit/obs` | none | **The logging assembly**: it *builds* loggers (`New`, `ParseLevel`, `Discard`) and owns the sink — there is no global logger to reach for. Its subpackages `agentkit/obs/hertz` (takes over hertz's log output), `agentkit/obs/hook` (eino's callbacks) and `agentkit/obs/httplog` (the model request log) are leaves too |
+| | `llm/common` | none | Vendor protocol layer (zero openheron dependencies, **zero log code**) |
 | | `webui` | none | Embedded frontend assets |
 | | `agentkit/fsx` | none | **The filesystem backend**: a bounded local backend — writes confined to the project root, ignore rules, result caps (see [fs-backend-design.md](fs-backend-design.md) — that document is Chinese only) |
 | | `agentkit/templates` | none | **The configuration templates**: the files `openheron init` writes and the config editor scaffolds. ★ It is a leaf so that both the configuration layer and the command layer can read the **same** file — a copy would drift |
@@ -74,8 +74,10 @@ ledger records the servers a turn touched.
 
 ### 2.1 Two dependency rules that must not be broken
 
-**(1) There is exactly one log sink.** All runtime logging goes through the
-`*slog.Logger` the composition root builds (`agentkit/obs`). Levels (Info/Warn/Error) and
+**(1) There is exactly one logging assembly.** `agentkit/obs` **builds** loggers (`New`,
+`ParseLevel`, `Discard`) and owns the sink; it does not hand out a global one. The composition
+root builds the `*slog.Logger` and injects it, so every package that logs takes a
+`*slog.Logger` parameter and defaults it to `obs.Discard()`. Levels (Info/Warn/Error) and
 prefixes are defined in that one place, and the level decides whether a line shows up in
 the default output — so a business package calling `log.Printf` or
 `fmt.Fprintln(os.Stderr)` directly bypasses the switch.
@@ -88,9 +90,9 @@ microseconds, the caller's file and line, the level, then the message and the at
 2026/10/29 22:28:34.346459 main.go:189: [Info] [main] openheron version=dev
 ```
 
-There is no exception any more: `llm/common` used to write the request log with the standard
-logger, and that code moved to `agentkit/obs/httplog` (`docs/logging-design.md` §6). Any
-openheron-internal import inside `llm/common` is still a regression.
+`llm/common` used to write the request log with the standard logger, and that code moved to
+`agentkit/obs/httplog` (`docs/logging-design.md` §6) — the leaf now carries no log code at all.
+Any openheron-internal import inside `llm/common` is still a regression.
 
 ★ The logger is built at the composition root (`main.installLogger`) around a shared
 `slog.LevelVar`, so `server/config.yaml`'s `log_level` and `OPENHERON_LOG_LEVEL` can move the
@@ -132,6 +134,36 @@ depends on `obs` and `persist`, and `agentkit/spec` depends on `obs`, `decl` and
 The `llm` package imports `build` (it is a thin wrapper over `build.Resolve`). If `build`
 imported `llm` back, that would be a cycle. `build` uses the protocol types in
 `llm/common` directly, which avoids the cycle and keeps the protocol layer a leaf.
+
+### 2.4 The composition root assembles the logger
+
+The logger is built once, in `main`, and handed down; no package reaches back for it
+(`main.newLogger`, `main.go:192`):
+
+```
+main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
+      -> callbacks.AppendGlobalHandlers(hook.New(log))
+      -> setupConfig(log, level, sink) -> applyLogLevel / applyLogFile
+      -> serve(ctx, st, log)
+```
+
+★ **The order is part of the design.** `newLogger` builds the logger over a shared
+`slog.LevelVar` and an `obs.Sink`, **before** the configuration is read — the configuration
+is what names the level and the file, and the logger has to exist before `setupConfig` can
+log anything. So the threshold and the destination move **after** the handler exists:
+`applyLogLevel` moves the threshold (`OPENHERON_LOG_LEVEL` > `log_level` > `info`) and
+`applyLogFile` re-points the sink at the file.
+
+★ **Two framework hand-offs, and neither is optional.** hertz keeps a process-global logger
+registry and eino a process-global callback registry, so `hlog.SetLogger` and
+`callbacks.AppendGlobalHandlers` each happen once, in the composition root, before
+`hserver.New`. Those two are the only global registrations openheron makes; everything else
+is injected.
+
+★ **The destination moves, the logger does not.** `obs.Sink` is the `io.Writer` behind the
+handler, so `log.file` can point it at a file after startup (`docs/logging-design.md` §10).
+hertz and eino already hold the logger, and a process-global registry cannot be rewritten —
+so the sink is the thing that changes.
 
 ## 3. The configuration system
 

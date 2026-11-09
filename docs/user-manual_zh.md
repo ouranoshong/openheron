@@ -449,14 +449,19 @@ allows: [read_issue, list_issues]
 | `lease_ttl` | `10m` | 一轮在没有进展的情况下能持有多久的租约——**必须长于 provider 自己的超时** |
 | `agent.max_depth` | `1` | 委派深度上限 |
 | `log_level` | `info` | `debug`、`info`、`warn`、`error` —— 决定哪些行会进输出 |
+| `log.file` | `""` | 日志写到的文件，相对**配置根**解析 —— 空串 = 只写标准错误 |
 
 ★ **`server/` 不热重载** —— 改了要重启才生效。所以配置编辑器里它是**只读**的，
 提交会报 `section "server" is not editable`。
 
 以下环境变量可以覆盖进程参数，优先级高于配置文件：
-`LISTEN_ADDR`、`DATA_DIR`、`PROJECT_ROOT`、`FRONTEND_MODE`、`STATIC_DIR`、`OPENHERON_LOG_LEVEL`。
+`LISTEN_ADDR`、`DATA_DIR`、`PROJECT_ROOT`、`FRONTEND_MODE`、`STATIC_DIR`、`OPENHERON_LOG_LEVEL`、
+`OPENHERON_LOG_FILE`。
 
 ★ `log_level` 不是这四个之一时回退 `info`；配置的 `deferred` 提示里带着原因。
+
+★ 日志默认写标准错误；`log.file` 指了路径就同时落盘 —— 路径相对**配置根**解析。文件按大小
+轮转，而打不开文件只是告警、不是启动失败：进程留在标准错误上，并把原因写在那儿。
 
 ### 4.6 技能（`skills/`）
 

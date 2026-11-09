@@ -43,8 +43,8 @@
 | | `helpers` | 无 | 无状态小工具 |
 | | `persist` | 无 | 原子写文件 |
 | | `approval` | 无 | 审批决定的表示与校验 |
-| | `agentkit/obs` | 无 | **日志出口**（唯一的 `Logger()`） |
-| | `llm/common` | 无 | 厂商协议层（零 openheron 依赖） |
+| | `agentkit/obs` | 无 | **日志装配处**：它**造** logger（`New`、`ParseLevel`、`Discard`）并持有 sink —— 没有全局 logger 可回取。它的子包 `agentkit/obs/hertz`（接管 hertz 的日志输出）、`agentkit/obs/hook`（eino 的 callback）与 `agentkit/obs/httplog`（模型请求日志）同样是叶子 |
+| | `llm/common` | 无 | 厂商协议层（零 openheron 依赖，**零日志代码**） |
 | | `webui` | 无 | 嵌入式前端资源 |
 | | `agentkit/fsx` | 无 | **文件系统后端**：有界的本地后端 —— 写收敛在项目根、忽略规则、结果上限（见 [fs-backend-design.md](fs-backend-design.md)，只有中文） |
 | | `agentkit/templates` | 无 | **配置模板**：`openheron init` 写下的文件、配置编辑器给出的脚手架。★ 它是叶子包，配置层与命令层才能读到**同一个**文件 —— 拷贝会漂移 |
@@ -70,8 +70,10 @@
 
 ### 2.1 两条不能破的依赖铁律
 
-**（一）日志只有一个出口。** 所有运行时日志走组合根建的那个 `*slog.Logger`
-（`agentkit/obs`）。级别（Info/Warn/Error）与前缀只在这一处定义，
+**（一）日志只有一处装配。** `agentkit/obs` **造** logger（`New`、`ParseLevel`、`Discard`）
+并持有 sink；它不发放全局的那一个。组合根造出 `*slog.Logger` 再注入下去，
+于是每个要记日志的包接收一个 `*slog.Logger` 形参，零值用 `obs.Discard()`。
+级别（Info/Warn/Error）与前缀只在这一处定义，
 而级别决定了一行会不会出现在默认输出里 —— 业务包直接调 `log.Printf` 或
 `fmt.Fprintln(os.Stderr)` 就会绕开这个开关。
 
@@ -82,9 +84,9 @@
 2026/10/29 22:28:34.346459 main.go:189: [Info] [main] openheron version=dev
 ```
 
-已经没有例外了：`llm/common` 原来用标准 logger 打请求日志，那段代码搬到了
-`agentkit/obs/httplog`（`docs/logging-design.md` §6）。`llm/common` 里任何一处
-import openheron 内部包都仍然算回归。
+`llm/common` 原来用标准 logger 打请求日志，那段代码搬到了
+`agentkit/obs/httplog`（`docs/logging-design.md` §6）—— 这个叶子包现在一行日志代码都没有。
+`llm/common` 里任何一处 import openheron 内部包都仍然算回归。
 
 ★ logger 现在由组合根（`main.installLogger`）围绕一个共享的 `slog.LevelVar` 建起来，
 所以 `server/config.yaml` 的 `log_level` 与 `OPENHERON_LOG_LEVEL` 能在 handler 建好之后
@@ -117,6 +119,32 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
 
 `llm` 包会引 `build`（它是对 `build.Resolve` 的薄封装）。若 `build` 反过来引 `llm`，
 就成了环。`build` 直接用 `llm/common` 的协议类型，既避免了环，也让协议层保持叶子。
+
+### 2.4 组合根装配 logger
+
+logger 只在 `main` 里造一次，然后一路传下去；没有哪个包回头去取
+（`main.newLogger`，`main.go:192`）：
+
+```
+main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
+      -> callbacks.AppendGlobalHandlers(hook.New(log))
+      -> setupConfig(log, level, sink) -> applyLogLevel / applyLogFile
+      -> serve(ctx, st, log)
+```
+
+★ **顺序本身就是设计。** `newLogger` 围绕一个共享的 `slog.LevelVar` 与一个 `obs.Sink`
+把 logger 建起来，**在**配置读出来**之前** —— 等级与文件路径由配置说了算，而 logger
+必须在 `setupConfig` 能打第一行日志之前就存在。所以门限与去处都在 handler 建好**之后**
+才动：`applyLogLevel` 移门限（`OPENHERON_LOG_LEVEL` > `log_level` > `info`），
+`applyLogFile` 把 sink 改向文件。
+
+★ **两次框架交接，一次都不能少。** hertz 持有进程级 logger 注册表，eino 持有进程级
+callback 注册表，所以 `hlog.SetLogger` 与 `callbacks.AppendGlobalHandlers` 各做一次，
+都在组合根里，且都在 `hserver.New` 之前。这是 openheron 唯一的两处全局注册，其余全是注入。
+
+★ **动的是去处，不是 logger。** `obs.Sink` 是 handler 背后的 `io.Writer`，所以 `log.file`
+能在启动后把它改向文件（`docs/logging-design.md` §10）。hertz 与 eino 已经持有那个 logger，
+而进程级注册表改不掉 —— 所以变的是 sink。
 
 ## 3. 配置系统
 

@@ -81,10 +81,12 @@ one. The measured internal import graph:
 
 Two rules that **must not be broken**:
 
-**(1) There is exactly one log sink.** Do not call `log.Printf` /
-`fmt.Fprintln(os.Stderr)` directly in a business package; go through `obs.Logger()`.
-Levels and prefixes are defined in one place, `agentkit/obs/logger.go:18`, and the
-level decides whether a line shows up in the default output.
+**(1) There is exactly one logging assembly.** `agentkit/obs` **builds** loggers and the
+composition root injects the one it built — there is no global one to go through. Do not call
+`log.Printf` / `fmt.Fprintln(os.Stderr)` directly in a business package; take the
+`*slog.Logger` your constructor was given. Levels and prefixes are defined in one place —
+`agentkit/obs/logger.go:39` parses the level, `agentkit/obs/runid.go:22` builds the prefix —
+and the level decides whether a line shows up in the default output.
 
 A line reads the way hertz's logger writes it — the date, the time with microseconds,
 **the caller's file and line**, the level, then the message and the attributes:
@@ -104,7 +106,10 @@ standard logger; that code moved to `agentkit/obs/httplog`, so the leaf logs not
 line carries a level. Any openheron-internal import inside `llm/common` is still a regression.
 
 ★ The composition root builds the logger around a shared `slog.LevelVar` and passes it down.
-There is no global logger: a package that logs takes a `*slog.Logger` parameter.
+There is no global logger: a package that logs takes a `*slog.Logger` parameter and defaults
+it to `obs.Discard()`. ★ **A module never reaches back for a global** — that is what makes
+`task test-race` meaningful, because a package-level variable swapped at runtime races with
+the background goroutines `Builder.Warm` and `Reloader.Watch` start.
 
 **(2) Declaration and behaviour are separate.** `agentkit/spec/decl` holds only plain
 structs and imports no other package; `agentkit/spec` holds the behaviour (loading,

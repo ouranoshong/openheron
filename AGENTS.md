@@ -127,7 +127,7 @@ notifications, and **interface copy**.
 
 | Scope | Rule | Example |
 |---|---|---|
-| Log | English | `obs.Logger().Info("[main] config updated", "version", v)` |
+| Log | English | `log.Info("[main] config updated", "version", v)` |
 | Error | English | `errors.New("query must not be empty")` |
 | Warning | English | `fmt.Fprintln(os.Stderr, "[config] hot reload failed, keeping previous config:", err)` |
 | Notification | English | `c.deferKey("watch.debounce fell back to default: %s", msg)` |
@@ -179,14 +179,16 @@ and it mixes two languages into the `deferred` field of `/v2/config`. Interface 
 story — the user reads the interface, not the source, and a Chinese/English mix makes "is this a
 bug or did I misconfigure it?" harder to answer.
 
-**There is exactly one log outlet**: `obs.Logger()` (`github.com/ouranoshong/openheron/agentkit/obs`).
-Do not call `log.Printf` / `fmt.Fprintln(os.Stderr)` directly in business packages — the level
+**There is exactly one logging assembly**, and it is not a global:
+`agentkit/obs` (`github.com/ouranoshong/openheron/agentkit/obs`) **builds** loggers — `New`,
+`ParseLevel`, `Discard` — and the composition root injects the one it built. Do not call
+`log.Printf` / `fmt.Fprintln(os.Stderr)` directly in business packages — the level
 (Info / Warn / Error) and the prefix are defined in one place, and the level decides whether a
 line shows up in the default output.
 
-There is no exception any more. `llm/common` used to write the request log with the standard
-logger; that code moved to `agentkit/obs/httplog` (`docs/logging-design.md` §6), so the leaf
-now logs nothing at all. Any openheron-internal import inside `llm/common` is still a regression.
+`llm/common` used to write the request log with the standard logger; that code moved to
+`agentkit/obs/httplog` (`docs/logging-design.md` §6), so the leaf now logs nothing at all. Any
+openheron-internal import inside `llm/common` is still a regression.
 
 ★ **There is no global logger.** `main.installLogger` builds one `*slog.Logger` around a shared
 `slog.LevelVar` and hands it to the frameworks and to every constructor. A package that needs to
@@ -437,7 +439,7 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 | `docs/mcp-design.md` | **MCP integration design** — the tool assembly path, what an MCP client adds to it, the `mcp__<server>__<tool>` namespace, prefix matching in the tool tables, and where an MCP server would run inside the Kit (**implemented**; §13 — the non-blocking start — is implemented too; §8 — how a sandbox Kit packages an MCP server — is still a proposal) |
 | `docs/config-design.md` | **Configuration system design** — the config root and its three levels, the partitions and their file specs, loading and precedence, hot reload, and the dependency iron rules (**the body describes the code as it is**; the `mcps/` partition and the tier that lives with the tool are implemented) |
 | `docs/tool-surface-design.md` | **Tool-surface design** — what tools an agent gets (`tools:` / `mcps:` / `skills:`), the MCP namespace's three segments, the configuration surface collapsed into one core, and the six `config_*` tools (**§2-§5 are implemented**) |
-| `docs/logging-design.md` | **Logging assembly refactor — design** — the composition root, a mutable `log_level`, injected loggers, taking over hertz's log output, and moving the request log out of `llm/common` (**a proposal, not implemented**) |
+| `docs/logging-design.md` | **Logging assembly refactor — design** — the composition root, a mutable `log_level`, injected loggers, taking over hertz's log output, and moving the request log out of `llm/common` (**implemented**) |
 
 ★ For the bilingual set, the file without a suffix is the **English main version**; `_zh` is the
 Chinese version; the two correspond one to one — change one and change the other.

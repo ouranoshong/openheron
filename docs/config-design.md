@@ -129,8 +129,10 @@
 **旧的平铺布局**（`state/checkpoints/<id>.ckpt`）仍作为只读回退被查询（`storage/filestore/checkpoint.go:86-96`），
 否则老会话里还等着人审批的那一轮就再也恢复不了。见 `checkpoint-store.md`（upstream）。
 
-★ **没有 `state/log/`** —— 会话与检查点之外不落别的文件。运行日志走标准错误，不落盘
-（落盘就要管轮转与清理，而它对排障的价值远低于成本）。
+★ **`state/` 里不落日志。** 会话与检查点之外，`state/` 里不落别的文件。运行日志**默认**走
+标准错误；落盘是可选的：`server/config.yaml` 的 `log.file` 指定一个路径（相对**配置根**）
+才会写文件，由 `lumberjack` 按大小轮转，打不开文件只告警、不阻止启动
+（见 §6.4 与 `docs/logging-design.md` §10）。
 
 ### 版本控制边界
 
@@ -292,8 +294,8 @@ func (c *Config) Deferred() []string                                  // agentki
 
 ```go
 for _, d := range c.Deferred() {
-    obs.Logger().Info("[main] config notice", "notice", d)
-}                                                                  // main.go:206-208
+    log.Info("[main] config notice", "notice", d)
+}                                                                  // main.go:353-354
 ```
 
 ★ **一条提示带着它属于哪个文件。** 内部存的是 `Notice{Path, Message}`
@@ -867,8 +869,9 @@ deepseek/deepseek-chat      used by researcher  → ChatModel B + http.Client B
 #### 端点方言与字段改名
 
 每个 agent 持有**自己的** `*http.Client` —— `build.FromConfig` 每个实例造一个
-（`agentkit/build/provider.go:36-49`），`common.New` 再给它套上日志 transport
-（`llm/common/model.go:60-64`）。所以：
+（`agentkit/build/provider.go:36-49`），装配层给它套上日志 transport
+（`agentkit/obs/httplog/logging.go:33`），`common.New` 拿到的已经是包好的实例。
+★ 所以协议层里没有一行日志代码 —— 包装是观测，不是协议。所以：
 
 - **端点私有参数**（思考开关等）→ `WithExtraFields`，且必须在**请求级**下发：请求级 extra 是
   **替换**语义（`go-openai@v0.1.6/chat.go:420-426` —— 原文是 "SetExtraFields will
@@ -2164,7 +2167,7 @@ Agent 池与审批链见 `agent-design.md (upstream)`；agent 装配 API 见
 |---|---|---|
 | `llm/` `agents/` `tools/` | ✅ | 已在 `agentkit/spec/reload.go` 实施：`HotDirs` + 轮询 + 换代 |
 | `mcps/` | ✅ | 已实施：那个分类带着 `hot: true`（`agentkit/spec/config.go:61-69`），于是 `hotDirList()`（`agentkit/spec/config.go:87`）把它放进 `HotDirs`（`agentkit/spec/reload.go:21`）—— 见 §6.7：改一个 server 的命令、它的超时**或它的档位**，下一轮就生效，不必重启 |
-| `server/` | ❌ | 配进程自身（listen / 静态目录 / 上限），改了要重启 |
+| `server/` | ❌ | 配进程自身（listen / 静态目录 / 上限 / `log_level` 与 `log.file`），改了要重启 |
 
 ★ 这条边界**有测试守着**（`TestWatchIgnoresServerDir`，
   `agentkit/spec/reload_test.go:233`）—— 改 `server/config.yaml` 不该触发换代。
@@ -2290,7 +2293,7 @@ builder 下次问就是新的一代。在飞 turn 仍持有旧实例引用，跑
 | `agentkit/spec` **不 import** hertz / eino | 声明层只用标准库加 `yaml.v3`；模型只以 `model_ref` 字符串出现，实例在 agent 装配期解析（见 §12.1） | `go list -deps ./agentkit/spec \| grep -E "hertz\|cloudwego/eino"` 应为空 |
 | `agentkit/run` **不 import** `agentkit/spec` | `agentkit/run` 的契约是 `AgentBuilder` 接口；配置是 `agentkit/build` 的实现细节 | `go list -deps ./agentkit/run \| grep "ouranoshong/openheron/agentkit/spec"` 应为空 |
 | `agentkit/build` → `agentkit/spec` | 单向 | — |
-| `llm/common` **没有任何 openheron 依赖** | 它是叶子包：在这里 import `obs` 会破坏「协议层不依赖运行时」这条规则 —— 标准日志器**只**在这一处被允许 | `go list -deps ./llm/common \| grep '^github.com/ouranoshong/openheron/'` 应只打印 `llm/common` 自身 |
+| `llm/common` **没有任何 openheron 依赖** | 它是叶子包：在这里 import `obs` 会破坏「协议层不依赖运行时」这条规则 —— 请求日志搬到了 `agentkit/obs/httplog`，这个叶子包一行日志代码都没有 | `go list -deps ./llm/common \| grep '^github.com/ouranoshong/openheron/'` 应只打印 `llm/common` 自身 |
 | `agentkit/spec` → `persist` | 唯一的落盘原语 | `go list -deps ./agentkit/spec \| grep '^github.com/ouranoshong/openheron/'` 应只打印 `agentkit/obs`、`agentkit/spec/decl`、`persist` 与 `agentkit/spec` 自身 |
 
 ★ openheron 有**两条**依赖铁律，而且它们不是同一条：第一条是「`agentkit/spec` 不碰
@@ -2314,8 +2317,9 @@ $ go list -deps ./agentkit/run  | grep "ouranoshong/openheron/agentkit/spec"   #
 $ go list -deps ./agentkit/spec | grep -E "ouranoshong/openheron/(agentkit/build|agentkit/run|api)"   # empty
 ```
 
-★ 与上游设计相比多了**两个**依赖：`agentkit/obs`（唯一的日志出口 —— `spec` 经它打印
-热更新结果）与 `agentkit/spec/decl`（承载 yaml 标签的包；即「声明与行为分离」那条
+★ 与上游设计相比多了**两个**依赖：`agentkit/obs`（日志的**装配处** —— `spec` 经它打印
+热更新结果；它**造** logger，而 `spec` 接收注入进来的那一个）与 `agentkit/spec/decl`
+（承载 yaml 标签的包；即「声明与行为分离」那条
 规则，见 [architecture.md](architecture.md) §2.1）。两者都不牵进框架：`decl` 一个本仓
 的包都不 import。
 
@@ -2840,14 +2844,14 @@ retry:
 | 测试实例靠「预置一份 `.heron/`」来隔离 | 隔离靠 `.env.test` 加 `task test-env-backend` / `test-env-reset` / `test-env-sync` 三个目标：实例跑在 `:18099`，**自带配置根与自带会话目录** | 端口不同不等于数据隔离 —— openheron 把会话写在 `.openheron/state/` 下，一个写在那儿的测试会污染真实历史 |
 | `agentkit/spec` 包有 **115** 个 `Test` 函数 | 它有 **180** 个 | 包随代码一起长大；上表列的是真正存在的用例 |
 | 模块路径是 `heron/...` | 是 `github.com/ouranoshong/openheron/...` | `go.mod` |
-| `agentkit/spec` 的 heron 依赖只有 `persist` | 有**四个**：`agentkit/obs`、`agentkit/spec/decl`、`persist` 与它自己 | `obs` 是唯一的日志出口；「声明」（`decl`）与「行为」（`spec`）的拆分是 openheron 自己的设计 —— 见 [architecture.md](architecture.md) §2.1 |
+| `agentkit/spec` 的 heron 依赖只有 `persist` | 有**四个**：`agentkit/obs`、`agentkit/spec/decl`、`persist` 与它自己 | `obs` 是日志的装配处；「声明」（`decl`）与「行为」（`spec`）的拆分是 openheron 自己的设计 —— 见 [architecture.md](architecture.md) §2.1 |
 | [architecture.md](architecture.md) §2.2 说 `agentkit/spec` import `kb` | **生产代码**并没有 —— 只有用例文件 `agentkit/spec/policy_contract_test.go:7` 这么做 | 校验知识库配置只需要声明（`decl.Model.IsEmbedding`），不需要 `kb` 包本身；那份文档 §2 的依赖表把测试算进去了 |
 | `llm.ConfigFromEnv` | 它是 `build.ConfigFromEnv`（`agentkit/build/config.go:15`） | 配置包不能依赖厂商协议层，而 `llm/common` 是零 openheron 依赖的叶子包 |
 | 模型结构体 | openheron 的 `decl.Model` 带 `kind`、`dimensions` 与 `context_window`；`summarize_at` **存在但已废弃** —— 阈值属于 agent（`decl.Agent.SummarizeAt`） | 阈值是 agent 的策略，窗口是模型的 —— 两者只在一个地方相遇（`agentkit/spec/summarize.go:25`） |
 | agent 结构体 | openheron 的 `decl.Agent` 把 `tools`、`skills` 与 `mcps` 都带成裸 `[]string`：**不写 = 一个都没有**，空列表也是没有 | 「没声明」与「声明为空」现在意思相同，所以那个用来区分它们的指针没了 —— 而它们共享的缺省就是**没有**（`agentkit/spec/decl/decl.go:104`、`:125`、`:135`） |
 | server 结构体 | openheron 的 `decl.Server` 带 `lease_ttl`（还有 `frontend_mode`） | 租约的预算必须长于 provider 自己的超时，而两者住在不同的文件里 |
 | `internal/atomicfile` | 是 `persist/atomicfile.go`，一个**顶层**叶子包 | openheron 没有 `internal/` 目录；`persist` 装着 `AtomicWrite` 与 `FileLock` 一族 |
-| `kb` 不 import 任何 heron 包 | `kb` import 了 `obs` 与 `persist` | `obs` 是唯一的日志出口，知识库也需要那个共用的原子写 |
+| `kb` 不 import 任何 heron 包 | `kb` import 了 `obs` 与 `persist` | `obs` 是日志的装配处，知识库也需要那个共用的原子写 |
 | `agentkit/spec` → `agentkit/run` 的破例在上游已于 2026-10-21 撤销 | openheron **从未有过** —— 代码面是在撤销之后抽出来的，`agentkit/spec` 提到 `agentkit/run` 的地方只有一条注释 | 撤销是上游的一个设计决定；openheron 直接继承了撤销后的形态 |
 | `models[].context_window` 是纯元数据，不生效 | 它**生效**：它是压缩阈值的分母（`agentkit/spec/summarize.go:25`） | openheron 实施了压缩与上下文用量看板 —— 见 [context-usage-design.md](context-usage-design.md) |
 | agent 写了模型没有声明的思考档位会进 `deferred` | 不会 —— 它被静默忽略 | 词汇表在 `llm/`，档位名在 `agents/`，两个文件从不互相核对 |

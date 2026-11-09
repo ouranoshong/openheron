@@ -171,23 +171,23 @@ model 覆盖 timeout，别只包一个）、`embed.go`、`ConfigFromEnv` 那条�
 - `agentkit/obs/hertz` 要实现 `hlog.FullLogger` 的 23 个方法：等级映射、格式化参数、
   `obs.Prefix(ctx)`、手工带调用方 PC（否则 handler 打印的是适配器自己的行号）。
 
-## 8 落实之后要回改的文档（第二遍更新）
+## 8 落实之后回改的文档（第二遍更新，已完成）
 
-★ 这一节是给「代码落地后回来改文档」用的清单。**当前这一遍只加标注、不改现状描述**，
-因为代码没动，把提案写成现状就是文档漂移。
+★ 这一节是「代码落地后回来改文档」的清单，**已经执行完毕**（2026-11-09）。左列是改动的
+落点，右列是它现在的样子 —— 留着是为了让下一次改动知道该去哪里同步。
 
-| 文档 | 现在加了什么标注 | 落地后要改成什么 |
+| 文档 | 改了什么 | 现在是什么样 |
 |---|---|---|
-| 本文 | 顶部「尚未实现」 | 改成已实现，或并进架构 / 开发者手册后删除本文 |
-| `AGENTS.md` / `AGENTS_zh.md` | 文档清单里标为提案；日志出口段加指针 | 删掉「唯一出口 = `obs.Logger()` 与唯一例外 `llm/common`」，改写成「组合根注入 `*slog.Logger`，`obs` 只负责构造」 |
-| `README.md` / `README_zh.md` | 中文单份清单里该条标「提案，未实现」 | 改成「已实现」 |
-| `docs/architecture.md` / `_zh.md` | §2.1 铁律段加提案指针 | 重写日志出口铁律、删「唯一例外」、改 L0 表格里 `agentkit/obs` 与 `llm/common` 两行，并补「组合根装配」章节 |
-| `docs/developer-manual.md` / `_zh.md` | 日志章节加提案指针 | 删「没有级别标签」整段，补「模块只接收 `*slog.Logger`，禁止回取全局」约定 |
-| `docs/user-manual.md` / `_zh.md` | §4.5 加提案指针 | 参数表加 `log_level`、环境变量列表补 `$OPENHERON_LOG_LEVEL`、注明「只读 + 需重启」 |
-| `docs/config-design.md` | §6.4 与环境变量两处加提案指针 | §6.4 字段表与 YAML 块补 `log_level`；改 `OPENHERON_LOG_LLM_REQUESTS` 的路径引用（文件已搬走）；§8 热重载补一句 |
-| `docs/sandbox-kit-design.md` | 本轮不改 | 代码搬包后 4 处行号引用会失效（脱敏、代理回退、往返委派），必须人工核，**脚本不查中文单份文档的行号内容** |
-| `sandbox-kit/TUTORIAL.md` / `_zh.md` | 本轮不改 | 可选：`server/config.yaml` 的职责描述补一条 |
-| `scripts/check-doc-pairs.py` | `CHINESE_ONLY` 已加入本文 | 若本文被删除，记得从 `CHINESE_ONLY` 里删掉 |
+| 本文 | 顶部标注 | 「全部落地」；§1 保留为改造前的快照 |
+| `AGENTS.md` / `AGENTS_zh.md` | 日志出口段与文档清单 | 改成「组合根注入 `*slog.Logger`，`obs` 只负责构造」；清单里标为已实现 |
+| `README.md` / `README_zh.md` | 文档清单 | 标为「已实现」 |
+| `docs/architecture.md` / `_zh.md` | §2.1 铁律、L0 表格、补章节 | 铁律重写为「日志只有一处装配」；L0 表格里 `agentkit/obs` 与 `llm/common` 两行改写；新增 §2.4「组合根装配」 |
+| `docs/developer-manual.md` / `_zh.md` | 日志章节 | 删掉 `obs.Logger()`，补「模块只接收 `*slog.Logger`，不回取全局」约定 |
+| `docs/user-manual.md` / `_zh.md` | §4.5 | 参数表加 `log_level` 与 `log.file`，环境变量列表补 `$OPENHERON_LOG_LEVEL` 与 `$OPENHERON_LOG_FILE`，注明「只读 + 需重启」 |
+| `docs/config-design.md` | §6.4、环境变量、依赖铁律、§8 | 字段表与 YAML 块补 `log_level` 与 `log`；`OPENHERON_LOG_LLM_REQUESTS` 的路径改到新包；「`state/` 里不落日志」那段按落盘能力重写；依赖铁律里「唯一的日志出口」改成「日志的装配处」 |
+| `docs/sandbox-kit-design.md` | 4 处行号引用 | 已人工核过：脱敏、代理回退、往返委派三处指向 `agentkit/obs/httplog/logging.go` 的新行号 |
+| `sandbox-kit/TUTORIAL.md` / `_zh.md` | 本轮不改 | 仍然只讲运行，不讲配置细节 |
+| `scripts/check-doc-pairs.py` | `CHINESE_ONLY` 已加入本文 | 本文保留在 `CHINESE_ONLY` 里；★ 顺带把 `read_text()` 改成显式 `utf-8` —— Windows 默认按 GBK 读，中文文档直接崩 |
 
 ★ 双语文档由 `task lint-docs` 查**标识符集合、代码块、§ 引用数**：反引号跨度必须两版一致
 （`` `POST /v2/run` `` 与 `` `POST` `/v2/run` `` 是两种不同的集合）。所有 `file.go:line`

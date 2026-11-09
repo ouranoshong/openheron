@@ -76,8 +76,10 @@ openheron/
 
 两条**不能破**的铁律：
 
-**（一）日志只有一个出口。** 业务包里不要直接 `log.Printf` / `fmt.Fprintln(os.Stderr)`，
-统一走 `obs.Logger()`。级别与前缀只在 `agentkit/obs/logger.go:18` 一处定义，
+**（一）日志只有一处装配。** `agentkit/obs` **造** logger，由组合根把它造好的那一个
+注入下去 —— 没有全局的那一个可走。业务包里不要直接 `log.Printf` / `fmt.Fprintln(os.Stderr)`，
+用你的构造函数拿到的那个 `*slog.Logger`。级别与前缀只在一处定义 ——
+`agentkit/obs/logger.go:39` 解析等级，`agentkit/obs/runid.go:22` 造前缀 ——
 而级别决定了一行会不会出现在默认输出里。
 
 一行的长相跟 hertz 的 logger 一样 —— 日期、带微秒的时间、**调用点的文件与行号**、
@@ -97,7 +99,9 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
 `llm/common` 里出现任何一处 openheron 内部 import 都仍然算回归。
 
 ★ 组合根围绕一个共享的 `slog.LevelVar` 建 logger，并逐层传下去。没有全局 logger：
-需要记日志的包接收一个 `*slog.Logger` 形参。
+需要记日志的包接收一个 `*slog.Logger` 形参，零值用 `obs.Discard()`。
+★ **模块不回取全局** —— 这正是 `task test-race` 有意义的前提：运行期被换掉的包级变量
+与 `Builder.Warm`、`Reloader.Watch` 起的后台 goroutine 赛跑。
 
 **（二）声明与行为分离。** `agentkit/spec/decl` 只放纯结构体，不引任何其它包；
 `agentkit/spec` 放行为（装载、校验、重载、写入）。
