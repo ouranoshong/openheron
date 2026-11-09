@@ -19,7 +19,7 @@
 |---|---|
 | 日志等级只从 `$OPENHERON_LOG_LEVEL` 读，构造 Handler 时写死成 `slog.Level`，之后不可变 | `agentkit/obs/logger.go:11`、`agentkit/obs/handler.go` |
 | `obs.Logger()` 是全局可变指针 + 互斥锁；`obs.SetLogger()` 可换实例 | `agentkit/obs/logger.go` |
-| `installObserver()` 在 `setupConfig()` 之前执行；`hook.New(logger)` 捕获了当时的 logger 实例 | `main.go:149` |
+| `installObserver()` 在 `setupConfig()` 之前执行；`hook.New(logger)` 捕获了当时的 logger 实例 | `main.go:150` |
 | `server/` 是 `hot: false`、`Editable: false`；`decodeStrict` 开了 `KnownFields(true)` | `agentkit/spec/config.go:70`、`agentkit/spec/config.go` |
 | `decl.Server` 没有 `log_level` 字段，模板里也没有这一行 | `agentkit/spec/decl/decl.go`、`agentkit/templates/files/server/config.yaml` |
 | hertz 的日志完全没接管：项目里没有一处 `hlog`，引擎横幅与 system logger 走框架默认实现 | `api/server.go` |
@@ -217,3 +217,43 @@ model 覆盖 timeout，别只包一个）、`embed.go`、`ConfigFromEnv` 那条�
   构造 hertz 引擎的测试包需在 `TestMain` 做一次 `hlog.SetLogger`，该全局非并发安全、不能并行设置。
 - 两条 grep：`obs.Logger()` 命中数 **0**；`llm/common` 内 `log.` 命中数 **0**。
 - `task test`、`task test-race`、`task lint-go`、`task lint-docs`。
+
+## 10 文件输出（2026-11-09 落地）
+
+★ 目标：进程日志除了 stderr 之外还能落到一个按大小轮转的文件里，且 `server/` 的「改了要重启」
+语义不变。
+
+### 10.1 为什么是 sink，而不是第二个 logger
+
+logger 在配置读出来之前就建好了（`main.newLogger`），而 `installLogger` 已经把它交给了
+hertz（`hlog.SetLogger`）和 eino（`callbacks.AppendGlobalHandlers`）——两个进程级注册表，
+运行期不能换。配置文件路径只有读完之后才知道，所以能换的只有 **writer**：
+`agentkit/obs/sink.go` 的 `Sink` 实现 `io.Writer`，`Set` 原子改向，`obs.Handler` 与两份
+注册表都不动。
+
+`Sink` 同时是失败兜底：目标写失败一次就切回 fallback（stderr），并且只报一次——不重试满盘，
+也不让日志静默消失。
+
+### 10.2 接线
+
+| 位置 | 做什么 |
+|---|---|
+| `main.newLogger` | 建 `obs.NewSink(os.Stderr)`，logger 从第一天就写在 sink 后面 |
+| `main.setupConfig` | 在 reloader 回调里用 `sync.Once` 调一次 `applyLogFile`；重载不换路径 |
+| `main.applyLogFile` | `Service.LogFile` 解析 + 建目录 + 0600 探针；挂 `lumberjack.Logger`；`console` 决定是否 `io.MultiWriter(os.Stderr, file)` |
+| `main.serve` | 退出时 `defer` 关闭 rotator，最后几行日志仍进得去文件 |
+| `spec.Service.LogFile` | 相对**配置根**解析；空串原样返回（= 不落盘） |
+| `spec.loadServer` | 负数 cap 归一为 0 并记 `deferred`；`file` 去首尾空白 |
+
+★ 探针的理由：`lumberjack` 第一次写入才开文件，且以 0644 创建。不先探一次，权限错误和 0600
+都到不了启动期 —— 而启动期是唯一有人能读到那条告警的时候。
+
+### 10.3 取舍
+
+- **默认关**：从终端起服的人本来就在看 stderr；没人要的文件是垃圾。
+- **落在配置根**：`logs/` 与 `state/`、`agents/` 同级，都是运行期状态；`static_dir` 是唯一
+  指向项目根的路径。
+- **`kb` 子命令不写文件**：它把结果打到 stdout，是一次性的；加第二个写者会毁掉「单写者 + 轮转」
+  这个假设。
+- **`format` 这一轮不做**：JSON 需要第二个 handler，而现在的 `Handler` 是手写的文本封装。
+  留作后续迭代 —— 不预留空键，配置里没有 `format`。

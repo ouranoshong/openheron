@@ -598,6 +598,38 @@ func TestDataDirResolvesAgainstConfigDir(t *testing.T) {
 	}
 }
 
+// ★ The log lives with the runtime state, not with the project: `data_dir`,
+//
+//	`logs/` and the partitions are all inside .openheron/, while static_dir is
+//	the one path that points into the tree.
+func TestLogFileResolvesAgainstConfigRoot(t *testing.T) {
+	f := newFixture(t)
+	s, err := NewService(f.root, filepath.Dir(f.root))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := s.LogFile(""); err != nil || got != "" {
+		t.Fatalf("an empty log file means no file, not an error: %q (%v)", got, err)
+	}
+
+	got, err := s.LogFile("logs/openheron.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(f.root, "logs", "openheron.log"); got != want {
+		t.Fatalf("a relative log file must resolve against the config root: %q != %q", got, want)
+	}
+	if fi, err := os.Stat(filepath.Dir(got)); err != nil || !fi.IsDir() {
+		t.Fatalf("LogFile must create the directory it names: %v", err)
+	}
+
+	abs := filepath.Join(t.TempDir(), "openheron.log")
+	if got, err := s.LogFile(abs); err != nil || got != abs {
+		t.Fatalf("an absolute log file must be returned as-is: %q (%v)", got, err)
+	}
+}
+
 func TestRootDefaultsToTheProjectRootDir(t *testing.T) {
 	deep := filepath.Join(t.TempDir(), "cmd", "server")
 	if err := os.MkdirAll(deep, 0o755); err != nil {

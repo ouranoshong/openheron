@@ -43,7 +43,7 @@
 配套的装配在（这些**今天仍在**，只是喂给它的东西变了）：
 
 - 档位表：`agentkit/build/spec.go:64` `policyOf`，缺省清单在 `agentkit/build/tools.go:61` `builtinAllowedTools`；
-- 每个工具文件的 `allows:` 汇总：`agentkit/spec/load.go:280` `AllowedTools`；
+- 每个工具文件的 `allows:` 汇总：`agentkit/spec/load.go:299` `AllowedTools`；
 - 服务端文件里的 `allows:` 翻译成暴露名：`agentkit/build/mcptools.go:173` `mcpAllowedNames`。
 
 ### 1.2 MCP 的名字：三段，各管一件事
@@ -56,11 +56,11 @@ mcp__github__ls
 
 | 段 | 分开的是 | 少了它会怎样 | 常量 |
 |---|---|---|---|
-| `mcp__` | MCP 工具 ↔ 内置工具 | 服务器暴露 `ls` 就顶掉内置 `ls` | `agentkit/spec/decl/decl.go:324` |
+| `mcp__` | MCP 工具 ↔ 内置工具 | 服务器暴露 `ls` 就顶掉内置 `ls` | `agentkit/spec/decl/decl.go:352` |
 | `<server>__` | 一台服务器 ↔ 另一台 | `mcp_github` 和 `mcp_minimax` 各自的 `ls` 撞成一个 | `agentkit/spec/decl/decl.go:333` |
 | `<tool>` | —（服务器自己的名字，只消毒） | 带 `-`/`.`/`:` 的名字过不了厂商函数名集合 | `agentkit/build/mcptools.go:151` |
 
-★ **双下划线是让名字可解析的那一半。** 服务器名必须匹配 `^[a-z0-9]+(_[a-z0-9]+)*$`（`agentkit/spec/decl/decl.go:341`），**不允许连续下划线**，所以 `mcp__a__b__x` 只有一种读法。如果服务器能叫 `a__b`，这个名字就有两种读法，整条规则当场失效。**正则和分隔符是一对。**
+★ **双下划线是让名字可解析的那一半。** 服务器名必须匹配 `^[a-z0-9]+(_[a-z0-9]+)*$`（`agentkit/spec/decl/decl.go:369`），**不允许连续下划线**，所以 `mcp__a__b__x` 只有一种读法。如果服务器能叫 `a__b`，这个名字就有两种读法，整条规则当场失效。**正则和分隔符是一对。**
 
 命名解决不了的两处，按服务器内部跳过（`agentkit/build/mcptools.go:68` `mcpPlan`）：
 
@@ -110,7 +110,7 @@ mcp__github__ls
 | 现在 | 之后 |
 |---|---|
 | `Agent.Skills *[]string` / `MCPServers *[]string` | `[]string`（指针消失） |
-| `mcpServersOf(list *[]string)`：nil → 全部（`agentkit/spec/load.go:638`） | **整个函数删掉**，直接用 `a.MCPServers` |
+| `mcpServersOf(list *[]string)`：nil → 全部（`agentkit/spec/load.go:657`） | **整个函数删掉**，直接用 `a.MCPServers` |
 | `skillScopeOf(list *[]string)` 的 nil 分支（`agentkit/build/skill.go:62`） | 删掉 |
 | `cloneList` 的 nil 语义与「指针是为了区分没写和空」的注释 | 删掉 |
 | 三处指针的文档 | 一行规则 |
@@ -274,7 +274,7 @@ HTTP、CLI 和工具都只调它们，没有第二个装配点。下面三刀是
 
 ★ **一条规则是「搬到服务端」而不是「删掉」。** 前端原本拿模型的 `reasoning` 词汇表检查
 agent 的档位，而 loader 不检查 —— 于是 vendor 没有的档位能一路加载成功，发出去就是
-「一点思考都没有」。现在它在 `validate()` 里（`agentkit/spec/load.go:616`
+「一点思考都没有」。现在它在 `validate()` 里（`agentkit/spec/load.go:635`
 `checkReasoning`），检查的是**每一个**文件，不只是在这个编辑器里改过的那些。
 
 ### 3.4 CLI 统一（✅）

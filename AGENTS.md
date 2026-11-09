@@ -193,6 +193,11 @@ now logs nothing at all. Any openheron-internal import inside `llm/common` is st
 log takes a `*slog.Logger` parameter and defaults it to `obs.Discard()`; it does not reach for a
 package-level variable.
 
+★ The log's **destination** can move after startup: `obs.Sink` is the `io.Writer` behind the
+handler, and `log.file` points it at a file once the configuration is read
+(`docs/logging-design.md` §10). What moves is where the records go, not the logger — hertz and
+eino already hold that, and a process-global registry cannot be rewritten.
+
 ## Other conventions
 
 - **Do not duplicate business assembly logic in the API layer** — when you need "the effective

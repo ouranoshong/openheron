@@ -167,6 +167,10 @@
 `*slog.Logger`，交给框架和每一个构造函数。需要记日志的包接收一个 `*slog.Logger` 形参，
 零值用 `obs.Discard()`，而不是回取包级变量。
 
+★ 日志的**去处**可以在启动后改：`obs.Sink` 是 handler 背后的 `io.Writer`，配置里的
+`log.file` 在配置读出之后把它改向文件（`docs/logging-design.md` §10）。换的是「写到哪儿」，
+不是 logger —— 后者已经被 hertz 与 eino 两份进程级注册表持有，换不掉。
+
 ## 其它约定
 
 - **不要在 API 层复制业务装配逻辑** —— 需要读「某个 agent 的生效工具表」时，由 `agent.Builder` 暴露只读查询，不要重算一遍 `Table.Blocked` / `Policy.TierOf`。

@@ -105,7 +105,7 @@ dependency chain along.
 
 ★ **The vocabulary the two halves share lives in `decl` too, and that is a
 dependency-direction fact, not a convenience.** The built-in tool names
-(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:291`) are read by **both** ends:
+(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:319`) are read by **both** ends:
 the loader checks the names an agent's `tools:` list mentions against them, and the
 builder refuses a provider that claims one of them (`reservedToolNames`,
 `agentkit/build/tools.go:75`). Neither end may import the other — the loader sits
@@ -117,7 +117,7 @@ would read as "that tool does not exist".
 
 **Validating** the knowledge-base config (`tools/kb.yaml`) needs to know whether the
 corpus path is relative, whether the model is declared at all, and whether it is
-declared as `kind: embedding` (`agentkit/spec/load.go:232` `loadKB`, `agentkit/spec/load.go:869`
+declared as `kind: embedding` (`agentkit/spec/load.go:251` `loadKB`, `agentkit/spec/load.go:869`
 `validateKB`).
 
 ★ All three answers live in the **declarations** (`decl.Model.IsEmbedding`,
@@ -176,7 +176,7 @@ elsewhere would keep it from loading at all. But the directory raises a **notice
 configuration that says nothing is the worst kind, because the process starts fine and the
 setting is gone.
 
-File names under `tools/` are a **whitelist**: `agentkit/spec/load.go:194` errors out on
+File names under `tools/` are a **whitelist**: `agentkit/spec/load.go:213` errors out on
 an unknown file instead of ignoring it — "I wrote kb.yaml and it did not take effect" is
 one of the hardest classes of problem to debug.
 
@@ -194,7 +194,7 @@ error.
 ★ **A model that nobody declares is not a startup error — it takes that agent out of
 the tree.** The rule is stated in full in `docs/config-design.md` §4.6; what the
 architecture has to say about it is where the boundary falls: `validate()` **settles**
-the tree (`agentkit/spec/load.go:517` `leaveOutUndeclaredModels`) — the agent is dropped
+the tree (`agentkit/spec/load.go:536` `leaveOutUndeclaredModels`) — the agent is dropped
 from `Config.Agents` and from every parent's `subagents:`, and the reason is kept in
 `Config.leftOut` (`agentkit/spec/config.go:139`). Everything downstream —
 `AgentNames()`, `MCPServersInUse()`, the tier table, the builder — sees the settled
@@ -276,7 +276,7 @@ The **exceptions are named**, and they are named by the file that provides the t
 | Source | What it names | Assembled at |
 |---|---|---|
 | The built-in tools that have no file of their own | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill`, plus the five config tools that only read | `agentkit/build/tools.go:68` `builtinAllowedTools` |
-| A tool's own file — `tools/*.yaml` and the knowledge base | that file's `allows:` | `agentkit/spec/load.go:280` `AllowedTools` |
+| A tool's own file — `tools/*.yaml` and the knowledge base | that file's `allows:` | `agentkit/spec/load.go:299` `AllowedTools` |
 | An MCP server's own file | that server's `allows:`, in the server's own vocabulary, translated to the exposed names | `agentkit/build/mcptools.go:173` `mcpAllowedNames` |
 
 `agentkit/build/spec.go:64` `policyOf` puts the three together and `Policy.TierOf`
@@ -315,9 +315,9 @@ second copy of the same keys that could only *tighten* the file — is gone, and
 takes effect after a restart.
 
 A declared topology that exceeds the cap is a **startup error**
-(`agentkit/spec/load.go:897`'s `validateDepth`) — never a silent truncation. A sub-agent
+(`agentkit/spec/load.go:916`'s `validateDepth`) — never a silent truncation. A sub-agent
 referencing an unknown agent and a cyclic topology are startup errors too
-(`agentkit/spec/load.go:968` `validateAgentGraph`, `agentkit/spec/load.go:985` `detectCycle`).
+(`agentkit/spec/load.go:987` `validateAgentGraph`, `agentkit/spec/load.go:985` `detectCycle`).
 
 ### 3.6 skills resolve by a different rule
 
@@ -479,13 +479,13 @@ offers is reported as a typo. `--no-tools` leaves it out.
 
 The path a tool takes is the same for every source:
 
-`tools/*.yaml` → `spec.loadTool` (`agentkit/spec/load.go:194`) → `decl.ToolsCfg` →
+`tools/*.yaml` → `spec.loadTool` (`agentkit/spec/load.go:213`) → `decl.ToolsCfg` →
 `toolRegistry.Build` (`agentkit/build/tools.go:90`) → `snapshot.buildHeavy`
 (`agentkit/build/snapshot.go:47`) → `applyToolConfig` (`agentkit/build/assemble.go:31`) →
 `deep.Config.ToolsConfig.Tools` → `deep.New` (`agentkit/build/assemble.go:40`).
 
 The MCP branch joins it at the registry: `mcps/<server>.yaml` → `spec.loadMCP`
-(`agentkit/spec/load.go:310`) → `decl.MCPServerCfg` → the MCP provider
+(`agentkit/spec/load.go:329`) → `decl.MCPServerCfg` → the MCP provider
 (`agentkit/build/mcptools.go:194`), registered at `agentkit/build/tools.go:42` → the same
 `toolRegistry.Build` → the same `applyToolConfig`.
 

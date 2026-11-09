@@ -21,6 +21,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 
 	"github.com/cloudwego/eino/callbacks"
+	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/ouranoshong/openheron/agentkit/build"
 	"github.com/ouranoshong/openheron/agentkit/obs"
@@ -44,7 +45,7 @@ func main() {
 	// ★ A bootstrap logger, built before any branch: every early exit has to
 	//   report through the same envelope as the server does. runServer builds
 	//   its own and hands it to the two frameworks.
-	boot, _ := newLogger()
+	boot, _, _ := newLogger()
 
 	if len(os.Args) > 1 && os.Args[1] == "kb" {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -158,9 +159,9 @@ func runServer(flags serverFlags) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	log, level := installLogger()
+	log, level, sink := installLogger()
 
-	st, err := setupConfig(flags, log, level)
+	st, err := setupConfig(flags, log, level, sink)
 	if err != nil {
 		return err
 	}
@@ -179,27 +180,35 @@ func runServer(flags serverFlags) error {
 // read. That is why the handler reads a Leveler instead of a fixed level:
 // the logger has to exist before setupConfig can log anything, and its
 // threshold is not known until setupConfig has run.
-// newLogger builds the process logger and its level. It touches no framework:
-// main uses it for the early exits, installLogger adds the registrations.
-func newLogger() (*slog.Logger, *slog.LevelVar) {
+// newLogger builds the process logger, its level, and the sink the file
+// destination is installed on. It touches no framework: main uses it for the
+// early exits, installLogger adds the registrations.
+//
+// ★ The sink is returned, not rebuilt later. The configuration names a log
+//
+//	file, but the configuration is read after the logger exists — and the
+//	logger cannot be replaced once hertz and eino hold it. So the caller keeps
+//	the route and points it at the file when it knows the path.
+func newLogger() (*slog.Logger, *slog.LevelVar, *obs.Sink) {
 	level := new(slog.LevelVar)
 	// The bootstrap level: the environment only, because no file has been
 	// read yet. applyLogLevel replaces it with env > file > info.
 	if lv, err := obs.LevelFromEnv(); err == nil {
 		level.Set(lv)
 	}
-	return obs.New(os.Stderr, level), level
+	sink := obs.NewSink(os.Stderr)
+	return obs.New(sink, level), level, sink
 }
 
-func installLogger() (*slog.Logger, *slog.LevelVar) {
-	log, level := newLogger()
+func installLogger() (*slog.Logger, *slog.LevelVar, *obs.Sink) {
+	log, level, sink := newLogger()
 
 	// ★ Both registries are process-global and not safe to change once the
 	//   server runs: hlog.SetLogger must precede hserver.New, and eino's
 	//   handler list must be in place before the first turn.
 	hlog.SetLogger(hertzlog.New(log))
 	callbacks.AppendGlobalHandlers(hook.New(log))
-	return log, level
+	return log, level, sink
 }
 
 // applyLogLevel resolves env > server/config.yaml > info and moves the shared
@@ -221,6 +230,71 @@ func applyLogLevel(log *slog.Logger, level *slog.LevelVar, c *spec.Config) {
 	level.Set(parsed)
 }
 
+// applyLogFile points the process logger at the configured file and returns
+// the rotator, or nil when no file is configured.
+//
+// ★ A log file that cannot be opened is a **warning**, not a failed start.
+//
+//	The server's job is to serve, and its log is how the failure would be
+//	explained: taking the process down over the destination removes the only
+//	place the reason could appear. The process continues on stderr.
+//
+// ★ The file is created here, 0600, before the rotator sees it. lumberjack
+//
+//	opens lazily on the first write and creates with 0644 — so neither the
+//	permission nor an early failure (a read-only directory, a path that is a
+//	directory) would be discovered at startup. The probe makes both visible
+//	while there is still someone to tell.
+//
+// ★ The path is inside the config root, with the rest of the runtime state.
+//
+//	OPENHERON_LOG_FILE overrides it for one run, the way OPENHERON_LOG_LEVEL
+//	does: an operator who has to capture a log should not have to edit the
+//	project to do it.
+func applyLogFile(log *slog.Logger, sink *obs.Sink, svc *spec.Service, c *spec.Config) io.Closer {
+	if c == nil || sink == nil || svc == nil {
+		return nil
+	}
+	cfg := c.Server.Log
+	path := cfg.File
+	if env := strings.TrimSpace(os.Getenv(obs.FileEnv)); env != "" {
+		path = env
+	}
+	resolved, err := svc.LogFile(path)
+	if err != nil {
+		log.Warn("[main] the log stays on stderr: the directory could not be created", "path", path, "err", err)
+		return nil
+	}
+	if resolved == "" {
+		return nil
+	}
+	probe, err := os.OpenFile(resolved, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		log.Warn("[main] the log stays on stderr: the file could not be opened", "path", resolved, "err", err)
+		return nil
+	}
+	_ = probe.Close()
+
+	file := &lumberjack.Logger{
+		Filename:   resolved,
+		MaxSize:    cfg.MaxSizeMB,
+		MaxAge:     cfg.MaxAgeDays,
+		MaxBackups: cfg.MaxBackups,
+		Compress:   cfg.Compress,
+		// Local time: the file is read by a person next to the machine, and
+		// hertz's logger prints local time already.
+		LocalTime: true,
+	}
+	var w io.Writer = file
+	if cfg.Console {
+		w = io.MultiWriter(os.Stderr, file)
+	}
+	sink.Set(w)
+	log.Info("[main] log file", "path", resolved, "console", cfg.Console,
+		"max_size_mb", cfg.MaxSizeMB, "max_age_days", cfg.MaxAgeDays)
+	return file
+}
+
 type startup struct {
 	cfgSvc   *spec.Service
 	mgr      *agentConfig
@@ -238,9 +312,13 @@ type startup struct {
 
 	log   *slog.Logger
 	level *slog.LevelVar
+	// logClose is the rotator behind the file destination, when one was
+	// configured. It is closed on shutdown so the last buffer flushes and
+	// Windows can delete a rotated file.
+	logClose io.Closer
 }
 
-func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar) (*startup, error) {
+func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar, sink *obs.Sink) (*startup, error) {
 	cfgSvc, err := spec.NewService(flags.configDir, flags.projectRoot)
 	if err != nil {
 		return nil, err
@@ -255,11 +333,22 @@ func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar) (*st
 	warnUnusedHomeConfig(cfgSvc.Root(), log)
 
 	mgr := &agentConfig{}
+	// ★ The file destination is installed **once**, on the first configuration
+	//   that arrives — which is this callback. server/ is restart-only, so a
+	//   reload that changes the path must not silently move the log while the
+	//   process keeps running; sync.Once is what makes "once" true even though
+	//   the callback fires on every reload.
+	var logClose io.Closer
+	var logOnce sync.Once
+	openLogFile := func(c *spec.Config) {
+		logOnce.Do(func() { logClose = applyLogFile(log, sink, cfgSvc, c) })
+	}
 	reloader, err := spec.NewReloader(cfgSvc, func(c *spec.Config) {
 		mgr.set(c)
 		// First: the configuration may name a level, and every line below
 		// should already obey it.
 		applyLogLevel(log, level, c)
+		openLogFile(c)
 		log.Info("[main] config loaded", "version", short(c.Version))
 		for _, d := range c.Deferred() {
 			log.Info("[main] config notice", "notice", d)
@@ -270,6 +359,8 @@ func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar) (*st
 	}
 	cfg, _ := mgr.Current()
 	applyLogLevel(log, level, cfg)
+	// In case the reloader did not call back synchronously.
+	openLogFile(cfg)
 
 	// ★ After the level is known, not before: these two lines are the "where
 	//   am I" note, and at error level they should be gone like every other
@@ -292,6 +383,7 @@ func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar) (*st
 		addr:        override("LISTEN_ADDR", cfg.Server.ListenAddr),
 		dataDir:     override("DATA_DIR", cfgDataDir),
 		projectRoot: override("PROJECT_ROOT", cfgSvc.ProjectRoot()),
+		logClose:    logClose,
 	}, nil
 }
 
@@ -453,6 +545,13 @@ func setupFrontend(st *startup, log *slog.Logger) error {
 }
 
 func serve(ctx context.Context, st *startup, log *slog.Logger) error {
+	defer func() {
+		// ★ After the shutdown lines, not before: the last records belong in
+		//   the file too, and a closed rotator would drop them.
+		if st.logClose != nil {
+			_ = st.logClose.Close()
+		}
+	}()
 	errCh := make(chan error, 1)
 	go func() { errCh <- st.srv.Spin() }()
 

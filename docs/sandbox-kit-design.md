@@ -33,8 +33,8 @@
 openheron 交付为单个静态二进制（`Taskfile.yml:81`、`Taskfile.yml:248-263`）。运行时它是
 **一个进程**，对外开三对表面：
 
-- **HTTP/SSE 服务**。`main.go:265` 把它建起来：
-  `api.New(rt, fm, hserver.WithHostPorts(st.addr))`。监听地址来自 `main.go:217`：
+- **HTTP/SSE 服务**。`main.go:350` 把它建起来：
+  `api.New(rt, fm, hserver.WithHostPorts(st.addr))`。监听地址来自 `main.go:225`：
   `override("LISTEN_ADDR", cfg.Server.ListenAddr)`。
   `POST /v2/run`（`api/v2_files.go:58`）是回合入口；它以 SSE 流应答
   （`api/v2_run.go:146`，`stream := s.newStream(c)`），边跑边 flush
@@ -47,7 +47,7 @@ openheron 交付为单个静态二进制（`Taskfile.yml:81`、`Taskfile.yml:248
   并且 `cmd.Dir = s.root`（`agentkit/fsx/fsx.go:747`、`agentkit/fsx/fsx.go:750`）。
 - **模型 API**。`llm/common/model.go:66-72` 把 provider 配置交给 `acl.NewClient`。
 
-Web UI 在**二进制里**：`main.go:35` 内嵌了 `all:web/dist`，`main.go:337` 把它挂在 `/`。
+Web UI 在**二进制里**：`main.go:35` 内嵌了 `all:web/dist`，`main.go:425` 把它挂在 `/`。
 `main.go:333` 是前端没构建时你会看到的警告（`task web`，`Taskfile.yml:127-131`）。
 
 ★ 由此得出的结论：openheron **不是**一个 CLI 编码 agent。它没有 TUI，没有终端里的
@@ -138,16 +138,16 @@ if c.BaseURL == "" {
 ### 1.5 会搬进 VM 的那些路径
 
 配置根只有三级（`AGENTS.md`）：`--config-dir` → `$OPENHERON_CONFIG_DIR` →
-`<projectRoot>/.openheron`。`main.go:184` 用 `main.go:80-95` 解析出来的两个参数建服务。
+`<projectRoot>/.openheron`。`main.go:184` 用 `main.go:81-96` 解析出来的两个参数建服务。
 
 进程内部：
 
-- **项目根** —— `main.go:219`，`override("PROJECT_ROOT", cfgSvc.ProjectRoot())`；
+- **项目根** —— `main.go:227`，`override("PROJECT_ROOT", cfgSvc.ProjectRoot())`；
   它是 shell 命令里相对路径的基准（`agentkit/fsx/fsx.go:750`），
   也是文件工具收敛的边界（`agentkit/fsx/fsx.go:194`、`agentkit/fsx/fsx.go:219`）；
-- **数据目录** —— `main.go:218`，`override("DATA_DIR", cfgDataDir)`；
-  会话在 `main.go:224`（`sessionsRoot := filepath.Join(st.dataDir, "sessions")`），
-  checkpoint 在它旁边（`main.go:229-232`）；
+- **数据目录** —— `main.go:226`，`override("DATA_DIR", cfgDataDir)`；
+  会话在 `main.go:294`（`sessionsRoot := filepath.Join(st.dataDir, "sessions")`），
+  checkpoint 在它旁边（`main.go:299-302`）；
 - **skills 目录** —— 作为第二个根加进来，见 `agentkit/build/snapshot.go:52-54`。
 
 ### 1.6 发布模型约束了这次集成
@@ -173,13 +173,13 @@ openheron 解析三个根，而且是在三个不同时刻解析的。沙箱三�
 |---|---|---|
 | 项目根 | `--project-root`，否则取**工作目录** | `agentkit/spec/config.go:247-258` |
 | 配置根 | `--config-dir`，否则 `$OPENHERON_CONFIG_DIR`，否则 `<projectRoot>/.openheron` | `agentkit/spec/config.go:260-272` |
-| 数据目录 | `$DATA_DIR`，否则 `<configRoot>/state` | `main.go:218`、`agentkit/spec/config.go:314-326` |
+| 数据目录 | `$DATA_DIR`，否则 `<configRoot>/state` | `main.go:226`、`agentkit/spec/config.go:314-326` |
 
 ★ **工作目录是项目根的默认值，而配置根跟着它走。** 在哪个目录启动的进程，
 就是以那个目录为根的进程：`cd` 进工作区，配置就落在 `<工作区>/.openheron`。
 
 ★ **`$PROJECT_ROOT` 挪不动配置根。** `main.go:184` 用两个**参数**建服务 ——
-`spec.NewService(flags.configDir, flags.projectRoot)` —— 之后 `main.go:219`
+`spec.NewService(flags.configDir, flags.projectRoot)` —— 之后 `main.go:227`
 才应用 `PROJECT_ROOT` 这个环境变量覆盖；它够得着 agent 的工作目录与文件后端的根
 （`agentkit/build/snapshot.go:56`），却够不着配置根。
 一个只设了 `$PROJECT_ROOT` 的容器会得到两个不同的根：
@@ -547,13 +547,13 @@ openheron 自己的默认值从那里落到了正确的位置：
   所以就是工作区自己的 `.openheron`，在挂载上。
 - `DATA_DIR` —— 默认是配置根下的 `state`（`agentkit/spec/config.go:314-326`），
   所以会话也住在挂载上（§2.9）。
-- `LISTEN_ADDR` —— 默认取服务配置的 `ListenAddr`（`main.go:217`）：`:8080`。
+- `LISTEN_ADDR` —— 默认取服务配置的 `ListenAddr`（`main.go:225`）：`:8080`。
 
 ★ 来自**运行时**（而不是来自 Kit）的变量：`HTTPS_PROXY` 与 `HTTP_PROXY`
 （openheron 认它们，§2.7；凭据替换正是靠它们，§2.8），以及 `WORKSPACE_DIR` ——
 工作区挂载的路径。`WORKSPACE_DIR` 也是启动 hook 声明的那个名字（§2.5）。
 
-★ **`main.go:459-464`（`override`）是另一种摆法能成立的原因。**
+★ **`main.go:554-559`（`override`）是另一种摆法能成立的原因。**
 `LISTEN_ADDR`、`DATA_DIR` 与 `PROJECT_ROOT` 都**先**从环境变量读、
 **后**从配置文件读，所以想换成别的摆法（比如把会话放到 volume 上，§2.9），
 用户只要设 `DATA_DIR`，别的都不用改。
@@ -563,7 +563,7 @@ openheron 自己的默认值从那里落到了正确的位置：
 
 #### 第一次运行：初始化
 
-一个空工作区没有配置，而服务没有配置就不肯启动（`main.go:135-143`）。
+一个空工作区没有配置，而服务没有配置就不肯启动（`main.go:136-144`）。
 所以 Kit 必须在服务起来之前把配置种下去 —— 而且要种在**工作区**里、
 以 uid `1000` 种，因为工作区属于用户。
 
@@ -838,7 +838,7 @@ agent 可以从环境里把它读出来，它跑的任何东西都能把它发�
 
 ### 2.9 沙箱拆除之后的状态
 
-会话与 checkpoint 是数据目录下的文件（`main.go:224`、`main.go:229-232`），
+会话与 checkpoint 是数据目录下的文件（`main.go:294`、`main.go:299-302`），
 而数据目录的默认值是 `<configRoot>/state`（`agentkit/spec/config.go:314-326`）。
 既然配置根是 `<工作区>/.openheron`（§1.7），默认的数据目录就是
 **`<工作区>/.openheron/state`** —— 在挂载上。
@@ -859,7 +859,7 @@ agent 可以从环境里把它读出来，它跑的任何东西都能把它发�
 他可以读它、备份它，或者连同其余文件一起删掉。
 在 volume 上它不碍事，但也在用户够不着的地方。
 
-★ `DATA_DIR`（`main.go:218`）就是那个开关：绝对路径优先于默认值
+★ `DATA_DIR`（`main.go:226`）就是那个开关：绝对路径优先于默认值
 （`agentkit/spec/config.go:314-326`），
 所以 Kit 可以把数据目录指到 volume 上，而不必碰配置。
 
@@ -1178,7 +1178,7 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
   拒绝写下一个加载不了的配置（`agentkit/spec/write.go:413-416`）。
   预置的 agent 引用了一个谁也没定义的 subagent —— `subagents: [task]` 而没有
   `agents/task.md` —— 正是这种情况：什么都不会被写，
-  服务随后以 "no configuration at …" 拒绝启动（`main.go:135-143`）。
+  服务随后以 "no configuration at …" 拒绝启动（`main.go:136-144`）。
   而启动 hook 把这个失败吞了，于是沙箱起来了、看着一切正常，
   端口上却没人听。Kit 的提示语现在说的是实际发生的事。
 - ★ **服务那个 socket 的守护进程，才是需要 `/dev/kvm` 的那一个。**

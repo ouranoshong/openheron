@@ -418,6 +418,29 @@ func (s *Service) DataDir(v string) (string, error) {
 	return v, nil
 }
 
+// LogFile resolves the configured log file against the **config root** and
+// creates the directory it lives in. Empty means no file, and that is not an
+// error: stderr is the default destination.
+//
+// ★ The config root, not the project root. `data_dir`, `logs/` and the
+//
+//	partitions all live inside .openheron/; `static_dir` is the one path that
+//	points into the project. A log file is runtime state, so it goes with the
+//	runtime state.
+func (s *Service) LogFile(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", nil
+	}
+	if !isAbsPath(v) {
+		v = filepath.Join(s.root, v)
+	}
+	if err := os.MkdirAll(filepath.Dir(v), 0o755); err != nil {
+		return "", fmt.Errorf("config: create log directory: %w", err)
+	}
+	return v, nil
+}
+
 func (s *Service) ResolveDir(v string) string {
 	v = strings.TrimSpace(v)
 	if v == "" || filepath.IsAbs(v) {

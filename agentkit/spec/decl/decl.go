@@ -260,7 +260,11 @@ type Server struct {
 	// LogLevel is debug, info, warn or error. A plain string: the loader
 	// validates it, so a bad value becomes a deferred notice instead of a
 	// failed start. OPENHERON_LOG_LEVEL overrides it.
-	LogLevel     string          `yaml:"log_level"`
+	LogLevel string `yaml:"log_level"`
+	// Log is the optional file destination. Empty File keeps the log on
+	// stderr, which is the default: a server started from a terminal is
+	// already being watched, and a file nobody asked for is litter.
+	Log          LogCfg          `yaml:"log"`
 	StartTimeout LenientDuration `yaml:"start_timeout"`
 	// LeaseTTL is how long a run's lease survives without progress.
 	//
@@ -272,6 +276,33 @@ type Server struct {
 	Watch    Watch           `yaml:"watch"`
 	Retry    RetryCfg        `yaml:"retry"`
 	Agent    AgentCfg        `yaml:"agent"`
+}
+
+// LogCfg is the optional file destination for the process log.
+//
+// ★ File resolves against the **config root**, like data_dir and static_dir:
+//
+//	the configuration is the whole description of a project, so a path that
+//	was absolute would tie that project to one machine.
+//
+// ★ The size and age caps belong to the rotator, not to the logger: 0 means
+//
+//	"no cap" for every one of them, and the loader normalises a negative value
+//	to 0 rather than refusing to start over a log setting.
+//
+// ★ `format` is deliberately absent. A second record shape means a second
+//
+//	handler, and the text envelope is what every line in this repository's
+//	documentation shows. It is a later iteration, not a reserved key.
+type LogCfg struct {
+	File string `yaml:"file"`
+	// Console keeps stderr alongside the file. Off is for a service whose
+	// stderr goes nowhere.
+	Console    bool `yaml:"console"`
+	MaxSizeMB  int  `yaml:"max_size_mb"`
+	MaxAgeDays int  `yaml:"max_age_days"`
+	MaxBackups int  `yaml:"max_backups"`
+	Compress   bool `yaml:"compress"`
 }
 
 const (

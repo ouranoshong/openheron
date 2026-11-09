@@ -56,10 +56,16 @@ func defaultKB() decl.KB {
 
 func defaultServer() decl.Server {
 	return decl.Server{
-		ListenAddr:   ":8080",
-		StaticDir:    "web/dist",
-		DataDir:      DirState,
-		LogLevel:     "info",
+		ListenAddr: ":8080",
+		StaticDir:  "web/dist",
+		DataDir:    DirState,
+		LogLevel:   "info",
+		Log: decl.LogCfg{
+			Console:    true,
+			MaxSizeMB:  20,
+			MaxAgeDays: 14,
+			MaxBackups: 5,
+		},
 		StartTimeout: decl.LenientDuration(60 * time.Second),
 		LeaseTTL:     decl.LenientDuration(10 * time.Minute),
 		Agent:        decl.AgentCfg{MaxDepth: 1},

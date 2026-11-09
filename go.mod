@@ -19,6 +19,7 @@ require (
 	github.com/meguminnnnnnnnn/go-openai v0.1.6
 	github.com/tidwall/sjson v1.2.5
 	golang.org/x/sys v0.49.0
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1+incompatible
 	gopkg.in/yaml.v3 v3.0.1
 )
 

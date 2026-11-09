@@ -21,6 +21,27 @@ data_dir: state
 #   falls back to info and is reported in the config's deferred notices.
 log_level: info
 
+# ★ Where the log goes. An empty file keeps it on stderr — the default,
+#   because a server started from a terminal is already being watched.
+#
+#   Uncomment `file:` to keep a copy on disk as well. A relative path resolves
+#   against this directory (<project>/.openheron), next to state/ and the
+#   partitions. Rotated by size: max_size_mb caps one file (0 = no cap),
+#   max_age_days and max_backups decide how much history survives, and
+#   compress gzips the rotated files. $OPENHERON_LOG_FILE overrides the path
+#   for one run.
+#
+#   ★ A log file that cannot be opened is a warning, not a failed start: the
+#     process keeps running on stderr, which is where the reason appears.
+#
+# log:
+#   file: logs/openheron.log
+#   console: true        # keep writing to stderr as well
+#   max_size_mb: 20
+#   max_age_days: 14
+#   max_backups: 5
+#   compress: false
+
 # ★ The front end. "embed" — the default — serves the UI compiled into the
 #   binary; "dir" serves a directory on disk instead, and static_dir points
 #   at it.

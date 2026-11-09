@@ -96,7 +96,7 @@ import openheron 内部包都仍然算回归。
 不会拉出一条依赖链。
 
 ★ **两边共用的那套词汇也住在 `decl` 里，而这是依赖方向的事实，不是图方便。** 内置工具名
-（`decl.BuiltinToolNames`，`agentkit/spec/decl/decl.go:291`）被**两端**读：装载器拿它核对
+（`decl.BuiltinToolNames`，`agentkit/spec/decl/decl.go:319`）被**两端**读：装载器拿它核对
 Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些名字的 provider
 （`reservedToolNames`，`agentkit/build/tools.go:75`）。两端互相不能引 —— 装载器在装配器
 下层 —— 所以这份清单不能住在其中任何一边：它住在**两边之下**，那个叶子包里。★ 抄一份
@@ -105,7 +105,7 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
 ### 2.2 `agentkit/spec` 为什么**不**引 `kb`
 
 知识库配置（`tools/kb.yaml`）的**校验**需要知道语料路径是不是相对路径、模型有没有被声明、
-以及它是不是声明为 `kind: embedding`（`agentkit/spec/load.go:232` 的 `loadKB`、
+以及它是不是声明为 `kind: embedding`（`agentkit/spec/load.go:251` 的 `loadKB`、
 `agentkit/spec/load.go:869` 的 `validateKB`）。
 
 ★ 这三个答案都在**声明**里（`decl.Model.IsEmbedding`、`decl.Model.Dimensions`），
@@ -156,7 +156,7 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
 `noteRetiredDirs`），并说清新家在哪儿 —— 被丢掉却一声不吭的配置是最糟的一种：
 进程起来得好好的，而那个设置已经没了。
 
-`tools/` 下的文件名是**白名单**：`agentkit/spec/load.go:194` 对未知文件直接报错，
+`tools/` 下的文件名是**白名单**：`agentkit/spec/load.go:213` 对未知文件直接报错，
 不会静默忽略 —— 「我写了 kb.yaml 但它没生效」是最难查的一类问题。
 
 ★ `mcps/` 分区**一个 server 一个文件**（`agentkit/spec/config.go:25` 的 `spec.DirMCP`）：
@@ -170,7 +170,7 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
 
 ★ **模型没人声明不是启动错误 —— 它把那个 Agent 留在树外。** 规则本身写在
 `docs/config-design.md` §4.6，架构这一层要说的是**边界落在哪儿**：`validate()` 会**settle**
-这棵树（`agentkit/spec/load.go:517` 的 `leaveOutUndeclaredModels`）—— 那个 Agent 从
+这棵树（`agentkit/spec/load.go:536` 的 `leaveOutUndeclaredModels`）—— 那个 Agent 从
 `Config.Agents` 里被删掉，每个父 Agent 的 `subagents:` 里也被删掉，理由留在
 `Config.leftOut` 里（`agentkit/spec/config.go:139`）。下游的一切 —— `AgentNames()`、
 `MCPServersInUse()`、档位表、装配层 —— 看到的都是 settle 之后的树，于是永远碰不到一个
@@ -241,7 +241,7 @@ allow 表里就是 `allow`，**其余一律是 `ask`**。镜像的声明 `decl.T
 | 来源 | 它点名什么 | 装配位置 |
 |---|---|---|
 | 没有自己文件的内置工具 | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill`，外加五个只读的 config 工具 | `agentkit/build/tools.go:68` `builtinAllowedTools` |
-| 工具自己的文件 —— `tools/*.yaml` 与知识库 | 那个文件的 `allows:` | `agentkit/spec/load.go:280` `AllowedTools` |
+| 工具自己的文件 —— `tools/*.yaml` 与知识库 | 那个文件的 `allows:` | `agentkit/spec/load.go:299` `AllowedTools` |
 | MCP server 自己的文件 | 那个 server 的 `allows:`，用它自己的词汇，翻译成暴露出来的名字 | `agentkit/build/mcptools.go:173` `mcpAllowedNames` |
 
 `agentkit/build/spec.go:64` 的 `policyOf` 把三处合成一张表，`Policy.TierOf` 读这张表。
@@ -274,9 +274,9 @@ allow 表里就是 `allow`，**其余一律是 `ask`**。镜像的声明 `decl.T
 拷贝，只能*收紧*文件里的值 —— 没有了，而 `server/` **不是**热分区
 （`agentkit/spec/config.go:52`），所以改上限要重启才生效。
 
-声明的拓扑超过上限是**启动错误**（`agentkit/spec/load.go:897` 的 `validateDepth`），
+声明的拓扑超过上限是**启动错误**（`agentkit/spec/load.go:916` 的 `validateDepth`），
 不静默截断。子 agent 引用不存在的 agent、拓扑成环，也都是启动错误
-（`agentkit/spec/load.go:968` 的 `validateAgentGraph`、`agentkit/spec/load.go:985` 的 `detectCycle`）。
+（`agentkit/spec/load.go:987` 的 `validateAgentGraph`、`agentkit/spec/load.go:985` 的 `detectCycle`）。
 
 ### 3.6 skills 的解析是另一套
 
@@ -414,13 +414,13 @@ provider 提供的名字会被当成笔误报出来。`--no-tools` 可以把它�
 
 工具的来路都一样：
 
-`tools/*.yaml` → `spec.loadTool`（`agentkit/spec/load.go:194`）→ `decl.ToolsCfg` →
+`tools/*.yaml` → `spec.loadTool`（`agentkit/spec/load.go:213`）→ `decl.ToolsCfg` →
 `toolRegistry.Build`（`agentkit/build/tools.go:90`）→ `snapshot.buildHeavy`
 （`agentkit/build/snapshot.go:47`）→ `applyToolConfig`（`agentkit/build/assemble.go:31`）→
 `deep.Config.ToolsConfig.Tools` → `deep.New`（`agentkit/build/assemble.go:40`）。
 
 MCP 这一支在注册表处并进来：`mcps/<server>.yaml` → `spec.loadMCP`
-（`agentkit/spec/load.go:310`）→ `decl.MCPServerCfg` → MCP provider
+（`agentkit/spec/load.go:329`）→ `decl.MCPServerCfg` → MCP provider
 （`agentkit/build/mcptools.go:194`），注册在 `agentkit/build/tools.go:42` → 同一个
 `toolRegistry.Build` → 同一个 `applyToolConfig`。
 

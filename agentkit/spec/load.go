@@ -151,6 +151,25 @@ func (c *Config) loadServer(file string, data []byte) error {
 		c.deferKey("log_level fell back to info: %v", err)
 	}
 	s.LogLevel = level
+	// ★ A negative cap is not a failed start. The rotator treats 0 as "no
+	//   cap", so a negative value means the same thing after normalisation,
+	//   and the notice says so — refusing to boot over a log setting would
+	//   take the server down for a typo in the least important section.
+	s.Log.File = strings.TrimSpace(s.Log.File)
+	for _, cap := range []struct {
+		key  string
+		val  *int
+		what string
+	}{
+		{"log.max_size_mb", &s.Log.MaxSizeMB, "size"},
+		{"log.max_age_days", &s.Log.MaxAgeDays, "age"},
+		{"log.max_backups", &s.Log.MaxBackups, "backup count"},
+	} {
+		if *cap.val < 0 {
+			c.deferKey("%s: a negative %s cap means no cap, using 0", cap.key, cap.what)
+			*cap.val = 0
+		}
+	}
 	c.Server = s
 	return nil
 }

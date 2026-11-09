@@ -112,7 +112,7 @@ validation, reloading, writing).
 
 ★ **The vocabulary the two halves share lives in `decl` too, and that is a
 dependency-direction fact, not a convenience.** The built-in tool names
-(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:291`) are read by **both** ends:
+(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:319`) are read by **both** ends:
 the loader checks the names an agent's `tools:` list mentions against them, and the
 builder refuses a provider that claims one of them (`reservedToolNames`,
 `agentkit/build/tools.go:75`). Neither end may import the other — the loader sits
@@ -174,7 +174,7 @@ Recomputing either one is the same mistake twice.
    and the ones a file's own `allows:` lists. You write no permission code.
 
 5. **Do not collide with a reserved name.** The names live in `decl.BuiltinToolNames`
-   (`agentkit/spec/decl/decl.go:291`): `ls` `read_file` `write_file` `edit_file` `glob`
+   (`agentkit/spec/decl/decl.go:319`): `ls` `read_file` `write_file` `edit_file` `glob`
    `grep` `execute` `task` `write_todos` `skill`. A collision fails at `Build` time.
    ★ **They live in `decl` and not in the build package because both halves need
    them**: the builder refuses a provider that claims one of these names
@@ -185,8 +185,8 @@ Recomputing either one is the same mistake twice.
    table at the wrong tool.
 
    ★ **A name that comes from a server is namespaced.** An MCP tool is exposed under
-   `decl.MCPToolPrefix` (`agentkit/spec/decl/decl.go:373`) and
-   `decl.MCPSeparator` (`agentkit/spec/decl/decl.go:382`), so the agent's table
+   `decl.MCPToolPrefix` (`agentkit/spec/decl/decl.go:401`) and
+   `decl.MCPSeparator` (`agentkit/spec/decl/decl.go:410`), so the agent's table
    narrows a whole server with a prefix instead of a list of names. ★ The composed
    name is never parsed back: `Table.Blocked` (`agentkit/build/policy.go:130`)
    matches prefixes, so nothing has to split a name to learn which server it
@@ -289,7 +289,7 @@ Say you want a new `mcps/` directory:
    and **non-hot-reloaded** directories clearly apart — whether a directory is hot
    changes what users expect.
 
-2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`agentkit/spec/config.go:521`) and
+2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`agentkit/spec/config.go:543`) and
    implement `loadXXX`.
 
    ★ **Two shapes the recipe did not have before `skills/`.** A partition may be
@@ -345,7 +345,7 @@ definition — there is no `enabled` key.
 - **Declared** by the constant `DirMCP = "mcps"` (`agentkit/spec/config.go:25`) and the
   `Categories` entry (`agentkit/spec/config.go:66`), which is editable, hot and
   `.yaml`.
-- **Loaded** by `loadMCP` (`agentkit/spec/load.go:310`): one file, one server.
+- **Loaded** by `loadMCP` (`agentkit/spec/load.go:329`): one file, one server.
 - ★ **"Hot" for this partition means the client is rebuilt.** The declaration is the
   server's identity, so a changed declaration means a changed server: the old client
   is torn down and a new one is started (`agentkit/build/mcpmanager.go:215`), keyed on
@@ -397,7 +397,7 @@ Editing `agents/*.md` is enough; no code change is needed. But keep in mind:
   until it is fixed, but the process does, and the editor that fixes it lives there.
 - An agent referenced by `subagents` must exist and must not form a cycle — both are
   **startup errors**. ★ A sub-agent that was left out is dropped from its parents'
-  `subagents:` (`agentkit/spec/load.go:546`), so the delegation tool never offers a worker
+  `subagents:` (`agentkit/spec/load.go:565`), so the delegation tool never offers a worker
   that cannot run — and a `subagents:` entry pointing at such an agent is not a cycle or a
   dangling reference, because the settled tree no longer mentions it.
 - Exceeding `max_depth` is a **startup error**, never a silent truncation.
@@ -475,7 +475,7 @@ starts the server and shows the agent nothing. ★ A contradiction between the t
 #### The two notices
 
 Both are **notices**, not errors — the configuration is legal, it just does not say
-what the author meant (`agentkit/spec/load.go:660` `noticeAgentTools`):
+what the author meant (`agentkit/spec/load.go:679` `noticeAgentTools`):
 
 | Notice | What it means | What to do |
 |---|---|---|
@@ -1174,7 +1174,7 @@ about text the user has already changed.
 
 ★ **A rule that was the client's moved to the server rather than disappearing.** An
 agent's `reasoning` level is checked against the model's declared vocabulary in
-`agentkit/spec/load.go:616` `checkReasoning` — where every file passes, not only the
+`agentkit/spec/load.go:635` `checkReasoning` — where every file passes, not only the
 edits made in the settings editor. ★ Deleting a client rule is only a simplification if
 the server already has it; that is the question to ask of the next one.
 
@@ -1408,7 +1408,7 @@ someone measures that the default misses something.
 | A config change does not take effect | Is that partition hot-reloaded? `llm/` `agents/` `tools/` `mcps/` are hot; `server/` and `skills/` need a restart |
 | Startup fails with `disabled_tools` was renamed to `tools` | ★ The two mean **opposite** things — one removed tools, the other names them. Delete `disabled_tools` and list the tools the agent should have in `tools:` (`agentkit/spec/load.go:99`) |
 | Startup fails with `names the MCP tool` … `but does not mount the server` | ★ Mounting and visibility are two levels: add the server to `mcps:`, or drop the tool from `tools:` (`agentkit/spec/load.go:771`) |
-| A notice says `tools` names a tool that does not exist | The built-in tools are the ones in `decl.BuiltinToolNames` (`agentkit/spec/decl/decl.go:291`); a provider's tool exists only when its file under `tools/` is written |
+| A notice says `tools` names a tool that does not exist | The built-in tools are the ones in `decl.BuiltinToolNames` (`agentkit/spec/decl/decl.go:319`); a provider's tool exists only when its file under `tools/` is written |
 | A notice says `tools` names the `skill` tool but `skills` is empty | The configuration is legal but self-contradictory: name the skill in `skills:`, or drop `skill` from `tools:` |
 | An agent cannot call a tool | `GET /v2/agents/:agentId` for the effective tool table; then read the tool's `reason` — `tools`, or the default `ask` tier, which asks |
 | An agent has **no** tools at all | ★ The tool list is an allow-list and it **defaults to none**: an absent `tools:` means no tool. List the tools the agent should have |
