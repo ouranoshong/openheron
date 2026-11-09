@@ -127,6 +127,7 @@ The result reports how many files were touched, how many documents were re-embed
 //
 //	path that escapes it is refused, because indexing it would put
 //	documents in the index that the corpus does not contain.
+//
 // isAbsPath reports whether a path was written as "from the root". On Windows
 // filepath.IsAbs("/x") is false because a drive is missing, but a caller that
 // wrote the leading separator meant an absolute path.

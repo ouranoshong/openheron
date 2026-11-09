@@ -10,10 +10,11 @@ import (
 // renameWithRetry replaces dst with the finished temp file.
 //
 // ★ On Windows MoveFileEx fails with ERROR_ACCESS_DENIED while any handle
-//   still has dst open — even a reader that is about to close it. On Linux
-//   rename over an open file is legal, which is why this only shows up there.
-//   The competing reader is a short os.ReadFile, so a handful of short waits
-//   is enough; the retries stop as soon as the error is not that one.
+//
+//	still has dst open — even a reader that is about to close it. On Linux
+//	rename over an open file is legal, which is why this only shows up there.
+//	The competing reader is a short os.ReadFile, so a handful of short waits
+//	is enough; the retries stop as soon as the error is not that one.
 func renameWithRetry(old, newPath string) error {
 	var err error
 	for attempt := 0; attempt < 20; attempt++ {
