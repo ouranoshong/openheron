@@ -342,20 +342,22 @@ definition — there is no `enabled` key.
   the declaration's fingerprint (`agentkit/build/mcpmanager.go:330`). ★ A hot partition
   whose resources are not rebuilt lies about being hot.
 - **The write gate** refuses a name that could not be read back:
-  `validateFileName` (`agentkit/spec/write.go:116`) accepts only a `<server>.yaml` whose
-  name is a valid server name (`agentkit/spec/write.go:107`) — the file's name is the
+  `validateFileName` (`agentkit/spec/write.go:166`) accepts only a `<server>.yaml` whose
+  name is a valid server name (`agentkit/spec/write.go:185`) — the file's name is the
   server's name, and the server's name is the namespace segment of that server's tools.
-- **The scaffold** is `Skeleton` (`agentkit/spec/write.go:189`), and the `mcps/` branch
-  (`agentkit/spec/write.go:186`) writes a **loadable** file: ★ a file under `mcps/`
+- **The scaffold** is `Skeleton` (`agentkit/spec/write.go:280`), and the `mcps/` branch
+  (`agentkit/spec/write.go:307`) writes a **loadable** file: ★ a file under `mcps/`
   **defines** a server, so a file that cannot be parsed is not a server that is off, it
   is a configuration that does not load. The optional fields are written as comments,
   and the `command` is a placeholder that is not installed — so the server does not come
   up, the log says so, and the agent carries on.
-- ★ **The example is one file, read by two layers.** `agentkit/templates/files/mcps/example.yaml`
-  is the template `openheron init` writes (`initcfg/initcfg.go`) and the skeleton the
-  configuration editor hands out (`agentkit/spec/write.go`). ★ The editor is served by the
-  API and the API cannot import `initcfg` — it would be a cycle — so the file lives in
-  `agentkit/templates`, a **leaf** both can depend on. ★ A copy would drift.
+- ★ **The scaffold is one file, and the leading underscore is what says it is not one to
+  install.** `agentkit/templates/files/mcps/_example.yaml` is the skeleton the
+  configuration editor hands out (`agentkit/spec/write.go`), and `openheron init` writes
+  the three servers that live beside it — `mcps/fetch.yaml`, `mcps/time.yaml` and
+  `mcps/deepwiki.yaml`. ★ The editor is served by the API and the API cannot import
+  `initcfg` — it would be a cycle — so the file lives in `agentkit/templates`, a
+  **leaf** both can depend on. ★ A copy would drift.
 
 ### 3.3 Adding an API route
 

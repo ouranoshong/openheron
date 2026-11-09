@@ -365,12 +365,16 @@ workspace — the startup hook does it, before the server comes up:
 
 ```
 ~/my-project/.openheron/
-  agents/main.md      the entry agent
-  agents/task.md      the executor agent
-  llm/deepseek.yaml   the model profile
-  mcps/example.yaml   an MCP server (a sample — the command is a placeholder)
-  server/             the server's own settings
-  state/              the sessions
+  agents/main.md           the entry agent
+  agents/task.md           the general execution expert
+  agents/agent-expert.md   the agent-domain expert
+  agents/skill-expert.md   the skill-domain expert
+  skills/                  the skills, one folder each
+  llm/deepseek.yaml        the model profile
+  mcps/                    three MCP servers (fetch, time, deepwiki)
+  tools/                   the tool configurations
+  server/                  the server's own settings
+  state/                   the sessions
 ```
 
 ★ **Those are your files.** They are on your mount, in plain sight, and

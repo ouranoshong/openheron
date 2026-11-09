@@ -23,14 +23,20 @@ type Options struct {
 	Provider string
 	BaseURL  string
 	Env      string
-	// Tools writes the tool configurations under tools/.
+	// NoTools leaves the tool configurations under tools/ unwritten.
 	//
-	// ★ A provider whose configuration is absent mounts nothing, so writing
-	//   the file is what turns the tool on — which makes this opt-in: a
-	//   minimal runnable configuration should not open an outbound channel
-	//   on its own.
-	Tools bool
-	Force bool
+	// ★ The switch is **negative** on purpose: the zero value has to be the
+	//   full tree, because the full tree is what a new configuration needs.
+	//   A positive switch would make "the default" and "the complete
+	//   configuration" two different things, and the first one is what a
+	//   caller gets by forgetting to set a flag.
+	//
+	// ★ The tools are part of the tree, not an extra: an agent's `tools:`
+	//   list names `request_get` / `duckduckgo_search` /
+	//   `wikipedia_search`, and a name that no provider offers is reported
+	//   as a typo.
+	NoTools bool
+	Force   bool
 }
 
 type Plan struct {
@@ -94,6 +100,15 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 		}
 	}
 
+	// ── skills ──────────────────────────────────────────────────────────
+	//
+	// ★ The skills are a **nested** partition — `skills/<name>/SKILL.md` —
+	//   and they are written like the rest: an agent's `skills:` list names
+	//   them, and a name that is not on disk is a skill nobody can load.
+	if err := copySection(p, manifest.Templates, spec.DirSkills, nil); err != nil {
+		return nil, err
+	}
+
 	// ── provider ────────────────────────────────────────────────────────
 	if choice.NeedProvider {
 		if svc.Has(spec.DirLLM, choice.Provider+".yaml") {
@@ -121,10 +136,13 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 
 	// ── tools ───────────────────────────────────────────────────────────
 	//
-	// ★ A provider whose configuration is absent mounts nothing, so init does
-	//   not write them on its own — which tools exist is the user's call.
-	if !opts.Tools {
-		p.Notes = append(p.Notes, "tools/ was skipped (--tools writes the tool configurations)")
+	// ★ The tool configurations are part of the tree: the agents name
+	//   `request_get` / `duckduckgo_search` / `wikipedia_search`, and a name
+	//   that no provider offers is reported as a typo. So they are written
+	//   unless the caller asks for them not to be.
+	if opts.NoTools {
+		p.Notes = append(p.Notes,
+			"tools/ was skipped (--no-tools leaves the tool configurations unwritten)")
 	} else {
 		if err := copySection(p, manifest.Templates, spec.DirTools, nil); err != nil {
 			return nil, err

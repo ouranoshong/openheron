@@ -1,0 +1,20 @@
+# mcps/time.yaml
+#
+# The official reference implementation (Python): uvx mcp-server-time
+# The current time and time-zone conversion; no credentials, no side effects,
+# and the smallest server that shows whether the MCP chain works at all.
+# Optional argument: add "--local-timezone", "Asia/Shanghai" to args.
+# Prerequisite: uvx is on the PATH; on Windows, change command to uvx.exe if
+# the command cannot be found.
+#
+# Mounted: it is mounted on task.
+transport: stdio
+command: uvx
+args: ["mcp-server-time"]
+timeout: 30s
+call_timeout: 30s
+
+# ★ Both read-only tools run without a nod; a name that is written wrong
+#   raises no error, it is just silently not in effect (check the /mcps
+#   panel).
+allows: [get_current_time, convert_time]

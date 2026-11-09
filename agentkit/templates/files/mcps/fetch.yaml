@@ -1,0 +1,24 @@
+# mcps/fetch.yaml
+#
+# The official reference implementation (Python): uvx mcp-server-fetch
+# Read-only fetching from the open web: it turns a page into markdown and
+# hands it to the model. No credentials, no write operation.
+# Prerequisite: uvx is on the PATH (it comes with uv); the first start
+# downloads the package.
+# On Windows, if exec cannot find the command, change command to uvx.exe.
+#
+# Mounted: it is mounted on task (use mcp__fetch__* to verify an external
+# document or page).
+# The file only defines the server; who starts it is the agent's mcps:, who
+# sees it is the agent's tools: — both levels have to be written.
+transport: stdio
+command: uvx
+args: ["mcp-server-fetch"]
+timeout: 30s
+call_timeout: 60s
+
+# ★ allows uses the server's own tool names, not the exposed name
+#   mcp__fetch__fetch.
+#   The default is ask; naming fetch means that one needs no nod. The tools
+#   the server adds later still ask.
+allows: [fetch]

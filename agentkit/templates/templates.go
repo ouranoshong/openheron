@@ -19,6 +19,7 @@ import (
 	"io/fs"
 	"path"
 	"regexp"
+	"strings"
 )
 
 //go:embed all:files
@@ -27,11 +28,34 @@ var files embed.FS
 // root is the directory the template files live in, inside the embed.
 const root = "files"
 
+// isScaffold reports whether one file is a **scaffold** rather than a file
+// to install.
+//
+// ★ The leading underscore is the mark: `llm/_generic.yaml` is the fallback
+//
+//	that is chosen and never copied, and `mcps/_example.yaml` is the
+//	skeleton a new MCP server starts from. A file whose name starts with
+//	`_` is therefore **not** part of the tree that gets written — it is the
+//	source of a scaffold.
+//
+// ★ The rule lives here, in the package that owns the files: the alternative
+//
+//	is a list of names in the layer that copies them, and a list of names
+//	is a list that drifts from the tree it describes.
+func isScaffold(name string) bool {
+	return strings.HasPrefix(name, "_")
+}
+
 // File returns one template's content, by its path under files/.
 //
 // ★ The path is the one the template is addressed by everywhere else:
 //
-//	"mcps/example.yaml", "tools/http.yaml", "llm/openai.yaml".
+//	"mcps/_example.yaml", "tools/http.yaml", "llm/openai.yaml".
+//
+// ★ A scaffold is addressable here like any other file: `File` answers
+//
+//	"does this exact path exist", and the underscore rule is about what
+//	gets **copied**, not about what can be read.
 func File(rel string) (string, error) {
 	raw, err := files.ReadFile(path.Join(root, rel))
 	if err != nil {
@@ -40,12 +64,63 @@ func File(rel string) (string, error) {
 	return string(raw), nil
 }
 
+// Nested returns every template under one directory that holds a **folder
+// per entity**, keyed by the path it is written to.
+//
+// ★ The nested partition is `skills/`: a skill is a folder, and the folder
+//
+//	name is the skill's name, so the file sits one level deeper than the
+//	partition's own directory. A flat reader cannot see it — `Dir` skips
+//	the directories — and the editor and `openheron init` need to see it
+//	the same way.
+//
+// ★ The keys keep the whole path ("skills/code-review/SKILL.md"), because
+//
+//	that is the shape the callers use: they address a template by the path
+//	it is written to.
+func Nested(dir string) (map[string]string, error) {
+	out := map[string]string{}
+	entries, err := fs.ReadDir(files, path.Join(root, dir))
+	if err != nil {
+		return nil, fmt.Errorf("templates: read %s: %w", dir, err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		sub, err := fs.ReadDir(files, path.Join(root, dir, e.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("templates: read %s/%s: %w", dir, e.Name(), err)
+		}
+		for _, f := range sub {
+			if f.IsDir() {
+				continue
+			}
+			if isScaffold(f.Name()) {
+				continue
+			}
+			rel := path.Join(dir, e.Name(), f.Name())
+			content, err := File(rel)
+			if err != nil {
+				return nil, err
+			}
+			out[rel] = content
+		}
+	}
+	return out, nil
+}
+
 // Dir returns every template under one directory, keyed by its path.
 //
 // ★ The keys keep the directory ("tools/http.yaml"), because that is the
 //
 //	shape the callers use: the editor's manifest and the init plan both
 //	address a template by the path it is written to.
+//
+// ★ A **scaffold** — a file whose name starts with `_` — is not in the
+//
+//	answer: it is the source of a skeleton, not a file to install, and the
+//	callers of this function copy what it returns.
 func Dir(dir string) (map[string]string, error) {
 	out := map[string]string{}
 	entries, err := fs.ReadDir(files, path.Join(root, dir))
@@ -54,6 +129,9 @@ func Dir(dir string) (map[string]string, error) {
 	}
 	for _, e := range entries {
 		if e.IsDir() {
+			continue
+		}
+		if isScaffold(e.Name()) {
 			continue
 		}
 		content, err := File(path.Join(dir, e.Name()))
@@ -66,6 +144,11 @@ func Dir(dir string) (map[string]string, error) {
 }
 
 // Has reports whether one template exists.
+//
+// ★ It is an exact-path question, so a **scaffold** is found here too: the
+//
+//	underscore rule is about what gets copied, and a caller that asks
+//	"is llm/_generic.yaml there?" wants to know that it is.
 func Has(rel string) bool {
 	_, err := files.ReadFile(path.Join(root, rel))
 	return err == nil

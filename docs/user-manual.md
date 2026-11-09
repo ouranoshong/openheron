@@ -159,23 +159,40 @@ openheron
 
 Open <http://localhost:8080>.
 
-`openheron init` writes five files:
+`openheron init` writes the whole tree:
 
 ```
 your/project/
 └── .openheron/
     ├── agents/
-    │   ├── main.md          # entry agent: understand, split, delegate, verify
-    │   └── task.md          # executor agent: does the actual work
+    │   ├── main.md           # entry agent: understand the request, plan, dispatch
+    │   ├── task.md           # general execution expert: llm/ tools/ mcps/ server/
+    │   ├── agent-expert.md   # agent-domain expert: agents/*.md
+    │   └── skill-expert.md   # skill-domain expert: skills/<name>/SKILL.md
+    ├── skills/
+    │   ├── openheron-config-map/SKILL.md        # the facts of the configuration system
+    │   ├── openheron-config-edit/SKILL.md       # the procedure for changing it
+    │   ├── openheron-config-templates/SKILL.md  # how to get a skeleton
+    │   └── openheron-config-validate/SKILL.md   # the silent failures
     ├── llm/
     │   └── deepseek.yaml    # model profile
     ├── mcps/
-    │   └── example.yaml      # an MCP server example (its command is a placeholder)
+    │   ├── fetch.yaml        # fetch a page and turn it into markdown
+    │   ├── time.yaml         # the current time and time-zone conversion
+    │   └── deepwiki.yaml     # public repository documentation and Q&A
+    ├── tools/
+    │   ├── filesystem.yaml   # the tiers of the filesystem tools
+    │   ├── http.yaml         # request_get
+    │   ├── web_search.yaml   # duckduckgo_search
+    │   ├── wikipedia.yaml    # wikipedia_search
+    │   └── kb.yaml           # the knowledge base (off: its corpus_dir is empty)
     └── server/
         └── config.yaml      # process parameters (not hot-reloaded)
 ```
 
-★ The file under `mcps/` is an **example**, not a configuration — see §4.7.
+★ The three MCP servers need `uvx` on the PATH, and the two stdio ones download their
+package on the first start — a server that cannot be started costs that server's tools
+and nothing else (§4.7).
 
 ★ **There is no `policy/` file.** The tiers have a default and the exceptions are
 named where the tool comes from (§4.3), so a file that says what the code already
@@ -194,7 +211,7 @@ Other `init` options:
 | `--model <name>` | Choose the model, default `deepseek-flash` |
 | `--base-url <url>` | The vendor endpoint (**with the path**, copy it from their docs) |
 | `--env <NAME>` | The environment variable holding the secret, default `<PROVIDER>_API_KEY` |
-| `--tools` | Also generate the tool configurations under `tools/` |
+| `--no-tools` | Leave the tool configurations under `tools/` unwritten |
 | `--force` | Overwrite existing files |
 | `--dry-run` | Print what would be written, write nothing |
 | `--json` | Machine-readable output |
@@ -450,10 +467,11 @@ switched on by a **non-empty `corpus_dir`**, not by the file's presence.
 ★ **Only these four file names are accepted** under `tools/`; any other name is a
 **startup error** and is never silently ignored.
 
-★ **`openheron init` writes nothing under `tools/` by default** — that whole directory is
-yours to write. Pass `--tools` and it writes the four files above. Not writing a file
-means not enabled: the tool does not appear in the agent's tool table, and the model
-cannot see it.
+★ **`openheron init` writes the five files above** — the tool configurations are part
+of the tree, because the factory agents name `request_get`, `duckduckgo_search` and
+`wikipedia_search`, and a name no provider offers is reported as a typo. Pass
+`--no-tools` and that directory stays empty. Not writing a file means not enabled: the
+tool does not appear in the agent's tool table, and the model cannot see it.
 
 ★ **The file's `allows:` line decides what runs without asking** — `tools/http.yaml`
 names `request_get`, `tools/kb.yaml` names `kb_search`. Everything else that file
@@ -562,12 +580,17 @@ call_timeout: 60s
 underscores is refused: the exposed name `mcp__a__b__x` could not be read back later —
 is that the server `a` with the tool `b__x`, or the server `a__b` with the tool `x`?
 
-★ **`openheron init` writes `mcps/example.yaml`** — an *example*, and a **loadable**
-one: a file under `mcps/` **defines** a server, so a file that cannot be parsed is not a
-server that is off, it is a configuration that does not load. ★ Its `command` is a
-placeholder that is not installed, so the server does not come up, **the log says so,
-and the agent carries on**. **Copying it to `mcps/<server>.yaml` and putting your own
-command in it is the act of defining that server.**
+★ **`openheron init` writes three servers** — `mcps/fetch.yaml`, `mcps/time.yaml` and
+`mcps/deepwiki.yaml`. ★ Each of them **defines** a server, so a file that cannot be
+parsed is not a server that is off, it is a configuration that does not load. ★ The two
+stdio ones run `uvx`, and `uvx` is not installed by default — so the server does not
+come up, **the log says so, and the agent carries on**. ★ **Writing a file of your own
+under `mcps/` with your own command in it is the act of defining that server**; copy
+one of the three and change the `command:`.
+
+★ **The example that is not installed** — `mcps/_example.yaml` in the templates — is the
+skeleton the settings editor starts a new server from. It is a scaffold, not a file to
+install, so `openheron init` does not write it.
 
 ★ **The first start of a stdio server may be slow, and `timeout:` is the ceiling for
 it.** The command is often a package runner (`npx`, `uvx`), and the first run installs

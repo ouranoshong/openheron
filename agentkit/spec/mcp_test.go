@@ -361,7 +361,9 @@ func TestTheEditorRefusesAServerNameThatCouldNotBeReadBack(t *testing.T) {
 //	package is a leaf, and a leaf's test may not reach up into the layer
 //	that depends on it.
 func TestTheMCPExampleLoads(t *testing.T) {
-	content, err := templates.File("mcps/example.yaml")
+	// ★ The scaffold is the source of the skeleton a new server starts from;
+	//   the leading underscore marks it as a file that is not installed.
+	content, err := templates.File("mcps/_example.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}

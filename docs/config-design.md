@@ -173,12 +173,15 @@ cp -r .openheron-example/{agents,llm,skills} /your/project/.openheron/
 >   给了 `--config-dir` 就写到那儿，否则写 `<目标目录>/.openheron`。
 >   方案见 `init-design.md`（upstream）。
 >
-> 它写什么：`agents/main.md`、`agents/task.md`、`llm/<provider>.yaml`、`mcps/example.yaml`、
-> `server/config.yaml` —— 加上 `--tools` 时才写 `tools/` 下的工具配置
+> 它写什么：`agents/main.md`、`agents/task.md`、`agents/agent-expert.md`、
+> `agents/skill-expert.md`、`llm/<provider>.yaml`、`server/config.yaml`、
+> `tools/` 下的五个文件、`mcps/fetch.yaml`、`mcps/time.yaml`、`mcps/deepwiki.yaml`，
+> 以及 `skills/openheron-config-<name>/SKILL.md` 四个技能
 > （`initcmd.go:138-150`、`initcfg/initcfg.go:77-86`、`initcfg/initcfg.go:110`、
 > `initcfg/initcfg.go:167`、`initcfg/initcfg.go:185`）。
-> ★ **`tools/` 这一段是可选的**：没有 `--tools` 时 `init` 不写它 —— 配置缺失的 provider 返回空，
-> 所以写下这个文件才是把工具挂上去的那一步（`agentkit/build/nettools.go`）。
+> ★ **`tools/` 这一段是默认写的**：那五个文件是这棵树的一部分 —— 出厂的 agent 会点名
+> `request_get` / `duckduckgo_search` / `wikipedia_search`，而没有 provider 提供的名字
+> 会被当成笔误报出来。★ 想留下它就加 `--no-tools`（`agentkit/build/nettools.go`）。
 > ★ **没有 `policy/` 这一段 —— 那个分区已经没了。** 档位由**提供**工具的那些文件点名
 > （§6.3、§6.6），而上限已经写进 `server/config.yaml`（§12.2）。★ 一份「说的就是代码已经在做的事」
 > 的文件是噪音，而配置树里的噪音会被当成意思读。
@@ -1459,7 +1462,7 @@ skills are not enabled
 | 里面的文件名固定 `SKILL.md` | `agentkit/spec/config.go:33` `SkillFileName` |
 | 文件夹名要能被读回来：`^[a-z0-9]+([_-][a-z0-9]+)*$` | `agentkit/spec/decl/decl.go:439` `SkillNamePattern` |
 | 只列**有 `SKILL.md`** 的文件夹 | `agentkit/spec/write.go:256` `listNested` |
-| 新建时文件夹跟着建、删除时空文件夹一起删 | `agentkit/spec/write.go:189` 与 `Delete` 里那一支 |
+| 新建时文件夹跟着建、删除时空文件夹一起删 | `agentkit/spec/write.go:280` 与 `Delete` 里那一支 |
 | 热更新：改一个 `SKILL.md`，下一轮生效 | `Category{hot: true}`（`agentkit/spec/config.go:100`）；指纹的遍历是**递归**的，两层下的文件也算 |
 
 ★ **`skills/` 是唯一没有 loader 的分区。** skill 文件不是配置层读的 —— 运行时自己的 backend 读它
@@ -1654,7 +1657,8 @@ allows: [read_issue, list_issues]
 `tools/wikipedia.yaml` 说 `allows: [wikipedia_search]`，`tools/kb.yaml` 说
 `allows: [kb_search]` —— 于是档位是**看得见、改得动**的，而不是靠约定隐含的，
 而一份新工作区从一开始就让它的只读工具直接放行。★ 那些可选的集成
-留在 `--tools` 后面：它们存在哪些是用户说了算，而文件系统那套不是可选的。
+留在 `tools/` 那五个文件里：它们的档位是**看得见、改得动**的，而一份新工作区从一开始
+就让它的只读工具直接放行。★ `--no-tools` 只是让那一段不写出来而已。
 
 #### ★ 档位改动下一轮就生效
 
@@ -1773,7 +1777,7 @@ agent 有没有这个工具。一个没点名 `write_file` 的 agent 压根儿�
 `agentkit/spec/decl/decl.go:538-556`）；值在 provider 里（三个超时在
 `agentkit/build/nettools.go:22-27`，搜索的缺省在 `agentkit/build/nettools.go:210-217`，维基的缺省在
 `agentkit/build/nettools.go:246-253`），知识库的缺省在 `agentkit/spec/defaults.go:49-56`。出厂模板把
-它们都写了出来（`agentkit/spec/write.go:189-228` `Skeleton`、`:235` `ToolTemplates`）—— 那是看清整个配置面最短的一条路。
+它们都写了出来（`agentkit/spec/write.go:280-322` `Skeleton`、`:334` `ToolTemplates`）—— 那是看清整个配置面最短的一条路。
 
 ★ 出厂模板里有两条注释跑在代码前面，两条都要让困惑的人买单：`web_search.yaml` 的模板提到还有第二个
 provider `searxng`（`agentkit/templates/files/tools/web_search.yaml:3`），而代码只认 `duckduckgo` —— 写 `searxng` 会被当作
@@ -2026,18 +2030,19 @@ allow 清单说*其中哪些*直接放行。
 
 #### 模板
 
-★ **配置编辑器提供脚手架。** `Template(spec.DirMCP, …)`（`agentkit/spec/write.go:189`）
+★ **配置编辑器提供脚手架。** `Template(spec.DirMCP, …)`（`agentkit/spec/write.go:280`）
 写出一份**能加载**、并说明缺了什么的文件 —— `mcps/` 下的文件**定义**一个 server，所以一份
 解析不了的文件不是「server 关着」，而是「配置加载不了」。写入门拒绝名字不是
-`<server>.yaml`、或者 server 名不合法的文件（`agentkit/spec/write.go:107`）。
+`<server>.yaml`、或者 server 名不合法的文件（`agentkit/spec/write.go:185`）。
 
-★ **出厂样例也是一份能加载的文件。** `openheron init` 写下 `mcps/example.yaml`，来自模板
-文件 `agentkit/templates/files/mcps/example.yaml` —— ★ **一个文件，两个读者**：
-配置编辑器拿它当脚手架（`agentkit/spec/write.go`），`openheron init` 把它写下去
-（`initcfg/initcfg.go`）。★ 两边在不同层，所以文件住在一个**两边都能依赖的叶子包**里 ——
-拷贝会漂移，而拷贝正是原先的依赖形状逼出来的。它的 `command` 是一个没装的占位符：
-server 起不来，日志里说一句，agent 照跑。★ **把它复制成 `mcps/<server>.yaml` 并填上你
-自己的 command，就是定义那个 server 这个动作。**
+★ **那个例子是脚手架，不是要装的东西。** 它住在模板文件
+`agentkit/templates/files/mcps/_example.yaml` —— ★ **开头那个下划线就是「不写下去」的
+标记**：`openheron init` 写的是它旁边的三台服务器（`mcps/fetch.yaml`、`mcps/time.yaml`、
+`mcps/deepwiki.yaml`），而这个文件只由配置编辑器当脚手架读（`agentkit/spec/write.go`）。
+★ 两边在不同层，所以文件住在一个**两边都能依赖的叶子包**里 —— 拷贝会漂移，而拷贝正是
+原先的依赖形状逼出来的。它的 `command` 是一个没装的占位符：server 起不来，日志里说一句，
+agent 照跑。★ **把它复制成 `mcps/<server>.yaml` 并填上你自己的 command，就是定义那个
+server 这个动作。**
 
 #### 实施状态
 

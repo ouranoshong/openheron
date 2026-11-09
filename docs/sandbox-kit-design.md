@@ -188,7 +188,7 @@ agent 在一个目录里干活，配置却从另一个目录读。
 ★ `openheron init` 是非交互且幂等的 —— 这正是它能当启动步骤用的原因：
 
 - 每个输入都是一个参数（`initcmd.go:16-42`）：`--dir`、`--config-dir`、
-  `--model`、`--provider`、`--base-url`、`--env`、`--tools`、
+  `--model`、`--provider`、`--base-url`、`--env`、`--no-tools`、
   `--force`、`--dry-run`、`--json`；
 - 它只写缺的东西，其余报为保留（`initcmd.go:120`、`initcmd.go:118`）；
 - 它写进 `<dir>/.openheron`，而且**从不读 `$OPENHERON_CONFIG_DIR`**
@@ -1405,20 +1405,33 @@ URLs"），而且实测过：把两个 OCI 引用换成 `../../openheron` 与
 | `sbx env create --force` | `✓ Created sandbox openheron-demo`，端口发布在临时回环端口上 |
 | 沙箱自身的状态 | 工作区挂在它的宿主路径上，agent 是 `openheron-demo` |
 | `sbx env run --force` | agent 会话打开，服务启动 |
-| 服务 | `/v2/health` 回答 `status: ok`，`/v2/agents` 列出两个 agent，一次 `POST /v2/run` 流出模型的帧 |
+| 服务 | `/v2/health` 回答 `status: ok`，`/v2/agents` 列出四个 agent（入口加三位执行专家），一次 `POST /v2/run` 流出模型的帧 |
 
 ★ **startup hook 把配置写在挂载上。** Kit 的 `lifecycle@1` 启动命令跑的是
 `openheron init --dir "$WORKSPACE_DIR"`，沙箱里的日志显示整套都写了出来：
 
 ```
+created .openheron/agents/agent-expert.md
 created .openheron/agents/main.md
+created .openheron/agents/skill-expert.md
 created .openheron/agents/task.md
+created .openheron/skills/openheron-config-edit/SKILL.md
+created .openheron/skills/openheron-config-map/SKILL.md
+created .openheron/skills/openheron-config-templates/SKILL.md
+created .openheron/skills/openheron-config-validate/SKILL.md
 created .openheron/llm/deepseek.yaml
-created .openheron/mcps/example.yaml
+created .openheron/tools/filesystem.yaml
+created .openheron/tools/http.yaml
+created .openheron/tools/kb.yaml
+created .openheron/tools/web_search.yaml
+created .openheron/tools/wikipedia.yaml
+created .openheron/mcps/deepwiki.yaml
+created .openheron/mcps/fetch.yaml
+created .openheron/mcps/time.yaml
 created .openheron/server/config.yaml
 ```
 
-★ **这份集合是五个文件，里面没有 `policy/`。** 那个分区在 2026-11-07 退役了
+★ **这份集合是十八个文件，里面没有 `policy/`。** 那个分区在 2026-11-07 退役了
 （§1.2），所以今天写出来的配置把档位放在提供工具的那些文件里，而不是一份中心清单里。
 
 ★ **所以示例项目什么配置都不带。** 工作区里放着项目与环境文件，其余的由

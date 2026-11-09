@@ -3,6 +3,11 @@
 # A server name may not contain a run of underscores — "mcp__a__b__x" could not be
 # read back.
 #
+# ★ This file is the **scaffold** for a new server, not one to install: the
+#   leading underscore is the mark of a file that is not written by
+#   `openheron init` and not offered as a template — the servers that are
+#   installed live beside it, one file each.
+#
 # ★ This file **defines** a server: the file's presence is the definition, there is
 #   no "enabled" key. So it has to hold a server that is worth having — put the
 #   executable you want in command, and the server is defined.
