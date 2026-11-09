@@ -447,7 +447,7 @@ MCP 服务器按服务器一个文件来配：
 ★ server 名就是文件名去掉 `.yaml`，它就是命名空间的那一段（§3.1）。
   不匹配 `^[a-z0-9]+(_[a-z0-9]+)*$` 的文件名是**加载期硬错误** ——
   是我们自己写的，我们自己修。★ 配置编辑器也拒绝同样的名字
-  （`agentkit/spec/write.go:107`），所以经编辑器写出来的文件也不会破坏这条规则。
+  （`agentkit/spec/write.go:185`），所以经编辑器写出来的文件也不会破坏这条规则。
 
 ### 5.4 这个分区是热的
 
@@ -591,8 +591,8 @@ allows: [request_get]
 | 谁来写 | 写什么 |
 |---|---|
 | 用户 | 手写 `mcps/<server>.yaml` 这些文件 |
-| `openheron init` | ★ 一个**示例** —— `mcps/example.yaml`，而且是**能加载**的那份：文件**定义**了 server（§5.3），所以一份解析不了的文件不是「server 关着」，而是「配置加载不了」。它的 `command` 是一个没装的占位符，于是 server 起不来，**日志里说一句，agent 照跑**。把它复制成 `mcps/<server>.yaml` 并填上你自己的 command，就是定义它（`initcfg/initcfg.go:131`） |
-| 配置编辑器 | ★ 同一份模板，走它的「新建文件」对话框 —— 编辑器**能写** `mcps/`（`agentkit/spec/write.go:190`），而且它拒绝不是一个可读回服务器名的文件（`agentkit/spec/write.go:107`） |
+| `openheron init` | ★ **三台服务器** —— `mcps/fetch.yaml`、`mcps/time.yaml`、`mcps/deepwiki.yaml`，而且每一份都是**能加载**的：文件**定义**了 server（§5.3），所以一份解析不了的文件不是「server 关着」，而是「配置加载不了」。两个 stdio 的 `command` 是 `uvx`，而 `uvx` 默认没装，于是 server 起不来，**日志里说一句，agent 照跑**。复制其中一份、改掉 `command`，就是定义你自己的 server（`initcfg/initcfg.go:164`） |
+| 配置编辑器 | ★ 脚手架走它的「新建文件」对话框 —— 编辑器**能写** `mcps/`（`agentkit/spec/write.go:307`），而且它拒绝不是一个可读回服务器名的文件（`agentkit/spec/write.go:185`） |
 
 ### 5.7 什么会大声失败
 
@@ -1161,7 +1161,7 @@ headers:
 | 一次启动，一个客户端（§6.8） | 管理者 —— 单飞启动（`agentkit/build/mcpmanager.go:215`） |
 | 失败的启动不拖住装配（§6.8） | `startStdioClient`（`agentkit/build/mcpmanager.go:432`）—— 先杀子进程（`agentkit/build/mcpmanager.go:485`），再拆解，而拆解有上限（`agentkit/build/mcpmanager.go:501`） |
 | 一次 run 碰过的 server（§7.4） | `agentkit/run/runrow.go:84` 与 `storage/runledger.go:168` —— run 的那一行点名它们 |
-| 示例与编辑器的模板（§5.6） | `agentkit/templates/files/mcps/example.yaml` —— ★ **一个文件，两个读者**：init 把它写成 `mcps/example.yaml`（`initcfg/initcfg.go:131`），编辑器拿它当脚手架（`agentkit/spec/write.go:190`，经由 `spec.Template`） |
+| 脚手架与编辑器的模板（§5.6） | `agentkit/templates/files/mcps/_example.yaml` —— ★ **开头那个下划线就是「不写下去」的标记**：init 写的是它旁边的三台服务器（`initcfg/initcfg.go:164`），编辑器拿它当脚手架（`agentkit/spec/write.go:307`，经由 `spec.Template`） |
 | 一个 agent 加载哪些服务器（§5.3） | `agentkit/spec/decl/decl.go:114`（那个字段）→ `agentkit/spec/load.go:806`（那个并集 —— ★ 留在树外的 agent 不计入，它本来也跑不起来）→ `agentkit/build/mcpmanager.go`（那次启动） |
 | agent 的收窄（§11.3） | `agentkit/build/policy.go:129` —— 表里那些命名空间前缀 |
 | `/mcps` 那个视图（§11.2） | `agentkit/build/mcpstatus.go:64` —— 管理者的状态、那份计划、边界的判定，合成一处投影 |
@@ -1197,7 +1197,7 @@ headers:
 | 3 | `agentkit/spec/decl/decl.go` | `MCPServerCfg` 声明结构体、`MCPFiles` 持有者、命名空间常量；`call_timeout`；★ agent 的 `MCPServers` 字段，agent 与子 agent 各有一份（§5.3） | **已完成** —— `agentkit/spec/decl/decl.go:426`、`:474`、`:308`、`:317`、`:457`、`:114`、`:604` |
 | 4 | `agentkit/spec/load.go` | `mcps/<server>.yaml` 的加载器，带 §3.1 与 §5.2 的文件名与字段校验，以及 §5.7 的那些加载期硬错误 | **已完成** —— `agentkit/spec/load.go:317`、`:508` |
 | 5 | `agentkit/spec/defaults.go` | `EnabledToolNames` 加上带命名空间的 MCP 工具；一个服务器的缺省档位（`ask`） | ★ **搬了家** —— 那些名字进了**装配**层的工具名全域（`agentkit/build/introspect.go:127`），因为名字的合成属于那一层，而 `agentkit/spec` 不得 import 它；缺省档位现在是**每一个**工具都走那张表的兜底，而不再是命名空间的一条规则（`agentkit/build/policy.go:55`） |
-| 6 | `agentkit/spec/write.go` | 新建 `mcps/` 文件的脚手架 | **已完成** —— `agentkit/spec/write.go:190`，服务器名校验在 `:107` |
+| 6 | `agentkit/spec/write.go` | 新建 `mcps/` 文件的脚手架 | **已完成** —— `agentkit/spec/write.go:307`，服务器名校验在 `:185` |
 | 7 | `agentkit/build/tools.go` | `mcpToolProvider`，注册在注册表里 | **已完成** —— `agentkit/build/tools.go:41`，provider 在 `agentkit/build/mcptools.go:194` |
 | 8 | `agentkit/build/policy.go` | `Blocked` 的前缀匹配器，**以及**档位的**装配**：各 provider 从自己文件里的声明贡献（对外名字 → 档位）（§7.3） | **已完成** —— ★ **装配**在 `agentkit/build/spec.go:64`（内置清单、`tools/` 各文件、MCP server 自己那份）；前缀匹配器在 `agentkit/build/policy.go:98`，而 `Table.Blocked` 在 `:146` |
 | 9 | `api/v2_settings.go` | `mcps/` 的可编辑分区 | ★ **通用** —— 那份清单走的是 `spec.Categories`（`api/v2_settings.go:135`），而 `mcps/` 是一个可编辑分类（`agentkit/spec/config.go:66`），所以不需要专门的一段 |
@@ -1205,7 +1205,7 @@ headers:
 | 11 | `agentkit/build/mcptools.go` | `mcpPlan` —— 那份共享的命名与档位映射（§9.1），把 stdio 调用串行化的 per-server 互斥锁（§6.5），以及子进程的环境装配（§5.5） | **已完成** —— `agentkit/build/mcptools.go:68`、`:335`；★ 环境装配在管理者里（`agentkit/build/mcpmanager.go:458`） |
 | 12 | `agentkit/build/mcpmanager.go` | 管理者：一个 server 一个客户端、**单飞启动**（§6.8）、**只懒启动某个 agent 要的**那些服务器（§5.3）、崩了的子进程重启、推进代际的工具清单重新列举，以及快照换代时的拆解（§6.6） | **已完成** —— `agentkit/build/mcpmanager.go:42`；★ 拆解发生在**声明**上（`:229`）与进程退出时（`:150`），而不是快照换代时（§6.6） |
 | 13 | `agentkit/run/runrow.go` | run 的那一行记下这次 run 碰过哪些 MCP server（§7.4） | **已完成** —— `agentkit/run/runrow.go:84`、`storage/runledger.go:168` |
-| 14 | `agentkit/templates` 与 `spec.Template` | `mcps/example.yaml` 这个示例，以及新建 `mcps/` 文件时编辑器用的模板 —— ★ **一个文件，两个读者**：编辑器读不到 init 包里那个文件（编辑器由 API 供给，而 API 不能 import `initcfg`，那是循环），所以文件住在 `agentkit/templates` —— 一个**两边都能依赖的叶子包**（§5.6） | **已完成** —— `agentkit/templates/files/mcps/example.yaml`、`initcfg/initcfg.go:131`、`agentkit/spec/write.go:190` |
+| 14 | `agentkit/templates` 与 `spec.Template` | `mcps/_example.yaml` 这个脚手架，以及新建 `mcps/` 文件时编辑器用的模板 —— ★ **两边都在同一个叶子包里**：编辑器读不到 init 包里那个文件（编辑器由 API 供给，而 API 不能 import `initcfg`，那是循环），所以文件住在 `agentkit/templates` —— 一个**两边都能依赖的叶子包**（§5.6） | **已完成** —— `agentkit/templates/files/mcps/_example.yaml`、`initcfg/initcfg.go:164`、`agentkit/spec/write.go:307` |
 | 15 | `api/commands.go` | `mcps` 这个 action 命令与 `commandActionOpenMCPs`（§11.1） | **已完成** —— `api/commands.go:31`、`:61` |
 | 16 | `api/v2_mcps.go` | `GET /v2/mcps` —— 那个视图（§11.4） | **已完成** —— `api/v2_mcps.go:74`，路由在 `api/v2_files.go:63` |
 | 17 | `api/v2_introspect.go` | `MCPSource` 接口与 `SetMCPSource`：API 层去问 builder，它不直接读管理者（§11.2）；★ 以及配置面视图里那些已配置的服务器（§11.4） | ★ **拆开了** —— 接口与 `SetMCPSource` 在 `api/v2_mcps.go:18`、`:41`；配置面视图列出那些服务器在 `api/v2_introspect.go:392` |

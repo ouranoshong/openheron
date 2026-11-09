@@ -60,34 +60,34 @@ change that). Pin a version with `OPENHERON_VERSION=v0.1.0`. Prefer to look befo
 you run? Download `install.sh` from the
 [releases page](https://github.com/ouranoshong/openheron/releases/latest) and read it.
 
-`openheron init` writes five files: `agents/main.md`, `agents/task.md`,
-`llm/<provider>.yaml`, `mcps/example.yaml` and `server/config.yaml`. Existing files are
-**kept, not overwritten** (unless you pass `--force`), so running it in an
-already-configured project is safe.
+`openheron init` writes the whole tree: `agents/main.md`, `agents/task.md`,
+`agents/agent-expert.md`, `agents/skill-expert.md`, `llm/<provider>.yaml`,
+`server/config.yaml`, the five files under `tools/`, the three MCP servers
+`mcps/fetch.yaml`, `mcps/time.yaml` and `mcps/deepwiki.yaml`, and the four skills
+`skills/openheron-config-<name>/SKILL.md`. Existing files are **kept, not overwritten**
+(unless you pass `--force`), so running it in an already-configured project is safe.
 
-`tools/` is **not** written by default — a provider whose configuration is absent mounts
-nothing, so writing the file is what turns the tool on, and which tools exist is yours to
-decide. Pass `--tools` to get `tools/filesystem.yaml`, `tools/http.yaml`,
-`tools/web_search.yaml`, `tools/wikipedia.yaml` and `tools/kb.yaml`.
+Pass `--no-tools` to leave `tools/` out. The tools are part of the tree because the
+agents name `request_get`, `duckduckgo_search` and `wikipedia_search`, and a name that
+no provider offers is reported as a typo.
 
 ★ **`tools/filesystem.yaml` is the one that does not switch anything on.** The filesystem
 tools are always mounted, so that file only tunes their tiers: `allows:
 [write_file, edit_file, execute]` is how an agent that edits and runs commands on its own
 is spelled. Absent, the readers run without a nod and the writers ask.
 
-★ **The MCP example is a sample, not a running server** — its `command` is a placeholder
-that is not installed. The file is still valid: it **loads**, and a server that cannot
-be started costs that server's tools and nothing else. ★ The panel reports it — `/mcps`
-shows the server as `unreachable` with the reason — and the first turn that builds the
-agent writes `[mcp] the server is unreachable` to the log. Starting a server is lazy, so
-nothing is attempted at boot.
+★ **The three MCP servers need `uvx` on the PATH**, and the two stdio ones download
+their package on the first start. A server that cannot be started costs that server's
+tools and nothing else — the process still starts, the log says
+`[mcp] the server is unreachable`, and `/mcps` shows the server as `unreachable` with the
+reason. Starting a server is lazy, so nothing is attempted at boot.
 
 ## Command line
 
 | Command | Effect |
 |---|---|
 | `openheron [--config-dir <path>] [--project-root <path>]` | Start the server |
-| `openheron init [--dir] [--model] [--provider] [--base-url] [--env] [--tools] [--force] [--dry-run] [--json]` | Generate a minimal runnable configuration |
+| `openheron init [--dir] [--model] [--provider] [--base-url] [--env] [--no-tools] [--force] [--dry-run] [--json]` | Generate a runnable configuration |
 | `openheron kb index [--config-dir] [--json] [files...]` | Build the knowledge-base index |
 | `openheron kb search [--config-dir] <query>` | Search the knowledge base |
 | `openheron kb status [--config-dir] [--json]` | Inspect the index |

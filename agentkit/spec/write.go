@@ -305,10 +305,12 @@ func Skeleton(catDir string, modelRefs []string) string {
 			"#\n" +
 			"# ★ tools/ is hot-reloaded: the change takes effect on the next turn, no process restart.\n"
 	case DirMCP:
-		// ★ The MCP example is one file, in the templates package: the
-		//   configuration editor and `openheron init` both read it from
-		//   there, so the two cannot drift.
-		tpl, err := templates.File("mcps/example.yaml")
+		// ★ The MCP example is one file, in the templates package, and the
+		//   configuration editor reads it from there — so the editor and the
+		//   file cannot drift. The leading underscore marks it as a
+		//   scaffold: it is what a new server starts from, not a server
+		//   that is installed.
+		tpl, err := templates.File("mcps/_example.yaml")
 		if err != nil {
 			return ""
 		}

@@ -1,10 +1,13 @@
+# tools/web_search.yaml
+#
 # Web search. Writing this file enables it.
 #
-# ★ provider has only two options: duckduckgo (zero config, zero key) and searxng (self-hosted).
-provider: duckduckgo
+# ★ provider: the code only knows **duckduckgo**. (An earlier version of this
+#   template also mentioned searxng; that is out of date.)
+provider: duckduckgo      # the only provider the code accepts
 max_results: 10
-timeout: 60s
-region: ""
+timeout: 60s              # a search has to page through results, so it gets more room than HTTP
+region: ""                # empty = worldwide; duckduckgo's kl parameter (wt-wt / cn-zh / ...)
 
 # ★ The tools that run **without a nod**.
 allows: [duckduckgo_search]

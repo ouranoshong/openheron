@@ -1,11 +1,16 @@
-# HTTP tool. Writing this file enables it.
+# tools/http.yaml
 #
-# ★ methods defaults to get only — write methods (post/put/delete) must be named
-#   explicitly, otherwise "just adding a POST" turns into an outbound channel.
-methods: [get]
-headers: {}
-timeout: 30s
+# The file's content IS the tool's own configuration: there is no outer
+# wrapper key and no "enabled" flag. The file name is on the whitelist; a
+# name that is not on it is a load-time hard error.
+#
+# ★ methods defaults to get only — the write methods (post/put/delete) must be
+#   named explicitly, otherwise "just adding a POST" turns into an outbound
+#   channel.
+methods: [get]            # only the whitelisted methods; post/put/delete have to be named
+headers: {}               # the headers every request carries
+timeout: 30s              # a lenient duration: it must carry a unit, and a wrong one silently falls back to 200ms
 
-# ★ The tools that run **without a nod**. Everything else this file provides
-#   asks — the default is ask, and the exceptions are named.
-allows: [request_get]
+# ★ The names that run **without a nod**, in this file's own vocabulary.
+#   Everything else this file provides asks — the default is ask.
+allows: [request_get]     # request_post and the other write methods still ask

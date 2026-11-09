@@ -22,6 +22,17 @@ import (
 //	alternatives is not a partition to copy.
 func Templates(dir string) map[string]string {
 	switch dir {
+	case DirSkills:
+		// ★ skills/ is the one **nested** partition: a skill is a folder
+		//   whose name is the skill's name, so the file sits one level
+		//   deeper than the partition's directory. A flat reader cannot see
+		//   it, and the editor and `openheron init` have to see it the
+		//   same way.
+		files, err := templates.Nested(dir)
+		if err != nil {
+			return map[string]string{}
+		}
+		return files
 	case DirAgent, DirTools, DirMCP, DirServer:
 		files, err := templates.Dir(dir)
 		if err != nil {

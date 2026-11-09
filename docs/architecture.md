@@ -468,10 +468,10 @@ absent mounts nothing, so writing the file is what turns the tool on (`tools/*.y
 ★ The filesystem middleware is the exception — `fsx.New`
 mounts it unconditionally (`agentkit/build/snapshot.go:56`), and the knowledge base is
 switched by its **corpus**, not by its file.
-★ Note that `openheron init` **writes nothing** under `tools/` by default — that whole
-directory is yours to write, and a provider without a configuration mounts nothing, so
-turning a tool on is a decision, not a side effect. `--tools` writes the four
-configuration files.
+★ Note that `openheron init` writes the tool configurations under `tools/` — the
+directory is part of the tree the factory ships, because the factory agents name
+`request_get`, `duckduckgo_search` and `wikipedia_search`, and a name no provider
+offers is reported as a typo. `--no-tools` leaves it out.
 
 The path a tool takes is the same for every source:
 

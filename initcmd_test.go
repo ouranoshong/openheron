@@ -38,14 +38,30 @@ func TestInitJSONOutputIsValidJSON(t *testing.T) {
 	if out.Dir == "" || out.Model == "" {
 		t.Fatalf("dir and model must be reported: %+v", out)
 	}
-	if len(out.Created) != 5 {
-		t.Fatalf("created = %v, want five files", out.Created)
+	// ★ The tree is written whole: four agents, four skills, three MCP
+	//   servers, five tool configurations, the provider and the server
+	//   section — 18 files.
+	if len(out.Created) != 18 {
+		t.Fatalf("created = %v, want 18 files", out.Created)
 	}
 	for _, want := range []string{
 		".openheron/agents/main.md",
 		".openheron/agents/task.md",
+		".openheron/agents/agent-expert.md",
+		".openheron/agents/skill-expert.md",
+		".openheron/skills/openheron-config-map/SKILL.md",
+		".openheron/skills/openheron-config-edit/SKILL.md",
+		".openheron/skills/openheron-config-templates/SKILL.md",
+		".openheron/skills/openheron-config-validate/SKILL.md",
 		".openheron/llm/deepseek.yaml",
-		".openheron/mcps/example.yaml",
+		".openheron/tools/http.yaml",
+		".openheron/tools/web_search.yaml",
+		".openheron/tools/wikipedia.yaml",
+		".openheron/tools/kb.yaml",
+		".openheron/tools/filesystem.yaml",
+		".openheron/mcps/fetch.yaml",
+		".openheron/mcps/time.yaml",
+		".openheron/mcps/deepwiki.yaml",
 		".openheron/server/config.yaml",
 	} {
 		found := false
@@ -128,18 +144,17 @@ func TestInitWritesIntoTheGivenDirectory(t *testing.T) {
 	for _, rel := range []string{
 		".openheron/agents/main.md",
 		".openheron/agents/task.md",
+		".openheron/agents/agent-expert.md",
+		".openheron/agents/skill-expert.md",
+		".openheron/skills/openheron-config-map/SKILL.md",
 		".openheron/llm/deepseek.yaml",
-		".openheron/mcps/example.yaml",
+		".openheron/mcps/fetch.yaml",
+		".openheron/tools/http.yaml",
 		".openheron/server/config.yaml",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
 			t.Fatalf("%s must exist: %v", rel, err)
 		}
-	}
-	// ★ A provider whose configuration is absent mounts nothing, so init does
-	//   not open an outbound channel on its own.
-	if _, err := os.Stat(filepath.Join(dir, ".openheron", "tools")); err == nil {
-		t.Fatal("tools/ must not be written unless --tools is given")
 	}
 	svc, err := spec.NewServiceAt(filepath.Join(dir, ".openheron"), dir)
 	if err != nil {
@@ -150,10 +165,14 @@ func TestInitWritesIntoTheGivenDirectory(t *testing.T) {
 	}
 }
 
+// ★ The tool configurations are part of the tree: the agents name
+//
+//	`request_get` / `duckduckgo_search` / `wikipedia_search`, and a name that
+//	no provider offers is reported as a typo.
 func TestInitToolsWritesTheToolConfigurations(t *testing.T) {
 	dir := initEnv(t)
 	var buf bytes.Buffer
-	if err := initCmd([]string{"--dir", dir, "--tools"}, &buf); err != nil {
+	if err := initCmd([]string{"--dir", dir}, &buf); err != nil {
 		t.Fatalf("initCmd: %v", err)
 	}
 	for _, rel := range []string{
@@ -161,6 +180,7 @@ func TestInitToolsWritesTheToolConfigurations(t *testing.T) {
 		".openheron/tools/web_search.yaml",
 		".openheron/tools/wikipedia.yaml",
 		".openheron/tools/kb.yaml",
+		".openheron/tools/filesystem.yaml",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
 			t.Fatalf("%s must exist: %v", rel, err)
@@ -177,5 +197,26 @@ func TestInitToolsWritesTheToolConfigurations(t *testing.T) {
 	if cfg.Tools.HTTP == nil || cfg.Tools.WebSearch == nil ||
 		cfg.Tools.Wikipedia == nil {
 		t.Fatalf("the written tool files must enable the tools: %+v", cfg.Tools)
+	}
+}
+
+// ★ The switch is negative on purpose: the full tree is the default, and
+//
+//	`--no-tools` is the way to leave the tool configurations out.
+func TestInitNoToolsLeavesTheToolConfigurationsOut(t *testing.T) {
+	dir := initEnv(t)
+	var buf bytes.Buffer
+	if err := initCmd([]string{"--dir", dir, "--no-tools"}, &buf); err != nil {
+		t.Fatalf("initCmd: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".openheron", "tools")); err == nil {
+		t.Fatal("tools/ must not be written when --no-tools is given")
+	}
+	// ★ The rest of the tree is written all the same.
+	if _, err := os.Stat(filepath.Join(dir, ".openheron", "agents", "main.md")); err != nil {
+		t.Fatalf("the agents must still be written: %v", err)
+	}
+	if !strings.Contains(buf.String(), "tools/ was skipped") {
+		t.Fatalf("the output must say what was skipped:\n%s", buf.String())
 	}
 }

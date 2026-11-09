@@ -404,9 +404,9 @@ Agent 的技能；而技能工具只有在确实有技能可加载时才值得�
 挂上去的那一步（`tools/*.yaml`）。★ 文件系统中间件是
 例外 —— `fsx.New` 无条件挂载它（`agentkit/build/snapshot.go:56`），知识库则是由它的
 **corpus** 开关，而不是由文件开关。
-★ 注意 `openheron init` **默认不写** `tools/` 下的任何文件 —— 那一整个目录要用户自己写；
-配置缺失的 provider 什么都不挂，所以开一个工具是一个决定，不是一个副作用。`--tools` 会写
-那四个配置文件。
+★ 注意 `openheron init` 会写 `tools/` 下的工具配置 —— 那一整个目录是出厂树的一部分，
+因为出厂的 agent 会点名 `request_get`、`duckduckgo_search` 和 `wikipedia_search`，而没有
+provider 提供的名字会被当成笔误报出来。`--no-tools` 可以把它留下不写。
 
 工具的来路都一样：
 

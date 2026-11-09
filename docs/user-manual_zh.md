@@ -147,23 +147,39 @@ openheron
 
 打开 <http://localhost:8080>。
 
-`openheron init` 会写五个文件：
+`openheron init` 写整棵树：
 
 ```
 your/project/
 └── .openheron/
     ├── agents/
-    │   ├── main.md          # 入口 Agent：理解需求、拆任务、委派、验收
-    │   └── task.md          # 执行 Agent：真正动手干活
+    │   ├── main.md           # 入口 Agent：理解需求、给方案、分派、汇总
+    │   ├── task.md           # 通用执行专家：llm/ tools/ mcps/ server/
+    │   ├── agent-expert.md   # agent 域专家：agents/*.md
+    │   └── skill-expert.md   # 技能域专家：skills/<name>/SKILL.md
+    ├── skills/
+    │   ├── openheron-config-map/SKILL.md        # 配置系统的事实地图
+    │   ├── openheron-config-edit/SKILL.md       # 修改配置的规程
+    │   ├── openheron-config-templates/SKILL.md  # 骨架怎么拿
+    │   └── openheron-config-validate/SKILL.md   # 静默失效
     ├── llm/
     │   └── deepseek.yaml    # 模型档案
     ├── mcps/
-    │   └── example.yaml      # 一个 MCP 服务器的示例（它的 command 是占位符）
+    │   ├── fetch.yaml        # 抓网页转 markdown
+    │   ├── time.yaml         # 当前时间与时区换算
+    │   └── deepwiki.yaml     # 公开仓库文档与问答
+    ├── tools/
+    │   ├── filesystem.yaml   # 文件系统工具的档位
+    │   ├── http.yaml         # request_get
+    │   ├── web_search.yaml   # duckduckgo_search
+    │   ├── wikipedia.yaml    # wikipedia_search
+    │   └── kb.yaml           # 知识库（关着：corpus_dir 是空的）
     └── server/
         └── config.yaml      # 进程自身参数（不热重载）
 ```
 
-★ `mcps/` 下那个文件是**示例**，不是配置 —— 见 §4.7。
+★ 那三个 MCP 服务器要 PATH 里有 `uvx`，两个 stdio 的还会在第一次启动时下载自己的包 ——
+起不来的服务器只赔上它自己的工具，别的什么都不影响（§4.7）。
 
 ★ **没有 `policy/` 下的文件。** 档位有缺省，例外由工具的来处点名（§4.3），
 而一份「说的就是代码已经在做的事」的文件是噪音 —— ★ 配置树里的噪音会被当成意思读。
@@ -180,7 +196,7 @@ your/project/
 | `--model <name>` | 选模型，默认 `deepseek-flash` |
 | `--base-url <url>` | 厂商端点（**含路径**，从厂商文档抄） |
 | `--env <NAME>` | 密钥的环境变量名，默认 `<PROVIDER>_API_KEY` |
-| `--tools` | 同时生成 `tools/` 下的工具配置 |
+| `--no-tools` | 把 `tools/` 下的工具配置留下不写 |
 | `--force` | 覆盖已存在的文件 |
 | `--dry-run` | 只打印要写什么，不落盘 |
 | `--json` | 机器可读输出 |
@@ -413,9 +429,10 @@ allows: [read_issue, list_issues]
 
 ★ `tools/` 下**只认这四个文件名**，写别的名字会**启动报错**，不会被静默忽略。
 
-★ **`openheron init` 默认不写 `tools/` 下的任何文件** —— 这一整个目录要你自己写；加
-`--tools` 才会把上面那四个文件写出来。没写就是没启用：对应的工具不会出现在 agent 的
-工具表里，模型也看不见它。
+★ **`openheron init` 会写 `tools/` 下的那五个文件** —— 工具配置是这棵树的一部分，
+因为出厂的 agent 会点名 `request_get`、`duckduckgo_search` 和 `wikipedia_search`，
+而没有 provider 提供的名字会被当成笔误报出来。加 `--no-tools` 那个目录就空着。
+没写就是没启用：对应的工具不会出现在 agent 的工具表里，模型也看不见它。
 
 ★ **这个文件的 `allows:` 行决定哪些不用问** —— `tools/http.yaml` 点 `request_get`，
 `tools/kb.yaml` 点 `kb_search`。这个文件提供的其余一切都问（§4.3）。
@@ -516,11 +533,15 @@ call_timeout: 60s
 暴露出来的名字 `mcp__a__b__x` 以后没法反解回来 —— 那是服务器 `a` 带工具 `b__x`，
 还是服务器 `a__b` 带工具 `x`？
 
-★ **`openheron init` 写的是 `mcps/example.yaml`** —— 那是**示例**，而且是一份**能加载**的
-示例：`mcps/` 下的文件**定义**一台服务器，所以一份解析不了的文件不是「服务器关着」，
-而是「配置加载不了」。★ 它的 `command` 是一个没装的占位符，于是服务器起不来，
-**日志里说一句，Agent 照跑**。**把它复制成 `mcps/<server>.yaml` 并填上你自己的
-command，这个动作本身就是定义那台服务器。**
+★ **`openheron init` 写三台服务器** —— `mcps/fetch.yaml`、`mcps/time.yaml` 和
+`mcps/deepwiki.yaml`。★ 每一份都**定义**一台服务器，所以一份解析不了的文件不是
+「服务器关着」，而是「配置加载不了」。★ 两个 stdio 的跑 `uvx`，而 `uvx` 默认没装 ——
+于是服务器起不来，**日志里说一句，Agent 照跑**。★ **自己在 `mcps/` 下写一份文件、
+填上自己的 command，这个动作本身就是定义那台服务器**；复制那三个之一、改掉 `command:`
+就行。
+
+★ **那个不安装的示例** —— 模板里的 `mcps/_example.yaml` —— 是设置界面新建服务器时的
+骨架。它是脚手架，不是要安装的文件，所以 `openheron init` 不写它。
 
 ★ **stdio 服务器的第一次启动可能很慢，而 `timeout:` 就是这次启动的上限。** 命令常常
 是一个包运行器（`npx`、`uvx`），第一次跑会把服务器装上 —— 那次安装是启动的一部分，

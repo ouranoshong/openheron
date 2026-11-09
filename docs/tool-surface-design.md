@@ -279,15 +279,17 @@ agent 的档位，而 loader 不检查 —— 于是 vendor 没有的档位能�
 
 ### 3.4 CLI 统一（✅）
 
-`initcfg.BuildPlan`（`initcfg/initcfg.go:50`）取一次 manifest：`items` 是跳过表，
-`templates` 是内容。`copySection`（`:180`）按分区前缀挑，`p.add`（`:257`）查
+`initcfg.BuildPlan`（`initcfg/initcfg.go:56`）取一次 manifest：`items` 是跳过表，
+`templates` 是内容。`copySection`（`:198`）按分区前缀挑，`p.add`（`:275`）查
 `items` 而不是 `os.Stat`。
 
 `llm/` 仍从 templates 包读，这是刻意的：它的文件是**备选**（provider 自己的模板与通用
 兜底），所以 manifest 根本不带 `llm/` 模板。
 
-★ 判据落实了：`init` 的产物**逐字节不变**（十个文件、同样的哈希，带不带 `--tools` 都一样），
-而 `init` 与「新建文件」现在问的是同一个东西。
+★ 判据落实了：`init` 的产物**逐字节不变**（同样的文件、同样的哈希，与「新建文件」问的是
+同一份模板），而 `init` 与「新建文件」现在问的是同一个东西。★ `skills/` 是唯一的**嵌套**
+分区，所以 `copySection` 走的是 `templates.Nested` 那条路（`:198`）—— 扁平的文件树看不见
+`skills/<name>/SKILL.md`。
 
 ## 4. 决定三：六个 config 工具（✅ 已实施）
 

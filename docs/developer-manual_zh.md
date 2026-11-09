@@ -296,18 +296,20 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
   （`agentkit/build/mcpmanager.go:330`）。★ 一个资源没有跟着重建的热分区，就是在
   撒谎说自己热。
 - **写入闸门**拒绝一个读不回来的名字：`validateFileName`
-  （`agentkit/spec/write.go:116`）只接受 `<server>.yaml` 且服务器名合法
-  （`agentkit/spec/write.go:107`）—— 文件名就是服务器名，而服务器名就是这台服务器
+  （`agentkit/spec/write.go:166`）只接受 `<server>.yaml` 且服务器名合法
+  （`agentkit/spec/write.go:185`）—— 文件名就是服务器名，而服务器名就是这台服务器
   工具的命名空间段。
-- **脚手架**是 `Skeleton`（`agentkit/spec/write.go:189`），其中 `mcps/` 那一支
-  （`agentkit/spec/write.go:186`）写出的是一份**能加载**的文件：★ `mcps/` 下的文件
+- **脚手架**是 `Skeleton`（`agentkit/spec/write.go:280`），其中 `mcps/` 那一支
+  （`agentkit/spec/write.go:307`）写出的是一份**能加载**的文件：★ `mcps/` 下的文件
   **定义**一台 server，所以一份解析不了的文件不是「server 关着」，而是「配置加载不了」。
   可选的那些字段写成注释，而 `command` 是一个没装的占位符 —— 于是 server 起不来，
   日志里说一句，agent 照跑。
-- ★ **示例是一个文件，两层读它。** `agentkit/templates/files/mcps/example.yaml` 既是
-  `openheron init` 写下的模板（`initcfg/initcfg.go`），也是配置编辑器给出的脚手架
-  （`agentkit/spec/write.go`）。★ 编辑器由 API 供给，而 API 不能 import `initcfg` ——
-  那是循环 —— 所以文件住在一个**两边都能依赖的叶子包** `agentkit/templates` 里。★ 拷贝会漂移。
+- ★ **脚手架是一个文件，而开头那个下划线就是「这不是要装的东西」的意思。**
+  `agentkit/templates/files/mcps/_example.yaml` 是配置编辑器给出的骨架
+  （`agentkit/spec/write.go`），而 `openheron init` 写的是它旁边的三台服务器 ——
+  `mcps/fetch.yaml`、`mcps/time.yaml` 和 `mcps/deepwiki.yaml`。★ 编辑器由 API 供给，
+  而 API 不能 import `initcfg` —— 那是循环 —— 所以文件住在一个**两边都能依赖的叶子包**
+  `agentkit/templates` 里。★ 拷贝会漂移。
 
 ### 3.3 加一条 API 路由
 

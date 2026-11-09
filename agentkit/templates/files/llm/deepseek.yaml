@@ -27,4 +27,7 @@ models:
       low:  { reasoning_effort: low,  thinking: { type: enabled } }
       high: { reasoning_effort: high, thinking: { type: enabled } }
       max:  { reasoning_effort: max,  thinking: { type: enabled } }
-    reasoning_default: off                        # used when the agent writes no reasoning
+    # ★ The factory agents do not write a tier of their own, so this is the
+    #   tier they run with: the default tier is the one the whole team uses
+    #   unless an agent says otherwise.
+    reasoning_default: low                        # used when the agent writes no reasoning

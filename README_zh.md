@@ -50,30 +50,32 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 想先看一眼再执行，就从[发布页](https://github.com/ouranoshong/openheron/releases/latest)
 把 `install.sh` 下载下来读一遍。
 
-`openheron init` 写五个文件：`agents/main.md`、`agents/task.md`、`llm/<provider>.yaml`、
-`mcps/example.yaml` 和 `server/config.yaml`。已存在的文件
+`openheron init` 写整棵树：`agents/main.md`、`agents/task.md`、
+`agents/agent-expert.md`、`agents/skill-expert.md`、`llm/<provider>.yaml`、
+`server/config.yaml`、`tools/` 下的五个文件、三个 MCP 服务器
+`mcps/fetch.yaml`、`mcps/time.yaml` 和 `mcps/deepwiki.yaml`，以及四个技能
+`skills/openheron-config-<name>/SKILL.md`。已存在的文件
 **保留不覆盖**（除非加 `--force`），所以在一个已经配好的项目里跑它是安全的。
 
-`tools/` 默认**不写** —— 配置缺失的 provider 什么都不挂，所以写下这个文件才是把工具挂上去
-的那一步，用哪些工具得由你来定；加 `--tools` 才会写 `tools/filesystem.yaml`、
-`tools/http.yaml`、`tools/web_search.yaml`、`tools/wikipedia.yaml` 和 `tools/kb.yaml`。
+加 `--no-tools` 可以把 `tools/` 留下不写。工具是这棵树的一部分，因为 agent 会点名
+`request_get`、`duckduckgo_search` 和 `wikipedia_search`，而没有 provider 提供的名字
+会被当成笔误报出来。
 
 ★ **`tools/filesystem.yaml` 是唯一一个什么都不打开的。** 文件系统工具一直都在，所以那个
 文件只调它们的档位：写 `allows: [write_file, edit_file, execute]` 就是「让这个 agent 自己
 改文件、自己跑命令」的写法。不写，则读取器直接放行、写入器要问。
 
-★ **MCP 那个例子是样本，不是能跑起来的服务器** —— 它的 `command` 是个没装的占位符。
-文件本身合法：它**能加载**，而起不来的服务器只赔上它自己的工具，别的什么都不影响。
-★ 面板会说 —— `/mcps` 把那个服务器显示成 `unreachable` 并带上原因 —— 而第一个真正装配
-agent 的回合会往日志里写 `[mcp] the server is unreachable`。启动是懒的，所以开机时什么都
-不会去试。
+★ **三个 MCP 服务器都要 PATH 里有 `uvx`**，两个 stdio 的还会在第一次启动时下载自己的包。
+起不来的服务器只赔上它自己的工具，别的什么都不影响 —— 进程照样起来，日志里写
+`[mcp] the server is unreachable`，`/mcps` 把那个服务器显示成 `unreachable` 并带上原因。
+启动是懒的，所以开机时什么都不会去试。
 
 ## 命令行
 
 | 命令 | 作用 |
 |---|---|
 | `openheron [--config-dir <path>] [--project-root <path>]` | 启动服务 |
-| `openheron init [--dir] [--model] [--provider] [--base-url] [--env] [--tools] [--force] [--dry-run] [--json]` | 生成最小可运行配置 |
+| `openheron init [--dir] [--model] [--provider] [--base-url] [--env] [--no-tools] [--force] [--dry-run] [--json]` | 生成可运行配置 |
 | `openheron kb index [--config-dir] [--json] [files...]` | 给知识库建索引 |
 | `openheron kb search [--config-dir] <query>` | 检索知识库 |
 | `openheron kb status [--config-dir] [--json]` | 看索引现状 |

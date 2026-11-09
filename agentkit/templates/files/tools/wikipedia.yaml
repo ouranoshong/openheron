@@ -1,8 +1,10 @@
+# tools/wikipedia.yaml
+#
 # Wikipedia lookup. Writing this file enables it.
 top_k: 3
 language: zh
 timeout: 15s
-base_url: ""
+base_url: ""              # empty = the official endpoint; only a self-hosted mirror fills this in
 
 # ★ The tools that run **without a nod**.
 allows: [wikipedia_search]
