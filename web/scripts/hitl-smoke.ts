@@ -22,9 +22,49 @@ const ok = (c: boolean, l: string, e = "") => {
   if (!c) bad = true
 }
 
+// ★ Which agent runs the turn is a choice, not an assumption. The factory
+//   tree puts the file tools on the **execution** agents; `main` is the
+//   dispatcher and holds `task` and the config tools, not `write_file`. A
+//   turn on `main` can therefore never reach the approval this smoke is
+//   about — the model is asked for a tool it cannot see, and the round
+//   ends in a polite refusal instead of an interrupt. So the agent is
+//   picked from the tool table: the first one that names `write_file` wins.
+async function agentWithWriteFile(): Promise<string | undefined> {
+  const detail = await j(await fetch(`${BASE}/v2/agents`))
+  const agents: { id: string; tools?: string[] }[] = detail.agents ?? []
+  return agents.find((a) => (a.tools ?? []).includes("write_file"))?.id
+}
+
+const agent = await agentWithWriteFile()
+if (!agent) {
+  console.error(
+    [
+      "✗ no agent names write_file in its tool table.",
+      "",
+      "  The approval this smoke exercises is raised by the **tool call**, so",
+      "  some agent has to be able to make one. The factory tree puts the file",
+      "  tools on the execution agents; if none of them names write_file, the",
+      "  tree cannot reach an approval at all.",
+      "",
+      "  See .openheron/agents/<agent>.md — the `tools:` list is an allow-list.",
+    ].join("\n"),
+  )
+  process.exit(2)
+}
+console.log(`using agent ${agent} (its tool table names write_file)`)
+
 async function makeInterruptedThread(attempts: number): Promise<{ id: string; text: string }> {
   for (let i = 1; i <= attempts; i++) {
     const { threadId } = await j(await fetch(`${BASE}/v2/sessions`, { method: "POST" }))
+
+    // The agent belongs to the session, not to the run: /v2/run has no agent
+    // field, and the server takes the session's active agent.
+    await fetch(`${BASE}/v2/sessions/${threadId}/agent`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentId: agent }),
+    })
+
     const res = await fetch(`${BASE}/v2/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -35,7 +75,12 @@ async function makeInterruptedThread(attempts: number): Promise<{ id: string; te
           {
             id: "u1",
             role: "user",
-            content: "用 write_file 工具在 /tmp 写 hitl-probe.txt，内容 x。不要用别的工具。",
+            // ★ A **relative** file name, not /tmp. The path is a Unix
+            //   convention: on Windows there is no /tmp, so the model goes
+            //   looking for it, does not find it, and gives up — and the
+            //   round ends without the tool call this smoke is waiting for.
+            //   "your working directory" is a path that exists everywhere.
+            content: "用 write_file 工具写一个文件，文件名 hitl-probe.txt，内容 x。写到你当前的工作目录即可。不要用别的工具。",
           },
         ],
       }),

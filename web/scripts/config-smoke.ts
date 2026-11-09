@@ -48,20 +48,32 @@ async function configWriteVerdict(agent: string): Promise<Verdict | undefined> {
   return tools.find((t) => t.name === "config_write")
 }
 
-const agent = (await j(await fetch(`${BASE}/v2/agents`))).defaultAgent ?? "main"
-const verdict = await configWriteVerdict(agent)
+// ★ Which agent runs the turn is a choice, not an assumption. The factory
+//   tree puts the configuration tools on the **execution** agents; `main` is
+//   the dispatcher and does not name `config_write`. Asking `main` for it is
+//   asking for a tool it cannot see — the round ends in a refusal, and the
+//   smoke reports "not configured" about an agent that was never the one
+//   that could have called it.
+async function agentWithConfigWrite(): Promise<string | undefined> {
+  const detail = await j(await fetch(`${BASE}/v2/agents`))
+  const agents: { id: string; tools?: string[] }[] = detail.agents ?? []
+  return agents.find((a) => (a.tools ?? []).includes("config_write"))?.id
+}
+
+const agent = await agentWithConfigWrite()
+const verdict = agent ? await configWriteVerdict(agent) : undefined
 
 if (!verdict) {
   console.error(
     [
-      `✗ config_write is not in the tool table of agent ${agent}.`,
+      "✗ no agent names config_write in its tool table.",
       "",
       "  This smoke needs an agent that may call it, and the tier must be ask:",
       "",
-      `      .openheron/agents/${agent}.md`,
-      `      tools: [..., config_write]`,
+      "      .openheron/agents/<agent>.md",
+      "      tools: [..., config_write]",
       "",
-      "  The tool is deliberately absent from every shipped template: handing an",
+      "  The tool is deliberately absent from the dispatcher: handing an",
       "  agent the pen that edits its own configuration is a decision, not a",
       "  default. See docs/user-manual.md §4.9.",
       "  After editing, run: task test-env-sync",
@@ -69,6 +81,7 @@ if (!verdict) {
   )
   process.exit(2)
 }
+console.log(`using agent ${agent} (its tool table names config_write)`)
 if (verdict.reason) {
   console.error(
     `✗ config_write is blocked for agent ${agent} by its own tools: list (reason: ${verdict.reason}).`,
@@ -124,6 +137,15 @@ ok(!(await exists()), "the probe file does not exist before the run")
 async function runWithApproval(attempts: number): Promise<{ id: string; text: string }> {
   for (let i = 1; i <= attempts; i++) {
     const { threadId } = await j(await fetch(`${BASE}/v2/sessions`, { method: "POST" }))
+
+    // The agent belongs to the session, not to the run: /v2/run has no agent
+    // field, and the server takes the session's active agent.
+    await fetch(`${BASE}/v2/sessions/${threadId}/agent`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentId: agent }),
+    })
+
     const prompt = [
       `Call the config_write tool exactly once with path "${PROBE}" and this content,`,
       "verbatim, and then stop:",
