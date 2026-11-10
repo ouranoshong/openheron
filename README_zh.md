@@ -65,10 +65,12 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 文件只调它们的档位：写 `allows: [write_file, edit_file, execute]` 就是「让这个 agent 自己
 改文件、自己跑命令」的写法。不写，则读取器直接放行、写入器要问。
 
-★ **三个 MCP 服务器都要 PATH 里有 `uvx`**，两个 stdio 的还会在第一次启动时下载自己的包。
-起不来的服务器只赔上它自己的工具，别的什么都不影响 —— 进程照样起来，日志里写
-`[mcp] the server is unreachable`，`/mcps` 把那个服务器显示成 `unreachable` 并带上原因。
-启动是懒的，所以开机时什么都不会去试。
+★ **两个 stdio 服务器（`fetch`、`time`）要 PATH 里有 `uvx`**，第一次启动时还会下载自己的包；
+`deepwiki` 是 streamable HTTP 服务器，不需要 `uvx`。只要某个 agent 挂载了某台服务器，
+配置一读进来它就在**后台启动** —— 启动不挡住第一轮对话，还没起来的服务器这一轮不贡献工具，
+下一轮才加进来；没人挂载的服务器永远不起。启动失败只赔上那台服务器自己的工具：进程照样跑，
+日志写 `[mcp] the server did not start`，`/mcps` 把它显示成 `unreachable` 并带上原因
+（还在启动途中则是 `starting`）。
 
 ## 命令行
 
@@ -100,7 +102,7 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 | `llm/` | 每个厂商一个 `.yaml`：端点、密钥、模型清单、思考档位表 | ✅ |
 | `tools/` | 外部工具与知识库配置 —— 配置缺失的 provider 什么都不挂。每个文件的 `allows:` 点名哪些工具不用点头 | ✅ |
 | `mcps/` | 每个 MCP 服务器一个 `.yaml`：传输方式、command 或 URL、超时，以及服务器自己的 `allows:` | ✅ |
-| `skills/` | `<name>/SKILL.md`，eino 原生 skill 约定 | ❌ |
+| `skills/` | `<name>/SKILL.md`，eino 原生 skill 约定 | ✅ |
 | `server/` | 进程自身参数：监听地址、目录、超时、深度上限 | ❌ 需重启 |
 | `state/` | 会话与 checkpoint（自动创建，**不要提交**） | — |
 
@@ -122,11 +124,12 @@ mcps: []
 
 frontmatter 是**严格解码**的 —— 写错一个键就是启动错误，不会被忽略。可用键：
 `description`、`model`、`max_iterations`、`subagents`、`tools`、`mcps`、`skills`、
-`temperature`、`max_tokens`、`reasoning`。
+`temperature`、`max_tokens`、`reasoning`、`summarize_at`。
 
 - `model` 必填，格式 `<provider>/<model>`，**不继承、不回退** —— 解析不了就在启动时报错。
 - `subagents` 声明拓扑；引用的 agent 必须存在，且**不能成环**。
-- `tools` 是这个 agent 能用的**内置**工具白名单，名字就是模型看见的那些。
+- `tools` 是这个 agent 能用的工具白名单 —— **所有非 MCP 工具**：内置工具、`tools/` 下各文件
+  提供的工具，以及 `config_*` 工具。名字就是模型看见的那些。
   **不写就是一个工具都没有** —— 这张清单就是全部答案。
 - `mcps` 是这个 agent 挂载的 MCP 服务器清单；挂载一个就是起一个子进程，
   **并把它的全部工具交给这个 agent**，所以**不写就是不起任何服务器、也没有任何 MCP 工具**。
@@ -145,7 +148,7 @@ frontmatter 是**严格解码**的 —— 写错一个键就是启动错误，�
 | 位置 | 点名什么 | 作用范围 |
 |---|---|---|
 | `tools/*.yaml` 与 `mcps/<server>.yaml` 的 `allows:` | 那个文件（或那个服务器）里不用点头的工具 | 所有 agent |
-| `agents/*.md` 的 `tools` | 这个 agent 能用的**内置**工具 | 只影响这一个 agent |
+| `agents/*.md` 的 `tools` | 这个 agent 能用的全部工具 —— **所有非 MCP 工具** | 只影响这一个 agent |
 
 ★ 两处**分开存储、从不合并** —— 合并就丢掉了「是哪一层拦的」这个信息。档位表是共享的，
 文件的 `allows:` 只往上**加**；某个 agent 能用哪些，由它自己的 `tools` 清单决定。

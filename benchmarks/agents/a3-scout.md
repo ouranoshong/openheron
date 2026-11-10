@@ -3,7 +3,13 @@ description: "scout: the read-only investigator. Reports what the code does, wit
 model: qwen/qwen3.8-flash
 max_iterations: 20
 reasoning: low
-disabled_tools: [write_file, edit_file, execute]
+tools:                        # the allow-list: the readers and the todo list. This agent changes nothing and delegates nothing.
+  - ls
+  - read_file
+  - glob
+  - grep
+  - write_todos
+mcps: []                      # no MCP server is mounted
 summarize_at: 80%
 ---
 

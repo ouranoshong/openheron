@@ -89,7 +89,7 @@ type toolProvider interface {
 ★ **上面每一条查找都是按名字查的，而名字就是全部契约。**
   `TierOf` 是一次 map 查找；`Blocked` 是一次 map 查找
   加一次前缀扫描（`agentkit/build/policy.go:163`）。
-  ★ 那次前缀扫描是**内置工具**的前缀模式带来的；MCP 工具不走它 —— 一个 MCP 工具属于
+  ★ 那次前缀扫描是**非 MCP 工具**的前缀模式带来的；MCP 工具不走它 —— 一个 MCP 工具属于
   哪台 server 是从它的名字读出来的（`agentkit/spec/decl/decl.go:498` `MCPServerOf`），
   而「这台 server 挂不挂」是那个 agent 的 `mcps:` 清单说的（§4）。
   其余全是精确匹配 —— 而一个 MCP 工具的档位**在服务器还没起来之前**就能回答（§7.3）。
@@ -247,7 +247,7 @@ mcp__<server>__<tool>
 
 > **只有 MCP 工具可以用 `mcp__` 前缀。**
 
-否则一个内置工具就能占了命名空间，而为 MCP 写的前缀规则会悄悄盖住它。
+否则一个非 MCP 工具就能占了命名空间，而为 MCP 写的前缀规则会悄悄盖住它。
 
 ## 4. 挂载即授予（★ 2026-11-10 改）
 
@@ -256,14 +256,14 @@ mcp__<server>__<tool>
 ```yaml
 # .openheron/agents/main.md
 mcps: [github]              # 挂载 github —— 同时就是「用它的全部工具」
-tools: [ls, read_file]      # 内置工具的允许列表；MCP 的名字不写在这里
+tools: [ls, read_file]      # 非 MCP 工具的允许列表；MCP 的名字不写在这里
 ```
 
 | 问题 | 谁回答 | 缺省 |
 |---|---|---|
 | 用不用这台 server | agent 的 `mcps:` | 不挂载 |
 | 用不用它的哪个工具 | server 自己的文件（`tools:` 是过滤器） | 全部 |
-| 用不用哪个内置工具 | agent 的 `tools:` | 没有 |
+| 用不用哪个非 MCP 工具 | agent 的 `tools:` | 没有 |
 
 ★ **为什么不再要第二层。** 旧语义是「挂载 ≠ 可见」：挂载把进程拉起来，`tools:` 再点名
 哪些工具看得见 —— 而那一份名单是**按 agent** 的，于是每个挂它的 agent 都要重复同一段前缀。
@@ -282,7 +282,7 @@ agent 一视同仁。
 ★ **命名空间三段式不可协商**（§3），而从暴露名把 server 读回来的那个函数是 `MCPServerOf`
 （`agentkit/spec/decl/decl.go:498`）—— 一个 agent 判断一个 MCP 工具属于哪台 server，靠的是它。
 
-### 4.1 内置工具的前缀语法
+### 4.1 非 MCP 工具的前缀语法
 
 ★ agent 的 `tools` 除了精确名字，还接受**尾部 `*` 的前缀模式**，而它是一张**白名单**：
 模式点的是这个 agent **拿到**什么。
@@ -290,7 +290,7 @@ agent 一视同仁。
 | 条目 | 匹配 |
 |---|---|
 | `execute` | 名字正好是 `execute` 的那个工具 |
-| `config_*` | 每一个名字以 `config_` 开头的内置工具 |
+| `config_*` | 每一个名字以 `config_` 开头的工具 |
 | `mcp__github__*` | —— **不再匹配任何东西**（§4） |
 
 ★ **档位根本不在这张表里。** 档位由**提供**那个工具的文件来说（§7.3），
@@ -332,7 +332,7 @@ allow (if the file's allows list names it) → ask (everything else)
   清单是关于**agent** 的。⇒ 那个工具在表里仍然是 `allow` 或 `ask`，
   而 agent 的清单被并排报出来，作为那个 `reason`
   （`agentkit/build/introspect.go:116` `verdictOf`，以及
-  `agentkit/build/introspect.go:36` `reasonOf` —— 内置工具的理由是 `tools`，
+  `agentkit/build/introspect.go:36` `reasonOf` —— 非 MCP 工具的理由是 `tools`，
   MCP 工具的理由是 `mcps`）。
   ★ 第三档就得说「不合法」，而这里没有什么是不合法的：
   一个 agent 不许用的工具，只是压根不在那个 agent 的工具集里。
@@ -1425,7 +1425,7 @@ headers:
 | `[]` | 一个 MCP 工具都拿不到 |
 
 ★ **挂载即授予（§4）。** 不再有一份「按 agent 的 MCP 可见性」清单要维护 ——
-  挂不挂那台 server 就是全部答案。而它有**两个**理由可查：内置工具查 `tools`，
+  挂不挂那台 server 就是全部答案。而它有**两个**理由可查：非 MCP 工具查 `tools`，
   MCP 工具查 `mcps`（`agentkit/build/introspect.go:36` `reasonOf`）。
 
 ★ **启动的是并集。** 快照是共享的，所以管理者启动的是**某个** agent 点名的那些服务器：

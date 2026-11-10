@@ -76,11 +76,14 @@ tools are always mounted, so that file only tunes their tiers: `allows:
 [write_file, edit_file, execute]` is how an agent that edits and runs commands on its own
 is spelled. Absent, the readers run without a nod and the writers ask.
 
-★ **The three MCP servers need `uvx` on the PATH**, and the two stdio ones download
-their package on the first start. A server that cannot be started costs that server's
-tools and nothing else — the process still starts, the log says
-`[mcp] the server is unreachable`, and `/mcps` shows the server as `unreachable` with the
-reason. Starting a server is lazy, so nothing is attempted at boot.
+★ **The two stdio servers (`fetch`, `time`) need `uvx` on the PATH** and download their
+package on the first start; `deepwiki` is a streamable HTTP server and needs no `uvx`.
+Every server that some agent mounts is **started in the background as soon as the
+configuration is known** — the start does not hold up the first turn, and a server still
+coming up contributes no tools until the next turn. A server nobody mounts is never
+started. If a start fails, only that server's tools are lost: the process still runs, the
+log says `[mcp] the server did not start`, and `/mcps` shows the server as `unreachable`
+with the reason (or `starting` while it is on its way).
 
 ## Command line
 
@@ -113,7 +116,7 @@ not silently grow an empty configuration tree.
 | `llm/` | One `.yaml` per vendor: endpoint, secret, model list, reasoning tier table | ✅ |
 | `tools/` | External tools and the knowledge-base config — a provider without a configuration mounts nothing. Each file's `allows:` names the tools that run without a nod | ✅ |
 | `mcps/` | One `.yaml` per MCP server: transport, command or URL, timeouts, and the server's own `allows:` | ✅ |
-| `skills/` | `<name>/SKILL.md`, eino's native skill convention | ❌ |
+| `skills/` | `<name>/SKILL.md`, eino's native skill convention | ✅ |
 | `server/` | The process's own parameters: listen address, directories, timeouts, depth cap | ❌ needs a restart |
 | `state/` | Sessions and checkpoints (auto-created, **do not commit**) | — |
 
@@ -136,15 +139,17 @@ mcps: []
 
 The frontmatter is **strictly decoded** — one wrong key is a startup error, never
 silently ignored. Available keys: `description`, `model`, `max_iterations`,
-`subagents`, `tools`, `mcps`, `skills`, `temperature`, `max_tokens`, `reasoning`.
+`subagents`, `tools`, `mcps`, `skills`, `temperature`, `max_tokens`, `reasoning`,
+`summarize_at`.
 
 - `model` is required, in the form `<provider>/<model>`, and is **never inherited and
   never falls back** — failing to resolve it is a startup error.
 - `subagents` declares the topology; every referenced agent must exist and the graph
   **must not contain a cycle**.
-- `tools` is the allow-list of the **built-in** tools this agent may use; the names are the
-  ones the model sees. **Not declaring it means no tools at all** — the list is the whole
-  answer.
+- `tools` is the allow-list of the tools this agent may use — every tool that is **not** an
+  MCP one: the built-ins, the ones the files under `tools/` provide, and the `config_*` tools.
+  The names are the ones the model sees. **Not declaring it means no tools at all** — the
+  list is the whole answer.
 - `mcps` is the list of MCP servers this agent mounts; mounting one starts a child
   process **and hands the agent all of that server's tools**, so **not declaring it means
   no server and no MCP tools**. A mounted tool's name is `mcp__<server>__<tool>`; it is
@@ -166,7 +171,7 @@ provides it**:
 | Where | What it names | Scope |
 |---|---|---|
 | `allows:` in `tools/*.yaml` and `mcps/<server>.yaml` | the tools of that file (or that server) that run without a nod | Every agent |
-| `tools` in `agents/*.md` | the **built-in** tools this agent may use at all | This one agent only |
+| `tools` in `agents/*.md` | the tools this agent may use at all — every tool that is **not** an MCP one | This one agent only |
 
 ★ The two are **stored separately and never merged** — merging would destroy the
 information about *which* layer blocked something. The tier table is shared and a file's

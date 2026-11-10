@@ -5,7 +5,7 @@
 #
 # ★ The file **defines** the server; an agent **mounts** it in its `mcps:`, and
 #   mounting hands that agent all of the server's tools. The agent's `tools:`
-#   names the built-in tools only — it does not name MCP ones.
+#   names the tools that are not MCP ones — it does not name MCP tools.
 #
 # ★ This file is the **scaffold** for a new server, not one to install: the
 #   leading underscore is the mark of a file that is not written by

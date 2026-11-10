@@ -24,14 +24,15 @@ tools:                        # the allow-list: no `task` means it cannot delega
   - duckduckgo_search       # tools/web_search.yaml, read-only, allow
   - wikipedia_search        # tools/wikipedia.yaml, read-only, allow
   # kb_search is not named: kb.yaml has an empty corpus_dir, so the knowledge base is off
-  # ↑ tools: names the **built-in** tools only. The MCP tools are not named here:
-  #   mounting a server under mcps: hands over all of that server's tools.
+  # ↑ tools: names every tool that is **not** an MCP tool — the built-ins, the ones
+  #   the files under tools/ provide, and the config_* tools. The MCP tools are not
+  #   named here: mounting a server under mcps: hands over all of that server's tools.
 skills:                       # an absent key means no skill at all
   - openheron-config-map
   - openheron-config-edit
   - openheron-config-templates
   - openheron-config-validate
-mcps: [fetch, time, deepwiki]   # only these three read-only servers are mounted; filesystem / memory are defined but not mounted. Mounting one hands over all of its tools.
+mcps: [fetch, time, deepwiki]   # only these three read-only servers are mounted; a filesystem / memory server is not shipped and not mounted. Mounting one hands over all of its tools.
 temperature: 0.1
 max_tokens: 2048
 summarize_at: 80%
@@ -106,7 +107,8 @@ When verifying an external fact, prefer these over answering from memory:
   is **not** shipped and not mounted, so it stays invisible and its process never starts. When one is needed,
   report to `main` "which agent should mount it" — changing `mcps:` belongs to `agent-expert`'s domain, so do
   not touch `agents/*.md` yourself; mounting it is one line in `mcps:`, and the tools come with it.
-- ★ `tools:` does **not** name MCP tools: it is the allow-list of the built-in tools. An `mcp__<server>__*`
+- ★ `tools:` does **not** name MCP tools: it is the allow-list of every tool that is not one — the
+  built-ins, the ones the files under `tools/` provide, and the `config_*` tools. An `mcp__<server>__*`
   line in it says nothing and is reported as a notice — drop the line and put the server in `mcps:`.
 - A server that cannot be reached only means "the tool is not mounted at all, plus one warning"; it does not
   stop the process from starting. When a tool is missing, check `config_notices {}` and `/mcps` first — do

@@ -65,11 +65,11 @@ workspace 里，与任何一条消息都没有关系；消息发出时附件就�
 
 | 环节 | 落点 | 状态 |
 |---|---|---|
-| HTTP 上传接口 | `api/v2_files.go:92` `v2UploadFiles` | ✅ 已实现，multipart 多文件 |
-| 大小上限 | `api/v2_files.go:90` `maxUploadBytes = 32 << 20` | ✅ 32 MiB |
-| 路径逃逸防护 | `storage/filestore/session.go:591` `safeJoin` | ✅ 绝对路径与 `..` 一律拒绝 |
-| 落盘位置 | `storage/filestore/session.go:515` `PutFile` → `<state>/<session>/workspace/` | ✅ 会话自己的 workspace |
-| 列出附件 | `api/v2_files.go:143` `v2ListFiles` | ✅ |
+| HTTP 上传接口 | `api/v2_files.go:112` `v2UploadFiles` | ✅ 已实现，multipart 多文件 |
+| 大小上限 | `api/v2_files.go:110` `maxUploadBytes = 32 << 20` | ✅ 32 MiB |
+| 路径逃逸防护 | `storage/filestore/session.go:628` `safeJoin` | ✅ 绝对路径与 `..` 一律拒绝 |
+| 落盘位置 | `storage/filestore/session.go:552` `PutFile` → `<state>/<session>/workspace/` | ✅ 会话自己的 workspace |
+| 列出附件 | `api/v2_files.go:377` `v2ListFiles` | ✅ |
 | 前端上传入口 | `web/src/components/composer.tsx:505` `<input type="file">` | ✅ 纸夹按钮 |
 | 前端附件 chip | `web/src/components/composer.tsx:477` | ✅ 名字 + 大小 + 移除 |
 | `/attach` 命令 | `web/src/lib/commands.ts` → `attach_files` | ✅ |
@@ -356,7 +356,7 @@ type runAttachment struct {
 func resolveAttachments(sess storage.Session, in []runAttachment) ([]message.Attachment, error)
 ```
 
-校验用 `storage/filestore/session.go:591` 的 `safeJoin` —— **同一个函数**，
+校验用 `storage/filestore/session.go:628` 的 `safeJoin` —— **同一个函数**，
 不要另写一份。它已经处理了 `..`、绝对路径和 Windows 的 `\abs.txt`
 （`session.go:79-86` `isAbsPath`）。
 
@@ -1271,7 +1271,7 @@ provider 拒绝图片**也不**让整轮失败（去掉图片重问一遍，模�
 path, putErr := sess.PutFile(fh.Filename, f)
 ```
 
-而 `storage/filestore/session.go:564` 的 `PutFile` 落到 `os.Create(dst)` ——
+而 `storage/filestore/session.go:552` 的 `PutFile` 落到 `os.Create(dst)` ——
 **同名就是截断覆盖**。
 
 ★ **本小节描述的是修复前的状态。** 现在的落盘是

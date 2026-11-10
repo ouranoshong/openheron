@@ -99,7 +99,7 @@ same knowledge in two places, and the two would drift.
 - Do not make the write decision for the user, and do not widen the scope on your own; `state/` is runtime data:
   do not change it, do not commit it.
 - A key is only ever written as `${ENV_VAR}` or `@file:/path`, never in plaintext.
-- `server/` is the cold partition (a change needs a restart); `llm/` `agents/` `tools/` `mcps/` are the hot
-  ones — say so in the plan.
+- `server/` is the cold partition (a change needs a restart); `llm/` `agents/` `tools/` `mcps/` `skills/`
+  are the hot ones — say so in the plan.
 - The depth cap defaults to 1: you are level 0, the three execution experts are at level 1, and none of them can
   delegate any further.

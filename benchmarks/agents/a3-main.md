@@ -4,7 +4,14 @@ model: qwen/qwen3.8-max
 max_iterations: 20
 reasoning: high
 subagents: [scout, task]
-disabled_tools: [write_file, edit_file, execute]
+tools:                        # the allow-list: the readers and the delegation tool. This agent never writes and never runs a command.
+  - ls
+  - read_file
+  - glob
+  - grep
+  - task
+  - write_todos
+mcps: []                      # no MCP server is mounted
 summarize_at: 80%
 ---
 

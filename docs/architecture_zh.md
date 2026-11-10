@@ -98,7 +98,7 @@
 不会拉出一条依赖链。
 
 ★ **两边共用的那套词汇也住在 `decl` 里，而这是依赖方向的事实，不是图方便。** 内置工具名
-（`decl.BuiltinToolNames`，`agentkit/spec/decl/decl.go:319`）被**两端**读：装载器拿它核对
+（`decl.BuiltinToolNames`，`agentkit/spec/decl/decl.go:347`）被**两端**读：装载器拿它核对
 Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些名字的 provider
 （`reservedToolNames`，`agentkit/build/tools.go:75`）。两端互相不能引 —— 装载器在装配器
 下层 —— 所以这份清单不能住在其中任何一边：它住在**两边之下**，那个叶子包里。★ 抄一份
@@ -214,7 +214,7 @@ frontmatter 可用键（`agentkit/spec/decl/decl.go:78` 的 `decl.Agent`）：
 | `model` | `model` | `<provider>/<model>`，**不继承、不回退** |
 | `max_iterations` | `max_iterations` | 工具循环轮数上限 |
 | `subagents` | `subagents` | 可委派的子 Agent 列表 |
-| `tools` | `tools` | 这个 Agent 可用的**内置**工具 —— **暴露出来**的名字，模型看见的那些。★ **不写表示一个都没有**（`agentkit/spec/decl/decl.go:111`） |
+| `tools` | `tools` | 这个 Agent 可用的**非 MCP 工具** —— **暴露出来**的名字，模型看见的那些。★ **不写表示一个都没有**（`agentkit/spec/decl/decl.go:111`） |
 | `skills` | `skills` | 这个 Agent 可加载的技能 —— `skills/` 下的文件夹。★ **不写表示一个都没有**（`agentkit/spec/decl/decl.go:132`） |
 | `mcps` | `mcps` | 本 Agent **挂载**的 MCP server —— 每一个都会起一个子进程，而挂载一个就是**把它的全部工具交给这个 Agent**。★ **不写表示一个都不挂**（`agentkit/spec/decl/decl.go:148`） |
 | `temperature` | `temperature` | 采样温度 |
@@ -240,7 +240,7 @@ frontmatter 可用键（`agentkit/spec/decl/decl.go:78` 的 `decl.Agent`）：
 
 ★ **MCP 只有一个键，而挂载就是授予。** `mcps:` 说哪些 server 被**挂载** ——
 挂载一个 server 就是起一个子进程 —— 它同时也是说这个 Agent **拿到了它的全部工具**。
-★ `tools:` 只管**内置**工具：写进去的 `mcp__<server>__*` 不授予任何东西，会被丢弃，
+★ `tools:` 不点名 MCP 工具：写进去的 `mcp__<server>__*` 不授予任何东西，会被丢弃，
 并以一条**提示**报出（`agentkit/spec/load.go:836` 的 `checkAgentMCPNames`）——
 不是装载期错误，因为那是语义变了，不是自相矛盾。
 ★ **代价是真实的**：再也不能只收窄某一个 Agent 的 MCP 工具。server 自己的文件
@@ -288,7 +288,7 @@ allow 表里就是 `allow`，**其余一律是 `ask`**。镜像的声明 `decl.T
 清单 —— 它是**逐 Agent** 的：清单没点名的工具不在这个 Agent 的工具集里，模型也就看不见。
 
 ★ **被挡住的工具保留自己的档位**，并在 `reason` 里说清原因 —— 而现在原因有**两个**：
-内置工具是 `tools`，MCP 工具是它的 server **没挂载**（`LayerNotMounted`）
+非 MCP 工具是 `tools`，MCP 工具是它的 server **没挂载**（`LayerNotMounted`）
 （`agentkit/build/introspect.go:36` 的 `reasonOf`）。★ 旧的那个原因跟着它命名的那一层
 一起没了：没挂载的 server 本就没有工具可挡，而挂载了就把**全部**工具给了。所以
 `Table.Blocked` 回答 `LayerNotLoaded`（`agentkit/build/policy.go:251`）或者
@@ -422,7 +422,7 @@ Agent 的技能；而技能工具只有在确实有技能可加载时才值得�
 | MCP server | `agentkit/build/mcptools.go:194` | `mcp__<server>__<tool>` |
 
 ★ **config 工具总是被挂上，但几乎从不可见。** 它们进每个 Agent 的批次，一个 Agent 只看见
-自己 `tools:` 清单点名的那些 —— 与其它内置工具一样。其中五个只读，在代码的例外清单里；
+自己 `tools:` 清单点名的那些 —— 与其它非 MCP 工具一样。其中五个只读，在代码的例外清单里；
 `config_write` 不在里面，且文件加不进去（§6.3）。
 
 ★ **一个工具的档位由提供它的那个文件决定。** 文件自己的 `allows:` 点名那些不用问的
@@ -465,7 +465,7 @@ MCP 这一支在注册表处并进来：`mcps/<server>.yaml` → `spec.loadMCP`
 装配等的是一个 server，不是一个 server 的尸体。
 
 ★ **启动不站在那一轮的关键路径上。** 配置一被读到，所有挂载的 server 就在**后台**
-起起来（`agentkit/build/mcpmanager.go:123` `Warm`），而每台 server 各自有一个状态 ——
+起起来（`agentkit/build/mcpmanager.go:129` `Warm`），而每台 server 各自有一个状态 ——
 `not_started`、`starting`、`ready` 或 `failed`。还没起来的 server 不贡献工具，
 那一轮照跑；它起来之后工具面变了，代际推进，于是**下一轮**就有它的工具。
 

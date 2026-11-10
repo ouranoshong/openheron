@@ -43,20 +43,20 @@ Prefill the struct → decode file by file (yaml.v3 writes only the keys that ap
 
 | Key | What it governs |
 |---|---|
-| `tools` | Which **built-in** tools this agent may use (the exposed names); it accepts a trailing `*` prefix |
+| `tools` | Which **non-MCP** tools this agent may use — the built-ins, the ones the files under `tools/` provide, and the `config_*` tools (the exposed names); it accepts a trailing `*` prefix |
 | `mcps` | Which servers are **mounted** (child processes are started) — and a mounted server brings **all of its tools** |
 | `skills` | Which skills can be loaded (the folder names under `skills/`) |
 
 - ★ `disabled_tools` is a **hard error at load time**, not a rename: the old key is still parsed, only so that it can report "renamed to `tools` and the meaning is inverted". **There is no alias**.
 - ★ An agent that omits `tools:` has an empty tool table; a `main` that omits `task` "talks but does nothing".
-- ★ `tools` and `mcps` answer **different questions**: `tools` is the allow-list of the built-in tools, `mcps` is the servers, and **mounting a server hands the agent all of that server's tools**. The two keys do not have to agree. An `mcp__<server>__*` line in `tools:` says nothing — it is reported as a **notice**, so the file still loads.
+- ★ `tools` and `mcps` answer **different questions**: `tools` is the allow-list of the tools that are not MCP tools, `mcps` is the servers, and **mounting a server hands the agent all of that server's tools**. The two keys do not have to agree. An `mcp__<server>__*` line in `tools:` says nothing — it is reported as a **notice**, so the file still loads.
 - ★ Mounting is not approving: the tier of an MCP tool comes from the `allows:` of the server's own file, and the default there is `ask` too.
 - A lone `*`, or a `*` that is not at the end, is a hard error at load time; `tools: ["*"]` is not allowed.
 - A server name must match `^[a-z0-9]+(_[a-z0-9]+)*$`, consecutive underscores are not allowed; the exposed name `mcp__<server>__<tool>` is assembled in exactly one place.
 
 ## The tiers: there is no global list
 
-- The default is **`ask`**. The code's own `builtinAllowedTools` (`ls read_file glob grep task write_todos skill`) **always takes effect** and is the base; the `allows:` of each tool file can only **add upward**, it cannot take a name away.
+- The default is **`ask`**. The code's own `builtinAllowedTools` (`ls read_file glob grep task write_todos skill`, plus the five read-only `config_get` `config_validate` `config_template` `config_notices` `config_tier`) **always takes effect** and is the base; the `allows:` of each tool file can only **add upward**, it cannot take a name away.
 - To tighten, change that table in the code; to loosen, write `allows:` in the file that provides the tool (using that file's own vocabulary).
 - `tools/filesystem.yaml` **is implemented**: it carries only `allows:`, and it is the **tuning knob** for loosening the tier of `ls` / `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute`, not a switch — the filesystem tools are always there.
 - ★ `config_write` is **always ask**: `alwaysAsk` strips it out of any `allows:` after the merge. A file that can authorize a tool cannot authorize the tool that "rewrites itself".
@@ -83,7 +83,7 @@ Prefill the struct → decode file by file (yaml.v3 writes only the keys that ap
 - Directory lookup: `$EINO_EXT_SKILLS_DIR` wins, otherwise search upward from the cwd for `.openheron/skills` — this one **does** search upward, unlike the config root.
 - The frontmatter is **eino's schema**: `name` / `description` / `context` / `agent` / `model`. `name` matches the directory name; `description` says "when to load it".
 - `context: inline` is not a declared constant; a typo does not error, it silently becomes inline. Only `fork` uses `agent:` / `model:`, and a reference that cannot be resolved is an error.
-- Hot: `llm/` `agents/` `tools/` `mcps/`; cold: `server/` (a change needs a restart). `skills/` is not in `HotDirs`; a content change takes effect after the agent pool is rebuilt.
+- Hot: `llm/` `agents/` `tools/` `mcps/` `skills/`; cold: `server/` (a change needs a restart). `skills/` is a hot partition too — the fingerprint walks it recursively, so editing a `SKILL.md` rebuilds the snapshot and takes effect on the next turn.
 - A broken configuration does not kill the process: a failed reload keeps the last good configuration; only a failure on the first load makes the startup fail.
 
 ## Known traps (check these first)

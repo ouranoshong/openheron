@@ -2,7 +2,7 @@
 #
 #   ★ server/ is **not hot-reloaded** — it configures the process itself, so a
 #     change here needs a restart. Every other section (llm/ agents/ tools/
-#     mcps/) is picked up from the next turn.
+#     mcps/ skills/) is picked up from the next turn.
 #
 #   ★ The values below are the **code's own defaults**, written out so that
 #     they are visible and editable. Writing them changes nothing by itself —
