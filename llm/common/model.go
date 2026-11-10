@@ -83,7 +83,24 @@ func (cm *ChatModel) Generate(ctx context.Context, in []*schema.Message,
 	ctx = callbacks.EnsureRunInfo(ctx, cm.GetType(), components.ComponentOfChatModel)
 
 	out, err := cm.cli.Generate(ctx, in, opts...)
-	return out, wrap(err, cm.hintKeys)
+	if err == nil {
+		return out, nil
+	}
+	// ★ A model with no vision refuses the whole request, and the turn dies
+	//   on a picture the user attached. The files are still there, so the
+	//   second attempt is the same question without the pictures — and the
+	//   model is told (see [withoutImages]).
+	stripped, ok := withoutImages(in)
+	if !ok {
+		return nil, wrap(err, cm.hintKeys)
+	}
+	out, retryErr := cm.cli.Generate(ctx, stripped, opts...)
+	if retryErr != nil {
+		// ★ The failure was not about the pictures: the first error is the
+		//   real reason.
+		return nil, wrap(err, cm.hintKeys)
+	}
+	return out, nil
 }
 
 func (cm *ChatModel) Stream(ctx context.Context, in []*schema.Message,
@@ -91,7 +108,17 @@ func (cm *ChatModel) Stream(ctx context.Context, in []*schema.Message,
 	ctx = callbacks.EnsureRunInfo(ctx, cm.GetType(), components.ComponentOfChatModel)
 
 	out, err := cm.cli.Stream(ctx, in, opts...)
-	if err != nil {
+	if err == nil {
+		return attributingStream(out, cm.hintKeys), nil
+	}
+	// ★ The same fallback as Generate: the request is refused before the
+	//   stream opens, so the retry is still a whole second attempt.
+	stripped, ok := withoutImages(in)
+	if !ok {
+		return nil, wrap(err, cm.hintKeys)
+	}
+	out, retryErr := cm.cli.Stream(ctx, stripped, opts...)
+	if retryErr != nil {
 		return nil, wrap(err, cm.hintKeys)
 	}
 	return attributingStream(out, cm.hintKeys), nil
