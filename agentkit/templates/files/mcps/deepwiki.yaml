@@ -11,7 +11,8 @@
 #   this one does not, so the key is not written at all.
 #
 # Mounted: it is mounted on task (use mcp__deepwiki__* to look up the facts of
-# a third-party library or framework).
+# a third-party library or framework). Mounting it hands the agent all of the
+# server's tools; the agent's tools: names the built-in tools only.
 transport: http
 url: https://mcp.deepwiki.com/mcp
 timeout: 30s

@@ -32,7 +32,7 @@ and the offset of the frontmatter is corrected by `parseShift` — all of these 
 |---|---|
 | the agent cannot call a single tool | **`tools:` omitted** — the allow-list is closed by default, an empty tool table; a `main` that omits `task` cannot delegate |
 | the skill is completely invisible | the agent's `skills:` allow-list is missing the directory name (the allow-list filters both `List` and `Get`) |
-| the MCP server runs but is invisible | `mcps:` mounts it, but `tools:` does not name `mcp__<server>__*`; both levels must be written |
+| the MCP server runs but its tools are invisible | the agent mounts it, so the **server's own file** decides: its `tools:` filter does not offer that tool (a wrong name does not error), or the server was never reached |
 | the MCP tool asks for a nod every time although `allows:` was configured | the name in the file does not match the tool name the server really provides — **a wrong name does not error**, check it with `/mcps`; the same goes for the `tools:` filter |
 | the MCP server never starts at all | it is not named by any agent's `mcps:`; the file being there only "defines" it, mounting it is what starts the process |
 | a tier is written and nothing thinks at all | `agents[].reasoning` is not in the model's vocabulary — silently ignored, **and there is no deferred** |
@@ -52,10 +52,12 @@ and the offset of the frontmatter is corrected by `parseShift` — all of these 
 ## The hard errors at load time (for reading `issues[]`)
 
 A leftover `disabled_tools` (**renamed to `tools` and the meaning is inverted, no alias**), `tools: ["*"]` or a `*` that is not at the end,
-`tools` naming `mcp__x__*` while `mcps` does not mount `x`, `mcps` naming a server that does not exist,
+`mcps` naming a server that does not exist,
 an unknown field with a line number, an empty document / comments only, a bare number in `timeout: 60`, a `model` without a prefix or with an undeclared reference,
 `subagents` in a cycle / over the limit / referring to something that does not exist, a missing `kb.model`, an unknown file name under `tools/`,
 a `mcps` server name that does not match the regex, an http server carrying `env:`, an `@file:` that cannot be read.
+
+★ An `mcp__x__*` line in `tools:` is **not** on this list: it is a **notice** (the tools list is about the built-in tools, and `mcps:` is what mounts a server and gives the agent its tools).
 
 ## The runtime confirmation
 

@@ -164,7 +164,7 @@ func (h *skillAgentHub) Get(ctx context.Context, name string,
 	a, _, err := h.builder.buildNode(ctx, h.snap, node{
 		base:      base,
 		agentSpec: &agentSpec,
-		table:     specTable(h.policy, agentSpec, h.snap.agentSpec.mcpServers),
+		table:     specTable(h.policy, agentSpec),
 		depth:     0,
 		model:     overridden,
 	})

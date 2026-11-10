@@ -109,7 +109,7 @@ func (b *Builder) buildNode(ctx context.Context, snap *snapshot, n node) (
 		cfg.Handlers = append(handlers, toolChain(boundary, snap.agentSpec.maxDepth)...)
 		hubs.agent.bindRoot(cfg)
 	} else if sp != nil {
-		cfg.Handlers = subHandlers(snap.agentSpec.policy, *sp, snap.agentSpec.maxDepth, snap.agentSpec.mcpServers)
+		cfg.Handlers = subHandlers(snap.agentSpec.policy, *sp, snap.agentSpec.maxDepth)
 	}
 
 	// The compaction middleware goes on every agent that declares a

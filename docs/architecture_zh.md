@@ -107,8 +107,8 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
 ### 2.2 `agentkit/spec` 为什么**不**引 `kb`
 
 知识库配置（`tools/kb.yaml`）的**校验**需要知道语料路径是不是相对路径、模型有没有被声明、
-以及它是不是声明为 `kind: embedding`（`agentkit/spec/load.go:251` 的 `loadKB`、
-`agentkit/spec/load.go:869` 的 `validateKB`）。
+以及它是不是声明为 `kind: embedding`（`agentkit/spec/load.go:285` 的 `loadKB`、
+`agentkit/spec/load.go:934` 的 `validateKB`）。
 
 ★ 这三个答案都在**声明**里（`decl.Model.IsEmbedding`、`decl.Model.Dimensions`），
   所以配置层根本不引知识库 —— 只有测试文件引（`agentkit/spec/policy_contract_test.go:7`）。
@@ -180,8 +180,7 @@ callback 注册表，所以 `hlog.SetLogger` 与 `callbacks.AppendGlobalHandlers
 （`agentkit/spec/config.go:40`），而旧配置遗留下来的 `policy/` 目录**不会被读** ——
 没人加载它。它当年承载的档位模型如今住进了工具文件与 Agent 文件
 （§3.4）。★ 配置**照样能起来**：其余部分可能完全没问题，而别处一个坏文件会让整份配置
-根本加载不了。但这个目录会留下一条**提示**（`agentkit/spec/config.go:410`
-`noteRetiredDirs`），并说清新家在哪儿 —— 被丢掉却一声不吭的配置是最糟的一种：
+根本加载不了。但这个目录会留下一条**提示**（`agentkit/spec/config.go:533` `noteRetiredDirs`），并说清新家在哪儿 —— 被丢掉却一声不吭的配置是最糟的一种：
 进程起来得好好的，而那个设置已经没了。
 
 `tools/` 下的文件名是**白名单**：`agentkit/spec/load.go:213` 对未知文件直接报错，
@@ -194,17 +193,17 @@ callback 注册表，所以 `hlog.SetLogger` 与 `callbacks.AppendGlobalHandlers
 ### 3.3 Agent 定义
 
 一个 Agent 是一个 markdown 文件：**frontmatter + 正文**。frontmatter 是**严格解码**的
-（`agentkit/spec/load.go:75` 的 `loadAgent`）—— 写错一个键就是启动错误。
+（`agentkit/spec/load.go:76` 的 `loadAgent`）—— 写错一个键就是启动错误。
 
 ★ **模型没人声明不是启动错误 —— 它把那个 Agent 留在树外。** 规则本身写在
 `docs/config-design.md` §4.6，架构这一层要说的是**边界落在哪儿**：`validate()` 会**settle**
-这棵树（`agentkit/spec/load.go:536` 的 `leaveOutUndeclaredModels`）—— 那个 Agent 从
+这棵树（`agentkit/spec/load.go:565` 的 `leaveOutUndeclaredModels`）—— 那个 Agent 从
 `Config.Agents` 里被删掉，每个父 Agent 的 `subagents:` 里也被删掉，理由留在
 `Config.leftOut` 里（`agentkit/spec/config.go:139`）。下游的一切 —— `AgentNames()`、
 `MCPServersInUse()`、档位表、装配层 —— 看到的都是 settle 之后的树，于是永远碰不到一个
 它跑不起来的 Agent。★ 动这段代码之前要知道两件事：默认 Agent 也一样被留在树外（结果是
 改好之前没有会话能跑，但进程照常起来，编辑器就在进程里），以及写入门
-（`agentkit/spec/write.go:353` 的 `checkNoAgentLost`）比的是**settle 后的 before** 与
+（`agentkit/spec/write.go:472` 的 `checkNoAgentLost`）比的是**settle 后的 before** 与
 **settle 后的 after** —— 于是可以加一个 Agent、可以放着已经坏的不动，不能把一个能跑的拿走。
 
 frontmatter 可用键（`agentkit/spec/decl/decl.go:78` 的 `decl.Agent`）：
@@ -215,9 +214,9 @@ frontmatter 可用键（`agentkit/spec/decl/decl.go:78` 的 `decl.Agent`）：
 | `model` | `model` | `<provider>/<model>`，**不继承、不回退** |
 | `max_iterations` | `max_iterations` | 工具循环轮数上限 |
 | `subagents` | `subagents` | 可委派的子 Agent 列表 |
-| `tools` | `tools` | 这个 Agent 可用的工具 —— **暴露出来**的名字，模型看见的那些。★ **不写表示一个都没有**（`agentkit/spec/decl/decl.go:104`） |
-| `skills` | `skills` | 这个 Agent 可加载的技能 —— `skills/` 下的文件夹。★ **不写表示一个都没有**（`agentkit/spec/decl/decl.go:125`） |
-| `mcps` | `mcps` | 本 Agent **挂载**的 MCP server —— 每一个都会起一个子进程。★ **不写表示一个都不挂**（`agentkit/spec/decl/decl.go:135`） |
+| `tools` | `tools` | 这个 Agent 可用的**内置**工具 —— **暴露出来**的名字，模型看见的那些。★ **不写表示一个都没有**（`agentkit/spec/decl/decl.go:111`） |
+| `skills` | `skills` | 这个 Agent 可加载的技能 —— `skills/` 下的文件夹。★ **不写表示一个都没有**（`agentkit/spec/decl/decl.go:132`） |
+| `mcps` | `mcps` | 本 Agent **挂载**的 MCP server —— 每一个都会起一个子进程，而挂载一个就是**把它的全部工具交给这个 Agent**。★ **不写表示一个都不挂**（`agentkit/spec/decl/decl.go:148`） |
 | `temperature` | `temperature` | 采样温度 |
 | `max_tokens` | `max_tokens` | 采样上限 |
 | `reasoning` | `reasoning` | 思考档位名（`low`/`high`/`max`…） |
@@ -239,13 +238,15 @@ frontmatter 可用键（`agentkit/spec/decl/decl.go:78` 的 `decl.Agent`）：
 ★ **没有别名**：一个仍按旧义工作的别名会让黑名单继续活着，一个按新义工作的别名则等于
 替用户把黑名单翻成白名单 —— 那正是这次拒绝要防的误会。
 
-★ **MCP 有两层，两层都得写。** `mcps:` 说哪些 server 被**挂载** —— 挂载一个 server 就是
-起一个子进程 —— `tools:` 说它那些工具里哪些被 Agent **看见**，按暴露出来的名字
-`mcp__<server>__<tool>`，或者按模式 `mcp__<server>__*`。★ `mcps: [github]` 而 `tools:`
-里没有 `mcp__github__*`，意思只有「把它起起来」，Agent 一个都看不见。★ 两层互相矛盾
-是**装载期错误**（`agentkit/spec/load.go:771` 的 `checkAgentMCPNames`）：`tools:` 里点了
-`mcp__github__*` 而 `mcps:` 里没有 `github`，这条规则永远不可能命中，所以装载器会说出来，
-而不是让它悄悄地什么也不做。
+★ **MCP 只有一个键，而挂载就是授予。** `mcps:` 说哪些 server 被**挂载** ——
+挂载一个 server 就是起一个子进程 —— 它同时也是说这个 Agent **拿到了它的全部工具**。
+★ `tools:` 只管**内置**工具：写进去的 `mcp__<server>__*` 不授予任何东西，会被丢弃，
+并以一条**提示**报出（`agentkit/spec/load.go:836` 的 `checkAgentMCPNames`）——
+不是装载期错误，因为那是语义变了，不是自相矛盾。
+★ **代价是真实的**：再也不能只收窄某一个 Agent 的 MCP 工具。server 自己的文件
+（`mcps/<server>.yaml`）过滤它自己的工具，而那个过滤器是所有挂载它的 Agent 共享的。
+★ **审批不受影响**：MCP 工具的档位来自那个 server 文件的 `allows:`，缺省仍然是 `ask` ——
+挂载不等于放行。
 
 ### 3.4 档位模型：默认 `ask`，例外被点名
 
@@ -268,8 +269,8 @@ allow 表里就是 `allow`，**其余一律是 `ask`**。镜像的声明 `decl.T
 
 | 来源 | 它点名什么 | 装配位置 |
 |---|---|---|
-| 没有自己文件的内置工具 | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill`，外加五个只读的 config 工具 | `agentkit/build/tools.go:68` `builtinAllowedTools` |
-| 工具自己的文件 —— `tools/*.yaml` 与知识库 | 那个文件的 `allows:` | `agentkit/spec/load.go:299` `AllowedTools` |
+| 没有自己文件的内置工具 | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill`，外加五个只读的 config 工具 | `agentkit/build/tools.go:79` `builtinAllowedTools` |
+| 工具自己的文件 —— `tools/*.yaml` 与知识库 | 那个文件的 `allows:` | `agentkit/spec/load.go:326` `AllowedTools` |
 | MCP server 自己的文件 | 那个 server 的 `allows:`，用它自己的词汇，翻译成暴露出来的名字 | `agentkit/build/mcptools.go:173` `mcpAllowedNames` |
 
 `agentkit/build/spec.go:64` 的 `policyOf` 把三处合成一张表，`Policy.TierOf` 读这张表。
@@ -286,12 +287,12 @@ allow 表里就是 `allow`，**其余一律是 `ask`**。镜像的声明 `decl.T
 （`agentkit/build/policy.go:130`），也就是 Agent 以 `decl.SubAgentSpec` 带在身上的那份
 清单 —— 它是**逐 Agent** 的：清单没点名的工具不在这个 Agent 的工具集里，模型也就看不见。
 
-★ **被挡住的工具保留自己的档位**，并在 `reason` 里说清原因 —— 而现在原因只有**一个**：
-`tools`（`agentkit/build/introspect.go:36` 的 `reasonOf`）。★ 第二个原因跟着它命名的
-那一层一起没了：没挂载的 server 本就没有工具可挡，而挂载了却没点名的工具恰恰被这份清单
-挡住。所以 `Table.Blocked` 只回答 `LayerNotLoaded`
-（`agentkit/build/policy.go:212`），再没有别的 —— MCP 作用域那一层（`LayerMCPScope`）
-已删除。
+★ **被挡住的工具保留自己的档位**，并在 `reason` 里说清原因 —— 而现在原因有**两个**：
+内置工具是 `tools`，MCP 工具是它的 server **没挂载**（`LayerNotMounted`）
+（`agentkit/build/introspect.go:36` 的 `reasonOf`）。★ 旧的那个原因跟着它命名的那一层
+一起没了：没挂载的 server 本就没有工具可挡，而挂载了就把**全部**工具给了。所以
+`Table.Blocked` 回答 `LayerNotLoaded`（`agentkit/build/policy.go:251`）或者
+`LayerNotMounted`（`agentkit/build/policy.go:258`）。
 
 ### 3.5 深度上限与拓扑校验
 
@@ -302,20 +303,20 @@ allow 表里就是 `allow`，**其余一律是 `ask`**。镜像的声明 `decl.T
 拷贝，只能*收紧*文件里的值 —— 没有了，而 `server/` **不是**热分区
 （`agentkit/spec/config.go:52`），所以改上限要重启才生效。
 
-声明的拓扑超过上限是**启动错误**（`agentkit/spec/load.go:916` 的 `validateDepth`），
+声明的拓扑超过上限是**启动错误**（`agentkit/spec/load.go:962` 的 `validateDepth`），
 不静默截断。子 agent 引用不存在的 agent、拓扑成环，也都是启动错误
-（`agentkit/spec/load.go:987` 的 `validateAgentGraph`、`agentkit/spec/load.go:985` 的 `detectCycle`）。
+（`agentkit/spec/load.go:1033` 的 `validateAgentGraph`、`agentkit/spec/load.go:1050` 的 `detectCycle`）。
 
 ### 3.6 skills 的解析是另一套
 
 `skills/` **不是**「配置根下的一个分区」，而是独立解析的
-（`agentkit/build/skill.go:182` 的 `ResolveSkillsDir`）：先看 `$EINO_EXT_SKILLS_DIR`，
+（`agentkit/build/skill.go:190` 的 `ResolveSkillsDir`）：先看 `$EINO_EXT_SKILLS_DIR`，
 没有才从当前目录**向上**找 `.openheron/skills`。
 
 ★ **编辑器也得问这个问题，而且不许自己猜。** 它写的是 `<配置根>/skills/`，而那个目录只有在
 探针正好落在那里时才是生效的那一个；不是的话，保存会落进一棵没人读的树。所以解析结果在启动时
 被推进配置层（`spec.Service.SetSkillsDir`，`agentkit/spec/config.go:284`），指向别处时保存被拒
-（`agentkit/spec/write.go:150` 的 `validateWritable`），清单里那个分区标成只读并点名真正的目录。
+（`agentkit/spec/write.go:151` 的 `validateWritable`），清单里那个分区标成只读并点名真正的目录。
 ★ 这条规则只住在 `build` 里：在 `spec` 里再写一份，就是「到底加载了哪些技能」的第二个答案。
 
 ★ 这跟「配置根不向上查找」是两条不同的规则。skills 是目录树，
@@ -355,11 +356,10 @@ Agent 的技能；而技能工具只有在确实有技能可加载时才值得�
 - 密钥字面量被拒：`api_key must be a reference, not a literal: use ${ENV_VAR} or @file:/path`
   —— 防止密钥进了仓库。
 - 乐观并发：带 `baseRevision`，与磁盘上的 revision 不符就报冲突。
-- 一次改动不许把一个**本来能跑的 Agent** 带出树外（`agentkit/spec/write.go:470`
-  `checkNoAgentLost`）：拿磁盘上 settle 后的树与试装后 settle 的树比，写、批写或删除
+- 一次改动不许把一个**本来能跑的 Agent** 带出树外（`agentkit/spec/write.go:472` `checkNoAgentLost`）：拿磁盘上 settle 后的树与试装后 settle 的树比，写、批写或删除
   里凡是会把一个本来能跑的 Agent 弄丢的都拒绝。★ 本来就在树外的 Agent 两边都不在，
   所以一次无关的编辑永远不会被算成「把它弄丢」。
-- **还有东西指着它**的删除被拒（`agentkit/spec/write.go:706` `checkNotReferenced`），
+- **还有东西指着它**的删除被拒（`agentkit/spec/write.go:708` `checkNotReferenced`），
   而且拒绝点名是谁在指：是哪个文件还在指着被删的那个、要移除什么。★ 这道闸门跑在
   试装之前，因为试装的装载错误正是它要取代的症状 —— 那个错误点名被删掉的文件，
   把真正的原因藏在别处。
@@ -422,7 +422,7 @@ Agent 的技能；而技能工具只有在确实有技能可加载时才值得�
 | MCP server | `agentkit/build/mcptools.go:194` | `mcp__<server>__<tool>` |
 
 ★ **config 工具总是被挂上，但几乎从不可见。** 它们进每个 Agent 的批次，一个 Agent 只看见
-自己 `tools:` 清单点名的那些 —— 与其它工具一样。其中五个只读，在代码的例外清单里；
+自己 `tools:` 清单点名的那些 —— 与其它内置工具一样。其中五个只读，在代码的例外清单里；
 `config_write` 不在里面，且文件加不进去（§6.3）。
 
 ★ **一个工具的档位由提供它的那个文件决定。** 文件自己的 `allows:` 点名那些不用问的
@@ -470,8 +470,8 @@ MCP 这一支在注册表处并进来：`mcps/<server>.yaml` → `spec.loadMCP`
 那一轮照跑；它起来之后工具面变了，代际推进，于是**下一轮**就有它的工具。
 
 ★ 暴露出来的名字是 `mcp__<server>__<tool>`，只在一处拼装（`agentkit/build/mcptools.go:141`）。
-server 自己的名字就是命名空间那一段，而 agent 的 `tools:` 清单点的是暴露出来的那些名字 ——
-整个 server 用模式 `mcp__<server>__*` 一把点。★ **这个前缀模式是安全的**：server 名里
+server 自己的名字就是命名空间那一段，而一个暴露名属于哪台 server 是从它**读回来**的
+（`agentkit/spec/decl/decl.go:498` 的 `MCPServerOf`）。★ **命名空间不可协商**：server 名里
 不许出现连续的下划线，所以一个 server 的前缀伸不到另一个 server 去。
 
 ## 5. 运行循环
@@ -665,7 +665,7 @@ selector 里不要写 `?? []`；用模块级常量或 store 里的 selector。
   `0.5*词法分 + 0.5*余弦相似度`，无向量时**纯词法**（所以 `kb status` 会报
   `lexical-only retrieval`）。
 - 词法分给**标识符加权**：出现在标题/小节标题/链接里的词比出现在正文里的词值钱。
-- `openheron kb index` 有**运行锁**（`kb/store.go:121` 的 `StartRun`）：同时只能跑一轮。
+- `openheron kb index` 有**运行锁**（`kb/store.go:146` 的 `StartRun`）：同时只能跑一轮。
 - agent 侧拿到两个工具：`kb_search`（返回文档**大纲**而非全文）与 `kb_index`。
   `kb_index` 默认落在 `ask` 档 —— 让 agent 自己重建索引需要人点头。
 

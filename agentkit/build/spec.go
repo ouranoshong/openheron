@@ -129,7 +129,7 @@ func (s *snapshot) tableFor(agentID string) *Table {
 func tablesOf(sp agentSpec) map[string]*Table {
 	out := make(map[string]*Table, len(sp.agents))
 	for id, as := range sp.agents {
-		out[id] = specTable(sp.policy, as, sp.mcpServers)
+		out[id] = specTable(sp.policy, as)
 	}
 	return out
 }

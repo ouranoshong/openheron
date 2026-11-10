@@ -18,7 +18,7 @@ func verdictsByName(t *testing.T, vs []ToolVerdict) map[string]ToolVerdict {
 func TestFilterObservesEvenWithoutAnyBlocking(t *testing.T) {
 	// ★ The list names both tools, so nothing is blocked — and the
 	//   observation still happens.
-	tbl := newTable("main", []string{"read_file", "task"})
+	tbl := newTable("main", []string{"read_file", "task"}, nil)
 	tools := []tool.BaseTool{
 		&stubTool{name: "read_file"},
 		&stubTool{name: "task"},
@@ -38,7 +38,7 @@ func TestFilterObservesEvenWithoutAnyBlocking(t *testing.T) {
 }
 
 func TestFilterObservesBeforeRemoving(t *testing.T) {
-	tbl := newTable("main", []string{"read_file"})
+	tbl := newTable("main", []string{"read_file"}, nil)
 	kept, removed := tbl.Filter([]tool.BaseTool{
 		&stubTool{name: "grep"},
 		&stubTool{name: "read_file"},
@@ -54,7 +54,7 @@ func TestFilterObservesBeforeRemoving(t *testing.T) {
 }
 
 func TestObservedUnknownBeforeAnyTurn(t *testing.T) {
-	tbl := newTable("main", nil)
+	tbl := newTable("main", nil, nil)
 	names, ok := tbl.Observed()
 	if ok {
 		t.Fatal("a table that never filtered should report Known=false")
@@ -65,7 +65,7 @@ func TestObservedUnknownBeforeAnyTurn(t *testing.T) {
 }
 
 func TestObserveOverwritesRatherThanAccumulates(t *testing.T) {
-	tbl := newTable("main", nil)
+	tbl := newTable("main", nil, nil)
 	tbl.Filter([]tool.BaseTool{&stubTool{name: "a"}, &stubTool{name: "b"}})
 	tbl.Filter([]tool.BaseTool{&stubTool{name: "b"}})
 
@@ -76,7 +76,7 @@ func TestObserveOverwritesRatherThanAccumulates(t *testing.T) {
 }
 
 func TestObserveSkipsToolsWithoutNames(t *testing.T) {
-	tbl := newTable("main", nil)
+	tbl := newTable("main", nil, nil)
 	tbl.Filter([]tool.BaseTool{
 		&stubTool{name: ""},
 		&stubTool{name: "grep"},

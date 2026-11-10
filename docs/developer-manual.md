@@ -160,7 +160,7 @@ Recomputing either one is the same mistake twice.
    Note that `Provide` returns a **batch** — one provider may supply several tools.
 
 2. **Register it.** Add your provider to `defaultToolRegistry` at
-   `agentkit/build/tools.go:36`. The position determines the order, and it also
+   `agentkit/build/tools.go:52`. The position determines the order, and it also
    determines how optional and required providers are told apart.
 
 3. **Optionality is decided by `Optional()`, not by returning an error.** A provider
@@ -204,7 +204,7 @@ Recomputing either one is the same mistake twice.
 #### The MCP provider
 
 `mcpToolProvider` is registered like any other provider — `defaultToolRegistry`
-at `agentkit/build/tools.go:36` — and it answers the same `toolProvider` contract
+at `agentkit/build/tools.go:52` — and it answers the same `toolProvider` contract
 at `agentkit/build/tools.go:20`. Four things about it are not generic:
 
 - **The client outlives the batch.** ★ The batch is built once per snapshot:
@@ -226,7 +226,7 @@ at `agentkit/build/tools.go:20`. Four things about it are not generic:
   simply missing from the table, and the user sees "this feature seems to be
   missing".
 - **The output is capped, and the stdio calls are serialized.** The cap lives in
-  the component's result handler (`agentkit/build/mcptools.go:376`), and the
+  the component's result handler (`agentkit/build/mcptools.go:343`), and the
   calls of one stdio server go through `serialTool`
   (`agentkit/build/mcptools.go:335`), which takes a per-server mutex and a call
   deadline.
@@ -270,7 +270,7 @@ For a developer who has to debug it:
   passed (`mcpStartTimeout`, `agentkit/build/mcpmanager.go:328`) — a server that
   cannot start must not be spawned in a loop.
 - **The tool list is re-listed when a turn asks for it**, and the previous
-  listing is older than 30 seconds (`agentkit/build/mcpmanager.go:34`,
+  listing is older than 30 seconds (`agentkit/build/mcpmanager.go:36`,
   `mcpRelistInterval`). ★ That interval is a fixed value, not a configuration
   key: a knob nobody turns is a knob nobody tests, and a server's tool list
   changes on the scale of days.
@@ -294,7 +294,7 @@ Say you want a new `mcps/` directory:
    and **non-hot-reloaded** directories clearly apart — whether a directory is hot
    changes what users expect.
 
-2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`agentkit/spec/config.go:543`) and
+2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`agentkit/spec/config.go:544`) and
    implement `loadXXX`.
 
    ★ **Two shapes the recipe did not have before `skills/`.** A partition may be
@@ -386,7 +386,7 @@ definition — there is no `enabled` key.
    ```
 
 3. **Data sources.** To wire up a new source, add a `SetXxxSource` method on
-   `api.Server` (the pattern is `api/server.go:112`'s `SetSkillsSource`) and connect it
+   `api.Server` (the pattern is `api/server.go:113`'s `SetSkillsSource`) and connect it
    in `main.go`. **Do not** let a handler read a global variable directly.
 
 4. **Streaming.** The SSE sink lives in `transport`; `api` only writes the events out.
@@ -407,8 +407,7 @@ Editing `agents/*.md` is enough; no code change is needed. But keep in mind:
   dangling reference, because the settled tree no longer mentions it.
 - Exceeding `max_depth` is a **startup error**, never a silent truncation.
 
-★ **The write gate is the other half of "left out".** `agentkit/spec/write.go:470`
-`checkNoAgentLost` compares the **settled** tree on disk with the **settled** trial tree and
+★ **The write gate is the other half of "left out".** `agentkit/spec/write.go:472` `checkNoAgentLost` compares the **settled** tree on disk with the **settled** trial tree and
 refuses a write, a batch or a delete that would take a working agent out. Without it,
 repointing an agent at a nonexistent model would remove it silently — which is exactly the
 failure the load-time rule stopped being. ★ Do not "simplify" it by comparing the raw
@@ -432,7 +431,7 @@ The assembly logic is in `agentkit/build/assemble.go`; the validation logic is i
 
 #### ★ When the agent cannot be built, the turn has to be told
 
-`agentkit/run/loop.go:108` `makePrepareAgent` is where the builder is asked for this
+`agentkit/run/loop.go:125` `makePrepareAgent` is where the builder is asked for this
 turn's agent — and where a configuration problem becomes a runtime one. ★ The error
 has to be handed to the turn (`turn.fail`): the framework records it and stops the
 loop, but nobody else marks the turn failed, so the waiter sat until the **start
@@ -452,9 +451,9 @@ none** — an absent key and an empty list mean the same thing, and they mean "n
 
 | Key | What it names | Absent means |
 |---|---|---|
-| `tools` | the tools the agent may use — the **exposed** names, the ones the model sees | no tool |
+| `tools` | the **built-in** tools the agent may use — the **exposed** names, the ones the model sees | no tool |
 | `skills` | the skills the agent may load — the folders under `skills/` | no skill |
-| `mcps` | the MCP servers the agent **mounts** — each one starts a child process | no server |
+| `mcps` | the MCP servers the agent **mounts** — each one starts a child process, and mounting one **hands the agent all of that server's tools** | no server |
 
 ★ **Do not write `disabled_tools`.** It was the **opposite** of `tools` — one removed
 tools, the other names them — so the loader **refuses** the file
@@ -470,25 +469,30 @@ not use (`agentkit/build/topology.go:72` `specTable`), and the model never sees 
 the list removed. ★ **There is no "nothing to do" shortcut**
 (`agentkit/build/policy.go:145`): an **empty** list removes **everything**.
 
-★ **MCP has two levels.** `mcps:` says which servers are **mounted**; `tools:` says
-which of that server's tools the agent **sees** — `mcp__<server>__<tool>`, or the
-pattern `mcp__<server>__*`. ★ `mcps: [github]` without `mcp__github__*` in `tools:`
-starts the server and shows the agent nothing. ★ A contradiction between the two is a
-**load-time error** (`agentkit/spec/load.go:771` `checkAgentMCPNames`): naming
-`mcp__github__*` while `mcps:` leaves `github` out can never match.
+★ **MCP has one key, and mounting is the grant.** `mcps:` says which servers are
+**mounted** — and mounting one hands the agent **all of that server's tools**. ★ `tools:`
+is about the **built-in** tools only: an `mcp__<server>__*` entry there grants nothing, is
+dropped, and is reported as a **notice** (`agentkit/spec/load.go:836`
+`checkAgentMCPNames`) — not a load-time error, because the meaning changed rather than
+contradicting itself. ★ **The cost is real**: narrowing one agent's MCP tools is no longer
+possible — the server's own file filters them, and that filter is shared by every agent
+that mounts it. ★ **Approval is untouched**: an MCP tool's tier comes from that server
+file's `allows:`, and the default there is still `ask` — mounting is not approving.
 
-#### The two notices
+#### The three notices
 
-Both are **notices**, not errors — the configuration is legal, it just does not say
-what the author meant (`agentkit/spec/load.go:679` `noticeAgentTools`):
+All three are **notices**, not errors — the configuration is legal, it just does not say
+what the author meant (`agentkit/spec/load.go:708` `noticeAgentTools`):
 
 | Notice | What it means | What to do |
 |---|---|---|
 | `tools` names a tool that does not exist | the built-in tools are the ones in `decl.BuiltinToolNames`, and a provider's tool exists only when its file under `tools/` is written | check the spelling; write the `tools/` file if the provider is missing |
 | `tools` names the `skill` tool but `skills` is empty | the agent can ask for a skill and there is none to load | name the skill in `skills:`, or drop `skill` from `tools:` |
+| `tools` names MCP tools | `tools` is the **built-in** allow-list; `mcps:` is what mounts a server **and** grants its tools | drop the `mcp__*` lines and put the server in `mcps:` |
 
-★ **An `mcp__*` name is skipped by the check**: a server's tools are discovered at
-runtime, so a name it does not have yet is not a typo.
+★ **An `mcp__*` name is skipped by the "does not exist" check**: a server's tools are
+discovered at runtime, so a name it does not have yet is not a typo. The MCP notice is a
+different one — it says the line does not do what it reads as.
 
 ### 3.5 Adding a vendor / model
 
@@ -556,7 +560,7 @@ it still protects that agent's window. The derivation only picks up the **root's
 | the finalizer | `finalize`, same file | the replacement history is the agent's system messages **plus the summary** — openheron's context prompt is a system message (`agentkit/run/input.go`), and dropping it would leave the agent without its rules for the rest of the turn |
 | the announcement | eino's `after_summarize` event | the middleware publishes the replacement history on the agent's event stream |
 | the pickup | `compactionFrom` in `agentkit/emit/emit.go` | the derivation reads the event and puts the compacted message on `Artifacts.Compaction` — the **summary**, not the system message that shares the replacement history |
-| the write | `archiveCompaction` in `agentkit/run/loop.go:182` | the message is appended to the transcript **before the turn's own messages** |
+| the write | `archiveCompaction` in `agentkit/run/loop.go:303` | the message is appended to the transcript **before the turn's own messages** |
 | the boundary | `message/compaction.go:103` | the marker rides on that message, so the transcript stays the single source of truth |
 
 ★ **The write order is not a detail.** The compacted message summarizes everything that came
@@ -1369,7 +1373,7 @@ about text the user has already changed.
 
 ★ **A rule that was the client's moved to the server rather than disappearing.** An
 agent's `reasoning` level is checked against the model's declared vocabulary in
-`agentkit/spec/load.go:635` `checkReasoning` — where every file passes, not only the
+`agentkit/spec/load.go:668` `checkReasoning` — where every file passes, not only the
 edits made in the settings editor. ★ Deleting a client rule is only a simplification if
 the server already has it; that is the question to ask of the next one.
 
@@ -1602,7 +1606,8 @@ someone measures that the default misses something.
 | Startup reports a missing configuration | The `config root` line in the startup log — it prints the root actually used and the project root |
 | A config change does not take effect | Is that partition hot-reloaded? `llm/` `agents/` `tools/` `mcps/` are hot; `server/` and `skills/` need a restart |
 | Startup fails with `disabled_tools` was renamed to `tools` | ★ The two mean **opposite** things — one removed tools, the other names them. Delete `disabled_tools` and list the tools the agent should have in `tools:` (`agentkit/spec/load.go:99`) |
-| Startup fails with `names the MCP tool` … `but does not mount the server` | ★ Mounting and visibility are two levels: add the server to `mcps:`, or drop the tool from `tools:` (`agentkit/spec/load.go:771`) |
+| A notice says `tools` names MCP tools | ★ `tools` is the built-in allow-list and `mcps:` is what mounts a server **and** grants its tools: drop the `mcp__*` lines and put the server in `mcps:` (`agentkit/spec/load.go:836`) |
+| An agent cannot call an MCP tool | Is the server in that agent's `mcps:`? Mounting **is** the grant — the agent's `tools:` list has nothing to do with it (`agentkit/spec/decl/decl.go:148`) |
 | A notice says `tools` names a tool that does not exist | The built-in tools are the ones in `decl.BuiltinToolNames` (`agentkit/spec/decl/decl.go:319`); a provider's tool exists only when its file under `tools/` is written |
 | A notice says `tools` names the `skill` tool but `skills` is empty | The configuration is legal but self-contradictory: name the skill in `skills:`, or drop `skill` from `tools:` |
 | An agent cannot call a tool | `GET /v2/agents/:agentId` for the effective tool table; then read the tool's `reason` — `tools`, or the default `ask` tier, which asks |
@@ -1631,7 +1636,7 @@ the current state of the code, not a to-do list** — fixing one is a separate c
 | **The conflict dialog does not show the on-disk version** | `web/src/components/settings/conflict-dialog.tsx:18-23` | It shows only your stale `baseRevision` plus a hard-coded "changed by someone else", and **never fetches the disk version**. There is no "overwrite anyway" button either — "Keep editing" merely clears the conflict marker, so the next save resends the same stale revision and conflicts again. |
 | **Four runtime dependencies sit in `devDependencies`** | `web/package.json` | `lucide-react` (imported by 10 files), `clsx`, `tailwind-merge` and `class-variance-authority` are all imported by `src/` and bundled into `web/dist`. The build passes (Vite resolves them at build time), but the manifest is wrong. |
 | **The comment at `api/server.go:112` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
-| **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the five partitions (`agentkit/spec/config.go:40-71`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:410`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:72`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |
+| **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the five partitions (`agentkit/spec/config.go:533`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:410`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:72`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |
 
 ## 8. Before committing
 

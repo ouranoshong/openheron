@@ -270,9 +270,9 @@ Available frontmatter keys:
 | `max_iterations` | Cap on tool-loop iterations |
 | `summarize_at` | When this agent's context is **compacted** into a summary: `80%` of the model's window (the default), an absolute token count (`104858`), or `0` for never |
 | `subagents` | Whom it may delegate to (see §5) |
-| `tools` | Tools **this agent may use** — the names the model sees. ★ **Not declared means no tools at all**: the list is the whole answer, and an MCP tool is named by its composed name or by a prefix (`mcp__github__*`, see §4.8) |
+| `tools` | The **built-in** tools **this agent may use** — the names the model sees. ★ **Not declared means no tools at all**: the list is the whole answer. ★ MCP tools are **not** named here — the agent gets them by mounting the server (see §4.8) |
 | `skills` | The skills this agent may load — an allow-list of the folders under `skills/`. **Not declared means no skill**, and so does an empty list |
-| `mcps` | The MCP servers this agent **mounts** — **not declared means no server**, and so does an empty list. Mounting one starts a child process (see §4.8) |
+| `mcps` | The MCP servers this agent **mounts** — **not declared means no server**, and so does an empty list. Mounting one starts a child process **and hands the agent all of that server's tools** (see §4.8) |
 | `temperature` / `max_tokens` | Sampling parameters |
 | `reasoning` | Reasoning tier: `off` / `low` / `high` / `max` (names defined by the vendor profile) |
 
@@ -639,9 +639,8 @@ an http server's `headers:`.
 
 ### 4.8 Which servers an agent gets
 
-Two levers, and they are independent.
-
-**The `mcps:` key in the agent's frontmatter** decides which servers the agent may use:
+**The `mcps:` key in the agent's frontmatter** decides which servers the agent gets — and
+mounting one **is** the grant:
 
 ```yaml
 ---
@@ -654,35 +653,30 @@ mcps: [github]
 |---|---|
 | absent | **no** server |
 | `[]` | **none** |
-| `[github]` | exactly those servers |
+| `[github]` | exactly those servers — and all of their tools |
 
 ★ A sub-agent carries a list of its **own**, next to its own `skills` and `tools` — the
 list is read from the agent that is running, not from the root's.
 
-★ **Mounting is not the same as seeing.** `mcps:` says which servers are **started**;
-`tools:` says which of their tools the agent sees. Both have to be written:
+★ **Mounting is the grant.** `mcps:` says which servers are **started**, and the agent
+**gets all of that server's tools** — there is no second list to write.
+
+★ **`tools:` is about the built-in tools only.** An `mcp__<server>__*` entry there grants
+nothing: it is dropped, and the configuration reports a **notice** saying so. The server
+belongs in `mcps:`.
+
+★ **Approval is separate from mounting.** Mounting gives the agent the tools; whether a
+tool runs without a nod comes from the server's own file (`mcps/<server>.yaml`), and the
+default there is `ask` — **mounting is not approving**.
+
+**`tools` takes a trailing `*` as a pattern.** An exact name, or a **trailing** `*`:
 
 ```yaml
----
-model: deepseek/deepseek-flash
-mcps: [github]                  # start github
-tools: [ls, mcp__github__*]     # and let this agent see its tools
----
+tools: [ls, read_file, config_*]
 ```
 
-★ Naming `mcp__github__*` while `mcps:` excludes `github` is a **startup error**: the
-prefix could never match, and a rule that can never match is a mistake.
-
-**`tools` is the second lever, and it takes a prefix.** An exact name, or a **trailing**
-`*`:
-
-```yaml
-tools: [ls, read_file, mcp__github__*]
-```
-
-- `mcp__github__*` — every tool of the `github` server.
-- `mcp__*` — every MCP tool of every server.
-- `mcp__github__create_issue` — exactly that one tool.
+- `config_*` — every built-in tool whose name starts with `config_`.
+- `ls` — exactly that one tool.
 
 ★ **`mcp*foo` and a lone `*` are refused at startup.** Only a *trailing* `*` is a pattern,
 and a lone `*` would be a way of saying "everything" in a list whose whole point is to say
@@ -691,8 +685,8 @@ what is there: a rule whose reach differs from what it reads as is a silent mism
 ### 4.9 The configuration tools
 
 Six tools let an agent read and change the configuration it runs from. They are always
-mounted and, like every other tool, only **visible** to the agents whose `tools:` list
-names them:
+mounted and, like every other built-in tool, only **visible** to the agents whose
+`tools:` list names them:
 
 | Tool | What it answers | Tier |
 |---|---|---|
@@ -1234,10 +1228,10 @@ the writing to `task`.
 Create the session with `POST /v2/sessions` first.
 
 **Q: The model does not see the MCP server's tools?**
-Open `/mcps` (see §6.8). A server the agent does not use reads `unused`; a tool the agent
-cannot reach reads `blocked`, and the reason names `tools` — the agent's own list does
-not cover it. A server that reads `unreachable` carries the error that says why it could
-not be started.
+Open `/mcps` (see §6.8). A server the agent does not mount reads `unused`; a tool the agent
+cannot reach reads `blocked`, and the reason names `mcps` — the agent does not mount that
+server. A server that reads `unreachable` carries the error that says why it could not be
+started.
 
 **Q: An MCP server does not start?**
 The startup error names the file and the field. `mcps/` is hot, so a fix takes effect on

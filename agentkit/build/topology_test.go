@@ -129,7 +129,7 @@ func TestSubAgentsCarryTheirOwnApprovalMiddleware(t *testing.T) {
 	// ★ write_file is not on the exception list, so it asks — and the
 	//   sub-agent's chain has to carry that gate.
 	policy := NewPolicy(nil)
-	handlers := subHandlers(policy, subSpec("writer"), 1, nil)
+	handlers := subHandlers(policy, subSpec("writer"), 1)
 
 	if !chainGatesWriteFile(t, handlers) {
 		t.Fatal("★ the sub-agent middleware chain has no gate - it could write files without approval")
@@ -138,7 +138,7 @@ func TestSubAgentsCarryTheirOwnApprovalMiddleware(t *testing.T) {
 
 func TestSubHandlersApplyItsOwnToolList(t *testing.T) {
 	policy := NewPolicy(nil)
-	handlers := subHandlers(policy, decl.SubAgentSpec{ID: "w", Tools: allToolsExcept("write_file")}, 1, nil)
+	handlers := subHandlers(policy, decl.SubAgentSpec{ID: "w", Tools: allToolsExcept("write_file")}, 1)
 
 	fw := findFilter(t, handlers)
 	if fw == nil {

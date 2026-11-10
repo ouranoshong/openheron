@@ -3,6 +3,10 @@
 # A server name may not contain a run of underscores — "mcp__a__b__x" could not be
 # read back.
 #
+# ★ The file **defines** the server; an agent **mounts** it in its `mcps:`, and
+#   mounting hands that agent all of the server's tools. The agent's `tools:`
+#   names the built-in tools only — it does not name MCP ones.
+#
 # ★ This file is the **scaffold** for a new server, not one to install: the
 #   leading underscore is the mark of a file that is not written by
 #   `openheron init` and not offered as a template — the servers that are

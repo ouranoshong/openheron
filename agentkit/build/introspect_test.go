@@ -67,7 +67,7 @@ func TestEffectiveToolsReportTheTierAndTheBlockingLayer(t *testing.T) {
 //	default is ask, and the allow-list says nothing about the tier.
 func TestVerdictOfFallsBackToAsk(t *testing.T) {
 	p := NewPolicy(nil)
-	v := verdictOf(newBoundary(p, newTable("main", []string{"brand_new_write_tool"})),
+	v := verdictOf(newBoundary(p, newTable("main", []string{"brand_new_write_tool"}, nil)),
 		"brand_new_write_tool", Observed{})
 
 	if v.Tier != TierAsk || v.Blocked != LayerNone || !v.Reached() {
@@ -102,7 +102,7 @@ func TestEffectiveToolsMatchesTheAssembledTable(t *testing.T) {
 	agentSpec := decl.SubAgentSpec{ID: "worker", Tools: allToolsExcept("write_file", "mystery")}
 	b := introspectBuilder(t, p, allToolsExcept("execute"), []decl.SubAgentSpec{agentSpec})
 
-	assembled := specTable(p, agentSpec, nil)
+	assembled := specTable(p, agentSpec)
 	reported := verdicts(t, b.EffectiveTools("worker"))
 
 	universe := append([]string{}, p.Allow...)

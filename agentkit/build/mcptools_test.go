@@ -182,78 +182,72 @@ func allowList(set map[string]bool) []string {
 
 // ── the agent's narrowing ───────────────────────────────────────────────
 
-// ★ The list is an **allow-list**, so "the agent may use these" is the
+// ★ The list is an **allow-list**, so "the agent may use these built-in
 //
-//	whole answer, and a tool it does not name is blocked.
-func TestAnEmptyListBlocksEveryTool(t *testing.T) {
-	tbl := newTable("main", nil)
-	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerNotLoaded {
+//	tools" is the whole answer, and a built-in tool it does not name is
+//	blocked.
+func TestAnEmptyListBlocksEveryBuiltInTool(t *testing.T) {
+	tbl := newTable("main", nil, nil)
+	if got := tbl.Blocked("read_file"); got != LayerNotLoaded {
 		t.Fatalf("blocked = %q, want %q", got, LayerNotLoaded)
 	}
+	if got := tbl.Blocked("execute"); got != LayerNotLoaded {
+		t.Fatalf("blocked = %q, want %q", got, LayerNotLoaded)
+	}
+}
+
+// ★ **A mounted server's tools are the agent's tools.** The tools: list
+//
+//	says nothing about them: the servers list is what grants them.
+func TestAMountedServerBringsItsTools(t *testing.T) {
+	tbl := newTable("main", nil, []string{"github"})
+	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerNone {
+		t.Fatalf("blocked = %q, want none", got)
+	}
+	if got := tbl.Blocked("mcp__github__write_issue"); got != LayerNone {
+		t.Fatalf("blocked = %q, want none — the server is mounted, so all of its tools are the agent's", got)
+	}
+	// ★ And the built-in tools are still the list's business.
 	if got := tbl.Blocked("read_file"); got != LayerNotLoaded {
 		t.Fatalf("blocked = %q, want %q", got, LayerNotLoaded)
 	}
 }
 
-func TestAListedToolIsNotBlocked(t *testing.T) {
-	tbl := newTable("main", []string{"mcp__github__read_issue"})
-	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerNone {
-		t.Fatalf("blocked = %q, want none", got)
-	}
-	// ★ The list is exact: a tool it does not name is still blocked.
-	if got := tbl.Blocked("mcp__github__write_issue"); got != LayerNotLoaded {
-		t.Fatalf("blocked = %q, want %q", got, LayerNotLoaded)
+// ★ An unmounted server's tools are blocked, and the reason says **which
+//
+//	key** decides it: the panel must not send the user to the tools list
+//	for an MCP tool.
+func TestAnUnmountedServerBlocksItsTools(t *testing.T) {
+	tbl := newTable("main", []string{"read_file"}, nil)
+	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerNotMounted {
+		t.Fatalf("blocked = %q, want %q", got, LayerNotMounted)
 	}
 }
 
-// ★ A server name may not contain a run of underscores, so the prefix of
+// ★ An MCP entry in the tools: list says nothing — it is dropped, and the
 //
-//	one server cannot reach another one.
-func TestTheServerNarrowingDeniesTheNamespacePrefixOnly(t *testing.T) {
-	tbl := newTable("main", []string{"mcp__github_x__read_issue"})
+//	server decides.
+func TestAnMCPEntryInTheToolsListGrantsNothing(t *testing.T) {
+	tbl := newTable("main", []string{"mcp__github__read_issue"}, nil)
+	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerNotMounted {
+		t.Fatalf("blocked = %q, want %q — the server is not mounted", got, LayerNotMounted)
+	}
+	mounted := newTable("main", []string{"mcp__github__read_issue"}, []string{"github"})
+	if got := mounted.Blocked("mcp__github__write_issue"); got != LayerNone {
+		t.Fatalf("blocked = %q, want none — the mounted server brings every one of its tools", got)
+	}
+}
+
+// ★ A server name may not contain a run of underscores, so one server's
+//
+//	tools are never another's.
+func TestTheServerBoundaryHolds(t *testing.T) {
+	tbl := newTable("main", nil, []string{"github_x"})
 
 	if got := tbl.Blocked("mcp__github_x__read_issue"); got != LayerNone {
 		t.Fatalf("blocked = %q, want none", got)
 	}
-	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerNotLoaded {
-		t.Fatalf("blocked = %q, want %q", got, LayerNotLoaded)
-	}
-}
-
-// ── the prefix patterns ─────────────────────────────────────────────────
-
-func TestAPrefixRuleReachesTheToolsOfOneServerOnly(t *testing.T) {
-	tbl := newTable("main", []string{"mcp__github__*"})
-	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerNone {
-		t.Fatalf("blocked = %q, want none", got)
-	}
-	if got := tbl.Blocked("mcp__files__read_file"); got != LayerNotLoaded {
-		t.Fatalf("blocked = %q, want %q", got, LayerNotLoaded)
-	}
-}
-
-func TestAWildcardPrefixReachesEveryMCPTool(t *testing.T) {
-	tbl := newTable("main", []string{"mcp__*"})
-	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerNone {
-		t.Fatalf("blocked = %q, want none", got)
-	}
-	if got := tbl.Blocked("mcp__files__read_file"); got != LayerNone {
-		t.Fatalf("blocked = %q, want none", got)
-	}
-	if got := tbl.Blocked("execute"); got != LayerNotLoaded {
-		t.Fatalf("blocked = %q, want %q — the pattern is the MCP namespace", got, LayerNotLoaded)
-	}
-}
-
-// ★ An **exact** entry names one tool — so it reaches that tool and nothing
-//
-//	else.
-func TestAnExactEntryReachesThatToolOnly(t *testing.T) {
-	tbl := newTable("main", []string{"mcp__github__read_issue"})
-	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerNone {
-		t.Fatalf("blocked = %q, want none", got)
-	}
-	if got := tbl.Blocked("mcp__github__write_issue"); got != LayerNotLoaded {
-		t.Fatalf("blocked = %q, want %q", got, LayerNotLoaded)
+	if got := tbl.Blocked("mcp__github__read_issue"); got != LayerNotMounted {
+		t.Fatalf("blocked = %q, want %q", got, LayerNotMounted)
 	}
 }

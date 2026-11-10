@@ -69,6 +69,7 @@ func TestPolicyFallsBackToAsk(t *testing.T) {
 func TestTheAllowListDecidesWhatTheAgentHas(t *testing.T) {
 	tbl := newTable("main",
 		[]string{"execute", "write_file"},
+		nil,
 	)
 	if got := tbl.Blocked("execute"); got != LayerNone {
 		t.Fatalf("a tool the agent names must not be blocked, got %q", got)
@@ -81,6 +82,7 @@ func TestTheAllowListDecidesWhatTheAgentHas(t *testing.T) {
 func TestFilterRemovesByLayer(t *testing.T) {
 	tbl := newTable("main",
 		[]string{"read_file"},
+		nil,
 	)
 	tools := []tool.BaseTool{
 		&stubTool{name: "read_file"},
@@ -104,8 +106,8 @@ func TestFilterRemovesByLayer(t *testing.T) {
 //
 //	use says nothing about another's.
 func TestTheToolsListIsScopedToItsOwnAgent(t *testing.T) {
-	writer := newTable("writer", []string{"read_file"})
-	reader := newTable("reader", []string{"write_file"})
+	writer := newTable("writer", []string{"read_file"}, nil)
+	reader := newTable("reader", []string{"write_file"}, nil)
 
 	tools := []tool.BaseTool{&stubTool{name: "write_file"}}
 
@@ -121,7 +123,7 @@ func TestTheToolsListIsScopedToItsOwnAgent(t *testing.T) {
 //
 //	blacklist could afford is exactly the case the allow-list must not have.
 func TestAnEmptyListRemovesEverything(t *testing.T) {
-	tbl := newTable("main", nil)
+	tbl := newTable("main", nil, nil)
 	tools := []tool.BaseTool{&stubTool{name: "read_file"}}
 	kept, removed := tbl.Filter(tools)
 	if len(kept) != 0 || removed[LayerNotLoaded] != 1 {
@@ -130,7 +132,7 @@ func TestAnEmptyListRemovesEverything(t *testing.T) {
 }
 
 func TestFilterKeepsToolsThatCannotReportName(t *testing.T) {
-	tbl := newTable("main", []string{"mystery"})
+	tbl := newTable("main", []string{"mystery"}, nil)
 	kept, _ := tbl.Filter([]tool.BaseTool{&brokenTool{}})
 	if len(kept) != 1 {
 		t.Fatal("a tool that cannot report its name must be kept (over-keeping beats wrongly stripping)")
@@ -150,7 +152,7 @@ type brokenErr struct{}
 func (*brokenErr) Error() string { return "cannot describe itself" }
 
 func TestFilterMiddlewareDropsTheToolsTheAgentDoesNotHave(t *testing.T) {
-	tbl := newTable("main", []string{"read_file"})
+	tbl := newTable("main", []string{"read_file"}, nil)
 	mw := newFilterMiddleware(tbl)
 
 	runCtx := &adk.ChatModelAgentContext{

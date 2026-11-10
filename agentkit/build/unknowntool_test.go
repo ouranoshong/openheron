@@ -155,7 +155,7 @@ func TestUnknownToolCallDoesNotKillTheRun(t *testing.T) {
 func TestUnknownToolScopeNamesOnlySurvivingTools(t *testing.T) {
 	// ★ The list names the two tools that survive; `grep` is not among
 	//   them, so the filter drops it.
-	filter := newFilterMiddleware(newTable("main", []string{"ls", "read_file"}))
+	filter := newFilterMiddleware(newTable("main", []string{"ls", "read_file"}, nil))
 	scope := newUnknownToolScope()
 
 	runCtx := &adk.ChatModelAgentContext{
@@ -225,7 +225,7 @@ func TestUnknownToolScopeIsRegisteredAfterTheFilter(t *testing.T) {
 	snap := mustSnapshot(t, b)
 	policy, table, maxDepth := snap.agentSpec.policy, snap.tableFor(snap.agentSpec.defaultAgent), snap.agentSpec.maxDepth
 	check(t, "root", toolChain(newBoundary(policy, table), maxDepth))
-	check(t, "sub-agent", subHandlers(NewPolicy(nil), decl.SubAgentSpec{ID: "x"}, 1, nil))
+	check(t, "sub-agent", subHandlers(NewPolicy(nil), decl.SubAgentSpec{ID: "x"}, 1))
 }
 
 func TestUnknownToolsReplyIsSafeWithoutToolNames(t *testing.T) {

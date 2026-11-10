@@ -119,8 +119,7 @@ would read as "that tool does not exist".
 
 **Validating** the knowledge-base config (`tools/kb.yaml`) needs to know whether the
 corpus path is relative, whether the model is declared at all, and whether it is
-declared as `kind: embedding` (`agentkit/spec/load.go:251` `loadKB`, `agentkit/spec/load.go:869`
-`validateKB`).
+declared as `kind: embedding` (`agentkit/spec/load.go:285` `loadKB`, `agentkit/spec/load.go:934` `validateKB`).
 
 ★ All three answers live in the **declarations** (`decl.Model.IsEmbedding`,
 `decl.Model.Dimensions`), so the configuration layer does not import the knowledge base
@@ -204,7 +203,7 @@ from an older configuration is **not read** — nothing loads it — and the tie
 to carry now lives in the tool files and the agent files instead (§3.4). ★ The
 configuration **still starts**: the rest of it may be perfectly good, and a broken file
 elsewhere would keep it from loading at all. But the directory raises a **notice**
-(`agentkit/spec/config.go:410` `noteRetiredDirs`) that names its new home — a dropped
+(`agentkit/spec/config.go:533` `noteRetiredDirs`) that names its new home — a dropped
 configuration that says nothing is the worst kind, because the process starts fine and the
 setting is gone.
 
@@ -220,20 +219,20 @@ namespace segment of that server's tools.
 ### 3.3 Agent definitions
 
 An agent is a markdown file: **frontmatter + body**. The frontmatter is **strictly
-decoded** (`agentkit/spec/load.go:75`'s `loadAgent`) — a single wrong key is a startup
+decoded** (`agentkit/spec/load.go:76`'s `loadAgent`) — a single wrong key is a startup
 error.
 
 ★ **A model that nobody declares is not a startup error — it takes that agent out of
 the tree.** The rule is stated in full in `docs/config-design.md` §4.6; what the
 architecture has to say about it is where the boundary falls: `validate()` **settles**
-the tree (`agentkit/spec/load.go:536` `leaveOutUndeclaredModels`) — the agent is dropped
+the tree (`agentkit/spec/load.go:565` `leaveOutUndeclaredModels`) — the agent is dropped
 from `Config.Agents` and from every parent's `subagents:`, and the reason is kept in
 `Config.leftOut` (`agentkit/spec/config.go:139`). Everything downstream —
 `AgentNames()`, `MCPServersInUse()`, the tier table, the builder — sees the settled
 tree and therefore never meets an agent it cannot run. ★ Two consequences worth
 knowing before touching this code: the default agent is left out like any other (with
 no session possible until it is fixed, but a process that starts, which is where the
-editor lives), and the write gate (`agentkit/spec/write.go:353` `checkNoAgentLost`)
+editor lives), and the write gate (`agentkit/spec/write.go:472` `checkNoAgentLost`)
 compares **settled before** against **settled after**, so a change may add an agent and
 may leave a broken one alone, but may not take a working one away.
 
@@ -245,9 +244,9 @@ Available frontmatter keys (`agentkit/spec/decl/decl.go:78`'s `decl.Agent`):
 | `model` | `model` | `<provider>/<model>`; **never inherited, never falls back** |
 | `max_iterations` | `max_iterations` | Cap on tool-loop iterations |
 | `subagents` | `subagents` | The sub-agents it may delegate to |
-| `tools` | `tools` | The tools this agent may use — the **exposed** names, the ones the model sees. ★ **Absent means none** (`agentkit/spec/decl/decl.go:104`) |
-| `skills` | `skills` | The skills this agent may load — the folders under `skills/`. ★ **Absent means none** (`agentkit/spec/decl/decl.go:125`) |
-| `mcps` | `mcps` | The MCP servers this agent **mounts** — each one starts a child process. ★ **Absent means no server** (`agentkit/spec/decl/decl.go:135`) |
+| `tools` | `tools` | The **built-in** tools this agent may use — the **exposed** names, the ones the model sees. ★ **Absent means none** (`agentkit/spec/decl/decl.go:111`) |
+| `skills` | `skills` | The skills this agent may load — the folders under `skills/`. ★ **Absent means none** (`agentkit/spec/decl/decl.go:132`) |
+| `mcps` | `mcps` | The MCP servers this agent **mounts** — each one starts a child process, and mounting one **hands the agent all of that server's tools**. ★ **Absent means no server** (`agentkit/spec/decl/decl.go:148`) |
 | `temperature` | `temperature` | Sampling temperature |
 | `max_tokens` | `max_tokens` | Sampling cap |
 | `reasoning` | `reasoning` | Reasoning tier name (`low`/`high`/`max`…) |
@@ -274,15 +273,17 @@ keep the blacklist alive, and an alias that worked with the new one would turn a
 blacklist into a whitelist on the user's behalf — the exact confusion the refusal
 exists to prevent.
 
-★ **MCP has two levels, and both have to be written.** `mcps:` says which servers are
-**mounted** — mounting a server starts a child process — and `tools:` says which of
-that server's tools the agent **sees**, by the exposed name `mcp__<server>__<tool>` or
-by the pattern `mcp__<server>__*`. ★ `mcps: [github]` without `mcp__github__*` in
-`tools:` says "start it" and nothing else: the agent sees none of it. ★ A contradiction
-between the two is a **load-time error** (`agentkit/spec/load.go:771`
-`checkAgentMCPNames`): naming `mcp__github__*` in `tools:` while `mcps:` leaves
-`github` out can never match, so the loader says so instead of letting the rule
-quietly do nothing.
+★ **MCP has one key, and mounting is the grant.** `mcps:` says which servers are
+**mounted** — mounting a server starts a child process — and it also says that the agent
+**gets all of that server's tools**. ★ `tools:` is about the **built-in** tools only:
+an `mcp__<server>__*` entry there grants nothing, is dropped, and is reported as a
+**notice** (`agentkit/spec/load.go:836` `checkAgentMCPNames`) — not a load-time error,
+because the meaning changed rather than contradicting itself.
+★ **The cost is real**: narrowing one agent's MCP tools is no longer possible. The
+server's own file (`mcps/<server>.yaml`) filters its tools, and that filter is shared by
+every agent that mounts it. ★ **Approval is untouched**: an MCP tool's tier comes from
+that server file's `allows:`, and the default there is still `ask` — mounting is not
+approving.
 
 ### 3.4 The tier model: `ask` by default, the exceptions named
 
@@ -307,8 +308,8 @@ The **exceptions are named**, and they are named by the file that provides the t
 
 | Source | What it names | Assembled at |
 |---|---|---|
-| The built-in tools that have no file of their own | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill`, plus the five config tools that only read | `agentkit/build/tools.go:68` `builtinAllowedTools` |
-| A tool's own file — `tools/*.yaml` and the knowledge base | that file's `allows:` | `agentkit/spec/load.go:299` `AllowedTools` |
+| The built-in tools that have no file of their own | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill`, plus the five config tools that only read | `agentkit/build/tools.go:79` `builtinAllowedTools` |
+| A tool's own file — `tools/*.yaml` and the knowledge base | that file's `allows:` | `agentkit/spec/load.go:326` `AllowedTools` |
 | An MCP server's own file | that server's `allows:`, in the server's own vocabulary, translated to the exposed names | `agentkit/build/mcptools.go:173` `mcpAllowedNames` |
 
 `agentkit/build/spec.go:64` `policyOf` puts the three together and `Policy.TierOf`
@@ -328,13 +329,13 @@ table. "May this agent use this tool at all?" is the **agent's own list** —
 `decl.SubAgentSpec` — and it is **per agent**: a tool the list does not name is not in
 that agent's tool set, so the model never sees it.
 
-★ **A blocked tool keeps its own tier**, and says why in its `reason` — and there is
-now exactly **one** reason: `tools` (`agentkit/build/introspect.go:36` `reasonOf`).
-★ The second reason is gone with the layer it named: a server the agent does not
-mount has no tools to block, and one it does mount but does not name is blocked by
-this very list. So `Table.Blocked` answers `LayerNotLoaded`
-(`agentkit/build/policy.go:212`) and nothing else — the MCP scope layer
-(`LayerMCPScope`) is deleted.
+★ **A blocked tool keeps its own tier**, and says why in its `reason` — and there are
+now exactly **two** reasons: `tools` for a built-in tool
+(`agentkit/build/introspect.go:36` `reasonOf`), and `mcps` for an MCP tool whose server
+this agent does not mount (`LayerNotMounted`). ★ The old second reason is gone with the
+layer it named: a server the agent does not mount has no tools to block, and one it does
+mount brings **all** of its tools. So `Table.Blocked` answers `LayerNotLoaded`
+(`agentkit/build/policy.go:251`) or `LayerNotMounted` (`agentkit/build/policy.go:258`).
 
 ### 3.5 Depth cap and topology validation
 
@@ -347,14 +348,14 @@ second copy of the same keys that could only *tighten* the file — is gone, and
 takes effect after a restart.
 
 A declared topology that exceeds the cap is a **startup error**
-(`agentkit/spec/load.go:916`'s `validateDepth`) — never a silent truncation. A sub-agent
+(`agentkit/spec/load.go:962`'s `validateDepth`) — never a silent truncation. A sub-agent
 referencing an unknown agent and a cyclic topology are startup errors too
-(`agentkit/spec/load.go:987` `validateAgentGraph`, `agentkit/spec/load.go:985` `detectCycle`).
+(`agentkit/spec/load.go:1033` `validateAgentGraph`, `agentkit/spec/load.go:1050` `detectCycle`).
 
 ### 3.6 skills resolve by a different rule
 
 `skills/` is **not** "a partition of the config root"; it is resolved independently
-(`agentkit/build/skill.go:182` `ResolveSkillsDir`): `$EINO_EXT_SKILLS_DIR` first, and only
+(`agentkit/build/skill.go:190` `ResolveSkillsDir`): `$EINO_EXT_SKILLS_DIR` first, and only
 if that is unset does it search **upwards** from the current directory for
 `.openheron/skills`.
 
@@ -363,7 +364,7 @@ writes `<config root>/skills/`, which is the directory in force only when the pr
 landed there; when it did not, a save would land in a tree nobody reads. So the
 resolved path is pushed into the config layer at startup (`spec.Service.SetSkillsDir`,
 `agentkit/spec/config.go:284`), the write is refused when it points elsewhere
-(`agentkit/spec/write.go:150` `validateWritable`), and the manifest marks the section
+(`agentkit/spec/write.go:151` `validateWritable`), and the manifest marks the section
 read-only with a note naming the real directory. ★ The rule lives in `build` only: a
 second copy in `spec` would be a second answer to "which skills are loaded".
 
@@ -411,13 +412,11 @@ The write path of the config editor (`/v2/settings`) has several gates:
   ${ENV_VAR} or @file:/path` — this keeps secrets out of the repository.
 - Optimistic concurrency: the write carries `baseRevision`; a mismatch with the revision
   on disk is reported as a conflict.
-- A change may not take a **working agent** out of the tree (`agentkit/spec/write.go:470`
-  `checkNoAgentLost`): the settled tree on disk is compared with the settled trial tree,
+- A change may not take a **working agent** out of the tree (`agentkit/spec/write.go:472` `checkNoAgentLost`): the settled tree on disk is compared with the settled trial tree,
   and a write, a batch or a delete that would drop an agent that used to work is
   refused. ★ An agent that was already out of the tree is out on both sides, so an
   unrelated edit is never counted as taking it out.
-- A **delete** that something still names is refused (`agentkit/spec/write.go:706`
-  `checkNotReferenced`), and the refusal names the referrer: which file still names the
+- A **delete** that something still names is refused (`agentkit/spec/write.go:708` `checkNotReferenced`), and the refusal names the referrer: which file still names the
   deleted one, and what to remove. ★ The gate runs before the trial load, because the
   trial load's error is the symptom it replaces — it names the deleted file and hides
   the real reason somewhere else.
@@ -488,7 +487,7 @@ or runs exactly like any other name. The gate does not change — only the names
 
 ★ **The config tools are always mounted and almost never visible.** They join the batch
 for every agent, and an agent sees the ones its own `tools:` list names — like every
-other tool. Five of them only read and are in the code's exception list; `config_write`
+other built-in tool. Five of them only read and are in the code's exception list; `config_write`
 is not, and cannot be added to it from a file (§6.3).
 
 ★ **The tier of a tool is decided by the file that provides it.** A file's own
@@ -545,9 +544,10 @@ turn** has its tools.
 
 ★ The exposed name is `mcp__<server>__<tool>`, composed in exactly one place
 (`agentkit/build/mcptools.go:141`). The server's own name is the namespace segment, and
-the agent's `tools:` list names the exposed names — a whole server with the pattern
-`mcp__<server>__*`. ★ **The prefix pattern is safe**: a server name may not contain a
-run of underscores, so the prefix of one server cannot reach another.
+which server an exposed name belongs to is read back out of it
+(`agentkit/spec/decl/decl.go:498` `MCPServerOf`). ★ **The namespace is not negotiable**:
+a server name may not contain a run of underscores, so the prefix of one server cannot
+reach another.
 
 ## 5. The run loop
 
@@ -771,7 +771,7 @@ stylesheet cannot reach its parts.
   without them (which is why `kb status` reports `lexical-only retrieval`).
 - The lexical score **weights identifiers**: a term appearing in the title, a section
   heading or a link is worth more than one buried in the prose.
-- `openheron kb index` takes a **run lock** (`kb/store.go:121`'s `StartRun`): only one
+- `openheron kb index` takes a **run lock** (`kb/store.go:146`'s `StartRun`): only one
   run at a time.
 - Agents get two tools: `kb_search` (returns a document **outline**, not the full text)
   and `kb_index`. `kb_index` defaults to the `ask` tier — letting an agent rebuild the

@@ -63,17 +63,16 @@ func (g *depthGuard) BeforeAgent(ctx context.Context, runCtx *adk.ChatModelAgent
 
 // specTable builds the tool table of one agent.
 //
-// ★ The agent's own tools: list is the **whole** answer: the tool set is one
+// ★ The agent's own tools: list is the **built-in** answer, and the servers
 //
-//	set for the whole snapshot, and the model never sees a tool the table
-//	removes. ★ An MCP server's tools are named by their composed names —
-//	`mcp__<server>__<tool>`, or the pattern `mcp__<server>__*` — so the
+//	it mounts bring the rest: a mounted server's tools are the agent's
+//	tools, and an unmounted one has none to bring. ★ An MCP server's tools
+//	are named by their composed names — `mcp__<server>__<tool>` — so the
 //	namespace is what keeps two servers' `ls` apart.
-func specTable(policy Policy, agentSpec decl.SubAgentSpec, servers []string) *Table {
-	return newTable(agentSpec.ID, agentSpec.Tools)
+func specTable(policy Policy, agentSpec decl.SubAgentSpec) *Table {
+	return newTable(agentSpec.ID, agentSpec.Tools, agentSpec.MCPServers)
 }
 
-func subHandlers(policy Policy, agentSpec decl.SubAgentSpec, maxDepth int,
-	servers []string) []adk.TypedChatModelAgentMiddleware[*schema.Message] {
-	return toolChain(newBoundary(policy, specTable(policy, agentSpec, servers)), maxDepth)
+func subHandlers(policy Policy, agentSpec decl.SubAgentSpec, maxDepth int) []adk.TypedChatModelAgentMiddleware[*schema.Message] {
+	return toolChain(newBoundary(policy, specTable(policy, agentSpec)), maxDepth)
 }

@@ -42,8 +42,8 @@
 
 配套的装配在（这些**今天仍在**，只是喂给它的东西变了）：
 
-- 档位表：`agentkit/build/spec.go:64` `policyOf`，缺省清单在 `agentkit/build/tools.go:61` `builtinAllowedTools`；
-- 每个工具文件的 `allows:` 汇总：`agentkit/spec/load.go:299` `AllowedTools`；
+- 档位表：`agentkit/build/spec.go:64` `policyOf`，缺省清单在 `agentkit/build/tools.go:79` `builtinAllowedTools`；
+- 每个工具文件的 `allows:` 汇总：`agentkit/spec/load.go:326` `AllowedTools`；
 - 服务端文件里的 `allows:` 翻译成暴露名：`agentkit/build/mcptools.go:173` `mcpAllowedNames`。
 
 ### 1.2 MCP 的名字：三段，各管一件事
@@ -98,8 +98,8 @@ mcp__github__ls
 
 | 键 | 不写 | `[]` | 管什么 | 类型 |
 |---|---|---|---|---|
-| `tools` | **没有** | 没有 | **可见性**：这个 agent 看得见哪些工具 | `[]string` |
-| `mcps` | **不挂载** | 不挂载 | **挂载**：要不要把那个子进程拉起来 | `[]string` |
+| `tools` | **没有** | 没有 | **内置工具**：这个 agent 能用哪些**内置**工具 | `[]string` |
+| `mcps` | **不挂载** | 不挂载 | **挂载**：挂哪些服务器；挂载一个就把该服务器的全部工具交给这个 agent | `[]string` |
 | `skills` | **没有** | 没有 | skill 可见性 | `[]string` |
 | `allows`（工具文件） | 代码的缺省清单 | 同左 | **审批**：哪些不用点头 | `[]string` |
 
@@ -117,27 +117,28 @@ mcp__github__ls
 
 ★ 这是整个改造里**唯一一处「改语义反而删代码」**的地方。
 
-### 2.3 MCP 的两级：挂载 ≠ 可见
+### 2.3 MCP：一个键管到底（2026-11-10 改）
 
 ```yaml
 # .openheron/agents/main.md
-mcps: [github]                            # ① 挂载：把 github 拉起来
-tools: [ls, read_file, mcp__github__*]    # ② 可见：这个 agent 看得见 github 的全部工具
+mcps: [github]                            # ① 挂载 github —— 这一行同时就是"用它的全部工具"
+tools: [ls, read_file]                    # ② 内置工具的允许列表；这里不写 MCP 的名字
 ```
 
-| 级 | 谁回答 | 缺省 |
+| 问题 | 谁回答 | 缺省 |
 |---|---|---|
 | 命名 | 代码，`mcp__<server>__<tool>`（**非协商**） | 外部工具必带命名空间 |
-| 挂载 | `mcps` | 不挂 |
-| 可见 | `tools` | 没有 |
+| 用不用这台服务器 | `mcps` | 不挂载 |
+| 用不用它的哪个工具 | 服务器自己的文件（`tools:` 是过滤器） | 全部 |
+| 用不用哪个内置工具 | `tools` | 没有 |
 
-★ **两级都要写，这是刻意的冗余。** `mcps: [github]` 只说「拉起来」；`tools` 里不点名 `mcp__github__*` 就一个工具都看不见。默认关门的代价就是每次都要说「我要」。
+★ **挂载即授予，这是用户定的语义（2026-11-10）。** `mcps: [github]` 这一行说了两件事：把子进程拉起来，并把它的全部工具交给这个 agent。再在 `tools:` 里写一遍 `mcp__github__*` 是同一件事的第二种说法 —— 而两种说法迟早会不一致（改了一处忘了另一处），所以只留一种。
 
-★ **`tools` 里必须写完整前缀。** 写 `ls` 拿到的是内置那个，两台 MCP 的 `ls` 一个都拿不到 —— 这是前缀规则直接带来的结果，不是限制。
+★ **代价是真实的：按 agent 收窄 MCP 工具的能力消失了。** 服务器文件自己的 `tools:` 过滤（`mcps/<server>.yaml`，`mcpOffers`）仍然是**按服务器**的收窄点，但它是所有挂载它的 agent 共享的。审批层不受影响：MCP 工具的 tier 来自服务器文件的 `allows:`，缺省 `ask` —— **挂载不等于放行**（`agentkit/build/mcptools.go:107`）。
 
-★ **矛盾要在加载期报错**：`tools` 点了 `mcp__github__*`，而 `mcps` 排除了 `github` ⇒ 前缀永远匹配不到东西。我们自己的配置大声失败。
+★ **`tools:` 里的 `mcp__*` 条目被丢弃，并以一条提示报出**，而不是加载期报错（`agentkit/spec/load.go:836` `checkAgentMCPNames`）。理由：语义已经变了，不是自相矛盾 —— 硬失败只会挡住一个本来能用的配置。提示要说清两件事：`tools` 是内置工具的，`mcps:` 才是挂载服务器并授予工具的地方。
 
-★ **`mcp__github__*` 这个通配是安全的**，因为双下划线保证了服务器名的右边界：它匹配 `mcp__github__ls`，不匹配 `mcp__github_x__y`（后者是服务器 `github_x`，第 13 位是 `x` 不是 `_`）。
+★ **`mcp__github__*` 这个通配不再有意义，但边界规则仍然成立。** 双下划线保证服务器名的右边界：它匹配 `mcp__github__ls`，不匹配 `mcp__github_x__y`（后者是服务器 `github_x`）。命名空间三段式**不可协商**（`agentkit/spec/decl/decl.go:461`）。
 
 ### 2.4 由此删掉的两样东西
 
@@ -151,7 +152,11 @@ if len(t.disabled) == 0 && len(t.denyMCP) == 0 { return tools, nil }
 if !t.sees(name) { removed++; continue }
 ```
 
-**2. `denyMCP` / `LayerMCPScope` 退休**（`agentkit/build/policy.go:129`、`:228`）。`mcps` 只管挂载；没挂载的服务器，其工具**根本不存在**，不需要再用前缀去挡。于是「这个工具为什么不在」只剩一个理由：`tools` 没点名（`agentkit/build/introspect.go:36` `reasonOf` 从两个值变成一个）。
+**2. `denyMCP` / `LayerMCPScope` 退休。** 全局 deny 清单和 MCP 前缀 deny 那一层一起没了
+（`agentkit/build/policy.go` 现在只有 `allow` 与 `ask` 两档）。`mcps` 只管挂载；没挂载的服务器，
+其工具**根本不存在**，不需要再用前缀去挡。于是「这个工具为什么不在」只剩**两个**理由，
+而它们要指给用户看的那把钥匙是不同的：内置工具是 `tools` 没点名，某个 MCP 工具是它的服务器
+**没挂载**（`agentkit/build/introspect.go:36` `reasonOf`：新增 `LayerNotMounted` ⇒ `"mcps"`）。
 
 ### 2.5 迁移：硬失败 + 向导
 
@@ -163,12 +168,13 @@ if !t.sees(name) { removed++; continue }
 
 ★ **这次迁移不会静默咬到正在工作的配置**：`tools` 是全新的键且缺省关门，所以**每一个 agent 文件都必须被改**；改的时候 `mcps`/`skills` 就在旁边。能力收缩和显式编辑发生在同一刻。
 
-### 2.6 两条加载期提示（不是错误）
+### 2.6 三条加载期提示（不是错误）
 
 | 条件 | 提示 | 为什么是提示不是错误 |
 |---|---|---|
 | `tools` 里有个非 `mcp__` 开头的名字，既不是内置名、也不是已启用 provider 的名字 | 「点名了不存在的工具」 | provider 可能只是还没配；`mcp__*` 跳过（服务器没起来之前无从得知），所以这条检查精确、不误报 |
 | `tools` 里有 `skill`，但 `skills` 没写 | 「能调技能工具，但一个技能都加载不了」 | 配置自相矛盾，但语法合法 |
+| `tools` 里有 `mcp__<server>__*` | 「`tools` 是内置工具的允许列表，`mcps:` 才是挂载服务器并授予工具的地方」 | 语义已经变了（挂载即授予），不是自相矛盾 —— 拦下启动只会挡住一个本来能用的配置 |
 
 ### 2.7 模板策略：让缺省值咬不到人
 
@@ -211,7 +217,7 @@ HTTP、CLI 和工具都只调它们，没有第二个装配点。下面三刀是
 ### 3.2 三刀
 
 **刀一：manifest 下沉进 `spec`（✅）。** `spec.Service.Manifest(live *Config)`
-（`agentkit/spec/manifest.go:68`）返回 `Manifest`（`:18`）：分区、文件、模板、模型词汇、
+（`agentkit/spec/manifest.go:18`）返回 `Manifest`（`:18`）：分区、文件、模板、模型词汇、
 指纹。`live` 只被读两处 —— agent 模板里的可用模型、模型选择器的档位词汇 —— 因为那两个是
 **进程手里**的值，不是磁盘上的值。
 
@@ -274,8 +280,7 @@ HTTP、CLI 和工具都只调它们，没有第二个装配点。下面三刀是
 
 ★ **一条规则是「搬到服务端」而不是「删掉」。** 前端原本拿模型的 `reasoning` 词汇表检查
 agent 的档位，而 loader 不检查 —— 于是 vendor 没有的档位能一路加载成功，发出去就是
-「一点思考都没有」。现在它在 `validate()` 里（`agentkit/spec/load.go:635`
-`checkReasoning`），检查的是**每一个**文件，不只是在这个编辑器里改过的那些。
+「一点思考都没有」。现在它在 `validate()` 里（`agentkit/spec/load.go:668` `checkReasoning`），检查的是**每一个**文件，不只是在这个编辑器里改过的那些。
 
 ### 3.4 CLI 统一（✅）
 
@@ -365,6 +370,7 @@ baseRevision → 拒明文 → 原子替换 → 试合并 → 失败回滚」。
 | 阶段 | 内容 | 判据 | 状态 |
 |---|---|---|---|
 | **P0** | 工具归属翻转：`disabled_tools` → `tools`，三张表统一「列出来的才有」，MCP 两级，删 `denyMCP`/`LayerMCPScope`，模板全显式 | `task check` 绿；`init` 产物能加载；用例见 §5.1 | ✅ `a805473` |
+| **P0′** | MCP 语义翻转（2026-11-10，用户决定）：`mcps:` **挂载即授予**该服务器的全部工具；`tools:` 只管**内置**工具；`tools:` 里的 `mcp__*` 从加载期错误变成一条提示 | `task check` 绿；用例见 §5.1 | ✅ 本次改动 |
 | **P1** | `Service.Manifest()` 下沉，`api/v2_settings.go` 变薄 | 现有 e2e 全绿，零行为变化 | ✅ |
 | **P2** | `Service.Diagnostics`（带行号），`/v2/settings/validate` 返回 `issues[]` | 新用例：未知键 → `line: 3` | ✅ |
 | **P3** | 前端删规则、改防抖 | e2e 绿；单测 311 → 271（规则用例搬去 Go） | ✅ |
@@ -375,7 +381,7 @@ baseRevision → 拒明文 → 原子替换 → 试合并 → 失败回滚」。
 P1 必须先于 P2/P3（manifest 是 Diagnostics 的输入）；P4 必须晚于 P2（工具复用
 Diagnostics）。这条顺序是真实的：P3 的 `issues` 就是 P2 的形状。
 
-### 5.1 P0 必须有的新用例
+### 5.1 P0 / P0′ 必须有的新用例
 
 | 用例 | 断言 |
 |---|---|
@@ -384,8 +390,10 @@ Diagnostics）。这条顺序是真实的：P3 的 `issues` 就是 P2 的形状�
 | `tools: [ls]` | 只有 `ls` |
 | `task` 缺席 | `main` 无法委派（拓扑校验能报出来更佳） |
 | `mcps` 不写 | 不挂任何服务器 |
-| `mcp__*` 出现在 `tools` 且服务器没挂 | 加载期报错（矛盾） |
-| `tools: [mcp__github__*]` | 只匹配 `mcp__github__*`，不匹配 `mcp__github_x__*` |
+| `mcps: [github]` | 该服务器的全部工具都归这个 agent（挂载即授予） |
+| `mcp__*` 出现在 `tools` | 被丢弃 + 一条提示（不再是加载期错误） |
+| `tools: [mcp__github__*]` | 不授予任何东西 —— MCP 工具由 `mcps:` 授予 |
+| 服务器没挂，而它的工具存在 | 挡在 `LayerNotMounted`，内省面板的理由指向 `mcps` |
 | `disabled_tools` 仍在 | 加载期报错，文案指明改名且反义 |
 | `tools` 里拼错的非 MCP 名字 | 有提示 |
 
@@ -409,7 +417,7 @@ MCP 接入、开发手册各自把「验证在前端」的段落改成了「验�
 
 - `docs/config-design.md` —— 配置系统（键表、档位模型、校验的落点）
 - `docs/architecture.md` —— 分层与装配
-- `docs/mcp-design.md` —— MCP 接入（前缀匹配与两级挂载）
+- `docs/mcp-design.md` —— MCP 接入（命名空间与挂载即授予）
 - `docs/developer-manual.md` —— 开发手册（前端的纯函数层不再有校验规则）
 
 ★ 判据很简单：一篇文档只写**代码里有的东西**。本文 §3 与 §4 现在写的是树上的东西，

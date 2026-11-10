@@ -37,6 +37,10 @@ func reasonOf(l Layer) string {
 	switch l {
 	case LayerNotLoaded:
 		return "tools"
+	case LayerNotMounted:
+		// ★ The key that decides it: an MCP tool is not in the agent's
+		//   tools: list, and never was — it is in the servers it mounts.
+		return "mcps"
 	default:
 		return ""
 	}

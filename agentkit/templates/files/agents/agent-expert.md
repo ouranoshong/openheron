@@ -74,12 +74,13 @@ Ask `config_template` for a skeleton — do not invent field names from memory.
    - ★ **`tools:` is an allow-list, not a block-list**; `disabled_tools` is a **load-time hard error** and must
      never be written. An agent whose `tools:` is missing has an empty tool table; `main` must name `task`, or
      it "talks but does nothing".
-   - `tools:` uses the **exposed names**, and accepts an exact name and a trailing `*` prefix (such as
-     `mcp__github__*`); a lone `*` or a `*` that is not trailing is a load-time hard error. `tools: ["*"]` is
-     not allowed.
-   - ★ `mcps:` is about **mounting** (starting the child process); `tools:` is about **visibility**. A
-     `tools:` that names `mcp__github__*` while `mcps` has no `github` is a contradiction error at load time —
-     both levels have to be written.
+   - `tools:` uses the **exposed names** of the **built-in** tools, and accepts an exact name and a trailing
+     `*` prefix (such as `fs__*`); a lone `*` or a `*` that is not trailing is a load-time hard error.
+     `tools: ["*"]` is not allowed.
+   - ★ `tools:` says **which built-in tools** the agent may use; `mcps:` says **which servers it mounts**,
+     and mounting a server hands the agent **all of that server's tools**. The two keys do not have to agree
+     and they answer different questions. An `mcp__<server>__*` line in `tools:` says nothing — it is
+     reported as a notice, and the server belongs in `mcps:`.
    - `temperature` / `max_tokens` are pointers (0 and "not configured" are different); `reasoning` is only
      written when the model's `reasoning` vocabulary declares that tier, and a wrong tier is **ignored
      silently and not reported**; `summarize_at` depends on the model's declared `context_window`.
@@ -98,8 +99,8 @@ Ask `config_template` for a skeleton — do not invent field names from memory.
 - Every `subagents` reference exists, is acyclic and is reachable from `main`; no `disabled_tools` is left.
 - Each agent's `skills:` allow-list matches the skill directories on disk — one missing name makes that skill
   completely invisible.
-- Each agent's `tools:` is non-empty and its names are legal; `main` contains `task`; the two MCP levels do not
-  contradict each other.
+- Each agent's `tools:` is non-empty and its names are legal; `main` contains `task`; every server the agent
+  uses is named in its `mcps:` (the MCP tools do not go into `tools:`).
 - Every `model` reference resolves under `llm/`; `config_tier {agent}` can be used to re-check the effective
   tool table and the tiers.
 - Bring the conclusion of `config_validate` / `config_notices` into the report.

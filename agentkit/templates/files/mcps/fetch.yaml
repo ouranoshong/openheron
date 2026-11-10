@@ -9,8 +9,9 @@
 #
 # Mounted: it is mounted on task (use mcp__fetch__* to verify an external
 # document or page).
-# The file only defines the server; who starts it is the agent's mcps:, who
-# sees it is the agent's tools: — both levels have to be written.
+# The file only defines the server; who starts it is the agent's mcps: —
+# and mounting one hands the agent all of that server's tools.
+# The agent's tools: names the built-in tools only; it does not name MCP ones.
 transport: stdio
 command: uvx
 args: ["mcp-server-fetch"]

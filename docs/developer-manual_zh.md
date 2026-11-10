@@ -146,7 +146,7 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
 
    注意 `Provide` 返回的是**一批**工具 —— 一个 provider 可以提供多个。
 
-2. **注册**。在 `agentkit/build/tools.go:36` 的 `defaultToolRegistry` 里加上你的
+2. **注册**。在 `agentkit/build/tools.go:52` 的 `defaultToolRegistry` 里加上你的
    provider。位置决定顺序，也决定「可选工具」与「必需工具」的区分。
 
 3. **可选性由 `Optional()` 决定**，不是由返回 error 决定。`Optional() == true` 的
@@ -183,7 +183,7 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
 #### MCP provider
 
 `mcpToolProvider` 的注册方式与其他 provider 一样 —— 在
-`agentkit/build/tools.go:36` 的 `defaultToolRegistry` 里 —— 它也遵守
+`agentkit/build/tools.go:52` 的 `defaultToolRegistry` 里 —— 它也遵守
 `agentkit/build/tools.go:20` 的同一份 `toolProvider` 契约。但它有四处不是通用的：
 
 - **客户端活得比这一批工具久。** ★ 这一批工具每个快照只建一次：
@@ -202,7 +202,7 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
   带着其余服务器的工具继续走。★ 那条 Warn 是**唯一**的提示 —— 工具根本没进表，
   用户看到的只是「这个功能好像没有」。
 - **输出有上限，stdio 调用被串行化。** 上限放在组件的结果处理器里
-  （`agentkit/build/mcptools.go:376`）；同一台 stdio 服务器的调用走 `serialTool`
+  （`agentkit/build/mcptools.go:343`）；同一台 stdio 服务器的调用走 `serialTool`
   （`agentkit/build/mcptools.go:335`），它带一把按服务器的互斥锁和一个调用截止时间。
 
 #### MCP 客户端的生命周期
@@ -238,7 +238,7 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
   （`mcpStartTimeout`，`agentkit/build/mcpmanager.go:328`）——
   起不来的 server 不能被拉成热循环。
 - **工具列表在一轮来要时重新列出**，条件是上一次列出的时间超过 30 秒
-  （`agentkit/build/mcpmanager.go:34`，`mcpRelistInterval`）。
+  （`agentkit/build/mcpmanager.go:36`，`mcpRelistInterval`）。
   ★ 这个间隔是写死的值，不是配置项：没人动的旋钮就是没人测的旋钮，而服务器
   的工具列表是以「天」为尺度变化的。
 - **列表变了就推一代。** `Refresh`（`agentkit/build/mcpmanager.go:118`）报告列表
@@ -258,7 +258,7 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
    `Categories` 里加一项（含 `ID`、`Label`、`Dir`、`Ext`、`Editable`）。**热重载目录**和
    **非热重载目录**要分清楚 —— 改一个目录的语义（热不热）影响用户预期。
 
-2. **`agentkit/spec/load.go`**：加 `loaderFor` 的分支（`agentkit/spec/config.go:543` 的
+2. **`agentkit/spec/load.go`**：加 `loaderFor` 的分支（`agentkit/spec/config.go:544` 的
    `loaderFor`），并实现 `loadXXX`。
 
    ★ **`skills/` 之前没有的两种形状。** 一个分区可以**不被加载**：`loader` 留 nil，加载循环跳过它
@@ -336,7 +336,7 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
    ```
 
 3. **数据来源**。要接新数据源，在 `api.Server` 上加一个 `SetXxxSource` 方法
-   （模式见 `api/server.go:112` 的 `SetSkillsSource`），在 `main.go` 里接线。
+   （模式见 `api/server.go:113` 的 `SetSkillsSource`），在 `main.go` 里接线。
    **不要**让 handler 直接去读全局变量。
 
 4. **流式响应**。SSE 出口在 `transport` 层，`api` 只负责把事件写出去。
@@ -355,7 +355,7 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
   也不算悬空引用 —— settle 之后的树里已经没有它了。
 - 深度超过 `max_depth` 是**启动错误**，不静默截断。
 
-★ **写入门是「留在树外」的另一半。** `agentkit/spec/write.go:470` 的 `checkNoAgentLost`
+★ **写入门是「留在树外」的另一半。** `agentkit/spec/write.go:472` 的 `checkNoAgentLost`
 拿**磁盘上 settle 后的树**和**试装后 settle 的树**比，拒绝掉任何会把一个能跑的 Agent 带出
 树外的写、批写或删除。没有它，把某个 Agent 的模型改成一个不存在的，它就会一声不吭地消失 ——
 那正是装载期那条规则不再负责的那种故障。★ 不要用「比较原始文件集合」来简化它：本来就坏掉的
@@ -374,7 +374,7 @@ Agent 在两边都不在，把它算成「被弄丢」会让任何一次无关�
 
 #### ★ Agent 装不起来时，那一轮必须被告知
 
-`agentkit/run/loop.go:108` 的 `makePrepareAgent` 是向 builder 要这一轮的 agent 的地方 ——
+`agentkit/run/loop.go:125` 的 `makePrepareAgent` 是向 builder 要这一轮的 agent 的地方 ——
 也是配置问题变成运行期问题的地方。★ 这个错误必须交给那一轮（`turn.fail`）：框架会记下它、
 停下循环，可没有人告诉那一轮「你失败了」，于是等待方一直等到**启动超时**，客户端拿到的是
 「turn start timeout」—— 一个既不点名文件也不点名的症状。
@@ -391,9 +391,9 @@ Agent 在两边都不在，把它算成「被弄丢」会让任何一次无关�
 
 | 键 | 它点名什么 | 不写表示 |
 |---|---|---|
-| `tools` | 这个 agent 可用的工具 —— **暴露出来**的名字，模型看见的那些 | 没有工具 |
+| `tools` | 这个 agent 可用的**内置**工具 —— **暴露出来**的名字，模型看见的那些 | 没有工具 |
 | `skills` | 这个 agent 可加载的技能 —— `skills/` 下的文件夹 | 没有技能 |
-| `mcps` | 这个 agent **挂载**的 MCP server —— 每一个都会起一个子进程 | 没有 server |
+| `mcps` | 这个 agent **挂载**的 MCP server —— 每一个都会起一个子进程，而挂载一个就是**把它的全部工具交给这个 agent** | 没有 server |
 
 ★ **不要写 `disabled_tools`。** 它与 `tools` 的含义**正好相反** —— 一个删工具，另一个
 点名工具 —— 所以装载器**拒绝**这个文件（`agentkit/spec/load.go:99`），而不是把键改个名：
@@ -407,24 +407,28 @@ Agent 在两边都不在，把它算成「被弄丢」会让任何一次无关�
 ★ **这里没有「没事可做」的捷径**（`agentkit/build/policy.go:145`）：**空**清单意味着
 **全部**移除。
 
-★ **MCP 有两层。** `mcps:` 说哪些 server 被**挂载**；`tools:` 说它那些工具里哪些被
-agent **看见** —— `mcp__<server>__<tool>`，或者模式 `mcp__<server>__*`。★ `mcps: [github]`
-而 `tools:` 里没有 `mcp__github__*`，那是把 server 起起来，agent 一个都看不见。
-★ 两层互相矛盾是**装载期错误**（`agentkit/spec/load.go:771` 的 `checkAgentMCPNames`）：
-点了 `mcp__github__*` 而 `mcps:` 里没有 `github`，这条规则永远不可能命中。
+★ **MCP 只有一个键，而挂载就是授予。** `mcps:` 说哪些 server 被**挂载** ——
+而挂载一个就是把这个 agent **该服务器的全部工具**给它。★ `tools:` 只管**内置**工具：
+写进去的 `mcp__<server>__*` 不授予任何东西，会被丢弃，并以一条**提示**报出
+（`agentkit/spec/load.go:836` 的 `checkAgentMCPNames`）—— 不是装载期错误，因为那是语义
+变了，不是自相矛盾。★ **代价是真实的**：再也不能只收窄某一个 agent 的 MCP 工具 ——
+收窄的地方是 server 自己的文件，而那个过滤器是所有挂载它的 agent 共享的。
+★ **审批不受影响**：MCP 工具的档位来自那个 server 文件的 `allows:`，缺省仍然是 `ask` ——
+挂载不等于放行。
 
-#### 两条提示
+#### 三条提示
 
-两条都是**提示**，不是错误 —— 配置是合法的，只是没有说出作者的本意
-（`agentkit/spec/load.go:679` 的 `noticeAgentTools`）：
+三条都是**提示**，不是错误 —— 配置是合法的，只是没有说出作者的本意
+（`agentkit/spec/load.go:708` 的 `noticeAgentTools`）：
 
 | 提示 | 它意味着什么 | 该怎么办 |
 |---|---|---|
 | `tools` 点名了一个不存在的工具 | 内置工具就是 `decl.BuiltinToolNames` 里那些，而某个 provider 的工具只有在 `tools/` 下写了它的文件时才存在 | 核对拼写；provider 缺失就去写那个 `tools/` 文件 |
 | `tools` 点名了 `skill` 工具，而 `skills` 是空的 | 配置合法，但自相矛盾：agent 能要一个技能，却没有技能可加载 | 在 `skills:` 里点名那个技能，或者把 `skill` 从 `tools:` 里去掉 |
+| `tools` 点名了 MCP 工具 | `tools` 是**内置**工具的允许清单；`mcps:` 才是挂载一个 server 并把它的工具交给这个 agent 的地方 | 删掉那些 `mcp__*` 行，把 server 写进 `mcps:` |
 
-★ **`mcp__*` 名字会被这项检查跳过**：server 的工具是运行时才发现的，所以它现在还没有的
-名字不算拼错。
+★ **`mcp__*` 名字会被「不存在」这项检查跳过**：server 的工具是运行时才发现的，所以它现在
+还没有的名字不算拼错。上面那条 MCP 提示是另一回事 —— 它说的是那一行不做它看起来要做的事。
 
 ### 3.5 加一个厂商 / 模型
 
@@ -485,7 +489,7 @@ agent** 的压缩（`agentkit/emit/emit.go`）：子 agent 的摘要不是会话
 | finalizer | 同文件的 `finalize` | 替换后的历史是 agent 的 system 消息**加上摘要** —— openheron 的上下文提示就是一条 system 消息（`agentkit/run/input.go`），丢掉它会让 agent 在这一轮余下的时间里没有自己的规则 |
 | 宣告 | eino 的 `after_summarize` 事件 | 中间件把替换后的历史发到 agent 的事件流上 |
 | 接住 | `agentkit/emit/emit.go` 的 `compactionFrom` | 推导层读这个事件，把压缩消息放进 `Artifacts.Compaction` —— 取的是**摘要**，不是同处替换历史里的那条 system 消息 |
-| 落盘 | `agentkit/run/loop.go:182` 的 `archiveCompaction` | 消息被追加到记录里，位置在**本轮消息之前** |
+| 落盘 | `agentkit/run/loop.go:303` 的 `archiveCompaction` | 消息被追加到记录里，位置在**本轮消息之前** |
 | 边界 | `message/compaction.go:103` | 标记搭在这条消息上，所以记录仍是唯一真相源 |
 
 ★ **写入顺序不是细节。** 压缩消息总结的是本轮消息之前的一切，所以必须先写。写在后面，摘要
@@ -1176,7 +1180,7 @@ loader 写的是 `corpus_dir`。`settings-validate.ts` 现在只剩字符串整�
 直接丢掉 —— 否则两张答案赛跑，赢的是慢的那张，也就是关于用户已经改过的文本的那张。
 
 ★ **有一条规则是「搬到服务端」而不是「删掉」。** agent 的 `reasoning` 档位现在在
-`agentkit/spec/load.go:635` 的 `checkReasoning` 里，拿模型的词汇表检查 —— 检查的是
+`agentkit/spec/load.go:668` 的 `checkReasoning` 里，拿模型的词汇表检查 —— 检查的是
 **每一个**文件，不只是在这个编辑器里改过的那些。
 ★ 删一条客户端规则，只有在服务端已经有它的时候才叫简化；下一条规则该先问这一句。
 
@@ -1372,7 +1376,8 @@ gitleaks 报的**提交数**比 git 报的低；但内容照样扫到了，因�
 | 启动报配置缺失 | 启动日志里的 `config root` 那行 —— 它打印了实际用的根和项目根 |
 | 改配置不生效 | 该分区热重载吗？`llm/`、`agents/`、`tools/`、`mcps/` 是热的；`server/`、`skills/` 要重启 |
 | 启动时报 `disabled_tools` was renamed to `tools` | ★ 两者含义**正好相反** —— 一个删工具，另一个点名工具。删掉 `disabled_tools`，在 `tools:` 里列出这个 agent 该有的工具（`agentkit/spec/load.go:99`） |
-| 启动时报 `names the MCP tool` … `but does not mount the server` | ★ 挂载与可见是两层：把那个 server 加进 `mcps:`，或者把那个工具从 `tools:` 里去掉（`agentkit/spec/load.go:771`） |
+| 提示说 `tools` 点名了 MCP 工具 | ★ `tools` 是内置工具的白名单，而 `mcps:` 才是挂载一个 server 并把它的工具交给它的��方：删掉那些 `mcp__*` 行，把 server 写进 `mcps:`（`agentkit/spec/load.go:836`） |
+| Agent 调不动某个 MCP 工具 | 那个 server 在这个 agent 的 `mcps:` 里吗？挂载**就是**授予 —— 这个 agent 的 `tools:` 清单与它无关（`agentkit/spec/decl/decl.go:148`） |
 | 提示说 `tools` 点名了一个不存在的工具 | 内置工具就是 `decl.BuiltinToolNames` 里那些（`agentkit/spec/decl/decl.go:319`）；某个 provider 的工具只有在 `tools/` 下写了它的文件时才存在 |
 | 提示说 `tools` 点名了 `skill` 工具，而 `skills` 是空的 | 配置合法但自相矛盾：在 `skills:` 里点名那个技能，或者把 `skill` 从 `tools:` 里去掉 |
 | Agent 调不动某工具 | `GET /v2/agents/:agentId` 看生效工具表；再读工具的 `reason` —— `tools`，或者默认的 `ask` 档（它会问） |
@@ -1400,7 +1405,7 @@ gitleaks 报的**提交数**比 git 报的低；但内容照样扫到了，因�
 | **冲突对话框不显示磁盘上的版本** | `web/src/components/settings/conflict-dialog.tsx:18-23` | 它只显示你那个陈旧的 `baseRevision` 加一句写死的「changed by someone else」，**没有真去取磁盘版本**。也没有「强行覆盖」按钮 —— 「Keep editing」只是清掉冲突标记，下次保存会带着同样的陈旧 revision 再冲突一次。 |
 | **四个运行时依赖被放在 `devDependencies`** | `web/package.json` | `lucide-react`（10 个文件引）、`clsx`、`tailwind-merge`、`class-variance-authority` 都被 `src/` 引用并打进 `web/dist`。构建能过（Vite 在构建期解析），但清单是错的。 |
 | **`api/server.go:112` 的注释指向不存在的路由** | 该行 | 注释写的是「GET /v2/spec」，但 `SetSkillsSource` 实际喂的是 `/v2/skills`。 |
-| **残留的 `policy/` 目录被丢弃了 —— 而配置照样加载** | 装载器只走五个分区（`agentkit/spec/config.go:40-71`）；退役的目录只被「注意到」，不会被读（`noteRetiredDirs`，`agentkit/spec/config.go:410`） | `policy/` 分区在 2026-11-07 退役了：档位住在提供工具的那些文件里，而默认档位是 `ask`。从前留下的 `policy/permissions.yaml` **不会被读** —— 以前被禁的工具现在会问，以前不用点头就过的工具现在也会问。★ 那条提示落在 `deferred` 里（启动日志与 `/v2/health` 都带着它），并说清新档位在哪儿；配置编辑器直接拒绝这个路径（「unknown config section」，`agentkit/spec/write.go:72`）。★ **空的** `policy/` 目录不报任何东西 —— 它里面本来就没有被丢掉的东西。 |
+| **残留的 `policy/` 目录被丢弃了 —— 而配置照样加载** | 装载器只走五个分区（`agentkit/spec/config.go:533`）；退役的目录只被「注意到」，不会被读（`noteRetiredDirs`，`agentkit/spec/config.go:410`） | `policy/` 分区在 2026-11-07 退役了：档位住在提供工具的那些文件里，而默认档位是 `ask`。从前留下的 `policy/permissions.yaml` **不会被读** —— 以前被禁的工具现在会问，以前不用点头就过的工具现在也会问。★ 那条提示落在 `deferred` 里（启动日志与 `/v2/health` 都带着它），并说清新档位在哪儿；配置编辑器直接拒绝这个路径（「unknown config section」，`agentkit/spec/write.go:72`）。★ **空的** `policy/` 目录不报任何东西 —— 它里面本来就没有被丢掉的东西。 |
 
 ## 8. 提交前
 

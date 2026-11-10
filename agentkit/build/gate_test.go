@@ -19,7 +19,7 @@ func TestRootAndSubAgentShareTheSameToolChain(t *testing.T) {
 	policy, table, maxDepth := snap.agentSpec.policy, snap.tableFor(snap.agentSpec.defaultAgent), snap.agentSpec.maxDepth
 
 	root := toolChain(newBoundary(policy, table), maxDepth)
-	sub := subHandlers(policy, decl.SubAgentSpec{ID: "x"}, maxDepth, nil)
+	sub := subHandlers(policy, decl.SubAgentSpec{ID: "x"}, maxDepth)
 
 	if len(root) != len(sub) {
 		t.Fatalf("root chain has %d middlewares, sub-agent has %d — "+
@@ -35,7 +35,7 @@ func TestRootAndSubAgentShareTheSameToolChain(t *testing.T) {
 }
 
 func TestToolChainOrderPutsFilterBeforeApproval(t *testing.T) {
-	chain := toolChain(newBoundary(NewPolicy(nil), newTable("main", nil)), 1)
+	chain := toolChain(newBoundary(NewPolicy(nil), newTable("main", nil, nil)), 1)
 
 	fi, ai, ui := -1, -1, -1
 	for i, mw := range chain {
@@ -62,7 +62,7 @@ func TestToolChainOrderPutsFilterBeforeApproval(t *testing.T) {
 }
 
 func TestToolChainHasTheSafeToolMiddleware(t *testing.T) {
-	chain := toolChain(newBoundary(NewPolicy(nil), newTable("main", nil)), 1)
+	chain := toolChain(newBoundary(NewPolicy(nil), newTable("main", nil, nil)), 1)
 
 	found := false
 	for _, mw := range chain {

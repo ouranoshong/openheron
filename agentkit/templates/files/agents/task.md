@@ -24,16 +24,14 @@ tools:                        # the allow-list: no `task` means it cannot delega
   - duckduckgo_search       # tools/web_search.yaml, read-only, allow
   - wikipedia_search        # tools/wikipedia.yaml, read-only, allow
   # kb_search is not named: kb.yaml has an empty corpus_dir, so the knowledge base is off
-  # ↓ MCP has two levels: mcps starts the process, tools makes it visible; both are needed
-  - mcp__fetch__*           # mcps/fetch.yaml, fetch a page and turn it into markdown
-  - mcp__time__*            # mcps/time.yaml, current time / time-zone conversion
-  - mcp__deepwiki__*        # mcps/deepwiki.yaml, public repository documentation and Q&A
+  # ↑ tools: names the **built-in** tools only. The MCP tools are not named here:
+  #   mounting a server under mcps: hands over all of that server's tools.
 skills:                       # an absent key means no skill at all
   - openheron-config-map
   - openheron-config-edit
   - openheron-config-templates
   - openheron-config-validate
-mcps: [fetch, time, deepwiki]   # only these three read-only servers are mounted; filesystem / memory are defined but not mounted
+mcps: [fetch, time, deepwiki]   # only these three read-only servers are mounted; filesystem / memory are defined but not mounted. Mounting one hands over all of its tools.
 temperature: 0.1
 max_tokens: 2048
 summarize_at: 80%
@@ -102,12 +100,14 @@ When verifying an external fact, prefer these over answering from memory:
 
 - ★ The default is **`ask`**: a tool that `allows:` does not name (including the ones the server adds later)
   needs a human nod. That is not a malfunction; a stdio server is a child process with this process's
-  permissions, and the cost of a wrong guess is asymmetric.
+  permissions, and the cost of a wrong guess is asymmetric. ★ **Mounting is not approving**: `mcps:` gives the
+  agent the server's tools, and the server's own file decides which of them run without a nod.
 - `mcps/` ships three read-only servers. A server with write capability — a filesystem or a memory server —
   is **not** shipped and not mounted, so it stays invisible and its process never starts. When one is needed,
-  report to `main` "which agent should mount it" — changing `mcps:` / `tools:` belongs to `agent-expert`'s
-  domain, so do not touch `agents/*.md` yourself; enabling it takes both levels at once, and writing only
-  one of them is a load-time error.
+  report to `main` "which agent should mount it" — changing `mcps:` belongs to `agent-expert`'s domain, so do
+  not touch `agents/*.md` yourself; mounting it is one line in `mcps:`, and the tools come with it.
+- ★ `tools:` does **not** name MCP tools: it is the allow-list of the built-in tools. An `mcp__<server>__*`
+  line in it says nothing and is reported as a notice — drop the line and put the server in `mcps:`.
 - A server that cannot be reached only means "the tool is not mounted at all, plus one warning"; it does not
   stop the process from starting. When a tool is missing, check `config_notices {}` and `/mcps` first — do
   not rush to change the configuration.

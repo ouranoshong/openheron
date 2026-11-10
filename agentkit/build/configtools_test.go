@@ -453,7 +453,7 @@ func TestTheAgentSeesOnlyTheConfigToolsItNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	table := specTable(policy, sp.agents[spec.DefaultAgentID], sp.mcpServers)
+	table := specTable(policy, sp.agents[spec.DefaultAgentID])
 
 	// The agent names config_get and config_write, so those are visible and
 	// the other two are not.

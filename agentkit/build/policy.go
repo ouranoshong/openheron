@@ -77,7 +77,7 @@ func (b boundary) Table() *Table { return b.table }
 type Table struct {
 	mu sync.RWMutex
 
-	// Load is the agent's allow-list: the tools it may use.
+	// Load is the agent's allow-list: the **built-in** tools it may use.
 	//
 	// ★ The default is **none**. A tool the list does not name is not
 	//   this agent's tool — the tool set is one set for the whole
@@ -95,15 +95,40 @@ type Table struct {
 	//   contain a run of underscores — so "mcp__github__" cannot reach
 	//   "mcp__github_x__".
 	loadPrefix []string
+
+	// servers are the MCP servers this agent mounts.
+	//
+	// ★ **A mounted server's tools are the agent's tools.** The agent's
+	//   tools: list is about the built-in tools, and the servers it mounts
+	//   bring their own — the two questions do not overlap, so the two keys
+	//   do not have to agree.
+	servers map[string]bool
 }
 
-func newTable(name string, load []string) *Table {
+// newTable builds the tool table of one agent.
+//
+// ★ The MCP entries of the tools list are **dropped**, not honored: they
+//
+//	said "and this server's tools too", and the servers list now says it.
+//	Keeping them would leave two ways to say one thing, and the two would
+//	disagree the moment one of them was edited.
+func newTable(name string, load []string, servers []string) *Table {
 	t := &Table{
-		Name:   name,
-		Load:   append([]string(nil), load...),
-		loaded: make(map[string]bool, len(load)),
+		Name:    name,
+		Load:    make([]string, 0, len(load)),
+		loaded:  make(map[string]bool, len(load)),
+		servers: make(map[string]bool, len(servers)),
+	}
+	for _, s := range servers {
+		if s != "" {
+			t.servers[s] = true
+		}
 	}
 	for _, n := range load {
+		if _, isMCP := decl.MCPServerOf(n); isMCP {
+			continue
+		}
+		t.Load = append(t.Load, n)
 		prefix, isPattern, err := decl.ParseToolNamePattern(n)
 		if err != nil {
 			// ★ The loader refuses these shapes, so a pattern that does
@@ -125,11 +150,25 @@ func newTable(name string, load []string) *Table {
 // Blocked reports whether the agent may not have this tool.
 //
 // ★ The list is an **allow-list**, so the answer is the other way round
-// from the blacklist it replaced: a tool the list does not name is
-// blocked, and one it names is not.
+//
+//	from the blacklist it replaced: a tool the list does not name is
+//	blocked, and one it names is not.
+//
+// ★ An MCP tool is judged by its **server**, not by the list: the agent
+//
+//	has the tools of the servers it mounts, and no tool of a server it
+//	does not. ★ The server's own file decides which of its tools exist
+//	and which of them run without a nod — mounting a server is not
+//	approving its tools.
 func (t *Table) Blocked(toolName string) Layer {
 	if t == nil {
 		return LayerNone
+	}
+	if server, isMCP := decl.MCPServerOf(toolName); isMCP {
+		if t.servers[server] {
+			return LayerNone
+		}
+		return LayerNotMounted
 	}
 	if t.loaded[toolName] {
 		return LayerNone
@@ -210,4 +249,11 @@ const (
 	//   agent does not mount has no tools to block, and one it does mount
 	//   but does not name is blocked by this very list.
 	LayerNotLoaded Layer = "not_loaded"
+	// LayerNotMounted is an MCP tool of a server this agent does not
+	// mount.
+	//
+	// ★ It is a reason of its own, and it is the one the panel shows:
+	//   "tools" would send the user to the wrong key, because the agent's
+	//   tools: list has nothing to do with an MCP tool.
+	LayerNotMounted Layer = "not_mounted"
 )

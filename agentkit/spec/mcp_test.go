@@ -324,6 +324,53 @@ func TestATrailingStarIsAPrefixPattern(t *testing.T) {
 	}
 }
 
+// ★ An MCP tool in the tools: list says nothing now: the servers list is
+//
+//	what mounts a server and gives the agent its tools. ★ The file still
+//	loads — the line is redundant, not wrong — and the notice says so,
+//	because a line that does nothing but looks like it does is worse than
+//	one that never existed.
+func TestAnMCPEntryInTheToolsListIsReportedAndIgnored(t *testing.T) {
+	f := newFixture(t)
+	f.seedMinimal(t)
+	f.write(t, "agents/main.md",
+		"---\nmodel: openai/fast\ntools: [\"ls\", \"mcp__github__*\"]\n---\n\n你是助手。\n")
+
+	cfg, err := f.load(t)
+	if err != nil {
+		t.Fatalf("a redundant line must not stop the file from loading: %v", err)
+	}
+	var said bool
+	for _, d := range cfg.Deferred() {
+		if strings.Contains(d, "github") && strings.Contains(d, "mcps:") {
+			said = true
+		}
+	}
+	if !said {
+		t.Fatalf("the notice must name the server and the key that decides it: %v", cfg.Deferred())
+	}
+}
+
+// ★ And an agent that names no MCP tool at all hears nothing: the notice
+//
+//	is about a line that is there, not about a key that is missing.
+func TestAnAgentWithoutMCPEntriesHearsNothing(t *testing.T) {
+	f := newFixture(t)
+	f.seedMinimal(t)
+	f.write(t, "agents/main.md",
+		"---\nmodel: openai/fast\ntools: [\"ls\", \"read_file\"]\n---\n\n你是助手。\n")
+
+	cfg, err := f.load(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range cfg.Deferred() {
+		if strings.Contains(d, "built-in tools") {
+			t.Fatalf("an agent with no MCP entry must not be told about one: %v", cfg.Deferred())
+		}
+	}
+}
+
 // ── the editor ──────────────────────────────────────────────────────────
 
 func TestTheEditorAcceptsAFileUnderMCPS(t *testing.T) {

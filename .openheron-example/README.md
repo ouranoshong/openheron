@@ -112,7 +112,9 @@ silently truncated.
 
 - **The tier table**: a tool nobody names **asks**; a file's `allows:` names the
   exceptions, and that list is **shared** by every agent;
-- **Each agent's own `tools`**: the tools *that* agent may use at all.
+- **Each agent's own `tools`**: the built-in tools *that* agent may use at all.
+  The tools of an MCP server are **not** in that list — the agent mounts the
+  server in `mcps:` and gets all of its tools.
 
 ★ The two are stored separately and never merged — merging them would throw
   away "who narrowed what". ★ A file's `allows:` only **adds** to the tier
@@ -169,3 +171,7 @@ file does not name.
 ★ To narrow down **one** agent's capabilities, use its own `tools` list. ★ And
   to widen them — to let an agent write and run commands unattended — name the
   tools in that same list, or in the file that provides them.
+
+★ An MCP server's tools are narrowed by the **server's own file** (`tools:` is
+  the filter there), not by the agent: the agent either mounts the server — and
+  then has all of its tools — or does not.

@@ -806,9 +806,7 @@ func (c *Config) validateMCP() error {
 				"agent %s lists the MCP server %q, which is not declared under %s/ (declared: %s)",
 				id, name, DirMCP, strings.Join(known, ", "))}
 		}
-		if err := c.checkAgentMCPNames(id, a); err != nil {
-			return err
-		}
+		c.checkAgentMCPNames(id, a)
 	}
 	return nil
 }
@@ -822,25 +820,27 @@ func agentFile(a *decl.Agent, id string) string {
 	return DirAgent + "/" + id + ".md"
 }
 
-// checkAgentMCPNames refuses a tools: list that names a server the agent
-// does not mount.
+// checkAgentMCPNames reports the MCP entries of an agent's tools: list.
 //
-// ★ Mounting and visibility are **two levels**: `mcps:` says which servers
+// ★ The two keys no longer have to agree: the tools: list is about the
 //
-//	are started, `tools:` says which of their tools the agent sees. A
-//	`tools:` entry that names a server the agent does not mount can never
-//	match — the tool does not exist — so it is a load-time error rather
-//	than a rule that quietly does nothing.
-func (c *Config) checkAgentMCPNames(agentID string, a *decl.Agent) error {
-	if len(a.Tools) == 0 || len(a.MCPServers) == 0 {
-		return nil
+//	**built-in** tools, and the mcps: list is about the servers. ★ So an
+//	`mcp__<server>__<tool>` entry says nothing — and it is a **notice**,
+//	not an error: the file still loads, the agent still gets the server's
+//	tools when it mounts the server, and the user is told that the line
+//	does not do what it looks like it does.
+//
+// ★ One notice per agent, naming every server the list mentions: three
+//
+//	lines of the same kind are one thing to fix, not three.
+func (c *Config) checkAgentMCPNames(agentID string, a *decl.Agent) {
+	if len(a.Tools) == 0 {
+		return
 	}
-	mounted := make(map[string]bool, len(a.MCPServers))
-	for _, n := range a.MCPServers {
-		mounted[n] = true
-	}
+	var servers []string
+	seen := map[string]bool{}
 	for _, entry := range a.Tools {
-		prefix, isPattern, err := decl.ParseToolNamePattern(entry)
+		prefix, _, err := decl.ParseToolNamePattern(entry)
 		if err != nil {
 			continue
 		}
@@ -848,19 +848,21 @@ func (c *Config) checkAgentMCPNames(agentID string, a *decl.Agent) error {
 		if !strings.HasPrefix(prefix, decl.MCPToolPrefix) {
 			continue
 		}
-		rest := strings.TrimPrefix(prefix, decl.MCPToolPrefix)
-		server, _, ok := strings.Cut(rest, decl.MCPSeparator)
-		if !ok || server == "" {
+		server, _, ok := strings.Cut(strings.TrimPrefix(prefix, decl.MCPToolPrefix), decl.MCPSeparator)
+		if !ok || server == "" || seen[server] {
 			continue
 		}
-		if mounted[server] {
-			continue
-		}
-		_ = isPattern
-		return fmt.Errorf("agent %s names the MCP tool %q but does not mount the server %q — "+
-			"add %q to mcps:, or drop the tool from tools:", agentID, entry, server, server)
+		seen[server] = true
+		servers = append(servers, server)
 	}
-	return nil
+	if len(servers) == 0 {
+		return
+	}
+	c.deferFile(agentFile(a, agentID),
+		"agent %s names MCP tools in tools: (%s), but the tools list is about the built-in tools — "+
+			"mcps: is what mounts a server and gives the agent its tools; drop those lines, "+
+			"and add the server to mcps: if the agent should have its tools",
+		agentID, strings.Join(servers, ", "))
 }
 
 // MCPServersInUse returns the servers some agent lists.

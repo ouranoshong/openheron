@@ -91,17 +91,23 @@ type Agent struct {
 
 	SubAgents []string `yaml:"subagents"`
 
-	// Tools is the allow-list of tools this agent may use.
+	// Tools is the allow-list of **built-in** tools this agent may use.
 	//
 	// ★ **The default is none.** A list that names a tool makes it visible;
 	//   a list that does not name it makes it invisible. There is no
 	//   "everything" and no "everything except" — the list is the whole
 	//   answer, and an absent key is an empty list.
 	//
-	// ★ The names are the **exposed** names — the ones the model sees. For
-	//   an MCP server's tool that is `mcp__<server>__<tool>`, and a
-	//   trailing "*" is a prefix pattern (`mcp__github__*` is every tool of
-	//   the server named `github`).
+	// ★ The names are the **exposed** names — the ones the model sees. A
+	//   trailing "*" is a prefix pattern (`fs__*` is every tool of that
+	//   prefix).
+	//
+	// ★ **An MCP server's tools are not named here.** They are the server's
+	//   own, and the agent mounts the server or it does not — see
+	//   MCPServers. A `mcp__<server>__<tool>` entry in this list says
+	//   nothing and is reported as a notice, because the two keys used to
+	//   have to agree and now they do not: this one is about the built-in
+	//   tools, that one is about the servers.
 	Tools []string `yaml:"tools"`
 
 	// DisabledTools is the **old** key, kept only so the loader can say
@@ -133,6 +139,12 @@ type Agent struct {
 	//
 	// ★ The names are the servers' **own** names — the file names under
 	//   mcps/ without the extension.
+	//
+	// ★ **Mounting a server is also the permission to use its tools.** The
+	//   agent's tools: list says nothing about them: a mounted server
+	//   brings its tools, and an unmounted one has none to bring. ★ The
+	//   server's own file still decides which of its tools exist and which
+	//   of them run without a nod — see MCPServerCfg.
 	MCPServers []string `yaml:"mcps"`
 
 	Temperature *float32 `yaml:"temperature"`
@@ -470,6 +482,29 @@ var mcpServerNameRE = regexp.MustCompile(MCPServerNamePattern)
 // ValidMCPServerName reports whether a server name may be used.
 func ValidMCPServerName(name string) bool {
 	return mcpServerNameRE.MatchString(name)
+}
+
+// MCPServerOf returns the server an exposed MCP tool belongs to.
+//
+// ★ The name is the composed one the model sees, and the server is read
+//
+//	back out of it: `mcp__github__read_issue` belongs to `github`. The
+//	boundary is unambiguous because a server name may not contain a run of
+//	underscores — see MCPSeparator.
+//
+// ★ A name that is not an MCP tool at all answers false: the caller is
+//
+//	looking at a built-in tool, and a built-in tool belongs to no server.
+func MCPServerOf(exposed string) (string, bool) {
+	if !strings.HasPrefix(exposed, MCPToolPrefix) {
+		return "", false
+	}
+	rest := strings.TrimPrefix(exposed, MCPToolPrefix)
+	server, tool, ok := strings.Cut(rest, MCPSeparator)
+	if !ok || server == "" || tool == "" {
+		return "", false
+	}
+	return server, true
 }
 
 // SkillNamePattern is the shape a skill's folder name may take.

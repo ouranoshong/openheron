@@ -173,12 +173,12 @@ func TestRegistryToolObeysTheAgentsAllowList(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root := specTable(NewPolicy(nil), decl.SubAgentSpec{ID: "main", Tools: []string{"new_tool"}}, nil)
+	root := specTable(NewPolicy(nil), decl.SubAgentSpec{ID: "main", Tools: []string{"new_tool"}})
 	if kept, _ := root.Filter(tools); len(kept) != 1 {
 		t.Fatalf("the root must see the tool, kept %v", namesOf(kept))
 	}
 	sub := specTable(NewPolicy(nil),
-		decl.SubAgentSpec{ID: "worker", Tools: []string{"read_file"}}, nil)
+		decl.SubAgentSpec{ID: "worker", Tools: []string{"read_file"}})
 	if kept, removed := sub.Filter(tools); len(kept) != 0 || removed[LayerNotLoaded] != 1 {
 		t.Fatalf("the sub-agent must not see it: kept %v removed %v", namesOf(kept), removed)
 	}
@@ -198,7 +198,7 @@ func TestRegistryToolObeysPolicyTiers(t *testing.T) {
 	// ★ The only way a tool does not reach the model is the agent's own
 	//   tools: list — it does not name it.
 	blocked := specTable(NewPolicy(nil),
-		decl.SubAgentSpec{ID: "main", Tools: []string{"read_file"}}, nil)
+		decl.SubAgentSpec{ID: "main", Tools: []string{"read_file"}})
 	if kept, removed := blocked.Filter(tools); len(kept) != 0 || removed[LayerNotLoaded] != 1 {
 		t.Fatalf("the allow-list must remove it at the filter stage: kept %v removed %v",
 			namesOf(kept), removed)

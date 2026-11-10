@@ -51,7 +51,7 @@ context: inline
 - ★ **The three lists are "only what is listed"**: `tools` / `skills` / `mcps` not written = not a single one, `[]` says the same thing.
 - ★ `disabled_tools` is a **hard error at load time**, and the error explains "renamed to `tools` and the meaning is inverted"; there is no alias, and renaming the key is not a fix.
 - ★ `tools:` uses the exposed names and accepts a trailing `*` prefix; a lone `*` / a `*` that is not at the end is a hard error. `main` must carry `task`; a level-1 agent does not carry `task`.
-- ★ `mcps` governs mounting, `tools` governs visibility, and both layers must be written; `tools` names `mcp__x__*` while `mcps` has no `x` ⇒ a contradiction error at load time.
+- ★ `tools` governs the **built-in** tools, `mcps` governs the **servers**, and mounting a server hands the agent **all of that server's tools**. The two keys do not have to agree: an `mcp__x__*` line in `tools` says nothing and is reported as a notice (drop the line, put the server in `mcps`).
 - `temperature` / `max_tokens` are pointers; a wrong `reasoning` tier is silently ignored and not reported; `summarize_at` depends on `context_window`.
 - The body is the Instruction, there is no `instruction_file`; the delimiters come in pairs, and an empty document is an error.
 - The depth `agent.max_depth` defaults to 1, and exceeding it is an error at startup. Effective: hot.
@@ -61,7 +61,7 @@ context: inline
 - The file name allow-list: `http.yaml` `web_search.yaml` `wikipedia.yaml` `kb.yaml` `filesystem.yaml`; anything else = a hard error at load time.
 - `filesystem.yaml` carries only `allows:`, and it **loosens** the tier of the filesystem tools (added onto the code base, it cannot take a name away); it can neither add nor remove tools. Tightening is done through the agent's `tools:`.
 - `allows:` uses **the file's own vocabulary** (`request_get` / `duckduckgo_search` / `wikipedia_search` / `kb_search`), not the exposed names; `kb_index` and the write methods ask by default.
-- In an MCP file, `tools:` is the filter and `allows:` is the tier exception — two questions, one cannot substitute for the other.
+- In an MCP file, `tools:` is the filter and `allows:` is the tier exception — two questions, one cannot substitute for the other. ★ The file's `tools:` narrows the server down to **the servers it applies to**; the agent's `mcps:` decides whether the server is mounted at all.
 - The parameters: `http.methods` defaults to `[get]`; `web_search.provider` only accepts `duckduckgo`; `kb.model` is required when `corpus_dir` is not empty and has to be `kind: embedding`; `corpus_dir` is relative to the project root, and an absolute path is refused.
 - Effective: hot (including the tier).
 
@@ -107,7 +107,7 @@ context: inline
 ## Scenario H: the troubleshooting order
 
 1. "It did not take effect" → first `config_notices {}` to see `deferred` and `configVersion`; then check whether it is `server/` (a restart is needed).
-2. "A startup error + a line number" → an unknown field / a leftover `disabled_tools` / a missing unit / an empty document / a model reference / a cycle or an overrun / an MCP contradiction between the two layers.
-3. "The tool is gone" → whether the agent's `tools:` names it, whether `mcps:` mounts it, the file name allow-list, the old `kb/` path, whether the server can be reached.
+2. "A startup error + a line number" → an unknown field / a leftover `disabled_tools` / a missing unit / an empty document / a model reference / a cycle or an overrun / an `mcps` server that does not exist.
+3. "The tool is gone" → for a built-in tool: whether the agent's `tools:` names it, the file name allow-list, the old `kb/` path. For an MCP tool: whether the agent's `mcps:` mounts the server, and whether the server's own file offers that tool.
 4. "The behavior is odd but nothing errors" → the `reasoning` tier, the 200ms fallback, the single-key override of `extra`, the no-op `header:`, an omitted `tools:`.
 5. "I changed it but the old behavior still runs" → the version in `config_notices`; a failed reload keeps the last good configuration, so do not take "it did not crash" for "the change is right".

@@ -142,11 +142,13 @@ silently ignored. Available keys: `description`, `model`, `max_iterations`,
   never falls back** — failing to resolve it is a startup error.
 - `subagents` declares the topology; every referenced agent must exist and the graph
   **must not contain a cycle**.
-- `tools` is the allow-list of the tools this agent may use; the names are the ones the
-  model sees. **Not declaring it means no tools at all** — the list is the whole answer.
+- `tools` is the allow-list of the **built-in** tools this agent may use; the names are the
+  ones the model sees. **Not declaring it means no tools at all** — the list is the whole
+  answer.
 - `mcps` is the list of MCP servers this agent mounts; mounting one starts a child
-  process, so **not declaring it means no server**. A server's tools are named by their
-  composed names (`mcp__<server>__<tool>`, or the pattern `mcp__<server>__*`).
+  process **and hands the agent all of that server's tools**, so **not declaring it means
+  no server and no MCP tools**. A mounted tool's name is `mcp__<server>__<tool>`; it is
+  not written in `tools`.
 - `skills` is the allow-list of skills this agent may use; the names are the folders
   under `skills/`. **Not declaring it means no skill**, and declaring an empty list
   means the same.
@@ -164,7 +166,7 @@ provides it**:
 | Where | What it names | Scope |
 |---|---|---|
 | `allows:` in `tools/*.yaml` and `mcps/<server>.yaml` | the tools of that file (or that server) that run without a nod | Every agent |
-| `tools` in `agents/*.md` | the tools this agent may use at all | This one agent only |
+| `tools` in `agents/*.md` | the **built-in** tools this agent may use at all | This one agent only |
 
 ★ The two are **stored separately and never merged** — merging would destroy the
 information about *which* layer blocked something. The tier table is shared and a file's
@@ -175,7 +177,8 @@ server says `create_issue` — not `mcp__github__create_issue`. The translation 
 the model sees happens once, where the tool is mounted.
 
 ★ There is **no global deny list**. "Not exposed" is said in exactly two places: a file's
-own `allows:` list, and an agent's `tools` list. A third list would be one more thing
+own `allows:` list, and an agent's `tools` list — plus `mcps` for the servers an agent
+does not mount. A third list would be one more thing
 to keep in sync — and it was the only one that had to speak the exposed names while the
 tools' own files speak theirs.
 

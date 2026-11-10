@@ -50,7 +50,7 @@ mcps: []
 - `tools` / `skills` / `mcps` **are all allow-lists**: not written = not a single one, `[]` says the same thing.
 - `disabled_tools` is a hard error at load time and must never appear in a skeleton.
 - The `tools:` of the entry agent **must carry `task`**, otherwise it "talks but does nothing"; a level-1 agent does not carry `task`.
-- To use MCP, write both levels: `mcps: [github]` + `tools: [..., mcp__github__*]`.
+- To use MCP, mount the server: `mcps: [github]` — and that is the whole step, because **mounting hands the agent all of that server's tools**. The agent's `tools:` names the **built-in** tools only, so an `mcp__github__*` line does not belong there.
 
 ## The skeleton of a SKILL.md
 

@@ -20,17 +20,15 @@ import (
 //	panel that showed every tool as blocked would say nothing about the
 //	server.
 func mcpViewConfig(agentServers []string) *spec.Config {
-	tools := make([]string, 0, len(agentServers))
-	for _, srv := range agentServers {
-		tools = append(tools, decl.MCPToolPrefix+srv+decl.MCPSeparator+"*")
-	}
 	return &spec.Config{
 		Agents: map[string]*decl.Agent{
 			spec.DefaultAgentID: {
 				ID:         spec.DefaultAgentID,
 				ModelRef:   "test/model",
 				MCPServers: agentServers,
-				Tools:      tools,
+				// ★ The tools list is about the **built-in** tools: the
+				//   servers the agent mounts bring their own.
+				Tools: []string{"read_file"},
 			},
 		},
 		Models: map[string]*decl.Model{"test/model": {ID: "model"}},
@@ -105,11 +103,12 @@ func TestAnUnreachableServerReportsTheErrorAndKeepsItsLastListing(t *testing.T) 
 // ★ The agent's own list is the whole answer for what it may use: a tool
 //
 //	it does not name is blocked, and the reason says so.
-func TestTheAgentsViewReportsTheToolsListAsTheReason(t *testing.T) {
+//
+// ★ A mounted server's tools are the agent's tools: the agent's own list
+//
+//	is not what decides them, and there is nothing to report.
+func TestTheAgentsViewReportsAMountedServersToolAsTheAgents(t *testing.T) {
 	cfg := mcpViewConfig([]string{"github"})
-	// ★ The agent mounts the server but names **no** tool of it: the
-	//   server's tools are in the universe (the tier table knows them), and
-	//   the agent does not have them.
 	cfg.Agents[spec.DefaultAgentID].Tools = []string{"read_file"}
 	cfg.MCPs["github"].Allows = []string{"read_issue"}
 	b := newTestBuilderWithConfig(t, cfg)
@@ -120,16 +119,34 @@ func TestTheAgentsViewReportsTheToolsListAsTheReason(t *testing.T) {
 			reason = v.Reason
 		}
 	}
-	if reason != "tools" {
-		t.Fatalf("reason = %q, want tools — the agent's list is what decides", reason)
+	if reason != "" {
+		t.Fatalf("reason = %q, want none — the agent mounts the server, so the tool is its", reason)
 	}
 }
 
-func TestTheReasonIsTheToolRuleWhenTheServerIsThere(t *testing.T) {
-	cfg := mcpViewConfig([]string{"github"})
-	// ★ The agent names **no** tool of the server: the server is there
-	//   and offers one, and the agent's own list is what keeps it away.
+// ★ And the reason for a tool of a server the agent does **not** mount
+//
+//	names the key that decides it: the tools list has nothing to do with
+//	an MCP tool, and sending the user there would be a dead end.
+func TestTheAgentsViewReportsTheMountedServersListAsTheReason(t *testing.T) {
+	cfg := mcpViewConfig(nil)
 	cfg.Agents[spec.DefaultAgentID].Tools = []string{"read_file"}
+	cfg.MCPs["github"].Allows = []string{"read_issue"}
+	b := newTestBuilderWithConfig(t, cfg)
+
+	reason := ""
+	for _, v := range b.EffectiveTools(spec.DefaultAgentID) {
+		if v.Name == "mcp__github__read_issue" {
+			reason = v.Reason
+		}
+	}
+	if reason != "mcps" {
+		t.Fatalf("reason = %q, want mcps — the servers list is what decides an MCP tool", reason)
+	}
+}
+
+func TestTheReasonIsEmptyWhenTheServerIsMounted(t *testing.T) {
+	cfg := mcpViewConfig([]string{"github"})
 	b := newTestBuilderWithConfig(t, cfg)
 	// ★ The server has to be up for the question to be about the agent's
 	//   list: a server that is not up has no tools to argue about.
@@ -148,8 +165,10 @@ func TestTheReasonIsTheToolRuleWhenTheServerIsThere(t *testing.T) {
 			continue
 		}
 		found = true
-		if v.Tools[0].Reason != "tools" {
-			t.Fatalf("reason = %q, want tools", v.Tools[0].Reason)
+		// ★ The agent mounts the server, so the tool is the agent's: there
+		//   is nothing to report.
+		if v.Tools[0].Reason != "" {
+			t.Fatalf("reason = %q, want none — the server is mounted", v.Tools[0].Reason)
 		}
 	}
 	if !found {
