@@ -56,6 +56,13 @@ var defaultRules = []string{
 //	    stamp, a message id) reaches the model too. A copy rebuilt from the
 //	    text would carry none of it.
 //
+// ★ The one exception is a turn with a picture in it: the assembly hands
+//
+//	the model a copy (see [assembleAttachments]), because the text has to
+//	move into a text part and the base64 has to stay out of the transcript.
+//	The copy carries the same stamps — it is the same message as far as
+//	they are concerned.
+//
 // A nil query means "no question this turn": the input is the context and
 // the history alone.
 func (c InputConfig) buildInput(ctx context.Context, p inputParams, query *schema.Message) (*adk.TypedAgentInput[*schema.Message], error) {
@@ -65,8 +72,13 @@ func (c InputConfig) buildInput(ctx context.Context, p inputParams, query *schem
 	//   prompt names the files the model is being given, and an image the
 	//   model cannot see must not be named as one it can.
 	note := ""
+	modelQuery := query
 	if query != nil {
-		note, _ = assembleAttachments(ctx, query, attachmentContext{workspace: p.Workspace})
+		var err error
+		note, modelQuery, err = assembleAttachments(ctx, query, attachmentContext{workspace: p.Workspace})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	messages = append(messages, newSystem(c.contextPrompt(ctx, p.Workspace, note)))
@@ -77,8 +89,8 @@ func (c InputConfig) buildInput(ctx context.Context, p inputParams, query *schem
 			messages = append(messages, msg)
 		}
 	}
-	if query != nil {
-		messages = append(messages, query)
+	if modelQuery != nil {
+		messages = append(messages, modelQuery)
 	}
 
 	return &adk.TypedAgentInput[*schema.Message]{

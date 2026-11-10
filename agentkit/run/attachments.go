@@ -63,11 +63,11 @@ type attachmentContext struct {
 	workspace string
 }
 
-// assembleAttachments prepares the message for the model.
+// assembleAttachments prepares the message the model will see.
 //
-// ★ It returns the message **with its multimodal parts**, and a note for the
+// ★ It returns the message the model sees and a note for the prompt. Two
 //
-//		prompt. Two things happen here:
+//	things happen here:
 //
 //	  - An image becomes an image part, so the model *sees* it. A path would
 //	    not do: the model would have to read the file as text, and an image
@@ -77,19 +77,42 @@ type attachmentContext struct {
 //	    file would spend the context on something the model can read on
 //	    demand with read_file — and the tools are already there.
 //
-// ★ The message is the one the transcript holds, so the assembly **adds**
-// parts to it rather than building a copy. The attachment list the
-// transcript carries and the parts the model sees are the same message.
-func assembleAttachments(ctx context.Context, msg *schema.Message, ac attachmentContext) (string, error) {
+// ★ When there is a picture to inline, the model gets a **copy** and the
+//
+//	transcript's message is left exactly as it was. Two reasons:
+//
+//	  - The transcript is a JSONL log with an 8 MiB line limit, and an
+//	    inlined picture is megabytes of base64. The transcript keeps the
+//	    *reference*; every request re-reads the file.
+//
+//	  - The copy's text moves into a **text part** and its Content is
+//	    cleared. ★ The wire has one `content` field that is either a string
+//	    or a list, and the openai adapter builds both when a message carries
+//	    a Content and a multi-content at the same time — the client then
+//	    refuses to marshal the request: "can't use both Content and
+//	    MultiContent properties simultaneously". One field, one shape.
+//
+// ★ The copy shares the Extra map with the transcript's message, so the id
+//
+//	and the attachment list ride along: they are facts about the message,
+//	and the copy is the same message as far as they are concerned.
+//
+// ★ The note names every file the user sent. A picture the model cannot see
+//
+//	must not be named as one it can.
+func assembleAttachments(ctx context.Context, msg *schema.Message, ac attachmentContext) (string, *schema.Message, error) {
 	atts, ok := message.ReadAttachments(msg)
 	if !ok || len(atts) == 0 {
-		return "", nil
+		return "", msg, nil
 	}
 
 	var parts []schema.MessageInputPart
-	var note strings.Builder
+	var lines []string
+
 	for _, att := range atts {
+		abs := filepath.Join(ac.workspace, att.Path)
 		if !isImage(att) {
+			lines = append(lines, fmt.Sprintf("  - %s — %s", att.Name, abs))
 			continue
 		}
 		part, err := inlineImage(ac.workspace, att)
@@ -98,36 +121,38 @@ func assembleAttachments(ctx context.Context, msg *schema.Message, ac attachment
 			//   there, and the model can read it as text or fetch it with a
 			//   tool. The note says what happened, so the model does not
 			//   claim to have seen an image it never saw.
-			if note.Len() == 0 {
-				note.WriteString("\nThe user attached these files:")
-			}
-			note.WriteString("\n  - " + att.Name + " (not inlined: " + err.Error() + ")")
+			lines = append(lines, fmt.Sprintf("  - %s (not inlined: %s) — %s", att.Name, err.Error(), abs))
 			continue
 		}
 		parts = append(parts, part)
+		lines = append(lines, fmt.Sprintf("  - %s — %s", att.Name, abs))
 	}
 
-	if len(parts) > 0 {
-		msg.UserInputMultiContent = append(msg.UserInputMultiContent, parts...)
+	note := ""
+	if len(lines) > 0 {
+		note = "\nThe user attached these files:\n" + strings.Join(lines, "\n") +
+			"\nRead a text file with read_file if the question needs its content."
 	}
 
-	// The text files are named in the prompt, with their absolute paths.
-	var texts []message.Attachment
-	for _, att := range atts {
-		if !isImage(att) {
-			texts = append(texts, att)
-		}
+	if len(parts) == 0 {
+		// ★ Nothing to inline: the message the model sees is the message
+		//   the transcript holds, and the text stays where it is.
+		return note, msg, nil
 	}
-	if len(texts) > 0 || note.Len() > 0 {
-		if note.Len() == 0 {
-			note.WriteString("\nThe user attached these files:")
-		}
-		for _, att := range texts {
-			note.WriteString("\n  - " + att.Name + " — " + filepath.Join(ac.workspace, att.Path))
-		}
-		note.WriteString("\nRead them with read_file if the question needs their content.")
+
+	model := *msg
+	model.Content = ""
+	model.UserInputMultiContent = make([]schema.MessageInputPart, 0, len(parts)+1)
+	if msg.Content != "" {
+		// ★ The text goes first: it is the question, and the pictures are
+		//   what it is about.
+		model.UserInputMultiContent = append(model.UserInputMultiContent, schema.MessageInputPart{
+			Type: schema.ChatMessagePartTypeText,
+			Text: msg.Content,
+		})
 	}
-	return note.String(), nil
+	model.UserInputMultiContent = append(model.UserInputMultiContent, parts...)
+	return note, &model, nil
 }
 
 // inlineImage reads an image from the workspace and turns it into a part.

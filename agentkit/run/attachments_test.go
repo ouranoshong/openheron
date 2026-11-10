@@ -76,20 +76,117 @@ func TestAnImageAttachmentBecomesAMultimodalPart(t *testing.T) {
 		t.Fatal(err)
 	}
 	parts := in.Messages[1].UserInputMultiContent
-	if len(parts) != 1 {
-		t.Fatalf("the message carries %d parts, want 1", len(parts))
+	// ★ The text is a part too: the wire has one `content` field, and it is
+	//   either a string or a list — never both.
+	if len(parts) != 2 {
+		t.Fatalf("the message carries %d parts, want the text and the picture", len(parts))
 	}
-	if parts[0].Type != schema.ChatMessagePartTypeImageURL {
-		t.Fatalf("the part is a %q, want an image", parts[0].Type)
+	if parts[1].Type != schema.ChatMessagePartTypeImageURL {
+		t.Fatalf("the part is a %q, want an image", parts[1].Type)
 	}
-	if parts[0].Image == nil || parts[0].Image.Base64Data == nil {
+	if parts[1].Image == nil || parts[1].Image.Base64Data == nil {
 		t.Fatal("the image part carries no data")
 	}
-	if parts[0].Image.MIMEType != "image/png" {
-		t.Fatalf("mime = %q, want image/png", parts[0].Image.MIMEType)
+	if parts[1].Image.MIMEType != "image/png" {
+		t.Fatalf("mime = %q, want image/png", parts[1].Image.MIMEType)
 	}
-	if *parts[0].Image.Base64Data == "" {
+	if *parts[1].Image.Base64Data == "" {
 		t.Fatal("the image carries no bytes")
+	}
+}
+
+// ★ The message the model sees must not carry its text **and** its parts.
+//
+//	★ The wire has one `content` field that is either a string or a list,
+//	  and the openai adapter builds both when a message carries a Content
+//	  and a multi-content at the same time. The client then refuses to
+//	  marshal the request: "can't use both Content and MultiContent
+//	  properties simultaneously" — and the turn dies on a picture the user
+//	  attached.
+//
+//	So the text moves into a text part and Content is cleared.
+func TestAMessageWithAPictureCarriesNoContentBesideItsParts(t *testing.T) {
+	ws := t.TempDir()
+	writeFile(t, ws, "shot.png", pngBytes)
+
+	msg := schema.UserMessage("what is in this picture?")
+	message.StampAttachments(msg, []message.Attachment{
+		{Name: "shot.png", Path: "shot.png", Size: int64(len(pngBytes)), MIME: "image/png"},
+	})
+
+	in, err := InputConfig{}.buildInput(context.Background(), inputParams{Workspace: ws}, msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := in.Messages[1]
+	if model.Content != "" {
+		t.Fatalf("the message still carries its text: %q", model.Content)
+	}
+	parts := model.UserInputMultiContent
+	if len(parts) != 2 {
+		t.Fatalf("the message carries %d parts, want the text and the picture", len(parts))
+	}
+	// ★ The text comes first: it is the question, and the picture is what
+	//   it is about.
+	if parts[0].Type != schema.ChatMessagePartTypeText {
+		t.Fatalf("the first part is a %q, want the text", parts[0].Type)
+	}
+	if parts[0].Text != "what is in this picture?" {
+		t.Fatalf("the text part carries %q", parts[0].Text)
+	}
+	if parts[1].Type != schema.ChatMessagePartTypeImageURL {
+		t.Fatalf("the second part is a %q, want the picture", parts[1].Type)
+	}
+}
+
+// ★ The transcript's message must not carry the base64.
+//
+//	★ The transcript is a JSONL log with an 8 MiB line limit, and a 2 MiB
+//	  picture is 2.7 MiB of base64. The transcript keeps the *reference*;
+//	  every request re-reads the file.
+func TestTheTranscriptMessageCarriesNoBase64(t *testing.T) {
+	ws := t.TempDir()
+	writeFile(t, ws, "shot.png", pngBytes)
+
+	msg := schema.UserMessage("what is in this picture?")
+	message.StampAttachments(msg, []message.Attachment{
+		{Name: "shot.png", Path: "shot.png", Size: int64(len(pngBytes)), MIME: "image/png"},
+	})
+
+	if _, err := (InputConfig{}).buildInput(context.Background(), inputParams{Workspace: ws}, msg); err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.UserInputMultiContent) != 0 {
+		t.Fatalf("the persisted message carries %d parts", len(msg.UserInputMultiContent))
+	}
+	if msg.Content != "what is in this picture?" {
+		t.Fatalf("the persisted message lost its text: %q", msg.Content)
+	}
+	// ★ The stamps are still there: the copy shares them.
+	if _, ok := message.ReadAttachments(msg); !ok {
+		t.Fatal("the persisted message lost its attachment list")
+	}
+}
+
+// ★ A turn with only a picture and no text still asks the question.
+//
+//	The text part is absent, and the picture is alone in the list.
+func TestAPictureOnlyTurnStillAsks(t *testing.T) {
+	ws := t.TempDir()
+	writeFile(t, ws, "shot.png", pngBytes)
+
+	msg := schema.UserMessage("")
+	message.StampAttachments(msg, []message.Attachment{
+		{Name: "shot.png", Path: "shot.png", Size: int64(len(pngBytes)), MIME: "image/png"},
+	})
+
+	in, err := InputConfig{}.buildInput(context.Background(), inputParams{Workspace: ws}, msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := in.Messages[1].UserInputMultiContent
+	if len(parts) != 1 || parts[0].Type != schema.ChatMessagePartTypeImageURL {
+		t.Fatalf("the message carries %d parts, want the picture alone", len(parts))
 	}
 }
 
