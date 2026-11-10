@@ -1163,6 +1163,8 @@ ContextWindow / SummarizeAt / Timeout / Reasoning* / Extra，**没有 vision 字
 | 19 | ★ 前端能预览：待发与历史都有缩略图，点击开大图 | Playwright（§14.6） | ⏳ 待实施 |
 | 20 | ★ **改名之后用户看到的仍是原名**（刷新后待发 chip 也不变） | `api` 用例（§13.4.1） | ⏳ 待实施 |
 | 21 | ★ JPEG 的 EXIF 方向被摆正，手机照片不会歪 | `agentkit/imaging` 用例（§13.6） | ⏳ 待实施 |
+| 22 | ★ **一切文件都能点开**：图片看图、PDF 内嵌、文本/代码/Markdown 看内容 | `api` + Playwright（§14.7） | ⏳ 待实施 |
+| 23 | ★ 文本类一律按 `text/plain` 返回（XSS 的那道闸） | `api` 用例（§14.2.1） | ⏳ 待实施 |
 
 ★ 第 3、4 条要**真的模型**才能验，所以它们属于 `task smoke` 而不是 CI
 （AGENTS.md：冒烟不进 CI，因为它们需要一个会回答的模型）。
@@ -1193,8 +1195,8 @@ prompt_tokens 1036          ← 图片真的进了 prompt
 provider 拒绝图片**也不**让整轮失败（去掉图片重问一遍，模型被告知）。
 见 §6.1。
 
-★ **第 15-21 条属于 §13 与 §14**，它们是**提案**：
-第 15-18、20、21 条是 Go 用例，第 19 条是 Playwright。
+★ **第 15-23 条属于 §13 与 §14**，它们是**提案**：
+第 15-18、20、21、23 条是 Go 用例，第 19、22 条是 Playwright。
 
 ---
 
@@ -1536,25 +1538,91 @@ GET /v2/sessions/:id/files/raw?path=<相对路径>[&max=<像素上限>]
 ```
 
 ★ **走 `ResolveWorkspaceFile`** —— 与删除端点同一套越界规则，
-越界的名字被拒。
+越界的名字被拒。★ **这是唯一的边界**：路径不能逃出这个会话的 workspace。
 
-★ **只允许图片 MIME**。这个端点的存在意义是「给界面看图」，
-让它也能取走任意文件就扩大了泄漏面（workspace 里可能有模型写的
-`.env`、脚本之类）。非图片的请求返回 415。
+#### 14.2.1 ★ 推翻「只允许图片」：用「服务端不解释内容」换回自由
 
-★ **`max` 是即时缩放，不落盘**：服务端解码 → 缩放 → 编码 → 返回。
+★ **原设计（2026-11-10 上午）**：这个端点只允许图片 MIME，非图片返回 415。
+理由是「它存在的意义是给界面看图，能取任意文件就扩大了泄漏面」。
+
+★ **这条被推翻了**（2026-11-10 下午，代码的主人的决定）：目标是
+「让一切都变得好用起来」，而「点开一个 `.md` 却被拒」正是最别扭的那种不好用。
+
+★ **但推翻的方式不是放弃安全 —— 是换一个更硬的安全边界**：
+
+> **服务端永远不把文件当内容解释，只当字节转发。**
+
+具体地，端点按文件的类型给出**四种**响应，**没有第五种**：
+
+| 文件类型 | Content-Type | 处置 |
+|---|---|---|
+| 图片（png/jpeg/gif/webp） | `image/*` | **inline** —— 前端 `<img>` 直接显示 |
+| PDF | `application/pdf` | **inline** —— 浏览器原生渲染 |
+| 文本类（`text/*`、json、xml、csv、markdown…） | **`text/plain; charset=utf-8`** | **inline** —— ★ 前端自己渲染 |
+| 其他一切（zip、docx、exe…） | `application/octet-stream` | **attachment** —— 下载 |
+
+★ **文本类一律按 `text/plain` 返回，是这一节最要紧的一条。**
+
+- 它**堵掉了 XSS**：一个 `text/html` 或 `image/svg+xml` 的上传文件，
+  如果服务端按它自己的 MIME 内联，浏览器就会**执行**它里面的脚本 ——
+  而那脚本跑在 openheron 的源头上（`<img>` 不执行，但 `<iframe>`/`<object>` 会）。
+  ★ 一律 `text/plain` 之后，浏览器只把它当**字**。
+- 它**顺带解决了「Markdown 谁来渲染」**：服务端返回纯文本，
+  前端用**已有的** `MarkdownText` / `CodeBlock` 渲染（§14.5）——
+  不需要在服务端引一个 HTML 渲染器，也不需要信任上传的 HTML。
+
+★ **SVG 归到「其他」**：SVG 是 XML，可以带 `<script>`，而浏览器把它当图片渲染时
+**会执行脚本**。★ 所以 SVG 走 `attachment`（下载），而不是「图片 inline」。
+★ 注意这与 §6 的判断一致：SVG 在附件方案里**从来不是图片**，它是文本。
+
+★ **PDF inline 的风险**：浏览器自带的 PDF 阅读器有沙箱，主流浏览器不执行
+PDF 里的 JavaScript。★ 但 PDF 仍是「执行别的程序留下的东西」，
+所以它只对**这个会话自己的 workspace** 开放（§14.2 的路径边界）。
+
+★ **`max` 只对图片有意义**：文本与 PDF 忽略它（缩放一段文字没有意义）。
+图片走即时缩放：服务端解码 → 缩放 → 编码 → 返回。★ **不落盘** ——
 不产生第二份文件，也就**没有第二个要清理的东西**。
 chip 用 `max=320`，放大用原图（不带 `max`）。
 
 ★ **CPU 代价可以忽略**：320px 的小图解码+缩放+编码是毫秒级的；
 而没有 `max` 的原图是零处理（直接读文件字节）。
 
-### 14.3 两处缩略图
+★ **Content-Type 由服务端按扩展名判定**（`message.MIMEOfExt`），
+**不是**按文件内容嗅探 —— 嗅探要多读一遍，而且用户改个扩展名就该按
+扩展名算（§3.1 的同名理由）。★ 判不出来就是 `application/octet-stream`。
 
-| 位置 | 数据来源 | 说明 |
-|---|---|---|
-| 输入框上方（待发） | 上传完成后的服务端路径 | 统一走 raw 端点，**不做两套** |
-| 历史消息里（已发） | 附件清单里的 `Path` | 同一端点 |
+### 14.3 ★ 按类型分派：图片、文档、代码各有各的看的方式
+
+★ 「一切都能点开看」不是「一切都用同一种方式看」。分派表：
+
+| 附件类型 | chip 里 | 消息里 | 点开 |
+|---|---|---|---|
+| **图片** | 48px 缩略图 | 缩略图（大一点） | lightbox（原图，可缩放） |
+| **PDF** | PDF 图标 | PDF 图标 | 内嵌预览（浏览器原生） |
+| **Markdown** | 文件图标 | 文件图标 | 渲染后的 Markdown |
+| **代码 / 文本 / CSV** | 文件图标 | 文件图标 | 代码高亮 / 纯文本 |
+| **其他**（zip、docx…） | 类型图标 | 类型图标 | 下载 |
+
+★ **分类靠 mime + 扩展名**，且 mime 优先（服务端判定的，比扩展名可信）。
+
+★ **前端已经有渲染能力，不用新依赖**（`web/src/components/`）：
+
+- `MarkdownText`（`markdown.tsx`）—— Markdown
+- `CodeBlock({ lang, text })`（`code-block.tsx`）+ `getHighlighter` /
+  `SUPPORTED_LANGS` / `langOf` / `looksLikeJson`（`lib/highlight.ts`）—— 代码
+- lucide-react ^1.55 自带 `FileTextIcon` / `FileCodeIcon` / `FileImageIcon` /
+  `FileArchiveIcon` / `FileSpreadsheetIcon` / `FileIcon` —— 类型图标
+
+★ **分类逻辑放进 `web/src/lib/file-kind.ts`** —— 一个**纯函数**模块，
+不 import 任何框架（AGENTS.md 的规矩：纯逻辑放 lib 的纯层，`bun test` 能证明它对）。
+
+★ **文本预览要有上限**：一个 3 MiB 的 `.log` 全塞进 DOM 是灾难。
+★ 超过阈值（比如 256 KiB）就只显示**头几行 + 「已截断」**，
+并提供一个「下载全文」的链接。★ 界面文案是英文。
+
+★ **两处 chip 同一套**：待发区（`composer.tsx:497`）与消息里
+（`message-parts.tsx:98`）都用 `AttachmentChip`，只是 testId 与 ×按钮不同。
+★ 所以预览逻辑只写一次。
 
 ★ **不做「本地 objectURL 预览」**：那会让前端多一套图片来源，
 而上传本来就要走服务端（要走压缩）。等上传的这段时间里用文件名占位，
@@ -1562,10 +1630,13 @@ chip 用 `max=320`，放大用原图（不带 `max`）。
 
 ★ **文件可能已经不在了**：用户可以在历史里看到一条附件，而那个文件
 后来被删了（或者 workspace 被清过）。`<img>` 会 onError ——
-那时**回退成今天的 chip 样式**，而不是留一个碎图。
+那时**回退成图标 + 文件名**，而不是留一个碎图。
 ★ 一个碎图比一句「文件没了」更像出了故障。
 
-### 14.4 放大：一个 lightbox
+★ **chip 上悬停显示完整文件名**（`title` 属性）：芯片里的名字是截断的，
+完整名字要能一眼看到。
+
+### 14.4 放大：一个覆盖层
 
 点击缩略图 → 打开大图（覆盖层），点击背景或按 Esc 关闭。
 
@@ -1576,16 +1647,24 @@ chip 用 `max=320`，放大用原图（不带 `max`）。
 ★ **大图用原图**（不带 `max`）：放大就是为了看细节，缩略图没意义。
 ★ 一次放大只请求一张图，不会把整条历史的附件都拉一遍。
 
+★ **覆盖层也承载非图片**：点开一个 Markdown 附件，出来的就是
+渲染后的内容；点开一个 PDF，出来的是浏览器内嵌的 PDF。
+★ 同一个覆盖层、同一个 Esc —— **一个交互学到底**，
+而不是「图片一种弹法、文本另一种弹法」。
+
 ### 14.5 改动面
 
 | 位置 | 改动 |
 |---|---|
+| `web/src/lib/file-kind.ts`（**新增**） | ★ 纯函数：按 mime + 扩展名分类，返回 `{ kind, icon, label }` |
 | `web/src/lib/api.ts` | 新增 `fileUrl(id, path, max?)` —— 拼 URL，**不 fetch**（`<img src>` 自己取） |
 | `web/src/lib/store/state.ts` | `Attachment` 已有 `mime` ⇒ **不用改** |
-| `web/src/components/attachment-chip.tsx` | 图片类型 ⇒ 渲染缩略图；点击 ⇒ 打开 lightbox |
-| `web/src/components/image-lightbox.tsx`（**新增**） | 覆盖层 + Esc + 点击背景关闭 |
-| `web/src/components/message-parts.tsx` | 历史里的附件 chip 走同一套 |
-| `web/test/e2e/attachments.spec.ts` | ★ 上传图 ⇒ chip 显示缩略图 ⇒ 点击 ⇒ 大图出现 |
+| `web/src/components/attachment-chip.tsx` | 图片 ⇒ 缩略图；其余 ⇒ 类型图标；点击 ⇒ 打开预览 |
+| `web/src/components/file-preview.tsx`（**新增**） | ★ 覆盖层：图片 / PDF / Markdown / 代码 / 文本；Esc + 点背景关闭 |
+| `web/src/components/message-parts.tsx` | 历史里的附件 chip 走同一套（**只改传参**） |
+| `web/src/components/composer.tsx` | 待发 chip 走同一套（**只改传参**） |
+| `web/test/file-kind.test.ts`（**新增**） | ★ 分类的纯函数用例 |
+| `web/test/e2e/attachments.spec.ts` | ★ 上传图 ⇒ chip 有缩略图 ⇒ 点击 ⇒ 大图；★ 文本附件 ⇒ 图标 ⇒ 点击 ⇒ 内容 |
 
 ★ **`<img src>` 而不是 fetch + blob**：浏览器的图片缓存、并发限制、
 解码都在 `<img>` 这一侧更成熟，而且 URL 可以直接被复制。
@@ -1597,7 +1676,14 @@ chip 用 `max=320`，放大用原图（不带 `max`）。
 
 | 位置 | 用例 |
 |---|---|
-| `web/test/`（单测） | ★ `fileUrl` 拼出正确的路径与 `max`；★ 非图片 MIME 不生成缩略图 |
-| `web/test/e2e/attachments.spec.ts` | ★ 待发 chip 有缩略图；★ 历史消息里的附件有缩略图；★ 点击开大图、Esc 关闭；★ 文件被删后回退成 chip 而不是碎图 |
+| `web/test/file-kind.test.ts`（单测） | ★ 图片/PDF/Markdown/代码/文本/其他各自归到对的类；★ mime 优先于扩展名；★ 认不出的归「其他」 |
+| `web/test/`（单测） | ★ `fileUrl` 拼出正确的路径与 `max` |
+| `web/test/e2e/attachments.spec.ts` | ★ 待发 chip 有缩略图；★ 历史消息里的附件有缩略图；★ 点击开大图、Esc 关闭；★ 文件被删后回退成图标而不是碎图；★ **文本附件点开能看到内容**；★ **PDF 附件点开是内嵌预览** |
+
+### 14.7 ★ 服务端端点的测试
+
+| 位置 | 用例 |
+|---|---|
+| `api` | ★ raw 端点返回图片的原始字节与 `image/*`；★ 文本类返回 **`text/plain; charset=utf-8`**（不是它自己的 MIME —— 这是 XSS 的那道闸）；★ PDF 返回 `application/pdf`；★ 其它返回 `application/octet-stream` + `Content-Disposition: attachment`；★ `max=320` 的图比原图小；★ 越界路径被拒；★ 不存在的文件是 404 |
 
 ---
