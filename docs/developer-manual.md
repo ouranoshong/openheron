@@ -386,7 +386,7 @@ definition — there is no `enabled` key.
    ```
 
 3. **Data sources.** To wire up a new source, add a `SetXxxSource` method on
-   `api.Server` (the pattern is `api/server.go:75`'s `SetSkillsSource`) and connect it
+   `api.Server` (the pattern is `api/server.go:112`'s `SetSkillsSource`) and connect it
    in `main.go`. **Do not** let a handler read a global variable directly.
 
 4. **Streaming.** The SSE sink lives in `transport`; `api` only writes the events out.
@@ -948,6 +948,68 @@ The original message is left alone: the copy on the wire is the only one that
 changes, and it shares the `Extra` map, so the id and the attachment list ride
 along.
 
+### 3.11 ★ Where an uploaded file lands
+
+An upload becomes a file in the session's workspace, and **two decisions are
+made at that moment**: whether it is compressed, and what it is called.
+
+**The name carries a hash.** A file is stored as `<original name>-<8 hex
+characters><extension>`, where the hash is `sha256` of the original name, the
+stored size and the modification time, separated by `0x00`.
+
+★ **Why:** the same name uploaded twice must not overwrite. An overwrite makes
+the transcript lie — the first message's attachment list names a file that is
+now the second one. ★ The hash is what makes the name unique; the original
+name is kept in front of it so that a human can still recognise the file.
+
+★ **The hash can be recomputed.** Read the file, stat it, hash the three
+inputs, and the name checks out. ★ That works because the modification time
+is **pinned**: `os.Chtimes` sets it to the moment of the upload, so the
+time in the hash and the time on the file are the same value. ★ The time is
+milliseconds, not nanoseconds — FAT32 has a two-second granularity, and a
+nanosecond hash cannot be recomputed on it.
+
+★ **The original name is remembered beside the session**, in `uploads.json`
+next to the transcript — **not inside the workspace**, which is the directory
+the model reads. The listing endpoint uses it to show the name the user typed;
+without it the interface would show a list of hashes.
+
+**A picture is compressed on the server.** `agentkit/imaging` does it:
+`Compress` scales the longest edge down to 1600 pixels and re-encodes **in the
+same format** — a PNG stays a PNG, transparency intact. ★ It is done on the
+server because that is where the gain lands: the base64 that goes into the
+request is encoded from the compressed bytes.
+
+★ **Three things are deliberately left alone.** A **GIF** is stored as it is —
+decoding one takes the first frame, so re-encoding it would throw the
+animation away. A **WebP** is stored as it is — there is no WebP encoder in
+Go. And a **JPEG's EXIF orientation** is applied before scaling, because Go's
+JPEG encoder writes no EXIF and a phone photo would come out sideways; the
+orientation is read with `github.com/rwcarlsen/goexif` and the picture is
+turned upright first.
+
+**The bytes are served by one endpoint**, `GET /v2/sessions/:id/files/raw`,
+which resolves the name inside the workspace and answers in one of four
+shapes:
+
+| Kind | Answer |
+|---|---|
+| A picture | its own image type, inline; `?max=<pixels>` scales it on the way out |
+| A PDF | `application/pdf`, inline |
+| Text | **`text/plain; charset=utf-8`**, inline |
+| Anything else | `application/octet-stream`, as a download |
+
+★ **The text rule is the one that matters.** A file named `.html` or `.svg` can
+carry a script, and a browser that renders it as a document — or as an image —
+runs that script **on this origin**. ★ So the server never interprets the
+content: it hands the bytes over and names a type that means "this is
+characters". The interface renders Markdown and code itself, so nothing is
+lost by it. ★ `image/svg+xml` is therefore not a picture here, and
+`agentkit/imaging` treats an SVG as text for the same reason.
+
+★ The only boundary is the workspace: the path is resolved by the session,
+and a name that escapes it is refused.
+
 ## 4. The frontend
 
 ### 4.1 The pure layers
@@ -1269,8 +1331,8 @@ do not touch" assertions.
 
 ### 5.6 E2E
 
-`task test-e2e` → `playwright test`, **14 specs, 185 cases**: `agents` `attachments` `chat`
-`compaction` `composer-autocomplete` `composer-meta` `history` `mcps` `multi-agent`
+`task test-e2e` → `playwright test`, **15 specs, 194 cases**: `agents` `attachments` `chat`
+`compaction` `composer-autocomplete` `composer-meta` `history` `mcps` `motion` `multi-agent`
 `reattach` `scroll` `session-busy` `settings` `theme`.
 
 Playwright starts two servers itself (`webServer` in `playwright.config.ts`): the fake
@@ -1511,14 +1573,11 @@ the current state of the code, not a to-do list** — fixing one is a separate c
 
 | Symptom | Where | Explanation |
 |---|---|---|
-| **Usage on a live stream is not accounted per agent** | `contract.Usage` has no `byAgent` field; the frontend's `toUsage` at `events.ts:479` maps only flat counts | `usage.byAgent` **exists only with history hydration**. So in a fresh turn the agent filter's tooltips show no cumulative token counts — they appear once you reload (pulling history). The **context occupancy** is live (§3.7): it arrives as its own `context_usage` event. E2E missed the gap because it tests a **seeded history thread**. |
+| **Usage on a live stream is not accounted per agent** | `contract.Usage` has no `byAgent` field; the frontend's `toUsage` at `events.ts:552` maps only flat counts | `usage.byAgent` **exists only with history hydration**. So in a fresh turn the agent filter's tooltips show no cumulative token counts — they appear once you reload (pulling history). The **context occupancy** is live (§3.7): it arrives as its own `context_usage` event. E2E missed the gap because it tests a **seeded history thread**. |
 | **A broken SSE stream does not reconnect** | `web/src/lib/api.ts` | A broken stream is simply broken: it goes to `onError` → the error panel, and the user has to resend. There is no reconnect and no resume-from-offset. |
 | **The conflict dialog does not show the on-disk version** | `web/src/components/settings/conflict-dialog.tsx:18-23` | It shows only your stale `baseRevision` plus a hard-coded "changed by someone else", and **never fetches the disk version**. There is no "overwrite anyway" button either — "Keep editing" merely clears the conflict marker, so the next save resends the same stale revision and conflicts again. |
-| **`web/index.html` declares `lang="zh-CN"`** | `web/index.html:2` | The interface is entirely in English (a hard requirement in AGENTS.md), but the `lang` declaration is still Chinese. It affects what a screen reader reads. |
-| **`tw-shimmer` is a ghost dependency** | `web/package.json:39` | The only mention of it in the whole repository is the manifest; no source, style or HTML file references it. |
 | **Four runtime dependencies sit in `devDependencies`** | `web/package.json` | `lucide-react` (imported by 10 files), `clsx`, `tailwind-merge` and `class-variance-authority` are all imported by `src/` and bundled into `web/dist`. The build passes (Vite resolves them at build time), but the manifest is wrong. |
-| **`web/scripts/interop-check.ts` is out of date** | lines 16-20 and 41-45 of that script | It POSTs to `/v2/run` **without a `threadId`**, while the server now requires a session first (`POST /v2/sessions`, see `api/v2_run.go:78`). So that item of `task smoke` fails (measured: 400 `threadId is required`). `web/scripts/hitl-smoke.ts` and `web/scripts/no-undefined-url-check.ts` already follow the new contract. |
-| **The comment at `api/server.go:75` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
+| **The comment at `api/server.go:112` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
 | **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the five partitions (`agentkit/spec/config.go:40-71`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:410`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:72`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |
 
 ## 8. Before committing

@@ -336,7 +336,7 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
    ```
 
 3. **数据来源**。要接新数据源，在 `api.Server` 上加一个 `SetXxxSource` 方法
-   （模式见 `api/server.go:75` 的 `SetSkillsSource`），在 `main.go` 里接线。
+   （模式见 `api/server.go:112` 的 `SetSkillsSource`），在 `main.go` 里接线。
    **不要**让 handler 直接去读全局变量。
 
 4. **流式响应**。SSE 出口在 `transport` 层，`api` 只负责把事件写出去。
@@ -819,6 +819,54 @@ can't use both Content and MultiContent properties simultaneously
 图片，而一张没有正文的图片，模型认不出它讲的是什么事。原消息不动：只有发出去
 的那份副本变了，而副本与原消息共用 `Extra`，于是 id 与附件清单照旧跟着走。
 
+### 3.11 ★ 上传的文件落在哪里
+
+上传会在会话的 workspace 里变成一个文件，而**两个决定就在那一刻做出**：
+压不压，叫什么。
+
+**名字里带一段哈希。** 文件存成 `<original name>-<8 hex characters><extension>`，
+其中哈希是原名、落盘大小与修改时间的 `sha256`，用 `0x00` 分隔。
+
+★ **为什么**：同名传两次不能互相覆盖。覆盖会让记录说谎 —— 第一条消息的附件清单
+指着的那个文件，已经是第二次的了。★ 哈希负责唯一，而原名留在前面，人还是
+认得出这个文件。
+
+★ **这个哈希可以复算。** 读文件、stat、把三个输入哈希一遍，名字就对上了。
+★ 这是因为修改时间被**钉住**了：`os.Chtimes` 把它设成上传那一刻，于是哈希里的
+时间与文件上的时间是同一个值。★ 时间取毫秒而不是纳秒 —— FAT32 的粒度是两秒，
+纳秒级的哈希在它上面复算不出来。
+
+★ **原名记在会话的旁边**，在 transcript 旁边的 `uploads.json` 里 ——
+**不在 workspace 里**，因为 workspace 是模型会读的那个目录。列举端点用它显示
+用户输入时的名字；没有它，界面上列出来的就是一堆哈希。
+
+**图片在服务端被压缩。** `agentkit/imaging` 干的这件事：`Compress` 把长边缩到
+1600 像素，并且**用同一种格式**重新编码 —— PNG 仍是 PNG，透明也留着。
+★ 放在服务端是因为收益在那里：进请求的 base64 是从压过的字节编出来的。
+
+★ **有三样东西是故意不动的。** **GIF** 原样存 —— 解码只取第一帧，重新编码就
+把动画扔了。**WebP** 原样存 —— Go 里没有 WebP 编码器。**JPEG 的 EXIF 方向**在
+缩放**之前**被应用 —— Go 的 JPEG 编码器不写 EXIF，手机照片会歪；方向用
+`github.com/rwcarlsen/goexif` 读出来，图片先摆正。
+
+**字节由一个端点送出**：`GET /v2/sessions/:id/files/raw`，它把名字解析到
+workspace 里，然后用四种形态之一回答：
+
+| 种类 | 回答 |
+|---|---|
+| 图片 | 它自己的 image 类型，inline；`?max=<pixels>` 在送出的路上缩放 |
+| PDF | `application/pdf`，inline |
+| 文本 | **`text/plain; charset=utf-8`**，inline |
+| 其它 | `application/octet-stream`，作为下载 |
+
+★ **文本那一条最要紧。** 一个叫 `.html` 或 `.svg` 的文件可以带着脚本，而浏览器
+把它当文档渲染 —— 或者当图片渲染 —— 都会**在这个源上**执行那个脚本。★ 所以
+服务端**从不解释内容**：它把字节交出去，并且报一个意思是「这是字符」的类型。
+界面自己渲染 Markdown 与代码，所以这样并不吃亏。★ `image/svg+xml` 因此在这里
+不算图片，`agentkit/imaging` 出于同样的理由把 SVG 当文本。
+
+★ 唯一的边界是 workspace：路径由会话解析，越界的名字被拒。
+
 ## 4. 前端
 
 ### 4.1 三层纯函数
@@ -1099,9 +1147,9 @@ Bun 本身没有 `localStorage`，不 stub 会炸。
 
 ### 5.6 E2E
 
-`task test-e2e` → `playwright test`，**14 个 spec、185 个用例**：
+`task test-e2e` → `playwright test`，**15 个 spec、194 个用例**：
 `agents` `attachments` `chat` `compaction` `composer-autocomplete` `composer-meta` `history` `mcps`
-`multi-agent` `reattach` `scroll` `session-busy` `settings` `theme`。
+`motion` `multi-agent` `reattach` `scroll` `session-busy` `settings` `theme`。
 
 Playwright 自己起两个服务（`playwright.config.ts` 的 `webServer`）：
 假后端（`web/test/serve.ts`）+ Vite（`--mode test`）。
@@ -1305,14 +1353,11 @@ gitleaks 报的**提交数**比 git 报的低；但内容照样扫到了，因�
 
 | 现象 | 位置 | 说明 |
 |---|---|---|
-| **活跃流的用量没有按 Agent 分账** | `contract.Usage` 没有 `byAgent` 字段；前端 `events.ts:479` 的 `toUsage` 只映射扁平计数 | `usage.byAgent` **只在历史水合时才有**。所以新开的一轮里，Agent 过滤条提示里的累计 token 数是空的 —— 刷新一下（拉历史）才会出现。**上下文占用**是实时的（§3.7）：它走自己的 `context_usage` 事件。E2E 之所以没发现这个缺口，是因为它测的是**带种子的历史线程**。 |
+| **活跃流的用量没有按 Agent 分账** | `contract.Usage` 没有 `byAgent` 字段；前端 `events.ts:552` 的 `toUsage` 只映射扁平计数 | `usage.byAgent` **只在历史水合时才有**。所以新开的一轮里，Agent 过滤条提示里的累计 token 数是空的 —— 刷新一下（拉历史）才会出现。**上下文占用**是实时的（§3.7）：它走自己的 `context_usage` 事件。E2E 之所以没发现这个缺口，是因为它测的是**带种子的历史线程**。 |
 | **SSE 断了不会自动重连** | `web/src/lib/api.ts` | 流断掉就是断掉：走 `onError` → 错误面板，用户得自己重发。没有重连、没有断点续传。 |
 | **冲突对话框不显示磁盘上的版本** | `web/src/components/settings/conflict-dialog.tsx:18-23` | 它只显示你那个陈旧的 `baseRevision` 加一句写死的「changed by someone else」，**没有真去取磁盘版本**。也没有「强行覆盖」按钮 —— 「Keep editing」只是清掉冲突标记，下次保存会带着同样的陈旧 revision 再冲突一次。 |
-| **`web/index.html` 声明 `lang="zh-CN"`** | `web/index.html:2` | 界面文案全是英文（AGENTS.md 的硬性要求），`lang` 声明却还是中文。会影响读屏软件的朗读语言。 |
-| **`tw-shimmer` 是幽灵依赖** | `web/package.json:39` | 全仓库只有清单里这一处提到它，源码、样式、HTML 都没引用。 |
 | **四个运行时依赖被放在 `devDependencies`** | `web/package.json` | `lucide-react`（10 个文件引）、`clsx`、`tailwind-merge`、`class-variance-authority` 都被 `src/` 引用并打进 `web/dist`。构建能过（Vite 在构建期解析），但清单是错的。 |
-| **`web/scripts/interop-check.ts` 已过时** | 该脚本第 16-20、41-45 行 | 它直接 POST `/v2/run` 且**不带 `threadId`**，而服务端现在要求先 `POST /v2/sessions`（`api/v2_run.go:78`）。所以 `task smoke` 里的这一项会失败（实测报 400 `threadId is required`）。`web/scripts/hitl-smoke.ts` 与 `web/scripts/no-undefined-url-check.ts` 已按新契约写。 |
-| **`api/server.go:75` 的注释指向不存在的路由** | 该行 | 注释写的是「GET /v2/spec」，但 `SetSkillsSource` 实际喂的是 `/v2/skills`。 |
+| **`api/server.go:112` 的注释指向不存在的路由** | 该行 | 注释写的是「GET /v2/spec」，但 `SetSkillsSource` 实际喂的是 `/v2/skills`。 |
 | **残留的 `policy/` 目录被丢弃了 —— 而配置照样加载** | 装载器只走五个分区（`agentkit/spec/config.go:40-71`）；退役的目录只被「注意到」，不会被读（`noteRetiredDirs`，`agentkit/spec/config.go:410`） | `policy/` 分区在 2026-11-07 退役了：档位住在提供工具的那些文件里，而默认档位是 `ask`。从前留下的 `policy/permissions.yaml` **不会被读** —— 以前被禁的工具现在会问，以前不用点头就过的工具现在也会问。★ 那条提示落在 `deferred` 里（启动日志与 `/v2/health` 都带着它），并说清新档位在哪儿；配置编辑器直接拒绝这个路径（「unknown config section」，`agentkit/spec/write.go:72`）。★ **空的** `policy/` 目录不报任何东西 —— 它里面本来就没有被丢掉的东西。 |
 
 ## 8. 提交前

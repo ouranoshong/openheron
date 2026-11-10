@@ -1024,6 +1024,22 @@ removed from the session's workspace as well. ★ A file that already went out
 with a message is **not** deleted — that message says the file was part of the
 question, and deleting it would make the record lie.
 
+★ **You can look at a file before you send it, and after.** A picture shows as
+a thumbnail on its chip; everything else shows the icon of its kind. Click it
+and the file opens in place: the picture at full size, a PDF in the reader, a
+Markdown file rendered, code highlighted, text as text. ★ The same works on
+the attachments in the messages above — those are history, so they have no
+×, but they open just the same. ★ A file that is gone (deleted with the ×, or
+cleaned out of the workspace) falls back to its icon instead of a broken image.
+
+★ **A picture is compressed on the way in.** It keeps its format — a PNG
+stays a PNG, with its transparency — and it is scaled down when it is larger
+than 1600 pixels on its longest edge. ★ A GIF and a WebP are stored as they
+are: the first would lose its animation, and the second cannot be re-encoded
+here. ★ The file's **name** in the workspace carries a short hash, so
+uploading the same name twice gives two files instead of one overwriting the
+other — and the interface still shows you the name you recognise.
+
 ★ **A reload does not lose anything.** The files you have not sent yet come
 back (the server keeps them), and the files you already sent stay on their
 messages.
