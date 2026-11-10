@@ -542,6 +542,10 @@ func (fs *FileSession) DeleteWorkspaceFile(name string) error {
 	if err := os.Remove(full); err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	// ★ The original name goes with the file. An entry that outlives its
+	//   file would show up in the listing as a name for something that is
+	//   no longer there.
+	fs.forgetUpload(name)
 	return nil
 }
 

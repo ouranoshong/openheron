@@ -18,6 +18,10 @@ type stubSession struct {
 
 func (s *stubSession) Workspace() string { return s.root }
 
+func (s *stubSession) OriginalNames() map[string]string { return map[string]string{} }
+
+func (s *stubSession) RecordUpload(string, string) error { return nil }
+
 func (s *stubSession) ResolveWorkspaceFile(name string) (string, error) {
 	clean := filepath.Clean(name)
 	if clean == "." || filepath.IsAbs(clean) || filepath.HasPrefix(clean, "..") {

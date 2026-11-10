@@ -18,7 +18,7 @@ require (
 	github.com/mark3labs/mcp-go v0.43.0
 	github.com/meguminnnnnnnnn/go-openai v0.1.6
 	github.com/tidwall/sjson v1.2.5
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1+incompatible
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -48,6 +48,7 @@ require (
 	github.com/nikolalohinski/gonja v1.5.3 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.9 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/slongfield/pyfmt v0.0.0-20220222012616-ea85ff4c361f // indirect
 	github.com/spf13/cast v1.7.1 // indirect
@@ -60,6 +61,7 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/arch v0.11.0 // indirect
 	golang.org/x/exp v0.0.0-20230713183714-613f0c0eb8a1 // indirect
+	golang.org/x/image v0.48.0 // indirect
 	golang.org/x/net v0.39.0 // indirect
 	google.golang.org/protobuf v1.34.1 // indirect
 )

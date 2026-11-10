@@ -308,6 +308,10 @@ func (s *fakeSession) ResolveWorkspaceFile(name string) (string, error) {
 
 func (s *fakeSession) DeleteWorkspaceFile(string) error { return nil }
 
+func (s *fakeSession) RecordUpload(string, string) error { return nil }
+
+func (s *fakeSession) OriginalNames() map[string]string { return map[string]string{} }
+
 // ---- fake agent ----
 
 // fakeAgent emits a scripted sequence of events and then exits.

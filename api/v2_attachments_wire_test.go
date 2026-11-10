@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/cloudwego/eino/schema"
@@ -70,6 +71,9 @@ func TestAMessageWithNothingIsStillDropped(t *testing.T) {
 //	★ It is the name the client sends back with the next question, so it
 //	  has to be the name the server itself resolves — not a directory on
 //	  somebody's disk.
+//
+//	★ The name on disk carries a hash, so it is not the name that was
+//	  typed. The **name** the user recognises is reported separately.
 func TestTheUploadedPathIsRelativeToTheWorkspace(t *testing.T) {
 	srv := newV2Server(t)
 	id := createThread(t, srv)
@@ -87,8 +91,15 @@ func TestTheUploadedPathIsRelativeToTheWorkspace(t *testing.T) {
 	if len(out.Files) != 1 {
 		t.Fatalf("got %d files, want 1", len(out.Files))
 	}
-	if out.Files[0].Path != "notes.md" {
-		t.Fatalf("path = %q, want the workspace-relative name", out.Files[0].Path)
+	path := out.Files[0].Path
+	if path != filepath.Base(path) || strings.Contains(path, "/") {
+		t.Fatalf("path = %q, want the workspace-relative name", path)
+	}
+	if !strings.HasPrefix(path, "notes-") || !strings.HasSuffix(path, ".md") {
+		t.Fatalf("path = %q, want the hashed name of notes.md", path)
+	}
+	if out.Files[0].Name != "notes.md" {
+		t.Fatalf("name = %q, want the name the user typed", out.Files[0].Name)
 	}
 	if out.Files[0].Mime != "text/markdown" {
 		t.Fatalf("mime = %q, want text/markdown", out.Files[0].Mime)
@@ -109,8 +120,17 @@ func TestDeletingAFileRemovesItFromTheWorkspace(t *testing.T) {
 	if got.code != consts.StatusCreated {
 		t.Fatalf("upload = %d (%s)", got.code, got.body)
 	}
+	var out uploadResult
+	if err := json.Unmarshal([]byte(got.body), &out); err != nil {
+		t.Fatalf("decode: %v (%s)", err, got.body)
+	}
+	if len(out.Files) != 1 {
+		t.Fatalf("got %d files, want 1", len(out.Files))
+	}
 
-	del := callJSON(t, srv, "DELETE", "/v2/sessions/"+id+"/files?path=removable.txt", nil)
+	// ★ The delete names the file the way the server named it. The typed
+	//   name is not on disk any more — the disk name carries a hash.
+	del := callJSON(t, srv, "DELETE", "/v2/sessions/"+id+"/files?path="+url.QueryEscape(out.Files[0].Path), nil)
 	if del.code != consts.StatusOK {
 		t.Fatalf("delete = %d (%s)", del.code, del.body)
 	}

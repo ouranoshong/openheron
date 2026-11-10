@@ -108,6 +108,31 @@ type Session interface {
 	//   message is history — it is not a reference count to maintain.
 	DeleteWorkspaceFile(name string) error
 
+	// RecordUpload remembers the name a workspace file had before it was
+	// renamed.
+	//
+	// ★ A file is stored under a name that carries a hash of its own
+	//   content and time, so that two uploads of the same name do not
+	//   overwrite each other. The name the user recognises exists **only**
+	//   here — and the listing endpoint needs it, because the interface
+	//   shows names, not hashes.
+	//
+	// ★ The path is relative to the workspace, like every other name this
+	//   interface speaks.
+	RecordUpload(path, originalName string) error
+
+	// OriginalNames returns the map from workspace-relative paths to the
+	// names the files carried when they were uploaded.
+	//
+	// ★ It is a map, not a lookup, because the listing walks every file
+	//   in the workspace: one lookup per file would read the map once per
+	//   file.
+	//
+	// ★ It may be empty — a session whose files were never renamed has
+	//   nothing to map, and a file that was never renamed is simply not
+	//   in it.
+	OriginalNames() map[string]string
+
 	Init(agentID string) error
 	Delete() error
 	Meta() Meta
