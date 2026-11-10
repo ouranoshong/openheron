@@ -1013,6 +1013,12 @@ so it never claims to have seen a picture it did not see. ★ And if the model
 itself has no vision, the turn still runs: the same question goes out again
 without the picture, and the model is told the picture is gone.
 
+★ **Accepting a picture is not the same as seeing it.** Whether a picture reaches
+the model's eyes is the provider's business: some models read it, some take the
+request and never look at it — DeepSeek's `deepseek-v4-pro` does the latter. ★
+When that happens the model says so itself; openheron cannot declare a model's
+vision in the configuration, so it does not pretend to know.
+
 ★ **The × on a chip deletes the file.** Not just from the list: the file is
 removed from the session's workspace as well. ★ A file that already went out
 with a message is **not** deleted — that message says the file was part of the

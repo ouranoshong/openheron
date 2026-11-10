@@ -876,7 +876,7 @@ not. Both are published, and the tutorial says which to use when.
 ### 3.10 ★ Putting something on a message
 
 A message carries more than its text: an id, a compaction marker, an attachment
-list. All of it rides in `message.Extra`, and there are **three rules** that
+list. All of it rides in `message.Extra`, and there are **four rules** that
 are not obvious until they have bitten.
 
 **1. The value in `Extra` must be on gob's allow-list.** `Extra` is encoded
@@ -929,6 +929,24 @@ JSONL log with an 8 MiB line limit, and a 2 MiB picture is 2.7 MiB of base64).
 ★ **This only shows up against a real model** — the fake backend does not
 serialize, and the Go tests never reach the adapter. It belongs to
 `task smoke`, not to CI.
+
+**4. The shape is settled at the wire, not in the assembly.** The rule above
+governs the message **this turn** assembles. The history is durable data, and it
+carries whatever shape it was written with: a session recorded before the
+assembly learned to move the body holds a message with a `Content` **and** a
+picture part, and that message fails the rule above every single time it is
+loaded. ★ A session cannot rewrite its own history, so the repair has to happen
+on the way out — and it has to happen for **every** message, not only for the
+one this turn produced.
+
+`llm/common/shape.go` (`normalizeWireShape`) settles it in `Generate` /
+`Stream`, just before the request is handed to the adapter: the body moves into
+a **text part**, `Content` is cleared, and the deprecated `MultiContent` is
+emptied rather than merged. ★ The parts are the richer shape — they can carry a
+picture, and a picture without its body is a picture the model cannot place.
+The original message is left alone: the copy on the wire is the only one that
+changes, and it shares the `Extra` map, so the id and the attachment list ride
+along.
 
 ## 4. The frontend
 

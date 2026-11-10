@@ -765,7 +765,7 @@ sed -i "s|^    default: .*|    default: \"$NEXT\"|" sandbox-kit/openheron/openhe
 ### 3.10 ★ 往消息上挂东西
 
 消息带的比正文多：一个 id、一个压缩标记、一份附件清单。它们全都挂在
-`message.Extra` 上，而有**三条规则**不到踩过坑是不知道的。
+`message.Extra` 上，而有**四条规则**不到踩过坑是不知道的。
 
 **1. `Extra` 里的值必须在 gob 的白名单上。** 写 checkpoint 时 `Extra` 走 gob
 编码，而 gob 编不了 interface 里没注册过的类型。所以一个
@@ -806,6 +806,18 @@ can't use both Content and MultiContent properties simultaneously
 是 8 MiB 行上限的 JSONL 日志，2 MiB 的图 base64 之后是 2.7 MiB）。
 ★ **这个坑只有在真模型上才暴露** —— 假后端不序列化，Go 用例也碰不到适配器。
 它属于 `task smoke`，不属于 CI。
+
+**4. 形状在 wire 边界定下来，不在装配层。** 上面那条规则管的是**这一轮**装配
+出来的消息。历史是持久数据，它带着写下它时的形状：在装配学会挪正文之前写下的
+会话里，存着一条**同时有 `Content` 和图片 part** 的消息 —— 它每次被加载都会撞上
+上面那条规则。★ 会话不能改写自己的历史，所以修复只能发生在**出去的路上**，
+而且要对**每一条**消息做，不能只对这一轮产生的那一条。
+
+`llm/common/shape.go`（`normalizeWireShape`）在 `Generate` / `Stream` 里、
+请求交给适配器之前把它定下来：正文挪进一个 **text part**，`Content` 清空，
+而废弃的 `MultiContent` 被**清空而不是合并**。★ part 是更丰富的形状 —— 它装得下
+图片，而一张没有正文的图片，模型认不出它讲的是什么事。原消息不动：只有发出去
+的那份副本变了，而副本与原消息共用 `Extra`，于是 id 与附件清单照旧跟着走。
 
 ## 4. 前端
 

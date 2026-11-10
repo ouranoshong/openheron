@@ -82,6 +82,12 @@ func (cm *ChatModel) Generate(ctx context.Context, in []*schema.Message,
 	opts ...model.Option) (*schema.Message, error) {
 	ctx = callbacks.EnsureRunInfo(ctx, cm.GetType(), components.ComponentOfChatModel)
 
+	// ★ The shape is settled **here**, at the wire. A message that carries a
+	//   body and a picture at the same time is refused by the client before
+	//   the request is sent, and the history a transcript already holds can
+	//   carry both — see [normalizeWireShape].
+	in = normalizeWireShape(in)
+
 	out, err := cm.cli.Generate(ctx, in, opts...)
 	if err == nil {
 		return out, nil
@@ -106,6 +112,9 @@ func (cm *ChatModel) Generate(ctx context.Context, in []*schema.Message,
 func (cm *ChatModel) Stream(ctx context.Context, in []*schema.Message,
 	opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 	ctx = callbacks.EnsureRunInfo(ctx, cm.GetType(), components.ComponentOfChatModel)
+
+	// ★ The same settling as Generate, and for the same reason.
+	in = normalizeWireShape(in)
 
 	out, err := cm.cli.Stream(ctx, in, opts...)
 	if err == nil {
