@@ -114,6 +114,27 @@ test.describe("会话列表", () => {
   })
 })
 
+test.describe("会话标题", () => {
+  // ★ The title belongs to the conversation. The optimistic bubble that
+  //   opens a turn must not rename it — the title used to flip to "New Chat"
+  //   for the whole run and snap back when the list was refreshed at the end
+  //   of the turn, so the user watched the conversation lose its name.
+  test("★ 发送消息的过程中，标题不会被改掉", async ({ page }) => {
+    await setScenario("slowRun")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+
+    await sendMessage(page, `${MARKER_A} keep going`)
+
+    // ★ The run is still going, so what the sidebar shows right now is the
+    //   live title — not the one the server sends when the turn is over.
+    await expect(page.locator(STOP_BUTTON)).toBeVisible({ timeout: 5000 })
+    const titles = (await threadTitles(page)).join(" | ")
+    expect(titles).toContain("Alpha conversation")
+    expect(titles).not.toContain("New Chat")
+  })
+})
+
 test.describe("发送与流式渲染", () => {
   test("发送一条消息恰好创建一个会话条目", async ({ page }) => {
     await setScenario("simple")

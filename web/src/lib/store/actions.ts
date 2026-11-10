@@ -266,21 +266,33 @@ export const useStore = create<StoreState>((set, get) => ({
       ? sessions[activeId]?.meta.agentId || MAIN_AGENT
       : (pendingAgentId ?? undefined)
     const agentId = requested ?? MAIN_AGENT
+    const existing = sessions[localKey]
     const placeholder: SessionEntry = {
-      meta: {
-        threadId: localKey,
-        title: "New Chat",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        messageCount: 0,
-        state: "running",
-        hasPendingApproval: false,
-        agentId,
-      },
+      // ★ The meta of a session that already exists is **kept**. The
+      //   placeholder is the optimistic bubble, not a new conversation —
+      //   writing "New Chat" over the title renamed the conversation in the
+      //   sidebar for the whole run, and the server's title only came back
+      //   when the list was refreshed at the end of the turn.
+      //
+      // ★ A brand-new session still gets the placeholder meta: there is no
+      //   title yet, and "New Chat" is what it is called until the server
+      //   names it.
+      meta: existing
+        ? { ...existing.meta, state: "running" }
+        : {
+            threadId: localKey,
+            title: "New Chat",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            messageCount: 0,
+            state: "running",
+            hasPendingApproval: false,
+            agentId,
+          },
       // ★ The optimistic bubble carries the files too: the user has to see
       //   what they sent, and the bubble is the only thing on screen at the
       //   moment they sent it.
-      convo: appendLocalUserMessage(sessions[localKey]?.convo ?? emptyConversation(), trimmed, pending),
+      convo: appendLocalUserMessage(existing?.convo ?? emptyConversation(), trimmed, pending),
       loaded: true,
     }
     set((s) => ({
