@@ -764,6 +764,17 @@ if _, err := c.stdin.Write(requestBytes); err != nil {   // ← no lock
   ★ 换掉客户端的是**声明** —— 指纹就是声明自己的那份
   （`agentkit/build/mcpmanager.go:330`）—— 而另一个拆解时机就是进程退出。
 
+★ **拆 stdio 客户端时那两行 `ERROR: Error reading from stdout` 不是故障。**
+`mcp-go@v0.43.0` 的 `readResponses` 阻塞在 `ReadString`，而它自己的 `Close()` 先
+`close(done)`、再由 `cmd.Wait()` 关掉 stdout 管道 —— reader 醒来拿到的是
+`file already closed`，被当成传输错误交给 `log.Default()` 打到 stderr，
+**每个 stdio 子进程一行**，而且绕过了 `log_level` 与 `log.file`。
+⇒ `agentkit/build/mcpmanager.go` 的 `mcpCommandLogger` 把 `WithCommandLogger` 接回
+进程 logger：`Infof` 走 `Debug`，只有「`Error reading from stdout` + 关闭管道措辞」
+降级为 `Debug` 并留一行 teardown 痕迹，其它错误仍是 `Error`。
+真正的断链是 `EOF`（库本来就忽略）或别的错误，不会被这条过滤吞掉；
+子进程本身仍按原路由 `killMCPChild` / `closeMCPClient` 收干净。
+
 ★ **重新列举发生在这一轮装配 agent 之前，而不是在批次构建里面。** 批次是每一代构建
   一次，而代际只在清单变了的时候才动 —— 所以*在*构建里重新列举就永远轮不到跑。
   ⇒ builder 先问管理者，而一次变化在 `main.go` 自己的 `agentConfig` 里推进代际 ——

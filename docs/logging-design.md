@@ -189,6 +189,11 @@ model 覆盖 timeout，别只包一个）、`embed.go`、`ConfigFromEnv` 那条�
   `os.Exit` 跳过 defer，与 `log.Fatalf` 行为一致；差别是这几行终于带上 `[Error]` 与正确调用点。
 - `agentkit/obs/hertz` 要实现 `hlog.FullLogger` 的 23 个方法：等级映射、格式化参数、
   `obs.Prefix(ctx)`、手工带调用方 PC（否则 handler 打印的是适配器自己的行号）。
+- ★ 第三方库也会绕开这套出口：`mcp-go` 的 stdio transport 默认用 `log.Default()` 直写
+  stderr。`agentkit/build/mcpmanager.go` 的 `mcpCommandLogger` 经 `WithCommandLogger`
+  把它接回注入的 `*slog.Logger`，于是 `log_level` / `log.file` / 统一前缀重新生效；
+  关闭时那条 `file already closed` 的已知竞态降级为 `Debug`（详见 `docs/mcp-design.md`
+  「进程退出时拆掉」一节）。
 
 ## 8 落实之后回改的文档（第二遍更新，已完成）
 

@@ -1,6 +1,7 @@
 package build
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
@@ -414,4 +416,53 @@ func TestTheSilentServerDoesNotTakeTheOthersDownWithIt(t *testing.T) {
 	} else if len(own) == 0 {
 		t.Fatal("the reachable server must still offer its tools")
 	}
+}
+
+// ★ A normal shutdown used to print one ERROR per stdio child: mcp-go's
+//
+//	reader is blocked in ReadString when its own Close shuts the pipe. That
+//	is teardown, not a transport failure — but a genuine read error still
+//	has to stay an Error.
+func TestMCPCommandLoggerSeparatesTeardownFromFailure(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(obs.NewHandler(&buf, slog.LevelDebug))
+	l := newMCPCommandLogger(log)
+
+	l.Errorf("Error reading from stdout: %v", errors.New("read |0: file already closed"))
+	quiet := buf.String()
+	if strings.Contains(quiet, "[Error]") {
+		t.Fatalf("our own teardown must not be an error:\n%s", quiet)
+	}
+	if !strings.Contains(quiet, "[Debug]") ||
+		!strings.Contains(quiet, "stdio reader stopped on teardown") {
+		t.Fatalf("the teardown lost its trace:\n%s", quiet)
+	}
+
+	buf.Reset()
+	l.Errorf("Error reading from stdout: %v", errors.New("read |0: broken pipe"))
+	loud := buf.String()
+	if !strings.Contains(loud, "[Error]") ||
+		!strings.Contains(loud, "Error reading from stdout") {
+		t.Fatalf("a real transport failure must stay visible:\n%s", loud)
+	}
+
+	buf.Reset()
+	l.Errorf("Error writing response: %v", errors.New("short write"))
+	if !strings.Contains(buf.String(), "[Error]") {
+		t.Fatalf("other library errors must stay visible:\n%s", buf.String())
+	}
+}
+
+func TestMCPCommandLoggerRoutesInfoAndSurvivesANilLogger(t *testing.T) {
+	var buf bytes.Buffer
+	l := newMCPCommandLogger(slog.New(obs.NewHandler(&buf, slog.LevelDebug)))
+	l.Infof("connected to %s", "fetch")
+	if !strings.Contains(buf.String(), "[Debug]") ||
+		!strings.Contains(buf.String(), "connected to fetch") {
+		t.Fatalf("the library's Info line must follow our level and sink:\n%s", buf.String())
+	}
+	// ★ The kb CLI builds a client without a process logger. Adapting the
+	//   library must not turn that path into a nil-pointer panic.
+	newMCPCommandLogger(nil).Errorf("Error reading from stdout: %v",
+		errors.New("file already closed"))
 }

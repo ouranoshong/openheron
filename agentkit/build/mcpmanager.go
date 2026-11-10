@@ -706,6 +706,45 @@ const mcpTeardownGrace = 5 * time.Second
 // ★ The command is resolved in the sandbox's PATH, never against the
 //
 //	project root: the workspace must not get to choose what runs.
+//
+// mcpCommandLogger puts mcp-go's stdio transport back on the process logger.
+//
+// ★ Left alone, the library calls log.Default() and writes straight to
+//
+//	stderr: those lines ignore log_level, miss log.file and our sink, and a
+//	normal shutdown prints "ERROR: Error reading from stdout" once per
+//	stdio child. This adapter implements the library's tiny Infof/Errorf
+//	interface, so no import of its util package is needed.
+type mcpCommandLogger struct{ log *slog.Logger }
+
+func newMCPCommandLogger(log *slog.Logger) mcpCommandLogger {
+	if log == nil {
+		log = obs.Discard()
+	}
+	return mcpCommandLogger{log: log}
+}
+
+func (l mcpCommandLogger) Infof(format string, v ...any) {
+	l.log.Debug("[mcp] " + fmt.Sprintf(format, v...))
+}
+
+func (l mcpCommandLogger) Errorf(format string, v ...any) {
+	msg := fmt.Sprintf(format, v...)
+	// ★ readResponses is blocked in ReadString when Close closes done and
+	//   cmd.Wait closes the stdout pipe. The library treats the resulting
+	//   os.ErrClosed as a transport failure; in fact the reader is simply
+	//   stopping because we closed it. A genuine failure reports EOF
+	//   (which the library already ignores) or a different error, so only
+	//   the exact os.ErrClosed wording is downgraded — real errors stay
+	//   Errors.
+	if strings.HasPrefix(msg, "Error reading from stdout:") &&
+		strings.Contains(msg, "file already closed") {
+		l.log.Debug("[mcp] stdio reader stopped on teardown", "detail", msg)
+		return
+	}
+	l.log.Error("[mcp] " + msg)
+}
+
 func startStdioClient(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg, log *slog.Logger) (mcpClient, error) {
 	env := mcpChildEnv(cfg)
 
@@ -727,7 +766,8 @@ func startStdioClient(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg, lo
 			cmd.Env = env
 			child = cmd
 			return cmd, nil
-		}))
+		}),
+		transport.WithCommandLogger(newMCPCommandLogger(log)))
 	if err := tr.Start(lifeCtx); err != nil {
 		return nil, fmt.Errorf("start %q: %w", cfg.Command, err)
 	}
