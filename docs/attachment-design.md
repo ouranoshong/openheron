@@ -160,7 +160,7 @@ transcript user 'hello world' count=1
 | 6 | 前端交互 | 拖拽 + 粘贴 + 纸夹**三件都要** | 用户手册已经承诺了拖拽粘贴 |
 | 7 | 「移除」的语义 | 移除 = 从**待发清单**移除；已发的附件不删 | 已发消息的附件是历史的一部分 |
 | 8 | 图片怎么落盘 | **服务端压缩**（只压 PNG/JPEG，最长边 1600px，保持原格式） | 压缩的收益在服务端才兑现（base64 是压后才编的） |
-| 9 | 落盘的文件名 | **原名-哈希8位.ext**，哈希 = sha256(名 ‖ 大小 ‖ mtime) | 同名覆盖会让**记录说谎**（§13.1） |
+| 9 | 落盘的文件名 | **所有文件**都叫 `原名-哈希8位.ext`，哈希 = sha256(名 ‖ 大小 ‖ mtime) | 同名覆盖会让**记录说谎**（§13.1）；覆盖要治本，不能只治图片 |
 | 10 | 预览 | **缩略图 + 点击放大**，字节走一个只读端点 | 用户要确认「我传的是不是那张图」（§14） |
 
 ★ 第 5 条是本设计里最省事也最正确的一条：**transcript 里只存「哪个文件」，
@@ -1065,6 +1065,7 @@ ContextWindow / SummarizeAt / Timeout / Reasoning* / Extra，**没有 vision 字
 | 6 | **不动 `docs/mcp-design.md` §8** | MCP 服务器的文件工具是另一条路，与本文正交 |
 | 7 | **不做 WebP 与 GIF 的压缩** | Go 没有 WebP 编码器；GIF 解码只取第一帧，压缩等于毁掉动画。§13.5 |
 | 8 | **不做基于内容的去重** | 哈希的输入是「名+大小+mtime」，它解决的是**命名唯一**（不覆盖），不是「同一张图只存一份」。后者要内容哈希，是另一件事 |
+| 9 | **不改写已有的旧文件** | 旧会话里的文件没压也没改名，**继续能用**（§13.8）。回写它们要读每一个文件、猜它当初的样子 —— 猜错了就是改坏用户的记录 |
 
 ---
 
@@ -1075,8 +1076,8 @@ ContextWindow / SummarizeAt / Timeout / Reasoning* / Extra，**没有 vision 字
 | 1 | `docs/user-manual.md` + `_zh` | ★ 拖拽/粘贴从「已宣称」变成「真的」；附件清单随消息回看要写进去 |
 | 2 | `docs/architecture.md` + `_zh` | 附件从「会话级」改成「消息级」—— 架构章节若提到 workspace 的语义，要跟着改 |
 | 3 | `docs/developer-manual.md` + `_zh` | 已知问题表里如果提到消息重复，要删掉（§4.5 修掉了） |
-| 4 | `docs/user-manual.md` + `_zh`（**§13/§14 实施时**） | ★ 上传的图会被压到最长边 1600px、落盘名会带哈希后缀；GIF 与 WebP 不压；★ 缩略图与放大的用法 |
-| 5 | `docs/developer-manual.md` + `_zh`（**§13/§14 实施时**） | ★ 新端点 `GET /v2/sessions/:id/files/raw`；★ 落盘名的哈希规则与可复算性 |
+| 4 | `docs/user-manual.md` + `_zh`（**§13/§14 实施时**） | ★ 上传的图会被压到最长边 1600px；★ **所有文件**的落盘名都会带哈希后缀，但界面上一律显示**原名**；GIF 与 WebP 不压；★ 缩略图与放大的用法 |
+| 5 | `docs/developer-manual.md` + `_zh`（**§13/§14 实施时**） | ★ 新端点 `GET /v2/sessions/:id/files/raw`；★ 落盘名的哈希规则与可复算性；★ 原名映射（`uploads.json`） |
 
 ★ 三处都是**双语**文档，改一处必须改另一处，`task lint-docs` 会查。
 
@@ -1156,10 +1157,12 @@ ContextWindow / SummarizeAt / Timeout / Reasoning* / Extra，**没有 vision 字
 | 13 | ★ 一条消息不能同时带正文和多模态 part | `agentkit/run` 用例（§4.4.3） | ✅ |
 | 14 | ★ **形状在 wire 边界统一**，历史里的旧消息也不炸 | `llm/common/shape_test.go`（§4.4.4） | ✅ |
 | 15 | ★ 上传的图被压到最长边 1600px，格式不变 | `agentkit/imaging` 用例（§13.5） | ⏳ 待实施 |
-| 16 | ★ 落盘名是 `原名-哈希8位.ext`，同名不再覆盖 | `api` 用例（§13.4） | ⏳ 待实施 |
+| 16 | ★ 落盘名是 `原名-哈希8位.ext`，**同名不再覆盖**（图与文本都要） | `api` 用例（§13.4、§13.9） | ⏳ 待实施 |
 | 17 | ★ 哈希**可复算**：读文件 → stat → 重算 → 对上名字 | `api` 用例（§13.3） | ⏳ 待实施 |
 | 18 | ★ GIF 与 WebP **不压**（不毁动画、不谎称能编码） | `agentkit/imaging` 用例（§13.5） | ⏳ 待实施 |
 | 19 | ★ 前端能预览：待发与历史都有缩略图，点击开大图 | Playwright（§14.6） | ⏳ 待实施 |
+| 20 | ★ **改名之后用户看到的仍是原名**（刷新后待发 chip 也不变） | `api` 用例（§13.4.1） | ⏳ 待实施 |
+| 21 | ★ JPEG 的 EXIF 方向被摆正，手机照片不会歪 | `agentkit/imaging` 用例（§13.6） | ⏳ 待实施 |
 
 ★ 第 3、4 条要**真的模型**才能验，所以它们属于 `task smoke` 而不是 CI
 （AGENTS.md：冒烟不进 CI，因为它们需要一个会回答的模型）。
@@ -1190,8 +1193,8 @@ prompt_tokens 1036          ← 图片真的进了 prompt
 provider 拒绝图片**也不**让整轮失败（去掉图片重问一遍，模型被告知）。
 见 §6.1。
 
-★ **第 15-19 条属于 §13 与 §14**，它们是**提案**：
-第 15-18 条是 Go 用例，第 19 条是 Playwright。
+★ **第 15-21 条属于 §13 与 §14**，它们是**提案**：
+第 15-18、20、21 条是 Go 用例，第 19 条是 Playwright。
 
 ---
 
@@ -1217,6 +1220,10 @@ path, putErr := sess.PutFile(fh.Filename, f)
 那份清单说「这条消息带了这个文件」，而那个文件已经是第二次的了。
 ★ 用户重传一张图（很常见：拍糊了重拍、截错图重截）就会撞上。
 
+★ **文本文件也一样**，而且更常：`notes.md`、`README.md`、`screenshot.png`
+—— 重名是常态。★ 所以 §13.2 第 6 条把改名范围定成**所有文件**：
+只治图片等于把最常见的情形留在外面。
+
 ★ 这也解释了为什么「哈希命名」不是洁癖：**它要解决的是覆盖，不是好看。**
 
 ### 13.2 决策
@@ -1228,7 +1235,8 @@ path, putErr := sess.PutFile(fh.Filename, f)
 | 3 | 压成什么 | **保持原格式**（PNG 仍是 PNG，JPEG 仍是 JPEG） |
 | 4 | 压到什么程度 | **最长边 1600px** |
 | 5 | 落盘名 | **原名-哈希8位.ext** |
-| 6 | 哈希的输入 | 原名 + 压缩后大小 + 上传时刻的 mtime |
+| 6 | 命名的适用范围 | **所有上传文件**（不只是图片） |
+| 7 | 哈希的输入 | 原名 + 落盘大小 + 上传时刻的 mtime |
 
 ★ **第 1 条为什么不在前端**：前端的 canvas 压缩要处理 CORS 画布污染、
 EXIF 方向、以及「用户绕过界面直接调 API」的情况 —— 而服务端只有一条路。
@@ -1239,6 +1247,12 @@ EXIF 方向、以及「用户绕过界面直接调 API」的情况 —— 而服
 附件清单不变、模型的 `image_url` part 不变、DeepSeek 的
 「JPEG / PNG / GIF / WebP」兼容面不变。转 JPEG 能压得更小，
 但**透明通道会变成白底** —— 截图、抠图、带透明背景的图都会毁掉。
+
+★ **第 6 条是后加的**（2026-11-10 的决定）：**覆盖要治本**。
+只给图片改名，文本文件仍然同名覆盖 —— 而「同名 `notes.md` 被第二次上传吃掉」
+是同一个毛病。★ 而且文本文件才是**最常**重名的那一类（`notes.md`、
+`screenshot.png`），只治图片等于把最常见的情形留在外面。
+★ 代价是文本文件的路径也变了（§13.4.1 记了这件事怎么补偿）。
 
 ### 13.3 ★ 哈希里的 mtime，以及那个循环
 
@@ -1252,7 +1266,7 @@ EXIF 方向、以及「用户绕过界面直接调 API」的情况 —— 而服
 
 ```
 t0 = 收到这次上传的时刻（毫秒精度）
-size = 压缩后的字节数
+size = 落盘字节数（图片是压缩后的，文本是原始的）
 hash = sha256(name ‖ 0x00 ‖ size ‖ 0x00 ‖ t0.UnixMilli) 的前 8 位 hex
 最终名 = stem + "-" + hash + ext
 写入 → os.Chtimes(path, t0, t0)   ← 把 mtime 钉成 t0
@@ -1282,12 +1296,63 @@ ext  = 原扩展名，保持原样（判定 MIME 时会小写化，不受影响�
 最终名 = stem + "-" + hash8 + ext
 ```
 
-★ **原名进哈希，但原名不进文件名以外的地方**：清单里的 `Name` 仍然是
-**原名**（用户认得的那个），`Path` 是压缩后的落盘名。两者都存，
+★ **原名进哈希，清洗后的 stem 进文件名**：清单里的 `Name` 仍然是
+**原名**（用户认得的那个），`Path` 是落盘名。两者都存，
 各有各的用处：`Name` 给人看，`Path` 给机器用。
 
 ★ **清洗是必须的**：`safeJoin` 会拒绝越界的名字，而一个叫
 `../../etc/passwd` 的上传名应该在这里就被改掉，而不是走到落盘那一步才报错。
+
+### 13.4.1 ★ 改名之后，原名从哪来
+
+改名有代价：**workspace 里的文件名不再等于用户上传时的名字**。
+而「用户看到的是原名」是硬要求 —— 附件清单里的 `Name` 是它，
+待发 chip 上写的也是它。
+
+三个地方要拿到原名：
+
+| 谁要 | 什么时候 | 原名从哪来 |
+|---|---|---|
+| 上传响应 | 刚上传完 | ★ 就在手上（`fh.Filename`）—— **精确** |
+| 附件清单（已发） | 消息落盘时 | 随清单存进消息的 `Extra` —— **精确** |
+| 待发清单（刷新后恢复） | 前端列举 workspace | ★ **只能从 workspace 反推** —— 见下 |
+
+★ 前端 `web/src/lib/store/actions.ts:792` 的 `restorePendingFiles` 现在拿
+workspace 里的**文件名**当 chip 的显示名（`merged.push({ name: f.name, … })`）。
+改名之后它会显示 `图片相关-a3f9c2b1.png` —— **用户认不出自己传的文件**。
+
+★ 两条路：
+
+1. **从文件名反推**：显示名 = 去掉 `-hash8` 后缀。
+   - 优点：零额外状态。
+   - 缺点：**不精确** —— 清洗（§13.4）改过非法字符的 stem 与原名不同；
+     而且原名自己以 `-8位hex` 结尾时会歧义。
+2. **服务端记一份原名映射**：`path → 原名`，存在**会话目录**里
+   （`<session>/uploads.json`，与 workspace **平级**）。
+   - ★ 放会话目录而不是 workspace：workspace 是**模型看得见的工作区**，
+     映射对模型没有意义，混进去只是噪音。
+   - 列举端点用它还原 `Name` ⇒ **前端零改动**。
+   - 删文件时同步删掉那一条。
+
+★ **本设计选 2**：原名是**事实**，不该靠从文件名猜。
+★ 映射的生命周期很短 —— 文件一旦被某条消息认领，原名就进了附件清单，
+映射里那一条不再被读到；删文件时清掉。
+
+★ 落点：`storage.Session` 加两个方法（与 `PutFile` / `DeleteWorkspaceFile` 同一层）：
+
+```go
+// RecordUpload remembers the name the file had before it was renamed.
+RecordUpload(path, originalName string) error
+
+// OriginalName returns the name the file had before it was renamed.
+OriginalName(path string) string
+```
+
+★ 写映射要**原子**（临时文件 + rename）：同一个会话可能并发上传，
+而「读—改—写」不是原子的就会丢条目。
+
+★ **`DeleteWorkspaceFile` 要一起清那一条**：留下一条指向已删文件的映射，
+下次列举时它会被当成「有个文件叫这个名字」而显示成一个不存在的 chip。
 
 ### 13.5 压缩规则
 
@@ -1316,46 +1381,88 @@ ext  = 原扩展名，保持原样（判定 MIME 时会小写化，不受影响�
 ★ **依赖**：新增 `golang.org/x/image`（`draw` 与 `webp` 解码）。
 PNG / JPEG / GIF 的编解码在标准库里，不需要新依赖。
 
-### 13.6 ★ JPEG 的 EXIF 方向：已知风险
+### 13.6 JPEG 的 EXIF 方向
 
 Go 的 `jpeg.Encode` **不写 EXIF**。而手机照片的方向信息（Orientation tag）
 常常只在 EXIF 里 —— 于是重编码过的照片可能被转 90 度或 180 度。
 
-★ 三个选择：
+★ **已决定：引入 `github.com/rwcarlsen/goexif`（纯 Go，MIT）**，
+读出 Orientation，需要时**先按它把图摆正，再缩放、再编码**。
 
-1. **引入 `github.com/rwcarlsen/goexif`**，读 Orientation，需要时先旋转再编码。
-   纯 Go，依赖很小，多一个依赖换一个「用户的图没歪」。
-2. **JPEG 只缩放不重编码** —— 但缩放后必须重新编码，所以这条路不通。
-3. **JPEG 原样落盘** —— 最省事，但 JPEG 恰恰是压缩收益最大的那类。
+★ **为什么值得多一个依赖**：EXIF 方向是**静默**的错 —— 图转了 90 度，
+没有报错，只是模型看到的世界是歪的，用户看到的预览也是歪的。
+而手机照片是「图片附件」里占比最大的一类。
 
-★ **本设计推荐 1**：一个纯 Go 的 EXIF 读取器，换掉一类「图歪了」的投诉。
-但它多一个依赖，所以**摆在明面上**，由代码的主人拍板。
+★ **怎么用**：
+
+```go
+x, err := exif.Decode(bytes.NewReader(data))
+if err == nil {
+    tag, err := x.Get(exif.Orientation)
+    if err == nil {
+        if v, ok := tag.Int(0); ok { ori = int(v) }
+    }
+}
+```
+
+★ **八个取值对应八个几何变换**（EXIF 规范）：
+
+| 值 | 含义 | 变换 |
+|---|---|---|
+| 1 | 正常 | 原样 |
+| 2 | 水平镜像 | 翻转 |
+| 3 | 旋转 180° | 旋转 |
+| 4 | 垂直镜像 | 翻转 |
+| 5 | 转置（沿主对角线） | 旋转 + 翻转 |
+| 6 | 顺时针 90° | 旋转 |
+| 7 | 反转置（沿副对角线） | 旋转 + 翻转 |
+| 8 | 逆时针 90° | 旋转 |
+
+★ **手机最常见的是 6 与 8**，所以**用例至少锁住这两个**：
+构造一张四边颜色不同的图、给它写上 orientation=6 的 EXIF，
+压完之后断言「上边还是上边」—— 一个写错了方向的测试会安静地放过一个歪的图。
+
+★ **PNG 没有这个问题**（EXIF 是 JPEG 的机制），GIF 不压（§13.5），
+所以**只有 JPEG 需要这一段**。
+
+★ **依赖清单**：新增 `golang.org/x/image`（`draw` 与 `webp` 解码）与
+`github.com/rwcarlsen/goexif`（EXIF 读取）。PNG / JPEG / GIF 的编解码
+在标准库里。★ 两个都是纯 Go，**不引入 CGO** —— 这一条对本项目很关键
+（`task test-race` 已经依赖 cgo，能少一个就少一个）。
 
 ### 13.7 落点与流程
 
-新包 `agentkit/imaging`（只依赖标准库与 `golang.org/x/image`，不依赖
-openheron 的其他包），对外两个函数：
+新包 `agentkit/imaging`（只依赖标准库、`golang.org/x/image` 与 `goexif`，
+不依赖 openheron 的其他包），对外两个函数：
 
 ```go
-// Compress 按 §13.5 的规则压一张图；不是 PNG/JPEG、或不值得压，就原样返回。
+// Compress 按 §13.5 的规则处理一张图：不是 PNG/JPEG、或不值得压，
+// 就原样返回。changed 说的是「字节变了」。
 func Compress(name string, data []byte) (out []byte, changed bool, err error)
 
-// HashedName 按 §13.3 算出落盘名。
+// HashedName 按 §13.3 算出落盘名 —— 对**所有**文件，不只是图片。
 func HashedName(name string, size int64, mtime time.Time) string
 ```
+
+★ `Compress` 的内部顺序是**摆正 → 缩放 → 编码**：EXIF 方向要在缩放之前
+处理，否则转的是缩放后的图（方向反了）。
 
 `api/v2_files.go` 的上传流程变成：
 
 ```
 读上传字节
-  ↓ 是 PNG/JPEG 且值得压？
-压缩 → (bytes, size)
+  ↓ 是 PNG/JPEG？
+  ├─ 是 → 读 EXIF 方向 → 需要时摆正 → 缩放（最长边 1600px）→ 重编码（保持原格式）
+  └─ 否 → 原样
   ↓
+size = len(bytes)
 t0 = now()
-hash = HashedName(原名, size, t0)
-sess.PutFile(哈希名, bytes.NewReader(data))
+落盘名 = HashedName(原名, size, t0)        ← 对所有文件
+sess.PutFile(落盘名, bytes.NewReader(bytes))
   ↓
-os.Chtimes(path, t0, t0)
+os.Chtimes(path, t0, t0)                   ← mtime 与哈希里的一致（§13.3）
+  ↓
+sess.RecordUpload(相对路径, 原名)           ← 原名映射（§13.4.1）
   ↓
 返回 { name: 原名, path: 相对路径, size, mime }
 ```
@@ -1363,33 +1470,45 @@ os.Chtimes(path, t0, t0)
 ★ **`PutFile` 的签名不变** —— 它只是个「把字节写进 workspace」的东西，
 压缩与命名是**上传语义**，属于上层。
 
-★ **文本文件不走这条路**：原名落盘，与今天一样。★ 用户说的是图片，
-而文本文件改名会让「用户上传 `notes.md`，模型 `read_file` 那个路径」
-这件事变得不可预测（清单里的 Name 与 Path 不再是同一个东西）。
-★ 但**同名文本覆盖的隐患仍在** —— 那是另一个问题，本设计不碰它，
-只在这里记一笔。
+★ **文本文件：不压缩，但照样改名。** ★ 压缩只对 PNG/JPEG（§13.5），
+**命名对所有文件**（§13.2 第 6 条）。
+
+★ **模型读文件不受改名影响**：§4.4.1 的清单给模型的是**绝对路径**
+（`assembleAttachments` 里的 `filepath.Join(workspace, att.Path)`），
+模型 `read_file` 的是那个绝对路径，与文件名长什么样无关。
+★ 而清单里的 `Name` 仍是**原名** —— 模型看到的是「`notes.md` 在这儿」，
+不是一个哈希后缀。
 
 ### 13.8 对既有链路的影响
 
 | 落点 | 影响 |
 |---|---|
 | 附件清单的 `Name` | 仍是**原名**（用户认得的） |
-| 附件清单的 `Path` | 变成哈希名（相对 workspace） |
-| 附件清单的 `Size` | 压缩后的真实大小 —— `api/v2_attachments.go:46` 本来就用 `os.Stat` 取真值，**不用改** |
+| 附件清单的 `Path` | 变成哈希名（相对 workspace）—— **所有文件** |
+| 附件清单的 `Size` | 落盘后的真实大小 —— `api/v2_attachments.go:46` 本来就用 `os.Stat` 取真值，**不用改** |
 | 附件清单的 `MIME` | `MIMEOfExt(path)` 按扩展名判定，格式不变 ⇒ **不用改** |
-| 模型侧 | base64 变小 ⇒ 请求更快、更省 token；`image_url` part 的形状**不用改** |
+| 提示词里的路径 | `assembleAttachments` 给的是**绝对路径**，模型 `read_file` 不受影响 ⇒ **不用改** |
+| 模型侧 | 图片的 base64 变小 ⇒ 请求更快、更省 token；`image_url` part 的形状**不用改** |
+| 列举端点 `GET /v2/sessions/:id/files` | `Name` 要用**原名映射**还原（§13.4.1），否则刷新后待发 chip 显示哈希名 |
+| 前端 | ★ **零改动** —— 前端一直用服务端给的 `name` 与 `path`，不猜文件名 |
 | 旧会话 | 旧文件没压也没改名，但 `MIMEOfExt(path)` 照旧判定 ⇒ **继续能用** |
 
 ★ **没有格式迁移问题**：新旧两种命名并存于同一个 workspace，
 没有任何代码依赖「文件名长什么样」。
 
+★ **模型的工作区会多出一堆哈希名** —— 它 `ls` workspace 时看到的是
+`notes-a3f9c2b1.md` 而不是 `notes.md`。★ 但提示词里的清单给的是
+**原名 + 绝对路径**，模型要读哪个文件是明确的；而且 §4.4.1 本来就教它
+「总是用文件系统工具查真实代码」。
+
 ### 13.9 测试
 
 | 位置 | 用例 |
 |---|---|
-| `agentkit/imaging` | ★ PNG 压完仍是 PNG；★ JPEG 压完仍是 JPEG；★ 长边 ≤ 1600px 且体积 ≤ 200 KiB 时**不动**；★ GIF 与 WebP **原样**；★ 哈希对同样的三个输入稳定；★ 哈希随 name/size/mtime 任一变化而变；★ 清洗后的名字不含分隔符 |
-| `api` | ★ 上传一张图后落盘名是 `原名-哈希8位.ext`；★ 落盘文件的 mtime 与哈希里的一致（**可复算**）；★ 清单里 `Name` 是原名、`Path` 是哈希名；★ 两次上传同名图 ⇒ 两个文件，**互不覆盖**；★ 文本文件仍用原名 |
-| `agentkit/run` | ★ 压过的图内联时 MIME 仍对 |
+| `agentkit/imaging` | ★ PNG 压完仍是 PNG；★ JPEG 压完仍是 JPEG；★ 长边 ≤ 1600px 且体积 ≤ 200 KiB 时**不动**；★ GIF 与 WebP **原样**；★ EXIF orientation=6 的 JPEG 压完**方向不变**；★ 哈希对同样的三个输入稳定；★ 哈希随 name/size/mtime 任一变化而变；★ 清洗后的名字不含分隔符 |
+| `storage/filestore` | ★ `RecordUpload` / `OriginalName` 往返；★ 原名映射是**原子**的（并发写不丢条目）；★ 删文件时映射条目一起消失 |
+| `api` | ★ 上传一张图后落盘名是 `原名-哈希8位.ext`；★ 落盘文件的 mtime 与哈希里的一致（**可复算**）；★ 清单里 `Name` 是原名、`Path` 是哈希名；★ **两次上传同名文件 ⇒ 两个文件，互不覆盖**（图与文本都要）；★ 文本文件**也**用哈希名；★ 列举端点返回的 `Name` 是**原名**而不是哈希名；★ 上传响应里的 `Name` 是原名 |
+| `agentkit/run` | ★ 压过的图内联时 MIME 仍对；★ 模型清单里的路径是绝对路径，读得到 |
 
 ---
 
