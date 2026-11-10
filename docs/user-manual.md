@@ -270,7 +270,7 @@ Available frontmatter keys:
 | `max_iterations` | Cap on tool-loop iterations |
 | `summarize_at` | When this agent's context is **compacted** into a summary: `80%` of the model's window (the default), an absolute token count (`104858`), or `0` for never |
 | `subagents` | Whom it may delegate to (see §5) |
-| `tools` | The **built-in** tools **this agent may use** — the names the model sees. ★ **Not declared means no tools at all**: the list is the whole answer. ★ MCP tools are **not** named here — the agent gets them by mounting the server (see §4.8) |
+| `tools` | The tools **this agent may use** — every tool that is **not** an MCP one: the built-ins, the ones the files under `tools/` provide, and the `config_*` tools. ★ **Not declared means no tools at all**: the list is the whole answer. ★ MCP tools are **not** named here — the agent gets them by mounting the server (see §4.8) |
 | `skills` | The skills this agent may load — an allow-list of the folders under `skills/`. **Not declared means no skill**, and so does an empty list |
 | `mcps` | The MCP servers this agent **mounts** — **not declared means no server**, and so does an empty list. Mounting one starts a child process **and hands the agent all of that server's tools** (see §4.8) |
 | `temperature` / `max_tokens` | Sampling parameters |
@@ -661,9 +661,9 @@ list is read from the agent that is running, not from the root's.
 ★ **Mounting is the grant.** `mcps:` says which servers are **started**, and the agent
 **gets all of that server's tools** — there is no second list to write.
 
-★ **`tools:` is about the built-in tools only.** An `mcp__<server>__*` entry there grants
-nothing: it is dropped, and the configuration reports a **notice** saying so. The server
-belongs in `mcps:`.
+★ **`tools:` names the tools that are not MCP tools.** An `mcp__<server>__*` entry there
+grants nothing: it is dropped, and the configuration reports a **notice** saying so. The
+server belongs in `mcps:`.
 
 ★ **Approval is separate from mounting.** Mounting gives the agent the tools; whether a
 tool runs without a nod comes from the server's own file (`mcps/<server>.yaml`), and the
@@ -675,7 +675,7 @@ default there is `ask` — **mounting is not approving**.
 tools: [ls, read_file, config_*]
 ```
 
-- `config_*` — every built-in tool whose name starts with `config_`.
+- `config_*` — every tool whose name starts with `config_`.
 - `ls` — exactly that one tool.
 
 ★ **`mcp*foo` and a lone `*` are refused at startup.** Only a *trailing* `*` is a pattern,
@@ -685,8 +685,8 @@ what is there: a rule whose reach differs from what it reads as is a silent mism
 ### 4.9 The configuration tools
 
 Six tools let an agent read and change the configuration it runs from. They are always
-mounted and, like every other built-in tool, only **visible** to the agents whose
-`tools:` list names them:
+mounted and, like every other tool that is not an MCP one, only **visible** to the agents
+whose `tools:` list names them:
 
 | Tool | What it answers | Tier |
 |---|---|---|

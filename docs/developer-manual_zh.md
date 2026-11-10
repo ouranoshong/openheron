@@ -107,7 +107,7 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
 `agentkit/spec` 放行为（装载、校验、重载、写入）。
 
 ★ **两边共用的那套词汇也住在 `decl` 里，而这是依赖方向的事实，不是图方便。** 内置工具名
-（`decl.BuiltinToolNames`，`agentkit/spec/decl/decl.go:319`）被**两端**读：装载器拿它核对
+（`decl.BuiltinToolNames`，`agentkit/spec/decl/decl.go:347`）被**两端**读：装载器拿它核对
 Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些名字的 provider
 （`reservedToolNames`，`agentkit/build/tools.go:75`）。两端互相不能引 —— 装载器在装配器
 下层 —— 所以这份清单不能住在其中任何一边：它住在**两边之下**，那个叶子包里。★ 抄一份
@@ -163,7 +163,7 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
    你不需要写任何权限代码。
 
 5. **名字不能撞保留名**。名字住在 `decl.BuiltinToolNames`
-   （`agentkit/spec/decl/decl.go:319`）：`ls` `read_file` `write_file` `edit_file` `glob`
+   （`agentkit/spec/decl/decl.go:347`）：`ls` `read_file` `write_file` `edit_file` `glob`
    `grep` `execute` `task` `write_todos` `skill`。撞上会在 `Build` 时报错。
    ★ **它们住在 `decl` 而不是 build 包里，是因为两边都要用**：装配器拒绝冒用这些名字的
    provider（`reservedToolNames`，`agentkit/build/tools.go:75`），装载器则核对 Agent 的
@@ -391,7 +391,7 @@ Agent 在两边都不在，把它算成「被弄丢」会让任何一次无关�
 
 | 键 | 它点名什么 | 不写表示 |
 |---|---|---|
-| `tools` | 这个 agent 可用的**内置**工具 —— **暴露出来**的名字，模型看见的那些 | 没有工具 |
+| `tools` | 这个 agent 可用的**非 MCP 工具** —— **暴露出来**的名字，模型看见的那些 | 没有工具 |
 | `skills` | 这个 agent 可加载的技能 —— `skills/` 下的文件夹 | 没有技能 |
 | `mcps` | 这个 agent **挂载**的 MCP server —— 每一个都会起一个子进程，而挂载一个就是**把它的全部工具交给这个 agent** | 没有 server |
 
@@ -408,7 +408,7 @@ Agent 在两边都不在，把它算成「被弄丢」会让任何一次无关�
 **全部**移除。
 
 ★ **MCP 只有一个键，而挂载就是授予。** `mcps:` 说哪些 server 被**挂载** ——
-而挂载一个就是把这个 agent **该服务器的全部工具**给它。★ `tools:` 只管**内置**工具：
+而挂载一个就是把这个 agent **该服务器的全部工具**给它。★ `tools:` 不点名 MCP 工具：
 写进去的 `mcp__<server>__*` 不授予任何东西，会被丢弃，并以一条**提示**报出
 （`agentkit/spec/load.go:836` 的 `checkAgentMCPNames`）—— 不是装载期错误，因为那是语义
 变了，不是自相矛盾。★ **代价是真实的**：再也不能只收窄某一个 agent 的 MCP 工具 ——
@@ -425,7 +425,7 @@ Agent 在两边都不在，把它算成「被弄丢」会让任何一次无关�
 |---|---|---|
 | `tools` 点名了一个不存在的工具 | 内置工具就是 `decl.BuiltinToolNames` 里那些，而某个 provider 的工具只有在 `tools/` 下写了它的文件时才存在 | 核对拼写；provider 缺失就去写那个 `tools/` 文件 |
 | `tools` 点名了 `skill` 工具，而 `skills` 是空的 | 配置合法，但自相矛盾：agent 能要一个技能，却没有技能可加载 | 在 `skills:` 里点名那个技能，或者把 `skill` 从 `tools:` 里去掉 |
-| `tools` 点名了 MCP 工具 | `tools` 是**内置**工具的允许清单；`mcps:` 才是挂载一个 server 并把它的工具交给这个 agent 的地方 | 删掉那些 `mcp__*` 行，把 server 写进 `mcps:` |
+| `tools` 点名了 MCP 工具 | `tools` 不点名 MCP 工具；`mcps:` 才是挂载一个 server 并把它的工具交给这个 agent 的地方 | 删掉那些 `mcp__*` 行，把 server 写进 `mcps:` |
 
 ★ **`mcp__*` 名字会被「不存在」这项检查跳过**：server 的工具是运行时才发现的，所以它现在
 还没有的名字不算拼错。上面那条 MCP 提示是另一回事 —— 它说的是那一行不做它看起来要做的事。
@@ -1376,9 +1376,9 @@ gitleaks 报的**提交数**比 git 报的低；但内容照样扫到了，因�
 | 启动报配置缺失 | 启动日志里的 `config root` 那行 —— 它打印了实际用的根和项目根 |
 | 改配置不生效 | 该分区热重载吗？`llm/`、`agents/`、`tools/`、`mcps/` 是热的；`server/`、`skills/` 要重启 |
 | 启动时报 `disabled_tools` was renamed to `tools` | ★ 两者含义**正好相反** —— 一个删工具，另一个点名工具。删掉 `disabled_tools`，在 `tools:` 里列出这个 agent 该有的工具（`agentkit/spec/load.go:99`） |
-| 提示说 `tools` 点名了 MCP 工具 | ★ `tools` 是内置工具的白名单，而 `mcps:` 才是挂载一个 server 并把它的工具交给它的��方：删掉那些 `mcp__*` 行，把 server 写进 `mcps:`（`agentkit/spec/load.go:836`） |
+| 提示说 `tools` 点名了 MCP 工具 | ★ `tools` 不点名 MCP 工具，而 `mcps:` 才是挂载一个 server 并把它的工具交给它的地方：删掉那些 `mcp__*` 行，把 server 写进 `mcps:`（`agentkit/spec/load.go:836`） |
 | Agent 调不动某个 MCP 工具 | 那个 server 在这个 agent 的 `mcps:` 里吗？挂载**就是**授予 —— 这个 agent 的 `tools:` 清单与它无关（`agentkit/spec/decl/decl.go:148`） |
-| 提示说 `tools` 点名了一个不存在的工具 | 内置工具就是 `decl.BuiltinToolNames` 里那些（`agentkit/spec/decl/decl.go:319`）；某个 provider 的工具只有在 `tools/` 下写了它的文件时才存在 |
+| 提示说 `tools` 点名了一个不存在的工具 | 内置工具就是 `decl.BuiltinToolNames` 里那些（`agentkit/spec/decl/decl.go:347`）；某个 provider 的工具只有在 `tools/` 下写了它的文件时才存在 |
 | 提示说 `tools` 点名了 `skill` 工具，而 `skills` 是空的 | 配置合法但自相矛盾：在 `skills:` 里点名那个技能，或者把 `skill` 从 `tools:` 里去掉 |
 | Agent 调不动某工具 | `GET /v2/agents/:agentId` 看生效工具表；再读工具的 `reason` —— `tools`，或者默认的 `ask` 档（它会问） |
 | 某个 agent **一个**工具都没有 | ★ 工具清单是白名单，而且**默认一个都没有**：不写 `tools:` 就是没有工具。列出这个 agent 该有的工具 |

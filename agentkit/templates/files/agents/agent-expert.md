@@ -74,10 +74,11 @@ Ask `config_template` for a skeleton — do not invent field names from memory.
    - ★ **`tools:` is an allow-list, not a block-list**; `disabled_tools` is a **load-time hard error** and must
      never be written. An agent whose `tools:` is missing has an empty tool table; `main` must name `task`, or
      it "talks but does nothing".
-   - `tools:` uses the **exposed names** of the **built-in** tools, and accepts an exact name and a trailing
+   - `tools:` uses the **exposed names** of the tools that are **not** MCP tools — the built-ins, the ones
+     the files under `tools/` provide, and the `config_*` tools — and accepts an exact name and a trailing
      `*` prefix (such as `fs__*`); a lone `*` or a `*` that is not trailing is a load-time hard error.
      `tools: ["*"]` is not allowed.
-   - ★ `tools:` says **which built-in tools** the agent may use; `mcps:` says **which servers it mounts**,
+   - ★ `tools:` says **which non-MCP tools** the agent may use; `mcps:` says **which servers it mounts**,
      and mounting a server hands the agent **all of that server's tools**. The two keys do not have to agree
      and they answer different questions. An `mcp__<server>__*` line in `tools:` says nothing — it is
      reported as a notice, and the server belongs in `mcps:`.

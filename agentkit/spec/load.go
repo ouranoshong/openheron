@@ -859,7 +859,7 @@ func (c *Config) checkAgentMCPNames(agentID string, a *decl.Agent) {
 		return
 	}
 	c.deferFile(agentFile(a, agentID),
-		"agent %s names MCP tools in tools: (%s), but the tools list is about the built-in tools — "+
+		"agent %s names MCP tools in tools: (%s), but the tools list does not name MCP tools — "+
 			"mcps: is what mounts a server and gives the agent its tools; drop those lines, "+
 			"and add the server to mcps: if the agent should have its tools",
 		agentID, strings.Join(servers, ", "))

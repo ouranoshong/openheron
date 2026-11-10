@@ -99,9 +99,9 @@ type Table struct {
 	// servers are the MCP servers this agent mounts.
 	//
 	// ★ **A mounted server's tools are the agent's tools.** The agent's
-	//   tools: list is about the built-in tools, and the servers it mounts
-	//   bring their own — the two questions do not overlap, so the two keys
-	//   do not have to agree.
+	//   tools: list names the tools that are not MCP ones, and the servers
+	//   it mounts bring their own — the two questions do not overlap, so the
+	//   two keys do not have to agree.
 	servers map[string]bool
 }
 

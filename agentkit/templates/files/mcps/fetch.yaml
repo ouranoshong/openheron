@@ -11,7 +11,7 @@
 # document or page).
 # The file only defines the server; who starts it is the agent's mcps: —
 # and mounting one hands the agent all of that server's tools.
-# The agent's tools: names the built-in tools only; it does not name MCP ones.
+# The agent's tools: names the tools that are not MCP ones; it never names MCP tools.
 transport: stdio
 command: uvx
 args: ["mcp-server-fetch"]

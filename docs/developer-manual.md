@@ -117,7 +117,7 @@ validation, reloading, writing).
 
 ★ **The vocabulary the two halves share lives in `decl` too, and that is a
 dependency-direction fact, not a convenience.** The built-in tool names
-(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:319`) are read by **both** ends:
+(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:347`) are read by **both** ends:
 the loader checks the names an agent's `tools:` list mentions against them, and the
 builder refuses a provider that claims one of them (`reservedToolNames`,
 `agentkit/build/tools.go:75`). Neither end may import the other — the loader sits
@@ -179,7 +179,7 @@ Recomputing either one is the same mistake twice.
    and the ones a file's own `allows:` lists. You write no permission code.
 
 5. **Do not collide with a reserved name.** The names live in `decl.BuiltinToolNames`
-   (`agentkit/spec/decl/decl.go:319`): `ls` `read_file` `write_file` `edit_file` `glob`
+   (`agentkit/spec/decl/decl.go:347`): `ls` `read_file` `write_file` `edit_file` `glob`
    `grep` `execute` `task` `write_todos` `skill`. A collision fails at `Build` time.
    ★ **They live in `decl` and not in the build package because both halves need
    them**: the builder refuses a provider that claims one of these names
@@ -451,7 +451,7 @@ none** — an absent key and an empty list mean the same thing, and they mean "n
 
 | Key | What it names | Absent means |
 |---|---|---|
-| `tools` | the **built-in** tools the agent may use — the **exposed** names, the ones the model sees | no tool |
+| `tools` | the **non-MCP** tools the agent may use — the **exposed** names, the ones the model sees | no tool |
 | `skills` | the skills the agent may load — the folders under `skills/` | no skill |
 | `mcps` | the MCP servers the agent **mounts** — each one starts a child process, and mounting one **hands the agent all of that server's tools** | no server |
 
@@ -471,7 +471,7 @@ the list removed. ★ **There is no "nothing to do" shortcut**
 
 ★ **MCP has one key, and mounting is the grant.** `mcps:` says which servers are
 **mounted** — and mounting one hands the agent **all of that server's tools**. ★ `tools:`
-is about the **built-in** tools only: an `mcp__<server>__*` entry there grants nothing, is
+does not name MCP tools: an `mcp__<server>__*` entry there grants nothing, is
 dropped, and is reported as a **notice** (`agentkit/spec/load.go:836`
 `checkAgentMCPNames`) — not a load-time error, because the meaning changed rather than
 contradicting itself. ★ **The cost is real**: narrowing one agent's MCP tools is no longer
@@ -488,7 +488,7 @@ what the author meant (`agentkit/spec/load.go:708` `noticeAgentTools`):
 |---|---|---|
 | `tools` names a tool that does not exist | the built-in tools are the ones in `decl.BuiltinToolNames`, and a provider's tool exists only when its file under `tools/` is written | check the spelling; write the `tools/` file if the provider is missing |
 | `tools` names the `skill` tool but `skills` is empty | the agent can ask for a skill and there is none to load | name the skill in `skills:`, or drop `skill` from `tools:` |
-| `tools` names MCP tools | `tools` is the **built-in** allow-list; `mcps:` is what mounts a server **and** grants its tools | drop the `mcp__*` lines and put the server in `mcps:` |
+| `tools` names MCP tools | `tools` does not name MCP tools; `mcps:` is what mounts a server **and** grants its tools | drop the `mcp__*` lines and put the server in `mcps:` |
 
 ★ **An `mcp__*` name is skipped by the "does not exist" check**: a server's tools are
 discovered at runtime, so a name it does not have yet is not a typo. The MCP notice is a
@@ -1606,9 +1606,9 @@ someone measures that the default misses something.
 | Startup reports a missing configuration | The `config root` line in the startup log — it prints the root actually used and the project root |
 | A config change does not take effect | Is that partition hot-reloaded? `llm/` `agents/` `tools/` `mcps/` are hot; `server/` and `skills/` need a restart |
 | Startup fails with `disabled_tools` was renamed to `tools` | ★ The two mean **opposite** things — one removed tools, the other names them. Delete `disabled_tools` and list the tools the agent should have in `tools:` (`agentkit/spec/load.go:99`) |
-| A notice says `tools` names MCP tools | ★ `tools` is the built-in allow-list and `mcps:` is what mounts a server **and** grants its tools: drop the `mcp__*` lines and put the server in `mcps:` (`agentkit/spec/load.go:836`) |
+| A notice says `tools` names MCP tools | ★ `tools` does not name MCP tools, and `mcps:` is what mounts a server **and** grants its tools: drop the `mcp__*` lines and put the server in `mcps:` (`agentkit/spec/load.go:836`) |
 | An agent cannot call an MCP tool | Is the server in that agent's `mcps:`? Mounting **is** the grant — the agent's `tools:` list has nothing to do with it (`agentkit/spec/decl/decl.go:148`) |
-| A notice says `tools` names a tool that does not exist | The built-in tools are the ones in `decl.BuiltinToolNames` (`agentkit/spec/decl/decl.go:319`); a provider's tool exists only when its file under `tools/` is written |
+| A notice says `tools` names a tool that does not exist | The built-in tools are the ones in `decl.BuiltinToolNames` (`agentkit/spec/decl/decl.go:347`); a provider's tool exists only when its file under `tools/` is written |
 | A notice says `tools` names the `skill` tool but `skills` is empty | The configuration is legal but self-contradictory: name the skill in `skills:`, or drop `skill` from `tools:` |
 | An agent cannot call a tool | `GET /v2/agents/:agentId` for the effective tool table; then read the tool's `reason` — `tools`, or the default `ask` tier, which asks |
 | An agent has **no** tools at all | ★ The tool list is an allow-list and it **defaults to none**: an absent `tools:` means no tool. List the tools the agent should have |

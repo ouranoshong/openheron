@@ -3,7 +3,16 @@ description: "task: the concrete executor. Writes files per the task order and r
 model: qwen/qwen3.8-flash
 max_iterations: 30
 reasoning: low
-disabled_tools: [kb_index]
+tools:                        # the allow-list: the readers, the writers and the runner.
+  - ls
+  - read_file
+  - write_file
+  - edit_file
+  - glob
+  - grep
+  - execute
+  - write_todos
+mcps: []                      # no MCP server is mounted
 summarize_at: 80%
 ---
 

@@ -51,7 +51,7 @@ context: inline
 - ★ **The three lists are "only what is listed"**: `tools` / `skills` / `mcps` not written = not a single one, `[]` says the same thing.
 - ★ `disabled_tools` is a **hard error at load time**, and the error explains "renamed to `tools` and the meaning is inverted"; there is no alias, and renaming the key is not a fix.
 - ★ `tools:` uses the exposed names and accepts a trailing `*` prefix; a lone `*` / a `*` that is not at the end is a hard error. `main` must carry `task`; a level-1 agent does not carry `task`.
-- ★ `tools` governs the **built-in** tools, `mcps` governs the **servers**, and mounting a server hands the agent **all of that server's tools**. The two keys do not have to agree: an `mcp__x__*` line in `tools` says nothing and is reported as a notice (drop the line, put the server in `mcps`).
+- ★ `tools` governs the **non-MCP** tools — the built-ins, the ones the files under `tools/` provide, and the `config_*` tools — `mcps` governs the **servers**, and mounting a server hands the agent **all of that server's tools**. The two keys do not have to agree: an `mcp__x__*` line in `tools` says nothing and is reported as a notice (drop the line, put the server in `mcps`).
 - `temperature` / `max_tokens` are pointers; a wrong `reasoning` tier is silently ignored and not reported; `summarize_at` depends on `context_window`.
 - The body is the Instruction, there is no `instruction_file`; the delimiters come in pairs, and an empty document is an error.
 - The depth `agent.max_depth` defaults to 1, and exceeding it is an error at startup. Effective: hot.
@@ -108,6 +108,6 @@ context: inline
 
 1. "It did not take effect" → first `config_notices {}` to see `deferred` and `configVersion`; then check whether it is `server/` (a restart is needed).
 2. "A startup error + a line number" → an unknown field / a leftover `disabled_tools` / a missing unit / an empty document / a model reference / a cycle or an overrun / an `mcps` server that does not exist.
-3. "The tool is gone" → for a built-in tool: whether the agent's `tools:` names it, the file name allow-list, the old `kb/` path. For an MCP tool: whether the agent's `mcps:` mounts the server, and whether the server's own file offers that tool.
+3. "The tool is gone" → for a non-MCP tool: whether the agent's `tools:` names it, the file name allow-list, the old `kb/` path. For an MCP tool: whether the agent's `mcps:` mounts the server, and whether the server's own file offers that tool.
 4. "The behavior is odd but nothing errors" → the `reasoning` tier, the 200ms fallback, the single-key override of `extra`, the no-op `header:`, an omitted `tools:`.
 5. "I changed it but the old behavior still runs" → the version in `config_notices`; a failed reload keeps the last good configuration, so do not take "it did not crash" for "the change is right".

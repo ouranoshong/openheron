@@ -3,7 +3,17 @@ description: "main: does the whole job itself."
 model: qwen/qwen3.8-max
 max_iterations: 30
 reasoning: high
-disabled_tools: [kb_index]
+tools:                        # the allow-list: the **union** of the arms' tools, so the baseline is not handicapped.
+  - ls
+  - read_file
+  - glob
+  - grep
+  - task
+  - write_todos
+  - write_file
+  - edit_file
+  - execute
+mcps: []                      # no MCP server is mounted
 summarize_at: 80%
 ---
 

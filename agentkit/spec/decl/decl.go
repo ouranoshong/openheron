@@ -91,7 +91,9 @@ type Agent struct {
 
 	SubAgents []string `yaml:"subagents"`
 
-	// Tools is the allow-list of **built-in** tools this agent may use.
+	// Tools is the allow-list of the tools this agent may use — every tool
+	// that is **not** an MCP one: the built-ins, the ones the files under
+	// tools/ provide, and the config_* tools.
 	//
 	// ★ **The default is none.** A list that names a tool makes it visible;
 	//   a list that does not name it makes it invisible. There is no
@@ -106,8 +108,8 @@ type Agent struct {
 	//   own, and the agent mounts the server or it does not — see
 	//   MCPServers. A `mcp__<server>__<tool>` entry in this list says
 	//   nothing and is reported as a notice, because the two keys used to
-	//   have to agree and now they do not: this one is about the built-in
-	//   tools, that one is about the servers.
+	//   have to agree and now they do not: this one is about the tools that
+	//   are not MCP ones, that one is about the servers.
 	Tools []string `yaml:"tools"`
 
 	// DisabledTools is the **old** key, kept only so the loader can say

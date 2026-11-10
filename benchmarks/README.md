@@ -24,6 +24,36 @@ eat the saving.
 shows what the cheap model does on its own, and the interesting question is
 whether A beats C *at C's quality*.
 
+## The tools each arm carries
+
+★ **The tool list is part of the measurement.** A tool's schema sits in the
+prompt, and the prompt is what gets billed — so the arms have to carry the
+same tools, or the comparison is between two different prompts.
+
+Every agent names its tools explicitly (`tools:` is an allow-list; an absent
+key means **no** tool at all, not "all of them"):
+
+| Role | Tools |
+|---|---|
+| parent | `ls` `read_file` `glob` `grep` `task` `write_todos` |
+| scout | `ls` `read_file` `glob` `grep` `write_todos` |
+| worker | `ls` `read_file` `write_file` `edit_file` `glob` `grep` `execute` `write_todos` |
+| solo (B, C) | the **union** of the three |
+
+★ **B and C carry the union** so the baseline is not handicapped: the solo arm
+has to be able to do what the delegated arms do between them.
+
+★ **No MCP server and no skill is mounted.** The tasks are code work on a
+fixture tree, and the `skill` tool without a skill to load is a contradiction
+the loader reports.
+
+★ **The numbers further down were measured with the previous tool set.** Back
+then an absent list meant "every tool", so every agent carried every schema —
+the readers, the writers, the runner, the delegation tool, the skill reader and
+the configuration tools. The schemas are in the prompt, so **a run today is not
+comparable with those numbers**: re-run the sweep before reading a new number
+against an old one.
+
 ## Why the two parameters decide it
 
 The saving is not a matter of taste; it falls out of two measurable numbers:
@@ -222,6 +252,9 @@ looks at the measured ratio if the parent has to read the code itself, and
 worth more if the plan can be corrected before anyone writes a line.
 
 ## What the sweep showed
+
+★ **The tool set moved since this sweep** — see "The tools each arm carries".
+These numbers belong to the old set, where every agent carried every tool.
 
 One repeat over all fifteen tasks (the report is `out/report.json`; the two
 judgement failures in that run were **check** bugs, not model failures — one

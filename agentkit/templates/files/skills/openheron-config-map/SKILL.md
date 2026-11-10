@@ -43,13 +43,13 @@ Prefill the struct → decode file by file (yaml.v3 writes only the keys that ap
 
 | Key | What it governs |
 |---|---|
-| `tools` | Which **built-in** tools this agent may use (the exposed names); it accepts a trailing `*` prefix |
+| `tools` | Which **non-MCP** tools this agent may use — the built-ins, the ones the files under `tools/` provide, and the `config_*` tools (the exposed names); it accepts a trailing `*` prefix |
 | `mcps` | Which servers are **mounted** (child processes are started) — and a mounted server brings **all of its tools** |
 | `skills` | Which skills can be loaded (the folder names under `skills/`) |
 
 - ★ `disabled_tools` is a **hard error at load time**, not a rename: the old key is still parsed, only so that it can report "renamed to `tools` and the meaning is inverted". **There is no alias**.
 - ★ An agent that omits `tools:` has an empty tool table; a `main` that omits `task` "talks but does nothing".
-- ★ `tools` and `mcps` answer **different questions**: `tools` is the allow-list of the built-in tools, `mcps` is the servers, and **mounting a server hands the agent all of that server's tools**. The two keys do not have to agree. An `mcp__<server>__*` line in `tools:` says nothing — it is reported as a **notice**, so the file still loads.
+- ★ `tools` and `mcps` answer **different questions**: `tools` is the allow-list of the tools that are not MCP tools, `mcps` is the servers, and **mounting a server hands the agent all of that server's tools**. The two keys do not have to agree. An `mcp__<server>__*` line in `tools:` says nothing — it is reported as a **notice**, so the file still loads.
 - ★ Mounting is not approving: the tier of an MCP tool comes from the `allows:` of the server's own file, and the default there is `ask` too.
 - A lone `*`, or a `*` that is not at the end, is a hard error at load time; `tools: ["*"]` is not allowed.
 - A server name must match `^[a-z0-9]+(_[a-z0-9]+)*$`, consecutive underscores are not allowed; the exposed name `mcp__<server>__<tool>` is assembled in exactly one place.

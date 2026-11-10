@@ -107,7 +107,7 @@ dependency chain along.
 
 ★ **The vocabulary the two halves share lives in `decl` too, and that is a
 dependency-direction fact, not a convenience.** The built-in tool names
-(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:319`) are read by **both** ends:
+(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:347`) are read by **both** ends:
 the loader checks the names an agent's `tools:` list mentions against them, and the
 builder refuses a provider that claims one of them (`reservedToolNames`,
 `agentkit/build/tools.go:75`). Neither end may import the other — the loader sits
@@ -244,7 +244,7 @@ Available frontmatter keys (`agentkit/spec/decl/decl.go:78`'s `decl.Agent`):
 | `model` | `model` | `<provider>/<model>`; **never inherited, never falls back** |
 | `max_iterations` | `max_iterations` | Cap on tool-loop iterations |
 | `subagents` | `subagents` | The sub-agents it may delegate to |
-| `tools` | `tools` | The **built-in** tools this agent may use — the **exposed** names, the ones the model sees. ★ **Absent means none** (`agentkit/spec/decl/decl.go:111`) |
+| `tools` | `tools` | The **non-MCP** tools this agent may use — the **exposed** names, the ones the model sees. ★ **Absent means none** (`agentkit/spec/decl/decl.go:111`) |
 | `skills` | `skills` | The skills this agent may load — the folders under `skills/`. ★ **Absent means none** (`agentkit/spec/decl/decl.go:132`) |
 | `mcps` | `mcps` | The MCP servers this agent **mounts** — each one starts a child process, and mounting one **hands the agent all of that server's tools**. ★ **Absent means no server** (`agentkit/spec/decl/decl.go:148`) |
 | `temperature` | `temperature` | Sampling temperature |
@@ -275,7 +275,7 @@ exists to prevent.
 
 ★ **MCP has one key, and mounting is the grant.** `mcps:` says which servers are
 **mounted** — mounting a server starts a child process — and it also says that the agent
-**gets all of that server's tools**. ★ `tools:` is about the **built-in** tools only:
+**gets all of that server's tools**. ★ `tools:` does not name MCP tools:
 an `mcp__<server>__*` entry there grants nothing, is dropped, and is reported as a
 **notice** (`agentkit/spec/load.go:836` `checkAgentMCPNames`) — not a load-time error,
 because the meaning changed rather than contradicting itself.
@@ -330,7 +330,7 @@ table. "May this agent use this tool at all?" is the **agent's own list** —
 that agent's tool set, so the model never sees it.
 
 ★ **A blocked tool keeps its own tier**, and says why in its `reason` — and there are
-now exactly **two** reasons: `tools` for a built-in tool
+now exactly **two** reasons: `tools` for a tool that is not an MCP one
 (`agentkit/build/introspect.go:36` `reasonOf`), and `mcps` for an MCP tool whose server
 this agent does not mount (`LayerNotMounted`). ★ The old second reason is gone with the
 layer it named: a server the agent does not mount has no tools to block, and one it does
@@ -487,7 +487,7 @@ or runs exactly like any other name. The gate does not change — only the names
 
 ★ **The config tools are always mounted and almost never visible.** They join the batch
 for every agent, and an agent sees the ones its own `tools:` list names — like every
-other built-in tool. Five of them only read and are in the code's exception list; `config_write`
+other tool that is not an MCP one. Five of them only read and are in the code's exception list; `config_write`
 is not, and cannot be added to it from a file (§6.3).
 
 ★ **The tier of a tool is decided by the file that provides it.** A file's own
@@ -536,7 +536,7 @@ teardown is bounded (`agentkit/build/mcpmanager.go:485`, `agentkit/build/mcpmana
 A build waits for a server, not for a server's corpse.
 
 ★ **The start does not stand on the turn's critical path.** Every mounted server is
-started in the **background** when the configuration is known (`agentkit/build/mcpmanager.go:123`
+started in the **background** when the configuration is known (`agentkit/build/mcpmanager.go:129`
 `Warm`), and each server keeps its own state — `not_started`, `starting`, `ready` or
 `failed`. A server that is not up yet contributes no tools, and the turn runs without
 them; when it comes up, the tool surface changes, the generation moves, and **the next
