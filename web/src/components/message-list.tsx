@@ -206,7 +206,11 @@ export function MessageList() {
 export function EmptyHero() {
   return (
     <div className="text-muted-foreground mb-6 flex flex-col items-center gap-1 text-center">
-      <BrandMark className="mb-1 size-16" />
+      {/* ★ The welcome screen is the one place the mark is big enough to be
+          read as a drawing, so it is the one place that plays the entrance.
+          The header's 20px copy stays still — a permanent animation in a
+          permanent position is noise, not information. */}
+      <BrandMark className="mb-1 size-16" play testId="brand-mark" />
       <p className="text-foreground text-xl font-semibold">openheron</p>
       <p className="text-sm">Ask anything about this workspace.</p>
     </div>
