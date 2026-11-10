@@ -40,6 +40,7 @@ workspace 里，与任何一条消息都没有关系；消息发出时附件就�
 | 回看 | 历史消息按 `Extra` 重建 `@` 头，不重新内联图片 | `agentkit/run/input.go` 的 `withHistoryAttachmentPaths` |
 | 图片 | 仍是 `inlineImage` 的 image part，上限 `maxInlineImageBytes`；超限图片与二进制附件列入提示词「暂时不能处理」，**不给路径** | `agentkit/run/attachments.go` |
 | wire | `llm/common/model.go` 一次请求；`llm/common/files.go`、`llm/common/vision.go` 及各自测试**已删除** | — |
+| wire 形状 | `normalizeWireShape` 统一双形状；★ 另给「只有思维链、没有正文与工具调用」的历史 assistant 消息补一个可见占位正文（副本，transcript 不动） | `llm/common/shape.go` 的 `withVisibleAssistantContent` |
 | 指令 | 上下文提示词把 `read_file` 写成义务，大文件用 `offset` / `limit` 分段读；模型没读由**用户再提示一次**，没有自动兜底 | `agentkit/run/input.go` 的 `attachmentRules` |
 
 ★ **绝对路径是硬要求**：`agentkit/fsx/fsx.go` 的 `resolve` 把相对路径按**项目根**
@@ -581,7 +582,19 @@ func normalizeWireShape(in []*schema.Message) []*schema.Message
 ★ **已废弃的 `MultiContent`（老名字的同一个字段）被清空而不是合并**：
 它在 wire 上已经没有位置了，合并只会造出第三种形状。
 
-回归用例：`llm/common/shape_test.go`（7 例）。
+★ **同一个边界还兜住另一种脏历史：空的 assistant 消息。** 一轮只输出了思维链
+就结束（思考预算耗尽 / 流被中途切断），会以空 `Content`、没有 `tool_calls`、
+只有 `ReasoningContent` 的形状写进 transcript —— `message.HasContent` 把思维链
+也算「有内容」，于是它被正常归档。而客户端的 `content` 是 `omitempty`，这条消息
+在线上变成 `{"role":"assistant"}`，端点直接拒绝**整个请求**：
+`Invalid assistant message: content or tool_calls must be set`。
+`withVisibleAssistantContent` 在副本里补上 `noVisibleResponseText`，如实说明
+「上一轮没有产出回答」，而不是编造一段回答；transcript 与思维链都不动。
+带 `tool_calls` 的消息本来就合法，原样放过。★ DeepSeek 侧实测：`content` 键
+存在（哪怕值为空串）即通过，完全没有 `content` 键才 400 —— 这正是 `omitempty`
+造成的。
+
+回归用例：`llm/common/shape_test.go`（12 例，其中 4 例覆盖空 assistant 消息）。
 
 ### 4.5 ★ 修掉重复：让最后那条消息**就是**落盘那条
 

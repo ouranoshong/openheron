@@ -40,12 +40,53 @@ import (
 //
 //	list ride along — they are facts about the message, and the copy is the
 //	same message as far as they are concerned.
+//
+// ★ The same pass also gives every assistant message something the provider
+//
+//	accepts as `content`. A turn that produced reasoning only — a thinking
+//	budget that ran out, or a stream cut short — is persisted with an empty
+//	Content, no tool calls and a ReasoningContent. The client's `content`
+//	field is `omitempty`, so that message goes out as `{"role":"assistant"}`
+//	and the endpoint refuses it ("content or tool_calls must be set"). The
+//	transcript is durable; this is repaired on the way out, in a copy.
 func normalizeWireShape(in []*schema.Message) []*schema.Message {
 	out := make([]*schema.Message, len(in))
 	for i, m := range in {
-		out[i] = oneShape(m)
+		out[i] = withVisibleAssistantContent(oneShape(m))
 	}
 	return out
+}
+
+// noVisibleResponseText stands in for a turn that reached the transcript with
+// reasoning but no answer.
+//
+// ★ It says what happened instead of inventing an answer: a model handed a
+//
+//	bare assistant message may assume a reply was given, exactly as a model
+//	whose file was silently dropped claims to have read it. Reasoning content
+//	is left alone — it is a separate field, and the endpoint accepts it.
+const noVisibleResponseText = "[no visible response] The previous turn ended " +
+	"without an answer or a tool call. Treat it as empty — do not assume " +
+	"anything was said or done."
+
+// withVisibleAssistantContent makes sure an assistant message carries one of
+// the two things an OpenAI-compatible endpoint requires: content or tool_calls.
+func withVisibleAssistantContent(m *schema.Message) *schema.Message {
+	if m == nil || m.Role != schema.Assistant {
+		return m
+	}
+	// ★ Parts count as content too: the client marshals them into that same
+	//   `content` field. Only a message with none of them is the one that
+	//   disappears under omitempty.
+	if m.Content != "" || len(m.ToolCalls) > 0 ||
+		len(m.MultiContent) > 0 ||
+		len(m.UserInputMultiContent) > 0 ||
+		len(m.AssistantGenMultiContent) > 0 {
+		return m
+	}
+	cp := *m
+	cp.Content = noVisibleResponseText
+	return &cp
 }
 
 // oneShape returns the message in its single shape.

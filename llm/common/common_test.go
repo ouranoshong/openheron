@@ -261,6 +261,23 @@ func TestBadRequestHintNamesToolSchemaValidation(t *testing.T) {
 	}
 }
 
+// ★ "verify base_url" is wrong for this one too: nothing about the endpoint
+//
+//	is misconfigured. A history message lost its content to omitempty.
+func TestBadRequestHintNamesTheEmptyAssistantMessage(t *testing.T) {
+	e := &APIError{Kind: KindBadRequest,
+		Message: "Invalid assistant message: content or tool_calls must be set"}
+	h := badRequestHint(e, nil)
+	for _, want := range []string{"assistant", "content", "history", "wire boundary"} {
+		if !strings.Contains(h, want) {
+			t.Fatalf("hint %q is missing %q", h, want)
+		}
+	}
+	if strings.Contains(h, "verify base_url") {
+		t.Fatalf("the generic hint must not be used here: %q", h)
+	}
+}
+
 func TestContextCanceledPassesThrough(t *testing.T) {
 	if got := wrap(context.Canceled, nil); !errors.Is(got, context.Canceled) {
 		t.Fatalf("context.Canceled must pass through unchanged, got %#v", got)

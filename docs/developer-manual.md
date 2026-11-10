@@ -948,6 +948,17 @@ The original message is left alone: the copy on the wire is the only one that
 changes, and it shares the `Extra` map, so the id and the attachment list ride
 along.
 
+★ One more rule lives at the same boundary. A turn that ends after reasoning
+only — a thinking budget that ran out, or a stream cut short — is persisted
+with an empty `Content`, no `tool_calls`, and a `ReasoningContent`. The client
+declares `content` as `omitempty`, so the message goes out with no `content`
+and no `tool_calls` at all, and the endpoint refuses the whole request
+("content or tool_calls must be set"). `normalizeWireShape` therefore also
+calls `withVisibleAssistantContent`: it puts `noVisibleResponseText` in the
+copy's `Content`, says what happened instead of inventing an answer, and leaves
+the transcript and its reasoning alone. An assistant message with `tool_calls`
+is already legal and is passed through untouched.
+
 ### 3.11 ★ Where an uploaded file lands
 
 An upload becomes a file in the session's workspace, and **two decisions are

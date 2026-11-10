@@ -393,6 +393,51 @@ func TestRejectedRequestLogsRawToolsWithoutTheEnvSwitch(t *testing.T) {
 	}
 }
 
+// ★ "Invalid assistant message: content or tool_calls must be set" names
+//
+//	no message, and the tools bytes say nothing about the history. The
+//	rejection line has to be able to say which message was bare — without
+//	putting the user's question into the log.
+func TestRejectedRequestShowsWhichMessageWasBare(t *testing.T) {
+	t.Setenv(LogRequestsEnv, "")
+	buf, log := capture(t, slog.LevelInfo)
+
+	body := `{"model":"m","messages":[` +
+		`{"role":"system","content":"rules"},` +
+		`{"role":"user","content":"a private question"},` +
+		`{"role":"assistant","reasoning_content":"thinking only"},` +
+		`{"role":"user","content":"go on"}]}`
+	reply := `{"error":{"message":"Invalid assistant message: content or tool_calls must be set"}}`
+
+	client := loggingClient(roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Status:     "400 Bad Request",
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(reply)),
+			Request:    req,
+		}, nil
+	}), log)
+	req, _ := http.NewRequest(http.MethodPost, "https://example.com/chat", strings.NewReader(body))
+	if _, err := client.Do(req); err != nil {
+		t.Fatal(err)
+	}
+
+	got := buf.String()
+	for _, want := range []string{
+		"shapes=", "2:assistant(body=absent,calls=0)", "0:system(body=present,calls=0)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the rejection line is missing %q:\n%s", want, got)
+		}
+	}
+	for _, secret := range []string{"a private question", "thinking only", "rules", "go on"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("message text %q leaked into the log:\n%s", secret, got)
+		}
+	}
+}
+
 func TestAcceptedRequestDoesNotLogRawTools(t *testing.T) {
 	t.Setenv(LogRequestsEnv, "")
 	buf, log := capture(t, slog.LevelInfo)

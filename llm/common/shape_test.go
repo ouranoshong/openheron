@@ -242,6 +242,110 @@ func TestANilMessageIsPassedThrough(t *testing.T) {
 	}
 }
 
+// reasoningOnlyAssistant is what a turn that spent its whole budget thinking,
+// or a stream cut short, leaves in the transcript: reasoning, no answer, no
+// tool calls. The client's `content` is omitempty, so on the wire the
+// assistant message has no `content` and no `tool_calls` at all.
+func reasoningOnlyAssistant() *schema.Message {
+	return &schema.Message{
+		Role:             schema.Assistant,
+		ReasoningContent: "let me think about the logs the user pasted",
+	}
+}
+
+// ★ The provider's rule, reproduced from the client library: an empty
+//
+//	Content is omitted, not sent as "". An endpoint that demands content or
+//	tool_calls therefore sees a bare assistant message and refuses it.
+func TestTheProviderRefusesAnAssistantWithNoContentAndNoCalls(t *testing.T) {
+	bare := goopenai.ChatCompletionMessage{
+		Role:             goopenai.ChatMessageRoleAssistant,
+		ReasoningContent: "thinking",
+	}
+	b, err := json.Marshal(bare)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), `"content"`) || strings.Contains(string(b), `"tool_calls"`) {
+		t.Fatalf("the constraint moved: %s", b)
+	}
+}
+
+// ★ A reasoning-only assistant message is made visible on the wire.
+//
+//	★ The transcript keeps its copy: a session cannot rewrite its own
+//	  history, and the next turn would otherwise fail the same way forever.
+func TestAReasoningOnlyAssistantGetsVisibleContent(t *testing.T) {
+	original := reasoningOnlyAssistant()
+	original.Extra = map[string]any{"openheron_message_id": "blank-1"}
+
+	out := normalizeWireShape([]*schema.Message{original})
+	if out[0].Content != noVisibleResponseText {
+		t.Fatalf("the assistant still has no visible content: %q", out[0].Content)
+	}
+	if original.Content != "" {
+		t.Fatalf("the transcript's message was modified: %q", original.Content)
+	}
+	if out[0].ReasoningContent != original.ReasoningContent {
+		t.Fatal("the reasoning was lost")
+	}
+	if out[0].Extra["openheron_message_id"] != "blank-1" {
+		t.Fatal("the stamp was lost")
+	}
+}
+
+// ★ An assistant with tool calls is already legal — leave it exactly alone.
+//
+//	★ Empty Content with tool calls is the normal shape of every tool turn;
+//	  giving it a placeholder would put words in the model's mouth.
+func TestAnAssistantWithToolCallsIsLeftAlone(t *testing.T) {
+	calls := &schema.Message{
+		Role: schema.Assistant,
+		ToolCalls: []schema.ToolCall{{
+			ID: "call_1", Function: schema.FunctionCall{Name: "glob", Arguments: "{}"},
+		}},
+	}
+	out := normalizeWireShape([]*schema.Message{calls})
+	if out[0] != calls {
+		t.Fatal("a tool-call message must be passed through untouched")
+	}
+	if out[0].Content != "" {
+		t.Fatalf("a placeholder was injected into a tool turn: %q", out[0].Content)
+	}
+}
+
+// ★ The message that actually leaves the process carries `content`.
+//
+//	★ The unit test above checks the in-memory shape; this one checks the
+//	  JSON the endpoint reads, which is where omitempty does its damage.
+func TestTheWireCarriesContentForAReasoningOnlyAssistant(t *testing.T) {
+	srv := &recordingServer{}
+	cm := newRecordingModel(t, srv)
+
+	if _, err := cm.Generate(context.Background(), []*schema.Message{
+		schema.UserMessage("what happened?"), reasoningOnlyAssistant(),
+	}); err != nil {
+		t.Fatalf("the turn must not die on a blank history message: %v", err)
+	}
+
+	var payload struct {
+		Messages []map[string]any `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(srv.body()), &payload); err != nil {
+		t.Fatalf("the request does not parse: %v", err)
+	}
+	if len(payload.Messages) != 2 {
+		t.Fatalf("the request carries %d messages, want 2", len(payload.Messages))
+	}
+	content, ok := payload.Messages[1]["content"]
+	if !ok {
+		t.Fatalf("the assistant message still has no content field:\n%s", srv.body())
+	}
+	if content == "" {
+		t.Fatal("the assistant message carries an empty content")
+	}
+}
+
 // ★ The constraint itself: one `content` field, one shape.
 //
 //	★ The client refuses to marshal a message carrying both — the turn dies

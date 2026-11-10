@@ -170,9 +170,13 @@ model 覆盖 timeout，别只包一个）、`embed.go`、`ConfigFromEnv` 那条�
 - ★ **被拒绝的请求不受这两个开关约束**（`logRejectedRequest`，
   `agentkit/obs/httplog/logging.go:160`）：
   恰恰是那一轮被拒的请求值得留证，等运维想起 `OPENHERON_LOG_LLM_REQUESTS=1` 再复现，
-  往往已经不复现了。这一行带 `status` / `detail`（端点错误正文）/ `names`，body 由
-  `req.GetBody` 回放取得，**不额外缓冲成功的请求**；读完错误正文后原样放回 `resp.Body`，
-  调用方仍能解析。成功轮次保持安静。
+  往往已经不复现了。这一行带 `status` / `detail`（端点错误正文）/ `names` / `shapes`，
+  body 由 `req.GetBody` 回放取得，**不额外缓冲成功的请求**；读完错误正文后原样放回
+  `resp.Body`，调用方仍能解析。成功轮次保持安静。
+- ★ `shapes`（`messageShapes`）只记每条消息的**形状**：序号、角色、有没有正文、
+  工具调用数量 —— 一个问题、一段回答都不进日志。端点报「content or tool_calls
+  must be set」时并不点名是哪条消息，而 `tools` 原始字节完全不涉及 `messages`；
+  例如 `2:assistant(body=absent,calls=0)` 一眼就指出那条只有思维链的 assistant。
 - 请求体仍放在 message 里，由 `obs.Handler` 的 `escapeMessage` 压成单行，脱敏断言保持不变。
 - ★ **唯一的行为变化**：请求体现在还要 `log_level: debug`（或 `$OPENHERON_LOG_LEVEL=debug`）
   才可见。原来 `OPENHERON_LOG_LLM_REQUESTS=1 task dev` 的用法要补上等级。若不想动默认行为，

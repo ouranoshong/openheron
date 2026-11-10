@@ -188,7 +188,7 @@ func (t *loggingTransport) logRejectedRequest(resp *http.Response, req *http.Req
 		"provider", providerName(t.provider),
 		"status", resp.StatusCode,
 		"detail", detail,
-		"names", names,
+		"names", names, "shapes", messageShapes(body),
 	}
 	if raw == "" {
 		t.log.Warn("[llm] rejected request (no tools bytes available)", attrs...)
@@ -319,4 +319,44 @@ func sensitiveKey(key string) bool {
 	default:
 		return false
 	}
+}
+
+// messageShapes describes the messages of a rejected request without copying
+// any of their text into the log.
+//
+// ★ The tools line answers "which tool table was sent", but an endpoint that
+//
+//	refuses a message ("content or tool_calls must be set") names no message
+//	at all — and the tools array says nothing about the history. This is the
+//	one place that can say which message was bare. ★ Only roles, whether a
+//	message has a body, and tool-call counts are recorded: the question and
+//	the answer stay out of the log.
+func messageShapes(body []byte) string {
+	var top struct {
+		Messages []struct {
+			Role      string          `json:"role"`
+			Content   json.RawMessage `json:"content"`
+			ToolCalls json.RawMessage `json:"tool_calls"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &top); err != nil {
+		return "unparseable"
+	}
+	parts := make([]string, 0, len(top.Messages))
+	for i, m := range top.Messages {
+		body := "absent"
+		if len(m.Content) > 0 && string(m.Content) != `""` && string(m.Content) != "null" {
+			body = "present"
+		}
+		calls := 0
+		if len(m.ToolCalls) > 0 && string(m.ToolCalls) != "null" {
+			var list []json.RawMessage
+			if json.Unmarshal(m.ToolCalls, &list) == nil {
+				calls = len(list)
+			}
+		}
+		parts = append(parts, strconv.Itoa(i)+":"+m.Role+
+			"(body="+body+",calls="+strconv.Itoa(calls)+")")
+	}
+	return strings.Join(parts, " ")
 }

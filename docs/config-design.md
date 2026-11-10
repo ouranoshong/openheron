@@ -374,7 +374,9 @@ server 侧那五个走同一个辅助函数 —— `override`（`main.go:554`）
   （`agentkit/obs/httplog/logging.go:262`），不经 `map` 重排，
   用来定位端点对工具 schema 的 `non-unique elements` 拒绝。★ **被拒绝的请求不看这两个开关**：
   `agentkit/obs/httplog/logging.go:160` 会在 4xx/5xx 时以 `Warn` 记下同一份原始字节，
-  并附上 `status` / `detail` / `names` —— 出问题的那一轮才最需要留证。
+  并附上 `status` / `detail` / `names` / `shapes` —— 出问题的那一轮才最需要留证。
+  ★ `shapes` 只记消息形状（角色、有无正文、工具调用数），不含正文：端点报
+  「content or tool_calls must be set」时不点名消息，靠它定位。
 - `OPENHERON_LOG_FILE`（`agentkit/obs/sink.go:12`，读于 `main.go:260`）—— 日志落盘的
   文件路径，覆盖 `server/config.yaml` 的 `log.file`（见 §6.4）；★ 打不开文件**不阻止
   启动**，进程留在 stderr，原因写在同一行日志里（`main.go:254` 的 `applyLogFile`）。

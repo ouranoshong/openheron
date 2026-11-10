@@ -180,6 +180,10 @@ func badRequestHint(e *APIError, keys []string) string {
 		strings.Contains(msg, "non-unique elements") {
 		return "the provider's own tool-schema validator rejected the request (duplicate required names it parsed, not necessarily ones we sent): resend the turn; the exact tools bytes are in the '[llm] rejected request tools (raw)' log line"
 	}
+	if strings.Contains(msg, "content or tool_calls must be set") ||
+		strings.Contains(msg, "invalid assistant message") {
+		return "an assistant message in the history had neither content nor tool_calls (a turn that ended after reasoning only); the wire boundary now gives it a visible body — resend the turn"
+	}
 	if len(keys) > 0 && mentionsAny(msg, keys...) {
 		return "the request carries endpoint-specific fields it rejects: check models[].extra and thinking in .openheron/llm/<id>.yaml"
 	}

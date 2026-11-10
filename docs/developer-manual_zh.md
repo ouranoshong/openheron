@@ -819,6 +819,15 @@ can't use both Content and MultiContent properties simultaneously
 图片，而一张没有正文的图片，模型认不出它讲的是什么事。原消息不动：只有发出去
 的那份副本变了，而副本与原消息共用 `Extra`，于是 id 与附件清单照旧跟着走。
 
+★ 同一个边界上还有一条规则。一轮只输出了思维链就结束 —— 思考预算耗尽，
+或流被中途切断 —— 会以空 `Content`、没有 `tool_calls`、只有 `ReasoningContent`
+的形状写进 transcript。客户端把 `content` 声明成 `omitempty`，于是这条消息在线上
+既没有 `content` 也没有 `tool_calls`，端点会拒绝**整个请求**
+（"content or tool_calls must be set"）。★ 所以 `normalizeWireShape` 还会调用
+`withVisibleAssistantContent`：把 `noVisibleResponseText` 放进副本的 `Content`，
+**如实说明发生了什么**而不是编造一个回答；transcript 与思维链都不动。带
+`tool_calls` 的 assistant 消息本来就合法，原样放过。
+
 ### 3.11 ★ 上传的文件落在哪里
 
 上传会在会话的 workspace 里变成一个文件，而**两个决定就在那一刻做出**：
