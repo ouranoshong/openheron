@@ -216,7 +216,7 @@ task check      # lint + test
 | [docs/user-manual.md](docs/user-manual.md) · [中文](docs/user-manual_zh.md) | **用户使用说明** —— 安装、配置、界面操作 |
 | [docs/developer-manual.md](docs/developer-manual.md) · [中文](docs/developer-manual_zh.md) | **开发者说明** —— 分层、依赖铁律、开发配方、测试与排障 |
 
-★ 另有**九篇只有中文的文档** —— 架构与代码设计那一类。它们的中文内容接管了原文件名，
+★ 另有**十一篇只有中文的文档** —— 架构与代码设计那一类。它们的中文内容接管了原文件名，
 所以下面的链接就是它们唯一的入口：
 
 | 文档 | 内容 |
@@ -230,6 +230,8 @@ task check      # lint + test
 | [docs/config-design.md](docs/config-design.md) | **配置系统设计说明** —— 配置根与它的三级解析、各个分区、加载与优先级、热更新（正文讲的是代码现状） |
 | [docs/tool-surface-design.md](docs/tool-surface-design.md) | **工具面设计** —— 一个 agent 拿到哪些工具（`tools:` / `mcps:` / `skills:`）与六个 `config_*` 工具（§2-§5 已实现） |
 | [docs/logging-design.md](docs/logging-design.md) | **日志装配改造设计** —— 组合根、可变等级、`log_level`、logger 注入，以及把请求日志搬出 `llm/common`（**已实现**） |
+| [docs/animation-design.md](docs/animation-design.md) | **界面动效设计** —— 动效令牌、减少动态效果的降级、品牌标记的入场，以及仍是提案的界面那几条动效（§2.3、§3、§4 已实现） |
+| [docs/attachment-design.md](docs/attachment-design.md) | **附件设计** —— 上传的文件怎么落盘、服务端对它做了什么，以及界面怎么显示它 |
 
 ★ 把 openheron 打包成沙箱 workload 的 **Docker Sandbox Kit** 在
 [`sandbox-kit/`](sandbox-kit/) 里 —— 描述文件、内容配方与入口脚本。

@@ -15,7 +15,7 @@ one — change one and change the other.
 > `docs/user-manual.md` / `docs/user-manual_zh.md` (user guide),
 > `docs/developer-manual.md` / `docs/developer-manual_zh.md` (developer guide).
 >
-> **and nine Chinese-only documents** under `docs/` — the architecture and code-design
+> **and eleven Chinese-only documents** under `docs/` — the architecture and code-design
 > ones. ★ Their Chinese content **took over the plain name**: `docs/config-design.md`
 > **is** the Chinese document — there is no `_zh` twin and no English one:
 > `docs/context-usage-design.md` (context-usage estimation design),
@@ -29,9 +29,14 @@ one — change one and change the other.
 > the configuration is administered),
 > `docs/logging-design.md` (logging assembly refactor — **implemented**: a mutable level,
 > `log_level`, a composition-root logger, the hertz adapter, and the request log moved out
-> of `llm/common`).
+> of `llm/common`),
+> `docs/animation-design.md` (interface motion — **partly implemented**: the motion tokens,
+> the reduced-motion fallback and the brand mark's entrance are in the tree; the interface
+> motions are still a proposal),
+> `docs/attachment-design.md` (attachments — how an uploaded file lands on disk, what the
+> server does to it, and how the interface shows it).
 > **Every other design document under `docs/` still lives in the upstream repository** ——
-> any `docs/xxx.md` reference below that is not one of these thirteen, is the upstream copy.
+> any `docs/xxx.md` reference below that is not one of these fifteen, is the upstream copy.
 > If you cannot get hold of it before changing semantics, ask first; do not change
 > configuration or interfaces from memory.
 >
@@ -440,6 +445,8 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 | `docs/config-design.md` | **Configuration system design** — the config root and its three levels, the partitions and their file specs, loading and precedence, hot reload, and the dependency iron rules (**the body describes the code as it is**; the `mcps/` partition and the tier that lives with the tool are implemented) |
 | `docs/tool-surface-design.md` | **Tool-surface design** — what tools an agent gets (`tools:` / `mcps:` / `skills:`), the MCP namespace's three segments, the configuration surface collapsed into one core, and the six `config_*` tools (**§2-§5 are implemented**) |
 | `docs/logging-design.md` | **Logging assembly refactor — design** — the composition root, a mutable `log_level`, injected loggers, taking over hertz's log output, and moving the request log out of `llm/common` (**implemented**) |
+| `docs/animation-design.md` | **Interface motion — design** — the motion tokens, the reduced-motion fallback, the brand mark's entrance, and the interface motions that are still a proposal (**§2.3, §3 and §4 are implemented**) |
+| `docs/attachment-design.md` | **Attachments — design** — how an uploaded file lands on disk, what the server does to it (the name carries a hash, pictures are compressed), and how the interface shows it |
 
 ★ For the bilingual set, the file without a suffix is the **English main version**; `_zh` is the
 Chinese version; the two correspond one to one — change one and change the other.

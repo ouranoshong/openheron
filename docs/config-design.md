@@ -361,13 +361,16 @@ server 侧那五个走同一个辅助函数 —— `override`（`main.go:554`）
 `EINO_EXT_SKILLS_DIR` 是例外：每次解析 skills 目录都会重新读它（`agentkit/build/skill.go:185`），
 所以改动会在 agent 池重建时生效。
 
-★ 另有两个环境变量，**不在上表里**，因为它们不碰配置：
+★ 另有三个环境变量，**不在上表里**，因为它们只管日志，不碰别的配置：
 
 - `OPENHERON_LOG_LEVEL`（`agentkit/obs/logger.go:11`，读于 `agentkit/obs/logger.go:71`）——
   日志级别；它**覆盖** `server/config.yaml` 的 `log_level`（见 §6.4）；
 - `OPENHERON_LOG_LLM_REQUESTS`（`agentkit/obs/httplog/logging.go:25`，读于
   `agentkit/obs/httplog/logging.go:103`）—— 是否打印请求体。★ 请求体本身现在还要
   `log_level: debug` 才可见：这个变量只决定「读不读、脱不脱敏」。
+- `OPENHERON_LOG_FILE`（`agentkit/obs/sink.go:12`，读于 `main.go:260`）—— 日志落盘的
+  文件路径，覆盖 `server/config.yaml` 的 `log.file`（见 §6.4）；★ 打不开文件**不阻止
+  启动**，进程留在 stderr，原因写在同一行日志里（`main.go:254` 的 `applyLogFile`）。
 
 ★ 还有第三组确实从环境变量读配置，但**不在主路径上**：`MODEL_TYPE`、`MODEL_TIMEOUT`、
 `MODEL_EXTRA_JSON`、`OPENAI_BASE_URL`、`OPENAI_API_KEY`、`OPENAI_MODEL`、`OPENAI_MODEL_ID`、

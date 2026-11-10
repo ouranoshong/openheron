@@ -247,7 +247,7 @@ This repository ships **four bilingual document sets**, maintained alongside the
 | [docs/user-manual.md](docs/user-manual.md) · [中文](docs/user-manual_zh.md) | **User manual** — installation, configuration, operating the interface |
 | [docs/developer-manual.md](docs/developer-manual.md) · [中文](docs/developer-manual_zh.md) | **Developer manual** — layering, the dependency rules, development recipes, testing and troubleshooting |
 
-★ And **nine Chinese-only documents** — the architecture and code-design ones. Their Chinese
+★ And **eleven Chinese-only documents** — the architecture and code-design ones. Their Chinese
 content took over the plain name, so the link below is the only entry there is:
 
 | Document | Contents |
@@ -261,6 +261,8 @@ content took over the plain name, so the link below is the only entry there is:
 | [docs/config-design.md](docs/config-design.md) | **Configuration system — design** — the config root and its three levels, the partitions, loading and precedence, hot reload (the body describes the code as it is) |
 | [docs/tool-surface-design.md](docs/tool-surface-design.md) | **Tool surface — design** — which tools an agent gets (`tools:` / `mcps:` / `skills:`) and the six `config_*` tools (§2-§5 are implemented) |
 | [docs/logging-design.md](docs/logging-design.md) | **Logging assembly refactor — design** — the composition root, a mutable level, `log_level`, injected loggers, and moving the request log out of `llm/common` (**implemented**) |
+| [docs/animation-design.md](docs/animation-design.md) | **Interface motion — design** — the motion tokens, the reduced-motion fallback, the brand mark's entrance, and the interface motions that are still a proposal (§2.3, §3 and §4 are implemented) |
+| [docs/attachment-design.md](docs/attachment-design.md) | **Attachments — design** — how an uploaded file lands on disk, what the server does to it, and how the interface shows it |
 
 ★ The **Docker Sandbox Kit** that packages openheron as a sandbox workload lives in
 [`sandbox-kit/`](sandbox-kit/) — the descriptor, the content recipe and the entrypoint.

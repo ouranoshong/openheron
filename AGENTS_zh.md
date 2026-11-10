@@ -15,7 +15,7 @@
 > `docs/user-manual.md` / `docs/user-manual_zh.md`（用户使用说明）、
 > `docs/developer-manual.md` / `docs/developer-manual_zh.md`（开发者说明）。
 >
-> **另有九篇只有中文的文档**在 `docs/` 下 —— 架构与代码设计那一类。
+> **另有十一篇只有中文的文档**在 `docs/` 下 —— 架构与代码设计那一类。
 > ★ 它们的中文内容**接管了原文件名**：`docs/config-design.md` **就是**那篇中文文档 ——
 > 既没有 `_zh` 副本，也没有英文版：
 > `docs/context-usage-design.md`（上下文使用预估设计方案）、
@@ -27,9 +27,12 @@
 > `docs/config-design.md`（配置系统设计说明）、
 > `docs/tool-surface-design.md`（工具面 —— 一个 agent 拿到哪些工具，以及配置怎么被管理）、
 > `docs/logging-design.md`（日志装配改造设计 —— **已实现**：可变等级、`log_level`、
-> 组合根 logger、hertz 适配器，以及把请求日志搬出 `llm/common`）。
+> 组合根 logger、hertz 适配器，以及把请求日志搬出 `llm/common`）、
+> `docs/animation-design.md`（界面动效 —— **部分已实现**：动效令牌、减少动态效果的降级、
+> 品牌标记的入场都在代码里；界面那几条动效还是方案）、
+> `docs/attachment-design.md`（附件 —— 上传的文件怎么落盘、服务端对它做了什么、界面怎么显示）。
 > **`docs/` 下其余设计文档仍在上游仓库** ——
-> 下面凡引用 `docs/xxx.md` 而这十三篇之外的，都是上游那份。
+> 下面凡引用 `docs/xxx.md` 而这十五篇之外的，都是上游那份。
 > 改语义前若拿不到它，先问，别凭印象改配置或接口。
 >
 > ★ **设计类文档只写中文。** 讲代码怎么搭起来的文档 —— 分层、
@@ -385,6 +388,8 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
 | `docs/config-design.md` | **配置系统设计说明** —— 配置根与它的三级解析、各个分区与它们的文件规格、加载与优先级、热更新，以及依赖铁律（**正文讲的是代码现状**；`mcps/` 分区与住在工具旁边的档位已实施） |
 | `docs/tool-surface-design.md` | **工具面设计** —— 一个 agent 拿到哪些工具（`tools:` / `mcps:` / `skills:`）、MCP 命名空间的三段、配置面收敛成一个核心，以及六个 `config_*` 工具（**§2-§5 已实现**） |
 | `docs/logging-design.md` | **日志装配改造设计** —— 组合根、可变的 `log_level`、logger 注入、接管 hertz 的日志输出，以及把请求日志搬出 `llm/common`（**已实现**） |
+| `docs/animation-design.md` | **界面动效设计** —— 动效令牌、减少动态效果的降级、品牌标记的入场，以及仍是提案的界面那几条动效（**§2.3、§3、§4 已实现**） |
+| `docs/attachment-design.md` | **附件设计** —— 上传的文件怎么落盘、服务端对它做了什么（名字带哈希、图片被压缩），以及界面怎么显示它 |
 
 ★ 双语那一组里，无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。
 

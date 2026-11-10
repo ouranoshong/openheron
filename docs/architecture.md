@@ -741,6 +741,18 @@ stops earlier — a paragraph of sixty characters is a hard read.
 from one place (`web/src/lib/theme.ts`). The light and the dark palette are the same token
 set with two values, so a color that exists in one exists in the other.
 
+★ **Motion is CSS-only, and it obeys the system's setting.** The durations and the easings
+are tokens in `web/src/index.css` (`--motion-duration-*`), and one global
+`prefers-reduced-motion` rule collapses every animation — including the ones
+`tw-animate-css` brings — to 0.01ms, so a user who asks for less motion gets the same
+interface without the travel. The design is `docs/animation-design.md`.
+
+★ **The brand mark is generated, not drawn twice.** `web/public/favicon.svg` is the source;
+`web/src/components/brand-mark.generated.tsx` is written from it by
+`web/scripts/generate-brand-mark.ts`, and a unit test fails when the two drift. The mark
+is inline SVG, because an SVG inside an `img` is a separate document and the page's
+stylesheet cannot reach its parts.
+
 ## 9. The knowledge base
 
 `kb` is an **optional** local corpus retrieval layer.

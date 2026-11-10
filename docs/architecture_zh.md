@@ -640,6 +640,16 @@ selector 里不要写 `?? []`；用模块级常量或 store 里的 selector。
 ★ **主题**在首屏之前就定了,由 `web/index.html` 里的一段脚本决定,并且只从一处读：
 `web/src/lib/theme.ts`。浅色与暗色是同一套 token 的两组取值,一边有的颜色另一边也有。
 
+★ **动效只有 CSS,而且听系统的。** 时长与缓动是 `web/src/index.css` 里的 token
+（`--motion-duration-*`），一条全局的 `prefers-reduced-motion` 规则把所有动画 ——
+包括 `tw-animate-css` 自带的那几处 —— 压到 0.01ms：要求少动效的用户拿到的是同一个
+界面，只是没有那趟位移。方案在 `docs/animation-design.md`。
+
+★ **品牌标记是生成的，不是画了两遍。** `web/public/favicon.svg` 是源，
+`web/src/components/brand-mark.generated.tsx` 由 `web/scripts/generate-brand-mark.ts`
+写出来，两者一漂移单测就失败。标记是内联 SVG —— 装在 `img` 里的 SVG 是另一个文档，
+页面的样式表选不进去它的部件。
+
 ## 9. 知识库
 
 `kb` 是一个**可选**的本地语料检索层。
