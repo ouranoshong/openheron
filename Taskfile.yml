@@ -269,9 +269,15 @@ tasks:
           if [ "$os" = "windows" ]; then
             if command -v zip >/dev/null 2>&1; then
               (cd {{.RELEASE_DIR}} && zip -qr "$name.zip" "$name");
-            elif command -v python3 >/dev/null 2>&1; then
-              (cd {{.RELEASE_DIR}} && python3 -m zipfile -c "$name.zip" "$name");
-            else
+            elif command -v {{.PY}} >/dev/null 2>&1; then
+              # ★ {{.PY}} is `python` on Windows and `python3` elsewhere. The
+              #   name `python3` is checked on purpose: on Windows it hits the
+              #   Microsoft Store alias, which **exists** and therefore passes
+              #   `command -v` but then exits 9009 without running anything.
+              #   Probing the interpreter we are actually going to call is
+              #   the only way that branch tells the truth.
+              (cd {{.RELEASE_DIR}} && {{.PY}} -m zipfile -c "$name.zip" "$name");
+            elif command -v python >/dev/null 2>&1; then
               (cd {{.RELEASE_DIR}} && python -m zipfile -c "$name.zip" "$name");
             fi;
           else
