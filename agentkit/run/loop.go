@@ -72,21 +72,22 @@ func (rt *Runtime) makeGenInput(sess storage.Session, turn *Turn) func(context.C
 		//   sent".
 		message.StampAttachments(userMsg, queryItem.Attachments)
 
-		// ★ Build first, persist second. The message the model sees is the
-		//   same object the transcript will hold, so anything stamped on it
-		//   — the id, an attachment list — reaches the model too. And a
-		//   build that fails leaves no half-written question behind: the
-		//   transcript only learns about the turn once the turn can start.
+		// ★ Build first, persist second. The stamps are put on the message
+		//   before it is handed to the assembly, and the copy the model sees
+		//   shares its Extra map, so the id and the attachment list reach the
+		//   model too. A build that fails leaves no half-written question
+		//   behind: the transcript only learns about the turn once it starts.
 		built, err := rt.cfg.Input.buildInput(ctx, inputParams{
 			History:   sess.Messages(true),
 			Workspace: sess.Workspace(),
 		}, userMsg)
 		if err != nil {
-			// ★ Same rule as the build: an error the framework records but
-			//   nobody hands to the turn is an error the client never sees.
-			//   The input assembly can fail on the user's own files (a
-			//   workspace path that does not resolve), and "turn start
-			//   timeout" would name none of that.
+			// ★ An error the framework records but nobody hands to the turn
+			//   is an error the client never sees: it would surface as
+			//   "turn start timeout", which names neither the cause nor the
+			//   file. Attachments are checked earlier (resolveAttachments),
+			//   but the input still owns an error channel for anything the
+			//   context assembly may legitimately fail on.
 			fail := fmt.Errorf("assemble turn input: %w", err)
 			turn.fail(fail)
 			return nil, fail

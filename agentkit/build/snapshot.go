@@ -137,7 +137,7 @@ func resolveModel(ctx context.Context, snap *snapshot, sp decl.SubAgentSpec,
 		if base != nil {
 			return base, nil
 		}
-		return buildModel(ctx, snap.log)
+		return buildModel(ctx, snap.log, configuredRequestDump(snap.cfg))
 	}
 	factory := snap.models
 	if factory == nil {
@@ -150,7 +150,7 @@ func resolveModel(ctx context.Context, snap *snapshot, sp decl.SubAgentSpec,
 	}, snap.log)
 }
 
-func buildModel(ctx context.Context, log *slog.Logger) (model.BaseModel[*schema.Message], error) {
+func buildModel(ctx context.Context, log *slog.Logger, requestDump bool) (model.BaseModel[*schema.Message], error) {
 	mc, err := ConfigFromEnv()
 	if err != nil {
 		return nil, err
@@ -159,7 +159,8 @@ func buildModel(ctx context.Context, log *slog.Logger) (model.BaseModel[*schema.
 	// and the request would never reach the log. This is the non-primary path
 	// (no provider or model named in the configuration).
 	if mc.HTTPClient == nil {
-		mc.HTTPClient = httplog.Wrap(&http.Client{Timeout: mc.Timeout}, mc.ProviderID, log)
+		mc.HTTPClient = httplog.Wrap(&http.Client{Timeout: mc.Timeout}, mc.ProviderID, log,
+			httplog.WithRequestBodyDump(requestDump))
 	}
 	cm, err := common.New(ctx, mc)
 	if err != nil {

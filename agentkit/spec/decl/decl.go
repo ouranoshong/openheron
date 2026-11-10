@@ -261,6 +261,14 @@ type Server struct {
 	// validates it, so a bad value becomes a deferred notice instead of a
 	// failed start. OPENHERON_LOG_LEVEL overrides it.
 	LogLevel string `yaml:"log_level"`
+	// LogRequests turns on the full, redacted model request-body dump at
+	// debug level (plus the raw tools array). It is off by default: a body
+	// can be megabytes, and a failed request is always logged regardless.
+	// OPENHERON_LOG_LLM_REQUESTS overrides it for one run.
+	//
+	// ★ This is a content switch, not a destination — it sits beside
+	//   log_level rather than inside LogCfg, which is only about the file.
+	LogRequests bool `yaml:"log_requests"`
 	// Log is the optional file destination. Empty File keeps the log on
 	// stderr, which is the default: a server started from a terminal is
 	// already being watched, and a file nobody asked for is litter.

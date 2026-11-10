@@ -489,6 +489,7 @@ provides asks (§4.3).
 | `lease_ttl` | `10m` | How long a run's lease survives without progress — **longer than the provider's own timeout** |
 | `agent.max_depth` | `1` | Cap on delegation depth |
 | `log_level` | `info` | `debug`, `info`, `warn` or `error` — decides which lines reach the output |
+| `log_requests` | `false` | Whether to print the redacted model request body and the raw `tools` array at `debug` level; same effect as `OPENHERON_LOG_LLM_REQUESTS=1` |
 | `log.file` | `""` | A file to write the log to, relative to the **config root** — empty means stderr only |
 
 ★ **`server/` is not hot-reloaded** — a change only takes effect after a restart. That is
@@ -497,7 +498,14 @@ why it is **read-only** in the config editor, and submitting it fails with
 
 These environment variables override the file and take precedence:
 `LISTEN_ADDR`, `DATA_DIR`, `PROJECT_ROOT`, `FRONTEND_MODE`, `STATIC_DIR`, `OPENHERON_LOG_LEVEL`,
-`OPENHERON_LOG_FILE`.
+`OPENHERON_LOG_FILE`, `OPENHERON_LOG_LLM_REQUESTS`.
+
+★ `log_requests` and `OPENHERON_LOG_LLM_REQUESTS` are two spellings of the same switch: the
+first sets the project default, the second decides one run (**the environment variable wins** —
+the config is consulted only when it is unset). When on, every model request writes a redacted
+body line and a raw `tools` line at `debug` level. With both off, a **rejected** request still
+leaves its raw `tools` bytes, because that is the turn worth keeping. This is a content switch;
+it has nothing to do with where `log.file` writes.
 
 ★ A `log_level` that is not one of the four falls back to `info`; the config's `deferred`
 notices carry the reason.
@@ -1005,13 +1013,18 @@ leave the composer and appear on the message itself. A file that has been sent
 stays with that message — you can still see which one it was weeks later, after
 a reload.
 
-★ **The model really gets them.** A text file is handed to the model as a path
-it can read with `read_file`; an image is put into the request as an image, so
-the model *sees* it rather than reading bytes as text. ★ An image that is too
-large to inline falls back to a path — and the model is told it was not inlined,
-so it never claims to have seen a picture it did not see. ★ And if the model
-itself has no vision, the turn still runs: the same question goes out again
-without the picture, and the model is told the picture is gone.
+★ **The model really gets them — by opening them.** A picture goes in as an
+image, so the model *sees* it rather than reading bytes as text. ★ Any other
+text file is named by an `@` line at the top of the message, holding an
+absolute path; the model calls `read_file` on it. The file's bytes are not in
+the request, so the first thing the model does is open the file — for a large
+one it reads in chunks with `offset` and `limit`. ★ A binary attachment (a
+PDF, an archive) is named in the prompt as "cannot be processed yet": the
+model tells you so instead of pretending it read it.
+★ **There is no automatic fallback.** A picture the model cannot see fails the
+turn with the provider's error; a file the model did not open is not re-sent
+behind your back. If an answer looks like the file was never read, tell the
+model to read it again.
 
 ★ **Accepting a picture is not the same as seeing it.** Whether a picture reaches
 the model's eyes is the provider's business: some models read it, some take the

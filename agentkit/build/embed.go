@@ -24,7 +24,7 @@ type Embedder struct {
 var _ embedding.Embedder = (*Embedder)(nil)
 
 func NewEmbedder(ctx context.Context, p *decl.Provider, m *decl.Model,
-	log *slog.Logger) (*Embedder, error) {
+	log *slog.Logger, requestDump bool) (*Embedder, error) {
 	if p == nil {
 		return nil, fmt.Errorf("llm: provider is nil")
 	}
@@ -45,10 +45,11 @@ func NewEmbedder(ctx context.Context, p *decl.Provider, m *decl.Model,
 	}
 
 	cli, err := aclembed.NewEmbeddingClient(ctx, &aclembed.EmbeddingConfig{
-		APIKey:     p.APIKey,
-		BaseURL:    p.BaseURL,
-		Model:      m.ID,
-		HTTPClient: httplog.Wrap(&http.Client{Timeout: timeout}, p.ID, log),
+		APIKey:  p.APIKey,
+		BaseURL: p.BaseURL,
+		Model:   m.ID,
+		HTTPClient: httplog.Wrap(&http.Client{Timeout: timeout}, p.ID, log,
+			httplog.WithRequestBodyDump(requestDump)),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("llm: build embedder for %q: %w", m.ID, err)

@@ -121,7 +121,7 @@ func assemble(ctx context.Context, configDir string, log *slog.Logger) (*kbEnv, 
 	if err != nil {
 		return nil, err
 	}
-	emb, err := build.NewEmbedder(ctx, p, m, nil)
+	emb, err := build.NewEmbedder(ctx, p, m, nil, cfg.Server.LogRequests)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +287,7 @@ func assembleSearch(ctx context.Context, svc *spec.Service, cfg *spec.Config) (*
 	if err != nil {
 		return nil, err
 	}
-	emb, err := build.NewEmbedder(ctx, p, m, nil)
+	emb, err := build.NewEmbedder(ctx, p, m, nil, cfg.Server.LogRequests)
 	if err != nil {
 		return nil, err
 	}

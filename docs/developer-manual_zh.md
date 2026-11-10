@@ -867,6 +867,39 @@ workspace 里，然后用四种形态之一回答：
 
 ★ 唯一的边界是 workspace：路径由会话解析，越界的名字被拒。
 
+### 3.12 ★ 上传的文件怎么到模型手里
+
+★ **非图片的文本文件不内联。** 模型看到的那条用户消息，开头是每个文件一行 `@`，
+写的是**绝对**路径：
+
+```text
+@"<workspace>/notes-a1b2.md"
+
+what does it say?
+```
+
+★ 路径必须是绝对的：`agentkit/fsx/fsx.go` 把相对 `path` 按项目根解析，而不是
+按会话的 workspace —— workspace 相对的名字会让 `read_file` 去读另一个文件。
+路径里带空白时加引号，上下文提示词会让模型调用时把引号去掉。
+
+★ 这个消息头是一个**视图**，不是改写。transcript 保留用户自己的话，以及
+`Extra`（`openheron_attachments`）里那个 workspace 相对的 `path`；界面用
+`UserText` 和 metadata 渲染气泡与附件 chip。历史消息也会重建这个消息头，所以
+隔一轮再问「刚才那个文件」，模型仍然叫得出文件名。
+
+**图片仍然是 image part。** `inlineImage` 在请求发出时才读字节，上限由
+`maxInlineImageBytes` 管着。超限的图片，以及二进制附件（PDF、压缩包），会在
+提示词里被列为「暂时不能处理」—— 它们**不**拿 `@` 路径，因为对非文本字节用
+`read_file` 只会读出噪声。
+
+★ **没有降级链。** `llm/common/model.go` 一次请求发完就结束。端点拒绝图片时，
+这一轮带着它自己的错误结束，由用户换模型或换说法重试；`llm/common/files.go`
+与 `llm/common/vision.go` 连同 file 块与重试路径一起删掉了。
+
+★ 上下文提示词（`agentkit/run/input.go`）把读文件写成义务：每个 `@` 路径都
+`MUST call read_file`；文件大时用 `offset` 和 `limit` 分段读 —— 这个工具一次
+最多返回 2000 行。模型没读文件时由用户再提示一次，没有自动的第二次尝试。
+
 ## 4. 前端
 
 ### 4.1 三层纯函数

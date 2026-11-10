@@ -18,8 +18,17 @@ import (
 	"github.com/ouranoshong/openheron/llm/common"
 )
 
+// configuredRequestDump is the one place build reads the request-body switch:
+// a nil config (the env-only path) simply has no project default.
+func configuredRequestDump(c *spec.Config) bool {
+	if c == nil {
+		return false
+	}
+	return c.Server.LogRequests
+}
+
 func FromConfig(ctx context.Context, root string, p *decl.Provider, m *decl.Model,
-	log *slog.Logger) (model.ToolCallingChatModel, error) {
+	log *slog.Logger, requestDump bool) (model.ToolCallingChatModel, error) {
 
 	if p == nil {
 		return nil, fmt.Errorf("llm: provider is nil")
@@ -36,17 +45,19 @@ func FromConfig(ctx context.Context, root string, p *decl.Provider, m *decl.Mode
 	}
 
 	cfg := &common.Config{
-		ProviderID:  p.ID,
-		APIKey:      p.APIKey,
-		BaseURL:     p.BaseURL,
-		HTTPClient:  httplog.Wrap(&http.Client{Timeout: timeout}, p.ID, log),
+		ProviderID: p.ID,
+		APIKey:     p.APIKey,
+		BaseURL:    p.BaseURL,
+		HTTPClient: httplog.Wrap(&http.Client{Timeout: timeout}, p.ID, log,
+			httplog.WithRequestBodyDump(requestDump)),
 		HintKeys:    p.HintKeys,
 		ExtraFields: p.Extra,
 	}
 	if m != nil {
 		cfg.Model = m.ID
 		if m.Timeout.Duration() > 0 {
-			cfg.HTTPClient = httplog.Wrap(&http.Client{Timeout: m.Timeout.Duration()}, p.ID, log)
+			cfg.HTTPClient = httplog.Wrap(&http.Client{Timeout: m.Timeout.Duration()}, p.ID, log,
+				httplog.WithRequestBodyDump(requestDump))
 		}
 	}
 
@@ -87,7 +98,7 @@ func BuildModel(ctx context.Context, c *spec.Config, ref string, in CallIntent,
 	if err != nil {
 		return nil, err
 	}
-	cm, err := FromConfig(ctx, c.ConfigRoot, p, m, log)
+	cm, err := FromConfig(ctx, c.ConfigRoot, p, m, log, configuredRequestDump(c))
 	if err != nil {
 		return nil, err
 	}

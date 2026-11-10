@@ -1010,6 +1010,48 @@ lost by it. ★ `image/svg+xml` is therefore not a picture here, and
 ★ The only boundary is the workspace: the path is resolved by the session,
 and a name that escapes it is refused.
 
+### 3.12 ★ How an uploaded file reaches the model
+
+★ **A non-picture text file is not inlined.** The model's copy of the user
+message starts with one `@` line per file, holding the path in its
+**absolute** form:
+
+```text
+@"<workspace>/notes-a1b2.md"
+
+what does it say?
+```
+
+★ The path is absolute because `agentkit/fsx/fsx.go` resolves a relative
+`path` against the project root, not the session workspace: a
+workspace-relative name would send `read_file` to the wrong file. A path
+containing whitespace is quoted, and the context prompt tells the model to
+drop the quotes.
+
+★ The header is a **view**, not a rewrite. The transcript keeps the user's
+own words and the workspace-relative `path` in `Extra`
+(`openheron_attachments`); the client renders `UserText` and the attachment
+chip from metadata. The header is rebuilt for history messages too, so "that
+file you just sent" still names a file one turn later.
+
+**Pictures still become image parts.** `inlineImage` reads the bytes at
+request time and `maxInlineImageBytes` bounds them. A picture over the limit,
+or a binary attachment (a PDF, an archive), is named in the prompt as
+"cannot be processed yet" — it gets no `@` path, because `read_file` on bytes
+that are not text produces noise.
+
+★ **There is no fallback chain.** `llm/common/model.go` sends one request.
+An endpoint that refuses a picture fails the turn with its own error; the
+user retries with a different model or wording. `llm/common/files.go` and
+`llm/common/vision.go` were removed together with the file-block and retry
+path.
+
+★ The context prompt (`agentkit/run/input.go`) makes reading an obligation:
+`MUST call read_file` on every `@` path, and for a large file read it in
+chunks with `offset` and `limit` — the tool returns at most 2000 lines per
+call. If the model did not open the file, the user prompts it again; there is
+no automatic second attempt.
+
 ## 4. The frontend
 
 ### 4.1 The pure layers

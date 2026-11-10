@@ -39,6 +39,24 @@ var defaultRules = []string{
 	"  5. When writing or editing a file and then claiming it compiles, you MUST run the build tool to verify.",
 }
 
+// attachmentRules explain the @ header. They are always present, not just on
+// the turn that carries a file: a history message can carry the header too,
+// and a rule that only appears with the current turn would leave "that file
+// you just sent" unexplained.
+//
+// ★ An attachment's bytes are **not** in the message any more. The rule has
+//
+//	to say so explicitly, and it has to be an obligation: a model that treats
+//	@ as ordinary prose answers about a file it never opened.
+var attachmentRules = []string{
+	"  6. A line at the start of a user message that begins with @ is a file path injected by the system, not words the user typed.",
+	"     Pass it to read_file exactly as written; when the path is wrapped in double quotes, drop the quotes.",
+	"     An absolute path is used as-is; a relative one is resolved from the project root.",
+	"  7. Attachment contents are NOT included in the message. Before answering about an attached file, you MUST call read_file on its @ path.",
+	"     For a large file, read it in chunks with read_file's offset and limit (the tool returns at most 2000 lines per call).",
+	"  8. A file named in the prompt as \"cannot be processed yet\" is not available to you. Say so; do not try to read it as text.",
+}
+
 // buildInput returns the agent input for one turn: a transient context prompt
 // followed by history. The context prompt is never persisted to the session.
 //
@@ -51,17 +69,17 @@ var defaultRules = []string{
 //	    exactly once. Appending the text again — as this function used to —
 //	    handed the model the same question twice.
 //
-//	  - The message the model sees is the **same object** the transcript
-//	    holds, so anything stamped on it (an attachment list, a provenance
-//	    stamp, a message id) reaches the model too. A copy rebuilt from the
-//	    text would carry none of it.
+//	  - A message without attachments is the **same object** the transcript
+//	    holds, so its stamps (a provenance stamp, a message id) reach the
+//	    model too. A copy rebuilt from the text would carry none of it.
 //
-// ★ The one exception is a turn with a picture in it: the assembly hands
+// ★ A message with attachments is handed to the model as a **copy** (see
 //
-//	the model a copy (see [assembleAttachments]), because the text has to
-//	move into a text part and the base64 has to stay out of the transcript.
-//	The copy carries the same stamps — it is the same message as far as
-//	they are concerned.
+//	[presentMessage]). The copy carries the @ header and, for a picture, the
+//	base64 that must stay out of the transcript. The header is a view: writing
+//	it into the persisted message would put machine paths in the user's own
+//	bubble, and an absolute path is not a fact the transcript should keep.
+//	The copy shares the Extra map, so every stamp still rides along.
 //
 // A nil query means "no question this turn": the input is the context and
 // the history alone.
@@ -69,16 +87,12 @@ func (c InputConfig) buildInput(ctx context.Context, p inputParams, query *schem
 	messages := make([]*schema.Message, 0, len(p.History)+2)
 
 	// ★ The attachments are assembled **before** the prompt is written: the
-	//   prompt names the files the model is being given, and an image the
-	//   model cannot see must not be named as one it can.
+	//   prompt names the files that cannot be processed, and a file the model
+	//   is not told about is a file it may claim to have read.
 	note := ""
 	modelQuery := query
 	if query != nil {
-		var err error
-		note, modelQuery, err = assembleAttachments(ctx, query, attachmentContext{workspace: p.Workspace})
-		if err != nil {
-			return nil, err
-		}
+		note, modelQuery = assembleAttachments(query, attachmentContext{workspace: p.Workspace})
 	}
 
 	messages = append(messages, newSystem(c.contextPrompt(ctx, p.Workspace, note)))
@@ -86,7 +100,7 @@ func (c InputConfig) buildInput(ctx context.Context, p inputParams, query *schem
 	history := withoutSubagentMessages(p.History)
 	for _, msg := range normalizeHistory(history) {
 		if msg != nil {
-			messages = append(messages, msg)
+			messages = append(messages, withHistoryAttachmentPaths(msg, p.Workspace))
 		}
 	}
 	if modelQuery != nil {
@@ -97,6 +111,26 @@ func (c InputConfig) buildInput(ctx context.Context, p inputParams, query *schem
 		Messages:        messages,
 		EnableStreaming: true,
 	}, nil
+}
+
+// withHistoryAttachmentPaths rebuilds the @ header of an earlier user message.
+//
+// ★ The transcript stores only the **relative** path in Extra; it does not
+//
+//	store the header, and Extra is not part of what the model sees. Without
+//	this pass, "what did that file say?" one turn later would show the model
+//	a question about a file with no way to name it.
+//
+// ★ Pictures are not re-inlined here. The old behavior inlined a picture
+//
+//	only for the turn that carried it, and doing it for every earlier turn
+//	would put megabytes of base64 back into every later request.
+func withHistoryAttachmentPaths(msg *schema.Message, workspace string) *schema.Message {
+	if msg.Role != schema.User || !message.HasAttachments(msg) {
+		return msg
+	}
+	header, _ := attachmentPaths(msg, attachmentContext{workspace: workspace})
+	return presentMessage(msg, header, nil)
 }
 
 func withoutSubagentMessages(hist []*schema.Message) []*schema.Message {
@@ -131,6 +165,7 @@ func (c InputConfig) contextPrompt(ctx context.Context, workspace, attachments s
 	lines = append(lines, "[Context]")
 	lines = append(lines, "IMPORTANT RULES:")
 	lines = append(lines, defaultRules...)
+	lines = append(lines, attachmentRules...)
 
 	if c.ProjectRoot != "" {
 		lines = append(lines,

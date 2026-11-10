@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/cloudwego/eino/schema"
+	goopenai "github.com/meguminnnnnnnnn/go-openai"
 )
 
 // bothShapesMessage is a message that carries a body and a picture at the
@@ -179,8 +180,14 @@ func TestAMessageWithOneShapeIsNotCopied(t *testing.T) {
 		t.Fatal("a plain message must be passed through as it is")
 	}
 
-	// ★ The shape the assembly produces is passed through too.
-	assembled := pictureMessage()
+	// ★ The shape the assembly produces is passed through too: the body has
+	//   moved into a part, and Content is empty.
+	assembled := &schema.Message{
+		Role: schema.User,
+		UserInputMultiContent: []schema.MessageInputPart{
+			{Type: schema.ChatMessagePartTypeText, Text: "the question"},
+		},
+	}
 	out = normalizeWireShape([]*schema.Message{assembled})
 	if out[0] != assembled {
 		t.Fatal("an assembled message must be passed through as it is")
@@ -232,5 +239,33 @@ func TestANilMessageIsPassedThrough(t *testing.T) {
 	out := normalizeWireShape([]*schema.Message{nil})
 	if out[0] != nil {
 		t.Fatal("a nil message must stay nil")
+	}
+}
+
+// ★ The constraint itself: one `content` field, one shape.
+//
+//	★ The client refuses to marshal a message carrying both — the turn dies
+//	  before the request is even sent, on a picture the user attached. This is
+//	  the provider's rule, not openheron's, and it is why normalization exists.
+func TestTheProviderRefusesAMessageWithBothShapes(t *testing.T) {
+	both := goopenai.ChatCompletionMessage{
+		Role:    goopenai.ChatMessageRoleUser,
+		Content: "the question",
+		MultiContent: []goopenai.ChatMessagePart{
+			{Type: goopenai.ChatMessagePartTypeText, Text: "the question"},
+		},
+	}
+	if _, err := json.Marshal(both); err == nil {
+		t.Fatal("a message with both a string and a list must be refused")
+	}
+
+	list := goopenai.ChatCompletionMessage{
+		Role: goopenai.ChatMessageRoleUser,
+		MultiContent: []goopenai.ChatMessagePart{
+			{Type: goopenai.ChatMessagePartTypeText, Text: "the question"},
+		},
+	}
+	if _, err := json.Marshal(list); err != nil {
+		t.Fatalf("the list alone must be accepted: %v", err)
 	}
 }

@@ -365,9 +365,16 @@ server 侧那五个走同一个辅助函数 —— `override`（`main.go:554`）
 
 - `OPENHERON_LOG_LEVEL`（`agentkit/obs/logger.go:11`，读于 `agentkit/obs/logger.go:71`）——
   日志级别；它**覆盖** `server/config.yaml` 的 `log_level`（见 §6.4）；
-- `OPENHERON_LOG_LLM_REQUESTS`（`agentkit/obs/httplog/logging.go:25`，读于
-  `agentkit/obs/httplog/logging.go:103`）—— 是否打印请求体。★ 请求体本身现在还要
-  `log_level: debug` 才可见：这个变量只决定「读不读、脱不脱敏」。
+- `OPENHERON_LOG_LLM_REQUESTS`（`agentkit/obs/httplog/logging.go:29`，读于
+  `agentkit/obs/httplog/logging.go:207`）—— 是否打印请求体。★ 它**覆盖**
+  `server/config.yaml` 的 `log_requests`：变量为空时才由配置决定；
+  `1` / `true` / `yes` / `on` 打开，其它非空值（含 `0` / `false` / `off`）关掉。
+  ★ 请求体本身还要 `log_level: debug` 才可见：这个开关只决定「读不读、脱不脱敏」。
+  ★ debug 下另记一行 `tools` 原始字节与工具名
+  （`agentkit/obs/httplog/logging.go:262`），不经 `map` 重排，
+  用来定位端点对工具 schema 的 `non-unique elements` 拒绝。★ **被拒绝的请求不看这两个开关**：
+  `agentkit/obs/httplog/logging.go:160` 会在 4xx/5xx 时以 `Warn` 记下同一份原始字节，
+  并附上 `status` / `detail` / `names` —— 出问题的那一轮才最需要留证。
 - `OPENHERON_LOG_FILE`（`agentkit/obs/sink.go:12`，读于 `main.go:260`）—— 日志落盘的
   文件路径，覆盖 `server/config.yaml` 的 `log.file`（见 §6.4）；★ 打不开文件**不阻止
   启动**，进程留在 stderr，原因写在同一行日志里（`main.go:254` 的 `applyLogFile`）。
@@ -873,7 +880,7 @@ deepseek/deepseek-chat      used by researcher  → ChatModel B + http.Client B
 
 每个 agent 持有**自己的** `*http.Client` —— `build.FromConfig` 每个实例造一个
 （`agentkit/build/provider.go:36-49`），装配层给它套上日志 transport
-（`agentkit/obs/httplog/logging.go:33`），`common.New` 拿到的已经是包好的实例。
+（`agentkit/obs/httplog/logging.go:51`），`common.New` 拿到的已经是包好的实例。
 ★ 所以协议层里没有一行日志代码 —— 包装是观测，不是协议。所以：
 
 - **端点私有参数**（思考开关等）→ `WithExtraFields`，且必须在**请求级**下发：请求级 extra 是
@@ -1335,6 +1342,15 @@ agent 能不能用它」。一个工具可以是 `allow` 而仍然不在某个 a
 覆盖。非法值不致命：`loadServer` 归一为 `info` 并记一条 `deferred`（`agentkit/spec/load.go`
 的 `normalizeLogLevel`）。和 `server/` 的其余字段一样，它改了要重启。
 
+★ `log_requests` 默认 `false`，与 `OPENHERON_LOG_LLM_REQUESTS=1` **等价**：打开后，
+每次模型请求都会在 `debug` 下记一行脱敏后的请求体和一行 `tools` 原始字节。
+环境变量优先级更高（变量为空才看配置），两者都没开时，只有**被拒绝的请求**
+仍会留下证据（见 `docs/logging-design.md` §6.4）。★ 它是**内容开关**，不是日志目的地，
+所以与 `log_level` 并列放在顶层，而不塞进只管落盘的 `log:` 块。
+★ 值由构建模型的那份配置注入 `httplog.Wrap`（`WithRequestBodyDump`，
+`agentkit/obs/httplog/logging.go:41`），**没有包级全局状态**；`server/` 不在热更新目录里，
+改这个键要重启。
+
 ★ `log.file` 默认**空**，也就是只写 stderr。填了路径才会落盘，由 `lumberjack` 按大小轮转；
 `OPENHERON_LOG_FILE` 覆盖路径。打不开文件**不阻止启动**：进程留在 stderr，原因写在同一行
 日志里（`main.applyLogFile`）。设计见 `docs/logging-design.md` §10。
@@ -1346,6 +1362,7 @@ frontend_mode: embed        # embed | dir — the UI compiled into the binary, o
 static_dir: web/dist        # relative to the **project root** (not the config root, not cwd)
 data_dir: state             # relative to the **config root**; an empty string means state/
 log_level: info             # debug | info | warn | error; $OPENHERON_LOG_LEVEL overrides it
+log_requests: false         # dump redacted request bodies at debug; $OPENHERON_LOG_LLM_REQUESTS wins
 
 log:                        # ★ omitted `file` = stderr only (the default)
   file: ""                  # relative to the **config root**; e.g. logs/openheron.log
@@ -1406,6 +1423,7 @@ string，只看 `Decode` 的错误会漏掉它（`agentkit/spec/decl/decl.go:612
 | `static_dir` | `string` | `web/dist` | 相对**项目根** `<root>` 解析（`Service.ResolveDir`），非 cwd、非配置根；只在 `frontend_mode: dir` 时才被读 |
 | `data_dir` | `string` | `state` | 相对**配置根**解析（`Service.DataDir`），非项目根、非 cwd；空串等同 `state`；目录不存在时创建 |
 | `log_level` | `string` | `info` | `debug` `info` `warn` `error`；非法值回退 `info` 并记 `deferred`；由 `OPENHERON_LOG_LEVEL` 覆盖 |
+| `log_requests` | `bool` | `false` | 是否在 `debug` 下打印脱敏后的模型请求体与 `tools` 原始字节；等价于 `OPENHERON_LOG_LLM_REQUESTS=1`，环境变量优先；与 `log:` 的落盘设置无关 |
 | `log.file` | `string` | `""` | 日志文件；相对**配置根**解析（`Service.LogFile`），空串 = 只写 stderr；由 `OPENHERON_LOG_FILE` 覆盖；打不开文件只告警、不阻止启动 |
 | `log.console` | `bool` | `true` | 写文件的同时保留 stderr；`false` 只写文件 |
 | `log.max_size_mb` | `int` | `20` | 单个文件的 MB 上限；`0` = 不按大小轮转；负数归一为 `0` 并记 `deferred` |
@@ -2170,7 +2188,7 @@ Agent 池与审批链见 `agent-design.md (upstream)`；agent 装配 API 见
 |---|---|---|
 | `llm/` `agents/` `tools/` | ✅ | 已在 `agentkit/spec/reload.go` 实施：`HotDirs` + 轮询 + 换代 |
 | `mcps/` | ✅ | 已实施：那个分类带着 `hot: true`（`agentkit/spec/config.go:61-69`），于是 `hotDirList()`（`agentkit/spec/config.go:87`）把它放进 `HotDirs`（`agentkit/spec/reload.go:21`）—— 见 §6.7：改一个 server 的命令、它的超时**或它的档位**，下一轮就生效，不必重启 |
-| `server/` | ❌ | 配进程自身（listen / 静态目录 / 上限 / `log_level` 与 `log.file`），改了要重启 |
+| `server/` | ❌ | 配进程自身（listen / 静态目录 / 上限 / `log_level`、`log_requests` 与 `log.file`），改了要重启 |
 
 ★ 这条边界**有测试守着**（`TestWatchIgnoresServerDir`，
   `agentkit/spec/reload_test.go:233`）—— 改 `server/config.yaml` 不该触发换代。

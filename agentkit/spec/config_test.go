@@ -82,6 +82,49 @@ func TestMissingConfigDirectoryIsNotAnError(t *testing.T) {
 	}
 }
 
+// ★ server/config.yaml's log_requests is the project-level twin of
+//
+//	OPENHERON_LOG_LLM_REQUESTS. It has to reach the loader, and a file that
+//	omits it has to stay off — dumping megabyte bodies must be opt-in.
+func TestTheRequestDumpSwitchComesFromTheConfig(t *testing.T) {
+	t.Run("declared true", func(t *testing.T) {
+		f := newFixture(t)
+		f.seedMinimal(t)
+		f.write(t, "server/config.yaml", "listen_addr: \":9999\"\nlog_requests: true\n")
+		cfg, err := f.load(t)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !cfg.Server.LogRequests {
+			t.Fatal("log_requests: true did not reach Server.LogRequests")
+		}
+	})
+	t.Run("omitted stays off", func(t *testing.T) {
+		f := newFixture(t)
+		f.seedMinimal(t)
+		f.write(t, "server/config.yaml", "listen_addr: \":9999\"\n")
+		cfg, err := f.load(t)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Server.LogRequests {
+			t.Fatal("an omitted log_requests must default to false")
+		}
+	})
+}
+
+// ★ A switch nobody can find is a switch nobody uses: the scaffold a new
+//
+//	project gets has to name the key, not leave it to the docs.
+func TestTheServerTemplateNamesTheRequestDumpSwitch(t *testing.T) {
+	for _, text := range Templates(DirServer) {
+		if strings.Contains(text, "log_requests:") {
+			return
+		}
+	}
+	t.Fatal("the server/config.yaml template must name the log_requests key")
+}
+
 func TestDefaultsSurviveWhenFileOmitsKeys(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)

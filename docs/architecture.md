@@ -650,22 +650,27 @@ The pieces:
 - The list is stamped on the user message **as JSON bytes** — `Extra` is encoded
   with gob when the checkpoint is written, and gob cannot encode a value of an
   unregistered type inside an interface.
-- The assembly (`agentkit/run/attachments.go`) splits the list: a **text** file
-  becomes a path in the prompt, and the model reads it with `read_file`; an
-  **image** becomes a multimodal part, so the model *sees* it. ★ An image that
-  cannot be inlined (too large, or the file is gone) falls back to a path
-  **and the model is told** — a silent fallback would have it claim to have
-  seen a picture it never saw.
+- The assembly (`agentkit/run/attachments.go`) splits the list: a **text**
+  file becomes an `@` line at the head of the model's copy, holding the
+  **absolute** path, and the model reads it with `read_file`; an **image**
+  becomes a multimodal part, so the model *sees* it. ★ A binary file, or an
+  image that cannot be inlined, is named in the prompt as "cannot be
+  processed yet" — it gets no path, because `read_file` on bytes that are
+  not text produces noise.
+- ★ **The header is a view, not a rewrite.** The transcript keeps the user's
+  own words and the relative path in `Extra`; the header is rebuilt for
+  history messages too, so "that file you just sent" still names a file.
 - ★ **The model gets a copy when a picture is inlined.** The transcript's
   message keeps its text and never carries the base64 (the transcript is a
   JSONL log with an 8 MiB line limit), and the copy's text moves into a
   **text part** — the wire has one `content` field that is either a string or
   a list, and the openai adapter builds both when a message carries a
   `Content` and a multi-content at the same time.
-- ★ **A model with no vision does not kill the turn** (`llm/common/vision.go`):
-  the request is refused, the same question goes out again without the
-  pictures, and the model is told — a model that does not know its picture is
-  gone would answer about a picture it never saw.
+- ★ **There is one request and no fallback** (`llm/common/model.go`). A model
+  with no vision fails the turn with the provider's own error; the user
+  retries. `llm/common/files.go` and `llm/common/vision.go` are gone. ★ The
+  context prompt makes `read_file` an obligation, and asks for `offset` and
+  `limit` when a file is large.
 - `GET /v2/sessions/{id}/messages` carries the list back in the message's
   metadata, so the history shows which file went with which question.
 

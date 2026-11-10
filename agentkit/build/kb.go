@@ -22,7 +22,7 @@ func buildKBTools(ctx context.Context, c *spec.Config, projectRoot, dataDir stri
 	if err != nil {
 		return nil, err
 	}
-	emb, err := NewEmbedder(ctx, prov, mdl, log)
+	emb, err := NewEmbedder(ctx, prov, mdl, log, configuredRequestDump(c))
 	if err != nil {
 		return nil, err
 	}

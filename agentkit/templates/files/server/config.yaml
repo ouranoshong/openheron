@@ -21,6 +21,12 @@ data_dir: state
 #   falls back to info and is reported in the config's deferred notices.
 log_level: info
 
+# ★ Dump each model request body (redacted) and the raw tools array at debug
+#   level. Off by default: a body can be megabytes. Set true here to make it
+#   the project default; $OPENHERON_LOG_LLM_REQUESTS overrides it for one run.
+#   A rejected request (4xx/5xx) always logs its tools array, switch or not.
+log_requests: false
+
 # ★ Where the log goes. An empty file keeps it on stderr — the default,
 #   because a server started from a terminal is already being watched.
 #

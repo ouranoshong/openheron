@@ -175,7 +175,12 @@ func hintFor(e *APIError, keys []string) string {
 }
 
 func badRequestHint(e *APIError, keys []string) string {
-	if len(keys) > 0 && mentionsAny(strings.ToLower(e.Message), keys...) {
+	msg := strings.ToLower(e.Message)
+	if strings.Contains(msg, "invalid schema for function") ||
+		strings.Contains(msg, "non-unique elements") {
+		return "the provider's own tool-schema validator rejected the request (duplicate required names it parsed, not necessarily ones we sent): resend the turn; the exact tools bytes are in the '[llm] rejected request tools (raw)' log line"
+	}
+	if len(keys) > 0 && mentionsAny(msg, keys...) {
 		return "the request carries endpoint-specific fields it rejects: check models[].extra and thinking in .openheron/llm/<id>.yaml"
 	}
 	return "request rejected: verify base_url, the model name, and the parameters this endpoint supports"

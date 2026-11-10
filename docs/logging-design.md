@@ -152,8 +152,27 @@ model 覆盖 timeout，别只包一个）、`embed.go`、`ConfigFromEnv` 那条�
 ### 6.4 分级与输出
 
 - 请求摘要 → `Info`（`provider` / `method` / `url` / `bytes` 结构化属性）；
-  请求体读取失败 → `Warn`；空体提示与脱敏后的请求体 → `Debug`。
+  请求体读取失败 → `Warn`；空体提示、脱敏后的请求体、以及 **`tools` 原始字节** → `Debug`；
+  **被拒绝的请求（4xx/5xx）的 `tools` 原始字节 → `Warn`**。
 - `OPENHERON_LOG_LLM_REQUESTS` 随包搬走，仍是「是否读取并脱敏请求体」的**内容开关**。
+- ★ 同一个开关也能写进 `server/config.yaml` 的 `log_requests`（缺省 `false`）：
+  项目级默认值，作用与 `OPENHERON_LOG_LLM_REQUESTS=1` 完全一样。★ 优先级是
+  **环境变量 > 配置**：变量为空才看配置；`1` / `true` / `yes` / `on` 打开，
+  其它非空值（`0` / `false` / `off`）显式关掉（`requestBodyDump`，
+  `agentkit/obs/httplog/logging.go:207`）。`server/` 不热更新，改了要重启。
+- ★ 配置值由构建模型的那份 `*spec.Config` 经 `httplog.WithRequestBodyDump`
+  （`agentkit/obs/httplog/logging.go:41`）注入 `Wrap`，不设包级全局变量 ——
+  本仓库的日志器一律由组合根注入，开关也不该破例。
+- ★ `tools` 原始字节单独记一行（`toolsOfBody`，`agentkit/obs/httplog/logging.go:262`）：
+  脱敏那条会把 body 经 `map` 重新序列化，重复的 JSON 键被吞掉、`properties` 顺序被重排，
+  而端点报「non-unique elements」这类拒绝只能靠**发出去的原始字节**判断。这一行只含
+  工具定义与工具名列表，不含 `messages`。
+- ★ **被拒绝的请求不受这两个开关约束**（`logRejectedRequest`，
+  `agentkit/obs/httplog/logging.go:160`）：
+  恰恰是那一轮被拒的请求值得留证，等运维想起 `OPENHERON_LOG_LLM_REQUESTS=1` 再复现，
+  往往已经不复现了。这一行带 `status` / `detail`（端点错误正文）/ `names`，body 由
+  `req.GetBody` 回放取得，**不额外缓冲成功的请求**；读完错误正文后原样放回 `resp.Body`，
+  调用方仍能解析。成功轮次保持安静。
 - 请求体仍放在 message 里，由 `obs.Handler` 的 `escapeMessage` 压成单行，脱敏断言保持不变。
 - ★ **唯一的行为变化**：请求体现在还要 `log_level: debug`（或 `$OPENHERON_LOG_LEVEL=debug`）
   才可见。原来 `OPENHERON_LOG_LLM_REQUESTS=1 task dev` 的用法要补上等级。若不想动默认行为，

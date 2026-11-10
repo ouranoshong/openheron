@@ -19,10 +19,29 @@ import (
 	"strings"
 )
 
-// LogRequestsEnv turns on the body dump. The summary line is controlled by
-// the log level instead; this variable only says whether the body is read,
-// redacted and printed at debug level.
+// LogRequestsEnv turns on the full body dump. The summary line is controlled
+// by the log level instead; this variable only says whether the body is read,
+// redacted and printed at debug level. ★ It wins over the configured value
+// (server/config.yaml's log_requests) when it is set — an operator who has to
+// capture one run should not have to edit the project. ★ A rejected request
+// (4xx/5xx) always logs its raw tools array, with or without either switch —
+// see [loggingTransport.logRejectedRequest].
 const LogRequestsEnv = "OPENHERON_LOG_LLM_REQUESTS"
+
+// Option configures one wrapped client.
+type Option func(*loggingTransport)
+
+// WithRequestBodyDump carries the value of server/config.yaml's log_requests.
+//
+// ★ This is injection, not a package-level flag: the value comes from the
+//
+//	same `*spec.Config` that built this model, so a client wrapped for one
+//	configuration generation cannot inherit a switch from another. httplog
+//	itself still knows nothing about spec — build passes the plain bool. The
+//	env override is applied per request in [requestBodyDump].
+func WithRequestBodyDump(enabled bool) Option {
+	return func(t *loggingTransport) { t.dumpBody = enabled }
+}
 
 // Wrap returns a copy of c whose transport logs the request.
 //
@@ -30,7 +49,7 @@ const LogRequestsEnv = "OPENHERON_LOG_LLM_REQUESTS"
 // transport of its own: that is the link that reads HTTPS_PROXY and HTTP_PROXY
 // from the environment, and it is what makes the sandbox Kit's credential
 // substitution work.
-func Wrap(c *http.Client, providerID string, log *slog.Logger) *http.Client {
+func Wrap(c *http.Client, providerID string, log *slog.Logger, opts ...Option) *http.Client {
 	if c == nil {
 		c = &http.Client{}
 	}
@@ -38,9 +57,14 @@ func Wrap(c *http.Client, providerID string, log *slog.Logger) *http.Client {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 
+	next := &loggingTransport{provider: providerID, log: log}
+	for _, o := range opts {
+		o(next)
+	}
+
 	base := c.Transport
 	if prev, ok := base.(*loggingTransport); ok {
-		if prev.log == log && prev.provider == providerID {
+		if prev.log == log && prev.provider == providerID && prev.dumpBody == next.dumpBody {
 			return c
 		}
 		// ★ Unwrap first: nesting two transports would log the same request
@@ -50,9 +74,10 @@ func Wrap(c *http.Client, providerID string, log *slog.Logger) *http.Client {
 	if base == nil {
 		base = http.DefaultTransport
 	}
+	next.base = base
 
 	out := *c
-	out.Transport = &loggingTransport{base: base, provider: providerID, log: log}
+	out.Transport = next
 	return &out
 }
 
@@ -60,10 +85,11 @@ type loggingTransport struct {
 	base     http.RoundTripper
 	provider string
 	log      *slog.Logger
+	dumpBody bool
 }
 
 func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	full := fullRequestLogging()
+	full := requestBodyDump(t.dumpBody)
 
 	var body []byte
 	if full && req.Body != nil {
@@ -94,14 +120,95 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 			// redaction readable in one piece.
 			t.log.Debug("[llm] request body: "+redactedJSON(body),
 				"provider", providerName(t.provider))
+
+			// ★ redactedJSON re-marshals through a map, which silently drops
+			//   duplicate JSON keys and reorders the properties. A provider
+			//   that rejects a tool schema for "non-unique elements" can only
+			//   be diagnosed from the bytes that actually went out, so the
+			//   tools array is logged as a raw slice here. Only the tool
+			//   definitions reach this line — the messages stay out of it.
+			//   This copy is gated by the switch and debug level; the copy
+			//   written for a rejected request is not (see below).
+			if raw, names := toolsOfBody(body); raw != "" {
+				t.log.Debug("[llm] request tools (raw): "+raw,
+					"provider", providerName(t.provider),
+					"names", names)
+			}
 		}
 	}
 
-	return t.base.RoundTrip(req)
+	resp, err := t.base.RoundTrip(req)
+	if err == nil && resp != nil && resp.StatusCode >= 400 {
+		t.logRejectedRequest(resp, req, body)
+	}
+	return resp, err
 }
 
-func fullRequestLogging() bool {
+// logRejectedRequest writes the exact tools bytes of a rejected request.
+//
+// ★ A provider that says "Invalid schema for function 'x': [...] has
+//
+//	non-unique elements" is reporting what its own parser saw, which is not
+//	necessarily what we sent. The only way to settle that is the raw bytes of
+//	the request that actually failed — so this line is unconditional on a
+//	4xx/5xx, with no environment switch. The happy path stays quiet.
+//
+// ★ GetBody is the replay handle http.NewRequest leaves on a buffered body,
+//
+//	so recovering the bytes costs nothing on requests that succeed. When the
+//	full-body switch is on, the bytes are already in memory. Either way the
+//	response body is put back before the caller reads it.
+func (t *loggingTransport) logRejectedRequest(resp *http.Response, req *http.Request, body []byte) {
+	if len(body) == 0 && req.GetBody != nil {
+		rc, err := req.GetBody()
+		if err == nil {
+			b, readErr := io.ReadAll(rc)
+			_ = rc.Close()
+			if readErr == nil {
+				body = b
+			}
+		}
+	}
+
+	detail := ""
+	if resp.Body != nil {
+		b, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		resp.Body = io.NopCloser(bytes.NewReader(b))
+		if err == nil {
+			detail = strings.Join(strings.Fields(string(b)), " ")
+			if len(detail) > 400 {
+				detail = detail[:400]
+			}
+		}
+	}
+
+	raw, names := toolsOfBody(body)
+	attrs := []any{
+		"provider", providerName(t.provider),
+		"status", resp.StatusCode,
+		"detail", detail,
+		"names", names,
+	}
+	if raw == "" {
+		t.log.Warn("[llm] rejected request (no tools bytes available)", attrs...)
+		return
+	}
+	t.log.Warn("[llm] rejected request tools (raw): "+raw, attrs...)
+}
+
+// requestBodyDump resolves env > server/config.yaml > false.
+//
+// ★ An empty environment means "no opinion": the configured value decides.
+//
+//	Any non-empty value is an explicit override for one run — the four
+//	truthy spellings turn it on, everything else (including 0 / false / off)
+//	turns it off. That keeps the old env-only behaviour byte for byte while
+//	giving the project a default.
+func requestBodyDump(configured bool) bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(LogRequestsEnv))) {
+	case "":
+		return configured
 	case "1", "true", "yes", "on":
 		return true
 	default:
@@ -142,6 +249,35 @@ func safeRequestURL(u *url.URL) string {
 	}
 	c.RawQuery = q.Encode()
 	return c.String()
+}
+
+// toolsOfBody returns the tools array exactly as it appears in the request
+// body, plus the names of the tools in it.
+//
+// ★ The array is a json.RawMessage, not a map: unmarshalling it into a Go
+//
+//	value would collapse duplicate keys — the very thing a "non-unique
+//	elements" rejection is about — and would reorder the properties. The
+//	names are a cheap way to tell which agent's tool table produced a
+//	request when several agents share one provider.
+func toolsOfBody(body []byte) (string, []string) {
+	var top struct {
+		Tools json.RawMessage `json:"tools"`
+	}
+	if err := json.Unmarshal(body, &top); err != nil || len(top.Tools) == 0 {
+		return "", nil
+	}
+	var defs []struct {
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}
+	_ = json.Unmarshal(top.Tools, &defs)
+	names := make([]string, 0, len(defs))
+	for _, d := range defs {
+		names = append(names, d.Function.Name)
+	}
+	return string(top.Tools), names
 }
 
 func redactedJSON(body []byte) string {

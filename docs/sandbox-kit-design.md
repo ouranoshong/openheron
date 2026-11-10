@@ -133,7 +133,7 @@ if c.BaseURL == "" {
 ```
 
 —— 然后把 `APIKey` 交给 `acl.NewClient`（`llm/common/model.go`），
-并不要求它非空。`agentkit/obs/httplog/logging.go:177` 会在日志里把 `apikey` 与 `authorization` 头抹掉。
+并不要求它非空。`agentkit/obs/httplog/logging.go:312` 会在日志里把 `apikey` 与 `authorization` 头抹掉。
 
 ### 1.5 会搬进 VM 的那些路径
 
@@ -734,8 +734,8 @@ openheron 自己的出站需求不因这个而改变：
 ★ **代理就是全部的模型。** 每个数据包都从宿主侧的代理出去，
 代理既执行策略也注入凭据 —— 所以"网络策略"和"代理"是一件事，不是两件事。
 openheron 的客户端走的正是它：`agentkit/build/provider.go` 建的是一个
-没有自带 transport 的普通 `http.Client`，`agentkit/obs/httplog/logging.go:51`
-回退到 `http.DefaultTransport`，`agentkit/obs/httplog/logging.go:100` 把往返委派给它 ——
+没有自带 transport 的普通 `http.Client`，`agentkit/obs/httplog/logging.go:74`
+回退到 `http.DefaultTransport`，`agentkit/obs/httplog/logging.go:139` 把往返委派给它 ——
 而 `http.DefaultTransport` 会从环境变量读 `HTTPS_PROXY` 与 `HTTP_PROXY`。
 
 ★ 这正是凭据替换能成立的原因（§2.8），也是要盯着的失败形态：
@@ -1075,7 +1075,7 @@ agent 在工作区里写下的文件，在宿主视角下属于 uid `1000`，
    策略日志里要看到它走在代理路径上，而容器里的环境变量
    装的是哨兵值而不是真密钥。
    一个绕过代理的客户端会把哨兵值送到 API，然后收到一个 401。
-   openheron 的客户端认 `HTTPS_PROXY`（`agentkit/obs/httplog/logging.go:100`
+   openheron 的客户端认 `HTTPS_PROXY`（`agentkit/obs/httplog/logging.go:139`
    委派给 `http.DefaultTransport`），但这一点要被观测到，而不是被假设。
 9. **初始化测试**。一个空工作区必须带着配置起来：
    初始化写出配置、服务启动、配置根就是用户在宿主上看到的那一个。

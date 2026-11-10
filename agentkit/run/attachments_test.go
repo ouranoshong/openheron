@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,11 +30,16 @@ func writeFile(t *testing.T, ws, name string, data []byte) string {
 	return name
 }
 
-// ★ A text file is named in the prompt, with its absolute path.
+// abs is the slash form the @ header uses.
+func abs(ws, name string) string {
+	return filepath.ToSlash(filepath.Join(ws, name))
+}
+
+// ★ A text file is **not** inlined. Its absolute path goes into the @ header,
 //
-//	The model reads it on demand with read_file: inlining the whole file
-//	would spend the context on something the tools can fetch.
-func TestATextAttachmentIsNamedInThePrompt(t *testing.T) {
+//	and the model reads it with read_file. The transcript keeps the user's own
+//	words and the relative path in Extra — the header is a view, not a rewrite.
+func TestATextAttachmentBecomesAnAtPath(t *testing.T) {
 	ws := t.TempDir()
 	writeFile(t, ws, "notes.md", []byte("hello"))
 
@@ -46,22 +52,130 @@ func TestATextAttachmentIsNamedInThePrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	system := in.Messages[0].Content
-	if !strings.Contains(system, "notes.md") {
-		t.Fatalf("the prompt must name the attachment: %s", system)
+	model := in.Messages[1]
+	if !strings.HasPrefix(model.Content, "@"+abs(ws, "notes.md")+"\n\n") {
+		t.Fatalf("the header must name the absolute path first: %q", model.Content)
 	}
-	if !strings.Contains(system, filepath.Join(ws, "notes.md")) {
-		t.Fatalf("the prompt must carry the absolute path: %s", system)
+	if !strings.HasSuffix(model.Content, "what does it say?") {
+		t.Fatalf("the user's words must follow the header: %q", model.Content)
 	}
-	if len(in.Messages[1].UserInputMultiContent) != 0 {
-		t.Fatal("a text file must not become a multimodal part")
+	if len(model.UserInputMultiContent) != 0 {
+		t.Fatalf("a text attachment must not become a part: %d parts", len(model.UserInputMultiContent))
+	}
+
+	if msg.Content != "what does it say?" {
+		t.Fatalf("the transcript lost its text: %q", msg.Content)
+	}
+	if len(msg.UserInputMultiContent) != 0 {
+		t.Fatal("the transcript gained parts")
+	}
+	atts, ok := message.ReadAttachments(msg)
+	if !ok || len(atts) != 1 || atts[0].Path != "notes.md" {
+		t.Fatalf("Extra must keep the workspace-relative path: %+v", atts)
 	}
 }
 
-// ★ An image becomes a multimodal part, so the model *sees* it.
+// ★ The rules are always present, because a history message can carry an @
 //
-//	A path would not do: the model would have to read the image as text, and
-//	an image read as text is noise.
+//	header even when the current turn has no attachments at all.
+func TestTheRulesExplainTheHeaderAndChunkedReading(t *testing.T) {
+	in, err := InputConfig{}.buildInput(context.Background(), inputParams{Workspace: t.TempDir()},
+		schema.UserMessage("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	system := in.Messages[0].Content
+	for _, want := range []string{"MUST call read_file", "offset and limit", "2000 lines", "cannot be processed yet"} {
+		if !strings.Contains(system, want) {
+			t.Fatalf("the prompt must say %q: %s", want, system)
+		}
+	}
+	if strings.Contains(system, "The user attached files that cannot be processed yet") {
+		t.Fatal("a turn without attachments must not name any blocked file")
+	}
+}
+
+// ★ Every readable file gets its own @ line, in the order the user sent them.
+//
+//	★ The MIME says octet-stream for a .go file and an SVG; the extension is
+//	  the second opinion that keeps both readable.
+func TestEveryReadableFileGetsItsOwnAtLine(t *testing.T) {
+	ws := t.TempDir()
+	writeFile(t, ws, "notes.md", []byte("hello"))
+	writeFile(t, ws, "main.go", []byte("package main"))
+
+	msg := schema.UserMessage("explain these")
+	message.StampAttachments(msg, []message.Attachment{
+		{Name: "notes.md", Path: "notes.md", Size: 5, MIME: "text/markdown"},
+		{Name: "main.go", Path: "main.go", Size: 12, MIME: "application/octet-stream"},
+		{Name: "logo.svg", Path: "logo.svg", Size: 3, MIME: "application/octet-stream"},
+	})
+
+	in, err := InputConfig{}.buildInput(context.Background(), inputParams{Workspace: ws}, msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := in.Messages[1].Content
+	first := strings.Index(content, abs(ws, "notes.md"))
+	second := strings.Index(content, abs(ws, "main.go"))
+	third := strings.Index(content, abs(ws, "logo.svg"))
+	if first < 0 || second < 0 || third < 0 || !(first < second && second < third) {
+		t.Fatalf("the @ lines must all appear, in attachment order: %q", content)
+	}
+	if strings.Count(content, "@") != 3 {
+		t.Fatalf("want three @ paths, got %q", content)
+	}
+}
+
+// ★ A path with whitespace is quoted, the same form the composer inserts.
+func TestAPathWithSpacesIsQuoted(t *testing.T) {
+	ws := t.TempDir()
+	writeFile(t, ws, "my notes.md", []byte("hello"))
+
+	msg := schema.UserMessage("what does it say?")
+	message.StampAttachments(msg, []message.Attachment{
+		{Name: "my notes.md", Path: "my notes.md", Size: 5, MIME: "text/markdown"},
+	})
+
+	in, err := InputConfig{}.buildInput(context.Background(), inputParams{Workspace: ws}, msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `@"` + abs(ws, "my notes.md") + `"`
+	if !strings.HasPrefix(in.Messages[1].Content, want) {
+		t.Fatalf("the quoted path must lead the message: %q", in.Messages[1].Content)
+	}
+}
+
+// ★ A binary attachment is **not** named by an @ path. Giving the model a
+//
+//	path to a PDF invites it to read binary bytes as text, which produces
+//	noise that looks like content. The prompt says it cannot be processed.
+func TestABinaryAttachmentIsNamedAsUnprocessable(t *testing.T) {
+	ws := t.TempDir()
+	msg := schema.UserMessage("what is in the archive?")
+	message.StampAttachments(msg, []message.Attachment{
+		{Name: "bundle.zip", Path: "bundle.zip", Size: 100, MIME: "application/zip"},
+	})
+
+	in, err := InputConfig{}.buildInput(context.Background(), inputParams{Workspace: ws}, msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := in.Messages[1]
+	if strings.HasPrefix(model.Content, "@") {
+		t.Fatalf("a binary file must not get an @ path: %q", model.Content)
+	}
+	if model.Content != "what is in the archive?" {
+		t.Fatalf("the user's words must be untouched: %q", model.Content)
+	}
+	system := in.Messages[0].Content
+	if !strings.Contains(system, "bundle.zip") || !strings.Contains(system, "cannot be processed yet") {
+		t.Fatalf("the prompt must say the file is unavailable: %s", system)
+	}
+}
+
+// ★ A picture still becomes a multimodal part, so the model *sees* it.
 func TestAnImageAttachmentBecomesAMultimodalPart(t *testing.T) {
 	ws := t.TempDir()
 	writeFile(t, ws, "shot.png", pngBytes)
@@ -76,8 +190,6 @@ func TestAnImageAttachmentBecomesAMultimodalPart(t *testing.T) {
 		t.Fatal(err)
 	}
 	parts := in.Messages[1].UserInputMultiContent
-	// ★ The text is a part too: the wire has one `content` field, and it is
-	//   either a string or a list — never both.
 	if len(parts) != 2 {
 		t.Fatalf("the message carries %d parts, want the text and the picture", len(parts))
 	}
@@ -90,28 +202,22 @@ func TestAnImageAttachmentBecomesAMultimodalPart(t *testing.T) {
 	if parts[1].Image.MIMEType != "image/png" {
 		t.Fatalf("mime = %q, want image/png", parts[1].Image.MIMEType)
 	}
-	if *parts[1].Image.Base64Data == "" {
-		t.Fatal("the image carries no bytes")
+	if *parts[1].Image.Base64Data != base64.StdEncoding.EncodeToString(pngBytes) {
+		t.Fatal("the image carries the wrong bytes")
 	}
 }
 
-// ★ The message the model sees must not carry its text **and** its parts.
+// ★ The header precedes the question even when a picture is present: the
 //
-//	★ The wire has one `content` field that is either a string or a list,
-//	  and the openai adapter builds both when a message carries a Content
-//	  and a multi-content at the same time. The client then refuses to
-//	  marshal the request: "can't use both Content and MultiContent
-//	  properties simultaneously" — and the turn dies on a picture the user
-//	  attached.
-//
-//	So the text moves into a text part and Content is cleared.
-func TestAMessageWithAPictureCarriesNoContentBesideItsParts(t *testing.T) {
+//	wire has one content field, so the body moves into the first text part.
+func TestAnAtHeaderAndAPictureShareOneWireShape(t *testing.T) {
 	ws := t.TempDir()
 	writeFile(t, ws, "shot.png", pngBytes)
 
 	msg := schema.UserMessage("what is in this picture?")
 	message.StampAttachments(msg, []message.Attachment{
 		{Name: "shot.png", Path: "shot.png", Size: int64(len(pngBytes)), MIME: "image/png"},
+		{Name: "notes.md", Path: "notes.md", Size: 5, MIME: "text/markdown"},
 	})
 
 	in, err := InputConfig{}.buildInput(context.Background(), inputParams{Workspace: ws}, msg)
@@ -123,19 +229,59 @@ func TestAMessageWithAPictureCarriesNoContentBesideItsParts(t *testing.T) {
 		t.Fatalf("the message still carries its text: %q", model.Content)
 	}
 	parts := model.UserInputMultiContent
-	if len(parts) != 2 {
-		t.Fatalf("the message carries %d parts, want the text and the picture", len(parts))
+	if len(parts) != 2 || parts[0].Type != schema.ChatMessagePartTypeText || parts[1].Type != schema.ChatMessagePartTypeImageURL {
+		t.Fatalf("want a text part and a picture, got %d parts: %+v", len(parts), parts)
 	}
-	// ★ The text comes first: it is the question, and the picture is what
-	//   it is about.
-	if parts[0].Type != schema.ChatMessagePartTypeText {
-		t.Fatalf("the first part is a %q, want the text", parts[0].Type)
+	if !strings.HasPrefix(parts[0].Text, "@"+abs(ws, "notes.md")+"\n\nwhat is in this picture?") {
+		t.Fatalf("the @ header must lead the text part: %q", parts[0].Text)
 	}
-	if parts[0].Text != "what is in this picture?" {
-		t.Fatalf("the text part carries %q", parts[0].Text)
+}
+
+// ★ There is no fallback for a picture over the limit: the model is told the
+//
+//	file cannot be processed, and is not given a path to read as text.
+func TestAnOversizedImageIsNamedAsUnprocessable(t *testing.T) {
+	ws := t.TempDir()
+	big := make([]byte, maxInlineImageBytes+1)
+	writeFile(t, ws, "huge.png", big)
+
+	msg := schema.UserMessage("what is in this picture?")
+	message.StampAttachments(msg, []message.Attachment{
+		{Name: "huge.png", Path: "huge.png", Size: int64(len(big)), MIME: "image/png"},
+	})
+
+	in, err := InputConfig{}.buildInput(context.Background(), inputParams{Workspace: ws}, msg)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if parts[1].Type != schema.ChatMessagePartTypeImageURL {
-		t.Fatalf("the second part is a %q, want the picture", parts[1].Type)
+	if len(in.Messages[1].UserInputMultiContent) != 0 {
+		t.Fatal("an oversized image must not be inlined")
+	}
+	if strings.Contains(in.Messages[1].Content, "@") {
+		t.Fatalf("an oversized image must not get an @ path: %q", in.Messages[1].Content)
+	}
+	system := in.Messages[0].Content
+	if !strings.Contains(system, "huge.png") || !strings.Contains(system, "cannot be processed") {
+		t.Fatalf("the prompt must say the picture is unavailable: %s", system)
+	}
+}
+
+// ★ A turn with only a file and no text still asks the question: the @ header
+//
+//	is the whole message, and the model knows what to read.
+func TestAFileOnlyTurnStillAsks(t *testing.T) {
+	ws := t.TempDir()
+	msg := schema.UserMessage("")
+	message.StampAttachments(msg, []message.Attachment{
+		{Name: "notes.md", Path: "notes.md", Size: 5, MIME: "text/markdown"},
+	})
+
+	in, err := InputConfig{}.buildInput(context.Background(), inputParams{Workspace: ws}, msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(in.Messages[1].Content, "@"+abs(ws, "notes.md")) {
+		t.Fatalf("the @ header is the question: %q", in.Messages[1].Content)
 	}
 }
 
@@ -162,15 +308,12 @@ func TestTheTranscriptMessageCarriesNoBase64(t *testing.T) {
 	if msg.Content != "what is in this picture?" {
 		t.Fatalf("the persisted message lost its text: %q", msg.Content)
 	}
-	// ★ The stamps are still there: the copy shares them.
 	if _, ok := message.ReadAttachments(msg); !ok {
 		t.Fatal("the persisted message lost its attachment list")
 	}
 }
 
-// ★ A turn with only a picture and no text still asks the question.
-//
-//	The text part is absent, and the picture is alone in the list.
+// ★ A picture alone, with no text, is still a question the model can see.
 func TestAPictureOnlyTurnStillAsks(t *testing.T) {
 	ws := t.TempDir()
 	writeFile(t, ws, "shot.png", pngBytes)
@@ -190,42 +333,11 @@ func TestAPictureOnlyTurnStillAsks(t *testing.T) {
 	}
 }
 
-// ★ An image over the limit falls back to a path — and the model is told.
-//
-//	★ The point is that it is **not** silent: a model that believes it saw
-//	  an image answers about an image it never saw.
-func TestAnOversizedImageFallsBackToAPathAndSaysSo(t *testing.T) {
-	ws := t.TempDir()
-	// Just over the limit.
-	big := make([]byte, maxInlineImageBytes+1)
-	writeFile(t, ws, "huge.png", big)
-
-	msg := schema.UserMessage("what is in this picture?")
-	message.StampAttachments(msg, []message.Attachment{
-		{Name: "huge.png", Path: "huge.png", Size: int64(len(big)), MIME: "image/png"},
-	})
-
-	in, err := InputConfig{}.buildInput(context.Background(), inputParams{Workspace: ws}, msg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(in.Messages[1].UserInputMultiContent) != 0 {
-		t.Fatal("an oversized image must not be inlined")
-	}
-	system := in.Messages[0].Content
-	if !strings.Contains(system, "huge.png") {
-		t.Fatalf("the prompt must still name the file: %s", system)
-	}
-	if !strings.Contains(system, "not inlined") {
-		t.Fatalf("the prompt must say it was not inlined: %s", system)
-	}
-}
-
 // ★ A missing file does not fail the turn.
 //
 //	The attachment was resolved when the request arrived, so this is the
-//	race where the file disappears in between. The turn still answers: the
-//	model is told the file is not there, and the question is still asked.
+//	race where the file disappears in between. The @ path is still named;
+//	read_file will tell the model the file is gone, and the user too.
 func TestAMissingFileDoesNotFailTheTurn(t *testing.T) {
 	ws := t.TempDir()
 
@@ -238,8 +350,41 @@ func TestAMissingFileDoesNotFailTheTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a missing file must not fail the turn: %v", err)
 	}
-	if len(in.Messages) < 2 {
-		t.Fatal("the input must still carry the question")
+	if !strings.HasPrefix(in.Messages[1].Content, "@") {
+		t.Fatalf("the @ path must still be named: %q", in.Messages[1].Content)
+	}
+}
+
+// ★ "That file you just sent" only works if the header is rebuilt for history.
+//
+//	★ Extra is not part of what the model sees, and the transcript never
+//	  stores the absolute path. Without this pass the later question would
+//	  name no file at all.
+func TestAnEarlierMessagesAtHeaderIsRebuilt(t *testing.T) {
+	ws := t.TempDir()
+	earlier := schema.UserMessage("here are the notes")
+	message.StampAttachments(earlier, []message.Attachment{
+		{Name: "notes.md", Path: "notes.md", Size: 5, MIME: "text/markdown"},
+	})
+
+	in, err := InputConfig{}.buildInput(context.Background(), inputParams{
+		History:   []*schema.Message{earlier},
+		Workspace: ws,
+	}, schema.UserMessage("what did that file say?"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(in.Messages) != 3 {
+		t.Fatalf("want system, history and query, got %d messages", len(in.Messages))
+	}
+	if !strings.HasPrefix(in.Messages[1].Content, "@"+abs(ws, "notes.md")) {
+		t.Fatalf("the earlier message lost its @ header: %q", in.Messages[1].Content)
+	}
+	if earlier.Content != "here are the notes" {
+		t.Fatalf("the persisted history was rewritten: %q", earlier.Content)
+	}
+	if strings.Contains(in.Messages[2].Content, "@") {
+		t.Fatalf("the current turn has no attachments of its own: %q", in.Messages[2].Content)
 	}
 }
 
@@ -255,7 +400,10 @@ func TestAMessageWithoutAttachmentsIsUnchanged(t *testing.T) {
 	if len(in.Messages[1].UserInputMultiContent) != 0 {
 		t.Fatal("a message with no attachments must carry no parts")
 	}
-	if strings.Contains(in.Messages[0].Content, "attached") {
-		t.Fatalf("the prompt must not mention attachments: %s", in.Messages[0].Content)
+	if in.Messages[1] != msg {
+		t.Fatal("a message with no attachments must be the same object")
+	}
+	if in.Messages[1].Content != "hello" {
+		t.Fatalf("the message gained a header: %q", in.Messages[1].Content)
 	}
 }

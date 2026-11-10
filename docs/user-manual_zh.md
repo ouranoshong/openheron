@@ -449,6 +449,7 @@ allows: [read_issue, list_issues]
 | `lease_ttl` | `10m` | 一轮在没有进展的情况下能持有多久的租约——**必须长于 provider 自己的超时** |
 | `agent.max_depth` | `1` | 委派深度上限 |
 | `log_level` | `info` | `debug`、`info`、`warn`、`error` —— 决定哪些行会进输出 |
+| `log_requests` | `false` | 是否在 `debug` 下打印脱敏后的模型请求体与 `tools` 原始字节；等价于 `OPENHERON_LOG_LLM_REQUESTS=1` |
 | `log.file` | `""` | 日志写到的文件，相对**配置根**解析 —— 空串 = 只写标准错误 |
 
 ★ **`server/` 不热重载** —— 改了要重启才生效。所以配置编辑器里它是**只读**的，
@@ -456,7 +457,12 @@ allows: [read_issue, list_issues]
 
 以下环境变量可以覆盖进程参数，优先级高于配置文件：
 `LISTEN_ADDR`、`DATA_DIR`、`PROJECT_ROOT`、`FRONTEND_MODE`、`STATIC_DIR`、`OPENHERON_LOG_LEVEL`、
-`OPENHERON_LOG_FILE`。
+`OPENHERON_LOG_FILE`、`OPENHERON_LOG_LLM_REQUESTS`。
+
+★ `log_requests` 与 `OPENHERON_LOG_LLM_REQUESTS` 是同一个开关的两种写法：前者定项目默认值，
+后者给单次运行下定论（**环境变量优先**，变量为空才看配置）。打开后每次模型请求会在 `debug`
+下记一行脱敏后的请求体和一行 `tools` 原始字节；两个都关着时，**被拒绝的请求**仍会留下
+`tools` 原始字节，因为那一轮最需要留证。它只管内容，不关 `log.file` 的落盘。
 
 ★ `log_level` 不是这四个之一时回退 `info`；配置的 `deferred` 提示里带着原因。
 
@@ -910,11 +916,13 @@ This session is running in another window — stop it to take over
 本身。已经发出去的文件留在那条消息上 —— 几周之后刷新一下，你仍然看得出
 当时发的是哪一个文件。
 
-★ **模型是真的拿到它们了。** 文本类文件以路径的形式交给模型，它可以用
-`read_file` 去读；图片是作为图片放进请求里的，所以模型是**看见**它，而不是把
-字节当文本读。★ 太大而没法内联的图片会退回到路径，而且**模型会被告知**它
-没有内联 —— 于是它绝不会声称自己看见了一张没看见的图。★ **模型自己看不见图**
-也一样：这一轮照跑 —— 同一个问题去掉图片再问一遍，并且模型会被告知图片没了。
+★ **模型是真的拿到它们了 —— 靠自己去打开。** 图片是作为图片放进去的，所以模型是
+**看见**它，而不是把字节当文本读；其它文本文件在消息开头以 `@` 行的形式给出绝对
+路径，模型用 `read_file` 去读。★ 文件内容不在请求里，所以模型第一件事就是打开那个
+文件 —— 文件很大时用 `offset` 和 `limit` 分段读。★ 二进制附件（PDF、压缩包）会在
+提示词里被标成「暂时不能处理」：模型会如实告诉你，而不是假装读过。
+★ **没有自动兜底。** 模型看不了图片时，这一轮会带着 provider 的错误结束；模型没去
+读的文件也不会在背后重发一遍。如果回答看起来像是没读过文件，就再提示模型读一次。
 
 ★ **收下图片不等于看见图片。** 图片有没有真的进到模型的眼里，是 provider 的事：
 有的模型会读它，有的模型收下请求却不看它（DeepSeek 的 `deepseek-v4-pro` 就是

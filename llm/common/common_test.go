@@ -240,6 +240,27 @@ func TestBadRequestHintUsesConfiguredKeys(t *testing.T) {
 	}
 }
 
+// ★ "verify base_url / model name" sent a whole debugging session down the
+//
+//	wrong path: this 400 is the provider's own tool-schema parser reporting
+//	what it saw, not a bad endpoint or model.
+func TestBadRequestHintNamesToolSchemaValidation(t *testing.T) {
+	e := &APIError{Kind: KindBadRequest, Message: "Invalid schema for function 'glob': " +
+		`["path","path"] has non-unique elements`}
+	h := badRequestHint(e, nil)
+	for _, want := range []string{"tool-schema", "resend", "rejected request tools"} {
+		if !strings.Contains(h, want) {
+			t.Fatalf("hint %q is missing %q", h, want)
+		}
+	}
+	if strings.Contains(h, "verify base_url") {
+		t.Fatalf("the generic hint must not be used here: %q", h)
+	}
+	if h2 := badRequestHint(&APIError{Kind: KindBadRequest, Message: "unknown field"}, nil); !strings.Contains(h2, "verify base_url") {
+		t.Fatalf("an unrelated 400 should keep the generic hint: %q", h2)
+	}
+}
+
 func TestContextCanceledPassesThrough(t *testing.T) {
 	if got := wrap(context.Canceled, nil); !errors.Is(got, context.Canceled) {
 		t.Fatalf("context.Canceled must pass through unchanged, got %#v", got)

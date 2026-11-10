@@ -64,7 +64,6 @@ func New(ctx context.Context, c *Config) (*ChatModel, error) {
 	// ★ The client arrives already wrapped by the assembly layer
 	// (agentkit/obs/httplog). Request logging is observation, not protocol,
 	// and this package keeps zero openheron dependencies.
-
 	cli, err := acl.NewClient(ctx, &acl.Config{
 		APIKey:      c.APIKey,
 		BaseURL:     c.BaseURL,
@@ -88,22 +87,14 @@ func (cm *ChatModel) Generate(ctx context.Context, in []*schema.Message,
 	//   carry both — see [normalizeWireShape].
 	in = normalizeWireShape(in)
 
+	// ★ One request, no second attempt. Attachments are paths in the message,
+	//
+	//	not file or image blocks on the wire: there is nothing here to strip on
+	//	failure. A provider that refuses a picture fails the turn with its own
+	//	error, and the user can retry with a different model or prompt — an
+	//	automatic retry without the picture used to hide that refusal.
 	out, err := cm.cli.Generate(ctx, in, opts...)
-	if err == nil {
-		return out, nil
-	}
-	// ★ A model with no vision refuses the whole request, and the turn dies
-	//   on a picture the user attached. The files are still there, so the
-	//   second attempt is the same question without the pictures — and the
-	//   model is told (see [withoutImages]).
-	stripped, ok := withoutImages(in)
-	if !ok {
-		return nil, wrap(err, cm.hintKeys)
-	}
-	out, retryErr := cm.cli.Generate(ctx, stripped, opts...)
-	if retryErr != nil {
-		// ★ The failure was not about the pictures: the first error is the
-		//   real reason.
+	if err != nil {
 		return nil, wrap(err, cm.hintKeys)
 	}
 	return out, nil
@@ -116,18 +107,11 @@ func (cm *ChatModel) Stream(ctx context.Context, in []*schema.Message,
 	// ★ The same settling as Generate, and for the same reason.
 	in = normalizeWireShape(in)
 
+	// ★ The same one-request rule as Generate: a stream that fails before it
+	//
+	//	opens is reported, not retried with the attachment quietly removed.
 	out, err := cm.cli.Stream(ctx, in, opts...)
-	if err == nil {
-		return attributingStream(out, cm.hintKeys), nil
-	}
-	// ★ The same fallback as Generate: the request is refused before the
-	//   stream opens, so the retry is still a whole second attempt.
-	stripped, ok := withoutImages(in)
-	if !ok {
-		return nil, wrap(err, cm.hintKeys)
-	}
-	out, retryErr := cm.cli.Stream(ctx, stripped, opts...)
-	if retryErr != nil {
+	if err != nil {
 		return nil, wrap(err, cm.hintKeys)
 	}
 	return attributingStream(out, cm.hintKeys), nil

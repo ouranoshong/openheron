@@ -27,6 +27,35 @@ workspace 里，与任何一条消息都没有关系；消息发出时附件就�
 
 ---
 
+## 0.1 ★ 当前实现（2026-11-10 起，代码以此为准）
+
+2026-11-10 决定：**非图片附件不再内联、不再上线 file 块、不再有任何降级重试。**
+本文 §4.4.1 之后的许多段落（尤其 **§15 全节**、§6.1 的图片降级、§7 的落地
+清单与后文的验收表）是上一版实现的快照，保留作历史；**描述现状时以下表为准**。
+
+| 环节 | 现在的代码 | 落点 |
+|---|---|---|
+| 绑定 | 附件清单仍是消息级，`Extra` 存 workspace 相对的 `path` | `message/attachment.go`、`api/v2_attachments.go` |
+| 呈现 | 非图片**文本**附件在模型副本的消息头插入一行 `@绝对路径`；transcript 的 `Content` 不动 | `agentkit/run/attachments.go` 的 `attachmentPaths` / `presentMessage` |
+| 回看 | 历史消息按 `Extra` 重建 `@` 头，不重新内联图片 | `agentkit/run/input.go` 的 `withHistoryAttachmentPaths` |
+| 图片 | 仍是 `inlineImage` 的 image part，上限 `maxInlineImageBytes`；超限图片与二进制附件列入提示词「暂时不能处理」，**不给路径** | `agentkit/run/attachments.go` |
+| wire | `llm/common/model.go` 一次请求；`llm/common/files.go`、`llm/common/vision.go` 及各自测试**已删除** | — |
+| 指令 | 上下文提示词把 `read_file` 写成义务，大文件用 `offset` / `limit` 分段读；模型没读由**用户再提示一次**，没有自动兜底 | `agentkit/run/input.go` 的 `attachmentRules` |
+
+★ **绝对路径是硬要求**：`agentkit/fsx/fsx.go` 的 `resolve` 把相对路径按**项目根**
+解析，而 `Extra` 里的 `path` 是 **workspace 相对** —— 直接把那个相对名字交给
+`read_file` 会读到另一个文件（甚至项目根下的同名文件）。★ 路径含空白时写成
+`@"..."`，提示词让模型调用时去掉引号。
+
+★ `read_file` 的 `offset` / `limit` 定义在
+`eino@v0.9.22/adk/middlewares/filesystem/filesystem.go:585-593`，工具层默认
+一次最多返回 2000 行（同文件 `:181` 的用例验证）—— 分段读取不是一句口号，
+工具真的支持。★ 二进制附件（PDF、压缩包等）先按 MIME 与扩展名判为
+「暂时不能处理」，**不给** `@` 路径：对非文本字节调用 `read_file` 只会得到噪声。
+这一块留待后续优化。
+
+---
+
 ## 1. 问题：现状是什么，缺的是什么
 
 ### 1.1 已经有的部分（比「没做」要多）
@@ -403,6 +432,11 @@ func (c InputConfig) buildInput(ctx context.Context, p inputParams, query *schem
 装配函数不用知道附件是什么，它只需要把消息原样交给模型。
 
 #### 4.4.1 文本类附件：给路径
+
+> ★ **本节先被 §15 推翻，随后 §15 也在同一天废弃（2026-11-10）**。
+> 当前实现见 §0.1：文本附件在消息头给一行 `@` 绝对路径，由模型用
+> `read_file` 读；不内联、不进 file 块、没有降级。下面这段「只给路径」的
+> 论证保留下来，记的是当时为什么那么想。
 
 模型已经有 `read_file`（fsx 后端），workspace 也在 `ExtraRoots` 里
 （`agentkit/build/snapshot.go:59`）。所以文本附件**不需要内联**，
@@ -1016,6 +1050,8 @@ ContextWindow / SummarizeAt / Timeout / Reasoning* / Extra，**没有 vision 字
 | 11 | `agentkit/emit/emit.go`（**已做**） | ★ 流式消息盖上自己的 msgID（见 §4.7.3） |
 | 12 | `llm/common/vision.go`（**新增，已做**） | ★ 模型没有视觉时的降级：去掉图片重问一遍，并告知模型（§6.1） |
 | 13 | `llm/common/shape.go`（**新增，已做**） | ★ **形状在 wire 边界统一**（§4.4.4）：正文挪进 text part、`Content` 清空、废弃的 `MultiContent` 清空 |
+| 14 | `llm/common/files.go`（**新增，已做**） | ★ **file 块上 wire**（§15）：标记、file 块（扁平）、transport、端点拒绝时的降级 |
+| 15 | `llm/common/model.go`（**已做**） | ★ 装 transport；file part 备成标记；降级链接上「先文件、后图片」 |
 
 ### 7.2 前端
 
@@ -1047,6 +1083,7 @@ ContextWindow / SummarizeAt / Timeout / Reasoning* / Extra，**没有 vision 字
 | 11 | `web/test/e2e/attachments.spec.ts`（**新增，已落地**） | ★ 附件随消息发出、出现在历史里、刷新不丢、拖拽、粘贴、★ × 删的是真文件 |
 | 12 | `llm/common/vision_test.go`（**新增，已落地**） | ★ 拒绝图片的 provider 也能答；★ 重试不带图；★ 模型被告知；★ 别的错照原样报；★ 没有图就不重试 |
 | 13 | `llm/common/shape_test.go`（**新增，已落地**） | ★ 双形状的消息到了 wire 只剩一种形状；★ 正文进 part、图片保位；★ 原消息不动；★ 单形状不复制；★ 盖章跟着走；★ 废弃字段被清空 |
+| 14 | `llm/common/files_test.go`（**新增，已落地**） | ★ file part 在 wire 上是**扁平**的 file 块；★ 标记不漏到端点；★ 端点拒绝 file 块时这一轮仍然答得出来，重试带的是**文件内容**；★ 二进制文件被去掉且模型被告知；★ 标记不留在消息上；★ 没有文件的请求原样发出（§15.8） |
 
 ★ AGENTS.md 要求「**每一处界面改动都要有 Playwright 规格**」——
 拖拽、粘贴、chip 渲染三处都有（`attachments.spec.ts`）。
@@ -1066,6 +1103,7 @@ ContextWindow / SummarizeAt / Timeout / Reasoning* / Extra，**没有 vision 字
 | 7 | **不做 WebP 与 GIF 的压缩** | Go 没有 WebP 编码器；GIF 解码只取第一帧，压缩等于毁掉动画。§13.5 |
 | 8 | **不做基于内容的去重** | 哈希的输入是「名+大小+mtime」，它解决的是**命名唯一**（不覆盖），不是「同一张图只存一份」。后者要内容哈希，是另一件事 |
 | 9 | **不改写已有的旧文件** | 旧会话里的文件没压也没改名，**继续能用**（§13.8）。回写它们要读每一个文件、猜它当初的样子 —— 猜错了就是改坏用户的记录 |
+| 10 | **不做 Files API 的 `file_id` 形态** | ★ 那条路要先用 Files API 把文件传上去，拿到 `file-api-...` 才能填（§15.2）。而 DeepSeek 的 file 块**只收图片** —— 文本文件两条路都会被拒，所以它解决不了文本附件的问题；它要付出的代价是**文件先上传给第三方**，还要管 file_id 的生命周期。2026-11-10 决定：先不做 |
 
 ---
 
@@ -1695,5 +1733,182 @@ chip 用 `max=320`，放大用原图（不带 `max`）。
 | 位置 | 用例 |
 |---|---|
 | `api` | ★ raw 端点返回图片的原始字节与 `image/*`；★ 文本类返回 **`text/plain; charset=utf-8`**（不是它自己的 MIME —— 这是 XSS 的那道闸）；★ PDF 返回 `application/pdf`；★ 其它返回 `application/octet-stream` + `Content-Disposition: attachment`；★ `max=320` 的图比原图小；★ 越界路径被拒；★ 不存在的文件是 404 |
+
+---
+
+## 15. ★ 文件进 content：file 块（**已废弃**，2026-11-10 当日撤回）
+
+> ★ **整节是历史记录，不要再照它改代码。** 这一版把非图片附件做成
+> `file_data` 块并配了 `withoutFiles` 降级链；同日晚些时候决定改成
+> 「消息头 `@` 绝对路径 + 模型 `read_file`」，`llm/common/files.go`、
+> `llm/common/files_test.go`、`llm/common/vision.go`、
+> `llm/common/vision_test.go` 全部删除，`llm/common/model.go` 收敛为一次请求。
+> **当前实现以 §0.1 为准。** 下面的接口形状与实测数据留着，是因为它们解释过
+> 为什么那条路走不通，以及为什么撤回。
+
+### 15.1 问题：文件不在 content 里
+
+§4.4.1 原来的决定是「文本类附件只给路径，模型用 `read_file` 读」。
+那条决定在**图片**上是对的，在**其它文件**上不对：用户要的是
+「我发的东西，模型在这一次请求里就看见了」，而一条只有路径的消息，
+模型这一轮是**没有**那个文件的。
+
+★ **2026-11-10 的要求**：上传的文件必须作为 chat completions 的
+**content block** 进 user message 的 `content`。
+
+★ 依据是 chat completions 接口本身：`messages[].content` 可以是
+`string | object[]`，数组元素有三种 —— `text` / `image_url` / `file`，
+而 `file` 块用 `file_id` 或 `file_data`（base64 data URL），
+`filename` 可选。
+
+★ **§4.4.1 的结论就此作废**：文本文件不再只给路径。路径仍然给
+（模型可以再读一次），但内容**也**进 content。
+
+### 15.2 形状：扁平的 file part
+
+```json
+{
+  "role": "user",
+  "content": [
+    { "type": "text", "text": "这个文件里写了什么？" },
+    { "type": "file", "file_data": "data:text/markdown;base64,IyBNYWdp...", "filename": "notes.md" }
+  ]
+}
+```
+
+★ **是扁平的**：`file_data` 与 `filename` 和 `type` **同级**，
+外面没有 `"file"` 对象。
+
+这一条是踩出来的：`go-openai` 的 `ChatMessagePart` 把文件建模成
+`{"type":"file","file":{...}}`（嵌套），第一版就照它写了，
+端点回的是
+
+```
+400 file must have a file_id or file_data
+```
+
+—— 它读到了那个 part，却在自己该找字段的地方没找到。
+改成扁平之后，同一个端点的下一句变成了「这是**不支持的文件格式**」
+（§15.4），也就是说：**形状对了，它开始看内容了**。
+
+★ `file_id` 与 `file_data` **互斥**，且必居其一。本次**不做** `file_id`
+那条路（2026-11-10 的决定）：它要先用 Files API 把文件传上去，
+拿到 `file-api-...` 才能填，而 DeepSeek 的 file 块**只收图片**
+（webp/png/jpeg/gif）—— 文本文件两条路都会被拒，
+所以那条路解决不了文本附件的问题。
+
+### 15.3 ★ 适配器造不出这个块：标记 + transport
+
+eino 的 schema **有**这个 part（`schema.ChatMessagePartTypeFileURL`
+配 `schema.MessageInputFile`，`eino@v0.9.22/schema/message.go`），
+go-openai 的 `ChatMessagePart` 也**有** `File` 字段 ——
+但中间那个适配器不认：
+
+```
+eino-ext/libs/acl/openai@v0.1.17/chat_model.go
+  buildMessageFromUserInputMultiContent
+```
+
+它的转换器只处理 text / audio_url / image_url / video_url，
+`file_url` 落进 default 分支，**在发出一个字节之前**就报
+`unsupported chat message part type: file_url`。
+
+★ 能改 body 的钩子只有一个：`acl.WithRequestPayloadModifier`。
+但它**只留一个** modifier，而 reasoning 字段改名已经用了它
+（`llm/common/request.go:100`）。再加一个就把前一个**顶掉**了 ——
+reasoning 内容会悄悄不再改名。
+
+★ 所以走的是**最后一道**：标记 + transport。
+
+| 步骤 | 位置 | 做什么 |
+|---|---|---|
+| 装配 | `agentkit/run/attachments.go` `inlineFile` | 产出 eino 的 file part（语义正确，transcript 不碰） |
+| 备件 | `llm/common/files.go` `prepareFileParts` | 把 file part 换成一个**标记**（一个 text part） |
+| 上线 | `llm/common/files.go` `fileTransport` | 在 body 的最后一步，把标记换回**真的 file 块** |
+
+★ 标记是**纯 ASCII**（`[[openheron-file:` … `]]`）。第一版用的是
+U+2063 不可见分隔符，结果是**静默失效**：某些 JSON 编码器会把它
+写成 `\u2063`，transport 就找不到自己的标记，于是文件变成一大坨
+base64 文本发给模型 —— 没有报错，什么都没坏，就是不对。
+**能扛住所有编码器的标记，比用户打不出来的标记值钱。**
+
+★ transport 是 body 的**最后一个**触碰点，所以它跟 reasoning 改名
+那种 modifier 是**叠加**而不是竞争。
+
+### 15.4 ★ 降级链：端点不认 file 块时，文件还在
+
+```
+1. file 块（接口的形状）
+2. 端点拒绝 → 文本文件：内容作为 text part 进 content
+             二进制文件：去掉，并明确告知模型
+3. 端点拒绝 → 图片：去掉图片，并明确告知模型（§6.1）
+```
+
+★ 第 2 级不是「把文件丢了」：文本文件的内容**仍然在 content 里**，
+模型不用再调一次 `read_file`。这是实测里 DeepSeek 的走法：
+
+```
+400 You have uploaded an unsupported file. Please make sure your file is
+    valid and has one of the following formats: webp, png, jpeg, and gif.
+```
+
+—— DeepSeek 的 file 块**只收图片**。所以对 DeepSeek 而言，
+文本附件走的是第 2 级：内容以 text part 进 content。
+
+★ 二进制文件不能这么做：它的字节放进 text part 是噪声。
+那种情况是**去掉 + 明确告知**，路径还在提示词里，
+模型可以用 `read_file` 读。
+
+★ 「明确告知」是硬要求：模型不知道自己的文件没了，
+就会回答一个它从没读过的文件，而用户分不出
+「模型读了但没找到」和「模型根本没读」。
+
+### 15.5 token 代价
+
+★ 内联只发生在**本轮**：transcript 里存的是**引用**
+（§4.4.2 那条规则不变），每个请求现读盘、现编码。
+
+★ 但一轮之内**会重复**：工具循环里的每一次模型调用都会带上
+这一轮的文件内容（同一个消息对象在 ADK 的消息列表里）。
+历史里的旧轮次**不**重新内联 —— 那一轮的附件只有路径。
+
+### 15.6 验收（真实端点，deepseek-flash）
+
+★ 抓真实 wire 上的请求体（经本地转发代理落到磁盘）：
+
+```
+[0] role=system  content=<string>
+[1] role=system  content=<string>
+[2] role=user    parts=text,file
+     part[0].text = "What is the magic word in the attached file? ..."
+     part[1] = {"type":"file",
+                 "file_data":"data:text/markdown;base64,IyBNYWdpYyBub3Rl...",
+                 "filename":"magic-note.md"}
+```
+
+★ 端点拒绝后的重试（同一个 content 数组，第二个元素换成 text part）：
+
+```
+part[1].text = "The attached file \"magic-note.md\" reads:\n\n# Magic note\nThe magic word is PLATYPUS-42.\n"
+```
+
+★ 模型答 `PLATYPUS-42`，`outcome: success`；这一轮**没有调
+`read_file`** —— 内容就在 content 里。
+
+### 15.7 改动面
+
+| 位置 | 改什么 |
+|---|---|
+| `agentkit/run/attachments.go` | ★ `inlineFile` / `inlineAttachment`：非图片附件产出 file part；`maxInlineFileBytes`（5 MiB）；提示词改成「文件内容已随这条消息给出」 |
+| `llm/common/files.go`（**新增**） | ★ 标记、file 块、transport、降级（`withoutFiles`）、文本判定（`isTextual`） |
+| `llm/common/model.go` | ★ 装 transport（`withFileBlocks`）；`prepareFileParts`；降级链接上「先文件、后图片」 |
+
+### 15.8 测试
+
+| 位置 | 用例 |
+|---|---|
+| `llm/common/files_test.go`（**新增**） | ★ file part 在 wire 上是**扁平**的 file 块（`file_data` + `filename`）；★ 标记不漏到端点；★ 端点拒绝 file 块时这一轮仍然答得出来，且重试带的是**文件内容**；★ 二进制文件被去掉且模型被告知；★ 标记不留在消息上（transcript 的那条消息还带着 file part）；★ 没有文件的请求原样发出 |
+| `agentkit/run/attachments_test.go` | ★ 文本附件变成 file part（名字、类型、字节都对）；★ 超大文件退回路径且**不静默** |
+
 
 ---
