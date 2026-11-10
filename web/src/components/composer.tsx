@@ -501,6 +501,9 @@ export function Composer({ inset = true }: { inset?: boolean }) {
               <AttachmentChip
                 name={f.name}
                 size={f.size}
+                path={f.path}
+                mime={f.mime}
+                sessionId={activeId ?? undefined}
                 testId="attachment-chip"
                 onRemove={() => {
                   if (!activeId) return

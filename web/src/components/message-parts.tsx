@@ -53,9 +53,13 @@ export function Reasoning({
 export const MessageParts = memo(function MessageParts({
   parts,
   role,
+  sessionId,
 }: {
   parts: Part[]
   role: Message["role"]
+  // sessionId is the session the files belong to — the preview URL is built
+  // from it, so a chip without it can only show the name.
+  sessionId?: string
 }) {
   return (
     <>
@@ -101,6 +105,9 @@ export const MessageParts = memo(function MessageParts({
                 key={p.id}
                 name={p.name}
                 size={p.size}
+                path={p.path}
+                mime={p.mime}
+                sessionId={sessionId}
                 testId="message-attachment"
                 className="mb-1.5"
               />

@@ -163,6 +163,7 @@ export function MessageList() {
                 showRole={flags[i]?.showRole ?? false}
                 showAgent={multiAgent}
                 first={i === 0}
+                sessionId={activeId ?? undefined}
               />
             ),
           )}
@@ -250,12 +251,14 @@ const MessageRow = memo(function MessageRow({
   showRole,
   showAgent,
   first,
+  sessionId,
 }: {
   message: Message
   startsTurn: boolean
   showRole: boolean
   showAgent: boolean
   first: boolean
+  sessionId?: string
 }) {
   const isUser = message.role === "user"
   return (
@@ -285,7 +288,7 @@ const MessageRow = memo(function MessageRow({
             {showAgent && message.agent ? message.agent : message.role}
           </p>
         )}
-        <MessageParts parts={message.parts} role={message.role} />
+        <MessageParts parts={message.parts} role={message.role} sessionId={sessionId} />
       </div>
     </article>
   )

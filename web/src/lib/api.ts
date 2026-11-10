@@ -291,6 +291,22 @@ function sessionPath(id: string, suffix = ""): string {
   return `/v2/sessions/${id}${suffix}`
 }
 
+// fileUrl is the URL of one file's bytes.
+//
+// ★ It is a **string**, not a fetch: an `<img src>` hands the file to the
+//   browser's own picture pipeline — its cache, its concurrency limits, its
+//   decoder — and the URL can be copied out of the page.
+//
+// ★ max asks the server for a smaller picture. It only means something for
+//   an image: text and PDF ignore it.
+export function fileUrl(sessionId: string, path: string, max?: number): string {
+  if (!sessionId) {
+    throw new Error("session id is missing — the file belongs to a session")
+  }
+  const limit = max && max > 0 ? `&max=${Math.trunc(max)}` : ""
+  return `/v2/sessions/${sessionId}/files/raw?path=${encodeURIComponent(path)}${limit}`
+}
+
 export const api = {
   listThreads: () => call<{ items: ThreadMeta[] }>("/v2/sessions"),
 

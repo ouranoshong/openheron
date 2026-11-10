@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 
 // FakeRun is one run of the fake's session.
 //
@@ -29,6 +30,11 @@ export interface FakeThread {
   runs?: FakeRun[]
   usage?: Usage
   files: { name: string; path: string; size: number; mime: string }[]
+  // blobs holds the bytes of the uploaded files, keyed by the stored path.
+  //
+  // ★ The fake needs them because the raw endpoint serves **bytes** — a
+  //   fake that answered the preview with a name would test nothing.
+  blobs?: Map<string, ArrayBuffer>
 }
 
 export interface FakeMessage {
@@ -1175,11 +1181,49 @@ export function startFakeServer(port = 0): FakeServer {
         return "text/markdown"
       case ".json":
         return "application/json"
+      case ".csv":
+        return "text/csv"
+      case ".html":
+      case ".htm":
+        return "text/html"
+      case ".xml":
+        return "application/xml"
+      case ".yaml":
+      case ".yml":
+        return "application/yaml"
       case ".pdf":
         return "application/pdf"
+      case ".zip":
+        return "application/zip"
       default:
         return "application/octet-stream"
     }
+  }
+
+  // hashedName is the name a file is stored under.
+  //
+  // ★ The fake mirrors the real server here on purpose: the stored name
+  //   carries a hash, so a second upload of the same name does not
+  //   overwrite the first one — and the interface still shows the name the
+  //   user typed, because the name and the path are two different fields.
+  //
+  // ★ The hash is over the name, the size and the time, separated by zero
+  //   bytes, so "ab" + "12" and "a" + "b12" cannot collide.
+  function hashedName(name: string, size: number, mtime: number): string {
+    const idx = name.lastIndexOf(".")
+    const stem = idx > 0 ? name.slice(0, idx) : name
+    const ext = idx > 0 ? name.slice(idx) : ""
+    const h = createHash("sha256")
+    h.update(name)
+    h.update(Buffer.from([0]))
+    const n = Buffer.alloc(8)
+    n.writeBigUInt64BE(BigInt(size))
+    h.update(n)
+    h.update(Buffer.from([0]))
+    const m = Buffer.alloc(8)
+    m.writeBigUInt64BE(BigInt(mtime))
+    h.update(m)
+    return `${stem}-${h.digest("hex").slice(0, 8)}${ext}`
   }
 
   async function readJSON(req: Request): Promise<Record<string, any>> {
@@ -1926,6 +1970,48 @@ export function startFakeServer(port = 0): FakeServer {
         return json({ items, ...(active ? { activeRunId: active.runId } : {}) })
       }
 
+      // ★ The bytes of one file, for the preview.
+      //
+      //	★ The server never interprets the content — it hands the bytes
+      //	  back with a content type that keeps a script from running. The
+      //	  four shapes are the real server's: a picture, a PDF, text as
+      //	  **text/plain**, and everything else as a download.
+      const rawRoute = path.match(/^\/v2\/sessions\/([^/]+)\/files\/raw$/)
+      if (rawRoute) {
+        const t = find(rawRoute[1])
+        if (!t) return notFound()
+        const target = url.searchParams.get("path") ?? ""
+        if (!target.trim()) {
+          return fail(400, "path is required", "invalid_file_name")
+        }
+        const entry = t.files.find((f) => f.path === target)
+        if (!entry) {
+          return fail(404, "no such file in the session workspace", "invalid_file_name")
+        }
+        const bytes = t.blobs?.get(target)
+        if (!bytes) {
+          return fail(404, "no such file in the session workspace", "invalid_file_name")
+        }
+        const mime = entry.mime
+        if (mime === "image/png" || mime === "image/jpeg" || mime === "image/gif" || mime === "image/webp") {
+          return new Response(bytes, { headers: { "Content-Type": mime } })
+        }
+        if (mime === "application/pdf") {
+          return new Response(bytes, { headers: { "Content-Type": mime } })
+        }
+        if (mime.startsWith("text/") || mime === "application/json" || mime === "application/xml" || mime === "application/yaml") {
+          // ★ Text is always text/plain: an uploaded page must not become
+          //   a document the browser renders.
+          return new Response(bytes, { headers: { "Content-Type": "text/plain; charset=utf-8" } })
+        }
+        return new Response(bytes, {
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(entry.name)}`,
+          },
+        })
+      }
+
       const p = path.match(/^\/v2\/sessions\/([^/]+)\/(files|abort|compact)$/)
       if (p) {
         const t = find(p[1])
@@ -1981,21 +2067,40 @@ export function startFakeServer(port = 0): FakeServer {
         if (req.method === "POST") {
           const form = await req.formData().catch(() => null)
           const names = form ? [...form.getAll("files")] : []
-          const added = names
-            .filter((f): f is File => f instanceof File)
-            .map((f) => {
-              // ★ The path is **relative** to the workspace: it is the name
-              //   the client sends back with the next question, and it has
-              //   to be the name the server itself resolves.
-              const entry = {
-                name: f.name,
-                path: f.name,
-                size: f.size,
-                mime: mimeOf(f.name),
-              }
-              t!.files.push(entry)
-              return entry
-            })
+          if (!t.blobs) t.blobs = new Map()
+          const added: { name: string; path: string; size: number; mime: string }[] = []
+          for (const f of names) {
+            if (!(f instanceof File)) continue
+            // ★ The path is **relative** to the workspace: it is the name
+            //   the client sends back with the next question, and it has
+            //   to be the name the server itself resolves.
+            //
+            // ★ And it carries a hash, like the real server's: two
+            //   uploads of the same name are two files, and the
+            //   transcript's attachment list must not lie about either.
+            let salt = 0
+            let path = hashedName(f.name, f.size, Date.now())
+            // ★ The same name, the same size and the same millisecond
+            //   would hash the same way — so the second one steps forward
+            //   a millisecond until the name is free.
+            while (t!.files.some((other) => other.path === path)) {
+              salt += 1
+              path = hashedName(f.name, f.size, Date.now() + salt)
+            }
+            const entry = {
+              name: f.name,
+              path,
+              size: f.size,
+              mime: mimeOf(f.name),
+            }
+            t!.files.push(entry)
+            // ★ The bytes are kept, so the preview has something to serve.
+            //   They are read **before** the answer goes out — a client
+            //   that draws the thumbnail the moment it hears about the
+            //   file must not find the file empty.
+            t!.blobs.set(path, await f.arrayBuffer())
+            added.push(entry)
+          }
           if (added.length === 0) return fail(400, "file is required", "file_required")
           return json({ files: added, workspacePath: `/workspace/${t.threadId}` }, 201)
         }
@@ -2006,6 +2111,7 @@ export function startFakeServer(port = 0): FakeServer {
           }
           const i = t.files.findIndex((f) => f.path === target)
           if (i >= 0) t.files.splice(i, 1)
+          t.blobs?.delete(target)
           return json({ deleted: true, path: target })
         }
         return json({ workspacePath: `/workspace/${t.threadId}`, files: t.files })
