@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -88,6 +89,44 @@ func TestEditingASkillChangesTheVersion(t *testing.T) {
 	seedSkill(t, f, "code-review", "---\ndescription: two\n---\nbody\n")
 	if got := s.Fingerprint(); got == before {
 		t.Fatal("★ editing skills/<name>/SKILL.md must change the fingerprint, or the change never lands")
+	}
+}
+
+// ★ The fingerprint follows the **content**, not the timestamp.
+//
+//	★ The modification time is not a truth about the content: two writes
+//	  inside the same clock tick carry the same timestamp, and a file
+//	  rewritten **with the same length** then looks untouched. This case
+//	  pins that down by putting the timestamp back exactly where it was —
+//	  only the content differs, and the fingerprint must still move.
+func TestTheFingerprintFollowsTheContentNotTheTimestamp(t *testing.T) {
+	f := newFixture(t)
+	f.seedMinimal(t)
+	seedSkill(t, f, "code-review", "---\ndescription: one\n---\nbody\n")
+
+	s, err := NewService(f.root, filepath.Dir(f.root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := s.Fingerprint()
+	if before == "" {
+		t.Fatal("the fingerprint must not be empty")
+	}
+
+	path := filepath.Join(f.root, DirSkills, "code-review", SkillFileName)
+	stamp, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Same length, different content.
+	seedSkill(t, f, "code-review", "---\ndescription: two\n---\nbody\n")
+	// ★ And the timestamp goes back to where it was.
+	if err := os.Chtimes(path, stamp.ModTime(), stamp.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := s.Fingerprint(); got == before {
+		t.Fatal("★ the content changed, so the fingerprint must change — a timestamp is not a truth about the content")
 	}
 }
 

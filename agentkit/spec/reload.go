@@ -49,7 +49,7 @@ func (s *Service) HotDirFingerprints() map[string]string {
 }
 
 // dirEntryLines fingerprints a directory **tree**: every file under it, by
-// relative path, size and modification time.
+// relative path, size, modification time and **content**.
 //
 // ★ One level was not enough once `skills/` became a partition: a skill is
 //
@@ -58,6 +58,19 @@ func (s *Service) HotDirFingerprints() map[string]string {
 //	moved on, so a saved skill never reached the next turn. The walk is
 //	recursive for every partition now; the flat ones simply have nothing
 //	below them.
+//
+// ★ The **content hash** is there because the modification time is not a
+//
+//	truth about the content. Two writes inside the same clock tick carry
+//	the same timestamp, so a file edited **in place, with the same length**
+//	can look untouched to the fingerprint — and the change never lands.
+//	That is not a theoretical concern: the filesystem's timestamp
+//	granularity is coarser than the clock, and a test that rewrites a
+//	skill with a body of the same length fails on one run out of three.
+//
+//	The hash is **added** to the timestamp, not swapped for it: a file whose
+//	content is unchanged but whose timestamp moved still changes the
+//	fingerprint, which is what the reload has always done.
 func dirEntryLines(full string) []byte {
 	var buf bytes.Buffer
 	// ★ filepath.WalkDir visits in lexical order and does not follow
@@ -78,10 +91,25 @@ func dirEntryLines(full string) []byte {
 		if ierr != nil {
 			return nil
 		}
-		fmt.Fprintf(&buf, "%s %d %d\n", filepath.ToSlash(rel), info.Size(), info.ModTime().UnixNano())
+		fmt.Fprintf(&buf, "%s %d %d %s\n", filepath.ToSlash(rel), info.Size(),
+			info.ModTime().UnixNano(), contentHash(path))
 		return nil
 	})
 	return buf.Bytes()
+}
+
+// contentHash is the hash of a file's bytes.
+//
+// ★ A file that cannot be read still takes part in the fingerprint, with an
+//
+//	empty hash: dropping it would make a read error look like a deletion.
+func contentHash(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 func (c *Config) Debounce() time.Duration {
