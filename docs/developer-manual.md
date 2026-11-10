@@ -912,6 +912,24 @@ conversation on every compaction. The fallback is what makes it safe to ship:
 a transcript written before messages carried ids still gets a usable id,
 derived exactly as before.
 
+★ **And a message may not carry its text and its multimodal parts at the same
+time.** The wire has one `content` field: it is either a string or a list. The
+openai adapter fills `Content` from `inMsg.Content` **and** builds
+`MultiContent` from the parts, so a message with both is refused by the client
+before it is even sent —
+
+```
+can't use both Content and MultiContent properties simultaneously
+```
+
+★ The text therefore moves into a **text part** and `Content` is cleared. And
+the message the model sees is a **copy** in that case: the transcript's message
+keeps its text and never carries the base64 of a picture (the transcript is a
+JSONL log with an 8 MiB line limit, and a 2 MiB picture is 2.7 MiB of base64).
+★ **This only shows up against a real model** — the fake backend does not
+serialize, and the Go tests never reach the adapter. It belongs to
+`task smoke`, not to CI.
+
 ## 4. The frontend
 
 ### 4.1 The pure layers

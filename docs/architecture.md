@@ -653,9 +653,19 @@ The pieces:
 - The assembly (`agentkit/run/attachments.go`) splits the list: a **text** file
   becomes a path in the prompt, and the model reads it with `read_file`; an
   **image** becomes a multimodal part, so the model *sees* it. ★ An image that
-  cannot be inlined (too large, or the model has no vision) falls back to a path
+  cannot be inlined (too large, or the file is gone) falls back to a path
   **and the model is told** — a silent fallback would have it claim to have
   seen a picture it never saw.
+- ★ **The model gets a copy when a picture is inlined.** The transcript's
+  message keeps its text and never carries the base64 (the transcript is a
+  JSONL log with an 8 MiB line limit), and the copy's text moves into a
+  **text part** — the wire has one `content` field that is either a string or
+  a list, and the openai adapter builds both when a message carries a
+  `Content` and a multi-content at the same time.
+- ★ **A model with no vision does not kill the turn** (`llm/common/vision.go`):
+  the request is refused, the same question goes out again without the
+  pictures, and the model is told — a model that does not know its picture is
+  gone would answer about a picture it never saw.
 - `GET /v2/sessions/{id}/messages` carries the list back in the message's
   metadata, so the history shows which file went with which question.
 

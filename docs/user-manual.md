@@ -1009,7 +1009,9 @@ a reload.
 it can read with `read_file`; an image is put into the request as an image, so
 the model *sees* it rather than reading bytes as text. ★ An image that is too
 large to inline falls back to a path — and the model is told it was not inlined,
-so it never claims to have seen a picture it did not see.
+so it never claims to have seen a picture it did not see. ★ And if the model
+itself has no vision, the turn still runs: the same question goes out again
+without the picture, and the model is told the picture is gone.
 
 ★ **The × on a chip deletes the file.** Not just from the list: the file is
 removed from the session's workspace as well. ★ A file that already went out

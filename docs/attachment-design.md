@@ -465,6 +465,42 @@ base64 之后是 2.7 MiB —— 一张就吃掉行上限的三分之一，五张
 ★ 而且 transcript 是**追加写**的（`session.go:184` `O_APPEND`），
 写坏了那一行，整条历史的尾部就断了。
 
+#### 4.4.3 ★ 两个必须记住的形状约束
+
+★ **约束一：给模型看的是一条副本，transcript 里的那条不动。**
+
+装配（`agentkit/run/attachments.go` 的 `assembleAttachments`）**返回**一条
+副本，而不是就地改消息。理由有两条：
+
+- transcript 里不能有 base64（上面刚说过）；
+- 副本与 transcript 那条**共用同一个 `Extra`**，所以 id 与附件清单照旧跟着
+  消息走 —— 副本就这些事实而言还是那条消息。
+
+★ **约束二：一条消息不能同时有 `Content` 和多模态 part。**
+
+线上只有一个 `content` 字段，它要么是字符串，要么是列表。openai 适配器
+（`eino-ext/libs/acl/openai@v0.1.17/chat_model.go` 的
+`buildMessageFromUserInputMultiContent`）在有 `UserInputMultiContent` 时
+**照样**把 `inMsg.Content` 填进 `Content`，于是两个都满了，客户端拒绝
+序列化：
+
+```
+json: error calling MarshalJSON for type *openai.ChatCompletionMessage:
+can't use both Content and MultiContent properties simultaneously
+```
+
+★ 所以副本的正文要**挪进一个 text part**，`Content` 清空：
+
+```
+UserInputMultiContent = [ {text: "图里写了什么？"}, {image_url: ...} ]
+Content               = ""
+```
+
+★ 正文在前，图片在后：正文是问题，图片是问题问的东西。
+
+⚠️ 这个坑只有在**真模型**上才暴露 —— 假后端不序列化，Go 用例不碰适配器。
+所以它属于 `task smoke` 那一档，而不是 CI。
+
 ### 4.5 ★ 修掉重复：让最后那条消息**就是**落盘那条
 
 ★ **本节已实施。** 改法不是「判定历史里有没有这条」，而是
@@ -856,13 +892,34 @@ chip 是在说谎。
 | 1 | **哪些 MIME 算图片？** | `image/png`、`image/jpeg`、`image/gif`、`image/webp`。★ 不含 `image/svg+xml` —— SVG 是文本，能 `read_file`，走 §4.4.1 就够了 |
 | 2 | **多大的图片能内联？** | 单独一个上限，比如 5 MiB（压缩后）。★ 32 MiB 的上传上限是给**文件**的，不是给**图片**的 |
 | 3 | **超限了怎么办？** | **不静默降级** —— 走 §4.4.1 给路径，并在清单里标注「太大，未内联」。★ 静默降级会让模型以为它看见了图 |
-| 4 | **模型不支持视觉怎么办？** | 内联会报错。★ 捕获它，降级成给路径，并让这一轮**继续跑** —— 而不是整轮失败 |
+| 4 | **模型不支持视觉怎么办？** | 内联会报错。★ 捕获它，降级成给路径，并让这一轮**继续跑** —— 而不是整轮失败。**✅ 已实现**，见 §6.1 |
 | 5 | **base64 编码在哪做？** | **服务端**，请求时现读现编（§4.4.2）。★ 不在上传时编 —— 那会把 base64 存进 workspace，且上传响应要传 2.7 MiB 的字符串 |
 
 ★ 第 4 条是真实风险：`llm/common/model.go:68` 用的是
 `eino-ext/libs/acl/openai` 的 client，它把 `MultiContent` 转成 OpenAI 的
 多模态格式 —— 但**模型本身**支不支持 vision 是另一回事。
 deepseek 的模型就不支持图片。§6 第 4 条的降级路径是**必须的**，不是可选的。
+
+### 6.1 ★ 模型没有视觉时：去掉图片，再问一遍
+
+★ **落点**：`llm/common/vision.go` 的 `withoutImages` + `llm/common/model.go`
+里 `Generate` / `Stream` 的重试。
+
+★ **为什么落在模型层**：拒绝是 provider 抛的，而请求是在那里发出去的。
+更早的层（装配）看不到这个错误，更晚的层（run loop）已经拿不到这次请求了。
+
+★ **怎么做**：请求带着图片被拒 → **去掉图片，重问一遍**。文件还在 workspace
+里，提示词里也点着它的名字（§4.4.1 的清单列了**所有**附件，图片也在内），
+所以模型仍然知道有个文件在那儿。
+
+★ **模型必须被告知**：重试的那条消息里多一个 text part，说明图片被拿走了
+以及为什么。★ **不告知就是撒谎** —— 一个不知道自己图片没了的模型，会对着
+它没看见的图作答，而用户分不出「模型看了但没找到」和「模型根本没拿到」。
+
+★ **只重试一次，而且只在请求确实带了图片时**：别的失败照原样报出去 ——
+第一次那个错才是真正的原因，一把坏钥匙不该变成「是图片的问题」。
+
+⚠️ 代价：带图失败时会多发一次请求。换来的是**整轮不死**。
 
 ---
 
@@ -879,10 +936,11 @@ deepseek 的模型就不支持图片。§6 第 4 条的降级路径是**必须�
 | 5 | `api/v2_files.go`（**已做**） | `DELETE /v2/sessions/:id/files?path=`（删单个文件）；★ 上传与列举返回 **workspace 相对路径** |
 | 6 | `agentkit/run/bridge.go`（**已做**） | `loopItem.Attachments` |
 | 7 | `agentkit/run/loop.go`（**已做**） | 落盘时 `StampAttachments`；★ 调用 `buildInput` 传**消息对象**（见 §4.5） |
-| 8 | `agentkit/run/input.go` + `agentkit/run/attachments.go`（**新增，已做**） | ★ **重复的 query 追加（已修，见 §4.5）**；图片内联；文本清单进提示 |
+| 8 | `agentkit/run/input.go` + `agentkit/run/attachments.go`（**新增，已做**） | ★ **重复的 query 追加（已修，见 §4.5）**；图片内联；文本清单进提示；★ **装配返回副本**，正文挪进 text part（§4.4.3） |
 | 9 | `api/v2_convert.go`（**已做**） | `toAgUiMessage` 透出 `Metadata["attachments"]`；★ 只有附件没有正文的消息**不再被丢掉** |
 | 10 | `message/identity.go`（**新增，已做**） | ★ 消息 ID：`StampMessageID` / `MessageID`（见 §4.7） |
 | 11 | `agentkit/emit/emit.go`（**已做**） | ★ 流式消息盖上自己的 msgID（见 §4.7.3） |
+| 12 | `llm/common/vision.go`（**新增，已做**） | ★ 模型没有视觉时的降级：去掉图片重问一遍，并告知模型（§6.1） |
 
 ### 7.2 前端
 
@@ -908,10 +966,11 @@ deepseek 的模型就不支持图片。§6 第 4 条的降级路径是**必须�
 | 5 | `message/identity_test.go`（**已落地**） | ★ ID 扛得住 checkpoint 的 gob 编码 |
 | 6 | `agentkit/emit/identity_test.go`（**已落地**） | ★ 流式 ID 与归档 ID 一致 |
 | 7 | `message/attachment_test.go`（**已落地**） | ★ 清单存 JSON 字节；★ 三种形态都读得回来 |
-| 8 | `agentkit/run/attachments_test.go`（**已落地**） | 图片内联生成 `image_url` part；文本附件只给路径；★ 超大图片降级但**不静默**；★ 文件不在了**不**让整轮失败 |
+| 8 | `agentkit/run/attachments_test.go`（**已落地**） | 图片内联生成 `image_url` part；文本附件只给路径；★ 超大图片降级但**不静默**；★ 文件不在了**不**让整轮失败；★ 消息不能同时带正文和 part；★ transcript 里没有 base64 |
 | 9 | `api/v2_attachments_test.go` + `api/v2_attachments_wire_test.go`（**已落地**） | 带附件的一轮**不被** `isAttachRequest` 误判；`..` 与绝对路径被拒；★ 清单从 metadata 透出；★ 上传路径是相对的；★ 删除端点 |
 | 10 | `web/test/store-attachments.test.ts`（**新增，已落地**） | ★ 请求体带附件；★ 发完清空；★ 被拒时还回；★ 刷新后恢复待发清单 |
 | 11 | `web/test/e2e/attachments.spec.ts`（**新增，已落地**） | ★ 附件随消息发出、出现在历史里、刷新不丢、拖拽、粘贴、★ × 删的是真文件 |
+| 12 | `llm/common/vision_test.go`（**新增，已落地**） | ★ 拒绝图片的 provider 也能答；★ 重试不带图；★ 模型被告知；★ 别的错照原样报；★ 没有图就不重试 |
 
 ★ AGENTS.md 要求「**每一处界面改动都要有 Playwright 规格**」——
 拖拽、粘贴、chip 渲染三处都有（`attachments.spec.ts`）。
@@ -1003,15 +1062,21 @@ deepseek 的模型就不支持图片。§6 第 4 条的降级路径是**必须�
 | 7 | ★ 刷新后历史里的附件还在 | Playwright | ✅ |
 | 8 | ★ 拖拽与粘贴真的能用 | Playwright（假后端） | ✅ |
 | 9 | ★ 超大图片降级为路径，**不静默** | 用例 | ✅ |
-| 10 | ★ 不支持 vision 的模型不会让整轮失败 | 用例 | ✅ |
+| 10 | ★ 不支持 vision 的模型不会让整轮失败 | 用例（`llm/common/vision_test.go`：一个拒绝图片的假 provider） | ✅ |
 | 11 | ★ 只有附件没有文字的一轮也是一轮 | `api` 层用例 | ✅ |
 | 12 | ★ 删一个附件删的是真文件 | `api` + Playwright | ✅ |
+| 13 | ★ 一条消息不能同时带正文和多模态 part | `agentkit/run` 用例（§4.4.3） | ✅ |
 
 ★ 第 3、4 条要**真的模型**才能验，所以它们属于 `task smoke` 而不是 CI
 （AGENTS.md：冒烟不进 CI，因为它们需要一个会回答的模型）。
-第 1、2、5、6、9、10、11、12 条是 Go 用例，进 CI。
+第 1、2、5、6、9、10、11、12、13 条是 Go 用例，进 CI。
 第 7、8 条是 Playwright，用假后端，进 CI。
 
-★ **第 10 条的落法**：内联失败**不**让整轮失败 —— 文件还在，
-模型可以把它当文本读或者用工具取。提示词里会写明「这个文件没有内联」，
-所以模型不会声称自己看见了一张没看见的图。
+★ **第 13 条是踩出来的**：它在真模型上才暴露（假后端不序列化，Go 用例不碰
+适配器），错误是 openai 客户端拒绝序列化 ——
+`can't use both Content and MultiContent properties simultaneously`。
+所以它虽然有 Go 用例守着，**第一次遇到它的地方仍然是真模型**。
+
+★ **第 10 条的落法**：内联失败**不**让整轮失败（走路径，模型被告知）；
+provider 拒绝图片**也不**让整轮失败（去掉图片重问一遍，模型被告知）。
+见 §6.1。

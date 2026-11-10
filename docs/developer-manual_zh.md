@@ -792,6 +792,21 @@ sed -i "s|^    default: .*|    default: \"$NEXT\"|" sandbox-kit/openheron/openhe
 兜底是它能安全上线的原因：消息带 id 之前写的 transcript 仍然拿得到一个能用的
 id，而且派生方式与从前一模一样。
 
+★ **一条消息不能同时带正文和多模态 part。** 线上只有一个 `content` 字段：
+它要么是字符串，要么是列表。openai 适配器既把 `inMsg.Content` 填进
+`Content`，又用 part 拼出 `MultiContent`，于是两者都满的消息在**发出去之前**
+就被客户端拒了 ——
+
+```
+can't use both Content and MultiContent properties simultaneously
+```
+
+★ 所以正文要挪进一个 **text part**，`Content` 清空。而这种情况下给模型看的是
+一条**副本**：transcript 里那条留着正文，而且永远不带图片的 base64（transcript
+是 8 MiB 行上限的 JSONL 日志，2 MiB 的图 base64 之后是 2.7 MiB）。
+★ **这个坑只有在真模型上才暴露** —— 假后端不序列化，Go 用例也碰不到适配器。
+它属于 `task smoke`，不属于 CI。
+
 ## 4. 前端
 
 ### 4.1 三层纯函数
