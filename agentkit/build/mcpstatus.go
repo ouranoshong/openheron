@@ -176,17 +176,11 @@ func mcpToolViews(policy Policy, table *Table, plan mcpServerPlan) []MCPToolView
 	return out
 }
 
-// agentUsesMCP reports whether the agent lists the server.
-//
-// ★ An absent list means every configured server and an empty list means
-//
-//	none — the pointer tells the two apart.
-//
 // agentUsesMCP reports whether the agent mounts the named server.
 //
-// ★ The default is **none**: an agent that names no server mounts none, and
-//
-//	starting a server is a child process — it is never a default.
+// ★ The default is **none**: an absent list and an empty list mean the same
+// thing — an agent that names no server mounts none. Starting a server is a
+// child process, so it is never a default.
 func agentUsesMCP(list []string, name string) bool {
 	for _, n := range list {
 		if n == name {

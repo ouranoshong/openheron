@@ -102,7 +102,7 @@ context: inline
 - `context: inline` is the default, a typo silently becomes inline; in this project it is always inline, and `agent:` / `model:` are not written.
 - The body is the injected content, embedded in the template and self-contained; keep at least one piece of real content, an empty document is an error.
 - **The directory is changed on the skill side, the allow-list on the agent side**: after a directory is added or removed, sync the `skills:` of every agent, and issue the two as separate instructions.
-- Effective: not in `HotDirs`; a content change takes effect after the agent pool is rebuilt.
+- Effective: `skills/` is a hot partition — a content change rebuilds the snapshot and takes effect on the next turn, no restart.
 
 ## Scenario H: the troubleshooting order
 

@@ -64,7 +64,7 @@ a `mcps` server name that does not match the regex, an http server carrying `env
 1. The `deferred` and the `configVersion` of `config_notices {}` — confirm that what is running really is the one you have just changed.
 2. For a change in a hot partition, watch whether the generation change happens (on a failure `onChange` is not called and the old configuration keeps serving).
 3. A change under `server/` is **verified after the restart**; `config_write` does not write this section at all, it has to be changed by hand.
-4. A content change under `skills/` takes effect after the agent pool is rebuilt.
+4. A content change under `skills/` is hot: it rebuilds the snapshot and takes effect on the next turn.
 5. The `applied` / `requiresRestart` in the `config_write` return say whether this change really took effect — it takes effect at the next `PrepareAgent`.
 
 ## The output contract

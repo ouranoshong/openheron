@@ -56,7 +56,7 @@ Prefill the struct → decode file by file (yaml.v3 writes only the keys that ap
 
 ## The tiers: there is no global list
 
-- The default is **`ask`**. The code's own `builtinAllowedTools` (`ls read_file glob grep task write_todos skill`) **always takes effect** and is the base; the `allows:` of each tool file can only **add upward**, it cannot take a name away.
+- The default is **`ask`**. The code's own `builtinAllowedTools` (`ls read_file glob grep task write_todos skill`, plus the five read-only `config_get` `config_validate` `config_template` `config_notices` `config_tier`) **always takes effect** and is the base; the `allows:` of each tool file can only **add upward**, it cannot take a name away.
 - To tighten, change that table in the code; to loosen, write `allows:` in the file that provides the tool (using that file's own vocabulary).
 - `tools/filesystem.yaml` **is implemented**: it carries only `allows:`, and it is the **tuning knob** for loosening the tier of `ls` / `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute`, not a switch — the filesystem tools are always there.
 - ★ `config_write` is **always ask**: `alwaysAsk` strips it out of any `allows:` after the merge. A file that can authorize a tool cannot authorize the tool that "rewrites itself".
@@ -83,7 +83,7 @@ Prefill the struct → decode file by file (yaml.v3 writes only the keys that ap
 - Directory lookup: `$EINO_EXT_SKILLS_DIR` wins, otherwise search upward from the cwd for `.openheron/skills` — this one **does** search upward, unlike the config root.
 - The frontmatter is **eino's schema**: `name` / `description` / `context` / `agent` / `model`. `name` matches the directory name; `description` says "when to load it".
 - `context: inline` is not a declared constant; a typo does not error, it silently becomes inline. Only `fork` uses `agent:` / `model:`, and a reference that cannot be resolved is an error.
-- Hot: `llm/` `agents/` `tools/` `mcps/`; cold: `server/` (a change needs a restart). `skills/` is not in `HotDirs`; a content change takes effect after the agent pool is rebuilt.
+- Hot: `llm/` `agents/` `tools/` `mcps/` `skills/`; cold: `server/` (a change needs a restart). `skills/` is a hot partition too — the fingerprint walks it recursively, so editing a `SKILL.md` rebuilds the snapshot and takes effect on the next turn.
 - A broken configuration does not kill the process: a failed reload keeps the last good configuration; only a failure on the first load makes the startup fail.
 
 ## Known traps (check these first)

@@ -32,7 +32,7 @@ skills:                       # an absent key means no skill at all
   - openheron-config-edit
   - openheron-config-templates
   - openheron-config-validate
-mcps: [fetch, time, deepwiki]   # only these three read-only servers are mounted; filesystem / memory are defined but not mounted. Mounting one hands over all of its tools.
+mcps: [fetch, time, deepwiki]   # only these three read-only servers are mounted; a filesystem / memory server is not shipped and not mounted. Mounting one hands over all of its tools.
 temperature: 0.1
 max_tokens: 2048
 summarize_at: 80%

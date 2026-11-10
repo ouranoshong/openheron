@@ -76,11 +76,14 @@ tools are always mounted, so that file only tunes their tiers: `allows:
 [write_file, edit_file, execute]` is how an agent that edits and runs commands on its own
 is spelled. Absent, the readers run without a nod and the writers ask.
 
-★ **The three MCP servers need `uvx` on the PATH**, and the two stdio ones download
-their package on the first start. A server that cannot be started costs that server's
-tools and nothing else — the process still starts, the log says
-`[mcp] the server is unreachable`, and `/mcps` shows the server as `unreachable` with the
-reason. Starting a server is lazy, so nothing is attempted at boot.
+★ **The two stdio servers (`fetch`, `time`) need `uvx` on the PATH** and download their
+package on the first start; `deepwiki` is a streamable HTTP server and needs no `uvx`.
+Every server that some agent mounts is **started in the background as soon as the
+configuration is known** — the start does not hold up the first turn, and a server still
+coming up contributes no tools until the next turn. A server nobody mounts is never
+started. If a start fails, only that server's tools are lost: the process still runs, the
+log says `[mcp] the server did not start`, and `/mcps` shows the server as `unreachable`
+with the reason (or `starting` while it is on its way).
 
 ## Command line
 
@@ -113,7 +116,7 @@ not silently grow an empty configuration tree.
 | `llm/` | One `.yaml` per vendor: endpoint, secret, model list, reasoning tier table | ✅ |
 | `tools/` | External tools and the knowledge-base config — a provider without a configuration mounts nothing. Each file's `allows:` names the tools that run without a nod | ✅ |
 | `mcps/` | One `.yaml` per MCP server: transport, command or URL, timeouts, and the server's own `allows:` | ✅ |
-| `skills/` | `<name>/SKILL.md`, eino's native skill convention | ❌ |
+| `skills/` | `<name>/SKILL.md`, eino's native skill convention | ✅ |
 | `server/` | The process's own parameters: listen address, directories, timeouts, depth cap | ❌ needs a restart |
 | `state/` | Sessions and checkpoints (auto-created, **do not commit**) | — |
 
@@ -136,7 +139,8 @@ mcps: []
 
 The frontmatter is **strictly decoded** — one wrong key is a startup error, never
 silently ignored. Available keys: `description`, `model`, `max_iterations`,
-`subagents`, `tools`, `mcps`, `skills`, `temperature`, `max_tokens`, `reasoning`.
+`subagents`, `tools`, `mcps`, `skills`, `temperature`, `max_tokens`, `reasoning`,
+`summarize_at`.
 
 - `model` is required, in the form `<provider>/<model>`, and is **never inherited and
   never falls back** — failing to resolve it is a startup error.
