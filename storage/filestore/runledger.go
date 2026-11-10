@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/storage"
 )
 
@@ -45,14 +45,23 @@ const (
 type fileRunLedger struct {
 	root string
 	id   string
+	log  *slog.Logger
 
 	// mu serializes the epoch allocation and the trim. The append itself is
 	// an O_APPEND write, which the kernel already serializes.
 	mu sync.Mutex
+
 	// next is the last epoch handed out, and epochSeeded says whether it
 	// was read from the file yet.
 	next        uint64
 	epochSeeded bool
+}
+
+func (l *fileRunLedger) logger() *slog.Logger {
+	if l == nil || l.log == nil {
+		return discard
+	}
+	return l.log
 }
 
 // newRunLedger builds the ledger of one session. It touches no disk.
@@ -116,7 +125,7 @@ func (l *fileRunLedger) Append(_ context.Context, r storage.Run) error {
 //	maxRunLedgerRows snapshots pays for it.
 func (l *fileRunLedger) trimLocked() error {
 	path := runsPath(l.root, l.id)
-	rows, err := readRunRows(path)
+	rows, err := readRunRows(path, l.logger())
 	if err != nil {
 		return err
 	}
@@ -162,7 +171,7 @@ func (l *fileRunLedger) trimLocked() error {
 //	sends the run back to its previous state, which is a state it really
 //	was in.
 func (l *fileRunLedger) List(_ context.Context) ([]storage.Run, error) {
-	rows, err := readRunRows(runsPath(l.root, l.id))
+	rows, err := readRunRows(runsPath(l.root, l.id), l.logger())
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +202,7 @@ func (l *fileRunLedger) NextEpoch(_ context.Context) (uint64, error) {
 	defer l.mu.Unlock()
 
 	if !l.epochSeeded {
-		rows, err := readRunRows(runsPath(l.root, l.id))
+		rows, err := readRunRows(runsPath(l.root, l.id), l.logger())
 		if err != nil {
 			return 0, err
 		}
@@ -249,7 +258,7 @@ func (l *fileRunLedger) Reconcile(ctx context.Context) (int, error) {
 // ★ A missing file is an empty ledger, not an error: a session that never
 //
 //	ran has no rows, and that is a normal state.
-func readRunRows(path string) ([]storage.Run, error) {
+func readRunRows(path string, log *slog.Logger) ([]storage.Run, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -280,7 +289,7 @@ func readRunRows(path string) ([]storage.Run, error) {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	if skipped > 0 {
-		obs.Logger().Warn("[session] skipped malformed run rows",
+		log.Warn("[session] skipped malformed run rows",
 			"path", path, "rows", skipped)
 	}
 	return out, nil

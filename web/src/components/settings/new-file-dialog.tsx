@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { SectionPicker } from "@/components/settings/file-list"
 import { useSettings } from "@/lib/settings-store"
-import { fileTemplate, resolveTemplate, suggestPath, validatePath, type Section } from "@/lib/settings-validate"
+import { fileTemplate, resolveTemplate, suggestPath, type Section } from "@/lib/settings-validate"
 
 export function NewFileButton() {
   const [open, setOpen] = useState(false)
@@ -24,32 +24,46 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
   const modelRefs = useSettings((s) => s.manifest?.modelRefs)
   const newFile = useSettings((s) => s.newFile)
 
-  const [section, setSection] = useState<Section>("policy")
+  const [section, setSection] = useState<Section>("agents")
   const [name, setName] = useState("")
   const [content, setContent] = useState("")
   // edited records that the user has typed in the content box. Until then the
   // content is still the template, and a new file name may replace it with
   // that file's own template.
   const [edited, setEdited] = useState(false)
+  // ★ The refusal is the **server's sentence**, kept here rather than derived
+  //   from a copy of its rules. The name is not checked in this file at all:
+  //   `spec.ValidatePath` is the only thing that knows the tools/ whitelist
+  //   and the MCP server-name pattern, and a second copy here drifts.
+  const [refusal, setRefusal] = useState<string | undefined>()
 
   const path = suggestPath(name, section)
-  const pathIssues = path ? validatePath(path) : [{ line: 1, message: "enter a file name" }]
+  const named = name.trim() !== ""
 
   const reset = () => {
-    setSection("policy")
+    setSection("agents")
     setName("")
     setContent("")
     setEdited(false)
+    setRefusal(undefined)
   }
 
   const seed = (s: Section) => {
     setSection(s)
     setContent(templates?.[s] ?? "")
     setEdited(false)
+    setRefusal(undefined)
   }
 
   const submit = async () => {
-    await newFile(path, content)
+    const reason = await newFile(path, content)
+    // ★ A refused create keeps the dialog open with everything the user
+    //   typed. Closing it on failure sends them back to a list that does not
+    //   contain the file, with the reason in a status line behind the dialog.
+    if (reason !== undefined) {
+      setRefusal(reason)
+      return
+    }
     reset()
     onOpenChange?.(false)
   }
@@ -58,7 +72,14 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg" data-testid="new-file-dialog">
+      <DialogContent
+        // ★ Wider than a form needs to be: the skeleton of an agent file is
+        //   a dozen lines of YAML, and at 32rem it was edited in a column
+        //   that folded every key onto two lines. ★ The height cap keeps it
+        //   inside the window — the dialog scrolls, the page does not.
+        className="sm:max-w-3xl max-h-[85vh] overflow-y-auto"
+        data-testid="new-file-dialog"
+      >
         <DialogHeader>
           <DialogTitle>New file</DialogTitle>
           <DialogDescription>
@@ -80,7 +101,7 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
 
           <div className="flex flex-col gap-1.5">
             <label htmlFor="new-file-name" className="text-xs font-medium">
-              File name
+              {section === "skills" ? "Skill name (its folder)" : "File name"}
             </label>
             <input
               id="new-file-name"
@@ -107,18 +128,24 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
                   ? "researcher"
                   : section === "llm"
                     ? "deepseek"
-                    : section === "policy"
-                      ? "permissions / limits"
-                      : "config"
+                    : section === "mcps"
+                      ? "github"
+                      : section === "skills"
+                        ? "code-review"
+                        : section === "tools"
+                          ? "http"
+                          : "config"
               }
               className="bg-background rounded-md border px-2 py-1.5 font-mono text-xs"
               data-testid="new-file-name"
             />
-            {path && pathIssues.length === 0 && (
+            {path && (
               <span className="text-muted-foreground font-mono text-[11px]">{path}</span>
             )}
-            {pathIssues.length > 0 && (
-              <span className="text-destructive text-[11px]">{pathIssues[0]!.message}</span>
+            {refusal !== undefined && (
+              <span className="text-destructive text-[11px]" data-testid="new-file-refusal">
+                {refusal}
+              </span>
             )}
           </div>
 
@@ -144,7 +171,7 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
                 setContent(e.target.value)
                 setEdited(true)
               }}
-              rows={8}
+              rows={12}
               spellCheck={false}
               className="bg-background rounded-md border p-2 font-mono text-xs"
               data-testid="new-file-content"
@@ -160,7 +187,7 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
           <Button type="button" variant="ghost" onClick={() => onOpenChange?.(false)}>
             Cancel
           </Button>
-          <Button type="button" disabled={pathIssues.length > 0 || !path} onClick={() => void submit()} data-testid="new-file-create">
+          <Button type="button" disabled={!named} onClick={() => void submit()} data-testid="new-file-create">
             Create
           </Button>
         </DialogFooter>

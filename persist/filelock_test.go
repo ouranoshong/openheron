@@ -257,8 +257,12 @@ func TestLockSurvivesHolderBeingKilled(t *testing.T) {
 }
 
 func TestLockPathIsDerivedFromTheDir(t *testing.T) {
-	if got := LockPath("/a/b"); got != "/a/b/.lock" {
-		t.Fatalf("LockPath = %q", got)
+	// ★ Derived through filepath.Join: "/a/b" is not an absolute path on
+	//   Windows, and the separator differs there too.
+	dir := filepath.Join("a", "b")
+	want := filepath.Join(dir, ".lock")
+	if got := LockPath(dir); got != want {
+		t.Fatalf("LockPath = %q, want %q", got, want)
 	}
 }
 

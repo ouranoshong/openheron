@@ -3,7 +3,6 @@ package kb
 import (
 	"context"
 	"fmt"
-	"github.com/ouranoshong/openheron/agentkit/obs"
 	"path/filepath"
 
 	"github.com/cloudwego/eino/callbacks"
@@ -67,7 +66,7 @@ func NewRetriever(_ context.Context, config *RetrieverConfig) (*FileRetriever, e
 		config.DocumentConverter = DefaultDocumentConverter(config.ReturnFields)
 	}
 	if config.Embedding != nil && config.DistanceThreshold != nil {
-		obs.Logger().Warn("[kb] DistanceThreshold is ignored while an embedding is configured; " +
+		config.Store.logger().Warn("[kb] DistanceThreshold is ignored while an embedding is configured; " +
 			"the fused score has no cosine-distance dimension (see docs/kb-design.md §8.4)")
 	}
 	if config.Index != "" && config.Index != filepath.Base(config.Store.Dir()) {

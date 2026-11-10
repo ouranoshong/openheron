@@ -8,8 +8,8 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/message"
 	"github.com/ouranoshong/openheron/storage"
 )
 
@@ -17,6 +17,15 @@ import (
 // decision travels as a single item.
 type loopItem struct {
 	Query string
+
+	// Attachments are the files that came with this query.
+	//
+	// ★ They travel with the query because the attachment list belongs to
+	//   the **message**: the turn persists one user message, and that
+	//   message carries what it came with. A session-level list could only
+	//   answer "what does this session have" — not "that image you just
+	//   sent".
+	Attachments []message.Attachment
 
 	// Approvals maps an interrupt id to the decision for it. It is empty for
 	// a normal turn, and holds **every** outstanding decision for a resume
@@ -48,11 +57,21 @@ func (st *sessionState) markStarted(t time.Time) {
 // markTurnDone releases the turn pointer once its consumer has reported.
 // Only the matching handle is cleared, so a turn superseded in the meantime
 // is not disturbed.
+//
+// ★ It also releases whoever waits on the handle. The pointer is what the
+// admission gate reads: the moment it is nil the session is free, however
+// long its loop lives on waiting for the next item. Clearing it and
+// releasing the waiter are one step on purpose — an HTTP response that ends
+// in between hands the client a session it cannot use, and the client is
+// told "a turn is already running" about the turn it just finished.
 func (st *sessionState) markTurnDone(done *Turn) {
 	st.mu.Lock()
-	defer st.mu.Unlock()
 	if st.turn == done {
 		st.turn = nil
+	}
+	st.mu.Unlock()
+	if done != nil {
+		done.markReleased()
 	}
 }
 
@@ -137,7 +156,7 @@ func (rt *Runtime) loopExited(sessionID string, turn *Turn, loop *adk.TurnLoop[l
 		return
 	}
 	if exit != nil && exit.ExitReason != nil {
-		obs.Logger().Info("[openheronrt] loop exited", "session", sessionID, "reason", exit.ExitReason)
+		rt.log.Info("[openheronrt] loop exited", "session", sessionID, "reason", exit.ExitReason)
 	}
 	// ★ The loop is gone: nobody holds the session any more.
 	turn.lease.release()
@@ -264,6 +283,7 @@ func newTurnHandle(sessionID string, kind contract.TurnKind) *Turn {
 		Kind:      kind,
 		ready:     make(chan struct{}),
 		archived:  make(chan struct{}),
+		released:  make(chan struct{}),
 		abort:     make(chan struct{}),
 		publisher: newPublisher(),
 	}

@@ -61,8 +61,9 @@ func New(ctx context.Context, c *Config) (*ChatModel, error) {
 	if hc == nil {
 		hc = &http.Client{Timeout: c.Timeout}
 	}
-	hc = WrapHTTPClient(hc, c.ProviderID)
-
+	// ★ The client arrives already wrapped by the assembly layer
+	// (agentkit/obs/httplog). Request logging is observation, not protocol,
+	// and this package keeps zero openheron dependencies.
 	cli, err := acl.NewClient(ctx, &acl.Config{
 		APIKey:      c.APIKey,
 		BaseURL:     c.BaseURL,
@@ -80,14 +81,35 @@ func (cm *ChatModel) Generate(ctx context.Context, in []*schema.Message,
 	opts ...model.Option) (*schema.Message, error) {
 	ctx = callbacks.EnsureRunInfo(ctx, cm.GetType(), components.ComponentOfChatModel)
 
+	// ★ The shape is settled **here**, at the wire. A message that carries a
+	//   body and a picture at the same time is refused by the client before
+	//   the request is sent, and the history a transcript already holds can
+	//   carry both — see [normalizeWireShape].
+	in = normalizeWireShape(in)
+
+	// ★ One request, no second attempt. Attachments are paths in the message,
+	//
+	//	not file or image blocks on the wire: there is nothing here to strip on
+	//	failure. A provider that refuses a picture fails the turn with its own
+	//	error, and the user can retry with a different model or prompt — an
+	//	automatic retry without the picture used to hide that refusal.
 	out, err := cm.cli.Generate(ctx, in, opts...)
-	return out, wrap(err, cm.hintKeys)
+	if err != nil {
+		return nil, wrap(err, cm.hintKeys)
+	}
+	return out, nil
 }
 
 func (cm *ChatModel) Stream(ctx context.Context, in []*schema.Message,
 	opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 	ctx = callbacks.EnsureRunInfo(ctx, cm.GetType(), components.ComponentOfChatModel)
 
+	// ★ The same settling as Generate, and for the same reason.
+	in = normalizeWireShape(in)
+
+	// ★ The same one-request rule as Generate: a stream that fails before it
+	//
+	//	opens is reported, not retried with the attachment quietly removed.
 	out, err := cm.cli.Stream(ctx, in, opts...)
 	if err != nil {
 		return nil, wrap(err, cm.hintKeys)

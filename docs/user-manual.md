@@ -17,17 +17,17 @@ You need **Go 1.27.1+** (to build).
 ```bash
 git clone https://github.com/ouranoshong/openheron
 cd openheron
-make build
+task build
 ```
 
-`make build` builds the frontend and **embeds the interface into the binary**, producing
+`task build` builds the frontend and **embeds the interface into the binary**, producing
 `bin/openheron` — a self-contained executable that runs on any machine (cross-compile
 for platforms other than your build host).
 
 If you just want to try it quickly:
 
 ```bash
-make build-go     # backend only (no UI) — faster while iterating on Go code
+task build-go     # backend only (no UI) — faster while iterating on Go code
 ```
 
 ★ **Or install a released binary.** Every `v*` tag publishes the same self-contained
@@ -131,13 +131,15 @@ same agent.
 - The **configuration** lands in that workspace too: `.openheron/` is written
   on the first start, and it is yours to edit from then on.
 - The **key** stays on the host; the sandbox holds a sentinel.
-- **Approvals** still apply, and the policy is yours:
-  `policy/permissions.yaml` in the workspace decides which tools ask first.
+- **Approvals** still apply, and the default is the safe one: every tool asks
+  first, and the files under `.openheron/tools/` and `.openheron/mcps/` name the
+  exceptions (see §4.3).
 
 ★ The step-by-step guide is
 [`sandbox-kit/TUTORIAL.md`](../sandbox-kit/TUTORIAL.md) (Chinese:
 [`sandbox-kit/TUTORIAL_zh.md`](../sandbox-kit/TUTORIAL_zh.md)), and the design
-behind it is in [`docs/sandbox-kit-design.md`](sandbox-kit-design.md).
+behind it is in [`docs/sandbox-kit-design.md`](sandbox-kit-design.md) — that document is
+Chinese only, like every design document in this repository.
 
 ```bash
 sha256sum -c checksums.txt --ignore-missing
@@ -157,22 +159,45 @@ openheron
 
 Open <http://localhost:8080>.
 
-`openheron init` writes six files:
+`openheron init` writes the whole tree:
 
 ```
 your/project/
 └── .openheron/
     ├── agents/
-    │   ├── main.md          # entry agent: understand, split, delegate, verify
-    │   └── task.md          # executor agent: does the actual work
+    │   ├── main.md           # entry agent: understand the request, plan, dispatch
+    │   ├── task.md           # general execution expert: llm/ tools/ mcps/ server/
+    │   ├── agent-expert.md   # agent-domain expert: agents/*.md
+    │   └── skill-expert.md   # skill-domain expert: skills/<name>/SKILL.md
+    ├── skills/
+    │   ├── openheron-config-map/SKILL.md        # the facts of the configuration system
+    │   ├── openheron-config-edit/SKILL.md       # the procedure for changing it
+    │   ├── openheron-config-templates/SKILL.md  # how to get a skeleton
+    │   └── openheron-config-validate/SKILL.md   # the silent failures
     ├── llm/
     │   └── deepseek.yaml    # model profile
-    ├── policy/
-    │   ├── permissions.yaml # approval policy
-    │   └── limits.yaml      # caps on quantities
+    ├── mcps/
+    │   ├── fetch.yaml        # fetch a page and turn it into markdown
+    │   ├── time.yaml         # the current time and time-zone conversion
+    │   └── deepwiki.yaml     # public repository documentation and Q&A
+    ├── tools/
+    │   ├── filesystem.yaml   # the tiers of the filesystem tools
+    │   ├── http.yaml         # request_get
+    │   ├── web_search.yaml   # duckduckgo_search
+    │   ├── wikipedia.yaml    # wikipedia_search
+    │   └── kb.yaml           # the knowledge base (off: its corpus_dir is empty)
     └── server/
         └── config.yaml      # process parameters (not hot-reloaded)
 ```
+
+★ The three MCP servers need `uvx` on the PATH, and the two stdio ones download their
+package on the first start — a server that cannot be started costs that server's tools
+and nothing else (§4.7).
+
+★ **There is no `policy/` file.** The tiers have a default and the exceptions are
+named where the tool comes from (§4.3), so a file that says what the code already
+does is noise — ★ noise in a configuration tree is read as meaning. Name your
+exceptions in the tool's own file instead.
 
 ★ **Existing files are not overwritten** (unless you pass `--force`), so running it in
 an already-configured project is safe.
@@ -186,8 +211,7 @@ Other `init` options:
 | `--model <name>` | Choose the model, default `deepseek-flash` |
 | `--base-url <url>` | The vendor endpoint (**with the path**, copy it from their docs) |
 | `--env <NAME>` | The environment variable holding the secret, default `<PROVIDER>_API_KEY` |
-| `--no-policy` | Do not generate the `policy/` section (`permissions.yaml` and `limits.yaml`) |
-| `--tools` | Also generate the tool configurations under `tools/` |
+| `--no-tools` | Leave the tool configurations under `tools/` unwritten |
 | `--force` | Overwrite existing files |
 | `--dry-run` | Print what would be written, write nothing |
 | `--json` | Machine-readable output |
@@ -226,7 +250,8 @@ description: "task: the concrete executor. Writes files per the task order."
 model: deepseek/deepseek-flash
 max_iterations: 50
 reasoning: low
-disabled_tools: [kb_index]
+tools: [ls, read_file, write_file, edit_file, glob, grep, execute, write_todos]
+mcps: []
 summarize_at: 80%
 ---
 
@@ -245,8 +270,9 @@ Available frontmatter keys:
 | `max_iterations` | Cap on tool-loop iterations |
 | `summarize_at` | When this agent's context is **compacted** into a summary: `80%` of the model's window (the default), an absolute token count (`104858`), or `0` for never |
 | `subagents` | Whom it may delegate to (see §5) |
-| `disabled_tools` | Tool deny-list effective for **this agent** |
-| `skills` | The skills this agent may use — an allow-list of the folders under `skills/` (**not declared means every skill**, an empty list means none) |
+| `tools` | The **built-in** tools **this agent may use** — the names the model sees. ★ **Not declared means no tools at all**: the list is the whole answer. ★ MCP tools are **not** named here — the agent gets them by mounting the server (see §4.8) |
+| `skills` | The skills this agent may load — an allow-list of the folders under `skills/`. **Not declared means no skill**, and so does an empty list |
+| `mcps` | The MCP servers this agent **mounts** — **not declared means no server**, and so does an empty list. Mounting one starts a child process **and hands the agent all of that server's tools** (see §4.8) |
 | `temperature` / `max_tokens` | Sampling parameters |
 | `reasoning` | Reasoning tier: `off` / `low` / `high` / `max` (names defined by the vendor profile) |
 
@@ -256,6 +282,21 @@ configuration that fails silently is far harder to debug than one that fails lou
 ★ **`model` is not inherited.** The model the parent agent uses does not carry over to
 sub-agents — every agent has to name its own. That is exactly where "expert gets expert
 model" lands.
+
+★ **A model nobody declares leaves that agent out — it does not stop openheron.** The
+agent is dropped from the tree and from every parent's `subagents:`, and the reason is
+said in four places: the startup log, `/v2/health`, a grey notice on that agent's own
+file in the config editor (§6.3), and the error a session gets if it asks for it.
+★ The default agent is no exception: with no usable model, `main` is left out too, and
+until you fix it **no session can start** — but openheron does start, which is what lets
+you open the editor and fix the file. ★ The editor refuses the change that would cause
+it: pointing a working agent at a model that does not exist is rejected at save time.
+
+★ **A message that cannot start says why, not "timed out".** If the agent you are talking
+to cannot be built, the chat shows the reason itself — `agent "main" is left out of the
+tree: the model openai/gpt-4o-mini is not declared under llm/` — and the run ends with
+the code `agent_unavailable`. ★ That code means "your configuration is broken", so the
+answer is to open the editor and fix the file, not to send the message again.
 
 ★ **A `reasoning` tier only works if the model profile declares it.** An undeclared tier
 is **silently ignored**: an agent says `reasoning: high`, the endpoint has no `high`, and
@@ -332,31 +373,86 @@ survive the cut: the summary keeps them.
 missing from the table is silently ignored, so "I turned on high and it still does not
 think" shows up in the most hidden way possible.
 
-### 4.3 The approval policy (`policy/permissions.yaml`)
+### 4.3 Which tools ask
+
+**You do not have to decide.** A tool nobody names **asks** first: the run pauses and an
+approval card appears (see §6.2). The default is the safe one — one extra click
+against a destructive call nobody saw.
+
+There are only two tiers:
+
+| Tier | Meaning |
+|---|---|
+| `allow` | The tool runs without asking |
+| `ask` | The tool waits for your nod |
+
+**Two places name the exceptions**, and that is all of them:
+
+| Where | What it decides |
+|---|---|
+| The `allows:` line of the file that provides the tool | Which of that file's tools run **without** asking; everything else the file provides asks |
+| The `tools:` line of an agent | Which tools that agent **may use** — a tool that is not in it is not in its tool set, so the model does not even see it |
+
+★ **There is no global list.** There is no file where you list the tools that ask, and
+none where you list the tools nobody may use. A file names its own exceptions, an agent
+names its own, and the two never merge — so the effective tool table of an agent is
+always answerable from the configuration alone.
+
+★ **The code carries a default list, and a file only adds to it.** The readers
+(`ls` `read_file` `glob` `grep`) and the delegation tools (`task` `write_todos`
+`skill`) run without a nod, always — no file can take that away. Everything else asks
+until a file names it.
+
+★ **The three tools that change the machine have a file too.** `write_file`,
+`edit_file` and `execute` ask by default, and `tools/filesystem.yaml` is where you widen
+them:
 
 ```yaml
-ask:
-  - write_file
-  - edit_file
-  - execute
-  - kb_index
-deny: []
+# .openheron/tools/filesystem.yaml
+allows: [write_file, edit_file, execute]
 ```
 
-There are only two columns, and the semantics are plain:
+★ That file is a **tuner, not a switch**: the filesystem tools are always mounted, so the
+file cannot add or remove one — it only moves their tier. **Widening is the file's job;
+narrowing is the agent's** (`tools`), because narrowing is per agent and
+widening is a decision about the tool.
 
-- **Listed under `ask`**: every call needs **your nod**.
-- **Listed under `deny`**: **nobody may use it**.
-- **Listed in neither**: defaults to `allow` (straight through).
+The tools that come with a file of their own say so in that file:
 
-★ `deny` is **global**. The `disabled_tools` in `agents/*.md` only affects that one
-agent and **cannot relax the outer `deny`**. It is the one guarantee a sub-agent cannot
-loosen.
+```yaml
+# .openheron/tools/http.yaml
+methods: [get]
+allows: [request_get]
+```
+
+`request_get` runs without asking; a `request_post` asks — and it is not even offered
+unless `methods` names `post`. The knowledge base says the same thing: `kb.yaml` allows
+`kb_search` — searching reads, while `kb_index` writes to the index on disk, so it
+asks.
+
+An MCP server says it in its own file and in **its own vocabulary** — the server's own
+tool names, not the exposed ones (see §4.7):
+
+```yaml
+# .openheron/mcps/github.yaml
+allows: [read_issue, list_issues]
+```
+
+★ **A tier is not a verdict about the tool.** A tool an agent may not use keeps its own
+tier and says why: the effective tool table of an agent reports `blocked` with the
+reason `tools` (§4.8). There is no third tier and no global
+refusal — a tool is either available to that agent, or it is not in that agent's tool
+set at all.
+
+★ **The one exception cannot be widened.** `config_write` (§4.9) edits the
+configuration itself, including the file whose `allows:` list would grant it — so a file
+that could name it would be granting the tool that rewrites that file. It always asks,
+whatever any file says.
 
 ### 4.4 External tools (`tools/`)
 
-**Enabled by the presence of the file** — no code change needed. Four file names are
-recognised today:
+**No code change needed** — a provider whose configuration is absent mounts nothing, so
+writing the file is what turns the tool on. Four file names are recognised today:
 
 | File | Provides |
 |---|---|
@@ -365,13 +461,21 @@ recognised today:
 | `wikipedia.yaml` | Encyclopedia lookup |
 | `kb.yaml` | The knowledge base (see §7) |
 
+★ The knowledge base is the one exception: its file only holds the settings — it is
+switched on by a **non-empty `corpus_dir`**, not by the file's presence.
+
 ★ **Only these four file names are accepted** under `tools/`; any other name is a
 **startup error** and is never silently ignored.
 
-★ **`openheron init` writes nothing under `tools/` by default** — that whole directory is
-yours to write. Pass `--tools` and it writes the four files above. Not writing a file
-means not enabled: the tool does not appear in the agent's tool table, and the model
-cannot see it.
+★ **`openheron init` writes the five files above** — the tool configurations are part
+of the tree, because the factory agents name `request_get`, `duckduckgo_search` and
+`wikipedia_search`, and a name no provider offers is reported as a typo. Pass
+`--no-tools` and that directory stays empty. Not writing a file means not enabled: the
+tool does not appear in the agent's tool table, and the model cannot see it.
+
+★ **The file's `allows:` line decides what runs without asking** — `tools/http.yaml`
+names `request_get`, `tools/kb.yaml` names `kb_search`. Everything else that file
+provides asks (§4.3).
 
 ### 4.5 Process parameters (`server/config.yaml`)
 
@@ -384,13 +488,31 @@ cannot see it.
 | `start_timeout` | `60s` | Startup timeout |
 | `lease_ttl` | `10m` | How long a run's lease survives without progress — **longer than the provider's own timeout** |
 | `agent.max_depth` | `1` | Cap on delegation depth |
+| `log_level` | `info` | `debug`, `info`, `warn` or `error` — decides which lines reach the output |
+| `log_requests` | `false` | Whether to print the redacted model request body and the raw `tools` array at `debug` level; same effect as `OPENHERON_LOG_LLM_REQUESTS=1` |
+| `log.file` | `""` | A file to write the log to, relative to the **config root** — empty means stderr only |
 
 ★ **`server/` is not hot-reloaded** — a change only takes effect after a restart. That is
 why it is **read-only** in the config editor, and submitting it fails with
 `section "server" is not editable`.
 
 These environment variables override the file and take precedence:
-`LISTEN_ADDR`, `DATA_DIR`, `PROJECT_ROOT`, `FRONTEND_MODE`, `STATIC_DIR`.
+`LISTEN_ADDR`, `DATA_DIR`, `PROJECT_ROOT`, `FRONTEND_MODE`, `STATIC_DIR`, `OPENHERON_LOG_LEVEL`,
+`OPENHERON_LOG_FILE`, `OPENHERON_LOG_LLM_REQUESTS`.
+
+★ `log_requests` and `OPENHERON_LOG_LLM_REQUESTS` are two spellings of the same switch: the
+first sets the project default, the second decides one run (**the environment variable wins** —
+the config is consulted only when it is unset). When on, every model request writes a redacted
+body line and a raw `tools` line at `debug` level. With both off, a **rejected** request still
+leaves its raw `tools` bytes, because that is the turn worth keeping. This is a content switch;
+it has nothing to do with where `log.file` writes.
+
+★ A `log_level` that is not one of the four falls back to `info`; the config's `deferred`
+notices carry the reason.
+
+★ The log goes to the standard error unless `log.file` names a path — relative to the
+**config root**. The file is rotated by size, and a file that cannot be opened is a warning
+rather than a failed start: the process stays on the standard error and says why.
 
 ### 4.6 Skills (`skills/`)
 
@@ -413,6 +535,186 @@ means **none**. A skill outside the list is not advertised to the model, and ask
 it by name fails — a model cannot load what it cannot see. A name that is not in the
 directory is reported in the log when the agent is built, rather than ignored.
 
+★ **A skill is a folder, and that is what the editor asks for.** `/settings` lists each
+partition as a folder in a file tree, so a skill appears as `skills/code-review/SKILL.md`:
+type the skill's name, and the file inside it is always `SKILL.md`. The name is the same
+one you write in an agent's `skills:` list, and it has to be readable back —
+lowercase letters and digits, single `-` or `_` separators, so `code-review` and
+`code_review` stay two different skills.
+
+★ **When openheron reads skills from somewhere else, the section says so and refuses the
+save.** The rule above means the directory in force can be a different one from
+`<config root>/skills/`. Writing into the one nobody loads would change nothing, so the
+editor shows what the process actually reads and keeps the section read-only. A process
+that found no skills directory at all is not that case: `<config root>/skills/` is then
+where the next start will look, and creating the first skill there works.
+
+### 4.7 MCP servers (`mcps/`)
+
+An MCP server is a program that offers tools to a model. openheron mounts **one server
+per file**, and **the file's presence is the definition** — there is no `enabled` key.
+
+`mcps/<server>.yaml` — the file's name is the server's name:
+
+```yaml
+# .openheron/mcps/github.yaml
+transport: stdio
+command: npx
+args: ["-y", "@modelcontextprotocol/server-github"]
+env:
+  GITHUB_TOKEN: ${GITHUB_TOKEN}
+timeout: 30s
+call_timeout: 60s
+tools: []
+allows: [read_issue, list_issues]
+```
+
+The same server over HTTP:
+
+```yaml
+# .openheron/mcps/remote.yaml
+transport: http
+url: https://mcp.example.com/mcp
+headers:
+  Authorization: Bearer ${REMOTE_TOKEN}
+timeout: 30s
+call_timeout: 60s
+```
+
+| Field | Applies to | Meaning |
+|---|---|---|
+| `transport` | both | `stdio` (a child process) or `http` (**streamable HTTP** — there is no SSE transport). Defaults to `stdio` |
+| `command` | stdio | The executable to run. **Required** |
+| `args` | stdio | The command's arguments |
+| `env` | stdio | The child's environment, layered over the inherited one |
+| `url` | http | The server's address. **Required** |
+| `headers` | http | Sent on every request |
+| `timeout` | both | The ceiling for connect, initialize and list tools (default `30s`) |
+| `call_timeout` | both | The ceiling for one tool call (default `60s`) |
+| `tools` | both | A **filter** on the server's own tool names; absent or empty means all of them |
+| `allows` | both | The server's own tool names that run **without** asking; everything else asks |
+
+★ **The file's name must match `^[a-z0-9]+(_[a-z0-9]+)*$`.** A name with a run of
+underscores is refused: the exposed name `mcp__a__b__x` could not be read back later —
+is that the server `a` with the tool `b__x`, or the server `a__b` with the tool `x`?
+
+★ **`openheron init` writes three servers** — `mcps/fetch.yaml`, `mcps/time.yaml` and
+`mcps/deepwiki.yaml`. ★ Each of them **defines** a server, so a file that cannot be
+parsed is not a server that is off, it is a configuration that does not load. ★ The two
+stdio ones run `uvx`, and `uvx` is not installed by default — so the server does not
+come up, **the log says so, and the agent carries on**. ★ **Writing a file of your own
+under `mcps/` with your own command in it is the act of defining that server**; copy
+one of the three and change the `command:`.
+
+★ **The example that is not installed** — `mcps/_example.yaml` in the templates — is the
+skeleton the settings editor starts a new server from. It is a scaffold, not a file to
+install, so `openheron init` does not write it.
+
+★ **The first start of a stdio server may be slow, and `timeout:` is the ceiling for
+it.** The command is often a package runner (`npx`, `uvx`), and the first run installs
+the server — that install is part of the start, so a server that needs a minute to
+install does not come up within `timeout: 30s`. ★ It then does not come up at all, and
+the turn carries on without its tools: run the command once by hand to warm the cache,
+or give the file a longer `timeout:`.
+
+★ **What fails at startup:** an unknown `transport`; a stdio server with no `command`; an
+http server with no `url`; `env:` on an http server; an agent naming a server that does
+not exist.
+
+★ **What does not fail:** a bad `timeout` — it degrades to the default and is reported in
+the notices; an unset `${ENV}` in `env:` — that entry is left out and reported. A wrong
+timeout changes *how long we wait*, not *what happens*, so it must not keep a server from
+starting.
+
+**The names you will see.** A server's tool `create_issue` reaches the model as
+`mcp__github__create_issue`. The server's own name and the exposed name are both shown
+in the `/mcps` panel (see §6.8).
+
+★ **The file does not have to name the credential.** In a sandbox the variable holds the
+`credential@1` sentinel and the host's proxy swaps in the real value on the way out — so
+the sentinel reaches the server through the inherited environment, and the same holds for
+an http server's `headers:`.
+
+★ **`mcps/` is hot.** A change takes effect on the next turn — no restart.
+
+### 4.8 Which servers an agent gets
+
+**The `mcps:` key in the agent's frontmatter** decides which servers the agent gets — and
+mounting one **is** the grant:
+
+```yaml
+---
+model: deepseek/deepseek-flash
+mcps: [github]
+---
+```
+
+| The `mcps:` key | Means |
+|---|---|
+| absent | **no** server |
+| `[]` | **none** |
+| `[github]` | exactly those servers — and all of their tools |
+
+★ A sub-agent carries a list of its **own**, next to its own `skills` and `tools` — the
+list is read from the agent that is running, not from the root's.
+
+★ **Mounting is the grant.** `mcps:` says which servers are **started**, and the agent
+**gets all of that server's tools** — there is no second list to write.
+
+★ **`tools:` is about the built-in tools only.** An `mcp__<server>__*` entry there grants
+nothing: it is dropped, and the configuration reports a **notice** saying so. The server
+belongs in `mcps:`.
+
+★ **Approval is separate from mounting.** Mounting gives the agent the tools; whether a
+tool runs without a nod comes from the server's own file (`mcps/<server>.yaml`), and the
+default there is `ask` — **mounting is not approving**.
+
+**`tools` takes a trailing `*` as a pattern.** An exact name, or a **trailing** `*`:
+
+```yaml
+tools: [ls, read_file, config_*]
+```
+
+- `config_*` — every built-in tool whose name starts with `config_`.
+- `ls` — exactly that one tool.
+
+★ **`mcp*foo` and a lone `*` are refused at startup.** Only a *trailing* `*` is a pattern,
+and a lone `*` would be a way of saying "everything" in a list whose whole point is to say
+what is there: a rule whose reach differs from what it reads as is a silent mismatch.
+
+### 4.9 The configuration tools
+
+Six tools let an agent read and change the configuration it runs from. They are always
+mounted and, like every other built-in tool, only **visible** to the agents whose
+`tools:` list names them:
+
+| Tool | What it answers | Tier |
+|---|---|---|
+| `config_get` | One file (`{path}`: its text, revision, and whether it is hot), or `{}`: the partitions, the files that exist, and what the running process holds | allow |
+| `config_validate` | `{path, content}`: would this file load, and where exactly is it wrong — the server reports the line. `{}`: check the tree on disk | allow |
+| `config_template` | `{path}`: the skeleton that file starts from. `{section}`: that partition's templates. Neither: an index of what to ask for | allow |
+| `config_notices` | What the loader noticed but did not refuse: renamed keys, retired directories, values that fell back to a default | allow |
+| `config_tier` | `{tool}`: whether it asks. `{agent}`: that agent's tools and their tiers. Neither: the default tier and the whole exception list | allow |
+| `config_write` | Writes a file: checked against the tree, checked against the revision you read, and refused whole if the merge breaks. Takes effect on the next turn | **ask** |
+
+```markdown
+---
+# .openheron/agents/main.md
+tools: [ls, read_file, glob, grep, task, write_todos, config_get, config_validate]
+---
+```
+
+★ **Give `config_get` and `config_validate` before `config_write`.** The first two only
+read; the third changes the configuration and always interrupts for approval. An agent
+that can validate but not write is a useful reviewer; an agent that can only write is a
+loader error waiting to happen.
+
+★ **`config_write` cannot write `server/`, and `config_get` can still read it.** The
+partition configures the process itself and is not hot-reloaded, so a change needs a
+restart — the write path refuses it rather than saving something that silently does
+nothing. Reading is a different question, and it is the one an agent asks when it wants
+to know what the process is actually running with.
+
 ## 5. Multiple agents and delegation
 
 ### 5.1 Who may delegate to whom
@@ -433,20 +735,21 @@ silent truncation.
 
 ### 5.2 The depth cap
 
-The cap is decided by `agent.max_depth` in `server/config.yaml` together with the same
-key in `policy/limits.yaml`, and **the stricter one wins**. The default `1` means "only
-the entry agent may delegate; a sub-agent may not spawn children".
+The cap is `agent.max_depth` in `server/config.yaml`. The default `1` means "only the
+entry agent may delegate; a sub-agent may not spawn children".
 
 For a deeper delegation chain:
 
 ```yaml
-# policy/limits.yaml
+# .openheron/server/config.yaml
 agent:
   max_depth: 3
 ```
 
 ★ A declared topology that exceeds the cap is a **startup error**, not "truncate to the
 cap and carry on". The latter would make the depth protection meaningless.
+
+★ **`server/` is not hot-reloaded** (§4.5) — a deeper cap needs a restart.
 
 ### 5.3 Several agents in one session
 
@@ -462,12 +765,19 @@ In the interface:
 
 | Element | What it does |
 |---|---|
-| **Sidebar** | Session list, agent filter, status dot (lights up when an approval is pending) |
+| **Header** | The agent filter (each chip names an agent; hover it for its context occupancy and spend), the theme switch, and the status of the current turn |
+| **Sidebar** | The session list, the "New thread" button, the settings entry |
 | **Composer** | Ask a question; `/` opens the slash commands; supports drag/paste attachments |
 | **Message list** | Assistant replies, reasoning, tool-call cards, sub-agent output (with attribution) |
 | **Approval card** | Appears when your nod is needed: approve / deny (with an optional reason) |
 | **Tool card** | The arguments and result of each tool call |
 | **Settings** | Entry point to the config editor |
+
+★ The **theme switch** is in the header: light or dark. It follows your desktop until you
+pick one, and the choice is remembered.
+★ A **table** in a reply has a width of its own: it fills the column, a long cell wraps
+inside it, and a table with many columns scrolls inside its own frame instead of pushing
+the page sideways.
 
 ### 6.1 Slash commands
 
@@ -475,9 +785,10 @@ In the interface:
 |---|---|
 | `/new` | Start a new session |
 | `/stop` | Stop the current turn |
-| `/attach` | Attach files to the current session |
+| `/attach` | Attach files to the **next** message — see §6.9 |
 | `/settings` | Open the config editor |
 | `/agents` | Switch the session's agent |
+| `/mcps` | Show the MCP servers of this agent — see §6.8 |
 | `/compact` | **Compact the conversation now** — see §6.6 |
 | `/skill` | Pick a named skill for this task |
 | `/review` | Review the current changes or the given paths |
@@ -503,18 +814,47 @@ silently starting a fresh turn.
 
 ### 6.3 The config editor
 
-`/settings` opens it. It can edit `llm/`, `agents/`, `policy/` and `tools/`.
+`/settings` opens it. It can edit `llm/`, `agents/`, `tools/` and `mcps/`.
 
 The write path has several gates:
 
+- **Nothing is checked in the browser any more.** The editor sends the draft to the
+  server and shows the server's answer — each issue with the line it is on. Typing is
+  debounced by 250 ms, and an answer that belongs to an older draft is dropped.
+- **Every issue names the file it is about.** A problem in another file is shown under
+  **that** file's name — and it is a link: click it and the editor opens that file. Your
+  own file's problems stay on your own file. ★ A file that does not even parse still takes
+  the whole tree with it, so a broken file elsewhere still blocks the save; the status
+  line says which file is the reason.
+- **A grey line is a hint, a red line is an error.** A hint says "this tree is short
+  something" and does not block anything; an error is what keeps Save disabled. An agent
+  whose model is not declared is a **hint** on that agent's own file: the tree loads
+  without it (see §4.1), so the file in front of you can be perfectly fine.
+- **A change that would take a working agent out of the tree is refused.** Repointing an
+  agent at a model nobody declares would otherwise make it disappear without a word. The
+  refusal is shown on the file you are editing — that is the change being made — and Save
+  stays disabled until the agent is back in the tree. Adding an agent, or editing
+  something unrelated, is never refused this way.
+- **A delete that something still names is refused, and the refusal names the referrer.**
+  Deleting `mcps/fetch.yaml` while an agent still mounts it would leave that agent
+  pointing at a server that is not there. The message says **which file still names it**
+  and **what to remove** — remove that reference first, then delete the file. The same
+  goes for a model profile an agent uses and for an agent another agent delegates to.
 - `server/` is **not editable** (not hot-reloaded, so a change needs a restart).
 - **Literal secrets are rejected** — `api_key must be a reference, not a literal`. Use
   `${ENV_VAR}` or `@file:/path`.
 - **A file with no YAML content is rejected** — a file that is empty, or holds nothing
   but comments, carries no configuration at all. The message names the fields the file
   needs; under `tools/` it says which tool is missing what.
+- **A file under `mcps/` must be named `<server>.yaml`**, and the server name must match
+  the pattern of §4.7 — any other name is refused at save time.
 - **Optimistic concurrency**: if the file changed elsewhere, saving reports a conflict
   and lets you choose to overwrite or to back off.
+- **A new file whose name the server refuses keeps the dialog open**, with what you typed
+  still there and the server's sentence beside the field — the file name rules are the
+  server's (`server/` is read-only, `tools/` takes five names, `mcps/` takes
+  `<server>.yaml`), so the refusal comes back from the server, not from a copy in the
+  dialog.
 
 ### 6.4 The context meter
 
@@ -619,23 +959,120 @@ A client whose connection drops comes back with the run's id — `POST /v2/run` 
 /v2/sessions/{id}/runs` says whether the run is still going, and the run's own history
 is there for the times when it is not.
 
+### 6.8 `/mcps` — the MCP servers of this agent
+
+`/mcps` is an **action**, not a prompt: it opens a dialog, and it never writes into the
+transcript and never reaches the model. The status is **read**, not generated — a model
+describing the servers would be a second, lossy truth about a fact the runtime already
+holds.
+
+The dialog is titled "MCP servers" and holds one block per configured server:
+
+- the server's name, its transport (`stdio` or `http`), and its state — `ready`,
+  `starting`, `unreachable` or `unused`;
+- one row per tool: the server's own name, the exposed name (`mcp__github__create_issue`),
+  the tier (`allow` or `ask`), and the state.
+
+A configuration with no server says "No MCP servers are configured".
+
+★ **Opening the dialog starts the servers it asks about**, so it can answer "is my server
+broken?" — otherwise the answer would be "run a turn and find out". A server the agent
+does not use is `unused` and carries no tool rows.
+
+★ **A server that cannot start does not stop the turn.** The agent runs without that
+server's tools — the rest of the tool surface is unaffected — and the panel carries the
+reason next to the server. The only thing a broken server costs you is its own tools.
+
+★ **A server on its way is a state of its own: `starting`.** The servers are started in
+the background as soon as the configuration is known, so the first turn usually finds
+them up. A server that is still starting says `starting` and carries **no error** —
+there is no error yet, it is on its way. The tools it brings join the **next** turn.
+
+The **Refresh** button re-reads the state, so you can fix a server and see the fix without
+closing the dialog.
+
+### 6.9 Sending attachments
+
+Three ways in, and they all end in the same place — a row of chips above the composer:
+
+| How | What happens |
+|---|---|
+| The **paperclip** button | Opens the file picker |
+| **Dragging** files onto the composer | The composer highlights while the drag is over it |
+| **Pasting** | Ctrl+V with an image on the clipboard attaches it — no "save it as a file first" |
+
+★ **A file is attached to a *message*, not to a session.** The chips above the
+composer are waiting to go out with your **next** message; once you send, they
+leave the composer and appear on the message itself. A file that has been sent
+stays with that message — you can still see which one it was weeks later, after
+a reload.
+
+★ **The model really gets them — by opening them.** A picture goes in as an
+image, so the model *sees* it rather than reading bytes as text. ★ Any other
+text file is named by an `@` line at the top of the message, holding an
+absolute path; the model calls `read_file` on it. The file's bytes are not in
+the request, so the first thing the model does is open the file — for a large
+one it reads in chunks with `offset` and `limit`. ★ A binary attachment (a
+PDF, an archive) is named in the prompt as "cannot be processed yet": the
+model tells you so instead of pretending it read it.
+★ **There is no automatic fallback.** A picture the model cannot see fails the
+turn with the provider's error; a file the model did not open is not re-sent
+behind your back. If an answer looks like the file was never read, tell the
+model to read it again.
+
+★ **Accepting a picture is not the same as seeing it.** Whether a picture reaches
+the model's eyes is the provider's business: some models read it, some take the
+request and never look at it — DeepSeek's `deepseek-v4-pro` does the latter. ★
+When that happens the model says so itself; openheron cannot declare a model's
+vision in the configuration, so it does not pretend to know.
+
+★ **The × on a chip deletes the file.** Not just from the list: the file is
+removed from the session's workspace as well. ★ A file that already went out
+with a message is **not** deleted — that message says the file was part of the
+question, and deleting it would make the record lie.
+
+★ **You can look at a file before you send it, and after.** A picture shows as
+a thumbnail on its chip; everything else shows the icon of its kind. Click it
+and the file opens in place: the picture at full size, a PDF in the reader, a
+Markdown file rendered, code highlighted, text as text. ★ The same works on
+the attachments in the messages above — those are history, so they have no
+×, but they open just the same. ★ A file that is gone (deleted with the ×, or
+cleaned out of the workspace) falls back to its icon instead of a broken image.
+
+★ **A picture is compressed on the way in.** It keeps its format — a PNG
+stays a PNG, with its transparency — and it is scaled down when it is larger
+than 1600 pixels on its longest edge. ★ A GIF and a WebP are stored as they
+are: the first would lose its animation, and the second cannot be re-encoded
+here. ★ The file's **name** in the workspace carries a short hash, so
+uploading the same name twice gives two files instead of one overwriting the
+other — and the interface still shows you the name you recognise.
+
+★ **A reload does not lose anything.** The files you have not sent yet come
+back (the server keeps them), and the files you already sent stay on their
+messages.
+
 ## 7. The knowledge base
 
 The knowledge base is an **optional** local corpus retrieval layer: it turns a set of
 markdown documents into material an agent can search.
 
+★ **What "corpus" means.** "Corpus" is the information-retrieval term for the collection of
+documents a search answers from; here it is **one directory**. `corpus_dir` is the directory the
+knowledge base indexes — a path relative to the project root, and only the `.md` files under it
+are indexed (`kb/index.go:21`).
+
 ### 7.1 Turning it on
 
 ```yaml
 # .openheron/tools/kb.yaml
-corpus: docs          # a directory relative to the project root
+corpus_dir: docs      # a directory relative to the project root
 index: default
 model: openai/text-embedding-3-small
 top_k: 8
 ```
 
-- **Not configuring `corpus` means it is off.**
-- `corpus` **must be a path relative to the project root**. An absolute path is a
+- **Not configuring `corpus_dir` means it is off.**
+- `corpus_dir` **must be a path relative to the project root**. An absolute path is a
   **startup error** — the index and its corpus must have the same lifetime, and a corpus
   living in a system directory would rob the index of meaning.
 - `model` is required and must point at a model declared with `kind: embedding`;
@@ -708,7 +1145,8 @@ publicly, or narrow `listen_addr` to `127.0.0.1`.
 | POST | `/v2/run` | **SSE entry point**: ask a question, or answer an approval (see §6.7) |
 | GET | `/v2/skills` | The skill list |
 | GET | `/v2/agents` `/v2/agents/:agentId` | Agents and their effective tool tables |
-| GET | `/v2/config` | The effective configuration |
+| GET | `/v2/mcps` | The MCP servers of one agent (`?agent=`); see §6.8 |
+| GET | `/v2/config` | The effective configuration (its `policy` field carries the default tier and the names that run without a nod) |
 | GET | `/v2/health` | Health check (includes `deferred` notices) |
 | GET | `/v2/runtime` | Runtime status |
 | GET | `/v2/settings` | The list of editable items |
@@ -780,13 +1218,28 @@ Run `openheron kb status` first: `lexical-only retrieval` means there are no vec
 and the hybrid score is not in effect. Configure an embedding model and re-index.
 
 **Q: An agent cannot call `write_file`?**
-Two possibilities: it is disabled for that agent by `disabled_tools`, or it is denied
-globally by `deny`. Check `GET /v2/agents/:agentId` for the effective tool table. By
-default `main` has `write_file`/`edit_file`/`execute` disabled — in the factory
-configuration it only orchestrates.
+Two possibilities: it is not in that agent's `tools:` list — then the model does not even
+see it — or it is an `ask` tool and nobody answered the approval card. Check
+`GET /v2/agents/:agentId` for the effective tool table. In the factory configuration
+`main` keeps only the readers and the delegation tool, because it orchestrates and hands
+the writing to `task`.
 
 **Q: `/v2/run` says `threadId is required`**
 Create the session with `POST /v2/sessions` first.
+
+**Q: The model does not see the MCP server's tools?**
+Open `/mcps` (see §6.8). A server the agent does not mount reads `unused`; a tool the agent
+cannot reach reads `blocked`, and the reason names `mcps` — the agent does not mount that
+server. A server that reads `unreachable` carries the error that says why it could not be
+started.
+
+**Q: An MCP server does not start?**
+The startup error names the file and the field. `mcps/` is hot, so a fix takes effect on
+the next turn — no restart.
+
+**Q: The panel says a server is `starting`?**
+It is on its way: the servers are started in the background when the configuration is
+known. The tools it brings join the **next** turn — press **Refresh** to see them.
 
 **Q: The port is taken / the interface will not open?**
 Change the port in `listen_addr`, or override it with the `LISTEN_ADDR` environment

@@ -1,0 +1,375 @@
+package common
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/cloudwego/eino/schema"
+	goopenai "github.com/meguminnnnnnnnn/go-openai"
+)
+
+// bothShapesMessage is a message that carries a body and a picture at the
+// same time.
+//
+// ★ This is the shape a transcript written **before** the assembly learned to
+//
+//	move the body into a text part holds. It is durable: the session cannot
+//	rewrite its own history, so every later question about it would fail the
+//	same way.
+func bothShapesMessage() *schema.Message {
+	b64 := "aGVsbG8="
+	return &schema.Message{
+		Role:    schema.User,
+		Content: "what is in this picture?",
+		UserInputMultiContent: []schema.MessageInputPart{
+			{
+				Type: schema.ChatMessagePartTypeImageURL,
+				Image: &schema.MessageInputImage{
+					MessagePartCommon: schema.MessagePartCommon{
+						Base64Data: &b64,
+						MIMEType:   "image/png",
+					},
+				},
+			},
+		},
+	}
+}
+
+// recordingServer keeps the request bodies it was given.
+type recordingServer struct {
+	mu     sync.Mutex
+	bodies []string
+}
+
+func (s *recordingServer) handler(w http.ResponseWriter, r *http.Request) {
+	raw, _ := io.ReadAll(r.Body)
+	s.mu.Lock()
+	s.bodies = append(s.bodies, string(raw))
+	s.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{
+		"id":"chatcmpl-1","object":"chat.completion","created":1700000000,"model":"m",
+		"choices":[{"index":0,"message":{"role":"assistant","content":"the answer"},"finish_reason":"stop"}],
+		"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+}
+
+func (s *recordingServer) body() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.bodies) == 0 {
+		return ""
+	}
+	return s.bodies[0]
+}
+
+// newRecordingModel wires a model to a server that records what it was sent.
+func newRecordingModel(t *testing.T, srv *recordingServer) *ChatModel {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(srv.handler))
+	t.Cleanup(ts.Close)
+	cm, err := New(context.Background(), &Config{
+		ProviderID: "deepseek",
+		APIKey:     "k",
+		BaseURL:    ts.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cm
+}
+
+// ★ A message with both shapes reaches the wire in one shape.
+//
+//	★ This is the whole point of the normalization: the client refuses to
+//	  marshal a message that carries a string and a list at the same time,
+//	  and it does so before the request is sent — so the turn dies on the
+//	  spot, with no answer and no error the user can act on.
+func TestAMessageWithBothShapesReachesTheWireInOneShape(t *testing.T) {
+	srv := &recordingServer{}
+	cm := newRecordingModel(t, srv)
+
+	if _, err := cm.Generate(context.Background(), []*schema.Message{bothShapesMessage()}); err != nil {
+		t.Fatalf("the turn must not die on a message the history holds: %v", err)
+	}
+
+	body := srv.body()
+	if !strings.Contains(body, "image_url") {
+		t.Fatalf("the picture was dropped:\n%s", body)
+	}
+	if !strings.Contains(body, "what is in this picture?") {
+		t.Fatalf("the body was dropped:\n%s", body)
+	}
+
+	// ★ The `content` field is a list, and it holds the body and the picture.
+	var payload struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content any    `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("the request does not parse: %v", err)
+	}
+	if len(payload.Messages) != 1 {
+		t.Fatalf("the request carries %d messages, want 1", len(payload.Messages))
+	}
+	parts, ok := payload.Messages[0].Content.([]any)
+	if !ok {
+		t.Fatalf("the content is %T, want a list", payload.Messages[0].Content)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("the content holds %d parts, want the body and the picture", len(parts))
+	}
+}
+
+// ★ The body moves into a text part, and the picture keeps its place.
+//
+//	★ The parts are the richer shape: a picture without its body is a
+//	  picture the model cannot place.
+func TestTheBodyMovesIntoAPartAndThePictureKeepsItsPlace(t *testing.T) {
+	out := normalizeWireShape([]*schema.Message{bothShapesMessage()})
+	m := out[0]
+	if m.Content != "" {
+		t.Fatalf("the message still carries its body: %q", m.Content)
+	}
+	if len(m.UserInputMultiContent) != 2 {
+		t.Fatalf("the message carries %d parts, want the body and the picture", len(m.UserInputMultiContent))
+	}
+	if m.UserInputMultiContent[0].Type != schema.ChatMessagePartTypeText {
+		t.Fatalf("the first part is %q, want the text", m.UserInputMultiContent[0].Type)
+	}
+	if m.UserInputMultiContent[0].Text != "what is in this picture?" {
+		t.Fatalf("the body is %q", m.UserInputMultiContent[0].Text)
+	}
+	if m.UserInputMultiContent[1].Type != schema.ChatMessagePartTypeImageURL {
+		t.Fatalf("the second part is %q, want the picture", m.UserInputMultiContent[1].Type)
+	}
+}
+
+// ★ The original is left alone.
+//
+//	★ The caller holds the message the transcript keeps; the normalization
+//	  makes a copy for the wire and must not touch the one it was given.
+func TestTheNormalizationLeavesTheOriginalAlone(t *testing.T) {
+	original := bothShapesMessage()
+	normalizeWireShape([]*schema.Message{original})
+
+	if original.Content != "what is in this picture?" {
+		t.Fatalf("the original lost its body: %q", original.Content)
+	}
+	if len(original.UserInputMultiContent) != 1 {
+		t.Fatalf("the original was modified: %d parts", len(original.UserInputMultiContent))
+	}
+}
+
+// ★ A message that already has one shape is not copied.
+//
+//	★ The common case is a plain text message, and the common case should
+//	  cost nothing: no copy, no allocation, no surprise.
+func TestAMessageWithOneShapeIsNotCopied(t *testing.T) {
+	plain := schema.UserMessage("hello")
+	out := normalizeWireShape([]*schema.Message{plain})
+	if out[0] != plain {
+		t.Fatal("a plain message must be passed through as it is")
+	}
+
+	// ★ The shape the assembly produces is passed through too: the body has
+	//   moved into a part, and Content is empty.
+	assembled := &schema.Message{
+		Role: schema.User,
+		UserInputMultiContent: []schema.MessageInputPart{
+			{Type: schema.ChatMessagePartTypeText, Text: "the question"},
+		},
+	}
+	out = normalizeWireShape([]*schema.Message{assembled})
+	if out[0] != assembled {
+		t.Fatal("an assembled message must be passed through as it is")
+	}
+}
+
+// ★ The stamps ride along.
+//
+//	★ The id and the attachment list are facts about the message, and the
+//	  copy on the wire is the same message as far as they are concerned.
+func TestTheStampsRideAlong(t *testing.T) {
+	original := bothShapesMessage()
+	original.Extra = map[string]any{"openheron_message_id": "abc-123"}
+
+	out := normalizeWireShape([]*schema.Message{original})
+	id, ok := out[0].Extra["openheron_message_id"]
+	if !ok || id != "abc-123" {
+		t.Fatalf("the stamp was lost: %v", out[0].Extra)
+	}
+}
+
+// ★ The deprecated list is emptied rather than merged.
+//
+//	★ `MultiContent` is the older name for the same wire field, and the
+//	  client refuses it beside a body as well. It has no place on the wire
+//	  any more, so it goes — the body stays, and nothing is invented.
+func TestTheDeprecatedListIsEmptied(t *testing.T) {
+	legacy := &schema.Message{
+		Role:    schema.User,
+		Content: "the question",
+		MultiContent: []schema.ChatMessagePart{
+			{Type: schema.ChatMessagePartTypeText, Text: "the question"},
+		},
+	}
+
+	out := normalizeWireShape([]*schema.Message{legacy})
+	if out[0].Content != "" {
+		t.Fatalf("the message still carries its body: %q", out[0].Content)
+	}
+	if len(out[0].MultiContent) != 0 {
+		t.Fatalf("the deprecated list survived: %d parts", len(out[0].MultiContent))
+	}
+}
+
+// ★ A nil message is passed through.
+//
+//	★ The history can hold a nil, and a nil must not become a message.
+func TestANilMessageIsPassedThrough(t *testing.T) {
+	out := normalizeWireShape([]*schema.Message{nil})
+	if out[0] != nil {
+		t.Fatal("a nil message must stay nil")
+	}
+}
+
+// reasoningOnlyAssistant is what a turn that spent its whole budget thinking,
+// or a stream cut short, leaves in the transcript: reasoning, no answer, no
+// tool calls. The client's `content` is omitempty, so on the wire the
+// assistant message has no `content` and no `tool_calls` at all.
+func reasoningOnlyAssistant() *schema.Message {
+	return &schema.Message{
+		Role:             schema.Assistant,
+		ReasoningContent: "let me think about the logs the user pasted",
+	}
+}
+
+// ★ The provider's rule, reproduced from the client library: an empty
+//
+//	Content is omitted, not sent as "". An endpoint that demands content or
+//	tool_calls therefore sees a bare assistant message and refuses it.
+func TestTheProviderRefusesAnAssistantWithNoContentAndNoCalls(t *testing.T) {
+	bare := goopenai.ChatCompletionMessage{
+		Role:             goopenai.ChatMessageRoleAssistant,
+		ReasoningContent: "thinking",
+	}
+	b, err := json.Marshal(bare)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), `"content"`) || strings.Contains(string(b), `"tool_calls"`) {
+		t.Fatalf("the constraint moved: %s", b)
+	}
+}
+
+// ★ A reasoning-only assistant message is made visible on the wire.
+//
+//	★ The transcript keeps its copy: a session cannot rewrite its own
+//	  history, and the next turn would otherwise fail the same way forever.
+func TestAReasoningOnlyAssistantGetsVisibleContent(t *testing.T) {
+	original := reasoningOnlyAssistant()
+	original.Extra = map[string]any{"openheron_message_id": "blank-1"}
+
+	out := normalizeWireShape([]*schema.Message{original})
+	if out[0].Content != noVisibleResponseText {
+		t.Fatalf("the assistant still has no visible content: %q", out[0].Content)
+	}
+	if original.Content != "" {
+		t.Fatalf("the transcript's message was modified: %q", original.Content)
+	}
+	if out[0].ReasoningContent != original.ReasoningContent {
+		t.Fatal("the reasoning was lost")
+	}
+	if out[0].Extra["openheron_message_id"] != "blank-1" {
+		t.Fatal("the stamp was lost")
+	}
+}
+
+// ★ An assistant with tool calls is already legal — leave it exactly alone.
+//
+//	★ Empty Content with tool calls is the normal shape of every tool turn;
+//	  giving it a placeholder would put words in the model's mouth.
+func TestAnAssistantWithToolCallsIsLeftAlone(t *testing.T) {
+	calls := &schema.Message{
+		Role: schema.Assistant,
+		ToolCalls: []schema.ToolCall{{
+			ID: "call_1", Function: schema.FunctionCall{Name: "glob", Arguments: "{}"},
+		}},
+	}
+	out := normalizeWireShape([]*schema.Message{calls})
+	if out[0] != calls {
+		t.Fatal("a tool-call message must be passed through untouched")
+	}
+	if out[0].Content != "" {
+		t.Fatalf("a placeholder was injected into a tool turn: %q", out[0].Content)
+	}
+}
+
+// ★ The message that actually leaves the process carries `content`.
+//
+//	★ The unit test above checks the in-memory shape; this one checks the
+//	  JSON the endpoint reads, which is where omitempty does its damage.
+func TestTheWireCarriesContentForAReasoningOnlyAssistant(t *testing.T) {
+	srv := &recordingServer{}
+	cm := newRecordingModel(t, srv)
+
+	if _, err := cm.Generate(context.Background(), []*schema.Message{
+		schema.UserMessage("what happened?"), reasoningOnlyAssistant(),
+	}); err != nil {
+		t.Fatalf("the turn must not die on a blank history message: %v", err)
+	}
+
+	var payload struct {
+		Messages []map[string]any `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(srv.body()), &payload); err != nil {
+		t.Fatalf("the request does not parse: %v", err)
+	}
+	if len(payload.Messages) != 2 {
+		t.Fatalf("the request carries %d messages, want 2", len(payload.Messages))
+	}
+	content, ok := payload.Messages[1]["content"]
+	if !ok {
+		t.Fatalf("the assistant message still has no content field:\n%s", srv.body())
+	}
+	if content == "" {
+		t.Fatal("the assistant message carries an empty content")
+	}
+}
+
+// ★ The constraint itself: one `content` field, one shape.
+//
+//	★ The client refuses to marshal a message carrying both — the turn dies
+//	  before the request is even sent, on a picture the user attached. This is
+//	  the provider's rule, not openheron's, and it is why normalization exists.
+func TestTheProviderRefusesAMessageWithBothShapes(t *testing.T) {
+	both := goopenai.ChatCompletionMessage{
+		Role:    goopenai.ChatMessageRoleUser,
+		Content: "the question",
+		MultiContent: []goopenai.ChatMessagePart{
+			{Type: goopenai.ChatMessagePartTypeText, Text: "the question"},
+		},
+	}
+	if _, err := json.Marshal(both); err == nil {
+		t.Fatal("a message with both a string and a list must be refused")
+	}
+
+	list := goopenai.ChatCompletionMessage{
+		Role: goopenai.ChatMessageRoleUser,
+		MultiContent: []goopenai.ChatMessagePart{
+			{Type: goopenai.ChatMessagePartTypeText, Text: "the question"},
+		},
+	}
+	if _, err := json.Marshal(list); err != nil {
+		t.Fatalf("the list alone must be accepted: %v", err)
+	}
+}

@@ -37,7 +37,7 @@ func TestLoadWithNilEqualsLoad(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 	f.write(t, "server/config.yaml", "listen_addr: \":9999\"\n")
-	f.write(t, "policy/permissions.yaml", "ask: [read_file, write_file]\n")
+	f.write(t, "tools/http.yaml", "methods: [get]\nallows: [read_file, write_file]\n")
 
 	s := f.service(t)
 
@@ -56,8 +56,8 @@ func TestLoadWithNilEqualsLoad(t *testing.T) {
 	if withNil.Server.ListenAddr != plain.Server.ListenAddr {
 		t.Fatalf("listen_addr = %q, want %q", withNil.Server.ListenAddr, plain.Server.ListenAddr)
 	}
-	if strings.Join(withNil.Policy.Ask, ",") != strings.Join(plain.Policy.Ask, ",") {
-		t.Fatalf("ask = %v, want %v", withNil.Policy.Ask, plain.Policy.Ask)
+	if strings.Join(withNil.AllowedTools(), ",") != strings.Join(plain.AllowedTools(), ",") {
+		t.Fatalf("the exception list = %v, want %v", withNil.AllowedTools(), plain.AllowedTools())
 	}
 	if len(withNil.Agents) != len(plain.Agents) {
 		t.Fatalf("agents = %d, want %d", len(withNil.Agents), len(plain.Agents))
@@ -67,23 +67,23 @@ func TestLoadWithNilEqualsLoad(t *testing.T) {
 func TestLoadWithReplacesExistingContent(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
-	f.write(t, "policy/permissions.yaml", "ask: [read_file]\n")
+	f.write(t, "tools/http.yaml", "methods: [get]\nallows: [read_file]\n")
 
 	s := f.service(t)
 	cfg, err := s.loadWith(&mutation{
-		Rel:     "policy/permissions.yaml",
-		Content: []byte("deny: [execute]\n"),
+		Rel:     "tools/http.yaml",
+		Content: []byte("methods: [get]\nallows: [execute]\n"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Policy.Ask) != 0 {
-		t.Fatalf("ask = %v, want empty (wholesale replace)", cfg.Policy.Ask)
+	if got := cfg.AllowedTools(); len(got) != 1 || got[0] != "execute" {
+		t.Fatalf("the exception list = %v, want [execute] — the file is replaced wholesale", got)
 	}
-	if got := cfg.Policy.Deny; len(got) != 1 || got[0] != "execute" {
-		t.Fatalf("deny = %v, want [execute]", got)
+	if got := cfg.AllowedTools(); len(got) != 1 || got[0] != "execute" {
+		t.Fatalf("the exception list = %v, want [execute]", got)
 	}
-	if got := f.read(t, "policy/permissions.yaml"); !strings.Contains(got, "read_file") {
+	if got := f.read(t, "tools/http.yaml"); !strings.Contains(got, "read_file") {
 		t.Fatalf("disk was modified: %q", got)
 	}
 }
@@ -108,21 +108,27 @@ func TestLoadWithAddsANewFile(t *testing.T) {
 	}
 }
 
-func TestLoadWithDeleteCatchesDanglingModelRef(t *testing.T) {
+func TestLoadWithDeleteLeavesTheDanglingAgentOutOfTheTree(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 
 	s := f.service(t)
-	_, err := s.loadWith(&mutation{Rel: "llm/openai.yaml", Delete: true})
+	cfg, err := s.loadWith(&mutation{Rel: "llm/openai.yaml", Delete: true})
 
-	if err == nil {
-		t.Fatal("deleting the only provider that main references must fail the trial merge")
+	// ★ The trial merge does not fail: an agent whose model is not declared
+	//   is **left out**, and the tree still holds together. What refuses the
+	//   delete is the gate — see the delete tests.
+	if err != nil {
+		t.Fatalf("the trial merge must hold together: %v", err)
 	}
-	if !strings.Contains(err.Error(), "openai/fast") {
-		t.Fatalf("the error must name the dangling reference, got %q", err)
+	if _, ok := cfg.Agents["main"]; ok {
+		t.Fatal("the agent must be left out of the tree")
+	}
+	if why := cfg.LeftOut()["main"]; why == "" {
+		t.Fatalf("the reason must be recorded: %v", cfg.LeftOut())
 	}
 	if f.exists(t, "llm/openai.yaml") != true {
-		t.Fatal("a failed trial merge must not delete anything on disk")
+		t.Fatal("a trial merge must not delete anything on disk")
 	}
 }
 
@@ -144,23 +150,27 @@ func TestLoadWithDeleteSucceedsWhenNothingDangles(t *testing.T) {
 	}
 }
 
-func TestLoadWithRejectsUnresolvableModelRef(t *testing.T) {
+func TestLoadWithLeavesAnUnresolvableModelRefOutOfTheTree(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 
 	s := f.service(t)
-	_, err := s.loadWith(&mutation{
+	cfg, err := s.loadWith(&mutation{
 		Rel:     "agents/main.md",
 		Content: []byte("---\nmodel: openai/nope\n---\nbody\n"),
 	})
-	if err == nil {
-		t.Fatal("an unresolvable model ref must fail the trial merge")
+
+	// ★ The trial merge holds together and the agent is left out — with the
+	//   reason recorded, because a degradation that is silent is the worst
+	//   kind.
+	if err != nil {
+		t.Fatalf("the trial merge must hold together: %v", err)
 	}
-	if !strings.Contains(err.Error(), "agents/main.md") {
-		t.Fatalf("the error must name the file to edit, got %q", err)
+	if _, ok := cfg.Agents["main"]; ok {
+		t.Fatal("the agent must be left out of the tree")
 	}
-	if !strings.Contains(err.Error(), "openai/nope") {
-		t.Fatalf("the error must name the ref, got %q", err)
+	if why := cfg.LeftOut()["main"]; !strings.Contains(why, "openai/nope") {
+		t.Fatalf("the reason must name the model: %q", why)
 	}
 }
 
@@ -170,7 +180,7 @@ func TestLoadWithRejectsUnknownYAMLFieldWithLineNumber(t *testing.T) {
 
 	s := f.service(t)
 	_, err := s.loadWith(&mutation{
-		Rel:     "policy/permissions.yaml",
+		Rel:     "tools/http.yaml",
 		Content: []byte("allow: [read_file]\nmax_retry: 3\n"),
 	})
 	if err == nil {
@@ -182,7 +192,7 @@ func TestLoadWithRejectsUnknownYAMLFieldWithLineNumber(t *testing.T) {
 	if !strings.Contains(err.Error(), "line 2") {
 		t.Fatalf("the error must carry a line number, got %q", err)
 	}
-	if !strings.Contains(err.Error(), "policy/permissions.yaml") {
+	if !strings.Contains(err.Error(), "tools/http.yaml") {
 		t.Fatalf("the error must name the file by its relative path, got %q", err)
 	}
 	if strings.Contains(err.Error(), f.root) || strings.Contains(err.Error(), f.root) {
@@ -193,19 +203,19 @@ func TestLoadWithRejectsUnknownYAMLFieldWithLineNumber(t *testing.T) {
 func TestTheCandidateOnlyAffectsItsOwnFile(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
-	f.write(t, "policy/permissions.yaml", "ask: [on_disk]\n")
+	f.write(t, "tools/http.yaml", "methods: [get]\nallows: [on_disk]\n")
 	f.write(t, "server/config.yaml", "listen_addr: \":9999\"\n")
 
 	s := f.service(t)
 	cfg, err := s.loadWith(&mutation{
-		Rel:     "policy/permissions.yaml",
-		Content: []byte("ask: [candidate]\n"),
+		Rel:     "tools/http.yaml",
+		Content: []byte("methods: [get]\nallows: [candidate]\n"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Policy.Ask) != 1 || cfg.Policy.Ask[0] != "candidate" {
-		t.Fatalf("ask = %v, want [candidate]", cfg.Policy.Ask)
+	if got := cfg.AllowedTools(); len(got) != 1 || got[0] != "candidate" {
+		t.Fatalf("the exception list = %v, want [candidate]", got)
 	}
 	if cfg.Server.ListenAddr != ":9999" {
 		t.Fatalf("an unrelated file must not be affected: listen_addr = %q", cfg.Server.ListenAddr)
@@ -242,27 +252,33 @@ func TestLoadWithCreatesIntoAMissingDirectory(t *testing.T) {
 	f.seedMinimal(t)
 	t.Setenv("TEST_LLM_KEY", "sk-test")
 
-	if _, err := os.Stat(filepath.Join(cfgRoot, DirPolicy)); err == nil {
-		t.Fatal("precondition: policy/ must not exist yet")
+	if _, err := os.Stat(filepath.Join(cfgRoot, DirTools)); err == nil {
+		t.Fatal("precondition: tools/ must not exist yet")
 	}
 
 	s := f.service(t)
 	cfg, err := s.loadWith(&mutation{
-		Rel:     "policy/permissions.yaml",
-		Content: []byte("ask: [execute]\n"),
+		Rel:     "tools/http.yaml",
+		Content: []byte("methods: [get]\nallows: [execute]\n"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Policy.Ask) != 1 || cfg.Policy.Ask[0] != "execute" {
-		t.Fatalf("ask = %v, want [execute]", cfg.Policy.Ask)
+	if got := cfg.AllowedTools(); len(got) != 1 || got[0] != "execute" {
+		t.Fatalf("the exception list = %v, want [execute]", got)
 	}
-	if _, err := os.Stat(filepath.Join(cfgRoot, DirPolicy)); err == nil {
+	if _, err := os.Stat(filepath.Join(cfgRoot, DirTools)); err == nil {
 		t.Fatal("trial merge created a directory on disk")
 	}
 }
 
-func TestCategoriesCoverExactlyWhatTheLoaderReads(t *testing.T) {
+// ★ Categories is the configuration **surface**, and a loader is what the
+// loader reads — the two are no longer the same set. `skills/` belongs to the
+// surface (the editor lists it, the path rules cover it, the manifest carries
+// it) and not to the loader: skills are read by the runtime's own backend, so
+// a category with no loader is not a bug, it is the one partition that is not
+// this package's business.
+func TestCategoriesCoverTheSurfaceAndEveryLoaderIsComplete(t *testing.T) {
 	seen := map[string]bool{}
 	for _, c := range Categories {
 		if seen[c.Dir] {
@@ -275,14 +291,29 @@ func TestCategoriesCoverExactlyWhatTheLoaderReads(t *testing.T) {
 			Models:    map[string]*decl.Model{},
 			Agents:    map[string]*decl.Agent{},
 			Server:    defaultServer(),
-			Policy:    defaultPolicy(),
 		}
-		if cfg.loaderFor(c) == nil {
+		loaded := cfg.loaderFor(c) != nil
+		if c.Dir == DirSkills {
+			if loaded {
+				t.Fatal("★ skills must have no loader: the config layer does not read skill files, " +
+					"and a loader here would put a second reader next to the runtime's backend")
+			}
+			if !c.Nested {
+				t.Fatal("skills/ is the nested partition: skills/<name>/SKILL.md")
+			}
+			continue
+		}
+		if !loaded {
 			t.Fatalf("category %q has no loader", c.Dir)
 		}
+		if c.Nested {
+			t.Fatalf("category %q must not be nested: its files sit directly in the partition", c.Dir)
+		}
 	}
-	if seen[DirSkills] {
-		t.Fatal("skills must stay out of Categories: it is a directory tree, not flat entity files")
+	for _, d := range []string{DirLLM, DirAgent, DirServer, DirTools, DirMCP, DirSkills} {
+		if !seen[d] {
+			t.Fatalf("partition %q is missing from Categories", d)
+		}
 	}
 }
 
@@ -333,7 +364,7 @@ func TestDecodeStrictReportsAnEmptyDocument(t *testing.T) {
 		"empty":         "",
 		"blank lines":   "\n\n  \n",
 		"comments only": "# HTTP tool. Writing this file enables it.\n",
-		"section tmpl":  Template(DirTools, nil),
+		"section tmpl":  Skeleton(DirTools, nil),
 	} {
 		var v decl.HTTPToolsCfg
 		err := decodeStrict([]byte(content), &v)
@@ -359,7 +390,7 @@ func TestWriteToolFileWithNoDocumentIsRejectedWithAReadableError(t *testing.T) {
 	f.seedMinimal(t)
 	s := f.service(t)
 
-	_, _, err := s.Write("tools/http.yaml", []byte(Template(DirTools, nil)), "")
+	_, _, err := s.Write("tools/http.yaml", []byte(Skeleton(DirTools, nil)), "")
 	if err == nil {
 		t.Fatal("a tools file with no YAML document must be rejected")
 	}

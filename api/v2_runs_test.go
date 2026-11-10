@@ -19,7 +19,7 @@ func TestV2SessionRunsListsTheRunsAndTheActiveOne(t *testing.T) {
 	srv, _ := newV2RunServerWith(t, blockingBuilder{})
 	sess := mustCreate(t, srv)
 
-	turn, err := srv.rt.Submit(context.Background(), sess.ID(), "", "hold the turn open")
+	turn, err := srv.rt.Submit(context.Background(), sess.ID(), "", "hold the turn open", nil)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestV2SessionCarriesTheActiveRunID(t *testing.T) {
 	srv, _ := newV2RunServerWith(t, blockingBuilder{})
 	sess := mustCreate(t, srv)
 
-	turn, err := srv.rt.Submit(context.Background(), sess.ID(), "", "hold the turn open")
+	turn, err := srv.rt.Submit(context.Background(), sess.ID(), "", "hold the turn open", nil)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestV2SessionRunByID(t *testing.T) {
 	srv, _ := newV2RunServerWith(t, blockingBuilder{})
 	sess := mustCreate(t, srv)
 
-	turn, err := srv.rt.Submit(context.Background(), sess.ID(), "", "hold the turn open")
+	turn, err := srv.rt.Submit(context.Background(), sess.ID(), "", "hold the turn open", nil)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestV2RunAttachesToALiveRun(t *testing.T) {
 	srv, captured := newV2RunServerWith(t, attachBuilder{released: released})
 	sess := mustCreate(t, srv)
 
-	turn, err := srv.rt.Submit(context.Background(), sess.ID(), "", "hold the turn open")
+	turn, err := srv.rt.Submit(context.Background(), sess.ID(), "", "hold the turn open", nil)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestV2RunRefusesToAttachToAFinishedRun(t *testing.T) {
 	srv, _ := newV2RunServerWith(t, attachBuilder{released: released})
 	sess := mustCreate(t, srv)
 
-	turn, err := srv.rt.Submit(context.Background(), sess.ID(), "", "hold the turn open")
+	turn, err := srv.rt.Submit(context.Background(), sess.ID(), "", "hold the turn open", nil)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}

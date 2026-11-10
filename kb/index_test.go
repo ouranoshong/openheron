@@ -10,8 +10,8 @@ import (
 
 func testIndexOpts(corpus string) IndexOptions {
 	return IndexOptions{
-		Corpus:  corpus,
-		Headers: map[string]string{"##": "section", "###": "subsection"},
+		CorpusDir: corpus,
+		Headers:   map[string]string{"##": "section", "###": "subsection"},
 	}
 }
 
@@ -215,6 +215,7 @@ func TestIndexDropsDeletedFiles(t *testing.T) {
 		t.Error("the deleted doc kept an orphan vector in the sidecar")
 	}
 	s2, err := NewStore(st.Dir())
+	t.Cleanup(func() { _ = s2.Close() })
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}

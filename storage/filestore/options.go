@@ -1,6 +1,9 @@
 package filestore
 
-import "context"
+import (
+	"context"
+	"log/slog"
+)
 
 // Teardown stops a session's runtime state before its files are removed.
 type Teardown interface {
@@ -13,4 +16,7 @@ type Teardown interface {
 type Options struct {
 	Teardown             Teardown
 	CheckpointLegacyRoot string
+	// Logger is injected by the assembly layer. Nil drops the lines, which is
+	// what a test that does not care about them gets.
+	Logger *slog.Logger
 }

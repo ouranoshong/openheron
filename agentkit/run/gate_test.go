@@ -25,6 +25,25 @@ func blockingAgent(started chan struct{}) func(int, contract.TurnKind) adk.Typed
 	}
 }
 
+// slowBuild is a builder that takes its time.
+//
+// ★ The turn becomes ready when the agent **starts**, not when it emits
+//
+//	(see `makeOnAgentEvents`), so an agent that stays quiet is still a ready
+//	turn. The only way to reach the start timeout is a build that has not
+//	come back yet — and that is what this is.
+//
+// ★ It does come back, eventually: the loop then runs and exits, and the
+//
+//	session is free again. A build that hung for ever would leave the
+//	loop alive, and the session busy, which is a different story.
+func slowBuild(delay time.Duration) func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
+	return func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
+		time.Sleep(delay)
+		return &fakeAgent{}
+	}
+}
+
 // A second Submit on a session with a live turn must be refused, and the
 // refusal must change nothing: not the running turn, not the transcript,
 // not the checkpoint, not the pending approval.
@@ -35,7 +54,7 @@ func TestSubmitRefusalIsInert(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "first")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "first", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +71,7 @@ func TestSubmitRefusalIsInert(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := rt.Submit(ctx, sess.ID(), "", "second"); !errors.Is(err, ErrSessionBusy) {
+	if _, err := rt.Submit(ctx, sess.ID(), "", "second", nil); !errors.Is(err, ErrSessionBusy) {
 		t.Fatalf("want ErrSessionBusy, got %v", err)
 	}
 
@@ -90,7 +109,7 @@ func TestSubmitRefusesWhileAnApprovalIsPending(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := rt.Submit(ctx, sess.ID(), "", "hello"); !errors.Is(err, ErrSessionBusy) {
+	if _, err := rt.Submit(ctx, sess.ID(), "", "hello", nil); !errors.Is(err, ErrSessionBusy) {
 		t.Fatalf("want ErrSessionBusy while an approval is pending, got %v", err)
 	}
 }
@@ -131,7 +150,7 @@ func TestRefusedResumeKeepsTheApproval(t *testing.T) {
 	sess := mustSession(t, sm)
 
 	// A live QUERY turn holds the session.
-	turn, err := rt.Submit(ctx, sess.ID(), "", "first")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "first", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +193,7 @@ func TestSubmitIsNotRefusedWhileTheTurnIsArchiving(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "first")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "first", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +210,7 @@ func TestSubmitIsNotRefusedWhileTheTurnIsArchiving(t *testing.T) {
 		return st.turn == nil
 	})
 
-	if _, err := rt.Submit(ctx, sess.ID(), "", "second"); err != nil {
+	if _, err := rt.Submit(ctx, sess.ID(), "", "second", nil); err != nil {
 		t.Fatalf("the session must be free once the turn is archived: %v", err)
 	}
 }
@@ -199,14 +218,19 @@ func TestSubmitIsNotRefusedWhileTheTurnIsArchiving(t *testing.T) {
 // A turn that never becomes streamable must not hold the session forever.
 // The start timeout fails the turn, which releases the slot.
 func TestAStartTimeoutReleasesTheSession(t *testing.T) {
-	// The agent cannot be built, so the loop never starts and the turn
-	// never becomes ready.
-	b := &fakeBuilder{err: errors.New("boom")}
+	// ★ The agent is built but never produces an event, so the turn never
+	//   becomes ready — a **genuine** start timeout.
+	//
+	//   It used to be a builder that failed, which was a different thing
+	//   wearing the same coat: that path now reports its own reason (see
+	//   `TestBuilderFailureSurfacesAsLoopError`), so a test that wanted the
+	//   timeout had to stop borrowing it.
+	b := &fakeBuilder{agent: slowBuild(300 * time.Millisecond)}
 	rt, sm := newTestRuntime(t, b)
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "never starts")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "never starts", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +248,7 @@ func TestAStartTimeoutReleasesTheSession(t *testing.T) {
 		return st.turn == nil
 	})
 
-	if _, err := rt.Submit(ctx, sess.ID(), "", "the next one"); err != nil {
+	if _, err := rt.Submit(ctx, sess.ID(), "", "the next one", nil); err != nil {
 		t.Fatalf("the session must be free after a start timeout: %v", err)
 	}
 }
@@ -243,7 +267,7 @@ func TestAbortClearsTheVoidApproval(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +289,80 @@ func TestAbortClearsTheVoidApproval(t *testing.T) {
 	}
 
 	// And the session is usable again.
-	if _, err := rt.Submit(ctx, sess.ID(), "", "something else"); err != nil {
+	if _, err := rt.Submit(ctx, sess.ID(), "", "something else", nil); err != nil {
 		t.Fatalf("the session must be usable after the abort: %v", err)
+	}
+}
+
+// ★ A response that ends before the session is released hands the client a
+// session it cannot use: it reads the end of the stream, sends its next
+// message, and is told "a turn is already running" about the turn it just
+// finished — a false 409, which is the one thing a busy signal must never be.
+//
+// ★ `archived` is not that moment. The archive lands inside the loop's own
+// callback; the pointer the gate reads is cleared a step later, after the
+// run's row is written. `released` is the channel that says "the pointer is
+// gone", and it has to be closed by the same code that clears it.
+func TestTheSessionIsReleasedBeforeTheResponseCanEnd(t *testing.T) {
+	b := &fakeBuilder{agent: func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
+		return &fakeAgent{script: func(ctx context.Context, emit func(*adk.TypedAgentEvent[*schema.Message]) bool) {
+			emit(textEvent("working"))
+			emit(exitEvent())
+		}}
+	}}
+	rt, sm := newTestRuntime(t, b)
+	ctx := context.Background()
+	sess := mustSession(t, sm)
+
+	turn, err := rt.Submit(ctx, sess.ID(), "", "first", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := turn.Wait(5 * time.Second); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	drain(t, turn)
+	turn.WaitArchived()
+
+	// This is what the HTTP handler does before it flushes.
+	released := make(chan struct{})
+	go func() { turn.WaitReleased(); close(released) }()
+	select {
+	case <-released:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the turn was archived but the session was never released; " +
+			"the client's next message would be refused as busy")
+	}
+
+	// And the thing the client actually does next.
+	if _, err := rt.Submit(ctx, sess.ID(), "", "second", nil); err != nil {
+		t.Fatalf("the session must accept the next turn once the response may end: %v", err)
+	}
+}
+
+// A turn that can never run must release the waiter too: the start-timeout
+// path closes the archive channel for exactly this reason, and `released`
+// must not be the one that is forgotten.
+func TestAFailedTurnReleasesItsWaiter(t *testing.T) {
+	// ★ A turn that never becomes ready — the genuine timeout path, for the
+	//   reason spelled out in `TestAStartTimeoutReleasesTheSession`.
+	b := &fakeBuilder{agent: slowBuild(300 * time.Millisecond)}
+	rt, sm := newTestRuntime(t, b)
+	sess := mustSession(t, sm)
+
+	turn, err := rt.Submit(context.Background(), sess.ID(), "", "never starts", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := turn.Wait(100 * time.Millisecond); !errors.Is(err, ErrStartTimeout) {
+		t.Fatalf("Wait = %v, want ErrStartTimeout", err)
+	}
+
+	released := make(chan struct{})
+	go func() { turn.WaitReleased(); close(released) }()
+	select {
+	case <-released:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a failed turn kept its waiter blocked")
 	}
 }

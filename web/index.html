@@ -1,10 +1,31 @@
 <!doctype html>
-<html lang="zh-CN">
+<!-- ★ The interface copy is English (AGENTS.md), so the document says so:
+     a screen reader pronouncing English with Chinese rules gets the pauses
+     and the word breaks wrong. -->
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>openheron</title>
+    <script>
+      // ★ The theme is decided **before the first paint**. A script that ran
+      //   after React mounted would show a light page and then turn it dark
+      //   — a flash on every load, and a worse one on a dark desktop.
+      //   The storage key is the one `src/lib/theme.ts` writes.
+      (function () {
+        try {
+          var stored = localStorage.getItem("openheron.theme")
+          var dark =
+            stored === "dark" ||
+            (stored !== "light" &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches)
+          document.documentElement.classList.toggle("dark", dark)
+        } catch (e) {
+          // No storage and no media query: the light theme is the default.
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

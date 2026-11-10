@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ouranoshong/openheron/contract"
-	"github.com/ouranoshong/openheron/storage"
 	"io"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,7 +15,9 @@ import (
 	"github.com/cloudwego/eino/adk/middlewares/summarization"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/message"
+	"github.com/ouranoshong/openheron/storage"
 )
 
 // ---- in-memory storage.SessionManager for Runtime tests ----
@@ -296,6 +298,19 @@ func (l *fakeRunLedger) Reconcile(_ context.Context) (int, error) {
 
 func (s *fakeSession) Workspace() string                         { return "/tmp" }
 func (s *fakeSession) PutFile(string, io.Reader) (string, error) { return "", nil }
+
+func (s *fakeSession) ResolveWorkspaceFile(name string) (string, error) {
+	if name == "" || strings.HasPrefix(name, "..") || filepath.IsAbs(name) {
+		return "", fmt.Errorf("invalid workspace file name %q", name)
+	}
+	return filepath.Join("/tmp", name), nil
+}
+
+func (s *fakeSession) DeleteWorkspaceFile(string) error { return nil }
+
+func (s *fakeSession) RecordUpload(string, string) error { return nil }
+
+func (s *fakeSession) OriginalNames() map[string]string { return map[string]string{} }
 
 // ---- fake agent ----
 

@@ -41,7 +41,7 @@ func (b *Builder) newSkillHubs(snap *snapshot, base deep.Config,
 		model: &skillModelHub{resolve: func(ctx context.Context, ref string) (
 			model.BaseModel[*schema.Message], error) {
 
-			return models(ctx, snap.cfg, ref, CallIntent{})
+			return models(ctx, snap.cfg, ref, CallIntent{}, snap.log)
 		}},
 	}
 }

@@ -1,7 +1,6 @@
 import { ArrowDownIcon, SquareIcon } from "lucide-react"
 import { memo, useEffect, useMemo, useRef, useState } from "react"
 
-import { AgentFilter } from "@/components/agent-filter"
 import { BrandMark } from "@/components/brand-mark"
 import { CompactionDivider } from "@/components/compaction-divider"
 import { MessageParts } from "@/components/message-parts"
@@ -142,14 +141,13 @@ export function MessageList() {
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <AgentFilter />
       <div
         ref={scrollRef}
         data-testid="message-list"
         aria-busy={loading || undefined}
         className="min-h-0 flex-1 overflow-y-auto"
       >
-        <div className="mx-auto max-w-3xl px-4 py-6">
+        <div className="mx-auto w-full max-w-[var(--chat-column)] px-[var(--chat-gutter)] py-8">
           {loading && messages.length === 0 && <MessageSkeleton />}
 
           {!loading && messages.length === 0 && !error && <Welcome />}
@@ -165,6 +163,7 @@ export function MessageList() {
                 showRole={flags[i]?.showRole ?? false}
                 showAgent={multiAgent}
                 first={i === 0}
+                sessionId={activeId ?? undefined}
               />
             ),
           )}
@@ -208,7 +207,11 @@ export function MessageList() {
 export function EmptyHero() {
   return (
     <div className="text-muted-foreground mb-6 flex flex-col items-center gap-1 text-center">
-      <BrandMark className="mb-1 size-16" />
+      {/* ★ The welcome screen is the one place the mark is big enough to be
+          read as a drawing, so it is the one place that plays the entrance.
+          The header's 20px copy stays still — a permanent animation in a
+          permanent position is noise, not information. */}
+      <BrandMark className="mb-1 size-16" play testId="brand-mark" />
       <p className="text-foreground text-xl font-semibold">openheron</p>
       <p className="text-sm">Ask anything about this workspace.</p>
     </div>
@@ -227,7 +230,7 @@ function StatusLine({ status }: { status: TurnStatus }) {
   if (status === "running") {
     return (
       <p className="text-muted-foreground mt-4 flex items-center gap-1.5 text-xs" role="status">
-        <span className="bg-sky-500 size-1.5 animate-pulse rounded-full" />
+        <span className="bg-info size-1.5 animate-pulse rounded-full" />
         Working…
       </p>
     )
@@ -248,12 +251,14 @@ const MessageRow = memo(function MessageRow({
   showRole,
   showAgent,
   first,
+  sessionId,
 }: {
   message: Message
   startsTurn: boolean
   showRole: boolean
   showAgent: boolean
   first: boolean
+  sessionId?: string
 }) {
   const isUser = message.role === "user"
   return (
@@ -283,7 +288,7 @@ const MessageRow = memo(function MessageRow({
             {showAgent && message.agent ? message.agent : message.role}
           </p>
         )}
-        <MessageParts parts={message.parts} role={message.role} />
+        <MessageParts parts={message.parts} role={message.role} sessionId={sessionId} />
       </div>
     </article>
   )

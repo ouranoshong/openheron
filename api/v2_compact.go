@@ -36,35 +36,35 @@ func (s *Server) v2Compact(ctx context.Context, c *app.RequestContext) {
 	id := c.Param("id")
 	sess, err := s.sm.Get(ctx, id)
 	if err != nil {
-		v2FailErr(c, err)
+		s.v2FailErr(c, err)
 		return
 	}
 
 	pending, _ := s.rt.StatusOf(ctx, sess.ID())
 	switch pending.Phase {
 	case run.PhaseRunning, run.PhaseWaitingApproval:
-		v2Fail(c, consts.StatusConflict, codeSessionBusy,
+		s.v2Fail(c, consts.StatusConflict, codeSessionBusy,
 			"a run is in progress; stop it before compacting", false)
 		return
 	}
 
 	if s.compactorFn == nil {
-		v2FailInternal(c, errors.New("no compactor is wired"))
+		s.v2FailInternal(c, errors.New("no compactor is wired"))
 		return
 	}
 	sum, err := s.compactorFn.Summarizer(ctx, sess.AgentID())
 	if err != nil {
-		v2FailInternal(c, err)
+		s.v2FailInternal(c, err)
 		return
 	}
 
 	res, err := run.Compact(ctx, sess, sum)
 	if err != nil {
 		if errors.Is(err, run.ErrNothingToCompact) {
-			v2Fail(c, consts.StatusBadRequest, codeInvalidBody, err.Error(), false)
+			s.v2Fail(c, consts.StatusBadRequest, codeInvalidBody, err.Error(), false)
 			return
 		}
-		v2FailInternal(c, err)
+		s.v2FailInternal(c, err)
 		return
 	}
 

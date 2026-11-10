@@ -17,7 +17,7 @@ import (
 )
 
 func TestNetToolsAreOffByDefault(t *testing.T) {
-	cfg := configFromSpecs("test/model", nil, decl.Policy{}, nil)
+	cfg := configFromSpecs("test/model", nil, nil, nil)
 	env := toolEnv{cfg: cfg}
 	ctx := context.Background()
 
@@ -37,7 +37,7 @@ func TestNetToolsAreOffByDefault(t *testing.T) {
 }
 
 func TestHTTPToolsDefaultToGetOnly(t *testing.T) {
-	cfg := configFromSpecs("test/model", nil, decl.Policy{}, nil)
+	cfg := configFromSpecs("test/model", nil, nil, nil)
 	cfg.Tools.HTTP = &decl.HTTPToolsCfg{}
 
 	tools, err := httpRequestToolProvider{}.Provide(context.Background(), toolEnv{cfg: cfg})
@@ -57,7 +57,7 @@ func TestHTTPToolsDefaultToGetOnly(t *testing.T) {
 }
 
 func TestHTTPToolsHonorTheMethodAllowlist(t *testing.T) {
-	cfg := configFromSpecs("test/model", nil, decl.Policy{}, nil)
+	cfg := configFromSpecs("test/model", nil, nil, nil)
 	cfg.Tools.HTTP = &decl.HTTPToolsCfg{Methods: []string{"get", "post"}}
 
 	tools, err := httpRequestToolProvider{}.Provide(context.Background(), toolEnv{cfg: cfg})
@@ -85,7 +85,7 @@ func TestHTTPToolRefusesLoopback(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := configFromSpecs("test/model", nil, decl.Policy{}, nil)
+	cfg := configFromSpecs("test/model", nil, nil, nil)
 	cfg.Tools.HTTP = &decl.HTTPToolsCfg{}
 	tools, err := httpRequestToolProvider{}.Provide(context.Background(), toolEnv{cfg: cfg})
 	if err != nil {
@@ -149,41 +149,47 @@ func TestToolOutputUncappedWhenSmall(t *testing.T) {
 }
 
 func TestEnabledToolsAreAllowedByDefault(t *testing.T) {
-	cfg := configFromSpecs("test/model", nil, decl.Policy{}, nil)
+	cfg := configFromSpecs("test/model", nil, nil, nil)
 	cfg.Tools.HTTP = &decl.HTTPToolsCfg{}
 	cfg.Tools.WebSearch = &decl.WebSearchCfg{}
 	cfg.Tools.Wikipedia = &decl.WikipediaCfg{}
 
 	snap := mustSnapshot(t, newTestBuilderWithConfig(t, cfg))
+	// ★ An enabled tool is **not** an allowed one: the default is ask, and
+	//   the file that provides the tool names its exceptions.
 	for _, name := range []string{
 		decl.ToolNameHTTPGet,
 		decl.ToolNameWebSearch,
 		decl.ToolNameWikipedia,
 	} {
-		if got := snap.agentSpec.policy.TierOf(name); got != TierAllow {
-			t.Fatalf("%s tier = %q, want allow", name, got)
+		if got := snap.agentSpec.policy.TierOf(name); got != TierAsk {
+			t.Fatalf("%s tier = %q, want ask", name, got)
 		}
 	}
 }
 
-func TestPolicyStillWinsOverTheEnabledDefault(t *testing.T) {
-	cfg := configFromSpecs("test/model", nil, decl.Policy{}, nil)
+// ★ The tier table is assembled from the configuration: a tool nobody
+//
+//	named asks, and a tool its own file names runs without a nod.
+func TestTheFilesOwnExceptionsWinOverTheDefault(t *testing.T) {
+	cfg := configFromSpecs("test/model", nil, nil, nil)
 	cfg.Tools.WebSearch = &decl.WebSearchCfg{}
-	cfg.Policy.Ask = []string{decl.ToolNameWebSearch}
-	cfg.Policy.Deny = []string{decl.ToolNameHTTPGet}
-	cfg.Tools.HTTP = &decl.HTTPToolsCfg{}
+	cfg.Tools.HTTP = &decl.HTTPToolsCfg{Allows: []string{decl.ToolNameHTTPGet}}
 
 	snap := mustSnapshot(t, newTestBuilderWithConfig(t, cfg))
-	if got := snap.agentSpec.policy.TierOf(decl.ToolNameWebSearch); got != TierAsk {
-		t.Fatalf("the policy's ask must win, got %q", got)
+	if got := snap.agentSpec.policy.TierOf(decl.ToolNameHTTPGet); got != TierAllow {
+		t.Fatalf("the file names it, so it must run without a nod, got %q", got)
 	}
-	if got := snap.agentSpec.policy.TierOf(decl.ToolNameHTTPGet); got != TierDeny {
-		t.Fatalf("the policy's deny must win, got %q", got)
+	if got := snap.agentSpec.policy.TierOf(decl.ToolNameWebSearch); got != TierAsk {
+		t.Fatalf("nobody named it, so it must ask, got %q", got)
 	}
 }
 
-func TestDisabledToolsStillRemoveTheEnabledTools(t *testing.T) {
-	cfg := configFromSpecs("test/model", []string{decl.ToolNameWebSearch}, decl.Policy{}, nil)
+// ★ The agent's own tools: list decides what it may use — a provider's
+//
+//	tool is reachable only when the agent names it.
+func TestTheToolsListDecidesWhetherTheEnabledToolsAreReachable(t *testing.T) {
+	cfg := configFromSpecs("test/model", allToolsExcept(decl.ToolNameWebSearch), nil, nil)
 	cfg.Tools.WebSearch = &decl.WebSearchCfg{}
 
 	snap := mustSnapshot(t, newTestBuilderWithConfig(t, cfg))
@@ -191,13 +197,13 @@ func TestDisabledToolsStillRemoveTheEnabledTools(t *testing.T) {
 	if table == nil {
 		t.Fatal("the default agent must have a table")
 	}
-	if got := table.Blocked(decl.ToolNameWebSearch); got != LayerDisable {
-		t.Fatalf("the agent's disabled_tools must still remove it, got %q", got)
+	if got := table.Blocked(decl.ToolNameWebSearch); got != LayerNotLoaded {
+		t.Fatalf("the agent's tools list must decide it, got %q", got)
 	}
 }
 
 func TestUnknownWebSearchProviderIsRejected(t *testing.T) {
-	cfg := configFromSpecs("test/model", nil, decl.Policy{}, nil)
+	cfg := configFromSpecs("test/model", nil, nil, nil)
 	cfg.Tools.WebSearch = &decl.WebSearchCfg{Provider: "binggo"}
 
 	_, err := webSearchToolProvider{}.Provide(context.Background(), toolEnv{cfg: cfg})
@@ -210,7 +216,7 @@ func TestUnknownWebSearchProviderIsRejected(t *testing.T) {
 }
 
 func TestNetToolNamesDoNotCollideWithReservedNames(t *testing.T) {
-	cfg := configFromSpecs("test/model", nil, decl.Policy{}, nil)
+	cfg := configFromSpecs("test/model", nil, nil, nil)
 	cfg.Tools.HTTP = &decl.HTTPToolsCfg{Methods: []string{"get", "post", "put", "delete"}}
 	cfg.Tools.WebSearch = &decl.WebSearchCfg{}
 	cfg.Tools.Wikipedia = &decl.WikipediaCfg{}

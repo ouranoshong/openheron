@@ -1,0 +1,21 @@
+# tools/kb.yaml
+#
+# The knowledge base is not turned on by "the file is there", it is turned on
+# by a non-empty corpus_dir; this copy is the template of a switched-off one.
+#
+# ★ corpus_dir is the **corpus directory**, relative to the project root; an
+#   absolute path is refused. Empty string = knowledge base off. It lives and
+#   dies with the index: change the directory without rebuilding the index and
+#   it will confidently return unrelated answers.
+corpus_dir: ""            # relative to the project root; an absolute path is refused. When it is set, model is required
+index: default            # the index lands in state/kb/<index>/
+# model must point at a model with kind: embedding in llm/*.yaml; empty = pure lexical retrieval.
+model: ""                 # <provider>/<model>, and it has to be kind: embedding
+query_instruction: ""
+batch_size: 10
+max_batch_chars: 1200
+top_k: 8
+
+# ★ The tools that run **without a nod** — the search reads; the index
+#   writes to the index on disk, so it asks.
+allows: [kb_search]       # kb_index writes the index, so it asks by default

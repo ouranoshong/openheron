@@ -30,7 +30,7 @@ func TestARunWithNoSubscriberStillArchives(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestASubscriberThatVanishesDoesNotStopTheRun(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestASubscriberThatStallsIsDroppedAndTheRunKeepsGoing(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,6 +141,30 @@ func TestTheEventWindowIsBounded(t *testing.T) {
 	}
 	if n == 0 {
 		t.Fatal("the window must keep the recent events")
+	}
+}
+
+// ★ A subscriber that arrives **after** the run closed still gets the
+//
+//	window. The connection subscribes after the turn signals ready, and the
+//	run may finish in between — an approval raised in that window would
+//	otherwise be dropped, and the client would see a run that finished
+//	without ever having asked.
+func TestALateSubscriberAfterTheRunClosedStillGetsTheWindow(t *testing.T) {
+	p := newPublisher()
+	p.Publish(contract.RunEvent{Kind: contract.RunEventInterrupt, Interrupts: []contract.Interrupt{{ID: "int-1"}}})
+	p.Close()
+
+	sub := p.Subscribe()
+	ev, ok := <-sub.Events()
+	if !ok {
+		t.Fatal("the closed run must still deliver what it published")
+	}
+	if ev.Kind != contract.RunEventInterrupt || len(ev.Interrupts) != 1 || ev.Interrupts[0].ID != "int-1" {
+		t.Fatalf("the approval must survive the close, got %+v", ev)
+	}
+	if _, ok := <-sub.Events(); ok {
+		t.Fatal("a closed run must not deliver anything more")
 	}
 }
 

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ouranoshong/openheron/agentkit/obs"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -39,7 +41,7 @@ func TestApprovalChainEndToEnd(t *testing.T) {
 	t.Cleanup(func() { _ = rt.Shutdown(ctx) })
 
 	engine := route.NewEngine(hertzconfig.NewOptions(nil))
-	srv := New(rt, fm)
+	srv := New(rt, fm, obs.Discard())
 	srv.h = engine
 	var captured bufExtWriter
 	srv.newStream = func(c *app.RequestContext) *transport.SSEStream {
@@ -61,9 +63,11 @@ func TestApprovalChainEndToEnd(t *testing.T) {
 	if got.code != 200 {
 		t.Fatalf("run = %d (%s)", got.code, got.body)
 	}
-	if !strings.Contains(captured.String(), "int-e2e") {
-		t.Fatalf("the interrupt must reach the client: %s", captured.String())
-	}
+	// ★ The interrupt is written by the run's own goroutine, and the
+	//   response returns before that happens — so the buffer has to be
+	//   **waited for**, not read once. Reading once is a race that fails
+	//   whenever the scheduler happens to run the writer late.
+	waitForStream(t, &captured, "int-e2e")
 	waitForPending(t, sess, 1)
 
 	ckpt := filepath.Join(root, id, "checkpoints", id+".ckpt")
@@ -132,6 +136,24 @@ func TestApprovalChainEndToEnd(t *testing.T) {
 	if len(st.Decisions) != 1 || st.Decisions[0].InterruptID != "int-e2e" {
 		t.Fatalf("the audit must be on disk: %+v", st.Decisions)
 	}
+}
+
+// waitForStream waits until the SSE buffer carries the wanted text.
+//
+// ★ The run writes its events from its own goroutine, so the buffer is
+//
+//	read while it is being written. Waiting is the only correct way to
+//	look at it.
+func waitForStream(t *testing.T, w *bufExtWriter, want string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(w.String(), want) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the stream never carried %q: %s", want, w.String())
 }
 
 func waitForPending(t *testing.T, sess storage.Session, want int) {

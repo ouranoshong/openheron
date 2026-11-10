@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"hash/fnv"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -49,7 +50,7 @@ func (w wordEmbedder) Dimensions() int { return w.dim }
 func kbConfig(corpus, model string) *spec.Config {
 	c := &spec.Config{Models: map[string]*decl.Model{}}
 	c.KB = decl.KB{
-		Corpus:        corpus,
+		CorpusDir:     corpus,
 		Index:         "test",
 		Model:         model,
 		BatchSize:     10,
@@ -78,7 +79,14 @@ func TestKBToolsShareOneStoreAcrossProcesses(t *testing.T) {
 	c.Models["local/embed"] = &decl.Model{ID: "embed", Kind: string(decl.ModelKindEmbedding), Dimensions: 32}
 
 	emb := wordEmbedder{dim: 32}
-	tools, err := buildKBToolsWithEmbedder(context.Background(), c, emb, root, dataDir)
+	var closers []io.Closer
+	t.Cleanup(func() {
+		for _, c := range closers {
+			_ = c.Close()
+		}
+	})
+	track := func(c io.Closer) { closers = append(closers, c) }
+	tools, err := buildKBToolsWithEmbedder(context.Background(), c, emb, root, dataDir, track)
 	if err != nil {
 		t.Fatalf("buildKBToolsWithEmbedder: %v", err)
 	}
@@ -128,6 +136,7 @@ func TestKBToolsShareOneStoreAcrossProcesses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}
+	defer other.Close()
 	otherIx, err := kb.NewIndexer(context.Background(), &kb.IndexerConfig{
 		Store: other, Embedding: emb, BatchSize: 10, MaxBatchChars: 1200,
 	})
@@ -135,7 +144,7 @@ func TestKBToolsShareOneStoreAcrossProcesses(t *testing.T) {
 		t.Fatalf("indexer: %v", err)
 	}
 	if _, err := kb.Index(context.Background(), otherIx, kb.IndexOptions{
-		Corpus: corpus, Headers: c.KB.Splitter.Headers,
+		CorpusDir: corpus, Headers: c.KB.Splitter.Headers,
 	}, []string{"a.md"}); err != nil {
 		t.Fatalf("out-of-process index: %v", err)
 	}
@@ -151,8 +160,8 @@ func TestKBToolsShareOneStoreAcrossProcesses(t *testing.T) {
 
 func TestBuildKBToolsOffWhenCorpusUnset(t *testing.T) {
 	c := &spec.Config{Models: map[string]*decl.Model{}}
-	c.KB.Corpus = ""
-	tools, err := buildKBToolsWithEmbedder(context.Background(), c, wordEmbedder{dim: 8}, t.TempDir(), t.TempDir())
+	c.KB.CorpusDir = ""
+	tools, err := buildKBToolsWithEmbedder(context.Background(), c, wordEmbedder{dim: 8}, t.TempDir(), t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("buildKBToolsWithEmbedder: %v", err)
 	}
@@ -175,13 +184,21 @@ func TestBuildKBToolsDetectsModelChange(t *testing.T) {
 	c := kbConfig("docs", "local/embed")
 	c.Models["local/embed"] = &decl.Model{ID: "embed", Kind: string(decl.ModelKindEmbedding)}
 
-	if _, err := buildKBToolsWithEmbedder(context.Background(), c, wordEmbedder{dim: 32}, root, dataDir); err != nil {
+	var closers []io.Closer
+	t.Cleanup(func() {
+		for _, c := range closers {
+			_ = c.Close()
+		}
+	})
+	track := func(c io.Closer) { closers = append(closers, c) }
+	if _, err := buildKBToolsWithEmbedder(context.Background(), c, wordEmbedder{dim: 32}, root, dataDir, track); err != nil {
 		t.Fatalf("first build: %v", err)
 	}
 	other, err := kb.NewStore(filepath.Join(dataDir, spec.DirKBIndex, "test"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer other.Close()
 	if err := other.SetIdentity("local/embed", 0); err != nil {
 		t.Fatalf("SetIdentity: %v", err)
 	}
@@ -192,7 +209,7 @@ func TestBuildKBToolsDetectsModelChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := kb.Index(context.Background(), ix, kb.IndexOptions{
-		Corpus: corpus, Headers: c.KB.Splitter.Headers,
+		CorpusDir: corpus, Headers: c.KB.Splitter.Headers,
 	}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +217,7 @@ func TestBuildKBToolsDetectsModelChange(t *testing.T) {
 	c2 := kbConfig("docs", "local/other")
 	c2.Models["local/other"] = &decl.Model{ID: "other", Kind: string(decl.ModelKindEmbedding)}
 
-	_, err = buildKBToolsWithEmbedder(context.Background(), c2, wordEmbedder{dim: 32}, root, dataDir)
+	_, err = buildKBToolsWithEmbedder(context.Background(), c2, wordEmbedder{dim: 32}, root, dataDir, track)
 	if err == nil {
 		t.Fatal("a changed embedding model was accepted while the old index is still there")
 	}

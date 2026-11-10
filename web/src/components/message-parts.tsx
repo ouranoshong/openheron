@@ -1,6 +1,7 @@
 import { BrainIcon, ChevronRightIcon } from "lucide-react"
 import { memo, useState } from "react"
 
+import { AttachmentChip } from "@/components/attachment-chip"
 import { MarkdownText, MessageBody } from "@/components/markdown"
 import { ToolCard } from "@/components/tool-card"
 import { thinkingLabel } from "@/lib/thinking"
@@ -52,9 +53,13 @@ export function Reasoning({
 export const MessageParts = memo(function MessageParts({
   parts,
   role,
+  sessionId,
 }: {
   parts: Part[]
   role: Message["role"]
+  // sessionId is the session the files belong to — the preview URL is built
+  // from it, so a chip without it can only show the name.
+  sessionId?: string
 }) {
   return (
     <>
@@ -90,6 +95,23 @@ export const MessageParts = memo(function MessageParts({
 
           case "tool":
             return <ToolCard key={p.id} part={p} />
+
+          // ★ A file that came with the message. It has no remove button:
+          //   the list is history, and deleting the file would make the
+          //   message claim something that is no longer true.
+          case "attachment":
+            return (
+              <AttachmentChip
+                key={p.id}
+                name={p.name}
+                size={p.size}
+                path={p.path}
+                mime={p.mime}
+                sessionId={sessionId}
+                testId="message-attachment"
+                className="mb-1.5"
+              />
+            )
         }
       })}
     </>

@@ -11,7 +11,6 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"github.com/ouranoshong/openheron/helpers"
 )
@@ -174,9 +173,9 @@ func (b *Builder) assemble(ctx context.Context, snap *snapshot,
 func (b *Builder) skillHandlers(ctx context.Context, backend fsapi.Backend, hubs *skillHubs,
 	scope skillScope) ([]adk.TypedChatModelAgentMiddleware[*schema.Message], error) {
 
-	mw, err := skillChain(ctx, backend, hubs, scope)
+	mw, err := skillChain(ctx, backend, hubs, scope, b.logger())
 	if err != nil {
-		obs.Logger().Warn("[agent] skill middleware disabled", "err", err)
+		b.logger().Warn("[agent] skill middleware disabled", "err", err)
 		return nil, nil
 	}
 	if mw == nil {
@@ -187,13 +186,12 @@ func (b *Builder) skillHandlers(ctx context.Context, backend fsapi.Backend, hubs
 
 // scopeOf reads the skill allow-list of an agent.
 //
-// ★ A nil spec means no restriction: an agent that says nothing about skills
+// ★ The default is none: an agent that says nothing about skills gets no
 //
-//	gets every skill in the directory, which is what it got before the field
-//	existed.
+//	skill, the same rule as every other list on an agent.
 func scopeOf(sp *decl.SubAgentSpec) skillScope {
 	if sp == nil {
-		return skillScope{all: true}
+		return skillScope{names: map[string]bool{}}
 	}
 	return skillScopeOf(sp.Skills)
 }

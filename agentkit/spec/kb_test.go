@@ -45,8 +45,8 @@ func TestKBAbsentIsNotAnError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("no tools/kb.yaml must not be an error: %v", err)
 	}
-	if cfg.KB.Corpus != "" {
-		t.Errorf("corpus = %q, want empty (knowledge base off)", cfg.KB.Corpus)
+	if cfg.KB.CorpusDir != "" {
+		t.Errorf("corpus = %q, want empty (knowledge base off)", cfg.KB.CorpusDir)
 	}
 	if cfg.KB.BatchSize != 10 || cfg.KB.TopK != 8 {
 		t.Errorf("defaults = batch %d / topk %d, want 10 / 8", cfg.KB.BatchSize, cfg.KB.TopK)
@@ -59,7 +59,7 @@ func TestKBAbsentIsNotAnError(t *testing.T) {
 
 func TestKBCorpusRejectsAbsolutePath(t *testing.T) {
 	f := kbFixture(t)
-	f.write(t, "tools/kb.yaml", "corpus: /usr/share/doc\nmodel: local/Qwen3-Embedding-0.6B-GGUF\n")
+	f.write(t, "tools/kb.yaml", "corpus_dir: /usr/share/doc\nmodel: local/Qwen3-Embedding-0.6B-GGUF\n")
 
 	err := loadErr(t, f)
 	if err == nil {
@@ -70,9 +70,60 @@ func TestKBCorpusRejectsAbsolutePath(t *testing.T) {
 	}
 }
 
-func TestKBModelMustBeEmbedding(t *testing.T) {
+// TestKBTheOldCorpusKeyStillLoads proves that the `corpus` → `corpus_dir`
+// rename does not break a working configuration.
+//
+// ★ A rename that breaks the people who already use the thing is a
+//
+//	migration, not a rename — and the project's rule is that a **silent**
+//	break is the worst outcome. The old key loads, and the loader says so
+//	in `deferred`, so the user learns about it at startup.
+func TestKBTheOldCorpusKeyStillLoads(t *testing.T) {
 	f := kbFixture(t)
 	f.write(t, "tools/kb.yaml", "corpus: docs\nmodel: local/Qwen3-Embedding-0.6B-GGUF\n")
+
+	cfg, err := load(t, f)
+	if err != nil {
+		t.Fatalf("the old `corpus` key must still load: %v", err)
+	}
+	if cfg.KB.CorpusDir != "docs" {
+		t.Errorf("CorpusDir = %q, want docs (the old key's value)", cfg.KB.CorpusDir)
+	}
+	if cfg.KB.CorpusLegacy != "" {
+		t.Errorf("CorpusLegacy = %q, want empty (it is read once, then dropped)",
+			cfg.KB.CorpusLegacy)
+	}
+
+	found := false
+	for _, d := range cfg.Deferred() {
+		if strings.Contains(d, "corpus_dir") && strings.Contains(d, "renamed") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the rename must be reported in deferred, got %v", cfg.Deferred())
+	}
+}
+
+// TestKBTheNewKeyWinsOverTheOldOne proves the precedence when both spellings
+// are present: the current key is the one that counts.
+func TestKBTheNewKeyWinsOverTheOldOne(t *testing.T) {
+	f := kbFixture(t)
+	f.write(t, "tools/kb.yaml",
+		"corpus: old\ncorpus_dir: docs\nmodel: local/Qwen3-Embedding-0.6B-GGUF\n")
+
+	cfg, err := load(t, f)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.KB.CorpusDir != "docs" {
+		t.Errorf("CorpusDir = %q, want docs (the new key wins)", cfg.KB.CorpusDir)
+	}
+}
+
+func TestKBModelMustBeEmbedding(t *testing.T) {
+	f := kbFixture(t)
+	f.write(t, "tools/kb.yaml", "corpus_dir: docs\nmodel: local/Qwen3-Embedding-0.6B-GGUF\n")
 
 	cfg, err := load(t, f)
 	if err != nil {
@@ -88,7 +139,7 @@ func TestKBModelMustBeEmbedding(t *testing.T) {
 
 func TestKBModelMustExist(t *testing.T) {
 	f := kbFixture(t)
-	f.write(t, "tools/kb.yaml", "corpus: docs\nmodel: local/nope\n")
+	f.write(t, "tools/kb.yaml", "corpus_dir: docs\nmodel: local/nope\n")
 
 	err := loadErr(t, f)
 	if err == nil || !strings.Contains(err.Error(), "not declared") {
@@ -98,7 +149,7 @@ func TestKBModelMustExist(t *testing.T) {
 
 func TestKBModelRequiredWhenCorpusSet(t *testing.T) {
 	f := kbFixture(t)
-	f.write(t, "tools/kb.yaml", "corpus: docs\n")
+	f.write(t, "tools/kb.yaml", "corpus_dir: docs\n")
 
 	err := loadErr(t, f)
 	if err == nil || !strings.Contains(err.Error(), "kb.model") {
@@ -108,7 +159,7 @@ func TestKBModelRequiredWhenCorpusSet(t *testing.T) {
 
 func TestKBCorpusAloneIsNotAnError(t *testing.T) {
 	f := kbFixture(t)
-	f.write(t, "tools/kb.yaml", "corpus: docs\n")
+	f.write(t, "tools/kb.yaml", "corpus_dir: docs\n")
 
 	err := loadErr(t, f)
 	if err == nil || !strings.Contains(err.Error(), "kb.model") {
@@ -119,7 +170,7 @@ func TestKBCorpusAloneIsNotAnError(t *testing.T) {
 func TestKBEmptyHeadersIsAccepted(t *testing.T) {
 	f := kbFixture(t)
 	f.write(t, "tools/kb.yaml",
-		"corpus: docs\nmodel: local/Qwen3-Embedding-0.6B-GGUF\nsplitter:\n  headers: {}\n")
+		"corpus_dir: docs\nmodel: local/Qwen3-Embedding-0.6B-GGUF\nsplitter:\n  headers: {}\n")
 
 	cfg, err := load(t, f)
 	if err != nil {
@@ -133,7 +184,7 @@ func TestKBEmptyHeadersIsAccepted(t *testing.T) {
 func TestKBSplitterHeadersReplaceNotMerge(t *testing.T) {
 	f := kbFixture(t)
 	f.write(t, "tools/kb.yaml",
-		"corpus: docs\nmodel: local/Qwen3-Embedding-0.6B-GGUF\nsplitter:\n  headers: {\"##\": section}\n")
+		"corpus_dir: docs\nmodel: local/Qwen3-Embedding-0.6B-GGUF\nsplitter:\n  headers: {\"##\": section}\n")
 
 	cfg, err := load(t, f)
 	if err != nil {
@@ -149,7 +200,7 @@ func TestKBSplitterHeadersReplaceNotMerge(t *testing.T) {
 
 func TestModelDimensionsMustNotBeNegative(t *testing.T) {
 	f := kbFixture(t)
-	f.write(t, "tools/kb.yaml", "corpus: docs\nmodel: local/Qwen3-Embedding-0.6B-GGUF\n")
+	f.write(t, "tools/kb.yaml", "corpus_dir: docs\nmodel: local/Qwen3-Embedding-0.6B-GGUF\n")
 
 	cfg, err := load(t, f)
 	if err != nil {

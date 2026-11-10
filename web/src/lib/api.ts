@@ -109,13 +109,31 @@ export interface CompactionResult {
 
 export interface UploadedFile {
   name: string
+  // path is relative to the session's workspace — it is the name the server
+  // resolves, and the name the client sends back with the next question.
   path: string
   size: number
+  // mime is the content type the server derived from the file's name.
+  mime: string
 }
 
 export interface UploadResult {
   files: UploadedFile[]
   workspacePath: string
+}
+
+// WorkspaceFile is one file in a session's workspace.
+export interface WorkspaceFile {
+  name: string
+  path: string
+  size: number
+  mime: string
+  modifiedAt: string
+}
+
+export interface WorkspaceFiles {
+  workspacePath: string
+  files: WorkspaceFile[]
 }
 
 export interface ProjectFile {
@@ -133,6 +151,7 @@ export type CommandAction =
   | "attach_files"
   | "open_settings"
   | "open_agents"
+  | "open_mcps"
   | "compact"
 
 export interface SlashCommand {
@@ -141,6 +160,39 @@ export interface SlashCommand {
   argumentHint?: string
   kind: "action" | "prompt"
   action?: CommandAction
+}
+
+// MCPServerView is one MCP server, as the runtime holds it.
+//
+// The status is about the server ("ready", "starting", "unreachable",
+// "unused") and the tool rows are about this agent: a tool can be
+// available, skipped (the server offered it and it could not be exposed)
+// or blocked (this agent does not reach it).
+//
+// ★ "starting" is its own state: a server that is on its way is doing what
+//   it was asked to do, and a reader who cannot tell it from "unreachable"
+//   reads a server on its way as a broken one.
+export interface MCPServerView {
+  name: string
+  transport: string
+  status: "ready" | "starting" | "unreachable" | "unused"
+  error: string
+  tools: MCPToolView[]
+}
+
+export interface MCPToolView {
+  // name is the server's own name — the vocabulary of the file.
+  name: string
+  // exposedName is the name the model sees.
+  exposedName: string
+  tier: string
+  status: "available" | "skipped" | "blocked"
+  reason: string
+}
+
+export interface MCPServersView {
+  agent: string
+  servers: MCPServerView[]
 }
 
 export interface AgentModelView {
@@ -160,7 +212,9 @@ export interface AgentView {
   model: AgentModelView
   maxIterations: number
   subagents: string[]
-  disabledTools: string[]
+  // ★ tools is the agent's tool allow-list. The default is none — an
+  //   absent list and an empty list mean the same thing.
+  tools: string[]
   // summarizeAt is the compaction threshold of this agent, in tokens. Zero
   // means it never compacts — either because it says so, or because the
   // model declares no window to measure against.
@@ -237,6 +291,22 @@ function sessionPath(id: string, suffix = ""): string {
   return `/v2/sessions/${id}${suffix}`
 }
 
+// fileUrl is the URL of one file's bytes.
+//
+// ★ It is a **string**, not a fetch: an `<img src>` hands the file to the
+//   browser's own picture pipeline — its cache, its concurrency limits, its
+//   decoder — and the URL can be copied out of the page.
+//
+// ★ max asks the server for a smaller picture. It only means something for
+//   an image: text and PDF ignore it.
+export function fileUrl(sessionId: string, path: string, max?: number): string {
+  if (!sessionId) {
+    throw new Error("session id is missing — the file belongs to a session")
+  }
+  const limit = max && max > 0 ? `&max=${Math.trunc(max)}` : ""
+  return `/v2/sessions/${sessionId}/files/raw?path=${encodeURIComponent(path)}${limit}`
+}
+
 export const api = {
   listThreads: () => call<{ items: ThreadMeta[] }>("/v2/sessions"),
 
@@ -290,6 +360,18 @@ export const api = {
 
   listSkills: () => call<{ skills: SkillView[] }>("/v2/skills", { cache: "no-store" }),
 
+  // listMCPServers reads the MCP servers of one agent. The agent is
+  // optional and defaults to the configuration's default agent.
+  //
+  // ★ It is never cached: the status is live state — it changes when a
+  //   child process dies — and the tab's caches are the place for
+  //   configuration, not for liveness.
+  listMCPServers: (agent?: string) =>
+    call<MCPServersView>(
+      agent ? `/v2/mcps?agent=${encodeURIComponent(agent)}` : "/v2/mcps",
+      { cache: "no-store" },
+    ),
+
   async uploadFiles(id: string, files: readonly File[]): Promise<UploadResult> {
     const form = new FormData()
     for (const f of files) form.append("files", f, f.name)
@@ -300,6 +382,22 @@ export const api = {
     }
     return (await res.json()) as UploadResult
   },
+
+  // listFiles reads what is in the session's workspace.
+  //
+  // ★ It is the server's own account of the files — the client has no
+  //   truth of its own to fall back on after a reload.
+  listFiles: (id: string) => call<WorkspaceFiles>(sessionPath(id, "/files")),
+
+  // deleteFile removes one file from the session's workspace.
+  //
+  // ★ The granularity is the **file**. The attachment list of a message is
+  //   history, and history is not rewritten when a file is deleted.
+  deleteFile: (id: string, path: string) =>
+    call<{ deleted: boolean; path: string }>(
+      `${sessionPath(id, "/files")}?path=${encodeURIComponent(path)}`,
+      { method: "DELETE" },
+    ),
 }
 
 // ── /v2/run ───────────────────────────────────────────────────────────────
@@ -310,10 +408,24 @@ export interface ResumeInput {
   reason?: string
 }
 
+// RunAttachment is one file the client names with its question.
+//
+// ★ The path is relative to the session's workspace. The server resolves it
+//   against the session's own workspace and refuses anything that escapes
+//   it, so there is no path a client could send to read a file outside.
+export interface RunAttachment {
+  name: string
+  path: string
+  size?: number
+}
+
 export interface RunInput {
   threadId: string
   query?: string
   resume?: ResumeInput[]
+  // attachments are the files that came with this question. They are
+  // recorded on the message, so the history can show them later.
+  attachments?: RunAttachment[]
   // runId asks for a specific run. With no query it means "attach to the
   // run I already know" — the server refuses a run that is not live.
   //
@@ -416,6 +528,7 @@ export function runStream(input: RunInput, handlers: RunHandlers): RunHandle {
         body: JSON.stringify({
           threadId: input.threadId,
           ...(input.query !== undefined ? { query: input.query } : {}),
+          ...(input.attachments !== undefined ? { attachments: input.attachments } : {}),
           ...(input.runId !== undefined ? { runId: input.runId } : {}),
           ...(input.resume
             ? { resume: input.resume.map((r) => ({ interruptId: r.interruptId, payload: { approved: r.approved, reason: r.reason ?? "" } })) }

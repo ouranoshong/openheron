@@ -46,11 +46,11 @@ STATE_DIR="$TEST_ROOT/state"
 
 mkdir -p "$CONFIG_DIR/server" "$STATE_DIR"
 
-# agents/ llm/ policy/ skills/ tools/ are **inputs** (agent definitions, vendor
-# protocols, permissions, tool configuration), not state. The test instance
-# needs real agents to get through a whole turn, so they are copied over — and
-# copied rather than symlinked so that a crashing test cannot damage the
-# development configuration.
+# agents/ llm/ policy/ skills/ tools/ mcps/ are **inputs** (agent definitions,
+# vendor protocols, permissions, tool configuration, MCP servers), not state.
+# The test instance needs real agents to get through a whole turn, so they are
+# copied over — and copied rather than symlinked so that a crashing test
+# cannot damage the development configuration.
 #
 # ★ tools/ is in there too: it is a **configuration** directory (one file per
 #   external tool, plus the knowledge base), and for it to behave the same it
@@ -58,11 +58,22 @@ mkdir -p "$CONFIG_DIR/server" "$STATE_DIR"
 #   tools are always on (or always off) in the test instance, which is not the
 #   same thing as development.
 #
+# ★ mcps/ belongs to the same list and for the same reason, only the failure
+#   is louder: an agent names the servers it mounts in its own frontmatter
+#   (`mcps: [fetch]`), and the loader refuses an agent that names a server
+#   nobody declared — "agent task lists the MCP server "fetch", which is not
+#   declared under mcps/". Copy the agents without the servers and the test
+#   instance refuses to start at all.
+#
+# ★ The list is the set of **configuration partitions**, and a partition that
+#   is missing from it is a partition the test instance silently disagrees
+#   with the development side about.
+#
 # Deliberately excludes server/ and state/: this script manages those itself.
 copy_defs() {
   local src="$REPO_ROOT/.openheron" sub
   [[ -d "$src" ]] || { echo "[test-backend] no $src, skipping agent defs" >&2; return; }
-  for sub in agents llm policy skills tools; do
+  for sub in agents llm policy skills tools mcps; do
     [[ -d "$src/$sub" ]] || continue
     if [[ ! -d "$CONFIG_DIR/$sub" || "$SYNC" == 1 ]]; then
       rm -rf "${CONFIG_DIR:?:?}/$sub"
@@ -123,9 +134,23 @@ if [[ "$PREPARE_ONLY" == 1 ]]; then
   exit 0
 fi
 
-BIN="${OPENHERON_BIN:-$REPO_ROOT/bin/openheron}"
+# ★ The binary is named by the build, and the build knows the platform: the
+#   Taskfile builds `bin/openheron{{.EXE}}`, so the file is `openheron.exe`
+#   on Windows and `openheron` everywhere else. A hardcoded name picks the
+#   wrong file — and the wrong file is worse than a missing one, because a
+#   stale binary from an earlier commit starts happily and fails on the
+#   configuration it does not understand.
+#   So the platform decides, the same way the build does.
+BIN="${OPENHERON_BIN:-}"
+if [[ -z "$BIN" ]]; then
+  if [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* || "$OSTYPE" == win32* ]]; then
+    BIN="$REPO_ROOT/bin/openheron.exe"
+  else
+    BIN="$REPO_ROOT/bin/openheron"
+  fi
+fi
 if [[ ! -x "$BIN" ]]; then
-  echo "[test-backend] binary not found: $BIN (run 'make build-go' first)" >&2
+  echo "[test-backend] binary not found: $BIN (run 'task build-go' first)" >&2
   exit 1
 fi
 

@@ -28,6 +28,7 @@ const (
 	commandActionAttachFiles  commandAction = "attach_files"
 	commandActionOpenSettings commandAction = "open_settings"
 	commandActionOpenAgents   commandAction = "open_agents"
+	commandActionOpenMCPs     commandAction = "open_mcps"
 	commandActionCompact      commandAction = "compact"
 )
 
@@ -51,6 +52,14 @@ var commandRegistry = []commandSpec{
 	{
 		Name: "agents", Description: "Switch the active agent",
 		Kind: commandKindAction, Action: commandActionOpenAgents, ArgumentHint: "[agent]",
+	},
+	{
+		// ★ An action, not a prompt: a prompt would ask the *model* to
+		//   describe the servers, and the model's answer would be a
+		//   second, lossy truth about a fact the runtime holds. The status
+		//   is read, not generated.
+		Name: "mcps", Description: "Show the MCP servers of this agent",
+		Kind: commandKindAction, Action: commandActionOpenMCPs,
 	},
 	{
 		// ★ An action, not a prompt: a prompt would only make the model

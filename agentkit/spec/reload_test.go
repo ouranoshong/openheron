@@ -3,6 +3,7 @@ package spec
 import (
 	"context"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,7 +52,11 @@ func TestServerDirIsNotHot(t *testing.T) {
 			t.Fatal("a change under server/ needs a restart and must not take part in hot reload")
 		}
 	}
-	want := []string{DirAgent, DirLLM, DirPolicy, DirTools}
+	// ★ skills/ is hot for the same reason the other four are: a SKILL.md is
+	//   content the agent reads, so editing one has to reach the next turn
+	//   without a restart. The walk is recursive — a file two levels down is
+	//   what a skill actually is.
+	want := []string{DirAgent, DirLLM, DirMCP, DirSkills, DirTools}
 	if len(HotDirs) != len(want) {
 		t.Fatalf("hot dirs = %v, want exactly %v", HotDirs, want)
 	}
@@ -59,6 +64,69 @@ func TestServerDirIsNotHot(t *testing.T) {
 		if HotDirs[i] != d {
 			t.Fatalf("hot dirs = %v, want exactly %v", HotDirs, want)
 		}
+	}
+}
+
+// ★ The fingerprint walks the tree **recursively**, and a skill is the case
+// that needs it: `skills/<name>/SKILL.md` edits the file, not the folder, so a
+// one-level walk saw an unchanged directory and the saved skill never reached
+// the next turn.
+func TestEditingASkillChangesTheVersion(t *testing.T) {
+	f := newFixture(t)
+	f.seedMinimal(t)
+	seedSkill(t, f, "code-review", "---\ndescription: one\n---\nbody\n")
+
+	s, err := NewService(f.root, filepath.Dir(f.root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := s.Fingerprint()
+	if before == "" {
+		t.Fatal("the fingerprint must not be empty")
+	}
+
+	// Same name, same folder, same size class — only the content moves.
+	seedSkill(t, f, "code-review", "---\ndescription: two\n---\nbody\n")
+	if got := s.Fingerprint(); got == before {
+		t.Fatal("★ editing skills/<name>/SKILL.md must change the fingerprint, or the change never lands")
+	}
+}
+
+// ★ The fingerprint follows the **content**, not the timestamp.
+//
+//	★ The modification time is not a truth about the content: two writes
+//	  inside the same clock tick carry the same timestamp, and a file
+//	  rewritten **with the same length** then looks untouched. This case
+//	  pins that down by putting the timestamp back exactly where it was —
+//	  only the content differs, and the fingerprint must still move.
+func TestTheFingerprintFollowsTheContentNotTheTimestamp(t *testing.T) {
+	f := newFixture(t)
+	f.seedMinimal(t)
+	seedSkill(t, f, "code-review", "---\ndescription: one\n---\nbody\n")
+
+	s, err := NewService(f.root, filepath.Dir(f.root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := s.Fingerprint()
+	if before == "" {
+		t.Fatal("the fingerprint must not be empty")
+	}
+
+	path := filepath.Join(f.root, DirSkills, "code-review", SkillFileName)
+	stamp, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Same length, different content.
+	seedSkill(t, f, "code-review", "---\ndescription: two\n---\nbody\n")
+	// ★ And the timestamp goes back to where it was.
+	if err := os.Chtimes(path, stamp.ModTime(), stamp.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := s.Fingerprint(); got == before {
+		t.Fatal("★ the content changed, so the fingerprint must change — a timestamp is not a truth about the content")
 	}
 }
 
@@ -277,17 +345,40 @@ func TestWatchExitsOnContextCancel(t *testing.T) {
 	}
 }
 
-func TestLogReloadFailedIsSwappable(t *testing.T) {
-	orig := LogReloadFailed
-	var sb strings.Builder
-	LogReloadFailed = func(err error) { sb.WriteString(err.Error()) }
-	defer func() { LogReloadFailed = orig }()
-
-	LogReloadFailed(os.ErrNotExist)
-	if !strings.Contains(sb.String(), "not exist") {
-		t.Fatalf("the log sink was never called: %q", sb.String())
-	}
+// reloadNotice is what the hot-reload test reads out of the log.
+type reloadNotice struct {
+	version string
+	changed []string
 }
+
+// noticeHandler turns a log record into a reloadNotice. It never blocks: the
+// watcher must not wait for the test.
+type noticeHandler struct{ ch chan reloadNotice }
+
+func (h noticeHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h noticeHandler) Handle(_ context.Context, r slog.Record) error {
+	n := reloadNotice{}
+	r.Attrs(func(a slog.Attr) bool {
+		switch a.Key {
+		case "version":
+			n.version = a.Value.String()
+		case "changed":
+			if s := a.Value.String(); s != "" {
+				n.changed = strings.Split(s, ",")
+			}
+		}
+		return true
+	})
+	select {
+	case h.ch <- n:
+	default:
+	}
+	return nil
+}
+
+func (h noticeHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h noticeHandler) WithGroup(string) slog.Handler      { return h }
 
 func TestHotReloadLogsWhichPartitionsChanged(t *testing.T) {
 	f := newFixture(t)
@@ -297,40 +388,46 @@ func TestHotReloadLogsWhichPartitionsChanged(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	orig := LogReloaded
-	var gotVersion string
-	var gotChanged []string
-	LogReloaded = func(version string, changed []string) {
-		gotVersion = version
-		gotChanged = changed
-	}
-	defer func() { LogReloaded = orig }()
+	// ★ The notification travels through a channel, not through captured
+	//   variables: the hook runs on the watcher's goroutine, and a variable
+	//   it writes is read by the test goroutine — that is a race, and the
+	//   detector reports it as one.
+	notices := make(chan reloadNotice, 1)
 
-	r, err := NewReloader(s, func(*Config) {})
+	r, err := NewReloader(s, func(*Config) {}, WithLogger(slog.New(noticeHandler{ch: notices})))
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go r.Watch(ctx)
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		r.Watch(ctx)
+	}()
+	// ★ Stopping the watcher is what orders this test's reads: the writes
+	//   the hook made happen-before the goroutine ends, and the goroutine
+	//   ending happens-before the receive below.
+	defer func() {
+		cancel()
+		<-watcherDone
+	}()
 
 	time.Sleep(50 * time.Millisecond)
 	f.write(t, "agents/main.md", "---\nmodel: openai/strong\n---\n改了\n")
 
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if len(gotChanged) > 0 {
-			break
+	var got reloadNotice
+	deadline := time.After(3 * time.Second)
+	for len(got.changed) == 0 {
+		select {
+		case got = <-notices:
+		case <-deadline:
+			t.Fatal("the hot reload must report which partition changed")
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
-	if len(gotChanged) == 0 {
-		t.Fatal("the hot reload must report which partition changed")
+	if got.changed[0] != "agents" {
+		t.Fatalf("changed = %v, want agents", got.changed)
 	}
-	if gotChanged[0] != "agents" {
-		t.Fatalf("changed = %v, want agents", gotChanged)
-	}
-	if gotVersion == "" {
+	if got.version == "" {
 		t.Fatal("the hot reload must report the new version")
 	}
 }

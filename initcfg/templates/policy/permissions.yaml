@@ -1,9 +1,0 @@
-# ★ There are only two columns, ask and deny — **any tool not named is allowed**.
-#   Name the tools that really have consequences here: ask (a nod every time) or
-#   deny (unavailable).
-ask:   [write_file, edit_file, execute, kb_index]
-deny:  []
-
-# ★ The outer deny takes precedence over each agent's own disabled_tools — that
-#   is the one guarantee a sub-agent cannot relax. To narrow down **one**
-#   agent, use its own disabled_tools.

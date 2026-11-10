@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/ouranoshong/openheron/approval"
 	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/message"
 	"github.com/ouranoshong/openheron/storage"
 )
 
@@ -60,6 +62,8 @@ type Config struct {
 	// ★ It must be longer than the provider's own timeout, or a slow but
 	//	alive model is fenced out while it is thinking.
 	LeaseTTL time.Duration
+	// Logger is the run's log. Nil drops the run's own warnings.
+	Logger *slog.Logger
 }
 
 // ApprovalDecision is one decision about one outstanding interrupt.
@@ -115,6 +119,8 @@ type Runtime struct {
 	// instanceID is the owner written into the ledger's rows.
 	instanceID string
 
+	log *slog.Logger
+
 	mu     sync.Mutex
 	states map[string]*sessionState
 }
@@ -127,7 +133,10 @@ func New(cfg Config) *Runtime {
 	if cfg.InstanceID == "" {
 		cfg.InstanceID = defaultInstanceID()
 	}
-	return &Runtime{cfg: cfg, instanceID: cfg.InstanceID, states: make(map[string]*sessionState)}
+	if cfg.Logger == nil {
+		cfg.Logger = discard
+	}
+	return &Runtime{cfg: cfg, instanceID: cfg.InstanceID, states: make(map[string]*sessionState), log: cfg.Logger}
 }
 
 // defaultInstanceID names this process.
@@ -185,12 +194,18 @@ func (rt *Runtime) newRunID() string { return uuid.NewString() }
 //	a caller that already has one (a client re-attaching to a run it
 //	knows) hands it in, and the run carries it from the first row to the
 //	last.
-func (rt *Runtime) Submit(ctx context.Context, sessionID, runID, query string) (*Turn, error) {
+//
+// ★ attachments are the files that came with the question. They travel with
+//
+//	the query because the attachment list belongs to the **message**: the
+//	turn persists one user message, and that message carries what it came
+//	with.
+func (rt *Runtime) Submit(ctx context.Context, sessionID, runID, query string, atts []message.Attachment) (*Turn, error) {
 	sess, err := rt.cfg.SessionManager.Get(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	if query == "" {
+	if query == "" && len(atts) == 0 {
 		return nil, errors.New("query must not be empty")
 	}
 
@@ -214,7 +229,7 @@ func (rt *Runtime) Submit(ctx context.Context, sessionID, runID, query string) (
 		}
 	}
 
-	rt.runClaimedTurn(ctx, sess, turn, loop, prev, loopItem{Query: query})
+	rt.runClaimedTurn(ctx, sess, turn, loop, prev, loopItem{Query: query, Attachments: atts})
 	return turn, nil
 }
 
@@ -282,7 +297,7 @@ func (rt *Runtime) claimTurn(ctx context.Context, sess storage.Session, kind con
 	//   live"; the lease says "that turn is making progress". A session
 	//   whose owner stalled can be taken over — and the turn slot alone
 	//   cannot say that.
-	turn.lease = newRunLease(rt.cfg.LeaseArbiter, rt.cfg.LeaseTTL)
+	turn.lease = newRunLease(rt.cfg.LeaseArbiter, rt.cfg.LeaseTTL, rt.log)
 	if err := turn.lease.claim(sess.ID(), turn.RunID, rt.instanceID, row.run.Epoch); err != nil {
 		rt.releaseClaim(sess, turn, prev, prevLoop)
 		return nil, nil, nil, nil, fmt.Errorf("%w: %v", ErrSessionBusy, err)
@@ -339,7 +354,7 @@ func (rt *Runtime) openRunRow(ctx context.Context, sess storage.Session, turn *T
 	if err := ledger.Append(ctx, row); err != nil {
 		return nil, fmt.Errorf("write the run row: %w", err)
 	}
-	return newRunRow(ledger, row), nil
+	return newRunRow(ledger, row, rt.log), nil
 }
 
 // releaseClaim gives the slot back when a claimed turn cannot start.
@@ -813,7 +828,7 @@ func (rt *Runtime) activeRun(ctx context.Context, sess storage.Session) (storage
 	}
 	runs, err := ledger.List(ctx)
 	if err != nil {
-		logf("session=%s failed to read the run ledger: %v", sess.ID(), err)
+		rt.logf("session=%s failed to read the run ledger: %v", sess.ID(), err)
 		return storage.Run{}, false
 	}
 	return storage.ActiveRun(runs)
@@ -833,7 +848,7 @@ func (rt *Runtime) parentRunOf(ctx context.Context, sess storage.Session) string
 	}
 	runs, err := ledger.List(ctx)
 	if err != nil {
-		logf("session=%s failed to read the run ledger: %v", sess.ID(), err)
+		rt.logf("session=%s failed to read the run ledger: %v", sess.ID(), err)
 		return ""
 	}
 	storage.SortRunsByStart(runs)

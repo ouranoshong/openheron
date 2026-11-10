@@ -2,9 +2,15 @@ package run
 
 import (
 	"context"
+	"log/slog"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/cloudwego/eino/schema"
+
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"github.com/ouranoshong/openheron/storage"
 )
 
@@ -24,11 +30,14 @@ type runRow struct {
 	ledger storage.RunLedger
 	run    storage.Run
 	closed bool
+
+	log *slog.Logger
 }
 
-// newRunRow wraps a run's first snapshot.
-func newRunRow(ledger storage.RunLedger, r storage.Run) *runRow {
-	return &runRow{ledger: ledger, run: r}
+// newRunRow wraps a run's first snapshot. log may be nil: the row then drops
+// the one warning it can write.
+func newRunRow(ledger storage.RunLedger, r storage.Run, log *slog.Logger) *runRow {
+	return &runRow{ledger: ledger, run: r, log: log}
 }
 
 // set writes a non-terminal state.
@@ -70,6 +79,77 @@ func (rw *runRow) finish(state storage.RunState, code, message string) {
 	rw.writeLocked()
 }
 
+// noteMCPServers records the MCP servers the run touched.
+//
+// ★ The names are the servers' own, and the ledger holds them once: a run
+//
+//	touches a server many times, and the row says which servers were
+//	involved, not how often.
+func (rw *runRow) noteMCPServers(names []string) {
+	if rw == nil || len(names) == 0 {
+		return
+	}
+	rw.mu.Lock()
+	defer rw.mu.Unlock()
+	if rw.closed {
+		return
+	}
+	seen := make(map[string]bool, len(rw.run.MCPServers))
+	for _, n := range rw.run.MCPServers {
+		seen[n] = true
+	}
+	for _, n := range names {
+		if n == "" || seen[n] {
+			continue
+		}
+		seen[n] = true
+		rw.run.MCPServers = append(rw.run.MCPServers, n)
+	}
+	sort.Strings(rw.run.MCPServers)
+	rw.run.UpdatedAt = time.Now().UTC()
+	rw.writeLocked()
+}
+
+// mcpServersOf names the MCP servers the messages touched.
+//
+// ★ The tool name is namespaced, and the namespace's first segment is the
+//
+//	server: mcp__<server>__<tool>. ★ A server name may not contain a run
+//	of underscores, so the boundary is unambiguous and the name does not
+//	have to be parsed back into anything else.
+func mcpServersOf(msgs []*schema.Message) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range msgs {
+		if m == nil {
+			continue
+		}
+		for _, tc := range m.ToolCalls {
+			name, ok := mcpServerOf(tc.Function.Name)
+			if !ok || seen[name] {
+				continue
+			}
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// mcpServerOf reads the server out of an exposed tool name.
+func mcpServerOf(tool string) (string, bool) {
+	if !strings.HasPrefix(tool, decl.MCPToolPrefix) {
+		return "", false
+	}
+	rest := tool[len(decl.MCPToolPrefix):]
+	i := strings.Index(rest, decl.MCPSeparator)
+	if i <= 0 {
+		return "", false
+	}
+	return rest[:i], true
+}
+
 // isClosed reports whether the row already carries a terminal state.
 func (rw *runRow) isClosed() bool {
 	if rw == nil {
@@ -92,6 +172,6 @@ func (rw *runRow) writeLocked() {
 		return
 	}
 	if err := rw.ledger.Append(context.Background(), rw.run); err != nil {
-		logf("session=%s run=%s failed to write the run row: %v", rw.run.SessionID, rw.run.RunID, err)
+		logf(rw.log, "session=%s run=%s failed to write the run row: %v", rw.run.SessionID, rw.run.RunID, err)
 	}
 }

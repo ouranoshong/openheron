@@ -14,15 +14,14 @@ synthesises — tokens are spent where they actually matter.
 
 "who may do what" becomes a few hard rules:
 
-- **Tool permissions have two layers and are never merged** — the outer
-  `policy/permissions.yaml` sets the global `ask`/`deny`, each inner agent narrows it
-  with its own `disabled_tools`. The outer `deny` wins, and **a sub agent cannot relax
-  it**.
+- **Tool permissions are named, and the default is to ask** — a tool nobody names asks
+  first; the exceptions are the ones a file's own `allows:` list names, and each agent
+  says which of them it may use at all.
 - **Delegation has a depth cap** — the entry agent is level 0, an agent at depth `d` may
   spawn children if and only if `d < max_depth`; a topology over the cap is a **startup
   error**, never a silent truncation.
 - **One session can run several agents** — independent work is dispatched in parallel.
-- **Configuration is files** — model profiles, prompts and approval policy are files you
+- **Configuration is files** — model profiles, prompts and tool tiers are files you
   can read and edit.
 - **One binary, runs anywhere** — the frontend is embedded into a single file, compiled
   statically across platforms.
@@ -37,7 +36,7 @@ neither zero latency nor unlimited concurrency.
 ## Quick start
 
 ```bash
-make build                           # build (frontend + a single binary with the UI embedded)
+task build                           # build (frontend + a single binary with the UI embedded)
 cd /your/project && openheron init   # generate a minimal runnable configuration in your project
 export DEEPSEEK_API_KEY=sk-...       # secrets are read from the environment only
 openheron                            # start, then open http://localhost:8080
@@ -61,21 +60,34 @@ change that). Pin a version with `OPENHERON_VERSION=v0.1.0`. Prefer to look befo
 you run? Download `install.sh` from the
 [releases page](https://github.com/ouranoshong/openheron/releases/latest) and read it.
 
-`openheron init` writes six files: `agents/main.md`, `agents/task.md`,
-`llm/<provider>.yaml`, `policy/permissions.yaml`, `policy/limits.yaml` and
-`server/config.yaml`. Existing files are **kept, not overwritten** (unless you pass
-`--force`), so running it in an already-configured project is safe.
+`openheron init` writes the whole tree: `agents/main.md`, `agents/task.md`,
+`agents/agent-expert.md`, `agents/skill-expert.md`, `llm/<provider>.yaml`,
+`server/config.yaml`, the five files under `tools/`, the three MCP servers
+`mcps/fetch.yaml`, `mcps/time.yaml` and `mcps/deepwiki.yaml`, and the four skills
+`skills/openheron-config-<name>/SKILL.md`. Existing files are **kept, not overwritten**
+(unless you pass `--force`), so running it in an already-configured project is safe.
 
-`tools/` is **not** written by default — a file's presence is the switch that turns a
-tool on, so which tools exist is yours to decide. Pass `--tools` to get
-`tools/http.yaml`, `tools/web_search.yaml`, `tools/wikipedia.yaml` and `tools/kb.yaml`.
+Pass `--no-tools` to leave `tools/` out. The tools are part of the tree because the
+agents name `request_get`, `duckduckgo_search` and `wikipedia_search`, and a name that
+no provider offers is reported as a typo.
+
+★ **`tools/filesystem.yaml` is the one that does not switch anything on.** The filesystem
+tools are always mounted, so that file only tunes their tiers: `allows:
+[write_file, edit_file, execute]` is how an agent that edits and runs commands on its own
+is spelled. Absent, the readers run without a nod and the writers ask.
+
+★ **The three MCP servers need `uvx` on the PATH**, and the two stdio ones download
+their package on the first start. A server that cannot be started costs that server's
+tools and nothing else — the process still starts, the log says
+`[mcp] the server is unreachable`, and `/mcps` shows the server as `unreachable` with the
+reason. Starting a server is lazy, so nothing is attempted at boot.
 
 ## Command line
 
 | Command | Effect |
 |---|---|
 | `openheron [--config-dir <path>] [--project-root <path>]` | Start the server |
-| `openheron init [--dir] [--model] [--provider] [--base-url] [--env] [--no-policy] [--tools] [--force] [--dry-run] [--json]` | Generate a minimal runnable configuration |
+| `openheron init [--dir] [--model] [--provider] [--base-url] [--env] [--no-tools] [--force] [--dry-run] [--json]` | Generate a runnable configuration |
 | `openheron kb index [--config-dir] [--json] [files...]` | Build the knowledge-base index |
 | `openheron kb search [--config-dir] <query>` | Search the knowledge base |
 | `openheron kb status [--config-dir] [--json]` | Inspect the index |
@@ -99,8 +111,8 @@ not silently grow an empty configuration tree.
 |---|---|---|
 | `agents/` | One `.md` per agent: frontmatter + body (the body is the prompt) | ✅ |
 | `llm/` | One `.yaml` per vendor: endpoint, secret, model list, reasoning tier table | ✅ |
-| `policy/` | `permissions.yaml` (approval tiers), `limits.yaml` (quota caps) | ✅ |
-| `tools/` | External tools and the knowledge-base config — **enabled by the file's presence** | ✅ |
+| `tools/` | External tools and the knowledge-base config — a provider without a configuration mounts nothing. Each file's `allows:` names the tools that run without a nod | ✅ |
+| `mcps/` | One `.yaml` per MCP server: transport, command or URL, timeouts, and the server's own `allows:` | ✅ |
 | `skills/` | `<name>/SKILL.md`, eino's native skill convention | ❌ |
 | `server/` | The process's own parameters: listen address, directories, timeouts, depth cap | ❌ needs a restart |
 | `state/` | Sessions and checkpoints (auto-created, **do not commit**) | — |
@@ -117,46 +129,67 @@ description: "task: the concrete executor. Writes files per the task order…"
 model: deepseek/deepseek-flash
 max_iterations: 50
 reasoning: low
-disabled_tools: [kb_index]
+tools: [ls, read_file, write_file, edit_file, glob, grep, execute, write_todos]
+mcps: []
 ---
 ```
 
 The frontmatter is **strictly decoded** — one wrong key is a startup error, never
 silently ignored. Available keys: `description`, `model`, `max_iterations`,
-`subagents`, `disabled_tools`, `skills`, `temperature`, `max_tokens`, `reasoning`.
+`subagents`, `tools`, `mcps`, `skills`, `temperature`, `max_tokens`, `reasoning`.
 
 - `model` is required, in the form `<provider>/<model>`, and is **never inherited and
   never falls back** — failing to resolve it is a startup error.
 - `subagents` declares the topology; every referenced agent must exist and the graph
   **must not contain a cycle**.
+- `tools` is the allow-list of the **built-in** tools this agent may use; the names are the
+  ones the model sees. **Not declaring it means no tools at all** — the list is the whole
+  answer.
+- `mcps` is the list of MCP servers this agent mounts; mounting one starts a child
+  process **and hands the agent all of that server's tools**, so **not declaring it means
+  no server and no MCP tools**. A mounted tool's name is `mcp__<server>__<tool>`; it is
+  not written in `tools`.
 - `skills` is the allow-list of skills this agent may use; the names are the folders
-  under `skills/`. **Not declaring it means every skill**, and declaring an empty list
-  means none.
+  under `skills/`. **Not declaring it means no skill**, and declaring an empty list
+  means the same.
 - `reasoning` names a **tier** (such as `high`), which `models[].reasoning` in
   `llm/*.yaml` translates into the differing fields each vendor uses. **If that table is
   missing, the tier is silently ignored** — an agent says `reasoning: high` while the
   endpoint has no `high`, which means "no thinking at all", with no error at all.
 
-### The two permission layers
+### The permission model
 
-| Layer | Where | Scope |
+A tool that nobody names **asks** — the run interrupts and waits for a human. The
+exceptions are the tools that run without a nod, and each one is named by **the file that
+provides it**:
+
+| Where | What it names | Scope |
 |---|---|---|
-| Outer | `deny` in `policy/permissions.yaml` | Every agent |
-| Inner | `disabled_tools` in `agents/*.md` | This one agent only |
+| `allows:` in `tools/*.yaml` and `mcps/<server>.yaml` | the tools of that file (or that server) that run without a nod | Every agent |
+| `tools` in `agents/*.md` | the **built-in** tools this agent may use at all | This one agent only |
 
-The two are **stored separately and never merged** — merging would destroy the
-information about *which* layer blocked something. The outer `deny` wins, and it is the
-one guarantee a sub agent cannot relax.
+★ The two are **stored separately and never merged** — merging would destroy the
+information about *which* layer blocked something. The tier table is shared and a file's
+`allows:` only **adds** to it; an agent's own `tools` list decides what that agent sees.
 
-A tool that is not named defaults to `allow` (straight through). Name it under `ask` to
-make it need a human every time — the run interrupts and waits for the decision — and
-under `deny` to disable it outright.
+★ **A file speaks its own vocabulary.** `tools/http.yaml` says `request_get`, and an MCP
+server says `create_issue` — not `mcp__github__create_issue`. The translation to the name
+the model sees happens once, where the tool is mounted.
+
+★ There is **no global deny list**. "Not exposed" is said in exactly two places: a file's
+own `allows:` list, and an agent's `tools` list — plus `mcps` for the servers an agent
+does not mount. A third list would be one more thing
+to keep in sync — and it was the only one that had to speak the exposed names while the
+tools' own files speak theirs.
+
+★ **The old `disabled_tools` key is refused**, with a message that says which way round
+the two are: `tools` says which tools an agent **gets**. Renaming the key alone would
+have turned a blacklist into a whitelist without saying so.
 
 ### The depth cap
 
 `agent.max_depth` in `server/config.yaml` (default `1`, meaning only the entry agent may
-delegate) and the same key in `policy/limits.yaml` **resolve to the stricter of the
-two**. A declared topology over the cap is a **startup error**, never a silent
+delegate). A declared topology over the cap is a **startup error**, never a silent
 truncation.
 
 ## The HTTP API
@@ -172,6 +205,7 @@ to narrow it.
 | GET | `/v2/sessions/:id/messages` | Replay the history + usage |
 | POST | `/v2/sessions/:id/abort` | Abort the running turn |
 | GET | `/v2/agents` `/v2/agents/:agentId` | Agents and their effective tool tables |
+| GET | `/v2/mcps` | The MCP servers of one agent (`?agent=<agentId>`, optional) |
 | GET | `/v2/config` `/v2/health` `/v2/runtime` | Effective config / health / runtime status |
 | GET/POST/PUT/DELETE | `/v2/settings/item` | Config editor reads and writes |
 
@@ -186,7 +220,7 @@ disturbed, and nothing about it is discarded.
 ## The knowledge base
 
 `kb` is an **optional** local corpus retrieval layer: a set of markdown documents indexed
-under `<data-dir>/kb/<index>/`. Configure it in `tools/kb.yaml` (no `corpus` means the
+under `<data-dir>/kb/<index>/`. Configure it in `tools/kb.yaml` (no `corpus_dir` means the
 knowledge base is off), build the index with `openheron kb index`, and let agents
 retrieve with `kb_search`. `kb_index` defaults to the `ask` tier — letting an agent
 rebuild the index needs a human nod.
@@ -194,32 +228,44 @@ rebuild the index needs a human nod.
 ## Development
 
 ```bash
-make build-go   # backend only (no frontend rebuild) — fastest while iterating on Go code
-make web-dev    # Vite dev server (:5173, proxies /v2 to :8080)
-make dev        # rebuild and restart the Go binary automatically (air)
-make check      # lint + test
+task build-go   # backend only (no frontend rebuild) — fastest while iterating on Go code
+task web-dev    # Vite dev server (:5173, proxies /v2 to :8080)
+task dev        # rebuild and restart the Go binary automatically (air)
+task check      # lint + test
 ```
 
-`make test-e2e` drives a real browser against a deterministic fake backend; `make smoke`
+`task test-e2e` drives a real browser against a deterministic fake backend; `task smoke`
 runs against the test instance and needs a reachable model. The ports, the test
 environment and the traps around them are in
 [docs/developer-manual.md](docs/developer-manual.md) §5.
 
 ## Related documents
 
-This repository ships nine document sets, maintained alongside the code, each in English
-and Chinese (**English is the primary version, `_zh` the Chinese one**):
+This repository ships **four bilingual document sets**, maintained alongside the code
+(**English is the primary version, `_zh` the Chinese one**):
 
 | Document | Contents |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) · [中文](docs/architecture_zh.md) | **Architecture** — layering and dependency direction, the configuration system, assembly, the run loop, storage, HTTP, the frontend |
 | [docs/user-manual.md](docs/user-manual.md) · [中文](docs/user-manual_zh.md) | **User manual** — installation, configuration, operating the interface |
 | [docs/developer-manual.md](docs/developer-manual.md) · [中文](docs/developer-manual_zh.md) | **Developer manual** — layering, the dependency rules, development recipes, testing and troubleshooting |
-| [docs/context-usage-design.md](docs/context-usage-design.md) · [中文](docs/context-usage-design_zh.md) | **Context usage estimate — design** — the occupancy metric, the data flow, and how the compacted conversation is persisted (implemented) |
-| [docs/session-concurrency-design.md](docs/session-concurrency-design.md) · [中文](docs/session-concurrency-design_zh.md) | **Session concurrency — design** — the one-turn-per-session rule and how the frontend learns that a session is busy (implemented) |
-| [docs/run-lifecycle-design.md](docs/run-lifecycle-design.md) · [中文](docs/run-lifecycle-design_zh.md) | **Run lifecycle — design** — how a run could become a durable row with a lease and a fence (a proposal: only §1 describes the code) |
-| [docs/fs-backend-design.md](docs/fs-backend-design.md) · [中文](docs/fs-backend-design_zh.md) | **Filesystem backend — design** — the `agentkit/fsx` fork and the path confinement every tool passes through (implemented) |
-| [docs/sandbox-kit-design.md](docs/sandbox-kit-design.md) · [中文](docs/sandbox-kit-design_zh.md) | **Docker Sandbox Kit packaging — design** — the whole process as a v3 workload Kit inside a microVM, how the model key stays on the host, and the SSE path (a proposal: only §1 describes the code) |
+
+★ And **eleven Chinese-only documents** — the architecture and code-design ones. Their Chinese
+content took over the plain name, so the link below is the only entry there is:
+
+| Document | Contents |
+|---|---|
+| [docs/context-usage-design.md](docs/context-usage-design.md) | **Context usage estimate — design** — the occupancy metric, the data flow, and how the compacted conversation is persisted (implemented) |
+| [docs/session-concurrency-design.md](docs/session-concurrency-design.md) | **Session concurrency — design** — the one-turn-per-session rule and how the frontend learns that a session is busy (implemented) |
+| [docs/run-lifecycle-design.md](docs/run-lifecycle-design.md) | **Run lifecycle — design** — a run as a durable row, a lease with a fence, and the connection demoted to a subscriber (§3-§9 are implemented) |
+| [docs/fs-backend-design.md](docs/fs-backend-design.md) | **Filesystem backend — design** — the `agentkit/fsx` fork and the path confinement every tool passes through (implemented) |
+| [docs/sandbox-kit-design.md](docs/sandbox-kit-design.md) | **Docker Sandbox Kit packaging — design** — the whole process as a v3 workload Kit inside a microVM, how the model key stays on the host, and the SSE path (the Kit is built and published) |
+| [docs/mcp-design.md](docs/mcp-design.md) | **MCP integration — design** — the tool assembly path, the tool namespace, and where an MCP server would run inside the Kit (implemented, except §8) |
+| [docs/config-design.md](docs/config-design.md) | **Configuration system — design** — the config root and its three levels, the partitions, loading and precedence, hot reload (the body describes the code as it is) |
+| [docs/tool-surface-design.md](docs/tool-surface-design.md) | **Tool surface — design** — which tools an agent gets (`tools:` / `mcps:` / `skills:`) and the six `config_*` tools (§2-§5 are implemented) |
+| [docs/logging-design.md](docs/logging-design.md) | **Logging assembly refactor — design** — the composition root, a mutable level, `log_level`, injected loggers, and moving the request log out of `llm/common` (**implemented**) |
+| [docs/animation-design.md](docs/animation-design.md) | **Interface motion — design** — the motion tokens, the reduced-motion fallback, the brand mark's entrance, and the interface motions that are still a proposal (§2.3, §3 and §4 are implemented) |
+| [docs/attachment-design.md](docs/attachment-design.md) | **Attachments — design** — how an uploaded file lands on disk, what the server does to it, and how the interface shows it |
 
 ★ The **Docker Sandbox Kit** that packages openheron as a sandbox workload lives in
 [`sandbox-kit/`](sandbox-kit/) — the descriptor, the content recipe and the entrypoint.

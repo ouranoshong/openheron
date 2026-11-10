@@ -61,22 +61,25 @@ func skillNames(t *testing.T, b skill.Backend) []string {
 	return out
 }
 
-func scopeOfNames(names ...string) *[]string {
-	return &names
+func scopeOfNames(names ...string) []string {
+	return names
 }
 
-func TestAnAgentWithoutASkillListGetsEverySkill(t *testing.T) {
+// ★ The default is **none**, like every other list on an agent: an agent
+//
+//	that says nothing about skills gets no skill.
+func TestAnAgentWithoutASkillListGetsNoSkill(t *testing.T) {
 	dir := t.TempDir()
 	writeSkillFile(t, dir, "alpha", "alpha")
 	writeSkillFile(t, dir, "beta", "beta")
 
 	scoped, err := newScopedSkillBackend(context.Background(),
-		testSkillBackend(t, dir), skillScopeOf(nil))
+		testSkillBackend(t, dir), skillScopeOf(nil), nil)
 	if err != nil {
 		t.Fatalf("newScopedSkillBackend: %v", err)
 	}
-	if got := len(skillNames(t, scoped)); got != 2 {
-		t.Fatalf("the agent sees %d skills, want 2 (%v)", got, skillNames(t, scoped))
+	if got := len(skillNames(t, scoped)); got != 0 {
+		t.Fatalf("the agent sees %d skills, want none (%v)", got, skillNames(t, scoped))
 	}
 }
 
@@ -86,7 +89,7 @@ func TestTheSkillListLimitsWhatTheAgentSees(t *testing.T) {
 	writeSkillFile(t, dir, "beta", "beta")
 
 	scoped, err := newScopedSkillBackend(context.Background(),
-		testSkillBackend(t, dir), skillScopeOf(scopeOfNames("alpha")))
+		testSkillBackend(t, dir), skillScopeOf(scopeOfNames("alpha")), nil)
 	if err != nil {
 		t.Fatalf("newScopedSkillBackend: %v", err)
 	}
@@ -102,7 +105,7 @@ func TestTheSkillListAlsoRefusesToLoadASkillThatIsNotAllowed(t *testing.T) {
 	writeSkillFile(t, dir, "beta", "beta")
 
 	scoped, err := newScopedSkillBackend(context.Background(),
-		testSkillBackend(t, dir), skillScopeOf(scopeOfNames("alpha")))
+		testSkillBackend(t, dir), skillScopeOf(scopeOfNames("alpha")), nil)
 	if err != nil {
 		t.Fatalf("newScopedSkillBackend: %v", err)
 	}
@@ -119,7 +122,7 @@ func TestTheSkillListAcceptsTheFolderName(t *testing.T) {
 	writeSkillFile(t, dir, "code-tools", "code-tools-v2")
 
 	scoped, err := newScopedSkillBackend(context.Background(),
-		testSkillBackend(t, dir), skillScopeOf(scopeOfNames("code-tools")))
+		testSkillBackend(t, dir), skillScopeOf(scopeOfNames("code-tools")), nil)
 	if err != nil {
 		t.Fatalf("newScopedSkillBackend: %v", err)
 	}
@@ -134,7 +137,7 @@ func TestAnEmptySkillListMeansNoSkillAtAll(t *testing.T) {
 	writeSkillFile(t, dir, "alpha", "alpha")
 
 	scoped, err := newScopedSkillBackend(context.Background(),
-		testSkillBackend(t, dir), skillScopeOf(scopeOfNames()))
+		testSkillBackend(t, dir), skillScopeOf(scopeOfNames()), nil)
 	if err != nil {
 		t.Fatalf("newScopedSkillBackend: %v", err)
 	}
@@ -148,7 +151,7 @@ func TestASkillThatIsNotThereIsReported(t *testing.T) {
 	writeSkillFile(t, dir, "alpha", "alpha")
 
 	scoped, err := newScopedSkillBackend(context.Background(),
-		testSkillBackend(t, dir), skillScopeOf(scopeOfNames("alpha", "nope")))
+		testSkillBackend(t, dir), skillScopeOf(scopeOfNames("alpha", "nope")), nil)
 	if err != nil {
 		t.Fatalf("newScopedSkillBackend: %v", err)
 	}
@@ -170,7 +173,7 @@ func TestTheScopeReachesTheSkillToolDescription(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fsx.New: %v", err)
 	}
-	mw, err := skillChain(context.Background(), backend, nil, skillScopeOf(scopeOfNames("alpha")))
+	mw, err := skillChain(context.Background(), backend, nil, skillScopeOf(scopeOfNames("alpha")), nil)
 	if err != nil {
 		t.Fatalf("skillChain: %v", err)
 	}

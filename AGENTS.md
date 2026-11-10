@@ -7,41 +7,92 @@ one — change one and change the other.
 
 > ★ **This repository is the code surface**: Go backend + React frontend + build configuration.
 >
-> It ships **nine** bilingual document sets, maintained alongside the code
-> (**English is the main version; the `_zh` suffix marks the Chinese version**):
+> It ships **four** bilingual document sets, maintained alongside the code
+> (**English is the main version; the `_zh` suffix marks the Chinese version**; the
+> Kit's two guides are bilingual too, and they live in `sandbox-kit/` — see below):
 > `README.md` / `README_zh.md`,
 > `docs/architecture.md` / `docs/architecture_zh.md` (architecture),
 > `docs/user-manual.md` / `docs/user-manual_zh.md` (user guide),
-> `docs/developer-manual.md` / `docs/developer-manual_zh.md` (developer guide),
-> `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` (context-usage estimation design),
-> `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` (session concurrency design),
-> `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` (run lifecycle design),
-> `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` (filesystem backend design),
-> `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` (Docker Sandbox Kit packaging).
+> `docs/developer-manual.md` / `docs/developer-manual_zh.md` (developer guide).
+>
+> **and eleven Chinese-only documents** under `docs/` — the architecture and code-design
+> ones. ★ Their Chinese content **took over the plain name**: `docs/config-design.md`
+> **is** the Chinese document — there is no `_zh` twin and no English one:
+> `docs/context-usage-design.md` (context-usage estimation design),
+> `docs/session-concurrency-design.md` (session concurrency design),
+> `docs/run-lifecycle-design.md` (run lifecycle design),
+> `docs/fs-backend-design.md` (filesystem backend design),
+> `docs/sandbox-kit-design.md` (Docker Sandbox Kit packaging),
+> `docs/mcp-design.md` (MCP integration design),
+> `docs/config-design.md` (configuration system design),
+> `docs/tool-surface-design.md` (the tool surface — which tools an agent gets, and how
+> the configuration is administered),
+> `docs/logging-design.md` (logging assembly refactor — **implemented**: a mutable level,
+> `log_level`, a composition-root logger, the hertz adapter, and the request log moved out
+> of `llm/common`),
+> `docs/animation-design.md` (interface motion — **partly implemented**: the motion tokens,
+> the reduced-motion fallback and the brand mark's entrance are in the tree; the interface
+> motions are still a proposal),
+> `docs/attachment-design.md` (attachments — how an uploaded file lands on disk, what the
+> server does to it, and how the interface shows it).
 > **Every other design document under `docs/` still lives in the upstream repository** ——
-> any `docs/xxx.md` reference below that is not one of these nine is the upstream copy.
+> any `docs/xxx.md` reference below that is not one of these fifteen, is the upstream copy.
 > If you cannot get hold of it before changing semantics, ask first; do not change
 > configuration or interfaces from memory.
 >
-> ★ The first four sets describe **what the code surface already is**; `docs/context-usage-design.md`
+> ★ **A design document is written in Chinese only.** A document that says how the code
+> is built — layering, a subsystem's design, a refactoring proposal — has no second
+> audience: it is read by the people who read Chinese, and a hand-maintained English
+> twin is a second copy that drifts. ★ The eight documents above were retired from
+> bilingual on 2026-11-08: their Chinese content took over the plain name, so a link to
+> `docs/config-design.md` still resolves — it resolves to the Chinese document now.
+> ★ **What stays bilingual is what a user or an integrator reads**: `README.md`,
+> `docs/user-manual.md`, and — because somebody has to be able to work in this tree —
+> `docs/architecture.md` and `docs/developer-manual.md`. Their audience is not assumed
+> to read Chinese. The Kit's two guides (`sandbox-kit/TUTORIAL.md` and
+> `sandbox-kit/BUILDING.md`) are bilingual for the same reason.
+>
+> ★ The four bilingual sets describe **what the code surface already is**; the Chinese-only
+> designs say the same about their own subject: `docs/context-usage-design.md`
 > covers **context usage and compaction** — the usage dashboard (§2, §4, §5), compaction and its
 > persistence (§7), and the rendering of compaction markers in the interface (§7.7) are all
 > already in the code.
 > `docs/session-concurrency-design.md` covers **session concurrency** — the admission gate for
 > one turn per session (§5), the cross-client 409 (§5.2), and the frontend busy-state handling
 > (§5.4-§5.6) are all already in the code.
-> `docs/run-lifecycle-design.md` is the odd one out: it is a **proposal**, not a description.
-> Its §1 describes the code as it is — a turn is bound to one SSE connection today — while its
-> §2 onwards describe what would be built: a run as a durable row, a lease with a fence, and the
-> connection demoted to a subscriber. **Nothing from §2 onwards is in the tree.**
-> `docs/sandbox-kit-design.md` is a **proposal** as well: its §1 describes the openheron process
-> as it is — one process with an HTTP/SSE server, the file tools and the shell tool sharing one
-> backend — while its §2 onwards describe packaging that whole process as a Docker Sandbox Kit,
-> so the boundary moves outward instead of inward and the read path is covered too.
-> **Nothing from §2 onwards is in the tree.**
+> `docs/run-lifecycle-design.md` covers the **run lifecycle** — a run as a durable row, a
+> lease with a fence, and the connection demoted to a subscriber. ★ **That one landed**:
+> §3-§9 are in the tree (`storage/runledger.go`, `storage/lease.go`,
+> `storage/memarbit/arbiter.go`, `agentkit/emit/`), the scan is the truth and the
+> notification is only a hint. §1 still describes the code as it was — a turn bound to one
+> SSE connection — so it reads as history.
+> `docs/sandbox-kit-design.md` describes the **Docker Sandbox Kit** — the openheron process
+> as it is (one process with an HTTP/SSE server, the file tools and the shell tool sharing
+> one backend) packaged as a Kit, so the boundary moves outward instead of inward and the
+> read path is covered too. ★ **That one landed as well**: the descriptors, the content
+> recipe, the entrypoint and the vendor mixins are in `sandbox-kit/`, `task kit` builds
+> them and the CI `kit` job publishes them. §4.2 still lists three decisions that are the
+> owner's to make.
 > `docs/fs-backend-design.md` describes the **filesystem backend** — the bounded fork of
 > `eino-ext`'s local backend (§5) and the confinement rule every tool passes through — and it is
 > **implemented**: `agentkit/fsx` is wired in at both call sites.
+> `docs/mcp-design.md` describes the **MCP integration** — the `mcps/` config partition, the
+> `mcp__<server>__<tool>` namespace, the tier that lives with the server's own file, and the
+> `/mcps` view. **It is implemented**: the partition, the provider, the manager and the endpoint
+> are all in the tree. ★ §13 — the non-blocking start, where every server keeps a state and
+> its tools join the next turn once the server is up — is implemented too. ★ §8 — how a
+> sandbox Kit packages an MCP server — is still a proposal.
+> `docs/config-design.md` describes the **configuration system** — the config root and its
+> three levels, the partitions and their file specs, loading and precedence, hot reload, and
+> the dependency iron rules. **Its body describes the code as it is**; the `mcps/` partition
+> (§6.7) and the tier that lives with the tool (§6.6) are implemented. ★ The prefix matching
+> in a **global deny** (§6.3) is gone with the deny list itself: "not exposed" is said by a
+> file's `allows:` and by an agent's `tools`.
+>
+> ★ `docs/logging-design.md` **is implemented**: the mutable level, `log_level`, the
+> composition root, the hertz adapter, the per-module injection and moving the request log
+> out of `llm/common` are all in the tree. §1 is the pre-change snapshot, kept to explain
+> why. It is a new Chinese-only document — unlike the eight above, it never had an English twin.
 >
 > ★ One directory is not a document set: **`sandbox-kit/`** holds the Docker Sandbox Kits that
 > package openheron as a sandbox workload — `openheron/` (the workload: descriptor, content
@@ -51,9 +102,9 @@ one — change one and change the other.
 > build it, change the descriptor, publish a version (`TUTORIAL_zh.md` and
 > `BUILDING_zh.md` are the Chinese versions), `sandbox-kit/acceptance/run.sh` is the
 > acceptance run — every claim the design makes, as a check that fails the script.
-> They are a **separate artifact**: `make release` still produces the six static
+> They are a **separate artifact**: `task release` still produces the six static
 > binaries and nothing else. Their design is `docs/sandbox-kit-design.md`, and
-> `make kit` builds them.
+> `task kit` builds them.
 >
 > Write these documents **from the code, not from imagination**: every conclusion must point at a
 > line in the code. When the code changes, the documents change with it — documentation drift is
@@ -62,10 +113,14 @@ one — change one and change the other.
 > A design that proposes something new may go past the code — but it must say so where the
 > description stops and the proposal starts, and label the proposal as not implemented.
 >
-> ★ **Both versions must stay in sync**: editing the English version means editing the `_zh`
-> version too, and vice versa. Code identifiers, line references, commands and paths must
-> correspond one to one — you can compare them set by set with
-> `grep -oP '`[a-zA-Z0-9_./:$-]+`' | sort -u`.
+> ★ **Both versions of a bilingual document must stay in sync**: editing the English version
+> means editing the `_zh` version too, and vice versa. That applies to the bilingual set —
+> `README.md`, `docs/architecture.md`, `docs/user-manual.md`,
+> `docs/developer-manual.md`, `sandbox-kit/TUTORIAL.md` and `sandbox-kit/BUILDING.md` —
+> and to nothing else: the Chinese-only documents have one version, so there is nothing to
+> keep in sync with. Code identifiers, line references, commands and paths must
+> correspond one to one — `task lint-docs` checks all six pairs, and you can compare them
+> set by set with `grep -oP '`[a-zA-Z0-9_./:$-]+`' | sort -u`.
 > ★ Note that the **backtick span has to match too**: `` `POST /v2/run` `` and `` `POST` `/v2/run` ``
 > say the same thing but yield different identifier sets — the comparison will report a
 > difference. Do not let "different phrasing" hide "different content".
@@ -77,13 +132,13 @@ notifications, and **interface copy**.
 
 | Scope | Rule | Example |
 |---|---|---|
-| Log | English | `obs.Logger().Info("[main] config updated", "version", v)` |
+| Log | English | `log.Info("[main] config updated", "version", v)` |
 | Error | English | `errors.New("query must not be empty")` |
 | Warning | English | `fmt.Fprintln(os.Stderr, "[config] hot reload failed, keeping previous config:", err)` |
 | Notification | English | `c.deferKey("watch.debounce fell back to default: %s", msg)` |
 | API response body | English | `c.JSON(400, map[string]string{"error": "thread not found"})` |
 | **Interface copy** | **English** | `"Run in a separate agent"` |
-| **Content written into user configuration** | **English** | the header of `catalog.md`, the comment block of `policy/limits.yaml` |
+| **Content written into user configuration** | **English** | the header of `catalog.md`, the comment block of `server/config.yaml`, the comment block of `tools/http.yaml` |
 
 ### Code comments
 
@@ -105,7 +160,7 @@ When you add comments, follow these rules:
   (counter-intuitive design trade-offs, pitfalls hit, pointers to upstream docs) must be
   translated **point by point**, not compressed into a single sentence. Keep the `★` markers —
   they mark "there is a trap here"; dropping them downgrades a warning to small talk.
-- **Point at upstream docs**: `docs/config-design.md`, `docs/api-v2-design.md` and the like are
+- **Point at the design docs**: `docs/config-design.md`, `docs/api-v2-design.md` and the like are
   the design basis; do not restate their content in comments.
 
 ### Outside that scope, Chinese stays
@@ -129,14 +184,26 @@ and it mixes two languages into the `deferred` field of `/v2/config`. Interface 
 story — the user reads the interface, not the source, and a Chinese/English mix makes "is this a
 bug or did I misconfigure it?" harder to answer.
 
-**There is exactly one log outlet**: `obs.Logger()` (`github.com/ouranoshong/openheron/agentkit/obs`).
-Do not call `log.Printf` / `fmt.Fprintln(os.Stderr)` directly in business packages — the level
+**There is exactly one logging assembly**, and it is not a global:
+`agentkit/obs` (`github.com/ouranoshong/openheron/agentkit/obs`) **builds** loggers — `New`,
+`ParseLevel`, `Discard` — and the composition root injects the one it built. Do not call
+`log.Printf` / `fmt.Fprintln(os.Stderr)` directly in business packages — the level
 (Info / Warn / Error) and the prefix are defined in one place, and the level decides whether a
 line shows up in the default output.
 
-There is exactly one exception: `llm/common` uses the standard logger — it is a leaf package with
-zero openheron dependencies, and importing `obs` would break that iron rule
-(`docs/architecture.md` §2.1, "the two dependency iron rules").
+`llm/common` used to write the request log with the standard logger; that code moved to
+`agentkit/obs/httplog` (`docs/logging-design.md` §6), so the leaf now logs nothing at all. Any
+openheron-internal import inside `llm/common` is still a regression.
+
+★ **There is no global logger.** `main.installLogger` builds one `*slog.Logger` around a shared
+`slog.LevelVar` and hands it to the frameworks and to every constructor. A package that needs to
+log takes a `*slog.Logger` parameter and defaults it to `obs.Discard()`; it does not reach for a
+package-level variable.
+
+★ The log's **destination** can move after startup: `obs.Sink` is the `io.Writer` behind the
+handler, and `log.file` points it at a file once the configuration is read
+(`docs/logging-design.md` §10). What moves is where the records go, not the logger — hertz and
+eino already hold that, and a process-global registry cannot be rewritten.
 
 ## Other conventions
 
@@ -152,15 +219,24 @@ zero openheron dependencies, and importing `obs` would break that iron rule
 - **Archival comes before presentation** — when the SSE sink breaks, stop rendering but keep
   consuming the event stream, otherwise `Outcome.Intermediates` is incomplete and the history
   has holes.
-- **`deny` beats `disabled_tools`** — the outer policy is the one guarantee a sub-agent cannot
-  relax.
-- Before changing configuration semantics, read upstream `docs/config-design.md`; before changing
+- **The default tier is `ask`** — a tool nobody names asks, and the exceptions are the tools
+  that run without a nod: the ones a file names in its own `allows:` list, and the built-in
+  readers the code knows. ★ "Not exposed" is said in exactly **two** places — a file's own
+  allow-list, and an agent's `tools` list. There is no global deny any more.
+- ★ **An agent's own lists are allow-lists, and they default to nothing.** `tools:` says
+  which tools the agent may use, `mcps:` which servers it mounts, `skills:` which skills it
+  loads — an absent key and an empty list mean the same thing. ★ The **tier table** is a
+  separate question and it is shared: a file's `allows:` says what runs without a nod, and
+  an agent's `tools` says what that agent may use at all. ★ The old `disabled_tools` key is
+  **refused** with a message that says which way round the two are — the meaning is
+  opposite, so renaming it alone would have turned a blacklist into a whitelist.
+- Before changing configuration semantics, read `docs/config-design.md`; before changing
   an interface, read `docs/api-design.md`; before adding a `/v2` endpoint, read
   `docs/api-v2-design.md`; before touching the frontend, read `docs/frontend-design.md`; before
   touching the test environment (ports / isolation directories), read `docs/frontend-design.md`
-  §11.2 and `docs/config-design.md` §5.2. **Those upstream documents are not in this
-  repository** — if you cannot get them, ask first. The `docs/architecture.md` /
-  `docs/user-manual.md` / `docs/developer-manual.md` shipped here (and their `_zh` Chinese
+  §11.2 and `docs/config-design.md` §5.2. ★ `docs/config-design.md` **is** in this repository;
+  the other three are upstream documents that are **not** — if you cannot get them, ask
+  first. The `docs/architecture.md` / `docs/user-manual.md` / `docs/developer-manual.md` shipped here (and their `_zh` Chinese
   versions) describe **this code surface** as it actually is — just read them.
   `docs/context-usage-design.md` covers context usage and compaction: the usage dashboard and
   compaction persistence are already in the code; read it before changing context-usage code.
@@ -194,6 +270,15 @@ docs(readme): drop the API table, it lives in the user manual
   or a selector in the store.
 - **Every interface change needs a Playwright spec** (reasons and acceptance requirements are in
   the "Testing" section below).
+- **The chat's width is one token, not a number repeated in six places.** `--chat-column`,
+  `--prose-column` and `--chat-gutter` live in `web/src/index.css`: the **blocks** (tables,
+  code, tool cards) take the whole column and the **prose** stops earlier, because a paragraph
+  of sixty characters is a hard read. ★ A table has a **floor** (7rem per column — that is
+  what makes a table of many columns scroll inside its own wrapper) and a **ceiling** (28rem
+  per cell — that is what makes a long sentence wrap instead of stretching the table).
+- **A color is a token, never a literal.** `sky-500` in a component is a bug: the status
+  colors are `--info`, `--warning` and `--success`, and the light and the dark palette are
+  **the same token set with two values** — so a color that exists in one exists in the other.
 
 ## Testing
 
@@ -213,37 +298,38 @@ file.
 
 | Command | Covers | Requires |
 |---|---|---|
-| `make test` | Full Go suite (`go test ./...`) | — |
+| `task test` | Full Go suite (`go test ./...`) | — |
+| `task test-race` | The same suite under the race detector (`go test -race ./...`) | — |
 | `cd web && bun run test:unit` | Pure-function layers (reducer / framing / store / highlighting) | — |
-| `make test-e2e` | Real browser + deterministic fake backend | nothing (it ships its own fake backend) |
-| `make test-install` | The release installer against a local fake release | nothing |
-| `make smoke` | Real-backend integration: SSE framing, history replay, approval wiring | **the test instance must be running** |
-| `make lint` | Go vet + gofmt + oxlint + tsc | — |
-| `make lint-go` / `make lint-web` | The two halves of `make lint`, for a job with only one toolchain | — |
-| `make check` | `lint` + `test`; run this before committing | — |
+| `task test-e2e` | Real browser + deterministic fake backend | nothing (it ships its own fake backend) |
+| `task test-install` | The release installer against a local fake release | nothing |
+| `task smoke` | Real-backend integration: SSE framing, history replay, approval wiring | **the test instance must be running** |
+| `task lint` | Go vet + gofmt + oxlint + tsc | — |
+| `task lint-go` / `task lint-web` | The two halves of `task lint`, for a job with only one toolchain | — |
+| `task check` | `lint` + `test` + `test-race`; run this before committing | — |
 
-★ **CI runs the repo's own commands**: `make lint-go` + `make test`, `make lint-web` +
-`bun run test:unit`, `make test-e2e`. The smokes are **not** in CI — they need a model
-that answers, and that is not reproducible on a runner. A `v*` tag publishes a release
-only after all three checks are green (developer-manual §3.9).
+★ **CI runs the repo's own commands**: `task lint-go` + `task test` + `task test-race`,
+`task lint-web` + `bun run test:unit`, `task test-e2e`. The smokes are **not** in CI — they
+need a model that answers, and that is not reproducible on a runner. A `v*` tag publishes a
+release only after all three checks are green (developer-manual §3.9).
 
 ★ **A `v*` tag also publishes the sandbox Kit.** The `kit` job waits for the same
 checks — the secret scan included — and then pushes the workload and every mixin to
 Docker Hub. It needs the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets.
 
-★ **Secrets are scanned twice.** The pre-commit hook (`make install-hooks`) scans the
+★ **Secrets are scanned twice.** The pre-commit hook (`task install-hooks`) scans the
 staged diff; the `secrets` CI job scans the whole history. A key that was committed
 before the hook existed is still in the history — only the CI scan finds that one.
 
 ★ **Never push to `main`.** It is protected: push a branch, open a pull request, and the
 owner merges. A merge publishes nothing — only a `v*` tag does.
 
-Start the test instance (a prerequisite of `make smoke`):
+Start the test instance (a prerequisite of `task smoke`):
 
 ```bash
-make test-env-backend   # foreground, :18099, separate config + separate session directory
-make test-env-reset     # rebuild the test directories only, do not start
-make test-env-sync      # ★ must run after you change agent definitions on the dev side
+task test-env-backend   # foreground, :18099, separate config + separate session directory
+task test-env-reset     # rebuild the test directories only, do not start
+task test-env-sync      # ★ must run after you change agent definitions on the dev side
 ```
 
 Single smoke scripts (they connect to :18099 by default, **no need to write `OPENHERON_BASE`**):
@@ -252,6 +338,7 @@ Single smoke scripts (they connect to :18099 by default, **no need to write `OPE
 cd web && bun run smoke:interop            # SSE framing, concatenation, history hydration
 cd web && bun run smoke:no-undefined-url   # never sends a malformed URL
 cd web && bun run smoke:hitl               # approval resume works end to end
+cd web && bun run smoke:config             # config_write's approval round trip (needs a prerequisite, below)
 ```
 
 ### Rules
@@ -262,7 +349,7 @@ cd web && bun run smoke:hitl               # approval resume works end to end
 - **E2E uses the fake backend — do not switch it to the real backend.** The real backend depends
   on model cooperation, and when it fails you cannot tell a broken interface from a model that
   did not obey; with `retries` on, failures become noise and after three rounds nobody reads
-  them. Protocol-level verification against the real backend is `make smoke`'s job; the two
+  them. Protocol-level verification against the real backend is `task smoke`'s job; the two
   complement each other.
 - **`smoke:hitl` is flaky, about 1 in 5** — it depends on the model *choosing* to call
   `write_file` to trigger an approval. That is the model's freedom, not a code regression; the
@@ -270,16 +357,16 @@ cd web && bun run smoke:hitl               # approval resume works end to end
   pretending the wiring is broken. Do not use retry counts to cover it up.
 - ★ **`smoke:hitl` has a prerequisite; without it the script fails 100% of the time (that is not
   "flaky")**: for **the agent that actually calls the tool**, its `write_file` must land in the
-  `ask` tier (neither globally `deny`-ed nor disabled by its own `disabled_tools`) — otherwise
-  the model cannot call that tool at all, and no approval can be triggered.
-  ★ Do not stare at `main`: the factory config does list
-  `disabled_tools: [write_file, edit_file, execute]` for `main`, but `main` only orchestrates and
-  **delegates** the work to `task`, whose `write_file` sits in the `ask` tier — the approval
-  still triggers. Observed event stream on 2026-10-29: `TOOL_CALL_START name=task` (the
-  sub-agent is invoked as a tool), then `TOOL_CALL_START name=write_file subagentRunId=task`;
-  the interrupted `subagentRunId` is `task` too.
+  `ask` tier (not named in its own file's `allows:`) **and** be in that agent's own `tools:`
+  list — otherwise the model cannot call that tool at all, and no approval can be triggered.
+  ★ Do not stare at `main`: the factory config gives `main` the readers and the delegation
+  tool, but `main` only orchestrates and **delegates** the work to `task`, whose `write_file`
+  sits in the `ask` tier — the approval still triggers. Observed event stream on 2026-10-29:
+  `TOOL_CALL_START name=task` (the sub-agent is invoked as a tool), then
+  `TOOL_CALL_START name=write_file subagentRunId=task`; the interrupted `subagentRunId` is
+  `task` too.
   To check whether a tier is reachable, look at **each** agent's effective tool table:
-  `curl -s :18099/v2/agents | grep -A3 disabledTools` and
+  `curl -s :18099/v2/agents | grep -A3 tools` and
   `curl -s :18099/v2/agents/task` (`effectiveTools` gives the tier and the reason).
   ★ `.openheron/` is **local untracked** configuration; changing it affects your own real
   agents (opening up `write_file` means that agent really can write files) — ask yourself
@@ -290,7 +377,7 @@ cd web && bun run smoke:hitl               # approval resume works end to end
   names the config root with `OPENHERON_CONFIG_DIR` — the config root **does not search
   upward**, so the one at the repository root is structurally unreachable. Ports and state must
   be isolated **together**.
-- **`make test-env-sync` is mandatory, not optional.** The test instance's
+- **`task test-env-sync` is mandatory, not optional.** The test instance's
   `agents/ llm/ policy/ skills/` are **copied** from the dev side; without syncing, a changed
   agent definition is not what gets tested.
 - **`pkill` needs `-x`; do not use `-f "bin/openheron"`.** `-f` matches the full command line
@@ -336,20 +423,33 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 
 ### Shipped here (maintained alongside the code surface)
 
+★ The **bilingual** set — English first, `_zh` second, and the two correspond one to one:
+
 | Document | Content |
 |---|---|
 | `README.md` / `README_zh.md` | **Project overview** — positioning, quick start, commands, configuration at a glance, HTTP reference |
 | `docs/architecture.md` / `docs/architecture_zh.md` | **Architecture** — layering and dependency direction, configuration system, assembly, run loop, storage, HTTP, frontend, knowledge base |
 | `docs/user-manual.md` / `docs/user-manual_zh.md` | **User guide** — installation, configuration, interface operation (for users, no internal design) |
 | `docs/developer-manual.md` / `docs/developer-manual_zh.md` | **Developer guide** — layering, dependency iron rules, development recipes, testing and troubleshooting, known issues |
-| `docs/context-usage-design.md` / `docs/context-usage-design_zh.md` | **Context-usage estimation design** — accounting rules, data flow, backend and frontend changes, persistence of compaction results and effective history (**the usage dashboard and compaction persistence are implemented**) |
-| `docs/session-concurrency-design.md` / `docs/session-concurrency-design_zh.md` | **Session concurrency design** — why cross-client preemption happened, the "one turn per session" rule and its implementation, and how the frontend learns that a session is busy (**the admission gate and the 409 are implemented**) |
-| `docs/fs-backend-design.md` / `docs/fs-backend-design_zh.md` | **Filesystem backend design** — why `eino-ext`'s local backend was forked into `agentkit/fsx`, how paths are confined to the project root, and how `ls`/`glob` are bounded (**implemented**) |
-| `docs/run-lifecycle-design.md` / `docs/run-lifecycle-design_zh.md` | **Run lifecycle design** — why a turn is bound to one SSE connection today, and how a run becomes a durable row with a lease and a fence, so the connection can be demoted to a subscriber (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
-| `docs/sandbox-kit-design.md` / `docs/sandbox-kit-design_zh.md` | **Docker Sandbox Kit packaging** — the openheron process as it is, a v3 workload Kit that would carry the whole process into a microVM, how the model key stays on the host, and the SSE path that has to be measured (**a proposal: §1 describes the code, §2 onwards do not exist yet**) |
 
-★ The file without a suffix is the **English main version**; `_zh` is the Chinese version; the two
-correspond one to one — change one and change the other.
+★ The **Chinese-only** set — one version each, and the file name carries no suffix:
+
+| Document | Content |
+|---|---|
+| `docs/context-usage-design.md` | **Context-usage estimation design** — accounting rules, data flow, backend and frontend changes, persistence of compaction results and effective history (**the usage dashboard and compaction persistence are implemented**) |
+| `docs/session-concurrency-design.md` | **Session concurrency design** — why cross-client preemption happened, the "one turn per session" rule and its implementation, and how the frontend learns that a session is busy (**the admission gate and the 409 are implemented**) |
+| `docs/fs-backend-design.md` | **Filesystem backend design** — why `eino-ext`'s local backend was forked into `agentkit/fsx`, how paths are confined to the project root, and how `ls`/`glob` are bounded (**implemented**) |
+| `docs/run-lifecycle-design.md` | **Run lifecycle design** — why a turn was bound to one SSE connection, and how a run became a durable row with a lease and a fence, so the connection could be demoted to a subscriber (**§3-§9 are implemented**: the ledger, the lease, the fence, the scan and the frontend) |
+| `docs/sandbox-kit-design.md` | **Docker Sandbox Kit packaging** — the openheron process as it is, a v3 workload Kit that carries the whole process into a microVM, how the model key stays on the host, and the SSE path that had to be measured (**the Kit is built and published**; §4.2 still holds three open decisions) |
+| `docs/mcp-design.md` | **MCP integration design** — the tool assembly path, what an MCP client adds to it, the `mcp__<server>__<tool>` namespace, prefix matching in the tool tables, and where an MCP server would run inside the Kit (**implemented**; §13 — the non-blocking start — is implemented too; §8 — how a sandbox Kit packages an MCP server — is still a proposal) |
+| `docs/config-design.md` | **Configuration system design** — the config root and its three levels, the partitions and their file specs, loading and precedence, hot reload, and the dependency iron rules (**the body describes the code as it is**; the `mcps/` partition and the tier that lives with the tool are implemented) |
+| `docs/tool-surface-design.md` | **Tool-surface design** — what tools an agent gets (`tools:` / `mcps:` / `skills:`), the MCP namespace's three segments, the configuration surface collapsed into one core, and the six `config_*` tools (**§2-§5 are implemented**) |
+| `docs/logging-design.md` | **Logging assembly refactor — design** — the composition root, a mutable `log_level`, injected loggers, taking over hertz's log output, and moving the request log out of `llm/common` (**implemented**) |
+| `docs/animation-design.md` | **Interface motion — design** — the motion tokens, the reduced-motion fallback, the brand mark's entrance, and the interface motions that are still a proposal (**§2.3, §3 and §4 are implemented**) |
+| `docs/attachment-design.md` | **Attachments — design** — how an uploaded file lands on disk, what the server does to it (the name carries a hash, pictures are compressed), and how the interface shows it |
+
+★ For the bilingual set, the file without a suffix is the **English main version**; `_zh` is the
+Chinese version; the two correspond one to one — change one and change the other.
 
 ### Upstream repository (not distributed with this repository)
 
@@ -364,7 +464,6 @@ overview and the index of the volumes.
 | `docs/hygiene-research.md` | **Code hygiene research** — exported symbols with no consumer, third-party archives, dead code (2026-10-23) |
 | `docs/agent-architecture-survey.md` | **Survey of external agent architectures** — the gateway and background-service problems of pi / rakazo / OpenClaw / Hermes / Letta (2026-10-24) |
 | `docs/positioning.md` | **Positioning and trade-offs** — expert per expert model × agent as a tool: mechanism breakdown and boundaries (2026-10-25) |
-| `docs/config-design.md` | Config schema, layering, validation, hot reload |
 | `docs/api-design.md` | The old unprefixed APIs (**retired on 2026-10-23 together with M3**, kept as history) |
 | `docs/api-v2-design.md` | The `/v2` API family and the AG-UI event contract |
 | `docs/frontend-design.md` | React frontend architecture and interface |

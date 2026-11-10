@@ -35,10 +35,12 @@ func (o Observed) Has(name string) bool {
 
 func reasonOf(l Layer) string {
 	switch l {
-	case LayerDeny:
-		return "policy.deny"
-	case LayerDisable:
-		return "disabled_tools"
+	case LayerNotLoaded:
+		return "tools"
+	case LayerNotMounted:
+		// ★ The key that decides it: an MCP tool is not in the agent's
+		//   tools: list, and never was — it is in the servers it mounts.
+		return "mcps"
 	default:
 		return ""
 	}
@@ -100,7 +102,10 @@ func (b *Builder) PolicyTools() []ToolVerdict {
 	obs := observedOf(rootTable)
 	names := toolNameUniverse(newBoundary(policy, rootTable), snap.cfg.EnabledToolNames(), subs, obs)
 
-	flat := newBoundary(policy, specTable(Policy{}, decl.SubAgentSpec{}))
+	// ★ The policy view carries **no agent's narrowing**: it is the tier
+	//   table on its own. ★ A nil table is what says "nothing is narrowed
+	//   here" — with an allow-list, an empty one would say the opposite.
+	flat := newBoundary(policy, nil)
 	out := make([]ToolVerdict, 0, len(names))
 	for _, n := range names {
 		out = append(out, verdictOf(flat, n, obs))
@@ -116,7 +121,9 @@ func verdictOf(b boundary, name string, obs Observed) ToolVerdict {
 		ObservedKnown: obs.Known,
 	}
 	if l := b.Table().Blocked(name); l != LayerNone {
-		v.Tier, v.Blocked = TierDeny, l
+		// ★ The tier stays what it is: a tool the agent does not get still
+		//   asks — it is this agent that cannot have it.
+		v.Blocked = l
 		v.Reason = reasonOf(l)
 	}
 	return v
@@ -124,7 +131,7 @@ func verdictOf(b boundary, name string, obs Observed) ToolVerdict {
 
 func toolNameUniverse(b boundary, enabled []string, subs []decl.SubAgentSpec, obs Observed) []string {
 	policy := b.Policy()
-	seen := make(map[string]bool, len(policy.Ask)+len(policy.Deny)+len(enabled))
+	seen := make(map[string]bool, len(policy.Allow)+len(enabled))
 	add := func(list []string) {
 		for _, n := range list {
 			if n != "" {
@@ -132,17 +139,20 @@ func toolNameUniverse(b boundary, enabled []string, subs []decl.SubAgentSpec, ob
 			}
 		}
 	}
-	add(policy.Ask)
-	add(policy.Deny)
+	// ★ The names that run without a nod are known from the configuration
+	//   alone, so they are part of the universe before the server is ever
+	//   up. The rest of a server's tools join it once they have been
+	//   observed.
+	add(policy.Allow)
 	add(enabled)
 	for name := range reservedToolNames {
 		add([]string{name})
 	}
 	if table := b.Table(); table != nil {
-		add(table.Disable)
+		add(table.Load)
 	}
 	for _, s := range subs {
-		addSpecDisabled(add, s)
+		addSpecTools(add, s)
 	}
 	add(obs.Names)
 
@@ -154,10 +164,10 @@ func toolNameUniverse(b boundary, enabled []string, subs []decl.SubAgentSpec, ob
 	return out
 }
 
-func addSpecDisabled(add func([]string), agentSpec decl.SubAgentSpec) {
-	add(agentSpec.DisabledTools)
+func addSpecTools(add func([]string), agentSpec decl.SubAgentSpec) {
+	add(agentSpec.Tools)
 	for _, s := range agentSpec.Sub {
-		addSpecDisabled(add, s)
+		addSpecTools(add, s)
 	}
 }
 

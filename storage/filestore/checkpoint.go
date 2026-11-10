@@ -5,13 +5,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/cloudwego/eino/adk"
 
-	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/persist"
 )
 
@@ -41,8 +41,16 @@ type fileCheckpointStore struct {
 	root       string
 	id         string
 	legacyRoot string
+	log        *slog.Logger
 
 	mu sync.Mutex
+}
+
+func (s *fileCheckpointStore) logger() *slog.Logger {
+	if s == nil || s.log == nil {
+		return discard
+	}
+	return s.log
 }
 
 // newfileCheckpointStore prepares the checkpoint store of one session.
@@ -62,7 +70,19 @@ func (s *fileCheckpointStore) setID(id string) {
 }
 
 // dir is where this session's checkpoints live.
+//
+// ★ The lock is not decoration. `setID` repoints the store at another session
+// while the run loop is loading a checkpoint — a GET /v2/sessions/:id reads
+// the transcript header and, if it disagrees with the directory, calls here.
+// A plain read of `s.id` while that write is in flight is a data race, and
+// the two goroutines hold different locks (`FileSession.mu` on one side), so
+// nothing else serialises them.
+//
+// ★ It is safe to lock here: every caller resolves its path **before** taking
+// s.mu, so the two never nest.
 func (s *fileCheckpointStore) dir() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return filepath.Join(s.root, s.id, ckptDir)
 }
 
@@ -90,7 +110,7 @@ func (s *fileCheckpointStore) Get(_ context.Context, checkPointID string) ([]byt
 			return nil, false, err
 		}
 		if found {
-			obs.Logger().Info("[checkpoint] read a checkpoint from the legacy directory",
+			s.logger().Info("[checkpoint] read a checkpoint from the legacy directory",
 				"session", checkPointID, "path", legacy)
 		}
 	}
@@ -185,11 +205,11 @@ func (s *fileCheckpointStore) legacyPath(checkPointID string) string {
 func (s *fileCheckpointStore) quarantine(path string, cause error) {
 	bad := path + ckptBadExt
 	if err := os.Rename(path, bad); err != nil {
-		obs.Logger().Error("[checkpoint] session is corrupt and quarantine failed",
+		s.logger().Error("[checkpoint] session is corrupt and quarantine failed",
 			"cause", cause, "err", err, "path", path)
 		return
 	}
-	obs.Logger().Warn("[checkpoint] session is corrupt; quarantined",
+	s.logger().Warn("[checkpoint] session is corrupt; quarantined",
 		"cause", cause, "path", bad)
 }
 

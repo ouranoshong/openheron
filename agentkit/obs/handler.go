@@ -33,9 +33,13 @@ const timeFormat = "2006/01/02 15:04:05.000000"
 // counter of the call site in the record, and that is what this prints — a
 // log line pointing into obs itself would be useless.
 type Handler struct {
-	w     io.Writer
-	mu    *sync.Mutex
-	level slog.Level
+	w  io.Writer
+	mu *sync.Mutex
+	// level is read through an interface, not captured as a value: the
+	// process's level has to move after the handler is built (the config is
+	// read later than the logger is assembled), and every copy made by With()
+	// has to move with it.
+	level slog.Leveler
 	// attrs are the ones With() collected; they lead the record's own.
 	attrs []slog.Attr
 	// group is the open WithGroup() prefix.
@@ -44,13 +48,28 @@ type Handler struct {
 
 // NewHandler builds a handler that writes to w and lets levels at or above
 // level through.
+//
+// ★ The fixed level is wrapped in a LevelVar rather than stored: callers that
+// only need one level keep the old signature, and the handler keeps a single
+// code path. Use NewHandlerWithLevel when the level has to move.
 func NewHandler(w io.Writer, level slog.Level) *Handler {
+	lv := new(slog.LevelVar)
+	lv.Set(level)
+	return NewHandlerWithLevel(w, lv)
+}
+
+// NewHandlerWithLevel builds a handler whose threshold is read from level on
+// every record, so a LevelVar can move it after construction.
+func NewHandlerWithLevel(w io.Writer, level slog.Leveler) *Handler {
+	if level == nil {
+		level = new(slog.LevelVar)
+	}
 	return &Handler{w: w, mu: &sync.Mutex{}, level: level}
 }
 
 // Enabled reports whether a level makes it into the output.
 func (h *Handler) Enabled(_ context.Context, level slog.Level) bool {
-	return level >= h.level
+	return level >= h.level.Level()
 }
 
 // Handle renders one record.

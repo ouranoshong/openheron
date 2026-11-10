@@ -29,7 +29,7 @@ sandbox-kit/
 ```sh
 sbx --version      # 0.42.0 or later
 docker --version
-bun --version      # the frontend toolchain: make kit runs make build
+bun --version      # the frontend toolchain: task kit runs task build
 ```
 
 ★ 版本下限不是装饰：0.42.0 修了 `CVE-2026-77179` 与 `CVE-2026-79994`
@@ -40,7 +40,7 @@ bun --version      # the frontend toolchain: make kit runs make build
 每个 Kit 目标都会在缺的时候建一个：
 
 ```sh
-make kit-builder
+task kit-builder
 ```
 
 ★ **为什么不用默认 builder。** `docker` driver 配经典镜像存储会丢掉
@@ -52,18 +52,18 @@ make kit-builder
 ## 2. 构建
 
 ```sh
-make kit         # the workload: openheron-kit:<version>
-make kit-mixin   # every mixin: openheron-kit-<vendor>:<version>
+task kit         # the workload: openheron-kit:<version>
+task kit-mixin   # every mixin: openheron-kit-<vendor>:<version>
 ```
 
-★ **`<version>` 就是 Makefile 里的 `KIT_VERSION`** —— 版本只住在那一处。
+★ **`<version>` 就是 Taskfile.yml 里的 `KIT_VERSION`** —— 版本只住在那一处。
 构建把它盖进描述文件与镜像 tag，所以本地拿到的镜像就是发布出去的那个。
 
 ★ 两者都会导出到本地 docker store。不导出的话本地就没有镜像可供校验，
-`make kit-check` 会去找一个从没导出的镜像。
+`task kit-check` 会去找一个从没导出的镜像。
 
-★ **二进制是在宿主上构建的，不是在镜像里。** `make kit` 先跑
-`make build` —— 前端、嵌进二进制的界面、这个仓库自己的代码 ——
+★ **二进制是在宿主上构建的，不是在镜像里。** `task kit` 先跑
+`task build` —— 前端、嵌进二进制的界面、这个仓库自己的代码 ——
 再把产物复制到配方旁边：
 
 ```dockerfile
@@ -73,7 +73,7 @@ RUN chmod 0755 /usr/local/bin/openheron
 
 ★ **两个后果。** 这个 Kit 带的是**当前源码**，而不是某个 release：
 不必等 release，镜像里的二进制自报的是 `git describe` 而不是 release tag。
-而且构建需要**前端工具链** —— `make build` 会跑 vite —— 所以构建一个 Kit
+而且构建需要**前端工具链** —— `task build` 会跑 vite —— 所以构建一个 Kit
 比"有 docker 就行"要多一些东西。
 
 ★ **二进制被复制到配方旁边**，是因为构建上下文够不到它被给到的目录之外：
@@ -89,7 +89,7 @@ RUN chmod 0755 /usr/local/bin/openheron
 ## 3. 校验
 
 ```sh
-make kit-check   # kit-tck validate against the specification
+task kit-check   # kit-tck validate against the specification
 ```
 
 ★ `kit-tck` 是规范仓库里的那套一致性测试。它读镜像，
@@ -106,7 +106,7 @@ sbx run ./sandbox-kit/openheron \
 ```
 
 ★ 本地目录就是一个合法的 Kit 引用，运行时按需构建它 ——
-所以这条路径根本不需要先 `make kit`。这是发布之前验证描述文件改动的办法。
+所以这条路径根本不需要先 `task kit`。这是发布之前验证描述文件改动的办法。
 
 ★ **`--kit` 在这里接的是目录，不是镜像。** 一个 mixin 目录里只有一个 YAML 文件、
 别无他物；运行时把这份纯声明构建成镜像。
@@ -120,7 +120,7 @@ sbx run ./sandbox-kit/openheron \
 ## 5. 发布
 
 ```sh
-make kit-push kit-push-mixin
+task kit-push kit-push-mixin
 ```
 
 ★ **mixin 有自己的仓库，而且必须如此**：一个 Kit 由它的引用来标识，
@@ -163,7 +163,7 @@ if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
 
 ★ **镜像的 tag 不带 `v`**：release 是 `v0.1.0`，Kit 是 `0.1.0`，
 所以指南里那个引用就是 tag。版本同时进到**已发布的描述文件**里 ——
-因为 `make kit` 是在 Kit 目录的一份副本里构建的、版本写在那份副本上，
+因为 `task kit` 是在 Kit 目录的一份副本里构建的、版本写在那份副本上，
 工作区永远不会被改脏。
 
 ★ **这个 Kit 是单架构的。** 二进制在 runner 上构建，所以镜像就是 runner 的
@@ -171,7 +171,7 @@ if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
 而现在这个是动态链接的。
 
 ★ **tag 就是版本，而版本就是 release。** Kit 的 `version` 参数是它安装的
-release tag，`make kit-push` 用同一个版本给镜像打 tag。
+release tag，`task kit-push` 用同一个版本给镜像打 tag。
 一个指向没人发布过的 release 的 Kit，就是没人构建得出来的 Kit ——
 所以先发 release，再推指向它的 Kit。
 
@@ -241,8 +241,7 @@ sandbox-kit/acceptance/run.sh
 ★ 它把整件事跑一遍 —— 前置检查、干净的沙箱、挂载上的配置、凭据、
 一次真实模型调用、流的形状、客户端的离去，以及从每个视角看端口 ——
 任何一项不过就非零退出。它跑出来的数字在
-[`docs/sandbox-kit-design_zh.md`](../docs/sandbox-kit-design_zh.md) §6.6
-（英文版是 [`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md)）。
+[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md) §6.6。
 
 ★ **跑批的那份记录不进版本库。** 它是运行产物：绝对路径、临时端口、
 帧数、模型自己的话 —— 每重跑一次都会与文档引用的数字对不上。
@@ -257,8 +256,8 @@ sandbox-kit/acceptance/run.sh
 | `kit-tck` 说找不到可校验的镜像 | 构建没有导出 —— `--load` 是必需的，它就在配方里 |
 | 镜像构建出来了，但运行时不认它是 Kit | manifest annotation 没了 —— 用 container driver 的 builder |
 | 构建时下载 404 | 那个版本指向一个从没发布过的 release |
-| 构建时报 `openheron: not found` | 二进制没被复制进去 —— `make kit` 会做这件事，
-所以用 `make kit` 构建，而不是直接调 buildx |
+| 构建时报 `openheron: not found` | 二进制没被复制进去 —— `task kit` 会做这件事，
+所以用 `task kit` 构建，而不是直接调 buildx |
 | `family "dual" is not supported yet` | 运行时还没实现它；把字段去掉 |
 | `spec.yaml (or spec.yml) is required` | `sbx kit pack` 是 **v1/v2** 的产物语法；v3 的 Kit 以 OCI 镜像或目录流传 |
 | `KVM error: Permission denied` | 服务那个 socket 的守护进程不是有 `/dev/kvm` 权限的那一个 —— 见设计的 §6.2 |
@@ -266,4 +265,5 @@ sandbox-kit/acceptance/run.sh
 ---
 
 这一切背后的设计，以及它依赖的每一条假设，都在
-[`docs/sandbox-kit-design_zh.md`](../docs/sandbox-kit-design_zh.md) 里。
+[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md) 里 —— 那篇文档只有中文，
+本仓库的设计文档都是这样。

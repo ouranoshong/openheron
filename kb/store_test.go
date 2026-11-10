@@ -12,9 +12,13 @@ import (
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	s, err := NewStore(filepath.Join(t.TempDir(), "docs"))
+	t.Cleanup(func() { _ = s.Close() })
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
+	// ★ The store keeps its run-lock file open; on Windows an open handle
+	//   stops TempDir from being removed.
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 
@@ -34,6 +38,7 @@ func reconcile(t *testing.T, s *Store, req ReconcileRequest) *ReconcileResult {
 func TestStoreRoundTrip(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "docs")
 	s, err := NewStore(dir)
+	t.Cleanup(func() { _ = s.Close() })
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -52,6 +57,7 @@ func TestStoreRoundTrip(t *testing.T) {
 	}
 
 	s2, err := NewStore(dir)
+	t.Cleanup(func() { _ = s2.Close() })
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -200,6 +206,7 @@ func TestSearchDuringReconcileIsSafe(t *testing.T) {
 func TestSidecarWrittenAfterCatalog(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "docs")
 	s, err := NewStore(dir)
+	t.Cleanup(func() { _ = s.Close() })
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -216,6 +223,7 @@ func TestSidecarWrittenAfterCatalog(t *testing.T) {
 		}
 	}
 	s2, err := NewStore(dir)
+	t.Cleanup(func() { _ = s2.Close() })
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -227,6 +235,7 @@ func TestSidecarWrittenAfterCatalog(t *testing.T) {
 func TestCorruptSidecarSelfHeals(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "docs")
 	s, err := NewStore(dir)
+	t.Cleanup(func() { _ = s.Close() })
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -239,6 +248,7 @@ func TestCorruptSidecarSelfHeals(t *testing.T) {
 	}
 
 	s2, err := NewStore(dir)
+	t.Cleanup(func() { _ = s2.Close() })
 	if err != nil {
 		t.Fatalf("reopen with a corrupt sidecar must not fail: %v", err)
 	}
@@ -253,6 +263,7 @@ func TestCorruptSidecarSelfHeals(t *testing.T) {
 func TestSidecarIndexVersionMismatchClearsVectors(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "docs")
 	s, err := NewStore(dir)
+	t.Cleanup(func() { _ = s.Close() })
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -266,6 +277,7 @@ func TestSidecarIndexVersionMismatchClearsVectors(t *testing.T) {
 	}
 
 	s2, err := NewStore(dir)
+	t.Cleanup(func() { _ = s2.Close() })
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -519,12 +531,14 @@ func TestReconcileCountsReEmbeddedVsUnchanged(t *testing.T) {
 func TestStoreRefreshesFromOtherProcess(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "docs")
 	s1, err := NewStore(dir)
+	t.Cleanup(func() { _ = s1.Close() })
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
 	reconcile(t, s1, ReconcileRequest{Fresh: []Entry{ent("a.md", "t", "s")}})
 
 	s2, err := NewStore(dir)
+	t.Cleanup(func() { _ = s2.Close() })
 	if err != nil {
 		t.Fatalf("second store: %v", err)
 	}
@@ -562,6 +576,7 @@ func TestStartRunIsExclusive(t *testing.T) {
 func TestStoreCloseReleasesRunLock(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "docs")
 	s, err := NewStore(dir)
+	t.Cleanup(func() { _ = s.Close() })
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -572,6 +587,7 @@ func TestStoreCloseReleasesRunLock(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 	s2, err := NewStore(dir)
+	t.Cleanup(func() { _ = s2.Close() })
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}

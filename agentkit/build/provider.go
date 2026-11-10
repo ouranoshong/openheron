@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"sort"
@@ -11,13 +12,23 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 
+	"github.com/ouranoshong/openheron/agentkit/obs/httplog"
 	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"github.com/ouranoshong/openheron/llm/common"
 )
 
-func FromConfig(ctx context.Context, root string, p *decl.Provider, m *decl.Model) (
-	model.ToolCallingChatModel, error) {
+// configuredRequestDump is the one place build reads the request-body switch:
+// a nil config (the env-only path) simply has no project default.
+func configuredRequestDump(c *spec.Config) bool {
+	if c == nil {
+		return false
+	}
+	return c.Server.LogRequests
+}
+
+func FromConfig(ctx context.Context, root string, p *decl.Provider, m *decl.Model,
+	log *slog.Logger, requestDump bool) (model.ToolCallingChatModel, error) {
 
 	if p == nil {
 		return nil, fmt.Errorf("llm: provider is nil")
@@ -34,17 +45,19 @@ func FromConfig(ctx context.Context, root string, p *decl.Provider, m *decl.Mode
 	}
 
 	cfg := &common.Config{
-		ProviderID:  p.ID,
-		APIKey:      p.APIKey,
-		BaseURL:     p.BaseURL,
-		HTTPClient:  &http.Client{Timeout: timeout},
+		ProviderID: p.ID,
+		APIKey:     p.APIKey,
+		BaseURL:    p.BaseURL,
+		HTTPClient: httplog.Wrap(&http.Client{Timeout: timeout}, p.ID, log,
+			httplog.WithRequestBodyDump(requestDump)),
 		HintKeys:    p.HintKeys,
 		ExtraFields: p.Extra,
 	}
 	if m != nil {
 		cfg.Model = m.ID
 		if m.Timeout.Duration() > 0 {
-			cfg.HTTPClient = &http.Client{Timeout: m.Timeout.Duration()}
+			cfg.HTTPClient = httplog.Wrap(&http.Client{Timeout: m.Timeout.Duration()}, p.ID, log,
+				httplog.WithRequestBodyDump(requestDump))
 		}
 	}
 
@@ -78,14 +91,14 @@ type CallIntent struct {
 	MaxTokens   *int
 }
 
-func BuildModel(ctx context.Context, c *spec.Config, ref string, in CallIntent) (
-	model.ToolCallingChatModel, error) {
+func BuildModel(ctx context.Context, c *spec.Config, ref string, in CallIntent,
+	log *slog.Logger) (model.ToolCallingChatModel, error) {
 
 	p, m, err := Resolve(c, ref)
 	if err != nil {
 		return nil, err
 	}
-	cm, err := FromConfig(ctx, c.ConfigRoot, p, m)
+	cm, err := FromConfig(ctx, c.ConfigRoot, p, m, log, configuredRequestDump(c))
 	if err != nil {
 		return nil, err
 	}

@@ -11,16 +11,12 @@ import (
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/events"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
-
-	"github.com/ouranoshong/openheron/agentkit/obs"
 )
 
-func captureLog(t *testing.T) (*bytes.Buffer, func()) {
+func captureLog(t *testing.T) (*bytes.Buffer, *slog.Logger) {
 	t.Helper()
 	var buf bytes.Buffer
-	prev := obs.Logger()
-	obs.SetLogger(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	return &buf, func() { obs.SetLogger(prev) }
+	return &buf, slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 }
 
 func retryEvent(attempt int) *adk.TypedAgentEvent[*schema.Message] {
@@ -34,15 +30,14 @@ func retryEvent(attempt int) *adk.TypedAgentEvent[*schema.Message] {
 }
 
 func TestAModelRetryIsAlsoVisibleInTheServerLog(t *testing.T) {
-	buf, restore := captureLog(t)
-	defer restore()
+	buf, log := captureLog(t)
 
 	evs := []*adk.TypedAgentEvent[*schema.Message]{
 		textEvent(assistantText("hello")),
 		retryEvent(1),
 		exitEvent(),
 	}
-	got, _, _ := runErr(t, evs, emit.Options{})
+	got, _, _ := runErr(t, evs, emit.Options{Logger: log})
 
 	customs := 0
 	for _, e := range got {
@@ -60,14 +55,13 @@ func TestAModelRetryIsAlsoVisibleInTheServerLog(t *testing.T) {
 }
 
 func TestANormalErrorDoesNotLogAModelRetry(t *testing.T) {
-	buf, restore := captureLog(t)
-	defer restore()
+	buf, log := captureLog(t)
 
 	evs := []*adk.TypedAgentEvent[*schema.Message]{
 		textEvent(assistantText("hello")),
 		{Err: errBoom{}},
 	}
-	runErr(t, evs, emit.Options{})
+	runErr(t, evs, emit.Options{Logger: log})
 
 	if strings.Contains(buf.String(), "model retry") {
 		t.Fatalf("an ordinary error must not be logged as a retry: %q", buf.String())

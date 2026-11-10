@@ -84,6 +84,55 @@ type Session interface {
 	Workspace() string
 	PutFile(name string, r io.Reader) (string, error)
 
+	// ResolveWorkspaceFile turns a name relative to this session's
+	// workspace into an absolute path inside it.
+	//
+	// ★ It is the **only** way the outside world may name a file in the
+	//   workspace. A name that escapes the workspace is refused, not
+	//   clamped: a clamped path would silently read a different file, and
+	//   the model would answer about the wrong thing.
+	//
+	// ★ The path is resolved, not checked for existence — the caller
+	//   decides what a missing file means.
+	ResolveWorkspaceFile(name string) (string, error)
+
+	// DeleteWorkspaceFile removes a file from this session's workspace.
+	//
+	// ★ The name is relative to the workspace, and a name that escapes it is
+	//   refused — the same rule as ResolveWorkspaceFile, and for the same
+	//   reason: a delete that lands outside would remove a file the session
+	//   never owned.
+	//
+	// ★ The granularity is the **file**, not the message. A file may be
+	//   referenced by several messages, and the attachment list of a
+	//   message is history — it is not a reference count to maintain.
+	DeleteWorkspaceFile(name string) error
+
+	// RecordUpload remembers the name a workspace file had before it was
+	// renamed.
+	//
+	// ★ A file is stored under a name that carries a hash of its own
+	//   content and time, so that two uploads of the same name do not
+	//   overwrite each other. The name the user recognises exists **only**
+	//   here — and the listing endpoint needs it, because the interface
+	//   shows names, not hashes.
+	//
+	// ★ The path is relative to the workspace, like every other name this
+	//   interface speaks.
+	RecordUpload(path, originalName string) error
+
+	// OriginalNames returns the map from workspace-relative paths to the
+	// names the files carried when they were uploaded.
+	//
+	// ★ It is a map, not a lookup, because the listing walks every file
+	//   in the workspace: one lookup per file would read the map once per
+	//   file.
+	//
+	// ★ It may be empty — a session whose files were never renamed has
+	//   nothing to map, and a file that was never renamed is simply not
+	//   in it.
+	OriginalNames() map[string]string
+
 	Init(agentID string) error
 	Delete() error
 	Meta() Meta

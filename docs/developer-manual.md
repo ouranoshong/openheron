@@ -19,11 +19,21 @@
 | Ports | see `.env.test` (repository root, committed) |
 
 ```bash
-make build-go     # backend only (no UI) — fastest while iterating on Go code
-make web-dev      # Vite dev server (:5173, proxies /v2 to :8080)
-make dev          # air: rebuild and restart the Go binary automatically
-make check        # lint + test — run this before committing
+task init          # create .openheron/ — the configuration the server reads (once per clone)
+task build-go     # backend only (no UI) — fastest while iterating on Go code
+task web-dev      # Vite dev server (:5173, proxies /v2 to :8080)
+task dev          # air: rebuild and restart the Go binary automatically
+task check        # lint + test — run this before committing
 ```
+
+★ **The server refuses to start without a configuration**: it reads exactly one
+config root — `$OPENHERON_CONFIG_DIR`, else `<project-root>/.openheron` — and
+reports `no configuration at <root>: run openheron init to create one` when it
+is empty. The repository ships `.openheron-example/` (the sample) but not
+`.openheron/` (the real one: it holds your own model and API key, so it is
+git-ignored). **`task init` is therefore the first command on a fresh clone.**
+It writes only the files that are missing and keeps the ones already there, so
+running it twice changes nothing.
 
 ## 2. Repository layout
 
@@ -65,16 +75,18 @@ one. The measured internal import graph:
 | Layer | Packages | Internal dependencies |
 |---|---|---|
 | **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `agentkit/fsx` `llm/common` `webui` | none |
-| **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` none; `storage`→`contract`; `kb`→`obs`,`persist`; `spec`→`obs`,`decl`,`kb`,`persist`; `emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
+| **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` none; `storage`→`contract`; `kb`→`obs`,`persist`; `spec`→`obs`,`decl`,`templates`,`persist`; `emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
 | **L2** | `agentkit/build` `agentkit/run` `storage/filestore` `storage/memarbit` `transport` `llm` `initcfg` | see architecture.md §2 |
 | **L3** | `api` | almost all of them |
 
 Two rules that **must not be broken**:
 
-**(1) There is exactly one log sink.** Do not call `log.Printf` /
-`fmt.Fprintln(os.Stderr)` directly in a business package; go through `obs.Logger()`.
-Levels and prefixes are defined in one place, `agentkit/obs/logger.go:18`, and the
-level decides whether a line shows up in the default output.
+**(1) There is exactly one logging assembly.** `agentkit/obs` **builds** loggers and the
+composition root injects the one it built — there is no global one to go through. Do not call
+`log.Printf` / `fmt.Fprintln(os.Stderr)` directly in a business package; take the
+`*slog.Logger` your constructor was given. Levels and prefixes are defined in one place —
+`agentkit/obs/logger.go:39` parses the level, `agentkit/obs/runid.go:22` builds the prefix —
+and the level decides whether a line shows up in the default output.
 
 A line reads the way hertz's logger writes it — the date, the time with microseconds,
 **the caller's file and line**, the level, then the message and the attributes:
@@ -89,23 +101,41 @@ handler cannot produce it (its envelope is a list of attributes, and the source 
 another attribute). ★ The file and the line are the **caller's**: slog captures the call
 site's program counter in the record, and that is what the handler prints.
 
-**The only exception is `llm/common`** — it is a leaf package with zero openheron
-dependencies, and importing `obs` there would break the "the protocol layer does not
-depend on the runtime" rule, so it uses the standard logger with the same flags
-(`llm/common/logging.go`). Its lines have the same envelope but **no level tag**:
-that package has no levels. Any openheron-internal import inside `llm/common` is a
-regression.
+**There is no exception any more.** `llm/common` used to write the request log with the
+standard logger; that code moved to `agentkit/obs/httplog`, so the leaf logs nothing and every
+line carries a level. Any openheron-internal import inside `llm/common` is still a regression.
+
+★ The composition root builds the logger around a shared `slog.LevelVar` and passes it down.
+There is no global logger: a package that logs takes a `*slog.Logger` parameter and defaults
+it to `obs.Discard()`. ★ **A module never reaches back for a global** — that is what makes
+`task test-race` meaningful, because a package-level variable swapped at runtime races with
+the background goroutines `Builder.Warm` and `Reloader.Watch` start.
 
 **(2) Declaration and behaviour are separate.** `agentkit/spec/decl` holds only plain
 structs and imports no other package; `agentkit/spec` holds the behaviour (loading,
 validation, reloading, writing).
 
+★ **The vocabulary the two halves share lives in `decl` too, and that is a
+dependency-direction fact, not a convenience.** The built-in tool names
+(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:319`) are read by **both** ends:
+the loader checks the names an agent's `tools:` list mentions against them, and the
+builder refuses a provider that claims one of them (`reservedToolNames`,
+`agentkit/build/tools.go:75`). Neither end may import the other — the loader sits
+below the builder — so the list cannot live in either of them: it lives **below both**,
+in the leaf package. ★ A second copy would be two lists that drift, and the drift
+would read as "that tool does not exist".
+
 ### 2.2 Do not duplicate assembly logic in the API layer
 
 When you need "the effective tool table of some agent", let `agent.Builder` expose a
 read-only query. **Do not** recompute `Table.Blocked` / `Policy.TierOf` in the API
-layer. The reason is plain: recomputation drifts — change the policy once and the API's
-answer and the runtime's answer stop agreeing.
+layer. The reason is plain: recomputation drifts — change the tier table once and the
+API's answer and the runtime's answer stop agreeing.
+
+★ **The two answer different questions, and the API layer must keep them apart.**
+`Policy.TierOf` answers "does this tool need a human?" and is the **same for every
+agent**; `Table.Blocked` answers "may this agent use it at all?" and is **per agent**.
+Recomputing either one is the same mistake twice.
 
 ## 3. Development recipes
 
@@ -114,7 +144,7 @@ answer and the runtime's answer stop agreeing.
 `agentkit/build/nettools.go` is the complete worked example, using `web_search`.
 
 1. **Implement the provider.** A tool provider is the `toolProvider` interface at
-   `agentkit/build/tools.go:19`:
+   `agentkit/build/tools.go:20`:
 
    ```go
    type toolProvider interface {
@@ -130,60 +160,219 @@ answer and the runtime's answer stop agreeing.
    Note that `Provide` returns a **batch** — one provider may supply several tools.
 
 2. **Register it.** Add your provider to `defaultToolRegistry` at
-   `agentkit/build/tools.go:29`. The position determines the order, and it also
+   `agentkit/build/tools.go:52`. The position determines the order, and it also
    determines how optional and required providers are told apart.
 
 3. **Optionality is decided by `Optional()`, not by returning an error.** A provider
    with `Optional() == true` logs a Warn and is skipped when it fails
-   (`tools.go:58-60`) — a missing API key must not stop the whole service from starting.
+   (`tools.go:101`) — a missing API key must not stop the whole service from starting.
    ★ But note that this Warn is the **only** notice: the tool silently does not enter
    the table, and the user will only notice that "this feature seems to be missing".
    Think hard about whether that Warn is enough when adding an optional provider.
 
 4. **The gate works on its own.** `agentkit/build/gate.go` filters the tool table with
-   the outer policy plus the inner `disabled_tools`. You write no permission code.
+   the agent's own `tools:` allow-list — the list that says which tools the agent may
+   use at all — and wraps **every tool the tier table does not name** behind an
+   approval. ★ The two are **different questions**: the allow-list is per agent, the
+   tier table is shared by every agent. ★ The default tier is `ask`, so the exceptions
+   are the named ones: the built-in tools the code knows (`agentkit/build/tools.go:62`)
+   and the ones a file's own `allows:` lists. You write no permission code.
 
-5. **Do not collide with a reserved name.** `reservedToolNames` at `tools.go:39` lists
-   `ls` `read_file` `write_file` `edit_file` `glob` `grep` `execute` `task`
-   `write_todos` `skill`. A collision fails at `Build` time.
-   The tool name is also the key in the policy table — a collision would point the
-   policy at the wrong tool.
+5. **Do not collide with a reserved name.** The names live in `decl.BuiltinToolNames`
+   (`agentkit/spec/decl/decl.go:319`): `ls` `read_file` `write_file` `edit_file` `glob`
+   `grep` `execute` `task` `write_todos` `skill`. A collision fails at `Build` time.
+   ★ **They live in `decl` and not in the build package because both halves need
+   them**: the builder refuses a provider that claims one of these names
+   (`reservedToolNames`, `agentkit/build/tools.go:75`), and the loader checks the
+   names an agent's `tools:` list mentions. Neither may import the other, so the list
+   lives below both.
+   The tool name is also the key in the tier table — a collision would point the
+   table at the wrong tool.
 
-6. **A collision across providers also fails**: `validateBatch` at `tools.go:76` tracks
+   ★ **A name that comes from a server is namespaced.** An MCP tool is exposed under
+   `decl.MCPToolPrefix` (`agentkit/spec/decl/decl.go:401`) and
+   `decl.MCPSeparator` (`agentkit/spec/decl/decl.go:410`), so the agent's table
+   narrows a whole server with a prefix instead of a list of names. ★ The composed
+   name is never parsed back: `Table.Blocked` (`agentkit/build/policy.go:130`)
+   matches prefixes, so nothing has to split a name to learn which server it
+   belongs to.
+
+6. **A collision across providers also fails**: `validateBatch` at `tools.go:118` tracks
    names in `seen`, so two providers offering the same tool name fail at startup
    instead of one silently overwriting the other.
 
+#### The MCP provider
+
+`mcpToolProvider` is registered like any other provider — `defaultToolRegistry`
+at `agentkit/build/tools.go:52` — and it answers the same `toolProvider` contract
+at `agentkit/build/tools.go:20`. Four things about it are not generic:
+
+- **The client outlives the batch.** ★ The batch is built once per snapshot:
+  `buildHeavy` runs under a `sync.Once` (`agentkit/build/snapshot.go:41`), so a
+  client owned by the provider would be torn down with the snapshot. The
+  **manager** owns the clients (`agentkit/build/mcpmanager.go:42`), and the
+  provider asks the manager for them (`agentkit/build/mcpmanager.go:89`).
+- **The names are namespaced, and composed in one place.** `mcpPlan`
+  (`agentkit/build/mcptools.go:68`) maps the server's own tool names to the
+  exposed names and their tiers, and the name itself is composed once, in
+  `mcpExposedName` (`agentkit/build/mcptools.go:141`). The provider and the
+  `/mcps` projection both go through `mcpPlan`, so they cannot disagree about
+  what a tool is called.
+- **The provider is optional, and the warning is the only notice.** An
+  unreachable server must not keep the agent down, so `Provide`
+  (`agentkit/build/mcptools.go:201`) logs a warning that names the server, the
+  transport and the error (`agentkit/build/mcptools.go:217`), and carries on
+  without that server's tools. ★ The warning is the only notice — the tools are
+  simply missing from the table, and the user sees "this feature seems to be
+  missing".
+- **The output is capped, and the stdio calls are serialized.** The cap lives in
+  the component's result handler (`agentkit/build/mcptools.go:343`), and the
+  calls of one stdio server go through `serialTool`
+  (`agentkit/build/mcptools.go:335`), which takes a per-server mutex and a call
+  deadline.
+
+#### The MCP client lifecycle
+
+For a developer who has to debug it:
+
+- **One client per server.** The manager holds one entry per server
+  (`agentkit/build/mcpmanager.go:42`), and the entry owns that server's client,
+  its listing and its per-server mutex.
+- **The start is single-flight.** `ensure`
+  (`agentkit/build/mcpmanager.go:215`) starts the client under a lock, so the
+  provider and the `/mcps` panel asking at the same moment get the same client
+  and the same child process. Two child processes for one server would make the
+  tools the model sees depend on which process answered.
+- **A crashed child is started again on the next call.** `markBroken`
+  (`agentkit/build/mcpmanager.go:290`) closes the client when the pipe broke,
+  and the next call starts a new one. ★ A call that runs out of time is **not**
+  a broken connection: the server may simply be slow, so a deadline gives up
+  without tearing the client down (`agentkit/build/mcptools.go:358`).
+- **A failed start does not hold the build.** The teardown of a failed start
+  waits for the child to exit, and a child that is still installing its own
+  package does not exit because its stdin closed — so `startStdioClient`
+  (`agentkit/build/mcpmanager.go:432`) kills the child
+  (`agentkit/build/mcpmanager.go:485`) and bounds the teardown
+  (`agentkit/build/mcpmanager.go:501`). ★ A build waits for a server, not for a
+  server's corpse: without the kill, a server that cannot be started takes the
+  turn down with it, and the client is told "turn start timeout" — a symptom
+  that names neither the server nor the reason.
+- **The start is a background job, and every server has a state.** The manager
+  starts the servers in the background (`Warm`, `agentkit/build/mcpmanager.go:123`)
+  and each entry carries one of four states (`mcpState`,
+  `agentkit/build/mcpmanager.go:297`): `not_started`, `starting`, `ready` or
+  `failed`. ★ `Tools` never waits — it answers `errMCPStarting` while the job is
+  in flight, and the provider skips the server **without** a warning: a server
+  on its way is not a broken server. ★ The tools a server brings join the
+  **next** turn: the job compares the listing before and after and moves the
+  generation when it changed (`runStart`, `agentkit/build/mcpmanager.go:450`).
+  ★ A failed start is retried, but not before the file's own `timeout:` has
+  passed (`mcpStartTimeout`, `agentkit/build/mcpmanager.go:328`) — a server that
+  cannot start must not be spawned in a loop.
+- **The tool list is re-listed when a turn asks for it**, and the previous
+  listing is older than 30 seconds (`agentkit/build/mcpmanager.go:36`,
+  `mcpRelistInterval`). ★ That interval is a fixed value, not a configuration
+  key: a knob nobody turns is a knob nobody tests, and a server's tool list
+  changes on the scale of days.
+- **A changed list bumps the generation.** `Refresh`
+  (`agentkit/build/mcpmanager.go:118`) reports whether a listing changed, and the
+  builder bumps the generation through the same hook the configuration reloader
+  uses (`agentkit/build/builder.go:67`). The refresh happens before the turn's
+  agent is assembled (`agentkit/build/builder.go:105`), because the batch is
+  built once per generation — a re-list inside the build would never run.
+
 ### 3.2 Adding a new configuration partition
 
-Say you want a new `mcp/` directory:
+Say you want a new `mcps/` directory:
 
-1. **`agentkit/spec/config.go`**: add the directory constant `DirMCP = "mcp"` and an entry
-   in `Categories` (with `ID`, `Label`, `Dir`, `Ext`). Keep **hot-reloaded** and
-   **non-hot-reloaded** directories clearly apart — whether a directory is hot changes
-   what users expect.
+★ That directory is no longer hypothetical — `docs/mcp-design.md` designs it (that
+  document is Chinese only, like every design document here), and the partition is in
+  the tree. The recipe below is the one it followed.
 
-2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`config.go:296`) and
+1. **`agentkit/spec/config.go`**: add the directory constant `DirMCP = "mcps"` and an entry
+   in `Categories` (with `ID`, `Label`, `Dir`, `Ext`, `Editable`). Keep **hot-reloaded**
+   and **non-hot-reloaded** directories clearly apart — whether a directory is hot
+   changes what users expect.
+
+2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`agentkit/spec/config.go:544`) and
    implement `loadXXX`.
+
+   ★ **Two shapes the recipe did not have before `skills/`.** A partition may be
+   **not loaded**: leave `loader` nil and the load loop skips it — that is for files read
+   by something other than the config layer (the skill backend reads `SKILL.md`), and
+   `Categories` is then the *surface* (manifest, path rules, editor) rather than the
+   loader's list. And a partition may be **nested** (`Category.Nested`):
+   `skills/<name>/SKILL.md`, one folder per entity, the folder name being the entity's
+   name. ★ Depth is not a free-for-all: `ValidateReadPath` refuses a path one level too
+   deep in every other partition, because the loader reads exactly one level and a file
+   two levels down would be saved and never loaded.
 
 3. **`agentkit/spec/decl/decl.go`**: add the plain declaration struct.
 
-4. **Hot reload comes for free**: `hotDirList()` at `agentkit/spec/config.go:76` filters
+4. **Hot reload comes for free**: `hotDirList()` at `agentkit/spec/config.go:114` filters
    the `Categories` whose `Hot()` is true — mark the category hot in step 1 and the
    watched set includes it automatically. **You do not** need to register it by hand in
    `reload.go` (and forgetting to would mean "config changes do not take effect, with
    no notice at all").
 
-5. **Write gate**: add it to the editable-section list in `api/v2_settings.go`.
-   A non-hot-reloaded section **must not** be in the editable list — otherwise the user
-   changes it in the UI, it only takes effect after a restart, and the UI says nothing.
+5. **Write gate**: mark the entry `Editable: true` in step 1 — ★ the **manifest** is
+   the truth, and the settings endpoint reads that flag (`api/v2_settings.go`); the
+   client takes the editable categories from the manifest rather than keeping a list
+   of its own. A non-hot-reloaded section **must not** be editable — otherwise the
+   user changes it in the UI, it only takes effect after a restart, and the UI says
+   nothing.
 
 6. **Defaults**: `agentkit/spec/defaults.go`.
 
 7. **Factory template**: `openheron init` writes the minimum runnable configuration, so
-   a new partition needs one too. Either add a file under `initcfg/templates/<dir>/` —
-   for the files only init produces — or reuse the scaffold the config editor already
-   has (`spec.ToolTemplates()` / `spec.LimitsTemplate()`). ★ **One file's content has
-   one source**: two copies of the same file are two copies that drift.
+   a new partition needs one too. Put the file under
+   `agentkit/templates/files/<dir>/` — ★ the **leaf** package both the command layer
+   (`initcfg`) and the configuration layer (`agentkit/spec`, which serves the editor)
+   can depend on — and read it from there. ★ **One file's content has one source**: two
+   copies of the same file are two copies that drift, and the copy is what the
+   dependency shape used to force. The section skeletons that are not files on disk
+   (the agents' frontmatter carries the available models) stay in
+   `spec.Skeleton(catDir, …)`.
+
+   ★ **init copies a partition by its directory, not by a list of file names.**
+   `initcfg`'s `copySection` asks the templates package what the partition holds
+   and copies what comes back — ★ so a template file that appears in
+   `agentkit/templates/files/<dir>/` is written by init without a line of Go
+   changing. ★ The llm/ partition is the one exception: its files are
+   alternatives (the provider's own template and the generic fallback), and a
+   partition of alternatives is not a partition to copy.
+
+#### The `mcps/` partition
+
+The `mcps/` partition is one file per MCP server, and the file's presence **is** the
+definition — there is no `enabled` key.
+
+- **Declared** by the constant `DirMCP = "mcps"` (`agentkit/spec/config.go:25`) and the
+  `Categories` entry (`agentkit/spec/config.go:66`), which is editable, hot and
+  `.yaml`.
+- **Loaded** by `loadMCP` (`agentkit/spec/load.go:329`): one file, one server.
+- ★ **"Hot" for this partition means the client is rebuilt.** The declaration is the
+  server's identity, so a changed declaration means a changed server: the old client
+  is torn down and a new one is started (`agentkit/build/mcpmanager.go:215`), keyed on
+  the declaration's fingerprint (`agentkit/build/mcpmanager.go:330`). ★ A hot partition
+  whose resources are not rebuilt lies about being hot.
+- **The write gate** refuses a name that could not be read back:
+  `validateFileName` (`agentkit/spec/write.go:166`) accepts only a `<server>.yaml` whose
+  name is a valid server name (`agentkit/spec/write.go:185`) — the file's name is the
+  server's name, and the server's name is the namespace segment of that server's tools.
+- **The scaffold** is `Skeleton` (`agentkit/spec/write.go:280`), and the `mcps/` branch
+  (`agentkit/spec/write.go:307`) writes a **loadable** file: ★ a file under `mcps/`
+  **defines** a server, so a file that cannot be parsed is not a server that is off, it
+  is a configuration that does not load. The optional fields are written as comments,
+  and the `command` is a placeholder that is not installed — so the server does not come
+  up, the log says so, and the agent carries on.
+- ★ **The scaffold is one file, and the leading underscore is what says it is not one to
+  install.** `agentkit/templates/files/mcps/_example.yaml` is the skeleton the
+  configuration editor hands out (`agentkit/spec/write.go`), and `openheron init` writes
+  the three servers that live beside it — `mcps/fetch.yaml`, `mcps/time.yaml` and
+  `mcps/deepwiki.yaml`. ★ The editor is served by the API and the API cannot import
+  `initcfg` — it would be a cycle — so the file lives in `agentkit/templates`, a
+  **leaf** both can depend on. ★ A copy would drift.
 
 ### 3.3 Adding an API route
 
@@ -197,7 +386,7 @@ Say you want a new `mcp/` directory:
    ```
 
 3. **Data sources.** To wire up a new source, add a `SetXxxSource` method on
-   `api.Server` (the pattern is `api/server.go:75`'s `SetSkillsSource`) and connect it
+   `api.Server` (the pattern is `api/server.go:113`'s `SetSkillsSource`) and connect it
    in `main.go`. **Do not** let a handler read a global variable directly.
 
 4. **Streaming.** The SSE sink lives in `transport`; `api` only writes the events out.
@@ -207,13 +396,103 @@ Say you want a new `mcp/` directory:
 
 Editing `agents/*.md` is enough; no code change is needed. But keep in mind:
 
-- `model` is **required** and never inherited. A wrong value is a startup error.
+- `model` is **required** and never inherited. ★ A model **nobody declares** is no longer
+  a startup error: the agent is **left out of the tree** and everything else loads
+  (`docs/config-design.md` §4.6). That includes the default agent — no session can start
+  until it is fixed, but the process does, and the editor that fixes it lives there.
 - An agent referenced by `subagents` must exist and must not form a cycle — both are
-  **startup errors**.
+  **startup errors**. ★ A sub-agent that was left out is dropped from its parents'
+  `subagents:` (`agentkit/spec/load.go:565`), so the delegation tool never offers a worker
+  that cannot run — and a `subagents:` entry pointing at such an agent is not a cycle or a
+  dangling reference, because the settled tree no longer mentions it.
 - Exceeding `max_depth` is a **startup error**, never a silent truncation.
+
+★ **The write gate is the other half of "left out".** `agentkit/spec/write.go:472` `checkNoAgentLost` compares the **settled** tree on disk with the **settled** trial tree and
+refuses a write, a batch or a delete that would take a working agent out. Without it,
+repointing an agent at a nonexistent model would remove it silently — which is exactly the
+failure the load-time rule stopped being. ★ Do not "simplify" it by comparing the raw
+file set: an agent that was already broken is out on both sides, and counting it as lost
+would make every unrelated edit fail.
+
+★ **The delete gate runs before the trial load.** `checkNotReferenced`
+(`agentkit/spec/write.go:706`) reads the tree as it is **now**, so it can refuse a delete
+that something still names — and the refusal names **who names it** and what to remove.
+★ It runs before the trial load because the trial load's error is the symptom it replaces:
+that error names the deleted file and hides the real reason somewhere else. ★ What the user
+has to change is the reference, not the deleted file.
+
+★ **An agent the change removes on purpose is not "lost"** (the `removed` parameter of
+`agentsLostBy`) — the gate asks "does an agent that used to work still work", and a user
+deleting an agent on purpose is another thing; without the two apart, no agent file could
+ever be deleted.
 
 The assembly logic is in `agentkit/build/assemble.go`; the validation logic is in
 `agentkit/spec/load.go`.
+
+#### ★ When the agent cannot be built, the turn has to be told
+
+`agentkit/run/loop.go:125` `makePrepareAgent` is where the builder is asked for this
+turn's agent — and where a configuration problem becomes a runtime one. ★ The error
+has to be handed to the turn (`turn.fail`): the framework records it and stops the
+loop, but nobody else marks the turn failed, so the waiter sat until the **start
+timeout** and the client was told "turn start timeout" — a symptom naming neither the
+file nor the model.
+
+The failure carries its own code (`agent_unavailable`, `transport/transport.go:43`) and the
+builder's own message (`agentkit/run/errors.go:57` `agentUnavailable`): the sentinel
+classifies, it does not prefix, so the user reads the reason once. ★ The same rule
+applies to the input assembly in `makeGenInput` — an error the framework records but
+nobody hands to the turn is an error the client never sees.
+
+#### The three lists on an agent
+
+`tools:`, `skills:` and `mcps:` are **allow-lists**, and **all three default to
+none** — an absent key and an empty list mean the same thing, and they mean "nothing".
+
+| Key | What it names | Absent means |
+|---|---|---|
+| `tools` | the **built-in** tools the agent may use — the **exposed** names, the ones the model sees | no tool |
+| `skills` | the skills the agent may load — the folders under `skills/` | no skill |
+| `mcps` | the MCP servers the agent **mounts** — each one starts a child process, and mounting one **hands the agent all of that server's tools** | no server |
+
+★ **Do not write `disabled_tools`.** It was the **opposite** of `tools` — one removed
+tools, the other names them — so the loader **refuses** the file
+(`agentkit/spec/load.go:99`) rather than renaming the key: renaming it alone would
+have turned a blacklist into a whitelist without saying so. The message says which way
+round the two mean. ★ **There is no alias**: an alias that still worked with the old
+meaning would keep the blacklist alive, and an alias that worked with the new one would
+flip the agent's tool set on the user's behalf.
+
+★ **The tool set is the snapshot's, and the list narrows it.** The snapshot's tools are
+one set for the whole snapshot; each agent's `tools:` list removes what that agent may
+not use (`agentkit/build/topology.go:72` `specTable`), and the model never sees a tool
+the list removed. ★ **There is no "nothing to do" shortcut**
+(`agentkit/build/policy.go:145`): an **empty** list removes **everything**.
+
+★ **MCP has one key, and mounting is the grant.** `mcps:` says which servers are
+**mounted** — and mounting one hands the agent **all of that server's tools**. ★ `tools:`
+is about the **built-in** tools only: an `mcp__<server>__*` entry there grants nothing, is
+dropped, and is reported as a **notice** (`agentkit/spec/load.go:836`
+`checkAgentMCPNames`) — not a load-time error, because the meaning changed rather than
+contradicting itself. ★ **The cost is real**: narrowing one agent's MCP tools is no longer
+possible — the server's own file filters them, and that filter is shared by every agent
+that mounts it. ★ **Approval is untouched**: an MCP tool's tier comes from that server
+file's `allows:`, and the default there is still `ask` — mounting is not approving.
+
+#### The three notices
+
+All three are **notices**, not errors — the configuration is legal, it just does not say
+what the author meant (`agentkit/spec/load.go:708` `noticeAgentTools`):
+
+| Notice | What it means | What to do |
+|---|---|---|
+| `tools` names a tool that does not exist | the built-in tools are the ones in `decl.BuiltinToolNames`, and a provider's tool exists only when its file under `tools/` is written | check the spelling; write the `tools/` file if the provider is missing |
+| `tools` names the `skill` tool but `skills` is empty | the agent can ask for a skill and there is none to load | name the skill in `skills:`, or drop `skill` from `tools:` |
+| `tools` names MCP tools | `tools` is the **built-in** allow-list; `mcps:` is what mounts a server **and** grants its tools | drop the `mcp__*` lines and put the server in `mcps:` |
+
+★ **An `mcp__*` name is skipped by the "does not exist" check**: a server's tools are
+discovered at runtime, so a name it does not have yet is not a typo. The MCP notice is a
+different one — it says the line does not do what it reads as.
 
 ### 3.5 Adding a vendor / model
 
@@ -281,7 +560,7 @@ it still protects that agent's window. The derivation only picks up the **root's
 | the finalizer | `finalize`, same file | the replacement history is the agent's system messages **plus the summary** — openheron's context prompt is a system message (`agentkit/run/input.go`), and dropping it would leave the agent without its rules for the rest of the turn |
 | the announcement | eino's `after_summarize` event | the middleware publishes the replacement history on the agent's event stream |
 | the pickup | `compactionFrom` in `agentkit/emit/emit.go` | the derivation reads the event and puts the compacted message on `Artifacts.Compaction` — the **summary**, not the system message that shares the replacement history |
-| the write | `archiveCompaction` in `agentkit/run/loop.go:182` | the message is appended to the transcript **before the turn's own messages** |
+| the write | `archiveCompaction` in `agentkit/run/loop.go:303` | the message is appended to the transcript **before the turn's own messages** |
 | the boundary | `message/compaction.go:103` | the marker rides on that message, so the transcript stays the single source of truth |
 
 ★ **The write order is not a detail.** The compacted message summarizes everything that came
@@ -324,7 +603,7 @@ and the message list draws a divider in place of the chat bubble
 (`web/src/components/message-list.tsx:101`, drawn by
 `web/src/components/compaction-divider.tsx`). A compaction that happens **mid-turn** is
 announced on the stream instead: the transport emits a `CUSTOM "context_compacted"` event
-(`transport/transport.go:590`) and the reducer puts a boundary into the list at once
+(`transport/transport.go:208`) and the reducer puts a boundary into the list at once
 (`web/src/lib/events.ts:412`).
 
 ★ The live event carries **no numbers**. The numbers — how many messages were superseded, how
@@ -436,12 +715,12 @@ the install gate in front of it.
 
 | Job | What it runs | Needs |
 |---|---|---|
-| `go` | `make lint-go` + `make test` | Go |
-| `web` | `make lint-web` + `bun run test:unit` | bun |
-| `e2e` | `make test-e2e` — the fake backend it ships with | bun + chromium |
+| `go` | `task lint-go` + `task test` + `task test-race` | Go |
+| `web` | `task lint-web` + `bun run test:unit` | bun |
+| `e2e` | `task test-e2e` — the fake backend it ships with | bun + chromium |
 | `secrets` | gitleaks over the whole history (§5.9) | — |
-| `install-script` | `make test-install` — the installer against a local fake release | — |
-| `release` | `make release`, then a **draft** GitHub Release | the four checks |
+| `install-script` | `task test-install` — the installer against a local fake release | — |
+| `release` | `task release`, then a **draft** GitHub Release | the four checks |
 | `install` | installs the assets of that draft on every platform we ship for | `release` |
 | `publish` | turns the draft into the public release | `install` |
 
@@ -456,14 +735,20 @@ assets the `release` job built, on every platform we publish for, and only then 
 readable with admin rights alone, while an annotation is readable from the API by
 anyone.
 
-★ **The smokes are not in CI.** `make smoke` needs a model that answers, and a model
+★ **The smokes are not in CI.** `task smoke` needs a model that answers, and a model
 that answers is not reproducible on a runner — a failure there would be noise, not a
 signal. The E2E is the deterministic half, and it is the half that can gate a release.
 
-★ **The commands are the repo's own.** CI calls `make lint-go` / `make test` /
-`make test-e2e` — the commands §5.2 lists — so the recipe lives in the Makefile and
-nowhere else. `make lint-go` and `make lint-web` are the two halves of `make lint`,
-split so that a job installs only the toolchain it needs.
+★ **The commands are the repo's own.** CI calls `task lint-go` / `task test` /
+`task test-race` / `task test-e2e` — the commands §5.2 lists — so the recipe lives in
+the Taskfile and nowhere else. `task lint-go` and `task lint-web` are the two halves of
+`task lint`, split so that a job installs only the toolchain it needs.
+
+★ **The race detector is a step of the `go` job, not a job of its own.** The branch
+protection already requires that job's name, so a step inside it is covered by the
+protection — a new job would be a check that nothing waits for, and a check nobody
+waits for is not a gate. For the same reason the job's **name** does not change: a
+renamed job is a new check name, and the old one goes missing.
 
 #### Cutting a release
 
@@ -522,7 +807,7 @@ To publish an existing tag again, run the workflow by hand and give it the tag.
 
 The two installers (`scripts/install.sh`, `scripts/install.ps1`) travel with the
 release, so `releases/latest/download/install.sh` always refers to the script
-that belongs to the binaries next to it. `make test-install` checks the installer
+that belongs to the binaries next to it. `task test-install` checks the installer
 against a local fake release: the download, the checksum gate (including a
 corrupted archive, which must install nothing), the install and the version
 check.
@@ -556,24 +841,24 @@ merge means "the code is on `main`", not "a binary exists".
 
 #### The Kit's version
 
-★ **The version lives in one place: `KIT_VERSION` in the Makefile.** Everything
+★ **The version lives in one place: `KIT_VERSION` in the Taskfile.** Everything
 else either gets it from there or does not name it:
 
 | Where | How it gets the version |
 |---|---|
-| `Makefile` — `KIT_VERSION ?= …` | **the source** |
+| `Taskfile.yml` — `KIT_VERSION: …` | **the source** |
 | `sandbox-kit/openheron/openheron.yaml` — `args.version.default` | stamped in by the build (`sed` on the staged copy) |
-| the published image tag | `$(KIT_VERSION)` |
+| the published image tag | `{{.KIT_VERSION}}` |
 | the guide (`sandbox-kit/TUTORIAL.md`) | it names `latest`, which CI points at the release |
 
 ★ **So a release is a pull request that touches two lines.** Open one that
-changes `KIT_VERSION` in the Makefile and `args.version.default` in the
+changes `KIT_VERSION` in the Taskfile and `args.version.default` in the
 descriptor, and nothing else: the guide says `latest`, and CI derives the tag
 from the version you tag.
 
 ```sh
 # the whole contract of a release pull request — $NEXT is the version you tag
-sed -i "s/^KIT_VERSION ?= .*/KIT_VERSION ?= $NEXT/" Makefile
+sed -i "s/^  KIT_VERSION: .*/  KIT_VERSION: $NEXT/" Taskfile.yml
 sed -i "s|^    default: .*|    default: \"$NEXT\"|" sandbox-kit/openheron/openheron.yaml
 ```
 
@@ -591,6 +876,196 @@ tells.
 
 ★ **The version tag is what a consumer pins.** `latest` moves; `0.0.7` does
 not. Both are published, and the tutorial says which to use when.
+
+### 3.10 ★ Putting something on a message
+
+A message carries more than its text: an id, a compaction marker, an attachment
+list. All of it rides in `message.Extra`, and there are **four rules** that
+are not obvious until they have bitten.
+
+**1. The value in `Extra` must be on gob's allow-list.** `Extra` is encoded
+with gob when the checkpoint is written, and gob cannot encode a value of an
+unregistered type inside an interface. A `[]message.Attachment` therefore fails
+the checkpoint write **at stop time** — long after the code that put it there
+looked fine — and leaves a half-written approval behind. The allow-list is
+`string` / `int64` / `int` / `bool` / `float64` / `[]byte`.
+
+★ **So a structured value is stored as JSON bytes**, and the reader accepts
+every shape it can meet: the bytes this package writes, the **base64 string**
+they become after a JSON round trip (JSON encodes `[]byte` as a string — and
+the transcript is JSON), and the struct slice a caller may have put there
+directly.
+
+**2. The stamp is written once.** `message.put` is write-once, deliberately: a
+message's identity is decided when it is born, and a message that is stamped
+again on its way through the pipeline keeps what it was born with.
+
+**3. The model must see the object the transcript holds.** The turn's user
+message is **built first and persisted second** (`agentkit/run/loop.go`):
+`buildInput` receives the message object, and `sess.Append` happens after it
+succeeds. ★ The other order has a hole — `Append` only logs its failure, so a
+failed append would leave the model with a question it never saw. The same
+ordering is what lets the attachment list reach the model: it is stamped on
+the one message, and the model is handed that one message.
+
+★ **A message has an id of its own** (`message/identity.go`). The derived id
+that `api/v2_convert.go` falls back to mixes the content with the message's
+**position**, so inserting a compaction marker in front of it renumbers it — and
+the frontend, which keys its messages by this id, would rebuild the whole
+conversation on every compaction. The fallback is what makes it safe to ship:
+a transcript written before messages carried ids still gets a usable id,
+derived exactly as before.
+
+★ **And a message may not carry its text and its multimodal parts at the same
+time.** The wire has one `content` field: it is either a string or a list. The
+openai adapter fills `Content` from `inMsg.Content` **and** builds
+`MultiContent` from the parts, so a message with both is refused by the client
+before it is even sent —
+
+```
+can't use both Content and MultiContent properties simultaneously
+```
+
+★ The text therefore moves into a **text part** and `Content` is cleared. And
+the message the model sees is a **copy** in that case: the transcript's message
+keeps its text and never carries the base64 of a picture (the transcript is a
+JSONL log with an 8 MiB line limit, and a 2 MiB picture is 2.7 MiB of base64).
+★ **This only shows up against a real model** — the fake backend does not
+serialize, and the Go tests never reach the adapter. It belongs to
+`task smoke`, not to CI.
+
+**4. The shape is settled at the wire, not in the assembly.** The rule above
+governs the message **this turn** assembles. The history is durable data, and it
+carries whatever shape it was written with: a session recorded before the
+assembly learned to move the body holds a message with a `Content` **and** a
+picture part, and that message fails the rule above every single time it is
+loaded. ★ A session cannot rewrite its own history, so the repair has to happen
+on the way out — and it has to happen for **every** message, not only for the
+one this turn produced.
+
+`llm/common/shape.go` (`normalizeWireShape`) settles it in `Generate` /
+`Stream`, just before the request is handed to the adapter: the body moves into
+a **text part**, `Content` is cleared, and the deprecated `MultiContent` is
+emptied rather than merged. ★ The parts are the richer shape — they can carry a
+picture, and a picture without its body is a picture the model cannot place.
+The original message is left alone: the copy on the wire is the only one that
+changes, and it shares the `Extra` map, so the id and the attachment list ride
+along.
+
+★ One more rule lives at the same boundary. A turn that ends after reasoning
+only — a thinking budget that ran out, or a stream cut short — is persisted
+with an empty `Content`, no `tool_calls`, and a `ReasoningContent`. The client
+declares `content` as `omitempty`, so the message goes out with no `content`
+and no `tool_calls` at all, and the endpoint refuses the whole request
+("content or tool_calls must be set"). `normalizeWireShape` therefore also
+calls `withVisibleAssistantContent`: it puts `noVisibleResponseText` in the
+copy's `Content`, says what happened instead of inventing an answer, and leaves
+the transcript and its reasoning alone. An assistant message with `tool_calls`
+is already legal and is passed through untouched.
+
+### 3.11 ★ Where an uploaded file lands
+
+An upload becomes a file in the session's workspace, and **two decisions are
+made at that moment**: whether it is compressed, and what it is called.
+
+**The name carries a hash.** A file is stored as `<original name>-<8 hex
+characters><extension>`, where the hash is `sha256` of the original name, the
+stored size and the modification time, separated by `0x00`.
+
+★ **Why:** the same name uploaded twice must not overwrite. An overwrite makes
+the transcript lie — the first message's attachment list names a file that is
+now the second one. ★ The hash is what makes the name unique; the original
+name is kept in front of it so that a human can still recognise the file.
+
+★ **The hash can be recomputed.** Read the file, stat it, hash the three
+inputs, and the name checks out. ★ That works because the modification time
+is **pinned**: `os.Chtimes` sets it to the moment of the upload, so the
+time in the hash and the time on the file are the same value. ★ The time is
+milliseconds, not nanoseconds — FAT32 has a two-second granularity, and a
+nanosecond hash cannot be recomputed on it.
+
+★ **The original name is remembered beside the session**, in `uploads.json`
+next to the transcript — **not inside the workspace**, which is the directory
+the model reads. The listing endpoint uses it to show the name the user typed;
+without it the interface would show a list of hashes.
+
+**A picture is compressed on the server.** `agentkit/imaging` does it:
+`Compress` scales the longest edge down to 1600 pixels and re-encodes **in the
+same format** — a PNG stays a PNG, transparency intact. ★ It is done on the
+server because that is where the gain lands: the base64 that goes into the
+request is encoded from the compressed bytes.
+
+★ **Three things are deliberately left alone.** A **GIF** is stored as it is —
+decoding one takes the first frame, so re-encoding it would throw the
+animation away. A **WebP** is stored as it is — there is no WebP encoder in
+Go. And a **JPEG's EXIF orientation** is applied before scaling, because Go's
+JPEG encoder writes no EXIF and a phone photo would come out sideways; the
+orientation is read with `github.com/rwcarlsen/goexif` and the picture is
+turned upright first.
+
+**The bytes are served by one endpoint**, `GET /v2/sessions/:id/files/raw`,
+which resolves the name inside the workspace and answers in one of four
+shapes:
+
+| Kind | Answer |
+|---|---|
+| A picture | its own image type, inline; `?max=<pixels>` scales it on the way out |
+| A PDF | `application/pdf`, inline |
+| Text | **`text/plain; charset=utf-8`**, inline |
+| Anything else | `application/octet-stream`, as a download |
+
+★ **The text rule is the one that matters.** A file named `.html` or `.svg` can
+carry a script, and a browser that renders it as a document — or as an image —
+runs that script **on this origin**. ★ So the server never interprets the
+content: it hands the bytes over and names a type that means "this is
+characters". The interface renders Markdown and code itself, so nothing is
+lost by it. ★ `image/svg+xml` is therefore not a picture here, and
+`agentkit/imaging` treats an SVG as text for the same reason.
+
+★ The only boundary is the workspace: the path is resolved by the session,
+and a name that escapes it is refused.
+
+### 3.12 ★ How an uploaded file reaches the model
+
+★ **A non-picture text file is not inlined.** The model's copy of the user
+message starts with one `@` line per file, holding the path in its
+**absolute** form:
+
+```text
+@"<workspace>/notes-a1b2.md"
+
+what does it say?
+```
+
+★ The path is absolute because `agentkit/fsx/fsx.go` resolves a relative
+`path` against the project root, not the session workspace: a
+workspace-relative name would send `read_file` to the wrong file. A path
+containing whitespace is quoted, and the context prompt tells the model to
+drop the quotes.
+
+★ The header is a **view**, not a rewrite. The transcript keeps the user's
+own words and the workspace-relative `path` in `Extra`
+(`openheron_attachments`); the client renders `UserText` and the attachment
+chip from metadata. The header is rebuilt for history messages too, so "that
+file you just sent" still names a file one turn later.
+
+**Pictures still become image parts.** `inlineImage` reads the bytes at
+request time and `maxInlineImageBytes` bounds them. A picture over the limit,
+or a binary attachment (a PDF, an archive), is named in the prompt as
+"cannot be processed yet" — it gets no `@` path, because `read_file` on bytes
+that are not text produces noise.
+
+★ **There is no fallback chain.** `llm/common/model.go` sends one request.
+An endpoint that refuses a picture fails the turn with its own error; the
+user retries with a different model or wording. `llm/common/files.go` and
+`llm/common/vision.go` were removed together with the file-block and retry
+path.
+
+★ The context prompt (`agentkit/run/input.go`) makes reading an obligation:
+`MUST call read_file` on every `@` path, and for a large file read it in
+chunks with `offset` and `limit` — the tool returns at most 2000 lines per
+call. If the model did not open the file, the user prompts it again; there is
+no automatic second attempt.
 
 ## 4. The frontend
 
@@ -716,7 +1191,41 @@ the DOM is not the problem and virtualization would buy nothing.
 - `vite.config.ts`: `@` → `src`; dev port `5173` (`15173` in test mode),
   `strictPort: true`; `/v2` is proxied to `OPENHERON_API_TARGET`.
 - `web/dist` is embedded into the binary with `go:embed` (`webui/webui.go`).
-- `make build` builds the frontend first, then the Go binary.
+- `task build` builds the frontend first, then the Go binary.
+
+### 4.6 ★ The layout tokens and the theme
+
+★ **The width of the chat is one token, not a number repeated in six places.**
+`web/src/index.css` defines three:
+
+| Token | What it is |
+|---|---|
+| `--chat-column` | the column the conversation lives in (64rem) |
+| `--prose-column` | the width the **text** inside it stops at (46rem) |
+| `--chat-gutter` | the space on both sides of the column |
+
+★ The two widths are different **on purpose**. The column is wide so that a table or a code
+block fits whole; a paragraph of sixty characters is a hard read, so the prose stops
+earlier. The **blocks** take the whole column and only the text is held back — which is why
+the cap sits on the text elements (`markdown.tsx`'s `PROSE`) and not on the message bubble.
+
+★ A table has **two** limits, and they answer different questions: a **floor** of 7rem per
+column is what makes a table of many columns overflow and scroll inside its own wrapper, and
+a **ceiling** of 28rem per cell is what makes a long sentence wrap inside its cell instead of
+stretching the table. ★ A table with no ceiling is a table as wide as its longest cell, and a
+cell with no floor is a column squeezed into a sliver.
+
+★ The **theme** is decided **before the first paint**, by a script in `web/index.html`, and
+read from one place — `web/src/lib/theme.ts`. A component that needs it subscribes with
+`useSyncExternalStore`; the settings editor's CodeMirror theme follows it too, so a switch
+while the editor is open repaints it.
+★ The CodeMirror editor is given `theme="none"` on purpose: the library's default is
+`theme="light"`, which paints the editor **white**, and that rule sits **after** ours in the
+stylesheet — so it won, and the dark theme had white text on a white background. The editor
+takes its colors from the app's tokens instead.
+★ The light and the dark palette are **the same token set with two values**, so a color that
+exists in one exists in the other — and a hard-coded `sky-500` in a component is a bug: the
+status colors are `--info`, `--warning` and `--success`.
 
 ## 5. Testing
 
@@ -743,25 +1252,26 @@ To change a port, change only that one file.
 
 | Command | Covers | Requires |
 |---|---|---|
-| `make test` | All of Go (`go test ./...`) | — |
+| `task test` | All of Go (`go test ./...`) | — |
+| `task test-race` | The same suite under the race detector (`go test -race -count=1 ./...`) | — |
 | `cd web && bun run test:unit` | The pure layers (reducer / framing / store / highlighting) | — |
-| `make test-e2e` | A real browser + a deterministic fake backend | nothing (it brings its own fake backend) |
-| `make smoke` | Real-backend integration: SSE framing, history replay, approval wiring | **the test instance running, and a reachable model** |
-| `make lint` | Go vet + gofmt + oxlint + tsc | — |
-| `make lint-go` / `make lint-web` | The two halves of `make lint`, for a job that only has one toolchain | — |
-| `make check` | `lint` + `test` — run this before committing | — |
-| `make install-hooks` | Install the pre-commit hooks (gitleaks + gofmt) | `pre-commit` |
+| `task test-e2e` | A real browser + a deterministic fake backend | nothing (it brings its own fake backend) |
+| `task smoke` | Real-backend integration: SSE framing, history replay, approval wiring | **the test instance running, and a reachable model** |
+| `task lint` | Go vet + gofmt + oxlint + tsc | — |
+| `task lint-go` / `task lint-web` | The two halves of `task lint`, for a job that only has one toolchain | — |
+| `task check` | `lint` + `test` — run this before committing | — |
+| `task install-hooks` | Install the pre-commit hooks (gitleaks + gofmt) | `pre-commit` |
 
 To start the test instance:
 
 ```bash
-make test-env-backend   # foreground, :18099, its own config + its own session directory
-make test-env-reset     # only rebuild the test directories, do not start
-make test-env-sync      # ★ must be run after you change the development-side agent definitions
+task test-env-backend   # foreground, :18099, its own config + its own session directory
+task test-env-reset     # only rebuild the test directories, do not start
+task test-env-sync      # ★ must be run after you change the development-side agent definitions
 ```
 
-★ **`make test-env-sync` is mandatory, not optional** — the test instance's
-`agents/ llm/ policy/ skills/` are **copied** from the development side, so change an
+★ **`task test-env-sync` is mandatory, not optional** — the test instance's
+`agents/ llm/ tools/ skills/` are **copied** from the development side, so change an
 agent without syncing and you are still testing the old definition.
 
 ★ **The smokes need a model that answers.** They run a real turn against the
@@ -778,6 +1288,7 @@ Individual smoke scripts (they connect to :18099 by default, so **you do not wri
 cd web && bun run smoke:interop            # SSE framing, concatenation, history hydration
 cd web && bun run smoke:no-undefined-url   # no malformed URLs are emitted
 cd web && bun run smoke:hitl               # the approval resume path works
+cd web && bun run smoke:config             # config_write's approval round trip (see (8) below)
 ```
 
 ### 5.3 Go unit tests
@@ -787,7 +1298,7 @@ cd web && bun run smoke:hitl               # the approval resume path works
 | Package | Contract it pins |
 |---|---|
 | `agentkit/spec` | Config root resolution, strict frontmatter decoding, depth validation, cycle detection, write gates |
-| `agentkit/build` | Tool assembly, policy tiers, the gate, topology, nested resume, the skill scope |
+| `agentkit/build` | Tool assembly, the allow/ask tier table, the gate, topology, nested resume, the skill scope |
 | `agentkit/run` | Input construction (a sub-agent's messages do not mix into the parent's history), event bridging |
 | `api` | Routing, SSE frames, the error envelope, `threadId` being required |
 | `kb` | Indexing, scoring, the catalog format (including legacy Chinese header compatibility) |
@@ -795,6 +1306,16 @@ cd web && bun run smoke:hitl               # the approval resume path works
 | `transport` | Event types, attribution, per-agent usage accounting |
 | `initcfg` | The completeness of the factory templates |
 | `agentkit/fsx` | The write boundary (including symlink escapes), the `ls`/`glob`/`grep` caps, and absolute glob patterns |
+
+★ **Run the race detector too**: `task test-race` (`go test -race ./...`). The plain
+  suite is green while the detector is red more often than one would like — a race
+  needs two goroutines to meet, and the plain suite does not care when they do.
+  The three production races it caught (2026-11-06) were all the same mistake:
+  **the lock was there, and one path did not go through it.** A mutex in the middle
+  of a struct reads as "it guards the fields below it", and that reading is how
+  `FileSession`'s identity fields ended up outside the protection. ⇒ When you add
+  a field to a type that has a lock, write down what the lock covers — next to the
+  lock — and make every read and write of that field go through it.
 
 ### 5.4 The knowledge-base corpus convention (`docs/`)
 
@@ -832,9 +1353,29 @@ the contract on its own — the extractor does not read one language to help the
 
 ### 5.5 Frontend unit tests
 
-`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **14 test files, 271
+`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **22 test files, 284
 cases**, covering the pure layers: `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
-`thinking.ts` / `turns.ts` / `approval.ts` / `settings-validate.ts` and friends.
+`thinking.ts` / `turns.ts` / `approval.ts` / `settings-store.ts` and friends.
+
+★ **The client keeps no configuration rules at all.** It used to: a copy of the
+partition table, the tools/ file whitelist, the MCP server-name pattern, and a per-key
+scan of every file, written when validation was synchronous. The server has always known
+the line numbers — yaml.v3 reports them — so the copy earned nothing but drift, and it
+had drifted (`corpus` where the loader says `corpus_dir`). `settings-validate.ts` is now
+string shaping and rendering: `issueLine`, `suggestPath`, `resolveTemplate`.
+
+★ **What replaced it is a round trip with a stamp.** An edit schedules one question 250 ms
+after the typing stops (`web/src/lib/settings-store.ts:240` `scheduleValidate`), and a
+save asks again immediately and cancels the pending one. Every reply is stamped
+(`:229` `validateSeq`): a reply that is no longer the newest, or no longer about the
+selected file, is dropped — otherwise the slower of two answers wins, which is the one
+about text the user has already changed.
+
+★ **A rule that was the client's moved to the server rather than disappearing.** An
+agent's `reasoning` level is checked against the model's declared vocabulary in
+`agentkit/spec/load.go:668` `checkReasoning` — where every file passes, not only the
+edits made in the settings editor. ★ Deleting a client rule is only a simplification if
+the server already has it; that is the question to ask of the next one.
 
 ★ `store.test.ts` exercises the **whole zustand store**, so it stubs
 `globalThis.localStorage` and `globalThis.fetch` before running
@@ -847,8 +1388,9 @@ do not touch" assertions.
 
 ### 5.6 E2E
 
-`make test-e2e` → `playwright test`, **8 specs, 124 cases**: `chat` `multi-agent`
-`agents` `composer-meta` `composer-autocomplete` `settings` `history` `scroll`.
+`task test-e2e` → `playwright test`, **15 specs, 194 cases**: `agents` `attachments` `chat`
+`compaction` `composer-autocomplete` `composer-meta` `history` `mcps` `motion` `multi-agent`
+`reattach` `scroll` `session-busy` `settings` `theme`.
 
 Playwright starts two servers itself (`webServer` in `playwright.config.ts`): the fake
 backend (`web/test/serve.ts`) and Vite (`--mode test`).
@@ -873,7 +1415,7 @@ exercise "how does the interface behave when the stream stalls".
 depends on the model cooperating, so a failure cannot tell you whether the interface is
 broken or the model misbehaved; turn on `retries` and failures become noise that nobody
 reads after the third round. Protocol-level verification against a real backend is
-`make smoke`'s job — the two are complementary.
+`task smoke`'s job — the two are complementary.
 
 **(2) Let a busy port fail loudly.** `reuseExistingServer: false` in
 `playwright.config.ts` and `strictPort: true` in Vite are both deliberate: reusing the
@@ -914,19 +1456,43 @@ call `write_file` in order to trigger an approval. That is the model's freedom, 
 code regression; the script retries, and when nothing triggers it **reports an error
 explicitly** rather than pretending the wiring is broken.
 ★ It has a **precondition**: the agent that actually calls the tool must have
-`write_file` in the `ask` tier — neither globally denied nor disabled by its own
-`disabled_tools`. With the tool out of reach there is no approval to trigger.
-★ Do not look at `main` for this. The factory configuration does give `main`
-`disabled_tools: [write_file, edit_file, execute]`, but `main` only orchestrates: it
-**delegates** the work to `task`, and `task`'s `write_file` is in the `ask` tier — so
-the approval fires anyway. Measured event stream:
+`write_file` in the `ask` tier — ★ that is the **default**: no file names it in an
+`allows:` list — **and** the agent's own `tools:` list must name it, or the tool is
+not in the agent's tool set at all. With the tool out of reach there is no approval to
+trigger.
+★ Do not look at `main` for this. The factory configuration gives `main`
+`tools: [ls, read_file, glob, grep, task, write_todos]` — the readers and the
+delegation tool, no writers — but `main` only orchestrates: it **delegates** the work
+to `task`, and `task`'s `tools:` list names `write_file`, which is in the `ask` tier —
+so the approval fires anyway. Measured event stream:
 `TOOL_CALL_START name=task` (a sub-agent is invoked as a tool), then
 `TOOL_CALL_START name=write_file subagentRunId=task`, and the interrupt's
 `subagentRunId` is `task` too.
 To check whether a tier is reachable, look at **each** agent's effective tool table:
 `GET /v2/agents` and `GET /v2/agents/task` report the tier and the reason per tool.
 
-**(8) Changing the interface requires browser verification.** "I changed it and the tests
+**(8) `smoke:config` needs a configuration that could not ship as a default.**
+`config_write` is absent from every template on purpose — handing an agent the pen that
+edits its own configuration is a decision — so no shipped agent can call it, and the
+smoke's turn would have nothing to trigger. The script therefore **checks its own
+precondition first** and exits `2` with the line to add, instead of looking flaky:
+
+```yaml
+# .openheron/agents/main.md
+tools: [..., config_write]
+```
+
+then `task test-env-sync`. ★ It refuses to run when `config_write` is **not** in the
+`ask` tier either: an allow-tier `config_write` would have written the file without an
+approval, which is the one thing the smoke exists to catch. That is also why the target
+is `task smoke-config` and not a step of `task smoke` — it can never pass on a default
+install.
+
+★ It puts the tree back: the probe file is deleted through the API at the end, and the
+script asserts it is gone. A smoke that leaves an agent file behind changes what the
+next run tests.
+
+**(9) Changing the interface requires browser verification.** "I changed it and the tests
 are green" is not evidence — script-level tests cannot see the rendering layer.
 
 ### 5.8 ★ The cost benchmark
@@ -994,7 +1560,7 @@ Two layers, because they see different things:
 written. The CI job is the one that finds what the hook cannot: a secret that was
 committed before the hook existed, or on a machine without it.
 
-Install the hooks with `make install-hooks` (it needs `pre-commit` — `pipx install
+Install the hooks with `task install-hooks` (it needs `pre-commit` — `pipx install
 pre-commit`). The gitleaks revision is **pinned** in `.pre-commit-config.yaml`, so
 a new upstream rule cannot turn every commit red on a day nobody touched the
 security setup.
@@ -1038,9 +1604,17 @@ someone measures that the default misses something.
 | Symptom | Check first |
 |---|---|
 | Startup reports a missing configuration | The `config root` line in the startup log — it prints the root actually used and the project root |
-| A config change does not take effect | Is that partition hot-reloaded? `server/` and `skills/` need a restart |
-| An agent cannot call a tool | `GET /v2/agents/:agentId` for the effective tool table; then decide whether it is an inner disable or an outer `deny` |
+| A config change does not take effect | Is that partition hot-reloaded? `llm/` `agents/` `tools/` `mcps/` are hot; `server/` and `skills/` need a restart |
+| Startup fails with `disabled_tools` was renamed to `tools` | ★ The two mean **opposite** things — one removed tools, the other names them. Delete `disabled_tools` and list the tools the agent should have in `tools:` (`agentkit/spec/load.go:99`) |
+| A notice says `tools` names MCP tools | ★ `tools` is the built-in allow-list and `mcps:` is what mounts a server **and** grants its tools: drop the `mcp__*` lines and put the server in `mcps:` (`agentkit/spec/load.go:836`) |
+| An agent cannot call an MCP tool | Is the server in that agent's `mcps:`? Mounting **is** the grant — the agent's `tools:` list has nothing to do with it (`agentkit/spec/decl/decl.go:148`) |
+| A notice says `tools` names a tool that does not exist | The built-in tools are the ones in `decl.BuiltinToolNames` (`agentkit/spec/decl/decl.go:319`); a provider's tool exists only when its file under `tools/` is written |
+| A notice says `tools` names the `skill` tool but `skills` is empty | The configuration is legal but self-contradictory: name the skill in `skills:`, or drop `skill` from `tools:` |
+| An agent cannot call a tool | `GET /v2/agents/:agentId` for the effective tool table; then read the tool's `reason` — `tools`, or the default `ask` tier, which asks |
+| An agent has **no** tools at all | ★ The tool list is an allow-list and it **defaults to none**: an absent `tools:` means no tool. List the tools the agent should have |
+| A leftover `policy/` directory still seems to carry your old tiers | The partition was retired: the tiers live in the files that provide the tools, and the default tier is `ask`. The startup log says so — the notice lands in `deferred` |
 | `reasoning` seems to do nothing | Is that tier declared in the model profile? Undeclared means silently ignored |
+| The editor blames the file you are editing for a problem in **another** file | ★ Every issue names the file it is about (`Issue.Path`), and the editor shows another file's issue under **that** file's name — as a link that opens it. ★ But the tree has to load: a broken file anywhere still refuses the save, so fix that file first |
 | An approval cannot resume | Is the checkpoint still there? Check `pendingApprovals` on `/v2/sessions/:id` |
 | White screen + `Maximum update depth exceeded` | Is some selector returning a new array/object? |
 | E2E reports `already used` | An orphan from the previous force-killed run holds the port; clear it and retry |
@@ -1057,19 +1631,17 @@ the current state of the code, not a to-do list** — fixing one is a separate c
 
 | Symptom | Where | Explanation |
 |---|---|---|
-| **Usage on a live stream is not accounted per agent** | `contract.Usage` has no `byAgent` field; the frontend's `toUsage` at `events.ts:479` maps only flat counts | `usage.byAgent` **exists only with history hydration**. So in a fresh turn the agent filter chips show no cumulative token counts — they appear once you reload (pulling history). The **context occupancy** is live (§3.7): it arrives as its own `context_usage` event. E2E missed the gap because it tests a **seeded history thread**. |
+| **Usage on a live stream is not accounted per agent** | `contract.Usage` has no `byAgent` field; the frontend's `toUsage` at `events.ts:552` maps only flat counts | `usage.byAgent` **exists only with history hydration**. So in a fresh turn the agent filter's tooltips show no cumulative token counts — they appear once you reload (pulling history). The **context occupancy** is live (§3.7): it arrives as its own `context_usage` event. E2E missed the gap because it tests a **seeded history thread**. |
 | **A broken SSE stream does not reconnect** | `web/src/lib/api.ts` | A broken stream is simply broken: it goes to `onError` → the error panel, and the user has to resend. There is no reconnect and no resume-from-offset. |
 | **The conflict dialog does not show the on-disk version** | `web/src/components/settings/conflict-dialog.tsx:18-23` | It shows only your stale `baseRevision` plus a hard-coded "changed by someone else", and **never fetches the disk version**. There is no "overwrite anyway" button either — "Keep editing" merely clears the conflict marker, so the next save resends the same stale revision and conflicts again. |
-| **`web/index.html` declares `lang="zh-CN"`** | `web/index.html:2` | The interface is entirely in English (a hard requirement in AGENTS.md), but the `lang` declaration is still Chinese. It affects what a screen reader reads. |
-| **`tw-shimmer` is a ghost dependency** | `web/package.json:39` | The only mention of it in the whole repository is the manifest; no source, style or HTML file references it. |
 | **Four runtime dependencies sit in `devDependencies`** | `web/package.json` | `lucide-react` (imported by 10 files), `clsx`, `tailwind-merge` and `class-variance-authority` are all imported by `src/` and bundled into `web/dist`. The build passes (Vite resolves them at build time), but the manifest is wrong. |
-| **`web/scripts/interop-check.ts` is out of date** | lines 16-20 and 41-45 of that script | It POSTs to `/v2/run` **without a `threadId`**, while the server now requires a session first (`POST /v2/sessions`, see `api/v2_run.go:78`). So that item of `make smoke` fails (measured: 400 `threadId is required`). `web/scripts/hitl-smoke.ts` and `web/scripts/no-undefined-url-check.ts` already follow the new contract. |
-| **The comment at `api/server.go:75` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
+| **The comment at `api/server.go:112` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
+| **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the five partitions (`agentkit/spec/config.go:533`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:410`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:72`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |
 
 ## 8. Before committing
 
 ```bash
-make check        # lint + test
+task check        # lint + test
 ```
 
 - `gofmt -l .` must print nothing.

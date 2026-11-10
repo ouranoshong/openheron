@@ -15,16 +15,16 @@
 ```bash
 git clone https://github.com/ouranoshong/openheron
 cd openheron
-make build
+task build
 ```
 
-`make build` 会构建前端并把界面**嵌进二进制**，产物是 `bin/openheron` —— 一个自包含的可执行
+`task build` 会构建前端并把界面**嵌进二进制**，产物是 `bin/openheron` —— 一个自包含的可执行
 文件，扔到哪台机器上都能跑（目标平台之外的机器用交叉编译）。
 
 只想快速试一下：
 
 ```bash
-make build-go     # 只构建后端（不含界面），迭代 Go 代码时更快
+task build-go     # 只构建后端（不含界面），迭代 Go 代码时更快
 ```
 
 ★ **或者一条命令装上发布出来的二进制。** 每个 `v*` tag 都会发布同样的单文件可执行程序，
@@ -120,13 +120,14 @@ HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
 - **配置**也落在那儿：`.openheron/` 在第一次启动时写好，
   从此它就是你的文件，你随便改。
 - **密钥**留在宿主上，沙箱里只有哨兵值。
-- **审批**照旧，而且策略是你的：工作区里的 `policy/permissions.yaml`
-  决定哪些工具先问一声。
+- **审批**照旧，而且默认是安全的那一档：每个工具都要先问一声，
+  而 `.openheron/tools/` 与 `.openheron/mcps/` 下的文件点名例外（见 §4.3）。
 
 ★ 分步教程见
 [`sandbox-kit/TUTORIAL.md`](../sandbox-kit/TUTORIAL.md)（中文：
 [`sandbox-kit/TUTORIAL_zh.md`](../sandbox-kit/TUTORIAL_zh.md)），
-背后的设计见 [`docs/sandbox-kit-design.md`](sandbox-kit-design_zh.md)。
+背后的设计见 [`docs/sandbox-kit-design.md`](sandbox-kit-design.md) —— 那篇文档只有中文，
+本仓库的设计文档都是这样。
 
 ```bash
 sha256sum -c checksums.txt --ignore-missing
@@ -138,7 +139,7 @@ sha256sum -c checksums.txt --ignore-missing
 ## 2. 第一次使用
 
 ```bash
-cd /你的项目
+cd /your/project
 openheron init                      # 在当前目录下生成配置
 export DEEPSEEK_API_KEY=sk-...     # 密钥只从环境变量读
 openheron
@@ -146,22 +147,43 @@ openheron
 
 打开 <http://localhost:8080>。
 
-`openheron init` 会写六个文件：
+`openheron init` 写整棵树：
 
 ```
-你的项目/
+your/project/
 └── .openheron/
     ├── agents/
-    │   ├── main.md          # 入口 Agent：理解需求、拆任务、委派、验收
-    │   └── task.md          # 执行 Agent：真正动手干活
+    │   ├── main.md           # 入口 Agent：理解需求、给方案、分派、汇总
+    │   ├── task.md           # 通用执行专家：llm/ tools/ mcps/ server/
+    │   ├── agent-expert.md   # agent 域专家：agents/*.md
+    │   └── skill-expert.md   # 技能域专家：skills/<name>/SKILL.md
+    ├── skills/
+    │   ├── openheron-config-map/SKILL.md        # 配置系统的事实地图
+    │   ├── openheron-config-edit/SKILL.md       # 修改配置的规程
+    │   ├── openheron-config-templates/SKILL.md  # 骨架怎么拿
+    │   └── openheron-config-validate/SKILL.md   # 静默失效
     ├── llm/
     │   └── deepseek.yaml    # 模型档案
-    ├── policy/
-    │   ├── permissions.yaml # 审批策略
-    │   └── limits.yaml      # 配额上限
+    ├── mcps/
+    │   ├── fetch.yaml        # 抓网页转 markdown
+    │   ├── time.yaml         # 当前时间与时区换算
+    │   └── deepwiki.yaml     # 公开仓库文档与问答
+    ├── tools/
+    │   ├── filesystem.yaml   # 文件系统工具的档位
+    │   ├── http.yaml         # request_get
+    │   ├── web_search.yaml   # duckduckgo_search
+    │   ├── wikipedia.yaml    # wikipedia_search
+    │   └── kb.yaml           # 知识库（关着：corpus_dir 是空的）
     └── server/
         └── config.yaml      # 进程自身参数（不热重载）
 ```
+
+★ 那三个 MCP 服务器要 PATH 里有 `uvx`，两个 stdio 的还会在第一次启动时下载自己的包 ——
+起不来的服务器只赔上它自己的工具，别的什么都不影响（§4.7）。
+
+★ **没有 `policy/` 下的文件。** 档位有缺省，例外由工具的来处点名（§4.3），
+而一份「说的就是代码已经在做的事」的文件是噪音 —— ★ 配置树里的噪音会被当成意思读。
+要自己点例外，就写在那个工具自己的文件里。
 
 ★ **已存在的文件不会被覆盖**（除非加 `--force`），所以在一个已经配好的项目里跑它是安全的。
 
@@ -174,8 +196,7 @@ openheron
 | `--model <name>` | 选模型，默认 `deepseek-flash` |
 | `--base-url <url>` | 厂商端点（**含路径**，从厂商文档抄） |
 | `--env <NAME>` | 密钥的环境变量名，默认 `<PROVIDER>_API_KEY` |
-| `--no-policy` | 不生成 `policy/` 目录（`permissions.yaml` 与 `limits.yaml`） |
-| `--tools` | 同时生成 `tools/` 下的工具配置 |
+| `--no-tools` | 把 `tools/` 下的工具配置留下不写 |
 | `--force` | 覆盖已存在的文件 |
 | `--dry-run` | 只打印要写什么，不落盘 |
 | `--json` | 机器可读输出 |
@@ -185,7 +206,7 @@ openheron
 **只有三级，不向上查找**：
 
 ```
---config-dir  →  $OPENHERON_CONFIG_DIR  →  <项目根>/.openheron
+--config-dir  →  $OPENHERON_CONFIG_DIR  →  <project-root>/.openheron
 ```
 
 - **默认那一档不存在会帮你创建**。
@@ -196,7 +217,7 @@ openheron
 如果默认根下没有 `agents/main.md`，启动会直接告诉你：
 
 ```
-no configuration at /你的项目/.openheron: run `openheron init` to create one
+no configuration at /your/project/.openheron: run `openheron init` to create one
 ```
 
 ## 4. 配置怎么写
@@ -211,7 +232,8 @@ description: "task: the concrete executor. Writes files per the task order."
 model: deepseek/deepseek-flash
 max_iterations: 50
 reasoning: low
-disabled_tools: [kb_index]
+tools: [ls, read_file, write_file, edit_file, glob, grep, execute, write_todos]
+mcps: []
 summarize_at: 80%
 ---
 
@@ -230,8 +252,9 @@ frontmatter 可用键：
 | `max_iterations` | 工具循环的轮数上限 |
 | `summarize_at` | 这个 Agent 的上下文什么时候被**压缩**成摘要：模型窗口的 `80%`（默认）、绝对 token 数（`104858`）、或 `0` 表示永不 |
 | `subagents` | 它能委派给谁（见 §5） |
-| `disabled_tools` | 对**这个 Agent** 生效的工具禁用表 |
-| `skills` | 这个 Agent 能用的技能 —— `skills/` 下文件夹的白名单（**不写就是全部**，写空列表就是一个都没有） |
+| `tools` | **这个 Agent 能用的内置工具** —— 就是模型看见的那些名字。★ **不写就是一个工具都没有**：这张清单就是全部答案。★ MCP 的工具**不写在这里** —— 挂载那个 server 就会得到它的工具（见 §4.8） |
+| `skills` | 这个 Agent 能加载的技能 —— `skills/` 下文件夹的白名单。**不写就是没有技能**，写空列表也一样 |
+| `mcps` | 这个 Agent **挂载**的 MCP 服务器 —— **不写就是不起任何服务器**，写空列表也一样。挂载一个就是起一个子进程，**并把它的全部工具交给这个 Agent**（见 §4.8） |
 | `temperature` / `max_tokens` | 采样参数 |
 | `reasoning` | 思考档位：`off` / `low` / `high` / `max`（名字由厂商档案定义） |
 
@@ -240,6 +263,18 @@ frontmatter 可用键：
 
 ★ **`model` 不继承**。父 Agent 用了哪个模型，子 Agent 不会跟着用 —— 每个 Agent 都得自己写。
 这正是「专家配专模」的落点。
+
+★ **模型没人声明，只会把那个 Agent 留在树外 —— 不会让 openheron 起不来。** 那个 Agent
+会从树里摘掉，每个父 Agent 的 `subagents:` 里也会删掉，理由在四个地方说：启动日志、
+`/v2/health`、配置编辑器里**它自己文件上那条灰色的提示**（§6.3），以及会话真的要用它时
+拿到的那句错。★ 默认 Agent 也不例外：没有可用的模型时 `main` 同样留在树外，在你改好之前
+**没有会话能跑** —— 但 openheron 照常起来，这正是你能打开编辑器改这个文件的原因。
+★ 编辑器会拦下造成这种结果的改动：把一个本来能跑的 Agent 指向一个不存在的模型，保存时就被拒。
+
+★ **跑不起来的那条消息说的是原因，不是「超时」。** 如果你要对话的那个 Agent 装不起来，
+聊天里给出的就是原因本身 —— `agent "main" is left out of the tree: the model
+openai/gpt-4o-mini is not declared under llm/` —— 这一轮以 `agent_unavailable` 这个码结束。
+★ 这个码意味着「你的配置坏了」，所以该做的是打开编辑器改文件，而不是把消息再发一遍。
 
 ★ **`reasoning` 档位必须在模型档案里声明过才有效**。没声明的档位会被**静默忽略**：
 Agent 写着 `reasoning: high`，而端点没有 `high`，实际效果是「完全不思考」，且没有任何报错。
@@ -308,29 +343,79 @@ Agent。模型档案里留着的 `summarize_at` 不再被读，openheron 加载�
 「这个端点怎么表达 high」之间的翻译层。表里没有的档位会被静默忽略，
 于是「开了 high 档却不思考」这个坑会以最隐蔽的方式出现。
 
-### 4.3 审批策略（`policy/permissions.yaml`）
+### 4.3 哪些工具要问
+
+**你不用去决定。** 没人点名的工具**一律先问**：这一轮暂停，界面上出现审批卡片
+（见 §6.2）。默认是安全的那一档 —— 多点一次，换来的是一次没人看见的破坏性调用
+不被执行。
+
+档位只有两个：
+
+| 档位 | 含义 |
+|---|---|
+| `allow` | 直接跑，不问 |
+| `ask` | 等你点头 |
+
+**例外只有两处来点**，就这两处：
+
+| 位置 | 它决定什么 |
+|---|---|
+| 提供这个工具的那个文件里的 `allows:` 行 | 这个文件提供的哪些工具**不用**问；其余一律问 |
+| Agent 里的 `tools:` 行 | 这个 Agent **能用的**工具 —— 不在里面的工具就不在它的工具表里，模型连看都看不见 |
+
+★ **没有全局清单。** 没有一份文件让你列出「哪些工具要问」，也没有一份让你列出
+「哪些工具谁都不能用」。文件点自己的例外，Agent 点自己的例外，两者从不合并 ——
+于是一个 Agent 的生效工具表，永远只靠配置就能回答。
+
+★ **代码自带一份缺省清单，文件只能往上加。** 读取类（`ls` `read_file` `glob` `grep`）
+与委派类（`task` `write_todos` `skill`）永远不用问 —— 没有任何文件能把它拿走。
+其余的一律要问，直到有文件点了名。
+
+★ **改机器的那三个工具也有自己的文件。** `write_file`、`edit_file`、`execute` 缺省要问，
+而放宽它们的地方就是 `tools/filesystem.yaml`：
 
 ```yaml
-ask:
-  - write_file
-  - edit_file
-  - execute
-  - kb_index
-deny: []
+# .openheron/tools/filesystem.yaml
+allows: [write_file, edit_file, execute]
 ```
 
-只有两列，语义很直接：
+★ 那个文件是**调音旋钮，不是开关**：文件系统工具一直都在，所以它既不能加一个也不能删一个，
+只能挪它们的档位。**放宽是文件的活，收窄是 agent 的活**（`tools`）—— 因为收窄是
+按 agent 来的，而放宽是关于这个工具本身的决定。
 
-- **在 `ask` 里**：每次调用都要**你点头**。
-- **在 `deny` 里**：**谁都不能用**。
-- **不在任何一列里**：默认 `allow`（直接放行）。
+有自己文件的工具，在那个文件里说：
 
-★ `deny` 是**全局**的。`agents/*.md` 里的 `disabled_tools` 只影响那一个 Agent，
-**放松不了外层的 `deny`**。这是子 Agent 唯一放松不了的保证。
+```yaml
+# .openheron/tools/http.yaml
+methods: [get]
+allows: [request_get]
+```
+
+`request_get` 不用问；`request_post` 要问 —— 而且 `methods` 不点 `post` 的话它压根
+不会被提供。知识库说的是同一件事：`kb.yaml` 放行 `kb_search` —— 检索是读，而
+`kb_index` 要往磁盘上的索引里写，所以要问。
+
+MCP server 在它自己的文件里说，用的是**它自己的词汇** —— server 自己的工具名，
+不是暴露出来的那些（见 §4.7）：
+
+```yaml
+# .openheron/mcps/github.yaml
+allows: [read_issue, list_issues]
+```
+
+★ **档位不是对工具的判决。** 一个 Agent 根本用不了的工具保留自己的档位，并在理由里
+说清：Agent 的生效工具表会报 `blocked`，理由是 `tools`（§4.8）。
+没有第三档，也没有全局拒绝 —— 一个工具要么对这个 Agent 可用，要么压根不在它的
+工具表里。
+
+★ **有一个例外放宽不了。** `config_write`（§4.9）改的是配置本身，包括那个 `allows:`
+列表会授予它的文件 —— 一个能点名它的文件，授的是重写它自己的工具。所以它**永远**要点头，
+不管哪个文件怎么说。
 
 ### 4.4 外部工具（`tools/`）
 
-**文件存在即启用**，不用改代码。当前支持四个文件名：
+**不用改代码** —— 配置缺失的 provider 什么都不挂，所以写下这个文件才是把工具挂上去的那一步。
+当前支持四个文件名：
 
 | 文件 | 提供 |
 |---|---|
@@ -339,11 +424,18 @@ deny: []
 | `wikipedia.yaml` | 百科查询 |
 | `kb.yaml` | 知识库（见 §7） |
 
+★ 知识库是唯一的例外：它的文件只承载设置 —— 真正开关它的是**非空 `corpus_dir`**，而不是
+文件在不在。
+
 ★ `tools/` 下**只认这四个文件名**，写别的名字会**启动报错**，不会被静默忽略。
 
-★ **`openheron init` 默认不写 `tools/` 下的任何文件** —— 这一整个目录要你自己写；加
-`--tools` 才会把上面那四个文件写出来。没写就是没启用：对应的工具不会出现在 agent 的
-工具表里，模型也看不见它。
+★ **`openheron init` 会写 `tools/` 下的那五个文件** —— 工具配置是这棵树的一部分，
+因为出厂的 agent 会点名 `request_get`、`duckduckgo_search` 和 `wikipedia_search`，
+而没有 provider 提供的名字会被当成笔误报出来。加 `--no-tools` 那个目录就空着。
+没写就是没启用：对应的工具不会出现在 agent 的工具表里，模型也看不见它。
+
+★ **这个文件的 `allows:` 行决定哪些不用问** —— `tools/http.yaml` 点 `request_get`，
+`tools/kb.yaml` 点 `kb_search`。这个文件提供的其余一切都问（§4.3）。
 
 ### 4.5 进程参数（`server/config.yaml`）
 
@@ -356,12 +448,26 @@ deny: []
 | `start_timeout` | `60s` | 启动超时 |
 | `lease_ttl` | `10m` | 一轮在没有进展的情况下能持有多久的租约——**必须长于 provider 自己的超时** |
 | `agent.max_depth` | `1` | 委派深度上限 |
+| `log_level` | `info` | `debug`、`info`、`warn`、`error` —— 决定哪些行会进输出 |
+| `log_requests` | `false` | 是否在 `debug` 下打印脱敏后的模型请求体与 `tools` 原始字节；等价于 `OPENHERON_LOG_LLM_REQUESTS=1` |
+| `log.file` | `""` | 日志写到的文件，相对**配置根**解析 —— 空串 = 只写标准错误 |
 
 ★ **`server/` 不热重载** —— 改了要重启才生效。所以配置编辑器里它是**只读**的，
 提交会报 `section "server" is not editable`。
 
 以下环境变量可以覆盖进程参数，优先级高于配置文件：
-`LISTEN_ADDR`、`DATA_DIR`、`PROJECT_ROOT`、`FRONTEND_MODE`、`STATIC_DIR`。
+`LISTEN_ADDR`、`DATA_DIR`、`PROJECT_ROOT`、`FRONTEND_MODE`、`STATIC_DIR`、`OPENHERON_LOG_LEVEL`、
+`OPENHERON_LOG_FILE`、`OPENHERON_LOG_LLM_REQUESTS`。
+
+★ `log_requests` 与 `OPENHERON_LOG_LLM_REQUESTS` 是同一个开关的两种写法：前者定项目默认值，
+后者给单次运行下定论（**环境变量优先**，变量为空才看配置）。打开后每次模型请求会在 `debug`
+下记一行脱敏后的请求体和一行 `tools` 原始字节；两个都关着时，**被拒绝的请求**仍会留下
+`tools` 原始字节，因为那一轮最需要留证。它只管内容，不关 `log.file` 的落盘。
+
+★ `log_level` 不是这四个之一时回退 `info`；配置的 `deferred` 提示里带着原因。
+
+★ 日志默认写标准错误；`log.file` 指了路径就同时落盘 —— 路径相对**配置根**解析。文件按大小
+轮转，而打不开文件只是告警、不是启动失败：进程留在标准错误上，并把原因写在那儿。
 
 ### 4.6 技能（`skills/`）
 
@@ -382,6 +488,171 @@ skills: [refactor, review]
 不会出现在给模型看的技能清单里，点名去调也会失败 —— 看不见的东西调不到。
 名单里写了目录里没有的名字，Agent 装配时日志会报出来，不会被忽略。
 
+★ **一个技能就是一层文件夹，编辑器问的就是这个名字。** `/settings` 把每个分区显示成文件树
+里的一个文件夹，于是技能长成 `skills/code-review/SKILL.md`：你只填技能名，文件夹里那个
+文件名永远是 `SKILL.md`。这个名就是你在 Agent 的 `skills:` 里写的那个，而且必须能被读回来 ——
+小写字母和数字，单个 `-` 或 `_` 分隔，所以 `code-review` 和 `code_review` 是两个技能。
+
+★ **当 openheron 从别处读技能时，这个分区会说明并拒绝保存。** 上面那条规则意味着生效的目录
+可能不是 `<配置根>/skills/`。往一个没人加载的目录里写等于什么都没改，所以编辑器会显示进程实际
+在读的那个目录，并把这一分区标成只读。启动时**一个技能目录都没找到**不算这种情况：那时
+`<配置根>/skills/` 正是下次启动会去找的地方，在那儿建第一个技能是有效的。
+
+### 4.7 MCP 服务器（`mcps/`）
+
+MCP 服务器是一个把工具提供给模型的程序。openheron **一个文件挂一个服务器**，
+而且**文件在就是定义** —— 没有 `enabled` 这个键。
+
+`mcps/<server>.yaml` —— 文件名就是服务器的名字：
+
+```yaml
+# .openheron/mcps/github.yaml
+transport: stdio
+command: npx
+args: ["-y", "@modelcontextprotocol/server-github"]
+env:
+  GITHUB_TOKEN: ${GITHUB_TOKEN}
+timeout: 30s
+call_timeout: 60s
+tools: []
+allows: [read_issue, list_issues]
+```
+
+同一个服务器走 HTTP 的写法：
+
+```yaml
+# .openheron/mcps/remote.yaml
+transport: http
+url: https://mcp.example.com/mcp
+headers:
+  Authorization: Bearer ${REMOTE_TOKEN}
+timeout: 30s
+call_timeout: 60s
+```
+
+| 字段 | 用在哪 | 说明 |
+|---|---|---|
+| `transport` | 两者 | `stdio`（一个子进程）或 `http`（**streamable HTTP** —— 没有 SSE 这个传输方式）。默认 `stdio` |
+| `command` | stdio | 要执行的命令。**必填** |
+| `args` | stdio | 命令的参数 |
+| `env` | stdio | 子进程的环境变量，叠在继承来的那份之上 |
+| `url` | http | 服务器的地址。**必填** |
+| `headers` | http | 每次请求都带上 |
+| `timeout` | 两者 | 连接、握手、列工具的时限（默认 `30s`） |
+| `call_timeout` | 两者 | 单次工具调用的时限（默认 `60s`） |
+| `tools` | 两者 | 对**服务器自己的**工具名的**过滤**；不写或写空就是全都要 |
+| `allows` | 两者 | 服务器自己的工具名里**不用问**的那些；其余都要问 |
+
+★ **文件名必须匹配 `^[a-z0-9]+(_[a-z0-9]+)*$`。** 带一串连续下划线的名字会被拒绝：
+暴露出来的名字 `mcp__a__b__x` 以后没法反解回来 —— 那是服务器 `a` 带工具 `b__x`，
+还是服务器 `a__b` 带工具 `x`？
+
+★ **`openheron init` 写三台服务器** —— `mcps/fetch.yaml`、`mcps/time.yaml` 和
+`mcps/deepwiki.yaml`。★ 每一份都**定义**一台服务器，所以一份解析不了的文件不是
+「服务器关着」，而是「配置加载不了」。★ 两个 stdio 的跑 `uvx`，而 `uvx` 默认没装 ——
+于是服务器起不来，**日志里说一句，Agent 照跑**。★ **自己在 `mcps/` 下写一份文件、
+填上自己的 command，这个动作本身就是定义那台服务器**；复制那三个之一、改掉 `command:`
+就行。
+
+★ **那个不安装的示例** —— 模板里的 `mcps/_example.yaml` —— 是设置界面新建服务器时的
+骨架。它是脚手架，不是要安装的文件，所以 `openheron init` 不写它。
+
+★ **stdio 服务器的第一次启动可能很慢，而 `timeout:` 就是这次启动的上限。** 命令常常
+是一个包运行器（`npx`、`uvx`），第一次跑会把服务器装上 —— 那次安装是启动的一部分，
+所以一台要装一分钟的服务器，在 `timeout: 30s` 里起不来。
+★ 于是它就根本起不来，而这一轮照跑，只是没有它的工具：自己手动跑一次那条命令把缓存
+捂热，或者给那个文件写一个更长的 `timeout:`。
+
+★ **会在启动时报错的**：写了不认识的 `transport`；stdio 服务器没有 `command`；
+http 服务器没有 `url`；http 服务器上写了 `env:`；Agent 点名了一个不存在的服务器。
+
+★ **不会启动报错的**：`timeout` 写坏了 —— 它退回到默认值，并在告警里报出来；
+`env:` 里的 `${ENV}` 没设 —— 那一条被跳过，并在告警里报出来。写错的 timeout 改的是
+「等多久」，不是「会怎样」，所以它不该拦住服务器启动。
+
+**你会看到的名字。** 服务器自己的工具 `create_issue` 到模型那里叫
+`mcp__github__create_issue`。服务器自己的名字和暴露出来的名字在 `/mcps` 面板里都列出来
+（见 §6.8）。
+
+★ **文件里不必写出凭据的名字。** 在沙箱里那个变量装的是 `credential@1` 哨兵，
+宿主上的代理在出网时才把真值换上去 —— 于是哨兵顺着继承的环境到达服务器，
+http 服务器的 `headers:` 也是一回事。
+
+★ **`mcps/` 是热的。** 改了下一轮就生效 —— 不用重启。
+
+### 4.8 一个 Agent 能拿到哪些服务器
+
+**Agent frontmatter 里的 `mcps:` 键**决定这个 Agent 能拿到哪些服务器 —— 而挂载一个
+**就是**授予：
+
+```yaml
+---
+model: deepseek/deepseek-flash
+mcps: [github]
+---
+```
+
+| `mcps:` 这个键 | 含义 |
+|---|---|
+| 不写 | **不起**任何服务器 |
+| `[]` | **一个都没有** |
+| `[github]` | 正好这些服务器 —— 连同它们的全部工具 |
+
+★ 子 Agent 有**自己**的名单，和它自己的 `skills`、`tools` 并排 —— 读的是正在跑的
+那个 Agent 的名单，不是根 Agent 的。
+
+★ **挂载就是授予。** `mcps:` 说哪些服务器被**拉起来**，而这个 Agent **拿到了那个服务器
+的全部工具** —— 不需要再写第二份清单。
+
+★ **`tools:` 只管内置工具。** 写进去的 `mcp__<server>__*` 不授予任何东西：它会被丢弃，
+配置会报一条**提示**说清这件事。那个 server 该写进 `mcps:`。
+
+★ **审批与挂载是两件事。** 挂载把工具交给 Agent；而某个工具要不要点头，由那个 server
+自己的文件（`mcps/<server>.yaml`）决定，而那里的缺省是 `ask` ——
+**挂载不等于放行**。
+
+**`tools` 接受结尾的 `*` 前缀模式。** 一个精确的名字，或一个**结尾**的 `*`：
+
+```yaml
+tools: [ls, read_file, config_*]
+```
+
+- `config_*` —— 每一个以 `config_` 开头的内置工具。
+- `ls` —— 就那一个工具。
+
+★ **`mcp*foo` 和单独一个 `*` 会在启动时报错。** 只有**结尾**的 `*` 才是前缀模式，
+而单独一个 `*` 等于在一张「说明有什么」的清单里写「什么都有」：一条作用范围和字面读法
+不一致的规则，就是一次无声的错配。
+
+### 4.9 配置工具
+
+有六个工具让 Agent 读取并修改**它自己跑在其中的那份配置**。它们总是被挂上，而和别的
+内置工具一样，只有 `tools:` 清单点了名的 Agent 才**看得见**它们：
+
+| 工具 | 它回答什么 | 档位 |
+|---|---|---|
+| `config_get` | 单个文件（`{path}`：正文、revision、是否热加载），或 `{}`：分区表、现有文件、以及**进程手里**那份配置 | allow |
+| `config_validate` | `{path, content}`：这份内容能不能加载，**错在第几行** —— 行号由服务端给。`{}`：检查磁盘上这棵树 | allow |
+| `config_template` | `{path}`：这个文件从什么骨架开始。`{section}`：那个分区的模板。都不给：一份「能问什么」的索引 | allow |
+| `config_notices` | loader 发现了但没拒绝的事：改了名的键、退休的目录、回落到缺省的值 | allow |
+| `config_tier` | `{tool}`：它要不要点头。`{agent}`：那个 Agent 的工具与各自档位。都不给：缺省档位与整张例外表 | allow |
+| `config_write` | 写一个文件：对整棵树预检、对你读到的 revision 校验、合并失败就整份拒绝。**下一轮**生效 | **ask** |
+
+```markdown
+---
+# .openheron/agents/main.md
+tools: [ls, read_file, glob, grep, task, write_todos, config_get, config_validate]
+---
+```
+
+★ **先给 `config_get` 和 `config_validate`，再给 `config_write`。** 前两个只读；第三个
+改配置，而且每次都会停下来等审批。能校验不能写的 Agent 是个有用的审阅者；只会写的
+Agent 是一次迟早要来的加载错误。
+
+★ **`config_write` 写不了 `server/`，而 `config_get` 读得了。** 那一节配置的是进程自己，
+不热加载，改了要重启 —— 所以写入路径直接拒绝它，而不是存下去一个悄悄不生效的值。
+读是另一个问题，而且正是 agent 想知道「进程到底跑着什么」时会问的那个。
+
 ## 5. 多 Agent 与委派
 
 ### 5.1 谁能委派给谁
@@ -401,19 +672,21 @@ subagents: [task]
 
 ### 5.2 深度上限
 
-深度上限由 `server/config.yaml` 的 `agent.max_depth` 和 `policy/limits.yaml` 的同名项
-共同决定，**取更严的**。默认 `1`，意思是「只有入口 Agent 能委派，子 Agent 不能再生子」。
+深度上限就是 `server/config.yaml` 里的 `agent.max_depth`。默认 `1`，意思是「只有入口
+Agent 能委派，子 Agent 不能再生子」。
 
 想跑更深的委派链：
 
 ```yaml
-# policy/limits.yaml
+# .openheron/server/config.yaml
 agent:
   max_depth: 3
 ```
 
 ★ 声明的拓扑超过上限是**启动错误**，不是「截断到上限然后继续跑」。
 后者会让深度保护形同虚设。
+
+★ **`server/` 不热重载**（§4.5）—— 上限调深要重启才生效。
 
 ### 5.3 一次会话能同时跑多个 Agent
 
@@ -428,12 +701,17 @@ agent:
 
 | 元素 | 作用 |
 |---|---|
-| **侧边栏** | 会话列表、Agent 过滤、状态点（有待审批时会亮） |
+| **标题栏** | Agent 过滤（每个 chip 只写 agent 名，悬停看它的上下文占用与用量）、主题开关，以及这一轮的状态 |
+| **侧边栏** | 会话列表、「新建会话」按钮、设置入口 |
 | **输入框** | 提问；`/` 开头触发斜杠命令；支持拖拽/粘贴附件 |
 | **消息列表** | 助手回复、思考过程、工具调用卡片、子 Agent 产出（带归属） |
 | **审批卡** | 需要你点头时出现，同意 / 拒绝（可附理由） |
 | **工具卡** | 每个工具调用的参数与结果 |
 | **设置** | 配置编辑器的入口 |
+
+★ **主题开关**在标题栏上：浅色或暗色。在你手动选之前，它跟着你的系统走；选过之后就记住了。
+★ 回答里的**表格有自己的宽度**：它占满整列，长句子在自己的格子里换行，
+而列很多的表在**自己的框里**横向滚动，不会把整页推歪。
 
 ### 6.1 斜杠命令
 
@@ -441,9 +719,10 @@ agent:
 |---|---|
 | `/new` | 新建会话 |
 | `/stop` | 停掉当前这轮 |
-| `/attach` | 往当前会话附加文件 |
+| `/attach` | 往**下一条**消息附加文件 —— 见 §6.9 |
 | `/settings` | 打开配置编辑器 |
 | `/agents` | 切换当前会话的 Agent |
+| `/mcps` | 看看这个 Agent 的 MCP 服务器 —— 见 §6.8 |
 | `/compact` | **立刻压缩当前对话** —— 见 §6.6 |
 | `/skill` | 为这次任务指定一个技能 |
 | `/review` | 复查当前改动或给定路径 |
@@ -467,16 +746,38 @@ agent:
 
 ### 6.3 配置编辑器
 
-`/settings` 打开。它能改：`llm/` `agents/` `policy/` `tools/`。
+`/settings` 打开。它能改：`llm/` `agents/` `tools/` `mcps/`。
 
 写入有几道闸门：
 
+- **浏览器里不再做任何校验。** 编辑器把草稿发给服务端，显示服务端那份答案 —— 每条 issue
+  带着它所在的行。打字会 250 ms 防抖，属于旧草稿的回包直接丢掉。
+- **每条 issue 都点明它说的是哪个文件。** 别的文件上的问题显示在**那个**文件的名字下面，
+  而且它是个链接 —— 点一下编辑器就打开那个文件。你自己这个文件的问题就留在自己身上。
+  ★ 连解析都解析不了的文件仍然会拖垮整棵树，所以别的文件坏成这样，这次保存照样会被拒，
+  状态栏会写出是哪个文件坏在哪儿。
+- **灰色那行是 hint，红色那行是 error。** hint 说的是「这棵树少了一样东西」，它什么都不拦；
+  error 才是让 Save 按不下去的那个。模型没声明的 Agent 得到的是**它自己文件上的一条 hint**：
+  整棵树少它照样装得上（见 §4.1），所以眼前这个文件可能一点毛病没有。
+- **「让一个本来能跑的 Agent 掉出树」的改动会被拒。** 把某个 Agent 的模型改成一个没人声明的，
+  它本来会一声不吭地消失。拒绝显示在**你正在编辑的文件**上 —— 那正是被改的东西 —— 并且在
+  那个 Agent 回到树里之前 Save 一直是禁用的。新增 Agent、或者改一个不相干的地方，永远不会
+  这样被拒。
+- **「还有东西指着它」的删除会被拒，而且拒绝会点名是谁在指。** 还有一个 Agent 挂着
+  `mcps/fetch.yaml` 时把它删掉，那个 Agent 就指着一个不存在的服务器了。那句话会写明
+  **是哪个文件还在指着它**、**要移除什么** —— 先把引用去掉，再删这个文件。
+  模型档案（某个 Agent 在用）与被委派的 Agent（另一个 Agent 在委派它）也一样。
 - `server/` **不可编辑**（不热重载，改了要重启）。
 - **密钥字面量被拒** —— `api_key must be a reference, not a literal`。
   要用 `${ENV_VAR}` 或 `@file:/path`。
 - **没有 YAML 内容的文件被拒** —— 纯空、或者只有注释的文件根本没有配置。报错会点名
   这个文件需要哪些字段；在 `tools/` 下还会说清是哪个工具缺了什么。
+- **`mcps/` 下的文件必须叫 `<server>.yaml`**，服务器名字还要匹配 §4.7 的模式 ——
+  别的名字在保存时就被拒。
 - **乐观并发**：如果文件在别处被改过，保存会报冲突，让你选覆盖还是放弃。
+- **新建文件的文件名被服务端拒绝时，对话框不关**：你写的东西还在，服务端那句话就在输入框
+  旁边 —— 文件名规则是服务端的（`server/` 只读、`tools/` 只认五个名字、`mcps/` 只认
+  `<server>.yaml`），所以拒绝是从服务端回来的，不是对话框里那份副本给的。
 
 ### 6.4 上下文仪表盘
 
@@ -566,22 +867,100 @@ This session is running in another window — stop it to take over
 `runId`、**不带问题**——就能拿到这一轮剩下的部分。`GET /v2/sessions/{id}/runs`
 说这个 run 还跑不跑；它不跑的时候，那一轮的历史就在那里。
 
+### 6.8 `/mcps` —— 这个 Agent 的 MCP 服务器
+
+`/mcps` 是一个**动作**，不是提示词：它打开一个对话框，**不写进对话记录，也永远不到模型那里**。
+状态是**读**出来的，不是生成出来的 —— 让模型去描述这些服务器，等于造一个关于运行时
+已知事实的、有损的第二份真相。
+
+对话框标题是 "MCP servers"，每个已配置的服务器一块：
+
+- 服务器的名字、它的传输方式（`stdio` 或 `http`）、以及它的状态 —— `ready`、
+  `starting`、`unreachable` 或 `unused`；
+- 每个工具一行：服务器自己的名字、暴露出来的名字（`mcp__github__create_issue`）、
+  档位（`allow` 或 `ask`）、以及状态。
+
+一个服务器都没配时，对话框说的是 "No MCP servers are configured"。
+
+★ **打开对话框会把它问到的那些服务器启动起来**，所以它能回答「我的服务器是不是坏了」——
+否则答案只能是「跑一轮看看」。这个 Agent 没用到的服务器是 `unused`，不带工具行。
+
+★ **起不来的服务器不会让这一轮停掉。** 这个 Agent 照跑，只是没有那个服务器的工具 ——
+其余的工具不受影响 —— 而对话框里那个服务器旁边就带着原因。
+一个坏掉的服务器，代价只有它自己那些工具。
+
+★ **「正在启动」是它自己的一态：`starting`。** 服务器在配置一被读到时就在后台起起来，
+所以第一轮通常赶得上。一台还在起的服务器写着 `starting`，而且**不带错误** ——
+还没有错误，它正在路上。它带来的工具在**下一轮**进来。
+
+**Refresh** 按钮会重读一次状态，所以你改完服务器不用关掉对话框就能看到效果。
+
+### 6.9 发附件
+
+三个入口，最后都落在同一个地方 —— 输入框上方的一排 chip：
+
+| 怎么进来 | 会发生什么 |
+|---|---|
+| **回形针**按钮 | 打开文件选择器 |
+| **把文件拖**到输入框上 | 拖拽经过时输入框会高亮 |
+| **粘贴** | 剪贴板里有图时 Ctrl+V 就贴上了 —— 不用「先存成文件再选」 |
+
+★ **文件是挂在一条*消息*上的，不是挂在会话上的。** 输入框上方的 chip 是等着
+跟你的**下一条**消息一起发出去的；发出去之后它们就离开输入框，出现在那条消息
+本身。已经发出去的文件留在那条消息上 —— 几周之后刷新一下，你仍然看得出
+当时发的是哪一个文件。
+
+★ **模型是真的拿到它们了 —— 靠自己去打开。** 图片是作为图片放进去的，所以模型是
+**看见**它，而不是把字节当文本读；其它文本文件在消息开头以 `@` 行的形式给出绝对
+路径，模型用 `read_file` 去读。★ 文件内容不在请求里，所以模型第一件事就是打开那个
+文件 —— 文件很大时用 `offset` 和 `limit` 分段读。★ 二进制附件（PDF、压缩包）会在
+提示词里被标成「暂时不能处理」：模型会如实告诉你，而不是假装读过。
+★ **没有自动兜底。** 模型看不了图片时，这一轮会带着 provider 的错误结束；模型没去
+读的文件也不会在背后重发一遍。如果回答看起来像是没读过文件，就再提示模型读一次。
+
+★ **收下图片不等于看见图片。** 图片有没有真的进到模型的眼里，是 provider 的事：
+有的模型会读它，有的模型收下请求却不看它（DeepSeek 的 `deepseek-v4-pro` 就是
+这样）。★ 这种情况下模型会**自己说出来** —— openheron 没有办法在配置里声明一个
+模型支不支持视觉，所以它不假装知道。
+
+★ **chip 上的 × 是真删。** 不只是从列表里拿走：文件也从会话的 workspace 里
+删掉了。★ 已经随消息发出去的文件**不会**被删 —— 那条消息说了这个文件是问题
+的一部分，删了它，记录就在说谎。
+
+★ **文件在发之前能看，发之后也能看。** 图片在 chip 上是缩略图，其它文件是
+它那一类的图标。点一下就地打开：图片是原图，PDF 用阅读器，Markdown 渲染出来，
+代码带高亮，文本就是文本。★ 上方消息里的附件同样如此 —— 它们是历史，所以没有
+×，但照样打得开。★ 文件已经不在了（被 × 删了，或者 workspace 被清过）时，
+回退成图标，而不是留一个碎图。
+
+★ **图片在进来的时候会被压缩。** 格式不变 —— PNG 仍是 PNG，透明也留着 ——
+长边超过 1600 像素时会被缩下来。★ GIF 与 WebP 原样存：前者会丢动画，后者
+在这里没法重新编码。★ 文件在 workspace 里的**名字**带一小段哈希，所以同名传
+两次是两个文件，而不是后者盖掉前者 —— 而界面上仍然显示你认得的那个名字。
+
+★ **刷新不会丢东西。** 还没发出去的文件会回来（服务端留着它们），已经发出去的
+文件留在各自的消息上。
+
 ## 7. 知识库
 
 知识库是**可选**的本地语料检索层：把一批 markdown 文档变成 Agent 能检索的资料。
+
+★ **「corpus」是什么意思。** 「corpus」是信息检索里对「检索系统据以作答的那批文档」的叫法；
+在这里它就是**一个目录**。`corpus_dir` 是知识库要索引的那个目录 —— 一条相对项目根的路径，
+而只有它下面的 `.md` 文件会被索引（`kb/index.go:21`）。
 
 ### 7.1 开启
 
 ```yaml
 # .openheron/tools/kb.yaml
-corpus: docs          # 相对项目根的目录
+corpus_dir: docs      # a directory relative to the project root
 index: default
 model: openai/text-embedding-3-small
 top_k: 8
 ```
 
-- `corpus` **不配就是关闭**。
-- `corpus` **必须是相对项目根的路径**。写绝对路径会**启动报错** ——
+- `corpus_dir` **不配就是关闭**。
+- `corpus_dir` **必须是相对项目根的路径**。写绝对路径会**启动报错** ——
   索引和语料必须同生共死，放到系统目录里的语料会让索引失去意义。
 - `model` 必填，且必须指向一个声明了 `kind: embedding` 的模型，
   否则启动报错（`kb.model ... is not an embedding model`）。
@@ -591,11 +970,11 @@ top_k: 8
 ### 7.2 命令行
 
 ```bash
-openheron kb index                 # 建索引
-openheron kb index docs/a.md       # 只索引指定文件
-openheron kb search "配置根怎么解析"  # 检索
-openheron kb status                # 看索引现状
-openheron kb status --json         # 机器可读
+openheron kb index                 # build the index
+openheron kb index docs/a.md       # index only the given files
+openheron kb search "how is the config root resolved"   # search
+openheron kb status                # inspect the index
+openheron kb status --json         # machine-readable
 ```
 
 三条命令都支持 `--config-dir <path>`，用来指向别的配置根。
@@ -616,12 +995,12 @@ Agent 拿到两个工具：
 ## 8. 命令行速查
 
 ```
-openheron [--config-dir <path>] [--project-root <path>]   启动服务
-openheron init [选项]                                     生成最小可运行配置
-openheron kb index [--config-dir] [--json] [文件...]       建索引
-openheron kb search [--config-dir] <查询>                  检索
-openheron kb status [--config-dir] [--json]                看索引现状
-openheron version                                         打印版本号
+openheron [--config-dir <path>] [--project-root <path>]   start the server
+openheron init [options]                                   generate a minimal runnable configuration
+openheron kb index [--config-dir] [--json] [files...]      build the index
+openheron kb search [--config-dir] <query>                 search
+openheron kb status [--config-dir] [--json]                inspect the index
+openheron version                                         print the version
 ```
 
 ## 9. HTTP 接口速查
@@ -645,10 +1024,11 @@ openheron version                                         打印版本号
 | POST/GET | `/v2/sessions/:id/files` | 上传 / 列会话工作区文件（单文件上限 32 MiB） |
 | GET | `/v2/project/files` | 列项目根文件（`?q=` `?limit=`） |
 | GET | `/v2/commands` | 斜杠命令清单 |
-| POST | `/v2/run` | **SSE 入口**：提问，或回复审批 |
+| POST | `/v2/run` | **SSE 入口**：提问，或回复审批（见 §6.7） |
 | GET | `/v2/skills` | 技能清单 |
 | GET | `/v2/agents` `/v2/agents/:agentId` | Agent 及其生效工具表 |
-| GET | `/v2/config` | 生效配置 |
+| GET | `/v2/mcps` | 某个 Agent 的 MCP 服务器（`?agent=`）；见 §6.8 |
+| GET | `/v2/config` | 生效配置（其中的 `policy` 字段带着缺省档位与那些不用问的工具名） |
 | GET | `/v2/health` | 健康检查（含 `deferred` 告警） |
 | GET | `/v2/runtime` | 运行时状态 |
 | GET | `/v2/settings` | 可编辑项清单 |
@@ -658,15 +1038,15 @@ openheron version                                         打印版本号
 ### 9.1 跑一轮
 
 ```bash
-# 1. 建会话
+# 1. Create a session
 curl -s -X POST localhost:8080/v2/sessions \
   -H 'content-type: application/json' -d '{"agentId":"main"}'
 # → {"threadId":"...","state":"idle",...}
 
-# 2. 提问（SSE 流）
+# 2. Ask (SSE stream)
 curl -N -X POST localhost:8080/v2/run \
   -H 'content-type: application/json' \
-  -d '{"threadId":"<上一步的 id>","query":"读一下 README"}'
+  -d '{"threadId":"<the id from step 1>","query":"read the README"}'
 ```
 
 ★ **`threadId` 必填**。不传会得到
@@ -688,7 +1068,7 @@ curl -N -X POST localhost:8080/v2/run \
   "threadId": "...",
   "resume": [
     {"interruptId": "...", "payload": {"approved": true}},
-    {"interruptId": "...", "payload": {"approved": false, "reason": "别动那个文件"}}
+    {"interruptId": "...", "payload": {"approved": false, "reason": "do not touch that file"}}
   ]
 }
 ```
@@ -715,12 +1095,25 @@ curl -N -X POST localhost:8080/v2/run \
 混合打分没生效。配好 embedding 模型后重新 `kb index`。
 
 **Q：Agent 调不动 `write_file`？**
-两种可能：它被这个 Agent 的 `disabled_tools` 禁了，或者被全局 `deny` 禁了。
-查 `GET /v2/agents/:agentId` 看生效工具表。默认 `main` 是禁用了
+两种可能：它不在这个 Agent 的 `tools:` 清单里 —— 那模型连看都看不见 —— 或者它
+本来就只是个 `ask` 档工具，而那张审批卡片没人答。查
+`GET /v2/agents/:agentId` 看生效工具表。默认 `main` 是禁用了
 `write_file`/`edit_file`/`execute` 的 —— 出厂配置里它只做编排。
 
 **Q：`/v2/run` 报 `threadId is required`**
 先 `POST /v2/sessions` 建会话。
+
+**Q：模型看不见 MCP 服务器的工具？**
+打开 `/mcps`（见 §6.8）。这个 Agent 没挂载的服务器写着 `unused`；够不着的工具写着
+`blocked`，括号里的理由会点名 `mcps` —— 这个 Agent 没挂载那个 server。
+写着 `unreachable` 的服务器旁边带着出错原因，说清它为什么起不来。
+
+**Q：MCP 服务器起不来？**
+启动报错会点名是哪个文件的哪个字段。`mcps/` 是热的，所以改完下一轮就生效 —— 不用重启。
+
+**Q：面板说某台服务器 `starting`？**
+它正在起：配置一被读到，服务器就在后台起起来。它带来的工具在**下一轮**进来 ——
+按 **Refresh** 就看得见。
 
 **Q：端口被占 / 界面打不开？**
 `listen_addr` 改端口，或用环境变量 `LISTEN_ADDR` 覆盖。

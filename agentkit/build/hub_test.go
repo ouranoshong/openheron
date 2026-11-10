@@ -101,7 +101,7 @@ func TestSkillAgentHubEmptyNameReturnsThePooledAgent(t *testing.T) {
 }
 
 func TestSkillAgentHubForkBuildsNamedAgent(t *testing.T) {
-	cfg := configFromSpecs("test/model", nil, decl.Policy{}, []decl.SubAgentSpec{
+	cfg := configFromSpecs("test/model", nil, nil, []decl.SubAgentSpec{
 		{ID: "worker", Description: "does the work", Instruction: "work",
 			Sub: []decl.SubAgentSpec{{ID: "leaf", Description: "leaf"}}},
 	})
@@ -128,7 +128,7 @@ func TestSkillAgentHubForkBuildsNamedAgent(t *testing.T) {
 
 func TestSkillAgentHubPrefersSkillModelOverride(t *testing.T) {
 	override := &stubModel{}
-	cfg := configFromSpecs("test/model", nil, decl.Policy{}, []decl.SubAgentSpec{
+	cfg := configFromSpecs("test/model", nil, nil, []decl.SubAgentSpec{
 		{ID: "worker", Description: "d", ModelRef: "worker/model"},
 	})
 	b := newTestBuilderWithConfig(t, cfg)

@@ -37,7 +37,7 @@ func TestTheRunIsRecordedBeforeItIsHandedOut(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestTheTerminalRowLandsAfterTheArchive(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,12 +107,14 @@ func TestATurnThatNeverStartsClosesItsRow(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "never starts")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "never starts", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := turn.Wait(100 * time.Millisecond); !errors.Is(err, ErrStartTimeout) {
-		t.Fatalf("Wait = %v, want ErrStartTimeout", err)
+	// ★ The build's own reason, not a start timeout: the turn knows why it
+	//   never ran, and the row below carries the same reason.
+	if err := turn.Wait(100 * time.Millisecond); !errors.Is(err, ErrAgentUnavailable) {
+		t.Fatalf("Wait = %v, want ErrAgentUnavailable", err)
 	}
 
 	waitFor(t, func() bool {
@@ -140,7 +142,7 @@ func TestTheScanNamesTheActiveRun(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +188,7 @@ func TestTheResumeNamesItsParentRun(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +236,7 @@ func TestAFailedRunIsNotRecordedAsCompleted(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +271,7 @@ func TestAStoppedRunIsRecordedAsAborted(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +313,7 @@ func TestStatusOfReportsTheActiveRunID(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "hello there", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

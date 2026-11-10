@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -110,25 +111,45 @@ func (l *FileLock) Path() string {
 	return l.path
 }
 
+// holderOffset is where the pid is written.
+//
+// ★ Offset 0 is the byte the Windows lock covers. Writing the pid there
+//
+//	would be correct on Unix and unreadable on Windows: a second process
+//	cannot read a byte another process holds a lock on, so the conflict
+//	message would always say "holder unknown".
+const holderOffset = 1
+
 func (l *FileLock) stampHolder() {
 	if l.f == nil {
 		return
 	}
 	body := strconv.Itoa(os.Getpid()) + "\n"
-	if err := l.f.Truncate(0); err != nil {
+	// ★ Keep the locked byte: Truncate(0) removes the range the lock names.
+	if err := l.f.Truncate(holderOffset); err != nil {
 		return
 	}
-	if _, err := l.f.WriteAt([]byte(body), 0); err != nil {
+	if _, err := l.f.WriteAt([]byte(body), holderOffset); err != nil {
 		return
 	}
 }
 
 func (l *FileLock) holderHint() string {
-	b, err := os.ReadFile(l.path)
+	f, err := os.Open(l.path)
 	if err != nil {
 		return "holder unknown"
 	}
-	pid := strings.TrimSpace(string(b))
+	defer f.Close()
+
+	// ★ Read past the locked byte. Reading the whole file fails on Windows
+	//   while another process holds the lock, which is exactly the case this
+	//   message exists for.
+	buf := make([]byte, 64)
+	n, err := f.ReadAt(buf, holderOffset)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "holder unknown"
+	}
+	pid := strings.TrimSpace(string(buf[:n]))
 	if pid == "" {
 		return "holder unknown"
 	}

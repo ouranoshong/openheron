@@ -114,14 +114,17 @@ func TestWriteManyWritesMutuallyDependentFilesAtOnce(t *testing.T) {
 
 func TestWriteManyLeavesTheDiskAloneWhenTheMergeIsRejected(t *testing.T) {
 	f := newFixture(t)
+	f.seedMinimal(t)
 	s, err := NewService(f.root, filepath.Dir(f.root))
 	if err != nil {
 		t.Fatal(err)
 	}
 	before := snapshot(t, f.root)
 
+	// ★ The batch replaces the provider with one that no longer declares
+	//   openai/fast — the model **main** names. Main would drop out of the
+	//   tree, and a change that does that is refused.
 	_, _, err = s.WriteMany([]File{
-		{Rel: "agents/main.md", Content: []byte("---\nmodel: openai/nope\n---\n\n坏的。\n")},
 		{Rel: "llm/openai.yaml", Content: []byte(batchProvider)},
 	}, "")
 	if err == nil {
@@ -152,15 +155,18 @@ func TestWriteManyRejectsALiteralSecret(t *testing.T) {
 
 func TestWriteManyIsAllOrNothing(t *testing.T) {
 	f := newFixture(t)
+	f.seedMinimal(t)
 	s, err := NewService(f.root, filepath.Dir(f.root))
 	if err != nil {
 		t.Fatal(err)
 	}
 	before := snapshot(t, f.root)
 
+	// ★ One file in the batch is fine and the other takes main out of the
+	//   tree. The fine one must not land either: a batch is one change.
 	_, _, err = s.WriteMany([]File{
 		{Rel: "llm/openai.yaml", Content: []byte(batchProvider)},
-		{Rel: "agents/main.md", Content: []byte("---\nmodel: openai/missing\n---\n\n坏的。\n")},
+		{Rel: "tools/http.yaml", Content: []byte("methods: [get]\nallows: [execute]\n")},
 	}, "")
 	if err == nil {
 		t.Fatal("the batch must be rejected")

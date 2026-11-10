@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"io/fs"
+	"log/slog"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -13,6 +14,7 @@ import (
 	hertzconfig "github.com/cloudwego/hertz/pkg/common/config"
 	"github.com/cloudwego/hertz/pkg/route"
 
+	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/agentkit/run"
 	hcfg "github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/storage"
@@ -36,8 +38,8 @@ type Server struct {
 	// have no socket); defaults to transport.New.
 	newStream func(*app.RequestContext) *transport.SSEStream
 	// cfgFn reads the live configuration for the introspection endpoints.
-	// A function, not a pointer: openheron hot-reloads llm/, agents/ and policy/,
-	// and a captured value would serve stale agent topology after every reload.
+	// A function, not a pointer: openheron hot-reloads llm/, agents/, tools/ and
+	// mcps/, and a captured value would serve stale agent topology after every reload.
 	cfgFn ConfigSource
 	// cfgSvc is the config Service itself, for /v2/settings — reading needs
 	// only the merged Config, writing needs the files behind it.
@@ -58,9 +60,27 @@ type Server struct {
 	// compaction. Optional: without it the endpoint reports that no
 	// compactor is wired.
 	compactorFn CompactorSource
+	// mcpFn reports the MCP servers of one agent. Optional for the same
+	// reason as the tools source, but with a sharper edge: the view asks
+	// the manager to start the servers it reports, so recomputing it here
+	// would be the very duplication this injection exists to prevent.
+	mcpFn MCPSource
 	// startTimeoutFn reads server.start_timeout. A function for the same
 	// reason as cfgFn: the value is configuration, not a constant.
 	startTimeoutFn func() time.Duration
+	// logLevelFn reports the log level in effect. A function because the level
+	// can move without the file changing — an env override, or a reload.
+	logLevelFn func() string
+	// log is the transport's logger. Nil is accepted: tests build a server
+	// without one and the lines are dropped.
+	log *slog.Logger
+}
+
+func (s *Server) logger() *slog.Logger {
+	if s == nil || s.log == nil {
+		return obs.Discard()
+	}
+	return s.log
 }
 
 // defaultStartTimeout matches the shipped default when no config is wired.
@@ -79,6 +99,16 @@ func (s *Server) startTimeout() time.Duration {
 // SetStartTimeoutSource wires server.start_timeout into the run path.
 func (s *Server) SetStartTimeoutSource(fn func() time.Duration) { s.startTimeoutFn = fn }
 
+// SetLogLevelSource wires the effective log level into GET /v2/config.
+func (s *Server) SetLogLevelSource(fn func() string) { s.logLevelFn = fn }
+
+func (s *Server) logLevel() string {
+	if s.logLevelFn == nil {
+		return ""
+	}
+	return s.logLevelFn()
+}
+
 // SetSkillsSource wires the skills block of GET /v2/spec.
 func (s *Server) SetSkillsSource(fn func() []SkillView) { s.skillsFn = fn }
 
@@ -87,8 +117,9 @@ func (s *Server) SetPoolSource(fn func() map[string]any) { s.poolFn = fn }
 
 // New builds the server. Both collaborators are explicit so tests can inject
 // fakes without touching the filesystem or a model.
-func New(rt *run.Runtime, sm storage.SessionManager, opts ...hertzconfig.Option) *Server {
-	return &Server{rt: rt, sm: sm, h: hserver.New(opts...), newStream: transport.New}
+func New(rt *run.Runtime, sm storage.SessionManager, log *slog.Logger,
+	opts ...hertzconfig.Option) *Server {
+	return &Server{rt: rt, sm: sm, log: log, h: hserver.New(opts...), newStream: transport.New}
 }
 
 // SetStaticDir serves the front end from a directory on disk. Empty disables
@@ -127,9 +158,18 @@ func (s *Server) registerRoutes() {
 	}
 
 	if s.staticFS != "" && s.embedded == nil {
+		// ★ StaticFS is fasthttp's FS: it keeps the served files open and
+		//   reuses them, so a change on disk is invisible until the cache
+		//   expires — and on Windows an open handle also blocks deletion.
+		//   The default is ten seconds, which is a long time to stare at an
+		//   unchanged frontend in dir mode; one second is the compromise.
+		//   A non-positive value is normalised back to the default, so this
+		//   cannot be switched off (see staticDir in server_test.go for the
+		//   consequence in tests).
 		h.StaticFS("/", &app.FS{
-			Root:       s.staticFS,
-			IndexNames: []string{"index.html"},
+			Root:          s.staticFS,
+			IndexNames:    []string{"index.html"},
+			CacheDuration: time.Second,
 		})
 	}
 }

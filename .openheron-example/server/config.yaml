@@ -35,7 +35,7 @@ agent:
   #   own subagents:).
   #   See docs/multi-agent-design.md §4.
 
-# Changes under llm/ agents/ policy/ tools/ are discovered automatically and swap the generation; server/ does not
+# Changes under llm/ agents/ tools/ mcps/ are discovered automatically and swap the generation; server/ does not
 watch:
   enabled: true
   debounce: 200ms

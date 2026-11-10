@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 
 // FakeRun is one run of the fake's session.
 //
@@ -28,7 +29,12 @@ export interface FakeThread {
   pendings?: PendingApproval[]
   runs?: FakeRun[]
   usage?: Usage
-  files: { name: string; path: string; size: number }[]
+  files: { name: string; path: string; size: number; mime: string }[]
+  // blobs holds the bytes of the uploaded files, keyed by the stored path.
+  //
+  // ★ The fake needs them because the raw endpoint serves **bytes** — a
+  //   fake that answered the preview with a name would test nothing.
+  blobs?: Map<string, ArrayBuffer>
 }
 
 export interface FakeMessage {
@@ -213,9 +219,16 @@ export const SCENARIOS = {
 
   error: ["A"],
 
+  // ★ agentUnavailable: the agent could not be built — the configuration is
+  //   broken, not the turn. The client must show the reason, because the
+  //   answer is "fix a file", not "send it again".
+  agentUnavailable: ["A"],
+
   code: ["A"],
 
   table: ["A"],
+
+  wideTable: ["A"],
 
   lists: ["A"],
 
@@ -285,6 +298,67 @@ const FAKE_SKILLS = [
   },
 ]
 
+// The MCP view the fake backend serves.
+//
+// ★ It carries the three states the panel has to show: a server that is up,
+//   one that is unreachable, and one the agent does not use.
+const FAKE_MCP_SERVERS = [
+  {
+    name: "github",
+    transport: "stdio",
+    status: "ready",
+    error: "",
+    tools: [
+      {
+        name: "read_issue",
+        exposedName: "mcp__github__read_issue",
+        tier: "ask",
+        status: "available",
+        reason: "",
+      },
+      {
+        name: "delete_repo",
+        exposedName: "mcp__github__delete_repo",
+        tier: "ask",
+        status: "available",
+        reason: "",
+      },
+    ],
+  },
+  {
+    name: "files",
+    transport: "http",
+    status: "unreachable",
+    error: "the command is not on the PATH",
+    tools: [
+      {
+        name: "read_file",
+        exposedName: "mcp__files__read_file",
+        tier: "allow",
+        status: "available",
+        reason: "",
+      },
+    ],
+  },
+  {
+    name: "deploy",
+    transport: "stdio",
+    status: "unused",
+    error: "",
+    tools: [],
+  },
+]
+
+// ★ A server that is on its way: it carries no error, because there is no
+// error yet — it is starting, and the tools it brings join the next turn.
+const FAKE_MCP_STARTING_SERVER = {
+  name: "pending",
+  transport: "stdio",
+  status: "starting",
+  error: "",
+  tools: [],
+}
+
 const FAKE_COMMANDS = [
   { name: "new", description: "Start a new thread", kind: "action", action: "new_thread" },
   { name: "stop", description: "Stop the current run", kind: "action", action: "stop_run" },
@@ -302,6 +376,12 @@ const FAKE_COMMANDS = [
     description: "Compact the conversation into a summary",
     kind: "action",
     action: "compact",
+  },
+  {
+    name: "mcps",
+    description: "Show the MCP servers of this agent",
+    kind: "action",
+    action: "open_mcps",
   },
   {
     name: "skill",
@@ -353,7 +433,7 @@ const FAKE_AGENTS = {
       },
       maxIterations: 20,
       subagents: [],
-      disabledTools: [],
+      tools: [],
     },
     {
       id: "main",
@@ -368,7 +448,7 @@ const FAKE_AGENTS = {
       },
       maxIterations: 40,
       subagents: ["worker"],
-      disabledTools: [],
+      tools: [],
     },
   ],
 }
@@ -384,7 +464,7 @@ const FAKE_AGENTS_MULTI = {
       model: { provider: "openai", model: "fast", reasoning: "low", reasoningAvailable: ["low"], reasoningDefault: "low" },
       maxIterations: 20,
       subagents: [],
-      disabledTools: [],
+      tools: [],
     },
     {
       id: "lead",
@@ -392,7 +472,7 @@ const FAKE_AGENTS_MULTI = {
       model: { provider: "deepseek", model: "deepseek-v4", reasoning: "high", reasoningAvailable: ["high", "off"], reasoningDefault: "off" },
       maxIterations: 40,
       subagents: ["coder"],
-      disabledTools: [],
+      tools: [],
     },
     {
       id: "main",
@@ -400,7 +480,7 @@ const FAKE_AGENTS_MULTI = {
       model: { provider: "deepseek", model: "deepseek-v4", reasoning: "high", reasoningAvailable: ["high", "off"], reasoningDefault: "off" },
       maxIterations: 40,
       subagents: ["lead"],
-      disabledTools: [],
+      tools: [],
     },
   ],
 }
@@ -415,7 +495,7 @@ const FAKE_AGENTS_MANY = {
     model: { provider: "openai", model: "fast", reasoning: "low", reasoningAvailable: ["low"], reasoningDefault: "low" },
     maxIterations: 20,
     subagents: [],
-    disabledTools: [],
+    tools: [],
   })),
 }
 
@@ -431,7 +511,7 @@ const FAKE_AGENTS_GREW = {
       model: { provider: "openai", model: "fast", reasoning: "low", reasoningAvailable: ["low"], reasoningDefault: "low" },
       maxIterations: 20,
       subagents: [],
-      disabledTools: [],
+      tools: [],
     },
   ],
 }
@@ -852,6 +932,38 @@ function eventsFor(
       ]
     }
 
+    case "wideTable": {
+      // ★ Twelve columns, so the table's floor (7rem per column) is wider
+      //   than the chat column: this is the case where the table is
+      //   **meant** to overflow and scroll inside its own wrapper.
+      const cols = [
+        "alpha",
+        "bravo",
+        "charlie",
+        "delta",
+        "echo",
+        "foxtrot",
+        "golf",
+        "hotel",
+        "india",
+        "juliet",
+        "kilo",
+        "lima",
+      ]
+      const md = [
+        `| ${cols.join(" | ")} |`,
+        `| ${cols.map(() => "---").join(" | ")} |`,
+        `| ${cols.map((c) => `${c}-value`).join(" | ")} |`,
+      ].join("\n")
+      return [
+        started(threadId, runId),
+        textStart("m-1", "assistant"),
+        textDelta("m-1", md),
+        textEnd("m-1"),
+        finished(threadId, runId),
+      ]
+    }
+
     case "lists": {
       const md = [
         "- alpha",
@@ -901,6 +1013,15 @@ function eventsFor(
         textDelta("m-1", "starting"),
         textEnd("m-1"),
         runError("upstream_error", "upstream provider is unavailable"),
+      ]
+
+    case "agentUnavailable":
+      return [
+        started(threadId, runId),
+        runError(
+          "agent_unavailable",
+          'agent "main" is left out of the tree: the model openai/gpt-4o-mini is not declared under llm/',
+        ),
       ]
 
     case "reasoningDone": {
@@ -1013,6 +1134,7 @@ export function startFakeServer(port = 0): FakeServer {
   let seq = 0
   let scenario: ScenarioName = "simple"
   let agentsMode: "default" | "multi" | "many" | "grew" = "default"
+  let mcpMode: "default" | "empty" | "starting" = "default"
   let defaultRoot = "main"
 
   const find = (id: string) => threads.find((t) => t.threadId === id)
@@ -1034,6 +1156,74 @@ export function startFakeServer(port = 0): FakeServer {
       out[k] = v
     })
     return out
+  }
+
+  // mimeOf guesses a content type from a file name.
+  //
+  // ★ The real server derives it the same way: from the **name**, not from
+  //   what the client said about the file.
+  function mimeOf(name: string): string {
+    const ext = name.slice(name.lastIndexOf(".")).toLowerCase()
+    switch (ext) {
+      case ".png":
+        return "image/png"
+      case ".jpg":
+      case ".jpeg":
+        return "image/jpeg"
+      case ".gif":
+        return "image/gif"
+      case ".webp":
+        return "image/webp"
+      case ".txt":
+        return "text/plain"
+      case ".md":
+      case ".markdown":
+        return "text/markdown"
+      case ".json":
+        return "application/json"
+      case ".csv":
+        return "text/csv"
+      case ".html":
+      case ".htm":
+        return "text/html"
+      case ".xml":
+        return "application/xml"
+      case ".yaml":
+      case ".yml":
+        return "application/yaml"
+      case ".pdf":
+        return "application/pdf"
+      case ".zip":
+        return "application/zip"
+      default:
+        return "application/octet-stream"
+    }
+  }
+
+  // hashedName is the name a file is stored under.
+  //
+  // ★ The fake mirrors the real server here on purpose: the stored name
+  //   carries a hash, so a second upload of the same name does not
+  //   overwrite the first one — and the interface still shows the name the
+  //   user typed, because the name and the path are two different fields.
+  //
+  // ★ The hash is over the name, the size and the time, separated by zero
+  //   bytes, so "ab" + "12" and "a" + "b12" cannot collide.
+  function hashedName(name: string, size: number, mtime: number): string {
+    const idx = name.lastIndexOf(".")
+    const stem = idx > 0 ? name.slice(0, idx) : name
+    const ext = idx > 0 ? name.slice(idx) : ""
+    const h = createHash("sha256")
+    h.update(name)
+    h.update(Buffer.from([0]))
+    const n = Buffer.alloc(8)
+    n.writeBigUInt64BE(BigInt(size))
+    h.update(n)
+    h.update(Buffer.from([0]))
+    const m = Buffer.alloc(8)
+    m.writeBigUInt64BE(BigInt(mtime))
+    h.update(m)
+    return `${stem}-${h.digest("hex").slice(0, 8)}${ext}`
   }
 
   async function readJSON(req: Request): Promise<Record<string, any>> {
@@ -1068,41 +1258,61 @@ export function startFakeServer(port = 0): FakeServer {
     settingsDisk.length = 0
     settingsRev = 0
     const put = (path: string, body: string) => settingsDisk.push({ path, body, rev: nextRev() })
-    put("policy/permissions.yaml", "allow: [ls, read_file]\nask: [write_file]\ndeny: []\n")
-    put("policy/limits.yaml", "agent:\n  max_depth: 2\nretry:\n  max_retries: 1\n")
+    put("tools/http.yaml", "methods: [get]\nallows: [request_get]\n")
+    // ★ An mcps/ file on disk, so the editor can be opened on the partition
+    //   that carries YAML like tools/ does. Without it the MCP partition has
+    //   no item to select, and "mcps/ is not highlighted" cannot be seen.
+    put("mcps/filesystem.yaml", "transport: stdio\ncommand: npx\nargs:\n  - mcp-server-filesystem\ntimeout: 30s\n")
     put("agents/main.md", "---\nmodel: deepseek/flash\ndescription: root\n---\nbody\n")
+    // ★ A second agent, so an issue about another file has a file to be
+    //   about — and so the editor's link to it goes somewhere.
+    put("agents/agent-expert.md", "---\nmodel: openai/gpt-4o-mini\ndescription: expert\n---\nexpert body\n")
     put("llm/deepseek.yaml", "type: openai\nbase_url: https://x\napi_key: ${KEY}\nmodels:\n  - id: flash\n")
+    // ★ A skill, so the tree has a folder that is two levels deep — the one
+    //   partition whose path is not `<section>/<file>`.
+    put("skills/code-review/SKILL.md", "---\ndescription: reviews a diff\n---\nbody\n")
     put("server/config.yaml", 'listen_addr: ":8080"\n')
   }
   seedSettings()
 
   const SETTINGS_MANIFEST = {
+    // ★ The order mirrors the real server's partition table
+    //   (spec.Categories): llm, agents, server, tools, mcps. The client picks
+    //   the **first editable** item when the dialog opens, so a fake with a
+    //   different order tests a different file than the real one does.
     categories: [
-      { id: "policy", label: "Approval policy", editable: true, hot: true },
-      { id: "agents", label: "Agents", editable: true, hot: true },
       { id: "llm", label: "Providers", editable: true, hot: true },
+      { id: "agents", label: "Agents", editable: true, hot: true },
       { id: "server", label: "Server", editable: false, hot: false, note: "not hot-reloaded; changes apply on restart" },
       { id: "tools", label: "Tools", editable: true, hot: true },
+      // ★ The MCP partition, exactly as the real server ships it: editable
+      //   and hot. The client's own list of editable sections is a second
+      //   truth — it is what made "mcps/ is not editable" appear.
+      { id: "mcps", label: "MCP servers", editable: true, hot: true },
+      // ★ A skill is a folder: skills/<name>/SKILL.md. Nested, editable, hot.
+      { id: "skills", label: "Skills", editable: true, hot: true },
     ],
     items: [
-      { path: "policy/permissions.yaml", exists: true, hot: true, revision: "r1" },
-      { path: "policy/limits.yaml", exists: true, hot: true, revision: "r6" },
-      { path: "agents/main.md", exists: true, hot: true, revision: "r3" },
       { path: "llm/deepseek.yaml", exists: true, hot: true, revision: "r4" },
+      { path: "agents/main.md", exists: true, hot: true, revision: "r3" },
+      { path: "agents/agent-expert.md", exists: true, hot: true, revision: "r3" },
       { path: "server/config.yaml", exists: true, hot: false, revision: "r5" },
+      { path: "tools/http.yaml", exists: true, hot: true, revision: "r1" },
+      { path: "mcps/filesystem.yaml", exists: true, hot: true, revision: "r1" },
+      { path: "skills/code-review/SKILL.md", exists: true, hot: true, revision: "r1" },
     ],
     templates: {
-      policy: "allow: []\nask: []\ndeny: []\n",
-      "policy/limits.yaml":
-        "# 限制规则：数量上的上限。\n# 只能收紧；放宽请改 server/config.yaml。\nagent:\n  max_depth: 0\nretry:\n  max_retries: 0\n",
       agents: "---\nmodel: \ndescription: \n---\n\n# available models: deepseek/flash\n",
       llm: "type: openai\nbase_url: \napi_key: ${}\nmodels: []\n",
+      mcps: "transport: stdio\ncommand: mcp-example-server\nargs: []\ntimeout: 30s\ncall_timeout: 60s\n",
+      skills: "---\ndescription: \n---\n\n# Instructions\n",
       // ★ The tools section template is **nothing but comments**, exactly as
       //   the real server ships it. A file built from it has no YAML
       //   document at all, so the skeleton the dialog must offer is the
       //   FILE's template — this is the shape the bug lived in.
       tools:
         "# tools/ one file = one tool:\n" +
+        "#   filesystem.yaml   the filesystem tools' tiers (always mounted)\n" +
         "#   http.yaml         request_get / request_post / request_put / request_delete\n" +
         "#   web_search.yaml   duckduckgo_search\n" +
         "#   wikipedia.yaml    wikipedia_search\n" +
@@ -1112,6 +1322,13 @@ export function startFakeServer(port = 0): FakeServer {
         "#   Whether the file exists IS the switch — turning a tool off = deleting that file.\n" +
         "#\n" +
         "# ★ tools/ is hot-reloaded: the change takes effect on the next turn, no process restart.\n",
+      "tools/filesystem.yaml":
+        "# The filesystem tools. ★ They are **always mounted** — this file does not\n" +
+        "#   switch them on, it tunes their tiers.\n" +
+        "#\n" +
+        "# ★ `allows:` here is **additive**: a name joins the exceptions, and it never\n" +
+        "#   takes one away.\n" +
+        "allows: []\n",
       "tools/http.yaml":
         "# HTTP tool. Writing this file enables it.\n" +
         "#\n" +
@@ -1155,18 +1372,125 @@ export function startFakeServer(port = 0): FakeServer {
 
   const hotFor = (path: string) => !path.startsWith("server/")
 
-  const writeSettingOnProbe = (body: any): Response | null => {
-    const path: string = body.path ?? ""
-    const content: string = body.content ?? ""
-    if (path.startsWith("llm/") && /^api_key:\s*(?!\$\{|@file:)/m.test(content)) {
-      return fail(400, "api_key must be a ${ENV} or @file: reference", "config_secret_literal")
+  // validateProbe answers `/v2/settings/validate` the way the loader answers
+  // Diagnostics: a list of issues, each with a line when it has one.
+  //
+  // ★ The editor asks the server now instead of running its own copy of the
+  //   rules, so the fake has to model the two findings the specs are about:
+  //   a key written out in plain text, and a file with no YAML document at
+  //   all. Everything else validates — which is what "the fake is not a
+  //   loader" means, and the real loader's own cases live in Go.
+  const validateProbe = (path: string, content: string) => {
+    const issues: { path?: string; line: number; severity: "error" | "hint"; message: string }[] = []
+    const hasDocument = content.split("\n").some((l) => {
+      const t = l.trim()
+      return t !== "" && !t.startsWith("#")
+    })
+    if (!hasDocument) {
+      issues.push({
+        path,
+        line: 0,
+        severity: "error",
+        message: "the file is empty (or contains only comments)",
+      })
+      return issues
     }
-    if (content.includes("BROKEN")) {
-      return fail(
-        422,
-        "agents/main.md references model deepseek/gone which is not declared under llm/",
-        "config_would_break_merge",
-      )
+    if (path.startsWith("llm/")) {
+      const m = /^api_key:\s*(?!\$\{|@file:)/m.exec(content)
+      if (m) {
+        issues.push({
+          path,
+          line: content.slice(0, m.index).split("\n").length,
+          severity: "error",
+          message:
+            "api_key must be a reference, not a literal: use ${ENV_VAR} or @file:/path so the secret stays out of the repository",
+        })
+      }
+    }
+    // ★ An agent whose model is not declared is **left out of the tree**: the
+    //   tree still loads, the reason is said out loud, and the problem lands
+    //   on **that agent's own file** — not on the file being edited. The
+    //   notice belongs to the tree, so it is there whichever file is open.
+    const expertStillBroken =
+      path !== "agents/agent-expert.md" || content.includes("model: openai/gpt-4o-mini")
+    if (expertStillBroken) {
+      issues.push({
+        path: "agents/agent-expert.md",
+        line: 0,
+        severity: "hint",
+        message:
+          "agent agent-expert references model openai/gpt-4o-mini which is not declared under llm/; the agent is left out",
+      })
+    }
+    // ★ The same shape for the MCP server: an unset environment variable
+    //   leaves its entry out, and the notice is on the server's own file.
+    issues.push({
+      path: "mcps/memory.yaml",
+      line: 0,
+      severity: "hint",
+      message:
+        "env MEMORY_FILE_PATH refers to OPENHERON_MCP_MEMORY_FILE, which is not set; the entry is left out",
+    })
+    // ★ **The gate.** A change that would take a **working** agent out of the
+    //   tree is refused — and the refusal is on the file being edited, because
+    //   that is the change being made. The agent that would be lost is named.
+    if (path === "agents/main.md" && content.includes("model: deepseek/gone")) {
+      issues.push({
+        path,
+        line: 0,
+        severity: "error",
+        message:
+          'the change would leave the agent "main" out of the tree: the model deepseek/gone is not declared under llm/',
+      })
+    }
+    return issues
+  }
+
+  // pathProbe stands in for `spec.ValidatePath` in the two refusals the specs
+  // are about: a file name a partition does not accept, and a server name that
+  // could not be read back.
+  //
+  // ★ This is the **server** side of the fake, so it may hold a copy of the
+  //   rules — that is what a fake is for. The client holds none.
+  const pathProbe = (path: string): Response | null => {
+    const [section = "", file = "", extra = ""] = path.split("/")
+    const editable = ["agents", "llm", "tools", "mcps", "skills"]
+    if (!file || !editable.includes(section)) {
+      return fail(400, `unknown config section ${section}`, "config_path_invalid")
+    }
+    if (section === "skills") {
+      // ★ A skill is a folder: skills/<name>/SKILL.md, and the folder name is
+      //   the skill's name.
+      if (!extra || extra !== "SKILL.md") {
+        return fail(400, "skills/ accepts <name>/SKILL.md", "config_path_invalid")
+      }
+      if (!/^[a-z0-9]+([_-][a-z0-9]+)*$/.test(file)) {
+        return fail(
+          400,
+          "the skill name is its folder name and must match ^[a-z0-9]+([_-][a-z0-9]+)*$",
+          "config_path_invalid",
+        )
+      }
+      return null
+    }
+    if (extra) {
+      return fail(400, `${section}/ holds <name>`, "config_path_invalid")
+    }
+    if (section === "tools") {
+      const known = ["filesystem.yaml", "http.yaml", "kb.yaml", "web_search.yaml", "wikipedia.yaml"]
+      if (!known.includes(file)) {
+        return fail(400, `tools/ only accepts ${known.join(", ")}; other files here are rejected at load time`, "config_path_invalid")
+      }
+    }
+    if (section === "mcps") {
+      const name = file.endsWith(".yaml") ? file.slice(0, -".yaml".length) : ""
+      if (!/^[a-z0-9]+(_[a-z0-9]+)*$/.test(name)) {
+        return fail(
+          400,
+          `mcps/ accepts <server>.yaml, and the server name must match ^[a-z0-9]+(_[a-z0-9]+)*$`,
+          "config_path_invalid",
+        )
+      }
     }
     return null
   }
@@ -1178,7 +1502,7 @@ export function startFakeServer(port = 0): FakeServer {
     if (body.includes("BROKEN")) {
       return fail(
         422,
-        "agents/main.md references model deepseek/gone which is not declared under llm/",
+        'the change would leave the agent "main" out of the tree: the model deepseek/gone is not declared under llm/',
         "config_would_break_merge",
       )
     }
@@ -1211,6 +1535,7 @@ export function startFakeServer(port = 0): FakeServer {
       query?: string
       messages?: FakeMessage[]
       resume?: unknown[]
+      attachments?: { name: string; path: string; size?: number }[]
     }
     try {
       body = await req.json()
@@ -1269,7 +1594,16 @@ export function startFakeServer(port = 0): FakeServer {
     // ★ Attach: the client comes back for a run it already knows. The
     //   request carries the run's id and no question — a question would
     //   mean "start a new run".
-    if (body.runId && !(body.query ?? "").trim() && !body.messages?.length && !body.resume?.length) {
+    //
+    //   ★ Files count as a question: a turn that carries files and no text
+    //   is a new turn, not a re-attach.
+    if (
+      body.runId &&
+      !(body.query ?? "").trim() &&
+      !body.messages?.length &&
+      !body.resume?.length &&
+      !body.attachments?.length
+    ) {
       const run = (thread.runs ?? []).find((r) => r.runId === body.runId)
       if (!run || run.state !== "running") {
         return fail(404, "the run is no longer live; load the session's history instead", "run_not_live")
@@ -1302,11 +1636,35 @@ export function startFakeServer(port = 0): FakeServer {
     thread.state = "running"
 
     const query = (body.query ?? "").trim() || lastUserText(body.messages)
-    if (!query) return fail(400, "message must not be empty", "empty_message")
+    // ★ A turn with files and no text is still a turn: the question may be
+    //   entirely in the attachment.
+    const attachments = body.attachments ?? []
+    if (!query && attachments.length === 0) {
+      return fail(400, "message must not be empty", "empty_message")
+    }
 
     const marker = query.includes(MARKER_B) ? MARKER_B : MARKER_A
     const msgId = `m-${++seq}`
-    thread.messages.push({ id: `u-${seq}`, role: "user", content: query })
+    // ★ The files are recorded on the message, so the history can show
+    //   "that image you just sent" long after the turn is over.
+    const userMessage: FakeMessage = {
+      id: `u-${seq}`,
+      role: "user",
+      content: query,
+      ...(attachments.length > 0
+        ? {
+            metadata: {
+              attachments: attachments.map((a) => ({
+                name: a.name,
+                path: a.path,
+                size: a.size ?? 0,
+                mime: mimeOf(a.path),
+              })),
+            },
+          }
+        : {}),
+    }
+    thread.messages.push(userMessage)
     const assistantMsg: FakeMessage = { id: msgId, role: "assistant", content: "" }
     thread.messages.push(assistantMsg)
     if (thread.title === "New Session") thread.title = query.slice(0, 40)
@@ -1416,6 +1774,18 @@ export function startFakeServer(port = 0): FakeServer {
         if (agentsMode === "grew") return json(FAKE_AGENTS_GREW)
         return json(FAKE_AGENTS)
       }
+      if (path === "/v2/mcps" && req.method === "GET") {
+        const agent = url.searchParams.get("agent") ?? "main"
+        // ★ "starting" is a state of its own: the server is on its way,
+        //   and the panel has to tell it apart from a broken one.
+        const servers =
+          mcpMode === "empty"
+            ? []
+            : mcpMode === "starting"
+              ? [...FAKE_MCP_SERVERS, FAKE_MCP_STARTING_SERVER]
+              : FAKE_MCP_SERVERS
+        return json({ agent, servers })
+      }
       if (path === "/v2/health") return json({ ok: true })
 
       if (path === "/__fake/reset" && req.method === "POST") {
@@ -1425,6 +1795,7 @@ export function startFakeServer(port = 0): FakeServer {
         seq = 0
         scenario = "simple"
         agentsMode = "default"
+        mcpMode = "default"
         defaultRoot = "main"
         return json({ ok: true })
       }
@@ -1435,6 +1806,11 @@ export function startFakeServer(port = 0): FakeServer {
         }
         defaultRoot = agent
         return json({ ok: true, defaultRoot })
+      }
+      if (path === "/__fake/mcp-mode" && req.method === "POST") {
+        const mode = url.searchParams.get("mode") ?? "default"
+        mcpMode = mode === "empty" ? "empty" : mode === "starting" ? "starting" : "default"
+        return json({ ok: true, mode: mcpMode })
       }
       if (path === "/__fake/threads/clear" && req.method === "POST") {
         threads = []
@@ -1485,9 +1861,12 @@ export function startFakeServer(port = 0): FakeServer {
 
       if (path === "/v2/settings/validate" && req.method === "POST") {
         const body = (await readJSON(req))
-        const probe = writeSettingOnProbe(body)
-        if (probe) return probe
-        return json({ ok: true, configVersion: "fake-v1" })
+        const issues = validateProbe(body.path ?? "", body.content ?? "")
+        return json({
+          ok: !issues.some((i) => i.severity === "error"),
+          issues,
+          configVersion: "fake-v1",
+        })
       }
 
       if (path === "/v2/settings/item") {
@@ -1503,6 +1882,8 @@ export function startFakeServer(port = 0): FakeServer {
           })
         }
         if (req.method === "POST" || req.method === "PUT") {
+          const refused = pathProbe(body.path ?? "")
+          if (refused) return refused
           return writeSetting(body.path, body.content ?? "", body.baseRevision)
         }
         if (req.method === "DELETE") {
@@ -1589,6 +1970,48 @@ export function startFakeServer(port = 0): FakeServer {
         return json({ items, ...(active ? { activeRunId: active.runId } : {}) })
       }
 
+      // ★ The bytes of one file, for the preview.
+      //
+      //	★ The server never interprets the content — it hands the bytes
+      //	  back with a content type that keeps a script from running. The
+      //	  four shapes are the real server's: a picture, a PDF, text as
+      //	  **text/plain**, and everything else as a download.
+      const rawRoute = path.match(/^\/v2\/sessions\/([^/]+)\/files\/raw$/)
+      if (rawRoute) {
+        const t = find(rawRoute[1])
+        if (!t) return notFound()
+        const target = url.searchParams.get("path") ?? ""
+        if (!target.trim()) {
+          return fail(400, "path is required", "invalid_file_name")
+        }
+        const entry = t.files.find((f) => f.path === target)
+        if (!entry) {
+          return fail(404, "no such file in the session workspace", "invalid_file_name")
+        }
+        const bytes = t.blobs?.get(target)
+        if (!bytes) {
+          return fail(404, "no such file in the session workspace", "invalid_file_name")
+        }
+        const mime = entry.mime
+        if (mime === "image/png" || mime === "image/jpeg" || mime === "image/gif" || mime === "image/webp") {
+          return new Response(bytes, { headers: { "Content-Type": mime } })
+        }
+        if (mime === "application/pdf") {
+          return new Response(bytes, { headers: { "Content-Type": mime } })
+        }
+        if (mime.startsWith("text/") || mime === "application/json" || mime === "application/xml" || mime === "application/yaml") {
+          // ★ Text is always text/plain: an uploaded page must not become
+          //   a document the browser renders.
+          return new Response(bytes, { headers: { "Content-Type": "text/plain; charset=utf-8" } })
+        }
+        return new Response(bytes, {
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(entry.name)}`,
+          },
+        })
+      }
+
       const p = path.match(/^\/v2\/sessions\/([^/]+)\/(files|abort|compact)$/)
       if (p) {
         const t = find(p[1])
@@ -1644,15 +2067,52 @@ export function startFakeServer(port = 0): FakeServer {
         if (req.method === "POST") {
           const form = await req.formData().catch(() => null)
           const names = form ? [...form.getAll("files")] : []
-          const added = names
-            .filter((f): f is File => f instanceof File)
-            .map((f) => {
-              const entry = { name: f.name, path: `/workspace/${t!.threadId}/${f.name}`, size: f.size }
-              t!.files.push(entry)
-              return entry
-            })
+          if (!t.blobs) t.blobs = new Map()
+          const added: { name: string; path: string; size: number; mime: string }[] = []
+          for (const f of names) {
+            if (!(f instanceof File)) continue
+            // ★ The path is **relative** to the workspace: it is the name
+            //   the client sends back with the next question, and it has
+            //   to be the name the server itself resolves.
+            //
+            // ★ And it carries a hash, like the real server's: two
+            //   uploads of the same name are two files, and the
+            //   transcript's attachment list must not lie about either.
+            let salt = 0
+            let path = hashedName(f.name, f.size, Date.now())
+            // ★ The same name, the same size and the same millisecond
+            //   would hash the same way — so the second one steps forward
+            //   a millisecond until the name is free.
+            while (t!.files.some((other) => other.path === path)) {
+              salt += 1
+              path = hashedName(f.name, f.size, Date.now() + salt)
+            }
+            const entry = {
+              name: f.name,
+              path,
+              size: f.size,
+              mime: mimeOf(f.name),
+            }
+            t!.files.push(entry)
+            // ★ The bytes are kept, so the preview has something to serve.
+            //   They are read **before** the answer goes out — a client
+            //   that draws the thumbnail the moment it hears about the
+            //   file must not find the file empty.
+            t!.blobs.set(path, await f.arrayBuffer())
+            added.push(entry)
+          }
           if (added.length === 0) return fail(400, "file is required", "file_required")
           return json({ files: added, workspacePath: `/workspace/${t.threadId}` }, 201)
+        }
+        if (req.method === "DELETE") {
+          const target = url.searchParams.get("path") ?? ""
+          if (!target.trim()) {
+            return fail(400, "path is required", "invalid_file_name")
+          }
+          const i = t.files.findIndex((f) => f.path === target)
+          if (i >= 0) t.files.splice(i, 1)
+          t.blobs?.delete(target)
+          return json({ deleted: true, path: target })
         }
         return json({ workspacePath: `/workspace/${t.threadId}`, files: t.files })
       }

@@ -62,13 +62,10 @@ func (m *approvalMiddleware) WrapInvokableToolCall(
 	}
 	name := tCtx.Name
 
-	switch p := m.policy.TierOf(name); p {
-	case TierAllow:
+	// ★ The default is ask, so the gate wraps everything the exception
+	//   list does not name.
+	if m.policy.TierOf(name) == TierAllow {
 		return endpoint, nil
-	case TierDeny:
-		return func(context.Context, string, ...tool.Option) (string, error) {
-			return "", fmt.Errorf("tool %q is denied by policy", name)
-		}, nil
 	}
 
 	return func(ctx context.Context, args string, opts ...tool.Option) (string, error) {
@@ -99,13 +96,11 @@ func (m *approvalMiddleware) WrapStreamableToolCall(
 	}
 	name := tCtx.Name
 
-	switch p := m.policy.TierOf(name); p {
-	case TierAllow:
+	// ★ The gate has two tiers only: allow runs, everything else asks.
+	//   There is no "deny" — a tool an agent may not use is not in its
+	//   tool set at all, so the gate never sees it.
+	if m.policy.TierOf(name) == TierAllow {
 		return endpoint, nil
-	case TierDeny:
-		return func(context.Context, string, ...tool.Option) (*schema.StreamReader[string], error) {
-			return nil, fmt.Errorf("tool %q is denied by policy", name)
-		}, nil
 	}
 
 	return func(ctx context.Context, args string, opts ...tool.Option) (*schema.StreamReader[string], error) {

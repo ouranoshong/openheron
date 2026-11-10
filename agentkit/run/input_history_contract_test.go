@@ -85,7 +85,7 @@ func TestHistorySatisfiesTheEndpointContract(t *testing.T) {
 					"so the case proves nothing: %s", describeHistory(hist))
 			}
 
-			in, err := InputConfig{}.buildInput(context.Background(), inputParams{History: hist}, "next")
+			in, err := InputConfig{}.buildInput(context.Background(), inputParams{History: hist}, schema.UserMessage("next"))
 			if err != nil {
 				t.Fatal(err)
 			}

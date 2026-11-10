@@ -42,14 +42,14 @@ type projectCandidate struct {
 // "what can I reference in this project", while uploads live per session.
 func (s *Server) v2ProjectFiles(_ context.Context, c *app.RequestContext) {
 	if s.cfgSvc == nil {
-		v2Fail(c, consts.StatusServiceUnavailable, "config_unavailable",
+		s.v2Fail(c, consts.StatusServiceUnavailable, "config_unavailable",
 			"config service not wired", false)
 		return
 	}
 
 	q := strings.TrimSpace(c.Query("q"))
 	if len(q) > maxProjectQueryLength {
-		v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "query is too long", false)
+		s.v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "query is too long", false)
 		return
 	}
 
@@ -57,7 +57,7 @@ func (s *Server) v2ProjectFiles(_ context.Context, c *app.RequestContext) {
 	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil {
-			v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "limit must be a number", false)
+			s.v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "limit must be a number", false)
 			return
 		}
 		limit = n

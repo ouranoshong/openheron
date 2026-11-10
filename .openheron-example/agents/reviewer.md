@@ -1,9 +1,11 @@
 ---
 description: Review — read the changes, find problems, give conclusions. Does not change files.
 model: openai/gpt-4o
-# The reviewer does not write files — its only job is to find other people's problems.
-# execute is kept: running the test suite once is part of the review.
-disabled_tools: [write_file, edit_file]
+# ★ tools is the allow-list, and **the default is none**. The reviewer does
+#   not write files — its only job is to find other people's problems.
+#   execute is kept: running the test suite once is part of the review.
+tools: [ls, read_file, glob, grep, execute]
+mcps: []
 ---
 
 You are the reviewer.

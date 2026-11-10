@@ -110,12 +110,16 @@ func TestPendingApprovalFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Make the directory unwritable so the atomic rewrite genuinely fails.
-	dir := sessionDir(root, id)
-	if err := os.Chmod(dir, 0o500); err != nil {
+	// ★ Make the target itself unusable instead of chmod'ing the directory:
+	//   directory permissions are POSIX-only, and Windows ignores them, so the
+	//   atomic rewrite would silently succeed there.
+	statePath := filepath.Join(sessionDir(root, id), "state.json")
+	if err := os.Remove(statePath); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	if err := os.Mkdir(statePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := sess.SetPendingApproval(&storage.PendingApproval{Interrupts: []contract.PendingInterrupt{{InterruptID: "agent:B;tool:y"}}}); err == nil {
 		t.Fatal("expected a persistence failure")

@@ -4,8 +4,12 @@ import type { ConversationState, Interrupt } from "@/lib/types"
 
 export interface Attachment {
   name: string
+  // path is relative to the session's workspace — it is the name the server
+  // resolves, and the name the client sends back with the next question.
   path: string
   size: number
+  // mime is the content type the **server** derived from the file's name.
+  mime: string
 }
 
 export interface SessionEntry {
@@ -45,7 +49,11 @@ export interface StoreState {
   // busy flag may only be cleared on the word of a scan.
   scanBusy(id: string): Promise<void>
   addFiles(files: File[]): Promise<void>
-  removeFile(sessionId: string, name: string): Promise<void>
+  // removeFile takes a file out of the pending list, and off the disk.
+  //
+  // ★ The path is the name relative to the session's workspace — it is what
+  //   the server resolves, and what it deletes.
+  removeFile(sessionId: string, path: string): Promise<void>
   answer(interrupts: Interrupt[], approved: boolean, reason?: string): Promise<void>
   stop(): Promise<void>
   compact(): Promise<void>

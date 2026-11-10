@@ -179,6 +179,17 @@ function replaceAt<T>(arr: T[], index: number, value: T): T[] {
   return next
 }
 
+// isOpenPart reports whether a part is the open half of a streaming kind.
+//
+// ★ It is a function rather than an inline comparison because the union
+//   has more members than "text" and "reasoning" now: a part of another
+//   kind has no `complete` flag at all, and the comparison has to narrow
+//   the union before that flag may be read.
+function isOpenPart(p: Part, kind: "text" | "reasoning"): boolean {
+  if (kind === "text") return p.kind === "text" && p.complete === false
+  return p.kind === "reasoning" && p.complete === false
+}
+
 function updateMessage(
   state: ConversationState,
   messageId: string,
@@ -218,7 +229,7 @@ function openPart(
   const parts = base.messages[midx]!.parts
   for (let i = parts.length - 1; i >= 0; i--) {
     const p = parts[i]!
-    if (p.kind === kind && p.complete === false) return { state: base, index: i }
+    if (isOpenPart(p, kind)) return { state: base, index: i }
   }
 
   const fresh: Part =
@@ -247,18 +258,23 @@ function closePart(
   const parts = state.messages[midx]!.parts
   for (let i = parts.length - 1; i >= 0; i--) {
     const p = parts[i]!
-    if (p.kind === kind && p.complete === false) {
-      const next: Part =
-        p.kind === "reasoning"
-          ? {
-              ...p,
-              complete: true,
-              ...(opts?.interrupted ? { interrupted: true } : {}),
-              ...(opts?.timestamp !== undefined && p.startedAt !== undefined
-                ? { elapsedMs: opts.timestamp - p.startedAt }
-                : {}),
-            }
-          : { ...p, complete: true }
+    if (!isOpenPart(p, kind)) continue
+    if (p.kind === "text") {
+      const next: Part = { ...p, complete: true }
+      return updateMessage(state, messageId, (m) => ({
+        ...m,
+        parts: replaceAt(m.parts, i, next),
+      }))
+    }
+    if (p.kind === "reasoning") {
+      const next: Part = {
+        ...p,
+        complete: true,
+        ...(opts?.interrupted ? { interrupted: true } : {}),
+        ...(opts?.timestamp !== undefined && p.startedAt !== undefined
+          ? { elapsedMs: opts.timestamp - p.startedAt }
+          : {}),
+      }
       return updateMessage(state, messageId, (m) => ({
         ...m,
         parts: replaceAt(m.parts, i, next),
@@ -279,8 +295,13 @@ function appendToOpenPart(
   if (index < 0) return state
   return updateMessage(withPart, messageId, (m) => {
     const p = m.parts[index]!
-    if (p.kind !== kind) return m
-    return { ...m, parts: replaceAt(m.parts, index, { ...p, text: p.text + delta }) }
+    if (p.kind === "text" && kind === "text") {
+      return { ...m, parts: replaceAt(m.parts, index, { ...p, text: p.text + delta }) }
+    }
+    if (p.kind === "reasoning" && kind === "reasoning") {
+      return { ...m, parts: replaceAt(m.parts, index, { ...p, text: p.text + delta }) }
+    }
+    return m
   })
 }
 
@@ -521,7 +542,7 @@ export function closeAllOpenParts(
   let out = state
   for (const m of state.messages) {
     for (const kind of ["text", "reasoning"] as const) {
-      const has = m.parts.some((p) => p.kind === kind && p.complete === false)
+      const has = m.parts.some((p) => isOpenPart(p, kind))
       if (has) out = closePart(out, m.id, kind, opts)
     }
   }

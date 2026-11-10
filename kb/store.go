@@ -7,6 +7,7 @@ import (
 	"encoding/gob"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -52,12 +53,37 @@ type Store struct {
 
 	run *persist.FileLock
 
+	// log is injected by the assembly layer. Nil drops the lines, which is
+	// what a test that does not care about them gets.
+	log *slog.Logger
+
+	// mu guards the store's three pieces of state: cat, der and stamp.
+	//
+	// ★ Two rules follow from the scope, and both of them were broken before
+	//	  they were written down:
+	//
+	//	- Every read takes the lock and every write happens under it —
+	//	  including the writes of **derived** values. stamp is the catalog
+	//	  file's stat, so refreshing it means stat'ing the file (I/O, which
+	//	  must happen outside the lock) and assigning the result (which
+	//	  must happen inside it).
+	//	- A reader that needs the entries takes a **deep** copy under the
+	//	  lock. der.Entries is a map that install and SetVectors mutate in
+	//	  place, so a shallow copy is still shared with the writer — and a
+	//	  reader iterating a map another goroutine writes is a fatal error,
+	//	  not a race the detector merely reports.
 	mu  sync.RWMutex
 	cat Catalog
 	der Derived
 
 	stamp fileStamp
 
+	// runMu serialises the reloads: it makes "the catalog changed on disk"
+	// a thing that is re-read once, not once per goroutine that noticed.
+	//
+	// ★ It is not a data lock — the state it protects is guarded by mu.
+	//   It is the "one reload at a time" gate, and the stamp is re-checked
+	//   under it because another goroutine may have reloaded in between.
 	runMu sync.Mutex
 
 	afterWrite func()
@@ -69,7 +95,24 @@ type fileStamp struct {
 	valid bool
 }
 
-func NewStore(dir string) (*Store, error) {
+// Option configures a Store at construction.
+type Option func(*Store)
+
+// WithLogger sets the logger the store writes through.
+func WithLogger(log *slog.Logger) Option {
+	return func(s *Store) { s.log = log }
+}
+
+func (s *Store) logger() *slog.Logger {
+	if s == nil || s.log == nil {
+		return discard
+	}
+	return s.log
+}
+
+var discard = obs.Discard()
+
+func NewStore(dir string, opts ...Option) (*Store, error) {
 	if dir == "" {
 		return nil, fmt.Errorf("kb: store dir must not be empty")
 	}
@@ -81,6 +124,9 @@ func NewStore(dir string) (*Store, error) {
 		return nil, err
 	}
 	s := &Store{dir: dir, run: run, der: Derived{IndexVersion: IndexVersion, Entries: map[string]DerivedEntry{}}}
+	for _, o := range opts {
+		o(s)
+	}
 	if err := s.load(); err != nil {
 		_ = run.Close()
 		return nil, err
@@ -217,14 +263,26 @@ func (s *Store) Reconcile(ctx context.Context, req ReconcileRequest) (*Reconcile
 	mdPath := filepath.Join(s.dir, catalogFile)
 
 	var lastWarnings []string
+	var lastReadErr error
 	for attempt := 1; attempt <= maxCommitAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		cur, warnings := s.readCatalog()
+		cur, warnings, err := s.readCatalog()
+		if err != nil {
+			return nil, err
+		}
 		lastWarnings = warnings
 
-		merged, next, res := mergeCatalog(cur, s.der, req)
+		// ★ The derived state is snapshotted under the lock, and the snapshot
+		//   is a **deep** copy: s.der.Entries is a map that install and
+		//   SetVectors mutate in place, so a shallow copy would still be
+		//   shared with the writer — and mergeCatalog iterates it.
+		s.mu.RLock()
+		der := cloneDerived(s.der)
+		s.mu.RUnlock()
+
+		merged, next, res := mergeCatalog(cur, der, req)
 
 		if req.Embed != nil {
 			vectors, err := req.Embed(ctx, merged.Entries)
@@ -256,9 +314,14 @@ func (s *Store) Reconcile(ctx context.Context, req ReconcileRequest) (*Reconcile
 			s.afterWrite()
 		}
 
-		got, err := os.ReadFile(mdPath)
+		got, err := readFileRetry(mdPath)
 		if err != nil {
-			return nil, fmt.Errorf("kb: read back %s: %w", mdPath, err)
+			// ★ Same window as readFileRetry: our own rename can still be
+			//   holding the file. A read that did not happen is not a write
+			//   that did not land — retry the commit, and report the read error
+			//   only if every attempt failed.
+			lastReadErr = err
+			continue
 		}
 		if !bytes.Equal(got, body) {
 			continue
@@ -268,6 +331,9 @@ func (s *Store) Reconcile(ctx context.Context, req ReconcileRequest) (*Reconcile
 		res.Warnings = lastWarnings
 		s.install(merged, next, req, res)
 		return res, nil
+	}
+	if lastReadErr != nil {
+		return nil, fmt.Errorf("kb: read back %s: %w", mdPath, lastReadErr)
 	}
 	return nil, fmt.Errorf("kb: %s was modified while writing (%d attempts); "+
 		"your edit collided with an index run — re-run `openheron kb index`",
@@ -466,6 +532,13 @@ func (s *Store) install(cat Catalog, next Derived, req ReconcileRequest, res *Re
 		touched[e.Path] = true
 	}
 
+	// ★ The stamp is the catalog file's stat, and the catalog has already
+	//   been written — so it can be stat'ed here, before the lock, and the
+	//   result assigned inside it. Stat'ing under the lock would hold it
+	//   across I/O, and assigning it after the unlock would write a guarded
+	//   field outside the guard.
+	stamp, _ := statStamp(filepath.Join(s.dir, catalogFile))
+
 	s.mu.Lock()
 	if s.der.Entries == nil {
 		s.der.Entries = make(map[string]DerivedEntry, len(touched))
@@ -496,12 +569,12 @@ func (s *Store) install(cat Catalog, next Derived, req ReconcileRequest, res *Re
 		s.der.Dim = req.Dim
 	}
 	s.cat = cloneCatalog(cat)
+	s.stamp = stamp
 	s.mu.Unlock()
 
 	if err := s.saveSidecar(); err != nil {
-		obs.Logger().Warn("[kb] sidecar write failed, vectors will be rebuilt next run", "err", err)
+		s.logger().Warn("[kb] sidecar write failed, vectors will be rebuilt next run", "err", err)
 	}
-	s.stamp, _ = statStamp(filepath.Join(s.dir, catalogFile))
 }
 
 func (s *Store) SetVectors(vectors map[string][]float32) error {
@@ -536,24 +609,59 @@ func (s *Store) saveSidecar() error {
 	return nil
 }
 
-func (s *Store) readCatalog() (Catalog, []string) {
-	b, err := os.ReadFile(filepath.Join(s.dir, catalogFile))
+func (s *Store) readCatalog() (Catalog, []string, error) {
+	path := filepath.Join(s.dir, catalogFile)
+	b, err := readFileRetry(path)
 	if err != nil {
-		return Catalog{Header: Header{IndexVersion: IndexVersion}}, nil
+		if os.IsNotExist(err) {
+			return Catalog{Header: Header{IndexVersion: IndexVersion}}, nil, nil
+		}
+		// ★ "Could not read it now" is not "there is no catalog yet". The
+		//   second reading starts the merge from an empty base and writes
+		//   that back, which is how a concurrent writer's entries disappear.
+		return Catalog{}, nil, fmt.Errorf("kb: read %s: %w", path, err)
 	}
 	c, err := ParseCatalog(b)
 	if err != nil {
-		obs.Logger().Error("[kb] catalog.md is unreadable, refusing to overwrite it", "err", err)
+		s.logger().Error("[kb] catalog.md is unreadable, refusing to overwrite it", "err", err)
 		return Catalog{Header: Header{IndexVersion: IndexVersion}}, []string{
 			fmt.Sprintf("catalog.md is unreadable: %v", err),
-		}
+		}, nil
 	}
 	if c.Header.IndexVersion == 0 {
 		c.Header.IndexVersion = IndexVersion
 	}
-	return c, c.Warnings
+	return c, c.Warnings, nil
 }
 
+// readFileRetry reads path, riding out the moment a rename holds it.
+//
+// ★ Windows: MoveFileEx keeps the destination for the duration of the swap, so
+//
+//	a reader that arrives inside that window is refused with a sharing
+//	violation. Unix has no such window, and neither platform reports it as
+//	"no such file" — which is why the caller must not treat every error as a
+//	missing catalog. 20 × 2ms is longer than any rename and shorter than a
+//	user noticing a turn.
+func readFileRetry(path string) ([]byte, error) {
+	var err error
+	for attempt := 0; attempt < 20; attempt++ {
+		var b []byte
+		b, err = os.ReadFile(path)
+		if err == nil || os.IsNotExist(err) {
+			return b, err
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	return nil, err
+}
+
+// load reads the catalog and the sidecar into the store.
+//
+// ★ It does not take the lock: it runs while the store is being opened,
+//
+//	before anybody else can reach it. The lazy path — refresh — is the one
+//	that can race, and that one is locked.
 func (s *Store) load() error {
 	b, err := os.ReadFile(filepath.Join(s.dir, catalogFile))
 	if err != nil {
@@ -590,14 +698,14 @@ func (s *Store) load() error {
 	}
 	var der Derived
 	if err := gob.NewDecoder(bytes.NewReader(sb)).Decode(&der); err != nil {
-		obs.Logger().Warn("[kb] sidecar is unreadable, vectors will be rebuilt next run", "err", err)
+		s.logger().Warn("[kb] sidecar is unreadable, vectors will be rebuilt next run", "err", err)
 		der = Derived{IndexVersion: IndexVersion, Entries: map[string]DerivedEntry{}}
 	}
 	if der.Entries == nil {
 		der.Entries = map[string]DerivedEntry{}
 	}
 	if der.IndexVersion != 0 && der.IndexVersion != IndexVersion {
-		obs.Logger().Warn("[kb] sidecar was written by another build; vectors will be rebuilt",
+		s.logger().Warn("[kb] sidecar was written by another build; vectors will be rebuilt",
 			"written_by_version", der.IndexVersion, "this_build_version", IndexVersion)
 		der = Derived{IndexVersion: IndexVersion, Entries: map[string]DerivedEntry{}}
 	}

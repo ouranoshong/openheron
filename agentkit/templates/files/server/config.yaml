@@ -1,0 +1,82 @@
+# ★ The process's own configuration.
+#
+#   ★ server/ is **not hot-reloaded** — it configures the process itself, so a
+#     change here needs a restart. Every other section (llm/ agents/ tools/
+#     mcps/) is picked up from the next turn.
+#
+#   ★ The values below are the **code's own defaults**, written out so that
+#     they are visible and editable. Writing them changes nothing by itself —
+#     it only makes the knobs findable.
+
+# The address the HTTP server listens on.
+listen_addr: ":8080"
+
+# ★ Runtime data: sessions, checkpoints, the knowledge-base index.
+#   A relative path resolves against the **config root** (<project>/.openheron).
+data_dir: state
+
+# ★ The process log level: debug | info | warn | error.
+#   Like everything else in server/, it takes effect after a restart.
+#   $OPENHERON_LOG_LEVEL overrides it. A value that is not one of the four
+#   falls back to info and is reported in the config's deferred notices.
+log_level: info
+
+# ★ Dump each model request body (redacted) and the raw tools array at debug
+#   level. Off by default: a body can be megabytes. Set true here to make it
+#   the project default; $OPENHERON_LOG_LLM_REQUESTS overrides it for one run.
+#   A rejected request (4xx/5xx) always logs its tools array, switch or not.
+log_requests: false
+
+# ★ Where the log goes. An empty file keeps it on stderr — the default,
+#   because a server started from a terminal is already being watched.
+#
+#   Uncomment `file:` to keep a copy on disk as well. A relative path resolves
+#   against this directory (<project>/.openheron), next to state/ and the
+#   partitions. Rotated by size: max_size_mb caps one file (0 = no cap),
+#   max_age_days and max_backups decide how much history survives, and
+#   compress gzips the rotated files. $OPENHERON_LOG_FILE overrides the path
+#   for one run.
+#
+#   ★ A log file that cannot be opened is a warning, not a failed start: the
+#     process keeps running on stderr, which is where the reason appears.
+#
+# log:
+#   file: logs/openheron.log
+#   console: true        # keep writing to stderr as well
+#   max_size_mb: 20
+#   max_age_days: 14
+#   max_backups: 5
+#   compress: false
+
+# ★ The front end. "embed" — the default — serves the UI compiled into the
+#   binary; "dir" serves a directory on disk instead, and static_dir points
+#   at it.
+# frontend_mode: embed
+# static_dir: web/dist
+
+# Upper bound for one turn, from submission to entering the running state.
+start_timeout: 60s
+
+# How long a run's lease survives without progress. A run that reports nothing
+# for this long loses the lease, however alive it is — so it must be **longer
+# than the provider's own timeout** (llm/<id>.yaml), or a slow but alive model
+# is fenced out while it is thinking.
+lease_ttl: 10m
+
+# How many times a failed model call is retried.
+retry:
+  max_retries: 5
+
+# ★ Max nesting depth. **The entry agent (the one the session selected) is
+#   level 0**; an agent at depth d may spawn sub-agents if and only if
+#   d < max_depth. 1 = only the entry agent may delegate.
+#   A declared topology that exceeds the limit is **an error at startup**; it is
+#   never silently truncated.
+agent:
+  max_depth: 1
+
+# ★ Configuration watching: a change under llm/ agents/ tools/ mcps/ is
+#   discovered automatically and swaps the generation from the next turn.
+#   The watcher is on by default; set enabled to false to turn it off.
+watch:
+  debounce: 200ms

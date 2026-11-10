@@ -13,13 +13,13 @@ import {
 } from "../src/lib/settings-store"
 import type { SettingsItem, SettingsManifest } from "../src/lib/settings-api"
 
-const POLICY = "allow: [read_file]\n"
+const HTTP = "methods: [get]\nallows: [request_get]\n"
 const PROVIDER = "type: openai\nbase_url: https://x\napi_key: ${KEY}\nmodels:\n  - id: fast\n"
 
 const MAIN_MD = "---\nmodel: deepseek/flash\ndescription: root\nreasoning: high  # level\n---\nbody\n"
 
 const ON_DISK: Record<string, string> = {
-  "policy/permissions.yaml": POLICY,
+  "tools/http.yaml": HTTP,
   "agents/main.md": MAIN_MD,
   "llm/deepseek.yaml": PROVIDER,
   "server/config.yaml": "listen_addr: \":9099\"\n",
@@ -35,18 +35,18 @@ const item = (path: string, over: Partial<SettingsItem> = {}): SettingsItem => (
 
 const manifest: SettingsManifest = {
   categories: [
-    { id: "policy", editable: true, hot: true },
+    { id: "tools", editable: true, hot: true },
     { id: "agents", editable: true, hot: true },
     { id: "llm", editable: true, hot: true },
     { id: "server", editable: false, hot: false, note: "not hot-reloaded; changes apply on restart" },
   ],
   items: [
-    item("policy/permissions.yaml"),
+    item("tools/http.yaml"),
     item("agents/main.md"),
     item("llm/deepseek.yaml"),
     item("server/config.yaml", { hot: false }),
   ],
-  templates: { policy: "allow: []\nask: []\ndeny: []\n", agents: "---\nmodel: \n---\n" },
+  templates: { tools: "# one file = one tool\n", agents: "---\nmodel: \n---\n" },
   modelRefs: ["deepseek/flash"],
   reasoningLevels: { "deepseek/flash": ["off", "low", "high", "max"] },
   configVersion: "v1",
@@ -98,7 +98,27 @@ function install(): void {
       if (body.content!.includes("BROKEN_MERGE")) {
         return json({ error: "agents/main.md references model x/y not declared", code: "config_would_break_merge", retryable: false }, 422)
       }
-      return json({ ok: true, configVersion: "v1" })
+      // ★ Two findings, so the store can be tested for what it does with a
+      //   verdict — render it, block the write, replace it on the next
+      //   answer. Which findings a real loader produces is agentkit/spec's
+      //   business and is tested there.
+      const issues: { line: number; severity: string; message: string }[] = []
+      if (/^api_key:\s*sk-/m.test(body.content!)) {
+        issues.push({
+          line: 3,
+          severity: "error",
+          message: "api_key must be a reference, not a literal: use ${ENV_VAR} or @file:/path",
+        })
+      }
+      const level = /^reasoning:\s*([a-z]+)/m.exec(body.content!)?.[1]
+      if (level === "ultra") {
+        issues.push({
+          line: 4,
+          severity: "error",
+          message: 'reasoning "ultra" is not declared by deepseek/flash — the model declares: high, low, max, off',
+        })
+      }
+      return json({ ok: issues.length === 0, issues, configVersion: "v1" })
     }
 
     if (url === "/v2/settings/item") {
@@ -120,6 +140,9 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // ★ A debounced validation that is still pending would fire during the
+  //   next test, against that test's fetch. closeSettings is what cancels it.
+  s().closeSettings()
   useSettings.setState({
     open: false,
     manifest: undefined,
@@ -145,7 +168,7 @@ describe("opening", () => {
     await s().openSettings()
     expect(s().open).toBe(true)
     expect(s().manifest?.items).toHaveLength(4)
-    expect(s().selected).toBe("policy/permissions.yaml")
+    expect(s().selected).toBe("tools/http.yaml")
   })
 
   test("records a load failure instead of throwing", async () => {
@@ -177,7 +200,7 @@ describe("the one config root", () => {
   test("reading a file asks for the path only — there is no level to pass", async () => {
     await s().openSettings()
     const lastGet = calls.filter((c) => c.url.startsWith("/v2/settings/item?")).at(-1)
-    expect(lastGet?.url).toContain("path=policy%2Fpermissions.yaml")
+    expect(lastGet?.url).toContain("path=tools%2Fhttp.yaml")
     expect(lastGet?.url).not.toContain("level=")
   })
 
@@ -186,7 +209,7 @@ describe("the one config root", () => {
     s().edit("ask: [execute]\n")
     await s().save()
     const put = calls.find((c) => c.method === "PUT")
-    expect(put?.body.path).toBe("policy/permissions.yaml")
+    expect(put?.body.path).toBe("tools/http.yaml")
     expect(put?.body.level).toBeUndefined()
   })
 })
@@ -201,38 +224,62 @@ describe("editing", () => {
     expect(selectDirty(s())).toBe(false)
   })
 
-  test("a local failure blocks saving without touching the network", async () => {
+  test("a server verdict blocks the write, and the PUT never goes out", async () => {
     await s().openSettings()
     await s().select("llm/deepseek.yaml")
-    const before = calls.length
     s().edit("type: openai\nbase_url: https://x\napi_key: sk-leak\nmodels: []\n")
 
-    expect(s().issues.length).toBeGreaterThan(0)
-    expect(selectCanSave(s())).toBe(false)
     await s().save()
-    expect(calls.length).toBe(before)
+    expect(s().saveState).toBe("error")
     expect(s().saveError).toContain("reference")
+    expect(s().issues.some((i) => i.message.includes("reference"))).toBe(true)
+    expect(calls.some((c) => c.method === "PUT")).toBe(false)
   })
 
-  test("the rules follow the section of the selected file", async () => {
+  // ★ Validation is a round trip now, so it is debounced. Two keystrokes
+  //   inside the window are one question — the answer is about the draft, and
+  //   the draft has moved on.
+  test("a burst of edits asks the server once, after the pause", async () => {
+    await s().openSettings()
+    await s().select("llm/deepseek.yaml")
+    const before = calls.filter((c) => c.url === "/v2/settings/validate").length
+
+    s().edit("type: openai\n")
+    s().edit("type: openai\nbase_url: https://x\n")
+    s().edit(PROVIDER)
+    await new Promise((r) => setTimeout(r, 400))
+
+    const validated = calls.filter((c) => c.url === "/v2/settings/validate").slice(before)
+    expect(validated).toHaveLength(1)
+    expect(validated[0]!.body.content).toBe(PROVIDER)
+  })
+
+  test("the answer replaces the previous verdict", async () => {
     await s().openSettings()
     await s().select("llm/deepseek.yaml")
     s().edit("api_key: sk-leak\n")
+    await new Promise((r) => setTimeout(r, 400))
     expect(s().issues.some((i) => i.message.includes("reference"))).toBe(true)
 
-    await s().select("policy/permissions.yaml")
-    s().edit("api_key: sk-leak\n")
-    expect(s().issues.some((i) => i.message.includes("unknown key"))).toBe(true)
-  })
-
-  test("editing clears the previous verdict", async () => {
-    await s().openSettings()
-    await s().select("llm/deepseek.yaml")
-    s().edit("api_key: sk-leak\n")
-    expect(s().issues.length).toBeGreaterThan(0)
     s().edit(PROVIDER)
+    await new Promise((r) => setTimeout(r, 400))
     expect(s().issues).toEqual([])
     expect(s().serverIssues).toEqual([])
+  })
+
+  // ★ A save clicked inside the debounce window must not write on the
+  //   strength of a verdict about older text: it asks again, now, and the
+  //   pending question is cancelled so the two answers cannot cross.
+  test("saving cancels the pending question and asks its own", async () => {
+    await s().openSettings()
+    s().edit("ask: [execute]\n")
+    const before = calls.filter((c) => c.url === "/v2/settings/validate").length
+    await s().save()
+    await new Promise((r) => setTimeout(r, 400))
+
+    const validated = calls.filter((c) => c.url === "/v2/settings/validate").slice(before)
+    expect(validated).toHaveLength(1)
+    expect(s().saveState).toBe("saved")
   })
 })
 
@@ -256,7 +303,7 @@ describe("saving", () => {
 
     expect(s().saveState).toBe("error")
     expect(s().saveError).toContain("ultra")
-    expect(s().saveError).toContain("off, low, high, max")
+    expect(s().saveError).toContain("high, low, max, off")
     expect(calls.some((c) => c.method === "PUT")).toBe(false)
   })
 
@@ -357,7 +404,7 @@ describe("deleting", () => {
     await s().remove()
     expect(s().saveState).toBe("error")
     expect(s().serverIssues.join()).toContain("openai/fast")
-    expect(s().selected).toBe("policy/permissions.yaml")
+    expect(s().selected).toBe("tools/http.yaml")
   })
 })
 
@@ -383,7 +430,20 @@ describe("selectors", () => {
 
   test("selectSelectedItem finds the selected path", async () => {
     await s().openSettings()
-    expect(selectSelectedItem(s())?.path).toBe("policy/permissions.yaml")
+    expect(selectSelectedItem(s())?.path).toBe("tools/http.yaml")
+  })
+
+  // ★ A dirty draft on a partition this client may not write must not make
+  //   Save reachable. The editor also refuses to type into it; this is the
+  //   second lock, and the one that survives a change to the first.
+  test("a non-editable partition is never saveable, however dirty the draft", async () => {
+    await s().openSettings()
+    useSettings.setState({ selected: "server/config.yaml", saved: "a\n", draft: "b\n" })
+    expect(selectDirty(s())).toBe(true)
+    expect(selectCanSave(s())).toBe(false)
+
+    useSettings.setState({ selected: "tools/http.yaml", saved: "a\n", draft: "b\n" })
+    expect(selectCanSave(s())).toBe(true)
   })
 
   test("selectIsEditable reads the category, not the item", async () => {

@@ -45,13 +45,13 @@ func TestALiveOwnerHoldsTheSession(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	if _, err := rt.Submit(ctx, sess.ID(), "", "hold the turn open"); err != nil {
+	if _, err := rt.Submit(ctx, sess.ID(), "", "hold the turn open", nil); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	t.Cleanup(func() { _ = rt.Abort(context.Background(), sess.ID()) })
 	<-started
 
-	if _, err := rt.Submit(ctx, sess.ID(), "", "second"); err == nil {
+	if _, err := rt.Submit(ctx, sess.ID(), "", "second", nil); err == nil {
 		t.Fatal("a second run must be refused while the owner holds the session")
 	}
 }
@@ -72,7 +72,7 @@ func TestAStalledOwnerDoesNotHoldTheSessionForEver(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	if _, err := rt.Submit(ctx, sess.ID(), "", "hold the turn open"); err != nil {
+	if _, err := rt.Submit(ctx, sess.ID(), "", "hold the turn open", nil); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	t.Cleanup(func() { _ = rt.Abort(context.Background(), sess.ID()) })
@@ -81,7 +81,7 @@ func TestAStalledOwnerDoesNotHoldTheSessionForEver(t *testing.T) {
 	// The owner stalls: it reports no progress, so its lease runs out.
 	time.Sleep(200 * time.Millisecond)
 
-	if _, err := rt.Submit(ctx, sess.ID(), "", "take over"); err != nil {
+	if _, err := rt.Submit(ctx, sess.ID(), "", "take over", nil); err != nil {
 		t.Fatalf("a stalled owner must not hold the session for ever: %v", err)
 	}
 }
@@ -104,7 +104,7 @@ func TestAProgressingRunKeepsItsLease(t *testing.T) {
 	ctx := context.Background()
 	sess := mustSession(t, sm)
 
-	turn, err := rt.Submit(ctx, sess.ID(), "", "work for a while")
+	turn, err := rt.Submit(ctx, sess.ID(), "", "work for a while", nil)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}

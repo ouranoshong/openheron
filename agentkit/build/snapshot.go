@@ -3,6 +3,9 @@ package build
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/ouranoshong/openheron/agentkit/fsx"
+	"github.com/ouranoshong/openheron/agentkit/obs/httplog"
 	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"github.com/ouranoshong/openheron/llm/common"
@@ -21,7 +25,10 @@ type snapshot struct {
 	gen uint64
 
 	cfg                  *spec.Config
+	svc                  *spec.Service
 	projectRoot, dataDir string
+	log                  *slog.Logger
+	track                func(io.Closer)
 	agentSpec            agentSpec
 	tables               map[string]*Table
 	models               modelFactory
@@ -50,7 +57,7 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 	// The session workspace (uploads) and the skills directory may live outside the
 	// project root; everything else is off limits.
 	roots := []string{s.dataDir}
-	if dir, ok := resolveSkillsDir(); ok {
+	if dir, ok := ResolveSkillsDir(s.log); ok {
 		roots = append(roots, dir)
 	}
 	local, err := fsx.New(fsx.Config{Root: s.projectRoot, ExtraRoots: roots})
@@ -62,8 +69,11 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 
 	tools, err := s.tools.Build(ctx, toolEnv{
 		cfg:         s.cfg,
+		svc:         s.svc,
 		projectRoot: s.projectRoot,
 		dataDir:     s.dataDir,
+		log:         s.log,
+		track:       s.track,
 	})
 	if err != nil {
 		return out, err
@@ -72,26 +82,30 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 	return out, nil
 }
 
-func newSnapshot(gen uint64, cfg *spec.Config, projectRoot, dataDir string,
-	models modelFactory, tools *toolRegistry) (*snapshot, error) {
+func newSnapshot(gen uint64, cfg *spec.Config, svc *spec.Service,
+	projectRoot, dataDir string, models modelFactory,
+	tools *toolRegistry, log *slog.Logger, track func(io.Closer)) (*snapshot, error) {
 
 	sp, err := specOf(cfg, projectRoot)
 	if err != nil {
 		return nil, err
 	}
 	if sp.maxDepth <= 0 {
-		sp.maxDepth = decl.DefaultMaxDepth
+		sp.maxDepth = spec.DefaultMaxDepth
 	}
 	if models == nil {
 		models = defaultModelFactory
 	}
 	if tools == nil {
-		tools = defaultToolRegistry()
+		tools = defaultToolRegistry(nil)
 	}
 	tables := tablesOf(sp)
 	return &snapshot{
+		log:         log,
+		track:       track,
 		gen:         gen,
 		cfg:         cfg,
+		svc:         svc,
 		projectRoot: projectRoot,
 		dataDir:     dataDir,
 		agentSpec:   sp,
@@ -107,7 +121,7 @@ func (b *Builder) snapshotFor(cfg *spec.Config, gen uint64) (*snapshot, error) {
 	if b.snap != nil && b.snap.gen >= gen {
 		return b.snap, nil
 	}
-	snap, err := newSnapshot(gen, cfg, b.projectRoot, b.dataDir, b.models, b.tools)
+	snap, err := newSnapshot(gen, cfg, b.svc, b.projectRoot, b.dataDir, b.models, b.tools, b.log, b.track)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +137,7 @@ func resolveModel(ctx context.Context, snap *snapshot, sp decl.SubAgentSpec,
 		if base != nil {
 			return base, nil
 		}
-		return buildModel(ctx)
+		return buildModel(ctx, snap.log, configuredRequestDump(snap.cfg))
 	}
 	factory := snap.models
 	if factory == nil {
@@ -133,13 +147,20 @@ func resolveModel(ctx context.Context, snap *snapshot, sp decl.SubAgentSpec,
 		Reasoning:   sp.Reasoning,
 		Temperature: sp.Temperature,
 		MaxTokens:   sp.MaxTokens,
-	})
+	}, snap.log)
 }
 
-func buildModel(ctx context.Context) (model.BaseModel[*schema.Message], error) {
+func buildModel(ctx context.Context, log *slog.Logger, requestDump bool) (model.BaseModel[*schema.Message], error) {
 	mc, err := ConfigFromEnv()
 	if err != nil {
 		return nil, err
+	}
+	// ★ ConfigFromEnv sets no client, so common.New would build a bare one
+	// and the request would never reach the log. This is the non-primary path
+	// (no provider or model named in the configuration).
+	if mc.HTTPClient == nil {
+		mc.HTTPClient = httplog.Wrap(&http.Client{Timeout: mc.Timeout}, mc.ProviderID, log,
+			httplog.WithRequestBodyDump(requestDump))
 	}
 	cm, err := common.New(ctx, mc)
 	if err != nil {

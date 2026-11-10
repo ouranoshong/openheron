@@ -79,6 +79,13 @@ function installFetch(): void {
     if (url.startsWith("/v2/sessions/") && url.endsWith("/abort") && init?.method === "POST") {
       return json({ threadId: url.split("/")[3]!, aborted: true })
     }
+    if (url.startsWith("/v2/sessions/") && url.endsWith("/files")) {
+      const method = init?.method ?? "GET"
+      if (method === "DELETE") {
+        return json({ deleted: true, path: new URL(url, "http://x").searchParams.get("path") ?? "" })
+      }
+      return json({ workspacePath: "/workspace", files: [] })
+    }
     return real(input, init)
   }) as typeof fetch
 }
@@ -327,6 +334,39 @@ describe("seedFromHistory", () => {
     expect(c.messages).toHaveLength(1)
     expect(c.messages[0]!.parts).toHaveLength(1)
     expect(c.messages[0]!.parts[0]!.kind === "tool" && c.messages[0]!.parts[0]!.result).toBe("a b c")
+  })
+
+  // ★ The attachment list is the answer to "that image you just sent".
+  //
+  //	★ It comes back with the message, so the history shows the file and
+  //	  not only the question that carried it.
+  test("历史里的附件清单重建为 attachment part", () => {
+    const c = seedFromHistory([
+      {
+        id: "m1",
+        role: "user",
+        content: "图里写了什么？",
+        metadata: {
+          attachments: [{ name: "shot.png", path: "shot.png", size: 2048, mime: "image/png" }],
+        },
+      },
+    ])
+    const parts = c.messages[0]!.parts
+    // ★ The files come first, the text after — the same order the
+    //   optimistic bubble uses.
+    expect(parts[0]!.kind).toBe("attachment")
+    const p = parts[0]!
+    if (p.kind !== "attachment") throw new Error("expected an attachment part")
+    expect(p.name).toBe("shot.png")
+    expect(p.path).toBe("shot.png")
+    expect(p.size).toBe(2048)
+    expect(p.mime).toBe("image/png")
+    expect(parts[1]!.kind).toBe("text")
+  })
+
+  test("没有附件的消息不带 attachment part", () => {
+    const c = seedFromHistory([{ id: "m1", role: "user", content: "hi" }])
+    expect(c.messages[0]!.parts.every((p) => p.kind !== "attachment")).toBe(true)
   })
 
   test("消息带出 agent 归属", () => {

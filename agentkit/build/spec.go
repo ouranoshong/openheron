@@ -1,6 +1,7 @@
 package build
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -13,6 +14,9 @@ type agentSpec struct {
 	defaultAgent string
 	policy       Policy
 	maxDepth     int
+	// mcpServers are the configured servers, sorted. The agent's own
+	// mcps: list is read against them.
+	mcpServers []string
 }
 
 func specOf(cfg *spec.Config, projectRoot string) (agentSpec, error) {
@@ -33,6 +37,12 @@ func specOf(cfg *spec.Config, projectRoot string) (agentSpec, error) {
 	}
 	defaultAgent := cfg.DefaultAgent()
 	if _, ok := agents[defaultAgent]; !ok {
+		// ★ An agent that was **left out** is not "not declared": it is
+		//   declared, and the reason it cannot run is known. Saying which
+		//   one it is saves the reader from looking in the wrong place.
+		if msg := leftOutMessage(cfg, defaultAgent); msg != "" {
+			return agentSpec{}, errors.New(msg)
+		}
 		return agentSpec{}, fmt.Errorf("agent: the default agent %q is not declared", defaultAgent)
 	}
 	return agentSpec{
@@ -40,11 +50,35 @@ func specOf(cfg *spec.Config, projectRoot string) (agentSpec, error) {
 		defaultAgent: defaultAgent,
 		policy:       policyOf(cfg),
 		maxDepth:     cfg.MaxDepth(),
+		mcpServers:   mcpServersOfConfig(cfg),
 	}, nil
 }
 
+// policyOf assembles the tier table.
+//
+// ★ The exceptions come from two places, and both of them are the
+//
+//	configuration: a tool's own file names the ones that run without a
+//	nod (`allows:`), and an MCP server's file names its own — in the
+//	server's own vocabulary, translated to the exposed names here.
 func policyOf(cfg *spec.Config) Policy {
-	return NewPolicy(cfg.Policy.Ask, cfg.Policy.Deny)
+	allow := builtinAllowedTools()
+	allow = append(allow, cfg.AllowedTools()...)
+	for name := range mcpAllowedNames(cfg.MCPs) {
+		allow = append(allow, name)
+	}
+
+	// ★ The merge happens first, the removal last. A file's `allows:` list is
+	//   one of the sources above, so checking the names before the merge
+	//   would let the file grant the tool that rewrites the file.
+	kept := allow[:0]
+	for _, name := range allow {
+		if alwaysAsk[name] {
+			continue
+		}
+		kept = append(kept, name)
+	}
+	return NewPolicy(kept)
 }
 
 func (s *agentSpec) agentSpec(id string) (decl.SubAgentSpec, bool) {

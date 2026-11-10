@@ -8,6 +8,13 @@ import { cn } from "@/lib/utils"
 
 const InPreContext = createContext(false)
 
+// ★ The prose width. The chat column is wide so that a table or a code block
+//   fits whole — but a paragraph of sixty characters is a hard read, so the
+//   **text** blocks stop at the prose column and the block elements do not.
+//   One class, applied to the text elements only: a table inside a paragraph
+//   is not a thing, and the ceiling lives on the cells.
+const PROSE = "max-w-[var(--prose-column)]"
+
 function Pre({ children }: { children: ReactNode }) {
   return <InPreContext.Provider value>{children}</InPreContext.Provider>
 }
@@ -41,35 +48,54 @@ export const MarkdownText = memo(function MarkdownText({ text }: { text: string 
         pre: ({ children }) => <Pre>{children}</Pre>,
         code: (props) => <CodeAdapter {...props} />,
         table: ({ children }) => (
-          <div data-testid="markdown-table" className="my-3 w-full overflow-x-auto">
-            <table className="border-border w-max min-w-full border-collapse text-sm tabular-nums [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_th]:border [&_th]:border-border [&_th]:bg-muted/50 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-medium">
+          <div data-testid="markdown-table" className="my-3 w-full max-w-full overflow-x-auto">
+            <table
+              className={cn(
+                "border-border w-full border-collapse text-sm tabular-nums",
+                "[&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:align-top",
+                // ★ A table has two limits, and they answer different questions.
+                //   The **floor** (7rem per column) is what makes a table of
+                //   many columns overflow and scroll, instead of squeezing
+                //   every column into a sliver.
+                //   The **ceiling** (28rem per cell) is what makes a long
+                //   sentence wrap inside its cell instead of stretching the
+                //   table past the column.
+                "[&_td]:min-w-[7rem] [&_td]:max-w-[28rem] [&_td]:break-words",
+                "[&_th]:border [&_th]:border-border [&_th]:bg-muted/50 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-medium [&_th]:min-w-[7rem] [&_th]:whitespace-nowrap",
+              )}
+            >
               {children}
             </table>
           </div>
         ),
+        p: ({ children }) => <p className={cn("my-2", PROSE)}>{children}</p>,
         h1: ({ children }) => (
-          <h1 className="mt-6 mb-2 text-xl leading-snug font-semibold">{children}</h1>
+          <h1 className={cn("mt-6 mb-2 text-xl leading-snug font-semibold", PROSE)}>{children}</h1>
         ),
         h2: ({ children }) => (
-          <h2 className="mt-5 mb-2 text-lg leading-snug font-semibold">{children}</h2>
+          <h2 className={cn("mt-5 mb-2 text-lg leading-snug font-semibold", PROSE)}>{children}</h2>
         ),
         h3: ({ children }) => (
-          <h3 className="mt-4 mb-1.5 text-base leading-snug font-semibold">{children}</h3>
+          <h3 className={cn("mt-4 mb-1.5 text-base leading-snug font-semibold", PROSE)}>{children}</h3>
         ),
         h4: ({ children }) => (
-          <h4 className="mt-4 mb-1.5 text-sm font-semibold">{children}</h4>
+          <h4 className={cn("mt-4 mb-1.5 text-sm font-semibold", PROSE)}>{children}</h4>
         ),
         h5: ({ children }) => (
-          <h5 className="mt-4 mb-1.5 text-sm font-semibold">{children}</h5>
+          <h5 className={cn("mt-4 mb-1.5 text-sm font-semibold", PROSE)}>{children}</h5>
         ),
         h6: ({ children }) => (
-          <h6 className="text-muted-foreground mt-4 mb-1.5 text-sm font-semibold">{children}</h6>
+          <h6 className={cn("text-muted-foreground mt-4 mb-1.5 text-sm font-semibold", PROSE)}>
+            {children}
+          </h6>
         ),
         strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
         em: ({ children }) => <em className="italic">{children}</em>,
         del: ({ children }) => <del className="opacity-70 line-through">{children}</del>,
         blockquote: ({ children }) => (
-          <blockquote className="border-border text-muted-foreground my-3 border-l-2 pl-3">
+          <blockquote
+            className={cn("border-border text-muted-foreground my-3 border-l-2 pl-3", PROSE)}
+          >
             {children}
           </blockquote>
         ),
@@ -84,6 +110,7 @@ export const MarkdownText = memo(function MarkdownText({ text }: { text: string 
               className={cn(
                 "my-2 space-y-1 pl-5",
                 taskList ? "list-none pl-1" : "list-disc",
+                PROSE,
                 className,
               )}
             >
@@ -92,7 +119,7 @@ export const MarkdownText = memo(function MarkdownText({ text }: { text: string 
           )
         },
         ol: ({ children, start }) => (
-          <ol start={start} className="my-2 list-decimal space-y-1 pl-5">
+          <ol start={start} className={cn("my-2 list-decimal space-y-1 pl-5", PROSE)}>
             {children}
           </ol>
         ),

@@ -19,15 +19,16 @@ func TestTheSkillListIsReadFromTheAgentFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	list := cfg.Agents["main"].Skills
-	if list == nil {
-		t.Fatal("the skill list must be read")
-	}
-	if len(*list) != 2 || (*list)[0] != "alpha" || (*list)[1] != "beta" {
-		t.Fatalf("skills = %v, want [alpha beta]", *list)
+	if len(list) != 2 || list[0] != "alpha" || list[1] != "beta" {
+		t.Fatalf("skills = %v, want [alpha beta]", list)
 	}
 }
 
-func TestAnAgentWithoutASkillListHasNoList(t *testing.T) {
+// ★ The list is like every other list on an agent: **the default is none**.
+//
+//	An absent list and an empty list mean the same thing, so there is no
+//	pointer and no third state.
+func TestAnAgentWithoutASkillListHasNoSkill(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 
@@ -35,12 +36,12 @@ func TestAnAgentWithoutASkillListHasNoList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Agents["main"].Skills != nil {
-		t.Fatalf("an undeclared list must stay nil, got %v", *cfg.Agents["main"].Skills)
+	if len(cfg.Agents["main"].Skills) != 0 {
+		t.Fatalf("an undeclared list must mean no skill, got %v", cfg.Agents["main"].Skills)
 	}
 }
 
-func TestAnEmptySkillListIsNotTheSameAsNoList(t *testing.T) {
+func TestAnEmptySkillListMeansNoSkill(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 	f.write(t, "agents/main.md", strings.Replace(minimalAgent,
@@ -50,12 +51,8 @@ func TestAnEmptySkillListIsNotTheSameAsNoList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	list := cfg.Agents["main"].Skills
-	if list == nil {
-		t.Fatal("an empty list must not be read as an undeclared one")
-	}
-	if len(*list) != 0 {
-		t.Fatalf("skills = %v, want an empty list", *list)
+	if len(cfg.Agents["main"].Skills) != 0 {
+		t.Fatalf("skills = %v, want an empty list", cfg.Agents["main"].Skills)
 	}
 }
 
@@ -73,7 +70,7 @@ func TestTheSkillListReachesTheAgentSpec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if spec.Skills == nil || len(*spec.Skills) != 1 || (*spec.Skills)[0] != "alpha" {
+	if len(spec.Skills) != 1 || spec.Skills[0] != "alpha" {
 		t.Fatalf("the agent spec must carry the skill list, got %v", spec.Skills)
 	}
 }

@@ -341,12 +341,16 @@ workload 声明了它，所以这个服务是个后台 workload，而不是一�
 
 ```
 ~/my-project/.openheron/
-  agents/main.md      the entry agent
-  agents/task.md      the executor agent
-  llm/deepseek.yaml   the model profile
-  policy/             permissions and limits
-  server/             the server's own settings
-  state/              the sessions
+  agents/main.md           the entry agent
+  agents/task.md           the general execution expert
+  agents/agent-expert.md   the agent-domain expert
+  agents/skill-expert.md   the skill-domain expert
+  skills/                  the skills, one folder each
+  llm/deepseek.yaml        the model profile
+  mcps/                    three MCP servers (fetch, time, deepwiki)
+  tools/                   the tool configurations
+  server/                  the server's own settings
+  state/                   the sessions
 ```
 
 ★ **那些都是你的文件。** 它们在你的挂载上，明明白白摆在那儿，
@@ -396,19 +400,28 @@ models:
 理解需求、拆任务、委派、验收；执行那个真正动手。
 它们就是普通 Markdown，里面写着指令。
 
-★ **`policy/permissions.yaml`** 决定哪些工具要先问一声：
+★ **哪些工具要先问一声**，由提供这个工具的那个文件决定 ——
+没有全局清单。没人点名的工具一律**要问**：
 
 ```yaml
-# ★ There are only two columns, ask and deny — **any tool not named is allowed**.
-#   Name the tools that really have consequences here: ask (a nod every time) or
-#   deny (unavailable).
-ask:   [write_file, edit_file, execute, kb_index]
-deny:  []
-
-# ★ The outer deny takes precedence over each agent's own disabled_tools — that
-#   is the one guarantee a sub-agent cannot relax. To narrow down **one**
-#   agent, use its own disabled_tools.
+# tools/http.yaml
+methods: [get]
+allows: [request_get]
 ```
+
+★ 代码自带一份**缺省**清单 —— 文件系统的读取类、委派类、skill 读取器
+直接放行，而文件只能往上加。别的都要问：
+`write_file`、`edit_file`、`execute`。★ 这三个也有自己的文件，想留给一个
+没人盯着的 agent，就在那里放宽它们：
+
+```yaml
+# tools/filesystem.yaml
+allows: [write_file, edit_file, execute]
+```
+
+★ **「不被暴露」只说两处**：工具自己文件的 `allows:` 清单，
+以及某个 agent 自己的 `tools` 清单。要收窄**某一个** agent，
+就用它的 `tools` 清单 —— 要放宽，同样在那里点名。
 
 ★ **`server/config.yaml`** 是进程自己的设置 —— 监听地址、数据目录、
 重试次数、agent 深度上限。它**不**热重载：它配置的是进程本身，
@@ -511,7 +524,7 @@ sbx rm openheron
 
 ★ **一件能干活的事，就是整个演示。** 仓库里带了一个：
 [`examples/demo-project`](examples/demo-project) 是一个带 bug 的小 Go 程序 ——
-`make test` 是失败的，而修好它只需要一个字符。
+`task test` 是失败的，而修好它只需要一个字符。
 
 ★ **在仓库根目录跑**，下面那些路径才解析得到。
 
@@ -526,7 +539,7 @@ sbx run docker.io/ouranoshong/openheron-kit:latest \
 ★ **或者从源码树**，运行时直接用磁盘上的文件把两个 Kit 组装出来：
 
 ```sh
-make kit    # once: it builds the binary and copies it beside the recipe
+task kit    # once: it builds the binary and copies it beside the recipe
 
 sbx run ./sandbox-kit/openheron \
     --kit ./sandbox-kit/examples/demo-project/openheron-deepseek \
@@ -534,16 +547,16 @@ sbx run ./sandbox-kit/openheron \
 ```
 
 ★ 第二种是你**改** Kit 时该用的那条：运行时拿你刚编辑过的文件重新构建，
-中间没有镜像、也没有 registry。它需要先跑一次 `make kit` ——
+中间没有镜像、也没有 registry。它需要先跑一次 `task kit` ——
 因为正是那一步把二进制复制到了构建够得着的配方旁边。
 第一种是用户走的那条，除了 `sbx` 什么都不需要。
 
-让它修好那个失败的测试。agent 会读文件、跑 `make test`、
+让它修好那个失败的测试。agent 会读文件、跑 `task test`、
 **在动手之前先问你** —— 批了它 —— 然后改动落在你宿主上，
 因为工作区就是你宿主上的一个目录。
 
 ★ 这个项目**不带** `.openheron/`：第一次启动时 `openheron init` 把整份配置
-写出来。而**自带**了 agent 或策略的项目会保留它们 ——
+写出来。而**自带**了 agent 或工具配置的项目会保留它们 ——
 `init` 写缺的、留有的，所以**你随项目带上的文件说了算**，
 而你留下的那些，第一次启动时补齐。
 

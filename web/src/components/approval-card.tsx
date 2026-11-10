@@ -33,7 +33,7 @@ export function ApprovalCard({ inset = true }: { inset?: boolean }) {
         data-testid="approval-card"
         role="alertdialog"
         aria-labelledby="approval-title"
-        className="border-warning/40 bg-warning/10 mx-auto max-w-3xl space-y-2.5 rounded-lg border p-3"
+        className="border-warning/40 bg-warning/10 mx-auto w-full max-w-[var(--chat-column)] space-y-2.5 rounded-lg border p-3"
       >
         <div className="flex items-start gap-2">
           <ShieldAlertIcon className="mt-0.5 size-4 shrink-0" />

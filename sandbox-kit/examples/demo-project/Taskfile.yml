@@ -1,0 +1,23 @@
+# Demo project commands for the Docker Sandbox Kit example.
+#
+# ★ These targets are for the **host**: the agent inside the sandbox runs
+#   `go test ./...` directly (see README.md), because the base image owes
+#   the platform only bash, git and a CA bundle — no task, and no make.
+
+version: '3'
+
+tasks:
+  default:
+    desc: 'Run the Go test suite (the bare-command default)'
+    cmds:
+      - task: test
+
+  test:
+    desc: 'Run the Go test suite'
+    cmds:
+      - go test ./...
+
+  run:
+    desc: 'Run the demo program'
+    cmds:
+      - go run .

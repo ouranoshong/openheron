@@ -2,11 +2,13 @@ package build
 
 import (
 	"context"
-	"slices"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/cloudwego/eino/components/tool"
+
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
 
 type Tier string
@@ -14,37 +16,47 @@ type Tier string
 const (
 	TierAllow Tier = "allow"
 	TierAsk   Tier = "ask"
-	TierDeny  Tier = "deny"
 )
 
+// Policy is the assembled tier table: a name → a tier.
+//
+// ★ The default is **ask**, and the exceptions are named. ★ There is no
+//
+//	global deny any more: "not exposed" is said in exactly two places —
+//	a file's own `allows:` list, and an agent's own `tools` list.
+//
+// ★ The table is assembled from the **configuration**, so the tier of a
+//
+//	tool is answerable before its server is even up.
 type Policy struct {
-	Ask  []string
-	Deny []string
+	// Allow lists the tools that run without a nod.
+	Allow []string
 
-	ask map[string]bool
+	allow map[string]bool
 }
 
-func NewPolicy(ask, deny []string) Policy {
+// NewPolicy builds the table from the names that run without a nod.
+func NewPolicy(allow []string) Policy {
 	p := Policy{
-		Ask:  append([]string(nil), ask...),
-		Deny: append([]string(nil), deny...),
-		ask:  make(map[string]bool, len(ask)),
+		Allow: append([]string(nil), allow...),
+		allow: make(map[string]bool, len(allow)),
 	}
-	for _, n := range ask {
-		p.ask[n] = true
+	for _, n := range allow {
+		p.allow[n] = true
 	}
 	return p
 }
 
+// TierOf answers the tier of one tool name.
+//
+// ★ The default is ask, because the cost of guessing wrong is asymmetric:
+//
+//	one extra click against a destructive call nobody saw.
 func (p Policy) TierOf(name string) Tier {
-	switch {
-	case slices.Contains(p.Deny, name):
-		return TierDeny
-	case p.ask[name]:
-		return TierAsk
-	default:
+	if p.allow[name] {
 		return TierAllow
 	}
+	return TierAsk
 }
 
 type Layer string
@@ -65,43 +77,108 @@ func (b boundary) Table() *Table { return b.table }
 type Table struct {
 	mu sync.RWMutex
 
-	Deny    []string
-	Disable []string
-	Name    string
+	// Load is the agent's allow-list: the **built-in** tools it may use.
+	//
+	// ★ The default is **none**. A tool the list does not name is not
+	//   this agent's tool — the tool set is one set for the whole
+	//   snapshot, and the model never sees a tool the table removes.
+	Load []string
+	Name string
 
-	denied   map[string]bool
-	disabled map[string]bool
+	loaded   map[string]bool
 	observed map[string]bool
+
+	// loadPrefix holds the trailing-* patterns of the agent's tools list.
+	//
+	// ★ They are prefixes and never parsed names: the composed name is
+	//   never split back into its two halves, and a server name may not
+	//   contain a run of underscores — so "mcp__github__" cannot reach
+	//   "mcp__github_x__".
+	loadPrefix []string
+
+	// servers are the MCP servers this agent mounts.
+	//
+	// ★ **A mounted server's tools are the agent's tools.** The agent's
+	//   tools: list is about the built-in tools, and the servers it mounts
+	//   bring their own — the two questions do not overlap, so the two keys
+	//   do not have to agree.
+	servers map[string]bool
 }
 
-func newTable(name string, deny, disable []string) *Table {
+// newTable builds the tool table of one agent.
+//
+// ★ The MCP entries of the tools list are **dropped**, not honored: they
+//
+//	said "and this server's tools too", and the servers list now says it.
+//	Keeping them would leave two ways to say one thing, and the two would
+//	disagree the moment one of them was edited.
+func newTable(name string, load []string, servers []string) *Table {
 	t := &Table{
-		Name:     name,
-		Deny:     append([]string(nil), deny...),
-		Disable:  append([]string(nil), disable...),
-		denied:   make(map[string]bool, len(deny)),
-		disabled: make(map[string]bool, len(disable)),
+		Name:    name,
+		Load:    make([]string, 0, len(load)),
+		loaded:  make(map[string]bool, len(load)),
+		servers: make(map[string]bool, len(servers)),
 	}
-	for _, n := range deny {
-		t.denied[n] = true
+	for _, s := range servers {
+		if s != "" {
+			t.servers[s] = true
+		}
 	}
-	for _, n := range disable {
-		t.disabled[n] = true
+	for _, n := range load {
+		if _, isMCP := decl.MCPServerOf(n); isMCP {
+			continue
+		}
+		t.Load = append(t.Load, n)
+		prefix, isPattern, err := decl.ParseToolNamePattern(n)
+		if err != nil {
+			// ★ The loader refuses these shapes, so a pattern that does
+			//   not parse can only come from a caller that did not go
+			//   through the loader. Treat it as an exact name rather than
+			//   dropping the rule silently.
+			t.loaded[n] = true
+			continue
+		}
+		if isPattern {
+			t.loadPrefix = append(t.loadPrefix, prefix)
+			continue
+		}
+		t.loaded[prefix] = true
 	}
 	return t
 }
 
+// Blocked reports whether the agent may not have this tool.
+//
+// ★ The list is an **allow-list**, so the answer is the other way round
+//
+//	from the blacklist it replaced: a tool the list does not name is
+//	blocked, and one it names is not.
+//
+// ★ An MCP tool is judged by its **server**, not by the list: the agent
+//
+//	has the tools of the servers it mounts, and no tool of a server it
+//	does not. ★ The server's own file decides which of its tools exist
+//	and which of them run without a nod — mounting a server is not
+//	approving its tools.
 func (t *Table) Blocked(toolName string) Layer {
 	if t == nil {
 		return LayerNone
 	}
-	if t.denied[toolName] {
-		return LayerDeny
+	if server, isMCP := decl.MCPServerOf(toolName); isMCP {
+		if t.servers[server] {
+			return LayerNone
+		}
+		return LayerNotMounted
 	}
-	if t.disabled[toolName] {
-		return LayerDisable
+	if t.loaded[toolName] {
+		return LayerNone
 	}
-	return LayerNone
+	for _, p := range t.loadPrefix {
+		if strings.HasPrefix(toolName, p) {
+			return LayerNone
+		}
+	}
+	return LayerNotLoaded
 }
 
 func (t *Table) Filter(tools []tool.BaseTool) ([]tool.BaseTool, map[Layer]int) {
@@ -110,9 +187,10 @@ func (t *Table) Filter(tools []tool.BaseTool) ([]tool.BaseTool, map[Layer]int) {
 	}
 	t.observe(tools)
 
-	if len(t.denied) == 0 && len(t.disabled) == 0 {
-		return tools, nil
-	}
+	// ★ There is no "nothing to do" shortcut any more: the list is an
+	//   allow-list, so an **empty** list means every tool is removed. The
+	//   shortcut the blacklist could afford ("no rules, keep everything")
+	//   is exactly the case the allow-list must not have.
 	kept := make([]tool.BaseTool, 0, len(tools))
 	removed := map[Layer]int{}
 	for _, tl := range tools {
@@ -162,7 +240,20 @@ func (t *Table) Observed() (names []string, ok bool) {
 }
 
 const (
-	LayerNone    Layer = ""
-	LayerDeny    Layer = "deny"
-	LayerDisable Layer = "disable"
+	LayerNone Layer = ""
+	// LayerNotLoaded is the agent's own tools: list: the tool is not in
+	// it, so the agent does not have the tool at all.
+	//
+	// ★ There is **one** reason now. The global deny list is gone with the
+	//   partition, and the MCP scope layer went with it: a server the
+	//   agent does not mount has no tools to block, and one it does mount
+	//   but does not name is blocked by this very list.
+	LayerNotLoaded Layer = "not_loaded"
+	// LayerNotMounted is an MCP tool of a server this agent does not
+	// mount.
+	//
+	// ★ It is a reason of its own, and it is the one the panel shows:
+	//   "tools" would send the user to the wrong key, because the agent's
+	//   tools: list has nothing to do with an MCP tool.
+	LayerNotMounted Layer = "not_mounted"
 )

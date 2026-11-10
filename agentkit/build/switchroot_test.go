@@ -10,7 +10,7 @@ import (
 )
 
 func TestEveryDeclaredAgentCanBeTheSessionAgent(t *testing.T) {
-	cfg := configFromSpecs("test/model", nil, decl.Policy{}, []decl.SubAgentSpec{
+	cfg := configFromSpecs("test/model", nil, nil, []decl.SubAgentSpec{
 		{ID: "worker", ModelRef: "test/model", Sub: []decl.SubAgentSpec{
 			{ID: "leaf", ModelRef: "test/model"},
 		}},
@@ -50,7 +50,7 @@ func TestPoolSeparatesGenerations(t *testing.T) {
 }
 
 func TestBuildSwitchableRootIsPooledSeparately(t *testing.T) {
-	cfg := configFromSpecs("test/model", nil, decl.Policy{}, []decl.SubAgentSpec{
+	cfg := configFromSpecs("test/model", nil, nil, []decl.SubAgentSpec{
 		{ID: "worker", Description: "worker", Instruction: "do work", ModelRef: "test/model"},
 	})
 	b := newTestBuilderWithConfig(t, cfg)
@@ -89,7 +89,7 @@ func TestBuildRejectsUnknownRoot(t *testing.T) {
 }
 
 func TestBuildRootWithoutModelFailsLoudly(t *testing.T) {
-	cfg := configFromSpecs("test/model", nil, decl.Policy{}, []decl.SubAgentSpec{
+	cfg := configFromSpecs("test/model", nil, nil, []decl.SubAgentSpec{
 		{ID: "worker", Description: "worker"},
 	})
 	b := newTestBuilderWithConfig(t, cfg)

@@ -97,8 +97,8 @@ sha256_of() {
 
 # ── 1. the platform ──────────────────────────────────────────────────────────
 #
-# ★ The asset names come from the Makefile (PLATFORMS and the naming rule), so
-#   this script and `make release` must not drift apart.
+# ★ The asset names come from the Taskfile (PLATFORMS and the naming rule), so
+#   this script and `task release` must not drift apart.
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
 case "$os" in
 linux) os=linux ;;

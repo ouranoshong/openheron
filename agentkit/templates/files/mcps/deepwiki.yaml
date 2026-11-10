@@ -1,0 +1,26 @@
+# mcps/deepwiki.yaml
+#
+# Cognition's official remote MCP: it reads the generated documentation of a
+# public GitHub repository and answers questions about it. Free, no
+# credentials.
+# transport: http is streamable HTTP, not SSE (the old /sse endpoint is gone),
+# and this project does not support SSE.
+# ★ An http server is a remote process, so it must never carry env: — not
+#   even an empty map, that is a load-time hard error.
+#   Use headers: when it needs a credential, and write the value as ${ENV};
+#   this one does not, so the key is not written at all.
+#
+# Mounted: it is mounted on task (use mcp__deepwiki__* to look up the facts of
+# a third-party library or framework). Mounting it hands the agent all of the
+# server's tools; the agent's tools: names the built-in tools only.
+transport: http
+url: https://mcp.deepwiki.com/mcp
+timeout: 30s
+call_timeout: 90s
+
+# read_wiki_structure / read_wiki_contents are the stable read-only tools, and
+# they run without a nod. The question-asking tool is called ask_question or
+# ask_wiki_question depending on the version, so it is not named here — it
+# stays ask. The allow-list may cover a tool the server does not offer yet; a
+# name that is written wrong raises no error, that entry is just not in effect.
+allows: [read_wiki_structure, read_wiki_contents]

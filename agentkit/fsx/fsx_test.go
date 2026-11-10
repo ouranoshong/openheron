@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -193,6 +194,11 @@ func TestResolveWriteFailsClosed(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: permissions do not block the walk")
 	}
+	if runtime.GOOS == "windows" {
+		// ★ Windows has no POSIX permission bits on directories: Chmod below
+		//   succeeds but does not stop the walk, so the fixture cannot exist.
+		t.Skip("directory permissions are a POSIX concept")
+	}
 	root := t.TempDir()
 	locked := filepath.Join(root, "locked")
 	mkdir(t, locked)
@@ -374,7 +380,15 @@ func TestGlobStopsAtItsTimeBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b.walkBudget = time.Nanosecond
+	// ★ A **negative** budget, not a tiny positive one. The clock's resolution
+	//   is coarser than a nanosecond on some platforms — Windows reads the
+	//   monotonic clock in ~0.5ms steps — and `Add` truncates to that
+	//   resolution, so `time.Now().Add(time.Nanosecond)` is a no-op there and
+	//   the deadline never looks expired: the walk finishes, nothing says it
+	//   was cut short, and the assertion below fails at random. A budget that
+	//   is already an hour in the past says the same thing and cannot be
+	//   quantized away.
+	b.walkBudget = -time.Hour
 
 	files, err := b.GlobInfo(context.Background(), &filesystem.GlobInfoRequest{Pattern: "**/*"})
 	if err != nil {

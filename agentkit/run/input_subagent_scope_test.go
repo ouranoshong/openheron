@@ -30,7 +30,7 @@ func TestSubagentMessagesAreKeptOutOfTheModelInput(t *testing.T) {
 			expertResult,
 			parentResult,
 		},
-	}, "next")
+	}, schema.UserMessage("next"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestRemovingSubagentMessagesKeepsTheParentsPairsIntact(t *testing.T) {
 			expertResult,
 			parentResult,
 		},
-	}, "next")
+	}, schema.UserMessage("next"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestSubagentMessagesAreFilteredInEveryTurn(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		in, err := c.buildInput(context.Background(), inputParams{
 			History: []*schema.Message{schema.UserMessage("q"), expert},
-		}, "next")
+		}, schema.UserMessage("next"))
 		if err != nil {
 			t.Fatal(err)
 		}

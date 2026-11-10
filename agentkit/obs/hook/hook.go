@@ -18,7 +18,7 @@ type Handler struct {
 
 func New(l *slog.Logger) *Handler {
 	if l == nil {
-		l = obs.Logger()
+		l = obs.Discard()
 	}
 	return &Handler{log: l}
 }

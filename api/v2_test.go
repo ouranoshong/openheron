@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/ouranoshong/openheron/agentkit/obs"
 	"time"
 
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
@@ -491,6 +493,11 @@ func TestV2UploadWithoutFileIs400(t *testing.T) {
 // the file lands INSIDE the workspace — assert that rather than a status
 // code, and keep a direct PutFile test below for the guard that actually
 // rejects traversal.
+//
+// ★ The path the client gets back is **relative** to the workspace: it is
+//
+//	the name the client sends back with the next question, and it has to
+//	be the name the server itself resolves.
 func TestV2UploadConfinesToWorkspace(t *testing.T) {
 	srv := newV2Server(t)
 	id := createThread(t, srv)
@@ -505,7 +512,11 @@ func TestV2UploadConfinesToWorkspace(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	for _, f := range out.Files {
-		if !strings.HasPrefix(f.Path, out.WorkspacePath+string(os.PathSeparator)) {
+		if filepath.IsAbs(f.Path) {
+			t.Fatalf("the path must be relative to the workspace, got %q", f.Path)
+		}
+		full := filepath.Join(out.WorkspacePath, f.Path)
+		if !strings.HasPrefix(full, out.WorkspacePath+string(os.PathSeparator)) {
 			t.Fatalf("file escaped the workspace: %s (workspace %s)", f.Path, out.WorkspacePath)
 		}
 		if strings.Contains(f.Name, "/") || strings.Contains(f.Name, "..") {
@@ -622,8 +633,7 @@ models:
     reasoning_default: high
 `)
 	write("agents/main.md", "---\ndescription: root\nmodel: test/small\nsubagents: [worker]\n---\nbody\n")
-	write("agents/worker.md", "---\ndescription: worker\nmodel: test/big\ndisabled_tools: [execute]\n---\nbody\n")
-	write("policy/permissions.yaml", "ask:\n  - execute\n  - read_file\ndeny:\n  - rm_rf\n")
+	write("agents/worker.md", "---\ndescription: worker\nmodel: test/big\ntools: [ls, read_file]\n---\nbody\n")
 
 	// base is the user-level dir, root is the project root — both arguments
 	// matter: leaving projectRoot empty makes the loader look for .openheron
@@ -662,11 +672,13 @@ func sampleTools() stubTools {
 		byAgent: map[string][]ToolVerdict{
 			"main": {
 				{Name: "read_file", Tier: string(decl.TierAllow)},
-				{Name: "execute", Tier: string(decl.TierDeny), Reason: "disabled_tools"},
+				// ★ A blocked tool keeps its own tier — it is this agent
+				//   that cannot have it, not that the tool is illegal.
+				{Name: "execute", Tier: string(decl.TierAsk), Reason: "tools"},
 			},
 			"worker": {
 				{Name: "read_file", Tier: string(decl.TierAllow)},
-				{Name: "execute", Tier: string(decl.TierDeny), Reason: "disabled_tools"},
+				{Name: "execute", Tier: string(decl.TierAsk), Reason: "tools"},
 			},
 		},
 		policy: []ToolVerdict{
@@ -696,8 +708,8 @@ func TestEffectiveToolsRendersTheInjectedVerdict(t *testing.T) {
 	}
 	if tool, ok := byName["execute"]; !ok {
 		t.Fatalf("execute must appear in the tool table, got %+v", byName)
-	} else if tool.Tier != string(decl.TierDeny) || tool.Reason != "disabled_tools" {
-		t.Fatalf("execute = %+v, want deny via disabled_tools", tool)
+	} else if tool.Tier != string(decl.TierAsk) || tool.Reason != "tools" {
+		t.Fatalf("execute = %+v, want ask via tools", tool)
 	}
 	if tool := byName["read_file"]; tool.Tier != string(decl.TierAllow) || tool.Reason != "" {
 		t.Fatalf("read_file = %+v, want allow with no reason", tool)
@@ -711,7 +723,7 @@ func TestRuntimeToolsAreRenderedSeparately(t *testing.T) {
 	}
 	stub.byAgent["worker"] = []ToolVerdict{
 		{Name: "read_file", Tier: string(decl.TierAllow), Present: true, ObservedKnown: true},
-		{Name: "grep_search", Tier: string(decl.TierDeny), Reason: "policy.deny", ObservedKnown: true},
+		{Name: "grep_search", Tier: string(decl.TierAsk), Reason: "tools", ObservedKnown: true},
 	}
 
 	srv := newV2Server(t)
@@ -793,8 +805,9 @@ func TestV2ConfigSurfacesPolicyAndModels(t *testing.T) {
 	if view.DefaultAgent != "main" {
 		t.Fatalf("defaultAgent = %q", view.DefaultAgent)
 	}
-	if view.Policy.DefaultTier != string(decl.TierAllow) {
-		t.Fatalf("defaultTier = %q, want allow", view.Policy.DefaultTier)
+	// ★ The default is ask: a tool nobody names asks.
+	if view.Policy.DefaultTier != string(decl.TierAsk) {
+		t.Fatalf("defaultTier = %q, want ask", view.Policy.DefaultTier)
 	}
 	if len(view.Providers) != 1 || view.Providers[0].ID != "test" {
 		t.Fatalf("providers = %+v", view.Providers)
@@ -850,7 +863,7 @@ func newV2RunServerWith(t *testing.T, builder run.AgentBuilder) (*Server, *bufEx
 	t.Cleanup(func() { _ = rt.Shutdown(context.Background()) })
 
 	engine := route.NewEngine(hertzconfig.NewOptions(nil))
-	srv := New(rt, fm)
+	srv := New(rt, fm, obs.Discard())
 	srv.h = engine
 	var captured bufExtWriter
 	srv.newStream = func(c *app.RequestContext) *transport.SSEStream {
@@ -1121,7 +1134,7 @@ func TestV2AbortStopsARunningThread(t *testing.T) {
 	srv.SetConfigSource(func() *spec.Config { return testConfig(t) })
 
 	sess := mustCreate(t, srv)
-	if _, err := srv.rt.Submit(context.Background(), sess.ID(), "", "keep going"); err != nil {
+	if _, err := srv.rt.Submit(context.Background(), sess.ID(), "", "keep going", nil); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	if st, ok := srv.rt.StatusOf(context.Background(), sess.ID()); !ok || st.Phase != run.PhaseRunning {

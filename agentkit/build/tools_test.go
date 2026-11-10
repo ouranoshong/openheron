@@ -156,13 +156,16 @@ func TestToolRegistryIsAtomicPerProvider(t *testing.T) {
 	}
 }
 
-func TestRegistryToolDefaultsToAllow(t *testing.T) {
-	if got := NewPolicy(nil, nil).TierOf("brand_new_tool"); got != TierAllow {
-		t.Fatalf("an unlisted registry tool = %q, want the allow fallback", got)
+func TestRegistryToolDefaultsToAsk(t *testing.T) {
+	if got := NewPolicy(nil).TierOf("brand_new_tool"); got != TierAsk {
+		t.Fatalf("an unlisted registry tool = %q, want ask", got)
 	}
 }
 
-func TestRegistryToolObeysDisabledTools(t *testing.T) {
+// ★ The list is an **allow-list**: a tool the agent does not name is not its
+//
+//	tool, and a tool it names is — whoever else may or may not have it.
+func TestRegistryToolObeysTheAgentsAllowList(t *testing.T) {
 	tools, err := buildRegistry(t, registryOf(
 		&fakeProvider{id: "a", tools: []tool.BaseTool{&stubTool{name: "new_tool"}}},
 	))
@@ -170,13 +173,13 @@ func TestRegistryToolObeysDisabledTools(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root := specTable(NewPolicy(nil, nil), decl.SubAgentSpec{ID: "main"})
+	root := specTable(NewPolicy(nil), decl.SubAgentSpec{ID: "main", Tools: []string{"new_tool"}})
 	if kept, _ := root.Filter(tools); len(kept) != 1 {
 		t.Fatalf("the root must see the tool, kept %v", namesOf(kept))
 	}
-	sub := specTable(NewPolicy(nil, nil),
-		decl.SubAgentSpec{ID: "worker", DisabledTools: []string{"new_tool"}})
-	if kept, removed := sub.Filter(tools); len(kept) != 0 || removed[LayerDisable] != 1 {
+	sub := specTable(NewPolicy(nil),
+		decl.SubAgentSpec{ID: "worker", Tools: []string{"read_file"}})
+	if kept, removed := sub.Filter(tools); len(kept) != 0 || removed[LayerNotLoaded] != 1 {
 		t.Fatalf("the sub-agent must not see it: kept %v removed %v", namesOf(kept), removed)
 	}
 }
@@ -188,13 +191,17 @@ func TestRegistryToolObeysPolicyTiers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := NewPolicy(nil, nil)
-	if got := p.TierOf("new_tool"); got != TierAllow {
-		t.Fatalf("tier = %q, want allow", got)
+	p := NewPolicy(nil)
+	if got := p.TierOf("new_tool"); got != TierAsk {
+		t.Fatalf("tier = %q, want ask — the default is ask", got)
 	}
-	deny := specTable(NewPolicy(nil, []string{"new_tool"}), decl.SubAgentSpec{ID: "main"})
-	if kept, removed := deny.Filter(tools); len(kept) != 0 || removed[LayerDeny] != 1 {
-		t.Fatalf("deny must remove it at the filter stage: kept %v removed %v", namesOf(kept), removed)
+	// ★ The only way a tool does not reach the model is the agent's own
+	//   tools: list — it does not name it.
+	blocked := specTable(NewPolicy(nil),
+		decl.SubAgentSpec{ID: "main", Tools: []string{"read_file"}})
+	if kept, removed := blocked.Filter(tools); len(kept) != 0 || removed[LayerNotLoaded] != 1 {
+		t.Fatalf("the allow-list must remove it at the filter stage: kept %v removed %v",
+			namesOf(kept), removed)
 	}
 }
 

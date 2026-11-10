@@ -39,15 +39,20 @@ test("多 agent 会话有过滤条，能按 agent 切消息", async ({ page }) =
   await expect(page.locator('[data-testid="message"]')).toHaveCount(4)
 })
 
-test("过滤条上显示每个 agent 的用量分账", async ({ page }) => {
+test("过滤条上的 chip 只写名字，用量在提示里", async ({ page }) => {
   await openApp(page)
   await openThread(page, MULTI)
 
   const main = page.locator('[data-testid="agent-filter-main"]')
   const coder = page.locator('[data-testid="agent-filter-coder"]')
-  await expect(main).toContainText("600")
-  await expect(coder).toContainText("600")
+  // ★ The chip carries the agent's name and nothing else: with the numbers
+  //   on it, the header was a ledger and nobody could tell which number was
+  //   which.
+  await expect(main).toHaveText("main")
+  await expect(coder).toHaveText("coder")
+  // The two quantities live in the tooltip.
   await expect(main).toHaveAttribute("title", /main — 600 tokens/)
+  await expect(coder).toHaveAttribute("title", /coder — 600 tokens/)
 })
 
 test("多 agent 会话的角色标签显示 agent 名", async ({ page }) => {

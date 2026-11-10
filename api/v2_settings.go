@@ -17,29 +17,6 @@ const (
 	codeConfigWriteConflict = "config_write_conflict"
 )
 
-type settingsCategory struct {
-	ID       string `json:"id"`
-	Editable bool   `json:"editable"`
-	Hot      bool   `json:"hot"`
-	Note     string `json:"note,omitempty"`
-}
-
-type settingsItem struct {
-	Path     string `json:"path"`
-	Exists   bool   `json:"exists"`
-	Hot      bool   `json:"hot"`
-	Revision string `json:"revision,omitempty"`
-}
-
-type settingsManifest struct {
-	Categories      []settingsCategory  `json:"categories"`
-	Items           []settingsItem      `json:"items"`
-	Templates       map[string]string   `json:"templates"`
-	ModelRefs       []string            `json:"modelRefs"`
-	ReasoningLevels map[string][]string `json:"reasoningLevels"`
-	ConfigVersion   string              `json:"configVersion"`
-}
-
 type settingsItemBody struct {
 	Path     string `json:"path"`
 	Content  string `json:"content"`
@@ -68,12 +45,6 @@ type settingsValidateBody struct {
 	Content string `json:"content"`
 }
 
-type settingsValidateResult struct {
-	OK            bool     `json:"ok"`
-	Errors        []string `json:"errors,omitempty"`
-	ConfigVersion string   `json:"configVersion"`
-}
-
 // SetConfigService wires /v2/settings.
 // Optional: without it the endpoints answer 503. Config is still fully
 // readable through /v2/config, so a caller that only wants to inspect does
@@ -83,7 +54,7 @@ func (s *Server) SetConfigService(svc *spec.Service) { s.cfgSvc = svc }
 // requireSettings returns the wired Service or writes 503.
 func (s *Server) requireSettings(c *app.RequestContext) *spec.Service {
 	if s.cfgSvc == nil {
-		v2Fail(c, consts.StatusServiceUnavailable, "config_unavailable",
+		s.v2Fail(c, consts.StatusServiceUnavailable, "config_unavailable",
 			"config writing is not wired on this server", false)
 		return nil
 	}
@@ -91,7 +62,7 @@ func (s *Server) requireSettings(c *app.RequestContext) *spec.Service {
 }
 
 // settingsFail maps a config write failure onto HTTP.
-func settingsFail(c *app.RequestContext, err error) {
+func (s *Server) settingsFail(c *app.RequestContext, err error) {
 	var we *spec.WriteError
 	if errors.As(err, &we) {
 		msg := we.Message
@@ -100,19 +71,19 @@ func settingsFail(c *app.RequestContext, err error) {
 		}
 		switch we.Kind {
 		case spec.ErrPathInvalid:
-			v2Fail(c, consts.StatusBadRequest, codeConfigPathInvalid, msg, false)
+			s.v2Fail(c, consts.StatusBadRequest, codeConfigPathInvalid, msg, false)
 		case spec.ErrSecretLiteral:
-			v2Fail(c, consts.StatusBadRequest, codeConfigSecretLiteral, msg, false)
+			s.v2Fail(c, consts.StatusBadRequest, codeConfigSecretLiteral, msg, false)
 		case spec.ErrMergeRejected:
-			v2Fail(c, consts.StatusUnprocessableEntity, codeConfigWouldBreak, msg, false)
+			s.v2Fail(c, consts.StatusUnprocessableEntity, codeConfigWouldBreak, msg, false)
 		case spec.ErrConflict:
-			v2Fail(c, consts.StatusConflict, codeConfigWriteConflict, msg, false)
+			s.v2Fail(c, consts.StatusConflict, codeConfigWriteConflict, msg, false)
 		default:
-			v2FailInternal(c, errors.New(msg))
+			s.v2FailInternal(c, errors.New(msg))
 		}
 		return
 	}
-	v2FailInternal(c, err)
+	s.v2FailInternal(c, err)
 }
 
 // ── GET /v2/settings ──────────────────────────────────────────────────────
@@ -122,48 +93,15 @@ func (s *Server) v2SettingsManifest(_ context.Context, c *app.RequestContext) {
 	if svc == nil {
 		return
 	}
-	live := s.liveConfig()
-	refs := live.ModelRefs()
-
-	manifest := settingsManifest{
-		Categories:      make([]settingsCategory, 0, len(spec.Categories)),
-		Items:           []settingsItem{},
-		Templates:       map[string]string{},
-		ModelRefs:       refs,
-		ReasoningLevels: live.ReasoningLevels(),
+	// ★ The manifest is assembled in spec, not here: `openheron init` and
+	//   the config_* tools ask the same question, and three assemblies of
+	//   "which files are there" is how the CLI and the editor drift.
+	m, err := svc.Manifest(s.liveConfig())
+	if err != nil {
+		s.settingsFail(c, err)
+		return
 	}
-	for _, cat := range spec.Categories {
-		view := settingsCategory{ID: cat.Dir, Editable: cat.Editable, Hot: cat.Hot()}
-		if !cat.Editable {
-			view.Note = "not hot-reloaded; changes apply on restart"
-		}
-		manifest.Categories = append(manifest.Categories, view)
-		manifest.Templates[cat.Dir] = spec.Template(cat.Dir, refs)
-		if cat.Dir == spec.DirPolicy {
-			manifest.Templates[spec.DirPolicy+"/limits.yaml"] = spec.LimitsTemplate()
-		}
-		if cat.Dir == spec.DirTools {
-			for rel, tpl := range spec.ToolTemplates() {
-				manifest.Templates[rel] = tpl
-			}
-		}
-
-		names, err := svc.ListFiles(cat)
-		if err != nil {
-			settingsFail(c, err)
-			return
-		}
-		for _, name := range names {
-			rel := cat.Dir + "/" + name
-			item := settingsItem{Path: rel, Exists: true, Hot: cat.Hot()}
-			if _, rev, err := svc.ReadFile(rel); err == nil {
-				item.Revision = rev
-			}
-			manifest.Items = append(manifest.Items, item)
-		}
-	}
-	manifest.ConfigVersion = svc.Fingerprint()
-	c.JSON(consts.StatusOK, manifest)
+	c.JSON(consts.StatusOK, m)
 }
 
 // ── GET /v2/settings/item ─────────────────────────────────────────────────
@@ -173,19 +111,14 @@ func (s *Server) v2SettingsItem(_ context.Context, c *app.RequestContext) {
 	if svc == nil {
 		return
 	}
-	rel, ok := s.settingsTarget(c)
+	rel := c.Query("path")
+	cat, ok := s.readPath(c, rel)
 	if !ok {
-		return
-	}
-
-	cat, err := spec.ValidatePath(rel)
-	if err != nil {
-		settingsFail(c, err)
 		return
 	}
 	body, rev, err := svc.ReadFile(rel)
 	if err != nil {
-		settingsFail(c, err)
+		s.settingsFail(c, err)
 		return
 	}
 
@@ -210,7 +143,7 @@ func (s *Server) v2SettingsSave(_ context.Context, c *app.RequestContext) {
 
 	rev, _, err := svc.Write(rel, content, baseRev)
 	if err != nil {
-		settingsFail(c, err)
+		s.settingsFail(c, err)
 		return
 	}
 	s.settingsApplied(c, svc, rel, rev)
@@ -223,13 +156,13 @@ func (s *Server) v2SettingsDelete(_ context.Context, c *app.RequestContext) {
 	if svc == nil {
 		return
 	}
-	rel, ok := s.settingsTarget(c)
-	if !ok {
+	rel := c.Query("path")
+	if _, ok := s.writePath(c, rel); !ok {
 		return
 	}
 
 	if _, err := svc.Delete(rel); err != nil {
-		settingsFail(c, err)
+		s.settingsFail(c, err)
 		return
 	}
 	s.settingsApplied(c, svc, rel, "")
@@ -244,46 +177,56 @@ func (s *Server) v2SettingsValidate(_ context.Context, c *app.RequestContext) {
 	}
 	var body settingsValidateBody
 	if err := c.BindAndValidate(&body); err != nil {
-		v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "invalid body", false)
+		s.v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "invalid body", false)
 		return
 	}
-	rel, ok := s.pathArg(c, body.Path)
-	if !ok {
+	rel := body.Path
+	if _, ok := s.readPath(c, rel); !ok {
 		return
 	}
 
-	res := settingsValidateResult{OK: true}
-	if err := svc.Validate(rel, []byte(body.Content)); err != nil {
-		res.OK = false
-		res.Errors = []string{err.Error()}
+	d, err := svc.Diagnostics(rel, []byte(body.Content))
+	if err != nil {
+		s.settingsFail(c, err)
+		return
 	}
-	res.ConfigVersion = svc.Fingerprint()
-	c.JSON(consts.StatusOK, res)
+	c.JSON(consts.StatusOK, d)
 }
 
-func (s *Server) pathArg(c *app.RequestContext, rel string) (string, bool) {
-	if _, err := spec.ValidatePath(rel); err != nil {
-		settingsFail(c, err)
-		return "", false
+// readPath is the gate for a request that only reads.
+//
+// ★ Two gates, not one: reading a file the editor may not write is exactly
+// what a reader needs most (see `spec.ValidateReadPath`), and conflating them
+// made `server/config.yaml` unreadable while the manifest listed it.
+func (s *Server) readPath(c *app.RequestContext, rel string) (spec.Category, bool) {
+	cat, err := spec.ValidateReadPath(rel)
+	if err != nil {
+		s.settingsFail(c, err)
+		return spec.Category{}, false
 	}
-	return rel, true
+	return cat, true
 }
 
-func (s *Server) settingsTarget(c *app.RequestContext) (string, bool) {
-	return s.pathArg(c, c.Query("path"))
+// writePath is the gate for a request that writes.
+func (s *Server) writePath(c *app.RequestContext, rel string) (spec.Category, bool) {
+	cat, err := spec.ValidatePath(rel)
+	if err != nil {
+		s.settingsFail(c, err)
+		return spec.Category{}, false
+	}
+	return cat, true
 }
 
 func (s *Server) settingsWriteArgs(c *app.RequestContext) (string, string, []byte, bool) {
 	var body settingsWriteBody
 	if err := c.BindAndValidate(&body); err != nil {
-		v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "invalid body", false)
+		s.v2Fail(c, consts.StatusBadRequest, codeInvalidBody, "invalid body", false)
 		return "", "", nil, false
 	}
-	rel, ok := s.pathArg(c, body.Path)
-	if !ok {
+	if _, ok := s.writePath(c, body.Path); !ok {
 		return "", "", nil, false
 	}
-	return rel, body.BaseRevision, []byte(body.Content), true
+	return body.Path, body.BaseRevision, []byte(body.Content), true
 }
 
 func (s *Server) settingsApplied(c *app.RequestContext, svc *spec.Service,
@@ -291,7 +234,7 @@ func (s *Server) settingsApplied(c *app.RequestContext, svc *spec.Service,
 
 	version := svc.Fingerprint()
 	hot := false
-	if cat, err := spec.ValidatePath(rel); err == nil {
+	if cat, err := spec.ValidateReadPath(rel); err == nil {
 		hot = cat.Hot()
 	}
 	applied := hot && s.watchEnabled()

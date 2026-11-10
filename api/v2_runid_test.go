@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"os"
 	"strings"
 	"testing"
 
@@ -32,11 +31,10 @@ func (b *runIDCapturingBuilder) Build(ctx context.Context, _, _ string, _ contra
 
 func TestV2RunUsesOneRunIDForTheLogAndTheStream(t *testing.T) {
 	var logs bytes.Buffer
-	obs.SetLogger(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	t.Cleanup(func() { obs.SetLogger(obs.DefaultLogger(os.Stderr)) })
 
 	builder := &runIDCapturingBuilder{}
 	srv, captured := newV2RunServerWith(t, builder)
+	srv.log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	id := createThread(t, srv)
 
 	got := callJSON(t, srv, "POST", "/v2/run", map[string]any{
@@ -63,11 +61,10 @@ func TestV2RunUsesOneRunIDForTheLogAndTheStream(t *testing.T) {
 
 func TestV2RunMintsARunIDWhenTheClientHasNone(t *testing.T) {
 	var logs bytes.Buffer
-	obs.SetLogger(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	t.Cleanup(func() { obs.SetLogger(obs.DefaultLogger(os.Stderr)) })
 
 	builder := &runIDCapturingBuilder{}
 	srv, captured := newV2RunServerWith(t, builder)
+	srv.log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	id := createThread(t, srv)
 
 	got := callJSON(t, srv, "POST", "/v2/run", map[string]any{
@@ -91,11 +88,10 @@ func TestV2RunMintsARunIDWhenTheClientHasNone(t *testing.T) {
 
 func TestV2ResumeGetsItsOwnRunID(t *testing.T) {
 	var logs bytes.Buffer
-	obs.SetLogger(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	t.Cleanup(func() { obs.SetLogger(obs.DefaultLogger(os.Stderr)) })
 
 	builder := &runIDCapturingBuilder{}
 	srv, _ := newV2RunServerWith(t, builder)
+	srv.log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	id := createThread(t, srv)
 
 	if got := callJSON(t, srv, "POST", "/v2/run", map[string]any{

@@ -30,13 +30,13 @@ var startupAt = time.Now().UTC()
 // requireConfig returns the live config or writes 503.
 func (s *Server) requireConfig(c *app.RequestContext) *spec.Config {
 	if s.cfgFn == nil {
-		v2Fail(c, consts.StatusServiceUnavailable, "config_unavailable",
+		s.v2Fail(c, consts.StatusServiceUnavailable, "config_unavailable",
 			"no config source is wired", false)
 		return nil
 	}
 	cfg := s.cfgFn()
 	if cfg == nil {
-		v2Fail(c, consts.StatusServiceUnavailable, "config_unavailable",
+		s.v2Fail(c, consts.StatusServiceUnavailable, "config_unavailable",
 			"config is not loaded yet", true)
 		return nil
 	}
@@ -111,13 +111,13 @@ type agentView struct {
 	Model         modelView `json:"model"`
 	MaxIterations int       `json:"maxIterations"`
 	Subagents     []string  `json:"subagents"`
-	DisabledTools []string  `json:"disabledTools"`
-	// Skills is the agent's skill allow-list.
-	Skills []string `json:"skills"`
-	// SkillsRestricted reports that the list above is an allow-list. When it
-	// is false the agent says nothing about skills, so it gets every skill in
-	// the skills directory.
-	SkillsRestricted      bool       `json:"skillsRestricted"`
+	// Tools is the agent's tool allow-list: the tools it may use.
+	//
+	// ★ The default is none — an absent list and an empty list mean the
+	//   same thing, so there is nothing else to report.
+	Tools []string `json:"tools"`
+	// Skills is the agent's skill allow-list. The default is none.
+	Skills                []string   `json:"skills"`
 	EffectiveTools        []toolView `json:"effectiveTools,omitempty"`
 	RuntimeTools          []string   `json:"runtimeTools,omitempty"`
 	RuntimeToolsKnown     bool       `json:"runtimeToolsKnown"`
@@ -170,7 +170,7 @@ func (s *Server) v2AgentDetail(_ context.Context, c *app.RequestContext) {
 			return
 		}
 	}
-	v2Fail(c, consts.StatusNotFound, "agent_not_found",
+	s.v2Fail(c, consts.StatusNotFound, "agent_not_found",
 		"agent "+id+" is not declared", false)
 }
 
@@ -191,20 +191,17 @@ func (s *Server) agentViews(cfg *spec.Config, withTools bool) []agentView {
 			Description:   a.Description,
 			MaxIterations: a.MaxIterations,
 			Subagents:     a.SubAgents,
-			DisabledTools: a.DisabledTools,
+			Tools:         a.Tools,
 			Model:         modelOf(cfg, a),
 			SummarizeAt:   contexts[id].SummarizeAt,
 		}
 		if v.Subagents == nil {
 			v.Subagents = []string{}
 		}
-		if v.DisabledTools == nil {
-			v.DisabledTools = []string{}
+		if v.Tools == nil {
+			v.Tools = []string{}
 		}
-		if a.Skills != nil {
-			v.Skills = append([]string{}, *a.Skills...)
-			v.SkillsRestricted = true
-		}
+		v.Skills = append([]string{}, a.Skills...)
 		if v.Skills == nil {
 			v.Skills = []string{}
 		}
@@ -301,10 +298,15 @@ func (s *Server) policyTools() []toolView {
 
 // ── GET /v2/config ───────────────────────────────────────────────────────
 
+// policyView is the tier model as the configuration states it.
+//
+// ★ There is no ask list and no deny list any more: the default is ask,
+//
+//	and the exceptions are the tools that run without a nod — named by
+//	the file that provides them.
 type policyView struct {
-	Ask         []string `json:"ask"`
-	Deny        []string `json:"deny"`
 	DefaultTier string   `json:"defaultTier"`
+	Allow       []string `json:"allow"`
 }
 
 type providerView struct {
@@ -349,6 +351,9 @@ type serverView struct {
 	MaxDepth      int    `json:"maxDepth"`
 	WatchEnabled  bool   `json:"watchEnabled"`
 	WatchDebounce string `json:"watchDebounce"`
+	// LogLevel is the level in effect, not the configured value: an env
+	// override has to be visible here or the field lies about the output.
+	LogLevel string `json:"logLevel"`
 }
 
 type configView struct {
@@ -362,6 +367,25 @@ type configView struct {
 	Providers    []providerView `json:"providers"`
 	Skills       []SkillView    `json:"skills"`
 	Server       serverView     `json:"server"`
+	// MCPServers are the configured MCP servers: the configuration says
+	// what exists, and the panel says what is up.
+	MCPServers []mcpServerBrief `json:"mcpServers"`
+}
+
+// allowNames picks the tools that run without a nod out of the tier table.
+//
+// ★ The table is the truth about the tiers, so the allow list is read off
+//
+//	it — a second source would be a second answer.
+func allowNames(tiers []toolView) []string {
+	out := make([]string, 0, len(tiers))
+	for _, t := range tiers {
+		if t.Tier == string(decl.TierAllow) && t.Reason == "" {
+			out = append(out, t.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (s *Server) v2Config(_ context.Context, c *app.RequestContext) {
@@ -370,24 +394,32 @@ func (s *Server) v2Config(_ context.Context, c *app.RequestContext) {
 		return
 	}
 
+	// ★ The tier table comes from the builder, not from the configuration:
+	//   the allow list is assembled from three places (the code's own
+	//   built-in readers, a file's `allows:`, an MCP server's `allows:`),
+	//   and recomputing half of it here would make this view contradict the
+	//   tool table it carries next to it.
+	tiers := s.toolTiers()
+
 	out := configView{
 		Version:      cfg.Version,
 		Deferred:     cfg.Deferred(),
 		DefaultAgent: cfg.DefaultAgent(),
 		MaxDepth:     cfg.MaxDepth(),
 		Policy: policyView{
-			Ask:         nonNil(cfg.Policy.Ask),
-			Deny:        nonNil(cfg.Policy.Deny),
-			DefaultTier: string(decl.TierAllow),
+			DefaultTier: string(decl.TierAsk),
+			Allow:       allowNames(tiers),
 		},
-		Tools:  s.toolTiers(),
-		Agents: s.agentViews(cfg, false),
+		Tools:      tiers,
+		Agents:     s.agentViews(cfg, false),
+		MCPServers: configuredMCP(cfg),
 		Server: serverView{
 			StartTimeout:  cfg.Server.StartTimeout.Duration().String(),
 			MaxRetries:    cfg.MaxRetries(),
 			MaxDepth:      cfg.MaxDepth(),
 			WatchEnabled:  cfg.Server.Watch.Enabled == nil || *cfg.Server.Watch.Enabled,
 			WatchDebounce: cfg.Server.Watch.Debounce.Duration().String(),
+			LogLevel:      s.logLevel(),
 		},
 	}
 

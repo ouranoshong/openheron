@@ -19,7 +19,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	root := t.TempDir()
 	f := &fixture{root: filepath.Join(root, ".openheron")}
-	for _, sub := range []string{DirLLM, DirAgent, DirServer, DirPolicy, DirTools} {
+	for _, sub := range []string{DirLLM, DirAgent, DirServer, DirTools, DirMCP} {
 		if err := os.MkdirAll(filepath.Join(f.root, sub), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -80,6 +80,49 @@ func TestMissingConfigDirectoryIsNotAnError(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "main.md") {
 		t.Fatalf("the error must name the missing file, got %q", err)
 	}
+}
+
+// ★ server/config.yaml's log_requests is the project-level twin of
+//
+//	OPENHERON_LOG_LLM_REQUESTS. It has to reach the loader, and a file that
+//	omits it has to stay off — dumping megabyte bodies must be opt-in.
+func TestTheRequestDumpSwitchComesFromTheConfig(t *testing.T) {
+	t.Run("declared true", func(t *testing.T) {
+		f := newFixture(t)
+		f.seedMinimal(t)
+		f.write(t, "server/config.yaml", "listen_addr: \":9999\"\nlog_requests: true\n")
+		cfg, err := f.load(t)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !cfg.Server.LogRequests {
+			t.Fatal("log_requests: true did not reach Server.LogRequests")
+		}
+	})
+	t.Run("omitted stays off", func(t *testing.T) {
+		f := newFixture(t)
+		f.seedMinimal(t)
+		f.write(t, "server/config.yaml", "listen_addr: \":9999\"\n")
+		cfg, err := f.load(t)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Server.LogRequests {
+			t.Fatal("an omitted log_requests must default to false")
+		}
+	})
+}
+
+// ★ A switch nobody can find is a switch nobody uses: the scaffold a new
+//
+//	project gets has to name the key, not leave it to the docs.
+func TestTheServerTemplateNamesTheRequestDumpSwitch(t *testing.T) {
+	for _, text := range Templates(DirServer) {
+		if strings.Contains(text, "log_requests:") {
+			return
+		}
+	}
+	t.Fatal("the server/config.yaml template must name the log_requests key")
 }
 
 func TestDefaultsSurviveWhenFileOmitsKeys(t *testing.T) {
@@ -148,39 +191,25 @@ models:
 	}
 }
 
-func TestDenyAndAskComeFromTheSameFile(t *testing.T) {
+// ★ The exceptions come from the file that provides the tool.
+func TestTheExceptionsComeFromTheToolsOwnFile(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
-	f.write(t, "policy/permissions.yaml", "deny: [execute]\nask: [write_file]\n")
+	f.write(t, "tools/http.yaml", "methods: [get]\nallows: [request_get]\n")
 
 	cfg, err := f.load(t)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Policy.TierOf("execute"); got != decl.TierDeny {
-		t.Fatalf("execute must be denied, got %q", got)
+	allowed := map[string]bool{}
+	for _, n := range cfg.AllowedTools() {
+		allowed[n] = true
 	}
-	if got := cfg.Policy.TierOf("write_file"); got != decl.TierAsk {
-		t.Fatalf("write_file must be in the ask tier, got %q", got)
+	if !allowed["request_get"] {
+		t.Fatal("request_get must run without a nod — the file names it")
 	}
-}
-
-func TestUnlistedToolDefaultsToAllow(t *testing.T) {
-	f := newFixture(t)
-	f.seedMinimal(t)
-	p := defaultPolicy()
-	for _, tool := range []string{"ls", "read_file", "glob", "grep", "write_todos", "task"} {
-		if got := p.TierOf(tool); got != decl.TierAllow {
-			t.Errorf("the built-in read-only tool %s must default to allow, got %q", tool, got)
-		}
-	}
-	for _, tool := range []string{"write_file", "edit_file", "execute"} {
-		if got := p.TierOf(tool); got != decl.TierAsk {
-			t.Errorf("the mutating tool %s must default to ask, got %q", tool, got)
-		}
-	}
-	if got := p.TierOf("brand_new_tool"); got != decl.TierAllow {
-		t.Fatalf("* an unlisted tool must fall back to allow, got %q", got)
+	if allowed["request_post"] {
+		t.Fatal("request_post must ask — the file does not name it")
 	}
 }
 
@@ -316,12 +345,23 @@ func TestUnknownModelRefDoesNotFallBack(t *testing.T) {
 	f.seedMinimal(t)
 	f.write(t, "agents/main.md", "---\nmodel: openai/nonexistent\n---\n")
 
-	_, err := f.load(t)
-	if err == nil {
-		t.Fatal("★ a reference to an undeclared model must be an error, not a silent fallback to the default model")
+	cfg, err := f.load(t)
+	if err != nil {
+		t.Fatalf("★ an undeclared model must not take the tree down: %v", err)
 	}
-	if !strings.Contains(err.Error(), "nonexistent") {
-		t.Fatalf("the error must name the model: %v", err)
+	// ★ And it must not **fall back** either: the agent is left out, not
+	//   quietly pointed at some other model.
+	if _, ok := cfg.Agents["main"]; ok {
+		t.Fatal("★ an agent whose model is not declared must be left out, not given another model")
+	}
+	var said bool
+	for _, d := range cfg.Deferred() {
+		if strings.Contains(d, "nonexistent") {
+			said = true
+		}
+	}
+	if !said {
+		t.Fatalf("the notice must name the model: %v", cfg.Deferred())
 	}
 }
 
@@ -350,7 +390,7 @@ func TestUnknownSubagentIsRejected(t *testing.T) {
 // ── frontmatter ──────────────────────────────────────────────────────────
 
 func TestFrontmatterAndBodySplit(t *testing.T) {
-	fm, body, err := splitFrontmatter([]byte("---\nmodel: a/b\ndescription: x\n---\n你是助手。\n\n第二段。\n"))
+	fm, body, _, err := splitFrontmatter([]byte("---\nmodel: a/b\ndescription: x\n---\n你是助手。\n\n第二段。\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +403,7 @@ func TestFrontmatterAndBodySplit(t *testing.T) {
 }
 
 func TestFrontmatterUnterminatedIsError(t *testing.T) {
-	if _, _, err := splitFrontmatter([]byte("---\nmodel: a/b\n")); err == nil {
+	if _, _, _, err := splitFrontmatter([]byte("---\nmodel: a/b\n")); err == nil {
 		t.Fatal("a missing closing delimiter must be an error")
 	}
 }
@@ -397,81 +437,17 @@ func TestDeferredIsCollected(t *testing.T) {
 	}
 }
 
-// ── policy/limits.yaml ───────────────────────────────────────────────────
+// ── a retired partition ──────────────────────────────────────────────────
 
-func limitsGlobal(t *testing.T, f *fixture, depth, retries int) {
-	t.Helper()
-	f.write(t, "server/config.yaml",
-		"agent:\n  max_depth: "+itoa(depth)+"\nretry:\n  max_retries: "+itoa(retries)+"\n")
-}
-
-func itoa(n int) string { return strconv.Itoa(n) }
-
-func TestLimitsTightenTheGlobalBaseline(t *testing.T) {
+// ★ The `policy/` partition is gone. A configuration that still carries it
+//
+//	loads — the rest of it may be perfectly good — but the directory is
+//	**not read**, and a user who believes their tiers still apply has to
+//	be told.
+func TestALeftOverPolicyDirectoryIsReported(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
-	limitsGlobal(t, f, 3, 4)
-	f.write(t, "policy/limits.yaml", "agent:\n  max_depth: 2\nretry:\n  max_retries: 1\n")
-
-	cfg, err := f.load(t)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := cfg.MaxDepth(); got != 2 {
-		t.Fatalf("MaxDepth = %d, want 2 (limits.yaml tightens the global 3)", got)
-	}
-	if got := cfg.MaxRetries(); got != 1 {
-		t.Fatalf("MaxRetries = %d, want 1 (limits.yaml tightens the global 4)", got)
-	}
-	for _, d := range cfg.Deferred() {
-		if strings.Contains(d, "limits.yaml") {
-			t.Fatalf("limits.yaml is implemented now, it must not be deferred: %q", d)
-		}
-	}
-}
-
-func TestLimitsTightenButNeverLoosen(t *testing.T) {
-	f := newFixture(t)
-	f.seedMinimal(t)
-	limitsGlobal(t, f, 9, 9)
-	f.write(t, "policy/limits.yaml", "agent:\n  max_depth: 3\nretry:\n  max_retries: 4\n")
-	f.write(t, "policy/limits.yaml", "agent:\n  max_depth: 1\nretry:\n  max_retries: 2\n")
-
-	cfg, err := f.load(t)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := cfg.MaxDepth(); got != 1 {
-		t.Fatalf("MaxDepth = %d, want 1 (the stricter of the two levels)", got)
-	}
-	if got := cfg.MaxRetries(); got != 2 {
-		t.Fatalf("MaxRetries = %d, want 2 (the stricter of the two levels)", got)
-	}
-}
-
-func TestLimitsCannotLoosenTheGlobalBaseline(t *testing.T) {
-	f := newFixture(t)
-	f.seedMinimal(t)
-	limitsGlobal(t, f, 1, 5)
-	f.write(t, "policy/limits.yaml", "agent:\n  max_depth: 5\nretry:\n  max_retries: 99\n")
-
-	cfg, err := f.load(t)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := cfg.MaxDepth(); got != 1 {
-		t.Fatalf("MaxDepth = %d, want 1 (the global baseline must not be loosened)", got)
-	}
-	if got := cfg.MaxRetries(); got != 5 {
-		t.Fatalf("MaxRetries = %d, want 5 (the global baseline must not be loosened)", got)
-	}
-}
-
-func TestLooserLimitIsReportedAsDeferred(t *testing.T) {
-	f := newFixture(t)
-	f.seedMinimal(t)
-	limitsGlobal(t, f, 1, 5)
-	f.write(t, "policy/limits.yaml", "agent:\n  max_depth: 5\n")
+	f.write(t, "policy/permissions.yaml", "ask: [write_file]\ndeny: [execute]\n")
 
 	cfg, err := f.load(t)
 	if err != nil {
@@ -479,55 +455,110 @@ func TestLooserLimitIsReportedAsDeferred(t *testing.T) {
 	}
 	found := false
 	for _, d := range cfg.Deferred() {
-		if strings.Contains(d, "max_depth") {
+		if strings.Contains(d, "policy/") {
 			found = true
+			// ★ The notice has to say where the tiers went, or it is only
+			//   half a message.
+			if !strings.Contains(d, "server/config.yaml") {
+				t.Errorf("the notice must name the new home, got %q", d)
+			}
 		}
 	}
 	if !found {
-		t.Fatalf("a looser-than-baseline limit must be reported in deferred, got %v", cfg.Deferred())
+		t.Fatalf("★ a dropped partition must leave a word, got %v", cfg.Deferred())
 	}
 }
 
-func TestLimitsZeroMeansInherit(t *testing.T) {
+// ★ An empty directory is not a configuration: it carries nothing that was
+//
+//	dropped, so it must not raise a notice the user cannot act on.
+func TestAnEmptyRetiredDirectoryIsNotReported(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
-	limitsGlobal(t, f, 2, 7)
-	f.write(t, "policy/limits.yaml", "agent:\n  max_depth: 0\nretry:\n  max_retries: 0\n")
+	if err := os.MkdirAll(filepath.Join(f.root, "policy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg, err := f.load(t)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.MaxDepth(); got != 2 {
-		t.Fatalf("MaxDepth = %d, want 2 (0 = inherit the global)", got)
-	}
-	if got := cfg.MaxRetries(); got != 7 {
-		t.Fatalf("MaxRetries = %d, want 7 (0 = inherit the global)", got)
+	for _, d := range cfg.Deferred() {
+		if strings.Contains(d, "policy/") {
+			t.Fatalf("an empty directory carries nothing that was dropped, got %q", d)
+		}
 	}
 }
 
-func TestLimitsRejectsUnknownKeys(t *testing.T) {
+// ── the caps ─────────────────────────────────────────────────────────────
+//
+// ★ The cap lives in server/config.yaml: one place, one value. It is not
+//
+//	hot-reloaded — a change takes effect on the next start — and that is
+//	the price of not having a second copy of the same number.
+func capsGlobal(t *testing.T, f *fixture, depth, retries int) {
+	t.Helper()
+	f.write(t, "server/config.yaml",
+		"agent:\n  max_depth: "+itoa(depth)+"\nretry:\n  max_retries: "+itoa(retries)+"\n")
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
+
+func TestTheCapsComeFromTheServerConfiguration(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
-	f.write(t, "policy/limits.yaml", "agent:\n  max_tokens: 100\n")
+	capsGlobal(t, f, 3, 4)
+
+	cfg, err := f.load(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.MaxDepth(); got != 3 {
+		t.Fatalf("MaxDepth = %d, want 3", got)
+	}
+	if got := cfg.MaxRetries(); got != 4 {
+		t.Fatalf("MaxRetries = %d, want 4", got)
+	}
+}
+
+func TestTheCapsFallBackToTheDefaults(t *testing.T) {
+	f := newFixture(t)
+	f.seedMinimal(t)
+	f.write(t, "server/config.yaml", "agent:\n  max_depth: 0\nretry:\n  max_retries: 0\n")
+
+	cfg, err := f.load(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.MaxDepth(); got != DefaultMaxDepth {
+		t.Fatalf("MaxDepth = %d, want the default %d (0 = the default)", got, DefaultMaxDepth)
+	}
+	if got := cfg.MaxRetries(); got != DefaultMaxRetries {
+		t.Fatalf("MaxRetries = %d, want the default %d (0 = the default)", got, DefaultMaxRetries)
+	}
+}
+
+func TestTheCapsRejectUnknownKeys(t *testing.T) {
+	f := newFixture(t)
+	f.seedMinimal(t)
+	f.write(t, "server/config.yaml", "agent:\n  max_tokens: 100\n")
 
 	if _, err := f.load(t); err == nil {
 		t.Fatal("an unknown key must be an error (strict parsing), not silently ignored")
 	}
 }
 
-func TestLimitsDepthBelowTopologyFailsValidation(t *testing.T) {
+func TestADepthAboveTheCapFailsValidation(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 	f.write(t, "agents/researcher.md",
 		"---\ndescription: R\nmodel: openai/fast\nsubagents: [grandchild]\n---\n")
 	f.write(t, "agents/grandchild.md", "---\ndescription: G\nmodel: openai/fast\n---\n")
 	f.write(t, "agents/main.md", "---\nmodel: openai/fast\nsubagents: [researcher]\n---\n")
-	limitsGlobal(t, f, 3, 5)
-	f.write(t, "policy/limits.yaml", "agent:\n  max_depth: 1\n")
+	capsGlobal(t, f, 1, 5)
 
 	if _, err := f.load(t); err == nil {
-		t.Fatal("a declared depth above the tightened limit must be an error")
+		t.Fatal("a declared depth above the cap must be an error")
 	}
 }
 
@@ -543,8 +574,10 @@ func TestRelativePathsResolveAgainstProjectDir(t *testing.T) {
 	if a != b {
 		t.Fatalf("a relative path must resolve against project_dir: %q != %q", a, b)
 	}
-	abs := s.resolvePath("/var/lib/openheron")
-	if abs != "/var/lib/openheron" {
+	// ★ The absolute path is derived from the fixture, not hard-coded: "/x"
+	//   is absolute on Unix and not on Windows, where it needs a drive.
+	want := filepath.Join(f.root, "var", "lib", "openheron")
+	if abs := s.resolvePath(want); abs != want {
 		t.Fatalf("an absolute path must be returned as-is: %q", abs)
 	}
 }
@@ -565,7 +598,8 @@ func TestProjectRootAndResolveDir(t *testing.T) {
 	if got := s.ResolveDir("static"); got != filepath.Join(root, "static") {
 		t.Fatalf("a relative path must resolve against the project root: %q != %q", got, filepath.Join(root, "static"))
 	}
-	if got := s.ResolveDir("/abs/static"); got != "/abs/static" {
+	abs := filepath.Join(root, "abs", "static")
+	if got := s.ResolveDir(abs); got != abs {
 		t.Fatalf("an absolute path must be returned as-is: %q", got)
 	}
 	if got := s.ResolveDir("  "); got != "" {
@@ -604,6 +638,38 @@ func TestDataDirResolvesAgainstConfigDir(t *testing.T) {
 	abs := filepath.Join(t.TempDir(), "elsewhere")
 	if got, err := s.DataDir(abs); err != nil || got != abs {
 		t.Fatalf("an absolute data_dir must be returned as-is: %q (%v)", got, err)
+	}
+}
+
+// ★ The log lives with the runtime state, not with the project: `data_dir`,
+//
+//	`logs/` and the partitions are all inside .openheron/, while static_dir is
+//	the one path that points into the tree.
+func TestLogFileResolvesAgainstConfigRoot(t *testing.T) {
+	f := newFixture(t)
+	s, err := NewService(f.root, filepath.Dir(f.root))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := s.LogFile(""); err != nil || got != "" {
+		t.Fatalf("an empty log file means no file, not an error: %q (%v)", got, err)
+	}
+
+	got, err := s.LogFile("logs/openheron.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(f.root, "logs", "openheron.log"); got != want {
+		t.Fatalf("a relative log file must resolve against the config root: %q != %q", got, want)
+	}
+	if fi, err := os.Stat(filepath.Dir(got)); err != nil || !fi.IsDir() {
+		t.Fatalf("LogFile must create the directory it names: %v", err)
+	}
+
+	abs := filepath.Join(t.TempDir(), "openheron.log")
+	if got, err := s.LogFile(abs); err != nil || got != abs {
+		t.Fatalf("an absolute log file must be returned as-is: %q (%v)", got, err)
 	}
 }
 
@@ -715,7 +781,7 @@ func TestSubagentGraphIsAccepted(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 	f.write(t, "agents/researcher.md",
-		"---\ndescription: 只读检索\nmodel: openai/fast\ndisabled_tools: [execute]\n---\n只读。\n")
+		"---\ndescription: 只读检索\nmodel: openai/fast\ntools: [ls, read_file, glob, grep]\n---\n只读。\n")
 	f.write(t, "agents/main.md",
 		"---\nmodel: openai/strong\nsubagents: [researcher]\n---\n主。\n")
 
@@ -724,7 +790,7 @@ func TestSubagentGraphIsAccepted(t *testing.T) {
 		t.Fatalf("a valid sub-agent declaration must not be rejected: %v", err)
 	}
 	r := cfg.Agents["researcher"]
-	if r == nil || len(r.DisabledTools) != 1 {
+	if r == nil || len(r.Tools) != 4 {
 		t.Fatalf("the sub-agent declaration was not loaded: %+v", r)
 	}
 }
@@ -779,7 +845,7 @@ func TestSubAgentSpecsMirrorTopology(t *testing.T) {
 	f.seedMinimal(t)
 	f.write(t, "server/config.yaml", "agent:\n  max_depth: 2\n")
 	f.write(t, "agents/researcher.md",
-		"---\ndescription: R\nmodel: openai/fast\ndisabled_tools: [execute]\nreasoning: low\ntemperature: 0.3\nmax_tokens: 128\nsubagents: [grandchild]\n---\nR 正文\n")
+		"---\ndescription: R\nmodel: openai/fast\ntools: [ls, read_file]\nreasoning: low\ntemperature: 0.3\nmax_tokens: 128\nsubagents: [grandchild]\n---\nR 正文\n")
 	f.write(t, "agents/grandchild.md", "---\ndescription: G\nmodel: openai/fast\n---\nG 正文\n")
 	f.write(t, "agents/main.md", "---\nmodel: openai/fast\nsubagents: [researcher]\n---\n")
 
@@ -795,8 +861,8 @@ func TestSubAgentSpecsMirrorTopology(t *testing.T) {
 	if len(specs) != 1 || specs[0].ID != "researcher" {
 		t.Fatalf("the top level of the spec tree is wrong: %+v", specs)
 	}
-	if len(specs[0].DisabledTools) != 1 || specs[0].DisabledTools[0] != "execute" {
-		t.Fatalf("disabled_tools was not carried over: %+v", specs[0].DisabledTools)
+	if len(specs[0].Tools) != 2 || specs[0].Tools[0] != "ls" {
+		t.Fatalf("tools was not carried over: %+v", specs[0].Tools)
 	}
 	if specs[0].Reasoning != "low" {
 		t.Fatalf("the reasoning gear name was not carried over: %q", specs[0].Reasoning)

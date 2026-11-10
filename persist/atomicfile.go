@@ -4,7 +4,30 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
+
+// renameWithRetry replaces dst with the finished temp file.
+//
+// ★ On Windows MoveFileEx fails with ERROR_ACCESS_DENIED while any handle
+//
+//	still has dst open — even a reader that is about to close it. On Linux
+//	rename over an open file is legal, which is why this only shows up there.
+//	The competing reader is a short os.ReadFile, so a handful of short waits
+//	is enough; the retries stop as soon as the error is not that one.
+func renameWithRetry(old, newPath string) error {
+	var err error
+	for attempt := 0; attempt < 20; attempt++ {
+		if err = os.Rename(old, newPath); err == nil {
+			return nil
+		}
+		if !isTransientRenameError(err) {
+			return err
+		}
+		time.Sleep(time.Duration(5+attempt*5) * time.Millisecond)
+	}
+	return err
+}
 
 func AtomicWrite(dst string, data []byte, tmpSuffix string) error {
 	if tmpSuffix == "" {
@@ -39,7 +62,7 @@ func AtomicWrite(dst string, data []byte, tmpSuffix string) error {
 		return fmt.Errorf("persist: close %s: %w", tmp, err)
 	}
 
-	if err := os.Rename(tmp, dst); err != nil {
+	if err := renameWithRetry(tmp, dst); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("persist: rename %s -> %s: %w", tmp, dst, err)
 	}

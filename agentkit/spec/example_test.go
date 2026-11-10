@@ -84,11 +84,13 @@ func TestExampleConfigExposesEveryRole(t *testing.T) {
 			t.Fatalf("the example must expose the %q role, got %v", want, specs)
 		}
 	}
-	if got := byID["researcher"].DisabledTools; len(got) != 3 {
-		t.Fatalf("researcher must disable the writing tools, got %v", got)
+	// ★ The list is an **allow-list**: the researcher names the readers and
+	//   nothing else; the coder names the writers too.
+	if got := byID["researcher"].Tools; len(got) != 4 {
+		t.Fatalf("researcher must have only the readers, got %v", got)
 	}
-	if got := byID["coder"].DisabledTools; len(got) != 0 {
-		t.Fatalf("coder must keep the writing tools, got %v", got)
+	if got := byID["coder"].Tools; len(got) == 0 {
+		t.Fatal("coder must have the writing tools")
 	}
 }
 

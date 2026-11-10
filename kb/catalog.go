@@ -102,7 +102,7 @@ func RenderCatalog(c Catalog) []byte {
 	b.WriteString(catalogHeader)
 	b.WriteString("\n\n")
 
-	fmt.Fprintf(&b, "> corpus: %s  ·  %s  ·  rev %d  ·  writer %s  ·  created at %s\n",
+	fmt.Fprintf(&b, "> corpus_dir: %s  ·  %s  ·  rev %d  ·  writer %s  ·  created at %s\n",
 		orNone(c.Header.Corpus), docCount(len(entries)), c.Header.Revision,
 		orNone(c.Header.Writer), stamp(c.Header.Created))
 	b.WriteString("> Maintained by `openheron kb index`. **The summary line can be edited directly** " +
@@ -294,7 +294,7 @@ func applyHeaderSegment(h *Header, part string) {
 		return
 	}
 	for _, k := range headerKeyPairs {
-		for _, prefix := range []string{k.english, k.chinese} {
+		for _, prefix := range k.prefixes {
 			if !strings.HasPrefix(part, prefix) {
 				continue
 			}
@@ -304,32 +304,38 @@ func applyHeaderSegment(h *Header, part string) {
 	}
 }
 
-// headerKeyPairs pairs every catalog.md header key with the Chinese spelling
-// used before the header was translated. Both spellings are accepted, so a
-// catalog.md written by an older build keeps its corpus, revision, model, dim
-// and timestamps instead of silently falling back to zero values.
+// headerKeyPairs pairs every catalog.md header key with the spellings that
+// came before it. All of them are accepted, so a catalog.md written by an
+// older build keeps its corpus, revision, model, dim and timestamps instead
+// of silently falling back to zero values.
+//
+// ★ The corpus key has **four** spellings: the current `corpus_dir`, the
+//
+//	`corpus` the header carried before the key was renamed (2026-11-06), and
+//	the two Chinese ones the header went through. A catalog.md on disk is
+//	not rewritten by a rename, so all of them have to parse — the header is
+//	a file format, not a configuration surface.
 var headerKeyPairs = []struct {
-	english string
-	chinese string
-	parse   func(h *Header, value string)
+	prefixes []string
+	parse    func(h *Header, value string)
 }{
-	{"corpus:", "语料:", func(h *Header, v string) {
+	{[]string{"corpus_dir:", "corpus:", "语料目录:", "语料:"}, func(h *Header, v string) {
 		h.Corpus = v
 	}},
-	{"extraction rule v", "抽取规则 v", func(h *Header, v string) {
+	{[]string{"extraction rule v", "抽取规则 v"}, func(h *Header, v string) {
 		h.IndexVersion = parseInt(v, 0, "IndexVersion", "", nil)
 	}},
-	{"model ", "模型 ", func(h *Header, v string) {
+	{[]string{"model ", "模型 "}, func(h *Header, v string) {
 		model, dim, ok := parseModelDim(v)
 		h.Model = model
 		if ok {
 			h.Dim = dim
 		}
 	}},
-	{"updated at ", "更新于 ", func(h *Header, v string) {
+	{[]string{"updated at ", "更新于 "}, func(h *Header, v string) {
 		h.Updated = parseStamp(v)
 	}},
-	{"created at ", "建于 ", func(h *Header, v string) {
+	{[]string{"created at ", "建于 "}, func(h *Header, v string) {
 		h.Created = parseStamp(v)
 	}},
 }

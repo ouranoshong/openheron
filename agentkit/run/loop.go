@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
+	"github.com/google/uuid"
 
 	"github.com/ouranoshong/openheron/agentkit/emit"
 	"github.com/ouranoshong/openheron/agentkit/obs"
@@ -22,7 +24,7 @@ import (
 func (rt *Runtime) newLoop(ctx context.Context, sess storage.Session, turn *Turn) *adk.TurnLoop[loopItem, *schema.Message] {
 	cfg := adk.TurnLoopConfig[loopItem, *schema.Message]{
 		GenInput:      rt.makeGenInput(sess, turn),
-		PrepareAgent:  rt.makePrepareAgent(sess),
+		PrepareAgent:  rt.makePrepareAgent(sess, turn),
 		OnAgentEvents: rt.makeOnAgentEvents(sess, turn),
 	}
 	if store, _ := sess.GetCheckPointStore(); store != nil {
@@ -64,16 +66,38 @@ func (rt *Runtime) makeGenInput(sess storage.Session, turn *Turn) func(context.C
 
 		userMsg := message.NewUser(queryItem.Query)
 		message.StampNow(userMsg)
-		if err := sess.Append(userMsg); err != nil {
-			rt.logf("session=%s failed to persist user message: %v", sess.ID(), err)
-		}
+		message.StampMessageID(userMsg, uuid.NewString())
+		// ★ The attachment list belongs to the message, not to the session:
+		//   only a message-level binding can answer "that image you just
+		//   sent".
+		message.StampAttachments(userMsg, queryItem.Attachments)
 
+		// ★ Build first, persist second. The stamps are put on the message
+		//   before it is handed to the assembly, and the copy the model sees
+		//   shares its Extra map, so the id and the attachment list reach the
+		//   model too. A build that fails leaves no half-written question
+		//   behind: the transcript only learns about the turn once it starts.
 		built, err := rt.cfg.Input.buildInput(ctx, inputParams{
 			History:   sess.Messages(true),
 			Workspace: sess.Workspace(),
-		}, queryItem.Query)
+		}, userMsg)
 		if err != nil {
-			return nil, fmt.Errorf("assemble turn input: %w", err)
+			// ★ An error the framework records but nobody hands to the turn
+			//   is an error the client never sees: it would surface as
+			//   "turn start timeout", which names neither the cause nor the
+			//   file. Attachments are checked earlier (resolveAttachments),
+			//   but the input still owns an error channel for anything the
+			//   context assembly may legitimately fail on.
+			fail := fmt.Errorf("assemble turn input: %w", err)
+			turn.fail(fail)
+			return nil, fail
+		}
+
+		if err := sess.Append(userMsg); err != nil {
+			// ★ A failed write does not cost the model the question: the
+			//   input is already assembled and carries it. The transcript
+			//   loses the record, and the turn still answers.
+			rt.logf("session=%s failed to persist user message: %v", sess.ID(), err)
 		}
 
 		return &adk.GenInputResult[loopItem, *schema.Message]{
@@ -86,12 +110,35 @@ func (rt *Runtime) makeGenInput(sess storage.Session, turn *Turn) func(context.C
 
 // makePrepareAgent asks the injected builder for this turn's agent. The
 // Runtime never imports the agent package, so tests can inject a fake.
-func (rt *Runtime) makePrepareAgent(sess storage.Session) func(context.Context, *adk.TurnLoop[loopItem, *schema.Message], []loopItem) (adk.TypedAgent[*schema.Message], error) {
+//
+// ★ **A build failure has to fail the turn.** The builder is where a
+//
+//	configuration problem becomes a runtime one — an agent whose model is
+//	not declared, a skill that cannot be read back, a provider file that
+//	does not parse. The framework records the error and stops the loop, but
+//	nothing ever marked the turn failed: `Wait` sat until the start
+//	timeout, and the client was told "turn start timeout" — a symptom that
+//	names neither the file nor the reason.
+//
+//	So the error is handed to the turn here, and the turn's failure is what
+//	the client sees: the reason, in the builder's own words.
+func (rt *Runtime) makePrepareAgent(sess storage.Session, turn *Turn) func(context.Context, *adk.TurnLoop[loopItem, *schema.Message], []loopItem) (adk.TypedAgent[*schema.Message], error) {
 	return func(ctx context.Context, _ *adk.TurnLoop[loopItem, *schema.Message], _ []loopItem) (adk.TypedAgent[*schema.Message], error) {
 		if rt.cfg.AgentBuilder == nil {
-			return nil, errors.New("openheronrt: no AgentBuilder configured")
+			err := errors.New("openheronrt: no AgentBuilder configured")
+			turn.fail(agentUnavailable{reason: err})
+			return nil, err
 		}
-		return rt.cfg.AgentBuilder.Build(ctx, sess.ID(), sess.AgentID(), contract.TurnQuery)
+		agent, err := rt.cfg.AgentBuilder.Build(ctx, sess.ID(), sess.AgentID(), contract.TurnQuery)
+		if err != nil {
+			// ★ The reason is wrapped, not replaced: the client's message is
+			//   the builder's, and the sentinel is what lets the transport
+			//   tell "your configuration is broken" from "something went
+			//   wrong inside".
+			turn.fail(agentUnavailable{reason: err})
+			return nil, err
+		}
+		return agent, nil
 	}
 }
 
@@ -130,6 +177,11 @@ func (rt *Runtime) makeOnAgentEvents(sess storage.Session, turn *Turn) func(cont
 			Err:           err,
 		}
 		turn.holdPending(artifacts.Pending)
+
+		// ★ The ledger names the servers this run touched, so a
+		//   post-mortem can answer "which server was this" without
+		//   reading the whole transcript.
+		turn.row.noteMCPServers(mcpServersOf(artifacts.Intermediates))
 
 		rt.archive(sess, turn, out)
 		// ★ The messages are on disk: the turn is finished with the
@@ -215,6 +267,11 @@ func (rt *Runtime) archive(sess storage.Session, turn *Turn, out Outcome) {
 	rt.archiveCompaction(sess, out)
 
 	for _, msg := range out.Intermediates {
+		// ★ Every archived message carries its own id, so the client can key
+		//   it no matter what the transcript looks like later. A message
+		//   that already has one keeps it — the stream may have stamped it
+		//   before it reached here.
+		message.StampMessageID(msg, uuid.NewString())
 		if err := sess.Append(msg); err != nil {
 			rt.logf("session=%s failed to archive intermediate message: %v", sess.ID(), err)
 		}
@@ -257,6 +314,10 @@ func (rt *Runtime) archiveCompaction(sess storage.Session, out Outcome) {
 	if agent := sess.AgentID(); agent != "" {
 		message.StampAgent(msg, agent)
 	}
+	// ★ The boundary is the one message that lands in the **middle** of the
+	//   transcript, so it is the one that renumbers its neighbours. It needs
+	//   an id of its own for the same reason every other message does.
+	message.StampMessageID(msg, uuid.NewString())
 	if err := sess.Append(msg); err != nil {
 		rt.logf("session=%s failed to persist the compacted message: %v", sess.ID(), err)
 	}
@@ -307,14 +368,20 @@ func (rt *Runtime) makeGenResume(sess storage.Session) func(context.Context, *ad
 }
 
 func (rt *Runtime) logf(format string, args ...any) {
-	logf(format, args...)
+	logf(rt.log, format, args...)
 }
 
-// logf writes a warning through the one log outlet.
+// logf writes a warning through the run's logger.
 //
-// ★ It is a package-level function because not every caller has a Runtime:
+// ★ It takes the logger explicitly because not every caller has a Runtime:
 //
-//	the run row is written by the turn handle, which does not.
-func logf(format string, args ...any) {
-	obs.Logger().Warn("[openheronrt] " + fmt.Sprintf(format, args...))
+//	the run row is written by the turn handle, which carries the logger
+//	the Runtime handed it. A nil logger drops the line.
+func logf(log *slog.Logger, format string, args ...any) {
+	if log == nil {
+		return
+	}
+	log.Warn("[openheronrt] " + fmt.Sprintf(format, args...))
 }
+
+var discard = obs.Discard()

@@ -29,7 +29,25 @@ export interface ToolPart {
   fromHistory?: boolean
 }
 
-export type Part = TextPart | ReasoningPart | ToolPart
+// AttachmentPart is one file that came with a message.
+//
+// ★ It belongs to the **message**, not to the session: only a message-level
+//   binding can answer "that image you just sent". A session-level list
+//   could only answer "what does this session have", which is a different
+//   question.
+//
+// ★ path is relative to the session's workspace. It is the name the server
+//   resolves, so it is what the client sends back with the next question.
+export interface AttachmentPart {
+  kind: "attachment"
+  id: string
+  name: string
+  path: string
+  size: number
+  mime: string
+}
+
+export type Part = TextPart | ReasoningPart | ToolPart | AttachmentPart
 
 // CompactionMark is what a compacted message carries.
 //

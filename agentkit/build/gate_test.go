@@ -35,7 +35,7 @@ func TestRootAndSubAgentShareTheSameToolChain(t *testing.T) {
 }
 
 func TestToolChainOrderPutsFilterBeforeApproval(t *testing.T) {
-	chain := toolChain(newBoundary(NewPolicy(nil, nil), newTable("main", nil, nil)), 1)
+	chain := toolChain(newBoundary(NewPolicy(nil), newTable("main", nil, nil)), 1)
 
 	fi, ai, ui := -1, -1, -1
 	for i, mw := range chain {
@@ -62,7 +62,7 @@ func TestToolChainOrderPutsFilterBeforeApproval(t *testing.T) {
 }
 
 func TestToolChainHasTheSafeToolMiddleware(t *testing.T) {
-	chain := toolChain(newBoundary(NewPolicy(nil, nil), newTable("main", nil, nil)), 1)
+	chain := toolChain(newBoundary(NewPolicy(nil), newTable("main", nil, nil)), 1)
 
 	found := false
 	for _, mw := range chain {
@@ -110,7 +110,7 @@ func TestApprovalInfoSurvivesGob(t *testing.T) {
 // streaming one, so a gate that only wraps the synchronous path leaves the
 // very tool it is there for unguarded.
 func TestApprovalGateAlsoWrapsTheStreamingPath(t *testing.T) {
-	mw := newApprovalMiddleware(NewPolicy([]string{"execute"}, nil))
+	mw := newApprovalMiddleware(NewPolicy([]string{"execute"}))
 
 	_, ok := mw.(interface {
 		WrapStreamableToolCall(context.Context, adk.StreamableToolCallEndpoint, *adk.ToolContext) (adk.StreamableToolCallEndpoint, error)
@@ -124,7 +124,7 @@ func TestApprovalGateAlsoWrapsTheStreamingPath(t *testing.T) {
 // The two paths must reach the same verdict: a tool that the synchronous
 // gate stops, the streaming gate stops too.
 func TestStreamingAndSynchronousGatesAgree(t *testing.T) {
-	mw := newApprovalMiddleware(NewPolicy([]string{"execute"}, nil))
+	mw := newApprovalMiddleware(NewPolicy(nil))
 
 	syncCalled := false
 	syncWrapped, err := mw.WrapInvokableToolCall(
@@ -171,7 +171,7 @@ func TestStreamingAndSynchronousGatesAgree(t *testing.T) {
 // A denied tool is refused on both paths, and the refusal is a message the
 // model can read rather than an error that ends the turn.
 func TestDeniedToolIsRefusedOnBothPaths(t *testing.T) {
-	mw := newApprovalMiddleware(NewPolicy(nil, []string{"execute"}))
+	mw := newApprovalMiddleware(NewPolicy(nil))
 
 	syncWrapped, err := mw.WrapInvokableToolCall(
 		context.Background(),
@@ -204,7 +204,7 @@ func TestDeniedToolIsRefusedOnBothPaths(t *testing.T) {
 // An allow-tier tool is left alone on both paths — the gate must not cost
 // the tools nobody has to approve.
 func TestAllowedToolRunsOnBothPaths(t *testing.T) {
-	mw := newApprovalMiddleware(NewPolicy([]string{"execute"}, nil))
+	mw := newApprovalMiddleware(NewPolicy([]string{"read_file"}))
 
 	syncRan := false
 	syncWrapped, err := mw.WrapInvokableToolCall(

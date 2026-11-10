@@ -3,17 +3,16 @@
 Copy these directories into the project root's `.openheron/`:
 
 ```bash
-cp -r .openheron-example/{agents,llm,policy,skills} /your/project/.openheron/
+cp -r .openheron-example/{agents,llm,skills} /your/project/.openheron/
 ```
 
 | Directory | Contents |
 |---|---|
 | `agents/main.md` | agent declaration — frontmatter (`model` / `max_iterations` …) + **the body is the prompt** |
 | `llm/openai.yaml` | vendor profile — `base_url` / `api_key` / `models[]` / thinking tier table |
-| `policy/permissions.yaml` | approval tiers — `ask` / `deny` (**anything not named is allowed**) |
 | `server/config.yaml` | process parameters — listen address / directories / timeouts / **not hot-reloaded** |
 | `skills/<name>/SKILL.md` | eino native skill convention |
-| `tools/<tool>.yaml` | external tools and the knowledge base — **the file's presence = enabled** (this sample ships none; external tools are all off by default) |
+| `tools/<tool>.yaml` | external tools and the knowledge base — **a provider without a configuration mounts nothing** (this sample ships none; external tools are all off by default) |
 
 `state/` (sessions and checkpoints) is created automatically on first startup —
 **do not** commit it.
@@ -22,7 +21,7 @@ cp -r .openheron-example/{agents,llm,policy,skills} /your/project/.openheron/
 
 | Directory | Hot reload | Why |
 |---|---|---|
-| `llm/` `agents/` `policy/` `tools/` | ✅ | the new configuration is used from the next turn |
+| `llm/` `agents/` `tools/` `mcps/` | ✅ | the new configuration is used from the next turn |
 | `server/` | ❌ | it configures the process itself, so a change needs a restart |
 
 A broken configuration **does not kill the process** — the previous one is kept and
@@ -95,7 +94,7 @@ builds its own model instance from its own `model:`.
 | Switch | Location | Effect |
 |---|---|---|
 | `agent.max_depth` | `server/config.yaml` | max nesting depth (the entry is level 0). The default `1` = only the entry agent may delegate |
-| `disabled_tools` | `agents/*.md` | affects this one agent only. Stored **separately from the global `deny`, never merged** |
+| `tools` | `agents/*.md` | the tools this agent may use. **Absent = none** — the list is the whole answer. The tier table itself is **shared**; this list is per agent |
 
 A declared topology that exceeds `max_depth` is **an error at startup**; it is never
 silently truncated.
@@ -111,12 +110,16 @@ silently truncated.
 
 "Who may write" is controlled by **two** layers, and neither may be missing:
 
-- **Outer**: the `deny` in `policy/permissions.yaml` — nobody may use it;
-- **Inner**: each agent's own `disabled_tools` — affects that one agent only.
+- **The tier table**: a tool nobody names **asks**; a file's `allows:` names the
+  exceptions, and that list is **shared** by every agent;
+- **Each agent's own `tools`**: the built-in tools *that* agent may use at all.
+  The tools of an MCP server are **not** in that list — the agent mounts the
+  server in `mcps:` and gets all of its tools.
 
-★ The outer `deny` takes precedence over the inner `disabled_tools`: it is the one
-  guarantee a sub-agent **cannot relax**. The two layers are stored separately and
-  never merged — merging them would throw away "who is in the outer layer".
+★ The two are stored separately and never merged — merging them would throw
+  away "who narrowed what". ★ A file's `allows:` only **adds** to the tier
+  table; an agent's `tools` list can only take a tool away, never hand one
+  back.
 
 ### Parallel delegation
 
@@ -143,12 +146,32 @@ message so that they run at the same time:
 
 ## Default approval tiers
 
-**The fallback for an unlisted tool is `allow` (straight through)** — the policy file
-has only the `ask` / `deny` columns, so not being named means being allowed. A newly
-added tool is therefore directly usable by default; to make it **require a human nod
-every time**, add its name to `ask` in `policy/permissions.yaml`; to make it
-**completely unusable**, add it to `deny`.
+**The default tier is `ask`** — a tool nobody names asks first. The exceptions
+are named, and each one is named by **the file that provides the tool**:
 
-★ The outer `deny` takes precedence over the inner `disabled_tools` — it is the one
-  guarantee a sub-agent cannot relax. To narrow down **one** agent's capabilities,
-  use its own `disabled_tools`, not the global policy.
+```yaml
+# tools/http.yaml
+allows: [request_get]
+```
+
+The built-in tools that have **no file of their own** — the filesystem readers
+(`ls` `read_file` `glob` `grep`), the delegation tools (`task` `write_todos`) and
+the skill reader — run without a nod; the code knows them. Everything else
+asks: `write_file`, `edit_file`, `execute`, and any MCP tool the server's own
+file does not name.
+
+★ A tool a file names in its `allows:` uses **that file's own vocabulary** — an
+  MCP server says `create_issue`, not `mcp__github__create_issue`, and the
+  translation happens once, where the tool is mounted.
+
+★ **"Not exposed" is said in exactly two places**: a tool's own `allows:` list
+  (what runs without a nod) and an agent's `tools` list (what that agent may
+  use at all). There is no third, global list to keep in sync.
+
+★ To narrow down **one** agent's capabilities, use its own `tools` list. ★ And
+  to widen them — to let an agent write and run commands unattended — name the
+  tools in that same list, or in the file that provides them.
+
+★ An MCP server's tools are narrowed by the **server's own file** (`tools:` is
+  the filter there), not by the agent: the agent either mounts the server — and
+  then has all of its tools — or does not.

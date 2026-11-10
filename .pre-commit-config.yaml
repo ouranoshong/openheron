@@ -1,4 +1,4 @@
-# Pre-commit hooks. Install them with: make install-hooks
+# Pre-commit hooks. Install them with: task install-hooks
 #
 # ★ The gitleaks revision is pinned. "latest" would let a new rule turn every
 #   commit red on a day nobody touched the security setup — and the rule that

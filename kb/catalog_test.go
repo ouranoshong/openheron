@@ -88,7 +88,7 @@ func TestRenderCatalogUsesTheEnglishHeader(t *testing.T) {
 	out := string(RenderCatalog(sampleCatalog()))
 	for _, want := range []string{
 		"# Knowledge Base Catalog",
-		"corpus: docs",
+		"corpus_dir: docs",
 		"extraction rule v2",
 		"model local/embed (dim 1024)",
 		"updated at 2026-10-16T00:41:12Z",
@@ -139,6 +139,32 @@ func TestParseCatalogAcceptsTheLegacyChineseHeader(t *testing.T) {
 	}
 	if !h.Updated.Equal(updated) {
 		t.Errorf("Updated = %v, want %v", h.Updated, updated)
+	}
+}
+
+// TestParseCatalogAcceptsThePreRenameCorpusHeader proves that a catalog.md
+// written before the `corpus` → `corpus_dir` rename still parses.
+//
+// ★ The rename was to the **configuration key**; the catalog.md header is a
+//
+//	file format, and a rename does not rewrite the files already on disk.
+//	Without this case the corpus of every existing index would silently
+//	become "" — and an empty corpus is "the knowledge base is off".
+func TestParseCatalogAcceptsThePreRenameCorpusHeader(t *testing.T) {
+	for _, prefix := range []string{"corpus:", "语料:", "语料目录:"} {
+		body := "# Knowledge Base Catalog\n\n" +
+			"> " + prefix + " docs  ·  1 document  ·  rev 3  ·  writer abc\n"
+
+		c, err := ParseCatalog([]byte(body))
+		if err != nil {
+			t.Fatalf("ParseCatalog(%q): %v", prefix, err)
+		}
+		if c.Header.Corpus != "docs" {
+			t.Errorf("%q: Corpus = %q, want docs", prefix, c.Header.Corpus)
+		}
+		if c.Header.Revision != 3 {
+			t.Errorf("%q: Revision = %d, want 3", prefix, c.Header.Revision)
+		}
 	}
 }
 

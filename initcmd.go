@@ -24,8 +24,7 @@ func initCmd(args []string, stdout io.Writer) error {
 	provider := fs.String("provider", "", "provider template to use (default: deepseek)")
 	baseURL := fs.String("base-url", "", "endpoint for a new provider file")
 	env := fs.String("env", "", "environment variable holding the api key")
-	noPolicy := fs.Bool("no-policy", false, "do not write the policy/ section (permissions.yaml and limits.yaml)")
-	tools := fs.Bool("tools", false, "also write the tool configurations under tools/ (the file's presence enables the tool)")
+	noTools := fs.Bool("no-tools", false, "leave the tool configurations under tools/ unwritten (they are written by default)")
 	force := fs.Bool("force", false, "overwrite files that already exist")
 	dryRun := fs.Bool("dry-run", false, "report what would be written, write nothing")
 	asJSON := fs.Bool("json", false, "machine-readable output")
@@ -72,8 +71,7 @@ func initCmd(args []string, stdout io.Writer) error {
 		Provider: *provider,
 		BaseURL:  *baseURL,
 		Env:      *env,
-		NoPolicy: *noPolicy,
-		Tools:    *tools,
+		NoTools:  *noTools,
 		Force:    *force,
 	})
 	if err != nil {
@@ -140,15 +138,17 @@ func reportInit(plan *initcfg.Plan, root string, dryRun, asJSON bool, stdout io.
 
 func printInitUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "usage: openheron init [--dir <path>] [--model <provider>/<model>] [--provider <id>]")
-	fmt.Fprintln(stdout, "                [--base-url <url>] [--env <NAME>] [--no-policy] [--tools]")
+	fmt.Fprintln(stdout, "                [--base-url <url>] [--env <NAME>] [--no-tools]")
 	fmt.Fprintln(stdout, "                [--force] [--dry-run] [--json]")
 	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout, "Creates a minimal, runnable project-level configuration in <dir>/.openheron.")
+	fmt.Fprintln(stdout, "Creates a runnable project-level configuration in <dir>/.openheron.")
 	fmt.Fprintln(stdout, "Only the files that are actually missing are written; files that already")
 	fmt.Fprintln(stdout, "exist at the user level are inherited, never replaced.")
 	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout, "Written: agents/main.md, agents/task.md, llm/<provider>.yaml,")
-	fmt.Fprintln(stdout, "        policy/permissions.yaml, policy/limits.yaml, server/config.yaml.")
-	fmt.Fprintln(stdout, "--tools adds the tool configurations under tools/ — a file's presence is")
-	fmt.Fprintln(stdout, "the switch that turns a tool on, so that is opt-in.")
+	fmt.Fprintln(stdout, "Written: agents/main.md, agents/task.md, agents/agent-expert.md,")
+	fmt.Fprintln(stdout, "        agents/skill-expert.md, llm/<provider>.yaml, server/config.yaml,")
+	fmt.Fprintln(stdout, "        tools/{filesystem,http,kb,web_search,wikipedia}.yaml,")
+	fmt.Fprintln(stdout, "        mcps/{fetch,time,deepwiki}.yaml,")
+	fmt.Fprintln(stdout, "        skills/openheron-config-{map,edit,templates,validate}/SKILL.md.")
+	fmt.Fprintln(stdout, "--no-tools leaves tools/ unwritten; every other partition is always written.")
 }
