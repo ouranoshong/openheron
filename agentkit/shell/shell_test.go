@@ -245,14 +245,52 @@ func TestTheMSYS2PathIsAbsolute(t *testing.T) {
 	t.Setenv("SystemDrive", "C:")
 	for _, p := range windowsPOSIXShells() {
 		if strings.Contains(p, "msys64") {
-			if !filepath.IsAbs(p) {
-				t.Fatalf("path = %q, want an absolute one", p)
-			}
-			if !strings.HasPrefix(p, `C:\`) {
-				t.Fatalf("path = %q, want it under C:\\", p)
+			if !msysPathIsAbsolute(p) {
+				t.Fatalf("path = %q, want an absolute one under the C: drive", p)
 			}
 			return
 		}
 	}
 	t.Fatal("the list must name the MSYS2 shell")
+}
+
+// msysPathIsAbsolute reports whether a path names a place on the C: drive
+// rather than a place relative to the current directory of that drive.
+//
+// ★ The property is **Windows's**, and `filepath.IsAbs` cannot say it on a
+//
+//	Linux build, where every absolute path starts with a slash. What
+//	matters is the drive and the separator right after it: `C:msys64`
+//	is relative to the current directory of the drive, and `C:\msys64`
+//	— or `C:/msys64` — is not. ★ The separator the code spells it with
+//	is the **host's** (the paths are built with filepath.Join), so both
+//	spellings have to be read, and a Linux build is covered by the same
+//	rule.
+func msysPathIsAbsolute(p string) bool {
+	rest, ok := strings.CutPrefix(p, "C:")
+	if !ok {
+		return false
+	}
+	return rest != "" && (rest[0] == '\\' || rest[0] == '/')
+}
+
+// ★ The rule itself, with every spelling the code and the bug produce.
+//
+//	★ A test that only checked the spelling of the machine it ran on
+//	would pass here and fail in CI — or the other way round.
+func TestTheMSYS2PathRuleReadsBothSpellings(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want bool
+	}{
+		{`C:\msys64\usr\bin\sh.exe`, true},
+		{"C:/msys64/usr/bin/sh.exe", true},
+		{"C:msys64/usr/bin/sh.exe", false},
+		{"msys64/usr/bin/sh.exe", false},
+		{`C:`, false},
+	} {
+		if got := msysPathIsAbsolute(tc.path); got != tc.want {
+			t.Fatalf("msysPathIsAbsolute(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
 }
