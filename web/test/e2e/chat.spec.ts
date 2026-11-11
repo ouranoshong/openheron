@@ -142,7 +142,7 @@ test.describe("会话标题", () => {
   test("★ 改名时编辑的是原来的名字，而不是 New Chat", async ({ page }) => {
     await setScenario("simple")
     await openApp(page)
-    await sendMessage(page, `${MARKER_A} 这个会话后来有了名字`)
+    await sendMessage(page, `${MARKER_A} 这是一个非常长的会话标题用来检查编辑框会不会把名字截断`)
 
     // ★ The server names the session after its first question, so the row
     //   carries that name by the time the turn is over.
@@ -161,9 +161,19 @@ test.describe("会话标题", () => {
     //   it from scratch.
     await expect(input).toBeFocused()
     expect(
-      await input.evaluate((el: HTMLInputElement) => el.selectionStart === 0 && el.selectionEnd === el.value.length),
+      await input.evaluate((el: HTMLTextAreaElement) => el.selectionStart === 0 && el.selectionEnd === el.value.length),
       "the whole name should be selected",
     ).toBe(true)
+
+    // ★ And the editor shows the whole name: the row truncates a long
+    //   title to one line, but the box the user reads it in wraps and
+    //   grows — no part of the name is cut off.
+    const box = await input.evaluate((el: HTMLTextAreaElement) => ({
+      clipped: el.scrollHeight > el.clientHeight + 1,
+      height: el.clientHeight,
+    }))
+    expect(box.clipped, "the editor must not cut the name off").toBe(false)
+    expect(box.height, "a long name wraps, so the editor grows past one line").toBeGreaterThan(34)
 
     // ★ And committing it keeps the name: the editor did not replace the
     //   conversation's title with the placeholder.
