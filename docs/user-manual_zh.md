@@ -113,11 +113,11 @@ openheron
 ★ 有个坑：Windows 上的 `python3` 是 Microsoft Store 的转发器 —— 存在，但什么也不干 ——
 所以仓库自己的脚本在那边调的是 `python`。这只影响文档校验（`task lint-docs`）。
 
-**有一个工具要 Windows 不自带的软件。**
+**有一个工具在 Windows 上装了别的软件会更好。**
 
-| 工具 | 需要 | 没有它会看到 |
+| 工具 | 装上更好 | 没有它会看到 |
 |---|---|---|
-| `grep` | PATH 上有 [ripgrep](https://github.com/BurntSushi/ripgrep)（`rg`） | `ripgrep (rg) is not installed or not in PATH` |
+| `grep` | PATH 上有 [ripgrep](https://github.com/BurntSushi/ripgrep)（`rg`） | ★ 工具退回自己的引擎：搜索一样、上限一样、预算一样 —— 但不认 `.gitignore`，认识的文件类型也更少 |
 
 ★ **文件工具两个都不需要。** `read_file`、`write_file`、`edit_file`、`ls` 和 `glob`
 是运行时自己的代码，在 Windows 上照常工作。
@@ -1203,5 +1203,7 @@ POSIX shell，机器上一个都没有时退回 `cmd.exe`；两种情况工具�
 该写哪一套方言，于是命令是照着真正跑它的那个 shell 写的。★ 启动日志会打印它挑中
 的是哪个 shell。
 
-**Q：`grep` 工具报 `ripgrep (rg) is not installed or not in PATH`？**
-`grep` 就是 ripgrep：装上它并放进 PATH。Windows 不自带。
+**Q：没有 ripgrep 时，`grep` 工具是不是就弱了？**
+它用自己的引擎搜：同样的正则、同样的上限、同样的预算，对「这个文件在不在」给出的
+答案也一样。少的是：不读 `.gitignore`，认识的文件类型更少 —— 不认识的类型会被
+拒绝，而不是猜一个。★ 启动日志会打印挑中的是哪个引擎；想用另一个就装上 ripgrep。

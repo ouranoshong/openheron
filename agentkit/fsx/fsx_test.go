@@ -239,8 +239,8 @@ func TestGrepCapsMatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(matches) != maxGrepMatches+1 {
-		t.Fatalf("got %d matches, want %d + the cap line", len(matches), maxGrepMatches)
+	if len(matches) != maxGrepMatches {
+		t.Fatalf("got %d matches, want %d", len(matches), maxGrepMatches)
 	}
 	if last := matches[len(matches)-1]; !strings.Contains(last.Content, "cap") {
 		t.Fatalf("last match is %+v, want the cap hint", last)

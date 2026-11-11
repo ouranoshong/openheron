@@ -1142,7 +1142,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（见�
 | `storage/filestore` | 追加写、原子重写、checkpoint、待审批持久化 |
 | `transport` | 事件类型、归属、用量分账 |
 | `initcfg` | 出厂模板的完整性 |
-| `agentkit/fsx` | 写边界（含符号链接逃逸）、`ls`/`glob`/`grep` 的上限、绝对 glob pattern |
+| `agentkit/fsx` | 写边界（含符号链接逃逸）、`ls`/`glob`/`grep` 的上限、绝对 glob pattern，以及替 `ripgrep` 兜底的内置搜索引擎 |
 | `agentkit/shell` | `execute` 工具用哪个 shell 跑命令，以及工具描述告诉模型的那套方言 |
 
 ★ **竞态检测器也要跑**：`task test-race`（`go test -race ./...`）。普通套件是绿的而

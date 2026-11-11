@@ -1332,7 +1332,7 @@ cd web && bun run smoke:config             # config_write's approval round trip 
 | `storage/filestore` | Append writes, atomic rewrites, checkpoints, pending-approval persistence |
 | `transport` | Event types, attribution, per-agent usage accounting |
 | `initcfg` | The completeness of the factory templates |
-| `agentkit/fsx` | The write boundary (including symlink escapes), the `ls`/`glob`/`grep` caps, and absolute glob patterns |
+| `agentkit/fsx` | The write boundary (including symlink escapes), the `ls`/`glob`/`grep` caps, absolute glob patterns, and the built-in search engine that stands in for `ripgrep` |
 | `agentkit/shell` | Which shell the `execute` tool runs commands with, and the dialect the tool's description tells the model |
 
 ★ **Run the race detector too**: `task test-race` (`go test -race ./...`). The plain

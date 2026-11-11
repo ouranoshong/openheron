@@ -81,6 +81,11 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 	out.backend = local
 	out.shell = sh
 
+	// ★ The search engine is decided with the backend, and it is worth a
+	//   line in the log: a machine whose grep tool runs on the built-in
+	//   engine answers the same questions, but not with the same edges.
+	s.log.Info("[agent] the grep tool searches with this engine", "engine", local.SearchEngine())
+
 	tools, err := s.tools.Build(ctx, toolEnv{
 		cfg:         s.cfg,
 		svc:         s.svc,

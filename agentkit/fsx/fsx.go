@@ -123,6 +123,13 @@ type Local struct {
 	shell []string
 	// shellPathDir is prepended to the child's PATH.
 	shellPathDir string
+	// rgPath is the ripgrep binary, empty when it is not installed.
+	//
+	// ★ The search engine is chosen **once**, here: the tool has to work
+	//   on a machine with nothing installed, and ripgrep is not one of
+	//   the things Windows ships. An empty path means the built-in engine
+	//   (see grep_fallback.go) — and the result says which one ran.
+	rgPath string
 	// walkBudget is the per-walk time budget.
 	//
 	// ★ It is a field so a test can shorten it; production always gets the
@@ -164,12 +171,17 @@ func New(cfg Config) (*Local, error) {
 	if len(shell) == 0 {
 		shell = []string{"/bin/sh", "-c"}
 	}
+	// ★ The search engine is picked here, not per call: a machine without
+	//   ripgrep would otherwise pay a failed process on every search, and
+	//   the first call would be the one that discovers it.
+	rgPath, _ := exec.LookPath("rg")
 	return &Local{
 		root:            abs,
 		roots:           roots,
 		validateCommand: validate,
 		shell:           shell,
 		shellPathDir:    cfg.ShellPathDir,
+		rgPath:          rgPath,
 		walkBudget:      walkBudget,
 	}, nil
 }
@@ -387,6 +399,13 @@ func (s *Local) GrepRaw(ctx context.Context, req *filesystem.GrepRequest) ([]fil
 	if req.Pattern == "" {
 		return nil, fmt.Errorf("pattern is required")
 	}
+	// ★ Without ripgrep the built-in engine takes over (grep_fallback.go):
+	//   the grep tool is the one tool that has to work on a machine with
+	//   nothing installed, and ripgrep is not one of the things Windows
+	//   ships.
+	if s.rgPath == "" {
+		return s.grepBuiltin(ctx, req)
+	}
 	path, err := s.resolve(req.Path)
 	if err != nil {
 		return nil, err
@@ -423,7 +442,7 @@ func (s *Local) GrepRaw(ctx context.Context, req *filesystem.GrepRequest) ([]fil
 	caller := ctx
 	ctx, cancel := context.WithTimeout(ctx, s.walkBudget)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "rg", args...)
+	cmd := exec.CommandContext(ctx, s.rgPath, args...)
 	cmd.Dir = s.root
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -433,7 +452,9 @@ func (s *Local) GrepRaw(ctx context.Context, req *filesystem.GrepRequest) ([]fil
 	}
 	if err := cmd.Start(); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
-			return nil, fmt.Errorf("ripgrep (rg) is not installed or not in PATH. Please install it: https://github.com/BurntSushi/ripgrep#installation")
+			// ★ Ripgrep was there when the backend was built and is gone
+			//   now. The built-in engine is the answer, not a failure.
+			return s.grepBuiltin(ctx, req)
 		}
 		return nil, fmt.Errorf("failed to execute ripgrep: %w", err)
 	}
@@ -498,14 +519,48 @@ func (s *Local) GrepRaw(ctx context.Context, req *filesystem.GrepRequest) ([]fil
 		return nil, fmt.Errorf("failed to execute ripgrep: %w", waitErr)
 	}
 	if capped {
-		// The renderer prints "path:line:content" per match, so a cap can only be
-		// stated as one more match. Upgrade when the tool layer is ours.
-		matches = append(matches, filesystem.GrepMatch{
-			Path:    path,
-			Content: fmt.Sprintf("… %d matches is the cap; narrow the pattern or the path", maxGrepMatches),
-		})
+		// ★ The cap is a note on the last match, not a match of its own:
+		//   the renderer counts the paths and the entries it is given, so
+		//   a note that was an entry would turn "two hundred files" into
+		//   "two hundred and one". The content mode — the mode that shows
+		//   lines — shows the note as a line of its own.
+		grepNote(matches, grepCapNote())
 	}
 	return matches, nil
+}
+
+// SearchEngine names the engine the grep tool searches with.
+//
+// ★ It is asked for by the log line at startup: a machine whose grep tool
+//
+//	is degraded should say so once, where the operator will see it.
+func (s *Local) SearchEngine() string {
+	if s.rgPath == "" {
+		return "built-in"
+	}
+	return "ripgrep"
+}
+
+// grepNote appends a note to the last match.
+//
+// ★ The note is **not** a match of its own: the renderer counts the paths
+//
+//	and the entries it is given, so a note that was an entry of its own
+//	would turn "two files" into "three files" — and in the mode that
+//	lists file paths it would put the searched directory among the files
+//	that matched. A note on the content of the last match keeps every
+//	count right.
+func grepNote(matches []filesystem.GrepMatch, note string) {
+	if len(matches) == 0 {
+		return
+	}
+	last := &matches[len(matches)-1]
+	last.Content = last.Content + "\n" + note
+}
+
+// grepCapNote is the note the cap produces.
+func grepCapNote() string {
+	return fmt.Sprintf("… %d matches is the cap; narrow the pattern or the path", maxGrepMatches)
 }
 
 func (s *Local) GlobInfo(ctx context.Context, req *filesystem.GlobInfoRequest) ([]filesystem.FileInfo, error) {

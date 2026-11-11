@@ -125,11 +125,11 @@ executable keeps the `.exe` suffix there.
 runs nothing — so the repository's own scripts call `python` there. It only
 matters for the document checks (`task lint-docs`).
 
-**One tool needs software Windows does not ship.**
+**One tool is better with software Windows does not ship.**
 
-| Tool | Needs | What you get without it |
+| Tool | Better with | What you get without it |
 |---|---|---|
-| `grep` | [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on PATH | `ripgrep (rg) is not installed or not in PATH` |
+| `grep` | [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on PATH | ★ the tool falls back to its own engine: the same searches, the same caps, the same budget — but no `.gitignore` rules, and fewer file types |
 
 ★ **The file tools need neither.** `read_file`, `write_file`, `edit_file`, `ls`
 and `glob` are the runtime's own code, and they work on Windows as they are.
@@ -1342,5 +1342,9 @@ machine has none; either way the tool's description tells the model which
 dialect to write, so the command is written for the shell that runs it.
 ★ The startup log names the shell it picked.
 
-**Q: The `grep` tool says `ripgrep (rg) is not installed or not in PATH`?**
-`grep` is ripgrep: install it and put it on PATH. Windows does not ship it.
+**Q: Is the `grep` tool weaker without ripgrep?**
+It searches with its own engine: the same regular expressions, the same caps, the same
+budget, and the same answer to "is this file there". What it does not do is read
+`.gitignore`, and it knows fewer file types — a type it does not know is refused
+rather than guessed at. ★ The startup log names the engine that was picked; install
+ripgrep to get the other one.
