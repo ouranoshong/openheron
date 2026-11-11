@@ -10,26 +10,19 @@
 
 ## 1. 安装
 
-需要 **Go 1.27.1+**（构建用），另外还要 [go-task](https://taskfile.dev) 和
-[Bun](https://bun.sh)：界面是用 Bun 构建再嵌进二进制的，所以这两个构建工具不是可选项。
+openheron 是一个自包含的可执行程序 —— 界面已经嵌在二进制里，旁边不需要再装任何东西。
+怎么装，按你的处境挑一条路：
 
-```bash
-git clone https://github.com/ouranoshong/openheron
-cd openheron
-task build
-```
+| 你的处境 | 看哪节 |
+|---|---|
+| 只想尽快用起来 | §1.1 装发布版 |
+| 要改代码 | §1.2 从源码构建 |
+| 在 Windows 上 | §1.3 在 Windows 上 |
+| 想让 agent 的工具够不到你的机器 | §1.4 在沙箱里跑 |
 
-`task build` 会构建前端并把界面**嵌进二进制**，产物是 `bin/openheron` —— 一个自包含的可执行
-文件，扔到哪台机器上都能跑（目标平台之外的机器用交叉编译）。
+### 1.1 装发布版
 
-只想快速试一下：
-
-```bash
-task build-go     # 只构建后端（不含界面），迭代 Go 代码时更快
-```
-
-★ **或者一条命令装上发布出来的二进制。** 每个 `v*` tag 都会发布同样的单文件可执行程序，
-覆盖六个平台 —— 界面是嵌进去的，旁边不需要再装任何东西。一条命令就够了：
+每个 `v*` tag 都发布同样的单文件可执行程序，覆盖六个平台。一条命令就够了：
 
 ```bash
 # Linux / macOS
@@ -53,11 +46,11 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 | `OPENHERON_TOKEN` | 私有仓库用的 token |
 | `OPENHERON_API_URL` | API 主机（默认 `https://api.github.com`；GitHub Enterprise 是 `https://<host>/api/v3`） |
 
-想先看一眼再执行，就从[发布页](https://github.com/ouranoshong/openheron/releases/latest)
+★ 想先看一眼再执行，就从[发布页](https://github.com/ouranoshong/openheron/releases/latest)
 把 `install.sh` 下载下来读一遍 —— 脚本本身就是这个 release 的一部分，就在它装的那些
 二进制旁边。
 
-不用脚本的话，从[发布页](https://github.com/ouranoshong/openheron/releases/latest)取产物，
+**不用脚本的话**，从[发布页](https://github.com/ouranoshong/openheron/releases/latest)取产物，
 并用同目录下的 `checksums.txt` 校验：
 
 | 平台 | 产物 |
@@ -69,16 +62,43 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 | Windows x64 | `openheron_<version>_windows_amd64.zip` |
 | Windows arm64 | `openheron_<version>_windows_arm64.zip` |
 
-### 在 Windows 上
-
-**装。** PowerShell 里一行：
-
-```powershell
-irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps1 | iex
+```bash
+sha256sum -c checksums.txt --ignore-missing
 ```
 
-★ **有两处和 Unix 版不一样。** 装的位置是 `%LOCALAPPDATA%\Programs\openheron` ——
-不是 `~/.local/bin` —— 而且它**不碰你的 PATH**：脚本发现那个目录不在 PATH 上时只打印
+★ 二进制是静态的（`CGO_ENABLED=0`），所以那个平台上随便哪台机器都能跑 ——
+不用装 Go，不用装 Node，也没有运行时要伺候。
+
+★ 装好之后：跑起来见 §2，密钥怎么设见 §4.2。
+
+### 1.2 从源码构建
+
+要改代码才需要这条。需要 **Go 1.27.1+**，另外还要 [go-task](https://taskfile.dev) 和
+[Bun](https://bun.sh)：界面是用 Bun 构建再嵌进二进制的，所以这两个构建工具不是可选项。
+
+```bash
+git clone https://github.com/ouranoshong/openheron
+cd openheron
+task build
+```
+
+`task build` 会构建前端并把界面**嵌进二进制**，产物是 `bin/openheron` —— 一个自包含的
+可执行文件，扔到哪台机器上都能跑（目标平台之外的机器用交叉编译）。
+
+只想快速试一下：
+
+```bash
+task build-go     # 只构建后端（不含界面），迭代 Go 代码时更快
+```
+
+★ Windows 上的产物是 `bin\openheron.exe` —— 可执行文件在那边保留 `.exe` 后缀。
+而 Windows 上的 `python3` 是 Microsoft Store 的转发器 —— 存在，但什么也不干 ——
+仓库自己的脚本在那边调的是 `python`。这只影响文档校验（`task lint-docs`）。
+
+### 1.3 在 Windows 上
+
+★ **装的位置和 PATH 两处和 Unix 版不一样。** 位置是 `%LOCALAPPDATA%\Programs\openheron`
+（不是 `~/.local/bin`），而且**它不碰你的 PATH**：脚本发现那个目录不在 PATH 上时只打印
 一行提示，所以要么自己加，要么用全路径调用那个可执行文件：
 
 ```powershell
@@ -95,54 +115,27 @@ $dir = "$env:LOCALAPPDATA\Programs\openheron"
 powershell -c "irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps1 | iex"
 ```
 
-**跑起来。**
+**工具差在哪。** 文件工具（`read_file`、`write_file`、`edit_file`、`ls`、`glob`）是运行时
+自己的代码，在 Windows 上照常工作；只有 `grep` 要额外的
+[ripgrep](https://github.com/BurntSushi/ripgrep)（`rg`）—— 它不自带，没有就会报
+`ripgrep (rg) is not installed or not in PATH`（§10）。
 
-```powershell
-cd C:\your\project
-openheron init
-openheron
-```
-
-然后浏览器打开 http://localhost:8080。配置根是项目下的 `.openheron` 目录（没有就建），
-或者 `--config-dir`、`$env:OPENHERON_CONFIG_DIR` 指的那个。端口取自
-`server/config.yaml` 里的 `listen_addr`（缺省 `:8080`），或者 `LISTEN_ADDR` 环境变量。
-
-**从源码构建。** Go、go-task 与 Bun —— 就是这一节开头说的那三样 —— 而 Windows 上
-`task build` 的产物是 `bin\openheron.exe`：可执行文件在那边保留 `.exe` 后缀。
-
-★ 有个坑：Windows 上的 `python3` 是 Microsoft Store 的转发器 —— 存在，但什么也不干 ——
-所以仓库自己的脚本在那边调的是 `python`。这只影响文档校验（`task lint-docs`）。
-
-**有一个工具在 Windows 上装了别的软件会更好。**
-
-| 工具 | 装上更好 | 没有它会看到 |
-|---|---|---|
-| `grep` | PATH 上有 [ripgrep](https://github.com/BurntSushi/ripgrep)（`rg`） | ★ 工具退回自己的引擎：搜索一样、上限一样、预算一样 —— 但不认 `.gitignore`，认识的文件类型也更少 |
-
-★ **文件工具两个都不需要。** `read_file`、`write_file`、`edit_file`、`ls` 和 `glob`
-是运行时自己的代码，在 Windows 上照常工作。
-
-**shell 工具自己找 shell。** `execute` 需要一个程序来跑命令，openheron 在进程启动时
-去找：
-
-1. PATH 上的 `sh` 或 `bash`；
-2. Git for Windows（`C:\Program Files\Git\usr\bin\bash.exe`）与 MSYS2
-   （`C:\msys64\usr\bin\sh.exe`）；
-3. WSL 启动器（`C:\Windows\System32\bash.exe`）—— **排在最后**，因为它把命令跑在
-   Linux 文件系统里，那边的 `C:\Users` 是 `/mnt/c/Users`。
+**shell 工具自己找 shell。** `execute` 需要一个程序来跑命令，openheron 在进程启动时按这个
+顺序找：PATH 上的 `sh` 或 `bash` → Git for Windows（`C:\Program Files\Git\usr\bin\bash.exe`）
+与 MSYS2（`C:\msys64\usr\bin\sh.exe`）→ WSL 启动器（`C:\Windows\System32\bash.exe`，
+**排在最后**，因为它把命令跑在 Linux 文件系统里，那边的 `C:\Users` 是 `/mnt/c/Users`）。
 
 ★ 每个候选都要跑一条最简单的命令验一下活，所以 Windows 自带的那个 `bash.exe` ——
-每台机器都有，没有 WSL 发行版时什么也不干 —— 不会被当成 shell。第一个能跑的候选
-就是它；在 PATH 之外找到的 shell，它自己那个目录会被放到子进程 PATH 的最前面，
-于是 `ls` 之类的工具也找得到。
+每台机器都有，没有 WSL 发行版时什么也不干 —— 不会被当成 shell。第一个能跑的候选就是它；
+在 PATH 之外找到的 shell，它自己那个目录会被放到子进程 PATH 的最前面，于是 `ls` 之类的
+工具也找得到。
 
-★ **一个 POSIX shell 都没有时，工具退回 `cmd.exe`**，而它的描述会告诉模型写
-Windows 命令（`dir`、`type`、`copy`），而不是 POSIX 的那套（`ls`、`cat`、`cp`）。
-★ 方言不是猜的：模型读到的那段描述与真正跑命令的程序是同一个答案，在启动时一次
-定下来。另一条路是把 `execute` 从那个 Agent 的 `tools:` 清单里去掉 —— 出厂配置
-本来就是这么做的。
+★ **一个 POSIX shell 都没有时，工具退回 `cmd.exe`**，而它的描述会告诉模型写 Windows 命令
+（`dir`、`type`、`copy`），而不是 POSIX 的那套（`ls`、`cat`、`cp`）。★ 方言不是猜的：
+模型读到的那段描述与真正跑命令的程序是同一个答案，在启动时一次定下来。另一条路是把
+`execute` 从那个 Agent 的 `tools:` 清单里去掉 —— 出厂配置本来就是这么做的。
 
-### 在沙箱里跑
+### 1.4 在沙箱里跑
 
 ★ **跑 openheron 不止有二进制这一条路。** 如果你希望 agent 的文件工具与
 shell 工具根本够不到你的机器，openheron 有 Docker Sandbox Kit 的形态：
@@ -204,14 +197,9 @@ HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
 背后的设计见 [`docs/sandbox-kit-design.md`](sandbox-kit-design.md) —— 那篇文档只有中文，
 本仓库的设计文档都是这样。
 
-```bash
-sha256sum -c checksums.txt --ignore-missing
-```
-
-★ 二进制是静态的（`CGO_ENABLED=0`），所以那个平台上随便哪台机器都能跑 ——
-不用装 Go，不用装 Node，也没有运行时要伺候。
-
 ## 2. 第一次使用
+
+### 2.1 跑起来
 
 ```bash
 cd /your/project
@@ -221,6 +209,80 @@ openheron
 ```
 
 打开 <http://localhost:8080>。
+
+★ 密钥从环境变量读，而**怎么设**取决于你在哪个系统上 —— macOS 与 Linux 见 §4.2，
+Windows 见 §2.2。
+
+### 2.2 在 Windows 上跑第一次
+
+PowerShell 里，从零到跑起来：
+
+```powershell
+cd C:\path\to\your-project
+openheron init                      # 在当前目录下生成配置
+$env:DEEPSEEK_API_KEY = "sk-..."    # 密钥只从环境变量读
+openheron
+```
+
+★ `openheron` 不在 PATH 上的时候，用全路径调
+`%LOCALAPPDATA%\Programs\openheron\openheron.exe`（§1.3）。
+
+`init` 跑完会打印一行提示：
+
+```
+the api key is read from the environment at request time: export DEEPSEEK_API_KEY=...
+```
+
+★ 那行提示用的是 **Unix 的 `export`**，在 PowerShell 和 cmd.exe 里都跑不了 —— Windows 上
+对应的是 `$env:DEEPSEEK_API_KEY = "sk-..."`（PowerShell）或 `set DEEPSEEK_API_KEY=sk-...`
+（cmd.exe）。
+
+#### 密钥怎么设
+
+同一条命令，四种写法，作用范围不一样：
+
+- **当前这个 PowerShell 窗口** —— `$env:DEEPSEEK_API_KEY = "sk-..."`：只这个窗口。
+- **这个用户以后开的每个终端** —— `[Environment]::SetEnvironmentVariable('DEEPSEEK_API_KEY', 'sk-...', 'User')`：长期；★ **要开一个新终端**才生效。
+- **cmd.exe 当前窗口** —— `set DEEPSEEK_API_KEY=sk-...`：只这个窗口。
+- **cmd.exe 用户级** —— `setx DEEPSEEK_API_KEY sk-...`：长期；★ **值会被截断到 1024 个字符**。
+
+★ **已经开着的 shell 留着它启动时的那份环境** —— 跑 `setx` 或
+`[Environment]::SetEnvironmentVariable` 的那个窗口看不到这个变量，得**另开一个终端**。
+
+★ **密钥是在加载配置时读的**（§4.2），所以变量要设到**启动 openheron 的那个进程**上：
+事后在另一个终端补设的，运行中的服务看不到。
+
+★ **Windows 上变量名不区分大小写** —— `$env:deepseek_api_key` 就是 `DEEPSEEK_API_KEY`
+这个变量；macOS 与 Linux 上不是（§4.2）。
+
+**把密钥放进文件。** 不想让密钥待在环境变量里，就用 `@file:` 指向一个文件：
+
+```yaml
+api_key: '@file:C:\Users\you\deepseek.key'   # 单引号
+api_key: "@file:C:/Users/you/deepseek.key"    # 或者正斜杠
+```
+
+★ **Windows 上双引号加反斜杠不行**：YAML 的双引号里 `\` 是转义符，`\U` 不是合法转义，
+整个档案解析失败（`yaml: did not find expected hexdecimal number`）。用单引号，或者把
+路径写成正斜杠。★ 路径要**绝对**的：相对路径是相对**启动 openheron 时所在的目录**（§4.2）。
+
+**怎么确认配好了。** 浏览器打开 `http://localhost:8080/v2/config`，那个 provider 条目里
+`hasApiKey` 应该是 `true`；启动日志里没有 `api_key env DEEPSEEK_API_KEY is not set`
+这一行，才算设上了（§4.2）。
+
+#### 启动前
+
+★ **`init` 写的地方和服务读的地方可能不是一个。** `init` 一定写当前目录下的
+`.openheron`，它**不看** `$OPENHERON_CONFIG_DIR`；而服务读的顺序是 `--config-dir` →
+`$OPENHERON_CONFIG_DIR` → 项目根下的 `.openheron`（§3）。这个环境变量设着的时候，
+服务起来会报 "no configuration at ..."，因为它读的不是 `init` 写的那一棵。
+
+★ **Windows 上子进程找不到命令时**，把 `mcps/fetch.yaml` 和 `mcps/time.yaml` 里的
+`command` 改成 `uvx.exe` —— 那两个 MCP 服务器要 PATH 里有 `uvx`（§2.3）。
+
+端口被占就在**启动之前**换一个：`$env:LISTEN_ADDR = ":9090"`（§10）。
+
+### 2.3 init 写了什么
 
 `openheron init` 写整棵树：
 
@@ -253,8 +315,8 @@ your/project/
         └── config.yaml      # 进程自身参数（不热重载）
 ```
 
-★ 那三个 MCP 服务器要 PATH 里有 `uvx`，两个 stdio 的还会在第一次启动时下载自己的包 ——
-起不来的服务器只赔上它自己的工具，别的什么都不影响（§4.7）。
+★ 那三个 MCP 服务器里有两个是 stdio 的 —— `fetch` 和 `time`，要 PATH 里有 `uvx`，而且
+第一次启动时会下载自己的包；起不来的服务器只赔上它自己的工具，别的什么都不影响（§4.7）。
 
 ★ **没有 `policy/` 下的文件。** 档位有缺省，例外由工具的来处点名（§4.3），
 而一份「说的就是代码已经在做的事」的文件是噪音 —— ★ 配置树里的噪音会被当成意思读。
@@ -405,7 +467,8 @@ models:
 | `extra` | 厂商级方言，透传给所有请求 |
 
 ★ **`api_key` 只能写环境变量名**（`${OPENAI_API_KEY}`）或文件引用（`@file:/path`）。
-在配置里写字面量密钥，配置编辑器会直接拒绝保存 —— 密钥不该进仓库。
+在配置里写字面量密钥，配置编辑器会直接拒绝保存 —— 密钥不该进仓库。★ `@file:`
+这种写法在 YAML 里**必须加引号**；下面那节讲各系统的密钥从哪来。
 
 ★ **压缩阈值属于 Agent，不属于模型。** `context_window` 是模型的；`summarize_at` 是 Agent 的 ——
 这个 Agent 把自己的上下文填到多少才压缩，是它自己的策略。同一个模型可以服务多个策略不同的
@@ -417,6 +480,86 @@ Agent。模型档案里留着的 `summarize_at` 不再被读，openheron 加载�
 ★ **`reasoning` 档位表不是可选的**。它是「Agent 写 `reasoning: high`」与
 「这个端点怎么表达 high」之间的翻译层。表里没有的档位会被静默忽略，
 于是「开了 high 档却不思考」这个坑会以最隐蔽的方式出现。
+
+#### 密钥从哪来
+
+档案只写**密钥在哪**，从不写密钥本身。有两种写法，两种都在**加载配置时**读取：
+
+```yaml
+# .openheron/llm/deepseek.yaml
+api_key: ${DEEPSEEK_API_KEY}                  # 一个环境变量
+api_key: "@file:/etc/openheron/deepseek.key"  # 同一个密钥，从文件读
+```
+
+★ **`@file:` 的引号不能省。** `@` 是 YAML 的保留字符，不加引号的
+`api_key: @file:/path` 根本解析不了（"found character that cannot start any token"），
+那个档案永远加载不上。`${NAME}` 不需要引号。
+
+★ **密钥是在加载配置时读的** —— 所以要在**启动 openheron 之前**把变量设好。
+事后再在另一个终端里 export，运行中的服务看不到它；把档案重新保存一次会重载配置，
+重载时会再读一遍这个变量。
+
+★ **Windows 上怎么设这个变量，见 §2.2** —— PowerShell 与 cmd.exe 的四种写法、
+「变量名不区分大小写」，还有 `@file:` 在 Windows 上的引号坑，都在那里。
+
+**macOS 与 Linux。**
+
+```sh
+export DEEPSEEK_API_KEY=sk-...
+```
+
+想长期有效，就把这一行写进 `~/.zshrc`（macOS）、`~/.bashrc`（Linux 上的 bash）
+或 `~/.profile`（任何 POSIX shell）。
+
+★ **macOS 与 Linux 上变量名区分大小写。** `$env:deepseek_api_key` 在那边是另一个变量，
+那边档案会读到 `api_key env DEEPSEEK_API_KEY is not set`；Windows 上相反，不区分（§2.2）。
+
+★ **变量要到达的是进程，不是你的登录会话。** `~/.bashrc` 那一行只有**交互式 bash**
+会读：systemd 单元、launchd 作业、容器和 CI runner 各自有自己的环境，
+它们都不读你的 shell 的 rc 文件。要把它交给真正启动 openheron 的那个东西：
+
+| openheron 跑在哪 | 变量放哪 |
+|---|---|
+| 终端里 | `export ...`（macOS 与 Linux）/ `$env:... = ...`（Windows，见 §2.2） |
+| systemd 单元（Linux） | 单元文件里的 `Environment=DEEPSEEK_API_KEY=sk-...`，然后 `systemctl daemon-reload` |
+| launchd 作业（macOS） | 作业 plist 里的 `EnvironmentVariables` |
+| 容器里 | `docker run -e DEEPSEEK_API_KEY=sk-...`，或 `--env-file .env` |
+| CI | runner 自己的密钥库 —— 存变量，不是存密钥 |
+
+**`@file:` 这种写法。** 文件里放的就是那个变量本来装的密钥，在加载时读，内容会去掉首尾空白。
+两件事要知道：
+
+- ★ **相对路径是相对启动 openheron 时所在的那个目录**，不是相对配置根 —— 用绝对路径。
+- ★ **路径不存在是启动错误**，不是提醒：
+  `config: parse llm/deepseek.yaml: api_key: read secret file: open /etc/openheron/deepseek.key: no such file or directory`。
+  这个区别是刻意的：变量没设是运行期状态，路径写错是配置本身写错了。
+
+**怎么知道配好了。** 哪个变量没设，启动日志会点名：
+
+```
+[main] config notice notice="llm/deepseek.yaml: api_key env DEEPSEEK_API_KEY is not set; calls to this endpoint will fail with 401 Unauthorized"
+```
+
+★ 这条提醒**不会拦住服务**：openheron 照常起来，Agent 照常建起来，
+而那个端点第一次被调用时回的是 `401 Unauthorized`。同一批提醒也在
+`GET /v2/config` 与 `GET /v2/health` 的 `deferred` 里。
+
+★ **变量设成空串不等于没设。** `DEEPSEEK_API_KEY=` —— 设了，但里面是空的 ——
+会解析成一个空密钥，而且**一条提醒都不会有**，所以没有提醒不等于没有问题。
+要看的是 `GET /v2/config` 里的 `hasApiKey` 字段，那个 provider 条目长这样：
+
+```json
+{"id":"deepseek","baseUrl":"https://api.deepseek.com","hasApiKey":true,"models":[{"id":"deepseek-flash","contextWindow":1310720}]}
+```
+
+找到密钥时 `hasApiKey` 是 `true`，没有密钥时是 `false` —— 而密钥本身永远不出进程。
+★ **把变量掏空的方式决定了你落在哪一种**：`$env:DEEPSEEK_API_KEY = ""` 会留下一个
+空值（静默），`$env:DEEPSEEK_API_KEY = $null` 是把变量删掉（提醒照常出现）；
+Unix shell 上是 `export DEEPSEEK_API_KEY=` 与 `unset DEEPSEEK_API_KEY` 这一对。
+
+★ **变量名是你自己定的。** `openheron init --env DEEPSEEK_API_KEY`
+会把档案写成 `${DEEPSEEK_API_KEY}`；档案写了别的变量名，环境里就得有那个变量 ——
+要紧的是两边说的是同一个。
 
 ### 4.3 哪些工具要问
 
@@ -1198,7 +1341,7 @@ curl -N -X POST localhost:8080/v2/run \
 `GET /v2/runtime` 返回运行时状态。启动日志也会打印配置根路径。
 
 **Q：Windows 上 agent 的 shell 工具失败，或者跑的是模型按另一套系统写的命令？**
-`execute` 工具在服务启动时挑自己的 shell —— 见 §1（「在 Windows 上」）。它优先要
+`execute` 工具在服务启动时挑自己的 shell —— 见 §1.3（「在 Windows 上」）。它优先要
 POSIX shell，机器上一个都没有时退回 `cmd.exe`；两种情况工具的描述都会告诉模型
 该写哪一套方言，于是命令是照着真正跑它的那个 shell 写的。★ 启动日志会打印它挑中
 的是哪个 shell。

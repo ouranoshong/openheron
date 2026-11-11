@@ -12,29 +12,20 @@
 
 ## 1. Installation
 
-You need **Go 1.27.1+** (to build), plus [go-task](https://taskfile.dev) and
-[Bun](https://bun.sh): the interface is built with Bun and embedded into the
-binary, so the two build tools are not optional.
+openheron is a self-contained executable — the interface is embedded in the binary, so
+nothing has to be installed next to it. How you install it depends on where you are:
 
-```bash
-git clone https://github.com/ouranoshong/openheron
-cd openheron
-task build
-```
+| Where you are | Read |
+|---|---|
+| You just want to use it | §1.1 Install a release |
+| You are going to change the code | §1.2 Build it from source |
+| You are on Windows | §1.3 On Windows |
+| You want the agent's tools to have no way to reach your machine | §1.4 Running it in a sandbox |
 
-`task build` builds the frontend and **embeds the interface into the binary**, producing
-`bin/openheron` — a self-contained executable that runs on any machine (cross-compile
-for platforms other than your build host).
+### 1.1 Install a release
 
-If you just want to try it quickly:
-
-```bash
-task build-go     # backend only (no UI) — faster while iterating on Go code
-```
-
-★ **Or install a released binary.** Every `v*` tag publishes the same self-contained
-executable for six platforms — the interface is embedded, so nothing has to be installed
-next to it. One command does the whole thing:
+Every `v*` tag publishes the same self-contained executable for six platforms. One
+command does the whole thing:
 
 ```bash
 # Linux / macOS
@@ -59,11 +50,11 @@ match the checksum is not installed.
 | `OPENHERON_TOKEN` | A token, for a private repository |
 | `OPENHERON_API_URL` | The API host (default `https://api.github.com`; a GitHub Enterprise one is `https://<host>/api/v3`) |
 
-Prefer to look before you run? Download `install.sh` from the
+★ Prefer to look before you run? Download `install.sh` from the
 [releases page](https://github.com/ouranoshong/openheron/releases/latest) and read it —
 the script is part of the release, next to the binaries it installs.
 
-Without the script, take the archive from the
+**Without the script**, take the archive from the
 [releases page](https://github.com/ouranoshong/openheron/releases/latest) and check it
 against the `checksums.txt` next to it:
 
@@ -76,18 +67,49 @@ against the `checksums.txt` next to it:
 | Windows x64 | `openheron_<version>_windows_amd64.zip` |
 | Windows arm64 | `openheron_<version>_windows_arm64.zip` |
 
-### On Windows
-
-**Install it.** One line in PowerShell:
-
-```powershell
-irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps1 | iex
+```bash
+sha256sum -c checksums.txt --ignore-missing
 ```
 
-★ **Two things differ from the Unix installer.** It installs into
-`%LOCALAPPDATA%\Programs\openheron` — not `~/.local/bin` — and it **does not
-touch your PATH**: the script only prints a hint when that directory is not on
-it. Add it yourself, or call the binary by its full path:
+★ The binary is static (`CGO_ENABLED=0`), so it runs on any machine of that platform —
+no Go, no Node, no runtime to install.
+
+★ Once it is installed: running it is §2, and where the key comes from is §4.2.
+
+### 1.2 Build it from source
+
+You only need this one if you are going to change the code. You need **Go 1.27.1+**
+(to build), plus [go-task](https://taskfile.dev) and [Bun](https://bun.sh): the
+interface is built with Bun and embedded into the binary, so the two build tools are
+not optional.
+
+```bash
+git clone https://github.com/ouranoshong/openheron
+cd openheron
+task build
+```
+
+`task build` builds the frontend and **embeds the interface into the binary**, producing
+`bin/openheron` — a self-contained executable that runs on any machine (cross-compile
+for platforms other than your build host).
+
+If you just want to try it quickly:
+
+```bash
+task build-go     # backend only (no UI) — faster while iterating on Go code
+```
+
+★ On Windows the product is `bin\openheron.exe` — the executable keeps the `.exe` suffix
+there. And `python3` on Windows is the Microsoft Store alias — it exists and runs
+nothing — so the repository's own scripts call `python` there. It only matters for the
+document checks (`task lint-docs`).
+
+### 1.3 On Windows
+
+★ **Two things differ from the Unix installer.** The location is
+`%LOCALAPPDATA%\Programs\openheron` — not `~/.local/bin` — and it **does not touch
+your PATH**: the script only prints a hint when that directory is not on it. Add it
+yourself, or call the binary by its full path:
 
 ```powershell
 # put the install directory on the user PATH
@@ -103,45 +125,18 @@ From `cmd.exe` there is no `irm`, so hand the line to PowerShell:
 powershell -c "irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps1 | iex"
 ```
 
-**Run it.**
+**Where the tools differ.** The file tools (`read_file`, `write_file`, `edit_file`,
+`ls` and `glob`) are the runtime's own code, and they work on Windows as they are;
+only `grep` needs [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on top —
+Windows does not ship it, and without it you get
+`ripgrep (rg) is not installed or not in PATH` (§10).
 
-```powershell
-cd C:\your\project
-openheron init
-openheron
-```
-
-Then open http://localhost:8080. The configuration root is the `.openheron`
-directory under the project — created when missing — or the one named by
-`--config-dir` or `$env:OPENHERON_CONFIG_DIR`. The port comes from
-`listen_addr` in `server/config.yaml` (`:8080` by default), or from the
-`LISTEN_ADDR` environment variable.
-
-**Build it from source.** Go, go-task and Bun — the three this section names at the
-top — and `task build` produces `bin\openheron.exe` on Windows, because the
-executable keeps the `.exe` suffix there.
-
-★ One trap: on Windows `python3` is the Microsoft Store alias — it exists and
-runs nothing — so the repository's own scripts call `python` there. It only
-matters for the document checks (`task lint-docs`).
-
-**One tool is better with software Windows does not ship.**
-
-| Tool | Better with | What you get without it |
-|---|---|---|
-| `grep` | [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on PATH | ★ the tool falls back to its own engine: the same searches, the same caps, the same budget — but no `.gitignore` rules, and fewer file types |
-
-★ **The file tools need neither.** `read_file`, `write_file`, `edit_file`, `ls`
-and `glob` are the runtime's own code, and they work on Windows as they are.
-
-**The shell tool finds a shell by itself.** `execute` needs a program to run
-the command in, and openheron looks for one when the process starts:
-
-1. `sh` or `bash` on PATH;
-2. Git for Windows (`C:\Program Files\Git\usr\bin\bash.exe`) and MSYS2
-   (`C:\msys64\usr\bin\sh.exe`);
-3. the WSL launcher (`C:\Windows\System32\bash.exe`) — **last**, because it runs
-   the command in a Linux filesystem, where `C:\Users` is `/mnt/c/Users`.
+**The shell tool finds a shell by itself.** `execute` needs a program to run the
+command in, and openheron looks for one when the process starts, in this order: `sh`
+or `bash` on PATH → Git for Windows (`C:\Program Files\Git\usr\bin\bash.exe`) and
+MSYS2 (`C:\msys64\usr\bin\sh.exe`) → the WSL launcher
+(`C:\Windows\System32\bash.exe`, **last**, because it runs the command in a Linux
+filesystem, where `C:\Users` is `/mnt/c/Users`).
 
 ★ Each candidate is checked by running one trivial command, so the `bash.exe`
 that ships with Windows — it is on every machine and does nothing without a
@@ -157,7 +152,7 @@ same answer, decided once at startup. The other way out is to leave `execute`
 out of that agent's `tools:` list — the factory configuration already does
 that.
 
-### Running it in a sandbox
+### 1.4 Running it in a sandbox
 
 ★ **The binary is not the only way to run openheron.** If you would rather the
 agent's file and shell tools could not reach your machine at all, openheron
@@ -225,14 +220,9 @@ same agent.
 behind it is in [`docs/sandbox-kit-design.md`](sandbox-kit-design.md) — that document is
 Chinese only, like every design document in this repository.
 
-```bash
-sha256sum -c checksums.txt --ignore-missing
-```
-
-★ The binary is static (`CGO_ENABLED=0`), so it runs on any machine of that platform —
-no Go, no Node, no runtime to install.
-
 ## 2. First run
+
+### 2.1 Getting it running
 
 ```bash
 cd /your/project
@@ -242,6 +232,87 @@ openheron
 ```
 
 Open <http://localhost:8080>.
+
+★ The key is read from the environment, and **how** you set it depends on the system
+you are on — macOS and Linux see §4.2, Windows see §2.2.
+
+### 2.2 Running it for the first time on Windows
+
+In PowerShell, from nothing to running:
+
+```powershell
+cd C:\path\to\your-project
+openheron init                      # generate the configuration in the current directory
+$env:DEEPSEEK_API_KEY = "sk-..."    # secrets are read from the environment only
+openheron
+```
+
+★ When `openheron` is not on the PATH, call it by its full path:
+`%LOCALAPPDATA%\Programs\openheron\openheron.exe` (§1.3).
+
+`init` prints one line when it is done:
+
+```
+the api key is read from the environment at request time: export DEEPSEEK_API_KEY=...
+```
+
+★ That line uses **the Unix `export`**, which runs in neither PowerShell nor cmd.exe — on
+Windows the same thing is `$env:DEEPSEEK_API_KEY = "sk-..."` (PowerShell) or
+`set DEEPSEEK_API_KEY=sk-...` (cmd.exe).
+
+#### How to set the key
+
+One command, four ways of writing it, and they do not reach the same far:
+
+- **The PowerShell window you are in** — `$env:DEEPSEEK_API_KEY = "sk-..."`: that window only.
+- **Every terminal this user opens from now on** — `[Environment]::SetEnvironmentVariable('DEEPSEEK_API_KEY', 'sk-...', 'User')`: permanently; ★ **you have to open a new terminal**.
+- **The cmd.exe window you are in** — `set DEEPSEEK_API_KEY=sk-...`: that window only.
+- **The cmd.exe window, for this user** — `setx DEEPSEEK_API_KEY sk-...`: permanently; ★ **the value is truncated at 1024 characters**.
+
+★ **A shell keeps the environment it started with** — the window that ran `setx` or
+`[Environment]::SetEnvironmentVariable` does not see the variable; you have to **open
+another terminal**.
+
+★ **The key is read when the configuration is loaded** (§4.2), so the variable has to
+reach **the process that starts openheron**: setting it in another terminal afterwards
+does nothing for a server that is already running.
+
+★ **On Windows the variable name is case-insensitive** — `$env:deepseek_api_key` is the
+`DEEPSEEK_API_KEY` variable; on macOS and Linux it is not (§4.2).
+
+**Putting the key in a file.** To keep the secret out of the environment, point
+`@file:` at a file:
+
+```yaml
+api_key: '@file:C:\Users\you\deepseek.key'   # single quotes
+api_key: "@file:C:/Users/you/deepseek.key"    # or forward slashes
+```
+
+★ **Double quotes with backslashes do not work on Windows**: `\` is an escape character
+inside a YAML double-quoted scalar and `\U` is not a legal escape, so the whole profile
+fails to parse (`yaml: did not find expected hexdecimal number`). Use single quotes, or
+write the path with forward slashes. ★ The path has to be **absolute**: a relative one is
+relative to **the directory openheron was started from** (§4.2).
+
+**How to tell that it worked.** Open `http://localhost:8080/v2/config` in a browser; the
+provider entry reads `hasApiKey` and it should be `true`; and the startup log must not
+carry `api_key env DEEPSEEK_API_KEY is not set` (§4.2).
+
+#### Before it starts
+
+★ **The place `init` writes to and the place the server reads from may not be the same.**
+`init` always writes `.openheron` under the current directory and it **does not look at**
+`$OPENHERON_CONFIG_DIR`; the server reads `--config-dir` → `$OPENHERON_CONFIG_DIR` →
+`.openheron` under the project root (§3). With that environment variable set, the server
+comes up with "no configuration at ...", because it is not reading the tree `init` wrote.
+
+★ **When the child process cannot find the command on Windows**, change `command` to
+`uvx.exe` in `mcps/fetch.yaml` and `mcps/time.yaml` — the two MCP servers need `uvx` on
+the PATH (§2.3).
+
+If the port is taken, change it **before** it starts: `$env:LISTEN_ADDR = ":9090"` (§10).
+
+### 2.3 What init writes
 
 `openheron init` writes the whole tree:
 
@@ -274,9 +345,9 @@ your/project/
         └── config.yaml      # process parameters (not hot-reloaded)
 ```
 
-★ The three MCP servers need `uvx` on the PATH, and the two stdio ones download their
-package on the first start — a server that cannot be started costs that server's tools
-and nothing else (§4.7).
+★ Two of the three MCP servers are stdio ones — `fetch` and `time` — and they need `uvx`
+on the PATH and download their package on the first start; a server that cannot be
+started costs that server's tools and nothing else (§4.7).
 
 ★ **There is no `policy/` file.** The tiers have a default and the exceptions are
 named where the tool comes from (§4.3), so a file that says what the code already
@@ -440,7 +511,9 @@ models:
 
 ★ **`api_key` may only be an environment variable name** (`${OPENAI_API_KEY}`) or a file
 reference (`@file:/path`). Writing a literal secret into the configuration makes the
-config editor refuse to save it — secrets do not belong in the repository.
+config editor refuse to save it — secrets do not belong in the repository. ★ The
+`@file:` form needs **quotes** in YAML; the subsection below says where the key comes
+from on each system.
 
 ★ **The compaction threshold belongs to the agent, not to the model.** `context_window` is the
 model's; `summarize_at` is the agent's, because how much of that window this agent fills before
@@ -456,6 +529,98 @@ survive the cut: the summary keeps them.
 "the agent writes `reasoning: high`" and "how this endpoint expresses high". A tier
 missing from the table is silently ignored, so "I turned on high and it still does not
 think" shows up in the most hidden way possible.
+
+#### The key: where it comes from
+
+The profile names **where** the secret is — never the secret itself. Two forms work,
+and both are read **when the configuration is loaded**:
+
+```yaml
+# .openheron/llm/deepseek.yaml
+api_key: ${DEEPSEEK_API_KEY}                  # an environment variable
+api_key: "@file:/etc/openheron/deepseek.key"  # the same key, read from a file
+```
+
+★ **The quotes around `@file:` are not optional.** `@` is a reserved character in
+YAML, so an unquoted `api_key: @file:/path` does not parse at all ("found character
+that cannot start any token") and the profile never loads. `${NAME}` needs no quotes.
+
+★ **The key is read when the configuration is loaded** — so set the variable
+**before** you start openheron. A variable you export in another terminal afterwards
+is not seen by the running server; saving the profile file again reloads the
+configuration, and that reload reads the variable once more.
+
+★ **How the variable is set on Windows, see §2.2** — the four ways of writing it in
+PowerShell and cmd.exe, the case-insensitive variable name, and the `@file:` quoting pit
+on Windows are all there.
+
+**macOS and Linux.**
+
+```sh
+export DEEPSEEK_API_KEY=sk-...
+```
+
+To make it permanent, put the line in `~/.zshrc` (macOS), `~/.bashrc` (Linux with
+bash) or `~/.profile` (any POSIX shell).
+
+★ **On macOS and Linux the variable name is case-sensitive.** `$env:deepseek_api_key` is
+another variable there, and the profile then reads
+`api_key env DEEPSEEK_API_KEY is not set`; on Windows it is the other way round
+(§2.2).
+
+★ **The variable has to reach the process, not your login.** A `~/.bashrc` line is
+read by **interactive bash only**: a systemd unit, a launchd job, a container and a CI
+runner each get an environment of their own, and none of them reads your shell's rc
+files. Give it to whatever starts openheron:
+
+| openheron runs in | where the variable goes |
+|---|---|
+| a terminal | `export ...` (macOS and Linux) / `$env:... = ...` (Windows, see §2.2) |
+| a systemd unit (Linux) | `Environment=DEEPSEEK_API_KEY=sk-...` in the unit file, then `systemctl daemon-reload` |
+| a launchd job (macOS) | `EnvironmentVariables` in the job's plist |
+| a container | `docker run -e DEEPSEEK_API_KEY=sk-...`, or `--env-file .env` |
+| CI | the runner's secret store — the variable, not the key |
+
+**The `@file:` form.** The file holds the same secret the variable would, and it is
+read at load time with its content trimmed. Two things to know:
+
+- ★ **A relative path is relative to the directory openheron was started from**, not
+  to the configuration root — use an absolute path.
+- ★ **A path that does not exist is a startup error**, not a reminder:
+  `config: parse llm/deepseek.yaml: api_key: read secret file: open /etc/openheron/deepseek.key: no such file or directory`.
+  The difference is deliberate: an unset variable is a runtime state, a wrong path is
+  a mistake in the configuration.
+
+**How to tell that it worked.** A variable that is not set is named in the startup log:
+
+```
+[main] config notice notice="llm/deepseek.yaml: api_key env DEEPSEEK_API_KEY is not set; calls to this endpoint will fail with 401 Unauthorized"
+```
+
+★ That reminder **does not stop the server**: openheron starts, the agent builds, and
+the endpoint answers `401 Unauthorized` the first time it is called. The same notices
+are under `deferred` in `GET /v2/config` and `GET /v2/health`.
+
+★ **An empty variable is not an unset one.** `DEEPSEEK_API_KEY=` — set, but with
+nothing in it — resolves to an empty key and produces **no reminder at all**, so the
+absence of a notice is not the absence of a problem. The field to look at is
+`hasApiKey` in `GET /v2/config`; the provider entry reads
+
+```json
+{"id":"deepseek","baseUrl":"https://api.deepseek.com","hasApiKey":true,"models":[{"id":"deepseek-flash","contextWindow":1310720}]}
+```
+
+`hasApiKey` is `true` when a key was found and `false` when there is none — and the
+key itself never leaves the process. ★ **How the variable is emptied decides which of
+the two you get**: `$env:DEEPSEEK_API_KEY = ""` leaves an empty value behind (silent),
+while `$env:DEEPSEEK_API_KEY = $null` removes the variable (the reminder appears);
+`export DEEPSEEK_API_KEY=` and `unset DEEPSEEK_API_KEY` are the same pair on a Unix
+shell.
+
+★ **The name of the variable is yours to choose.** `openheron init --env DEEPSEEK_API_KEY`
+writes the profile with `${DEEPSEEK_API_KEY}`, and a profile that names another
+variable needs that other variable in the environment — what matters is that the two
+name the same one.
 
 ### 4.3 Which tools ask
 
@@ -1336,7 +1501,7 @@ The startup log also prints the config root path.
 
 **Q: On Windows the agent's shell tool fails, or runs commands the model wrote
 for another system?**
-The `execute` tool picks its shell when the server starts — see §1 ("On
+The `execute` tool picks its shell when the server starts — see §1.3 ("On
 Windows"). It prefers a POSIX shell and falls back to `cmd.exe` when the
 machine has none; either way the tool's description tells the model which
 dialect to write, so the command is written for the shell that runs it.

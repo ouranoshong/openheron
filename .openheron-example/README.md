@@ -33,8 +33,9 @@ one log line is written.
    set does **not** block startup, it only records one reminder in the startup log;
    the "no permission" (401) only comes back when that endpoint is actually
    requested. You can also use `@file:/path` to read the key from a file (a wrong
-   path is an error at startup). **Do not write the key into this file** — it
-   normally belongs in version control.
+   path is an error at startup). ★ **The `@file:` form needs quotes in YAML** — `@`
+   is a reserved character there, and an unquoted value does not parse at all.
+   **Do not write the key into this file** — it normally belongs in version control.
 
 2. **`model` must be written as `<provider>/<model>`** — `provider` is the file name
    under `llm/`, and `model` is the `id` declared in that file's `models[]`. A
