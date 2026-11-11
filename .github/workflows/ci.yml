@@ -93,22 +93,40 @@ jobs:
       - name: install the dependencies
         working-directory: web
         run: bun install --frozen-lockfile
+      - name: the browser version
+        id: browsers
+        working-directory: web
+        # ★ The cache key carries the version the browsers belong to, and it
+        #   is read from the installed package: a version bump has to miss
+        #   the cache, and a key written by hand would drift from it.
+        run: |
+          version=$(bun -e "console.log((await Bun.file('node_modules/@playwright/test/package.json').json()).version)")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: the browser cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.browsers.outputs.version }}
       - name: install the browser
         working-directory: web
         # ★ Only chromium: the config declares one project, and installing
         #   every browser would cost minutes for nothing.
-        # ★ The browsers come from a CDN and the system dependencies come
-        #   from the Ubuntu archive: neither belongs to us, and a runner that
-        #   cannot fetch them fails the run for a reason that has nothing to
-        #   do with the code. So the step is retried — the install is not
-        #   resumable, so the whole thing runs again.
-        # ★ Each attempt is bounded. A fetch that **hangs** is worse than one
-        #   that fails: it sits in this step until the job times out, hours
-        #   later, and the retries never happen. A healthy install takes
-        #   twenty seconds; five minutes is generous on purpose.
+        # ★ **No `--with-deps`.** That flag runs `apt-get`, and the archive
+        #   the runner reads was unreachable — the step sat in apt for ten
+        #   minutes and then failed on the packages it could not fetch. The
+        #   runner image ships the libraries chromium needs (it ships
+        #   Chrome), so the apt pass buys nothing but the outage.
+        # ★ **Only the headless shell.** A headless run launches the headless
+        #   shell, not the full Chrome for Testing; the full browser is a
+        #   hundred megabytes that nothing here uses.
+        # ★ The step is retried, and each attempt is bounded. The install is
+        #   not resumable, so the whole thing runs again; and a fetch that
+        #   **hangs** is worse than one that fails, because it sits here until
+        #   the job times out and the retry never starts. The cache above
+        #   usually makes the whole step a no-op.
         run: |
           for attempt in 1 2 3; do
-            if timeout --kill-after=30 300 bun x playwright install --with-deps chromium; then
+            if timeout --kill-after=30 300 bun x playwright install chromium --only-shell; then
               exit 0
             fi
             if [ "$attempt" -lt 3 ]; then
