@@ -69,7 +69,12 @@ type MCPServerView struct {
 //
 //	"is my server broken?" without talking to it, and the answer would
 //	otherwise be "run a turn and find out".
-func (b *Builder) MCPServers(ctx context.Context, agentID string) []MCPServerView {
+//
+// ★ The context is the caller's — a panel request's — and it is
+//
+//	deliberately **not** the server's life: a request that is answered
+//	must not take the child process with it.
+func (b *Builder) MCPServers(_ context.Context, agentID string) []MCPServerView {
 	snap := b.currentSnapshot()
 	if snap == nil || snap.cfg == nil {
 		return nil
@@ -105,7 +110,7 @@ func (b *Builder) MCPServers(ctx context.Context, agentID string) []MCPServerVie
 			continue
 		}
 
-		own, err := b.mcpTools(ctx, scfg)
+		own, err := b.mcpTools(scfg)
 		if err != nil {
 			// ★ A server on its way is not a broken server: the panel
 			//   says so, and it does not carry an error — there is no
@@ -138,11 +143,15 @@ func (b *Builder) MCPServers(ctx context.Context, agentID string) []MCPServerVie
 //
 //	panel and a turn that arrive at the same moment get one client — and
 //	one child process.
-func (b *Builder) mcpTools(ctx context.Context, cfg *decl.MCPServerCfg) ([]string, error) {
+//
+// ★ It asks without a context: the manager owns the child, and the
+//
+//	caller does not get to end it.
+func (b *Builder) mcpTools(cfg *decl.MCPServerCfg) ([]string, error) {
 	if b.mcp == nil {
 		return nil, nil
 	}
-	_, own, err := b.mcp.Tools(ctx, cfg)
+	_, own, err := b.mcp.Tools(cfg)
 	return own, err
 }
 

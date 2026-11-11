@@ -36,7 +36,7 @@ mcps/*.yaml → spec.loadMCP → decl.MCPServerCfg
 |---|---|
 | 加载一个 `mcps/` 文件 | `agentkit/spec/load.go:363` `loadMCP` |
 | 声明结构体 | `agentkit/spec/decl/decl.go:618` `MCPServerCfg` |
-| 读一个服务器的工具 | `agentkit/build/mcpmanager.go:178` `mcpManager.Tools` |
+| 读一个服务器的工具 | `agentkit/build/mcpmanager.go:183` `mcpManager.Tools` |
 | 构造每个 provider 的那一批 | `agentkit/build/tools.go:128` `toolRegistry.Build` |
 | 物化，一个快照一次 | `agentkit/build/snapshot.go:54` `buildHeavy` |
 | 交给 eino | `agentkit/build/assemble.go:30` `applyToolConfig` |
@@ -121,7 +121,7 @@ type toolProvider interface {
   把它登记成 `Editable: true` 与 `hot: true`：配置编辑器可以写它，热重载盯着它，
   加载器把服务器放进 `Config.MCPs`（`agentkit/spec/config.go:111`）。
   ★ 一个资源重建不回来的热分区，就是一个谎称自己是热的分区 ——
-  所以客户端的生命挂在声明的指纹上（`agentkit/build/mcpmanager.go:330`）。
+  所以客户端的生命挂在声明的指纹上（`agentkit/build/mcpmanager.go:344`）。
 
 ## 2. MCP 服务器改变了什么
 
@@ -166,8 +166,8 @@ type Config struct {
 
 | 没做 | 对 openheron 的后果 |
 |---|---|
-| 不管客户端生命周期 —— 不拉起、不 `Start`、不 `Initialize`、不 `Close` | 连接归 openheron 管：manager 建它、初始化它、养着它，进程退出时拆掉它（`agentkit/build/mcpmanager.go:395`） |
-| 不选传输方式 | stdio / SSE / streamable HTTP 是 `mcp-go` 的 `client` 构造器；openheron 挑一个（`agentkit/build/mcpmanager.go:418`、`:472`） |
+| 不管客户端生命周期 —— 不拉起、不 `Start`、不 `Initialize`、不 `Close` | 连接归 openheron 管：manager 建它、初始化它、养着它，进程退出时拆掉它（`agentkit/build/mcpmanager.go:409`） |
+| 不选传输方式 | stdio / SSE / streamable HTTP 是 `mcp-go` 的 `client` 构造器；openheron 挑一个（`agentkit/build/mcpmanager.go:440`、`:472`） |
 | 没有配置格式 | schema 就是 §5 —— `mcps/<server>.yaml`，一个服务器一个文件（`agentkit/spec/load.go:336`） |
 | 不支持流式 | 那层包装只实现了 `Info` 与 `InvokableRun`，所以它是 `tool.InvokableTool`，永远不是 `tool.StreamableTool`。整个结果作为一块 JSON 回来 |
 
@@ -237,12 +237,12 @@ mcp__<server>__<tool>
 ★ 被跳过的工具必须**看得见**：警告里要写清服务器名、原始工具名，
   以及它本来会有的合成名。「某个功能好像不见了」是这份设计拒绝出现的症状。
   ⇒ provider 把这三样都写进日志（`agentkit/build/mcptools.go:236`），
-  而面板把它显示成 `skipped` 并带上原因（`agentkit/build/mcpstatus.go:145`）。
+  而面板把它显示成 `skipped` 并带上原因（`agentkit/build/mcpstatus.go:154`）。
 
 ### 3.3 命名空间顺带把问题 1 也关上了
 
 一个提供 `ls` 的服务器现在提供的是 `mcp__<server>__ls`，
-不再与 `reservedToolNames`（`agentkit/build/tools.go:69`）相撞。
+不再与 `reservedToolNames`（`agentkit/build/tools.go:113`）相撞。
 反过来也成立，而且它本身就是一条规则：
 
 > **只有 MCP 工具可以用 `mcp__` 前缀。**
@@ -495,8 +495,8 @@ MCP 服务器按服务器一个文件来配：
   stdio 的子进程被拆掉、新的被拉起来。
   一个资源无法重建的热分区，就是一个谎称自己是热的分区。
   ⇒ 客户端在**声明**变了的时候被重建，而不是在快照变了的时候：
-  指纹就是声明自己的那份（`agentkit/build/mcpmanager.go:330`），
-  而拉起会换掉旧客户端（`agentkit/build/mcpmanager.go:229`）。
+  指纹就是声明自己的那份（`agentkit/build/mcpmanager.go:344`），
+  而拉起会换掉旧客户端（`agentkit/build/mcpmanager.go:234`）。
 
 ### 5.5 子进程的环境
 
@@ -527,7 +527,7 @@ MCP 服务器按服务器一个文件来配：
   （`agentkit/build/mcpmanager.go:458`）。
 
 ★ 那份环境里的 `PATH` 就是继承来的那个，没有被改动：命令在沙箱的 PATH 里解析，
-  绝不相对项目根（`agentkit/build/mcpmanager.go:418`）。
+  绝不相对项目根（`agentkit/build/mcpmanager.go:440`）。
 
 ### 5.6 配置模板
 
@@ -697,10 +697,20 @@ provider 照 §1.2 的契约写，注册在注册表里（`agentkit/build/tools.
 | 取工具清单 | `ListTools` | 同样 |
 | 拆掉 | 声明变了或进程退出时子进程被杀掉 | 会话关闭 |
 
+★ **子进程的生命归管理者，不归调用方。** 调用方是**一轮**（§11），而一轮会结束：
+轮次结束时运行期取消它交给 builder 的那个上下文（`agentkit/run/runtime.go:397`），
+而 `exec.CommandContext` 在上下文取消时会杀掉子进程 ——
+那个工具于是**还在表里**，却再也答不上话：`transport error: failed to write request`。
+⇒ 拉起子进程的那个上下文由**管理者的生命周期**派生
+（`agentkit/build/mcpmanager.go:425` `dispatch`），
+而管理者的生命周期只被两件事结束：声明变了（§6.6）或进程退出。
+★ 管理者的 API 因此**不收上下文**：`Tools` 与 `dispatch` 都只收配置 ——
+  这样「谁拥有这个子进程」不会被交给下一个调用方去决定。
+
 ★ manager 用的是**传输层**的构造器，再在它上面套 `client.NewClient`，
   而不是 `client.NewStdioMCPClient` / `client.NewStreamableHttpClient`：
   更低的那一层才是设置子进程环境与参数的地方
-  （`agentkit/build/mcpmanager.go:418`、`:472`），
+  （`agentkit/build/mcpmanager.go:440`、`:472`），
   而初始化对两种传输来说是同一个函数（`agentkit/build/mcpmanager.go:492`）。
 
 ★ 初始化的结果**可以丢掉**：provider 只要工具清单。
@@ -785,8 +795,9 @@ if _, err := c.stdin.Write(requestBytes); err != nil {   // ← no lock
 | **★ 预热** | 配置一加载完，一个**统一的后台作业**就遍历 agent 配置、取挂载的并集、逐台在后台起起来（§13.4）—— ★ 没有任何 agent 点名的 server 永远不会被启动 |
 | **只启动一次** | ★ 这次启动是**单飞**的：两个调用方要同一个 server，拿到的是**那一个**客户端（§6.8） |
 | **崩了的子进程自动重启** | 一个死掉的 stdio server 在下一次调用时被重新拉起 —— 崩了不是配置错误，而一个死掉的 server 就那么死着才是最糟的结果 |
+| **★ 子进程的生命归管理者** | 拉起子进程的那个上下文由**管理者的生命周期**派生，不是调用方的（`agentkit/build/mcpmanager.go:425` `dispatch`）—— ★ 调用方是**一轮**，一轮结束时的取消会把子进程一起带走，于是那个工具还在表里却答不上话（§6.2） |
 | **发现工具清单变了** | 管理者重新列举工具；清单变了就**推进代际**、工具重建 —— 与配置重载是同一条路（§6.7） |
-| **服务器变了就换掉它** | 一份不再匹配运行中客户端指纹的声明会关掉旧客户端并拉起新的（`agentkit/build/mcpmanager.go:229`） |
+| **服务器变了就换掉它** | 一份不再匹配运行中客户端指纹的声明会关掉旧客户端并拉起新的（`agentkit/build/mcpmanager.go:234`） |
 | **进程退出时拆掉** | 管理者在关闭时关掉每一个客户端（`agentkit/build/mcpmanager.go:150`、`main.go:472`） |
 
 ★ **工具清单是管理者的活，不是快照的。** server 的工具是运行期才发现的，
@@ -797,7 +808,7 @@ if _, err := c.stdin.Write(requestBytes); err != nil {   // ← no lock
   树上没有这么做，理由就是管理者本身：它只注册一次，跨快照拥有那些客户端，
   所以一次没碰某个服务器的配置变化，会让那个服务器的子进程继续跑着。
   ★ 换掉客户端的是**声明** —— 指纹就是声明自己的那份
-  （`agentkit/build/mcpmanager.go:330`）—— 而另一个拆解时机就是进程退出。
+  （`agentkit/build/mcpmanager.go:344`）—— 而另一个拆解时机就是进程退出。
 
 ★ **拆 stdio 客户端时那两行 `ERROR: Error reading from stdout` 不是故障。**
 `mcp-go@v0.43.0` 的 `readResponses` 阻塞在 `ReadString`，而它自己的 `Close()` 先
@@ -1202,11 +1213,11 @@ headers:
 | 文件自己的档位（§7.3） | 同一个函数 —— 文件里的名字被映射到对外的那些，而那张表是从配置装配出来的（`agentkit/build/mcptools.go:173`） |
 | 串行化（§6.5） | `serialTool`（`agentkit/build/mcptools.go:335`）—— 一个包装层，与 `nettools.go` 里的 `cappedTool` 同一个形状 |
 | 输出封顶（§6.4） | 同一族包装层 —— 组件的 `ToolCallResultHandler`（`agentkit/build/mcptools.go:376`） |
-| 客户端的生命（§6.2、§6.6） | 管理者 —— `Start` / `Initialize` / `ListTools`，懒启动、崩掉的子进程重启（`agentkit/build/mcpmanager.go:290`），以及进程退出时的拆解（`agentkit/build/mcpmanager.go:150`） |
-| 热重载（§5.4） | `agentkit/spec/reload.go` —— 这个分区是热的（`agentkit/spec/config.go:66`），而声明变了就会换掉客户端（`agentkit/build/mcpmanager.go:229`） |
+| 客户端的生命（§6.2、§6.6） | 管理者 —— `Start` / `Initialize` / `ListTools`，懒启动、崩掉的子进程重启（`agentkit/build/mcpmanager.go:304`），以及进程退出时的拆解（`agentkit/build/mcpmanager.go:150`） |
+| 热重载（§5.4） | `agentkit/spec/reload.go` —— 这个分区是热的（`agentkit/spec/config.go:66`），而声明变了就会换掉客户端（`agentkit/build/mcpmanager.go:234`） |
 | 工具清单变了（§6.6） | 管理者 —— 重新列举（`agentkit/build/mcpmanager.go:118`），以及推进代际并重建工具（`agentkit/build/builder.go:105`） |
-| 一次启动，一个客户端（§6.8） | 管理者 —— 单飞启动（`agentkit/build/mcpmanager.go:403` `dispatch`） |
-| 失败的启动不拖住装配（§6.8） | `startStdioClient`（`agentkit/build/mcpmanager.go:432`）—— 先杀子进程（`agentkit/build/mcpmanager.go:485`），再拆解，而拆解有上限（`agentkit/build/mcpmanager.go:501`） |
+| 一次启动，一个客户端（§6.8） | 管理者 —— 单飞启动（`agentkit/build/mcpmanager.go:425` `dispatch`） |
+| 失败的启动不拖住装配（§6.8） | `startStdioClient`（`agentkit/build/mcpmanager.go:457`）—— 先杀子进程（`agentkit/build/mcpmanager.go:485`），再拆解，而拆解有上限（`agentkit/build/mcpmanager.go:501`） |
 | 一次 run 碰过的 server（§7.4） | `agentkit/run/runrow.go:84` 与 `storage/runledger.go:168` —— run 的那一行点名它们 |
 | 脚手架与编辑器的模板（§5.6） | `agentkit/templates/files/mcps/_example.yaml` —— ★ **开头那个下划线就是「不写下去」的标记**：init 写的是它旁边的三台服务器（`initcfg/initcfg.go:164`），编辑器拿它当脚手架（`agentkit/spec/write.go:307`，经由 `spec.Template`） |
 | 一个 agent 加载哪些服务器（§5.3） | `agentkit/spec/decl/decl.go:114`（那个字段）→ `agentkit/spec/load.go:825`（那个并集 —— ★ 留在树外的 agent 不计入，它本来也跑不起来）→ `agentkit/build/mcpmanager.go`（那次启动） |
@@ -1563,7 +1574,7 @@ headers:
 
 ★ **MCP 的启动曾经站在那一轮的关键路径上。** 装配工具集
 （`agentkit/build/snapshot.go:54` `buildHeavy`）向 provider 要工具，provider 向管理者
-要客户端（`agentkit/build/mcptools.go:201` → `agentkit/build/mcpmanager.go:178` `Tools`），
+要客户端（`agentkit/build/mcptools.go:201` → `agentkit/build/mcpmanager.go:183` `Tools`），
 而那时的 `Tools` 会**等**这次启动做完：`ensure` 在锁下把子进程拉起来、握上手、
 列完工具，才轮到这一轮。
 
@@ -1573,7 +1584,7 @@ headers:
   就能把那一轮的预算吃光，客户端最后拿到的是「turn start timeout」。
 
 ★ **面板被同一件事阻塞。** `/mcps` 问的是同一句「起起来让我看看」
-  （`agentkit/build/mcpstatus.go:141` `mcpTools` → 同一个 `Tools`），
+  （`agentkit/build/mcpstatus.go:150` `mcpTools` → 同一个 `Tools`），
   所以打开面板那一次 HTTP 请求可以卡住整个期限。
 
 ### 13.2 八条规则
@@ -1612,12 +1623,12 @@ headers:
 ★ **状态是 server 的，投影是 agent 的。** 「这个 agent 不用它」（`unused`）与
 「这台 server 起不来」（`unreachable`）是两句不同的话 —— 状态串一直这样分；
 新增的 `starting` 站在它们的对面：**它不是失败，它是在路上。**
-（`agentkit/build/mcpmanager.go:304` `mcpState`，
+（`agentkit/build/mcpmanager.go:318` `mcpState`，
 `agentkit/build/mcpstatus.go:26` `MCPServerStarting`）
 
 ★ **一次启动只有一份。** 单飞的那把锁还在，只是它守的不再是「启动这件事」，
 而是「这个 server 现在处于哪个状态」—— ★ 所以它得是**短**的：
-锁里只许改状态，不许等握手（`agentkit/build/mcpmanager.go:403` `dispatch`）。
+锁里只许改状态，不许等握手（`agentkit/build/mcpmanager.go:425` `dispatch`）。
 
 ### 13.4 那个统一的后台作业：预热
 
@@ -1637,7 +1648,7 @@ for _, name := range cfg.MCPServersInUse() {
 
 ★ **预热不是唯一的起法**：一次要求（provider 或面板）也会起，走的是同一个单飞。
   那正是「失败的退避重试」能成立的原因 —— 而**退避就是文件自己的 `timeout:`**
-  （`agentkit/build/mcpmanager.go:335` `mcpStartTimeout`）：★ 刚失败过的 server
+  （`agentkit/build/mcpmanager.go:349` `mcpStartTimeout`）：★ 刚失败过的 server
   在那个期限过去之前不会被再问一次，所以起不来的 server 不会被拉成热循环，
   而起得来的 server 也不会被放弃。
 
@@ -1651,12 +1662,12 @@ for _, name := range cfg.MCPServersInUse() {
 | 地方 | 之前 | 现在 |
 |---|---|---|
 | `mcpManager.Tools`（`agentkit/build/mcpmanager.go:172`） | 等启动 | 立刻返回：`ready` 给客户端与清单，`starting` 给「还没好」，`failed` 给错误（`view`，`:355`） |
-| `mcpEntry.ensure` → `dispatch`（`agentkit/build/mcpmanager.go:396`） | 在调用者的上下文里同步启动 | 在锁下**发起**一次后台作业就返回；作业自己的上下文是管理者的，不是那一轮的 |
+| `mcpEntry.ensure` → `dispatch`（`agentkit/build/mcpmanager.go:410`） | 在调用者的上下文里同步启动 | 在锁下**发起**一次后台作业就返回；作业自己的上下文是管理者的，不是那一轮的 |
 | `mcpEntry` 的状态 | `cli` / `err` / `tools` 三个字段各说一半 | 一个显式的状态字段，四态 |
 | `mcpToolProvider.Provide`（`agentkit/build/mcptools.go:201`） | 不可达就告警并跳过 | 「还在起」**不是**失败：不告警，不挂它的工具 |
 | `mcpManager.Warm`（`agentkit/build/mcpmanager.go:123`） | 没有 | 那个统一的后台作业 |
 | 代际 | 只有 `Refresh` 走的那条路 | ★ 作业落地时直接推进（`bumpGeneration`，`:105`；接的是 `agentkit/build/builder.go:107` `SetGenerationBump` → `main.go:727` 的 `agentConfig.bump`） |
-| `MCPServers`（`agentkit/build/mcpstatus.go:72`） | 三态 | 四态：`starting` 是新的一态 |
+| `MCPServers`（`agentkit/build/mcpstatus.go:77`） | 三态 | 四态：`starting` 是新的一态 |
 
 ### 13.6 ★ 三个坑
 

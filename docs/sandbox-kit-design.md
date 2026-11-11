@@ -39,12 +39,13 @@ openheron 交付为单个静态二进制（`Taskfile.yml:81`、`Taskfile.yml:248
   `POST /v2/run`（`api/v2_files.go:58`）是回合入口；它以 SSE 流应答
   （`api/v2_run.go:146`，`stream := s.newStream(c)`），边跑边 flush
   （`api/v2_run.go:155`、`api/v2_run.go:176`；`transport/sse.go:91`）。
-- **文件工具与 shell 工具**。`agentkit/build/snapshot.go:56` 建出同一个后端
-  `fsx.New(fsx.Config{Root: s.projectRoot, ExtraRoots: roots})`，
-  `agentkit/build/snapshot.go:60-61` 把同一个值交给两个角色：
-  `out.backend = local`（文件工具）与 `out.streamingShell = local`（`execute` 工具）。
-  shell 那侧跑的是 `exec.CommandContext(ctx, "/bin/sh", "-c", command)`，
-  并且 `cmd.Dir = s.root`（`agentkit/fsx/fsx.go:747`、`agentkit/fsx/fsx.go:750`）。
+- **文件工具与 shell 工具**。`agentkit/build/snapshot.go:72` 建出同一个后端
+  `fsx.New(fsx.Config{Root: s.projectRoot, ExtraRoots: roots, Shell: sh.Command(), ShellPathDir: sh.Dir})`，
+  `agentkit/build/snapshot.go:81-82` 把同一个值交给两个角色：
+  `out.backend = local`（文件工具）与 `out.shell = sh`（`execute` 工具的方言）。
+  `sh` 是启动时探测出来的（`agentkit/shell/shell.go:84`），shell 那侧跑的是
+  `exec.CommandContext(ctx, s.shell[0], args...)`，
+  并且 `cmd.Dir = s.root`（`agentkit/fsx/fsx.go:775`、`agentkit/fsx/fsx.go:778`）。
 - **模型 API**。`llm/common/model.go:66-72` 把 provider 配置交给 `acl.NewClient`。
 
 Web UI 在**二进制里**：`main.go:35` 内嵌了 `all:web/dist`，`main.go:425` 把它挂在 `/`。

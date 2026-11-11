@@ -1,5 +1,5 @@
 import { MoreHorizontalIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { useShallow } from "zustand/react/shallow"
 
 import { SettingsEntry } from "@/components/settings/settings-entry"
@@ -67,6 +67,7 @@ function SessionRow({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(entry.meta.title)
   const wrapRef = useRef<HTMLLIElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     if (!menuOpen) return
@@ -77,12 +78,57 @@ function SessionRow({
     return () => document.removeEventListener("mousedown", onDown)
   }, [menuOpen])
 
+  // ★ The editor shows the whole name. The row truncates a long title to
+  //   one line — but the editor is where the user reads the name before
+  //   they change it, and a half-visible name is a name they cannot check.
+  //   So the box wraps and grows to fit the text instead of hiding the
+  //   tail of it.
+  //
+  // ★ The height is the **border box**: Tailwind makes every element
+  //   border-box, so scrollHeight alone would clip the last line by the
+  //   border — and a clipped descender is a clipped name.
+  useLayoutEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = "auto"
+    const style = window.getComputedStyle(el)
+    const border =
+      parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth)
+    el.style.height = `${el.scrollHeight + border}px`
+  }, [draft, editing])
+
+  // ★ The editor opens on the whole name: the user renames it, they do
+  //   not retype it from scratch.
+  useEffect(() => {
+    if (!editing) return
+    const el = inputRef.current
+    if (!el) return
+    el.focus()
+    el.select()
+  }, [editing])
+
+  // ★ The draft is seeded from the name the row shows **when the editor
+  //   opens**, not from the name the row was mounted with. A session is
+  //   named by the server after its first question, so the mounted name
+  //   was still the placeholder — the editor opened on "New Chat" while
+  //   the sidebar already showed the real one, and pressing Enter
+  //   replaced the conversation's name with "New Chat".
+  const startEditing = () => {
+    setMenuOpen(false)
+    setDraft(entry.meta.title)
+    setEditing(true)
+  }
+
   const commit = async () => {
-    const t = draft.trim()
+    // ★ The title is one line: the sidebar shows one line, and a pasted
+    //   name may carry a newline of its own.
+    const t = draft.replace(/[\r\n]+/g, " ").trim()
     setEditing(false)
     setMenuOpen(false)
     if (!t || t === entry.meta.title) return
     await rename(entry.meta.threadId, t).catch(() => {
+      // ★ The rename failed and the store rolled the title back: the
+      //   editor opens on that name again, not on the placeholder.
       setDraft(entry.meta.title)
     })
   }
@@ -90,20 +136,27 @@ function SessionRow({
   if (editing) {
     return (
       <li ref={wrapRef} className="px-1 py-0.5">
-        <input
+        <textarea
+          ref={inputRef}
           autoFocus
           aria-label="Thread title"
+          rows={1}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => void commit()}
           onKeyDown={(e) => {
-            if (e.key === "Enter") void commit()
+            if (e.key === "Enter") {
+              // ★ The title is one line. A textarea would otherwise put a
+              //   newline in it, and the sidebar shows one line.
+              e.preventDefault()
+              void commit()
+            }
             if (e.key === "Escape") {
               setDraft(entry.meta.title)
               setEditing(false)
             }
           }}
-          className="border-ring bg-background w-full rounded-md border px-2 py-1 text-sm outline-none focus-visible:ring-2"
+          className="border-ring bg-background w-full resize-none overflow-hidden rounded-md border px-2 py-1 text-sm outline-none focus-visible:ring-2"
         />
       </li>
     )
@@ -150,10 +203,7 @@ function SessionRow({
           <MenuItem
             icon={<PencilIcon className="size-3.5" />}
             label="Rename"
-            onClick={() => {
-              setMenuOpen(false)
-              setEditing(true)
-            }}
+            onClick={startEditing}
           />
           <MenuItem
             icon={<Trash2Icon className="size-3.5" />}

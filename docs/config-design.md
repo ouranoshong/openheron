@@ -760,7 +760,7 @@ models:                            # ★ multiple models: several models under o
 |---|---|---|---|
 | `type` | `string` | ✅ | **只用于显示** —— 代码里没有按它分支的地方。它不能为空（`agentkit/spec/load.go:29-31`），但取值自由：`openai_compat` 是出厂模板写的（`agentkit/templates/files/llm/openai.yaml`） |
 | `base_url` | `string` | ✅ | 主机（可带前缀）。**不要写 `/chat/completions`** |
-| `api_key` | `string` | | `${ENV}` / `@file:`；空 = 无鉴权（自建网关、本地 ollama）。**`${ENV}` 未设不阻塞启动**，只记提醒，请求时返回 401 |
+| `api_key` | `string` | | `${ENV}` / `@file:`；空 = 无鉴权（自建网关、本地 ollama）。**`${ENV}` 未设不阻塞启动**，只记提醒，请求时返回 401。★ `@file:` 在 YAML 里**必须加引号** —— `@` 是保留字符，不加引号解析不过。★ 变量**设成空串**（`export X=`）与**未设**不是一回事：空串解析成空密钥，且**一条提醒都不记** —— `LookupEnv` 分支只分「有没有这个变量」（`agentkit/spec/expand.go:30`），空串是「有」 |
 | `timeout` | `Duration` | | 缺省 `5m`（`agentkit/build/provider.go:31-34`）。**不能依赖 SDK 隐式默认** —— 端点愿意想多久是它说了算 |
 | `header` | `map[string]string` | | ★ **解析了，然后没人读** —— 见下 |
 | `extra` | `map[string]any` | | 厂商私有请求体，**顶层键覆盖** |
@@ -1734,7 +1734,16 @@ allows: [read_issue, list_issues]
 是代码那份缺省清单（`agentkit/build/tools.go:79` `builtinAllowedTools`）。
 
 这一套就是 eino 的文件系统中间件：`ls`、`read_file`、`write_file`、`edit_file`、
-`glob`、`grep`、`execute`（`eino@v0.9.22/adk/middlewares/filesystem/filesystem.go:38-46`）。
+`glob`、`grep`（`eino@v0.9.22/adk/middlewares/filesystem/filesystem.go:38-46`）。
+
+★ **`execute` 不在中间件那一列里 —— 它是 openheron 自己的工具**
+（`agentkit/build/execute.go`）。中间件只在配置里带着 shell 时才挂一个 `execute`
+（`eino@v0.9.22/adk/middlewares/filesystem/filesystem.go:505`），而框架给它的描述只字
+不提这台机器上跑命令的是哪个 shell —— 写命令的是模型，模型得知道方言。所以中间件那个
+不挂（`agentkit/build/assemble.go:32` 的 `cfg.StreamingShell` 留 nil），换成自己的：
+描述是框架那段加上**这台机器的方言**（`agentkit/shell/shell.go` 启动时探测一次，
+先要 POSIX shell，一个都没有才退回 `cmd.exe`）。★ 名字仍然保留，provider 不得冒用
+（`agentkit/build/tools.go:121`）—— 名字没变，变的只是它归谁。
 
 ```
 ls  read_file  glob  grep
@@ -1749,7 +1758,7 @@ ls  read_file  glob  grep
 留一处点名例外的位置。
 
 ★ **这个文件里的 `allows:` 是加法的。** 写在这里的名字是加进代码那份缺省清单
-（`agentkit/build/tools.go:61`）—— 它从来拿不走一个名字：
+（`agentkit/build/tools.go:79`）—— 它从来拿不走一个名字：
 
 ```yaml
 # .openheron/tools/filesystem.yaml
@@ -1770,9 +1779,10 @@ agent 有没有这个**内置**工具。一个没点名 `write_file` 的 agent �
 （§6.3）。★ MCP 工具不在这份清单里：挂载一个 server 就拿到它的全部工具（§6.2），而它们要不要
 点头由那个 server 自己的 `allows:` 决定。
 
-★ **它说的工具名就是中间件自己的名字** —— `ls`、`read_file`、`write_file`、
-`edit_file`、`glob`、`grep`、`execute`（`eino@v0.9.22/adk/middlewares/filesystem/filesystem.go:38-46`）。
-它们同时也是暴露名，所以这里没有翻译，不像一个 MCP server 自己的词汇那样（§6.7）。
+★ **它说的工具名就是暴露给模型的名字** —— `ls`、`read_file`、`write_file`、
+`edit_file`、`glob`、`grep` 来自中间件（`eino@v0.9.22/adk/middlewares/filesystem/filesystem.go:38-46`），
+`execute` 来自 openheron 自己（见上）。它们同时也是暴露名，所以这里没有翻译，不像一个
+MCP server 自己的词汇那样（§6.7）。
 
 #### ★ 迁移（旧配置怎么办）
 
@@ -1984,7 +1994,7 @@ MCP 服务器的配置。**一个 server 一个文件**：
 超时**或它的档位**，下一轮就生效，不必重启。
 
 ★ **重载唯一要顾对的是客户端。** stdio 的子进程被拆掉、新的被拉起来；声明变了就换掉
-那个客户端（`agentkit/build/mcpmanager.go:215` `ensure`），而工具清单变了就通过配置
+那个客户端（`agentkit/build/mcpmanager.go:220` `ensure`），而工具清单变了就通过配置
 重载器用的同一个钩子推进代际（`agentkit/build/builder.go:67`、`:105`）。
 ★ 一个资源重建不出来的热分区，就是一个谎称自己是热的分区。
 

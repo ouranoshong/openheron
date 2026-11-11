@@ -212,7 +212,7 @@ func (p mcpToolProvider) Provide(ctx context.Context, env toolEnv) ([]tool.BaseT
 		if scfg == nil {
 			continue
 		}
-		cli, own, err := p.mgr.Tools(ctx, scfg)
+		cli, own, err := p.mgr.Tools(scfg)
 		if err != nil {
 			// ★ "On its way" is not a failure: the server is doing
 			//   exactly what it was asked to do, and the tools it brings

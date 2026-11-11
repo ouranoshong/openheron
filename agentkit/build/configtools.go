@@ -224,7 +224,7 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 		name: decl.ToolNameConfigTier,
 		desc: "Explain approval tiers. With a tool name, its tier (allow or ask). With an " +
 			"agent id, that agent's tools and the tier of each. With neither, the default " +
-			"tier and the whole exception list.",
+			"tier and the whole exception list. Answers use this turn's config snapshot.",
 		params: map[string]*schema.ParameterInfo{
 			"tool":  {Type: schema.String, Desc: "a tool name, e.g. write_file"},
 			"agent": {Type: schema.String, Desc: "an agent id, e.g. main"},
@@ -246,7 +246,7 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 			case in.Agent != "":
 				a, ok := cfg.Agents[in.Agent]
 				if !ok {
-					return nil, fmt.Errorf("no agent %q under agents/", in.Agent)
+					return nil, missingAgentError(svc, cfg, in.Agent)
 				}
 				type row struct {
 					Name string `json:"name"`
@@ -310,13 +310,22 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 				hot = cat.Hot()
 			}
 			out.Applied = hot && watchEnabled(cfg)
-			if !out.Applied {
+			switch {
+			case !out.Applied:
 				out.RequiresRestart = true
 				if hot {
 					out.Note = "hot reload is disabled; restart openheron to apply"
 				} else {
 					out.Note = "this section is not hot-reloaded; restart openheron to apply"
 				}
+			default:
+				// ★ "applied" means the watcher will pick the file up, not that
+				//   this turn can see it. A turn that has just written an agent
+				//   used to read applied:true as permission to verify it in the
+				//   same turn, and every config_* tool there answers from the
+				//   snapshot the turn started with — so the verification failed.
+				out.Note = "written to disk and picked up by hot reload on the next turn; " +
+					"config_* tools in this turn still read the snapshot it started with"
 			}
 			return out, nil
 		},
@@ -426,4 +435,38 @@ func orEmpty(list []string) []string {
 		return []string{}
 	}
 	return list
+}
+
+// missingAgentError explains an agent id that is not in cfg.Agents, for config_tier.
+//
+// ★ Every config_* tool answers from the **snapshot this turn was built
+//
+//	with**, not from the files on disk right now. Three different situations
+//	produce the same lookup miss, and they need three different answers:
+//
+//	  - The loader left the agent out of the tree (an undeclared model, a
+//	    broken subagent link). Its file is on disk, but the agent will never
+//	    run until the file is fixed — config_notices / config_validate say why.
+//	  - The file was written earlier in this turn by config_write. It is on
+//	    disk and valid, and it takes effect on the next turn.
+//	  - There is no such file at all: a typo, or an agent never created.
+//
+// ★ "no agent X under agents/" used to be the answer to all three. A turn
+//
+//	that had just written the file read that as "the write failed" and wrote
+//	it again; another turn delegated a lookup to a subagent to check whether
+//	the agent existed. Naming the case — and the next step — stops that loop.
+func missingAgentError(svc *spec.Service, cfg *spec.Config, id string) error {
+	if why := cfg.LeftOut()[id]; why != "" {
+		return fmt.Errorf("agent %q is on disk but left out of the configuration tree: %s. "+
+			"It will not appear next turn either — fix the file, then check config_notices "+
+			"and config_validate", id, why)
+	}
+	if svc.Has(spec.DirAgent, id+".md") {
+		return fmt.Errorf("agent %q is written to agents/%s.md but not in this turn's "+
+			"configuration yet: config_write takes effect on the next turn, and all config_* "+
+			"tools in a turn read the snapshot that turn started with. The write already "+
+			"succeeded — do not write it again; check it on the next turn", id, id)
+	}
+	return fmt.Errorf("no agent %q under agents/", id)
 }

@@ -98,17 +98,60 @@ func TestOnEndWithStreamOutputClosesItsCopy(t *testing.T) {
 	h := newTestHandler(&buf)
 
 	sr, sw := schema.Pipe[callbacks.CallbackOutput](1)
-	go func() {
-		_ = sw.Send(nil, nil)
-		sw.Close()
-	}()
 
 	ctx := h.OnStart(context.Background(), &callbacks.RunInfo{Component: "ChatModel"}, nil)
 	ctx = h.OnEndWithStreamOutput(ctx, &callbacks.RunInfo{Component: "ChatModel"}, sr)
 	_ = ctx
 
+	// ★ The write side is what reports the close, and asking it is what makes
+	//   this deterministic. A writer goroutine racing the handler used to decide
+	//   the outcome: when its send landed in the buffer before the handler
+	//   closed the reader, the buffered value came back with a nil error and
+	//   the assertion failed even though the handler had done its job. A send
+	//   into a closed reader is refused, a send into an open one is buffered.
+	if closed := sw.Send(nil, nil); !closed {
+		t.Fatal("expected the handler to close the reader it was given")
+	}
+	sw.Close()
+
 	if _, err := sr.Recv(); err == nil {
 		t.Fatal("expected the closed copy to stop delivering")
+	}
+}
+
+func TestOnEndWithStreamOutputLeavesTheComponentsStreamIntact(t *testing.T) {
+	var buf bytes.Buffer
+	h := newTestHandler(&buf)
+
+	sr, sw := schema.Pipe[callbacks.CallbackOutput](2)
+	go func() {
+		_ = sw.Send("first", nil)
+		_ = sw.Send("second", nil)
+		sw.Close()
+	}()
+
+	// The handler is registered per invocation: the global list is process-wide
+	// and grows for the rest of the run, and this test does not need it. The
+	// copy machinery is the same either way — the framework hands every handler
+	// a copy and keeps one for the component.
+	ctx := callbacks.InitCallbacks(context.Background(), &callbacks.RunInfo{
+		Component: components.ComponentOfChatModel,
+	}, h)
+	_, next := callbacks.OnEndWithStreamOutput[callbacks.CallbackOutput](ctx, sr)
+	defer next.Close()
+
+	// Closing the handler's copy must not cost the component its values.
+	var got []string
+	for {
+		v, err := next.Recv()
+		if err != nil {
+			break
+		}
+		s, _ := v.(string)
+		got = append(got, s)
+	}
+	if len(got) != 2 || got[0] != "first" || got[1] != "second" {
+		t.Fatalf("expected the component's copy to carry both values, got %v", got)
 	}
 }
 

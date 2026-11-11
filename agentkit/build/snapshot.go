@@ -16,6 +16,7 @@ import (
 
 	"github.com/ouranoshong/openheron/agentkit/fsx"
 	"github.com/ouranoshong/openheron/agentkit/obs/httplog"
+	"github.com/ouranoshong/openheron/agentkit/shell"
 	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"github.com/ouranoshong/openheron/llm/common"
@@ -39,9 +40,9 @@ type snapshot struct {
 }
 
 type heavyDeps struct {
-	backend        fsapi.Backend
-	streamingShell fsapi.StreamingShell
-	tools          []tool.BaseTool
+	backend fsapi.Backend
+	shell   shell.Shell
+	tools   []tool.BaseTool
 }
 
 func (s *snapshot) heavyDepsOf(ctx context.Context) (heavyDeps, error) {
@@ -60,12 +61,30 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 	if dir, ok := ResolveSkillsDir(s.log); ok {
 		roots = append(roots, dir)
 	}
-	local, err := fsx.New(fsx.Config{Root: s.projectRoot, ExtraRoots: roots})
+
+	// ★ The shell is decided **once**, here: the execute tool's description
+	//   tells the model which dialect to write, and the backend runs the
+	//   command — so the two have to be the same answer, and it has to be
+	//   the machine's answer at startup.
+	sh := shell.Detect()
+	s.log.Info("[agent] the execute tool runs commands with this shell", "shell", sh.String())
+
+	local, err := fsx.New(fsx.Config{
+		Root:         s.projectRoot,
+		ExtraRoots:   roots,
+		Shell:        sh.Command(),
+		ShellPathDir: sh.Dir,
+	})
 	if err != nil {
 		return out, fmt.Errorf("build filesystem backend: %w", err)
 	}
 	out.backend = local
-	out.streamingShell = local
+	out.shell = sh
+
+	// ★ The search engine is decided with the backend, and it is worth a
+	//   line in the log: a machine whose grep tool runs on the built-in
+	//   engine answers the same questions, but not with the same edges.
+	s.log.Info("[agent] the grep tool searches with this engine", "engine", local.SearchEngine())
 
 	tools, err := s.tools.Build(ctx, toolEnv{
 		cfg:         s.cfg,
@@ -78,7 +97,14 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 	if err != nil {
 		return out, err
 	}
-	out.tools = tools
+	// ★ The execute tool is **ours** (see execute.go): the framework's
+	//   description does not say which shell the command runs in, and the
+	//   model is the one who writes the command.
+	exec, err := newExecuteTool(local, executeToolDesc(sh))
+	if err != nil {
+		return out, fmt.Errorf("build the execute tool: %w", err)
+	}
+	out.tools = append(tools, exec)
 	return out, nil
 }
 

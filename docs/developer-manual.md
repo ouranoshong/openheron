@@ -74,7 +74,7 @@ one. The measured internal import graph:
 
 | Layer | Packages | Internal dependencies |
 |---|---|---|
-| **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `agentkit/fsx` `llm/common` `webui` | none |
+| **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `agentkit/fsx` `agentkit/shell` `llm/common` `webui` | none |
 | **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` none; `storage`→`contract`; `kb`→`obs`,`persist`; `spec`→`obs`,`decl`,`templates`,`persist`; `emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
 | **L2** | `agentkit/build` `agentkit/run` `storage/filestore` `storage/memarbit` `transport` `llm` `initcfg` | see architecture.md §2 |
 | **L3** | `api` | almost all of them |
@@ -117,10 +117,10 @@ validation, reloading, writing).
 
 ★ **The vocabulary the two halves share lives in `decl` too, and that is a
 dependency-direction fact, not a convenience.** The built-in tool names
-(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:347`) are read by **both** ends:
+(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:349`) are read by **both** ends:
 the loader checks the names an agent's `tools:` list mentions against them, and the
 builder refuses a provider that claims one of them (`reservedToolNames`,
-`agentkit/build/tools.go:75`). Neither end may import the other — the loader sits
+`agentkit/build/tools.go:113`). Neither end may import the other — the loader sits
 below the builder — so the list cannot live in either of them: it lives **below both**,
 in the leaf package. ★ A second copy would be two lists that drift, and the drift
 would read as "that tool does not exist".
@@ -175,15 +175,15 @@ Recomputing either one is the same mistake twice.
    use at all — and wraps **every tool the tier table does not name** behind an
    approval. ★ The two are **different questions**: the allow-list is per agent, the
    tier table is shared by every agent. ★ The default tier is `ask`, so the exceptions
-   are the named ones: the built-in tools the code knows (`agentkit/build/tools.go:62`)
+   are the named ones: the built-in tools the code knows (`agentkit/build/tools.go:79`)
    and the ones a file's own `allows:` lists. You write no permission code.
 
 5. **Do not collide with a reserved name.** The names live in `decl.BuiltinToolNames`
-   (`agentkit/spec/decl/decl.go:347`): `ls` `read_file` `write_file` `edit_file` `glob`
+   (`agentkit/spec/decl/decl.go:349`): `ls` `read_file` `write_file` `edit_file` `glob`
    `grep` `execute` `task` `write_todos` `skill`. A collision fails at `Build` time.
    ★ **They live in `decl` and not in the build package because both halves need
    them**: the builder refuses a provider that claims one of these names
-   (`reservedToolNames`, `agentkit/build/tools.go:75`), and the loader checks the
+   (`reservedToolNames`, `agentkit/build/tools.go:113`), and the loader checks the
    names an agent's `tools:` list mentions. Neither may import the other, so the list
    lives below both.
    The tool name is also the key in the tier table — a collision would point the
@@ -238,20 +238,28 @@ For a developer who has to debug it:
 - **One client per server.** The manager holds one entry per server
   (`agentkit/build/mcpmanager.go:42`), and the entry owns that server's client,
   its listing and its per-server mutex.
+- **The child's life belongs to the manager, not to the caller.** The context that
+  spawns the child is derived from the **manager's** lifetime
+  (`agentkit/build/mcpmanager.go:425` `dispatch`), not from the caller's. ★ The
+  caller is a **turn**, and a turn ends: the run cancels the context it hands to
+  the builder (`agentkit/run/runtime.go:397`), and `exec.CommandContext` kills the
+  child with it — so the tool stays in the table and can no longer answer
+  (`transport error: failed to write request`). ⇒ `Tools` and `dispatch` take no
+  context at all: who owns the child is not the caller's to decide.
 - **The start is single-flight.** `ensure`
-  (`agentkit/build/mcpmanager.go:215`) starts the client under a lock, so the
+  (`agentkit/build/mcpmanager.go:220`) starts the client under a lock, so the
   provider and the `/mcps` panel asking at the same moment get the same client
   and the same child process. Two child processes for one server would make the
   tools the model sees depend on which process answered.
 - **A crashed child is started again on the next call.** `markBroken`
-  (`agentkit/build/mcpmanager.go:290`) closes the client when the pipe broke,
+  (`agentkit/build/mcpmanager.go:304`) closes the client when the pipe broke,
   and the next call starts a new one. ★ A call that runs out of time is **not**
   a broken connection: the server may simply be slow, so a deadline gives up
   without tearing the client down (`agentkit/build/mcptools.go:358`).
 - **A failed start does not hold the build.** The teardown of a failed start
   waits for the child to exit, and a child that is still installing its own
   package does not exit because its stdin closed — so `startStdioClient`
-  (`agentkit/build/mcpmanager.go:432`) kills the child
+  (`agentkit/build/mcpmanager.go:457`) kills the child
   (`agentkit/build/mcpmanager.go:485`) and bounds the teardown
   (`agentkit/build/mcpmanager.go:501`). ★ A build waits for a server, not for a
   server's corpse: without the kill, a server that cannot be started takes the
@@ -260,14 +268,14 @@ For a developer who has to debug it:
 - **The start is a background job, and every server has a state.** The manager
   starts the servers in the background (`Warm`, `agentkit/build/mcpmanager.go:123`)
   and each entry carries one of four states (`mcpState`,
-  `agentkit/build/mcpmanager.go:297`): `not_started`, `starting`, `ready` or
+  `agentkit/build/mcpmanager.go:311`): `not_started`, `starting`, `ready` or
   `failed`. ★ `Tools` never waits — it answers `errMCPStarting` while the job is
   in flight, and the provider skips the server **without** a warning: a server
   on its way is not a broken server. ★ The tools a server brings join the
   **next** turn: the job compares the listing before and after and moves the
   generation when it changed (`runStart`, `agentkit/build/mcpmanager.go:450`).
   ★ A failed start is retried, but not before the file's own `timeout:` has
-  passed (`mcpStartTimeout`, `agentkit/build/mcpmanager.go:328`) — a server that
+  passed (`mcpStartTimeout`, `agentkit/build/mcpmanager.go:342`) — a server that
   cannot start must not be spawned in a loop.
 - **The tool list is re-listed when a turn asks for it**, and the previous
   listing is older than 30 seconds (`agentkit/build/mcpmanager.go:36`,
@@ -280,6 +288,33 @@ For a developer who has to debug it:
   uses (`agentkit/build/builder.go:67`). The refresh happens before the turn's
   agent is assembled (`agentkit/build/builder.go:105`), because the batch is
   built once per generation — a re-list inside the build would never run.
+
+#### The execute tool — ours, not the framework's
+
+★ **The framework mounts an `execute` tool of its own**, but only when the config
+carries a shell (`eino@v0.9.22/adk/middlewares/filesystem/filesystem.go:505`), and its
+description says nothing about **which shell this machine runs commands with**. The
+model is the one who writes the command, so the description is the only place the
+dialect can be stated — and a description that says "sandbox environment" and nothing
+else is how a Windows agent ends up running `ls -la` in `cmd.exe`.
+
+So openheron mounts its own: `agentkit/build/execute.go` builds it with
+`utils.InferStreamTool`, and `agentkit/build/assemble.go:32` leaves
+`cfg.StreamingShell` **nil** so the framework's is not mounted too — two tools with
+one name is a model that calls the wrong one. ★ The streaming body is the framework's,
+copied: the model reads the output, so the sentences it ends with ("[Command failed
+with exit code 2]", "[Command executed successfully with no output]") are part of the
+contract.
+
+★ **The shell is decided once, when the process starts** — `agentkit/shell`
+(`agentkit/shell/shell.go:84`): a POSIX shell first (PATH's `sh`/`bash`, then Git for
+Windows and MSYS2, then the WSL launcher), each candidate checked by running one
+trivial command, and `cmd.exe /c` when none of them runs. The description names the
+same shell the backend runs with (`agentkit/shell/shell.go:230`), because the two have
+to be the same answer — the description tells the model which dialect to write, and
+the backend runs what the model wrote. ★ The decision is not a configuration key:
+a knob that turns the description and the runner apart is a knob that makes the
+model wrong.
 
 ### 3.2 Adding a new configuration partition
 
@@ -353,8 +388,8 @@ definition — there is no `enabled` key.
 - **Loaded** by `loadMCP` (`agentkit/spec/load.go:329`): one file, one server.
 - ★ **"Hot" for this partition means the client is rebuilt.** The declaration is the
   server's identity, so a changed declaration means a changed server: the old client
-  is torn down and a new one is started (`agentkit/build/mcpmanager.go:215`), keyed on
-  the declaration's fingerprint (`agentkit/build/mcpmanager.go:330`). ★ A hot partition
+  is torn down and a new one is started (`agentkit/build/mcpmanager.go:220`), keyed on
+  the declaration's fingerprint (`agentkit/build/mcpmanager.go:344`). ★ A hot partition
   whose resources are not rebuilt lies about being hot.
 - **The write gate** refuses a name that could not be read back:
   `validateFileName` (`agentkit/spec/write.go:166`) accepts only a `<server>.yaml` whose
@@ -1305,7 +1340,8 @@ cd web && bun run smoke:config             # config_write's approval round trip 
 | `storage/filestore` | Append writes, atomic rewrites, checkpoints, pending-approval persistence |
 | `transport` | Event types, attribution, per-agent usage accounting |
 | `initcfg` | The completeness of the factory templates |
-| `agentkit/fsx` | The write boundary (including symlink escapes), the `ls`/`glob`/`grep` caps, and absolute glob patterns |
+| `agentkit/fsx` | The write boundary (including symlink escapes), the `ls`/`glob`/`grep` caps, absolute glob patterns, and the built-in search engine that stands in for `ripgrep` |
+| `agentkit/shell` | Which shell the `execute` tool runs commands with, and the dialect the tool's description tells the model |
 
 ★ **Run the race detector too**: `task test-race` (`go test -race ./...`). The plain
   suite is green while the detector is red more often than one would like — a race
@@ -1388,7 +1424,7 @@ do not touch" assertions.
 
 ### 5.6 E2E
 
-`task test-e2e` → `playwright test`, **15 specs, 194 cases**: `agents` `attachments` `chat`
+`task test-e2e` → `playwright test`, **15 specs, 196 cases**: `agents` `attachments` `chat`
 `compaction` `composer-autocomplete` `composer-meta` `history` `mcps` `motion` `multi-agent`
 `reattach` `scroll` `session-busy` `settings` `theme`.
 
@@ -1608,7 +1644,7 @@ someone measures that the default misses something.
 | Startup fails with `disabled_tools` was renamed to `tools` | ★ The two mean **opposite** things — one removed tools, the other names them. Delete `disabled_tools` and list the tools the agent should have in `tools:` (`agentkit/spec/load.go:99`) |
 | A notice says `tools` names MCP tools | ★ `tools` does not name MCP tools, and `mcps:` is what mounts a server **and** grants its tools: drop the `mcp__*` lines and put the server in `mcps:` (`agentkit/spec/load.go:836`) |
 | An agent cannot call an MCP tool | Is the server in that agent's `mcps:`? Mounting **is** the grant — the agent's `tools:` list has nothing to do with it (`agentkit/spec/decl/decl.go:148`) |
-| A notice says `tools` names a tool that does not exist | The built-in tools are the ones in `decl.BuiltinToolNames` (`agentkit/spec/decl/decl.go:347`); a provider's tool exists only when its file under `tools/` is written |
+| A notice says `tools` names a tool that does not exist | The built-in tools are the ones in `decl.BuiltinToolNames` (`agentkit/spec/decl/decl.go:349`); a provider's tool exists only when its file under `tools/` is written |
 | A notice says `tools` names the `skill` tool but `skills` is empty | The configuration is legal but self-contradictory: name the skill in `skills:`, or drop `skill` from `tools:` |
 | An agent cannot call a tool | `GET /v2/agents/:agentId` for the effective tool table; then read the tool's `reason` — `tools`, or the default `ask` tier, which asks |
 | An agent has **no** tools at all | ★ The tool list is an allow-list and it **defaults to none**: an absent `tools:` means no tool. List the tools the agent should have |

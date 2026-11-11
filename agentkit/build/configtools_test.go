@@ -468,3 +468,77 @@ func TestTheAgentSeesOnlyTheConfigToolsItNames(t *testing.T) {
 		}
 	}
 }
+
+// ★ A turn that has just created an agent with config_write used to be told
+//
+//	"no agent X under agents/". It read that as a failed write, wrote the file
+//	again, polled config_get and even delegated a lookup to a subagent. All
+//	config_* tools in a turn hold the snapshot that turn started with, so the
+//	answer has to name the timing instead of claiming the agent is absent.
+func TestConfigTierNamesAJustWrittenAgentAsPending(t *testing.T) {
+	_, _, tools := configToolEnv(t)
+
+	write := callToolJSON[struct {
+		Path string `json:"path"`
+		Note string `json:"note"`
+	}](t, tools, decl.ToolNameConfigWrite,
+		`{"path":"agents/brand-new.md","content":"---\nmodel: openai/fast\ntools: [ls]\n---\nbody\n"}`)
+	if write.Path != "agents/brand-new.md" {
+		t.Fatalf("the file was not written: %+v", write)
+	}
+	for _, want := range []string{"next turn", "snapshot"} {
+		if !strings.Contains(write.Note, want) {
+			t.Fatalf("a successful write must say when it takes effect (%q): %q", want, write.Note)
+		}
+	}
+
+	_, err := callTool(t, tools, decl.ToolNameConfigTier, `{"agent":"brand-new"}`)
+	if err == nil {
+		t.Fatal("the agent is not in this turn's configuration; the lookup must say so")
+	}
+	for _, want := range []string{"brand-new", "next turn", "do not write it again"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the answer must say %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), `no agent "brand-new" under agents/`) {
+		t.Fatalf("the answer must not claim the agent is absent: %v", err)
+	}
+}
+
+// ★ A file can be on disk and still never run: an undeclared model leaves the
+//
+//	agent out of the settled tree. Promising "next turn" there would be a
+//	second wrong answer, so missingAgentError checks LeftOut before the disk.
+func TestMissingAgentErrorSeparatesLeftOutFromAbsent(t *testing.T) {
+	svc, cfg, _ := configToolEnv(t)
+
+	err := missingAgentError(svc, cfg, "ghost")
+	if err == nil || !strings.Contains(err.Error(), `no agent "ghost" under agents/`) {
+		t.Fatalf("a name with no file must be reported plainly: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(svc.Root(), "agents", "broken.md"),
+		[]byte("---\nmodel: openai/missing\ntools: [ls]\n---\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := svc.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.LeftOut()["broken"] == "" {
+		t.Fatal("the loader must have left the agent with an undeclared model out")
+	}
+	err = missingAgentError(svc, reloaded, "broken")
+	if err == nil {
+		t.Fatal("a left-out agent must be reported")
+	}
+	for _, want := range []string{"left out", "will not appear next turn", "config_notices"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the answer must say %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "takes effect on the next turn") {
+		t.Fatalf("a broken file never takes effect; do not promise the next turn: %v", err)
+	}
+}
