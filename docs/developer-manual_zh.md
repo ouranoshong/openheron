@@ -212,16 +212,22 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
 - **一个服务器一个客户端。** 管理器为每个服务器持有一个条目
   （`agentkit/build/mcpmanager.go:42`），这个条目拥有该服务器的客户端、它的工具
   列表，以及它那把按服务器的互斥锁。
-- **启动是单飞的。** `ensure`（`agentkit/build/mcpmanager.go:215`）在锁下启动
+- **子进程的生命归管理器，不归调用方。** 拉起子进程的那个上下文由**管理者的生命周期**
+  派生（`agentkit/build/mcpmanager.go:425` `dispatch`），不是调用方的。★ 调用方是
+  **一轮**，而一轮会结束：运行期取消它交给 builder 的那个上下文
+  （`agentkit/run/runtime.go:397`），`exec.CommandContext` 于是把子进程一起杀掉 ——
+  那个工具还在表里，却再也答不上话（`transport error: failed to write request`）。
+  ⇒ `Tools` 与 `dispatch` 都不收上下文：谁拥有这个子进程，不是调用方该决定的事。
+- **启动是单飞的。** `ensure`（`agentkit/build/mcpmanager.go:220`）在锁下启动
   客户端，所以同时来问的 provider 与 `/mcps` 面板拿到的是同一个客户端、同一个子
   进程。★ 一个服务器跑两个子进程，会让模型看到的工具取决于哪个进程先应答。
 - **崩掉的子进程会在下一次调用时重新拉起。** 管道断了时 `markBroken`
-  （`agentkit/build/mcpmanager.go:290`）关掉客户端，下一次调用重新起一个。
+  （`agentkit/build/mcpmanager.go:304`）关掉客户端，下一次调用重新起一个。
   ★ **超时不是连接断了**：服务器可能只是慢，所以截止时间到了就放弃，不会拆掉
   客户端（`agentkit/build/mcptools.go:358`）。
 - **起不来的服务器不会拖住装配。** 启动失败之后的拆解要等子进程退出，而一个还在
   装自己依赖的子进程不会因为 stdin 关了就退出 —— 所以 `startStdioClient`
-  （`agentkit/build/mcpmanager.go:432`）先杀掉子进程
+  （`agentkit/build/mcpmanager.go:457`）先杀掉子进程
   （`agentkit/build/mcpmanager.go:485`），拆解也有上限
   （`agentkit/build/mcpmanager.go:501`）。
   ★ 装配等的是一个 server，不是一个 server 的尸体：不杀它，一个起不来的服务器会
@@ -229,13 +235,13 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
   一个既不点名是哪个 server、也不说为什么的症状。
 - **启动是一个后台作业，每台 server 各自有一个状态。** 管理器在后台起那些服务器
   （`Warm`，`agentkit/build/mcpmanager.go:123`），每个条目带四态之一
-  （`mcpState`，`agentkit/build/mcpmanager.go:297`）：`not_started`、`starting`、
+  （`mcpState`，`agentkit/build/mcpmanager.go:311`）：`not_started`、`starting`、
   `ready`、`failed`。★ `Tools` 从不等 —— 作业在飞时它答 `errMCPStarting`，
   而 provider 跳过那台 server 而且**不告警**：正在起不等于坏了。
   ★ 一台 server 带来的工具在**下一轮**进来：作业拿落地前后的清单比，
   变了就推进代际（`runStart`，`agentkit/build/mcpmanager.go:450`）。
   ★ 失败的启动会重试，但不会早于文件自己的 `timeout:`
-  （`mcpStartTimeout`，`agentkit/build/mcpmanager.go:328`）——
+  （`mcpStartTimeout`，`agentkit/build/mcpmanager.go:342`）——
   起不来的 server 不能被拉成热循环。
 - **工具列表在一轮来要时重新列出**，条件是上一次列出的时间超过 30 秒
   （`agentkit/build/mcpmanager.go:36`，`mcpRelistInterval`）。
@@ -327,8 +333,8 @@ successfully with no output]」）是契约的一部分。
 - **装载**由 `loadMCP`（`agentkit/spec/load.go:329`）完成：一个文件，一个服务器。
 - ★ **这个分区的「热」意味着客户端会被重建。** 声明就是服务器的身份，所以声明变了
   就是服务器变了：旧客户端被拆掉，重新起一个新的
-  （`agentkit/build/mcpmanager.go:215`），依据是那份声明的指纹
-  （`agentkit/build/mcpmanager.go:330`）。★ 一个资源没有跟着重建的热分区，就是在
+  （`agentkit/build/mcpmanager.go:220`），依据是那份声明的指纹
+  （`agentkit/build/mcpmanager.go:344`）。★ 一个资源没有跟着重建的热分区，就是在
   撒谎说自己热。
 - **写入闸门**拒绝一个读不回来的名字：`validateFileName`
   （`agentkit/spec/write.go:166`）只接受 `<server>.yaml` 且服务器名合法

@@ -136,7 +136,7 @@ func (m *mcpManager) Warm(cfg *spec.Config) {
 			if scfg == nil {
 				continue
 			}
-			m.entry(name).dispatch(m.ctx, scfg, m.start)
+			m.entry(name).dispatch(scfg, m.start)
 		}
 	}()
 }
@@ -149,7 +149,7 @@ func (m *mcpManager) entry(name string) *mcpEntry {
 		// ★ The entry tells the manager when the surface changed: the
 		//   job that brings a server up does not know what a generation
 		//   is, and the manager does.
-		e = &mcpEntry{name: name, onChange: m.bumpGeneration, log: m.log}
+		e = &mcpEntry{name: name, onChange: m.bumpGeneration, log: m.log, life: m.ctx}
 		m.entries[name] = e
 	}
 	return e
@@ -175,9 +175,14 @@ func (m *mcpManager) entry(name string) *mcpEntry {
 //	for one server would be worse than a slow start — the two could
 //	report different tool lists, and the tools the model sees would
 //	depend on which process answered.
-func (m *mcpManager) Tools(ctx context.Context, cfg *decl.MCPServerCfg) (mcpClient, []string, error) {
+//
+// ★ It takes **no context**, and that is the point: the client it hands
+//
+//	out owns a child process, and a child process may not be owned by a
+//	caller that goes away. The caller is a turn, and a turn ends.
+func (m *mcpManager) Tools(cfg *decl.MCPServerCfg) (mcpClient, []string, error) {
 	e := m.entry(cfg.Name)
-	e.dispatch(ctx, cfg, m.start)
+	e.dispatch(cfg, m.start)
 	return e.view()
 }
 
@@ -251,6 +256,15 @@ func (m *mcpManager) Close() {
 type mcpEntry struct {
 	name string
 	log  *slog.Logger
+
+	// life is the context that bounds the child process.
+	//
+	// ★ It is the **manager's** lifetime, and never the caller's: the
+	//
+	//	caller is a turn (or a panel request), and a caller that goes
+	//	away would take the child with it — leaving a tool that
+	//	answers "file already closed" for the rest of the session.
+	life context.Context
 
 	// mu guards the entry's own state.
 	mu          sync.Mutex
@@ -400,7 +414,15 @@ func (e *mcpEntry) stale() bool {
 //
 //	stale, and a hot partition whose resources are not rebuilt lies about
 //	being hot.
-func (e *mcpEntry) dispatch(ctx context.Context, cfg *decl.MCPServerCfg,
+//
+// ★ It takes **no context** either, and that is the trap it exists to
+//
+//	remove: the child's life used to come from the caller, and the
+//	caller is a turn. A turn that ends cancelled the context, the
+//	child died with it, and every later call to that server's tools
+//	answered "transport error: failed to write request" — a tool that
+//	was still offered, and could not be called.
+func (e *mcpEntry) dispatch(cfg *decl.MCPServerCfg,
 	start func(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg, log *slog.Logger) (mcpClient, error)) {
 
 	e.startMu.Lock()
@@ -428,7 +450,10 @@ func (e *mcpEntry) dispatch(ctx context.Context, cfg *decl.MCPServerCfg,
 		e.close()
 	}
 
-	life, cancel := context.WithCancel(ctx)
+	// ★ The child's life is the **manager's**, not the caller's: the
+	//   child ends when the entry is closed, when it breaks, or when
+	//   the process goes away — and not one moment earlier.
+	life, cancel := context.WithCancel(e.life)
 	e.mu.Lock()
 	e.cancel = cancel
 	e.state = mcpStarting

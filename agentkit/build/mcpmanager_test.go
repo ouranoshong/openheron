@@ -125,7 +125,7 @@ func TestTwoCallersAskingForTheSameServerGetOneClient(t *testing.T) {
 			defer wg.Done()
 			// ★ "On its way" is an answer, not a failure: the callers
 			//   that arrive while the job is in flight are told so.
-			if _, _, err := m.Tools(context.Background(), cfg); err != nil &&
+			if _, _, err := m.Tools(cfg); err != nil &&
 				!errors.Is(err, errMCPStarting) {
 				t.Errorf("Tools: %v", err)
 			}
@@ -145,7 +145,7 @@ func TestACrashedChildIsStartedAgainOnTheNextCall(t *testing.T) {
 	m := newFakeMCPManager(&starts, cli)
 	cfg := mcpCfg("github")
 
-	if _, _, err := m.Tools(context.Background(), cfg); err != nil &&
+	if _, _, err := m.Tools(cfg); err != nil &&
 		!errors.Is(err, errMCPStarting) {
 		t.Fatalf("Tools: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestACrashedChildIsStartedAgainOnTheNextCall(t *testing.T) {
 	if !cli.isClosed() {
 		t.Fatal("the dead client must be closed")
 	}
-	if _, _, err := m.Tools(context.Background(), cfg); err != nil &&
+	if _, _, err := m.Tools(cfg); err != nil &&
 		!errors.Is(err, errMCPStarting) {
 		t.Fatalf("Tools: %v", err)
 	}
@@ -172,14 +172,14 @@ func TestAChangedDeclarationReplacesTheClient(t *testing.T) {
 	m := newFakeMCPManager(&starts, cli)
 
 	cfg := mcpCfg("github")
-	if _, _, err := m.Tools(context.Background(), cfg); err != nil &&
+	if _, _, err := m.Tools(cfg); err != nil &&
 		!errors.Is(err, errMCPStarting) {
 		t.Fatalf("Tools: %v", err)
 	}
 	waitForMCPSettled(t, m, "github")
 
 	changed := mcpCfg("github", func(c *decl.MCPServerCfg) { c.Command = "other" })
-	if _, _, err := m.Tools(context.Background(), changed); err != nil &&
+	if _, _, err := m.Tools(changed); err != nil &&
 		!errors.Is(err, errMCPStarting) {
 		t.Fatalf("Tools: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestAChangedToolListIsReportedByTheRefresh(t *testing.T) {
 		MCPs:   decl.MCPFiles{"github": mcpCfg("github")},
 		Agents: map[string]*decl.Agent{spec.DefaultAgentID: {ID: spec.DefaultAgentID, MCPServers: []string{"github"}}},
 	}
-	if _, _, err := m.Tools(context.Background(), cfg.MCPs["github"]); err != nil &&
+	if _, _, err := m.Tools(cfg.MCPs["github"]); err != nil &&
 		!errors.Is(err, errMCPStarting) {
 		t.Fatalf("Tools: %v", err)
 	}
@@ -300,20 +300,20 @@ func TestAnUnreachableServerSaysSoAndKeepsTheOtherServersAlive(t *testing.T) {
 		return cli, nil
 	}
 
-	if _, _, err := m.Tools(context.Background(), mcpCfg("broken")); err != nil &&
+	if _, _, err := m.Tools(mcpCfg("broken")); err != nil &&
 		!errors.Is(err, errMCPStarting) {
 		t.Fatalf("Tools: %v", err)
 	}
 	waitForMCPSettled(t, m, "broken")
-	if _, _, err := m.Tools(context.Background(), mcpCfg("broken")); err == nil {
+	if _, _, err := m.Tools(mcpCfg("broken")); err == nil {
 		t.Fatal("an unreachable server must report the failure")
 	}
-	if _, _, err := m.Tools(context.Background(), mcpCfg("github")); err != nil &&
+	if _, _, err := m.Tools(mcpCfg("github")); err != nil &&
 		!errors.Is(err, errMCPStarting) {
 		t.Fatalf("Tools: %v", err)
 	}
 	waitForMCPSettled(t, m, "github")
-	if _, own, err := m.Tools(context.Background(), mcpCfg("github")); err != nil {
+	if _, own, err := m.Tools(mcpCfg("github")); err != nil {
 		t.Fatalf("Tools: %v", err)
 	} else if len(own) != 1 {
 		t.Fatalf("tools = %v, want the reachable server's tool", own)
@@ -387,7 +387,7 @@ func TestTheSilentServerDoesNotTakeTheOthersDownWithIt(t *testing.T) {
 	//   passed.
 	defer m.Close()
 	begin := time.Now()
-	_, _, err = m.Tools(context.Background(), silentMCPCfg(t))
+	_, _, err = m.Tools(silentMCPCfg(t))
 	elapsed := time.Since(begin)
 	// ★ The manager answers at once: the server is on its way, and the
 	//   caller is not held by it.
@@ -406,12 +406,12 @@ func TestTheSilentServerDoesNotTakeTheOthersDownWithIt(t *testing.T) {
 		c.Env = map[string]string{mcpServerEnv: "1"}
 		c.Timeout = decl.MCPDuration{Value: 30 * time.Second}
 	})
-	if _, _, err := m.Tools(context.Background(), good); err != nil &&
+	if _, _, err := m.Tools(good); err != nil &&
 		!errors.Is(err, errMCPStarting) {
 		t.Fatalf("Tools: %v", err)
 	}
 	waitForMCPSettled(t, m, "fake")
-	if _, own, err := m.Tools(context.Background(), good); err != nil {
+	if _, own, err := m.Tools(good); err != nil {
 		t.Fatalf("Tools: %v", err)
 	} else if len(own) == 0 {
 		t.Fatal("the reachable server must still offer its tools")

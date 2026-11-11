@@ -1994,7 +1994,7 @@ MCP 服务器的配置。**一个 server 一个文件**：
 超时**或它的档位**，下一轮就生效，不必重启。
 
 ★ **重载唯一要顾对的是客户端。** stdio 的子进程被拆掉、新的被拉起来；声明变了就换掉
-那个客户端（`agentkit/build/mcpmanager.go:215` `ensure`），而工具清单变了就通过配置
+那个客户端（`agentkit/build/mcpmanager.go:220` `ensure`），而工具清单变了就通过配置
 重载器用的同一个钩子推进代际（`agentkit/build/builder.go:67`、`:105`）。
 ★ 一个资源重建不出来的热分区，就是一个谎称自己是热的分区。
 

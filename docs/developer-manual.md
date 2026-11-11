@@ -238,20 +238,28 @@ For a developer who has to debug it:
 - **One client per server.** The manager holds one entry per server
   (`agentkit/build/mcpmanager.go:42`), and the entry owns that server's client,
   its listing and its per-server mutex.
+- **The child's life belongs to the manager, not to the caller.** The context that
+  spawns the child is derived from the **manager's** lifetime
+  (`agentkit/build/mcpmanager.go:425` `dispatch`), not from the caller's. ★ The
+  caller is a **turn**, and a turn ends: the run cancels the context it hands to
+  the builder (`agentkit/run/runtime.go:397`), and `exec.CommandContext` kills the
+  child with it — so the tool stays in the table and can no longer answer
+  (`transport error: failed to write request`). ⇒ `Tools` and `dispatch` take no
+  context at all: who owns the child is not the caller's to decide.
 - **The start is single-flight.** `ensure`
-  (`agentkit/build/mcpmanager.go:215`) starts the client under a lock, so the
+  (`agentkit/build/mcpmanager.go:220`) starts the client under a lock, so the
   provider and the `/mcps` panel asking at the same moment get the same client
   and the same child process. Two child processes for one server would make the
   tools the model sees depend on which process answered.
 - **A crashed child is started again on the next call.** `markBroken`
-  (`agentkit/build/mcpmanager.go:290`) closes the client when the pipe broke,
+  (`agentkit/build/mcpmanager.go:304`) closes the client when the pipe broke,
   and the next call starts a new one. ★ A call that runs out of time is **not**
   a broken connection: the server may simply be slow, so a deadline gives up
   without tearing the client down (`agentkit/build/mcptools.go:358`).
 - **A failed start does not hold the build.** The teardown of a failed start
   waits for the child to exit, and a child that is still installing its own
   package does not exit because its stdin closed — so `startStdioClient`
-  (`agentkit/build/mcpmanager.go:432`) kills the child
+  (`agentkit/build/mcpmanager.go:457`) kills the child
   (`agentkit/build/mcpmanager.go:485`) and bounds the teardown
   (`agentkit/build/mcpmanager.go:501`). ★ A build waits for a server, not for a
   server's corpse: without the kill, a server that cannot be started takes the
@@ -260,14 +268,14 @@ For a developer who has to debug it:
 - **The start is a background job, and every server has a state.** The manager
   starts the servers in the background (`Warm`, `agentkit/build/mcpmanager.go:123`)
   and each entry carries one of four states (`mcpState`,
-  `agentkit/build/mcpmanager.go:297`): `not_started`, `starting`, `ready` or
+  `agentkit/build/mcpmanager.go:311`): `not_started`, `starting`, `ready` or
   `failed`. ★ `Tools` never waits — it answers `errMCPStarting` while the job is
   in flight, and the provider skips the server **without** a warning: a server
   on its way is not a broken server. ★ The tools a server brings join the
   **next** turn: the job compares the listing before and after and moves the
   generation when it changed (`runStart`, `agentkit/build/mcpmanager.go:450`).
   ★ A failed start is retried, but not before the file's own `timeout:` has
-  passed (`mcpStartTimeout`, `agentkit/build/mcpmanager.go:328`) — a server that
+  passed (`mcpStartTimeout`, `agentkit/build/mcpmanager.go:342`) — a server that
   cannot start must not be spawned in a loop.
 - **The tool list is re-listed when a turn asks for it**, and the previous
   listing is older than 30 seconds (`agentkit/build/mcpmanager.go:36`,
@@ -380,8 +388,8 @@ definition — there is no `enabled` key.
 - **Loaded** by `loadMCP` (`agentkit/spec/load.go:329`): one file, one server.
 - ★ **"Hot" for this partition means the client is rebuilt.** The declaration is the
   server's identity, so a changed declaration means a changed server: the old client
-  is torn down and a new one is started (`agentkit/build/mcpmanager.go:215`), keyed on
-  the declaration's fingerprint (`agentkit/build/mcpmanager.go:330`). ★ A hot partition
+  is torn down and a new one is started (`agentkit/build/mcpmanager.go:220`), keyed on
+  the declaration's fingerprint (`agentkit/build/mcpmanager.go:344`). ★ A hot partition
   whose resources are not rebuilt lies about being hot.
 - **The write gate** refuses a name that could not be read back:
   `validateFileName` (`agentkit/spec/write.go:166`) accepts only a `<server>.yaml` whose

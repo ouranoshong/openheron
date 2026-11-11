@@ -175,7 +175,7 @@ func TestOneServerIsStartedOnlyOnce(t *testing.T) {
 	// ★ The warm starts the mounted servers…
 	b.Warm(cfg)
 	// …and the demand asks for the same one while that start is in flight.
-	if _, _, err := b.mcp.Tools(context.Background(), cfg.MCPs["github"]); err != nil &&
+	if _, _, err := b.mcp.Tools(cfg.MCPs["github"]); err != nil &&
 		!errors.Is(err, errMCPStarting) {
 		t.Fatalf("Tools: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestAFailedStartIsRetriedAfterTheBackoff(t *testing.T) {
 	}
 
 	// The first ask starts it, and it fails.
-	b.mcp.Tools(context.Background(), cfg.MCPs["github"])
+	b.mcp.Tools(cfg.MCPs["github"])
 	waitForMCPSettled(t, b.mcp, "github")
 	if got := atomic.LoadInt32(&starts); got != 1 {
 		t.Fatalf("the server was started %d times, want 1", got)
@@ -209,7 +209,7 @@ func TestAFailedStartIsRetriedAfterTheBackoff(t *testing.T) {
 	// ★ Inside the backoff the server is not asked again: the file's own
 	//   deadline is the interval, so a broken server is not spawned in a
 	//   loop.
-	b.mcp.Tools(context.Background(), cfg.MCPs["github"])
+	b.mcp.Tools(cfg.MCPs["github"])
 	time.Sleep(50 * time.Millisecond)
 	if got := atomic.LoadInt32(&starts); got != 1 {
 		t.Fatalf("the server was started %d times, want 1 — the backoff holds", got)
@@ -218,7 +218,7 @@ func TestAFailedStartIsRetriedAfterTheBackoff(t *testing.T) {
 	// ★ After the backoff it is asked again: one failure is not a
 	//   permanent verdict.
 	time.Sleep(mcpStartTimeout(cfg.MCPs["github"]) + 50*time.Millisecond)
-	b.mcp.Tools(context.Background(), cfg.MCPs["github"])
+	b.mcp.Tools(cfg.MCPs["github"])
 	waitForMCPSettled(t, b.mcp, "github")
 	if got := atomic.LoadInt32(&starts); got != 2 {
 		t.Fatalf("the server was started %d times, want 2 — a failure is retried", got)
