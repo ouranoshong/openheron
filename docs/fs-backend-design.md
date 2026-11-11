@@ -2,7 +2,7 @@
 
 > 状态：**已实现。** `agentkit/fsx` 在两处调用点替换了
 > `github.com/cloudwego/eino-ext/adk/backend/local@v0.2.2`
-> （`agentkit/build/snapshot.go:56`、`agentkit/build/skill.go:96`）。§1 讲的是被删掉
+> （`agentkit/build/snapshot.go:72`、`agentkit/build/skill.go:96`）。§1 讲的是被删掉
 > 的上游代码，所以它读起来像一段历史；§5 指着现在每一块的落点。
 >
 > 范围：文件系统**后端**（`ls`、`read_file`、`glob`、`grep`、`write_file`、
@@ -294,7 +294,7 @@ func (s *Local) globPattern(base, pattern string) (string, error)
 | `Read` | 只用 `resolve` | 读按设计是开放的（§5.1） |
 | `GrepRaw` | `resolve`；pattern 前加 `--`；`cmd.Dir = root`；结果走管道读取并封顶 | `-foo` 是 pattern 不是 flag；`rg` 继承一个确定的 cwd；上游把整份匹配缓冲了两遍 |
 | `Write` / `Edit` | `resolveWrite` | 写边界，包括借符号链接出去 |
-| `ExecuteStreaming` | `cmd.Dir = root`，保留 `ValidateCommand` | shell 命令里的相对路径现在意味着 project root |
+| `ExecuteStreaming` | `cmd.Dir = root`，保留 `ValidateCommand`；跑命令的程序由调用方给（§5.7） | shell 命令里的相对路径现在意味着 project root |
 
 `GrepRaw` 逐行读 `rg --json`，到 `maxGrepMatches` 就停，并杀掉进程而不是让它把一次
 没人再读的扫描跑完。封顶表达成「又多一条匹配」（`path:0:… 200 matches is the cap…`），
@@ -323,14 +323,42 @@ func (s *Local) globPattern(base, pattern string) (string, error)
 封顶那两行是 `shortcut:`：ls/glob 工具只渲染 `FileInfo.Path`，所以上限只能表达成
 「又多一条条目」。这在对话记录里是诚实的，也不需要改 middleware。
 
+### 5.7 跑命令的程序归谁管
+
+★ **后端不再写死 `/bin/sh -c`。** `Config.Shell` 是程序加它自己的开关
+（`["/bin/sh", "-c"]`、`["cmd.exe", "/c"]`），`Config.ShellPathDir` 会被放到子进程
+PATH 的最前面 —— 一个在 PATH 之外找到的 shell（Git for Windows、MSYS2）否则找不到
+自己那套 `ls`。命令接在开关后面（`agentkit/fsx/fsx.go:775`）。
+
+★ **决定归调用方，因为描述与执行必须是同一个答案。** 探测在 `agentkit/shell`
+（`agentkit/shell/shell.go:84` 的 `Detect`），一份快照一次：
+
+1. PATH 上的 `sh` 或 `bash`；
+2. Git for Windows 与 MSYS2 的常见安装位；
+3. WSL 启动器（`C:\Windows\System32\bash.exe`）—— 排在最后：它把命令跑在 Linux
+   文件系统里，那边的 `C:\Users` 是 `/mnt/c/Users`；
+4. 一个都没有就 `cmd.exe /c`。
+
+★ **每个候选都要验一下活**（跑一条 `exit 0`）：Windows 自带的那个 `bash.exe` 每台
+机器都有，没有 WSL 发行版时它启动、打一行错、退出码非零 —— 把它当成 shell 比没有
+shell 更糟。第一个能跑的候选就是它。
+
+★ **`execute` 工具是 openheron 自己的**（`agentkit/build/execute.go`），框架那个不挂
+（`agentkit/build/assemble.go:32`）：框架的描述只字不提这台机器上跑命令的是哪个
+shell，而写命令的是模型 —— 描述是唯一能让模型知道方言的地方，于是方言写死在描述里
+（`agentkit/shell/shell.go:230` 的 `Note`）。名字仍然保留，provider 不得冒用。
+
 ## 6. 改动落在哪里
 
 | 文件 | 改动 |
 |---|---|
 | `agentkit/fsx/fsx.go` | 新增：这个分支，823 行，保留上游 header |
 | `agentkit/fsx/fsx_test.go` | 新增：边界、上限、pattern 修复 |
-| `agentkit/build/snapshot.go:47-60` | `fsx.New(Config{Root: projectRoot, ExtraRoots: [dataDir, skillsDir]})` |
+| `agentkit/fsx/exec_shell_test.go` | 新增：命令真的交给了配置的程序、shell 目录进了子进程 PATH |
+| `agentkit/build/snapshot.go:72` | `fsx.New(Config{Root: projectRoot, ExtraRoots: [dataDir, skillsDir], Shell: …, ShellPathDir: …})` |
 | `agentkit/build/skill.go:96` | `fsx.New(Config{Root: dir})` —— skill 列表只读一个目录 |
+| `agentkit/shell/shell.go` | 新增：探测用哪个 shell，以及给模型读的那句方言 |
+| `agentkit/build/execute.go` | 新增：openheron 自己的 `execute` 工具 |
 | `go.mod` | 去掉 `eino-ext/adk/backend/local`；`bmatcuk/doublestar/v4` 变成直接依赖 |
 | `docs/architecture.md` §2 | 新增 `agentkit/fsx` 的 L1 行 |
 

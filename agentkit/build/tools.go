@@ -118,6 +118,12 @@ var reservedToolNames = func() map[string]string {
 			out[n] = "DeepAgent"
 		case "skill":
 			out[n] = "skill middleware"
+		case "execute":
+			// ★ The execute tool is **ours**, not the framework's: openheron
+			//   mounts it (see execute.go), because the model writes the
+			//   command and only our description says which shell runs it.
+			//   The name stays reserved — no provider may claim it.
+			out[n] = "openheron's execute tool"
 		default:
 			out[n] = "filesystem middleware"
 		}

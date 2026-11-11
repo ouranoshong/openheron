@@ -242,7 +242,7 @@ mcp__<server>__<tool>
 ### 3.3 命名空间顺带把问题 1 也关上了
 
 一个提供 `ls` 的服务器现在提供的是 `mcp__<server>__ls`，
-不再与 `reservedToolNames`（`agentkit/build/tools.go:69`）相撞。
+不再与 `reservedToolNames`（`agentkit/build/tools.go:113`）相撞。
 反过来也成立，而且它本身就是一条规则：
 
 > **只有 MCP 工具可以用 `mcp__` 前缀。**

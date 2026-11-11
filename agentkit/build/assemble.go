@@ -29,7 +29,11 @@ func (b *Builder) baseConfig(snap *snapshot, root decl.SubAgentSpec) deep.Config
 
 func applyToolConfig(cfg *deep.Config, h heavyDeps) {
 	cfg.Backend = h.backend
-	cfg.StreamingShell = h.streamingShell
+	// ★ `cfg.StreamingShell` stays nil on purpose: the framework's
+	//   filesystem middleware would mount an execute tool of its own, and
+	//   the model would see two tools with one name. The execute tool is
+	//   ours (see execute.go) — its description names the shell this
+	//   machine runs commands with.
 	cfg.ToolsConfig.Tools = append(cfg.ToolsConfig.Tools, h.tools...)
 	cfg.ToolsConfig = withUnknownToolsReply(cfg.ToolsConfig)
 	cfg.ToolsConfig.EmitInternalEvents = true

@@ -113,21 +113,34 @@ openheron
 ★ 有个坑：Windows 上的 `python3` 是 Microsoft Store 的转发器 —— 存在，但什么也不干 ——
 所以仓库自己的脚本在那边调的是 `python`。这只影响文档校验（`task lint-docs`）。
 
-**有两个工具要 Windows 不自带的软件。**
+**有一个工具要 Windows 不自带的软件。**
 
 | 工具 | 需要 | 没有它会看到 |
 |---|---|---|
 | `grep` | PATH 上有 [ripgrep](https://github.com/BurntSushi/ripgrep)（`rg`） | `ripgrep (rg) is not installed or not in PATH` |
-| `execute` | 一个 POSIX shell | ★ 这个工具跑的是 `/bin/sh -c`，在 Windows 上那个路径指向**你启动服务那个盘符下的** `bin\sh.exe` —— 那儿没有 shell，这一次调用就失败：`executable file not found in %PATH%` |
 
 ★ **文件工具两个都不需要。** `read_file`、`write_file`、`edit_file`、`ls` 和 `glob`
 是运行时自己的代码，在 Windows 上照常工作。
 
-shell 的来源：MSYS2（`C:\msys64\usr\bin\sh.exe`）和 Git for Windows
-（`C:\Program Files\Git\usr\bin\sh.exe`）都自带一个 —— 但那个路径是写死的，
-所以它得能在那个盘符上以 `bin\sh.exe` 被找到。符号链接要管理员权限或开发者模式；
-直接复制也行，只要那个 shell 自己的运行时还找得到。★ 另一条路是把 `execute`
-从那个 Agent 的 `tools:` 清单里去掉 —— 出厂配置本来就是这么做的。
+**shell 工具自己找 shell。** `execute` 需要一个程序来跑命令，openheron 在进程启动时
+去找：
+
+1. PATH 上的 `sh` 或 `bash`；
+2. Git for Windows（`C:\Program Files\Git\usr\bin\bash.exe`）与 MSYS2
+   （`C:\msys64\usr\bin\sh.exe`）；
+3. WSL 启动器（`C:\Windows\System32\bash.exe`）—— **排在最后**，因为它把命令跑在
+   Linux 文件系统里，那边的 `C:\Users` 是 `/mnt/c/Users`。
+
+★ 每个候选都要跑一条最简单的命令验一下活，所以 Windows 自带的那个 `bash.exe` ——
+每台机器都有，没有 WSL 发行版时什么也不干 —— 不会被当成 shell。第一个能跑的候选
+就是它；在 PATH 之外找到的 shell，它自己那个目录会被放到子进程 PATH 的最前面，
+于是 `ls` 之类的工具也找得到。
+
+★ **一个 POSIX shell 都没有时，工具退回 `cmd.exe`**，而它的描述会告诉模型写
+Windows 命令（`dir`、`type`、`copy`），而不是 POSIX 的那套（`ls`、`cat`、`cp`）。
+★ 方言不是猜的：模型读到的那段描述与真正跑命令的程序是同一个答案，在启动时一次
+定下来。另一条路是把 `execute` 从那个 Agent 的 `tools:` 清单里去掉 —— 出厂配置
+本来就是这么做的。
 
 ### 在沙箱里跑
 
@@ -1184,10 +1197,11 @@ curl -N -X POST localhost:8080/v2/run \
 `GET /v2/config` 返回生效配置；`GET /v2/health` 返回健康状态和 `deferred` 告警；
 `GET /v2/runtime` 返回运行时状态。启动日志也会打印配置根路径。
 
-**Q：Windows 上 agent 的 shell 工具报 `executable file not found in %PATH%`？**
-`execute` 工具跑的是 `/bin/sh -c`，在 Windows 上那个路径指向服务启动时所在盘符下的
-`bin\sh.exe` —— 见 §1（「在 Windows 上」）。要么在那儿放一个 POSIX shell，
-要么把 `execute` 从那个 Agent 的 `tools:` 清单里去掉。
+**Q：Windows 上 agent 的 shell 工具失败，或者跑的是模型按另一套系统写的命令？**
+`execute` 工具在服务启动时挑自己的 shell —— 见 §1（「在 Windows 上」）。它优先要
+POSIX shell，机器上一个都没有时退回 `cmd.exe`；两种情况工具的描述都会告诉模型
+该写哪一套方言，于是命令是照着真正跑它的那个 shell 写的。★ 启动日志会打印它挑中
+的是哪个 shell。
 
 **Q：`grep` 工具报 `ripgrep (rg) is not installed or not in PATH`？**
 `grep` 就是 ripgrep：装上它并放进 PATH。Windows 不自带。

@@ -125,23 +125,37 @@ executable keeps the `.exe` suffix there.
 runs nothing — so the repository's own scripts call `python` there. It only
 matters for the document checks (`task lint-docs`).
 
-**Two tools need software Windows does not ship.**
+**One tool needs software Windows does not ship.**
 
 | Tool | Needs | What you get without it |
 |---|---|---|
 | `grep` | [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on PATH | `ripgrep (rg) is not installed or not in PATH` |
-| `execute` | a POSIX shell | ★ the tool runs `/bin/sh -c`, and on Windows that path resolves to `bin\sh.exe` **on the drive you started the server from** — with no shell there the call fails with `executable file not found in %PATH%` |
 
 ★ **The file tools need neither.** `read_file`, `write_file`, `edit_file`, `ls`
 and `glob` are the runtime's own code, and they work on Windows as they are.
 
-For the shell: MSYS2 (`C:\msys64\usr\bin\sh.exe`) and Git for Windows
-(`C:\Program Files\Git\usr\bin\sh.exe`) both ship one — but the path is fixed,
-so it has to be reachable as `bin\sh.exe` on that drive. A symbolic link needs
-administrator rights or developer mode; a copy works too, as long as the
-shell's own runtime stays reachable. ★ The other way out is to leave
-`execute` out of that agent's `tools:` list — the factory configuration
-already does that.
+**The shell tool finds a shell by itself.** `execute` needs a program to run
+the command in, and openheron looks for one when the process starts:
+
+1. `sh` or `bash` on PATH;
+2. Git for Windows (`C:\Program Files\Git\usr\bin\bash.exe`) and MSYS2
+   (`C:\msys64\usr\bin\sh.exe`);
+3. the WSL launcher (`C:\Windows\System32\bash.exe`) — **last**, because it runs
+   the command in a Linux filesystem, where `C:\Users` is `/mnt/c/Users`.
+
+★ Each candidate is checked by running one trivial command, so the `bash.exe`
+that ships with Windows — it is on every machine and does nothing without a
+WSL distribution — is not mistaken for a shell. The first candidate that runs
+wins, and a shell found outside PATH gets its own directory put first in the
+child's PATH, so `ls` and its neighbours are found.
+
+★ **With no POSIX shell at all the tool falls back to `cmd.exe`**, and its
+description tells the model to write Windows commands (`dir`, `type`, `copy`)
+rather than POSIX ones (`ls`, `cat`, `cp`). ★ The dialect is never a guess:
+the description the model reads and the program that runs the command are the
+same answer, decided once at startup. The other way out is to leave `execute`
+out of that agent's `tools:` list — the factory configuration already does
+that.
 
 ### Running it in a sandbox
 
@@ -1320,10 +1334,13 @@ variable.
 health status and any `deferred` notices; `GET /v2/runtime` returns the runtime status.
 The startup log also prints the config root path.
 
-**Q: On Windows the agent's shell tool fails with `executable file not found in %PATH%`?**
-The `execute` tool runs `/bin/sh -c`, and on Windows that path resolves to
-`bin\sh.exe` on the drive the server was started from — see §1 ("On Windows"). Either
-put a POSIX shell there, or leave `execute` out of that agent's `tools:` list.
+**Q: On Windows the agent's shell tool fails, or runs commands the model wrote
+for another system?**
+The `execute` tool picks its shell when the server starts — see §1 ("On
+Windows"). It prefers a POSIX shell and falls back to `cmd.exe` when the
+machine has none; either way the tool's description tells the model which
+dialect to write, so the command is written for the shell that runs it.
+★ The startup log names the shell it picked.
 
 **Q: The `grep` tool says `ripgrep (rg) is not installed or not in PATH`?**
 `grep` is ripgrep: install it and put it on PATH. Windows does not ship it.

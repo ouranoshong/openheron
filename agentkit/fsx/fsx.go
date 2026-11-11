@@ -99,6 +99,19 @@ type Config struct {
 	// The session workspace (uploads) and the skills directory belong here.
 	ExtraRoots []string
 
+	// Shell is the program a command line is handed to: the program and the
+	// flags that come before the command. Empty means /bin/sh -c.
+	//
+	// ★ The decision belongs to the caller, not to this package: the tool's
+	//   description tells the model which dialect to write, and the two have
+	//   to be the same answer.
+	Shell []string
+
+	// ShellPathDir is prepended to the child's PATH. A shell that was found
+	// outside PATH (Git for Windows, MSYS2) cannot find its own utilities
+	// otherwise: the shell starts, and then `ls` is not a command.
+	ShellPathDir string
+
 	ValidateCommand func(string) error
 }
 
@@ -106,6 +119,10 @@ type Local struct {
 	root            string
 	roots           []string
 	validateCommand func(string) error
+	// shell is the program and the flags; the command line is appended.
+	shell []string
+	// shellPathDir is prepended to the child's PATH.
+	shellPathDir string
 	// walkBudget is the per-walk time budget.
 	//
 	// ★ It is a field so a test can shorten it; production always gets the
@@ -143,10 +160,16 @@ func New(cfg Config) (*Local, error) {
 	if cfg.ValidateCommand != nil {
 		validate = cfg.ValidateCommand
 	}
+	shell := cfg.Shell
+	if len(shell) == 0 {
+		shell = []string{"/bin/sh", "-c"}
+	}
 	return &Local{
 		root:            abs,
 		roots:           roots,
 		validateCommand: validate,
+		shell:           shell,
+		shellPathDir:    cfg.ShellPathDir,
 		walkBudget:      walkBudget,
 	}, nil
 }
@@ -744,10 +767,20 @@ func (s *Local) ExecuteStreaming(ctx context.Context, input *filesystem.ExecuteR
 
 // initStreamingCmd creates command with stdout and stderr pipes.
 func (s *Local) initStreamingCmd(ctx context.Context, command string) (*exec.Cmd, io.ReadCloser, io.ReadCloser, error) {
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	// ★ The program is the caller's decision (see Config.Shell): the tool's
+	//   description names the same dialect the command runs in.
+	args := make([]string, 0, len(s.shell))
+	args = append(args, s.shell[1:]...)
+	args = append(args, command)
+	cmd := exec.CommandContext(ctx, s.shell[0], args...)
 	// Relative paths in a shell command mean the project root, not wherever the server
 	// happened to be started.
 	cmd.Dir = s.root
+	// ★ The shell's own directory goes first: a shell that was found outside
+	//   PATH (Git for Windows, MSYS2) cannot find `ls` without it.
+	if s.shellPathDir != "" {
+		cmd.Env = append(os.Environ(), "PATH="+s.shellPathDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

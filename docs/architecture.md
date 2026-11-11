@@ -50,6 +50,7 @@ counting `grep '"github.com/ouranoshong/openheron/'` hits per package:
 | | `llm/common` | none | Vendor protocol layer (zero openheron dependencies, **zero log code**) |
 | | `webui` | none | Embedded frontend assets |
 | | `agentkit/fsx` | none | **The filesystem backend**: a bounded local backend — writes confined to the project root, ignore rules, result caps (see [fs-backend-design.md](fs-backend-design.md) — that document is Chinese only) |
+| | `agentkit/shell` | none | **Which shell runs the commands**: it picks a POSIX shell (or `cmd.exe`) at startup, and it is also the sentence the `execute` tool's description tells the model — the dialect and the runner have to be the same answer |
 | | `agentkit/templates` | none | **The configuration templates**: the files `openheron init` writes and the config editor scaffolds. ★ It is a leaf so that both the configuration layer and the command layer can read the **same** file — a copy would drift |
 | **L1** | `agentkit/spec/decl` | none | **Pure declarations** (where the yaml tags live) **and the shared vocabulary** — the built-in tool names and the MCP namespace (§2.1) |
 | | `agentkit/emit` | `obs`, `approval`, `contract`, `helpers`, `message` | The derivation: agent events → the run's facts |
@@ -478,7 +479,8 @@ or runs exactly like any other name. The gate does not change — only the names
 
 | Source | Assembled at | Examples |
 |---|---|---|
-| Filesystem middleware | `agentkit/build/snapshot.go:56` | `ls` `read_file` `write_file` `edit_file` `execute` |
+| Filesystem middleware | `agentkit/build/snapshot.go:72` | `ls` `read_file` `write_file` `edit_file` |
+| The execute tool | `agentkit/build/execute.go:38` | `execute` |
 | Network tools | `build/nettools.go` | `web_search` `http` |
 | Knowledge base | `build/kb.go` | `kb_search` `kb_index` |
 | Encyclopedia | `build/nettools.go:236` | `wikipedia` |
@@ -501,7 +503,7 @@ own vocabulary** — the server's tool names, not the exposed ones.
 The external network tools need **no code change**: a provider whose configuration is
 absent mounts nothing, so writing the file is what turns the tool on (`tools/*.yaml`).
 ★ The filesystem middleware is the exception — `fsx.New`
-mounts it unconditionally (`agentkit/build/snapshot.go:56`), and the knowledge base is
+mounts it unconditionally (`agentkit/build/snapshot.go:72`), and the knowledge base is
 switched by its **corpus**, not by its file.
 ★ Note that `openheron init` writes the tool configurations under `tools/` — the
 directory is part of the tree the factory ships, because the factory agents name

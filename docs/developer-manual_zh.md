@@ -69,7 +69,7 @@ openheron/
 
 | 层 | 包 | 内部依赖 |
 |---|---|---|
-| **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `agentkit/fsx` `llm/common` `webui` | 无 |
+| **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `agentkit/fsx` `agentkit/shell` `llm/common` `webui` | 无 |
 | **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` 无；`storage`→`contract`；`kb`→`obs`,`persist`；`spec`→`obs`,`decl`,`templates`,`persist`；`emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
 | **L2** | `agentkit/build` `agentkit/run` `storage/filestore` `storage/memarbit` `transport` `llm` `initcfg` | 见 architecture.md §2 |
 | **L3** | `api` | 几乎全部 |
@@ -107,9 +107,9 @@ handler 拼不出来（它的信封是一串属性，源码也只是又一个属
 `agentkit/spec` 放行为（装载、校验、重载、写入）。
 
 ★ **两边共用的那套词汇也住在 `decl` 里，而这是依赖方向的事实，不是图方便。** 内置工具名
-（`decl.BuiltinToolNames`，`agentkit/spec/decl/decl.go:347`）被**两端**读：装载器拿它核对
+（`decl.BuiltinToolNames`，`agentkit/spec/decl/decl.go:349`）被**两端**读：装载器拿它核对
 Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些名字的 provider
-（`reservedToolNames`，`agentkit/build/tools.go:75`）。两端互相不能引 —— 装载器在装配器
+（`reservedToolNames`，`agentkit/build/tools.go:113`）。两端互相不能引 —— 装载器在装配器
 下层 —— 所以这份清单不能住在其中任何一边：它住在**两边之下**，那个叶子包里。★ 抄一份
 就是两份会漂移的清单，而漂移读起来就是「那个工具不存在」。
 
@@ -159,14 +159,14 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
    工具表 —— 那份清单说的是这个 agent 到底能用哪些工具 —— 并且把**凡是档位表没有点名的
    工具**都裹进审批里。★ 这是**两个不同的问题**：白名单逐 agent 而定，档位表则是每个
    agent 共享的。★ 默认档位是 `ask`，所以例外都是被点名的那些：代码认识的那些内置工具
-   （`agentkit/build/tools.go:62`），以及某个文件自己的 `allows:` 列出的那些。
+   （`agentkit/build/tools.go:79`），以及某个文件自己的 `allows:` 列出的那些。
    你不需要写任何权限代码。
 
 5. **名字不能撞保留名**。名字住在 `decl.BuiltinToolNames`
-   （`agentkit/spec/decl/decl.go:347`）：`ls` `read_file` `write_file` `edit_file` `glob`
+   （`agentkit/spec/decl/decl.go:349`）：`ls` `read_file` `write_file` `edit_file` `glob`
    `grep` `execute` `task` `write_todos` `skill`。撞上会在 `Build` 时报错。
    ★ **它们住在 `decl` 而不是 build 包里，是因为两边都要用**：装配器拒绝冒用这些名字的
-   provider（`reservedToolNames`，`agentkit/build/tools.go:75`），装载器则核对 Agent 的
+   provider（`reservedToolNames`，`agentkit/build/tools.go:113`），装载器则核对 Agent 的
    `tools:` 列表里点到的名字。两边互相不能引，所以这份清单住在两边之下。
    工具名同时是档位表里的键 —— 撞名会让档位表指向错误的工具。
 
@@ -246,6 +246,27 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
   （`agentkit/build/builder.go:67`）。这次重列发生在该轮 agent 装配**之前**
   （`agentkit/build/builder.go:105`），因为这一批工具每代只建一次 —— 把重列放进
   构建里就永远不会跑到了。
+
+#### execute 工具 —— 是我们自己的，不是框架的
+
+★ **框架自己也挂一个 `execute`**，但只在配置里带着 shell 时才挂
+（`eino@v0.9.22/adk/middlewares/filesystem/filesystem.go:505`），而它给的描述只字不提
+**这台机器上跑命令的是哪个 shell**。写命令的是模型，于是描述是唯一能写明方言的地方 ——
+而一段只说「沙箱环境」的话，正是让 Windows 上的 agent 在 `cmd.exe` 里跑 `ls -la` 的
+那种描述。
+
+所以 openheron 挂自己的：`agentkit/build/execute.go` 用 `utils.InferStreamTool` 建它，
+而 `agentkit/build/assemble.go:32` 让 `cfg.StreamingShell` **留 nil**，框架那个就不挂 ——
+两个同名工具就是模型会叫错的那个。★ 流式那段是框架的，逐字抄来：模型读的是输出，
+所以它收尾那两句（「[Command failed with exit code 2]」「[Command executed
+successfully with no output]」）是契约的一部分。
+
+★ **shell 在进程启动时定一次** —— `agentkit/shell`（`agentkit/shell/shell.go:84`）：
+先要 POSIX shell（PATH 上的 `sh`/`bash`，然后 Git for Windows 与 MSYS2，最后是 WSL
+启动器），每个候选都要跑一条最简单的命令验一下活，一个都不行才用 `cmd.exe /c`。描述
+里点名的 shell 与后端真正跑命令的那个是同一个（`agentkit/shell/shell.go:230`）——
+两者必须是同一个答案：描述告诉模型该写哪套方言，后端跑的是模型写出来的。★ 这个决定
+不是配置键：一个能把描述与执行拧开的旋钮，就是一个能把模型带歪的旋钮。
 
 ### 3.2 加一个新的配置分区
 
@@ -1122,6 +1143,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（见�
 | `transport` | 事件类型、归属、用量分账 |
 | `initcfg` | 出厂模板的完整性 |
 | `agentkit/fsx` | 写边界（含符号链接逃逸）、`ls`/`glob`/`grep` 的上限、绝对 glob pattern |
+| `agentkit/shell` | `execute` 工具用哪个 shell 跑命令，以及工具描述告诉模型的那套方言 |
 
 ★ **竞态检测器也要跑**：`task test-race`（`go test -race ./...`）。普通套件是绿的而
   检测器是红的，这种事比人们以为的更常见 —— 竞态要两个 goroutine 碰面才成立，而
@@ -1378,7 +1400,7 @@ gitleaks 报的**提交数**比 git 报的低；但内容照样扫到了，因�
 | 启动时报 `disabled_tools` was renamed to `tools` | ★ 两者含义**正好相反** —— 一个删工具，另一个点名工具。删掉 `disabled_tools`，在 `tools:` 里列出这个 agent 该有的工具（`agentkit/spec/load.go:99`） |
 | 提示说 `tools` 点名了 MCP 工具 | ★ `tools` 不点名 MCP 工具，而 `mcps:` 才是挂载一个 server 并把它的工具交给它的地方：删掉那些 `mcp__*` 行，把 server 写进 `mcps:`（`agentkit/spec/load.go:836`） |
 | Agent 调不动某个 MCP 工具 | 那个 server 在这个 agent 的 `mcps:` 里吗？挂载**就是**授予 —— 这个 agent 的 `tools:` 清单与它无关（`agentkit/spec/decl/decl.go:148`） |
-| 提示说 `tools` 点名了一个不存在的工具 | 内置工具就是 `decl.BuiltinToolNames` 里那些（`agentkit/spec/decl/decl.go:347`）；某个 provider 的工具只有在 `tools/` 下写了它的文件时才存在 |
+| 提示说 `tools` 点名了一个不存在的工具 | 内置工具就是 `decl.BuiltinToolNames` 里那些（`agentkit/spec/decl/decl.go:349`）；某个 provider 的工具只有在 `tools/` 下写了它的文件时才存在 |
 | 提示说 `tools` 点名了 `skill` 工具，而 `skills` 是空的 | 配置合法但自相矛盾：在 `skills:` 里点名那个技能，或者把 `skill` 从 `tools:` 里去掉 |
 | Agent 调不动某工具 | `GET /v2/agents/:agentId` 看生效工具表；再读工具的 `reason` —— `tools`，或者默认的 `ask` 档（它会问） |
 | 某个 agent **一个**工具都没有 | ★ 工具清单是白名单，而且**默认一个都没有**：不写 `tools:` 就是没有工具。列出这个 agent 该有的工具 |

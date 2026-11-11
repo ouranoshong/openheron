@@ -47,6 +47,7 @@
 | | `llm/common` | 无 | 厂商协议层（零 openheron 依赖，**零日志代码**） |
 | | `webui` | 无 | 嵌入式前端资源 |
 | | `agentkit/fsx` | 无 | **文件系统后端**：有界的本地后端 —— 写收敛在项目根、忽略规则、结果上限（见 [fs-backend-design.md](fs-backend-design.md)，只有中文） |
+| | `agentkit/shell` | 无 | **哪个 shell 跑命令**：启动时挑一个 POSIX shell（或者 `cmd.exe`），它同时是 `execute` 工具描述里告诉模型的那句话 —— 方言与执行必须是同一个答案 |
 | | `agentkit/templates` | 无 | **配置模板**：`openheron init` 写下的文件、配置编辑器给出的脚手架。★ 它是叶子包，配置层与命令层才能读到**同一个**文件 —— 拷贝会漂移 |
 | **L1** | `agentkit/spec/decl` | 无 | **纯声明**结构体（yaml tag 集中处）**以及两边都要读的那套词汇** —— 内置工具名与 MCP 命名空间（§2.1） |
 | | `agentkit/emit` | `obs`, `approval`, `contract`, `helpers`, `message` | 推导层：agent 事件 → run 的事实 |
@@ -414,7 +415,8 @@ Agent 的技能；而技能工具只有在确实有技能可加载时才值得�
 
 | 来源 | 装配位置 | 例子 |
 |---|---|---|
-| 文件系统中间件 | `agentkit/build/snapshot.go:56` | `ls` `read_file` `write_file` `edit_file` `execute` |
+| 文件系统中间件 | `agentkit/build/snapshot.go:72` | `ls` `read_file` `write_file` `edit_file` |
+| execute 工具 | `agentkit/build/execute.go:38` | `execute` |
 | 网络工具 | `build/nettools.go` | `web_search` `http` |
 | 知识库 | `build/kb.go` | `kb_search` `kb_index` |
 | 百科 | `build/nettools.go:236` | `wikipedia` |
@@ -434,7 +436,7 @@ Agent 的技能；而技能工具只有在确实有技能可加载时才值得�
 
 对外的网络工具**不用改代码**：配置缺失的 provider 什么都不挂，所以写下这个文件才是把工具
 挂上去的那一步（`tools/*.yaml`）。★ 文件系统中间件是
-例外 —— `fsx.New` 无条件挂载它（`agentkit/build/snapshot.go:56`），知识库则是由它的
+例外 —— `fsx.New` 无条件挂载它（`agentkit/build/snapshot.go:72`），知识库则是由它的
 **corpus** 开关，而不是由文件开关。
 ★ 注意 `openheron init` 会写 `tools/` 下的工具配置 —— 那一整个目录是出厂树的一部分，
 因为出厂的 agent 会点名 `request_get`、`duckduckgo_search` 和 `wikipedia_search`，而没有
