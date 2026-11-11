@@ -341,13 +341,20 @@ func TestTheBuiltinEngineRefusesToReportNoMatchesForAnInvalidPattern(t *testing.
 // The walk has the same budget as every other walk, and says so.
 func TestTheBuiltinEngineStopsAtItsBudget(t *testing.T) {
 	root := t.TempDir()
-	for i := 0; i < 200; i++ {
-		dir := filepath.Join(root, fmt.Sprintf("d%03d", i))
-		mkdir(t, dir)
-		write(t, filepath.Join(dir, "a.txt"), "hit\n")
-	}
+	write(t, filepath.Join(root, "a.txt"), "hit\n")
 	b := newFallbackBackend(t, root)
-	b.walkBudget = 20 * time.Millisecond
+	// ★ A **negative** budget, not a positive one that the machine is
+	//
+	//	slow enough to exceed. A positive budget asks the machine to
+	//	be slow: the walk finishes inside it on a quick machine — a
+	//	Linux runner searching a tmpfs — and the test fails on the
+	//	machine that is quickest. ★ A negative one is also what the
+	//	clock's resolution asks for: it is coarser than a nanosecond
+	//	on some platforms (Windows reads the monotonic clock in ~0.5ms
+	//	steps), so `Add` truncates to it and a budget of a nanosecond
+	//	can be a no-op there. A budget that is already an hour in the
+	//	past says the same thing and cannot be quantized away.
+	b.walkBudget = -time.Hour
 
 	_, err := b.GrepRaw(context.Background(), &filesystem.GrepRequest{Pattern: "hit"})
 	if err == nil {
