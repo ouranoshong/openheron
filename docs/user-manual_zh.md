@@ -710,8 +710,8 @@ tools: [ls, read_file, config_*]
 | `config_validate` | `{path, content}`：这份内容能不能加载，**错在第几行** —— 行号由服务端给。`{}`：检查磁盘上这棵树 | allow |
 | `config_template` | `{path}`：这个文件从什么骨架开始。`{section}`：那个分区的模板。都不给：一份「能问什么」的索引 | allow |
 | `config_notices` | loader 发现了但没拒绝的事：改了名的键、退休的目录、回落到缺省的值 | allow |
-| `config_tier` | `{tool}`：它要不要点头。`{agent}`：那个 Agent 的工具与各自档位。都不给：缺省档位与整张例外表 | allow |
-| `config_write` | 写一个文件：对整棵树预检、对你读到的 revision 校验、合并失败就整份拒绝。**下一轮**生效 | **ask** |
+| `config_tier` | `{tool}`：它要不要点头。`{agent}`：那个 Agent 的工具与各自档位。都不给：缺省档位与整张例外表。答案用的是**本轮的**配置快照，本轮刚写入的 Agent 还看不见 —— 工具会明说这一点，而不是假装它不存在 | allow |
+| `config_write` | 写一个文件：对整棵树预检、对你读到的 revision 校验、合并失败就整份拒绝。**下一轮**生效 —— `applied` 说的是监视器会接住这份改动，不是说本轮就能看见 | **ask** |
 
 ```markdown
 ---

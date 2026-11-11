@@ -308,7 +308,7 @@ agent 的档位，而 loader 不检查 —— 于是 vendor 没有的档位能�
 | `config_validate` | `{path, content}` 或 `{}` | `{ok, issues[], configVersion}` | `Diagnostics` / `Check` | allow |
 | `config_template` | `{path}` / `{section}` | `{path, content}` / `{section, templates}`；都没有时给索引 | `TemplateFor` / `Templates` / `Skeleton` | allow |
 | `config_notices` | `{}` | `{deferred[], version, configVersion, watch}` | `Deferred()` / `Fingerprint()` | allow |
-| `config_tier` | `{tool}` / `{agent}` | `{tool, tier}` / `{agent, tools[]}`；都没有时 `{defaultTier, allow[]}` | `policyOf` / `TierOf` | allow |
+| `config_tier` | `{tool}` / `{agent}` | `{tool, tier}` / `{agent, tools[]}`；都没有时 `{defaultTier, allow[]}`。★ 查不到 agent 时按「刚写入待下一轮 / 被 loader 排除 / 根本不存在」分别给诊断 | `policyOf` / `TierOf` / `missingAgentError` | allow |
 | `config_write` | `{path, content, baseRevision?}` | `{path, revision, configVersion, applied, requiresRestart, note}` | `Write`（`agentkit/spec/write.go`） | **ask** |
 
 ### 4.1 四个要点
@@ -327,7 +327,7 @@ baseRevision → 拒明文 → 原子替换 → 试合并 → 失败回滚」。
 ★ **工具自己界定答案大小，不套通用输出截断。** 通用截断砍的是**字符串**，对 JSON 答案来说
 就是一份解析不了的文件；而对 `config_get` 来说，它会留下「半个文件 + 匹配的 revision」——
 正是把另一半改没的那条路。所以 `config_get` 超过 64 KiB（
-`agentkit/build/configtools.go:340`）**拒绝**而不是截断，`config_template` 一次只给一个
+`agentkit/build/configtools.go:352`）**拒绝**而不是截断，`config_template` 一次只给一个
 分区，什么都不问时给索引。
 
 ★ **`config_get` 不会泄露密钥。** 配置里只有 `${ENV}` 或 `@file:` 引用，值在请求时才解析；
@@ -345,6 +345,17 @@ baseRevision → 拒明文 → 原子替换 → 试合并 → 失败回滚」。
 `PrepareAgent`（`agentkit/run/loop.go`），不影响当前轮次和正在进行的 LLM 请求。返回里带
 `applied` / `requiresRestart` 说明这次到底生效了没有，不做额外禁止 —— 禁止的收益抵不上
 规则复杂度。
+
+★ **`applied: true` 也不等于「本轮可见」。** 六个 `config_*` 工具在装配时拿的是
+**这一轮开始时的 `*spec.Config` 快照**（`configToolProvider.Provide` 的 `env.cfg`），
+写入只改磁盘；热重载要到下一轮重新装配才会换掉这份快照。所以「写完立刻用
+`config_tier` / `config_get {}` 验证」必然读不到刚写的 agent —— 这不是写入失败。
+★ 旧文案 `no agent "x" under agents/` 把三种情况说成一种，实测让模型把刚写好的文件
+又写了一遍、反复复查、甚至派子 agent 去查 HTTP 接口。现在 `missingAgentError` 分开答：
+文件在磁盘且没被排除 → 明说「下一轮生效，别重写、别在本轮复查」；被
+`leftOut` 排除（例如 model 未声明）→ 明说「修文件，下一轮也不会出现」；磁盘上没有
+文件 → 才是原来那句。★ `config_write` 成功的返回也带 `note`，把生效时点写在
+模型刚拿到结果的地方。
 
 ★ 它**不能**写 `server/`：那一节不是热加载的，写闸门直接拒绝。
 ★ 但它**读得了** `server/` —— 读与写是两把闸门：`ValidateReadPath` 只管路径形状，
