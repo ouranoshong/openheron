@@ -97,7 +97,24 @@ jobs:
         working-directory: web
         # ★ Only chromium: the config declares one project, and installing
         #   every browser would cost minutes for nothing.
-        run: bun x playwright install --with-deps chromium
+        # ★ The browsers come from a CDN and the system dependencies come
+        #   from the Ubuntu archive: neither belongs to us, and a runner that
+        #   cannot fetch them fails the run for a reason that has nothing to
+        #   do with the code. The step is retried — the install is not
+        #   resumable, so the whole thing runs again — and a second failure
+        #   is still a failure.
+        run: |
+          for attempt in 1 2 3; do
+            if bun x playwright install --with-deps chromium; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::the browser install failed (attempt ${attempt} of 3), retrying"
+              sleep $((attempt * 15))
+            fi
+          done
+          echo "::error::the browser install failed three times"
+          exit 1
       - name: e2e
         # ★ The command stays the repo's own (`task test-e2e`); the tee is
         #   only there so that a failure can be summarized **where it can be
