@@ -12,7 +12,9 @@
 
 ## 1. Installation
 
-You need **Go 1.27.1+** (to build).
+You need **Go 1.27.1+** (to build), plus [go-task](https://taskfile.dev) and
+[Bun](https://bun.sh): the interface is built with Bun and embedded into the
+binary, so the two build tools are not optional.
 
 ```bash
 git clone https://github.com/ouranoshong/openheron
@@ -45,13 +47,14 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 ```
 
 The installer picks the asset for your platform, **verifies its sha256 against the
-release's `checksums.txt`**, and installs it into `~/.local/bin`. A download that does
-not match the checksum is not installed.
+release's `checksums.txt`**, and installs it into `~/.local/bin`
+(`%LOCALAPPDATA%\Programs\openheron` on Windows). A download that does not
+match the checksum is not installed.
 
 | Variable | Effect |
 |---|---|
 | `OPENHERON_VERSION` | Install a specific tag instead of the latest release |
-| `INSTALL_DIR` | Where to install (default `~/.local/bin`) |
+| `INSTALL_DIR` | Where to install (default `~/.local/bin`, or `%LOCALAPPDATA%\Programs\openheron` on Windows) |
 | `OPENHERON_REPO` | Install from another `owner/repo` |
 | `OPENHERON_TOKEN` | A token, for a private repository |
 | `OPENHERON_API_URL` | The API host (default `https://api.github.com`; a GitHub Enterprise one is `https://<host>/api/v3`) |
@@ -72,6 +75,73 @@ against the `checksums.txt` next to it:
 | macOS arm64 | `openheron_<version>_darwin_arm64.tar.gz` |
 | Windows x64 | `openheron_<version>_windows_amd64.zip` |
 | Windows arm64 | `openheron_<version>_windows_arm64.zip` |
+
+### On Windows
+
+**Install it.** One line in PowerShell:
+
+```powershell
+irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps1 | iex
+```
+
+★ **Two things differ from the Unix installer.** It installs into
+`%LOCALAPPDATA%\Programs\openheron` — not `~/.local/bin` — and it **does not
+touch your PATH**: the script only prints a hint when that directory is not on
+it. Add it yourself, or call the binary by its full path:
+
+```powershell
+# put the install directory on the user PATH
+$dir = "$env:LOCALAPPDATA\Programs\openheron"
+[Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $dir, 'User')
+```
+
+★ Open a **new** terminal afterwards: a shell keeps the PATH it started with.
+
+From `cmd.exe` there is no `irm`, so hand the line to PowerShell:
+
+```cmd
+powershell -c "irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps1 | iex"
+```
+
+**Run it.**
+
+```powershell
+cd C:\your\project
+openheron init
+openheron
+```
+
+Then open http://localhost:8080. The configuration root is the `.openheron`
+directory under the project — created when missing — or the one named by
+`--config-dir` or `$env:OPENHERON_CONFIG_DIR`. The port comes from
+`listen_addr` in `server/config.yaml` (`:8080` by default), or from the
+`LISTEN_ADDR` environment variable.
+
+**Build it from source.** Go, go-task and Bun — the three this section names at the
+top — and `task build` produces `bin\openheron.exe` on Windows, because the
+executable keeps the `.exe` suffix there.
+
+★ One trap: on Windows `python3` is the Microsoft Store alias — it exists and
+runs nothing — so the repository's own scripts call `python` there. It only
+matters for the document checks (`task lint-docs`).
+
+**Two tools need software Windows does not ship.**
+
+| Tool | Needs | What you get without it |
+|---|---|---|
+| `grep` | [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on PATH | `ripgrep (rg) is not installed or not in PATH` |
+| `execute` | a POSIX shell | ★ the tool runs `/bin/sh -c`, and on Windows that path resolves to `bin\sh.exe` **on the drive you started the server from** — with no shell there the call fails with `executable file not found in %PATH%` |
+
+★ **The file tools need neither.** `read_file`, `write_file`, `edit_file`, `ls`
+and `glob` are the runtime's own code, and they work on Windows as they are.
+
+For the shell: MSYS2 (`C:\msys64\usr\bin\sh.exe`) and Git for Windows
+(`C:\Program Files\Git\usr\bin\sh.exe`) both ship one — but the path is fixed,
+so it has to be reachable as `bin\sh.exe` on that drive. A symbolic link needs
+administrator rights or developer mode; a copy works too, as long as the
+shell's own runtime stays reachable. ★ The other way out is to leave
+`execute` out of that agent's `tools:` list — the factory configuration
+already does that.
 
 ### Running it in a sandbox
 
@@ -1249,3 +1319,11 @@ variable.
 `GET /v2/config` returns the effective configuration; `GET /v2/health` returns the
 health status and any `deferred` notices; `GET /v2/runtime` returns the runtime status.
 The startup log also prints the config root path.
+
+**Q: On Windows the agent's shell tool fails with `executable file not found in %PATH%`?**
+The `execute` tool runs `/bin/sh -c`, and on Windows that path resolves to
+`bin\sh.exe` on the drive the server was started from — see §1 ("On Windows"). Either
+put a POSIX shell there, or leave `execute` out of that agent's `tools:` list.
+
+**Q: The `grep` tool says `ripgrep (rg) is not installed or not in PATH`?**
+`grep` is ripgrep: install it and put it on PATH. Windows does not ship it.

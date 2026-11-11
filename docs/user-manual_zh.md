@@ -10,7 +10,8 @@
 
 ## 1. 安装
 
-需要 **Go 1.27.1+**（构建用）。
+需要 **Go 1.27.1+**（构建用），另外还要 [go-task](https://taskfile.dev) 和
+[Bun](https://bun.sh)：界面是用 Bun 构建再嵌进二进制的，所以这两个构建工具不是可选项。
 
 ```bash
 git clone https://github.com/ouranoshong/openheron
@@ -41,12 +42,13 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 ```
 
 安装脚本会挑出对应你平台的产物，**用发布页的 `checksums.txt` 校验 sha256**，装进
-`~/.local/bin`。校验不过的下载**不会被安装**。
+`~/.local/bin`（Windows 上是 `%LOCALAPPDATA%\Programs\openheron`）。校验不过的下载
+**不会被安装**。
 
 | 变量 | 作用 |
 |---|---|
 | `OPENHERON_VERSION` | 装指定 tag，而不是最新版 |
-| `INSTALL_DIR` | 装到哪（默认 `~/.local/bin`） |
+| `INSTALL_DIR` | 装到哪（缺省 `~/.local/bin`，Windows 上是 `%LOCALAPPDATA%\Programs\openheron`） |
 | `OPENHERON_REPO` | 从别的 `owner/repo` 装 |
 | `OPENHERON_TOKEN` | 私有仓库用的 token |
 | `OPENHERON_API_URL` | API 主机（默认 `https://api.github.com`；GitHub Enterprise 是 `https://<host>/api/v3`） |
@@ -66,6 +68,66 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 | macOS arm64 | `openheron_<version>_darwin_arm64.tar.gz` |
 | Windows x64 | `openheron_<version>_windows_amd64.zip` |
 | Windows arm64 | `openheron_<version>_windows_arm64.zip` |
+
+### 在 Windows 上
+
+**装。** PowerShell 里一行：
+
+```powershell
+irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps1 | iex
+```
+
+★ **有两处和 Unix 版不一样。** 装的位置是 `%LOCALAPPDATA%\Programs\openheron` ——
+不是 `~/.local/bin` —— 而且它**不碰你的 PATH**：脚本发现那个目录不在 PATH 上时只打印
+一行提示，所以要么自己加，要么用全路径调用那个可执行文件：
+
+```powershell
+# 把安装目录加进用户 PATH
+$dir = "$env:LOCALAPPDATA\Programs\openheron"
+[Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $dir, 'User')
+```
+
+★ 改完**开一个新的终端**：已经开着的 shell 留着它启动时的那份 PATH。
+
+`cmd.exe` 里没有 `irm`，把这一行交给 PowerShell：
+
+```cmd
+powershell -c "irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps1 | iex"
+```
+
+**跑起来。**
+
+```powershell
+cd C:\your\project
+openheron init
+openheron
+```
+
+然后浏览器打开 http://localhost:8080。配置根是项目下的 `.openheron` 目录（没有就建），
+或者 `--config-dir`、`$env:OPENHERON_CONFIG_DIR` 指的那个。端口取自
+`server/config.yaml` 里的 `listen_addr`（缺省 `:8080`），或者 `LISTEN_ADDR` 环境变量。
+
+**从源码构建。** Go、go-task 与 Bun —— 就是这一节开头说的那三样 —— 而 Windows 上
+`task build` 的产物是 `bin\openheron.exe`：可执行文件在那边保留 `.exe` 后缀。
+
+★ 有个坑：Windows 上的 `python3` 是 Microsoft Store 的转发器 —— 存在，但什么也不干 ——
+所以仓库自己的脚本在那边调的是 `python`。这只影响文档校验（`task lint-docs`）。
+
+**有两个工具要 Windows 不自带的软件。**
+
+| 工具 | 需要 | 没有它会看到 |
+|---|---|---|
+| `grep` | PATH 上有 [ripgrep](https://github.com/BurntSushi/ripgrep)（`rg`） | `ripgrep (rg) is not installed or not in PATH` |
+| `execute` | 一个 POSIX shell | ★ 这个工具跑的是 `/bin/sh -c`，在 Windows 上那个路径指向**你启动服务那个盘符下的** `bin\sh.exe` —— 那儿没有 shell，这一次调用就失败：`executable file not found in %PATH%` |
+
+★ **文件工具两个都不需要。** `read_file`、`write_file`、`edit_file`、`ls` 和 `glob`
+是运行时自己的代码，在 Windows 上照常工作。
+
+shell 的来源：MSYS2（`C:\msys64\usr\bin\sh.exe`）和 Git for Windows
+（`C:\Program Files\Git\usr\bin\sh.exe`）都自带一个 —— 但那个路径是写死的，
+所以它得能在那个盘符上以 `bin\sh.exe` 被找到。符号链接要管理员权限或开发者模式；
+直接复制也行，只要那个 shell 自己的运行时还找得到。★ 另一条路是把 `execute`
+从那个 Agent 的 `tools:` 清单里去掉 —— 出厂配置本来就是这么做的。
 
 ### 在沙箱里跑
 
@@ -1121,3 +1183,11 @@ curl -N -X POST localhost:8080/v2/run \
 **Q：想看服务到底加载了什么？**
 `GET /v2/config` 返回生效配置；`GET /v2/health` 返回健康状态和 `deferred` 告警；
 `GET /v2/runtime` 返回运行时状态。启动日志也会打印配置根路径。
+
+**Q：Windows 上 agent 的 shell 工具报 `executable file not found in %PATH%`？**
+`execute` 工具跑的是 `/bin/sh -c`，在 Windows 上那个路径指向服务启动时所在盘符下的
+`bin\sh.exe` —— 见 §1（「在 Windows 上」）。要么在那儿放一个 POSIX shell，
+要么把 `execute` 从那个 Agent 的 `tools:` 清单里去掉。
+
+**Q：`grep` 工具报 `ripgrep (rg) is not installed or not in PATH`？**
+`grep` 就是 ripgrep：装上它并放进 PATH。Windows 不自带。
