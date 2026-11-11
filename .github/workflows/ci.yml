@@ -100,16 +100,19 @@ jobs:
         # ★ The browsers come from a CDN and the system dependencies come
         #   from the Ubuntu archive: neither belongs to us, and a runner that
         #   cannot fetch them fails the run for a reason that has nothing to
-        #   do with the code. The step is retried — the install is not
-        #   resumable, so the whole thing runs again — and a second failure
-        #   is still a failure.
+        #   do with the code. So the step is retried — the install is not
+        #   resumable, so the whole thing runs again.
+        # ★ Each attempt is bounded. A fetch that **hangs** is worse than one
+        #   that fails: it sits in this step until the job times out, hours
+        #   later, and the retries never happen. A healthy install takes
+        #   twenty seconds; five minutes is generous on purpose.
         run: |
           for attempt in 1 2 3; do
-            if bun x playwright install --with-deps chromium; then
+            if timeout --kill-after=30 300 bun x playwright install --with-deps chromium; then
               exit 0
             fi
             if [ "$attempt" -lt 3 ]; then
-              echo "::warning::the browser install failed (attempt ${attempt} of 3), retrying"
+              echo "::warning::the browser install failed or hung (attempt ${attempt} of 3), retrying"
               sleep $((attempt * 15))
             fi
           done
