@@ -1388,7 +1388,7 @@ do not touch" assertions.
 
 ### 5.6 E2E
 
-`task test-e2e` → `playwright test`, **15 specs, 194 cases**: `agents` `attachments` `chat`
+`task test-e2e` → `playwright test`, **15 specs, 196 cases**: `agents` `attachments` `chat`
 `compaction` `composer-autocomplete` `composer-meta` `history` `mcps` `motion` `multi-agent`
 `reattach` `scroll` `session-busy` `settings` `theme`.
 

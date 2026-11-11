@@ -133,6 +133,49 @@ test.describe("会话标题", () => {
     expect(titles).toContain("Alpha conversation")
     expect(titles).not.toContain("New Chat")
   })
+
+  // ★ The rename editor opens on the name the row shows. It used to open
+  //   on the name the row was **mounted** with — a session is named by the
+  //   server after its first question, so that name was still "New Chat"
+  //   while the sidebar already showed the real one. Pressing Enter then
+  //   replaced the conversation's name with "New Chat".
+  test("★ 改名时编辑的是原来的名字，而不是 New Chat", async ({ page }) => {
+    await setScenario("simple")
+    await openApp(page)
+    await sendMessage(page, `${MARKER_A} 这个会话后来有了名字`)
+
+    // ★ The server names the session after its first question, so the row
+    //   carries that name by the time the turn is over.
+    const item = page.locator(THREAD_ITEM).filter({ hasText: MARKER_A }).first()
+    await expect(item).toBeVisible({ timeout: 7000 })
+
+    const row = page.locator(THREAD_ROW).filter({ hasText: MARKER_A }).first()
+    await row.hover()
+    await row.locator('[aria-label="More options"]').click()
+    await clickMenuItem(page, "Rename")
+
+    const input = page.getByRole("textbox", { name: "Thread title" })
+    await expect(input).toHaveValue(new RegExp(MARKER_A))
+
+    // ★ The name is selected, so the user renames it instead of retyping
+    //   it from scratch.
+    await expect(input).toBeFocused()
+    expect(
+      await input.evaluate((el: HTMLInputElement) => el.selectionStart === 0 && el.selectionEnd === el.value.length),
+      "the whole name should be selected",
+    ).toBe(true)
+
+    // ★ And committing it keeps the name: the editor did not replace the
+    //   conversation's title with the placeholder.
+    await input.press("Enter")
+    await expect(page.locator(THREAD_ITEM).filter({ hasText: MARKER_A })).toHaveCount(1)
+
+    // ★ And the server still holds that name: nothing was renamed to
+    //   "New Chat" behind the user's back.
+    await page.reload()
+    await expect(page.locator(THREAD_ITEM).filter({ hasText: MARKER_A })).toHaveCount(1)
+    expect((await threadTitles(page)).join(" | ")).not.toContain("New Chat")
+  })
 })
 
 test.describe("发送与流式渲染", () => {

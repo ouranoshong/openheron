@@ -1193,7 +1193,7 @@ Bun 本身没有 `localStorage`，不 stub 会炸。
 
 ### 5.6 E2E
 
-`task test-e2e` → `playwright test`，**15 个 spec、194 个用例**：
+`task test-e2e` → `playwright test`，**15 个 spec、196 个用例**：
 `agents` `attachments` `chat` `compaction` `composer-autocomplete` `composer-meta` `history` `mcps`
 `motion` `multi-agent` `reattach` `scroll` `session-busy` `settings` `theme`。
 

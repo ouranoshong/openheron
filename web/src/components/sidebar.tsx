@@ -67,6 +67,7 @@ function SessionRow({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(entry.meta.title)
   const wrapRef = useRef<HTMLLIElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!menuOpen) return
@@ -77,12 +78,36 @@ function SessionRow({
     return () => document.removeEventListener("mousedown", onDown)
   }, [menuOpen])
 
+  // ★ The editor opens on the whole name: the user renames it, they do
+  //   not retype it from scratch.
+  useEffect(() => {
+    if (!editing) return
+    const el = inputRef.current
+    if (!el) return
+    el.focus()
+    el.select()
+  }, [editing])
+
+  // ★ The draft is seeded from the name the row shows **when the editor
+  //   opens**, not from the name the row was mounted with. A session is
+  //   named by the server after its first question, so the mounted name
+  //   was still the placeholder — the editor opened on "New Chat" while
+  //   the sidebar already showed the real one, and pressing Enter
+  //   replaced the conversation's name with "New Chat".
+  const startEditing = () => {
+    setMenuOpen(false)
+    setDraft(entry.meta.title)
+    setEditing(true)
+  }
+
   const commit = async () => {
     const t = draft.trim()
     setEditing(false)
     setMenuOpen(false)
     if (!t || t === entry.meta.title) return
     await rename(entry.meta.threadId, t).catch(() => {
+      // ★ The rename failed and the store rolled the title back: the
+      //   editor opens on that name again, not on the placeholder.
       setDraft(entry.meta.title)
     })
   }
@@ -91,6 +116,7 @@ function SessionRow({
     return (
       <li ref={wrapRef} className="px-1 py-0.5">
         <input
+          ref={inputRef}
           autoFocus
           aria-label="Thread title"
           value={draft}
@@ -150,10 +176,7 @@ function SessionRow({
           <MenuItem
             icon={<PencilIcon className="size-3.5" />}
             label="Rename"
-            onClick={() => {
-              setMenuOpen(false)
-              setEditing(true)
-            }}
+            onClick={startEditing}
           />
           <MenuItem
             icon={<Trash2Icon className="size-3.5" />}
