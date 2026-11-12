@@ -57,7 +57,7 @@ Prefill the struct → decode file by file (yaml.v3 writes only the keys that ap
 ## The tiers: there is no global list
 
 - The default is **`ask`**. The code's own `builtinAllowedTools` (`ls read_file glob grep task write_todos skill`, plus the five read-only `config_get` `config_validate` `config_template` `config_notices` `config_tier`) **always takes effect** and is the base; the `allows:` of each tool file can only **add upward**, it cannot take a name away.
-- To tighten, change that table in the code; to loosen, write `allows:` in the file that provides the tool (using that file's own vocabulary).
+- To tighten, change that table in the code; to loosen, write `allows:` in the file that provides the tool (naming the tool the way the model sees it: `request_get` in `tools/http.yaml`, `write_file` in `tools/filesystem.yaml`). ★ An **MCP** file is the other case: there the names are the **server's own** (`create_issue`), because the exposed name is assembled with the namespace.
 - `tools/filesystem.yaml` **is implemented**: it carries only `allows:`, and it is the **tuning knob** for loosening the tier of `ls` / `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute`, not a switch — the filesystem tools are always there.
 - ★ `config_write` is **always ask**: `alwaysAsk` strips it out of any `allows:` after the merge. A file that can authorize a tool cannot authorize the tool that "rewrites itself".
 - The tier (`allow` / `ask`) and the agent's `tools:` list are **two questions**: the first is shared, the second is per agent. A tool can be `allow` and still be invisible to some agent.
@@ -76,7 +76,8 @@ Prefill the struct → decode file by file (yaml.v3 writes only the keys that ap
 ★ `config_write` **cannot write `server/`** (the write gate `ValidatePath` refuses it), but `config_get` **can read it** (the read gate `ValidateReadPath` only cares about the shape). The two gates are not the same thing.
 ★ `config_validate {}` is fail-fast: it gives only the first blocking error plus every hint, not the full list of problems.
 ★ `config_get` does not leak secrets (the configuration only holds `${ENV}` / `@file:` references); over 64 KiB it **refuses** outright instead of truncating.
-★ `config_write` returns `applied` / `requiresRestart` — it takes effect at the next `PrepareAgent`; writing the agent itself is allowed too.
+★ `config_write` returns `applied` / `requiresRestart` — it takes effect at the next `PrepareAgent`; writing the agent itself is allowed too. ★ `applied: true` means the watcher will pick the file up, **not** that this turn can see it.
+★ **The config tools answer from two places.** The **file** answers (`config_get {path}`, `config_validate {path, content}`) read the disk, so a write is visible there at once. The **tree** answers (`config_tier`, the `effective` summary of `config_get {}`, the `deferred` of `config_notices`) come from the snapshot the turn was built with — a file written in this turn is on disk but in no tree yet, and it joins on the next turn.
 
 ## Skills (skills/) and hot vs. cold
 
@@ -89,6 +90,7 @@ Prefill the struct → decode file by file (yaml.v3 writes only the keys that ap
 ## Known traps (check these first)
 
 - A leftover `disabled_tools` / an omitted `tools:` — the former errors at load time, the latter silently becomes zero tools.
+- An agent written in this very turn answers "not in this turn's configuration yet" — **the write succeeded**; the tree catches up on the next turn, and the error says exactly that. Writing the file again is the mistake.
 - The `header:` of `llm/<provider>.yaml` is parsed but **never consumed**.
 - When provider-level `extra` happens to hold only `temperature` or `max_tokens`, it overrides the agent's value of the same name.
 - `agents[].reasoning` is not in the model's vocabulary → silently ignored, **and not reported**; the loader only checks the files under the `validate()` path.

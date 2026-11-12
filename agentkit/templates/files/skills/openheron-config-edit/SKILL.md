@@ -10,7 +10,7 @@ context: inline
 
 `skill-expert` / `agent-expert` / `task` under `main` are three specialized instances of one and the same execution capability: this section treats the three alike, the only difference being the configuration domain; `main` gives all three the same instruction format.
 
-1. Before starting, read the target file with `config_get`; change only the files the instructions name, one at a time; re-read after the change to confirm.
+1. Before starting, read the target file with `config_get`; change only the files the instructions name, one at a time; re-read after the change to confirm the **file**. ★ The **tree** is this turn's snapshot: a file written now is on disk but in no tree yet, and it joins on the next turn.
 2. An unknown field is a hard error — rather write one key fewer than invent a key.
 3. Every duration carries a unit; every model reference carries the `<provider>/` prefix and has been declared in `llm/`.
 4. A secret is written only as `${ENV}` / `@file:`, never in plaintext, never echoed back.
@@ -21,7 +21,7 @@ context: inline
 9. Execute strictly by the instruction's **goal / scope / constraints**; if something is unclear, report "what is missing" instead of guessing the scope yourself.
 10. Act only inside the named configuration domain; when the work crosses domains, report which execution expert should take it over, and do not overstep.
 11. Understanding the intent and the trade-offs of a plan are not this skill's job (that is `main`'s); report only the key items.
-12. **After the change you must** run `config_validate` + `config_notices` and carry "error / warning / passed / not verified" into the conclusion; without a validation conclusion do not say "it is fixed".
+12. **After the change you must** run `config_validate` + `config_notices` and carry "error / warning / passed / not verified" into the conclusion; without a validation conclusion do not say "it is fixed". ★ `config_validate` reads the disk and `config_notices` reads this turn's snapshot — say in the conclusion that the new configuration is confirmed on the next turn.
 
 ## The tool call order (do not skip a step)
 
@@ -30,7 +30,7 @@ context: inline
 3. **Before writing** `config_validate {path, content}` — clear the line numbers in `issues[]`.
 4. **Every write goes through `config_write {path, content, baseRevision}`**: whole-tree pre-check → revision conflict detection → refusal of plaintext → atomic replacement → trial merge → rollback on failure.
    `write_file` / `edit_file` are a fallback only when `config_write` explicitly refuses that path, and the reason has to be stated in the conclusion.
-5. After the change `config_validate {}` (the whole tree on disk, fail-fast) and `config_notices {}`.
+5. After the change `config_validate {}` (the whole tree on disk, fail-fast) and `config_notices {}` (this turn's snapshot).
 6. Need to confirm a tier → `config_tier {tool}` / `{agent}`.
 
 ★ `config_write` is always `ask` and cannot write `server/`; `config_get` can read `server/`. When you hit a `server/` change, report "a human has to edit it and restart".
@@ -60,7 +60,7 @@ context: inline
 
 - The file name allow-list: `http.yaml` `web_search.yaml` `wikipedia.yaml` `kb.yaml` `filesystem.yaml`; anything else = a hard error at load time.
 - `filesystem.yaml` carries only `allows:`, and it **loosens** the tier of the filesystem tools (added onto the code base, it cannot take a name away); it can neither add nor remove tools. Tightening is done through the agent's `tools:`.
-- `allows:` uses **the file's own vocabulary** (`request_get` / `duckduckgo_search` / `wikipedia_search` / `kb_search`), not the exposed names; `kb_index` and the write methods ask by default.
+- `allows:` names the tools the way the model sees them (`request_get` / `duckduckgo_search` / `wikipedia_search` / `kb_search`, and `write_file` / `edit_file` / `execute` for the filesystem file); `kb_index` and the write methods ask by default. ★ An **MCP** file is the other case: there the names are the **server's own** (`create_issue`), because the exposed name is assembled with the namespace.
 - In an MCP file, `tools:` is the filter and `allows:` is the tier exception — two questions, one cannot substitute for the other. ★ The file's `tools:` narrows the server down to **the servers it applies to**; the agent's `mcps:` decides whether the server is mounted at all.
 - The parameters: `http.methods` defaults to `[get]`; `web_search.provider` only accepts `duckduckgo`; `kb.model` is required when `corpus_dir` is not empty and has to be `kind: embedding`; `corpus_dir` is relative to the project root, and an absolute path is refused.
 - Effective: hot (including the tier).
@@ -76,7 +76,7 @@ context: inline
   it only silently does not take effect — use the `/mcps` panel to check the tool names the server actually provides, do not copy them from memory.
 - The server cannot be reached: the tools are not mounted at all plus one warning, and **the process start is not affected**. `timeout` / `call_timeout` are lenient,
   a wrong value falls back to the default and goes into `deferred`.
-- The list of the servers that get started is the **union** of the servers listed by all the agents. Effective: hot; on a generation change the stdio child processes are recreated.
+- The list of the servers that get started is the **union** of the servers listed by all the agents. Effective: hot — but ★ the stdio child belongs to the **manager**, not to the turn: a turn that ends does not kill it, and only a changed **declaration** restarts it (a new generation alone does not). A server that is still starting answers "the server is starting", and its tools join the **next** turn.
 
 ## Scenario E: the process itself (server/)
 

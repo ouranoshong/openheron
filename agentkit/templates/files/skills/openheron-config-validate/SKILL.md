@@ -16,9 +16,9 @@ and the offset of the frontmatter is corrected by `parseShift` — all of these 
 |---|---|---|
 | 1 | `config_validate {path, content}` | clear the `issues[]` before the write (`Line: 0` means "no line", not line 0; the message of a cross-file rule names the file) |
 | 2 | `config_validate {}` | the whole tree on disk. **fail-fast**: only the first blocking error plus every hint, not the full list of problems |
-| 3 | `config_notices {}` | `deferred[]` / `version` / `configVersion` / `watch` |
-| 4 | `config_tier {tool}` or `{agent}` | the tier and the effective tool table (the result after `alwaysAsk`) |
-| 5 | `config_get {}` | the partition table, the file list, **the configuration the process holds** |
+| 3 | `config_notices {}` | `deferred[]` / `version` / `configVersion` / `watch` — the `deferred[]` is the snapshot's |
+| 4 | `config_tier {tool}` or `{agent}` | the tier and the effective tool table (the result after `alwaysAsk`), read from this turn's snapshot |
+| 5 | `config_get {}` | the partition table, the file list, **the configuration this turn was built with** (the snapshot) |
 
 ★ A parse failure has no hints (the hints hang off the `*Config`), but the collection of the notices is ordered **before** the hard rules — one failing rule does not swallow the "you probably did not mean this".
 ★ `config_write` comes with its own whole-tree pre-check and `baseRevision` conflict detection; after a refused write the file is byte for byte the same as before the write.
@@ -43,6 +43,8 @@ and the offset of the frontmatter is corrected by `parseShift` — all of these 
 | the request returns 401 | `${ENV}` is not set: it only goes into `deferred`, and the failure moves to the moment the endpoint is called |
 | the model never compacts | `context_window` is not declared, or `summarize_at` is written on the model side (deprecated) |
 | a certain agent never ran | unreachable from `main` — it does not error, but it is never constructed |
+| the agent was written in this very turn and the tree says it does not exist | **the write succeeded**: the config tools read this turn's snapshot, so the new agent appears on the next turn — the error says exactly that. Do not write it again |
+| the agent is on disk but never runs | the loader left it out of the tree (an undeclared model, a broken subagent link) — `config_notices` / `config_validate` say why |
 | `context: fork` does not take effect | a typo in `context` does not error, it silently becomes inline; `inline` is not a declared constant |
 | the template and the code disagree | the factory template comments outrun the code: `web_search.provider` only accepts `duckduckgo`; an empty `kb.model` is not a pure lexical retrieval |
 | "it did not crash, so it is right" | a failed reload **keeps the last good configuration** and writes only one log line; the retired `policy/` directory only goes into `deferred` |
@@ -61,11 +63,11 @@ a `mcps` server name that does not match the regex, an http server carrying `env
 
 ## The runtime confirmation
 
-1. The `deferred` and the `configVersion` of `config_notices {}` — confirm that what is running really is the one you have just changed.
+1. The `configVersion` of `config_notices {}` — it hashes the **disk**, so it moves as soon as the file is written. ★ The `deferred[]` next to it is the **snapshot's**: it lists the problems of the configuration that was running when the turn started, not the new one.
 2. For a change in a hot partition, watch whether the generation change happens (on a failure `onChange` is not called and the old configuration keeps serving).
 3. A change under `server/` is **verified after the restart**; `config_write` does not write this section at all, it has to be changed by hand.
 4. A content change under `skills/` is hot: it rebuilds the snapshot and takes effect on the next turn.
-5. The `applied` / `requiresRestart` in the `config_write` return say whether this change really took effect — it takes effect at the next `PrepareAgent`.
+5. The `applied` / `requiresRestart` in the `config_write` return say whether this change really took effect — it takes effect at the next `PrepareAgent`. ★ `applied: true` means the watcher will pick it up, **not** that this turn sees it: every `config_*` tool in this turn still reads the snapshot it started with.
 
 ## The output contract
 
