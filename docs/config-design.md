@@ -2252,7 +2252,7 @@ Agent 池与审批链见 `agent-design.md (upstream)`；agent 装配 API 见
 
 ---
 
-## 8. 热更新（P1，✅ 已实施）
+## 8. 热更新（P1–P3，✅ 已实施）
 
 ### 8.1 分区
 
@@ -2357,42 +2357,66 @@ sha256 几十 KB 可以忽略 —— 而换掉的是一类**说不清的漏检**
 
 ### 8.5 换代的实际接线
 
+★ **2026-11-13（P2）改过**：换代不再是「一改全换」，而是**按依赖重建**；
+**2026-11-13（P3）又加了一条**：一轮**钉住自己开始时的那棵树**。
+
 ```
 spec.Reloader.Reload() succeeds
         │
-        └─ onChange ──► agentConfig.set(cfg)        (cfg + gen are published under one lock, main.go:707)
+        └─ onChange ──► agentConfig.set(cfg)        (cfg + gen are published under one lock)
                                 │
                                 ▼
-                the next Builder.Build asks mgr.Current()   (agentkit/build/builder.go:181)
+                the next Builder.Build asks mgr.Current()
                                 │
-                                ├─ snapshotFor: the generation only moves forward (agentkit/build/snapshot.go:144)
+                                ├─ reloadIfMarked: the write path only MARKED the file
+                                │     (agentkit/spec/config.go: Mark / DrainMarks)
+                                │     ├─ drain the marks → svc.Load() → mgr.Publish(fresh)
+                                │     └─ the marks are a cache; the truth is the content hash
+                                ▼
+                        snapshotFor: the generation only moves forward
                                 │     ├─ spec / policy / table
                                 │     ├─ models / tools
-                                │     └─ a new heavyDeps (backend / tool set, built lazily, agentkit/build/snapshot.go:48-53)
+                                │     └─ a new heavyDeps (backend / tool set, built lazily)
                                 ▼
-                        pool.GetOrBuild(name, gen)   (agentkit/build/builder.go:254)
-                          (the entry carries the generation; an old generation no longer hits, agentkit/build/pool.go:33)
+                        computeDeps: every agent's own fingerprint
+                                │     (agentkit/build/fingerprint.go)
+                                │     ├─ its own file, its model file, its tools, its skills
+                                │     ├─ its sub-agents' fingerprints, recursively
+                                │     └─ the live tool list of the MCP servers it mounts
+                                ▼
+                        pool.GetOrBuild(name, fingerprint)
+                                │
+                                ├─ a changed dependency ⇒ a new fingerprint ⇒ a new entry
+                                └─ an unchanged one ⇒ the old entry stays in place
+                                ▼
+                        ★ and a RESUME asks for the tree it started with
+                                (agentkit/run/runtime.go: parentRunOf → Turn.pin
+                                 → agentkit/build/builder.go: pooledRoot → pool.Lookup)
 ```
 
-★ **失败不回调**：`Service.Load` 的语法 / 模型引用 / 拓扑校验失败时
-（`agentkit/spec/load.go:616`），`Reloader` 不调用 `onChange`，管理器保留旧一代
-（`agentkit/spec/reload.go:174-181`）。因此不需要另写 `validateModels`，也不会出现
-「接口报 A 代、运行跑 B 代」。
+★ **失败不回调**：`Service.Load` 的语法 / 模型引用 / 拓扑校验失败时，
+`Reloader` 不调用 `onChange`，管理器保留旧一代。因此不需要另写 `validateModels`，
+也不会出现「接口报 A 代、运行跑 B 代」。
 
 ★ **没有推送式换绑**：本仓库根本没有 `Reconfigure` 这类入口。换配置 = 管理器换内容；
 builder 下次问就是新的一代。在飞 turn 仍持有旧实例引用，跑完即被 GC 回收 ——
 不需要排空信号。
 
-★ **模型实例也随代际重建**：`heavyDepsOf` 的 `sync.Once` 属于快照
-（`agentkit/build/snapshot.go:37-53`），新快照必然新实例。改 `llm/*.yaml` 或
-`agents/main.md` 后管理器的代际 +1（`main.go:707-710`），池里那条记录的代际对不上了
-（`agentkit/build/pool.go:33`），`/v2/agents` 与运行期同时看到新模型。
+★ **写路径只标记**（P2）：落盘的是**配置服务**，它记下「哪些文件变了」；
+**重建发生在下一轮建树之前**，而且**只重建受影响的那几个 agent**。
+★ 标记是**缓存不是真相**：进程重启后标记是空的，答案仍然对 —— 因为真相是
+磁盘上的内容哈希。
+
+★ **一轮钉住自己开始时的那棵树**（P3）：run 的行记下这棵树的指纹，
+恢复那一轮**按指纹要 agent**，而不是按名字要「当前那棵」。
+⇒ 被打断的那一轮继续用它开始时的那棵树；**新配置在下一轮生效**。
+★ 钉住的那棵树不在池里（进程重启过）⇒ 打一条 warn，退回当前那棵，**不静默换树**。
 
 ★ **这一节讲的是现在。** 「工具表面说清答的是哪一边」、「配置根里的写统一走配置服务」与
 「重载改成标记式按需重建」的改造方案在 `docs/config-optimization-design.md` ——
-那篇是**提案，未实施**（其中 P1 已经落地），§7 列了已经拍板的决定。
+那篇是**改造方案**，P1–P3 已落地，**P4（代际退休）仍是提案**，§7 列了已经拍板的决定。
 ★ 两篇不打架：一篇讲现在，一篇讲将来；而 §8.5 那条「换代即换树」的接线，
-正是那篇要改掉的东西。
+正是那篇要改掉的东西 —— **它已经改掉了**。
 
 ---
 

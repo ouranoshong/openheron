@@ -304,7 +304,7 @@ agent 的档位，而 loader 不检查 —— 于是 vendor 没有的档位能�
 
 | 工具 | 输入 | 输出 | 复用 | 档位 |
 |---|---|---|---|---|
-| `config_get` | `{path}` 或 `{}` | 单文件：`{path, exists, hot, revision, content, source}`；无参：分区表、文件清单、**生效**配置摘要，外加 `runningVersion` 与 `diskVersion` | `Manifest` / `ReadFile` | allow |
+| `config_get` | `{path}` / `{path, impact}` / `{impact}` / `{}` | 单文件：`{path, exists, hot, revision, content, source}`；无参：分区表、文件清单、**生效**配置摘要，外加 `runningVersion` 与 `diskVersion`；★ 带 `impact`：这一份（或整棵树）的影响范围 | `Manifest` / `ReadFile` | allow |
 | `config_validate` | `{path, content}` 或 `{}` | `{ok, issues[], configVersion, source}` | `Diagnostics` / `Check` | allow |
 | `config_template` | `{path}` / `{section}` | `{path, content}` / `{section, templates}`；都没有时给索引 | `TemplateFor` / `Templates` / `Skeleton` | allow |
 | `config_notices` | `{}` | `{deferred[], runningVersion, diskVersion, watch, source}` | `Deferred()` / `Fingerprint()` | allow |
@@ -317,6 +317,14 @@ agent 的档位，而 loader 不检查 —— 于是 vendor 没有的档位能�
 其余答「disk」。★ 而 `runningVersion` 与 `diskVersion` 是**两个数**：
 盘上那份和本轮跑的那份，在热更新接手之前一直是不同的。
 这一节的形状是 `docs/config-optimization-design.md` §2 定的（✅ P1 已实施）。
+
+★ **`config_get` 的第二个参数是 `impact`**（✅ P2 已实施）：它回答
+「**下一轮什么会变？**」——
+`{path, impact: true}` 答**这一个文件**的影响（谁依赖它、谁会因为它重建），
+`{impact: true}` 答**整棵树**的影响（哪些文件变了、下一轮哪些 agent 会重建）。
+⇒ 答案里的 `source` 是 `running`（它讲的是**下一轮**要用的那棵树）。
+★ 形态与答案形状见 `docs/config-optimization-design.md` §5；
+**不新增第七个工具** —— `config_get` 已经是「问配置」的那一个。
 
 ### 4.1 四个要点
 

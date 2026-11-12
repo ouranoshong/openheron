@@ -1,6 +1,6 @@
 # 配置系统优化改造方案
 
-> **状态：P1 已实施（2026-11-12）；P2–P4 是提案，未实施（§5 的形态已定，实现仍在 P2）。**
+> **状态：P1–P3 已实施（P1 2026-11-12，P2/P3 2026-11-13）；P4 是提案，未实施。**
 >
 > ★ 本文写的是**要改成什么样**。现在的实现在
 > `docs/config-design.md` §8（热更新）与 §6（配置表面）里；本文的每一条结论都从那里出发。
@@ -9,6 +9,9 @@
 > ★ **§1 讲的是改造前的样子。** P1 已经把 §1.3、§1.5、§1.6 与 §1.7 那几条改掉了
 > （§2 与 §3 标着「✅ 已实施」）；它们留在这里，是因为后面的设计是从这几条事实推出来的。
 > ★ 改过之后，§1.5 那张表与 §1.6 那两句现在是**历史**——代码里已经不再是这样。
+> ★ **§1.1 与 §1.2 同样成了历史**：P2 把重建粒度换成了指纹，P3 把「一轮钉住自己」
+> 变成了事实。
+> ★ **§1 里的行号是改造前的位置** —— 代码已经走了，别照着找；现在的落点在**附录 A**。
 >
 > ★ **触发它的两件事都发生在真实使用里**，不是设想：
 >
@@ -24,10 +27,10 @@
 >
 > | 部分 | 解决什么 | 阶段 |
 > |---|---|---|
-> | §2 工具表面的一致性 | 模型能不能判断自己改没改 | P1 |
-> | §3 写入路径统一 | 改配置和改普通文件是不是同一套检查 | P1 |
-> | §4 重载改造 | 一次改动为什么换掉整棵树 | P2–P4 |
-> | §5 影响范围查询 | 「下一轮什么会变」可不可回答 | P2（形态已定） |
+> | §2 工具表面的一致性 | 模型能不能判断自己改没改 | P1 ✅ |
+> | §3 写入路径统一 | 改配置和改普通文件是不是同一套检查 | P1 ✅ |
+> | §4 重载改造 | 一次改动为什么换掉整棵树 | P2–P3 ✅（P4 仍是提案） |
+> | §5 影响范围查询 | 「下一轮什么会变」可不可回答 | P2 ✅ |
 
 ---
 
@@ -320,7 +323,7 @@ shell 里的重定向能写配置根，**绕得过任何闸门**。
 
 > **写只标记；重建按依赖发生；一轮钉住自己开始时的那棵树。**
 
-### 4.2 标记：写路径**不再**触发重建
+### 4.2 标记：写路径**不再**触发重建 ✅ 已实施（P2，2026-11-13）
 
 - 写路径（`config_write` 与文件工具）做完闸门、落盘之后，**只做一件事**：
   把「哪些文件变了」记进一个**脏集合**。
@@ -330,8 +333,12 @@ shell 里的重定向能写配置根，**绕得过任何闸门**。
   它省掉一次全量扫描，不承担正确性。
 - 脏集合放哪：**进程内**（`agentkit/build` 的 builder）。不写进 `state/`：
   它不是需要跨重启存活的事实。
+- ⇒ **落点**：标记由**配置服务**记（`agentkit/spec/config.go` 的 `Service.Mark`
+  与 `DrainMarks`），因为**落盘路径只有它**（`agentkit/spec/write.go` 的
+  `Write` / `WriteMany`）；builder 在建树前把标记取走、重读一次配置、
+  再把新配置发布出去（`agentkit/build/builder.go` 的 `reloadIfMarked`）。
 
-### 4.3 重建的粒度：从**全局代际**换成**每个 agent 自己的依赖指纹**
+### 4.3 重建的粒度：从**全局代际**换成**每个 agent 自己的依赖指纹** ✅ 已实施（P2，2026-11-13）
 
 代际是**全局**的，所以任何改动都会让所有 agent 失效。要按需重建，就得把
 「什么变了」换成**「谁变了」**——给每个 agent 一个**自己的**指纹。
@@ -347,33 +354,108 @@ shell 里的重定向能写配置根，**绕得过任何闸门**。
 | 它 `skills:` 列出的那些 `skills/<name>/` | 技能正文 |
 | **它子 agent 的指纹**（递归） | ★ 父的 `task` 工具描述里嵌着子 agent 的名字与描述 |
 
-⇒ **池的键从 (名字, 代际) 变成 (名字, 指纹)**（`agentkit/build/pool.go:31`）。
+⇒ **池的键从 (名字, 代际) 变成 (名字, 指纹)**（`agentkit/build/pool.go`）。
 
 ★ **这一条顺带解决了「改一个 skill 重建整棵树」**：技能只进它自己那几个
 agent 的指纹，别人的指纹不动，池里那份 entry 继续用。
 
-### 4.4 ★ 一轮钉住自己的 agent —— 这是修「打断」的那一条
+⇒ **落点**：指纹的算法在 `agentkit/build/fingerprint.go`（`computeDeps`
+与 `fingerprintOf`）。★ **贡献是「窄」的**：`tools/` 分区只算**这个 agent
+用到的那些工具**的配置，加上**覆盖了它那些工具的 `allows:` 子集** ——
+一份文件对这个 agent 什么都没说，就算作「没贡献」。★ 但**文件路径仍然
+进指纹的映射**：这样「某文件开始给它的工具开例外」也能被发现。
+
+★ **MCP 服务器的工具清单已经并进指纹**（P2 顺带做了）：清单变了 ⇒ 挂载它的
+agent 指纹变了 ⇒ 它们重建。清单不进「文件哈希」那一栏，因为服务器起来的时候
+没有改任何文件。
+
+### 4.4 ★ 一轮钉住自己的 agent —— 这是修「打断」的那一条 ✅ 已实施（P3，2026-11-13）
 
 - **问题**：一轮跑到一半被审批打断，回来时 `makePrepareAgent` 取的是**当前**代际
   （§1.2），于是它继续在一个**换过的** agent 上跑。
 - **提案**：**run 记住自己开始时那棵树的指纹**；恢复时按**指纹**取回，
   不是按名字取「当前那棵」。
-  - 池按 (名字, 指纹) 存 entry（`agentkit/build/pool.go:58` 现在是 `p.ents[name] = e`，
-    一代换一代就把旧的丢掉了）—— 改成**多留一代**：
-    `p.ents[name][fingerprint] = e`，旧的 entry 在**没有 run 引用它**之后才回收。
-  - run 的行（`storage/runledger.go` 的 `Run`）或 turn handle 记下这棵树的指纹；
-    `makePrepareAgent` 在恢复时拿这个指纹去要 agent。
+  - 池按 (名字, 指纹) 存 entry —— 旧的 entry **留着**（§7.1 第五条：
+    留到进程退出）。
+  - run 的行（`storage/runledger.go` 的 `Run`）记下这棵树的指纹
+    （`TreeFingerprint`）；恢复时按父 run 的指纹去要 agent。
 - ⇒ **被打断的那一轮，继续用它开始时的那棵树**：报告回得来。
   而**新配置在下一轮生效**（下一轮 = 下一个新 run，不含恢复那一轮）。
 - ★ 这条与 §4.3 是同一件事的两面：指纹既是「谁变了」的答案，
   也是「我是谁」的答案。有了它，恢复不必猜「当前是第几代」。
 
-### 4.5 MCP 的工具清单变化走同一条路
+⇒ **落点**：
 
-现在：MCP server 的清单变了 → `main.go:727` `bump()` → **全局** `gen++`
-（`agentkit/build/builder.go:107` `SetGenerationBump`）。
+| 环节 | 在哪 |
+|---|---|
+| run 的行记指纹 | `storage/runledger.go` 的 `Run.TreeFingerprint` |
+| builder 交出指纹 | `agentkit/build/builder.go` 的 `Build` 返回 `(agent, fingerprint, err)` |
+| 恢复时取父 run 的指纹 | `agentkit/run/runtime.go` 的 `parentRunOf` |
+| 这一轮带着它 | `agentkit/run/turn.go` 的 `Turn.pin` → `agentkit/run/loop.go` 的 `makePrepareAgent` |
+| 按指纹取回那棵树 | `agentkit/build/builder.go` 的 `pooledRoot` → `agentkit/build/pool.go` 的 `Lookup` |
+
+★ **指纹与 agent 必须同一次调用返回**：中间若有一次重载，记下来的树就错了。
+★ **钉住的那棵树不在池里**（进程重启过）⇒ **打一条 warn，退回当前那棵**——
+**不静默换树**（`agentkit/build/pinned_test.go` 的
+`TestAPinnedBuildSaysWhenTheTreeIsGone`）。
+
+★ **恢复轮拿到的是池里那一份实例，不是新装的。** 这不是省事，是**必须**：
+旧树的内容**只存在于那个实例里** —— 磁盘上的文件已经变了，重新装配出来的
+是**新树**。⇒ 池里的旧 entry 因此不是缓存，是**旧树的材料**。
+
+★ **代价**：被打断的那个 agent 实例被恢复轮接着用，于是**两轮共享同一条事件
+流**。openheron 自己的规矩是「一条流只有一个读者」（`agentkit/run/loop.go`），
+这里被打破了 —— 见 §4.7。
+
+### 4.5 MCP 的工具清单变化走同一条路 ⏳ 一半已实施（P2），退休代际是 P4
+
+现在：MCP server 的清单变了 → `main.go` 的 `bump()` → **全局** `gen++`
+（`agentkit/build/builder.go` 的 `SetGenerationBump`）。
 提案：清单变了 → **受影响 agent 的指纹变了** → 池按 §4.3 重建它们。
 ★ 不再需要 `bump()` 这条全局通道；**「代际」这个概念可以整体退休**。
+
+★ **清单并进指纹这一步已经在 P2 做了**（`agentkit/build/mcpmanager.go` 的
+`ToolsOf`）：MCP 服务器的**实时**工具清单是它挂载的那些 agent 指纹的输入之一，
+所以清单一变，挂载它的 agent 指纹就变，池就重建它们。
+★ **剩下的**是把「代际」这个概念本身退休：`main.go` 的 `agentConfig.gen`、
+`SetGenerationBump`、`agentConfig.bump()`、`/v2/runtime` 的 `gen` 字段，
+以及**快照缓存的键**（快照现在按代际缓存，见 §7.3 的第四条）。
+
+### 4.7 ★ 一个上游的数据竞争：loop 收尾时读，agent 还在写
+
+P3 的验收测试第一次让**真的 agent** 走完整的打断→恢复，于是撞上一个
+**框架内部**的数据竞争。★ 机制是实测出来的（eino v0.9.22）：
+
+- eino 的 `TurnLoop` 有一个 **proxy 协程**（`adk/turn_loop.go:1878`），
+  它把 agent 的事件转发出去。★ 转发一个**取消事件**时，它把
+  `l.capturedCancelErr` 写进 loop 自己的状态（`:1889`）。
+- 同一个 loop 的协程在收尾时读那个状态（`:1723` 与 `:2006`），**没有同步**。
+- ★ **被取消的 agent 会回一个 `*adk.CancelError` 事件** ——
+  那个事件到达时，loop 可能已经收尾了，于是那个写落在**已经死掉的**
+  loop 上。
+
+⇒ `go test -race` 会报它。**那两行是上游的代码，openheron 改不了。**
+
+★ **什么时候会撞上**：**loop 被拆掉的时候，agent 还在跑**。实测两条路：
+
+1. ★ **以审批结束的一轮**：这一轮的 callback 返回错误 → loop 退出 →
+   收尾时读那个状态，而 agent 还在收尾 ⇒ 撞上。
+   ⇒ **openheron 侧能修**：一轮结束前**先把 agent 的事件流排空**
+   （`agentkit/run/loop.go` 的 `settleAgent`，排空的信号由
+   `agentkit/emit/emit.go` 给）。★ 排空之后 proxy 协程已经退出，
+   那个写不会再发生 —— **写没了，竞态也就没了**。
+   ★ 排空**不取消任何东西**：这一轮的 context 是框架写检查点用的，
+   取消它会把检查点一起带走，而检查点正是让审批能被回答的东西。
+2. ★ **中止与收尾**（`rt.Abort` / `rt.Shutdown`）：**框架自己**停 loop、
+   同时取消 agent，写与读真的并发。
+   ⇒ ★ 要彻底修，agent 得有**自己的 context**（与 loop 的 context 解耦），
+   中止时**先 quiesce agent、再停 loop**。★ 那是**另一件工程**，
+   本方案不做。★ 但它是真的：**中止一个正在跑的会话，会撞上它。**
+
+⇒ **验收测试按生产形态写**：审批来自**子 agent**
+（`agentkit/run/pintree_test.go` 的 fixture 就是 `main` → `task`），
+并且**每一轮都等到它真正结束**再让 runtime 收尾 ——
+★ 否则测试自己就在拆一个还在跑的 agent。
 
 ### 4.6 提案明确**不做**的事
 
@@ -381,7 +463,7 @@ agent 的指纹，别人的指纹不动，池里那份 entry 继续用。
   写与重建解耦，是这一节全部内容的要害。
 - ★ **不做「脏集合决定正确性」**：脏集合只决定「要不要重算」。
   重算永远以磁盘哈希为准（§1.4）。
-- ★ **不改 `server/` 的非热重载**：它不在热分区里（`agentkit/spec/config.go:71`
+- ★ **不改 `server/` 的非热重载**：它不在热分区里（`agentkit/spec/config.go` 的
   `Editable: false, hot: false`），本来就只影响进程自己的参数。
 
 ---
@@ -509,13 +591,15 @@ P2 的重建机制是：按新配置算每个 agent 的指纹，和运行中那�
 | 期 | 做什么 | 风险 | 状态 |
 |---|---|---|---|
 | **P1** | §2 工具表面一致性 + §3 写入路径统一 | 小：只改写路径与答案，不动重建 | ✅ **2026-11-12** |
-| **P2** | §4.2 + §4.3：标记 + 每 agent 依赖指纹，池的键换成指纹；**外加 §5 的影响范围查询**（形态已定：放在 `config_get` 上） | 中：重建粒度的核心 | 提案 |
-| **P3** | §4.4：run 钉住自己的树（多留一代 + 记住指纹） | 中：触及恢复路径 | 提案 |
-| **P4** | §4.5：MCP 清单变化并入指纹，全局 `bump()` 退休 | 大：代际这个概念退场 | 提案 |
+| **P2** | §4.2 + §4.3：标记 + 每 agent 依赖指纹，池的键换成指纹；**外加 §5 的影响范围查询** | 中：重建粒度的核心 | ✅ **2026-11-13** |
+| **P3** | §4.4：run 钉住自己的树（记住指纹 + 按指纹取回） | 中：触及恢复路径 | ✅ **2026-11-13** |
+| **P4** | §4.5 剩下的一半：全局 `bump()` 与「代际」退休 | 大：代际这个概念退场 | 提案 |
 
 ★ **P1 可以单独上**：它解决「`edit_file` 没有修订冲突检查」与
 「模型判断不出自己改没改」这两条，不依赖后面任何一期。
-而 P1 单独上线时，**「打断」还在** —— 写配置仍然会整棵树重建，所以要等到 P3。
+★ **P2 + P3 一起上**：「打断」要修好，两条都得在——只有 P2 的话，
+重建变细了，但被打断的那一轮仍然会换树；只有 P3 的话，
+钉住了树，可树本身仍旧是一改全换。
 
 ### 6.2 验收用例（每一条都要有测试）
 
@@ -540,29 +624,47 @@ P2 的重建机制是：按新配置算每个 agent 的指纹，和运行中那�
   （`TestAWriteReportsBothVersionsAndSaysWhichMoved` 与
   `TestConfigTierNamesAJustWrittenAgentAsPending`）
 
-**P2**
+**P2** ✅ 已落地，测试在 `agentkit/build/fingerprint_test.go` 与
+`agentkit/spec/toolfiles_test.go`
 
 - 写 `agents/skill-expert.md` ⇒ **skill-expert 与它的父**被重建，
   **别的 agent 不重建**（池的 miss/hit 计数可断言）。
+  （`TestChangingOneAgentRebuildsItsTreeAndNobodyElse`）
 - 写 `skills/<name>/SKILL.md` ⇒ 只有 `skills:` 里点了它的 agent 被重建。
+  （`TestChangingASkillRebuildsOnlyTheTreeThatNamesIt`）
 - 写 `tools/http.yaml` ⇒ 档位表受影响的 agent 被重建。
+  （`TestChangingAToolsFileRebuildsOnlyTheAgentsThatUseItsTools`）
 - 写一个**没人依赖**的 `tools/foo.yaml` ⇒ **没有 agent 被重建**，且
   `config_get {path: "tools/foo.yaml", impact: true}` 答 `dependents: []`、
   `rebuilds: []`。
+  （`TestAFileNobodyDependsOnRebuildsNobody`、
+  `TestTheImpactQuerySaysNobodyDependsOnAnUnusedFile`）
 - ★ `config_get {impact: true}` 的 `rebuilds` 与「池里真正被重建的 agent 集合」
   **完全相等**（断言相等，而不只是断言某个 agent 在里面）。
+  （`TestTheImpactQueryAndThePoolAgreeOnWhoIsRebuilt`）
 - ★ `config_get {path: "agents/skill-expert.md", impact: true}` 的 `dependents`
   只有 `skill-expert`，`rebuilds` 还有它的父（§5.3 的直接 vs 传递）。
-- ★ **重启之后**再问一次影响范围 ⇒ 答案与重启前**一致**
-  （脏集合是空的，答案却不变 —— §5.5）。
+  （`TestTheImpactQueryNamesTheDependentsAndTheRebuilds`）
+- ★ **答案不靠脏集合**：写完不重启，下一轮照样看见新配置（标记只是缓存）。
+  （`TestTheNextTurnSeesAWriteWithoutTheWatcher`）
 - 改 `server/config.yaml` ⇒ 影响范围答 `requiresRestart: true`，
   `dependents` 与 `rebuilds` 都为空（§5.6 第 1 条）。
+  （`TestTheImpactQuerySaysAColdPartitionNeedsARestart`）
 
-**P3**
+**P3** ✅ 已落地，测试在 `agentkit/run/pintree_test.go` 与
+`agentkit/build/pinned_test.go`
 
-- ★ **恢复的那一轮**：审批打断 → 落盘 → 批准 ⇒ 恢复拿到**同一个 agent 实例**
-  （断言指针相同或指纹相同），报告回来。
-- ★ **下一轮**才看到新配置（断言第二轮的 agent 指纹变了）。
+- ★ **恢复的那一轮**：审批打断 → 落盘 → 批准 ⇒ 恢复**要的是开始时那棵树的
+  指纹**，而不是当前那棵；工具真的又跑了一遍，报告回得来。
+  （`TestAResumeRunsOnTheTreeTheRoundStartedWith`）
+- ★ **下一轮**才看到新配置（断言下一轮问的是当前树、行的指纹也换了）。
+  （`TestTheNextTurnRunsOnTheNewTree`）
+- ★ **没有树就没有钉**：builder 说不出树的时候，字段留空，恢复也不钉。
+  （`TestARunWithoutATreeRecordsNone`）
+- ★ **钉住的那棵树要真的取回来**（同一个实例、同一份指纹）。
+  （`TestAPinnedBuildReturnsTheTreeItPinned`）
+- ★ **树不在了就说出来**：进程重启过 ⇒ 退回当前那棵，并打一条 warn
+  ——**不静默换树**。（`TestAPinnedBuildSaysWhenTheTreeIsGone`）
 
 **全部**
 
@@ -603,6 +705,38 @@ P2 的重建机制是：按新配置算每个 agent 的指纹，和运行中那�
 3. **§2.1 的 `source` 字段用不用英文？** ✅ 用了英文（`disk` / `running`）——
    答案面向模型，且与其它字段一致。
 
+### 7.3 P2 与 P3 期间又拍板的六条
+
+1. **指纹的贡献要「窄」到什么程度？** ✅ **`tools/` 分区只算这个 agent 用到的
+   那些工具**，加上**覆盖了它那些工具的 `allows:` 子集**。
+   ⇒ 一份文件对这个 agent 什么都没说，就算作「没贡献」。
+   ★ **但文件路径仍然进映射**：这样「某文件开始给它的工具开例外」也能被发现。
+   （`agentkit/build/fingerprint.go` 的 `toolsContribution`）
+2. **「这一份文件变了」是什么意思？** ✅ **「这个文件对某个 agent 的贡献变了」**，
+   不是「文件内容变了」。⇒ 没人依赖的文件 ⇒ `dependents: []`、
+   `changed: false`、`rebuilds: []` —— 这正是「它不影响下一轮」的答案。
+   （`agentkit/build/impact.go`）
+3. **指纹什么时候交出来？** ✅ **与 agent 同一次调用**（`Build` 返回
+   `(agent, fingerprint, err)`）。★ 中间若有一次重载，记下来的树就错了。
+4. **快照还按不按代际缓存？** ✅ **暂时按**（`agentkit/build/snapshot.go` 的
+   `snapshotFor`：代际不倒退，且不低于当前代际）。
+   ★ **这是 P4 退休「代际」时最后一处要改的地方**：快照现在按代际缓存，
+   代际退休了就得换一个键。★ 中途试过按配置指针缓存 —— 那会让
+   「工具面变了但 agent 不重建」重新出现（`TestTheToolsJoinTheNextTurn`），
+   已经回退。
+5. **钉住的那棵树不在池里怎么办？** ✅ **打一条 warn，退回当前那棵**——
+   **不静默换树**。★ 进程重启过才会这样；静默换树正是这个钉子要防的 bug。
+   （`agentkit/build/pinned_test.go` 的 `TestAPinnedBuildSaysWhenTheTreeIsGone`）
+6. **一轮结束前要不要等 agent 收尾？** ✅ **要，而且不取消任何东西。**
+   ★ 框架在 loop 收尾时读 agent 的状态，agent 的事件流在写那个状态 ——
+   一轮结束得太快，框架读的就是一个**正在被写**的字段（§4.7）。
+   ⇒ 一轮结束前**排空 agent 的事件流**（`agentkit/run/loop.go` 的 `settleAgent`），
+   等它关上了再让这一轮返回。
+   ★ **排空不取消**：这一轮的 context 是框架写检查点用的，
+   取消它会把检查点一起带走 —— 而检查点正是让审批能被回答的东西。
+   ★ **只等「结束」的那一轮**：失败的那一轮 agent 可能还在跑，
+   等它没有意义 —— 那是框架拆 loop 时的事（§4.7 的第二条）。
+
 ---
 
 ## 附录 A：本文引用的代码位置
@@ -641,17 +775,20 @@ P2 的重建机制是：按新配置算每个 agent 的指纹，和运行中那�
 
 | 位置 | 是什么 |
 |---|---|
-| `agentkit/build/pool.go:31` | `GetOrBuild()` —— 池的键 |
-| `agentkit/build/pool.go:58` | `p.ents[name] = e` —— 换代即丢旧 entry |
+| `agentkit/build/pool.go:48` | `GetOrBuild()` —— 池的键是 **(名字, 指纹)** |
+| `agentkit/build/pool.go:80` | `m[fingerprint] = e` —— ★ 旧 entry **留着**（钉住的那棵树还要用） |
+| `agentkit/build/pool.go:90` | `Lookup()` —— 按指纹取回钉住的那棵树（✅ P3） |
+| `agentkit/build/fingerprint.go` | ★ 指纹 —— 每个 agent 依赖什么（✅ P2） |
+| `agentkit/build/impact.go` | ★ 影响范围查询（✅ P2） |
 | `agentkit/build/builder.go:107` | `SetGenerationBump()` |
-| `agentkit/build/builder.go:181` | `b.mgr.Current()` |
-| `agentkit/build/builder.go:254` | `pool.GetOrBuild()` 的调用点 |
+| `agentkit/build/builder.go:162` | `b.mgr.Current()` |
+| `agentkit/build/builder.go:288` | `pool.GetOrBuild()` 的调用点 |
 | `agentkit/build/assemble.go:31` | `cfg.Backend = h.backend` —— 把 fsx 交给框架 |
 | `agentkit/build/assemble.go:100` | `cfg.SubAgents = children` —— 重建带子树 |
 | `agentkit/build/configgate.go` | ★ `configGate` —— build 层的实现，把写交给服务（✅ P1 新增） |
-| `agentkit/build/snapshot.go:48` | `heavyDepsOf()` |
-| `agentkit/build/snapshot.go:72` | `fsx.New(...)` —— 后端在这里造，gate 也在这里接上 |
-| `agentkit/build/snapshot.go:93` | `toolEnv` —— `cfg` 与 `svc` 都在这儿 |
+| `agentkit/build/snapshot.go:66` | `heavyDepsOf()` |
+| `agentkit/build/snapshot.go:90` | `fsx.New(...)` —— 后端在这里造，gate 也在这里接上 |
+| `agentkit/build/snapshot.go:111` | `toolEnv` —— `cfg` 与 `svc` 都在这儿 |
 | `agentkit/build/configtools.go:78` | `configToolProvider.Provide()` |
 | `agentkit/build/configtools.go:116` | `config_get` 读盘 |
 | `agentkit/build/configtools.go:129` | `config_get` 的 `Revision` 字段 |
@@ -681,12 +818,16 @@ P2 的重建机制是：按新配置算每个 agent 的指纹，和运行中那�
 
 | 位置 | 是什么 |
 |---|---|
-| `agentkit/run/loop.go:132` | `makePrepareAgent()` —— 每轮（也是每次恢复）取 agent |
-| `agentkit/run/loop.go:347` | `makeGenResume()` |
-| `agentkit/run/runtime.go:522` | 「a resume is a NEW run」 |
+| `agentkit/run/loop.go:125` | `makePrepareAgent()` —— 每轮（也是每次恢复）取 agent |
+| `agentkit/run/loop.go:253` | ★ `settleAgent()` —— 一轮结束前**排空** agent 的事件流 |
+| `agentkit/run/loop.go:406` | `makeGenResume()` |
+| `agentkit/run/runtime.go:534` | 「a resume is a NEW run」 |
+| `agentkit/emit/emit.go:183` | `pump()` —— agent 事件流的**唯一读者** |
+| `agentkit/emit/emit.go:98` | `Options.Drained` —— 「agent 的流关上了」这个信号 |
+| `storage/runledger.go` | ★ `Run.TreeFingerprint` —— 这一轮跑在哪棵树上（✅ P3） |
 | `main.go:680` | `agentConfig` |
 | `main.go:707` | `agentConfig.set()` —— `gen++` |
-| `main.go:727` | `agentConfig.bump()` |
+| `main.go:740` | `agentConfig.bump()` |
 
 ### 框架（上游，不在本仓库）
 
