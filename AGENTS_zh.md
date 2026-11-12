@@ -77,7 +77,7 @@
 > 的 `tools` 两处说。
 >
 > ★ `docs/config-optimization-design.md` 是**提案，未实施** —— 它说工具表面、写入路径与
-> 重载该往哪儿走，以及哪些事得由 owner 拍板。代码现状是 `docs/config-design.md` §8（热更新）
+> 重载该往哪儿走；其中 P1 已经落地，§7 列了 owner 已拍板的决定。代码现状是 `docs/config-design.md` §8（热更新）
 > 与 §6（配置表面）描述的样子：两篇不打架，一篇讲现在，一篇讲将来。
 > ★ 它的触发却是真的 —— 一次落在 agent 自己文件上的 `config_write` 会换掉整棵树，
 > 而被审批打断的那一轮回来时已经换了个 agent，于是报告回不来。
@@ -396,7 +396,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
 | `docs/sandbox-kit-design.md` | **Docker Sandbox Kit 打包设计方案** —— openheron 进程今天是什么样、一个把整个进程带进 microVM 的 v3 workload Kit、模型密钥如何留在宿主，以及当初必须实测的那条 SSE 路（**Kit 已建成并发布**；§4.2 还有三条没定） |
 | `docs/mcp-design.md` | **MCP 接入设计方案** —— 工具装配路径、MCP 客户端给它带来什么、`mcp__<server>__<tool>` 命名空间、工具表里的前缀匹配，以及 MCP 服务器在 Kit 里会跑在哪（**已实施**；§13 —— 非阻塞的 MCP 启动 —— 也已实施；§8 —— 沙箱 Kit 怎么打包一台 MCP 服务器 —— 仍是提案） |
 | `docs/config-design.md` | **配置系统设计说明** —— 配置根与它的三级解析、各个分区与它们的文件规格、加载与优先级、热更新，以及依赖铁律（**正文讲的是代码现状**；`mcps/` 分区与住在工具旁边的档位已实施） |
-| `docs/config-optimization-design.md` | **配置系统优化改造方案** —— 六个 `config_*` 工具各答哪一边、文件工具写配置根时怎么转交给配置服务、重载怎么改成「只做标记，下一轮按依赖重建」，以及那个回答「下一轮什么会变」的查询（**是提案，未实施**；§7 列了 owner 已拍板的决定与仍待拍板的三条） |
+| `docs/config-optimization-design.md` | **配置系统优化改造方案** —— 六个 `config_*` 工具各答哪一边、文件工具写配置根时怎么转交给配置服务、重载怎么改成「只做标记，下一轮按依赖重建」，以及那个回答「下一轮什么会变」的查询（**是提案，未实施**；其中 P1 已经落地，§7 列了 owner 已拍板的决定） |
 | `docs/tool-surface-design.md` | **工具面设计** —— 一个 agent 拿到哪些工具（`tools:` / `mcps:` / `skills:`）、MCP 命名空间的三段、配置面收敛成一个核心，以及六个 `config_*` 工具（**§2-§5 已实现**） |
 | `docs/logging-design.md` | **日志装配改造设计** —— 组合根、可变的 `log_level`、logger 注入、接管 hertz 的日志输出，以及把请求日志搬出 `llm/common`（**已实现**） |
 | `docs/animation-design.md` | **界面动效设计** —— 动效令牌、减少动态效果的降级、品牌标记的入场，以及仍是提案的界面那几条动效（**§2.3、§3、§4 已实现**） |
