@@ -170,11 +170,30 @@ func (rt *Runtime) makeOnAgentEvents(sess storage.Session, turn *Turn) func(cont
 		turn.events = events
 		turn.signalReady()
 
+		// ★ The drain channel is the run's word that the agent is done:
+		//   the derivation closes it when the agent's stream has closed.
+		drained := make(chan struct{})
+
 		artifacts, err := emit.Derive(events, emit.Options{
 			RunID:     turn.RunID,
 			RootAgent: sess.AgentID(),
 			Contexts:  rt.contexts(),
+			Drained:   drained,
 		}, turn.publisher, turn.abort)
+
+		// ★ The agent may still be winding down: the framework reads the
+		//   agent's state when the loop stops, and the agent's stream is
+		//   what writes it. ★ So a round that ended waits for the stream
+		//   to close — otherwise the framework reads a field the agent is
+		//   still writing.
+		//
+		// ★ A round that ENDED is the case: the agent has said what it
+		//   had to say, and the stream closes right behind it. ★ A round
+		//   that FAILED is not: the agent may still be running, and the
+		//   framework's teardown is what stops it.
+		if err == nil {
+			rt.settleAgent(turn, drained)
+		}
 
 		out := Outcome{
 			Intermediates: artifacts.Intermediates,
@@ -207,6 +226,39 @@ func (rt *Runtime) makeOnAgentEvents(sess storage.Session, turn *Turn) func(cont
 		}
 
 		return rt.finalize(sess, turn, out)
+	}
+}
+
+// agentSettleTimeout bounds the wait for the agent's event stream to close.
+//
+// ★ The wait is short in practice — the agent's stream closes right
+//
+//	behind its last event — and it is bounded because an agent that
+//	never closes would otherwise hold the round for ever.
+const agentSettleTimeout = time.Second
+
+// settleAgent waits for the agent's event stream to close.
+//
+// ★ The framework reads the agent's state when the loop stops, and the
+//
+//	agent's stream is what writes it. ★ Ending the round while the agent
+//	is still winding down leaves the framework reading a field the agent
+//	is still writing — a data race inside the framework.
+//
+// ★ The wait does not cancel anything. ★ The turn's context is what the
+//
+//	framework writes the checkpoint with, and a cancelled context would
+//	take the checkpoint with it — and the checkpoint is what makes the
+//	approval answerable.
+func (rt *Runtime) settleAgent(turn *Turn, drained <-chan struct{}) {
+	if drained == nil {
+		return
+	}
+	select {
+	case <-drained:
+		return
+	case <-time.After(agentSettleTimeout):
+		rt.logf("session=%s the agent's stream did not close after the round ended", turn.sessionID)
 	}
 }
 

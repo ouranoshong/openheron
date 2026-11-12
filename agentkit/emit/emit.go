@@ -86,6 +86,16 @@ type Options struct {
 	Contexts map[string]contract.AgentContext
 	// Logger is injected by the run. Nil drops the derivation's own lines.
 	Logger *slog.Logger
+	// Drained is closed when the agent's event stream has closed.
+	//
+	// ★ The run owns the channel, and it is the run's word that the agent
+	//   is done. ★ The framework reads the agent's state when the loop
+	//   stops, and the agent's stream is what writes it — so a round that
+	//   ends while the agent is still winding down leaves the framework
+	//   reading a field the agent is still writing.
+	//
+	// ★ Nil means the caller does not care.
+	Drained chan struct{}
 }
 
 // Artifacts are what the run archives.
@@ -123,6 +133,7 @@ func Derive(src Source, opts Options, sink Sink, cancel <-chan struct{}) (Artifa
 		opts:   opts,
 		sink:   sink,
 		events: make(chan *adk.TypedAgentEvent[*schema.Message], 64),
+		done:   make(chan struct{}),
 	}
 	go d.pump(src, cancel)
 	return d.run(cancel)
@@ -144,6 +155,13 @@ type deriver struct {
 	// events is the agent's stream, pumped by a goroutine.
 	events chan *adk.TypedAgentEvent[*schema.Message]
 
+	// done is closed when the derivation is over.
+	//
+	// ★ It tells the pump to stop handing events over: the run has
+	//   what it needs, and the events that are left are the agent's
+	//   way of winding down.
+	done chan struct{}
+
 	intermediates []*schema.Message
 	pending       []contract.PendingInterrupt
 	usage         contract.Usage
@@ -164,6 +182,9 @@ type deriver struct {
 //	the events it takes are the ones the cancelled run no longer wants.
 func (d *deriver) pump(src Source, cancel <-chan struct{}) {
 	defer close(d.events)
+	if d.opts.Drained != nil {
+		defer close(d.opts.Drained)
+	}
 	for {
 		ev, ok := src.Next()
 		if !ok {
@@ -173,11 +194,29 @@ func (d *deriver) pump(src Source, cancel <-chan struct{}) {
 		case d.events <- ev:
 		case <-cancel:
 			return
+		case <-d.done:
+			// ★ The derivation is over and the run does not want these
+			//   events any more. ★ The stream still has to be read to the
+			//   end: the framework reads the agent's state when the loop
+			//   stops, and the agent's stream is what writes it. ★ So the
+			//   pump reads the rest and drops it — it is still the only
+			//   reader, and the run's wait ends when the stream closes.
+			for {
+				if _, ok := src.Next(); !ok {
+					return
+				}
+			}
 		}
 	}
 }
 
 func (d *deriver) run(cancel <-chan struct{}) (Artifacts, error) {
+	// ★ The derivation is over the moment this returns — and the pump has
+	//
+	//	to know it: the events that are left belong to an agent that is
+	//	winding down, and nobody is going to read them.
+	defer close(d.done)
+
 	mainAgent := d.opts.RootAgent
 
 	for {

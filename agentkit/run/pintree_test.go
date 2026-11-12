@@ -330,6 +330,11 @@ func TestTheNextTurnRunsOnTheNewTree(t *testing.T) {
 	if runs[2].TreeFingerprint != "tree-2" {
 		t.Fatalf("★ the next turn must run on the new tree, got %q", runs[2].TreeFingerprint)
 	}
+	// ★ The round has to be OVER before the test ends: a round that is
+	//   still running when the runtime shuts down leaves the framework
+	//   tearing the agent down while it is still writing — and the
+	//   framework reads that state as it goes.
+	waitFor(t, func() bool { return ledgerOf(t, sess)[2].State == storage.RunWaitingApproval })
 	runtime.KeepAlive(firstLoop)
 }
 
@@ -365,5 +370,12 @@ func TestARunWithoutATreeRecordsNone(t *testing.T) {
 	if pins[1] != "" {
 		t.Fatalf("a run with no tree pins nothing, got %q", pins[1])
 	}
+	// ★ The round has to be OVER before the test ends: the resume runs
+	//   the tool for real, and a round that is still running when the
+	//   runtime shuts down is torn down mid-flight.
+	waitFor(t, func() bool {
+		runs := ledgerOf(t, sess)
+		return len(runs) == 2 && runs[1].State == storage.RunCompleted
+	})
 	runtime.KeepAlive(firstLoop)
 }
