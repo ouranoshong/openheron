@@ -15,7 +15,7 @@
 > `docs/user-manual.md` / `docs/user-manual_zh.md`（用户使用说明）、
 > `docs/developer-manual.md` / `docs/developer-manual_zh.md`（开发者说明）。
 >
-> **另有十一篇只有中文的文档**在 `docs/` 下 —— 架构与代码设计那一类。
+> **另有十二篇只有中文的文档**在 `docs/` 下 —— 架构与代码设计那一类。
 > ★ 它们的中文内容**接管了原文件名**：`docs/config-design.md` **就是**那篇中文文档 ——
 > 既没有 `_zh` 副本，也没有英文版：
 > `docs/context-usage-design.md`（上下文使用预估设计方案）、
@@ -30,9 +30,11 @@
 > 组合根 logger、hertz 适配器，以及把请求日志搬出 `llm/common`）、
 > `docs/animation-design.md`（界面动效 —— **部分已实现**：动效令牌、减少动态效果的降级、
 > 品牌标记的入场都在代码里；界面那几条动效还是方案）、
-> `docs/attachment-design.md`（附件 —— 上传的文件怎么落盘、服务端对它做了什么、界面怎么显示）。
+> `docs/attachment-design.md`（附件 —— 上传的文件怎么落盘、服务端对它做了什么、界面怎么显示）、
+> `docs/config-reload-design.md`（配置重载与写入路径改造方案 —— **是提案**：重载改成
+> 「只做标记，下一轮按依赖重建」，文件工具写配置根时转交给配置服务）。
 > **`docs/` 下其余设计文档仍在上游仓库** ——
-> 下面凡引用 `docs/xxx.md` 而这十五篇之外的，都是上游那份。
+> 下面凡引用 `docs/xxx.md` 而这十六篇之外的，都是上游那份。
 > 改语义前若拿不到它，先问，别凭印象改配置或接口。
 >
 > ★ **设计类文档只写中文。** 讲代码怎么搭起来的文档 —— 分层、
@@ -73,6 +75,12 @@
 > `mcps/` 分区（§6.7）与住在工具旁边的档位（§6.6）**已实施**。★ **全局 deny** 里的
 > 前缀匹配（§6.3）跟着 deny 清单一起没了：「不被暴露」现在只由文件的 `allows:` 与 agent
 > 的 `tools` 两处说。
+>
+> ★ `docs/config-reload-design.md` 是**提案，未实施** —— 它说重载与写入路径该往哪儿走，
+> 以及哪些事得由 owner 拍板。代码现状是 `docs/config-design.md` §8（热更新）与
+> §6（配置表面）描述的样子：两篇不打架，一篇讲现在，一篇讲将来。
+> ★ 它的触发却是真的 —— 一次落在 agent 自己文件上的 `config_write` 会换掉整棵树，
+> 而被审批打断的那一轮回来时已经换了个 agent，于是报告回不来。
 >
 > ★ `docs/logging-design.md` **已实现**：可变的等级、`log_level`、组合根、hertz 适配器、
 > 逐模块注入，以及把请求日志搬出 `llm/common` 都在树里。§1 是改造前的快照，留着解释
@@ -386,6 +394,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
 | `docs/sandbox-kit-design.md` | **Docker Sandbox Kit 打包设计方案** —— openheron 进程今天是什么样、一个把整个进程带进 microVM 的 v3 workload Kit、模型密钥如何留在宿主，以及当初必须实测的那条 SSE 路（**Kit 已建成并发布**；§4.2 还有三条没定） |
 | `docs/mcp-design.md` | **MCP 接入设计方案** —— 工具装配路径、MCP 客户端给它带来什么、`mcp__<server>__<tool>` 命名空间、工具表里的前缀匹配，以及 MCP 服务器在 Kit 里会跑在哪（**已实施**；§13 —— 非阻塞的 MCP 启动 —— 也已实施；§8 —— 沙箱 Kit 怎么打包一台 MCP 服务器 —— 仍是提案） |
 | `docs/config-design.md` | **配置系统设计说明** —— 配置根与它的三级解析、各个分区与它们的文件规格、加载与优先级、热更新，以及依赖铁律（**正文讲的是代码现状**；`mcps/` 分区与住在工具旁边的档位已实施） |
+| `docs/config-reload-design.md` | **配置重载与写入路径改造方案** —— 为什么一次配置写入会换掉整棵 agent 树，以及重载怎么改成「只做标记，下一轮按依赖重建」、文件工具写配置根怎么转交给配置服务（**是提案，未实施**；§6 列了五条要 owner 拍板的问题） |
 | `docs/tool-surface-design.md` | **工具面设计** —— 一个 agent 拿到哪些工具（`tools:` / `mcps:` / `skills:`）、MCP 命名空间的三段、配置面收敛成一个核心，以及六个 `config_*` 工具（**§2-§5 已实现**） |
 | `docs/logging-design.md` | **日志装配改造设计** —— 组合根、可变的 `log_level`、logger 注入、接管 hertz 的日志输出，以及把请求日志搬出 `llm/common`（**已实现**） |
 | `docs/animation-design.md` | **界面动效设计** —— 动效令牌、减少动态效果的降级、品牌标记的入场，以及仍是提案的界面那几条动效（**§2.3、§3、§4 已实现**） |
