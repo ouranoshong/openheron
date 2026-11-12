@@ -1337,6 +1337,19 @@ cd web && bun run smoke:hitl               # the approval resume path works
 cd web && bun run smoke:config             # config_write's approval round trip (see (8) below)
 ```
 
+★ **One check is not hermetic, and it is opt-in.** The HTTP tool's `proxy:` key can only be
+proved against a real proxy: a fake one proves the plumbing, only a real one proves the
+**route**. So the check lives behind an environment variable and the suite skips it:
+
+```bash
+OPENHERON_TEST_PROXY=http://127.0.0.1:7890 go test ./agentkit/build -run TheProxyKeyAgainstARealProxy -v
+```
+
+It fetches one target twice — once through the proxy, once directly — and **two different
+egress addresses** are the proof that the request really went through the proxy. It also
+checks the rule the setting exists for: a private target is refused without a proxy and
+handed to the proxy with one.
+
 ### 5.3 Go unit tests
 
 `go test ./...` covers 20 packages. The contracts are pinned mainly here:

@@ -1142,6 +1142,18 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 cd web && bun run smoke:config             # config_write 的审批往返（见下面第（八）条）
 ```
 
+★ **有一项检查不是封闭的，而且要显式打开。** HTTP 工具的 `proxy:` 键只有对着真实代理才
+能证明：假代理证明的是管道，真实代理证明的才是**路径**。所以这项检查挂在环境变量后面，
+测试套件会跳过它：
+
+```bash
+OPENHERON_TEST_PROXY=http://127.0.0.1:7890 go test ./agentkit/build -run TheProxyKeyAgainstARealProxy -v
+```
+
+它把同一个目标取两次 —— 一次走代理，一次直连 —— **两个不同的出口地址**就是「请求确实
+走了代理」的证据。它还验了这项设置存在的理由：私网目标在没有代理时被拒，配了代理则交给
+代理。
+
 ### 5.3 Go 单元测试
 
 `go test ./...` 覆盖 20 个包。契约主要由这几处锁定：
