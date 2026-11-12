@@ -219,11 +219,11 @@ func TestPoolStatsCountHitsAndMisses(t *testing.T) {
 func TestBuilderBuildGoesThroughPool(t *testing.T) {
 	b := newMinimalBuilder(t)
 
-	a1, err := b.Build(context.Background(), "s1", "", contract.TurnQuery)
+	a1, _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	a2, err := b.Build(context.Background(), "s2", "", contract.TurnQuery)
+	a2, _, err := b.Build(context.Background(), "s2", "", contract.TurnQuery, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,13 +247,13 @@ func TestBuilderBuildGoesThroughPool(t *testing.T) {
 func TestAGenerationBumpAloneDoesNotRebuildTheAgent(t *testing.T) {
 	b := newMinimalBuilder(t)
 
-	a1, err := b.Build(context.Background(), "s1", "", contract.TurnQuery)
+	a1, _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg, _ := managerOf(t, b).Current()
 	managerOf(t, b).set(cfg)
-	a2, err := b.Build(context.Background(), "s1", "", contract.TurnQuery)
+	a2, _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,5 +264,6 @@ func TestAGenerationBumpAloneDoesNotRebuildTheAgent(t *testing.T) {
 
 func TestBuildSignatureUnchanged(t *testing.T) {
 	b := newMinimalBuilder(t)
-	var _ func(context.Context, string, string, contract.TurnKind) (adk.TypedAgent[*schema.Message], error) = b.Build
+	var _ func(context.Context, string, string, contract.TurnKind, string) (
+		adk.TypedAgent[*schema.Message], string, error) = b.Build
 }

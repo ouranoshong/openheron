@@ -205,8 +205,9 @@ type state struct {
 
 type interruptingBuilder struct{}
 
-func (interruptingBuilder) Build(context.Context, string, string, contract.TurnKind) (adk.TypedAgent[*schema.Message], error) {
-	return &interruptingAgent{}, nil
+func (interruptingBuilder) Build(context.Context, string, string, contract.TurnKind, string) (
+	adk.TypedAgent[*schema.Message], string, error) {
+	return &interruptingAgent{}, "", nil
 }
 
 // Contexts reports what each agent's context allows. The fake has no

@@ -91,7 +91,7 @@ func TestFilesystemToolsAreActuallyWired(t *testing.T) {
 	cfg.Agents[spec.DefaultAgentID].MaxIterations = 2
 	b := newModelBuilder(t, cfg, m, nil)
 
-	a, err := b.Build(context.Background(), "main", "", contract.TurnQuery)
+	a, _, err := b.Build(context.Background(), "main", "", contract.TurnQuery, "")
 	if err != nil {
 		t.Fatalf("build agent: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestFilesystemToolsSurviveTheAgentsRootSwitch(t *testing.T) {
 		"child/model": child,
 	})
 
-	a, err := b.Build(context.Background(), "main", "task", contract.TurnQuery)
+	a, _, err := b.Build(context.Background(), "main", "task", contract.TurnQuery, "")
 	if err != nil {
 		t.Fatalf("build the sub agent as root: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestSubAgentsAlsoGetTheFilesystemTools(t *testing.T) {
 		"child/model": child,
 	})
 
-	a, err := b.Build(context.Background(), "main", "", contract.TurnQuery)
+	a, _, err := b.Build(context.Background(), "main", "", contract.TurnQuery, "")
 	if err != nil {
 		t.Fatalf("build agent: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestTheToolListRemovesTheFilesystemToolsFromTheModel(t *testing.T) {
 	cfg.Agents[spec.DefaultAgentID].MaxIterations = 3
 	b := newModelBuilder(t, cfg, m, nil)
 
-	a, err := b.Build(context.Background(), "main", "", contract.TurnQuery)
+	a, _, err := b.Build(context.Background(), "main", "", contract.TurnQuery, "")
 	if err != nil {
 		t.Fatalf("build agent: %v", err)
 	}

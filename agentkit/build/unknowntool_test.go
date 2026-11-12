@@ -103,7 +103,7 @@ func runScripted(t *testing.T, unknownName string, without ...string) [][]*schem
 		model.BaseModel[*schema.Message], error) {
 		return m, nil
 	}
-	a, err := b.Build(context.Background(), "main", "", contract.TurnQuery)
+	a, _, err := b.Build(context.Background(), "main", "", contract.TurnQuery, "")
 	if err != nil {
 		t.Fatalf("build agent: %v", err)
 	}

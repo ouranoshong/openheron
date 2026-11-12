@@ -129,7 +129,8 @@ func (rt *Runtime) makePrepareAgent(sess storage.Session, turn *Turn) func(conte
 			turn.fail(agentUnavailable{reason: err})
 			return nil, err
 		}
-		agent, err := rt.cfg.AgentBuilder.Build(ctx, sess.ID(), sess.AgentID(), contract.TurnQuery)
+		agent, fingerprint, err := rt.cfg.AgentBuilder.Build(ctx, sess.ID(), sess.AgentID(),
+			contract.TurnQuery, turn.pin)
 		if err != nil {
 			// ★ The reason is wrapped, not replaced: the client's message is
 			//   the builder's, and the sentinel is what lets the transport
@@ -138,6 +139,12 @@ func (rt *Runtime) makePrepareAgent(sess storage.Session, turn *Turn) func(conte
 			turn.fail(agentUnavailable{reason: err})
 			return nil, err
 		}
+		// ★ The row records the tree the run ran on. ★ It is the only place
+		//   that tree is written down, and it is what a resume asks for:
+		//   the round it continues has to run on the same tree, or the
+		//   report is written by an agent that is not the one that
+		//   started the work.
+		turn.row.noteTree(fingerprint)
 		return agent, nil
 	}
 }

@@ -110,6 +110,27 @@ func (rw *runRow) noteMCPServers(names []string) {
 	rw.writeLocked()
 }
 
+// noteTree records the tree the run ran on.
+//
+// ★ The fingerprint is what a resume asks for: the round it continues must
+//
+//	run on the tree that round started with. ★ An empty fingerprint means
+//	the tree is not known — and a resume that finds none falls back to the
+//	current tree and says so.
+func (rw *runRow) noteTree(fingerprint string) {
+	if rw == nil || fingerprint == "" {
+		return
+	}
+	rw.mu.Lock()
+	defer rw.mu.Unlock()
+	if rw.closed {
+		return
+	}
+	rw.run.TreeFingerprint = fingerprint
+	rw.run.UpdatedAt = time.Now().UTC()
+	rw.writeLocked()
+}
+
 // mcpServersOf names the MCP servers the messages touched.
 //
 // ★ The tool name is namespaced, and the namespace's first segment is the

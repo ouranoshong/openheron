@@ -77,6 +77,14 @@ type Turn struct {
 	// row is the run's durable record. Nil when the session has no ledger.
 	row *runRow
 
+	// pin is the tree this turn runs on.
+	//
+	// ★ A resume continues the round it answers, and it runs on the tree
+	//   that round started with — not on the tree the disk would build
+	//   now. ★ The fingerprint says which tree that is; an empty one means
+	//   "the current tree", and it is what a fresh query asks for.
+	pin string
+
 	// awaitingApproval says the run ended by raising an interrupt. The
 	// terminal row waits for the approval to be persisted — the loop's
 	// exit writes it, and it must be on disk before the run may call

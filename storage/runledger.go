@@ -166,6 +166,14 @@ type Run struct {
 	//   reading the whole transcript. The individual calls are in the
 	//   transcript — the row says which servers were involved.
 	MCPServers []string `json:"mcp_servers,omitempty"`
+	// TreeFingerprint identifies the agent tree this run ran on.
+	//
+	// ★ A resume continues the round it answers, so it must run on the
+	//   **same tree**: the report is written by that agent, and an agent
+	//   that was swapped in between cannot write it. ★ The fingerprint is
+	//   what says "the same tree" — a name would not, because the agent
+	//   behind a name may have been rebuilt.
+	TreeFingerprint string `json:"tree_fingerprint,omitempty"`
 }
 
 // RunLedger is the durable record of the runs of one session.

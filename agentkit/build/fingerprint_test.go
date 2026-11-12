@@ -99,7 +99,7 @@ func writeConfig(t *testing.T, svc *spec.Service, rel, body string) {
 // buildRoot builds an agent and returns the fingerprint it was built at.
 func buildRoot(t *testing.T, b *Builder, name string) string {
 	t.Helper()
-	if _, err := b.Build(context.Background(), "s1", name, contract.TurnQuery); err != nil {
+	if _, _, err := b.Build(context.Background(), "s1", name, contract.TurnQuery, ""); err != nil {
 		t.Fatal(err)
 	}
 	return mustSnapshot(t, b).fingerprintOf(name)

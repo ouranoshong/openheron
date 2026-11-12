@@ -411,8 +411,20 @@ type fakeBuilder struct {
 	mu       sync.Mutex
 	builds   int
 	agentIDs []string
-	agent    func(call int, kind contract.TurnKind) adk.TypedAgent[*schema.Message]
-	err      error
+	// pins are the tree fingerprints the turns asked for, in order.
+	pins []string
+	// tree is the tree the builder claims to be on. Empty means "whatever
+	// was pinned".
+	tree  string
+	agent func(call int, kind contract.TurnKind) adk.TypedAgent[*schema.Message]
+	err   error
+}
+
+// pinsSeen returns the tree fingerprints the turns asked for, in order.
+func (b *fakeBuilder) pinsSeen() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.pins...)
 }
 
 // Contexts reports what each agent's context allows.
@@ -425,21 +437,34 @@ func (b *fakeBuilder) Contexts() map[string]contract.AgentContext {
 	return nil
 }
 
-func (b *fakeBuilder) Build(_ context.Context, _ string, agentID string, kind contract.TurnKind) (adk.TypedAgent[*schema.Message], error) {
+// Build returns the fake agent, and the tree it pretends to be.
+//
+// ★ The fingerprint is what a resume pins: the fake remembers the pin it
+//
+//	was given, so a test can say "the round continues on the tree it
+//	started with" and check that it did.
+func (b *fakeBuilder) Build(_ context.Context, _ string, agentID string, kind contract.TurnKind,
+	pinned string) (adk.TypedAgent[*schema.Message], string, error) {
+
 	b.mu.Lock()
 	b.builds++
 	n := b.builds
 	b.agentIDs = append(b.agentIDs, agentID)
+	b.pins = append(b.pins, pinned)
 	agent := b.agent
+	tree := b.tree
 	b.mu.Unlock()
 
 	if b.err != nil {
-		return nil, b.err
+		return nil, "", b.err
+	}
+	if tree == "" {
+		tree = pinned
 	}
 	if agent == nil {
-		return &fakeAgent{}, nil
+		return &fakeAgent{}, tree, nil
 	}
-	return agent(n, kind), nil
+	return agent(n, kind), tree, nil
 }
 
 // drain consumes a turn's events to completion and reports the outcome.

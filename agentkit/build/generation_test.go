@@ -70,13 +70,13 @@ func TestIntrospectionWorksBeforeFirstBuild(t *testing.T) {
 
 func TestBuildPullsTheCurrentGeneration(t *testing.T) {
 	b := newTestBuilder(t)
-	if _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery); err != nil {
+	if _, _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery, ""); err != nil {
 		t.Fatal(err)
 	}
 	before := mustSnapshot(t, b).gen
 
 	managerOf(t, b).set(minimalTestConfig())
-	if _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery); err != nil {
+	if _, _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := mustSnapshot(t, b).gen; got != before+1 {
@@ -112,7 +112,7 @@ func TestModelIsResolvedAtBuildTime(t *testing.T) {
 	if calls != 0 {
 		t.Fatalf("deriving a snapshot must not resolve models, got %d calls", calls)
 	}
-	if _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery); err != nil {
+	if _, _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery, ""); err != nil {
 		t.Fatal(err)
 	}
 	if calls == 0 {
@@ -139,10 +139,10 @@ func TestSwitchedRootUsesItsOwnModel(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if _, err := b.Build(ctx, "s1", "", contract.TurnQuery); err != nil {
+	if _, _, err := b.Build(ctx, "s1", "", contract.TurnQuery, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Build(ctx, "s1", "worker", contract.TurnQuery); err != nil {
+	if _, _, err := b.Build(ctx, "s1", "worker", contract.TurnQuery, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -167,7 +167,7 @@ func TestRootOnlyPhasesStayAtRoot(t *testing.T) {
 	p := &fakeProvider{id: "fake", tools: []tool.BaseTool{&stubTool{name: "fake_tool"}}}
 	b.tools = registryOf(p)
 
-	if _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery); err != nil {
+	if _, _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery, ""); err != nil {
 		t.Fatal(err)
 	}
 	if p.calls != 1 {
@@ -190,7 +190,7 @@ func TestSubAgentWithoutModelFallsBackToTheBase(t *testing.T) {
 	}
 
 	bc := countBuilds(t)
-	if _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery); err != nil {
+	if _, _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery, ""); err != nil {
 		t.Fatal(err)
 	}
 	found := false

@@ -178,12 +178,18 @@ func (b *Builder) Stats() (hits, misses uint64, size int, gen uint64) {
 	return hits, misses, size, gen
 }
 
-// Build returns the agent for this turn.
+// Build returns the agent for this turn, and the fingerprint of the tree it
+// was built from.
+//
+// ★ The fingerprint comes back **with** the agent because it is the agent's
+//
+//	identity: a name is not enough, because the agent behind a name may
+//	have been rebuilt. ★ And a resume needs it — see BuildPinned.
 func (b *Builder) Build(ctx context.Context, _ string, agentID string,
-	_ contract.TurnKind) (adk.TypedAgent[*schema.Message], error) {
+	_ contract.TurnKind, pinned string) (adk.TypedAgent[*schema.Message], string, error) {
 
 	if b.mgr == nil {
-		return nil, errors.New("agent: no config manager is wired")
+		return nil, "", errors.New("agent: no config manager is wired")
 	}
 	cfg, gen := b.mgr.Current()
 
@@ -203,7 +209,7 @@ func (b *Builder) Build(ctx context.Context, _ string, agentID string,
 
 	snap, err := b.snapshotFor(cfg, gen)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	name := strings.TrimSpace(agentID)
@@ -211,13 +217,13 @@ func (b *Builder) Build(ctx context.Context, _ string, agentID string,
 		name = snap.agentSpec.defaultAgent
 	}
 	if _, ok := snap.agentSpec.agentSpec(name); !ok {
-		return nil, b.agentUnavailable(name, snap)
+		return nil, "", b.agentUnavailable(name, snap)
 	}
-	e, err := b.pooledRoot(ctx, snap, name)
+	e, fingerprint, err := b.pooledRoot(ctx, snap, name, pinned)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return e.agent, nil
+	return e.agent, fingerprint, nil
 }
 
 // agentUnavailable says why an agent is not there.
@@ -253,21 +259,41 @@ func leftOutMessage(cfg *spec.Config, name string) string {
 	return fmt.Sprintf("agent %q is left out of the tree: %s", name, why)
 }
 
-func (b *Builder) pooledRoot(ctx context.Context, snap *snapshot, name string) (*entry, error) {
+func (b *Builder) pooledRoot(ctx context.Context, snap *snapshot, name, pinned string) (
+	*entry, string, error) {
 
 	sp, ok := snap.agentSpec.agentSpec(name)
 	if !ok {
-		return nil, b.agentUnavailable(name, snap)
+		return nil, "", b.agentUnavailable(name, snap)
 	}
 	table := snap.tableFor(name)
 	if table == nil {
-		return nil, fmt.Errorf("agent: %q has no tool table", name)
+		return nil, "", fmt.Errorf("agent: %q has no tool table", name)
 	}
-	return b.pool.GetOrBuild(ctx, name, snap.fingerprintOf(name),
+	fingerprint := snap.fingerprintOf(name)
+	if pinned != "" {
+		// ★ The pinned tree: the pool keeps an entry per fingerprint, and
+		//   the old one lives as long as the process does — so the round
+		//   that started with that tree can finish on it.
+		if e, ok := b.pool.Lookup(name, pinned); ok {
+			return e, pinned, nil
+		}
+		// ★ The tree is gone: the process restarted, or the pool was
+		//   rebuilt. ★ The round continues on the current tree, and it
+		//   says so — a silent swap would be the very bug this pin
+		//   exists to stop.
+		b.logger().Warn("[agent] the pinned tree is gone, continuing on the current one",
+			"agent", name, "pinned", pinned, "current", fingerprint)
+	}
+	e, err := b.pool.GetOrBuild(ctx, name, fingerprint,
 		func(ctx context.Context) (adk.TypedAgent[*schema.Message],
 			model.BaseModel[*schema.Message], error) {
 			return b.assemble(ctx, snap, &sp, table)
 		})
+	if err != nil {
+		return nil, "", err
+	}
+	return e, e.fingerprint, nil
 }
 
 // reloadIfMarked reads the configuration again when the write path marked a

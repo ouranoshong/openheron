@@ -212,7 +212,7 @@ func TestAddingAProviderNeedsNoAssemblyChange(t *testing.T) {
 		tools: []tool.BaseTool{&stubTool{name: "fake_tool"}}})
 
 	bc := countBuilds(t)
-	if _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery); err != nil {
+	if _, _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery, ""); err != nil {
 		t.Fatal(err)
 	}
 	if len(bc.inputs) == 0 {

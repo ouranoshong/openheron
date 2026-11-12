@@ -30,7 +30,19 @@ const DefaultStartTimeout = 60 * time.Second
 // AgentBuilder produces the agent for one turn. It is injected so openheronrt
 // never imports the agent package, which keeps its tests free of a real model.
 type AgentBuilder interface {
-	Build(ctx context.Context, sessionID, agentID string, kind contract.TurnKind) (adk.TypedAgent[*schema.Message], error)
+	// Build returns the agent for this turn, and the fingerprint of the
+	// tree it was built from.
+	//
+	// ★ The fingerprint comes back **with** the agent because it is the
+	//   agent's identity: a name is not enough, because the agent behind a
+	//   name may have been rebuilt. ★ And a resume needs it: the round it
+	//   continues must run on the tree that round started with.
+	//
+	// ★ A **pinned** fingerprint asks for that tree by name — that is what
+	//   a resume does. ★ An empty one means "the current tree", and it is
+	//   what a fresh query asks for.
+	Build(ctx context.Context, sessionID, agentID string, kind contract.TurnKind,
+		fingerprint string) (adk.TypedAgent[*schema.Message], string, error)
 	// Contexts reports what each agent's context allows: the model's window
 	// and the compaction threshold.
 	//
@@ -548,11 +560,17 @@ func (rt *Runtime) Resume(ctx context.Context, sessionID, runID string, decision
 	//   point would eat the user's decision: the card disappears and the
 	//   approval can never be answered again. Claiming first means a
 	//   refusal leaves the approval untouched.
+	//
+	// ★ The parent's tree comes with it: the resume continues the round
+	//   the approval belongs to, so it runs on the tree that round started
+	//   with — not on the tree the disk would build now.
+	parentRunID, parentTree := rt.parentRunOf(ctx, sess)
 	turn, loop, prev, prevLoop, err := rt.claimTurn(ctx, sess, contract.TurnResume, runID,
-		rt.parentRunOf(ctx, sess))
+		parentRunID)
 	if err != nil {
 		return nil, err
 	}
+	turn.pin = parentTree
 
 	pending, err := sess.TakePendingApproval()
 	if err != nil {
@@ -834,30 +852,35 @@ func (rt *Runtime) activeRun(ctx context.Context, sess storage.Session) (storage
 	return storage.ActiveRun(runs)
 }
 
-// parentRunOf returns the run a resume continues.
+// parentRunOf returns the run a resume continues, and the tree it ran on.
 //
 // ★ It is the newest run that ended by raising an approval. The pending
 //
 //	approval itself does not carry the run's id — the record that holds
 //	the interrupt id is the checkpoint's business — so the ledger is where
 //	the question's owner is looked up.
-func (rt *Runtime) parentRunOf(ctx context.Context, sess storage.Session) string {
+//
+// ★ The tree comes with it: a resume continues the round it answers, so it
+//
+//	runs on the tree that round started with, and the parent's row is
+//	where that tree is written down.
+func (rt *Runtime) parentRunOf(ctx context.Context, sess storage.Session) (string, string) {
 	ledger := sess.RunLedger()
 	if ledger == nil {
-		return ""
+		return "", ""
 	}
 	runs, err := ledger.List(ctx)
 	if err != nil {
 		rt.logf("session=%s failed to read the run ledger: %v", sess.ID(), err)
-		return ""
+		return "", ""
 	}
 	storage.SortRunsByStart(runs)
 	for i := len(runs) - 1; i >= 0; i-- {
 		if runs[i].State == storage.RunWaitingApproval {
-			return runs[i].RunID
+			return runs[i].RunID, runs[i].TreeFingerprint
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // RunSnapshot is the scan of one session's runs.

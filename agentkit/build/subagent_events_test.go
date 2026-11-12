@@ -19,7 +19,7 @@ func TestSubagentEventsAreForwardedToTheParentStream(t *testing.T) {
 	b := newTestBuilderWithConfig(t, cfg)
 
 	bc := countBuilds(t)
-	if _, err := b.Build(context.Background(), "main", "main", contract.TurnQuery); err != nil {
+	if _, _, err := b.Build(context.Background(), "main", "main", contract.TurnQuery, ""); err != nil {
 		t.Fatalf("build main: %v", err)
 	}
 	if bc.n == 0 {

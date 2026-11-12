@@ -259,8 +259,10 @@ type blockingBuilder struct {
 	onStop func()
 }
 
-func (b blockingBuilder) Build(context.Context, string, string, contract.TurnKind) (adk.TypedAgent[*schema.Message], error) {
-	return blockingAgent{onStop: b.onStop}, nil
+func (b blockingBuilder) Build(context.Context, string, string, contract.TurnKind, string) (
+	adk.TypedAgent[*schema.Message], string, error) {
+
+	return blockingAgent{onStop: b.onStop}, "", nil
 }
 
 // Contexts reports what each agent's context allows. The fake has no

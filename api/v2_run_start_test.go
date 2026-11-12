@@ -87,8 +87,9 @@ type failingBuilder struct {
 	reason error
 }
 
-func (b failingBuilder) Build(context.Context, string, string, contract.TurnKind) (adk.TypedAgent[*schema.Message], error) {
-	return nil, b.reason
+func (b failingBuilder) Build(context.Context, string, string, contract.TurnKind, string) (
+	adk.TypedAgent[*schema.Message], string, error) {
+	return nil, "", b.reason
 }
 
 // Contexts reports what each agent's context allows. The fake has no
