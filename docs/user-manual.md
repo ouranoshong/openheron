@@ -726,6 +726,27 @@ tool does not appear in the agent's tool table, and the model cannot see it.
 names `request_get`, `tools/kb.yaml` names `kb_search`. Everything else that file
 provides asks (§4.3).
 
+★ **A proxy moves the boundary; it does not add to it.** `http.yaml` and `web_search.yaml`
+carry an optional `proxy:` key. Empty is **no proxy**: the tool dials the target itself and
+refuses a target that does not resolve to a public address, and that refusal is what keeps a
+model from being used to reach the machine's own network. A proxy **replaces** that rule — a
+proxy exists to reach what cannot be reached directly (an intranet host is not public, and
+reaching it is what the proxy is for) — so with one configured the target may be any address
+the proxy can reach, and the proxy is the boundary. The schemes are `http`, `https`, `socks5`
+and `socks5h`; a wrong one is a **startup error**. Nothing is read from the environment: the
+proxy is named, or it is not.
+
+```yaml
+# .openheron/tools/http.yaml
+methods: [get]
+proxy: http://127.0.0.1:7890
+allows: [request_get]
+```
+
+★ The **model API calls** are a different client: they read `HTTP_PROXY` and `HTTPS_PROXY`
+from the environment, and that is the path the sandbox Kit's credential substitution depends
+on. The `proxy:` key is for the **tools**, and it never looks at the environment.
+
 ### 4.5 Process parameters (`server/config.yaml`)
 
 | Field | Default | Meaning |

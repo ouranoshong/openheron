@@ -429,6 +429,22 @@ type HTTPToolsCfg struct {
 	Headers map[string]string `yaml:"headers"`
 	Timeout LenientDuration   `yaml:"timeout"`
 	Allows  []string          `yaml:"allows"`
+
+	// Proxy is the proxy every request of this tool goes through.
+	//
+	// ★ It is empty by default, and an empty proxy is **no proxy**: the
+	//
+	//	tool dials the target itself and refuses a target that does not
+	//	resolve to a public address.
+	//
+	// ★ A proxy **replaces** that rule rather than adding to it. A proxy
+	//
+	//	exists to reach what cannot be reached directly — an intranet
+	//	host is not public, and reaching it is exactly what the proxy is
+	//	for — so with a proxy configured the target may be any address
+	//	the proxy can reach. The proxy is named in the configuration, so
+	//	it is the user's own boundary and not ours to police.
+	Proxy string `yaml:"proxy"`
 }
 
 type WebSearchCfg struct {
@@ -437,6 +453,12 @@ type WebSearchCfg struct {
 	Timeout    LenientDuration `yaml:"timeout"`
 	Region     string          `yaml:"region"`
 	Allows     []string        `yaml:"allows"`
+
+	// Proxy is the proxy the search goes through. ★ It follows the HTTP
+	//
+	//	tool's rule: empty is no proxy, and a proxy replaces the
+	//	public-address rule rather than adding to it.
+	Proxy string `yaml:"proxy"`
 }
 
 type WikipediaCfg struct {

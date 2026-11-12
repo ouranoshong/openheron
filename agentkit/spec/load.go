@@ -251,11 +251,21 @@ func (c *Config) loadTool(file string, data []byte) error {
 		if err := decodeTool(data, &t, toolHints["http"]); err != nil {
 			return err
 		}
+		// ★ The proxy is checked **here**, not when the tool is built: a
+		//   wrong proxy means every request of this tool fails, and the
+		//   user has to hear about it while the file is the thing being
+		//   edited.
+		if _, err := ParseProxy(t.Proxy); err != nil {
+			return err
+		}
 		c.Tools.HTTP = &t
 		return nil
 	case "web_search":
 		var t decl.WebSearchCfg
 		if err := decodeTool(data, &t, toolHints["web_search"]); err != nil {
+			return err
+		}
+		if _, err := ParseProxy(t.Proxy); err != nil {
 			return err
 		}
 		c.Tools.WebSearch = &t

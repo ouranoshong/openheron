@@ -69,13 +69,13 @@ think-act-observe loop so that each observation decides the next step.
 ### 2.1 Agent definitions
 
 An agent is a markdown file: **frontmatter + body**. The frontmatter is **strictly
-decoded** (`agentkit/spec/load.go:76`'s `loadAgent`) — a single wrong key is a startup
+decoded** (`agentkit/spec/load.go:75`'s `loadAgent`) — a single wrong key is a startup
 error.
 
 ★ **A model that nobody declares is not a startup error — it takes that agent out of
 the tree.** The rule is stated in full in `docs/config-design.md` §4.6; what the
 architecture has to say about it is where the boundary falls: `validate()` **settles**
-the tree (`agentkit/spec/load.go:565` `leaveOutUndeclaredModels`) — the agent is dropped
+the tree (`agentkit/spec/load.go:574` `leaveOutUndeclaredModels`) — the agent is dropped
 from `Config.Agents` and from every parent's `subagents:`, and the reason is kept in
 `Config.leftOut` (`agentkit/spec/config.go:164`). Everything downstream —
 `AgentNames()`, `MCPServersInUse()`, the tier table, the builder — sees the settled
@@ -86,7 +86,7 @@ editor lives), and the write gate (`agentkit/spec/write.go:472` `checkNoAgentLos
 compares **settled before** against **settled after**, so a change may add an agent and
 may leave a broken one alone, but may not take a working one away.
 
-Available frontmatter keys (`agentkit/spec/decl/decl.go:79`'s `decl.Agent`):
+Available frontmatter keys (`agentkit/spec/decl/decl.go:78`'s `decl.Agent`):
 
 | Key | yaml tag | Meaning |
 |---|---|---|
@@ -94,9 +94,9 @@ Available frontmatter keys (`agentkit/spec/decl/decl.go:79`'s `decl.Agent`):
 | `model` | `model` | `<provider>/<model>`; **never inherited, never falls back** |
 | `max_iterations` | `max_iterations` | Cap on tool-loop iterations |
 | `subagents` | `subagents` | The sub-agents it may delegate to |
-| `tools` | `tools` | The **non-MCP** tools this agent may use — the **exposed** names, the ones the model sees. ★ **Absent means none** (`agentkit/spec/decl/decl.go:113`) |
-| `skills` | `skills` | The skills this agent may load — the folders under `skills/`. ★ **Absent means none** (`agentkit/spec/decl/decl.go:134`) |
-| `mcps` | `mcps` | The MCP servers this agent **mounts** — each one starts a child process, and mounting one **hands the agent all of that server's tools**. ★ **Absent means no server** (`agentkit/spec/decl/decl.go:150`) |
+| `tools` | `tools` | The **non-MCP** tools this agent may use — the **exposed** names, the ones the model sees. ★ **Absent means none** (`agentkit/spec/decl/decl.go:112`) |
+| `skills` | `skills` | The skills this agent may load — the folders under `skills/`. ★ **Absent means none** (`agentkit/spec/decl/decl.go:133`) |
+| `mcps` | `mcps` | The MCP servers this agent **mounts** — each one starts a child process, and mounting one **hands the agent all of that server's tools**. ★ **Absent means no server** (`agentkit/spec/decl/decl.go:149`) |
 | `temperature` | `temperature` | Sampling temperature |
 | `max_tokens` | `max_tokens` | Sampling cap |
 | `reasoning` | `reasoning` | Reasoning tier name (`low`/`high`/`max`…) |
@@ -118,7 +118,7 @@ empty" now mean the same thing — nothing.
 ★ **The old key is refused, not renamed.** `disabled_tools` was the **opposite** of
 `tools` — one removed tools, the other names them — so renaming it alone would have
 turned a blacklist into a whitelist without saying so. The loader therefore **refuses**
-the file (`agentkit/spec/load.go:107`) and says that the meaning is the other way
+the file (`agentkit/spec/load.go:106`) and says that the meaning is the other way
 round. ★ **There is no alias**: an alias that still worked with the old meaning would
 keep the blacklist alive, and an alias that worked with the new one would turn a
 blacklist into a whitelist on the user's behalf — the exact confusion the refusal
@@ -128,7 +128,7 @@ exists to prevent.
 **mounted** — mounting a server starts a child process — and it also says that the agent
 **gets all of that server's tools**. ★ `tools:` does not name MCP tools:
 an `mcp__<server>__*` entry there grants nothing, is dropped, and is reported as a
-**notice** (`agentkit/spec/load.go:836` `checkAgentMCPNames`) — not a load-time error,
+**notice** (`agentkit/spec/load.go:845` `checkAgentMCPNames`) — not a load-time error,
 because the meaning changed rather than contradicting itself.
 ★ **The cost is real**: narrowing one agent's MCP tools is no longer possible. The
 server's own file (`mcps/<server>.yaml`) filters its tools, and that filter is shared by
@@ -331,13 +331,13 @@ offers is reported as a typo. `--no-tools` leaves it out.
 
 The path a tool takes is the same for every source:
 
-`tools/*.yaml` → `spec.loadTool` (`agentkit/spec/load.go:247`) → `decl.ToolsCfg` →
+`tools/*.yaml` → `spec.loadTool` (`agentkit/spec/load.go:246`) → `decl.ToolsCfg` →
 `toolRegistry.Build` (`agentkit/build/tools.go:128`) → `snapshot.buildHeavy`
 (`agentkit/build/snapshot.go:54`) → `applyToolConfig` (`agentkit/build/assemble.go:30`) →
 `deep.Config.ToolsConfig.Tools` → `deep.New` (`agentkit/build/assemble.go:39`).
 
 The MCP branch joins it at the registry: `mcps/<server>.yaml` → `spec.loadMCP`
-(`agentkit/spec/load.go:363`) → `decl.MCPServerCfg` → the MCP provider
+(`agentkit/spec/load.go:372`) → `decl.MCPServerCfg` → the MCP provider
 (`agentkit/build/mcptools.go:194`), registered at `agentkit/build/tools.go:52` → the same
 `toolRegistry.Build` → the same `applyToolConfig`.
 
@@ -368,7 +368,7 @@ turn** has its tools.
 ★ The exposed name is `mcp__<server>__<tool>`, composed in exactly one place
 (`agentkit/build/mcptools.go:141`). The server's own name is the namespace segment, and
 which server an exposed name belongs to is read back out of it
-(`agentkit/spec/decl/decl.go:500` `MCPServerOf`). ★ **The namespace is not negotiable**:
+(`agentkit/spec/decl/decl.go:521` `MCPServerOf`). ★ **The namespace is not negotiable**:
 a server name may not contain a run of underscores, so the prefix of one server cannot
 reach another.
 
@@ -404,7 +404,7 @@ description is rendered from it, so it is what the model **sees** — and `Get`
 only one half would leave a skill that a model remembers the name of loadable.
 
 ★ **The list is a plain slice, and the default is none.** `decl.Agent.Skills`
-(`agentkit/spec/decl/decl.go:134`) is `[]string`, not a pointer: "not declared" and
+(`agentkit/spec/decl/decl.go:133`) is `[]string`, not a pointer: "not declared" and
 "declared and empty" now mean the same thing — no skill — so there is nothing left to
 distinguish. ★ A skill the list does not name is not the agent's skill, and the skill
 tool is only worth naming when there is a skill to load — which the loader says so
@@ -522,7 +522,7 @@ dependency chain along.
 
 ★ **The vocabulary the two halves share lives in `decl` too, and that is a
 dependency-direction fact, not a convenience.** The built-in tool names
-(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:349`) are read by **both** ends:
+(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:348`) are read by **both** ends:
 the loader checks the names an agent's `tools:` list mentions against them, and the
 builder refuses a provider that claims one of them (`reservedToolNames`,
 `agentkit/build/tools.go:113`). Neither end may import the other — the loader sits
@@ -534,7 +534,7 @@ would read as "that tool does not exist".
 
 **Validating** the knowledge-base config (`tools/kb.yaml`) needs to know whether the
 corpus path is relative, whether the model is declared at all, and whether it is
-declared as `kind: embedding` (`agentkit/spec/load.go:285` `loadKB`, `agentkit/spec/load.go:934` `validateKB`).
+declared as `kind: embedding` (`agentkit/spec/load.go:294` `loadKB`, `agentkit/spec/load.go:943` `validateKB`).
 
 ★ All three answers live in the **declarations** (`decl.Model.IsEmbedding`,
 `decl.Model.Dimensions`), so the configuration layer does not import the knowledge base
@@ -626,7 +626,7 @@ from loading at all. But the directory raises a **notice**
 configuration that says nothing is the worst kind, because the process starts fine and the
 setting is gone.
 
-File names under `tools/` are a **whitelist**: `agentkit/spec/load.go:280` errors out on
+File names under `tools/` are a **whitelist**: `agentkit/spec/load.go:289` errors out on
 an unknown file instead of ignoring it — "I wrote kb.yaml and it did not take effect" is
 one of the hardest classes of problem to debug.
 
@@ -656,7 +656,7 @@ There are **two** tiers, and the default is the safe one:
 
 `build.Policy.TierOf` (`agentkit/build/policy.go:55`) answers the tier of one tool
 name: a name in the allow list is `allow`, and **every other name is `ask`**. The
-mirrored declaration `decl.Tier` (`agentkit/spec/decl/decl.go:255`) holds `TierAllow`
+mirrored declaration `decl.Tier` (`agentkit/spec/decl/decl.go:254`) holds `TierAllow`
 and `TierAsk` and nothing else — there is no third tier.
 
 ★ **The default is `ask` because the cost of guessing wrong is asymmetric**: one extra
@@ -669,7 +669,7 @@ The **exceptions are named**, and they are named by the file that provides the t
 | Source | What it names | Assembled at |
 |---|---|---|
 | The built-in tools that have no file of their own | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill`, plus the five config tools that only read | `agentkit/build/tools.go:79` `builtinAllowedTools` |
-| A tool's own file — `tools/*.yaml` and the knowledge base | that file's `allows:` | `agentkit/spec/load.go:326` `AllowedTools` |
+| A tool's own file — `tools/*.yaml` and the knowledge base | that file's `allows:` | `agentkit/spec/load.go:335` `AllowedTools` |
 | An MCP server's own file | that server's `allows:`, in the server's own vocabulary, translated to the exposed names | `agentkit/build/mcptools.go:173` `mcpAllowedNames` |
 
 `agentkit/build/spec.go:64` `policyOf` puts the three together and `Policy.TierOf`
@@ -708,9 +708,9 @@ second copy of the same keys that could only *tighten* the file — is gone, and
 takes effect after a restart.
 
 A declared topology that exceeds the cap is a **startup error**
-(`agentkit/spec/load.go:962`'s `validateDepth`) — never a silent truncation. A sub-agent
+(`agentkit/spec/load.go:971`'s `validateDepth`) — never a silent truncation. A sub-agent
 referencing an unknown agent and a cyclic topology are startup errors too
-(`agentkit/spec/load.go:1033` `validateAgentGraph`, `agentkit/spec/load.go:1050` `detectCycle`).
+(`agentkit/spec/load.go:1042` `validateAgentGraph`, `agentkit/spec/load.go:1059` `detectCycle`).
 
 ### 5.7 Write gates
 

@@ -25,7 +25,7 @@ openheron 手里已经握有两个足以回答「这个会话是不是快撑爆�
 
 ### 1.1 上下文窗口配了，然后被忽略
 
-`context_window` 是模型声明的一部分（`agentkit/spec/decl/decl.go:44`）：
+`context_window` 是模型声明的一部分（`agentkit/spec/decl/decl.go:43`）：
 
 ```go
 ContextWindow int `yaml:"context_window"`

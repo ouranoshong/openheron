@@ -11,3 +11,10 @@ region: ""                # empty = worldwide; duckduckgo's kl parameter (wt-wt 
 
 # ★ The tools that run **without a nod**.
 allows: [duckduckgo_search]
+
+# ★ proxy: the proxy the search goes through. Empty is **no proxy** — the tool
+#   dials the target itself and refuses a target that is not a public address.
+#   A proxy **replaces** that rule instead of adding to it: the proxy is then
+#   the boundary, and the target may be any address it can reach. Schemes:
+#   http, https, socks5, socks5h. A wrong one is a load-time error.
+proxy: ""

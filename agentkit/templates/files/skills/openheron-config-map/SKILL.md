@@ -90,6 +90,7 @@ Prefill the struct → decode file by file (yaml.v3 writes only the keys that ap
 ## Known traps (check these first)
 
 - A leftover `disabled_tools` / an omitted `tools:` — the former errors at load time, the latter silently becomes zero tools.
+- ★ The HTTP and search tools do **not** pick up the environment's proxy: `HTTP_PROXY` / `HTTPS_PROXY` reach the **model** call, not the tool. A tool that cannot leave the machine is fixed by naming the proxy in `http.yaml` / `web_search.yaml` (`proxy:`) — and a proxy **replaces** the public-address rule rather than adding to it, so the target may then be any address the proxy can reach.
 - An agent written in this very turn answers "not in this turn's configuration yet" — **the write succeeded**; the tree catches up on the next turn, and the error says exactly that. Writing the file again is the mistake.
 - The `header:` of `llm/<provider>.yaml` is parsed but **never consumed**.
 - When provider-level `extra` happens to hold only `temperature` or `max_tokens`, it overrides the agent's value of the same name.

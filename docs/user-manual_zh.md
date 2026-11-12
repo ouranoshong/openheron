@@ -655,6 +655,24 @@ allows: [read_issue, list_issues]
 ★ **这个文件的 `allows:` 行决定哪些不用问** —— `tools/http.yaml` 点 `request_get`，
 `tools/kb.yaml` 点 `kb_search`。这个文件提供的其余一切都问（§4.3）。
 
+★ **代理是挪边界，不是加边界。** `http.yaml` 和 `web_search.yaml` 有一个可选的 `proxy:` 键。
+空值就是**不走代理**：工具自己连目标，并拒绝解析不到公网地址的目标 —— 正是这条拒绝让模型
+没法被拿来探这台机器自己的内网。配了代理就是**换掉**这条规则 —— 代理存在的意义就是去够直接
+够不到的东西（内网地址不是公网地址，够到它正是代理的用处）—— 所以配了代理之后目标可以是
+代理够得到的任何地址，边界就落在代理上。支持的协议是 `http`、`https`、`socks5` 和
+`socks5h`；写错协议是**启动报错**。这里不会从环境变量里读任何东西：代理要么被点名，要么
+就没有。
+
+```yaml
+# .openheron/tools/http.yaml
+methods: [get]
+proxy: http://127.0.0.1:7890
+allows: [request_get]
+```
+
+★ **模型 API 调用是另一个客户端**：它读环境变量里的 `HTTP_PROXY` 和 `HTTPS_PROXY`，
+沙箱 Kit 的凭据替换走的就是这条路。`proxy:` 键是给**工具**用的，它不看环境变量。
+
 ### 4.5 进程参数（`server/config.yaml`）
 
 | 字段 | 默认 | 说明 |

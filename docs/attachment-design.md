@@ -1012,7 +1012,7 @@ part 有 `text` / `image_url` / `file` 三种，`image_url.url` 收 base64 data 
 模型会自己说它看不见 —— 用户至少不会以为模型看过。
 
 ★ openheron **无法从配置声明一个模型有没有视觉**：
-`agentkit/spec/decl/decl.go:38` 的 `decl.Model` 只有 ID / Kind / Dimensions /
+`agentkit/spec/decl/decl.go:37` 的 `decl.Model` 只有 ID / Kind / Dimensions /
 ContextWindow / SummarizeAt / Timeout / Reasoning* / Extra，**没有 vision 字段**。
 所以「这个模型支不支持图片」目前只能是 provider 的事实，不是 openheron 的配置。
 

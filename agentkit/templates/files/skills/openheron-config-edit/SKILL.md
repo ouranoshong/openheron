@@ -63,6 +63,7 @@ context: inline
 - `allows:` names the tools the way the model sees them (`request_get` / `duckduckgo_search` / `wikipedia_search` / `kb_search`, and `write_file` / `edit_file` / `execute` for the filesystem file); `kb_index` and the write methods ask by default. ★ An **MCP** file is the other case: there the names are the **server's own** (`create_issue`), because the exposed name is assembled with the namespace.
 - In an MCP file, `tools:` is the filter and `allows:` is the tier exception — two questions, one cannot substitute for the other. ★ The file's `tools:` narrows the server down to **the servers it applies to**; the agent's `mcps:` decides whether the server is mounted at all.
 - The parameters: `http.methods` defaults to `[get]`; `web_search.provider` only accepts `duckduckgo`; `kb.model` is required when `corpus_dir` is not empty and has to be `kind: embedding`; `corpus_dir` is relative to the project root, and an absolute path is refused.
+- ★ `proxy:` (`http.yaml` and `web_search.yaml`) is the proxy every request goes through. Empty = **no proxy**, and **nothing is read from the environment**. ★ A proxy **replaces** the public-address rule instead of adding to it: with one configured the target may be any address the proxy can reach — an intranet host is not public, and reaching it is what the proxy is for — so the proxy is the boundary. Schemes: `http` `https` `socks5` `socks5h`; a wrong one is a hard error at load time.
 - Effective: hot (including the tier).
 
 ## Scenario D: the MCP servers (mcps/)

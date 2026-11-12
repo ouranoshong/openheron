@@ -43,7 +43,7 @@
 配套的装配在（这些**今天仍在**，只是喂给它的东西变了）：
 
 - 档位表：`agentkit/build/spec.go:64` `policyOf`，缺省清单在 `agentkit/build/tools.go:79` `builtinAllowedTools`；
-- 每个工具文件的 `allows:` 汇总：`agentkit/spec/load.go:326` `AllowedTools`；
+- 每个工具文件的 `allows:` 汇总：`agentkit/spec/load.go:335` `AllowedTools`；
 - 服务端文件里的 `allows:` 翻译成暴露名：`agentkit/build/mcptools.go:173` `mcpAllowedNames`。
 
 ### 1.2 MCP 的名字：三段，各管一件事
@@ -56,17 +56,17 @@ mcp__github__ls
 
 | 段 | 分开的是 | 少了它会怎样 | 常量 |
 |---|---|---|---|
-| `mcp__` | MCP 工具 ↔ 内置工具 | 服务器暴露 `ls` 就顶掉内置 `ls` | `agentkit/spec/decl/decl.go:352` |
-| `<server>__` | 一台服务器 ↔ 另一台 | `mcp_github` 和 `mcp_minimax` 各自的 `ls` 撞成一个 | `agentkit/spec/decl/decl.go:333` |
+| `mcp__` | MCP 工具 ↔ 内置工具 | 服务器暴露 `ls` 就顶掉内置 `ls` | `agentkit/spec/decl/decl.go:351` |
+| `<server>__` | 一台服务器 ↔ 另一台 | `mcp_github` 和 `mcp_minimax` 各自的 `ls` 撞成一个 | `agentkit/spec/decl/decl.go:332` |
 | `<tool>` | —（服务器自己的名字，只消毒） | 带 `-`/`.`/`:` 的名字过不了厂商函数名集合 | `agentkit/build/mcptools.go:151` |
 
-★ **双下划线是让名字可解析的那一半。** 服务器名必须匹配 `^[a-z0-9]+(_[a-z0-9]+)*$`（`agentkit/spec/decl/decl.go:369`），**不允许连续下划线**，所以 `mcp__a__b__x` 只有一种读法。如果服务器能叫 `a__b`，这个名字就有两种读法，整条规则当场失效。**正则和分隔符是一对。**
+★ **双下划线是让名字可解析的那一半。** 服务器名必须匹配 `^[a-z0-9]+(_[a-z0-9]+)*$`（`agentkit/spec/decl/decl.go:368`），**不允许连续下划线**，所以 `mcp__a__b__x` 只有一种读法。如果服务器能叫 `a__b`，这个名字就有两种读法，整条规则当场失效。**正则和分隔符是一对。**
 
 命名解决不了的两处，按服务器内部跳过（`agentkit/build/mcptools.go:68` `mcpPlan`）：
 
 | 情形 | 结果 | 理由码 |
 |---|---|---|
-| 组合名超 64 字符（`agentkit/spec/decl/decl.go:394`） | 跳过那个工具 | `name_too_long` |
+| 组合名超 64 字符（`agentkit/spec/decl/decl.go:393`） | 跳过那个工具 | `name_too_long` |
 | 消毒后与同服务器的另一个工具重名 | 跳过后来的 | `name_collision` |
 
 ★ 两种都是**跳过 + 警告，不让进程失败**：名字是远端定的，它今天多一个古怪工具，只该赔掉那一个。
@@ -110,7 +110,7 @@ mcp__github__ls
 | 现在 | 之后 |
 |---|---|
 | `Agent.Skills *[]string` / `MCPServers *[]string` | `[]string`（指针消失） |
-| `mcpServersOf(list *[]string)`：nil → 全部（`agentkit/spec/load.go:657`） | **整个函数删掉**，直接用 `a.MCPServers` |
+| `mcpServersOf(list *[]string)`：nil → 全部（`agentkit/spec/load.go:666`） | **整个函数删掉**，直接用 `a.MCPServers` |
 | `skillScopeOf(list *[]string)` 的 nil 分支（`agentkit/build/skill.go:62`） | 删掉 |
 | `cloneList` 的 nil 语义与「指针是为了区分没写和空」的注释 | 删掉 |
 | 三处指针的文档 | 一行规则 |
@@ -136,9 +136,9 @@ tools: [ls, read_file]                    # ② 非 MCP 工具的允许列表；
 
 ★ **代价是真实的：按 agent 收窄 MCP 工具的能力消失了。** 服务器文件自己的 `tools:` 过滤（`mcps/<server>.yaml`，`mcpOffers`）仍然是**按服务器**的收窄点，但它是所有挂载它的 agent 共享的。审批层不受影响：MCP 工具的 tier 来自服务器文件的 `allows:`，缺省 `ask` —— **挂载不等于放行**（`agentkit/build/mcptools.go:107`）。
 
-★ **`tools:` 里的 `mcp__*` 条目被丢弃，并以一条提示报出**，而不是加载期报错（`agentkit/spec/load.go:836` `checkAgentMCPNames`）。理由：语义已经变了，不是自相矛盾 —— 硬失败只会挡住一个本来能用的配置。提示要说清两件事：`tools` 不点名 MCP 工具，`mcps:` 才是挂载服务器并授予工具的地方。
+★ **`tools:` 里的 `mcp__*` 条目被丢弃，并以一条提示报出**，而不是加载期报错（`agentkit/spec/load.go:845` `checkAgentMCPNames`）。理由：语义已经变了，不是自相矛盾 —— 硬失败只会挡住一个本来能用的配置。提示要说清两件事：`tools` 不点名 MCP 工具，`mcps:` 才是挂载服务器并授予工具的地方。
 
-★ **`mcp__github__*` 这个通配不再有意义，但边界规则仍然成立。** 双下划线保证服务器名的右边界：它匹配 `mcp__github__ls`，不匹配 `mcp__github_x__y`（后者是服务器 `github_x`）。命名空间三段式**不可协商**（`agentkit/spec/decl/decl.go:461`）。
+★ **`mcp__github__*` 这个通配不再有意义，但边界规则仍然成立。** 双下划线保证服务器名的右边界：它匹配 `mcp__github__ls`，不匹配 `mcp__github_x__y`（后者是服务器 `github_x`）。命名空间三段式**不可协商**（`agentkit/spec/decl/decl.go:482`）。
 
 ### 2.4 由此删掉的两样东西
 
@@ -280,7 +280,7 @@ HTTP、CLI 和工具都只调它们，没有第二个装配点。下面三刀是
 
 ★ **一条规则是「搬到服务端」而不是「删掉」。** 前端原本拿模型的 `reasoning` 词汇表检查
 agent 的档位，而 loader 不检查 —— 于是 vendor 没有的档位能一路加载成功，发出去就是
-「一点思考都没有」。现在它在 `validate()` 里（`agentkit/spec/load.go:668` `checkReasoning`），检查的是**每一个**文件，不只是在这个编辑器里改过的那些。
+「一点思考都没有」。现在它在 `validate()` 里（`agentkit/spec/load.go:677` `checkReasoning`），检查的是**每一个**文件，不只是在这个编辑器里改过的那些。
 
 ### 3.4 CLI 统一（✅）
 

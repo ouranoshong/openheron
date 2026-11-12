@@ -14,3 +14,13 @@ timeout: 30s              # a lenient duration: it must carry a unit, and a wron
 # ★ The names that run **without a nod**, in this file's own vocabulary.
 #   Everything else this file provides asks — the default is ask.
 allows: [request_get]     # request_post and the other write methods still ask
+
+# ★ proxy: the proxy every request goes through. Empty is **no proxy** — the
+#   tool dials the target itself and refuses a target that is not a public
+#   address. A proxy **replaces** that rule instead of adding to it: a proxy
+#   exists to reach what cannot be reached directly (an intranet host is not
+#   public, and reaching it is what the proxy is for), so with one configured
+#   the target may be any address the proxy can reach — the proxy is the
+#   boundary. Schemes: http, https, socks5, socks5h. A wrong one is a
+#   load-time error.
+proxy: ""
