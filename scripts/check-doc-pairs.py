@@ -42,7 +42,7 @@ CHINESE_ONLY = [
     "animation-design.md",
     "attachment-design.md",
     "config-design.md",
-    "config-reload-design.md",
+    "config-optimization-design.md",
     "context-usage-design.md",
     "fs-backend-design.md",
     "logging-design.md",

@@ -35,9 +35,10 @@ one — change one and change the other.
 > motions are still a proposal),
 > `docs/attachment-design.md` (attachments — how an uploaded file lands on disk, what the
 > server does to it, and how the interface shows it),
-> `docs/config-reload-design.md` (configuration reload and write-path refactor — **a proposal**:
-> the reload becomes "mark, then rebuild on the next turn by dependency", and the file tools
-> hand configuration-root writes over to the configuration service).
+> `docs/config-optimization-design.md` (configuration system optimization — **a proposal**:
+> the tool surface says which side it answers from, the file tools hand configuration-root
+> writes over to the configuration service, and the reload becomes "mark, then rebuild on the
+> next turn by dependency").
 > **Every other design document under `docs/` still lives in the upstream repository** ——
 > any `docs/xxx.md` reference below that is not one of these sixteen, is the upstream copy.
 > If you cannot get hold of it before changing semantics, ask first; do not change
@@ -92,13 +93,16 @@ one — change one and change the other.
 > in a **global deny** (§6.3) is gone with the deny list itself: "not exposed" is said by a
 > file's `allows:` and by an agent's `tools`.
 >
-> ★ `docs/config-reload-design.md` is a **proposal, not implemented** — it says where the
-> reload and the write paths should go, and what the owner has to decide. The code today is
-> what `docs/config-design.md` §8 (hot reload) and §6 (the configuration surface) describe:
-> the two documents do not contradict each other, one is the present and the other the future.
+> ★ `docs/config-optimization-design.md` is a **proposal, not implemented** — it says where the
+> tool surface, the write paths and the reload should go, and what the owner has to decide.
+> The code today is what `docs/config-design.md` §8 (hot reload) and §6 (the configuration
+> surface) describe: the two documents do not contradict each other, one is the present and
+> the other the future.
 > ★ Its trigger is real, though — a `config_write` that lands on an agent's own file swaps
 > the whole tree, and the run that was interrupted by the approval comes back on a different
-> agent, so the report never returns.
+> agent, so the report never returns. ★ And the model cannot tell whether its own change
+> landed: half the `config_*` tools answer from the files on disk and half from the tree the
+> turn started with, and two of the messages say the opposite.
 >
 > ★ `docs/logging-design.md` **is implemented**: the mutable level, `log_level`, the
 > composition root, the hertz adapter, the per-module injection and moving the request log
@@ -454,7 +458,7 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 | `docs/sandbox-kit-design.md` | **Docker Sandbox Kit packaging** — the openheron process as it is, a v3 workload Kit that carries the whole process into a microVM, how the model key stays on the host, and the SSE path that had to be measured (**the Kit is built and published**; §4.2 still holds three open decisions) |
 | `docs/mcp-design.md` | **MCP integration design** — the tool assembly path, what an MCP client adds to it, the `mcp__<server>__<tool>` namespace, prefix matching in the tool tables, and where an MCP server would run inside the Kit (**implemented**; §13 — the non-blocking start — is implemented too; §8 — how a sandbox Kit packages an MCP server — is still a proposal) |
 | `docs/config-design.md` | **Configuration system design** — the config root and its three levels, the partitions and their file specs, loading and precedence, hot reload, and the dependency iron rules (**the body describes the code as it is**; the `mcps/` partition and the tier that lives with the tool are implemented) |
-| `docs/config-reload-design.md` | **Configuration reload and write-path refactor — design** — why one configuration write replaces the whole agent tree, and how the reload becomes "mark, then rebuild on the next turn by dependency" while the file tools hand configuration-root writes over to the configuration service (**a proposal, not implemented**; §6 lists five questions for the owner) |
+| `docs/config-optimization-design.md` | **Configuration system optimization — design** — the six `config_*` tools and which side each answers from, the file tools handing configuration-root writes over to the configuration service, the reload becoming "mark, then rebuild on the next turn by dependency", and the query that answers "what changes next turn" (**a proposal, not implemented**; §7 lists the decisions the owner has already made and the three still open) |
 | `docs/tool-surface-design.md` | **Tool-surface design** — what tools an agent gets (`tools:` / `mcps:` / `skills:`), the MCP namespace's three segments, the configuration surface collapsed into one core, and the six `config_*` tools (**§2-§5 are implemented**) |
 | `docs/logging-design.md` | **Logging assembly refactor — design** — the composition root, a mutable `log_level`, injected loggers, taking over hertz's log output, and moving the request log out of `llm/common` (**implemented**) |
 | `docs/animation-design.md` | **Interface motion — design** — the motion tokens, the reduced-motion fallback, the brand mark's entrance, and the interface motions that are still a proposal (**§2.3, §3 and §4 are implemented**) |
