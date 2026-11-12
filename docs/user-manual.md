@@ -773,6 +773,9 @@ told to (`proxy: env`).
 | `start_timeout` | `60s` | Startup timeout |
 | `lease_ttl` | `10m` | How long a run's lease survives without progress — **longer than the provider's own timeout** |
 | `agent.max_depth` | `1` | Cap on delegation depth |
+| `watch.enabled` | `true` | Whether the hot-reload watcher runs at all — with it off, **every** change needs a restart |
+| `watch.debounce` | `200ms` | How long the watcher waits before it reads a changed file |
+| `retry.max_retries` | `5` | How many times one turn may retry a model call |
 | `log_level` | `info` | `debug`, `info`, `warn` or `error` — decides which lines reach the output |
 | `log_requests` | `false` | Whether to print the redacted model request body and the raw `tools` array at `debug` level; same effect as `OPENHERON_LOG_LLM_REQUESTS=1` |
 | `log.file` | `""` | A file to write the log to, relative to the **config root** — empty means stderr only |
@@ -833,6 +836,10 @@ save.** The rule above means the directory in force can be a different one from
 editor shows what the process actually reads and keeps the section read-only. A process
 that found no skills directory at all is not that case: `<config root>/skills/` is then
 where the next start will look, and creating the first skill there works.
+
+★ **`skills/` is hot.** Editing a `SKILL.md` under the config root takes effect on the
+next turn — no restart. A skills directory that lives **elsewhere** is not watched: a
+change there reaches the agents on the next start.
 
 ### 4.7 MCP servers (`mcps/`)
 
@@ -973,14 +980,50 @@ Six tools let an agent read and change the configuration it runs from. They are 
 mounted and, like every other tool that is not an MCP one, only **visible** to the agents
 whose `tools:` list names them:
 
-| Tool | What it answers | Tier |
-|---|---|---|
-| `config_get` | One file (`{path}`: its text, revision, and whether it is hot), or `{}`: the partitions, the files that exist, and what the running process holds | allow |
-| `config_validate` | `{path, content}`: would this file load, and where exactly is it wrong — the server reports the line. `{}`: check the tree on disk | allow |
-| `config_template` | `{path}`: the skeleton that file starts from. `{section}`: that partition's templates. Neither: an index of what to ask for | allow |
-| `config_notices` | What the loader noticed but did not refuse: renamed keys, retired directories, values that fell back to a default | allow |
-| `config_tier` | `{tool}`: whether it asks. `{agent}`: that agent's tools and their tiers. Neither: the default tier and the whole exception list. Answers use this turn's configuration snapshot, so an agent written earlier in the same turn is not visible yet — the tool says so instead of claiming it does not exist | allow |
-| `config_write` | Writes a file: checked against the tree, checked against the revision you read, and refused whole if the merge breaks. Takes effect on the next turn — `applied` means the watcher will pick it up, not that this turn can already see it | **ask** |
+| Tool | What it answers | Which side it answers from | Tier |
+|---|---|---|---|
+| `config_get` | One file (`{path}`: its text, revision, and whether it is hot), or `{}`: the partitions, the files that exist, and what the running process holds. With `impact` it answers a different question instead: who depends on that file, and who the next turn rebuilds | the **disk** (`disk`) for a file's text; the overview carries both sides | allow |
+| `config_validate` | `{path, content}`: would this file load, and where exactly is it wrong — the server reports the line. `{}`: check the tree on disk | the **disk** (`disk`) | allow |
+| `config_template` | `{path}`: the skeleton that file starts from. `{section}`: that partition's templates. Neither: an index of what to ask for | neither — a skeleton is neither a file nor a tree | allow |
+| `config_notices` | What the loader noticed but did not refuse: renamed keys, retired directories, values that fell back to a default | the **running** tree (`running`) | allow |
+| `config_tier` | `{tool}`: whether it asks. `{agent}`: that agent's tools and their tiers. Neither: the default tier and the whole exception list. Answers use the tree this turn runs, so an agent written earlier in the same turn is not visible yet — the tool says so instead of claiming it does not exist | the **running** tree (`running`) | allow |
+| `config_write` | Writes a file: checked against the tree, checked against the revision you read, and refused whole if the merge breaks. Takes effect on the next turn — `applied` means the watcher will pick it up, not that this turn can already see it | the write lands on the **disk**; the answer carries both sides | **ask** |
+
+★ **Every answer says which side it came from.** The field is `source`, and it is `disk`
+(the files on disk right now) or `running` (the tree this turn was built with). The two
+do not contradict each other — they answer different questions: a change written earlier
+in this turn is already in the disk's text and is not yet in the running tree's.
+
+★ **The overview and the write answer carry the two versions instead**: `runningVersion`
+and `diskVersion`. They differ for as long as a change has not been picked up, and that
+difference is the answer to "has my change landed".
+
+★ **`config_get` has a second question: `impact`.** It does not read the file — it
+answers "who depends on this file, and who does the next turn rebuild":
+
+| Answer | What is in it |
+|---|---|
+| with a `path` | `dependents` (the agents this file says something about), `rebuilds` (the agents the next turn rebuilds), `changed` (did this file's contribution to some agent move), and `requiresRestart` when the change cannot be picked up without a restart |
+| without one | `changedFiles` (the files whose contribution to some agent moved) and the same `rebuilds` |
+
+★ **The impact answer comes from the running tree** (`running`), even though it compares
+the disk with it: the dependency graph it walks is the running tree's, and the answer
+says what the disk would change about it. So `config_get` with a `path` answers `disk`
+and `config_get` with `impact` answers `running` — two questions, two sides.
+
+★ **A change reaches only the agents that read the file.** The next turn rebuilds the
+agents whose own dependencies moved — an agent that never reads the changed file keeps
+the one it has. So editing one agent's file rebuilds that agent and its parents, and
+leaves the rest of the tree alone.
+
+★ **`dependents` is direct, `rebuilds` is transitive.** A parent carries its children's
+identity, so a change to a sub-agent rebuilds the parent too: changing
+`agents/skill-expert.md` lists `skill-expert` under `dependents`, and `skill-expert`
+plus its parent under `rebuilds`.
+
+★ **`requiresRestart` is the honest answer for a cold partition.** A file under `server/`
+configures the process, not an agent: nothing reaches an agent, so the answer is
+"nothing changes, and you have to restart" — not "nothing happens".
 
 ```markdown
 ---
@@ -999,6 +1042,14 @@ partition configures the process itself and is not hot-reloaded, so a change nee
 restart — the write path refuses it rather than saving something that silently does
 nothing. Reading is a different question, and it is the one an agent asks when it wants
 to know what the process is actually running with.
+
+★ **The file tools go through the same checks.** `write_file` and `edit_file` on a path
+inside the config root are handed to the configuration service, so the same gates run:
+the tree must still load, a literal secret may not land in a provider file, and a
+working agent must not disappear from the tree. ★ `edit_file` reads the file through the
+service too, so it carries the revision and a change that raced it is refused;
+`write_file` carries no revision, so a whole-file write is "the last writer wins" — the
+gates still run.
 
 ## 5. Multiple agents and delegation
 
@@ -1096,6 +1147,13 @@ error — so it can adjust its approach instead of falling over.
 (e.g. the session directory was cleaned out), the interface tells you plainly that the
 approval can no longer be resumed and asks you to send a new message, instead of
 silently starting a fresh turn.
+
+★ **The round comes back to the tree it started with.** A round that was interrupted for
+an approval records the tree it ran on, and the resume continues on that tree — so a
+configuration change made in the meantime does not change what that round concludes.
+The change takes effect on the **next** round (§4.9). ★ If openheron was restarted in
+the meantime, that tree is gone: the round continues on the current one, and the log
+says so.
 
 ### 6.3 The config editor
 
@@ -1490,8 +1548,15 @@ a wrong key.
 
 **Q: I changed `agents/main.md` and nothing happened?**
 `agents/` is hot-reloaded, so it should have taken effect. If it did not, look for the
-reload error in the startup log. `server/` and `skills/` are **not** hot-reloaded and
-need a restart.
+reload error in the startup log. `server/` is **not** hot-reloaded and needs a restart.
+`skills/` is hot too — a `SKILL.md` under the config root takes effect on the next turn
+(§4.6) — but a skills directory that lives elsewhere is not watched.
+
+**Q: I changed one agent's file — do the other agents change too?**
+No, and that is the point. A change reaches only the agents that read the file: the next
+turn rebuilds the agent you edited and its parents, and the others keep what they had.
+`config_get` with `impact` tells you who is in that set before you change anything
+(§4.9).
 
 **Q: The model does not think — `reasoning: high` seems to do nothing?**
 Most likely the model profile **does not declare the `high` tier**. A tier missing from
