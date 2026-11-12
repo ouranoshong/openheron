@@ -168,6 +168,32 @@ jobs:
             /tmp/e2e.log
           retention-days: 7
 
+  # ★ The tag has to point at a commit that is **on `main`**. A tag on a side
+  #   branch publishes a release nobody merged: `main` keeps the old version,
+  #   the release page counts commits that will never line up, and the next
+  #   release repeats it. The manual says so; this job makes it true.
+  tag-check:
+    name: tag (on main)
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          # ★ Full history: the question is "is the tagged commit an ancestor
+          #   of `main`", and that question needs both of them.
+          fetch-depth: 0
+      - name: the tagged commit must be on main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error title=the tag is not on main::merge the commit into main first, then cut the tag on main"
+            echo "::error title=the tag is not on main::$(git log -1 --oneline HEAD) is not on origin/main"
+            exit 1
+          fi
+          echo "the tagged commit is on main: $(git log -1 --oneline HEAD)"
+
   release:
     name: release
     # ★ A tag on a red commit publishes nothing: the checks come first.
@@ -178,7 +204,9 @@ jobs:
     #     failed run with zero jobs, not as a failing job).
     # ★ The release waits for the secret scan too: a tag whose commit holds a
     #   key should not become a published release.
-    needs: [go, web, e2e, secrets]
+    # ★ And it waits for the tag check: a release built from a commit `main`
+    #   never took is a release nobody merged.
+    needs: [go, web, e2e, secrets, tag-check]
     if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
     runs-on: ubuntu-latest
     permissions:
@@ -428,7 +456,10 @@ jobs:
     # ★ The Kit is a **separate artifact** from the release, and it waits for
     #   the same checks rather than for the release: the two publish different
     #   things, and neither one should wait for the other.
-    needs: [go, web, e2e, secrets]
+    #
+    # ★ The Kit waits for the tag check as well: an image labelled with a
+    #   release that `main` never took is the same drift, one image further out.
+    needs: [go, web, e2e, secrets, tag-check]
     if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
     runs-on: ubuntu-latest
     permissions:

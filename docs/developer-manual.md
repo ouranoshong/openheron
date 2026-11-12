@@ -754,14 +754,22 @@ the install gate in front of it.
 | `web` | `task lint-web` + `bun run test:unit` | bun |
 | `e2e` | `task test-e2e` — the fake backend it ships with | bun + chromium |
 | `secrets` | gitleaks over the whole history (§5.9) | — |
+| `tag-check` | the tagged commit has to be on `main` | — |
 | `install-script` | `task test-install` — the installer against a local fake release | — |
-| `release` | `task release`, then a **draft** GitHub Release | the four checks |
+| `release` | `task release`, then a **draft** GitHub Release | the checks and the tag check |
 | `install` | installs the assets of that draft on every platform we ship for | `release` |
 | `publish` | turns the draft into the public release | `install` |
 
 ★ **The release waits for the checks** (`needs`), so a tag on a red commit publishes
 nothing. That is why the pipeline is one file: a job cannot wait for a job in another
 workflow, so two files would have to run the checks a second time.
+
+★ **And the release waits for the tag check.** `tag-check` asks whether the tagged
+commit is an ancestor of `main` — the rule this section states in prose. A rule that
+lives only in prose gets broken under time pressure: a tag on a side branch publishes
+a release nobody merged, `main` keeps the old version, and the release page counts
+commits that will never line up. The pipeline refuses it instead, and the annotation
+says what to do: merge the commit into `main` first, then cut the tag there.
 
 ★ **The release also waits for the install gate.** The `install` job installs the very
 assets the `release` job built, on every platform we publish for, and only then does
@@ -791,14 +799,17 @@ renamed job is a new check name, and the old one goes missing.
 
 **Before tagging**
 
-1. `main` is green — the badge at the top of the README, or the last run in
+1. ★ **The release is merged into `main` first.** The version bump is a pull
+   request that touches two lines, and it is merged before the tag is cut: the
+   tag goes on `main`'s tip. A tag on a side branch publishes a release nobody
+   merged, and `tag-check` refuses it.
+2. `main` is green — the badge at the top of the README, or the last run in
    the Actions tab.
-2. The working tree is clean and `main` is up to date: `git pull --ff-only`.
-   The tag has to point at a commit that **is on `main`** — `main` is
-   protected, so a tag on a side branch publishes something nobody merged.
-3. The tag name is decided. `v*` is the convention (`v0.1.0`), and the tag is
+3. The working tree is clean and `main` is up to date: `git pull --ff-only`.
+   The tag has to point at a commit that **is on `main`**.
+4. The tag name is decided. `v*` is the convention (`v0.1.0`), and the tag is
    also the version stamped into the binary.
-4. ★ **The tag ruleset is `release-tag`** (Settings → Rules → Rulesets). It
+5. ★ **The tag ruleset is `release-tag`** (Settings → Rules → Rulesets). It
    refuses to **delete or move** a tag, and that is deliberate: a failed
    release's tag stays in the repository as the record of what was tried.
    Creating tags is allowed.
