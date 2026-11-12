@@ -59,6 +59,22 @@ func (configToolProvider) ID() string { return "config" }
 // the service was not wired, which is a different thing from failing.
 func (configToolProvider) Optional() bool { return false }
 
+// The two sides an answer can come from.
+//
+// ★ A tool that answers from the files on disk and a tool that answers from
+//
+//	the tree this turn runs do not contradict each other — they answer
+//	different questions. ★ The name is **in the answer**, so the caller
+//	does not have to know which is which: a model that has just written a
+//	configuration file can see that the disk moved and the running tree did
+//	not, instead of reading two numbers that differ by one letter.
+const (
+	// sourceDisk is the files on disk right now.
+	sourceDisk = "disk"
+	// sourceRunning is the tree this turn was built with.
+	sourceRunning = "running"
+)
+
 func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTool, error) {
 	// ★ No service, no tools. The registry is built in tests without one,
 	//   and a tool that panics on first use is worse than an absent tool.
@@ -74,7 +90,9 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 		desc: "Read the configuration. With a path, return that file's text and revision. " +
 			"Without one, return the partition table, the files that exist, and a summary " +
 			"of what the running process holds. Paths are relative to the config root " +
-			"(agents/main.md, tools/http.yaml).",
+			"(agents/main.md, tools/http.yaml). ★ The text is read from the disk, so a " +
+			"change written earlier in this turn is already in it; the summary is the " +
+			"tree this turn runs, which is not.",
 		params: map[string]*schema.ParameterInfo{
 			"path": {Type: schema.String, Desc: "relative path, e.g. agents/main.md; omit for the overview"},
 		},
@@ -110,7 +128,11 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 				Hot      bool   `json:"hot"`
 				Revision string `json:"revision,omitempty"`
 				Content  string `json:"content"`
-			}{in.Path, rev != "", cat.Hot(), rev, string(content)}, nil
+				// ★ The file is read from the **disk**, not from the tree
+				//   this turn runs: a change written earlier in this turn
+				//   is already in here.
+				Source string `json:"source"`
+			}{in.Path, rev != "", cat.Hot(), rev, string(content), sourceDisk}, nil
 		},
 	}
 
@@ -131,10 +153,23 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 			if err := json.Unmarshal([]byte(args), &in); err != nil {
 				return nil, fmt.Errorf("%s: %w", decl.ToolNameConfigValidate, err)
 			}
+			// ★ The tree is read from the **disk** and the trial merge is
+			//   run against it, so the answer is the disk's state — not the
+			//   tree this turn runs.
 			if in.Path == "" {
-				return svc.Check(), nil
+				return struct {
+					*spec.Diagnostics
+					Source string `json:"source"`
+				}{svc.Check(), sourceDisk}, nil
 			}
-			return svc.Diagnostics(in.Path, []byte(in.Content))
+			d, err := svc.Diagnostics(in.Path, []byte(in.Content))
+			if err != nil {
+				return nil, err
+			}
+			return struct {
+				*spec.Diagnostics
+				Source string `json:"source"`
+			}{d, sourceDisk}, nil
 		},
 	}
 
@@ -211,12 +246,17 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 			"\"did my change do what I meant\".",
 		params: nil,
 		run: func(_ context.Context, _ string) (any, error) {
+			// ★ The two versions, named for what they are: the tree this
+			//   turn runs, and the files on disk right now. ★ They differ
+			//   for as long as a hot change has not been picked up, and
+			//   that difference is the answer to "has my change landed".
 			return struct {
-				Deferred      []string `json:"deferred"`
-				Version       string   `json:"version"`
-				ConfigVersion string   `json:"configVersion"`
-				Watch         bool     `json:"watch"`
-			}{orEmpty(cfg.Deferred()), cfg.Version, svc.Fingerprint(), watchEnabled(cfg)}, nil
+				Deferred       []string `json:"deferred"`
+				RunningVersion string   `json:"runningVersion"`
+				DiskVersion    string   `json:"diskVersion"`
+				Watch          bool     `json:"watch"`
+				Source         string   `json:"source"`
+			}{orEmpty(cfg.Deferred()), cfg.Version, svc.Fingerprint(), watchEnabled(cfg), sourceRunning}, nil
 		},
 	}
 
@@ -224,7 +264,9 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 		name: decl.ToolNameConfigTier,
 		desc: "Explain approval tiers. With a tool name, its tier (allow or ask). With an " +
 			"agent id, that agent's tools and the tier of each. With neither, the default " +
-			"tier and the whole exception list. Answers use this turn's config snapshot.",
+			"tier and the whole exception list. ★ Answers come from the configuration this " +
+			"turn runs, not from the files on disk — a change written earlier in this turn " +
+			"is not in them yet.",
 		params: map[string]*schema.ParameterInfo{
 			"tool":  {Type: schema.String, Desc: "a tool name, e.g. write_file"},
 			"agent": {Type: schema.String, Desc: "an agent id, e.g. main"},
@@ -240,9 +282,10 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 			switch {
 			case in.Tool != "":
 				return struct {
-					Tool string `json:"tool"`
-					Tier Tier   `json:"tier"`
-				}{in.Tool, policy.TierOf(in.Tool)}, nil
+					Tool   string `json:"tool"`
+					Tier   Tier   `json:"tier"`
+					Source string `json:"source"`
+				}{in.Tool, policy.TierOf(in.Tool), sourceRunning}, nil
 			case in.Agent != "":
 				a, ok := cfg.Agents[in.Agent]
 				if !ok {
@@ -257,16 +300,18 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 					rows = append(rows, row{name, policy.TierOf(name)})
 				}
 				return struct {
-					Agent string `json:"agent"`
-					Tools []row  `json:"tools"`
-				}{in.Agent, rows}, nil
+					Agent  string `json:"agent"`
+					Tools  []row  `json:"tools"`
+					Source string `json:"source"`
+				}{in.Agent, rows, sourceRunning}, nil
 			default:
 				allow := append([]string(nil), policy.Allow...)
 				sort.Strings(allow)
 				return struct {
 					DefaultTier Tier     `json:"defaultTier"`
 					Allow       []string `json:"allow"`
-				}{TierAsk, allow}, nil
+					Source      string   `json:"source"`
+				}{TierAsk, allow, sourceRunning}, nil
 			}
 		},
 	}
@@ -275,7 +320,10 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 		name: decl.ToolNameConfigWrite,
 		desc: "Write a configuration file. The write is checked before it lands: it must parse, " +
 			"the tree must still hold together, and the base revision must match what is on " +
-			"disk. A change takes effect on the next turn. Always asks for approval.",
+			"disk. A change takes effect on the next turn. Always asks for approval. " +
+			"★ To change one line of a configuration file, edit_file does it and goes " +
+			"through the same checks; this tool replaces the whole file, so it needs the " +
+			"whole text.",
 		params: map[string]*schema.ParameterInfo{
 			"path":         {Type: schema.String, Desc: "relative path, e.g. agents/main.md", Required: true},
 			"content":      {Type: schema.String, Desc: "the file's full new text", Required: true},
@@ -300,11 +348,12 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 			out := struct {
 				Path            string `json:"path"`
 				Revision        string `json:"revision"`
-				ConfigVersion   string `json:"configVersion"`
+				RunningVersion  string `json:"runningVersion"`
+				DiskVersion     string `json:"diskVersion"`
 				Applied         bool   `json:"applied"`
 				RequiresRestart bool   `json:"requiresRestart,omitempty"`
 				Note            string `json:"note,omitempty"`
-			}{Path: in.Path, Revision: rev, ConfigVersion: svc.Fingerprint()}
+			}{Path: in.Path, Revision: rev, RunningVersion: cfg.Version, DiskVersion: svc.Fingerprint()}
 			hot := true
 			if cat, err := spec.ValidatePath(in.Path); err == nil {
 				hot = cat.Hot()
@@ -320,12 +369,22 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 				}
 			default:
 				// ★ "applied" means the watcher will pick the file up, not that
-				//   this turn can see it. A turn that has just written an agent
-				//   used to read applied:true as permission to verify it in the
-				//   same turn, and every config_* tool there answers from the
-				//   snapshot the turn started with — so the verification failed.
-				out.Note = "written to disk and picked up by hot reload on the next turn; " +
-					"config_* tools in this turn still read the snapshot it started with"
+				//   this turn can see it.
+				//
+				//   ★ The note has to say **which** is which. The old one
+				//   claimed that every config_* tool in this turn reads the
+				//   snapshot it started with — and that was false:
+				//   config_get reads the disk. A model that trusted it read
+				//   its own write as a stale value and wrote it again, which
+				//   is the loop missingAgentError was built to stop.
+				//
+				//   ★ The two versions are the answer to "has my change
+				//   landed": the disk moved, the tree this turn runs did
+				//   not — and the next turn is when the new tree is built.
+				out.Note = "written to disk; the next turn rebuilds the whole agent tree with it. " +
+					"the tree this turn runs has not changed yet: config_tier and config_notices " +
+					"still answer from it, while config_get reads the disk and already shows the " +
+					"new content"
 			}
 			return out, nil
 		},
@@ -363,7 +422,7 @@ func configOverview(svc *spec.Service, cfg *spec.Config) (any, error) {
 		return nil, err
 	}
 
-	out := configOverviewAnswer{ConfigVersion: m.ConfigVersion}
+	out := configOverviewAnswer{DiskVersion: m.ConfigVersion, RunningVersion: cfg.Version}
 	out.Categories = make([]configOverviewCategory, 0, len(m.Categories))
 	for _, c := range m.Categories {
 		out.Categories = append(out.Categories, configOverviewCategory{c.ID, c.Editable, c.Hot})
@@ -395,10 +454,18 @@ func configOverview(svc *spec.Service, cfg *spec.Config) (any, error) {
 }
 
 type configOverviewAnswer struct {
-	ConfigVersion string                   `json:"configVersion"`
-	Categories    []configOverviewCategory `json:"categories"`
-	Items         []configOverviewItem     `json:"items"`
-	Effective     configOverviewEffective  `json:"effective"`
+	// ★ The two versions, named for what they are: the tree this turn
+	//   runs, and the files on disk right now. They differ for as long as
+	//   a hot change has not been picked up, and that difference is the
+	//   answer to "has my change landed".
+	RunningVersion string `json:"runningVersion"`
+	DiskVersion    string `json:"diskVersion"`
+
+	Categories []configOverviewCategory `json:"categories"`
+	// ★ The files that exist, with the revision each one has **on disk**.
+	Items []configOverviewItem `json:"items"`
+	// ★ What the process holds — the tree this turn was built with.
+	Effective configOverviewEffective `json:"effective"`
 }
 
 type configOverviewCategory struct {
@@ -456,6 +523,14 @@ func orEmpty(list []string) []string {
 //	that had just written the file read that as "the write failed" and wrote
 //	it again; another turn delegated a lookup to a subagent to check whether
 //	the agent existed. Naming the case — and the next step — stops that loop.
+//
+// ★ ★ This tool answers from the snapshot, and **only** this tool does: the
+//
+//	sentence below used to claim that every config_* tool in a turn reads
+//	the snapshot, and that was false — config_get reads the disk and
+//	config_validate re-reads the tree. A model that believed it read its
+//	own write as a stale value and wrote it again, which is the very loop
+//	the paragraph above is about.
 func missingAgentError(svc *spec.Service, cfg *spec.Config, id string) error {
 	if why := cfg.LeftOut()[id]; why != "" {
 		return fmt.Errorf("agent %q is on disk but left out of the configuration tree: %s. "+
@@ -464,9 +539,10 @@ func missingAgentError(svc *spec.Service, cfg *spec.Config, id string) error {
 	}
 	if svc.Has(spec.DirAgent, id+".md") {
 		return fmt.Errorf("agent %q is written to agents/%s.md but not in this turn's "+
-			"configuration yet: config_write takes effect on the next turn, and all config_* "+
-			"tools in a turn read the snapshot that turn started with. The write already "+
-			"succeeded — do not write it again; check it on the next turn", id, id)
+			"configuration yet: config_write takes effect on the next turn, and this tool "+
+			"answers from the configuration this turn was built with. The write already "+
+			"succeeded — do not write it again; config_get reads the disk and already shows "+
+			"the new content, check it on the next turn", id, id)
 	}
 	return fmt.Errorf("no agent %q under agents/", id)
 }

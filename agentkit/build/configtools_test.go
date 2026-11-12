@@ -167,8 +167,9 @@ func TestConfigGetReadsAFileAndTheOverview(t *testing.T) {
 	}
 
 	overview := callToolJSON[struct {
-		ConfigVersion string `json:"configVersion"`
-		Items         []struct {
+		DiskVersion    string `json:"diskVersion"`
+		RunningVersion string `json:"runningVersion"`
+		Items          []struct {
 			Path string `json:"path"`
 		} `json:"items"`
 		Effective struct {
@@ -179,8 +180,8 @@ func TestConfigGetReadsAFileAndTheOverview(t *testing.T) {
 		} `json:"effective"`
 	}](t, tools, decl.ToolNameConfigGet, `{}`)
 
-	if overview.ConfigVersion == "" {
-		t.Fatal("the overview must carry the fingerprint")
+	if overview.DiskVersion == "" || overview.RunningVersion == "" {
+		t.Fatalf("the overview must carry both versions: %+v", overview)
 	}
 	var sawAgent bool
 	for _, it := range overview.Items {
@@ -196,6 +197,65 @@ func TestConfigGetReadsAFileAndTheOverview(t *testing.T) {
 	}
 	if len(overview.Effective.Models) == 0 {
 		t.Fatal("the overview must name the models the process holds")
+	}
+}
+
+// ★ Every answer says which side it comes from.
+//
+// ★ The two sides do not contradict each other — they answer different
+//
+//	questions — but a model that cannot tell them apart reads a change it
+//	just made as a change that did not happen, and writes it again.
+func TestTheConfigToolsSayWhichSideTheyAnswerFrom(t *testing.T) {
+	_, _, tools := configToolEnv(t)
+
+	get := callToolJSON[struct {
+		Source string `json:"source"`
+	}](t, tools, decl.ToolNameConfigGet, `{"path":"agents/main.md"}`)
+	if get.Source != sourceDisk {
+		t.Fatalf("config_get reads the files on disk, source = %q", get.Source)
+	}
+
+	validate := callToolJSON[struct {
+		Source string `json:"source"`
+	}](t, tools, decl.ToolNameConfigValidate, `{}`)
+	if validate.Source != sourceDisk {
+		t.Fatalf("config_validate re-reads the tree from disk, source = %q", validate.Source)
+	}
+
+	tier := callToolJSON[struct {
+		Source string `json:"source"`
+	}](t, tools, decl.ToolNameConfigTier, `{"tool":"read_file"}`)
+	if tier.Source != sourceRunning {
+		t.Fatalf("config_tier answers from the tree this turn runs, source = %q", tier.Source)
+	}
+}
+
+// ★ The two versions are the machine-readable answer to "has my change
+// landed": the disk moved, the tree this turn runs did not.
+func TestAWriteReportsBothVersionsAndSaysWhichMoved(t *testing.T) {
+	_, _, tools := configToolEnv(t)
+
+	out := callToolJSON[struct {
+		RunningVersion string `json:"runningVersion"`
+		DiskVersion    string `json:"diskVersion"`
+		Note           string `json:"note"`
+	}](t, tools, decl.ToolNameConfigWrite,
+		`{"path":"agents/main.md","content":"---\nmodel: openai/fast\ntools: [ls]\n---\nbody two\n"}`)
+
+	if out.RunningVersion == "" || out.DiskVersion == "" {
+		t.Fatalf("both versions must be present: %+v", out)
+	}
+	if out.RunningVersion == out.DiskVersion {
+		t.Fatalf("the write must move the disk version only: %+v", out)
+	}
+	// ★ The note has to name both sides. It used to claim that every
+	//   config_* tool in a turn reads the snapshot, which was false, and a
+	//   model that believed it read its own write as a stale value.
+	for _, want := range []string{"next turn", "config_get reads the disk"} {
+		if !strings.Contains(out.Note, want) {
+			t.Fatalf("the note must say %q: %q", want, out.Note)
+		}
 	}
 }
 
@@ -300,14 +360,18 @@ func TestConfigNoticesReportsWhatTheLoaderNoticed(t *testing.T) {
 	svc, cfg, tools := configToolEnv(t)
 
 	out := callToolJSON[struct {
-		Deferred      []string `json:"deferred"`
-		Version       string   `json:"version"`
-		ConfigVersion string   `json:"configVersion"`
-		Watch         bool     `json:"watch"`
+		Deferred       []string `json:"deferred"`
+		RunningVersion string   `json:"runningVersion"`
+		DiskVersion    string   `json:"diskVersion"`
+		Watch          bool     `json:"watch"`
+		Source         string   `json:"source"`
 	}](t, tools, decl.ToolNameConfigNotices, `{}`)
 
-	if out.Version == "" || out.ConfigVersion == "" {
-		t.Fatalf("both fingerprints must be present: %+v", out)
+	if out.RunningVersion == "" || out.DiskVersion == "" {
+		t.Fatalf("both versions must be present: %+v", out)
+	}
+	if out.Source != sourceRunning {
+		t.Fatalf("source = %q, want %q — the notices answer from the running tree", out.Source, sourceRunning)
 	}
 	if out.Deferred == nil {
 		t.Fatal("an empty list must be [], not null: a model reads the shape")
@@ -381,14 +445,15 @@ func TestConfigWriteSavesAndReportsWhenItApplies(t *testing.T) {
 	out := callToolJSON[struct {
 		Path            string `json:"path"`
 		Revision        string `json:"revision"`
-		ConfigVersion   string `json:"configVersion"`
+		RunningVersion  string `json:"runningVersion"`
+		DiskVersion     string `json:"diskVersion"`
 		Applied         bool   `json:"applied"`
 		RequiresRestart bool   `json:"requiresRestart"`
 	}](t, tools, decl.ToolNameConfigWrite,
 		`{"path":"agents/main.md","content":"---\nmodel: openai/fast\ntools: [ls, config_get]\n---\nbody two\n"}`)
 
-	if out.Revision == "" || out.ConfigVersion == "" {
-		t.Fatalf("a write must report both revisions: %+v", out)
+	if out.Revision == "" || out.RunningVersion == "" || out.DiskVersion == "" {
+		t.Fatalf("a write must report the revision and both versions: %+v", out)
 	}
 	body, _, err := svc.ReadFile("agents/main.md")
 	if err != nil {
@@ -472,9 +537,13 @@ func TestTheAgentSeesOnlyTheConfigToolsItNames(t *testing.T) {
 // ★ A turn that has just created an agent with config_write used to be told
 //
 //	"no agent X under agents/". It read that as a failed write, wrote the file
-//	again, polled config_get and even delegated a lookup to a subagent. All
-//	config_* tools in a turn hold the snapshot that turn started with, so the
+//	again, polled config_get and even delegated a lookup to a subagent. The
 //	answer has to name the timing instead of claiming the agent is absent.
+//
+// ★ The tool that answers is config_tier, and it answers from the tree this
+//
+//	turn runs — not from the disk. That is why the message says which side
+//	it comes from: config_get reads the disk and already shows the new file.
 func TestConfigTierNamesAJustWrittenAgentAsPending(t *testing.T) {
 	_, _, tools := configToolEnv(t)
 
@@ -486,7 +555,7 @@ func TestConfigTierNamesAJustWrittenAgentAsPending(t *testing.T) {
 	if write.Path != "agents/brand-new.md" {
 		t.Fatalf("the file was not written: %+v", write)
 	}
-	for _, want := range []string{"next turn", "snapshot"} {
+	for _, want := range []string{"next turn", "tree this turn runs"} {
 		if !strings.Contains(write.Note, want) {
 			t.Fatalf("a successful write must say when it takes effect (%q): %q", want, write.Note)
 		}

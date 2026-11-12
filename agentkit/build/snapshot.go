@@ -74,6 +74,10 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 		ExtraRoots:   roots,
 		Shell:        sh.Command(),
 		ShellPathDir: sh.Dir,
+		// ★ The writes that land inside the configuration root go through
+		//   the configuration service: a configuration file is written with
+		//   the checks the editor uses (see configgate.go).
+		ConfigGate: newConfigGate(s.svc),
 	})
 	if err != nil {
 		return out, fmt.Errorf("build filesystem backend: %w", err)

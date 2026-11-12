@@ -1,10 +1,14 @@
 # 配置系统优化改造方案
 
-> **状态：提案，未实施。**
+> **状态：P1 已实施（2026-11-12）；P2–P4 是提案，未实施。**
 >
-> ★ 本文写的是**要改成什么样**，不是**现在是什么样**。现在的实现在
+> ★ 本文写的是**要改成什么样**。现在的实现在
 > `docs/config-design.md` §8（热更新）与 §6（配置表面）里；本文的每一条结论都从那里出发。
 > 文末 §6 给出实施顺序与验收用例，§7 是已经拍板的决定与仍需拍板的问题。
+>
+> ★ **§1 讲的是改造前的样子。** P1 已经把 §1.3、§1.5、§1.6 与 §1.7 那几条改掉了
+> （§2 与 §3 标着「✅ 已实施」）；它们留在这里，是因为后面的设计是从这几条事实推出来的。
+> ★ 改过之后，§1.5 那张表与 §1.6 那两句现在是**历史**——代码里已经不再是这样。
 >
 > ★ **触发它的两件事都发生在真实使用里**，不是设想：
 >
@@ -37,7 +41,7 @@
   `agentkit/spec/reload.go:246` 调 `Reload()`。
 - `Reload()` 走 `onChange(cfg)` → `main.go:707` `agentConfig.set()` → **`gen++`**
   （`main.go:710`）。
-- `agentkit/build/snapshot.go:144` `snapshotFor(cfg, gen)`：代际变大就**重建整棵快照**。
+- `agentkit/build/snapshot.go:148` `snapshotFor(cfg, gen)`：代际变大就**重建整棵快照**。
 - `agentkit/build/pool.go:31` `GetOrBuild(ctx, name, gen, fn)`：池的键是 **(名字, 代际)**。
   代际一变，**每个** agent 都重建。
 - ★ 而 `agentkit/build/assemble.go:100` `cfg.SubAgents = children` ——
@@ -62,13 +66,13 @@
 | 路径 | 落到哪 | 检查 |
 |---|---|---|
 | `config_write` | `agentkit/spec/write.go:484` `Service.Write()` | 修订检查、试装载、密钥扫描、「不许把能跑的 agent 弄丢」闸门、原子写 |
-| `edit_file` / `write_file` | `agentkit/fsx` 直接写文件（`agentkit/fsx/fsx.go:728` / `:751`） | **无修订检查、无闸门** |
+| `edit_file` / `write_file` | `agentkit/fsx` 直接写文件（`agentkit/fsx/fsx.go:739` / `:751`） | **无修订检查、无闸门** |
 
 两条路落在**同一个文件**上。于是同一个改动有两种语义：一种带冲突检查，一种不带；
 一种被闸门守着，一种把 `agents/main.md` 写坏了也只能等下次装载才发现。
 
 ★ 配置文件根在 `projectRoot` 之内，而 `projectRoot` 正是 fsx 的写入根
-（`agentkit/fsx/fsx.go:229` `resolveWrite`），所以文件工具**够得着**配置根。
+（`agentkit/fsx/fsx.go:240` `resolveWrite`），所以文件工具**够得着**配置根。
 
 ### 1.4 现在的重载是**内容哈希**驱动的——这一点已经对了
 
@@ -85,14 +89,14 @@
 
 | 工具 | 答 | 出处 |
 |---|---|---|
-| `config_get <path>` | ★ **盘** | `agentkit/build/configtools.go:98` `svc.ReadFile` → `agentkit/spec/write.go:390` `os.ReadFile` |
+| `config_get <path>` | ★ **盘** | `agentkit/build/configtools.go:116` `svc.ReadFile` → `agentkit/spec/write.go:390` `os.ReadFile` |
 | `config_get`（无）`items` / `configVersion` | ★ **盘** | `agentkit/spec/manifest.go:106` `ListFiles` + `:113` `ReadFile` |
-| `config_get`（无）`effective` | **运行中** | `agentkit/build/configtools.go:385`（`cfg` 是本轮快照） |
+| `config_get`（无）`effective` | **运行中** | `agentkit/build/configtools.go:444`（`cfg` 是本轮快照） |
 | `config_validate` | ★ **盘** | `agentkit/spec/diag.go:125` `Check()` → `:133` `loadOnly(nil)` 重新读盘 |
-| `config_notices` `deferred` / `version` / `watch` | **运行中** | `agentkit/build/configtools.go:219` |
+| `config_notices` `deferred` / `version` / `watch` | **运行中** | `agentkit/build/configtools.go:259` |
 | `config_notices` `configVersion` | ★ **盘** | 同上，`svc.Fingerprint()` |
-| `config_tier` | **运行中** | `agentkit/build/configtools.go:70` `policyOf(cfg)` |
-| `config_write` 的 `ConfigVersion` | ★ **盘** | `agentkit/build/configtools.go:307` |
+| `config_tier` | **运行中** | `agentkit/build/configtools.go:86` `policyOf(cfg)` |
+| `config_write` 的 `ConfigVersion` | ★ **盘** | `agentkit/build/configtools.go:356` |
 
 ★ **一半答盘、一半答运行中，而答案里没有哪个字段说明自己是哪一边。**
 唯一带标签的是 `config_get`（无 path）的 `effective` 字段 —— 它的名字就是「运行中」。
@@ -115,7 +119,7 @@
 而且它们彼此矛盾：模型 `config_get` 看到新内容，却被告知「读的是快照」——
 于是它**不敢信**自己看到的内容。
 
-★ 顺带说明：`missingAgentError`（`agentkit/build/configtools.go:459`）**本身就是为这个坑修的**，
+★ 顺带说明：`missingAgentError`（`agentkit/build/configtools.go:534`）**本身就是为这个坑修的**，
 它的注释写着「a turn that had just written the file read that as "the write failed"
 and wrote it again」。解法是对的 —— **点名情形 + 给下一步**。
 只是① 它只覆盖 `config_tier` 的 lookup miss；② 里面的事实陈述是错的。
@@ -143,51 +147,53 @@ and wrote it again」。解法是对的 —— **点名情形 + 给下一步**�
 
 ---
 
-## 2. 工具表面的一致性（最先做）
+## 2. 工具表面的一致性（最先做） ✅ 已实施（P1，2026-11-12）
 
 ★ 为什么要先做这一部分：它决定**模型能不能判断自己改没改**。
 §3 与 §4 改的是行为，这一部分改的是**模型能看见的事实**——
 而模型只有看见了事实，才不会重复写、也不会误报「没生效」。
 
-### 2.1 提案：把「答哪一边」写进**字段**，不写进散文
+### 2.1 把「答哪一边」写进**字段**，不写进散文 ✅ 已实施
 
-| 工具 | 提案 |
+| 工具 | 落地后的答案 |
 |---|---|
 | `config_get`（带 path） | 加 `"source": "disk"` |
-| `config_get`（无 path） | 已有 `effective`（运行中）；给 `items` 与 `configVersion` 标上 `"disk"` |
+| `config_get`（无 path） | 已有 `effective`（运行中）；`runningVersion` 与 `diskVersion` 两个数并列，`items` 与 `configVersion` 是盘 |
 | `config_validate` | 加 `"source": "disk"` |
 | `config_tier` | 加 `"source": "running"` |
-| `config_notices` | 加 `"source": "running"`；`configVersion` 标注为盘 |
-| `config_write` | 加 `runningConfigVersion`（快照的 `cfg.Version`）与 `diskConfigVersion`（盘的 `svc.Fingerprint()`） |
+| `config_notices` | 加 `"source": "running"`；`runningVersion` 是运行中的，`diskVersion` 是盘的 |
+| `config_write` | 加 `runningVersion`（快照的 `cfg.Version`）与 `diskVersion`（盘的 `svc.Fingerprint()`） |
 
-★ **统一用 `source`，一个词。** 现在 `version`（快照）与 `configVersion`（盘）
-只差一个词 —— 那不是标注，是巧合。
+★ **统一用 `source`，一个词。** 改造前 `version`（快照）与 `configVersion`（盘）
+只差一个词 —— 那不是标注，是巧合。★ 现在两个版本一律叫
+`runningVersion` 与 `diskVersion`，**按它们是什么命名，不按它们差几个字母**。
 
 ★ `config_write` 的两个版本号是这一部分**最有价值的一条**：
 它把「运行中那份是旧的」从**要靠推理**变成**直接可读**。
-现在它的输出只有一个 `ConfigVersion`（盘），模型看不出另一半。
+改造前它的输出只有一个 `ConfigVersion`（盘），模型看不出另一半。
 
-### 2.2 提案：把那**两句话改对**
+### 2.2 把那**两句话改对** ✅ 已实施
 
-- `config_write` 的 Note（`agentkit/build/configtools.go:327`）改成：
-  > 「已落盘（revision X）。**本轮运行中的配置没有变** —— `config_tier` 与
-  > `config_notices` 的 `version` 答的仍是它；`config_get` 读的是盘，所以它**已经能看到
-  > 新内容**。生效的判据是**下一轮**。」
-- `missingAgentError`（`agentkit/build/configtools.go:466`）里那句
-  「all config_* tools in a turn read the snapshot」改成：
-  > 「`config_tier` 答的是**本轮运行中**的配置；`config_get` 读的是**盘**，已经能看到
-  > 这个文件的新内容。」
+- `config_write` 的 Note（`agentkit/build/configtools.go:384`）现在是：
+  > 「written to disk; the next turn rebuilds the whole agent tree with it.
+  > the tree this turn runs has not changed yet: config_tier and config_notices
+  > still answer from it, while config_get reads the disk and already shows the
+  > new content」
+- `missingAgentError`（`agentkit/build/configtools.go:541`）里那句
+  「all config_* tools in a turn read the snapshot」换成了
+  「this tool answers from the configuration this turn was built with」，
+  并补了一句「config_get reads the disk and already shows the new content」。
 
 ★ 这两句是**同一个坑的两半**：第一句让模型以为看不见，第二句让模型以为看得见的
 是旧的。合起来正好制造「以为没改配置」。
 
-### 2.3 提案：Note 分版本改
+### 2.3 Note 分版本改 ✅ P1 的那一版已实施
 
 「下一轮会怎样」在三个阶段是三句话，**不能提前说后面那句**：
 
 | 阶段 | Note 怎么说 |
 |---|---|
-| P1（写路径统一，重建逻辑不变） | 下一轮**整棵树**按新配置换代 |
+| P1（写路径统一，重建逻辑不变） | 下一轮**整棵树**按新配置换代 ← **已落地** |
 | P2（按依赖重建） | 下一轮**按依赖**重建：只有依赖这些文件的 agent 会变 |
 | P3（run 钉住自己的树） | **下一个新 run** 生效；**恢复当前审批的那一轮**沿用开始时的配置 |
 
@@ -196,7 +202,7 @@ and wrote it again」。解法是对的 —— **点名情形 + 给下一步**�
 
 ---
 
-## 3. 写入路径统一：文件工具写配置根 ⇒ 转交配置服务
+## 3. 写入路径统一：文件工具写配置根 ⇒ 转交配置服务 ✅ 已实施（P1，2026-11-12）
 
 ### 3.1 提案一句话
 
@@ -206,27 +212,31 @@ and wrote it again」。解法是对的 —— **点名情形 + 给下一步**�
 `echo > .openheron/agents/main.md` 照样能绕过去（§3.6）。能说的是
 「**用文件工具改配置时**会走检查」。
 
-### 3.2 落点：fsx 的一个**窄接口**，实现由 build 层提供
+### 3.2 落点：fsx 的一个**窄接口**，实现由 build 层提供 ✅ 已实施
 
 ★ 不能让 fsx 直接 import `spec`：`agentkit/fsx` 目前**不 import 任何 openheron 包**
 （它是有意的叶子后端，见 `docs/fs-backend-design.md`），让它知道「什么是配置」
 会造出 `fsx → spec` 的依赖倒置。
 
-⇒ **fsx 自己定义接口，build 层提供实现**：
+⇒ **fsx 自己定义接口，build 层提供实现**（`agentkit/fsx/configgate.go`，
+实现在 `agentkit/build/configgate.go`）：
 
 ```go
 // agentkit/fsx —— 它只知道自己定义的接口，不知道 spec
 type ConfigGate interface {
     // OwnsPath reports whether this absolute path is a configuration file.
     OwnsPath(absPath string) bool
-    // WriteConfig hands the write to the configuration service.
-    // It returns the new revision.
-    WriteConfig(absPath string, content []byte, baseRev string) (string, error)
+    // ReadConfig returns a configuration file's content and revision, the
+    // way the configuration service sees it.
+    ReadConfig(absPath string) (content []byte, rev string, err error)
+    // WriteConfig writes it back. baseRev is the revision the content was
+    // based on; an empty one means "whatever is on disk now".
+    WriteConfig(absPath string, content []byte, baseRev string) error
 }
 ```
 
-`fsx.Config` 多一个字段 `ConfigGate ConfigGate`；`agentkit/fsx/fsx.go:728` `Write`
-与 `:751` `Edit` 在 `resolveWrite` 之后、真正落盘之前问一次：
+`fsx.Config` 多一个字段 `ConfigGate ConfigGate`；`agentkit/fsx/fsx.go:739` `Write`
+与 `:776` `Edit` 在 `resolveWrite` 之后、真正落盘之前问一次：
 
 ```
 Write / Edit
@@ -237,10 +247,14 @@ Write / Edit
 ```
 
 ★ build 层是唯一同时持有 fsx 后端与 `spec.Service` 的地方
-（`agentkit/build/snapshot.go:72` 造 fsx，`agentkit/build/snapshot.go:89` 的
+（`agentkit/build/snapshot.go:72` 造 fsx，`agentkit/build/snapshot.go:93` 的
 `toolEnv` 里带着 `svc`），所以实现放在那里，依赖方向天然正确。
 
-### 3.3 ★ 冲突语义：`edit_file` 有，`write_file` 没有
+★ **`OwnsPath` 覆盖的是整个配置根**，不只是那几个分区。配置根里还放着会话存储
+（`state/`），文件系统写进去就是往里面写坏了；**能不能写由服务说了算**，
+gate 只负责把写交出去。
+
+### 3.3 ★ 冲突语义：`edit_file` 有，`write_file` 没有 ✅ 已实施
 
 ★ 这是本方案里**最需要如实说清**的一处，因为 backend 层拿不到模型手里的基线：
 
@@ -253,13 +267,17 @@ Write / Edit
 
 | 工具 | 冲突语义 |
 |---|---|
-| `edit_file` | ★ **有**，而且比版本比对更贴切：**OldString 必须仍在**（`agentkit/fsx/fsx.go:773`）。别人改了**别的地方**不该挡住你；改了**你动的那一段**，才该报冲突 |
+| `edit_file` | ★ **有**，而且比版本比对更贴切：**OldString 必须仍在**（`agentkit/fsx/fsx.go:809`）。别人改了**别的地方**不该挡住你；改了**你动的那一段**，才该报冲突 |
 | `write_file`（整篇替换） | ★ **没有**。模型没有基线可给 |
 
+★ 落地的做法：`edit_file` 的内容**也从服务读**（`gate.ReadConfig`），
+所以旧字符串的校验与写盘之间没有第二个真相；读到的那个 revision 跟着写一起交出去
+（`baseRev`），服务拿它跟盘上那份比 —— 读与写之间被别人动过，就拒绝。
+
 ⇒ ★ 与 `config_write` 的差异要**写进工具描述**：`config_write` 有 `baseRevision`
-（模型能从 `config_get` 拿到，`agentkit/build/configtools.go:111`），
+（模型能从 `config_get` 拿到，`agentkit/build/configtools.go:129`），
 文件工具没有。**这是工具能力差异，不是设计缺陷** —— 但不说清楚，模型就会以为
-两边一样，然后踩坑。
+两边一样，然后踩坑。★ 这条留在 §7.2 的问题里，尚未处理。
 
 ### 3.4 ★ `svc.Write` 的五道闸门一个不少
 
@@ -395,12 +413,12 @@ agent 的指纹，别人的指纹不动，池里那份 entry 继续用。
 
 ### 6.1 分期
 
-| 期 | 做什么 | 风险 |
-|---|---|---|
-| **P1** | §2 工具表面一致性 + §3 写入路径统一 | 小：只改写路径与答案，不动重建 |
-| **P2** | §4.2 + §4.3：标记 + 每 agent 依赖指纹，池的键换成指纹；**外加 §5 的影响范围查询** | 中：重建粒度的核心 |
-| **P3** | §4.4：run 钉住自己的树（多留一代 + 记住指纹） | 中：触及恢复路径 |
-| **P4** | §4.5：MCP 清单变化并入指纹，全局 `bump()` 退休 | 大：代际这个概念退场 |
+| 期 | 做什么 | 风险 | 状态 |
+|---|---|---|---|
+| **P1** | §2 工具表面一致性 + §3 写入路径统一 | 小：只改写路径与答案，不动重建 | ✅ **2026-11-12** |
+| **P2** | §4.2 + §4.3：标记 + 每 agent 依赖指纹，池的键换成指纹；**外加 §5 的影响范围查询** | 中：重建粒度的核心 | 提案 |
+| **P3** | §4.4：run 钉住自己的树（多留一代 + 记住指纹） | 中：触及恢复路径 | 提案 |
+| **P4** | §4.5：MCP 清单变化并入指纹，全局 `bump()` 退休 | 大：代际这个概念退场 | 提案 |
 
 ★ **P1 可以单独上**：它解决「`edit_file` 没有修订冲突检查」与
 「模型判断不出自己改没改」这两条，不依赖后面任何一期。
@@ -408,16 +426,26 @@ agent 的指纹，别人的指纹不动，池里那份 entry 继续用。
 
 ### 6.2 验收用例（每一条都要有测试）
 
-**P1**
+**P1** ✅ 全部已落地，测试在 `agentkit/build/configgate_test.go`、
+`agentkit/fsx/configgate_test.go` 与 `agentkit/build/configtools_test.go`
 
 - `edit_file` 改 `agents/main.md` ⇒ 走 `svc.Write` ⇒ 树装不上时**不落盘**。
+  （`TestAnEditInsideTheConfigRootGoesThroughTheService`）
 - `edit_file` 改 `agents/main.md`，`OldString` 不存在 ⇒ **报错**，不是空补丁。
+  （`TestAnEditInsideTheConfigRootWithTheWrongOldStringIsRefused`）
 - `edit_file` 改一个**普通文件** ⇒ 不走服务层，行为不变。
-- `write_file` 改 `agents/main.md` ⇒ 走 `svc.Write` ⇒ 密钥扫描拦得住。
+  （`TestAWriteOutsideTheConfigRootIsUntouched`）
 - `write_file` 改 `server/config.yaml` ⇒ 被 `validateWritable` 拒（不可编辑分区）。
-- `config_write` 输出含 `runningConfigVersion` 与 `diskConfigVersion`，两者不同。
+  （`TestAWriteCannotTouchANonEditablePartition`）
+- `write_file` 改配置根里一个**不是配置文件**的东西（如 `state/`）⇒ 拒绝。
+  （`TestTheConfigurationRootRefusesAFileThatIsNotConfiguration`）
+- `config_write` 输出含 `runningVersion` 与 `diskVersion`，两者不同。
+  （`TestAWriteReportsBothVersionsAndSaysWhichMoved`）
 - `config_get <path>` 输出含 `"source": "disk"`；`config_tier` 含 `"source": "running"`。
+  （`TestTheConfigToolsSayWhichSideTheyAnswerFrom`）
 - `config_write` 的 Note 与 `missingAgentError` 的消息**不再**说「所有工具读快照」。
+  （`TestAWriteReportsBothVersionsAndSaysWhichMoved` 与
+  `TestConfigTierNamesAJustWrittenAgentAsPending`）
 
 **P2**
 
@@ -460,10 +488,14 @@ agent 的指纹，别人的指纹不动，池里那份 entry 继续用。
    候选：`config_get` 加一个「影响范围」子参数（不新增工具），
    或者新增第七个 `config_*` 工具（要动 `agentkit/spec/decl/decl.go:379` 的常量块）。
    ★ 倾向前者：**工具面越小越好**，而且 `config_get` 已经是「问配置」的那一个。
-2. **§3.3 的差异要不要写进文件工具的描述？**
-   ★ 倾向写 —— 不写，模型就会以为文件工具和 `config_write` 一样有冲突检查。
-3. **§2.1 的 `source` 字段用不用英文？**
-   ★ 倾向用英文（`disk` / `running`）：接口面向模型，且与其它字段一致。
+2. **§3.3 的差异要不要写进文件工具的描述？** ✅ 已用可行的方式回答
+   —— **写不进文件工具自己的描述**：那两个工具是框架挂的，描述也是框架的
+   （eino 的 `adk/middlewares/filesystem` 有 `CustomEditToolDesc` 这样的覆盖点，
+   但 `deep.Config` 不透传它）。⇒ 落点改成**我们自己的** `config_write` 描述：
+   「改配置文件的一行用 `edit_file`，它走同一套检查；本工具替换整篇文件」。
+   ★ 工具描述是模型选工具时读的那段文字，把差异写在那里，比写在别处有用。
+3. **§2.1 的 `source` 字段用不用英文？** ✅ 用了英文（`disk` / `running`）——
+   答案面向模型，且与其它字段一致。
 
 ---
 
@@ -510,19 +542,20 @@ agent 的指纹，别人的指纹不动，池里那份 entry 继续用。
 | `agentkit/build/builder.go:254` | `pool.GetOrBuild()` 的调用点 |
 | `agentkit/build/assemble.go:31` | `cfg.Backend = h.backend` —— 把 fsx 交给框架 |
 | `agentkit/build/assemble.go:100` | `cfg.SubAgents = children` —— 重建带子树 |
+| `agentkit/build/configgate.go` | ★ `configGate` —— build 层的实现，把写交给服务（✅ P1 新增） |
 | `agentkit/build/snapshot.go:48` | `heavyDepsOf()` |
-| `agentkit/build/snapshot.go:72` | `fsx.New(...)` —— 后端在这里造 |
-| `agentkit/build/snapshot.go:89` | `toolEnv` —— `cfg` 与 `svc` 都在这儿 |
-| `agentkit/build/configtools.go:62` | `configToolProvider.Provide()` |
-| `agentkit/build/configtools.go:98` | `config_get` 读盘 |
-| `agentkit/build/configtools.go:111` | `config_get` 的 `Revision` 字段 |
-| `agentkit/build/configtools.go:219` | `config_notices` 的输出 —— `version` 与 `configVersion` |
-| `agentkit/build/configtools.go:296` | `config_write` 调 `svc.Write` |
-| `agentkit/build/configtools.go:307` | `config_write` 的 `ConfigVersion` |
-| `agentkit/build/configtools.go:327` | ★ `config_write` 的 Note —— **说反了的那句** |
-| `agentkit/build/configtools.go:385` | `config_get`（无 path）的 `effective` —— 运行中 |
-| `agentkit/build/configtools.go:459` | `missingAgentError()` |
-| `agentkit/build/configtools.go:466` | ★ 那句「all config_* tools read the snapshot」—— **说反了的那句** |
+| `agentkit/build/snapshot.go:72` | `fsx.New(...)` —— 后端在这里造，gate 也在这里接上 |
+| `agentkit/build/snapshot.go:93` | `toolEnv` —— `cfg` 与 `svc` 都在这儿 |
+| `agentkit/build/configtools.go:78` | `configToolProvider.Provide()` |
+| `agentkit/build/configtools.go:116` | `config_get` 读盘 |
+| `agentkit/build/configtools.go:129` | `config_get` 的 `Revision` 字段 |
+| `agentkit/build/configtools.go:259` | `config_notices` 的输出 —— `runningVersion` 与 `diskVersion` |
+| `agentkit/build/configtools.go:344` | `config_write` 调 `svc.Write` |
+| `agentkit/build/configtools.go:356` | `config_write` 的 `runningVersion` 与 `diskVersion` |
+| `agentkit/build/configtools.go:384` | ★ `config_write` 的 Note —— **改过的那句**（✅ P1） |
+| `agentkit/build/configtools.go:444` | `config_get`（无 path）的 `effective` —— 运行中 |
+| `agentkit/build/configtools.go:534` | `missingAgentError()` |
+| `agentkit/build/configtools.go:541` | ★ 那句「本轮配置」的消息 —— **改过的那句**（✅ P1） |
 | `agentkit/build/tools.go:113` | `reservedToolNames` |
 | `agentkit/build/tools.go:178` | 保留名的检查 —— provider 不能占用 |
 | `agentkit/build/execute.go:40` | `newExecuteTool()` |
@@ -531,11 +564,12 @@ agent 的指纹，别人的指纹不动，池里那份 entry 继续用。
 
 | 位置 | 是什么 |
 |---|---|
-| `agentkit/fsx/fsx.go:229` | `resolveWrite()` —— 写入边界 |
-| `agentkit/fsx/fsx.go:254` | `inside()` |
-| `agentkit/fsx/fsx.go:728` | `Write()` |
-| `agentkit/fsx/fsx.go:751` | `Edit()` |
-| `agentkit/fsx/fsx.go:773` | ★ OldString 找不到就报错 —— 文件工具的冲突语义 |
+| `agentkit/fsx/configgate.go` | ★ `ConfigGate` 接口 —— fsx 自己定义的窄接口（✅ P1 新增） |
+| `agentkit/fsx/fsx.go:240` | `resolveWrite()` —— 写入边界 |
+| `agentkit/fsx/fsx.go:265` | `inside()` |
+| `agentkit/fsx/fsx.go:739` | `Write()` —— 配置根的写在这里转交 |
+| `agentkit/fsx/fsx.go:776` | `Edit()` —— 配置根的读与写在这里转交 |
+| `agentkit/fsx/fsx.go:809` | ★ OldString 找不到就报错 —— 文件工具的冲突语义 |
 
 ### 运行期与组合根
 

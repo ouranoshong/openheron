@@ -145,10 +145,10 @@ tools: [ls, read_file]                    # ② 非 MCP 工具的允许列表；
 **1. `Table.Filter` 没有「不筛」这个分支了。** 缺省关门 ⇒ 白名单永远生效：
 
 ```go
-// 现在：名单为空就不筛（一行最容易写反的短路，agentkit/build/policy.go:166）
+// 改造前：名单为空就不筛（一行最容易写反的短路）
 if len(t.disabled) == 0 && len(t.denyMCP) == 0 { return tools, nil }
 
-// 之后：永远只留点名的
+// 之后：永远只留点名的（Filter 现在在 agentkit/build/policy.go:184）
 if !t.sees(name) { removed++; continue }
 ```
 
@@ -304,12 +304,19 @@ agent 的档位，而 loader 不检查 —— 于是 vendor 没有的档位能�
 
 | 工具 | 输入 | 输出 | 复用 | 档位 |
 |---|---|---|---|---|
-| `config_get` | `{path}` 或 `{}` | 单文件：`{path, exists, hot, revision, content}`；无参：分区表、文件清单、**生效**配置摘要 | `Manifest` / `ReadFile` | allow |
-| `config_validate` | `{path, content}` 或 `{}` | `{ok, issues[], configVersion}` | `Diagnostics` / `Check` | allow |
+| `config_get` | `{path}` 或 `{}` | 单文件：`{path, exists, hot, revision, content, source}`；无参：分区表、文件清单、**生效**配置摘要，外加 `runningVersion` 与 `diskVersion` | `Manifest` / `ReadFile` | allow |
+| `config_validate` | `{path, content}` 或 `{}` | `{ok, issues[], configVersion, source}` | `Diagnostics` / `Check` | allow |
 | `config_template` | `{path}` / `{section}` | `{path, content}` / `{section, templates}`；都没有时给索引 | `TemplateFor` / `Templates` / `Skeleton` | allow |
-| `config_notices` | `{}` | `{deferred[], version, configVersion, watch}` | `Deferred()` / `Fingerprint()` | allow |
-| `config_tier` | `{tool}` / `{agent}` | `{tool, tier}` / `{agent, tools[]}`；都没有时 `{defaultTier, allow[]}`。★ 查不到 agent 时按「刚写入待下一轮 / 被 loader 排除 / 根本不存在」分别给诊断 | `policyOf` / `TierOf` / `missingAgentError` | allow |
-| `config_write` | `{path, content, baseRevision?}` | `{path, revision, configVersion, applied, requiresRestart, note}` | `Write`（`agentkit/spec/write.go`） | **ask** |
+| `config_notices` | `{}` | `{deferred[], runningVersion, diskVersion, watch, source}` | `Deferred()` / `Fingerprint()` | allow |
+| `config_tier` | `{tool}` / `{agent}` | `{tool, tier, source}` / `{agent, tools[], source}`；都没有时 `{defaultTier, allow[], source}`。★ 查不到 agent 时按「刚写入待下一轮 / 被 loader 排除 / 根本不存在」分别给诊断 | `policyOf` / `TierOf` / `missingAgentError` | allow |
+| `config_write` | `{path, content, baseRevision?}` | `{path, revision, runningVersion, diskVersion, applied, requiresRestart, note}` | `Write`（`agentkit/spec/write.go`） | **ask** |
+
+★ **`source` 说的是这个答案从哪一边来**：`disk`（此刻盘上的文件）或 `running`
+（这一轮跑的那棵树）。★ 六个工具里只有 `config_get`（带 path）、
+`config_validate` 与 `config_notices` 的 `deferred` 那一侧答「running」——
+其余答「disk」。★ 而 `runningVersion` 与 `diskVersion` 是**两个数**：
+盘上那份和本轮跑的那份，在热更新接手之前一直是不同的。
+这一节的形状是 `docs/config-optimization-design.md` §2 定的（✅ P1 已实施）。
 
 ### 4.1 四个要点
 
@@ -320,14 +327,14 @@ baseRevision → 拒明文 → 原子替换 → 试合并 → 失败回滚」。
 
 ★ **恒 ask 需要一条规则，不能只靠「不在清单里」。** 档位表是「代码清单 + 每个文件的
 `allows:` + MCP 服务器的 `allows:`」合起来的，所以一个文件只要写
-`allows: [config_write]` 就能给它自己解锁。`alwaysAsk`（`agentkit/build/tools.go:93`）
+`allows: [config_write]` 就能给它自己解锁。`alwaysAsk`（`agentkit/build/tools.go:104`）
 在**合并之后**把它剥掉 —— 一个能给自己授权的文件，授的是重写它自己的工具。这一条有测试
 （本仓库的测试配置正好写了 `allows: [config_write]`）。
 
 ★ **工具自己界定答案大小，不套通用输出截断。** 通用截断砍的是**字符串**，对 JSON 答案来说
 就是一份解析不了的文件；而对 `config_get` 来说，它会留下「半个文件 + 匹配的 revision」——
 正是把另一半改没的那条路。所以 `config_get` 超过 64 KiB（
-`agentkit/build/configtools.go:352`）**拒绝**而不是截断，`config_template` 一次只给一个
+`agentkit/build/configtools.go:408`）**拒绝**而不是截断，`config_template` 一次只给一个
 分区，什么都不问时给索引。
 
 ★ **`config_get` 不会泄露密钥。** 配置里只有 `${ENV}` 或 `@file:` 引用，值在请求时才解析；
@@ -349,13 +356,23 @@ baseRevision → 拒明文 → 原子替换 → 试合并 → 失败回滚」。
 ★ **`applied: true` 也不等于「本轮可见」。** 六个 `config_*` 工具在装配时拿的是
 **这一轮开始时的 `*spec.Config` 快照**（`configToolProvider.Provide` 的 `env.cfg`），
 写入只改磁盘；热重载要到下一轮重新装配才会换掉这份快照。所以「写完立刻用
-`config_tier` / `config_get {}` 验证」必然读不到刚写的 agent —— 这不是写入失败。
+`config_tier` 验证」必然读不到刚写的 agent —— 这不是写入失败。
 ★ 旧文案 `no agent "x" under agents/` 把三种情况说成一种，实测让模型把刚写好的文件
 又写了一遍、反复复查、甚至派子 agent 去查 HTTP 接口。现在 `missingAgentError` 分开答：
 文件在磁盘且没被排除 → 明说「下一轮生效，别重写、别在本轮复查」；被
 `leftOut` 排除（例如 model 未声明）→ 明说「修文件，下一轮也不会出现」；磁盘上没有
 文件 → 才是原来那句。★ `config_write` 成功的返回也带 `note`，把生效时点写在
 模型刚拿到结果的地方。
+
+★ ★ **但「六个工具都读快照」这句话本身是错的，而它就在上面那段里。**
+`config_get`（带 path）读的是**盘**——`svc.ReadFile` 就是 `os.ReadFile`
+（`agentkit/spec/write.go:390`）；`config_validate` 也重新读盘
+（`agentkit/spec/diag.go:133`）；`config_get {}` 的 `items` 与版本号同样来自盘。
+只有 `config_tier` 与 `config_notices` 的 `deferred` 答本轮快照。
+★ 一句说反的话落在模型判断「我改没改成」的路上，代价是**它不敢信自己看到的
+新内容**，于是再写一遍 —— 正是上面那段要治的循环。★ 现在每个答案都带 `source`
+说清是哪一边，`config_write` 还给出 `runningVersion` 与 `diskVersion` 两个数
+（`docs/config-optimization-design.md` §2，✅ P1 已实施）。
 
 ★ 它**不能**写 `server/`：那一节不是热加载的，写闸门直接拒绝。
 ★ 但它**读得了** `server/` —— 读与写是两把闸门：`ValidateReadPath` 只管路径形状，

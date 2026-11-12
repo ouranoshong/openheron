@@ -112,6 +112,14 @@ type Config struct {
 	// otherwise: the shell starts, and then `ls` is not a command.
 	ShellPathDir string
 
+	// ConfigGate, when set, receives the writes that land inside the
+	// configuration root: they go through the configuration service
+	// instead of the filesystem, so they get the checks the editor gets.
+	//
+	// ★ nil leaves every write to the filesystem — the behaviour of a
+	//   backend that is not openheron's.
+	ConfigGate ConfigGate
+
 	ValidateCommand func(string) error
 }
 
@@ -119,6 +127,8 @@ type Local struct {
 	root            string
 	roots           []string
 	validateCommand func(string) error
+	// gate receives the writes that land inside the configuration root.
+	gate ConfigGate
 	// shell is the program and the flags; the command line is appended.
 	shell []string
 	// shellPathDir is prepended to the child's PATH.
@@ -179,6 +189,7 @@ func New(cfg Config) (*Local, error) {
 		root:            abs,
 		roots:           roots,
 		validateCommand: validate,
+		gate:            cfg.ConfigGate,
 		shell:           shell,
 		shellPathDir:    cfg.ShellPathDir,
 		rgPath:          rgPath,
@@ -731,6 +742,20 @@ func (s *Local) Write(ctx context.Context, req *filesystem.WriteRequest) error {
 		return err
 	}
 
+	// ★ A file inside the configuration root goes through the configuration
+	//   service: it is a configuration file, and a configuration file is
+	//   written with the checks the editor uses — the tree must still
+	//   load, no secret may land in it, and a working agent must not
+	//   disappear from it.
+	//
+	//   ★ There is no revision to check against: the framework's write
+	//   request carries no revision, and the model has no baseline to give
+	//   (see docs/config-optimization-design.md §3.3). A whole-file write
+	//   is therefore "the last writer wins" — the gates still run.
+	if g := s.gate; g != nil && g.OwnsPath(path) {
+		return g.WriteConfig(path, []byte(req.Content), "")
+	}
+
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("failed to create parent directory: %w", err)
 	}
@@ -762,7 +787,17 @@ func (s *Local) Edit(ctx context.Context, req *filesystem.EditRequest) error {
 		return fmt.Errorf("new string must be different from old string")
 	}
 
-	content, err := os.ReadFile(path)
+	// ★ The configuration root is read through the service too: one read,
+	//   one revision, one truth. The revision is what the write will be
+	//   based on, so a change between the read and the write is caught.
+	gate := s.gate
+	var content []byte
+	var baseRev string
+	if gate != nil && gate.OwnsPath(path) {
+		content, baseRev, err = gate.ReadConfig(path)
+	} else {
+		content, err = os.ReadFile(path)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
@@ -782,6 +817,18 @@ func (s *Local) Edit(ctx context.Context, req *filesystem.EditRequest) error {
 		newText = strings.Replace(text, req.OldString, req.NewString, -1)
 	} else {
 		newText = strings.Replace(text, req.OldString, req.NewString, 1)
+	}
+
+	// ★ The surgical edit **is** the conflict check: the string it replaces
+	//   has to still be there. Somebody else changing a different part of
+	//   the file does not stop you — and somebody else changing this part
+	//   does, because the string is no longer there.
+	//
+	//   ★ The base revision travels with it: the service checks it against
+	//   the disk, so a write that raced another one is refused rather than
+	//   silently applied to a file that moved underneath it.
+	if gate != nil && gate.OwnsPath(path) {
+		return gate.WriteConfig(path, []byte(newText), baseRev)
 	}
 
 	return os.WriteFile(path, []byte(newText), 0644)
