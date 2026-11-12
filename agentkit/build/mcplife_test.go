@@ -92,7 +92,6 @@ func TestTheServerTheWarmStartedOutlivesATurn(t *testing.T) {
 func TestTheServerComesBackAfterItBroke(t *testing.T) {
 	cfg := liveMCPConfig(t)
 	b := newTestBuilderWithConfig(t, cfg)
-	b.SetGenerationBump(func() { managerOf(t, b).bump() })
 
 	turnCtx, endTurn := context.WithCancel(context.Background())
 	defer endTurn()

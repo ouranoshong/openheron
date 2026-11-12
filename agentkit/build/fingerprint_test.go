@@ -381,7 +381,7 @@ func TestTheNextTurnSeesAWriteWithoutTheWatcher(t *testing.T) {
 	buildRoot(t, b, "other")
 
 	// ★ The manager holds the configuration the builder published.
-	cfg, _ := managerOf(t, b).Current()
+	cfg := managerOf(t, b).Current()
 	if !strings.Contains(cfg.Agents["other"].Instruction, "other body v2") {
 		t.Fatal("★ the next turn must see the write without waiting for the watcher")
 	}

@@ -1,6 +1,6 @@
 # 配置系统优化改造方案
 
-> **状态：P1–P3 已实施（P1 2026-11-12，P2/P3 2026-11-13）；P4 是提案，未实施。**
+> **状态：P1–P4 全部已实施（2026-11-12）。**
 >
 > ★ 本文写的是**要改成什么样**。现在的实现在
 > `docs/config-design.md` §8（热更新）与 §6（配置表面）里；本文的每一条结论都从那里出发。
@@ -29,7 +29,7 @@
 > |---|---|---|
 > | §2 工具表面的一致性 | 模型能不能判断自己改没改 | P1 ✅ |
 > | §3 写入路径统一 | 改配置和改普通文件是不是同一套检查 | P1 ✅ |
-> | §4 重载改造 | 一次改动为什么换掉整棵树 | P2–P3 ✅（P4 仍是提案） |
+> | §4 重载改造 | 一次改动为什么换掉整棵树 | P2–P4 ✅ |
 > | §5 影响范围查询 | 「下一轮什么会变」可不可回答 | P2 ✅ |
 
 ---
@@ -338,7 +338,7 @@ shell 里的重定向能写配置根，**绕得过任何闸门**。
   `Write` / `WriteMany`）；builder 在建树前把标记取走、重读一次配置、
   再把新配置发布出去（`agentkit/build/builder.go` 的 `reloadIfMarked`）。
 
-### 4.3 重建的粒度：从**全局代际**换成**每个 agent 自己的依赖指纹** ✅ 已实施（P2，2026-11-13）
+### 4.3 重建的粒度：从**全局代际**换成**每个 agent 自己的依赖指纹** ✅ 已实施（P2，2026-11-12）
 
 代际是**全局**的，所以任何改动都会让所有 agent 失效。要按需重建，就得把
 「什么变了」换成**「谁变了」**——给每个 agent 一个**自己的**指纹。
@@ -369,7 +369,7 @@ agent 的指纹，别人的指纹不动，池里那份 entry 继续用。
 agent 指纹变了 ⇒ 它们重建。清单不进「文件哈希」那一栏，因为服务器起来的时候
 没有改任何文件。
 
-### 4.4 ★ 一轮钉住自己的 agent —— 这是修「打断」的那一条 ✅ 已实施（P3，2026-11-13）
+### 4.4 ★ 一轮钉住自己的 agent —— 这是修「打断」的那一条 ✅ 已实施（P3，2026-11-12）
 
 - **问题**：一轮跑到一半被审批打断，回来时 `makePrepareAgent` 取的是**当前**代际
   （§1.2），于是它继续在一个**换过的** agent 上跑。
@@ -407,19 +407,25 @@ agent 指纹变了 ⇒ 它们重建。清单不进「文件哈希」那一栏，
 流**。openheron 自己的规矩是「一条流只有一个读者」（`agentkit/run/loop.go`），
 这里被打破了 —— 见 §4.7。
 
-### 4.5 MCP 的工具清单变化走同一条路 ⏳ 一半已实施（P2），退休代际是 P4
+### 4.5 MCP 的工具清单变化走同一条路 ✅ 已实施（P2 清单并进指纹，P4 退休代际，2026-11-12）
 
-现在：MCP server 的清单变了 → `main.go` 的 `bump()` → **全局** `gen++`
+改造前：MCP server 的清单变了 → `main.go` 的 `bump()` → **全局** `gen++`
 （`agentkit/build/builder.go` 的 `SetGenerationBump`）。
-提案：清单变了 → **受影响 agent 的指纹变了** → 池按 §4.3 重建它们。
-★ 不再需要 `bump()` 这条全局通道；**「代际」这个概念可以整体退休**。
+现在：清单变了 → **受影响 agent 的指纹变了** → 池按 §4.3 重建它们。
 
-★ **清单并进指纹这一步已经在 P2 做了**（`agentkit/build/mcpmanager.go` 的
-`ToolsOf`）：MCP 服务器的**实时**工具清单是它挂载的那些 agent 指纹的输入之一，
-所以清单一变，挂载它的 agent 指纹就变，池就重建它们。
-★ **剩下的**是把「代际」这个概念本身退休：`main.go` 的 `agentConfig.gen`、
+★ **两条路各归其位，缺一条都不够**：
+- **清单并进指纹**（P2，`agentkit/build/mcpmanager.go` 的 `ToolsOf`）：MCP 服务器的
+  **实时**工具清单是它挂载的那些 agent 指纹的输入之一，所以清单一变，挂载它的
+  agent 指纹就变，池就重建它们。★ 这一条管的是**哪些 agent 重建**。
+- **工具面并进快照的身份**（P4，`agentkit/build/mcpmanager.go` 的 `surfaceHash`）：
+  快照的身份是 **（配置对象，MCP 工具面）**。★ 这一条管的是**树本身要不要重建**：
+  工具集是按快照建的，服务器起来了却没有换树，那棵树里的工具集就是旧的。
+
+★ **「代际」这个概念已经整体退休**：`main.go` 的 `agentConfig.gen`、
 `SetGenerationBump`、`agentConfig.bump()`、`/v2/runtime` 的 `gen` 字段，
-以及**快照缓存的键**（快照现在按代际缓存，见 §7.3 的第四条）。
+以及快照按代际缓存的键，全部删掉。⇒ `/v2/runtime` 的 pool 块现在报的是
+`version`（配置的指纹，`main.go` 的 `configVersion`）—— **哪一棵树**，
+而不是「第几代」。
 
 ### 4.7 ★ 一个上游的数据竞争：loop 收尾时读，agent 还在写
 
@@ -593,7 +599,7 @@ P2 的重建机制是：按新配置算每个 agent 的指纹，和运行中那�
 | **P1** | §2 工具表面一致性 + §3 写入路径统一 | 小：只改写路径与答案，不动重建 | ✅ **2026-11-12** |
 | **P2** | §4.2 + §4.3：标记 + 每 agent 依赖指纹，池的键换成指纹；**外加 §5 的影响范围查询** | 中：重建粒度的核心 | ✅ **2026-11-13** |
 | **P3** | §4.4：run 钉住自己的树（记住指纹 + 按指纹取回） | 中：触及恢复路径 | ✅ **2026-11-13** |
-| **P4** | §4.5 剩下的一半：全局 `bump()` 与「代际」退休 | 大：代际这个概念退场 | 提案 |
+| **P4** | §4.5 剩下的一半：全局 `bump()` 与「代际」退休 | 大：代际这个概念退场 | ✅ **2026-11-12** |
 
 ★ **P1 可以单独上**：它解决「`edit_file` 没有修订冲突检查」与
 「模型判断不出自己改没改」这两条，不依赖后面任何一期。
@@ -705,7 +711,7 @@ P2 的重建机制是：按新配置算每个 agent 的指纹，和运行中那�
 3. **§2.1 的 `source` 字段用不用英文？** ✅ 用了英文（`disk` / `running`）——
    答案面向模型，且与其它字段一致。
 
-### 7.3 P2 与 P3 期间又拍板的六条
+### 7.3 P2–P4 期间又拍板的七条
 
 1. **指纹的贡献要「窄」到什么程度？** ✅ **`tools/` 分区只算这个 agent 用到的
    那些工具**，加上**覆盖了它那些工具的 `allows:` 子集**。
@@ -718,12 +724,17 @@ P2 的重建机制是：按新配置算每个 agent 的指纹，和运行中那�
    （`agentkit/build/impact.go`）
 3. **指纹什么时候交出来？** ✅ **与 agent 同一次调用**（`Build` 返回
    `(agent, fingerprint, err)`）。★ 中间若有一次重载，记下来的树就错了。
-4. **快照还按不按代际缓存？** ✅ **暂时按**（`agentkit/build/snapshot.go` 的
-   `snapshotFor`：代际不倒退，且不低于当前代际）。
-   ★ **这是 P4 退休「代际」时最后一处要改的地方**：快照现在按代际缓存，
-   代际退休了就得换一个键。★ 中途试过按配置指针缓存 —— 那会让
-   「工具面变了但 agent 不重建」重新出现（`TestTheToolsJoinTheNextTurn`），
-   已经回退。
+4. **快照还按不按代际缓存？** ✅ **不按了**（P4，`agentkit/build/snapshot.go` 的
+   `snapshotFor`）：快照的身份是 **（配置对象，MCP 工具面）**。
+   ★ **配置对象当身份，而不是内容哈希**：生产里每次 reload 都换一个新对象，
+   所以「对象变了」就是「配置变了」；而测试里手搓的配置没有 `Version`，
+   按内容算反而会把两份不同的配置算成同一份。
+   ★ **工具面并进来，是因为工具集是按快照建的**：服务器起来了却没有换树，
+   那棵树里的工具集就是旧的 —— 这正是中途只按配置指针缓存时，
+   「工具面变了但 agent 不重建」重新出现的原因（`TestTheToolsJoinTheNextTurn`）。
+   ★ **树不会后退**：配置是在 builder 的锁**里面**读的，读序就是建序，
+   晚到的调用者带不来一棵旧的树 —— 它**不带配置**。
+   （`agentkit/build/tree_test.go` 的 `TestTheSnapshotFollowsTheManager`）
 5. **钉住的那棵树不在池里怎么办？** ✅ **打一条 warn，退回当前那棵**——
    **不静默换树**。★ 进程重启过才会这样；静默换树正是这个钉子要防的 bug。
    （`agentkit/build/pinned_test.go` 的 `TestAPinnedBuildSaysWhenTheTreeIsGone`）
@@ -736,6 +747,13 @@ P2 的重建机制是：按新配置算每个 agent 的指纹，和运行中那�
    取消它会把检查点一起带走 —— 而检查点正是让审批能被回答的东西。
    ★ **只等「结束」的那一轮**：失败的那一轮 agent 可能还在跑，
    等它没有意义 —— 那是框架拆 loop 时的事（§4.7 的第二条）。
+7. **代际退休之后，「树变了」这件事由谁说？** ✅ **没有人说** ——
+   **比较出来**。快照的身份是（配置对象，工具面），builder 每次建树前
+   把当前的身份和手上那份比一比：不一样就重建，一样就复用。
+   ★ 原来那条 `bump()` 通道是「**有人通知**树变了」；现在没有通知者，
+   只有比较 —— 所以没有人能忘记通知，也没有人能通知错。
+   ★ MCP 管理器不再回调任何人（`SetBump` / `bumpGeneration` / `onChange` 全删），
+   它只负责回答「现在有什么工具」。
 
 ---
 
@@ -780,15 +798,18 @@ P2 的重建机制是：按新配置算每个 agent 的指纹，和运行中那�
 | `agentkit/build/pool.go:90` | `Lookup()` —— 按指纹取回钉住的那棵树（✅ P3） |
 | `agentkit/build/fingerprint.go` | ★ 指纹 —— 每个 agent 依赖什么（✅ P2） |
 | `agentkit/build/impact.go` | ★ 影响范围查询（✅ P2） |
-| `agentkit/build/builder.go:107` | `SetGenerationBump()` |
-| `agentkit/build/builder.go:162` | `b.mgr.Current()` |
-| `agentkit/build/builder.go:288` | `pool.GetOrBuild()` 的调用点 |
+| `agentkit/build/builder.go:159` | `Build()` —— 树在这里建 |
+| `agentkit/build/builder.go:165` | `b.mgr.Current()` |
+| `agentkit/build/builder.go:257` | `pool.GetOrBuild()` 的调用点 |
 | `agentkit/build/assemble.go:31` | `cfg.Backend = h.backend` —— 把 fsx 交给框架 |
 | `agentkit/build/assemble.go:100` | `cfg.SubAgents = children` —— 重建带子树 |
 | `agentkit/build/configgate.go` | ★ `configGate` —— build 层的实现，把写交给服务（✅ P1 新增） |
-| `agentkit/build/snapshot.go:66` | `heavyDepsOf()` |
-| `agentkit/build/snapshot.go:90` | `fsx.New(...)` —— 后端在这里造，gate 也在这里接上 |
-| `agentkit/build/snapshot.go:111` | `toolEnv` —— `cfg` 与 `svc` 都在这儿 |
+| `agentkit/build/snapshot.go:77` | `heavyDepsOf()` |
+| `agentkit/build/snapshot.go:101` | `fsx.New(...)` —— 后端在这里造，gate 也在这里接上 |
+| `agentkit/build/snapshot.go:122` | `toolEnv` —— `cfg` 与 `svc` 都在这儿 |
+| `agentkit/build/snapshot.go:207` | ★ `snapshotFor()` —— 身份是（配置对象，工具面）（✅ P4） |
+| `agentkit/build/mcpmanager.go:243` | ★ `surfaceHash()` —— MCP 工具面（✅ P4） |
+| `agentkit/build/manager.go:20` | `ConfigManager.Current()` —— 只要配置，不要代际（✅ P4） |
 | `agentkit/build/configtools.go:78` | `configToolProvider.Provide()` |
 | `agentkit/build/configtools.go:116` | `config_get` 读盘 |
 | `agentkit/build/configtools.go:129` | `config_get` 的 `Revision` 字段 |
@@ -825,9 +846,9 @@ P2 的重建机制是：按新配置算每个 agent 的指纹，和运行中那�
 | `agentkit/emit/emit.go:183` | `pump()` —— agent 事件流的**唯一读者** |
 | `agentkit/emit/emit.go:98` | `Options.Drained` —— 「agent 的流关上了」这个信号 |
 | `storage/runledger.go` | ★ `Run.TreeFingerprint` —— 这一轮跑在哪棵树上（✅ P3） |
-| `main.go:680` | `agentConfig` |
-| `main.go:707` | `agentConfig.set()` —— `gen++` |
-| `main.go:740` | `agentConfig.bump()` |
+| `main.go:683` | `agentConfig` |
+| `main.go:715` | `agentConfig.set()` —— 发布新配置（✅ P4：不再有 `gen++`） |
+| `main.go:749` | `configVersion()` —— 「哪一棵树」（✅ P4） |
 
 ### 框架（上游，不在本仓库）
 

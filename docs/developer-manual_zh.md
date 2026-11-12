@@ -234,24 +234,28 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
   把这一轮一起拖下水，而客户端收到的是「turn start timeout」——
   一个既不点名是哪个 server、也不说为什么的症状。
 - **启动是一个后台作业，每台 server 各自有一个状态。** 管理器在后台起那些服务器
-  （`Warm`，`agentkit/build/mcpmanager.go:123`），每个条目带四态之一
-  （`mcpState`，`agentkit/build/mcpmanager.go:311`）：`not_started`、`starting`、
+  （`Warm`，`agentkit/build/mcpmanager.go:98`），每个条目带四态之一
+  （`mcpState`，`agentkit/build/mcpmanager.go:337`）：`not_started`、`starting`、
   `ready`、`failed`。★ `Tools` 从不等 —— 作业在飞时它答 `errMCPStarting`，
   而 provider 跳过那台 server 而且**不告警**：正在起不等于坏了。
-  ★ 一台 server 带来的工具在**下一轮**进来：作业拿落地前后的清单比，
-  变了就推进代际（`runStart`，`agentkit/build/mcpmanager.go:450`）。
+  ★ 一台 server 带来的工具在**下一轮**进来：作业落地时把工具列出来，
+  **工具面**变了，builder 比出这个差别
+  （`runStart`，`agentkit/build/mcpmanager.go:501`）。
   ★ 失败的启动会重试，但不会早于文件自己的 `timeout:`
-  （`mcpStartTimeout`，`agentkit/build/mcpmanager.go:342`）——
+  （`mcpStartTimeout`，`agentkit/build/mcpmanager.go:368`）——
   起不来的 server 不能被拉成热循环。
 - **工具列表在一轮来要时重新列出**，条件是上一次列出的时间超过 30 秒
   （`agentkit/build/mcpmanager.go:36`，`mcpRelistInterval`）。
   ★ 这个间隔是写死的值，不是配置项：没人动的旋钮就是没人测的旋钮，而服务器
   的工具列表是以「天」为尺度变化的。
-- **列表变了就推一代。** `Refresh`（`agentkit/build/mcpmanager.go:118`）报告列表
-  是否变化，builder 通过与配置重载器同一个钩子推一代
-  （`agentkit/build/builder.go:67`）。这次重列发生在该轮 agent 装配**之前**
-  （`agentkit/build/builder.go:105`），因为这一批工具每代只建一次 —— 把重列放进
-  构建里就永远不会跑到了。
+- **列表变了就动工具面，builder 去比。** `Refresh`
+  （`agentkit/build/mcpmanager.go:172`）重新列举那些清单已经老过间隔的 server，
+  而 `surfaceHash`（`agentkit/build/mcpmanager.go:243`）说此刻挂载的那些 server
+  提供了什么。★ builder 把它**比**上这棵树建的时候那份工具面
+  （`agentkit/build/snapshot.go:207`）：不一样 ⇒ 换一棵树，一样 ⇒ 沿用旧的。
+  ★ 没有通知，也没有计数器 —— 通知会漏，比较不会漏。这次重列发生在该轮 agent
+  装配**之前**（`agentkit/build/builder.go:171`），因为这一批工具每棵树只建一次
+  —— 把重列放进构建里就永远不会跑到了。
 
 #### execute 工具 —— 是我们自己的，不是框架的
 

@@ -91,9 +91,6 @@ func TestAServerThatIsStillStartingDoesNotHoldTheBuild(t *testing.T) {
 func TestTheToolsJoinTheNextTurn(t *testing.T) {
 	cfg := asyncMCPCfg()
 	b := newTestBuilderWithConfig(t, cfg)
-	// ★ The generation moves when the surface changes: that is the hook
-	//   the configuration reloader uses, and the one the manager uses.
-	b.SetGenerationBump(func() { managerOf(t, b).bump() })
 
 	blocked := &blockedStart{release: make(chan struct{})}
 	b.mcp.start = blocked.start
@@ -112,16 +109,20 @@ func TestTheToolsJoinTheNextTurn(t *testing.T) {
 	}
 
 	// The server comes up.
-	firstGen := first.gen
+	firstSurface := b.mcp.surfaceHash(b.mgr.Current())
 	close(blocked.release)
 	waitForMCPSettled(t, b.mcp, "github")
-	// ★ ready and bumped are two steps by one goroutine; the tools only join
-	//   once the generation moved, which is what the next turn reads.
-	waitForGeneration(t, b, firstGen)
+	// ★ The listing and the surface are two steps by one goroutine: the
+	//   tools only join the next tree once the surface moved, and that is
+	//   what the next turn reads. ★ There is no hook to call any more —
+	//   the surface is compared, not announced.
+	waitForSurfaceChange(t, b, firstSurface)
 
-	// ★ The next turn's snapshot: a new generation, and the tools are
-	//   there.
+	// ★ The next turn's snapshot: a new tree, and the tools are there.
 	second := mustSnapshot(t, b)
+	if second == first {
+		t.Fatal("a changed tool surface must produce a new tree")
+	}
 	deps, err = second.heavyDepsOf(context.Background())
 	if err != nil {
 		t.Fatalf("the heavy dependencies: %v", err)

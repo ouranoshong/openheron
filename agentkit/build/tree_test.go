@@ -20,8 +20,13 @@ func TestFirstGenerationAndLaterOnesDeriveTheSameTable(t *testing.T) {
 	b := newTestBuilderWithConfig(t, cfg)
 
 	first := mustSnapshot(t, b)
-	managerOf(t, b).set(cfg)
+	// ★ A **different object** with the same content: the tree's identity
+	//   is the object, so republishing the same one would not move it.
+	managerOf(t, b).set(configFromSpecs("test/model", []string{"disable_me"}, allowOf(p), nil))
 	second := mustSnapshot(t, b)
+	if first == second {
+		t.Fatal("a new configuration object must produce a new tree")
+	}
 
 	for _, name := range []string{"write_file", "read_file", "execute", "disable_me", "unlisted"} {
 		if got, want := second.tableFor(second.agentSpec.defaultAgent).Blocked(name), first.tableFor(first.agentSpec.defaultAgent).Blocked(name); got != want {
@@ -33,7 +38,7 @@ func TestFirstGenerationAndLaterOnesDeriveTheSameTable(t *testing.T) {
 func TestMaxDepthDefaultsInOnePlace(t *testing.T) {
 	cfg := minimalTestConfig()
 	cfg.Server.Agent.MaxDepth = 0
-	snap, err := newSnapshot(1, cfg, nil, nil, "", "", nil, nil, nil, nil)
+	snap, err := newSnapshot(cfg, "", nil, nil, "", "", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +48,7 @@ func TestMaxDepthDefaultsInOnePlace(t *testing.T) {
 
 	cfg2 := minimalTestConfig()
 	cfg2.Server.Agent.MaxDepth = 3
-	snap2, err := newSnapshot(1, cfg2, nil, nil, "", "", nil, nil, nil, nil)
+	snap2, err := newSnapshot(cfg2, "", nil, nil, "", "", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,31 +73,84 @@ func TestIntrospectionWorksBeforeFirstBuild(t *testing.T) {
 	}
 }
 
-func TestBuildPullsTheCurrentGeneration(t *testing.T) {
+// TestBuildPullsTheCurrentConfiguration says the builder reads the
+// configuration the manager holds **now**.
+//
+// ★ It is the rule the generation used to carry, and it is a stronger
+//
+//	one: a caller cannot name an older tree, because it does not name
+//	one — it asks for the tree, and the tree is what the manager holds.
+func TestBuildPullsTheCurrentConfiguration(t *testing.T) {
 	b := newTestBuilder(t)
 	if _, _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery, ""); err != nil {
 		t.Fatal(err)
 	}
-	before := mustSnapshot(t, b).gen
+	before := mustSnapshot(t, b).cfg
 
-	managerOf(t, b).set(minimalTestConfig())
+	next := minimalTestConfig()
+	managerOf(t, b).set(next)
 	if _, _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery, ""); err != nil {
 		t.Fatal(err)
 	}
-	if got := mustSnapshot(t, b).gen; got != before+1 {
-		t.Fatalf("Build did not pull the new generation: gen=%d, want %d", got, before+1)
+	got := mustSnapshot(t, b).cfg
+	if got != next {
+		t.Fatalf("Build did not pull the current configuration: %p, want %p", got, next)
+	}
+	if before == next {
+		t.Fatal("the test must publish a different configuration object")
 	}
 }
 
-func TestManagerGenerationIsMonotonic(t *testing.T) {
+// TestTheManagerPublishesWhatItHolds says the manager is the one place
+// that answers "what is running".
+func TestTheManagerPublishesWhatItHolds(t *testing.T) {
 	m := testManager(nil)
-	_, g1 := m.Current()
-	m.set(minimalTestConfig())
-	_, g2 := m.Current()
-	m.set(minimalTestConfig())
-	_, g3 := m.Current()
-	if !(g1 < g2 && g2 < g3) {
-		t.Fatalf("generations must increase: %d, %d, %d", g1, g2, g3)
+	if m.Current() == nil {
+		t.Fatal("the manager must hold a configuration")
+	}
+	next := minimalTestConfig()
+	m.Publish(next)
+	if got := m.Current(); got != next {
+		t.Fatalf("Current = %p, want the published configuration %p", got, next)
+	}
+}
+
+// TestTheTreeMovesAndTheAgentsDoNot is the rule that replaces the
+// generation.
+//
+// ★ The tree's identity is the configuration **object** and the MCP tool
+//
+//	surface; the agents' identity is the **fingerprint**, and the
+//	fingerprint is content. ★ So a new configuration object is a new
+//	tree — the table is derived again, the tree's own bookkeeping moves
+//	— while an identical configuration leaves the fingerprint alone, and
+//	the pooled agents stay.
+//
+// ★ That is the split the generation never had: it said "everything
+//
+//	changed" and made every agent pay for it.
+func TestTheTreeMovesAndTheAgentsDoNot(t *testing.T) {
+	b := newTestBuilderWithConfig(t, minimalTestConfig())
+
+	first, _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstTree := mustSnapshot(t, b)
+
+	// ★ The same content, a different object.
+	managerOf(t, b).set(minimalTestConfig())
+	second, _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondTree := mustSnapshot(t, b)
+
+	if secondTree == firstTree {
+		t.Fatal("★ a new configuration object must produce a new tree")
+	}
+	if second != first {
+		t.Fatal("★ an identical configuration must not swap the agent: the fingerprint is what says whether it moved")
 	}
 }
 
@@ -171,7 +229,7 @@ func TestRootOnlyPhasesStayAtRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	if p.calls != 1 {
-		t.Fatalf("tool providers ran %d times, want exactly 1 per generation", p.calls)
+		t.Fatalf("tool providers ran %d times, want exactly 1 per tree", p.calls)
 	}
 }
 

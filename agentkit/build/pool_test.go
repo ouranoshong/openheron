@@ -228,37 +228,38 @@ func TestBuilderBuildGoesThroughPool(t *testing.T) {
 		t.Fatal(err)
 	}
 	if a1 != a2 {
-		t.Fatal("★ two Build calls in the same generation must return the same instance")
+		t.Fatal("★ two Build calls on the same tree must return the same instance")
 	}
-	hits, misses, _, _ := b.Stats()
+	hits, misses, _ := b.Stats()
 	if hits == 0 {
 		t.Fatalf("the second Build must hit the pool; stats hits=%d misses=%d", hits, misses)
 	}
 }
 
-// TestAGenerationBumpAloneDoesNotRebuildTheAgent is the new rule.
+// TestTheSameConfigurationDoesNotRebuildTheAgent is the new rule.
 //
-// ★ The pool's key is the fingerprint, and a generation bump does not move
+// ★ The pool's key is the fingerprint, and the tree's identity is the
 //
-//	it: the configuration stands still, so the agents stand still. ★ The
-//	one thing a bump used to buy — a rebuild when a server's tool list
-//	changes — is bought by the fingerprint instead, because the server's
-//	tool list is part of what an agent depends on.
-func TestAGenerationBumpAloneDoesNotRebuildTheAgent(t *testing.T) {
+//	configuration **object** plus the MCP tool surface: a configuration
+//	that is republished unchanged moves neither, so the agents stand
+//	still. ★ What a bump used to buy — a rebuild when a server's tool
+//	list changes — is bought by the fingerprint instead, because the
+//	server's tool list is part of what an agent depends on.
+func TestTheSameConfigurationDoesNotRebuildTheAgent(t *testing.T) {
 	b := newMinimalBuilder(t)
 
 	a1, _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, _ := managerOf(t, b).Current()
+	cfg := managerOf(t, b).Current()
 	managerOf(t, b).set(cfg)
 	a2, _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if a1 != a2 {
-		t.Fatal("★ a bump alone must not swap the instance: the fingerprint is what says whether the agent moved")
+		t.Fatal("★ the same configuration must not swap the instance: the fingerprint is what says whether the agent moved")
 	}
 }
 

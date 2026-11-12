@@ -35,9 +35,7 @@ type Builder struct {
 	// svc is the configuration service: where the tree is, how to read it
 	// and how to write it without leaving half a file behind. The config_*
 	// tools answer through it rather than growing a second way in.
-	svc *spec.Service
-	// bump moves the generation when a server's tool list changed.
-	bump func()
+	svc  *spec.Service
 	mu   sync.Mutex
 	snap *snapshot
 	// closers are resources a snapshot opened and never hands back — the KB
@@ -96,25 +94,6 @@ func NewBuilder(mgr ConfigManager, opts ...Option) *Builder {
 	return b
 }
 
-// SetGenerationBump wires the callback that moves the generation.
-//
-// ★ A server's tool list can change while the configuration stands still,
-//
-//	and the tools have to be rebuilt for it. The rebuild is the same road
-//	a configuration change takes, so the generation moves through the same
-//	hook — a second way to move it would be a second way to be wrong
-//	about it.
-func (b *Builder) SetGenerationBump(fn func()) {
-	b.bump = fn
-	// ★ The manager needs the same hook: a server that comes up changes
-	//   the tool surface, and the surface is rebuilt once per
-	//   generation — so the generation has to move when that happens,
-	//   not when a turn happens to ask.
-	if b.mcp != nil {
-		b.mcp.SetBump(fn)
-	}
-}
-
 // Warm starts every mounted MCP server in the background.
 //
 // ★ It is the pre-warm: the servers some agent mounts are started as soon
@@ -159,23 +138,15 @@ func (b *Builder) currentSnapshot() *snapshot {
 	if b.mgr == nil {
 		return nil
 	}
-	cfg, gen := b.mgr.Current()
-	s, err := b.snapshotFor(cfg, gen)
+	s, err := b.snapshotFor()
 	if err != nil {
 		return nil
 	}
 	return s
 }
 
-func (b *Builder) Stats() (hits, misses uint64, size int, gen uint64) {
-	hits, misses, size = b.pool.Stats()
-	// ★ The generation is the **configuration's** counter now, not the
-	//   pool's: the pool's key is a fingerprint, and what the pool holds
-	//   are entries.
-	if b.mgr != nil {
-		_, gen = b.mgr.Current()
-	}
-	return hits, misses, size, gen
+func (b *Builder) Stats() (hits, misses uint64, size int) {
+	return b.pool.Stats()
 }
 
 // Build returns the agent for this turn, and the fingerprint of the tree it
@@ -191,23 +162,26 @@ func (b *Builder) Build(ctx context.Context, _ string, agentID string,
 	if b.mgr == nil {
 		return nil, "", errors.New("agent: no config manager is wired")
 	}
-	cfg, gen := b.mgr.Current()
+	cfg := b.mgr.Current()
 
 	// ★ The re-list happens before the turn's agent is assembled, not
-	//   inside the batch build: the batch is built once per generation,
-	//   and the generation moves only when a list changes — so a re-list
-	//   inside the build would never run.
-	if b.mcp != nil && b.mcp.Refresh(ctx, cfg) && b.bump != nil {
-		b.bump()
-		cfg, gen = b.mgr.Current()
+	//   inside the build: the listing is what the tree is built from, and
+	//   a re-list inside the build would never run.
+	//
+	// ★ The answer is **not** used here: the tree's identity carries the
+	//   tool surface, so the builder compares it (see snapshotFor) instead
+	//   of being told that it moved. ★ "Told" was the old road — and it
+	//   was a second way to be wrong about it.
+	if b.mcp != nil {
+		b.mcp.Refresh(ctx, cfg)
 	}
 
 	// ★ A change the write path made is read **before** the tree is built,
 	//   not after the watcher's next poll: "the next turn uses it" has to
 	//   be a promise, and a poll is a guess.
-	cfg, gen = b.reloadIfMarked(cfg, gen)
+	b.reloadIfMarked()
 
-	snap, err := b.snapshotFor(cfg, gen)
+	snap, err := b.snapshotFor()
 	if err != nil {
 		return nil, "", err
 	}
@@ -308,13 +282,13 @@ func (b *Builder) pooledRoot(ctx context.Context, snap *snapshot, name, pinned s
 //
 //	lands between the two is in the configuration the read returns, so
 //	losing its mark loses nothing.
-func (b *Builder) reloadIfMarked(cfg *spec.Config, gen uint64) (*spec.Config, uint64) {
+func (b *Builder) reloadIfMarked() {
 	if b.svc == nil {
-		return cfg, gen
+		return
 	}
 	marks := b.svc.DrainMarks()
 	if len(marks) == 0 {
-		return cfg, gen
+		return
 	}
 	fresh, err := b.svc.Load()
 	if err != nil {
@@ -324,10 +298,9 @@ func (b *Builder) reloadIfMarked(cfg *spec.Config, gen uint64) (*spec.Config, ui
 		//   user.
 		b.logger().Error("[config] the configuration on disk does not load, keeping the previous one",
 			"err", err, "marked", strings.Join(marks, ","))
-		return cfg, gen
+		return
 	}
 	b.mgr.Publish(fresh)
-	return b.mgr.Current()
 }
 
 var errAgentNotDeclared = errors.New("agent is not declared")

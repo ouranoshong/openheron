@@ -268,8 +268,8 @@ provider 只回答「这个 snapshot 有哪些工具」并交回一批工具，�
 
 启动不站在那一轮的关键路径上：配置一被读到，所有挂载的 server 就在后台起起来
 （`agentkit/build/mcpmanager.go:129` `Warm`），每台各有状态 —— `not_started`、`starting`、
-`ready` 或 `failed`。还没起来的 server 不贡献工具，那一轮照跑；起来之后工具面变了，代际
-推进，下一轮就有它的工具。
+`ready` 或 `failed`。还没起来的 server 不贡献工具，那一轮照跑；起来之后工具面变了，builder
+比出来了，下一轮就有它的工具。
 
 暴露名是 `mcp__<server>__<tool>`，只在一处拼装（`agentkit/build/mcptools.go:141`）；server
 自己的名字就是命名空间那一段，暴露名属于哪台 server 是从它读回来的

@@ -11,7 +11,13 @@ import (
 )
 
 type ConfigManager interface {
-	Current() (*spec.Config, uint64)
+	// Current returns the configuration the process runs on.
+	//
+	// ★ It is the **whole** answer, and that is the point: ★ the tree is
+	//   built from the configuration the manager holds **now**, and a
+	//   reload publishes a new one. ★ A counter used to say "the tree
+	//   moved"; the object says it too, and it says which tree.
+	Current() *spec.Config
 	// Publish accepts a configuration the builder read itself.
 	//
 	// ★ The builder reads the configuration again when the write path

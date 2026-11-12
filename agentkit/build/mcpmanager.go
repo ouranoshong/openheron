@@ -60,16 +60,6 @@ type mcpManager struct {
 	//   deadline would be killed the moment the start returned.
 	start func(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg, log *slog.Logger) (mcpClient, error)
 
-	// bump moves the generation when the tool surface changes.
-	//
-	// ★ A server that comes up changes what the model can call, and the
-	//   tools are rebuilt once per generation — so the generation has to
-	//   move when the surface changes, not when a turn happens to ask.
-	//   ★ It is the same hook the configuration reloader uses: a second
-	//   way to move the generation would be a second way to be wrong
-	//   about it.
-	bump func()
-
 	// ctx is the manager's own lifetime: the background starts hang off
 	// it, so the process going away takes them with it.
 	ctx    context.Context
@@ -87,27 +77,6 @@ func newMCPManager(log *slog.Logger) *mcpManager {
 		ctx:     ctx,
 		cancel:  cancel,
 		log:     log,
-	}
-}
-
-// SetBump wires the hook that moves the generation when the surface changes.
-func (m *mcpManager) SetBump(fn func()) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.bump = fn
-}
-
-// bumpGeneration moves the generation, if the hook is wired.
-//
-// ★ It reads the hook under the lock: the hook is wired after the manager
-//
-//	is built, and a background job may read it while that happens.
-func (m *mcpManager) bumpGeneration() {
-	m.mu.Lock()
-	fn := m.bump
-	m.mu.Unlock()
-	if fn != nil {
-		fn()
 	}
 }
 
@@ -146,10 +115,7 @@ func (m *mcpManager) entry(name string) *mcpEntry {
 	defer m.mu.Unlock()
 	e := m.entries[name]
 	if e == nil {
-		// ★ The entry tells the manager when the surface changed: the
-		//   job that brings a server up does not know what a generation
-		//   is, and the manager does.
-		e = &mcpEntry{name: name, onChange: m.bumpGeneration, log: m.log, life: m.ctx}
+		e = &mcpEntry{name: name, log: m.log, life: m.ctx}
 		m.entries[name] = e
 	}
 	return e
@@ -199,10 +165,13 @@ func (m *mcpManager) markBroken(name string) func() {
 
 // Refresh re-lists the servers whose listing is older than the interval.
 //
-// ★ It reports whether a listing changed, because that is what moves the
+// ★ It reports whether a listing changed. ★ That answer is no longer
 //
-//	generation: the tools are rebuilt exactly like a configuration change
-//	rebuilds them, and a restart is not needed either way.
+//	used to move anything — the tree's identity carries the tool surface,
+//	and the builder compares it (see surfaceHash). ★ The report is the
+//	manager's own answer to "did anything move", and it is what the
+//	manager's own tests pin down: a fresh listing is not re-listed, and
+//	a changed one is.
 func (m *mcpManager) Refresh(ctx context.Context, cfg *spec.Config) bool {
 	if cfg == nil {
 		return false
@@ -254,6 +223,40 @@ func (m *mcpManager) ToolsOf(server string) []string {
 		return nil
 	}
 	return e.lastTools()
+}
+
+// surfaceHash is what the mounted servers offer right now.
+//
+// ★ It is part of the tree's identity: the tool set is built once per
+//
+//	snapshot, and a server that comes up offers tools the tree does not
+//	have yet. ★ A generation used to say "the surface changed"; this says
+//	**what** it is, and the tree can be compared with it.
+//
+// ★ The listing is the **mounted** servers — the ones some agent lists.
+//
+//	A server nobody mounts is never started, and one that was unmounted
+//	keeps its client but loses its claim on the tree: the tree's tools
+//	do not carry it any more, and the tree must not be held hostage by
+//	it.
+//
+// ★ The tool names are sorted, because the order the server hands them
+//
+//	in is not the order it will hand them in next time.
+func (m *mcpManager) surfaceHash(cfg *spec.Config) string {
+	if m == nil || cfg == nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, name := range cfg.MCPServersInUse() {
+		tools := m.ToolsOf(name)
+		sort.Strings(tools)
+		sb.WriteString(name)
+		sb.WriteByte('=')
+		sb.WriteString(strings.Join(tools, ","))
+		sb.WriteByte(';')
+	}
+	return sb.String()
 }
 
 // Close tears every client down.
@@ -331,13 +334,6 @@ type mcpEntry struct {
 
 	// callMu serializes the calls of a stdio server.
 	callMu sync.Mutex
-
-	// onChange is called when the tool surface changed — a server that
-	// came up, or one that lost its tools.
-	//
-	// ★ It is a hook and not a call to the builder: the entry does not
-	//   know what a generation is, and the manager does.
-	onChange func()
 }
 
 // mcpState is where one server is in its own lifecycle.
@@ -512,10 +508,6 @@ func (e *mcpEntry) runStart(life context.Context, cancel context.CancelFunc,
 	opCtx, opCancel := context.WithTimeout(life, mcpStartTimeout(cfg))
 	defer opCancel()
 
-	e.mu.Lock()
-	prev := append([]string(nil), e.tools...)
-	e.mu.Unlock()
-
 	cli, err := start(opCtx, life, cfg, e.log)
 	var names []string
 	if err == nil {
@@ -523,19 +515,18 @@ func (e *mcpEntry) runStart(life context.Context, cancel context.CancelFunc,
 	}
 
 	e.mu.Lock()
-	changed := false
 	if err != nil {
 		e.state, e.err, e.lastAttempt = mcpFailed, err, time.Now()
 		e.cli, e.tools, e.listedAt = nil, nil, time.Time{}
-		// ★ The client is gone, so its tools are gone with it — that is a
-		//   changed surface when it had one.
-		changed = len(prev) > 0
+		// ★ The client is gone, so its tools are gone with it — and the
+		//   tree's tool surface with them. ★ The manager does not have to
+		//   announce that: the tree compares the surface it was built
+		//   from with the one the servers offer now.
 		e.cancel = nil
 	} else {
 		e.state, e.err, e.lastAttempt = mcpReady, nil, time.Now()
 		e.cli, e.tools, e.listedAt = cli, names, time.Now()
 		e.fingerprint, e.serial = want, cfg.Transport == decl.MCPTransportStdio
-		changed = !sameStrings(prev, names)
 	}
 	e.mu.Unlock()
 
@@ -549,10 +540,6 @@ func (e *mcpEntry) runStart(life context.Context, cancel context.CancelFunc,
 
 	e.log.Info("[mcp] the server is up",
 		"server", cfg.Name, "transport", cfg.Transport, "tools", len(names))
-
-	if changed && e.onChange != nil {
-		e.onChange()
-	}
 }
 
 // list reads the server's own tool names.

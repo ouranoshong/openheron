@@ -266,28 +266,33 @@ For a developer who has to debug it:
   turn down with it, and the client is told "turn start timeout" — a symptom
   that names neither the server nor the reason.
 - **The start is a background job, and every server has a state.** The manager
-  starts the servers in the background (`Warm`, `agentkit/build/mcpmanager.go:123`)
+  starts the servers in the background (`Warm`, `agentkit/build/mcpmanager.go:98`)
   and each entry carries one of four states (`mcpState`,
-  `agentkit/build/mcpmanager.go:311`): `not_started`, `starting`, `ready` or
+  `agentkit/build/mcpmanager.go:337`): `not_started`, `starting`, `ready` or
   `failed`. ★ `Tools` never waits — it answers `errMCPStarting` while the job is
   in flight, and the provider skips the server **without** a warning: a server
   on its way is not a broken server. ★ The tools a server brings join the
-  **next** turn: the job compares the listing before and after and moves the
-  generation when it changed (`runStart`, `agentkit/build/mcpmanager.go:450`).
+  **next** turn: the job lists the tools when it lands, the **tool surface**
+  changes, and the builder notices the difference
+  (`runStart`, `agentkit/build/mcpmanager.go:501`).
   ★ A failed start is retried, but not before the file's own `timeout:` has
-  passed (`mcpStartTimeout`, `agentkit/build/mcpmanager.go:342`) — a server that
+  passed (`mcpStartTimeout`, `agentkit/build/mcpmanager.go:368`) — a server that
   cannot start must not be spawned in a loop.
 - **The tool list is re-listed when a turn asks for it**, and the previous
   listing is older than 30 seconds (`agentkit/build/mcpmanager.go:36`,
   `mcpRelistInterval`). ★ That interval is a fixed value, not a configuration
   key: a knob nobody turns is a knob nobody tests, and a server's tool list
   changes on the scale of days.
-- **A changed list bumps the generation.** `Refresh`
-  (`agentkit/build/mcpmanager.go:118`) reports whether a listing changed, and the
-  builder bumps the generation through the same hook the configuration reloader
-  uses (`agentkit/build/builder.go:67`). The refresh happens before the turn's
-  agent is assembled (`agentkit/build/builder.go:105`), because the batch is
-  built once per generation — a re-list inside the build would never run.
+- **A changed list moves the tool surface, and the builder compares.** `Refresh`
+  (`agentkit/build/mcpmanager.go:172`) re-lists the servers whose listing is
+  older than the interval, and `surfaceHash`
+  (`agentkit/build/mcpmanager.go:243`) says what the mounted servers offer right
+  now. ★ The builder **compares** that with the surface the tree was built from
+  (`agentkit/build/snapshot.go:207`): different ⇒ a new tree, the same ⇒ the
+  old one. ★ There is no notification and no counter — a notification can be
+  forgotten, and a comparison cannot. The refresh happens before the turn's
+  agent is assembled (`agentkit/build/builder.go:171`), because the batch is
+  built once per tree — a re-list inside the build would never run.
 
 #### The execute tool — ours, not the framework's
 

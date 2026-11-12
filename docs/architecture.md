@@ -362,8 +362,8 @@ A build waits for a server, not for a server's corpse.
 started in the **background** when the configuration is known (`agentkit/build/mcpmanager.go:129`
 `Warm`), and each server keeps its own state — `not_started`, `starting`, `ready` or
 `failed`. A server that is not up yet contributes no tools, and the turn runs without
-them; when it comes up, the tool surface changes, the generation moves, and **the next
-turn** has its tools.
+them; when it comes up, the tool surface changes, the builder notices the difference,
+and **the next turn** has its tools.
 
 ★ The exposed name is `mcp__<server>__<tool>`, composed in exactly one place
 (`agentkit/build/mcptools.go:141`). The server's own name is the namespace segment, and

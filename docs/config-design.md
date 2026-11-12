@@ -2350,20 +2350,26 @@ sha256 几十 KB 可以忽略 —— 而换掉的是一类**说不清的漏检**
    turn 记，否则调试会变成猜谜。它由 `/v2/health` 以 `configVersion` 暴露
    （`api/v2_introspect.go:481`）。
 
-★ 指纹**不再**是 Agent Pool 的代际键：池需要可比大小的单调计数，而指纹是字符串。
-代际由 `main.go` 的 `agentConfig`（`main.go:680-719`；管理器接口是
-`build.ConfigManager`，`agentkit/build/manager.go:13-15`）在同一把锁内与配置一起发布，
-见 `agent-design-v2.md (upstream)` §4.2。
+★ 指纹**就是** Agent Pool 的键：池按 `(名字, 指纹)` 存 entry
+（`agentkit/build/pool.go`）。★ 指纹是字符串，而池要的是一个可比大小的键 ——
+所以池按 `(名字, 指纹)` 存，不是按一个单调计数。
+★★ **「代际」这个概念已经退休**（P4，2026-11-12）：`main.go` 的 `agentConfig`
+（`main.go:683-754`；管理器接口是 `build.ConfigManager`，
+`agentkit/build/manager.go:13-29`）只有 `Current()` 与 `Publish()`，
+没有计数器。⇒ 树的身份是**（配置对象，MCP 工具面）**
+（`agentkit/build/snapshot.go:207`），而不是「第几代」。
 
 ### 8.5 换代的实际接线
 
-★ **2026-11-13（P2）改过**：换代不再是「一改全换」，而是**按依赖重建**；
-**2026-11-13（P3）又加了一条**：一轮**钉住自己开始时的那棵树**。
+★ **2026-11-12（P2）改过**：换代不再是「一改全换」，而是**按依赖重建**；
+**同一天（P3）又加了一条**：一轮**钉住自己开始时的那棵树**；
+**P4** 把「代际」这个概念退休了 —— 树的身份是**（配置对象，工具面）**，
+没有人再「推进」它，只有比较。
 
 ```
 spec.Reloader.Reload() succeeds
         │
-        └─ onChange ──► agentConfig.set(cfg)        (cfg + gen are published under one lock)
+        └─ onChange ──► agentConfig.set(cfg)        (cfg is published under one lock)
                                 │
                                 ▼
                 the next Builder.Build asks mgr.Current()
@@ -2373,7 +2379,7 @@ spec.Reloader.Reload() succeeds
                                 │     ├─ drain the marks → svc.Load() → mgr.Publish(fresh)
                                 │     └─ the marks are a cache; the truth is the content hash
                                 ▼
-                        snapshotFor: the generation only moves forward
+                        snapshotFor: the identity is (config object, tool surface)
                                 │     ├─ spec / policy / table
                                 │     ├─ models / tools
                                 │     └─ a new heavyDeps (backend / tool set, built lazily)
@@ -2395,11 +2401,11 @@ spec.Reloader.Reload() succeeds
 ```
 
 ★ **失败不回调**：`Service.Load` 的语法 / 模型引用 / 拓扑校验失败时，
-`Reloader` 不调用 `onChange`，管理器保留旧一代。因此不需要另写 `validateModels`，
-也不会出现「接口报 A 代、运行跑 B 代」。
+`Reloader` 不调用 `onChange`，管理器保留上一份配置。因此不需要另写 `validateModels`，
+也不会出现「接口报 A 版、运行跑 B 版」。
 
 ★ **没有推送式换绑**：本仓库根本没有 `Reconfigure` 这类入口。换配置 = 管理器换内容；
-builder 下次问就是新的一代。在飞 turn 仍持有旧实例引用，跑完即被 GC 回收 ——
+builder 下次问就是新的一棵。在飞 turn 仍持有旧实例引用，跑完即被 GC 回收 ——
 不需要排空信号。
 
 ★ **写路径只标记**（P2）：落盘的是**配置服务**，它记下「哪些文件变了」；
@@ -2414,8 +2420,8 @@ builder 下次问就是新的一代。在飞 turn 仍持有旧实例引用，跑
 
 ★ **这一节讲的是现在。** 「工具表面说清答的是哪一边」、「配置根里的写统一走配置服务」与
 「重载改成标记式按需重建」的改造方案在 `docs/config-optimization-design.md` ——
-那篇是**改造方案**，P1–P3 已落地，**P4（代际退休）仍是提案**，§7 列了已经拍板的决定。
-★ 两篇不打架：一篇讲现在，一篇讲将来；而 §8.5 那条「换代即换树」的接线，
+那篇是**改造方案**，P1–P4 **全部已落地**，§7 列了已经拍板的决定。
+★ 两篇不打架：一篇讲现在，一篇讲将来；§8.5 那条「换代即换树」的接线，
 正是那篇要改掉的东西 —— **它已经改掉了**。
 
 ---
@@ -2755,7 +2761,7 @@ agentkit/spec/write.go:persist.AtomicWrite
 | `ACrashedChildIsStartedAgainOnTheNextCall` | 崩掉的子进程在下次调用时被重新拉起 |
 | `AChangedDeclarationReplacesTheClient` | 声明变了就换掉客户端 —— 这正是这个分区能热的原因 |
 | `AFreshListingIsNotReListed` | 只有当上一份清单超过 30 秒时才重新取一次工具清单 |
-| `AChangedToolListIsReportedByTheRefresh` | 清单变了就通过配置重载器用的同一个钩子推进代际 |
+| `AChangedToolListIsReportedByTheRefresh` | 清单变了就报出来 —— ★ 而**树**是**比**出来的（配置对象 + 工具面），不是被通知的 |
 | `TheChildEnvironmentIsTheProcessesOwnWithTheFileOnTop` | 子进程的环境是本进程的环境，文件的 `env:` 叠在上面 |
 | `TheCommandIsNeverResolvedAgainstTheProjectRoot` | ★ 命令在沙箱的 PATH 里解析，绝不对着项目根解析 |
 | `AnUnreachableServerSaysSoAndKeepsTheOtherServersAlive` | 连不上的 server 只赔掉自己的工具，别的都不赔 |

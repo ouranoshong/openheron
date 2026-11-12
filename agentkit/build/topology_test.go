@@ -28,7 +28,7 @@ func buildSubtree(t *testing.T, specs []decl.SubAgentSpec, maxDepth int) *buildC
 	t.Helper()
 	cfg := configFromSpecs("test/model", nil, nil, specs)
 	b := newTestBuilderWithConfig(t, cfg)
-	snap, err := b.snapshotFor(cfg, 1)
+	snap, err := b.snapshotFor()
 	if err != nil {
 		t.Fatal(err)
 	}

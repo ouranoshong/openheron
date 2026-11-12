@@ -226,18 +226,29 @@ func TestNewGenerationRebindsPolicyAndTable(t *testing.T) {
 	}
 }
 
-func TestNewGenerationBumpsTheGeneration(t *testing.T) {
+// TestANewConfigurationRebuildsTheTree says a new configuration is a new
+// tree.
+//
+// ★ The identity is the configuration **object** plus the MCP tool
+//
+//	surface, and a reload publishes a new object — so the tree follows
+//	without anybody announcing that it moved.
+func TestANewConfigurationRebuildsTheTree(t *testing.T) {
 	b := introspectBuilder(t, NewPolicy(nil), nil, nil)
-	before := mustSnapshot(t, b).gen
+	before := mustSnapshot(t, b)
 
-	managerOf(t, b).set(minimalTestConfig())
-	after := mustSnapshot(t, b).gen
-	if after != before+1 {
-		t.Fatalf("generation = %d, want %d", after, before+1)
+	next := minimalTestConfig()
+	managerOf(t, b).set(next)
+	after := mustSnapshot(t, b)
+	if after == before {
+		t.Fatal("a new configuration must produce a new tree")
+	}
+	if after.cfg != next {
+		t.Fatalf("the tree = %p, want the configuration the manager holds %p", after.cfg, next)
 	}
 }
 
-func TestNewGenerationRebindsTheChatModel(t *testing.T) {
+func TestANewConfigurationRebindsTheChatModel(t *testing.T) {
 	cfg := minimalTestConfig()
 	cfg.Agents[spec.DefaultAgentID].ModelRef = "ref/a"
 	b := newTestBuilderWithConfig(t, cfg)
@@ -273,33 +284,45 @@ func TestNewGenerationRebindsTheChatModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	if secondModel != modelB {
-		t.Fatalf("after a generation bump model = %p, want modelB %p", secondModel, modelB)
+		t.Fatalf("after a new configuration model = %p, want modelB %p", secondModel, modelB)
 	}
 }
 
-func TestSnapshotNeverRegresses(t *testing.T) {
+// TestTheSnapshotFollowsTheManager is the rule the generation used to
+// carry.
+//
+// ★ The tree never regresses, and it does not need a counter to say so:
+//
+//	a caller cannot ask for an older tree, because it does not name one —
+//	snapshotFor reads the manager under the builder's own lock, so the
+//	order of the reads is the order of the builds.
+func TestTheSnapshotFollowsTheManager(t *testing.T) {
 	b := introspectBuilder(t, NewPolicy(nil), nil, nil)
-	newer := configFromSpecs("test/model", nil,
-		allowOf(NewPolicy(nil)), nil)
+	mgr := managerOf(t, b)
 
-	if _, err := b.snapshotFor(newer, 7); err != nil {
-		t.Fatal(err)
-	}
-	old := configFromSpecs("test/model", nil,
+	first := configFromSpecs("test/model", nil,
 		allowOf(NewPolicy(nil)), nil)
-	got, err := b.snapshotFor(old, 3)
-	if err != nil {
-		t.Fatal(err)
+	mgr.set(first)
+	if got := mustSnapshot(t, b).cfg; got != first {
+		t.Fatalf("the tree = %p, want the configuration the manager holds %p", got, first)
 	}
-	if got.gen != 7 {
-		t.Fatalf("snapshot regressed to gen %d, want 7", got.gen)
-	}
-	if got.gen != 7 {
-		t.Fatalf("the newer snapshot was overwritten: gen %d, want 7", got.gen)
+
+	second := configFromSpecs("test/model", nil,
+		allowOf(NewPolicy(nil)), nil)
+	mgr.set(second)
+	if got := mustSnapshot(t, b).cfg; got != second {
+		t.Fatalf("the tree = %p, want the newer configuration %p", got, second)
 	}
 }
 
-func TestSnapshotForReadsTheGenerationUnderTheLock(t *testing.T) {
+// TestSnapshotForReadsTheConfigurationUnderTheLock says the tree is read
+// and built as one step.
+//
+// ★ The configuration is read **inside** the builder's lock, so a caller
+//
+//	that arrived late with an older configuration cannot put an older
+//	tree back — it does not carry one at all.
+func TestSnapshotForReadsTheConfigurationUnderTheLock(t *testing.T) {
 	b := introspectBuilder(t, NewPolicy(nil), nil, nil)
 	mgr := managerOf(t, b)
 	if _, err := mustSnapshot(t, b).heavyDepsOf(context.Background()); err != nil {
@@ -311,13 +334,12 @@ func TestSnapshotForReadsTheGenerationUnderTheLock(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			cfg, _ := mgr.Current()
+			cfg := mgr.Current()
 			mgr.set(cfg)
 		}()
 		go func() {
 			defer wg.Done()
-			cfg, gen := mgr.Current()
-			s, err := b.snapshotFor(cfg, gen)
+			s, err := b.snapshotFor()
 			if err != nil {
 				t.Error(err)
 				return
@@ -330,7 +352,7 @@ func TestSnapshotForReadsTheGenerationUnderTheLock(t *testing.T) {
 	wg.Wait()
 }
 
-func TestGenerationChangeIsSafeUnderConcurrency(t *testing.T) {
+func TestConfigurationChangeIsSafeUnderConcurrency(t *testing.T) {
 	b := introspectBuilder(t, NewPolicy(nil), nil, nil)
 	mgr := managerOf(t, b)
 
@@ -349,8 +371,7 @@ func TestGenerationChangeIsSafeUnderConcurrency(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			cfg, gen := mgr.Current()
-			s, err := b.snapshotFor(cfg, gen)
+			s, err := b.snapshotFor()
 			if err != nil {
 				t.Error(err)
 				return

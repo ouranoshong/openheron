@@ -23,9 +23,20 @@ import (
 )
 
 type snapshot struct {
-	gen uint64
+	// ★ The tree's identity: the configuration it was derived from, and
+	// ★ the tool surface the MCP servers offered at that moment.
+	//
+	// ★ A new configuration **object** is a new tree — that is what a
+	//   reload publishes, and what the write path publishes. ★ A surface
+	//   that moved is a new tree too: the tool set is built once, and a
+	//   server that comes up offers tools the tree does not have yet.
+	//
+	// ★ There is no counter here any more. ★ A counter said "everything
+	//   changed"; these two say "**this** changed", and the pool's key
+	//   (the fingerprint) says the same thing per agent.
+	cfg     *spec.Config
+	surface string
 
-	cfg                  *spec.Config
 	svc                  *spec.Service
 	projectRoot, dataDir string
 	log                  *slog.Logger
@@ -133,7 +144,7 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 	return out, nil
 }
 
-func newSnapshot(gen uint64, cfg *spec.Config, svc *spec.Service, mcp *mcpManager,
+func newSnapshot(cfg *spec.Config, surface string, svc *spec.Service, mcp *mcpManager,
 	projectRoot, dataDir string, models modelFactory,
 	tools *toolRegistry, log *slog.Logger, track func(io.Closer)) (*snapshot, error) {
 
@@ -158,8 +169,8 @@ func newSnapshot(gen uint64, cfg *spec.Config, svc *spec.Service, mcp *mcpManage
 	return &snapshot{
 		log:         log,
 		track:       track,
-		gen:         gen,
 		cfg:         cfg,
+		surface:     surface,
 		svc:         svc,
 		projectRoot: projectRoot,
 		dataDir:     dataDir,
@@ -173,27 +184,35 @@ func newSnapshot(gen uint64, cfg *spec.Config, svc *spec.Service, mcp *mcpManage
 	}, nil
 }
 
-// snapshotFor returns the snapshot for this configuration.
+// snapshotFor returns the tree the process runs on.
 //
-// ★ The cache is keyed on the **generation**, and it never goes back: a
+// ★ The tree is built from the configuration the manager holds **now**, and
 //
-//	late caller with an older generation must not replace a newer tree with
-//	an older one. ★ The generation moves for two things — the configuration
-//	was reloaded, or a server's tool surface changed — and both are facts
-//	about the tree.
+//	from the tool surface the MCP servers offer right now. ★ Those two are
+//	its identity: a reload publishes a new configuration, and a server
+//	that comes up changes the surface.
+//
+// ★ The configuration is read **inside the lock**, so the order of the
+//
+//	reads is the order of the builds: a caller that arrived late with an
+//	older configuration cannot put an older tree back. ★ That is what the
+//	generation used to guarantee — and it guaranteed it with a counter
+//	that said "everything changed", where this says "**this** changed".
 //
 // ★ The snapshot is heavier than the agents: it owns the filesystem
 //
 //	backend and the tool set. ★ The agents themselves are pooled by
 //	**fingerprint**, so a snapshot that moves does not rebuild the agents
 //	whose inputs did not change.
-func (b *Builder) snapshotFor(cfg *spec.Config, gen uint64) (*snapshot, error) {
+func (b *Builder) snapshotFor() (*snapshot, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.snap != nil && b.snap.gen >= gen {
+	cfg := b.mgr.Current()
+	surface := b.mcp.surfaceHash(cfg)
+	if b.snap != nil && b.snap.cfg == cfg && b.snap.surface == surface {
 		return b.snap, nil
 	}
-	snap, err := newSnapshot(gen, cfg, b.svc, b.mcp, b.projectRoot, b.dataDir,
+	snap, err := newSnapshot(cfg, surface, b.svc, b.mcp, b.projectRoot, b.dataDir,
 		b.models, b.tools, b.log, b.track)
 	if err != nil {
 		return nil, err

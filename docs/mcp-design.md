@@ -796,7 +796,7 @@ if _, err := c.stdin.Write(requestBytes); err != nil {   // ← no lock
 | **只启动一次** | ★ 这次启动是**单飞**的：两个调用方要同一个 server，拿到的是**那一个**客户端（§6.8） |
 | **崩了的子进程自动重启** | 一个死掉的 stdio server 在下一次调用时被重新拉起 —— 崩了不是配置错误，而一个死掉的 server 就那么死着才是最糟的结果 |
 | **★ 子进程的生命归管理者** | 拉起子进程的那个上下文由**管理者的生命周期**派生，不是调用方的（`agentkit/build/mcpmanager.go:425` `dispatch`）—— ★ 调用方是**一轮**，一轮结束时的取消会把子进程一起带走，于是那个工具还在表里却答不上话（§6.2） |
-| **发现工具清单变了** | 管理者重新列举工具；清单变了就**推进代际**、工具重建 —— 与配置重载是同一条路（§6.7） |
+| **发现工具清单变了** | 管理者重新列举工具；清单变了就**换掉工具面**、工具重建 —— 与配置重载是同一条路（§6.7） |
 | **服务器变了就换掉它** | 一份不再匹配运行中客户端指纹的声明会关掉旧客户端并拉起新的（`agentkit/build/mcpmanager.go:234`） |
 | **进程退出时拆掉** | 管理者在关闭时关掉每一个客户端（`agentkit/build/mcpmanager.go:150`、`main.go:472`） |
 
@@ -821,18 +821,20 @@ if _, err := c.stdin.Write(requestBytes); err != nil {   // ← no lock
 真正的断链是 `EOF`（库本来就忽略）或别的错误，不会被这条过滤吞掉；
 子进程本身仍按原路由 `killMCPChild` / `closeMCPClient` 收干净。
 
-★ **重新列举发生在这一轮装配 agent 之前，而不是在批次构建里面。** 批次是每一代构建
-  一次，而代际只在清单变了的时候才动 —— 所以*在*构建里重新列举就永远轮不到跑。
-  ⇒ builder 先问管理者，而一次变化在 `main.go` 自己的 `agentConfig` 里推进代际 ——
-  与配置变化推进它的地方是同一个（`main.go:727` `bump`、`main.go:707` `set`）——
-  于是快照在 agent 装配之前就被重建了。
+★ **重新列举发生在这一轮装配 agent 之前，而不是在批次构建里面。** 批次是每一棵**树**构建
+  一次，而树只在清单变了的时候才换 —— 所以*在*构建里重新列举就永远轮不到跑。
+  ⇒ builder 先问管理者（`agentkit/build/builder.go:171` `Refresh`），再比一次
+  工具面（`agentkit/build/mcpmanager.go:243` `surfaceHash`）——
+  变了就换树，于是快照在 agent 装配之前就被重建了。
 
-★ **builder 需要一条推进代际的路。** `ConfigManager` 是只读的
-  （`agentkit/build/manager.go:12` —— 它只有 `Current()`，别的都没有），
-  所以 builder 在它旁边长出一个 **bump** 回调（`agentkit/build/builder.go:67`），
-  而 `main.go` 把那个回调接到重载器用的同一个 `agentConfig.bump` 上
-  （`main.go:321`、`main.go:606`）。
-  ★ 推进代际的第二条路，就是关于它出错方式的第二条路。
+★ **builder 不需要一条「谁变了」的路。** 改造前它有一个 **bump** 回调
+  （`SetGenerationBump`），接在 `main.go` 的 `agentConfig.bump` 上 ——
+  ★ 那是一条**通知**的路：有人得记得告诉 builder「树变了」。
+  ⇒ 现在**没有人通知，只有比较**：快照的身份是（配置对象，MCP 工具面），
+  builder 每次建树前把当前的身份和手上那份比一比（`agentkit/build/snapshot.go:207`）。
+  ★ 通知的路会漏（有人忘了通知），比较的路不会漏 —— 而且它只有一条。
+  ★ `ConfigManager` 也因此更窄了：它只有 `Current()` 与 `Publish()`
+  （`agentkit/build/manager.go:20`、`:28`）—— 读当前配置、发新配置，别的都没有。
 
 ★ **间隔是 30 秒，而且它不是一个配置键。** 某一轮来要一个 server、而上一份清单已经
   比 **30 秒**更老时，管理者才重新列举它 —— 所以一个闲着的 openheron 什么都不列举，
@@ -901,7 +903,7 @@ Policy.TierOf(name):
   也不会出现「一个工具还揣着旧档位」的空窗期。
 
 ★ **而一个自己改了工具清单的 server 走的是同一条路。** 管理者轮询那份清单（§6.6）；
-  清单变了就推进代际、工具重建 —— 与配置变化走同一条路，同样不需要重启。
+  清单变了就换掉工具面、工具重建 —— 与配置变化走同一条路，同样不需要重启。
 
 ### 6.8 一次启动，一个客户端
 
@@ -1215,7 +1217,7 @@ headers:
 | 输出封顶（§6.4） | 同一族包装层 —— 组件的 `ToolCallResultHandler`（`agentkit/build/mcptools.go:376`） |
 | 客户端的生命（§6.2、§6.6） | 管理者 —— `Start` / `Initialize` / `ListTools`，懒启动、崩掉的子进程重启（`agentkit/build/mcpmanager.go:304`），以及进程退出时的拆解（`agentkit/build/mcpmanager.go:150`） |
 | 热重载（§5.4） | `agentkit/spec/reload.go` —— 这个分区是热的（`agentkit/spec/config.go:66`），而声明变了就会换掉客户端（`agentkit/build/mcpmanager.go:234`） |
-| 工具清单变了（§6.6） | 管理者 —— 重新列举（`agentkit/build/mcpmanager.go:118`），以及推进代际并重建工具（`agentkit/build/builder.go:105`） |
+| 工具清单变了（§6.6） | 管理者 —— 重新列举（`agentkit/build/mcpmanager.go:172`），以及换掉工具面并重建工具（`agentkit/build/mcpmanager.go:243` `surfaceHash`） |
 | 一次启动，一个客户端（§6.8） | 管理者 —— 单飞启动（`agentkit/build/mcpmanager.go:425` `dispatch`） |
 | 失败的启动不拖住装配（§6.8） | `startStdioClient`（`agentkit/build/mcpmanager.go:457`）—— 先杀子进程（`agentkit/build/mcpmanager.go:485`），再拆解，而拆解有上限（`agentkit/build/mcpmanager.go:501`） |
 | 一次 run 碰过的 server（§7.4） | `agentkit/run/runrow.go:84` 与 `storage/runledger.go:168` —— run 的那一行点名它们 |
@@ -1261,7 +1263,7 @@ headers:
 | 9 | `api/v2_settings.go` | `mcps/` 的可编辑分区 | ★ **通用** —— 那份清单走的是 `spec.Categories`（`api/v2_settings.go:135`），而 `mcps/` 是一个可编辑分类（`agentkit/spec/config.go:66`），所以不需要专门的一段 |
 | 10 | `agentkit/build/nettools.go` | 输出封顶，套到 MCP 批次上 | ★ **在别处** —— 封顶落在组件的结果处理器里（`agentkit/build/mcptools.go:376`），用的是同一个常量（`agentkit/build/nettools.go:24`） |
 | 11 | `agentkit/build/mcptools.go` | `mcpPlan` —— 那份共享的命名与档位映射（§9.1），把 stdio 调用串行化的 per-server 互斥锁（§6.5），以及子进程的环境装配（§5.5） | **已完成** —— `agentkit/build/mcptools.go:68`、`:335`；★ 环境装配在管理者里（`agentkit/build/mcpmanager.go:458`） |
-| 12 | `agentkit/build/mcpmanager.go` | 管理者：一个 server 一个客户端、**单飞启动**（§6.8）、**只懒启动某个 agent 要的**那些服务器（§5.3）、崩了的子进程重启、推进代际的工具清单重新列举，以及快照换代时的拆解（§6.6） | **已完成** —— `agentkit/build/mcpmanager.go:42`；★ 拆解发生在**声明**上（`:229`）与进程退出时（`:150`），而不是快照换代时（§6.6） |
+| 12 | `agentkit/build/mcpmanager.go` | 管理者：一个 server 一个客户端、**单飞启动**（§6.8）、**只懒启动某个 agent 要的**那些服务器（§5.3）、崩了的子进程重启、工具清单的重新列举与**工具面**，以及快照换代时的拆解（§6.6） | **已完成** —— `agentkit/build/mcpmanager.go:44`；★ 拆解发生在**声明**上（`:229`）与进程退出时（`:264`），而不是快照换代时（§6.6） |
 | 13 | `agentkit/run/runrow.go` | run 的那一行记下这次 run 碰过哪些 MCP server（§7.4） | **已完成** —— `agentkit/run/runrow.go:84`、`storage/runledger.go:168` |
 | 14 | `agentkit/templates` 与 `spec.Template` | `mcps/_example.yaml` 这个脚手架，以及新建 `mcps/` 文件时编辑器用的模板 —— ★ **两边都在同一个叶子包里**：编辑器读不到 init 包里那个文件（编辑器由 API 供给，而 API 不能 import `initcfg`，那是循环），所以文件住在 `agentkit/templates` —— 一个**两边都能依赖的叶子包**（§5.6） | **已完成** —— `agentkit/templates/files/mcps/_example.yaml`、`initcfg/initcfg.go:164`、`agentkit/spec/write.go:307` |
 | 15 | `api/commands.go` | `mcps` 这个 action 命令与 `commandActionOpenMCPs`（§11.1） | **已完成** —— `api/commands.go:31`、`:61` |
@@ -1269,11 +1271,11 @@ headers:
 | 17 | `api/v2_introspect.go` | `MCPSource` 接口与 `SetMCPSource`：API 层去问 builder，它不直接读管理者（§11.2）；★ 以及配置面视图里那些已配置的服务器（§11.4） | ★ **拆开了** —— 接口与 `SetMCPSource` 在 `api/v2_mcps.go:18`、`:41`；配置面视图列出那些服务器在 `api/v2_introspect.go:392` |
 | 18 | `agentkit/build/mcpstatus.go` | `Builder.MCPServers(agentID)` —— 管理者状态的投影（§11.2） | **已完成** —— `agentkit/build/mcpstatus.go:64` |
 | 19 | `agentkit/build/policy.go` | 表里 agent 挂载的 server 清单，以及按 server 判定一个 MCP 工具归不归这个 agent 的那条规则（§11.3） | **已完成** —— `agentkit/build/policy.go:105`，接在 `agentkit/build/topology.go:72` |
-| 20 | `main.go` | 那根接线，紧挨着 `SetToolsSource`（`main.go:365`）（§11.2） | **已完成** —— `main.go:321`（那个 bump）、`:279`（`SetMCPSource`）、`:384`（那个 close） |
+| 20 | `main.go` | 那根接线，紧挨着 `SetToolsSource`（`main.go:455`）（§11.2） | **已完成** —— `main.go:456`（`SetMCPSource`）、`:573`（那个 close） |
 | 21 | `web/src/lib/api.ts` | `open_mcps` 这个 action 与 `listMCPServers`（§11.5） | **已完成** —— `web/src/lib/api.ts:136`、`:329` |
 | 22 | `web/src/components/mcp-panel.tsx` | 那个面板（§11.5） | **已完成** |
 | 23 | `web/src/components/composer.tsx` | 打开面板的那个 action 分支（§11.5） | **已完成** —— `web/src/components/composer.tsx:282` |
-| 24 | `agentkit/build/builder.go` 与 `agentkit/build/manager.go` | 这一轮的第一步：问管理者某个 server 的工具清单有没有变，变了就取新的快照；以及推进代际的那个 **bump** 回调（§6.6） | **已完成** —— `agentkit/build/builder.go:67`、`:105`；★ 配置管理器仍然是只读的（`agentkit/build/manager.go:12`） |
+| 24 | `agentkit/build/builder.go` 与 `agentkit/build/manager.go` | 这一轮的第一步：问管理者重新列举一次，然后比一次工具面，变了就取新的快照（§6.6） | **已完成** —— `agentkit/build/builder.go:171`、`:207`；★ 配置管理器只剩 `Current()` 与 `Publish()`（`agentkit/build/manager.go:20`、`:28`） |
 
 ★ **有三行搬了家，还有一行没有照写落地。** 工具名全域搬到了装配层（第 5 行），
   输出封顶搬进了组件的结果处理器（第 10 行），API 那个 MCP 接口搬进了
@@ -1594,7 +1596,7 @@ headers:
 | R1 | **启动是一次后台作业**，装配不等待它 | 一台 server 不该决定一轮能不能开始 |
 | R2 | **每个 server 有一个状态** | 「还没起来」与「起不来」是两件事；混起来就只剩「不可用」 |
 | R3 | **没起来的 server 不贡献工具**，而那一轮照跑 | 挂一个调不通的工具比没有这个工具更糟 |
-| R4 | **起来了就推进代际**，下一轮的工具清单里就有它 | 工具集是每一代构建一次的（§6.6）；代际不动，它就不动 |
+| R4 | **起来了就换掉工具面**，下一轮的工具清单里就有它 | 工具集是每一棵树构建一次的（§6.6）；工具面不动，它就不动 |
 | R5 | **一次启动，一个客户端**（§6.8 不变） | 单飞不因为异步而变 |
 | R6 | **失败的退避重试** | 一次失败不该是永远的失败，也不该是热循环 |
 | R7 | **期限属于作业，不属于那一轮** | 那一轮的预算是给模型的 |
@@ -1666,21 +1668,22 @@ for _, name := range cfg.MCPServersInUse() {
 | `mcpEntry` 的状态 | `cli` / `err` / `tools` 三个字段各说一半 | 一个显式的状态字段，四态 |
 | `mcpToolProvider.Provide`（`agentkit/build/mcptools.go:201`） | 不可达就告警并跳过 | 「还在起」**不是**失败：不告警，不挂它的工具 |
 | `mcpManager.Warm`（`agentkit/build/mcpmanager.go:123`） | 没有 | 那个统一的后台作业 |
-| 代际 | 只有 `Refresh` 走的那条路 | ★ 作业落地时直接推进（`bumpGeneration`，`:105`；接的是 `agentkit/build/builder.go:107` `SetGenerationBump` → `main.go:727` 的 `agentConfig.bump`） |
+| 工具面 | 只有 `Refresh` 走的那条路 | ★ **没有通知，只有比较**（✅ P4）：作业落地时清单变了，工具面就变了（`agentkit/build/mcpmanager.go:243` `surfaceHash`），builder 比出来就换树 |
 | `MCPServers`（`agentkit/build/mcpstatus.go:77`） | 三态 | 四态：`starting` 是新的一态 |
 
 ### 13.6 ★ 三个坑
 
 1. **清单的比较看不见「从没有到有」。** `Refresh` 先读 `prev := e.lastTools()`，
-   再读 `names`；而后台作业落地时**两份都是新的** —— 相等，于是代际不动，
+   再读 `names`；而后台作业落地时**两份都是新的** —— 相等，于是工具面不动，
    那批工具就永远进不来。⇒ **作业自己比**：它拿落地前的清单与落地后的清单比，
-   变了就推进代际（`runStart`，`agentkit/build/mcpmanager.go:450`）。
+   变了就换掉工具面（`runStart`，`agentkit/build/mcpmanager.go:501`）。
 
-2. **代际要由作业完成时推进，而不是在 `Refresh` 里。** 若只在 `Refresh` 里推进，
-   那么「作业在 `Refresh` 之后、装配之前落地」这一段里代际不动 ——
-   而那一批工具是**每一代构建一次**的（§6.6），于是它要等到再下一轮才进得来。
-   ⇒ 作业落地时直接调推进代际的那个回调。★ 它是带锁的
-   （`main.go:727` 的 `agentConfig.bump`），所以从后台 goroutine 调它是对的。
+2. **工具面要在作业完成时就换，而不是等 `Refresh`。** 若只在 `Refresh` 里换，
+   那么「作业在 `Refresh` 之后、装配之前落地」这一段里工具面不动 ——
+   而那一批工具是**每一棵树构建一次**的（§6.6），于是它要等到再下一轮才进得来。
+   ⇒ 作业落地时直接把清单写进入口条目，工具面下一次比较就看得见。
+   ★ 这比「推进代际」那条路更窄：作业只改自己的状态，不通知任何人 ——
+   ★ 现在**没有人通知，只有比较**（§6.6）。
 
 3. **重试不能变成热循环。** 一次失败之后，谁再问都要重试的话，一台永远起不来的
    server 会被反复拉起。⇒ 两次尝试之间至少隔一个 `timeout:` ——

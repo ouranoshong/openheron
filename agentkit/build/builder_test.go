@@ -37,7 +37,7 @@ func TestNewBuilderDefersEverythingToBuild(t *testing.T) {
 	if b.snap != nil {
 		t.Fatal("NewBuilder must not derive a snapshot before the manager is asked")
 	}
-	if _, _, size, _ := b.Stats(); size != 0 {
+	if _, _, size := b.Stats(); size != 0 {
 		t.Fatalf("NewBuilder must not populate the pool, got %d entries", size)
 	}
 }

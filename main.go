@@ -357,7 +357,7 @@ func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar, sink
 	if err != nil {
 		return nil, configLoadError(cfgSvc, err)
 	}
-	cfg, _ := mgr.Current()
+	cfg := mgr.Current()
 	applyLogLevel(log, level, cfg)
 	// In case the reloader did not call back synchronously.
 	openLogFile(cfg)
@@ -403,17 +403,16 @@ func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 
 	// The filesystem tools take paths, and the agent has no other way to learn
 	// where the code lives. It arrives through WithPaths, not the spec.
+	//
+	// ★ There is no "a server's tool list changed" hook here any more: the
+	//   tool surface is part of the tree's identity, and the builder
+	//   compares the surface the servers offer now with the one the tree
+	//   was built from. ★ A separate way to announce a change would be a
+	//   second way to be wrong about it.
 	builder := build.NewBuilder(st.mgr,
 		build.WithPaths(st.projectRoot, st.dataDir),
 		build.WithConfigService(st.cfgSvc))
 	st.builder = builder
-
-	// ★ A server's tool list can change while the configuration stands
-	//   still, and the tools have to be rebuilt for it. The rebuild is the
-	//   same road a configuration change takes, so the generation moves
-	//   through the same hook the reloader uses — a second way to move it
-	//   would be a second way to be wrong about it.
-	builder.SetGenerationBump(st.mgr.bump)
 
 	// ★ The pre-warm: every server some agent mounts is started in the
 	//   background as soon as the configuration is known — so the first
@@ -449,8 +448,7 @@ func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 
 	st.srv = api.New(rt, fm, log, hserver.WithHostPorts(st.addr))
 	st.srv.SetConfigSource(func() *spec.Config {
-		c, _ := st.mgr.Current()
-		return c
+		return st.mgr.Current()
 	})
 	st.srv.SetConfigService(st.cfgSvc)
 	st.srv.SetToolsSource(toolsAdapter{b: builder})
@@ -461,13 +459,13 @@ func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 		st.srv.SetLogLevelSource(func() string { return obs.LevelName(st.level.Level()) })
 	}
 	st.srv.SetStartTimeoutSource(func() time.Duration {
-		c, _ := st.mgr.Current()
-		return startTimeout(c)
+		return startTimeout(st.mgr.Current())
 	})
 	st.srv.SetPoolSource(func() map[string]any {
-		hits, misses, size, gen := builder.Stats()
+		hits, misses, size := builder.Stats()
 		return map[string]any{
-			"hits": hits, "misses": misses, "size": size, "gen": gen,
+			"hits": hits, "misses": misses, "size": size,
+			"version": configVersion(st.mgr.Current()),
 		}
 	})
 	st.srv.SetSkillsSource(func() []api.SkillView {
@@ -489,8 +487,10 @@ func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 }
 
 func inspectSessions(ctx context.Context, st *startup, log *slog.Logger) {
-	if h, m, size, gen := st.builder.Stats(); st.cfg.WatchEnabled() {
-		log.Info("[main] agent pool", "gen", gen, "entries", size, "hits", h, "misses", m)
+	if h, m, size := st.builder.Stats(); st.cfg.WatchEnabled() {
+		log.Info("[main] agent pool",
+			"version", configVersion(st.mgr.Current()),
+			"entries", size, "hits", h, "misses", m)
 	}
 
 	report, err := st.fm.Inspect(ctx)
@@ -673,14 +673,15 @@ func (a toolsAdapter) RuntimeTools(agentID string) api.Observed {
 
 // agentConfig holds the configuration the process runs on.
 //
-// ★ The generation moves in exactly one place, and this is it: a server's
+// ★ The configuration **object** is the tree's identity: a reload
 //
-//	tool list can change while the configuration stands still, and the
-//	tools have to be rebuilt for it.
+//	publishes a new one, and the builder compares the object it holds
+//	with the one the tree was built from. ★ There is no generation
+//	counter here any more — a counter said "everything changed", and
+//	the pool's fingerprint says which agents a change reaches.
 type agentConfig struct {
 	mu  sync.RWMutex
 	cfg *spec.Config
-	gen uint64
 
 	// warm starts the mounted MCP servers in the background.
 	//
@@ -698,16 +699,21 @@ func (c *agentConfig) setWarm(fn func(*spec.Config)) {
 	c.warm = fn
 }
 
-func (c *agentConfig) Current() (*spec.Config, uint64) {
+// Current returns the configuration the process runs on.
+//
+// ★ It is the whole answer, and that is the point: the tree is built
+//
+//	from the configuration the manager holds **now**, and a reload
+//	publishes a new one.
+func (c *agentConfig) Current() *spec.Config {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.cfg, c.gen
+	return c.cfg
 }
 
 func (c *agentConfig) set(cfg *spec.Config) {
 	c.mu.Lock()
 	c.cfg = cfg
-	c.gen++
 	warm := c.warm
 	c.mu.Unlock()
 	// ★ The pre-warm is outside the lock: it starts child processes, and
@@ -723,24 +729,27 @@ func (c *agentConfig) set(cfg *spec.Config) {
 // ★ The builder reads the configuration again when the write path marked a
 //
 //	change, and publishes it here — so that "the next turn uses it" is a
-//	promise rather than a race with the watcher's poll. ★ The generation
-//	moves with it, because the tree moved: the pool's key is a
-//	fingerprint now, and the fingerprint is what says which agents the
-//	change reaches.
+//	promise rather than a race with the watcher's poll. ★ The tree moves
+//	with it: the pool's key is a fingerprint now, and the fingerprint is
+//	what says which agents the change reaches.
 func (c *agentConfig) Publish(cfg *spec.Config) {
 	c.set(cfg)
 }
 
-// bump moves the generation without changing the configuration.
+// configVersion is the configuration's own version, and "" when there is
+// none.
 //
-// ★ The generation moves in exactly one place, and this is it: a server's
+// ★ It is the fingerprint of the configuration's **content**, so two
 //
-//	tool list can change while the configuration stands still, and the
-//	tools have to be rebuilt for it.
-func (c *agentConfig) bump() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.gen++
+//	runs of the same configuration report the same version, and a
+//	reload that changed something reports a different one. ★ It says
+//	"which configuration" — the tree's identity is the object, and
+//	this is the object's name.
+func configVersion(cfg *spec.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	return cfg.Version
 }
 
 func override(key, fallback string) string {
