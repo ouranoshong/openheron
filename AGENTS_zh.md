@@ -351,7 +351,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
 
 | 文档 | 内容 |
 |---|---|
-| `README.md` / `README_zh.md` | **项目说明** —— 定位、快速开始、命令、配置速览、HTTP 速查 |
+| `README.md` / `README_zh.md` | **项目说明** —— 定位与它站着的几条硬规则，然后一张「想做什么看哪篇」的表 |
 | `docs/architecture.md` / `docs/architecture_zh.md` | **架构设计说明** —— 分层与依赖方向、配置系统、装配、运行循环、存储、HTTP、前端、知识库 |
 | `docs/user-manual.md` / `docs/user-manual_zh.md` | **用户使用说明** —— 安装、配置、界面操作（面向使用者，不含内部设计） |
 | `docs/developer-manual.md` / `docs/developer-manual_zh.md` | **开发者说明** —— 分层、依赖铁律、开发配方、测试与排障、已知问题 |

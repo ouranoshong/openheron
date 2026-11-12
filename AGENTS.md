@@ -407,7 +407,7 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 
 | Document | Content |
 |---|---|
-| `README.md` / `README_zh.md` | **Project overview** — positioning, quick start, commands, configuration at a glance, HTTP reference |
+| `README.md` / `README_zh.md` | **Project overview** — the positioning and the rules it stands on, then a table saying which document answers which question |
 | `docs/architecture.md` / `docs/architecture_zh.md` | **Architecture** — layering and dependency direction, configuration system, assembly, run loop, storage, HTTP, frontend, knowledge base |
 | `docs/user-manual.md` / `docs/user-manual_zh.md` | **User guide** — installation, configuration, interface operation (for users, no internal design) |
 | `docs/developer-manual.md` / `docs/developer-manual_zh.md` | **Developer guide** — layering, dependency iron rules, development recipes, testing and troubleshooting, known issues |

@@ -808,8 +808,7 @@ renamed job is a new check name, and the old one goes missing.
    request that touches two lines, and it is merged before the tag is cut: the
    tag goes on `main`'s tip. A tag on a side branch publishes a release nobody
    merged, and `tag-check` refuses it.
-2. `main` is green — the badge at the top of the README, or the last run in
-   the Actions tab.
+2. `main` is green — the last run in the Actions tab.
 3. The working tree is clean and `main` is up to date: `git pull --ff-only`.
    The tag has to point at a commit that **is on `main`**.
 4. The tag name is decided. `v*` is the convention (`v0.1.0`), and the tag is

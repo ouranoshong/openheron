@@ -701,7 +701,7 @@ composer 必须读**服务端**的答案，而不是自己的内存：
 1. ★ **发布先合进 `main`。** 改版本号是一个只动两行的 pull request，它在打 tag 之前
    就合进了 `main` —— tag 打在 `main` 的顶端。打在侧分支上的 tag 会发布一份没人合并过
    的东西，而 `tag-check` 会拒绝它。
-2. `main` 是绿的 —— README 顶部的徽章，或者 Actions 页最后一轮。
+2. `main` 是绿的 —— Actions 页最后一轮。
 3. 工作树干净、`main` 是最新的：`git pull --ff-only`。tag 必须指向**已经在 `main` 上的
    那个提交**。
 4. tag 名定好了。约定是 `v*`（`v0.1.0`），而且 tag 就是打进二进制里的那个版本号。
