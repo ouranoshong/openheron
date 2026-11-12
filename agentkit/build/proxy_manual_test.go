@@ -70,6 +70,19 @@ func TestTheProxyKeyAgainstARealProxy(t *testing.T) {
 		t.Logf("with a proxy: %v", err)
 	})
 
+	// ★ The environment's proxy, asked for by name: the same real proxy,
+	//
+	//	reached through the "env" setting. The route has to come out the
+	//	same way — otherwise the setting did nothing.
+	t.Run("the environment's proxy", func(t *testing.T) {
+		setProxyEnv(t, proxy, "")
+		out, err := fetchThrough(t, "env", trace)
+		if err != nil {
+			t.Fatalf("the request through the environment's proxy must work: %v", err)
+		}
+		t.Logf("through the environment:\n%s", out)
+	})
+
 	// ★ The whole chain: the file on disk, the configuration that loads it,
 	//
 	//	the tool it assembles, and the request that leaves the machine.

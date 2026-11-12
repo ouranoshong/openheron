@@ -21,6 +21,8 @@ allows: [request_get]     # request_post and the other write methods still ask
 #   exists to reach what cannot be reached directly (an intranet host is not
 #   public, and reaching it is what the proxy is for), so with one configured
 #   the target may be any address the proxy can reach — the proxy is the
-#   boundary. Schemes: http, https, socks5, socks5h. A wrong one is a
-#   load-time error.
+#   boundary. Three settings: "" (no proxy), a URL (that proxy; the
+#   environment is ignored), and "env" (the environment decides —
+#   HTTP_PROXY / HTTPS_PROXY / NO_PROXY, read once when the tool is built).
+#   Schemes: http, https, socks5, socks5h. A wrong one is a load-time error.
 proxy: ""

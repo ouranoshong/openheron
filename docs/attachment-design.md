@@ -90,7 +90,7 @@ workspace 里，与任何一条消息都没有关系；消息发出时附件就�
 | 2 | **历史里看不出这条消息带了附件** | `agentkit/run/loop.go:66` 落盘的是 `message.NewUser(queryItem.Query)` —— 纯文本 |
 | 3 | **刷新页面附件即失** | `web/src/lib/store/state.ts:20` `attachments: Record<string, Attachment[]>` 只活在内存里 |
 | 4 | **「移除」只改前端** | `web/src/lib/store/actions.ts:202` `removeFile` 只过滤 store 的 map；服务端 workspace 里的文件还在 |
-| 5 | **拖拽/粘贴完全没写** | `web/src` 里 `onDrop` / `onPaste` / `dataTransfer` 零匹配 —— 但 `docs/user-manual.md:768` 已经宣称 "supports drag/paste attachments" |
+| 5 | **拖拽/粘贴完全没写** | `web/src` 里 `onDrop` / `onPaste` / `dataTransfer` 零匹配 —— 但 `docs/user-manual.md:1055` 已经宣称 "supports drag/paste attachments" |
 
 ★ 第 5 条是**文档漂移**：用户手册承诺了一个不存在的能力。
 

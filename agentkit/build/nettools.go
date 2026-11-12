@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"net/http"
 	"strings"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 	"github.com/cloudwego/eino-ext/components/tool/wikipedia"
 	"github.com/cloudwego/eino/components/tool"
 
-	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 )
 
@@ -27,58 +25,15 @@ const (
 	defaultToolOutputBytes  = 20000
 )
 
-// newPublicOnlyClient builds the client the network tools use.
+// dialPublicOnly dials a target that has to be a public address.
 //
-// ★ Without a proxy the tool dials the target itself and refuses a target
+// ★ The check happens **here**, at the moment of the dial, and the
 //
-//	that does not resolve to a public address. That is the guard against
-//	a model being used to reach the host's own network.
-//
-// ★ A proxy **replaces** that guard, and it replaces it on purpose. A
-//
-//	proxy exists to reach what cannot be reached directly — an intranet
-//	host is not public, and reaching it is what the proxy is for — so
-//	with a proxy configured the target may be any address the proxy can
-//	reach, and the proxy decides. The proxy is named in the
-//	configuration, so it is the user's own boundary and not ours to
-//	police.
-//
-// ★ The two rules cannot be merged: a guard that looks at the target and
-//
-//	a proxy that is asked to reach the target are answers to two
-//	different questions, and a target the proxy can reach is often one
-//	the guard would refuse. One rule, one setting: the proxy is named,
-//	or it is not.
-func newPublicOnlyClient(timeout time.Duration, proxy string) (*http.Client, error) {
-	if timeout <= 0 {
-		timeout = defaultHTTPTimeout
-	}
-	dialer := &net.Dialer{Timeout: timeout, KeepAlive: 30 * time.Second}
-	tr := &http.Transport{
-		MaxIdleConns:          32,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
-	proxyURL, err := spec.ParseProxy(proxy)
-	if err != nil {
-		return nil, err
-	}
-	if proxyURL == nil {
-		tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return dialPublicOnly(ctx, dialer, network, addr)
-		}
-	} else {
-		tr.Proxy = http.ProxyURL(proxyURL)
-		// ★ The proxy is named in the configuration, so dialing it is not
-		//   the tool reaching into the host's network — it is the user
-		//   pointing at their own proxy. A local proxy is 127.0.0.1 by
-		//   definition, so the public-only rule must not apply to it.
-		tr.DialContext = dialer.DialContext
-	}
-	return &http.Client{Timeout: timeout, Transport: tr}, nil
-}
-
+//	connection is made to the address that was just checked. A check
+//	that ran at the name-resolution step alone would leave a hole: the
+//	name is resolved twice — once to judge it and once to reach it —
+//	and a name that answers differently the second time is the
+//	rebinding that the check was supposed to stop.
 func dialPublicOnly(ctx context.Context, dialer *net.Dialer, network, addr string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -163,7 +118,7 @@ func (httpRequestToolProvider) Provide(ctx context.Context, env toolEnv) ([]tool
 	if cfg == nil {
 		return nil, nil
 	}
-	cli, err := newPublicOnlyClient(cfg.Timeout.Duration(), cfg.Proxy)
+	cli, err := newNetworkClient(cfg.Timeout.Duration(), cfg.Proxy)
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +212,7 @@ func (webSearchToolProvider) Provide(ctx context.Context, env toolEnv) ([]tool.B
 		timeout = defaultWebSearchTimeout
 	}
 
-	cli, err := newPublicOnlyClient(timeout, cfg.Proxy)
+	cli, err := newNetworkClient(timeout, cfg.Proxy)
 	if err != nil {
 		return nil, err
 	}

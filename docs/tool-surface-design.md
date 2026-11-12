@@ -138,7 +138,7 @@ tools: [ls, read_file]                    # ② 非 MCP 工具的允许列表；
 
 ★ **`tools:` 里的 `mcp__*` 条目被丢弃，并以一条提示报出**，而不是加载期报错（`agentkit/spec/load.go:845` `checkAgentMCPNames`）。理由：语义已经变了，不是自相矛盾 —— 硬失败只会挡住一个本来能用的配置。提示要说清两件事：`tools` 不点名 MCP 工具，`mcps:` 才是挂载服务器并授予工具的地方。
 
-★ **`mcp__github__*` 这个通配不再有意义，但边界规则仍然成立。** 双下划线保证服务器名的右边界：它匹配 `mcp__github__ls`，不匹配 `mcp__github_x__y`（后者是服务器 `github_x`）。命名空间三段式**不可协商**（`agentkit/spec/decl/decl.go:482`）。
+★ **`mcp__github__*` 这个通配不再有意义，但边界规则仍然成立。** 双下划线保证服务器名的右边界：它匹配 `mcp__github__ls`，不匹配 `mcp__github_x__y`（后者是服务器 `github_x`）。命名空间三段式**不可协商**（`agentkit/spec/decl/decl.go:491`）。
 
 ### 2.4 由此删掉的两样东西
 

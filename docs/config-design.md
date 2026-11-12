@@ -54,9 +54,9 @@
 | 10 | 根探测 | `--config-dir` → `$OPENHERON_CONFIG_DIR` → `<projectRoot>/.openheron` | ★ **不做上溯搜索** —— 取决于工作目录的根会让同一条命令读到另一份配置（`agentkit/spec/config.go:242-254`） |
 | 11 | 多模型 | 一个 provider 文件持 `models[]`，引用 `<provider>/<model>` | 「入口 agent 强模型 + 下属弱模型」是最常见诉求；且与 `agents/*.md` 的 `model:` 引用形式一致（`agentkit/spec/load.go:55-68`、`agentkit/spec/load.go:499-508`） |
 | 12 | 模型构造 | **每个 agent 一个实例**（粒度 = provider × model × reasoning 档位 × 端点字段形状 × timeout） | ★ **实施时更正**：原写「一个 provider 一个实例」，理由是「连接池天然共享」。后半句不成立 —— `FromConfig` 每次新建 `http.Client`（`agentkit/build/provider.go:40`、`agentkit/build/provider.go:47`），而 agent 各自声明模型与思考档位，本就是彼此独立的（`agentkit/build/provider.go:81-95`） |
-| 13 | 时长分两档 | `llm/*.yaml` 里的 `timeout` 严格报错；`debounce` / `start_timeout` / `tools/` 下的时长降级并记 `deferred` | 前者写错会让超时行为不可预测；后者只影响「等多久」，不该让程序起不来。**降级必须出声**（`agentkit/spec/decl/decl.go:633`、`agentkit/spec/decl/decl.go:537-546`、`agentkit/spec/reload.go:80-84`） |
+| 13 | 时长分两档 | `llm/*.yaml` 里的 `timeout` 严格报错；`debounce` / `start_timeout` / `tools/` 下的时长降级并记 `deferred` | 前者写错会让超时行为不可预测；后者只影响「等多久」，不该让程序起不来。**降级必须出声**（`agentkit/spec/decl/decl.go:642`、`agentkit/spec/decl/decl.go:537-546`、`agentkit/spec/reload.go:80-84`） |
 | 14 | 子 agent 规格 | 放 `decl.SubAgentSpec`，装配层直接用 | `agentkit/build → agentkit/spec` 本就是允许的单向依赖；另立一份会「编译不报错、运行期少个值」（`agentkit/spec/decl/decl.go:641-659`、`agentkit/spec/subagent.go:18-28`、`agentkit/build/spec.go:23`） |
-| 15 | MCP 工具命名 | 暴露给模型的名字一律加命名空间 `mcp__<server>__<tool>` | **已实施**（见 §6.7）。MCP 工具名**由远端服务器定**：会撞保留工具名（`ls` / `execute`），也常带点号（`github.create_issue`）—— 后者过不了 provider 的 function name 字符集。命名空间把「撞名」变成「不可能」。前缀与分隔符是常量（`agentkit/spec/decl/decl.go:482`、`:470`），暴露名只在一处合成（`agentkit/build/mcptools.go:141`），provider 注册在工具注册表里（`agentkit/build/tools.go:42`、`:52`） |
+| 15 | MCP 工具命名 | 暴露给模型的名字一律加命名空间 `mcp__<server>__<tool>` | **已实施**（见 §6.7）。MCP 工具名**由远端服务器定**：会撞保留工具名（`ls` / `execute`），也常带点号（`github.create_issue`）—— 后者过不了 provider 的 function name 字符集。命名空间把「撞名」变成「不可能」。前缀与分隔符是常量（`agentkit/spec/decl/decl.go:491`、`:470`），暴露名只在一处合成（`agentkit/build/mcptools.go:141`），provider 注册在工具注册表里（`agentkit/build/tools.go:42`、`:52`） |
 | 16 | 前缀匹配 | 某个 agent 的 `tools` 接受精确名 **+** 尾部 `*` 的前缀模式 | **已实施**（见 §6.3）：`newTable` 留着前缀模式（`agentkit/build/policy.go:115`），`Table.Blocked` 匹配它们（`agentkit/build/policy.go:163`）。★ **全局 deny** 跟着分区一起没了，所以已经没有第二层可供匹配 —— 前缀语法是它**唯一**的所在。★ 这份清单是**允许清单**，所以一个模式点名的是这个 agent **拿到**什么，而不是拿不到什么。★ 而它现在只管**非 MCP 工具** —— `mcp__*` 条目会被丢弃并报一条提示（§6.2） |
 | 17 | 档位写在哪 | **跟着工具走**：每个文件的 `allows:` 点名**不用点头**的那些，其余一律要点头；★ 已经**不再有任何全局清单** —— `policy/permissions.yaml` 没了 | **已实施**（见 §6.3、§6.6）：server 自己的文件用 server 自己的词汇点名它的例外，`tools/` 下的文件点名自己的例外，而那张表是从配置装配出来的。★ 档位是关于**某一个工具**的一句话，所以就该待在那个工具的文件里 —— 而且在那里用的是**同一套词汇**（`http.yaml` 说 `post`，所以它能说 `allows: [post]`；中心那份文件却不得不点名内部名字 `request_post`）。★ 全局清单跟着一起走了：「不被暴露」已经说了两遍（文件的 `allows:`、agent 的 `tools:`），第三处就多一处要同步的地方 —— 而它是唯一必须说暴露名的那处 |
 | 18 | 缺省档位 | **到处都是 `ask`** —— 代码带一份**缺省** allow 清单，而文件的 `allows:` 对它覆盖的那些工具**加进**去 | ★ **已实施**（见 §6.3）：缺省是 `ask`（`agentkit/build/policy.go:55` `TierOf`），代码那份清单是**地板**（`agentkit/build/tools.go:79` `builtinAllowedTools`），文件只能往上加；那张表是从配置装配出来的，所以档位在 server 还没起来之前就能回答（`agentkit/build/mcptools.go:173` `mcpAllowedNames`）。★ 全体同一条规则：文件系统工具、HTTP 工具与一个 MCP server 行为一致，也没有需要记的分组缺省。★ 代码那份清单之所以存在，是因为 `task` —— 委派工具 —— **没有自己的文件**，而一个不点一下就不能委派的 agent 等于不能委派。MCP server 的工具是**运行期才发现**的：openheron 不知道 `delete_repo` 做什么，而 stdio 之下 server 是带着 agent 自己权限的子进程 ⇒ 默认点头是这场交易里安全的那一侧 |
@@ -1058,7 +1058,7 @@ func expandValue(v string) (value string, resolved bool, err error) {
 ★ **但不是每个时长都严格。** `server/config.yaml` 与 `tools/` 下的文件用的是宽松变体
 （`agentkit/spec/decl/decl.go:537-550`）：解析不过的值会被记下来并换成默认值，而不是让整次
 加载失败。宽松变体覆盖 `watch.debounce`、`start_timeout`、`lease_ttl` 以及 `tools/` 下的
-超时（`agentkit/spec/decl/decl.go:555`，`:275`，`:282`，`:306`，`:312`，`:319`）。
+超时（`agentkit/spec/decl/decl.go:564`，`:275`，`:282`，`:306`，`:312`，`:319`）。
 
 ★ **而宽松回退的值到处都一样：`200ms`** —— 也就是 debounce 的默认值
 （`agentkit/spec/decl/decl.go:13`，`:325-334`）。所以 `start_timeout: 60`（裸数字）既不会变成
@@ -1178,7 +1178,7 @@ server ⇒ 加载失败，报错信息会列出**确实**声明过的那些 serv
 ★ **被启动的那份清单是并集。** 工具集对整次装配只有一份，所以管理器启动的是**某个**
 agent 列出的那些 server（`agentkit/spec/load.go:884` `MCPServersInUse`）；只有子 agent
 列出的 server 也会被启动 —— 那个子 agent 可能正是跑起来的那一个。★ 子 agent 带着**自己**
-的清单（`agentkit/spec/decl/decl.go:847` `SubAgentSpec.MCPServers`），而**它**的清单收窄的
+的清单（`agentkit/spec/decl/decl.go:856` `SubAgentSpec.MCPServers`），而**它**的清单收窄的
 是**它自己**那张表，不是它父 agent 的。
 
 ★ **`description` 为什么重要**：它被渲染进 `task` 工具描述
@@ -1318,19 +1318,19 @@ server 压根儿没有工具可挡。
 
 ★ **它住在哪儿。** 加载器拒绝那些不是模式的写法
 （`agentkit/spec/load.go:130` `validateAgentTools`，语法本身在
-`agentkit/spec/decl/decl.go:554` `ParseToolNamePattern`）；那张表把前缀模式与精确名放
+`agentkit/spec/decl/decl.go:563` `ParseToolNamePattern`）；那张表把前缀模式与精确名放
 在一起留着（`agentkit/build/policy.go:115` `newTable`），而 `Table.Blocked` 匹配它们
 （`agentkit/build/policy.go:163`）。★ 而 `newTable` 会把 `mcp__*` 条目**整个丢掉** ——
 它们不再授予任何东西。
 
 ★ **前缀模式之所以安全，是因为 server 名里不许出现连续的下划线**
-（`agentkit/spec/decl/decl.go:499` `MCPServerNamePattern`）：`mcp__github__` 够不到
+（`agentkit/spec/decl/decl.go:508` `MCPServerNamePattern`）：`mcp__github__` 够不到
 `mcp__github_x__`，因为后一个 server 名压根儿声明不出来。★ 拼出来的名字从不被拆回去 ——
 模式是前缀，不是名字。
 
 ★ **MCP 的命名空间与「挂载即授予」是一件事（2026-11-10 改）。** `mcps:` 说哪些 server 被
 **挂载**（作为子进程启动），而挂载一个 server 就把它的**全部工具**交给这个 agent ——
-不需要再在 `tools:` 里点名一遍。★ **命名空间不可协商**（`agentkit/spec/decl/decl.go:482`
+不需要再在 `tools:` 里点名一遍。★ **命名空间不可协商**（`agentkit/spec/decl/decl.go:491`
 `MCPToolPrefix`、`:470` `MCPSeparator`）：外部工具一律带 `mcp__<server>__<tool>`，而
 `MCPServerOf`（`:498`）能从暴露名里把 server 读回来。
 
@@ -1518,7 +1518,7 @@ skills are not enabled
 |---|---|
 | 只有这一个分区允许两层 | `agentkit/spec/write.go:136` `shapeHint`；拒绝在 `ValidateReadPath` 里 |
 | 里面的文件名固定 `SKILL.md` | `agentkit/spec/config.go:33` `SkillFileName` |
-| 文件夹名要能被读回来：`^[a-z0-9]+([_-][a-z0-9]+)*$` | `agentkit/spec/decl/decl.go:538` `SkillNamePattern` |
+| 文件夹名要能被读回来：`^[a-z0-9]+([_-][a-z0-9]+)*$` | `agentkit/spec/decl/decl.go:547` `SkillNamePattern` |
 | 只列**有 `SKILL.md`** 的文件夹 | `agentkit/spec/write.go:258` `listNested` |
 | 新建时文件夹跟着建、删除时空文件夹一起删 | `agentkit/spec/write.go:280` 与 `Delete` 里那一支 |
 | 热更新：改一个 `SKILL.md`，下一轮生效 | `Category{hot: true}`（`agentkit/spec/config.go:100`）；指纹的遍历是**递归**的，两层下的文件也算 |
@@ -1675,11 +1675,16 @@ skills are not enabled
 #### ★ `proxy:` —— 工具出网走不走代理（✅ 已实施）
 
 `tools/http.yaml`（`agentkit/spec/decl/decl.go:427`）与 `tools/web_search.yaml`
-（`agentkit/spec/decl/decl.go:450`）各有一个可选的 `proxy:` 键。**空值就是不走代理**，
-而且**不从环境变量里读** —— 代理要么被点名，要么就没有。
+（`agentkit/spec/decl/decl.go:458`）各有一个可选的 `proxy:` 键。**三种写法**：
+
+| 写法 | 含义 |
+|---|---|
+| `""`（缺省） | **不走代理**：工具自己连目标，并拒绝解析不到公网地址的目标 |
+| 一个 URL | 走这个代理，**环境变量被忽略** |
+| `env` | 路线交给环境：`HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` |
 
 ★ **代理是挪边界，不是加边界。** 不配代理时，工具自己连目标，并拒绝解析不到公网地址的
-目标（`agentkit/build/nettools.go:82` `dialPublicOnly`，判定在 `agentkit/build/nettools.go:112` `isPublicIP`）——
+目标（`agentkit/build/nettools.go:37` `dialPublicOnly`，判定在 `agentkit/build/nettools.go:67` `isPublicIP`）——
 那是防「模型被拿来探这台机器的内网」的那道关。配了代理，那道关就**换成**代理：
 
 | | 目标地址的检查 | 连接由谁发起 |
@@ -1693,14 +1698,27 @@ skills are not enabled
 指出来的那一个，不是我们该去管的。
 
 ★ **所以代理地址自己不查公网。** 本地代理按定义就是 `127.0.0.1`，`isPublicIP` 会判它不是
-公网 —— 于是配了代理之后拨号走的是普通拨号（`agentkit/build/nettools.go:52`
-`newPublicOnlyClient`），
-而**目标**那一侧不再由我们判断。
+公网 —— 于是配了代理之后拨号走的是普通拨号（`agentkit/build/proxy.go:45`
+`newNetworkClient`），而**目标**那一侧不再由我们判断。
 
 ★ **协议是 transport 会说的那几种**：`http` `https` `socks5` `socks5h`
-（`agentkit/spec/proxy.go:26` `ParseProxy`）。socks5 不需要另装一个代理程序 —— Go 的
+（`agentkit/spec/proxy.go:48` `ParseProxy`）。socks5 不需要另装一个代理程序 —— Go 的
 transport 自带 SOCKS5 拨号器。★ **写错是启动报错**，不是提示：请求根本出不了机器的用户，
 得先把文件改对。
+
+★ **`env` 是写出来的那一档，不是缺省。** 缺省不能是「环境里有什么算什么」：那会让**恰好**
+导出了代理的机器上每一个工具都改道，而为此买单的是这台机器的主人 —— 环境是共享的东西，
+它没有说这个工具该怎么走。要用环境，就写 `proxy: env`。
+
+★ **`env` 的路线逐请求决定，而环境只读一次。** `HTTP_PROXY` 与 `HTTPS_PROXY` 各管一段，
+`NO_PROXY` 把主机拿回来 —— 所以客户端拿着**两个** transport，按请求挑一个
+（`agentkit/build/proxy.go:92` `newEnvProxyClient`，挑路的是 `agentkit/build/proxy.go:129`
+`envProxyRouter`）。★ **为什么要在 transport 之前挑**：transport 只把地址交给拨号器，
+不说那是代理还是目标 —— 挑晚了就分不清，代理地址会被当成目标去判公网。★ **环境在装配
+工具时读一次**（`httpproxy.FromEnvironment()`），之后环境变了，跑着的工具也不改路线；
+`NO_PROXY` 的规则仍然逐请求生效，因为它说的是目标，不是时刻。★ **`NO_PROXY` 拿回来的
+主机走直连**，而直连是工具自己发起的 —— 那道公网地址的检查**照旧**（回环地址也一样：
+环境的规则本来就不代理它）。
 
 ★ **模型 API 调用是另一个客户端**：它读环境变量里的 `HTTP_PROXY` / `HTTPS_PROXY`
 （`agentkit/obs/httplog/logging.go:74` 回退到 `http.DefaultTransport`，而后者带
@@ -1913,7 +1931,7 @@ set`（`agentkit/spec/load.go:906`）。
 
 文件不在时，每个 provider 都不挂任何工具（`agentkit/build/nettools.go:129-131`、
 `agentkit/build/nettools.go:197-199`、`agentkit/build/nettools.go:243-245`），上限是
-`defaultToolOutputBytes`（`agentkit/build/nettools.go:27`）。
+`defaultToolOutputBytes`（`agentkit/build/nettools.go:25`）。
 
 「只连公网」是在**拨号那一刻**解析并判的，且连到**刚判过的那个 IP** ——
 （`agentkit/build/nettools.go:48-76`）—— DNS 可以在两次解析之间换答案（rebinding），只在解析时判
@@ -1922,7 +1940,7 @@ set`（`agentkit/spec/load.go:906`）。
 ★ **维基那个工具是唯一不在拨号器后面的。** 只连公网的客户端守住的是模型能指到哪儿的两个工具：HTTP
 工具与网页搜索。维基工具的端点来自 `wikipedia.yaml` 的 `base_url`，而 eino-ext 的维基工具自己建
 HTTP 客户端 —— 没有可以注入的钩子（`agentkit/build/nettools.go:259-266`）。输出上限照样罩着它
-（`agentkit/build/nettools.go:310`）。
+（`agentkit/build/nettools.go:265`）。
 
 ★ **MCP 是这一族的第四类，而它更危险**：上面那张表限制的是「**工具**能碰到什么」，而 stdio 的 MCP
 server 是 openheron 的**子进程** —— 它能写文件、能联网，「只连公网」那套限制在它身上不成立。
@@ -2000,7 +2018,7 @@ MCP 服务器的配置。**一个 server 一个文件**：
 
 ★ ★ **类型是 `MCPDuration`，不是那个包级的宽松时长清单。** 别的键用的那份宽松时长清单
 不带来源信息，所以一个坏值说不出是哪个文件、哪个键写错了
-（`agentkit/spec/decl/decl.go:470`）。这是相对原设计的一次刻意偏离，也正是两个 MCP
+（`agentkit/spec/decl/decl.go:479`）。这是相对原设计的一次刻意偏离，也正是两个 MCP
 超时有自己类型的原因。
 
 ★ `tools: []` 是**全部**而不是**一个都没有** —— 一个表示「什么也没有」的空白名单
@@ -2061,7 +2079,7 @@ mcp__<server>__<tool>
   （`agentkit/build/mcptools.go:141` `mcpExposedName`）。
 
 ★ **合成名超过 64 个字符会被跳过并给出警告**，一个 server 里两个清洗后同名的工具，
-  后一个也一样（`agentkit/spec/decl/decl.go:594`、`agentkit/build/mcptools.go:27-28`）。
+  后一个也一样（`agentkit/spec/decl/decl.go:603`、`agentkit/build/mcptools.go:27-28`）。
 ★ **绝不**是加载期失败：名字是远端服务器定的，而一个多出一个怪工具的 server
   该付出的代价是那个工具，不是整个 agent。
 
@@ -2275,7 +2293,7 @@ stdio 子进程被拆掉、新的被拉起来，而工具清单变了就通过�
 （`agentkit/spec/reload.go:146-149`）。
 
 ★ 防抖**只读一次**，读在 watcher 启动的时候（`agentkit/spec/reload.go:142-145`），
-而 `watch` 住在 `server/` 下面（`agentkit/spec/decl/decl.go:553`）—— 那不是热分区。
+而 `watch` 住在 `server/` 下面（`agentkit/spec/decl/decl.go:562`）—— 那不是热分区。
 所以改 `watch.debounce` 要重启；它不在热更新顺手带上的那批里。
 
 ### 8.3 首次加载与重载：两个入口
@@ -2479,7 +2497,7 @@ agentkit/spec/write.go:persist.AtomicWrite
 
 ★ **第 10、11 两行已实施。** 命名空间只在一处合成
 （`agentkit/build/mcptools.go:141`），前缀语法由 `decl.ParseToolNamePattern`
-（`agentkit/spec/decl/decl.go:557`）解析、被加载器拒绝
+（`agentkit/spec/decl/decl.go:566`）解析、被加载器拒绝
 （`agentkit/spec/load.go:130` `validateAgentTools`），那张表留着这些模式
 （`agentkit/build/policy.go:115` `newTable`）并匹配它们
 （`agentkit/build/policy.go:163` `Table.Blocked`）。
@@ -2512,7 +2530,7 @@ agentkit/spec/write.go:persist.AtomicWrite
 | 8 | `ParseRef`（`agentkit/spec/load.go:508`）与 `validate`（`agentkit/spec/load.go:567`） |
 | 9 | `model.WithModel` 是一个请求级选项（`llm/common/request.go:32`）；实例缓存以 agent 名 + 代际为键（`agentkit/build/pool.go:31`） |
 | 10 | 命名空间只在一处合成（`agentkit/build/mcptools.go:141` `mcpExposedName`），前缀与分隔符是常量（`agentkit/spec/decl/decl.go:400`、`:382`） |
-| 11 | `decl.ParseToolNamePattern`（`agentkit/spec/decl/decl.go:557`）+ 加载器的拒绝（`agentkit/spec/load.go:130` `validateAgentTools`）+ 留着并匹配那些模式的那张表（`agentkit/build/policy.go:115` `newTable`、`:130` `Table.Blocked`） |
+| 11 | `decl.ParseToolNamePattern`（`agentkit/spec/decl/decl.go:566`）+ 加载器的拒绝（`agentkit/spec/load.go:130` `validateAgentTools`）+ 留着并匹配那些模式的那张表（`agentkit/build/policy.go:115` `newTable`、`:130` `Table.Blocked`） |
 | 12 | MCP 那一半：`mcpAllowedNames`（`agentkit/build/mcptools.go:173`）；`tools/` 那一半：`AllowedTools`（`agentkit/spec/load.go:308`）；没有文件的工具：`builtinAllowedTools`（`agentkit/build/tools.go:62`）—— 以及缺省（`agentkit/build/policy.go:55` `TierOf`） |
 | 14 | 三份清单都是裸切片，所以「键缺失」与「空清单」是同一件事（`agentkit/spec/decl/decl.go:103`、`:125`、`:135`）；旧键被拒绝（`agentkit/spec/load.go:95`）；清单是允许清单（`agentkit/build/policy.go:85` `Table.Load`），而 `Filter` 没有「无事可做」的捷径（`agentkit/build/policy.go:145`） |
 
@@ -2883,7 +2901,7 @@ retry:
 | `context_window` 在自省响应里可见 | `api/v2_introspect.go:265` |
 | `spec` → `run` 的破例在这里从未存在 | `git grep -n "agentkit/run" fa7131a -- agentkit/spec` → 一条注释，别无其它 |
 | MCP 命名空间只在一处合成 | `mcpExposedName`（`agentkit/build/mcptools.go:140`）+ 前缀与分隔符常量（`agentkit/spec/decl/decl.go:363`、`:345`） |
-| 某个 agent 的 `tools` 前缀模式 | `decl.ParseToolNamePattern`（`agentkit/spec/decl/decl.go:557`）+ 加载器的拒绝（`agentkit/spec/load.go:130` `validateAgentTools`）+ 留着并匹配那些模式的那张表（`agentkit/build/policy.go:115` `newTable`、`:130` `Table.Blocked`） |
+| 某个 agent 的 `tools` 前缀模式 | `decl.ParseToolNamePattern`（`agentkit/spec/decl/decl.go:566`）+ 加载器的拒绝（`agentkit/spec/load.go:130` `validateAgentTools`）+ 留着并匹配那些模式的那张表（`agentkit/build/policy.go:115` `newTable`、`:130` `Table.Blocked`） |
 | 旧的 `disabled_tools` 键被拒绝 | 加载器的拒绝（`agentkit/spec/load.go:95`）—— 这个字段存在，只是为了能抓住那个还在写它的文件（`agentkit/spec/decl/decl.go:112`） |
 | agent 的三份清单缺省都是「没有」 | `decl.Agent.Tools` / `.Skills` / `.MCPServers` 都是裸切片（`agentkit/spec/decl/decl.go:103`、`:125`、`:135`）—— 「没声明」与「声明为空」现在是同一件事 |
 | 不等 server 起来就能回答 MCP 档位 | `mcpAllowedNames`（`agentkit/build/mcptools.go:172`）+ 缺省档位（`agentkit/build/policy.go:55` `TierOf`）+ 用例 `TestTheTierIsAnswerableWhileTheServerIsUnreachable` |
@@ -2900,15 +2918,15 @@ retry:
 | 配置根三级解析（显式 → env → 项目根自己的目录） | ✅ | `agentkit/spec/config.go:213` |
 | **不上溯** | ✅ | `NewService` 的注释（`agentkit/spec/config.go:250`）；`TestTheConfigRootIsNeverSearchedForUpwards` |
 | `${ENV}` 缺则提醒（不阻塞）+ `@file:` | ✅ | `agentkit/spec/expand.go:10` `expandValue`，`agentkit/spec/load.go:42` |
-| `Duration` 强制带单位 | ✅ | `agentkit/spec/decl/decl.go:633` |
-| `LenientDuration` 降级并记 `deferred` | ✅ | `agentkit/spec/decl/decl.go:558`，`agentkit/spec/reload.go:80` |
+| `Duration` 强制带单位 | ✅ | `agentkit/spec/decl/decl.go:642` |
+| `LenientDuration` 降级并记 `deferred` | ✅ | `agentkit/spec/decl/decl.go:567`，`agentkit/spec/reload.go:80` |
 | frontmatter 切分 | ✅ | `agentkit/spec/expand.go:56` `splitFrontmatter` |
 | 模型引用校验（不静默退化） | ✅ | `agentkit/spec/load.go:535` `ParseRef`，`agentkit/spec/load.go:615` `validate` |
 | `subagents` 图校验（缺引用 + 成环） | ✅ | `agentkit/spec/load.go:1042` `validateAgentGraph`，`agentkit/spec/load.go:1059` `detectCycle` |
 | 缺省档是 `ask`，而文件的 `allows:` 是例外 | ✅ | `Policy.TierOf`（`agentkit/build/policy.go:55`）；例外来自 `builtinAllowedTools`（`agentkit/build/tools.go:61`）、`Config.AllowedTools`（`agentkit/spec/load.go:308`）与 `mcpAllowedNames`（`agentkit/build/mcptools.go:172`），由 `policyOf`（`agentkit/build/spec.go:64`）装配 |
 | `envOr` → `cfg.*` | ✅ | `main.go:733` `override`（用在 `main.go:429`） |
 | `.openheron/state/` 取代 `./data` | ✅ | `config.Service.DataDir("")`（`agentkit/spec/config.go:314`） |
-| `MaxRetries` 配置化 | ✅ | `decl.RetryCfg.MaxRetries`（`agentkit/spec/decl/decl.go:583`）→ `Config.MaxRetries()`（`agentkit/spec/load.go:989`） |
+| `MaxRetries` 配置化 | ✅ | `decl.RetryCfg.MaxRetries`（`agentkit/spec/decl/decl.go:592`）→ `Config.MaxRetries()`（`agentkit/spec/load.go:989`） |
 | skills 自动探测 `.openheron/skills` | ✅ | `agentkit/build/skill.go:190` `ResolveSkillsDir` / `:208` `probeProjectSkills` |
 | 写入门拒绝字面量密钥 | ✅ | `agentkit/spec/write.go:855` `checkSecret` |
 | ~~`chatmodel.New` 直读 env~~ | ✅ 已删 | 包已移除，改 `llm/common` |
@@ -2948,5 +2966,5 @@ retry:
 | `models[].context_window` 是纯元数据，不生效 | 它**生效**：它是压缩阈值的分母（`agentkit/spec/summarize.go:25`） | openheron 实施了压缩与上下文用量看板 —— 见 [context-usage-design.md](context-usage-design.md) |
 | agent 写了模型没有声明的思考档位会进 `deferred` | 不会 —— 它被静默忽略 | 词汇表在 `llm/`，档位名在 `agents/`，两个文件从不互相核对 |
 | `go test -race ./...` 全仓是绿的 | 它**曾经不是**：竞态检测器在 `agentkit/run`、`api`、`kb`、`agentkit/spec` 报了竞态 | `spec` 里那处在测试自己身上；四处现在都修好了，§11.5 逐条记着各自是什么 |
-| `tools/` 里的坏超时会被报成 `watch.debounce` | 这个标签是错的：`collectBadDurations` 给**每一条**坏时长都加上前缀 "watch.debounce fell back to default"，于是 `tools/http.yaml` 里的坏 `timeout` 落到了同一个标签下 | `decl.BadDurations()` 是一个不带来源信息的包级列表（`agentkit/spec/decl/decl.go:549`） |
+| `tools/` 里的坏超时会被报成 `watch.debounce` | 这个标签是错的：`collectBadDurations` 给**每一条**坏时长都加上前缀 "watch.debounce fell back to default"，于是 `tools/http.yaml` 里的坏 `timeout` 落到了同一个标签下 | `decl.BadDurations()` 是一个不带来源信息的包级列表（`agentkit/spec/decl/decl.go:752`） |
 

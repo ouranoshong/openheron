@@ -444,6 +444,14 @@ type HTTPToolsCfg struct {
 	//	for — so with a proxy configured the target may be any address
 	//	the proxy can reach. The proxy is named in the configuration, so
 	//	it is the user's own boundary and not ours to police.
+	//
+	// ★ It has three settings: "" (no proxy), a URL (that proxy, and the
+	//
+	//	environment is ignored), and "env" (the environment decides —
+	//	HTTP_PROXY / HTTPS_PROXY / NO_PROXY). The default cannot mean
+	//	"whatever the environment says": a client that picks the proxy
+	//	up on its own changes its route without anybody asking, and the
+	//	one who pays for that is the person whose machine it is.
 	Proxy string `yaml:"proxy"`
 }
 
@@ -457,7 +465,8 @@ type WebSearchCfg struct {
 	// Proxy is the proxy the search goes through. ★ It follows the HTTP
 	//
 	//	tool's rule: empty is no proxy, and a proxy replaces the
-	//	public-address rule rather than adding to it.
+	//	public-address rule rather than adding to it. ★ The three
+	//	settings are the same: "", a URL, or "env".
 	Proxy string `yaml:"proxy"`
 }
 

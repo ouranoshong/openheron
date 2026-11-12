@@ -1348,7 +1348,8 @@ OPENHERON_TEST_PROXY=http://127.0.0.1:7890 go test ./agentkit/build -run TheProx
 It fetches one target twice — once through the proxy, once directly — and **two different
 egress addresses** are the proof that the request really went through the proxy. It also
 checks the rule the setting exists for: a private target is refused without a proxy and
-handed to the proxy with one.
+handed to the proxy with one. And it fetches the target once more through `proxy: env` — the
+environment's proxy, asked for by name — which has to reach the same proxy.
 
 ### 5.3 Go unit tests
 

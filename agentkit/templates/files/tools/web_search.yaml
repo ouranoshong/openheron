@@ -15,6 +15,9 @@ allows: [duckduckgo_search]
 # ★ proxy: the proxy the search goes through. Empty is **no proxy** — the tool
 #   dials the target itself and refuses a target that is not a public address.
 #   A proxy **replaces** that rule instead of adding to it: the proxy is then
-#   the boundary, and the target may be any address it can reach. Schemes:
-#   http, https, socks5, socks5h. A wrong one is a load-time error.
+#   the boundary, and the target may be any address it can reach. Three
+#   settings: "" (no proxy), a URL (that proxy; the environment is ignored),
+#   and "env" (the environment decides — HTTP_PROXY / HTTPS_PROXY / NO_PROXY,
+#   read once when the tool is built). Schemes: http, https, socks5, socks5h.
+#   A wrong one is a load-time error.
 proxy: ""
