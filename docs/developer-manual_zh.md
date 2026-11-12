@@ -1157,7 +1157,7 @@ OPENHERON_TEST_PROXY=http://127.0.0.1:7890 go test ./agentkit/build -run TheProx
 
 ### 5.3 Go 单元测试
 
-`go test ./...` 覆盖 20 个包。契约主要由这几处锁定：
+`go test ./...` 覆盖 25 个包。契约主要由这几处锁定：
 
 | 包 | 锁住的契约 |
 |---|---|
@@ -1171,6 +1171,7 @@ OPENHERON_TEST_PROXY=http://127.0.0.1:7890 go test ./agentkit/build -run TheProx
 | `initcfg` | 出厂模板的完整性 |
 | `agentkit/fsx` | 写边界（含符号链接逃逸）、`ls`/`glob`/`grep` 的上限、绝对 glob pattern，以及替 `ripgrep` 兜底的内置搜索引擎 |
 | `agentkit/shell` | `execute` 工具用哪个 shell 跑命令，以及工具描述告诉模型的那套方言 |
+| `agentkit/imaging` | 附件的图片那条路：哪些要缩放、哪些保住格式，以及把手机照片摆正的 EXIF 方向 |
 
 ★ **竞态检测器也要跑**：`task test-race`（`go test -race ./...`）。普通套件是绿的而
   检测器是红的，这种事比人们以为的更常见 —— 竞态要两个 goroutine 碰面才成立，而

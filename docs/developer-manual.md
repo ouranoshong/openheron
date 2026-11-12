@@ -1353,7 +1353,7 @@ environment's proxy, asked for by name — which has to reach the same proxy.
 
 ### 5.3 Go unit tests
 
-`go test ./...` covers 20 packages. The contracts are pinned mainly here:
+`go test ./...` covers 25 packages. The contracts are pinned mainly here:
 
 | Package | Contract it pins |
 |---|---|
@@ -1367,6 +1367,7 @@ environment's proxy, asked for by name — which has to reach the same proxy.
 | `initcfg` | The completeness of the factory templates |
 | `agentkit/fsx` | The write boundary (including symlink escapes), the `ls`/`glob`/`grep` caps, absolute glob patterns, and the built-in search engine that stands in for `ripgrep` |
 | `agentkit/shell` | Which shell the `execute` tool runs commands with, and the dialect the tool's description tells the model |
+| `agentkit/imaging` | The attachment's picture path: what is resized, what keeps its format, and the EXIF orientation that turns a phone photo upright |
 
 ★ **Run the race detector too**: `task test-race` (`go test -race ./...`). The plain
   suite is green while the detector is red more often than one would like — a race
