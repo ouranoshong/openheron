@@ -168,7 +168,14 @@ func (b *Builder) currentSnapshot() *snapshot {
 }
 
 func (b *Builder) Stats() (hits, misses uint64, size int, gen uint64) {
-	return b.pool.Stats()
+	hits, misses, size = b.pool.Stats()
+	// ★ The generation is the **configuration's** counter now, not the
+	//   pool's: the pool's key is a fingerprint, and what the pool holds
+	//   are entries.
+	if b.mgr != nil {
+		_, gen = b.mgr.Current()
+	}
+	return hits, misses, size, gen
 }
 
 // Build returns the agent for this turn.
@@ -188,6 +195,11 @@ func (b *Builder) Build(ctx context.Context, _ string, agentID string,
 		b.bump()
 		cfg, gen = b.mgr.Current()
 	}
+
+	// ★ A change the write path made is read **before** the tree is built,
+	//   not after the watcher's next poll: "the next turn uses it" has to
+	//   be a promise, and a poll is a guess.
+	cfg, gen = b.reloadIfMarked(cfg, gen)
 
 	snap, err := b.snapshotFor(cfg, gen)
 	if err != nil {
@@ -251,11 +263,45 @@ func (b *Builder) pooledRoot(ctx context.Context, snap *snapshot, name string) (
 	if table == nil {
 		return nil, fmt.Errorf("agent: %q has no tool table", name)
 	}
-	return b.pool.GetOrBuild(ctx, name, snap.gen,
+	return b.pool.GetOrBuild(ctx, name, snap.fingerprintOf(name),
 		func(ctx context.Context) (adk.TypedAgent[*schema.Message],
 			model.BaseModel[*schema.Message], error) {
 			return b.assemble(ctx, snap, &sp, table)
 		})
+}
+
+// reloadIfMarked reads the configuration again when the write path marked a
+// change.
+//
+// ★ The mark is what makes "the next turn uses it" a **promise**: the
+//
+//	watcher's poll would notice the same change a moment later, and a turn
+//	that starts in between would run the old tree.
+//
+// ★ The marks are drained **before** the read, not after: a write that
+//
+//	lands between the two is in the configuration the read returns, so
+//	losing its mark loses nothing.
+func (b *Builder) reloadIfMarked(cfg *spec.Config, gen uint64) (*spec.Config, uint64) {
+	if b.svc == nil {
+		return cfg, gen
+	}
+	marks := b.svc.DrainMarks()
+	if len(marks) == 0 {
+		return cfg, gen
+	}
+	fresh, err := b.svc.Load()
+	if err != nil {
+		// ★ The configuration on disk does not load. The previous one stays
+		//   in force and the turn says so — the watcher will say it too,
+		//   but the watcher speaks to the log and the turn speaks to the
+		//   user.
+		b.logger().Error("[config] the configuration on disk does not load, keeping the previous one",
+			"err", err, "marked", strings.Join(marks, ","))
+		return cfg, gen
+	}
+	b.mgr.Publish(fresh)
+	return b.mgr.Current()
 }
 
 var errAgentNotDeclared = errors.New("agent is not declared")

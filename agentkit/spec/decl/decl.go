@@ -336,6 +336,23 @@ const (
 	ToolNameWikipedia  = "wikipedia_search"
 )
 
+// The filesystem middleware's own tools.
+//
+// ★ They are named here, and not only in the list below, because the table
+//
+//	that says which `tools/` file configures them needs the same names: two
+//	copies of a name are two answers to "which file carries this tool", and
+//	the second one to drift is the one nobody reads.
+const (
+	ToolNameLs        = "ls"
+	ToolNameReadFile  = "read_file"
+	ToolNameWriteFile = "write_file"
+	ToolNameEditFile  = "edit_file"
+	ToolNameGlob      = "glob"
+	ToolNameGrep      = "grep"
+	ToolNameExecute   = "execute"
+)
+
 // BuiltinToolNames are the tools openheron's own middleware provides.
 //
 // ★ They live here, not in the build package, because **both** halves need
@@ -347,7 +364,8 @@ const (
 //
 //	built-in tool, and the model would see two tools with one name.
 var BuiltinToolNames = []string{
-	"ls", "read_file", "write_file", "edit_file", "glob", "grep", "execute",
+	ToolNameLs, ToolNameReadFile, ToolNameWriteFile, ToolNameEditFile,
+	ToolNameGlob, ToolNameGrep, ToolNameExecute,
 	"task", "write_todos",
 	"skill",
 }

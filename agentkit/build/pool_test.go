@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"fmt"
 	"github.com/ouranoshong/openheron/contract"
 	"sync"
 	"testing"
@@ -59,11 +60,11 @@ func (c *countingBuild) build(id string) buildFn { return c.fn(id) }
 func TestPoolReusesInstanceForSameKey(t *testing.T) {
 	p, c := newTestPool(t)
 
-	e1, err := p.GetOrBuild(context.Background(), "main", 1, c.build("main"))
+	e1, err := p.GetOrBuild(context.Background(), "main", "fp1", c.build("main"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	e2, err := p.GetOrBuild(context.Background(), "main", 1, c.build("main"))
+	e2, err := p.GetOrBuild(context.Background(), "main", "fp1", c.build("main"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,34 +76,66 @@ func TestPoolReusesInstanceForSameKey(t *testing.T) {
 	}
 }
 
-func TestBumpInvalidatesEntries(t *testing.T) {
+// TestANewFingerprintBuildsANewInstance is the other side of the same rule.
+//
+// ★ The key is the fingerprint, so a fingerprint that moved is a different
+//
+//	agent — and the old entry stays where it is.
+func TestANewFingerprintBuildsANewInstance(t *testing.T) {
 	p, c := newTestPool(t)
 
-	e1, _ := p.GetOrBuild(context.Background(), "main", 1, c.build("main"))
-	e2, _ := p.GetOrBuild(context.Background(), "main", 2, c.build("main"))
+	e1, _ := p.GetOrBuild(context.Background(), "main", "fp1", c.build("main"))
+	e2, _ := p.GetOrBuild(context.Background(), "main", "fp2", c.build("main"))
 
 	if e1 == e2 {
-		t.Fatal("★ after the generation bump a new instance must be returned")
+		t.Fatal("★ a new fingerprint must build a new instance")
 	}
 	if c.count() != 2 {
-		t.Fatalf("after the bump it must rebuild once, cumulative %d", c.count())
+		t.Fatalf("it must rebuild once, cumulative %d", c.count())
 	}
 }
 
-func TestPoolDoesNotGrowAcrossGenerations(t *testing.T) {
+// TestTheOldEntrySurvivesANewFingerprint is what a pinned run depends on.
+//
+// ★ A run that recorded the previous tree asks for it by fingerprint, and
+//
+//	the answer has to still be there.
+func TestTheOldEntrySurvivesANewFingerprint(t *testing.T) {
 	p, c := newTestPool(t)
-	for gen := uint64(1); gen <= 5; gen++ {
-		p.GetOrBuild(context.Background(), "main", gen, c.build("main"))
+
+	e1, _ := p.GetOrBuild(context.Background(), "main", "fp1", c.build("main"))
+	p.GetOrBuild(context.Background(), "main", "fp2", c.build("main"))
+
+	got, ok := p.Lookup("main", "fp1")
+	if !ok {
+		t.Fatal("★ the old entry must survive: a run that pinned it still needs it")
+	}
+	if got != e1 {
+		t.Fatal("the pinned lookup must return the entry that tree built")
+	}
+}
+
+// TestThePoolKeepsOneEntryPerFingerprint replaces the old rule.
+//
+// ★ The pool used to hold one entry per agent and drop it when the
+//
+//	generation moved. ★ Now it holds one entry per (agent, fingerprint),
+//	and the old one stays — the decision was to keep old entries until the
+//	process exits rather than to invent a rule for reclaiming them.
+func TestThePoolKeepsOneEntryPerFingerprint(t *testing.T) {
+	p, c := newTestPool(t)
+	for _, fp := range []string{"fp1", "fp2", "fp3"} {
+		p.GetOrBuild(context.Background(), "main", fp, c.build("main"))
 	}
 
-	if _, _, size, _ := p.Stats(); size != 1 {
-		t.Fatalf("★ the pool must not grow across generations, got %d entries", size)
+	if _, _, size := p.Stats(); size != 3 {
+		t.Fatalf("★ the pool must hold one entry per fingerprint, got %d entries", size)
 	}
 }
 
 func TestUnregisteredAgentIsAnError(t *testing.T) {
 	p := newPool()
-	_, err := p.GetOrBuild(context.Background(), "ghost", 1, func(context.Context) (
+	_, err := p.GetOrBuild(context.Background(), "ghost", "fp1", func(context.Context) (
 		adk.TypedAgent[*schema.Message], model.BaseModel[*schema.Message], error) {
 		return &stubAgent{name: "ghost"}, &stubModel{}, nil
 	})
@@ -121,7 +154,7 @@ func TestPoolIsSafeUnderConcurrentUse(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			e, err := p.GetOrBuild(context.Background(), "main", 1, c.build("main"))
+			e, err := p.GetOrBuild(context.Background(), "main", "fp1", c.build("main"))
 			if err != nil {
 				t.Error(err)
 				return
@@ -138,9 +171,9 @@ func TestPoolIsSafeUnderConcurrentUse(t *testing.T) {
 	}
 }
 
-func TestPoolIsSafeAcrossBump(t *testing.T) {
+func TestPoolIsSafeAcrossFingerprints(t *testing.T) {
 	p, c := newTestPool(t)
-	p.GetOrBuild(context.Background(), "main", 1, c.build("main"))
+	p.GetOrBuild(context.Background(), "main", "fp1", c.build("main"))
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
@@ -148,7 +181,7 @@ func TestPoolIsSafeAcrossBump(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 50; i++ {
-			p.GetOrBuild(context.Background(), "main", uint64(i+2), c.build("main"))
+			p.GetOrBuild(context.Background(), "main", fmt.Sprintf("fp%d", i+2), c.build("main"))
 		}
 		close(stop)
 	}()
@@ -161,7 +194,7 @@ func TestPoolIsSafeAcrossBump(t *testing.T) {
 			case <-stop:
 				return
 			default:
-				if _, err := p.GetOrBuild(context.Background(), "main", 1, c.build("main")); err != nil {
+				if _, err := p.GetOrBuild(context.Background(), "main", "fp1", c.build("main")); err != nil {
 					t.Error(err)
 					return
 				}
@@ -173,11 +206,11 @@ func TestPoolIsSafeAcrossBump(t *testing.T) {
 
 func TestPoolStatsCountHitsAndMisses(t *testing.T) {
 	p, c := newTestPool(t)
-	p.GetOrBuild(context.Background(), "main", 1, c.build("main")) // miss
-	p.GetOrBuild(context.Background(), "main", 1, c.build("main")) // hit
-	p.GetOrBuild(context.Background(), "main", 1, c.build("main")) // hit
+	p.GetOrBuild(context.Background(), "main", "fp1", c.build("main")) // miss
+	p.GetOrBuild(context.Background(), "main", "fp1", c.build("main")) // hit
+	p.GetOrBuild(context.Background(), "main", "fp1", c.build("main")) // hit
 
-	hits, misses, _, _ := p.Stats()
+	hits, misses, _ := p.Stats()
 	if misses != 1 || hits != 2 {
 		t.Fatalf("hit counters are wrong: hits=%d misses=%d (want 2/1)", hits, misses)
 	}
@@ -203,7 +236,15 @@ func TestBuilderBuildGoesThroughPool(t *testing.T) {
 	}
 }
 
-func TestBuilderBumpSwapsInstance(t *testing.T) {
+// TestAGenerationBumpAloneDoesNotRebuildTheAgent is the new rule.
+//
+// ★ The pool's key is the fingerprint, and a generation bump does not move
+//
+//	it: the configuration stands still, so the agents stand still. ★ The
+//	one thing a bump used to buy — a rebuild when a server's tool list
+//	changes — is bought by the fingerprint instead, because the server's
+//	tool list is part of what an agent depends on.
+func TestAGenerationBumpAloneDoesNotRebuildTheAgent(t *testing.T) {
 	b := newMinimalBuilder(t)
 
 	a1, err := b.Build(context.Background(), "s1", "", contract.TurnQuery)
@@ -216,8 +257,8 @@ func TestBuilderBumpSwapsInstance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a1 == a2 {
-		t.Fatal("★ the instance must be swapped after the generation bump")
+	if a1 != a2 {
+		t.Fatal("★ a bump alone must not swap the instance: the fingerprint is what says whether the agent moved")
 	}
 }
 

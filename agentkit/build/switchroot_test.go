@@ -29,23 +29,28 @@ func TestEveryDeclaredAgentCanBeTheSessionAgent(t *testing.T) {
 	}
 }
 
-func TestPoolSeparatesGenerations(t *testing.T) {
+// TestPoolSeparatesFingerprints is the pool's new rule.
+//
+// ★ The key is the fingerprint, so two fingerprints are two agents — and
+//
+//	each one is built once.
+func TestPoolSeparatesFingerprints(t *testing.T) {
 	p := newPool()
 	c := &countingBuild{}
 
-	old, err := p.GetOrBuild(context.Background(), "task", 1, c.fn("task"))
+	old, err := p.GetOrBuild(context.Background(), "task", "fp1", c.fn("task"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cur, err := p.GetOrBuild(context.Background(), "task", 2, c.fn("task"))
+	cur, err := p.GetOrBuild(context.Background(), "task", "fp2", c.fn("task"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if old == cur {
-		t.Fatal("★ entries from different generations must not be shared")
+		t.Fatal("★ entries from different fingerprints must not be shared")
 	}
 	if c.count() != 2 {
-		t.Fatalf("each generation must build once, got %d builds", c.count())
+		t.Fatalf("each fingerprint must build once, got %d builds", c.count())
 	}
 }
 

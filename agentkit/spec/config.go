@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -259,6 +260,9 @@ func (c *Config) deferFile(path, format string, args ...any) {
 }
 
 type Service struct {
+	// mu guards the marks: the write path marks from one goroutine and
+	// the builder drains from another.
+	mu          sync.Mutex
 	root        string
 	projectRoot string
 	defaulted   bool
@@ -272,6 +276,72 @@ type Service struct {
 	//   a second copy of it in this package would be a second answer to
 	//   "which skills are loaded". Empty means "the runtime found none".
 	skillsDir string
+
+	// marked are the configuration files that changed since the last drain.
+	//
+	// ★ The mark is a **cache, not the truth**: the truth is the content
+	//   hash on disk (see reload.go). ★ It exists so that the next turn
+	//   sees a change without waiting for the watcher's next poll — the
+	//   write path knows what it wrote, and the poll only guesses.
+	//
+	// ★ It is in-process on purpose: a mark that had to survive a restart
+	//   would be a fact about the past, and the past is what the content
+	//   hash is for.
+	marked map[string]bool
+}
+
+// Mark records that a configuration file changed.
+//
+// ★ The mark says "look again", not "this is the new content": the content
+//
+//	hash is what says what the file says now.
+func (s *Service) Mark(rel string) {
+	if s == nil || rel == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.marked == nil {
+		s.marked = map[string]bool{}
+	}
+	s.marked[rel] = true
+}
+
+// Marks returns the files that changed since the last drain, sorted.
+func (s *Service) Marks() []string {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.marked))
+	for rel := range s.marked {
+		out = append(out, rel)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// DrainMarks returns the files that changed and forgets them.
+//
+// ★ The drain happens **after** the caller has read the configuration
+//
+//	again: a mark that is dropped before the read would lose the change,
+//	and the next turn would run the old configuration with no trace that
+//	it ever moved.
+func (s *Service) DrainMarks() []string {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.marked))
+	for rel := range s.marked {
+		out = append(out, rel)
+	}
+	s.marked = nil
+	sort.Strings(out)
+	return out
 }
 
 // SetSkillsDir tells the service where the runtime actually reads skills.
@@ -289,6 +359,21 @@ func (s *Service) SetSkillsDir(dir string) {
 		}
 	}
 	s.skillsDir = dir
+}
+
+// SkillsDir returns the directory the runtime reads skills from.
+//
+// ★ It is the editor's question too: a skill written into a directory
+//
+//	nobody loads is a silent degradation, and the service refuses that
+//	write. ★ So the answer has to be readable from outside — the rule
+//	itself lives in build.ResolveSkillsDir, and the service only carries
+//	what it was told.
+func (s *Service) SkillsDir() string {
+	if s == nil {
+		return ""
+	}
+	return s.skillsDir
 }
 
 // skillsElsewhere reports the runtime's skills directory when it is not the

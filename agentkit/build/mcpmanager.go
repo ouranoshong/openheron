@@ -230,6 +230,32 @@ func (m *mcpManager) Refresh(ctx context.Context, cfg *spec.Config) bool {
 	return changed
 }
 
+// ToolsOf reports the live tool names of one server.
+//
+// ★ The list is **live**: a server that is still starting offers no tools,
+//
+//	and one that comes up offers its own. ★ That is why the list is part
+//	of an agent's fingerprint and not only of its file — the agent's tool
+//	surface changes when a server comes up, and the agent has to be
+//	rebuilt for it.
+//
+// ★ It does **not** start a server: the dependency walk asks what the
+//
+//	server offers, and a walk that started servers would be a walk that
+//	changed the world it was measuring.
+func (m *mcpManager) ToolsOf(server string) []string {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	e := m.entries[server]
+	m.mu.Unlock()
+	if e == nil {
+		return nil
+	}
+	return e.lastTools()
+}
+
 // Close tears every client down.
 //
 // ★ The client outlives the snapshot, so something has to end it: the

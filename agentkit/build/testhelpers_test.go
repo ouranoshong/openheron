@@ -33,6 +33,13 @@ func (m *fakeManager) set(cfg *spec.Config) {
 	m.gen++
 }
 
+// Publish accepts a configuration the builder read itself.
+//
+// ★ The real manager publishes the same way: the configuration is replaced
+//
+//	and the generation moves with it, because the tree moved.
+func (m *fakeManager) Publish(cfg *spec.Config) { m.set(cfg) }
+
 // bump moves the generation without changing the configuration.
 //
 // ★ It is what the real configuration manager does when a server's tool
@@ -125,6 +132,27 @@ func managerOf(t *testing.T, b *Builder) *fakeManager {
 		t.Fatalf("builder is not backed by a fakeManager: %T", b.mgr)
 	}
 	return m
+}
+
+// poolEntry returns the pool's entry for an agent, whatever fingerprint it
+// was built at.
+//
+// ★ The pool holds one entry per (agent, fingerprint), so a test that wants
+//
+//	"the entry for this agent" has to pick one — and there is only one
+//	unless the agent was rebuilt at a new fingerprint.
+func poolEntry(t *testing.T, b *Builder, name string) *entry {
+	t.Helper()
+	b.pool.mu.Lock()
+	defer b.pool.mu.Unlock()
+	m, ok := b.pool.ents[name]
+	if !ok || len(m) == 0 {
+		t.Fatalf("no pool entry for %q", name)
+	}
+	for _, e := range m {
+		return e
+	}
+	return nil
 }
 
 // configFromSpecs builds a configuration for the assembly tests.

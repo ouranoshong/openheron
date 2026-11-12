@@ -718,6 +718,19 @@ func (c *agentConfig) set(cfg *spec.Config) {
 	}
 }
 
+// Publish accepts a configuration the builder read itself.
+//
+// ★ The builder reads the configuration again when the write path marked a
+//
+//	change, and publishes it here — so that "the next turn uses it" is a
+//	promise rather than a race with the watcher's poll. ★ The generation
+//	moves with it, because the tree moved: the pool's key is a
+//	fingerprint now, and the fingerprint is what says which agents the
+//	change reaches.
+func (c *agentConfig) Publish(cfg *spec.Config) {
+	c.set(cfg)
+}
+
 // bump moves the generation without changing the configuration.
 //
 // ★ The generation moves in exactly one place, and this is it: a server's

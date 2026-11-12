@@ -33,7 +33,7 @@ func TestFirstGenerationAndLaterOnesDeriveTheSameTable(t *testing.T) {
 func TestMaxDepthDefaultsInOnePlace(t *testing.T) {
 	cfg := minimalTestConfig()
 	cfg.Server.Agent.MaxDepth = 0
-	snap, err := newSnapshot(1, cfg, nil, "", "", nil, nil, nil, nil)
+	snap, err := newSnapshot(1, cfg, nil, nil, "", "", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestMaxDepthDefaultsInOnePlace(t *testing.T) {
 
 	cfg2 := minimalTestConfig()
 	cfg2.Server.Agent.MaxDepth = 3
-	snap2, err := newSnapshot(1, cfg2, nil, "", "", nil, nil, nil, nil)
+	snap2, err := newSnapshot(1, cfg2, nil, nil, "", "", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,10 +146,8 @@ func TestSwitchedRootUsesItsOwnModel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b.pool.mu.Lock()
-	mainEntry := b.pool.ents[spec.DefaultAgentID]
-	workerEntry := b.pool.ents["worker"]
-	b.pool.mu.Unlock()
+	mainEntry := poolEntry(t, b, spec.DefaultAgentID)
+	workerEntry := poolEntry(t, b, "worker")
 	if mainEntry == nil || workerEntry == nil {
 		t.Fatalf("missing pool entries: main=%v worker=%v", mainEntry, workerEntry)
 	}

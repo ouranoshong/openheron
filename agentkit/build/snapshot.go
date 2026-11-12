@@ -34,9 +34,27 @@ type snapshot struct {
 	tables               map[string]*Table
 	models               modelFactory
 	tools                *toolRegistry
-	heavyOnce            sync.Once
-	heavy                heavyDeps
-	heavyErr             error
+	// mcp owns the MCP clients. ★ It outlives the snapshot — a client owns
+	//   a child process — and the dependency walk asks it what the servers
+	//   offer right now.
+	mcp       *mcpManager
+	heavyOnce sync.Once
+	heavy     heavyDeps
+	heavyErr  error
+
+	// skillsDir is where the runtime reads skills from.
+	//
+	// ★ It is resolved **once** per snapshot: the dependency walk hashes
+	//   the skill files and the filesystem backend reads them, and two
+	//   resolutions could be two answers.
+	skillsDir string
+	// deps is what each agent depends on, by the file that carries it.
+	//
+	// ★ It is the tree's **identity**: two agents with the same
+	//   fingerprint are the same agent, whatever the rest of the
+	//   configuration did. ★ And it is the answer to "who depends on this
+	//   file" — see impact.go.
+	deps map[string]agentDeps
 }
 
 type heavyDeps struct {
@@ -58,8 +76,8 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 	// The session workspace (uploads) and the skills directory may live outside the
 	// project root; everything else is off limits.
 	roots := []string{s.dataDir}
-	if dir, ok := ResolveSkillsDir(s.log); ok {
-		roots = append(roots, dir)
+	if s.skillsDir != "" {
+		roots = append(roots, s.skillsDir)
 	}
 
 	// ★ The shell is decided **once**, here: the execute tool's description
@@ -93,6 +111,9 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 	tools, err := s.tools.Build(ctx, toolEnv{
 		cfg:         s.cfg,
 		svc:         s.svc,
+		deps:        s.deps,
+		mcp:         s.mcp,
+		skillsDir:   s.skillsDir,
 		projectRoot: s.projectRoot,
 		dataDir:     s.dataDir,
 		log:         s.log,
@@ -112,7 +133,7 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 	return out, nil
 }
 
-func newSnapshot(gen uint64, cfg *spec.Config, svc *spec.Service,
+func newSnapshot(gen uint64, cfg *spec.Config, svc *spec.Service, mcp *mcpManager,
 	projectRoot, dataDir string, models modelFactory,
 	tools *toolRegistry, log *slog.Logger, track func(io.Closer)) (*snapshot, error) {
 
@@ -130,6 +151,10 @@ func newSnapshot(gen uint64, cfg *spec.Config, svc *spec.Service,
 		tools = defaultToolRegistry(nil)
 	}
 	tables := tablesOf(sp)
+	// ★ The skills directory is resolved **once** per snapshot: the
+	//   dependency walk hashes the skill files, and the filesystem backend
+	//   reads them, and two resolutions could be two answers.
+	skillsDir, _ := ResolveSkillsDir(log)
 	return &snapshot{
 		log:         log,
 		track:       track,
@@ -142,21 +167,51 @@ func newSnapshot(gen uint64, cfg *spec.Config, svc *spec.Service,
 		tables:      tables,
 		models:      models,
 		tools:       tools,
+		mcp:         mcp,
+		skillsDir:   skillsDir,
+		deps:        computeDeps(cfg, svc, skillsDir, mcp),
 	}, nil
 }
 
+// snapshotFor returns the snapshot for this configuration.
+//
+// ★ The cache is keyed on the **generation**, and it never goes back: a
+//
+//	late caller with an older generation must not replace a newer tree with
+//	an older one. ★ The generation moves for two things — the configuration
+//	was reloaded, or a server's tool surface changed — and both are facts
+//	about the tree.
+//
+// ★ The snapshot is heavier than the agents: it owns the filesystem
+//
+//	backend and the tool set. ★ The agents themselves are pooled by
+//	**fingerprint**, so a snapshot that moves does not rebuild the agents
+//	whose inputs did not change.
 func (b *Builder) snapshotFor(cfg *spec.Config, gen uint64) (*snapshot, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.snap != nil && b.snap.gen >= gen {
 		return b.snap, nil
 	}
-	snap, err := newSnapshot(gen, cfg, b.svc, b.projectRoot, b.dataDir, b.models, b.tools, b.log, b.track)
+	snap, err := newSnapshot(gen, cfg, b.svc, b.mcp, b.projectRoot, b.dataDir,
+		b.models, b.tools, b.log, b.track)
 	if err != nil {
 		return nil, err
 	}
 	b.snap = snap
 	return snap, nil
+}
+
+// fingerprintOf returns the agent's fingerprint, and "" when it has none.
+//
+// ★ An agent that is not in the dependency map has no fingerprint — and the
+//
+//	pool then keys it by the empty string, which is a key like any other.
+func (s *snapshot) fingerprintOf(name string) string {
+	if d, ok := s.deps[name]; ok {
+		return d.fingerprint
+	}
+	return ""
 }
 
 func resolveModel(ctx context.Context, snap *snapshot, sp decl.SubAgentSpec,

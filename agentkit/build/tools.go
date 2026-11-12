@@ -24,6 +24,19 @@ type toolEnv struct {
 	// where the tree is and how to write it safely. The config_* tools
 	// answer through it, so they answer the same way the editor does.
 	svc *spec.Service
+
+	// deps is the running tree's dependency map: what each agent depends
+	// on, by the file that carries it.
+	//
+	// ★ The impact query compares it with the current one to answer "what
+	//   changes next turn" — and it is the **running** tree's map, so the
+	//   answer is about the tree this turn runs.
+	deps map[string]agentDeps
+	// mcp owns the MCP clients: the dependency walk asks it what the
+	// mounted servers offer right now.
+	mcp mcpTools
+	// skillsDir is where the runtime reads skills from.
+	skillsDir string
 }
 
 func (e toolEnv) logger() *slog.Logger {

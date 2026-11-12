@@ -512,6 +512,13 @@ func (s *Service) Write(rel string, content []byte, baseRev string) (rev string,
 	if err := persist.AtomicWrite(dst, content, writeTmpSuffix); err != nil {
 		return "", nil, err
 	}
+	// ★ The file landed, so it is **marked**: the next turn reads the
+	//   configuration again before it builds, and the change is in it.
+	//   ★ The watcher's poll would notice the same thing a moment later,
+	//   and a turn that starts in between would run the old tree — so the
+	//   mark is what makes "the next turn uses it" a promise instead of a
+	//   race.
+	s.Mark(rel)
 
 	return Revision(content), trial, nil
 }
@@ -579,6 +586,11 @@ func (s *Service) WriteMany(files []File, baseRev string) (rev string, cfg *Conf
 			}
 			return "", nil, err
 		}
+	}
+	// ★ The same mark the single write leaves: the files landed, so the
+	//   next turn reads the configuration again before it builds.
+	for _, f := range files {
+		s.Mark(f.Rel)
 	}
 	return s.Fingerprint(), trial, nil
 }

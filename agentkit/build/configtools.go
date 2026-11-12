@@ -92,16 +92,26 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 			"of what the running process holds. Paths are relative to the config root " +
 			"(agents/main.md, tools/http.yaml). ★ The text is read from the disk, so a " +
 			"change written earlier in this turn is already in it; the summary is the " +
-			"tree this turn runs, which is not.",
+			"tree this turn runs, which is not. ★ With impact: true, answer the other " +
+			"question instead: who depends on that file, and who the next turn rebuilds.",
 		params: map[string]*schema.ParameterInfo{
 			"path": {Type: schema.String, Desc: "relative path, e.g. agents/main.md; omit for the overview"},
+			"impact": {Type: schema.Boolean, Desc: "answer the impact question instead: " +
+				"who depends on this file, and who the next turn rebuilds"},
 		},
 		run: func(_ context.Context, args string) (any, error) {
 			var in struct {
-				Path string `json:"path"`
+				Path   string `json:"path"`
+				Impact bool   `json:"impact"`
 			}
 			if err := json.Unmarshal([]byte(args), &in); err != nil {
 				return nil, fmt.Errorf("%s: %w", decl.ToolNameConfigGet, err)
+			}
+			// ★ The impact question replaces the content: the caller wants
+			//   to know what a change would reach, not to read the file
+			//   again.
+			if in.Impact {
+				return impactAnswer(svc, cfg, env.deps, env.mcp, env.skillsDir, in.Path)
 			}
 			if in.Path == "" {
 				return configOverview(svc, cfg)
