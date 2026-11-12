@@ -93,7 +93,7 @@ vars:
   #   leaving a modified file in the working tree.
   KIT_STAGE: '{{.KIT_DIR}}/.stage-openheron'
   KIT_MIXINS: '{{.KIT_DIR}}/openheron-deepseek {{.KIT_DIR}}/openheron-openai'
-  KIT_VERSION: 0.0.9
+  KIT_VERSION: 0.2.0
   KIT_IMAGE: 'openheron-kit:{{.KIT_VERSION}}'
   KIT_BUILDER: kit-builder
   KIT_REPO: docker.io/ouranoshong/openheron-kit

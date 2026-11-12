@@ -1101,7 +1101,7 @@ workload 自己的环境是从沙箱内部抓的，宿主上读的。
 | 进程是不是从工作区启动的？ | **是** —— `PWD` 与 `OLDPWD` 都是工作区 |
 | 配置是不是落在挂载上？ | **是** —— `.openheron/{agents,llm,mcps,server,state}` 在宿主上，会话也在 |
 | 凭据到不到模型？ | **到** —— 容器里是 `DEEPSEEK_API_KEY=proxy-managed`；代理换上真值，调用返回了 "ok" |
-| 发布版配方构建得出来吗？ | **能** —— `task kit` 用 container-driver builder 产出 `openheron-kit:0.0.6`，里面的二进制自报 `v0.0.6` |
+| 发布版配方构建得出来吗？ | **能** —— `task kit` 用 container-driver builder 产出 `openheron-kit:0.2.0`，里面的二进制自报 `v0.2.0` |
 | workload 能与 credential mixin 组合吗？ | **能** —— 容器里是 `DEEPSEEK_API_KEY=proxy-managed`，配置在挂载上，模型答了 |
 | 纯声明的 mixin 没有 Dockerfile 也构建得出来吗？ | **能** —— `task kit-mixin` 只靠描述文件就产出镜像 |
 | 发布版 Kit 在沙箱里跑得起来吗？ | **能** —— startup hook 把配置写到挂载上，服务在自己的数据目录里建出了 state |
