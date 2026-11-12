@@ -391,7 +391,15 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 				//   ★ The two versions are the answer to "has my change
 				//   landed": the disk moved, the tree this turn runs did
 				//   not — and the next turn is when the new tree is built.
-				out.Note = "written to disk; the next turn rebuilds the whole agent tree with it. " +
+				// ★ "the whole agent tree" used to be the wording, and it
+				//   stopped being true when the pool learned to key on the
+				//   agent's own fingerprint: a change reaches the agents that
+				//   read that file, and the others are reused. Saying "the
+				//   whole tree" would tell a model that every agent is torn
+				//   down and rebuilt — which is exactly the kind of wrong
+				//   belief these notes exist to prevent.
+				out.Note = "written to disk; the next turn rebuilds the tree with it, " +
+					"and only the agents that depend on this file are rebuilt. " +
 					"the tree this turn runs has not changed yet: config_tier and config_notices " +
 					"still answer from it, while config_get reads the disk and already shows the " +
 					"new content"
