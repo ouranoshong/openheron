@@ -627,5 +627,5 @@ narrow that, narrow it on the host, not by editing the Kit.
 ★ **Building this yourself?** The image is published, but the sources are
 in the repository: [`BUILDING.md`](BUILDING.md) covers building it from
 source, changing the descriptor, and publishing a new version.
-[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md) is the design
+[`docs/tools-design.md`](../docs/tools-design.md) is the design
 behind it, and every assumption it rests on is measured.

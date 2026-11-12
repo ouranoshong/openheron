@@ -19,7 +19,7 @@
 #   Without any of them, the workload asks for no credential at all and the
 #   user injects the key themselves (which puts the key inside the sandbox).
 #
-# The design this implements is docs/sandbox-kit-design.md.
+# The design this implements is docs/tools-design.md.
 
 schemaVersion: "3"
 kind: mixin

@@ -5,7 +5,7 @@
 // place to pass a root, an ignore list or a result cap; deep.Config only exposes Backend /
 // Shell / StreamingShell, so the middleware's own knobs are unreachable from here too. The
 // backend is the only injection point, which is why the bounds live in this file and not in
-// a copied middleware — see docs/fs-backend-design.md.
+// a copied middleware — see docs/tools-design.md.
 //
 // Two different boundaries live here:
 //   - writes are confined to Root + ExtraRoots (resolveWrite);
@@ -750,7 +750,7 @@ func (s *Local) Write(ctx context.Context, req *filesystem.WriteRequest) error {
 	//
 	//   ★ There is no revision to check against: the framework's write
 	//   request carries no revision, and the model has no baseline to give
-	//   (see docs/config-optimization-design.md §3.3). A whole-file write
+	//   (see docs/config-design.md §11). A whole-file write
 	//   is therefore "the last writer wins" — the gates still run.
 	if g := s.gate; g != nil && g.OwnsPath(path) {
 		return g.WriteConfig(path, []byte(req.Content), "")

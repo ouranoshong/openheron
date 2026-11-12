@@ -3,7 +3,7 @@
 # The openheron Kit acceptance run.
 #
 # ★ What this script is for: it is the repeatable form of the measurement in
-#   docs/sandbox-kit-design.md §6. Every claim that section makes has a check
+#   docs/tools-design.md §4.4. Every claim that section makes has a check
 #   here, and a check that fails fails the script — the run is not a report
 #   that says "looks fine".
 #

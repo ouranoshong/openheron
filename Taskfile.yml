@@ -304,7 +304,7 @@ tasks:
   # ★ A separate artifact, not part of the release pipeline: `task release` still
   #   produces the six static binaries and nothing else. The Kit packages
   #   openheron as a Docker Sandboxes workload — its design is
-  #   docs/sandbox-kit-design.md.
+  #   docs/tools-design.md.
   #
 # The build context is sandbox-kit/, because the Kit specification finds the
 # content recipe by the descriptor's filename stem, beside it.

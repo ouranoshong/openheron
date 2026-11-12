@@ -268,7 +268,7 @@ sandbox-kit/acceptance/run.sh
 the mount, the credential, a real model call, the shape of the stream, the
 client's departure, and the port from every vantage point — and exits
 non-zero if any check fails. The numbers it produced are in
-[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md) §6.6.
+[`docs/tools-design.md`](../docs/tools-design.md) §4.4.
 
 ★ **The transcript is not part of the tree.** It is a run artifact: absolute
 paths, an ephemeral port, frame counts, the model's own words — and every
@@ -287,10 +287,10 @@ wherever you want it.
 | `openheron: not found` during the build | the binary was not copied in — `task kit` does that, so build the Kit with `task kit` and not with buildx directly |
 | `family "dual" is not supported yet` | the runtime does not implement it; omit the field |
 | `spec.yaml (or spec.yml) is required` | `sbx kit pack` is the **v1/v2** artifact grammar; a v3 Kit travels as an OCI image or a directory |
-| `KVM error: Permission denied` | the daemon serving the socket is not the one with `/dev/kvm` access — see §6.2 of the design |
+| `KVM error: Permission denied` | the daemon serving the socket is not the one with `/dev/kvm` access — see `docs/pitfalls.md` |
 
 ---
 
 The design behind all of this, and every assumption it rests on, is in
-[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md) — that document is Chinese
+[`docs/tools-design.md`](../docs/tools-design.md) — that document is Chinese
 only, like every other design document in this repository.

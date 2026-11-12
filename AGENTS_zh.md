@@ -15,82 +15,49 @@
 > `docs/user-manual.md` / `docs/user-manual_zh.md`（用户使用说明）、
 > `docs/developer-manual.md` / `docs/developer-manual_zh.md`（开发者说明）。
 >
-> **另有十二篇只有中文的文档**在 `docs/` 下 —— 架构与代码设计那一类。
+> **另有五篇只有中文的文档**在 `docs/` 下 —— 架构与代码设计那一类。
 > ★ 它们的中文内容**接管了原文件名**：`docs/config-design.md` **就是**那篇中文文档 ——
 > 既没有 `_zh` 副本，也没有英文版：
-> `docs/context-usage-design.md`（上下文使用预估设计方案）、
-> `docs/session-concurrency-design.md`（会话并发设计方案）、
-> `docs/run-lifecycle-design.md`（run 生命周期设计方案）、
-> `docs/fs-backend-design.md`（文件系统后端设计方案）、
-> `docs/sandbox-kit-design.md`（Docker Sandbox Kit 打包设计方案）、
-> `docs/mcp-design.md`（MCP 接入设计方案）、
-> `docs/config-design.md`（配置系统设计说明）、
-> `docs/tool-surface-design.md`（工具面 —— 一个 agent 拿到哪些工具，以及配置怎么被管理）、
-> `docs/logging-design.md`（日志装配改造设计 —— **已实现**：可变等级、`log_level`、
-> 组合根 logger、hertz 适配器，以及把请求日志搬出 `llm/common`）、
-> `docs/animation-design.md`（界面动效 —— **部分已实现**：动效令牌、减少动态效果的降级、
-> 品牌标记的入场都在代码里；界面那几条动效还是方案）、
-> `docs/attachment-design.md`（附件 —— 上传的文件怎么落盘、服务端对它做了什么、界面怎么显示）、
-> `docs/config-optimization-design.md`（配置系统优化改造方案 —— **P1–P4 已落地**：
-> 工具表面说清答的是哪一边、文件工具写配置根时转交给配置服务、重载改成「只做标记，下一轮按依赖重建」、
-> 以及「代际」退休 —— 树的身份改成配置对象与 MCP 工具面）。
+> `docs/config-design.md`（配置系统 —— 配置根与它的三级解析、各个分区与它们的
+> 文件规格、加载与优先级、工具面、六个 `config_*` 工具、热更新，以及依赖铁律）、
+> `docs/runtime-design.md`（运行时 —— run 变成一行持久事实、配上租约与 fence、
+> 连接降级为订阅者、一个会话一轮的准入闸门、上下文占用与压缩，以及日志装配）、
+> `docs/tools-design.md`（工具与集成 —— 工具从哪来、有界的文件系统后端、
+> MCP 接入，以及 Docker Sandbox Kit）、
+> `docs/ui-design.md`（界面与它的资源 —— 附件与动效）、
+> `docs/pitfalls.md`（坑点登记册 —— 这棵树踩过的坑、每个坑的成因，以及它怎么处理）。
 > **`docs/` 下其余设计文档仍在上游仓库** ——
-> 下面凡引用 `docs/xxx.md` 而这十六篇之外的，都是上游那份。
+> 下面凡引用 `docs/xxx.md` 而这五篇之外的，都是上游那份。
 > 改语义前若拿不到它，先问，别凭印象改配置或接口。
 >
 > ★ **设计类文档只写中文。** 讲代码怎么搭起来的文档 —— 分层、
 > 某个子系统的设计、一次重构方案 —— 没有第二个读者：读它的人读中文，而手工维护的
-> 英文对照版是一份会漂移的第二拷贝。★ 上面那八篇在 2026-11-08 退了双语：中文内容
+> 英文对照版是一份会漂移的第二拷贝。★ 上面那几篇在 2026-11-08 退了双语：中文内容
 > 接管了原文件名，所以指向 `docs/config-design.md` 的链接照样解析 —— 解析到的是中文那篇。
 > ★ **仍然要双语的是给用户或集成方读的东西**：`README.md`、`docs/user-manual.md`，
 > 以及 —— 因为总得有人能在这个树里干活 —— `docs/architecture.md` 与
 > `docs/developer-manual.md`。不假定他们的读者读中文。Kit 的那两份指南
 > （`sandbox-kit/TUTORIAL.md` 与 `sandbox-kit/BUILDING.md`）出于同样的理由保持双语。
 >
-> ★ 前面四组讲的是**代码面已经是什么样**；`docs/context-usage-design.md`
-> 讲的是**上下文占用与压缩** —— 占用仪表盘（§2、§4、§5）、压缩及其持久化（§7）、
-> 以及压缩标记的界面渲染（§7.7）都已在代码里。
-> `docs/session-concurrency-design.md` 讲的是**会话并发** —— 一个会话一轮的准入闸门
-> （§5）、跨客户端的 409（§5.2）、以及前端的忙态处理（§5.4-§5.6）都已在代码里。
-> `docs/run-lifecycle-design.md` 讲的是**run 生命周期** —— run 变成一行持久事实、
-> 租约配 fence、连接降级为订阅者。★ **那一份落地了**：§3-§9 都在树上
-> （`storage/runledger.go`、`storage/lease.go`、`storage/memarbit/arbiter.go`、
-> `agentkit/emit/`），扫描才是真相，通知只是提示。§1 讲的仍是当年的代码 ——
-> 一轮绑在一条 SSE 连接上 —— 读起来像一段历史。
-> `docs/sandbox-kit-design.md` 讲的是**Docker Sandbox Kit** —— openheron 进程今天是什么样 ——
-> 一个进程，一对 HTTP/SSE 服务，文件工具与 shell 工具共用同一个后端 ——
-> 打包成 Kit，于是边界往外挪而不是往里挪，读路径也被罩住了。
-> ★ **那一份也落地了**：描述文件、内容配方、入口脚本与每个厂商一份的 mixin 都在
-> `sandbox-kit/` 里，`task kit` 构建它们，CI 的 `kit` job 发布它们。§4.2 仍有三条
-> 留给 owner 决定。
-> `docs/fs-backend-design.md` 讲的是**文件系统后端** —— `eino-ext` local 后端的有界分支
-> （§5）以及每个工具都要经过的那条收敛规则 —— 它**已实现**：`agentkit/fsx` 已在两处
-> 调用点接上。
-> `docs/mcp-design.md` 讲的是 **MCP 接入** —— `mcps/` 配置分区、
-> `mcp__<server>__<tool>` 命名空间、住在 server 自己文件里的档位，以及 `/mcps` 视图。
-> **它已实现**：分区、provider、管理器与端点都在树上。★ §13 —— 非阻塞的 MCP 启动
-> （每台 server 各自维护一个状态，起来了就在下一轮把工具带进来）—— 也已实施。
-> ★ §8 —— 沙箱 Kit 怎么打包一个 MCP server —— 仍然是提案。
+> ★ 前面四组讲的是**代码面已经是什么样**；那五篇中文单份讲的也是**各自的主题
+> 现状**：每一篇都**讲代码现在是什么样**，没落地的提案集中放在各自的「待决」一节里。
 > `docs/config-design.md` 讲的是**配置系统** —— 配置根与它的三级解析、各个分区与它们的
-> 文件规格、加载与优先级、热更新，以及依赖铁律。**正文讲的是代码现状**；
-> `mcps/` 分区（§6.7）与住在工具旁边的档位（§6.6）**已实施**。★ **全局 deny** 里的
-> 前缀匹配（§6.3）跟着 deny 清单一起没了：「不被暴露」现在只由文件的 `allows:` 与 agent
-> 的 `tools` 两处说。
->
-> ★ `docs/config-optimization-design.md` **全部已实施** —— P1–P4 已落地，§7 列了 owner
-> 已拍板的决定。★ P4 让「代际」退休了：树的身份是配置对象加上 MCP 工具面，
-> builder **比**而不是被**通知**。
-> 代码现状是 `docs/config-design.md` §8（热更新）
-> 与 §6（配置表面）描述的样子：两篇不打架，一篇讲现在，一篇讲将来。
-> ★ 它的触发是真的，而且**已经修好了**：一次落在 agent 自己文件上的 `config_write`
-> 现在只换**受影响的那几个 agent**（P2），而被审批打断的那一轮**钉住自己开始时的那棵树**，
-> 报告回得来（P3）。
-> ★ 而模型**判断不出自己的改动有没有落地**这件事也修好了：六个 `config_*` 工具现在
-> 各自说清答的是哪一边，两句说反的话也改过来了（P1）。
->
-> ★ `docs/logging-design.md` **已实现**：可变的等级、`log_level`、组合根、hertz 适配器、
-> 逐模块注入，以及把请求日志搬出 `llm/common` 都在树里。§1 是改造前的快照，留着解释
-> 为什么改。它是新建的中文单份文档 —— 与上面那八篇不同，从来没有过英文版。
+> 文件规格、加载与优先级、工具面、六个 `config_*` 工具、热更新，以及依赖铁律。
+> ★ 它的正文讲的就是**现在**：`mcps/` 分区、住在工具旁边的档位、
+> 「只做标记，下一轮按依赖重建」的重载，以及「代际」的退休 ——
+> 树的身份是配置对象加上 MCP 工具面，builder **比**而不是被**通知** —— 全都在代码里。
+> `docs/runtime-design.md` 讲的是**运行时** —— run 变成一行持久事实、配上租约与 fence、
+> 连接降级为订阅者、一个会话一轮的准入闸门与它的跨客户端 409、上下文占用与压缩，
+> 以及日志装配（可变等级、`log_level`、组合根与 hertz 适配器）。
+> `docs/tools-design.md` 讲的是**工具与集成** —— 工具从哪来
+> （`tools:` / `mcps:` / `skills:` 与 `mcp__<server>__<tool>` 命名空间）、
+> `agentkit/fsx` 那个有界的文件系统后端、MCP 接入，以及把整个进程打包成 v3 workload 的
+> Docker Sandbox Kit。★「沙箱 Kit 怎么打包一个 MCP server」仍是提案。
+> `docs/ui-design.md` 讲的是**界面与它的资源** —— 上传的文件怎么落盘、服务端对它做了什么、
+> 界面怎么显示它，以及动效令牌与减少动态效果的降级。
+> ★ 还有 `docs/pitfalls.md` —— **坑点登记册**：这棵树踩过的坑、每个坑的成因、
+> 它是修好了还是仍有一条边界。动一个你还没动过的子系统之前先读它 ——
+> 比重新发现同一个坑便宜。
 >
 > ★ 有一个目录不是文档组：**`sandbox-kit/`** 装着把 openheron 打包成沙箱 workload 的
 > Docker Sandbox Kit —— `openheron/`（workload：描述文件、内容配方、入口脚本），
@@ -101,7 +68,7 @@
 > `sandbox-kit/acceptance/run.sh` 是验收跑批 —— 设计里的每条断言都是一项检查，
 > 有一项不过脚本就非零退出。
 > 它们是**独立产物**：`task release` 仍然只产出那六个静态二进制，别的一概没有。
-> 设计见 `docs/sandbox-kit-design.md`，构建用 `task kit`。
+> 设计见 `docs/tools-design.md`，构建用 `task kit`。
 >
 > 写这几组文档时**照代码写**，别照想象写：每个结论都要能在代码里指到行。
 > 代码改了，文档跟着改 —— 文档漂移比没有文档更贵。
@@ -179,7 +146,7 @@
 只有一处定义，而级别决定了一行会不会出现在默认输出里。
 
 `llm/common` 原来用标准 logger 打请求日志，那段代码搬到了
-`agentkit/obs/httplog`（`docs/logging-design.md` §6），这个叶子包现在一行日志都没有。
+`agentkit/obs/httplog`（`docs/runtime-design.md` §4.4），这个叶子包现在一行日志都没有。
 `llm/common` 里出现任何一处 openheron 内部 import 都仍然算回归。
 
 ★ **没有全局 logger 了。** `main.installLogger` 围绕一个共享的 `slog.LevelVar` 建一个
@@ -187,7 +154,7 @@
 零值用 `obs.Discard()`，而不是回取包级变量。
 
 ★ 日志的**去处**可以在启动后改：`obs.Sink` 是 handler 背后的 `io.Writer`，配置里的
-`log.file` 在配置读出之后把它改向文件（`docs/logging-design.md` §10）。换的是「写到哪儿」，
+`log.file` 在配置读出之后把它改向文件（`docs/runtime-design.md` §4.3）。换的是「写到哪儿」，
 不是 logger —— 后者已经被 hertz 与 eino 两份进程级注册表持有，换不掉。
 
 ## 其它约定
@@ -209,11 +176,11 @@
 - 改配置语义前先读 `docs/config-design.md`；改接口前先读 `docs/api-design.md`；
   新增 `/v2` 接口读 `docs/api-v2-design.md`；动前端读 `docs/frontend-design.md`；
   动测试环境（端口 / 隔离目录）读 `docs/frontend-design.md` §11.2 与
-  `docs/config-design.md` §5.2。★ `docs/config-design.md` **就在本仓库里**，
+  `docs/config-design.md` §3.3。★ `docs/config-design.md` **就在本仓库里**，
   另外三份是**不在**本仓库的上游文档 —— 拿不到就先问。
   本仓库自带的 `docs/architecture.md` / `docs/user-manual.md` /
   `docs/developer-manual.md`（及其 `_zh` 中文版）讲的是**本代码面**的实际结构，
-  直接看就行。`docs/context-usage-design.md` 讲的是上下文占用与压缩：占用仪表盘
+  直接看就行。`docs/runtime-design.md` 讲的是上下文占用与压缩：占用仪表盘
   与压缩持久化都已在代码里；动上下文用量相关代码前先看它。
 
 ### 提交信息
@@ -374,7 +341,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
   排除就不再下降到子文件，近的规则优先。
 
 隔离的完整细节见 `docs/frontend-design.md` §11.2 与
-`docs/config-design.md` §5.2。
+`docs/config-design.md` §3.3。
 
 ## 关联文档
 
@@ -393,18 +360,11 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
 
 | 文档 | 内容 |
 |---|---|
-| `docs/context-usage-design.md` | **上下文使用预估设计方案** —— 占用口径、数据流、后端与前端改动、压缩结果的持久化与有效历史（**占用仪表盘与压缩持久化已实现**） |
-| `docs/session-concurrency-design.md` | **会话并发设计方案** —— 跨客户端抢占的成因、「一个会话一轮」的规则与实现、以及前端怎么知道会话正忙（**准入闸门与 409 已实现**） |
-| `docs/fs-backend-design.md` | **文件系统后端设计方案** —— 为什么把 `eino-ext` 的 local 后端分叉成 `agentkit/fsx`、路径如何收敛在项目根之内、`ls`/`glob` 如何被封顶（**已实现**） |
-| `docs/run-lifecycle-design.md` | **run 生命周期设计方案** —— 一轮为什么曾绑在一条 SSE 连接上，以及 run 怎么变成一行持久事实、配上租约与 fence，好让连接降级为订阅者（**§3-§9 已实现**：账本、租约、fence、扫描与前端都在树上） |
-| `docs/sandbox-kit-design.md` | **Docker Sandbox Kit 打包设计方案** —— openheron 进程今天是什么样、一个把整个进程带进 microVM 的 v3 workload Kit、模型密钥如何留在宿主，以及当初必须实测的那条 SSE 路（**Kit 已建成并发布**；§4.2 还有三条没定） |
-| `docs/mcp-design.md` | **MCP 接入设计方案** —— 工具装配路径、MCP 客户端给它带来什么、`mcp__<server>__<tool>` 命名空间、工具表里的前缀匹配，以及 MCP 服务器在 Kit 里会跑在哪（**已实施**；§13 —— 非阻塞的 MCP 启动 —— 也已实施；§8 —— 沙箱 Kit 怎么打包一台 MCP 服务器 —— 仍是提案） |
-| `docs/config-design.md` | **配置系统设计说明** —— 配置根与它的三级解析、各个分区与它们的文件规格、加载与优先级、热更新，以及依赖铁律（**正文讲的是代码现状**；`mcps/` 分区与住在工具旁边的档位已实施） |
-| `docs/config-optimization-design.md` | **配置系统优化改造方案** —— 六个 `config_*` 工具各答哪一边、文件工具写配置根时怎么转交给配置服务、重载怎么改成「只做标记，下一轮按依赖重建」、那个回答「下一轮什么会变」的查询，以及「代际」的退休（**P1–P4 已实施**，§7 列了 owner 已拍板的决定） |
-| `docs/tool-surface-design.md` | **工具面设计** —— 一个 agent 拿到哪些工具（`tools:` / `mcps:` / `skills:`）、MCP 命名空间的三段、配置面收敛成一个核心，以及六个 `config_*` 工具（**§2-§5 已实现**） |
-| `docs/logging-design.md` | **日志装配改造设计** —— 组合根、可变的 `log_level`、logger 注入、接管 hertz 的日志输出，以及把请求日志搬出 `llm/common`（**已实现**） |
-| `docs/animation-design.md` | **界面动效设计** —— 动效令牌、减少动态效果的降级、品牌标记的入场，以及仍是提案的界面那几条动效（**§2.3、§3、§4 已实现**） |
-| `docs/attachment-design.md` | **附件设计** —— 上传的文件怎么落盘、服务端对它做了什么（名字带哈希、图片被压缩），以及界面怎么显示它 |
+| `docs/config-design.md` | **配置系统设计说明** —— 配置根与它的三级解析、各个分区与它们的文件规格、加载与优先级、工具面、六个 `config_*` 工具、热更新，以及依赖铁律（**正文讲的是代码现状**） |
+| `docs/runtime-design.md` | **运行时设计说明** —— run 变成一行持久事实、配上租约与 fence、一个会话一轮的准入闸门、上下文占用与压缩，以及日志装配（**正文讲的是代码现状**） |
+| `docs/tools-design.md` | **工具与集成设计说明** —— 工具从哪来、`agentkit/fsx` 那个有界的文件系统后端、MCP 接入，以及 Docker Sandbox Kit（**正文讲的是代码现状**） |
+| `docs/ui-design.md` | **界面与资源设计说明** —— 上传的文件怎么落盘、服务端对它做了什么、界面怎么显示它，以及动效令牌（**正文讲的是代码现状**） |
+| `docs/pitfalls.md` | **坑点登记册** —— 这棵树踩过的坑、每个坑的成因、是修好了还是仍有一条边界 |
 
 ★ 双语那一组里，无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。
 

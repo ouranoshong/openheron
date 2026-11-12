@@ -15,40 +15,29 @@ one — change one and change the other.
 > `docs/user-manual.md` / `docs/user-manual_zh.md` (user guide),
 > `docs/developer-manual.md` / `docs/developer-manual_zh.md` (developer guide).
 >
-> **and twelve Chinese-only documents** under `docs/` — the architecture and code-design
+> **and five Chinese-only documents** under `docs/` — the architecture and code-design
 > ones. ★ Their Chinese content **took over the plain name**: `docs/config-design.md`
 > **is** the Chinese document — there is no `_zh` twin and no English one:
-> `docs/context-usage-design.md` (context-usage estimation design),
-> `docs/session-concurrency-design.md` (session concurrency design),
-> `docs/run-lifecycle-design.md` (run lifecycle design),
-> `docs/fs-backend-design.md` (filesystem backend design),
-> `docs/sandbox-kit-design.md` (Docker Sandbox Kit packaging),
-> `docs/mcp-design.md` (MCP integration design),
-> `docs/config-design.md` (configuration system design),
-> `docs/tool-surface-design.md` (the tool surface — which tools an agent gets, and how
-> the configuration is administered),
-> `docs/logging-design.md` (logging assembly refactor — **implemented**: a mutable level,
-> `log_level`, a composition-root logger, the hertz adapter, and the request log moved out
-> of `llm/common`),
-> `docs/animation-design.md` (interface motion — **partly implemented**: the motion tokens,
-> the reduced-motion fallback and the brand mark's entrance are in the tree; the interface
-> motions are still a proposal),
-> `docs/attachment-design.md` (attachments — how an uploaded file lands on disk, what the
-> server does to it, and how the interface shows it),
-> `docs/config-optimization-design.md` (configuration system optimization — **P1–P4 landed**:
-> the tool surface says which side it answers from, the file tools hand
-> configuration-root writes over to the configuration service, the reload becomes "mark, then
-> rebuild on the next turn by dependency", and the generation counter is retired in favour of the
-> tree's identity — the configuration object and the MCP tool surface).
+> `docs/config-design.md` (the configuration system — the config root and its three
+> levels, the partitions and their file specs, loading and precedence, the tool surface,
+> the six `config_*` tools, hot reload, and the dependency iron rules),
+> `docs/runtime-design.md` (the runtime — a run as a durable row with a lease and a
+> fence, the one-turn-per-session admission gate, context usage and compaction, and the
+> logging assembly),
+> `docs/tools-design.md` (tools and integrations — where a tool comes from, the bounded
+> filesystem backend, the MCP integration, and the Docker Sandbox Kit),
+> `docs/ui-design.md` (the interface and its resources — attachments and motion),
+> `docs/pitfalls.md` (the pitfall register — the traps this tree has hit, what caused
+> each of them, and how it was handled).
 > **Every other design document under `docs/` still lives in the upstream repository** ——
-> any `docs/xxx.md` reference below that is not one of these sixteen, is the upstream copy.
+> any `docs/xxx.md` reference below that is not one of these five, is the upstream copy.
 > If you cannot get hold of it before changing semantics, ask first; do not change
 > configuration or interfaces from memory.
 >
 > ★ **A design document is written in Chinese only.** A document that says how the code
 > is built — layering, a subsystem's design, a refactoring proposal — has no second
 > audience: it is read by the people who read Chinese, and a hand-maintained English
-> twin is a second copy that drifts. ★ The eight documents above were retired from
+> twin is a second copy that drifts. ★ The design documents above were retired from
 > bilingual on 2026-11-08: their Chinese content took over the plain name, so a link to
 > `docs/config-design.md` still resolves — it resolves to the Chinese document now.
 > ★ **What stays bilingual is what a user or an integrator reads**: `README.md`,
@@ -58,59 +47,32 @@ one — change one and change the other.
 > `sandbox-kit/BUILDING.md`) are bilingual for the same reason.
 >
 > ★ The four bilingual sets describe **what the code surface already is**; the Chinese-only
-> designs say the same about their own subject: `docs/context-usage-design.md`
-> covers **context usage and compaction** — the usage dashboard (§2, §4, §5), compaction and its
-> persistence (§7), and the rendering of compaction markers in the interface (§7.7) are all
-> already in the code.
-> `docs/session-concurrency-design.md` covers **session concurrency** — the admission gate for
-> one turn per session (§5), the cross-client 409 (§5.2), and the frontend busy-state handling
-> (§5.4-§5.6) are all already in the code.
-> `docs/run-lifecycle-design.md` covers the **run lifecycle** — a run as a durable row, a
-> lease with a fence, and the connection demoted to a subscriber. ★ **That one landed**:
-> §3-§9 are in the tree (`storage/runledger.go`, `storage/lease.go`,
-> `storage/memarbit/arbiter.go`, `agentkit/emit/`), the scan is the truth and the
-> notification is only a hint. §1 still describes the code as it was — a turn bound to one
-> SSE connection — so it reads as history.
-> `docs/sandbox-kit-design.md` describes the **Docker Sandbox Kit** — the openheron process
-> as it is (one process with an HTTP/SSE server, the file tools and the shell tool sharing
-> one backend) packaged as a Kit, so the boundary moves outward instead of inward and the
-> read path is covered too. ★ **That one landed as well**: the descriptors, the content
-> recipe, the entrypoint and the vendor mixins are in `sandbox-kit/`, `task kit` builds
-> them and the CI `kit` job publishes them. §4.2 still lists three decisions that are the
-> owner's to make.
-> `docs/fs-backend-design.md` describes the **filesystem backend** — the bounded fork of
-> `eino-ext`'s local backend (§5) and the confinement rule every tool passes through — and it is
-> **implemented**: `agentkit/fsx` is wired in at both call sites.
-> `docs/mcp-design.md` describes the **MCP integration** — the `mcps/` config partition, the
-> `mcp__<server>__<tool>` namespace, the tier that lives with the server's own file, and the
-> `/mcps` view. **It is implemented**: the partition, the provider, the manager and the endpoint
-> are all in the tree. ★ §13 — the non-blocking start, where every server keeps a state and
-> its tools join the next turn once the server is up — is implemented too. ★ §8 — how a
-> sandbox Kit packages an MCP server — is still a proposal.
-> `docs/config-design.md` describes the **configuration system** — the config root and its
-> three levels, the partitions and their file specs, loading and precedence, hot reload, and
-> the dependency iron rules. **Its body describes the code as it is**; the `mcps/` partition
-> (§6.7) and the tier that lives with the tool (§6.6) are implemented. ★ The prefix matching
-> in a **global deny** (§6.3) is gone with the deny list itself: "not exposed" is said by a
-> file's `allows:` and by an agent's `tools`.
->
-> ★ `docs/config-optimization-design.md` is **fully implemented** — its P1–P4 have landed, and
-> §7 lists the decisions the owner has made. ★ P4 retired the generation counter: the tree's
-> identity is the configuration object plus the MCP tool surface, and the builder **compares**
-> instead of being **notified**.
-> The code today is what `docs/config-design.md` §8 (hot reload) and §6 (the configuration
-> surface) describe: the two documents do not contradict each other, one is the present and
-> the other the future.
-> ★ Its trigger is real, and it is **fixed**: a `config_write` that lands on an agent's own
-> file now rebuilds **only the agents it affects** (P2), and the run that was interrupted by the
-> approval **pins the tree it started with**, so the report returns (P3).
-> ★ And the model can now tell whether its own change landed: the six `config_*` tools each say
-> which side they answer from, and the two messages that said the opposite have been fixed (P1).
->
-> ★ `docs/logging-design.md` **is implemented**: the mutable level, `log_level`, the
-> composition root, the hertz adapter, the per-module injection and moving the request log
-> out of `llm/common` are all in the tree. §1 is the pre-change snapshot, kept to explain
-> why. It is a new Chinese-only document — unlike the eight above, it never had an English twin.
+> designs say the same about their own subject: each of the five **describes the code as
+> it is**, and the proposals that have not landed are collected in its own "待决" section.
+> `docs/config-design.md` covers **the configuration system** — the config root and its
+> three levels, the partitions and their file specs, loading and precedence, the tool
+> surface, the six `config_*` tools, hot reload, and the dependency iron rules.
+> ★ Its body is the present: the `mcps/` partition, the tier that lives with the tool,
+> the "mark, then rebuild on the next turn by dependency" reload, and the retirement of
+> the generation counter — the tree's identity is the configuration object plus the MCP
+> tool surface, and the builder **compares** instead of being **notified** — are all in
+> the code.
+> `docs/runtime-design.md` covers **the runtime** — a run as a durable row with a lease
+> and a fence, the connection demoted to a subscriber, the one-turn-per-session admission
+> gate and its cross-client 409, context usage and compaction, and the logging assembly
+> (the mutable level, `log_level`, the composition root and the hertz adapter).
+> `docs/tools-design.md` covers **tools and integrations** — where a tool comes from
+> (`tools:` / `mcps:` / `skills:` and the `mcp__<server>__<tool>` namespace), the bounded
+> filesystem backend in `agentkit/fsx`, the MCP integration, and the Docker Sandbox Kit
+> that packages the whole process as a v3 workload. ★ How a sandbox Kit packages an MCP
+> server is still a proposal.
+> `docs/ui-design.md` covers **the interface and its resources** — how an uploaded file
+> lands on disk, what the server does to it, how the interface shows it, and the motion
+> tokens with the reduced-motion fallback.
+> ★ And `docs/pitfalls.md` is the **pitfall register**: the traps this tree has hit, what
+> caused each of them, how it was fixed or what boundary it still has. Read it before
+> touching a subsystem you have not touched yet — it is cheaper than rediscovering the
+> same trap.
 >
 > ★ One directory is not a document set: **`sandbox-kit/`** holds the Docker Sandbox Kits that
 > package openheron as a sandbox workload — `openheron/` (the workload: descriptor, content
@@ -121,7 +83,7 @@ one — change one and change the other.
 > `BUILDING_zh.md` are the Chinese versions), `sandbox-kit/acceptance/run.sh` is the
 > acceptance run — every claim the design makes, as a check that fails the script.
 > They are a **separate artifact**: `task release` still produces the six static
-> binaries and nothing else. Their design is `docs/sandbox-kit-design.md`, and
+> binaries and nothing else. Their design is `docs/tools-design.md`, and
 > `task kit` builds them.
 >
 > Write these documents **from the code, not from imagination**: every conclusion must point at a
@@ -210,7 +172,7 @@ bug or did I misconfigure it?" harder to answer.
 line shows up in the default output.
 
 `llm/common` used to write the request log with the standard logger; that code moved to
-`agentkit/obs/httplog` (`docs/logging-design.md` §6), so the leaf now logs nothing at all. Any
+`agentkit/obs/httplog` (`docs/runtime-design.md` §4.4), so the leaf now logs nothing at all. Any
 openheron-internal import inside `llm/common` is still a regression.
 
 ★ **There is no global logger.** `main.installLogger` builds one `*slog.Logger` around a shared
@@ -220,7 +182,7 @@ package-level variable.
 
 ★ The log's **destination** can move after startup: `obs.Sink` is the `io.Writer` behind the
 handler, and `log.file` points it at a file once the configuration is read
-(`docs/logging-design.md` §10). What moves is where the records go, not the logger — hertz and
+(`docs/runtime-design.md` §4.3). What moves is where the records go, not the logger — hertz and
 eino already hold that, and a process-global registry cannot be rewritten.
 
 ## Other conventions
@@ -252,11 +214,11 @@ eino already hold that, and a process-global registry cannot be rewritten.
   an interface, read `docs/api-design.md`; before adding a `/v2` endpoint, read
   `docs/api-v2-design.md`; before touching the frontend, read `docs/frontend-design.md`; before
   touching the test environment (ports / isolation directories), read `docs/frontend-design.md`
-  §11.2 and `docs/config-design.md` §5.2. ★ `docs/config-design.md` **is** in this repository;
+  §11.2 and `docs/config-design.md` §3.3. ★ `docs/config-design.md` **is** in this repository;
   the other three are upstream documents that are **not** — if you cannot get them, ask
   first. The `docs/architecture.md` / `docs/user-manual.md` / `docs/developer-manual.md` shipped here (and their `_zh` Chinese
   versions) describe **this code surface** as it actually is — just read them.
-  `docs/context-usage-design.md` covers context usage and compaction: the usage dashboard and
+  `docs/runtime-design.md` covers context usage and compaction: the usage dashboard and
   compaction persistence are already in the code; read it before changing context-usage code.
 
 ### Commit messages
@@ -435,7 +397,7 @@ cd web && bun run smoke:config             # config_write's approval round trip 
   children; the nearer rule wins.
 
 The full isolation details are in `docs/frontend-design.md` §11.2 and
-`docs/config-design.md` §5.2.
+`docs/config-design.md` §3.3.
 
 ## Related documents
 
@@ -454,18 +416,11 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 
 | Document | Content |
 |---|---|
-| `docs/context-usage-design.md` | **Context-usage estimation design** — accounting rules, data flow, backend and frontend changes, persistence of compaction results and effective history (**the usage dashboard and compaction persistence are implemented**) |
-| `docs/session-concurrency-design.md` | **Session concurrency design** — why cross-client preemption happened, the "one turn per session" rule and its implementation, and how the frontend learns that a session is busy (**the admission gate and the 409 are implemented**) |
-| `docs/fs-backend-design.md` | **Filesystem backend design** — why `eino-ext`'s local backend was forked into `agentkit/fsx`, how paths are confined to the project root, and how `ls`/`glob` are bounded (**implemented**) |
-| `docs/run-lifecycle-design.md` | **Run lifecycle design** — why a turn was bound to one SSE connection, and how a run became a durable row with a lease and a fence, so the connection could be demoted to a subscriber (**§3-§9 are implemented**: the ledger, the lease, the fence, the scan and the frontend) |
-| `docs/sandbox-kit-design.md` | **Docker Sandbox Kit packaging** — the openheron process as it is, a v3 workload Kit that carries the whole process into a microVM, how the model key stays on the host, and the SSE path that had to be measured (**the Kit is built and published**; §4.2 still holds three open decisions) |
-| `docs/mcp-design.md` | **MCP integration design** — the tool assembly path, what an MCP client adds to it, the `mcp__<server>__<tool>` namespace, prefix matching in the tool tables, and where an MCP server would run inside the Kit (**implemented**; §13 — the non-blocking start — is implemented too; §8 — how a sandbox Kit packages an MCP server — is still a proposal) |
-| `docs/config-design.md` | **Configuration system design** — the config root and its three levels, the partitions and their file specs, loading and precedence, hot reload, and the dependency iron rules (**the body describes the code as it is**; the `mcps/` partition and the tier that lives with the tool are implemented) |
-| `docs/config-optimization-design.md` | **Configuration system optimization — design** — the six `config_*` tools and which side each answers from, the file tools handing configuration-root writes over to the configuration service, the reload becoming "mark, then rebuild on the next turn by dependency", the query that answers "what changes next turn", and the retirement of the generation counter (**P1–P4 are implemented**, and §7 lists the decisions the owner has made) |
-| `docs/tool-surface-design.md` | **Tool-surface design** — what tools an agent gets (`tools:` / `mcps:` / `skills:`), the MCP namespace's three segments, the configuration surface collapsed into one core, and the six `config_*` tools (**§2-§5 are implemented**) |
-| `docs/logging-design.md` | **Logging assembly refactor — design** — the composition root, a mutable `log_level`, injected loggers, taking over hertz's log output, and moving the request log out of `llm/common` (**implemented**) |
-| `docs/animation-design.md` | **Interface motion — design** — the motion tokens, the reduced-motion fallback, the brand mark's entrance, and the interface motions that are still a proposal (**§2.3, §3 and §4 are implemented**) |
-| `docs/attachment-design.md` | **Attachments — design** — how an uploaded file lands on disk, what the server does to it (the name carries a hash, pictures are compressed), and how the interface shows it |
+| `docs/config-design.md` | **Configuration system design** — the config root and its three levels, the partitions and their file specs, loading and precedence, the tool surface, the six `config_*` tools, hot reload, and the dependency iron rules (**the body describes the code as it is**) |
+| `docs/runtime-design.md` | **Runtime design** — a run as a durable row with a lease and a fence, the one-turn-per-session admission gate, context usage and compaction, and the logging assembly (**the body describes the code as it is**) |
+| `docs/tools-design.md` | **Tools and integrations design** — where a tool comes from, the bounded filesystem backend in `agentkit/fsx`, the MCP integration, and the Docker Sandbox Kit (**the body describes the code as it is**) |
+| `docs/ui-design.md` | **Interface and resources design** — how an uploaded file lands on disk, what the server does to it, how the interface shows it, and the motion tokens (**the body describes the code as it is**) |
+| `docs/pitfalls.md` | **Pitfall register** — the traps this tree has hit, what caused each of them, and how it was fixed or what boundary it still has |
 
 ★ For the bilingual set, the file without a suffix is the **English main version**; `_zh` is the
 Chinese version; the two correspond one to one — change one and change the other.

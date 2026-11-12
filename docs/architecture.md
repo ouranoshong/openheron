@@ -223,7 +223,7 @@ The event types come from the `ag-ui-protocol/ag-ui` Go SDK. The frames are rend
 | `TOOL_CALL_START/ARGS/END/RESULT` | `transport.go:283-314` | Tool calls |
 | `CUSTOM` (`model_retry`) | `transport.go:232` | Model-retry notice |
 | `RUN_FINISHED` | `transport.go:69`, `:75` | The turn ended; carries result and usage |
-| `RUN_ERROR` | `transport.go:240`, `api/v2_run.go:283` | Failure — ★ the code says which kind, and the message says why (see `docs/run-lifecycle-design.md` §8.3) |
+| `RUN_ERROR` | `transport.go:240`, `api/v2_run.go:283` | Failure — ★ the code says which kind, and the message says why (see `docs/runtime-design.md` §5.4) |
 
 A sub-agent's output is **attributed through `subagentRunId` on the event** rather than
 through a separate event type — that lets the frontend handle every agent's output with
@@ -339,7 +339,7 @@ they are mounted onto an Agent, and how skills are scoped to a particular Agent.
 ★ **The config tools are always mounted and almost never visible.** They join the batch
 for every agent, and an agent sees the ones its own `tools:` list names — like every
 other tool that is not an MCP one. Five of them only read and are in the code's exception list; `config_write`
-is not, and cannot be added to it from a file (`docs/config-design.md` §6.3).
+is not, and cannot be added to it from a file (`docs/config-design.md` §6.2).
 
 ★ **The tier of a tool is decided by the file that provides it.** A file's own
 `allows:` names the tools that run without a nod — `tools/http.yaml` names
@@ -468,7 +468,7 @@ counting `grep '"github.com/ouranoshong/openheron/'` hits per package:
 | | `agentkit/obs` | none | **The logging assembly**: it *builds* loggers (`New`, `ParseLevel`, `Discard`) and owns the sink — there is no global logger to reach for. Its subpackages `agentkit/obs/hertz` (takes over hertz's log output), `agentkit/obs/hook` (eino's callbacks) and `agentkit/obs/httplog` (the model request log) are leaves too |
 | | `llm/common` | none | Vendor protocol layer (zero openheron dependencies, **zero log code**) |
 | | `webui` | none | Embedded frontend assets |
-| | `agentkit/fsx` | none | **The filesystem backend**: a bounded local backend — writes confined to the project root, ignore rules, result caps (see [fs-backend-design.md](fs-backend-design.md) — that document is Chinese only) |
+| | `agentkit/fsx` | none | **The filesystem backend**: a bounded local backend — writes confined to the project root, ignore rules, result caps (see [tools-design.md](tools-design.md) — that document is Chinese only) |
 | | `agentkit/shell` | none | **Which shell runs the commands**: it picks a POSIX shell (or `cmd.exe`) at startup, and it is also the sentence the `execute` tool's description tells the model — the dialect and the runner have to be the same answer |
 | | `agentkit/imaging` | none | Compresses uploaded pictures, derives the hashed file names and the thumbnails |
 | | `agentkit/templates` | none | **The configuration templates**: the files `openheron init` writes and the config editor scaffolds. ★ It is a leaf so that both the configuration layer and the command layer can read the **same** file — a copy would drift |
@@ -536,7 +536,7 @@ microseconds, the caller's file and line, the level, then the message and the at
 ```
 
 `llm/common` used to write the request log with the standard logger, and that code moved to
-`agentkit/obs/httplog` (`docs/logging-design.md` §6) — the leaf now carries no log code at all.
+`agentkit/obs/httplog` (`docs/runtime-design.md` §4.4) — the leaf now carries no log code at all.
 Any openheron-internal import inside `llm/common` is still a regression.
 
 ★ The logger is built at the composition root (`main.installLogger`) around a shared
@@ -607,7 +607,7 @@ registry and eino a process-global callback registry, so `hlog.SetLogger` and
 is injected.
 
 ★ **The destination moves, the logger does not.** `obs.Sink` is the `io.Writer` behind the
-handler, so `log.file` can point it at a file after startup (`docs/logging-design.md` §10).
+handler, so `log.file` can point it at a file after startup (`docs/runtime-design.md` §4.3).
 hertz and eino already hold the logger, and a process-global registry cannot be rewritten —
 so the sink is the thing that changes.
 
@@ -897,7 +897,7 @@ set with two values, so a color that exists in one exists in the other.
 are tokens in `web/src/index.css` (`--motion-duration-*`), and one global
 `prefers-reduced-motion` rule collapses every animation — including the ones
 `tw-animate-css` brings — to 0.01ms, so a user who asks for less motion gets the same
-interface without the travel. The design is `docs/animation-design.md`.
+interface without the travel. The design is `docs/ui-design.md`.
 
 ★ **The brand mark is generated, not drawn twice.** `web/public/favicon.svg` is the source;
 `web/src/components/brand-mark.generated.tsx` is written from it by

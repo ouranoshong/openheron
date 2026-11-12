@@ -19,7 +19,7 @@
 #       --host api.openai.com --env OPENAI_API_KEY \
 #       --placeholder proxy-managed --value-stdin
 #
-# The design this implements is docs/sandbox-kit-design.md.
+# The design this implements is docs/tools-design.md.
 
 schemaVersion: "3"
 kind: mixin

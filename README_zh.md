@@ -219,26 +219,20 @@ task check      # lint + test
 | [docs/user-manual.md](docs/user-manual.md) · [中文](docs/user-manual_zh.md) | **用户使用说明** —— 安装、配置、界面操作 |
 | [docs/developer-manual.md](docs/developer-manual.md) · [中文](docs/developer-manual_zh.md) | **开发者说明** —— 分层、依赖铁律、开发配方、测试与排障 |
 
-★ 另有**十一篇只有中文的文档** —— 架构与代码设计那一类。它们的中文内容接管了原文件名，
+★ 另有**五篇只有中文的文档** —— 架构与代码设计那一类。它们的中文内容接管了原文件名，
 所以下面的链接就是它们唯一的入口：
 
 | 文档 | 内容 |
 |---|---|
-| [docs/context-usage-design.md](docs/context-usage-design.md) | **上下文使用预估设计方案** —— 占用口径、数据流，以及压缩后的对话如何持久化（已实现） |
-| [docs/session-concurrency-design.md](docs/session-concurrency-design.md) | **会话并发设计方案** —— 「一个会话一轮」的规则，以及前端怎么知道会话正忙（已实现） |
-| [docs/run-lifecycle-design.md](docs/run-lifecycle-design.md) | **run 生命周期设计方案** —— run 变成一行持久事实、配上租约与 fence，好让连接降级为订阅者（§3-§9 已实现） |
-| [docs/fs-backend-design.md](docs/fs-backend-design.md) | **文件系统后端设计方案** —— `agentkit/fsx` 这个分叉，与每个工具都要经过的路径收敛（已实现） |
-| [docs/sandbox-kit-design.md](docs/sandbox-kit-design.md) | **Docker Sandbox Kit 打包设计方案** —— 整个进程作为 v3 workload Kit 进 microVM、模型密钥如何留在宿主，以及 SSE 这条路（Kit 已建成并发布） |
-| [docs/mcp-design.md](docs/mcp-design.md) | **MCP 接入设计方案** —— 工具装配路径、工具命名空间，以及 MCP 服务器在 Kit 里会跑在哪（已实现，例外是 §8） |
-| [docs/config-design.md](docs/config-design.md) | **配置系统设计说明** —— 配置根与它的三级解析、各个分区、加载与优先级、热更新（正文讲的是代码现状） |
-| [docs/tool-surface-design.md](docs/tool-surface-design.md) | **工具面设计** —— 一个 agent 拿到哪些工具（`tools:` / `mcps:` / `skills:`）与六个 `config_*` 工具（§2-§5 已实现） |
-| [docs/logging-design.md](docs/logging-design.md) | **日志装配改造设计** —— 组合根、可变等级、`log_level`、logger 注入，以及把请求日志搬出 `llm/common`（**已实现**） |
-| [docs/animation-design.md](docs/animation-design.md) | **界面动效设计** —— 动效令牌、减少动态效果的降级、品牌标记的入场，以及仍是提案的界面那几条动效（§2.3、§3、§4 已实现） |
-| [docs/attachment-design.md](docs/attachment-design.md) | **附件设计** —— 上传的文件怎么落盘、服务端对它做了什么，以及界面怎么显示它 |
+| [docs/config-design.md](docs/config-design.md) | **配置系统设计说明** —— 配置根与它的三级解析、各个分区、加载与优先级、工具面、六个 `config_*` 工具、热更新，以及依赖铁律（正文讲的是代码现状） |
+| [docs/runtime-design.md](docs/runtime-design.md) | **运行时设计说明** —— run 变成一行持久事实、配上租约与 fence、「一个会话一轮」的准入闸门、上下文占用与压缩，以及日志装配（正文讲的是代码现状） |
+| [docs/tools-design.md](docs/tools-design.md) | **工具与集成设计说明** —— 工具从哪来、`agentkit/fsx` 这个分叉、MCP 接入，以及把整个进程打包成沙箱 workload 的 Docker Sandbox Kit（正文讲的是代码现状） |
+| [docs/ui-design.md](docs/ui-design.md) | **界面与资源设计说明** —— 上传的文件怎么落盘、服务端对它做了什么、界面怎么显示它，以及动效令牌（正文讲的是代码现状） |
+| [docs/pitfalls.md](docs/pitfalls.md) | **坑点登记册** —— 这棵树踩过的坑、每个坑的成因，以及它怎么处理 |
 
 ★ 把 openheron 打包成沙箱 workload 的 **Docker Sandbox Kit** 在
 [`sandbox-kit/`](sandbox-kit/) 里 —— 描述文件、内容配方与入口脚本。
-它的设计见 [docs/sandbox-kit-design.md](docs/sandbox-kit-design.md)。
+它的设计见 [docs/tools-design.md](docs/tools-design.md)。
 
 ★ `docs/` 下更细的分册设计与行业对照在**上游仓库**里 —— 机制拆解与取舍见上游的
 `docs/positioning.md`。

@@ -592,5 +592,5 @@ sbx run ./sandbox-kit/openheron \
 
 ★ **想自己构建？** 镜像是发布好的，但源码在仓库里：
 [`BUILDING.md`](BUILDING.md) 讲怎么从源码构建、怎么改描述文件、
-怎么发布新版本。[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md)
+怎么发布新版本。[`docs/tools-design.md`](../docs/tools-design.md)
 是它背后的设计，而它依赖的每一条假设都是实测出来的。

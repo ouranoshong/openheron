@@ -39,18 +39,11 @@ PAIRS = [
 #   so a `_zh` twin for any of these is a mistake, not a mirror. This
 #   catches it before it becomes a pair nobody updates.
 CHINESE_ONLY = [
-    "animation-design.md",
-    "attachment-design.md",
     "config-design.md",
-    "config-optimization-design.md",
-    "context-usage-design.md",
-    "fs-backend-design.md",
-    "logging-design.md",
-    "mcp-design.md",
-    "run-lifecycle-design.md",
-    "sandbox-kit-design.md",
-    "session-concurrency-design.md",
-    "tool-surface-design.md",
+    "pitfalls.md",
+    "runtime-design.md",
+    "tools-design.md",
+    "ui-design.md",
 ]
 
 IDENT = re.compile(r"`[a-zA-Z0-9_./:$-]+`")

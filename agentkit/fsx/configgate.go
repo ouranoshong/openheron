@@ -7,7 +7,7 @@ package fsx
 //
 //	interface, and the answer comes from the caller. That keeps the package
 //	free of any openheron dependency — it is a leaf backend, and it stays
-//	one (see docs/fs-backend-design.md).
+//	one (see docs/tools-design.md).
 type ConfigGate interface {
 	// OwnsPath reports whether this absolute path is a configuration file.
 	//

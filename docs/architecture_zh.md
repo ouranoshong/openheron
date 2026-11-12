@@ -171,7 +171,7 @@ frontmatter 键。正文就是提示词本身（`Instruction`）。
 | `TOOL_CALL_START/ARGS/END/RESULT` | `transport.go:283-314` | 工具调用 |
 | `CUSTOM`（`model_retry`） | `transport.go:232` | 模型重试提示 |
 | `RUN_FINISHED` | `transport.go:69`, `:75` | 本轮结束，带结果与用量 |
-| `RUN_ERROR` | `transport.go:240`, `api/v2_run.go:283` | 失败 —— 码说明哪一类，消息说明为什么（见 `docs/run-lifecycle-design.md` §8.3） |
+| `RUN_ERROR` | `transport.go:240`, `api/v2_run.go:283` | 失败 —— 码说明哪一类，消息说明为什么（见 `docs/runtime-design.md` §5.4） |
 
 子 Agent 的产出通过事件上的 `subagentRunId` 归属，不另开事件类型，前端能用同一套 reducer
 处理所有 Agent 的输出。
@@ -257,7 +257,7 @@ workspace 里拿走；已经随消息发出去的文件留在那条消息上。
 
 config 工具总是被挂上，但几乎从不可见：它们进每个 Agent 的批次，Agent 只看见自己 `tools:`
 点名的那些，与其它非 MCP 工具一样。其中五个只读，在代码的例外清单里；`config_write` 不在，
-且文件加不进去（`docs/config-design.md` §6.3）。
+且文件加不进去（`docs/config-design.md` §6.2）。
 
 一个工具的档位由提供它的那个文件决定：文件自己的 `allows:` 点名不用问的工具
 （`tools/http.yaml` 点 `request_get`，`tools/kb.yaml` 点 `kb_search`），该文件提供的其余
@@ -341,7 +341,7 @@ openheron 的篇幅大部分在这里 —— 边界比能力更决定一个 Agen
 | | `agentkit/obs` | 无 | **日志装配处**：造 logger（`New`、`ParseLevel`、`Discard`）并持有 sink，没有全局 logger 可回取。子包 `agentkit/obs/hertz`（接管 hertz 日志）、`agentkit/obs/hook`（eino callback）、`agentkit/obs/httplog`（模型请求日志）同样是叶子 |
 | | `llm/common` | 无 | 厂商协议层，零 openheron 依赖、零日志代码 |
 | | `webui` | 无 | 嵌入式前端资源 |
-| | `agentkit/fsx` | 无 | **文件系统后端**：写收敛在项目根、忽略规则、结果上限（见 [fs-backend-design.md](fs-backend-design.md)，只有中文） |
+| | `agentkit/fsx` | 无 | **文件系统后端**：写收敛在项目根、忽略规则、结果上限（见 [tools-design.md](tools-design.md)，只有中文） |
 | | `agentkit/shell` | 无 | **哪个 shell 跑命令**：启动时挑一个 POSIX shell（或者 `cmd.exe`），它同时是 `execute` 工具描述里告诉模型的那句话 —— 方言与执行必须是同一个答案 |
 | | `agentkit/imaging` | 无 | 上传图片的压缩、哈希文件名与缩略图 |
 | | `agentkit/templates` | 无 | **配置模板**：`openheron init` 写下的文件、编辑器给的脚手架。是叶子包，配置层与命令层才能读到同一个文件 |
@@ -398,7 +398,7 @@ sink；组合根造出 `*slog.Logger` 再注入下去，每个要记日志的包
 2026/10/29 22:28:34.346459 main.go:189: [Info] [main] openheron version=dev
 ```
 
-请求日志原来在 `llm/common`，已搬到 `agentkit/obs/httplog`（`docs/logging-design.md` §6）；
+请求日志原来在 `llm/common`，已搬到 `agentkit/obs/httplog`（`docs/runtime-design.md` §4.4）；
 该叶子包现在没有日志代码。`llm/common` 里任何一处 import openheron 内部包都算回归。
 logger 由组合根 `main.installLogger` 围绕共享的 `slog.LevelVar` 建起来，所以
 `server/config.yaml` 的 `log_level` 与 `OPENHERON_LOG_LEVEL` 能在 handler 建好之后移动门限。
@@ -443,7 +443,7 @@ main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
 `info`），`applyLogFile` 把 sink 改向文件。hertz 与 eino 各持一个进程级注册表，所以
 `hlog.SetLogger` 与 `callbacks.AppendGlobalHandlers` 各做一次，都在 `hserver.New` 之前 ——
 这是仅有的两处全局注册，其余全是注入。`obs.Sink` 是 handler 背后的 `io.Writer`，所以
-`log.file` 能在启动后改向文件（`docs/logging-design.md` §10）；变的是 sink，不是 logger。
+`log.file` 能在启动后改向文件（`docs/runtime-design.md` §4.3）；变的是 sink，不是 logger。
 
 ### 5.2 配置根只有三级
 
@@ -634,7 +634,7 @@ zustand 的 selector 必须返回引用稳定的值：每次调用造新数组/�
 
 动效只有 CSS，而且听系统的：时长与缓动是 `web/src/index.css` 里的 token
 （`--motion-duration-*`），一条全局的 `prefers-reduced-motion` 规则把所有动画 —— 包括
-`tw-animate-css` 自带的那几处 —— 压到 0.01ms。方案在 `docs/animation-design.md`。
+`tw-animate-css` 自带的那几处 —— 压到 0.01ms。方案在 `docs/ui-design.md`。
 
 品牌标记是生成的，不是画了两遍：`web/public/favicon.svg` 是源，
 `web/src/components/brand-mark.generated.tsx` 由 `web/scripts/generate-brand-mark.ts` 写出来，

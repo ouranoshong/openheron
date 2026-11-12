@@ -325,7 +325,7 @@ model wrong.
 
 Say you want a new `mcps/` directory:
 
-★ That directory is no longer hypothetical — `docs/mcp-design.md` designs it (that
+★ That directory is no longer hypothetical — `docs/tools-design.md` designs it (that
   document is Chinese only, like every design document here), and the partition is in
   the tree. The recipe below is the one it followed.
 

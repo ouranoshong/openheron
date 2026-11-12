@@ -282,7 +282,7 @@ successfully with no output]」）是契约的一部分。
 
 比如新增 `mcps/` 目录：
 
-★ 这个目录不再只是假设 —— `docs/mcp-design.md` 设计了它（本仓库的设计文档只有中文），
+★ 这个目录不再只是假设 —— `docs/tools-design.md` 设计了它（本仓库的设计文档只有中文），
   而且这个分区已经在树上。下面这份配方就是它走的路子。
 
 1. **`agentkit/spec/config.go`**：加目录常量 `DirMCP = "mcps"`，并在

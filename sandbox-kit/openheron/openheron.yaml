@@ -13,7 +13,7 @@
 #   the user, not to the workload. The credentials live in the mixins beside
 #   this one: `../openheron-deepseek/`, `../openheron-openai/`.
 #
-# The design this implements is docs/sandbox-kit-design.md.
+# The design this implements is docs/tools-design.md.
 
 schemaVersion: "3"
 kind: workload

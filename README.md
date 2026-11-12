@@ -255,26 +255,20 @@ This repository ships **four bilingual document sets**, maintained alongside the
 | [docs/user-manual.md](docs/user-manual.md) · [中文](docs/user-manual_zh.md) | **User manual** — installation, configuration, operating the interface |
 | [docs/developer-manual.md](docs/developer-manual.md) · [中文](docs/developer-manual_zh.md) | **Developer manual** — layering, the dependency rules, development recipes, testing and troubleshooting |
 
-★ And **eleven Chinese-only documents** — the architecture and code-design ones. Their Chinese
+★ And **five Chinese-only documents** — the architecture and code-design ones. Their Chinese
 content took over the plain name, so the link below is the only entry there is:
 
 | Document | Contents |
 |---|---|
-| [docs/context-usage-design.md](docs/context-usage-design.md) | **Context usage estimate — design** — the occupancy metric, the data flow, and how the compacted conversation is persisted (implemented) |
-| [docs/session-concurrency-design.md](docs/session-concurrency-design.md) | **Session concurrency — design** — the one-turn-per-session rule and how the frontend learns that a session is busy (implemented) |
-| [docs/run-lifecycle-design.md](docs/run-lifecycle-design.md) | **Run lifecycle — design** — a run as a durable row, a lease with a fence, and the connection demoted to a subscriber (§3-§9 are implemented) |
-| [docs/fs-backend-design.md](docs/fs-backend-design.md) | **Filesystem backend — design** — the `agentkit/fsx` fork and the path confinement every tool passes through (implemented) |
-| [docs/sandbox-kit-design.md](docs/sandbox-kit-design.md) | **Docker Sandbox Kit packaging — design** — the whole process as a v3 workload Kit inside a microVM, how the model key stays on the host, and the SSE path (the Kit is built and published) |
-| [docs/mcp-design.md](docs/mcp-design.md) | **MCP integration — design** — the tool assembly path, the tool namespace, and where an MCP server would run inside the Kit (implemented, except §8) |
-| [docs/config-design.md](docs/config-design.md) | **Configuration system — design** — the config root and its three levels, the partitions, loading and precedence, hot reload (the body describes the code as it is) |
-| [docs/tool-surface-design.md](docs/tool-surface-design.md) | **Tool surface — design** — which tools an agent gets (`tools:` / `mcps:` / `skills:`) and the six `config_*` tools (§2-§5 are implemented) |
-| [docs/logging-design.md](docs/logging-design.md) | **Logging assembly refactor — design** — the composition root, a mutable level, `log_level`, injected loggers, and moving the request log out of `llm/common` (**implemented**) |
-| [docs/animation-design.md](docs/animation-design.md) | **Interface motion — design** — the motion tokens, the reduced-motion fallback, the brand mark's entrance, and the interface motions that are still a proposal (§2.3, §3 and §4 are implemented) |
-| [docs/attachment-design.md](docs/attachment-design.md) | **Attachments — design** — how an uploaded file lands on disk, what the server does to it, and how the interface shows it |
+| [docs/config-design.md](docs/config-design.md) | **Configuration system — design** — the config root and its three levels, the partitions, loading and precedence, the tool surface, the six `config_*` tools, hot reload and the dependency iron rules (the body describes the code as it is) |
+| [docs/runtime-design.md](docs/runtime-design.md) | **Runtime — design** — a run as a durable row with a lease and a fence, the one-turn-per-session admission gate, context usage and compaction, and the logging assembly (the body describes the code as it is) |
+| [docs/tools-design.md](docs/tools-design.md) | **Tools and integrations — design** — where a tool comes from, the `agentkit/fsx` fork, the MCP integration, and the Docker Sandbox Kit that packages the whole process (the body describes the code as it is) |
+| [docs/ui-design.md](docs/ui-design.md) | **Interface and resources — design** — how an uploaded file lands on disk, what the server does to it, how the interface shows it, and the motion tokens (the body describes the code as it is) |
+| [docs/pitfalls.md](docs/pitfalls.md) | **Pitfall register** — the traps this tree has hit, what caused each of them, and how it was handled |
 
 ★ The **Docker Sandbox Kit** that packages openheron as a sandbox workload lives in
 [`sandbox-kit/`](sandbox-kit/) — the descriptor, the content recipe and the entrypoint.
-Its design is [docs/sandbox-kit-design.md](docs/sandbox-kit-design.md).
+Its design is [docs/tools-design.md](docs/tools-design.md).
 
 ★ The finer-grained design documents and the industry comparison live in the **upstream
 repository** under `docs/` — for the mechanism breakdown and the trade-offs, see the
