@@ -654,13 +654,20 @@ composer 必须读**服务端**的答案，而不是自己的内存：
 | `web` | `task lint-web` + `bun run test:unit` | bun |
 | `e2e` | `task test-e2e` —— 用它自带的假后端 | bun + chromium |
 | `secrets` | gitleaks 扫整个历史（§5.9） | — |
+| `tag-check` | 被 tag 的那个提交必须在 `main` 上 | — |
 | `install-script` | `task test-install` —— 用本地假发布测安装脚本 | — |
-| `release` | `task release`，然后建一份**草稿** GitHub Release | 上面四个检查 |
+| `release` | `task release`，然后建一份**草稿** GitHub Release | 上面四个检查 + tag 检查 |
 | `install` | 在我们发布的每个平台上装那份草稿里的产物 | `release` |
 | `publish` | 把草稿转成公开的 release | `install` |
 
 ★ **发布等检查**（`needs`），所以一个红 commit 上的 tag 什么也发不出去。流水线因此是
 **一个文件**：job 没法等另一个 workflow 里的 job，两个文件就意味着检查要跑第二遍。
+
+★ **发布还要等 tag 检查。** `tag-check` 问的是被 tag 的那个提交是不是 `main` 的祖先 ——
+这正是本节用文字写下的那条规则。只活在文字里的规则，一忙起来就会被绕过去：打在侧分支上
+的 tag 会发布一份没人合并过的东西，`main` 上留着旧版本，发布页上则数着一批永远对不齐的
+提交。流水线会直接拒绝，并在注解里说清该怎么办：先把那个提交合进 `main`，再在 `main`
+上打 tag。
 
 ★ **发布还要过安装闸门。** `install` job 装的就是 `release` job 造出来的那批产物，
 在我们要发布的每个平台上都装一遍，全装成了 `publish` 才把 release 公开 —— 一个没人
@@ -687,13 +694,14 @@ composer 必须读**服务端**的答案，而不是自己的内存：
 
 **打 tag 之前**
 
-1. `main` 是绿的 —— README 顶部的徽章，或者 Actions 页最后一轮。
-2. 工作树干净、`main` 是最新的：`git pull --ff-only`。★★ tag 必须指向
-   **已经在 `main` 上的那个提交** —— `main` 受保护，打在侧分支上的 tag
-   会发布一份没人合并过的东西。
-3. tag 名定好了。约定是 `v*`（`v0.1.0`），而且 tag 就是打进二进制里的
-   那个版本号。
-4. ★ **tag 的规则叫 `release-tag`**（Settings → Rules → Rulesets）。它
+1. ★ **发布先合进 `main`。** 改版本号是一个只动两行的 pull request，它在打 tag 之前
+   就合进了 `main` —— tag 打在 `main` 的顶端。打在侧分支上的 tag 会发布一份没人合并过
+   的东西，而 `tag-check` 会拒绝它。
+2. `main` 是绿的 —— README 顶部的徽章，或者 Actions 页最后一轮。
+3. 工作树干净、`main` 是最新的：`git pull --ff-only`。tag 必须指向**已经在 `main` 上的
+   那个提交**。
+4. tag 名定好了。约定是 `v*`（`v0.1.0`），而且 tag 就是打进二进制里的那个版本号。
+5. ★ **tag 的规则叫 `release-tag`**（Settings → Rules → Rulesets）。它
    禁止**删除或移动** tag —— 这是故意的：失败的发版，那个 tag 就留在仓库里
    当「试过什么」的记录。创建 tag 是允许的。
 
