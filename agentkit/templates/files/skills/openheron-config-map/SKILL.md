@@ -64,27 +64,28 @@ Prefill the struct → decode file by file (yaml.v3 writes only the keys that ap
 
 ## The six config tools (built in, still to be named in `tools:`)
 
-| Tool | What it answers | Tier |
-|---|---|---|
-| `config_get` | `{path}` reads a single file (with revision / hot); `{}` the partition table, the file list, the configuration in force | allow |
-| `config_validate` | `{path, content}` whether it can land, and on which line the error is; `{}` checks the whole tree on disk | allow |
-| `config_template` | `{path}` / `{section}` gives the skeleton; with neither you get the index | allow |
-| `config_notices` | `deferred[]` / version / configVersion / watch | allow |
-| `config_tier` | the tier of `{tool}` / `{agent}`; with neither you get the default and the whole exception table | allow |
-| `config_write` | an atomic write that carries `baseRevision` | **ask** |
+| Tool | What it answers | Side | Tier |
+|---|---|---|---|
+| `config_get` | `{path}` reads a single file (with revision / hot); `{}` the partition table, the file list, the configuration in force; `{impact: true}` answers "who depends on this file, and who the next turn rebuilds" | `disk` for a file's text, `running` for `impact`; the overview carries both versions | allow |
+| `config_validate` | `{path, content}` whether it can land, and on which line the error is; `{}` checks the whole tree on disk | `disk` | allow |
+| `config_template` | `{path}` / `{section}` gives the skeleton; with neither you get the index | neither — a skeleton is neither a file nor a tree | allow |
+| `config_notices` | `deferred[]` / `runningVersion` / `diskVersion` / `watch` | `running` | allow |
+| `config_tier` | the tier of `{tool}` / `{agent}`; with neither you get the default and the whole exception table | `running` | allow |
+| `config_write` | an atomic write that carries `baseRevision`; the answer carries `revision` / `runningVersion` / `diskVersion` / `applied` / `requiresRestart` | it wrote the disk, and it reports both versions | **ask** |
 
+★ **The answers name the side they came from.** `config_get {path}`, `config_validate` and `config_get {impact}` carry a `source` field: `disk` (the files on disk right now) or `running` (the tree this turn runs). The two that report a *state* rather than a *question* — `config_get {}` and `config_notices` — carry the two versions instead: `runningVersion` (the tree this turn runs) and `diskVersion` (the files on disk). A model that has just written a file can see that the disk moved and the running tree did not, instead of reading two numbers that differ by one letter.
 ★ `config_write` **cannot write `server/`** (the write gate `ValidatePath` refuses it), but `config_get` **can read it** (the read gate `ValidateReadPath` only cares about the shape). The two gates are not the same thing.
 ★ `config_validate {}` is fail-fast: it gives only the first blocking error plus every hint, not the full list of problems.
 ★ `config_get` does not leak secrets (the configuration only holds `${ENV}` / `@file:` references); over 64 KiB it **refuses** outright instead of truncating.
-★ `config_write` returns `applied` / `requiresRestart` — it takes effect at the next `PrepareAgent`; writing the agent itself is allowed too. ★ `applied: true` means the watcher will pick the file up, **not** that this turn can see it.
-★ **The config tools answer from two places.** The **file** answers (`config_get {path}`, `config_validate {path, content}`) read the disk, so a write is visible there at once. The **tree** answers (`config_tier`, the `effective` summary of `config_get {}`, the `deferred` of `config_notices`) come from the snapshot the turn was built with — a file written in this turn is on disk but in no tree yet, and it joins on the next turn.
+★ `config_write` returns `applied` / `requiresRestart` — it takes effect at the next turn; writing the agent itself is allowed too. ★ `applied: true` means the watcher will pick the file up, **not** that this turn can see it.
+★ **The config tools answer from two places.** The **file** answers (`config_get {path}`, `config_validate {path, content}`) read the disk, so a write is visible there at once. The **tree** answers (`config_tier`, the `effective` summary of `config_get {}`, the `deferred` of `config_notices`) come from the tree the turn was built with — a file written in this turn is on disk but in no tree yet, and it joins on the next turn.
 
 ## Skills (skills/) and hot vs. cold
 
 - Directory lookup: `$EINO_EXT_SKILLS_DIR` wins, otherwise search upward from the cwd for `.openheron/skills` — this one **does** search upward, unlike the config root.
 - The frontmatter is **eino's schema**: `name` / `description` / `context` / `agent` / `model`. `name` matches the directory name; `description` says "when to load it".
 - `context: inline` is not a declared constant; a typo does not error, it silently becomes inline. Only `fork` uses `agent:` / `model:`, and a reference that cannot be resolved is an error.
-- Hot: `llm/` `agents/` `tools/` `mcps/` `skills/`; cold: `server/` (a change needs a restart). `skills/` is a hot partition too — the fingerprint walks it recursively, so editing a `SKILL.md` rebuilds the snapshot and takes effect on the next turn.
+- Hot: `llm/` `agents/` `tools/` `mcps/` `skills/`; cold: `server/` (a change needs a restart). `skills/` is a hot partition too — the dependency walk reads the skill's own file, so editing a `SKILL.md` reaches the agents that name it and takes effect on the next turn.
 - A broken configuration does not kill the process: a failed reload keeps the last good configuration; only a failure on the first load makes the startup fail.
 
 ## Known traps (check these first)
@@ -94,7 +95,7 @@ Prefill the struct → decode file by file (yaml.v3 writes only the keys that ap
 - An agent written in this very turn answers "not in this turn's configuration yet" — **the write succeeded**; the tree catches up on the next turn, and the error says exactly that. Writing the file again is the mistake.
 - The `header:` of `llm/<provider>.yaml` is parsed but **never consumed**.
 - When provider-level `extra` happens to hold only `temperature` or `max_tokens`, it overrides the agent's value of the same name.
-- `agents[].reasoning` is not in the model's vocabulary → silently ignored, **and not reported**; the loader only checks the files under the `validate()` path.
+- `agents[].reasoning` is not in the model's vocabulary → a **load-time hard error**, and it names the file and the levels the model does declare. The vocabulary belongs to the model, not to the agent: a level the model does not carry means the request goes out with no reasoning configured at all.
 - `models[].summarize_at` is deprecated; the threshold belongs to the agent, and the denominator is the model's `context_window`.
 - The old `kb/config.yaml` is not read and is **silent** (`kb_search` disappears without an error); the migration has to `mv` first and start afterwards.
 - Every `.yaml` under `server/` is decoded into the same struct, with no file name allow-list — `server/typo.yaml` is merged into the configuration.

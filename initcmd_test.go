@@ -38,11 +38,11 @@ func TestInitJSONOutputIsValidJSON(t *testing.T) {
 	if out.Dir == "" || out.Model == "" {
 		t.Fatalf("dir and model must be reported: %+v", out)
 	}
-	// ★ The tree is written whole: four agents, four skills, three MCP
+	// ★ The tree is written whole: four agents, five skills, three MCP
 	//   servers, five tool configurations, the provider and the server
-	//   section — 18 files.
-	if len(out.Created) != 18 {
-		t.Fatalf("created = %v, want 18 files", out.Created)
+	//   section — 19 files.
+	if len(out.Created) != 19 {
+		t.Fatalf("created = %v, want 19 files", out.Created)
 	}
 	for _, want := range []string{
 		".openheron/agents/main.md",
@@ -53,6 +53,7 @@ func TestInitJSONOutputIsValidJSON(t *testing.T) {
 		".openheron/skills/openheron-config-edit/SKILL.md",
 		".openheron/skills/openheron-config-templates/SKILL.md",
 		".openheron/skills/openheron-config-validate/SKILL.md",
+		".openheron/skills/openheron-agent-authoring/SKILL.md",
 		".openheron/llm/deepseek.yaml",
 		".openheron/tools/http.yaml",
 		".openheron/tools/web_search.yaml",

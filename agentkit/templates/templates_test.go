@@ -27,6 +27,7 @@ func TestEveryTemplateIsThere(t *testing.T) {
 		"skills/openheron-config-edit/SKILL.md",
 		"skills/openheron-config-templates/SKILL.md",
 		"skills/openheron-config-validate/SKILL.md",
+		"skills/openheron-agent-authoring/SKILL.md",
 	} {
 		if !Has(rel) {
 			t.Errorf("%s is missing", rel)
@@ -90,6 +91,7 @@ func TestNestedReturnsTheSkillFolders(t *testing.T) {
 		"skills/openheron-config-edit/SKILL.md",
 		"skills/openheron-config-templates/SKILL.md",
 		"skills/openheron-config-validate/SKILL.md",
+		"skills/openheron-agent-authoring/SKILL.md",
 	}
 	if len(out) != len(want) {
 		t.Fatalf("Nested(skills) = %v, want %d entries", out, len(want))

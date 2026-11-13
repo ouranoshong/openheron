@@ -16,9 +16,12 @@ and the offset of the frontmatter is corrected by `parseShift` — all of these 
 |---|---|---|
 | 1 | `config_validate {path, content}` | clear the `issues[]` before the write (`Line: 0` means "no line", not line 0; the message of a cross-file rule names the file) |
 | 2 | `config_validate {}` | the whole tree on disk. **fail-fast**: only the first blocking error plus every hint, not the full list of problems |
-| 3 | `config_notices {}` | `deferred[]` / `version` / `configVersion` / `watch` — the `deferred[]` is the snapshot's |
-| 4 | `config_tier {tool}` or `{agent}` | the tier and the effective tool table (the result after `alwaysAsk`), read from this turn's snapshot |
-| 5 | `config_get {}` | the partition table, the file list, **the configuration this turn was built with** (the snapshot) |
+| 3 | `config_notices {}` | `deferred[]` / `runningVersion` / `diskVersion` / `watch` — the `deferred[]` is the running tree's |
+| 4 | `config_tier {tool}` or `{agent}` | the tier and the effective tool table (the result after `alwaysAsk`), read from the tree this turn runs |
+| 5 | `config_get {}` | the partition table, the file list, **the configuration this turn was built with** |
+| 6 | `config_get {impact: true}` | who depends on what changed, and who the next turn rebuilds |
+
+★ **The answers name the side they came from.** `config_get {path}`, `config_validate` and `config_get {impact}` carry a `source` field: `disk` (the files on disk right now) or `running` (the tree this turn runs). The two that report a *state* — `config_get {}` and `config_notices` — carry `runningVersion` and `diskVersion` instead.
 
 ★ A parse failure has no hints (the hints hang off the `*Config`), but the collection of the notices is ordered **before** the hard rules — one failing rule does not swallow the "you probably did not mean this".
 ★ `config_write` comes with its own whole-tree pre-check and `baseRevision` conflict detection; after a refused write the file is byte for byte the same as before the write.
@@ -35,7 +38,7 @@ and the offset of the frontmatter is corrected by `parseShift` — all of these 
 | the MCP server runs but its tools are invisible | the agent mounts it, so the **server's own file** decides: its `tools:` filter does not offer that tool (a wrong name does not error), or the server was never reached |
 | the MCP tool asks for a nod every time although `allows:` was configured | the name in the file does not match the tool name the server really provides — **a wrong name does not error**, check it with `/mcps`; the same goes for the `tools:` filter |
 | the MCP server never starts at all | it is not named by any agent's `mcps:`; the file being there only "defines" it, mounting it is what starts the process |
-| a tier is written and nothing thinks at all | `agents[].reasoning` is not in the model's vocabulary — silently ignored, **and there is no deferred** |
+| a tier is written and nothing thinks at all | `agents[].reasoning` is not in the model's vocabulary — that is a **load-time hard error** now, and it names the file and the levels the model does declare. It is not silent and it is not a deferred |
 | `kb_search` disappears and the log says not a word | the old `kb/config.yaml` is not in a loaded partition; the migration has to `mv` first and start afterwards |
 | the `temperature` in the request is not the value the agent wrote | the provider-level `extra` happens to hold only `temperature` / `max_tokens` |
 | `header:` is configured and nothing happens | it is parsed and then never consumed |
@@ -43,7 +46,7 @@ and the offset of the frontmatter is corrected by `parseShift` — all of these 
 | the request returns 401 | `${ENV}` is not set: it only goes into `deferred`, and the failure moves to the moment the endpoint is called |
 | the model never compacts | `context_window` is not declared, or `summarize_at` is written on the model side (deprecated) |
 | a certain agent never ran | unreachable from `main` — it does not error, but it is never constructed |
-| the agent was written in this very turn and the tree says it does not exist | **the write succeeded**: the config tools read this turn's snapshot, so the new agent appears on the next turn — the error says exactly that. Do not write it again |
+| the agent was written in this very turn and the tree says it does not exist | **the write succeeded**: `config_tier` answers from the tree this turn was built with, so the new agent appears on the next turn — the error says exactly that. Do not write it again. (`config_get` reads the disk and already shows the new file.) |
 | the agent is on disk but never runs | the loader left it out of the tree (an undeclared model, a broken subagent link) — `config_notices` / `config_validate` say why |
 | `context: fork` does not take effect | a typo in `context` does not error, it silently becomes inline; `inline` is not a declared constant |
 | the template and the code disagree | the factory template comments outrun the code: `web_search.provider` only accepts `duckduckgo`; an empty `kb.model` is not a pure lexical retrieval |
@@ -63,17 +66,18 @@ a `mcps` server name that does not match the regex, an http server carrying `env
 
 ## The runtime confirmation
 
-1. The `configVersion` of `config_notices {}` — it hashes the **disk**, so it moves as soon as the file is written. ★ The `deferred[]` next to it is the **snapshot's**: it lists the problems of the configuration that was running when the turn started, not the new one.
-2. For a change in a hot partition, watch whether the generation change happens (on a failure `onChange` is not called and the old configuration keeps serving).
+1. The two versions in `config_notices {}` — `diskVersion` (it hashes the **disk**, so it moves as soon as the file is written) and `runningVersion` (the tree this turn runs). ★ The `deferred[]` next to them is the **running tree's**: it lists the problems of the configuration that was running when the turn started, not the new one.
+2. For a change in a hot partition, watch whether the running version moves (on a failure the reload is not applied and the old configuration keeps serving).
 3. A change under `server/` is **verified after the restart**; `config_write` does not write this section at all, it has to be changed by hand.
-4. A content change under `skills/` is hot: it rebuilds the snapshot and takes effect on the next turn.
-5. The `applied` / `requiresRestart` in the `config_write` return say whether this change really took effect — it takes effect at the next `PrepareAgent`. ★ `applied: true` means the watcher will pick it up, **not** that this turn sees it: every `config_*` tool in this turn still reads the snapshot it started with.
+4. A content change under `skills/` is hot: it reaches the agents that name that skill and takes effect on the next turn.
+5. The `applied` / `requiresRestart` in the `config_write` return say whether this change really took effect — it takes effect on the next turn. ★ `applied: true` means the watcher will pick it up, **not** that this turn sees it: `config_tier` and `config_notices` still answer from the tree this turn runs, while `config_get` reads the disk and already shows the new content.
+6. `config_get {impact: true}` says what the change reaches: `dependents[]` (direct) and `rebuilds[]` (transitive — a parent's children are part of it). A change reaches **only** the agents whose own dependencies moved.
 
 ## The output contract
 
 Report only the key conclusions, do not paste the whole file and do not list the checking process:
 
-1. **Error**: `file path:line number` + one sentence on the cause + what it blocks (the startup / the load / the generation change).
+1. **Error**: `file path:line number` + one sentence on the cause + what it blocks (the startup / the load / the hot reload).
 2. **Warning**: the `deferred` entries and the silent failures listed above, pointing out that they "do not error but will not take effect".
 3. **Passed**: one sentence, naming the way it was verified (single file / whole tree / notices / after a restart).
 4. **Not verified**: what genuinely cannot be confirmed (the reachability of the endpoint, whether the secret was injected, the blocking errors that follow beyond `{}`), marked clearly and not glossed over.

@@ -19,7 +19,8 @@ while the tool asks `spec.TemplateFor` / `Templates` / `Skeleton`, which is the 
 
 ★ The file template wins over the partition template; the manifest has already settled this, so do not implement a fallback yourself.
 ★ `llm/` is the **fallback** (the provider's own template + a generic catch-all), the manifest carries no `llm/` template, and it is still read from the templates package.
-★ Only one partition is served at a time; a `config_get` over 64 KiB is refused instead of truncated.
+★ `config_template` serves **one partition at a time** — `{section}` returns that partition's files, and with neither argument it returns an **index** (the partition names and the paths under them), not every template at once: the whole set is tens of kilobytes, and a model handed all of it has to find the one it wanted anyway.
+★ `config_get` over 64 KiB is **refused** rather than truncated — a tool that returns half a file invites the model to edit the half it got.
 
 ## After you have the skeleton
 

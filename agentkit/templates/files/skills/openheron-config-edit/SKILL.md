@@ -10,7 +10,7 @@ context: inline
 
 `skill-expert` / `agent-expert` / `task` under `main` are three specialized instances of one and the same execution capability: this section treats the three alike, the only difference being the configuration domain; `main` gives all three the same instruction format.
 
-1. Before starting, read the target file with `config_get`; change only the files the instructions name, one at a time; re-read after the change to confirm the **file**. ★ The **tree** is this turn's snapshot: a file written now is on disk but in no tree yet, and it joins on the next turn.
+1. Before starting, read the target file with `config_get`; change only the files the instructions name, one at a time; re-read after the change to confirm the **file**. ★ The **tree** this turn runs is fixed: a file written now is on disk but in no tree yet, and it joins on the next turn.
 2. An unknown field is a hard error — rather write one key fewer than invent a key.
 3. Every duration carries a unit; every model reference carries the `<provider>/` prefix and has been declared in `llm/`.
 4. A secret is written only as `${ENV}` / `@file:`, never in plaintext, never echoed back.
@@ -21,26 +21,41 @@ context: inline
 9. Execute strictly by the instruction's **goal / scope / constraints**; if something is unclear, report "what is missing" instead of guessing the scope yourself.
 10. Act only inside the named configuration domain; when the work crosses domains, report which execution expert should take it over, and do not overstep.
 11. Understanding the intent and the trade-offs of a plan are not this skill's job (that is `main`'s); report only the key items.
-12. **After the change you must** run `config_validate` + `config_notices` and carry "error / warning / passed / not verified" into the conclusion; without a validation conclusion do not say "it is fixed". ★ `config_validate` reads the disk and `config_notices` reads this turn's snapshot — say in the conclusion that the new configuration is confirmed on the next turn.
+12. **After the change you must** run `config_validate` + `config_notices` and carry "error / warning / passed / not verified" into the conclusion; without a validation conclusion do not say "it is fixed". ★ `config_validate` reads the disk and `config_notices` answers from the tree this turn runs — say in the conclusion that the new configuration is confirmed on the next turn.
 
 ## The tool call order (do not skip a step)
 
 1. `config_get {path}` — get the body and the `revision`.
 2. For a new file, get the skeleton first with `config_template {path}` or `{section}`; do not invent fields from memory.
 3. **Before writing** `config_validate {path, content}` — clear the line numbers in `issues[]`.
-4. **Every write goes through `config_write {path, content, baseRevision}`**: whole-tree pre-check → revision conflict detection → refusal of plaintext → atomic replacement → trial merge → rollback on failure.
-   `write_file` / `edit_file` are a fallback only when `config_write` explicitly refuses that path, and the reason has to be stated in the conclusion.
-5. After the change `config_validate {}` (the whole tree on disk, fail-fast) and `config_notices {}` (this turn's snapshot).
+4. **Every write goes through the configuration service.** `config_write {path, content, baseRevision}` does a whole-tree pre-check → revision conflict detection → refusal of plaintext → atomic replacement → trial merge → rollback on failure.
+   ★ `write_file` / `edit_file` are **not** a fallback that bypasses it: a write that lands inside the configuration root is **handed to the same service**, so it runs the same gates and comes back with the same refusal. `edit_file` carries the revision it read, so a change between the read and the write is caught; `write_file` carries none, so a whole-file write is "last writer wins" — the gates still run.
+   ⇒ Use `config_write` when you have the whole text; use `edit_file` when you are changing one line. Either way the file that lands is checked the same.
+5. After the change `config_validate {}` (the whole tree on disk, fail-fast) and `config_notices {}` (the tree this turn runs).
 6. Need to confirm a tier → `config_tier {tool}` / `{agent}`.
+7. Need to know what a change will reach → `config_get {impact: true, path}`: who depends on the file, and who the next turn rebuilds.
 
 ★ `config_write` is always `ask` and cannot write `server/`; `config_get` can read `server/`. When you hit a `server/` change, report "a human has to edit it and restart".
+
+## What a change reaches
+
+★ **A change reaches only the agents that read the file.** The next turn rebuilds the agents whose own dependencies moved — an agent that never reads the changed file keeps running the one it has. Two questions, two tools:
+
+| Question | Call | Answer |
+|---|---|---|
+| who depends on this file? | `config_get {impact: true, path: "..."}` | `dependents[]` — the agents the file says something about |
+| who does the next turn rebuild? | `config_get {impact: true}` | `rebuilds[]` — every agent whose own dependencies moved |
+| did this file change anything at all? | the same call | `changed` — a file nobody depends on has not changed in the sense that matters |
+| does it need a restart? | the same call | `requiresRestart` — a partition that is not hot-reloaded reaches no agent at all |
+
+⇒ This is the answer to "I changed it and only some agents moved": that is the rule, not a bug. `dependents[]` is **direct** (the agents this file says something about); `rebuilds[]` is **transitive** (an agent's children are part of it, because the parent's `task` tool description carries them).
 
 ## Scenario A: the vendors and the models (llm/)
 
 - The provider id = the file name without its extension; `type` (display only), `base_url` and `models[].id` are required.
 - A reference is `<provider>/<model>`; an undeclared model = an error at startup.
 - Only `kind: embedding` can be used by the knowledge base; `context_window` not written = 0 = automatic compaction never triggers.
-- `reasoning` is the **vocabulary**, `reasoning_default` is the default tier; an agent only writes a tier name, and a wrong one fails silently.
+- `reasoning` is the **vocabulary**, `reasoning_default` is the default tier; an agent only writes a tier name, and a tier the model does not declare is a **load-time hard error** that names the file and the levels the model does declare.
 - `extra` overrides by **top-level key**, it does not deep-merge; do not put only `temperature` / `max_tokens` in it; `header:` does not take effect.
 - Effective: hot.
 
@@ -52,7 +67,7 @@ context: inline
 - ★ `disabled_tools` is a **hard error at load time**, and the error explains "renamed to `tools` and the meaning is inverted"; there is no alias, and renaming the key is not a fix.
 - ★ `tools:` uses the exposed names and accepts a trailing `*` prefix; a lone `*` / a `*` that is not at the end is a hard error. `main` must carry `task`; a level-1 agent does not carry `task`.
 - ★ `tools` governs the **non-MCP** tools — the built-ins, the ones the files under `tools/` provide, and the `config_*` tools — `mcps` governs the **servers**, and mounting a server hands the agent **all of that server's tools**. The two keys do not have to agree: an `mcp__x__*` line in `tools` says nothing and is reported as a notice (drop the line, put the server in `mcps`).
-- `temperature` / `max_tokens` are pointers; a wrong `reasoning` tier is silently ignored and not reported; `summarize_at` depends on `context_window`.
+- `temperature` / `max_tokens` are pointers; a `reasoning` tier the model does not declare is a **load-time hard error** (it names the file and the levels the model does declare); `summarize_at` depends on `context_window`.
 - The body is the Instruction, there is no `instruction_file`; the delimiters come in pairs, and an empty document is an error.
 - The depth `agent.max_depth` defaults to 1, and exceeding it is an error at startup. Effective: hot.
 
@@ -77,7 +92,7 @@ context: inline
   it only silently does not take effect — use the `/mcps` panel to check the tool names the server actually provides, do not copy them from memory.
 - The server cannot be reached: the tools are not mounted at all plus one warning, and **the process start is not affected**. `timeout` / `call_timeout` are lenient,
   a wrong value falls back to the default and goes into `deferred`.
-- The list of the servers that get started is the **union** of the servers listed by all the agents. Effective: hot — but ★ the stdio child belongs to the **manager**, not to the turn: a turn that ends does not kill it, and only a changed **declaration** restarts it (a new generation alone does not). A server that is still starting answers "the server is starting", and its tools join the **next** turn.
+- The list of the servers that get started is the **union** of the servers listed by all the agents. Effective: hot — but ★ the stdio child belongs to the **manager**, not to the turn: a turn that ends does not kill it, and only a changed **declaration** restarts it (the declaration is what the child's identity is built from; a change somewhere else in the configuration does not touch it). A server that is still starting answers "the server is starting", and its tools join the **next** turn.
 
 ## Scenario E: the process itself (server/)
 
@@ -103,12 +118,13 @@ context: inline
 - `context: inline` is the default, a typo silently becomes inline; in this project it is always inline, and `agent:` / `model:` are not written.
 - The body is the injected content, embedded in the template and self-contained; keep at least one piece of real content, an empty document is an error.
 - **The directory is changed on the skill side, the allow-list on the agent side**: after a directory is added or removed, sync the `skills:` of every agent, and issue the two as separate instructions.
-- Effective: `skills/` is a hot partition — a content change rebuilds the snapshot and takes effect on the next turn, no restart.
+- Effective: `skills/` is a hot partition — a content change reaches the agents that name that skill and takes effect on the next turn, no restart.
 
 ## Scenario H: the troubleshooting order
 
-1. "It did not take effect" → first `config_notices {}` to see `deferred` and `configVersion`; then check whether it is `server/` (a restart is needed).
-2. "A startup error + a line number" → an unknown field / a leftover `disabled_tools` / a missing unit / an empty document / a model reference / a cycle or an overrun / an `mcps` server that does not exist.
+1. "It did not take effect" → first `config_notices {}` to see `deferred` and the two versions: `diskVersion` (the disk) against `runningVersion` (the tree this turn runs). They differ for as long as a hot change has not been picked up — that difference **is** the answer to "has my change landed". Then check whether it is `server/` (a restart is needed).
+2. "A startup error + a line number" → an unknown field / a leftover `disabled_tools` / a missing unit / an empty document / a model reference / a cycle or an overrun / an `mcps` server that does not exist / a `reasoning` tier the model does not declare.
 3. "The tool is gone" → for a non-MCP tool: whether the agent's `tools:` names it, the file name allow-list, the old `kb/` path. For an MCP tool: whether the agent's `mcps:` mounts the server, and whether the server's own file offers that tool.
-4. "The behavior is odd but nothing errors" → the `reasoning` tier, the 200ms fallback, the single-key override of `extra`, the no-op `header:`, an omitted `tools:`.
-5. "I changed it but the old behavior still runs" → the version in `config_notices`; a failed reload keeps the last good configuration, so do not take "it did not crash" for "the change is right".
+4. "The behavior is odd but nothing errors" → the 200ms fallback, the single-key override of `extra`, the no-op `header:`, an omitted `tools:`.
+5. "I changed it but the old behavior still runs" → the two versions in `config_notices`; a failed reload keeps the last good configuration, so do not take "it did not crash" for "the change is right".
+6. "I changed it and only some agents moved" → that is the rule, not a bug: a change reaches the agents whose own dependencies moved. `config_get {impact: true, path}` says which ones, and `config_get {impact: true}` without a path says who the next turn rebuilds.
