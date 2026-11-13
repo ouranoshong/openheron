@@ -92,7 +92,7 @@ openheron/
 级别，然后是消息与属性：
 
 ```
-2026/10/29 22:28:34.346459 main.go:189: [Info] [main] openheron version=dev
+2026/10/29 22:28:34.346459 main.go:431: [Info] [main] openheron version=dev
 2026/10/29 22:28:34.351002 api/v2_run.go:123: [Warn] [run=abc123] request failed err="connection refused"
 ```
 

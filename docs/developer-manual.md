@@ -99,7 +99,7 @@ A line reads the way hertz's logger writes it — the date, the time with micros
 **the caller's file and line**, the level, then the message and the attributes:
 
 ```
-2026/10/29 22:28:34.346459 main.go:189: [Info] [main] openheron version=dev
+2026/10/29 22:28:34.346459 main.go:431: [Info] [main] openheron version=dev
 2026/10/29 22:28:34.351002 api/v2_run.go:123: [Warn] [run=abc123] request failed err="connection refused"
 ```
 

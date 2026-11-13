@@ -675,9 +675,9 @@ Agent 上的那个设置（`agentkit/spec/load.go:63-67`）。
 `fmt.Fprintln(os.Stderr)` 就会绕开这个开关。**
 
 级别优先级：**`$OPENHERON_LOG_LEVEL` > `server/config.yaml` 的 `log_level` > `info`**
-（`main.go:216` 的 `applyLogLevel`）。取值 `debug / info / warn(warning) / error`，
+（`main.go:262` 的 `applyLogLevel`）。取值 `debug / info / warn(warning) / error`，
 大小写与空白不敏感；空值即 `info`。★ **非法值不致命**：回退 `info` 并记一条
-`deferred` 提示。★ **告警必须在切换等级之前发出**（`main.go:226-230`），否则
+`deferred` 提示。★ **告警必须在切换等级之前发出**（`main.go:271-275`），否则
 `error` 等级会把告警自己吞掉。
 
 ★ **门限可以后移，是因为 handler 持有的是 `slog.Leveler` 而不是定值。** 一个共享的
@@ -691,7 +691,7 @@ logger 只在 `main` 里造一次再传下去：`newLogger()` → `installLogger
 （`applyLogLevel` / `applyLogFile`）→ `setupRuntime` → `api.New(..., log)` →
 `hserver.New`。
 
-- `main.newLogger`（`main.go:192`）围绕共享的 `slog.LevelVar` 与 `obs.Sink` 建好
+- `main.newLogger`（`main.go:238`）围绕共享的 `slog.LevelVar` 与 `obs.Sink` 建好
   logger，**在**配置读出来**之前** —— 等级与文件路径由配置决定，而 logger 必须先
   存在，`setupConfig` 才能打第一行日志。
 - `main.installLogger`（`main.go:249`）完成两次框架交接：`hlog.SetLogger`
@@ -728,9 +728,9 @@ logger 就是竞态；组合根先装配正好消掉它（用 `task test-race` �
 
 `agentkit/obs/sink.go:25` 的 `Sink` 实现 `io.Writer`，`Set`（`:66`）原子改向；
 `obs.Handler` 与两份注册表都不动。启动时 `main.newLogger` 就建好 sink
-（`main.go:199`），logger 从第一天起写在 sink 后面。
+（`main.go:245`），logger 从第一天起写在 sink 后面。
 
-接线在 `main.applyLogFile`（`main.go:254`）：
+接线在 `main.applyLogFile`（`main.go:300`）：
 
 | 位置 | 做什么 |
 |---|---|
@@ -741,14 +741,14 @@ logger 就是竞态；组合根先装配正好消掉它（用 `task test-race` �
 
 ★ **探针的理由：** `lumberjack` 第一次写入才开文件，且以 0644 创建。不先探一次，
 权限错误和 0600 都到不了启动期 —— 而启动期是唯一有人能读到那条告警的时候
-（`main.go:271`）。
+（`main.go:317-320`）。
 
 ★ **落不进文件是警告，不是失败的启动。** 服务的活儿是服务，而它的日志正是失败原因
 唯一的容身之处；为了去处把进程拉下去，等于拿掉唯一能解释原因的地方。进程继续走
-stderr（`main.go:236-240`）。
+stderr（`main.go:282-286`）。
 
 ★ **路径落在配置根**（`spec.Service.LogFile` 解析），`$OPENHERON_LOG_FILE` 覆盖它一次
-（`main.go:260`）。`server/` 不热更新：改了要重启。
+（`main.go:306`）。`server/` 不热更新：改了要重启。
 
 ★ **sink 同时是失败兜底。** 目标写失败一次就切回 fallback（stderr），并且只报一次
 （`agentkit/obs/sink.go:74`）—— 不重试满盘，也不让日志静默消失。

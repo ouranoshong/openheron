@@ -385,7 +385,7 @@ openheron 的篇幅大部分在这里 —— 边界比能力更决定一个 Agen
 MCP 路径带进来两个第三方包：`github.com/cloudwego/eino-ext/components/tool/mcp`（eino
 适配器）与 `github.com/mark3labs/mcp-go`（协议客户端），都在 `agentkit/build` 里。
 `agentkit/run` 引 `agentkit/spec/decl` 只为命名空间常量 —— run 账本要记这一轮碰过哪些 server。
-`storage/filestore` 只在组合根 `main.go:34` 被引用，`api` 不直接引它。
+`storage/filestore` 只在组合根 `main.go:35` 被引用，`api` 不直接引它。
 
 #### 两条不能破的依赖铁律
 
@@ -395,7 +395,7 @@ sink；组合根造出 `*slog.Logger` 再注入下去，每个要记日志的包
 `fmt.Fprintln(os.Stderr)` 就会绕开这个开关。格式与 hertz 一致（`agentkit/obs/handler.go`）：
 
 ```
-2026/10/29 22:28:34.346459 main.go:189: [Info] [main] openheron version=dev
+2026/10/29 22:28:34.346459 main.go:431: [Info] [main] openheron version=dev
 ```
 
 请求日志原来在 `llm/common`，已搬到 `agentkit/obs/httplog`（`docs/runtime-design.md` §4.4）；
@@ -428,7 +428,7 @@ logger 由组合根 `main.installLogger` 围绕共享的 `slog.LevelVar` 建起�
 
 #### 组合根装配 logger
 
-logger 只在 `main` 里造一次再传下去（`main.newLogger`，`main.go:192`）：
+logger 只在 `main` 里造一次再传下去（`main.newLogger`，`main.go:238`）：
 
 ```
 main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))

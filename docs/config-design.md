@@ -29,7 +29,7 @@
 |---|---|---|
 | 1 | **一个**配置根 | 任一时刻只有一份配置生效，没有继承链（`agentkit/spec/config.go:425`） |
 | 2 | 按功能分区 | 新增一类配置不改已有文件布局（`agentkit/spec/config.go:59-104`） |
-| 3 | 「配了没用」必须可见 | 未知字段报错；认识但未兑现的键进 `deferred` 并**强制打印**（`agentkit/spec/config.go:203`、`main.go:353-355`） |
+| 3 | 「配了没用」必须可见 | 未知字段报错；认识但未兑现的键进 `deferred` 并**强制打印**（`agentkit/spec/config.go:203`、`main.go:415-417`） |
 | 4 | 密钥不入库 | 档案只存 `${ENV}` 引用或 `@file:` 路径 —— 编辑器拒绝保存明文（`agentkit/spec/write.go:926-932`） |
 | 5 | 零新增依赖 | `go.mod` 只用已在缓存的 `gopkg.in/yaml.v3 v3.0.1`（`go.mod:26`）—— YAML 这一层就是全部成本 |
 
@@ -161,7 +161,7 @@ llm/*.local.yaml
 ★ **只有默认出来的那个根才会被创建**（`agentkit/spec/config.go:451-458`）：`--config-dir` 或
 `$OPENHERON_CONFIG_DIR` 指向一个不存在的地方是用户笔误，它不能变成一棵悄悄空着的配置树。
 `Service.RootIsDefaulted`（`agentkit/spec/config.go:488`）就是为了把两者分开 ——
-`main.go:148-153` 给出的是 "no configuration at <root>: run `openheron init` to create one"，
+`main.go:149-157` 给出的是 "no configuration at <root>: run `openheron init` to create one"，
 而不是 "agents/main.md does not exist"。★ **还有第二个入口，给 `init` 用**：`openheron init` 走
 `spec.NewServiceAt`（`agentkit/spec/config.go:462-478`），从不读 `$OPENHERON_CONFIG_DIR` —— 否则 init
 会把新配置写到用户没指的地方去。
@@ -206,14 +206,14 @@ llm/*.local.yaml
 |---|---|---|
 | `server.data_dir`（相对） | **配置根** | `agentkit/spec/config.go:497-499` |
 | `server.log.file`（相对） | **配置根** | `agentkit/spec/config.go:520-522` |
-| `server.static_dir`（相对） | **项目根** | `agentkit/spec/config.go:529-535`，用在 `main.go:530` |
+| `server.static_dir`（相对） | **项目根** | `agentkit/spec/config.go:529-535`，用在 `main.go:597` |
 | `kb.corpus_dir`（相对） | **项目根** | `agentkit/spec/load.go:1045-1048` |
 
 ★ **这个划分是刻意的：状态跟着配置走，工作树跟着项目走。** 相对的 `data_dir` 在配置被搬走时
 跟着搬；相对的 `static_dir` 与相对的知识库语料属于被服务的那个项目，配置搬走时它们不该跟着搬。
 
-★ **`PROJECT_ROOT` 生效得比配置根晚。** `setupConfig` 先解析出 service（`main.go:322`），之后
-才用环境变量覆盖运行期的项目根（`main.go:385`）。于是 `PROJECT_ROOT` 挪的是 agent 的工作目录，
+★ **`PROJECT_ROOT` 生效得比配置根晚。** `setupConfig` 先解析出 service（`main.go:368`），之后
+才用环境变量覆盖运行期的项目根（`main.go:447`）。于是 `PROJECT_ROOT` 挪的是 agent 的工作目录，
 **挪不动**默认出来的配置根 —— 那仍然落在工作目录的 `.openheron/` 下。要一起挪，传 `--project-root`。
 
 ### 3.3 测试实例靠「点名的配置根」隔离
@@ -303,7 +303,7 @@ only comments)」，`agentkit/spec/config.go:738`），因为「只有注释的�
 | **认识但此刻缺运行期前提** | 同上，且**不阻塞启动** | `api_key` 的 `${ENV}` 未设 —— 请求该端点时才 401 |
 
 `Config.Deferred()`（`agentkit/spec/config.go:203-213`）收集这些句子；启动时逐条打印
-（`main.go:353-355`）：
+（`main.go:415-417`）：
 
 ```go
 for _, d := range c.Deferred() {
@@ -350,14 +350,14 @@ export），不是配置写错。写错的东西（拼错的键、写错的 `@fi
 | 环境变量 | 覆盖什么 | 在哪里读 |
 |---|---|---|
 | `OPENHERON_CONFIG_DIR` | **配置根**（唯一的那一份） | `agentkit/spec/config.go:440`（名字是常量 `ConfigDirEnv`，`:131`） |
-| `LISTEN_ADDR` | `server.listen_addr` | `main.go:383` |
-| `DATA_DIR` | 解析后的数据目录（会话、checkpoint） | `main.go:384` |
-| `PROJECT_ROOT` | 交给 agent 的项目根 | `main.go:385` |
-| `STATIC_DIR` | `server.static_dir` | `main.go:530` |
-| `FRONTEND_MODE` | `server.frontend_mode` | `main.go:516` |
+| `LISTEN_ADDR` | `server.listen_addr` | `main.go:445` |
+| `DATA_DIR` | 解析后的数据目录（会话、checkpoint） | `main.go:446` |
+| `PROJECT_ROOT` | 交给 agent 的项目根 | `main.go:447` |
+| `STATIC_DIR` | `server.static_dir` | `main.go:597` |
+| `FRONTEND_MODE` | `server.frontend_mode` | `main.go:583` |
 | `EINO_EXT_SKILLS_DIR` | skills 目录 | `agentkit/build/skill.go:194` |
 
-server 侧那三个覆盖走同一个辅助函数 —— `override`（`main.go:817-822`）在环境变量非空时返回环境值，
+server 侧那三个覆盖走同一个辅助函数 —— `override`（`main.go:822-827`）在环境变量非空时返回环境值，
 否则返回配置值。
 
 ★ **server 侧那三个覆盖只在启动时读一次。** `server/` 不参与热重载（`agentkit/spec/config.go:71-74`），
@@ -367,7 +367,7 @@ server 侧那三个覆盖走同一个辅助函数 —— `override`（`main.go:8
 ★ 另有三个环境变量**只管日志**，不碰别的配置：`OPENHERON_LOG_LEVEL`（`agentkit/obs/logger.go:11`，读于
 `main.go:267`）覆盖 `server/config.yaml` 的 `log_level`；`OPENHERON_LOG_LLM_REQUESTS`
 （`agentkit/obs/httplog/logging.go:29`，读于 `agentkit/obs/httplog/logging.go:207-208`）决定是否打印请求体，
-变量为空时才由配置决定；`OPENHERON_LOG_FILE`（`agentkit/obs/sink.go:12`，读于 `main.go:260`）覆盖
+变量为空时才由配置决定；`OPENHERON_LOG_FILE`（`agentkit/obs/sink.go:12`，读于 `main.go:306`）覆盖
 `server/config.yaml` 的 `log.file` —— ★ 打不开文件**不阻止启动**，进程留在 stderr。
 
 ★ 还有第三组确实从环境变量读配置，但**不在主路径上**：`MODEL_TYPE`、`MODEL_TIMEOUT`、
@@ -438,7 +438,7 @@ agent 上，而且完全不提原来那个为什么不见了。代价是没有�
 
 | 谁说 | 说什么 | 在哪 |
 |---|---|---|
-| 启动日志 | `[main] config notice` + 那条 `deferred` | `main.go:353-355` |
+| 启动日志 | `[main] config notice` + 那条 `deferred` | `main.go:415-417` |
 | `/v2/health`、`/v2/config` | 同一条 `deferred` | `api/v2_introspect.go:482`、`api/v2_introspect.go:406` |
 | 配置编辑器 | 一条 **hint**，落在那个 agent 自己的文件上 | `agentkit/spec/diag.go:71-123` 的 `Diagnostics` |
 | 会话真的要用它时 | `agent "x" is left out of the tree: the model ... is not declared under llm/` | `agentkit/build/builder.go:225-234` 的 `leftOutMessage` |
@@ -833,7 +833,7 @@ skills 怎么没生效」变成一个查不出原因的问题。★ **这次向�
 | 字段 | 类型 | 缺省 | 说明 |
 |---|---|---|---|
 | `listen_addr` | `string` | `:8080` | Hertz 监听地址。★ 必须加引号 —— 以 `:` 开头的值解析得有歧义 |
-| `frontend_mode` | `string` | `embed` | `embed` 服务编译进二进制的界面；`dir` 服务磁盘上的一个目录。值不认识时只记一条告警，前端不启用（`main.go:530-545`） |
+| `frontend_mode` | `string` | `embed` | `embed` 服务编译进二进制的界面；`dir` 服务磁盘上的一个目录。值不认识时只记一条告警，前端不启用（`main.go:609`） |
 | `static_dir` | `string` | `web/dist` | 相对**项目根**解析（`Service.ResolveDir`）；只在 `frontend_mode: dir` 时才被读 |
 | `data_dir` | `string` | `state` | 相对**配置根**解析；空串等同 `state`；目录不存在时创建 |
 | `log_level` | `string` | `info` | `debug` `info` `warn` `error`；非法值回退 `info` 并记 `deferred`（`agentkit/spec/load.go:149-151`） |
@@ -1208,7 +1208,7 @@ Reloader.Reload() (at runtime)
 改坏配置**不让进程死**：`Reload` 失败时旧配置继续服务，`Watch` 只记一条日志
 （`agentkit/spec/reload.go:246-247`）；只有**首次**加载失败会让进程起不来（那时没有「旧配置」可用）——
 `NewReloader` 返回错误（`agentkit/spec/reload.go:163-172`），`setupConfig` 把它变成启动失败
-（`main.go:356-359`）。换代成功会连同版本号与变了哪些分区一起记下来
+（`main.go:419-421`）。换代成功会连同版本号与变了哪些分区一起记下来
 （`agentkit/spec/reload.go:249-251`）。
 
 ### 8.3 指纹与 `Config.Version`
@@ -1235,7 +1235,7 @@ Reloader.Reload() (at runtime)
 指征必须按 turn 记，否则调试会变成猜谜；它由 `/v2/health` 以 `configVersion` 暴露
 （`api/v2_introspect.go:481`）。
 
-★★ **「代际」这个概念已经退休。** `main.go` 的 `agentConfig`（`main.go:682-693`）只有 `Current()` 与
+★★ **「代际」这个概念已经退休。** `main.go` 的 `agentConfig`（`main.go:749-760`）只有 `Current()` 与
 `Publish()`，没有计数器。⇒ 树的身份是**（配置对象，MCP 工具面）**
 （`agentkit/build/snapshot.go:207-222`），而不是「第几代」。
 
@@ -1540,7 +1540,7 @@ github.com/ouranoshong/openheron/llm/common
 | `agentkit/fsx/fsx.go:232-250` / `:739-775` / `:776-835` / `:809` | `resolveWrite`（写入边界） / `Write` / `Edit` —— 配置根的写在这里转交 / ★ `OldString` 找不到就报错 —— 文件工具的冲突语义 |
 | `agentkit/run/loop.go:125-140` / `:240-260` / `agentkit/run/runtime.go:567-573` / `:867-881` / `agentkit/run/turn.go:80-86` | `makePrepareAgent`（带钉住） / `settleAgent` / 恢复时取父 run 的树 / `parentRunOf` / `Turn.pin` |
 | `storage/runledger.go:169-176` | `Run.TreeFingerprint` |
-| `main.go:98` / `:111-121` / `:123-140` / `:149-157` / `:367-450` / `:445-447` / `:578` / `:592` / `:744-755` / `:770-799` / `:810-815` / `:817-822` | `--config-dir` / 用法 / `warnUnusedHomeConfig` / `configLoadError` / `setupConfig` / 三个 `override` 读点 / `FRONTEND_MODE` / `STATIC_DIR` / `agentConfig` / `Current` `Publish` / `configVersion` / `override` |
+| `main.go:98` / `:111-121` / `:123-140` / `:149-157` / `:367-450` / `:445-447` / `:583` / `:597` / `:749-760` / `:775-804` / `:815-820` / `:822-827` | `--config-dir` / 用法 / `warnUnusedHomeConfig` / `configLoadError` / `setupConfig` / 三个 `override` 读点 / `FRONTEND_MODE` / `STATIC_DIR` / `agentConfig` / `Current` `Publish` / `configVersion` / `override` |
 | `api/v2_introspect.go:406` / `:481-482` / `api/v2_settings.go:64-90` / `:91-104` / `:201-216` | `deferred` 与 `configVersion` / `settingsFail` / manifest handler / `readPath` `writePath` |
 | `initcfg/initcfg.go:56-94` / `:198-224` | `BuildPlan` / `copySection` |
 | `.env.test` / `scripts/test-backend.sh:47` `:76` `:90-105` `:128-130` | 测试环境的约定与隔离脚本 |

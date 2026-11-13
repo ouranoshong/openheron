@@ -516,7 +516,7 @@ The MCP path is where two of them enter the tree:
 `github.com/mark3labs/mcp-go` (the protocol client), both in `agentkit/build`.
 `agentkit/run` imports `agentkit/spec/decl` for the namespace constants alone — the run's
 ledger records the servers a turn touched. `storage/filestore` is imported only by the
-composition root, `main.go:34`; `api` does not import it.
+composition root, `main.go:35`; `api` does not import it.
 
 #### Two dependency rules that must not be broken
 
@@ -533,7 +533,7 @@ microseconds, the caller's file and line, the level, then the message and the at
 (`agentkit/obs/handler.go`):
 
 ```
-2026/10/29 22:28:34.346459 main.go:189: [Info] [main] openheron version=dev
+2026/10/29 22:28:34.346459 main.go:431: [Info] [main] openheron version=dev
 ```
 
 `llm/common` used to write the request log with the standard logger, and that code moved to
@@ -585,7 +585,7 @@ appear in that test file only.
 #### The composition root assembles the logger
 
 The logger is built once, in `main`, and handed down; no package reaches back for it
-(`main.newLogger`, `main.go:192`):
+(`main.newLogger`, `main.go:238`):
 
 ```
 main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
