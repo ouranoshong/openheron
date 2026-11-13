@@ -473,7 +473,12 @@ func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 	//   second way to be wrong about it.
 	builder := build.NewBuilder(st.mgr,
 		build.WithPaths(st.projectRoot, st.dataDir),
-		build.WithConfigService(st.cfgSvc))
+		build.WithConfigService(st.cfgSvc),
+		// ★ Without this the builder's logger is obs.Discard(), and its
+		//   warnings go nowhere: the MCP servers' lifecycle, "the
+		//   configuration on disk does not load", and the skill that is not
+		//   in the skills directory.
+		build.WithLogger(st.log))
 	st.builder = builder
 
 	// ★ The pre-warm: every server some agent mounts is started in the
