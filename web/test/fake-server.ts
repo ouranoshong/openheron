@@ -246,6 +246,9 @@ export const SCENARIOS = {
   //   configuration service answers more calls than the filesystem does.
   toolConfig: ["A"],
 
+  // ★ toolUnknown: a tool the title table does not name.
+  toolUnknown: ["A"],
+
   reasoningDone: ["A"],
 
   compaction: ["A"],
@@ -893,6 +896,25 @@ function eventsFor(
           messageId: "call_1",
           role: "tool",
           content: JSON.stringify({ path: "agents/main.md", exists: true, hot: true }, null, 2),
+        },
+        finished(threadId, runId),
+      ]
+    }
+
+    case "toolUnknown": {
+      // ★ A tool the title table does not name: an MCP server's tool. The
+      //   card shows the name the model called, not the word "tool".
+      return [
+        started(threadId, runId),
+        toolStart("call_1", "mcp__github__create_issue", "m-1"),
+        toolArgs("call_1", JSON.stringify({ title: "a bug" })),
+        toolEnd("call_1"),
+        {
+          type: "TOOL_CALL_RESULT",
+          toolCallId: "call_1",
+          messageId: "call_1",
+          role: "tool",
+          content: JSON.stringify({ number: 7 }, null, 2),
         },
         finished(threadId, runId),
       ]

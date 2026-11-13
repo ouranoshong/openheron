@@ -25,6 +25,7 @@ import { CodeBlock } from "@/components/code-block"
 import { looksLikeJson } from "@/lib/highlight"
 import { prettyArgs } from "@/lib/tool-args"
 import { toolIcon, type ToolIconName } from "@/lib/tool-icons"
+import { toolTitle } from "@/lib/tool-titles"
 import type { ToolPart } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -54,18 +55,6 @@ const GLYPHS: Record<ToolIconName, LucideIcon> = {
   "file-search": FileSearchIcon,
   database: DatabaseIcon,
   wrench: WrenchIcon,
-}
-
-const TITLES: Record<string, string> = {
-  ls: "List directory",
-  glob: "Find files",
-  grep: "Search content",
-  read_file: "Read file",
-  write_file: "Write file",
-  edit_file: "Edit file",
-  execute: "Run command",
-  fetch: "Fetch URL",
-  write_todos: "Update todos",
 }
 
 // ★ The key the argument lives under, per tool.
@@ -119,7 +108,7 @@ export function ToolCard({ part }: { part: ToolPart }) {
   //   compile. There is no second fallback here to hide a mistake.
   const glyph = toolIcon(part.name)
   const Icon = GLYPHS[glyph]
-  const title = TITLES[part.name] || part.name || "tool"
+  const title = toolTitle(part.name)
   const hint = part.name ? hintOf(part.name, part.argsText) : undefined
   const resultLines = part.result?.split("\n").length
   const args = prettyArgs(part.argsText)
@@ -149,7 +138,9 @@ export function ToolCard({ part }: { part: ToolPart }) {
           className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")}
         />
         <Icon data-icon={glyph} className="size-3.5 shrink-0" />
-        <span className="truncate font-medium">{title}</span>
+        <span data-testid="tool-title" className="truncate font-medium">
+          {title}
+        </span>
 
         {/* ★ The argument is the one line that says what the call did, so
             it gets a row of its own: it is never squeezed out by the

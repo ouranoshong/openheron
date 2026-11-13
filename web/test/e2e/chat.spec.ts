@@ -1201,3 +1201,56 @@ test.describe("工具卡的图标", () => {
     expect(drawing).not.toBe(chevron)
   })
 })
+
+test.describe("工具卡的标题", () => {
+  // ★ The card names the call, not the tool. `config_get` says what the
+  //   model asked for; "Read configuration" says what the reader sees.
+  //
+  // ★ The assertion is about the text **on the screen** — a table that
+  //   happens to be right in a file nobody opened is not what the reader
+  //   reads.
+  function title(page: import("@playwright/test").Page) {
+    return page.locator('[data-testid="tool-card"] [data-testid="tool-title"]').first()
+  }
+
+  test("★ read_file 的标题是「Read file」，不是工具名", async ({ page }) => {
+    await setScenario("toolDone")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the file`)
+
+    await expect(title(page)).toHaveText("Read file")
+  })
+
+  test("★ config_get 的标题是「Read configuration」", async ({ page }) => {
+    await setScenario("toolConfig")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the config`)
+
+    // ★ The configuration service answers more calls in a real run than the
+    //   filesystem does, and the whole family used to show a raw name.
+    await expect(title(page)).toHaveText("Read configuration")
+  })
+
+  test("★ 表里没有的工具保留自己的名字", async ({ page }) => {
+    await setScenario("toolUnknown")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} call an unknown tool`)
+
+    // ★ An MCP server's tool is named by the server. Hiding that behind the
+    //   word "tool" says less than showing it.
+    await expect(title(page)).toHaveText("mcp__github__create_issue")
+  })
+
+  test("★ 标题不是原始工具名", async ({ page }) => {
+    await setScenario("toolConfig")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the config`)
+
+    // ★ The raw name is what the table is supposed to have replaced.
+    await expect(title(page)).not.toHaveText("config_get")
+  })
+})
