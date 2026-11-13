@@ -242,6 +242,10 @@ export const SCENARIOS = {
 
   toolJson: ["A"],
 
+  // ★ toolConfig is the **most common tool in a real run**: the
+  //   configuration service answers more calls than the filesystem does.
+  toolConfig: ["A"],
+
   reasoningDone: ["A"],
 
   compaction: ["A"],
@@ -873,6 +877,23 @@ function eventsFor(
         ...msg,
         { type: "TOOL_CALL_RESULT", toolCallId: "call_1", messageId: "call_1", content: "package main\n\nfunc main() {}\n", role: "tool" },
         ...announce("m-1"),
+        finished(threadId, runId),
+      ]
+    }
+
+    case "toolConfig": {
+      return [
+        started(threadId, runId),
+        toolStart("call_1", "config_get", "m-1"),
+        toolArgs("call_1", JSON.stringify({ path: "agents/main.md" })),
+        toolEnd("call_1"),
+        {
+          type: "TOOL_CALL_RESULT",
+          toolCallId: "call_1",
+          messageId: "call_1",
+          role: "tool",
+          content: JSON.stringify({ path: "agents/main.md", exists: true, hot: true }, null, 2),
+        },
         finished(threadId, runId),
       ]
     }

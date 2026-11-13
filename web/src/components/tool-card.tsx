@@ -1,32 +1,59 @@
 import {
+  BotIcon,
+  BookOpenIcon,
   ChevronRightIcon,
-  ClipboardIcon,
-  FileOutputIcon,
-  FolderSearchIcon,
+  DatabaseIcon,
+  FilePenIcon,
+  FilePlusIcon,
+  FileSearchIcon,
+  FileTextIcon,
+  FolderIcon,
   GlobeIcon,
-  ListChecksIcon,
-  PencilIcon,
+  LibraryIcon,
+  ListTreeIcon,
+  ScanSearchIcon,
   SearchIcon,
-  TerminalIcon,
+  SettingsIcon,
+  SquareTerminalIcon,
+  TextSearchIcon,
+  WrenchIcon,
+  type LucideIcon,
 } from "lucide-react"
-import { useState, type ComponentType } from "react"
+import { useState } from "react"
 
 import { CodeBlock } from "@/components/code-block"
 import { looksLikeJson } from "@/lib/highlight"
 import { prettyArgs } from "@/lib/tool-args"
+import { toolIcon, type ToolIconName } from "@/lib/tool-icons"
 import type { ToolPart } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-const ICONS: Record<string, ComponentType<{ className?: string }>> = {
-  ls: FolderSearchIcon,
-  glob: SearchIcon,
-  grep: SearchIcon,
-  read_file: ClipboardIcon,
-  write_file: FileOutputIcon,
-  edit_file: PencilIcon,
-  execute: TerminalIcon,
-  fetch: GlobeIcon,
-  write_todos: ListChecksIcon,
+// ★ The icons the tool table names.
+//
+//	★ The table names an icon; this table draws it. Two truths about
+//	  "what an icon is called" is one truth too many — so the *name*
+//	  lives in [toolIcon] and only the drawing lives here.
+//
+//	★ The key type is the table's own, so a name without a drawing here
+//	  is a **compile error** — not a card that shows the wrong glyph.
+const GLYPHS: Record<ToolIconName, LucideIcon> = {
+  folder: FolderIcon,
+  "scan-search": ScanSearchIcon,
+  "text-search": TextSearchIcon,
+  "file-text": FileTextIcon,
+  "file-plus": FilePlusIcon,
+  "file-pen": FilePenIcon,
+  "square-terminal": SquareTerminalIcon,
+  globe: GlobeIcon,
+  "list-tree": ListTreeIcon,
+  bot: BotIcon,
+  "book-open": BookOpenIcon,
+  settings: SettingsIcon,
+  search: SearchIcon,
+  library: LibraryIcon,
+  "file-search": FileSearchIcon,
+  database: DatabaseIcon,
+  wrench: WrenchIcon,
 }
 
 const TITLES: Record<string, string> = {
@@ -87,7 +114,11 @@ const PHASE_LABEL: Record<ToolPart["phase"], string> = {
 }
 
 export function ToolCard({ part }: { part: ToolPart }) {
-  const Icon = ICONS[part.name] || TerminalIcon
+  // ★ The name comes from the table, so the drawing is **total**: every
+  //   name the table can produce has a glyph, or the build would not
+  //   compile. There is no second fallback here to hide a mistake.
+  const glyph = toolIcon(part.name)
+  const Icon = GLYPHS[glyph]
   const title = TITLES[part.name] || part.name || "tool"
   const hint = part.name ? hintOf(part.name, part.argsText) : undefined
   const resultLines = part.result?.split("\n").length
@@ -114,9 +145,10 @@ export function ToolCard({ part }: { part: ToolPart }) {
         className="text-muted-foreground hover:bg-muted/60 grid w-full grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1 px-3 py-2 text-left text-xs sm:grid-cols-[auto_auto_minmax(0,1fr)_auto]"
       >
         <ChevronRightIcon
+          data-testid="tool-chevron"
           className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")}
         />
-        <Icon className="size-3.5 shrink-0" />
+        <Icon data-icon={glyph} className="size-3.5 shrink-0" />
         <span className="truncate font-medium">{title}</span>
 
         {/* ★ The argument is the one line that says what the call did, so

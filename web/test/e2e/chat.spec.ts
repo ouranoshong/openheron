@@ -1141,3 +1141,63 @@ test.describe("工具卡的宽度", () => {
     expect(hint.width).toBeGreaterThan(100)
   })
 })
+
+test.describe("工具卡的图标", () => {
+  // ★ The icon sits one gap away from the chevron that folds the card. A
+  //   glyph that reads as a `>` reads as a **second folding control**: the
+  //   reader clicks the wrong thing and the card does not open.
+  //
+  // ★ The name the table gives is on the element that draws it, so the
+  //   assertion is about what is on the screen — not about a table that
+  //   happens to be right in a file nobody opened.
+  function icon(page: import("@playwright/test").Page) {
+    return page.locator('[data-testid="tool-card"] [data-icon]').first()
+  }
+
+  test("★ read_file 画的是一张纸，不是剪贴板", async ({ page }) => {
+    await setScenario("toolDone")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the file`)
+
+    // ★ `clipboard` is a small square at 14px, and next to the chevron it
+    //   read as a second folding symbol.
+    await expect(icon(page)).toHaveAttribute("data-icon", "file-text")
+  })
+
+  test("★ execute 画的是带框的终端，不是裸的 >", async ({ page }) => {
+    await setScenario("toolJson")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} run a json tool`)
+
+    // ★ The bare `>_` was the same shape as the chevron beside it.
+    await expect(icon(page)).toHaveAttribute("data-icon", "square-terminal")
+  })
+
+  test("★ config_get 画的是齿轮", async ({ page }) => {
+    await setScenario("toolConfig")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the config`)
+
+    // ★ The configuration service answers more calls in a real run than the
+    //   filesystem does, and the whole family is one gear.
+    await expect(icon(page)).toHaveAttribute("data-icon", "settings")
+  })
+
+  test("★ 图标和折叠箭头不是同一个图形", async ({ page }) => {
+    await setScenario("toolDone")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the file`)
+
+    const card = page.locator('[data-testid="tool-card"]').first()
+    const [chevron, drawing] = await Promise.all([
+      card.locator('[data-testid="tool-chevron"]').evaluate((el) => el.innerHTML),
+      card.locator("[data-icon]").first().evaluate((el) => el.innerHTML),
+    ])
+    // ★ Two identical chevrons side by side are two folding controls.
+    expect(drawing).not.toBe(chevron)
+  })
+})
