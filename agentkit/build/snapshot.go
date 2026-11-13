@@ -270,8 +270,10 @@ func buildModel(ctx context.Context, log *slog.Logger, requestDump bool) (model.
 	if err != nil {
 		return nil, err
 	}
-	return common.AttachRequestOptions(cm, common.RequestOptions{
+	// ★ The same truncation guard as the configured path: the cut is the
+	//   model's, not the provider file's.
+	return newTruncationAwareModel(common.AttachRequestOptions(cm, common.RequestOptions{
 		Model:  mc.Model,
 		Fields: mc.ExtraFields,
-	}, "", ""), nil
+	}, "", "")), nil
 }

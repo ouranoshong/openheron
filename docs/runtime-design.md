@@ -280,11 +280,18 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 发布方在 `agentkit/run/publish.go:34`：一把锁、一个有界的 `window`、一个订阅者集合、
 一个 `closed` 标志，外加一个 `onProgress` 回调。
 
-- ★ **发布方绝不在满通道上等。** 慢的订阅者会被踢掉（`agentkit/run/publish.go:58` 的
+- ★ **发布方绝不在满通道上等。** 慢的订阅者会被踢掉（`agentkit/run/publish.go:60` 的
   `Publish`）。★ **被卡住的订阅者才是要紧的那一种，它和「慢」不是一回事**：慢的读者
   终究会把通道排空；卡住的那个是 socket 写永不返回 —— 对端消失了却没发 RST，内核
   还在往一个没人读的缓冲区里塞字节。发布方踢掉它而不是等它，run 继续走。拆分之前，
   同一种情况会卡住 run，因为写 socket 的就是 run 自己。
+- ★ **被踢掉的流与正常结束的流，线上必须长得不一样。** 订阅者记下自己是被**截断**的
+  （`agentkit/run/publish.go:163` 的 `subscription.truncated`），渲染器据此**不写终态帧**
+  （`transport/transport.go` 的 `RenderStream`）。★ 为什么不是细节：客户端把终态帧读作
+  「这一轮说完了」，于是**不再回头**；而那一轮最要紧的东西 —— 审批 —— 可能恰好在这个
+  订阅者没读到的尾部。没有终态帧时，客户端走它自己的「连接断了、回到 run」那条路
+  （前端 `onDone` 的 reattach），从 transcript 里把审批读回来。★ 反过来，在被截断的流上
+  补一个 success，就是告诉客户端「已经结束」而它会信 —— 审批窗口于是要等一次手动刷新。
 - ★ **窗口是有界的，不是这一轮的历史。** 窗口留最后 1000 个事件
   （`agentkit/run/publish.go:19`），最老的被丢掉，于是长的一轮花的是**固定**的内存。
   没人看的一轮为一份没人读的日志付**恒定**的代价，而 run 真正的产出（transcript）
@@ -907,7 +914,7 @@ stderr（`main.go:236-240`）。
 |---|---|
 | `TestARunWithNoSubscriberStillArchives` | **没有任何订阅者**时，run 依然归档 —— 这是「一轮比连接活得久」的直接检验 |
 | `TestASubscriberThatVanishesDoesNotStopTheRun` | 订阅者消失不影响 run |
-| `TestASubscriberThatStallsIsDroppedAndTheRunKeepsGoing` | 通道溢出的订阅者被**踢掉**，run 继续归档 |
+| `TestASubscriberThatStallsIsDroppedAndTheRunKeepsGoing` | 通道溢出的订阅者被**踢掉**，run 继续归档；且它报告自己的流是**截断**的 |
 | `TestTheEventWindowIsBounded` | 没人挂上来的 run，它的事件日志不超出窗口大小 |
 | `TestALateSubscriberGetsTheWindow` | 晚到的订阅者先拿到窗口的回放，再拿到实时事件 |
 | `TestALateSubscriberAfterTheRunClosedStillGetsTheWindow` | run 关掉之后才来的订阅者仍然拿到窗口 |
@@ -1065,8 +1072,8 @@ stderr（`main.go:236-240`）。
 - `agentkit/run/bridge.go` — `sessionState`(:39)、`markTurnDone`(:67)、`loopExited`(:134)、
   抛审批的 run 在这里关发布方(:169)、`closeApprovalRow`(:180)、`closeOpenRow`(:203)、
   `writeHeldApproval`(:227)
-- `agentkit/run/publish.go` — 窗口上界 1000(:19)、`publisher`(:34)、`Publish` 永不阻塞
-  (:58)、`Subscribe` 回放窗口(:94)
+- `agentkit/run/publish.go` — 窗口上界 1000(:20)、`publisher`(:36)、`Publish` 永不阻塞
+  (:60)、`Subscribe` 回放窗口(:106)、`subscription.truncated`(:163)
 - `agentkit/run/turn.go` — `Wait` 超时判失败(:158)、`WaitReleased`(:246)、`WaitArchived`
   (:259)、归档等待上界 30 秒(:272)、`failedState`(:330)
 - `agentkit/run/lease.go` — 默认 TTL 10 分钟(:20)、`leaseExpired`(:28)、进展驱动的续租

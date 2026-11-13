@@ -104,7 +104,10 @@ func BuildModel(ctx context.Context, c *spec.Config, ref string, in CallIntent,
 	}
 	field, from := ReasoningFields(m)
 	cm = common.AttachRequestOptions(cm, RequestOptionsFor(p, m, in), field, from)
-	return stampModel(cm, ref, effectiveTier(m, in)), nil
+	// ★ The truncation guard needs the model's own answer, so the model is
+	//   where it goes: nothing below the model can tell a cut-off call
+	//   from a complete one.
+	return newTruncationAwareModel(stampModel(cm, ref, effectiveTier(m, in))), nil
 }
 
 func effectiveTier(m *decl.Model, in CallIntent) string {

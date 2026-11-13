@@ -611,3 +611,87 @@ func TestMissingAgentErrorSeparatesLeftOutFromAbsent(t *testing.T) {
 		t.Fatalf("a broken file never takes effect; do not promise the next turn: %v", err)
 	}
 }
+
+// ★ A file's whole text has to travel in **one** tool call, and one tool
+//
+//	call is bounded by the model's output limit. A file bigger than that
+//	limit cannot be written in one go — so it is written in pieces, and
+//	every piece must leave the file loadable.
+func TestConfigWriteBuildsALongFileInPieces(t *testing.T) {
+	_, _, tools := configToolEnv(t)
+
+	first := "---\nmodel: openai/fast\ntools: [ls, config_get, config_write]\n---\nbody one\n"
+	args, err := json.Marshal(map[string]any{
+		"path": "agents/main.md", "content": first,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := callToolJSON[map[string]any](t, tools, decl.ToolNameConfigWrite, string(args))
+	rev, _ := out["revision"].(string)
+	if rev == "" {
+		t.Fatalf("the write must answer with a revision: %#v", out)
+	}
+
+	args, err = json.Marshal(map[string]any{
+		"path": "agents/main.md", "content": "body two\n", "append": true, "baseRevision": rev,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	callToolJSON[map[string]any](t, tools, decl.ToolNameConfigWrite, string(args))
+
+	got := callToolJSON[map[string]any](t, tools, decl.ToolNameConfigGet, `{"path":"agents/main.md"}`)
+	content, _ := got["content"].(string)
+	if !strings.Contains(content, "body one") || !strings.Contains(content, "body two") {
+		t.Fatalf("both pieces must be on disk: %q", content)
+	}
+}
+
+// ★ An append goes through the same gates as a whole-file write: a piece
+//
+//	that would break the tree is refused whole, and the file on disk keeps
+//	the text it had.
+func TestAnAppendThatBreaksTheTreeIsRefused(t *testing.T) {
+	_, _, tools := configToolEnv(t)
+
+	args, err := json.Marshal(map[string]any{
+		"path": "tools/http.yaml", "content": "methods: [post]\n", "append": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := callTool(t, tools, decl.ToolNameConfigWrite, string(args)); err == nil {
+		t.Fatal("an append that breaks the tree must be refused")
+	}
+
+	got := callToolJSON[map[string]any](t, tools, decl.ToolNameConfigGet, `{"path":"tools/http.yaml"}`)
+	content, _ := got["content"].(string)
+	if strings.Contains(content, "post") {
+		t.Fatalf("the refused piece must not be on disk: %q", content)
+	}
+}
+
+// ★ Appending to a file that does not exist creates it: a model that writes
+//
+//	a long file in pieces should not have to know whether the first piece is
+//	the first piece or the only one.
+func TestAnAppendToAMissingFileCreatesIt(t *testing.T) {
+	_, _, tools := configToolEnv(t)
+
+	args, err := json.Marshal(map[string]any{
+		"path":    "skills/piece/SKILL.md",
+		"content": "---\nname: piece\ndescription: a skill written in pieces\n---\nbody\n",
+		"append":  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	callToolJSON[map[string]any](t, tools, decl.ToolNameConfigWrite, string(args))
+
+	got := callToolJSON[map[string]any](t, tools, decl.ToolNameConfigGet,
+		`{"path":"skills/piece/SKILL.md"}`)
+	if exists, _ := got["exists"].(bool); !exists {
+		t.Fatalf("the file must be there: %#v", got)
+	}
+}

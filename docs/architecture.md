@@ -217,13 +217,13 @@ The event types come from the `ag-ui-protocol/ag-ui` Go SDK. The frames are rend
 
 | Event | Emitted at | Meaning |
 |---|---|---|
-| `RUN_STARTED` | `transport.go:61` | The turn began; carries `threadId` |
-| `TEXT_MESSAGE_START/CONTENT/END` | `transport.go:246-263` | Assistant body, incrementally |
-| `REASONING_*` | `transport.go:269-280` | Reasoning process |
-| `TOOL_CALL_START/ARGS/END/RESULT` | `transport.go:283-314` | Tool calls |
-| `CUSTOM` (`model_retry`) | `transport.go:232` | Model-retry notice |
-| `RUN_FINISHED` | `transport.go:69`, `:75` | The turn ended; carries result and usage |
-| `RUN_ERROR` | `transport.go:240`, `api/v2_run.go:283` | Failure — ★ the code says which kind, and the message says why (see `docs/runtime-design.md` §5.4) |
+| `RUN_STARTED` | `transport.go:77` | The turn began; carries `threadId` |
+| `TEXT_MESSAGE_START/CONTENT/END` | `transport.go:265-282` | Assistant body, incrementally |
+| `REASONING_*` | `transport.go:288-297` | Reasoning process |
+| `TOOL_CALL_START/ARGS/END/RESULT` | `transport.go:302-336` | Tool calls |
+| `CUSTOM` (`model_retry`) | `transport.go:246` | Model-retry notice |
+| `RUN_FINISHED` | `transport.go:88`, `:94` | The turn ended; carries result and usage. ★ A stream the run cut off gets no terminal frame (`RenderStream`), so the client re-attaches instead of believing a false "success" (`docs/runtime-design.md` §2.3) |
+| `RUN_ERROR` | `transport.go:259`, `api/v2_run.go:283` | Failure — ★ the code says which kind, and the message says why (see `docs/runtime-design.md` §5.4) |
 
 A sub-agent's output is **attributed through `subagentRunId` on the event** rather than
 through a separate event type — that lets the frontend handle every agent's output with

@@ -1001,7 +1001,7 @@ whose `tools:` list names them:
 | `config_template` | `{path}`: the skeleton that file starts from. `{section}`: that partition's templates. Neither: an index of what to ask for | neither — a skeleton is neither a file nor a tree | allow |
 | `config_notices` | What the loader noticed but did not refuse: renamed keys, retired directories, values that fell back to a default | the **running** tree (`running`) | allow |
 | `config_tier` | `{tool}`: whether it asks. `{agent}`: that agent's tools and their tiers. Neither: the default tier and the whole exception list. Answers use the tree this turn runs, so an agent written earlier in the same turn is not visible yet — the tool says so instead of claiming it does not exist | the **running** tree (`running`) | allow |
-| `config_write` | Writes a file: checked against the tree, checked against the revision you read, and refused whole if the merge breaks. Takes effect on the next turn — `applied` means the watcher will pick it up, not that this turn can already see it | the write lands on the **disk**; the answer carries both sides | **ask** |
+| `config_write` | Writes a file: checked against the tree, checked against the revision you read, and refused whole if the merge breaks. Takes effect on the next turn — `applied` means the watcher will pick it up, not that this turn can already see it. With `append` it adds the content to the end of the file instead of replacing it — the way to write a file whose whole text does not fit in one call | the write lands on the **disk**; the answer carries both sides | **ask** |
 
 ★ **Every answer says which side it came from.** The field is `source`, and it is `disk`
 (the files on disk right now) or `running` (the tree this turn was built with). The two
@@ -1011,6 +1011,17 @@ in this turn is already in the disk's text and is not yet in the running tree's.
 ★ **The overview and the write answer carry the two versions instead**: `runningVersion`
 and `diskVersion`. They differ for as long as a change has not been picked up, and that
 difference is the answer to "has my change landed".
+
+★ **A file longer than one call is written in pieces.** `config_write` replaces the whole
+file, and one tool call is bounded by the model's own output limit — so a file whose text
+does not fit in one call is written in pieces: the first piece replaces the file, and every
+later piece goes with `append`, which adds to what is already on disk. Every piece goes
+through the same gates, so the file on disk is loadable after **every** piece.
+
+★ **A call the model could not finish is refused, not run.** When the output hits the
+model's token limit, the arguments of the tool call are incomplete — and the server
+refuses that call with a message that says so. Nothing is written and no approval card is
+raised; the model is told to send less in one call.
 
 ★ **`config_get` has a second question: `impact`.** It does not read the file — it
 answers "who depends on this file, and who does the next turn rebuild":

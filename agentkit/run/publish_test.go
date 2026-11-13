@@ -119,6 +119,12 @@ func TestASubscriberThatStallsIsDroppedAndTheRunKeepsGoing(t *testing.T) {
 		select {
 		case _, ok := <-sub.Events():
 			if !ok {
+				// ★ And it says so: a cut stream must not be rendered as a
+				//   finished run, or an approval raised after the cut would
+				//   never reach the client until a reload.
+				if !sub.Truncated() {
+					t.Fatal("the dropped subscription must report that its stream was cut")
+				}
 				return // the subscription was closed: it was dropped
 			}
 		case <-deadline:

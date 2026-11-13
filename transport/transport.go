@@ -54,6 +54,22 @@ const (
 //
 //	changed who derives them, not what they say.
 func Render(w io.Writer, threadID, runID string, ch <-chan contract.RunEvent) error {
+	return RenderStream(w, threadID, runID, ch, nil)
+}
+
+// RenderStream is Render with the ability to tell a finished stream from a
+// cut one.
+//
+// ★ A subscriber the run dropped is not a run that finished: the renderer
+// must not close its stream with a terminal frame. The client reads a
+// terminal frame as "the run is over, this is the whole outcome", and the
+// approval it did not receive would then be invisible until a reload. An
+// open-ended stream sends the client down its "the connection dropped, come
+// back to the run" path instead, which reads the transcript and therefore
+// the approval.
+func RenderStream(w io.Writer, threadID, runID string, ch <-chan contract.RunEvent,
+	truncated func() bool) error {
+
 	if runID == "" {
 		runID = uuid.NewString()
 	}
@@ -65,6 +81,9 @@ func Render(w io.Writer, threadID, runID string, ch <-chan contract.RunEvent) er
 	}
 
 	switch {
+	case truncated != nil && truncated():
+		// ★ No terminal frame: the stream was cut, and a "success" here
+		//   would tell the client the run said everything it had to say.
 	case len(r.interrupts) > 0:
 		r.emit(events.NewRunFinishedEventWithOptions(threadID, runID,
 			events.WithInterruptOutcome(r.interrupts)))

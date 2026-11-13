@@ -523,6 +523,69 @@ func (s *Service) Write(rel string, content []byte, baseRev string) (rev string,
 	return Revision(content), trial, nil
 }
 
+// Append adds content to the end of a file instead of replacing it.
+//
+// ★ This exists because a file's whole text has to travel in **one** tool
+//
+//	call, and one tool call is bounded by the model's output budget. A
+//	file bigger than that budget cannot be written at all — and the
+//	alternative (a file replaced by half of itself) is worse than not
+//	writing it, because nothing says so afterwards.
+//
+// ★ The result goes through the **same** gates as a whole-file write: the
+//
+//	tree must still load, a working agent must not disappear, the base
+//	revision must still match. So the file on disk is a valid
+//	configuration file after **every** piece — never a half-written one.
+//
+// ★ Appending to a file that does not exist creates it. The model that
+//
+//	writes a long file in pieces should not have to know whether the
+//	first piece is the first piece or the only one.
+func (s *Service) Append(rel string, content []byte, baseRev string) (rev string, cfg *Config, err error) {
+	if _, err := s.validateWritable(rel); err != nil {
+		return "", nil, err
+	}
+	// ★ The revision is checked **before** the file is read: the read and
+	//   the check have to see the same version of the disk.
+	if err := s.checkRevision(rel, baseRev); err != nil {
+		return "", nil, err
+	}
+	cur, _, err := s.ReadFile(rel)
+	if err != nil {
+		return "", nil, err
+	}
+	full := make([]byte, 0, len(cur)+len(content))
+	full = append(full, cur...)
+	full = append(full, content...)
+
+	// ★ The secret check reads the **whole** file, not the piece: the file
+	//   is what lands on disk, and that is what the check is about.
+	if err := s.checkSecretFor(rel, full); err != nil {
+		return "", nil, err
+	}
+
+	m := &mutation{Rel: rel, Content: full}
+	trial, err := s.loadWith(m)
+	if err != nil {
+		return "", nil, &WriteError{Kind: ErrMergeRejected, Rel: rel, Message: err.Error(), Err: err}
+	}
+	if err := s.checkNoAgentLost(trial, rel, nil); err != nil {
+		return "", nil, err
+	}
+
+	if s.root == "" {
+		return "", nil, writeErrf(ErrPathInvalid, rel, "no config root")
+	}
+	dst := filepath.Join(s.root, filepath.FromSlash(rel))
+	if err := persist.AtomicWrite(dst, full, writeTmpSuffix); err != nil {
+		return "", nil, err
+	}
+	s.Mark(rel)
+
+	return Revision(full), trial, nil
+}
+
 type File struct {
 	Rel     string
 	Content []byte

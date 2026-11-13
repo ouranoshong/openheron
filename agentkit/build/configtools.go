@@ -39,6 +39,15 @@ func (t *configTool) InvokableRun(ctx context.Context, args string, _ ...tool.Op
 	if args == "" {
 		args = "{}"
 	}
+	// ★ The guard middleware refuses a cut-off call before it reaches this
+	//   point. This is the last line: a tool that ran with half of its
+	//   arguments would write half a file, and "half a file" is the one
+	//   outcome nobody can notice afterwards.
+	if isTruncatedArgs(args) {
+		return "", fmt.Errorf("%s: this call was cut off by the model's token limit, so its "+
+			"arguments are incomplete and nothing was done — send less in one call",
+			t.name)
+	}
 	out, err := t.run(ctx, args)
 	if err != nil {
 		return "", err
@@ -333,17 +342,23 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 			"disk. A change takes effect on the next turn. Always asks for approval. " +
 			"★ To change one line of a configuration file, edit_file does it and goes " +
 			"through the same checks; this tool replaces the whole file, so it needs the " +
-			"whole text.",
+			"whole text. ★ When the whole text does not fit in one call, write the file in " +
+			"pieces: the first piece replaces the file, and every later piece goes with " +
+			"append: true, which adds to what is already there. Every piece must leave the " +
+			"file loadable.",
 		params: map[string]*schema.ParameterInfo{
 			"path":         {Type: schema.String, Desc: "relative path, e.g. agents/main.md", Required: true},
 			"content":      {Type: schema.String, Desc: "the file's full new text", Required: true},
 			"baseRevision": {Type: schema.String, Desc: "the revision config_get returned; omit to overwrite whatever is there"},
+			"append": {Type: schema.Boolean, Desc: "add the content to the end of the file instead of " +
+				"replacing it — the way to build a long file in pieces, one piece per call"},
 		},
 		run: func(_ context.Context, args string) (any, error) {
 			var in struct {
 				Path         string `json:"path"`
 				Content      string `json:"content"`
 				BaseRevision string `json:"baseRevision"`
+				Append       bool   `json:"append"`
 			}
 			if err := json.Unmarshal([]byte(args), &in); err != nil {
 				return nil, fmt.Errorf("%s: %w", decl.ToolNameConfigWrite, err)
@@ -351,7 +366,16 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 			if in.Path == "" {
 				return nil, fmt.Errorf("%s: path is required", decl.ToolNameConfigWrite)
 			}
-			rev, _, err := svc.Write(in.Path, []byte(in.Content), in.BaseRevision)
+			var rev string
+			var err error
+			if in.Append {
+				// ★ The piece goes onto what is already there, and the
+				//   result goes through the same gates as a whole-file
+				//   write: the file on disk is loadable after every piece.
+				rev, _, err = svc.Append(in.Path, []byte(in.Content), in.BaseRevision)
+			} else {
+				rev, _, err = svc.Write(in.Path, []byte(in.Content), in.BaseRevision)
+			}
 			if err != nil {
 				return nil, err
 			}

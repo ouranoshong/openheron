@@ -2,6 +2,7 @@ package run
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/ouranoshong/openheron/contract"
 )
@@ -20,10 +21,11 @@ const windowSize = 1000
 
 // subscriberQueue is how many events a subscriber may fall behind by.
 //
-// ★ It matches the window: a subscriber that joins late has the window
-//
-//	replayed into its queue, and the queue has to hold it.
-const subscriberQueue = windowSize
+// ★ It is the window plus headroom. A subscriber that joins late has the
+// **whole** window replayed into its queue, and it must still have room for
+// the events that follow: a queue that only fits the replay drops the
+// subscriber on its very next event — and that event could be the approval.
+const subscriberQueue = windowSize + 64
 
 // publisher is the run's event bus.
 //
@@ -72,6 +74,16 @@ func (p *publisher) Publish(ev contract.RunEvent) {
 		if !sub.push(ev) {
 			// ★ The subscriber is gone. It stopped reading, and the run
 			//   does not wait for it.
+			//
+			// ★ But its stream was **cut**, not finished, and the two must
+			//   not look alike on the wire: the renderer closes a finished
+			//   stream with a terminal frame, and a client that reads
+			//   "success" stops looking — so an approval raised after this
+			//   point would never be shown until a manual reload. The
+			//   subscriber marks itself, and the renderer leaves the stream
+			//   open-ended instead; the client's own "the stream ended with
+			//   no terminal frame" path then re-attaches or reloads.
+			sub.truncated.Store(true)
 			delete(p.subs, sub)
 			sub.close()
 		}
@@ -141,6 +153,14 @@ type subscription struct {
 	p    *publisher
 	ch   chan contract.RunEvent
 	once sync.Once
+
+	// truncated says this stream was cut short, not finished.
+	//
+	// ★ The difference is the terminal frame. A run that ended normally
+	//   closes its subscribers and lets the renderer say "finished"; one
+	//   that dropped a subscriber must not, because the subscriber did not
+	//   see the end of the run — and the end is where the approval lives.
+	truncated atomic.Bool
 }
 
 // Events is the subscriber's channel.
@@ -149,6 +169,12 @@ type subscription struct {
 //
 //	stream is over.
 func (s *subscription) Events() <-chan contract.RunEvent { return s.ch }
+
+// Truncated reports whether the run cut this subscriber off.
+//
+// ★ It is read after the channel closes, and the flag is set before the
+// close — so the answer describes this stream, not a later one.
+func (s *subscription) Truncated() bool { return s.truncated.Load() }
 
 // Close detaches the subscriber.
 //

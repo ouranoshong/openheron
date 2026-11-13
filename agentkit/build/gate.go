@@ -166,6 +166,12 @@ func singleChunk(msg string) *schema.StreamReader[string] {
 
 func toolChain(b boundary, maxDepth int) []adk.TypedChatModelAgentMiddleware[*schema.Message] {
 	return []adk.TypedChatModelAgentMiddleware[*schema.Message]{
+		// ★ **First**: a call whose arguments were cut off by the model's
+		//   own output limit must not run, and it must not reach a human as
+		//   a card to approve either. The handlers are applied so that
+		//   handlers[0] ends up outermost (eino's adk applies them in
+		//   reverse), so this one sees the call before the gate does.
+		newTruncationGuardMiddleware(),
 		newFilterMiddleware(b.table),
 		newApprovalMiddleware(b.policy),
 		newDepthMiddleware(maxDepth),

@@ -165,13 +165,13 @@ frontmatter 键。正文就是提示词本身（`Instruction`）。
 
 | 事件 | 发射点 | 含义 |
 |---|---|---|
-| `RUN_STARTED` | `transport.go:61` | 本轮开始，带 `threadId` |
-| `TEXT_MESSAGE_START/CONTENT/END` | `transport.go:246-263` | 助手正文增量 |
-| `REASONING_*` | `transport.go:269-280` | 思考过程 |
-| `TOOL_CALL_START/ARGS/END/RESULT` | `transport.go:283-314` | 工具调用 |
-| `CUSTOM`（`model_retry`） | `transport.go:232` | 模型重试提示 |
-| `RUN_FINISHED` | `transport.go:69`, `:75` | 本轮结束，带结果与用量 |
-| `RUN_ERROR` | `transport.go:240`, `api/v2_run.go:283` | 失败 —— 码说明哪一类，消息说明为什么（见 `docs/runtime-design.md` §5.4） |
+| `RUN_STARTED` | `transport.go:77` | 本轮开始，带 `threadId` |
+| `TEXT_MESSAGE_START/CONTENT/END` | `transport.go:265-282` | 助手正文增量 |
+| `REASONING_*` | `transport.go:288-297` | 思考过程 |
+| `TOOL_CALL_START/ARGS/END/RESULT` | `transport.go:302-336` | 工具调用 |
+| `CUSTOM`（`model_retry`） | `transport.go:246` | 模型重试提示 |
+| `RUN_FINISHED` | `transport.go:88`, `:94` | 本轮结束，带结果与用量。★ 被 run 截断的流**不写终态帧**（`RenderStream`），客户端于是重新挂回来，而不是相信一个假的 success（`docs/runtime-design.md` §2.3） |
+| `RUN_ERROR` | `transport.go:259`, `api/v2_run.go:283` | 失败 —— 码说明哪一类，消息说明为什么（见 `docs/runtime-design.md` §5.4） |
 
 子 Agent 的产出通过事件上的 `subagentRunId` 归属，不另开事件类型，前端能用同一套 reducer
 处理所有 Agent 的输出。
