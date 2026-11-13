@@ -490,7 +490,7 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 | 审批卡出现 | 无 | 从下 8px 淡入 | `opacity` / `transform` | ★ 它**取代 composer**，出现得晚、位置显眼 |
 | 状态点切换 | 只有 `animate-pulse`（`web/src/app/shell.tsx:20`） | 保留 pulse，另加**颜色过渡** | `background-color` | 状态点的语义由上游文档定义 |
 | 「Working…」 | `animate-pulse` 小点（`web/src/components/message-list.tsx:233`） | 保留 | — | 已有 |
-| 工具卡展开 | 箭头 `rotate-90`（`web/src/components/tool-card.tsx:90`） | 箭头保留；**内容**用 `grid-template-rows: 0fr → 1fr` 做高度过渡 | `height`（第二条铁律的例外） | 内容本来就要变高 |
+| 工具卡展开 | 箭头 `rotate-90`（`web/src/components/tool-card.tsx:117`） | 箭头保留；**内容**用 `grid-template-rows: 0fr → 1fr` 做高度过渡 | `height`（第二条铁律的例外） | 内容本来就要变高 |
 | 折叠箭头 | 已有 `transition-transform`（三处各写一遍） | 补上 `--motion-duration-fast` | `transform` | 三个地方各写一遍 = 会漂 |
 | 对话框 | `data-open` / `data-closed` 已有（`web/src/components/ui/dialog.tsx:42`、`:64`） | 保留 | — | 现成的模式，新动效照它写 |
 
@@ -713,7 +713,7 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 | `web/src/components/message-list.tsx:233` | 「Working…」的 pulse 点 |
 | `web/src/app/shell.tsx:20` | 状态点的 pulse |
 | `web/src/app/shell.tsx:80` | 页头的品牌标记（不播） |
-| `web/src/components/tool-card.tsx:90` | 折叠箭头 |
+| `web/src/components/tool-card.tsx:117` | 折叠箭头 |
 | `web/src/components/ui/dialog.tsx:42` | 对话框浮层的 `data-open` |
 | `web/src/index.css:76` | 动效令牌 |
 | `web/src/index.css:185` | `prefers-reduced-motion` 的全局规则 |

@@ -14,6 +14,7 @@ import {
   clickMenuItem,
   openApp,
   openThread,
+  openToolCard,
   resetBackend,
   sendMessage,
   setScenario,
@@ -1023,6 +1024,8 @@ test.describe("工具卡的语法高亮", () => {
     await openApp(page)
     await openThread(page, "Alpha conversation")
     await sendMessage(page, `${MARKER_A} read the file`)
+    // ★ The card starts closed, so the arguments have to be opened first.
+    await openToolCard(page)
     await expect(page.locator('[data-testid="tool-args"]')).toBeVisible({ timeout: 7000 })
 
     const args = page.locator('[data-testid="tool-args"]')
@@ -1042,6 +1045,7 @@ test.describe("工具卡的语法高亮", () => {
     await openApp(page)
     await openThread(page, "Alpha conversation")
     await sendMessage(page, `${MARKER_A} read the file`)
+    await openToolCard(page)
     const args = page.locator('[data-testid="tool-args"]')
     await expect(args).toBeVisible({ timeout: 7000 })
 
@@ -1058,6 +1062,7 @@ test.describe("工具卡的语法高亮", () => {
     await openApp(page)
     await openThread(page, "Alpha conversation")
     await sendMessage(page, `${MARKER_A} read the file`)
+    await openToolCard(page)
 
     const result = page.locator('[data-testid="tool-result"]')
     await expect(result).toBeVisible({ timeout: 7000 })
@@ -1071,6 +1076,7 @@ test.describe("工具卡的语法高亮", () => {
     await openApp(page)
     await openThread(page, "Alpha conversation")
     await sendMessage(page, `${MARKER_A} run a json tool`)
+    await openToolCard(page)
 
     const result = page.locator('[data-testid="tool-result"]')
     await expect(result).toBeVisible({ timeout: 7000 })
@@ -1078,5 +1084,60 @@ test.describe("工具卡的语法高亮", () => {
     await expect(result.locator("span[style*='--shiki-light']").first()).toBeVisible({
       timeout: 8000,
     })
+  })
+})
+
+test.describe("工具卡的宽度", () => {
+  // ★ The header carries three things and they do not fit on one line
+  //   everywhere: the title, the argument (the path the call was about),
+  //   and the metadata ("80 lines / done"). The argument is the one that
+  //   must never be squeezed, so the metadata is what moves.
+  async function rows(page: import("@playwright/test").Page) {
+    // ★ `getBoundingClientRect` and not `boundingBox()`: the second one
+    //   answers null for an element that is outside the viewport, and on a
+    //   narrow screen the card is exactly that.
+    const box = async (sel: string) =>
+      page
+        .locator(sel)
+        .first()
+        .evaluate((el) => {
+          const r = el.getBoundingClientRect()
+          return { top: Math.round(r.top), left: Math.round(r.left), width: Math.round(r.width) }
+        })
+    return {
+      hint: await box('[data-testid="tool-hint"]'),
+      meta: await box('[data-testid="tool-meta"]'),
+    }
+  }
+
+  test("★ 宽屏时元信息留在第一行，路径落到标题之下", async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await setScenario("toolDone")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the file`)
+
+    const { hint, meta } = await rows(page)
+    // ★ The metadata sits on the **first** row, at the far end; the
+    //   argument is on the row below, in the title's own column. So the
+    //   metadata is **above** the argument here.
+    expect(meta.top).toBeLessThan(hint.top)
+  })
+
+  test("★ 窄屏时元信息换到独立的一行，路径不被挤掉", async ({ page }) => {
+    // ★ Below the `sm` breakpoint the header is three rows: the title, the
+    //   argument, and the metadata. The argument still gets a full row of
+    //   its own — it is the one that must stay readable.
+    await page.setViewportSize({ width: 420, height: 900 })
+    await setScenario("toolDone")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the file`)
+
+    const { hint, meta } = await rows(page)
+    // ★ A row of its own: the metadata is below the argument.
+    expect(meta.top).toBeGreaterThan(hint.top)
+    // ★ And the argument was not squeezed out of the card.
+    expect(hint.width).toBeGreaterThan(100)
   })
 })

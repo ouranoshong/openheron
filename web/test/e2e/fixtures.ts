@@ -106,6 +106,20 @@ export async function openThread(page: Page, title: string): Promise<void> {
   await row.click()
 }
 
+// ★ openToolCard opens the **first** tool card of the transcript.
+//
+// ★ The card starts closed — a tool call is a step, not a message — so a
+//   test that wants the arguments or the result has to open it first.
+export async function openToolCard(page: Page, index = 0): Promise<void> {
+  const card = page.locator('[data-testid="tool-card"]').nth(index)
+  await card.waitFor({ state: "visible", timeout: 7000 })
+  const toggle = card.locator('[data-testid="tool-card-toggle"]')
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click()
+  }
+  await expect(card).toHaveAttribute("data-open", "true")
+}
+
 export function trackRequests(page: Page): string[] {
   const seen: string[] = []
   page.on("request", (r) => {
