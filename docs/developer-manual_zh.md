@@ -17,19 +17,21 @@
 | 端口 | 见 `.env.test`（仓库根，已提交） |
 
 ```bash
-task init          # 创建 .openheron/ —— 服务端读的配置（每个克隆只需一次）
+task init          # 创建 .openheron/ —— 服务端读的配置（可省略：服务端自己也会写）
 task build-go     # 只构建后端（不含界面），迭代 Go 代码时最快
 task web-dev      # Vite dev server（:5173，代理 /v2 到 :8080）
 task dev          # air：Go 自动重建重启
 task check        # lint + test，提交前跑这个
 ```
 
-★ **没有配置，服务端就不启动**：它只读一个配置根 —— `$OPENHERON_CONFIG_DIR`，
-否则 `<项目根>/.openheron` —— 为空时报 `no configuration at <root>: run
-openheron init to create one`。仓库里带的是 `.openheron-example/`（样例），
-不是 `.openheron/`（真正那份：里面是你的模型和 API key，所以被 git 忽略了）。
-**所以新克隆之后第一个命令就是 `task init`。** 它只写缺的文件，已经在的保留，
-跑两遍不会有任何变化。
+★ **服务端在第一次启动时写配置**：它只读一个配置根 —— `$OPENHERON_CONFIG_DIR`，
+否则 `<项目根>/.openheron` —— 当这个根是**缺省**的那个、而且里面没有
+`agents/main.md` 时，它先把出厂树写出来，再去装载配置。★ **点名的根不会被写**：
+`--config-dir` 与 `$OPENHERON_CONFIG_DIR` 指的是用户自己选的目录，它空着是用户的
+决定。仓库里带的是 `.openheron-example/`（样例），不是 `.openheron/`（真正那份：
+里面是你的模型和 API key，所以被 git 忽略了）。★ **`task init` 是显式那条路**：
+它收 `--model` / `--provider` / `--env`，而且只写缺的文件，已经在的保留，跑两遍
+不会有任何变化。
 
 ## 2. 仓库结构
 

@@ -226,9 +226,8 @@ Chinese only, like every design document in this repository.
 
 ```bash
 cd /your/project
-openheron init                      # generate the configuration in the current directory
 export DEEPSEEK_API_KEY=sk-...     # secrets are read from the environment only
-openheron
+openheron                           # the configuration is written on the first start
 ```
 
 Open <http://localhost:8080>.
@@ -236,13 +235,18 @@ Open <http://localhost:8080>.
 ★ The key is read from the environment, and **how** you set it depends on the system
 you are on — macOS and Linux see §4.2, Windows see §2.2.
 
+★ **The server writes the configuration itself** the first time it starts in a
+project that has none: the same tree `openheron init` writes (§2.3), with the
+DeepSeek provider template and the key read from `DEEPSEEK_API_KEY`. ★ Use
+`openheron init` when you want another model or provider, or when you want the
+configuration written without starting the server.
+
 ### 2.2 Running it for the first time on Windows
 
 In PowerShell, from nothing to running:
 
 ```powershell
 cd C:\path\to\your-project
-openheron init                      # generate the configuration in the current directory
 $env:DEEPSEEK_API_KEY = "sk-..."    # secrets are read from the environment only
 openheron
 ```
@@ -255,6 +259,9 @@ openheron
 ```
 the api key is read from the environment at request time: export DEEPSEEK_API_KEY=...
 ```
+
+★ The server reports the same thing in its startup log when it writes the
+configuration itself.
 
 ★ That line uses **the Unix `export`**, which runs in neither PowerShell nor cmd.exe — on
 Windows the same thing is `$env:DEEPSEEK_API_KEY = "sk-..."` (PowerShell) or
@@ -304,7 +311,8 @@ carry `api_key env DEEPSEEK_API_KEY is not set` (§4.2).
 `init` always writes `.openheron` under the current directory and it **does not look at**
 `$OPENHERON_CONFIG_DIR`; the server reads `--config-dir` → `$OPENHERON_CONFIG_DIR` →
 `.openheron` under the project root (§3). With that environment variable set, the server
-comes up with "no configuration at ...", because it is not reading the tree `init` wrote.
+comes up with "no configuration at ...", because it is not reading the tree `init` wrote —
+★ and it does not write one there either: a root you named is a root you own.
 
 ★ **When the child process cannot find the command on Windows**, change `command` to
 `uvx.exe` in `mcps/fetch.yaml` and `mcps/time.yaml` — the two MCP servers need `uvx` on
@@ -312,9 +320,10 @@ the PATH (§2.3).
 
 If the port is taken, change it **before** it starts: `$env:LISTEN_ADDR = ":9090"` (§10).
 
-### 2.3 What init writes
+### 2.3 What the configuration holds
 
-`openheron init` writes the whole tree:
+The whole tree is written by `openheron init` — and by the server itself, the
+first time it starts in a project that has none:
 
 ```
 your/project/
@@ -328,7 +337,8 @@ your/project/
     │   ├── openheron-config-map/SKILL.md        # the facts of the configuration system
     │   ├── openheron-config-edit/SKILL.md       # the procedure for changing it
     │   ├── openheron-config-templates/SKILL.md  # how to get a skeleton
-    │   └── openheron-config-validate/SKILL.md   # the silent failures
+    │   ├── openheron-config-validate/SKILL.md   # the silent failures
+    │   └── openheron-agent-authoring/SKILL.md   # how to write an agent
     ├── llm/
     │   └── deepseek.yaml    # model profile
     ├── mcps/
@@ -379,14 +389,18 @@ Other `init` options:
 --config-dir  →  $OPENHERON_CONFIG_DIR  →  <project-root>/.openheron
 ```
 
-- **The default level is created for you** when it does not exist.
+- **The default level is created for you** when it does not exist — and the tree in it
+  is written for you too, on the first start (§2.1).
 - The first two levels are **not** created when they point nowhere — a typo must not
   silently grow an empty configuration tree. Startup then reports
   `config: load <path>: ...`, which tells you where it went wrong.
 - The config root **does not depend on "where the process was started from"**: running
   `openheron` in a subdirectory still reads the same configuration.
+- ★ **A root you named is never written into**: `--config-dir` and `$OPENHERON_CONFIG_DIR`
+  point at a directory you chose, and an empty one is your decision, not a gap.
 
-If the default root has no `agents/main.md`, startup says so directly:
+If the default root has no `agents/main.md` **and the server could not write one**,
+startup says so directly:
 
 ```
 no configuration at /your/project/.openheron: run `openheron init` to create one
@@ -1539,7 +1553,10 @@ The decision goes back into the **same** `/v2/run`:
 ## 10. FAQ
 
 **Q: Startup says `no configuration at ...: run \`openheron init\` to create one`**
-The config root is empty. Run `openheron init` in the project root.
+The config root is empty and the server could not write one itself — it does
+that on the first start in a project that has none. The startup log says why
+the automatic initialization failed; `openheron init` in the project root does
+the same thing with a model and a provider of your choice.
 
 **Q: `config: load <path>: agents/main.md does not exist or could not be parsed`**
 One of two things: the config root points at the wrong place (fix it with

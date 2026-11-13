@@ -31,6 +31,7 @@ import (
 	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/api"
 	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/initcfg"
 	"github.com/ouranoshong/openheron/storage/filestore"
 	"github.com/ouranoshong/openheron/storage/memarbit"
 	"github.com/ouranoshong/openheron/webui"
@@ -153,6 +154,51 @@ func configLoadError(svc *spec.Service, err error) error {
 		}
 	}
 	return fmt.Errorf("config: load %s: %w", svc.Root(), err)
+}
+
+// initConfigIfEmpty writes the factory configuration when the process starts on
+// a project that has none.
+//
+// ★ Only the **defaulted** root is filled: `--config-dir` and
+// `$OPENHERON_CONFIG_DIR` name a root, and a named root that is empty is the
+// user's decision, not a gap for us to fill. ★ The test instance names its
+// root, so it never has a configuration written under it.
+//
+// ★ The plan is the one `openheron init` builds — the same templates, the
+// same rules — so "the server created it" and "the command created it" are the
+// same tree. The model is the provider template's own default
+// (deepseek/deepseek-flash) and the api key is read from the environment at
+// request time, exactly as with `openheron init` without flags.
+//
+// ★ "Empty" means **no agent file**: a tree that has one is a configuration,
+// whether or not it loads, and this must not touch it. The plan itself skips
+// the files that are already there, so a half-written tree is topped up
+// rather than replaced.
+func initConfigIfEmpty(svc *spec.Service, log *slog.Logger) error {
+	if log == nil {
+		log = obs.Discard()
+	}
+	if !svc.RootIsDefaulted() {
+		return nil
+	}
+	agent := filepath.Join(svc.Root(), spec.DirAgent, spec.DefaultAgentID+".md")
+	if _, err := os.Stat(agent); err == nil {
+		return nil
+	}
+	plan, err := initcfg.BuildPlan(svc, initcfg.Options{})
+	if err != nil {
+		return err
+	}
+	if err := plan.Apply(svc); err != nil {
+		return err
+	}
+	log.Info("[main] configuration initialized", "dir", svc.Root(),
+		"model", plan.Model, "files", len(plan.Files))
+	if plan.EnvHint != "" {
+		log.Info("[main] the api key is read from the environment at request time",
+			"env", plan.EnvHint)
+	}
+	return nil
 }
 
 func runServer(flags serverFlags) error {
@@ -322,6 +368,22 @@ func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar, sink
 	cfgSvc, err := spec.NewService(flags.configDir, flags.projectRoot)
 	if err != nil {
 		return nil, err
+	}
+	// ★ The configuration is written on the first start, so a fresh clone
+	//   starts without a command in front of it.
+	//
+	//   ★ It has to happen **before** the skills directory is resolved: that
+	//     probe looks for the directory on disk, and a tree that was written
+	//     a moment ago is the one it has to find.
+	//
+	//   ★ The line about it goes to the console, not to the log file: the
+	//     file's destination is part of the configuration, and the
+	//     configuration is what this line is about.
+	if err := initConfigIfEmpty(cfgSvc, log); err != nil {
+		// ★ Not fatal: a configuration that is there but does not load is a
+		//   different thing, and the load below reports it in the way that
+		//   fits it.
+		log.Warn("[main] the configuration could not be initialized", "err", err)
 	}
 	// ★ The editor writes <config root>/skills/, and the runtime reads
 	//   whatever its own probe resolved. Tell the config layer where that is,

@@ -454,7 +454,15 @@ main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
 实现在 `agentkit/spec/config.go` 的 `NewService`。**不向上查找祖先目录**：否则同一条命令换个
 启动目录就读到另一份配置，测试实例也会读到开发配置。只有默认派生的根会被自动创建
 （`agentkit/spec/config.go:455` 的 `os.MkdirAll`）；显式 root / env root 指向不存在的路径时
-不创建。`spec.NewServiceAt` 是给 `openheron init` 用的另一条入口，只认显式传入的路径，
+不创建。
+
+★ **第一次启动时写的是整棵树**，不只是那个目录：当配置根是缺省派生的那个、而且里面没有
+`agents/main.md` 时，服务端先把出厂树写出来 —— 与 `openheron init` 建的是同一份计划 ——
+再去装载配置（`main.go` 里的 `initConfigIfEmpty`）。★ **点名的根永远不会被写**：用户
+指过去的空目录是用户的决定，测试实例也靠这一点 —— 它的根是点名的，所以从来不会有人
+往它底下写配置。
+
+`spec.NewServiceAt` 是给 `openheron init` 用的另一条入口，只认显式传入的路径，
 不读环境变量。
 
 ### 5.3 目录分区

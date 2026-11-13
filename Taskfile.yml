@@ -175,12 +175,14 @@ tasks:
   # ── Configuration ───────────────────────────────────────────────────────────
   #
   # ★ The server reads exactly one configuration root — $OPENHERON_CONFIG_DIR,
-  #   else <project-root>/.openheron — and refuses to start without one:
-  #   "no configuration at <root>: run `openheron init` to create one". The
+  #   else <project-root>/.openheron — and writes the factory tree itself when
+  #   that root is the defaulted one and holds no agents/main.md. The
   #   repository ships .openheron-example/ (the sample) but not .openheron/
   #   (the real one — it holds the developer's own model and API key, so it
-  #   is git-ignored). A fresh clone therefore cannot start the server at
-  #   all, and this is the command that makes it startable.
+  #   is git-ignored).
+  #
+  # ★ This task is the **explicit** path: it takes --model / --provider /
+  #   --env, and the automatic initialization has no way to ask for those.
   #
   # ★ init writes only the files that are missing and keeps the ones that are
   #   already there ("kept <file> (already exists)"), so it is **idempotent**:

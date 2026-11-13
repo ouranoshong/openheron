@@ -129,10 +129,15 @@ llm/*.local.yaml
 东西** —— 绝不覆盖已有的同名文件（同名文件是**整体替换**语义）；给了 `--config-dir` 就写到那儿，否则
 写 `<目标目录>/.openheron`。它写什么（`initcfg/initcfg.go:56` 的 `BuildPlan`、`:198` 的 `copySection`）：
 `agents/` 下的四个 agent、`llm/<provider>.yaml`、`server/config.yaml`、`tools/` 下的五个文件、`mcps/` 下的
-三台服务器（`fetch` `time` `deepwiki`），以及 `skills/openheron-config-<name>/SKILL.md` 四个技能。
+三台服务器（`fetch` `time` `deepwiki`），以及 `skills/` 下的五个技能 ——
+`openheron-config-<name>/SKILL.md` 四个，加上 `openheron-agent-authoring/SKILL.md`。
 ★ **`tools/` 这一段是默认写的**：那五个文件是这棵树的一部分 —— 出厂的 agent 会点名 `request_get` /
 `duckduckgo_search` / `wikipedia_search`，而没有 provider 提供的名字会被当成笔误报出来；想留下它就加
 `--no-tools`。★ **没有 `policy/` 这一段 —— 那个分区已经没了。**
+
+★ **服务端第一次启动时写的是同一棵树。** 缺省根下没有 `agents/main.md` 时，它在装载配置之前先把
+出厂树写出来（`main.go:180` 的 `initConfigIfEmpty`），用的就是上面那份计划 —— 所以
+「服务端写的」与「命令写的」是同一棵树。★ **点名的根不写**：理由见 §3。
 
 ## 3. 配置根：三级，没有探测
 
@@ -163,6 +168,17 @@ llm/*.local.yaml
 
 ★ **家目录也不是兜底。** 如果 `~/.openheron/` 存在却不是正在用的配置根，进程会在启动时说一声
 （`main.go:122-139` 的 `warnUnusedHomeConfig`）：配置根从不被搜出来，所以那个目录必须被点名。
+
+★ **默认根下还没有 `agents/main.md` 时，服务端自己把树写出来**（`main.go:180` 的
+`initConfigIfEmpty`）：写的还是 §2.2 那份计划，模型用 provider 模板自己的缺省
+（`deepseek/deepseek-flash`），密钥从环境变量读（`DEEPSEEK_API_KEY`）—— 与不带参数的
+`openheron init` 完全一致。★ **「空」的判据是「没有 agent 文件」**：已经有 `agents/main.md`
+的树就是一份配置（能不能装载是另一回事），这份初始化不碰它；计划本身只补缺的那些，
+所以半写状态的树是被补齐，不是被替换。
+
+★ **点名的根不写**：`--config-dir` 与 `$OPENHERON_CONFIG_DIR` 指的是用户自己选的目录，
+它空着是用户的决定，不是一个缺口。★ 这条同时是**测试实例能隔离**的前提：测试实例点
+自己的根，所以自动初始化在它那儿永远不发生 —— 那棵树的每一份文件都是脚本放进去的。
 
 ### 3.1 两个「根」：`Root` 与 `ProjectRoot`
 

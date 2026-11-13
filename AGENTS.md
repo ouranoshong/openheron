@@ -191,6 +191,12 @@ eino already hold that, and a process-global registry cannot be rewritten.
   process was started from", the same command run from another directory reads a different
   config, and test instances end up reading the development config too. To change the config
   root, name it; do not add another lookup rule.
+- ★ **The server fills the defaulted root and never a named one.** When the config root is
+  `<projectRoot>/.openheron` — the one the user did not name — and it holds no
+  `agents/main.md`, the first start writes the factory tree (the same plan `openheron init`
+  builds). `--config-dir` and `$OPENHERON_CONFIG_DIR` name a directory, and an empty one is
+  the user's decision. ★ That asymmetry is what keeps the test instance isolated: it names
+  its own root, so nothing is ever written under it.
 - **Archival comes before presentation** — when the SSE sink breaks, stop rendering but keep
   consuming the event stream, otherwise `Outcome.Intermediates` is incomplete and the history
   has holes.

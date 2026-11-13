@@ -626,6 +626,13 @@ Only a **defaulted** root is created automatically (`agentkit/spec/config.go:455
 explicit root or an env root pointing nowhere is **not** created: a typo must not silently
 grow an empty configuration tree.
 
+★ **The tree itself is written on the first start**, not only the directory: when the config
+root is the defaulted one and holds no `agents/main.md`, the server writes the factory tree —
+the same plan `openheron init` builds — before it loads anything (`initConfigIfEmpty` in
+`main.go`). A **named** root is never written into: an empty directory the user pointed at is
+their decision, and the test instance depends on it — its root is named, so no configuration
+is ever written under it.
+
 `spec.NewServiceAt` is a second entry point, used by `openheron init`: it **honours only
 the path passed in** and does not read the environment variable — otherwise init would
 write the new configuration somewhere the user did not point at.

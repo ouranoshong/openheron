@@ -19,21 +19,24 @@
 | Ports | see `.env.test` (repository root, committed) |
 
 ```bash
-task init          # create .openheron/ — the configuration the server reads (once per clone)
+task init          # create .openheron/ — the configuration the server reads (optional: the server writes it too)
 task build-go     # backend only (no UI) — fastest while iterating on Go code
 task web-dev      # Vite dev server (:5173, proxies /v2 to :8080)
 task dev          # air: rebuild and restart the Go binary automatically
 task check        # lint + test — run this before committing
 ```
 
-★ **The server refuses to start without a configuration**: it reads exactly one
-config root — `$OPENHERON_CONFIG_DIR`, else `<project-root>/.openheron` — and
-reports `no configuration at <root>: run openheron init to create one` when it
-is empty. The repository ships `.openheron-example/` (the sample) but not
-`.openheron/` (the real one: it holds your own model and API key, so it is
-git-ignored). **`task init` is therefore the first command on a fresh clone.**
-It writes only the files that are missing and keeps the ones already there, so
-running it twice changes nothing.
+★ **The server writes the configuration on the first start**: it reads exactly
+one config root — `$OPENHERON_CONFIG_DIR`, else `<project-root>/.openheron` —
+and when that root is the defaulted one and holds no `agents/main.md`, it
+writes the factory tree before it loads anything. ★ A **named** root is never
+written into: `--config-dir` and `$OPENHERON_CONFIG_DIR` mean a directory the
+user chose, and an empty one is their decision. The repository ships
+`.openheron-example/` (the sample) but not `.openheron/` (the real one: it
+holds your own model and API key, so it is git-ignored). ★ **`task init` is the
+explicit path**: it takes `--model` / `--provider` / `--env`, and it writes only
+the files that are missing and keeps the ones already there, so running it
+twice changes nothing.
 
 ## 2. Repository layout
 

@@ -203,9 +203,8 @@ HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
 
 ```bash
 cd /your/project
-openheron init                      # 在当前目录下生成配置
 export DEEPSEEK_API_KEY=sk-...     # 密钥只从环境变量读
-openheron
+openheron                           # 配置在第一次启动时写出来
 ```
 
 打开 <http://localhost:8080>。
@@ -213,13 +212,17 @@ openheron
 ★ 密钥从环境变量读，而**怎么设**取决于你在哪个系统上 —— macOS 与 Linux 见 §4.2，
 Windows 见 §2.2。
 
+★ **服务端会自己写配置**：在还没有配置的项目里第一次启动时，它写出的那棵树与
+`openheron init` 写的完全一样（§2.3），用 DeepSeek 的 provider 模板，密钥从
+`DEEPSEEK_API_KEY` 读。★ 要换模型、换 provider，或者只想把配置写出来而先不启动
+服务端，就用 `openheron init`。
+
 ### 2.2 在 Windows 上跑第一次
 
 PowerShell 里，从零到跑起来：
 
 ```powershell
 cd C:\path\to\your-project
-openheron init                      # 在当前目录下生成配置
 $env:DEEPSEEK_API_KEY = "sk-..."    # 密钥只从环境变量读
 openheron
 ```
@@ -232,6 +235,8 @@ openheron
 ```
 the api key is read from the environment at request time: export DEEPSEEK_API_KEY=...
 ```
+
+★ 服务端自己写配置时，启动日志里报的是同一件事。
 
 ★ 那行提示用的是 **Unix 的 `export`**，在 PowerShell 和 cmd.exe 里都跑不了 —— Windows 上
 对应的是 `$env:DEEPSEEK_API_KEY = "sk-..."`（PowerShell）或 `set DEEPSEEK_API_KEY=sk-...`
@@ -275,16 +280,17 @@ api_key: "@file:C:/Users/you/deepseek.key"    # 或者正斜杠
 ★ **`init` 写的地方和服务读的地方可能不是一个。** `init` 一定写当前目录下的
 `.openheron`，它**不看** `$OPENHERON_CONFIG_DIR`；而服务读的顺序是 `--config-dir` →
 `$OPENHERON_CONFIG_DIR` → 项目根下的 `.openheron`（§3）。这个环境变量设着的时候，
-服务起来会报 "no configuration at ..."，因为它读的不是 `init` 写的那一棵。
+服务起来会报 "no configuration at ..."，因为它读的不是 `init` 写的那一棵 ——
+★ 而它也不会在那儿写一棵：你点名的根是你自己的。
 
 ★ **Windows 上子进程找不到命令时**，把 `mcps/fetch.yaml` 和 `mcps/time.yaml` 里的
 `command` 改成 `uvx.exe` —— 那两个 MCP 服务器要 PATH 里有 `uvx`（§2.3）。
 
 端口被占就在**启动之前**换一个：`$env:LISTEN_ADDR = ":9090"`（§10）。
 
-### 2.3 init 写了什么
+### 2.3 配置里有什么
 
-`openheron init` 写整棵树：
+整棵树由 `openheron init` 写出 —— 服务端自己第一次启动时写的也是这棵树：
 
 ```
 your/project/
@@ -298,7 +304,8 @@ your/project/
     │   ├── openheron-config-map/SKILL.md        # 配置系统的事实地图
     │   ├── openheron-config-edit/SKILL.md       # 修改配置的规程
     │   ├── openheron-config-templates/SKILL.md  # 骨架怎么拿
-    │   └── openheron-config-validate/SKILL.md   # 静默失效
+    │   ├── openheron-config-validate/SKILL.md   # 静默失效
+    │   └── openheron-agent-authoring/SKILL.md   # 怎么写一个 agent
     ├── llm/
     │   └── deepseek.yaml    # 模型档案
     ├── mcps/
@@ -346,12 +353,14 @@ your/project/
 --config-dir  →  $OPENHERON_CONFIG_DIR  →  <project-root>/.openheron
 ```
 
-- **默认那一档不存在会帮你创建**。
+- **默认那一档不存在会帮你创建** —— 里面的树也会帮你写，第一次启动时写（§2.1）。
 - 前两档指向不存在的目录时**不会创建** —— 打错字不该静默长出一棵空配置树。
   这种情况下启动会报 `config: load <path>: ...`，告诉你哪里不对。
 - 配置根**不依赖「进程从哪启动」**：在子目录里跑 `openheron` 读到的还是同一份配置。
+- ★ **你点名的根永远不会被写**：`--config-dir` 与 `$OPENHERON_CONFIG_DIR` 指的是你选的
+  目录，它空着是你的决定，不是一个缺口。
 
-如果默认根下没有 `agents/main.md`，启动会直接告诉你：
+如果默认根下没有 `agents/main.md`、而服务端也没能写出来，启动会直接告诉你：
 
 ```
 no configuration at /your/project/.openheron: run `openheron init` to create one
@@ -1372,7 +1381,9 @@ curl -N -X POST localhost:8080/v2/run \
 ## 10. 常见问题
 
 **Q：启动报 `no configuration at ...: run \`openheron init\` to create one`**
-配置根是空的。在项目根跑 `openheron init`。
+配置根是空的，而服务端没能自己写出来 —— 它会在第一次启动时写。启动日志里说了自动
+初始化为什么失败；在项目根跑 `openheron init` 做的是同一件事，只是模型和 provider
+由你定。
 
 **Q：报 `config: load <path>: agents/main.md does not exist or could not be parsed`**
 两件事之一：配置根指错了（用 `--config-dir` 或 `$OPENHERON_CONFIG_DIR` 指对），
