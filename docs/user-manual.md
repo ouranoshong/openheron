@@ -715,7 +715,7 @@ whatever any file says.
 ### 4.4 External tools (`tools/`)
 
 **No code change needed** — a provider whose configuration is absent mounts nothing, so
-writing the file is what turns the tool on. Four file names are recognised today:
+writing the file is what turns the tool on. Six file names are recognised today:
 
 | File | Provides |
 |---|---|
@@ -723,18 +723,23 @@ writing the file is what turns the tool on. Four file names are recognised today
 | `web_search.yaml` | Web search |
 | `wikipedia.yaml` | Encyclopedia lookup |
 | `kb.yaml` | The knowledge base (see §7) |
+| `filesystem.yaml` | The filesystem tool set |
+| `config.yaml` | The configuration tools themselves |
 
-★ The knowledge base is the one exception: its file only holds the settings — it is
-switched on by a **non-empty `corpus_dir`**, not by the file's presence.
+★ The knowledge base is not switched on by its file: it is switched on by a **non-empty
+`corpus_dir`**, and its file only holds the settings. The filesystem and configuration
+tools are the other way round — they are mounted whether their file is there or not.
 
-★ **Only these four file names are accepted** under `tools/`; any other name is a
+★ **Only these six file names are accepted** under `tools/`; any other name is a
 **startup error** and is never silently ignored.
 
-★ **`openheron init` writes the five files above** — the tool configurations are part
+★ **`openheron init` writes the six files above** — the tool configurations are part
 of the tree, because the factory agents name `request_get`, `duckduckgo_search` and
 `wikipedia_search`, and a name no provider offers is reported as a typo. Pass
-`--no-tools` and that directory stays empty. Not writing a file means not enabled: the
-tool does not appear in the agent's tool table, and the model cannot see it.
+`--no-tools` and that directory stays empty. ★ For a provider-driven tool, not writing
+its file means not enabled: the tool does not appear in the agent's tool table, and the
+model cannot see it. The filesystem and configuration tools are mounted either way —
+for those two, a missing file takes away an exception, not the tool.
 
 ★ **The file's `allows:` line decides what runs without asking** — `tools/http.yaml`
 names `request_get`, `tools/kb.yaml` names `kb_search`. Everything else that file

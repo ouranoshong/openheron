@@ -57,11 +57,19 @@ func TestEveryToolHasItsFileOrNone(t *testing.T) {
 	if got := ToolConfigFile(decl.ToolNameLs); got != "tools/filesystem.yaml" {
 		t.Fatalf("the filesystem tools live in %q", got)
 	}
-	// ★ The delegation tools, the skill reader and the config tools are
-	//	provided by the code: nothing on disk can change them.
-	for _, name := range []string{"task", "write_todos", "skill", "config_get", "config_write"} {
+	// ★ The delegation tools and the skill reader are provided by the code:
+	//	nothing on disk can change them.
+	for _, name := range []string{"task", "write_todos", "skill"} {
 		if got := ToolConfigFile(name); got != "" {
 			t.Fatalf("%q has no file of its own, but the table says %q", name, got)
+		}
+	}
+	// ★ The configuration tools have a file of their own: it is what says
+	//	that the read-only ones run without a nod — so an agent that uses
+	//	one of them depends on that file.
+	for _, name := range decl.ConfigToolNames {
+		if got := ToolConfigFile(name); got != "tools/config.yaml" {
+			t.Fatalf("%q lives in %q", name, got)
 		}
 	}
 }

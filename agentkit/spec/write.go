@@ -175,8 +175,8 @@ func validateFileName(cat Category, rel string) error {
 			}
 		}
 		return writeErrf(ErrPathInvalid, rel,
-			"tools/ only accepts %s; other files here are rejected at load time",
-			strings.Join(ToolFileNames(), ", "))
+			"tools/ accepts one file per tool: %s; other files here are rejected at load time",
+			toolFileList())
 	case DirMCP:
 		// ★ The file's name is the server's name, and it is the namespace
 		//   segment of that server's tools: a name that does not match the
@@ -298,10 +298,14 @@ func Skeleton(catDir string, modelRefs []string) string {
 			"#   web_search.yaml   duckduckgo_search\n" +
 			"#   wikipedia.yaml    wikipedia_search\n" +
 			"#   kb.yaml           knowledge base\n" +
+			"#   filesystem.yaml   ls / read_file / write_file / edit_file / glob / grep / execute\n" +
+			"#   config.yaml       config_get / config_validate / config_template / config_notices / config_tier / config_write\n" +
 			"#\n" +
 			"# ★ The content of the file IS **that tool's own configuration** (no outer wrapper key).\n" +
-			"#   A provider whose configuration is absent mounts nothing, so for these tools\n" +
+			"#   A provider whose configuration is absent mounts nothing, so for those tools\n" +
 			"#   the file's presence IS the switch — turning a tool off = deleting that file.\n" +
+			"#   The filesystem and configuration tools are mounted either way: for those\n" +
+			"#   two, a missing file takes away an exception, not the tool.\n" +
 			"#\n" +
 			"# ★ tools/ is hot-reloaded: the change takes effect on the next turn, no process restart.\n"
 	case DirMCP:

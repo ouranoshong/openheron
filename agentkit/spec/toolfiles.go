@@ -40,15 +40,18 @@ var toolFiles = []toolFile{
 		decl.ToolNameEditFile, decl.ToolNameGlob, decl.ToolNameGrep,
 		decl.ToolNameExecute,
 	}},
+	// ★ The configuration tools have a file of their own, and it is what
+	//	says that the read-only ones run without a nod — so an agent that
+	//	uses one of them depends on that file.
+	{"config.yaml", append([]string(nil), decl.ConfigToolNames...)},
 }
 
 // ToolConfigFile returns the `tools/` file that configures the named tool,
 // and "" when no file does.
 //
-// ★ A tool with no file of its own — the delegation tools, the skill reader,
+// ★ A tool with no file of its own — the delegation tools and the skill
 //
-//	the `config_*` tools — is provided by the code, so nothing on disk can
-//	change it.
+//	reader — is provided by the code, so nothing on disk can change it.
 //
 // ★ The answer is what "this agent depends on that file" is built on: the
 //
@@ -105,6 +108,9 @@ func (c *Config) ToolAllows() map[string][]string {
 	}
 	if t := c.Tools.Filesystem; t != nil {
 		out[DirTools+"/filesystem.yaml"] = t.Allows
+	}
+	if t := c.Tools.Config; t != nil {
+		out[DirTools+"/config.yaml"] = t.Allows
 	}
 	out[DirTools+"/kb.yaml"] = c.KB.Allows
 	return out

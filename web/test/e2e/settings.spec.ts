@@ -150,6 +150,23 @@ test.describe("opening", () => {
     expect(await coloredTokens(page)).toBeGreaterThan(0)
   })
 
+  // ★ The configuration tools have a file of their own now, and it is in
+  //   every tree — so the editor must open it, color it as YAML, and save
+  //   it, the same way it treats every other tools/ file.
+  test("the configuration tools' own file opens, is colored and saves", async ({ page }) => {
+    await openSettings(page)
+    await selectFile(page, "tools/config.yaml")
+    await expect(page.locator(EDITOR)).toContainText("max_read_bytes")
+    expect(await coloredTokens(page)).toBeGreaterThan(0)
+
+    await page.locator(EDITOR).click()
+    await page.keyboard.press("Control+a")
+    await page.keyboard.type("allows: [config_get]\nmax_read_bytes: 4096\n")
+
+    await page.click(SAVE)
+    await expect(page.locator(STATUS)).toContainText(/Saved .* applied/)
+  })
+
   // ★ The editor used to paint itself white: the library's default theme
   //   does, and its rule sat after ours. In the dark theme that was white
   //   text on a white background.

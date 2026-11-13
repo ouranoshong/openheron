@@ -235,6 +235,34 @@ func TestAFileNobodyDependsOnRebuildsNobody(t *testing.T) {
 	}
 }
 
+// ★ The configuration tools have a file of their own, so an agent that uses
+//
+//	one of them depends on that file: changing it rebuilds that agent and
+//
+//	leaves the others alone.
+func TestChangingTheConfigFileRebuildsTheAgentsThatUseTheConfigTools(t *testing.T) {
+	svc, b, _ := fingerprintEnv(t)
+
+	writeConfig(t, svc, "agents/main.md",
+		"---\nmodel: openai/fast\ntools: [ls, request_get, config_get]\n"+
+			"subagents: [skill-expert]\n---\nmain body\n")
+	writeConfig(t, svc, "tools/config.yaml", "allows: [config_get]\n")
+
+	mainFP := buildRoot(t, b, "main")
+	otherFP := buildRoot(t, b, "other")
+
+	writeConfig(t, svc, "tools/config.yaml", "allows: [config_get, config_tier]\n")
+
+	got := buildRoot(t, b, "main")
+	if got == mainFP {
+		t.Fatal("★ the agent that uses a config tool must be rebuilt when its file changes")
+	}
+	got = buildRoot(t, b, "other")
+	if got != otherFP {
+		t.Fatal("★ an agent that does not use the config tools must not be rebuilt")
+	}
+}
+
 // TestTheImpactQueryNamesTheDependentsAndTheRebuilds is the query's own
 // contract.
 //

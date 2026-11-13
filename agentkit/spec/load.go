@@ -206,6 +206,9 @@ var toolHints = map[string]string{
 	"web_search": "the web search configuration (provider, max_results, timeout)",
 	"wikipedia":  "the Wikipedia configuration (top_k, language, timeout)",
 	"kb":         "the knowledge base configuration (corpus, index, model)",
+	// ★ The configuration tools have a file of their own, and it is what
+	//	says that the read-only ones run without a nod.
+	"config": "the configuration tools' exceptions and limits",
 }
 
 // ToolFileNames are the file names tools/ accepts, sorted.
@@ -286,10 +289,105 @@ func (c *Config) loadTool(file string, data []byte) error {
 		return nil
 	case "kb":
 		return c.loadKB(data)
+	case "config":
+		var t decl.ConfigToolsCfg
+		if err := decodeTool(data, &t, toolHints["config"]); err != nil {
+			return err
+		}
+		if err := validateConfigReadBytes(&t); err != nil {
+			return err
+		}
+		// ★ A file that asks for the one tool that rewrites the files
+		//	saying so is a file that did not take effect — so it is said
+		//	in the notice, not swallowed by the tier table.
+		for _, name := range t.Allows {
+			if name == decl.ToolNameConfigWrite {
+				c.deferFile(DirTools+"/config.yaml",
+					"`allows:` cannot grant `config_write`: it edits the very files "+
+						"whose `allows:` lists would grant it, so it always asks")
+			}
+		}
+		c.Tools.Config = &t
+		return nil
 	default:
-		return fmt.Errorf("tools/ only accepts %s; unknown file %q",
-			strings.Join(ToolFileNames(), ", "), file)
+		return fmt.Errorf("tools/ accepts one file per tool: %s; unknown file %q",
+			toolFileList(), file)
 	}
+}
+
+// toolFileList is the accepted file names, for the messages that name them.
+//
+// ★ One sentence for both messages: two lists is two answers to "which
+//
+//	files may I write here", and the one nobody reads is the one that
+//
+//	drifts.
+func toolFileList() string {
+	return strings.Join(ToolFileNames(), ", ")
+}
+
+// validateConfigReadBytes refuses a limit outside the range the tool takes.
+//
+// ★ It is a **hard error**, not a clamp: a limit that silently becomes
+//
+//	another number is a limit the user did not write, and what follows is
+//
+//	a tool that refuses a file the user expected to read.
+func validateConfigReadBytes(t *decl.ConfigToolsCfg) error {
+	if t == nil || t.MaxReadBytes == 0 {
+		return nil
+	}
+	if t.MaxReadBytes < decl.MinConfigReadBytes || t.MaxReadBytes > decl.MaxConfigReadBytes {
+		return fmt.Errorf("max_read_bytes is %d; it must be between %d and %d",
+			t.MaxReadBytes, decl.MinConfigReadBytes, decl.MaxConfigReadBytes)
+	}
+	return nil
+}
+
+// noticeConfigToolsAbsent says what the configuration tools cost when
+// their file is not there.
+//
+// ★ The five read-only tools run **without a nod** because their file says
+//
+//	so — there is no code list that names them any more. A tree without
+//
+//	the file therefore asks for every configuration question, and that shows
+//
+//	up only in the approval card, so it is said here as well.
+//
+// ★ The notice is only worth its noise when it changes something: an agent
+//
+//	that names none of the tools never sees them.
+func (c *Config) noticeConfigToolsAbsent() {
+	if c.Tools.Config != nil {
+		return
+	}
+	used := false
+	for _, a := range c.Agents {
+		if a == nil {
+			continue
+		}
+		for _, entry := range a.Tools {
+			// ★ An entry is either a name or a trailing-* pattern, and a
+			//	pattern is spelled with the same prefix — so one check
+			//	covers both.
+			if strings.HasPrefix(entry, "config_") {
+				used = true
+				break
+			}
+		}
+		if used {
+			break
+		}
+	}
+	if !used {
+		return
+	}
+	c.deferFile(DirTools+"/config.yaml",
+		"the configuration tools ask for a nod: this file is what says that the "+
+			"read-only ones run without one. Write it with `allows: [config_get, "+
+			"config_validate, config_template, config_notices, config_tier]`, or let "+
+			"an agent that does not need them drop them from its own `tools:` list")
 }
 
 func (c *Config) loadKB(data []byte) error {
@@ -355,6 +453,9 @@ func (c *Config) AllowedTools() []string {
 		add(t.Allows)
 	}
 	if t := c.Tools.Filesystem; t != nil {
+		add(t.Allows)
+	}
+	if t := c.Tools.Config; t != nil {
 		add(t.Allows)
 	}
 	add(c.KB.Allows)

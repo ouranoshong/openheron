@@ -80,10 +80,13 @@ func defaultToolRegistry(mgr *mcpManager) *toolRegistry {
 //
 //	read, and the delegation tools.
 //
-// ★ A tool that has a file of its own (the HTTP, search and knowledge-base
+// ★ A tool that has a file of its own (the HTTP, search, knowledge-base and
 //
-//	tools) names its own exceptions in that file — this list is the
-//	fallback for the tools that have no file.
+//	configuration tools) names its own exceptions in that file — this list is
+//
+//	the fallback for the tools that have no file of their own, and for the
+//
+//	framework's filesystem middleware, whose file is a tuner.
 //
 // ★ `task` is in it because an agent that cannot delegate without a nod
 //
@@ -94,52 +97,64 @@ var builtinAllowedTools = func() []string {
 		"ls", "read_file", "glob", "grep", // the filesystem's readers
 		"task", "write_todos", // the delegation tools
 		"skill", // the skill reader
-
-		// ★ The config tools that only read. They join this list for the
-		//   same reason `task` does: they belong to no file, so no file can
-		//   name them as an exception — and a question about the
-		//   configuration should not cost an approval. `config_write` is
-		//   **absent on purpose**: it edits the files this list comes from.
-		decl.ToolNameConfigGet,
-		decl.ToolNameConfigValidate,
-		decl.ToolNameConfigTemplate,
-		decl.ToolNameConfigNotices,
-		decl.ToolNameConfigTier,
 	}
 }
 
 // alwaysAsk are the tools no configuration may turn into an exception.
 //
 // ★ One name, one rule: `config_write` edits the configuration — including
-// the file whose `allows:` list would grant it. A file that could grant it
-// grants itself, so the exception is removed here, after every source has
-// been merged, rather than trusted to stay absent.
+// the file whose `allows:` list would grant it (`tools/config.yaml`). A file
+// that could grant it grants itself, so the exception is removed here,
+// after every source has been merged, rather than trusted to stay absent.
 var alwaysAsk = map[string]bool{
 	decl.ToolNameConfigWrite: true,
 }
 
-// reservedToolNames maps a built-in tool's name to what provides it.
+// reservedTool is one name that a provider may not claim.
+//
+// ★ `owner` is the provider that provides it, and empty when **no**
+//
+//	provider does — the framework's own middleware mounts those, and a
+//
+//	provider that claimed one would shadow it: the model would see two
+//
+//	tools with one name.
+type reservedTool struct {
+	owner string
+	label string
+}
+
+// reservedToolNames maps a reserved tool's name to who owns it.
 //
 // ★ The **names** live in decl (one list, so the loader and the builder
 //
 //	cannot disagree about what exists); only the owner is build's business.
-var reservedToolNames = func() map[string]string {
-	out := make(map[string]string, len(decl.BuiltinToolNames))
+//
+// ★ The configuration tools are named here because they have a file of
+//
+//	their own — and a file means a name that belongs to somebody.
+var reservedToolNames = func() map[string]reservedTool {
+	out := make(map[string]reservedTool, len(decl.BuiltinToolNames)+len(decl.ConfigToolNames))
 	for _, n := range decl.BuiltinToolNames {
 		switch n {
 		case "task", "write_todos":
-			out[n] = "DeepAgent"
+			out[n] = reservedTool{"", "DeepAgent"}
 		case "skill":
-			out[n] = "skill middleware"
+			out[n] = reservedTool{"", "skill middleware"}
 		case "execute":
 			// ★ The execute tool is **ours**, not the framework's: openheron
 			//   mounts it (see execute.go), because the model writes the
 			//   command and only our description says which shell runs it.
 			//   The name stays reserved — no provider may claim it.
-			out[n] = "openheron's execute tool"
+			out[n] = reservedTool{"", "openheron's execute tool"}
 		default:
-			out[n] = "filesystem middleware"
+			out[n] = reservedTool{"", "filesystem middleware"}
 		}
+	}
+	// ★ The config tools are the configuration provider's, so that one may
+	//	claim them and nobody else may.
+	for _, n := range decl.ConfigToolNames {
+		out[n] = reservedTool{"config", "the configuration service"}
 	}
 	return out
 }()
@@ -188,8 +203,11 @@ func validateBatch(ctx context.Context, providerID string,
 		if info == nil || info.Name == "" {
 			return nil, fmt.Errorf("tool info has an empty name")
 		}
-		if owner, ok := reservedToolNames[info.Name]; ok {
-			return nil, fmt.Errorf("tool %q is owned by %s", info.Name, owner)
+		if r, ok := reservedToolNames[info.Name]; ok && r.owner != providerID {
+			// ★ The provider that owns a name may provide it; anybody else
+			//	may not — two providers with one name is a model that sees
+			//	two tools where there is one.
+			return nil, fmt.Errorf("tool %q is owned by %s", info.Name, r.label)
 		}
 		switch t.(type) {
 		case tool.InvokableTool, tool.StreamableTool,

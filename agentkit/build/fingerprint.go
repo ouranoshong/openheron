@@ -232,7 +232,10 @@ func (w *depWalker) configures(rel string, uses map[string]bool) bool {
 			// ★ A pattern covers a whole family of tools, and the file
 			//   that configures one of them is the file that configures
 			//   the family: the names are known, so the match is exact.
-			for _, name := range decl.BuiltinToolNames {
+			// ★ The configuration tools have a file of their own now, so
+			//	they belong in the walk too — a pattern that covers them
+			//	is the same fact as a name that names them.
+			for _, name := range decl.KnownToolNames {
 				if strings.HasPrefix(name, prefix) && spec.ToolConfigFile(name) == rel {
 					return true
 				}

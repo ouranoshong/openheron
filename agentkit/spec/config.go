@@ -587,6 +587,7 @@ func (s *Service) loadOnly(ms map[string]*mutation) (*Config, error) {
 	}
 
 	cfg.noteRetiredDirs(s.root)
+	cfg.noticeConfigToolsAbsent()
 	cfg.collectBadDurations()
 	return cfg, nil
 }

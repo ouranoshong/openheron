@@ -642,7 +642,7 @@ allows: [read_issue, list_issues]
 ### 4.4 外部工具（`tools/`）
 
 **不用改代码** —— 配置缺失的 provider 什么都不挂，所以写下这个文件才是把工具挂上去的那一步。
-当前支持四个文件名：
+当前支持六个文件名：
 
 | 文件 | 提供 |
 |---|---|
@@ -650,16 +650,20 @@ allows: [read_issue, list_issues]
 | `web_search.yaml` | 网页搜索 |
 | `wikipedia.yaml` | 百科查询 |
 | `kb.yaml` | 知识库（见 §7） |
+| `filesystem.yaml` | 文件系统那一组工具 |
+| `config.yaml` | 配置工具自己 |
 
-★ 知识库是唯一的例外：它的文件只承载设置 —— 真正开关它的是**非空 `corpus_dir`**，而不是
-文件在不在。
+★ 知识库不是靠文件开关的：真正开关它的是**非空 `corpus_dir`**，而文件只承载设置。文件系统与
+配置工具则相反 —— 无论文件在不在，它们都挂着。
 
-★ `tools/` 下**只认这四个文件名**，写别的名字会**启动报错**，不会被静默忽略。
+★ `tools/` 下**只认这六个文件名**，写别的名字会**启动报错**，不会被静默忽略。
 
-★ **`openheron init` 会写 `tools/` 下的那五个文件** —— 工具配置是这棵树的一部分，
+★ **`openheron init` 会写 `tools/` 下的那六个文件** —— 工具配置是这棵树的一部分，
 因为出厂的 agent 会点名 `request_get`、`duckduckgo_search` 和 `wikipedia_search`，
 而没有 provider 提供的名字会被当成笔误报出来。加 `--no-tools` 那个目录就空着。
-没写就是没启用：对应的工具不会出现在 agent 的工具表里，模型也看不见它。
+★ 对 provider 驱动的工具来说，没写就是没启用：对应的工具不会出现在 agent 的工具表里，
+模型也看不见它。文件系统与配置工具则无论如何都挂着 —— 对这两个，文件不在少掉的是
+一个例外，不是工具本身。
 
 ★ **这个文件的 `allows:` 行决定哪些不用问** —— `tools/http.yaml` 点 `request_get`，
 `tools/kb.yaml` 点 `kb_search`。这个文件提供的其余一切都问（§4.3）。

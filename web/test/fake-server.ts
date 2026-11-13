@@ -1280,6 +1280,10 @@ export function startFakeServer(port = 0): FakeServer {
     settingsRev = 0
     const put = (path: string, body: string) => settingsDisk.push({ path, body, rev: nextRev() })
     put("tools/http.yaml", "methods: [get]\nallows: [request_get]\n")
+    // ★ The configuration tools' own file. It is in the real tree, and the
+    //   editor must be able to open it — a file the real server has and the
+    //   fake does not is a file no spec can see.
+    put("tools/config.yaml", "allows: [config_get, config_validate, config_template, config_notices, config_tier]\nmax_read_bytes: 65536\n")
     // ★ An mcps/ file on disk, so the editor can be opened on the partition
     //   that carries YAML like tools/ does. Without it the MCP partition has
     //   no item to select, and "mcps/ is not highlighted" cannot be seen.
@@ -1319,6 +1323,7 @@ export function startFakeServer(port = 0): FakeServer {
       { path: "agents/agent-expert.md", exists: true, hot: true, revision: "r3" },
       { path: "server/config.yaml", exists: true, hot: false, revision: "r5" },
       { path: "tools/http.yaml", exists: true, hot: true, revision: "r1" },
+      { path: "tools/config.yaml", exists: true, hot: true, revision: "r1" },
       { path: "mcps/filesystem.yaml", exists: true, hot: true, revision: "r1" },
       { path: "skills/code-review/SKILL.md", exists: true, hot: true, revision: "r1" },
     ],
@@ -1333,16 +1338,29 @@ export function startFakeServer(port = 0): FakeServer {
       //   FILE's template — this is the shape the bug lived in.
       tools:
         "# tools/ one file = one tool:\n" +
-        "#   filesystem.yaml   the filesystem tools' tiers (always mounted)\n" +
         "#   http.yaml         request_get / request_post / request_put / request_delete\n" +
         "#   web_search.yaml   duckduckgo_search\n" +
         "#   wikipedia.yaml    wikipedia_search\n" +
         "#   kb.yaml           knowledge base\n" +
+        "#   filesystem.yaml   ls / read_file / write_file / edit_file / glob / grep / execute\n" +
+        "#   config.yaml       config_get / config_validate / config_template / config_notices / config_tier / config_write\n" +
         "#\n" +
         "# ★ The content of the file IS **that tool's own configuration** (no outer wrapper key).\n" +
-        "#   Whether the file exists IS the switch — turning a tool off = deleting that file.\n" +
+        "#   A provider whose configuration is absent mounts nothing, so for those tools\n" +
+        "#   the file's presence IS the switch — turning a tool off = deleting that file.\n" +
+        "#   The filesystem and configuration tools are mounted either way: for those\n" +
+        "#   two, a missing file takes away an exception, not the tool.\n" +
         "#\n" +
         "# ★ tools/ is hot-reloaded: the change takes effect on the next turn, no process restart.\n",
+      "tools/config.yaml":
+        "# The configuration tools. ★ They are **always mounted** — the provider\n" +
+        "#   mounts them and no file switches them on. This file names their\n" +
+        "#   exceptions and tunes them.\n" +
+        "#\n" +
+        "# ★ `config_write` is **not** here, and no file can put it there: it edits\n" +
+        "#   the very files whose `allows:` lists would grant it. It always asks.\n" +
+        "allows: [config_get, config_validate, config_template, config_notices, config_tier]\n" +
+        "max_read_bytes: 65536\n",
       "tools/filesystem.yaml":
         "# The filesystem tools. ★ They are **always mounted** — this file does not\n" +
         "#   switch them on, it tunes their tiers.\n" +
@@ -1498,7 +1516,7 @@ export function startFakeServer(port = 0): FakeServer {
       return fail(400, `${section}/ holds <name>`, "config_path_invalid")
     }
     if (section === "tools") {
-      const known = ["filesystem.yaml", "http.yaml", "kb.yaml", "web_search.yaml", "wikipedia.yaml"]
+      const known = ["config.yaml", "filesystem.yaml", "http.yaml", "kb.yaml", "web_search.yaml", "wikipedia.yaml"]
       if (!known.includes(file)) {
         return fail(400, `tools/ only accepts ${known.join(", ")}; other files here are rejected at load time`, "config_path_invalid")
       }

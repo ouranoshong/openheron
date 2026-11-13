@@ -1,0 +1,27 @@
+# tools/config.yaml
+#
+# The configuration tools. ★ They are **always mounted** — the provider
+#   answers from the configuration service, and no file switches them on.
+#   This file names their exceptions and tunes them.
+#
+# The tools this file configures:
+#   config_get  config_validate  config_template  config_notices
+#   config_tier  config_write
+#
+# ★ `allows:` is **additive**, like every other file under tools/: a name
+#   here joins the exceptions and never takes one away. It speaks **this
+#   file's own vocabulary** — the tool names as they are exposed.
+#
+# ★ `config_write` is **not** here, and no file can put it there: it edits
+#   the very files whose `allows:` lists would grant it. It always asks.
+#
+# ★ Absent, every tool this provider offers asks — the read-only ones
+#   included: this file is what says that a question about the
+#   configuration does not cost an approval.
+allows: [config_get, config_validate, config_template, config_notices, config_tier]
+
+# ★ The largest file `config_get` hands back. It **refuses** a file bigger
+#   than this rather than truncating it: a tool that returns half a file
+#   invites the model to edit the half it got and write it back.
+#   1024..1048576; the default is 65536.
+max_read_bytes: 65536

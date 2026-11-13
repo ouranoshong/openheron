@@ -414,11 +414,21 @@ var ConfigToolNames = []string{
 	ToolNameConfigWrite,
 }
 
+// KnownToolNames are every tool name the configuration knows about.
+//
+// ★ The built-in names are the framework's and the config names are
+//
+//	ours, so the two live in two lists — and a reader that needs "all of
+//
+//	them" joins them here, once, instead of knowing that there are two.
+var KnownToolNames = append(append([]string{}, BuiltinToolNames...), ConfigToolNames...)
+
 type ToolsCfg struct {
-	HTTP       *HTTPToolsCfg  `yaml:"http"`
-	WebSearch  *WebSearchCfg  `yaml:"web_search"`
-	Wikipedia  *WikipediaCfg  `yaml:"wikipedia"`
-	Filesystem *FilesystemCfg `yaml:"filesystem"`
+	HTTP       *HTTPToolsCfg   `yaml:"http"`
+	WebSearch  *WebSearchCfg   `yaml:"web_search"`
+	Wikipedia  *WikipediaCfg   `yaml:"wikipedia"`
+	Filesystem *FilesystemCfg  `yaml:"filesystem"`
+	Config     *ConfigToolsCfg `yaml:"config"`
 }
 
 // FilesystemCfg is the filesystem tool set's own configuration.
@@ -435,6 +445,62 @@ type ToolsCfg struct {
 type FilesystemCfg struct {
 	Allows []string `yaml:"allows"`
 }
+
+// ConfigToolsCfg is the configuration tool set's own configuration.
+//
+// ★ The six `config_*` tools are **always mounted** — the provider answers
+//
+//	from the configuration service, and no file switches them on. So this
+//
+//	file is a **tuner**, not a switch: it names the exceptions and tunes the
+//
+//	limits, and it never decides which tools exist.
+//
+// ★ `allows:` is **additive**, like every other file under tools/: a name
+//
+//	here joins the exceptions the code already carries, and it never takes
+//
+//	one away.
+//
+// ★ `config_write` is **absent on purpose**: it edits the very files whose
+//
+//	`allows:` lists would grant it, so a file that could grant it would be
+//
+//	granting the tool that rewrites that file. The tier table strips it
+//
+//	after every source has been merged.
+type ConfigToolsCfg struct {
+	Allows []string `yaml:"allows"`
+
+	// MaxReadBytes is the largest file `config_get` hands back.
+	//
+	// ★ It **refuses** rather than truncates: a tool that returns half a
+	//
+	//	file is a tool that invites the model to edit the half it got and
+	//
+	//	write it back — and the revision it was given is the revision of
+	//
+	//	the truncated text, so the write would go through.
+	//
+	// ★ Zero means the default. A value outside the range below is a
+	//
+	//	hard error at load time, not a clamp: a limit that silently becomes
+	//
+	//	another number is a limit the user did not write.
+	MaxReadBytes int `yaml:"max_read_bytes"`
+}
+
+// The range `max_read_bytes` may take.
+//
+// ★ The ceiling lives here rather than in the provider because **both**
+//
+//	halves have to know it: the loader refuses a value outside it, and the
+//
+//	provider reads what is left.
+const (
+	MinConfigReadBytes = 1024
+	MaxConfigReadBytes = 1024 * 1024
+)
 
 // HTTPToolsCfg is the HTTP tool's own configuration.
 //

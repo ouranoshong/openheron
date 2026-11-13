@@ -127,7 +127,7 @@ dependency-direction fact, not a convenience.** The built-in tool names
 (`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:366`) are read by **both** ends:
 the loader checks the names an agent's `tools:` list mentions against them, and the
 builder refuses a provider that claims one of them (`reservedToolNames`,
-`agentkit/build/tools.go:126`). Neither end may import the other — the loader sits
+`agentkit/build/tools.go:127`). Neither end may import the other — the loader sits
 below the builder — so the list cannot live in either of them: it lives **below both**,
 in the leaf package. ★ A second copy would be two lists that drift, and the drift
 would read as "that tool does not exist".
@@ -182,7 +182,7 @@ Recomputing either one is the same mistake twice.
    use at all — and wraps **every tool the tier table does not name** behind an
    approval. ★ The two are **different questions**: the allow-list is per agent, the
    tier table is shared by every agent. ★ The default tier is `ask`, so the exceptions
-   are the named ones: the built-in tools the code knows (`agentkit/build/tools.go:92`)
+   are the named ones: the built-in tools the code knows (`agentkit/build/tools.go:95`)
    and the ones a file's own `allows:` lists. You write no permission code.
 
 5. **Do not collide with a reserved name.** The names live in `decl.BuiltinToolNames`
@@ -190,15 +190,15 @@ Recomputing either one is the same mistake twice.
    `grep` `execute` `task` `write_todos` `skill`. A collision fails at `Build` time.
    ★ **They live in `decl` and not in the build package because both halves need
    them**: the builder refuses a provider that claims one of these names
-   (`reservedToolNames`, `agentkit/build/tools.go:126`), and the loader checks the
+   (`reservedToolNames`, `agentkit/build/tools.go:127`), and the loader checks the
    names an agent's `tools:` list mentions. Neither may import the other, so the list
    lives below both.
    The tool name is also the key in the tier table — a collision would point the
    table at the wrong tool.
 
    ★ **A name that comes from a server is namespaced.** An MCP tool is exposed under
-   `decl.MCPToolPrefix` (`agentkit/spec/decl/decl.go:512`) and
-   `decl.MCPSeparator` (`agentkit/spec/decl/decl.go:521`), so the agent's table
+   `decl.MCPToolPrefix` (`agentkit/spec/decl/decl.go:578`) and
+   `decl.MCPSeparator` (`agentkit/spec/decl/decl.go:587`), so the agent's table
    narrows a whole server with a prefix instead of a list of names. ★ The composed
    name is never parsed back: `Table.Blocked` (`agentkit/build/policy.go:163`)
    matches prefixes, so nothing has to split a name to learn which server it
@@ -349,7 +349,7 @@ Say you want a new `mcps/` directory:
    and **non-hot-reloaded** directories clearly apart — whether a directory is hot
    changes what users expect.
 
-2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`agentkit/spec/config.go:629`) and
+2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`agentkit/spec/config.go:630`) and
    implement `loadXXX`.
 
    ★ **Two shapes the recipe did not have before `skills/`.** A partition may be
@@ -418,7 +418,7 @@ definition — there is no `enabled` key.
 - **Declared** by the constant `DirMCP = "mcps"` (`agentkit/spec/config.go:26`) and the
   `Categories` entry (`agentkit/spec/config.go:85`), which is editable, hot and
   `.yaml`.
-- **Loaded** by `loadMCP` (`agentkit/spec/load.go:373`): one file, one server.
+- **Loaded** by `loadMCP` (`agentkit/spec/load.go:474`): one file, one server.
 - ★ **"Hot" for this partition means the client is rebuilt.** The declaration is the
   server's identity, so a changed declaration means a changed server: the old client
   is torn down and a new one is started (`agentkit/build/mcpmanager.go:447`), keyed on
@@ -429,7 +429,7 @@ definition — there is no `enabled` key.
   name is a valid server name (`agentkit/spec/write.go:185`) — the file's name is the
   server's name, and the server's name is the namespace segment of that server's tools.
 - **The scaffold** is `Skeleton` (`agentkit/spec/write.go:280`), and the `mcps/` branch
-  (`agentkit/spec/write.go:307`) writes a **loadable** file: ★ a file under `mcps/`
+  (`agentkit/spec/write.go:309`) writes a **loadable** file: ★ a file under `mcps/`
   **defines** a server, so a file that cannot be parsed is not a server that is off, it
   is a configuration that does not load. The optional fields are written as comments,
   and the `command` is a placeholder that is not installed — so the server does not come
@@ -470,12 +470,12 @@ Editing `agents/*.md` is enough; no code change is needed. But keep in mind:
   until it is fixed, but the process does, and the editor that fixes it lives there.
 - An agent referenced by `subagents` must exist and must not form a cycle — both are
   **startup errors**. ★ A sub-agent that was left out is dropped from its parents'
-  `subagents:` (`agentkit/spec/load.go:610`), so the delegation tool never offers a worker
+  `subagents:` (`agentkit/spec/load.go:711`), so the delegation tool never offers a worker
   that cannot run — and a `subagents:` entry pointing at such an agent is not a cycle or a
   dangling reference, because the settled tree no longer mentions it.
 - Exceeding `max_depth` is a **startup error**, never a silent truncation.
 
-★ **The write gate is the other half of "left out".** `agentkit/spec/write.go:472` `checkNoAgentLost` compares the **settled** tree on disk with the **settled** trial tree and
+★ **The write gate is the other half of "left out".** `agentkit/spec/write.go:474` `checkNoAgentLost` compares the **settled** tree on disk with the **settled** trial tree and
 refuses a write, a batch or a delete that would take a working agent out. Without it,
 repointing an agent at a nonexistent model would remove it silently — which is exactly the
 failure the load-time rule stopped being. ★ Do not "simplify" it by comparing the raw
@@ -483,7 +483,7 @@ file set: an agent that was already broken is out on both sides, and counting it
 would make every unrelated edit fail.
 
 ★ **The delete gate runs before the trial load.** `checkNotReferenced`
-(`agentkit/spec/write.go:720`) reads the tree as it is **now**, so it can refuse a delete
+(`agentkit/spec/write.go:722`) reads the tree as it is **now**, so it can refuse a delete
 that something still names — and the refusal names **who names it** and what to remove.
 ★ It runs before the trial load because the trial load's error is the symptom it replaces:
 that error names the deleted file and hides the real reason somewhere else. ★ What the user
@@ -540,7 +540,7 @@ the list removed. ★ **There is no "nothing to do" shortcut**
 ★ **MCP has one key, and mounting is the grant.** `mcps:` says which servers are
 **mounted** — and mounting one hands the agent **all of that server's tools**. ★ `tools:`
 does not name MCP tools: an `mcp__<server>__*` entry there grants nothing, is
-dropped, and is reported as a **notice** (`agentkit/spec/load.go:846`
+dropped, and is reported as a **notice** (`agentkit/spec/load.go:947`
 `checkAgentMCPNames`) — not a load-time error, because the meaning changed rather than
 contradicting itself. ★ **The cost is real**: narrowing one agent's MCP tools is no longer
 possible — the server's own file filters them, and that filter is shared by every agent
@@ -550,7 +550,7 @@ file's `allows:`, and the default there is still `ask` — mounting is not appro
 #### The three notices
 
 All three are **notices**, not errors — the configuration is legal, it just does not say
-what the author meant (`agentkit/spec/load.go:718` `noticeAgentTools`):
+what the author meant (`agentkit/spec/load.go:819` `noticeAgentTools`):
 
 | Notice | What it means | What to do |
 |---|---|---|
@@ -1525,7 +1525,7 @@ about text the user has already changed.
 
 ★ **A rule that was the client's moved to the server rather than disappearing.** An
 agent's `reasoning` level is checked against the model's declared vocabulary in
-`agentkit/spec/load.go:678` `checkReasoning` — where every file passes, not only the
+`agentkit/spec/load.go:779` `checkReasoning` — where every file passes, not only the
 edits made in the settings editor. ★ Deleting a client rule is only a simplification if
 the server already has it; that is the question to ask of the next one.
 
@@ -1759,7 +1759,7 @@ misses something.
 | Startup reports a missing configuration | The `config root` line in the startup log — it prints the root actually used and the project root |
 | A config change does not take effect | Is that partition hot-reloaded? `llm/` `agents/` `tools/` `mcps/` `skills/` are hot; `server/` needs a restart |
 | Startup fails with `disabled_tools` was renamed to `tools` | ★ The two mean **opposite** things — one removed tools, the other names them. Delete `disabled_tools` and list the tools the agent should have in `tools:` (`agentkit/spec/load.go:108`) |
-| A notice says `tools` names MCP tools | ★ `tools` does not name MCP tools, and `mcps:` is what mounts a server **and** grants its tools: drop the `mcp__*` lines and put the server in `mcps:` (`agentkit/spec/load.go:846`) |
+| A notice says `tools` names MCP tools | ★ `tools` does not name MCP tools, and `mcps:` is what mounts a server **and** grants its tools: drop the `mcp__*` lines and put the server in `mcps:` (`agentkit/spec/load.go:947`) |
 | An agent cannot call an MCP tool | Is the server in that agent's `mcps:`? Mounting **is** the grant — the agent's `tools:` list has nothing to do with it (`agentkit/spec/decl/decl.go:147`) |
 | A notice says `tools` names a tool that does not exist | The built-in tools are the ones in `decl.BuiltinToolNames` (`agentkit/spec/decl/decl.go:366`); a provider's tool exists only when its file under `tools/` is written |
 | A notice says `tools` names the `skill` tool but `skills` is empty | The configuration is legal but self-contradictory: name the skill in `skills:`, or drop `skill` from `tools:` |
@@ -1789,7 +1789,7 @@ the current state of the code, not a to-do list** — fixing one is a separate c
 | **The conflict dialog does not show the on-disk version** | `web/src/components/settings/conflict-dialog.tsx:18-23` | It shows only your stale `baseRevision` plus a hard-coded "changed by someone else", and **never fetches the disk version**. There is no "overwrite anyway" button either — "Keep editing" merely clears the conflict marker, so the next save resends the same stale revision and conflicts again. |
 | **Four runtime dependencies sit in `devDependencies`** | `web/package.json` | `lucide-react` (imported by 10 files), `clsx`, `tailwind-merge` and `class-variance-authority` are all imported by `src/` and bundled into `web/dist`. The build passes (Vite resolves them at build time), but the manifest is wrong. |
 | **The comment at `api/server.go:112` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
-| **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the six partitions (`agentkit/spec/config.go:574`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:618`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:116`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |
+| **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the six partitions (`agentkit/spec/config.go:574`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:619`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:116`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |
 
 ## 8. Before committing
 

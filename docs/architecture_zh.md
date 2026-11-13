@@ -64,11 +64,11 @@ checkpoint（`approval` + `storage`）恢复。
 （`agentkit/spec/load.go:76` 的 `loadAgent`），写错一个键就是启动错误。
 
 模型没人声明**不是**启动错误，而是把那个 Agent 留在树外：`validate()` 会 settle 这棵树
-（`agentkit/spec/load.go:575` 的 `leaveOutUndeclaredModels`）—— Agent 从 `Config.Agents` 里
+（`agentkit/spec/load.go:676` 的 `leaveOutUndeclaredModels`）—— Agent 从 `Config.Agents` 里
 删掉，每个父 Agent 的 `subagents:` 里也删掉，理由留在 `Config.leftOut`
 （`agentkit/spec/config.go:165`）。下游（`AgentNames()`、`MCPServersInUse()`、档位表、
 装配层）看到的都是 settle 之后的树。默认 Agent 也一样被留在树外。写入门
-（`agentkit/spec/write.go:472` 的 `checkNoAgentLost`）比的是 settle 后的 before 与 after：
+（`agentkit/spec/write.go:474` 的 `checkNoAgentLost`）比的是 settle 后的 before 与 after：
 可以加 Agent、可以放着已坏的不动，不能把一个能跑的拿走。规则见 `docs/config-design.md` §4.6。
 
 frontmatter 可用键（`agentkit/spec/decl/decl.go:79` 的 `decl.Agent`）：
@@ -99,7 +99,7 @@ frontmatter 键。正文就是提示词本身（`Instruction`）。
 含义正好相反，只改个名就等于把黑名单悄悄变成白名单。也没有别名 —— 那会让黑名单继续活着。
 
 `mcps:` 挂载就是授予。`tools:` 不点名 MCP 工具：写进去的 `mcp__<server>__*` 不授予任何东西，
-会被丢弃并报一条提示（`agentkit/spec/load.go:846` 的 `checkAgentMCPNames`），不是装载期错误。
+会被丢弃并报一条提示（`agentkit/spec/load.go:947` 的 `checkAgentMCPNames`），不是装载期错误。
 代价是再也不能只收窄某一个 Agent 的 MCP 工具 —— `mcps/<server>.yaml` 过滤自己的工具，
 那个过滤器由所有挂载它的 Agent 共享。审批不受影响：档位来自 server 文件的 `allows:`，
 缺省仍是 `ask`。
@@ -252,16 +252,16 @@ workspace 里拿走；已经随消息发出去的文件留在那条消息上。
 | 网络工具 | `build/nettools.go` | `web_search` `http` |
 | 知识库 | `build/kb.go` | `kb_search` `kb_index` |
 | 百科 | `build/nettools.go:232` | `wikipedia` |
-| 配置本身 | `agentkit/build/configtools.go:53` | `config_get` `config_validate` `config_template` `config_notices` `config_tier` `config_write` |
+| 配置本身 | `agentkit/build/configtools.go:92` | `config_get` `config_validate` `config_template` `config_notices` `config_tier` `config_write` |
 | MCP server | `agentkit/build/mcptools.go:194` | `mcp__<server>__<tool>` |
 
 config 工具总是被挂上，但几乎从不可见：它们进每个 Agent 的批次，Agent 只看见自己 `tools:`
-点名的那些，与其它非 MCP 工具一样。其中五个只读，在代码的例外清单里；`config_write` 不在，
-且文件加不进去（`docs/config-design.md` §6.2）。
+点名的那些，与其它非 MCP 工具一样。其中五个只读，`tools/config.yaml` 点名它们时它们不用点头；
+`config_write` 不在其中，且任何文件都加不进去（`docs/config-design.md` §6.2）。
 
 一个工具的档位由提供它的那个文件决定：文件自己的 `allows:` 点名不用问的工具
 （`tools/http.yaml` 点 `request_get`，`tools/kb.yaml` 点 `kb_search`），该文件提供的其余
-一切都问。没有自己文件的内置工具由代码点名（`agentkit/build/tools.go:92`）：读取类
+一切都问。没有自己文件的内置工具由代码点名（`agentkit/build/tools.go:95`）：读取类
 （`ls` `read_file` `glob` `grep`）与委派类（`task` `write_todos` `skill`）。MCP server 用
 **它自己的词汇**说这件事，不是暴露出来的名字。对外网络工具不用改代码：配置缺失的 provider
 什么都不挂，写下 `tools/*.yaml` 才是把工具挂上去的那一步。文件系统中间件是例外 ——
@@ -271,13 +271,13 @@ config 工具总是被挂上，但几乎从不可见：它们进每个 Agent 的
 
 工具的来路都一样：
 
-`tools/*.yaml` → `spec.loadTool`（`agentkit/spec/load.go:247`）→ `decl.ToolsCfg` →
-`toolRegistry.Build`（`agentkit/build/tools.go:147`）→ `snapshot.buildHeavy`
+`tools/*.yaml` → `spec.loadTool`（`agentkit/spec/load.go:250`）→ `decl.ToolsCfg` →
+`toolRegistry.Build`（`agentkit/build/tools.go:162`）→ `snapshot.buildHeavy`
 （`agentkit/build/snapshot.go:84`）→ `applyToolConfig`（`agentkit/build/assemble.go:30`）→
 `deep.Config.ToolsConfig.Tools` → `deep.New`（`agentkit/build/assemble.go:43`）。
 
 MCP 这一支在注册表处并进来：`mcps/<server>.yaml` → `spec.loadMCP`
-（`agentkit/spec/load.go:373`）→ `decl.MCPServerCfg` → MCP provider
+（`agentkit/spec/load.go:474`）→ `decl.MCPServerCfg` → MCP provider
 （`agentkit/build/mcptools.go:194`），注册在 `agentkit/build/tools.go:55` → 同一个
 `toolRegistry.Build` → 同一个 `applyToolConfig`。
 
@@ -296,7 +296,7 @@ provider 只回答「这个 snapshot 有哪些工具」并交回一批工具，�
 
 暴露名是 `mcp__<server>__<tool>`，只在一处拼装（`agentkit/build/mcptools.go:141`）；server
 自己的名字就是命名空间那一段，暴露名属于哪台 server 是从它读回来的
-（`agentkit/spec/decl/decl.go:549` 的 `MCPServerOf`）。命名空间不可协商：server 名里不许
+（`agentkit/spec/decl/decl.go:615` 的 `MCPServerOf`）。命名空间不可协商：server 名里不许
 出现连续的下划线，所以一个 server 的前缀伸不到另一个 server 去。
 
 ### 4.2 skills 的解析是另一套
@@ -409,13 +409,13 @@ logger 由组合根 `main.installLogger` 围绕共享的 `slog.LevelVar` 建起�
 
 内置工具名 `decl.BuiltinToolNames`（`agentkit/spec/decl/decl.go:348`）两端都要读：装载器拿它
 核对 Agent 的 `tools:` 列表，装配器拿它拒绝冒用这些名字的 provider
-（`reservedToolNames`，`agentkit/build/tools.go:126`）。两端互相不能引，所以清单住在两边之下
+（`reservedToolNames`，`agentkit/build/tools.go:127`）。两端互相不能引，所以清单住在两边之下
 的叶子包里；抄一份就是两份会漂移的清单。
 
 #### `agentkit/spec` 为什么**不**引 `kb`
 
 `tools/kb.yaml` 的校验要判断语料路径是否相对、模型是否声明、是否 `kind: embedding`
-（`agentkit/spec/load.go:295` 的 `loadKB`、`agentkit/spec/load.go:944` 的 `validateKB`）。
+（`agentkit/spec/load.go:393` 的 `loadKB`、`agentkit/spec/load.go:1045` 的 `validateKB`）。
 三个答案都在声明里（`decl.Model.IsEmbedding`、`decl.Model.Dimensions`），所以配置层不引知识库
 —— 只有测试文件引（`agentkit/spec/policy_contract_test.go:7`）。`kb` 依赖 `obs` 和
 `persist`，`agentkit/spec` 依赖 `obs`、`decl` 与 `persist`，方向仍然单向。
@@ -482,10 +482,10 @@ main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
 `server/` 不热（`agentkit/spec/config.go:71`）。`skills/` 的指纹是递归 walk，改 `SKILL.md`
 下一轮生效。
 
-**没有 `policy/` 分区**（`agentkit/spec/config.go:618` `noteRetiredDirs`）：它当年承载的
+**没有 `policy/` 分区**（`agentkit/spec/config.go:619` `noteRetiredDirs`）：它当年承载的
 档位模型现在住在工具文件与 Agent 文件里（§5.5）。遗留的 `policy/` 目录不会被读，但会留下
 一条提示说清新家在哪儿，不会一声不吭地丢掉配置。`tools/` 下的
-文件名是白名单，未知文件直接报错（`agentkit/spec/load.go:290`）。`mcps/` 一个 server 一个
+文件名是白名单，未知文件直接报错（`agentkit/spec/load.go:313`）。`mcps/` 一个 server 一个
 文件（`agentkit/spec/config.go:26` 的 `spec.DirMCP`），文件在定义就在，没有 `enabled` 键，
 文件名就是 server 名，也是其工具命名空间那一段。
 
@@ -520,13 +520,13 @@ main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
 
 | 来源 | 它点名什么 | 装配位置 |
 |---|---|---|
-| 没有自己文件的内置工具 | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill`，外加五个只读的 config 工具 | `agentkit/build/tools.go:92` `builtinAllowedTools` |
-| 工具自己的文件 —— `tools/*.yaml` 与知识库 | 那个文件的 `allows:` | `agentkit/spec/load.go:336` `AllowedTools` |
+| 没有自己文件的内置工具 | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill` | `agentkit/build/tools.go:95` `builtinAllowedTools` |
+| 工具自己的文件 —— `tools/*.yaml` 与知识库 | 那个文件的 `allows:` | `agentkit/spec/load.go:434` `AllowedTools` |
 | MCP server 自己的文件 | 那个 server 的 `allows:`，用它自己的词汇，翻译成暴露出来的名字 | `agentkit/build/mcptools.go:173` `mcpAllowedNames` |
 
 `agentkit/build/spec.go:64` 的 `policyOf` 把三处合成一张表，`Policy.TierOf` 读它。表由配置
 装配，所以一个工具的档位在它的 server 起来之前就能回答。`config_write` 改的是配置本身，
-`alwaysAsk`（`agentkit/build/tools.go:117`）在合并之后把它摘掉：例外来自三处，能拿走例外的
+`alwaysAsk`（`agentkit/build/tools.go:109`）在合并之后把它摘掉：例外来自三处，能拿走例外的
 只有这一处。
 
 档位与可见性是两个问题，分开摆着：「这个工具要不要人点头」是共享的档位表
@@ -543,9 +543,9 @@ main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
 `retry.max_retries` 就在旁边。上限只住在这里 —— `policy/limits.yaml` 那份只能收紧的副本
 没有了，而 `server/` 不是热分区（`agentkit/spec/config.go:71`），改上限要重启。
 
-声明的拓扑超过上限是启动错误（`agentkit/spec/load.go:972` 的 `validateDepth`），不静默截断；
-引用不存在的 agent、成环也都是启动错误（`agentkit/spec/load.go:1043` 的
-`validateAgentGraph`、`agentkit/spec/load.go:1060` 的 `detectCycle`）。
+声明的拓扑超过上限是启动错误（`agentkit/spec/load.go:1073` 的 `validateDepth`），不静默截断；
+引用不存在的 agent、成环也都是启动错误（`agentkit/spec/load.go:1144` 的
+`validateAgentGraph`、`agentkit/spec/load.go:1161` 的 `detectCycle`）。
 
 ### 5.7 写入闸门
 
@@ -554,10 +554,10 @@ main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
 - `server/` 不可编辑（`api/v2_settings.go`）：它不热重载，接口直接拒绝。
 - 密钥字面量被拒：`api_key must be a reference, not a literal: use ${ENV_VAR} or @file:/path`。
 - 乐观并发：带 `baseRevision`，与磁盘上的 revision 不符就报冲突。
-- 一次改动不许把一个本来能跑的 Agent 带出树外（`agentkit/spec/write.go:472`
+- 一次改动不许把一个本来能跑的 Agent 带出树外（`agentkit/spec/write.go:474`
   `checkNoAgentLost`）：比磁盘上 settle 后的树与试装后 settle 的树。本来就在树外的 Agent
   两边都不在，所以一次无关的编辑不会被算成「把它弄丢」。
-- **还有东西指着它**的删除被拒（`agentkit/spec/write.go:720` `checkNotReferenced`），拒绝
+- **还有东西指着它**的删除被拒（`agentkit/spec/write.go:722` `checkNotReferenced`），拒绝
   点名是谁在指、要移除什么。这道闸门跑在试装之前：试装的装载错误正是它要取代的症状。
 
 ### 5.8 工具闸门

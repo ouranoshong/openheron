@@ -141,10 +141,10 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 			if err != nil {
 				return nil, err
 			}
-			if len(content) > maxReadableConfigBytes {
+			if limit := configReadBytesLimit(cfg); len(content) > limit {
 				return nil, fmt.Errorf("%s is %d bytes; this tool hands back at most %d. "+
 					"Edit it in the settings editor, or read the part you need with read_file",
-					in.Path, len(content), maxReadableConfigBytes)
+					in.Path, len(content), limit)
 			}
 			return struct {
 				Path     string `json:"path"`
@@ -448,14 +448,32 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 	return out, nil
 }
 
-// maxReadableConfigBytes is the largest file config_get hands back.
+// defaultConfigReadBytes is the largest file config_get hands back when the
+// configuration does not say.
 //
 // ★ It **refuses** rather than truncates. A tool that returns half a file is
 //
 //	a tool that invites the model to edit the half it got and write it back:
 //	the base revision would still match, because the revision it was given
 //	was the revision of the truncated text.
-const maxReadableConfigBytes = 64 * 1024
+//
+// ★ The number lives here rather than in the configuration because **the
+//
+//	provider** is what reads it; the file only carries the override
+//	(`tools/config.yaml`, `max_read_bytes`).
+const defaultConfigReadBytes = 64 * 1024
+
+// configReadBytesLimit is the limit in force for this tree.
+//
+// ★ The file's value wins, and zero — the value a file that does not
+//
+//	mention it carries — means the default.
+func configReadBytesLimit(cfg *spec.Config) int {
+	if cfg == nil || cfg.Tools.Config == nil || cfg.Tools.Config.MaxReadBytes <= 0 {
+		return defaultConfigReadBytes
+	}
+	return cfg.Tools.Config.MaxReadBytes
+}
 
 // configOverview is `config_get` with no path: what exists, and what the
 // running process holds.
