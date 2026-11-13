@@ -150,11 +150,6 @@ When you add comments, follow these rules:
 | **Test case names** | Descriptive text, not runtime output |
 | **Test fixture data** | Sample values used by assertions (e.g. `"答完了"`); changing them detaches the assertion from the behavior under test |
 
-★ **The factory agent prompts (`initcfg/templates/agents/*.md`, `.openheron-example/`) are
-English — do not turn them back into Chinese.** They are both model prompts and file content the
-user reads — so they follow the rules above. The context prompt built by `inputctx` is English
-anyway (it is for the LLM), so that rule does not apply to it.
-
 The test: **will this string be printed at runtime, returned to a caller, or written into a file
 the user reads?** Yes → English; no → keep Chinese.
 
