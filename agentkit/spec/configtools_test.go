@@ -9,7 +9,7 @@ import (
 
 // ★ The configuration tools have a file of their own, and it is what says
 //
-//	that the read-only ones run without a nod — the same rule every other
+//	that the ones it names run without a nod — the same rule every other
 //
 //	provider's tools follow.
 func TestTheConfigToolsNameTheirOwnExceptions(t *testing.T) {
@@ -92,10 +92,12 @@ func TestAnAgentThatUsesNoConfigToolIsNotToldAboutIt(t *testing.T) {
 	}
 }
 
-// ★ A file that asks for the one tool that rewrites the files saying so is
+// ★ A file that grants `config_write` is a file that took effect: the tool
 //
-//	a file that did not take effect — so it is said, not swallowed.
-func TestAConfigFileThatGrantsConfigWriteIsReported(t *testing.T) {
+//	is granted like every other one of the family, and nothing is deferred
+//
+//	about it.
+func TestAConfigFileThatGrantsConfigWriteTakesEffect(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 	f.write(t, "tools/config.yaml", "allows: ["+decl.ToolNameConfigWrite+"]\n")
@@ -104,14 +106,17 @@ func TestAConfigFileThatGrantsConfigWriteIsReported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := false
+	allowed := map[string]bool{}
+	for _, n := range cfg.AllowedTools() {
+		allowed[n] = true
+	}
+	if !allowed[decl.ToolNameConfigWrite] {
+		t.Fatalf("%s must run without a nod — the file names it", decl.ToolNameConfigWrite)
+	}
 	for _, d := range cfg.Deferred() {
 		if strings.Contains(d, decl.ToolNameConfigWrite) {
-			found = true
+			t.Fatalf("the file grants it, so nothing is deferred about it: %v", d)
 		}
-	}
-	if !found {
-		t.Fatalf("the notice must name the tool that cannot be granted, got %v", cfg.Deferred())
 	}
 }
 

@@ -422,7 +422,7 @@ ctime），但要额外给 storage 加「重命名」的能力，而且中途会
 
 **根因**：`allows:` 是**加法** —— 代码缺省是地板，文件只能往上加。★ 而那一族的工具
 **已经在代码的缺省清单里**（五个只读的 config 工具），所以新文件**没有任何可授予的余量**；
-唯一剩下的那个（`config_write`）又被 `alwaysAsk` 恒锁。⇒ 文件写了等于没写 —— 正是
+唯一剩下的那个（`config_write`）当时还被一条代码规则恒锁。⇒ 文件写了等于没写 —— 正是
 `docs/config-design.md` §4.3「配了没用」那一类。
 
 **修法**：把那一族的**缺省**从代码里搬进文件 —— 也就是让代码那份清单不再点名它们，于是
@@ -432,7 +432,10 @@ ctime），但要额外给 storage 加「重命名」的能力，而且中途会
 
 **现状**：已修 —— ★ 出处：`agentkit/build/tools.go` 的 `builtinAllowedTools`（现在只覆盖
 没有自己文件的那些）、`agentkit/spec/load.go` 的 `noticeConfigToolsAbsent`，以及
-`tools/config.yaml`。
+`tools/config.yaml`。★ 后来（2026-11-13）那条「`config_write` 恒 ask」的特例也撤了 ——
+它当时是这一族里唯一还锁着的名字，而它锁着的理由是「文件能给自己解锁等于没解锁」。
+⇒ 现在的规则是**没有例外**：这一族六个工具都由 `tools/config.yaml` 点名放行；出厂模板
+不点名 `config_write`（问配置不该要点头，改配置应该要）。
 
 ## 8. 模型与协议
 
@@ -667,9 +670,9 @@ ctime），但要额外给 storage 加「重命名」的能力，而且中途会
 | `kb` 不 import 任何 heron 包 | `kb` import 了 `obs` 与 `persist` | `obs` 是日志的装配处，知识库也需要那个共用的原子写 |
 | `agentkit/spec` → `agentkit/run` 的破例在上游已于 2026-10-21 撤销 | openheron **从未有过** —— 代码面是在撤销之后抽出来的 | 撤销是上游的一个设计决定；openheron 直接继承了撤销后的形态 |
 | `models[].context_window` 是纯元数据，不生效 | 它**生效**：它是压缩阈值的分母（`agentkit/spec/summarize.go:25`） | openheron 实施了压缩与上下文用量看板 —— 见 `docs/runtime-design.md` §3 |
-| agent 写了模型没有声明的思考档位会进 `deferred` | **不会** —— 现在是**加载期错误**（`agentkit/spec/load.go:779` 的 `checkReasoning`） | 词汇表属于**模型**；档位名写在 agent 里。★ 这一行在 2026-11-12 复核时改过：旧文档写的是「静默忽略」，那个检查已经搬进了加载期 |
+| agent 写了模型没有声明的思考档位会进 `deferred` | **不会** —— 现在是**加载期错误**（`agentkit/spec/load.go:775` 的 `checkReasoning`） | 词汇表属于**模型**；档位名写在 agent 里。★ 这一行在 2026-11-12 复核时改过：旧文档写的是「静默忽略」，那个检查已经搬进了加载期 |
 | `go test -race ./...` 全仓是绿的 | 它**曾经不是**：竞态检测器在 `agentkit/run`、`api`、`kb`、`agentkit/spec` 报了竞态 | 四处现在都修好了，`task check`（含 `test-race`）全绿 |
-| `tools/` 里的坏超时会被报成 `watch.debounce` | 这个标签是错的：`agentkit/spec/reload.go:124` 给**每一条**坏时长都加上前缀 "watch.debounce fell back to default"，于是 `tools/http.yaml` 里的坏 `timeout` 落到了同一个标签下 | `decl.BadDurations()` 是一个不带来源信息的包级列表（`agentkit/spec/decl/decl.go:836`） |
+| `tools/` 里的坏超时会被报成 `watch.debounce` | 这个标签是错的：`agentkit/spec/reload.go:124` 给**每一条**坏时长都加上前缀 "watch.debounce fell back to default"，于是 `tools/http.yaml` 里的坏 `timeout` 落到了同一个标签下 | `decl.BadDurations()` 是一个不带来源信息的包级列表（`agentkit/spec/decl/decl.go:851`） |
 
 **现状**：`已知边界`（永远存在，除非 fork）。
 

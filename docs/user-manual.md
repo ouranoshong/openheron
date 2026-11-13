@@ -707,10 +707,10 @@ reason `tools` (§4.8). There is no third tier and no global
 refusal — a tool is either available to that agent, or it is not in that agent's tool
 set at all.
 
-★ **The one exception cannot be widened.** `config_write` (§4.9) edits the
-configuration itself, including the file whose `allows:` list would grant it — so a file
-that could name it would be granting the tool that rewrites that file. It always asks,
-whatever any file says.
+★ **No tool is exempt from its file.** `config_write` (§4.9) edits the configuration
+itself, including the file whose `allows:` list grants it — so a file that names it is
+granting the tool that rewrites that file. It asks like every other tool until
+`tools/config.yaml` names it, and that file does not name it by default.
 
 ### 4.4 External tools (`tools/`)
 
@@ -1001,12 +1001,12 @@ whose `tools:` list names them:
 
 | Tool | What it answers | Which side it answers from | Tier |
 |---|---|---|---|
-| `config_get` | One file (`{path}`: its text, revision, and whether it is hot), or `{}`: the partitions, the files that exist, and what the running process holds. With `impact` it answers a different question instead: who depends on that file, and who the next turn rebuilds | the **disk** (`disk`) for a file's text; the overview carries both sides | allow |
-| `config_validate` | `{path, content}`: would this file load, and where exactly is it wrong — the server reports the line. `{}`: check the tree on disk | the **disk** (`disk`) | allow |
-| `config_template` | `{path}`: the skeleton that file starts from. `{section}`: that partition's templates. Neither: an index of what to ask for | neither — a skeleton is neither a file nor a tree | allow |
-| `config_notices` | What the loader noticed but did not refuse: renamed keys, retired directories, values that fell back to a default | the **running** tree (`running`) | allow |
-| `config_tier` | `{tool}`: whether it asks. `{agent}`: that agent's tools and their tiers. Neither: the default tier and the whole exception list. Answers use the tree this turn runs, so an agent written earlier in the same turn is not visible yet — the tool says so instead of claiming it does not exist | the **running** tree (`running`) | allow |
-| `config_write` | Writes a file: checked against the tree, checked against the revision you read, and refused whole if the merge breaks. Takes effect on the next turn — `applied` means the watcher will pick it up, not that this turn can already see it. With `append` it adds the content to the end of the file instead of replacing it — the way to write a file whose whole text does not fit in one call | the write lands on the **disk**; the answer carries both sides | **ask** |
+| `config_get` | One file (`{path}`: its text, revision, and whether it is hot), or `{}`: the partitions, the files that exist, and what the running process holds. With `impact` it answers a different question instead: who depends on that file, and who the next turn rebuilds | the **disk** (`disk`) for a file's text; the overview carries both sides | allow — named by `tools/config.yaml`; ask without it |
+| `config_validate` | `{path, content}`: would this file load, and where exactly is it wrong — the server reports the line. `{}`: check the tree on disk | the **disk** (`disk`) | allow — named by `tools/config.yaml`; ask without it |
+| `config_template` | `{path}`: the skeleton that file starts from. `{section}`: that partition's templates. Neither: an index of what to ask for | neither — a skeleton is neither a file nor a tree | allow — named by `tools/config.yaml`; ask without it |
+| `config_notices` | What the loader noticed but did not refuse: renamed keys, retired directories, values that fell back to a default | the **running** tree (`running`) | allow — named by `tools/config.yaml`; ask without it |
+| `config_tier` | `{tool}`: whether it asks. `{agent}`: that agent's tools and their tiers. Neither: the default tier and the whole exception list. Answers use the tree this turn runs, so an agent written earlier in the same turn is not visible yet — the tool says so instead of claiming it does not exist | the **running** tree (`running`) | allow — named by `tools/config.yaml`; ask without it |
+| `config_write` | Writes a file: checked against the tree, checked against the revision you read, and refused whole if the merge breaks. Takes effect on the next turn — `applied` means the watcher will pick it up, not that this turn can already see it. With `append` it adds the content to the end of the file instead of replacing it — the way to write a file whose whole text does not fit in one call | the write lands on the **disk**; the answer carries both sides | **ask** — the default file does not name it; `tools/config.yaml` can |
 
 ★ **Every answer says which side it came from.** The field is `source`, and it is `disk`
 (the files on disk right now) or `running` (the tree this turn was built with). The two

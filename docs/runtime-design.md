@@ -525,7 +525,7 @@ run 的产出。**`transport` 现在只渲染**（`transport/transport.go:1-13` 
 
 ★ **百分比需要窗口。** `context_window: 0` 意味着*没配置*，而百分比的百分比是零：
 那个 Agent 永不压缩，spec 包在加载配置时把它记进 `deferred`
-（`agentkit/spec/load.go:1013` 的 `noticeCompactionWindows`）。绝对的 token 数不需要窗口。
+（`agentkit/spec/load.go:1009` 的 `noticeCompactionWindows`）。绝对的 token 数不需要窗口。
 
 ★ **模型档案里的 `summarize_at` 已废弃。** 它照常解析 —— 直接删掉会让所有老
 `llm/*.yaml` 启动即失败，因为解码器是严格的 —— 但没有任何地方读它，spec 包会指路到

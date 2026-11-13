@@ -207,7 +207,7 @@ llm/*.local.yaml
 | `server.data_dir`（相对） | **配置根** | `agentkit/spec/config.go:497-499` |
 | `server.log.file`（相对） | **配置根** | `agentkit/spec/config.go:520-522` |
 | `server.static_dir`（相对） | **项目根** | `agentkit/spec/config.go:529-535`，用在 `main.go:530` |
-| `kb.corpus_dir`（相对） | **项目根** | `agentkit/spec/load.go:1049-1052` |
+| `kb.corpus_dir`（相对） | **项目根** | `agentkit/spec/load.go:1045-1048` |
 
 ★ **这个划分是刻意的：状态跟着配置走，工作树跟着项目走。** 相对的 `data_dir` 在配置被搬走时
 跟着搬；相对的 `static_dir` 与相对的知识库语料属于被服务的那个项目，配置搬走时它们不该跟着搬。
@@ -323,19 +323,19 @@ for _, d := range c.Deferred() {
 |---|---|---|
 | `agentkit/spec/load.go:44-46` | `api_key` 的 `${ENV}` 未设 —— 真正发请求时会 401 | `llm/<provider>.yaml` |
 | `agentkit/spec/load.go:64-68` | `models[].summarize_at` 不再被读 —— 阈值归 agent 管 | `llm/<provider>.yaml` |
-| `agentkit/spec/load.go:411-414` | 键 `corpus` 已改名为 `corpus_dir` —— 旧键仍然能加载 | `tools/kb.yaml` |
-| `agentkit/spec/load.go:556-559` | MCP server 的 `env:` 里某个 `${ENV}` 未设 —— 这一条被略掉 | `mcps/<server>.yaml` |
-| `agentkit/spec/load.go:556-574` | MCP server 的超时不是时长 —— 用缺省值 | `mcps/<server>.yaml` |
-| `agentkit/spec/load.go:848-851` | `tools:` 点名了一个不存在的工具 | `agents/<id>.md` |
-| `agentkit/spec/load.go:848-859` | 点了 `skill` 工具却没有 `skills` —— 技能一个也没有 | `agents/<id>.md` |
-| `agentkit/spec/load.go:972-976` | `tools:` 里点名了 MCP 工具 —— 那一行不授予任何东西 | `agents/<id>.md` |
-| `agentkit/spec/load.go:1028-1031` | 该模型没有声明 `context_window` —— 该 agent 的自动压缩不会发生 | `llm/<provider>.yaml` |
+| `agentkit/spec/load.go:407-410` | 键 `corpus` 已改名为 `corpus_dir` —— 旧键仍然能加载 | `tools/kb.yaml` |
+| `agentkit/spec/load.go:552-555` | MCP server 的 `env:` 里某个 `${ENV}` 未设 —— 这一条被略掉 | `mcps/<server>.yaml` |
+| `agentkit/spec/load.go:552-570` | MCP server 的超时不是时长 —— 用缺省值 | `mcps/<server>.yaml` |
+| `agentkit/spec/load.go:844-847` | `tools:` 点名了一个不存在的工具 | `agents/<id>.md` |
+| `agentkit/spec/load.go:844-855` | 点了 `skill` 工具却没有 `skills` —— 技能一个也没有 | `agents/<id>.md` |
+| `agentkit/spec/load.go:968-972` | `tools:` 里点名了 MCP 工具 —— 那一行不授予任何东西 | `agents/<id>.md` |
+| `agentkit/spec/load.go:1024-1027` | 该模型没有声明 `context_window` —— 该 agent 的自动压缩不会发生 | `llm/<provider>.yaml` |
 | `agentkit/spec/load.go:149-151` / `:168-171` | `log_level` 拼错 → 归一为 `info`；`log.*` 的上限是负数 → 归一为 `0` | — |
 | `agentkit/spec/config.go:626` | 磁盘上还留着一个退役的分区（`policy/`）—— 它**没有被读**，而这条提示说明它的内容去了哪儿 | — |
 | `agentkit/spec/reload.go:122-126` | 某个宽松时长解析不了，退回了缺省值 | — |
 
 ★ **最后这条消息对所有宽松时长都写 `watch.debounce`。** 写坏的长时被收进同一个全局列表
-（`agentkit/spec/decl/decl.go:820-836`），又在同一处上报，所以 `tools/http.yaml` 的超时写错了，
+（`agentkit/spec/decl/decl.go:835-851`），又在同一处上报，所以 `tools/http.yaml` 的超时写错了，
 也会以 `watch.debounce` 的名义出现。读它时要读成「有个宽松时长写错了」，而不是「debounce 写错了」。
 
 `deferred` 不只是被打印：它们也出现在 `/v2/health`（`api/v2_introspect.go:482`）与
@@ -396,10 +396,10 @@ server 侧那三个覆盖走同一个辅助函数 —— `override`（`main.go:7
 | 问题的来源 | `Issue.Path` |
 |---|---|
 | 某个文件解析不出来（YAML 报错、缺必填键） | 那个文件（`FileError`，`agentkit/spec/fileerr.go:20`） |
-| 某个 agent 的模型没在 `llm/` 里声明 | **那个 agent 的文件**，而且是 **hint** 不是 error —— 整棵树照常装得上，见 §4.6（`agentkit/spec/load.go:696-698`） |
-| 某个 agent 的 `reasoning:` 档位没被声明 | 那个 agent 的文件（`agentkit/spec/load.go:797-799` 的 `checkReasoning`） |
-| 某个 agent 点名了一个不存在的 MCP server | **那个 agent 的文件**（`agentkit/spec/load.go:916-918` 的 `validateMCP`） |
-| 知识库的配置不对 | `tools/kb.yaml`（`agentkit/spec/load.go:1041-1043` 的 `kbErr`） |
+| 某个 agent 的模型没在 `llm/` 里声明 | **那个 agent 的文件**，而且是 **hint** 不是 error —— 整棵树照常装得上，见 §4.6（`agentkit/spec/load.go:692-694`） |
+| 某个 agent 的 `reasoning:` 档位没被声明 | 那个 agent 的文件（`agentkit/spec/load.go:775-796` 的 `checkReasoning`） |
+| 某个 agent 点名了一个不存在的 MCP server | **那个 agent 的文件**（`agentkit/spec/load.go:891-919` 的 `validateMCP`） |
+| 知识库的配置不对 | `tools/kb.yaml`（`agentkit/spec/load.go:1037-1039` 的 `kbErr`） |
 | 跨文件的规则（委派图成环、嵌套深度超限） | 空 —— 消息里点名了涉及的文件 |
 | 一条提示（`deferred`） | 它属于的那个文件（§4.3 的 `Notice.Path`） |
 
@@ -416,14 +416,14 @@ server 侧那三个覆盖走同一个辅助函数 —— `override`（`main.go:7
 剩下的配置照常装配、进程照常启动。理由不是宽容 —— 修它的入口（配置编辑器）就住在这个进程里，
 进程起不来的话，连「哪儿错了」都没人告诉你。
 
-落地是四件事，一件都不能少（`agentkit/spec/load.go:676-682` 的 `leaveOutUndeclaredModels`）：
+落地是四件事，一件都不能少（`agentkit/spec/load.go:672-678` 的 `leaveOutUndeclaredModels`）：
 
 | # | 做什么 | 在哪 |
 |---|---|---|
-| 1 | 从 `Config.Agents` 里删掉 | `agentkit/spec/load.go:704` |
-| 2 | 从**每个**父 agent 的 `subagents:` 里删掉 —— 委派工具不能提供一个跑不起来的工 | `agentkit/spec/load.go:709-714` |
+| 1 | 从 `Config.Agents` 里删掉 | `agentkit/spec/load.go:700` |
+| 2 | 从**每个**父 agent 的 `subagents:` 里删掉 —— 委派工具不能提供一个跑不起来的工 | `agentkit/spec/load.go:705-710` |
 | 3 | 记下**为什么**（`Config.leftOut`，`agentkit/spec/config.go:165`） | `agentkit/spec/config.go:173-178` 的 `LeftOut()` |
-| 4 | 出声：一条 `deferred`，路径是**它自己的文件** | `agentkit/spec/load.go:696-698` |
+| 4 | 出声：一条 `deferred`，路径是**它自己的文件** | `agentkit/spec/load.go:692-694` |
 
 ★ **不删父 agent 的 `subagents:` 就是留了个坑。** 委派工具按 `subagents:` 列表提供子 agent，列表里
 留着一个装不上的名字，模型会去点它，然后拿到一个运行期错误 —— 那是一个本来可以在加载期就说清楚的
@@ -531,7 +531,7 @@ models:                            # ★ several models under one provider
 
 一个 `llm/<provider>.yaml` 持有该厂商的 `base_url` / `api_key` / `timeout` 与 `models[]` 列表。引用
 形式是 **`<provider-id>/<model-id>`**（`model: openai/gpt-4o`）：`ParseRef` 取**第一个** `/`，两侧都
-不得为空 —— 没有 `/` 的引用直接报错（`agentkit/spec/load.go:637-641`）。provider id 就是**去掉扩展名的
+不得为空 —— 没有 `/` 的引用直接报错（`agentkit/spec/load.go:633-637`）。provider id 就是**去掉扩展名的
 文件名**（`agentkit/spec/load.go:20`）。
 
 ★ **思考档位是三层分离的**：**能力**（`models[].reasoning` 存不存在）、**词汇表**（它的键值对：这个端点
@@ -539,7 +539,7 @@ models:                            # ★ several models under one provider
 `agents/*.md` 的 `reasoning` —— ★ 两侧字段同名，但一个是词汇表、一个是选择。**解析顺序**：
 `agent.reasoning` → 空则 `model.reasoning_default` → 再空则不注入（`effectiveTier`，
 `agentkit/build/provider.go:113-119`）。★ **档位不在词汇表里是加载期错误**：`checkReasoning`
-（`agentkit/spec/load.go:779-784`）拒绝它并列出该模型声明的档位 —— 不能容忍的原因是：`reasoning: max`
+（`agentkit/spec/load.go:775-780`）拒绝它并列出该模型声明的档位 —— 不能容忍的原因是：`reasoning: max`
 写在一个只声明 off/low/high 的模型上，请求会**不带任何思考参数**发出去，那是「一点思考都没有」，
 而不是「一个没定义的档位」。
 
@@ -554,8 +554,8 @@ models:                            # ★ several models under one provider
 
 `timeout` 等一律走 `time.ParseDuration`（`5m` / `30s`），**不用纳秒整数**。空串 = 不设置。★ **坑**：
 `timeout: 60`（缺单位）必须**报错**而非当作 60 秒 —— 自定义 `Duration` 类型强制要求字符串形式
-（`agentkit/spec/decl/decl.go:899-922`）。★ **但不是每个时长都严格**：`server/config.yaml` 与 `tools/`、
-`mcps/` 下的文件用的是宽松变体（`agentkit/spec/decl/decl.go:792-803`），解析不过的值被记下来并换成
+（`agentkit/spec/decl/decl.go:914-937`）。★ **但不是每个时长都严格**：`server/config.yaml` 与 `tools/`、
+`mcps/` 下的文件用的是宽松变体（`agentkit/spec/decl/decl.go:807-818`），解析不过的值被记下来并换成
 默认值，而不是让整次加载失败。★ **而宽松回退的值到处都一样：`200ms`** —— 也就是 debounce 的默认值
 （`agentkit/spec/decl/decl.go:16`）。所以 `start_timeout: 60`（裸数字）既不会变成 60 秒，也不会回退到 60 秒
 的默认值：它会变成 **200 毫秒**，而且 deferred 列表里那条提醒不管实际是哪个键写坏了，永远写的是
@@ -595,7 +595,7 @@ The body is the Instruction. Leave it empty to use the framework's built-in prom
 | `model` | `string` | ✅ | `<provider>/<model>`。**不继承、不回退**（`agentkit/spec/load.go:98-103`） |
 | `description` | `string` | | 进 `task` 工具描述。描述写不好，模型就选不到它 |
 | `max_iterations` | `int` | | `0` = 没声明，走框架自己的缺省 |
-| `subagents` | `[]string` | | 引用其他 agent 文件名；引用不存在或成环 ⇒ 启动期报错（`agentkit/spec/load.go:1144-1151`） |
+| `subagents` | `[]string` | | 引用其他 agent 文件名；引用不存在或成环 ⇒ 启动期报错（`agentkit/spec/load.go:1140-1147`） |
 | `tools` | `[]string` | | **这个 agent 可以用的非 MCP 工具允许清单**。名字是**暴露名**；尾部 `*` 是前缀模式（§6.2） |
 | `skills` | `[]string` | | 技能允许清单，名字是 `skills/` 下的**文件夹名** |
 | `mcps` | `[]string` | | 这个 agent **挂载**的 MCP server，按**server 名**（§6.3） |
@@ -626,9 +626,9 @@ markdown 约定**同构**。★ **行号要真，不能只是「有」**：yaml.
 
 上限只住在**一处** —— `server/config.yaml` 的 `agent.max_depth` —— 缺省 `1`
 （`agentkit/spec/defaults.go:11`、`:71`）。★ 没有第二份拷贝要对账，也没有「两者取更严」这条规则了：
-`MaxDepth()` 直接读 server 自己的值（`agentkit/spec/load.go:1129-1132`）。
+`MaxDepth()` 直接读 server 自己的值（`agentkit/spec/load.go:1125-1128`）。
 
-★ **校验在启动期**（`agentkit/spec/load.go:1073-1079` 的 `validateDepth`），且是**报错**而非运行时截断
+★ **校验在启动期**（`agentkit/spec/load.go:1069-1075` 的 `validateDepth`），且是**报错**而非运行时截断
 —— 「配了三层但实际只跑两层」是最难查的一类问题。装配层用同一判据，在到顶时**根本不构造**下一层。
 
 ### 5.3 `tools/<tool>.yaml`
@@ -642,7 +642,7 @@ markdown 约定**同构**。★ **行号要真，不能只是「有」**：yaml.
 ★ **文件不决定哪些工具存在 —— 决定的是 provider。** 工具集来自代码：`defaultToolRegistry` 里注册的
 那些 provider，以及文件系统中间件（它**无条件**挂载）；★ 文件负责的是**参数**和**档位**。★ **文件名是
 白名单**（`agentkit/spec/load.go:203-224` 的 `toolHints` 与 `ToolFileNames`）：未知文件名在**加载期**就是
-硬错误（`agentkit/spec/load.go:312-315`）。★ 这份清单**只有一个**家：加载器、写入门与两条错误消息都读
+硬错误（`agentkit/spec/load.go:307-310`）。★ 这份清单**只有一个**家：加载器、写入门与两条错误消息都读
 它，所以编辑器存不下一个加载器会拒掉的文件。★ **空文件会被拒绝**，并给出一条提示、告诉用户该写什么
 （`agentkit/spec/load.go:236-240`）—— 文件的内容**就是**这个工具的配置，所以「这里没有配置」才是用户
 用得上的那句话。
@@ -680,14 +680,14 @@ markdown 约定**同构**。★ **行号要真，不能只是「有」**：yaml.
 | `wikipedia.yaml` | `top_k` / `language` / `timeout` / `base_url` | `3` / `zh` / `15s` / `""`→官方 | 返回几条 / 维基的语言 / 单次检索的上限 / API 端点（自建镜像用） |
 | `wikipedia.yaml` | `allows` | `[]` | 同上 |
 | `filesystem.yaml` | `allows` | `[]` | ★ 同上，而且是**加法**（见下） |
-| `config.yaml` | `allows` | `[]` | ★ 同上；★ 那一族的名字用**本文件自己的词汇**（`config_get`）；★ `config_write` 点名也加不进去（见 §6.2） |
+| `config.yaml` | `allows` | `[]` | ★ 同上；★ 那一族的名字用**本文件自己的词汇**（`config_get`）；★ `config_write` 也由它放行（见 §6.2） |
 | `config.yaml` | `max_read_bytes` | `65536` | `config_get` 最多 handing back 多大的文件；★ **拒绝**而不是截断（见 §7.1）；范围 1024..1048576，越界是加载期硬错误 |
-| `kb.yaml` | `corpus_dir` / `index` | `""`→关 / `default` | 语料目录，**相对项目根**；绝对路径被拒（`agentkit/spec/load.go:1049-1052`）；索引目录名，落在 `state/kb/<index>/` |
-| `kb.yaml` | `model` | `""` | 向量化模型，`<provider>/<model>`；必须 `kind: embedding`；`corpus_dir` 非空时**必填**（`agentkit/spec/load.go:1053-1056`） |
+| `kb.yaml` | `corpus_dir` / `index` | `""`→关 / `default` | 语料目录，**相对项目根**；绝对路径被拒（`agentkit/spec/load.go:1045-1048`）；索引目录名，落在 `state/kb/<index>/` |
+| `kb.yaml` | `model` | `""` | 向量化模型，`<provider>/<model>`；必须 `kind: embedding`；`corpus_dir` 非空时**必填**（`agentkit/spec/load.go:1049-1052`） |
 | `kb.yaml` | `query_instruction` | `""` | 只加在查询侧的指令前缀 |
 | `kb.yaml` | `batch_size` / `max_batch_chars` / `top_k` | `10` / `1200` / `8` | 一次向量化请求的条数上限 / 一批的字符数上限 / `kb_search` 默认召回条数 |
 | `kb.yaml` | `allows` | `[]` | `kb_search` —— `kb_index` 要写索引，所以要点头 |
-| `kb.yaml` | `splitter.headers` | `{}` | ★ 仍然解析，但**不再生效**（`agentkit/spec/load.go:395-399`）—— 见 §11 |
+| `kb.yaml` | `splitter.headers` | `{}` | ★ 仍然解析，但**不再生效**（`agentkit/spec/load.go:391-395`）—— 见 §11 |
 
 ★ **这些字段的缺省值住在读它们的 provider 里，不在 `decl` 里。** 声明结构体只带形状，值在 provider
 里（三个超时在 `agentkit/build/nettools.go:21-26`，搜索的缺省在 `agentkit/build/nettools.go:187-195`，
@@ -704,12 +704,12 @@ markdown 约定**同构**。★ **行号要真，不能只是「有」**：yaml.
 ★ **`execute` 不在中间件那一列里 —— 它是 openheron 自己的工具**（`agentkit/build/execute.go`）。中间件
 只在配置里带着 shell 时才挂一个 `execute`，而框架给它的描述只字不提这台机器上跑命令的是哪个 shell ——
 写命令的是模型，模型得知道方言。所以中间件那个不挂（`agentkit/build/assemble.go:30-40`），换成自己的。
-★ 名字仍然保留，provider 不得冒用（`agentkit/build/tools.go:127-160`）。★ **读取器直接放行，写入器要点头**
+★ 名字仍然保留，provider 不得冒用（`agentkit/build/tools.go:117-150`）。★ **读取器直接放行，写入器要点头**
 —— `write_file`、`edit_file` 与 `execute` 不在代码那份清单里，所以它们会为一个人打断这一轮：它们正是那
 三个会改动这台机器的工具。
 
 ★ **这个文件里的 `allows:` 是加法的**，写在这里的名字是加进代码那份缺省清单 —— 它从来拿不走一个名字
-（`agentkit/spec/decl/decl.go:434-447` 的 `FilesystemCfg`）：
+（`agentkit/spec/decl/decl.go:439-452` 的 `FilesystemCfg`）：
 
 ```yaml
 # .openheron/tools/filesystem.yaml
@@ -728,14 +728,15 @@ allows: [write_file, edit_file, execute]   # ★ 三个写入工具，不用点�
 
 ★ **六个工具始终被挂上**（provider 给的），所以这个文件**不是开关**：它点名例外、也调上限，工具在不在
 不归它管。★ **它是第一个「自己的文件决定自己档位」的工具族** —— 而这正是它成为自指的那一层的原因：
-那五个只读工具的放行档**不在代码里了**，代码那份清单只覆盖**没有自己文件**的那些（§6.2）。
+这一族工具的放行档**不在代码里了**，代码那份清单只覆盖**没有自己文件**的那些（§6.2）。
 
-★ **`config_write` 点名也加不进去**：它改的就是写了这个 `allows:` 的那个文件，文件能给自己解锁等于没
-解锁。`alwaysAsk`（`agentkit/build/tools.go:103-111`）在**合并之后**把它摘掉；★ 而文件写了它也不会
-静默 —— 加载器发一条 notice 说「这一项无效，它恒为 ask」。
+★ **`config_write` 和其它五个一样，由这个文件点名放行。** 它改的就是写了这个 `allows:` 的那个文件 ——
+而这正是「例外住在自己那一族的文件里」这句话的代价：★ 一个能改配置的工具，也能改那份放行清单本身。
+⇒ 这是模型本身的性质，不是这一个工具的怪癖 —— 任何能写配置的工具都能放宽配置带的例外。
+★ 出厂模板**不点名**它，理由与知识库不点名 `kb_index` 一样：问配置不该要点头，改配置应该要。
 
-★ **文件不在时，那五个只读工具也要点头**，而代码里已经不再点名它们 —— 所以加载器发一条 notice，
-点名这个文件与那五个名字。★ notice **只在有 agent 真的点了这些工具时**才发：没有 agent 用它们，
+★ **文件不在时，那六个工具都要点头**，而代码里已经不再点名它们 —— 所以加载器发一条 notice，
+点名这个文件与那五个只读的名字。★ notice **只在有 agent 真的点了这些工具时**才发：没有 agent 用它们，
 这个差别对谁都不存在。
 
 ★ **`max_read_bytes` 是 `config_get` 的答案大小上限**，而它**拒绝**而不是截断（§7.1）。
@@ -807,7 +808,7 @@ skills 怎么没生效」变成一个查不出原因的问题。★ **这次向�
 分区写深一层会被**拒掉**：加载器只读一层，`agents/sub/main.md` 这样的文件会被保存、然后永远不会被
 加载（`agentkit/spec/write.go:102-125`）。里面的文件名固定 `SKILL.md`
 （`agentkit/spec/config.go:34`），文件夹名要能被读回来：`^[a-z0-9]+([_-][a-z0-9]+)*$`
-（`agentkit/spec/decl/decl.go:634`）。★ **`skills/` 也是唯一没有 loader 的分区**：skill 文件不是配置层
+（`agentkit/spec/decl/decl.go:649`）。★ **`skills/` 也是唯一没有 loader 的分区**：skill 文件不是配置层
 读的 —— 运行时自己的 backend 读它（`agentkit/build/skill.go:23`）；配置层要这一项只是为了**表面**（清单、
 路径规则、编辑器），所以加载循环跳过 `loader == nil` 的分区（`agentkit/spec/config.go:576-582`），而不是
 给它一个空 loader。
@@ -842,7 +843,7 @@ skills 怎么没生效」变成一个查不出原因的问题。★ **这次向�
 | `log.max_size_mb` / `max_age_days` / `max_backups` / `compress` | `int` / `int` / `int` / `bool` | `20` / `14` / `5` / `false` | 单个文件的 MB 上限（`0` = 不限，负数归一为 `0`）；轮转文件的保留天数；最多保留几个轮转文件；轮转文件是否 gzip |
 | `start_timeout` | `LenientDuration` | `60s` | 一轮从提交到进入运行状态的上限 |
 | `lease_ttl` | `LenientDuration` | `10m` | 一个 run 的租约在无进展的情况下能存活多久；它必须**长于 provider 自己的超时** |
-| `retry.max_retries` | `int` | `5` | 传 0 也用默认 ——「不配」与「配成 0」是两件事（`agentkit/spec/load.go:1137-1140`） |
+| `retry.max_retries` | `int` | `5` | 传 0 也用默认 ——「不配」与「配成 0」是两件事（`agentkit/spec/load.go:1133-1136`） |
 | `agent.max_depth` | `int` | `1` | 见 §5.2 |
 | `watch.enabled` | `*bool` | `nil`→开 | 用指针区分「没写」与「写了 false」（`agentkit/spec/reload.go:128-137`） |
 | `watch.debounce` | `LenientDuration` | `200ms` | 轮询间隔取其一半，下限 20ms（`agentkit/spec/reload.go:205-212`） |
@@ -894,7 +895,7 @@ server 是带着 agent 自己权限的子进程。
 | 来源 | 它点名什么 | 用的词汇 | 装配位置 |
 |---|---|---|---|
 | 没有自己文件的内置工具 | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill` | 暴露名 | `agentkit/build/tools.go:95-101` `builtinAllowedTools` |
-| 工具自己的文件 —— `tools/*.yaml` 与知识库 | 那个文件的 `allows:` | **文件自己的** | `agentkit/spec/load.go:434-437` `AllowedTools` |
+| 工具自己的文件 —— `tools/*.yaml` 与知识库 | 那个文件的 `allows:` | **文件自己的** | `agentkit/spec/load.go:430-433` `AllowedTools` |
 | MCP server 自己的文件 | 那个 server 的 `allows:` | **server 自己的** | `agentkit/build/mcptools.go:173-184` `mcpAllowedNames` |
 
 ★ **代码那份清单之所以存在**，是因为 `task` —— 委派工具 —— **没有自己的文件**，而一个不点一下就不能
@@ -904,11 +905,10 @@ server 是带着 agent 自己权限的子进程。
 ★ **配置工具现在有自己的文件了**，所以它们**不在**这份清单里 —— 一个 provider 的工具，它的例外由
 **它自己的文件**点名，这条规则对每一个 provider 都一样（§5.3 的「配置工具」那一节）。
 
-★ **那张表是从配置装配出来的**（`agentkit/build/spec.go:64-82` 的 `policyOf`），所以一个工具的档位在
+★ **那张表是从配置装配出来的**（`agentkit/build/spec.go:73-80` 的 `policyOf`），所以一个工具的档位在
 **它的 server 甚至还没起来之前**就能回答。正因如此，配置编辑器才能对一个没在跑的 server 回答「这个
-工具是什么档位」。★ **合并先、摘除后**：`alwaysAsk`（`agentkit/build/tools.go:103-111`）在**合并之后**把
-`config_write` 摘掉 —— 一个文件只要写 `allows: [config_write]` 就能给自己解锁，而那等于让它授予自己
-改写自己的工具。例外来自三处，能拿走例外的只有这一处。
+工具是什么档位」。★ **三处例外合成一张表，没有第四处**：代码清单 + 每个文件的 `allows:` + MCP 服务器的
+`allows:`。⇒ **没有哪个工具是例外的** —— 改配置的那个工具也一样，它的档位由 `tools/config.yaml` 点名。
 
 #### ★ 两个问题，分开摆着
 
@@ -942,12 +942,12 @@ agent 工具集里的工具根本到不了闸门。
 | 4 | 精确条目与前缀条目**等价** —— 命中就是这个 agent 拿到这个工具 | 这里没有档位可选；这份清单说的就是这个 agent 有什么 |
 
 ★ **它住在哪儿。** 加载器拒绝那些不是模式的写法（`agentkit/spec/load.go:131-138` 的
-`validateAgentTools`，语法本身在 `agentkit/spec/decl/decl.go:650-653` 的 `ParseToolNamePattern`）；那张
+`validateAgentTools`，语法本身在 `agentkit/spec/decl/decl.go:665-668` 的 `ParseToolNamePattern`）；那张
 表把前缀模式与精确名放在一起留着（`agentkit/build/policy.go:115-148` 的 `newTable`），而
 `Table.Blocked` 匹配它们（`agentkit/build/policy.go:163-182`）。
 
 ★ **前缀模式之所以安全，是因为 server 名里不许出现连续的下划线**
-（`agentkit/spec/decl/decl.go:595` 的 `MCPServerNamePattern`）：`mcp__github__` 够不到
+（`agentkit/spec/decl/decl.go:610` 的 `MCPServerNamePattern`）：`mcp__github__` 够不到
 `mcp__github_x__`，因为后一个 server 名压根儿声明不出来。★ 拼出来的名字从不被拆回去 —— 模式是前缀，
 不是名字。★ **它不新增档位，也不重排档位** —— 模式只决定**一条条目是否匹配某个名字**。
 
@@ -974,17 +974,15 @@ agent 共享的。
 
 ★ **挂载不等于放行。** MCP 工具的档位来自 server 文件的 `allows:`，缺省仍然是 `ask`。⇒ 一个 server
 提供的其余一切都要点头，**包括它还没提供的那些工具**。★ **`tools:` 里的 `mcp__*` 条目被丢弃，并以一条
-提示报出**，而不是加载期报错（`agentkit/spec/load.go:947-950` 的 `checkAgentMCPNames`）—— 理由：语义
-已经变了，不是自相矛盾；硬失败只会挡住一个本来能用的配置。★ **唯一的例外是 `config_write`**：它恒为
-`ask`，而**文件里写 `allows: [config_write]` 也加不进去** —— `alwaysAsk`
-（`agentkit/build/tools.go:109-111`）在合并之后把它摘掉。理由同上：一个能给自己授权的文件，授的是
-重写它自己的工具。
+提示报出**，而不是加载期报错（`agentkit/spec/load.go:943-946` 的 `checkAgentMCPNames`）—— 理由：语义
+已经变了，不是自相矛盾；硬失败只会挡住一个本来能用的配置。★ **配置工具没有例外**：
+`config_write` 的档位同样由 `tools/config.yaml` 点名，和它那五个只读兄弟一样。
 
 `mcps/<server>.yaml` 的字段全集：
 
 | 字段 | 类型 | 缺省 | 说明 |
 |---|---|---|---|
-| `transport` | `string` | `stdio` | `stdio` \| `http`；★ **未知值硬报错**，不静默退回 stdio（`agentkit/spec/load.go:490-497`）。`http` 只指**可流式 HTTP** |
+| `transport` | `string` | `stdio` | `stdio` \| `http`；★ **未知值硬报错**，不静默退回 stdio（`agentkit/spec/load.go:486-493`）。`http` 只指**可流式 HTTP** |
 | `command` / `args` | `string` / `[]string` | — / `[]` | stdio 专用，**`command` 必填**：要执行的命令与它的参数。★ 命令在沙箱的 PATH 里解析，**绝不**对着项目根解析 |
 | `env` | `map[string]string` | `{}` | **叠加**在继承来的环境之上的变量；★ 子进程的环境就是 openheron 自己的环境。★ 只属于 stdio：在 http server 上它是**加载期错误**，哪怕这个 map 是空的 |
 | `url` / `headers` | `string` / `map[string]string` | — / `{}` | http 专用，**`url` 必填**：服务器地址与每次请求都带的头 |
@@ -999,12 +997,12 @@ agent 共享的。
 
 ★ **server 存不存在只待在一个地方。** 没有 `enabled` 字段：server 是**因为文件存在**而被**定义**的，
 删掉文件就是删掉定义。★ **文件名就是命名空间。** `server` 段是**我们定**的（文件名），必须匹配
-`^[a-z0-9]+(_[a-z0-9]+)*$`，不匹配 ⇒ **加载期硬错误**（`agentkit/spec/load.go:475-478`）；`tool` 段
+`^[a-z0-9]+(_[a-z0-9]+)*$`，不匹配 ⇒ **加载期硬错误**（`agentkit/spec/load.go:471-474`）；`tool` 段
 是**服务器定**的，`[A-Za-z0-9_-]` 之外的字符替换成 `_`，大小写保持原样
 （`agentkit/build/mcptools.go:151-164`）。★ **命名空间同时解决了「撞保留工具名」**：暴露 `ls` 的 server
 变成 `mcp__<server>__ls`，不再与 `ls` / `execute` 那批保留名相撞。反过来也成立，且是一条规则：**只有
 MCP 工具可以用 `mcp__` 前缀**。★ **合成名超过 64 个字符会被跳过并给出警告**，一个 server 里两个清洗后
-同名的工具，后一个也一样（`agentkit/spec/decl/decl.go:687`、`agentkit/build/mcptools.go:68-121`）。
+同名的工具，后一个也一样（`agentkit/spec/decl/decl.go:702`、`agentkit/build/mcptools.go:68-121`）。
 ★ **绝不**是加载期失败：名字是远端服务器定的，而一个多出一个怪工具的 server 该付出的代价是那个工具，
 不是整个 agent。
 
@@ -1044,11 +1042,11 @@ MCP 工具可以用 `mcp__` 前缀**。★ **合成名超过 64 个字符会被�
 整份答案。`Service.Diagnostics`（`:71`）问「这份内容能不能落地」，`Service.Check`（`:125`）问「磁盘上
 这棵树能不能加载」。★ **`Line: 0` 不是第 0 行，是「没有行」。** 跨文件规则没有位置可指，它的消息里点名
 文件。★ **解析失败就没有 hint**：hint 挂在 `*Config` 上，而解析失败就没有这个对象 —— 这是边界，不是
-遗漏；所以 `validate()` 把 notice 的收集挪到硬规则**之前**（`agentkit/spec/load.go:724-730`），一条规则
+遗漏；所以 `validate()` 把 notice 的收集挪到硬规则**之前**（`agentkit/spec/load.go:720-726`），一条规则
 失败不该把同一份答案里「你大概不是这个意思」的部分一起吞掉。
 
 **刀三：档位的出口。** `config_tier` 与档位装配在同一个包里，直接调 `policyOf(cfg)`
-（`agentkit/build/spec.go:64`）拿到 `Policy`，再 `TierOf`。多加一层封装只会多一个和 `policyOf` 抢位置
+（`agentkit/build/spec.go:73`）拿到 `Policy`，再 `TierOf`。多加一层封装只会多一个和 `policyOf` 抢位置
 的东西。★ **CLI 统一**：`initcfg.BuildPlan`（`initcfg/initcfg.go:56`）取一次 manifest：`items` 是跳过表，
 `templates` 是内容；★ **`llm/` 仍从 templates 包读，这是刻意的** —— 它的文件是**备选**（provider 自己的
 模板与通用兜底），所以 manifest 根本不带 `llm/` 模板。
@@ -1056,7 +1054,7 @@ MCP 工具可以用 `mcp__` 前缀**。★ **合成名超过 64 个字符会被�
 ## 7. 六个 `config_*` 工具
 
 放在 `agentkit/build/configtools.go`，与其他 provider 一样注册进 `defaultToolRegistry`。名字的常量块在
-`agentkit/spec/decl/decl.go:397-415`。
+`agentkit/spec/decl/decl.go:402-420`。
 
 | 工具 | 输入 | 输出 | 复用 | 档位 |
 |---|---|---|---|---|
@@ -1065,7 +1063,7 @@ MCP 工具可以用 `mcp__` 前缀**。★ **合成名超过 64 个字符会被�
 | `config_template` | `{path}` / `{section}` | `{path, content}` / `{section, templates}`；都没有时给索引 | `TemplateFor` / `Templates` / `Skeleton` | ★ 文件点名时 allow，否则 ask |
 | `config_notices` | `{}` | `{deferred[], runningVersion, diskVersion, watch, source}` | `Deferred()` / `Fingerprint()` | ★ 文件点名时 allow，否则 ask |
 | `config_tier` | `{tool}` / `{agent}` | `{tool, tier, source}` / `{agent, tools[], source}`；都没有时 `{defaultTier, allow[], source}`。★ 查不到 agent 时按「刚写入待下一轮 / 被 loader 排除 / 根本不存在」分别给诊断 | `policyOf` / `TierOf` / `missingAgentError` | ★ 文件点名时 allow，否则 ask |
-| `config_write` | `{path, content, baseRevision?, append?}` | `{path, revision, runningVersion, diskVersion, applied, requiresRestart, note}` | `Write` / `Append`（`agentkit/spec/write.go:486` / `agentkit/spec/write.go:547`） | **ask** |
+| `config_write` | `{path, content, baseRevision?, append?}` | `{path, revision, runningVersion, diskVersion, applied, requiresRestart, note}` | `Write` / `Append`（`agentkit/spec/write.go:488` / `agentkit/spec/write.go:549`） | ★ 文件点名时 allow，否则 ask |
 
 ★ **`source` 说的是这个答案从哪一边来**：`disk`（此刻盘上的文件）或 `running`（这一轮跑的那棵树）——
 两个常量在 `agentkit/build/configtools.go:80-85`。★ **六个工具里只有 `config_tier` 与 `config_notices`
@@ -1085,10 +1083,9 @@ MCP 工具可以用 `mcp__` 前缀**。★ **合成名超过 64 个字符会被�
 
 ★ **`config_write` 是「加强」不是「包装」。** `Service.Write` 已经是「预校验 → 查 baseRevision → 拒
 明文 → 试合并 → 失败回滚 → 原子写」。用文件工具改配置**做不到**这些：它无法检测「我读完之后别人又改
-了」，也无法保证「合并失败不留半个文件」。★ **恒 ask 需要一条规则，不能只靠「不在清单里」**：档位表是
-「代码清单 + 每个文件的 `allows:` + MCP 服务器的 `allows:`」合起来的，所以一个文件只要写
-`allows: [config_write]` 就能给它自己解锁；`alwaysAsk`（`agentkit/build/tools.go:109-111`）在**合并之后**
-把它剥掉。
+了」，也无法保证「合并失败不留半个文件」。★ **它的档位和别的工具一样由文件说话**：档位表是「代码清单 +
+每个文件的 `allows:` + MCP 服务器的 `allows:`」合起来的，`tools/config.yaml` 点名它，它就不点头；
+不点名，它就要点头。★ 出厂模板不点名它 —— 问配置不该要点头，改配置应该要。
 
 ★ **工具自己界定答案大小，不套通用输出截断。** 通用截断砍的是**字符串**，对 JSON 答案来说就是一份解析
 不了的文件；而对 `config_get` 来说，它会留下「半个文件 + 匹配的 revision」—— 正是把另一半改没的那条
@@ -1465,8 +1462,8 @@ github.com/ouranoshong/openheron/llm/common
 | # | 项 | 现状 | 要定的 |
 |---|---|---|---|
 | 1 | `llm/<provider>.yaml` 的 `header:` | 形状在 `agentkit/spec/decl/decl.go:27`，加载器接受它（严格模式下未知键直接报错），但 `build.FromConfig` 组装 `common.Config` 时根本没带 header，而 `common.Config` 里压根儿没有这个字段 —— **解析了，从不被消费，也没有任何报告** | 要么把它交给端点，要么从这个键的规格里删掉 |
-| 2 | `tools/kb.yaml` 的 `splitter.headers` | 仍然解析，但加载器随后把它清空（`agentkit/spec/load.go:395-399`）—— **自 v2 起不再生效**，分段改由行扫描得出 | 与上一条同类：接线，还是删键 |
-| 3 | `tools/kb.yaml` 模板与加载器的说法不一致 | 模板第 12 行写着 "empty = pure lexical retrieval"（`agentkit/templates/files/tools/kb.yaml:12`），而加载器在 `corpus_dir` 非空时**拒绝**空的 `model`（`agentkit/spec/load.go:1053-1056`） | 改模板，还是让加载器接受空 `model` |
+| 2 | `tools/kb.yaml` 的 `splitter.headers` | 仍然解析，但加载器随后把它清空（`agentkit/spec/load.go:391-395`）—— **自 v2 起不再生效**，分段改由行扫描得出 | 与上一条同类：接线，还是删键 |
+| 3 | `tools/kb.yaml` 模板与加载器的说法不一致 | 模板第 12 行写着 "empty = pure lexical retrieval"（`agentkit/templates/files/tools/kb.yaml:12`），而加载器在 `corpus_dir` 非空时**拒绝**空的 `model`（`agentkit/spec/load.go:1049-1052`） | 改模板，还是让加载器接受空 `model` |
 | 4 | `execute`（shell）能绕过配置根的写闸门 | `execute` 是 openheron 自己的工具（`agentkit/build/execute.go`），它跑 shell，shell 里的重定向能写配置根 | 堵它等于给 shell 对配置根只读，那是另一件事；当前选择是**不堵**，并把这条边界写在这里 |
 | 5 | `write_file`（整篇替换）没有冲突语义 | `edit_file` 的冲突语义是 **`OldString` 必须仍在**（`agentkit/fsx/fsx.go:809`）；而 `write_file` 没有基线可给 —— 框架的写请求里没有 revision 字段 | 要不要给整篇替换也一条基线；差异已写进 `config_write` 的描述（`agentkit/build/configtools.go:344-353`） |
 | 6 | 全树校验仍是 fail-fast | `loadWithMany` 遇到第一个错误就返回，所以 `config_validate {}` 给的是「第一条阻塞错误 + 全部 hint」 | 要一次给全部，得把 loader 从「返回 error」改成「累积 issues」；本轮没做 |
@@ -1489,18 +1486,18 @@ github.com/ouranoshong/openheron/llm/common
 | `agentkit/spec/config.go:548-558` / `:564-593` / `:603-609` / `:619-627` | `loadWithMany`（校验后写 `Version`） / `loadOnly`（预填充、跳过无 loader 的分区） / `retiredDirs` / `noteRetiredDirs` |
 | `agentkit/spec/config.go:669-672` / `:738` / `:740-748` | 目录不存在不是错误 / `ErrEmptyDocument` / `decodeStrict` |
 | `agentkit/spec/defaults.go:11-13` / `:48-55` / `:57-75` | `DefaultMaxDepth` `DefaultMaxRetries` / `defaultKB` / `defaultServer` |
-| `agentkit/spec/decl/decl.go:19-36` / `:38-67` / `:79-163` | `Provider` / `Model` / `Agent` |
-| `agentkit/spec/decl/decl.go:269-301` / `:319-328` / `:346-371` / `:397-415` | `Server` / `LogCfg` / 内置工具名 / 六个 `config_*` 工具名的常量块与清单 |
-| `agentkit/spec/decl/decl.go:424` / `:434-447` / `:472-503` / `:578` / `:587` / `:595` / `:615` / `:634` | `KnownToolNames`（内置工具名 + 六个 `config_*` 工具名） / `FilesystemCfg` —— 调音旋钮 / `ConfigToolsCfg` —— 配置工具的例外与上限（`max_read_bytes` 的范围也在那儿） / `MCPToolPrefix` / `MCPSeparator` / `MCPServerNamePattern` / `MCPServerOf` / `SkillNamePattern` |
-| `agentkit/spec/decl/decl.go:650-653` / `:687` / `:792-803` / `:820-836` / `:899-922` | `ParseToolNamePattern` / `MCPMaxExposedNameLen` / `LenientDuration` / `BadDurations` / `Duration` |
+| `agentkit/spec/decl/decl.go:18-36` / `:38-75` / `:79-163` | `Provider` / `Model` / `Agent` |
+| `agentkit/spec/decl/decl.go:269-301` / `:319-328` / `:346-371` / `:402-420` | `Server` / `LogCfg` / 内置工具名 / 六个 `config_*` 工具名的常量块与清单 |
+| `agentkit/spec/decl/decl.go:429` / `:439-452` / `:487-518` / `:593` / `:602` / `:610` / `:630` / `:649` | `KnownToolNames`（内置工具名 + 六个 `config_*` 工具名） / `FilesystemCfg` —— 调音旋钮 / `ConfigToolsCfg` —— 配置工具的例外与上限（`max_read_bytes` 的范围也在那儿） / `MCPToolPrefix` / `MCPSeparator` / `MCPServerNamePattern` / `MCPServerOf` / `SkillNamePattern` |
+| `agentkit/spec/decl/decl.go:665-684` / `:702` / `:805-818` / `:851-857` / `:912-939` | `ParseToolNamePattern` / `MCPMaxExposedNameLen` / `LenientDuration` / `BadDurations` / `Duration` |
 | `agentkit/spec/diag.go:26-39` / `:42-46` / `:71` / `:125` / `:188-196` | `Issue` / `Diagnostics` / `Service.Diagnostics` / `Service.Check` / `parseShift` |
 | `agentkit/spec/expand.go:10-38` / `:56-78` / `agentkit/spec/fileerr.go:20` | `expandValue` / `splitFrontmatter` / `FileError` —— 带路径的装载错误 |
-| `agentkit/spec/load.go:19` / `:76` / `:140` / `:250` / `:474` / `:131-138` / `:203-224` / `:236-240` | `loadProvider` / `loadAgent` / `loadServer` / `loadTool` / `loadMCP` / `validateAgentTools` / `toolHints` 与 `ToolFileNames` / `decodeTool` |
-| `agentkit/spec/load.go:292-311` / `:325-327` / `:336-345` / `:361-391` | `loadTool` 的 `config` 分支 / `toolFileList`（两条错误消息共用的一份名单） / `validateConfigReadBytes` / `noticeConfigToolsAbsent`（★ 文件不在时，那五个只读工具要点头 —— 提示只在真有 agent 用它们时发） |
-| `agentkit/spec/load.go:393-399` / `:434-437` / `:545-548` / `:572-576` / `:595-599` | `loadKB` / `AllowedTools` / `expandMCPMaps` / `resolveMCPDuration` / `yamlHasKey` |
-| `agentkit/spec/load.go:637-641` / `:648-651` / `:676-682` / `:717-721` | `ParseRef` / `ProviderIDOf` / `leaveOutUndeclaredModels` / `validate`（notice 先于硬规则） |
-| `agentkit/spec/load.go:779-784` / `:819-825` / `:866-870` / `:895-899` / `:947-950` / `:986-993` | `checkReasoning` / `noticeAgentTools` / `knownToolNames` / `validateMCP` / `checkAgentMCPNames` / `MCPServersInUse` |
-| `agentkit/spec/load.go:1013-1018` / `:1041-1043` / `:1045-1048` / `:1073-1079` / `:1129-1132` / `:1144-1151` | `noticeCompactionWindows` / `kbErr` / `validateKB` / `validateDepth` / `MaxDepth` `MaxRetries` / `validateAgentGraph` `detectCycle` |
+| `agentkit/spec/load.go:19` / `:76` / `:140` / `:250` / `:470` / `:131-138` / `:203-224` / `:236-242` | `loadProvider` / `loadAgent` / `loadServer` / `loadTool` / `loadMCP` / `validateAgentTools` / `toolHints` 与 `ToolFileNames` / `decodeTool` |
+| `agentkit/spec/load.go:292-306` / `:320-322` / `:331-340` / `:356-387` | `loadTool` 的 `config` 分支 / `toolFileList`（两条错误消息共用的一份名单） / `validateConfigReadBytes` / `noticeConfigToolsAbsent`（★ 文件不在时，那五个只读工具要点头 —— 提示只在真有 agent 用它们时发） |
+| `agentkit/spec/load.go:389-418` / `:430-459` / `:541-560` / `:568-583` / `:591-611` | `loadKB` / `AllowedTools` / `expandMCPMaps` / `resolveMCPDuration` / `yamlHasKey` |
+| `agentkit/spec/load.go:633-642` / `:644-649` / `:672-711` / `:713-760` | `ParseRef` / `ProviderIDOf` / `leaveOutUndeclaredModels` / `validate`（notice 先于硬规则） |
+| `agentkit/spec/load.go:775-796` / `:815-858` / `:862-882` / `:891-919` / `:943-973` / `:982-1000` | `checkReasoning` / `noticeAgentTools` / `knownToolNames` / `validateMCP` / `checkAgentMCPNames` / `MCPServersInUse` |
+| `agentkit/spec/load.go:1009-1029` / `:1037-1039` / `:1041-1067` / `:1069-1085` / `:1125-1128` / `:1140-1147` | `noticeCompactionWindows` / `kbErr` / `validateKB` / `validateDepth` / `MaxDepth` `MaxRetries` / `validateAgentGraph` `detectCycle` |
 | `agentkit/spec/manifest.go:18-37` / `:68` | `Manifest` / `Service.Manifest` |
 | `agentkit/spec/reload.go:21` / `:23-34` / `:36-49` / `:51-104` / `:106-113` / `:115-126` / `:128-137` | `HotDirs` / `Fingerprint` / `HotDirFingerprints` / `dirEntryLines`（递归 walk） / `contentHash` / `Debounce` `collectBadDurations` / `WatchEnabled` |
 | `agentkit/spec/reload.go:163-172` / `:174-190` / `:204-254` | `NewReloader` / `Reload` / `Watch` |
@@ -1531,8 +1528,8 @@ github.com/ouranoshong/openheron/llm/common
 | `agentkit/build/pool.go:34-82` / `:90-99` | `GetOrBuild`（键是名字+指纹） / `Lookup` |
 | `agentkit/build/provider.go:30-69` / `:71-86` / `:94-111` / `:113-119` / `:121-146` / `:148-160` / `:162-171` | `FromConfig` / `Resolve` / `BuildModel`（★ 这里装上截断守卫的模型包装） / `effectiveTier` / `RequestOptionsFor` / `shallowMerge` / `ReasoningFields` |
 | `agentkit/build/skill.go:89-186` / `:190-215` / `:217-233` | `scopedSkillBackend` / `ResolveSkillsDir` / `probeProjectSkills` |
-| `agentkit/build/snapshot.go:147-185` / `:207-222` / `agentkit/build/spec.go:64-82` | `newSnapshot` / `snapshotFor`（身份是（配置对象，工具面）） / `policyOf`（三处合成一张表） |
-| `agentkit/build/tools.go:95-101` / `:103-111` / `:113-160` / `:162-188` | `builtinAllowedTools` / `alwaysAsk` / `reservedTool` 与 `reservedToolNames`（★ 保留名带 owner：拥有它的那个 provider 可以提供它，别的不行） / `toolRegistry.Build` |
+| `agentkit/build/snapshot.go:147-185` / `:207-222` / `agentkit/build/spec.go:73-80` | `newSnapshot` / `snapshotFor`（身份是（配置对象，工具面）） / `policyOf`（三处合成一张表） |
+| `agentkit/build/tools.go:95-101` / `:103-150` / `:152-178` | `builtinAllowedTools` / `reservedTool` 与 `reservedToolNames`（★ 保留名带 owner：拥有它的那个 provider 可以提供它，别的不行） / `toolRegistry.Build` |
 | `agentkit/build/callguard.go:30-49` / `:59-110` / `:133-161` / `:194-317` / `:319-465` / `:467-535` / `:537-579` | 两个标记与它们的常量 / `markTruncatedArgs` `markMalformedArgs` `isTruncatedArgs` `isMalformedArgs` `isJSONObject` / `repairDuplicatedTail`（去掉重复的尾巴） / `callGuardModel`（模型包装：★ 只有它看得见截断与重复的尾巴） / `guardCalls` `guardChunks` `markChunksTruncated`（★ 分块的参数要拼起来才能判） / `newCallGuardMiddleware`（★ 链首，所以它先于审批看到这次调用） / `truncationRefusal` `malformedRefusal` |
 
 ### 文件后端与运行期

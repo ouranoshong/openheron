@@ -100,16 +100,6 @@ var builtinAllowedTools = func() []string {
 	}
 }
 
-// alwaysAsk are the tools no configuration may turn into an exception.
-//
-// ★ One name, one rule: `config_write` edits the configuration — including
-// the file whose `allows:` list would grant it (`tools/config.yaml`). A file
-// that could grant it grants itself, so the exception is removed here,
-// after every source has been merged, rather than trusted to stay absent.
-var alwaysAsk = map[string]bool{
-	decl.ToolNameConfigWrite: true,
-}
-
 // reservedTool is one name that a provider may not claim.
 //
 // ★ `owner` is the provider that provides it, and empty when **no**

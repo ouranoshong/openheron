@@ -39,7 +39,10 @@ func configToolEnv(t *testing.T) (*spec.Service, *spec.Config, map[string]tool.I
 	write("llm/openai.yaml", "type: openai\nbase_url: https://a.example\napi_key: ${TEST_CONFIG_TOOLS_KEY}\n"+
 		"models:\n  - id: fast\n    reasoning:\n      off: { reasoning_effort: none }\n      high: { reasoning_effort: high }\n")
 	write("agents/main.md", "---\nmodel: openai/fast\ntools: [ls, config_get, config_write]\n---\nbody\n")
-	write("tools/http.yaml", "methods: [get]\nallows: [config_write]\n")
+	write("tools/http.yaml", "methods: [get]\n")
+	// ★ The configuration family speaks for itself: the file that owns the
+	//   family names its exceptions, `config_write` among them.
+	write("tools/config.yaml", "allows: ["+decl.ToolNameConfigWrite+"]\n")
 	write("server/config.yaml", "listen_addr: \":18099\"\n")
 
 	svc, err := spec.NewService(cfgRoot, root)
@@ -401,14 +404,16 @@ func TestConfigTierExplainsTheExceptionList(t *testing.T) {
 		t.Fatalf("write_file tier = %q, want ask", ask.Tier)
 	}
 
-	// ★ The one rule that cannot be widened: tools/http.yaml in this tree
-	//   says `allows: [config_write]`, and the answer is still ask.
+	// ★ The rule every tool follows: the file that speaks about a family
+	//   names that family's exceptions. `tools/config.yaml` names
+	//   `config_write`, so it runs without a nod — like a reader the same
+	//   file names.
 	self := callToolJSON[struct {
 		Tool string `json:"tool"`
 		Tier Tier   `json:"tier"`
 	}](t, tools, decl.ToolNameConfigTier, `{"tool":"config_write"}`)
-	if self.Tier != TierAsk {
-		t.Fatalf("config_write tier = %q; a file that lists it must not grant its own editor", self.Tier)
+	if self.Tier != TierAllow {
+		t.Fatalf("config_write tier = %q; the file that names it grants it", self.Tier)
 	}
 
 	perAgent := callToolJSON[struct {
@@ -432,10 +437,16 @@ func TestConfigTierExplainsTheExceptionList(t *testing.T) {
 	if len(all.Allow) == 0 {
 		t.Fatal("the exception list must not be empty")
 	}
+	// ★ And the exception list carries the name, because the file put it
+	//   there: a file that says it may not be granted would be a lie.
+	found := false
 	for _, n := range all.Allow {
 		if n == decl.ToolNameConfigWrite {
-			t.Fatal("config_write must never be in the exception list")
+			found = true
 		}
+	}
+	if !found {
+		t.Fatalf("the exception list must carry the name the file gave it: %v", all.Allow)
 	}
 }
 

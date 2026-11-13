@@ -35,15 +35,26 @@ func TestTheConfigToolsAskUntilTheirFileSaysOtherwise(t *testing.T) {
 	}
 }
 
-// ★ `config_write` edits the very file whose `allows:` list would grant it:
+// ★ `config_write` is granted by the file like every other tool of the
 //
-//	a file that could grant it grants itself.
-func TestNoFileMayGrantConfigWrite(t *testing.T) {
+//	family: the file that says which tools run without a nod says it about
+//
+//	this one too. ★ The rule that named one tool as the exception made it
+//
+//	the one that behaved unlike its five siblings, and it was a rule
+//
+//	somebody had to remember.
+func TestTheFileMayGrantConfigWrite(t *testing.T) {
+	bare := &spec.Config{}
+	if got := policyOf(bare).TierOf(decl.ToolNameConfigWrite); got != TierAsk {
+		t.Fatalf("without the file config_write must ask, got %q", got)
+	}
+
 	cfg := &spec.Config{Tools: decl.ToolsCfg{
 		Config: &decl.ConfigToolsCfg{Allows: []string{decl.ToolNameConfigWrite}},
 	}}
-	if got := policyOf(cfg).TierOf(decl.ToolNameConfigWrite); got != TierAsk {
-		t.Fatalf("config_write must always ask, got %q", got)
+	if got := policyOf(cfg).TierOf(decl.ToolNameConfigWrite); got != TierAllow {
+		t.Fatalf("the file names config_write, so it must run without a nod, got %q", got)
 	}
 }
 

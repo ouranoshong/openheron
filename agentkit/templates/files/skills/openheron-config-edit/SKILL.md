@@ -35,7 +35,7 @@ context: inline
 6. Need to confirm a tier → `config_tier {tool}` / `{agent}`.
 7. Need to know what a change will reach → `config_get {impact: true, path}`: who depends on the file, and who the next turn rebuilds.
 
-★ `config_write` is always `ask` and cannot write `server/`; `config_get` can read `server/`. When you hit a `server/` change, report "a human has to edit it and restart".
+★ `config_write` asks by default — `tools/config.yaml` is the file that can grant it — and it cannot write `server/`; `config_get` can read `server/`. When you hit a `server/` change, report "a human has to edit it and restart".
 
 ## What a change reaches
 

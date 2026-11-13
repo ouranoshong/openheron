@@ -14,7 +14,7 @@ This skill gives facts and rules only. Ask for the concrete values with `config_
 agents/<id>.md         agent definition (frontmatter + the body is the Instruction), main is the default agent
 llm/<provider>.yaml    the vendor's profile: base_url / api_key / models[]
 server/config.yaml     the process itself: listening, directories, timeouts, caps (the cold partition)
-tools/<tool>.yaml      http / web_search / wikipedia / kb / filesystem
+tools/<tool>.yaml      http / web_search / wikipedia / kb / filesystem / config
 mcps/<server>.yaml     one MCP server per file
 skills/<name>/SKILL.md a skill (only the first level of subdirectories is scanned)
 state/                 runtime data, never committed
@@ -56,27 +56,27 @@ Prefill the struct → decode file by file (yaml.v3 writes only the keys that ap
 
 ## The tiers: there is no global list
 
-- The default is **`ask`**. The code's own `builtinAllowedTools` (`ls read_file glob grep task write_todos skill`, plus the five read-only `config_get` `config_validate` `config_template` `config_notices` `config_tier`) **always takes effect** and is the base; the `allows:` of each tool file can only **add upward**, it cannot take a name away.
-- To tighten, change that table in the code; to loosen, write `allows:` in the file that provides the tool (naming the tool the way the model sees it: `request_get` in `tools/http.yaml`, `write_file` in `tools/filesystem.yaml`). ★ An **MCP** file is the other case: there the names are the **server's own** (`create_issue`), because the exposed name is assembled with the namespace.
+- The default is **`ask`**. The code's own `builtinAllowedTools` (`ls read_file glob grep task write_todos skill`) **always takes effect** and is the base; the `allows:` of each tool file can only **add upward**, it cannot take a name away. ★ The `config_*` tools are **not** in that list: their file, `tools/config.yaml`, is what says which of them run without a nod — absent, all six ask.
+- To tighten, change that table in the code; to loosen, write `allows:` in the file that provides the tool (naming the tool the way the model sees it: `request_get` in `tools/http.yaml`, `write_file` in `tools/filesystem.yaml`, `config_get` in `tools/config.yaml`). ★ An **MCP** file is the other case: there the names are the **server's own** (`create_issue`), because the exposed name is assembled with the namespace.
 - `tools/filesystem.yaml` **is implemented**: it carries only `allows:`, and it is the **tuning knob** for loosening the tier of `ls` / `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute`, not a switch — the filesystem tools are always there.
-- ★ `config_write` is **always ask**: `alwaysAsk` strips it out of any `allows:` after the merge. A file that can authorize a tool cannot authorize the tool that "rewrites itself".
+- ★ `config_write` is **not** exempt: `tools/config.yaml` grants it like any other name, and the file that grants it is among the files it edits. ★ The default template does not name it — a question about the configuration should not cost an approval, and a change to it should — so it asks until someone writes its name down.
 - The tier (`allow` / `ask`) and the agent's `tools:` list are **two questions**: the first is shared, the second is per agent. A tool can be `allow` and still be invisible to some agent.
 
 ## The six config tools (built in, still to be named in `tools:`)
 
 | Tool | What it answers | Side | Tier |
 |---|---|---|---|
-| `config_get` | `{path}` reads a single file (with revision / hot); `{}` the partition table, the file list, the configuration in force; `{impact: true}` answers "who depends on this file, and who the next turn rebuilds" | `disk` for a file's text, `running` for `impact`; the overview carries both versions | allow |
-| `config_validate` | `{path, content}` whether it can land, and on which line the error is; `{}` checks the whole tree on disk | `disk` | allow |
-| `config_template` | `{path}` / `{section}` gives the skeleton; with neither you get the index | neither — a skeleton is neither a file nor a tree | allow |
+| `config_get` | `{path}` reads a single file (with revision / hot); `{}` the partition table, the file list, the configuration in force; `{impact: true}` answers "who depends on this file, and who the next turn rebuilds" | `disk` for a file's text, `running` for `impact`; the overview carries both versions | `allow` when `tools/config.yaml` names it, `ask` otherwise |
+| `config_validate` | `{path, content}` whether it can land, and on which line the error is; `{}` checks the whole tree on disk | `disk` | `allow` when `tools/config.yaml` names it, `ask` otherwise |
+| `config_template` | `{path}` / `{section}` gives the skeleton; with neither you get the index | neither — a skeleton is neither a file nor a tree | `allow` when `tools/config.yaml` names it, `ask` otherwise |
 | `config_notices` | `deferred[]` / `runningVersion` / `diskVersion` / `watch` | `running` | allow |
-| `config_tier` | the tier of `{tool}` / `{agent}`; with neither you get the default and the whole exception table | `running` | allow |
-| `config_write` | an atomic write that carries `baseRevision`; the answer carries `revision` / `runningVersion` / `diskVersion` / `applied` / `requiresRestart` | it wrote the disk, and it reports both versions | **ask** |
+| `config_tier` | the tier of `{tool}` / `{agent}`; with neither you get the default and the whole exception table | `running` | `allow` when `tools/config.yaml` names it, `ask` otherwise |
+| `config_write` | an atomic write that carries `baseRevision`; the answer carries `revision` / `runningVersion` / `diskVersion` / `applied` / `requiresRestart` | it wrote the disk, and it reports both versions | **`ask`** — the default file does not name it; `tools/config.yaml` can |
 
 ★ **The answers name the side they came from.** `config_get {path}`, `config_validate` and `config_get {impact}` carry a `source` field: `disk` (the files on disk right now) or `running` (the tree this turn runs). The two that report a *state* rather than a *question* — `config_get {}` and `config_notices` — carry the two versions instead: `runningVersion` (the tree this turn runs) and `diskVersion` (the files on disk). A model that has just written a file can see that the disk moved and the running tree did not, instead of reading two numbers that differ by one letter.
 ★ `config_write` **cannot write `server/`** (the write gate `ValidatePath` refuses it), but `config_get` **can read it** (the read gate `ValidateReadPath` only cares about the shape). The two gates are not the same thing.
 ★ `config_validate {}` is fail-fast: it gives only the first blocking error plus every hint, not the full list of problems.
-★ `config_get` does not leak secrets (the configuration only holds `${ENV}` / `@file:` references); over 64 KiB it **refuses** outright instead of truncating.
+★ `config_get` does not leak secrets (the configuration only holds `${ENV}` / `@file:` references); over `max_read_bytes` (64 KiB by default, set in `tools/config.yaml`) it **refuses** outright instead of truncating.
 ★ `config_write` returns `applied` / `requiresRestart` — it takes effect at the next turn; writing the agent itself is allowed too. ★ `applied: true` means the watcher will pick the file up, **not** that this turn can see it.
 ★ **The config tools answer from two places.** The **file** answers (`config_get {path}`, `config_validate {path, content}`) read the disk, so a write is visible there at once. The **tree** answers (`config_tier`, the `effective` summary of `config_get {}`, the `deferred` of `config_notices`) come from the tree the turn was built with — a file written in this turn is on disk but in no tree yet, and it joins on the next turn.
 

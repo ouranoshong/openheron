@@ -297,16 +297,11 @@ func (c *Config) loadTool(file string, data []byte) error {
 		if err := validateConfigReadBytes(&t); err != nil {
 			return err
 		}
-		// ★ A file that asks for the one tool that rewrites the files
-		//	saying so is a file that did not take effect — so it is said
-		//	in the notice, not swallowed by the tier table.
-		for _, name := range t.Allows {
-			if name == decl.ToolNameConfigWrite {
-				c.deferFile(DirTools+"/config.yaml",
-					"`allows:` cannot grant `config_write`: it edits the very files "+
-						"whose `allows:` lists would grant it, so it always asks")
-			}
-		}
+		// ★ `allows:` speaks for the whole family, `config_write` included:
+		//	a tool that edits the configuration is granted by the very file
+		//	that says which tools run without a nod, like every other tool.
+		//	Nothing here removes a name — a file's `allows:` is additive and
+		//	its only power is to widen.
 		c.Tools.Config = &t
 		return nil
 	default:
@@ -347,13 +342,13 @@ func validateConfigReadBytes(t *decl.ConfigToolsCfg) error {
 // noticeConfigToolsAbsent says what the configuration tools cost when
 // their file is not there.
 //
-// ★ The five read-only tools run **without a nod** because their file says
+// ★ The configuration tools run **without a nod** because their file says so
 //
-//	so — there is no code list that names them any more. A tree without
+//	— there is no code list that names them any more. A tree without the
 //
-//	the file therefore asks for every configuration question, and that shows
+//	file therefore asks for every configuration question, and that shows up
 //
-//	up only in the approval card, so it is said here as well.
+//	only in the approval card, so it is said here as well.
 //
 // ★ The notice is only worth its noise when it changes something: an agent
 //
@@ -384,10 +379,11 @@ func (c *Config) noticeConfigToolsAbsent() {
 		return
 	}
 	c.deferFile(DirTools+"/config.yaml",
-		"the configuration tools ask for a nod: this file is what says that the "+
-			"read-only ones run without one. Write it with `allows: [config_get, "+
-			"config_validate, config_template, config_notices, config_tier]`, or let "+
-			"an agent that does not need them drop them from its own `tools:` list")
+		"the configuration tools ask for a nod: this file is what says that they "+
+			"run without one. Write it with `allows: [config_get, config_validate, "+
+			"config_template, config_notices, config_tier]`, add `config_write` only "+
+			"if an agent should rewrite the configuration unattended, or let an agent "+
+			"that does not need them drop them from its own `tools:` list")
 }
 
 func (c *Config) loadKB(data []byte) error {

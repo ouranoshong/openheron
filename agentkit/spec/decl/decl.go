@@ -390,10 +390,15 @@ const (
 // agent's `tools:` as a typo. A real tool the loader does not know about is
 // reported as a mistake the author did not make.
 //
-// ★ `config_write` is the only one that changes anything. It is deliberately
-// **not** in build's exception list, so it always asks — and the tier
-// assembly strips it from any file's `allows:`, because a file that could
-// grant it would be granting the tool that rewrites that file.
+// ★ `config_write` is the only one that changes anything. It is granted by
+//
+//	`tools/config.yaml` like every other tool of this family — the file that
+//
+//	says which tools run without a nod is the file that says it about this
+//
+//	one too. ★ No tool is exempt: a rule that named one tool as the
+//
+//	exception is a rule somebody has to remember.
 const (
 	ToolNameConfigGet      = "config_get"
 	ToolNameConfigValidate = "config_validate"
@@ -462,13 +467,23 @@ type FilesystemCfg struct {
 //
 //	one away.
 //
-// ★ `config_write` is **absent on purpose**: it edits the very files whose
+// ★ `config_write` is granted here like every other tool of the family. It
 //
-//	`allows:` lists would grant it, so a file that could grant it would be
+//	edits the configuration — this file among them — and it is granted by the
 //
-//	granting the tool that rewrites that file. The tier table strips it
+//	same `allows:` list that speaks about the others. ★ That is a property
 //
-//	after every source has been merged.
+//	of the model rather than of this tool: a tool that writes the
+//
+//	configuration can widen the exceptions the configuration carries.
+//
+//	★ The default template does not name it, for the same reason the
+//
+//	knowledge base does not name the tool that writes its index: a question
+//
+//	about the configuration should not cost an approval, and a change to it
+//
+//	should.
 type ConfigToolsCfg struct {
 	Allows []string `yaml:"allows"`
 

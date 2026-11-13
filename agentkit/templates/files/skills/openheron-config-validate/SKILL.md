@@ -17,7 +17,7 @@ and the offset of the frontmatter is corrected by `parseShift` — all of these 
 | 1 | `config_validate {path, content}` | clear the `issues[]` before the write (`Line: 0` means "no line", not line 0; the message of a cross-file rule names the file) |
 | 2 | `config_validate {}` | the whole tree on disk. **fail-fast**: only the first blocking error plus every hint, not the full list of problems |
 | 3 | `config_notices {}` | `deferred[]` / `runningVersion` / `diskVersion` / `watch` — the `deferred[]` is the running tree's |
-| 4 | `config_tier {tool}` or `{agent}` | the tier and the effective tool table (the result after `alwaysAsk`), read from the tree this turn runs |
+| 4 | `config_tier {tool}` or `{agent}` | the tier and the effective tool table (the result of the merge), read from the tree this turn runs |
 | 5 | `config_get {}` | the partition table, the file list, **the configuration this turn was built with** |
 | 6 | `config_get {impact: true}` | who depends on what changed, and who the next turn rebuilds |
 

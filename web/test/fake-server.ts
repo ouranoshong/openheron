@@ -1353,13 +1353,38 @@ export function startFakeServer(port = 0): FakeServer {
         "#\n" +
         "# ★ tools/ is hot-reloaded: the change takes effect on the next turn, no process restart.\n",
       "tools/config.yaml":
-        "# The configuration tools. ★ They are **always mounted** — the provider\n" +
-        "#   mounts them and no file switches them on. This file names their\n" +
-        "#   exceptions and tunes them.\n" +
+        "# tools/config.yaml\n" +
         "#\n" +
-        "# ★ `config_write` is **not** here, and no file can put it there: it edits\n" +
-        "#   the very files whose `allows:` lists would grant it. It always asks.\n" +
+        "# The configuration tools. ★ They are **always mounted** — the provider\n" +
+        "#   answers from the configuration service, and no file switches them on.\n" +
+        "#   This file names their exceptions and tunes them.\n" +
+        "#\n" +
+        "# The tools this file configures:\n" +
+        "#   config_get  config_validate  config_template  config_notices\n" +
+        "#   config_tier  config_write\n" +
+        "#\n" +
+        "# ★ `allows:` is **additive**, like every other file under tools/: a name\n" +
+        "#   here joins the exceptions and never takes one away. It speaks **this\n" +
+        "#   file's own vocabulary** — the tool names as they are exposed.\n" +
+        "#\n" +
+        "# ★ Absent, every tool this provider offers asks — the read-only ones\n" +
+        "#   included: this file is what says that a question about the\n" +
+        "#   configuration does not cost an approval.\n" +
+        "#\n" +
+        "# ★ `config_write` is not named below, and that is a **default, not a rule**:\n" +
+        "#   it edits the configuration — this file among them — so a change to the\n" +
+        "#   configuration should cost an approval. Nothing forbids naming it; to let\n" +
+        "#   an agent rewrite the configuration unattended, replace the line below\n" +
+        "#   with this one:\n" +
+        "#\n" +
+        "#   allows: [config_get, config_validate, config_template, config_notices, config_tier, config_write]\n" +
+        "#\n" +
+        "# ★ The largest file `config_get` hands back. It **refuses** a file bigger\n" +
+        "#   than this rather than truncating it: a tool that returns half a file\n" +
+        "#   invites the model to edit the half it got and write it back.\n" +
+        "#   1024..1048576; the default is 65536.\n" +
         "allows: [config_get, config_validate, config_template, config_notices, config_tier]\n" +
+        "\n" +
         "max_read_bytes: 65536\n",
       "tools/filesystem.yaml":
         "# The filesystem tools. ★ They are **always mounted** — this file does not\n" +

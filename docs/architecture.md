@@ -75,7 +75,7 @@ error.
 ★ **A model that nobody declares is not a startup error — it takes that agent out of
 the tree.** The rule is stated in full in `docs/config-design.md` §4.6; what the
 architecture has to say about it is where the boundary falls: `validate()` **settles**
-the tree (`agentkit/spec/load.go:676` `leaveOutUndeclaredModels`) — the agent is dropped
+the tree (`agentkit/spec/load.go:672` `leaveOutUndeclaredModels`) — the agent is dropped
 from `Config.Agents` and from every parent's `subagents:`, and the reason is kept in
 `Config.leftOut` (`agentkit/spec/config.go:165`). Everything downstream —
 `AgentNames()`, `MCPServersInUse()`, the tier table, the builder — sees the settled
@@ -128,7 +128,7 @@ exists to prevent.
 **mounted** — mounting a server starts a child process — and it also says that the agent
 **gets all of that server's tools**. ★ `tools:` does not name MCP tools:
 an `mcp__<server>__*` entry there grants nothing, is dropped, and is reported as a
-**notice** (`agentkit/spec/load.go:947` `checkAgentMCPNames`) — not a load-time error,
+**notice** (`agentkit/spec/load.go:943` `checkAgentMCPNames`) — not a load-time error,
 because the meaning changed rather than contradicting itself.
 ★ **The cost is real**: narrowing one agent's MCP tools is no longer possible. The
 server's own file (`mcps/<server>.yaml`) filters its tools, and that filter is shared by
@@ -339,7 +339,8 @@ they are mounted onto an Agent, and how skills are scoped to a particular Agent.
 ★ **The config tools are always mounted and almost never visible.** They join the batch
 for every agent, and an agent sees the ones its own `tools:` list names — like every
 other tool that is not an MCP one. Five of them only read, and they run without a nod when `tools/config.yaml`
-names them; `config_write` is never among them, and no file can add it (`docs/config-design.md` §6.2).
+names them; `config_write` is the sixth, and that same file names it like any other
+(`docs/config-design.md` §6.2).
 
 ★ **The tier of a tool is decided by the file that provides it.** A file's own
 `allows:` names the tools that run without a nod — `tools/http.yaml` names
@@ -362,12 +363,12 @@ offers is reported as a typo. `--no-tools` leaves it out.
 The path a tool takes is the same for every source:
 
 `tools/*.yaml` → `spec.loadTool` (`agentkit/spec/load.go:250`) → `decl.ToolsCfg` →
-`toolRegistry.Build` (`agentkit/build/tools.go:162`) → `snapshot.buildHeavy`
+`toolRegistry.Build` (`agentkit/build/tools.go:152`) → `snapshot.buildHeavy`
 (`agentkit/build/snapshot.go:84`) → `applyToolConfig` (`agentkit/build/assemble.go:30`) →
 `deep.Config.ToolsConfig.Tools` → `deep.New` (`agentkit/build/assemble.go:43`).
 
 The MCP branch joins it at the registry: `mcps/<server>.yaml` → `spec.loadMCP`
-(`agentkit/spec/load.go:474`) → `decl.MCPServerCfg` → the MCP provider
+(`agentkit/spec/load.go:470`) → `decl.MCPServerCfg` → the MCP provider
 (`agentkit/build/mcptools.go:194`), registered at `agentkit/build/tools.go:55` → the same
 `toolRegistry.Build` → the same `applyToolConfig`.
 
@@ -398,7 +399,7 @@ and **the next turn** has its tools.
 ★ The exposed name is `mcp__<server>__<tool>`, composed in exactly one place
 (`agentkit/build/mcptools.go:141`). The server's own name is the namespace segment, and
 which server an exposed name belongs to is read back out of it
-(`agentkit/spec/decl/decl.go:615` `MCPServerOf`). ★ **The namespace is not negotiable**:
+(`agentkit/spec/decl/decl.go:630` `MCPServerOf`). ★ **The namespace is not negotiable**:
 a server name may not contain a run of underscores, so the prefix of one server cannot
 reach another.
 
@@ -555,7 +556,7 @@ dependency-direction fact, not a convenience.** The built-in tool names
 (`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:348`) are read by **both** ends:
 the loader checks the names an agent's `tools:` list mentions against them, and the
 builder refuses a provider that claims one of them (`reservedToolNames`,
-`agentkit/build/tools.go:127`). Neither end may import the other — the loader sits
+`agentkit/build/tools.go:126`). Neither end may import the other — the loader sits
 below the builder — so the list cannot live in either of them: it lives **below both**,
 in the leaf package. ★ A second copy would be two lists that drift, and the drift
 would read as "that tool does not exist".
@@ -564,7 +565,7 @@ would read as "that tool does not exist".
 
 **Validating** the knowledge-base config (`tools/kb.yaml`) needs to know whether the
 corpus path is relative, whether the model is declared at all, and whether it is
-declared as `kind: embedding` (`agentkit/spec/load.go:393` `loadKB`, `agentkit/spec/load.go:1045` `validateKB`).
+declared as `kind: embedding` (`agentkit/spec/load.go:389` `loadKB`, `agentkit/spec/load.go:1041` `validateKB`).
 
 ★ All three answers live in the **declarations** (`decl.Model.IsEmbedding`,
 `decl.Model.Dimensions`), so the configuration layer does not import the knowledge base
@@ -663,7 +664,7 @@ from loading at all. But the directory raises a **notice**
 configuration that says nothing is the worst kind, because the process starts fine and the
 setting is gone.
 
-File names under `tools/` are a **whitelist**: `agentkit/spec/load.go:313` errors out on
+File names under `tools/` are a **whitelist**: `agentkit/spec/load.go:308` errors out on
 an unknown file instead of ignoring it — "I wrote kb.yaml and it did not take effect" is
 one of the hardest classes of problem to debug.
 
@@ -714,18 +715,18 @@ The **exceptions are named**, and they are named by the file that provides the t
 | Source | What it names | Assembled at |
 |---|---|---|
 | The built-in tools that have no file of their own | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill` | `agentkit/build/tools.go:95` `builtinAllowedTools` |
-| A tool's own file — `tools/*.yaml` and the knowledge base | that file's `allows:` | `agentkit/spec/load.go:434` `AllowedTools` |
+| A tool's own file — `tools/*.yaml` and the knowledge base | that file's `allows:` | `agentkit/spec/load.go:430` `AllowedTools` |
 | An MCP server's own file | that server's `allows:`, in the server's own vocabulary, translated to the exposed names | `agentkit/build/mcptools.go:173` `mcpAllowedNames` |
 
-`agentkit/build/spec.go:64` `policyOf` puts the three together and `Policy.TierOf`
+`agentkit/build/spec.go:73` `policyOf` puts the three together and `Policy.TierOf`
 reads the result. ★ The table is assembled from the **configuration**, so the tier of
 a tool is answerable before its server is even up.
 
-★ **One name is removed after the merge, not left out of it.** `config_write` edits the
-configuration, including the file whose `allows:` list would grant it — a file that
-could grant it grants itself. `alwaysAsk` (`agentkit/build/tools.go:109`) strips it from
-the assembled list, so the exceptions come from three sources and there is exactly one
-place that can take one away.
+★ **No name is removed after the merge.** The exceptions come from three sources — the
+code's list, a file's own `allows:` and an MCP server's `allows:` — and there is no
+fourth that can take one away. `config_write` edits the configuration, including the
+file whose `allows:` list grants it, and it is granted by that file like any other
+tool: a rule that named one tool as the exception is a rule somebody has to remember.
 
 ★ **Two questions, and they are kept apart.** "Does this tool need a human?" is the
 **tier table** — `Policy.TierOf` — and it is **shared**: every agent reads the same
@@ -753,9 +754,9 @@ second copy of the same keys that could only *tighten* the file — is gone, and
 takes effect after a restart.
 
 A declared topology that exceeds the cap is a **startup error**
-(`agentkit/spec/load.go:1073`'s `validateDepth`) — never a silent truncation. A sub-agent
+(`agentkit/spec/load.go:1069`'s `validateDepth`) — never a silent truncation. A sub-agent
 referencing an unknown agent and a cyclic topology are startup errors too
-(`agentkit/spec/load.go:1144` `validateAgentGraph`, `agentkit/spec/load.go:1161` `detectCycle`).
+(`agentkit/spec/load.go:1140` `validateAgentGraph`, `agentkit/spec/load.go:1157` `detectCycle`).
 
 ### 5.7 Write gates
 

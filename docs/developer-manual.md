@@ -127,7 +127,7 @@ dependency-direction fact, not a convenience.** The built-in tool names
 (`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:366`) are read by **both** ends:
 the loader checks the names an agent's `tools:` list mentions against them, and the
 builder refuses a provider that claims one of them (`reservedToolNames`,
-`agentkit/build/tools.go:127`). Neither end may import the other — the loader sits
+`agentkit/build/tools.go:126`). Neither end may import the other — the loader sits
 below the builder — so the list cannot live in either of them: it lives **below both**,
 in the leaf package. ★ A second copy would be two lists that drift, and the drift
 would read as "that tool does not exist".
@@ -190,15 +190,15 @@ Recomputing either one is the same mistake twice.
    `grep` `execute` `task` `write_todos` `skill`. A collision fails at `Build` time.
    ★ **They live in `decl` and not in the build package because both halves need
    them**: the builder refuses a provider that claims one of these names
-   (`reservedToolNames`, `agentkit/build/tools.go:127`), and the loader checks the
+   (`reservedToolNames`, `agentkit/build/tools.go:126`), and the loader checks the
    names an agent's `tools:` list mentions. Neither may import the other, so the list
    lives below both.
    The tool name is also the key in the tier table — a collision would point the
    table at the wrong tool.
 
    ★ **A name that comes from a server is namespaced.** An MCP tool is exposed under
-   `decl.MCPToolPrefix` (`agentkit/spec/decl/decl.go:578`) and
-   `decl.MCPSeparator` (`agentkit/spec/decl/decl.go:587`), so the agent's table
+   `decl.MCPToolPrefix` (`agentkit/spec/decl/decl.go:593`) and
+   `decl.MCPSeparator` (`agentkit/spec/decl/decl.go:602`), so the agent's table
    narrows a whole server with a prefix instead of a list of names. ★ The composed
    name is never parsed back: `Table.Blocked` (`agentkit/build/policy.go:163`)
    matches prefixes, so nothing has to split a name to learn which server it
@@ -418,7 +418,7 @@ definition — there is no `enabled` key.
 - **Declared** by the constant `DirMCP = "mcps"` (`agentkit/spec/config.go:26`) and the
   `Categories` entry (`agentkit/spec/config.go:85`), which is editable, hot and
   `.yaml`.
-- **Loaded** by `loadMCP` (`agentkit/spec/load.go:474`): one file, one server.
+- **Loaded** by `loadMCP` (`agentkit/spec/load.go:470`): one file, one server.
 - ★ **"Hot" for this partition means the client is rebuilt.** The declaration is the
   server's identity, so a changed declaration means a changed server: the old client
   is torn down and a new one is started (`agentkit/build/mcpmanager.go:447`), keyed on
@@ -470,7 +470,7 @@ Editing `agents/*.md` is enough; no code change is needed. But keep in mind:
   until it is fixed, but the process does, and the editor that fixes it lives there.
 - An agent referenced by `subagents` must exist and must not form a cycle — both are
   **startup errors**. ★ A sub-agent that was left out is dropped from its parents'
-  `subagents:` (`agentkit/spec/load.go:711`), so the delegation tool never offers a worker
+  `subagents:` (`agentkit/spec/load.go:707`), so the delegation tool never offers a worker
   that cannot run — and a `subagents:` entry pointing at such an agent is not a cycle or a
   dangling reference, because the settled tree no longer mentions it.
 - Exceeding `max_depth` is a **startup error**, never a silent truncation.
@@ -540,7 +540,7 @@ the list removed. ★ **There is no "nothing to do" shortcut**
 ★ **MCP has one key, and mounting is the grant.** `mcps:` says which servers are
 **mounted** — and mounting one hands the agent **all of that server's tools**. ★ `tools:`
 does not name MCP tools: an `mcp__<server>__*` entry there grants nothing, is
-dropped, and is reported as a **notice** (`agentkit/spec/load.go:947`
+dropped, and is reported as a **notice** (`agentkit/spec/load.go:943`
 `checkAgentMCPNames`) — not a load-time error, because the meaning changed rather than
 contradicting itself. ★ **The cost is real**: narrowing one agent's MCP tools is no longer
 possible — the server's own file filters them, and that filter is shared by every agent
@@ -550,7 +550,7 @@ file's `allows:`, and the default there is still `ask` — mounting is not appro
 #### The three notices
 
 All three are **notices**, not errors — the configuration is legal, it just does not say
-what the author meant (`agentkit/spec/load.go:819` `noticeAgentTools`):
+what the author meant (`agentkit/spec/load.go:815` `noticeAgentTools`):
 
 | Notice | What it means | What to do |
 |---|---|---|
@@ -1525,7 +1525,7 @@ about text the user has already changed.
 
 ★ **A rule that was the client's moved to the server rather than disappearing.** An
 agent's `reasoning` level is checked against the model's declared vocabulary in
-`agentkit/spec/load.go:779` `checkReasoning` — where every file passes, not only the
+`agentkit/spec/load.go:775` `checkReasoning` — where every file passes, not only the
 edits made in the settings editor. ★ Deleting a client rule is only a simplification if
 the server already has it; that is the question to ask of the next one.
 
@@ -1636,9 +1636,11 @@ tools: [..., config_write]
 
 then `task test-env-sync`. ★ It refuses to run when `config_write` is **not** in the
 `ask` tier either: an allow-tier `config_write` would have written the file without an
-approval, which is the one thing the smoke exists to catch. That is also why the target
-is `task smoke-config` and not a step of `task smoke` — it can never pass on a default
-install.
+approval, which is the one thing the smoke exists to catch. The tier comes from the file
+that owns the family — `tools/config.yaml` — so the smoke needs that file to leave
+`config_write` out, and it says which line to change instead of reporting a broken
+wiring. That is also why the target is `task smoke-config` and not a step of `task smoke`
+— it can never pass on a default install.
 
 ★ It puts the tree back: the probe file is deleted through the API at the end, and the
 script asserts it is gone. A smoke that leaves an agent file behind changes what the
@@ -1759,7 +1761,7 @@ misses something.
 | Startup reports a missing configuration | The `config root` line in the startup log — it prints the root actually used and the project root |
 | A config change does not take effect | Is that partition hot-reloaded? `llm/` `agents/` `tools/` `mcps/` `skills/` are hot; `server/` needs a restart |
 | Startup fails with `disabled_tools` was renamed to `tools` | ★ The two mean **opposite** things — one removed tools, the other names them. Delete `disabled_tools` and list the tools the agent should have in `tools:` (`agentkit/spec/load.go:108`) |
-| A notice says `tools` names MCP tools | ★ `tools` does not name MCP tools, and `mcps:` is what mounts a server **and** grants its tools: drop the `mcp__*` lines and put the server in `mcps:` (`agentkit/spec/load.go:947`) |
+| A notice says `tools` names MCP tools | ★ `tools` does not name MCP tools, and `mcps:` is what mounts a server **and** grants its tools: drop the `mcp__*` lines and put the server in `mcps:` (`agentkit/spec/load.go:943`) |
 | An agent cannot call an MCP tool | Is the server in that agent's `mcps:`? Mounting **is** the grant — the agent's `tools:` list has nothing to do with it (`agentkit/spec/decl/decl.go:147`) |
 | A notice says `tools` names a tool that does not exist | The built-in tools are the ones in `decl.BuiltinToolNames` (`agentkit/spec/decl/decl.go:366`); a provider's tool exists only when its file under `tools/` is written |
 | A notice says `tools` names the `skill` tool but `skills` is empty | The configuration is legal but self-contradictory: name the skill in `skills:`, or drop `skill` from `tools:` |

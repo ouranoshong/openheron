@@ -61,24 +61,22 @@ func specOf(cfg *spec.Config, projectRoot string) (agentSpec, error) {
 //	configuration: a tool's own file names the ones that run without a
 //	nod (`allows:`), and an MCP server's file names its own — in the
 //	server's own vocabulary, translated to the exposed names here.
+//
+// ★ **Every tool is governed by the same rule.** There is no name that a
+//
+//	configuration may not grant: a tool that has a file of its own is
+//	granted by that file, and a tool that has none is granted by the
+//	code's list. ★ A tool that edits the configuration — `config_write`
+//	above all — is granted by `tools/config.yaml` like any other, because
+//	a rule that named one tool as the exception is a rule that has to be
+//	remembered.
 func policyOf(cfg *spec.Config) Policy {
 	allow := builtinAllowedTools()
 	allow = append(allow, cfg.AllowedTools()...)
 	for name := range mcpAllowedNames(cfg.MCPs) {
 		allow = append(allow, name)
 	}
-
-	// ★ The merge happens first, the removal last. A file's `allows:` list is
-	//   one of the sources above, so checking the names before the merge
-	//   would let the file grant the tool that rewrites the file.
-	kept := allow[:0]
-	for _, name := range allow {
-		if alwaysAsk[name] {
-			continue
-		}
-		kept = append(kept, name)
-	}
-	return NewPolicy(kept)
+	return NewPolicy(allow)
 }
 
 func (s *agentSpec) agentSpec(id string) (decl.SubAgentSpec, bool) {
