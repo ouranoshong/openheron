@@ -94,7 +94,11 @@ if [[ ! -f "$CONFIG_DIR/server/config.yaml" ]]; then
 
 # The port actually comes from LISTEN_ADDR (see .env.test); this is only a
 # fallback.
-listen_addr: ":18099"
+#
+# ★ The loopback, on purpose: a bare ":18099" binds every interface, and the
+#   test instance drives a real agent whose tools run shell commands. The
+#   test instance must not be reachable from the network.
+listen_addr: "127.0.0.1:18099"
 
 # The cap on one turn from submission to running state. Shortened for tests:
 # failures must be fast, otherwise a single assertion can wait 60 seconds and
@@ -127,7 +131,7 @@ fi
 #   did: once it is set, the project's .openheron/ is never consulted.
 export OPENHERON_CONFIG_DIR="$CONFIG_DIR"
 export DATA_DIR="$STATE_DIR"
-export LISTEN_ADDR=":$OPENHERON_TEST_BACKEND_PORT"
+export LISTEN_ADDR="127.0.0.1:$OPENHERON_TEST_BACKEND_PORT"
 
 if [[ "$PREPARE_ONLY" == 1 ]]; then
   echo "[test-backend] prepared (not started)"

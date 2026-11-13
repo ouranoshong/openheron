@@ -206,7 +206,7 @@ llm/*.local.yaml
 |---|---|---|
 | `server.data_dir`（相对） | **配置根** | `agentkit/spec/config.go:497-499` |
 | `server.log.file`（相对） | **配置根** | `agentkit/spec/config.go:520-522` |
-| `server.static_dir`（相对） | **项目根** | `agentkit/spec/config.go:529-535`，用在 `main.go:597` |
+| `server.static_dir`（相对） | **项目根** | `agentkit/spec/config.go:529-535`，用在 `main.go:614` |
 | `kb.corpus_dir`（相对） | **项目根** | `agentkit/spec/load.go:1045-1048` |
 
 ★ **这个划分是刻意的：状态跟着配置走，工作树跟着项目走。** 相对的 `data_dir` 在配置被搬走时
@@ -222,7 +222,7 @@ llm/*.local.yaml
 :8080 / **:18099**，Vite :5173 / **:15173**，E2E 假后端 — / **:18180**；测试实例由
 `scripts/test-backend.sh` 启动（`task test-env-backend` / `test-env-reset` / `test-env-sync`），它点名了
 必须隔离的三个环境变量：`OPENHERON_CONFIG_DIR`（**配置根**，唯一的那一份）、`DATA_DIR`（会话数据）、
-`LISTEN_ADDR`（`:18099`）（`scripts/test-backend.sh:128-130`）。
+`LISTEN_ADDR`（`127.0.0.1:18099`）（`scripts/test-backend.sh:128-130`）。
 
 ★ **端口与状态必须一起隔离。** 换个端口不等于数据隔离：openheron 把会话写在配置根下的 `state/`，
 测试写在那里就污染了真实历史。测试实例是**点名**自己的配置根的，而配置根**从不上溯**
@@ -350,14 +350,14 @@ export），不是配置写错。写错的东西（拼错的键、写错的 `@fi
 | 环境变量 | 覆盖什么 | 在哪里读 |
 |---|---|---|
 | `OPENHERON_CONFIG_DIR` | **配置根**（唯一的那一份） | `agentkit/spec/config.go:440`（名字是常量 `ConfigDirEnv`，`:131`） |
-| `LISTEN_ADDR` | `server.listen_addr` | `main.go:445` |
-| `DATA_DIR` | 解析后的数据目录（会话、checkpoint） | `main.go:446` |
-| `PROJECT_ROOT` | 交给 agent 的项目根 | `main.go:447` |
-| `STATIC_DIR` | `server.static_dir` | `main.go:597` |
-| `FRONTEND_MODE` | `server.frontend_mode` | `main.go:583` |
+| `LISTEN_ADDR` | `server.listen_addr` | `main.go:440` |
+| `DATA_DIR` | 解析后的数据目录（会话、checkpoint） | `main.go:459` |
+| `PROJECT_ROOT` | 交给 agent 的项目根 | `main.go:460` |
+| `STATIC_DIR` | `server.static_dir` | `main.go:614` |
+| `FRONTEND_MODE` | `server.frontend_mode` | `main.go:600` |
 | `EINO_EXT_SKILLS_DIR` | skills 目录 | `agentkit/build/skill.go:194` |
 
-server 侧那三个覆盖走同一个辅助函数 —— `override`（`main.go:822-827`）在环境变量非空时返回环境值，
+server 侧那三个覆盖走同一个辅助函数 —— `override`（`main.go:839-844`）在环境变量非空时返回环境值，
 否则返回配置值。
 
 ★ **server 侧那三个覆盖只在启动时读一次。** `server/` 不参与热重载（`agentkit/spec/config.go:71-74`），
@@ -832,8 +832,8 @@ skills 怎么没生效」变成一个查不出原因的问题。★ **这次向�
 
 | 字段 | 类型 | 缺省 | 说明 |
 |---|---|---|---|
-| `listen_addr` | `string` | `:8080` | Hertz 监听地址。★ 必须加引号 —— 以 `:` 开头的值解析得有歧义 |
-| `frontend_mode` | `string` | `embed` | `embed` 服务编译进二进制的界面；`dir` 服务磁盘上的一个目录。值不认识时只记一条告警，前端不启用（`main.go:609`） |
+| `listen_addr` | `string` | `127.0.0.1:8080` | Hertz 监听地址。★ 必须加引号 —— 以 `:` 开头的值解析得有歧义。★ 缺省是**环回**：光一个 `:8080` 绑的是**所有网卡**，而这台服务器的工具跑的是 shell 命令 |
+| `frontend_mode` | `string` | `embed` | `embed` 服务编译进二进制的界面；`dir` 服务磁盘上的一个目录。值不认识时只记一条告警，前端不启用（`main.go:626`） |
 | `static_dir` | `string` | `web/dist` | 相对**项目根**解析（`Service.ResolveDir`）；只在 `frontend_mode: dir` 时才被读 |
 | `data_dir` | `string` | `state` | 相对**配置根**解析；空串等同 `state`；目录不存在时创建 |
 | `log_level` | `string` | `info` | `debug` `info` `warn` `error`；非法值回退 `info` 并记 `deferred`（`agentkit/spec/load.go:149-151`） |
@@ -847,6 +847,11 @@ skills 怎么没生效」变成一个查不出原因的问题。★ **这次向�
 | `agent.max_depth` | `int` | `1` | 见 §5.2 |
 | `watch.enabled` | `*bool` | `nil`→开 | 用指针区分「没写」与「写了 false」（`agentkit/spec/reload.go:128-137`） |
 | `watch.debounce` | `LenientDuration` | `200ms` | 轮询间隔取其一半，下限 20ms（`agentkit/spec/reload.go:205-212`） |
+
+★ **`listen_addr` 就是全部的边界。** 没有账号，也没有令牌 —— 这是一台机器上一个人用的工具。
+环回监听时，服务器自己会挡住别处来的请求（`api/guard.go` 的 Host 与 Origin 两条规则）；
+一旦把它写到 `0.0.0.0`，那两条规则就不管用了，所以启动时会留下一条告警
+（`main.go:447`）：**能碰到这个端口的人就能驱动这个 agent。**
 
 ★ **与 `tools/` 和 `mcps/` 不同，`server/` 没有文件名白名单。** 它下面的每一个 `.yaml` 都被解进同一个
 `decl.Server` 结构（`agentkit/spec/load.go:140-144`），所以一个手滑的 `server/typo.yaml` 会被并进
@@ -1235,7 +1240,7 @@ Reloader.Reload() (at runtime)
 指征必须按 turn 记，否则调试会变成猜谜；它由 `/v2/health` 以 `configVersion` 暴露
 （`api/v2_introspect.go:481`）。
 
-★★ **「代际」这个概念已经退休。** `main.go` 的 `agentConfig`（`main.go:749-760`）只有 `Current()` 与
+★★ **「代际」这个概念已经退休。** `main.go` 的 `agentConfig`（`main.go:766-777`）只有 `Current()` 与
 `Publish()`，没有计数器。⇒ 树的身份是**（配置对象，MCP 工具面）**
 （`agentkit/build/snapshot.go:207-222`），而不是「第几代」。
 
@@ -1540,7 +1545,7 @@ github.com/ouranoshong/openheron/llm/common
 | `agentkit/fsx/fsx.go:232-250` / `:739-775` / `:776-835` / `:809` | `resolveWrite`（写入边界） / `Write` / `Edit` —— 配置根的写在这里转交 / ★ `OldString` 找不到就报错 —— 文件工具的冲突语义 |
 | `agentkit/run/loop.go:125-140` / `:240-260` / `agentkit/run/runtime.go:567-573` / `:867-881` / `agentkit/run/turn.go:80-86` | `makePrepareAgent`（带钉住） / `settleAgent` / 恢复时取父 run 的树 / `parentRunOf` / `Turn.pin` |
 | `storage/runledger.go:169-176` | `Run.TreeFingerprint` |
-| `main.go:98` / `:111-121` / `:123-140` / `:149-157` / `:367-450` / `:445-447` / `:583` / `:597` / `:749-760` / `:775-804` / `:815-820` / `:822-827` | `--config-dir` / 用法 / `warnUnusedHomeConfig` / `configLoadError` / `setupConfig` / 三个 `override` 读点 / `FRONTEND_MODE` / `STATIC_DIR` / `agentConfig` / `Current` `Publish` / `configVersion` / `override` |
+| `main.go:98` / `:111-121` / `:123-140` / `:149-157` / `:367-462` / `:440` `:459` `:460` / `:600` / `:614` / `:766-777` / `:792-821` / `:832-837` / `:839-844` | `--config-dir` / 用法 / `warnUnusedHomeConfig` / `configLoadError` / `setupConfig` / 三个 `override` 读点 / `FRONTEND_MODE` / `STATIC_DIR` / `agentConfig` / `Current` `Publish` / `configVersion` / `override` |
 | `api/v2_introspect.go:406` / `:481-482` / `api/v2_settings.go:64-90` / `:91-104` / `:201-216` | `deferred` 与 `configVersion` / `settingsFail` / manifest handler / `readPath` `writePath` |
 | `initcfg/initcfg.go:56-94` / `:198-224` | `BuildPlan` / `copySection` |
 | `.env.test` / `scripts/test-backend.sh:47` `:76` `:90-105` `:128-130` | 测试环境的约定与隔离脚本 |

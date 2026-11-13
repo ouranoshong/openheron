@@ -56,7 +56,11 @@ func defaultKB() decl.KB {
 
 func defaultServer() decl.Server {
 	return decl.Server{
-		ListenAddr: ":8080",
+		// ★ The loopback, not a bare ":8080". A bare port binds **every**
+		//   interface, and this server's tools run shell commands — so the
+		//   default has to be the one that only the machine itself can
+		//   reach. Someone who wants the network opts in, in writing.
+		ListenAddr: "127.0.0.1:8080",
 		StaticDir:  "web/dist",
 		DataDir:    DirState,
 		LogLevel:   "info",

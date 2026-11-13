@@ -437,12 +437,25 @@ func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar, sink
 		return nil, err
 	}
 
+	addr := override("LISTEN_ADDR", cfg.Server.ListenAddr)
+
+	// ★ The exposure note. A listener beyond the loopback is reachable by
+	//   every machine on the network, and the tools this server drives run
+	//   shell commands. There is no token and no account — this is a
+	//   single-user tool on one machine — so the address itself is the whole
+	//   boundary, and a line like this one is what makes it a decision.
+	if !api.LoopbackOnly(addr) {
+		log.Warn("[main] the server listens beyond the loopback; "+
+			"anyone who can reach this port can drive the agent",
+			"addr", addr)
+	}
+
 	return &startup{
 		cfgSvc:      cfgSvc,
 		mgr:         mgr,
 		reloader:    reloader,
 		cfg:         cfg,
-		addr:        override("LISTEN_ADDR", cfg.Server.ListenAddr),
+		addr:        addr,
 		dataDir:     override("DATA_DIR", cfgDataDir),
 		projectRoot: override("PROJECT_ROOT", cfgSvc.ProjectRoot()),
 		logClose:    logClose,
@@ -514,6 +527,10 @@ func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 	}
 
 	st.srv = api.New(rt, fm, log, hserver.WithHostPorts(st.addr))
+	// ★ The guard goes on before the server registers its routes: hertz
+	//   wraps the handlers that come after a middleware, and a guard added
+	//   later is a guard that never runs.
+	st.srv.SetGuard(api.NewGuard(api.LoopbackOnly(st.addr)))
 	st.srv.SetConfigSource(func() *spec.Config {
 		return st.mgr.Current()
 	})

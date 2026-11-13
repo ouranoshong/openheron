@@ -318,7 +318,9 @@ comes up with "no configuration at ...", because it is not reading the tree `ini
 `uvx.exe` in `mcps/fetch.yaml` and `mcps/time.yaml` — the two MCP servers need `uvx` on
 the PATH (§2.3).
 
-If the port is taken, change it **before** it starts: `$env:LISTEN_ADDR = ":9090"` (§10).
+If the port is taken, change it **before** it starts: `$env:LISTEN_ADDR = "127.0.0.1:9090"` (§10).
+★ Keep the host in the address: `":9090"` alone binds **every** interface, and the agent's
+tools run shell commands (§9).
 
 ### 2.3 What the configuration holds
 
@@ -785,7 +787,7 @@ told to (`proxy: env`).
 
 | Field | Default | Meaning |
 |---|---|---|
-| `listen_addr` | `:8080` | Listen address |
+| `listen_addr` | `127.0.0.1:8080` | Listen address — the loopback by default; a bare `:8080` binds every interface (§9) |
 | `data_dir` | `state` | Where sessions and checkpoints live |
 | `static_dir` | `web/dist` | Frontend build output (used when `frontend_mode: dir`) |
 | `frontend_mode` | `embed` | `embed` uses the interface baked into the binary; `dir` reads from disk |
@@ -804,8 +806,8 @@ why it is **read-only** in the config editor, and submitting it fails with
 `section "server" is not editable`.
 
 These environment variables override the file and take precedence:
-`LISTEN_ADDR`, `DATA_DIR`, `PROJECT_ROOT`, `FRONTEND_MODE`, `STATIC_DIR`, `OPENHERON_LOG_LEVEL`,
-`OPENHERON_LOG_FILE`, `OPENHERON_LOG_LLM_REQUESTS`.
+`LISTEN_ADDR`, `DATA_DIR`, `PROJECT_ROOT`, `FRONTEND_MODE`, `STATIC_DIR`,
+`OPENHERON_LOG_LEVEL`, `OPENHERON_LOG_FILE`, `OPENHERON_LOG_LLM_REQUESTS`.
 
 ★ `log_requests` and `OPENHERON_LOG_LLM_REQUESTS` are two spellings of the same switch: the
 first sets the project default, the second decides one run (**the environment variable wins** —
@@ -1495,9 +1497,18 @@ openheron version                                         print the version
 
 ## 9. HTTP API reference
 
-The service exposes only the `/v2` family. There is no authentication and no CORS; the
-default `:8080` binds every interface, so put a reverse proxy in front to expose it
-publicly, or narrow `listen_addr` to `127.0.0.1`.
+The service exposes only the `/v2` family. ★ The default listener is the **loopback**
+(`127.0.0.1:8080`), so only this machine can reach it, and there is no CORS.
+
+★ **There is no account and no token.** This is a single-user tool on one machine: the
+address is the whole boundary. Exposing it — `listen_addr: 0.0.0.0:8080`, or a reverse
+proxy in front — is a decision you write down, and the server says so at startup.
+
+★ Two rules hold whatever the address is. A request that **changes** something and
+comes from another site is refused. And while the listener is on the loopback, a
+request whose **Host** is not this machine is refused — a page on another site can
+point a browser at `127.0.0.1`, and then the request would otherwise look like it came
+from here. Both answers are `403`.
 
 | Method | Path | Effect |
 |---|---|---|
@@ -1626,7 +1637,8 @@ known. The tools it brings join the **next** turn — press **Refresh** to see t
 
 **Q: The port is taken / the interface will not open?**
 Change the port in `listen_addr`, or override it with the `LISTEN_ADDR` environment
-variable.
+variable. ★ Keep the host in it: `127.0.0.1:9090` is the safe form, and a bare `:9090`
+binds every interface.
 
 **Q: How do I see what the server actually loaded?**
 `GET /v2/config` returns the effective configuration; `GET /v2/health` returns the

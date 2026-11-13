@@ -8,8 +8,12 @@
 #     they are visible and editable. Writing them changes nothing by itself —
 #     it only makes the knobs findable.
 
-# The address the HTTP server listens on.
-listen_addr: ":8080"
+# ★ The address the HTTP server listens on. The default is the **loopback**:
+#   the agent's tools run shell commands, so a listener every machine on the
+#   network can reach is a listener every machine on the network can drive.
+#   Write "0.0.0.0:8080" when you mean to expose it: whoever can reach the port
+#   can drive the agent, and the server says so at startup.
+listen_addr: "127.0.0.1:8080"
 
 # ★ Runtime data: sessions, checkpoints, the knowledge-base index.
 #   A relative path resolves against the **config root** (<project>/.openheron).

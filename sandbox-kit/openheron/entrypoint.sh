@@ -13,4 +13,13 @@ cd "${WORKSPACE_DIR:-$PWD}" || exit 1
 openheron init --dir "$PWD" || \
     echo "[entrypoint] init did not complete; the configuration was left as it was, and with none at all the server will not start"
 
+# ★ The sandbox publishes the workload's port, so the server inside has to
+#   listen on every interface: the default is the loopback, and the runtime
+#   outside the microVM cannot reach a loopback.
+#
+#   ★ "[::]" and not "0.0.0.0": it is a dual-stack socket, so it accepts the
+#     IPv4 connection the runtime publishes (the descriptor declares the
+#     family as ipv4). The descriptor's comment says exactly this.
+export LISTEN_ADDR="[::]:8080"
+
 exec openheron

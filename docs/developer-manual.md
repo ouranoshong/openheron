@@ -454,7 +454,7 @@ definition — there is no `enabled` key.
    ```
 
 3. **Data sources.** To wire up a new source, add a `SetXxxSource` method on
-   `api.Server` (the pattern is `api/server.go:113`'s `SetSkillsSource`) and connect it
+   `api.Server` (the pattern is `api/server.go:119`'s `SetSkillsSource`) and connect it
    in `main.go`. **Do not** let a handler read a global variable directly.
 
 4. **Streaming.** The SSE sink lives in `transport`; `api` only writes the events out.
@@ -1790,7 +1790,7 @@ the current state of the code, not a to-do list** — fixing one is a separate c
 | **A broken SSE stream does not reconnect** | `web/src/lib/api.ts` | A broken stream is simply broken: it goes to `onError` → the error panel, and the user has to resend. There is no reconnect and no resume-from-offset. |
 | **The conflict dialog does not show the on-disk version** | `web/src/components/settings/conflict-dialog.tsx:18-23` | It shows only your stale `baseRevision` plus a hard-coded "changed by someone else", and **never fetches the disk version**. There is no "overwrite anyway" button either — "Keep editing" merely clears the conflict marker, so the next save resends the same stale revision and conflicts again. |
 | **Four runtime dependencies sit in `devDependencies`** | `web/package.json` | `lucide-react` (imported by 10 files), `clsx`, `tailwind-merge` and `class-variance-authority` are all imported by `src/` and bundled into `web/dist`. The build passes (Vite resolves them at build time), but the manifest is wrong. |
-| **The comment at `api/server.go:112` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
+| **The comment at `api/server.go:118` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
 | **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the six partitions (`agentkit/spec/config.go:574`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:619`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:116`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |
 
 ## 8. Before committing

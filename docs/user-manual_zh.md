@@ -286,7 +286,9 @@ api_key: "@file:C:/Users/you/deepseek.key"    # 或者正斜杠
 ★ **Windows 上子进程找不到命令时**，把 `mcps/fetch.yaml` 和 `mcps/time.yaml` 里的
 `command` 改成 `uvx.exe` —— 那两个 MCP 服务器要 PATH 里有 `uvx`（§2.3）。
 
-端口被占就在**启动之前**换一个：`$env:LISTEN_ADDR = ":9090"`（§10）。
+端口被占就在**启动之前**换一个：`$env:LISTEN_ADDR = "127.0.0.1:9090"`（§10）。
+★ 地址里要留着主机名：`":9090"` 光一个端口绑的是**所有网卡**，而 agent 的工具跑的是
+shell 命令（§9）。
 
 ### 2.3 配置里有什么
 
@@ -703,7 +705,7 @@ allows: [request_get]
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
-| `listen_addr` | `:8080` | 监听地址 |
+| `listen_addr` | `127.0.0.1:8080` | 监听地址 —— 缺省是环回；光一个 `:8080` 绑的是所有网卡（§9） |
 | `data_dir` | `state` | 会话与 checkpoint 的存放目录 |
 | `static_dir` | `web/dist` | 前端产物目录（`frontend_mode: dir` 时用） |
 | `frontend_mode` | `embed` | `embed` 用嵌进二进制的界面，`dir` 读磁盘 |
@@ -721,7 +723,8 @@ allows: [request_get]
 提交会报 `section "server" is not editable`。
 
 以下环境变量可以覆盖进程参数，优先级高于配置文件：
-`LISTEN_ADDR`、`DATA_DIR`、`PROJECT_ROOT`、`FRONTEND_MODE`、`STATIC_DIR`、`OPENHERON_LOG_LEVEL`、
+`LISTEN_ADDR`、`DATA_DIR`、`PROJECT_ROOT`、`FRONTEND_MODE`、`STATIC_DIR`、
+`OPENHERON_LOG_LEVEL`、
 `OPENHERON_LOG_FILE`、`OPENHERON_LOG_LLM_REQUESTS`。
 
 ★ `log_requests` 与 `OPENHERON_LOG_LLM_REQUESTS` 是同一个开关的两种写法：前者定项目默认值，
@@ -1323,8 +1326,16 @@ openheron version                                         print the version
 
 ## 9. HTTP 接口速查
 
-服务只暴露 `/v2` 接口族。没有认证、没有 CORS；默认 `:8080` 会绑全部网卡，
-要在公网暴露请自己套反向代理，或把 `listen_addr` 收到 `127.0.0.1`。
+服务只暴露 `/v2` 接口族。★ 缺省的监听地址是**环回**（`127.0.0.1:8080`），所以只有这台
+机器碰得到它；也没有 CORS。
+
+★ **没有账号，也没有令牌。** 这是一台机器上一个人用的工具：地址就是全部的边界。要把它
+暴露出去 —— `listen_addr: 0.0.0.0:8080`，或者前面套一层反向代理 —— 是你写下来的决定，
+服务器会在启动时说一声。
+
+★ 两条规则里有一条跟地址无关：**会改动东西**而且来自别的站点的请求一律拒绝。另一条在
+监听环回时生效：**Host** 不是这台机器的请求一律拒绝 —— 别的站点的页面可以把浏览器指向
+`127.0.0.1`，那样请求看上去就像是从这儿发出来的。两个答案都是 `403`。
 
 | 方法 | 路径 | 作用 |
 |---|---|---|
@@ -1442,7 +1453,8 @@ Agent 和它的父 Agent，其余的照旧留着。改之前想知道这个集�
 按 **Refresh** 就看得见。
 
 **Q：端口被占 / 界面打不开？**
-`listen_addr` 改端口，或用环境变量 `LISTEN_ADDR` 覆盖。
+`listen_addr` 改端口，或用环境变量 `LISTEN_ADDR` 覆盖。★ 地址里要留着主机名：
+`127.0.0.1:9090` 是安全写法，光一个 `:9090` 绑的是所有网卡。
 
 **Q：想看服务到底加载了什么？**
 `GET /v2/config` 返回生效配置；`GET /v2/health` 返回健康状态和 `deferred` 告警；

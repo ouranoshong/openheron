@@ -74,6 +74,12 @@ type Server struct {
 	// log is the transport's logger. Nil is accepted: tests build a server
 	// without one and the lines are dropped.
 	log *slog.Logger
+	// guard is the access policy: who may drive the agent. Nil means the
+	// server serves anybody — the tests build one without a policy.
+	//
+	// ★ It is the difference between an open port and remote code
+	//   execution, because the agent's tools run shell commands.
+	guard *Guard
 }
 
 func (s *Server) logger() *slog.Logger {
@@ -126,6 +132,14 @@ func New(rt *run.Runtime, sm storage.SessionManager, log *slog.Logger,
 // it, which is what an embedding application wants.
 func (s *Server) SetStaticDir(dir string) { s.staticFS = dir }
 
+// SetGuard installs the access policy.
+//
+// ★ It is set before the routes are registered, because hertz wraps the
+//
+//	handlers registered after a middleware — a guard installed later is a
+//	guard that never runs.
+func (s *Server) SetGuard(g *Guard) { s.guard = g }
+
 // SetEmbeddedFrontend serves the React front end from assets, the go:embed
 // tree of web/dist. Takes precedence over SetStaticDir.
 func (s *Server) SetEmbeddedFrontend(assets fs.FS, prefix string) error {
@@ -151,6 +165,12 @@ func (s *Server) Spin() error {
 // binding a port.
 func (s *Server) registerRoutes() {
 	h := s.h
+	// ★ The guard is registered **before** the routes: hertz wraps the
+	//   handlers that come after a middleware, so a guard added later is a
+	//   guard that never runs.
+	if s.guard != nil {
+		h.Use(s.guardMiddleware)
+	}
 	s.registerV2Routes()
 
 	if s.spa != nil {
@@ -172,6 +192,29 @@ func (s *Server) registerRoutes() {
 			CacheDuration: time.Second,
 		})
 	}
+}
+
+// guardMiddleware is the hertz handler that enforces the access policy.
+//
+// ★ It logs every rejection: a refused request is somebody trying to drive
+//
+//	the agent, and that belongs in the log next to the runs it would have
+//	started.
+func (s *Server) guardMiddleware(ctx context.Context, c *app.RequestContext) {
+	status, body := s.guard.Reject(c)
+	if status == 0 {
+		c.Next(ctx)
+		return
+	}
+	s.logger().Warn("[api] request rejected",
+		"method", c.Request.Method(), "uri", c.Request.URI().String(),
+		"status", status, "code", body.Code)
+	c.JSON(status, body)
+	// ★ Abort, and not merely "return": hertz's Next is a **loop** over the
+	//   handlers, so a middleware that returns does not stop the chain — the
+	//   route handler still runs, writes its own body, and overwrites the
+	//   status the guard has just set.
+	c.Abort()
 }
 
 func (s *Server) session(ctx context.Context, c *app.RequestContext) (storage.Session, error) {

@@ -5,7 +5,7 @@
 #   knowledge base lives in the tools/ directory, and that side **is**
 #   hot-reloaded — a change takes effect on the next turn.
 
-listen_addr: ":8080"
+listen_addr: "127.0.0.1:8080"
 static_dir: static        # resolved relative to the **project root** (<root>/static)
 data_dir: state           # runtime data; in practice Service.StateDir() = <root>/.openheron/state
 

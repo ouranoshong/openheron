@@ -710,8 +710,8 @@ builder 每次建树前把当前的身份和手上那份比一比。
 （`mcpManager.Warm`，`agentkit/build/mcpmanager.go:98`）。
 ★ 没有任何 agent 点名的 server 永远不会被启动，连后台都不启动。
 ★ **每台 server 的启动是它自己的 goroutine** —— 三台各要一分钟的 server 不该花三分钟。
-预热挂在配置的加载与重载上（`main.go:490`），而它在锁**外**调它
-（`main.go:781-792` 的 `agentConfig.set`）——
+预热挂在配置的加载与重载上（`main.go:503`），而它在锁**外**调它
+（`main.go:798-809` 的 `agentConfig.set`）——
 拿着锁起进程会把每一个读配置的调用都堵住。
 
 ★ **预热不是唯一的起法**：一次要求（provider 或面板）也会起，走的是同一个单飞。
@@ -1033,10 +1033,11 @@ exec openheron
 所以在 startup hook 与入口脚本里各跑一次，代价是一次空操作，
 却把「hook 与入口脚本谁先谁后」这个依赖去掉了。
 
-★ **Kit 一个 openheron 环境变量都没设。** 入口脚本 `cd` 进工作区，
+★ **Kit 只设了一个 openheron 环境变量：`LISTEN_ADDR`。** 入口脚本 `cd` 进工作区，
 openheron 自己的默认值从那里落到了正确的位置：`PROJECT_ROOT`（默认是工作目录）、
-配置根（默认 `<projectRoot>/.openheron`）、`DATA_DIR`（默认是配置根下的 `state`）、
-`LISTEN_ADDR`（默认 `:8080`）。
+配置根（默认 `<projectRoot>/.openheron`）、`DATA_DIR`（默认是配置根下的 `state`）。
+★ `LISTEN_ADDR` 是**唯一**必须显式给的：缺省值是环回（`127.0.0.1:8080`），而运行时从
+microVM 外面转发进来的连接**到不了环回** —— 沙箱起来了，端口却没人应答。
 ★ 来自**运行时**而不是来自 Kit 的变量：`HTTPS_PROXY` 与 `HTTP_PROXY`
 （凭据替换正是靠它们），以及 `WORKSPACE_DIR`。
 
@@ -1297,8 +1298,8 @@ workload 是**内容**。跑在沙箱里的 MCP 服务器是 workload 内容；
 | `agentkit/run/runrow.go:88` | `noteMCPServers` |
 | `agentkit/run/runrow.go:141` | `mcpServersOf`（从名字读出 server） |
 | `storage/runledger.go:168` | `Run.MCPServers` |
-| `main.go:490` | 预热挂在配置的加载与重载上 |
-| `main.go:522` | `SetMCPSource` |
+| `main.go:503` | 预热挂在配置的加载与重载上 |
+| `main.go:539` | `SetMCPSource` |
 | `initcfg/initcfg.go:164` | init 写 `mcps/` 分区 |
 | `agentkit/templates/files/mcps/_example.yaml` | 脚手架（开头那个下划线是标记） |
 
@@ -1355,7 +1356,7 @@ workload 是**内容**。跑在沙箱里的 MCP 服务器是 workload 内容；
 | `sandbox-kit/openheron/openheron.yaml:93-98` | `lifecycle@1` 的 startup hook |
 | `sandbox-kit/openheron/entrypoint.sh:5` | `cd "${WORKSPACE_DIR:-$PWD}"` |
 | `sandbox-kit/openheron/entrypoint.sh:13` | `openheron init --dir "$PWD"` |
-| `sandbox-kit/openheron/entrypoint.sh:16` | `exec openheron` |
+| `sandbox-kit/openheron/entrypoint.sh:25` | `exec openheron` |
 | `sandbox-kit/openheron/openheron.dockerfile:11` | 那个二进制是动态链接的 |
 | `sandbox-kit/openheron/openheron.dockerfile:19` | 基础镜像 |
 | `sandbox-kit/openheron/openheron.dockerfile:34` | `WORKDIR` |
@@ -1363,8 +1364,8 @@ workload 是**内容**。跑在沙箱里的 MCP 服务器是 workload 内容；
 | `sandbox-kit/openheron-deepseek/openheron-deepseek.yaml:59-69` | mixin 的 `credential@1` |
 | `sandbox-kit/acceptance/run.sh` | 验收跑批（§6 的可重复形式） |
 | `main.go:153` | 没有配置就不肯启动 |
-| `main.go:445-447` | `LISTEN_ADDR` / `DATA_DIR` / `PROJECT_ROOT` 的覆盖顺序 |
-| `main.go:453` | 会话目录 |
+| `main.go:440` / `:459` / `:460` | `LISTEN_ADDR` / `DATA_DIR` / `PROJECT_ROOT` 的覆盖顺序 |
+| `main.go:466` | 会话目录 |
 | `agentkit/spec/config.go:425` | `NewService`（项目根的缺省是工作目录） |
 | `agentkit/spec/config.go:490` | `Service.ProjectRoot` |
 | `agentkit/spec/config.go:492` | `Service.DataDir`（缺省 `state`） |

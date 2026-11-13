@@ -860,8 +860,10 @@ a session never reads as busy for ever.
   `{"error": "...", "code": "...", "retryable": false}`.
 - **`/v2` routes are registered before the catch-all `GET /*`** — the SPA fallback can
   never swallow an API path.
-- **No authentication and no CORS.** The default `:8080` binds every interface; set
-  `listen_addr` explicitly to narrow it.
+- **The guard sits in front of the routes** (`api/guard.go`): a request that **changes**
+  something and comes from another site is refused, and while the listener is on the
+  loopback a request whose **Host** is not this machine is refused. ★ The default listener
+  is the loopback (`127.0.0.1:8080`), so both rules hold on their own.
 - The agent view (`api/v2_introspect.go:118`) reports an agent's tool allow-list as
   **`tools`** — the list itself, not the tools it removes. ★ `skillsRestricted` is
   gone: it existed only because an absent list and an empty one differed, and they no
@@ -924,8 +926,8 @@ other way round).
 Writing these down is cheaper than explaining them later. The following are **not
 present today**:
 
-- **No authentication, no multi-tenancy.** The default `:8080` is open on every
-  interface.
+- **No accounts, no multi-tenancy.** This is a single-user tool on one machine: the
+  listen address is the whole boundary. The default listener is the loopback.
 - **No TLS.** Put a reverse proxy in front to expose it publicly.
 - **No distribution.** A single process, a single binary; sessions live on local disk.
 - **The knowledge base supports local directory corpora only**, not remote fetching.

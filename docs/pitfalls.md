@@ -23,7 +23,7 @@
 
 ★ **一条坑写三遍是浪费**：细节留在本节，设计文档只留结论并指回这里。
 
-## 1. 上游框架的坑（eino v0.9.22 / eino-ext）
+## 1. 上游框架的坑（eino v0.9.22 / eino-ext / hertz v0.10.6）
 
 ### 1.1 ★ loop 收尾时读 agent 的状态，agent 还在写
 
@@ -95,6 +95,35 @@ eino 的 `fsapi.Backend` 接口，装配时把它交给框架（`agentkit/build/
 **修法**：自己实现压缩，落盘并保留「有效历史」（见 `docs/runtime-design.md`）。
 
 **现状**：`已修`。
+
+### 1.6 ★ hertz 的 `Request.Host()` 答的是 URI 的 host，不是 Host 头
+
+**症状**：加了一条「Host 必须是环回」的防线之后，**每一个**请求都被拒了 ——
+包括从 `http://127.0.0.1:8080` 打开的界面自己发出来的那些。日志里是
+`the request does not name this host`。
+
+**根因**：`c.Request.Host()` 返回的是 **URI 的 host**（`req.URI().Host()`），而**请求行**里
+带的是路径（`GET /v2/health HTTP/1.1`）—— URI 没有 host，所以它永远是空。Host **头**在
+另一个地方：`c.Request.Header.Host()`。
+
+**修法**：读 `Header.Host()`（`api/guard.go` 的 `hostOf`）。★ 单元测试里用
+`ut.Header{Key: "Host", …}` 设置它 —— `ut` 把它当作**普通头**写进去，所以这条路径在
+测试里也走得通。
+
+**现状**：`已修` —— `api/guard.go:186`，用例在 `api/guard_test.go`。
+
+### 1.7 ★ hertz 的中间件「返回」不等于「拦下」
+
+**症状**：防线拒掉了一个请求，响应体里确实有那句错误 JSON —— **但状态码是 200**，
+而且后面还多出处理器自己写的正文。看起来像「拒绝了，但没拦住」。
+
+**根因**：hertz 的 `RequestContext.Next` 是一个**循环**（`ctx.index++` 之后挨个调用剩下的
+处理器），不是「调用链的下一环」。★ 所以中间件 `return` 只是**回到那个循环里**，循环接着
+跑到了真正的处理器：它写了正文，还把状态码改回了 200。
+
+**修法**：拒绝时必须 `c.Abort()`（把 `ctx.index` 设成 `AbortIndex`），循环到此为止。
+
+**现状**：`已修` —— `api/server.go` 的 `guardMiddleware`。
 
 ## 2. 身份与重建
 
