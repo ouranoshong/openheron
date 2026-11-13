@@ -233,6 +233,26 @@ func (t *Turn) markReleased() {
 	t.releaseOnce.Do(func() { close(t.released) })
 }
 
+// holdsSlot reports whether the turn still holds the session's slot.
+//
+// ★ A released turn does not: it gave the slot up, either because its
+//
+//	outcome was archived (markTurnDone) or because its claim failed.
+//
+// ★ The runtime asks this before it puts a displaced claim back into the
+//
+//	slot: a claim that was itself displaced already gave up, and restoring
+//	it would put a dead turn — and a loop that was never run — back into
+//	the session.
+func (t *Turn) holdsSlot() bool {
+	select {
+	case <-t.released:
+		return false
+	default:
+		return true
+	}
+}
+
 // WaitReleased blocks until the turn no longer holds the session.
 //
 // ★ A response that ends before this has ended hands the client a session it

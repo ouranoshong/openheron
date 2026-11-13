@@ -382,12 +382,28 @@ func (rt *Runtime) openRunRow(ctx context.Context, sess storage.Session, turn *T
 //	still in flight — the next turn would then read an incomplete
 //	history.
 func (rt *Runtime) releaseClaim(sess storage.Session, turn *Turn, prev *Turn, prevLoop *adk.TurnLoop[loopItem, *schema.Message]) {
+	// ★ The turn gave the slot up: it does not hold the session any more,
+	//
+	//	and whoever waits on it must not be left hanging.
+	turn.markReleased()
+
 	st := rt.stateFor(sess.ID())
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.turn != turn {
 		// A newer turn took over in the meantime; its state is not ours
 		// to touch.
+		return
+	}
+	if prev == nil || !prev.holdsSlot() {
+		// ★ The displaced claim already gave up — it was displaced itself,
+		//
+		//	and its own release found the slot taken. Putting it back
+		//	would resurrect a dead turn, and the slot would hold a loop
+		//	that was never run: the session would read as busy for ever,
+		//	and the shutdown would wait for a loop nobody ever started.
+		st.turn = nil
+		st.loop = nil
 		return
 	}
 	st.turn = prev
@@ -435,6 +451,34 @@ func (rt *Runtime) ensureIdle(ctx context.Context, sess storage.Session) error {
 	return rt.ensureNoLiveTurn(ctx, sess)
 }
 
+// conflictTurns reports whether a new turn of kind "kind" may not start
+// while a turn of kind "live" is running.
+//
+// ★ The session's slot holds one turn, and a fresh query may not take
+//
+//	it: a query is a new round, and the session is in the middle of one —
+//	whichever kind is live. So a query behind a query and a query behind a
+//	resume are both refused.
+//
+// ★ A resume is the exception, and it is the exception in both
+//
+//	directions. It answers an approval, and the approval is written after
+//	the round that raised it has finished, so a resume never overlaps a
+//	query: the round's turn is cleared when its outcome is archived
+//	(markTurnDone), and the approval lands after that.
+//
+// ★ Two resumes do overlap — the second one finds the approval already
+//
+//	consumed and says so — and the rule has to allow that: a replayed
+//	approve must be told "there is nothing to answer", not "the session
+//	is busy".
+func conflictTurns(kind, live contract.TurnKind) bool {
+	if kind == contract.TurnResume && live == contract.TurnResume {
+		return false
+	}
+	return true
+}
+
 // ensureNoLiveTurn refuses the request when a turn is executing.
 //
 // ★ It asks about the LOOP, not the turn pointer alone. st.turn is
@@ -467,41 +511,23 @@ func (rt *Runtime) ensureNoLiveTurn(ctx context.Context, sess storage.Session) e
 	return nil
 }
 
-// conflictTurns reports whether a new turn of kind "kind" may not start
-// while a turn of kind "live" is running.
-//
-// ★ A resume continues the interrupted turn it answers — the same round
-//
-//	of the conversation — so two resumes never conflict. A query is a
-//	new round, and that is exactly what must not overlap: the
-//	cross-client case, where a second surface's message would take the
-//	running turn over.
-//
-// ★ So the only conflicting pair is query-behind-query. Everything else
-//
-//	— a resume behind a query (the user answering an approval raised by
-//	the running query), or a resume behind a resume — is the same
-//	conversation continuing.
-func conflictTurns(kind, live contract.TurnKind) bool {
-	if live == contract.TurnResume {
-		return false
-	}
-	return kind == contract.TurnQuery
-}
-
 // ensureNoLiveQuery refuses the request when a QUERY turn is executing.
 //
 // ★ A resume turn is not a conflict with another resume. A resume
 //
 //	continues the interrupted turn it answers — it is the same round of
 //	the conversation, not a new one — so the user may answer a second
-//	group of approvals while the first resume is still settling. What
-//	must never overlap is a fresh query: that is the "another tab cuts
-//	in" case, and it is what destroys the running turn.
+//	group of approvals while the first resume is still settling.
 //
-// ★ So the gate is about the KIND of the live turn:
-//   - a query turn running → refuse (a new query would take it over);
+// ★ So this pre-check is about the KIND of the live turn:
+//   - a query turn running → refuse (a fresh query would take it over);
 //   - a resume turn running → allow (it is the same conversation).
+//
+// ★ It is a pre-check, and the claim below is the stricter one: the slot
+//
+//	holds a single turn, so a fresh query behind a running resume is
+//	refused there as well (conflictTurns). A resume behind a query is
+//	refused by both.
 func (rt *Runtime) ensureNoLiveQuery(ctx context.Context, sess storage.Session) error {
 	st, ok := rt.lookupState(sess.ID())
 	if !ok {
