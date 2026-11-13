@@ -442,6 +442,39 @@ ctime），但要额外给 storage 加「重命名」的能力，而且中途会
 `KindBadRequest` 的提示语已经会点名「厂商自己的工具 schema 校验器拒了这次请求」，
 所以**工具 schema** 那类问题有话说；别的仍然指向错误的方向。
 
+### 8.3 ★ 同一块被发了两遍，参数就自带尾巴
+
+**症状**：`config_write` 报 `invalid character '"' after top-level value`。模型连着换好几种写法都失败，
+最后自己猜「是大小限制」——而真因与大小无关。
+
+**根因**：模型包装在流式路径上把「带着 `finish_reason` 的那一块」**发了两遍**：一次在
+`release()` 里（它已经进了 `held`），一次紧接着 `sw.Send(msg)`。厂商有时把 `finish_reason` 和工具调用的
+最后一块放在同一帧里，框架就把最后一块数了两遍 —— 参数于是变成「一个完整对象 +
+它自己的尾巴」，JSON 解析器不认。
+
+★ 2026-11-13 的现场里这条被逐字对上了：8 次失败的参数全部是这个形状，尾巴长度 1～11 字节，
+正好是最后一块的长度。
+
+**修法**：带理由的那一块不再进 `held`；它和 `held` 一起放出去，只放一次（`agentkit/build/callguard.go:217`）。
+★ 另外加一道防御：参数若能被修成「一个完整对象」（剩下的正好是它自己的后缀），就把尾巴去掉再跑
+（`repairDuplicatedTail`，`agentkit/build/callguard.go:133`）。
+
+**现状**：已修 —— ★ 出处：`agentkit/build/callguard.go` 的 `callGuardModel.Stream`。★ 实测：同一段载荷，旧二进制把参数发了两遍
+（工具报 unmarshal 错），修完之后 39 块参数拼成合法 JSON，一次写成功。
+
+### 8.4 ★ 截断标记被逐块拼接，守卫反而认不出来
+
+**症状**：一次被砍断的调用照样跑了，工具报 `invalid character '{' after top-level value`。
+
+**根因**：`markTruncatedArgs` 是**逐块**替换的，而框架会把各块拼起来 —— 于是拼出来的是 N 个标记连排，那不是 JSON，
+`isTruncatedArgs` 用 `json.Unmarshal` 去认，自然认不出来。★ 现场那一行的参数正好是 224 个
+`{"__truncated_by_token_limit":true}` 连排（224 = 2×112，两半一模一样）。
+
+**修法**：标记只落在**最后一块**上，前面的块清空；判标记改成「字符串里有没有这个键」，不再要求整串是 JSON
+（`agentkit/build/callguard.go:95`）。
+
+**现状**：已修。
+
 ## 9. 沙箱 Kit 的实测发现（宿主侧的，不是 Kit 的）
 
 ★ 这一节记的都是**在宿主机上操作**时踩到的坑 —— 它们不在 Kit 里，但会让「Kit 坏了」

@@ -48,6 +48,11 @@ func (t *configTool) InvokableRun(ctx context.Context, args string, _ ...tool.Op
 			"arguments are incomplete and nothing was done — send less in one call",
 			t.name)
 	}
+	if isMalformedArgs(args) {
+		return "", fmt.Errorf("%s: this call's arguments did not arrive as one complete JSON "+
+			"object, so nothing was done — send it again, and send less in one call",
+			t.name)
+	}
 	out, err := t.run(ctx, args)
 	if err != nil {
 		return "", err

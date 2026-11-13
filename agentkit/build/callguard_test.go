@@ -60,7 +60,7 @@ func (m *cutModel) GetType() string { return "cut" }
 const brokenArgs = `{"path":"skills/x/SKILL.md","content":"---\nname: x\n\n# the body stops here`
 
 func TestAGenerationThatRanOutOfRoomMarksItsToolCall(t *testing.T) {
-	m := newTruncationAwareModel(&cutModel{reason: finishReasonLength, args: brokenArgs})
+	m := newCallGuardModel(&cutModel{reason: finishReasonLength, args: brokenArgs})
 
 	msg, err := m.Generate(context.Background(), nil)
 	if err != nil {
@@ -73,7 +73,7 @@ func TestAGenerationThatRanOutOfRoomMarksItsToolCall(t *testing.T) {
 
 func TestACompleteGenerationKeepsItsToolCall(t *testing.T) {
 	args := `{"path":"skills/x/SKILL.md","content":"body"}`
-	m := newTruncationAwareModel(&cutModel{reason: "tool_calls", args: args})
+	m := newCallGuardModel(&cutModel{reason: "tool_calls", args: args})
 
 	msg, err := m.Generate(context.Background(), nil)
 	if err != nil {
@@ -87,7 +87,7 @@ func TestACompleteGenerationKeepsItsToolCall(t *testing.T) {
 // ★ The stream is the path the agent actually takes, and the reason arrives
 // after the call it is about.
 func TestTheStreamMarksACutCall(t *testing.T) {
-	m := newTruncationAwareModel(&cutModel{reason: finishReasonLength, args: brokenArgs})
+	m := newCallGuardModel(&cutModel{reason: finishReasonLength, args: brokenArgs})
 
 	sr, err := m.Stream(context.Background(), nil)
 	if err != nil {
@@ -116,7 +116,7 @@ func TestTheStreamMarksACutCall(t *testing.T) {
 
 func TestTheStreamKeepsACompleteCall(t *testing.T) {
 	args := `{"path":"skills/x/SKILL.md","content":"body"}`
-	m := newTruncationAwareModel(&cutModel{reason: "tool_calls", args: args})
+	m := newCallGuardModel(&cutModel{reason: "tool_calls", args: args})
 
 	sr, err := m.Stream(context.Background(), nil)
 	if err != nil {
@@ -140,7 +140,7 @@ func TestTheStreamKeepsACompleteCall(t *testing.T) {
 
 func TestTheGuardRefusesACutCall(t *testing.T) {
 	ran := false
-	mw := newTruncationGuardMiddleware()
+	mw := newCallGuardMiddleware()
 
 	endpoint, err := mw.WrapInvokableToolCall(context.Background(),
 		func(context.Context, string, ...tool.Option) (string, error) {
@@ -168,7 +168,7 @@ func TestTheGuardRefusesACutCall(t *testing.T) {
 
 func TestTheGuardPassesACleanCall(t *testing.T) {
 	ran := false
-	mw := newTruncationGuardMiddleware()
+	mw := newCallGuardMiddleware()
 
 	endpoint, err := mw.WrapInvokableToolCall(context.Background(),
 		func(context.Context, string, ...tool.Option) (string, error) {
@@ -203,7 +203,7 @@ func TestAConfigToolRefusesACutCall(t *testing.T) {
 }
 
 // ★ The marker replaces the broken text rather than carrying it along: a
-// tool that could read half a `content` value would write half a file.
+// tool that could read half of a `content` value would write half a file.
 func TestTheMarkerKeepsTheFieldsThatArrived(t *testing.T) {
 	marked := markTruncatedArgs(`{"path":"a.md","content":"body"}`)
 	if !isTruncatedArgs(marked) {
@@ -226,5 +226,167 @@ func TestTheMarkerKeepsTheFieldsThatArrived(t *testing.T) {
 	}
 	if len(fields) != 1 || !isTruncatedArgs(marked) {
 		t.Fatalf("only the marker may survive a broken call: %#v", fields)
+	}
+}
+
+// ★ The marker has to be found in the string the framework hands over, and
+// that string is the concatenation of the fragments the provider sent: the
+// concatenation of two markers is not JSON, so a parse would miss the very
+// calls the guard exists for.
+func TestTheMarkerIsFoundInAConcatenation(t *testing.T) {
+	one := markTruncatedArgs(brokenArgs)
+	two := one + one
+
+	if !isTruncatedArgs(two) {
+		t.Fatalf("the marker must be found in a concatenation: %s", two)
+	}
+	if isMalformedArgs(two) {
+		t.Fatal("a cut-off call is not a malformed one")
+	}
+}
+
+// ★ The shapes a provider really produces: the arguments are a complete
+// object and a piece of it comes again at the end. Every one of them was
+// read off a live session.
+func TestATailThatArrivedTwiceIsRepaired(t *testing.T) {
+	const prefix = `{"baseRevision": "3f4d7624", "content": "body", ` +
+		`"path": "skills/openheron-config-templates/SKILL.md"}`
+
+	for _, tail := range []string{`KILL.md"}`, `.md"}`, `"}`, `}`, `/SKILL.md"}`} {
+		fixed, ok := repairDuplicatedTail(prefix + tail)
+		if !ok {
+			t.Fatalf("the tail %q must be repaired away", tail)
+		}
+		if fixed != prefix {
+			t.Fatalf("the repaired arguments must be the object: %q", fixed)
+		}
+		if !isJSONObject(fixed) {
+			t.Fatalf("the repaired arguments must be one JSON object: %q", fixed)
+		}
+	}
+}
+
+// ★ The other way round: a call that is broken in a way that is not a
+// repeat must not be guessed at. A repair that fires here would write
+// something the model never said.
+func TestABrokenCallIsNotRepaired(t *testing.T) {
+	for _, args := range []string{
+		brokenArgs,                       // cut off in the middle of a string
+		`{"path":"a.md"} and some prose`, // a stray tail
+		`{"path":"a.md"}{"path":"b.md"}`, // two objects
+		`{"path":"a.md","content":"x",}`, // a trailing comma
+		`[1,2,3]`,                        // not an object at all
+		`{"path":"a.md"} `,               // nothing after the object
+	} {
+		if fixed, ok := repairDuplicatedTail(args); ok {
+			t.Fatalf("these must not be repaired: %q -> %q", args, fixed)
+		}
+	}
+}
+
+// ★ The guard runs the call with the repaired arguments: the object in
+// front of the repeat is what the model meant to send.
+func TestTheGuardRepairsADuplicatedTail(t *testing.T) {
+	const prefix = `{"path":"a.md","content":"b"}`
+
+	var seen string
+	mw := newCallGuardMiddleware()
+	endpoint, err := mw.WrapInvokableToolCall(context.Background(),
+		func(_ context.Context, args string, _ ...tool.Option) (string, error) {
+			seen = args
+			return "ran", nil
+		}, &adk.ToolContext{Name: "config_write", CallID: "call_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := endpoint(context.Background(), prefix+`}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "ran" {
+		t.Fatalf("the call must run: %q", out)
+	}
+	if seen != prefix {
+		t.Fatalf("the tool must get the repaired arguments: %q", seen)
+	}
+}
+
+// ★ A call that is broken in any other way is refused with a reason the
+// model can act on — not with the Go JSON error, which names neither the
+// fault nor the way out.
+func TestTheGuardRefusesABrokenCall(t *testing.T) {
+	ran := false
+	mw := newCallGuardMiddleware()
+	endpoint, err := mw.WrapInvokableToolCall(context.Background(),
+		func(context.Context, string, ...tool.Option) (string, error) {
+			ran = true
+			return "ran", nil
+		}, &adk.ToolContext{Name: "config_write", CallID: "call_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := endpoint(context.Background(), brokenArgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ran {
+		t.Fatal("a broken call must not run")
+	}
+	if !strings.Contains(out, "complete JSON object") {
+		t.Fatalf("the refusal must say what happened: %q", out)
+	}
+	if !strings.Contains(out, "append") {
+		t.Fatalf("the refusal must say the way out: %q", out)
+	}
+}
+
+// ★ The same, for the streamable path: the refusal is a message the model
+// reads, not an error.
+func TestTheStreamableGuardRefusesABrokenCall(t *testing.T) {
+	mw := newCallGuardMiddleware()
+	endpoint, err := mw.WrapStreamableToolCall(context.Background(),
+		func(context.Context, string, ...tool.Option) (*schema.StreamReader[string], error) {
+			t.Fatal("a broken call must not run")
+			return nil, nil
+		}, &adk.ToolContext{Name: "config_write", CallID: "call_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sr, err := endpoint(context.Background(), brokenArgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sr.Close()
+
+	msg, rerr := sr.Recv()
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if !strings.Contains(msg, "complete JSON object") {
+		t.Fatalf("the refusal must say what happened: %q", msg)
+	}
+}
+
+// ★ A broken call is marked, so the guard can see it — and the marker
+// stands for the call, not for the wreck.
+func TestABrokenCallIsMarked(t *testing.T) {
+	m := newCallGuardModel(&cutModel{reason: "tool_calls", args: brokenArgs})
+
+	msg, err := m.Generate(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := msg.ToolCalls[0].Function.Arguments
+	if !isMalformedArgs(args) {
+		t.Fatalf("a broken call must carry the marker: %s", args)
+	}
+	if !isJSONObject(args) {
+		t.Fatalf("the marked arguments must be one JSON object: %s", args)
+	}
+	if strings.Contains(args, "the body stops here") {
+		t.Fatalf("the broken text must not be carried along: %s", args)
 	}
 }

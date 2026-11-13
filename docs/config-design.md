@@ -1113,21 +1113,28 @@ MCP 工具可以用 `mcp__` 前缀**。★ **合成名超过 64 个字符会被�
 | 情形 | 规则 | 落点 |
 |---|---|---|
 | 文件比一次调用大 | `config_write` 接受 `append`：第一块替换文件，之后每一块**加到**盘上已有内容的后面。每一块都走**同一套**闸门（试合并、树还装不装得上、`baseRevision` 对不对得上），所以盘上的文件在**每一块之后**都是能加载的 | `Service.Append`（`agentkit/spec/write.go:545`） |
-| 模型没写完这一次 | 截断只发生在**模型**这一层看得见（厂商的 `finish_reason=length`）。参数被换成一份带标记的 JSON，中间件在**审批之前**就拒绝这次调用：没有东西被写下，也不弹审批卡片，模型拿到的是一句「这次被砍断了，少带点」 | `agentkit/build/truncation.go` |
+| 模型没写完这一次 | 截断只发生在**模型**这一层看得见（厂商的 `finish_reason=length`）。参数被换成一份带标记的 JSON，中间件在**审批之前**就拒绝这次调用：没有东西被写下，也不弹审批卡片，模型拿到的是一句「这次被砍断了，少带点」 | `markTruncatedArgs`（`agentkit/build/callguard.go:59`） |
+| 参数到了，但不是一份完整 JSON | 参数可能是「一个完整对象 + 它自己的尾巴再来一遍」——尾巴被数了两次。剩下的正好是它自己的后缀时，就把尾巴去掉，工具跑的是那份完整对象；不是这个形状就不动 | `repairDuplicatedTail`（`agentkit/build/callguard.go:133`） |
+| 参数根本不是 JSON | 参数被换成一份带标记的 JSON，中间件拒绝这次调用，模型拿到的是一句「参数没到齐，再发一次，或者少带点」 | `markMalformedArgs`（`agentkit/build/callguard.go:84`） |
 
 ★ **拒绝的理由是消息，不是错误。** 模型读到「被砍断了」能换条路走（分块写、用 `edit_file`、给 agent 更大的
 `max_tokens`）；读到 `unexpected end of JSON input` 它只会**再试一次同样大的调用** —— 那正是把一次手滑放大
-成一个死循环的那一步。
+成一个死循环的那一步。★ 同理，参数不是 JSON 时回的是「参数没到齐」，不是 Go 的 JSON 报错原文。
 
 ★ **闸门顺序是这件事的一半。** 守卫是中间件链的**第一个**（`agentkit/build/gate.go:167`）：eino 把 handler
 按倒序套，所以链首就是**最外层**，它先于审批闸门看到这次调用 —— 一个坏掉的调用**不该**变成一张等人点的
-卡片。★ 模型那一侧的实现是 `newTruncationAwareModel`（`agentkit/build/truncation.go:107`），装在
-`BuildModel`（`agentkit/build/provider.go:110`）—— 截断只有模型层看得见，它下面的一切都只看到一次
+卡片。★ 模型那一侧的实现是 `newCallGuardModel`（`agentkit/build/callguard.go:198`），装在
+`BuildModel`（`agentkit/build/provider.go:111`）—— 截断只有模型层看得见，它下面的一切都只看到一次
 「看起来完整」的调用。
 
 ★ **流式路径上，工具调用比理由先到。** 厂商先发工具调用、最后才发 `finish_reason`，所以那一块必须**等**
-到理由才能放行（`agentkit/build/truncation.go:124`）。★ 代价是零：工具调用是这一轮的最后一句话，它前面的
+到理由才能放行（`agentkit/build/callguard.go:217`）。★ 代价是零：工具调用是这一轮的最后一句话，它前面的
 正文早发出去了。
+
+★ **带着 `finish_reason` 的那一块，只能放一次。** 厂商有时把 `finish_reason` 和工具调用的**最后一块**放在同一帧里。
+那一块若是先进 `held`、再随后又单独发一次，框架就把最后一块数了两遍 —— 参数变成「一个完整对象 +
+它自己的尾巴」，没有任何 JSON 解析器会认。★ 这一点在 2026-11-13 的现场里被逐字对上了（见
+`docs/pitfalls.md` §8.3），修法是带理由的那一块不再进 `held`。
 
 ★ **`config_get` 与 `config_validate` 的空内容是不同的事。** `config_validate` 只给 `path` 不给 `content`，
 **不是**「检查盘上那个文件」，而是「把这个文件清空会怎样」—— `agentkit/build/configtools.go:184` 把空字符串
@@ -1498,7 +1505,7 @@ github.com/ouranoshong/openheron/llm/common
 | `agentkit/build/skill.go:89-186` / `:190-215` / `:217-233` | `scopedSkillBackend` / `ResolveSkillsDir` / `probeProjectSkills` |
 | `agentkit/build/snapshot.go:147-185` / `:207-222` / `agentkit/build/spec.go:64-82` | `newSnapshot` / `snapshotFor`（身份是（配置对象，工具面）） / `policyOf`（三处合成一张表） |
 | `agentkit/build/tools.go:92-109` / `:111-119` / `:126-145` / `:147-173` | `builtinAllowedTools` / `alwaysAsk` / `reservedToolNames` / `toolRegistry.Build` |
-| `agentkit/build/truncation.go:29-33` / `:43-68` / `:87-100` / `:103-208` / `:218-256` / `:260-275` | 标记与它的两个常量 / `markTruncatedArgs` `isTruncatedArgs` / `markCallsTruncated` / `truncationAwareModel`（模型包装：★ 只有它看得见截断） / `newTruncationGuardMiddleware`（★ 链首，所以它先于审批看到这次调用） / `truncationRefusal` |
+| `agentkit/build/callguard.go:30-49` / `:59-110` / `:133-161` / `:194-317` / `:319-465` / `:467-535` / `:537-579` | 两个标记与它们的常量 / `markTruncatedArgs` `markMalformedArgs` `isTruncatedArgs` `isMalformedArgs` `isJSONObject` / `repairDuplicatedTail`（去掉重复的尾巴） / `callGuardModel`（模型包装：★ 只有它看得见截断与重复的尾巴） / `guardCalls` `guardChunks` `markChunksTruncated`（★ 分块的参数要拼起来才能判） / `newCallGuardMiddleware`（★ 链首，所以它先于审批看到这次调用） / `truncationRefusal` `malformedRefusal` |
 
 ### 文件后端与运行期
 

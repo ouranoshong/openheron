@@ -171,7 +171,7 @@ func toolChain(b boundary, maxDepth int) []adk.TypedChatModelAgentMiddleware[*sc
 		//   a card to approve either. The handlers are applied so that
 		//   handlers[0] ends up outermost (eino's adk applies them in
 		//   reverse), so this one sees the call before the gate does.
-		newTruncationGuardMiddleware(),
+		newCallGuardMiddleware(),
 		newFilterMiddleware(b.table),
 		newApprovalMiddleware(b.policy),
 		newDepthMiddleware(maxDepth),
