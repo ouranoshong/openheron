@@ -694,8 +694,8 @@ logger 只在 `main` 里造一次再传下去：`newLogger()` → `installLogger
 - `main.newLogger`（`main.go:192`）围绕共享的 `slog.LevelVar` 与 `obs.Sink` 建好
   logger，**在**配置读出来**之前** —— 等级与文件路径由配置决定，而 logger 必须先
   存在，`setupConfig` 才能打第一行日志。
-- `main.installLogger`（`main.go:203`）完成两次框架交接：`hlog.SetLogger`
-  （`main.go:209`）与 `callbacks.AppendGlobalHandlers`（`main.go:210`）。
+- `main.installLogger`（`main.go:249`）完成两次框架交接：`hlog.SetLogger`
+  （`main.go:255`）与 `callbacks.AppendGlobalHandlers`（`main.go:256`）。
   ★ **这是仅有的两处全局注册**，其余全是注入。
 
 ★ **顺序不能动。** hertz 与 eino 各持一个进程级注册表，所以这两次交接必须在任何
@@ -736,7 +736,7 @@ logger 就是竞态；组合根先装配正好消掉它（用 `task test-race` �
 |---|---|
 | `main.newLogger` | 建 `obs.NewSink(os.Stderr)` |
 | `main.setupConfig` | 在 reloader 回调里用 `sync.Once` 调一次 `applyLogFile`；重载不换路径 |
-| `main.applyLogFile` | 解析路径 + 建目录 + 0600 探针；挂 `lumberjack.Logger`（`main.go:278`）；`console` 决定是否 `io.MultiWriter(os.Stderr, file)`（`main.go:290`） |
+| `main.applyLogFile` | 解析路径 + 建目录 + 0600 探针；挂 `lumberjack.Logger`（`main.go:324`）；`console` 决定是否 `io.MultiWriter(os.Stderr, file)`（`main.go:336`） |
 | `main.serve` | 退出时 `defer` 关闭 rotator，最后几行日志仍进得去文件 |
 
 ★ **探针的理由：** `lumberjack` 第一次写入才开文件，且以 0644 创建。不先探一次，

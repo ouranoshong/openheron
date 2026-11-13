@@ -30,16 +30,16 @@
 | 1 | **一个**配置根 | 任一时刻只有一份配置生效，没有继承链（`agentkit/spec/config.go:425`） |
 | 2 | 按功能分区 | 新增一类配置不改已有文件布局（`agentkit/spec/config.go:59-104`） |
 | 3 | 「配了没用」必须可见 | 未知字段报错；认识但未兑现的键进 `deferred` 并**强制打印**（`agentkit/spec/config.go:203`、`main.go:353-355`） |
-| 4 | 密钥不入库 | 档案只存 `${ENV}` 引用或 `@file:` 路径 —— 编辑器拒绝保存明文（`agentkit/spec/write.go:924-932`） |
+| 4 | 密钥不入库 | 档案只存 `${ENV}` 引用或 `@file:` 路径 —— 编辑器拒绝保存明文（`agentkit/spec/write.go:926-932`） |
 | 5 | 零新增依赖 | `go.mod` 只用已在缓存的 `gopkg.in/yaml.v3 v3.0.1`（`go.mod:26`）—— YAML 这一层就是全部成本 |
 
 ### 非目标
 
 - ❌ **配置根不做上溯搜索。** 这条规则写在 `NewService` 的文档注释里（`agentkit/spec/config.go:412-424`）。
 - ❌ **没有家目录那一层。** `~/.openheron` 永远不会被自动认领 —— 若它存在而不在用，运行时会把话说明白，
-  请你显式指名（`main.go:122-139`）。
+  请你显式指名（`main.go:123-140`）。
 - ❌ **不让配置承载密钥本体。** 加载器容忍明文密钥（`agentkit/spec/expand.go:10-38`），但编辑器拒绝保存
-  明文（`agentkit/spec/write.go:932-951`）—— 两条路径故意不对称。
+  明文（`agentkit/spec/write.go:934-942`）—— 两条路径故意不对称。
 - ❌ **不做字段级合并。** 只有一份配置，没有「谁覆盖谁」；字段级合并让配置来源不可辨。
 - ❌ **不让 `server/` 参与热更新。** 它配的是进程自身，改了要重启（`agentkit/spec/config.go:71-74`）。
 
@@ -80,8 +80,8 @@
 因为「还没有配置」和「目录不在」本来就是同一件事。
 
 ★ **没有 `.config.lock`。** 配置编辑器走的是**内容哈希的乐观并发**：`Revision` 是文件 SHA-256 的前八位
-十六进制（`agentkit/spec/write.go:442`），带着过期 `baseRevision` 的写入会被判为冲突
-（`agentkit/spec/write.go:892-907`）。
+十六进制（`agentkit/spec/write.go:381`），带着过期 `baseRevision` 的写入会被判为冲突
+（`agentkit/spec/write.go:894-911`）。
 
 `state/` 取代了旧的 `DATA_DIR=./data`，由 `Service.DataDir` 创建（`agentkit/spec/config.go:492-504`）：
 
@@ -136,7 +136,7 @@ llm/*.local.yaml
 `--no-tools`。★ **没有 `policy/` 这一段 —— 那个分区已经没了。**
 
 ★ **服务端第一次启动时写的是同一棵树。** 缺省根下没有 `agents/main.md` 时，它在装载配置之前先把
-出厂树写出来（`main.go:180` 的 `initConfigIfEmpty`），用的就是上面那份计划 —— 所以
+出厂树写出来（`main.go:177` 的 `initConfigIfEmpty`），用的就是上面那份计划 —— 所以
 「服务端写的」与「命令写的」是同一棵树。★ **点名的根不写**：理由见 §3。
 
 ## 3. 配置根：三级，没有探测
@@ -167,9 +167,9 @@ llm/*.local.yaml
 会把新配置写到用户没指的地方去。
 
 ★ **家目录也不是兜底。** 如果 `~/.openheron/` 存在却不是正在用的配置根，进程会在启动时说一声
-（`main.go:122-139` 的 `warnUnusedHomeConfig`）：配置根从不被搜出来，所以那个目录必须被点名。
+（`main.go:123-140` 的 `warnUnusedHomeConfig`）：配置根从不被搜出来，所以那个目录必须被点名。
 
-★ **默认根下还没有 `agents/main.md` 时，服务端自己把树写出来**（`main.go:180` 的
+★ **默认根下还没有 `agents/main.md` 时，服务端自己把树写出来**（`main.go:177` 的
 `initConfigIfEmpty`）：写的还是 §2.2 那份计划，模型用 provider 模板自己的缺省
 （`deepseek/deepseek-flash`），密钥从环境变量读（`DEEPSEEK_API_KEY`）—— 与不带参数的
 `openheron init` 完全一致。★ **「空」的判据是「没有 agent 文件」**：已经有 `agents/main.md`
@@ -357,7 +357,7 @@ export），不是配置写错。写错的东西（拼错的键、写错的 `@fi
 | `FRONTEND_MODE` | `server.frontend_mode` | `main.go:516` |
 | `EINO_EXT_SKILLS_DIR` | skills 目录 | `agentkit/build/skill.go:194` |
 
-server 侧那三个覆盖走同一个辅助函数 —— `override`（`main.go:755-760`）在环境变量非空时返回环境值，
+server 侧那三个覆盖走同一个辅助函数 —— `override`（`main.go:817-822`）在环境变量非空时返回环境值，
 否则返回配置值。
 
 ★ **server 侧那三个覆盖只在启动时读一次。** `server/` 不参与热重载（`agentkit/spec/config.go:71-74`），
@@ -365,7 +365,7 @@ server 侧那三个覆盖走同一个辅助函数 —— `override`（`main.go:7
 重新读它（`agentkit/build/skill.go:194`），所以改动会在 agent 池重建时生效。
 
 ★ 另有三个环境变量**只管日志**，不碰别的配置：`OPENHERON_LOG_LEVEL`（`agentkit/obs/logger.go:11`，读于
-`main.go:221`）覆盖 `server/config.yaml` 的 `log_level`；`OPENHERON_LOG_LLM_REQUESTS`
+`main.go:267`）覆盖 `server/config.yaml` 的 `log_level`；`OPENHERON_LOG_LLM_REQUESTS`
 （`agentkit/obs/httplog/logging.go:29`，读于 `agentkit/obs/httplog/logging.go:207-208`）决定是否打印请求体，
 变量为空时才由配置决定；`OPENHERON_LOG_FILE`（`agentkit/obs/sink.go:12`，读于 `main.go:260`）覆盖
 `server/config.yaml` 的 `log.file` —— ★ 打不开文件**不阻止启动**，进程留在 stderr。
@@ -454,8 +454,8 @@ agent 的检查使用 —— 两份拷贝会漂移，而漂移的那份是没人
 ★ 降级一旦成立，写入门就**必须**补上牙：既然「模型没声明」不再报错，那么把 `main` 的 `model:` 改成
 一个不存在的模型，就会**静默**让 `main` 消失 —— 这正是用户看不见的那种退化。规则只有一条：**可以往树里
 加，可以放着已经坏的不动，不可以把一个本来能跑的 agent 拿出去。** 比较的是**两边都 settle 过**的树
-（`agentkit/spec/write.go:478-498` 的 `agentsLostBy`）—— 一个本来就在树外的 agent 两边都不在，改动不碰
-它就不该算在改动头上。★ **磁盘上的树装不上时只许增不许减**（`agentkit/spec/write.go:528-533`）：此时没有
+（`agentkit/spec/write.go:417-441` 的 `agentsLostBy`）—— 一个本来就在树外的 agent 两边都不在，改动不碰
+它就不该算在改动头上。★ **磁盘上的树装不上时只许增不许减**（`agentkit/spec/write.go:455-472`）：此时没有
 任何东西「本来是能跑的」，而编辑器的草稿正是来替换那个坏文件的那个人 —— 拦下它，坏文件就永远修不好。
 ★ **有意删掉的 agent 不算「掉出树」**（`agentsLostBy` 的第三个参数 `removed`）—— 用户**主动**删一个
 agent 是另一件事；不然的话任何 agent 文件都删不掉。
@@ -527,7 +527,7 @@ models:                            # ★ several models under one provider
 | `extra` | `map[string]any` | 覆盖 provider 级同名键 |
 | `reasoning` | `map[string]map[string]any` | **档位词汇表**：档位名 → 该端点把它发成什么字段。为空 = 该模型不思考 |
 | `reasoning_default` | `string` | 建议档位；agent 没写 `reasoning` 时用它 |
-| `reasoning_field` / `reasoning_field_from` | `string` | 端点收发思维链的字段名，以及回放历史时的**源**字段名（默认取 `reasoning_field`，`agentkit/build/provider.go:162-171`） |
+| `reasoning_field` / `reasoning_field_from` | `string` | 端点收发思维链的字段名，以及回放历史时的**源**字段名（默认取 `reasoning_field`，`agentkit/build/provider.go:163-172`） |
 
 一个 `llm/<provider>.yaml` 持有该厂商的 `base_url` / `api_key` / `timeout` 与 `models[]` 列表。引用
 形式是 **`<provider-id>/<model-id>`**（`model: openai/gpt-4o`）：`ParseRef` 取**第一个** `/`，两侧都
@@ -538,16 +538,16 @@ models:                            # ★ several models under one provider
 把每个档位发成什么字段）、**默认**（`reasoning_default`），而**意图**（这次调用用哪一档）住在
 `agents/*.md` 的 `reasoning` —— ★ 两侧字段同名，但一个是词汇表、一个是选择。**解析顺序**：
 `agent.reasoning` → 空则 `model.reasoning_default` → 再空则不注入（`effectiveTier`，
-`agentkit/build/provider.go:113-119`）。★ **档位不在词汇表里是加载期错误**：`checkReasoning`
+`agentkit/build/provider.go:114-120`）。★ **档位不在词汇表里是加载期错误**：`checkReasoning`
 （`agentkit/spec/load.go:775-780`）拒绝它并列出该模型声明的档位 —— 不能容忍的原因是：`reasoning: max`
 写在一个只声明 off/low/high 的模型上，请求会**不带任何思考参数**发出去，那是「一点思考都没有」，
 而不是「一个没定义的档位」。
 
 **合并链只有一条**：`provider.extra ← model.extra ← reasoning[level]`，顶层键覆盖
-（`agentkit/build/provider.go:121-146` 的 `RequestOptionsFor`，`:148-160` 的 `shallowMerge`）。三层合完
+（`agentkit/build/provider.go:122-147` 的 `RequestOptionsFor`，`:149-161` 的 `shallowMerge`）。三层合完
 的**完整一份**必须整份递下去 —— 请求级 extra 是**替换**不是合并。★ **agent 自己的 `temperature` /
 `max_tokens` 赢过同名的 `extra` 键** —— 下发之前那两层会从合完的 map 里被删掉
-（`agentkit/build/provider.go:130-135`），否则两者都会往请求体里写 `temperature`，而合并补丁会让
+（`agentkit/build/provider.go:131-136`），否则两者都会往请求体里写 `temperature`，而合并补丁会让
 `extra` 那个赢。
 
 #### 时长
@@ -692,7 +692,7 @@ markdown 约定**同构**。★ **行号要真，不能只是「有」**：yaml.
 ★ **这些字段的缺省值住在读它们的 provider 里，不在 `decl` 里。** 声明结构体只带形状，值在 provider
 里（三个超时在 `agentkit/build/nettools.go:21-26`，搜索的缺省在 `agentkit/build/nettools.go:187-195`，
 维基的缺省在 `agentkit/build/nettools.go:237-243`），知识库的缺省在 `agentkit/spec/defaults.go:48-55`，
-而 `config_get` 的读取上限在 `agentkit/build/configtools.go:464`（`defaultConfigReadBytes`）。
+而 `config_get` 的读取上限在 `agentkit/build/configtools.go:466`（`defaultConfigReadBytes`）。
 
 #### ★ 文件系统工具：一个调音旋钮，加上代码里的缺省
 
@@ -1066,12 +1066,12 @@ MCP 工具可以用 `mcp__` 前缀**。★ **合成名超过 64 个字符会被�
 | `config_write` | `{path, content, baseRevision?, append?}` | `{path, revision, runningVersion, diskVersion, applied, requiresRestart, note}` | `Write` / `Append`（`agentkit/spec/write.go:488` / `agentkit/spec/write.go:549`） | ★ 文件点名时 allow，否则 ask |
 
 ★ **`source` 说的是这个答案从哪一边来**：`disk`（此刻盘上的文件）或 `running`（这一轮跑的那棵树）——
-两个常量在 `agentkit/build/configtools.go:80-85`。★ **六个工具里只有 `config_tier` 与 `config_notices`
+两个常量在 `agentkit/build/configtools.go:87-89`。★ **六个工具里只有 `config_tier` 与 `config_notices`
 的 `deferred` 那一侧答「running」** —— 其余答「disk」。
 
 ★ **`runningVersion` 与 `diskVersion` 是两个数**：盘上那份和本轮跑的那份，在热更新接手之前一直是不同的。
 
-★ **模型没有删除动作。** `svc.Delete`（`agentkit/spec/write.go:839-888`）留在服务层，删除不可逆 —— 所以
+★ **模型没有删除动作。** `svc.Delete`（`agentkit/spec/write.go:841-892`）留在服务层，删除不可逆 —— 所以
 工具面上**不**给模型一个「删掉这个文件」的动作。★ 那道删除门（§4.6）是给**编辑器**用的，不是给模型的。
 
 ★ **`config_get` 的第二个参数是 `impact`**（`agentkit/build/configtools.go:108-124`）：它回答
@@ -1089,7 +1089,7 @@ MCP 工具可以用 `mcp__` 前缀**。★ **合成名超过 64 个字符会被�
 
 ★ **工具自己界定答案大小，不套通用输出截断。** 通用截断砍的是**字符串**，对 JSON 答案来说就是一份解析
 不了的文件；而对 `config_get` 来说，它会留下「半个文件 + 匹配的 revision」—— 正是把另一半改没的那条
-路。所以 `config_get` 超过上限（`agentkit/build/configtools.go:464` 的 `defaultConfigReadBytes`，
+路。所以 `config_get` 超过上限（`agentkit/build/configtools.go:466` 的 `defaultConfigReadBytes`，
 64 KiB；`tools/config.yaml` 的 `max_read_bytes` 可以改）**拒绝**而不是截断，
 `config_template` 一次只给一个分区，什么都不问时给索引。★ **`config_get` 不会泄露密钥**：配置里只有
 `${ENV}` 或 `@file:` 引用，值在请求时才解析；读文件拿到的永远是引用。
@@ -1115,11 +1115,11 @@ MCP 工具可以用 `mcp__` 前缀**。★ **合成名超过 64 个字符会被�
 `requiresRestart` 说明这次到底生效了没有，不做额外禁止 —— 禁止的收益抵不上规则复杂度。
 
 ★ **`applied: true` 也不等于「本轮可见」。** 六个 `config_*` 工具在装配时拿的是**这一轮开始时的
-`*spec.Config` 快照**（`agentkit/build/configtools.go:90-95`），写入只改磁盘；热重载要到下一轮重新装配
+`*spec.Config` 快照**（`agentkit/build/snapshot.go:122-132`），写入只改磁盘；热重载要到下一轮重新装配
 才会换掉这份快照。★ **`config_write` 成功时返回里也带 `note`**，把生效时点写在模型刚拿到结果的地方
-（`agentkit/build/configtools.go:418-421`）。
+（`agentkit/build/configtools.go:432-436`）。
 
-★ **`config_tier` 查不到 agent 时，三种情况给三种答案**（`agentkit/build/configtools.go:572-573` 的
+★ **`config_tier` 查不到 agent 时，三种情况给三种答案**（`agentkit/build/configtools.go:601-615` 的
 `missingAgentError`）：文件在磁盘且没被排除 → 明说「下一轮生效，别重写、别在本轮复查」；被 `leftOut`
 排除 → 明说「修文件，下一轮也不会出现」；磁盘上没有文件 → 才是原来那句。★ **装配失败自己成为一个错误码**
 （`agent_unavailable`），消息是装配器自己的原话（`agentkit/build/builder.go:225-234`），而 run 层把这条
@@ -1465,7 +1465,7 @@ github.com/ouranoshong/openheron/llm/common
 | 2 | `tools/kb.yaml` 的 `splitter.headers` | 仍然解析，但加载器随后把它清空（`agentkit/spec/load.go:391-395`）—— **自 v2 起不再生效**，分段改由行扫描得出 | 与上一条同类：接线，还是删键 |
 | 3 | `tools/kb.yaml` 模板与加载器的说法不一致 | 模板第 12 行写着 "empty = pure lexical retrieval"（`agentkit/templates/files/tools/kb.yaml:12`），而加载器在 `corpus_dir` 非空时**拒绝**空的 `model`（`agentkit/spec/load.go:1049-1052`） | 改模板，还是让加载器接受空 `model` |
 | 4 | `execute`（shell）能绕过配置根的写闸门 | `execute` 是 openheron 自己的工具（`agentkit/build/execute.go`），它跑 shell，shell 里的重定向能写配置根 | 堵它等于给 shell 对配置根只读，那是另一件事；当前选择是**不堵**，并把这条边界写在这里 |
-| 5 | `write_file`（整篇替换）没有冲突语义 | `edit_file` 的冲突语义是 **`OldString` 必须仍在**（`agentkit/fsx/fsx.go:809`）；而 `write_file` 没有基线可给 —— 框架的写请求里没有 revision 字段 | 要不要给整篇替换也一条基线；差异已写进 `config_write` 的描述（`agentkit/build/configtools.go:344-353`） |
+| 5 | `write_file`（整篇替换）没有冲突语义 | `edit_file` 的冲突语义是 **`OldString` 必须仍在**（`agentkit/fsx/fsx.go:809`）；而 `write_file` 没有基线可给 —— 框架的写请求里没有 revision 字段 | 要不要给整篇替换也一条基线；差异已写进 `config_write` 的描述（`agentkit/build/configtools.go:345-355`） |
 | 6 | 全树校验仍是 fail-fast | `loadWithMany` 遇到第一个错误就返回，所以 `config_validate {}` 给的是「第一条阻塞错误 + 全部 hint」 | 要一次给全部，得把 loader 从「返回 error」改成「累积 issues」；本轮没做 |
 | 7 | `.openheron-example/.gitignore` 仍列着 `.config.lock` | 没有任何代码路径会创建这个文件（并发控制走内容哈希的 revision） | 删掉那行，还是保留它作为「曾经有过的东西」的说明 |
 | 8 | 一个 agent 的工具清单不能收窄 MCP 工具 | 收窄 MCP 工具的地方是 server 自己的 `tools:` 过滤器，那是**按 server** 的，对所有挂载它的 agent 共享 | 这是一个**已拍板**的代价（§6.3），不是待办；记在这里是因为它是「挂载即授予」明说的交换 |
@@ -1504,7 +1504,7 @@ github.com/ouranoshong/openheron/llm/common
 | `agentkit/spec/subagent.go:9-16` / `agentkit/spec/summarize.go:25-39` | `AgentNames` / `SummarizeAt` |
 | `agentkit/spec/toolfiles.go:30-47` / `:61-67` / `:78-82` / `:95-111` | `toolFiles` / `ToolConfigFile` / `ToolConfigFiles` / `ToolAllows` |
 | `agentkit/spec/write.go:70-80` / `:89-133` / `:136-141` / `:151-164` / `:166-208` / `:258-278` / `:280-334` | `ValidatePath` / `ValidateReadPath` / `shapeHint` / `validateWritable` / `validateFileName` / `listNested` / `Skeleton` |
-| `agentkit/spec/write.go:442` / `:447-463` / `:478-498` / `:528-547` / `:486-526` / `:547-605` / `:596-659` | `Revision`（内容哈希） / `ReadFile` / `agentsLostBy` / `agentsLostByChange` `checkNoAgentLost` / `Write`（闸门 + 原子写 + 标记） / `Append`（★ 分块写：同一套闸门，结果必须是能加载的） / `WriteMany` |
+| `agentkit/spec/write.go:381` / `:386-402` / `:417-441` / `:466-486` / `:488-528` / `:549-591` / `:598-663` | `Revision`（内容哈希） / `ReadFile` / `agentsLostBy` / `agentsLostByChange` `checkNoAgentLost` / `Write`（闸门 + 原子写 + 标记） / `Append`（★ 分块写：同一套闸门，结果必须是能加载的） / `WriteMany` |
 | `agentkit/spec/write.go:718-769` / `:785-811` / `:839-888` / `:892-907` / `:924-932` / `:932-951` | `referencesTo` / `checkNotReferenced` / `Delete` / `checkRevision` / `checkSecretFor` / `checkSecret` |
 
 ### 装配层（`agentkit/build`）
@@ -1515,7 +1515,7 @@ github.com/ouranoshong/openheron/llm/common
 | `agentkit/build/builder.go:159-201` / `:211-216` / `:225-234` / `:236-271` / `:285-304` | `Build`（返回 agent **与**它的指纹） / `agentUnavailable` / `leftOutMessage` / `pooledRoot`（钉住的那棵树在这里取回） / `reloadIfMarked`（标记 → 重读 → 发布） |
 | `agentkit/build/config.go:15-44` | `ConfigFromEnv` —— 不在主路径上的兜底 |
 | `agentkit/build/configgate.go:30-46` / `:57-66` / `:88-101` / `:110-117` | `newConfigGate` / `OwnsPath` / `ReadConfig` / `WriteConfig` |
-| `agentkit/build/configtools.go:85-90` / `:92-449` / `:127-129` / `:277-283` / `:307` `:313` `:331` / `:380` `:382` / `:390-391` / `:430-435` / `:464` / `:471-477` / `:599` | `sourceDisk` `sourceRunning` / 六个工具 / `impact` 分支 / `config_notices` / `config_tier` 的三个答案 / `svc.Append`、`svc.Write`、两个版本号、那条 `note` / `defaultConfigReadBytes` / `configReadBytesLimit` / `missingAgentError` |
+| `agentkit/build/configtools.go:85-90` / `:92-449` / `:127-129` / `:277-283` / `:307` `:313` `:331` / `:380` `:382` / `:390-391` / `:430-435` / `:466` / `:473-478` / `:599` | `sourceDisk` `sourceRunning` / 六个工具 / `impact` 分支 / `config_notices` / `config_tier` 的三个答案 / `svc.Append`、`svc.Write`、两个版本号、那条 `note` / `defaultConfigReadBytes` / `configReadBytesLimit` / `missingAgentError` |
 | `agentkit/build/fingerprint.go:69-78` / `:95-126` / `:133-314` / `:356-375` | `computeDeps` / `depWalker.of` / 各依赖的加入 / `fingerprintOf` |
 | `agentkit/build/gate.go:43-81` / `:89-124` / `:167-181` | `newApprovalMiddleware` 与它的同步 / 流式两条路 / `toolChain`（★ 守卫是**链首**，所以它最外层） |
 | `agentkit/build/hub.go:71-102` / `:119-176` | `skillModelHub.Get` / `skillAgentHub.Get` |
@@ -1540,7 +1540,7 @@ github.com/ouranoshong/openheron/llm/common
 | `agentkit/fsx/fsx.go:232-250` / `:739-775` / `:776-835` / `:809` | `resolveWrite`（写入边界） / `Write` / `Edit` —— 配置根的写在这里转交 / ★ `OldString` 找不到就报错 —— 文件工具的冲突语义 |
 | `agentkit/run/loop.go:125-140` / `:240-260` / `agentkit/run/runtime.go:567-573` / `:867-881` / `agentkit/run/turn.go:80-86` | `makePrepareAgent`（带钉住） / `settleAgent` / 恢复时取父 run 的树 / `parentRunOf` / `Turn.pin` |
 | `storage/runledger.go:169-176` | `Run.TreeFingerprint` |
-| `main.go:98` / `:110-120` / `:122-139` / `:148-153` / `:321-388` / `:383-385` / `:516` / `:530` / `:674-693` / `:708-737` / `:748-753` / `:755-760` | `--config-dir` / 用法 / `warnUnusedHomeConfig` / `configLoadError` / `setupConfig` / 三个 `override` 读点 / `FRONTEND_MODE` / `STATIC_DIR` / `agentConfig` / `Current` `Publish` / `configVersion` / `override` |
+| `main.go:98` / `:111-121` / `:123-140` / `:149-157` / `:367-450` / `:445-447` / `:578` / `:592` / `:744-755` / `:770-799` / `:810-815` / `:817-822` | `--config-dir` / 用法 / `warnUnusedHomeConfig` / `configLoadError` / `setupConfig` / 三个 `override` 读点 / `FRONTEND_MODE` / `STATIC_DIR` / `agentConfig` / `Current` `Publish` / `configVersion` / `override` |
 | `api/v2_introspect.go:406` / `:481-482` / `api/v2_settings.go:64-90` / `:91-104` / `:201-216` | `deferred` 与 `configVersion` / `settingsFail` / manifest handler / `readPath` `writePath` |
 | `initcfg/initcfg.go:56-94` / `:198-224` | `BuildPlan` / `copySection` |
 | `.env.test` / `scripts/test-backend.sh:47` `:76` `:90-105` `:128-130` | 测试环境的约定与隔离脚本 |
