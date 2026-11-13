@@ -344,8 +344,10 @@ func (configToolProvider) Provide(_ context.Context, env toolEnv) ([]tool.BaseTo
 		name: decl.ToolNameConfigWrite,
 		desc: "Write a configuration file. The write is checked before it lands: it must parse, " +
 			"the tree must still hold together, and the base revision must match what is on " +
-			"disk. A change takes effect on the next turn. Always asks for approval. " +
-			"★ To change one line of a configuration file, edit_file does it and goes " +
+			"disk. A change takes effect on the next turn. ★ The tier comes from " +
+			"tools/config.yaml, the file that names the configuration tools: the default " +
+			"file does not name this one, so it asks; a file that names it runs without " +
+			"a nod. ★ To change one line of a configuration file, edit_file does it and goes " +
 			"through the same checks; this tool replaces the whole file, so it needs the " +
 			"whole text. ★ When the whole text does not fit in one call, write the file in " +
 			"pieces: the first piece replaces the file, and every later piece goes with " +
