@@ -820,11 +820,12 @@ The rule lives in `agentkit/run`, next to the state it guards:
 
 - `ensureIdle` (`agentkit/run/runtime.go`) refuses a **new query** when a turn is
   executing or an approval is waiting.
-- `ensureNoLiveQuery` refuses a new query when a turn is executing, but lets a
-  **resume** through: a resume continues the interrupted turn it answers — the same
-  round of the conversation, not a new one.
+- `ensureNoLiveQuery` refuses a new **resume** when a **query** turn is executing; it
+  lets another **resume** through, because a resume continues the interrupted turn it
+  answers — the same round of the conversation, not a new one.
 - `claimTurn` takes the busy test and the takeover under **one** lock, so two
-  simultaneous requests cannot both pass.
+  simultaneous requests cannot both pass. What it asks is `conflictTurns`: the slot
+  holds one turn, and only a **resume behind a resume** gets through.
 
 A refusal changes **nothing**: no checkpoint discarded, no approval cleared, no
 message persisted. The running turn is untouched.
@@ -841,7 +842,9 @@ answerable if the checkpoint it resumes from exists.
 
 The frontend reads the server's answer rather than its own memory: the session's
 `state` comes from the server's scan of the **run ledger** and feeds the composer's
-guard, so a second tab hydrates as busy instead of idle.
+guard, so a second tab does not send into a running turn. ★ A second tab is not kept
+out either — it **attaches** to the run that owns the session and watches it, and an
+attach is a read: it starts no turn and claims nothing.
 
 The run ledger is the durable record of the runs: one row per run, written by the run's
 own goroutine (`agentkit/run/runrow.go`), read back by

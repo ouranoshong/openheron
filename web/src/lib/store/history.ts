@@ -135,15 +135,13 @@ export function seedFromHistory(
   //   Without it a second tab hydrates as idle and its send button works —
   //   the tab has no memory of the turn another tab started.
   //
-  // ★ A hydrated "running" is ALWAYS somebody else's turn. This surface
-  //   has just opened the session: it cannot own a turn it did not start
-  //   (a surface that owns one keeps its own event stream and never
-  //   re-hydrates — openSession returns early for a loaded session). So
-  //   the busy flag goes up here too, and the composer says whose turn it
-  //   is.
+  // ★ The busy **flag** does not go up here, though. The flag says the
+  //   live turn belongs to somebody else, and this surface is about to
+  //   find out whether it can watch that turn instead (attachToLiveRun):
+  //   a flag that went up and came down again would flash the warning at
+  //   a surface that is following the turn after all.
   if (state === "running") {
     convo.status = "running"
-    convo.busy = true
   }
   if (pending && pending.length > 0) {
     convo.status = "awaiting-approval"

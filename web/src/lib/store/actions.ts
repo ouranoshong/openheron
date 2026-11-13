@@ -11,6 +11,7 @@ import {
   type WorkspaceFile,
 } from "@/lib/api"
 import { readActiveThreadId, writeActiveThreadId } from "@/lib/active-thread"
+import { attachTarget, busyElsewhere } from "@/lib/attach"
 import { closeAllOpenParts, type AgEvent } from "@/lib/events"
 import {
   emptyConversation,
@@ -116,6 +117,13 @@ export const useStore = create<StoreState>((set, get) => ({
       //   is the server's account of them, and the client has none of its
       //   own after a reload.
       await restorePendingFiles(id, convo)
+      // ★ The session may already have a live turn — another tab started
+      //   it. This surface can watch that turn instead of being kept out
+      //   of it: the scan says which run owns the session, and the attach
+      //   hands over the rest of the turn.
+      if (view.state === "running") {
+        void get().attachToLiveRun(id)
+      }
     } catch (e) {
       if (isThreadNotFound(e)) {
         writeActiveThreadId("")
@@ -434,26 +442,17 @@ export const useStore = create<StoreState>((set, get) => ({
     )
   },
 
-  // scanBusy decides whether the session is busy, from the run ledger.
+  // applyScan records what the run ledger says about the session.
   //
   // ★ The busy flag may only be cleared on the word of a scan. A stream
   //   that ends says nothing about the session: another surface's turn
   //   may still be running, and the ledger is the only thing that knows.
   //
-  // ★ The run this surface owns is not "busy". Busy means "a live turn
+  // ★ The run this surface follows is not "busy". Busy means "a live turn
   //   that belongs to somebody else".
-  //
-  // ★ A failed scan leaves the flag alone. Guessing is what the scan
-  //   exists to stop.
-  async scanBusy(id: string) {
-    let runs: RunsView
-    try {
-      runs = await api.listRuns(id)
-    } catch {
-      return
-    }
+  applyScan(id: string, runs: RunsView) {
     const mine = get().sessions[id]?.convo?.runId
-    const busy = !!runs.activeRunId && runs.activeRunId !== mine
+    const busy = busyElsewhere(runs, mine)
     set((s) => {
       const entry = s.sessions[id]
       if (!entry) return s
@@ -472,6 +471,85 @@ export const useStore = create<StoreState>((set, get) => ({
         },
       }
     })
+  },
+
+  // attachToLiveRun follows the run that owns the session.
+  //
+  // ★ The run outlives the connection: the server archives the turn, not
+  //   this stream. So a surface that opens a session with a live turn can
+  //   come back to it — the scan says which run owns the session, and the
+  //   attach hands over the rest of the turn.
+  //
+  // ★ This is what a second tab does. Before it, the tab hydrated as
+  //   idle, said the session was busy in another window, and showed
+  //   nothing of the turn that was actually running. Now it watches the
+  //   same turn.
+  //
+  // ★ It is a read. The attach does not claim the session and does not
+  //   start a turn: the server refuses a run that is not live, and the
+  //   turn goes on whoever is watching.
+  async attachToLiveRun(id: string) {
+    // ★ One stream at a time. A surface that is already following a turn
+    //   has that turn to look after, and the run it follows is the one
+    //   the scan would name.
+    if (run) return
+
+    let runs: RunsView
+    try {
+      runs = await api.listRuns(id)
+    } catch {
+      return
+    }
+    const target = attachTarget(runs, get().sessions[id]?.convo?.runId)
+    if (!target) {
+      // ★ The scan says the session is free. Whatever said otherwise was
+      //   a reading from a moment ago, and the ledger is the truth.
+      get().applyScan(id, runs)
+      return
+    }
+
+    setCurrentRunKey(id)
+    run = runStream(
+      { threadId: id, runId: target },
+      {
+        onEvent: (ev) => get().applyEvent(id, ev as AgEvent),
+        onError: (msg, code) => {
+          run = null
+          setCurrentRunKey(null)
+          if (code === "run_not_live") {
+            // ★ The run ended between the scan and the attach. The
+            //   transcript has the answer.
+            void get().reloadHistory(id)
+            return
+          }
+          get().loadError(id, msg)
+        },
+        onDone: () => {
+          run = null
+          setCurrentRunKey(null)
+          // ★ The transcript is the truth once the run is over, and this
+          //   surface never owned the turn: it watched it. The replayed
+          //   events give way to the recorded ones.
+          void get().reloadHistory(id)
+          void get().scanBusy(id)
+          void get().refreshList()
+        },
+      },
+    )
+  },
+
+  // scanBusy asks the ledger whether the session is busy.
+  //
+  // ★ A failed scan leaves the flag alone. Guessing is what the scan
+  //   exists to stop.
+  async scanBusy(id: string) {
+    let runs: RunsView
+    try {
+      runs = await api.listRuns(id)
+    } catch {
+      return
+    }
+    get().applyScan(id, runs)
   },
 
   // reloadHistory re-reads the session's transcript.

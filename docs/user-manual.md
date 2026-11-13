@@ -1310,7 +1310,27 @@ The same thing is available over HTTP — `POST /v2/sessions/{id}/compact` — f
 A session runs **one turn at a time**. If the same session is open in two windows — two
 tabs, or a tab and another machine — only one of them can be running a turn.
 
-The other one says so:
+★ **The second window watches that turn.** It is not kept out of the conversation: it asks
+the server which run owns the session and attaches to it, and the rest of the turn arrives
+in that window too.
+
+```
+POST /v2/run
+{"threadId": "...", "runId": "..."}
+```
+
+★ **The attach is a read.** It is `POST /v2/run` with the run's `runId` and **no
+question**: it starts no turn and claims no session, so the turn goes on whoever is
+watching, and the server refuses an attach to a run that is over.
+
+★ **The turn belongs to the server, not to the window that started it.** Close that window
+and the attached one keeps receiving: the server archives the turn either way.
+
+★ **The stop button is the way to take over.** It stops the session's turn — whoever owns
+it — and then you can send. Every window that is watching sees it stop.
+
+★ **A message that arrives while a turn is running is refused.** The window that sent it
+says so:
 
 ```
 This session is running in another window — stop it to take over
@@ -1319,20 +1339,11 @@ This session is running in another window — stop it to take over
 ★ **Nothing is lost.** The refused message is not sent, so it does not appear in the
 conversation. The turn that is running keeps going, untouched.
 
-★ **The stop button is the way to take over.** It stops the session's turn — whoever
-owns it — and then you can send. The window that owned the turn sees it stop.
-
-★ **This is a server-side rule, not a browser one.** Any client that talks to the API
-gets the same answer, and the session's `state` reports `"running"` to every client
-looking at it. A second window opened while a turn is running hydrates as busy, with the
-send button already disabled.
-
-★ **A broken connection does not lose the turn.** The turn belongs to the server, not
-to the connection that happened to be watching it: the server archives it either way.
-A client whose connection drops comes back with the run's id — `POST /v2/run` with
-`runId` and **no question** — and gets the rest of the turn. `GET
-/v2/sessions/{id}/runs` says whether the run is still going, and the run's own history
-is there for the times when it is not.
+★ **This is a server-side rule, not a browser one.** Any client that talks to the API gets
+the same answer, and the session's `state` reports `"running"` to every client looking at
+it. `GET /v2/sessions/{id}/runs` says which run owns the session — that is how a second
+window finds the turn to attach to — and the run's own history is there for the times when
+it is not.
 
 ### 6.8 `/mcps` — the MCP servers of this agent
 

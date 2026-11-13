@@ -25,11 +25,14 @@ describe("session concurrency", () => {
     expect(convo.status).toBe("running")
   })
 
-  // A hydrated "running" is always somebody else's turn: this surface has
-  // just opened the session, so it cannot own a turn it did not start.
-  test("a hydrated running turn is marked busy — it belongs to another surface", () => {
+  // A hydrated "running" is a turn this surface has not joined yet. It does
+  // not raise the busy flag: the flag says the live turn belongs to
+  // somebody else, and this surface is about to attach to it instead — a
+  // flag that went up and came down again would flash the warning at a
+  // surface that is following the turn after all.
+  test("a hydrated running turn does not raise the busy flag", () => {
     const convo = seedFromHistory(history, undefined, undefined, "running")
-    expect(convo.busy).toBe(true)
+    expect(convo.busy).toBeUndefined()
   })
 
   test("an idle session is not busy", () => {

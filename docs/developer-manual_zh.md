@@ -226,7 +226,7 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
 - **子进程的生命归管理器，不归调用方。** 拉起子进程的那个上下文由**管理者的生命周期**
   派生（`agentkit/build/mcpmanager.go:447` `dispatch`），不是调用方的。★ 调用方是
   **一轮**，而一轮会结束：运行期取消它交给 builder 的那个上下文
-  （`agentkit/run/runtime.go:409`），`exec.CommandContext` 于是把子进程一起杀掉 ——
+  （`agentkit/run/runtime.go:425`），`exec.CommandContext` 于是把子进程一起杀掉 ——
   那个工具还在表里，却再也答不上话（`transport error: failed to write request`）。
   ⇒ `Tools` 与 `dispatch` 都不收上下文：谁拥有这个子进程，不是调用方该决定的事。
 - **启动是单飞的。** `dispatch`（`agentkit/build/mcpmanager.go:447`）在锁下启动
@@ -626,12 +626,25 @@ compacted into a summary」*，数字要等下一次加载 —— 那时标记�
 | 函数 | 位置 | 拒绝什么 |
 |---|---|---|
 | `ensureIdle` | `agentkit/run/runtime.go` | 有轮次执行**或**有审批在等时的**新查询** |
-| `ensureNoLiveQuery` | `agentkit/run/runtime.go` | 有轮次执行时的**新查询** —— 但放行**恢复** |
+| `ensureNoLiveQuery` | `agentkit/run/runtime.go` | 有**查询**轮次执行时的**新恢复** —— 但放行另一个**恢复** |
 | `claimTurn` | `agentkit/run/runtime.go` | 本身不拒绝：它把「忙不忙」的判定**与**接管放在同一把锁下 |
 
-**为什么恢复不是查询。** 恢复续接的是它所回答的那个被打断的轮次 —— 同一轮对话。
-`contract.TurnKind` 就是这么写的，规则随之而来：`conflictTurns` 只拒绝「查询跟在
-活轮次后面」这一种。
+**为什么放行「恢复撞恢复」。** 恢复续接的是它所回答的那个被打断的轮次 —— 同一轮
+对话，`contract.TurnKind` 就是这么写的。两个恢复确实会重叠：第二个会发现审批已经
+被消费，而**重放的「同意」必须被告知「没东西可答」（`ErrNoPendingInterrupt`），
+而不是「会话忙」**。
+
+★ **槽位只有一个，而它只问一个问题。** `conflictTurns` 拒绝其余的一切 —— 查询撞
+查询、查询撞恢复、恢复撞查询。★ **一次合法的恢复遇不到活着的查询轮次**：审批是
+**抬审批的那一轮结束之后**才写下来的，所以用户能回答的时候，那一轮已经结束。★
+旧规则（只拒绝「查询跟在活轮次后面」）把跨类型那一格留着了：两个预检不重叠，于是
+同时到达的 `Submit` 与 `Resume` 可以双双通过预检，再各自去占槽 —— 先占到的那个被
+`ErrSuperseded` 打死。
+
+★ **放回槽位的只能是还占着槽位的轮次。** `releaseClaim` 在把被顶掉的轮次放回去之前
+先问 `holdsSlot()`。一个**自己也被顶掉过**的 claim 早已放弃，放回去就会在槽位里留
+下一个**从未跑过**的 loop —— eino 的 `TurnLoop.Wait` 在 `Run` 从未被调用时永远阻塞，
+于是关停会挂死，那个会话也会永远读作「忙」。
 
 ★ **拒绝必须不改变任何东西。** `Submit` 里的检查点丢弃与待审批清除都排在**闸门
 之后**。改之前它们排在前面，于是一个被拒的请求删掉了正在跑那一轮的检查点与审批
@@ -660,6 +673,10 @@ composer 必须读**服务端**的答案，而不是自己的内存：
 - `GET /v2/sessions/{id}/messages` 带着 `state`；`seedFromHistory` 把它喂进
   `convo.status`（`web/src/lib/store/history.ts`）。少了它，第二个标签页水合出来
   就是空闲，发送按钮可用。
+- ★ **第二个标签页不是被挡在外面 —— 它会挂上。** 扫描
+  （`GET /v2/sessions/{id}/runs`）说得出这个会话归哪一轮，客户端就跟着那一轮走
+  （`web/src/lib/store/actions.ts` 的 `attachToLiveRun`）。挂上是**读**：它不占任何
+  槽位，所以与闸门不冲突。
 - `runStream` 的 `onError` 带上错误**码**（`web/src/lib/api.ts`）。散文分不出「别处
   正忙」与「失败」—— 码可以。
 - `session_busy` 的拒绝要**回滚乐观的用户消息**：服务端根本没收到，记录里就不该
@@ -667,6 +684,10 @@ composer 必须读**服务端**的答案，而不是自己的内存：
 
 ★ **忙着的会话不是失败的会话。** 它拿的是 `convo.busy`，不是 `status: "error"` ——
 那一轮没事，只是属于别人。composer 会显示停止按钮，用户据此接管。
+
+★ **「忙」与「在跑」是两个字段。** `status: "running"` 说的是**会话**在跑；
+`convo.busy` 说的是这一轮属于**别人** —— 本界面没在跟着它。★ 挂上之后 `convo.busy`
+就落下去了 —— run 一开始就清，所以一个正在看着那一轮的界面从不说「别处正忙」。
 
 ### 3.9 CI 与发版
 
@@ -996,7 +1017,7 @@ what does it say?
 **磁盘**。两个问题，两边（`docs/config-design.md` §8.5）。
 
 ★ **被审批打断的一轮回到它开始时的那棵树。** 那一轮把树的指纹钉住（`turn.pin`，
-`agentkit/run/runtime.go:573`），run 账本把它记下来（`TreeFingerprint`，
+`agentkit/run/runtime.go:599`），run 账本把它记下来（`TreeFingerprint`，
 `storage/runledger.go:176`），恢复时按名字向池要那一条（`Lookup`，
 `agentkit/build/pool.go:90`）。★ 池把旧的那条**留着** —— 钉住上一棵树的 run 仍然需要它
 —— 而旧条目是进程退出时才回收，不是更早。

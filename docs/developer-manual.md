@@ -257,7 +257,7 @@ For a developer who has to debug it:
   spawns the child is derived from the **manager's** lifetime
   (`agentkit/build/mcpmanager.go:447` `dispatch`), not from the caller's. ★ The
   caller is a **turn**, and a turn ends: the run cancels the context it hands to
-  the builder (`agentkit/run/runtime.go:409`), and `exec.CommandContext` kills the
+  the builder (`agentkit/run/runtime.go:425`), and `exec.CommandContext` kills the
   child with it — so the tool stays in the table and can no longer answer
   (`transport error: failed to write request`). ⇒ `Tools` and `dispatch` take no
   context at all: who owns the child is not the caller's to decide.
@@ -729,12 +729,29 @@ the runtime owns the rule.
 | Function | Where | Refuses |
 |---|---|---|
 | `ensureIdle` | `agentkit/run/runtime.go` | a new **query** when a turn executes or an approval waits |
-| `ensureNoLiveQuery` | `agentkit/run/runtime.go` | a new **query** when a turn executes — but lets a **resume** through |
+| `ensureNoLiveQuery` | `agentkit/run/runtime.go` | a new **resume** when a **query** turn executes — it lets another **resume** through |
 | `claimTurn` | `agentkit/run/runtime.go` | nothing on its own: it takes the busy test **and** the takeover under one lock |
 
-**Why a resume is not a query.** A resume continues the interrupted turn it answers — the
-same round of the conversation. `contract.TurnKind` says so, and the rule follows:
-`conflictTurns` refuses only a query behind a live turn.
+**Why a resume behind a resume is allowed.** A resume continues the interrupted turn
+it answers — the same round of the conversation, and `contract.TurnKind` says so.
+Two resumes do overlap: the second one finds the approval already consumed, and a
+replayed approve has to be told "there is nothing to answer"
+(`ErrNoPendingInterrupt`), not "the session is busy".
+
+★ **The slot holds one turn, and it asks one question.** `conflictTurns` refuses
+everything else — a query behind a query, a query behind a resume, a resume behind a
+query. ★ **A legal resume never meets a live query turn:** the approval is written
+*after* the round that raised it has finished, so by the time the user can answer,
+that round is over. ★ The old rule — refuse only a query behind a live turn — left
+the cross-type case open: the two pre-checks do not overlap, so a simultaneous
+`Submit` and `Resume` could both pass them and then both claim the slot. The first
+one to claim was killed with `ErrSuperseded`.
+
+★ **Only a turn that still holds the slot goes back into it.** `releaseClaim` asks
+`holdsSlot()` before it restores the displaced turn. A claim that was itself
+displaced already gave up, and putting it back would leave a loop that was never
+run in the slot — eino's `TurnLoop.Wait` blocks for ever when `Run` was never
+called, so the shutdown would hang and the session would read as busy for ever.
 
 ★ **A refusal must change nothing.** The checkpoint discard and the pending-approval
 clear in `Submit` run **after** the gate. Before this change they ran first, so a
@@ -766,6 +783,10 @@ The composer must read the **server's** answer, not its own memory:
 - `GET /v2/sessions/{id}/messages` carries `state`; `seedFromHistory` feeds it into
   `convo.status` (`web/src/lib/store/history.ts`). Without it a second tab hydrates as
   idle and its send button works.
+- ★ **A second tab does not stay out — it attaches.** The scan
+  (`GET /v2/sessions/{id}/runs`) says which run owns the session, and the client
+  follows that run (`attachToLiveRun` in `web/src/lib/store/actions.ts`). The
+  attach is a **read**: it claims nothing, so it cannot collide with the gate.
 - `runStream`'s `onError` carries the error **code** (`web/src/lib/api.ts`). The prose
   cannot tell "busy elsewhere" from "failed" — the code can.
 - A `session_busy` refusal **rolls back the optimistic user message**: the server never
@@ -775,6 +796,11 @@ The composer must read the **server's** answer, not its own memory:
 ★ **A busy session is not a failed session.** It gets `convo.busy`, not
 `status: "error"` — the turn is fine, it just belongs to someone else. The composer
 shows the stop button, which is how the user takes over.
+
+★ **"Busy" and "running" are two fields.** `status: "running"` says the **session**
+is running; `convo.busy` says the live turn belongs to **somebody else** — this
+surface is not following it. ★ The attach clears `convo.busy` as soon as the run
+starts, so a surface that is watching the turn never says it is busy elsewhere.
 
 ### 3.9 CI and releases
 
@@ -1174,7 +1200,7 @@ tree's — so it answers about the **running** tree, while `config_get` with a
 (`docs/config-design.md` §8.5).
 
 ★ **A round interrupted by an approval comes back to the tree it started with.**
-The turn pins the tree's fingerprint (`turn.pin`, `agentkit/run/runtime.go:573`),
+The turn pins the tree's fingerprint (`turn.pin`, `agentkit/run/runtime.go:599`),
 the run ledger records it (`TreeFingerprint`, `storage/runledger.go:176`), and the
 resume asks the pool for that entry by name (`Lookup`,
 `agentkit/build/pool.go:90`). ★ The pool **keeps** the old entry — a run that

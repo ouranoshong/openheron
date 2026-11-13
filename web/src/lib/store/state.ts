@@ -1,4 +1,4 @@
-import type { ThreadMeta } from "@/lib/api"
+import type { RunsView, ThreadMeta } from "@/lib/api"
 import type { AgEvent } from "@/lib/events"
 import type { ConversationState, Interrupt } from "@/lib/types"
 
@@ -48,6 +48,12 @@ export interface StoreState {
   // scanBusy decides whether the session is busy, from the run ledger. The
   // busy flag may only be cleared on the word of a scan.
   scanBusy(id: string): Promise<void>
+  // applyScan records what a scan said. It is the scan's own reading, so
+  // it may set or clear the busy flag.
+  applyScan(id: string, runs: RunsView): void
+  // attachToLiveRun follows the run that owns the session — what a second
+  // tab does when it opens a session with a live turn.
+  attachToLiveRun(id: string): Promise<void>
   addFiles(files: File[]): Promise<void>
   // removeFile takes a file out of the pending list, and off the disk.
   //

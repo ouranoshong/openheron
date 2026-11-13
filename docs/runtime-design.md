@@ -151,8 +151,8 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 |---|---|
 | `GET /v2/sessions/{id}/runs` —— 扫描，回答「发生过什么、正在发生什么」 | `api/v2_sessions.go:422` |
 | `GET /v2/sessions/{id}/runs/{runId}` —— 取一行 | `api/v2_sessions.go:443` |
-| 扫描读的是账本，不是易失的运行时状态 | `agentkit/run/runtime.go:932`（`ScanRuns`） |
-| 会话的 `state` 来自扫描 | `api/v2_sessions.go:505`（`stateOf`）→ `agentkit/run/runtime.go:804`（`StatusOf`）→ `agentkit/run/runtime.go:842`（`activeRun`） |
+| 扫描读的是账本，不是易失的运行时状态 | `agentkit/run/runtime.go:958`（`ScanRuns`） |
+| 会话的 `state` 来自扫描 | `api/v2_sessions.go:505`（`stateOf`）→ `agentkit/run/runtime.go:830`（`StatusOf`）→ `agentkit/run/runtime.go:868`（`activeRun`） |
 | 扫描**永不写**：会修账本的读，就分不清「是什么」与「刚被改成什么」 | `api/v2_sessions.go:418-421` |
 
 扫描的形状是 `runsView`（`api/v2_types.go`）：`items` 是每一行 run（`runId`、
@@ -229,7 +229,7 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 不拥有的会话写 `running` 行 —— fence 让这些写入无害，但停下来更好。
 
 ★ **闸门现在会问仲裁器。** `ensureNoLiveTurn` 与 `claimTurn` 都问「上一个持有者的
-租约过期了吗」（`agentkit/run/runtime.go:460`、`agentkit/run/runtime.go:280`）：过期
+租约过期了吗」（`agentkit/run/runtime.go:504`、`agentkit/run/runtime.go:280`）：过期
 的持有者已经不再占着这个会话，别的 run 可以接手，而 epoch 说得出此后两个里谁才是
 持有者。★ 没有仲裁器时一律按「没过期」处理（`agentkit/run/lease.go:28`）—— 闸门
 不能因为没人接上仲裁器就变弱。
@@ -321,35 +321,46 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 守卫才是规则。** 任何不是 openheron Web UI 的客户端 —— `curl`、另一个 AG-UI 客户端、
 未来的移动端 —— 都得到同样的保护。
 
-闸门是**两个方法**，不是一个：
+闸门是**两个预检 + 一个占槽**：
 
 | 方法 | 守什么 | 用在哪 |
 |---|---|---|
-| `ensureIdle`（`agentkit/run/runtime.go:431`） | 有活轮次**和**有待审批都拒绝 | 新查询（`Submit`，`agentkit/run/runtime.go:224`） |
-| `ensureNoLiveQuery`（`agentkit/run/runtime.go:505`） | 只在有**查询**轮次在跑时拒绝 | 恢复（`Resume`，`agentkit/run/runtime.go:550`） |
+| `ensureIdle`（`agentkit/run/runtime.go:447`） | 有活轮次**和**有待审批都拒绝 | 新查询（`Submit`，`agentkit/run/runtime.go:215`） |
+| `ensureNoLiveQuery`（`agentkit/run/runtime.go:531`） | 只在有**查询**轮次在跑时拒绝 | 恢复（`Resume`，`agentkit/run/runtime.go:564`） |
 
-★ **闸门问的是在跑那一轮的种类**（`agentkit/run/runtime.go:485` 的 `conflictTurns`）：
+两个预检都只是**话术**；规则在占槽。★ **槽位只有一个，而槽位不问「这一轮是不是
+查询」，只问「是不是恢复撞恢复」**（`agentkit/run/runtime.go:475` 的 `conflictTurns`）：
 
 | 在跑的轮次 | 新查询 | 新恢复 |
 |---|---|---|
-| 查询 | **拒绝** —— 跨客户端那一种 | 允许 —— 它回答的就是这一轮自己的审批 |
-| 恢复 | **拒绝** —— 新的一轮 | 允许 —— 同一轮继续 |
+| 查询 | **拒绝** —— 跨客户端那一种 | **拒绝** —— 槽位只有一个 |
+| 恢复 | **拒绝** —— 槽位只有一个 | 允许 —— 同一轮继续 |
 
-理由：恢复续接的是它所回答的那个被打断的轮次 —— 那是同一轮对话，不是新的一轮
-（`contract.TurnKind` 就是这么写的，`contract/contract.go:12`）。★ **查询才是不能
-重叠的东西**，而那恰恰是「另一个标签页插进来」。
+★ **唯一放行的那一格有它的理由。** 恢复续接的是它所回答的那个被打断的轮次 —— 那是
+同一轮对话，不是新的一轮（`contract.TurnKind` 就是这么写的，`contract/contract.go:12`）；
+两个恢复确实会重叠（第二个会发现审批已经被消费），而**重放的「同意」必须被告知
+「没东西可答」（`ErrNoPendingInterrupt`），而不是「会话忙」** —— 三条既有测试锁定的
+正是这句产品行为。
+
+★ **能答复的时候，抬审批的那一轮已经结束了。** 审批是那一轮**跑完之后**才写下来的
+（`markTurnDone` 先清轮次指针，审批随后落盘），所以一次合法的恢复**从来遇不到**
+一个活着的查询轮次。★ 反过来，两个预检合起来是**跨类型**互斥的，可每个预检都是
+「读」而不是「占」：查询的预检读的是「此刻没有活轮次」，而预检与占槽之间有一段
+窗口 —— 一个并发的恢复在这段窗口里占下槽位，槽位里的轮次于是变成**恢复**，旧规则
+（只挡「查询撞查询」）就把那一格放行了：两个轮次都拿到了槽位，先到的那个被后来的
+那个用 `ErrSuperseded` 打死。
 
 ★ **竞态由「占槽」关掉，不是由「检查」关掉。** `ensureIdle` 是给人看的友好提示；
 权威的是 `claimTurn`（`agentkit/run/runtime.go:265`）—— 它把「忙不忙」的判定与
 「接管」放在**同一把锁**下。两个同时到达的请求不可能都通过它：输家拿到
 `ErrSessionBusy`，而不是半启动的一轮。
 
-★ **Resume 先申领槽位，再消费审批**（`agentkit/run/runtime.go:558-583`）。
+★ **Resume 先申领槽位，再消费审批**（`agentkit/run/runtime.go:584-609`）。
 `TakePendingApproval` 会清掉记录并落盘，所以在那之后的任何拒绝都会**吃掉用户的
 决定** —— 卡片消失了，而那个审批再也答不上。先申领意味着拒绝时审批原样留着。
 
-★ **恢复钉住父轮次的那棵树**（`agentkit/run/runtime.go:567-573`）：父 run id 与树的
-指纹一起从账本里查出来（`agentkit/run/runtime.go:867` 的 `parentRunOf`），指纹写在
+★ **恢复钉住父轮次的那棵树**（`agentkit/run/runtime.go:593-599`）：父 run id 与树的
+指纹一起从账本里查出来（`agentkit/run/runtime.go:893` 的 `parentRunOf`），指纹写在
 `turn.pin` 上。⇒ 被打断的那一轮继续用它开始时的那棵树；**新配置在下一轮生效**。
 
 ### 2.2 「忙」就是忙 —— 包括等着审批
@@ -370,10 +381,16 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 
 ★ **「有活轮次」问的是 loop，不是轮次指针。** `st.turn` 在轮次归档完才清（滞后），
 而 `st.loop` 在 loop 活着期间一直都在（更长寿）—— 两者**都在**，才读作「忙」
-（`agentkit/run/runtime.go:440-451`）。
+（`agentkit/run/runtime.go:484-512`）。
 
-★ **中止会清掉那张作废的审批**（`agentkit/run/runtime.go:700`，`clearVoidApproval` 在
-`:710`）。否则「先停、再接管」接管不了 —— 闸门在有待审批时拒绝新查询，而那张审批
+★ **放回槽位的只能是还占着槽位的轮次。** `releaseClaim`
+（`agentkit/run/runtime.go:384`）在把被顶掉的轮次放回槽位之前先问 `holdsSlot()`
+（`agentkit/run/turn.go:247`）：一个**已经放弃**的轮次不再放回去 —— 否则槽位里会留下
+一个**从未 `Run()` 过的 loop**，而 eino 的 `TurnLoop.Wait` 明写「`Run` 没被调用时
+`Wait` 永远阻塞」⇒ 中止与关停会挂死，那个会话也永远读作「忙」。
+
+★ **中止会清掉那张作废的审批**（`agentkit/run/runtime.go:718`，`clearVoidApproval` 在
+`:736`）。否则「先停、再接管」接管不了 —— 闸门在有待审批时拒绝新查询，而那张审批
 属于一个已经不存在了的轮次。★ 只有**孤儿**审批（检查点已经没了）值得留着：它同样
 答不了，但那不是这次调用的业务，卡片留在屏幕上。
 
@@ -384,7 +401,7 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 `running` / `idle`。
 
 ★ **一次读，一个答案。** 阶段本身已经算进了待审批（`StatusOf` 从会话自己的待批记录
-推导 `PhaseWaitingApproval`，`agentkit/run/runtime.go:813-821`），分开读两遍可能看见
+推导 `PhaseWaitingApproval`，`agentkit/run/runtime.go:817-825`），分开读两遍可能看见
 它们不一致 —— 两次读之间待审批被清了。
 
 ★ **闸门与 `stateOf` 刻意读的不是同一个东西。** `stateOf` 走 `StatusOf`，而它是从
@@ -403,13 +420,19 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 
 ★ 把两者改成读同一个东西，就等于给它们同一个滞后 —— 而闸门的滞后会变成误拒。
 
-前端：`seedFromHistory` 认服务端的 `state`（`web/src/lib/store/history.ts:144`）：
-`state === "running"` 就把 `status` 置成 `running` 且 `busy` 置真。
+前端：`seedFromHistory` 认服务端的 `state`（`web/src/lib/store/history.ts:143`）：
+`state === "running"` 就把 `status` 置成 `running`。
 
-★ **水合出来的「running」一定是别人的轮次。** 刚打开会话的那个界面不可能拥有
-一轮它没启动的轮次 —— 拥有轮次的界面自己拿着事件流，永远不会重新水合。所以水合时
-**忙**标记也会置上，composer 会说清楚那是谁的轮次。待审批那一支保持优先：审批卡比
-「在跑」更具体。
+★ **「在跑」与「忙」是两个字段。** `status === "running"` 说的是**会话**在跑（禁发送
+键、显示停止键）；`busy` 说的是**这一轮属于别人**（本界面没在跟着它）。挂上那一轮
+之后 `busy` 就落下去了 —— `RUN_STARTED` 一到就清（`web/src/lib/events.ts:312`）。
+
+★ **水合出来的「running」一定是别人的轮次，但那个界面不必只是看着。** 刚打开会话的
+那个界面不可能拥有它没启动的轮次 —— 拥有轮次的界面自己拿着事件流，永远不会重新
+水合。★ 而水合**不**把 `busy` 置上：那个界面接下来会去**挂上**那一轮
+（`attachToLiveRun`，`web/src/lib/store/actions.ts:491`），挂上之后它就是在跟着这一轮
+的人。★ 先置上再撤掉，只会让「在别的窗口里跑着」这句话在一个本来就在跟着的界面上
+闪一下。待审批那一支保持优先：审批卡比「在跑」更具体。
 
 ### 2.4 409 是一等公民
 
@@ -428,7 +451,7 @@ this session」），客户端不必多一个码就能分辨。
 前端必须处理被拒的发送，**且不破坏本地视图**：**错误码不能丢** —— `runStream` 把
 `body.code` 一起交给 `onError`（`web/src/lib/api.ts:541`，签名在 `:451`），只剩散文
 的话前端分不清「忙」与「失败」；**乐观气泡要回滚** —— 那条消息根本没到服务端，却留在
-屏幕上像是发出去过（`web/src/lib/store/actions.ts:339-347`）；**会话被标记为忙，不是
+屏幕上像是发出去过（`web/src/lib/store/actions.ts:347-353`）；**会话被标记为忙，不是
 失败**。
 
 ★ **停止并接管。** 忙着的会话给一个「停止」动作：用户可以先停掉另一轮再发。停止
@@ -809,7 +832,7 @@ stderr（`main.go:282-286`）。
 ★ **挂上请求不带问题**（`api/v2_run.go:224` 的 `isAttachRequest`）：带问题就意味着
 「开始一轮新的」，在这里开始一轮新的等于把用户那句话悄悄跑第二遍。挂上走
 `attachRun`（`api/v2_run.go:241`），它按 id 找到那个活着的 run
-（`agentkit/run/runtime.go:910` 的 `LiveRun`），订阅它并渲染它的窗口。
+（`agentkit/run/runtime.go:936` 的 `LiveRun`），订阅它并渲染它的窗口。
 
 ★ **结束的 run 挂不上。** 服务端回 **404 `run_not_live`**
 （`api/v2_run.go:244`，码在 `api/v2_types.go:58`），而不是开始一轮新的 —— 客户端对
@@ -941,6 +964,20 @@ stderr（`main.go:282-286`）。
 | `TestAStalledOwnerDoesNotHoldTheSessionForEver` | **停滞的持有者不会永远占着会话** —— 租约是预算，闸门问的就是它 |
 | `TestAProgressingRunKeepsItsLease` | 报告了进展的 run 保住租约 |
 
+`agentkit/run/gate_concurrent_test.go`：
+
+| 用例 | 断言 |
+|---|---|
+| `TestConcurrentQueriesAdmitExactlyOne` | 16 个并发查询**恰好一个**被放行，其余是「忙」 |
+| `TestConcurrentQueriesAdmitExactlyOneWithLease` | 同上，但有租约仲裁器 |
+| `TestConcurrentClaimsAdmitExactlyOne` | 占槽这一层：16 个并发申领恰好一个拿到槽位 |
+| `TestConcurrentClaimsWithLeaseAdmitExactlyOne` | 同上，但有租约 |
+| `TestConcurrentQueryAndResumeClaimsAdmitExactlyOne` | **查询撞恢复**：每一轮恰好一个被放行 —— 这就是跨类型那扇门 |
+| `TestConcurrentResumesAdmitExactlyOne` | 8 个并发恢复恰好一个被放行，其余是「忙」或「没东西可答」 |
+| `TestConcurrentTakeoverAfterLeaseExpiryAdmitsExactlyOne` | 租约过期后的接管：8 个并发恰好一个 |
+| `TestALiveLeaseFromAnotherRunRefusesTheTurn` | 别的 run 持着活租约：新轮次被拒 |
+| `TestAnExpiredLeaseDoesNotLockTheSession` | 过期租约不锁死会话 |
+
 ### 6.3 Go —— HTTP 与存储
 
 | 文件 | 覆盖什么 |
@@ -958,18 +995,19 @@ stderr（`main.go:282-286`）。
 | 文件 | 覆盖什么 |
 |---|---|
 | `web/test/store-busy.test.ts` | 乐观气泡被回滚；会话被标记为忙而不是失败；普通失败仍然是失败；扫描报出一个不属于本界面的活动 run 时算忙；没有活动 run 时算空闲；本界面自己的 run 不算忙；**扫描失败时标记保持不动** |
-| `web/test/session-busy.test.ts` | 服务端的 `running` 水合成 `running`；水合出的 `running` 标记为忙；空闲的会话不忙；待审批优先于 running |
+| `web/test/session-busy.test.ts` | 服务端的 `running` 水合成 `running`；水合出的 `running` **不**标记为忙（那个界面接下来会去挂上那一轮）；空闲的会话不忙；待审批优先于 running |
 | `web/test/context-usage.test.ts` | `context_usage` 事件记下该 agent 的占用；一个 agent 的事件不动别人的占用；没有窗口时占用照报、窗口是零；历史水合把占用带进来；`selectActiveContext` 返回同一个引用，没有会话时是 `undefined` 而不是空数组 |
 | `web/test/compaction.test.ts` | 历史水合读出压缩标记；标记在就算边界，数字可以缺；实时事件插进一条边界；同一个压缩只插一次边界；实时边界没有数字 |
 | `web/test/compact-command.test.ts` | `/compact` 空闲时可见、运行中隐藏、等审批时隐藏；手动压缩带着数字来，实时压缩没有数字 |
-| `web/test/events.test.ts` | `RUN_STARTED` 记住 run id；没有 run id 的帧不会抹掉已有的那个 |
+| `web/test/events.test.ts` | `RUN_STARTED` 记住 run id；没有 run id 的帧不会抹掉已有的那个；`RUN_STARTED` 清掉「忙在别处」 |
+| `web/test/attach.test.ts` | 没有活动 run 就没东西可挂；活动 run 就是挂上目标；本界面已经在跟那一轮时不重复挂；本界面在跟别的一轮时挂上活动的那一轮；活动 run 不是自己的就是忙；自己的 run 不忙；没有活动 run 就是空闲 |
 
 ### 6.5 E2E（假后端）
 
 | spec | 断言 |
 |---|---|
 | `web/test/e2e/reattach.spec.ts` | 连接断了以后重新挂上，这一轮不丢；重新挂上时只带 run id，不带问题 |
-| `web/test/e2e/session-busy.spec.ts` | 第二个界面看到会话正忙，发送按钮被禁用；竞态下的第二个请求被拒绝，消息不留痕；忙着的会话可以停止另一轮来接管 |
+| `web/test/e2e/session-busy.spec.ts` | 第二个界面挂上同一轮，跟着看；关掉第一个界面第二个继续接收；竞态下的第二个请求被拒绝，消息不留痕；挂上以后仍然能停止那一轮来接管 |
 | `web/test/e2e/compaction.spec.ts` | 压缩消息渲染成分隔线而不是气泡；被取代的消息仍然读得到；轮内发生的压缩当场画出边界；`/compact` 手动压缩后画出边界 |
 
 ### 6.6 命令
@@ -1060,12 +1098,13 @@ stderr（`main.go:282-286`）。
 - `agentkit/run/runtime.go` — `defaultInstanceID`(:160)、`newRunID`(:187)、
   `Submit`(:215)、闸门之后的破坏性动作(:236)、`claimTurn`(:265)、租约过期可接管
   (:280)、`openRunRow`(:298)、记不下来就拒绝(:300)、申领租约(:312)、进展续租与丢租
-  即取消(:318)、释放被换下的轮次(:402)、run 上下文解绑(:409)、`ensureIdle`(:431)、
-  `ensureNoLiveTurn`(:452)、问 loop 不问指针(:440)、`conflictTurns`(:485)、
-  `ensureNoLiveQuery`(:505)、`Resume` 预检(:550)、父 run 与父树(:567)、先申领再消费
-  审批(:557)、`TakePendingApproval`(:575)、`Abort`(:658)、清作废审批(:700)、
-  `clearVoidApproval`(:710)、`StatusOf`(:804)、待审批推导阶段(:813)、`activeRun`(:842)、
-  `parentRunOf`(:867)、`LiveRun`(:910)、`ScanRuns`(:932)
+  即取消(:318)、`releaseClaim`(:384)、放弃的 claim 不复活(:398)、释放被换下的轮次
+  (:409)、run 上下文解绑(:425)、`ensureIdle`(:447)、`conflictTurns`(:475)、
+  问 loop 不问指针(:484)、`ensureNoLiveTurn`(:496)、`ensureNoLiveQuery`(:531)、
+  `Resume` 预检(:564)、先申领再消费审批(:584)、父 run 与父树(:593)、
+  `TakePendingApproval`(:601)、`Abort`(:684)、清作废审批(:718)、
+  `clearVoidApproval`(:736)、`StatusOf`(:830)、待审批推导阶段(:845)、`activeRun`(:868)、
+  `parentRunOf`(:893)、`LiveRun`(:936)、`ScanRuns`(:958)
 - `agentkit/run/loop.go` — 读有效历史(:81)、装配失败要判失败(:139)、记下树(:147)、
   行变 running(:168)、`emit.Derive`(:177)、归档→标记→终态行(:212)、`finishRun`(:277)、
   压缩消息在前(:326)、`archiveCompaction`(:362)
@@ -1074,8 +1113,9 @@ stderr（`main.go:282-286`）。
   `writeHeldApproval`(:227)
 - `agentkit/run/publish.go` — 窗口上界 1000(:20)、`publisher`(:36)、`Publish` 永不阻塞
   (:60)、`Subscribe` 回放窗口(:106)、`subscription.truncated`(:163)
-- `agentkit/run/turn.go` — `Wait` 超时判失败(:158)、`WaitReleased`(:246)、`WaitArchived`
-  (:259)、归档等待上界 30 秒(:272)、`failedState`(:330)
+- `agentkit/run/turn.go` — `Wait` 超时判失败(:158)、`markReleased`(:232)、
+  `holdsSlot`(:247)、`WaitReleased`(:266)、`WaitArchived`(:279)、归档等待上界 30 秒
+  (:292)、`failedState`(:350)
 - `agentkit/run/lease.go` — 默认 TTL 10 分钟(:20)、`leaseExpired`(:28)、进展驱动的续租
   与节流(:105)
 - `agentkit/run/errors.go` — `ErrSessionBusy`(:43)
@@ -1121,12 +1161,14 @@ stderr（`main.go:282-286`）。
 - `agentkit/spec/decl/decl.go` — `context_window`(:45)、`server.lease_ttl`(:297)、
   `server.log_level`(:277)、`LogCfg` 没有 `format` 键(:315)
 - `message/compaction.go` — `ExtraCompaction`(:14)、`Compaction`(:21)、`EffectiveView`(:103)
-- `web/src/lib/events.ts` — reducer 处理两个 `CUSTOM`(:382)、`onContextUsage`(:425)、
-  `onContextCompacted`(:447)
-- `web/src/lib/store/history.ts` — 水合时认服务端的 `state`(:144)
+- `web/src/lib/attach.ts` — `attachTarget`(:17)、`busyElsewhere`(:35)
+- `web/src/lib/events.ts` — `RUN_STARTED` 清忙(:312)、reducer 处理两个 `CUSTOM`(:383)、
+  `onContextUsage`(:431)、`onContextCompacted`(:453)
+- `web/src/lib/store/history.ts` — 水合时认服务端的 `state`(:143)
 - `web/src/lib/store/selectors.ts` — `selectActiveContext`(:103)
-- `web/src/lib/store/actions.ts` — 409 回滚与标记(:339)、`reattach`(:387)、流结束后
-  重新扫描(:369)、`scanBusy`(:448)、扫描失败保持原样(:452)、`stop` 后重新扫描(:574)
+- `web/src/lib/store/actions.ts` — 409 回滚与标记(:347)、`reattach`(:395)、流结束后
+  重新扫描(:377)、`applyScan`(:453)、`attachToLiveRun`(:491)、`scanBusy`(:545)、
+  扫描失败保持原样(:549)、`stop` 后重新扫描(:652)
 - `web/src/lib/api.ts` — `listRuns`(:342)、`onError` 带 code(:451)、把 `body.code` 传下去
   (:541)
 - `web/src/lib/types.ts` — `busy` 的含义(:151)

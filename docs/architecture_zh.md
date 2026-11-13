@@ -588,8 +588,10 @@ X」就可以据此调整。MCP 工具走同一道闸门，按名字查 `TierOf`
 旁边：
 
 - `ensureIdle`（`agentkit/run/runtime.go`）在有轮次执行**或**有审批在等时，拒绝新查询。
-- `ensureNoLiveQuery` 同样拒绝新查询，但放行恢复：恢复续接的是被打断的那一轮。
+- `ensureNoLiveQuery` 在有**查询**轮次执行时拒绝新**恢复**，但放行另一个**恢复**：
+  恢复续接的是被打断的那一轮 —— 同一轮对话，不是新的一轮。
 - `claimTurn` 把「忙不忙」与「接管」放在同一把锁下，两个同时到达的请求不可能都通过。
+  它问的是 `conflictTurns`：**槽位只有一个，只有「恢复撞恢复」放行。**
 
 拒绝不改变任何东西：不删检查点、不清审批、不落消息。run 的终态行由 `runRow.finish`
 （`agentkit/run/runrow.go:63`）在消息归档后追加；`v2Run` 等 `WaitArchived()` /
@@ -598,8 +600,10 @@ X」就可以据此调整。MCP 工具走同一道闸门，按名字查 `TierOf`
 框架正是在 loop 退出时写检查点。
 
 前端读服务端的答案，而不是自己的内存：会话的 `state` 来自服务端对 run 账本的扫描，并喂给
-composer 的守卫，所以第二个标签页水合出来就是「忙」。run 账本是一次 run 的持久记录，
-每次 run 一行，由 run 自己的 goroutine 写（`agentkit/run/runrow.go`），由
+composer 的守卫，所以第二个标签页不会往一个在跑的轮次里发消息。★ 而它也不是被挡在外面
+—— 它**挂上**归这个会话的那一轮，跟着看；挂上是读：不开始任何轮次，也不占任何槽位。
+run 账本是一次 run 的持久记录，每次 run 一行，由 run 自己的 goroutine 写
+（`agentkit/run/runrow.go`），由
 `GET /v2/sessions/{id}/runs` 读回来；终态行落在消息落盘之后，单是这个次序就让 busy 标记
 不用超时也天然诚实。被崩溃留下的、还开着的 run 会在启动巡检时被收成 `interrupted`。
 

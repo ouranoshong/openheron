@@ -276,6 +276,15 @@ export const THREAD_COMPACT = "77777777-7777-4777-8777-777777777777"
 // window — the case where "0 %" would be a lie.
 export const THREAD_TINY = "88888888-8888-4888-8888-888888888888"
 
+// LATE_DELTA is what a run publishes **after** a second surface attached.
+//
+// ★ It is the proof that the attached surface is still receiving: the
+//   window was replayed at the attach, and this was published after it.
+export const LATE_DELTA = " \u2014 and still going"
+
+// LATE_DELAY_MS is how long the run waits before publishing it.
+export const LATE_DELAY_MS = 150
+
 export const MARKER_A = "MARKER-ALPHA"
 export const MARKER_B = "MARKER-BRAVO"
 export const MARKER_LONG = "MARKER-LONGCVT"
@@ -1632,6 +1641,11 @@ export function startFakeServer(port = 0): FakeServer {
     const runId = body.runId ?? `run-${++seq}`
     let thread = body.threadId ? find(body.threadId) : undefined
 
+    // \u2605 stillRunning is the scenario that leaves a live turn behind: the
+    //
+    //   run stays open in the ledger and the session stays busy.
+    const stillRunning = scenario === "busySession" || scenario === "slowRun"
+
     if (!body.threadId) {
       return fail(400, "threadId is required; create the session with POST /v2/sessions first", "invalid_body")
     }
@@ -1699,6 +1713,23 @@ export function startFakeServer(port = 0): FakeServer {
         start(c) {
           // The window: what the client missed when it lost the connection.
           for (const ev of run.events) c.enqueue(encode(ev))
+          if (stillRunning) {
+            // \u2605 The run goes on. A second surface that attached is
+            //
+            //   watching the same turn, and the turn does not stop because
+            //   somebody looked at it.
+            //
+            //   The late delta is what proves the attached surface is
+            //   still receiving: it was published after the attach.
+            setTimeout(() => {
+              try {
+                c.enqueue(encode(textDelta(run.messageId ?? "m-1", LATE_DELTA)))
+              } catch {
+                // The reader is gone.
+              }
+            }, LATE_DELAY_MS)
+            return
+          }
           // And the rest of the turn.
           for (const ev of run.remaining ?? []) {
             if (assistant) applyToMessage(assistant, ev)
@@ -1752,7 +1783,13 @@ export function startFakeServer(port = 0): FakeServer {
     }
     thread.messages.push(userMessage)
     const assistantMsg: FakeMessage = { id: msgId, role: "assistant", content: "" }
-    thread.messages.push(assistantMsg)
+    // \u2605 A turn that is still running has not been archived, so its
+    //
+    //   answer is not in the transcript. The fake keeps the message for
+    //   the run's own bookkeeping, but the transcript must not have it: a
+    //   second surface that attaches has to see the text **arrive**, not
+    //   read it out of the history.
+    if (!stillRunning) thread.messages.push(assistantMsg)
     if (thread.title === "New Session") thread.title = query.slice(0, 40)
 
     // ★ The "dropped" scenario: the connection dies mid-turn, but the run
@@ -1805,7 +1842,6 @@ export function startFakeServer(port = 0): FakeServer {
         //   A scenario that keeps the session busy leaves the run open:
         //   the session's state and the ledger must agree, or the client
         //   gets two different answers to the same question.
-        const stillRunning = scenario === "busySession" || scenario === "slowRun"
         thread!.runs = [
           ...(thread!.runs ?? []),
           {

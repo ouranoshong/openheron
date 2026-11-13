@@ -312,6 +312,11 @@ export function reduceEvent(state: ConversationState, event: AgEvent): Conversat
     case "RUN_STARTED":
       // ★ The run id is kept: it is the client's way back to this run if
       //   the connection drops.
+      //
+      // ★ And the busy flag goes. It said the live turn belongs to
+      //   somebody else, and it does not any more: this surface is
+      //   following the run now, so it is watching the turn rather than
+      //   being kept out of it.
       return {
         ...state,
         status: "running",
@@ -319,6 +324,7 @@ export function reduceEvent(state: ConversationState, event: AgEvent): Conversat
         interrupts: [],
         error: undefined,
         retry: undefined,
+        busy: false,
       }
 
     case "RUN_FINISHED":
