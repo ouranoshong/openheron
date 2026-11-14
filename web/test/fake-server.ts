@@ -1368,13 +1368,70 @@ export function startFakeServer(port = 0): FakeServer {
     // ★ A second agent, so an issue about another file has a file to be
     //   about — and so the editor's link to it goes somewhere.
     put("agents/agent-expert.md", "---\nmodel: openai/gpt-4o-mini\ndescription: expert\n---\nexpert body\n")
-    put("llm/deepseek.yaml", "type: openai\nbase_url: https://x\napi_key: ${KEY}\nmodels:\n  - id: flash\n")
+    put("llm/deepseek.yaml", "type: openai\nbase_url: https://x\nmodels:\n  - id: flash\n")
     // ★ A skill, so the tree has a folder that is two levels deep — the one
     //   partition whose path is not `<section>/<file>`.
     put("skills/code-review/SKILL.md", "---\ndescription: reviews a diff\n---\nbody\n")
     put("server/config.yaml", 'listen_addr: ":8080"\n')
   }
   seedSettings()
+
+  // ── /v2/secrets ─────────────────────────────────────────────────────────
+  //
+  // ★ An in-memory keyring. The entries are the ones the **configuration**
+  //   names — the same rule the real server follows, because a keyring
+  //   cannot be enumerated: an entry whose entity is gone is invisible, and
+  //   so is one whose provider file was never written.
+  const secretStore = new Map<string, string>()
+  // ★ The variables the fake says are set. One entry is stored **and** its
+  //   variable is set, so the shadowing case has a stable subject: "the
+  //   environment overrides the keyring" is the trap the whole design has to
+  //   show, and a fake that never showed it would not test it.
+  const secretEnvSet = new Set<string>(["MCP_FILESYSTEM_TOKEN"])
+  secretStore.set("mcp:filesystem", "fake-token")
+
+  const secretEntities = (group: string): string[] => {
+    const prefix = group === "llm" ? "llm/" : "mcps/"
+    return settingsDisk
+      .filter((f) => f.path.startsWith(prefix) && f.path.endsWith(".yaml"))
+      .map((f) => f.path.slice(prefix.length, -".yaml".length))
+      .sort()
+  }
+
+  const secretEnvName = (group: string, name: string): string =>
+    group === "llm" ? `LLM_${name.toUpperCase()}_API_KEY` : `MCP_${name.toUpperCase()}_TOKEN`
+
+  const secretUser = (group: string, name: string): string => `${group}:${name}`
+
+  const secretItem = (group: string, name: string) => {
+    const user = secretUser(group, name)
+    const envVar = secretEnvName(group, name)
+    const stored = secretStore.has(user)
+    const envSet = secretEnvSet.has(envVar)
+    return {
+      name,
+      stored,
+      source: stored ? `keyring:${user}` : "",
+      effective: envSet ? `env:${envVar}` : stored ? `keyring:${user}` : "none",
+      shadowed: stored && envSet,
+      envVar,
+    }
+  }
+
+  const secretList = () => ({
+    groups: [
+      {
+        id: "llm",
+        label: "Providers",
+        items: secretEntities("llm").map((n) => secretItem("llm", n)),
+      },
+      {
+        id: "mcp",
+        label: "MCP servers",
+        items: secretEntities("mcp").map((n) => secretItem("mcp", n)),
+      },
+    ],
+  })
 
   const SETTINGS_MANIFEST = {
     // ★ The order mirrors the real server's partition table
@@ -1405,7 +1462,7 @@ export function startFakeServer(port = 0): FakeServer {
     ],
     templates: {
       agents: "---\nmodel: \ndescription: \n---\n\n# available models: deepseek/flash\n",
-      llm: "type: openai\nbase_url: \napi_key: ${}\nmodels: []\n",
+      llm: "type: openai\nbase_url: \nmodels: []\n",
       mcps: "transport: stdio\ncommand: mcp-example-server\nargs: []\ntimeout: 30s\ncall_timeout: 60s\n",
       skills: "---\ndescription: \n---\n\n# Instructions\n",
       // ★ The tools section template is **nothing but comments**, exactly as
@@ -1536,14 +1593,14 @@ export function startFakeServer(port = 0): FakeServer {
       return issues
     }
     if (path.startsWith("llm/")) {
-      const m = /^api_key:\s*(?!\$\{|@file:)/m.exec(content)
+      const m = /^\s*api_key:/m.exec(content)
       if (m) {
         issues.push({
           path,
           line: content.slice(0, m.index).split("\n").length,
           severity: "error",
           message:
-            "api_key must be a reference, not a literal: use ${ENV_VAR} or @file:/path so the secret stays out of the repository",
+            "api_key is no longer read — the key comes from LLM_<PROVIDER>_API_KEY (or from the keyring entry llm:<provider>); delete this line",
         })
       }
     }
@@ -1636,8 +1693,15 @@ export function startFakeServer(port = 0): FakeServer {
   }
 
   const writeSetting = (path: string, body: string, baseRevision?: string): Response => {
-    if (path.startsWith("llm/") && /^api_key:\s*(?!\$\{|@file:)/m.test(body)) {
-      return fail(400, "api_key must be a ${ENV} or @file: reference", "config_secret_literal")
+    // ★ The `api_key:` line is **retired**: the provider's name says where
+    //   the key comes from, so a file that carries one is a file the loader
+    //   refuses. Any line is refused — not only a literal one.
+    if (path.startsWith("llm/") && /^\s*api_key:/m.test(body)) {
+      return fail(
+        400,
+        "api_key is no longer read — the key comes from LLM_<PROVIDER>_API_KEY (or from the keyring entry llm:<provider>); delete this line",
+        "config_key_field_retired",
+      )
     }
     if (body.includes("BROKEN")) {
       return fail(
@@ -2078,6 +2142,47 @@ export function startFakeServer(port = 0): FakeServer {
 
       if (path === "/v2/settings" && req.method === "GET") {
         return json(SETTINGS_MANIFEST)
+      }
+
+      // ★ The secret surface: two namespaces, one shape. The group is in the
+      //   path, so "delete everything" is scoped by the request itself.
+      if (path === "/v2/secrets" && req.method === "GET") {
+        return json(secretList())
+      }
+
+      const secretOne = /^\/v2\/secrets\/([^/]+)\/([^/]+)$/.exec(path)
+      if (secretOne) {
+        const group = decodeURIComponent(secretOne[1])
+        const name = decodeURIComponent(secretOne[2])
+        if (group !== "llm" && group !== "mcp") {
+          return fail(404, "the group must be llm or mcp", "invalid_body")
+        }
+        if (req.method === "PUT") {
+          const body = (await readJSON(req))
+          const value = typeof body.value === "string" ? body.value.trim() : ""
+          if (value === "") return fail(400, "the value is empty", "invalid_body")
+          secretStore.set(secretUser(group, name), value)
+          // ★ The answer carries no value: the interface shows where a key
+          //   is and whether it is in force, never what it is.
+          return json({ group, ...secretItem(group, name) })
+        }
+        if (req.method === "DELETE") {
+          const had = secretStore.delete(secretUser(group, name))
+          return json({ group, name, deleted: had ? 1 : 0 })
+        }
+      }
+
+      const secretGroup = /^\/v2\/secrets\/([^/]+)$/.exec(path)
+      if (secretGroup && req.method === "DELETE") {
+        const group = decodeURIComponent(secretGroup[1])
+        if (group !== "llm" && group !== "mcp") {
+          return fail(404, "the group must be llm or mcp", "invalid_body")
+        }
+        let deleted = 0
+        for (const name of secretEntities(group)) {
+          if (secretStore.delete(secretUser(group, name))) deleted++
+        }
+        return json({ group, deleted })
       }
 
       if (path === "/v2/settings/validate" && req.method === "POST") {

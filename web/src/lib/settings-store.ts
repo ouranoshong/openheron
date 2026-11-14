@@ -21,11 +21,23 @@ export type SaveState =
   | "conflict"
   | "error"
 
+/**
+ * Which surface of the Settings dialog is open.
+ *
+ * ★ Two, and not more: the **files** and the **secrets**. ★ The secrets are
+ *   configuration, so they live in the same place — but they are not files,
+ *   so they are not in the tree: the tree is built from the paths the server
+ *   sends, and a secret has no path.
+ */
+export type SettingsTab = "files" | "secrets"
+
 export interface SettingsState {
   open: boolean
   manifest?: SettingsManifest
   loading: boolean
   loadError?: string
+
+  tab: SettingsTab
 
   selected?: string
   saved: string
@@ -45,6 +57,7 @@ export interface SettingsState {
   // ── actions ────────────────────────────────────────────────────────────
   openSettings(): Promise<void>
   closeSettings(): void
+  setTab(tab: SettingsTab): void
   select(path: string): Promise<void>
   edit(text: string): void
   reloadFromDisk(): Promise<void>
@@ -70,6 +83,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   serverIssues: [],
   saveState: "idle",
   applied: false,
+  tab: "files",
 
   async openSettings() {
     set({ open: true, loading: true, loadError: undefined })
@@ -85,7 +99,14 @@ export const useSettings = create<SettingsState>((set, get) => ({
 
   closeSettings() {
     cancelPendingValidate()
-    set({ open: false, selected: undefined, draft: "", saved: "", revision: "", issues: [], serverIssues: [], saveState: "idle" })
+    // ★ The tab goes back to the files: the dialog always opens on the tree,
+    //   and a user who left it on Secrets would come back to a panel about a
+    //   key they may no longer care about.
+    set({ open: false, tab: "files", selected: undefined, draft: "", saved: "", revision: "", issues: [], serverIssues: [], saveState: "idle" })
+  },
+
+  setTab(tab) {
+    set({ tab })
   },
 
   async select(path) {
