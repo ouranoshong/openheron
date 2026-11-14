@@ -1191,6 +1191,18 @@ export function startFakeServer(port = 0): FakeServer {
 
   const find = (id: string) => threads.find((t) => t.threadId === id)
 
+  // fakeAgents is the agent table the fake server currently serves.
+  //
+  // ★ The health endpoint answers with the **same** version: the client's
+  //   watcher reads the cheap signal and compares it against the one it
+  //   already has, so the two have to be the same number.
+  const fakeAgents = (): { version: string } => {
+    if (agentsMode === "multi") return FAKE_AGENTS_MULTI
+    if (agentsMode === "many") return FAKE_AGENTS_MANY
+    if (agentsMode === "grew") return FAKE_AGENTS_GREW
+    return FAKE_AGENTS
+  }
+
   const meta = (t: FakeThread) => ({
     threadId: t.threadId,
     title: t.title,
@@ -1891,10 +1903,7 @@ export function startFakeServer(port = 0): FakeServer {
       requests.push(`${req.method} ${path}`)
 
       if (path === "/v2/agents") {
-        if (agentsMode === "multi") return json(FAKE_AGENTS_MULTI)
-        if (agentsMode === "many") return json(FAKE_AGENTS_MANY)
-        if (agentsMode === "grew") return json(FAKE_AGENTS_GREW)
-        return json(FAKE_AGENTS)
+        return json(fakeAgents())
       }
       if (path === "/v2/mcps" && req.method === "GET") {
         const agent = url.searchParams.get("agent") ?? "main"
@@ -1908,7 +1917,11 @@ export function startFakeServer(port = 0): FakeServer {
               : FAKE_MCP_SERVERS
         return json({ agent, servers })
       }
-      if (path === "/v2/health") return json({ ok: true })
+      if (path === "/v2/health") {
+        // ★ The cheap signal the client's watcher reads: the configuration's
+        //   fingerprint, and nothing else.
+        return json({ ok: true, configVersion: fakeAgents().version })
+      }
 
       if (path === "/__fake/reset" && req.method === "POST") {
         threads = seedThreads()

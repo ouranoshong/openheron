@@ -499,7 +499,7 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 
 ★ **流式光标（新增，但只能做成 CSS 伪元素）**：现在流式输出**没有光标**，文本一段段蹦出来。
 
-★ 实现约束是硬的：消息流**每帧重渲染**（`web/src/lib/api.ts:463` 的 `FRAME_MS` = 33ms 批处理，
+★ 实现约束是硬的：消息流**每帧重渲染**（`web/src/lib/api.ts:476` 的 `FRAME_MS` = 33ms 批处理，
 每帧重新解析 markdown），所以光标**不能是 React 元素** —— 那样每帧都要重挂一次 DOM，成本和闪烁
 都不可接受。只能做成 CSS 伪元素（`::after` 画一根竖线，`opacity` 呼吸，不占 DOM、不引发重渲染）。
 
@@ -684,7 +684,7 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 | `web/src/lib/store/history.ts:90` | 历史水合时装配 part |
 | `web/src/lib/events.ts:188` | `isOpenPart`：联合类型变宽后的收窄 |
 | `web/src/lib/api.ts:302` | `fileUrl`：字符串而不是 fetch |
-| `web/src/lib/api.ts:531` | 请求体里的 `attachments` |
+| `web/src/lib/api.ts:544` | 请求体里的 `attachments` |
 
 ### A.6 前端：预览与动效
 

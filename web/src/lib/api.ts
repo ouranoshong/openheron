@@ -358,6 +358,19 @@ export const api = {
 
   listAgents: () => call<AgentsView>("/v2/agents", { cache: "no-store" }),
 
+  // configVersion reads the configuration's fingerprint, and nothing else.
+  //
+  // ★ It is the **cheap** way to ask "did the configuration change?": the
+  //   agent table is a fat payload, and a watcher only needs this one
+  //   string. The health endpoint carries it.
+  //
+  // ★ An empty string means the server has no configuration to fingerprint —
+  //   the caller has to fall back to reading the whole view.
+  configVersion: () =>
+    call<{ configVersion?: string }>("/v2/health", { cache: "no-store" }).then((v) =>
+      v.configVersion ?? "",
+    ),
+
   listSkills: () => call<{ skills: SkillView[] }>("/v2/skills", { cache: "no-store" }),
 
   // listMCPServers reads the MCP servers of one agent. The agent is

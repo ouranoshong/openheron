@@ -449,7 +449,7 @@ agent **可以**合法地同时忙 —— 客户端若把 `agent_busy` 读成「
 this session」），客户端不必多一个码就能分辨。
 
 前端必须处理被拒的发送，**且不破坏本地视图**：**错误码不能丢** —— `runStream` 把
-`body.code` 一起交给 `onError`（`web/src/lib/api.ts:541`，签名在 `:451`），只剩散文
+`body.code` 一起交给 `onError`（`web/src/lib/api.ts:554`，签名在 `:464`），只剩散文
 的话前端分不清「忙」与「失败」；**乐观气泡要回滚** —— 那条消息根本没到服务端，却留在
 屏幕上像是发出去过（`web/src/lib/store/actions.ts:347-353`）；**会话被标记为忙，不是
 失败**。
@@ -1169,8 +1169,8 @@ stderr（`main.go:282-286`）。
 - `web/src/lib/store/actions.ts` — 409 回滚与标记(:347)、`reattach`(:395)、流结束后
   重新扫描(:377)、`applyScan`(:453)、`attachToLiveRun`(:491)、`scanBusy`(:545)、
   扫描失败保持原样(:549)、`stop` 后重新扫描(:652)
-- `web/src/lib/api.ts` — `listRuns`(:342)、`onError` 带 code(:451)、把 `body.code` 传下去
-  (:541)
+- `web/src/lib/api.ts` — `listRuns`(:342)、`configVersion`(:369)、`onError` 带 code(:464)、
+  把 `body.code` 传下去(:554)
 - `web/src/lib/types.ts` — `busy` 的含义(:151)
 
 ### A.6 日志装配
