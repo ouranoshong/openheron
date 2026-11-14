@@ -641,12 +641,13 @@ func TestTheServerConfigurationIsWritten(t *testing.T) {
 // nothing. That is the property worth pinning: the day a default moves, this
 // test says the template has to move with it.
 //
-// ★ The one exception is log.file. The code's default is an empty path — the
+// ★ The exceptions are log.file and log.console. The code's defaults are an
 //
-//	log goes to the standard error and nowhere else — and the template names
-//	logs/openheron.log, so a new project keeps a log on disk instead of
-//	losing it with the terminal it was started in. The exception is the
-//	point, so it is pinned here rather than left to the template's text.
+//	empty path and a copy on the standard error — and the template names a
+//	logs/openheron.log and keeps stderr quiet, so a new project's log lands
+//	on disk and nowhere else, instead of dying with the terminal it was
+//	started in. The exceptions are the point, so they are pinned here
+//	rather than left to the template's text.
 func TestTheServerConfigurationHoldsTheCodeDefaults(t *testing.T) {
 	e := newEnv(t)
 	p := e.plan(Options{})
@@ -667,7 +668,13 @@ func TestTheServerConfigurationHoldsTheCodeDefaults(t *testing.T) {
 	if with.Server.Log.File != "logs/openheron.log" {
 		t.Fatalf("the template must name a log file, got %q", with.Server.Log.File)
 	}
-	with.Server.Log.File = ""
+	if with.Server.Log.Console {
+		t.Fatal("the template must keep the standard error quiet")
+	}
+	// ★ The two exceptions are normalized away; every other field still has
+	//   to be the code's own default.
+	with.Server.Log.File = without.Server.Log.File
+	with.Server.Log.Console = without.Server.Log.Console
 	if !reflect.DeepEqual(with.Server, without.Server) {
 		t.Fatalf("the written server configuration differs from the code defaults:\nwith:    %+v\nwithout: %+v",
 			with.Server, without.Server)

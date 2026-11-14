@@ -6,9 +6,10 @@
 #
 #   ★ The values below are the **code's own defaults**, written out so that
 #     they are visible and editable. Writing them changes nothing by itself —
-#     it only makes the knobs findable. ★ The one exception is `log.file`:
-#     the code's default is an empty string (stderr only), and this template
-#     names a path — so a new project keeps a log on disk.
+#     it only makes the knobs findable. ★ The exceptions are `log.file` and
+#     `log.console`: the code's defaults are an empty path and a copy on the
+#     standard error, and this template names a file and keeps stderr quiet —
+#     so a new project's log lands on disk and nowhere else.
 
 # ★ The address the HTTP server listens on. The default is the **loopback**:
 #   the agent's tools run shell commands, so a listener every machine on the
@@ -36,8 +37,7 @@ log_requests: false
 # ★ Where the log goes. The **code's default** is an empty `file`: the log
 #   then goes to the standard error only, because a server started from a
 #   terminal is already being watched. ★ This template names a path, so a new
-#   project keeps a copy on disk as well — set `file: ""` to go back to
-#   stderr only.
+#   project keeps a copy on disk — set `file: ""` to go back to stderr only.
 #
 #   A relative path resolves against the **config root** (<project>/.openheron),
 #   next to state/ and the partitions — not the project root. Rotated by size:
@@ -45,11 +45,16 @@ log_requests: false
 #   decide how much history survives, and compress gzips the rotated files.
 #   $OPENHERON_LOG_FILE overrides the path for one run.
 #
+#   ★ console: false means the file is the **whole** log: the standard error
+#     goes quiet once the configuration is read and the file is opened. The
+#     lines before that — and the reason a file could not be opened — still
+#     go to stderr. Set it to true to keep both.
+#
 #   ★ A log file that cannot be opened is a warning, not a failed start: the
 #     process keeps running on stderr, which is where the reason appears.
 log:
   file: logs/openheron.log
-  console: true        # keep writing to stderr as well
+  console: false       # the file is the log; the terminal goes quiet
   max_size_mb: 20
   max_age_days: 14
   max_backups: 5

@@ -134,6 +134,10 @@ func TestTheServerTemplateNamesTheRequestDumpSwitch(t *testing.T) {
 //
 //	same path, so a "contains" test would pass on it — the key has to
 //	start a line of its own.
+//
+// ★ The standard error stays quiet: the file is the whole log, so a
+//
+//	server that runs in the background does not scroll a terminal.
 func TestTheServerTemplateEnablesTheLogFile(t *testing.T) {
 	for _, text := range Templates(DirServer) {
 		lines := strings.Split(text, "\n")
@@ -141,6 +145,7 @@ func TestTheServerTemplateEnablesTheLogFile(t *testing.T) {
 			if line != "log:" {
 				continue
 			}
+			var hasFile, quietStderr bool
 			for _, next := range lines[i+1:] {
 				if next == "" || strings.HasPrefix(next, "#") {
 					continue
@@ -148,13 +153,23 @@ func TestTheServerTemplateEnablesTheLogFile(t *testing.T) {
 				if !strings.HasPrefix(next, " ") {
 					break
 				}
-				if strings.TrimSpace(next) == "file: logs/openheron.log" {
-					return
+				field := strings.TrimSpace(next)
+				if idx := strings.Index(field, "#"); idx >= 0 {
+					field = strings.TrimSpace(field[:idx])
 				}
+				switch field {
+				case "file: logs/openheron.log":
+					hasFile = true
+				case "console: false":
+					quietStderr = true
+				}
+			}
+			if hasFile && quietStderr {
+				return
 			}
 		}
 	}
-	t.Fatal("the server/config.yaml template must carry an active log block that names a file")
+	t.Fatal("the server/config.yaml template must carry an active log block that names a file and keeps stderr quiet")
 }
 
 func TestDefaultsSurviveWhenFileOmitsKeys(t *testing.T) {

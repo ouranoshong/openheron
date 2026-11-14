@@ -800,6 +800,7 @@ told to (`proxy: env`).
 | `log_level` | `info` | `debug`, `info`, `warn` or `error` — decides which lines reach the output |
 | `log_requests` | `false` | Whether to print the redacted model request body and the raw `tools` array at `debug` level; same effect as `OPENHERON_LOG_LLM_REQUESTS=1` |
 | `log.file` | `""` | A file to write the log to, relative to the **config root** — empty means stderr only. A new project's template names `logs/openheron.log` |
+| `log.console` | `true` | Whether the standard error keeps a copy beside the file — a new project's template sets it to `false` |
 
 ★ **`server/` is not hot-reloaded** — a change only takes effect after a restart. That is
 why it is **read-only** in the config editor, and submitting it fails with
@@ -819,11 +820,16 @@ it has nothing to do with where `log.file` writes.
 ★ A `log_level` that is not one of the four falls back to `info`; the config's `deferred`
 notices carry the reason.
 
-★ The log goes to the standard error unless `log.file` names a path — relative to the
-**config root**. A new project gets `logs/openheron.log`: the template writes it out, while
-the **code's** default is an empty path — the standard error only. The file is rotated by
-size, and a file that cannot be opened is a warning rather than a failed start: the process
-stays on the standard error and says why.
+★ Where the log goes is decided by two keys. `log.file` names the file — relative to the
+**config root** — and `log.console` says whether the standard error keeps a copy beside it.
+The **code's** defaults are an empty path and a stderr copy, so an untouched configuration
+logs to the standard error only. A new project gets `logs/openheron.log` and a **false**
+`log.console`: the file is the whole log, and the terminal goes quiet once the configuration
+is read. The lines before that — and the reason a file could not be opened — still go to
+the standard error.
+
+★ The file is rotated by size, and a file that cannot be opened is a warning rather than a
+failed start: the process stays on the standard error and says why.
 
 ### 4.6 Skills (`skills/`)
 

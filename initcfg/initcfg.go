@@ -171,9 +171,11 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 	//   so init writes it directly (see Apply). The values are the code's own
 	//   defaults: writing them changes nothing, it only makes them visible.
 	//
-	// ★ The one exception is log.file: the code's default is an empty string
-	//   (stderr only), and the template names a path — a new project keeps a
-	//   log on disk instead of losing it with the terminal it was started in.
+	// ★ The exceptions are log.file and log.console: the code's defaults are
+	//   an empty path and a copy on the standard error, and the template
+	//   names a file and keeps stderr quiet — a new project's log lands on
+	//   disk and nowhere else, instead of dying with the terminal it was
+	//   started in.
 	if err := copySection(p, manifest.Templates, spec.DirServer, nil); err != nil {
 		return nil, err
 	}

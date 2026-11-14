@@ -100,6 +100,8 @@
 为空串），而**出厂模板给的是 `logs/openheron.log`**（`server/config.yaml` 的 `log.file`），所以
 新项目开箱就有一份落盘的日志。路径相对**配置根**解析，打不开文件只告警、不阻止启动
 （`agentkit/spec/config.go:515-527` 的 `Service.LogFile`；见 `docs/runtime-design.md` §4.3）。
+★ 出厂模板的 `log.console` 是 `false` —— **文件就是全部的日志**：配置读出、文件打开之后，
+标准错误就安静了（`main.go:336`）。
 ★ 于是 `logs/` 与 `state/` 是同一类东西 —— **运行数据**，进版本库之前要把它排掉。
 
 ### 2.1 版本控制边界
@@ -842,7 +844,7 @@ skills 怎么没生效」变成一个查不出原因的问题。★ **这次向�
 | `log_level` | `string` | `info` | `debug` `info` `warn` `error`；非法值回退 `info` 并记 `deferred`（`agentkit/spec/load.go:149-151`） |
 | `log_requests` | `bool` | `false` | 是否在 `debug` 下打印脱敏后的模型请求体；等价于 `OPENHERON_LOG_LLM_REQUESTS=1`，环境变量优先 |
 | `log.file` | `string` | `""` | 日志文件；相对**配置根**解析；空串 = 只写 stderr；由 `OPENHERON_LOG_FILE` 覆盖。★ **代码缺省是空串，出厂模板给的是 `logs/openheron.log`** —— 新项目开箱就落盘 |
-| `log.console` | `bool` | `true` | 写文件的同时保留 stderr |
+| `log.console` | `bool` | `true` | 写文件的同时保留 stderr。★ **代码缺省是 `true`，出厂模板给的是 `false`** —— 文件就是全部的日志 |
 | `log.max_size_mb` / `max_age_days` / `max_backups` / `compress` | `int` / `int` / `int` / `bool` | `20` / `14` / `5` / `false` | 单个文件的 MB 上限（`0` = 不限，负数归一为 `0`）；轮转文件的保留天数；最多保留几个轮转文件；轮转文件是否 gzip |
 | `start_timeout` | `LenientDuration` | `60s` | 一轮从提交到进入运行状态的上限 |
 | `lease_ttl` | `LenientDuration` | `10m` | 一个 run 的租约在无进展的情况下能存活多久；它必须**长于 provider 自己的超时** |
