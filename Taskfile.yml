@@ -210,6 +210,14 @@ tasks:
   # The artifact is a **single binary** (the UI is already embedded with
   # go:embed), so "installing" means putting it somewhere on PATH — there is no
   # runtime dependency to install alongside it.
+  #
+  # ★ An install that failed must say so. The Windows branch used to print
+  #   "installed" even when the copy had failed: Copy-Item's failure is a
+  #   **non-terminating** error, so the statement after it ran anyway — the
+  #   old binary kept running while the task claimed a new one was in place.
+  #   The copy now happens in a script that stops on it (scripts/install-local.ps1),
+  #   and the version the installed binary reports is checked before anything
+  #   is claimed.
 
   install:
     desc: 'Install the binary into PREFIX (platform default); openheron is then runnable from anywhere'
@@ -225,7 +233,7 @@ tasks:
             echo 'hint: {{.PREFIX}} is not on PATH — export PATH="{{.PREFIX}}:$PATH"'
         platforms: [linux, darwin]
       - cmd: |-
-          powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '{{.PREFIX}}' | Out-Null; Copy-Item -Force -Path '{{.BIN}}' -Destination '{{.INSTALL_PATH}}'; Write-Host 'installed: {{.INSTALL_PATH}}'; Write-Host 'hint: add {{.PREFIX}} to your user PATH if it is not there yet'"
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-local.ps1 -Bin "{{.BIN}}" -Dest "{{.INSTALL_PATH}}" -ExpectVersion "{{.VERSION}}"
         platforms: [windows]
 
   uninstall:
@@ -237,7 +245,7 @@ tasks:
           echo "removed: {{.INSTALL_PATH}}"
         platforms: [linux, darwin]
       - cmd: |-
-          powershell -NoProfile -Command "Remove-Item -Force -ErrorAction SilentlyContinue -Path '{{.INSTALL_PATH}}'; Write-Host 'removed: {{.INSTALL_PATH}}'"
+          powershell -NoProfile -Command "if (Test-Path '{{.INSTALL_PATH}}') { Remove-Item -Force -Path '{{.INSTALL_PATH}}' -ErrorAction Stop }; Write-Host 'removed: {{.INSTALL_PATH}}'"
         platforms: [windows]
 
   # ── Multi-platform release ─────────────────────────────────────────────────

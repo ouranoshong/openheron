@@ -822,3 +822,26 @@ $env:TMP = $env:TEMP
 
 **现状**：`已知边界` —— ★ 这是这台机器的毛病，不是仓库的。★ 别去删系统临时目录（它在工作区之外，
 回收站工具不会收它）；换一个 `TEMP` 就够了。
+
+## 13. 构建与安装
+
+### 13.1 ★ 非终止的错误让安装器说了谎
+
+**症状**：`task install` 失败了 —— 目标文件「正由另一进程使用」—— 然后它照样打印
+`installed: C:\...\openheron.exe`。★ 旧二进制还在跑，而任务说新的已经装上了。
+
+**根因**：Windows 分支是一条 PowerShell 一行命令，`Copy-Item` 失败之后紧接着就是
+`Write-Host 'installed: ...'`。★ PowerShell 的**非终止错误**不会中断语句序列：复制失败被记成一条
+错误记录，下一句照样跑；`powershell -Command` 的退出码也因此是 0 —— 任务**成功**返回。
+
+★ 同一个毛病在 `uninstall` 里也有：`-ErrorAction SilentlyContinue` 把失败吞掉，然后打印 `removed:`。
+
+**修法**：★ **复制在前，宣称在后**，而且失败必须**终止**。复制挪进
+`scripts/install-local.ps1`（`$ErrorActionPreference = "Stop"` + `try/catch`）：失败时退出码非 0，
+`installed:` 根本不会打印。★ 装完再核一次版本（`openheron version`）——「装上了」要**能被验证**，
+而不只是「复制没报错」。★ PATH 提示只在那个目录**真的不在用户 PATH 上**时才打 —— 每次都打的提示
+等于没有提示。
+
+**现状**：`已修` —— `scripts/install-local.ps1` 与 `Taskfile.yml` 的 `install` / `uninstall`。
+★ 发布版的安装器（`scripts/install.ps1`）本来就没这个毛病：它开头就设了
+`$ErrorActionPreference = "Stop"`，而且**装完、验完版本**才说装好了。
