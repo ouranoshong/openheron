@@ -41,6 +41,22 @@ const (
 	RunEventContextUsage
 	// RunEventInterrupt reports the approvals the run is waiting for.
 	RunEventInterrupt
+	// RunEventApprovalResolved says the approval was answered.
+	//
+	// ★ It is a **session** fact, not a run's: the approval belongs to the
+	//   session, and the run that answered it is a *different* run. A
+	//   surface that is not watching that run still has to learn that the
+	//   card it holds is no longer answerable — otherwise it sits on a
+	//   question that was already answered, and every answer it offers is
+	//   refused.
+	RunEventApprovalResolved
+	// RunEventRunStarted says a new run owns the session.
+	//
+	// ★ It is what lets a surface that missed the start follow the round:
+	//   the run's own stream belongs to the surface that asked, and a
+	//   surface that was not there when the round began has no stream at
+	//   all.
+	RunEventRunStarted
 	// RunEventRetry reports that the provider is retrying.
 	RunEventRetry
 	// RunEventError reports that the run failed.
@@ -85,6 +101,15 @@ type RunEvent struct {
 	Pending []PendingInterrupt
 	// Code is the failure's code, on RunEventError.
 	Code string
+	// InterruptID names the approval the event is about, on
+	// RunEventApprovalResolved.
+	InterruptID string
+	// Approved carries the decision, on RunEventApprovalResolved.
+	Approved bool
+	// Reason carries the user's reason, on RunEventApprovalResolved.
+	Reason string
+	// TurnKind says what kind of turn a RunEventRunStarted announces.
+	TurnKind TurnKind
 }
 
 // Interrupt is one approval request, in openheron's own shape.

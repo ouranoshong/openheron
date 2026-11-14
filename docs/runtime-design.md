@@ -315,6 +315,51 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 从 `GET /v2/sessions/{id}/messages` 水合，看到的是**已经结束**的那一轮。窗口只服务
 「它还在跑的时候挂上来」—— 一个实时视图，永远不是最终视图。
 
+### 1.7 会话公告通道：审批不属于任何一轮
+
+★ **审批属于会话，不属于任何一轮。** 抛出审批的那一轮在抛出审批的那一刻就结束了
+（§1.6：loop 退出时关发布方，`agentkit/run/bridge.go:169`），而审批还在等一个答案。
+于是「审批被回答了」这个事实**无处可去** —— 它不能骑在旧一轮的总线上，那条总线已经
+死了；而等着这个答案的界面，手里那张卡于是永远留着，它给的每一个答案服务端都会拒。
+
+★ 所以有一条**会话级**的通道（`agentkit/run/announce.go:27` 的 `sessionAnnouncer`）：
+它比这个会话上的任何一轮都活得久。事实有两类：
+
+| 事实 | 发布点 | 帧 |
+|---|---|---|
+| 审批被回答 | `TakePendingApproval` 成功之后（`agentkit/run/runtime.go:620`） | `CUSTOM "approval_resolved"`，值是 `interrupt_id` / `approved` / `reason` / `run_id` |
+| 新一轮开始 | `startLoop` 之后（`agentkit/run/runtime.go:447`） | `CUSTOM "run_started"`，值是 `run_id` / `kind` |
+
+★ **两个事实是分开的，不是一个。** 「审批被回答」不等于「新一轮开始」：一次恢复消费了
+审批却没有继续这一轮（`Resume` 里 `len(approvals) == 0` 那条路），这时候只有前一个
+事实；反过来，一轮开始也不等于审批被回答。
+
+★ **`run_started` 发布在 `runClaimedTurn`，不是 `claimTurn`。** 放弃的 claim（一次恢复
+没找到可回答的审批）从未开始过一轮；宣布它会让别的界面去跟一个不存在的 run。
+
+★ **通道没有回放窗口**（`agentkit/run/publish.go:68` 的 `newLivePublisher`）。这些事实
+是**实时通知**，过去是**账本**的事 —— 一个迟到的订阅者会去挂一个早就结束的老 run。
+
+★ **总线是按订阅者建的，不是按会话建的**（`agentkit/run/announce.go:42`）。没人听的
+事实没有投递对象，而为一个没人听的会话留一条总线，就是每个见过的会话留一条：泄漏。
+最后一个订阅者走了，总线也就走了（`agentkit/run/announce.go:59`）。
+
+★ **通道没有终态帧**（`transport/transport.go:115` 的 `RenderSession`）：那里既没有
+`RUN_STARTED` 也没有 `RUN_FINISHED` —— 描述的是一条比任何一轮都活得久的通道，不是某一
+轮。它在客户端离开时结束，客户端把这读成「回到扫描」，而不是「会话结束了」。
+
+★ **客户端先订阅、后扫描**（`api/v2_session_events.go:40`）：订阅之前发生的事在扫描
+里，订阅之后发生的事在这里。★ 通道一开就**先 ping 一下**
+（`transport/sse.go:112` 的 `Ping`）—— fetch 在第一个字节到来之前不会 resolve，而一个
+还没开始读的客户端，是没听见事实的客户端。
+
+★ **客户端这一边**（`web/src/lib/session-events.ts`）：`approval_resolved` 把那张卡拿掉，
+`run_started` 让这一边跟上去（`web/src/lib/store/actions.ts:670` 的 `followRun`）。
+★ **一次只跟一条流**：还握着上一轮的时候，新的挂上要等它结束
+（`web/src/lib/store/actions.ts:81` 的 `releaseRun`）—— 服务端一个会话只允许一轮活着的
+轮次，新的那一轮本来就只可能在旧的结束之后开始。
+★ **公告不写下 run id**：那个 id 说的是「这一边正在看哪一轮」，而这一边还没挂上去。
+
 ---
 
 ## 2. 会话准入
@@ -866,8 +911,12 @@ stderr（`main.go:282-286`）。
 | `GET /v2/sessions/{id}/runs/{runId}` | 一行 run |
 | `GET /v2/sessions/{id}` | 会话的 `state` 与 `runId`（`api/v2_sessions.go:90-93`） |
 | `GET /v2/sessions/{id}/messages` | 整份记录 + `state` + `usage`（含 `usage.context`） |
+| `GET /v2/sessions/{id}/events` | 这个会话的公告通道 —— 审批被回答了、新一轮开始了（§1.7） |
 
 ★ 扫描的路由**只读**（`api/v2_files.go:57-58`）。
+
+★ **公告通道不是扫描。** 它只推**实时事实**，不回答「发生过什么」；那件事永远归扫描
+（§1.3）。★ 它不读账本、不改任何状态 —— 真相仍然在账本与 transcript 里。
 
 ### 5.3 中止与压缩
 
@@ -1001,6 +1050,9 @@ stderr（`main.go:282-286`）。
 | `storage/filestore/compaction_test.go` | 有效历史是最后一条压缩消息及其后的消息；没有压缩标记的会话返回完整记录；被取代的消息仍在盘上 |
 | `transport/context_test.go` | 占用是每个 agent **最后一次**调用的数字，不是总和；没说过话的 agent 不出现 |
 | `transport/compaction_test.go` | 压缩以 `CUSTOM "context_compacted"` 事件在流上宣告；子 agent 的压缩不是会话的 |
+| `agentkit/run/announce_test.go` | 会话听见了「一轮开始」与「审批被回答」；审批的事实活得比抛出它的那一轮久；通道没有回放；总线跟着最后一个读者走 |
+| `transport/session_test.go` | 会话的帧只带自定义事件，没有 run 的起止帧，也没有终态帧 |
+| `api/v2_session_events_test.go` | 公告通道把两个事实送到客户端；未知的会话没有通道可开 |
 
 ### 6.4 前端
 
@@ -1013,6 +1065,7 @@ stderr（`main.go:282-286`）。
 | `web/test/compact-command.test.ts` | `/compact` 空闲时可见、运行中隐藏、等审批时隐藏；手动压缩带着数字来，实时压缩没有数字 |
 | `web/test/events.test.ts` | `RUN_STARTED` 记住 run id；没有 run id 的帧不会抹掉已有的那个；`RUN_STARTED` 清掉「忙在别处」 |
 | `web/test/attach.test.ts` | 没有活动 run 就没东西可挂；活动 run 就是挂上目标；本界面已经在跟那一轮时不重复挂；本界面在跟别的一轮时挂上活动的那一轮；活动 run 不是自己的就是忙；自己的 run 不忙；没有活动 run 就是空闲 |
+| `web/test/session-events.test.ts` | 公告帧读出审批与新一轮；半懂的帧被丢掉；审批被回答后那张卡消失；还有别的审批就还在等；新一轮不写下 run id |
 
 ### 6.5 E2E（假后端）
 
@@ -1021,6 +1074,8 @@ stderr（`main.go:282-286`）。
 | `web/test/e2e/reattach.spec.ts` | 连接断了以后重新挂上，这一轮不丢；重新挂上时只带 run id，不带问题 |
 | `web/test/e2e/session-busy.spec.ts` | 第二个界面挂上同一轮，跟着看；关掉第一个界面第二个继续接收；竞态下的第二个请求被拒绝，消息不留痕；挂上以后仍然能停止那一轮来接管 |
 | `web/test/e2e/compaction.spec.ts` | 压缩消息渲染成分隔线而不是气泡；被取代的消息仍然读得到；轮内发生的压缩当场画出边界；`/compact` 手动压缩后画出边界 |
+| `web/test/e2e/session-events.spec.ts` | 审批在别处被回答后，第二个界面的卡片消失，并跟上了继续的那一轮 |
+| `web/test/e2e/session-busy.spec.ts` | 错过一轮开始的第二个界面跟上去，而不是说忙在别处；轮次在跑时写的消息留在输入框里，不进记录 |
 
 ### 6.6 命令
 
@@ -1054,10 +1109,13 @@ stderr（`main.go:282-286`）。
    不是一把锁。问题是：DB 驱动是真实需求，还是仅仅做准备。数据库驱动这一行
    （§1.5）是**未实施**的。
 
-3. ★ **谁可以回答审批？要不要告诉第二个界面「是谁答的」？**
+3. ★ **要不要告诉第二个界面「是谁答的」？**
    待审批是会话级的，所以两个界面都可能尝试。`TakePendingApproval` 是原子的，于是
-   第二个会拿到 `ErrNoPendingInterrupt` —— 这是对的，但 UX 需要说明「别人已经答过
-   了」。
+   第二个会拿到 `ErrNoPendingInterrupt` —— 这是对的。
+   ★ **「别人已经答过了」这件事现在由服务端说了**（§1.7）：会话的公告通道把
+   「审批被回答」这个事实告诉每一个界面，于是第二个界面的卡片自己消失、它跟上继续的
+   那一轮。★ 剩下的那半是「**是谁**答的」：帧里带着 `approved` 与 `reason`，但没有答
+   的人 —— 而一个会话本来就可以有几个客户端，说「是谁」就得先有「谁」的身份。
 
 4. ★ **run 的那一行要不要带上用量合计？**
    这里刻意不放（§1.1）：数字归 transcript 管。但一份「这一轮花了多少」的 run 列表，
@@ -1107,16 +1165,16 @@ stderr（`main.go:282-286`）。
 
 ### A.2 运行时
 
-- `agentkit/run/runtime.go` — `defaultInstanceID`(:160)、`newRunID`(:187)、
-  `Submit`(:215)、闸门之后的破坏性动作(:236)、`claimTurn`(:265)、租约过期可接管
-  (:280)、`openRunRow`(:298)、记不下来就拒绝(:300)、申领租约(:312)、进展续租与丢租
-  即取消(:318)、`releaseClaim`(:384)、放弃的 claim 不复活(:398)、释放被换下的轮次
-  (:409)、run 上下文解绑(:425)、`ensureIdle`(:447)、`conflictTurns`(:475)、
-  问 loop 不问指针(:484)、`ensureNoLiveTurn`(:496)、`ensureNoLiveQuery`(:531)、
-  `Resume` 预检(:564)、先申领再消费审批(:584)、父 run 与父树(:593)、
-  `TakePendingApproval`(:601)、`Abort`(:684)、清作废审批(:718)、
-  `clearVoidApproval`(:736)、`StatusOf`(:830)、待审批推导阶段(:845)、`activeRun`(:868)、
-  `parentRunOf`(:893)、`LiveRun`(:936)、`ScanRuns`(:958)
+- `agentkit/run/runtime.go` — `defaultInstanceID`(:173)、`newRunID`(:200)、
+  `Submit`(:228)、闸门之后的破坏性动作(:249)、`claimTurn`(:279)、租约过期可接管
+  (:293)、`openRunRow`(:311)、记不下来就拒绝(:312)、申领租约(:326)、进展续租与丢租
+  即取消(:331)、`releaseClaim`(:397)、放弃的 claim 不复活(:411)、释放被换下的轮次
+  (:422)、run 上下文解绑(:438)、`ensureIdle`(:466)、`conflictTurns`(:494)、
+  问 loop 不问指针(:503)、`ensureNoLiveTurn`(:515)、`ensureNoLiveQuery`(:550)、
+  `Resume` 预检(:595)、先申领再消费审批(:603)、父 run 与父树(:612)、
+  `TakePendingApproval`(:620)、`Abort`(:712)、清作废审批(:719)、
+  `clearVoidApproval`(:764)、`StatusOf`(:858)、待审批推导阶段(:873)、`activeRun`(:896)、
+  `parentRunOf`(:921)、`LiveRun`(:964)、`ScanRuns`(:986)
 - `agentkit/run/loop.go` — 读有效历史(:81)、装配失败要判失败(:139)、记下树(:147)、
   行变 running(:168)、`emit.Derive`(:177)、归档→标记→终态行(:212)、`finishRun`(:277)、
   压缩消息在前(:326)、`archiveCompaction`(:362)
@@ -1124,7 +1182,8 @@ stderr（`main.go:282-286`）。
   抛审批的 run 在这里关发布方(:169)、`closeApprovalRow`(:180)、`closeOpenRow`(:203)、
   `writeHeldApproval`(:227)
 - `agentkit/run/publish.go` — 窗口上界 1000(:20)、`publisher`(:36)、`Publish` 永不阻塞
-  (:60)、`Subscribe` 回放窗口(:106)、`subscription.truncated`(:163)
+  (:98)、`newLivePublisher`（公告通道没有窗口）(:68)、`watcherCount`(:85)、
+  `Subscribe` 回放窗口(:144)、`subscription.truncated`(:203)
 - `agentkit/run/turn.go` — `Wait` 超时判失败(:158)、`markReleased`(:232)、
   `holdsSlot`(:247)、`WaitReleased`(:266)、`WaitArchived`(:279)、归档等待上界 30 秒
   (:292)、`failedState`(:350)
@@ -1141,10 +1200,10 @@ stderr（`main.go:282-286`）。
   只有根 agent 的压缩(:268)、`compactionFrom`(:400)
 - `agentkit/emit/context.go` — `ContextUsageOf`(:21)、占用取 `TotalTokens`(:45)
 - `agentkit/emit/usage.go` — `aggregateUsage`(:71)
-- `contract/runevent.go` — `RunEventKind`(:13)、`RunEvent`(:56)
+- `contract/runevent.go` — `RunEventKind`(:13)、`RunEvent`(:72)
 - `contract/contract.go` — `TurnKind`(:12)、`ContextUsage`(:78)、`AgentContext`(:93)
 - `transport/transport.go` — 包注释(:1)、`CodeAgentUnavailable`(:43)、`Render`(:56)、
-  `CUSTOM "context_usage"`(:191)、`CUSTOM "context_compacted"`(:211)
+  `CUSTOM "context_usage"`(:243)、`CUSTOM "context_compacted"`(:266)
 
 ### A.4 会话准入
 
@@ -1157,7 +1216,7 @@ stderr（`main.go:282-286`）。
   `v2SessionRun`(:443)、`stateOf`(:505)
 - `api/v2_types.go` — `session_busy` 与改名理由(:40)、`run_not_live`(:58)、
   `ErrSessionBusy` → 409(:120)、`no_checkpoint` 的消息(:131)
-- `api/v2_files.go` — 路由注册(:40)、两条扫描路由(:57)
+- `api/v2_files.go` — 路由注册(:40)、两条扫描路由(:57)、公告通道的路由(:64)
 - `api/v2_compact.go` — `v2Compact`(:35)、轮次在跑 → 409(:46)
 - `api/v2_introspect.go` — `modelView.ContextWindow`(:105)、`modelBrief.ContextWindow`(:321)
 
@@ -1178,17 +1237,36 @@ stderr（`main.go:282-286`）。
   `onContextUsage`(:431)、`onContextCompacted`(:453)
 - `web/src/lib/store/history.ts` — 水合时认服务端的 `state`(:143)
 - `web/src/lib/store/selectors.ts` — `selectActiveContext`(:103)
-- `web/src/lib/store/actions.ts` — 409 回滚与标记(:347)、`reattach`(:395)、流结束后
-  重新扫描(:377)、`applyScan`(:453)、`attachToLiveRun`(:491)、`scanBusy`(:545)、
-  扫描失败保持原样(:549)、`stop` 后重新扫描(:652)
-- `web/src/lib/api.ts` — `listRuns`(:342)、`configVersion`(:369)、`onError` 带 code(:464)、
-  把 `body.code` 传下去(:554)
+- `web/src/lib/store/actions.ts` — 409 回滚与标记(:406)、`reattach`(:448)、流结束后
+  重新扫描(:430)、`applyScan`(:504)、`attachToLiveRun`(:542)、`scanBusy`(:711)、
+  扫描失败保持原样(:715)、`stop` 后重新扫描(:815)
+- `web/src/lib/api.ts` — `listRuns`(:343)、`configVersion`(:370)、`onError` 带 code(:465)、
+  把 `body.code` 传下去(:564)
 - `web/src/lib/types.ts` — `busy` 的含义(:151)
 
-### A.6 日志装配
+### A.6 会话公告通道
 
-- `agentkit/obs/logger.go` — handler 持 `Leveler`(:13)、`New`(:19)、`Discard`(:30)、
-  `ParseLevel`(:39)、`LevelFromEnv`(:71)
+- `agentkit/run/announce.go` — `sessionAnnouncer`(:27)、总线按订阅者建(:42)、
+  `subscribe`(:54)、`release`(:59)、`publish`(:77)、`Announce`(:93)、
+  `ReleaseAnnounce`(:102)、`AnnounceWatchers`(:115)、审批被回答(:142)、新一轮开始(:164)
+- `agentkit/run/runtime.go` — 新一轮开始(:447)、审批被回答(:637)
+- `contract/runevent.go` — `RunEventApprovalResolved`(:44)、`RunEventRunStarted`(:53)
+- `transport/transport.go` — `RenderSession`(:115)、`emitApprovalResolved`(:296)、
+  `emitRunStarted`(:312)
+- `transport/sse.go` — `Ping`(:112)
+- `api/v2_session_events.go` — `v2SessionEvents`(:40)、开通道先 ping(:63)
+- `api/v2_files.go` — 公告通道的路由(:64)
+- `web/src/lib/session-events.ts` — `parseSessionFact`(:43)、`applySessionFact`(:79)
+- `web/src/lib/api.ts` — `sessionStream`(:606)
+- `web/src/lib/store/actions.ts` — `releaseRun`(:81)、`watchSession`(:596)、
+  `applySessionFact`(:649)、`followRun`(:670)
+- `web/src/app/shell.tsx` — 通道跟着屏幕上的会话(:65)
+
+### A.7 日志装配
+
+- `agentkit/obs/logger.go` — `New`(:19)、`Discard`(:30)、`ParseLevel`(:39)、
+  `LevelFromEnv`(:71)
+- `agentkit/obs/handler.go` — handler 持 `Leveler`(:42)
 - `agentkit/obs/sink.go` — `Sink`(:25)、`NewSink`(:34)、`Set`(:66)、失败降级(:74)
 - `agentkit/obs/httplog/logging.go` — `Wrap`(:52)、被拒绝的请求(:161)、`tools` 原始字节
   (:263)

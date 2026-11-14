@@ -135,6 +135,13 @@ type Runtime struct {
 
 	mu     sync.Mutex
 	states map[string]*sessionState
+
+	// announcer is the session's announcement channel — the facts that
+	// outlive a run.
+	//
+	// ★ It is a separate bus per session, and not a field of sessionState:
+	//   the state dies with the turn, and the approval outlives the turn.
+	announcer *sessionAnnouncer
 }
 
 // New builds a Runtime. It performs no IO and starts nothing.
@@ -148,7 +155,13 @@ func New(cfg Config) *Runtime {
 	if cfg.Logger == nil {
 		cfg.Logger = discard
 	}
-	return &Runtime{cfg: cfg, instanceID: cfg.InstanceID, states: make(map[string]*sessionState), log: cfg.Logger}
+	return &Runtime{
+		cfg:        cfg,
+		instanceID: cfg.InstanceID,
+		states:     make(map[string]*sessionState),
+		log:        cfg.Logger,
+		announcer:  newSessionAnnouncer(),
+	}
 }
 
 // defaultInstanceID names this process.
@@ -427,6 +440,12 @@ func (rt *Runtime) runClaimedTurn(ctx context.Context, sess storage.Session, tur
 
 	rt.startLoop(runCtx, sess.ID(), turn, loop, cancel)
 
+	// ★ The session hears that a new round began. ★ It is published here
+	//   and not in claimTurn: a claim that gives up (a resume that found
+	//   nothing to answer) never starts a round, and announcing it would
+	//   tell the other surfaces to follow a run that does not exist.
+	rt.announceRunStarted(sess.ID(), turn.RunID, turn.Kind)
+
 	if ok, _ := loop.Push(item, adk.WithPreempt[loopItem, *schema.Message](adk.AfterToolCalls)); !ok {
 		rt.logf("session=%s push was rejected: the loop is stopping or its buffer is full", sess.ID())
 	}
@@ -607,6 +626,15 @@ func (rt *Runtime) Resume(ctx context.Context, sessionID, runID string, decision
 		rt.releaseClaim(sess, turn, prev, prevLoop)
 		return nil, ErrNoPendingInterrupt
 	}
+
+	// ★ The approval is gone: it was consumed, and every surface waiting on
+	//   it has to hear that its card is stale — a surface that keeps a card
+	//   the server has already answered offers answers that are refused.
+	//
+	// ★ It is published here and not when the round starts: the
+	//   consumption is the fact, and a resume that finds nothing to answer
+	//   consumes the approval without continuing the round.
+	rt.announceApprovalResolved(sess.ID(), pending.Interrupts, decisions, turn.RunID)
 
 	approvals := map[string]any{}
 	for _, d := range decisions {

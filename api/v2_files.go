@@ -57,6 +57,12 @@ func (s *Server) registerV2Routes() {
 	h.GET("/v2/sessions/:id/runs", s.v2SessionRuns)
 	h.GET("/v2/sessions/:id/runs/:runId", s.v2SessionRun)
 
+	// ★ The session's announcement channel: the facts that outlive a run —
+	//   an approval was answered, a new round began. ★ It is what keeps a
+	//   second surface from sitting on a question the server has already
+	//   answered.
+	h.GET("/v2/sessions/:id/events", s.v2SessionEvents)
+
 	h.POST("/v2/sessions/:id/files", s.v2UploadFiles)
 	h.GET("/v2/sessions/:id/files", s.v2ListFiles)
 	// ★ The bytes of one file, for the preview. It never interprets the

@@ -39,6 +39,14 @@ type publisher struct {
 	subs   map[*subscription]struct{}
 	closed bool
 
+	// replay says whether a late subscriber gets the window.
+	//
+	// ★ A run's bus replays: a client that attaches while the run is still
+	//   going must not miss the approval the run raised. The session's bus
+	//   does not: its facts are live notifications, and "what happened
+	//   before you arrived" is the scan's job — the ledger holds it.
+	replay bool
+
 	// onProgress is called when an event is published.
 	//
 	// ★ It is the run's liveness signal: the lease is renewed by
@@ -47,7 +55,37 @@ type publisher struct {
 }
 
 func newPublisher() *publisher {
+	return &publisher{subs: map[*subscription]struct{}{}, replay: true}
+}
+
+// newLivePublisher is a bus without a window: a subscriber gets what comes
+// after it, and nothing before.
+//
+// ★ It is the session's announcement channel. The facts it carries are
+//
+//	notifications, and the durable past is the ledger's — a surface that
+//	was not listening hydrates from the scan, not from a replay.
+func newLivePublisher() *publisher {
 	return &publisher{subs: map[*subscription]struct{}{}}
+}
+
+// empty reports whether the bus has no subscribers left.
+//
+// ★ It is what lets the session's bus be dropped when its last reader goes:
+//
+//	a bus kept for a session nobody watches is a leak with one entry per
+//	session the process ever saw.
+func (p *publisher) empty() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.subs) == 0
+}
+
+// watcherCount reports how many subscribers the bus has.
+func (p *publisher) watcherCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.subs)
 }
 
 // Publish hands one event to the window and to every subscriber.
@@ -107,8 +145,10 @@ func (p *publisher) Subscribe() *subscription {
 	sub := &subscription{p: p, ch: make(chan contract.RunEvent, subscriberQueue)}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for _, ev := range p.window {
-		sub.ch <- ev
+	if p.replay {
+		for _, ev := range p.window {
+			sub.ch <- ev
+		}
 	}
 	if p.closed {
 		// ★ The run is over: no more events will come, so the channel

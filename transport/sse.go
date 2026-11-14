@@ -100,6 +100,27 @@ func (s *SSEStream) Flush() {
 	s.buf = s.buf[:0]
 }
 
+// Ping publishes one keepalive frame.
+//
+// ★ It is what makes a client start reading. ★ A fetch does not resolve
+//
+//	until the first byte arrives, so a channel that says nothing for the
+//	length of the keepalive interval would leave the client waiting — and
+//	a client that is not reading yet is a client that has not heard the
+//	facts.
+//
+// ★ The frame carries no payload: it is a comment on the wire, not a fact.
+func (s *SSEStream) Ping() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken {
+		return
+	}
+	if err := s.stream.Publish(&sse.Event{}); err != nil {
+		s.broken = true
+	}
+}
+
 // Keepalive emits comment frames until done closes or the stream breaks.
 func (s *SSEStream) Keepalive(done <-chan struct{}, interval time.Duration) {
 	if interval <= 0 {

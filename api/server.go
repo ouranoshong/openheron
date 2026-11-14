@@ -80,6 +80,15 @@ type Server struct {
 	// ★ It is the difference between an open port and remote code
 	//   execution, because the agent's tools run shell commands.
 	guard *Guard
+	// sessionKeepalive is how often the session's channel says "still
+	// here".
+	//
+	// ★ It is also the **disconnect probe**. The channel is idle most of
+	//   the time, so nothing is written to it — and a write that fails is
+	//   the only portable way to learn that the client went away. ★
+	//   Without the probe a dead client would hold its subscription, and
+	//   the session's bus with it, until the next fact came.
+	sessionKeepalive time.Duration
 }
 
 func (s *Server) logger() *slog.Logger {
@@ -91,6 +100,23 @@ func (s *Server) logger() *slog.Logger {
 
 // defaultStartTimeout matches the shipped default when no config is wired.
 const defaultStartTimeout = 60 * time.Second
+
+// defaultSessionKeepalive is how often an idle session channel says "still
+// here".
+//
+// ★ Five seconds: the probe has to be frequent enough that an abandoned
+//
+//	channel does not hold its bus for long, and rare enough that an idle
+//	tab costs almost nothing.
+const defaultSessionKeepalive = 5 * time.Second
+
+// sessionKeepaliveOrDefault reports the channel's probe interval.
+func (s *Server) sessionKeepaliveOrDefault() time.Duration {
+	if s.sessionKeepalive > 0 {
+		return s.sessionKeepalive
+	}
+	return defaultSessionKeepalive
+}
 
 func (s *Server) startTimeout() time.Duration {
 	if s.startTimeoutFn == nil {
