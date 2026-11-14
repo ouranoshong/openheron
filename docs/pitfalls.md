@@ -190,7 +190,7 @@ eino 的 `fsapi.Backend` 接口，装配时把它交给框架（`agentkit/build/
 ## 3. 会话与轮次的时序缺陷
 
 ★ 这几个是实现 §「会话准入」时暴露出来的，每一个都改了设计。前四个有一个共同点，见 §3.5；
-后两个是同一个问题的另一面。
+§3.6 与 §3.7 是同一个问题的另一面；§3.8 换了一个方向 —— **行与失败的先后**。
 
 ### 3.1 ★ `Complete` 在归档落地之前就返回了
 
@@ -302,6 +302,27 @@ A 放弃时发现槽位不是它的（走掉），B 放弃时发现槽位是它�
 
 **现状**：`已修` —— `agentkit/run/runtime.go` 的 `releaseClaim` 与 `agentkit/run/turn.go` 的 `holdsSlot`；
 用例在 `agentkit/run/gate_concurrent_test.go`（同时 Resume 只放行一个，且会话不会卡住）。
+
+### 3.8 ★ 行比失败晚到 —— 竞态，而且会话永久 busy
+
+**症状**：`go test -race` 在 `agentkit/run` 报一处数据竞争（`claimTurn` 写 `turn.row`，
+`closeRow` 读它）；而生产里的表现是：几个 `Resume` 同时到达之后，**有一轮的行永远不落终态** ——
+那一行在账本里一直开着，会话读起来一直 busy。
+
+**根因**：★ **claim 是先占槽、再开行**（`claimTurn` 里 `openRunRow` 在拿到槽位**之后**）。
+于是在这两步之间，槽位已经是新轮次的了 —— 顶掉它的那个轮次会立刻 `fail` 它
+（`ErrSuperseded`），而它的行**还没到**。
+
+⇒ `closeRow` 看到 `t.row == nil` 就**直接返回**：那一行永远不会被关掉。
+⇒ 而 `turn.row` 本身是一个**裸指针**：一个 goroutine 在写它，另一个（顶替它的那个）在读它
+⇒ 数据竞争。★ 两个症状是同一个窗口的两面。
+
+**修法**：`turn.row` 收进一把锁（`rowMu`），并且加一道**闩** —— 失败早于行到达时，失败被
+**记住**（`rowFailed`），行一到达就补上终态（`setRow`）。★ 终态**取第一个**：与 `runRow` 的
+「第一次终态写入获胜」一致 —— 一轮只有一个结局。
+
+**现状**：`已修` —— `agentkit/run/turn.go` 的 `setRow` / `runRow` / `closeRow`；
+用例在 `agentkit/run/runrow_test.go`（失败早于行、行到了要补终态；终态取第一个）。
 
 
 ## 4. 文件系统后端

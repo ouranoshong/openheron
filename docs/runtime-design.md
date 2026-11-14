@@ -77,7 +77,7 @@ run 的记录是**生命周期**，不是载荷。transcript 已经管着内容�
 - **`Owner`** 是写下这一行的实例标识（`agentkit/run/runtime.go:160` 的
   `defaultInstanceID`：主机名 + 进程号）。它回答事故后的第一个问题：「这一行是谁写的」。
 - ★ **`TreeFingerprint`** 是这一轮跑的那棵 agent 树的指纹
-  （`agentkit/run/loop.go:147` 的 `turn.row.noteTree`）。恢复续接的是它所回答的那一轮，
+  （`agentkit/run/loop.go:147` 的 `turn.runRow().noteTree`）。恢复续接的是它所回答的那一轮，
   所以它必须跑在**同一棵树**上 —— 名字不够，因为同一个名字背后的 agent 可能已经被
   重建过；指纹才是「同一棵树」的凭证（`storage/runledger.go:169-176`）。
 
@@ -130,7 +130,7 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 
 实现顺序在 `agentkit/run/loop.go:212-216`：`rt.archive` → `turn.markArchived()` →
 `rt.finishRun`。`finishRun`（`agentkit/run/loop.go:277`）把消费者的错误带进终态：
-模型超时记作 `failed`，用户停掉记作 `aborted`（`agentkit/run/turn.go:330` 的
+模型超时记作 `failed`，用户停掉记作 `aborted`（`agentkit/run/turn.go:428` 的
 `failedState`）。★ 少了这一步，账本就成了唯一会撒谎的地方 —— 它会把一个中途死掉
 的 turn 记成 `completed`。
 
@@ -142,6 +142,13 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 ★ **第一行在 loop 启动之前就写。** `claimTurn` 先 `openRunRow`
 （`agentkit/run/runtime.go:298`），再开跑；写不进去就把槽位还回去并拒绝 —— 一个
 记不下来的 run 不能被拥有（`agentkit/run/runtime.go:300-304`）。
+
+★ **失败可能早于第一行。** claim 是**先占槽、再开行**，而顶掉它的那一轮会立刻 `fail` 它 ——
+在那两步之间，那一行还没到。★ 所以失败要**等**行：行没到就把失败记下来（`rowFailed`），
+行一到达就补上终态（`agentkit/run/turn.go:357` 的 `setRow`；`closeRow` 在
+`agentkit/run/turn.go:390`）。★ 终态**取第一个**，与账本的「第一次终态写入获胜」一致。
+★ 少了这道闩，那一行永远开着 —— 账本里挂着一个没人结束的 run，会话读起来一直 busy。
+★ `turn.row` 因此收进一把锁：写它的是申领的那个 goroutine，读它的是顶替它的那个。
 
 ### 1.3 通知是提示，扫描才是真相
 
@@ -385,7 +392,7 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 
 ★ **放回槽位的只能是还占着槽位的轮次。** `releaseClaim`
 （`agentkit/run/runtime.go:384`）在把被顶掉的轮次放回槽位之前先问 `holdsSlot()`
-（`agentkit/run/turn.go:247`）：一个**已经放弃**的轮次不再放回去 —— 否则槽位里会留下
+（`agentkit/run/turn.go:262`）：一个**已经放弃**的轮次不再放回去 —— 否则槽位里会留下
 一个**从未 `Run()` 过的 loop**，而 eino 的 `TurnLoop.Wait` 明写「`Run` 没被调用时
 `Wait` 永远阻塞」⇒ 中止与关停会挂死，那个会话也永远读作「忙」。
 

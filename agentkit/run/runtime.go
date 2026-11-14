@@ -303,7 +303,7 @@ func (rt *Runtime) claimTurn(ctx context.Context, sess storage.Session, kind con
 		rt.releaseClaim(sess, turn, prev, prevLoop)
 		return nil, nil, nil, nil, err
 	}
-	turn.row = row
+	turn.setRow(row)
 
 	// ★ The lease is the ownership rule. The turn slot says "a turn is
 	//   live"; the lease says "that turn is making progress". A session

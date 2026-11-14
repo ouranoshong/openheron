@@ -182,10 +182,9 @@ func (rt *Runtime) closeApprovalRow(turn *Turn) {
 		return
 	}
 	turn.awaitingApproval = false
-	if turn.row == nil {
-		return
+	if row := turn.runRow(); row != nil {
+		row.finish(storage.RunWaitingApproval, "", "")
 	}
-	turn.row.finish(storage.RunWaitingApproval, "", "")
 }
 
 // closeOpenRow closes a row that is still open.
@@ -201,18 +200,19 @@ func (rt *Runtime) closeApprovalRow(turn *Turn) {
 //	failure; a clean exit that the run never accounted for is an
 //	interruption — nobody finished it and nobody archived it.
 func (rt *Runtime) closeOpenRow(turn *Turn, exit *adk.TurnLoopExitState[loopItem, *schema.Message]) {
-	if turn == nil || turn.row == nil {
+	if turn == nil {
 		return
 	}
-	if turn.row.isClosed() {
+	row := turn.runRow()
+	if row == nil || row.isClosed() {
 		return
 	}
 	if exit != nil && exit.ExitReason != nil {
 		state, code := failedState(exit.ExitReason)
-		turn.row.finish(state, code, exit.ExitReason.Error())
+		row.finish(state, code, exit.ExitReason.Error())
 		return
 	}
-	turn.row.finish(storage.RunInterrupted, "interrupted",
+	row.finish(storage.RunInterrupted, "interrupted",
 		"the run's loop exited before the run finished")
 }
 

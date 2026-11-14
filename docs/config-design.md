@@ -1295,7 +1295,7 @@ config_write / the file tools land a change
 
 ★ **一轮钉住自己开始时的那棵树。** run 的行记下这棵树的指纹（`storage/runledger.go:176` 的
 `Run.TreeFingerprint`），恢复那一轮**按指纹要 agent**（`agentkit/run/runtime.go:893-907` 的
-`parentRunOf` → `agentkit/run/turn.go:86` 的 `Turn.pin`），而不是按名字要「当前那棵」。⇒ 被打断的那
+`parentRunOf` → `agentkit/run/turn.go:101` 的 `Turn.pin`），而不是按名字要「当前那棵」。⇒ 被打断的那
 一轮继续用它开始时的那棵树；**新配置在下一轮生效**。★ 钉住的那棵树不在池里（进程重启过）⇒ 打一条
 warn，退回当前那棵，**不静默换树**（`agentkit/build/builder.go:255-260`）。
 
@@ -1548,7 +1548,7 @@ github.com/ouranoshong/openheron/llm/common
 |---|---|
 | `agentkit/fsx/configgate.go:11-35` | `ConfigGate` —— fsx 自己定义的窄接口 |
 | `agentkit/fsx/fsx.go:232-250` / `:739-775` / `:776-835` / `:809` | `resolveWrite`（写入边界） / `Write` / `Edit` —— 配置根的写在这里转交 / ★ `OldString` 找不到就报错 —— 文件工具的冲突语义 |
-| `agentkit/run/loop.go:125-140` / `:240-260` / `agentkit/run/runtime.go:593-599` / `:893-907` / `agentkit/run/turn.go:80-86` | `makePrepareAgent`（带钉住） / `settleAgent` / 恢复时取父 run 的树 / `parentRunOf` / `Turn.pin` |
+| `agentkit/run/loop.go:125-140` / `:240-260` / `agentkit/run/runtime.go:593-599` / `:893-907` / `agentkit/run/turn.go:95-101` | `makePrepareAgent`（带钉住） / `settleAgent` / 恢复时取父 run 的树 / `parentRunOf` / `Turn.pin` |
 | `storage/runledger.go:169-176` | `Run.TreeFingerprint` |
 | `main.go:98` / `:111-121` / `:123-140` / `:149-157` / `:367-462` / `:440` `:459` `:460` / `:600` / `:614` / `:766-777` / `:792-821` / `:832-837` / `:839-844` | `--config-dir` / 用法 / `warnUnusedHomeConfig` / `configLoadError` / `setupConfig` / 三个 `override` 读点 / `FRONTEND_MODE` / `STATIC_DIR` / `agentConfig` / `Current` `Publish` / `configVersion` / `override` |
 | `api/v2_introspect.go:406` / `:481-482` / `api/v2_settings.go:64-90` / `:91-104` / `:201-216` | `deferred` 与 `configVersion` / `settingsFail` / manifest handler / `readPath` `writePath` |

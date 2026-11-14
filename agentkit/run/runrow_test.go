@@ -339,3 +339,47 @@ func TestStatusOfReportsTheActiveRunID(t *testing.T) {
 		return ok && status.Phase == PhaseIdle && status.RunID == ""
 	})
 }
+
+// ★ The row can arrive **after** the turn has already failed.
+//
+//	The claim takes the session's slot before it opens the row, and the turn
+//	that replaces it can fail it in that window — so the failure and the row
+//	meet in either order.
+//
+// ★ The order that matters is the one that loses: a run whose row is never
+//
+//	closed stays open in the ledger, and the session reads as busy for ever.
+func TestATurnThatFailedBeforeItsRowArrivedStillClosesTheRow(t *testing.T) {
+	turn := newTurnHandle("s1", contract.TurnResume)
+	turn.fail(ErrSuperseded)
+
+	row := newRunRow(nil, storage.Run{RunID: "r1", SessionID: "s1"}, nil)
+	turn.setRow(row)
+
+	if !row.isClosed() {
+		t.Fatal("the row must be closed: the turn failed before the row arrived")
+	}
+	if row.run.State != storage.RunAborted {
+		t.Fatalf("the row must carry the failure, got %q", row.run.State)
+	}
+	if row.run.ErrorCode != "superseded" {
+		t.Fatalf("the row must name the failure, got %q", row.run.ErrorCode)
+	}
+}
+
+// ★ The first ending wins: a turn that is superseded and then times out must
+//
+//	not change its story halfway through — the reader would see two endings
+//	for the same run.
+func TestTheFirstFailureIsTheRowsEnding(t *testing.T) {
+	turn := newTurnHandle("s1", contract.TurnResume)
+	turn.fail(ErrSuperseded)
+	turn.fail(ErrStartTimeout)
+
+	row := newRunRow(nil, storage.Run{RunID: "r1", SessionID: "s1"}, nil)
+	turn.setRow(row)
+
+	if row.run.ErrorCode != "superseded" {
+		t.Fatalf("the row must keep the first ending, got %q", row.run.ErrorCode)
+	}
+}

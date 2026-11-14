@@ -144,7 +144,7 @@ func (rt *Runtime) makePrepareAgent(sess storage.Session, turn *Turn) func(conte
 		//   the round it continues has to run on the same tree, or the
 		//   report is written by an agent that is not the one that
 		//   started the work.
-		turn.row.noteTree(fingerprint)
+		turn.runRow().noteTree(fingerprint)
 		return agent, nil
 	}
 }
@@ -165,7 +165,7 @@ func (rt *Runtime) makeOnAgentEvents(sess storage.Session, turn *Turn) func(cont
 	return func(ctx context.Context, _ *adk.TurnContext[loopItem, *schema.Message], events *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.Message]]) error {
 		// ★ The agent has started producing events: the run is executing,
 		//   not just claimed. The row says so before anything is archived.
-		turn.row.set(storage.RunRunning)
+		turn.runRow().set(storage.RunRunning)
 
 		turn.events = events
 		turn.signalReady()
@@ -207,7 +207,7 @@ func (rt *Runtime) makeOnAgentEvents(sess storage.Session, turn *Turn) func(cont
 		// ★ The ledger names the servers this run touched, so a
 		//   post-mortem can answer "which server was this" without
 		//   reading the whole transcript.
-		turn.row.noteMCPServers(mcpServersOf(artifacts.Intermediates))
+		turn.runRow().noteMCPServers(mcpServersOf(artifacts.Intermediates))
 
 		rt.archive(sess, turn, out)
 		// ★ The messages are on disk: the turn is finished with the
@@ -275,7 +275,8 @@ func (rt *Runtime) settleAgent(turn *Turn, drained <-chan struct{}) {
 //	checkpoint are written. A scan must not be able to call the run over
 //	before the question the user has to answer is on disk.
 func (rt *Runtime) finishRun(turn *Turn, out Outcome) {
-	if turn.row == nil {
+	row := turn.runRow()
+	if row == nil {
 		return
 	}
 	switch {
@@ -284,11 +285,11 @@ func (rt *Runtime) finishRun(turn *Turn, out Outcome) {
 		//   it. The distinction is the user's, and the row is what a
 		//   post-mortem reads.
 		state, code := failedState(out.Err)
-		turn.row.finish(state, code, out.Err.Error())
+		row.finish(state, code, out.Err.Error())
 	case len(out.Interrupts) > 0:
 		turn.awaitingApproval = true
 	default:
-		turn.row.finish(storage.RunCompleted, "", "")
+		row.finish(storage.RunCompleted, "", "")
 	}
 }
 
