@@ -9,10 +9,10 @@
 > 本文按 AGENTS.md 的文档语言规则**只有中文版** —— 架构与代码设计类文档不做双语。
 >
 > ★ **本文描述的是一个**部分**落地的提案。** P1（三个根、环境变量前缀、`init` 的默认目标）
-> **已经在代码里** —— 下面凡是写「要变成」而对应的那一条已经改过的地方，说的就是现状。
-> P2（`projects` 包与 `/v2/projects`）、P3（会话归属与侧栏分组）、P4（按会话切换的
-> project root）**还没有落地**，凡是写它们的地方都还是提案。§8 记着落地的顺序与进度，
-> §9 记着不在范围内的部分。
+> 与 P2（`projects` 包、`/v2/projects` 四个端点）**已经在代码里** —— 下面凡是写「要变成」
+> 而对应的那一条已经改过的地方，说的就是现状。
+> P3（会话归属与侧栏分组）、P4（按会话切换的 project root）**还没有落地**，凡是写它们的地方
+> 都还是提案。§8 记着落地的顺序与进度，§9 记着不在范围内的部分。
 
 ## 0. 一句话
 
@@ -163,8 +163,8 @@
 
 ### 3.1 命令行
 
-今天 `openheron` **只接受 flag**，位置参数直接报错（`main.go:113-115`：
-「openheron takes flags only」）。提案给它加**一个**可选位置参数 —— 项目目录：
+`openheron` 接受**一个**可选位置参数 —— 项目目录（flag 必须写在前面，Go 的 flag 解析器
+遇到第一个非 flag 参数就停）：
 
 ```bash
 openheron              # 多项目模式：全部项目，界面渲染多组
@@ -172,7 +172,7 @@ openheron .            # 单项目模式：只关注这个目录，界面渲染�
 openheron /work/api    # 同上
 ```
 
-多于一个位置参数报错。
+多于一个位置参数报错（`main.go:121-147` `parseServerFlags`）。
 
 ### 3.2 位置参数同时定两件事
 
@@ -298,7 +298,7 @@ API 层只负责把 `projectId` 写进表、把 `projectId` 读出来。
 ## 5. 接口
 
 ```
-GET    /v2/projects            → { items:[...], scope:{projectId,projectName,root}|null }
+GET    /v2/projects            → { items:[...], scope:{projectId,name,root}|null }
 POST   /v2/projects            → 加一个项目
 PATCH  /v2/projects/:id        → 改名 / 改 root / 改 order
 DELETE /v2/projects/:id        → 删项目（会话回落为「未选项目」，不删会话）
@@ -306,6 +306,9 @@ DELETE /v2/projects/:id        → 删项目（会话回落为「未选项目」
 POST   /v2/sessions            → body 带 projectId ⇒ 写进表
 GET    /v2/sessions            → 不过滤；每条带 projectId（从表查）
 ```
+
+★ `scope` 里的名字字段叫 **`name`**（不是 `projectName`）—— 它和 `items[]` 里那条项目的
+`name` 是同一个东西，客户端拿到 scope 就能直接把它渲染成那一组的小标题。
 
 ★ `GET /v2/sessions` 的 `projectId` **从表查**（表是权威），
 `pinned`（置顶）从会话查（那是会话属性，不是归属）。
@@ -422,13 +425,13 @@ CI 里有一个 `LISTEN_ADDR=0.0.0.0:9000`，openheron 的监听地址就被改�
 | 8 | `main.go:283-308` `initConfigIfEmpty` | 出厂树只写进**默认配置根** | ★ 已落地 |
 | 9 | `main.go:481-623` `setupConfig` | 解析 openheron_root → 建 Service → 装默认配置树 | ★ 已落地 |
 | 10 | `main.go:587,599,760,774` + `agentkit/spec/config.go:641-698` | 环境变量读点改名（+ 旧名 warn） | ★ 已落地 |
-| 11 | `main.go:625-731` `setupRuntime` | 数据目录**共享**；按会话取 project root | 前半已落地，后半是 P4 |
+| 11 | `main.go:633` `setupRuntime`（`:650-666` 注册表接线） | 数据目录**共享**；按会话取 project root | 前半已落地，后半是 P4 |
 | 12 | `agentkit/run/loop.go:80-83` | `inputParams` 加 `ProjectRoot`（**从会话/项目取**） | P4 |
 | 13 | `agentkit/run/input.go:170-186` | prompt 的 `Project root:` 用会话的值 | P4 |
 | 14 | `api/v2_project.go:72` | `@` 提及按项目取 root | P4 |
 | 15 | `agentkit/fsx/fsx.go:240` + `agentkit/build/snapshot.go:101` | 写边界 per-session（ctx 带本轮允许的根） | P4 |
-| 16 | 新 `projects` 包 | 类型 + 读写 + 文件锁 + `$OPENHERON_PROJECTS_FILE` | P2 |
-| 17 | `api/v2_sessions.go` / `api/v2_types.go:159-172` | `projectId`；新增 `/v2/projects` 四个端点 | P2 / P3 |
+| 16 | 新 `projects` 包（`projects/projects.go:99` `Location` / `:111` `Registry` / `:122` `Open` / `:297` `mutate`） | 类型 + 读写 + 文件锁 + `$OPENHERON_PROJECTS_FILE` | ★ 已落地 |
+| 17 | `api/v2_projects.go:57/107/147/189` 四个端点 + `api/v2_sessions.go` / `api/v2_types.go:159-172` | `/v2/projects` 的 GET/POST/PATCH/DELETE；`projectId` | 端点 ★ 已落地，`projectId` 是 P3 |
 | 18 | `initcmd.go:20-21,30-38,61` | `--dir` → `--config-root`；默认 `<openheron_root>/configs` | ★ 已落地 |
 | 19 | `agentkit/templates/files/server/config.yaml:23-28,44-48` | 注释：相对基准改成 openheron_root（**值不变**） | ★ 已落地 |
 | 20 | `scripts/test-backend.sh:132-136` | 环境变量改名 | ★ 已落地 |
@@ -440,7 +443,7 @@ CI 里有一个 `LISTEN_ADDR=0.0.0.0:9000`，openheron 的监听地址就被改�
 | 阶段 | 内容 | 风险 | 状态 |
 |---|---|---|---|
 | **P1** | `openheron_root` + 目录基准 + 环境变量前缀统一 + `init` 默认目标 + `warnUnusedHomeConfig` 删除 | 低 | ★ **已落地** |
-| **P2** | `projects` 包（读写 + 文件锁）+ `/v2/projects` 四个端点 | 中 | 未开始 |
+| **P2** | `projects` 包（读写 + 文件锁）+ `/v2/projects` 四个端点 | 中 | ★ **已落地** |
 | **P3** | 会话归属（`projectId`）+ 侧栏分组（置顶 / 项目 / 未选项目）+ 单项目模式一组 | 中 | 未开始 |
 | **P4** | per-session project root（prompt / `@` 提及 / **fsx 写边界**） | ★ 高（唯一有架构代价的） | 未开始 |
 

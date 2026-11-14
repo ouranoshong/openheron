@@ -74,6 +74,14 @@ func (s *Server) registerV2Routes() {
 	h.GET("/v2/project/files", s.v2ProjectFiles)
 	h.GET("/v2/commands", s.v2Commands)
 
+	// ★ The project surface: the table that says which sessions belong to
+	//   which project. ★ Four endpoints, one table, and no mode branch — the
+	//   scope in the answer says how many groups the client renders.
+	h.GET("/v2/projects", s.v2Projects)
+	h.POST("/v2/projects", s.v2CreateProject)
+	h.PATCH("/v2/projects/:id", s.v2UpdateProject)
+	h.DELETE("/v2/projects/:id", s.v2DeleteProject)
+
 	h.POST("/v2/run", s.v2Run)
 
 	h.GET("/v2/skills", s.v2Skills)

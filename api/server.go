@@ -17,6 +17,7 @@ import (
 	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/agentkit/run"
 	hcfg "github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/projects"
 	"github.com/ouranoshong/openheron/storage"
 	"github.com/ouranoshong/openheron/transport"
 	"github.com/ouranoshong/openheron/webui"
@@ -89,6 +90,18 @@ type Server struct {
 	//   Without the probe a dead client would hold its subscription, and
 	//   the session's bus with it, until the next fact came.
 	sessionKeepalive time.Duration
+	// projects is the project registry: the table that says which sessions
+	// belong to which project.
+	//
+	// ★ It is the only truth about that relation, and it is read from disk
+	//   on every request — the table is a user-level file and the user may
+	//   edit it while the server runs.
+	projects *projects.Registry
+	// scopeProjectID names the project this process focuses on.
+	//
+	// ★ Empty means the multi-project mode: the process serves every
+	//   project and the client renders every group.
+	scopeProjectID string
 }
 
 func (s *Server) logger() *slog.Logger {
@@ -146,6 +159,30 @@ func (s *Server) SetSkillsSource(fn func() []SkillView) { s.skillsFn = fn }
 
 // SetPoolSource wires the agent-pool block of GET /v2/runtime.
 func (s *Server) SetPoolSource(fn func() map[string]any) { s.poolFn = fn }
+
+// SetProjectsRegistry wires the project registry.
+//
+// ★ The endpoints answer 503 without it: a project table that is not there
+//
+//	is not "no projects", it is "this build does not know about projects".
+func (s *Server) SetProjectsRegistry(reg *projects.Registry) { s.projects = reg }
+
+// SetProjectScope names the project this process focuses on.
+//
+// ★ Empty means the multi-project mode. ★ The two modes have the **same**
+//
+//	shape — the same table, the same session list, the same endpoints — and
+//	the scope is the only thing that says how many groups the client
+//	renders.
+func (s *Server) SetProjectScope(id string) { s.scopeProjectID = id }
+
+// projectRegistry returns the registry, or nil when it is not wired.
+func (s *Server) projectRegistry() *projects.Registry {
+	if s == nil {
+		return nil
+	}
+	return s.projects
+}
 
 // New builds the server. Both collaborators are explicit so tests can inject
 // fakes without touching the filesystem or a model.

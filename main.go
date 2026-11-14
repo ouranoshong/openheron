@@ -33,6 +33,7 @@ import (
 	"github.com/ouranoshong/openheron/api"
 	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/initcfg"
+	"github.com/ouranoshong/openheron/projects"
 	"github.com/ouranoshong/openheron/storage/filestore"
 	"github.com/ouranoshong/openheron/storage/memarbit"
 	"github.com/ouranoshong/openheron/webui"
@@ -466,6 +467,12 @@ type startup struct {
 	dataDir     string
 	home        string
 	projectRoot string
+	// scopeDir is the project this process focuses on — the positional
+	// argument, empty in the multi-project mode.
+	scopeDir string
+	// projects is the project registry: the table that says which sessions
+	// belong to which project.
+	projects *projects.Registry
 
 	log   *slog.Logger
 	level *slog.LevelVar
@@ -618,6 +625,7 @@ func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar, sink
 		dataDir:     cfgDataDir,
 		home:        cfgSvc.Home(),
 		projectRoot: cfgSvc.DefaultProjectRoot(),
+		scopeDir:    flags.scopeDir,
 		logClose:    logClose,
 	}, nil
 }
@@ -635,6 +643,27 @@ func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 		return err
 	}
 	st.fm = fm
+
+	// ★ The project registry: the table that says which sessions belong to
+	//   which project. ★ It lives in the **data directory** — the relation
+	//   changes, and the configuration is the user's to point anywhere.
+	reg, err := projects.Open(projects.Location(st.dataDir))
+	if err != nil {
+		return err
+	}
+	st.projects = reg
+	// ★ The scope: the project this process focuses on. ★ Naming a
+	//   directory is a statement, so the directory is registered — without a
+	//   registration the new sessions would have nowhere to belong.
+	scopeID := ""
+	if st.scopeDir != "" {
+		p, err := reg.Ensure(ctx, st.scopeDir)
+		if err != nil {
+			return err
+		}
+		scopeID = p.ID
+		log.Info("[main] the process focuses on one project", "id", p.ID, "root", p.Root)
+	}
 
 	// The filesystem tools take paths, and the agent has no other way to learn
 	// where the code lives. It arrives through WithPaths, not the spec.
@@ -695,6 +724,8 @@ func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 		return st.mgr.Current()
 	})
 	st.srv.SetConfigService(st.cfgSvc)
+	st.srv.SetProjectsRegistry(reg)
+	st.srv.SetProjectScope(scopeID)
 	st.srv.SetToolsSource(toolsAdapter{b: builder})
 	st.srv.SetMCPSource(mcpAdapter{b: builder})
 	st.srv.SetContextSource(contextsAdapter{b: builder})
@@ -795,6 +826,12 @@ func serve(ctx context.Context, st *startup, log *slog.Logger) error {
 		//   the file too, and a closed rotator would drop them.
 		if st.logClose != nil {
 			_ = st.logClose.Close()
+		}
+		// ★ The registry holds the lock file open. ★ Windows will not delete
+		//   a file that is still open, so it has to go before the process
+		//   ends — otherwise the next start finds the table locked.
+		if st.projects != nil {
+			_ = st.projects.Close()
 		}
 	}()
 	errCh := make(chan error, 1)
