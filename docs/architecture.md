@@ -516,7 +516,7 @@ The MCP path is where two of them enter the tree:
 `github.com/mark3labs/mcp-go` (the protocol client), both in `agentkit/build`.
 `agentkit/run` imports `agentkit/spec/decl` for the namespace constants alone — the run's
 ledger records the servers a turn touched. `storage/filestore` is imported only by the
-composition root, `main.go:35`; `api` does not import it.
+composition root, `main.go:36`; `api` does not import it.
 
 #### Two dependency rules that must not be broken
 
@@ -537,7 +537,7 @@ microseconds, the caller's file and line, the level, then the message and the at
 ```
 
 `llm/common` used to write the request log with the standard logger, and that code moved to
-`agentkit/obs/httplog` (`docs/runtime-design.md` §4.4) — the leaf now carries no log code at all.
+`agentkit/obs/httplog` (`docs/runtime-design.md` §4.5) — the leaf now carries no log code at all.
 Any openheron-internal import inside `llm/common` is still a regression.
 
 ★ The logger is built at the composition root (`main.installLogger`) around a shared
@@ -585,7 +585,7 @@ appear in that test file only.
 #### The composition root assembles the logger
 
 The logger is built once, in `main`, and handed down; no package reaches back for it
-(`main.newLogger`, `main.go:246`):
+(`main.newLogger`, `main.go:252`):
 
 ```
 main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
@@ -611,6 +611,12 @@ is injected.
 handler, so `log.file` can point it at a file after startup (`docs/runtime-design.md` §4.3).
 hertz and eino already hold the logger, and a process-global registry cannot be rewritten —
 so the sink is the thing that changes.
+
+★ **The sink holds two destinations, and one of them does not move.** The **route** is
+where the records go; the **console** is where the process was started. `log.file` moves
+the route away from the console — and the one line that has to stay on the terminal
+anyway is the address the service serves on, which travels on the notice route instead
+(`docs/runtime-design.md` §4.4).
 
 ### 5.2 The config root has exactly three levels
 

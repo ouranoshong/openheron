@@ -385,7 +385,7 @@ openheron 的篇幅大部分在这里 —— 边界比能力更决定一个 Agen
 MCP 路径带进来两个第三方包：`github.com/cloudwego/eino-ext/components/tool/mcp`（eino
 适配器）与 `github.com/mark3labs/mcp-go`（协议客户端），都在 `agentkit/build` 里。
 `agentkit/run` 引 `agentkit/spec/decl` 只为命名空间常量 —— run 账本要记这一轮碰过哪些 server。
-`storage/filestore` 只在组合根 `main.go:35` 被引用，`api` 不直接引它。
+`storage/filestore` 只在组合根 `main.go:36` 被引用，`api` 不直接引它。
 
 #### 两条不能破的依赖铁律
 
@@ -398,7 +398,7 @@ sink；组合根造出 `*slog.Logger` 再注入下去，每个要记日志的包
 2026/10/29 22:28:34.346459 main.go:431: [Info] [main] openheron version=dev
 ```
 
-请求日志原来在 `llm/common`，已搬到 `agentkit/obs/httplog`（`docs/runtime-design.md` §4.4）；
+请求日志原来在 `llm/common`，已搬到 `agentkit/obs/httplog`（`docs/runtime-design.md` §4.5）；
 该叶子包现在没有日志代码。`llm/common` 里任何一处 import openheron 内部包都算回归。
 logger 由组合根 `main.installLogger` 围绕共享的 `slog.LevelVar` 建起来，所以
 `server/config.yaml` 的 `log_level` 与 `OPENHERON_LOG_LEVEL` 能在 handler 建好之后移动门限。
@@ -428,7 +428,7 @@ logger 由组合根 `main.installLogger` 围绕共享的 `slog.LevelVar` 建起�
 
 #### 组合根装配 logger
 
-logger 只在 `main` 里造一次再传下去（`main.newLogger`，`main.go:246`）：
+logger 只在 `main` 里造一次再传下去（`main.newLogger`，`main.go:252`）：
 
 ```
 main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
@@ -444,6 +444,10 @@ main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
 `hlog.SetLogger` 与 `callbacks.AppendGlobalHandlers` 各做一次，都在 `hserver.New` 之前 ——
 这是仅有的两处全局注册，其余全是注入。`obs.Sink` 是 handler 背后的 `io.Writer`，所以
 `log.file` 能在启动后改向文件（`docs/runtime-design.md` §4.3）；变的是 sink，不是 logger。
+
+★ **sink 握着两个去处，其中的一个不动。** **路线**是记录去哪儿，**终端**是进程从哪儿
+启动；`log.file` 把路线从终端上搬走 —— 而唯一必须留在终端上的那行是服务地址，它走
+**通告**那条路（`docs/runtime-design.md` §4.4）。
 
 ### 5.2 配置根只有三级
 

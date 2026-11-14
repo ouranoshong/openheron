@@ -98,6 +98,10 @@ composition root injects the one it built — there is no global one to go throu
 `agentkit/obs/logger.go:39` parses the level, `agentkit/obs/runid.go:22` builds the prefix —
 and the level decides whether a line shows up in the default output.
 
+★ **The notice route is not the log, and it does not move.** `obs.NewNotice` writes to the
+console and to the log file whatever the level and the destination say — the address the
+service serves on is not a log record (`docs/runtime-design.md` §4.4).
+
 A line reads the way hertz's logger writes it — the date, the time with microseconds,
 **the caller's file and line**, the level, then the message and the attributes:
 
@@ -457,7 +461,7 @@ definition — there is no `enabled` key.
    ```
 
 3. **Data sources.** To wire up a new source, add a `SetXxxSource` method on
-   `api.Server` (the pattern is `api/server.go:119`'s `SetSkillsSource`) and connect it
+   `api.Server` (the pattern is `api/server.go:145`'s `SetSkillsSource`) and connect it
    in `main.go`. **Do not** let a handler read a global variable directly.
 
 4. **Streaming.** The SSE sink lives in `transport`; `api` only writes the events out.
@@ -1266,7 +1270,7 @@ environment lookup.
 
 ★ **The keyring is a global OS resource, so it is reached only where somebody asked for
 it.** `spec.KeyringStore()` is called in exactly three places: the server's composition
-root (`main.go:385`), `openheron init` (`initcmd.go:70`) and `openheron secret`
+root (`main.go:393`), `openheron init` (`initcmd.go:70`) and `openheron secret`
 (`secretcmd.go:35`). ★ Everything else — a library user, a test — gets **no store at
 all**, and `Service.SecretStore()` returns `nil`. ★ A test that wrote to the
 developer's own credential store would leave an entry nobody would remember to delete.
@@ -1884,6 +1888,7 @@ misses something.
 | Startup fails with `api_key` is no longer read | ★ The retired line is still in the profile — delete it. The message names the variable and the keyring entry that replace it (§3.14) |
 | A provider has no key | `GET /v2/config` → the provider's `keySource`; `openheron secret list` says which of the two places is in force (§3.14) |
 | The Secrets tab says the keyring is not available | ★ The machine has no keyring (on Linux, no Secret Service over D-Bus) — the environment still works (§3.14) |
+| The terminal shows no address | ★ It travels the notice route: the line reads `the server serves on url=…` — and neither `log.file` nor `log_level` hides it (`docs/runtime-design.md` §4.4) |
 
 ★ **Archive before you present** — after the SSE sink breaks, stop rendering but keep
 consuming the event stream; otherwise `Outcome.Intermediates` is incomplete and the
@@ -1900,7 +1905,7 @@ the current state of the code, not a to-do list** — fixing one is a separate c
 | **A broken SSE stream does not reconnect** | `web/src/lib/api.ts` | A broken stream is simply broken: it goes to `onError` → the error panel, and the user has to resend. There is no reconnect and no resume-from-offset. |
 | **The conflict dialog does not show the on-disk version** | `web/src/components/settings/conflict-dialog.tsx:18-23` | It shows only your stale `baseRevision` plus a hard-coded "changed by someone else", and **never fetches the disk version**. There is no "overwrite anyway" button either — "Keep editing" merely clears the conflict marker, so the next save resends the same stale revision and conflicts again. |
 | **Four runtime dependencies sit in `devDependencies`** | `web/package.json` | `lucide-react` (imported by 10 files), `clsx`, `tailwind-merge` and `class-variance-authority` are all imported by `src/` and bundled into `web/dist`. The build passes (Vite resolves them at build time), but the manifest is wrong. |
-| **The comment at `api/server.go:118` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
+| **The comment at `api/server.go:144` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
 | **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the six partitions (`agentkit/spec/config.go:664`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:709`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:116`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |
 
 ## 8. Before committing

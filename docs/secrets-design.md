@@ -95,7 +95,7 @@ autolaunch（那会白等一次进程启动）。
 ★ **钥匙串是一个全局 OS 资源**，所以它**默认不接**：`Service` 上没有装 store 时，解析器走的是
 `nullStore`（`agentkit/spec/secret.go:220-231`），它回答「不可用」，而不是去碰开发者自己的
 凭据库。真正接上它的地方只有三处，都是**明确地问了**：服务端的组合根
-（`main.go:385`）、`openheron init`（`initcmd.go:69`）与 `openheron secret`（`secretcmd.go:32-44`）。
+（`main.go:393`）、`openheron init`（`initcmd.go:69`）与 `openheron secret`（`secretcmd.go:32-44`）。
 
 ### 2.2 两个入口共用一个名字
 

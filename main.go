@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -214,6 +215,10 @@ func runServer(flags serverFlags) error {
 	defer stop()
 
 	log, level, sink := installLogger()
+	// ★ The notice channel: the terminal the process was started on, and the
+	//   log file when one is installed. The address the service serves on
+	//   goes here — see serve.
+	notice := obs.NewNotice(sink.NoticeWriter())
 
 	st, err := setupConfig(flags, log, level, sink)
 	if err != nil {
@@ -221,6 +226,7 @@ func runServer(flags serverFlags) error {
 	}
 	st.log = log
 	st.level = level
+	st.notice = notice
 	if err := setupRuntime(ctx, st, log); err != nil {
 		return err
 	}
@@ -339,11 +345,10 @@ func applyLogFile(log *slog.Logger, sink *obs.Sink, svc *spec.Service, c *spec.C
 		// hertz's logger prints local time already.
 		LocalTime: true,
 	}
-	var w io.Writer = file
-	if cfg.Console {
-		w = io.MultiWriter(os.Stderr, file)
-	}
-	sink.Set(w)
+	// ★ The sink keeps the file apart from the log's route: a notice has to
+	//   reach the terminal even when the route has left it, and the file
+	//   even when the route still covers the terminal.
+	sink.Install(file, cfg.Console)
 	log.Info("[main] log file", "path", resolved, "console", cfg.Console,
 		"max_size_mb", cfg.MaxSizeMB, "max_age_days", cfg.MaxAgeDays)
 	return file
@@ -366,6 +371,9 @@ type startup struct {
 
 	log   *slog.Logger
 	level *slog.LevelVar
+	// notice is the channel the terminal always sees: the address the
+	// service serves on, whatever the log's destination is.
+	notice *slog.Logger
 	// logClose is the rotator behind the file destination, when one was
 	// configured. It is closed on shutdown so the last buffer flushes and
 	// Windows can delete a rotated file.
@@ -653,6 +661,17 @@ func serve(ctx context.Context, st *startup, log *slog.Logger) error {
 	errCh := make(chan error, 1)
 	go func() { errCh <- st.srv.Spin() }()
 
+	// ★ The address is announced once the listener is up: an address
+	//   printed before the server accepts connections is a promise, not a
+	//   fact. A server that failed to start has nothing to announce.
+	running, err := waitRunning(ctx, st.srv, errCh)
+	if err != nil {
+		return err
+	}
+	if running {
+		announceServing(st)
+	}
+
 	select {
 	case err := <-errCh:
 		return err
@@ -671,6 +690,62 @@ func serve(ctx context.Context, st *startup, log *slog.Logger) error {
 		}
 		return nil
 	}
+}
+
+// waitRunning waits until the server is listening.
+//
+// ★ It ends when the socket is bound, when the server fails to start, or
+//
+//	when the process is asked to stop — and it reports which of those it
+//	was, because the address is only worth announcing in the first case.
+func waitRunning(ctx context.Context, srv *api.Server, errCh <-chan error) (bool, error) {
+	for !srv.Running() {
+		select {
+		case err := <-errCh:
+			return false, err
+		case <-ctx.Done():
+			return false, nil
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	return true, nil
+}
+
+// announceServing tells the terminal where the service serves.
+//
+// ★ It is a notice, not a log record: the log's destination is configuration
+//
+//	(`log.file` with `log.console: false` takes the terminal away from every
+//	record), and the address is the one thing the person who started the
+//	process has to be able to read off the terminal.
+//
+// ★ The address is the configured one — the one the operator wrote down. A
+//
+//	port of 0 asks the operating system for a free port, and the line would
+//	then say `0`: `listen_addr` is a fixed port a person can type.
+func announceServing(st *startup) {
+	if st == nil || st.notice == nil {
+		return
+	}
+	st.notice.Info("[main] the server serves on", "url", serverURL(st.addr))
+}
+
+// serverURL renders the listen address as a URL.
+//
+// ★ ":8080" binds every interface, and "http://:8080" is not something a
+//
+//	browser opens: the loopback name is what a person means by "the server
+//	on this machine".
+func serverURL(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "http://" + addr
+	}
+	switch host {
+	case "", "0.0.0.0", "::":
+		host = "localhost"
+	}
+	return "http://" + net.JoinHostPort(host, port)
 }
 
 // contextsAdapter exposes the builder's context windows to the API layer.

@@ -750,9 +750,9 @@ Agent 上的那个设置（`agentkit/spec/load.go:82-86`）。
 `fmt.Fprintln(os.Stderr)` 就会绕开这个开关。**
 
 级别优先级：**`$OPENHERON_LOG_LEVEL` > `server/config.yaml` 的 `log_level` > `info`**
-（`main.go:270` 的 `applyLogLevel`）。取值 `debug / info / warn(warning) / error`，
+（`main.go:276` 的 `applyLogLevel`）。取值 `debug / info / warn(warning) / error`，
 大小写与空白不敏感；空值即 `info`。★ **非法值不致命**：回退 `info` 并记一条
-`deferred` 提示。★ **告警必须在切换等级之前发出**（`main.go:279-283`），否则
+`deferred` 提示。★ **告警必须在切换等级之前发出**（`main.go:284-288`），否则
 `error` 等级会把告警自己吞掉。
 
 ★ **门限可以后移，是因为 handler 持有的是 `slog.Leveler` 而不是定值。** 一个共享的
@@ -766,11 +766,11 @@ logger 只在 `main` 里造一次再传下去：`newLogger()` → `installLogger
 （`applyLogLevel` / `applyLogFile`）→ `setupRuntime` → `api.New(..., log)` →
 `hserver.New`。
 
-- `main.newLogger`（`main.go:246`）围绕共享的 `slog.LevelVar` 与 `obs.Sink` 建好
+- `main.newLogger`（`main.go:252`）围绕共享的 `slog.LevelVar` 与 `obs.Sink` 建好
   logger，**在**配置读出来**之前** —— 等级与文件路径由配置决定，而 logger 必须先
   存在，`setupConfig` 才能打第一行日志。
-- `main.installLogger`（`main.go:257`）完成两次框架交接：`hlog.SetLogger`
-  （`main.go:263`）与 `callbacks.AppendGlobalHandlers`（`main.go:264`）。
+- `main.installLogger`（`main.go:263`）完成两次框架交接：`hlog.SetLogger`
+  （`main.go:269`）与 `callbacks.AppendGlobalHandlers`（`main.go:270`）。
   ★ **这是仅有的两处全局注册**，其余全是注入。
 
 ★ **顺序不能动。** hertz 与 eino 各持一个进程级注册表，所以这两次交接必须在任何
@@ -801,43 +801,85 @@ logger 就是竞态；组合根先装配正好消掉它（用 `task test-race` �
 `installLogger` 已经把它交给了 hertz 与 eino —— 两个进程级注册表，运行期不能换。
 配置文件路径只有读完之后才知道，所以**能换的只有 writer**。
 
-`agentkit/obs/sink.go:25` 的 `Sink` 实现 `io.Writer`，`Set`（`:66`）原子改向；
-`obs.Handler` 与两份注册表都不动。启动时 `main.newLogger` 就建好 sink
-（`main.go:253`），logger 从第一天起写在 sink 后面。
+`agentkit/obs/sink.go:32` 的 `Sink` 实现 `io.Writer`，`Set`（`:76`）原子改向，
+`Install`（`:95`）把日志装进文件；`obs.Handler` 与两份注册表都不动。启动时
+`main.newLogger` 就建好 sink（`main.go:259`），logger 从第一天起写在 sink 后面。
 
-接线在 `main.applyLogFile`（`main.go:308`）：
+★ **sink 握着两个去处。** 一个是日志的**路线**（记录去哪儿），一个是**终端**
+（进程从哪儿启动）。路线会离开终端 —— `log.file` 就是干这个的 —— 而通告还要落在
+终端上，所以终端被单独记着（§4.4）。
+
+接线在 `main.applyLogFile`（`main.go:314`）：
 
 | 位置 | 做什么 |
 |---|---|
 | `main.newLogger` | 建 `obs.NewSink(os.Stderr)` |
 | `main.setupConfig` | 在 reloader 回调里用 `sync.Once` 调一次 `applyLogFile`；重载不换路径 |
-| `main.applyLogFile` | 解析路径 + 建目录 + 0600 探针；挂 `lumberjack.Logger`（`main.go:332`）；`console` 决定是否 `io.MultiWriter(os.Stderr, file)`（`main.go:344`） |
+| `main.applyLogFile` | 解析路径 + 建目录 + 0600 探针；挂 `lumberjack.Logger`（`main.go:338`）；`console` 决定日志是不是也留在终端（`main.go:351` 的 `sink.Install`） |
 | `main.serve` | 退出时 `defer` 关闭 rotator，最后几行日志仍进得去文件 |
 
 ★ **探针的理由：** `lumberjack` 第一次写入才开文件，且以 0644 创建。不先探一次，
 权限错误和 0600 都到不了启动期 —— 而启动期是唯一有人能读到那条告警的时候
-（`main.go:325-328`）。
+（`main.go:331-334`）。
 
 ★ **落不进文件是警告，不是失败的启动。** 服务的活儿是服务，而它的日志正是失败原因
 唯一的容身之处；为了去处把进程拉下去，等于拿掉唯一能解释原因的地方。进程继续走
-stderr（`main.go:290-294`）。
+stderr（`main.go:296-300`）。
 
 ★ **路径落在配置根**（`spec.Service.LogFile` 解析），`$OPENHERON_LOG_FILE` 覆盖它一次
-（`main.go:314`）。`server/` 不热更新：改了要重启。
+（`main.go:320`）。`server/` 不热更新：改了要重启。
 
 ★ **代码缺省是空路径**（只走 stderr），而**出厂模板给的是 `logs/openheron.log`**，且
-`log.console` 是 `false` —— 对新项目来说落盘是常态而不是可选项，**文件就是全部的日志**：
-配置读出、文件打开之后标准错误就安静了（`main.go:344`；见 `docs/config-design.md` §5.5）。
+`log.console` 是 `false` —— 对新项目来说落盘是常态而不是可选项，**日志进文件**：
+配置读出、文件打开之后标准错误就安静了（`main.go:351`；见 `docs/config-design.md` §5.5）。
 ★ 换的是 sink 背后的 writer，不是 logger —— hertz 与 eino 的记录跟着一起进文件。
+★ **只有通告不走这条路** —— 地址那一行仍然落在终端上（§4.4）。
 
 ★ **sink 同时是失败兜底。** 目标写失败一次就切回 fallback（stderr），并且只报一次
-（`agentkit/obs/sink.go:74`）—— 不重试满盘，也不让日志静默消失。
+（`agentkit/obs/sink.go:152`）—— 不重试满盘，也不让日志静默消失。
 
 ★ **`format` 这一轮不做。** JSON 需要第二个 handler，而现在的 `Handler` 是手写的文本
 封装。留作后续迭代 —— **不预留空键**，配置里没有 `format`
 （`agentkit/spec/decl/decl.go:332-335`）。
 
-### 4.4 叶子包的纪律
+### 4.4 通告：终端永远有一份地址
+
+★ **日志的去处是配置，通告的去处不是。** `log.file` 把记录搬进文件，
+`log.console: false` 让标准错误安静 —— 而**服务跑在哪个地址**是启动那个进程的人
+唯一必须看见的一件事：浏览器往哪儿开、别的进程往哪儿连，都是它说了算。所以地址
+走**通告通道**，不走日志通道。
+
+通告通道在 `agentkit/obs`（`agentkit/obs/notice.go:27` 的 `NewNotice`），它写两个
+地方：
+
+| 去处 | 什么时候 | 为什么 |
+|---|---|---|
+| 终端（进程启动时那个 stderr） | 永远 | ★ 配置管得了日志的去处，管不了「人站在哪儿看」 |
+| 日志文件 | 配了文件才有 | 这一轮运行的记录里要有地址这一条 |
+
+★ **通告不受等级过滤。** 等级是关于日志啰嗦程度的选择，而地址不是日志的一部分
+—— `log_level: error` 的运行也要看得见自己在哪儿。
+
+★ **通告走自己的路，不走日志的路。** 跟着日志走有两个坏处：等级一过滤它就没了；
+日志仍然覆盖终端时它会在终端上出现两次。⇒ sink 因此握着**两个**去处（§4.3）：
+日志的路线，与终端；`Install`（`agentkit/obs/sink.go:95`）装文件，`Notice`
+（`:124`）写通告。
+
+★ **一次通告，终端上一行。** `log.console: true` 时日志本身就覆盖终端，通告不再补
+一份；`log.console: false` 时日志去了文件，终端那一份由通告补上；没有文件时日志
+就在终端上，通告同样不补。三种配置下终端都恰好一行
+（`agentkit/obs/sink_test.go:135`）。
+
+★ **框架自己的横幅被拦下了。** hertz 在套接字绑好之后会打一行
+`HTTP server listening on address=...`（`agentkit/obs/hertz/hertz.go:47`）—— 说的是
+同一件事，留着就是两行，而且那一行是框架的形状、框架的 file:line。
+
+★ **打印的时机是监听就绪之后**（`main.go:701` 的 `waitRunning` 等的是套接字绑好，
+不是「进程说要启动」）：绑好之前印出来的是一句承诺，不是一件事实。★ **印的是配置
+的地址**（`main.go:462`）—— 端口写 `0` 时操作系统给一个随机端口，而那一行说的
+是 `0`；★ `listen_addr` 是给人看的固定端口，写 `0` 的运行没有人找得到服务。
+
+### 4.5 叶子包的纪律
 
 ★ **`llm/common` 里任何一处 import openheron 内部包都算回归。** 那个包是零 openheron
 依赖的叶子，厂商协议层，零日志代码。
@@ -1267,12 +1309,14 @@ stderr（`main.go:290-294`）。
 - `agentkit/obs/logger.go` — `New`(:19)、`Discard`(:30)、`ParseLevel`(:39)、
   `LevelFromEnv`(:71)
 - `agentkit/obs/handler.go` — handler 持 `Leveler`(:42)
-- `agentkit/obs/sink.go` — `Sink`(:25)、`NewSink`(:34)、`Set`(:66)、失败降级(:74)
+- `agentkit/obs/sink.go` — `Sink`(:32)、`NewSink`(:43)、`Set`(:76)、`Install`(:95)、
+  `Notice`(:124)、失败降级(:152)
+- `agentkit/obs/notice.go` — `NewNotice`(:27)
 - `agentkit/obs/httplog/logging.go` — `Wrap`(:52)、被拒绝的请求(:161)、`tools` 原始字节
   (:263)
-- `agentkit/obs/hertz/hertz.go` — hertz 适配器(:32)
+- `agentkit/obs/hertz/hertz.go` — hertz 适配器(:32)、框架横幅被拦下(:47)
 - `agentkit/build/mcpmanager.go` — `mcpCommandLogger`(:748)
-- `main.go` — `newLogger`(:192)、`installLogger`(:203)、`hlog.SetLogger`(:209)、
-  `callbacks.AppendGlobalHandlers`(:210)、`applyLogLevel`(:216)、告警在切换等级之前
-  (:226)、`applyLogFile`(:254)、0600 探针(:271)、`lumberjack`(:278)、`io.MultiWriter`
-  (:290)、落不进文件是警告(:236)
+- `main.go` — `newLogger`(:252)、`installLogger`(:263)、`hlog.SetLogger`(:269)、
+  `callbacks.AppendGlobalHandlers`(:270)、`applyLogLevel`(:276)、告警在切换等级之前
+  (:288)、`applyLogFile`(:314)、0600 探针(:331)、`lumberjack`(:338)、`sink.Install`
+  (:351)、落不进文件是警告(:296)、地址的通告(:726)

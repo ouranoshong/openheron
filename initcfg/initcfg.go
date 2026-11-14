@@ -184,6 +184,10 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 	//   names a file and keeps stderr quiet — a new project's log lands on
 	//   disk and nowhere else, instead of dying with the terminal it was
 	//   started in.
+	//
+	// ★ The address the server serves on is not part of that log: it is
+	//   printed on the terminal whatever this says, because it is the one
+	//   thing a person has to see to open the interface.
 	if err := copySection(p, manifest.Templates, spec.DirServer, nil); err != nil {
 		return nil, err
 	}

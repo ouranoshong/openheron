@@ -911,3 +911,24 @@ request after 10 seconds`），于是 E2E 里「另一个界面听见了审批�
 **现状**：`已修` —— `scripts/install-local.ps1` 与 `Taskfile.yml` 的 `install` / `uninstall`。
 ★ 发布版的安装器（`scripts/install.ps1`）本来就没这个毛病：它开头就设了
 `$ErrorActionPreference = "Stop"`，而且**装完、验完版本**才说装好了。
+
+## 14. 启动与日志
+
+### 14.1 ★ 日志进了文件，地址也跟着进了文件
+
+**症状**：在终端里跑 `openheron`，屏幕上只有启动时的两三行（配置写出来了、密钥在哪儿读），
+之后就安静了 —— ★ **服务跑在哪个地址看不见**，而浏览器要开的正是那个地址。
+
+**根因**：`log.file` 一装上，sink 就从标准错误改向文件；出厂模板的 `log.console` 是 `false`，
+于是标准错误从此不说话。★ 而 hertz 那一行 `HTTP server listening on address=...` 是**日志
+记录**，所以它跟着进了文件 —— 终端上什么都没有，而地址是唯一非看不可的一行。
+
+**修法**：**地址走通告那条路**（`docs/runtime-design.md` §4.4）。通告写终端（永远）与日志
+文件（配了文件才有），不受等级过滤，也不跟着日志的路线走 —— 于是三种配置下终端都恰好一行：
+`the server serves on url=http://127.0.0.1:8080`。★ 框架自己那行横幅被拦下了
+（`agentkit/obs/hertz/hertz.go:47`）：说的是同一件事，留着就是两行。
+
+★ **通告在监听就绪之后才打印**（`main.go:701`）：绑好之前印出来的是一句承诺，不是一件事实。
+
+**现状**：`已修` —— `agentkit/obs/sink.go` 的 `Install` 与 `Notice`、
+`agentkit/obs/notice.go` 的 `NewNotice`、`main.serve` 的 `waitRunning` 与 `announceServing`。

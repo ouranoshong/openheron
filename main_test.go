@@ -166,3 +166,43 @@ func TestApplyLogFileKeepsStderrWhenThePathIsUnusable(t *testing.T) {
 		t.Fatalf("the failure was not reported: %q", got)
 	}
 }
+
+// ★ The address is a notice: it reaches the terminal even when the log has
+//
+//	moved to a file, and it is said once.
+func TestAnnounceServingReachesTheTerminal(t *testing.T) {
+	var console, file bytes.Buffer
+	sink := obs.NewSink(&console)
+	sink.Install(&file, false)
+	notice := obs.NewNotice(sink.NoticeWriter())
+
+	announceServing(&startup{addr: "127.0.0.1:8080", notice: notice})
+
+	if !strings.Contains(console.String(), "http://127.0.0.1:8080") {
+		t.Fatalf("the address never reached the terminal:\n%s", console.String())
+	}
+	if n := strings.Count(console.String(), "the server serves on"); n != 1 {
+		t.Fatalf("the address was said %d times:\n%s", n, console.String())
+	}
+	if !strings.Contains(file.String(), "http://127.0.0.1:8080") {
+		t.Fatalf("the address never reached the log file:\n%s", file.String())
+	}
+}
+
+func TestServerURL(t *testing.T) {
+	cases := []struct {
+		addr string
+		want string
+	}{
+		{"127.0.0.1:8080", "http://127.0.0.1:8080"},
+		{":8080", "http://localhost:8080"},
+		{"0.0.0.0:8080", "http://localhost:8080"},
+		{"[::1]:8080", "http://[::1]:8080"},
+		{"not-an-address", "http://not-an-address"},
+	}
+	for _, c := range cases {
+		if got := serverURL(c.addr); got != c.want {
+			t.Fatalf("serverURL(%q) = %q, want %q", c.addr, got, c.want)
+		}
+	}
+}

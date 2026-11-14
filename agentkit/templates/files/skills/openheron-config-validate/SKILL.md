@@ -43,7 +43,10 @@ and the offset of the frontmatter is corrected by `parseShift` — all of these 
 | the `temperature` in the request is not the value the agent wrote | the provider-level `extra` happens to hold only `temperature` / `max_tokens` |
 | `header:` is configured and nothing happens | it is parsed and then never consumed |
 | the timeout / the lease suddenly becomes 200ms | a lenient duration falls back to `DefaultDebounce`; the `deferred` message **always** says `watch.debounce`, no matter which key was actually written wrong |
-| the request returns 401 | `${ENV}` is not set: it only goes into `deferred`, and the failure moves to the moment the endpoint is called |
+| the request returns 401 | ★ The provider's key is **not in the file**: its place comes from the
+provider's name — the environment variable `LLM_<PROVIDER>_API_KEY`, else the keyring entry
+`llm:<provider>`. Neither has it → a `deferred` notice naming both, and the failure moves to
+the moment the endpoint is called |
 | the model never compacts | `context_window` is not declared, or `summarize_at` is written on the model side (deprecated) |
 | a certain agent never ran | unreachable from `main` — it does not error, but it is never constructed |
 | the agent was written in this very turn and the tree says it does not exist | **the write succeeded**: `config_tier` answers from the tree this turn was built with, so the new agent appears on the next turn — the error says exactly that. Do not write it again. (`config_get` reads the disk and already shows the new file.) |

@@ -9,13 +9,15 @@
 #     it only makes the knobs findable. ★ The exceptions are `log.file` and
 #     `log.console`: the code's defaults are an empty path and a copy on the
 #     standard error, and this template names a file and keeps stderr quiet —
-#     so a new project's log lands on disk and nowhere else.
+#     so a new project's log lands on disk and nowhere else. ★ One line is
+#     not a log record and does not follow that route: the address the server
+#     serves on is printed on the terminal whatever this says.
 
 # ★ The address the HTTP server listens on. The default is the **loopback**:
 #   the agent's tools run shell commands, so a listener every machine on the
 #   network can reach is a listener every machine on the network can drive.
 #   Write "0.0.0.0:8080" when you mean to expose it: whoever can reach the port
-#   can drive the agent, and the server says so at startup.
+#   can drive the agent, and the server warns about it at startup — in the log.
 listen_addr: "127.0.0.1:8080"
 
 # ★ Runtime data: sessions, checkpoints, the knowledge-base index.
@@ -50,11 +52,16 @@ log_requests: false
 #     lines before that — and the reason a file could not be opened — still
 #     go to stderr. Set it to true to keep both.
 #
+#   ★ One line is not part of that log: the address the server serves on is
+#     printed on the terminal once the listener is up, whatever this says.
+#     It is the one thing you need to see to open the interface, and the
+#     level does not filter it.
+#
 #   ★ A log file that cannot be opened is a warning, not a failed start: the
 #     process keeps running on stderr, which is where the reason appears.
 log:
   file: logs/openheron.log
-  console: false       # the file is the log; the terminal goes quiet
+  console: false       # the file is the log; the terminal goes quiet (the address still shows)
   max_size_mb: 20
   max_age_days: 14
   max_backups: 5

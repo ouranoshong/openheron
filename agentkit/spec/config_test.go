@@ -139,9 +139,11 @@ func TestTheServerTemplateNamesTheRequestDumpSwitch(t *testing.T) {
 //	same path, so a "contains" test would pass on it — the key has to
 //	start a line of its own.
 //
-// ★ The standard error stays quiet: the file is the whole log, so a
+// ★ The standard error stays quiet: the file is where the log goes, so a
 //
-//	server that runs in the background does not scroll a terminal.
+//	server that runs in the background does not scroll a terminal. ★ The
+//	address the server serves on is not a log record — it is printed on
+//	the terminal whatever this says.
 func TestTheServerTemplateEnablesTheLogFile(t *testing.T) {
 	for _, text := range Templates(DirServer) {
 		lines := strings.Split(text, "\n")

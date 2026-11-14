@@ -710,8 +710,8 @@ builder 每次建树前把当前的身份和手上那份比一比。
 （`mcpManager.Warm`，`agentkit/build/mcpmanager.go:98`）。
 ★ 没有任何 agent 点名的 server 永远不会被启动，连后台都不启动。
 ★ **每台 server 的启动是它自己的 goroutine** —— 三台各要一分钟的 server 不该花三分钟。
-预热挂在配置的加载与重载上（`main.go:518`），而它在锁**外**调它
-（`main.go:813-824` 的 `agentConfig.set`）——
+预热挂在配置的加载与重载上（`main.go:526`），而它在锁**外**调它
+（`main.go:887-898` 的 `agentConfig.set`）——
 拿着锁起进程会把每一个读配置的调用都堵住。
 
 ★ **预热不是唯一的起法**：一次要求（provider 或面板）也会起，走的是同一个单飞。
@@ -1302,8 +1302,8 @@ workload 是**内容**。跑在沙箱里的 MCP 服务器是 workload 内容；
 | `agentkit/run/runrow.go:88` | `noteMCPServers` |
 | `agentkit/run/runrow.go:141` | `mcpServersOf`（从名字读出 server） |
 | `storage/runledger.go:168` | `Run.MCPServers` |
-| `main.go:518` | 预热挂在配置的加载与重载上 |
-| `main.go:554` | `SetMCPSource` |
+| `main.go:526` | 预热挂在配置的加载与重载上 |
+| `main.go:561` | `SetMCPSource` |
 | `initcfg/initcfg.go:173` | init 写 `mcps/` 分区 |
 | `agentkit/templates/files/mcps/_example.yaml` | 脚手架（开头那个下划线是标记） |
 
@@ -1367,9 +1367,9 @@ workload 是**内容**。跑在沙箱里的 MCP 服务器是 workload 内容；
 | `sandbox-kit/openheron-deepseek/openheron-deepseek.yaml:37-41` | mixin 的网络规则 |
 | `sandbox-kit/openheron-deepseek/openheron-deepseek.yaml:59-69` | mixin 的 `credential@1` |
 | `sandbox-kit/acceptance/run.sh` | 验收跑批（§6 的可重复形式） |
-| `main.go:160` | 没有配置就不肯启动 |
-| `main.go:455` / `:459` / `:460` | `LISTEN_ADDR` / `DATA_DIR` / `PROJECT_ROOT` 的覆盖顺序 |
-| `main.go:481` | 会话目录 |
+| `main.go:161` | 没有配置就不肯启动 |
+| `main.go:462` / `:481` / `:482` | `LISTEN_ADDR` / `DATA_DIR` / `PROJECT_ROOT` 的覆盖顺序 |
+| `main.go:488` | 会话目录 |
 | `agentkit/spec/config.go:514` | `NewService`（项目根的缺省是工作目录） |
 | `agentkit/spec/config.go:579` | `Service.ProjectRoot` |
 | `agentkit/spec/config.go:581` | `Service.DataDir`（缺省 `state`） |

@@ -148,7 +148,7 @@
 只有一处定义，而级别决定了一行会不会出现在默认输出里。
 
 `llm/common` 原来用标准 logger 打请求日志，那段代码搬到了
-`agentkit/obs/httplog`（`docs/runtime-design.md` §4.4），这个叶子包现在一行日志都没有。
+`agentkit/obs/httplog`（`docs/runtime-design.md` §4.5），这个叶子包现在一行日志都没有。
 `llm/common` 里出现任何一处 openheron 内部 import 都仍然算回归。
 
 ★ **没有全局 logger 了。** `main.installLogger` 围绕一个共享的 `slog.LevelVar` 建一个
@@ -158,6 +158,9 @@
 ★ 日志的**去处**可以在启动后改：`obs.Sink` 是 handler 背后的 `io.Writer`，配置里的
 `log.file` 在配置读出之后把它改向文件（`docs/runtime-design.md` §4.3）。换的是「写到哪儿」，
 不是 logger —— 后者已经被 hertz 与 eino 两份进程级注册表持有，换不掉。
+
+★ **通告**那条路不动：`obs.NewNotice` 不管等级与去处都写终端与日志文件 —— 服务地址就是
+这么一直看得见的（`docs/runtime-design.md` §4.4）。
 
 ## 其它约定
 

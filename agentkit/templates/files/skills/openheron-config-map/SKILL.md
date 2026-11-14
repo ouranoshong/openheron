@@ -34,7 +34,18 @@ Prefill the struct → decode file by file (yaml.v3 writes only the keys that ap
 
 - Strict mode `KnownFields(true)`: an unknown field is a hard error **with a line number**; an empty document / comments only → `ErrEmptyDocument`.
 - Three shapes: a key that is not recognized = a hard error; recognized but not honored = `deferred`; recognized but missing a runtime precondition = `deferred` and it does not block the startup.
-- `${ENV}` not set: only a warning, a 401 at request time; an `@file:` path that cannot be read: a hard error.
+- ★ **A key is not written in the file any more: its place comes from the name.**
+  A provider's key is the environment variable `LLM_<PROVIDER>_API_KEY`, else the keyring
+  entry `llm:<provider>`; an MCP header names `${MCP_<SERVER>_TOKEN}`, else the keyring
+  entry `mcp:<server>`. An `api_key:` line in `llm/<provider>.yaml` is refused, and the
+  message says where the key comes from now. ★ **The environment wins over the keyring.**
+- A name that is not there: only a `deferred` notice, and the failure moves to the moment
+  the endpoint is called (a provider answers 401; an MCP header is left out). ★ The notice
+  names **both** places, so it says which one is missing.
+- ★ The environment variable's **value** may be `@file:/path` — the key then comes from that
+  file, and a path that does not resolve is a hard error.
+- A plain `${ENV}` that is not set: a `deferred` notice, the entry is left out; an
+  `@file:` path that cannot be read: a hard error.
 - Two tiers of duration: the `timeout` of `llm/*.yaml` is a strict error; a lenient duration (`debounce` / `start_timeout` / `lease_ttl` / the `tools/` timeouts) falls back to **200ms** when it is written wrong, and the `deferred` message **always** says `watch.debounce`. ⇒ Always write the unit.
 
 ## The three allow-lists (★ the semantics flipped on 2026-11-08)
@@ -76,7 +87,9 @@ Prefill the struct → decode file by file (yaml.v3 writes only the keys that ap
 ★ **The answers name the side they came from.** `config_get {path}`, `config_validate` and `config_get {impact}` carry a `source` field: `disk` (the files on disk right now) or `running` (the tree this turn runs). The two that report a *state* rather than a *question* — `config_get {}` and `config_notices` — carry the two versions instead: `runningVersion` (the tree this turn runs) and `diskVersion` (the files on disk). A model that has just written a file can see that the disk moved and the running tree did not, instead of reading two numbers that differ by one letter.
 ★ `config_write` **cannot write `server/`** (the write gate `ValidatePath` refuses it), but `config_get` **can read it** (the read gate `ValidateReadPath` only cares about the shape). The two gates are not the same thing.
 ★ `config_validate {}` is fail-fast: it gives only the first blocking error plus every hint, not the full list of problems.
-★ `config_get` does not leak secrets (the configuration only holds `${ENV}` / `@file:` references); over `max_read_bytes` (64 KiB by default, set in `tools/config.yaml`) it **refuses** outright instead of truncating.
+★ `config_get` does not leak secrets (the configuration holds **references**, never values — and a
+provider file holds no key reference at all); over `max_read_bytes` (64 KiB by default, set in
+`tools/config.yaml`) it **refuses** outright instead of truncating.
 ★ `config_write` returns `applied` / `requiresRestart` — it takes effect at the next turn; writing the agent itself is allowed too. ★ `applied: true` means the watcher will pick the file up, **not** that this turn can see it.
 ★ **The config tools answer from two places.** The **file** answers (`config_get {path}`, `config_validate {path, content}`) read the disk, so a write is visible there at once. The **tree** answers (`config_tier`, the `effective` summary of `config_get {}`, the `deferred` of `config_notices`) come from the tree the turn was built with — a file written in this turn is on disk but in no tree yet, and it joins on the next turn.
 

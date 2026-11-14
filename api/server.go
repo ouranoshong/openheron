@@ -187,6 +187,22 @@ func (s *Server) Spin() error {
 	return s.h.(*hserver.Hertz).Run()
 }
 
+// Running reports whether the listener is up.
+//
+// ★ hertz marks the engine running before it binds, and the check is the
+//
+//	listener itself: the transporter publishes it only once the socket is
+//	bound. So this answers "the address answers", not "the server was asked
+//	to start" — which is the difference between an address that can be
+//	opened and a promise.
+func (s *Server) Running() bool {
+	h, ok := s.h.(*hserver.Hertz)
+	if !ok {
+		return false
+	}
+	return h.IsRunning()
+}
+
 // registerRoutes is split from Spin so a test can exercise routing without
 // binding a port.
 func (s *Server) registerRoutes() {

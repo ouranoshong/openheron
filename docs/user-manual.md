@@ -230,7 +230,9 @@ export LLM_DEEPSEEK_API_KEY=sk-...   # or keep it in the keyring (§4.2)
 openheron                             # the configuration is written on the first start
 ```
 
-Open <http://localhost:8080>.
+Open <http://localhost:8080>. ★ The terminal prints the address it serves on —
+`the server serves on url=http://127.0.0.1:8080` — and that line shows up whatever
+the log's destination is.
 
 ★ The key is read from the environment **or** from the keyring, and the environment
 wins — §4.2 says how the two fit together and where each one lives; Windows sees §2.2.
@@ -855,9 +857,14 @@ notices carry the reason.
 **config root** — and `log.console` says whether the standard error keeps a copy beside it.
 The **code's** defaults are an empty path and a stderr copy, so an untouched configuration
 logs to the standard error only. A new project gets `logs/openheron.log` and a **false**
-`log.console`: the file is the whole log, and the terminal goes quiet once the configuration
+`log.console`: the log goes to the file, and the terminal goes quiet once the configuration
 is read. The lines before that — and the reason a file could not be opened — still go to
 the standard error.
+
+★ **One line always reaches the terminal: the address the server serves on.** It is
+printed once the listener is up, and neither `log.file` nor `log_level` can hide it —
+the address is not a log record, it is what the process says about itself to the
+terminal it was started on (`docs/runtime-design.md` §4.4).
 
 ★ The file is rotated by size, and a file that cannot be opened is a warning rather than a
 failed start: the process stays on the standard error and says why.

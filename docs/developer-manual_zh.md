@@ -90,6 +90,9 @@ openheron/
 `agentkit/obs/logger.go:39` 解析等级，`agentkit/obs/runid.go:22` 造前缀 ——
 而级别决定了一行会不会出现在默认输出里。
 
+★ **通告那条路不是日志，而且它不动。** `obs.NewNotice` 不管等级与去处都写终端与日志
+文件 —— 服务地址不是日志记录（`docs/runtime-design.md` §4.4）。
+
 一行的长相跟 hertz 的 logger 一样 —— 日期、带微秒的时间、**调用点的文件与行号**、
 级别，然后是消息与属性：
 
@@ -389,7 +392,7 @@ successfully with no output]」）是契约的一部分。
    ```
 
 3. **数据来源**。要接新数据源，在 `api.Server` 上加一个 `SetXxxSource` 方法
-   （模式见 `api/server.go:119` 的 `SetSkillsSource`），在 `main.go` 里接线。
+   （模式见 `api/server.go:145` 的 `SetSkillsSource`），在 `main.go` 里接线。
    **不要**让 handler 直接去读全局变量。
 
 4. **流式响应**。SSE 出口在 `transport` 层，`api` 只负责把事件写出去。
@@ -1071,7 +1074,7 @@ export 出去的值，而且没人知道服务用的是哪一个。
 | 命令行 | `secretcmd.go:32` |
 
 ★ **钥匙串是全局的操作系统资源，所以只有「有人明确要了它」的地方才会碰它。**
-`spec.KeyringStore()` 只在三处被调用：服务端的组合根（`main.go:385`）、
+`spec.KeyringStore()` 只在三处被调用：服务端的组合根（`main.go:393`）、
 `openheron init`（`initcmd.go:70`）与 `openheron secret`（`secretcmd.go:35`）。
 ★ 其余一切 —— 库的使用者、测试 —— **拿不到任何 store**，而
 `Service.SecretStore()` 返回 `nil`。★ 一个往开发者自己凭据库里写东西的测试，会
@@ -1603,6 +1606,7 @@ gitleaks 报的**提交数**比 git 报的低；但内容照样扫到了，因�
 | 启动时报 `api_key` 不再被读 | ★ 档案里还留着已退休的那一行 —— 删掉它。那句话会点名替代它的变量与钥匙串条目（§3.14） |
 | 某个 provider 没有密钥 | `GET /v2/config` 看那个 provider 的 `keySource`；`openheron secret list` 说两个地方里哪个在生效（§3.14） |
 | Secrets 标签页说钥匙串不可用 | ★ 这台机器没有钥匙串（Linux 上是没有走 D-Bus 的 Secret Service）—— 环境变量那条路照样能用（§3.14） |
+| 终端上看不到地址 | ★ 它走通告那条路：那一行是 `the server serves on url=…` —— `log.file` 与 `log_level` 都藏不住它（`docs/runtime-design.md` §4.4） |
 
 ★ **归档优先于呈现** —— SSE sink 断裂后要停止渲染但继续消费事件流，
 否则 `Outcome.Intermediates` 不完整，历史会缺。
@@ -1618,7 +1622,7 @@ gitleaks 报的**提交数**比 git 报的低；但内容照样扫到了，因�
 | **SSE 断了不会自动重连** | `web/src/lib/api.ts` | 流断掉就是断掉：走 `onError` → 错误面板，用户得自己重发。没有重连、没有断点续传。 |
 | **冲突对话框不显示磁盘上的版本** | `web/src/components/settings/conflict-dialog.tsx:18-23` | 它只显示你那个陈旧的 `baseRevision` 加一句写死的「changed by someone else」，**没有真去取磁盘版本**。也没有「强行覆盖」按钮 —— 「Keep editing」只是清掉冲突标记，下次保存会带着同样的陈旧 revision 再冲突一次。 |
 | **四个运行时依赖被放在 `devDependencies`** | `web/package.json` | `lucide-react`（10 个文件引）、`clsx`、`tailwind-merge`、`class-variance-authority` 都被 `src/` 引用并打进 `web/dist`。构建能过（Vite 在构建期解析），但清单是错的。 |
-| **`api/server.go:118` 的注释指向不存在的路由** | 该行 | 注释写的是「GET /v2/spec」，但 `SetSkillsSource` 实际喂的是 `/v2/skills`。 |
+| **`api/server.go:144` 的注释指向不存在的路由** | 该行 | 注释写的是「GET /v2/spec」，但 `SetSkillsSource` 实际喂的是 `/v2/skills`。 |
 | **残留的 `policy/` 目录被丢弃了 —— 而配置照样加载** | 装载器只走六个分区（`agentkit/spec/config.go:664`）；退役的目录只被「注意到」，不会被读（`noteRetiredDirs`，`agentkit/spec/config.go:709`） | `policy/` 分区在 2026-11-07 退役了：档位住在提供工具的那些文件里，而默认档位是 `ask`。从前留下的 `policy/permissions.yaml` **不会被读** —— 以前被禁的工具现在会问，以前不用点头就过的工具现在也会问。★ 那条提示落在 `deferred` 里（启动日志与 `/v2/health` 都带着它），并说清新档位在哪儿；配置编辑器直接拒绝这个路径（「unknown config section」，`agentkit/spec/write.go:116`）。★ **空的** `policy/` 目录不报任何东西 —— 它里面本来就没有被丢掉的东西。 |
 
 ## 8. 提交前

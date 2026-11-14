@@ -13,7 +13,9 @@ context: inline
 1. Before starting, read the target file with `config_get`; change only the files the instructions name, one at a time; re-read after the change to confirm the **file**. ★ The **tree** this turn runs is fixed: a file written now is on disk but in no tree yet, and it joins on the next turn.
 2. An unknown field is a hard error — rather write one key fewer than invent a key.
 3. Every duration carries a unit; every model reference carries the `<provider>/` prefix and has been declared in `llm/`.
-4. A secret is written only as `${ENV}` / `@file:`, never in plaintext, never echoed back.
+4. A secret is never written in plaintext and never echoed back: a provider's key is **not written
+   at all** (its place comes from the provider's name), and an MCP header carries
+   `${MCP_<SERVER>_TOKEN}` or `@file:`.
 5. `state/` is neither changed nor committed.
 6. A write triggers a human approval — write the instruction completely, do not patch it up by trial and error.
 7. Decide how the change takes effect: a change under `server/` needs a restart, everything else takes effect on the next turn; state it in the plan.
@@ -53,6 +55,10 @@ context: inline
 ## Scenario A: the vendors and the models (llm/)
 
 - The provider id = the file name without its extension; `type` (display only), `base_url` and `models[].id` are required.
+- ★ **The key is not in the file.** Its place comes from the provider's name: the environment
+  variable `LLM_<PROVIDER>_API_KEY`, else the keyring entry `llm:<provider>`. An `api_key:`
+  line is refused with the sentence that names those two places — delete the line, do not
+  rewrite it.
 - A reference is `<provider>/<model>`; an undeclared model = an error at startup.
 - Only `kind: embedding` can be used by the knowledge base; `context_window` not written = 0 = automatic compaction never triggers.
 - `reasoning` is the **vocabulary**, `reasoning_default` is the default tier; an agent only writes a tier name, and a tier the model does not declare is a **load-time hard error** that names the file and the levels the model does declare.
@@ -88,6 +94,10 @@ context: inline
 - `allows:` uses the server's own tool names; empty = every tool asks, including the ones added later.
 - `command` is resolved in **PATH**, never relative to the project root (on Windows you may need `npx.cmd` / `uvx.exe`);
   the paths in `args` are **not** expanded with `${ENV}`. An `${ENV}` that is not set in `env:` only drops that entry, it does not block the startup.
+- ★ **A header that carries a token names it**: `${MCP_<SERVER>_TOKEN}` is that server's token —
+  the environment first, the keyring entry `mcp:<server>` second. A plain `${ENV}` is a plain
+  environment lookup. A name that is not there is a notice and the entry is left out, not a
+  failed start.
 - The file's `tools:` is a filter (the original tool names) and `allows:` is the tier exception; a **wrong name in either one does not error**,
   it only silently does not take effect — use the `/mcps` panel to check the tool names the server actually provides, do not copy them from memory.
 - The server cannot be reached: the tools are not mounted at all plus one warning, and **the process start is not affected**. `timeout` / `call_timeout` are lenient,
@@ -111,6 +121,7 @@ context: inline
 | the `tools:` section of `server/config.yaml` | split into `tools/*.yaml` | the error `field tools not found` |
 | `policy/permissions.yaml` / `limits.yaml` | the `allows:` of each tool file / the limits in `server/config.yaml` | not silent: the retired directory goes into `deferred` |
 | the `corpus` of `kb.yaml` | `corpus_dir` | the old key is still loaded, and it goes into `deferred` |
+| an `api_key:` line in `llm/<provider>.yaml` | deleted — the key's place comes from the provider's name | a hard error at load time, and the message names the environment variable and the keyring entry to use instead |
 
 ## Scenario G: the skills (skills/)
 

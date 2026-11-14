@@ -653,7 +653,9 @@ func TestTheServerConfigurationIsWritten(t *testing.T) {
 //	logs/openheron.log and keeps stderr quiet, so a new project's log lands
 //	on disk and nowhere else, instead of dying with the terminal it was
 //	started in. The exceptions are the point, so they are pinned here
-//	rather than left to the template's text.
+//	rather than left to the template's text. ★ The address the server serves
+//	on is not part of that log: it is printed on the terminal whatever this
+//	says.
 func TestTheServerConfigurationHoldsTheCodeDefaults(t *testing.T) {
 	e := newEnv(t)
 	p := e.plan(Options{})

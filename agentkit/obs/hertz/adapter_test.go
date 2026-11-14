@@ -129,3 +129,22 @@ func TestNilLoggerDoesNotPanic(t *testing.T) {
 	l.Info("MARK_NIL")
 	l.Fatalf("%s", "MARK_NIL_FATAL")
 }
+
+// ★ hertz announces the listener itself; openheron announces the address on
+//
+//	the console route, where the log's destination cannot hide it. Two lines
+//	would say it twice.
+func TestTheListeningBannerIsNotLogged(t *testing.T) {
+	buf, l := fixture(t, slog.LevelInfo)
+
+	l.Info("[system] HTTP server listening on address=127.0.0.1:8080")
+	l.Info("MARK_OTHER")
+
+	out := buf.String()
+	if strings.Contains(out, "HTTP server listening") {
+		t.Fatalf("the framework's banner was logged as well:\n%s", out)
+	}
+	if !strings.Contains(out, "MARK_OTHER") {
+		t.Fatalf("the adapter swallowed an ordinary line:\n%s", out)
+	}
+}

@@ -175,7 +175,7 @@ bug or did I misconfigure it?" harder to answer.
 line shows up in the default output.
 
 `llm/common` used to write the request log with the standard logger; that code moved to
-`agentkit/obs/httplog` (`docs/runtime-design.md` §4.4), so the leaf now logs nothing at all. Any
+`agentkit/obs/httplog` (`docs/runtime-design.md` §4.5), so the leaf now logs nothing at all. Any
 openheron-internal import inside `llm/common` is still a regression.
 
 ★ **There is no global logger.** `main.installLogger` builds one `*slog.Logger` around a shared
@@ -187,6 +187,10 @@ package-level variable.
 handler, and `log.file` points it at a file once the configuration is read
 (`docs/runtime-design.md` §4.3). What moves is where the records go, not the logger — hertz and
 eino already hold that, and a process-global registry cannot be rewritten.
+
+★ The **notice** route does not move: `obs.NewNotice` writes to the console and to the log file
+whatever the level and the destination say — that is how the serving address stays visible
+(`docs/runtime-design.md` §4.4).
 
 ## Other conventions
 
