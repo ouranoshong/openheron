@@ -15,6 +15,9 @@ func (f *fixture) service(t *testing.T) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// ★ The tests read their keys from a fake store, never from the
+	//   developer's own credential manager.
+	s.SetSecretStore(f.secrets)
 	return s
 }
 
@@ -250,7 +253,7 @@ func TestLoadWithCreatesIntoAMissingDirectory(t *testing.T) {
 	}
 	f := &fixture{root: cfgRoot}
 	f.seedMinimal(t)
-	t.Setenv("TEST_LLM_KEY", "sk-test")
+	t.Setenv("LLM_OPENAI_API_KEY", "sk-test")
 
 	if _, err := os.Stat(filepath.Join(cfgRoot, DirTools)); err == nil {
 		t.Fatal("precondition: tools/ must not exist yet")

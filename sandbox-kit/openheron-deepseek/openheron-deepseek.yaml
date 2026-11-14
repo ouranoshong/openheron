@@ -47,8 +47,8 @@ capabilities:
   # ★ The user binds the key with ONE command, and the placeholder it uses is
   #   the sentinel itself, so the runtime's injection and the host's binding
   #   agree without the user passing an environment variable:
-  #     printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
-  #       --host api.deepseek.com --env DEEPSEEK_API_KEY \
+  #     printf '%s' "$LLM_DEEPSEEK_API_KEY" | sbx secret set-custom \
+  #       --host api.deepseek.com --env LLM_DEEPSEEK_API_KEY \
   #       --placeholder proxy-managed --value-stdin
   #   The real key never enters the sandbox.
   #
@@ -63,7 +63,7 @@ capabilities:
       service: deepseek
       phase: runtime
       apiKey:
-        name: DEEPSEEK_API_KEY
+        name: LLM_DEEPSEEK_API_KEY
         proxyManaged: true
         inject:
           - {domain: api.deepseek.com, header: Authorization, format: "Bearer %s"}

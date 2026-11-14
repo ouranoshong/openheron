@@ -21,6 +21,13 @@ func (c *Config) loadProvider(file string, data []byte) error {
 	if id == "" {
 		return fmt.Errorf("provider file name is empty")
 	}
+	// ★ The name is the anchor of the whole secret naming scheme: it is the
+	//   environment variable's middle and the keyring user's middle, so it
+	//   has to be one that both can carry. The same shape an MCP server
+	//   name takes, for the same reason.
+	if !decl.ValidProviderName(id) {
+		return fmt.Errorf("llm/%s: the provider name %q must match %s", file, id, decl.ProviderNamePattern)
+	}
 
 	var p decl.Provider
 	if err := decodeStrict(data, &p); err != nil {
@@ -34,18 +41,30 @@ func (c *Config) loadProvider(file string, data []byte) error {
 	if p.BaseURL == "" {
 		return fmt.Errorf("missing base_url")
 	}
-	rawKey := p.APIKey
-	key, resolved, err := expandValue(rawKey)
-	if err != nil {
-		return fmt.Errorf("api_key: %w", err)
+	// ★ `api_key` is retired. It is refused here, with a sentence that says
+	//   where the key comes from now — the yaml decoder's own "field
+	//   api_key not found in type spec.Provider" would name a type the
+	//   user has never heard of and say nothing about what to do instead.
+	if strings.TrimSpace(p.APIKey) != "" {
+		return fmt.Errorf("llm/%s: `api_key` is no longer read — the key comes from %s "+
+			"(or from the keyring entry %s); delete this line",
+			file, LLMEnvName(id), LLMSecretUser(id))
 	}
-	if !resolved {
-		p.APIKey = ""
+
+	// ★ The key is not written in the file any more: its **place** is
+	//   derived from the file's own name. The environment is asked first
+	//   and the keyring second, and the file says nothing about either.
+	name := LLMEnvName(id)
+	sec, err := c.resolver().resolve(name)
+	if err != nil {
+		return fmt.Errorf("llm/%s: %w", file, err)
+	}
+	p.APIKey = sec.Value
+	p.KeySource = sec.Source
+	if !sec.Found {
 		c.deferFile(DirLLM+"/"+id+".yaml",
-			"api_key env %s is not set; calls to this endpoint will fail with 401 Unauthorized",
-			envVarName(rawKey))
-	} else {
-		p.APIKey = key
+			"no key for this provider: %s; calls to this endpoint will fail with 401 Unauthorized",
+			secretNotice(name, sec))
 	}
 
 	for ref := range c.Models {
@@ -544,6 +563,26 @@ func (c *Config) expandMCPMaps(file, key string, in map[string]string) (map[stri
 	}
 	out := make(map[string]string, len(in))
 	for k, v := range in {
+		// ★ A value that names one of the **derived** secrets is resolved
+		//   through the secret chain — the environment first, the keyring
+		//   second — so that `${MCP_GITHUB_TOKEN}` means "that server's
+		//   token" and not "a variable that happens to be spelled that
+		//   way". Every other reference keeps its old meaning: a plain
+		//   environment lookup.
+		if name, ok := derivedSecretRef(v); ok {
+			sec, err := c.resolver().resolve(name)
+			if err != nil {
+				return nil, fmt.Errorf("mcps/%s: %s %s: %w", file, key, k, err)
+			}
+			if !sec.Found {
+				c.deferFile(DirMCP+"/"+file,
+					"%s %s refers to a secret that is not there: %s; the entry is left out",
+					key, k, secretNotice(name, sec))
+				continue
+			}
+			out[k] = sec.Value
+			continue
+		}
 		val, resolved, err := expandValue(v)
 		if err != nil {
 			return nil, fmt.Errorf("mcps/%s: %s %s: %w", file, key, k, err)

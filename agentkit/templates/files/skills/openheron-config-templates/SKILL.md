@@ -27,7 +27,9 @@ while the tool asks `spec.TemplateFor` / `Templates` / `Skeleton`, which is the 
 - **Delete the pure comment lines** after copying, and keep at least one real key: a file that is only comments = an empty document = `ErrEmptyDocument`.
 - `<...>` is a placeholder and has to be replaced; the `<provider>/<model>` of `model` has to be declared in `llm/`.
 - Every duration carries a unit (`5m` / `60s` / `200ms`); do not add keys that the template does not list, strict mode refuses them.
-- `api_key` may only be written as `${ENV_VAR}` or `@file:/path`.
+- The api key is **not** written into the file: the provider's name says where it
+  comes from — the environment variable `LLM_<PROVIDER>_API_KEY`, or the keyring
+  entry `llm:<provider>`. An `api_key:` line is refused.
 - The field names and the rules of effect follow `openheron-config-map`, the way to change them follows `openheron-config-edit`;
   once it is filled in, run `config_validate {path, content}` before `config_write`.
 

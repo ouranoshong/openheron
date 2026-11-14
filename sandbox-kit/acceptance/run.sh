@@ -187,6 +187,13 @@ for d in agents llm mcps server state; do
 		"$([ -d "$WORKSPACE/.openheron/$d" ] && echo yes || echo no)"
 done
 
+# ★ The provider file names the key's **place**, and the place is not the
+#   file: an `api_key:` line is retired, and a file that still carries one
+#   is a file the loader refuses. So the claim "the key is not in the
+#   configuration" is a claim about the tree, and it is checked here.
+KEY_LINES=$(grep -rl -- "^[[:space:]]*api_key:" "$WORKSPACE/.openheron" 2>/dev/null | head -1)
+check "no configuration file carries an api_key line" "none" "${KEY_LINES:-none}"
+
 # ── The credential ────────────────────────────────────────────────────────
 
 head2 "Credential"
@@ -194,7 +201,7 @@ head2 "Credential"
 # The exec container shares the sandbox's network, so this is the workload's
 # own environment, not the exec container's.
 ENV_DUMP=$(timeout 180 sbx exec "$SANDBOX_NAME" -- sh -c '
-	echo "KEY=$DEEPSEEK_API_KEY"
+	echo "KEY=$LLM_DEEPSEEK_API_KEY"
 	echo "MODE=$SBX_CRED_DEEPSEEK_MODE"
 	echo "WS=$WORKSPACE_DIR"
 ' 2>/dev/null)
@@ -205,8 +212,8 @@ check_contains "WORKSPACE_DIR points at the host workspace" \
 	"WS=$WORKSPACE" "$ENV_DUMP"
 
 # The real key must not have been written anywhere the user can read.
-if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
-	LEAK=$(grep -rl -- "$DEEPSEEK_API_KEY" "$WORKSPACE/.openheron" 2>/dev/null | head -1)
+if [ -n "${LLM_DEEPSEEK_API_KEY:-}" ]; then
+	LEAK=$(grep -rl -- "$LLM_DEEPSEEK_API_KEY" "$WORKSPACE/.openheron" 2>/dev/null | head -1)
 	check "the real key is nowhere in the configuration root" "none" "${LEAK:-none}"
 fi
 

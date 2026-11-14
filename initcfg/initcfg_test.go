@@ -13,7 +13,6 @@ import (
 
 const userProviderYAML = `type: openai_compat
 base_url: https://api.openai.com/v1
-api_key: ${OPENAI_API_KEY}
 timeout: 5m
 models:
   - id: gpt-4o
@@ -99,15 +98,17 @@ func hasRel(list []string, want string) bool {
 func TestTemplateRendersIntoALoadableConfig(t *testing.T) {
 	e := newEnv(t)
 	content, err := renderTemplate("llm/openai.yaml", map[string]string{
-		"model":       "gpt-4o",
-		"base_url":    "",
-		"api_key_env": "",
+		"model":    "gpt-4o",
+		"base_url": "",
 	}, nil)
 	if err != nil {
 		t.Fatalf("renderTemplate: %v", err)
 	}
-	if !strings.Contains(string(content), "api_key: ${OPENAI_API_KEY}") {
-		t.Fatalf("the api key must be an environment reference, got:\n%s", content)
+	// ★ The api key is not in the file: the provider's name is the anchor,
+	//   so a reference to a variable would be a second spelling of a fact
+	//   the file's name already carries.
+	if strings.Contains(string(content), "api_key:") {
+		t.Fatalf("the api key must not be in the configuration, got:\n%s", content)
 	}
 	if !strings.Contains(string(content), "id: gpt-4o") {
 		t.Fatalf("the model id must be substituted, got:\n%s", content)
@@ -501,7 +502,6 @@ func TestEmbeddingModelsAreNotPicked(t *testing.T) {
 	e := newEnv(t)
 	e.write("llm/embed.yaml", `type: openai_compat
 base_url: https://api.openai.com/v1
-api_key: ${OPENAI_API_KEY}
 models:
   - id: text-embedding-3-small
     kind: embedding
@@ -523,8 +523,11 @@ func TestAnExplicitUndeclaredModelCreatesTheProvider(t *testing.T) {
 	if !hasRel(rels(p), "llm/deepseek.yaml") {
 		t.Fatalf("llm/deepseek.yaml must be written: %v", rels(p))
 	}
-	if p.EnvHint != "DEEPSEEK_API_KEY" {
-		t.Fatalf("env hint = %q, want DEEPSEEK_API_KEY", p.EnvHint)
+	if p.EnvHint != "LLM_DEEPSEEK_API_KEY" {
+		t.Fatalf("env hint = %q, want LLM_DEEPSEEK_API_KEY", p.EnvHint)
+	}
+	if p.SecretHint != "llm:deepseek" {
+		t.Fatalf("secret hint = %q, want llm:deepseek", p.SecretHint)
 	}
 }
 
@@ -570,8 +573,11 @@ func TestTheDefaultProviderIsDeepseek(t *testing.T) {
 	if p.Model != "deepseek/deepseek-flash" {
 		t.Fatalf("model = %q, want deepseek/deepseek-flash", p.Model)
 	}
-	if p.EnvHint != "DEEPSEEK_API_KEY" {
-		t.Fatalf("env hint = %q, want DEEPSEEK_API_KEY", p.EnvHint)
+	if p.EnvHint != "LLM_DEEPSEEK_API_KEY" {
+		t.Fatalf("env hint = %q, want LLM_DEEPSEEK_API_KEY", p.EnvHint)
+	}
+	if p.SecretHint != "llm:deepseek" {
+		t.Fatalf("secret hint = %q, want llm:deepseek", p.SecretHint)
 	}
 }
 

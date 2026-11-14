@@ -34,7 +34,7 @@ func fingerprintEnv(t *testing.T) (*spec.Service, *Builder, string) {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("TEST_FINGERPRINT_KEY", "sk-test")
+	t.Setenv("LLM_OPENAI_API_KEY", "sk-test")
 	// ★ The runtime reads skills from where the environment says, and the
 	//   dependency walk has to hash the same file the runtime reads.
 	skillsDir := filepath.Join(cfgRoot, spec.DirSkills)
@@ -47,7 +47,7 @@ func fingerprintEnv(t *testing.T) (*spec.Service, *Builder, string) {
 		}
 	}
 	write("llm/openai.yaml", "type: openai\nbase_url: https://a.example\n"+
-		"api_key: ${TEST_FINGERPRINT_KEY}\nmodels:\n  - id: fast\n")
+		"models:\n  - id: fast\n")
 	write("agents/main.md", "---\nmodel: openai/fast\ntools: [ls, request_get]\n"+
 		"subagents: [skill-expert]\n---\nmain body\n")
 	write("agents/skill-expert.md", "---\nmodel: openai/fast\ntools: [ls]\n"+

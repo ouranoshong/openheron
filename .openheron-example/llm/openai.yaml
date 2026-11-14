@@ -1,7 +1,11 @@
 type: openai_compat
 base_url: https://api.openai.com/v1
-api_key: ${OPENAI_API_KEY}
 timeout: 5m
+
+# The api key is not in this file: the provider's name — this file's name —
+# says where it comes from. The environment variable LLM_OPENAI_API_KEY, or
+# the keyring entry llm:openai. The environment wins when both are there.
+# Store one with: openheron secret set llm openai
 
 # The field names this endpoint uses — only used to give an accurate hint when a request is rejected.
 # The protocol layer hardcodes no vendor's field names.

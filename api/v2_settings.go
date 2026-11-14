@@ -11,10 +11,10 @@ import (
 )
 
 const (
-	codeConfigPathInvalid   = "config_path_invalid"
-	codeConfigSecretLiteral = "config_secret_literal"
-	codeConfigWouldBreak    = "config_would_break_merge"
-	codeConfigWriteConflict = "config_write_conflict"
+	codeConfigPathInvalid     = "config_path_invalid"
+	codeConfigKeyFieldRetired = "config_key_field_retired"
+	codeConfigWouldBreak      = "config_would_break_merge"
+	codeConfigWriteConflict   = "config_write_conflict"
 )
 
 type settingsItemBody struct {
@@ -72,8 +72,8 @@ func (s *Server) settingsFail(c *app.RequestContext, err error) {
 		switch we.Kind {
 		case spec.ErrPathInvalid:
 			s.v2Fail(c, consts.StatusBadRequest, codeConfigPathInvalid, msg, false)
-		case spec.ErrSecretLiteral:
-			s.v2Fail(c, consts.StatusBadRequest, codeConfigSecretLiteral, msg, false)
+		case spec.ErrKeyFieldRetired:
+			s.v2Fail(c, consts.StatusBadRequest, codeConfigKeyFieldRetired, msg, false)
 		case spec.ErrMergeRejected:
 			s.v2Fail(c, consts.StatusUnprocessableEntity, codeConfigWouldBreak, msg, false)
 		case spec.ErrConflict:

@@ -50,12 +50,17 @@ call_timeout: 60s
 # transport: http
 # url: https://mcp.example.com/mcp
 # headers:
-#   Authorization: Bearer ${REMOTE_TOKEN}
+#   Authorization: Bearer ${MCP_REMOTE_TOKEN}
 #
 # ★ The child's environment, when the server needs more than it inherits:
 #
 # env:
-#   GITHUB_TOKEN: ${GITHUB_TOKEN}
+#   GITHUB_TOKEN: ${MCP_GITHUB_TOKEN}
+#
+# ★ A ${MCP_<SERVER>_TOKEN} reference is **that server's token**: the
+#   environment variable of that name first, the keyring entry
+#   mcp:<server> second. A reference without that shape — ${GITHUB_TOKEN} —
+#   is a plain environment lookup and gets no keyring fallback.
 #
 # ★ The tools to offer, by the server's own names:
 #

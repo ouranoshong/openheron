@@ -12,7 +12,7 @@ This skill gives facts and rules only. Ask for the concrete values with `config_
 
 ```
 agents/<id>.md         agent definition (frontmatter + the body is the Instruction), main is the default agent
-llm/<provider>.yaml    the vendor's profile: base_url / api_key / models[]
+llm/<provider>.yaml    the vendor's profile: base_url / models[] (the api key is not in the file)
 server/config.yaml     the process itself: listening, directories, timeouts, caps (the cold partition)
 tools/<tool>.yaml      http / web_search / wikipedia / kb / filesystem / config
 mcps/<server>.yaml     one MCP server per file

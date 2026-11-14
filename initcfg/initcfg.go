@@ -22,7 +22,6 @@ type Options struct {
 	Model    string
 	Provider string
 	BaseURL  string
-	Env      string
 	// NoTools leaves the tool configurations under tools/ unwritten.
 	//
 	// ★ The switch is **negative** on purpose: the zero value has to be the
@@ -45,8 +44,19 @@ type Plan struct {
 	Skipped []string
 	Notes   []string
 	Model   string
+	// EnvHint is the environment variable that holds the provider's key.
+	//
+	// ★ It is **derived** from the provider's name (see `spec.LLMEnvName`),
+	//   not chosen: the file's name is the anchor of the whole secret
+	//   naming scheme.
 	EnvHint string
-	force   bool
+	// SecretHint is the keyring entry that holds the same key.
+	//
+	// ★ Both are named because the key has **two** places — the environment
+	//   overrides the keyring, and the user needs to know which one is in
+	//   force before they wonder why their export "did not work".
+	SecretHint string
+	force      bool
 
 	// existing is the manifest's answer to "which files are there": the
 	// same answer the settings editor gets, asked once for the whole plan.
@@ -118,17 +128,15 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 				choice.Provider+".yaml", choice.Model)
 		}
 		content, err := renderTemplate(choice.Template, map[string]string{
-			"model":       choice.Model,
-			"base_url":    opts.BaseURL,
-			"api_key_env": opts.Env,
-		}, map[string]string{
-			"api_key_env": defaultEnvName(choice.Provider),
-		})
+			"model":    choice.Model,
+			"base_url": opts.BaseURL,
+		}, nil)
 		if err != nil {
 			return nil, err
 		}
 		p.add("llm/"+choice.Provider+".yaml", content)
 		p.EnvHint = choice.EnvName
+		p.SecretHint = spec.LLMSecretUser(choice.Provider)
 	} else {
 		p.Notes = append(p.Notes, fmt.Sprintf(
 			"model %q is already declared; it is reused as is", choice.Ref))
@@ -312,7 +320,7 @@ func chooseModel(merged *spec.Config, opts Options) (choice, error) {
 			}
 		}
 		c.NeedProvider = true
-		if err := c.fillTemplate(opts); err != nil {
+		if err := c.fillTemplate(); err != nil {
 			return choice{}, err
 		}
 		return c, nil
@@ -334,7 +342,7 @@ func chooseModel(merged *spec.Config, opts Options) (choice, error) {
 	}
 	c := choice{Ref: provider + "/" + providerDefaultModel(provider), Provider: provider}
 	c.NeedProvider = true
-	if err := c.fillTemplate(opts); err != nil {
+	if err := c.fillTemplate(); err != nil {
 		return choice{}, err
 	}
 	if c.Model == "" {
@@ -344,7 +352,7 @@ func chooseModel(merged *spec.Config, opts Options) (choice, error) {
 	return c, nil
 }
 
-func (c *choice) fillTemplate(opts Options) error {
+func (c *choice) fillTemplate() error {
 	name, err := templateFor(c.Provider)
 	if err != nil {
 		return err
@@ -357,13 +365,11 @@ func (c *choice) fillTemplate(opts Options) error {
 	if c.Model == "" {
 		c.Model = templates.Default(string(raw), "model")
 	}
-	c.EnvName = templates.Default(string(raw), "api_key_env")
-	if c.EnvName == "" {
-		c.EnvName = defaultEnvName(c.Provider)
-	}
-	if opts.Env != "" {
-		c.EnvName = opts.Env
-	}
+	// ★ The variable name is **derived**, not chosen: the provider's name is
+	//   the file's name, and the name says where the key comes from. There is
+	//   no flag for a different one — a second spelling of the same fact is
+	//   a second thing to get wrong.
+	c.EnvName = spec.LLMEnvName(c.Provider)
 	return nil
 }
 
@@ -377,10 +383,6 @@ func usableModels(merged *spec.Config) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func defaultEnvName(provider string) string {
-	return strings.ToUpper(strings.ReplaceAll(provider, "-", "_")) + "_API_KEY"
 }
 
 const defaultProvider = "deepseek"

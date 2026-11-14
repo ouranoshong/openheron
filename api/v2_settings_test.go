@@ -42,7 +42,7 @@ func settingsEnvWithWatch(t *testing.T, watch bool) (*Server, *spec.Service, str
 			t.Fatal(err)
 		}
 	}
-	write("llm/openai.yaml", "type: openai\nbase_url: https://a.example\napi_key: ${TEST_SETTINGS_KEY}\nmodels:\n"+
+	write("llm/openai.yaml", "type: openai\nbase_url: https://a.example\nmodels:\n"+
 		"  - id: fast\n    reasoning_default: off\n    reasoning:\n      off: { reasoning_effort: none }\n      high: { reasoning_effort: high }\n"+
 		"  - id: plain\n    context_window: 8192\n")
 	write("agents/main.md", "---\nmodel: openai/fast\ndescription: root\nreasoning: high  # level\n---\nbody\n")
@@ -456,7 +456,7 @@ func TestSettingsSaveReportsNotAppliedWhenWatchIsOff(t *testing.T) {
 	}
 }
 
-func TestSettingsSaveRejectsLiteralSecret(t *testing.T) {
+func TestSettingsSaveRejectsTheRetiredAPIKeyField(t *testing.T) {
 	srv, svc, _ := settingsEnv(t)
 	_, before, _ := svc.ReadFile("llm/openai.yaml")
 
@@ -464,8 +464,8 @@ func TestSettingsSaveRejectsLiteralSecret(t *testing.T) {
 		Path: "llm/openai.yaml", BaseRevision: before,
 		Content: "type: openai\nbase_url: https://a.example\napi_key: sk-leaked\nmodels:\n  - id: fast\n",
 	})
-	if code := decodeCode(t, got.body); code != codeConfigSecretLiteral {
-		t.Fatalf("code = %q, want %q (%d %s)", code, codeConfigSecretLiteral, got.code, got.body)
+	if code := decodeCode(t, got.body); code != codeConfigKeyFieldRetired {
+		t.Fatalf("code = %q, want %q (%d %s)", code, codeConfigKeyFieldRetired, got.code, got.body)
 	}
 	_, after, _ := svc.ReadFile("llm/openai.yaml")
 	if before != after {

@@ -163,6 +163,29 @@ type Config struct {
 	//   builder says it when a session asks for that agent, and the write
 	//   gate says it when a change would take the agent out.
 	leftOut map[string]string
+
+	// secrets resolves the keys the configuration refers to.
+	//
+	// ★ It is a field because the keyring is a **global OS resource**: a
+	//
+	//	test has to be able to hand the loader a fake one. A package
+	//	variable would be shared by every tree in the process, and a test
+	//	that replaced it would race every other test that loads a tree.
+	secrets *secretResolver
+}
+
+// resolver returns the resolver this configuration reads its keys through.
+//
+// ★ A configuration built by hand (the tests do that) has no resolver of
+//
+//	its own, and gets the **null** one: no store wired means no keyring
+//	is reached. The tree that has a store — the server's, the one a test
+//	installs — carries it.
+func (c *Config) resolver() *secretResolver {
+	if c == nil || c.secrets == nil {
+		return nullResolver
+	}
+	return c.secrets
 }
 
 // LeftOut returns the agents that were left out of the tree, and why.
@@ -288,6 +311,71 @@ type Service struct {
 	//   would be a fact about the past, and the past is what the content
 	//   hash is for.
 	marked map[string]bool
+
+	// secrets resolves the keys. Nil means no store is wired, so the tree
+	// resolves through the null resolver and never reaches a keyring.
+	//
+	// ★ It belongs to the **service** and not to the tree, because the
+	//   service is the thing that outlives a reload: a tree is built again
+	//   on every change, and a store that had to be handed to each of them
+	//   would be a store that could be forgotten between two of them.
+	secrets *secretResolver
+}
+
+// SetSecretStore replaces where the secrets are read from and written to.
+//
+// ★ It exists so that a test — or an embedding process — can hand the
+//
+//	configuration a store of its own. ★ And so that the **keyring** is
+//	reached only where somebody asked for it: the default is no store at
+//	all, because the keyring is a global OS resource, and a test that
+//	wrote to it would leave entries in the developer's own credential
+//	store, under a name nobody would remember to delete.
+func (s *Service) SetSecretStore(store SecretStore) {
+	if s == nil {
+		return
+	}
+	if store == nil {
+		s.secrets = nil
+		return
+	}
+	s.secrets = &secretResolver{store: store}
+}
+
+// SecretStore returns the store the secrets live in.
+//
+// ★ Nil means **no store is wired**, and the caller turns that into a 503
+//
+//	rather than pretending the tree is empty. The interface, not the
+//	resolver: a caller that wants to write a secret wants the store, and
+//	the resolver's chain is the loader's business.
+func (s *Service) SecretStore() SecretStore {
+	if s == nil || s.secrets == nil {
+		return nil
+	}
+	return s.secrets.store
+}
+
+// MarkSecret records that a secret changed, so the next turn resolves it again.
+//
+// ★ The key is not in the configuration tree, so the tree's fingerprint does
+//
+//	not change when it does — the watcher's poll would never notice, and
+//	"the next turn uses it" would be a hope instead of a promise.
+//
+// ★ It marks the file that **names** the entity: the provider's profile or
+//
+//	the server's file. That file did not change, but the tree it stands for
+//	did, and that is what the mark means.
+func (s *Service) MarkSecret(group, name string) {
+	if s == nil || name == "" {
+		return
+	}
+	rel := DirLLM + "/" + name + ".yaml"
+	if group == SecretGroupMCP {
+		rel = DirMCP + "/" + name + ".yaml"
+	}
+	s.Mark(rel)
 }
 
 // Mark records that a configuration file changed.
@@ -569,6 +657,7 @@ func (s *Service) loadOnly(ms map[string]*mutation) (*Config, error) {
 		ConfigRoot: s.root,
 		Server:     defaultServer(),
 		KB:         defaultKB(),
+		secrets:    s.secrets,
 	}
 
 	for _, cat := range Categories {

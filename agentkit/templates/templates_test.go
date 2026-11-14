@@ -1,6 +1,7 @@
 package templates
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -104,15 +105,44 @@ func TestNestedReturnsTheSkillFolders(t *testing.T) {
 }
 
 func TestRenderExpandsThePlaceholders(t *testing.T) {
-	out, err := Render("model: {{model}}\napi_key: {{api_key_env}}\n",
-		map[string]string{"model": "deepseek/flash", "api_key_env": "DEEPSEEK_API_KEY"},
+	out, err := Render("model: {{model}}\nbase_url: {{base_url}}\n",
+		map[string]string{"model": "deepseek/flash", "base_url": "https://api.deepseek.com"},
 		nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "model: deepseek/flash\napi_key: ${DEEPSEEK_API_KEY}\n"
+	want := "model: deepseek/flash\nbase_url: https://api.deepseek.com\n"
 	if out != want {
 		t.Fatalf("rendered = %q, want %q", out, want)
+	}
+}
+
+// ★ A template carries no secret reference any more: the api key comes from
+//
+//	the provider's name, so a placeholder for it would be a second spelling
+//	of a fact the file's name already carries.
+func TestNoTemplateCarriesASecretReference(t *testing.T) {
+	for _, dir := range []string{"llm", "mcps", "tools", "server"} {
+		files, err := Dir(dir)
+		if err != nil {
+			t.Fatalf("read %s: %v", dir, err)
+		}
+		for rel, content := range files {
+			if strings.Contains(content, "api_key:") {
+				t.Errorf("%s still carries an api_key line", rel)
+			}
+		}
+	}
+	// ★ The scaffolds are not in Dir — they are sources, not files to
+	//   install — so they are checked by name.
+	for _, rel := range []string{"llm/_generic.yaml", "mcps/_example.yaml"} {
+		content, err := File(rel)
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if strings.Contains(content, "api_key:") {
+			t.Errorf("%s still carries an api_key line", rel)
+		}
 	}
 }
 

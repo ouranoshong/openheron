@@ -46,6 +46,47 @@ func envVarName(v string) string {
 	return ""
 }
 
+// derivedSecretRef reads the name out of a "${NAME}" reference, when that
+// name is one of the derived secrets.
+//
+// ★ Only the derived names qualify. A reference to anything else keeps its
+//
+//	old meaning — a plain environment lookup — and a name that merely
+//	looks like one of them is not turned into a keyring lookup.
+func derivedSecretRef(v string) (string, bool) {
+	v = strings.TrimSpace(v)
+	if !strings.HasPrefix(v, "${") || !strings.HasSuffix(v, "}") {
+		return "", false
+	}
+	name := strings.TrimSpace(v[2 : len(v)-1])
+	if name == "" {
+		return "", false
+	}
+	if _, ok := SecretUserFor(name); !ok {
+		return "", false
+	}
+	return name, true
+}
+
+// secretNotice says why a name held no key.
+//
+// ★ The two places are named separately: a user who exported the variable
+//
+//	and a user who stored the key in the keyring are doing different
+//	things, and the sentence has to tell them which one is missing. "No key"
+//	on its own sends them looking in the wrong place.
+func secretNotice(name string, sec Secret) string {
+	switch {
+	case sec.Empty:
+		return fmt.Sprintf("%s is set but empty", name)
+	case sec.Unavailable:
+		return fmt.Sprintf("%s is not set and the keyring is not available on this machine", name)
+	default:
+		user, _ := SecretUserFor(name)
+		return fmt.Sprintf("%s is not set and the keyring holds no %s", name, user)
+	}
+}
+
 // splitFrontmatter separates an agent file into its frontmatter block and its
 // body, and reports the line of the file the block starts on.
 //

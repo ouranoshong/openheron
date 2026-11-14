@@ -64,6 +64,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "secret" {
+		if err := secretCmd(os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			boot.Error("openheron secret failed", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "version", "--version", "-v":
@@ -117,7 +124,7 @@ func printServerUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "  --config-dir   the config root (llm/ agents/ mcps/ server/ tools/ live here)")
 	fmt.Fprintln(stdout, "  --project-root the project root: agent workdir and relative-path base")
 	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout, "Other commands: openheron init, openheron kb, openheron version")
+	fmt.Fprintln(stdout, "Other commands: openheron init, openheron secret, openheron kb, openheron version")
 }
 
 func warnUnusedHomeConfig(root string, log *slog.Logger) {
@@ -167,8 +174,9 @@ func configLoadError(svc *spec.Service, err error) error {
 // ★ The plan is the one `openheron init` builds — the same templates, the
 // same rules — so "the server created it" and "the command created it" are the
 // same tree. The model is the provider template's own default
-// (deepseek/deepseek-flash) and the api key is read from the environment at
-// request time, exactly as with `openheron init` without flags.
+// (deepseek/deepseek-flash) and the api key is read at request time from the
+// environment or from the keyring, exactly as with `openheron init` without
+// flags.
 //
 // ★ "Empty" means **no agent file**: a tree that has one is a configuration,
 // whether or not it loads, and this must not touch it. The plan itself skips
@@ -195,8 +203,8 @@ func initConfigIfEmpty(svc *spec.Service, log *slog.Logger) error {
 	log.Info("[main] configuration initialized", "dir", svc.Root(),
 		"model", plan.Model, "files", len(plan.Files))
 	if plan.EnvHint != "" {
-		log.Info("[main] the api key is read from the environment at request time",
-			"env", plan.EnvHint)
+		log.Info("[main] the api key is read at request time",
+			"env", plan.EnvHint, "keyring", plan.SecretHint)
 	}
 	return nil
 }
@@ -369,6 +377,12 @@ func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar, sink
 	if err != nil {
 		return nil, err
 	}
+	// ★ The keyring is wired **here** and nowhere else. It is a global OS
+	//   resource — the Windows Credential Manager, the macOS Keychain, the
+	//   Linux Secret Service — so the one process that reads and writes it
+	//   asks for it by name. Everything else (a library user, a test) gets
+	//   no store at all and never reaches the developer's credentials.
+	cfgSvc.SetSecretStore(spec.KeyringStore())
 	// ★ The configuration is written on the first start, so a fresh clone
 	//   starts without a command in front of it.
 	//

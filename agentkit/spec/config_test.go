@@ -13,18 +13,23 @@ import (
 
 type fixture struct {
 	root string
+	// secrets is the store the tests read their keys from. It is a fake on
+	// purpose — see fakeSecretStore.
+	secrets *fakeSecretStore
 }
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	root := t.TempDir()
-	f := &fixture{root: filepath.Join(root, ".openheron")}
+	f := &fixture{root: filepath.Join(root, ".openheron"), secrets: newFakeSecretStore()}
 	for _, sub := range []string{DirLLM, DirAgent, DirServer, DirTools, DirMCP} {
 		if err := os.MkdirAll(filepath.Join(f.root, sub), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("TEST_LLM_KEY", "sk-test")
+	// ★ The key comes from the environment by convention now: the provider
+	//   is "openai", so the variable is LLM_OPENAI_API_KEY.
+	t.Setenv("LLM_OPENAI_API_KEY", "sk-test")
 	return f
 }
 
@@ -41,17 +46,16 @@ func (f *fixture) write(t *testing.T, rel, content string) {
 
 func (f *fixture) load(t *testing.T) (*Config, error) {
 	t.Helper()
-	s, err := NewService(f.root, filepath.Dir(f.root))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s.Load()
+	return f.service(t).Load()
 }
 
+// ★ The provider file carries no key: the key comes from the environment
+//
+//	(LLM_OPENAI_API_KEY) or from the keyring (llm:openai), and the file
+//	says nothing about either.
 const minimalLLM = `
 type: openai_compat
 base_url: https://api.example.com
-api_key: ${TEST_LLM_KEY}
 models:
   - id: fast
   - id: strong
@@ -218,7 +222,6 @@ func TestTheOnlyFileInTheRootIsTheOneThatCounts(t *testing.T) {
 	f.write(t, "llm/openai.yaml", `
 type: openai_compat
 base_url: https://only.example.com
-api_key: ${TEST_LLM_KEY}
 models:
   - id: only
 `)
@@ -323,7 +326,7 @@ func TestTimeoutMissingUnitIsRejected(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 	f.write(t, "llm/openai.yaml",
-		"type: openai_compat\nbase_url: https://x\napi_key: ${TEST_LLM_KEY}\ntimeout: 300\nmodels: [{id: fast}]\n")
+		"type: openai_compat\nbase_url: https://x\ntimeout: 300\nmodels: [{id: fast}]\n")
 	if _, err := f.load(t); err == nil {
 		t.Fatal("a timeout without a unit must be an error at load time")
 	}
@@ -333,7 +336,7 @@ func TestUnknownFieldIsRejectedWithLineNumber(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 	f.write(t, "llm/openai.yaml",
-		"type: openai_compat\nbase_url: https://x\napi_key: ${TEST_LLM_KEY}\nmax_retry: 3\nmodels: [{id: fast}]\n")
+		"type: openai_compat\nbase_url: https://x\nmax_retry: 3\nmodels: [{id: fast}]\n")
 
 	_, err := f.load(t)
 	if err == nil {
@@ -348,18 +351,21 @@ func TestProviderMissingKeyIsReminderNotFatal(t *testing.T) {
 	f := newFixture(t)
 	f.write(t, "agents/main.md", "---\nmodel: openai/fast\n---\n")
 	f.write(t, "llm/openai.yaml",
-		"type: openai_compat\nbase_url: https://x\napi_key: ${OPENHERON_TEST_NOPE}\nmodels: [{id: fast}]\n")
+		"type: openai_compat\nbase_url: https://x\nmodels: [{id: fast}]\n")
+	// ★ The provider is "openai", so its key is LLM_OPENAI_API_KEY — and the
+	//   fixture sets it. Unsetting it is what makes the key missing.
+	os.Unsetenv("LLM_OPENAI_API_KEY")
 
 	cfg, err := f.load(t)
 	if err != nil {
-		t.Fatalf("a missing api_key must not block startup: %v", err)
+		t.Fatalf("a missing key must not block startup: %v", err)
 	}
 	if cfg.Providers["openai"].APIKey != "" {
-		t.Fatalf("an unresolved api_key must be empty, got %q", cfg.Providers["openai"].APIKey)
+		t.Fatalf("an unresolved key must be empty, got %q", cfg.Providers["openai"].APIKey)
 	}
 	var found bool
 	for _, d := range cfg.Deferred() {
-		if strings.Contains(d, "OPENHERON_TEST_NOPE") && strings.Contains(d, "401 Unauthorized") {
+		if strings.Contains(d, "LLM_OPENAI_API_KEY") && strings.Contains(d, "401 Unauthorized") {
 			found = true
 		}
 	}
@@ -472,8 +478,9 @@ func TestAgentBodyBecomesInstruction(t *testing.T) {
 func TestDeferredIsCollected(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
-	f.write(t, "llm/openai.yaml",
-		strings.Replace(minimalLLM, "${TEST_LLM_KEY}", "${OPENHERON_TEST_NEVER_SET_KEY}", 1))
+	// ★ The key comes from the environment now, so "no key" is an unset
+	//   variable — not a reference in the file.
+	os.Unsetenv("LLM_OPENAI_API_KEY")
 
 	cfg, err := f.load(t)
 	if err != nil {
@@ -958,7 +965,6 @@ func TestModelReasoningVocabularyAndDefault(t *testing.T) {
 	f.write(t, "llm/openai.yaml", `
 type: openai_compat
 base_url: https://api.example.com
-api_key: ${TEST_LLM_KEY}
 models:
   - id: fast
     reasoning:
@@ -986,7 +992,6 @@ func TestLegacyThinkingAndEffortAreRejected(t *testing.T) {
 	f.write(t, "llm/openai.yaml", `
 type: openai_compat
 base_url: https://api.example.com
-api_key: ${TEST_LLM_KEY}
 models:
   - id: fast
     thinking:

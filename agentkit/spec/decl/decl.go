@@ -20,7 +20,23 @@ type Provider struct {
 
 	Type string `yaml:"type"`
 
+	// APIKey is the key of this provider, once it is resolved.
+	//
+	// ★ It is **not read from the file any more**: the key comes from the
+	//   naming convention (see `spec.ResolveSecret`), and the loader fills
+	//   this in with what it resolved. The yaml tag stays so that an old
+	//   file which says `api_key:` is caught by the loader and answered
+	//   with a sentence that says what to do — the yaml decoder's own
+	//   "field api_key not found in type spec.Provider" is a sentence
+	//   nobody can act on.
 	APIKey string `yaml:"api_key"`
+
+	// KeySource says where the key came from: "env:LLM_DEEPSEEK_API_KEY",
+	// "keyring:llm:deepseek", "file:/path" or "none".
+	//
+	// ★ It names the **place**, never the value: the value never leaves the
+	//   process.
+	KeySource string `yaml:"-"`
 
 	BaseURL string `yaml:"base_url"`
 
@@ -600,6 +616,21 @@ const MCPToolPrefix = "mcp__"
 //	contain a run of underscores: the boundary has to be unambiguous, or
 //	"mcp__a__b__x" could not be read back.
 const MCPSeparator = "__"
+
+// ProviderNamePattern is the shape a provider name may take.
+//
+// ★ It is the same shape an MCP server name takes, and for the same reason:
+//
+//	the name is the anchor of the whole secret naming scheme, so it has to
+//	read as an environment variable name and as a keyring user.
+const ProviderNamePattern = `^[a-z0-9]+(_[a-z0-9]+)*$`
+
+var providerNameRE = regexp.MustCompile(ProviderNamePattern)
+
+// ValidProviderName reports whether a provider name may be used.
+func ValidProviderName(name string) bool {
+	return providerNameRE.MatchString(name)
+}
 
 // MCPServerNamePattern is the shape a server name may take.
 //

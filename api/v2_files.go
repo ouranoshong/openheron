@@ -90,6 +90,13 @@ func (s *Server) registerV2Routes() {
 	h.PUT("/v2/settings/item", s.v2SettingsSave)
 	h.DELETE("/v2/settings/item", s.v2SettingsDelete)
 	h.POST("/v2/settings/validate", s.v2SettingsValidate)
+
+	// ★ The secret surface: two namespaces, one shape. The group is in the
+	//   path, so "delete everything" is scoped by the request itself.
+	h.GET("/v2/secrets", s.v2Secrets)
+	h.PUT("/v2/secrets/:group/:name", s.v2SecretWrite)
+	h.DELETE("/v2/secrets/:group/:name", s.v2SecretDelete)
+	h.DELETE("/v2/secrets/:group", s.v2SecretGroupDelete)
 }
 
 // ── POST /v2/sessions/{id}/files ─────────────────────────────────────────

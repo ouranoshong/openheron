@@ -310,9 +310,19 @@ type policyView struct {
 }
 
 type providerView struct {
-	ID        string       `json:"id"`
-	BaseURL   string       `json:"baseUrl"`
-	HasAPIKey bool         `json:"hasApiKey"`
+	ID      string `json:"id"`
+	BaseURL string `json:"baseUrl"`
+	// HasAPIKey is a boolean on purpose: the key itself must never leave
+	// the process.
+	HasAPIKey bool `json:"hasApiKey"`
+	// KeySource names the **place** the key came from:
+	// "env:LLM_DEEPSEEK_API_KEY", "keyring:llm:deepseek", "file:/path" or
+	// "none".
+	//
+	// ★ It is the answer to a question `hasApiKey` cannot answer: a key
+	//   that is set and a key that is in force are two different facts, and
+	//   only the second one says which key the server will use.
+	KeySource string       `json:"keySource"`
 	Models    []modelBrief `json:"models"`
 }
 
@@ -430,6 +440,8 @@ func (s *Server) v2Config(_ context.Context, c *app.RequestContext) {
 			// hasApiKey is a boolean on purpose: the key itself must never
 			// leave the process.
 			HasAPIKey: p.APIKey != "",
+			// ★ The source names the place, not the value.
+			KeySource: p.KeySource,
 			Models:    []modelBrief{},
 		}
 		if p.BaseURL != "" {

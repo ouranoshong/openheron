@@ -25,7 +25,7 @@ func gateEnv(t *testing.T) (projectRoot, cfgRoot string, svc *spec.Service, b *f
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("TEST_CONFIG_TOOLS_KEY", "sk-test")
+	t.Setenv("LLM_OPENAI_API_KEY", "sk-test")
 
 	write := func(rel, body string) {
 		t.Helper()
@@ -33,7 +33,7 @@ func gateEnv(t *testing.T) (projectRoot, cfgRoot string, svc *spec.Service, b *f
 			t.Fatal(err)
 		}
 	}
-	write("llm/openai.yaml", "type: openai\nbase_url: https://a.example\napi_key: ${TEST_CONFIG_TOOLS_KEY}\n"+
+	write("llm/openai.yaml", "type: openai\nbase_url: https://a.example\n"+
 		"models:\n  - id: fast\n    reasoning:\n      off: { reasoning_effort: none }\n")
 	write("agents/main.md", "---\nmodel: openai/fast\ntools: [ls]\n---\nbody\n")
 	write("server/config.yaml", "listen_addr: \":18099\"\n")

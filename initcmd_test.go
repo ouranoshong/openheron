@@ -31,6 +31,7 @@ func TestInitJSONOutputIsValidJSON(t *testing.T) {
 		Created []string `json:"created"`
 		Notes   []string `json:"notes"`
 		Env     string   `json:"env"`
+		Secret  string   `json:"secret"`
 	}
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
 		t.Fatalf("the output must be valid JSON: %v\n%s", err, buf.String())
@@ -79,8 +80,13 @@ func TestInitJSONOutputIsValidJSON(t *testing.T) {
 			t.Fatalf("created = %v, want it to contain %s", out.Created, want)
 		}
 	}
-	if out.Env != "DEEPSEEK_API_KEY" {
-		t.Fatalf("env = %q, want DEEPSEEK_API_KEY", out.Env)
+	if out.Env != "LLM_DEEPSEEK_API_KEY" {
+		t.Fatalf("env = %q, want LLM_DEEPSEEK_API_KEY", out.Env)
+	}
+	// ★ The keyring entry is named too: the key has two places, and the
+	//   user has to know both before they wonder which one is in force.
+	if out.Secret != "llm:deepseek" {
+		t.Fatalf("secret = %q, want llm:deepseek", out.Secret)
 	}
 }
 

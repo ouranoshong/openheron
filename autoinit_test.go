@@ -45,8 +45,11 @@ func TestTheFirstStartWritesTheConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the provider file was not written: %v", err)
 	}
-	if !strings.Contains(string(provider), "${DEEPSEEK_API_KEY}") {
-		t.Fatalf("the api key must be read from the environment:\n%s", provider)
+	// ★ The api key is **not** in the provider file: the provider's name
+	//   says where it comes from — LLM_DEEPSEEK_API_KEY, or the keyring
+	//   entry llm:deepseek.
+	if strings.Contains(string(provider), "api_key:") {
+		t.Fatalf("the api key must not be in the configuration:\n%s", provider)
 	}
 	// ★ The tree has to load: a configuration that does not load is not a
 	//   configuration.

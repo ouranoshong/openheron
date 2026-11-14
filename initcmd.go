@@ -23,7 +23,6 @@ func initCmd(args []string, stdout io.Writer) error {
 	model := fs.String("model", "", "model to use, as <provider>/<model>")
 	provider := fs.String("provider", "", "provider template to use (default: deepseek)")
 	baseURL := fs.String("base-url", "", "endpoint for a new provider file")
-	env := fs.String("env", "", "environment variable holding the api key")
 	noTools := fs.Bool("no-tools", false, "leave the tool configurations under tools/ unwritten (they are written by default)")
 	force := fs.Bool("force", false, "overwrite files that already exist")
 	dryRun := fs.Bool("dry-run", false, "report what would be written, write nothing")
@@ -65,12 +64,15 @@ func initCmd(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// ★ The keyring is a global OS resource, so it is asked for by name —
+	//   here, where the command may read a key to say whether one is
+	//   there. Nothing else reaches it.
+	svc.SetSecretStore(spec.KeyringStore())
 
 	plan, err := initcfg.BuildPlan(svc, initcfg.Options{
 		Model:    *model,
 		Provider: *provider,
 		BaseURL:  *baseURL,
-		Env:      *env,
 		NoTools:  *noTools,
 		Force:    *force,
 	})
@@ -103,6 +105,9 @@ func reportInit(plan *initcfg.Plan, root string, dryRun, asJSON bool, stdout io.
 		if plan.EnvHint != "" {
 			out["env"] = plan.EnvHint
 		}
+		if plan.SecretHint != "" {
+			out["secret"] = plan.SecretHint
+		}
 		b, err := json.MarshalIndent(out, "", "  ")
 		if err != nil {
 			return err
@@ -131,14 +136,20 @@ func reportInit(plan *initcfg.Plan, root string, dryRun, asJSON bool, stdout io.
 	}
 	fmt.Fprintf(stdout, "\nconfig written to %s\n", plan.Dir)
 	if plan.EnvHint != "" {
-		fmt.Fprintf(stdout, "the api key is read from the environment at request time: export %s=...\n", plan.EnvHint)
+		// ★ Both places are named, and the order is the order of
+		//   precedence: the environment wins over the keyring. A user who
+		//   stores a key while an old export is still in the shell would
+		//   otherwise see "stored" and a key that is not in force.
+		fmt.Fprintf(stdout, "the api key is read at request time from %s, or from the keyring entry %s\n",
+			plan.EnvHint, plan.SecretHint)
+		fmt.Fprintf(stdout, "store one with: openheron secret set llm <provider>\n")
 	}
 	return nil
 }
 
 func printInitUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "usage: openheron init [--dir <path>] [--model <provider>/<model>] [--provider <id>]")
-	fmt.Fprintln(stdout, "                [--base-url <url>] [--env <NAME>] [--no-tools]")
+	fmt.Fprintln(stdout, "                [--base-url <url>] [--no-tools]")
 	fmt.Fprintln(stdout, "                [--force] [--dry-run] [--json]")
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Creates a runnable project-level configuration in <dir>/.openheron.")
@@ -151,4 +162,8 @@ func printInitUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "        mcps/{fetch,time,deepwiki}.yaml,")
 	fmt.Fprintln(stdout, "        skills/openheron-config-{map,edit,templates,validate}/SKILL.md.")
 	fmt.Fprintln(stdout, "--no-tools leaves tools/ unwritten; every other partition is always written.")
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "The api key is not written to the configuration: the provider's name says")
+	fmt.Fprintln(stdout, "where it comes from — LLM_<PROVIDER>_API_KEY, or the keyring entry")
+	fmt.Fprintln(stdout, "llm:<provider>. Store one with: openheron secret set llm <provider>")
 }

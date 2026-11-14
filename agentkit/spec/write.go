@@ -23,10 +23,10 @@ const revisionLen = 8
 type WriteErrorKind string
 
 const (
-	ErrPathInvalid   WriteErrorKind = "config_path_invalid"
-	ErrSecretLiteral WriteErrorKind = "config_secret_literal"
-	ErrMergeRejected WriteErrorKind = "config_would_break_merge"
-	ErrConflict      WriteErrorKind = "config_write_conflict"
+	ErrPathInvalid     WriteErrorKind = "config_path_invalid"
+	ErrKeyFieldRetired WriteErrorKind = "config_key_field_retired"
+	ErrMergeRejected   WriteErrorKind = "config_would_break_merge"
+	ErrConflict        WriteErrorKind = "config_write_conflict"
 )
 
 type WriteError struct {
@@ -280,7 +280,7 @@ func listNested(dir string, entries []os.DirEntry) []string {
 func Skeleton(catDir string, modelRefs []string) string {
 	switch catDir {
 	case DirLLM:
-		return "type: openai\nbase_url: \napi_key: ${}\nmodels: []\n"
+		return "type: openai\nbase_url: \nmodels: []\n"
 	case DirAgent:
 		s := "---\nmodel: \ndescription: \n"
 		// ★ The skills hint belongs in the frontmatter: the key is a
@@ -917,11 +917,21 @@ func orNone(rev string) string {
 	return rev
 }
 
-// secretLiteralMessage is the one sentence both callers say about a key
-// written out in plain text: the save refuses it, and the editor shows it
-// before the save is attempted.
-const secretLiteralMessage = "api_key must be a reference, not a literal: " +
-	"use ${ENV_VAR} or @file:/path so the secret stays out of the repository"
+// apiKeyRetiredMessage is the one sentence both callers say about a file
+// that still carries `api_key`: the save refuses it, and the editor shows
+// it before the save is attempted.
+//
+// ★ It names the provider's **own** variable and keyring entry, because the
+//
+//	user's next question is "where do I put it now", and the answer is
+//	different for every provider. A message that only said "api_key is gone"
+//	would leave them guessing.
+func apiKeyRetiredMessage(rel string) string {
+	id := strings.TrimSuffix(path.Base(rel), ".yaml")
+	return fmt.Sprintf("`api_key` is no longer read — the key of %q comes from %s "+
+		"(or from the keyring entry %s); delete this line",
+		id, LLMEnvName(id), LLMSecretUser(id))
+}
 
 func (s *Service) checkSecretFor(rel string, content []byte) error {
 	cat, ok := CategoryByDir(path.Dir(path.Clean(filepath.ToSlash(rel))))
@@ -935,36 +945,31 @@ func (s *Service) checkSecret(cat Category, rel string, content []byte) error {
 	if cat.Dir != DirLLM {
 		return nil
 	}
-	if secretLiteralLine(content) == 0 {
+	if apiKeyLine(content) == 0 {
 		return nil
 	}
-	return writeErrf(ErrSecretLiteral, rel, "%s", secretLiteralMessage)
+	return writeErrf(ErrKeyFieldRetired, rel, "%s", apiKeyRetiredMessage(rel))
 }
 
-// secretLiteralLine reports the 1-based line of a literal api_key, or 0 when
-// there is none.
+// apiKeyLine reports the 1-based line of an `api_key` key, or 0 when there
+// is none.
 //
-// ★ A literal key is not something the YAML decoder objects to: by the time
+// ★ The field is **retired**, so every occurrence counts — a line with no
 //
-//	it is a "problem" the file has already parsed, and the tree has already
-//	loaded. It is refused for a reason that belongs to the repository, not to
-//	the parser — which is exactly why it needs its own line number instead of
-//	riding on a parse error, and why the editor can show it while the user is
-//	still typing.
-func secretLiteralLine(content []byte) int {
+//	value and a line with a plaintext value are the same mistake now, and
+//	the loader refuses both. What is left of the old rule ("a reference is
+//	allowed") was the shape of the world before the key moved to the
+//	environment and the keyring.
+//
+// ★ It is a line scan and not a yaml walk because the answer has to be
+//
+//	usable **while the user is typing**: the editor shows the marker
+//	beside the line, and a decoder that only complains after the document
+//	parses cannot say where the problem is.
+func apiKeyLine(content []byte) int {
 	for i, line := range strings.Split(string(content), "\n") {
-		key, val, ok := splitYAMLLine(line)
+		key, _, ok := splitYAMLLine(line)
 		if !ok || key != "api_key" {
-			continue
-		}
-		v := unquote(strings.TrimSpace(val))
-		if v == "" {
-			continue
-		}
-		if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") {
-			continue
-		}
-		if strings.HasPrefix(v, "@file:") {
 			continue
 		}
 		return i + 1

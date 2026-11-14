@@ -99,9 +99,9 @@ func TestTheProxyKeyAgainstARealProxy(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		t.Setenv("TEST_LLM_KEY", "sk-test")
+		t.Setenv("LLM_OPENAI_API_KEY", "sk-test")
 		write("llm/openai.yaml",
-			"type: openai_compat\nbase_url: https://api.example.com\napi_key: ${TEST_LLM_KEY}\nmodels:\n  - id: fast\n")
+			"type: openai_compat\nbase_url: https://api.example.com\nmodels:\n  - id: fast\n")
 		write("agents/main.md", "---\nmodel: openai/fast\n---\nbody\n")
 		write("tools/http.yaml", "methods: [get]\nproxy: "+proxy+"\n")
 

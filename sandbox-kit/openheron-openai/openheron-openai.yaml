@@ -15,8 +15,8 @@
 # ★ The user binds each key with one command, and the placeholder it uses is
 #   the sentinel itself, so the runtime's injection and the host's binding
 #   agree without the user passing an environment variable:
-#     printf '%s' "$OPENAI_API_KEY" | sbx secret set-custom \
-#       --host api.openai.com --env OPENAI_API_KEY \
+#     printf '%s' "$LLM_OPENAI_API_KEY" | sbx secret set-custom \
+#       --host api.openai.com --env LLM_OPENAI_API_KEY \
 #       --placeholder proxy-managed --value-stdin
 #
 # The design this implements is docs/tools-design.md.
@@ -44,7 +44,7 @@ capabilities:
       service: openai
       phase: runtime
       apiKey:
-        name: OPENAI_API_KEY
+        name: LLM_OPENAI_API_KEY
         proxyManaged: true
         inject:
           - {domain: api.openai.com, header: Authorization, format: "Bearer %s"}
