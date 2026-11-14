@@ -26,6 +26,12 @@ type InputConfig struct {
 type inputParams struct {
 	History   []*schema.Message
 	Workspace string
+	// ProjectRoot is the directory this round works in.
+	//
+	// ★ It is the **session's** project root, read at the start of the
+	//   round — not the process's. ★ An empty value falls back to the
+	//   InputConfig's root: the default project root of the process.
+	ProjectRoot string
 }
 
 var defaultRules = []string{
@@ -95,7 +101,15 @@ func (c InputConfig) buildInput(ctx context.Context, p inputParams, query *schem
 		note, modelQuery = assembleAttachments(query, attachmentContext{workspace: p.Workspace})
 	}
 
-	messages = append(messages, newSystem(c.contextPrompt(ctx, p.Workspace, note)))
+	// ★ The root the prompt names is the **round's** root: the directory
+	//   the session works in. ★ The prompt, the relative paths and the write
+	//   boundary have to be the same directory — a model that is told about
+	//   one root and refused at another is being lied to.
+	root := p.ProjectRoot
+	if root == "" {
+		root = c.ProjectRoot
+	}
+	messages = append(messages, newSystem(c.contextPrompt(ctx, root, p.Workspace, note)))
 
 	history := withoutSubagentMessages(p.History)
 	for _, msg := range normalizeHistory(history) {
@@ -160,23 +174,28 @@ func newUser(text string) *schema.Message {
 //	part of the prompt because a file the model is not told about is a file
 //	the model cannot use: the workspace note says "files live there", which
 //	answers "where" but not "which ones".
-func (c InputConfig) contextPrompt(ctx context.Context, workspace, attachments string) string {
+//
+// ★ root is the directory the round works in — the session's project. ★ It
+//
+//	is a parameter and not a field of the config because the config is the
+//	process's answer and the root is the session's.
+func (c InputConfig) contextPrompt(ctx context.Context, root, workspace, attachments string) string {
 	var lines []string
 	lines = append(lines, "[Context]")
 	lines = append(lines, "IMPORTANT RULES:")
 	lines = append(lines, defaultRules...)
 	lines = append(lines, attachmentRules...)
 
-	if c.ProjectRoot != "" {
+	if root != "" {
 		lines = append(lines,
-			fmt.Sprintf("Project root: %s", c.ProjectRoot),
+			fmt.Sprintf("Project root: %s", root),
 			"  IMPORTANT: Always pass the project root as the path argument when using filesystem tools.",
-			fmt.Sprintf("  - grep(pattern=\"...\", path=\"%s\")", c.ProjectRoot),
-			fmt.Sprintf("  - glob(pattern=\"%s/**/*.go\")", c.ProjectRoot),
-			fmt.Sprintf("  - read_file(file_path=\"%s/some/file.go\")", c.ProjectRoot),
+			fmt.Sprintf("  - grep(pattern=\"...\", path=\"%s\")", root),
+			fmt.Sprintf("  - glob(pattern=\"%s/**/*.go\")", root),
+			fmt.Sprintf("  - read_file(file_path=\"%s/some/file.go\")", root),
 			"  grep and glob recurse into ALL subdirectories under the given path.",
 		)
-		if dirs := subdirs(ctx, c.ProjectRoot); len(dirs) > 0 {
+		if dirs := subdirs(ctx, root); len(dirs) > 0 {
 			lines = append(lines, "  Top-level subdirectories of the project root:")
 			for _, d := range dirs {
 				lines = append(lines, "    - "+d+"/")
@@ -185,7 +204,7 @@ func (c InputConfig) contextPrompt(ctx context.Context, workspace, attachments s
 		lines = append(lines, "  Use these tools to read actual source code before answering questions about the codebase.")
 	}
 
-	if c.ExamplesDir != "" && c.ExamplesDir != c.ProjectRoot {
+	if c.ExamplesDir != "" && c.ExamplesDir != root {
 		lines = append(lines,
 			fmt.Sprintf("eino-examples directory: %s", c.ExamplesDir),
 		)

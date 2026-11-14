@@ -169,6 +169,17 @@ type threadMeta struct {
 	// HasPendingApproval lets the sidebar draw the waiting dot without a
 	// second request per row.
 	HasPendingApproval bool `json:"hasPendingApproval"`
+	// ProjectID is the project the session belongs to.
+	//
+	// ★ It is read from the **project table**, not from the session record:
+	//   the table is the only truth about that relation, and a second copy
+	//   could disagree with the first without anything being able to
+	//   arbitrate.
+	//
+	// ★ It is always emitted, like agentId: an empty string is the answer
+	//   "no project", and a missing field would say "this build does not
+	//   know about projects" — a different thing.
+	ProjectID string `json:"projectId"`
 }
 
 type threadList struct {

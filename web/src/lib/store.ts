@@ -9,6 +9,7 @@ export {
   selectActiveAgentId,
   selectActiveError,
   selectActiveLoading,
+  selectActiveProjectId,
   selectActiveRetry,
   selectActiveUsage,
   selectActiveContext,

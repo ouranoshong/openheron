@@ -82,8 +82,8 @@ one — change one and change the other.
 > landed** — it says "as it is" once the code is in.
 > ★ And `docs/projects-design.md` covers **projects and directories** — the user-level
 > `openheron_root`, where the config root / data dir / log file land, the project↔session
-> relation in `projects.json`, and the per-session project root. **Its body describes a
-> proposal that has not landed** — it says what the code is to become.
+> relation in `projects.json`, and the per-session project root. **Its body describes the
+> code as it is.**
 > ★ And `docs/pitfalls.md` is the **pitfall register**: the traps this tree has hit, what
 > caused each of them, how it was fixed or what boundary it still has. Read it before
 > touching a subsystem you have not touched yet — it is cheaper than rediscovering the
@@ -451,7 +451,7 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 | `docs/tools-design.md` | **Tools and integrations design** — where a tool comes from, the bounded filesystem backend in `agentkit/fsx`, the MCP integration, and the Docker Sandbox Kit (**the body describes the code as it is**) |
 | `docs/ui-design.md` | **Interface and resources design** — how an uploaded file lands on disk, what the server does to it, how the interface shows it, and the motion tokens (**the body describes the code as it is**) |
 | `docs/secrets-design.md` | **Secret system design** — the two namespaces, the shared resolution chain, the keyring backend, the write surface, and the interface entry (**the body describes a proposal being landed**) |
-| `docs/projects-design.md` | **Projects and directories design** — the user-level `openheron_root`, where the config root / data dir / log file land, the project↔session relation in `projects.json`, and the per-session project root (**the body describes a proposal that has not landed**) |
+| `docs/projects-design.md` | **Projects and directories design** — the user-level `openheron_root`, where the config root / data dir / log file land, the project↔session relation in `projects.json`, and the per-session project root (**the body describes the code as it is**) |
 | `docs/pitfalls.md` | **Pitfall register** — the traps this tree has hit, what caused each of them, and how it was fixed or what boundary it still has |
 
 ★ For the bilingual set, the file without a suffix is the **English main version**; `_zh` is the

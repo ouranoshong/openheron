@@ -421,6 +421,7 @@ does not move when the configuration moves:
 ~/.openheron/                  ← the openheron root
   configs/                     ← the config root: agents/ llm/ mcps/ tools/ skills/ server/
   state/                       ← the data dir: sessions, checkpoints, the knowledge-base index
+    projects.json              ← the project table: which session belongs to which project
   logs/openheron.log           ← the log file
   projects/default/            ← the default project root
 ```
@@ -445,6 +446,38 @@ startup says so directly:
 
 ```
 no configuration at /home/you/.openheron/configs: run `openheron init` to create one
+```
+
+### 3.1 Projects: a directory a conversation works in
+
+★ **A project is a directory, and a conversation belongs to one.** The agent of that
+conversation reads and writes **in that directory** — not in the directory the server
+happens to run in.
+
+Start the server **with a directory** and it serves that one:
+
+```bash
+openheron .            # this project: one group in the sidebar, one working directory
+openheron              # every project: one group per project in the sidebar
+```
+
+★ The directory you name is **registered** in the project table on the first start — naming
+a directory is a statement about it, not a guess. ★ Start it without one and the table
+stays as it is: the conversations that belong to no project work in the **default
+project root** (`<openheron-root>/projects/default`).
+
+★ **The table is yours**: `state/projects.json` is a plain file, and you may read it or
+edit it. It is the **only** truth about which conversation belongs to which project —
+delete it and every conversation falls back to "no project" (nothing is lost: the
+transcripts, the uploads and the checkpoints all live in the data dir).
+
+```json
+{
+  "version": 1,
+  "projects": [
+    { "id": "openheron", "name": "openheron", "root": "/home/you/code/openheron", "order": 0, "sessions": ["…"] }
+  ]
+}
 ```
 
 ## 4. Writing configuration
@@ -1216,7 +1249,7 @@ In the interface:
 | Element | What it does |
 |---|---|
 | **Header** | The agent filter (each chip names an agent; hover it for its context occupancy and spend), the theme switch, and the status of the current turn |
-| **Sidebar** | The session list, the "New thread" button, the settings entry |
+| **Sidebar** | The session list — grouped by project — the "New thread" button, the project picker, the settings entry |
 | **Composer** | Ask a question; `/` opens the slash commands; supports drag/paste attachments |
 | **Message list** | Assistant replies, reasoning, tool-call cards, sub-agent output (with attribution) |
 | **Approval card** | Appears when your nod is needed: approve / deny (with an optional reason) |
@@ -1556,6 +1589,26 @@ other — and the interface still shows you the name you recognise.
 back (the server keeps them), and the files you already sent stay on their
 messages.
 
+### 6.10 The sidebar groups the conversations by project
+
+★ **Every conversation belongs to a project** (§3.1), and the sidebar shows that: one
+group per project, named after it. ★ The conversations that belong to no project sit
+in a "No project" group, and a group with nothing in it is not drawn at all.
+
+```bash
+openheron              # every project: one group per project
+openheron .            # one project: one group, and the "no project" conversations join it
+```
+
+★ **The picker above the list** says which project a **new** conversation belongs to.
+It is there only when there is a choice: with one project there is nothing to pick, so
+there is no picker. ★ A conversation keeps its project for its whole life — there is no
+"move it to another project"; a conversation that works in another directory is a new
+conversation.
+
+★ **The `@` picker follows the project too**: it lists the files of the project the
+conversation on screen belongs to.
+
 ## 7. The knowledge base
 
 The knowledge base is an **optional** local corpus retrieval layer: it turns a set of
@@ -1665,7 +1718,11 @@ from here. Both answers are `403`.
 | POST | `/v2/sessions/:id/abort` | Abort the running turn |
 | POST | `/v2/sessions/:id/compact` | Compact the conversation now (see §6.6) |
 | POST/GET | `/v2/sessions/:id/files` | Upload / list session workspace files (32 MiB per file) |
-| GET | `/v2/project/files` | List files under the project root (`?q=` `?limit=`) |
+| GET | `/v2/project/files` | List files under a project root (`?q=` `?limit=` `?project=`) |
+| GET | `/v2/projects` | The project table and the scope of this process (`{items, scope}`) |
+| POST | `/v2/projects` | Register a project (`{"name": "…", "root": "…"}`) |
+| PATCH | `/v2/projects/:id` | Rename a project, move it, or reorder it |
+| DELETE | `/v2/projects/:id` | Remove a project — its conversations fall back to "no project" |
 | GET | `/v2/commands` | The slash-command list |
 | POST | `/v2/run` | **SSE entry point**: ask a question, or answer an approval (see §6.7) |
 | GET | `/v2/skills` | The skill list |

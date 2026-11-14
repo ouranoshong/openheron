@@ -381,6 +381,7 @@ your/project/
 ~/.openheron/                  ← the openheron root
   configs/                     ← the config root: agents/ llm/ mcps/ tools/ skills/ server/
   state/                       ← the data dir: sessions, checkpoints, the knowledge-base index
+    projects.json              ← the project table: which session belongs to which project
   logs/openheron.log           ← the log file
   projects/default/            ← the default project root
 ```
@@ -400,6 +401,35 @@ your/project/
 
 ```
 no configuration at /home/you/.openheron/configs: run `openheron init` to create one
+```
+
+### 3.1 项目：会话干活的目录
+
+★ **项目是一个目录，会话属于项目。** 那个会话里的 agent 读写的就是**那个目录** ——
+不是服务端碰巧启动在哪儿。
+
+启动时**带上一个目录**，服务就只服务它：
+
+```bash
+openheron .            # 这个项目：侧栏一组，干活的目录也一个
+openheron              # 所有项目：侧栏每个项目一组
+```
+
+★ 你点名的目录会在第一次启动时**登记**进项目表 —— 点名一个目录是对它的一次表态，不是猜。
+★ 不带目录启动，项目表保持原样：那些「未选项目」的会话在**默认项目根**
+（`<openheron-root>/projects/default`）里干活。
+
+★ **这张表是你的**：`state/projects.json` 是个普通文件，你可以读，也可以改。
+它是「哪个会话属于哪个项目」的**唯一真相** —— 删掉它，所有会话回落成「未选项目」
+（什么都不会丢：transcript、上传的文件、checkpoint 全在状态目录里）。
+
+```json
+{
+  "version": 1,
+  "projects": [
+    { "id": "openheron", "name": "openheron", "root": "/home/you/code/openheron", "order": 0, "sessions": ["…"] }
+  ]
+}
 ```
 
 ## 4. 配置怎么写
@@ -1087,7 +1117,7 @@ agent:
 | 元素 | 作用 |
 |---|---|
 | **标题栏** | Agent 过滤（每个 chip 只写 agent 名，悬停看它的上下文占用与用量）、主题开关，以及这一轮的状态 |
-| **侧边栏** | 会话列表、「新建会话」按钮、设置入口 |
+| **侧边栏** | 会话列表（按项目分组）、「新建会话」按钮、项目选择器、设置入口 |
 | **输入框** | 提问；`/` 开头触发斜杠命令；支持拖拽/粘贴附件 |
 | **消息列表** | 助手回复、思考过程、工具调用卡片、子 Agent 产出（带归属） |
 | **审批卡** | 需要你点头时出现，同意 / 拒绝（可附理由） |
@@ -1373,6 +1403,22 @@ This session is running in another window — stop it to take over
 ★ **刷新不会丢东西。** 还没发出去的文件会回来（服务端留着它们），已经发出去的
 文件留在各自的消息上。
 
+### 6.10 侧栏按项目分组
+
+★ **每个会话都属于一个项目**（§3.1），侧栏就把这件事画出来：每个项目一组，组名是
+项目的名字。★ 「未选项目」的会话进「No project」那一组；底下什么都没有的组不画。
+
+```bash
+openheron              # 所有项目：每个项目一组
+openheron .            # 一个项目：一组，「未选项目」的会话并进来
+```
+
+★ **列表上面那个选择器**说的是**新**会话属于哪个项目。只有存在选择时它才出现：
+只有一个项目时没什么可选，就没有选择器。★ 一个会话一辈子属于它的项目 —— 没有
+「把它挪到别的项目」这回事；要在另一个目录里干活，就是另起一个会话。
+
+★ **`@` 选择器也跟着项目走**：它列的是屏幕上这个会话所属项目的文件。
+
 ## 7. 知识库
 
 知识库是**可选**的本地语料检索层：把一批 markdown 文档变成 Agent 能检索的资料。
@@ -1471,7 +1517,11 @@ openheron version                                         print the version
 | POST | `/v2/sessions/:id/abort` | 中断在跑的这轮 |
 | POST | `/v2/sessions/:id/compact` | 立刻压缩当前对话（见 §6.6） |
 | POST/GET | `/v2/sessions/:id/files` | 上传 / 列会话工作区文件（单文件上限 32 MiB） |
-| GET | `/v2/project/files` | 列项目根文件（`?q=` `?limit=`） |
+| GET | `/v2/project/files` | 列项目根文件（`?q=` `?limit=` `?project=`） |
+| GET | `/v2/projects` | 项目表与本进程的作用域（`{items, scope}`） |
+| POST | `/v2/projects` | 登记一个项目（`{"name": "…", "root": "…"}`） |
+| PATCH | `/v2/projects/:id` | 改名、换目录或调顺序 |
+| DELETE | `/v2/projects/:id` | 删项目 —— 它的会话回落成「未选项目」 |
 | GET | `/v2/commands` | 斜杠命令清单 |
 | POST | `/v2/run` | **SSE 入口**：提问，或回复审批（见 §6.7） |
 | GET | `/v2/skills` | 技能清单 |

@@ -1,5 +1,6 @@
 import { readSse } from "@/lib/sse"
 import { parseSessionFact, type SessionFact } from "@/lib/session-events"
+import type { ProjectScope, ProjectSummary } from "@/lib/projects"
 import type { ContextUsage } from "@/lib/types"
 
 export interface Usage {
@@ -41,6 +42,14 @@ export interface ThreadMeta {
   state: "idle" | "running" | "waiting_approval"
   hasPendingApproval: boolean
   agentId: string
+  /**
+   * The project the session belongs to.
+   *
+   * ★ It comes from the **project table**, not from the session record, and
+   * an empty string is the answer "no project" — the session works in the
+   * default project root.
+   */
+  projectId: string
 }
 
 export interface ThreadDetail extends ThreadMeta {
@@ -311,10 +320,20 @@ export function fileUrl(sessionId: string, path: string, max?: number): string {
 export const api = {
   listThreads: () => call<{ items: ThreadMeta[] }>("/v2/sessions"),
 
-  createThread: (agentId?: string) =>
+  // listProjects reads the project table and the scope of this process.
+  //
+  // ★ It is a **separate** call from the session list on purpose: the
+  //   session list is the sessions' answer, and the project list is the
+  //   table's answer. Two answers, two endpoints — and the client joins
+  //   them itself, by the project id.
+  listProjects: () => call<{ items: ProjectSummary[]; scope: ProjectScope | null }>("/v2/projects"),
+
+  createThread: (agentId?: string, projectId?: string) =>
     call<ThreadMeta>("/v2/sessions", {
       method: "POST",
-      body: agentId ? JSON.stringify({ agentId }) : undefined,
+      // ★ The project id goes with the request: a session belongs to a
+      //   project from the moment it is born, and it never moves.
+      body: agentId || projectId ? JSON.stringify({ ...(agentId ? { agentId } : {}), ...(projectId ? { projectId } : {}) }) : undefined,
     }),
 
   getThread: (id: string) => call<ThreadDetail>(sessionPath(id)),
@@ -349,9 +368,17 @@ export const api = {
   compact: (id: string) =>
     call<CompactionResult>(sessionPath(id, "/compact"), { method: "POST" }),
 
-  listProjectFiles: (q: string, signal?: AbortSignal) =>
+  // listProjectFiles lists the files the @-mention picker offers.
+  //
+  // ★ The project is named in the query: the picker lists the files of
+  //   **one** project, and the session on screen decides which one. ★ An
+  //   empty project leaves the server to decide — the scope, or the default
+  //   project root.
+  listProjectFiles: (q: string, projectId: string, signal?: AbortSignal) =>
     call<ProjectFileList>(
-      `/v2/project/files?q=${encodeURIComponent(q)}&limit=50`,
+      `/v2/project/files?q=${encodeURIComponent(q)}&limit=50${
+        projectId ? `&project=${encodeURIComponent(projectId)}` : ""
+      }`,
       signal ? { signal } : undefined,
     ),
 

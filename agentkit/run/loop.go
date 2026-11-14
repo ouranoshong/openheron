@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/ouranoshong/openheron/agentkit/emit"
+	"github.com/ouranoshong/openheron/agentkit/fsx"
 	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/message"
@@ -80,6 +81,11 @@ func (rt *Runtime) makeGenInput(sess storage.Session, turn *Turn) func(context.C
 		built, err := rt.cfg.Input.buildInput(ctx, inputParams{
 			History:   sess.Messages(true),
 			Workspace: sess.Workspace(),
+			// ★ The round's project root, read from the context the round
+			//   runs in. ★ It is the session's project — the directory the
+			//   tools write in and the directory the prompt names are the
+			//   same one.
+			ProjectRoot: fsx.ProjectRoot(ctx),
 		}, userMsg)
 		if err != nil {
 			// ★ An error the framework records but nobody hands to the turn

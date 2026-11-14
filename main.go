@@ -702,6 +702,22 @@ func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 		//   progress. The turn slot alone cannot say that.
 		LeaseArbiter: memarbit.New(),
 		LeaseTTL:     leaseTTL(st.cfg),
+		// ★ The directory a session works in: the root of the project it
+		//   belongs to. ★ It is resolved **at the start of every round**, so
+		//   a project that moved between rounds is picked up by the next one
+		//   — and the round that is running keeps the root it began with.
+		ProjectRootFor: func(ctx context.Context, sessionID string) string {
+			root, err := reg.RootOf(ctx, sessionID)
+			if err != nil {
+				// ★ A table that cannot be read is not a reason to fail the
+				//   round: the session works in the default project root,
+				//   and the log says why.
+				log.Warn("[main] the project table could not be read; the session works in the default project root",
+					"session", sessionID, "err", err)
+				return ""
+			}
+			return root
+		},
 	})
 	fm.SetTeardown(rt)
 	st.rt = rt

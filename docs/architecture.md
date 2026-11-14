@@ -229,6 +229,25 @@ A sub-agent's output is **attributed through `subagentRunId` on the event** rath
 through a separate event type — that lets the frontend handle every agent's output with
 one reducer.
 
+#### The project root travels in the context
+
+A session belongs to a project, and a project is a directory — so the directory a round
+works in is **per session**, not per process.
+
+`agentkit/run/runtime.go:461` reads it at the **start of the round** (the root of the
+project the session belongs to) and puts it into that round's context
+(`fsx.WithProjectRoot`, `agentkit/fsx/context.go:25`). Two consumers read it from
+there, and they must agree: the prompt (`agentkit/run/input.go:191`'s `Project root:`
+line, fed by `loop.go:88`) and the tools (`agentkit/fsx/fsx.go:298`'s write boundary).
+
+★ The filesystem backend is built **once** and shared by every round, so a root baked
+into it would be the root of the last round that used it. ★ The context replaces the
+backend's own root instead — a session that works in another project must not be able
+to write into this one, and the boundary is not widened.
+
+★ The round keeps the root it **started** with: a project that moved between rounds is
+picked up by the next one, never by the round that is running.
+
 ## 3. Memory: context and knowledge
 
 Short-term memory is the current session's context, long-term memory is what lands on disk,
@@ -473,23 +492,24 @@ counting `grep '"github.com/ouranoshong/openheron/'` hits per package:
 | | `agentkit/obs` | none | **The logging assembly**: it *builds* loggers (`New`, `ParseLevel`, `Discard`) and owns the sink — there is no global logger to reach for. Its subpackages `agentkit/obs/hertz` (takes over hertz's log output), `agentkit/obs/hook` (eino's callbacks) and `agentkit/obs/httplog` (the model request log) are leaves too |
 | | `llm/common` | none | Vendor protocol layer (zero openheron dependencies, **zero log code**) |
 | | `webui` | none | Embedded frontend assets |
-| | `agentkit/fsx` | none | **The filesystem backend**: a bounded local backend — writes confined to the project root, ignore rules, result caps (see [tools-design.md](tools-design.md) — that document is Chinese only) |
+| | `agentkit/fsx` | none | **The filesystem backend**: a bounded local backend — writes confined to the **round's** project root, ignore rules, result caps (see [tools-design.md](tools-design.md) — that document is Chinese only) |
 | | `agentkit/shell` | none | **Which shell runs the commands**: it picks a POSIX shell (or `cmd.exe`) at startup, and it is also the sentence the `execute` tool's description tells the model — the dialect and the runner have to be the same answer |
 | | `agentkit/imaging` | none | Compresses uploaded pictures, derives the hashed file names and the thumbnails |
 | | `agentkit/templates` | none | **The configuration templates**: the files `openheron init` writes and the config editor scaffolds. ★ It is a leaf so that both the configuration layer and the command layer can read the **same** file — a copy would drift |
 | **L1** | `agentkit/spec/decl` | none | **Pure declarations** (where the yaml tags live) **and the shared vocabulary** — the built-in tool names and the MCP namespace (§5.1) |
 | | `agentkit/emit` | `obs`, `approval`, `contract`, `helpers`, `message` | The derivation: agent events → the run's facts |
 | | `storage` | `contract` | Interfaces for sessions/messages/pending approvals |
+| | `projects` | `persist` | **The project table**: which sessions belong to which project, and the directory each project points at. It is a user-level file, so the write path takes a file lock and re-reads before it writes (see [projects-design.md](projects-design.md) — that document is Chinese only) |
 | | `kb` | `obs`, `persist` | Knowledge base: corpus, index, retrieval, scoring |
 | | `agentkit/spec` | `obs`, `decl`, `persist`, `templates` | Config loading, validation, hot reload, write gates |
 | **L2** | `agentkit/build` | `fsx`, `obs`, `obs/httplog`, `spec`, `decl`, `approval`, `contract`, `helpers`, `kb`, `llm/common`, `message` | Agent assembly, tool assembly, the tier table (`agentkit/build/policy.go`) and the approval gate |
-| | `agentkit/run` | `emit`, `obs`, `approval`, `contract`, `decl`, `message`, `storage` | Run loop, input construction, event consumption |
+| | `agentkit/run` | `emit`, `fsx`, `obs`, `approval`, `contract`, `decl`, `message`, `storage` | Run loop, input construction, event consumption |
 | | `storage/filestore` | `obs`, `contract`, `message`, `persist`, `storage` | File store implementation |
 | | `storage/memarbit` | `storage` | The in-memory lease arbiter |
 | | `transport` | `contract` | AG-UI rendering: the run's events → frames |
 | | `llm` | `build`, `spec`, `decl` | Thin wrapper (only `common/` and one test file) |
 | | `initcfg` | `spec`, `persist`, `templates` | Factory templates for `openheron init` |
-| **L3 entry** | `api` | `build`, `emit`, `imaging`, `obs`, `run`, `spec`, `decl`, `contract`, `message`, `storage`, `transport`, `webui` | HTTP routing, SSE, error envelope |
+| **L3 entry** | `api` | `build`, `emit`, `imaging`, `obs`, `projects`, `run`, `spec`, `decl`, `contract`, `message`, `storage`, `transport`, `webui` | HTTP routing, SSE, error envelope |
 
 The same layering, top to bottom, is the direction of the imports:
 
@@ -507,6 +527,7 @@ The same layering, top to bottom, is the direction of the imports:
   L1   agentkit/spec/decl       the declarations and the shared vocabulary
        agentkit/emit            agent events → the run's facts
        storage                  the session interfaces
+       projects                 the project table · the session's directory
        kb                       corpus · index · retrieval
        agentkit/spec            config load · validate · reload · write gates
        │
@@ -934,6 +955,13 @@ zustand instance, so importing it pulls in zustand, `fetch` and `localStorage` t
 
 ★ Put new logic in these layers and keep them pure — correctness is proven by
 `bun test`, which is far faster than "changed the UI, now open a browser".
+
+★ **The sidebar groups the conversations by project**, and the grouping is a pure
+function: `web/src/lib/projects.ts:95`'s `groupSessions(sessions, projects, scope)`.
+The client reads the project table and the scope **from the server** and draws what
+it was given — it never decides which project a session belongs to, because the
+table is the only truth about that relation. ★ A session without a project goes to
+the "no project" group, and a group with nothing in it is not drawn at all.
 
 ★ A zustand selector must return a **reference-stable** value: allocating a new
 array/object on every call makes `Object.is` decide "it changed" forever, which shows up

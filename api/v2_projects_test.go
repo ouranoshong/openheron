@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
@@ -185,5 +187,189 @@ func TestV2CreateProjectWithoutRootIs400(t *testing.T) {
 	}
 	if code := decodeCode(t, got.body); code != codeInvalidBody {
 		t.Fatalf("code = %q, want %q", code, codeInvalidBody)
+	}
+}
+
+// ── the session relation ──────────────────────────────────────────────────
+
+func TestV2SessionCarriesItsProject(t *testing.T) {
+	srv, reg := newProjectsServer(t)
+	root := t.TempDir()
+	p, err := reg.Ensure(context.Background(), root)
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+
+	created := callJSON(t, srv, "POST", "/v2/sessions", map[string]any{"projectId": p.ID})
+	if created.code != consts.StatusCreated {
+		t.Fatalf("POST /v2/sessions = %d, want 201 (%s)", created.code, created.body)
+	}
+	var meta threadDetail
+	if err := json.Unmarshal([]byte(created.body), &meta); err != nil {
+		t.Fatalf("decode: %v (%s)", err, created.body)
+	}
+	if meta.ProjectID != p.ID {
+		t.Fatalf("projectId = %q, want %q", meta.ProjectID, p.ID)
+	}
+
+	list := callJSON(t, srv, "GET", "/v2/sessions", nil)
+	var out threadList
+	if err := json.Unmarshal([]byte(list.body), &out); err != nil {
+		t.Fatalf("decode list: %v (%s)", err, list.body)
+	}
+	if len(out.Items) != 1 {
+		t.Fatalf("want 1 session, got %d", len(out.Items))
+	}
+	if out.Items[0].ProjectID != p.ID {
+		t.Fatalf("listed projectId = %q, want %q", out.Items[0].ProjectID, p.ID)
+	}
+
+	one := callJSON(t, srv, "GET", "/v2/sessions/"+meta.ThreadID, nil)
+	if one.code != consts.StatusOK {
+		t.Fatalf("GET /v2/sessions = %d (%s)", one.code, one.body)
+	}
+	var detail threadDetail
+	if err := json.Unmarshal([]byte(one.body), &detail); err != nil {
+		t.Fatalf("decode detail: %v (%s)", err, one.body)
+	}
+	if detail.ProjectID != p.ID {
+		t.Fatalf("detail projectId = %q, want %q", detail.ProjectID, p.ID)
+	}
+}
+
+func TestV2SessionWithoutAProjectHasNoProjectId(t *testing.T) {
+	srv, _ := newProjectsServer(t)
+
+	created := callJSON(t, srv, "POST", "/v2/sessions", nil)
+	if created.code != consts.StatusCreated {
+		t.Fatalf("POST /v2/sessions = %d, want 201 (%s)", created.code, created.body)
+	}
+	var meta threadDetail
+	if err := json.Unmarshal([]byte(created.body), &meta); err != nil {
+		t.Fatalf("decode: %v (%s)", err, created.body)
+	}
+	// ★ The field is always emitted: an empty string says "no project", and
+	//   a missing field would say "this build does not know about projects".
+	if meta.ProjectID != "" {
+		t.Fatalf("projectId = %q, want empty", meta.ProjectID)
+	}
+	if !strings.Contains(created.body, `"projectId"`) {
+		t.Fatalf("the field must be emitted even when empty: %s", created.body)
+	}
+}
+
+func TestV2CreateSessionInAnUnknownProjectIs404(t *testing.T) {
+	srv, _ := newProjectsServer(t)
+
+	got := callJSON(t, srv, "POST", "/v2/sessions", map[string]any{"projectId": "nope"})
+	if got.code != consts.StatusNotFound {
+		t.Fatalf("POST /v2/sessions = %d, want 404 (%s)", got.code, got.body)
+	}
+	if code := decodeCode(t, got.body); code != codeProjectNotFound {
+		t.Fatalf("code = %q, want %q", code, codeProjectNotFound)
+	}
+	// ★ The session must not exist: a request that names no project cannot
+	//   leave a session behind that belongs to nobody.
+	list := callJSON(t, srv, "GET", "/v2/sessions", nil)
+	var out threadList
+	if err := json.Unmarshal([]byte(list.body), &out); err != nil {
+		t.Fatalf("decode list: %v (%s)", err, list.body)
+	}
+	if len(out.Items) != 0 {
+		t.Fatalf("want no session, got %d", len(out.Items))
+	}
+}
+
+func TestV2DeleteSessionRemovesItFromTheTable(t *testing.T) {
+	srv, reg := newProjectsServer(t)
+	p, err := reg.Ensure(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	created := callJSON(t, srv, "POST", "/v2/sessions", map[string]any{"projectId": p.ID})
+	if created.code != consts.StatusCreated {
+		t.Fatalf("POST /v2/sessions = %d (%s)", created.code, created.body)
+	}
+	var meta threadDetail
+	if err := json.Unmarshal([]byte(created.body), &meta); err != nil {
+		t.Fatalf("decode: %v (%s)", err, created.body)
+	}
+
+	deleted := callJSON(t, srv, "DELETE", "/v2/sessions/"+meta.ThreadID, nil)
+	if deleted.code != consts.StatusOK {
+		t.Fatalf("DELETE /v2/sessions = %d (%s)", deleted.code, deleted.body)
+	}
+
+	snap, err := reg.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if _, ok := snap.ProjectOf(meta.ThreadID); ok {
+		t.Fatal("the deleted session must not be listed in the project any more")
+	}
+}
+
+// ── the @-mention picker ─────────────────────────────────────────────────
+
+// ★ The picker lists the files of **one** project, and the query says
+//
+//	which: the session on screen decides. ★ The files come from the
+//	project's own directory, so a project that moved is listed under its
+//	new one.
+func TestProjectFilesListTheProjectTheQueryNames(t *testing.T) {
+	srv, _, _ := settingsEnv(t)
+	reg, err := projects.Open(filepath.Join(t.TempDir(), projects.FileName))
+	if err != nil {
+		t.Fatalf("open registry: %v", err)
+	}
+	t.Cleanup(func() { _ = reg.Close() })
+	srv.SetProjectsRegistry(reg)
+
+	root := filepath.Join(t.TempDir(), "beta")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "beta.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := reg.Create(context.Background(), "beta", root)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got := callJSON(t, srv, "GET", "/v2/project/files?project="+p.ID, nil)
+	if got.code != consts.StatusOK {
+		t.Fatalf("GET /v2/project/files = %d (%s)", got.code, got.body)
+	}
+	var out projectFileList
+	if err := json.Unmarshal([]byte(got.body), &out); err != nil {
+		t.Fatalf("decode: %v (%s)", err, got.body)
+	}
+	found := false
+	for _, f := range out.Files {
+		if f.Path == "beta.md" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the project's own file must be listed: %s", got.body)
+	}
+}
+
+func TestProjectFilesOfAnUnknownProjectIs404(t *testing.T) {
+	srv, _, _ := settingsEnv(t)
+	reg, err := projects.Open(filepath.Join(t.TempDir(), projects.FileName))
+	if err != nil {
+		t.Fatalf("open registry: %v", err)
+	}
+	t.Cleanup(func() { _ = reg.Close() })
+	srv.SetProjectsRegistry(reg)
+
+	got := callJSON(t, srv, "GET", "/v2/project/files?project=nope", nil)
+	if got.code != consts.StatusNotFound {
+		t.Fatalf("GET /v2/project/files = %d, want 404 (%s)", got.code, got.body)
+	}
+	if code := decodeCode(t, got.body); code != codeProjectNotFound {
+		t.Fatalf("code = %q, want %q", code, codeProjectNotFound)
 	}
 }

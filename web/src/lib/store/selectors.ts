@@ -82,6 +82,20 @@ export function selectSessionList(s: StoreState): SessionEntry[] {
   return s.order.map((id) => s.sessions[id]!).filter(Boolean)
 }
 
+// selectActiveProjectId answers "which project is the composer working in".
+//
+// ★ It returns a **string**, not an object: a selector that built a new
+//   value on every call would make Object.is report "changed" every time,
+//   and the store would re-render forever.
+//
+// ★ The session's own project comes first — a conversation belongs to the
+//   project it was born in. ★ A thread that does not exist yet falls back
+//   to the project a new thread would belong to.
+export function selectActiveProjectId(s: StoreState): string {
+  const id = s.activeId ? s.sessions[s.activeId]?.meta.projectId : undefined
+  return id || s.activeProjectId || ""
+}
+
 export function selectActiveError(s: StoreState) {
   return s.activeId ? s.sessions[s.activeId]?.convo?.error : undefined
 }

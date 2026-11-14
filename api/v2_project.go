@@ -40,7 +40,13 @@ type projectCandidate struct {
 // The project root is the directory that contains .openheron (see
 // config.Service.ProjectRoot), not the session workspace: the picker is for
 // "what can I reference in this project", while uploads live per session.
-func (s *Server) v2ProjectFiles(_ context.Context, c *app.RequestContext) {
+//
+// ★ The project is named by the **query**: the picker lists the files of
+//
+//	one project, and the session on screen decides which one. ★ Without it
+//	the scope decides — the directory this process serves — and a process
+//	with no scope falls back to the default project root.
+func (s *Server) v2ProjectFiles(ctx context.Context, c *app.RequestContext) {
 	if s.cfgSvc == nil {
 		s.v2Fail(c, consts.StatusServiceUnavailable, "config_unavailable",
 			"config service not wired", false)
@@ -69,7 +75,44 @@ func (s *Server) v2ProjectFiles(_ context.Context, c *app.RequestContext) {
 		limit = 200
 	}
 
-	c.JSON(consts.StatusOK, listProjectFiles(s.cfgSvc.DefaultProjectRoot(), strings.ToLower(q), limit))
+	root, status, code, msg := s.projectRootOf(ctx, c.Query("project"))
+	if status != consts.StatusOK {
+		s.v2Fail(c, status, code, msg, false)
+		return
+	}
+	c.JSON(consts.StatusOK, listProjectFiles(root, strings.ToLower(q), limit))
+}
+
+// projectRootOf resolves the directory the @-mention picker lists.
+//
+// ★ The table is the only truth about the relation, so the root comes from
+//
+//	there: a project that was moved is listed under its new directory.
+//
+// ★ The three answers, in order: the project the query names; the project
+//
+//	this process focuses on; the default project root of the process.
+func (s *Server) projectRootOf(ctx context.Context, id string) (string, int, string, string) {
+	id = strings.TrimSpace(id)
+	snap := s.projectSnapshot(ctx)
+
+	if id != "" {
+		if snap == nil {
+			return "", consts.StatusServiceUnavailable, codeInternal, "the project registry is not wired"
+		}
+		p, ok := snap.Get(id)
+		if !ok {
+			return "", consts.StatusNotFound, codeProjectNotFound, "no such project: " + id
+		}
+		return p.Root, consts.StatusOK, "", ""
+	}
+
+	if scope := strings.TrimSpace(s.scopeProjectID); scope != "" && snap != nil {
+		if p, ok := snap.Get(scope); ok {
+			return p.Root, consts.StatusOK, "", ""
+		}
+	}
+	return s.cfgSvc.DefaultProjectRoot(), consts.StatusOK, "", ""
 }
 
 // listProjectFiles walks the tree breadth-first so shallow files surface

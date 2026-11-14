@@ -29,6 +29,7 @@ import { useSettings } from "@/lib/settings-store"
 import {
   selectActiveAgentId,
   selectActiveContext,
+  selectActiveProjectId,
   selectAttachments,
   selectBusyElsewhere,
   selectNotice,
@@ -107,6 +108,8 @@ export function Composer({ inset = true }: { inset?: boolean }) {
   const mcpWasOpen = useRef(false)
   const addFiles = useStore((s) => s.addFiles)
   const removeFile = useStore((s) => s.removeFile)
+  // ★ The project the @-mention picker lists.
+  const mentionProject = useStore(selectActiveProjectId)
 
   // acceptFiles hands a list of files to the store.
   //
@@ -203,7 +206,9 @@ export function Composer({ inset = true }: { inset?: boolean }) {
     let alive = true
     const timer = window.setTimeout(() => {
       api
-        .listProjectFiles(mentionQuery, controller.signal)
+        // ★ The project the picker lists: the session's own project, or the
+        //   project a new thread would belong to.
+        .listProjectFiles(mentionQuery, mentionProject, controller.signal)
         .then((res) => {
           if (alive) setMention({ query: mentionQuery, items: res.files })
         })
@@ -221,7 +226,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [mentionQuery])
+  }, [mentionQuery, mentionProject])
 
   // Opening settings from the composer should return focus to the composer
   // when the dialog closes.

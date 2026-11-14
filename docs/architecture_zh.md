@@ -176,6 +176,21 @@ frontmatter 键。正文就是提示词本身（`Instruction`）。
 子 Agent 的产出通过事件上的 `subagentRunId` 归属，不另开事件类型，前端能用同一套 reducer
 处理所有 Agent 的输出。
 
+#### project root 走 context
+
+会话属于项目，项目是一个目录 —— 所以一轮干活的目录是**按会话**的，不是按进程的。
+
+`agentkit/run/runtime.go:461` 在**轮次开始处**读它（会话所属项目的 root），放进这一轮的
+context（`fsx.WithProjectRoot`，`agentkit/fsx/context.go:25`）。两个消费者从那里读，而且必须
+一致：提示词（`agentkit/run/input.go:191` 的 `Project root:` 那行，由 `loop.go:88` 喂进去）
+与工具（`agentkit/fsx/fsx.go:298` 的写边界）。
+
+★ 文件系统后端**只建一次**、被所有轮次共用，所以把 root 烘焙进去等于用「上一轮用过的那个
+root」。★ context 里的 root **顶替**后端自己的 root：干别的项目的会话不该能写进这个项目的
+目录，边界没有因此放宽。
+
+★ 一轮守着自己**开始时**那个 root：项目在两轮之间搬了家，下一轮才认新位置，正在跑的那轮不认。
+
 ## 3. 记忆：上下文与知识
 
 短期记忆是当前会话的上下文，长期记忆落盘，外部知识靠检索接入。三者都回答同一个问题：这一轮
@@ -344,23 +359,24 @@ openheron 的篇幅大部分在这里 —— 边界比能力更决定一个 Agen
 | | `agentkit/obs` | 无 | **日志装配处**：造 logger（`New`、`ParseLevel`、`Discard`）并持有 sink，没有全局 logger 可回取。子包 `agentkit/obs/hertz`（接管 hertz 日志）、`agentkit/obs/hook`（eino callback）、`agentkit/obs/httplog`（模型请求日志）同样是叶子 |
 | | `llm/common` | 无 | 厂商协议层，零 openheron 依赖、零日志代码 |
 | | `webui` | 无 | 嵌入式前端资源 |
-| | `agentkit/fsx` | 无 | **文件系统后端**：写收敛在项目根、忽略规则、结果上限（见 [tools-design.md](tools-design.md)，只有中文） |
+| | `agentkit/fsx` | 无 | **文件系统后端**：写收敛在**本轮**的项目根、忽略规则、结果上限（见 [tools-design.md](tools-design.md)，只有中文） |
 | | `agentkit/shell` | 无 | **哪个 shell 跑命令**：启动时挑一个 POSIX shell（或者 `cmd.exe`），它同时是 `execute` 工具描述里告诉模型的那句话 —— 方言与执行必须是同一个答案 |
 | | `agentkit/imaging` | 无 | 上传图片的压缩、哈希文件名与缩略图 |
 | | `agentkit/templates` | 无 | **配置模板**：`openheron init` 写下的文件、编辑器给的脚手架。是叶子包，配置层与命令层才能读到同一个文件 |
 | **L1** | `agentkit/spec/decl` | 无 | 纯声明结构体（yaml tag 集中处）与两端共用的词汇 —— 内置工具名、MCP 命名空间（§5.1） |
 | | `agentkit/emit` | `obs`, `approval`, `contract`, `helpers`, `message` | agent 事件 → run 的事实 |
 | | `storage` | `contract` | 会话/消息/待审批的接口 |
+| | `projects` | `persist` | **项目表**：哪些会话属于哪个项目、每个项目指向哪个目录。它是用户级文件，所以写路径拿文件锁、写前重读（见 [projects-design.md](projects-design.md)，只有中文） |
 | | `kb` | `obs`, `persist` | 知识库：语料、索引、检索、评分 |
 | | `agentkit/spec` | `obs`, `decl`, `persist`, `templates` | 配置装载、校验、热重载、写入闸门 |
 | **L2** | `agentkit/build` | `fsx`, `obs`, `obs/httplog`, `spec`, `decl`, `approval`, `contract`, `helpers`, `kb`, `llm/common`, `message` | Agent 装配、工具装配、档位表（`agentkit/build/policy.go`）与审批闸门 |
-| | `agentkit/run` | `emit`, `obs`, `approval`, `contract`, `decl`, `message`, `storage` | 运行循环、输入构造、事件消费 |
+| | `agentkit/run` | `emit`, `fsx`, `obs`, `approval`, `contract`, `decl`, `message`, `storage` | 运行循环、输入构造、事件消费 |
 | | `storage/filestore` | `obs`, `contract`, `message`, `persist`, `storage` | 文件存储实现 |
 | | `storage/memarbit` | `storage` | 内存租约仲裁器 |
 | | `transport` | `contract` | AG-UI 渲染：run 的事件 → 帧 |
 | | `llm` | `build`, `spec`, `decl` | 薄封装（目录下只有 `common/` 与一个测试文件） |
 | | `initcfg` | `spec`, `persist`, `templates` | `openheron init` 的出厂模板 |
-| **L3 入口** | `api` | `build`, `emit`, `imaging`, `obs`, `run`, `spec`, `decl`, `contract`, `message`, `storage`, `transport`, `webui` | HTTP 路由、SSE、错误信封 |
+| **L3 入口** | `api` | `build`, `emit`, `imaging`, `obs`, `projects`, `run`, `spec`, `decl`, `contract`, `message`, `storage`, `transport`, `webui` | HTTP 路由、SSE、错误信封 |
 
 同样的分层，从上到下就是引用方向：
 
@@ -378,6 +394,7 @@ openheron 的篇幅大部分在这里 —— 边界比能力更决定一个 Agen
   L1   agentkit/spec/decl       the declarations and the shared vocabulary
        agentkit/emit            agent events → the run's facts
        storage                  the session interfaces
+       projects                 the project table · the session's directory
        kb                       corpus · index · retrieval
        agentkit/spec            config load · validate · reload · write gates
        │
@@ -675,6 +692,11 @@ React 19 + Vite + zustand，构建产物 `web/dist` 通过 `go:embed` 打进二�
 zustand 的 selector 必须返回引用稳定的值：每次调用造新数组/新对象会让 `Object.is` 永远判定
 「变了」，表现为 `Maximum update depth exceeded` 白屏。selector 里不要写 `?? []`；用模块级
 常量或 store 里的 selector。
+
+★ **侧栏按项目分组会话**，分组是纯函数：`web/src/lib/projects.ts:95` 的
+`groupSessions(sessions, projects, scope)`。项目表与作用域都**从服务端读**，客户端只画拿到
+的东西 —— 它从不自己判断会话属于哪个项目，因为那张表是归属关系的唯一真相。★ 没有项目的会话
+进「未选项目」组；空组不画。
 
 对话的宽度是一个 token，不是同一个数字抄六遍：`--chat-column`（那一列）、`--prose-column`
 （里面的文字）与 `--chat-gutter`（两侧留白）住在 `web/src/index.css`。列要宽，宽表才看得全；

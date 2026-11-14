@@ -21,6 +21,8 @@ import (
 	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/message"
 	"github.com/ouranoshong/openheron/storage"
+
+	"github.com/ouranoshong/openheron/agentkit/fsx"
 )
 
 // DefaultStartTimeout bounds how long a caller waits for a turn to become
@@ -74,6 +76,16 @@ type Config struct {
 	// ★ It must be longer than the provider's own timeout, or a slow but
 	//	alive model is fenced out while it is thinking.
 	LeaseTTL time.Duration
+	// ProjectRootFor resolves the directory a session works in.
+	//
+	// ★ It is a **function**, not a value: the root belongs to the session,
+	//   and the session's project may change between rounds. ★ It is called
+	//   once per round, at the round's start — the round keeps the root it
+	//   started with.
+	//
+	// ★ Without it the runtime falls back to Input.ProjectRoot: the default
+	//   project root of the process.
+	ProjectRootFor func(ctx context.Context, sessionID string) string
 	// Logger is the run's log. Nil drops the run's own warnings.
 	Logger *slog.Logger
 }
@@ -438,6 +450,16 @@ func (rt *Runtime) runClaimedTurn(ctx context.Context, sess storage.Session, tur
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	turn.cancel = cancel
 
+	// ★ The project root of this round. ★ It is read **here**, at the start
+	//   of the round: a project may be moved or renamed between rounds, and
+	//   the round that is running keeps the root it began with.
+	//
+	// ★ The root travels in the context, and the context is what reaches
+	//   both consumers: the prompt (the model must be told where the code
+	//   lives) and the tools (the write boundary). ★ The context is built
+	//   with WithoutCancel, so it **keeps the values** it was given.
+	runCtx = fsx.WithProjectRoot(runCtx, rt.projectRootOf(runCtx, sess.ID()))
+
 	rt.startLoop(runCtx, sess.ID(), turn, loop, cancel)
 
 	// ★ The session hears that a new round began. ★ It is published here
@@ -449,6 +471,22 @@ func (rt *Runtime) runClaimedTurn(ctx context.Context, sess storage.Session, tur
 	if ok, _ := loop.Push(item, adk.WithPreempt[loopItem, *schema.Message](adk.AfterToolCalls)); !ok {
 		rt.logf("session=%s push was rejected: the loop is stopping or its buffer is full", sess.ID())
 	}
+}
+
+// projectRootOf resolves the directory a session works in.
+//
+// ★ The answer is the session's **project**: the relation lives in the
+//
+//	project table, and the table is the only truth about it. ★ Without an
+//	injected resolver — or for a session that belongs to no project — the
+//	root is the default project root of the process.
+func (rt *Runtime) projectRootOf(ctx context.Context, sessionID string) string {
+	if rt.cfg.ProjectRootFor != nil {
+		if root := rt.cfg.ProjectRootFor(ctx, sessionID); root != "" {
+			return root
+		}
+	}
+	return rt.cfg.Input.ProjectRoot
 }
 
 // ensureIdle refuses the request when the session already owes the user

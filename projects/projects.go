@@ -214,6 +214,29 @@ func (r *Registry) List(ctx context.Context) ([]Project, error) {
 	return snap.Projects, nil
 }
 
+// RootOf returns the project root a session works in.
+//
+// ★ An empty string is the answer "this session belongs to no project" —
+//
+//	the caller falls back to the default project root. ★ The root comes from
+//	the table and not from the session record: the table is the only truth
+//	about the relation.
+//
+// ★ It is **one read**: the table is a file, and a round must not read it
+//
+//	once per tool call.
+func (r *Registry) RootOf(ctx context.Context, sessionID string) (string, error) {
+	snap, err := r.Snapshot(ctx)
+	if err != nil {
+		return "", err
+	}
+	p, ok := snap.ProjectOf(sessionID)
+	if !ok {
+		return "", nil
+	}
+	return p.Root, nil
+}
+
 func snapshotOf(t *Table) *Snapshot {
 	snap := &Snapshot{
 		byID:   make(map[string]Project, len(t.Projects)),

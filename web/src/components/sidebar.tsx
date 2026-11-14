@@ -1,19 +1,37 @@
 import { MoreHorizontalIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react"
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useShallow } from "zustand/react/shallow"
 
 import { SettingsEntry } from "@/components/settings/settings-entry"
 import { Button } from "@/components/ui/button"
+import { NO_PROJECT_GROUP, groupSessions, sortProjects } from "@/lib/projects"
 import { selectSessionList, useStore } from "@/lib/store"
 import type { SessionEntry } from "@/lib/store"
 import { cn } from "@/lib/utils"
 
 export function Sidebar() {
   const sessions = useStore(useShallow(selectSessionList))
+  const projects = useStore((s) => s.projects)
+  const scope = useStore((s) => s.projectScope)
+  const activeProjectId = useStore((s) => s.activeProjectId)
   const activeId = useStore((s) => s.activeId)
   const loading = useStore((s) => s.loadingList)
   const open = useStore((s) => s.openSession)
   const startNew = useStore((s) => s.startNewThread)
+  const setActiveProject = useStore((s) => s.setActiveProject)
+
+  // ★ The grouping is a **pure function** over three answers the server
+  //   gave: the sessions, the projects, and the scope. ★ The client does
+  //   not decide anything here — it does not guess which project a session
+  //   belongs to, and it does not decide how many groups there are.
+  const groups = useMemo(
+    () => groupSessions(sessions, projects, scope),
+    [sessions, projects, scope],
+  )
+
+  // ★ The flat list — no heading — is the case where there is nothing to
+  //   group by: no projects, so every conversation belongs to no project.
+  const flat = groups.length === 1 && groups[0]!.key === NO_PROJECT_GROUP
 
   return (
     <aside data-testid="sidebar" className="border-e flex w-64 shrink-0 flex-col">
@@ -29,22 +47,56 @@ export function Sidebar() {
         </Button>
       </div>
 
+      {/* ★ The project a new conversation belongs to. ★ It is only shown
+          when there is a choice: the single-project mode serves one
+          directory, and a picker with one option is a decoration. */}
+      {!scope && projects.length > 0 && (
+        <div className="px-2 pb-2">
+          <select
+            data-testid="project-picker"
+            aria-label="Project for new threads"
+            value={activeProjectId ?? ""}
+            onChange={(e) => setActiveProject(e.target.value)}
+            className="border-border bg-background w-full rounded-md border px-2 py-1 text-sm outline-none focus-visible:ring-2"
+          >
+            <option value="">No project</option>
+            {sortProjects(projects).map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {loading && sessions.length === 0 ? (
           <p className="text-muted-foreground p-2 text-xs">Loading…</p>
         ) : sessions.length === 0 ? (
           <p className="text-muted-foreground p-2 text-xs">No conversations yet.</p>
         ) : (
-          <ul className="space-y-0.5">
-            {sessions.map((s) => (
-              <SessionRow
-                key={s.meta.threadId}
-                entry={s}
-                active={s.meta.threadId === activeId}
-                onOpen={() => void open(s.meta.threadId)}
-              />
-            ))}
-          </ul>
+          groups.map((group) => (
+            <section key={group.key} data-testid="session-group" data-group={group.key}>
+              {!flat && (
+                <h2
+                  data-testid="session-group-title"
+                  className="text-muted-foreground px-2 pt-2 pb-1 text-xs font-medium"
+                >
+                  {group.title}
+                </h2>
+              )}
+              <ul className="space-y-0.5">
+                {group.sessions.map((s) => (
+                  <SessionRow
+                    key={s.meta.threadId}
+                    entry={s}
+                    active={s.meta.threadId === activeId}
+                    onOpen={() => void open(s.meta.threadId)}
+                  />
+                ))}
+              </ul>
+            </section>
+          ))
         )}
       </div>
       <SettingsEntry className="border-border border-t px-2 py-1.5" />

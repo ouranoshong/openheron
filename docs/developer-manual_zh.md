@@ -80,7 +80,7 @@ openheron/
 | 层 | 包 | 内部依赖 |
 |---|---|---|
 | **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `agentkit/fsx` `agentkit/shell` `llm/common` `webui` | 无 |
-| **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` 无；`storage`→`contract`；`kb`→`obs`,`persist`；`spec`→`obs`,`decl`,`templates`,`persist`；`emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
+| **L1** | `agentkit/spec/decl` `storage` `projects` `kb` `agentkit/spec` `agentkit/emit` | `decl` 无；`storage`→`contract`；`projects`→`persist`；`kb`→`obs`,`persist`；`spec`→`obs`,`decl`,`templates`,`persist`；`emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
 | **L2** | `agentkit/build` `agentkit/run` `storage/filestore` `storage/memarbit` `transport` `llm` `initcfg` | 见 architecture.md §2 |
 | **L3** | `api` | 几乎全部 |
 
@@ -1101,6 +1101,30 @@ export 出去的值，而且没人知道服务用的是哪一个。
 ★ **旧的 `api_key:` 那一行没有兼容层。** 还带着它的档案会被拒，而那句话会点名替代
 它的变量与钥匙串条目 —— 迁移就是「把那一行删掉」（`docs/secrets-design.md` §6）。
 
+### 3.15 ★ 会话的项目根
+
+会话属于项目，项目是一个目录 —— 所以一轮干活的目录是**按会话**的，不是按进程的。
+
+`agentkit/run/runtime.go:461` 在**轮次开始处**读它（会话所属项目的 root），放进这一轮的
+context（`fsx.WithProjectRoot`，`agentkit/fsx/context.go:25`）。两个消费者从那里读，
+而且必须一致：
+
+| 消费者 | 位置 | 拿它做什么 |
+|---|---|---|
+| 提示词 | `agentkit/run/input.go:191` | 点名它：`Project root: …` |
+| 工具 | `agentkit/fsx/fsx.go:298` | 写边界，以及相对路径的基准 |
+
+★ **永远别把 root 烘焙进文件系统后端。** 后端**只建一次**、被所有轮次共用
+（`agentkit/build/snapshot.go:78`），所以住在它里面的 root 是「上一轮用过的那个」。
+★ context 里的 root **顶替**后端自己的：干别的项目的会话不该能写进这个项目的目录，
+边界没有因此放宽 —— 而共享的那几个额外根（上传区、技能目录）在每一轮里都仍然可写。
+
+★ **轮次之外**，问那张表：`projects.Registry.RootOf(ctx, sessionID)`。「会话 → 项目 → 目录」
+是领域逻辑，住在 `projects` 包 —— API 层只负责写和读那个 `projectId`。
+
+★ **root 只在轮次开始处读一次。** 项目在两轮之间搬了家，下一轮才认新位置；正在跑的那一轮
+守着自己开始时那个。
+
 ## 4. 前端
 
 ### 4.1 三层纯函数
@@ -1116,9 +1140,10 @@ export 出去的值，而且没人知道服务用的是哪一个。
 | `web/src/lib/store/events.ts` | store 内的事件路由 | **`localStorage`** |
 | `web/src/lib/store/actions.ts` | zustand store 本体 + 全部异步 action | **zustand**、`fetch`、`localStorage` |
 | `web/src/lib/secrets.ts` | Secrets 面板的纯函数层：状态、文案、来源标签 | 只有 `import type`（编译期擦除） |
+| `web/src/lib/projects.ts` | 侧栏的分组：哪些会话归到哪个项目下 | 只有 `import type`（编译期擦除） |
 
 ★ **要精确**：真正框架无关的是 `sse.ts`、`events.ts`、`store/state.ts`、
-`store/selectors.ts`、`store/history.ts` 与 `secrets.ts`。`store.ts` 本身**是 barrel**，
+`store/selectors.ts`、`store/history.ts`、`secrets.ts` 与 `projects.ts`。`store.ts` 本身**是 barrel**，
 `store/actions.ts` 拥有 zustand 实例 —— 所以 import `store.ts` 就会把
 zustand、`fetch`、`localStorage` 一起拉进来。
 
@@ -1312,7 +1337,7 @@ OPENHERON_TEST_PROXY=http://127.0.0.1:7890 go test ./agentkit/build -run TheProx
 
 ### 5.3 Go 单元测试
 
-`go test ./...` 跑遍每个包，其中 **25** 个带测试。契约主要由这几处锁定：
+`go test ./...` 跑遍每个包，其中 **26** 个带测试。契约主要由这几处锁定：
 
 | 包 | 锁住的契约 |
 |---|---|
@@ -1324,7 +1349,8 @@ OPENHERON_TEST_PROXY=http://127.0.0.1:7890 go test ./agentkit/build -run TheProx
 | `storage/filestore` | 追加写、原子重写、checkpoint、待审批持久化 |
 | `transport` | 事件类型、归属、用量分账 |
 | `initcfg` | 出厂模板的完整性 |
-| `agentkit/fsx` | 写边界（含符号链接逃逸）、`ls`/`glob`/`grep` 的上限、绝对 glob pattern、替 `ripgrep` 兜底的内置搜索引擎，以及**写进配置根的那道配置闸门** |
+| `agentkit/fsx` | 写边界（含符号链接逃逸）、**顶替后端自己那个的本轮项目根**、`ls`/`glob`/`grep` 的上限、绝对 glob pattern、替 `ripgrep` 兜底的内置搜索引擎，以及**写进配置根的那道配置闸门** |
+| `projects` | 项目表：写锁、写前重读、**会话的项目根**，以及「会话绝不在项目之间搬家」这条规矩 |
 | `agentkit/shell` | `execute` 工具用哪个 shell 跑命令，以及工具描述告诉模型的那套方言 |
 | `agentkit/imaging` | 附件的图片那条路：哪些要缩放、哪些保住格式，以及把手机照片摆正的 EXIF 方向 |
 
@@ -1375,8 +1401,8 @@ OPENHERON_TEST_PROXY=http://127.0.0.1:7890 go test ./agentkit/build -run TheProx
 ### 5.5 前端单元测试
 
 `cd web && bun run test:unit`（`bun test test/*.test.ts`）——
-**25 个测试文件、316 个用例**，覆盖 `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
-`thinking.ts` / `turns.ts` / `approval.ts` / `settings-store.ts` 等层。
+**32 个测试文件、393 个用例**，覆盖 `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
+`thinking.ts` / `turns.ts` / `approval.ts` / `settings-store.ts` / `projects.ts` 等层。
 
 ★ **客户端一条配置规则都不留了。** 它从前留了一整套：分区表的副本、tools/ 的文件白名单、
 MCP server 名的正则，和一整份逐键扫描 —— 那是在校验还同步的年代写的。服务端一直都拿着
@@ -1403,9 +1429,9 @@ Bun 本身没有 `localStorage`，不 stub 会炸。
 
 ### 5.6 E2E
 
-`task test-e2e` → `playwright test`，**15 个 spec、196 个用例**：
+`task test-e2e` → `playwright test`，**18 个 spec、223 个用例**：
 `agents` `attachments` `chat` `compaction` `composer-autocomplete` `composer-meta` `history` `mcps`
-`motion` `multi-agent` `reattach` `scroll` `session-busy` `settings` `theme`。
+`motion` `multi-agent` `projects` `reattach` `scroll` `session-busy` `session-events` `settings` `theme`。
 
 Playwright 自己起两个服务（`playwright.config.ts` 的 `webServer`）：
 假后端（`web/test/serve.ts`）+ Vite（`--mode test`）。

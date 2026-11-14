@@ -109,6 +109,40 @@ func TestASessionBelongsToTheProjectThatHoldsIt(t *testing.T) {
 	}
 }
 
+// ★ The root of the project a session belongs to is the directory that
+//
+//	session works in. ★ A session nobody holds has no root: the caller
+//	falls back to the default project root of the process.
+func TestTheRootOfASessionIsItsProjectsRoot(t *testing.T) {
+	reg := newRegistry(t)
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "api")
+
+	p, err := reg.Create(ctx, "api", root)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := reg.Attach(ctx, "session-1", p.ID); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+
+	got, err := reg.RootOf(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("RootOf: %v", err)
+	}
+	if got != root {
+		t.Fatalf("the root = %q, want %q", got, root)
+	}
+
+	empty, err := reg.RootOf(ctx, "session-2")
+	if err != nil {
+		t.Fatalf("RootOf: %v", err)
+	}
+	if empty != "" {
+		t.Fatalf("a session nobody holds has no root, got %q", empty)
+	}
+}
+
 func TestASessionIsNotMovedBetweenProjects(t *testing.T) {
 	reg := newRegistry(t)
 	ctx := context.Background()

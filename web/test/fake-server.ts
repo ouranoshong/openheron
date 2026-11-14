@@ -26,6 +26,12 @@ export interface FakeThread {
   messages: FakeMessage[]
   state: "idle" | "running" | "waiting_approval"
   agentId?: string
+  // projectId is the project the session belongs to.
+  //
+  // ★ The fake has no project table: the id comes from the **mode** (see
+  //   fakeProjectOf), so the same thread is in the same project every time
+  //   it is read.
+  projectId?: string
   pendings?: PendingApproval[]
   runs?: FakeRun[]
   usage?: Usage
@@ -1194,6 +1200,7 @@ export function startFakeServer(port = 0): FakeServer {
   let scenario: ScenarioName = "simple"
   let agentsMode: "default" | "multi" | "many" | "grew" = "default"
   let mcpMode: "default" | "empty" | "starting" = "default"
+  let projectsMode: "default" | "multi" | "single" = "default"
   let defaultRoot = "main"
 
   const find = (id: string) => threads.find((t) => t.threadId === id)
@@ -1236,6 +1243,50 @@ export function startFakeServer(port = 0): FakeServer {
     return FAKE_AGENTS
   }
 
+  // fakeProjectOf says which project a session belongs to.
+  //
+  // ★ It is a **pure function of the thread id and the mode**: the fake has
+  //   no project table, and a table that changed under the reader would
+  //   show the same conversation in two places.
+  const fakeProjectOf = (threadId: string): string => {
+    if (projectsMode === "multi") {
+      if (threadId === THREAD_A || threadId === THREAD_MULTI) return "alpha"
+      if (threadId === THREAD_B || threadId === THREAD_COMPACT) return "beta"
+      return ""
+    }
+    if (projectsMode === "single") {
+      if (threadId === THREAD_A) return "alpha"
+      return ""
+    }
+    return ""
+  }
+
+  // fakeProjects is the project table the fake serves, and the scope.
+  //
+  // ★ The scope is null in the multi-project mode and names the project in
+  //   the single-project mode — the same two answers the real server gives.
+  const fakeProjects = (): {
+    items: { id: string; name: string; root: string; order: number; sessionCount: number }[]
+    scope: { projectId: string; name: string; root: string } | null
+  } => {
+    if (projectsMode === "multi") {
+      return {
+        items: [
+          { id: "alpha", name: "Alpha", root: "/tmp/alpha", order: 0, sessionCount: 2 },
+          { id: "beta", name: "Beta", root: "/tmp/beta", order: 1, sessionCount: 2 },
+        ],
+        scope: null,
+      }
+    }
+    if (projectsMode === "single") {
+      return {
+        items: [{ id: "alpha", name: "Alpha", root: "/tmp/alpha", order: 0, sessionCount: 1 }],
+        scope: { projectId: "alpha", name: "Alpha", root: "/tmp/alpha" },
+      }
+    }
+    return { items: [], scope: null }
+  }
+
   const meta = (t: FakeThread) => ({
     threadId: t.threadId,
     title: t.title,
@@ -1245,6 +1296,9 @@ export function startFakeServer(port = 0): FakeServer {
     state: t.state,
     hasPendingApproval: !!t.pendings?.length,
     agentId: t.agentId ?? "main",
+    // ★ The project the session belongs to — the same answer the real
+    //   server reads from the project table.
+    projectId: t.projectId ?? fakeProjectOf(t.threadId),
   })
 
   function queryParams(u: URL): Record<string, string> {
@@ -2081,6 +2135,7 @@ export function startFakeServer(port = 0): FakeServer {
         scenario = "simple"
         agentsMode = "default"
         mcpMode = "default"
+        projectsMode = "default"
         defaultRoot = "main"
         return json({ ok: true })
       }
@@ -2108,6 +2163,16 @@ export function startFakeServer(port = 0): FakeServer {
         }
         agentsMode = mode
         return json({ ok: true, mode: agentsMode })
+      }
+      // ★ The project mode: "default" has no projects at all, "multi" has
+      //   two of them and no scope, "single" has one and a scope.
+      if (path === "/__fake/projects-mode" && req.method === "POST") {
+        const mode = url.searchParams.get("mode") ?? "default"
+        if (mode !== "default" && mode !== "multi" && mode !== "single") {
+          return fail(400, `unknown projects mode: ${mode}`, "invalid_body")
+        }
+        projectsMode = mode
+        return json({ ok: true, mode: projectsMode })
       }
       if (path === "/__fake/scenario" && req.method === "POST") {
         const name = new URL(req.url).searchParams.get("name") ?? ""
@@ -2226,11 +2291,22 @@ export function startFakeServer(port = 0): FakeServer {
         return json({ items: threads.map(meta) })
       }
 
+      // ★ The project table and the scope of this process. ★ It is a
+      //   separate endpoint from the session list, and the client joins the
+      //   two by the project id.
+      if (path === "/v2/projects" && req.method === "GET") {
+        return json(fakeProjects())
+      }
+
       if (path === "/v2/sessions" && req.method === "POST") {
-        const body = (await req.json().catch(() => ({}))) as { agentId?: string }
+        const body = (await req.json().catch(() => ({}))) as { agentId?: string; projectId?: string }
         const agentId = (body.agentId ?? "").trim()
         if (agentId && !fakeAgentIds().has(agentId)) {
           return fail(400, `agent not found: ${agentId}`, "agent_not_found")
+        }
+        const projectId = (body.projectId ?? "").trim()
+        if (projectId && !fakeProjects().items.some((p) => p.id === projectId)) {
+          return fail(404, `no such project: ${projectId}`, "project_not_found")
         }
         const t: FakeThread = {
           threadId: `new-${++seq}`,
@@ -2240,6 +2316,7 @@ export function startFakeServer(port = 0): FakeServer {
           messages: [],
           state: "idle",
           agentId: agentId || defaultRoot,
+          projectId,
           files: [],
         }
         threads.push(t)
@@ -2505,6 +2582,7 @@ export function startFakeServer(port = 0): FakeServer {
       requests.length = 0
       seq = 0
       scenario = "simple"
+      projectsMode = "default"
     },
     setScenario: (name: ScenarioName) => {
       scenario = name

@@ -29,6 +29,7 @@ const meta = (id: string, title: string) => ({
   state: "idle" as const,
   hasPendingApproval: false,
   agentId: "main",
+  projectId: "",
 })
 
 const store = new Map<string, string>()

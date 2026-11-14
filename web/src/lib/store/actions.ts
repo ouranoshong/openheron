@@ -14,6 +14,7 @@ import {
 import { readActiveThreadId, writeActiveThreadId } from "@/lib/active-thread"
 import { attachTarget, busyElsewhere } from "@/lib/attach"
 import { closeAllOpenParts, type AgEvent } from "@/lib/events"
+import { resolveActiveProject } from "@/lib/projects"
 import { applySessionFact as foldSessionFact, type SessionFact } from "@/lib/session-events"
 import {
   emptyConversation,
@@ -103,10 +104,34 @@ export const useStore = create<StoreState>((set, get) => ({
   pendingAgentId: null,
   loadingList: false,
   agentFilter: null,
+  projects: [],
+  projectScope: null,
+  activeProjectId: null,
 
   setAgentFilter(agent) {
     if (get().agentFilter === agent) return
     set({ agentFilter: agent })
+  },
+
+  async refreshProjects() {
+    try {
+      const { items, scope } = await api.listProjects()
+      set((s) => ({
+        projects: items,
+        projectScope: scope,
+        activeProjectId: resolveActiveProject(s.activeProjectId, items, scope),
+      }))
+    } catch {
+      // ★ A server that does not know about projects answers 503. ★ That is
+      //   not a broken sidebar: the conversations are still there, they are
+      //   simply not grouped, and the sidebar renders one flat list.
+      set({ projects: [], projectScope: null })
+    }
+  },
+
+  setActiveProject(id) {
+    if (get().activeProjectId === id) return
+    set({ activeProjectId: id })
   },
 
   async refreshList() {
@@ -322,6 +347,10 @@ export const useStore = create<StoreState>((set, get) => ({
 
     const { activeId, sessions, pendingAgentId } = get()
     const localKey = activeId ?? `pending:${Date.now()}`
+    // ★ The project a **new** conversation belongs to. ★ It is the one the
+    //   user picked in the sidebar — or the scope, when the process serves a
+    //   single directory.
+    const projectId = get().activeProjectId ?? undefined
     // ★ The files that go with this question. They belong to the session the
     //   user is in, so they are read before the thread may be created.
     const pending = activeId ? (get().attachments[activeId] ?? []) : []
@@ -351,6 +380,7 @@ export const useStore = create<StoreState>((set, get) => ({
             state: "running",
             hasPendingApproval: false,
             agentId,
+            projectId: projectId ?? "",
           },
       // ★ The optimistic bubble carries the files too: the user has to see
       //   what they sent, and the bubble is the only thing on screen at the
@@ -368,7 +398,7 @@ export const useStore = create<StoreState>((set, get) => ({
     if (!threadId) {
       let created: ThreadMeta
       try {
-        created = await api.createThread(requested)
+        created = await api.createThread(requested, projectId)
       } catch (e) {
         run = null
         setCurrentRunKey(null)
@@ -958,7 +988,8 @@ async function ensureSession(): Promise<string> {
   const current = useStore.getState().activeId
   if (current !== null) return current
 
-  const created = await api.createThread(useStore.getState().pendingAgentId ?? undefined)
+  const state = useStore.getState()
+  const created = await api.createThread(state.pendingAgentId ?? undefined, state.activeProjectId ?? undefined)
   const id = created.threadId
   useStore.setState((s) => ({
     sessions: { ...s.sessions, [id]: { meta: created, convo: emptyConversation(), loaded: true } },
@@ -979,6 +1010,7 @@ function stubMeta(id: string): ThreadMeta {
     state: "idle",
     hasPendingApproval: false,
     agentId: MAIN_AGENT,
+    projectId: "",
   }
 }
 

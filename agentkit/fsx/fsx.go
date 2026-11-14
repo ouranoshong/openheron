@@ -8,7 +8,10 @@
 // a copied middleware — see docs/tools-design.md.
 //
 // Two different boundaries live here:
-//   - writes are confined to Root + ExtraRoots (resolveWrite);
+//   - writes are confined to the round's project root plus the shared extra
+//     roots (resolveWrite). ★ The round's root travels in the context
+//     (WithProjectRoot): the backend is built once and shared by every round,
+//     so a root baked into it would be the root of the last round that used it.
 //   - all seven methods are bounded in how far they read (ls/glob caps, grep cap, ctx).
 //
 // Reads are deliberately NOT confined: execute can already cat any file, so confining
@@ -92,7 +95,13 @@ type Config struct {
 	// Root is the project root: relative paths resolve against it and an empty path
 	// means it. Writes outside Root + ExtraRoots are refused; reads are not confined
 	// (execute can read anything anyway — see the package comment).
-	// An empty Root means the process working directory.
+	//
+	// ★ An empty Root means the process working directory.
+	//
+	// ★ It is the **fallback**: the root of the round in flight comes from the
+	//   context (WithProjectRoot) and replaces this one. The backend is shared
+	//   by every round, so a session that works in another project must not
+	//   be able to write into this one.
 	Root string
 
 	// ExtraRoots are writable and are never the default for an empty path.
@@ -124,8 +133,16 @@ type Config struct {
 }
 
 type Local struct {
-	root            string
-	roots           []string
+	root  string
+	roots []string
+	// extraRoots are the shared directories that are writable in every
+	// round: the session workspaces and the skills directory.
+	//
+	// ★ They are kept apart from the root because the round's root
+	//   **replaces** the root when the context carries one — and the shared
+	//   directories must survive that replacement: a session that works in
+	//   another project still writes its uploads and its skills.
+	extraRoots      []string
 	validateCommand func(string) error
 	// gate receives the writes that land inside the configuration root.
 	gate ConfigGate
@@ -163,6 +180,7 @@ func New(cfg Config) (*Local, error) {
 		return nil, fmt.Errorf("fsx: root %q: %w", cfg.Root, err)
 	}
 	roots := []string{abs}
+	extras := make([]string, 0, len(cfg.ExtraRoots))
 	for _, r := range cfg.ExtraRoots {
 		if strings.TrimSpace(r) == "" {
 			continue
@@ -172,6 +190,7 @@ func New(cfg Config) (*Local, error) {
 			return nil, fmt.Errorf("fsx: extra root %q: %w", r, err)
 		}
 		roots = append(roots, extra)
+		extras = append(extras, extra)
 	}
 	validate := defaultValidateCommand
 	if cfg.ValidateCommand != nil {
@@ -188,6 +207,7 @@ func New(cfg Config) (*Local, error) {
 	return &Local{
 		root:            abs,
 		roots:           roots,
+		extraRoots:      extras,
 		validateCommand: validate,
 		gate:            cfg.ConfigGate,
 		shell:           shell,
@@ -215,18 +235,60 @@ func canonical(p string) (string, error) {
 // An empty path means the project root (never "/") and a relative path is joined onto the
 // root; beyond that it only canonicalises. Reads are not confined on purpose — see the
 // package comment. Writes go through resolveWrite, which is where the boundary is.
-func (s *Local) resolve(p string) (string, error) {
+//
+// ★ The base is the **round's** root when the context carries one: the root
+//
+//	is per session, and a relative path is relative to the directory the
+//	session works in — not to the directory the process was started in.
+func (s *Local) resolve(ctx context.Context, p string) (string, error) {
+	base := s.base(ctx)
 	if strings.TrimSpace(p) == "" {
-		return s.root, nil
+		return base, nil
 	}
 	if !filepath.IsAbs(p) {
-		p = filepath.Join(s.root, p)
+		p = filepath.Join(base, p)
 	}
 	p = filepath.Clean(p)
 	if real, err := filepath.EvalSymlinks(p); err == nil {
 		p = real
 	}
 	return p, nil
+}
+
+// base is the directory a relative path resolves against.
+//
+// ★ The context's root wins over the backend's own: the backend is built
+//
+//	once and shared, and the root that matters is the one the round in
+//	flight works in. ★ It is canonicalised the same way the backend's root
+//	was, or a symlinked project would refuse its own files.
+func (s *Local) base(ctx context.Context) string {
+	round := ProjectRoot(ctx)
+	if round == "" {
+		return s.root
+	}
+	if real, err := canonical(round); err == nil {
+		return real
+	}
+	return round
+}
+
+// writeRoots are the directories a write may land in during this round.
+//
+// ★ When the context carries a root, that root **replaces** the backend's
+//
+//	root: a session that works in another project must not write into this
+//	one. ★ The shared extra roots stay — they are the uploads and the
+//	skills, and they belong to no project.
+func (s *Local) writeRoots(ctx context.Context) []string {
+	round := ProjectRoot(ctx)
+	if round == "" {
+		return s.roots
+	}
+	roots := make([]string, 0, len(s.extraRoots)+1)
+	roots = append(roots, s.base(ctx))
+	roots = append(roots, s.extraRoots...)
+	return roots
 }
 
 // resolveWrite is the write boundary: the target, or the deepest ancestor that exists,
@@ -237,24 +299,30 @@ func (s *Local) resolve(p string) (string, error) {
 // I/O, a symlink loop — is a directory we cannot inspect, and treating that as "no symlink
 // here" would be exactly the hole the walk exists to close. (The first version did: it
 // returned the unchecked lexical path.)
-func (s *Local) resolveWrite(p string) (string, error) {
-	abs, err := s.resolve(p)
+//
+// ★ The boundary is **the round's**: the context carries the root the
+//
+//	session works in, and the backend's own root is the fallback for a
+//	context that carries none.
+func (s *Local) resolveWrite(ctx context.Context, p string) (string, error) {
+	abs, err := s.resolve(ctx, p)
 	if err != nil {
 		return "", err
 	}
-	if !s.inside(abs) {
-		return "", fmt.Errorf("path %q is outside the project root %q", abs, s.root)
+	roots := s.writeRoots(ctx)
+	if !insideRoots(roots, abs) {
+		return "", fmt.Errorf("path %q is outside the project root %q", abs, s.base(ctx))
 	}
 	for dir := filepath.Dir(abs); ; dir = filepath.Dir(dir) {
 		real, err := filepath.EvalSymlinks(dir)
 		if err == nil {
-			if !s.inside(real) {
-				return "", fmt.Errorf("path %q resolves outside the project root %q", abs, s.root)
+			if !insideRoots(roots, real) {
+				return "", fmt.Errorf("path %q resolves outside the project root %q", abs, s.base(ctx))
 			}
 			return abs, nil
 		}
 		if !errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("cannot verify that %q is inside %q: %w", abs, s.root, err)
+			return "", fmt.Errorf("cannot verify that %q is inside %q: %w", abs, s.base(ctx), err)
 		}
 		if filepath.Dir(dir) == dir {
 			return abs, nil
@@ -262,8 +330,9 @@ func (s *Local) resolveWrite(p string) (string, error) {
 	}
 }
 
-func (s *Local) inside(p string) bool {
-	for _, root := range s.roots {
+// insideRoots says whether a path is inside one of the roots.
+func insideRoots(roots []string, p string) bool {
+	for _, root := range roots {
 		rel, err := filepath.Rel(root, p)
 		if err != nil {
 			continue
@@ -280,7 +349,7 @@ func (s *Local) ignored(d os.DirEntry) bool {
 }
 
 func (s *Local) LsInfo(ctx context.Context, req *filesystem.LsInfoRequest) ([]filesystem.FileInfo, error) {
-	path, err := s.resolve(req.Path)
+	path, err := s.resolve(ctx, req.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +395,7 @@ func (s *Local) LsInfo(ctx context.Context, req *filesystem.LsInfoRequest) ([]fi
 }
 
 func (s *Local) Read(ctx context.Context, req *filesystem.ReadRequest) (*filesystem.FileContent, error) {
-	path, err := s.resolve(req.FilePath)
+	path, err := s.resolve(ctx, req.FilePath)
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +486,7 @@ func (s *Local) GrepRaw(ctx context.Context, req *filesystem.GrepRequest) ([]fil
 	if s.rgPath == "" {
 		return s.grepBuiltin(ctx, req)
 	}
-	path, err := s.resolve(req.Path)
+	path, err := s.resolve(ctx, req.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -575,7 +644,7 @@ func grepCapNote() string {
 }
 
 func (s *Local) GlobInfo(ctx context.Context, req *filesystem.GlobInfoRequest) ([]filesystem.FileInfo, error) {
-	base, err := s.resolve(req.Path)
+	base, err := s.resolve(ctx, req.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -737,7 +806,7 @@ func (s *Local) globPattern(base, pattern string) (string, error) {
 }
 
 func (s *Local) Write(ctx context.Context, req *filesystem.WriteRequest) error {
-	path, err := s.resolveWrite(req.FilePath)
+	path, err := s.resolveWrite(ctx, req.FilePath)
 	if err != nil {
 		return err
 	}
@@ -774,7 +843,7 @@ func (s *Local) Write(ctx context.Context, req *filesystem.WriteRequest) error {
 }
 
 func (s *Local) Edit(ctx context.Context, req *filesystem.EditRequest) error {
-	path, err := s.resolveWrite(req.FilePath)
+	path, err := s.resolveWrite(ctx, req.FilePath)
 	if err != nil {
 		return err
 	}

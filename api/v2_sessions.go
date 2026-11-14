@@ -29,6 +29,13 @@ var (
 func (s *Server) v2CreateSession(ctx context.Context, c *app.RequestContext) {
 	var body struct {
 		AgentID string `json:"agentId"`
+		// ProjectID names the project the session belongs to.
+		//
+		// ★ An empty value means "no project": the session works in the
+		//   default project root. ★ It is **not** filled in from the scope —
+		//   the client says which project it means, and a server that
+		//   guessed would put the session somewhere the user did not ask for.
+		ProjectID string `json:"projectId"`
 	}
 	_ = c.Bind(&body)
 
@@ -42,13 +49,42 @@ func (s *Server) v2CreateSession(ctx context.Context, c *app.RequestContext) {
 		root = r
 	}
 
+	// ★ The project is checked **before** the session is created: a request
+	//   that names a project that is not there is a wrong request, and
+	//   answering it with a session nobody can find is worse.
+	projectID := trimSpace(body.ProjectID)
+	if projectID != "" {
+		snap := s.projectSnapshot(ctx)
+		if snap == nil {
+			s.v2Fail(c, consts.StatusServiceUnavailable, codeInternal,
+				"the project registry is not wired", false)
+			return
+		}
+		if _, ok := snap.Get(projectID); !ok {
+			s.v2Fail(c, consts.StatusNotFound, codeProjectNotFound,
+				"no such project: "+projectID, false)
+			return
+		}
+	}
+
 	sess, err := s.sm.Create(ctx, root)
 	if err != nil {
 		s.v2FailInternal(c, err)
 		return
 	}
 
-	meta := s.metaOf(ctx, sess, nil)
+	// ★ The session file is on disk, and that is a fact. ★ A table that could
+	//   not be written does not un-create the session: the session simply
+	//   has no project, and the log says why.
+	if projectID != "" {
+		if err := s.projectRegistry().Attach(ctx, sess.ID(), projectID); err != nil {
+			s.logger().Warn("[api] the project table write failed; the session has no project",
+				"session", sess.ID(), "project", projectID, "err", err)
+			projectID = ""
+		}
+	}
+
+	meta := s.metaOf(ctx, sess, nil, projectID)
 	c.JSON(consts.StatusCreated, meta)
 }
 
@@ -60,6 +96,9 @@ func (s *Server) v2ListSessions(ctx context.Context, c *app.RequestContext) {
 		s.v2FailInternal(c, err)
 		return
 	}
+	// ★ One read of the table for the whole list: it is a file, and a list of
+	//   a hundred sessions must not read it a hundred times.
+	snap := s.projectSnapshot(ctx)
 	out := threadList{Items: make([]threadMeta, 0, len(metas))}
 	for i := range metas {
 		m := metas[i]
@@ -68,7 +107,7 @@ func (s *Server) v2ListSessions(ctx context.Context, c *app.RequestContext) {
 			continue
 		}
 		pending, _ := sess.PendingApproval()
-		detail := s.metaOf(ctx, sess, pending)
+		detail := s.metaOf(ctx, sess, pending, projectIDOf(snap, sess.ID()))
 		out.Items = append(out.Items, detail.threadMeta)
 	}
 	c.JSON(consts.StatusOK, out)
@@ -89,7 +128,7 @@ func (s *Server) v2GetSession(ctx context.Context, c *app.RequestContext) {
 	}
 	status, _ := s.rt.StatusOf(ctx, sess.ID())
 
-	detail := s.metaOf(ctx, sess, pending)
+	detail := s.metaOf(ctx, sess, pending, projectIDOf(s.projectSnapshot(ctx), sess.ID()))
 	detail.RunID = status.RunID
 	if recs := sess.Decisions(); len(recs) > 0 {
 		detail.Decisions = toDecisionViews(recs)
@@ -134,7 +173,7 @@ func (s *Server) v2RenameSession(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	pending, _ := sess.PendingApproval()
-	c.JSON(consts.StatusOK, s.metaOf(ctx, sess, pending))
+	c.JSON(consts.StatusOK, s.metaOf(ctx, sess, pending, projectIDOf(s.projectSnapshot(ctx), sess.ID())))
 }
 
 // trimTitle clamps a user-supplied title the same way List() clamps a
@@ -200,7 +239,7 @@ func (s *Server) v2SwitchAgent(ctx context.Context, c *app.RequestContext) {
 	}
 
 	pending, _ := sess.PendingApproval()
-	c.JSON(consts.StatusOK, s.metaOf(ctx, sess, pending))
+	c.JSON(consts.StatusOK, s.metaOf(ctx, sess, pending, projectIDOf(s.projectSnapshot(ctx), sess.ID())))
 }
 
 // resolveAgentID validates an agent id against the live config.
@@ -258,6 +297,16 @@ func (s *Server) v2DeleteSession(ctx context.Context, c *app.RequestContext) {
 	if err := s.sm.Delete(ctx, id); err != nil {
 		s.v2FailInternal(c, err)
 		return
+	}
+	// ★ The session is gone from the disk, so it must go from the table too:
+	//   a stale id there would be a session that belongs to a project and
+	//   does not exist. ★ A table that could not be written is logged, not
+	//   fatal — the session is already gone.
+	if reg := s.projectRegistry(); reg != nil {
+		if err := reg.Detach(ctx, id); err != nil {
+			s.logger().Warn("[api] the project table write failed; the session id is still listed",
+				"session", id, "err", err)
+		}
 	}
 	c.JSON(consts.StatusOK, map[string]any{"threadId": id, "deleted": true})
 }
@@ -471,12 +520,17 @@ func (s *Server) v2SessionRun(ctx context.Context, c *app.RequestContext) {
 //
 //	alone: a session waiting on a human has no loop running, so the runtime
 //	would report idle and the sidebar dot would lie.
-func (s *Server) metaOf(ctx context.Context, sess storage.Session, pending *storage.PendingApproval) threadDetail {
+//
+// ★ The project id is passed in rather than read here: the table is a file,
+//
+//	and this function is called once per session.
+func (s *Server) metaOf(ctx context.Context, sess storage.Session, pending *storage.PendingApproval, projectID string) threadDetail {
 	meta := threadDetail{
 		ThreadID:     sess.ID(),
 		MessageCount: sess.Len(),
 		State:        s.stateOf(ctx, sess),
 		AgentID:      s.activeAgentID(sess),
+		ProjectID:    projectID,
 	}
 	if status, ok := s.rt.StatusOf(ctx, sess.ID()); ok && !status.StartedAt.IsZero() {
 		meta.UpdatedAt = status.StartedAt.UTC().Format(rfc3339Nano)

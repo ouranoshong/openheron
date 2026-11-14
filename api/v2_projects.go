@@ -97,6 +97,42 @@ func (s *Server) projectScopeOf(snap *projects.Snapshot) *projectScope {
 	return &projectScope{ProjectID: p.ID, Name: p.Name, Root: p.Root}
 }
 
+// projectSnapshot reads the project table once.
+//
+// ★ The table is a **file**, and a list of a hundred sessions must not read
+//
+//	it a hundred times. ★ It returns nil when there is no registry or the
+//	read fails — a table that cannot be read is not a reason to fail the
+//	request: the sessions are still there, they are simply not grouped.
+func (s *Server) projectSnapshot(ctx context.Context) *projects.Snapshot {
+	reg := s.projectRegistry()
+	if reg == nil {
+		return nil
+	}
+	snap, err := reg.Snapshot(ctx)
+	if err != nil {
+		s.logger().Warn("[api] read the project table failed", "err", err)
+		return nil
+	}
+	return snap
+}
+
+// projectIDOf returns the project a session belongs to.
+//
+// ★ An empty string is the answer "no project" — the session works in the
+//
+//	default project root.
+func projectIDOf(snap *projects.Snapshot, sessionID string) string {
+	if snap == nil {
+		return ""
+	}
+	p, ok := snap.ProjectOf(sessionID)
+	if !ok {
+		return ""
+	}
+	return p.ID
+}
+
 // ── POST /v2/projects ─────────────────────────────────────────────────────
 
 type projectBody struct {

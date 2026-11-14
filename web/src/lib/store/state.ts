@@ -1,5 +1,6 @@
 import type { RunsView, ThreadMeta } from "@/lib/api"
 import type { AgEvent } from "@/lib/events"
+import type { ProjectScope, ProjectSummary } from "@/lib/projects"
 import type { SessionFact } from "@/lib/session-events"
 import type { ConversationState, Interrupt } from "@/lib/types"
 
@@ -30,6 +31,23 @@ export interface StoreState {
   listError?: string
   agentFilter: string | null
   setAgentFilter(agent: string | null): void
+
+  // ── projects ────────────────────────────────────────────────────────────
+  //
+  // ★ The project table and the scope are the **server's** answers. The
+  //   client keeps them as they are and groups the sessions by them; it
+  //   never decides which project a session belongs to.
+  projects: ProjectSummary[]
+  // projectScope is the project this process focuses on; null is the
+  // multi-project mode.
+  projectScope: ProjectScope | null
+  // activeProjectId is the project a **new** conversation is created in.
+  //
+  // ★ In the single-project mode it is the scope — the process serves that
+  //   directory and nothing else.
+  activeProjectId: string | null
+  refreshProjects(): Promise<void>
+  setActiveProject(id: string): void
 
   // ── actions ────────────────────────────────────────────────────────────
   refreshList(): Promise<void>

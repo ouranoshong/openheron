@@ -65,7 +65,7 @@
 > 它才变成「现状」。
 > ★ 还有 `docs/projects-design.md` —— **项目与目录**：用户级的 `openheron_root`、
 > 配置根 / 数据目录 / 日志文件落在哪儿、`projects.json` 里的项目↔会话关系，
-> 以及按会话切换的 project root。**它的正文讲的是一个尚未落地的方案** —— 它说代码要变成什么。
+> 以及按会话切换的 project root。**它的正文讲的是代码现状。**
 > ★ 还有 `docs/pitfalls.md` —— **坑点登记册**：这棵树踩过的坑、每个坑的成因、
 > 它是修好了还是仍有一条边界。动一个你还没动过的子系统之前先读它 ——
 > 比重新发现同一个坑便宜。
@@ -389,7 +389,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
 | `docs/tools-design.md` | **工具与集成设计说明** —— 工具从哪来、`agentkit/fsx` 那个有界的文件系统后端、MCP 接入，以及 Docker Sandbox Kit（**正文讲的是代码现状**） |
 | `docs/ui-design.md` | **界面与资源设计说明** —— 上传的文件怎么落盘、服务端对它做了什么、界面怎么显示它，以及动效令牌（**正文讲的是代码现状**） |
 | `docs/secrets-design.md` | **密钥体系设计说明** —— 两个命名空间、共用的解析链、钥匙串后端、写入面，以及界面入口（**正文讲的是正在落地的方案**） |
-| `docs/projects-design.md` | **项目与目录设计说明** —— 用户级的 `openheron_root`、配置根 / 数据目录 / 日志文件落在哪儿、`projects.json` 里的项目↔会话关系，以及按会话切换的 project root（**正文讲的是一个尚未落地的方案**） |
+| `docs/projects-design.md` | **项目与目录设计说明** —— 用户级的 `openheron_root`、配置根 / 数据目录 / 日志文件落在哪儿、`projects.json` 里的项目↔会话关系，以及按会话切换的 project root（**正文讲的是代码现状**） |
 | `docs/pitfalls.md` | **坑点登记册** —— 这棵树踩过的坑、每个坑的成因、是修好了还是仍有一条边界 |
 
 ★ 双语那一组里，无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。

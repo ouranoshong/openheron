@@ -88,7 +88,7 @@ one. The measured internal import graph:
 | Layer | Packages | Internal dependencies |
 |---|---|---|
 | **L0** | `contract` `message` `helpers` `persist` `approval` `agentkit/obs` `agentkit/fsx` `agentkit/shell` `llm/common` `webui` | none |
-| **L1** | `agentkit/spec/decl` `storage` `kb` `agentkit/spec` `agentkit/emit` | `decl` none; `storage`→`contract`; `kb`→`obs`,`persist`; `spec`→`obs`,`decl`,`templates`,`persist`; `emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
+| **L1** | `agentkit/spec/decl` `storage` `projects` `kb` `agentkit/spec` `agentkit/emit` | `decl` none; `storage`→`contract`; `projects`→`persist`; `kb`→`obs`,`persist`; `spec`→`obs`,`decl`,`templates`,`persist`; `emit`→`obs`,`approval`,`contract`,`helpers`,`message` |
 | **L2** | `agentkit/build` `agentkit/run` `storage/filestore` `storage/memarbit` `transport` `llm` `initcfg` | see architecture.md §2 |
 | **L3** | `api` | almost all of them |
 
@@ -1301,6 +1301,36 @@ is gone is invisible and cannot be removed — a known boundary
 it is refused, with a sentence naming the variable and the keyring entry that replace
 it — the migration is "delete the line" (`docs/secrets-design.md` §6).
 
+### 3.15 ★ The project root of a session
+
+A session belongs to a project, and a project is a directory — so the directory a round
+works in is **per session**, not per process.
+
+`agentkit/run/runtime.go:461` reads it at the **start of the round** (the root of the
+project the session belongs to) and puts it into that round's context
+(`fsx.WithProjectRoot`, `agentkit/fsx/context.go:25`). Two consumers read it from there,
+and they must agree:
+
+| Consumer | Where | What it does with the root |
+|---|---|---|
+| The prompt | `agentkit/run/input.go:191` | names it: `Project root: …` |
+| The tools | `agentkit/fsx/fsx.go:298` | the write boundary, and the base of a relative path |
+
+★ **Never bake a root into the filesystem backend.** The backend is built **once** and
+shared by every round (`agentkit/build/snapshot.go:78`), so a root inside it is the root
+of the last round that used it. ★ The context's root **replaces** the backend's own: a
+session that works in another project must not be able to write into this one, and the
+boundary is not widened — the shared extra roots (the uploads, the skills) stay writable
+in every round.
+
+★ **Outside a round**, ask the table: `projects.Registry.RootOf(ctx, sessionID)`. The
+relation "session → project → directory" is domain logic and lives in the `projects`
+package — the API layer only writes and reads the `projectId`.
+
+★ **The root is read at the start of the round, and only there.** A project that moved
+between rounds is picked up by the next one; the round that is running keeps the root it
+began with.
+
 ## 4. The frontend
 
 ### 4.1 The pure layers
@@ -1316,10 +1346,11 @@ it — the migration is "delete the line" (`docs/secrets-design.md` §6).
 | `web/src/lib/store/events.ts` | Event routing inside the store | **`localStorage`** |
 | `web/src/lib/store/actions.ts` | The zustand store itself + all async actions | **zustand**, `fetch`, `localStorage` |
 | `web/src/lib/secrets.ts` | The secrets panel's pure layer: the status, the wording, the source label | `import type` only (erased at compile time) |
+| `web/src/lib/projects.ts` | The sidebar's grouping: which conversations go under which project | `import type` only (erased at compile time) |
 
 ★ **Be precise about this**: the genuinely framework-independent modules are `sse.ts`,
-`events.ts`, `store/state.ts`, `store/selectors.ts`, `store/history.ts` and
-`secrets.ts`.
+`events.ts`, `store/state.ts`, `store/selectors.ts`, `store/history.ts`,
+`secrets.ts` and `projects.ts`.
 `store.ts` itself **is a barrel**, and `store/actions.ts` owns the zustand instance —
 so importing `store.ts` pulls in zustand, `fetch` and `localStorage` as well.
 
@@ -1544,7 +1575,7 @@ environment's proxy, asked for by name — which has to reach the same proxy.
 
 ### 5.3 Go unit tests
 
-`go test ./...` runs over every package; **25** of them carry tests. The
+`go test ./...` runs over every package; **26** of them carry tests. The
 contracts are pinned mainly here:
 
 | Package | Contract it pins |
@@ -1557,7 +1588,8 @@ contracts are pinned mainly here:
 | `storage/filestore` | Append writes, atomic rewrites, checkpoints, pending-approval persistence |
 | `transport` | Event types, attribution, per-agent usage accounting |
 | `initcfg` | The completeness of the factory templates |
-| `agentkit/fsx` | The write boundary (including symlink escapes), the `ls`/`glob`/`grep` caps, absolute glob patterns, the built-in search engine that stands in for `ripgrep`, and **the configuration gate a write inside the config root goes through** |
+| `agentkit/fsx` | The write boundary (including symlink escapes), **the round's project root that replaces the backend's own**, the `ls`/`glob`/`grep` caps, absolute glob patterns, the built-in search engine that stands in for `ripgrep`, and **the configuration gate a write inside the config root goes through** |
+| `projects` | The project table: the write lock, the re-read before a write, **the session's project root**, and the rule that a session is never moved between projects |
 | `agentkit/shell` | Which shell the `execute` tool runs commands with, and the dialect the tool's description tells the model |
 | `agentkit/imaging` | The attachment's picture path: what is resized, what keeps its format, and the EXIF orientation that turns a phone photo upright |
 
@@ -1615,9 +1647,9 @@ the contract on its own — the extractor does not read one language to help the
 
 ### 5.5 Frontend unit tests
 
-`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **25 test files, 316
+`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **32 test files, 393
 cases**, covering the pure layers: `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
-`thinking.ts` / `turns.ts` / `approval.ts` / `settings-store.ts` and friends.
+`thinking.ts` / `turns.ts` / `approval.ts` / `settings-store.ts` / `projects.ts` and friends.
 
 ★ **The client keeps no configuration rules at all.** It used to: a copy of the
 partition table, the tools/ file whitelist, the MCP server-name pattern, and a per-key
@@ -1650,9 +1682,9 @@ do not touch" assertions.
 
 ### 5.6 E2E
 
-`task test-e2e` → `playwright test`, **15 specs, 196 cases**: `agents` `attachments` `chat`
+`task test-e2e` → `playwright test`, **18 specs, 223 cases**: `agents` `attachments` `chat`
 `compaction` `composer-autocomplete` `composer-meta` `history` `mcps` `motion` `multi-agent`
-`reattach` `scroll` `session-busy` `settings` `theme`.
+`projects` `reattach` `scroll` `session-busy` `session-events` `settings` `theme`.
 
 Playwright starts two servers itself (`webServer` in `playwright.config.ts`): the fake
 backend (`web/test/serve.ts`) and Vite (`--mode test`).

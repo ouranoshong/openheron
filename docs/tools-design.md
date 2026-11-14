@@ -220,33 +220,44 @@ StreamingShell（`eino@v0.9.22/adk/prebuilt/deep/deep.go:219-223`）。
 
 ### 2.2 写边界
 
-`resolve`（`agentkit/fsx/fsx.go:218`）被所有方法共用，只决定一个请求路径**指的是什么**：
+`resolve`（`agentkit/fsx/fsx.go:234`）被所有方法共用，只决定一个请求路径**指的是什么**：
 空路径是 project root（**绝不是 `/`**），相对路径挂在它下面。
 
 ★ **读是故意不收敛的。** 工具集里本来就有 `execute`，它能 `cat` 任何进程读得到的文件 ——
 所以限制 `read_file` 并没有换来安全，只换来了「项目就在隔壁目录却莫名 file not found」。
 原始事故需要的从来不是读禁令，而是**遍历的上限**。
 
-真正的边界是写，它走 `resolveWrite`（`agentkit/fsx/fsx.go:240`）：
+★ **基准是「本轮」的 project root**：`resolve` 的基准取自 ctx（`agentkit/fsx/fsx.go:256`
+的 `base`）—— 上下文里带了 root 就用它，没带才用后端自己的。★ 相对路径挂在**会话工作的那个
+目录**下面，不是进程启动的那个：会话属于项目，项目是一个目录。
+
+真正的边界是写，它走 `resolveWrite`（`agentkit/fsx/fsx.go:298`）：
 
 ```go
-if !s.inside(abs) {
-    return "", fmt.Errorf("path %q is outside the project root %q", abs, s.root)
-}
-for dir := filepath.Dir(abs); ; dir = filepath.Dir(dir) {
-    real, err := filepath.EvalSymlinks(dir)
-    if err == nil {
-        if !s.inside(real) {
-            return "", fmt.Errorf("path %q resolves outside the project root %q", abs, s.root)
-        }
-        return abs, nil
-    }
-    if !errors.Is(err, fs.ErrNotExist) {
-        return "", fmt.Errorf("cannot verify that %q is inside %q: %w", abs, s.root, err)
-    }
-    if filepath.Dir(dir) == dir {
-        return abs, nil
-    }
+func (s *Local) resolveWrite(ctx context.Context, p string) (string, error) {
+	abs, err := s.resolve(ctx, p)
+	if err != nil {
+		return "", err
+	}
+	roots := s.writeRoots(ctx)
+	if !insideRoots(roots, abs) {
+		return "", fmt.Errorf("path %q is outside the project root %q", abs, s.base(ctx))
+	}
+	for dir := filepath.Dir(abs); ; dir = filepath.Dir(dir) {
+		real, err := filepath.EvalSymlinks(dir)
+		if err == nil {
+			if !insideRoots(roots, real) {
+				return "", fmt.Errorf("path %q resolves outside the project root %q", abs, s.base(ctx))
+			}
+			return abs, nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("cannot verify that %q is inside %q: %w", abs, s.base(ctx), err)
+		}
+		if filepath.Dir(dir) == dir {
+			return abs, nil
+		}
+	}
 }
 ```
 
@@ -260,13 +271,16 @@ for dir := filepath.Dir(abs); ; dir = filepath.Dir(dir) {
   把任何错误都当成「这里没有符号链接」而返回未经检查的字面路径，
   等于一个读不了的祖先就能写到任何地方。
 
-`s.roots` 是 project root 加 `ExtraRoots`（会话工作区与 skills 目录 ——
-它们可能活在项目之外）。每个 root 在 `New` 里一次性变成绝对、去符号链接的真实路径
-（`agentkit/fsx/fsx.go:156`），所以比较的是真实路径。
+★ **允许写的目录是「本轮」的**（`agentkit/fsx/fsx.go:274` 的 `writeRoots`）：
+★ ctx 里带了 root，就用**那个** root 顶替后端自己的 root —— 会话 A 写不了会话 B 的目录，
+边界没有因此放宽；ctx 里没带（老调用、测试），才用后端自己的
+project root 加 `ExtraRoots`（会话工作区与 skills 目录 —— 它们可能活在项目之外）。
+每个 root 在 `New` 里一次性变成绝对、去符号链接的真实路径
+（`agentkit/fsx/fsx.go:164`），所以比较的是真实路径。
 
 ★ 拒绝是**错误**，不是空结果：模型能拿到一句可以据此行动的话。
 
-★ **落在配置根里的写走另一条路。** `ConfigGate`（`agentkit/fsx/fsx.go:121`）
+★ **落在配置根里的写走另一条路。** `ConfigGate`（`agentkit/fsx/configgate.go:11`）
 把这类写交给配置服务，于是它们拿到编辑器那几道闸门
 （`agentkit/build/snapshot.go:109` 的 `newConfigGate`）。
 

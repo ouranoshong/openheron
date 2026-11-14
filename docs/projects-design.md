@@ -8,11 +8,10 @@
 > 工具与集成（见 `docs/tools-design.md`）、界面资源与动效（见 `docs/ui-design.md`）。
 > 本文按 AGENTS.md 的文档语言规则**只有中文版** —— 架构与代码设计类文档不做双语。
 >
-> ★ **本文描述的是一个**部分**落地的提案。** P1（三个根、环境变量前缀、`init` 的默认目标）
-> 与 P2（`projects` 包、`/v2/projects` 四个端点）**已经在代码里** —— 下面凡是写「要变成」
-> 而对应的那一条已经改过的地方，说的就是现状。
-> P3（会话归属与侧栏分组）、P4（按会话切换的 project root）**还没有落地**，凡是写它们的地方
-> 都还是提案。§8 记着落地的顺序与进度，§9 记着不在范围内的部分。
+> ★ **本文描述的东西已经全部落在代码里** —— P1（三个根、环境变量前缀、`init` 的默认目标）、
+> P2（`projects` 包与 `/v2/projects`）、P3（会话归属与侧栏分组）、P4（按会话切换的
+> project root）。★ 下面凡是写「要变成」的地方，说的都是**现状**；§7 记着每一处的
+> 落点，§8 记着落地顺序与**设计之外多改的那几处**，§9 记着不在范围内的部分。
 
 ## 0. 一句话
 
@@ -221,6 +220,16 @@ groupSessions(sessions, projects, scope) → Group[]
 
 ★ **前端不许自己判断模式**：它读服务端给的 `scope`。界面读服务端的答案，不读自己的记忆。
 
+★ **空组不画**（`web/src/lib/projects.ts:95` `groupSessions`）：侧栏是会话的列表，
+一个底下什么都没有的标题只是噪声。
+
+★ **一个会话只在一个组里**：置顶的会话只在置顶组里 —— 一条出现两次的会话，
+是用户数不清的会话。
+
+★ **置顶组现在是空的**：★ 服务端**还没有** `pinned` 这个字段（代码里没有置顶这个功能），
+所以 `meta.pinned` 恒为假。分组函数按设计支持它，等置顶功能落地就亮起来 ——
+这不是谎报：没有这个标记就是「没置顶」，而今天确实没有置顶。
+
 ## 4. project root 按会话切换
 
 会话的 project root = **它所属项目的 root**；未选项目的会话用**默认项目根**。
@@ -241,10 +250,15 @@ groupSessions(sessions, projects, scope) → Group[]
 而 backend 被 `heavyOnce` 缓存（`agentkit/build/snapshot.go:78-82`），一个配置版本只建一次。
 一个 backend 服务多个 root，只有两条路：
 
-- **(a) ctx 带本轮允许的根**（推荐）：`fsx.WithWriteRoots(ctx, root)`，
+- **(a) ctx 带本轮允许的根**（**已落地**）：`fsx.WithProjectRoot(ctx, root)`，
   `resolveWrite` 额外查 ctx。工具方法都带 ctx（`agentkit/fsx/fsx.go:739`）⇒ 可行，
   而且**边界没有被放宽** —— 会话 A 写不了会话 B 的目录。
 - (b) 把所有项目根塞进 `ExtraRoots`：代码少，但一个会话能写另一个项目的目录。
+
+★ **落地时把名字改了一点**：设计里写的是 `fsx.WithWriteRoots`，代码里是
+`fsx.WithProjectRoot`（`agentkit/fsx/context.go:25`）。★ 原因是同一个值要管**两件事**：
+它既是「本轮允许写哪儿」，也是「相对路径的基准」和「提示词里那个目录」。
+一个值、两个消费者 —— 叫 `WriteRoots` 会让人以为它只管写。
 
 ★ **子 agent 拿得到同一个 ctx，这不是新问题**：`task` 工具把收到的 ctx 原样交给子 agent
 （eino `adk/prebuilt/deep/task_tool.go:174`，`a.InvokableRun(ctx, params, opts...)`），
@@ -266,20 +280,21 @@ prompt 里那行 `Project root: %s`（`agentkit/run/input.go:170-186`），
 ⇒ 解析点就在轮次开始处，一轮之内固定：
 
 ```
-Submit(ctx, sessionID, …)                       agentkit/run/runtime.go:228
- └ SessionManager.Get(ctx, sessionID)           runtime.go:229
- └ claimTurn(ctx, sess, …)                      runtime.go:241 → :278
- └ runClaimedTurn(ctx, sess, turn, loop, …)     runtime.go:257 → :428
-     ★ runCtx, cancel := context.WithCancel(…)  runtime.go:438   ← 注入点
-     └ startLoop(runCtx, sess.ID(), turn, loop) runtime.go:441
+Submit(ctx, sessionID, …)                       agentkit/run/runtime.go:240
+ └ SessionManager.Get(ctx, sessionID)           runtime.go:241
+ └ claimTurn(ctx, sess, …)                      runtime.go:253 → :290
+ └ runClaimedTurn(ctx, sess, turn, loop, …)     runtime.go:269 → :440
+     ★ runCtx, cancel := context.WithCancel(…)  runtime.go:450   ← 注入点
+     ★ runCtx = fsx.WithProjectRoot(runCtx, …)  runtime.go:461   ← root 进 ctx
+     └ startLoop(runCtx, sess.ID(), turn, loop) runtime.go:463
          └ loop.Run(ctx)                        agentkit/run/bridge.go:121
              ├ GenInput(ctx, …)                 agentkit/run/loop.go:43
-             │   └ inputParams{ProjectRoot: …}  loop.go:80 → input.go:170-186
+             │   └ inputParams{ProjectRoot: …}  loop.go:88 → input.go:191
              └ 工具调用拿到的就是同一个 ctx
-                ⇒ fsx.resolveWrite 查得到「本轮允许的根」  agentkit/fsx/fsx.go:240-247
+                ⇒ fsx.resolveWrite 查得到「本轮允许的根」  agentkit/fsx/fsx.go:298
 ```
 
-★ **`runtime.go:438` 为什么是对的地方**：那里造出这一轮的 `runCtx`，
+★ **`runtime.go:461` 为什么是对的地方**：那里造出这一轮的 `runCtx`，
 它一路传到 `loop.Run(ctx)`（`bridge.go:121`）⇒ 框架给 `GenInput` 的 ctx、
 以及**所有工具调用**的 ctx，都是它。而且那里用的是 `context.WithoutCancel(ctx)` ——
 **丢取消、留值**，所以放进去的东西一定传得下去。
@@ -288,8 +303,8 @@ Submit(ctx, sessionID, …)                       agentkit/run/runtime.go:228
 ★ **一轮之内不变**：root 在 ctx 里 ⇒ 这一轮从头到尾是同一个值；
 即便有人在轮次进行中改了项目的 root，这一轮仍用开始时读到的那一个，下一轮才生效。
 
-★ **谁来解析**：`projects.Registry.RootOf(sessionID)` —— 查表，O(1)。
-`run.Config` 多一个注入点；**没注入就回落**到 `InputConfig.ProjectRoot`
+★ **谁来解析**：`projects.Registry.RootOf(ctx, sessionID)` —— 查表，O(1)。
+`run.Config` 多一个注入点（`ProjectRootFor`）；**没注入就回落**到 `InputConfig.ProjectRoot`
 （它从「进程的项目根」变成「默认项目根」）⇒ 既有测试一行不用改。
 
 ★ **解析不在 API 层**：「会话 → 项目 → 目录」是领域逻辑，住在 `projects` 包，`run` 调用它。
@@ -315,6 +330,9 @@ GET    /v2/sessions            → 不过滤；每条带 projectId（从表查�
 
 ★ 删项目时它的会话**不删**，只是回落成「未选项目」。
 
+★ **没接注册表的服务器答 503，不是空列表**（`api/v2_projects.go`）：
+「没有项目」和「这个版本不认识项目」是两件事。
+
 ### 5.1 36 个端点里只有 4 个动
 
 | 类别 | 数量 | 变化 |
@@ -329,16 +347,19 @@ GET    /v2/sessions            → 不过滤；每条带 projectId（从表查�
 
 | 端点 | 变什么 |
 |---|---|
-| `GET /v2/project/files` | ★ 加 `?project=<id>` —— **唯一要加参数的端点**：@ 提及该列哪个项目的文件（今天列的是进程的项目根，`api/v2_project.go:72`）。缺省 = 作用域项目，没有作用域 = 默认项目根 |
-| `POST /v2/sessions` | body 从 `{agentId}` 变成 `{agentId, projectId?}`；**响应**加 `projectId` |
+| `GET /v2/project/files` | ★ 加 `?project=<id>` —— **唯一要加参数的端点**：@ 提及该列哪个项目的文件（`api/v2_project.go:95` 的 `projectRootOf`）。缺省 = 作用域项目，没有作用域 = 默认项目根。★ 名字不认识 ⇒ `404` + `codeProjectNotFound` |
+| `POST /v2/sessions` | body 从 `{agentId}` 变成 `{agentId, projectId?}`；**响应**加 `projectId`。★ `projectId` 不认识 ⇒ `404`，而且**会话不会被创建** —— 一个指名了不存在项目的请求，不该留下一个无处归属的会话 |
 | `GET /v2/sessions` | 响应每条加 `projectId`（**从 `projects.json` 查**） |
 | `GET /v2/sessions/:id` | 响应加 `projectId` |
 
 ★ **`PATCH /v2/sessions/:id` 不接受 `projectId`** —— 「换项目 = 新建项目」，
-就不搬会话，那条写路径不存在（`api/v2_sessions.go:112-114` 的 body 仍只有 `title`）。
+就不搬会话，那条写路径不存在（`api/v2_sessions.go` 的 body 仍只有 `title`）。
 
 ★ `POST /v2/sessions` 的写表失败**不让会话创建失败**：会话文件已经落盘，那是事实；
 归属写不进去，会话就是「未选项目」，日志报一条。
+
+★ **删会话时把 id 从表里摘掉**（`api/v2_sessions.go`）：会话文件没了，表里还挂着它，
+就是一个「属于某个项目、却不存在」的会话。
 
 ### 5.2 兼容性
 
@@ -425,18 +446,19 @@ CI 里有一个 `LISTEN_ADDR=0.0.0.0:9000`，openheron 的监听地址就被改�
 | 8 | `main.go:283-308` `initConfigIfEmpty` | 出厂树只写进**默认配置根** | ★ 已落地 |
 | 9 | `main.go:481-623` `setupConfig` | 解析 openheron_root → 建 Service → 装默认配置树 | ★ 已落地 |
 | 10 | `main.go:587,599,760,774` + `agentkit/spec/config.go:641-698` | 环境变量读点改名（+ 旧名 warn） | ★ 已落地 |
-| 11 | `main.go:633` `setupRuntime`（`:650-666` 注册表接线） | 数据目录**共享**；按会话取 project root | 前半已落地，后半是 P4 |
-| 12 | `agentkit/run/loop.go:80-83` | `inputParams` 加 `ProjectRoot`（**从会话/项目取**） | P4 |
-| 13 | `agentkit/run/input.go:170-186` | prompt 的 `Project root:` 用会话的值 | P4 |
-| 14 | `api/v2_project.go:72` | `@` 提及按项目取 root | P4 |
-| 15 | `agentkit/fsx/fsx.go:240` + `agentkit/build/snapshot.go:101` | 写边界 per-session（ctx 带本轮允许的根） | P4 |
-| 16 | 新 `projects` 包（`projects/projects.go:99` `Location` / `:111` `Registry` / `:122` `Open` / `:297` `mutate`） | 类型 + 读写 + 文件锁 + `$OPENHERON_PROJECTS_FILE` | ★ 已落地 |
-| 17 | `api/v2_projects.go:57/107/147/189` 四个端点 + `api/v2_sessions.go` / `api/v2_types.go:159-172` | `/v2/projects` 的 GET/POST/PATCH/DELETE；`projectId` | 端点 ★ 已落地，`projectId` 是 P3 |
+| 11 | `main.go:633` `setupRuntime`（`:650-666` 注册表接线，`:695-721` `run.Config`） | 数据目录**共享**；按会话取 project root | ★ 已落地 |
+| 12 | `agentkit/run/loop.go:88` | `inputParams` 加 `ProjectRoot`（**从会话/项目取**） | ★ 已落地 |
+| 13 | `agentkit/run/input.go:191` | prompt 的 `Project root:` 用会话的值 | ★ 已落地 |
+| 14 | `api/v2_project.go` `projectRootOf` | `@` 提及按项目取 root（`?project=<id>`） | ★ 已落地 |
+| 15 | `agentkit/fsx/context.go:25` + `agentkit/fsx/fsx.go:298` | 写边界 per-session（ctx 带本轮允许的根） | ★ 已落地 |
+| 16 | 新 `projects` 包（`projects/projects.go:99` `Location` / `:111` `Registry` / `:122` `Open` / `:297` `mutate` / `:228` `RootOf`） | 类型 + 读写 + 文件锁 + `$OPENHERON_PROJECTS_FILE` | ★ 已落地 |
+| 17 | `api/v2_projects.go:57/143/183/225` 四个端点 + `api/v2_sessions.go` / `api/v2_types.go:159` `threadMeta` | `/v2/projects` 的 GET/POST/PATCH/DELETE；`projectId` | ★ 已落地 |
 | 18 | `initcmd.go:20-21,30-38,61` | `--dir` → `--config-root`；默认 `<openheron_root>/configs` | ★ 已落地 |
 | 19 | `agentkit/templates/files/server/config.yaml:23-28,44-48` | 注释：相对基准改成 openheron_root（**值不变**） | ★ 已落地 |
 | 20 | `scripts/test-backend.sh:132-136` | 环境变量改名 | ★ 已落地 |
 | 21 | `sandbox-kit/openheron/entrypoint.sh:18-19,29,35,38` | 显式 `OPENHERON_CONFIG_ROOT`；`OPENHERON_LISTEN_ADDR`；`OPENHERON_DATA_DIR`；位置参数给项目 | ★ 已落地 |
 | 22 | `agentkit/build/skill.go:198` `ResolveSkillsDir` | ★ **设计里没写，但不改就坏**：配置根进解析链，否则技能一个都加载不到（见 §8） | ★ 已落地 |
+| 23 | `web/src/lib/projects.ts:95` `groupSessions` + `web/src/components/sidebar.tsx` | 侧栏分组 + 新会话选项目 | ★ 已落地 |
 
 ## 8. 落地顺序
 
@@ -444,8 +466,8 @@ CI 里有一个 `LISTEN_ADDR=0.0.0.0:9000`，openheron 的监听地址就被改�
 |---|---|---|---|
 | **P1** | `openheron_root` + 目录基准 + 环境变量前缀统一 + `init` 默认目标 + `warnUnusedHomeConfig` 删除 | 低 | ★ **已落地** |
 | **P2** | `projects` 包（读写 + 文件锁）+ `/v2/projects` 四个端点 | 中 | ★ **已落地** |
-| **P3** | 会话归属（`projectId`）+ 侧栏分组（置顶 / 项目 / 未选项目）+ 单项目模式一组 | 中 | 未开始 |
-| **P4** | per-session project root（prompt / `@` 提及 / **fsx 写边界**） | ★ 高（唯一有架构代价的） | 未开始 |
+| **P3** | 会话归属（`projectId`）+ 侧栏分组（置顶 / 项目 / 未选项目）+ 单项目模式一组 | 中 | ★ **已落地** |
+| **P4** | per-session project root（prompt / `@` 提及 / **fsx 写边界**） | ★ 高（唯一有架构代价的） | ★ **已落地** |
 
 ★ **P1 落地时多改了两处设计里没写的**，因为不改它们功能就是坏的：
 
@@ -457,8 +479,18 @@ CI 里有一个 `LISTEN_ADDR=0.0.0.0:9000`，openheron 的监听地址就被改�
    而 `init` 写的是**配置根**；拿旧名字当新名字会把配置写到没人要求的地方。
    旧名会报一条说清替代者的错。
 
-★ **P3 与 P4 之间是一个「界面在说谎」的中间态**：分组已经按项目显示了，
-但 agent 还在默认根里干活。⇒ 要么合并发布，要么在界面上明确写「该会话尚未绑定工作目录」。
+★ **P3 与 P4 是一个整体发出去的**：分组按项目显示，而 agent 在同一个项目里干活 ——
+「界面在说谎」的中间态没有存在过。
+
+★ **P3 落地时多改了三处设计里没写的**：
+
+1. **侧栏多了一个项目选择器**（`web/src/components/sidebar.tsx`）—— ★ 设计只说「前端一样传
+   `projectId`」，但多项目模式下**新会话属于哪个项目**得有个说法。默认是 `order` 最小的那个
+   （用户放在最上面的那个），用户可以改。
+2. **`DELETE /v2/sessions/:id` 把 id 从表里摘掉** —— 设计只说了「删项目时会话不删」，
+   反过来（删会话）也得让表知道，否则表里挂着一个不存在的会话。
+3. **`POST /v2/sessions` 的 `projectId` 不认识 ⇒ 404，而且不建会话** —— 设计没写这条错误路径。
+   ★ 理由：指名了不存在的东西还留下一个「无处归属」的会话，是更坏的结果。
 
 ## 9. 迁移：不做自动的
 
@@ -484,6 +516,7 @@ CI 里有一个 `LISTEN_ADDR=0.0.0.0:9000`，openheron 的监听地址就被改�
 | 一进程多配置树（每个项目一套 agents） | **不做** —— 配置共享是这一版的前提 |
 | 自动迁移历史数据 | **不做** —— §9 的四步手动做 |
 | 钥匙串 | 不变 —— 它是**全局 OS 资源**，本来就不按项目分（`main.go:393`） |
+| 知识库的语料目录 | 不变 —— `corpus_dir` 仍相对**默认项目根**（`kb/tools.go:97`）。★ 语料是**一份**的：按会话切换它，就等于每个项目一份索引，而索引落在状态目录里的那一份 |
 
 ## 11. 与其它文档的边界
 
@@ -492,5 +525,5 @@ CI 里有一个 `LISTEN_ADDR=0.0.0.0:9000`，openheron 的监听地址就被改�
 - `docs/runtime-design.md` —— 一轮是什么、租约与 fence、准入闸门、上下文与压缩、日志装配。
   本文只说**日志文件落在哪儿**。
 - `docs/tools-design.md` —— 工具从哪来、`agentkit/fsx` 的边界、MCP、Docker Sandbox Kit。
-  本文只在 §4 说**写边界要变成 per-session**，边界本身的规则在那份文档里。
+  本文只说**写边界是 per-session**，边界本身的规则在那份文档里。
 - `docs/ui-design.md` —— 附件与动效。本文只说**侧栏分几组**。

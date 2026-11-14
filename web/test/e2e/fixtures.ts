@@ -22,6 +22,16 @@ export async function setMCPMode(mode: "default" | "empty" | "starting"): Promis
   if (!r.ok) throw new Error(`failed to set the MCP mode ${mode}: ${r.status}`)
 }
 
+// ★ setProjectsMode chooses the project table the fake serves.
+//
+// ★ "default" has **no** projects at all — the sidebar is a flat list, and
+//   that is how the interface looked before the projects landed. ★ "multi"
+//   has two projects and no scope; ★ "single" has one project and a scope.
+export async function setProjectsMode(mode: "default" | "multi" | "single"): Promise<void> {
+  const r = await fetch(`${FAKE_URL}/__fake/projects-mode?mode=${mode}`, { method: "POST" })
+  if (!r.ok) throw new Error(`failed to set the projects mode ${mode}: ${r.status}`)
+}
+
 export async function setDefaultRoot(agent: string): Promise<void> {
   const r = await fetch(`${FAKE_URL}/__fake/default-root?agent=${agent}`, { method: "POST" })
   if (!r.ok) throw new Error(`failed to set the default root ${agent}: ${r.status}`)
