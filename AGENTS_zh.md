@@ -15,7 +15,7 @@
 > `docs/user-manual.md` / `docs/user-manual_zh.md`（用户使用说明）、
 > `docs/developer-manual.md` / `docs/developer-manual_zh.md`（开发者说明）。
 >
-> **另有六篇只有中文的文档**在 `docs/` 下 —— 架构与代码设计那一类。
+> **另有七篇只有中文的文档**在 `docs/` 下 —— 架构与代码设计那一类。
 > ★ 它们的中文内容**接管了原文件名**：`docs/config-design.md` **就是**那篇中文文档 ——
 > 既没有 `_zh` 副本，也没有英文版：
 > `docs/config-design.md`（配置系统 —— 配置根与它的三级解析、各个分区与它们的
@@ -26,9 +26,11 @@
 > MCP 接入，以及 Docker Sandbox Kit）、
 > `docs/ui-design.md`（界面与它的资源 —— 附件与动效）、
 > `docs/secrets-design.md`（密钥体系 —— 两个命名空间、解析链、钥匙串，以及写入面）、
+> `docs/projects-design.md`（项目与目录 —— 用户级的 `openheron_root`、配置根 / 数据目录 /
+> 日志落在哪儿、`projects.json` 里的项目与会话关系，以及按会话切换的 project root）、
 > `docs/pitfalls.md`（坑点登记册 —— 这棵树踩过的坑、每个坑的成因，以及它怎么处理）。
 > **`docs/` 下其余设计文档仍在上游仓库** ——
-> 下面凡引用 `docs/xxx.md` 而这六篇之外的，都是上游那份。
+> 下面凡引用 `docs/xxx.md` 而这七篇之外的，都是上游那份。
 > 改语义前若拿不到它，先问，别凭印象改配置或接口。
 >
 > ★ **设计类文档只写中文。** 讲代码怎么搭起来的文档 —— 分层、
@@ -61,6 +63,9 @@
 > 它们共用的那一条解析链（环境变量盖过钥匙串）、写入面（`/v2/secrets` 与 `openheron secret`），
 > 以及设置对话框里的 `Secrets` 标签页。**它的正文讲的是正在落地的方案** —— 代码进来之后
 > 它才变成「现状」。
+> ★ 还有 `docs/projects-design.md` —— **项目与目录**：用户级的 `openheron_root`、
+> 配置根 / 数据目录 / 日志文件落在哪儿、`projects.json` 里的项目↔会话关系，
+> 以及按会话切换的 project root。**它的正文讲的是一个尚未落地的方案** —— 它说代码要变成什么。
 > ★ 还有 `docs/pitfalls.md` —— **坑点登记册**：这棵树踩过的坑、每个坑的成因、
 > 它是修好了还是仍有一条边界。动一个你还没动过的子系统之前先读它 ——
 > 比重新发现同一个坑便宜。
@@ -375,6 +380,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
 | `docs/tools-design.md` | **工具与集成设计说明** —— 工具从哪来、`agentkit/fsx` 那个有界的文件系统后端、MCP 接入，以及 Docker Sandbox Kit（**正文讲的是代码现状**） |
 | `docs/ui-design.md` | **界面与资源设计说明** —— 上传的文件怎么落盘、服务端对它做了什么、界面怎么显示它，以及动效令牌（**正文讲的是代码现状**） |
 | `docs/secrets-design.md` | **密钥体系设计说明** —— 两个命名空间、共用的解析链、钥匙串后端、写入面，以及界面入口（**正文讲的是正在落地的方案**） |
+| `docs/projects-design.md` | **项目与目录设计说明** —— 用户级的 `openheron_root`、配置根 / 数据目录 / 日志文件落在哪儿、`projects.json` 里的项目↔会话关系，以及按会话切换的 project root（**正文讲的是一个尚未落地的方案**） |
 | `docs/pitfalls.md` | **坑点登记册** —— 这棵树踩过的坑、每个坑的成因、是修好了还是仍有一条边界 |
 
 ★ 双语那一组里，无后缀的是**英文主版本**，`_zh` 是中文版；两版内容一一对应，改一处要改两处。

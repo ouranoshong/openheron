@@ -41,7 +41,9 @@ PAIRS = [
 CHINESE_ONLY = [
     "config-design.md",
     "pitfalls.md",
+    "projects-design.md",
     "runtime-design.md",
+    "secrets-design.md",
     "tools-design.md",
     "ui-design.md",
 ]
