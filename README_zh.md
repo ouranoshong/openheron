@@ -37,12 +37,13 @@
 | 读运行时 —— run 生命周期、会话准入、上下文、日志 | [`docs/runtime-design.md`](docs/runtime-design.md) |
 | 读工具从哪来、文件系统后端、MCP、沙箱 Kit | [`docs/tools-design.md`](docs/tools-design.md) |
 | 读界面与它的资源 —— 附件与动效 | [`docs/ui-design.md`](docs/ui-design.md) |
+| 读密钥体系 —— 命名、解析、钥匙串、写入面 | [`docs/secrets-design.md`](docs/secrets-design.md) |
 | 读这棵树踩过的坑，以及它们的代价 | [`docs/pitfalls.md`](docs/pitfalls.md) |
 | 把它打包成沙箱 workload | [`sandbox-kit/TUTORIAL.md`](sandbox-kit/TUTORIAL.md) · [`sandbox-kit/BUILDING.md`](sandbox-kit/BUILDING.md) |
 | 遵守这里人与 AI 的约定 | [`AGENTS.md`](AGENTS.md) · [`AGENTS_zh.md`](AGENTS_zh.md) |
 | 读出厂配置样例 | [`.openheron-example/README.md`](.openheron-example/README.md) |
 
-★ 前三行是**双语**的 —— 英文是主版本，`_zh` 是中文版，两版一一对应。那五篇设计文档
+★ 前三行是**双语**的 —— 英文是主版本，`_zh` 是中文版，两版一一对应。那六篇设计文档
 **只有中文**：它们的中文内容接管了原文件名，所以上面的链接就是它们唯一的入口。
 Kit 的那两份指南旁边各有一个 `_zh` 版本。
 

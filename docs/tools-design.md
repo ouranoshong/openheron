@@ -27,10 +27,10 @@ MCP 服务器是另一种来源：它带的工具进同一张档位表，只是�
 | `skills` | `agents/<id>.md` | **一个都没有** | 这个 agent 能加载哪些技能 |
 | `allows` | `tools/*.yaml`、`mcps/<server>.yaml` | 代码的缺省清单 | **审批**：哪些工具不用点头 |
 
-字段的落点：`decl.Agent.Tools`（`agentkit/spec/decl/decl.go:113`）、
-`decl.Agent.Skills`（`agentkit/spec/decl/decl.go:134`）、
-`decl.Agent.MCPServers`（`agentkit/spec/decl/decl.go:150`）、
-`decl.SubAgentSpec.MCPServers`（`agentkit/spec/decl/decl.go:958`）。
+字段的落点：`decl.Agent.Tools`（`agentkit/spec/decl/decl.go:130`）、
+`decl.Agent.Skills`（`agentkit/spec/decl/decl.go:151`）、
+`decl.Agent.MCPServers`（`agentkit/spec/decl/decl.go:167`）、
+`decl.SubAgentSpec.MCPServers`（`agentkit/spec/decl/decl.go:990`）。
 三个都是**普通切片**，不是指针 —— 「没声明」与「声明了但是空的」是同一件事。
 
 ★ **两种风格，而且它们的缺省是反着选的。**
@@ -43,18 +43,18 @@ MCP 服务器是另一种来源：它带的工具进同一张档位表，只是�
 忘写 `allows` ⇒ 工具仍然可用，只是每次要点头，**在审批卡上看得见**。
 默认值该选「错了也看得见」的那一侧 —— 而这两侧的「看得见」方向相反。
 
-★ **旧键 `disabled_tools` 被拒绝，而不是改名**（`agentkit/spec/load.go:107`）。
+★ **旧键 `disabled_tools` 被拒绝，而不是改名**（`agentkit/spec/load.go:126`）。
 它与 `tools` 含义正好相反：只改个名就等于把黑名单悄悄变成白名单。
 也没有别名 —— 那会让黑名单继续活着。
 
 ★ **`tools:` 不点名 MCP 工具。** `mcp__<server>__*` 的条目现在什么也不授予，
-它们被丢弃并留下一条**提示**（`agentkit/spec/load.go:943` 的 `checkAgentMCPNames`）——
+它们被丢弃并留下一条**提示**（`agentkit/spec/load.go:983` 的 `checkAgentMCPNames`）——
 不是加载期错误，因为语义已经变了，不是自相矛盾。
 代价是真实的：**按 agent 收窄 MCP 工具的能力没有了**；收窄的地方变成 server 自己的文件。
 
 ★ **一个 agent 的 `tools:` 接受尾部 `*` 的前缀模式**（`decl.ParseToolNamePattern`，
-`agentkit/spec/decl/decl.go:665`）。但只有**结尾**的 `*` 是模式，`mcp*foo` 与单独的 `*`
-都是加载期硬错误（`agentkit/spec/load.go:113` 的 `validateAgentTools`）：
+`agentkit/spec/decl/decl.go:697`）。但只有**结尾**的 `*` 是模式，`mcp*foo` 与单独的 `*`
+都是加载期硬错误（`agentkit/spec/load.go:132` 的 `validateAgentTools`）：
 一条读起来与实际覆盖范围不同的规则，就是一次静默的错配。
 
 ### 1.2 名字就是策略：`mcp__<server>__<tool>`
@@ -69,19 +69,19 @@ mcp__github__read_issue
 
 | 段 | 谁定 | 规则 | 少了它会怎样 |
 |---|---|---|---|
-| `mcp__` | 协议层定的 | 常量 `decl.MCPToolPrefix`（`agentkit/spec/decl/decl.go:593`） | 服务器暴露一个 `ls` 就顶掉内置 `ls` |
-| `<server>__` | **我们定** —— `<server>.yaml` 的文件名 | 常量 `decl.MCPSeparator`（`agentkit/spec/decl/decl.go:602`）；server 名匹配 `^[a-z0-9]+(_[a-z0-9]+)*$`（`agentkit/spec/decl/decl.go:610`） | `mcp__github__ls` 与 `mcp__gitlab__ls` 撞成一个 |
+| `mcp__` | 协议层定的 | 常量 `decl.MCPToolPrefix`（`agentkit/spec/decl/decl.go:610`） | 服务器暴露一个 `ls` 就顶掉内置 `ls` |
+| `<server>__` | **我们定** —— `<server>.yaml` 的文件名 | 常量 `decl.MCPSeparator`（`agentkit/spec/decl/decl.go:619`）；server 名匹配 `^[a-z0-9]+(_[a-z0-9]+)*$`（`agentkit/spec/decl/decl.go:642`） | `mcp__github__ls` 与 `mcp__gitlab__ls` 撞成一个 |
 | `<tool>` | **服务器定** | `[A-Za-z0-9_-]` 之外的字符换成 `_`；大小写保持原样（`agentkit/build/mcptools.go:151`） | 带 `.`/`:` 的名字过不了厂商的函数名集合 |
 
 ★ **server 名里不许出现连续的下划线。** 否则 `mcp__a__b__x` 有两种读法 ——
 那是 server `a` 的工具 `b__x`，还是 server `a__b` 的工具 `x`？
 **正则和分隔符是一对**：边界有歧义，前缀规则就会悄悄放大。
-不匹配这个形状的文件名是**加载期硬错误**（`agentkit/spec/load.go:473`）。
+不匹配这个形状的文件名是**加载期硬错误**（`agentkit/spec/load.go:492`）。
 
 ★ **合成名永远不被读回来拆开。** 策略层只做整名与前缀匹配。
 这正是工具段能保留原始大小写与字符的原因。
 一个工具属于哪台 server，是从它的**名字**读出来的
-（`decl.MCPServerOf`，`agentkit/spec/decl/decl.go:630`）。
+（`decl.MCPServerOf`，`agentkit/spec/decl/decl.go:662`）。
 
 名字在**一处**拼装：`mcpExposedName`（`agentkit/build/mcptools.go:141`）。
 provider 与面板都走它，所以它们不可能对某个工具叫什么有分歧。
@@ -91,7 +91,7 @@ provider 与面板都走它，所以它们不可能对某个工具叫什么有�
 
 | 情况 | 结果 | 理由码 |
 |---|---|---|
-| 合成名超过 64 个字符（`decl.MCPMaxExposedNameLen`，`agentkit/spec/decl/decl.go:702`） | 跳过那个工具 | `name_too_long` |
+| 合成名超过 64 个字符（`decl.MCPMaxExposedNameLen`，`agentkit/spec/decl/decl.go:734`） | 跳过那个工具 | `name_too_long` |
 | 同一 server 里两个工具规整后同名 | 跳过后来的那个 | `name_collision` |
 
 两个理由码是机器值（`agentkit/build/mcptools.go:27-30`），与错误体里的 `code` 一样；
@@ -143,7 +143,7 @@ provider 那条 `Warn` 是**唯一**的通知 —— 工具不进表，用户看
 | 来源 | 它点名什么 | 装配位置 |
 |---|---|---|
 | 没有自己文件的内置工具 | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill` | `agentkit/build/tools.go:95` 的 `builtinAllowedTools` |
-| 工具自己的文件 —— `tools/*.yaml` 与知识库 | 那个文件的 `allows:` | `agentkit/spec/load.go:430` 的 `AllowedTools` |
+| 工具自己的文件 —— `tools/*.yaml` 与知识库 | 那个文件的 `allows:` | `agentkit/spec/load.go:449` 的 `AllowedTools` |
 | MCP server 自己的文件 | 那个 server 的 `allows:`，**用它自己的词汇**，翻译成暴露出来的名字 | `agentkit/build/mcptools.go:173` 的 `mcpAllowedNames` |
 
 三处合成的地方是 `agentkit/build/spec.go:73` 的 `policyOf`。
@@ -457,11 +457,11 @@ MCP 服务器与 openheron 今天的每一个工具，差别恰好在两处。
 
 | 字段 | 类型 | 缺省 | 含义 |
 |---|---|---|---|
-| `transport` | `string` | `stdio` | `stdio` 或 `http`；**未知值是硬错误**，不静默退回 stdio（`agentkit/spec/load.go:486`） |
-| `command` | `string` | — | 仅 stdio，**必填**（`agentkit/spec/load.go:508`） |
+| `transport` | `string` | `stdio` | `stdio` 或 `http`；**未知值是硬错误**，不静默退回 stdio（`agentkit/spec/load.go:505`） |
+| `command` | `string` | — | 仅 stdio，**必填**（`agentkit/spec/load.go:527`） |
 | `args` | `[]string` | `[]` | 仅 stdio：它的参数 |
-| `env` | `map[string]string` | `{}` | 仅 stdio：**叠加**在继承来的环境之上的变量；http 服务器写 `env:` 是**加载期硬错误**（`agentkit/spec/load.go:504`） |
-| `url` | `string` | — | 仅 http，**必填**（`agentkit/spec/load.go:497`） |
+| `env` | `map[string]string` | `{}` | 仅 stdio：**叠加**在继承来的环境之上的变量；http 服务器写 `env:` 是**加载期硬错误**（`agentkit/spec/load.go:523`） |
+| `url` | `string` | — | 仅 http，**必填**（`agentkit/spec/load.go:516`） |
 | `headers` | `map[string]string` | `{}` | 仅 http：每次请求都带的头 |
 | `timeout` | `MCPDuration` | `30s` | 连接 + 初始化 + 取工具清单的上限 |
 | `call_timeout` | `MCPDuration` | `60s` | **一次工具调用**的上限 |
@@ -476,7 +476,7 @@ MCP 服务器与 openheron 今天的每一个工具，差别恰好在两处。
 而本进程的环境不是它的环境。★ 一个什么也不做的键比一次拒绝更糟：
 用户会以为那个服务器是带着这个变量跑的。
 
-★ **类型是 `decl.MCPDuration`**（`agentkit/spec/decl/decl.go:717`），
+★ **类型是 `decl.MCPDuration`**（`agentkit/spec/decl/decl.go:749`），
 而不是别的宽松时长用的那份包级清单。差别在**来源**：别的宽松时长用的那份清单
 不带文件也不带键，所以它说不出**是哪一个**值写错了。
 `MCPDuration` 留着原文，也留着「这个键到底写没写」，
@@ -496,7 +496,7 @@ MCP 服务器与 openheron 今天的每一个工具，差别恰好在两处。
 ★ 子 agent 有自己的一份清单（`decl.SubAgentSpec.MCPServers`），
 所以清单是从**正在跑的那个 agent** 读的 —— 根 agent，或者这一轮所在的那个子 agent。
 
-★ **一个不存在的名字是加载期硬错误**（`agentkit/spec/load.go:912`）。
+★ **一个不存在的名字是加载期硬错误**（`agentkit/spec/load.go:952`）。
 一个写着 `githbu` 的 agent 会安安静静地一个 MCP 服务器都拿不到，
 而「因为笔误而少掉的工具」与「因为服务器倒了而少掉的工具」长得一模一样。
 
@@ -536,7 +536,7 @@ MCP server 从那儿读到它 —— 而那是 **MCP server 的事**，不是 op
 | 谁来写 | 写什么 |
 |---|---|
 | 用户 | 手写 `mcps/<server>.yaml` |
-| `openheron init` | ★ **三台服务器** —— `mcps/fetch.yaml`、`mcps/time.yaml`、`mcps/deepwiki.yaml`（`initcfg/initcfg.go:164`），而且每一份都是**能加载**的：文件**定义**了 server，所以一份解析不了的文件不是「server 关着」，而是「配置加载不了」 |
+| `openheron init` | ★ **三台服务器** —— `mcps/fetch.yaml`、`mcps/time.yaml`、`mcps/deepwiki.yaml`（`initcfg/initcfg.go:173`），而且每一份都是**能加载**的：文件**定义**了 server，所以一份解析不了的文件不是「server 关着」，而是「配置加载不了」 |
 | 配置编辑器 | ★ 脚手架走它的「新建文件」对话框 —— 编辑器**能写** `mcps/`（`agentkit/spec/write.go:309`），而且它拒绝不是一个可读回服务器名的文件（`agentkit/spec/write.go:185`） |
 
 ★ 脚手架本身在 `agentkit/templates/files/mcps/_example.yaml`：
@@ -594,7 +594,7 @@ the gate: Policy.TierOf("mcp__github__create_issue")
 | 职责 | 落点 |
 |---|---|
 | **一个 server 一个客户端** | 一个 server 就是一条连接，对 stdio 来说还是一个子进程 |
-| **只起某个 agent 要的 server** | 管理者只启动那些 agent 的 `mcps:` 清单里的服务器 —— 这份清单是**并集**（`agentkit/spec/load.go:982` 的 `MCPServersInUse`），因为快照的工具集是所有 agent 共享的 |
+| **只起某个 agent 要的 server** | 管理者只启动那些 agent 的 `mcps:` 清单里的服务器 —— 这份清单是**并集**（`agentkit/spec/load.go:1022` 的 `MCPServersInUse`），因为快照的工具集是所有 agent 共享的 |
 | **子进程的生命归管理者** | 拉起子进程的那个上下文由**管理者的生命周期**派生，不是调用方的（`agentkit/build/mcpmanager.go:447`） |
 | **崩了的子进程自动重启** | 一个死掉的 stdio server 在下一次调用时被重新拉起 |
 | **发现工具清单变了** | 管理者重新列举；清单变了就**换掉工具面**、工具重建 |
@@ -710,8 +710,8 @@ builder 每次建树前把当前的身份和手上那份比一比。
 （`mcpManager.Warm`，`agentkit/build/mcpmanager.go:98`）。
 ★ 没有任何 agent 点名的 server 永远不会被启动，连后台都不启动。
 ★ **每台 server 的启动是它自己的 goroutine** —— 三台各要一分钟的 server 不该花三分钟。
-预热挂在配置的加载与重载上（`main.go:503`），而它在锁**外**调它
-（`main.go:798-809` 的 `agentConfig.set`）——
+预热挂在配置的加载与重载上（`main.go:518`），而它在锁**外**调它
+（`main.go:813-824` 的 `agentConfig.set`）——
 拿着锁起进程会把每一个读配置的调用都堵住。
 
 ★ **预热不是唯一的起法**：一次要求（provider 或面板）也会起，走的是同一个单飞。
@@ -957,10 +957,10 @@ Kit 用的机制是 `credential@1` 带 `apiKey.proxyManaged: true`：
 
 ```
 the host holds the real key
-  └─ sbx secret set-custom --host api.github.com --env GITHUB_TOKEN \
+  └─ sbx secret set-custom --host api.github.com --env MCP_GITHUB_TOKEN \
        --placeholder proxy-managed --value-stdin
         ↓
-the container holds GITHUB_TOKEN=proxy-managed
+the container holds MCP_GITHUB_TOKEN=proxy-managed
         ↓
 the MCP server reads it and sends Authorization: Bearer proxy-managed
         ↓
@@ -969,7 +969,11 @@ the host proxy substitutes the real key ──► api.github.com
 
 ★ **`mcps/<server>.yaml` 里一个字段都不用为它写。** 哨兵注入的是**容器**，
 而子进程继承本进程的环境 —— 于是 MCP server 按它自己的约定就找到了那个变量。
-★ **凭据的变量名是 MCP server 的事，openheron 不需要知道。**
+★ **凭据的变量名仍然是 MCP server 的事**，但现在多了一条**推导出来的**路：
+`mcps/github.yaml` 的令牌叫 `MCP_GITHUB_TOKEN`（`docs/secrets-design.md` §1），
+所以 `env:` 里写 `${MCP_GITHUB_TOKEN}` 时，openheron 会把它解成**那台服务器的令牌**
+（先环境变量、后钥匙串）；而其余任何变量名仍旧只查环境 —— 两条路的分界在
+`agentkit/spec/load.go:560`。
 
 ★ **http 传输走的是同一条路。** `headers:` 这张表与其他一切一样展开，
 所以它能引用一个环境变量：在沙箱里那个变量装的是**哨兵**，
@@ -979,8 +983,8 @@ the host proxy substitutes the real key ──► api.github.com
 ★ **用户只跑一条命令**：
 
 ```sh
-printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
-    --host api.deepseek.com --env DEEPSEEK_API_KEY \
+printf '%s' "$LLM_DEEPSEEK_API_KEY" | sbx secret set-custom \
+    --host api.deepseek.com --env LLM_DEEPSEEK_API_KEY \
     --placeholder proxy-managed --value-stdin
 ```
 
@@ -1096,7 +1100,7 @@ Kit 由 `sandbox-kit/` 构建（二进制本地烤入）。
 | workload 的环境带不带 `WORKSPACE_DIR`？ | **带** —— 宿主的路径，也是工作区挂载的路径 |
 | 进程是不是从工作区启动的？ | **是** —— `PWD` 与 `OLDPWD` 都是工作区 |
 | 配置是不是落在挂载上？ | **是** —— `.openheron/{agents,llm,mcps,server,state}` 在宿主上，会话也在 |
-| 凭据到不到模型？ | **到** —— 容器里是 `DEEPSEEK_API_KEY=proxy-managed`；代理换上真值，调用返回了 "ok" |
+| 凭据到不到模型？ | **到** —— 容器里是 `LLM_DEEPSEEK_API_KEY=proxy-managed`；代理换上真值，调用返回了 "ok" |
 | 发布版配方构建得出来吗？ | **能** —— `task kit` 产出 `openheron-kit:<version>`，里面的二进制自报同一个版本号 |
 | 纯声明的 mixin 没有 Dockerfile 也构建得出来吗？ | **能** —— `task kit-mixin` 只靠描述文件就产出镜像 |
 | 两个厂商 mixin 能组合吗？ | **能** —— 两个哨兵都在容器里，DeepSeek 那边回了 200 |
@@ -1186,20 +1190,20 @@ workload 是**内容**。跑在沙箱里的 MCP 服务器是 workload 内容；
 
 | 位置 | 是什么 |
 |---|---|
-| `agentkit/spec/decl/decl.go:113` | `decl.Agent.Tools` |
-| `agentkit/spec/decl/decl.go:134` | `decl.Agent.Skills` |
-| `agentkit/spec/decl/decl.go:150` | `decl.Agent.MCPServers` |
-| `agentkit/spec/decl/decl.go:958` | `decl.SubAgentSpec.MCPServers` |
-| `agentkit/spec/decl/decl.go:366` | `decl.BuiltinToolNames` |
-| `agentkit/spec/decl/decl.go:402-409` | 六个 `config_*` 工具名 |
-| `agentkit/spec/decl/decl.go:487-518` | `decl.ConfigToolsCfg` —— `tools/config.yaml` 的形状与 `max_read_bytes` 的范围 |
-| `agentkit/spec/decl/decl.go:665` | `decl.ParseToolNamePattern` |
-| `agentkit/spec/load.go:107` | 拒绝旧键 `disabled_tools` |
-| `agentkit/spec/load.go:131` | `validateAgentTools`（拒绝假通配符） |
-| `agentkit/spec/load.go:430` | `Config.AllowedTools`（`tools/` 各文件的 `allows:`） |
-| `agentkit/spec/load.go:356-387` | `noticeConfigToolsAbsent`（★ 文件不在时的提示） |
-| `agentkit/spec/load.go:943` | `checkAgentMCPNames`（`tools:` 里的 `mcp__*` 只报提示） |
-| `agentkit/spec/load.go:982` | `Config.MCPServersInUse`（并集） |
+| `agentkit/spec/decl/decl.go:130` | `decl.Agent.Tools` |
+| `agentkit/spec/decl/decl.go:151` | `decl.Agent.Skills` |
+| `agentkit/spec/decl/decl.go:167` | `decl.Agent.MCPServers` |
+| `agentkit/spec/decl/decl.go:990` | `decl.SubAgentSpec.MCPServers` |
+| `agentkit/spec/decl/decl.go:383` | `decl.BuiltinToolNames` |
+| `agentkit/spec/decl/decl.go:419-426` | 六个 `config_*` 工具名 |
+| `agentkit/spec/decl/decl.go:504-535` | `decl.ConfigToolsCfg` —— `tools/config.yaml` 的形状与 `max_read_bytes` 的范围 |
+| `agentkit/spec/decl/decl.go:697` | `decl.ParseToolNamePattern` |
+| `agentkit/spec/load.go:126` | 拒绝旧键 `disabled_tools` |
+| `agentkit/spec/load.go:150` | `validateAgentTools`（拒绝假通配符） |
+| `agentkit/spec/load.go:449` | `Config.AllowedTools`（`tools/` 各文件的 `allows:`） |
+| `agentkit/spec/load.go:375-406` | `noticeConfigToolsAbsent`（★ 文件不在时的提示） |
+| `agentkit/spec/load.go:983` | `checkAgentMCPNames`（`tools:` 里的 `mcp__*` 只报提示） |
+| `agentkit/spec/load.go:1022` | `Config.MCPServersInUse`（并集） |
 | `agentkit/build/tools.go:49` | `toolProvider` 接口 |
 | `agentkit/build/tools.go:65` | `defaultToolRegistry`（MCP provider 注册处） |
 | `agentkit/build/tools.go:95` | `builtinAllowedTools` |
@@ -1227,24 +1231,24 @@ workload 是**内容**。跑在沙箱里的 MCP 服务器是 workload 内容；
 
 | 位置 | 是什么 |
 |---|---|
-| `agentkit/spec/decl/decl.go:593` | `decl.MCPToolPrefix` |
-| `agentkit/spec/decl/decl.go:602` | `decl.MCPSeparator` |
-| `agentkit/spec/decl/decl.go:610` | `decl.MCPServerNamePattern` |
-| `agentkit/spec/decl/decl.go:630` | `decl.MCPServerOf` |
-| `agentkit/spec/decl/decl.go:692-694` | `stdio` / `http` |
-| `agentkit/spec/decl/decl.go:702` | `decl.MCPMaxExposedNameLen`（64） |
-| `agentkit/spec/decl/decl.go:692-695` | 两个缺省超时 |
-| `agentkit/spec/decl/decl.go:717` | `decl.MCPDuration` |
-| `agentkit/spec/decl/decl.go:750` | `decl.MCPServerCfg` |
-| `agentkit/spec/decl/decl.go:798` | `decl.MCPFiles` |
+| `agentkit/spec/decl/decl.go:610` | `decl.MCPToolPrefix` |
+| `agentkit/spec/decl/decl.go:619` | `decl.MCPSeparator` |
+| `agentkit/spec/decl/decl.go:642` | `decl.MCPServerNamePattern` |
+| `agentkit/spec/decl/decl.go:662` | `decl.MCPServerOf` |
+| `agentkit/spec/decl/decl.go:724-726` | `stdio` / `http` |
+| `agentkit/spec/decl/decl.go:734` | `decl.MCPMaxExposedNameLen`（64） |
+| `agentkit/spec/decl/decl.go:724-727` | 两个缺省超时 |
+| `agentkit/spec/decl/decl.go:749` | `decl.MCPDuration` |
+| `agentkit/spec/decl/decl.go:782` | `decl.MCPServerCfg` |
+| `agentkit/spec/decl/decl.go:830` | `decl.MCPFiles` |
 | `agentkit/spec/config.go:26` | `spec.DirMCP` |
 | `agentkit/spec/config.go:85` | `mcps/` 分类（可编辑、热） |
-| `agentkit/spec/load.go:470` | `loadMCP` |
-| `agentkit/spec/load.go:473` | server 名的形状是加载期硬错误 |
-| `agentkit/spec/load.go:486-494` | `transport` 的取值 |
-| `agentkit/spec/load.go:496-499` | http 的 `url` / `env`，stdio 的 `command` |
-| `agentkit/spec/load.go:524-525` | 两个超时的缺省 |
-| `agentkit/spec/load.go:912-915` | agent 点名一个不存在的 server 是加载期错误 |
+| `agentkit/spec/load.go:489` | `loadMCP` |
+| `agentkit/spec/load.go:492` | server 名的形状是加载期硬错误 |
+| `agentkit/spec/load.go:505-513` | `transport` 的取值 |
+| `agentkit/spec/load.go:515-518` | http 的 `url` / `env`，stdio 的 `command` |
+| `agentkit/spec/load.go:543-544` | 两个超时的缺省 |
+| `agentkit/spec/load.go:952-955` | agent 点名一个不存在的 server 是加载期错误 |
 | `agentkit/spec/write.go:185` | 编辑器拒绝读不回来的 server 名 |
 | `agentkit/spec/write.go:309` | `mcps/` 的脚手架 |
 | `agentkit/build/mcptools.go:27-30` | 两个跳过理由码 |
@@ -1298,9 +1302,9 @@ workload 是**内容**。跑在沙箱里的 MCP 服务器是 workload 内容；
 | `agentkit/run/runrow.go:88` | `noteMCPServers` |
 | `agentkit/run/runrow.go:141` | `mcpServersOf`（从名字读出 server） |
 | `storage/runledger.go:168` | `Run.MCPServers` |
-| `main.go:503` | 预热挂在配置的加载与重载上 |
-| `main.go:539` | `SetMCPSource` |
-| `initcfg/initcfg.go:164` | init 写 `mcps/` 分区 |
+| `main.go:518` | 预热挂在配置的加载与重载上 |
+| `main.go:554` | `SetMCPSource` |
+| `initcfg/initcfg.go:173` | init 写 `mcps/` 分区 |
 | `agentkit/templates/files/mcps/_example.yaml` | 脚手架（开头那个下划线是标记） |
 
 ### A.3 文件系统后端
@@ -1363,9 +1367,9 @@ workload 是**内容**。跑在沙箱里的 MCP 服务器是 workload 内容；
 | `sandbox-kit/openheron-deepseek/openheron-deepseek.yaml:37-41` | mixin 的网络规则 |
 | `sandbox-kit/openheron-deepseek/openheron-deepseek.yaml:59-69` | mixin 的 `credential@1` |
 | `sandbox-kit/acceptance/run.sh` | 验收跑批（§6 的可重复形式） |
-| `main.go:153` | 没有配置就不肯启动 |
-| `main.go:440` / `:459` / `:460` | `LISTEN_ADDR` / `DATA_DIR` / `PROJECT_ROOT` 的覆盖顺序 |
-| `main.go:466` | 会话目录 |
-| `agentkit/spec/config.go:425` | `NewService`（项目根的缺省是工作目录） |
-| `agentkit/spec/config.go:490` | `Service.ProjectRoot` |
-| `agentkit/spec/config.go:492` | `Service.DataDir`（缺省 `state`） |
+| `main.go:160` | 没有配置就不肯启动 |
+| `main.go:455` / `:459` / `:460` | `LISTEN_ADDR` / `DATA_DIR` / `PROJECT_ROOT` 的覆盖顺序 |
+| `main.go:481` | 会话目录 |
+| `agentkit/spec/config.go:514` | `NewService`（项目根的缺省是工作目录） |
+| `agentkit/spec/config.go:579` | `Service.ProjectRoot` |
+| `agentkit/spec/config.go:581` | `Service.DataDir`（缺省 `state`） |

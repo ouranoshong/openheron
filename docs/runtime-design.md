@@ -225,7 +225,7 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 （`agentkit/run/lease.go:105`）。★ 续租被节流到 TTL 的四分之一：流式模型每个 token
 都报一次进展，每个 token 续一次租约等于每个 token 抢一次锁。
 
-★ **TTL 是配置项**（`server.lease_ttl`，`agentkit/spec/decl/decl.go:297`；默认 10 分钟，
+★ **TTL 是配置项**（`server.lease_ttl`，`agentkit/spec/decl/decl.go:314`；默认 10 分钟，
 `agentkit/run/lease.go:20`）。它必须**长于 provider 自己的超时** —— provider 的
 超时负责收拾真正挂死的调用，租约只需要比「慢但活着」的调用撑得更久。两者住在不同的
 地方（超时按端点在 `llm/<id>.yaml` 里），所以这个关系是运维要守的，不是代码能强制的。
@@ -600,15 +600,15 @@ run 的产出。**`transport` 现在只渲染**（`transport/transport.go:1-13` 
 
 ★ **百分比需要窗口。** `context_window: 0` 意味着*没配置*，而百分比的百分比是零：
 那个 Agent 永不压缩，spec 包在加载配置时把它记进 `deferred`
-（`agentkit/spec/load.go:1009` 的 `noticeCompactionWindows`）。绝对的 token 数不需要窗口。
+（`agentkit/spec/load.go:1049` 的 `noticeCompactionWindows`）。绝对的 token 数不需要窗口。
 
 ★ **模型档案里的 `summarize_at` 已废弃。** 它照常解析 —— 直接删掉会让所有老
 `llm/*.yaml` 启动即失败，因为解码器是严格的 —— 但没有任何地方读它，spec 包会指路到
-Agent 上的那个设置（`agentkit/spec/load.go:63-67`）。
+Agent 上的那个设置（`agentkit/spec/load.go:82-86`）。
 
 ★ **agent 视图认得窗口了。** `modelView.ContextWindow`（`api/v2_introspect.go:105`）
 让前端知道「我正在对话的这个 agent 的窗口有多大」；厂商清单里也有同一个字段
-（`api/v2_introspect.go:321` 的 `modelBrief`）。
+（`api/v2_introspect.go:331` 的 `modelBrief`）。
 
 ### 3.3 实时通道与历史通道
 
@@ -750,9 +750,9 @@ Agent 上的那个设置（`agentkit/spec/load.go:63-67`）。
 `fmt.Fprintln(os.Stderr)` 就会绕开这个开关。**
 
 级别优先级：**`$OPENHERON_LOG_LEVEL` > `server/config.yaml` 的 `log_level` > `info`**
-（`main.go:262` 的 `applyLogLevel`）。取值 `debug / info / warn(warning) / error`，
+（`main.go:270` 的 `applyLogLevel`）。取值 `debug / info / warn(warning) / error`，
 大小写与空白不敏感；空值即 `info`。★ **非法值不致命**：回退 `info` 并记一条
-`deferred` 提示。★ **告警必须在切换等级之前发出**（`main.go:271-275`），否则
+`deferred` 提示。★ **告警必须在切换等级之前发出**（`main.go:279-283`），否则
 `error` 等级会把告警自己吞掉。
 
 ★ **门限可以后移，是因为 handler 持有的是 `slog.Leveler` 而不是定值。** 一个共享的
@@ -766,11 +766,11 @@ logger 只在 `main` 里造一次再传下去：`newLogger()` → `installLogger
 （`applyLogLevel` / `applyLogFile`）→ `setupRuntime` → `api.New(..., log)` →
 `hserver.New`。
 
-- `main.newLogger`（`main.go:238`）围绕共享的 `slog.LevelVar` 与 `obs.Sink` 建好
+- `main.newLogger`（`main.go:246`）围绕共享的 `slog.LevelVar` 与 `obs.Sink` 建好
   logger，**在**配置读出来**之前** —— 等级与文件路径由配置决定，而 logger 必须先
   存在，`setupConfig` 才能打第一行日志。
-- `main.installLogger`（`main.go:249`）完成两次框架交接：`hlog.SetLogger`
-  （`main.go:255`）与 `callbacks.AppendGlobalHandlers`（`main.go:256`）。
+- `main.installLogger`（`main.go:257`）完成两次框架交接：`hlog.SetLogger`
+  （`main.go:263`）与 `callbacks.AppendGlobalHandlers`（`main.go:264`）。
   ★ **这是仅有的两处全局注册**，其余全是注入。
 
 ★ **顺序不能动。** hertz 与 eino 各持一个进程级注册表，所以这两次交接必须在任何
@@ -803,31 +803,31 @@ logger 就是竞态；组合根先装配正好消掉它（用 `task test-race` �
 
 `agentkit/obs/sink.go:25` 的 `Sink` 实现 `io.Writer`，`Set`（`:66`）原子改向；
 `obs.Handler` 与两份注册表都不动。启动时 `main.newLogger` 就建好 sink
-（`main.go:245`），logger 从第一天起写在 sink 后面。
+（`main.go:253`），logger 从第一天起写在 sink 后面。
 
-接线在 `main.applyLogFile`（`main.go:300`）：
+接线在 `main.applyLogFile`（`main.go:308`）：
 
 | 位置 | 做什么 |
 |---|---|
 | `main.newLogger` | 建 `obs.NewSink(os.Stderr)` |
 | `main.setupConfig` | 在 reloader 回调里用 `sync.Once` 调一次 `applyLogFile`；重载不换路径 |
-| `main.applyLogFile` | 解析路径 + 建目录 + 0600 探针；挂 `lumberjack.Logger`（`main.go:324`）；`console` 决定是否 `io.MultiWriter(os.Stderr, file)`（`main.go:336`） |
+| `main.applyLogFile` | 解析路径 + 建目录 + 0600 探针；挂 `lumberjack.Logger`（`main.go:332`）；`console` 决定是否 `io.MultiWriter(os.Stderr, file)`（`main.go:344`） |
 | `main.serve` | 退出时 `defer` 关闭 rotator，最后几行日志仍进得去文件 |
 
 ★ **探针的理由：** `lumberjack` 第一次写入才开文件，且以 0644 创建。不先探一次，
 权限错误和 0600 都到不了启动期 —— 而启动期是唯一有人能读到那条告警的时候
-（`main.go:317-320`）。
+（`main.go:325-328`）。
 
 ★ **落不进文件是警告，不是失败的启动。** 服务的活儿是服务，而它的日志正是失败原因
 唯一的容身之处；为了去处把进程拉下去，等于拿掉唯一能解释原因的地方。进程继续走
-stderr（`main.go:282-286`）。
+stderr（`main.go:290-294`）。
 
 ★ **路径落在配置根**（`spec.Service.LogFile` 解析），`$OPENHERON_LOG_FILE` 覆盖它一次
-（`main.go:306`）。`server/` 不热更新：改了要重启。
+（`main.go:314`）。`server/` 不热更新：改了要重启。
 
 ★ **代码缺省是空路径**（只走 stderr），而**出厂模板给的是 `logs/openheron.log`**，且
 `log.console` 是 `false` —— 对新项目来说落盘是常态而不是可选项，**文件就是全部的日志**：
-配置读出、文件打开之后标准错误就安静了（`main.go:336`；见 `docs/config-design.md` §5.5）。
+配置读出、文件打开之后标准错误就安静了（`main.go:344`；见 `docs/config-design.md` §5.5）。
 ★ 换的是 sink 背后的 writer，不是 logger —— hertz 与 eino 的记录跟着一起进文件。
 
 ★ **sink 同时是失败兜底。** 目标写失败一次就切回 fallback（stderr），并且只报一次
@@ -835,7 +835,7 @@ stderr（`main.go:282-286`）。
 
 ★ **`format` 这一轮不做。** JSON 需要第二个 handler，而现在的 `Handler` 是手写的文本
 封装。留作后续迭代 —— **不预留空键**，配置里没有 `format`
-（`agentkit/spec/decl/decl.go:315-318`）。
+（`agentkit/spec/decl/decl.go:332-335`）。
 
 ### 4.4 叶子包的纪律
 

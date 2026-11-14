@@ -30,16 +30,16 @@
 | 1 | **一个**配置根 | 任一时刻只有一份配置生效，没有继承链（`agentkit/spec/config.go:425`） |
 | 2 | 按功能分区 | 新增一类配置不改已有文件布局（`agentkit/spec/config.go:59-104`） |
 | 3 | 「配了没用」必须可见 | 未知字段报错；认识但未兑现的键进 `deferred` 并**强制打印**（`agentkit/spec/config.go:203`、`main.go:415-417`） |
-| 4 | 密钥不入库 | 档案只存 `${ENV}` 引用或 `@file:` 路径 —— 编辑器拒绝保存明文（`agentkit/spec/write.go:926-932`） |
-| 5 | 零新增依赖 | `go.mod` 只用已在缓存的 `gopkg.in/yaml.v3 v3.0.1`（`go.mod:26`）—— YAML 这一层就是全部成本 |
+| 4 | 密钥不入库 | ★ 档案**不写密钥** —— 密钥的**位置**由 provider 的名字推导（`agentkit/spec/secret.go:68-132`），值在环境变量或钥匙串里；`api_key` 这一行**已退休**，加载器拒绝它（`agentkit/spec/load.go:44-52`） |
+| 5 | 配置层零新增依赖 | `agentkit/spec` 只用已在缓存的 `gopkg.in/yaml.v3 v3.0.1`（`go.mod:27`）—— ★ **唯一的例外是密钥后端**：`github.com/zalando/go-keyring v0.2.8`（`go.mod:22`），它是一个显式的、被点名的例外（见 `docs/secrets-design.md`） |
 
 ### 非目标
 
 - ❌ **配置根不做上溯搜索。** 这条规则写在 `NewService` 的文档注释里（`agentkit/spec/config.go:412-424`）。
 - ❌ **没有家目录那一层。** `~/.openheron` 永远不会被自动认领 —— 若它存在而不在用，运行时会把话说明白，
   请你显式指名（`main.go:123-140`）。
-- ❌ **不让配置承载密钥本体。** 加载器容忍明文密钥（`agentkit/spec/expand.go:10-38`），但编辑器拒绝保存
-  明文（`agentkit/spec/write.go:934-942`）—— 两条路径故意不对称。
+- ❌ **不让配置承载密钥本体。** ★ 加载器**拒绝**任何 `api_key` 行（`agentkit/spec/load.go:44-52`）——
+  密钥的位置由**名字**推导（`agentkit/spec/secret.go:68-132`），配置文件里没有它的位置，也就没有它可以写错的地方。
 - ❌ **不做字段级合并。** 只有一份配置，没有「谁覆盖谁」；字段级合并让配置来源不可辨。
 - ❌ **不让 `server/` 参与热更新。** 它配的是进程自身，改了要重启（`agentkit/spec/config.go:71-74`）。
 
@@ -48,7 +48,7 @@
 ```
 <projectRoot>/.openheron/
 ├─ agents/main.md            ← agent: frontmatter + body (the body is the prompt)
-├─ llm/<provider>.yaml       ← vendor profile: base_url / api_key / models[]
+├─ llm/<provider>.yaml       ← vendor profile: base_url / models[] (the key is not in the file)
 ├─ server/config.yaml        ← the process itself: address / dirs / timeouts / the caps
 ├─ tools/<tool>.yaml         ← http / web_search / wikipedia / filesystem / kb
 ├─ mcps/<server>.yaml        ← one MCP server: command / transport / tier
@@ -176,7 +176,7 @@ llm/*.local.yaml
 
 ★ **默认根下还没有 `agents/main.md` 时，服务端自己把树写出来**（`main.go:177` 的
 `initConfigIfEmpty`）：写的还是 §2.2 那份计划，模型用 provider 模板自己的缺省
-（`deepseek/deepseek-flash`），密钥从环境变量读（`DEEPSEEK_API_KEY`）—— 与不带参数的
+（`deepseek/deepseek-flash`），密钥从环境变量或钥匙串读（`LLM_DEEPSEEK_API_KEY`）—— 与不带参数的
 `openheron init` 完全一致。★ **「空」的判据是「没有 agent 文件」**：已经有 `agents/main.md`
 的树就是一份配置（能不能装载是另一回事），这份初始化不碰它；计划本身只补缺的那些，
 所以半写状态的树是被补齐，不是被替换。
@@ -305,7 +305,7 @@ only comments)」，`agentkit/spec/config.go:738`），因为「只有注释的�
 |---|---|---|
 | **不认识的键** | 硬报错，带行号 | `max_retry`（拼错） |
 | **认识但本版不兑现** | 进 `deferred[]`，**启动必须逐条打印** | `models[].summarize_at` 仍会被解析，但不再被读 —— 阈值归 agent 管 |
-| **认识但此刻缺运行期前提** | 同上，且**不阻塞启动** | `api_key` 的 `${ENV}` 未设 —— 请求该端点时才 401 |
+| **认识但此刻缺运行期前提** | 同上，且**不阻塞启动** | provider 的密钥没有着落 —— 请求该端点时才 401 |
 
 `Config.Deferred()`（`agentkit/spec/config.go:203-213`）收集这些句子；启动时逐条打印
 （`main.go:415-417`）：
@@ -326,10 +326,10 @@ for _, d := range c.Deferred() {
 
 | 产生者 | 它说的是什么 | 属于哪个文件 |
 |---|---|---|
-| `agentkit/spec/load.go:44-46` | `api_key` 的 `${ENV}` 未设 —— 真正发请求时会 401 | `llm/<provider>.yaml` |
+| `agentkit/spec/load.go:64-68` | provider 的密钥没有着落 —— 真正发请求时会 401 | `llm/<provider>.yaml` |
 | `agentkit/spec/load.go:64-68` | `models[].summarize_at` 不再被读 —— 阈值归 agent 管 | `llm/<provider>.yaml` |
 | `agentkit/spec/load.go:407-410` | 键 `corpus` 已改名为 `corpus_dir` —— 旧键仍然能加载 | `tools/kb.yaml` |
-| `agentkit/spec/load.go:552-555` | MCP server 的 `env:` 里某个 `${ENV}` 未设 —— 这一条被略掉 | `mcps/<server>.yaml` |
+| `agentkit/spec/load.go:572-585` | MCP server 的 `env:` 里某个 `${MCP_<SERVER>_TOKEN}` 没有着落 —— 这一条被略掉 | `mcps/<server>.yaml` |
 | `agentkit/spec/load.go:552-570` | MCP server 的超时不是时长 —— 用缺省值 | `mcps/<server>.yaml` |
 | `agentkit/spec/load.go:844-847` | `tools:` 点名了一个不存在的工具 | `agents/<id>.md` |
 | `agentkit/spec/load.go:844-855` | 点了 `skill` 工具却没有 `skills` —— 技能一个也没有 | `agents/<id>.md` |
@@ -376,9 +376,11 @@ server 侧那三个覆盖走同一个辅助函数 —— `override`（`main.go:8
 `server/config.yaml` 的 `log.file` —— ★ 打不开文件**不阻止启动**，进程留在 stderr。
 
 ★ 还有第三组确实从环境变量读配置，但**不在主路径上**：`MODEL_TYPE`、`MODEL_TIMEOUT`、
-`MODEL_EXTRA_JSON`、`OPENAI_BASE_URL`、`OPENAI_API_KEY`、`OPENAI_MODEL`、`OPENAI_MODEL_ID`、
-`ARK_BASE_URL`、`ARK_API_KEY`、`ARK_MODEL`、`ARK_MODEL_ID` —— 全部由 `build.ConfigFromEnv`
-（`agentkit/build/config.go:15-44`）读取。
+`MODEL_EXTRA_JSON`、`OPENAI_BASE_URL`、`OPENAI_MODEL`、`OPENAI_MODEL_ID`、
+`ARK_BASE_URL`、`ARK_MODEL`、`ARK_MODEL_ID` —— 全部由 `build.ConfigFromEnv`
+（`agentkit/build/config.go:16-45`）读取。★ 密钥也在这一组里，但**先问推导出来的名字**：
+`LLM_<PROVIDER>_API_KEY`（`agentkit/build/config.go:30`），再退回旧名 `OPENAI_API_KEY` /
+`ARK_API_KEY` —— 这条路径**没有配置文件**，它的 provider 名就是 `MODEL_TYPE`（缺省 `openai`）。
 
 **`llm/*.yaml` 与 `agents/*.md` 里的字段没有环境变量覆盖。** 主路径是 `build.Resolve` +
 `build.FromConfig`（`agentkit/build/provider.go:71`、`agentkit/build/provider.go:30`），只读文件。
@@ -387,11 +389,15 @@ server 侧那三个覆盖走同一个辅助函数 —— `override`（`main.go:8
 根本走不到那里**。这是刻意的取舍：模型档案是**要被 review 和提交**的东西；给它一个进程外的高
 优先级通道，等于允许「repo 里的配置和线上跑的不一样」而两边都看不出来。
 
-★ **注入密钥的正规做法是引用，不是覆盖。** `api_key` 只能写 `${ENV_VAR}` 或 `@file:/path`，值在
-加载时由 `expandValue` 展开（`agentkit/spec/expand.go:10-38`）；而没设的 `${ENV}` **不会**拦住启动
-—— 它进 `deferred[]`。★ `@file:` 读不到文件**仍是硬错误** —— 那是路径写错，不是「暂时没注入」。
-两者的分界：env 是运行期状态，文件路径是配置本身。★ 变量**设成空串**（`export X=`）与**未设**不是
-一回事：空串解析成空密钥，且**一条提醒都不记**（`agentkit/spec/expand.go:30-35`）。
+★ **密钥的位置由名字推导，配置文件里没有它。** provider 的**名字**（文件名去掉 `.yaml`）决定它的密钥
+在哪里：环境变量 `LLM_<PROVIDER>_API_KEY`，或钥匙串条目 `llm:<provider>`
+（`agentkit/spec/secret.go:68-132`）。MCP server 侧**显式**点名：`${MCP_<SERVER>_TOKEN}`
+（`agentkit/spec/load.go:560-585`）—— 一把的那侧可以隐式，多把的那侧必须点名。
+★ **环境变量优先、钥匙串兜底**：环境是**覆盖层**，钥匙串是**存放地**
+（`agentkit/spec/secret.go:272-311`）。★ 两处都没有**不会**拦住启动 —— 它进 `deferred[]`。
+★ `@file:` 读不到文件**仍是硬错误** —— 那是路径写错，不是「暂时没注入」。★ 变量**设成空串**
+（`export X=`）与**未设**不是一回事：空串记一句「设了，但是空的」，未设记一句「没有着落」
+（`agentkit/spec/expand.go:78-88`）—— ★ 这条以前分不出来，今天分得出来了（见 `docs/pitfalls.md` §7.3）。
 
 ### 4.5 诊断的回答归属到文件
 
@@ -485,7 +491,6 @@ agent 的 `model:`；`agents/<id>.md` ← 另一个 agent 的 `subagents:` 清�
 # .openheron/llm/openai.yaml
 type: openai_compat                # free-form label, for display only
 base_url: https://api.openai.com/v1
-api_key: ${OPENAI_API_KEY}         # ${ENV} or @file:/path
 timeout: 5m
 extra:                             # provider-level defaults, they go into ExtraFields
   reasoning_effort: low
@@ -506,20 +511,20 @@ models:                            # ★ several models under one provider
     reasoning_field_from: reasoning_content # the source field name when replaying history
 ```
 
-**Provider**（连接属性，同一 provider 下所有模型共享，形状在 `agentkit/spec/decl/decl.go:19-36`）：
+**Provider**（连接属性，同一 provider 下所有模型共享，形状在 `agentkit/spec/decl/decl.go:18-52`）：
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `type` | `string` | ✅ | **只用于显示** —— 代码里没有按它分支的地方（`agentkit/spec/load.go:31-33`） |
-| `base_url` | `string` | ✅ | 主机（可带前缀）。**不要写 `/chat/completions`**（`agentkit/spec/load.go:34-36`） |
-| `api_key` | `string` | | `${ENV}` / `@file:`；空 = 无鉴权。★ `@file:` 在 YAML 里**必须加引号** —— `@` 是保留字符 |
+| `type` | `string` | ✅ | **只用于显示** —— 代码里没有按它分支的地方（`agentkit/spec/load.go:38-40`） |
+| `base_url` | `string` | ✅ | 主机（可带前缀）。**不要写 `/chat/completions`**（`agentkit/spec/load.go:41-43`） |
+| ~~`api_key`~~ | — | ❌ | ★ **已退休**：这一行不再被读，加载器**拒绝**它并说清新写法（`agentkit/spec/load.go:44-52`）。密钥的位置由 **provider 的名字**推导（`agentkit/spec/secret.go:68-132`） |
 | `timeout` | `Duration` | | 缺省 `5m`（`agentkit/build/provider.go:42-45`）。**不能依赖 SDK 隐式默认** |
 | `header` | `map[string]string` | | ★ **解析了，然后没人读** —— 见 §11 |
 | `extra` | `map[string]any` | | 厂商私有请求体，**顶层键覆盖** |
 | `hint_keys` | `[]string` | | 该端点使用的**字段名**，供 400 时给准确提示 |
 | `models` | `[]Model` | | 它声明的模型；**缺省 = 该 provider 不可用**（`agentkit/build/provider.go:78-84`） |
 
-**Model**（模型的固有属性，形状在 `agentkit/spec/decl/decl.go:38-67`）：
+**Model**（模型的固有属性，形状在 `agentkit/spec/decl/decl.go:54-81`）：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -534,7 +539,7 @@ models:                            # ★ several models under one provider
 | `reasoning_default` | `string` | 建议档位；agent 没写 `reasoning` 时用它 |
 | `reasoning_field` / `reasoning_field_from` | `string` | 端点收发思维链的字段名，以及回放历史时的**源**字段名（默认取 `reasoning_field`，`agentkit/build/provider.go:163-172`） |
 
-一个 `llm/<provider>.yaml` 持有该厂商的 `base_url` / `api_key` / `timeout` 与 `models[]` 列表。引用
+一个 `llm/<provider>.yaml` 持有该厂商的 `base_url` / `timeout` 与 `models[]` 列表。引用
 形式是 **`<provider-id>/<model-id>`**（`model: openai/gpt-4o`）：`ParseRef` 取**第一个** `/`，两侧都
 不得为空 —— 没有 `/` 的引用直接报错（`agentkit/spec/load.go:633-637`）。provider id 就是**去掉扩展名的
 文件名**（`agentkit/spec/load.go:20`）。
@@ -1479,6 +1484,7 @@ github.com/ouranoshong/openheron/llm/common
 | 6 | 全树校验仍是 fail-fast | `loadWithMany` 遇到第一个错误就返回，所以 `config_validate {}` 给的是「第一条阻塞错误 + 全部 hint」 | 要一次给全部，得把 loader 从「返回 error」改成「累积 issues」；本轮没做 |
 | 7 | `.openheron-example/.gitignore` 仍列着 `.config.lock` | 没有任何代码路径会创建这个文件（并发控制走内容哈希的 revision） | 删掉那行，还是保留它作为「曾经有过的东西」的说明 |
 | 8 | 一个 agent 的工具清单不能收窄 MCP 工具 | 收窄 MCP 工具的地方是 server 自己的 `tools:` 过滤器，那是**按 server** 的，对所有挂载它的 agent 共享 | 这是一个**已拍板**的代价（§6.3），不是待办；记在这里是因为它是「挂载即授予」明说的交换 |
+| 9 | ~~`llm/<provider>.yaml` 的 `api_key:` 字段~~ | ~~密钥的位置写在配置树里（`${ENV}` / `@file:`），于是「哪个变量装哪把钥匙」成了一份配置~~ | ★ **已落地**：字段退场，位置由**命名约定**给出（`LLM_<PROVIDER>_API_KEY` / 钥匙串 `llm:<provider>`），环境变量盖过钥匙串；写入面是 `/v2/secrets` 与 `openheron secret`。全文见 `docs/secrets-design.md` |
 
 ## 附录 A：本文引用的代码位置
 
@@ -1488,58 +1494,60 @@ github.com/ouranoshong/openheron/llm/common
 |---|---|
 | `agentkit/spec/config.go:19-26` / `:34` | 目录常量 `DirAgent` `DirLLM` `DirServer` `DirSkills` `DirState` `DirTools` `DirKBIndex` `DirMCP` / `SkillFileName = "SKILL.md"` |
 | `agentkit/spec/config.go:59-104` / `:115-127` | `Categories`（各分区与 `hot` 标志） / `hotDirList()` |
-| `agentkit/spec/config.go:165` / `:173-178` / `:189-195` / `:203-213` | `Config.leftOut` / `LeftOut()` / `Notice{Path, Message}` / `Deferred()` |
-| `agentkit/spec/config.go:228-243` / `:246` / `:258` | `DefaultAgent()` / `deferKey` / `deferFile` |
-| `agentkit/spec/config.go:298-308` / `:325-345` / `:355-362` / `:386-395` | `Mark` / `DrainMarks` / `SetSkillsDir` / `skillsElsewhere` |
-| `agentkit/spec/config.go:412-460` / `:462-478` | `NewService` —— 三级解析与「只创建缺省根」 / `NewServiceAt` —— 给 `init` 的入口 |
-| `agentkit/spec/config.go:480` / `:488` / `:490` / `:492-504` / `:515-527` / `:529-535` | `Root` / `RootIsDefaulted` / `ProjectRoot` / `DataDir` / `LogFile` / `ResolveDir` |
-| `agentkit/spec/config.go:548-558` / `:564-593` / `:603-609` / `:619-627` | `loadWithMany`（校验后写 `Version`） / `loadOnly`（预填充、跳过无 loader 的分区） / `retiredDirs` / `noteRetiredDirs` |
-| `agentkit/spec/config.go:669-672` / `:738` / `:740-748` | 目录不存在不是错误 / `ErrEmptyDocument` / `decodeStrict` |
+| `agentkit/spec/config.go:135` / `:196-201` / `:212-218` / `:226-236` | `Config.leftOut` / `LeftOut()` / `Notice{Path, Message}` / `Deferred()` |
+| `agentkit/spec/config.go:251-266` / `:269` / `:281` | `DefaultAgent()` / `deferKey` / `deferFile` |
+| `agentkit/spec/config.go:386-396` / `:420-433` / `:443-450` / `:474-483` | `Mark` / `DrainMarks` / `SetSkillsDir` / `skillsElsewhere` |
+| `agentkit/spec/config.go:513-548` / `:550-566` | `NewService` —— 三级解析与「只创建缺省根」 / `NewServiceAt` —— 给 `init` 的入口 |
+| `agentkit/spec/config.go:568` / `:576` / `:578` / `:580-592` / `:603-615` / `:617-623` | `Root` / `RootIsDefaulted` / `ProjectRoot` / `DataDir` / `LogFile` / `ResolveDir` |
+| `agentkit/spec/config.go:636-646` / `:652-682` / `:692-695` / `:708-717` | `loadWithMany`（校验后写 `Version`） / `loadOnly`（预填充、跳过无 loader 的分区） / `retiredDirs` / `noteRetiredDirs` |
+| `agentkit/spec/config.go:759-762` / `:827` / `:829-841` | 目录不存在不是错误 / `ErrEmptyDocument` / `decodeStrict` |
 | `agentkit/spec/defaults.go:11-13` / `:48-55` / `:57-75` | `DefaultMaxDepth` `DefaultMaxRetries` / `defaultKB` / `defaultServer` |
-| `agentkit/spec/decl/decl.go:18-36` / `:38-75` / `:79-163` | `Provider` / `Model` / `Agent` |
-| `agentkit/spec/decl/decl.go:269-301` / `:319-328` / `:346-371` / `:402-420` | `Server` / `LogCfg` / 内置工具名 / 六个 `config_*` 工具名的常量块与清单 |
-| `agentkit/spec/decl/decl.go:429` / `:439-452` / `:487-518` / `:593` / `:602` / `:610` / `:630` / `:649` | `KnownToolNames`（内置工具名 + 六个 `config_*` 工具名） / `FilesystemCfg` —— 调音旋钮 / `ConfigToolsCfg` —— 配置工具的例外与上限（`max_read_bytes` 的范围也在那儿） / `MCPToolPrefix` / `MCPSeparator` / `MCPServerNamePattern` / `MCPServerOf` / `SkillNamePattern` |
-| `agentkit/spec/decl/decl.go:665-684` / `:702` / `:805-818` / `:851-857` / `:912-939` | `ParseToolNamePattern` / `MCPMaxExposedNameLen` / `LenientDuration` / `BadDurations` / `Duration` |
+| `agentkit/spec/decl/decl.go:18-52` / `:54-83` / `:95-179` | `Provider` / `Model` / `Agent` |
+| `agentkit/spec/decl/decl.go:286-318` / `:319-328` / `:346-371` / `:402-420` | `Server` / `LogCfg` / 内置工具名 / 六个 `config_*` 工具名的常量块与清单 |
+| `agentkit/spec/decl/decl.go:445` / `:466-468` / `:503-522` / `:609` / `:618` / `:641` / `:661` / `:680` | `KnownToolNames`（内置工具名 + 六个 `config_*` 工具名） / `FilesystemCfg` —— 调音旋钮 / `ConfigToolsCfg` —— 配置工具的例外与上限（`max_read_bytes` 的范围也在那儿） / `MCPToolPrefix` / `MCPSeparator` / `MCPServerNamePattern` / `MCPServerOf` / `SkillNamePattern` |
+| `agentkit/spec/decl/decl.go:696-706` / `:733` / `:836-849` / `:882-891` / `:943-951` | `ParseToolNamePattern` / `MCPMaxExposedNameLen` / `LenientDuration` / `BadDurations` / `Duration` |
 | `agentkit/spec/diag.go:26-39` / `:42-46` / `:71` / `:125` / `:188-196` | `Issue` / `Diagnostics` / `Service.Diagnostics` / `Service.Check` / `parseShift` |
-| `agentkit/spec/expand.go:10-38` / `:56-78` / `agentkit/spec/fileerr.go:20` | `expandValue` / `splitFrontmatter` / `FileError` —— 带路径的装载错误 |
-| `agentkit/spec/load.go:19` / `:76` / `:140` / `:250` / `:470` / `:131-138` / `:203-224` / `:236-242` | `loadProvider` / `loadAgent` / `loadServer` / `loadTool` / `loadMCP` / `validateAgentTools` / `toolHints` 与 `ToolFileNames` / `decodeTool` |
-| `agentkit/spec/load.go:292-306` / `:320-322` / `:331-340` / `:356-387` | `loadTool` 的 `config` 分支 / `toolFileList`（两条错误消息共用的一份名单） / `validateConfigReadBytes` / `noticeConfigToolsAbsent`（★ 文件不在时，那五个只读工具要点头 —— 提示只在真有 agent 用它们时发） |
-| `agentkit/spec/load.go:389-418` / `:430-459` / `:541-560` / `:568-583` / `:591-611` | `loadKB` / `AllowedTools` / `expandMCPMaps` / `resolveMCPDuration` / `yamlHasKey` |
-| `agentkit/spec/load.go:633-642` / `:644-649` / `:672-711` / `:713-760` | `ParseRef` / `ProviderIDOf` / `leaveOutUndeclaredModels` / `validate`（notice 先于硬规则） |
-| `agentkit/spec/load.go:775-796` / `:815-858` / `:862-882` / `:891-919` / `:943-973` / `:982-1000` | `checkReasoning` / `noticeAgentTools` / `knownToolNames` / `validateMCP` / `checkAgentMCPNames` / `MCPServersInUse` |
-| `agentkit/spec/load.go:1009-1029` / `:1037-1039` / `:1041-1067` / `:1069-1085` / `:1125-1128` / `:1140-1147` | `noticeCompactionWindows` / `kbErr` / `validateKB` / `validateDepth` / `MaxDepth` `MaxRetries` / `validateAgentGraph` `detectCycle` |
+| `agentkit/spec/expand.go:10-39` / `:97-117` / `agentkit/spec/fileerr.go:20` | `expandValue` / `splitFrontmatter` / `FileError` —— 带路径的装载错误 |
+| `agentkit/spec/load.go:19` / `:95` / `:159` / `:269` / `:489` / `:150-157` / `:222-239` / `:255-261` | `loadProvider` / `loadAgent` / `loadServer` / `loadTool` / `loadMCP` / `validateAgentTools` / `toolHints` 与 `ToolFileNames` / `decodeTool` |
+| `agentkit/spec/load.go:269-330` / `:339-341` / `:350-359` / `:375-406` | `loadTool` 的 `config` 分支 / `toolFileList`（两条错误消息共用的一份名单） / `validateConfigReadBytes` / `noticeConfigToolsAbsent`（★ 文件不在时，那五个只读工具要点头 —— 提示只在真有 agent 用它们时发） |
+| `agentkit/spec/load.go:408-437` / `:449-478` / `:560-599` / `:607-622` / `:630-650` | `loadKB` / `AllowedTools` / `expandMCPMaps` / `resolveMCPDuration` / `yamlHasKey` |
+| `agentkit/spec/load.go:672-681` / `:683-688` / `:711-750` / `:752-799` | `ParseRef` / `ProviderIDOf` / `leaveOutUndeclaredModels` / `validate`（notice 先于硬规则） |
+| `agentkit/spec/load.go:814-835` / `:854-897` / `:901-921` / `:930-958` / `:982-1012` / `:1021-1039` | `checkReasoning` / `noticeAgentTools` / `knownToolNames` / `validateMCP` / `checkAgentMCPNames` / `MCPServersInUse` |
+| `agentkit/spec/load.go:1048-1068` / `:1076-1078` / `:1080-1106` / `:1108-1124` / `:1164-1172` / `:1179-1196` | `noticeCompactionWindows` / `kbErr` / `validateKB` / `validateDepth` / `MaxDepth` `MaxRetries` / `validateAgentGraph` `detectCycle` |
 | `agentkit/spec/manifest.go:18-37` / `:68` | `Manifest` / `Service.Manifest` |
-| `agentkit/spec/reload.go:21` / `:23-34` / `:36-49` / `:51-104` / `:106-113` / `:115-126` / `:128-137` | `HotDirs` / `Fingerprint` / `HotDirFingerprints` / `dirEntryLines`（递归 walk） / `contentHash` / `Debounce` `collectBadDurations` / `WatchEnabled` |
+| `agentkit/spec/reload.go:21` / `:23-34` / `:36-49` / `:74-99` / `:106-113` / `:115-122` / `:128-133` | `HotDirs` / `Fingerprint` / `HotDirFingerprints` / `dirEntryLines`（递归 walk） / `contentHash` / `Debounce` `collectBadDurations` / `WatchEnabled` |
 | `agentkit/spec/reload.go:163-172` / `:174-190` / `:204-254` | `NewReloader` / `Reload` / `Watch` |
 | `agentkit/spec/subagent.go:9-16` / `agentkit/spec/summarize.go:25-39` | `AgentNames` / `SummarizeAt` |
-| `agentkit/spec/toolfiles.go:30-47` / `:61-67` / `:78-82` / `:95-111` | `toolFiles` / `ToolConfigFile` / `ToolConfigFiles` / `ToolAllows` |
-| `agentkit/spec/write.go:70-80` / `:89-133` / `:136-141` / `:151-164` / `:166-208` / `:258-278` / `:280-334` | `ValidatePath` / `ValidateReadPath` / `shapeHint` / `validateWritable` / `validateFileName` / `listNested` / `Skeleton` |
-| `agentkit/spec/write.go:381` / `:386-402` / `:417-441` / `:466-486` / `:488-528` / `:549-591` / `:598-663` | `Revision`（内容哈希） / `ReadFile` / `agentsLostBy` / `agentsLostByChange` `checkNoAgentLost` / `Write`（闸门 + 原子写 + 标记） / `Append`（★ 分块写：同一套闸门，结果必须是能加载的） / `WriteMany` |
-| `agentkit/spec/write.go:718-769` / `:785-811` / `:839-888` / `:892-907` / `:924-932` / `:932-951` | `referencesTo` / `checkNotReferenced` / `Delete` / `checkRevision` / `checkSecretFor` / `checkSecret` |
+| `agentkit/spec/toolfiles.go:30-47` / `:61-70` / `:78-85` / `:95-117` | `toolFiles` / `ToolConfigFile` / `ToolConfigFiles` / `ToolAllows` |
+| `agentkit/spec/write.go:70-80` / `:89-133` / `:136-141` / `:151-164` / `:166-206` / `:258-272` / `:280-333` | `ValidatePath` / `ValidateReadPath` / `shapeHint` / `validateWritable` / `validateFileName` / `listNested` / `Skeleton` |
+| `agentkit/spec/write.go:381` / `:386-402` / `:417-441` / `:466-476` / `:488-528` / `:549-591` / `:598-663` | `Revision`（内容哈希） / `ReadFile` / `agentsLostBy` / `agentsLostByChange` `checkNoAgentLost` / `Write`（闸门 + 原子写 + 标记） / `Append`（★ 分块写：同一套闸门，结果必须是能加载的） / `WriteMany` |
+| `agentkit/spec/secret.go:33-60` / `:62-132` / `:160-178` / `:180-205` / `:207-231` / `:233-264` / `:272-311` / `:325-359` / `:360-396` | 两组命名空间的常量 / 名字与 user 的推导 / `SecretStore` 与两个错误 / `Secret`（三态） / `KeyringStore` 与 `nullStore` / `ResolveSecret` `ResolveSecretFrom` / 解析链（环境 → 钥匙串） / `SecretStatus` / `StatusFor` |
+| `agentkit/spec/secret_keyring.go:22-56` / `agentkit/spec/secret_keyring_linux.go` / `agentkit/spec/secret_keyring_other.go` | `keyringStore`（包一层 keyring 库） / Linux 的 D-Bus 预检 / 其余平台的实现 |
+| `agentkit/spec/write.go:720-773` / `:787-814` / `:841-892` / `:894-911` / `:929-945` / `:969-987` | `referencesTo` / `checkNotReferenced` / `Delete` / `checkRevision` / `apiKeyRetiredMessage` / `apiKeyLine` |
 
 ### 装配层（`agentkit/build`）
 
 | 位置 | 是什么 |
 |---|---|
-| `agentkit/build/assemble.go:18-28` / `:30-40` / `:136-176` | `baseConfig` / `applyToolConfig` / `assemble` |
+| `agentkit/build/assemble.go:18-28` / `:30-40` / `:136-175` | `baseConfig` / `applyToolConfig` / `assemble` |
 | `agentkit/build/builder.go:159-201` / `:211-216` / `:225-234` / `:236-271` / `:285-304` | `Build`（返回 agent **与**它的指纹） / `agentUnavailable` / `leftOutMessage` / `pooledRoot`（钉住的那棵树在这里取回） / `reloadIfMarked`（标记 → 重读 → 发布） |
-| `agentkit/build/config.go:15-44` | `ConfigFromEnv` —— 不在主路径上的兜底 |
+| `agentkit/build/config.go:16-50` | `ConfigFromEnv` —— 不在主路径上的兜底 |
 | `agentkit/build/configgate.go:30-46` / `:57-66` / `:88-101` / `:110-117` | `newConfigGate` / `OwnsPath` / `ReadConfig` / `WriteConfig` |
-| `agentkit/build/configtools.go:85-90` / `:92-449` / `:127-129` / `:277-283` / `:307` `:313` `:331` / `:380` `:382` / `:390-391` / `:430-435` / `:466` / `:473-478` / `:599` | `sourceDisk` `sourceRunning` / 六个工具 / `impact` 分支 / `config_notices` / `config_tier` 的三个答案 / `svc.Append`、`svc.Write`、两个版本号、那条 `note` / `defaultConfigReadBytes` / `configReadBytesLimit` / `missingAgentError` |
+| `agentkit/build/configtools.go:85-90` / `:92-449` / `:127-129` / `:277-283` / `:307` / `:313` / `:331` / `:380` / `:382` / `:390-391` / `:430-435` / `:466` / `:473-478` / `:599` | `sourceDisk` `sourceRunning` / 六个工具 / `impact` 分支 / `config_notices` / `config_tier` 的三个答案 / `svc.Append`、`svc.Write`、两个版本号、那条 `note` / `defaultConfigReadBytes` / `configReadBytesLimit` / `missingAgentError` |
 | `agentkit/build/fingerprint.go:69-78` / `:95-126` / `:133-314` / `:356-375` | `computeDeps` / `depWalker.of` / 各依赖的加入 / `fingerprintOf` |
 | `agentkit/build/gate.go:43-81` / `:89-124` / `:167-181` | `newApprovalMiddleware` 与它的同步 / 流式两条路 / `toolChain`（★ 守卫是**链首**，所以它最外层） |
-| `agentkit/build/hub.go:71-102` / `:119-176` | `skillModelHub.Get` / `skillAgentHub.Get` |
+| `agentkit/build/hub.go:64-69` / `:106-115` | `skillModelHub.Get` / `skillAgentHub.Get` |
 | `agentkit/build/impact.go:26-73` / `:102-112` / `:119-143` / `:153-169` | `impactAnswer` / `rebuilds` / `changedFiles` / `dependents` |
-| `agentkit/build/introspect.go:36-47` / `agentkit/build/manager.go:20-29` | `reasonOf`（两个理由） / `ConfigManager.Current`（只要配置，不要代际） |
+| `agentkit/build/introspect.go:36-47` / `agentkit/build/manager.go:13-29` | `reasonOf`（两个理由） / `ConfigManager.Current`（只要配置，不要代际） |
 | `agentkit/build/mcpmanager.go:98` / `:175` / `:215` / `:246` | `Warm` / `Refresh` / `ToolsOf` / `surfaceHash` |
-| `agentkit/build/mcptools.go:68-121` / `:123-133` / `:141-143` / `:151-164` / `:173-184` | `mcpPlan` / `mcpOffers` / `mcpExposedName` / `sanitizeMCPToolName` / `mcpAllowedNames` |
+| `agentkit/build/mcptools.go:68-116` / `:123-133` / `:141-143` / `:151-164` / `:173-184` | `mcpPlan` / `mcpOffers` / `mcpExposedName` / `sanitizeMCPToolName` / `mcpAllowedNames` |
 | `agentkit/build/nettools.go:21-26` / `:37-65` / `:67-91` / `:196-200` | 三个超时与输出上限 / `dialPublicOnly` / `isPublicIP` / 搜索后端的唯一取值 |
 | `agentkit/build/policy.go:16-19` / `:55-60` / `:115-148` / `:163-182` / `:184-209` / `:242-258` | 两档 / `TierOf` / `newTable` / `Blocked` / `Filter` / `Layer` |
-| `agentkit/build/pool.go:34-82` / `:90-99` | `GetOrBuild`（键是名字+指纹） / `Lookup` |
-| `agentkit/build/provider.go:30-69` / `:71-86` / `:94-111` / `:113-119` / `:121-146` / `:148-160` / `:162-171` | `FromConfig` / `Resolve` / `BuildModel`（★ 这里装上截断守卫的模型包装） / `effectiveTier` / `RequestOptionsFor` / `shallowMerge` / `ReasoningFields` |
-| `agentkit/build/skill.go:89-186` / `:190-215` / `:217-233` | `scopedSkillBackend` / `ResolveSkillsDir` / `probeProjectSkills` |
+| `agentkit/build/pool.go:48-82` / `:90-99` | `GetOrBuild`（键是名字+指纹） / `Lookup` |
+| `agentkit/build/provider.go:30-69` / `:71-86` / `:94-112` / `:114-120` / `:122-147` / `:149-161` / `:163-172` | `FromConfig` / `Resolve` / `BuildModel`（★ 这里装上截断守卫的模型包装） / `effectiveTier` / `RequestOptionsFor` / `shallowMerge` / `ReasoningFields` |
+| `agentkit/build/skill.go:78-87` / `:190-215` / `:217-233` | `scopedSkillBackend` / `ResolveSkillsDir` / `probeProjectSkills` |
 | `agentkit/build/snapshot.go:147-185` / `:207-222` / `agentkit/build/spec.go:73-80` | `newSnapshot` / `snapshotFor`（身份是（配置对象，工具面）） / `policyOf`（三处合成一张表） |
-| `agentkit/build/tools.go:95-101` / `:103-150` / `:152-178` | `builtinAllowedTools` / `reservedTool` 与 `reservedToolNames`（★ 保留名带 owner：拥有它的那个 provider 可以提供它，别的不行） / `toolRegistry.Build` |
+| `agentkit/build/tools.go:95-101` / `:112-126` / `:55-57` | `builtinAllowedTools` / `reservedTool` 与 `reservedToolNames`（★ 保留名带 owner：拥有它的那个 provider 可以提供它，别的不行） / `toolRegistry.Build` |
 | `agentkit/build/callguard.go:30-49` / `:59-110` / `:133-161` / `:194-317` / `:319-465` / `:467-535` / `:537-579` | 两个标记与它们的常量 / `markTruncatedArgs` `markMalformedArgs` `isTruncatedArgs` `isMalformedArgs` `isJSONObject` / `repairDuplicatedTail`（去掉重复的尾巴） / `callGuardModel`（模型包装：★ 只有它看得见截断与重复的尾巴） / `guardCalls` `guardChunks` `markChunksTruncated`（★ 分块的参数要拼起来才能判） / `newCallGuardMiddleware`（★ 链首，所以它先于审批看到这次调用） / `truncationRefusal` `malformedRefusal` |
 
 ### 文件后端与运行期
@@ -1549,8 +1557,9 @@ github.com/ouranoshong/openheron/llm/common
 | `agentkit/fsx/configgate.go:11-35` | `ConfigGate` —— fsx 自己定义的窄接口 |
 | `agentkit/fsx/fsx.go:232-250` / `:739-775` / `:776-835` / `:809` | `resolveWrite`（写入边界） / `Write` / `Edit` —— 配置根的写在这里转交 / ★ `OldString` 找不到就报错 —— 文件工具的冲突语义 |
 | `agentkit/run/loop.go:125-140` / `:240-260` / `agentkit/run/runtime.go:593-599` / `:893-907` / `agentkit/run/turn.go:95-101` | `makePrepareAgent`（带钉住） / `settleAgent` / 恢复时取父 run 的树 / `parentRunOf` / `Turn.pin` |
-| `storage/runledger.go:169-176` | `Run.TreeFingerprint` |
-| `main.go:98` / `:111-121` / `:123-140` / `:149-157` / `:367-462` / `:440` `:459` `:460` / `:600` / `:614` / `:766-777` / `:792-821` / `:832-837` / `:839-844` | `--config-dir` / 用法 / `warnUnusedHomeConfig` / `configLoadError` / `setupConfig` / 三个 `override` 读点 / `FRONTEND_MODE` / `STATIC_DIR` / `agentConfig` / `Current` `Publish` / `configVersion` / `override` |
-| `api/v2_introspect.go:406` / `:481-482` / `api/v2_settings.go:64-90` / `:91-104` / `:201-216` | `deferred` 与 `configVersion` / `settingsFail` / manifest handler / `readPath` `writePath` |
-| `initcfg/initcfg.go:56-94` / `:198-224` | `BuildPlan` / `copySection` |
-| `.env.test` / `scripts/test-backend.sh:47` `:76` `:90-105` `:128-130` | 测试环境的约定与隔离脚本 |
+| `storage/runledger.go:134-177` | `Run.TreeFingerprint` |
+| `main.go:106` / `:111-121` / `:123-140` / `:149-157` / `:367-462` / `:440` / `:459` / `:460` / `:600` / `:614` / `:766-777` / `:792-821` / `:832-837` / `:839-844` | `--config-dir` / 用法 / `warnUnusedHomeConfig` / `configLoadError` / `setupConfig` / 三个 `override` 读点 / `FRONTEND_MODE` / `STATIC_DIR` / `agentConfig` / `Current` `Publish` / `configVersion` / `override` |
+| `api/v2_introspect.go:416` / `:481-482` / `api/v2_settings.go:64-90` / `:91-104` / `:201-216` | `deferred` 与 `configVersion` / `settingsFail` / manifest handler / `readPath` `writePath` |
+| `api/v2_secrets.go:48-79` / `:89-100` / `:151-182` / `:192-216` / `:231-263` / `:274-372` | 两组的视图 / `GET /v2/secrets` / `PUT /v2/secrets/:group/:name` / `DELETE` 一条 / `DELETE` 整组 / 助手（store、target、user、mark） |
+| `initcfg/initcfg.go:66-194` / `:212-237` | `BuildPlan` / `copySection` |
+| `.env.test` / `scripts/test-backend.sh:47` / `:76` / `:90-105` / `:128-130` | 测试环境的约定与隔离脚本 |

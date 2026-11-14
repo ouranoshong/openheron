@@ -146,8 +146,8 @@ shell 工具根本够不到你的机器，openheron 有 Docker Sandbox Kit 的�
 （Linux 上要 KVM），以及按 openheron 读密钥的方式绑在宿主上的模型密钥：
 
 ```sh
-printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
-    --host api.deepseek.com --env DEEPSEEK_API_KEY \
+printf '%s' "$LLM_DEEPSEEK_API_KEY" | sbx secret set-custom \
+    --host api.deepseek.com --env LLM_DEEPSEEK_API_KEY \
     --placeholder proxy-managed --value-stdin
 ```
 
@@ -203,18 +203,19 @@ HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
 
 ```bash
 cd /your/project
-export DEEPSEEK_API_KEY=sk-...     # 密钥只从环境变量读
-openheron                           # 配置在第一次启动时写出来
+export LLM_DEEPSEEK_API_KEY=sk-...   # 或者放进钥匙串（§4.2）
+openheron                             # 配置在第一次启动时写出来
 ```
 
 打开 <http://localhost:8080>。
 
-★ 密钥从环境变量读，而**怎么设**取决于你在哪个系统上 —— macOS 与 Linux 见 §4.2，
-Windows 见 §2.2。
+★ 密钥从环境变量**或**钥匙串读，而环境变量优先 —— §4.2 说这两者怎么搭在一起、
+各自住在哪；Windows 见 §2.2。
 
 ★ **服务端会自己写配置**：在还没有配置的项目里第一次启动时，它写出的那棵树与
-`openheron init` 写的完全一样（§2.3），用 DeepSeek 的 provider 模板，密钥从
-`DEEPSEEK_API_KEY` 读。★ 要换模型、换 provider，或者只想把配置写出来而先不启动
+`openheron init` 写的完全一样（§2.3），用 DeepSeek 的 provider 模板。★ **密钥不在那
+棵树里** —— provider 的名字说了算：`LLM_DEEPSEEK_API_KEY`，或者钥匙串条目
+`llm:deepseek`。★ 要换模型、换 provider，或者只想把配置写出来而先不启动
 服务端，就用 `openheron init`。
 
 ### 2.2 在 Windows 上跑第一次
@@ -223,7 +224,7 @@ PowerShell 里，从零到跑起来：
 
 ```powershell
 cd C:\path\to\your-project
-$env:DEEPSEEK_API_KEY = "sk-..."    # 密钥只从环境变量读
+$env:LLM_DEEPSEEK_API_KEY = "sk-..."   # 或者放进钥匙串（§4.2）
 openheron
 ```
 
@@ -233,23 +234,38 @@ openheron
 `init` 跑完会打印一行提示：
 
 ```
-the api key is read from the environment at request time: export DEEPSEEK_API_KEY=...
+the api key is read at request time from LLM_DEEPSEEK_API_KEY, or from the keyring entry llm:deepseek
+store one with: openheron secret set llm <provider>
 ```
 
 ★ 服务端自己写配置时，启动日志里报的是同一件事。
 
-★ 那行提示用的是 **Unix 的 `export`**，在 PowerShell 和 cmd.exe 里都跑不了 —— Windows 上
-对应的是 `$env:DEEPSEEK_API_KEY = "sk-..."`（PowerShell）或 `set DEEPSEEK_API_KEY=sk-...`
-（cmd.exe）。
+★ 那行提示说的是 **Unix 的 `export`**，在 PowerShell 和 cmd.exe 里都跑不了 —— Windows 上
+对应的是 `$env:LLM_DEEPSEEK_API_KEY = "sk-..."`（PowerShell）或
+`set LLM_DEEPSEEK_API_KEY=sk-...`（cmd.exe）。
 
 #### 密钥怎么设
 
-同一条命令，四种写法，作用范围不一样：
+一把密钥有**两个地方**可放，而 provider 的名字决定它们各叫什么：环境变量
+`LLM_DEEPSEEK_API_KEY`，以及钥匙串条目 `llm:deepseek`。★ **环境变量优先** ——
+整条链在 §4.2，这里是 Windows 那一半。
 
-- **当前这个 PowerShell 窗口** —— `$env:DEEPSEEK_API_KEY = "sk-..."`：只这个窗口。
-- **这个用户以后开的每个终端** —— `[Environment]::SetEnvironmentVariable('DEEPSEEK_API_KEY', 'sk-...', 'User')`：长期；★ **要开一个新终端**才生效。
-- **cmd.exe 当前窗口** —— `set DEEPSEEK_API_KEY=sk-...`：只这个窗口。
-- **cmd.exe 用户级** —— `setx DEEPSEEK_API_KEY sk-...`：长期；★ **值会被截断到 1024 个字符**。
+**放钥匙串 —— 磁盘上什么都不会留下。** 设置对话框的 **Secrets** 标签页（§6.3）能填，
+命令行也行：
+
+```sh
+openheron secret set llm deepseek
+```
+
+★ 值是从**标准输入**读的，所以它既不进 shell 历史，也不进进程表。这条命令会等你把
+密钥粘进去再按回车。
+
+**放环境变量 —— 四种写法，作用范围不一样：**
+
+- **当前这个 PowerShell 窗口** —— `$env:LLM_DEEPSEEK_API_KEY = "sk-..."`：只这个窗口。
+- **这个用户以后开的每个终端** —— `[Environment]::SetEnvironmentVariable('LLM_DEEPSEEK_API_KEY', 'sk-...', 'User')`：长期；★ **要开一个新终端**才生效。
+- **cmd.exe 当前窗口** —— `set LLM_DEEPSEEK_API_KEY=sk-...`：只这个窗口。
+- **cmd.exe 用户级** —— `setx LLM_DEEPSEEK_API_KEY sk-...`：长期；★ **值会被截断到 1024 个字符**。
 
 ★ **已经开着的 shell 留着它启动时的那份环境** —— 跑 `setx` 或
 `[Environment]::SetEnvironmentVariable` 的那个窗口看不到这个变量，得**另开一个终端**。
@@ -257,23 +273,23 @@ the api key is read from the environment at request time: export DEEPSEEK_API_KE
 ★ **密钥是在加载配置时读的**（§4.2），所以变量要设到**启动 openheron 的那个进程**上：
 事后在另一个终端补设的，运行中的服务看不到。
 
-★ **Windows 上变量名不区分大小写** —— `$env:deepseek_api_key` 就是 `DEEPSEEK_API_KEY`
-这个变量；macOS 与 Linux 上不是（§4.2）。
+★ **Windows 上变量名不区分大小写** —— `$env:llm_deepseek_api_key` 就是
+`LLM_DEEPSEEK_API_KEY` 这个变量；macOS 与 Linux 上不是（§4.2）。
 
-**把密钥放进文件。** 不想让密钥待在环境变量里，就用 `@file:` 指向一个文件：
+**不想让密钥待在环境变量里。** 变量里也可以装一个**路径**，而不是密钥本身 ——
+值以 `@file:` 开头，openheron 去读那个文件：
 
-```yaml
-api_key: '@file:C:\Users\you\deepseek.key'   # 单引号
-api_key: "@file:C:/Users/you/deepseek.key"    # 或者正斜杠
+```powershell
+$env:LLM_DEEPSEEK_API_KEY = '@file:C:\Users\you\deepseek.key'
 ```
 
-★ **Windows 上双引号加反斜杠不行**：YAML 的双引号里 `\` 是转义符，`\U` 不是合法转义，
-整个档案解析失败（`yaml: did not find expected hexdecimal number`）。用单引号，或者把
-路径写成正斜杠。★ 路径要**绝对**的：相对路径是相对**启动 openheron 时所在的目录**（§4.2）。
+★ **引号不能省**：没有引号，`@` 就成了词分隔符。★ **路径要绝对** —— 相对路径是相对
+**启动 openheron 时所在的目录**（§4.2）—— 而且 ★ **路径解析不了是启动错误**，
+不是提醒。
 
 **怎么确认配好了。** 浏览器打开 `http://localhost:8080/v2/config`，那个 provider 条目里
-`hasApiKey` 应该是 `true`；启动日志里没有 `api_key env DEEPSEEK_API_KEY is not set`
-这一行，才算设上了（§4.2）。
+`hasApiKey` 应该是 `true`，`keySource` 会说清密钥是从哪儿来的；启动日志里没有
+`no key for this provider` 这一行，才算设上了（§4.2）。
 
 #### 启动前
 
@@ -341,7 +357,6 @@ your/project/
 | `--provider <name>` | 选模型厂商，默认 `deepseek` |
 | `--model <name>` | 选模型，默认 `deepseek-flash` |
 | `--base-url <url>` | 厂商端点（**含路径**，从厂商文档抄） |
-| `--env <NAME>` | 密钥的环境变量名，默认 `<PROVIDER>_API_KEY` |
 | `--no-tools` | 把 `tools/` 下的工具配置留下不写 |
 | `--force` | 覆盖已存在的文件 |
 | `--dry-run` | 只打印要写什么，不落盘 |
@@ -449,7 +464,6 @@ agent 带着摘要往前走。它有三种写法：
 ```yaml
 type: openai_compat
 base_url: https://api.deepseek.com
-api_key: ${DEEPSEEK_API_KEY}
 timeout: 5m
 
 models:
@@ -467,7 +481,7 @@ models:
 |---|---|
 | `type` | 协议类型，目前是 `openai_compat` |
 | `base_url` | 端点，**含路径**，从厂商文档抄 |
-| `api_key` | **环境变量名**，写成 `${NAME}` —— 不能写字面量 |
+| `api_key` | **已退休** —— 密钥来自环境变量还是钥匙串，由 provider 自己的**文件名**说了算（§4.2） |
 | `timeout` | 超时，带单位（`5m` / `30m`） |
 | `models[].id` | 模型名 |
 | `models[].context_window` | 上下文窗口 —— 压缩阈值就是拿它量的 |
@@ -477,9 +491,9 @@ models:
 | `hint_keys` | 端点的字段名，用于请求被拒时给出准确提示 |
 | `extra` | 厂商级方言，透传给所有请求 |
 
-★ **`api_key` 只能写环境变量名**（`${OPENAI_API_KEY}`）或文件引用（`@file:/path`）。
-在配置里写字面量密钥，配置编辑器会直接拒绝保存 —— 密钥不该进仓库。★ `@file:`
-这种写法在 YAML 里**必须加引号**；下面那节讲各系统的密钥从哪来。
+★ **`api_key:` 已退休。** 还带着这一行的档案**会被拒** —— 加载时拒，从配置编辑器
+保存时也拒 —— 而那句话会说清密钥现在从哪来：由 provider 自己的名字推导出来的那个环境
+变量与那条钥匙串条目。★ 密钥不该进仓库：它永远不会被写进配置树。
 
 ★ **压缩阈值属于 Agent，不属于模型。** `context_window` 是模型的；`summarize_at` 是 Agent 的 ——
 这个 Agent 把自己的上下文填到多少才压缩，是它自己的策略。同一个模型可以服务多个策略不同的
@@ -494,36 +508,36 @@ Agent。模型档案里留着的 `summarize_at` 不再被读，openheron 加载�
 
 #### 密钥从哪来
 
-档案只写**密钥在哪**，从不写密钥本身。有两种写法，两种都在**加载配置时**读取：
+模型档案已经不再提密钥了。★ **密钥从哪来，由 provider 的文件名说了算** ——
+`llm/<vendor>.yaml` 里不再有 `api_key:` 这一行，还留着它的文件会被拒（见上面那条）。
 
-```yaml
-# .openheron/llm/deepseek.yaml
-api_key: ${DEEPSEEK_API_KEY}                  # 一个环境变量
-api_key: "@file:/etc/openheron/deepseek.key"  # 同一个密钥，从文件读
-```
+对 provider `deepseek` —— 也就是文件 `llm/deepseek.yaml` —— 密钥有两个可能的地方：
 
-★ **`@file:` 的引号不能省。** `@` 是 YAML 的保留字符，不加引号的
-`api_key: @file:/path` 根本解析不了（"found character that cannot start any token"），
-那个档案永远加载不上。`${NAME}` 不需要引号。
+| | 在哪 |
+|---|---|
+| 环境变量（覆盖层） | `LLM_DEEPSEEK_API_KEY` |
+| 钥匙串（存放地） | 那一条 `llm:deepseek` |
 
-★ **密钥是在加载配置时读的** —— 所以要在**启动 openheron 之前**把变量设好。
-事后再在另一个终端里 export，运行中的服务看不到它；把档案重新保存一次会重载配置，
-重载时会再读一遍这个变量。
+★ **环境变量优先。** 解析链是：先环境变量，后钥匙串。先问环境变量，是因为它才是
+容器、CI runner 或操作者 shell 交给这个进程「就这一轮」的东西；钥匙串是机器自己留着
+的。★ 所以变量设着的时候，存在钥匙串里的那条**不在生效位置** —— 界面（§6.3）与
+`openheron secret list` 都会把这件事说出来，因为「存了」与「生效」是两个问题。
 
-★ **Windows 上怎么设这个变量，见 §2.2** —— PowerShell 与 cmd.exe 的四种写法、
-「变量名不区分大小写」，还有 `@file:` 在 Windows 上的引号坑，都在那里。
+★ **名字是推导出来的，不是你起的。** `llm/deepseek.yaml` 只可能是 provider
+`deepseek`，所以它只可能是 `LLM_DEEPSEEK_API_KEY` 与 `llm:deepseek`。一条规则代替
+一张表 —— 而且档案没法和自己的文件名唱反调。★ MCP 那边是同一个规矩：
+`mcps/github.yaml` 就是 `MCP_GITHUB_TOKEN` 与钥匙串条目 `mcp:github`（§4.7）。
 
-**macOS 与 Linux。**
+**放环境变量。** macOS 与 Linux：
 
 ```sh
-export DEEPSEEK_API_KEY=sk-...
+export LLM_DEEPSEEK_API_KEY=sk-...
 ```
 
 想长期有效，就把这一行写进 `~/.zshrc`（macOS）、`~/.bashrc`（Linux 上的 bash）
-或 `~/.profile`（任何 POSIX shell）。
-
-★ **macOS 与 Linux 上变量名区分大小写。** `$env:deepseek_api_key` 在那边是另一个变量，
-那边档案会读到 `api_key env DEEPSEEK_API_KEY is not set`；Windows 上相反，不区分（§2.2）。
+或 `~/.profile`（任何 POSIX shell）。★ **macOS 与 Linux 上变量名区分大小写。**
+`$env:llm_deepseek_api_key` 在那边是另一个变量，那边这个 provider 就会说自己没有
+密钥；Windows 上相反，不区分（§2.2）。
 
 ★ **变量要到达的是进程，不是你的登录会话。** `~/.bashrc` 那一行只有**交互式 bash**
 会读：systemd 单元、launchd 作业、容器和 CI runner 各自有自己的环境，
@@ -532,45 +546,61 @@ export DEEPSEEK_API_KEY=sk-...
 | openheron 跑在哪 | 变量放哪 |
 |---|---|
 | 终端里 | `export ...`（macOS 与 Linux）/ `$env:... = ...`（Windows，见 §2.2） |
-| systemd 单元（Linux） | 单元文件里的 `Environment=DEEPSEEK_API_KEY=sk-...`，然后 `systemctl daemon-reload` |
+| systemd 单元（Linux） | 单元文件里的 `Environment=LLM_DEEPSEEK_API_KEY=sk-...`，然后 `systemctl daemon-reload` |
 | launchd 作业（macOS） | 作业 plist 里的 `EnvironmentVariables` |
-| 容器里 | `docker run -e DEEPSEEK_API_KEY=sk-...`，或 `--env-file .env` |
+| 容器里 | `docker run -e LLM_DEEPSEEK_API_KEY=sk-...`，或 `--env-file .env` |
 | CI | runner 自己的密钥库 —— 存变量，不是存密钥 |
 
-**`@file:` 这种写法。** 文件里放的就是那个变量本来装的密钥，在加载时读，内容会去掉首尾空白。
-两件事要知道：
+**放钥匙串。** 设置对话框的 **Secrets** 标签页（§6.3）能填，命令行也行：
+
+```sh
+openheron secret set llm deepseek
+```
+
+★ 值是从**标准输入**读的，所以它既不进 shell 历史，也不进进程表。钥匙串是机器自己的
+凭据库 —— Windows 凭据管理器、macOS 钥匙串、Linux Secret Service —— 所以放在那儿的
+密钥不是你项目里的一个文件。
+
+**`@file:` 这种写法。** 变量里也可以装一个**路径**，而不是密钥本身：
+
+```sh
+export LLM_DEEPSEEK_API_KEY='@file:/etc/openheron/deepseek.key'
+```
+
+文件里放的就是那个变量本来装的密钥，在加载时读，内容会去掉首尾空白。两件事要知道：
 
 - ★ **相对路径是相对启动 openheron 时所在的那个目录**，不是相对配置根 —— 用绝对路径。
 - ★ **路径不存在是启动错误**，不是提醒：
-  `config: parse llm/deepseek.yaml: api_key: read secret file: open /etc/openheron/deepseek.key: no such file or directory`。
+  `config: parse llm/deepseek.yaml: read secret file: open /etc/openheron/deepseek.key: no such file or directory`。
   这个区别是刻意的：变量没设是运行期状态，路径写错是配置本身写错了。
 
-**怎么知道配好了。** 哪个变量没设，启动日志会点名：
+**怎么知道配好了。** 哪个 provider 没密钥，启动日志会点名：
 
 ```
-[main] config notice notice="llm/deepseek.yaml: api_key env DEEPSEEK_API_KEY is not set; calls to this endpoint will fail with 401 Unauthorized"
+[main] config notice notice="llm/deepseek.yaml: no key for this provider: LLM_DEEPSEEK_API_KEY is not set and the keyring holds no llm:deepseek; calls to this endpoint will fail with 401 Unauthorized"
 ```
 
 ★ 这条提醒**不会拦住服务**：openheron 照常起来，Agent 照常建起来，
 而那个端点第一次被调用时回的是 `401 Unauthorized`。同一批提醒也在
 `GET /v2/config` 与 `GET /v2/health` 的 `deferred` 里。
 
-★ **变量设成空串不等于没设。** `DEEPSEEK_API_KEY=` —— 设了，但里面是空的 ——
-会解析成一个空密钥，而且**一条提醒都不会有**，所以没有提醒不等于没有问题。
-要看的是 `GET /v2/config` 里的 `hasApiKey` 字段，那个 provider 条目长这样：
+★ **变量设成空串不等于没设。** `LLM_DEEPSEEK_API_KEY=` —— 设了，但里面是空的 ——
+它解析出来的结果是**没有密钥**，而提醒里会明明白白写着
+`LLM_DEEPSEEK_API_KEY is set but empty` —— 一个看得见、也改得掉的错误。变量压根没设时
+是另一句话：`LLM_DEEPSEEK_API_KEY is not set and the keyring holds no llm:deepseek`。
+要看的是 `GET /v2/config` 里的 `hasApiKey` 与 `keySource` 两个字段，那个 provider 条目
+长这样：
 
 ```json
-{"id":"deepseek","baseUrl":"https://api.deepseek.com","hasApiKey":true,"models":[{"id":"deepseek-flash","contextWindow":1310720}]}
+{"id":"deepseek","baseUrl":"https://api.deepseek.com","hasApiKey":true,"keySource":"env:LLM_DEEPSEEK_API_KEY","models":[{"id":"deepseek-flash","contextWindow":1310720}]}
 ```
 
 找到密钥时 `hasApiKey` 是 `true`，没有密钥时是 `false` —— 而密钥本身永远不出进程。
-★ **把变量掏空的方式决定了你落在哪一种**：`$env:DEEPSEEK_API_KEY = ""` 会留下一个
-空值（静默），`$env:DEEPSEEK_API_KEY = $null` 是把变量删掉（提醒照常出现）；
-Unix shell 上是 `export DEEPSEEK_API_KEY=` 与 `unset DEEPSEEK_API_KEY` 这一对。
-
-★ **变量名是你自己定的。** `openheron init --env DEEPSEEK_API_KEY`
-会把档案写成 `${DEEPSEEK_API_KEY}`；档案写了别的变量名，环境里就得有那个变量 ——
-要紧的是两边说的是同一个。
+`keySource` 说的是**地方**：`env:LLM_DEEPSEEK_API_KEY`、`keyring:llm:deepseek`、
+`file:/etc/openheron/deepseek.key` 或者 `none`。★ **把变量掏空的方式决定了你落在
+哪一种**：`$env:LLM_DEEPSEEK_API_KEY = ""` 会留下一个空值（提醒是「set but empty」），
+`$env:LLM_DEEPSEEK_API_KEY = $null` 是把变量删掉（提醒是「not set」）；
+Unix shell 上是 `export LLM_DEEPSEEK_API_KEY=` 与 `unset LLM_DEEPSEEK_API_KEY` 这一对。
 
 ### 4.3 哪些工具要问
 
@@ -787,7 +817,7 @@ transport: stdio
 command: npx
 args: ["-y", "@modelcontextprotocol/server-github"]
 env:
-  GITHUB_TOKEN: ${GITHUB_TOKEN}
+  GITHUB_TOKEN: ${MCP_GITHUB_TOKEN}
 timeout: 30s
 call_timeout: 60s
 tools: []
@@ -801,7 +831,7 @@ allows: [read_issue, list_issues]
 transport: http
 url: https://mcp.example.com/mcp
 headers:
-  Authorization: Bearer ${REMOTE_TOKEN}
+  Authorization: Bearer ${MCP_REMOTE_TOKEN}
 timeout: 30s
 call_timeout: 60s
 ```
@@ -822,6 +852,12 @@ call_timeout: 60s
 ★ **文件名必须匹配 `^[a-z0-9]+(_[a-z0-9]+)*$`。** 带一串连续下划线的名字会被拒绝：
 暴露出来的名字 `mcp__a__b__x` 以后没法反解回来 —— 那是服务器 `a` 带工具 `b__x`，
 还是服务器 `a__b` 带工具 `x`？
+
+★ **凭据的名字由文件名推导。** `mcps/github.yaml` 就是服务器 `github`，所以它的令牌是
+`MCP_GITHUB_TOKEN`，钥匙串条目是 `mcp:github` —— 与模型那边同一个规矩（§4.2）。
+★ 于是 `env:` 或 `headers:` 里的 `${MCP_GITHUB_TOKEN}` 不是「碰巧拼成这样的变量」：
+它就是**那台服务器的令牌**，同样先查环境变量、后查钥匙串。★ 其余的 `${NAME}`
+保持原意 —— 一次普通的环境变量查找。
 
 ★ **`openheron init` 写三台服务器** —— `mcps/fetch.yaml`、`mcps/time.yaml` 和
 `mcps/deepwiki.yaml`。★ 每一份都**定义**一台服务器，所以一份解析不了的文件不是
@@ -970,7 +1006,7 @@ Agent 是一次迟早要来的加载错误。
 读是另一个问题，而且正是 agent 想知道「进程到底跑着什么」时会问的那个。
 
 ★ **文件工具走的是同一套检查。** `write_file` 与 `edit_file` 落在配置根里的路径会交给
-配置服务，于是同样的闸门照跑：树必须还装得上、明文的密钥不许落进模型档案里、能跑的
+配置服务，于是同样的闸门照跑：树必须还装得上、模型档案里不许落一条 `api_key`、能跑的
 Agent 不许从树里消失。★ `edit_file` 也经服务读文件，所以它带着 revision，跟它抢跑的那次
 改动会被拒掉；`write_file` 不带 revision，所以整篇写入是「后写者赢」—— 闸门照样跑。
 
@@ -1097,8 +1133,8 @@ agent:
   **是哪个文件还在指着它**、**要移除什么** —— 先把引用去掉，再删这个文件。
   模型档案（某个 Agent 在用）与被委派的 Agent（另一个 Agent 在委派它）也一样。
 - `server/` **不可编辑**（不热重载，改了要重启）。
-- **密钥字面量被拒** —— `api_key must be a reference, not a literal`。
-  要用 `${ENV_VAR}` 或 `@file:/path`。
+- **`api_key` 这一行已退休** —— 还带着它的档案会被拒，而那句话会点名替代它的变量与
+  钥匙串条目（§4.2）。
 - **没有 YAML 内容的文件被拒** —— 纯空、或者只有注释的文件根本没有配置。报错会点名
   这个文件需要哪些字段；在 `tools/` 下还会说清是哪个工具缺了什么。
 - **`mcps/` 下的文件必须叫 `<server>.yaml`**，服务器名字还要匹配 §4.7 的模式 ——
@@ -1107,6 +1143,34 @@ agent:
 - **新建文件的文件名被服务端拒绝时，对话框不关**：你写的东西还在，服务端那句话就在输入框
   旁边 —— 文件名规则是服务端的（`server/` 只读、`tools/` 只认五个名字、`mcps/` 只认
   `<server>.yaml`），所以拒绝是从服务端回来的，不是对话框里那份副本给的。
+
+#### Secrets 标签页
+
+同一个对话框有**两个标签页**：**Files**（上面那个配置编辑器）与 **Secrets**。
+Secrets 标签页列出密钥所在的两个命名空间 —— **Providers** 与 **MCP servers** ——
+以及配置里声明的那些实体。
+
+选中一个实体，面板给出三行，**没有值**：
+
+| 行 | 是什么意思 |
+|---|---|
+| Stored in | 密钥存在哪 —— `keyring:llm:deepseek`，或者 `—` |
+| In effect | 真正在用的是哪一把 —— 环境变量那份、钥匙串那份、文件那份，或者 `none` |
+| Environment | 推导出来的那个变量，以及它设了没有 |
+
+★ **值只写不读。** 面板永远不显示密钥，连长度都不给：输入框是密码框，每次写完就清空，
+而值只进钥匙串，别处哪也不去 —— 不进配置树、不进日志行、也不回传给浏览器。
+
+★ **「存了」与「生效」不一致的时候，就是环境变量压过了钥匙串** —— 而这正是整个设计的
+坑：密钥写了，写的时候说的是「stored」，实际用的是另一把。面板会把这个说成一条警告，
+`openheron secret set` 也是一样。
+
+★ **整组删除要先问一句。** 「Remove all providers」删的是配置里声明的那些实体的模型
+密钥 —— 而且只有那些；MCP 服务器的令牌在另一个命名空间里，不在这次删除的范围里。
+确认框会写明范围与数量。
+
+★ **清单由配置驱动。** 实体没了的条目 —— 你删掉的 provider 文件 —— 是看不见的，
+在这里也删不掉：钥匙串不能枚举，所以没有办法知道它还在那儿。
 
 ### 6.4 上下文仪表盘
 
@@ -1337,6 +1401,11 @@ Agent 拿到两个工具：
 ```
 openheron [--config-dir <path>] [--project-root <path>]   start the server
 openheron init [options]                                   generate a minimal runnable configuration
+openheron secret set <llm|mcp> <name>                      store a key in the keyring (the value is read from stdin)
+openheron secret get <llm|mcp> <name>                      print the key that is in effect
+openheron secret list [--json]                             the entities and which key is in force
+openheron secret remove <llm|mcp> <name>                   remove one entry
+openheron secret remove <llm|mcp>                          remove every entry of that group
 openheron kb index [--config-dir] [--json] [files...]      build the index
 openheron kb search [--config-dir] <query>                 search
 openheron kb status [--config-dir] [--json]                inspect the index
@@ -1382,6 +1451,10 @@ openheron version                                         print the version
 | GET | `/v2/settings` | 可编辑项清单 |
 | GET/POST/PUT/DELETE | `/v2/settings/item` | 配置读写（带 `baseRevision`） |
 | POST | `/v2/settings/validate` | 不落盘地校验一份配置 |
+| GET | `/v2/secrets` | 两个命名空间，以及每把密钥在哪儿（§6.3） |
+| PUT | `/v2/secrets/:group/:name` | 把一把密钥存进钥匙串（`{"value":"..."}`） |
+| DELETE | `/v2/secrets/:group/:name` | 删掉一把密钥 |
+| DELETE | `/v2/secrets/:group` | 删掉那一组里的每把密钥 |
 
 ### 9.1 跑一轮
 
@@ -1489,3 +1562,13 @@ POSIX shell，机器上一个都没有时退回 `cmd.exe`；两种情况工具�
 它用自己的引擎搜：同样的正则、同样的上限、同样的预算，对「这个文件在不在」给出的
 答案也一样。少的是：不读 `.gitignore`，认识的文件类型更少 —— 不认识的类型会被
 拒绝，而不是猜一个。★ 启动日志会打印挑中的是哪个引擎；想用另一个就装上 ripgrep。
+
+**Q：密钥该放哪？**
+不放配置里。**provider 的文件名**说了算：`llm/deepseek.yaml` 就是环境变量
+`LLM_DEEPSEEK_API_KEY`，或者钥匙串条目 `llm:deepseek` —— 环境变量优先。
+用 `openheron secret set llm deepseek` 存一把，或者在设置对话框的 **Secrets**
+标签页里存（§6.3）；要让容器或 CI runner 看见，就 export 那个变量（§4.2）。
+
+**Q：启动时说 `api_key` 这一行不再被读了？**
+那个档案里还留着旧的那一行。★ 把它删掉：密钥已经不在配置里了，而那句话会点名
+替代它的变量与钥匙串条目（§4.2）。

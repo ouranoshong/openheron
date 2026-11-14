@@ -15,7 +15,7 @@ one — change one and change the other.
 > `docs/user-manual.md` / `docs/user-manual_zh.md` (user guide),
 > `docs/developer-manual.md` / `docs/developer-manual_zh.md` (developer guide).
 >
-> **and five Chinese-only documents** under `docs/` — the architecture and code-design
+> **and six Chinese-only documents** under `docs/` — the architecture and code-design
 > ones. ★ Their Chinese content **took over the plain name**: `docs/config-design.md`
 > **is** the Chinese document — there is no `_zh` twin and no English one:
 > `docs/config-design.md` (the configuration system — the config root and its three
@@ -27,10 +27,12 @@ one — change one and change the other.
 > `docs/tools-design.md` (tools and integrations — where a tool comes from, the bounded
 > filesystem backend, the MCP integration, and the Docker Sandbox Kit),
 > `docs/ui-design.md` (the interface and its resources — attachments and motion),
+> `docs/secrets-design.md` (the secret system — the naming of the two namespaces, the
+> resolution chain, the keyring, and the write surface),
 > `docs/pitfalls.md` (the pitfall register — the traps this tree has hit, what caused
 > each of them, and how it was handled).
 > **Every other design document under `docs/` still lives in the upstream repository** ——
-> any `docs/xxx.md` reference below that is not one of these five, is the upstream copy.
+> any `docs/xxx.md` reference below that is not one of these six, is the upstream copy.
 > If you cannot get hold of it before changing semantics, ask first; do not change
 > configuration or interfaces from memory.
 >
@@ -47,7 +49,7 @@ one — change one and change the other.
 > `sandbox-kit/BUILDING.md`) are bilingual for the same reason.
 >
 > ★ The four bilingual sets describe **what the code surface already is**; the Chinese-only
-> designs say the same about their own subject: each of the five **describes the code as
+> designs say the same about their own subject: each of the six **describes the code as
 > it is**, and the proposals that have not landed are collected in its own "待决" section.
 > `docs/config-design.md` covers **the configuration system** — the config root and its
 > three levels, the partitions and their file specs, loading and precedence, the tool
@@ -69,6 +71,12 @@ one — change one and change the other.
 > `docs/ui-design.md` covers **the interface and its resources** — how an uploaded file
 > lands on disk, what the server does to it, how the interface shows it, and the motion
 > tokens with the reduced-motion fallback.
+> ★ And `docs/secrets-design.md` covers **the secret system** — the two namespaces
+> (`LLM_<PROVIDER>_API_KEY` / `llm:<provider>` and `MCP_<SERVER>_TOKEN` /
+> `mcp:<server>`), the one resolution chain they share (the environment overrides the
+> keyring), the write surface (`/v2/secrets` and `openheron secret`), and the
+> `Secrets` tab in the settings dialog. **Its body describes a proposal that is being
+> landed** — it says "as it is" once the code is in.
 > ★ And `docs/pitfalls.md` is the **pitfall register**: the traps this tree has hit, what
 > caused each of them, how it was fixed or what boundary it still has. Read it before
 > touching a subsystem you have not touched yet — it is cheaper than rediscovering the
@@ -421,6 +429,7 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 | `docs/runtime-design.md` | **Runtime design** — a run as a durable row with a lease and a fence, the one-turn-per-session admission gate, context usage and compaction, and the logging assembly (**the body describes the code as it is**) |
 | `docs/tools-design.md` | **Tools and integrations design** — where a tool comes from, the bounded filesystem backend in `agentkit/fsx`, the MCP integration, and the Docker Sandbox Kit (**the body describes the code as it is**) |
 | `docs/ui-design.md` | **Interface and resources design** — how an uploaded file lands on disk, what the server does to it, how the interface shows it, and the motion tokens (**the body describes the code as it is**) |
+| `docs/secrets-design.md` | **Secret system design** — the two namespaces, the shared resolution chain, the keyring backend, the write surface, and the interface entry (**the body describes a proposal being landed**) |
 | `docs/pitfalls.md` | **Pitfall register** — the traps this tree has hit, what caused each of them, and how it was fixed or what boundary it still has |
 
 ★ For the bilingual set, the file without a suffix is the **English main version**; `_zh` is the

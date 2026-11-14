@@ -34,9 +34,11 @@ written into: `--config-dir` and `$OPENHERON_CONFIG_DIR` mean a directory the
 user chose, and an empty one is their decision. The repository ships
 `.openheron-example/` (the sample) but not `.openheron/` (the real one: it
 holds your own model and API key, so it is git-ignored). ★ **`task init` is the
-explicit path**: it takes `--model` / `--provider` / `--env`, and it writes only
+explicit path**: it takes `--model` / `--provider` / `--base-url`, and it writes only
 the files that are missing and keeps the ones already there, so running it
-twice changes nothing.
+twice changes nothing. ★ The **key** is not one of those files: it comes from
+`LLM_<PROVIDER>_API_KEY` or the keyring entry `llm:<provider>`, and `init` prints
+where to put it (§3.14).
 
 ## 2. Repository layout
 
@@ -44,6 +46,7 @@ twice changes nothing.
 openheron/
 ├── main.go            # entry point: flags, config root, server startup
 ├── initcmd.go         # openheron init
+├── secretcmd.go       # openheron secret
 ├── kbcmd.go           # openheron kb
 ├── api/               # HTTP routing, SSE, error envelope
 ├── agentkit/
@@ -124,7 +127,7 @@ validation, reloading, writing).
 
 ★ **The vocabulary the two halves share lives in `decl` too, and that is a
 dependency-direction fact, not a convenience.** The built-in tool names
-(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:366`) are read by **both** ends:
+(`decl.BuiltinToolNames`, `agentkit/spec/decl/decl.go:383`) are read by **both** ends:
 the loader checks the names an agent's `tools:` list mentions against them, and the
 builder refuses a provider that claims one of them (`reservedToolNames`,
 `agentkit/build/tools.go:126`). Neither end may import the other — the loader sits
@@ -186,7 +189,7 @@ Recomputing either one is the same mistake twice.
    and the ones a file's own `allows:` lists. You write no permission code.
 
 5. **Do not collide with a reserved name.** The names live in `decl.BuiltinToolNames`
-   (`agentkit/spec/decl/decl.go:366`): `ls` `read_file` `write_file` `edit_file` `glob`
+   (`agentkit/spec/decl/decl.go:383`): `ls` `read_file` `write_file` `edit_file` `glob`
    `grep` `execute` `task` `write_todos` `skill`. A collision fails at `Build` time.
    ★ **They live in `decl` and not in the build package because both halves need
    them**: the builder refuses a provider that claims one of these names
@@ -197,8 +200,8 @@ Recomputing either one is the same mistake twice.
    table at the wrong tool.
 
    ★ **A name that comes from a server is namespaced.** An MCP tool is exposed under
-   `decl.MCPToolPrefix` (`agentkit/spec/decl/decl.go:593`) and
-   `decl.MCPSeparator` (`agentkit/spec/decl/decl.go:602`), so the agent's table
+   `decl.MCPToolPrefix` (`agentkit/spec/decl/decl.go:610`) and
+   `decl.MCPSeparator` (`agentkit/spec/decl/decl.go:619`), so the agent's table
    narrows a whole server with a prefix instead of a list of names. ★ The composed
    name is never parsed back: `Table.Blocked` (`agentkit/build/policy.go:163`)
    matches prefixes, so nothing has to split a name to learn which server it
@@ -349,7 +352,7 @@ Say you want a new `mcps/` directory:
    and **non-hot-reloaded** directories clearly apart — whether a directory is hot
    changes what users expect.
 
-2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`agentkit/spec/config.go:630`) and
+2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`agentkit/spec/config.go:720`) and
    implement `loadXXX`.
 
    ★ **Two shapes the recipe did not have before `skills/`.** A partition may be
@@ -418,7 +421,7 @@ definition — there is no `enabled` key.
 - **Declared** by the constant `DirMCP = "mcps"` (`agentkit/spec/config.go:26`) and the
   `Categories` entry (`agentkit/spec/config.go:85`), which is editable, hot and
   `.yaml`.
-- **Loaded** by `loadMCP` (`agentkit/spec/load.go:470`): one file, one server.
+- **Loaded** by `loadMCP` (`agentkit/spec/load.go:489`): one file, one server.
 - ★ **"Hot" for this partition means the client is rebuilt.** The declaration is the
   server's identity, so a changed declaration means a changed server: the old client
   is torn down and a new one is started (`agentkit/build/mcpmanager.go:447`), keyed on
@@ -470,7 +473,7 @@ Editing `agents/*.md` is enough; no code change is needed. But keep in mind:
   until it is fixed, but the process does, and the editor that fixes it lives there.
 - An agent referenced by `subagents` must exist and must not form a cycle — both are
   **startup errors**. ★ A sub-agent that was left out is dropped from its parents'
-  `subagents:` (`agentkit/spec/load.go:707`), so the delegation tool never offers a worker
+  `subagents:` (`agentkit/spec/load.go:747`), so the delegation tool never offers a worker
   that cannot run — and a `subagents:` entry pointing at such an agent is not a cycle or a
   dangling reference, because the settled tree no longer mentions it.
 - Exceeding `max_depth` is a **startup error**, never a silent truncation.
@@ -525,7 +528,7 @@ none** — an absent key and an empty list mean the same thing, and they mean "n
 
 ★ **Do not write `disabled_tools`.** It was the **opposite** of `tools` — one removed
 tools, the other names them — so the loader **refuses** the file
-(`agentkit/spec/load.go:108`) rather than renaming the key: renaming it alone would
+(`agentkit/spec/load.go:127`) rather than renaming the key: renaming it alone would
 have turned a blacklist into a whitelist without saying so. The message says which way
 round the two mean. ★ **There is no alias**: an alias that still worked with the old
 meaning would keep the blacklist alive, and an alias that worked with the new one would
@@ -540,7 +543,7 @@ the list removed. ★ **There is no "nothing to do" shortcut**
 ★ **MCP has one key, and mounting is the grant.** `mcps:` says which servers are
 **mounted** — and mounting one hands the agent **all of that server's tools**. ★ `tools:`
 does not name MCP tools: an `mcp__<server>__*` entry there grants nothing, is
-dropped, and is reported as a **notice** (`agentkit/spec/load.go:943`
+dropped, and is reported as a **notice** (`agentkit/spec/load.go:983`
 `checkAgentMCPNames`) — not a load-time error, because the meaning changed rather than
 contradicting itself. ★ **The cost is real**: narrowing one agent's MCP tools is no longer
 possible — the server's own file filters them, and that filter is shared by every agent
@@ -550,7 +553,7 @@ file's `allows:`, and the default there is still `ask` — mounting is not appro
 #### The three notices
 
 All three are **notices**, not errors — the configuration is legal, it just does not say
-what the author meant (`agentkit/spec/load.go:815` `noticeAgentTools`):
+what the author meant (`agentkit/spec/load.go:855` `noticeAgentTools`):
 
 | Notice | What it means | What to do |
 |---|---|---|
@@ -580,6 +583,11 @@ different one — it says the line does not do what it reads as.
 4. Sampling-parameter precedence (see the assertions in `llm/provider_test.go`):
    **the agent's explicit parameters > `extra` > the vendor default**.
    `extra` is layered, with later layers overriding earlier ones.
+
+5. The **key** is not in the profile any more: the provider's file name says where
+   it comes from — `LLM_<PROVIDER>_API_KEY` or the keyring entry `llm:<provider>`
+   (§3.14). ★ A profile that still carries an `api_key:` line is **refused**, with a
+   message that names both.
 
 ### 3.6 Context compaction
 
@@ -1220,6 +1228,72 @@ context would take the checkpoint with it.
 framework stops the loop and cancels the agent itself, and that is a real
 read/write race — a known boundary, not a fixed one (`docs/pitfalls.md` §1.1).
 
+### 3.14 ★ The secret system
+
+A secret is **named**, not placed. The name says which namespace it belongs to, and
+where the value comes from is a separate question with one answer: **the environment
+first, the keyring second**.
+
+| | the model key of `deepseek` | the token of `mcps/github` |
+|---|---|---|
+| the environment (the override) | `LLM_DEEPSEEK_API_KEY` | `MCP_GITHUB_TOKEN` |
+| the keyring (the store) | `llm:deepseek` | `mcp:github` |
+
+★ **The environment is asked first** because it is the **override**: a container, a CI
+runner and a sandbox have no keyring, and there the environment is the only place the
+key can be. The other way round, a stale keyring entry would silently win over the
+value an operator just exported, and nobody would know which one the server used.
+
+★ **The name is derived, never written down.** The provider's **file name** is the
+provider's id (`agentkit/spec/load.go:19`), so `llm/deepseek.yaml` can only ever be
+`LLM_DEEPSEEK_API_KEY` and `llm:deepseek`. One rule instead of a table — and a profile
+cannot disagree with its own file name. ★ The MCP side is the same shape
+(`agentkit/spec/load.go:560`): a `${MCP_GITHUB_TOKEN}` in `env:` or in `headers:` is
+**that server's token**, while every other `${NAME}` keeps its old meaning — a plain
+environment lookup.
+
+| Contract | Where |
+|---|---|
+| the two namespaces and the derived names | `agentkit/spec/secret.go:33` |
+| `SecretStore` — the interface the keyring implements | `agentkit/spec/secret.go:160` |
+| the resolver — the environment first, the keyring second | `agentkit/spec/secret.go:272` |
+| the status the interface shows — "stored" and "in force" are two questions | `agentkit/spec/secret.go:360` |
+| the keyring backend | `agentkit/spec/secret_keyring.go:22` |
+| the loader's refusal of the retired `api_key` line | `agentkit/spec/load.go:48` |
+| the write gate's refusal of the same line | `agentkit/spec/write.go:929` |
+| the HTTP surface | `api/v2_secrets.go:89` |
+| the command line | `secretcmd.go:32` |
+
+★ **The keyring is a global OS resource, so it is reached only where somebody asked for
+it.** `spec.KeyringStore()` is called in exactly three places: the server's composition
+root (`main.go:385`), `openheron init` (`initcmd.go:70`) and `openheron secret`
+(`secretcmd.go:35`). ★ Everything else — a library user, a test — gets **no store at
+all**, and `Service.SecretStore()` returns `nil`. ★ A test that wrote to the
+developer's own credential store would leave an entry nobody would remember to delete.
+
+★ **A store that cannot be reached is a soft failure.** The resolver answers
+`Unavailable` and the tree still loads; the notice says the keyring is not available on
+this machine. ★ The only **hard** error is a `@file:` path that does not resolve: the
+user wrote a path, and the path is wrong.
+
+★ **The value is write-only.** `/v2/secrets` never returns a value — not even its
+length — and the interface shows **where** a key is and **whether** it is in force.
+`openheron secret get` is the one exception, and it prints the value **that is in
+force**: the environment's when it is set, the keyring's otherwise.
+
+★ **Writing a secret marks the tree.** The key is not in the configuration tree, so the
+watcher would never notice that it changed: `MarkSecret` marks the file that **names**
+the entity, and the next turn rebuilds (`agentkit/spec/config.go:370`).
+
+★ **The keyring cannot be enumerated**, so the list of secrets is driven by the
+**configuration**: the providers and the MCP servers that exist. An entry whose entity
+is gone is invisible and cannot be removed — a known boundary
+(`docs/secrets-design.md` §7).
+
+★ **The old `api_key:` line has no compatibility layer.** A profile that still carries
+it is refused, with a sentence naming the variable and the keyring entry that replace
+it — the migration is "delete the line" (`docs/secrets-design.md` §6).
+
 ## 4. The frontend
 
 ### 4.1 The pure layers
@@ -1234,9 +1308,11 @@ read/write race — a known boundary, not a fixed one (`docs/pitfalls.md` §1.1)
 | `web/src/lib/store/history.ts` | Rebuild session state from the REST history | `import type` only |
 | `web/src/lib/store/events.ts` | Event routing inside the store | **`localStorage`** |
 | `web/src/lib/store/actions.ts` | The zustand store itself + all async actions | **zustand**, `fetch`, `localStorage` |
+| `web/src/lib/secrets.ts` | The secrets panel's pure layer: the status, the wording, the source label | `import type` only (erased at compile time) |
 
 ★ **Be precise about this**: the genuinely framework-independent modules are `sse.ts`,
-`events.ts`, `store/state.ts`, `store/selectors.ts` and `store/history.ts`.
+`events.ts`, `store/state.ts`, `store/selectors.ts`, `store/history.ts` and
+`secrets.ts`.
 `store.ts` itself **is a barrel**, and `store/actions.ts` owns the zustand instance —
 so importing `store.ts` pulls in zustand, `fetch` and `localStorage` as well.
 
@@ -1511,11 +1587,11 @@ upstream documents use):
 ```
 
 ★ **This is a hard rule for every document under `docs/`, and the corpus is bigger
-than the bilingual set.** `docs/` holds **five Chinese-only design documents** — the
+than the bilingual set.** `docs/` holds **six Chinese-only design documents** — the
 configuration system, the runtime, the tools and integrations, the interface and its
-resources, and the pitfall register — next to the **four bilingual** ones (the README
-lives at the repository root). ★ A Chinese-only design document has no English twin
-(AGENTS.md says so), and that is **not** an exemption: the extractor reads one
+resources, the secret system, and the pitfall register — next to the **four bilingual**
+ones (the README lives at the repository root). ★ A Chinese-only design document has no
+English twin (AGENTS.md says so), and that is **not** an exemption: the extractor reads one
 document at a time, and the Chinese one has to yield a title and a summary on its
 own. ★ A document that opens with a plain paragraph **yields no summary** —
 `TestExtractAgainstRepoDocs` then reports
@@ -1543,7 +1619,7 @@ had drifted (`corpus` where the loader says `corpus_dir`). `settings-validate.ts
 string shaping and rendering: `issueLine`, `suggestPath`, `resolveTemplate`.
 
 ★ **What replaced it is a round trip with a stamp.** An edit schedules one question 250 ms
-after the typing stops (`web/src/lib/settings-store.ts:240` `scheduleValidate`), and a
+after the typing stops (`web/src/lib/settings-store.ts:261` `scheduleValidate`), and a
 save asks again immediately and cancels the pending one. Every reply is stamped
 (`:229` `validateSeq`): a reply that is no longer the newest, or no longer about the
 selected file, is dropped — otherwise the slower of two answers wins, which is the one
@@ -1551,7 +1627,7 @@ about text the user has already changed.
 
 ★ **A rule that was the client's moved to the server rather than disappearing.** An
 agent's `reasoning` level is checked against the model's declared vocabulary in
-`agentkit/spec/load.go:775` `checkReasoning` — where every file passes, not only the
+`agentkit/spec/load.go:815` `checkReasoning` — where every file passes, not only the
 edits made in the settings editor. ★ Deleting a client rule is only a simplification if
 the server already has it; that is the question to ask of the next one.
 
@@ -1745,7 +1821,12 @@ pre-commit`). The gitleaks revision is **pinned** in `.pre-commit-config.yaml`, 
 a new upstream rule cannot turn every commit red on a day nobody touched the
 security setup.
 
-★ **The rules are not loosened.** When gitleaks reports something that is not a
+★ **The configuration tree holds no secret at all.** The key lives in the keyring or
+in the environment (§3.14), and the `api_key:` line is retired — so a provider profile
+carries a *name*, never a value. ★ That is why the scan is the second line of defence
+rather than the first: the tree cannot hold a key to begin with.
+
+★ The rules are not loosened. When gitleaks reports something that is not a
 secret, the fix is a **narrow path allowlist** in a `.gitleaks.toml` — a path
 that is known to hold fixtures, not a regular expression that matches "anything
 that looks like a key". A broad allowlist is a hole with a config file on it.
@@ -1786,10 +1867,10 @@ misses something.
 |---|---|
 | Startup reports a missing configuration | The `config root` line in the startup log — it prints the root actually used and the project root |
 | A config change does not take effect | Is that partition hot-reloaded? `llm/` `agents/` `tools/` `mcps/` `skills/` are hot; `server/` needs a restart |
-| Startup fails with `disabled_tools` was renamed to `tools` | ★ The two mean **opposite** things — one removed tools, the other names them. Delete `disabled_tools` and list the tools the agent should have in `tools:` (`agentkit/spec/load.go:108`) |
-| A notice says `tools` names MCP tools | ★ `tools` does not name MCP tools, and `mcps:` is what mounts a server **and** grants its tools: drop the `mcp__*` lines and put the server in `mcps:` (`agentkit/spec/load.go:943`) |
-| An agent cannot call an MCP tool | Is the server in that agent's `mcps:`? Mounting **is** the grant — the agent's `tools:` list has nothing to do with it (`agentkit/spec/decl/decl.go:147`) |
-| A notice says `tools` names a tool that does not exist | The built-in tools are the ones in `decl.BuiltinToolNames` (`agentkit/spec/decl/decl.go:366`); a provider's tool exists only when its file under `tools/` is written |
+| Startup fails with `disabled_tools` was renamed to `tools` | ★ The two mean **opposite** things — one removed tools, the other names them. Delete `disabled_tools` and list the tools the agent should have in `tools:` (`agentkit/spec/load.go:127`) |
+| A notice says `tools` names MCP tools | ★ `tools` does not name MCP tools, and `mcps:` is what mounts a server **and** grants its tools: drop the `mcp__*` lines and put the server in `mcps:` (`agentkit/spec/load.go:983`) |
+| An agent cannot call an MCP tool | Is the server in that agent's `mcps:`? Mounting **is** the grant — the agent's `tools:` list has nothing to do with it (`agentkit/spec/decl/decl.go:164`) |
+| A notice says `tools` names a tool that does not exist | The built-in tools are the ones in `decl.BuiltinToolNames` (`agentkit/spec/decl/decl.go:383`); a provider's tool exists only when its file under `tools/` is written |
 | A notice says `tools` names the `skill` tool but `skills` is empty | The configuration is legal but self-contradictory: name the skill in `skills:`, or drop `skill` from `tools:` |
 | An agent cannot call a tool | `GET /v2/agents/:agentId` for the effective tool table; then read the tool's `reason` — `tools`, or the default `ask` tier, which asks |
 | An agent has **no** tools at all | ★ The tool list is an allow-list and it **defaults to none**: an absent `tools:` means no tool. List the tools the agent should have |
@@ -1800,6 +1881,9 @@ misses something.
 | White screen + `Maximum update depth exceeded` | Is some selector returning a new array/object? |
 | E2E reports `already used` | An orphan from the previous force-killed run holds the port; clear it and retry |
 | The event stream is incomplete | Did the SSE sink break? **Keep consuming** the stream, or the history will be missing |
+| Startup fails with `api_key` is no longer read | ★ The retired line is still in the profile — delete it. The message names the variable and the keyring entry that replace it (§3.14) |
+| A provider has no key | `GET /v2/config` → the provider's `keySource`; `openheron secret list` says which of the two places is in force (§3.14) |
+| The Secrets tab says the keyring is not available | ★ The machine has no keyring (on Linux, no Secret Service over D-Bus) — the environment still works (§3.14) |
 
 ★ **Archive before you present** — after the SSE sink breaks, stop rendering but keep
 consuming the event stream; otherwise `Outcome.Intermediates` is incomplete and the
@@ -1817,7 +1901,7 @@ the current state of the code, not a to-do list** — fixing one is a separate c
 | **The conflict dialog does not show the on-disk version** | `web/src/components/settings/conflict-dialog.tsx:18-23` | It shows only your stale `baseRevision` plus a hard-coded "changed by someone else", and **never fetches the disk version**. There is no "overwrite anyway" button either — "Keep editing" merely clears the conflict marker, so the next save resends the same stale revision and conflicts again. |
 | **Four runtime dependencies sit in `devDependencies`** | `web/package.json` | `lucide-react` (imported by 10 files), `clsx`, `tailwind-merge` and `class-variance-authority` are all imported by `src/` and bundled into `web/dist`. The build passes (Vite resolves them at build time), but the manifest is wrong. |
 | **The comment at `api/server.go:118` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
-| **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the six partitions (`agentkit/spec/config.go:574`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:619`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:116`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |
+| **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the six partitions (`agentkit/spec/config.go:664`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:709`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:116`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |
 
 ## 8. Before committing
 

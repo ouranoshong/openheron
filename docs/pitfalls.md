@@ -524,9 +524,14 @@ ctime），但要额外给 storage 加「重命名」的能力，而且中途会
 "api_key env %s is not set" 的提示，前者什么也不说。★ 同一个字段的两种「没有值」，
 待遇不一样。
 
-**修法**：还没修。
+**修法**：★ 密钥体系改造把这个坑**顺带修掉了** —— 但不是靠改 `expandValue`，而是靠
+**不再让配置树知道这把钥匙叫什么**。现在解析器知道变量叫什么（`LLM_DEEPSEEK_API_KEY`），
+于是「设了，但是空的」与「没设」是**两件明摆着的事**，各有一句话
+（`agentkit/spec/expand.go:78-88` 的 `secretNotice`）。
 
-**现状**：`待修` —— ★ 出处：`agentkit/spec/load.go` 的 `expandValue` 对空串的处理。
+**现状**：`已修` —— ★ 出处：`agentkit/spec/expand.go` 的 `secretNotice` 与
+`agentkit/spec/secret.go` 的 `Secret.Empty`。★ 旧的那种「字段里放引用」的配置已经不存在了：
+`api_key` 这一行被加载器拒绝（`agentkit/spec/load.go:44-52`）。
 
 ### 7.4 ★ 启动会写文件
 
@@ -787,23 +792,23 @@ ctime），但要额外给 storage 加「重命名」的能力，而且中途会
 
 | 上游的说法 | openheron 的实际 | 原因 |
 |---|---|---|
-| 配置根按「env → 上溯 → 自身」解析 | 它恰好按**三级**解析：显式 `--config-dir` → `$OPENHERON_CONFIG_DIR` → `<projectRoot>/.openheron`（不存在则创建），并且**刻意没有**上溯祖先目录（`agentkit/spec/config.go:417-418`） | 一旦配置根取决于「进程是从哪儿启动的」，同一条命令换个目录跑就会读到另一份配置 —— 测试实例也会读到开发者的那份 |
+| 配置根按「env → 上溯 → 自身」解析 | 它恰好按**三级**解析：显式 `--config-dir` → `$OPENHERON_CONFIG_DIR` → `<projectRoot>/.openheron`（不存在则创建），并且**刻意没有**上溯祖先目录（`agentkit/spec/config.go:506-507`） | 一旦配置根取决于「进程是从哪儿启动的」，同一条命令换个目录跑就会读到另一份配置 —— 测试实例也会读到开发者的那份 |
 | 测试实例靠「预置一份 `.heron/`」来隔离 | 隔离靠 `.env.test` 加 `task test-env-backend` / `test-env-reset` / `test-env-sync` 三个目标：实例跑在 `:18099`，**自带配置根与自带会话目录** | 端口不同不等于数据隔离 —— openheron 把会话写在 `.openheron/state/` 下，一个写在那儿的测试会污染真实历史 |
 | `agentkit/spec` 包有 **115** 个 `Test` 函数 | 它有 **228** 个 | 包随代码一起长大 |
 | 模块路径是 `heron/...` | 是 `github.com/ouranoshong/openheron/...` | `go.mod` |
 | `agentkit/spec` 的 heron 依赖只有 `persist` | 有**五个**：`agentkit/obs`、`agentkit/spec/decl`、`agentkit/templates`、`persist` 与它自己 | `obs` 是日志的装配处；「声明」（`decl`）与「行为」（`spec`）的拆分是 openheron 自己的设计 |
 | `docs/architecture.md` §2.2 说 `agentkit/spec` import `kb` | **生产代码**并没有 —— 只有用例文件 `agentkit/spec/policy_contract_test.go:7` 这么做 | 校验知识库配置只需要声明（`decl.Model.IsEmbedding`），不需要 `kb` 包本身 |
-| `llm.ConfigFromEnv` | 它是 `build.ConfigFromEnv`（`agentkit/build/config.go:15`） | 配置包不能依赖厂商协议层，而 `llm/common` 是零 openheron 依赖的叶子包 |
-| 模型结构体 | openheron 的 `decl.Model` 带 `kind`、`dimensions` 与 `context_window`；`summarize_at` **存在但已废弃** —— 阈值属于 agent（`decl.Agent.SummarizeAt`，`agentkit/spec/decl/decl.go:162`） | 阈值是 agent 的策略，窗口是模型的 —— 两者只在一个地方相遇（`agentkit/spec/summarize.go:25`） |
-| agent 结构体 | openheron 的 `decl.Agent` 把 `tools`、`skills` 与 `mcps` 都带成裸 `[]string`：**不写 = 一个都没有**，空列表也是没有（`agentkit/spec/decl/decl.go:113`、`:134`、`:150`） | 「没声明」与「声明为空」现在意思相同，所以那个用来区分它们的指针没了 —— 而它们共享的缺省就是**没有** |
-| server 结构体 | openheron 的 `decl.Server` 带 `lease_ttl`（还有 `frontend_mode`，`agentkit/spec/decl/decl.go:273`、`:297`） | 租约的预算必须长于 provider 自己的超时，而两者住在不同的文件里 |
+| `llm.ConfigFromEnv` | 它是 `build.ConfigFromEnv`（`agentkit/build/config.go:17`） | 配置包不能依赖厂商协议层，而 `llm/common` 是零 openheron 依赖的叶子包 |
+| 模型结构体 | openheron 的 `decl.Model` 带 `kind`、`dimensions` 与 `context_window`；`summarize_at` **存在但已废弃** —— 阈值属于 agent（`decl.Agent.SummarizeAt`，`agentkit/spec/decl/decl.go:179`） | 阈值是 agent 的策略，窗口是模型的 —— 两者只在一个地方相遇（`agentkit/spec/summarize.go:25`） |
+| agent 结构体 | openheron 的 `decl.Agent` 把 `tools`、`skills` 与 `mcps` 都带成裸 `[]string`：**不写 = 一个都没有**，空列表也是没有（`agentkit/spec/decl/decl.go:130`、`:134`、`:150`） | 「没声明」与「声明为空」现在意思相同，所以那个用来区分它们的指针没了 —— 而它们共享的缺省就是**没有** |
+| server 结构体 | openheron 的 `decl.Server` 带 `lease_ttl`（还有 `frontend_mode`，`agentkit/spec/decl/decl.go:290`、`:297`） | 租约的预算必须长于 provider 自己的超时，而两者住在不同的文件里 |
 | `internal/atomicfile` | 是 `persist/atomicfile.go`，一个**顶层**叶子包 | openheron 没有 `internal/` 目录；`persist` 装着 `AtomicWrite` 与 `FileLock` 一族 |
 | `kb` 不 import 任何 heron 包 | `kb` import 了 `obs` 与 `persist` | `obs` 是日志的装配处，知识库也需要那个共用的原子写 |
 | `agentkit/spec` → `agentkit/run` 的破例在上游已于 2026-10-21 撤销 | openheron **从未有过** —— 代码面是在撤销之后抽出来的 | 撤销是上游的一个设计决定；openheron 直接继承了撤销后的形态 |
 | `models[].context_window` 是纯元数据，不生效 | 它**生效**：它是压缩阈值的分母（`agentkit/spec/summarize.go:25`） | openheron 实施了压缩与上下文用量看板 —— 见 `docs/runtime-design.md` §3 |
-| agent 写了模型没有声明的思考档位会进 `deferred` | **不会** —— 现在是**加载期错误**（`agentkit/spec/load.go:775` 的 `checkReasoning`） | 词汇表属于**模型**；档位名写在 agent 里。★ 这一行在 2026-11-12 复核时改过：旧文档写的是「静默忽略」，那个检查已经搬进了加载期 |
+| agent 写了模型没有声明的思考档位会进 `deferred` | **不会** —— 现在是**加载期错误**（`agentkit/spec/load.go:815` 的 `checkReasoning`） | 词汇表属于**模型**；档位名写在 agent 里。★ 这一行在 2026-11-12 复核时改过：旧文档写的是「静默忽略」，那个检查已经搬进了加载期 |
 | `go test -race ./...` 全仓是绿的 | 它**曾经不是**：竞态检测器在 `agentkit/run`、`api`、`kb`、`agentkit/spec` 报了竞态 | 四处现在都修好了，`task check`（含 `test-race`）全绿 |
-| `tools/` 里的坏超时会被报成 `watch.debounce` | 这个标签是错的：`agentkit/spec/reload.go:124` 给**每一条**坏时长都加上前缀 "watch.debounce fell back to default"，于是 `tools/http.yaml` 里的坏 `timeout` 落到了同一个标签下 | `decl.BadDurations()` 是一个不带来源信息的包级列表（`agentkit/spec/decl/decl.go:851`） |
+| `tools/` 里的坏超时会被报成 `watch.debounce` | 这个标签是错的：`agentkit/spec/reload.go:124` 给**每一条**坏时长都加上前缀 "watch.debounce fell back to default"，于是 `tools/http.yaml` 里的坏 `timeout` 落到了同一个标签下 | `decl.BadDurations()` 是一个不带来源信息的包级列表（`agentkit/spec/decl/decl.go:883`） |
 
 **现状**：`已知边界`（永远存在，除非 fork）。
 

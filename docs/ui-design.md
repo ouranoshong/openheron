@@ -14,6 +14,11 @@
 ★ 本文只讲**现状**与**已经拍板的决定**。未落地的提案集中在 §3；「改造前是什么样」的
 叙述删掉了，理由留一句话。坑的细节在 `docs/pitfalls.md`。
 
+★ **本文不覆盖配置界面的那部分**：Settings 对话框里的文件树、编辑器与 Secrets 标签页
+属于**配置**，不是资源 —— 它们的设计在 `docs/config-design.md`（文件树与写闸门）与
+`docs/secrets-design.md`（§5 讲 Secrets 标签页：位置、数据形状、界面规矩与 E2E 断言）。
+本文只讲附件与动效。
+
 ## 1. 附件：清单挂在消息上
 
 ★ **附件是消息的属性，不是会话的属性。** 用户发来的文件绑在**它随的那条消息**上 ——
@@ -59,7 +64,7 @@ JSON 往返之后变成的 **base64 字符串**（JSON 把 `[]byte` 编成字符
 消息上，才谈得上「精确回溯这条消息引用了哪些文件」；压缩在 transcript 中间插入一条消息时，
 带 ID 的消息不改号。
 
-★ **两个粒度不要混**：删除的粒度是**文件**，绑定的粒度是**消息**（`api/v2_files.go:460`）。
+★ **两个粒度不要混**：删除的粒度是**文件**，绑定的粒度是**消息**（`api/v2_files.go:468`）。
 一个文件可能被多条消息引用，而已发消息的附件是历史的一部分。
 
 ### 1.2 后端：契约与解析
@@ -210,7 +215,7 @@ stem  = 原名去扩展名，清洗掉 Windows 不许的字符，截到 60 个 r
 最终名 = stem + "-" + hash8 + ext
 ```
 
-- ★ **命名对所有文件，不只是图片**（`api/v2_files.go:184`）：同名覆盖会让**记录说谎** —— 第一条
+- ★ **命名对所有文件，不只是图片**（`api/v2_files.go:192`）：同名覆盖会让**记录说谎** —— 第一条
   消息的清单里写着 `shot.png`，而那个文件已经是第二次上传的了。文本文件才是**最常**重名的那一类
   （`notes.md`、`README.md`）。★ 覆盖要治本，只治图片等于把最常见的情形留在外面。
 - 哈希的输入是**原名 + 大小 + mtime**（`imaging.go:356` 的 `hashOf`），三段之间用 `0x00` 分隔 ——
@@ -219,7 +224,7 @@ stem  = 原名去扩展名，清洗掉 Windows 不许的字符，截到 60 个 r
 
 ★ **哈希里的 mtime，以及那个循环**（细节见 `docs/pitfalls.md` §6.2）：文件的 mtime 是内核在写的
 那一刻定的，写之前拿不到；而哈希要写进文件名里。**一次写，不改名** —— `t0` = 收到这次上传的时刻，
-哈希由 `(名, 大小, t0)` 算出，写入后用 `os.Chtimes` 把 mtime 钉成 `t0`（`api/v2_files.go:191`）。
+哈希由 `(名, 大小, t0)` 算出，写入后用 `os.Chtimes` 把 mtime 钉成 `t0`（`api/v2_files.go:199`）。
 
 ★ **`Chtimes` 是对的而不是人造的**：`t0` 是这次上传的**真实时刻**，钉上去之后文件自己的 mtime 与
 哈希里的 mtime 是同一个值，于是「读文件 → stat → 重算哈希 → 对上名字」这条校验链成立。另一条路
@@ -241,7 +246,7 @@ FAT32 上不可复算。毫秒是「跨平台都稳」的刻度，而两次上�
 - 写入在会话的锁下（`uploads.go:38` 的 `RecordUpload`）—— 读—改—写不是原子的就会在并发上传时丢
   条目；删除时同步删掉那一条（`uploads.go:80` 的 `forgetUpload`，由 `storage/filestore/session.go:548`
   调用）。
-- 列举端点用它还原 `Name`（`api/v2_files.go:412` 的 `listWorkspace`），所以前端零改动。
+- 列举端点用它还原 `Name`（`api/v2_files.go:420` 的 `listWorkspace`），所以前端零改动。
 - ★ 旧会话的文件没压也没改名，但 `MIMEOfExt` 照旧判定 ⇒ **继续能用**。新旧两种命名并存于同一个
   workspace，没有任何代码依赖「文件名长什么样」。
 
@@ -293,7 +298,7 @@ FAT32 上不可复算。毫秒是「跨平台都稳」的刻度，而两次上�
   （`actions.ts:231` 调 `api.deleteFile`）；已发消息里的附件 → **不删**，它是历史的一部分，删了
   那条消息就说谎了。前端删失败时要把 chip **放回去**（`:244`）—— 一个把服务端还留着的文件藏起来
   的 chip 是在说谎。
-- 服务端：`DELETE /v2/sessions/:id/files?path=`（`api/v2_files.go:470`），路径相对 workspace，
+- 服务端：`DELETE /v2/sessions/:id/files?path=`（`api/v2_files.go:478`），路径相对 workspace，
   越界的名字被拒（`storage/filestore/session.go:537`）。★ **删一个不存在的文件不是错误**：调用方
   要的是「这个文件没了」，而它确实没了。
 
@@ -304,7 +309,7 @@ FAT32 上不可复算。毫秒是「跨平台都稳」的刻度，而两次上�
 会话的 workspace。
 
 ★ **服务端永远不把文件当内容解释，只当字节转发**，响应只有四种，没有第五种
-（`api/v2_files.go:245`）：
+（`api/v2_files.go:253`）：
 
 | 文件类型 | Content-Type | 处置 |
 |---|---|---|
@@ -313,17 +318,17 @@ FAT32 上不可复算。毫秒是「跨平台都稳」的刻度，而两次上�
 | 文本类（`text/*`、json、xml、csv…） | **`text/plain; charset=utf-8`** | **inline** —— 前端自己渲染 |
 | 其他一切（zip、docx…） | `application/octet-stream` | **attachment** —— 下载 |
 
-★ **文本类一律按 `text/plain` 返回，是这一节最要紧的一条**（`api/v2_files.go:319`）：一个
+★ **文本类一律按 `text/plain` 返回，是这一节最要紧的一条**（`api/v2_files.go:327`）：一个
 `text/html` 或 `image/svg+xml` 的上传文件，如果服务端按它自己的 MIME 内联，浏览器就会**执行**它
 里面的脚本 —— 而那脚本跑在 openheron 的源头上。一律 `text/plain` 之后，浏览器只把它当**字**。
 ★ 它顺带解决了「Markdown 谁来渲染」：服务端返回纯文本，前端用**已有的** `MarkdownText`
 （`web/src/components/markdown.tsx:43`）/ `CodeBlock`（`web/src/components/code-block.tsx:6`）渲染，
 不需要在服务端引一个 HTML 渲染器，也不需要信任上传的 HTML。
 
-★ **SVG 归到「其他」**（`api/v2_files.go:335` 的 `isPreviewImage`）：SVG 是 XML，可以带
+★ **SVG 归到「其他」**（`api/v2_files.go:343` 的 `isPreviewImage`）：SVG 是 XML，可以带
 `<script>`，而浏览器把它当图片渲染时**会执行脚本**。它走 `attachment`（下载）。
 
-★ `max` 只对图片有意义（`api/v2_files.go:300`）：图片走即时缩放 —— 解码 → 缩放 → 编码 → 返回，
+★ `max` 只对图片有意义（`api/v2_files.go:308`）：图片走即时缩放 —— 解码 → 缩放 → 编码 → 返回，
 **不落盘**，不产生第二份文件，也就**没有第二个要清理的东西**。文本与 PDF 忽略它。
 
 Content-Type 由服务端按扩展名判定（`message.MIMEOfExt`），**不是**按内容嗅探 —— 嗅探要多读一遍，
@@ -356,7 +361,7 @@ Content-Type 由服务端按扩展名判定（`message.MIMEOfExt`），**不是*
 | # | 问题 | 判据 |
 |---|---|---|
 | 1 | **哪些 MIME 算图片？** | `image/png`、`image/jpeg`、`image/jpg`、`image/gif`、`image/webp`（`agentkit/run/attachments.go:35` 的 `imageMIMEs`）。★ **不含 `image/svg+xml`** —— SVG 是文本，能 `read_file`，走文本那条路就够 |
-| 2 | **多大的图片能内联？** | 5 MiB（`agentkit/run/attachments.go:28` 的 `maxInlineImageBytes`）。★ 32 MiB 的上传上限（`api/v2_files.go:110`）是给**文件**的，不是给**图片**的 |
+| 2 | **多大的图片能内联？** | 5 MiB（`agentkit/run/attachments.go:28` 的 `maxInlineImageBytes`）。★ 32 MiB 的上传上限（`api/v2_files.go:118`）是给**文件**的，不是给**图片**的 |
 | 3 | **超限了怎么办？** | ★ **不降级成路径** —— 进「暂时不能处理」清单（`agentkit/run/attachments.go:257`）。给路径会让模型去 `read_file` 一张图的字节，那读出来的是噪声，而噪声读起来像内容 |
 | 4 | **模型不支持视觉怎么办？** | ★ **不降级** —— 这一轮带着 provider 的错误结束，由用户重试（`llm/common` 里没有 `vision.go`） |
 | 5 | **base64 编码在哪做？** | **服务端**，请求时现读现编。★ 不在上传时编 —— 那会把 base64 存进 workspace，而且上传响应要传一大串 base64 |
@@ -586,17 +591,17 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 | `api/v2_attachments.go:46` | 服务端自己 stat；目录不是附件 |
 | `api/v2_attachments.go:64` | 类型由服务端按名字判定 |
 | `api/v2_files.go:64` | `GET /v2/sessions/:id/files/raw` 路由 |
-| `api/v2_files.go:110` | `maxUploadBytes` = 32 MiB |
-| `api/v2_files.go:168` | 上传时在服务端压缩 |
-| `api/v2_files.go:184` | 哈希命名对**所有**文件 |
-| `api/v2_files.go:191` | `os.Chtimes` 把 mtime 钉成 t0 |
-| `api/v2_files.go:209` | `RecordUpload`：原名映射 |
-| `api/v2_files.go:245` | raw 端点的四种响应 |
-| `api/v2_files.go:300` | `max` 只对图片有意义 |
-| `api/v2_files.go:319` | 文本类一律 `text/plain` |
-| `api/v2_files.go:335` | `isPreviewImage`：SVG 不是图片 |
-| `api/v2_files.go:412` | `listWorkspace`：用原名映射还原 `Name` |
-| `api/v2_files.go:470` | `v2DeleteFile` |
+| `api/v2_files.go:118` | `maxUploadBytes` = 32 MiB |
+| `api/v2_files.go:176` | 上传时在服务端压缩 |
+| `api/v2_files.go:192` | 哈希命名对**所有**文件 |
+| `api/v2_files.go:199` | `os.Chtimes` 把 mtime 钉成 t0 |
+| `api/v2_files.go:217` | `RecordUpload`：原名映射 |
+| `api/v2_files.go:253` | raw 端点的四种响应 |
+| `api/v2_files.go:308` | `max` 只对图片有意义 |
+| `api/v2_files.go:327` | 文本类一律 `text/plain` |
+| `api/v2_files.go:343` | `isPreviewImage`：SVG 不是图片 |
+| `api/v2_files.go:420` | `listWorkspace`：用原名映射还原 `Name` |
+| `api/v2_files.go:478` | `v2DeleteFile` |
 | `api/v2_convert.go:76` | 清单进 `Metadata["attachments"]` |
 | `api/v2_convert.go:110` | 只有附件的消息不再被丢掉 |
 | `storage/storage.go:97` | `Session.ResolveWorkspaceFile` |

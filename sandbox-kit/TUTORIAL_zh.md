@@ -60,14 +60,14 @@ sudo usermod -aG kvm "$USER"
 在宿主上绑一次：
 
 ```sh
-printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
-    --host api.deepseek.com --env DEEPSEEK_API_KEY \
+printf '%s' "$LLM_DEEPSEEK_API_KEY" | sbx secret set-custom \
+    --host api.deepseek.com --env LLM_DEEPSEEK_API_KEY \
     --placeholder proxy-managed --value-stdin
 ```
 
 ★ 占位符 `proxy-managed` 是有意选的：它就是运行时注入容器里的那个哨兵值。
 真值留在宿主的 secret store 里，沙箱的代理在出网那一刻把它换上。
-容器里自始至终只有 `DEEPSEEK_API_KEY=proxy-managed`。
+容器里自始至终只有 `LLM_DEEPSEEK_API_KEY=proxy-managed`。
 
 ★ `--value-stdin` 让密钥既不进 shell 历史，也不进进程参数。
 
@@ -126,7 +126,7 @@ capabilities:
       service: deepseek
       phase: runtime
       apiKey:
-        name: DEEPSEEK_API_KEY
+        name: LLM_DEEPSEEK_API_KEY
         proxyManaged: true
         inject:
           - {domain: api.deepseek.com, header: Authorization, format: "Bearer %s"}
@@ -212,7 +212,7 @@ error: cannot create sandbox: request failed: 400 Bad Request: workspace "/tmp/w
   ✓ image — ready
   ✓ assembled kit image (21 layers)
     setting 1 environment variable
-      +DEEPSEEK_API_KEY
+      +LLM_DEEPSEEK_API_KEY
   ✓ http — published localhost:32772 -> 8080/tcp
 
   ✓ Created sandbox openheron
@@ -365,8 +365,13 @@ openheron 会随着它们的改动重新读取。你最常改的是模型档案 
 type: openai_compat
 base_url: https://api.deepseek.com
 
-# ★ api_key holds the **name of an environment variable**, rendered as ${NAME}.
-api_key: ${DEEPSEEK_API_KEY}
+# ★ The api key is **not** in this file. The provider's name is the file's
+#   name, and the name says where the key comes from:
+#
+#     the environment variable LLM_DEEPSEEK_API_KEY, or
+#     the keyring entry llm:deepseek
+#
+# ★ The environment wins when both are there.
 
 timeout: 5m
 
@@ -393,8 +398,9 @@ models:
 ★ **要把它指到别处时，真正要紧的是两行：**
 
 - `base_url` —— 厂商的端点，**带路径**，就照他们文档写的抄。
-- `api_key` —— 环境变量的**名字**，写成 `${NAME}`。字面量密钥会被拒：
-  这份配置是打算被提交进版本库的。
+- **密钥根本不在这个文件里** —— provider 的名字就是锚：
+  `llm/deepseek.yaml` 读的是 `LLM_DEEPSEEK_API_KEY`，或者钥匙串条目
+  `llm:deepseek`。字面量密钥会被拒：这份配置是打算被提交进版本库的。
 
 ★ **`agents/main.md` 与 `agents/task.md`** 是两个 agent：入口那个
 理解需求、拆任务、委派、验收；执行那个真正动手。
@@ -498,8 +504,8 @@ sbx run docker.io/ouranoshong/openheron-kit:latest \
 ★ **还要在起沙箱之前把那个厂商的密钥绑上：**
 
 ```sh
-printf '%s' "$OPENAI_API_KEY" | sbx secret set-custom \
-    --host api.openai.com --env OPENAI_API_KEY \
+printf '%s' "$LLM_OPENAI_API_KEY" | sbx secret set-custom \
+    --host api.openai.com --env LLM_OPENAI_API_KEY \
     --placeholder proxy-managed --value-stdin
 ```
 

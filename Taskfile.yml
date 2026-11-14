@@ -182,7 +182,9 @@ tasks:
   #   is git-ignored).
   #
   # ★ This task is the **explicit** path: it takes --model / --provider /
-  #   --env, and the automatic initialization has no way to ask for those.
+  #   --base-url, and the automatic initialization has no way to ask for
+  #   those. The api key is not one of these files: it comes from
+  #   LLM_<PROVIDER>_API_KEY or the keyring entry llm:<provider>.
   #
   # ★ init writes only the files that are missing and keeps the ones that are
   #   already there ("kept <file> (already exists)"), so it is **idempotent**:

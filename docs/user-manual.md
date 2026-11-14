@@ -164,8 +164,8 @@ name is the only thing that crosses the boundary.
 Linux), and the model key bound on the host the way openheron reads it:
 
 ```sh
-printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
-    --host api.deepseek.com --env DEEPSEEK_API_KEY \
+printf '%s' "$LLM_DEEPSEEK_API_KEY" | sbx secret set-custom \
+    --host api.deepseek.com --env LLM_DEEPSEEK_API_KEY \
     --placeholder proxy-managed --value-stdin
 ```
 
@@ -226,20 +226,21 @@ Chinese only, like every design document in this repository.
 
 ```bash
 cd /your/project
-export DEEPSEEK_API_KEY=sk-...     # secrets are read from the environment only
-openheron                           # the configuration is written on the first start
+export LLM_DEEPSEEK_API_KEY=sk-...   # or keep it in the keyring (§4.2)
+openheron                             # the configuration is written on the first start
 ```
 
 Open <http://localhost:8080>.
 
-★ The key is read from the environment, and **how** you set it depends on the system
-you are on — macOS and Linux see §4.2, Windows see §2.2.
+★ The key is read from the environment **or** from the keyring, and the environment
+wins — §4.2 says how the two fit together and where each one lives; Windows sees §2.2.
 
 ★ **The server writes the configuration itself** the first time it starts in a
 project that has none: the same tree `openheron init` writes (§2.3), with the
-DeepSeek provider template and the key read from `DEEPSEEK_API_KEY`. ★ Use
-`openheron init` when you want another model or provider, or when you want the
-configuration written without starting the server.
+DeepSeek provider template. ★ **The key is not in that tree** — the provider's
+name says where it comes from: `LLM_DEEPSEEK_API_KEY`, or the keyring entry
+`llm:deepseek`. ★ Use `openheron init` when you want another model or provider,
+or when you want the configuration written without starting the server.
 
 ### 2.2 Running it for the first time on Windows
 
@@ -247,7 +248,7 @@ In PowerShell, from nothing to running:
 
 ```powershell
 cd C:\path\to\your-project
-$env:DEEPSEEK_API_KEY = "sk-..."    # secrets are read from the environment only
+$env:LLM_DEEPSEEK_API_KEY = "sk-..."   # or keep it in the keyring (§4.2)
 openheron
 ```
 
@@ -257,24 +258,41 @@ openheron
 `init` prints one line when it is done:
 
 ```
-the api key is read from the environment at request time: export DEEPSEEK_API_KEY=...
+the api key is read at request time from LLM_DEEPSEEK_API_KEY, or from the keyring entry llm:deepseek
+store one with: openheron secret set llm <provider>
 ```
 
 ★ The server reports the same thing in its startup log when it writes the
 configuration itself.
 
-★ That line uses **the Unix `export`**, which runs in neither PowerShell nor cmd.exe — on
-Windows the same thing is `$env:DEEPSEEK_API_KEY = "sk-..."` (PowerShell) or
-`set DEEPSEEK_API_KEY=sk-...` (cmd.exe).
+★ That line names **the Unix `export`**, which runs in neither PowerShell nor cmd.exe —
+on Windows the same thing is `$env:LLM_DEEPSEEK_API_KEY = "sk-..."` (PowerShell) or
+`set LLM_DEEPSEEK_API_KEY=sk-...` (cmd.exe).
 
 #### How to set the key
 
-One command, four ways of writing it, and they do not reach the same far:
+There are **two places** a key can live, and the provider's name decides what each
+one is called: the environment variable `LLM_DEEPSEEK_API_KEY`, and the keyring
+entry `llm:deepseek`. ★ **The environment wins** — §4.2 has the whole chain; this
+is the Windows half of it.
 
-- **The PowerShell window you are in** — `$env:DEEPSEEK_API_KEY = "sk-..."`: that window only.
-- **Every terminal this user opens from now on** — `[Environment]::SetEnvironmentVariable('DEEPSEEK_API_KEY', 'sk-...', 'User')`: permanently; ★ **you have to open a new terminal**.
-- **The cmd.exe window you are in** — `set DEEPSEEK_API_KEY=sk-...`: that window only.
-- **The cmd.exe window, for this user** — `setx DEEPSEEK_API_KEY sk-...`: permanently; ★ **the value is truncated at 1024 characters**.
+**In the keyring — nothing lands on disk.** The Settings dialog's **Secrets** tab
+(§6.3) takes a value, or the command line does:
+
+```sh
+openheron secret set llm deepseek
+```
+
+★ The value is read from the **standard input**, so it lands neither in the shell's
+history nor in the process table. The command waits for you to paste the key and
+press Enter.
+
+**In the environment — four ways of writing it, and they do not reach the same far:**
+
+- **The PowerShell window you are in** — `$env:LLM_DEEPSEEK_API_KEY = "sk-..."`: that window only.
+- **Every terminal this user opens from now on** — `[Environment]::SetEnvironmentVariable('LLM_DEEPSEEK_API_KEY', 'sk-...', 'User')`: permanently; ★ **you have to open a new terminal**.
+- **The cmd.exe window you are in** — `set LLM_DEEPSEEK_API_KEY=sk-...`: that window only.
+- **The cmd.exe window, for this user** — `setx LLM_DEEPSEEK_API_KEY sk-...`: permanently; ★ **the value is truncated at 1024 characters**.
 
 ★ **A shell keeps the environment it started with** — the window that ran `setx` or
 `[Environment]::SetEnvironmentVariable` does not see the variable; you have to **open
@@ -284,26 +302,25 @@ another terminal**.
 reach **the process that starts openheron**: setting it in another terminal afterwards
 does nothing for a server that is already running.
 
-★ **On Windows the variable name is case-insensitive** — `$env:deepseek_api_key` is the
-`DEEPSEEK_API_KEY` variable; on macOS and Linux it is not (§4.2).
+★ **On Windows the variable name is case-insensitive** — `$env:llm_deepseek_api_key` is the
+`LLM_DEEPSEEK_API_KEY` variable; on macOS and Linux it is not (§4.2).
 
-**Putting the key in a file.** To keep the secret out of the environment, point
-`@file:` at a file:
+**Keeping the key out of the environment.** A variable may hold a **path** instead of
+the key — the value starts with `@file:` and openheron reads the file:
 
-```yaml
-api_key: '@file:C:\Users\you\deepseek.key'   # single quotes
-api_key: "@file:C:/Users/you/deepseek.key"    # or forward slashes
+```powershell
+$env:LLM_DEEPSEEK_API_KEY = '@file:C:\Users\you\deepseek.key'
 ```
 
-★ **Double quotes with backslashes do not work on Windows**: `\` is an escape character
-inside a YAML double-quoted scalar and `\U` is not a legal escape, so the whole profile
-fails to parse (`yaml: did not find expected hexdecimal number`). Use single quotes, or
-write the path with forward slashes. ★ The path has to be **absolute**: a relative one is
-relative to **the directory openheron was started from** (§4.2).
+★ **The quotes are not optional**: without them the `@` starts a word. ★ **The path
+has to be absolute** — a relative one is relative to **the directory openheron was
+started from** (§4.2) — and ★ **a path that does not resolve is a startup error**,
+not a reminder.
 
-**How to tell that it worked.** Open `http://localhost:8080/v2/config` in a browser; the
-provider entry reads `hasApiKey` and it should be `true`; and the startup log must not
-carry `api_key env DEEPSEEK_API_KEY is not set` (§4.2).
+**How to tell that it worked.** Open `http://localhost:8080/v2/config` in a browser;
+the provider entry reads `hasApiKey` and it should be `true`, and `keySource` names
+the place the key came from; the startup log must not carry
+`no key for this provider` (§4.2).
 
 #### Before it starts
 
@@ -377,7 +394,6 @@ Other `init` options:
 | `--provider <name>` | Choose the vendor, default `deepseek` |
 | `--model <name>` | Choose the model, default `deepseek-flash` |
 | `--base-url <url>` | The vendor endpoint (**with the path**, copy it from their docs) |
-| `--env <NAME>` | The environment variable holding the secret, default `<PROVIDER>_API_KEY` |
 | `--no-tools` | Leave the tool configurations under `tools/` unwritten |
 | `--force` | Overwrite existing files |
 | `--dry-run` | Print what would be written, write nothing |
@@ -497,7 +513,6 @@ configuration. Declare `context_window` in `llm/<vendor>.yaml`, or set an absolu
 ```yaml
 type: openai_compat
 base_url: https://api.deepseek.com
-api_key: ${DEEPSEEK_API_KEY}
 timeout: 5m
 
 models:
@@ -515,7 +530,7 @@ models:
 |---|---|
 | `type` | Protocol type; currently `openai_compat` |
 | `base_url` | The endpoint, **including the path**, copied from the vendor docs |
-| `api_key` | An **environment variable name**, written as `${NAME}` — never a literal |
+| `api_key` | **Retired** — the key comes from the environment or the keyring, and the provider's own **file name** says which (§4.2) |
 | `timeout` | Timeout, with a unit (`5m` / `30m`) |
 | `models[].id` | Model name |
 | `models[].context_window` | Context window — the size the compaction threshold is measured against |
@@ -525,11 +540,11 @@ models:
 | `hint_keys` | The endpoint's field names, used to give an accurate hint when a request is rejected |
 | `extra` | Vendor-level dialect, passed through to every request |
 
-★ **`api_key` may only be an environment variable name** (`${OPENAI_API_KEY}`) or a file
-reference (`@file:/path`). Writing a literal secret into the configuration makes the
-config editor refuse to save it — secrets do not belong in the repository. ★ The
-`@file:` form needs **quotes** in YAML; the subsection below says where the key comes
-from on each system.
+★ **`api_key:` is retired.** A profile that still carries the line is **refused** —
+both when it is loaded and when it is saved through the config editor — and the message
+says where the key comes from now: the environment variable and the keyring entry that
+the provider's own name derives. ★ Secrets do not belong in the repository: the key is
+never written into the configuration tree.
 
 ★ **The compaction threshold belongs to the agent, not to the model.** `context_window` is the
 model's; `summarize_at` is the agent's, because how much of that window this agent fills before
@@ -548,41 +563,41 @@ think" shows up in the most hidden way possible.
 
 #### The key: where it comes from
 
-The profile names **where** the secret is — never the secret itself. Two forms work,
-and both are read **when the configuration is loaded**:
+A model profile says nothing about the key any more. ★ **The provider's file name says
+where the key comes from** — there is no `api_key:` line in `llm/<vendor>.yaml` any
+more, and a file that still carries one is refused (the note above).
 
-```yaml
-# .openheron/llm/deepseek.yaml
-api_key: ${DEEPSEEK_API_KEY}                  # an environment variable
-api_key: "@file:/etc/openheron/deepseek.key"  # the same key, read from a file
-```
+For the provider `deepseek` — the file `llm/deepseek.yaml` — the key has two possible
+homes:
 
-★ **The quotes around `@file:` are not optional.** `@` is a reserved character in
-YAML, so an unquoted `api_key: @file:/path` does not parse at all ("found character
-that cannot start any token") and the profile never loads. `${NAME}` needs no quotes.
+| | where it is |
+|---|---|
+| the environment (the override) | `LLM_DEEPSEEK_API_KEY` |
+| the keyring (the store) | the entry `llm:deepseek` |
 
-★ **The key is read when the configuration is loaded** — so set the variable
-**before** you start openheron. A variable you export in another terminal afterwards
-is not seen by the running server; saving the profile file again reloads the
-configuration, and that reload reads the variable once more.
+★ **The environment wins.** The chain is: the environment first, the keyring second. The
+environment is asked first because it is what a container, a CI runner or an operator's
+shell hands to this process for exactly this run; the keyring is what the machine keeps.
+★ So a key stored in the keyring while a variable is set is **not in effect** — and both
+the interface (§6.3) and `openheron secret list` say so out loud, because "stored" and
+"in force" are two different questions.
 
-★ **How the variable is set on Windows, see §2.2** — the four ways of writing it in
-PowerShell and cmd.exe, the case-insensitive variable name, and the `@file:` quoting pit
-on Windows are all there.
+★ **The name is derived, not chosen.** `llm/deepseek.yaml` can only ever be the provider
+`deepseek`, so it can only ever be `LLM_DEEPSEEK_API_KEY` and `llm:deepseek`. One rule
+instead of a table — and a profile cannot disagree with its own file name. ★ The MCP side
+works the same way: `mcps/github.yaml` is `MCP_GITHUB_TOKEN` and the keyring entry
+`mcp:github` (§4.7).
 
-**macOS and Linux.**
+**In the environment.** macOS and Linux:
 
 ```sh
-export DEEPSEEK_API_KEY=sk-...
+export LLM_DEEPSEEK_API_KEY=sk-...
 ```
 
 To make it permanent, put the line in `~/.zshrc` (macOS), `~/.bashrc` (Linux with
-bash) or `~/.profile` (any POSIX shell).
-
-★ **On macOS and Linux the variable name is case-sensitive.** `$env:deepseek_api_key` is
-another variable there, and the profile then reads
-`api_key env DEEPSEEK_API_KEY is not set`; on Windows it is the other way round
-(§2.2).
+bash) or `~/.profile` (any POSIX shell). ★ **On macOS and Linux the variable name is
+case-sensitive.** `$env:llm_deepseek_api_key` is another variable there, and the provider
+then reports that it has no key; on Windows it is the other way round (§2.2).
 
 ★ **The variable has to reach the process, not your login.** A `~/.bashrc` line is
 read by **interactive bash only**: a systemd unit, a launchd job, a container and a CI
@@ -592,51 +607,67 @@ files. Give it to whatever starts openheron:
 | openheron runs in | where the variable goes |
 |---|---|
 | a terminal | `export ...` (macOS and Linux) / `$env:... = ...` (Windows, see §2.2) |
-| a systemd unit (Linux) | `Environment=DEEPSEEK_API_KEY=sk-...` in the unit file, then `systemctl daemon-reload` |
+| a systemd unit (Linux) | `Environment=LLM_DEEPSEEK_API_KEY=sk-...` in the unit file, then `systemctl daemon-reload` |
 | a launchd job (macOS) | `EnvironmentVariables` in the job's plist |
-| a container | `docker run -e DEEPSEEK_API_KEY=sk-...`, or `--env-file .env` |
+| a container | `docker run -e LLM_DEEPSEEK_API_KEY=sk-...`, or `--env-file .env` |
 | CI | the runner's secret store — the variable, not the key |
 
-**The `@file:` form.** The file holds the same secret the variable would, and it is
-read at load time with its content trimmed. Two things to know:
+**In the keyring.** The Settings dialog's **Secrets** tab (§6.3) takes a value, or the
+command line does:
+
+```sh
+openheron secret set llm deepseek
+```
+
+★ The value is read from the **standard input**, so it lands neither in the shell's
+history nor in the process table. The keyring is the machine's own credential store —
+the Windows Credential Manager, the macOS Keychain, the Linux Secret Service — so a key
+in it is not a file in your project.
+
+**The `@file:` form.** A variable may hold a **path** instead of the key:
+
+```sh
+export LLM_DEEPSEEK_API_KEY='@file:/etc/openheron/deepseek.key'
+```
+
+The file holds the same secret the variable would, and it is read at load time with its
+content trimmed. Two things to know:
 
 - ★ **A relative path is relative to the directory openheron was started from**, not
   to the configuration root — use an absolute path.
 - ★ **A path that does not exist is a startup error**, not a reminder:
-  `config: parse llm/deepseek.yaml: api_key: read secret file: open /etc/openheron/deepseek.key: no such file or directory`.
+  `config: parse llm/deepseek.yaml: read secret file: open /etc/openheron/deepseek.key: no such file or directory`.
   The difference is deliberate: an unset variable is a runtime state, a wrong path is
   a mistake in the configuration.
 
-**How to tell that it worked.** A variable that is not set is named in the startup log:
+**How to tell that it worked.** A provider with no key is named in the startup log:
 
 ```
-[main] config notice notice="llm/deepseek.yaml: api_key env DEEPSEEK_API_KEY is not set; calls to this endpoint will fail with 401 Unauthorized"
+[main] config notice notice="llm/deepseek.yaml: no key for this provider: LLM_DEEPSEEK_API_KEY is not set and the keyring holds no llm:deepseek; calls to this endpoint will fail with 401 Unauthorized"
 ```
 
 ★ That reminder **does not stop the server**: openheron starts, the agent builds, and
 the endpoint answers `401 Unauthorized` the first time it is called. The same notices
 are under `deferred` in `GET /v2/config` and `GET /v2/health`.
 
-★ **An empty variable is not an unset one.** `DEEPSEEK_API_KEY=` — set, but with
-nothing in it — resolves to an empty key and produces **no reminder at all**, so the
-absence of a notice is not the absence of a problem. The field to look at is
-`hasApiKey` in `GET /v2/config`; the provider entry reads
+★ **An empty variable is not an unset one.** `LLM_DEEPSEEK_API_KEY=` — set, but with
+nothing in it — resolves to **no key at all**, and the reminder says so in as many words:
+`LLM_DEEPSEEK_API_KEY is set but empty`. An unset variable produces the other sentence:
+`LLM_DEEPSEEK_API_KEY is not set and the keyring holds no llm:deepseek`. The fields to
+look at are `hasApiKey` and `keySource` in `GET /v2/config`; the provider entry reads
 
 ```json
-{"id":"deepseek","baseUrl":"https://api.deepseek.com","hasApiKey":true,"models":[{"id":"deepseek-flash","contextWindow":1310720}]}
+{"id":"deepseek","baseUrl":"https://api.deepseek.com","hasApiKey":true,"keySource":"env:LLM_DEEPSEEK_API_KEY","models":[{"id":"deepseek-flash","contextWindow":1310720}]}
 ```
 
-`hasApiKey` is `true` when a key was found and `false` when there is none — and the
-key itself never leaves the process. ★ **How the variable is emptied decides which of
-the two you get**: `$env:DEEPSEEK_API_KEY = ""` leaves an empty value behind (silent),
-while `$env:DEEPSEEK_API_KEY = $null` removes the variable (the reminder appears);
-`export DEEPSEEK_API_KEY=` and `unset DEEPSEEK_API_KEY` are the same pair on a Unix
-shell.
-
-★ **The name of the variable is yours to choose.** `openheron init --env DEEPSEEK_API_KEY`
-writes the profile with `${DEEPSEEK_API_KEY}`, and a profile that names another
-variable needs that other variable in the environment — what matters is that the two
-name the same one.
+`hasApiKey` is `true` when a key was found and `false` when there is none — and the key
+itself never leaves the process. `keySource` names the **place**:
+`env:LLM_DEEPSEEK_API_KEY`, `keyring:llm:deepseek`, `file:/etc/openheron/deepseek.key`
+or `none`. ★ **How the variable is emptied decides which of the two reminders you get**:
+`$env:LLM_DEEPSEEK_API_KEY = ""` leaves an empty value behind ("set but empty"), while
+`$env:LLM_DEEPSEEK_API_KEY = $null` removes the variable ("not set");
+`export LLM_DEEPSEEK_API_KEY=` and `unset LLM_DEEPSEEK_API_KEY` are the same pair on a
+Unix shell.
 
 ### 4.3 Which tools ask
 
@@ -883,7 +914,7 @@ transport: stdio
 command: npx
 args: ["-y", "@modelcontextprotocol/server-github"]
 env:
-  GITHUB_TOKEN: ${GITHUB_TOKEN}
+  GITHUB_TOKEN: ${MCP_GITHUB_TOKEN}
 timeout: 30s
 call_timeout: 60s
 tools: []
@@ -897,7 +928,7 @@ The same server over HTTP:
 transport: http
 url: https://mcp.example.com/mcp
 headers:
-  Authorization: Bearer ${REMOTE_TOKEN}
+  Authorization: Bearer ${MCP_REMOTE_TOKEN}
 timeout: 30s
 call_timeout: 60s
 ```
@@ -918,6 +949,14 @@ call_timeout: 60s
 ★ **The file's name must match `^[a-z0-9]+(_[a-z0-9]+)*$`.** A name with a run of
 underscores is refused: the exposed name `mcp__a__b__x` could not be read back later —
 is that the server `a` with the tool `b__x`, or the server `a__b` with the tool `x`?
+
+★ **The credential's name is derived from the file's name.** `mcps/github.yaml` is the
+server `github`, so its token is `MCP_GITHUB_TOKEN` and its keyring entry is
+`mcp:github` — the same rule the model side uses (§4.2). ★ A `${MCP_GITHUB_TOKEN}` in
+`env:` or in `headers:` is therefore not "a variable that happens to be spelled that
+way": it is **that server's token**, resolved through the environment first and the
+keyring second. ★ Every other `${NAME}` keeps its old meaning — a plain environment
+lookup.
 
 ★ **`openheron init` writes three servers** — `mcps/fetch.yaml`, `mcps/time.yaml` and
 `mcps/deepwiki.yaml`. ★ Each of them **defines** a server, so a file that cannot be
@@ -1085,7 +1124,7 @@ to know what the process is actually running with.
 
 ★ **The file tools go through the same checks.** `write_file` and `edit_file` on a path
 inside the config root are handed to the configuration service, so the same gates run:
-the tree must still load, a literal secret may not land in a provider file, and a
+the tree must still load, a provider file may not carry an `api_key` line, and a
 working agent must not disappear from the tree. ★ `edit_file` reads the file through the
 service too, so it carries the revision and a change that raced it is refused;
 `write_file` carries no revision, so a whole-file write is "the last writer wins" — the
@@ -1228,8 +1267,8 @@ The write path has several gates:
   and **what to remove** — remove that reference first, then delete the file. The same
   goes for a model profile an agent uses and for an agent another agent delegates to.
 - `server/` is **not editable** (not hot-reloaded, so a change needs a restart).
-- **Literal secrets are rejected** — `api_key must be a reference, not a literal`. Use
-  `${ENV_VAR}` or `@file:/path`.
+- **The `api_key` line is retired** — a profile that still carries it is refused, and
+  the message names the variable and the keyring entry that replace it (§4.2).
 - **A file with no YAML content is rejected** — a file that is empty, or holds nothing
   but comments, carries no configuration at all. The message names the fields the file
   needs; under `tools/` it says which tool is missing what.
@@ -1242,6 +1281,39 @@ The write path has several gates:
   server's (`server/` is read-only, `tools/` takes five names, `mcps/` takes
   `<server>.yaml`), so the refusal comes back from the server, not from a copy in the
   dialog.
+
+#### The Secrets tab
+
+The same dialog has **two tabs**: **Files** (the config editor above) and **Secrets**.
+The Secrets tab lists the two namespaces the keys live in — **Providers** and **MCP
+servers** — and the entities the configuration declares in them.
+
+For the entity you pick, the panel shows three rows and no value:
+
+| Row | What it means |
+|---|---|
+| Stored in | where the key is kept — `keyring:llm:deepseek`, or `—` |
+| In effect | which key is actually used — the environment's, the keyring's, a file's, or `none` |
+| Environment | the derived variable, and whether it is set |
+
+★ **The value is write-only.** The panel never shows the key, not even its length: the
+input is a password field, it is emptied after every write, and the value goes to the
+keyring and nowhere else — not into the configuration tree, not into a log line, not
+back to the browser.
+
+★ **"Stored" and "in effect" disagree exactly when the environment overrides the
+keyring** — and that is the trap of the whole design: the key was written, the write
+said "stored", and the key that is used is a different one. The panel says so in a
+warning, and so does `openheron secret set`.
+
+★ **Removing a whole group asks first.** "Remove all providers" deletes the model keys
+of the entities the configuration declares — and only those; the MCP servers' tokens are
+in a different namespace and are not touched. The confirmation names the scope and the
+count.
+
+★ **The list is driven by the configuration.** An entry whose entity is gone — a provider
+file you deleted — is invisible and cannot be removed from here: the keyring cannot be
+enumerated, so there is no way to know it is there.
 
 ### 6.4 The context meter
 
@@ -1512,6 +1584,11 @@ Agents get two tools:
 ```
 openheron [--config-dir <path>] [--project-root <path>]   start the server
 openheron init [options]                                   generate a minimal runnable configuration
+openheron secret set <llm|mcp> <name>                      store a key in the keyring (the value is read from stdin)
+openheron secret get <llm|mcp> <name>                      print the key that is in effect
+openheron secret list [--json]                             the entities and which key is in force
+openheron secret remove <llm|mcp> <name>                   remove one entry
+openheron secret remove <llm|mcp>                          remove every entry of that group
 openheron kb index [--config-dir] [--json] [files...]      build the index
 openheron kb search [--config-dir] <query>                 search
 openheron kb status [--config-dir] [--json]                inspect the index
@@ -1559,6 +1636,10 @@ from here. Both answers are `403`.
 | GET | `/v2/settings` | The list of editable items |
 | GET/POST/PUT/DELETE | `/v2/settings/item` | Read/write config (carries `baseRevision`) |
 | POST | `/v2/settings/validate` | Validate a configuration without writing it |
+| GET | `/v2/secrets` | The two namespaces and where each key is (§6.3) |
+| PUT | `/v2/secrets/:group/:name` | Store one key in the keyring (`{"value":"..."}`) |
+| DELETE | `/v2/secrets/:group/:name` | Remove one key |
+| DELETE | `/v2/secrets/:group` | Remove every key of that group |
 
 ### 9.1 Running a turn
 
@@ -1682,3 +1763,16 @@ budget, and the same answer to "is this file there". What it does not do is read
 `.gitignore`, and it knows fewer file types — a type it does not know is refused
 rather than guessed at. ★ The startup log names the engine that was picked; install
 ripgrep to get the other one.
+
+**Q: Where does my API key go?**
+Nowhere in the configuration. The provider's **file name** says where the key comes
+from: `llm/deepseek.yaml` is the environment variable `LLM_DEEPSEEK_API_KEY` or the
+keyring entry `llm:deepseek` — and the environment wins. Store one with
+`openheron secret set llm deepseek` or in the Settings dialog's **Secrets** tab
+(§6.3); export the variable instead when a container or a CI runner has to see it
+(§4.2).
+
+**Q: The startup says the `api_key` line is no longer read?**
+The profile still carries the old line. ★ Delete it: the key is not in the configuration
+any more, and the message names the variable and the keyring entry that replace it
+(§4.2).
