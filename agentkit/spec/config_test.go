@@ -125,6 +125,38 @@ func TestTheServerTemplateNamesTheRequestDumpSwitch(t *testing.T) {
 	t.Fatal("the server/config.yaml template must name the log_requests key")
 }
 
+// ★ The scaffold a new project gets has to **land the log on disk**: a
+//
+//	server started from a terminal loses its history when the terminal
+//	closes, and the log is the only record of what the agent did.
+//
+// ★ The check is for an **active** block. The commented-out form names the
+//
+//	same path, so a "contains" test would pass on it — the key has to
+//	start a line of its own.
+func TestTheServerTemplateEnablesTheLogFile(t *testing.T) {
+	for _, text := range Templates(DirServer) {
+		lines := strings.Split(text, "\n")
+		for i, line := range lines {
+			if line != "log:" {
+				continue
+			}
+			for _, next := range lines[i+1:] {
+				if next == "" || strings.HasPrefix(next, "#") {
+					continue
+				}
+				if !strings.HasPrefix(next, " ") {
+					break
+				}
+				if strings.TrimSpace(next) == "file: logs/openheron.log" {
+					return
+				}
+			}
+		}
+	}
+	t.Fatal("the server/config.yaml template must carry an active log block that names a file")
+}
+
 func TestDefaultsSurviveWhenFileOmitsKeys(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)

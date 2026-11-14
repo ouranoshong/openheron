@@ -640,6 +640,13 @@ func TestTheServerConfigurationIsWritten(t *testing.T) {
 // The template writes the code's own defaults, so writing it must change
 // nothing. That is the property worth pinning: the day a default moves, this
 // test says the template has to move with it.
+//
+// ★ The one exception is log.file. The code's default is an empty path — the
+//
+//	log goes to the standard error and nowhere else — and the template names
+//	logs/openheron.log, so a new project keeps a log on disk instead of
+//	losing it with the terminal it was started in. The exception is the
+//	point, so it is pinned here rather than left to the template's text.
 func TestTheServerConfigurationHoldsTheCodeDefaults(t *testing.T) {
 	e := newEnv(t)
 	p := e.plan(Options{})
@@ -657,6 +664,10 @@ func TestTheServerConfigurationHoldsTheCodeDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
+	if with.Server.Log.File != "logs/openheron.log" {
+		t.Fatalf("the template must name a log file, got %q", with.Server.Log.File)
+	}
+	with.Server.Log.File = ""
 	if !reflect.DeepEqual(with.Server, without.Server) {
 		t.Fatalf("the written server configuration differs from the code defaults:\nwith:    %+v\nwithout: %+v",
 			with.Server, without.Server)

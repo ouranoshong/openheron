@@ -773,6 +773,9 @@ stderr（`main.go:282-286`）。
 ★ **路径落在配置根**（`spec.Service.LogFile` 解析），`$OPENHERON_LOG_FILE` 覆盖它一次
 （`main.go:306`）。`server/` 不热更新：改了要重启。
 
+★ **代码缺省是空路径**（只走 stderr），而**出厂模板给的是 `logs/openheron.log`** —— 对新项目
+来说落盘是常态而不是可选项（见 `docs/config-design.md` §5.5）。
+
 ★ **sink 同时是失败兜底。** 目标写失败一次就切回 fallback（stderr），并且只报一次
 （`agentkit/obs/sink.go:74`）—— 不重试满盘，也不让日志静默消失。
 

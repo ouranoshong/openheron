@@ -717,7 +717,7 @@ allows: [request_get]
 | `retry.max_retries` | `5` | 一轮里一次模型调用最多重试几次 |
 | `log_level` | `info` | `debug`、`info`、`warn`、`error` —— 决定哪些行会进输出 |
 | `log_requests` | `false` | 是否在 `debug` 下打印脱敏后的模型请求体与 `tools` 原始字节；等价于 `OPENHERON_LOG_LLM_REQUESTS=1` |
-| `log.file` | `""` | 日志写到的文件，相对**配置根**解析 —— 空串 = 只写标准错误 |
+| `log.file` | `""` | 日志写到的文件，相对**配置根**解析 —— 空串 = 只写标准错误。新项目的模板写的是 `logs/openheron.log` |
 
 ★ **`server/` 不热重载** —— 改了要重启才生效。所以配置编辑器里它是**只读**的，
 提交会报 `section "server" is not editable`。
@@ -734,8 +734,9 @@ allows: [request_get]
 
 ★ `log_level` 不是这四个之一时回退 `info`；配置的 `deferred` 提示里带着原因。
 
-★ 日志默认写标准错误；`log.file` 指了路径就同时落盘 —— 路径相对**配置根**解析。文件按大小
-轮转，而打不开文件只是告警、不是启动失败：进程留在标准错误上，并把原因写在那儿。
+★ 日志默认写标准错误；`log.file` 指了路径就同时落盘 —— 路径相对**配置根**解析。★ 新项目
+拿到的是 `logs/openheron.log`：模板里写着，而**代码**的缺省是空路径 —— 也就是只写标准错误。
+文件按大小轮转，而打不开文件只是告警、不是启动失败：进程留在标准错误上，并把原因写在那儿。
 
 ### 4.6 技能（`skills/`）
 

@@ -170,6 +170,10 @@ func BuildPlan(svc *spec.Service, opts Options) (*Plan, error) {
 	// ★ server/ is not hot-reloaded and the config editor may not write it,
 	//   so init writes it directly (see Apply). The values are the code's own
 	//   defaults: writing them changes nothing, it only makes them visible.
+	//
+	// ★ The one exception is log.file: the code's default is an empty string
+	//   (stderr only), and the template names a path — a new project keeps a
+	//   log on disk instead of losing it with the terminal it was started in.
 	if err := copySection(p, manifest.Templates, spec.DirServer, nil); err != nil {
 		return nil, err
 	}

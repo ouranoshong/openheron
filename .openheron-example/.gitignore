@@ -1,5 +1,6 @@
 # Runtime data does not go into version control — the config wants diff / blame / rollback, session content must not leak
 state/
+logs/
 .config.lock
 
 # Safety net for plaintext keys (the normal way to write them is ${ENV} or @file:)

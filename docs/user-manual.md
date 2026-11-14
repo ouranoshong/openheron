@@ -799,7 +799,7 @@ told to (`proxy: env`).
 | `retry.max_retries` | `5` | How many times one turn may retry a model call |
 | `log_level` | `info` | `debug`, `info`, `warn` or `error` — decides which lines reach the output |
 | `log_requests` | `false` | Whether to print the redacted model request body and the raw `tools` array at `debug` level; same effect as `OPENHERON_LOG_LLM_REQUESTS=1` |
-| `log.file` | `""` | A file to write the log to, relative to the **config root** — empty means stderr only |
+| `log.file` | `""` | A file to write the log to, relative to the **config root** — empty means stderr only. A new project's template names `logs/openheron.log` |
 
 ★ **`server/` is not hot-reloaded** — a change only takes effect after a restart. That is
 why it is **read-only** in the config editor, and submitting it fails with
@@ -820,8 +820,10 @@ it has nothing to do with where `log.file` writes.
 notices carry the reason.
 
 ★ The log goes to the standard error unless `log.file` names a path — relative to the
-**config root**. The file is rotated by size, and a file that cannot be opened is a warning
-rather than a failed start: the process stays on the standard error and says why.
+**config root**. A new project gets `logs/openheron.log`: the template writes it out, while
+the **code's** default is an empty path — the standard error only. The file is rotated by
+size, and a file that cannot be opened is a warning rather than a failed start: the process
+stays on the standard error and says why.
 
 ### 4.6 Skills (`skills/`)
 

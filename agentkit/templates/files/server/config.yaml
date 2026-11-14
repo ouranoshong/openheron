@@ -6,7 +6,9 @@
 #
 #   ★ The values below are the **code's own defaults**, written out so that
 #     they are visible and editable. Writing them changes nothing by itself —
-#     it only makes the knobs findable.
+#     it only makes the knobs findable. ★ The one exception is `log.file`:
+#     the code's default is an empty string (stderr only), and this template
+#     names a path — so a new project keeps a log on disk.
 
 # ★ The address the HTTP server listens on. The default is the **loopback**:
 #   the agent's tools run shell commands, so a listener every machine on the
@@ -31,26 +33,27 @@ log_level: info
 #   A rejected request (4xx/5xx) always logs its tools array, switch or not.
 log_requests: false
 
-# ★ Where the log goes. An empty file keeps it on stderr — the default,
-#   because a server started from a terminal is already being watched.
+# ★ Where the log goes. The **code's default** is an empty `file`: the log
+#   then goes to the standard error only, because a server started from a
+#   terminal is already being watched. ★ This template names a path, so a new
+#   project keeps a copy on disk as well — set `file: ""` to go back to
+#   stderr only.
 #
-#   Uncomment `file:` to keep a copy on disk as well. A relative path resolves
-#   against this directory (<project>/.openheron), next to state/ and the
-#   partitions. Rotated by size: max_size_mb caps one file (0 = no cap),
-#   max_age_days and max_backups decide how much history survives, and
-#   compress gzips the rotated files. $OPENHERON_LOG_FILE overrides the path
-#   for one run.
+#   A relative path resolves against the **config root** (<project>/.openheron),
+#   next to state/ and the partitions — not the project root. Rotated by size:
+#   max_size_mb caps one file (0 = no cap), max_age_days and max_backups
+#   decide how much history survives, and compress gzips the rotated files.
+#   $OPENHERON_LOG_FILE overrides the path for one run.
 #
 #   ★ A log file that cannot be opened is a warning, not a failed start: the
 #     process keeps running on stderr, which is where the reason appears.
-#
-# log:
-#   file: logs/openheron.log
-#   console: true        # keep writing to stderr as well
-#   max_size_mb: 20
-#   max_age_days: 14
-#   max_backups: 5
-#   compress: false
+log:
+  file: logs/openheron.log
+  console: true        # keep writing to stderr as well
+  max_size_mb: 20
+  max_age_days: 14
+  max_backups: 5
+  compress: false
 
 # ★ The front end. "embed" — the default — serves the UI compiled into the
 #   binary; "dir" serves a directory on disk instead, and static_dir points
