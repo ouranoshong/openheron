@@ -165,7 +165,15 @@ func newSnapshot(cfg *spec.Config, surface string, svc *spec.Service, mcp *mcpMa
 	// ★ The skills directory is resolved **once** per snapshot: the
 	//   dependency walk hashes the skill files, and the filesystem backend
 	//   reads them, and two resolutions could be two answers.
-	skillsDir, _ := ResolveSkillsDir(log)
+	//
+	//   ★ The configuration root is part of the question: the skills live
+	//     inside the configuration tree, and a configuration root the editor
+	//     does not write into is a configuration root nobody reads.
+	configRoot := ""
+	if svc != nil {
+		configRoot = svc.Root()
+	}
+	skillsDir, _ := ResolveSkillsDir(log, configRoot)
 	return &snapshot{
 		log:         log,
 		track:       track,

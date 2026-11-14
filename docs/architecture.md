@@ -408,9 +408,13 @@ reach another.
 `skills/` is a **nested partition** in `Categories` (`skills/<name>/SKILL.md`), but its
 `loader` is nil: the manifest, the path rules and the editor belong to `spec`, while the
 content is resolved independently by `build`'s skill backend
-(`agentkit/build/skill.go:190` `ResolveSkillsDir`): `$EINO_EXT_SKILLS_DIR` first, and only
-if that is unset does it search **upwards** from the current directory for
-`.openheron/skills`.
+(`agentkit/build/skill.go:190` `ResolveSkillsDir`): `$EINO_EXT_SKILLS_DIR` first, then the
+**config root's** own `skills/`, and only if neither is there does it search **upwards** from
+the current directory for `.openheron/skills`.
+
+★ **The config root comes before the upward probe** because that is where the configuration
+editor writes. A skill saved where the configuration is, and never loaded, is a skill nobody
+can use; the upward probe is the old layout, and it is still there.
 
 ★ **The editor has to ask this question too, and the answer is not assumed.** It
 writes `<config root>/skills/`, which is the directory in force only when the probe
@@ -621,13 +625,22 @@ anyway is the address the service serves on, which travels on the notice route i
 ### 5.2 The config root has exactly three levels
 
 ```
---config-dir  →  $OPENHERON_CONFIG_DIR  →  <project-root>/.openheron
+--config-root  →  $OPENHERON_CONFIG_ROOT  →  <openheron-root>/configs
 ```
+
+The **openheron root** is the user-level base directory — `--openheron-root`, else
+`$OPENHERON_ROOT`, else `~/.openheron` — and the **state** (`data_dir`) and the **log file**
+are measured from it, so that moving the configuration does not move the history with it.
+The **default project root** (`--default-project-root`, else `$OPENHERON_DEFAULT_PROJECT_ROOT`,
+else `<openheron-root>/projects/default`) is where a session that belongs to no project
+works; `static_dir` and `corpus_dir` are measured from it.
 
 Implemented in `agentkit/spec/config.go`'s `NewService`. **Ancestor directories are never
 searched** — once the config root depends on "where the process was started from", the
 same command run from a different directory reads a different configuration, and a test
-instance would read the development configuration too.
+instance would read the development configuration too. ★ The **previous** names
+(`--config-dir`, `$OPENHERON_CONFIG_DIR`, `$PROJECT_ROOT`, `$DATA_DIR`, `$LISTEN_ADDR`,
+`$STATIC_DIR`, `$FRONTEND_MODE`) still work, and the old one is reported when it is used.
 
 Only a **defaulted** root is created automatically (`agentkit/spec/config.go:544`'s `os.MkdirAll`). An
 explicit root or an env root pointing nowhere is **not** created: a typo must not silently

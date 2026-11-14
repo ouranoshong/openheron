@@ -6,8 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/initcfg"
@@ -17,9 +17,8 @@ func initCmd(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	dir := fs.String("dir", "", "target directory (default: the current directory)")
-	configDir := fs.String("config-dir", "",
-		"the config root to write into (default: <dir>/.openheron)")
+	configRoot := fs.String("config-root", "",
+		"the config root to write into (default: <openheron-root>/configs)")
 	model := fs.String("model", "", "model to use, as <provider>/<model>")
 	provider := fs.String("provider", "", "provider template to use (default: deepseek)")
 	baseURL := fs.String("base-url", "", "endpoint for a new provider file")
@@ -28,6 +27,16 @@ func initCmd(args []string, stdout io.Writer) error {
 	dryRun := fs.Bool("dry-run", false, "report what would be written, write nothing")
 	asJSON := fs.Bool("json", false, "machine-readable output")
 
+	// ★ --dir is retired, and it is not an alias for --config-root: it named
+	//   a **project** directory, and init writes a **config root**. ★ The two
+	//   are different directories — accepting the old name for the new one
+	//   would write the configuration somewhere the caller did not ask for.
+	for _, a := range args {
+		if a == "--dir" || strings.HasPrefix(a, "--dir=") {
+			return fmt.Errorf("--dir was replaced by --config-root: it named a project directory, " +
+				"and init writes the config root itself")
+		}
+	}
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			printInitUsage(stdout)
@@ -39,28 +48,32 @@ func initCmd(args []string, stdout io.Writer) error {
 		return fmt.Errorf("unexpected argument %q; openheron init takes flags only", fs.Arg(0))
 	}
 
-	target := *dir
-	if target == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("openheron init: resolve working directory: %w", err)
-		}
-		target = wd
-	}
-	abs, err := filepath.Abs(target)
+	home, err := resolveOpenheronRoot("")
 	if err != nil {
-		return fmt.Errorf("openheron init: resolve target directory %q: %w", target, err)
+		return err
+	}
+	root := strings.TrimSpace(*configRoot)
+	if root == "" {
+		// ★ The default is the config root the server reads, so that "init
+		//   and then start" is the whole story. ★ It is not <project>/.openheron
+		//   any more: the configuration lives in the user-level base
+		//   directory, and the project directory is a project's business.
+		root = filepath.Join(home, spec.DefaultConfigDirName)
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("openheron init: resolve config root %q: %w", root, err)
+	}
+	projectRoot, err := commandProjectRoot()
+	if err != nil {
+		return err
 	}
 
-	root := *configDir
-	if root == "" {
-		root = filepath.Join(abs, spec.DefaultBaseDirName)
-	}
 	// NewServiceAt, not NewService: init writes into the directory it was
-	// pointed at and never reads $OPENHERON_CONFIG_DIR. The environment
+	// pointed at and never reads $OPENHERON_CONFIG_ROOT. The environment
 	// variable decides which configuration the server reads, and honoring it
 	// here would write the new configuration somewhere else than asked.
-	svc, err := spec.NewServiceAt(root, abs)
+	svc, err := spec.NewServiceAt(abs, projectRoot, spec.WithHome(home))
 	if err != nil {
 		return err
 	}
@@ -90,7 +103,11 @@ func initCmd(args []string, stdout io.Writer) error {
 func reportInit(plan *initcfg.Plan, root string, dryRun, asJSON bool, stdout io.Writer) error {
 	created := make([]string, 0, len(plan.Files))
 	for _, f := range plan.Files {
-		created = append(created, filepath.Join(spec.DefaultBaseDirName, f.Rel))
+		// ★ The paths are relative to the **config root** — the tree's own
+		//   layout, not the project's. The config root may live far away
+		//   from the working directory, and a path that only means something
+		//   relative to it is the honest one.
+		created = append(created, f.Rel)
 	}
 
 	if asJSON {
@@ -120,7 +137,7 @@ func reportInit(plan *initcfg.Plan, root string, dryRun, asJSON bool, stdout io.
 		fmt.Fprintf(stdout, "note: %s\n", n)
 	}
 	for _, s := range plan.Skipped {
-		fmt.Fprintf(stdout, "kept    %s (already exists)\n", filepath.Join(spec.DefaultBaseDirName, s))
+		fmt.Fprintf(stdout, "kept    %s (already exists)\n", s)
 	}
 	for _, c := range created {
 		fmt.Fprintf(stdout, "created %s\n", c)
@@ -148,13 +165,14 @@ func reportInit(plan *initcfg.Plan, root string, dryRun, asJSON bool, stdout io.
 }
 
 func printInitUsage(stdout io.Writer) {
-	fmt.Fprintln(stdout, "usage: openheron init [--dir <path>] [--model <provider>/<model>] [--provider <id>]")
+	fmt.Fprintln(stdout, "usage: openheron init [--config-root <path>] [--model <provider>/<model>] [--provider <id>]")
 	fmt.Fprintln(stdout, "                [--base-url <url>] [--no-tools]")
 	fmt.Fprintln(stdout, "                [--force] [--dry-run] [--json]")
 	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout, "Creates a runnable project-level configuration in <dir>/.openheron.")
-	fmt.Fprintln(stdout, "Only the files that are actually missing are written; files that already")
-	fmt.Fprintln(stdout, "exist at the user level are inherited, never replaced.")
+	fmt.Fprintln(stdout, "Creates a runnable configuration in the config root: <openheron-root>/configs")
+	fmt.Fprintln(stdout, "by default, which is the one the server reads. Only the files that are")
+	fmt.Fprintln(stdout, "actually missing are written; files that already exist are inherited,")
+	fmt.Fprintln(stdout, "never replaced.")
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Written: agents/main.md, agents/task.md, agents/agent-expert.md,")
 	fmt.Fprintln(stdout, "        agents/skill-expert.md, llm/<provider>.yaml, server/config.yaml,")

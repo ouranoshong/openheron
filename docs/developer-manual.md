@@ -27,10 +27,10 @@ task check        # lint + test — run this before committing
 ```
 
 ★ **The server writes the configuration on the first start**: it reads exactly
-one config root — `$OPENHERON_CONFIG_DIR`, else `<project-root>/.openheron` —
+one config root — `$OPENHERON_CONFIG_ROOT`, else `<openheron-root>/configs` —
 and when that root is the defaulted one and holds no `agents/main.md`, it
 writes the factory tree before it loads anything. ★ A **named** root is never
-written into: `--config-dir` and `$OPENHERON_CONFIG_DIR` mean a directory the
+written into: `--config-root` and `$OPENHERON_CONFIG_ROOT` mean a directory the
 user chose, and an empty one is their decision. The repository ships
 `.openheron-example/` (the sample) but not `.openheron/` (the real one: it
 holds your own model and API key, so it is git-ignored). ★ **`task init` is the
@@ -39,6 +39,9 @@ the files that are missing and keeps the ones already there, so running it
 twice changes nothing. ★ The **key** is not one of those files: it comes from
 `LLM_<PROVIDER>_API_KEY` or the keyring entry `llm:<provider>`, and `init` prints
 where to put it (§3.14).
+★ The **openheron root** is the user-level base directory — `--openheron-root`,
+else `$OPENHERON_ROOT`, else `~/.openheron` — and it is where the state and the
+log file live. ★ The configuration can move; the history does not move with it.
 
 ## 2. Repository layout
 
@@ -1465,9 +1468,10 @@ status colors are `--info`, `--warning` and `--success`.
 ### 5.1 Port and state isolation
 
 **Different ports do not mean different data.** openheron writes its sessions under
-`state/`, so a test writing there pollutes the real history. The test instance treats
-`.openheron-test/project` as the project root and **pre-seeds its own** `.openheron/`,
-then points `OPENHERON_CONFIG_DIR` at the config root — and since the config root
+`<openheron-root>/state/`, so a test writing there pollutes the real history. The test
+instance names its own openheron root (`.openheron-test/`), its own config root
+(`.openheron-test/configs/`), its own data dir (`.openheron-test/state/`) and its own
+project (`.openheron-test/project/`) — and since the config root
 **never searches upwards**, it structurally cannot reach the repository's copy.
 **Ports and state must be isolated together.**
 
@@ -1763,7 +1767,7 @@ test: the runner sweeps the arms, and `analyze.ts` checks the result.
 
 ```bash
 # the server, pointed at a scratch config root and a scratch project root
-./bin/openheron --config-dir $PWD/.openheron-bench --project-root $PWD/benchmarks/out/work
+./bin/openheron --config-root $PWD/.openheron-bench --default-project-root $PWD/benchmarks/out/work
 
 # the sweep: --arm and --task take comma-separated lists
 bun run benchmarks/run.ts --base http://127.0.0.1:18099 \

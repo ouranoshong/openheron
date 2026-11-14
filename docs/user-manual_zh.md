@@ -294,16 +294,16 @@ $env:LLM_DEEPSEEK_API_KEY = '@file:C:\Users\you\deepseek.key'
 
 #### 启动前
 
-★ **`init` 写的地方和服务读的地方可能不是一个。** `init` 一定写当前目录下的
-`.openheron`，它**不看** `$OPENHERON_CONFIG_DIR`；而服务读的顺序是 `--config-dir` →
-`$OPENHERON_CONFIG_DIR` → 项目根下的 `.openheron`（§3）。这个环境变量设着的时候，
+★ **`init` 写的地方和服务读的地方可能不是一个。** `init` 写它被指到的那个配置根 ——
+缺省是 `<openheron-root>/configs` —— 它**不看**环境变量；而服务读的顺序是 `--config-root` →
+`$OPENHERON_CONFIG_ROOT` → `<openheron-root>/configs`（§3）。这个环境变量指着别处的时候，
 服务起来会报 "no configuration at ..."，因为它读的不是 `init` 写的那一棵 ——
 ★ 而它也不会在那儿写一棵：你点名的根是你自己的。
 
 ★ **Windows 上子进程找不到命令时**，把 `mcps/fetch.yaml` 和 `mcps/time.yaml` 里的
 `command` 改成 `uvx.exe` —— 那两个 MCP 服务器要 PATH 里有 `uvx`（§2.3）。
 
-端口被占就在**启动之前**换一个：`$env:LISTEN_ADDR = "127.0.0.1:9090"`（§10）。
+端口被占就在**启动之前**换一个：`$env:OPENHERON_LISTEN_ADDR = "127.0.0.1:9090"`（§10）。
 ★ 地址里要留着主机名：`":9090"` 光一个端口绑的是**所有网卡**，而 agent 的工具跑的是
 shell 命令（§9）。
 
@@ -354,7 +354,7 @@ your/project/
 
 | 选项 | 作用 |
 |---|---|
-| `--dir <path>` | 写到指定目录（默认当前目录） |
+| `--config-root <path>` | 写到指定配置根（缺省 `<openheron-root>/configs`） |
 | `--provider <name>` | 选模型厂商，默认 `deepseek` |
 | `--model <name>` | 选模型，默认 `deepseek-flash` |
 | `--base-url <url>` | 厂商端点（**含路径**，从厂商文档抄） |
@@ -363,25 +363,43 @@ your/project/
 | `--dry-run` | 只打印要写什么，不落盘 |
 | `--json` | 机器可读输出 |
 
-## 3. 配置根：你的配置在哪
+## 3. 三个根：配置、状态与项目各在哪
 
 **只有三级，不向上查找**：
 
 ```
---config-dir  →  $OPENHERON_CONFIG_DIR  →  <project-root>/.openheron
+--config-root  →  $OPENHERON_CONFIG_ROOT  →  <openheron-root>/configs
+```
+
+★ **大本营**是用户级的那一个，配置搬走时它不跟着搬：
+
+```
+--openheron-root  →  $OPENHERON_ROOT  →  ~/.openheron
+```
+
+```
+~/.openheron/                  ← the openheron root
+  configs/                     ← the config root: agents/ llm/ mcps/ tools/ skills/ server/
+  state/                       ← the data dir: sessions, checkpoints, the knowledge-base index
+  logs/openheron.log           ← the log file
+  projects/default/            ← the default project root
 ```
 
 - **默认那一档不存在会帮你创建** —— 里面的树也会帮你写，第一次启动时写（§2.1）。
 - 前两档指向不存在的目录时**不会创建** —— 打错字不该静默长出一棵空配置树。
   这种情况下启动会报 `config: load <path>: ...`，告诉你哪里不对。
 - 配置根**不依赖「进程从哪启动」**：在子目录里跑 `openheron` 读到的还是同一份配置。
-- ★ **你点名的根永远不会被写**：`--config-dir` 与 `$OPENHERON_CONFIG_DIR` 指的是你选的
+- ★ **你点名的根永远不会被写**：`--config-root` 与 `$OPENHERON_CONFIG_ROOT` 指的是你选的
   目录，它空着是你的决定，不是一个缺口。
+- ★ **状态与日志文件住在大本营**，不在配置根里：搬走配置不会把历史一起搬走。
+- ★ **旧名字仍然生效** —— `$OPENHERON_CONFIG_DIR`、`$PROJECT_ROOT`、`$DATA_DIR`、
+  `$LISTEN_ADDR`、`$STATIC_DIR`、`$FRONTEND_MODE`、`--config-dir`、`--project-root` ——
+  而且用了旧名字会被点名，所以不会有哪个设置悄悄不再生效。
 
 如果默认根下没有 `agents/main.md`、而服务端也没能写出来，启动会直接告诉你：
 
 ```
-no configuration at /your/project/.openheron: run `openheron init` to create one
+no configuration at /home/you/.openheron/configs: run `openheron init` to create one
 ```
 
 ## 4. 配置怎么写
@@ -755,9 +773,12 @@ allows: [request_get]
 提交会报 `section "server" is not editable`。
 
 以下环境变量可以覆盖进程参数，优先级高于配置文件：
-`LISTEN_ADDR`、`DATA_DIR`、`PROJECT_ROOT`、`FRONTEND_MODE`、`STATIC_DIR`、
+`OPENHERON_LISTEN_ADDR`、`OPENHERON_DATA_DIR`、`OPENHERON_DEFAULT_PROJECT_ROOT`、
+`OPENHERON_FRONTEND_MODE`、`OPENHERON_STATIC_DIR`、
 `OPENHERON_LOG_LEVEL`、
 `OPENHERON_LOG_FILE`、`OPENHERON_LOG_LLM_REQUESTS`。
+
+★ `data_dir` 与 `log.file` 的基准是**大本营**，`static_dir` 的基准是**项目根**（§3）。
 
 ★ `log_requests` 与 `OPENHERON_LOG_LLM_REQUESTS` 是同一个开关的两种写法：前者定项目默认值，
 后者给单次运行下定论（**环境变量优先**，变量为空才看配置）。打开后每次模型请求会在 `debug`
@@ -781,9 +802,11 @@ allows: [request_get]
 
 `skills/<name>/SKILL.md`，按 eino 原生的 skill 约定。
 
-★ skills 的查找**是另一套规则**：先看 `$EINO_EXT_SKILLS_DIR`，
-没有才从**当前目录向上**找 `.openheron/skills`。这跟配置根「不向上找」不一样 ——
-skills 是目录树，向上找是为了能用你家目录里的技能。
+★ skills 的查找**是另一套规则**：先看 `$EINO_EXT_SKILLS_DIR`，再看**配置根自己的**
+`skills/`，两处都没有才从**当前目录向上**找 `.openheron/skills`。配置根排在向上探测
+前面，是因为配置编辑器就往那儿写 —— 存在配置里却加载不到的技能，是谁也用不了的技能。
+向上找是旧布局，它跟配置根「不向上找」不一样 —— skills 是目录树，向上找是为了能用你家
+目录里的技能。
 
 ★ **一个 Agent 能用哪些技能，由它自己声明**。`agents/<name>.md` 的 `skills` 键是
 白名单，名字就是 `skills/` 下的文件夹名：
@@ -1386,7 +1409,7 @@ openheron kb status                # inspect the index
 openheron kb status --json         # machine-readable
 ```
 
-三条命令都支持 `--config-dir <path>`，用来指向别的配置根。
+三条命令都支持 `--config-root <path>`，用来指向别的配置根（`--config-dir` 是旧名，仍然生效）。
 
 ★ `kb index` 有**运行锁**：同一时间只能跑一轮，重复调用会等前一轮结束。
 
@@ -1404,18 +1427,22 @@ Agent 拿到两个工具：
 ## 8. 命令行速查
 
 ```
-openheron [--config-dir <path>] [--project-root <path>]   start the server
+openheron [--openheron-root <path>] [--config-root <path>]      start the server
+           [--default-project-root <path>] [dir]
 openheron init [options]                                   generate a minimal runnable configuration
 openheron secret set <llm|mcp> <name>                      store a key in the keyring (the value is read from stdin)
 openheron secret get <llm|mcp> <name>                      print the key that is in effect
 openheron secret list [--json]                             the entities and which key is in force
 openheron secret remove <llm|mcp> <name>                   remove one entry
 openheron secret remove <llm|mcp>                          remove every entry of that group
-openheron kb index [--config-dir] [--json] [files...]      build the index
-openheron kb search [--config-dir] <query>                 search
-openheron kb status [--config-dir] [--json]                inspect the index
+openheron kb index [--config-root] [--json] [files...]     build the index
+openheron kb search [--config-root] <query>                search
+openheron kb status [--config-root] [--json]               inspect the index
 openheron version                                         print the version
 ```
+
+★ 那个**目录**就是这个进程关注的项目 —— 它同时也是默认项目根，除非 `--default-project-root`
+另有说法。flag 要写在它**前面**：`openheron --config-root ./cfg .`。
 
 ## 9. HTTP 接口速查
 
@@ -1507,7 +1534,7 @@ curl -N -X POST localhost:8080/v2/run \
 由你定。
 
 **Q：报 `config: load <path>: agents/main.md does not exist or could not be parsed`**
-两件事之一：配置根指错了（用 `--config-dir` 或 `$OPENHERON_CONFIG_DIR` 指对），
+两件事之一：配置根指错了（用 `--config-root` 或 `$OPENHERON_CONFIG_ROOT` 指对），
 或者 `agents/main.md` 的 frontmatter 写错了键。
 
 **Q：改了 `agents/main.md` 没生效？**
@@ -1550,7 +1577,7 @@ Agent 和它的父 Agent，其余的照旧留着。改之前想知道这个集�
 按 **Refresh** 就看得见。
 
 **Q：端口被占 / 界面打不开？**
-`listen_addr` 改端口，或用环境变量 `LISTEN_ADDR` 覆盖。★ 地址里要留着主机名：
+`listen_addr` 改端口，或用环境变量 `OPENHERON_LISTEN_ADDR` 覆盖。★ 地址里要留着主机名：
 `127.0.0.1:9090` 是安全写法，光一个 `:9090` 绑的是所有网卡。
 
 **Q：想看服务到底加载了什么？**

@@ -72,6 +72,18 @@ func WithConfigService(svc *spec.Service) Option {
 	}
 }
 
+// configRoot returns the configuration root, or "" when there is none.
+//
+// ★ Empty means "nobody wired a configuration service", and the skills are
+//
+//	then resolved by the probe alone.
+func (b *Builder) configRoot() string {
+	if b == nil || b.svc == nil {
+		return ""
+	}
+	return b.svc.Root()
+}
+
 func WithPaths(projectRoot, dataDir string) Option {
 	return func(b *Builder) {
 		b.projectRoot = projectRoot

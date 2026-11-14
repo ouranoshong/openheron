@@ -50,6 +50,7 @@ func settingsEnvWithWatch(t *testing.T, watch bool) (*Server, *spec.Service, str
 	write("server/spec.yaml", "listen_addr: \":9099\"\n"+
 		"watch:\n  enabled: "+map[bool]string{true: "true", false: "false"}[watch]+"\n")
 
+	t.Setenv(spec.RootEnv, "")
 	svc, err := spec.NewService(cfgRoot, root)
 	if err != nil {
 		t.Fatal(err)

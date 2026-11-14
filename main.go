@@ -95,56 +95,153 @@ func main() {
 }
 
 type serverFlags struct {
-	configDir   string
-	projectRoot string
+	openheronRoot      string
+	configRoot         string
+	defaultProjectRoot string
+	// legacyProjectRoot is the previous name of defaultProjectRoot.
+	legacyProjectRoot string
+	// scopeDir is the optional positional argument: the project this process
+	// focuses on.
+	scopeDir string
 }
+
+// The environment variables that override the server's own settings.
+//
+// ★ They carry the OPENHERON_ prefix: a bare LISTEN_ADDR or STATIC_DIR is a
+//
+//	name any other tool in the environment may also set, and a variable
+//	somebody else owns is a variable that can change this process's
+//	behaviour without anybody meaning to.
+const (
+	listenAddrEnv   = "OPENHERON_LISTEN_ADDR"
+	frontendModeEnv = "OPENHERON_FRONTEND_MODE"
+	staticDirEnv    = "OPENHERON_STATIC_DIR"
+)
 
 func parseServerFlags(args []string) (serverFlags, error) {
 	fs := flag.NewFlagSet("openheron", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var f serverFlags
-	fs.StringVar(&f.configDir, "config-dir", "",
-		"the config root to read (default: <project-root>/.openheron, created when missing; or $OPENHERON_CONFIG_DIR)")
-	fs.StringVar(&f.projectRoot, "project-root", "",
-		"the project root (default: the current directory)")
+	fs.StringVar(&f.openheronRoot, "openheron-root", "",
+		"the user-level base directory (default: ~/.openheron; or $OPENHERON_ROOT)")
+	fs.StringVar(&f.configRoot, "config-root", "",
+		"the config root to read (default: <openheron-root>/configs, created when missing; or $OPENHERON_CONFIG_ROOT)")
+	fs.StringVar(&f.defaultProjectRoot, "default-project-root", "",
+		"the project root for sessions that belong to no project (default: <openheron-root>/projects/default)")
+	fs.StringVar(&f.legacyProjectRoot, "project-root", "",
+		"deprecated: the previous name of --default-project-root")
 	if err := fs.Parse(args); err != nil {
 		return f, err
 	}
-	if fs.NArg() > 0 {
-		return f, fmt.Errorf("unexpected argument %q; openheron takes flags only", fs.Arg(0))
+	// ★ The flags come first: Go's flag parser stops at the first argument
+	//   that is not a flag, so `openheron . --config-root x` would read the
+	//   two flags as two more directories.
+	if fs.NArg() > 1 {
+		return f, fmt.Errorf("unexpected argument %q; openheron takes one directory, and the flags come first",
+			fs.Arg(1))
+	}
+	if fs.NArg() == 1 {
+		f.scopeDir = fs.Arg(0)
 	}
 	return f, nil
 }
 
 func printServerUsage(stdout io.Writer) {
-	fmt.Fprintln(stdout, "usage: openheron [--config-dir <path>] [--project-root <path>]")
+	fmt.Fprintln(stdout, "usage: openheron [flags] [dir]")
 	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout, "Reads exactly one configuration root: --config-dir, else $OPENHERON_CONFIG_DIR,")
-	fmt.Fprintln(stdout, "else <project-root>/.openheron (created when missing).")
+	fmt.Fprintln(stdout, "The directory is the project this process focuses on. It is also the")
+	fmt.Fprintln(stdout, "default project root, unless --default-project-root says otherwise.")
 	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout, "  --config-dir   the config root (llm/ agents/ mcps/ server/ tools/ live here)")
-	fmt.Fprintln(stdout, "  --project-root the project root: agent workdir and relative-path base")
+	fmt.Fprintln(stdout, "  --openheron-root       the user-level base directory (default: ~/.openheron)")
+	fmt.Fprintln(stdout, "  --config-root         the config root (llm/ agents/ mcps/ server/ tools/)")
+	fmt.Fprintln(stdout, "  --default-project-root the project root for sessions that belong to no project")
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "Reads exactly one configuration root: --config-root, else $OPENHERON_CONFIG_ROOT,")
+	fmt.Fprintln(stdout, "else <openheron-root>/configs (created when missing).")
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Other commands: openheron init, openheron secret, openheron kb, openheron version")
 }
 
-func warnUnusedHomeConfig(root string, log *slog.Logger) {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return
+// resolveOpenheronRoot resolves the user-level base directory.
+//
+// ★ The flag, else $OPENHERON_ROOT, else ~/.openheron.
+//
+//	The default is the user's home directory because the base directory
+//	holds the three things a person expects to find again on the next
+//	machine: the configuration, the state and the log file.
+func resolveOpenheronRoot(flagValue string) (string, error) {
+	v := strings.TrimSpace(flagValue)
+	if v == "" {
+		v = strings.TrimSpace(os.Getenv(spec.RootEnv))
 	}
-	homeCfg := filepath.Join(home, spec.DefaultBaseDirName)
-	if homeCfg == root {
-		return
+	if v == "" {
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return "", fmt.Errorf("resolve the openheron root: no home directory; "+
+				"pass --openheron-root or set %s", spec.RootEnv)
+		}
+		v = filepath.Join(home, ".openheron")
 	}
-	if fi, err := os.Stat(homeCfg); err != nil || !fi.IsDir() {
-		return
+	abs, err := filepath.Abs(v)
+	if err != nil {
+		return "", fmt.Errorf("resolve the openheron root %q: %w", v, err)
 	}
-	// The config root is never searched for anymore, so a config in the home
-	// directory is never picked up on its own — it has to be named.
-	log.Warn("[main] a config dir exists but is not the config root in use; "+
-		"pass --config-dir or set $OPENHERON_CONFIG_DIR to use it",
-		"dir", homeCfg, "root", root)
+	return abs, nil
+}
+
+// overrideEnv reads the environment variable that overrides a configured
+// value.
+//
+// ★ The previous name still works, and it is reported: an environment
+//
+//	variable that quietly stops working is the hardest kind of mistake to
+//	find — the user believes the setting changed, and nothing changed.
+func overrideEnv(log *slog.Logger, key, legacyKey, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	if legacyKey != "" {
+		if v := strings.TrimSpace(os.Getenv(legacyKey)); v != "" {
+			if log != nil {
+				log.Warn("[main] the environment variable was renamed",
+					"old", legacyKey, "new", key)
+			}
+			return v
+		}
+	}
+	return fallback
+}
+
+// commandProjectRoot returns the project root a command runs against.
+//
+// ★ The working directory, as it always was. A command is a thing a person
+//
+//	types while standing in a project, and the project they are standing in
+//	is the one they mean. ★ The server's default project root is a different
+//	question — it answers for a session that belongs to no project, and the
+//	server may be serving several projects at once.
+func commandProjectRoot() (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve the working directory: %w", err)
+	}
+	return wd, nil
+}
+
+// newConfigService builds the configuration service for a command that has
+// no server flags.
+//
+// ★ The openheron root is resolved the way the server resolves it: the
+//
+//	environment, else the user's home directory. ★ One answer per question —
+//	a command that read a different configuration than the server would be a
+//	command that lies.
+func newConfigService(configRoot, projectRoot string) (*spec.Service, error) {
+	home, err := resolveOpenheronRoot("")
+	if err != nil {
+		return nil, err
+	}
+	return spec.NewService(configRoot, projectRoot, spec.WithHome(home))
 }
 
 // configLoadError turns a config load failure into an actionable message.
@@ -367,6 +464,7 @@ type startup struct {
 
 	addr        string
 	dataDir     string
+	home        string
 	projectRoot string
 
 	log   *slog.Logger
@@ -381,9 +479,36 @@ type startup struct {
 }
 
 func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar, sink *obs.Sink) (*startup, error) {
-	cfgSvc, err := spec.NewService(flags.configDir, flags.projectRoot)
+	// ★ The openheron root first: it is the base the other two are
+	//   measured from, and the config root's default lives inside it.
+	home, err := resolveOpenheronRoot(flags.openheronRoot)
 	if err != nil {
 		return nil, err
+	}
+	// ★ The default project root. Three sources, in this order: the flag,
+	//   the positional directory, and the default inside the openheron root.
+	//   The directory is the second one because `openheron .` is the way to
+	//   keep the old intuition — "the agent works where I started it" — and
+	//   that intuition is worth more than a flag's precedence.
+	projectRoot := flags.defaultProjectRoot
+	if projectRoot == "" {
+		projectRoot = flags.legacyProjectRoot
+		if projectRoot != "" {
+			log.Warn("[main] --project-root was renamed to --default-project-root; " +
+				"the old name still works, but it will go")
+		}
+	}
+	if projectRoot == "" && flags.scopeDir != "" {
+		projectRoot = flags.scopeDir
+	}
+	cfgSvc, err := spec.NewService(flags.configRoot, projectRoot, spec.WithHome(home))
+	if err != nil {
+		return nil, err
+	}
+	// ★ The old environment variable names are reported here, once: the
+	//   service resolved them and cannot log them.
+	for _, d := range cfgSvc.Notices() {
+		log.Warn("[main] config notice", "notice", d)
 	}
 	// ★ The keyring is wired **here** and nowhere else. It is a global OS
 	//   resource — the Windows Credential Manager, the macOS Keychain, the
@@ -411,10 +536,9 @@ func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar, sink
 	//   whatever its own probe resolved. Tell the config layer where that is,
 	//   so a skill written into a directory nobody loads is refused instead
 	//   of saved in silence.
-	if dir, ok := build.ResolveSkillsDir(log); ok {
+	if dir, ok := build.ResolveSkillsDir(log, cfgSvc.Root()); ok {
 		cfgSvc.SetSkillsDir(dir)
 	}
-	warnUnusedHomeConfig(cfgSvc.Root(), log)
 
 	mgr := &agentConfig{}
 	// ★ The file destination is installed **once**, on the first configuration
@@ -452,14 +576,27 @@ func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar, sink
 	//   threshold that no configuration could close.
 	log.Info("[main] openheron", "version", version)
 	log.Info("[main] config root",
-		"root", cfgSvc.Root(), "projectRoot", cfgSvc.ProjectRoot())
+		"root", cfgSvc.Root(), "home", cfgSvc.Home(),
+		"projectRoot", cfgSvc.DefaultProjectRoot())
 
-	cfgDataDir, err := cfgSvc.DataDir(cfg.Server.DataDir)
+	// ★ The data directory: the configured value, else the environment. The
+	//   environment wins — it is the one that can change without an editor
+	//   restart — and it goes through the same resolution, so a relative
+	//   value lands in the openheron root like the configured one does.
+	dataDirValue := cfg.Server.DataDir
+	if env := strings.TrimSpace(os.Getenv(spec.DataDirEnv)); env != "" {
+		dataDirValue = env
+	} else if env := strings.TrimSpace(os.Getenv("DATA_DIR")); env != "" {
+		log.Warn("[main] the environment variable was renamed",
+			"old", "DATA_DIR", "new", spec.DataDirEnv)
+		dataDirValue = env
+	}
+	cfgDataDir, err := cfgSvc.DataDir(dataDirValue)
 	if err != nil {
 		return nil, err
 	}
 
-	addr := override("LISTEN_ADDR", cfg.Server.ListenAddr)
+	addr := overrideEnv(log, listenAddrEnv, "LISTEN_ADDR", cfg.Server.ListenAddr)
 
 	// ★ The exposure note. A listener beyond the loopback is reachable by
 	//   every machine on the network, and the tools this server drives run
@@ -478,8 +615,9 @@ func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar, sink
 		reloader:    reloader,
 		cfg:         cfg,
 		addr:        addr,
-		dataDir:     override("DATA_DIR", cfgDataDir),
-		projectRoot: override("PROJECT_ROOT", cfgSvc.ProjectRoot()),
+		dataDir:     cfgDataDir,
+		home:        cfgSvc.Home(),
+		projectRoot: cfgSvc.DefaultProjectRoot(),
 		logClose:    logClose,
 	}, nil
 }
@@ -575,7 +713,7 @@ func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 		}
 	})
 	st.srv.SetSkillsSource(func() []api.SkillView {
-		list := build.Skills(context.Background(), st.log)
+		list := build.Skills(context.Background(), st.log, st.cfgSvc.Root())
 		out := make([]api.SkillView, 0, len(list))
 		for _, s := range list {
 			out = append(out, api.SkillView{
@@ -619,7 +757,7 @@ func inspectSessions(ctx context.Context, st *startup, log *slog.Logger) {
 }
 
 func setupFrontend(st *startup, log *slog.Logger) error {
-	mode := override("FRONTEND_MODE", st.cfg.Server.FrontendMode)
+	mode := overrideEnv(log, frontendModeEnv, "FRONTEND_MODE", st.cfg.Server.FrontendMode)
 	assets, aerr := fs.Sub(webAssets, "web/dist")
 
 	switch mode {
@@ -633,9 +771,10 @@ func setupFrontend(st *startup, log *slog.Logger) error {
 		}
 		log.Info("[main] frontend: embedded from web/dist")
 	case "dir":
-		dir := st.cfgSvc.ResolveDir(override("STATIC_DIR", st.cfg.Server.StaticDir))
+		dir := st.cfgSvc.ResolveDir(overrideEnv(log, staticDirEnv, "STATIC_DIR", st.cfg.Server.StaticDir))
 		if dir == "" {
-			log.Warn("[main] frontend_mode=dir but static_dir is empty; set STATIC_DIR")
+			log.Warn("[main] frontend_mode=dir but static_dir is empty; set the environment variable",
+				"env", staticDirEnv)
 			return nil
 		}
 		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
@@ -923,13 +1062,6 @@ func configVersion(cfg *spec.Config) string {
 		return ""
 	}
 	return cfg.Version
-}
-
-func override(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }
 
 func short(v string) string {

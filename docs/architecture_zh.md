@@ -303,8 +303,11 @@ provider 只回答「这个 snapshot 有哪些工具」并交回一批工具，�
 
 `skills/` 是配置层 `Categories` 里的**嵌套分区**（`skills/<name>/SKILL.md`），但它的 `loader`
 为 nil：清单、路径规则与编辑器归 `spec`，内容由 `build` 的 skill backend 独立解析
-（`agentkit/build/skill.go:190` 的 `ResolveSkillsDir`）—— 先看 `$EINO_EXT_SKILLS_DIR`，没有才
-从当前目录**向上**找 `.openheron/skills`。这与「配置根不向上查找」是两条不同的规则。
+（`agentkit/build/skill.go:190` 的 `ResolveSkillsDir`）—— 先看 `$EINO_EXT_SKILLS_DIR`，再看
+**配置根自己的** `skills/`，两处都没有才从当前目录**向上**找 `.openheron/skills`。
+
+★ **配置根排在向上探测前面**，因为配置编辑器就往那儿写。存在配置里却加载不到的技能，是谁也
+用不了的技能；向上探测是旧布局，它还在。
 
 编辑器写的是 `<配置根>/skills/`，那个目录只有在探针正好落在那里时才是生效的那一个；不是的
 话保存会落进一棵没人读的树。所以解析结果在启动时被推进配置层
@@ -452,11 +455,21 @@ main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
 ### 5.2 配置根只有三级
 
 ```
---config-dir  →  $OPENHERON_CONFIG_DIR  →  <project-root>/.openheron
+--config-root  →  $OPENHERON_CONFIG_ROOT  →  <openheron-root>/configs
 ```
 
+**大本营**是用户级的那一个 —— `--openheron-root`，否则 `$OPENHERON_ROOT`，否则
+`~/.openheron` —— **状态**（`data_dir`）与**日志文件**的基准都是它，所以搬走配置不会把历史
+一起搬走。**默认项目根**（`--default-project-root`，否则 `$OPENHERON_DEFAULT_PROJECT_ROOT`，
+否则 `<openheron-root>/projects/default`）是「不属于任何项目的会话」干活的地方；
+`static_dir` 与 `corpus_dir` 的基准是它。
+
 实现在 `agentkit/spec/config.go` 的 `NewService`。**不向上查找祖先目录**：否则同一条命令换个
-启动目录就读到另一份配置，测试实例也会读到开发配置。只有默认派生的根会被自动创建
+启动目录就读到另一份配置，测试实例也会读到开发配置。★ **旧名字仍然生效**（`--config-dir`、
+`$OPENHERON_CONFIG_DIR`、`$PROJECT_ROOT`、`$DATA_DIR`、`$LISTEN_ADDR`、`$STATIC_DIR`、
+`$FRONTEND_MODE`），而且用了旧名字会被点名。
+
+只有默认派生的根会被自动创建
 （`agentkit/spec/config.go:544` 的 `os.MkdirAll`）；显式 root / env root 指向不存在的路径时
 不创建。
 

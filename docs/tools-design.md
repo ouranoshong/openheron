@@ -1027,9 +1027,11 @@ mixin 于是把主机名一并加上，两张 allow 列表按阶段取并集。
 
 ```sh
 cd "${WORKSPACE_DIR:-$PWD}" || exit 1
-openheron init --dir "$PWD" || \
+export OPENHERON_CONFIG_ROOT="$PWD/.openheron"
+openheron init --config-root "$OPENHERON_CONFIG_ROOT" || \
     echo "[entrypoint] init did not complete; the configuration was left as it was, and with none at all the server will not start"
-exec openheron
+export OPENHERON_LISTEN_ADDR="[::]:8080"
+exec openheron "$PWD"
 ```
 
 ★ **先 `cd`，其余都跟着来**：工作目录就是项目根，配置根是 `<cwd>/.openheron`。
@@ -1037,17 +1039,19 @@ exec openheron
 所以在 startup hook 与入口脚本里各跑一次，代价是一次空操作，
 却把「hook 与入口脚本谁先谁后」这个依赖去掉了。
 
-★ **Kit 只设了一个 openheron 环境变量：`LISTEN_ADDR`。** 入口脚本 `cd` 进工作区，
-openheron 自己的默认值从那里落到了正确的位置：`PROJECT_ROOT`（默认是工作目录）、
-配置根（默认 `<projectRoot>/.openheron`）、`DATA_DIR`（默认是配置根下的 `state`）。
-★ `LISTEN_ADDR` 是**唯一**必须显式给的：缺省值是环回（`127.0.0.1:8080`），而运行时从
+★ **Kit 设了三个 openheron 环境变量：`OPENHERON_CONFIG_ROOT`、`OPENHERON_LISTEN_ADDR`，
+以及位置参数给的项目目录。** ★ `OPENHERON_CONFIG_ROOT` 是**必须**显式给的：缺省是
+`<openheron-root>/configs`，而大本营在容器自己的文件系统里 —— 那是随沙箱一起消失的地方。
+点名它，配置才落在挂载上。
+★ `OPENHERON_LISTEN_ADDR` 同样是必须显式给的：缺省值是环回（`127.0.0.1:8080`），而运行时从
 microVM 外面转发进来的连接**到不了环回** —— 沙箱起来了，端口却没人应答。
+★ 位置参数 `$PWD` 说「这个工作区就是项目」：它同时定下默认项目根，于是 agent 在用户挂载的
+目录里干活。
 ★ 来自**运行时**而不是来自 Kit 的变量：`HTTPS_PROXY` 与 `HTTP_PROXY`
 （凭据替换正是靠它们），以及 `WORKSPACE_DIR`。
 
-★ **`$PROJECT_ROOT` 刻意不在 Kit 设的那几项里。** 它挪不动配置根 ——
-设了反而会让容器有两个根：一个只设了 `$PROJECT_ROOT` 的容器会得到两个不同的根，
-agent 在一个目录里干活，配置却从另一个目录读。
+★ **大本营刻意不在 Kit 设的那几项里。** 它是状态与日志的家 —— 而 Kit 想要的状态**在挂载上**：
+对话要挺过沙箱的停止、重建，甚至移除。
 
 ★ **VM 里的路径语义**：工作区挂在与宿主**同一个绝对路径**上，于是
 `cmd.Dir = s.root`（`agentkit/fsx/fsx.go:880`）含义不变；
@@ -1071,11 +1075,11 @@ shell 命令里的相对路径仍然指项目根；配置根是 `<工作区>/.op
 - ★ **而且它会一直活着** —— 靠的是 `long-running@1`：运行时不得仅因为没有会话
   挂着就停掉持有它的沙箱。于是客户端可以分离，而服务继续在跑、继续应答。
 
-★ **状态默认就已经是持久的。** 数据目录的缺省是 `<configRoot>/state`，
-而配置根是 `<工作区>/.openheron` ⇒ 默认的数据目录是 **`<工作区>/.openheron/state`** ——
-在挂载上。★ 挂载属于用户、比沙箱活得久，所以对话能挺过沙箱的停止、重建，甚至移除。
-规范里的 `volume@1` capability 在这件事上并不需要；
-★ `DATA_DIR` 就是那个开关：绝对路径优先于默认值。
+★ **状态默认就已经是持久的。** 数据目录的缺省是 `<openheron-root>/state`，
+而大本营的缺省是容器自己的 `~/.openheron` ⇒ 默认的数据目录在**沙箱自己的文件系统**里。
+★ **所以 Kit 显式点名了数据目录**：`OPENHERON_DATA_DIR="$PWD/.openheron/state"` ——
+绝对路径优先于默认值，于是状态落在挂载上。★ 挂载属于用户、比沙箱活得久，
+所以对话能挺过沙箱的停止、重建，甚至移除。规范里的 `volume@1` capability 在这件事上并不需要。
 
 ★ **边界是往外挪，这正是它便宜的原因。** Go 代码一行不改：
 agent 模型、档位表、审批流程、checkpoint store、文件工具及其收敛、API 面、
@@ -1359,17 +1363,20 @@ workload 是**内容**。跑在沙箱里的 MCP 服务器是 workload 内容；
 | `sandbox-kit/openheron/openheron.yaml:81-85` | `network-policy@1`（运行阶段放行 `*`） |
 | `sandbox-kit/openheron/openheron.yaml:93-98` | `lifecycle@1` 的 startup hook |
 | `sandbox-kit/openheron/entrypoint.sh:5` | `cd "${WORKSPACE_DIR:-$PWD}"` |
-| `sandbox-kit/openheron/entrypoint.sh:13` | `openheron init --dir "$PWD"` |
-| `sandbox-kit/openheron/entrypoint.sh:25` | `exec openheron` |
+| `sandbox-kit/openheron/entrypoint.sh:18` | `export OPENHERON_CONFIG_ROOT="$PWD/.openheron"` |
+| `sandbox-kit/openheron/entrypoint.sh:19` | `openheron init --config-root "$OPENHERON_CONFIG_ROOT"` |
+| `sandbox-kit/openheron/entrypoint.sh:29` | `export OPENHERON_LISTEN_ADDR="[::]:8080"` |
+| `sandbox-kit/openheron/entrypoint.sh:35` | `export OPENHERON_DATA_DIR="$PWD/.openheron/state"` |
+| `sandbox-kit/openheron/entrypoint.sh:38` | `exec openheron "$PWD"` |
 | `sandbox-kit/openheron/openheron.dockerfile:11` | 那个二进制是动态链接的 |
 | `sandbox-kit/openheron/openheron.dockerfile:19` | 基础镜像 |
 | `sandbox-kit/openheron/openheron.dockerfile:34` | `WORKDIR` |
 | `sandbox-kit/openheron-deepseek/openheron-deepseek.yaml:37-41` | mixin 的网络规则 |
 | `sandbox-kit/openheron-deepseek/openheron-deepseek.yaml:59-69` | mixin 的 `credential@1` |
 | `sandbox-kit/acceptance/run.sh` | 验收跑批（§6 的可重复形式） |
-| `main.go:161` | 没有配置就不肯启动 |
-| `main.go:462` / `:481` / `:482` | `LISTEN_ADDR` / `DATA_DIR` / `PROJECT_ROOT` 的覆盖顺序 |
-| `main.go:488` | 会话目录 |
-| `agentkit/spec/config.go:514` | `NewService`（项目根的缺省是工作目录） |
-| `agentkit/spec/config.go:579` | `Service.ProjectRoot` |
-| `agentkit/spec/config.go:581` | `Service.DataDir`（缺省 `state`） |
+| `main.go:258` | 没有配置就不肯启动 |
+| `main.go:587` / `:599` | `DATA_DIR` / `LISTEN_ADDR` 的覆盖顺序 |
+| `main.go:626` | 会话目录 |
+| `agentkit/spec/config.go:599` | `NewService`（三个根的解析） |
+| `agentkit/spec/config.go:766` | `Service.DefaultProjectRoot` |
+| `agentkit/spec/config.go:784` | `Service.DataDir`（缺省 `state`） |

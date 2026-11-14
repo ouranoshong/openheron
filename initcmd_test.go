@@ -11,18 +11,28 @@ import (
 	"github.com/ouranoshong/openheron/agentkit/spec"
 )
 
+// initEnv prepares a hermetic environment and returns the config root the
+// tests write into.
+//
+// ★ The openheron root is named, so the command has one answer for where the
+//
+//	base directory is — and the answer is a temporary directory, not the
+//	developer's home.
 func initEnv(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("USERPROFILE", filepath.Join(root, "home"))
+	t.Setenv(spec.RootEnv, filepath.Join(root, "base"))
+	t.Setenv(spec.ConfigRootEnv, "")
 	t.Setenv(spec.ConfigDirEnv, "")
-	return filepath.Join(root, "project")
+	return filepath.Join(root, "configs")
 }
 
 func TestInitJSONOutputIsValidJSON(t *testing.T) {
 	dir := initEnv(t)
 	var buf bytes.Buffer
-	if err := initCmd([]string{"--dir", dir, "--json"}, &buf); err != nil {
+	if err := initCmd([]string{"--config-root", dir, "--json"}, &buf); err != nil {
 		t.Fatalf("initCmd: %v", err)
 	}
 	var out struct {
@@ -46,26 +56,26 @@ func TestInitJSONOutputIsValidJSON(t *testing.T) {
 		t.Fatalf("created = %v, want 20 files", out.Created)
 	}
 	for _, want := range []string{
-		".openheron/agents/main.md",
-		".openheron/agents/task.md",
-		".openheron/agents/agent-expert.md",
-		".openheron/agents/skill-expert.md",
-		".openheron/skills/openheron-config-map/SKILL.md",
-		".openheron/skills/openheron-config-edit/SKILL.md",
-		".openheron/skills/openheron-config-templates/SKILL.md",
-		".openheron/skills/openheron-config-validate/SKILL.md",
-		".openheron/skills/openheron-agent-authoring/SKILL.md",
-		".openheron/llm/deepseek.yaml",
-		".openheron/tools/http.yaml",
-		".openheron/tools/web_search.yaml",
-		".openheron/tools/wikipedia.yaml",
-		".openheron/tools/kb.yaml",
-		".openheron/tools/filesystem.yaml",
-		".openheron/tools/config.yaml",
-		".openheron/mcps/fetch.yaml",
-		".openheron/mcps/time.yaml",
-		".openheron/mcps/deepwiki.yaml",
-		".openheron/server/config.yaml",
+		"agents/main.md",
+		"agents/task.md",
+		"agents/agent-expert.md",
+		"agents/skill-expert.md",
+		"skills/openheron-config-map/SKILL.md",
+		"skills/openheron-config-edit/SKILL.md",
+		"skills/openheron-config-templates/SKILL.md",
+		"skills/openheron-config-validate/SKILL.md",
+		"skills/openheron-agent-authoring/SKILL.md",
+		"llm/deepseek.yaml",
+		"tools/http.yaml",
+		"tools/web_search.yaml",
+		"tools/wikipedia.yaml",
+		"tools/kb.yaml",
+		"tools/filesystem.yaml",
+		"tools/config.yaml",
+		"mcps/fetch.yaml",
+		"mcps/time.yaml",
+		"mcps/deepwiki.yaml",
+		"server/config.yaml",
 	} {
 		found := false
 		for _, c := range out.Created {
@@ -93,13 +103,13 @@ func TestInitJSONOutputIsValidJSON(t *testing.T) {
 func TestInitDryRunWritesNothing(t *testing.T) {
 	dir := initEnv(t)
 	var buf bytes.Buffer
-	if err := initCmd([]string{"--dir", dir, "--dry-run"}, &buf); err != nil {
+	if err := initCmd([]string{"--config-root", dir, "--dry-run"}, &buf); err != nil {
 		t.Fatalf("initCmd: %v", err)
 	}
 	if !strings.Contains(buf.String(), "dry run") {
 		t.Fatalf("the output must say it was a dry run:\n%s", buf.String())
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".openheron")); err == nil {
+	if _, err := os.Stat(dir); err == nil {
 		t.Fatal("a dry run must not create anything")
 	}
 }
@@ -107,16 +117,32 @@ func TestInitDryRunWritesNothing(t *testing.T) {
 func TestInitRejectsAnUnknownFlag(t *testing.T) {
 	dir := initEnv(t)
 	var buf bytes.Buffer
-	err := initCmd([]string{"--dir", dir, "--nope"}, &buf)
+	err := initCmd([]string{"--config-root", dir, "--nope"}, &buf)
 	if err == nil {
 		t.Fatal("an unknown flag must be an error")
+	}
+}
+
+// ★ The old flag named a **project** directory and the new one names the
+//
+//	**config root** — two different directories. Accepting the old name for
+//	the new one would write the configuration somewhere nobody asked for.
+func TestInitRejectsTheRetiredDirFlag(t *testing.T) {
+	dir := initEnv(t)
+	var buf bytes.Buffer
+	err := initCmd([]string{"--dir", dir}, &buf)
+	if err == nil {
+		t.Fatal("--dir must be an error")
+	}
+	if !strings.Contains(err.Error(), "--config-root") {
+		t.Fatalf("the error must name the new flag: %v", err)
 	}
 }
 
 func TestInitRejectsAMalformedModel(t *testing.T) {
 	dir := initEnv(t)
 	var buf bytes.Buffer
-	err := initCmd([]string{"--dir", dir, "--model", "gpt-4o"}, &buf)
+	err := initCmd([]string{"--config-root", dir, "--model", "gpt-4o"}, &buf)
 	if err == nil {
 		t.Fatal("a model reference without a provider must be an error")
 	}
@@ -128,7 +154,7 @@ func TestInitRejectsAMalformedModel(t *testing.T) {
 func TestInitRejectsStrayArguments(t *testing.T) {
 	dir := initEnv(t)
 	var buf bytes.Buffer
-	if err := initCmd([]string{"--dir", dir, "extra"}, &buf); err == nil {
+	if err := initCmd([]string{"--config-root", dir, "extra"}, &buf); err == nil {
 		t.Fatal("a stray argument must be an error")
 	}
 }
@@ -148,25 +174,25 @@ func TestInitHelpPrintsTheUsage(t *testing.T) {
 func TestInitWritesIntoTheGivenDirectory(t *testing.T) {
 	dir := initEnv(t)
 	var buf bytes.Buffer
-	if err := initCmd([]string{"--dir", dir}, &buf); err != nil {
+	if err := initCmd([]string{"--config-root", dir}, &buf); err != nil {
 		t.Fatalf("initCmd: %v", err)
 	}
 	for _, rel := range []string{
-		".openheron/agents/main.md",
-		".openheron/agents/task.md",
-		".openheron/agents/agent-expert.md",
-		".openheron/agents/skill-expert.md",
-		".openheron/skills/openheron-config-map/SKILL.md",
-		".openheron/llm/deepseek.yaml",
-		".openheron/mcps/fetch.yaml",
-		".openheron/tools/http.yaml",
-		".openheron/server/config.yaml",
+		"agents/main.md",
+		"agents/task.md",
+		"agents/agent-expert.md",
+		"agents/skill-expert.md",
+		"skills/openheron-config-map/SKILL.md",
+		"llm/deepseek.yaml",
+		"mcps/fetch.yaml",
+		"tools/http.yaml",
+		"server/config.yaml",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
 			t.Fatalf("%s must exist: %v", rel, err)
 		}
 	}
-	svc, err := spec.NewServiceAt(filepath.Join(dir, ".openheron"), dir)
+	svc, err := spec.NewServiceAt(dir, dir)
 	if err != nil {
 		t.Fatalf("NewServiceAt: %v", err)
 	}
@@ -182,21 +208,21 @@ func TestInitWritesIntoTheGivenDirectory(t *testing.T) {
 func TestInitToolsWritesTheToolConfigurations(t *testing.T) {
 	dir := initEnv(t)
 	var buf bytes.Buffer
-	if err := initCmd([]string{"--dir", dir}, &buf); err != nil {
+	if err := initCmd([]string{"--config-root", dir}, &buf); err != nil {
 		t.Fatalf("initCmd: %v", err)
 	}
 	for _, rel := range []string{
-		".openheron/tools/http.yaml",
-		".openheron/tools/web_search.yaml",
-		".openheron/tools/wikipedia.yaml",
-		".openheron/tools/kb.yaml",
-		".openheron/tools/filesystem.yaml",
+		"tools/http.yaml",
+		"tools/web_search.yaml",
+		"tools/wikipedia.yaml",
+		"tools/kb.yaml",
+		"tools/filesystem.yaml",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
 			t.Fatalf("%s must exist: %v", rel, err)
 		}
 	}
-	svc, err := spec.NewServiceAt(filepath.Join(dir, ".openheron"), dir)
+	svc, err := spec.NewServiceAt(dir, dir)
 	if err != nil {
 		t.Fatalf("NewServiceAt: %v", err)
 	}
@@ -216,17 +242,38 @@ func TestInitToolsWritesTheToolConfigurations(t *testing.T) {
 func TestInitNoToolsLeavesTheToolConfigurationsOut(t *testing.T) {
 	dir := initEnv(t)
 	var buf bytes.Buffer
-	if err := initCmd([]string{"--dir", dir, "--no-tools"}, &buf); err != nil {
+	if err := initCmd([]string{"--config-root", dir, "--no-tools"}, &buf); err != nil {
 		t.Fatalf("initCmd: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".openheron", "tools")); err == nil {
+	if _, err := os.Stat(filepath.Join(dir, "tools")); err == nil {
 		t.Fatal("tools/ must not be written when --no-tools is given")
 	}
 	// ★ The rest of the tree is written all the same.
-	if _, err := os.Stat(filepath.Join(dir, ".openheron", "agents", "main.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "agents", "main.md")); err != nil {
 		t.Fatalf("the agents must still be written: %v", err)
 	}
 	if !strings.Contains(buf.String(), "tools/ was skipped") {
 		t.Fatalf("the output must say what was skipped:\n%s", buf.String())
+	}
+}
+
+// ★ The default target is the config root the server reads — the one inside
+//
+//	the openheron root. It is not <project>/.openheron any more.
+func TestInitDefaultsToTheOpenheronRoot(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("USERPROFILE", filepath.Join(root, "home"))
+	t.Setenv(spec.RootEnv, filepath.Join(root, "base"))
+	t.Setenv(spec.ConfigRootEnv, "")
+	t.Setenv(spec.ConfigDirEnv, "")
+
+	var buf bytes.Buffer
+	if err := initCmd(nil, &buf); err != nil {
+		t.Fatalf("initCmd: %v", err)
+	}
+	want := filepath.Join(root, "base", spec.DefaultConfigDirName)
+	if _, err := os.Stat(filepath.Join(want, "agents", "main.md")); err != nil {
+		t.Fatalf("the factory tree must land in %q: %v", want, err)
 	}
 }

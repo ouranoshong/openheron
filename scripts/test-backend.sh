@@ -35,13 +35,16 @@ for arg in "$@"; do
 done
 
 TEST_ROOT="$REPO_ROOT/$OPENHERON_TEST_ROOT"
-# The config root is named explicitly by OPENHERON_CONFIG_DIR (exported below),
-# and the process cwd moves to $PROJECT_DIR. The config root **no longer
-# searches upwards**, so the repository's own .openheron/ is structurally out of
-# reach — port isolation and data isolation no longer depend on "a probe that
-# happens to stop here", they depend on a named root.
+# ★ The three roots are named, not derived. The openheron root holds the
+#   state and the log; the config root holds the configuration; the default
+#   project root is the project the instance works in.
+#
+# ★ The config root **no longer searches upwards**, so the repository's own
+#   .openheron/ is structurally out of reach — port isolation and data
+#   isolation do not depend on "a probe that happens to stop here", they
+#   depend on a named root.
 PROJECT_DIR="$TEST_ROOT/project"
-CONFIG_DIR="$PROJECT_DIR/.openheron"
+CONFIG_DIR="$TEST_ROOT/configs"
 STATE_DIR="$TEST_ROOT/state"
 
 mkdir -p "$CONFIG_DIR/server" "$STATE_DIR"
@@ -92,7 +95,7 @@ if [[ ! -f "$CONFIG_DIR/server/config.yaml" ]]; then
 # Test configuration. Kept apart from the development configuration so that test
 # changes do not affect day-to-day use.
 
-# The port actually comes from LISTEN_ADDR (see .env.test); this is only a
+# The port actually comes from OPENHERON_LISTEN_ADDR (see .env.test); this is only a
 # fallback.
 #
 # ★ The loopback, on purpose: a bare ":18099" binds every interface, and the
@@ -119,19 +122,18 @@ YAML
   echo "[test-backend] wrote default server config"
 fi
 
-# PROJECT_ROOT is deliberately not set — cd-ing into $PROJECT_DIR does the same
-# job. projectRoot is taken from the working directory, so the cwd is it, which
-# matches development. The config root itself is named by
-# OPENHERON_CONFIG_DIR and is independent of projectRoot: projectRoot only
-# decides where the "default root" would land, and what the workdir is.
+# ★ The roots are named by the environment, and the names carry the
+#   OPENHERON_ prefix: a bare name like LISTEN_ADDR is a name any other tool
+#   in the environment may also set.
 #
-# ★ OPENHERON_CONFIG_DIR is now the **only** config root (llm/ agents/ … live
-#   directly inside it) — it used to be the "user-level layer" that was stacked
-#   on top of the project level. The value semantics did not change, the role
-#   did: once it is set, the project's .openheron/ is never consulted.
-export OPENHERON_CONFIG_DIR="$CONFIG_DIR"
-export DATA_DIR="$STATE_DIR"
-export LISTEN_ADDR="127.0.0.1:$OPENHERON_TEST_BACKEND_PORT"
+# ★ OPENHERON_DEFAULT_PROJECT_ROOT is the project the instance works in; it
+#   is the working directory the process is started in, and naming it keeps
+#   that true even though the working directory no longer decides it.
+export OPENHERON_ROOT="$TEST_ROOT"
+export OPENHERON_CONFIG_ROOT="$CONFIG_DIR"
+export OPENHERON_DATA_DIR="$STATE_DIR"
+export OPENHERON_DEFAULT_PROJECT_ROOT="$PROJECT_DIR"
+export OPENHERON_LISTEN_ADDR="127.0.0.1:$OPENHERON_TEST_BACKEND_PORT"
 
 if [[ "$PREPARE_ONLY" == 1 ]]; then
   echo "[test-backend] prepared (not started)"
@@ -159,9 +161,10 @@ if [[ ! -x "$BIN" ]]; then
 fi
 
 printf '[test-backend] base   : %s\n' "$OPENHERON_TEST_BACKEND_BASE"
-printf '[test-backend] config : %s\n' "$OPENHERON_CONFIG_DIR"
-printf '[test-backend] state  : %s\n' "$DATA_DIR"
-printf '[test-backend] cwd    : %s\n' "$PROJECT_DIR"
+printf '[test-backend] root   : %s\n' "$OPENHERON_ROOT"
+printf '[test-backend] config : %s\n' "$OPENHERON_CONFIG_ROOT"
+printf '[test-backend] state  : %s\n' "$OPENHERON_DATA_DIR"
+printf '[test-backend] project: %s\n' "$OPENHERON_DEFAULT_PROJECT_ROOT"
 
 cd "$PROJECT_DIR"
 exec "$BIN"

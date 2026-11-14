@@ -204,18 +204,27 @@ whatever the level and the destination say — that is how the serving address s
 - **Do not duplicate business assembly logic in the API layer** — when you need "the effective
   tool table of some agent", let `agent.Builder` expose a read-only query instead of recomputing
   `Table.Blocked` / `Policy.TierOf`.
-- **Config root resolution has exactly three levels**: explicit `--config-dir` →
-  `$OPENHERON_CONFIG_DIR` → `<projectRoot>/.openheron` (created if missing).
+- **Config root resolution has exactly three levels**: explicit `--config-root` →
+  `$OPENHERON_CONFIG_ROOT` → `<openheron-root>/configs` (created if missing). The openheron root is
+  `--openheron-root` → `$OPENHERON_ROOT` → `~/.openheron`.
   **No upward search of ancestor directories** — once the config root depends on "where the
   process was started from", the same command run from another directory reads a different
   config, and test instances end up reading the development config too. To change the config
   root, name it; do not add another lookup rule.
+- ★ **The state and the log file live in the openheron root, not in the config root.** `data_dir`
+  and `log.file` are measured from `<openheron-root>` — so moving the configuration does not move
+  the history with it. The two baselines are: `data_dir` / `log.file` → **the openheron root**;
+  `static_dir` / `corpus_dir` → **the project root**.
 - ★ **The server fills the defaulted root and never a named one.** When the config root is
-  `<projectRoot>/.openheron` — the one the user did not name — and it holds no
+  `<openheron-root>/configs` — the one the user did not name — and it holds no
   `agents/main.md`, the first start writes the factory tree (the same plan `openheron init`
-  builds). `--config-dir` and `$OPENHERON_CONFIG_DIR` name a directory, and an empty one is
+  builds). `--config-root` and `$OPENHERON_CONFIG_ROOT` name a directory, and an empty one is
   the user's decision. ★ That asymmetry is what keeps the test instance isolated: it names
   its own root, so nothing is ever written under it.
+- ★ **The old names still work, and the old one is reported.** `$OPENHERON_CONFIG_DIR`,
+  `$PROJECT_ROOT`, `$DATA_DIR`, `$LISTEN_ADDR`, `$STATIC_DIR` and `$FRONTEND_MODE` are the
+  previous names; `--config-dir` and `--project-root` are the previous flags. A variable or a
+  flag that quietly stops working is the hardest kind of mistake to find.
 - **Archival comes before presentation** — when the SSE sink breaks, stop rendering but keep
   consuming the event stream, otherwise `Outcome.Intermediates` is incomplete and the history
   has holes.
@@ -371,12 +380,13 @@ cd web && bun run smoke:config             # config_write's approval round trip 
   ★ `.openheron/` is **local untracked** configuration; changing it affects your own real
   agents (opening up `write_file` means that agent really can write files) — ask yourself
   first.
-- **Different ports are not data isolation.** openheron writes sessions under `.openheron/state/`;
-  a test that writes there pollutes the real history. The test instance treats
-  `.openheron-test/project` as the project root and **pre-seeds its own `.openheron/`**, then
-  names the config root with `OPENHERON_CONFIG_DIR` — the config root **does not search
-  upward**, so the one at the repository root is structurally unreachable. Ports and state must
-  be isolated **together**.
+- **Different ports are not data isolation.** openheron writes sessions under
+  `<openheron-root>/state/`; a test that writes there pollutes the real history. The test
+  instance names its own openheron root (`.openheron-test/`), its own config root
+  (`.openheron-test/configs/`), its own data dir (`.openheron-test/state/`) and its own
+  project (`.openheron-test/project/`) — the config root **does not search upward**, so the one
+  at the repository root is structurally unreachable. Ports and state must be isolated
+  **together**.
 - **`task test-env-sync` is mandatory, not optional.** The test instance's
   `agents/ llm/ policy/ skills/` are **copied** from the dev side; without syncing, a changed
   agent definition is not what gets tested.

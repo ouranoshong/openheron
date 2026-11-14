@@ -47,10 +47,14 @@ func secretCmdWith(args []string, stdin io.Reader, stdout, stderr io.Writer, sto
 	fs := flag.NewFlagSet("secret", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	configDir := fs.String("config-dir", "",
-		"the config root to read (default: <project-root>/.openheron)")
-	projectRoot := fs.String("project-root", "",
+	configRoot := fs.String("config-root", "",
+		"the config root to read (default: <openheron-root>/configs)")
+	legacyConfigRoot := fs.String("config-dir", "",
+		"deprecated: the previous name of --config-root")
+	defaultProjectRoot := fs.String("default-project-root", "",
 		"the project root (default: the current directory)")
+	legacyProjectRoot := fs.String("project-root", "",
+		"deprecated: the previous name of --default-project-root")
 	asJSON := fs.Bool("json", false, "machine-readable output")
 
 	if err := fs.Parse(args); err != nil {
@@ -66,15 +70,26 @@ func secretCmdWith(args []string, stdin io.Reader, stdout, stderr io.Writer, sto
 		return errors.New("openheron secret: an action is required")
 	}
 
+	// ★ The old names still work, and the old one is the fallback: a flag
+	//   that stops working is a flag that breaks somebody's script.
+	root := strings.TrimSpace(*configRoot)
+	if root == "" {
+		root = strings.TrimSpace(*legacyConfigRoot)
+	}
+	project := strings.TrimSpace(*defaultProjectRoot)
+	if project == "" {
+		project = strings.TrimSpace(*legacyProjectRoot)
+	}
+
 	switch rest[0] {
 	case "set":
 		return secretSet(rest[1:], stdin, stdout, store)
 	case "get":
 		return secretGet(rest[1:], stdout, store)
 	case "list":
-		return secretList(*configDir, *projectRoot, *asJSON, stdout, store)
+		return secretList(root, project, *asJSON, stdout, store)
 	case "remove":
-		return secretRemove(rest[1:], *configDir, *projectRoot, stdout, store)
+		return secretRemove(rest[1:], root, project, stdout, store)
 	default:
 		return fmt.Errorf("openheron secret: unknown action %q; it is set, get, list or remove", rest[0])
 	}
@@ -169,8 +184,8 @@ func secretGet(args []string, stdout io.Writer, store spec.SecretStore) error {
 //	cannot be enumerated, so a leftover entry whose entity is gone is
 //	invisible here — the same limit the HTTP surface has, and the same
 //	reason both of them drive the list from the tree.
-func secretList(configDir, projectRoot string, asJSON bool, stdout io.Writer, store spec.SecretStore) error {
-	cfg, err := loadSecretConfig(configDir, projectRoot)
+func secretList(configRoot, projectRoot string, asJSON bool, stdout io.Writer, store spec.SecretStore) error {
+	cfg, err := loadSecretConfig(configRoot, projectRoot)
 	if err != nil {
 		return err
 	}
@@ -204,7 +219,7 @@ func secretList(configDir, projectRoot string, asJSON bool, stdout io.Writer, st
 //	path says which one it is: `remove llm deepseek` removes that one,
 //	`remove llm` removes the whole group — the model keys, and **only**
 //	the model keys.
-func secretRemove(args []string, configDir, projectRoot string, stdout io.Writer, store spec.SecretStore) error {
+func secretRemove(args []string, configRoot, projectRoot string, stdout io.Writer, store spec.SecretStore) error {
 	if len(args) == 0 {
 		return errors.New("openheron secret remove: a group is required (llm or mcp)")
 	}
@@ -235,7 +250,7 @@ func secretRemove(args []string, configDir, projectRoot string, stdout io.Writer
 
 	// ★ The whole group: the entities have to be known, and they are known
 	//   from the configuration.
-	cfg, err := loadSecretConfig(configDir, projectRoot)
+	cfg, err := loadSecretConfig(configRoot, projectRoot)
 	if err != nil {
 		return err
 	}
@@ -364,17 +379,18 @@ func secretEntityNames(group string, cfg *spec.Config) []string {
 }
 
 // loadSecretConfig reads the configuration the entries are named by.
-func loadSecretConfig(configDir, projectRoot string) (*spec.Config, error) {
-	root := configDir
-	project := projectRoot
-	if project == "" {
-		wd, err := os.Getwd()
+func loadSecretConfig(configRoot, projectRoot string) (*spec.Config, error) {
+	root := strings.TrimSpace(projectRoot)
+	if root == "" {
+		// ★ The working directory: the command is about the configuration,
+		//   and a person types it while standing in a project.
+		wd, err := commandProjectRoot()
 		if err != nil {
-			return nil, fmt.Errorf("openheron secret: resolve the working directory: %w", err)
+			return nil, fmt.Errorf("openheron secret: %w", err)
 		}
-		project = wd
+		root = wd
 	}
-	svc, err := spec.NewService(root, project)
+	svc, err := newConfigService(configRoot, root)
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +421,8 @@ func printSecretUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "       openheron secret remove <llm|mcp> <name>  # one entry")
 	fmt.Fprintln(stdout, "       openheron secret remove <llm|mcp>         # the whole group")
 	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout, "Flags: --config-dir <path> --project-root <path> --json")
+	fmt.Fprintln(stdout, "Flags: --config-root <path> --default-project-root <path> --json")
+	fmt.Fprintln(stdout, "       (--config-dir and --project-root are the previous names and still work)")
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "The name says where the key comes from: llm/<name> is LLM_<NAME>_API_KEY")
 	fmt.Fprintln(stdout, "and the keyring entry llm:<name>; mcp/<name> is MCP_<NAME>_TOKEN and")

@@ -106,7 +106,7 @@ context: inline
 
 ## Scenario E: the process itself (server/)
 
-- The fields: `listen_addr` (quoting `:8080` is recommended), `frontend_mode`, `static_dir` (project root), `data_dir` (config root), `start_timeout`, `lease_ttl`, `retry.max_retries`, `agent.max_depth`, `watch.*`.
+- The fields: `listen_addr` (quoting `:8080` is recommended), `frontend_mode`, `static_dir` (project root), `data_dir` (openheron root), `start_timeout`, `lease_ttl`, `retry.max_retries`, `agent.max_depth`, `watch.*`.
 - `lease_ttl` has to be longer than the provider timeout; `watch.enabled` not written = on, only `false` turns it off; `retry.max_retries: 0` still follows the default.
 - ★ **A restart is mandatory after the change**; `config_write` refuses to write this section, so it has to be changed by hand. The environment variable overrides are also read once, at startup.
 

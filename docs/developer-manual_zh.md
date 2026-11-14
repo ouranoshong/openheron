@@ -24,15 +24,17 @@ task dev          # air：Go 自动重建重启
 task check        # lint + test，提交前跑这个
 ```
 
-★ **服务端在第一次启动时写配置**：它只读一个配置根 —— `$OPENHERON_CONFIG_DIR`，
-否则 `<项目根>/.openheron` —— 当这个根是**缺省**的那个、而且里面没有
+★ **服务端在第一次启动时写配置**：它只读一个配置根 —— `$OPENHERON_CONFIG_ROOT`，
+否则 `<openheron-root>/configs` —— 当这个根是**缺省**的那个、而且里面没有
 `agents/main.md` 时，它先把出厂树写出来，再去装载配置。★ **点名的根不会被写**：
-`--config-dir` 与 `$OPENHERON_CONFIG_DIR` 指的是用户自己选的目录，它空着是用户的
+`--config-root` 与 `$OPENHERON_CONFIG_ROOT` 指的是用户自己选的目录，它空着是用户的
 决定。仓库里带的是 `.openheron-example/`（样例），不是 `.openheron/`（真正那份：
 里面是你的模型和 API key，所以被 git 忽略了）。★ **`task init` 是显式那条路**：
 它收 `--model` / `--provider` / `--base-url`，而且只写缺的文件，已经在的保留，跑两遍
 不会有任何变化。★ **密钥**不在那些文件里：它来自 `LLM_<PROVIDER>_API_KEY` 或钥匙串
 条目 `llm:<provider>`，而 `init` 会把该放哪打印出来（§3.14）。
+★ **大本营**是用户级的那一个 —— `--openheron-root`，否则 `$OPENHERON_ROOT`，否则
+`~/.openheron` —— 状态与日志文件就住在它下面。★ 配置可以搬，历史不会跟着搬。
 
 ## 2. 仓库结构
 
@@ -1239,9 +1241,10 @@ const selectMessages = (s: State) => s.convo?.messages ?? EMPTY
 
 ### 5.1 端口与状态隔离
 
-**端口错开不等于数据隔离。** openheron 的会话写在 `state/` 里，
-测试写进去就污染真实历史。测试实例把 `.openheron-test/project` 当项目根并**预置自己的**
-`.openheron/`，再用 `OPENHERON_CONFIG_DIR` 指名配置根 ——
+**端口错开不等于数据隔离。** openheron 的会话写在 `<openheron-root>/state/` 里，
+测试写进去就污染真实历史。测试实例点自己的大本营（`.openheron-test/`）、自己的配置根
+（`.openheron-test/configs/`）、自己的数据目录（`.openheron-test/state/`）和自己的项目
+（`.openheron-test/project/`）——
 配置根**不向上查找**，所以仓库根那份结构上就读不到。**端口与状态必须一起隔离。**
 
 端口定义在仓库根的 `.env.test`（已提交）：
@@ -1494,7 +1497,7 @@ allow 档的 `config_write` 会在没有审批的情况下写好文件，而那�
 
 ```bash
 # 服务端，指向一个 scratch 配置根与一个 scratch 工程根
-./bin/openheron --config-dir $PWD/.openheron-bench --project-root $PWD/benchmarks/out/work
+./bin/openheron --config-root $PWD/.openheron-bench --default-project-root $PWD/benchmarks/out/work
 
 # 扫描：--arm 与 --task 接逗号分隔的列表
 bun run benchmarks/run.ts --base http://127.0.0.1:18099 \

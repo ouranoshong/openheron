@@ -170,15 +170,23 @@
 ## 其它约定
 
 - **不要在 API 层复制业务装配逻辑** —— 需要读「某个 agent 的生效工具表」时，由 `agent.Builder` 暴露只读查询，不要重算一遍 `Table.Blocked` / `Policy.TierOf`。
-- **配置根解析只有三级**：显式 `--config-dir` → `$OPENHERON_CONFIG_DIR` →
-  `<projectRoot>/.openheron`（不存在就创建）。**不向上查找祖先目录** ——
+- **配置根解析只有三级**：显式 `--config-root` → `$OPENHERON_CONFIG_ROOT` →
+  `<openheron-root>/configs`（不存在就创建）。大本营本身是 `--openheron-root` →
+  `$OPENHERON_ROOT` → `~/.openheron`。**不向上查找祖先目录** ——
   配置根一旦依赖「进程从哪启动」，同一条命令换个目录就读到另一份配置，
   测试实例也会因此读到开发配置。要换配置根就指名，别加新的查找规则。
-- ★ **服务端只填缺省根，绝不填点名的根。** 配置根是 `<projectRoot>/.openheron`（用户没指名
+- ★ **状态与日志文件住在大本营，不在配置根里。** `data_dir` 与 `log.file` 的基准是
+  `<openheron-root>` —— 搬走配置不会把历史一起搬走。两条基准是：`data_dir` /
+  `log.file` → **大本营**；`static_dir` / `corpus_dir` → **项目根**。
+- ★ **服务端只填缺省根，绝不填点名的根。** 配置根是 `<openheron-root>/configs`（用户没指名
   的那一个）且里面没有 `agents/main.md` 时，第一次启动会写出出厂树（与 `openheron init`
-  建的是同一份计划）。`--config-dir` 与 `$OPENHERON_CONFIG_DIR` 指的是一个目录，它空着是
+  建的是同一份计划）。`--config-root` 与 `$OPENHERON_CONFIG_ROOT` 指的是一个目录，它空着是
   用户的决定。★ 这条不对称正是测试实例能隔离的原因：它点自己的根，所以从来不会有人往它
   底下写东西。
+- ★ **旧名字仍然生效，而且旧名字会被点名。** `$OPENHERON_CONFIG_DIR`、`$PROJECT_ROOT`、
+  `$DATA_DIR`、`$LISTEN_ADDR`、`$STATIC_DIR` 与 `$FRONTEND_MODE` 都是旧名；
+  `--config-dir` 与 `--project-root` 是旧 flag。一个悄悄不再生效的环境变量或 flag，
+  是最难查出来的那种错误。
 - **归档优先于呈现** —— SSE sink 断裂后要停止渲染但继续消费事件流，否则 `Outcome.Intermediates` 不完整，历史会缺。
 - **缺省档位是 `ask`** —— 没人点名的工具一律要问；例外是那些不用点头就能跑的：
   文件在自己的 `allows:` 里点名的，以及代码知道的那些内置只读工具。★「不被暴露」现在
@@ -315,10 +323,11 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
   `curl -s :18099/v2/agents/task`（里面 `effectiveTools` 会给出 tier 与 reason）。
   ★ `.openheron/` 是**本地未跟踪**的配置，改它会影响你自己的真实 agent
   （放开 `write_file` 意味着那个 agent 真能写文件）—— 要改先问自己一句。
-- **端口错开不等于数据隔离**。openheron 的会话写在 `.openheron/state/`，测试写
-  进去就污染真实历史。测试实例把 `.openheron-test/project` 当项目根并**预置
-  自己的 `.openheron/`**，再用 `OPENHERON_CONFIG_DIR` 指名配置根 —— 配置根
-  **不向上查找**，所以仓库根那份结构上就读不到。端口与状态必须**一起**隔离。
+- **端口错开不等于数据隔离**。openheron 的会话写在 `<openheron-root>/state/`，测试写
+  进去就污染真实历史。测试实例点自己的大本营（`.openheron-test/`）、自己的配置根
+  （`.openheron-test/configs/`）、自己的数据目录（`.openheron-test/state/`）和自己的
+  项目（`.openheron-test/project/`）—— 配置根**不向上查找**，所以仓库根那份结构上就读不到。
+  端口与状态必须**一起**隔离。
 - **`task test-env-sync` 是必须的，不是可选的**。测试实例里的
   `agents/ llm/ policy/ skills/` 是从开发侧**复制**的，改完 agent 不
   同步，测的还是旧定义。

@@ -8,8 +8,11 @@
 > 工具与集成（见 `docs/tools-design.md`）、界面资源与动效（见 `docs/ui-design.md`）。
 > 本文按 AGENTS.md 的文档语言规则**只有中文版** —— 架构与代码设计类文档不做双语。
 >
-> ★ **本文描述的是一个尚未落地的提案。** 下面每一节都标着它要改哪一行代码；代码还没改，
-> 所以凡是写「要变成」的地方，现在都还没有变成。§8 记着落地的顺序，§9 记着不在范围内的部分。
+> ★ **本文描述的是一个**部分**落地的提案。** P1（三个根、环境变量前缀、`init` 的默认目标）
+> **已经在代码里** —— 下面凡是写「要变成」而对应的那一条已经改过的地方，说的就是现状。
+> P2（`projects` 包与 `/v2/projects`）、P3（会话归属与侧栏分组）、P4（按会话切换的
+> project root）**还没有落地**，凡是写它们的地方都还是提案。§8 记着落地的顺序与进度，
+> §9 记着不在范围内的部分。
 
 ## 0. 一句话
 
@@ -61,8 +64,8 @@
 | 作用域项目 | 位置参数 `openheron [dir]` | — | 无（= 全部项目） | — |
 
 ★ **相对基准从「配置根」改成「openheron_root」是这一版的核心改动。**
-`Service.DataDir`（`agentkit/spec/config.go:580-592`）今天把相对路径 join 到 `s.root`，
-`Service.LogFile`（`agentkit/spec/config.go:603-612`）也一样。两处都要改成 join `home`。
+`Service.DataDir`（`agentkit/spec/config.go:784`）今天把相对路径 join 到 `s.root`，
+`Service.LogFile`（`agentkit/spec/config.go:806`）也一样。两处都要改成 join `home`。
 ⇒ 于是**配置搬到哪儿，数据和日志都跟着 openheron_root 走** —— 配置是配置，状态是状态。
 
 ★ 配置根今天的解析是三级（`agentkit/spec/config.go:505-548`）：
@@ -150,7 +153,7 @@
 | **项目级** | 某个项目自己的配置树 | `projects.json` 里登记 `configDir`（可选字段，先留口不实现） |
 
 ★ **项目级配置要显式登记，不靠「探测 `<R>/.openheron` 存在就用」**：
-老用户每个项目下的 `.openheron/` 都是服务端自动写的**出厂树**（`main.go:186-211`）。
+老用户每个项目下的 `.openheron/` 都是服务端自动写的**出厂树**（`main.go:283-308`）。
 按「探测就用」的规则，每个项目都会用自己那份出厂树，用户级共享配置的意义就没了。
 显式登记没有这个副作用：老的 `.openheron/` 还在原地，用户想用就登记一行。
 
@@ -339,7 +342,7 @@ GET    /v2/sessions            → 不过滤；每条带 projectId（从表查�
 - **老客户端**：不带 `projectId` ⇒ 会话是「未选项目」⇒ agent 在**默认项目根**干活。
   接口形状没变，客户端照常能用。
 - ★ **一处行为变化**：老行为是「在哪个目录启动，agent 就在哪儿干活」
-  （cwd 是默认项目根，`agentkit/spec/config.go:514-520`）。新行为里 cwd 不再自动是工作目录
+  （cwd 是默认项目根，`agentkit/spec/config.go:686-693`）。新行为里 cwd 不再自动是工作目录
   ⇒ **要保留这个直觉就写 `openheron .`**（位置参数会顺手把默认项目根也设成这个目录）。
 
 ## 6. 命令行与环境变量
@@ -354,11 +357,12 @@ GET    /v2/sessions            → 不过滤；每条带 projectId（从表查�
 
 ★ `--project-root` 这个名字**退役**：它今天的含义是「agent 的工作目录」，
 提案里那个位置由 `--default-project-root` 接手（语义更准：它是**默认**，不是唯一的），
-而「进程关注哪个项目」由位置参数接手。
+而「进程关注哪个项目」由位置参数接手。★ **它仍然作为别名生效**，用了会打一条 warn
+（`main.go:494-500`）—— 一个悄悄不再生效的 flag 是最难查的那种错误。
 ★ `--config-dir` 改成 `--config-root`：`init` 那边的 `--dir` 也改成 `--config-root`
-（`initcmd.go:20-22`），**同一个概念不许两个名字**。
+（`initcmd.go:20-21`），**同一个概念不许两个名字**。
 ★ `openheron init` 的默认目标改成 **`<openheron_root>/configs`**（今天是 `<dir>/.openheron`，
-`initcmd.go:55-57`）—— 它要写的是服务器默认读的那一份。
+`initcmd.go:61`）—— 它要写的是服务器默认读的那一份。
 
 ### 6.2 环境变量
 
@@ -376,7 +380,8 @@ GET    /v2/sessions            → 不过滤；每条带 projectId（从表查�
 | `OPENHERON_LOG_LLM_REQUESTS` | 请求体日志 | 已合规 |
 | `OPENHERON_PROJECTS_FILE` | `projects.json` 的位置 | —（新，可选） |
 
-★ **旧名仍然生效，但打一条 warn 点名新名字**（`main.go:462,481,482,622,636` 那五个读点）。
+★ **旧名仍然生效，但打一条 warn 点名新名字**（`main.go:587,599,760,774` 与
+`agentkit/spec/config.go:641-698` 那几个读点）。
 环境变量常写在 shell profile 或 CI 的 env 块里，**静默失效最难查** ——
 用户以为改了端口，其实没改。
 
@@ -403,38 +408,51 @@ CI 里有一个 `LISTEN_ADDR=0.0.0.0:9000`，openheron 的监听地址就被改�
 
 ## 7. 代码改动清单
 
-| # | 位置 | 改什么 |
-|---|---|---|
-| 1 | `agentkit/spec/config.go:513` `NewService` | 配置根解析：点名 → env → **`<home>/configs`** |
-| 2 | `agentkit/spec/config.go:285-301` `Service` | 加 `home` 字段 |
-| 3 | `agentkit/spec/config.go:580-592` `DataDir` | 相对基准 `s.root` → **`s.home`** |
-| 4 | `agentkit/spec/config.go:603-612` `LogFile` | 相对基准 `s.root` → **`s.home`** |
-| 5 | `main.go:102-117` `parseServerFlags` | 新增 `--openheron-root` / `--default-project-root`；`--config-dir` → `--config-root`；接受一个可选位置参数 |
-| 6 | `main.go:120-129` `printServerUsage` | `openheron [dir] [--openheron-root …] [--config-root …] [--default-project-root …]` |
-| 7 | `main.go:131-148` `warnUnusedHomeConfig` | ★ **删掉** —— home 现在是合法的大本营，不是「废弃的配置根」 |
-| 8 | `main.go:186-211` `initConfigIfEmpty` | 出厂树只写进**默认配置根** |
-| 9 | `main.go:383-485` `setupConfig` | 解析 openheron_root → 建 Service → 装默认配置树 |
-| 10 | `main.go:462,481,482,622,636` | 五个环境变量读点改名（+ 旧名 warn） |
-| 11 | `main.go:487-593` `setupRuntime` | 数据目录**共享**；按会话取 project root |
-| 12 | `agentkit/run/loop.go:80-83` | `inputParams` 加 `ProjectRoot`（**从会话/项目取**） |
-| 13 | `agentkit/run/input.go:170-186` | prompt 的 `Project root:` 用会话的值 |
-| 14 | `api/v2_project.go:72` | `@` 提及按项目取 root |
-| 15 | `agentkit/fsx/fsx.go:240` + `agentkit/build/snapshot.go:101` | 写边界 per-session（ctx 带本轮允许的根） |
-| 16 | 新 `projects` 包 | 类型 + 读写 + 文件锁 + `$OPENHERON_PROJECTS_FILE` |
-| 17 | `api/v2_sessions.go` / `api/v2_types.go:159-172` | `projectId`；新增 `/v2/projects` 四个端点 |
-| 18 | `initcmd.go:20-22,55-57` | `--dir` → `--config-root`；默认 `<openheron_root>/configs` |
-| 19 | `agentkit/templates/files/server/config.yaml:25,63` | 注释：相对基准改成 openheron_root（**值不变**） |
-| 20 | `scripts/test-backend.sh:133-134` | 环境变量改名 |
-| 21 | `sandbox-kit/openheron/entrypoint.sh:13,23` | 显式 `OPENHERON_CONFIG_ROOT`；`OPENHERON_LISTEN_ADDR` |
+★ 「状态」一列说这一条**落在代码里了没有**。已落地的那几行，行号是**改完之后**的。
+
+| # | 位置 | 改什么 | 状态 |
+|---|---|---|---|
+| 1 | `agentkit/spec/config.go:599` `NewService` | 配置根解析：点名 → env → **`<home>/configs`** | ★ 已落地 |
+| 2 | `agentkit/spec/config.go:318` `Service` | 加 `home` 字段 | ★ 已落地 |
+| 3 | `agentkit/spec/config.go:784` `DataDir` | 相对基准 `s.root` → **`s.home`** | ★ 已落地 |
+| 4 | `agentkit/spec/config.go:806` `LogFile` | 相对基准 `s.root` → **`s.home`** | ★ 已落地 |
+| 5 | `main.go:121-147` `parseServerFlags` | 新增 `--openheron-root` / `--default-project-root`；`--config-dir` → `--config-root`；接受一个可选位置参数 | ★ 已落地 |
+| 6 | `main.go:149-166` `printServerUsage` | `openheron [flags] [dir]` | ★ 已落地 |
+| 7 | `main.go` 的 `warnUnusedHomeConfig` | ★ **删掉** —— home 现在是合法的大本营，不是「废弃的配置根」 | ★ 已落地 |
+| 8 | `main.go:283-308` `initConfigIfEmpty` | 出厂树只写进**默认配置根** | ★ 已落地 |
+| 9 | `main.go:481-623` `setupConfig` | 解析 openheron_root → 建 Service → 装默认配置树 | ★ 已落地 |
+| 10 | `main.go:587,599,760,774` + `agentkit/spec/config.go:641-698` | 环境变量读点改名（+ 旧名 warn） | ★ 已落地 |
+| 11 | `main.go:625-731` `setupRuntime` | 数据目录**共享**；按会话取 project root | 前半已落地，后半是 P4 |
+| 12 | `agentkit/run/loop.go:80-83` | `inputParams` 加 `ProjectRoot`（**从会话/项目取**） | P4 |
+| 13 | `agentkit/run/input.go:170-186` | prompt 的 `Project root:` 用会话的值 | P4 |
+| 14 | `api/v2_project.go:72` | `@` 提及按项目取 root | P4 |
+| 15 | `agentkit/fsx/fsx.go:240` + `agentkit/build/snapshot.go:101` | 写边界 per-session（ctx 带本轮允许的根） | P4 |
+| 16 | 新 `projects` 包 | 类型 + 读写 + 文件锁 + `$OPENHERON_PROJECTS_FILE` | P2 |
+| 17 | `api/v2_sessions.go` / `api/v2_types.go:159-172` | `projectId`；新增 `/v2/projects` 四个端点 | P2 / P3 |
+| 18 | `initcmd.go:20-21,30-38,61` | `--dir` → `--config-root`；默认 `<openheron_root>/configs` | ★ 已落地 |
+| 19 | `agentkit/templates/files/server/config.yaml:23-28,44-48` | 注释：相对基准改成 openheron_root（**值不变**） | ★ 已落地 |
+| 20 | `scripts/test-backend.sh:132-136` | 环境变量改名 | ★ 已落地 |
+| 21 | `sandbox-kit/openheron/entrypoint.sh:18-19,29,35,38` | 显式 `OPENHERON_CONFIG_ROOT`；`OPENHERON_LISTEN_ADDR`；`OPENHERON_DATA_DIR`；位置参数给项目 | ★ 已落地 |
+| 22 | `agentkit/build/skill.go:198` `ResolveSkillsDir` | ★ **设计里没写，但不改就坏**：配置根进解析链，否则技能一个都加载不到（见 §8） | ★ 已落地 |
 
 ## 8. 落地顺序
 
-| 阶段 | 内容 | 风险 |
-|---|---|---|
-| **P1** | `openheron_root` + 目录基准 + 环境变量前缀统一 + `init` 默认目标 + `warnUnusedHomeConfig` 删除 | 低 |
-| **P2** | `projects` 包（读写 + 文件锁）+ `/v2/projects` 四个端点 | 中 |
-| **P3** | 会话归属（`projectId`）+ 侧栏分组（置顶 / 项目 / 未选项目）+ 单项目模式一组 | 中 |
-| **P4** | per-session project root（prompt / `@` 提及 / **fsx 写边界**） | ★ 高（唯一有架构代价的） |
+| 阶段 | 内容 | 风险 | 状态 |
+|---|---|---|---|
+| **P1** | `openheron_root` + 目录基准 + 环境变量前缀统一 + `init` 默认目标 + `warnUnusedHomeConfig` 删除 | 低 | ★ **已落地** |
+| **P2** | `projects` 包（读写 + 文件锁）+ `/v2/projects` 四个端点 | 中 | 未开始 |
+| **P3** | 会话归属（`projectId`）+ 侧栏分组（置顶 / 项目 / 未选项目）+ 单项目模式一组 | 中 | 未开始 |
+| **P4** | per-session project root（prompt / `@` 提及 / **fsx 写边界**） | ★ 高（唯一有架构代价的） | 未开始 |
+
+★ **P1 落地时多改了两处设计里没写的**，因为不改它们功能就是坏的：
+
+1. **技能目录的解析**（`agentkit/build/skill.go:198` `ResolveSkillsDir`）多了一个参数 ——
+   **配置根**。★ 配置根搬到 `<openheron_root>/configs` 之后，向上探测 `<cwd>/.openheron/skills`
+   找的是**旧布局**，技能会**一个都加载不到**。现在顺序是：`$EINO_EXT_SKILLS_DIR` →
+   `<配置根>/skills` → 向上探测。配置根排在探测前面，是因为配置编辑器就往那儿写。
+2. **`openheron init` 的 `--dir` 退役**（`initcmd.go:30-39`）—— 它指的是**项目**目录，
+   而 `init` 写的是**配置根**；拿旧名字当新名字会把配置写到没人要求的地方。
+   旧名会报一条说清替代者的错。
 
 ★ **P3 与 P4 之间是一个「界面在说谎」的中间态**：分组已经按项目显示了，
 但 agent 还在默认根里干活。⇒ 要么合并发布，要么在界面上明确写「该会话尚未绑定工作目录」。

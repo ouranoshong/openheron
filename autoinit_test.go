@@ -20,6 +20,8 @@ import (
 func TestTheFirstStartWritesTheConfiguration(t *testing.T) {
 	project := t.TempDir()
 	t.Setenv(spec.ConfigDirEnv, "")
+	t.Setenv(spec.ConfigRootEnv, "")
+	t.Setenv(spec.RootEnv, "")
 	svc, err := spec.NewService("", project)
 	if err != nil {
 		t.Fatal(err)
@@ -96,6 +98,8 @@ func TestANamedRootIsNotWrittenInto(t *testing.T) {
 func TestAnExistingConfigurationIsLeftAlone(t *testing.T) {
 	project := t.TempDir()
 	t.Setenv(spec.ConfigDirEnv, "")
+	t.Setenv(spec.ConfigRootEnv, "")
+	t.Setenv(spec.RootEnv, "")
 	svc, err := spec.NewService("", project)
 	if err != nil {
 		t.Fatal(err)
@@ -130,6 +134,8 @@ func TestAnExistingConfigurationIsLeftAlone(t *testing.T) {
 func TestAHalfWrittenTreeIsToppedUp(t *testing.T) {
 	project := t.TempDir()
 	t.Setenv(spec.ConfigDirEnv, "")
+	t.Setenv(spec.ConfigRootEnv, "")
+	t.Setenv(spec.RootEnv, "")
 	svc, err := spec.NewService("", project)
 	if err != nil {
 		t.Fatal(err)

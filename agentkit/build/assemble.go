@@ -177,7 +177,7 @@ func (b *Builder) assemble(ctx context.Context, snap *snapshot,
 func (b *Builder) skillHandlers(ctx context.Context, backend fsapi.Backend, hubs *skillHubs,
 	scope skillScope) ([]adk.TypedChatModelAgentMiddleware[*schema.Message], error) {
 
-	mw, err := skillChain(ctx, backend, hubs, scope, b.logger())
+	mw, err := skillChain(ctx, backend, hubs, scope, b.logger(), b.configRoot())
 	if err != nil {
 		b.logger().Warn("[agent] skill middleware disabled", "err", err)
 		return nil, nil

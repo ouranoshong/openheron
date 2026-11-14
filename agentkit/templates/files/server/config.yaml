@@ -21,7 +21,10 @@
 listen_addr: "127.0.0.1:8080"
 
 # ★ Runtime data: sessions, checkpoints, the knowledge-base index.
-#   A relative path resolves against the **config root** (<project>/.openheron).
+#   A relative path resolves against the **openheron root** (the user-level
+#   base directory, ~/.openheron by default) — the state lives there, not in
+#   the configuration tree, so that moving the configuration does not move
+#   the history with it.
 data_dir: state
 
 # ★ The process log level: debug | info | warn | error.
@@ -41,8 +44,9 @@ log_requests: false
 #   terminal is already being watched. ★ This template names a path, so a new
 #   project keeps a copy on disk — set `file: ""` to go back to stderr only.
 #
-#   A relative path resolves against the **config root** (<project>/.openheron),
-#   next to state/ and the partitions — not the project root. Rotated by size:
+#   A relative path resolves against the **openheron root** (the user-level
+#   base directory, ~/.openheron by default), next to state/ — not the
+#   configuration tree, and not the project root. Rotated by size:
 #   max_size_mb caps one file (0 = no cap), max_age_days and max_backups
 #   decide how much history survives, and compress gzips the rotated files.
 #   $OPENHERON_LOG_FILE overrides the path for one run.

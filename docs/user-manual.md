@@ -327,17 +327,18 @@ the place the key came from; the startup log must not carry
 #### Before it starts
 
 ★ **The place `init` writes to and the place the server reads from may not be the same.**
-`init` always writes `.openheron` under the current directory and it **does not look at**
-`$OPENHERON_CONFIG_DIR`; the server reads `--config-dir` → `$OPENHERON_CONFIG_DIR` →
-`.openheron` under the project root (§3). With that environment variable set, the server
-comes up with "no configuration at ...", because it is not reading the tree `init` wrote —
+`init` writes the config root it is given — by default `<openheron-root>/configs` — and it
+**does not look at** the environment; the server reads `--config-root` →
+`$OPENHERON_CONFIG_ROOT` → `<openheron-root>/configs` (§3). With
+`$OPENHERON_CONFIG_ROOT` set to somewhere else, the server comes up with "no configuration
+at ...", because it is not reading the tree `init` wrote —
 ★ and it does not write one there either: a root you named is a root you own.
 
 ★ **When the child process cannot find the command on Windows**, change `command` to
 `uvx.exe` in `mcps/fetch.yaml` and `mcps/time.yaml` — the two MCP servers need `uvx` on
 the PATH (§2.3).
 
-If the port is taken, change it **before** it starts: `$env:LISTEN_ADDR = "127.0.0.1:9090"` (§10).
+If the port is taken, change it **before** it starts: `$env:OPENHERON_LISTEN_ADDR = "127.0.0.1:9090"` (§10).
 ★ Keep the host in the address: `":9090"` alone binds **every** interface, and the agent's
 tools run shell commands (§9).
 
@@ -392,7 +393,7 @@ Other `init` options:
 
 | Option | Effect |
 |---|---|
-| `--dir <path>` | Write into the given directory (default: current directory) |
+| `--config-root <path>` | Write into the given config root (default: `<openheron-root>/configs`) |
 | `--provider <name>` | Choose the vendor, default `deepseek` |
 | `--model <name>` | Choose the model, default `deepseek-flash` |
 | `--base-url <url>` | The vendor endpoint (**with the path**, copy it from their docs) |
@@ -401,12 +402,27 @@ Other `init` options:
 | `--dry-run` | Print what would be written, write nothing |
 | `--json` | Machine-readable output |
 
-## 3. The config root: where your configuration lives
+## 3. The roots: where your configuration, your state and your project live
 
 **Exactly three levels, no upward search**:
 
 ```
---config-dir  →  $OPENHERON_CONFIG_DIR  →  <project-root>/.openheron
+--config-root  →  $OPENHERON_CONFIG_ROOT  →  <openheron-root>/configs
+```
+
+★ The **openheron root** is the user-level base directory, and it is the one thing that
+does not move when the configuration moves:
+
+```
+--openheron-root  →  $OPENHERON_ROOT  →  ~/.openheron
+```
+
+```
+~/.openheron/                  ← the openheron root
+  configs/                     ← the config root: agents/ llm/ mcps/ tools/ skills/ server/
+  state/                       ← the data dir: sessions, checkpoints, the knowledge-base index
+  logs/openheron.log           ← the log file
+  projects/default/            ← the default project root
 ```
 
 - **The default level is created for you** when it does not exist — and the tree in it
@@ -416,14 +432,19 @@ Other `init` options:
   `config: load <path>: ...`, which tells you where it went wrong.
 - The config root **does not depend on "where the process was started from"**: running
   `openheron` in a subdirectory still reads the same configuration.
-- ★ **A root you named is never written into**: `--config-dir` and `$OPENHERON_CONFIG_DIR`
+- ★ **A root you named is never written into**: `--config-root` and `$OPENHERON_CONFIG_ROOT`
   point at a directory you chose, and an empty one is your decision, not a gap.
+- ★ **The state and the log file live in the openheron root**, not in the config root: moving
+  the configuration does not move your history with it.
+- ★ **The old names still work** — `$OPENHERON_CONFIG_DIR`, `$PROJECT_ROOT`, `$DATA_DIR`,
+  `$LISTEN_ADDR`, `$STATIC_DIR`, `$FRONTEND_MODE`, `--config-dir`, `--project-root` — and the
+  old one is reported when it is used, so a setting that silently stopped working never does.
 
 If the default root has no `agents/main.md` **and the server could not write one**,
 startup says so directly:
 
 ```
-no configuration at /your/project/.openheron: run `openheron init` to create one
+no configuration at /home/you/.openheron/configs: run `openheron init` to create one
 ```
 
 ## 4. Writing configuration
@@ -832,7 +853,7 @@ told to (`proxy: env`).
 | `retry.max_retries` | `5` | How many times one turn may retry a model call |
 | `log_level` | `info` | `debug`, `info`, `warn` or `error` — decides which lines reach the output |
 | `log_requests` | `false` | Whether to print the redacted model request body and the raw `tools` array at `debug` level; same effect as `OPENHERON_LOG_LLM_REQUESTS=1` |
-| `log.file` | `""` | A file to write the log to, relative to the **config root** — empty means stderr only. A new project's template names `logs/openheron.log` |
+| `log.file` | `""` | A file to write the log to, relative to the **openheron root** — empty means stderr only. A new project's template names `logs/openheron.log` |
 | `log.console` | `true` | Whether the standard error keeps a copy beside the file — a new project's template sets it to `false` |
 
 ★ **`server/` is not hot-reloaded** — a change only takes effect after a restart. That is
@@ -840,8 +861,12 @@ why it is **read-only** in the config editor, and submitting it fails with
 `section "server" is not editable`.
 
 These environment variables override the file and take precedence:
-`LISTEN_ADDR`, `DATA_DIR`, `PROJECT_ROOT`, `FRONTEND_MODE`, `STATIC_DIR`,
+`OPENHERON_LISTEN_ADDR`, `OPENHERON_DATA_DIR`, `OPENHERON_DEFAULT_PROJECT_ROOT`,
+`OPENHERON_FRONTEND_MODE`, `OPENHERON_STATIC_DIR`,
 `OPENHERON_LOG_LEVEL`, `OPENHERON_LOG_FILE`, `OPENHERON_LOG_LLM_REQUESTS`.
+
+★ `data_dir` and `log.file` are measured from the **openheron root**; `static_dir` is measured
+from the **project root** (§3).
 
 ★ `log_requests` and `OPENHERON_LOG_LLM_REQUESTS` are two spellings of the same switch: the
 first sets the project default, the second decides one run (**the environment variable wins** —
@@ -873,10 +898,13 @@ failed start: the process stays on the standard error and says why.
 
 `skills/<name>/SKILL.md`, following eino's native skill convention.
 
-★ Skills are looked up by **a different rule**: `$EINO_EXT_SKILLS_DIR` first, and only if
-that is unset does it search **upwards** from the current directory for
-`.openheron/skills`. That differs from the config root's "never search upwards" — skills
-are a directory tree, and searching upwards lets you use skills from your home directory.
+★ Skills are looked up by **a different rule**: `$EINO_EXT_SKILLS_DIR` first, then the
+**config root's** own `skills/`, and only if neither is there does it search **upwards**
+from the current directory for `.openheron/skills`. The config root comes before the probe
+because that is where the configuration editor writes — a skill saved where the
+configuration is, and never loaded, is a skill nobody can use. The upward search is the
+old layout, and it differs from the config root's "never search upwards" — skills are a
+directory tree, and searching upwards lets you use skills from your home directory.
 
 ★ **Which skills an agent may use is declared by that agent.** The `skills` key in
 `agents/<name>.md` is an allow-list, and the names are the folders under `skills/`:
@@ -1567,7 +1595,8 @@ openheron kb status                # inspect the index
 openheron kb status --json         # machine-readable
 ```
 
-All three accept `--config-dir <path>` to point at a different config root.
+All three accept `--config-root <path>` to point at a different config root (`--config-dir`
+is the previous name and still works).
 
 ★ `kb index` takes a **run lock**: only one run at a time, and a second call waits for
 the first to finish.
@@ -1589,18 +1618,23 @@ Agents get two tools:
 ## 8. Command-line reference
 
 ```
-openheron [--config-dir <path>] [--project-root <path>]   start the server
+openheron [--openheron-root <path>] [--config-root <path>]      start the server
+           [--default-project-root <path>] [dir]
 openheron init [options]                                   generate a minimal runnable configuration
 openheron secret set <llm|mcp> <name>                      store a key in the keyring (the value is read from stdin)
 openheron secret get <llm|mcp> <name>                      print the key that is in effect
 openheron secret list [--json]                             the entities and which key is in force
 openheron secret remove <llm|mcp> <name>                   remove one entry
 openheron secret remove <llm|mcp>                          remove every entry of that group
-openheron kb index [--config-dir] [--json] [files...]      build the index
-openheron kb search [--config-dir] <query>                 search
-openheron kb status [--config-dir] [--json]                inspect the index
+openheron kb index [--config-root] [--json] [files...]     build the index
+openheron kb search [--config-root] <query>                search
+openheron kb status [--config-root] [--json]               inspect the index
 openheron version                                         print the version
 ```
+
+★ The **directory** is the project this process focuses on — it is also the default project
+root, unless `--default-project-root` says otherwise. The flags come **before** it:
+`openheron --config-root ./cfg .`.
 
 ## 9. HTTP API reference
 
@@ -1693,12 +1727,12 @@ The decision goes back into the **same** `/v2/run`:
 **Q: Startup says `no configuration at ...: run \`openheron init\` to create one`**
 The config root is empty and the server could not write one itself — it does
 that on the first start in a project that has none. The startup log says why
-the automatic initialization failed; `openheron init` in the project root does
-the same thing with a model and a provider of your choice.
+the automatic initialization failed; `openheron init` does the same thing with a
+model and a provider of your choice.
 
 **Q: `config: load <path>: agents/main.md does not exist or could not be parsed`**
 One of two things: the config root points at the wrong place (fix it with
-`--config-dir` or `$OPENHERON_CONFIG_DIR`), or the frontmatter of `agents/main.md` has
+`--config-root` or `$OPENHERON_CONFIG_ROOT`), or the frontmatter of `agents/main.md` has
 a wrong key.
 
 **Q: I changed `agents/main.md` and nothing happened?**
@@ -1747,8 +1781,8 @@ It is on its way: the servers are started in the background when the configurati
 known. The tools it brings join the **next** turn — press **Refresh** to see them.
 
 **Q: The port is taken / the interface will not open?**
-Change the port in `listen_addr`, or override it with the `LISTEN_ADDR` environment
-variable. ★ Keep the host in it: `127.0.0.1:9090` is the safe form, and a bare `:9090`
+Change the port in `listen_addr`, or override it with the `OPENHERON_LISTEN_ADDR`
+environment variable. ★ Keep the host in it: `127.0.0.1:9090` is the safe form, and a bare `:9090`
 binds every interface.
 
 **Q: How do I see what the server actually loaded?**

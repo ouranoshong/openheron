@@ -69,7 +69,7 @@ func (s *Server) v2ProjectFiles(_ context.Context, c *app.RequestContext) {
 		limit = 200
 	}
 
-	c.JSON(consts.StatusOK, listProjectFiles(s.cfgSvc.ProjectRoot(), strings.ToLower(q), limit))
+	c.JSON(consts.StatusOK, listProjectFiles(s.cfgSvc.DefaultProjectRoot(), strings.ToLower(q), limit))
 }
 
 // listProjectFiles walks the tree breadth-first so shallow files surface

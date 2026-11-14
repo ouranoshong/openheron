@@ -17,16 +17,17 @@ server/config.yaml     the process itself: listening, directories, timeouts, cap
 tools/<tool>.yaml      http / web_search / wikipedia / kb / filesystem / config
 mcps/<server>.yaml     one MCP server per file
 skills/<name>/SKILL.md a skill (only the first level of subdirectories is scanned)
-state/                 runtime data, never committed
 ```
 
 There is no `policy/` partition; a leftover directory of that name is not read, it only lands in `deferred`. Empty subdirectories are not created automatically; only the config root derived by default is created when it is missing, and an explicitly named root that does not exist is a typo.
 
-## The config root: three levels, no probing
+## The three roots
 
-`--config-dir` → `$OPENHERON_CONFIG_DIR` → `<projectRoot>/.openheron`. **There is no upward search**, and the home directory is not a fallback either. The project root is `--project-root` or the cwd, and it is decoupled from the config root.
+The **openheron root** is the user-level base directory: `~/.openheron` by default, named by `--openheron-root` or `$OPENHERON_ROOT`. The **config root** is `<openheron root>/configs` by default, named by `--config-root` or `$OPENHERON_CONFIG_ROOT`. The **default project root** is `<openheron root>/projects/default` by default, named by `--default-project-root` or `$OPENHERON_DEFAULT_PROJECT_ROOT`.
 
-Do not mix the two baselines: relative to `data_dir` → **the config root**; relative to `static_dir` / `corpus_dir` → **the project root**. The typical failure of mixing them is a frontend 404, or an agent grepping inside `.openheron`.
+The config root is resolved in three levels, no probing: `--config-root` → `$OPENHERON_CONFIG_ROOT` → `<openheron root>/configs`. **There is no upward search**, and the home directory is not a fallback either. The old names `$OPENHERON_CONFIG_DIR` and `$PROJECT_ROOT` still work and are reported.
+
+Do not mix the baselines: relative to `data_dir` / `log.file` → **the openheron root**; relative to `static_dir` / `corpus_dir` → **the project root**. The typical failure of mixing them is a frontend 404, or an agent grepping inside the configuration tree.
 
 ## Loading and "configured but not effective"
 

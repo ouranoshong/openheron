@@ -100,15 +100,15 @@ vars:
   # Only kit-push-mixin sets this, through the task call below.
   MIXINS: ''
 
-  # ★ The configuration root the **server** will read: $OPENHERON_CONFIG_DIR
-  #   when it is set, else <project-root>/.openheron. `openheron init` has to
+  # ★ The configuration root the **server** will read: $OPENHERON_CONFIG_ROOT
+  #   when it is set, else <openheron-root>/configs. `openheron init` has to
   #   write to that exact root, or the server starts and finds nothing — and
-  #   init deliberately ignores $OPENHERON_CONFIG_DIR (it writes where it is
+  #   init deliberately ignores the environment (it writes where it is
   #   pointed, so it never writes somewhere else than asked). So the
   #   environment variable is passed through explicitly here.
   #   CLI_ARGS comes after this in the init task, so a flag the caller gives
   #   wins over this default.
-  INIT_ARGS: '{{if .OPENHERON_CONFIG_DIR}}--config-dir "{{.OPENHERON_CONFIG_DIR}}"{{else}}--dir "{{.ROOT_DIR}}"{{end}}'
+  INIT_ARGS: '{{if .OPENHERON_CONFIG_ROOT}}--config-root "{{.OPENHERON_CONFIG_ROOT}}"{{else}}--config-root "{{.ROOT_DIR}}/.openheron"{{end}}'
 
 tasks:
   # A bare `task` has no "first target" rule; `default` keeps that behaviour
@@ -167,10 +167,14 @@ tasks:
       - '{{.GO}} build -ldflags "-X main.version={{.VERSION}}" -o {{.BIN}} .'
 
   run:
-    desc: 'Run the binary (the UI comes from the existing web/dist)'
+    desc: 'Run the binary against the repository''s own configuration (the UI comes from the existing web/dist)'
     deps: [build-go]
     cmds:
-      - '{{.BIN}}'
+      # ★ The repository's own .openheron/ is named explicitly, and the
+      #   repository root is the project: the configuration root and the
+      #   project root are two different things now, and neither is the
+      #   working directory any more.
+      - '{{.BIN}} --config-root "{{.ROOT_DIR}}/.openheron" "{{.ROOT_DIR}}"'
 
   # ── Configuration ───────────────────────────────────────────────────────────
   #

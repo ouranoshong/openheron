@@ -638,18 +638,18 @@ func TestRelativePathsResolveAgainstProjectDir(t *testing.T) {
 	}
 }
 
-func TestProjectRootAndResolveDir(t *testing.T) {
+func TestDefaultProjectRootAndResolveDir(t *testing.T) {
 	f := newFixture(t)
 	s, err := NewService(f.root, filepath.Dir(f.root))
 	if err != nil {
 		t.Fatal(err)
 	}
 	root := filepath.Dir(f.root)
-	if s.ProjectRoot() != root {
-		t.Fatalf("ProjectRoot must be the parent of .openheron, want %q, got %q", root, s.ProjectRoot())
+	if s.DefaultProjectRoot() != root {
+		t.Fatalf("the default project root must be the parent of .openheron, want %q, got %q", root, s.DefaultProjectRoot())
 	}
-	if s.Root() == s.ProjectRoot() {
-		t.Fatal("Root (config root) and ProjectRoot (project root) must differ")
+	if s.Root() == s.DefaultProjectRoot() {
+		t.Fatal("Root (config root) and the default project root must differ")
 	}
 	if got := s.ResolveDir("static"); got != filepath.Join(root, "static") {
 		t.Fatalf("a relative path must resolve against the project root: %q != %q", got, filepath.Join(root, "static"))
@@ -736,6 +736,8 @@ func TestRootDefaultsToTheProjectRootDir(t *testing.T) {
 	}
 
 	t.Setenv(ConfigDirEnv, "")
+	t.Setenv(ConfigRootEnv, "")
+	t.Setenv(RootEnv, "")
 	s, err := NewService("", deep)
 	if err != nil {
 		t.Fatal(err)
@@ -761,6 +763,8 @@ func TestTheConfigRootIsNeverSearchedForUpwards(t *testing.T) {
 	}
 
 	t.Setenv(ConfigDirEnv, "")
+	t.Setenv(ConfigRootEnv, "")
+	t.Setenv(RootEnv, "")
 	s, err := NewService("", child)
 	if err != nil {
 		t.Fatal(err)
@@ -812,6 +816,8 @@ func TestTheEnvironmentWinsOverTheProjectRootDir(t *testing.T) {
 func TestAnAbsentExplicitRootIsNotCreated(t *testing.T) {
 	explicit := filepath.Join(t.TempDir(), "nope")
 	t.Setenv(ConfigDirEnv, "")
+	t.Setenv(ConfigRootEnv, "")
+	t.Setenv(RootEnv, "")
 
 	s, err := NewService(explicit, t.TempDir())
 	if err != nil {

@@ -10,7 +10,13 @@ cd "${WORKSPACE_DIR:-$PWD}" || exit 1
 #
 # ★ No --provider and no --env: openheron init decides both from its own
 #   rules, and the configuration on the mount is the user's to edit.
-openheron init --dir "$PWD" || \
+#
+# ★ The config root is named explicitly: the default is <openheron-root>/configs,
+#   which lives in the container's own filesystem, and the configuration the
+#   user edits is the one on the mount. Naming it is what makes the two the
+#   same directory.
+export OPENHERON_CONFIG_ROOT="$PWD/.openheron"
+openheron init --config-root "$OPENHERON_CONFIG_ROOT" || \
     echo "[entrypoint] init did not complete; the configuration was left as it was, and with none at all the server will not start"
 
 # ★ The sandbox publishes the workload's port, so the server inside has to
@@ -20,6 +26,13 @@ openheron init --dir "$PWD" || \
 #   ★ "[::]" and not "0.0.0.0": it is a dual-stack socket, so it accepts the
 #     IPv4 connection the runtime publishes (the descriptor declares the
 #     family as ipv4). The descriptor's comment says exactly this.
-export LISTEN_ADDR="[::]:8080"
+export OPENHERON_LISTEN_ADDR="[::]:8080"
 
-exec openheron
+# ★ The state lives on the mount, not in the sandbox's own filesystem: the
+#   openheron root defaults to ~/.openheron, which disappears with the
+#   sandbox, and a conversation that does not survive the sandbox is a
+#   conversation the user lost. The data dir is named, so it is on the mount.
+export OPENHERON_DATA_DIR="$PWD/.openheron/state"
+
+# ★ The workspace is the project: the agent works where the user's files are.
+exec openheron "$PWD"
