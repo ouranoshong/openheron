@@ -1195,6 +1195,10 @@ The change takes effect on the **next** round (§4.9). ★ If openheron was rest
 the meantime, that tree is gone: the round continues on the current one, and the log
 says so.
 
+★ **A second window on the same session keeps up.** If the approval is answered in one
+window, the other window's card disappears on its own and it goes on to follow the round
+that continued — no reload, and no button left over that the server would refuse.
+
 ### 6.3 The config editor
 
 `/settings` opens it. It can edit `llm/`, `agents/`, `tools/` and `mcps/`.

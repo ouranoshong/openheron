@@ -207,6 +207,12 @@ export const SCENARIOS = {
 
   approval: ["A"],
 
+  // ★ approvalLive: the approval is raised as usual, and the round that
+  //   continues after the answer stays **live**. ★ It is the case a second
+  //   surface needs: the other surface attaches to that round, and the
+  //   server refuses a run that is not live.
+  approvalLive: ["A"],
+
   slowRun: ["A"],
 
   dropped: ["A"],
@@ -753,6 +759,7 @@ function eventsFor(
   runId: string,
 ): RunEvent[] {
   switch (scenario) {
+    case "approvalLive":
     case "approval":
       return [
         started(threadId, runId),
@@ -1190,6 +1197,32 @@ export function startFakeServer(port = 0): FakeServer {
   let defaultRoot = "main"
 
   const find = (id: string) => threads.find((t) => t.threadId === id)
+
+  // ── the session's announcement channel ─────────────────────────────────
+  //
+  // ★ The channel is the session's, not a run's: an approval belongs to the
+  //   session, and the run that raised it is over by the time anybody can
+  //   answer it. ★ A second surface has to hear that the approval was
+  //   answered — otherwise it keeps a card the server refuses every answer
+  //   on.
+  const channels = new Map<string, Set<ReadableStreamDefaultController<Uint8Array>>>()
+
+  // publish hands one fact to the session's subscribers.
+  //
+  // ★ A session with no subscribers gets nothing: the fact is a
+  //   notification, and the durable truth is the transcript.
+  const publish = (threadId: string, ev: RunEvent) => {
+    const subs = channels.get(threadId)
+    if (!subs) return
+    const bytes = encode(ev)
+    for (const c of subs) {
+      try {
+        c.enqueue(bytes)
+      } catch {
+        // The reader is gone.
+      }
+    }
+  }
 
   // fakeAgents is the agent table the fake server currently serves.
   //
@@ -1658,6 +1691,11 @@ export function startFakeServer(port = 0): FakeServer {
     //   run stays open in the ledger and the session stays busy.
     const stillRunning = scenario === "busySession" || scenario === "slowRun"
 
+    // ★ resumedStaysLive keeps the round that continues after an answer
+    //   open. ★ It is what a second surface attaches to: the server refuses
+    //   a run that is not live.
+    const resumedStaysLive = scenario === "approvalLive"
+
     if (!body.threadId) {
       return fail(400, "threadId is required; create the session with POST /v2/sessions first", "invalid_body")
     }
@@ -1687,14 +1725,49 @@ export function startFakeServer(port = 0): FakeServer {
         content: approved ? "written" : `denied: ${answers[0]?.payload?.reason ?? "rejected by user"}`,
         toolCallId: "call_1",
       })
+      const msg: FakeMessage = { id: `m-${++seq}`, role: "assistant", content: "" }
+      thread.messages.push(msg)
+      const events = eventsFor("simple", thread.threadId, MARKER_A, runId)
+      for (const ev of events) applyToMessage(msg, ev)
+
+      // ★ The run is a row in the ledger **before** anything is announced: a
+      //   surface that attaches on the announcement must find it live.
+      const resumed: FakeRun = {
+        runId,
+        state: resumedStaysLive ? "running" : "completed",
+        kind: "resume",
+        startedAt: new Date().toISOString(),
+        events,
+        messageId: msg.id,
+      }
+      thread.runs = [...(thread.runs ?? []), resumed]
+
+      // ★ The approval is gone: it was consumed, and every surface waiting
+      //   on it has to hear that its card is stale.
+      for (const a of answers) {
+        publish(thread.threadId, {
+          type: "CUSTOM",
+          name: "approval_resolved",
+          value: {
+            interrupt_id: a.interruptId,
+            approved: a.payload?.approved ?? false,
+            reason: a.payload?.reason ?? "",
+            run_id: runId,
+          },
+        })
+      }
+      // ★ And the round that continues the work is announced on the same
+      //   channel: the surface that was waiting follows it.
+      publish(thread.threadId, {
+        type: "CUSTOM",
+        name: "run_started",
+        value: { run_id: runId, kind: "resume" },
+      })
+
       const stream = new ReadableStream<Uint8Array>({
         start(c) {
-          const msg: FakeMessage = { id: `m-${++seq}`, role: "assistant", content: "" }
-          thread!.messages.push(msg)
-          for (const ev of eventsFor("simple", thread!.threadId, MARKER_A, runId)) {
-            applyToMessage(msg, ev)
-            c.enqueue(encode(ev))
-          }
+          for (const ev of events) c.enqueue(encode(ev))
+          if (resumedStaysLive) return
           thread!.state = "idle"
           thread!.usage = USAGE
           c.close()
@@ -1763,6 +1836,14 @@ export function startFakeServer(port = 0): FakeServer {
     }
 
     thread.state = "running"
+
+    // ★ The session hears that a round began. ★ It is the fact that lets a
+    //   surface that did not ask for the round follow it.
+    publish(thread.threadId, {
+      type: "CUSTOM",
+      name: "run_started",
+      value: { run_id: runId, kind: "query" },
+    })
 
     const query = (body.query ?? "").trim() || lastUserText(body.messages)
     // ★ A turn with files and no text is still a turn: the question may be
@@ -1897,6 +1978,11 @@ export function startFakeServer(port = 0): FakeServer {
 
   const server = Bun.serve({
     port,
+    // ★ The session's announcement channel is a long-lived request, and
+    //   Bun's default idle timeout is ten seconds — which would cut the
+    //   channel in the middle of the very wait it exists for. ★ Zero
+    //   disables the timeout; the client closes the channel when it goes.
+    idleTimeout: 0,
     async fetch(req) {
       const url = new URL(req.url)
       const path = url.pathname
@@ -2070,6 +2156,39 @@ export function startFakeServer(port = 0): FakeServer {
         }
         t.agentId = id
         return json(meta(t))
+      }
+
+      // ★ The session's announcement channel. ★ It has no terminal frame:
+      //   it ends when the client goes away.
+      const evs = path.match(/^\/v2\/sessions\/([^/]+)\/events$/)
+      if (evs && req.method === "GET") {
+        const t = find(evs[1])
+        if (!t) return notFound()
+        const id = t.threadId
+        // ★ cancel() has no controller in scope, so the reader keeps one.
+        let reader: ReadableStreamDefaultController<Uint8Array> | null = null
+        const stream = new ReadableStream<Uint8Array>({
+          start(c) {
+            reader = c
+            let subs = channels.get(id)
+            if (!subs) {
+              subs = new Set()
+              channels.set(id, subs)
+            }
+            subs.add(c)
+            // ★ The channel says "I am here" right away. ★ A fetch does not
+            //   resolve until the first byte arrives, and a client that is
+            //   not reading yet has not heard the facts.
+            c.enqueue(keepalive())
+          },
+          cancel() {
+            const subs = channels.get(id)
+            if (!subs || !reader) return
+            subs.delete(reader)
+            if (subs.size === 0) channels.delete(id)
+          },
+        })
+        return sse(stream)
       }
 
       const m = path.match(/^\/v2\/sessions\/([^/]+)(\/messages)?$/)
@@ -2291,6 +2410,13 @@ export function startFakeServer(port = 0): FakeServer {
 function encode(ev: RunEvent): Uint8Array {
   const withTs = ev.timestamp === undefined ? { ...ev, timestamp: Date.now() } : ev
   return new TextEncoder().encode(`data:${JSON.stringify(withTs)}\n\n`)
+}
+
+// keepalive is the frame that carries no payload.
+//
+// ★ It is not a fact: it says the channel is open, and nothing more.
+function keepalive(): Uint8Array {
+  return new TextEncoder().encode("data:\n\n")
 }
 
 function sse(stream: ReadableStream<Uint8Array>): Response {

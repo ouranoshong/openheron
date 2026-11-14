@@ -4,6 +4,7 @@ import {
   ApiError,
   api,
   runStream,
+  sessionStream,
   type CompactionResult,
   type RunHandle,
   type RunsView,
@@ -13,6 +14,7 @@ import {
 import { readActiveThreadId, writeActiveThreadId } from "@/lib/active-thread"
 import { attachTarget, busyElsewhere } from "@/lib/attach"
 import { closeAllOpenParts, type AgEvent } from "@/lib/events"
+import { applySessionFact as foldSessionFact, type SessionFact } from "@/lib/session-events"
 import {
   emptyConversation,
   type ConversationState,
@@ -30,6 +32,59 @@ function isThreadNotFound(e: unknown): boolean {
 }
 
 let run: RunHandle | null = null
+
+// sessionChannel is the announcement channel of the session on screen.
+//
+// ★ It is the session's channel, not a run's: an approval belongs to the
+//   session, and the run that raised it is over by the time anybody can
+//   answer it. ★ One at a time — the channel follows the session the user
+//   is looking at, and a channel for a session nobody is looking at is a
+//   connection nobody reads.
+let sessionChannel: RunHandle | null = null
+let sessionChannelId: string | null = null
+
+// sessionReopen is the timer that brings the channel back after it ended.
+//
+// ★ The channel ends when the connection goes away, and that is not the
+//   end of the session: a surface that stops listening stops hearing
+//   that an approval was answered.
+let sessionReopen: ReturnType<typeof setTimeout> | null = null
+
+// pendingAttach is the run this surface will follow when its current
+// stream ends.
+//
+// ★ One stream at a time. ★ The server allows one live turn per session,
+//   so the new round can only begin after the old one is over — and the
+//   surface that is still holding the old stream has to let go first.
+let pendingAttach: { id: string; runId: string } | null = null
+
+// SESSION_REOPEN_MS is how long the client waits before it listens again
+// after the channel ended.
+//
+// ★ A second is long enough not to spin and short enough that the user
+//   does not notice the gap.
+const SESSION_REOPEN_MS = 1000
+
+// SESSION_RETRY_MS is how long the client waits before it tries again
+// after the channel could not be opened at all.
+//
+// ★ It is longer than the reopen: the server said no, and asking again
+//   every second would be a loop rather than a retry.
+const SESSION_RETRY_MS = 5000
+
+// releaseRun ends the local stream and starts the attach that waited for
+// it.
+//
+// ★ The wait is the point: a new round cannot begin before the old one is
+//   over, so a surface that is still holding the old stream has to let go
+//   of it before it can follow the new one.
+function releaseRun(): void {
+  run = null
+  setCurrentRunKey(null)
+  const pending = pendingAttach
+  pendingAttach = null
+  if (pending) void useStore.getState().followRun(pending.id, pending.runId)
+}
 
 // lastSentAttachments remembers the files that went out with the current
 // turn.
@@ -341,9 +396,8 @@ export const useStore = create<StoreState>((set, get) => ({
       {
         onEvent: (ev) => handleEvent(set, get, localKey, ev as AgEvent),
         onError: (message, code) => {
-          run = null
           const k = getCurrentRunKey() ?? localKey
-          setCurrentRunKey(null)
+          releaseRun()
           if (code === "session_busy") {
             // ★ The session has a live turn that this surface does not own.
             //   The message never reached the server, so the optimistic
@@ -360,8 +414,7 @@ export const useStore = create<StoreState>((set, get) => ({
           void get().reattach(k, message)
         },
         onDone: () => {
-          run = null
-          setCurrentRunKey(null)
+          releaseRun()
           lastSentAttachments = []
           // ★ The stream ended without a terminal frame: the connection
           //   died, not the run. The server archives the turn, not the
@@ -393,6 +446,10 @@ export const useStore = create<StoreState>((set, get) => ({
   //   - unknown     → report the error, because there is nothing better
   //     to say.
   async reattach(id: string, message: string) {
+    // ★ One stream at a time. ★ A pending attach may have taken the slot
+    //   already — the session's channel announced a round while this
+    //   stream was ending — and two streams would fight over the run.
+    if (run) return
     const entry = get().sessions[id]
     const runId = entry?.convo?.runId
     if (!runId) {
@@ -423,8 +480,7 @@ export const useStore = create<StoreState>((set, get) => ({
       {
         onEvent: (ev) => get().applyEvent(id, ev as AgEvent),
         onError: (msg, code) => {
-          run = null
-          setCurrentRunKey(null)
+          releaseRun()
           if (code === "run_not_live") {
             // ★ The run ended between the scan and the attach. The
             //   transcript has the answer.
@@ -434,8 +490,7 @@ export const useStore = create<StoreState>((set, get) => ({
           get().loadError(id, msg)
         },
         onDone: () => {
-          run = null
-          setCurrentRunKey(null)
+          releaseRun()
           void get().refreshList()
         },
       },
@@ -514,8 +569,7 @@ export const useStore = create<StoreState>((set, get) => ({
       {
         onEvent: (ev) => get().applyEvent(id, ev as AgEvent),
         onError: (msg, code) => {
-          run = null
-          setCurrentRunKey(null)
+          releaseRun()
           if (code === "run_not_live") {
             // ★ The run ended between the scan and the attach. The
             //   transcript has the answer.
@@ -525,11 +579,127 @@ export const useStore = create<StoreState>((set, get) => ({
           get().loadError(id, msg)
         },
         onDone: () => {
-          run = null
-          setCurrentRunKey(null)
+          releaseRun()
           // ★ The transcript is the truth once the run is over, and this
           //   surface never owned the turn: it watched it. The replayed
           //   events give way to the recorded ones.
+          void get().reloadHistory(id)
+          void get().scanBusy(id)
+          void get().refreshList()
+        },
+      },
+    )
+  },
+
+  // watchSession follows the session's announcements.
+  //
+  // ★ The channel is the session's, and it is what tells this surface
+  //   that an approval was answered somewhere else. ★ It follows the
+  //   session on screen: a channel for a session nobody is looking at is
+  //   a connection nobody reads.
+  watchSession(id: string | null) {
+    if (sessionChannelId === id) return
+    if (sessionReopen !== null) {
+      clearTimeout(sessionReopen)
+      sessionReopen = null
+    }
+    sessionChannel?.abort()
+    sessionChannel = null
+    sessionChannelId = id
+    if (!id) return
+
+    const reopen = (delay: number) => {
+      if (get().activeId !== id) return
+      sessionReopen = setTimeout(() => {
+        sessionReopen = null
+        get().watchSession(id)
+      }, delay)
+    }
+
+    sessionChannel = sessionStream(id, {
+      onFact: (fact) => get().applySessionFact(id, fact),
+      onClosed: () => {
+        // ★ The channel ended: the connection went away. ★ The facts it
+        //   carried are notifications, and the ones that were missed are
+        //   in the ledger — so come back to the scan, and listen again.
+        if (sessionChannelId !== id) return
+        sessionChannelId = null
+        void get().scanBusy(id)
+        if (get().sessions[id]?.convo?.status === "awaiting-approval") {
+          // ★ A card the server may have already answered: the transcript
+          //   is the truth about which approvals are still open.
+          void get().reloadHistory(id)
+        }
+        reopen(SESSION_REOPEN_MS)
+      },
+      onError: () => {
+        // ★ The channel could not be opened. ★ Nothing is lost: the
+        //   approval card is rebuilt from the transcript, and the next
+        //   scan says whether the session is busy. ★ The retry is slower
+        //   than the reopen — the server said no, and asking again every
+        //   second would be a loop rather than a retry.
+        if (sessionChannelId !== id) return
+        sessionChannelId = null
+        reopen(SESSION_RETRY_MS)
+      },
+    })
+  },
+
+  // applySessionFact folds one announcement of the session into the view.
+  //
+  // ★ The card is the point: a surface that waits on an approval and is
+  //   not told that the approval was answered keeps a card the server
+  //   refuses every answer on.
+  applySessionFact(id: string, fact: SessionFact) {
+    set((s) => {
+      const entry = s.sessions[id]
+      if (!entry) return {}
+      const convo = foldSessionFact(entry.convo ?? emptyConversation(), fact)
+      return { sessions: { ...s.sessions, [id]: { ...entry, convo } } }
+    })
+    if (fact.kind !== "run-started") return
+    // ★ A new round owns the session: follow it.
+    void get().followRun(id, fact.runId)
+  },
+
+  // followRun attaches to the run the session named.
+  //
+  // ★ The channel named it, so there is nothing to look for: the scan
+  //   exists for a surface that has to *find* the live run, and this one
+  //   was told.
+  //
+  // ★ One stream at a time. ★ A surface that is still holding the previous
+  //   run waits for it to end: the server allows one live turn per
+  //   session, so the new round cannot begin before the old one is over.
+  followRun(id: string, runId: string) {
+    if (!runId) return
+    // ★ Already following it: the attach has nothing to do. ★ The
+    //   conversation's run id is the one the surface is watching, and the
+    //   announcement does not write it down — so this says "this surface
+    //   is on that run", not "the session has that run".
+    if (get().sessions[id]?.convo?.runId === runId) return
+    if (run) {
+      pendingAttach = { id, runId }
+      return
+    }
+
+    setCurrentRunKey(id)
+    run = runStream(
+      { threadId: id, runId },
+      {
+        onEvent: (ev) => get().applyEvent(id, ev as AgEvent),
+        onError: (msg, code) => {
+          releaseRun()
+          if (code === "run_not_live") {
+            // ★ The run ended between the announcement and the attach.
+            //   The transcript has the answer.
+            void get().reloadHistory(id)
+            return
+          }
+          get().loadError(id, msg)
+        },
+        onDone: () => {
+          releaseRun()
           void get().reloadHistory(id)
           void get().scanBusy(id)
           void get().refreshList()
@@ -603,13 +773,11 @@ export const useStore = create<StoreState>((set, get) => ({
       {
         onEvent: (ev) => handleEvent(set, get, id, ev as AgEvent),
         onError: (message) => {
-          run = null
-          setCurrentRunKey(null)
+          releaseRun()
           get().loadError(id, message)
         },
         onDone: () => {
-          run = null
-          setCurrentRunKey(null)
+          releaseRun()
           void get().refreshList()
         },
       },
@@ -621,8 +789,7 @@ export const useStore = create<StoreState>((set, get) => ({
     if (!id) return
 
     run?.abort()
-    run = null
-    setCurrentRunKey(null)
+    releaseRun()
     set((s) => {
       const entry = s.sessions[id]
       if (!entry) return s

@@ -325,6 +325,41 @@ A 放弃时发现槽位不是它的（走掉），B 放弃时发现槽位是它�
 用例在 `agentkit/run/runrow_test.go`（失败早于行、行到了要补终态；终态取第一个）。
 
 
+### 3.9 ★ 审批卡在另一个标签页里不会消失
+
+**症状**：同一个会话开了两个标签页。一个在等审批，另一个回答了 —— 于是**回答的那个继续
+跑**，而**等的那个**一直举着那张卡；点「同意」被服务端以「这个审批已经被答过了」拒掉。
+用户看着一个解不开的死结。
+
+**根因**：★ **审批属于会话，事件属于轮次。** 抛出审批的那一轮在抛出审批的那一刻就结束
+了（`agentkit/run/bridge.go:169` 关掉发布方），而审批还在等一个答案 ⇒ 「审批被回答了」
+这个事实**无处可去** —— 它不能骑在旧一轮的总线上，那条总线已经死了。
+
+★ 客户端这一侧也没有别的通道：`applyScan`（`web/src/lib/store/actions.ts:504`）只改
+`busy`，**不碰审批卡**；于是等着的那一边**没有任何通道**能知道审批已经被消费。
+
+**修法**：★ 加一条**会话级**的公告通道（`agentkit/run/announce.go`），事实有两个：
+「审批被回答」与「新一轮开始」。服务端在 `TakePendingApproval` 成功之后发布前者，在
+`startLoop` 之后发布后者；客户端订阅 `GET /v2/sessions/{id}/events`，收到前者就把那张卡
+拿掉，收到后者就跟上去继续的那一轮。
+
+★ **事实是实时通知，过去归账本** —— 所以通道**没有回放窗口**：一个迟到的订阅者会去挂
+一个早就结束的老 run（`docs/runtime-design.md` §1.7）。
+
+★ **通道一开先 ping 一下**（`transport/sse.go` 的 `Ping`）：fetch 在第一个字节到来之前
+不会 resolve，而一个还没开始读的客户端，是没听见事实的客户端。
+
+★ **顺带改变了一件事**：错过一轮开始的第二个界面，现在会**跟上**那一轮，而不是说「忙在
+别处」。以前只有「打开会话时那一轮已经在跑」才会挂上（`web/test/e2e/session-busy.spec.ts`
+钉的是现在这个行为）。
+
+**现状**：`已修` —— 服务端 `agentkit/run/announce.go`、`transport.RenderSession`、
+`api/v2_session_events.go`；客户端 `web/src/lib/session-events.ts`、
+`web/src/lib/store/actions.ts` 的 `watchSession` / `applySessionFact` / `followRun`。
+用例在 `agentkit/run/announce_test.go`、`transport/session_test.go`、
+`api/v2_session_events_test.go`、`web/test/session-events.test.ts`、
+`web/test/e2e/session-events.spec.ts`。
+
 ## 4. 文件系统后端
 
 ### 4.1 ★ 一个静默的零结果 bug
@@ -822,6 +857,21 @@ $env:TMP = $env:TEMP
 
 **现状**：`已知边界` —— ★ 这是这台机器的毛病，不是仓库的。★ 别去删系统临时目录（它在工作区之外，
 回收站工具不会收它）；换一个 `TEMP` 就够了。
+
+### 12.2 ★ Bun 的假后端会掐掉十秒以上的连接
+
+**症状**：假后端上的会话通道在十秒后被掐断（Bun 的告警：`Bun.serve() timed out a
+request after 10 seconds`），于是 E2E 里「另一个界面听见了审批被回答」这件事**时好时坏**
+—— 而且坏的时候不像失败，像没发生。
+
+**根因**：`Bun.serve` 的 `idleTimeout` 默认十秒，而会话通道是一条**长连接** —— 它在
+没有事实的时候一个字都不说。
+
+**修法**：`idleTimeout: 0`（`web/test/fake-server.ts`）。★ 真后端没有这个问题：它自己
+的 keepalive 会在通道空闲时写一帧。
+
+★ **配套的一条**：通道一开就**先 ping 一下**（`transport/sse.go` 的 `Ping`）。fetch 在
+第一个字节到来之前不会 resolve —— 不 ping 的话，客户端要等到第一条事实才开读。
 
 ## 13. 构建与安装
 

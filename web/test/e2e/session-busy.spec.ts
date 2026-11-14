@@ -89,12 +89,14 @@ test("关掉第一个界面，第二个继续接收", async ({ page, context }) 
 })
 
 // The race the guard cannot prevent: the second surface hydrated while the
-// session was idle, and the first one started a turn in between. The
-// server refuses, and the refused message leaves no trace.
+// session was idle, and the first one started a turn in between.
 //
-// ★ The surface was not attached when the turn started, so it has nothing
-//   to follow: it says the session is busy and offers the stop button.
-test("竞态下的第二个请求被拒绝，消息不留痕", async ({ page, context }) => {
+// ★ The surface was not there when the turn started — but the session's
+//   channel tells it that a round began, so it follows that round instead of
+//   saying the session is busy elsewhere. ★ It is the same surface that
+//   opens a session with a live turn: that one hears the round from the
+//   server's state, this one hears it from the server's announcement.
+test("错过一轮开始的第二个界面跟上去，而不是说忙在别处", async ({ page, context }) => {
   await setScenario("busySession")
   await openApp(page)
   await openThread(page, ALPHA)
@@ -109,16 +111,50 @@ test("竞态下的第二个请求被拒绝，消息不留痕", async ({ page, co
   await typeAndEnter(page, "the first message")
   await expect(page.getByText(STILL_WORKING)).toBeVisible()
 
+  // ★ The second surface hears that a round began, and follows it.
+  await expect(other.getByText(STILL_WORKING)).toBeVisible({ timeout: 7000 })
+
+  // ★ And it is not kept out of the session: the round it is watching is
+  //   the session's round, so the warning would be a lie.
+  await expect(other.locator(BUSY)).toHaveCount(0)
+  await expect(other.locator(STOP_BUTTON)).toBeVisible()
+})
+
+// A message typed while the round runs never leaves the composer.
+//
+// ★ The session is busy, so there is nothing to send it to. ★ The draft
+//   stays where the user left it — the alternative is losing what they
+//   typed — and the transcript never claims a message that was not sent.
+test("轮次在跑时写的消息留在输入框里，不进记录", async ({ page, context }) => {
+  await setScenario("busySession")
+  await openApp(page)
+  await openThread(page, ALPHA)
+
+  const other = await context.newPage()
+  await openApp(other)
+  await openThread(other, ALPHA)
+
+  await typeAndEnter(page, "the first message")
+  await expect(page.getByText(STILL_WORKING)).toBeVisible()
+  await expect(other.getByText(STILL_WORKING)).toBeVisible({ timeout: 7000 })
+
   await typeAndEnter(other, "this one is refused")
 
-  // The optimistic bubble is rolled back — the server never took it. The
-  // scenario's own history stays; what must not be there is the refused
-  // message.
-  await expect(other.getByText("this one is refused")).toHaveCount(0)
+  // ★ The draft is still there: the user does not lose what they typed.
+  await expect(other.locator('[data-testid="composer-textarea"]')).toHaveValue(
+    "this one is refused",
+  )
 
-  // And the surface says why.
-  await expect(other.locator(BUSY)).toBeVisible()
-  await expect(other.locator(BUSY)).toContainText("running in another window")
+  // ★ The transcript holds the round it follows — so the check below is
+  //   not vacuous.
+  await expect(
+    other.locator('[data-testid="message"]').filter({ hasText: STILL_WORKING }).first(),
+  ).toBeVisible()
+
+  // ★ And the transcript does not claim the message that was never sent.
+  await expect(
+    other.locator('[data-testid="message"]').filter({ hasText: "this one is refused" }),
+  ).toHaveCount(0)
 })
 
 // A busy session is a conflict, not a failure: the user can stop the other

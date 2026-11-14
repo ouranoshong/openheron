@@ -1,4 +1,5 @@
 import { readSse } from "@/lib/sse"
+import { parseSessionFact, type SessionFact } from "@/lib/session-events"
 import type { ContextUsage } from "@/lib/types"
 
 export interface Usage {
@@ -465,6 +466,15 @@ export interface RunHandlers {
   onDone?(): void
 }
 
+export interface SessionHandlers {
+  // onFact carries one announcement of the session.
+  onFact(fact: SessionFact): void
+  // onClosed says the channel ended. It ended because the connection went
+  // away, not because the session did — the caller comes back to the scan.
+  onClosed?(): void
+  onError?(message: string): void
+}
+
 // FRAME_MS is how often the stream's events reach the store.
 //
 // ★ A token per state update makes the whole tree re-render per token,
@@ -575,6 +585,56 @@ export function runStream(input: RunInput, handlers: RunHandlers): RunHandle {
       //   turn: the user saw half an answer, and half an answer is better
       //   than none.
       batch.flushAll()
+      if (controller.signal.aborted) return
+      handlers.onError?.((e as Error).message)
+    }
+  })()
+
+  return { abort: () => controller.abort() }
+}
+
+// sessionStream opens the session's announcement channel.
+//
+// ★ It is the session's channel, not a run's. ★ A run's stream ends with
+//   the run, and the approval outlives the run that raised it: the round
+//   ends, the question stays — and the surface waiting on the question
+//   has no stream left to hear that it was answered.
+//
+// ★ The channel has no terminal frame. ★ It ends when the connection goes
+//   away, and the caller reads that as "come back to the scan" — not as
+//   "the session is over".
+export function sessionStream(threadId: string, handlers: SessionHandlers): RunHandle {
+  const controller = new AbortController()
+
+  void (async () => {
+    try {
+      const res = await fetch(`/v2/sessions/${encodeURIComponent(threadId)}/events`, {
+        method: "GET",
+        signal: controller.signal,
+        headers: { Accept: "text/event-stream" },
+      })
+      if (!res.ok) {
+        handlers.onError?.(`HTTP ${res.status}`)
+        return
+      }
+      if (!res.body) {
+        handlers.onError?.("response has no body — expected an event stream")
+        return
+      }
+
+      for await (const ev of readSse(res.body)) {
+        let parsed: unknown
+        try {
+          parsed = JSON.parse(ev.data)
+        } catch {
+          // A frame that will not parse is not a reason to end the channel.
+          continue
+        }
+        const fact = parseSessionFact(parsed)
+        if (fact) handlers.onFact(fact)
+      }
+      handlers.onClosed?.()
+    } catch (e) {
       if (controller.signal.aborted) return
       handlers.onError?.((e as Error).message)
     }

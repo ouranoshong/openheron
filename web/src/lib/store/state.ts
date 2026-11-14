@@ -1,5 +1,6 @@
 import type { RunsView, ThreadMeta } from "@/lib/api"
 import type { AgEvent } from "@/lib/events"
+import type { SessionFact } from "@/lib/session-events"
 import type { ConversationState, Interrupt } from "@/lib/types"
 
 export interface Attachment {
@@ -54,6 +55,13 @@ export interface StoreState {
   // attachToLiveRun follows the run that owns the session — what a second
   // tab does when it opens a session with a live turn.
   attachToLiveRun(id: string): Promise<void>
+  // watchSession follows the session's announcements — the channel that
+  // tells this surface that an approval was answered somewhere else.
+  watchSession(id: string | null): void
+  // applySessionFact folds one announcement of the session into the view.
+  applySessionFact(id: string, fact: SessionFact): void
+  // followRun attaches to the run the session named.
+  followRun(id: string, runId: string): void
   addFiles(files: File[]): Promise<void>
   // removeFile takes a file out of the pending list, and off the disk.
   //
