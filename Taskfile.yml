@@ -215,9 +215,11 @@ tasks:
   #   "installed" even when the copy had failed: Copy-Item's failure is a
   #   **non-terminating** error, so the statement after it ran anyway — the
   #   old binary kept running while the task claimed a new one was in place.
-  #   The copy now happens in a script that stops on it (scripts/install-local.ps1),
-  #   and the version the installed binary reports is checked before anything
-  #   is claimed.
+  #   The copy now happens in a script that stops on it (scripts/install-local.ps1).
+  #   ★ Both branches check the version the installed binary reports before
+  #   anything is claimed: "it is installed" is a claim, and a claim is
+  #   checked. ★ And `uninstall` stops on a failed removal on both platforms
+  #   — it used to print "removed" either way.
 
   install:
     desc: 'Install the binary into PREFIX (platform default); openheron is then runnable from anywhere'
@@ -227,7 +229,22 @@ tasks:
       - cmd: |-
           set -e
           mkdir -p "{{.PREFIX}}"
-          install -m 0755 "{{.BIN}}" "{{.INSTALL_PATH}}"
+          # ★ Copy first, claim later: a failed copy stops here, before
+          #   anything is claimed. ★ The destination is usually the binary
+          #   that is running right now, and the kernel refuses to truncate
+          #   a running executable.
+          install -m 0755 "{{.BIN}}" "{{.INSTALL_PATH}}" || {
+            echo "install failed: could not write {{.INSTALL_PATH}}" >&2
+            echo "hint: if openheron is running, stop it first (pkill -x openheron)" >&2
+            exit 1
+          }
+          # ★ The installed binary has to be the one that was built: "it is
+          #   installed" is a claim, and a claim is checked.
+          got=$("{{.INSTALL_PATH}}" version 2>/dev/null || true)
+          if [ "$got" != "{{.VERSION}}" ]; then
+            echo "install failed: the installed binary reports '$got' but {{.VERSION}} was expected" >&2
+            exit 1
+          fi
           echo "installed: {{.INSTALL_PATH}}"
           command -v openheron >/dev/null 2>&1 || \
             echo 'hint: {{.PREFIX}} is not on PATH — export PATH="{{.PREFIX}}:$PATH"'
@@ -241,6 +258,9 @@ tasks:
     silent: true
     cmds:
       - cmd: |-
+          # ★ set -e, because a removal that failed must not print "removed".
+          #   rm -f on a file that is not there is still a success.
+          set -e
           rm -f "{{.INSTALL_PATH}}"
           echo "removed: {{.INSTALL_PATH}}"
         platforms: [linux, darwin]

@@ -834,13 +834,24 @@ $env:TMP = $env:TEMP
 `Write-Host 'installed: ...'`。★ PowerShell 的**非终止错误**不会中断语句序列：复制失败被记成一条
 错误记录，下一句照样跑；`powershell -Command` 的退出码也因此是 0 —— 任务**成功**返回。
 
-★ 同一个毛病在 `uninstall` 里也有：`-ErrorAction SilentlyContinue` 把失败吞掉，然后打印 `removed:`。
+★ 同一个毛病在 `uninstall` 里也有，而且**两个平台都有**：Windows 那条用
+`-ErrorAction SilentlyContinue` 把失败吞掉；sh 那条**根本没有 `set -e`** —— `rm -f` 失败之后照样
+打印 `removed:`，退出码还是 0。
 
-**修法**：★ **复制在前，宣称在后**，而且失败必须**终止**。复制挪进
-`scripts/install-local.ps1`（`$ErrorActionPreference = "Stop"` + `try/catch`）：失败时退出码非 0，
-`installed:` 根本不会打印。★ 装完再核一次版本（`openheron version`）——「装上了」要**能被验证**，
-而不只是「复制没报错」。★ PATH 提示只在那个目录**真的不在用户 PATH 上**时才打 —— 每次都打的提示
-等于没有提示。
+★ ★ **sh 的 `install` 本来就没有这个毛病**：`set -e` 让任何一步失败都中止脚本，`installed:`
+根本不会打印。那条分支上真正缺的是**校验** —— 它只知道「复制没报错」，不知道「装上去的是不是
+刚构建的那一个」。
+
+**修法**：★ **复制在前，宣称在后**，而且失败必须**终止**。
+
+- Windows：复制挪进 `scripts/install-local.ps1`（`$ErrorActionPreference = "Stop"` + `try/catch`），
+  失败时退出码非 0，`installed:` 根本不会打印。
+- sh：给 `install` 加一道 `||` 守卫（失败时打印原因与「先停掉正在跑的实例」的提示，然后退出 1）；
+  `uninstall` 补上 `set -e` —— `rm -f` 对**不存在**的路径仍然算成功，所以失败必须是真失败。
+
+★ 两个平台都补上了**版本校验**：装完跑一次 `openheron version`，对不上就不算装上 ——
+「装上了」要**能被验证**，而不只是「复制没报错」。★ PATH 提示只在那个目录**真的不在用户 PATH 上**
+时才打 —— 每次都打的提示等于没有提示。
 
 **现状**：`已修` —— `scripts/install-local.ps1` 与 `Taskfile.yml` 的 `install` / `uninstall`。
 ★ 发布版的安装器（`scripts/install.ps1`）本来就没这个毛病：它开头就设了
