@@ -206,6 +206,13 @@ the log's destination is configuration, and the configuration must not be able t
 - **Do not duplicate business assembly logic in the API layer** — when you need "the effective
   tool table of some agent", let `agent.Builder` expose a read-only query instead of recomputing
   `Table.Blocked` / `Policy.TierOf`.
+- ★ **A directory the user picks is the server's job.** The browser will not tell a page where a
+  chosen directory lives — `webkitRelativePath` is relative to it and `showDirectoryPicker()` hands
+  out a name. ★ openheron runs on the user's machine, so the server opens the **operating
+  system's** chooser (`agentkit/dirpick` → `POST /v2/fs/pick-directory`) and the absolute path
+  comes back whole. ★ Two rules follow: the chooser is **local-only** (the window opens on the
+  server's desktop, and the request starts a process on the host), and a **closed chooser is not a
+  failure** — it is how a person says "not now".
 - **Config root resolution has exactly three levels**: explicit `--config-root` →
   `$OPENHERON_CONFIG_ROOT` → `<openheron-root>/configs` (created if missing). The openheron root is
   `--openheron-root` → `$OPENHERON_ROOT` → `~/.openheron`.

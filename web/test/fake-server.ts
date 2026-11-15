@@ -1213,6 +1213,12 @@ export function startFakeServer(port = 0): FakeServer {
   let agentsMode: "default" | "multi" | "many" | "grew" = "default"
   let mcpMode: "default" | "empty" | "starting" = "default"
   let projectsMode: "default" | "multi" | "single" = "default"
+  // ★ The chooser's answer. ★ It is a mode, not a constant: the client has
+  //   to tell "a directory was chosen" from "the chooser was closed" from
+  //   "this machine has no chooser", and only a mode can produce the last
+  //   two on demand.
+  let dirPickMode: "picked" | "cancelled" | "failed" = "picked"
+  let dirPickPath = "/tmp/picked-project"
   // ★ The table is **mutable**: the interface can write to it, and a project
   //   that was created has to be in the list the next GET answers with — or
   //   the dialog would show a project that does not exist.
@@ -2165,6 +2171,8 @@ export function startFakeServer(port = 0): FakeServer {
         mcpMode = "default"
         projectsMode = "default"
         seedProjects("default")
+        dirPickMode = "picked"
+        dirPickPath = "/tmp/picked-project"
         defaultRoot = "main"
         return json({ ok: true })
       }
@@ -2203,6 +2211,20 @@ export function startFakeServer(port = 0): FakeServer {
         projectsMode = mode
         seedProjects(mode)
         return json({ ok: true, mode: projectsMode })
+      }
+      // ★ The chooser's mode: which of the three answers it gives.
+      if (path === "/__fake/dir-pick" && req.method === "POST") {
+        const body = (await req.json().catch(() => ({}))) as {
+          mode?: string
+          path?: string
+        }
+        const mode = body.mode ?? "picked"
+        if (mode !== "picked" && mode !== "cancelled" && mode !== "failed") {
+          return fail(400, `unknown dir pick mode: ${mode}`, "invalid_body")
+        }
+        dirPickMode = mode
+        if (body.path) dirPickPath = body.path
+        return json({ ok: true, mode: dirPickMode, path: dirPickPath })
       }
       if (path === "/__fake/scenario" && req.method === "POST") {
         const name = new URL(req.url).searchParams.get("name") ?? ""
@@ -2332,8 +2354,7 @@ export function startFakeServer(port = 0): FakeServer {
       //   deletes projects, so the fake answers the way the server does —
       //   including the refusal: a project without a root is refused, and a
       //   project that is not in the table is a 404 with its own code.
-      if (path === "/v2/projects" && req.method === "POST") {
-        const body = (await req.json().catch(() => ({}))) as { name?: string; root?: string }
+      if (path === "/v2/projects" && req.method === "POST") {        const body = (await req.json().catch(() => ({}))) as { name?: string; root?: string }
         const root = (body.root ?? "").trim()
         if (!root) return fail(400, "the project root must not be empty", "invalid_body")
         const existing = fakeProjectTable.find((p) => p.root === root)
@@ -2390,6 +2411,20 @@ export function startFakeServer(port = 0): FakeServer {
         fakeProjectTable.splice(idx, 1)
         // ★ The sessions are not deleted: they fall back to "no project".
         return json({ id: projectRoute[1] })
+      }
+
+      // ★ The folder chooser. ★ The real one opens the operating system's
+      //   own dialog on the machine the server runs on, so the fake answers
+      //   with a fixed path — and with the three outcomes the client has to
+      //   tell apart: a directory, a closed chooser, and a machine that
+      //   cannot open one.
+      if (path === "/v2/fs/pick-directory" && req.method === "POST") {
+        if (dirPickMode === "cancelled") return json({ picked: false, path: "" })
+        if (dirPickMode === "failed") {
+          return fail(503, "this machine has no folder chooser — type the path instead",
+            "directory_picker_unavailable")
+        }
+        return json({ picked: true, path: dirPickPath })
       }
 
       if (path === "/v2/sessions" && req.method === "POST") {

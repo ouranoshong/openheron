@@ -1126,6 +1126,44 @@ context（`fsx.WithProjectRoot`，`agentkit/fsx/context.go:25`）。两个消费
 ★ **root 只在轮次开始处读一次。** 项目在两轮之间搬了家，下一轮才认新位置；正在跑的那一轮
 守着自己开始时那个。
 
+### 3.16 ★ 在服务端那台机器上选目录
+
+★ **浏览器不会告诉网页选中的目录在哪儿。** File API 只给网页目录的**名字**和里面的路径；
+File System Access API 给的是一个只有名字的 handle。★ 绝对路径是网页**拿不到**的那一样，
+而它恰恰是项目根必须是的那一样。
+
+⇒ **于是问那台机器。** openheron 跑在用户自己的机器上，所以服务端去打开**操作系统自己的**
+选择器（就是人手动会打开的那个窗口），路径整条回来。
+
+| | |
+|---|---|
+| 叶子包 | `agentkit/dirpick` —— **叶子**：它认识进程、认识三个操作系统，不认识 openheron |
+| 端点 | `POST /v2/fs/pick-directory`（`api/v2_dirpick.go`） |
+| 客户端那一半 | `web/src/lib/projects.ts` 的 `directoryPick` —— 三种答案，一个纯函数 |
+
+★ **三个平台，三条命令。** Windows 让 PowerShell 去要
+`System.Windows.Forms.FolderBrowserDialog`，macOS 让 `osascript` 去 `choose folder`，
+Linux 让 `zenity` 或 `kdialog` —— 装了哪个用哪个，一个都没装就明说
+（`ErrUnavailable` → 503）。
+
+★ **Windows 那条命令有三件事必须做对**，每一件都是先踩过坑的：
+
+- ★ **脚本走 `-EncodedCommand`**（UTF-16LE 的 base64），不走 `-Command`。
+  `-Command` 会把命令行的其余部分**重新解析**一遍，于是带空格的路径会变成两个参数。
+- ★ **起始目录走环境变量**，不走命令行 —— 同一个理由，也让带引号的路径变成不了代码。
+- ★ **输出是 UTF-8，且不带 BOM。** 路径可以是键盘打得出来的任何字符，而带中文名的家目录
+  是常态而不是特例。
+
+★ **关掉选择器不是失败。** 那是人说「现在不要」的方式，所以它是**另一种答案**
+（`{"picked": false}`），而输入框里原来填的东西原地不动。
+
+★ **只有本机的调用者能打开它。** 选择器把窗口开在**跑服务端那台机器**的桌面上：远端的调用者
+看不见它，只会在别人的屏幕上留一个窗口。★ 这也是这个端点唯一需要的守卫 —— 这个请求会在
+宿主上起一个进程，而这件事不该是网络上任何人都能开口要的。
+
+★ **选择器是一道缝**（`Server.SetDirectoryPicker`）：真的那个会开一个**窗口**，而测试
+不该在它自己跑的那台机器上这么做。
+
 ## 4. 前端
 
 ### 4.1 三层纯函数
@@ -1462,7 +1500,7 @@ OPENHERON_TEST_PROXY=http://127.0.0.1:7890 go test ./agentkit/build -run TheProx
 ### 5.5 前端单元测试
 
 `cd web && bun run test:unit`（`bun test test/*.test.ts`）——
-**32 个测试文件、401 个用例**，覆盖 `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
+**32 个测试文件、405 个用例**，覆盖 `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
 `thinking.ts` / `turns.ts` / `approval.ts` / `settings-store.ts` / `projects.ts` 等层。
 
 ★ **客户端一条配置规则都不留了。** 它从前留了一整套：分区表的副本、tools/ 的文件白名单、
@@ -1490,7 +1528,7 @@ Bun 本身没有 `localStorage`，不 stub 会炸。
 
 ### 5.6 E2E
 
-`task test-e2e` → `playwright test`，**18 个 spec、228 个用例**：
+`task test-e2e` → `playwright test`，**18 个 spec、231 个用例**：
 `agents` `attachments` `chat` `compaction` `composer-autocomplete` `composer-meta` `history` `mcps`
 `motion` `multi-agent` `projects` `reattach` `scroll` `secrets` `session-busy` `session-events` `settings` `theme`。
 

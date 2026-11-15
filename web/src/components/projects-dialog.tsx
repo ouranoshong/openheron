@@ -1,4 +1,4 @@
-import { PencilIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import { FolderIcon, Loader2Icon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -78,11 +78,14 @@ export function ProjectsDialog({
   const createProject = useStore((s) => s.createProject)
   const renameProject = useStore((s) => s.renameProject)
   const deleteProject = useStore((s) => s.deleteProject)
+  const pickDirectory = useStore((s) => s.pickDirectory)
 
   const [name, setName] = useState("")
   const [root, setRoot] = useState("")
   const [refusal, setRefusal] = useState<string | undefined>()
   const [busy, setBusy] = useState(false)
+  // picking says the chooser is open on the server's machine.
+  const [picking, setPicking] = useState(false)
   // editing is the project whose name is open in an input; null is none.
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState("")
@@ -145,6 +148,28 @@ export function ProjectsDialog({
       return
     }
     setRefusal(undefined)
+  }
+
+  // chooseDirectory opens the file browser and puts the answer in the field.
+  //
+  // ★ The chooser opens **on the machine the server runs on**, so the answer
+  //   comes back over the wire — and the field keeps whatever was typed
+  //   until a directory is actually chosen.
+  const chooseDirectory = async () => {
+    if (picking) return
+    setPicking(true)
+    setRefusal(undefined)
+    const answer = await pickDirectory(root)
+    setPicking(false)
+    if (answer.kind === "picked") {
+      setRoot(answer.path)
+      return
+    }
+    if (answer.kind === "failed") {
+      setRefusal(answer.reason)
+    }
+    // ★ "cancelled" says nothing: the chooser was closed, and that is how a
+    //   person says "not now".
   }
 
   if (open === undefined) return null
@@ -260,17 +285,40 @@ export function ProjectsDialog({
             data-testid="project-name-input"
             className="h-8 text-sm"
           />
-          <Input
-            value={root}
-            onChange={(e) => {
-              setRoot(e.target.value)
-              setRefusal(undefined)
-            }}
-            placeholder="Root directory"
-            aria-label="Project root"
-            data-testid="project-root-input"
-            className="h-8 font-mono text-xs"
-          />
+          <div className="flex items-center gap-2">
+            <Input
+              value={root}
+              onChange={(e) => {
+                setRoot(e.target.value)
+                setRefusal(undefined)
+              }}
+              placeholder="Root directory"
+              aria-label="Project root"
+              data-testid="project-root-input"
+              className="h-8 font-mono text-xs"
+            />
+            {/* ★ The file browser. ★ It is the **server's** dialog: a browser
+                will not tell a page where a chosen directory lives, so the
+                machine the server runs on is the one that is asked. */}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void chooseDirectory()}
+              disabled={picking}
+              data-testid="project-pick-directory"
+              aria-label="Choose a directory"
+              title="Open the file browser and choose a directory"
+              className="h-8 shrink-0 gap-1.5 px-2 text-xs"
+            >
+              {picking ? (
+                <Loader2Icon aria-hidden="true" className="size-3.5 animate-spin" />
+              ) : (
+                <FolderIcon aria-hidden="true" className="size-3.5" />
+              )}
+              Browse
+            </Button>
+          </div>
           {refusal !== undefined && (
             <span className="text-destructive text-[11px]" data-testid="project-refusal">
               {refusal}

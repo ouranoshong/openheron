@@ -259,6 +259,11 @@ groupSessions(sessions, projects, scope) → Group[]
 就该有两个函数**（`projectNameError` / `projectRenameError`），而不是一个带开关的 ——
 一个带开关的函数，调用处就得记住「这次是哪一种」。
 
+★ **目录旁边有个文件夹按钮**：它调起**系统自己的**文件夹选择器，让用户不用手打绝对路径。
+⇒ ★ **浏览器给不了绝对路径**（`webkitRelativePath` 只是相对路径，`showDirectoryPicker()`
+只给名字），所以这个按钮走的是**服务端**：openheron 就在用户机器上，它去开那个窗口
+（`agentkit/dirpick` → `POST /v2/fs/pick-directory`）。详见 `docs/pitfalls.md` §15.3。
+
 ★ **Escape 归平台管**：对话框里的 Escape 是 Radix 在 document **捕获阶段**接的，
 React 的 `preventDefault` 来不及 ⇒ 唯一能拦住的是 `onEscapeKeyDown` 这个 prop
 （详见 `docs/pitfalls.md` §15.2）。
@@ -493,6 +498,7 @@ CI 里有一个 `LISTEN_ADDR=0.0.0.0:9000`，openheron 的监听地址就被改�
 | 22 | `agentkit/build/skill.go:198` `ResolveSkillsDir` | ★ **设计里没写，但不改就坏**：配置根进解析链，否则技能一个都加载不到（见 §8） | ★ 已落地 |
 | 23 | `web/src/lib/projects.ts:95` `groupSessions` + `web/src/components/sidebar.tsx` | 侧栏分组 + 新会话选项目 | ★ 已落地 |
 | 24 | `web/src/components/projects-dialog.tsx` `ProjectsButton` / `ProjectsDialog` | ★ **表的写面**：输入框下方的「+ Project」；新建 / 重命名 / 删除（见 §3.5） | ★ 已落地 |
+| 25 | `agentkit/dirpick` + `api/v2_dirpick.go` `v2PickDirectory` | ★ **写面之二**：目录旁的文件夹按钮 —— **服务端**调起系统自己的选择器（浏览器给不了绝对路径，见 §3.5）；只有本机调用者能用 | ★ 已落地 |
 
 ## 8. 落地顺序
 

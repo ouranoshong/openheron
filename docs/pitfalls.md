@@ -1008,3 +1008,36 @@ request after 10 seconds`），于是 E2E 里「另一个界面听见了审批�
 （改名字时拦住 Escape）与输入框上的 `preventDefault`。
 ★ **顺序**：Radix 的 `onEscapeKeyDown` → `preventDefault()` → Radix 再看
 `defaultPrevented` → 不关 ⇒ 输入框的 `onKeyDown`（取消改名）照常跑。
+
+### 15.3 ★ 浏览器不会告诉网页选中的目录在哪儿
+
+**症状**：项目根要填绝对路径，而「让用户选一个文件夹」这件事在网页里做不了 ——
+`<input type="file" webkitdirectory>` 给的 `webkitRelativePath` 是**相对于所选目录**的路径，
+`showDirectoryPicker()` 给的 handle 只有目录的**名字**。⇒ 网页拿不到绝对路径。
+
+**根因**：★ 这是浏览器的**安全模型**，不是可以绕过的 bug：网页被允许读用户**选定的**内容，
+但不被允许知道磁盘上东西的位置。
+
+★ 于是常见的「用前端选目录」的做法其实**填不出绝对路径**：把目录名塞进输入框，服务端会把它
+当成**相对于自己工作目录**的路径解析 —— 于是「C:\Users\零柒\Documents\myproject」变成
+「<服务端 cwd>\myproject」，**指向一个完全不同的地方**，而且不报错。
+
+**修法**：★ **问那台机器。** openheron 跑在用户自己的机器上，所以服务端去打开**操作系统
+自己的**选择器，路径整条回来（`agentkit/dirpick`，`POST /v2/fs/pick-directory`）。
+
+★ **Windows 那条命令有三处坑**，每一处都是先踩过才发现的：
+
+1. ★ **脚本必须走 `-EncodedCommand`**（UTF-16LE 的 base64）：`-Command` 会把命令行的其余
+   部分**重新解析**，带空格的路径会变成两个参数。
+2. ★ **起始目录必须走环境变量**：同上，而且带引号的路径不会变成代码。
+3. ★ **输出必须是 UTF-8 且不带 BOM**：路径可以是键盘打得出来的任何字符，带中文名的家目录
+   是常态。
+
+★ **关掉选择器不是失败**：那是人说「现在不要」的方式，是**另一种答案**，不是错误。
+
+★ **只有本机的调用者能打开它**：选择器把窗口开在**跑服务端那台机器**的桌面上，远端调用者
+看不见它；而且这个请求会在宿主上起一个进程，不该是网络上任何人都能开口要的。
+
+**现状**：`已修` —— `agentkit/dirpick`（三个平台三条命令 + `ErrUnavailable`）、
+`api/v2_dirpick.go` 的端点与本机判定、`web/src/lib/projects.ts` 的 `directoryPick`
+（三种答案的纯函数）。

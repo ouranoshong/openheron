@@ -37,6 +37,24 @@ export async function setDefaultRoot(agent: string): Promise<void> {
   if (!r.ok) throw new Error(`failed to set the default root ${agent}: ${r.status}`)
 }
 
+// ★ setDirPickMode chooses what the folder chooser answers.
+//
+// ★ The real chooser opens the operating system's dialog on the machine the
+//   server runs on, so the fake answers with a fixed path. ★ The three
+//   modes are the three answers the client has to tell apart: a directory
+//   was chosen, the chooser was closed, and the machine has none.
+export async function setDirPickMode(
+  mode: "picked" | "cancelled" | "failed",
+  path = "/tmp/picked-project",
+): Promise<void> {
+  const r = await fetch(`${FAKE_URL}/__fake/dir-pick`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode, path }),
+  })
+  if (!r.ok) throw new Error(`failed to set the dir pick mode ${mode}: ${r.status}`)
+}
+
 export async function clearFakeThreads(): Promise<void> {
   const r = await fetch(`${FAKE_URL}/__fake/threads/clear`, { method: "POST" })
   if (!r.ok) throw new Error(`failed to clear the fake threads: ${r.status}`)

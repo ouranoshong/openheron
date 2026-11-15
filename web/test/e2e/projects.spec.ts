@@ -6,6 +6,7 @@ import {
   openApp,
   resetBackend,
   sendMessage,
+  setDirPickMode,
   setProjectsMode,
 } from "./fixtures"
 
@@ -31,6 +32,7 @@ const PROJECT_ROOT_INPUT = '[data-testid="project-root-input"]'
 const PROJECT_CREATE = '[data-testid="project-create"]'
 const PROJECT_RENAME_INPUT = '[data-testid="project-rename-input"]'
 const PROJECT_REFUSAL = '[data-testid="project-refusal"]'
+const PROJECT_PICK = '[data-testid="project-pick-directory"]'
 
 interface FakeThreadMeta {
   threadId: string
@@ -229,4 +231,56 @@ test("单项目模式没有创建项目的入口", async ({ page }) => {
   //   picked — so the entry would open a list of projects the process
   //   cannot switch between. ★ It is a decoration, and it is not there.
   await expect(page.locator(PROJECTS_BUTTON)).toHaveCount(0)
+})
+
+// ★ The folder chooser.
+//
+// ★ The button next to the root field opens the **server's** dialog: the
+//   browser will not tell a page where a chosen directory lives, so the
+//   machine the server runs on is the one that is asked.
+
+test("文件夹按钮把选中的目录填进 root", async ({ page }) => {
+  await setProjectsMode("default")
+  await setDirPickMode("picked", "/tmp/picked-project")
+  await openApp(page)
+
+  await page.locator(PROJECTS_BUTTON).click()
+  await expect(page.locator(PROJECT_PICK)).toBeVisible()
+
+  await page.locator(PROJECT_PICK).click()
+
+  // ★ The path the chooser answered with is in the field, and the form is
+  //   ready to create the project.
+  await expect(page.locator(PROJECT_ROOT_INPUT)).toHaveValue("/tmp/picked-project")
+  await page.locator(PROJECT_NAME_INPUT).fill("Picked")
+  await expect(page.locator(PROJECT_CREATE)).toBeEnabled()
+})
+
+test("关掉选择器不是失败 —— 原来填的还在", async ({ page }) => {
+  await setProjectsMode("default")
+  await setDirPickMode("cancelled")
+  await openApp(page)
+
+  await page.locator(PROJECTS_BUTTON).click()
+  await page.locator(PROJECT_ROOT_INPUT).fill("/tmp/typed-by-hand")
+  await page.locator(PROJECT_PICK).click()
+
+  // ★ "Not now" is not a failure: the field keeps what was typed, and
+  //   nothing is said about it.
+  await expect(page.locator(PROJECT_ROOT_INPUT)).toHaveValue("/tmp/typed-by-hand")
+  await expect(page.locator(PROJECT_REFUSAL)).toHaveCount(0)
+})
+
+test("机器上没有选择器，理由写在那儿", async ({ page }) => {
+  await setProjectsMode("default")
+  await setDirPickMode("failed")
+  await openApp(page)
+
+  await page.locator(PROJECTS_BUTTON).click()
+  await page.locator(PROJECT_PICK).click()
+
+  // ★ The reason is the server's own sentence, and the form is still there:
+  //   the path can still be typed.
+  await expect(page.locator(PROJECT_REFUSAL)).toContainText("no folder chooser")
+  await expect(page.locator(PROJECT_ROOT_INPUT)).toBeVisible()
 })

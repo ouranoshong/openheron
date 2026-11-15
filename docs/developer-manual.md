@@ -1332,6 +1332,51 @@ package — the API layer only writes and reads the `projectId`.
 between rounds is picked up by the next one; the round that is running keeps the root it
 began with.
 
+### 3.16 ★ Choosing a directory on the server's machine
+
+★ **The browser cannot tell a page where a chosen directory lives.** The File API hands
+the page the **name** of the folder and the paths inside it; the File System Access API
+hands it a handle with a name and nothing else. ★ The absolute path is the one thing the
+page cannot get — and it is the one thing a project root has to be.
+
+⇒ **The machine is asked.** openheron runs on the user's machine, so the server opens the
+operating system's own chooser — the window a person would open by hand — and the path
+comes back whole.
+
+| | |
+|---|---|
+| The leaf | `agentkit/dirpick` — a **leaf**: it knows about processes and about three operating systems, and nothing about openheron |
+| The endpoint | `POST /v2/fs/pick-directory` (`api/v2_dirpick.go`) |
+| The client's half | `web/src/lib/projects.ts`'s `directoryPick` — the three answers, as a pure function |
+
+★ **Three platforms, three commands.** Windows asks PowerShell for
+`System.Windows.Forms.FolderBrowserDialog`, macOS asks `osascript` for `choose folder`,
+and Linux asks `zenity` or `kdialog` — the first one that is installed wins, and a
+machine with none is told so plainly (`ErrUnavailable` → 503).
+
+★ **Three things the Windows call has to get right**, and each of them is a bug that
+happened first:
+
+- ★ **The script travels as `-EncodedCommand`** (base64 of UTF-16LE), not as `-Command`.
+  `-Command` takes the rest of the command line and **re-parses** it, so a path with a
+  space in it arrives as two arguments.
+- ★ **The start directory travels in the environment**, not in the command line — for the
+  same reason, and so that a path with a quote in it cannot become code.
+- ★ **The output is UTF-8 without a byte-order mark.** A path may hold any character the
+  keyboard can produce, and a home directory with a Chinese name is the ordinary case.
+
+★ **A closed chooser is not a failure.** It is how a person says "not now", so it is its
+own answer (`{"picked": false}`), and the field keeps what was typed.
+
+★ **Only a local client may open it.** The chooser puts a window on the desktop of the
+machine that runs the server: a remote caller would not see it, and would leave a window
+behind on somebody else's screen. ★ It is also the only guard the endpoint needs — the
+request starts a process on the host, and that must not be something anybody on the
+network can ask for.
+
+★ **The chooser is a seam** (`Server.SetDirectoryPicker`): the real one opens a **window**,
+and a test may not do that on the machine it runs on.
+
 ## 4. The frontend
 
 ### 4.1 The pure layers
@@ -1715,7 +1760,7 @@ the contract on its own — the extractor does not read one language to help the
 
 ### 5.5 Frontend unit tests
 
-`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **32 test files, 401
+`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **32 test files, 405
 cases**, covering the pure layers: `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
 `thinking.ts` / `turns.ts` / `approval.ts` / `settings-store.ts` / `projects.ts` and friends.
 
@@ -1750,7 +1795,7 @@ do not touch" assertions.
 
 ### 5.6 E2E
 
-`task test-e2e` → `playwright test`, **18 specs, 228 cases**: `agents` `attachments` `chat`
+`task test-e2e` → `playwright test`, **18 specs, 231 cases**: `agents` `attachments` `chat`
 `compaction` `composer-autocomplete` `composer-meta` `history` `mcps` `motion` `multi-agent`
 `projects` `reattach` `scroll` `secrets` `session-busy` `session-events` `settings` `theme`.
 

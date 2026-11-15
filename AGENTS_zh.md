@@ -172,6 +172,12 @@
 ## 其它约定
 
 - **不要在 API 层复制业务装配逻辑** —— 需要读「某个 agent 的生效工具表」时，由 `agent.Builder` 暴露只读查询，不要重算一遍 `Table.Blocked` / `Policy.TierOf`。
+- ★ **用户选的目录是服务端的事。** 浏览器不会告诉网页选中的目录在哪儿 ——
+  `webkitRelativePath` 是相对于它的路径，`showDirectoryPicker()` 只给一个名字。
+  ★ openheron 跑在用户自己的机器上，所以由服务端去打开**操作系统自己的**选择器
+  （`agentkit/dirpick` → `POST /v2/fs/pick-directory`），绝对路径整条回来。
+  ★ 由此有两条规矩：选择器**只允许本机调用**（窗口开在服务端的桌面上，而且这个请求会在
+  宿主上起一个进程），以及**关掉选择器不是失败** —— 那是人说「现在不要」。
 - **配置根解析只有三级**：显式 `--config-root` → `$OPENHERON_CONFIG_ROOT` →
   `<openheron-root>/configs`（不存在就创建）。大本营本身是 `--openheron-root` →
   `$OPENHERON_ROOT` → `~/.openheron`。**不向上查找祖先目录** ——

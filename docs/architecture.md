@@ -47,6 +47,7 @@ state lands in the file store (`storage/filestore`), and approvals resume from a
   ──────────────────────────────────────────────────────────────────────────
     fsx                  the filesystem backend
     agentkit/shell       which shell the execute tool runs commands with
+    agentkit/dirpick     the operating system's own folder chooser
     tools/*.yaml         the external tools
     mcps/                the MCP servers
     skills/              the skills
@@ -494,6 +495,7 @@ counting `grep '"github.com/ouranoshong/openheron/'` hits per package:
 | | `webui` | none | Embedded frontend assets |
 | | `agentkit/fsx` | none | **The filesystem backend**: a bounded local backend — writes confined to the **round's** project root, ignore rules, result caps (see [tools-design.md](tools-design.md) — that document is Chinese only) |
 | | `agentkit/shell` | none | **Which shell runs the commands**: it picks a POSIX shell (or `cmd.exe`) at startup, and it is also the sentence the `execute` tool's description tells the model — the dialect and the runner have to be the same answer |
+| | `agentkit/dirpick` | none | **The operating system's own folder chooser**: the browser will not tell a page where a chosen directory lives, so the machine the server runs on is the one that is asked |
 | | `agentkit/imaging` | none | Compresses uploaded pictures, derives the hashed file names and the thumbnails |
 | | `agentkit/templates` | none | **The configuration templates**: the files `openheron init` writes and the config editor scaffolds. ★ It is a leaf so that both the configuration layer and the command layer can read the **same** file — a copy would drift |
 | **L1** | `agentkit/spec/decl` | none | **Pure declarations** (where the yaml tags live) **and the shared vocabulary** — the built-in tool names and the MCP namespace (§5.1) |
@@ -532,7 +534,7 @@ The same layering, top to bottom, is the direction of the imports:
        agentkit/spec            config load · validate · reload · write gates
        │
   L0   contract  message  helpers  persist  approval  agentkit/obs
-       llm/common  webui  agentkit/fsx  agentkit/shell  agentkit/imaging  agentkit/templates
+       llm/common  webui  agentkit/fsx  agentkit/shell  agentkit/dirpick  agentkit/imaging  agentkit/templates
 ```
 
 The table counts **internal** dependencies only — the third-party packages are not in it.

@@ -11,6 +11,8 @@
 //	The grouping is the one piece of logic the sidebar needs, and a piece of
 //	logic that cannot be run without a browser cannot be tested.
 
+import type { DirectoryPick } from "@/lib/types"
+
 /** One project, as the API shows it. */
 export interface ProjectSummary {
   id: string
@@ -252,4 +254,23 @@ export function projectRenameError(name: string): string | undefined {
 export function projectRootError(root: string): string | undefined {
   if (root.trim() === "") return "The root must not be empty."
   return undefined
+}
+
+/**
+ * directoryPick reads the server's answer to a folder chooser.
+ *
+ * ★ Three outcomes, and the middle one is the interesting one: a chooser
+ *   that was **closed** is not a failure — it is how a person says "not
+ *   now" — so it must not be reported as one.
+ *
+ * ★ "Picked" without a path is a contradiction, and the server would be
+ *   wrong: the client says so rather than filling in an empty root.
+ */
+export function directoryPick(answer: { picked: boolean; path?: string }): DirectoryPick {
+  if (!answer.picked) return { kind: "cancelled" }
+  const path = (answer.path ?? "").trim()
+  if (path === "") {
+    return { kind: "failed", reason: "The server did not say which directory." }
+  }
+  return { kind: "picked", path }
 }

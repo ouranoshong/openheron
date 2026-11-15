@@ -72,6 +72,12 @@ type Server struct {
 	// logLevelFn reports the log level in effect. A function because the level
 	// can move without the file changing — an env override, or a reload.
 	logLevelFn func() string
+	// pickDirFn opens the folder chooser. Nil means the operating system's
+	// own.
+	//
+	// ★ It is a seam because the real one opens a **window** — on the
+	//   machine the tests run on, which is not a thing a test may do.
+	pickDirFn func(ctx context.Context, start string) (string, error)
 	// log is the transport's logger. Nil is accepted: tests build a server
 	// without one and the lines are dropped.
 	log *slog.Logger

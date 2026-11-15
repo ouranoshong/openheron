@@ -14,7 +14,7 @@ import {
 import { readActiveThreadId, writeActiveThreadId } from "@/lib/active-thread"
 import { attachTarget, busyElsewhere } from "@/lib/attach"
 import { closeAllOpenParts, type AgEvent } from "@/lib/events"
-import { resolveActiveProject } from "@/lib/projects"
+import { directoryPick, resolveActiveProject } from "@/lib/projects"
 import { applySessionFact as foldSessionFact, type SessionFact } from "@/lib/session-events"
 import {
   emptyConversation,
@@ -188,6 +188,18 @@ export const useStore = create<StoreState>((set, get) => ({
       return undefined
     } catch (e) {
       return describeError(e)
+    }
+  },
+
+  async pickDirectory(start) {
+    try {
+      const answer = await api.pickDirectory(start.trim())
+      return directoryPick(answer)
+    } catch (e) {
+      // ★ The reason is the server's own sentence: the machine has no
+      //   chooser, or the chooser failed, and the client keeps no second
+      //   copy of those rules.
+      return { kind: "failed", reason: describeError(e) }
     }
   },
 

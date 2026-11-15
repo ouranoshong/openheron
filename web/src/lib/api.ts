@@ -356,6 +356,19 @@ export const api = {
   deleteProject: (id: string) =>
     call<{ id: string }>(`/v2/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
+  // pickDirectory opens the operating system's folder chooser.
+  //
+  // ★ It is the **server's** dialog: a browser will not tell a page where a
+  //   chosen directory lives — it hands the page the folder's name and the
+  //   paths inside it — and the absolute path is the one thing a project
+  //   root has to be. ★ The server runs on the user's machine, so the
+  //   machine is the one that is asked.
+  pickDirectory: (start: string) =>
+    call<{ picked: boolean; path: string }>("/v2/fs/pick-directory", {
+      method: "POST",
+      body: JSON.stringify({ start }),
+    }),
+
   createThread: (agentId?: string, projectId?: string) =>
     call<ThreadMeta>("/v2/sessions", {
       method: "POST",

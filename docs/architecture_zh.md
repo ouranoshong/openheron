@@ -40,6 +40,7 @@ checkpoint（`approval` + `storage`）恢复。
   ──────────────────────────────────────────────────────────────────────────
     fsx                  the filesystem backend
     agentkit/shell       which shell the execute tool runs commands with
+    agentkit/dirpick     the operating system's own folder chooser
     tools/*.yaml         the external tools
     mcps/                the MCP servers
     skills/              the skills
@@ -361,6 +362,7 @@ openheron 的篇幅大部分在这里 —— 边界比能力更决定一个 Agen
 | | `webui` | 无 | 嵌入式前端资源 |
 | | `agentkit/fsx` | 无 | **文件系统后端**：写收敛在**本轮**的项目根、忽略规则、结果上限（见 [tools-design.md](tools-design.md)，只有中文） |
 | | `agentkit/shell` | 无 | **哪个 shell 跑命令**：启动时挑一个 POSIX shell（或者 `cmd.exe`），它同时是 `execute` 工具描述里告诉模型的那句话 —— 方言与执行必须是同一个答案 |
+| | `agentkit/dirpick` | 无 | **操作系统自己的文件夹选择器**：浏览器不会告诉网页选中的目录在哪儿，于是问跑服务端的那台机器 |
 | | `agentkit/imaging` | 无 | 上传图片的压缩、哈希文件名与缩略图 |
 | | `agentkit/templates` | 无 | **配置模板**：`openheron init` 写下的文件、编辑器给的脚手架。是叶子包，配置层与命令层才能读到同一个文件 |
 | **L1** | `agentkit/spec/decl` | 无 | 纯声明结构体（yaml tag 集中处）与两端共用的词汇 —— 内置工具名、MCP 命名空间（§5.1） |
@@ -399,7 +401,7 @@ openheron 的篇幅大部分在这里 —— 边界比能力更决定一个 Agen
        agentkit/spec            config load · validate · reload · write gates
        │
   L0   contract  message  helpers  persist  approval  agentkit/obs
-       llm/common  webui  agentkit/fsx  agentkit/shell  agentkit/imaging  agentkit/templates
+       llm/common  webui  agentkit/fsx  agentkit/shell  agentkit/dirpick  agentkit/imaging  agentkit/templates
 ```
 
 MCP 路径带进来两个第三方包：`github.com/cloudwego/eino-ext/components/tool/mcp`（eino

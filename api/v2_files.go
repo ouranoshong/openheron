@@ -82,6 +82,11 @@ func (s *Server) registerV2Routes() {
 	h.PATCH("/v2/projects/:id", s.v2UpdateProject)
 	h.DELETE("/v2/projects/:id", s.v2DeleteProject)
 
+	// ★ The folder chooser: the server opens the operating system's own
+	//   dialog, because the browser will not tell a page where a chosen
+	//   directory lives.
+	h.POST("/v2/fs/pick-directory", s.v2PickDirectory)
+
 	h.POST("/v2/run", s.v2Run)
 
 	h.GET("/v2/skills", s.v2Skills)

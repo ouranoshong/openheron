@@ -2,7 +2,7 @@ import type { RunsView, ThreadMeta } from "@/lib/api"
 import type { AgEvent } from "@/lib/events"
 import type { ProjectScope, ProjectSummary } from "@/lib/projects"
 import type { SessionFact } from "@/lib/session-events"
-import type { ConversationState, Interrupt } from "@/lib/types"
+import type { ConversationState, DirectoryPick, Interrupt } from "@/lib/types"
 
 export interface Attachment {
   name: string
@@ -62,6 +62,12 @@ export interface StoreState {
   createProject(name: string, root: string): Promise<string | undefined>
   renameProject(id: string, name: string): Promise<string | undefined>
   deleteProject(id: string): Promise<string | undefined>
+  // pickDirectory opens the operating system's folder chooser.
+  //
+  // ★ It answers with three outcomes, not two: a directory was chosen, the
+  //   chooser was closed, or the machine could not open one. ★ A closed
+  //   chooser is not a failure — it is how a person says "not now".
+  pickDirectory(start: string): Promise<DirectoryPick>
 
   // ── actions ────────────────────────────────────────────────────────────
   refreshList(): Promise<void>

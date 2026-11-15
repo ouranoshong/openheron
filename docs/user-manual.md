@@ -1628,6 +1628,11 @@ The dialog is the whole write surface of the table:
 - **Create** — a name (optional; the directory's own name is used when you
   leave it empty) and a root directory (required, and it must not be empty).
   The server turns the root into an absolute path and takes it as it is.
+  ★ **Browse** — the button next to the root field opens **your system's own
+  folder chooser**, the window you would open by hand, and puts the directory
+  you pick into the field. ★ The window opens **on the machine the server
+  runs on**, so a browser on another machine cannot use it — and closing it
+  without choosing is not an error: what you typed stays where it is.
 - **Rename** — the pencil on the project row. Only the name changes; the
   directory stays where it is. ★ The name is **required** here — the project
   already has one, and an empty name would take it away; the dialog says so and
@@ -1759,6 +1764,7 @@ from here. Both answers are `403`.
 | POST | `/v2/projects` | Register a project (`{"name": "…", "root": "…"}`) |
 | PATCH | `/v2/projects/:id` | Rename a project, move it, or reorder it |
 | DELETE | `/v2/projects/:id` | Remove a project — its conversations fall back to "no project" |
+| POST | `/v2/fs/pick-directory` | Open the system's folder chooser on the server's machine (`{"start": "…"}`) |
 | GET | `/v2/commands` | The slash-command list |
 | POST | `/v2/run` | **SSE entry point**: ask a question, or answer an approval (see §6.7) |
 | GET | `/v2/skills` | The skill list |

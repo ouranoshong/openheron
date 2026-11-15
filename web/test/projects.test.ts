@@ -4,6 +4,7 @@ import {
   NO_PROJECT_GROUP,
   PINNED_GROUP,
   defaultProject,
+  directoryPick,
   groupSessions,
   projectNameError,
   projectRenameError,
@@ -181,5 +182,29 @@ describe("projectRootError", () => {
     // ★ The client must not keep a second copy of the rules: the server
     //   resolves the path, and it is the one that says no.
     expect(projectRootError("/tmp/does-not-exist")).toBeUndefined()
+  })
+})
+
+describe("directoryPick", () => {
+  test("选中了就是那条路径", () => {
+    const got = directoryPick({ picked: true, path: "/tmp/picked" })
+    expect(got).toEqual({ kind: "picked", path: "/tmp/picked" })
+  })
+
+  test("关掉选择器不是失败", () => {
+    // ★ "Not now" is how a person says it, and the client must not report
+    //   it as an error.
+    const got = directoryPick({ picked: false, path: "" })
+    expect(got).toEqual({ kind: "cancelled" })
+  })
+
+  test("说选了却没说是哪个，就是服务端说错了", () => {
+    const got = directoryPick({ picked: true, path: "  " })
+    expect(got.kind).toBe("failed")
+  })
+
+  test("路径两边的空格去掉", () => {
+    const got = directoryPick({ picked: true, path: "  /tmp/picked \n" })
+    expect(got).toEqual({ kind: "picked", path: "/tmp/picked" })
   })
 })
