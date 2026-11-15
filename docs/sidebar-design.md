@@ -115,7 +115,7 @@ model 就在一个目录被告知去另一个目录读写。
 | `@` 提及选择器 | 同上 |
 
 ★ **屏幕上的会话说了算**：打开一个会话，它的项目就是当前项目
-（`web/src/lib/store/actions.ts:277` `openSession`，以及 `web/src/lib/store/actions.ts:239`
+（`web/src/lib/store/actions.ts:317` `openSession`，以及 `web/src/lib/store/actions.ts:279`
 `refreshList` —— 启动时会话比列表先到，那一刻它还不知道自己属于哪个项目）。
 
 ★ **会话的归属不可改**（`api/v2_sessions.go:38` 的 `ProjectID` 只在创建时读，`PATCH`
@@ -149,10 +149,10 @@ model 就在一个目录被告知去另一个目录读写。
 
 | 项 | 做什么 | 现状 |
 |---|---|---|
-| **New conversation** | 在这个项目里新起一段对话 | ★ 有：`web/src/lib/store/actions.ts:168` `startThreadInProject` |
-| **Rename project** | 就地改项目的名字 | ★ 有：`web/src/lib/store/actions.ts:194` `renameProject`；★ 名字**必填**（`web/src/lib/projects.ts:322` `projectRenameError`） |
-| **Change folder** | 改项目指向哪个目录 | ★ 接口有（`api/v2_projects.go:177` 收 `root`），客户端的动作是 `web/src/lib/store/actions.ts:200` `updateProject` |
-| **Remove project** | 从地图上摘掉这个项目 | ★ 有：`api/v2_projects.go:225` + `web/src/lib/store/actions.ts:213` `deleteProject` |
+| **New conversation** | 在这个项目里新起一段对话 | ★ 有：`web/src/lib/store/actions.ts:208` `startThreadInProject` |
+| **Rename project** | 就地改项目的名字 | ★ 有：`web/src/lib/store/actions.ts:234` `renameProject`；★ 名字**必填**（`web/src/lib/projects.ts:322` `projectRenameError`） |
+| **Change folder** | 改项目指向哪个目录 | ★ 接口有（`api/v2_projects.go:177` 收 `root`），客户端的动作是 `web/src/lib/store/actions.ts:240` `updateProject` |
+| **Remove project** | 从地图上摘掉这个项目 | ★ 有：`api/v2_projects.go:225` + `web/src/lib/store/actions.ts:253` `deleteProject` |
 
 ★ **单项目模式不给「改目录」和「移除」**：进程只服务一个目录，而那个目录就是作用域 ——
 挪走或删掉它，等于改了进程服务的东西。

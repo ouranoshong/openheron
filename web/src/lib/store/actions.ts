@@ -12,7 +12,7 @@ import {
   type WorkspaceFile,
 } from "@/lib/api"
 import { readActiveThreadId, writeActiveThreadId } from "@/lib/active-thread"
-import { attachTarget, busyElsewhere } from "@/lib/attach"
+import { attachTarget, busyElsewhere, recoveryPlan } from "@/lib/attach"
 import { closeAllOpenParts, type AgEvent } from "@/lib/events"
 import { directoryPick, projectSwitch, resolveActiveProject } from "@/lib/projects"
 import { applySessionFact as foldSessionFact, type SessionFact } from "@/lib/session-events"
@@ -82,6 +82,46 @@ const SESSION_REOPEN_MS = 1000
 // ★ It is longer than the reopen: the server said no, and asking again
 //   every second would be a loop rather than a retry.
 const SESSION_RETRY_MS = 5000
+
+// RECOVER_WAIT_MS is how long the recovery waits between two reads of the
+// ledger.
+//
+// ★ A second is long enough not to hammer the server and short enough that
+//   the approval reaches the card the moment the round raises it.
+const RECOVER_WAIT_MS = 1000
+
+// RECOVER_DEADLINE_MS is how long the recovery keeps looking for the end of
+// a round.
+//
+// ★ The recovery is a safety net, not a lease: a round that never ends must
+//   not keep the client reading the ledger forever. ★ Past the deadline the
+//   recovery stops — the transcript is still there, and the next scan or a
+//   reload picks the approval up.
+const RECOVER_DEADLINE_MS = 10 * 60 * 1000
+
+// RECOVER_ATTACH_LIMIT is how many times the recovery attaches to a round
+// before it settles for waiting.
+//
+// ★ Three covers the ordinary case: the first attach is the one that
+//   follows the cut, and the two after it cover a round that was cut more
+//   than once. ★ Past the limit the recovery waits instead — an attach
+//   that keeps being cut would keep replaying the round's events into a
+//   client that is already too slow to read them.
+const RECOVER_ATTACH_LIMIT = 3
+
+// recovering is the set of sessions whose cut round is being recovered.
+//
+// ★ One recovery per session: two of them would read the same transcript
+//   twice and race each other into the store.
+const recovering = new Set<string>()
+
+// recoverAttempts counts the attaches a session's recovery has made.
+//
+// ★ It is not reset by the recovery itself: the chain is
+//   "attach → cut → recover → attach", and a counter that restarted with
+//   every recovery would never reach the limit. ★ It is reset when a round
+//   is over — the next round starts fresh.
+const recoverAttempts = new Map<string, number>()
 
 // releaseRun ends the local stream and starts the attach that waited for
 // it.
@@ -565,17 +605,21 @@ export const useStore = create<StoreState>((set, get) => ({
           //   still going and come back to it if it is.
           void get().reattach(k, message)
         },
-        onDone: () => {
+        onDone: (terminal) => {
           releaseRun()
           lastSentAttachments = []
-          // ★ The stream ended without a terminal frame: the connection
-          //   died, not the run. The server archives the turn, not the
-          //   stream — so come back to the run instead of losing the
-          //   answer. A run that finished (or failed) left the
-          //   conversation out of "running", and those need no rescue.
-          if (get().sessions[threadId]?.convo?.status === "running") {
-            void get().reattach(threadId, "the connection dropped before the run finished")
-            return
+          // ★ The stream ended without the round's last frame: the
+          //   connection died, not the run. The server archives the turn,
+          //   not the stream — so come back to the run instead of losing
+          //   the answer.
+          if (!terminal) {
+            const started = get().sessions[threadId]?.convo?.runId
+            if (started) {
+              void get().reattach(threadId, "the connection dropped before the run finished")
+              return
+            }
+            // ★ The stream died before the round even started: there is
+            //   nothing to come back to.
           }
           // ★ The stream ended; the session may still be busy — another
           //   surface's turn may be running. The scan decides.
@@ -597,14 +641,22 @@ export const useStore = create<StoreState>((set, get) => ({
   //   - over        → the transcript is the truth, so load it;
   //   - unknown     → report the error, because there is nothing better
   //     to say.
-  async reattach(id: string, message: string) {
+  //
+  // ★ And an attach that is cut too does not end the story: the recovery
+  //   (recoverRound) takes over, because the approval the round raises is
+  //   still waiting — the cut only took the stream away.
+  async reattach(id: string, message: string, runId?: string) {
     // ★ One stream at a time. ★ A pending attach may have taken the slot
     //   already — the session's channel announced a round while this
     //   stream was ending — and two streams would fight over the run.
     if (run) return
     const entry = get().sessions[id]
-    const runId = entry?.convo?.runId
-    if (!runId) {
+    // ★ The run to follow. ★ The caller may name it: the recovery knows
+    //   which run the ledger says is live, and that is the authority — the
+    //   conversation's own run id is what this surface saw last, which is
+    //   not the same thing.
+    const target = runId ?? entry?.convo?.runId
+    if (!target) {
       get().loadError(id, message)
       return
     }
@@ -617,7 +669,7 @@ export const useStore = create<StoreState>((set, get) => ({
       return
     }
     const live = runs.items.find(
-      (r) => r.runId === runId && (r.state === "running" || r.state === "starting"),
+      (r) => r.runId === target && (r.state === "running" || r.state === "starting"),
     )
     if (!live) {
       // ★ The run is over. The transcript holds the finished turn, and it
@@ -628,7 +680,7 @@ export const useStore = create<StoreState>((set, get) => ({
 
     setCurrentRunKey(id)
     run = runStream(
-      { threadId: id, runId },
+      { threadId: id, runId: target },
       {
         onEvent: (ev) => get().applyEvent(id, ev as AgEvent),
         onError: (msg, code) => {
@@ -641,12 +693,84 @@ export const useStore = create<StoreState>((set, get) => ({
           }
           get().loadError(id, msg)
         },
-        onDone: () => {
+        onDone: (terminal) => {
           releaseRun()
+          if (!terminal) {
+            // ★ The stream was cut: the round may still be running, and the
+            //   approval it raises has to reach the card. ★ The recovery
+            //   asks the ledger, and the transcript answers.
+            void get().recoverRound(id)
+            return
+          }
           void get().refreshList()
         },
       },
     )
+  },
+
+  // recoverRound comes back to a round whose stream ended without the
+  // round's last frame.
+  //
+  // ★ The wire cannot tell the two endings apart: a round that finished and
+  //   a stream that was cut both close the response. ★ The server writes the
+  //   round's last frame for the first one and deliberately does not for the
+  //   second (transport/transport.go) — a last frame says "this is
+  //   everything the run had to say", and an approval raised after that
+  //   point would stay invisible until the user reloaded the page.
+  //
+  //   ★ That is the bug this action exists for: the card that only shows up
+  //   after a refresh.
+  //
+  // ★ So the recovery asks the ledger, and the ledger is the truth: a live
+  //   run means the round is still going, and no live run means it is over
+  //   and the transcript holds the approvals it raised.
+  //
+  // ★ The transcript is where the answer comes from. ★ The stream is the one
+  //   thing that cannot be asked: it is the thing that was cut.
+  async recoverRound(id: string) {
+    if (recovering.has(id)) return
+    recovering.add(id)
+    try {
+      const deadline = Date.now() + RECOVER_DEADLINE_MS
+      for (;;) {
+        // ★ The user moved on: a card for a session nobody is looking at is
+        //   a card nobody answers, and the session is read from the
+        //   transcript when they come back.
+        if (get().activeId !== id) return
+        let runs: RunsView
+        try {
+          runs = await api.listRuns(id)
+        } catch {
+          // ★ A ledger that cannot be read says nothing. The conversation
+          //   keeps what it has.
+          return
+        }
+        const plan = recoveryPlan(runs)
+        if (plan.kind === "transcript") {
+          // ★ The round is over: the transcript holds what it raised, the
+          //   approval above all. ★ The counter goes with it — the next
+          //   round starts fresh.
+          recoverAttempts.delete(id)
+          await get().reloadHistory(id)
+          return
+        }
+        const attempts = recoverAttempts.get(id) ?? 0
+        if (attempts < RECOVER_ATTACH_LIMIT) {
+          // ★ The round is still going: watch it. ★ The attach's own end
+          //   comes back here, and by then the round is usually over.
+          recoverAttempts.set(id, attempts + 1)
+          void get().reattach(id, "the connection dropped before the round finished", plan.runId)
+          return
+        }
+        // ★ The attach did not help — the stream was cut again. ★ Wait for
+        //   the round to end: the ledger says so, and the transcript holds
+        //   the answer.
+        if (Date.now() >= deadline) return
+        await new Promise<void>((r) => setTimeout(r, RECOVER_WAIT_MS))
+      }
+    } finally {
+      recovering.delete(id)
+    }
   },
 
   // applyScan records what the run ledger says about the session.
@@ -730,8 +854,14 @@ export const useStore = create<StoreState>((set, get) => ({
           }
           get().loadError(id, msg)
         },
-        onDone: () => {
+        onDone: (terminal) => {
           releaseRun()
+          if (!terminal) {
+            // ★ The stream was cut: the round may still be running, and the
+            //   approval it raises has to reach the card.
+            void get().recoverRound(id)
+            return
+          }
           // ★ The transcript is the truth once the run is over, and this
           //   surface never owned the turn: it watched it. The replayed
           //   events give way to the recorded ones.
@@ -850,8 +980,14 @@ export const useStore = create<StoreState>((set, get) => ({
           }
           get().loadError(id, msg)
         },
-        onDone: () => {
+        onDone: (terminal) => {
           releaseRun()
+          if (!terminal) {
+            // ★ The stream was cut: the round may still be running, and the
+            //   approval it raises has to reach the card.
+            void get().recoverRound(id)
+            return
+          }
           void get().reloadHistory(id)
           void get().scanBusy(id)
           void get().refreshList()
@@ -928,8 +1064,17 @@ export const useStore = create<StoreState>((set, get) => ({
           releaseRun()
           get().loadError(id, message)
         },
-        onDone: () => {
+        onDone: (terminal) => {
           releaseRun()
+          if (!terminal) {
+            // ★ The stream was cut: the round that follows the answer may
+            //   still be running, and the approval it raises has to reach
+            //   the card. ★ This path used to be missing — the round after
+            //   an answer had no way back, so its approval stayed invisible
+            //   until the page was reloaded.
+            void get().reattach(id, "the connection dropped before the round finished")
+            return
+          }
           void get().refreshList()
         },
       },

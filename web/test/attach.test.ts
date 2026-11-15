@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test"
 
-import { attachTarget, busyElsewhere } from "../src/lib/attach"
+import { attachTarget, busyElsewhere, recoveryPlan } from "../src/lib/attach"
+import type { RunsView } from "../src/lib/api"
 
 const RUNS = { items: [], activeRunId: "run-1" }
+const T1 = "2026-10-30T10:00:00Z"
 
 describe("the attach target", () => {
   // A session with no live turn has nothing to attach to. The scan is the
@@ -42,5 +44,30 @@ describe("the busy flag", () => {
 
   test("no active run means the session is free", () => {
     expect(busyElsewhere({ items: [] }, undefined)).toBe(false)
+  })
+})
+
+describe("the recovery plan", () => {
+  // ★ The wire cannot tell a finished round and a cut stream apart, so the
+  //   plan comes from the ledger.
+  test("a live run means the round is still going — watch it", () => {
+    expect(recoveryPlan(RUNS)).toEqual({ kind: "watch", runId: "run-1" })
+  })
+
+  // ★ No live run means the round is over: the transcript holds the
+  //   approvals it raised.
+  test("no active run means the round is over — read the transcript", () => {
+    expect(recoveryPlan({ items: [] })).toEqual({ kind: "transcript" })
+  })
+
+  // ★ A run that waits for an approval is over as far as the ledger is
+  //   concerned — the answer starts a new run.
+  test("a run that waits for an approval is over", () => {
+    const runs: RunsView = {
+      items: [
+        { runId: "run-1", state: "waiting_approval", kind: "query", epoch: 1, startedAt: T1 },
+      ],
+    }
+    expect(recoveryPlan(runs)).toEqual({ kind: "transcript" })
   })
 })

@@ -7,7 +7,10 @@ import { createHash } from "node:crypto"
 //   attach path needs the run's events to replay.
 export interface FakeRun {
   runId: string
-  state: "starting" | "running" | "completed" | "failed"
+  // ★ "waiting_approval" is the state a run that stopped to ask the user a
+  //   question ends in. ★ It is terminal — the answer starts a new run — so
+  //   the scan does not report it as the live one.
+  state: "starting" | "running" | "completed" | "failed" | "waiting_approval"
   kind: "query" | "resume"
   startedAt: string
   endedAt?: string
@@ -113,6 +116,11 @@ interface RawInterrupt {
   reason: string
   message?: string
   toolCallId?: string
+  // ★ metadata is what the wire carries beside the interrupt: the tool's
+  //   name and its arguments, so the card can say what it is about.
+  metadata?: { toolName?: string; arguments?: unknown }
+  // ★ subagentRunId names the agent that raised it.
+  subagentRunId?: string
 }
 
 interface RunEvent {
@@ -210,6 +218,24 @@ function runError(code: string, message: string): RunEvent {
   return { type: "RUN_ERROR", code, message }
 }
 
+// pendingsFrom turns the interrupts of a finished frame into the pending
+// approvals the session holds.
+//
+// ★ The frame is what the client reads; the pending approval is what the
+//   transcript answers with. ★ A cut stream never carries the frame, so an
+//   approval can be on the server's side without ever being on the wire —
+//   and the recovery reads it from here.
+function pendingsFrom(hits: RawInterrupt[]): PendingApproval[] {
+  return hits.map((hit) => ({
+    interruptId: hit.id,
+    reason: hit.reason,
+    message: hit.message,
+    toolCallId: hit.toolCallId,
+    toolName: hit.metadata?.toolName ?? "write_file",
+    subagentRunId: hit.subagentRunId,
+  }))
+}
+
 const USAGE: Usage = {
   promptTokens: 100,
   completionTokens: 50,
@@ -280,6 +306,23 @@ export const SCENARIOS = {
   // busySession: the session already has a live turn, so a second run is
   // refused with 409 session_busy — the cross-client case.
   busySession: ["A"],
+
+  // ★ cutApproval: the round's stream is cut **before** its last frame, and
+  //   the round ends with an approval. ★ The approval never reaches the
+  //   wire — it stays on the server's side — which is what the real server
+  //   does when a subscriber falls behind (agentkit/run/publish.go): the
+  //   stream is cut, not finished, and no terminal frame is written for it.
+  cutApproval: ["A"],
+
+  // ★ cutResume: the query round ends with an approval as usual, and the
+  //   round that follows the answer is cut the same way. ★ This is the case
+  //   the user reported: the approval after the answer never showed up, and
+  //   only a page reload brought it back.
+  cutResume: ["A"],
+
+  // ★ cutLive: the round's stream is cut and the round goes on — it raises
+  //   its approval a moment later. ★ The approval is never on the wire.
+  cutLive: ["A"],
 } as const
 
 export type ScenarioName = keyof typeof SCENARIOS
@@ -778,6 +821,9 @@ function eventsFor(
 ): RunEvent[] {
   switch (scenario) {
     case "approvalLive":
+    // ★ cutResume: the query round is an ordinary approval round — the cut
+    //   happens in the round that follows the answer.
+    case "cutResume":
     case "approval":
       return [
         started(threadId, runId),
@@ -1848,6 +1894,11 @@ export function startFakeServer(port = 0): FakeServer {
     //   a run that is not live.
     const resumedStaysLive = scenario === "approvalLive"
 
+    // ★ cutLive: the round goes on after its stream was cut — it raises its
+    //   approval a moment later. ★ The attach has to wait for the round:
+    //   the round is what ends, not the connection.
+    const cutLive = scenario === "cutLive"
+
     if (!body.threadId) {
       return fail(400, "threadId is required; create the session with POST /v2/sessions first", "invalid_body")
     }
@@ -1880,16 +1931,28 @@ export function startFakeServer(port = 0): FakeServer {
       const msg: FakeMessage = { id: `m-${++seq}`, role: "assistant", content: "" }
       thread.messages.push(msg)
       const events = eventsFor("simple", thread.threadId, MARKER_A, runId)
-      for (const ev of events) applyToMessage(msg, ev)
+      // ★ The "cutResume" scenario: the round that follows the answer is cut
+      //   before its last frame, and it raises a **new** approval. ★ This is
+      //   the case the user reported — the approval after the answer never
+      //   showed up, and only a reload brought it back.
+      const cutResume = scenario === "cutResume"
+      // ★ The cut round never says how it ended: its last frame is the one
+      //   the client must not see.
+      const sent = cutResume ? events.slice(0, -1) : events
+      for (const ev of sent) applyToMessage(msg, ev)
 
       // ★ The run is a row in the ledger **before** anything is announced: a
       //   surface that attaches on the announcement must find it live.
       const resumed: FakeRun = {
         runId,
-        state: resumedStaysLive ? "running" : "completed",
+        state: cutResume
+          ? "waiting_approval"
+          : resumedStaysLive
+            ? "running"
+            : "completed",
         kind: "resume",
         startedAt: new Date().toISOString(),
-        events,
+        events: sent,
         messageId: msg.id,
       }
       thread.runs = [...(thread.runs ?? []), resumed]
@@ -1918,8 +1981,26 @@ export function startFakeServer(port = 0): FakeServer {
 
       const stream = new ReadableStream<Uint8Array>({
         start(c) {
-          for (const ev of events) c.enqueue(encode(ev))
+          for (const ev of sent) c.enqueue(encode(ev))
           if (resumedStaysLive) return
+          if (cutResume) {
+            // ★ The round raised another approval and was cut before its last
+            //   frame. ★ The approval is on the server's side only: the
+            //   client has to read it back from the transcript.
+            thread!.state = "waiting_approval"
+            thread!.pendings = pendingsFrom([
+              {
+                id: "int-2",
+                reason: "tool_call",
+                message: "edit_file requires approval",
+                toolCallId: "call_2",
+                metadata: { toolName: "edit_file", arguments: { file_path: "/tmp/y.txt" } },
+              },
+            ])
+            thread!.usage = USAGE
+            c.close()
+            return
+          }
           thread!.state = "idle"
           thread!.usage = USAGE
           c.close()
@@ -1950,6 +2031,22 @@ export function startFakeServer(port = 0): FakeServer {
         start(c) {
           // The window: what the client missed when it lost the connection.
           for (const ev of run.events) c.enqueue(encode(ev))
+          if (cutLive) {
+            // ★ The round goes on: the stream stays open until the round
+            //   raises its approval, and it closes **without** a last
+            //   frame. ★ The approval is on the server's side only — the
+            //   client has to read it from the transcript.
+            const wait = setInterval(() => {
+              if (run.state === "running") return
+              clearInterval(wait)
+              try {
+                c.close()
+              } catch {
+                // The reader is gone.
+              }
+            }, 50)
+            return
+          }
           if (stillRunning) {
             // \u2605 The run goes on. A second surface that attached is
             //
@@ -2074,6 +2171,96 @@ export function startFakeServer(port = 0): FakeServer {
       return sse(stream)
     }
 
+    // ★ The "cutApproval" scenario: the round's stream is cut before its
+    //   last frame, and the round ends with an approval. ★ The approval
+    //   never reaches the wire — the real server does the same when a
+    //   subscriber falls behind (agentkit/run/publish.go), and it writes no
+    //   terminal frame for a cut stream (transport/transport.go).
+    //
+    //   ★ The client has to find the approval by itself: the ledger says
+    //   the round is over, and the transcript holds what it raised.
+    if (scenario === "cutApproval") {
+      const events = eventsFor("approval", thread!.threadId, marker, runId)
+      const cut = events.slice(0, -1)
+      const fin = events.at(-1)
+      const hits = fin?.outcome?.type === "interrupt" ? (fin.outcome.interrupts ?? []) : []
+      for (const ev of cut) applyToMessage(assistantMsg, ev)
+      thread!.runs = [
+        ...(thread!.runs ?? []),
+        {
+          runId,
+          state: "waiting_approval",
+          kind: "query",
+          startedAt: new Date().toISOString(),
+          endedAt: new Date().toISOString(),
+          events: cut,
+          messageId: assistantMsg.id,
+        },
+      ]
+      thread!.state = "waiting_approval"
+      thread!.pendings = pendingsFrom(hits)
+      thread!.usage = USAGE
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          for (const ev of cut) c.enqueue(encode(ev))
+          // ★ The stream is cut: there is no terminal frame. ★ The client
+          //   must not read this as "the round said everything it had to
+          //   say" — the approval is still waiting, and only the transcript
+          //   knows.
+          c.close()
+        },
+      })
+      return sse(stream)
+    }
+
+    // ★ The "cutLive" scenario: the round's stream is cut and the round goes
+    //   on — it raises its approval a moment later. ★ The approval is never
+    //   on the wire: the client has to wait for the round to end and read
+    //   the transcript, because the transcript is the only place it is.
+    if (scenario === "cutLive") {
+      const head: RunEvent[] = [
+        started(thread!.threadId, runId),
+        textStart(msgId, "assistant"),
+        textDelta(msgId, `${marker} working`),
+      ]
+      for (const ev of head) applyToMessage(assistantMsg, ev)
+      thread!.runs = [
+        ...(thread!.runs ?? []),
+        {
+          runId,
+          state: "running",
+          kind: "query",
+          startedAt: new Date().toISOString(),
+          events: head,
+          messageId: assistantMsg.id,
+        },
+      ]
+      thread!.state = "running"
+      // ★ The round raises its approval a moment later, and there is no
+      //   stream left to carry it.
+      const hit: RawInterrupt = {
+        id: "int-1",
+        reason: "tool_call",
+        message: "write_file requires approval",
+        toolCallId: "call_1",
+        metadata: { toolName: "write_file", arguments: { file_path: "/tmp/x.txt" } },
+      }
+      setTimeout(() => {
+        const run = (thread!.runs ?? []).find((r) => r.runId === runId)
+        if (run) run.state = "waiting_approval"
+        thread!.pendings = pendingsFrom([hit])
+        thread!.state = "waiting_approval"
+      }, 1500)
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          for (const ev of head) c.enqueue(encode(ev))
+          // ★ The stream is cut: the round goes on without it.
+          c.close()
+        },
+      })
+      return sse(stream)
+    }
+
     const stream = new ReadableStream<Uint8Array>({
       start(c) {
         const events = eventsFor(scenario, thread!.threadId, marker, runId)
@@ -2103,14 +2290,7 @@ export function startFakeServer(port = 0): FakeServer {
         const hits = fin?.outcome?.type === "interrupt" ? (fin.outcome.interrupts ?? []) : []
         if (hits.length > 0) {
           thread!.state = "waiting_approval"
-          thread!.pendings = hits.map((hit) => ({
-            interruptId: hit.id,
-            reason: hit.reason,
-            message: hit.message,
-            toolCallId: hit.toolCallId,
-            toolName: "write_file",
-            subagentRunId: (hit as { subagentRunId?: string }).subagentRunId,
-          }))
+          thread!.pendings = pendingsFrom(hits)
         } else if (scenario === "busySession") {
           // ★ The session keeps its live turn: the stream stays open and
           //   the state stays "running", so the next run meets the gate.

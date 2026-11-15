@@ -256,14 +256,14 @@ FAT32 上不可复算。毫秒是「跨平台都稳」的刻度，而两次上�
 
 ### 1.5 前端：发送、乐观气泡、拖拽粘贴
 
-待发清单按会话存在 store 里（`web/src/lib/store/state.ts:24` 的
-`attachments: Record<string, Attachment[]>`），一项是 `{name, path, size, mime}`（`state.ts:5`）。
+待发清单按会话存在 store 里（`web/src/lib/store/state.ts:26` 的
+`attachments: Record<string, Attachment[]>`），一项是 `{name, path, size, mime}`（`state.ts:7`）。
 
-- 发送时清单从 store 里取出来一起发（`web/src/lib/store/actions.ts:264`、`:331`）。
-- ★ **发完要清空**（`:324`）—— 否则下一轮会把同一批文件再发一遍。
-- ★ **被拒的一轮要把文件还回待发清单**（`:345` 的 `restorePending`）：服务端没拿到这个问题，文件
+- 发送时清单从 store 里取出来一起发（`web/src/lib/store/actions.ts:518`、`:586`）。
+- ★ **发完要清空**（`:577`）—— 否则下一轮会把同一批文件再发一遍。
+- ★ **被拒的一轮要把文件还回待发清单**（`:599` 的 `restorePending`）：服务端没拿到这个问题，文件
   就还是用户的，不是消息的。
-- ★ **乐观气泡里也要画附件**（`:748` 的 `appendLocalUserMessage`）：附件是这条消息的一部分，用户
+- ★ **乐观气泡里也要画附件**（`:1288` 的 `appendLocalUserMessage`）：附件是这条消息的一部分，用户
   发出去的瞬间看不到自己发了什么，就等于没有发出去。★ 文件在前、文字在后 —— chip 读起来是这个
   问题的附件，问题跟在后面。
 - 三件交互都要：
@@ -285,9 +285,9 @@ FAT32 上不可复算。毫秒是「跨平台都稳」的刻度，而两次上�
 一回事。所以 `GET /v2/sessions/{id}/files` **不能**用来还原消息上的清单，它只能还原**待发清单**。
 
 - 恢复靠一条判据：workspace 里**没有任何消息认领过**的文件才是「待发」
-  （`web/src/lib/store/actions.ts:814`）。一条消息认领过的文件是跟那个问题一起发出去的，把它放回
+  （`web/src/lib/store/actions.ts:1354`）。一条消息认领过的文件是跟那个问题一起发出去的，把它放回
   待发清单，下一个问题就会再发一次 —— 用户只问了一次。
-- ★ 清单是**合并**而不是覆盖（`:824`）：用户刚上传的文件比还在路上的那份列举新。
+- ★ 清单是**合并**而不是覆盖（`:1364`）：用户刚上传的文件比还在路上的那份列举新。
 - 真正的消息级清单在 **transcript 里**，历史水合时跟着消息一起回来：`web/src/lib/store/history.ts:16`
   的 `readAttachments` 从 wire 的 metadata 读，`:90` 装配成 part。★ 文件在前、文字在后 —— 与乐观
   气泡同一顺序，所以一条消息不管刚发出去还是从历史读回来，长得一样。
@@ -356,7 +356,7 @@ Content-Type 由服务端按扩展名判定（`message.MIMEOfExt`），**不是*
 - ★ 覆盖层也承载非图片：点开一个 Markdown 附件出来的是渲染后的内容（`file-preview.tsx:181`），点开
   一个 PDF 是浏览器内嵌的 PDF（`:81`）。同一个覆盖层、同一个 Esc —— **一个交互学到底**，而不是
   「图片一种弹法、文本另一种弹法」。
-- 字节的 URL 是一个**字符串**而不是一次 fetch（`web/src/lib/api.ts:302` 的 `fileUrl`）：`<img src>`
+- 字节的 URL 是一个**字符串**而不是一次 fetch（`web/src/lib/api.ts:312` 的 `fileUrl`）：`<img src>`
   把文件交给浏览器自己的图片管线 —— 它的缓存、它的并发限制、它的解码器 —— 而且那个 URL 可以被复制
   出页面。
 
@@ -508,7 +508,7 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 
 ★ **流式光标（新增，但只能做成 CSS 伪元素）**：现在流式输出**没有光标**，文本一段段蹦出来。
 
-★ 实现约束是硬的：消息流**每帧重渲染**（`web/src/lib/api.ts:476` 的 `FRAME_MS` = 33ms 批处理，
+★ 实现约束是硬的：消息流**每帧重渲染**（`web/src/lib/api.ts:565` 的 `FRAME_MS` = 33ms 批处理，
 每帧重新解析 markdown），所以光标**不能是 React 元素** —— 那样每帧都要重挂一次 DOM，成本和闪烁
 都不可接受。只能做成 CSS 伪元素（`::after` 画一根竖线，`opacity` 呼吸，不占 DOM、不引发重渲染）。
 
@@ -675,25 +675,25 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 |---|---|
 | `web/src/lib/types.ts:41` | `AttachmentPart` |
 | `web/src/lib/types.ts:50` | `Part` 联合类型 |
-| `web/src/lib/store/state.ts:5` | `Attachment` |
-| `web/src/lib/store/state.ts:24` | 待发清单按会话存放 |
-| `web/src/lib/store/actions.ts:231` | `removeFile`：删真文件，失败就把 chip 放回去 |
-| `web/src/lib/store/actions.ts:244` | 删失败时把 chip 放回去 |
-| `web/src/lib/store/actions.ts:255` | `send` |
-| `web/src/lib/store/actions.ts:264` | 取出待发清单 |
-| `web/src/lib/store/actions.ts:324` | 发完清空 |
-| `web/src/lib/store/actions.ts:331` | 请求体带上附件 |
-| `web/src/lib/store/actions.ts:345` | 被拒的一轮把文件还回 |
-| `web/src/lib/store/actions.ts:748` | `appendLocalUserMessage`：乐观气泡 |
-| `web/src/lib/store/actions.ts:781` | `restorePending` |
-| `web/src/lib/store/actions.ts:804` | `restorePendingFiles` |
-| `web/src/lib/store/actions.ts:814` | 「没有消息认领过」才是待发 |
-| `web/src/lib/store/actions.ts:824` | 合并而不是覆盖 |
+| `web/src/lib/store/state.ts:7` | `Attachment` |
+| `web/src/lib/store/state.ts:26` | 待发清单按会话存放 |
+| `web/src/lib/store/actions.ts:481` | `removeFile`：删真文件，失败就把 chip 放回去 |
+| `web/src/lib/store/actions.ts:494` | 删失败时把 chip 放回去 |
+| `web/src/lib/store/actions.ts:505` | `send` |
+| `web/src/lib/store/actions.ts:518` | 取出待发清单 |
+| `web/src/lib/store/actions.ts:577` | 发完清空 |
+| `web/src/lib/store/actions.ts:586` | 请求体带上附件 |
+| `web/src/lib/store/actions.ts:599` | 被拒的一轮把文件还回 |
+| `web/src/lib/store/actions.ts:1288` | `appendLocalUserMessage`：乐观气泡 |
+| `web/src/lib/store/actions.ts:1321` | `restorePending` |
+| `web/src/lib/store/actions.ts:1344` | `restorePendingFiles` |
+| `web/src/lib/store/actions.ts:1354` | 「没有消息认领过」才是待发 |
+| `web/src/lib/store/actions.ts:1364` | 合并而不是覆盖 |
 | `web/src/lib/store/history.ts:16` | `readAttachments` |
-| `web/src/lib/store/history.ts:90` | 历史水合时装配 part |
+| `web/src/lib/store/history.ts:85` | 历史水合时装配 part |
 | `web/src/lib/events.ts:188` | `isOpenPart`：联合类型变宽后的收窄 |
-| `web/src/lib/api.ts:302` | `fileUrl`：字符串而不是 fetch |
-| `web/src/lib/api.ts:544` | 请求体里的 `attachments` |
+| `web/src/lib/api.ts:312` | `fileUrl`：字符串而不是 fetch |
+| `web/src/lib/api.ts:644` | 请求体里的 `attachments` |
 
 ### A.6 前端：预览与动效
 

@@ -108,7 +108,18 @@ export interface StoreState {
   send(text: string): Promise<void>
   // reattach comes back to a run after the connection dropped. The run
   // outlives the connection, so a broken stream is not a lost turn.
-  reattach(id: string, message: string): Promise<void>
+  //
+  // ★ The run may be named: the caller that read the ledger knows which
+  //   run is live, and that is the authority — the conversation's own run
+  //   id is only what this surface saw last.
+  reattach(id: string, message: string, runId?: string): Promise<void>
+  // recoverRound comes back to a round whose stream ended without the
+  // round's last frame.
+  //
+  // ★ The wire cannot tell a finished round and a cut stream apart, and the
+  //   difference decides whether an approval is shown or lost — so the
+  //   recovery asks the ledger, and the transcript answers.
+  recoverRound(id: string): Promise<void>
   // reloadHistory re-reads the session's transcript — what a client does
   // when it learns a run is over.
   reloadHistory(id: string): Promise<void>

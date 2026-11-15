@@ -531,7 +531,18 @@ export interface RunHandlers {
   //   code is what tells them apart — "session_busy" means the session
   //   has a live turn, so the optimistic message must be rolled back.
   onError?(message: string, code?: string): void
-  onDone?(): void
+  // onDone says whether the stream ended with the round's **last frame**.
+  //
+  // ★ The two endings look the same on the wire: a round that finished and
+  //   a stream that was cut both close the response. ★ The server writes
+  //   the round's last frame for the first one and deliberately does not for
+  //   the second (transport/transport.go) — a last frame says "this is
+  //   everything the run had to say", and an approval raised after that
+  //   point would stay invisible until the user reloaded the page.
+  //
+  //   So the caller has to know which one it got: the second one has to go
+  //   back to the ledger and the transcript.
+  onDone?(terminal: boolean): void
 }
 
 export interface SessionHandlers {
@@ -559,6 +570,17 @@ const FRAME_MS = 33
 //   to click something, and a card that arrives a frame late reads as
 //   a broken button. They are never batched.
 const URGENT_EVENTS = new Set(["RUN_STARTED", "RUN_FINISHED", "RUN_ERROR"])
+
+// TERMINAL_EVENTS are the frames a round ends with.
+//
+// ★ A round that finished says so in its last frame, and the client reads
+//   that frame as "this is everything the run had to say". ★ These two are
+//   the frames the server closes a stream with — RUN_FINISHED for a round
+//   that ended, RUN_ERROR for one that failed.
+//
+// ★ A stream that was **cut** ends with neither, and that difference is the
+//   whole point: the cut stream must not look like a finished round.
+const TERMINAL_EVENTS = new Set(["RUN_FINISHED", "RUN_ERROR"])
 
 /**
  * batcher groups the stream's events into frames.
@@ -639,15 +661,23 @@ export function runStream(input: RunInput, handlers: RunHandlers): RunHandle {
 
       // ★ The events are batched into frames (see FRAME_MS). The order is
       //   the wire's order; only the timing changes.
+      //
+      //   ★ The flag says whether the round's last frame arrived. A round
+      //   that finished and a stream that was cut close the response the
+      //   same way, and the caller has to tell them apart: the cut one may
+      //   still be raising an approval.
+      let terminal = false
       for await (const ev of readSse(res.body)) {
         try {
-          batch.push(JSON.parse(ev.data))
+          const parsed = JSON.parse(ev.data) as { type?: string }
+          if (parsed.type && TERMINAL_EVENTS.has(parsed.type)) terminal = true
+          batch.push(parsed)
         } catch {
           // A single event that will not parse must not destroy the whole turn — skip it and keep reading.
         }
       }
       batch.flushAll()
-      handlers.onDone?.()
+      handlers.onDone?.(terminal)
     } catch (e) {
       // ★ Whatever the stream managed to deliver still belongs to the
       //   turn: the user saw half an answer, and half an answer is better

@@ -179,13 +179,13 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 
 | 标记从前从哪来 | 标记现在从哪来 |
 |---|---|
-| 流结束 → 假定空闲 | 流结束 → **重新扫描**（`web/src/lib/store/actions.ts:369`） |
-| `stop()` 乐观地置 `busy: false` | `stop()` → 发 abort → **重新扫描** → 再决定（`web/src/lib/store/actions.ts:574`） |
+| 流结束 → 假定空闲 | 流结束 → **重新扫描**（`web/src/lib/store/actions.ts:626`） |
+| `stop()` 乐观地置 `busy: false` | `stop()` → 发 abort → **重新扫描** → 再决定（`web/src/lib/store/actions.ts:1112`） |
 | 409 `session_busy` → 标记忙 | 不变 —— 但这条消息背后现在是一个扫描出来的事实 |
 | 页面加载 → 读 `state` | 不变 —— 扫的是账本 |
 
 ★ **一句话规则：客户端只有在扫描发话时才可以清掉 `busy`。** 扫描失败就让标记留在
-原样（`web/src/lib/store/actions.ts:452-454`）—— 猜正是扫描要治的病。
+原样（`web/src/lib/store/actions.ts:1001-1005`）—— 猜正是扫描要治的病。
 
 ★ **「栅栏换扫描」到客户端为止，而且只能到客户端为止。** 响应路径上那道栅栏回答的
 是另一个问题：「一个刚读完这个响应结尾的调用方，能不能立刻发下一条？」账本回答得
@@ -287,24 +287,42 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 发布方在 `agentkit/run/publish.go:34`：一把锁、一个有界的 `window`、一个订阅者集合、
 一个 `closed` 标志，外加一个 `onProgress` 回调。
 
-- ★ **发布方绝不在满通道上等。** 慢的订阅者会被踢掉（`agentkit/run/publish.go:60` 的
+- ★ **发布方绝不在满通道上等。** 慢的订阅者会被踢掉（`agentkit/run/publish.go:98` 的
   `Publish`）。★ **被卡住的订阅者才是要紧的那一种，它和「慢」不是一回事**：慢的读者
   终究会把通道排空；卡住的那个是 socket 写永不返回 —— 对端消失了却没发 RST，内核
   还在往一个没人读的缓冲区里塞字节。发布方踢掉它而不是等它，run 继续走。拆分之前，
   同一种情况会卡住 run，因为写 socket 的就是 run 自己。
 - ★ **被踢掉的流与正常结束的流，线上必须长得不一样。** 订阅者记下自己是被**截断**的
-  （`agentkit/run/publish.go:163` 的 `subscription.truncated`），渲染器据此**不写终态帧**
-  （`transport/transport.go` 的 `RenderStream`）。★ 为什么不是细节：客户端把终态帧读作
+  （`agentkit/run/publish.go:203` 的 `subscription.truncated`），渲染器据此**不写终态帧**
+  （`transport/transport.go:70` 的 `RenderStream`）。★ 为什么不是细节：客户端把终态帧读作
   「这一轮说完了」，于是**不再回头**；而那一轮最要紧的东西 —— 审批 —— 可能恰好在这个
-  订阅者没读到的尾部。没有终态帧时，客户端走它自己的「连接断了、回到 run」那条路
-  （前端 `onDone` 的 reattach），从 transcript 里把审批读回来。★ 反过来，在被截断的流上
-  补一个 success，就是告诉客户端「已经结束」而它会信 —— 审批窗口于是要等一次手动刷新。
+  订阅者没读到的尾部。★ 反过来，在被截断的流上补一个 success，就是告诉客户端「已经结束」
+  而它会信 —— 审批窗口于是要等一次手动刷新。
+- ★ **客户端自己知道流是被切的。** 一次流结束只有两种可能，而线上长得一样：这一轮说完了，
+  或者流被切了。★ 区分它们的是**最后一帧**：`RUN_FINISHED` / `RUN_ERROR` 才是「说完了」
+  （`web/src/lib/api.ts:583` 的 `TERMINAL_EVENTS`），被切的流一帧都没有 —— 所以 `runStream`
+  的 `onDone` 带着这个事实走（`web/src/lib/api.ts:680`）。★ **这是唯一能分开两者的信号**：
+  响应体结束这件事，两边一模一样。
+- ★ **切了的那一轮，客户端去问账本。** 恢复的动作是 `recoverRound`
+  （`web/src/lib/store/actions.ts:726`）：★ **线上答不了这个问题** —— 流就是被切的那一样东西，
+  再挂一次很可能被同样地切掉。★ 账本答得了：`GET /v2/sessions/{id}/runs` 的 `activeRunId`
+  是「这一轮还在不在」的权威，而**等着审批的那一轮算已经结束**
+  （`storage/runledger.go:83` 的 `IsTerminal`）—— 审批一抛出来，`activeRunId` 就是空的。
+- ★ **答案在 transcript 里。** 没有活跃的一轮 ⇒ 这一轮说完了 ⇒ 它抛出的审批在
+  `GET /v2/sessions/{id}/messages` 的 `pendingApprovals` 里，客户端重读一遍 transcript，
+  卡片就回来了（`web/src/lib/store/history.ts:146` 的 `seedFromHistory`）。★ 还有活跃的一轮 ⇒
+  这一轮还在跑 ⇒ 客户端重新挂上去（`reattach`，`web/src/lib/store/actions.ts:644`），
+  剩下的部分照常渲染，审批照常到达。
+- ★ **恢复有护栏。** 重新挂上去最多三次（`RECOVER_ATTACH_LIMIT`）：★ 被切的流再挂一次很可能
+  再被切一次，而每一次重挂都把这一轮的事件重放一遍 —— 一个已经读不动的客户端不该被这样喂。
+  超过上限就改成**等**：读账本，等这一轮结束，然后读 transcript。★ 用户已经走开的那一轮
+  就不管了（`activeId` 变了就退出）—— 用户回来时打开会话本来就会读 transcript。
 - ★ **窗口是有界的，不是这一轮的历史。** 窗口留最后 1000 个事件
-  （`agentkit/run/publish.go:19`），最老的被丢掉，于是长的一轮花的是**固定**的内存。
+  （`agentkit/run/publish.go:20`），最老的被丢掉，于是长的一轮花的是**固定**的内存。
   没人看的一轮为一份没人读的日志付**恒定**的代价，而 run 真正的产出（transcript）
   反正都要写。另一种做法（等有人挂上来再开始建窗口）意味着猜 —— 而且会漏掉最要紧
   的那种情况：挂到一半的客户端。
-- ★ **窗口的回放与登记在同一把锁里**（`agentkit/run/publish.go:94` 的 `Subscribe`），
+- ★ **窗口的回放与登记在同一把锁里**（`agentkit/run/publish.go:144` 的 `Subscribe`），
   所以一个订阅者每个事件恰好看一次：先是窗口里的那些，然后是随后来的那些。
 - ★ **run 在这一轮结束**时才关掉订阅** —— 而一个以抛审批结束的这一轮，在审批落盘
   之前不算结束**（`agentkit/run/bridge.go:169`）。这不是细节：客户端是从通道关闭那一刻
@@ -354,9 +372,9 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 还没开始读的客户端，是没听见事实的客户端。
 
 ★ **客户端这一边**（`web/src/lib/session-events.ts`）：`approval_resolved` 把那张卡拿掉，
-`run_started` 让这一边跟上去（`web/src/lib/store/actions.ts:670` 的 `followRun`）。
+`run_started` 让这一边跟上去（`web/src/lib/store/actions.ts:952` 的 `followRun`）。
 ★ **一次只跟一条流**：还握着上一轮的时候，新的挂上要等它结束
-（`web/src/lib/store/actions.ts:81` 的 `releaseRun`）—— 服务端一个会话只允许一轮活着的
+（`web/src/lib/store/actions.ts:132` 的 `releaseRun`）—— 服务端一个会话只允许一轮活着的
 轮次，新的那一轮本来就只可能在旧的结束之后开始。
 ★ **公告不写下 run id**：那个 id 说的是「这一边正在看哪一轮」，而这一边还没挂上去。
 
@@ -482,7 +500,7 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 ★ **水合出来的「running」一定是别人的轮次，但那个界面不必只是看着。** 刚打开会话的
 那个界面不可能拥有它没启动的轮次 —— 拥有轮次的界面自己拿着事件流，永远不会重新
 水合。★ 而水合**不**把 `busy` 置上：那个界面接下来会去**挂上**那一轮
-（`attachToLiveRun`，`web/src/lib/store/actions.ts:491`），挂上之后它就是在跟着这一轮
+（`attachToLiveRun`，`web/src/lib/store/actions.ts:818`），挂上之后它就是在跟着这一轮
 的人。★ 先置上再撤掉，只会让「在别的窗口里跑着」这句话在一个本来就在跟着的界面上
 闪一下。待审批那一支保持优先：审批卡比「在跑」更具体。
 
@@ -501,9 +519,9 @@ agent **可以**合法地同时忙 —— 客户端若把 `agent_busy` 读成「
 this session」），客户端不必多一个码就能分辨。
 
 前端必须处理被拒的发送，**且不破坏本地视图**：**错误码不能丢** —— `runStream` 把
-`body.code` 一起交给 `onError`（`web/src/lib/api.ts:554`，签名在 `:464`），只剩散文
+`body.code` 一起交给 `onError`（`web/src/lib/api.ts:654`，签名在 `:533`），只剩散文
 的话前端分不清「忙」与「失败」；**乐观气泡要回滚** —— 那条消息根本没到服务端，却留在
-屏幕上像是发出去过（`web/src/lib/store/actions.ts:347-353`）；**会话被标记为忙，不是
+屏幕上像是发出去过（`web/src/lib/store/actions.ts:593-601`）；**会话被标记为忙，不是
 失败**。
 
 ★ **停止并接管。** 忙着的会话给一个「停止」动作：用户可以先停掉另一轮再发。停止
