@@ -19,6 +19,7 @@ export function Sidebar() {
   const open = useStore((s) => s.openSession)
   const startNew = useStore((s) => s.startNewThread)
   const switchProject = useStore((s) => s.switchProject)
+  const startThreadInProject = useStore((s) => s.startThreadInProject)
 
   // ★ The grouping is a **pure function** over three answers the server
   //   gave: the sessions, the projects, and the scope. ★ The client does
@@ -80,11 +81,30 @@ export function Sidebar() {
           groups.map((group) => (
             <section key={group.key} data-testid="session-group" data-group={group.key}>
               {!flat && (
+                // ★ The group's own row: its name, and the "+" that starts a
+                //   new conversation in it. ★ The button belongs to the
+                //   **project** the group names, so a group that is not one
+                //   (the "no project" group, the pinned group) gets none —
+                //   ★ and the check is against the table, not against the
+                //   key: a project whose id happens to be "no-project" is a
+                //   project.
                 <h2
                   data-testid="session-group-title"
-                  className="text-muted-foreground px-2 pt-2 pb-1 text-xs font-medium"
+                  className="text-muted-foreground group hover:bg-muted flex items-center gap-1 rounded-md px-2 pt-2 pb-1 text-xs font-medium"
                 >
-                  {group.title}
+                  <span className="min-w-0 flex-1 truncate">{group.title}</span>
+                  {projects.some((p) => p.id === group.key) && (
+                    <button
+                      type="button"
+                      data-testid="new-thread-in-project"
+                      aria-label={`New thread in ${group.title}`}
+                      title="Start a new conversation in this project"
+                      onClick={() => startThreadInProject(group.key)}
+                      className="hover:bg-muted grid size-5 shrink-0 place-items-center rounded-md opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                    >
+                      <PlusIcon className="size-3.5" />
+                    </button>
+                  )}
                 </h2>
               )}
               <ul className="space-y-0.5">

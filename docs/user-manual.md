@@ -1613,6 +1613,12 @@ directory is a new conversation.
 ★ **The `@` picker follows the project too**: it lists the files of the project the
 conversation on screen belongs to.
 
+★ **A "+" next to a project's name starts a new conversation in that project.**
+It shows when the pointer is over the project's row. The composer comes back
+empty and that project becomes the one it works in. ★ The "+" never keeps the
+conversation that is already open — not even when that conversation belongs to
+that very project: a new conversation is a new one.
+
 ### 6.11 Switching, creating, renaming and deleting a project
 
 ★ **The entry is the button under the input box**, on the line that says which

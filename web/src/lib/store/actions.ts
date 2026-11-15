@@ -165,6 +165,16 @@ export const useStore = create<StoreState>((set, get) => ({
     })
   },
 
+  startThreadInProject(id) {
+    // ★ The "+" next to a project in the sidebar means "a new conversation
+    //   here", and a new conversation is never the one that is already open
+    //   — not even when that one belongs to the same project. ⇒ The switch
+    //   moves the composer into the project, and the new thread always
+    //   comes back empty.
+    get().switchProject(id)
+    get().startNewThread()
+  },
+
   async createProject(name, root) {
     try {
       const p = await api.createProject(name.trim(), root.trim())

@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 
 import {
+  COMPOSER,
   FAKE_URL,
   MARKER_A,
   openApp,
@@ -34,6 +35,7 @@ const PROJECT_RENAME_INPUT = '[data-testid="project-rename-input"]'
 const PROJECT_REFUSAL = '[data-testid="project-refusal"]'
 const PROJECT_PICK = '[data-testid="project-pick-directory"]'
 const PROJECT_CURRENT = '[data-testid="project-current"]'
+const NEW_THREAD_IN_PROJECT = '[data-testid="new-thread-in-project"]'
 
 interface FakeThreadMeta {
   threadId: string
@@ -383,4 +385,54 @@ test("改名的时候点行不切换 —— 那一下属于输入框", async ({ 
   //   at once is two things done wrong.
   await expect(page.locator(PROJECTS_DIALOG)).toBeVisible()
   await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Alpha")
+})
+
+// ★ The "+" next to a project.
+//
+// ★ It is the way into a **new** conversation in that project: the composer
+//   comes back empty and the project becomes the one it works in. ★ It is not
+//   the switch in the dialog — a switch keeps the conversation that belongs
+//   to the project you picked, and a "+" never keeps one.
+
+test("项目旁边的 + 开一段新对话，当前项目切到它", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  // ★ Open a conversation that belongs to Alpha — the button names it.
+  const alpha = page.locator(GROUP).filter({ has: page.getByText("Alpha", { exact: true }) })
+  await alpha.locator(THREAD_ITEM).first().click()
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Alpha")
+
+  // ★ The "+" next to Beta: a new conversation there. ★ The composer comes
+  //   back empty and the button names the project that was picked.
+  const beta = page.locator(GROUP).filter({ has: page.getByText("Beta", { exact: true }) })
+  const plus = beta.locator(NEW_THREAD_IN_PROJECT)
+  await plus.hover()
+  await plus.click()
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Beta")
+  await expect(page.locator(PICKER)).toHaveValue("beta")
+
+  // ★ And the conversation that was open is still in the sidebar — its work
+  //   is not lost, only left.
+  await expect(page.locator(GROUP)).toHaveCount(3)
+  await expect(alpha.locator(THREAD_ITEM)).toHaveCount(2)
+})
+
+test("同一个项目旁边的 + 也开新的", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  const alpha = page.locator(GROUP).filter({ has: page.getByText("Alpha", { exact: true }) })
+  await alpha.locator(THREAD_ITEM).first().click()
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Alpha")
+
+  // ★ The "+" next to the project the conversation already belongs to: the
+  //   project does not change, but the composer comes back empty — a new
+  //   conversation is a new one, and it is not the one that was open.
+  await alpha.locator(NEW_THREAD_IN_PROJECT).hover()
+  await alpha.locator(NEW_THREAD_IN_PROJECT).click()
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Alpha")
+  await expect(page.locator(COMPOSER)).toBeVisible()
+  // ★ The conversation that was open is no longer the one on screen.
+  await expect(alpha.locator(THREAD_ITEM).first()).not.toHaveAttribute("data-active", "true")
 })

@@ -66,6 +66,13 @@ export interface StoreState {
   //   to an empty one, and the next question creates a conversation in the
   //   project that was picked.
   switchProject(id: string): void
+  // startThreadInProject opens a new conversation in a project.
+  //
+  // ★ It is the "+" next to a project in the sidebar: "a new conversation
+  //   here". ★ A new conversation is never the one that is already open —
+  //   not even when that one belongs to the same project — so the composer
+  //   always comes back empty.
+  startThreadInProject(id: string): void
   // ★ The three write paths on the project table. ★ Each returns the
   //   **server's** sentence when it refuses, and undefined when it did the
   //   thing — so a dialog can stay open with the reason on it, and a form

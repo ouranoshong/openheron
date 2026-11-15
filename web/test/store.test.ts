@@ -291,6 +291,39 @@ describe("switchProject —— 切换项目", () => {
   })
 })
 
+describe("startThreadInProject —— 项目旁边的「+」", () => {
+  test("换到别的项目：新对话在那儿，旧的还在侧栏里", async () => {
+    sessionProjects.set(A, "alpha")
+    await useStore.getState().refreshList()
+    useStore.setState({ activeId: A })
+
+    useStore.getState().startThreadInProject("beta")
+
+    // ★ The composer comes back empty — a new conversation is not the one
+    //   that was open — and the project it will belong to is the one that
+    //   was picked.
+    expect(useStore.getState().activeId).toBeNull()
+    expect(useStore.getState().activeProjectId).toBe("beta")
+    // ★ And the conversation itself is untouched: its work is not lost,
+    //   only left.
+    expect(useStore.getState().order).toContain(A)
+  })
+
+  test("同一个项目也开新的 —— 「+」就是新的意思", async () => {
+    sessionProjects.set(A, "alpha")
+    await useStore.getState().refreshList()
+    useStore.setState({ activeId: A })
+
+    useStore.getState().startThreadInProject("alpha")
+
+    // ★ The conversation on screen belongs to this very project, and it is
+    //   still open. ★ The "+" next to a project means "a new conversation
+    //   here" — not "the one that is already here".
+    expect(useStore.getState().activeId).toBeNull()
+    expect(useStore.getState().activeProjectId).toBe("alpha")
+  })
+})
+
 describe("当前项目跟着会话走", () => {
   test("打开一个会话，当前项目就是它的项目", async () => {
     sessionProjects.set(A, "alpha")
