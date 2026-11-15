@@ -924,6 +924,8 @@ printed once the listener is up, and neither `log.file` nor `log_level` can hide
 the address is not a log record, it is what the process says about itself to the
 terminal it was started on (`docs/runtime-design.md` §4.4).
 
+★ **A second line appears when the listener is beyond the loopback**: `the server listens beyond the loopback; anyone who can reach this port can drive the agent`. It travels the same way, so a configuration that sends the log to a file cannot hide the fact that the agent is reachable from the network. On the loopback there is nothing to say, and nothing is said (`docs/runtime-design.md` §4.4).
+
 ★ The file is rotated by size, and a file that cannot be opened is a warning rather than a
 failed start: the process stays on the standard error and says why.
 
@@ -1696,7 +1698,8 @@ The service exposes only the `/v2` family. ★ The default listener is the **loo
 
 ★ **There is no account and no token.** This is a single-user tool on one machine: the
 address is the whole boundary. Exposing it — `listen_addr: 0.0.0.0:8080`, or a reverse
-proxy in front — is a decision you write down, and the server says so at startup.
+proxy in front — is a decision you write down, and the server says so on the terminal at
+startup.
 
 ★ Two rules hold whatever the address is. A request that **changes** something and
 comes from another site is refused. And while the listener is on the loopback, a

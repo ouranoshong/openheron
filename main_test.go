@@ -189,6 +189,62 @@ func TestAnnounceServingReachesTheTerminal(t *testing.T) {
 	}
 }
 
+// ★ The exposure is a notice too: the log's destination is configuration,
+// and a line that says "anyone who can reach this port can drive the
+// agent" must not be the thing the configuration hides.
+//
+// ★ The log is in the file and the console is off — the configuration that
+//
+//	hid this line before.
+func TestAnnounceExposureReachesTheTerminal(t *testing.T) {
+	var console, file bytes.Buffer
+	sink := obs.NewSink(&console)
+	sink.Install(&file, false)
+	notice := obs.NewNotice(sink.NoticeWriter())
+
+	announceExposure(&startup{addr: "0.0.0.0:8080", notice: notice})
+
+	if !strings.Contains(console.String(), "listens beyond the loopback") {
+		t.Fatalf("the exposure never reached the terminal:\n%s", console.String())
+	}
+	if !strings.Contains(file.String(), "listens beyond the loopback") {
+		t.Fatalf("the exposure never reached the log file:\n%s", file.String())
+	}
+	if !strings.Contains(console.String(), "[Warn]") {
+		t.Fatalf("the exposure lost its level:\n%s", console.String())
+	}
+}
+
+// ★ A listener on the loopback is not an exposure, and a warning that
+//
+//	always appears is a warning nobody reads.
+func TestAnnounceExposureIsSilentOnTheLoopback(t *testing.T) {
+	var console bytes.Buffer
+	sink := obs.NewSink(&console)
+	notice := obs.NewNotice(sink.NoticeWriter())
+
+	announceExposure(&startup{addr: "127.0.0.1:8080", notice: notice})
+
+	if console.Len() != 0 {
+		t.Fatalf("the loopback was reported as an exposure:\n%s", console.String())
+	}
+}
+
+// ★ A bare port is not a loopback address: it binds every interface, and
+//
+//	it is the shape a port number takes.
+func TestAnnounceExposureNamesABarePort(t *testing.T) {
+	var console bytes.Buffer
+	sink := obs.NewSink(&console)
+	notice := obs.NewNotice(sink.NoticeWriter())
+
+	announceExposure(&startup{addr: ":8080", notice: notice})
+
+	if !strings.Contains(console.String(), "listens beyond the loopback") {
+		t.Fatalf("a bare port is every interface, and it was not reported:\n%s", console.String())
+	}
+}
+
 func TestServerURL(t *testing.T) {
 	cases := []struct {
 		addr string

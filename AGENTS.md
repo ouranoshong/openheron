@@ -196,8 +196,10 @@ handler, and `log.file` points it at a file once the configuration is read
 eino already hold that, and a process-global registry cannot be rewritten.
 
 ★ The **notice** route does not move: `obs.NewNotice` writes to the console and to the log file
-whatever the level and the destination say — that is how the serving address stays visible
-(`docs/runtime-design.md` §4.4).
+whatever the level and the destination say — that is how the serving address stays visible, and
+how the warning that says the listener is beyond the loopback stays visible
+(`docs/runtime-design.md` §4.4). ★ A warning about being exposed is a notice, not a log record:
+the log's destination is configuration, and the configuration must not be able to hide it.
 
 ## Other conventions
 

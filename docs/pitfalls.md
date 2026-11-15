@@ -929,7 +929,27 @@ request after 10 seconds`），于是 E2E 里「另一个界面听见了审批�
 `the server serves on url=http://127.0.0.1:8080`。★ 框架自己那行横幅被拦下了
 （`agentkit/obs/hertz/hertz.go:47`）：说的是同一件事，留着就是两行。
 
-★ **通告在监听就绪之后才打印**（`main.go:701`）：绑好之前印出来的是一句承诺，不是一件事实。
+★ **通告在监听就绪之后才打印**（`main.go:860`）：绑好之前印出来的是一句承诺，不是一件事实。
 
 **现状**：`已修` —— `agentkit/obs/sink.go` 的 `Install` 与 `Notice`、
 `agentkit/obs/notice.go` 的 `NewNotice`、`main.serve` 的 `waitRunning` 与 `announceServing`。
+
+### 14.2 ★ 暴露告警被日志配置藏了起来
+
+**症状**：把 `listen_addr` 写成 `0.0.0.0:8080` 之后，终端上什么也没有 —— 没有地址，
+也没有「能碰到这个端口的人就能驱动这个 agent」那一句。
+
+**根因**：那句话是**一条日志记录**（`log.Warn`），而日志的去处是配置：出厂模板的
+`log.console` 是 `false`，`log.file` 又把记录搬进了文件。⇒ **恰恰是暴露出去的那一次
+运行，终端上什么也没有** —— 而这一次的风险最高。★ `log_level` 再高一档，它连日志
+文件里都没有了。
+
+**修法**：那句话走**通告那条路**（`docs/runtime-design.md` §4.4），跟地址一样：
+终端永远一份，日志文件有则一份，**等级也过滤不掉**（通告自己的门限固定在 info，
+所以 `log_level: error` 也看得见这条 `[Warn]`）。★ 它跟地址**一起**说，且说在监听
+就绪之后 —— 暴露是那个地址的意思，两行是一件事。★ **环回时不说话**：一句关于
+「没有发生的事」的告警是噪声，而一句总出现的告警是没人看的告警。
+
+**现状**：`已修` —— `main.go:946` 的 `announceExposure`（判定用 `api.LoopbackOnly`）；
+测试在 `main_test.go`（`TestAnnounceExposureReachesTheTerminal`、
+`TestAnnounceExposureIsSilentOnTheLoopback`、`TestAnnounceExposureNamesABarePort`）。

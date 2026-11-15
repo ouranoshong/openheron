@@ -639,9 +639,10 @@ so the sink is the thing that changes.
 
 ★ **The sink holds two destinations, and one of them does not move.** The **route** is
 where the records go; the **console** is where the process was started. `log.file` moves
-the route away from the console — and the one line that has to stay on the terminal
-anyway is the address the service serves on, which travels on the notice route instead
-(`docs/runtime-design.md` §4.4).
+the route away from the console — and the lines that have to stay on the terminal anyway
+are the address the service serves on and, when the listener is beyond the loopback, the
+warning that says anyone who can reach the port can drive the agent. They travel on the
+notice route instead (`docs/runtime-design.md` §4.4).
 
 ### 5.2 The config root has exactly three levels
 

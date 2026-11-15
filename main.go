@@ -605,16 +605,17 @@ func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar, sink
 
 	addr := overrideEnv(log, listenAddrEnv, "LISTEN_ADDR", cfg.Server.ListenAddr)
 
-	// ★ The exposure note. A listener beyond the loopback is reachable by
-	//   every machine on the network, and the tools this server drives run
-	//   shell commands. There is no token and no account — this is a
-	//   single-user tool on one machine — so the address itself is the whole
-	//   boundary, and a line like this one is what makes it a decision.
-	if !api.LoopbackOnly(addr) {
-		log.Warn("[main] the server listens beyond the loopback; "+
-			"anyone who can reach this port can drive the agent",
-			"addr", addr)
-	}
+	// ★ The exposure note is **not** here. A listener beyond the loopback is
+	//   reachable by every machine on the network, and the tools this server
+	//   drives run shell commands — there is no token and no account, so the
+	//   address itself is the whole boundary, and saying so is what makes it
+	//   a decision instead of an accident.
+	//
+	// ★ It must not be a log record: the log's destination is configuration
+	//   (`log.file` with `log.console: false` takes the terminal away), and a
+	//   warning about being exposed is exactly the line a configuration must
+	//   not be able to hide. ⇒ It is a **notice**, said with the address once
+	//   the listener is up — see announceExposure.
 
 	return &startup{
 		cfgSvc:      cfgSvc,
@@ -862,6 +863,7 @@ func serve(ctx context.Context, st *startup, log *slog.Logger) error {
 	}
 	if running {
 		announceServing(st)
+		announceExposure(st)
 	}
 
 	select {
@@ -920,6 +922,37 @@ func announceServing(st *startup) {
 		return
 	}
 	st.notice.Info("[main] the server serves on", "url", serverURL(st.addr))
+}
+
+// announceExposure says what a listener beyond the loopback means.
+//
+// ★ It is a notice, for the same reason the address is one: the log's
+//
+//	destination is configuration, and a warning that says "anyone who can
+//	reach this port can drive the agent" must not be the thing the
+//	configuration hides. ★ The record is a **warning** and the notice
+//	channel does not filter it — the notice logger's own threshold is fixed
+//	at info, so the line survives `log_level: error` as well.
+//
+// ★ It is said **with** the address and not before it: the exposure is what
+//
+//	that address means, the two lines belong together, and both are facts
+//	only once the listener is up.
+//
+// ★ A listener on the loopback is not an exposure, and the line is silent
+//
+//	then: a warning about nothing is noise, and a warning that always
+//	appears is a warning nobody reads.
+func announceExposure(st *startup) {
+	if st == nil || st.notice == nil {
+		return
+	}
+	if api.LoopbackOnly(st.addr) {
+		return
+	}
+	st.notice.Warn("[main] the server listens beyond the loopback; "+
+		"anyone who can reach this port can drive the agent",
+		"addr", st.addr)
 }
 
 // serverURL renders the listen address as a URL.

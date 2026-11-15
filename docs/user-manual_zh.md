@@ -826,6 +826,8 @@ allows: [request_get]
 `log_level` 都藏不住它 —— 地址不是日志记录，是进程对启动它的那个终端说的自己
 （`docs/runtime-design.md` §4.4）。
 
+★ **监听地址越过环回时，终端上会多一行**：`the server listens beyond the loopback; anyone who can reach this port can drive the agent`。它走同一条路 —— 所以把日志送进文件的配置，藏不住「这个 agent 已经被网络够得着」这件事。环回时没有话要说，于是不说（`docs/runtime-design.md` §4.4）。
+
 ★ 文件按大小轮转，而打不开文件只是告警、不是启动失败：进程留在标准错误上，并把原因写在那儿。
 
 ### 4.6 技能（`skills/`）
@@ -1497,7 +1499,7 @@ openheron version                                         print the version
 
 ★ **没有账号，也没有令牌。** 这是一台机器上一个人用的工具：地址就是全部的边界。要把它
 暴露出去 —— `listen_addr: 0.0.0.0:8080`，或者前面套一层反向代理 —— 是你写下来的决定，
-服务器会在启动时说一声。
+服务器会在启动时于终端上说一声。
 
 ★ 两条规则里有一条跟地址无关：**会改动东西**而且来自别的站点的请求一律拒绝。另一条在
 监听环回时生效：**Host** 不是这台机器的请求一律拒绝 —— 别的站点的页面可以把浏览器指向

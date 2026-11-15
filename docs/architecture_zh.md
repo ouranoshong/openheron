@@ -466,8 +466,9 @@ main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
 `log.file` 能在启动后改向文件（`docs/runtime-design.md` §4.3）；变的是 sink，不是 logger。
 
 ★ **sink 握着两个去处，其中的一个不动。** **路线**是记录去哪儿，**终端**是进程从哪儿
-启动；`log.file` 把路线从终端上搬走 —— 而唯一必须留在终端上的那行是服务地址，它走
-**通告**那条路（`docs/runtime-design.md` §4.4）。
+启动；`log.file` 把路线从终端上搬走 —— 而必须留在终端上的那几行是服务地址，以及监听地址
+越过环回时那句「能碰到这个端口的人就能驱动这个 agent」，它们走**通告**那条路
+（`docs/runtime-design.md` §4.4）。
 
 ### 5.2 配置根只有三级
 

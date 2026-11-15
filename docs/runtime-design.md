@@ -842,12 +842,25 @@ stderr（`main.go:296-300`）。
 封装。留作后续迭代 —— **不预留空键**，配置里没有 `format`
 （`agentkit/spec/decl/decl.go:332-335`）。
 
-### 4.4 通告：终端永远有一份地址
+### 4.4 通告：终端永远有的那几行
 
 ★ **日志的去处是配置，通告的去处不是。** `log.file` 把记录搬进文件，
 `log.console: false` 让标准错误安静 —— 而**服务跑在哪个地址**是启动那个进程的人
 唯一必须看见的一件事：浏览器往哪儿开、别的进程往哪儿连，都是它说了算。所以地址
 走**通告通道**，不走日志通道。
+
+★ **越界的那一句也走这条通道。** 监听地址越过环回时，服务器会说一句
+`the server listens beyond the loopback; anyone who can reach this port can drive the agent`
+（`main.go:953` 的 `announceExposure`）。★ 这句话以前是**一条日志记录**，而日志记录
+的去处是配置 —— 出厂模板的 `log.console` 是 `false`，于是**恰恰是暴露出去的那一次运行，
+终端上什么也没有**：一句「你把 agent 暴露给全网了」被配置藏了起来。
+⇒ 安全相关的告警不能是日志记录，它跟地址一样是**通告**：终端永远有一份，
+日志文件有则一份，**等级也过滤不掉**（通告自己的门限固定在 info，`log_level: error`
+照样看得见这条 `[Warn]`）。
+
+★ **它跟地址一起说，说在监听就绪之后。** 暴露是那个地址的意思，两行是一件事；
+而且绑好之前印出来的是一句承诺，不是一件事实。★ **环回时不说话**：
+一句关于「没有发生的事」的告警是噪声，而一句总出现的告警是没人看的告警。
 
 通告通道在 `agentkit/obs`（`agentkit/obs/notice.go:27` 的 `NewNotice`），它写两个
 地方：
@@ -868,15 +881,16 @@ stderr（`main.go:296-300`）。
 ★ **一次通告，终端上一行。** `log.console: true` 时日志本身就覆盖终端，通告不再补
 一份；`log.console: false` 时日志去了文件，终端那一份由通告补上；没有文件时日志
 就在终端上，通告同样不补。三种配置下终端都恰好一行
-（`agentkit/obs/sink_test.go:135`）。
+（`agentkit/obs/sink_test.go:135`）—— ★ 监听地址越过环回时**多一行**：那是那句
+`[Warn]`，它跟地址是两件事，不是一件事说了两遍。
 
 ★ **框架自己的横幅被拦下了。** hertz 在套接字绑好之后会打一行
 `HTTP server listening on address=...`（`agentkit/obs/hertz/hertz.go:47`）—— 说的是
 同一件事，留着就是两行，而且那一行是框架的形状、框架的 file:line。
 
-★ **打印的时机是监听就绪之后**（`main.go:701` 的 `waitRunning` 等的是套接字绑好，
+★ **打印的时机是监听就绪之后**（`main.go:860` 的 `waitRunning` 等的是套接字绑好，
 不是「进程说要启动」）：绑好之前印出来的是一句承诺，不是一件事实。★ **印的是配置
-的地址**（`main.go:462`）—— 端口写 `0` 时操作系统给一个随机端口，而那一行说的
+的地址**（`main.go:466`）—— 端口写 `0` 时操作系统给一个随机端口，而那一行说的
 是 `0`；★ `listen_addr` 是给人看的固定端口，写 `0` 的运行没有人找得到服务。
 
 ### 4.5 叶子包的纪律
@@ -1309,14 +1323,14 @@ stderr（`main.go:296-300`）。
 - `agentkit/obs/logger.go` — `New`(:19)、`Discard`(:30)、`ParseLevel`(:39)、
   `LevelFromEnv`(:71)
 - `agentkit/obs/handler.go` — handler 持 `Leveler`(:42)
-- `agentkit/obs/sink.go` — `Sink`(:32)、`NewSink`(:43)、`Set`(:76)、`Install`(:95)、
-  `Notice`(:124)、失败降级(:152)
+- `agentkit/obs/sink.go` — `Sink`(:32)、`NewSink`(:43)、`Set`(:81)、`Install`(:100)、
+  `NoticeWriter`(:118)、`Notice`(:129)、失败降级(:157)
 - `agentkit/obs/notice.go` — `NewNotice`(:27)
 - `agentkit/obs/httplog/logging.go` — `Wrap`(:52)、被拒绝的请求(:161)、`tools` 原始字节
   (:263)
 - `agentkit/obs/hertz/hertz.go` — hertz 适配器(:32)、框架横幅被拦下(:47)
 - `agentkit/build/mcpmanager.go` — `mcpCommandLogger`(:748)
-- `main.go` — `newLogger`(:252)、`installLogger`(:263)、`hlog.SetLogger`(:269)、
-  `callbacks.AppendGlobalHandlers`(:270)、`applyLogLevel`(:276)、告警在切换等级之前
-  (:288)、`applyLogFile`(:314)、0600 探针(:331)、`lumberjack`(:338)、`sink.Install`
-  (:351)、落不进文件是警告(:296)、地址的通告(:726)
+- `main.go` — `newLogger`(:350)、`installLogger`(:361)、`hlog.SetLogger`(:367)、
+  `callbacks.AppendGlobalHandlers`(:368)、`applyLogLevel`(:374)、告警在切换等级之前
+  (:386)、`applyLogFile`(:412)、落不进文件是警告(:423)、0600 探针(:429)、
+  `lumberjack`(:436)、`sink.Install`(:449)、地址的通告(:920)、越界的通告(:946)

@@ -103,7 +103,8 @@ and the level decides whether a line shows up in the default output.
 
 ★ **The notice route is not the log, and it does not move.** `obs.NewNotice` writes to the
 console and to the log file whatever the level and the destination say — the address the
-service serves on is not a log record (`docs/runtime-design.md` §4.4).
+service serves on is not a log record, and neither is the warning that says the listener
+is beyond the loopback (`docs/runtime-design.md` §4.4).
 
 A line reads the way hertz's logger writes it — the date, the time with microseconds,
 **the caller's file and line**, the level, then the message and the attributes:
