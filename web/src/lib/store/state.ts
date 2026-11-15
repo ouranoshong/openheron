@@ -79,6 +79,16 @@ export interface StoreState {
   //   does not have to keep its own copy of the rules.
   createProject(name: string, root: string): Promise<string | undefined>
   renameProject(id: string, name: string): Promise<string | undefined>
+  // updateProject changes what the server already holds: the name, the
+  // directory or the order.
+  //
+  // ★ The server takes all three in one patch (`PATCH /v2/projects/{id}`),
+  //   so the client has one path for them too — a second way to rename
+  //   would be a second place to keep the rules.
+  updateProject(
+    id: string,
+    patch: { name?: string; root?: string; order?: number },
+  ): Promise<string | undefined>
   deleteProject(id: string): Promise<string | undefined>
   // pickDirectory opens the operating system's folder chooser.
   //

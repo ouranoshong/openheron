@@ -5,6 +5,7 @@ import {
   PINNED_GROUP,
   defaultProject,
   directoryPick,
+  foldGroups,
   groupSessions,
   projectNameError,
   projectRenameError,
@@ -45,20 +46,31 @@ describe("groupSessions —— 多项目模式", () => {
     expect(groups[0]!.title).toBe("CodeLab")
   })
 
-  test("空组不出现", () => {
+  // ★ An empty **project** is a row in the map: ★ the sidebar's actions on a
+  //   project live on the project's own row, so a project that is not drawn
+  //   is a project that cannot be renamed, moved or removed.
+  test("空项目也画出来，它是地图上的一格", () => {
     const groups = groupSessions([session("a", "alpha")], [project("alpha", 0), project("empty", 1)], null)
-    expect(groups.map((g) => g.key)).toEqual(["alpha"])
+    expect(groups.map((g) => g.key)).toEqual(["alpha", "empty"])
+    expect(groups[1]!.sessions).toEqual([])
   })
 
   test("一个会话只在一个组里", () => {
     const groups = groupSessions([session("a", "alpha", true)], [project("alpha", 0)], null)
-    expect(groups.map((g) => g.sessions.length)).toEqual([1])
+    // ★ The pinned conversation is in the pinned group and nowhere else — and
+    //   the project it came from is still a row, holding nothing.
     expect(groups[0]!.key).toBe(PINNED_GROUP)
+    expect(groups[0]!.sessions.map((s) => s.meta.threadId)).toEqual(["a"])
+    expect(groups[1]!.key).toBe("alpha")
+    expect(groups[1]!.sessions).toEqual([])
   })
 
   test("表里没有的项目 id 落到未选项目组", () => {
     const groups = groupSessions([session("a", "gone")], [project("alpha", 0)], null)
-    expect(groups.map((g) => g.key)).toEqual([NO_PROJECT_GROUP])
+    // ★ The conversation whose project is gone lands in the "no project"
+    //   bucket, and the project that is still in the table is still a row.
+    expect(groups.map((g) => g.key)).toEqual(["alpha", NO_PROJECT_GROUP])
+    expect(groups[1]!.sessions.map((s) => s.meta.threadId)).toEqual(["a"])
   })
 
   test("没有项目也没有会话时没有组", () => {
@@ -82,6 +94,15 @@ describe("groupSessions —— 单项目模式", () => {
   test("别的项目的会话不进来", () => {
     const groups = groupSessions([session("c", "other")], [project("other", 0)], scope("alpha"))
     expect(groups).toEqual([])
+  })
+
+  test("★ 作用域项目在表里时，没有会话也画出来", () => {
+    // ★ The scope project is the one directory this process serves, and the
+    //   map says so even when nothing has been started in it yet.
+    const groups = groupSessions([], [project("alpha", 0)], scope("alpha"))
+    expect(groups).toHaveLength(1)
+    expect(groups[0]!.key).toBe("alpha")
+    expect(groups[0]!.sessions).toEqual([])
   })
 
   test("只有未选项目的会话时也在那一组里", () => {
@@ -202,6 +223,46 @@ describe("projectRenameError", () => {
 
   test("普通名字没有理由", () => {
     expect(projectRenameError("CodeLab")).toBeUndefined()
+  })
+})
+
+describe("foldGroups", () => {
+  const groups = groupSessions(
+    [session("a", "alpha"), session("b", "alpha"), session("c", "beta")],
+    [project("alpha", 1), project("beta", 2)],
+    null,
+  )
+
+  test("没折叠的组原样", () => {
+    const folded = foldGroups(groups, new Set())
+    expect(folded.map((g) => g.folded)).toEqual([false, false])
+    expect(folded.map((g) => g.sessions.length)).toEqual([2, 1])
+  })
+
+  test("★ 折叠的组仍然有标题，也有它的会话", () => {
+    // ★ The fold is a **display** state: the group is still there, and the
+    //   count of a folded group is still its count — a group that says
+    //   nothing about how much is in it is a group the user has to open to
+    //   know.
+    const folded = foldGroups(groups, new Set(["alpha"]))
+    expect(folded[0]!.folded).toBe(true)
+    expect(folded[0]!.title).toBe("alpha")
+    expect(folded[0]!.sessions.length).toBe(2)
+    expect(folded[1]!.folded).toBe(false)
+  })
+
+  test("折叠的是组键，不是项目 id 碰巧相同的东西", () => {
+    // ★ A key that names no group simply never matches.
+    const folded = foldGroups(groups, new Set(["gone"]))
+    expect(folded.map((g) => g.folded)).toEqual([false, false])
+  })
+
+  test("★ 空组不折叠 —— 没有东西可以收起来", () => {
+    // ★ A folded heading that says "0" is a folder the user has to open to
+    //   learn that it is empty.
+    const withEmpty = groupSessions([session("a", "alpha")], [project("alpha", 0), project("empty", 1)], null)
+    const folded = foldGroups(withEmpty, new Set(["empty"]))
+    expect(folded.map((g) => g.folded)).toEqual([false, false])
   })
 })
 

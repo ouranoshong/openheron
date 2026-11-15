@@ -192,8 +192,17 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   async renameProject(id, name) {
+    // ★ A rename is a patch with one field in it: the server takes the name,
+    //   the root and the order in one body, so the client has one path.
+    return get().updateProject(id, { name: name.trim() })
+  },
+
+  async updateProject(id, patch) {
     try {
-      await api.updateProject(id, { name: name.trim() })
+      await api.updateProject(id, patch)
+      // ★ The table is re-read after the write: the project that was changed
+      //   is the one that is drawn, and the list that comes back is the
+      //   server's answer.
       await get().refreshProjects()
       return undefined
     } catch (e) {

@@ -1,25 +1,61 @@
-import { MoreHorizontalIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  PlusIcon,
+  Trash2Icon,
+} from "lucide-react"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useShallow } from "zustand/react/shallow"
 
+import { ProjectRootDialog } from "@/components/projects-dialog"
 import { SettingsEntry } from "@/components/settings/settings-entry"
 import { Button } from "@/components/ui/button"
-import { NO_PROJECT_GROUP, groupSessions, sortProjects } from "@/lib/projects"
+import { foldGroups, groupSessions, projectRenameError } from "@/lib/projects"
+import type { ProjectSummary, SessionGroup } from "@/lib/projects"
 import { selectSessionList, useStore } from "@/lib/store"
 import type { SessionEntry } from "@/lib/store"
 import { cn } from "@/lib/utils"
+
+// ★ The folded groups are remembered on this machine.
+//
+// ★ They are a **preference**, not a fact: the server never hears of them,
+//   and the conversations they hide are still there. ★ The key holds the
+//   **group keys** — the "no project" group is folded like any other.
+const FOLDED_KEY = "openheron.sidebar.folded"
+
+function readFolded(): Set<string> {
+  try {
+    const raw = localStorage.getItem(FOLDED_KEY)
+    if (!raw) return new Set()
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(parsed.filter((k): k is string => typeof k === "string"))
+  } catch {
+    // ★ A browser that refuses storage still gets a working sidebar.
+    return new Set()
+  }
+}
+
+function writeFolded(folded: ReadonlySet<string>): void {
+  try {
+    localStorage.setItem(FOLDED_KEY, JSON.stringify([...folded]))
+  } catch {
+    // ★ Not being able to remember is not a reason to break the fold.
+  }
+}
 
 export function Sidebar() {
   const sessions = useStore(useShallow(selectSessionList))
   const projects = useStore((s) => s.projects)
   const scope = useStore((s) => s.projectScope)
-  const activeProjectId = useStore((s) => s.activeProjectId)
   const activeId = useStore((s) => s.activeId)
   const loading = useStore((s) => s.loadingList)
   const open = useStore((s) => s.openSession)
   const startNew = useStore((s) => s.startNewThread)
-  const switchProject = useStore((s) => s.switchProject)
-  const startThreadInProject = useStore((s) => s.startThreadInProject)
 
   // ★ The grouping is a **pure function** over three answers the server
   //   gave: the sessions, the projects, and the scope. ★ The client does
@@ -31,8 +67,35 @@ export function Sidebar() {
   )
 
   // ★ The flat list — no heading — is the case where there is nothing to
-  //   group by: no projects, so every conversation belongs to no project.
-  const flat = groups.length === 1 && groups[0]!.key === NO_PROJECT_GROUP
+  //   group by: no projects in the table, so every conversation belongs to
+  //   no project. ★ The table is the answer, not the groups: a table with
+  //   projects in it is a map, even when no conversation has been started in
+  //   one of them yet.
+  const flat = scope === null && projects.length === 0
+
+  // ★ The fold is the client's own business: the server never hears of it.
+  const [folded, setFolded] = useState<Set<string>>(readFolded)
+  useEffect(() => {
+    writeFolded(folded)
+  }, [folded])
+
+  const shown = useMemo(() => foldGroups(groups, folded), [groups, folded])
+
+  const toggle = (key: string) => {
+    setFolded((prev) => {
+      // ★ The keys of groups that are gone are dropped here: the list of
+      //   groups is known at this moment, and a deleted project must not
+      //   leave its key behind for good.
+      const live = new Set(groups.map((g) => g.key))
+      const next = new Set([...prev].filter((k) => live.has(k)))
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }
 
   return (
     <aside data-testid="sidebar" className="border-e flex w-64 shrink-0 flex-col">
@@ -48,77 +111,55 @@ export function Sidebar() {
         </Button>
       </div>
 
-      {/* ★ The project the composer works in. ★ It is only shown when there
-          is a choice: the single-project mode serves one directory, and a
-          picker with one option is a decoration. ★ It is the **same** value
-          the button under the input box names and the @-mention picker
-          lists the files of — one truth, three views. */}
-      {!scope && projects.length > 0 && (
-        <div className="px-2 pb-2">
-          <select
-            data-testid="project-picker"
-            aria-label="Project for new threads"
-            value={activeProjectId ?? ""}
-            onChange={(e) => switchProject(e.target.value)}
-            className="border-border bg-background w-full rounded-md border px-2 py-1 text-sm outline-none focus-visible:ring-2"
-          >
-            <option value="">No project</option>
-            {sortProjects(projects).map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {loading && sessions.length === 0 ? (
           <p className="text-muted-foreground p-2 text-xs">Loading…</p>
-        ) : sessions.length === 0 ? (
-          <p className="text-muted-foreground p-2 text-xs">No conversations yet.</p>
+        ) : flat ? (
+          sessions.length === 0 ? (
+            <p className="text-muted-foreground p-2 text-xs">No conversations yet.</p>
+          ) : (
+            // ★ No project to be a folder: the conversations sit at the root of
+            //   the tree, and there is no heading to draw. ★ The sidebar looks
+            //   exactly as it looked before the projects landed.
+            <ul role="tree" aria-label="Conversations" data-testid="session-tree" className="space-y-0.5">
+              {groups[0]!.sessions.map((s) => (
+                <SessionRow
+                  key={s.meta.threadId}
+                  entry={s}
+                  level={1}
+                  active={s.meta.threadId === activeId}
+                  onOpen={() => void open(s.meta.threadId)}
+                />
+              ))}
+            </ul>
+          )
         ) : (
-          groups.map((group) => (
-            <section key={group.key} data-testid="session-group" data-group={group.key}>
-              {!flat && (
-                // ★ The group's own row: its name, and the "+" that starts a
-                //   new conversation in it. ★ The button belongs to the
-                //   **project** the group names, so a group that is not one
-                //   (the "no project" group, the pinned group) gets none —
-                //   ★ and the check is against the table, not against the
-                //   key: a project whose id happens to be "no-project" is a
-                //   project.
-                <h2
-                  data-testid="session-group-title"
-                  className="text-muted-foreground group hover:bg-muted flex items-center gap-1 rounded-md px-2 pt-2 pb-1 text-xs font-medium"
-                >
-                  <span className="min-w-0 flex-1 truncate">{group.title}</span>
-                  {projects.some((p) => p.id === group.key) && (
-                    <button
-                      type="button"
-                      data-testid="new-thread-in-project"
-                      aria-label={`New thread in ${group.title}`}
-                      title="Start a new conversation in this project"
-                      onClick={() => startThreadInProject(group.key)}
-                      className="hover:bg-muted grid size-5 shrink-0 place-items-center rounded-md opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                    >
-                      <PlusIcon className="size-3.5" />
-                    </button>
-                  )}
-                </h2>
-              )}
-              <ul className="space-y-0.5">
-                {group.sessions.map((s) => (
-                  <SessionRow
-                    key={s.meta.threadId}
-                    entry={s}
-                    active={s.meta.threadId === activeId}
-                    onOpen={() => void open(s.meta.threadId)}
-                  />
-                ))}
-              </ul>
-            </section>
-          ))
+          <ul role="tree" aria-label="Conversations" data-testid="session-tree" className="space-y-0.5">
+            {shown.map((group) => (
+              <li
+                key={group.key}
+                role="treeitem"
+                // ★ A folder with nothing in it is not expandable, and it says
+                //   so: the attribute is left off rather than lying with a
+                //   "false" that promises a child list.
+                aria-expanded={group.sessions.length > 0 ? !group.folded : undefined}
+                aria-level={1}
+                aria-label={group.title}
+                data-testid="session-group"
+                data-group={group.key}
+                data-folded={group.folded ? "true" : "false"}
+              >
+                <ProjectGroup
+                  group={group}
+                  project={projects.find((p) => p.id === group.key) ?? null}
+                  scoped={scope !== null}
+                  activeId={activeId}
+                  onToggle={() => toggle(group.key)}
+                  onOpen={(id) => void open(id)}
+                />
+              </li>
+            ))}
+          </ul>
         )}
       </div>
       <SettingsEntry className="border-border border-t px-2 py-1.5" />
@@ -126,12 +167,277 @@ export function Sidebar() {
   )
 }
 
+/**
+ * ProjectGroup is one folder of the tree: its heading, and the
+ * conversations in it.
+ *
+ * ★ The heading is a **folder row**: a disclosure triangle, a folder, the
+ *   name and the row's own menu. ★ The triangle is the fold — it is the one
+ *   control that is always there, because it says a **state**, not an action.
+ *
+ * ★ The menu holds the actions on the project. ★ It is here and not in the
+ *   dialog under the input box, because the project is *seen* here: an
+ *   action that is far from the thing it acts on is an action nobody takes.
+ */
+function ProjectGroup({
+  group,
+  project,
+  scoped,
+  activeId,
+  onToggle,
+  onOpen,
+}: {
+  group: SessionGroup<SessionEntry>
+  project: ProjectSummary | null
+  scoped: boolean
+  activeId: string | null
+  onToggle(): void
+  onOpen(id: string): void
+}) {
+  const startThreadInProject = useStore((s) => s.startThreadInProject)
+  const renameProject = useStore((s) => s.renameProject)
+  const deleteProject = useStore((s) => s.deleteProject)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(group.title)
+  const [nameError, setNameError] = useState<string | undefined>()
+  const [rootOpen, setRootOpen] = useState(false)
+  // ★ The key of the folder dialog's **opening**: it changes when the dialog
+  //   opens, so the dialog is mounted afresh and its field starts on the
+  //   path the project has. ★ It does not change when the dialog closes —
+  //   the close animation belongs to the mounted dialog.
+  const [rootOpenKey, setRootOpenKey] = useState(0)
+  const headRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (!headRef.current?.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener("mousedown", onDown)
+    return () => document.removeEventListener("mousedown", onDown)
+  }, [menuOpen])
+
+  useEffect(() => {
+    if (!editing) return
+    const el = inputRef.current
+    if (!el) return
+    el.focus()
+    el.select()
+  }, [editing])
+
+  // ★ The draft is seeded from the name the heading shows **when the editor
+  //   opens** — the table is the server's answer, and it may have changed
+  //   since the row was drawn.
+  const startEditing = () => {
+    setMenuOpen(false)
+    setDraft(group.title)
+    setNameError(undefined)
+    setEditing(true)
+  }
+
+  const commit = async () => {
+    const name = draft.replace(/[\r\n]+/g, " ").trim()
+    // ★ An empty name is refused: the project already has one, and an empty
+    //   name would take it away. ★ The rule is the client's own — it is the
+    //   same one the server keeps.
+    const error = projectRenameError(name)
+    if (error !== undefined) {
+      setNameError(error)
+      return
+    }
+    setNameError(undefined)
+    setEditing(false)
+    if (name === group.title || !project) return
+    await renameProject(project.id, name).catch(() => {})
+  }
+
+  const remove = async () => {
+    setMenuOpen(false)
+    if (!project) return
+    await deleteProject(project.id).catch(() => {})
+  }
+
+  const folded = group.folded === true
+  // ★ The count is the **server's** answer for a project, and the client's
+  //   own for the group that has none.
+  const count = project ? project.sessionCount : group.sessions.length
+  // ★ The folder is open when there is something inside it: ★ an empty
+  //   folder is a closed folder, and a folder that is folded away is closed
+  //   too — the icon says the state, the way the triangle does.
+  const openFolder = !folded && group.sessions.length > 0
+
+  return (
+    <>
+      <div
+        ref={headRef}
+        data-testid="session-group-title"
+        className="text-muted-foreground group hover:bg-muted relative flex items-center gap-1 rounded-md px-2 pt-2 pb-1 text-xs font-medium"
+      >
+        {group.sessions.length > 0 ? (
+          <button
+            type="button"
+            data-testid="group-toggle"
+            aria-expanded={!folded}
+            aria-label={`${folded ? "Expand" : "Collapse"} ${group.title}`}
+            onClick={onToggle}
+            className="hover:bg-muted grid size-4 shrink-0 place-items-center rounded-sm"
+          >
+            {folded ? (
+              <ChevronRightIcon aria-hidden="true" className="size-3.5" />
+            ) : (
+              <ChevronDownIcon aria-hidden="true" className="size-3.5" />
+            )}
+          </button>
+        ) : (
+          // ★ An empty folder has nothing to unfold: the triangle is the
+          //   fold, and folding nothing is a control that does nothing. ★ The
+          //   spacer keeps the names lined up with the folders that do have
+          //   conversations under them.
+          <span aria-hidden="true" className="size-4 shrink-0" />
+        )}
+
+        {openFolder ? (
+          <FolderOpenIcon aria-hidden="true" className="size-3.5 shrink-0" />
+        ) : (
+          <FolderIcon aria-hidden="true" className="size-3.5 shrink-0" />
+        )}
+
+        {editing ? (
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => void commit()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                void commit()
+              }
+              if (e.key === "Escape") {
+                setDraft(group.title)
+                setEditing(false)
+              }
+            }}
+            aria-label={`Name of ${group.title}`}
+            aria-invalid={nameError !== undefined}
+            title={nameError}
+            data-testid="project-group-rename"
+            className="border-ring bg-background min-w-0 flex-1 rounded-md border px-1 py-0.5 text-xs outline-none focus-visible:ring-2"
+          />
+        ) : (
+          <span className="min-w-0 flex-1 truncate">{group.title}</span>
+        )}
+
+        {folded && (
+          <span data-testid="group-count" className="shrink-0 text-[11px] tabular-nums">
+            {count}
+          </span>
+        )}
+
+        {project && (
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              aria-label={`Options for ${group.title}`}
+              data-testid="project-menu-button"
+              onClick={() => setMenuOpen((v) => !v)}
+              className="hover:bg-muted grid size-5 place-items-center rounded-md opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+            >
+              <MoreHorizontalIcon aria-hidden="true" className="size-3.5" />
+            </button>
+
+            {menuOpen && (
+              <div
+                role="menu"
+                data-testid="project-menu"
+                className="bg-popover absolute end-1 top-full z-10 mt-0.5 w-44 rounded-md border p-0.5 shadow-md"
+              >
+                <MenuItem
+                  icon={<PlusIcon className="size-3.5" />}
+                  label="New conversation"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    startThreadInProject(group.key)
+                  }}
+                />
+                <MenuItem
+                  icon={<PencilIcon className="size-3.5" />}
+                  label="Rename project"
+                  onClick={startEditing}
+                />
+                {/*
+                  ★ The process serves **one** directory in the single-project
+                  //   mode, and that directory is the scope: moving or
+                  //   removing it would change what the process serves, so
+                  //   those two actions are not offered there.
+                */}
+                {!scoped && (
+                  <MenuItem
+                    icon={<FolderIcon className="size-3.5" />}
+                    label="Change folder"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      // ★ The key changes with the opening: the dialog is
+                      //   mounted afresh, and its field starts on the path
+                      //   the project has.
+                      setRootOpenKey((k) => k + 1)
+                      setRootOpen(true)
+                    }}
+                  />
+                )}
+                {!scoped && (
+                  <MenuItem
+                    icon={<Trash2Icon className="size-3.5" />}
+                    label="Remove project"
+                    danger
+                    onClick={() => void remove()}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {!folded && (
+        <ul role="group" className="space-y-0.5 ps-4">
+          {group.sessions.map((s) => (
+            <SessionRow
+              key={s.meta.threadId}
+              entry={s}
+              level={2}
+              active={s.meta.threadId === activeId}
+              onOpen={() => onOpen(s.meta.threadId)}
+            />
+          ))}
+        </ul>
+      )}
+
+      {project && (
+        <ProjectRootDialog
+          // ★ The dialog mounts afresh for every opening, so the field starts
+          //   on the path the project has — ★ the editor shows what is there,
+          //   not what was typed the last time it was open.
+          key={rootOpenKey}
+          project={project}
+          open={rootOpen}
+          onOpenChange={setRootOpen}
+        />
+      )}
+    </>
+  )
+}
+
 function SessionRow({
   entry,
+  level,
   active,
   onOpen,
 }: {
   entry: SessionEntry
+  level: number
   active: boolean
   onOpen(): void
 }) {
@@ -237,7 +543,14 @@ function SessionRow({
   }
 
   return (
-    <li ref={wrapRef} data-testid="thread-row" className="group relative">
+    <li
+      ref={wrapRef}
+      role="treeitem"
+      aria-level={level}
+      aria-label={entry.meta.title || "New Chat"}
+      data-testid="thread-row"
+      className="group relative"
+    >
       <button
         type="button"
         data-testid="thread-item"

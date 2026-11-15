@@ -959,23 +959,30 @@ zustand instance, so importing it pulls in zustand, `fetch` and `localStorage` t
 ★ Put new logic in these layers and keep them pure — correctness is proven by
 `bun test`, which is far faster than "changed the UI, now open a browser".
 
-★ **The sidebar groups the conversations by project**, and the grouping is a pure
-function: `web/src/lib/projects.ts:97`'s `groupSessions(sessions, projects, scope)`.
+★ **The sidebar is a file tree of projects**, and the grouping is a pure
+function: `web/src/lib/projects.ts:113`'s `groupSessions(sessions, projects, scope)`.
 The client reads the project table and the scope **from the server** and draws what
 it was given — it never decides which project a session belongs to, because the
 table is the only truth about that relation. ★ A session without a project goes to
-the "no project" group, and a group with nothing in it is not drawn at all. ★ The
-sidebar's own design — its groups, rows, menus and the one current project — is
-`docs/sidebar-design.md`.
+the "no project" folder. ★ **A project is a folder even when it holds no conversations**:
+that folder is where the project's own actions live, so a project with nothing in it can
+still be renamed, moved or removed. ★ The
+folding is the client's own business and stays on the machine
+(`web/src/lib/projects.ts`'s `foldGroups`); ★ the sidebar's own design — its groups,
+rows, menus and the one current project — is `docs/sidebar-design.md`.
 
-★ **The table has a write surface, and it sits under the input box.** The client
-keeps no copy of it: every change goes through the server, and the list that comes
-back is the one that is drawn. The entry is the button under the input box
-(`web/src/components/projects-dialog.tsx`'s `ProjectsButton`) — it names the project
-the composer works in, and the dialog it opens is both the switcher and the write
-surface: pick a project, create, rename, delete. ★ It is only there when there is a
-choice: the single-project mode serves one directory, and a server that does not
-know the table answers `503`.
+★ **The table has two write surfaces, and they are split by what they act on.**
+★ A **new** project is made under the input box: that is where the decision "which
+directory does the next conversation work in" is made, and it is made before the
+first word is typed. ★ An **existing** project is changed on its own row in the
+sidebar, where the project is seen. ★ The client keeps no copy of the table: every
+change goes through the server, and the list that comes back is the one that is
+drawn. ★ The button under the input box
+(`web/src/components/projects-dialog.tsx`'s `ProjectsButton`) is a **switch** on the
+empty page and a **label** on a conversation page — ★ a conversation's project is
+immutable, so a switch there could only mean leaving the conversation. ★ It is only
+there when there is a choice: the single-project mode serves one directory, and a
+server that does not know the table answers `503`.
 
 ★ A zustand selector must return a **reference-stable** value: allocating a new
 array/object on every call makes `Object.is` decide "it changed" forever, which shows up

@@ -11,19 +11,31 @@ import {
   setProjectsMode,
 } from "./fixtures"
 
-// ★ The sidebar groups the conversations by the project they belong to.
+// ★ The sidebar is a **file tree**: projects are folders, conversations are
+//   the files in them.
 //
 // ★ The grouping is the **server's** answer: the client reads the project
 //   table and the scope, and it draws what it was given. ★ These specs pin
 //   the three modes — no projects, many projects, one project — because a
 //   sidebar that shows a conversation in the wrong group is not a cosmetic
 //   mistake: it says the work happens in a directory it does not happen in.
+//
+// ★ And the button under the input box has **two forms**: a switch on the
+//   empty view, a label on a conversation page. ★ A conversation's project
+//   is immutable, so a switch there could only mean "leave this
+//   conversation" — and a button that says one thing and does another is
+//   worse than no button.
 
 const GROUP = '[data-testid="session-group"]'
 const GROUP_TITLE = '[data-testid="session-group-title"]'
+const GROUP_TOGGLE = '[data-testid="group-toggle"]'
+const GROUP_COUNT = '[data-testid="group-count"]'
+const TREE = '[data-testid="session-tree"]'
 const THREAD_ITEM = '[data-testid="thread-item"]'
-const PICKER = '[data-testid="project-picker"]'
+const THREAD_ROW = '[data-testid="thread-row"]'
+const NEW_THREAD = '[data-testid="new-thread"]'
 const PROJECTS_BUTTON = '[data-testid="projects-button"]'
+const PROJECTS_LABEL = '[data-testid="projects-label"]'
 const PROJECTS_DIALOG = '[data-testid="projects-dialog"]'
 const PROJECTS_EMPTY = '[data-testid="projects-empty"]'
 const PROJECT_ROW = '[data-testid="project-row"]'
@@ -31,11 +43,17 @@ const PROJECT_NAME = '[data-testid="project-name"]'
 const PROJECT_NAME_INPUT = '[data-testid="project-name-input"]'
 const PROJECT_ROOT_INPUT = '[data-testid="project-root-input"]'
 const PROJECT_CREATE = '[data-testid="project-create"]'
-const PROJECT_RENAME_INPUT = '[data-testid="project-rename-input"]'
 const PROJECT_REFUSAL = '[data-testid="project-refusal"]'
 const PROJECT_PICK = '[data-testid="project-pick-directory"]'
 const PROJECT_CURRENT = '[data-testid="project-current"]'
-const NEW_THREAD_IN_PROJECT = '[data-testid="new-thread-in-project"]'
+const PROJECT_MENU_BUTTON = '[data-testid="project-menu-button"]'
+const PROJECT_MENU = '[data-testid="project-menu"]'
+const PROJECT_GROUP_RENAME = '[data-testid="project-group-rename"]'
+const PROJECT_ROOT_DIALOG = '[data-testid="project-root-dialog"]'
+const PROJECT_ROOT_EDIT = '[data-testid="project-root-edit"]'
+const PROJECT_ROOT_PICK = '[data-testid="project-root-pick"]'
+const PROJECT_ROOT_SAVE = '[data-testid="project-root-save"]'
+const PROJECT_ROOT_REFUSAL = '[data-testid="project-root-refusal"]'
 
 interface FakeThreadMeta {
   threadId: string
@@ -43,9 +61,21 @@ interface FakeThreadMeta {
   projectId: string
 }
 
+interface FakeProject {
+  id: string
+  name: string
+  root: string
+}
+
 async function fakeThreads(): Promise<FakeThreadMeta[]> {
   const res = await fetch(`${FAKE_URL}/v2/sessions`)
   const body = (await res.json()) as { items: FakeThreadMeta[] }
+  return body.items
+}
+
+async function fakeProjects(): Promise<FakeProject[]> {
+  const res = await fetch(`${FAKE_URL}/v2/projects`)
+  const body = (await res.json()) as { items: FakeProject[] }
   return body.items
 }
 
@@ -57,14 +87,12 @@ test("没有项目时侧栏是一张平表，没有分组标题", async ({ page 
   await setProjectsMode("default")
   await openApp(page)
 
-  // ★ There is one group — the conversations that belong to no project —
-  //   and it has **no heading**: the sidebar looks exactly as it looked
-  //   before the projects landed.
-  await expect(page.locator(GROUP)).toHaveCount(1)
+  // ★ There is no project to be a folder, so the conversations sit at the
+  //   root of the tree — and there is **no heading**: the sidebar looks
+  //   exactly as it looked before the projects landed.
   await expect(page.locator(GROUP_TITLE)).toHaveCount(0)
   await expect(page.locator(THREAD_ITEM).first()).toBeVisible()
-  // ★ There is no project to pick, so there is no picker.
-  await expect(page.locator(PICKER)).toHaveCount(0)
+  await expect(page.locator(TREE).locator(THREAD_ROW)).toHaveCount(8)
 })
 
 test("多项目模式按项目分组，每个会话只出现一次", async ({ page }) => {
@@ -74,12 +102,12 @@ test("多项目模式按项目分组，每个会话只出现一次", async ({ pa
   await expect(page.locator(GROUP)).toHaveCount(3)
   await expect(page.locator(GROUP_TITLE)).toHaveText(["Alpha", "Beta", "No project"])
 
-  const alpha = page.locator(GROUP).filter({ has: page.getByText("Alpha", { exact: true }) })
+  const alpha = page.locator('[data-group="alpha"]')
   await expect(alpha.locator(THREAD_ITEM)).toHaveCount(2)
 
   // ★ A conversation that belongs to no project is in its own group, and it
   //   is not in the project groups as well.
-  const orphan = page.locator(GROUP).filter({ has: page.getByText("No project", { exact: true }) })
+  const orphan = page.locator('[data-group="no-project"]')
   await expect(orphan.locator(THREAD_ITEM)).toHaveCount(4)
 
   const titles = await page.locator(THREAD_ITEM).allInnerTexts()
@@ -92,8 +120,6 @@ test("单项目模式只有一组，作用域的会话和未选项目的会话�
 
   await expect(page.locator(GROUP)).toHaveCount(1)
   await expect(page.locator(GROUP_TITLE)).toHaveText(["Alpha"])
-  // ★ The scope leaves no choice, so there is no picker.
-  await expect(page.locator(PICKER)).toHaveCount(0)
 
   // ★ The sessions of the scope project and the ones that belong to no
   //   project are in the same group — the process serves one directory, and
@@ -104,30 +130,327 @@ test("单项目模式只有一组，作用域的会话和未选项目的会话�
   await expect(group.locator(THREAD_ITEM)).toHaveCount(8)
 })
 
-test("新建会话落在侧栏选中的项目里", async ({ page }) => {
+// ★ The sidebar is a map, and it does not say where you work.
+//
+// ★ The picker that used to sit at the top of the sidebar is gone: it was a
+//   **switch**, and a switch belongs to the moment where nothing is decided
+//   yet. ★ On a conversation page the only place that names the project is
+//   the label under the input box.
+
+test("侧栏顶部不再有项目选择器", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  await expect(page.locator("aside select")).toHaveCount(0)
+  // ★ The entry that is left is under the input box: it is a switch, and it
+  //   is there only while nothing is decided.
+  await expect(page.locator(PROJECTS_BUTTON)).toBeVisible()
+})
+
+// ★ The tree says what it is.
+
+test("树的结构对读屏说得通", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  const tree = page.getByRole("tree")
+  await expect(tree).toHaveCount(1)
+
+  // ★ A folder is a tree item that can be expanded — and the arrow says
+  //   whether it is.
+  const alpha = page.locator('[data-group="alpha"]')
+  await expect(alpha).toHaveAttribute("role", "treeitem")
+  await expect(alpha).toHaveAttribute("aria-expanded", "true")
+  await expect(alpha).toHaveAttribute("aria-level", "1")
+
+  // ★ And the conversations in it are one level deeper.
+  await expect(alpha.locator(THREAD_ROW).first()).toHaveAttribute("aria-level", "2")
+  await expect(alpha.getByRole("group")).toHaveCount(1)
+})
+
+test("★ 折叠：三角收起一组，计数还在", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  const alpha = page.locator('[data-group="alpha"]')
+  await expect(alpha.locator(THREAD_ITEM)).toHaveCount(2)
+
+  await alpha.locator(GROUP_TOGGLE).click()
+
+  // ★ The folder is still there — it holds something — and it says how much.
+  await expect(alpha.locator(THREAD_ITEM)).toHaveCount(0)
+  await expect(alpha.locator(GROUP_COUNT)).toHaveText("2")
+  await expect(alpha).toHaveAttribute("aria-expanded", "false")
+})
+
+test("★ 折叠会被记住", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  const alpha = page.locator('[data-group="alpha"]')
+  await alpha.locator(GROUP_TOGGLE).click()
+  await expect(alpha.locator(THREAD_ITEM)).toHaveCount(0)
+
+  // ★ The fold is a **preference**: it is kept on this machine, and a
+  //   reload brings it back.
+  await page.reload()
+  await expect(alpha.locator(THREAD_ITEM)).toHaveCount(0)
+  await expect(alpha.locator(GROUP_COUNT)).toHaveText("2")
+})
+
+// ★ The button under the input box has two forms.
+
+test("空视图上那个按钮写着当前项目", async ({ page }) => {
   await setProjectsMode("multi")
   await openApp(page)
 
   // ★ The first project is the default: a new conversation needs a project,
   //   and the one the user put at the top is the one it gets.
-  await expect(page.locator(PICKER)).toHaveValue("alpha")
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Alpha")
+})
 
-  await page.locator(PICKER).selectOption("beta")
-  await sendMessage(page, `${MARKER_A} in beta`)
+test("★ 对话页上那个按钮只是标签，不能切换", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
 
+  // ★ Open a conversation that belongs to Beta.
+  const beta = page.locator('[data-group="beta"]')
+  await beta.locator(THREAD_ITEM).first().click()
+
+  // ★ The label names the conversation's project — and it is a label: the
+  //   switch is gone, because a conversation's project cannot change.
+  await expect(page.locator(PROJECTS_LABEL)).toHaveText("Beta")
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveCount(0)
+
+  // ★ Clicking it does nothing at all: no dialog opens.
+  await page.locator(PROJECTS_LABEL).click()
+  await expect(page.locator(PROJECTS_DIALOG)).toHaveCount(0)
+})
+
+test("空视图上那个按钮可以切换", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  await page.locator(PROJECTS_BUTTON).click()
+  await page.locator(PROJECT_ROW).filter({ hasText: "Beta" }).click()
+
+  // ★ The dialog closes — the user picked, the work is over — and the button
+  //   names the project that was picked.
+  await expect(page.locator(PROJECTS_DIALOG)).toHaveCount(0)
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Beta")
+
+  // ★ And the next conversation is created in it.
+  await sendMessage(page, `${MARKER_A} after the switch`)
   await expect
     .poll(async () => {
       const threads = await fakeThreads()
-      // ★ The new conversation is the **last** one: the fake appends it.
       return threads[threads.length - 1]?.projectId
     }, { timeout: 7000 })
     .toBe("beta")
+})
 
-  // ★ And the sidebar shows it under that project. ★ The conversation is
-  //   named after its first question once the run is over — the title is
-  //   the server's, not the placeholder's.
-  const beta = page.locator(GROUP).filter({ has: page.getByText("Beta", { exact: true }) })
-  await expect(beta.locator(THREAD_ITEM).filter({ hasText: MARKER_A })).toHaveCount(1)
+test("★「没有项目」是列表的第一项", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  await page.locator(PROJECTS_BUTTON).click()
+
+  // ★ "No project" leads the list: it is "do not pick a project", not one of
+  //   the projects, and last would make it look like the default one.
+  await expect(page.locator(PROJECT_ROW).first().locator(PROJECT_NAME)).toHaveText("No project")
+  await page.locator(PROJECT_ROW).first().click()
+
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("No project")
+  await sendMessage(page, `${MARKER_A} without a project`)
+  await expect
+    .poll(async () => {
+      const threads = await fakeThreads()
+      return threads[threads.length - 1]?.projectId
+    }, { timeout: 7000 })
+    .toBe("")
+})
+
+test("当前项目在列表里标出来", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  await page.locator(PROJECTS_BUTTON).click()
+
+  // ★ The list says which one is current — the button under the input box
+  //   and the list must not disagree.
+  const alpha = page.locator(PROJECT_ROW).filter({ hasText: "Alpha" })
+  const beta = page.locator(PROJECT_ROW).filter({ hasText: "Beta" })
+  await expect(alpha).toHaveAttribute("data-active", "true")
+  await expect(alpha.locator(PROJECT_CURRENT)).toBeVisible()
+  await expect(beta).toHaveAttribute("data-active", "false")
+  await expect(beta.locator(PROJECT_CURRENT)).toHaveCount(0)
+})
+
+test("★ 换项目要回空视图 —— 对话页上那个地方不提供开关", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  // ★ Open a conversation that belongs to Beta.
+  const beta = page.locator('[data-group="beta"]')
+  await beta.locator(THREAD_ITEM).first().click()
+  await expect(page.locator(PROJECTS_LABEL)).toHaveText("Beta")
+
+  // ★ The way to work in another project is a **new conversation**: the
+  //   empty view is where the project of the next one is chosen.
+  await page.locator(NEW_THREAD).click()
+  await expect(page.locator(PROJECTS_BUTTON)).toBeVisible()
+  await page.locator(PROJECTS_BUTTON).click()
+  await page.locator(PROJECT_ROW).filter({ hasText: "Alpha" }).click()
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Alpha")
+
+  // ★ And the conversation that was open is still in the sidebar: its work
+  //   is not lost, only left.
+  await expect(page.locator(GROUP)).toHaveCount(3)
+  await expect(beta.locator(THREAD_ITEM)).toHaveCount(2)
+})
+
+// ★ The project's own row: the actions on a project that is already on the
+//   map.
+
+test("★ 项目行的菜单里能开一段新对话", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  // ★ Open a conversation that belongs to Alpha — the label names it.
+  const alpha = page.locator('[data-group="alpha"]')
+  await alpha.locator(THREAD_ITEM).first().click()
+  await expect(page.locator(PROJECTS_LABEL)).toHaveText("Alpha")
+
+  // ★ The menu of the project: a new conversation there. ★ The composer
+  //   comes back empty and the button names the project that was picked.
+  const beta = page.locator('[data-group="beta"]')
+  await beta.locator(PROJECT_MENU_BUTTON).hover()
+  await beta.locator(PROJECT_MENU_BUTTON).click()
+  await expect(beta.locator(PROJECT_MENU)).toBeVisible()
+  await beta.getByRole("menuitem", { name: "New conversation" }).click()
+
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Beta")
+  await expect(page.locator(COMPOSER)).toBeVisible()
+
+  // ★ And the conversation that was open is still in the sidebar — its work
+  //   is not lost, only left.
+  await expect(page.locator(GROUP)).toHaveCount(3)
+  await expect(alpha.locator(THREAD_ITEM)).toHaveCount(2)
+})
+
+test("★ 项目行的菜单里能改名", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  const beta = page.locator('[data-group="beta"]')
+  await beta.locator(PROJECT_MENU_BUTTON).hover()
+  await beta.locator(PROJECT_MENU_BUTTON).click()
+  await beta.getByRole("menuitem", { name: "Rename project" }).click()
+
+  // ★ The name is edited **in place**: the project is seen there, so it is
+  //   changed there.
+  await expect(beta.locator(PROJECT_GROUP_RENAME)).toBeVisible()
+  await beta.locator(PROJECT_GROUP_RENAME).fill("Beta Two")
+  await beta.locator(PROJECT_GROUP_RENAME).press("Enter")
+
+  await expect(page.locator(GROUP_TITLE)).toHaveText(["Alpha", "Beta Two", "No project"])
+  const projects = await fakeProjects()
+  expect(projects.find((p) => p.id === "beta")?.name).toBe("Beta Two")
+})
+
+test("★ 改名不能是空的，理由写在那儿", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  const beta = page.locator('[data-group="beta"]')
+  await beta.locator(PROJECT_MENU_BUTTON).hover()
+  await beta.locator(PROJECT_MENU_BUTTON).click()
+  await beta.getByRole("menuitem", { name: "Rename project" }).click()
+
+  await beta.locator(PROJECT_GROUP_RENAME).fill("")
+  await beta.locator(PROJECT_GROUP_RENAME).press("Enter")
+
+  // ★ Renaming is the one place where the name is **required**: the project
+  //   already has one, and an empty name would take it away. ★ The editor
+  //   stays open and says why.
+  await expect(beta.locator(PROJECT_GROUP_RENAME)).toBeVisible()
+  await expect(beta.locator(PROJECT_GROUP_RENAME)).toHaveAttribute("aria-invalid", "true")
+  await expect(beta.locator(PROJECT_GROUP_RENAME)).toHaveValue("")
+  // ★ And the rename did not happen: the table still carries the old name.
+  const projects = await fakeProjects()
+  expect(projects.find((p) => p.id === "beta")?.name).toBe("Beta")
+})
+
+test("★ 项目行的菜单里能改目录", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  const beta = page.locator('[data-group="beta"]')
+  await beta.locator(PROJECT_MENU_BUTTON).hover()
+  await beta.locator(PROJECT_MENU_BUTTON).click()
+  await beta.getByRole("menuitem", { name: "Change folder" }).click()
+
+  // ★ A project **is** a directory: this says where the agent reads and
+  //   writes. ★ The field opens on the path the project has.
+  await expect(page.locator(PROJECT_ROOT_DIALOG)).toBeVisible()
+  await expect(page.locator(PROJECT_ROOT_EDIT)).toHaveValue("/tmp/beta")
+  await page.locator(PROJECT_ROOT_EDIT).fill("/tmp/moved")
+  await page.locator(PROJECT_ROOT_SAVE).click()
+
+  await expect(page.locator(PROJECT_ROOT_DIALOG)).toHaveCount(0)
+  const projects = await fakeProjects()
+  expect(projects.find((p) => p.id === "beta")?.root).toBe("/tmp/moved")
+})
+
+test("★ 改目录时机器上没有选择器，理由写在那儿", async ({ page }) => {
+  await setProjectsMode("multi")
+  await setDirPickMode("failed")
+  await openApp(page)
+
+  const beta = page.locator('[data-group="beta"]')
+  await beta.locator(PROJECT_MENU_BUTTON).hover()
+  await beta.locator(PROJECT_MENU_BUTTON).click()
+  await beta.getByRole("menuitem", { name: "Change folder" }).click()
+
+  await expect(page.locator(PROJECT_ROOT_DIALOG)).toBeVisible()
+  await page.locator(PROJECT_ROOT_PICK).click()
+
+  // ★ The reason is the server's own sentence, and the path that was there
+  //   is still there: the dialog is a form, and a chooser that could not
+  //   open is not a closed form.
+  await expect(page.locator(PROJECT_ROOT_REFUSAL)).toContainText("no folder chooser")
+  await expect(page.locator(PROJECT_ROOT_EDIT)).toHaveValue("/tmp/beta")
+})
+
+test("★ 项目行的菜单里能移除项目", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  const beta = page.locator('[data-group="beta"]')
+  await beta.locator(PROJECT_MENU_BUTTON).hover()
+  await beta.locator(PROJECT_MENU_BUTTON).click()
+  await beta.getByRole("menuitem", { name: "Remove project" }).click()
+
+  // ★ The project is gone from the map — and the conversations that belonged
+  //   to it are **kept**: they fall back to no project.
+  await expect(page.locator(GROUP)).toHaveCount(2)
+  await expect(page.locator(GROUP_TITLE)).toHaveText(["Alpha", "No project"])
+  const projects = await fakeProjects()
+  expect(projects.find((p) => p.id === "beta")).toBeUndefined()
+})
+
+test("★ 单项目模式不给移动和移除", async ({ page }) => {
+  await setProjectsMode("single")
+  await openApp(page)
+
+  // ★ The process serves **one** directory, and that directory is the scope:
+  //   moving or removing it would change what the process serves.
+  const alpha = page.locator('[data-group="alpha"]')
+  await alpha.locator(PROJECT_MENU_BUTTON).hover()
+  await alpha.locator(PROJECT_MENU_BUTTON).click()
+  await expect(alpha.getByRole("menuitem", { name: "New conversation" })).toBeVisible()
+  await expect(alpha.getByRole("menuitem", { name: "Change folder" })).toHaveCount(0)
+  await expect(alpha.getByRole("menuitem", { name: "Remove project" })).toHaveCount(0)
 })
 
 // ★ The project table is writable from the interface.
@@ -137,9 +460,10 @@ test("新建会话落在侧栏选中的项目里", async ({ page }) => {
 //   to get a project: the picker was hidden because the table was empty, and
 //   nothing else spoke to it. ★ The entry is below the input box, because a
 //   project is what a conversation belongs to — a thing decided before the
-//   first word is typed.
+//   first word is typed. ★ And **new** projects are made there: the actions
+//   on a project that exists are on its own row in the sidebar.
 
-test("项目可以从界面创建、重命名、删除", async ({ page }) => {
+test("项目可以从界面创建", async ({ page }) => {
   await setProjectsMode("default")
   await openApp(page)
 
@@ -155,22 +479,56 @@ test("项目可以从界面创建、重命名、删除", async ({ page }) => {
   await page.locator(PROJECT_CREATE).click()
 
   // ★ The list that is shown is the list the **server** answers with.
-  await expect(page.locator(PROJECT_ROW)).toHaveCount(1)
-  await expect(page.locator(PROJECT_NAME)).toHaveText("CodeLab")
+  await expect(page.locator(PROJECT_ROW)).toHaveCount(2)
+  await expect(page.locator(PROJECT_NAME).last()).toHaveText("CodeLab")
 
   // ★ And the project that was just made is the one a new conversation
   //   belongs to — the user made it, and the next conversation is the one
   //   they are about to start.
-  await expect(page.locator(PICKER)).toHaveValue("codelab")
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("CodeLab")
+})
 
-  await page.getByRole("button", { name: "Rename CodeLab" }).click()
-  await page.locator(PROJECT_RENAME_INPUT).fill("Work")
-  await page.locator(PROJECT_RENAME_INPUT).press("Enter")
-  await expect(page.locator(PROJECT_NAME)).toHaveText("Work")
+test("★ 新建的项目空着也是一行 —— 地图上有它", async ({ page }) => {
+  await setProjectsMode("default")
+  await openApp(page)
 
-  await page.getByRole("button", { name: "Delete Work" }).click()
-  await expect(page.locator(PROJECT_ROW)).toHaveCount(0)
-  await expect(page.locator(PROJECTS_EMPTY)).toBeVisible()
+  // ★ The table is empty, so the sidebar is a flat list of conversations.
+  await expect(page.locator(GROUP)).toHaveCount(0)
+
+  await page.locator(PROJECTS_BUTTON).click()
+  await page.locator(PROJECT_NAME_INPUT).fill("CodeLab")
+  await page.locator(PROJECT_ROOT_INPUT).fill("/tmp/codelab")
+  await page.locator(PROJECT_CREATE).click()
+
+  // ★ The create keeps the dialog open: it shows the project that was just
+  //   made, and that project is the current one now. ★ Close it — the
+  //   sidebar is behind the overlay until it is gone.
+  await expect(page.locator(PROJECTS_DIALOG)).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page.locator(PROJECTS_DIALOG)).toHaveCount(0)
+
+  // ★ Now the table carries a project, and the sidebar is a map. ★ The
+  //   project is a row even though no conversation has been started in it:
+  //   that row is where its actions live, and a project with no row could
+  //   not be renamed, moved or removed.
+  // ★ The row is found by its **key**, not by its name: the name is what the
+  //   user types, and a rename would make the locator miss.
+  const group = page.locator('[data-group="codelab"]')
+  await expect(group).toHaveCount(1)
+  await expect(group.locator(GROUP_TITLE)).toHaveText("CodeLab")
+
+  // ★ The conversations that belong to no project are still in their own
+  //   basket — the new project did not swallow them.
+  await expect(page.locator('[data-group="no-project"]')).toHaveCount(1)
+
+  // ★ Nothing to unfold, so there is no triangle: a fold of nothing is a
+  //   control that does nothing.
+  await expect(group.locator(GROUP_TOGGLE)).toHaveCount(0)
+
+  // ★ And the menu is on the row: the project is managed where it is seen.
+  await group.locator(PROJECT_MENU_BUTTON).hover()
+  await group.locator(PROJECT_MENU_BUTTON).click()
+  await expect(group.getByRole("menuitem", { name: "Rename project" })).toBeVisible()
 })
 
 test("没有目录就建不了项目，理由写在那儿", async ({ page }) => {
@@ -197,33 +555,9 @@ test("名字可以留空 —— 目录名就是它的名字", async ({ page }) =
   await expect(page.locator(PROJECT_CREATE)).toBeEnabled()
   await page.locator(PROJECT_CREATE).click()
 
-  await expect(page.locator(PROJECT_ROW)).toHaveCount(1)
+  await expect(page.locator(PROJECT_ROW)).toHaveCount(2)
   // ★ The name came from the directory, and it is the server's answer.
-  await expect(page.locator(PROJECT_NAME)).toHaveText("openheron")
-})
-
-test("改名要名字，空的留在那儿，理由写在那儿", async ({ page }) => {
-  await setProjectsMode("default")
-  await openApp(page)
-
-  await page.locator(PROJECTS_BUTTON).click()
-  await page.locator(PROJECT_NAME_INPUT).fill("CodeLab")
-  await page.locator(PROJECT_ROOT_INPUT).fill("/tmp/codelab")
-  await page.locator(PROJECT_CREATE).click()
-  await expect(page.locator(PROJECT_ROW)).toHaveCount(1)
-
-  await page.getByRole("button", { name: "Rename CodeLab" }).click()
-  await page.locator(PROJECT_RENAME_INPUT).fill("")
-  await page.locator(PROJECT_RENAME_INPUT).press("Enter")
-
-  // ★ Renaming is the one place where the name is **required**: the project
-  //   already has one, and an empty name would take it away. ★ The dialog
-  //   stays open and says why.
-  await expect(page.locator(PROJECTS_DIALOG)).toBeVisible()
-  await expect(page.locator(PROJECT_REFUSAL)).toContainText("The name must not be empty.")
-  // ★ And the name is still the old one: the rename did not happen.
-  await page.locator(PROJECT_RENAME_INPUT).press("Escape")
-  await expect(page.locator(PROJECT_NAME)).toHaveText("CodeLab")
+  await expect(page.locator(PROJECT_NAME).last()).toHaveText("openheron")
 })
 
 test("单项目模式没有创建项目的入口", async ({ page }) => {
@@ -286,153 +620,4 @@ test("机器上没有选择器，理由写在那儿", async ({ page }) => {
   //   the path can still be typed.
   await expect(page.locator(PROJECT_REFUSAL)).toContainText("no folder chooser")
   await expect(page.locator(PROJECT_ROOT_INPUT)).toBeVisible()
-})
-
-// ★ The button is the switcher.
-//
-// ★ It sits under the input box, so it names the project the composer works
-//   in — the same one the @-mention picker lists the files of. ★ A button
-//   that said "Project" no matter what the composer was in would say
-//   nothing about where the work happens.
-
-test("按钮上写着当前项目", async ({ page }) => {
-  await setProjectsMode("multi")
-  await openApp(page)
-
-  // ★ The first project is the default: a new conversation needs a project,
-  //   and the one the user put at the top is the one it gets. ★ The button
-  //   and the sidebar's picker say the same thing.
-  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Alpha")
-  await expect(page.locator(PICKER)).toHaveValue("alpha")
-})
-
-test("点项目行就切换过去", async ({ page }) => {
-  await setProjectsMode("multi")
-  await openApp(page)
-
-  await page.locator(PROJECTS_BUTTON).click()
-  await page.locator(PROJECT_ROW).filter({ hasText: "Beta" }).click()
-
-  // ★ The dialog closes — the user picked, the work is over — and both
-  //   controls name the project that was picked.
-  await expect(page.locator(PROJECTS_DIALOG)).toHaveCount(0)
-  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Beta")
-  await expect(page.locator(PICKER)).toHaveValue("beta")
-
-  // ★ And the next conversation is created in it.
-  await sendMessage(page, `${MARKER_A} after the switch`)
-  await expect
-    .poll(async () => {
-      const threads = await fakeThreads()
-      return threads[threads.length - 1]?.projectId
-    }, { timeout: 7000 })
-    .toBe("beta")
-})
-
-test("当前项目在列表里标出来", async ({ page }) => {
-  await setProjectsMode("multi")
-  await openApp(page)
-
-  await page.locator(PROJECTS_BUTTON).click()
-
-  // ★ The list says which one is current — the button under the input box
-  //   and the list must not disagree.
-  const alpha = page.locator(PROJECT_ROW).filter({ hasText: "Alpha" })
-  const beta = page.locator(PROJECT_ROW).filter({ hasText: "Beta" })
-  await expect(alpha).toHaveAttribute("data-active", "true")
-  await expect(alpha.locator(PROJECT_CURRENT)).toBeVisible()
-  await expect(beta).toHaveAttribute("data-active", "false")
-  await expect(beta.locator(PROJECT_CURRENT)).toHaveCount(0)
-})
-
-test("切换项目会离开当前会话 —— 归属不可改", async ({ page }) => {
-  await setProjectsMode("multi")
-  await openApp(page)
-
-  // ★ Open a conversation that belongs to Beta.
-  const beta = page.locator(GROUP).filter({ has: page.getByText("Beta", { exact: true }) })
-  await beta.locator(THREAD_ITEM).first().click()
-  // ★ The button names the conversation's project: the composer works there.
-  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Beta")
-
-  // ★ Switching to another project leaves that conversation — a
-  //   conversation's project is immutable, so the next one is created in the
-  //   project that was picked. ★ The conversation itself stays in the
-  //   sidebar: its work is not lost, only left.
-  await page.locator(PROJECTS_BUTTON).click()
-  await page.locator(PROJECT_ROW).filter({ hasText: "Alpha" }).click()
-  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Alpha")
-  await expect(page.locator(GROUP)).toHaveCount(3)
-
-  await sendMessage(page, `${MARKER_A} in alpha`)
-  await expect
-    .poll(async () => {
-      const threads = await fakeThreads()
-      return threads[threads.length - 1]?.projectId
-    }, { timeout: 7000 })
-    .toBe("alpha")
-})
-
-test("改名的时候点行不切换 —— 那一下属于输入框", async ({ page }) => {
-  await setProjectsMode("multi")
-  await openApp(page)
-
-  await page.locator(PROJECTS_BUTTON).click()
-  await page.getByRole("button", { name: "Rename Beta" }).click()
-  await page.locator(PROJECT_RENAME_INPUT).fill("Beta Two")
-
-  // ★ The row is a switch, but the click belongs to the rename: two things
-  //   at once is two things done wrong.
-  await expect(page.locator(PROJECTS_DIALOG)).toBeVisible()
-  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Alpha")
-})
-
-// ★ The "+" next to a project.
-//
-// ★ It is the way into a **new** conversation in that project: the composer
-//   comes back empty and the project becomes the one it works in. ★ It is not
-//   the switch in the dialog — a switch keeps the conversation that belongs
-//   to the project you picked, and a "+" never keeps one.
-
-test("项目旁边的 + 开一段新对话，当前项目切到它", async ({ page }) => {
-  await setProjectsMode("multi")
-  await openApp(page)
-
-  // ★ Open a conversation that belongs to Alpha — the button names it.
-  const alpha = page.locator(GROUP).filter({ has: page.getByText("Alpha", { exact: true }) })
-  await alpha.locator(THREAD_ITEM).first().click()
-  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Alpha")
-
-  // ★ The "+" next to Beta: a new conversation there. ★ The composer comes
-  //   back empty and the button names the project that was picked.
-  const beta = page.locator(GROUP).filter({ has: page.getByText("Beta", { exact: true }) })
-  const plus = beta.locator(NEW_THREAD_IN_PROJECT)
-  await plus.hover()
-  await plus.click()
-  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Beta")
-  await expect(page.locator(PICKER)).toHaveValue("beta")
-
-  // ★ And the conversation that was open is still in the sidebar — its work
-  //   is not lost, only left.
-  await expect(page.locator(GROUP)).toHaveCount(3)
-  await expect(alpha.locator(THREAD_ITEM)).toHaveCount(2)
-})
-
-test("同一个项目旁边的 + 也开新的", async ({ page }) => {
-  await setProjectsMode("multi")
-  await openApp(page)
-
-  const alpha = page.locator(GROUP).filter({ has: page.getByText("Alpha", { exact: true }) })
-  await alpha.locator(THREAD_ITEM).first().click()
-  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Alpha")
-
-  // ★ The "+" next to the project the conversation already belongs to: the
-  //   project does not change, but the composer comes back empty — a new
-  //   conversation is a new one, and it is not the one that was open.
-  await alpha.locator(NEW_THREAD_IN_PROJECT).hover()
-  await alpha.locator(NEW_THREAD_IN_PROJECT).click()
-  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Alpha")
-  await expect(page.locator(COMPOSER)).toBeVisible()
-  // ★ The conversation that was open is no longer the one on screen.
-  await expect(alpha.locator(THREAD_ITEM).first()).not.toHaveAttribute("data-active", "true")
 })

@@ -1591,56 +1591,56 @@ other — and the interface still shows you the name you recognise.
 back (the server keeps them), and the files you already sent stay on their
 messages.
 
-### 6.10 The sidebar groups the conversations by project
+### 6.10 The sidebar is a file tree of projects
 
 ★ **Every conversation belongs to a project** (§3.1), and the sidebar shows that: one
-group per project, named after it. ★ The conversations that belong to no project sit
-in a "No project" group, and a group with nothing in it is not drawn at all.
+folder per project, named after it, with the conversations in it. ★ The conversations that
+belong to no project sit in a "No project" folder. ★ **A project is a folder even when it
+holds no conversations** — that folder is where the project's own actions live (§6.11),
+so a project with nothing in it is still a folder you can rename, move or remove.
 
 ```bash
-openheron              # every project: one group per project
-openheron .            # one project: one group, and the "no project" conversations join it
+openheron              # every project: one folder per project
+openheron .            # one project: one folder, and the "no project" conversations join it
 ```
 
-★ **The picker above the list** says which project the composer works in — and
-that is **one** answer for both cases: the project a **new** conversation
-belongs to, and the project the conversation on screen belongs to. It is there
-only when there is a choice: with one project there is nothing to pick, so
-there is no picker. ★ A conversation keeps its project for its whole life —
-there is no "move it to another project"; a conversation that works in another
-directory is a new conversation.
+★ **The folders open and close.** The arrow in front of a project's name folds it away, and
+the number of conversations in it stays on the heading. ★ The folders you closed are
+remembered on this machine, so the sidebar looks the same the next time you open it.
+★ A project with no conversations has no arrow: there is nothing to open.
+
+★ **A conversation keeps its project for its whole life** — there is no "move it to another
+project"; a conversation that works in another directory is a new conversation.
 
 ★ **The `@` picker follows the project too**: it lists the files of the project the
 conversation on screen belongs to.
 
-★ **A "+" next to a project's name starts a new conversation in that project.**
-It shows when the pointer is over the project's row. The composer comes back
-empty and that project becomes the one it works in. ★ The "+" never keeps the
-conversation that is already open — not even when that conversation belongs to
-that very project: a new conversation is a new one.
+### 6.11 Choosing a project, and managing the ones you have
 
-### 6.11 Switching, creating, renaming and deleting a project
+★ **The entry is the button under the input box**, on the line that says which agent is
+answering. ★ It **names the project the composer works in** — the same project the `@`
+picker lists the files of — and clicking it opens the dialog of the table.
 
-★ **The entry is the button under the input box**, on the line that says which
-agent is answering. ★ It **names the project the composer works in** — the
-same project the `@` picker lists the files of — and clicking it opens the
-dialog of the table. A project is the decision "which directory does this
-conversation work in", and that is made before the first word is typed — so
-the button sits with the composer, not in the sidebar.
+★ **The button has two forms, and the difference is the point.** On the **empty page** —
+no conversation, or one that has not said anything yet — it is a button and it opens the
+dialog. On a **conversation page** it is a **label**: it says where the work happens and
+does nothing else. ★ A conversation's project is fixed, so the only thing a switch could do
+there would be to leave the conversation — and a button that says one thing and does
+another is worse than no button.
 
 ★ **The button is only there when there is a choice.** In the single-project
 mode (`openheron .`) there is nothing to pick, so there is no button; and a
 server that does not know the project table answers `503`, so the button is not
 drawn there either.
 
-The dialog is the whole surface of the table:
+The dialog holds two things:
 
-- **Switch** — click a project row and the composer moves into it: the
-  button under the input box, the picker above the sidebar and the `@` picker
-  all name that project from then on, and the row that is the current one
-  says so. ★ A conversation keeps its project for its whole life, so
-  switching **leaves** a conversation that belongs to another project — it
-  stays in the sidebar with its history, and the composer comes back empty.
+- **Choose** — the first row is "No project": the conversations then work in the default
+  project root. Then one row per project. Clicking a row moves the composer into it: the
+  button under the input box and the `@` picker all name that project from then on, and
+  the row that is the current one says so. ★ A conversation keeps its project for its whole
+  life, so choosing another one **leaves** a conversation that belongs to a different
+  project — it stays in the sidebar with its history, and the composer comes back empty.
   ★ The next question then opens a conversation in the project you picked.
 - **Create** — a name (optional; the directory's own name is used when you
   leave it empty) and a root directory (required, and it must not be empty).
@@ -1650,16 +1650,28 @@ The dialog is the whole surface of the table:
   you pick into the field. ★ The window opens **on the machine the server
   runs on**, so a browser on another machine cannot use it — and closing it
   without choosing is not an error: what you typed stays where it is.
-- **Rename** — the pencil on the project row. Only the name changes; the
-  directory stays where it is. ★ The name is **required** here — the project
-  already has one, and an empty name would take it away; the dialog says so and
-  keeps what you typed.
-- **Delete** — the bin on the project row. ★ **The conversations are kept**:
-  they fall back to "no project" and keep their history. Removing a label must
-  not remove the work.
+
+★ **The projects that already exist are managed in the sidebar**, on the project's own
+row: the "⋯" next to the name opens its menu.
+
+- **New conversation** — a new conversation in that project. The composer comes back empty
+  and that project becomes the one it works in. ★ It never keeps the conversation that is
+  already open — not even when that conversation belongs to that very project: a new
+  conversation is a new one.
+- **Rename project** — the name changes where it stands; the directory stays where it is.
+  ★ The name is **required** here — the project already has one, and an empty name would
+  take it away; the editor says so and keeps what you typed.
+- **Change folder** — the directory the project points at. ★ That directory is where the
+  work happens: a project *is* a directory. The **Browse** button opens your system's own
+  folder chooser, the same one the create form uses.
+- **Remove project** — the project leaves the sidebar. ★ **The conversations are kept**:
+  they fall back to "no project" and keep their history. Removing a label must not remove
+  the work.
 
 ★ **The project you just created is the one you work in right away** — the
-composer switches into it, and the picker above the sidebar selects it too.
+composer switches into it. ★ The dialog stays open, with the new project in
+the list and marked as the current one: it shows what the create did, and it
+is where the next project would be created from.
 
 ★ **A refused create keeps the dialog open**, with what you typed still in it
 and the server's reason under the form. The reason is the server's own

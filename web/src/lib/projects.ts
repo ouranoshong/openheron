@@ -58,6 +58,14 @@ export interface SessionGroup<T> {
   /** The heading the sidebar shows. */
   title: string
   sessions: T[]
+  /**
+   * ★ Whether the group is folded away — its heading is drawn, its
+   *   conversations are not.
+   *
+   * ★ It is a **display** state, not a fact about the sessions: the server
+   *   still holds them, and the group still exists.
+   */
+  folded?: boolean
 }
 
 /** The key of the pinned group. */
@@ -90,9 +98,17 @@ export const NO_PROJECT_GROUP_TITLE = "No project"
  *   group and nowhere else — a conversation that shows up twice is a
  *   conversation the user cannot count.
  *
- * ★ An **empty** group is not returned. The sidebar is a list of
- *   conversations; a heading with nothing under it is noise, and a project
- *   with no conversations is not a thing the sidebar has to announce.
+ * ★ **A project in the table is a group, even when it holds nothing.** ★ The
+ *   sidebar is a **map** of the projects, and the actions on a project — the
+ *   rename, the new folder, the removal — live on the project's own row.
+ *   ★ A project that is not drawn has no row, and a project with no row
+ *   cannot be managed at all: it would be a directory the user made and can
+ *   neither rename nor throw away.
+ *
+ * ★ The **buckets** the sessions are sorted into are a different thing: the
+ *   pinned group and the "no project" group hold conversations and nothing
+ *   else, so an empty one is not returned — a heading with nothing under it
+ *   is noise.
  */
 export function groupSessions<T extends GroupableSession>(
   sessions: readonly T[],
@@ -110,7 +126,13 @@ export function groupSessions<T extends GroupableSession>(
         group.sessions.push(s)
       }
     }
-    return group.sessions.length > 0 ? [group] : []
+    // ★ The scope project is in the table — the server could not report a
+    //   scope otherwise — so it is drawn even when it holds nothing: ★ it is
+    //   the one directory this process serves, and the map says so.
+    if (group.sessions.length > 0 || projects.some((p) => p.id === scope.projectId)) {
+      return [group]
+    }
+    return []
   }
 
   const pinned: T[] = []
@@ -146,10 +168,10 @@ export function groupSessions<T extends GroupableSession>(
   }
 
   for (const p of ordered) {
-    const list = buckets.get(p.id)
-    if (list && list.length > 0) {
-      groups.push({ key: p.id, title: p.name, sessions: list })
-    }
+    // ★ Every project in the table is a group — ★ including one that holds no
+    //   conversation: the row is where the project's own actions live, and a
+    //   project with no row could not be renamed, moved or removed.
+    groups.push({ key: p.id, title: p.name, sessions: buckets.get(p.id) ?? [] })
   }
 
   const orphans = buckets.get(NO_PROJECT_GROUP)
@@ -157,6 +179,36 @@ export function groupSessions<T extends GroupableSession>(
     groups.push({ key: NO_PROJECT_GROUP, title: NO_PROJECT_GROUP_TITLE, sessions: orphans })
   }
   return groups
+}
+
+/**
+ * foldGroups marks the groups the user folded away.
+ *
+ * ★ A folded group **keeps its heading** — it still holds conversations, they
+ *   are just not drawn. ★ The fold is a **display** state, not a fact about
+ *   the conversations: the server still holds them, and the group still
+ *   exists.
+ *
+ * ★ The **sessions stay in the group**: the fold is a display state, and the
+ *   count of a folded group is still its count — ★ a group that says nothing
+ *   about how much is in it is a group the user has to open to know.
+ *
+ * ★ The folded set holds **group keys**, not project ids: the "no project"
+ *   group is folded like any other, and a key that names a group that is gone
+ *   simply never matches.
+ *
+ * ★ A group with **nothing** in it is never folded: there is nothing to put
+ *   away, and a heading that says "0" is a folder the user has to open to
+ *   learn that it is empty.
+ *
+ * ★ It is a pure function so it can be tested without a browser — the folding
+ *   is the only piece of the tree that is the client's own business.
+ */
+export function foldGroups<T>(
+  groups: readonly SessionGroup<T>[],
+  folded: ReadonlySet<string>,
+): SessionGroup<T>[] {
+  return groups.map((g) => ({ ...g, folded: g.sessions.length > 0 && folded.has(g.key) }))
 }
 
 /**

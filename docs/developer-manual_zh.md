@@ -1166,18 +1166,17 @@ Linux 让 `zenity` 或 `kdialog` —— 装了哪个用哪个，一个都没装�
 
 ### 3.17 ★ 「当前项目」一个值
 
-★ **界面上有三处会说项目** —— 选择器的值、输入框下方的按钮、`@` 提及选择器列的文件 ——
+★ **界面上有两处会说项目** —— 输入框下方的标签、`@` 提及选择器列的文件 ——
 它们**绝不能各说各的**。⇒ 它们读**同一个**值：store 里的 `activeProjectId`，它的意思是
 「输入框这头在哪个项目里干活」。
 
 | 面 | 读的是 |
 |---|---|
-| 选择器的值（`web/src/components/sidebar.tsx`） | `activeProjectId` |
-| 输入框下方的按钮（`web/src/components/projects-dialog.tsx`） | `selectActiveProjectId` —— 会话的项目优先 |
+| 输入框下方的标签（`web/src/components/projects-dialog.tsx`） | `selectActiveProjectId` —— 会话的项目优先 |
 | `@` 提及选择器（`web/src/components/composer.tsx`） | `selectActiveProjectId` |
 
 ★ **屏幕上那个会话说了算。** `openSession` 与 `refreshList` 把会话的项目抄进
-`activeProjectId`：你正在读的那段对话就是输入框干活的地方，选择器和按钮跟着它走。
+`activeProjectId`：你正在读的那段对话就是输入框干活的地方，标签跟着它走。
 ★ `refreshList` 也要做这件事，因为启动时会话**比列表先**打开 —— 那一刻会话还不知道
 自己属于哪个项目。
 
@@ -1186,16 +1185,20 @@ Linux 让 `zenity` 或 `kdialog` —— 装了哪个用哪个，一个都没装�
 你选的项目里另起一个会话。⇒ 这个判断是一个**纯函数**（`web/src/lib/projects.ts` 里的
 `projectSwitch`）—— 它是这套说法里唯一的判断，而判断要放在能测的地方。
 
-★ **「没有项目」是一个选择。** 选择器有这一项，服务端也认（会话落在默认项目根），所以
-`resolveActiveProject` 保留空 id；只有 **null**（「还没选过」）才退回第一个项目。
-★ 一次刷新不该把它改掉。
+★ **开关属于「还没决定」的那一刻。** 输入框下方那个按钮在空白页上是**开关**，在对话页上
+是**标签**：会话的项目改不了，所以在那儿一个开关唯一能做的就是**离开这段会话**。
+⇒ 判据是 `selectIsEmptyView`，它是一个 selector（`web/src/lib/store/selectors.ts`）。
+
+★ **「没有项目」是一个选择。** 对话框里有这一项 —— 它是列表的**第一**行 —— 服务端也认
+（会话落在默认项目根），所以 `resolveActiveProject` 保留空 id；只有 **null**（「还没选过」）
+才退回第一个项目。★ 一次刷新不该把它改掉。
 
 ★ **新建的项目走同一条路**（`createProject` → `switchProject`）：刚建的项目就是你干活的那个。
 
 整套规则在设计文档里：`docs/projects-design.md` §3.6。
 
-★ 侧栏自己的形状 —— 它的分组、它的行、在一个项目里开一段对话的那个 `+`，
-以及它还没有的那些菜单 —— 在 `docs/sidebar-design.md`。
+★ 侧栏自己的形状 —— 它的文件夹、它的行、项目上的那个菜单，以及折叠 —— 在
+`docs/sidebar-design.md`。
 
 ## 4. 前端
 
