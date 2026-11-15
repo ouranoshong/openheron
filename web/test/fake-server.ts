@@ -323,6 +323,15 @@ export const SCENARIOS = {
   // ★ cutLive: the round's stream is cut and the round goes on — it raises
   //   its approval a moment later. ★ The approval is never on the wire.
   cutLive: ["A"],
+
+  // ★ refusedAttach: the round's stream is cut, and the client comes back
+  //   for it — and the server refuses the attach **while the ledger's row
+  //   is still open**. ★ This is the window the user hit: the runtime
+  //   releases its turn first, the approval is written next, and the row
+  //   closes last (agentkit/run/bridge.go). ★ A client that reads the
+  //   transcript right away finds no approval in it, and the card never
+  //   shows up until the page is reloaded.
+  refusedAttach: ["A"],
 } as const
 
 export type ScenarioName = keyof typeof SCENARIOS
@@ -2023,7 +2032,12 @@ export function startFakeServer(port = 0): FakeServer {
       !body.attachments?.length
     ) {
       const run = (thread.runs ?? []).find((r) => r.runId === body.runId)
-      if (!run || run.state !== "running") {
+      // ★ refusedAttach: the row is still open, but the runtime's turn is
+      //   gone. ★ The server refuses on the runtime and the ledger's barrier
+      //   comes up later (agentkit/run/bridge.go), so this is what the
+      //   client sees in the window between the two — and it has to wait for
+      //   the barrier before it reads the transcript.
+      if (!run || run.state !== "running" || scenario === "refusedAttach") {
         return fail(404, "the run is no longer live; load the session's history instead", "run_not_live")
       }
       const assistant = thread.messages.find((m) => m.id === run.messageId)
@@ -2251,6 +2265,57 @@ export function startFakeServer(port = 0): FakeServer {
         thread!.pendings = pendingsFrom([hit])
         thread!.state = "waiting_approval"
       }, 1500)
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          for (const ev of head) c.enqueue(encode(ev))
+          // ★ The stream is cut: the round goes on without it.
+          c.close()
+        },
+      })
+      return sse(stream)
+    }
+
+    // ★ refusedAttach: the round's stream is cut, the client comes back for
+    //   it, and the server refuses the attach — while the ledger's row is
+    //   still open. ★ The row closes a moment later, and that is when the
+    //   approval is on disk: the runtime released its turn first, so the
+    //   refusal says nothing about the approval (agentkit/run/bridge.go).
+    if (scenario === "refusedAttach") {
+      const head: RunEvent[] = [
+        started(thread!.threadId, runId),
+        textStart(msgId, "assistant"),
+        textDelta(msgId, `${marker} working`),
+      ]
+      for (const ev of head) applyToMessage(assistantMsg, ev)
+      thread!.runs = [
+        ...(thread!.runs ?? []),
+        {
+          runId,
+          state: "running",
+          kind: "query",
+          startedAt: new Date().toISOString(),
+          events: head,
+          messageId: assistantMsg.id,
+        },
+      ]
+      thread!.state = "running"
+      const hit: RawInterrupt = {
+        id: "int-1",
+        reason: "tool_call",
+        message: "write_file requires approval",
+        toolCallId: "call_1",
+        metadata: { toolName: "write_file", arguments: { file_path: "/tmp/x.txt" } },
+      }
+      setTimeout(() => {
+        // ★ The barrier goes up: the row closes and the approval lands.
+        const run = (thread!.runs ?? []).find((r) => r.runId === runId)
+        if (run) {
+          run.state = "waiting_approval"
+          run.endedAt = new Date().toISOString()
+        }
+        thread!.pendings = pendingsFrom([hit])
+        thread!.state = "waiting_approval"
+      }, 900)
       const stream = new ReadableStream<Uint8Array>({
         start(c) {
           for (const ev of head) c.enqueue(encode(ev))

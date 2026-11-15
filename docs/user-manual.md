@@ -1310,7 +1310,9 @@ that continued — no reload, and no button left over that the server would refu
 
 ★ **The card does not need a reload.** If the connection drops while a round is running,
 the client comes back to that round and reads the open approvals out of the transcript — so
-an approval raised in that round still arrives on its own.
+an approval raised in that round still arrives on its own. ★ And if the server refuses that
+return — the round is over, but its approval has not landed on disk yet — the client waits
+for the round's ledger row to close and reads the transcript then.
 
 ### 6.3 The config editor
 

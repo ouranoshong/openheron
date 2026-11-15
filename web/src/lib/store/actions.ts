@@ -651,15 +651,10 @@ export const useStore = create<StoreState>((set, get) => ({
     //   stream was ending — and two streams would fight over the run.
     if (run) return
     const entry = get().sessions[id]
-    // ★ The run to follow. ★ The caller may name it: the recovery knows
-    //   which run the ledger says is live, and that is the authority — the
-    //   conversation's own run id is what this surface saw last, which is
-    //   not the same thing.
-    const target = runId ?? entry?.convo?.runId
-    if (!target) {
-      get().loadError(id, message)
-      return
-    }
+    // ★ The run the caller names. ★ The recovery knows which run the ledger
+    //   says is live, and that is the authority — the conversation's own run
+    //   id is what this surface saw last, which is not the same thing.
+    const requested = runId ?? entry?.convo?.runId
 
     let runs: RunsView
     try {
@@ -668,10 +663,29 @@ export const useStore = create<StoreState>((set, get) => ({
       get().loadError(id, message)
       return
     }
-    const live = runs.items.find(
-      (r) => r.runId === target && (r.state === "running" || r.state === "starting"),
-    )
-    if (!live) {
+    // ★ A ledger that answers with nothing is a ledger that cannot be read:
+    //   the scan is the only thing that can say a run is over, and an answer
+    //   without rows is not a scan.
+    if (!runs || !Array.isArray(runs.items)) {
+      get().loadError(id, message)
+      return
+    }
+    // ★ The run to follow. ★ The ledger names the run that owns the
+    //   session, and it is the only thing that can say a run is over.
+    //
+    //   ★ The conversation's own run id is not enough. ★ The round that
+    //   follows an answer is a **new** run, and the client does not learn
+    //   its id until the round announces it — so a client that reattaches
+    //   after a cut names the round *before* it, which is over and gone.
+    //   ★ The ledger names the round that is actually going.
+    const live = (candidate?: string) =>
+      candidate
+        ? runs.items.find(
+            (r) => r.runId === candidate && (r.state === "running" || r.state === "starting"),
+          )
+        : undefined
+    const target = live(runs.activeRunId)?.runId ?? live(requested)?.runId
+    if (!target) {
       // ★ The run is over. The transcript holds the finished turn, and it
       //   is the only truth about what the session contains.
       await get().reloadHistory(id)
@@ -686,9 +700,13 @@ export const useStore = create<StoreState>((set, get) => ({
         onError: (msg, code) => {
           releaseRun()
           if (code === "run_not_live") {
-            // ★ The run ended between the scan and the attach. The
-            //   transcript has the answer.
-            void get().reloadHistory(id)
+            // ★ The server says this round's turn is gone. ★ It does NOT
+            //   say the transcript already holds what the round raised: the
+            //   runtime releases its turn first and the approval lands
+            //   after it (agentkit/run/bridge.go), so reading the transcript
+            //   now can find nothing. ★ The recovery waits for the barrier
+            //   and reads the transcript then.
+            void get().recoverRound(id, target)
             return
           }
           get().loadError(id, msg)
@@ -725,9 +743,17 @@ export const useStore = create<StoreState>((set, get) => ({
   //   run means the round is still going, and no live run means it is over
   //   and the transcript holds the approvals it raised.
   //
+  // ★ "refused" is the run the server said is no longer live. ★ It is the
+  //   server's runtime that says so, and the runtime releases its turn
+  //   **before** the approval is written and before the row closes
+  //   (agentkit/run/bridge.go) — so a refused run's row can still be open,
+  //   and the approval is not on disk yet. ★ Reading the transcript then
+  //   finds nothing, and a card that was never read never shows. ★ So the
+  //   recovery waits for the barrier instead.
+  //
   // ★ The transcript is where the answer comes from. ★ The stream is the one
   //   thing that cannot be asked: it is the thing that was cut.
-  async recoverRound(id: string) {
+  async recoverRound(id: string, refused?: string) {
     if (recovering.has(id)) return
     recovering.add(id)
     try {
@@ -745,7 +771,9 @@ export const useStore = create<StoreState>((set, get) => ({
           //   keeps what it has.
           return
         }
-        const plan = recoveryPlan(runs)
+        // ★ And an answer that is not a ledger says nothing either.
+        if (!runs || !Array.isArray(runs.items)) return
+        const plan = recoveryPlan(runs, refused)
         if (plan.kind === "transcript") {
           // ★ The round is over: the transcript holds what it raised, the
           //   approval above all. ★ The counter goes with it — the next
@@ -753,6 +781,15 @@ export const useStore = create<StoreState>((set, get) => ({
           recoverAttempts.delete(id)
           await get().reloadHistory(id)
           return
+        }
+        if (plan.kind === "wait") {
+          // ★ The barrier is not up yet: the round ended, and its question
+          //   has not landed. ★ Waiting is the whole answer here — reading
+          //   the transcript now would find a session with no approval in
+          //   it, and nothing would ask again.
+          if (Date.now() >= deadline) return
+          await new Promise<void>((r) => setTimeout(r, RECOVER_WAIT_MS))
+          continue
         }
         const attempts = recoverAttempts.get(id) ?? 0
         if (attempts < RECOVER_ATTACH_LIMIT) {
@@ -847,9 +884,11 @@ export const useStore = create<StoreState>((set, get) => ({
         onError: (msg, code) => {
           releaseRun()
           if (code === "run_not_live") {
-            // ★ The run ended between the scan and the attach. The
-            //   transcript has the answer.
-            void get().reloadHistory(id)
+            // ★ The server says this round's turn is gone. ★ The approval it
+            //   raised may not be on disk yet — the runtime releases the
+            //   turn first (agentkit/run/bridge.go) — so the recovery waits
+            //   for the barrier and reads the transcript then.
+            void get().recoverRound(id, target)
             return
           }
           get().loadError(id, msg)
@@ -973,9 +1012,12 @@ export const useStore = create<StoreState>((set, get) => ({
         onError: (msg, code) => {
           releaseRun()
           if (code === "run_not_live") {
-            // ★ The run ended between the announcement and the attach.
-            //   The transcript has the answer.
-            void get().reloadHistory(id)
+            // ★ The run ended between the announcement and the attach. ★
+            //   The approval it raised may not be on disk yet — the runtime
+            //   releases the turn first (agentkit/run/bridge.go) — so the
+            //   recovery waits for the barrier and reads the transcript
+            //   then.
+            void get().recoverRound(id, runId)
             return
           }
           get().loadError(id, msg)

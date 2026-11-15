@@ -180,12 +180,12 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 | 标记从前从哪来 | 标记现在从哪来 |
 |---|---|
 | 流结束 → 假定空闲 | 流结束 → **重新扫描**（`web/src/lib/store/actions.ts:626`） |
-| `stop()` 乐观地置 `busy: false` | `stop()` → 发 abort → **重新扫描** → 再决定（`web/src/lib/store/actions.ts:1112`） |
+| `stop()` 乐观地置 `busy: false` | `stop()` → 发 abort → **重新扫描** → 再决定（`web/src/lib/store/actions.ts:1158`） |
 | 409 `session_busy` → 标记忙 | 不变 —— 但这条消息背后现在是一个扫描出来的事实 |
 | 页面加载 → 读 `state` | 不变 —— 扫的是账本 |
 
 ★ **一句话规则：客户端只有在扫描发话时才可以清掉 `busy`。** 扫描失败就让标记留在
-原样（`web/src/lib/store/actions.ts:1001-1005`）—— 猜正是扫描要治的病。
+原样（`web/src/lib/store/actions.ts:1045-1052`）—— 猜正是扫描要治的病。
 
 ★ **「栅栏换扫描」到客户端为止，而且只能到客户端为止。** 响应路径上那道栅栏回答的
 是另一个问题：「一个刚读完这个响应结尾的调用方，能不能立刻发下一条？」账本回答得
@@ -304,15 +304,30 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
   的 `onDone` 带着这个事实走（`web/src/lib/api.ts:680`）。★ **这是唯一能分开两者的信号**：
   响应体结束这件事，两边一模一样。
 - ★ **切了的那一轮，客户端去问账本。** 恢复的动作是 `recoverRound`
-  （`web/src/lib/store/actions.ts:726`）：★ **线上答不了这个问题** —— 流就是被切的那一样东西，
+  （`web/src/lib/store/actions.ts:756`）：★ **线上答不了这个问题** —— 流就是被切的那一样东西，
   再挂一次很可能被同样地切掉。★ 账本答得了：`GET /v2/sessions/{id}/runs` 的 `activeRunId`
   是「这一轮还在不在」的权威，而**等着审批的那一轮算已经结束**
   （`storage/runledger.go:83` 的 `IsTerminal`）—— 审批一抛出来，`activeRunId` 就是空的。
-- ★ **答案在 transcript 里。** 没有活跃的一轮 ⇒ 这一轮说完了 ⇒ 它抛出的审批在
-  `GET /v2/sessions/{id}/messages` 的 `pendingApprovals` 里，客户端重读一遍 transcript，
-  卡片就回来了（`web/src/lib/store/history.ts:146` 的 `seedFromHistory`）。★ 还有活跃的一轮 ⇒
-  这一轮还在跑 ⇒ 客户端重新挂上去（`reattach`，`web/src/lib/store/actions.ts:644`），
-  剩下的部分照常渲染，审批照常到达。
+- ★ **答案在 transcript 里 —— 但要等它落盘。** 没有活跃的一轮 ⇒ 这一轮说完了 ⇒ 它抛出的
+  审批在 `GET /v2/sessions/{id}/messages` 的 `pendingApprovals` 里，客户端重读一遍
+  transcript，卡片就回来了（`web/src/lib/store/history.ts:146` 的 `seedFromHistory`）。
+  ★ 还有活跃的一轮 ⇒ 这一轮还在跑 ⇒ 客户端重新挂上去（`reattach`，
+  `web/src/lib/store/actions.ts:648`），剩下的部分照常渲染，审批照常到达。
+- ★ **`run_not_live` 说的是「运行时的 turn 没了」，不是「transcript 里已经有审批了」。**
+  ★ 服务端拒绝挂靠，看的是**运行时的易失 turn**（`agentkit/run/runtime.go:1002` 的
+  `LiveRun`）；而落盘的次序是：先释放 turn（`agentkit/run/bridge.go:142`），再写审批
+  （`:163`），最后立起账本的屏障（`:164`）。★ **拒绝与审批之间因此有一道缝**：客户端在
+  这道缝里收到 404，而此刻 transcript 里还没有那条审批 —— 读一次就放弃，等于把审批
+  永远藏起来，用户只能靠刷新页面把它逼出来。
+- ★ **所以 404 之后是等屏障，不是读一次 transcript 就走。** 恢复计划多了一个「等」的状态
+  （`web/src/lib/attach.ts:76` 的 `recoveryPlan`）：★ 被拒的那一轮在账本里**还不是终态**
+  ⇒ 屏障还没立起来 ⇒ 等账本（`RECOVER_WAIT_MS`）再问一次；终态了 ⇒ 审批必定已经在盘上
+  （屏障站在审批卡后面，`agentkit/run/bridge.go:176`）⇒ 这时才读 transcript。★
+  这道缝很窄但真实：2026-11-15 用户实例的账本里，那一次 attach 比账本行关闭早 **13ms**。
+- ★ **要跟哪一轮，由账本说了算。** ★ 会话自己记住的那个 run id 是「这个界面最后看见的
+  那一轮」，而**答完审批之后的那一轮是新的 run** —— 客户端要等它 announce 才知道它的 id。
+  ★ 于是「挂回去」若用会话记住的 id，挂的是上一轮（早就结束的那一轮）；账本的
+  `activeRunId` 才是「还在跑的那一轮」（`reattach`，`web/src/lib/store/actions.ts:648`）。
 - ★ **恢复有护栏。** 重新挂上去最多三次（`RECOVER_ATTACH_LIMIT`）：★ 被切的流再挂一次很可能
   再被切一次，而每一次重挂都把这一轮的事件重放一遍 —— 一个已经读不动的客户端不该被这样喂。
   超过上限就改成**等**：读账本，等这一轮结束，然后读 transcript。★ 用户已经走开的那一轮
@@ -372,7 +387,7 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 还没开始读的客户端，是没听见事实的客户端。
 
 ★ **客户端这一边**（`web/src/lib/session-events.ts`）：`approval_resolved` 把那张卡拿掉，
-`run_started` 让这一边跟上去（`web/src/lib/store/actions.ts:952` 的 `followRun`）。
+`run_started` 让这一边跟上去（`web/src/lib/store/actions.ts:986` 的 `followRun`）。
 ★ **一次只跟一条流**：还握着上一轮的时候，新的挂上要等它结束
 （`web/src/lib/store/actions.ts:132` 的 `releaseRun`）—— 服务端一个会话只允许一轮活着的
 轮次，新的那一轮本来就只可能在旧的结束之后开始。
@@ -500,7 +515,7 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 ★ **水合出来的「running」一定是别人的轮次，但那个界面不必只是看着。** 刚打开会话的
 那个界面不可能拥有它没启动的轮次 —— 拥有轮次的界面自己拿着事件流，永远不会重新
 水合。★ 而水合**不**把 `busy` 置上：那个界面接下来会去**挂上**那一轮
-（`attachToLiveRun`，`web/src/lib/store/actions.ts:818`），挂上之后它就是在跟着这一轮
+（`attachToLiveRun`，`web/src/lib/store/actions.ts:859`），挂上之后它就是在跟着这一轮
 的人。★ 先置上再撤掉，只会让「在别的窗口里跑着」这句话在一个本来就在跟着的界面上
 闪一下。待审批那一支保持优先：审批卡比「在跑」更具体。
 
@@ -963,11 +978,15 @@ stderr（`main.go:296-300`）。
 ★ **挂上请求不带问题**（`api/v2_run.go:224` 的 `isAttachRequest`）：带问题就意味着
 「开始一轮新的」，在这里开始一轮新的等于把用户那句话悄悄跑第二遍。挂上走
 `attachRun`（`api/v2_run.go:241`），它按 id 找到那个活着的 run
-（`agentkit/run/runtime.go:936` 的 `LiveRun`），订阅它并渲染它的窗口。
+（`agentkit/run/runtime.go:1002` 的 `LiveRun`），订阅它并渲染它的窗口。
 
 ★ **结束的 run 挂不上。** 服务端回 **404 `run_not_live`**
 （`api/v2_run.go:244`，码在 `api/v2_types.go:58`），而不是开始一轮新的 —— 客户端对
 这个拒绝的回答是「去加载历史」，它必须能把它和「会话可以重试」分得开。
+
+★ **但这个拒绝只说了「运行时的 turn 没了」。** ★ 它**没有**说审批已经落盘：拒绝看的是
+易失的 turn，而审批是在释放 turn **之后**才写的（§1.6）。★ 所以客户端在 404 上不能
+「读一次 transcript 就走」—— 要等账本的屏障立起来再读（`web/src/lib/attach.ts:76`）。
 
 响应在归档与释放之后才收（`api/v2_run.go:201` 与 `:209`）：`turn.WaitArchived()`
 （消息在盘上）与 `turn.WaitReleased()`（槽位空了）。
@@ -1008,7 +1027,7 @@ stderr（`main.go:296-300`）。
 | 码 | 在哪儿产生 | 含义 |
 |---|---|---|
 | `session_busy` | `api/v2_types.go:48` | 会话忙 —— 有活轮次，或有待审批 |
-| `run_not_live` | `api/v2_types.go:58` | 挂上的那一轮已经不在跑了 |
+| `run_not_live` | `api/v2_types.go:58` | ★ 挂上的那一轮已经不在跑了 —— ★ 只说明**运行时的 turn** 没了，**不**说明审批已经落盘（§1.6） |
 | `no_pending_interrupt` | `api/v2_types.go:36` | 这个审批已经被答过了 |
 | `no_checkpoint` | `api/v2_types.go:37` | 这个审批的检查点没了 |
 | `turn_superseded` | `api/v2_types.go:49` | 为兼容保留；抢占那条路已经没有了 |
@@ -1306,17 +1325,17 @@ stderr（`main.go:296-300`）。
 - `agentkit/spec/decl/decl.go` — `context_window`(:45)、`server.lease_ttl`(:297)、
   `server.log_level`(:277)、`LogCfg` 没有 `format` 键(:315)
 - `message/compaction.go` — `ExtraCompaction`(:14)、`Compaction`(:21)、`EffectiveView`(:103)
-- `web/src/lib/attach.ts` — `attachTarget`(:17)、`busyElsewhere`(:35)
+- `web/src/lib/attach.ts` — `attachTarget`(:17)、`busyElsewhere`(:35)、`recoveryPlan`(:76)
 - `web/src/lib/events.ts` — `RUN_STARTED` 清忙(:312)、reducer 处理两个 `CUSTOM`(:383)、
   `onContextUsage`(:431)、`onContextCompacted`(:453)
 - `web/src/lib/store/history.ts` — 水合时认服务端的 `state`(:143)
-- `web/src/lib/store/selectors.ts` — `selectActiveContext`(:103)
-- `web/src/lib/store/actions.ts` — 409 回滚与标记(:406)、`reattach`(:448)、流结束后
-  重新扫描(:430)、`applyScan`(:504)、`attachToLiveRun`(:542)、`scanBusy`(:711)、
-  扫描失败保持原样(:715)、`stop` 后重新扫描(:815)
-- `web/src/lib/api.ts` — `listRuns`(:343)、`configVersion`(:370)、`onError` 带 code(:465)、
-  把 `body.code` 传下去(:564)
-- `web/src/lib/types.ts` — `busy` 的含义(:151)
+- `web/src/lib/store/selectors.ts` — `selectActiveContext`(:117)
+- `web/src/lib/store/actions.ts` — 409 回滚与标记(:593)、`reattach`(:648)、流结束后
+  重新扫描(:626)、`applyScan`(:821)、`attachToLiveRun`(:859)、`recoverRound`(:756)、
+  `scanBusy`(:1045)、扫描失败保持原样(:1049-1051)、`stop` 后重新扫描(:1158)
+- `web/src/lib/api.ts` — `listRuns`(:403)、`configVersion`(:438)、`onError` 带 code(:533)、
+  把 `body.code` 传下去(:654)
+- `web/src/lib/types.ts` — `busy` 的含义(:158)
 
 ### A.6 会话公告通道
 
@@ -1331,9 +1350,9 @@ stderr（`main.go:296-300`）。
 - `api/v2_session_events.go` — `v2SessionEvents`(:40)、开通道先 ping(:63)
 - `api/v2_files.go` — 公告通道的路由(:64)
 - `web/src/lib/session-events.ts` — `parseSessionFact`(:43)、`applySessionFact`(:79)
-- `web/src/lib/api.ts` — `sessionStream`(:606)
-- `web/src/lib/store/actions.ts` — `releaseRun`(:81)、`watchSession`(:596)、
-  `applySessionFact`(:649)、`followRun`(:670)
+- `web/src/lib/api.ts` — `sessionStream`(:704)
+- `web/src/lib/store/actions.ts` — `releaseRun`(:132)、`watchSession`(:912)、
+  `applySessionFact`(:965)、`followRun`(:986)
 - `web/src/app/shell.tsx` — 通道跟着屏幕上的会话(:65)
 
 ### A.7 日志装配

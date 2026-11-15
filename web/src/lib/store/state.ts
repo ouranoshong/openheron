@@ -119,7 +119,11 @@ export interface StoreState {
   // ★ The wire cannot tell a finished round and a cut stream apart, and the
   //   difference decides whether an approval is shown or lost — so the
   //   recovery asks the ledger, and the transcript answers.
-  recoverRound(id: string): Promise<void>
+  //
+  // ★ The refused run may be named: the server says a run is not live
+  //   before its approval is on disk, so the recovery has to wait for the
+  //   ledger's barrier before it reads the transcript.
+  recoverRound(id: string, refused?: string): Promise<void>
   // reloadHistory re-reads the session's transcript — what a client does
   // when it learns a run is over.
   reloadHistory(id: string): Promise<void>

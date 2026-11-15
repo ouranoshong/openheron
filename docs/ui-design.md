@@ -285,7 +285,7 @@ FAT32 上不可复算。毫秒是「跨平台都稳」的刻度，而两次上�
 一回事。所以 `GET /v2/sessions/{id}/files` **不能**用来还原消息上的清单，它只能还原**待发清单**。
 
 - 恢复靠一条判据：workspace 里**没有任何消息认领过**的文件才是「待发」
-  （`web/src/lib/store/actions.ts:1354`）。一条消息认领过的文件是跟那个问题一起发出去的，把它放回
+  （`web/src/lib/store/actions.ts:1400`）。一条消息认领过的文件是跟那个问题一起发出去的，把它放回
   待发清单，下一个问题就会再发一次 —— 用户只问了一次。
 - ★ 清单是**合并**而不是覆盖（`:1364`）：用户刚上传的文件比还在路上的那份列举新。
 - 真正的消息级清单在 **transcript 里**，历史水合时跟着消息一起回来：`web/src/lib/store/history.ts:16`
@@ -299,7 +299,7 @@ FAT32 上不可复算。毫秒是「跨平台都稳」的刻度，而两次上�
   （`web/src/lib/events.ts:188`）。
 - 渲染：`web/src/components/message-parts.tsx:102` 的 `case "attachment"`。
 - ★ **「移除」的语义**：待发清单里的附件 → 移除 = **真的删掉** workspace 里的文件
-  （`actions.ts:231` 调 `api.deleteFile`）；已发消息里的附件 → **不删**，它是历史的一部分，删了
+  （`actions.ts:490` 调 `api.deleteFile`）；已发消息里的附件 → **不删**，它是历史的一部分，删了
   那条消息就说谎了。前端删失败时要把 chip **放回去**（`:244`）—— 一个把服务端还留着的文件藏起来
   的 chip 是在说谎。
 - 服务端：`DELETE /v2/sessions/:id/files?path=`（`api/v2_files.go:478`），路径相对 workspace，
@@ -684,11 +684,11 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 | `web/src/lib/store/actions.ts:577` | 发完清空 |
 | `web/src/lib/store/actions.ts:586` | 请求体带上附件 |
 | `web/src/lib/store/actions.ts:599` | 被拒的一轮把文件还回 |
-| `web/src/lib/store/actions.ts:1288` | `appendLocalUserMessage`：乐观气泡 |
-| `web/src/lib/store/actions.ts:1321` | `restorePending` |
-| `web/src/lib/store/actions.ts:1344` | `restorePendingFiles` |
-| `web/src/lib/store/actions.ts:1354` | 「没有消息认领过」才是待发 |
-| `web/src/lib/store/actions.ts:1364` | 合并而不是覆盖 |
+| `web/src/lib/store/actions.ts:1334` | `appendLocalUserMessage`：乐观气泡 |
+| `web/src/lib/store/actions.ts:1367` | `restorePending` |
+| `web/src/lib/store/actions.ts:1390` | `restorePendingFiles` |
+| `web/src/lib/store/actions.ts:1400` | 「没有消息认领过」才是待发 |
+| `web/src/lib/store/actions.ts:1388` | 合并而不是覆盖 |
 | `web/src/lib/store/history.ts:16` | `readAttachments` |
 | `web/src/lib/store/history.ts:85` | 历史水合时装配 part |
 | `web/src/lib/events.ts:188` | `isOpenPart`：联合类型变宽后的收窄 |

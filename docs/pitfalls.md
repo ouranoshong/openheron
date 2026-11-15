@@ -335,7 +335,7 @@ A 放弃时发现槽位不是它的（走掉），B 放弃时发现槽位是它�
 了（`agentkit/run/bridge.go:169` 关掉发布方），而审批还在等一个答案 ⇒ 「审批被回答了」
 这个事实**无处可去** —— 它不能骑在旧一轮的总线上，那条总线已经死了。
 
-★ 客户端这一侧也没有别的通道：`applyScan`（`web/src/lib/store/actions.ts:780`）只改
+★ 客户端这一侧也没有别的通道：`applyScan`（`web/src/lib/store/actions.ts:821`）只改
 `busy`，**不碰审批卡**；于是等着的那一边**没有任何通道**能知道审批已经被消费。
 
 **修法**：★ 加一条**会话级**的公告通道（`agentkit/run/announce.go`），事实有两个：
@@ -359,6 +359,36 @@ A 放弃时发现槽位不是它的（走掉），B 放弃时发现槽位是它�
 用例在 `agentkit/run/announce_test.go`、`transport/session_test.go`、
 `api/v2_session_events_test.go`、`web/test/session-events.test.ts`、
 `web/test/e2e/session-events.spec.ts`。
+
+### 3.10 ★ 404 `run_not_live` 说的不是「审批已经落盘」
+
+**症状**：用户实例上，`/v2/run` 突然回 404
+（`{"error":"the run is no longer live; load the session's history instead","code":"run_not_live"}`），
+而**审批窗口弹不出来** —— 用户只能刷新页面才看得见那张卡。
+
+**根因**：★ **服务端拒绝挂靠，看的是运行时的易失 turn；而审批落盘在释放 turn 之后。**
+落盘的次序是：先释放 turn（`agentkit/run/bridge.go:142`），再写审批（`:163`），最后立起
+账本的屏障（`:164`）。★ 于是「这一轮没了」与「审批在盘上」之间有**一道缝**。
+
+★ 而客户端把 404 读成了「transcript 里已经有答案了」—— 读一次 transcript 就放弃。
+★ 那一次读取正好落在缝里：transcript 里还没有那条审批 ⇒ 界面停在旧状态 ⇒
+**没有任何人会再问一次** ⇒ 卡片永远不出现。
+
+★ 缝有多宽：2026-11-15 用户实例的账本里，那一次 attach 请求比那一行关闭早 **13ms**
+（21:44:16.6898 对 21:44:16.7030）。
+
+**修法**：★ 404 不再是一次性的「读 transcript」，而是**回到恢复流程**；而恢复流程多了一个
+「等」的状态（`web/src/lib/attach.ts:76` 的 `recoveryPlan`）：★ 被拒的那一轮在账本里
+**还不是终态** ⇒ 屏障还没立起来 ⇒ 等账本再问一次；终态了 ⇒ 审批必定已经在盘上（屏障站在
+审批卡后面，`agentkit/run/bridge.go:176`）⇒ 这时才读 transcript。
+
+★ 顺带修掉的是**挂回去的目标**：★ 答完审批之后的那一轮是**新的 run**，客户端要等它 announce
+才知道它的 id；用会话自己记住的 run id 去挂，挂的是上一轮（早就结束的那一轮）。★ 账本的
+`activeRunId` 才是「还在跑的那一轮」（`web/src/lib/store/actions.ts:648`）。
+
+**现状**：`已修` —— 客户端 `web/src/lib/attach.ts`、`web/src/lib/store/actions.ts`；
+用例在 `web/test/attach.test.ts`、`web/test/store-recover.test.ts`、
+`web/test/e2e/approval-recovery.spec.ts`。
 
 ## 4. 文件系统后端
 

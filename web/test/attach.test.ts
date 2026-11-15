@@ -71,3 +71,41 @@ describe("the recovery plan", () => {
     expect(recoveryPlan(runs)).toEqual({ kind: "transcript" })
   })
 })
+
+describe("the recovery plan after a refused attach", () => {
+  // ★ The server refuses an attach on its **runtime**: the turn is gone.
+  //   The ledger's row is the **barrier**, and it stands up after the
+  //   approval is written (agentkit/run/bridge.go). ★ So a refused run's
+  //   row can still be open, and the approval is not on disk yet.
+  test("a refused run whose row is still open — wait for the barrier", () => {
+    const runs: RunsView = {
+      items: [{ runId: "run-1", state: "running", kind: "query", epoch: 1, startedAt: T1 }],
+      activeRunId: "run-1",
+    }
+    expect(recoveryPlan(runs, "run-1")).toEqual({ kind: "wait", runId: "run-1" })
+  })
+
+  // ★ The barrier is up: the row is terminal and the approval is on disk.
+  //   The transcript holds it now.
+  test("a refused run whose row is closed — read the transcript", () => {
+    const runs: RunsView = {
+      items: [
+        { runId: "run-1", state: "waiting_approval", kind: "query", epoch: 1, startedAt: T1 },
+      ],
+    }
+    expect(recoveryPlan(runs, "run-1")).toEqual({ kind: "transcript" })
+  })
+
+  // ★ Another round is going: that one is the one to follow, whatever the
+  //   refused run was.
+  test("a live run that is not the refused one — watch it", () => {
+    const runs: RunsView = {
+      items: [
+        { runId: "run-1", state: "running", kind: "query", epoch: 1, startedAt: T1 },
+        { runId: "run-2", state: "running", kind: "resume", epoch: 2, startedAt: T1 },
+      ],
+      activeRunId: "run-2",
+    }
+    expect(recoveryPlan(runs, "run-1")).toEqual({ kind: "watch", runId: "run-2" })
+  })
+})

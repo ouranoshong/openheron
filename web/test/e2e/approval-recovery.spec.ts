@@ -105,3 +105,34 @@ test.describe("审批卡不靠刷新", () => {
     await expect(page.locator(COMPOSER)).toHaveCount(0)
   })
 })
+
+// ★ **The refusal must not cost the user the question.**
+//
+// ★ The server refuses an attach on its **runtime**: the turn is gone. ★ The
+//   ledger's row is the **barrier**, and it stands up after the approval is
+//   written (agentkit/run/bridge.go) — so a refusal can arrive while the
+//   approval is still nowhere on disk.
+//
+// ★ A client that reads the transcript right away finds nothing, and
+//   nothing asks again: the card never shows up, and the user reloads the
+//   page to get it. ★ That is what the user hit.
+test.describe("挂上被拒的轮次", () => {
+  test("挂上被拒以后，审批卡自己弹出来", async ({ page }) => {
+    await setScenario("refusedAttach")
+    await openApp(page)
+
+    let reloads = 0
+    page.on("load", () => {
+      reloads += 1
+    })
+
+    await sendMessage(page, `${MARKER_A} write the file`)
+
+    // ★ The round's approval was never on the wire, and the attach that
+    //   would have carried it was refused. ★ The client waits for the
+    //   barrier and reads the transcript then.
+    await expect(page.locator(APPROVAL_CARD)).toBeVisible({ timeout: 10000 })
+    await expect(page.locator(APPROVAL_TOOL)).toHaveText("write_file")
+    expect(reloads).toBe(0)
+  })
+})

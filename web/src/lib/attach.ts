@@ -43,6 +43,9 @@ export function busyElsewhere(runs: RunsView, following: string | undefined): bo
 export type Recovery =
   // watch: the round is still going — follow it.
   | { kind: "watch"; runId: string }
+  // wait: the round is over, but its ledger row is still open — the barrier
+  // behind the approval card is not up yet.
+  | { kind: "wait"; runId: string }
   // transcript: the round is over — the transcript holds what it raised.
   | { kind: "transcript" }
 
@@ -62,8 +65,44 @@ export type Recovery =
 //
 // ★ A run that waits for an approval counts as over: it stopped to ask the
 //   user a question, and the answer starts a new run (storage/runledger.go).
-export function recoveryPlan(runs: RunsView): Recovery {
+//
+// ★ "refused" is the run the server said is no longer live — the answer to
+//   an attach that came back 404. ★ It changes the plan, because the server
+//   refuses on the **runtime's** turn while the ledger's row is the
+//   **barrier**: the runtime releases its turn first, the approval is
+//   written next, and the row closes last (agentkit/run/bridge.go). ★ So
+//   there is a window in which the turn is gone and the approval is not on
+//   disk yet, and reading the transcript in that window finds nothing.
+export function recoveryPlan(runs: RunsView, refused?: string): Recovery {
   const active = runs.activeRunId
-  if (!active) return { kind: "transcript" }
-  return { kind: "watch", runId: active }
+  // ★ A live run that is not the one the server refused: follow it. ★ It is
+  //   the round that is actually going, whatever this surface was following
+  //   a moment ago.
+  if (active && active !== refused) return { kind: "watch", runId: active }
+  // ★ The refused run's row is still open. ★ The row is the barrier, and the
+  //   barrier stands behind the approval card: the approval is on disk
+  //   before the row closes. ★ So an open row means the question has not
+  //   landed yet — wait for the barrier, do not read a transcript that
+  //   cannot hold it.
+  if (refused) {
+    const row = runs.items.find((r) => r.runId === refused)
+    if (row && !TERMINAL_RUN_STATES.has(row.state)) {
+      return { kind: "wait", runId: refused }
+    }
+  }
+  return { kind: "transcript" }
 }
+
+// TERMINAL_RUN_STATES are the run states that are final.
+//
+// ★ They are the server's own set (storage/runledger.go): a run that is
+//   starting or running owns the session, and every other state does not.
+//   ★ "waiting_approval" is terminal — the run stopped to ask a question,
+//   and the answer starts a new run.
+const TERMINAL_RUN_STATES = new Set([
+  "waiting_approval",
+  "completed",
+  "failed",
+  "aborted",
+  "interrupted",
+])
