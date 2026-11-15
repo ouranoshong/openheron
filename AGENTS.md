@@ -15,7 +15,7 @@ one — change one and change the other.
 > `docs/user-manual.md` / `docs/user-manual_zh.md` (user guide),
 > `docs/developer-manual.md` / `docs/developer-manual_zh.md` (developer guide).
 >
-> **and seven Chinese-only documents** under `docs/` — the architecture and code-design
+> **and eight Chinese-only documents** under `docs/` — the architecture and code-design
 > ones. ★ Their Chinese content **took over the plain name**: `docs/config-design.md`
 > **is** the Chinese document — there is no `_zh` twin and no English one:
 > `docs/config-design.md` (the configuration system — the config root and its three
@@ -32,10 +32,12 @@ one — change one and change the other.
 > `docs/projects-design.md` (projects and directories — the user-level `openheron_root`,
 > the config root / data dir / log landing spots, the project↔session relation, and the
 > per-session project root),
+> `docs/sidebar-design.md` (the sidebar — its groups, rows and menus, the one
+> current project, and what is still missing),
 > `docs/pitfalls.md` (the pitfall register — the traps this tree has hit, what caused
 > each of them, and how it was handled).
 > **Every other design document under `docs/` still lives in the upstream repository** ——
-> any `docs/xxx.md` reference below that is not one of these seven, is the upstream copy.
+> any `docs/xxx.md` reference below that is not one of these eight, is the upstream copy.
 > If you cannot get hold of it before changing semantics, ask first; do not change
 > configuration or interfaces from memory.
 >
@@ -52,7 +54,7 @@ one — change one and change the other.
 > `sandbox-kit/BUILDING.md`) are bilingual for the same reason.
 >
 > ★ The four bilingual sets describe **what the code surface already is**; the Chinese-only
-> designs say the same about their own subject: each of the six **describes the code as
+> designs say the same about their own subject: each of the eight **describes the code as
 > it is**, and the proposals that have not landed are collected in its own "待决" section.
 > `docs/config-design.md` covers **the configuration system** — the config root and its
 > three levels, the partitions and their file specs, loading and precedence, the tool
@@ -84,6 +86,9 @@ one — change one and change the other.
 > `openheron_root`, where the config root / data dir / log file land, the project↔session
 > relation in `projects.json`, and the per-session project root. **Its body describes the
 > code as it is.**
+> ★ And `docs/sidebar-design.md` covers **the sidebar** — its groups, rows and the two
+> menus, the one current project, and what is still missing. **Its body describes the
+> code as it is**; the proposals that have not landed are in its own "待决" section.
 > ★ And `docs/pitfalls.md` is the **pitfall register**: the traps this tree has hit, what
 > caused each of them, how it was fixed or what boundary it still has. Read it before
 > touching a subsystem you have not touched yet — it is cheaper than rediscovering the

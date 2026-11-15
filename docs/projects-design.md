@@ -620,3 +620,5 @@ API，却没写**谁**在界面上调它。★ 结果是多项目模式启动时
 - `docs/tools-design.md` —— 工具从哪来、`agentkit/fsx` 的边界、MCP、Docker Sandbox Kit。
   本文只说**写边界是 per-session**，边界本身的规则在那份文档里。
 - `docs/ui-design.md` —— 附件与动效。本文只说**侧栏分几组**。
+- `docs/sidebar-design.md` —— 侧栏本身：分组、行、两个菜单、一份「当前项目」，以及还缺什么。
+  本文只说**项目的表与项目↔会话的关系**；侧栏长什么样、菜单怎么组织在那份文档里。

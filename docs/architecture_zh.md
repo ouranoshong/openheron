@@ -696,16 +696,17 @@ zustand 的 selector 必须返回引用稳定的值：每次调用造新数组/�
 「变了」，表现为 `Maximum update depth exceeded` 白屏。selector 里不要写 `?? []`；用模块级
 常量或 store 里的 selector。
 
-★ **侧栏按项目分组会话**，分组是纯函数：`web/src/lib/projects.ts:95` 的
+★ **侧栏按项目分组会话**，分组是纯函数：`web/src/lib/projects.ts:97` 的
 `groupSessions(sessions, projects, scope)`。项目表与作用域都**从服务端读**，客户端只画拿到
 的东西 —— 它从不自己判断会话属于哪个项目，因为那张表是归属关系的唯一真相。★ 没有项目的会话
-进「未选项目」组；空组不画。
+进「未选项目」组；空组不画。★ 侧栏本身的设计 —— 它的分组、行、菜单与那一份「当前项目」——
+在 `docs/sidebar-design.md`。
 
 ★ **那张表有写面，写面在输入框下面。** 客户端不留自己那份：每次改动都走服务端，回来的列表
-才是画出来的那份。入口是输入框下面那一行的「+ Project」按钮
-（`web/src/components/projects-dialog.tsx` 的 `ProjectsButton`），旁边的对话框就是全部写面 ——
-新建、重命名、删除。★ 它只在有得选的时候才在：单项目模式只服务一个目录，而不认识这张表的
-服务端答 `503`。
+才是画出来的那份。入口是输入框下面那个按钮（`web/src/components/projects-dialog.tsx` 的
+`ProjectsButton`）—— 它写着输入框这头在哪个项目里干活，而它打开的对话框既是切换器也是写面：
+选一个项目，新建、重命名、删除。★ 它只在有得选的时候才在：单项目模式只服务一个目录，
+而不认识这张表的服务端答 `503`。
 
 对话的宽度是一个 token，不是同一个数字抄六遍：`--chat-column`（那一列）、`--prose-column`
 （里面的文字）与 `--chat-gutter`（两侧留白）住在 `web/src/index.css`。列要宽，宽表才看得全；

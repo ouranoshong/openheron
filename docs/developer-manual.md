@@ -1412,6 +1412,9 @@ project you just made is the one you work in.
 
 The whole rule, in the design document: `docs/projects-design.md` §3.6.
 
+★ The sidebar's own shape — its groups, its rows, the `+` that starts a conversation
+in a project, and the menus it does not have yet — is `docs/sidebar-design.md`.
+
 ## 4. The frontend
 
 ### 4.1 The pure layers

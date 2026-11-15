@@ -44,6 +44,7 @@ CHINESE_ONLY = [
     "projects-design.md",
     "runtime-design.md",
     "secrets-design.md",
+    "sidebar-design.md",
     "tools-design.md",
     "ui-design.md",
 ]
