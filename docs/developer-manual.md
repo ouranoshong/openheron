@@ -1347,7 +1347,7 @@ began with.
 | `web/src/lib/store/events.ts` | Event routing inside the store | **`localStorage`** |
 | `web/src/lib/store/actions.ts` | The zustand store itself + all async actions | **zustand**, `fetch`, `localStorage` |
 | `web/src/lib/secrets.ts` | The secrets panel's pure layer: the status, the wording, the source label | `import type` only (erased at compile time) |
-| `web/src/lib/projects.ts` | The sidebar's grouping: which conversations go under which project | `import type` only (erased at compile time) |
+| `web/src/lib/projects.ts` | The projects' pure layer: the sidebar's grouping, and the rules the new-project form enforces | `import type` only (erased at compile time) |
 
 ★ **Be precise about this**: the genuinely framework-independent modules are `sse.ts`,
 `events.ts`, `store/state.ts`, `store/selectors.ts`, `store/history.ts`,
@@ -1494,6 +1494,73 @@ takes its colors from the app's tokens instead.
 ★ The light and the dark palette are **the same token set with two values**, so a color that
 exists in one exists in the other — and a hard-coded `sky-500` in a component is a bug: the
 status colors are `--info`, `--warning` and `--success`.
+
+### 4.7 ★ An entry's position is part of its identity
+
+★ **React identifies the children of a component by position, not by key.** A child
+that moves from index 1 to index 2 is a **different** child: React unmounts the old
+one and mounts a new one, and everything local to it is lost.
+
+That is not a theory — it is what the project dialog did. `ComposerMeta` renders the
+line under the input box, and its content **changes shape** with the agent's state (a
+skeleton, an error, the badge). The project button was that line's extra child, so the
+moment the shape changed the button was unmounted and remounted — and the dialog's
+`open` state went with it: **the dialog closed itself** right after the first project
+was created, with no error and no failing request.
+
+★ **The fix is to pin the position, not to hunt the trigger.** The content goes into
+one wrapper and the extra child sits beside it, so its index never changes:
+
+```tsx
+// ✗ the action's index moves with the branch
+return (
+  <>
+    {loading ? <Skeleton /> : <Badge />}
+    {action}
+  </>
+)
+
+// ✓ one shape: the content is wrapped, the action is always the last child
+return (
+  <>
+    <div className="contents">{body}</div>
+    {action}
+  </>
+)
+```
+
+`web/src/components/composer-meta.tsx` takes the extra child as an `action` prop, and
+`web/src/components/composer.tsx` passes the project button as it. ★ `contents` is what
+keeps the wrapper out of the layout: the wrapper has no box of its own, so the gaps and
+the wrapping are still the row's.
+
+★ **The same trap waits in every place where a component renders a conditional
+child.** A dialog, a menu or an open popover holds local state, and that state is the
+first thing a remount takes away.
+
+### 4.8 ★ A key the platform handles: ask it, do not compete with it
+
+★ **Escape is the platform's key inside a dialog.** Radix listens for it on the
+document in the **capture phase**, and the capture phase runs **before** React's
+handlers — so `preventDefault()` in a component's `onKeyDown` arrives too late to
+stop the dismissal.
+
+★ The one place that can still say no is the **`onEscapeKeyDown` prop**: Radix asks
+it before it looks at `defaultPrevented`.
+
+```tsx
+<DialogContent
+  onEscapeKeyDown={(e) => {
+    // ★ While a field is being edited, Escape cancels the edit and not the
+    //   dialog — and this prop is the only place that can say so.
+    if (editing !== null) e.preventDefault()
+  }}
+>
+```
+
+★ **The general rule**: when the platform owns a key, use the hook it offers rather
+than fighting it from the inside. A `preventDefault` in a handler that runs *after*
+the platform's is a line of code that looks like it should work — and does not.
 
 ## 5. Testing
 
@@ -1648,7 +1715,7 @@ the contract on its own — the extractor does not read one language to help the
 
 ### 5.5 Frontend unit tests
 
-`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **32 test files, 393
+`cd web && bun run test:unit` (`bun test test/*.test.ts`) — **32 test files, 401
 cases**, covering the pure layers: `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
 `thinking.ts` / `turns.ts` / `approval.ts` / `settings-store.ts` / `projects.ts` and friends.
 
@@ -1683,9 +1750,9 @@ do not touch" assertions.
 
 ### 5.6 E2E
 
-`task test-e2e` → `playwright test`, **18 specs, 223 cases**: `agents` `attachments` `chat`
+`task test-e2e` → `playwright test`, **18 specs, 228 cases**: `agents` `attachments` `chat`
 `compaction` `composer-autocomplete` `composer-meta` `history` `mcps` `motion` `multi-agent`
-`projects` `reattach` `scroll` `session-busy` `session-events` `settings` `theme`.
+`projects` `reattach` `scroll` `secrets` `session-busy` `session-events` `settings` `theme`.
 
 Playwright starts two servers itself (`webServer` in `playwright.config.ts`): the fake
 backend (`web/test/serve.ts`) and Vite (`--mode test`).

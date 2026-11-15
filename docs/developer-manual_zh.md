@@ -1141,7 +1141,7 @@ context（`fsx.WithProjectRoot`，`agentkit/fsx/context.go:25`）。两个消费
 | `web/src/lib/store/events.ts` | store 内的事件路由 | **`localStorage`** |
 | `web/src/lib/store/actions.ts` | zustand store 本体 + 全部异步 action | **zustand**、`fetch`、`localStorage` |
 | `web/src/lib/secrets.ts` | Secrets 面板的纯函数层：状态、文案、来源标签 | 只有 `import type`（编译期擦除） |
-| `web/src/lib/projects.ts` | 侧栏的分组：哪些会话归到哪个项目下 | 只有 `import type`（编译期擦除） |
+| `web/src/lib/projects.ts` | 项目的纯函数层：侧栏的分组，以及新建表单执行的规则 | 只有 `import type`（编译期擦除） |
 
 ★ **要精确**：真正框架无关的是 `sse.ts`、`events.ts`、`store/state.ts`、
 `store/selectors.ts`、`store/history.ts`、`secrets.ts` 与 `projects.ts`。`store.ts` 本身**是 barrel**，
@@ -1262,6 +1262,66 @@ const selectMessages = (s: State) => s.convo?.messages ?? EMPTY
 于是暗色下成了白字白底。编辑器改成吃应用自己的 token。
 ★ 浅色与暗色是**同一套 token 的两组取值**，一边有的颜色另一边也有 ——
 组件里写死的 `sky-500` 是 bug：状态色是 `--info`、`--warning` 与 `--success`。
+
+### 4.7 ★ 入口的位置就是它的身份
+
+★ **React 按位置认孩子，不按 key。** 一个孩子从下标 1 挪到下标 2，就是**另一个**孩子：
+React 会把旧的卸载、新的挂载，它身上的局部状态一起没了。
+
+这不是理论 —— 项目对话框就是这么出事的。`ComposerMeta` 画的是输入框下面那一行，而它的
+内容**随 Agent 的状态换形状**（骨架、报错、徽标）。项目按钮是那一行多出来的那个孩子，
+于是形状一变，按钮就被卸载重挂 —— 对话框的 `open` 状态跟着没了：**建完第一个项目，
+对话框自己关上了**，没有报错，也没有失败的请求。
+
+★ **改法是把位置钉死，不是去追触发条件。** 内容进一个包装，额外的孩子坐在它旁边，
+它的下标就永远不变：
+
+```tsx
+// ✗ 入口的下标跟着分支走
+return (
+  <>
+    {loading ? <Skeleton /> : <Badge />}
+    {action}
+  </>
+)
+
+// ✓ 永远一个形状：内容包起来，入口永远是最后一个孩子
+return (
+  <>
+    <div className="contents">{body}</div>
+    {action}
+  </>
+)
+```
+
+`web/src/components/composer-meta.tsx` 把这个额外的孩子收成 `action` prop，
+`web/src/components/composer.tsx` 把项目按钮传进去。★ 保住版式的是 `contents`：
+包装自己不带盒子，所以间距和换行还是那一行的。
+
+★ **同一个坑在每一处「按条件渲染孩子」的地方等着。** 对话框、菜单、展开的浮层都拿着
+局部状态，而重挂第一个拿走的就是它。
+
+### 4.8 ★ 平台自己处理的那个键：问它，别跟它抢
+
+★ **对话框里的 Escape 是平台那个键。** Radix 在 document 的**捕获阶段**听它，
+而捕获阶段**跑在 React 的处理器前面** —— 所以组件的 `onKeyDown` 里写
+`preventDefault()` 时，已经来不及拦下那次关闭。
+
+★ 唯一还能说「不」的地方是 **`onEscapeKeyDown` 这个 prop**：Radix 在看
+`defaultPrevented` 之前会先问它。
+
+```tsx
+<DialogContent
+  onEscapeKeyDown={(e) => {
+    // ★ 正在改字段时，Escape 取消的是这一改，不是整个对话框 ——
+    //   而只有这个 prop 能这么说。
+    if (editing !== null) e.preventDefault()
+  }}
+>
+```
+
+★ **通则**：★ **这个键归平台管，就用它给的那个口子，别从里面跟它抢。**
+在跑得比平台**晚**的处理器里 `preventDefault`，是一行看起来该生效、实际不生效的代码。
 
 ## 5. 测试
 
@@ -1402,7 +1462,7 @@ OPENHERON_TEST_PROXY=http://127.0.0.1:7890 go test ./agentkit/build -run TheProx
 ### 5.5 前端单元测试
 
 `cd web && bun run test:unit`（`bun test test/*.test.ts`）——
-**32 个测试文件、393 个用例**，覆盖 `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
+**32 个测试文件、401 个用例**，覆盖 `sse.ts` / `events.ts` / `store/` / `highlight.ts` /
 `thinking.ts` / `turns.ts` / `approval.ts` / `settings-store.ts` / `projects.ts` 等层。
 
 ★ **客户端一条配置规则都不留了。** 它从前留了一整套：分区表的副本、tools/ 的文件白名单、
@@ -1430,9 +1490,9 @@ Bun 本身没有 `localStorage`，不 stub 会炸。
 
 ### 5.6 E2E
 
-`task test-e2e` → `playwright test`，**18 个 spec、223 个用例**：
+`task test-e2e` → `playwright test`，**18 个 spec、228 个用例**：
 `agents` `attachments` `chat` `compaction` `composer-autocomplete` `composer-meta` `history` `mcps`
-`motion` `multi-agent` `projects` `reattach` `scroll` `session-busy` `session-events` `settings` `theme`。
+`motion` `multi-agent` `projects` `reattach` `scroll` `secrets` `session-busy` `session-events` `settings` `theme`。
 
 Playwright 自己起两个服务（`playwright.config.ts` 的 `webServer`）：
 假后端（`web/test/serve.ts`）+ Vite（`--mode test`）。

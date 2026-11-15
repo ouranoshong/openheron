@@ -953,3 +953,58 @@ request after 10 seconds`），于是 E2E 里「另一个界面听见了审批�
 **现状**：`已修` —— `main.go:946` 的 `announceExposure`（判定用 `api.LoopbackOnly`）；
 测试在 `main_test.go`（`TestAnnounceExposureReachesTheTerminal`、
 `TestAnnounceExposureIsSilentOnTheLoopback`、`TestAnnounceExposureNamesABarePort`）。
+
+## 15. 前端渲染
+
+### 15.1 ★ React 按下标认孩子 ⇒ 入口被卸载重挂 ⇒ 对话框自己关上
+
+**症状**：在项目对话框里建完第一个项目，**对话框自己关上了** —— 没有报错，没有失败的请求，
+控制台是干净的。★ 而且**复现不了**：再建一个、改个名、删一个，都不关。
+
+**根因**：★ **React 按下标认孩子，不按 key。** `ComposerMeta` 画的是输入框下面那一行，
+它的内容**随 Agent 的状态换形状**（骨架、报错、徽标），而项目按钮是那一行多出来的那个孩子。
+于是形状一变，按钮就从下标 1 挪到了下标 2 —— React 认为那是**另一个**孩子，
+把旧的卸载、新的挂载；对话框的 `open` 是按钮身上的**局部状态**，跟着没了。
+
+★ **「复现不了」是这一类坑的特征，不是它不存在的证据**：下标只在**某几种形状切换**时变，
+而触发它的那一次切换未必每次都发生。⇒ **修法不能是「找到触发条件」** —— 那是追现象，
+下一次换个形状它还会回来。
+
+**修法**：**把位置钉死**。内容包进一个 `contents` 包装
+（`web/src/components/composer-meta.tsx`），入口永远是最后一个孩子 ——
+于是下标不变，也就没有卸载重挂。
+
+★ **顺带定下了一条约定**：`ComposerMeta` 多出来的孩子收成 `action` prop，
+而不是让调用方自己往 children 里塞 —— ★ **调用方塞进去的孩子在第几个，取决于调用方自己写了什么**，
+那不是 `ComposerMeta` 能保证的事。
+
+**现状**：`已修` —— `web/src/components/composer-meta.tsx` 的 `action` prop 与 `contents` 包装，
+`web/src/components/composer.tsx` 传 `action={<ProjectsButton />}`。
+★ **还缺一样**：一条能**稳定**复现那个现象的回归用例 —— 改法是按结构性根因做的，
+但现在没有一条用例能证明「它不会再自己关上」。
+
+### 15.2 ★ 平台的 Escape 走在捕获阶段，React 里的 `preventDefault` 太晚
+
+**症状**：在重命名输入框里按 Escape，想「取消这次改名」，结果**整个对话框关上了** ——
+取消一个字段，顺手把整个对话框带走了。
+
+**根因**：★ Radix 的对话框在 **document 的捕获阶段**监听 Escape
+（`@radix-ui/react-use-escape-keydown`：`addEventListener("keydown", …, { capture: true })`），
+而捕获阶段**先于** React 的处理器（React 挂在根容器上，是冒泡阶段）。
+⇒ 输入框里写 `e.preventDefault()` 时，Radix 早就判完案了。
+
+★ Radix 留了一个口子：`DismissableLayer` 在关掉之前会问一次
+`onEscapeKeyDown?.(event)`，然后才看 `event.defaultPrevented` ——
+**那个 prop 是唯一还能说「不」的地方**。
+
+**修法**：`DialogContent` 上的 `onEscapeKeyDown` 里判断「现在是不是在改名字」，
+是就 `e.preventDefault()` —— 于是 Escape 取消这次改名，对话框留在原地。
+
+★ **通则**：★ **平台自己处理的那个键，要抢就得在它给的口子上抢**；
+在组件的事件处理器里 `preventDefault` 是**第二**顺位 —— 顺序不对时，它只是
+「看起来该生效却没生效」的一行代码。
+
+**现状**：`已修` —— `web/src/components/projects-dialog.tsx` 的 `onEscapeKeyDown`
+（改名字时拦住 Escape）与输入框上的 `preventDefault`。
+★ **顺序**：Radix 的 `onEscapeKeyDown` → `preventDefault()` → Radix 再看
+`defaultPrevented` → 不关 ⇒ 输入框的 `onKeyDown`（取消改名）照常跑。

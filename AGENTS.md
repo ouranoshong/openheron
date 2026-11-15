@@ -290,6 +290,16 @@ docs(readme): drop the API table, it lives in the user manual
 - **A color is a token, never a literal.** `sky-500` in a component is a bug: the status
   colors are `--info`, `--warning` and `--success`, and the light and the dark palette are
   **the same token set with two values** — so a color that exists in one exists in the other.
+- ★ **An entry's position is part of its identity.** React reconciles children by **index**,
+  not by key: a child that moves from index 1 to index 2 is a *different* child — the old one
+  is unmounted, the new one mounted, and every local state it held is gone. ★ A dialog, a
+  menu or an open popover lives in that state, so a conditional sibling that shifts the
+  entry's index makes the dialog **close itself**. Pin the position (wrap the content in one
+  `contents` element and keep the extra child last) instead of hunting for the trigger.
+- ★ **A key the platform owns: ask it, do not compete with it.** Radix listens for Escape on
+  the document in the **capture phase**, which runs *before* React's handlers — so
+  `preventDefault()` in a component's `onKeyDown` is too late to stop a dialog from closing.
+  The one place that can still say no is the **`onEscapeKeyDown` prop**.
 
 ## Testing
 

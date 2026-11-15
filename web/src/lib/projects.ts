@@ -209,3 +209,47 @@ export function resolveActiveProject(
   const def = defaultProject(projects, scope)
   return def ? def.id : null
 }
+
+/**
+ * projectNameError says why a name cannot be used.
+ *
+ * ★ A name is **one line**: the sidebar draws it as a heading, and a name
+ *   with a newline in it breaks that heading into two.
+ *
+ * ★ An **empty** name is not an error here: a new project may take the
+ *   directory's own name, and the server does that (`projects.Registry.Create`
+ *   derives it from the root). ★ Renaming is the other case — see
+ *   `projectRenameError`.
+ */
+export function projectNameError(name: string): string | undefined {
+  if (/[\r\n]/.test(name.trim())) return "The name must be one line."
+  return undefined
+}
+
+/**
+ * projectRenameError says why a project cannot be renamed to this name.
+ *
+ * ★ Renaming is the one place where the name is **required**: the project
+ *   already has one, and an empty name would take it away. ★ The server says
+ *   the same thing (`projects.Registry.Update`: "the project name must not be
+ *   empty") — the client says it first, so the field is not sent at all.
+ */
+export function projectRenameError(name: string): string | undefined {
+  if (name.trim() === "") return "The name must not be empty."
+  return projectNameError(name)
+}
+
+/**
+ * projectRootError says why a root cannot be used.
+ *
+ * ★ The root is the **only** required field of a new project. A project *is*
+ *   a directory, and the name is optional — the server derives it from the
+ *   directory when it is empty.
+ *
+ * ★ The directory is not checked for existence here: the server is the one
+ *   that resolves the path, and a client-side copy of that rule would drift.
+ */
+export function projectRootError(root: string): string | undefined {
+  if (root.trim() === "") return "The root must not be empty."
+  return undefined
+}

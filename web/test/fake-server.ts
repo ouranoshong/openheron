@@ -18,6 +18,18 @@ export interface FakeRun {
   messageId?: string
 }
 
+// FakeProject is one row of the fake's project table.
+//
+// ★ The shape is the server's `projectView`: the client reads the table
+//   through the same contract it reads the real one through.
+export interface FakeProject {
+  id: string
+  name: string
+  root: string
+  order: number
+  sessionCount: number
+}
+
 export interface FakeThread {
   threadId: string
   title: string
@@ -1201,7 +1213,28 @@ export function startFakeServer(port = 0): FakeServer {
   let agentsMode: "default" | "multi" | "many" | "grew" = "default"
   let mcpMode: "default" | "empty" | "starting" = "default"
   let projectsMode: "default" | "multi" | "single" = "default"
+  // ★ The table is **mutable**: the interface can write to it, and a project
+  //   that was created has to be in the list the next GET answers with — or
+  //   the dialog would show a project that does not exist.
+  let fakeProjectTable: FakeProject[] = []
   let defaultRoot = "main"
+
+  // seedProjects fills the table the mode asks for.
+  const seedProjects = (mode: "default" | "multi" | "single") => {
+    if (mode === "multi") {
+      fakeProjectTable = [
+        { id: "alpha", name: "Alpha", root: "/tmp/alpha", order: 0, sessionCount: 2 },
+        { id: "beta", name: "Beta", root: "/tmp/beta", order: 1, sessionCount: 2 },
+      ]
+      return
+    }
+    if (mode === "single") {
+      fakeProjectTable = [{ id: "alpha", name: "Alpha", root: "/tmp/alpha", order: 0, sessionCount: 1 }]
+      return
+    }
+    fakeProjectTable = []
+  }
+  seedProjects(projectsMode)
 
   const find = (id: string) => threads.find((t) => t.threadId === id)
 
@@ -1248,17 +1281,20 @@ export function startFakeServer(port = 0): FakeServer {
   // ★ It is a **pure function of the thread id and the mode**: the fake has
   //   no project table, and a table that changed under the reader would
   //   show the same conversation in two places.
+  //
+  // ★ A project that is not in the table any more counts as no project: the
+  //   same thing the real server does when a project is deleted — the
+  //   conversations fall back to "no project".
   const fakeProjectOf = (threadId: string): string => {
+    let id = ""
     if (projectsMode === "multi") {
-      if (threadId === THREAD_A || threadId === THREAD_MULTI) return "alpha"
-      if (threadId === THREAD_B || threadId === THREAD_COMPACT) return "beta"
-      return ""
+      if (threadId === THREAD_A || threadId === THREAD_MULTI) id = "alpha"
+      else if (threadId === THREAD_B || threadId === THREAD_COMPACT) id = "beta"
+    } else if (projectsMode === "single") {
+      if (threadId === THREAD_A) id = "alpha"
     }
-    if (projectsMode === "single") {
-      if (threadId === THREAD_A) return "alpha"
-      return ""
-    }
-    return ""
+    if (!id) return ""
+    return fakeProjectTable.some((p) => p.id === id) ? id : ""
   }
 
   // fakeProjects is the project table the fake serves, and the scope.
@@ -1266,25 +1302,17 @@ export function startFakeServer(port = 0): FakeServer {
   // ★ The scope is null in the multi-project mode and names the project in
   //   the single-project mode — the same two answers the real server gives.
   const fakeProjects = (): {
-    items: { id: string; name: string; root: string; order: number; sessionCount: number }[]
+    items: FakeProject[]
     scope: { projectId: string; name: string; root: string } | null
   } => {
-    if (projectsMode === "multi") {
-      return {
-        items: [
-          { id: "alpha", name: "Alpha", root: "/tmp/alpha", order: 0, sessionCount: 2 },
-          { id: "beta", name: "Beta", root: "/tmp/beta", order: 1, sessionCount: 2 },
-        ],
-        scope: null,
-      }
-    }
     if (projectsMode === "single") {
+      const one = fakeProjectTable.find((p) => p.id === "alpha")
       return {
-        items: [{ id: "alpha", name: "Alpha", root: "/tmp/alpha", order: 0, sessionCount: 1 }],
-        scope: { projectId: "alpha", name: "Alpha", root: "/tmp/alpha" },
+        items: fakeProjectTable,
+        scope: one ? { projectId: one.id, name: one.name, root: one.root } : null,
       }
     }
-    return { items: [], scope: null }
+    return { items: fakeProjectTable, scope: null }
   }
 
   const meta = (t: FakeThread) => ({
@@ -2136,6 +2164,7 @@ export function startFakeServer(port = 0): FakeServer {
         agentsMode = "default"
         mcpMode = "default"
         projectsMode = "default"
+        seedProjects("default")
         defaultRoot = "main"
         return json({ ok: true })
       }
@@ -2172,6 +2201,7 @@ export function startFakeServer(port = 0): FakeServer {
           return fail(400, `unknown projects mode: ${mode}`, "invalid_body")
         }
         projectsMode = mode
+        seedProjects(mode)
         return json({ ok: true, mode: projectsMode })
       }
       if (path === "/__fake/scenario" && req.method === "POST") {
@@ -2296,6 +2326,70 @@ export function startFakeServer(port = 0): FakeServer {
       //   two by the project id.
       if (path === "/v2/projects" && req.method === "GET") {
         return json(fakeProjects())
+      }
+
+      // ★ The write side of the table. ★ The interface creates, renames and
+      //   deletes projects, so the fake answers the way the server does —
+      //   including the refusal: a project without a root is refused, and a
+      //   project that is not in the table is a 404 with its own code.
+      if (path === "/v2/projects" && req.method === "POST") {
+        const body = (await req.json().catch(() => ({}))) as { name?: string; root?: string }
+        const root = (body.root ?? "").trim()
+        if (!root) return fail(400, "the project root must not be empty", "invalid_body")
+        const existing = fakeProjectTable.find((p) => p.root === root)
+        if (existing) return json(existing)
+        const slug = (root.split(/[\\/]/).filter(Boolean).pop() ?? "project")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+        let id = slug || "project"
+        let n = 1
+        while (fakeProjectTable.some((p) => p.id === id)) {
+          n += 1
+          id = `${slug || "project"}-${n}`
+        }
+        const p: FakeProject = {
+          id,
+          name: (body.name ?? "").trim() || slug || "project",
+          root,
+          order: fakeProjectTable.length,
+          sessionCount: 0,
+        }
+        fakeProjectTable.push(p)
+        return json(p, 201)
+      }
+
+      const projectRoute = path.match(/^\/v2\/projects\/([^/]+)$/)
+      if (projectRoute && req.method === "PATCH") {
+        const p = fakeProjectTable.find((x) => x.id === projectRoute[1])
+        if (!p) return fail(404, `no such project: ${projectRoute[1]}`, "project_not_found")
+        const body = (await req.json().catch(() => ({}))) as {
+          name?: string
+          root?: string
+          order?: number
+        }
+        if (body.name !== undefined) {
+          const name = body.name.trim()
+          // ★ The server refuses an empty name on a rename: the project
+          //   already has one, and an empty name would take it away.
+          if (!name) return fail(400, "the project name must not be empty", "invalid_body")
+          p.name = name
+        }
+        if (body.root !== undefined) {
+          const root = body.root.trim()
+          if (!root) return fail(400, "the project root must not be empty", "invalid_body")
+          p.root = root
+        }
+        if (typeof body.order === "number") p.order = body.order
+        return json(p)
+      }
+
+      if (projectRoute && req.method === "DELETE") {
+        const idx = fakeProjectTable.findIndex((x) => x.id === projectRoute[1])
+        if (idx < 0) return fail(404, `no such project: ${projectRoute[1]}`, "project_not_found")
+        fakeProjectTable.splice(idx, 1)
+        // ★ The sessions are not deleted: they fall back to "no project".
+        return json({ id: projectRoute[1] })
       }
 
       if (path === "/v2/sessions" && req.method === "POST") {
@@ -2583,6 +2677,7 @@ export function startFakeServer(port = 0): FakeServer {
       seq = 0
       scenario = "simple"
       projectsMode = "default"
+      seedProjects("default")
     },
     setScenario: (name: ScenarioName) => {
       scenario = name

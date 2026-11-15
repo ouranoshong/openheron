@@ -5,6 +5,9 @@ import {
   PINNED_GROUP,
   defaultProject,
   groupSessions,
+  projectNameError,
+  projectRenameError,
+  projectRootError,
   resolveActiveProject,
   sortProjects,
   type ProjectScope,
@@ -128,5 +131,55 @@ describe("resolveActiveProject", () => {
 
   test("一个项目都没有时没有答案", () => {
     expect(resolveActiveProject(null, [], null)).toBeNull()
+  })
+})
+
+describe("projectNameError", () => {
+  test("空名字不算错 —— 新建时它可以由目录名推出来", () => {
+    // ★ The name is optional: the server derives it from the directory.
+    //   So the empty name must not stop the create.
+    expect(projectNameError("")).toBeUndefined()
+    expect(projectNameError("   ")).toBeUndefined()
+  })
+
+  test("名字只能是一行", () => {
+    // ★ The sidebar draws the name as a heading, and a name with a newline
+    //   in it breaks that heading into two.
+    expect(projectNameError("api\ngateway")).toBeDefined()
+    expect(projectNameError("api\r\ngateway")).toBeDefined()
+  })
+
+  test("普通名字没有理由", () => {
+    expect(projectNameError("CodeLab")).toBeUndefined()
+  })
+})
+
+describe("projectRenameError", () => {
+  test("重命名时名字是必填的 —— 项目本来就有名字", () => {
+    // ★ Renaming is the one place where the name is required: the server
+    //   refuses an empty one ("the project name must not be empty").
+    expect(projectRenameError("")).toBeDefined()
+    expect(projectRenameError("  ")).toBeDefined()
+  })
+
+  test("重命名也是一行", () => {
+    expect(projectRenameError("api\ngateway")).toBeDefined()
+  })
+
+  test("普通名字没有理由", () => {
+    expect(projectRenameError("CodeLab")).toBeUndefined()
+  })
+})
+
+describe("projectRootError", () => {
+  test("目录是唯一必填项，空的不行", () => {
+    expect(projectRootError("")).toBeDefined()
+    expect(projectRootError("  ")).toBeDefined()
+  })
+
+  test("目录不检查存不存在 —— 那是服务端的事", () => {
+    // ★ The client must not keep a second copy of the rules: the server
+    //   resolves the path, and it is the one that says no.
+    expect(projectRootError("/tmp/does-not-exist")).toBeUndefined()
   })
 })

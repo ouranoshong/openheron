@@ -1611,6 +1611,39 @@ conversation.
 ★ **The `@` picker follows the project too**: it lists the files of the project the
 conversation on screen belongs to.
 
+### 6.11 Creating, renaming and deleting a project
+
+★ **The entry is the "+ Project" button under the input box**, on the line that
+says which agent is answering. A project is the decision "which directory does
+this conversation work in", and that is made before the first word is typed — so
+the button sits with the composer, not in the sidebar.
+
+★ **The button is only there when there is a choice.** In the single-project
+mode (`openheron .`) there is nothing to pick, so there is no button; and a
+server that does not know the project table answers `503`, so the button is not
+drawn there either.
+
+The dialog is the whole write surface of the table:
+
+- **Create** — a name (optional; the directory's own name is used when you
+  leave it empty) and a root directory (required, and it must not be empty).
+  The server turns the root into an absolute path and takes it as it is.
+- **Rename** — the pencil on the project row. Only the name changes; the
+  directory stays where it is. ★ The name is **required** here — the project
+  already has one, and an empty name would take it away; the dialog says so and
+  keeps what you typed.
+- **Delete** — the bin on the project row. ★ **The conversations are kept**:
+  they fall back to "no project" and keep their history. Removing a label must
+  not remove the work.
+
+★ **The project you just created is the one your next conversation belongs
+to** — the picker above the sidebar selects it right away.
+
+★ **A refused create keeps the dialog open**, with what you typed still in it
+and the server's reason under the form. The reason is the server's own
+sentence: the server owns the rules, so the client keeps no second copy of
+them.
+
 ## 7. The knowledge base
 
 The knowledge base is an **optional** local corpus retrieval layer: it turns a set of

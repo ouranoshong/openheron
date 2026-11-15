@@ -328,6 +328,34 @@ export const api = {
   //   them itself, by the project id.
   listProjects: () => call<{ items: ProjectSummary[]; scope: ProjectScope | null }>("/v2/projects"),
 
+  // createProject adds a project to the table.
+  //
+  // ★ The name is optional: the server derives it from the directory when it
+  //   is empty. ★ The root is not optional — a project **is** a directory,
+  //   and a project without one is a label with nothing under it.
+  createProject: (name: string, root: string) =>
+    call<ProjectSummary>("/v2/projects", {
+      method: "POST",
+      body: JSON.stringify({ name, root }),
+    }),
+
+  // updateProject renames a project, moves it, or reorders it.
+  //
+  // ★ The id does not change: it is what the sessions carry, and a session
+  //   that belonged to "api" cannot become a session of "api2" by a rename.
+  updateProject: (id: string, patch: { name?: string; root?: string; order?: number }) =>
+    call<ProjectSummary>(`/v2/projects/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  // deleteProject removes a project from the table.
+  //
+  // ★ The sessions are **not** deleted: they fall back to "no project" and
+  //   keep their history. Removing a label must not remove the work.
+  deleteProject: (id: string) =>
+    call<{ id: string }>(`/v2/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
   createThread: (agentId?: string, projectId?: string) =>
     call<ThreadMeta>("/v2/sessions", {
       method: "POST",

@@ -964,6 +964,14 @@ it was given — it never decides which project a session belongs to, because th
 table is the only truth about that relation. ★ A session without a project goes to
 the "no project" group, and a group with nothing in it is not drawn at all.
 
+★ **The table has a write surface, and it sits under the input box.** The client
+keeps no copy of it: every change goes through the server, and the list that comes
+back is the one that is drawn. The entry is the "+ Project" button on the line
+below the input box (`web/src/components/projects-dialog.tsx`'s `ProjectsButton`),
+and the dialog beside it is the whole write surface — create, rename, delete. ★ It
+is only there when there is a choice: the single-project mode serves one directory,
+and a server that does not know the table answers `503`.
+
 ★ A zustand selector must return a **reference-stable** value: allocating a new
 array/object on every call makes `Object.is` decide "it changed" forever, which shows up
 as a `Maximum update depth exceeded` white screen. Never write `?? []` in a selector;

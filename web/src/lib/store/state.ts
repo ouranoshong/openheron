@@ -41,6 +41,13 @@ export interface StoreState {
   // projectScope is the project this process focuses on; null is the
   // multi-project mode.
   projectScope: ProjectScope | null
+  // projectsKnown says whether this server knows about projects at all.
+  //
+  // ★ A server that does not answer with a table is a server from **before**
+  //   the projects, and the interface has to say so instead of offering an
+  //   entry that would fail. ★ A transport failure is not that: the server
+  //   may know perfectly well, and the next refresh says so.
+  projectsKnown: boolean
   // activeProjectId is the project a **new** conversation is created in.
   //
   // ★ In the single-project mode it is the scope — the process serves that
@@ -48,6 +55,13 @@ export interface StoreState {
   activeProjectId: string | null
   refreshProjects(): Promise<void>
   setActiveProject(id: string): void
+  // ★ The three write paths on the project table. ★ Each returns the
+  //   **server's** sentence when it refuses, and undefined when it did the
+  //   thing — so a dialog can stay open with the reason on it, and a form
+  //   does not have to keep its own copy of the rules.
+  createProject(name: string, root: string): Promise<string | undefined>
+  renameProject(id: string, name: string): Promise<string | undefined>
+  deleteProject(id: string): Promise<string | undefined>
 
   // ── actions ────────────────────────────────────────────────────────────
   refreshList(): Promise<void>

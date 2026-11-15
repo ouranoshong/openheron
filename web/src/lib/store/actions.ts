@@ -32,6 +32,16 @@ function isThreadNotFound(e: unknown): boolean {
   return e instanceof ApiError && e.code === "thread_not_found"
 }
 
+// describeError turns a failed call into the **server's** sentence.
+//
+// ★ The server owns the rules — which name is refused, which root is empty —
+//   so the reason on the screen is the one the server wrote, not a copy of
+//   them on this side that could drift.
+function describeError(e: unknown): string {
+  if (e instanceof ApiError) return e.message
+  return (e as Error).message ?? String(e)
+}
+
 let run: RunHandle | null = null
 
 // sessionChannel is the announcement channel of the session on screen.
@@ -106,6 +116,7 @@ export const useStore = create<StoreState>((set, get) => ({
   agentFilter: null,
   projects: [],
   projectScope: null,
+  projectsKnown: false,
   activeProjectId: null,
 
   setAgentFilter(agent) {
@@ -119,12 +130,20 @@ export const useStore = create<StoreState>((set, get) => ({
       set((s) => ({
         projects: items,
         projectScope: scope,
+        projectsKnown: true,
         activeProjectId: resolveActiveProject(s.activeProjectId, items, scope),
       }))
-    } catch {
+    } catch (e) {
       // ★ A server that does not know about projects answers 503. ★ That is
       //   not a broken sidebar: the conversations are still there, they are
       //   simply not grouped, and the sidebar renders one flat list.
+      // ★ A transport failure is **not** the same thing — the server may
+      //   know perfectly well, and the next refresh says so. ⇒ only a 503
+      //   takes the table away for good.
+      if (e instanceof ApiError && e.status === 503) {
+        set({ projects: [], projectScope: null, projectsKnown: false })
+        return
+      }
       set({ projects: [], projectScope: null })
     }
   },
@@ -132,6 +151,44 @@ export const useStore = create<StoreState>((set, get) => ({
   setActiveProject(id) {
     if (get().activeProjectId === id) return
     set({ activeProjectId: id })
+  },
+
+  async createProject(name, root) {
+    try {
+      const p = await api.createProject(name.trim(), root.trim())
+      await get().refreshProjects()
+      // ★ The new project becomes the one a new conversation belongs to: the
+      //   user just made it, and the next conversation is the one they are
+      //   about to start.
+      set({ activeProjectId: p.id })
+      return undefined
+    } catch (e) {
+      return describeError(e)
+    }
+  },
+
+  async renameProject(id, name) {
+    try {
+      await api.updateProject(id, { name: name.trim() })
+      await get().refreshProjects()
+      return undefined
+    } catch (e) {
+      return describeError(e)
+    }
+  },
+
+  async deleteProject(id) {
+    try {
+      await api.deleteProject(id)
+      // ★ The table is re-read after the write: the project is gone, and the
+      //   session list has to be re-grouped — the sessions that belonged to it
+      //   are now "no project".
+      await get().refreshProjects()
+      await get().refreshList()
+      return undefined
+    } catch (e) {
+      return describeError(e)
+    }
   },
 
   async refreshList() {

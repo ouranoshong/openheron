@@ -230,6 +230,39 @@ groupSessions(sessions, projects, scope) → Group[]
 所以 `meta.pinned` 恒为假。分组函数按设计支持它，等置顶功能落地就亮起来 ——
 这不是谎报：没有这个标记就是「没置顶」，而今天确实没有置顶。
 
+### 3.5 ★ 表的写面：界面上的一个「+」
+
+★ **设计里没写界面上怎么建项目，写出来才发现那是最大的一个洞**：多项目模式
+（`openheron` 不带目录参数）启动时，表是**空的**（`main.go` 只在 `scopeDir != ""` 时
+`Ensure` 一个）；表空 ⇒ 侧栏的选择器**不渲染**（`projects.length > 0` 才画）⇒
+**界面上没有任何办法建项目**，而后端的 `POST /v2/projects` 一直在那儿没人调。
+⇒ 表的写面必须有一个**入口**，而且它**不能**挂在选择器上 —— 空表正是最需要它的时候。
+
+★ **入口在输入框的正下方**（`ComposerMeta` 那一行的右端，`web/src/components/projects-dialog.tsx`
+的 `ProjectsButton`）：一个项目是**一段对话属于哪儿**的决定，而这件事在第一个字之前就定了。
+点开是 `ProjectsDialog` —— **表的全部写面**都在那一个对话框里：列出项目、新建、重命名、删除。
+
+| 决定 | 为什么 |
+|---|---|
+| ★ 入口**不在**侧栏选择器旁边 | 空表时选择器不渲染，而空表正是需要入口的时候 |
+| ★ 入口**不在**设置对话框 | 设置里放的是**配置**；项目表是**用户级状态**，不是配置树的一部分 |
+| ★ **单项目模式没有这个入口** | 进程只服务一个目录，新建的项目永远选不上 —— 那是个装饰 |
+| ★ **服务端不认识项目时（503）也没有** | `projectsKnown` 为假；给一个注定失败的入口比不给更糟 |
+| ★ 新建的项目立刻成为新对话的归属 | 用户刚建的，下一段对话就是他要开始的那一段 |
+
+★ **名字可选，目录必填**：项目**就是**一个目录，而名字可以由目录名推出来
+（`projects.Registry.Create` 这么做）。★ **删项目不删会话**：会话回落成「未选项目」，
+历史一点不丢 —— 摘掉一个标签不该把工作也摘掉。
+
+★ **但改名时名字是必填的**：项目本来就有名字，空名字会把它拿走，服务端也是这么拒绝的
+（`projects.Registry.Update`：「the project name must not be empty」）。⇒ **两处的规则不同，
+就该有两个函数**（`projectNameError` / `projectRenameError`），而不是一个带开关的 ——
+一个带开关的函数，调用处就得记住「这次是哪一种」。
+
+★ **Escape 归平台管**：对话框里的 Escape 是 Radix 在 document **捕获阶段**接的，
+React 的 `preventDefault` 来不及 ⇒ 唯一能拦住的是 `onEscapeKeyDown` 这个 prop
+（详见 `docs/pitfalls.md` §15.2）。
+
 ## 4. project root 按会话切换
 
 会话的 project root = **它所属项目的 root**；未选项目的会话用**默认项目根**。
@@ -459,6 +492,7 @@ CI 里有一个 `LISTEN_ADDR=0.0.0.0:9000`，openheron 的监听地址就被改�
 | 21 | `sandbox-kit/openheron/entrypoint.sh:18-19,29,35,38` | 显式 `OPENHERON_CONFIG_ROOT`；`OPENHERON_LISTEN_ADDR`；`OPENHERON_DATA_DIR`；位置参数给项目 | ★ 已落地 |
 | 22 | `agentkit/build/skill.go:198` `ResolveSkillsDir` | ★ **设计里没写，但不改就坏**：配置根进解析链，否则技能一个都加载不到（见 §8） | ★ 已落地 |
 | 23 | `web/src/lib/projects.ts:95` `groupSessions` + `web/src/components/sidebar.tsx` | 侧栏分组 + 新会话选项目 | ★ 已落地 |
+| 24 | `web/src/components/projects-dialog.tsx` `ProjectsButton` / `ProjectsDialog` | ★ **表的写面**：输入框下方的「+ Project」；新建 / 重命名 / 删除（见 §3.5） | ★ 已落地 |
 
 ## 8. 落地顺序
 
@@ -491,6 +525,15 @@ CI 里有一个 `LISTEN_ADDR=0.0.0.0:9000`，openheron 的监听地址就被改�
    反过来（删会话）也得让表知道，否则表里挂着一个不存在的会话。
 3. **`POST /v2/sessions` 的 `projectId` 不认识 ⇒ 404，而且不建会话** —— 设计没写这条错误路径。
    ★ 理由：指名了不存在的东西还留下一个「无处归属」的会话，是更坏的结果。
+
+★ **落地后又补了一处设计里没有的：表的写面**（§3.5）—— 设计把 `POST /v2/projects` 写进了
+API，却没写**谁**在界面上调它。★ 结果是多项目模式启动时表是空的、空表让侧栏选择器不渲染，
+于是**界面上没有任何办法建项目**：后端有端点，前端只读。⇒ 加了输入框下方的「+ Project」
+和那一个对话框（新建 / 重命名 / 删除）。
+★ 还顺手记了一条**前端会踩的坑**：那个入口的 `open` 状态住在 `ComposerMeta` 的一个 prop 里，
+而 prop 的**下标会随 agent 徽章的分支变化** —— React 按下标认孩子，下标一变就是卸载重挂，
+挂在里面的对话框就**自己关掉了**。修法是让入口在 DOM 里的位置**恒定**
+（`web/src/components/composer-meta.tsx` 的 `contents` 包装）。详见 `docs/pitfalls.md` §15.1。
 
 ## 9. 迁移：不做自动的
 

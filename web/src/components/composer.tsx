@@ -8,6 +8,7 @@ import { SkillPicker } from "@/components/skill-picker"
 import { ComposerMeta } from "@/components/composer-meta"
 import { ComposerPopup, type PopupItem } from "@/components/composer-popup"
 import { StopButton } from "@/components/message-list"
+import { ProjectsButton } from "@/components/projects-dialog"
 import { api, type ProjectFile, type SkillView, type SlashCommand } from "@/lib/api"
 import { selectableAgents } from "@/lib/agent-info"
 import {
@@ -697,6 +698,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         context={contextUsage}
         notice={notice}
         busy={busyElsewhere}
+        action={<ProjectsButton />}
       />
 
       {skillPicker.open ? (

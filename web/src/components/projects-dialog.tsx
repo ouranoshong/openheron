@@ -1,0 +1,297 @@
+import { PencilIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import { useState } from "react"
+
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { projectNameError, projectRenameError, projectRootError, sortProjects } from "@/lib/projects"
+import { useStore } from "@/lib/store"
+
+/**
+ * ProjectsButton is the way into the project table.
+ *
+ * ★ It sits **below the input box**, next to the line that says which agent
+ *   is answering: a project is what a conversation belongs to, and that is
+ *   decided before the first word is typed. ★ It is only there when there is
+ *   a choice — the single-project mode serves one directory, and a button
+ *   that opens a list of projects the process cannot switch between is a
+ *   decoration.
+ *
+ * ★ It is also only there when the **server** has a table. A server from
+ *   before the projects answers 503, and offering an entry that would fail
+ *   is worse than not offering it.
+ */
+export function ProjectsButton() {
+  const [open, setOpen] = useState(false)
+  const scope = useStore((s) => s.projectScope)
+  const known = useStore((s) => s.projectsKnown)
+
+  if (scope || !known) return null
+
+  return (
+    <>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="text-muted-foreground hover:text-foreground ms-auto h-6 gap-1 px-1.5 text-[11px]"
+        onClick={() => setOpen(true)}
+        data-testid="projects-button"
+        aria-label="Projects"
+        title="A project is a directory. Conversations belong to one and work in its directory."
+      >
+        <PlusIcon className="size-3" />
+        Project
+      </Button>
+      <ProjectsDialog open={open} onOpenChange={setOpen} />
+    </>
+  )
+}
+
+/**
+ * ProjectsDialog is the whole write surface of the project table.
+ *
+ * ★ It lists the projects, and it creates, renames and deletes them. ★ The
+ *   table is the **server's**, so every change goes through the server and
+ *   the list that comes back is the one that is shown — the client never
+ *   keeps a second copy of the table.
+ *
+ * ★ Deleting a project does not delete its conversations: they fall back to
+ *   "no project" and keep their history. Removing a label must not remove
+ *   the work.
+ */
+export function ProjectsDialog({
+  open,
+  onOpenChange,
+}: {
+  open?: boolean
+  onOpenChange?: (v: boolean) => void
+}) {
+  const projects = useStore((s) => s.projects)
+  const createProject = useStore((s) => s.createProject)
+  const renameProject = useStore((s) => s.renameProject)
+  const deleteProject = useStore((s) => s.deleteProject)
+
+  const [name, setName] = useState("")
+  const [root, setRoot] = useState("")
+  const [refusal, setRefusal] = useState<string | undefined>()
+  const [busy, setBusy] = useState(false)
+  // editing is the project whose name is open in an input; null is none.
+  const [editing, setEditing] = useState<string | null>(null)
+  const [draft, setDraft] = useState("")
+
+  // ★ The **name** is optional and the **root** is not: a project *is* a
+  //   directory, and the server derives the name from it when the name is
+  //   empty. ★ So an empty name is not what stops the create — an empty root
+  //   is.
+  const nameError = projectNameError(name)
+  const rootError = projectRootError(root)
+  const canCreate = nameError === undefined && rootError === undefined
+
+  const reset = () => {
+    setName("")
+    setRoot("")
+    setRefusal(undefined)
+    setEditing(null)
+    setDraft("")
+  }
+
+  const submit = async () => {
+    if (!canCreate) return
+    setBusy(true)
+    const reason = await createProject(name, root)
+    setBusy(false)
+    // ★ A refused create keeps the dialog open with everything the user
+    //   typed: closing it on failure sends them back to a list that does not
+    //   contain the project, with the reason behind the dialog.
+    if (reason !== undefined) {
+      setRefusal(reason)
+      return
+    }
+    reset()
+  }
+
+  const commitRename = async (id: string) => {
+    const error = projectRenameError(draft)
+    if (error) {
+      setRefusal(error)
+      return
+    }
+    setBusy(true)
+    const reason = await renameProject(id, draft)
+    setBusy(false)
+    if (reason !== undefined) {
+      setRefusal(reason)
+      return
+    }
+    setEditing(null)
+    setDraft("")
+    setRefusal(undefined)
+  }
+
+  const remove = async (id: string) => {
+    setBusy(true)
+    const reason = await deleteProject(id)
+    setBusy(false)
+    if (reason !== undefined) {
+      setRefusal(reason)
+      return
+    }
+    setRefusal(undefined)
+  }
+
+  if (open === undefined) return null
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="sm:max-w-lg"
+        data-testid="projects-dialog"
+        onEscapeKeyDown={(e) => {
+          // ★ While a name is being edited, Escape cancels the rename and
+          //   **not** the dialog. ★ The dialog's own Escape handling runs on
+          //   the document in the **capture** phase — before any React
+          //   handler sees the key — so `preventDefault` in the input is too
+          //   late, and this prop is the only place that can still say no.
+          if (editing !== null) e.preventDefault()
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle>Projects</DialogTitle>
+          <DialogDescription>
+            A project is a directory. The conversations that belong to one work in its directory, and
+            they are listed under it in the sidebar.
+          </DialogDescription>
+        </DialogHeader>
+
+        {sortProjects(projects).length === 0 ? (
+          <p className="text-muted-foreground text-xs" data-testid="projects-empty">
+            No projects yet. The conversations you start now work in the default project root.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-1" data-testid="projects-list">
+            {sortProjects(projects).map((p) => (
+              <li
+                key={p.id}
+                data-testid="project-row"
+                data-project-id={p.id}
+                className="flex items-center gap-2 rounded-md border px-2 py-1.5"
+              >
+                <div className="min-w-0 flex-1">
+                  {editing === p.id ? (
+                    <Input
+                      autoFocus
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault()
+                          void commitRename(p.id)
+                        }
+                        if (e.key === "Escape") {
+                          // ★ Escape cancels the rename and leaves the dialog
+                          //   open — the dialog's own Escape is held back by
+                          //   `onEscapeKeyDown` above while a name is being
+                          //   edited.
+                          e.preventDefault()
+                          setEditing(null)
+                          setDraft("")
+                        }
+                      }}
+                      aria-label={`Name of ${p.name}`}
+                      data-testid="project-rename-input"
+                      className="h-7 text-sm"
+                    />
+                  ) : (
+                    <div className="truncate text-sm font-medium" data-testid="project-name">
+                      {p.name}
+                    </div>
+                  )}
+                  <div className="text-muted-foreground truncate font-mono text-[11px]" title={p.root}>
+                    {p.root}
+                  </div>
+                </div>
+                <span className="text-muted-foreground shrink-0 text-[11px]">
+                  {p.sessionCount} {p.sessionCount === 1 ? "session" : "sessions"}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Rename ${p.name}`}
+                  onClick={() => {
+                    setEditing(p.id)
+                    setDraft(p.name)
+                    setRefusal(undefined)
+                  }}
+                  className="hover:bg-muted grid size-6 shrink-0 place-items-center rounded-md"
+                >
+                  <PencilIcon className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Delete ${p.name}`}
+                  title="The conversations are kept — they fall back to no project."
+                  onClick={() => void remove(p.id)}
+                  className="hover:bg-muted text-destructive grid size-6 shrink-0 place-items-center rounded-md"
+                >
+                  <Trash2Icon className="size-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="flex flex-col gap-2 border-t pt-3">
+          <span className="text-xs font-medium">New project</span>
+          <Input
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value)
+              setRefusal(undefined)
+            }}
+            placeholder="Name (optional — the directory's own name is used)"
+            aria-label="Project name"
+            data-testid="project-name-input"
+            className="h-8 text-sm"
+          />
+          <Input
+            value={root}
+            onChange={(e) => {
+              setRoot(e.target.value)
+              setRefusal(undefined)
+            }}
+            placeholder="Root directory"
+            aria-label="Project root"
+            data-testid="project-root-input"
+            className="h-8 font-mono text-xs"
+          />
+          {refusal !== undefined && (
+            <span className="text-destructive text-[11px]" data-testid="project-refusal">
+              {refusal}
+            </span>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="ghost" onClick={() => onOpenChange?.(false)}>
+            Close
+          </Button>
+          <Button
+            type="button"
+            disabled={!canCreate || busy}
+            onClick={() => void submit()}
+            data-testid="project-create"
+          >
+            Create project
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
