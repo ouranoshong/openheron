@@ -18,7 +18,7 @@ export function Sidebar() {
   const loading = useStore((s) => s.loadingList)
   const open = useStore((s) => s.openSession)
   const startNew = useStore((s) => s.startNewThread)
-  const setActiveProject = useStore((s) => s.setActiveProject)
+  const switchProject = useStore((s) => s.switchProject)
 
   // ★ The grouping is a **pure function** over three answers the server
   //   gave: the sessions, the projects, and the scope. ★ The client does
@@ -47,16 +47,18 @@ export function Sidebar() {
         </Button>
       </div>
 
-      {/* ★ The project a new conversation belongs to. ★ It is only shown
-          when there is a choice: the single-project mode serves one
-          directory, and a picker with one option is a decoration. */}
+      {/* ★ The project the composer works in. ★ It is only shown when there
+          is a choice: the single-project mode serves one directory, and a
+          picker with one option is a decoration. ★ It is the **same** value
+          the button under the input box names and the @-mention picker
+          lists the files of — one truth, three views. */}
       {!scope && projects.length > 0 && (
         <div className="px-2 pb-2">
           <select
             data-testid="project-picker"
             aria-label="Project for new threads"
             value={activeProjectId ?? ""}
-            onChange={(e) => setActiveProject(e.target.value)}
+            onChange={(e) => switchProject(e.target.value)}
             className="border-border bg-background w-full rounded-md border px-2 py-1 text-sm outline-none focus-visible:ring-2"
           >
             <option value="">No project</option>

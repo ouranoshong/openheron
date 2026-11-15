@@ -248,6 +248,13 @@ the log's destination is configuration, and the configuration must not be able t
   an agent's `tools` says what that agent may use at all. ★ The old `disabled_tools` key is
   **refused** with a message that says which way round the two are — the meaning is
   opposite, so renaming it alone would have turned a blacklist into a whitelist.
+- ★ **There is one current project, and it is one value.** `activeProjectId` means "the project
+  the composer works in", and the sidebar's picker, the button under the input box and the
+  `@`-mention picker all read it. ★ A second copy of "which project am I in" is a contradiction
+  waiting to happen — two controls naming different directories make the interface argue with
+  itself. ★ A conversation's project is **immutable**, so switching **leaves** a conversation
+  that belongs to another project (it stays in the sidebar with its history) and the composer
+  comes back empty — "switch" can only mean "the next conversation is in that project".
 - Before changing configuration semantics, read `docs/config-design.md`; before changing
   an interface, read `docs/api-design.md`; before adding a `/v2` endpoint, read
   `docs/api-v2-design.md`; before touching the frontend, read `docs/frontend-design.md`; before

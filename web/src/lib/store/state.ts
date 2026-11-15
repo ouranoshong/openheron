@@ -48,13 +48,24 @@ export interface StoreState {
   //   entry that would fail. ★ A transport failure is not that: the server
   //   may know perfectly well, and the next refresh says so.
   projectsKnown: boolean
-  // activeProjectId is the project a **new** conversation is created in.
+  // activeProjectId is the project the composer works in.
+  //
+  // ★ It is **one** truth: the sidebar's picker, the button under the input
+  //   box and the @-mention picker all read it, and they must never
+  //   disagree — two controls that name different projects make the
+  //   interface argue with itself.
   //
   // ★ In the single-project mode it is the scope — the process serves that
   //   directory and nothing else.
   activeProjectId: string | null
   refreshProjects(): Promise<void>
-  setActiveProject(id: string): void
+  // switchProject moves the composer into a project.
+  //
+  // ★ A conversation's project is immutable, so switching **leaves** a
+  //   conversation that belongs to another project: the composer comes back
+  //   to an empty one, and the next question creates a conversation in the
+  //   project that was picked.
+  switchProject(id: string): void
   // ★ The three write paths on the project table. ★ Each returns the
   //   **server's** sentence when it refuses, and undefined when it did the
   //   thing — so a dialog can stay open with the reason on it, and a form

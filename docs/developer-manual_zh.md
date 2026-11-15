@@ -1164,6 +1164,36 @@ Linux 让 `zenity` 或 `kdialog` —— 装了哪个用哪个，一个都没装�
 ★ **选择器是一道缝**（`Server.SetDirectoryPicker`）：真的那个会开一个**窗口**，而测试
 不该在它自己跑的那台机器上这么做。
 
+### 3.17 ★ 「当前项目」一个值
+
+★ **界面上有三处会说项目** —— 选择器的值、输入框下方的按钮、`@` 提及选择器列的文件 ——
+它们**绝不能各说各的**。⇒ 它们读**同一个**值：store 里的 `activeProjectId`，它的意思是
+「输入框这头在哪个项目里干活」。
+
+| 面 | 读的是 |
+|---|---|
+| 选择器的值（`web/src/components/sidebar.tsx`） | `activeProjectId` |
+| 输入框下方的按钮（`web/src/components/projects-dialog.tsx`） | `selectActiveProjectId` —— 会话的项目优先 |
+| `@` 提及选择器（`web/src/components/composer.tsx`） | `selectActiveProjectId` |
+
+★ **屏幕上那个会话说了算。** `openSession` 与 `refreshList` 把会话的项目抄进
+`activeProjectId`：你正在读的那段对话就是输入框干活的地方，选择器和按钮跟着它走。
+★ `refreshList` 也要做这件事，因为启动时会话**比列表先**打开 —— 那一刻会话还不知道
+自己属于哪个项目。
+
+★ **会话的归属不可改。** `PATCH /v2/sessions/:id` 不接受 `projectId`，所以切换会**离开**
+属于别的项目的那个会话：输入框这头回到空白，那段会话带着历史留在侧栏里，下一个问题就在
+你选的项目里另起一个会话。⇒ 这个判断是一个**纯函数**（`web/src/lib/projects.ts` 里的
+`projectSwitch`）—— 它是这套说法里唯一的判断，而判断要放在能测的地方。
+
+★ **「没有项目」是一个选择。** 选择器有这一项，服务端也认（会话落在默认项目根），所以
+`resolveActiveProject` 保留空 id；只有 **null**（「还没选过」）才退回第一个项目。
+★ 一次刷新不该把它改掉。
+
+★ **新建的项目走同一条路**（`createProject` → `switchProject`）：刚建的项目就是你干活的那个。
+
+整套规则在设计文档里：`docs/projects-design.md` §3.6。
+
 ## 4. 前端
 
 ### 4.1 三层纯函数

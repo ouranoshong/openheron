@@ -192,7 +192,7 @@ export function defaultProject(
 }
 
 /**
- * resolveActiveProject says which project a **new** conversation belongs to.
+ * resolveActiveProject says which project the composer works in.
  *
  * ★ The single-project mode has no choice: the process serves one directory,
  * and a conversation created anywhere else would work in a place the user
@@ -207,9 +207,40 @@ export function resolveActiveProject(
   scope: ProjectScope | null,
 ): string | null {
   if (scope) return scope.projectId
-  if (current && projects.some((p) => p.id === current)) return current
+  // ★ "No project" is a choice too: the sidebar offers it, and the server
+  //   accepts a conversation without one — it works in the default project
+  //   root. ★ So an empty id is kept as it is; only **null** ("nothing was
+  //   chosen yet") falls back to the first project. ★ A refresh must not
+  //   undo the user's own "no project".
+  if (current !== null && (current === "" || projects.some((p) => p.id === current))) {
+    return current
+  }
   const def = defaultProject(projects, scope)
   return def ? def.id : null
+}
+
+/**
+ * projectSwitch says what a switch to a project does.
+ *
+ * ★ A conversation's project is **immutable** — the server has no path that
+ *   moves one (`PATCH /v2/sessions/:id` does not take a `projectId`) — so
+ *   "switch to that project" can only mean "the next conversation is in that
+ *   project". ★ When the conversation on screen belongs to another project,
+ *   the composer **leaves** it: that conversation's work stays where it is
+ *   (it is still in the sidebar), and what is on screen is what the composer
+ *   is about to work in.
+ *
+ * ★ `sessionProject` is undefined when **no conversation is on screen** —
+ *   then there is nothing to leave, and the switch is only a selection.
+ */
+export function projectSwitch(
+  target: string,
+  sessionProject: string | undefined,
+): { projectId: string; leaveSession: boolean } {
+  return {
+    projectId: target,
+    leaveSession: sessionProject !== undefined && sessionProject !== target,
+  }
 }
 
 /**

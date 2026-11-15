@@ -230,7 +230,7 @@ groupSessions(sessions, projects, scope) → Group[]
 所以 `meta.pinned` 恒为假。分组函数按设计支持它，等置顶功能落地就亮起来 ——
 这不是谎报：没有这个标记就是「没置顶」，而今天确实没有置顶。
 
-### 3.5 ★ 表的写面：界面上的一个「+」
+### 3.5 ★ 表的界面：入口在输入框下方
 
 ★ **设计里没写界面上怎么建项目，写出来才发现那是最大的一个洞**：多项目模式
 （`openheron` 不带目录参数）启动时，表是**空的**（`main.go` 只在 `scopeDir != ""` 时
@@ -240,7 +240,7 @@ groupSessions(sessions, projects, scope) → Group[]
 
 ★ **入口在输入框的正下方**（`ComposerMeta` 那一行的右端，`web/src/components/projects-dialog.tsx`
 的 `ProjectsButton`）：一个项目是**一段对话属于哪儿**的决定，而这件事在第一个字之前就定了。
-点开是 `ProjectsDialog` —— **表的全部写面**都在那一个对话框里：列出项目、新建、重命名、删除。
+点开是 `ProjectsDialog` —— **表的全部界面**都在那一个对话框里：切换、列出项目、新建、重命名、删除。
 
 | 决定 | 为什么 |
 |---|---|
@@ -248,7 +248,8 @@ groupSessions(sessions, projects, scope) → Group[]
 | ★ 入口**不在**设置对话框 | 设置里放的是**配置**；项目表是**用户级状态**，不是配置树的一部分 |
 | ★ **单项目模式没有这个入口** | 进程只服务一个目录，新建的项目永远选不上 —— 那是个装饰 |
 | ★ **服务端不认识项目时（503）也没有** | `projectsKnown` 为假；给一个注定失败的入口比不给更糟 |
-| ★ 新建的项目立刻成为新对话的归属 | 用户刚建的，下一段对话就是他要开始的那一段 |
+| ★ 新建的项目立刻成为当前项目 | 用户刚建的，接下来这段对话就是他要开始的那一段 |
+| ★ **按钮上写着当前项目名** | 一个永远写着「Project」的按钮，对「现在在哪个目录里干活」一个字都没说 |
 
 ★ **名字可选，目录必填**：项目**就是**一个目录，而名字可以由目录名推出来
 （`projects.Registry.Create` 这么做）。★ **删项目不删会话**：会话回落成「未选项目」，
@@ -267,6 +268,41 @@ groupSessions(sessions, projects, scope) → Group[]
 ★ **Escape 归平台管**：对话框里的 Escape 是 Radix 在 document **捕获阶段**接的，
 React 的 `preventDefault` 来不及 ⇒ 唯一能拦住的是 `onEscapeKeyDown` 这个 prop
 （详见 `docs/pitfalls.md` §15.2）。
+
+### 3.6 ★ 「当前项目」只有一份真相
+
+★ **按钮要能切换项目**（这是界面上提出来的要求），而「当前项目」这个概念天生有两个来源：
+屏幕上的会话属于哪个项目，和**新建**的会话属于哪个项目。⇒ 它们**必须是同一个值**，
+否则界面上会自己跟自己吵：侧栏的选择器说 A，输入框下方的按钮说 B。
+
+⇒ **`activeProjectId` 就是那一份真相**：它的意思是「输入框这头在哪个项目里干活」。
+三个面读它，谁也不另存一份：
+
+| 面 | 读的是 |
+|---|---|
+| 侧栏的选择器 `project-picker` | `activeProjectId` |
+| 输入框下方的按钮 `projects-button` | `selectActiveProjectId` —— 会话的项目优先，没有会话时就是 `activeProjectId` |
+| `@` 选择器 | `selectActiveProjectId` —— 本来就是它 |
+
+★ **会话打开时，当前项目跟着会话走**（`openSession` 与 `refreshList` 都做这件事）：
+屏幕上这段会话属于哪个项目，输入框这头就在哪个项目里干活 —— 这不是猜，是会话自己的归属。
+★ **会话列表到达时也得跟上**：启动时会话比列表先到，那时的会话还不知道自己属于哪个项目
+（`refreshList` 拿到列表后补上）。
+
+★ **「没有项目」是一个选择**：侧栏的选择器有这一项，服务端也认（会话落在默认项目根）。
+所以 `resolveActiveProject` **保留空串**，只有 **null**（「还没选过」）才退回第一个项目 ——
+★ 一次刷新不该把用户自己选的「没有项目」改掉。
+
+★ **切换会离开当前会话**：会话的归属**不可改**（`PATCH /v2/sessions/:id` 不接受 `projectId`），
+所以「切到那个项目」只能是「下一个会话在那个项目里」。⇒ 屏幕上的会话属于别的项目时，
+切换把它**留在原地**（侧栏里、带着历史），输入框这头回到空白 ⇒ 下一个问题就在新项目里
+另起一个会话。⇒ 这个判断是一个**纯函数**（`projectSwitch`）：它是这套语义里唯一需要
+判断的地方，而需要判断的地方就该能被测。
+
+★ **新建的项目走同一条路**（`createProject` → `switchProject`）：刚建的项目就是
+「输入框这头在干活的那个项目」。
+
+★ **改名的时候点行不切换**：那一行此刻是输入框，不是开关。
 
 ## 4. project root 按会话切换
 
@@ -497,8 +533,9 @@ CI 里有一个 `LISTEN_ADDR=0.0.0.0:9000`，openheron 的监听地址就被改�
 | 21 | `sandbox-kit/openheron/entrypoint.sh:18-19,29,35,38` | 显式 `OPENHERON_CONFIG_ROOT`；`OPENHERON_LISTEN_ADDR`；`OPENHERON_DATA_DIR`；位置参数给项目 | ★ 已落地 |
 | 22 | `agentkit/build/skill.go:198` `ResolveSkillsDir` | ★ **设计里没写，但不改就坏**：配置根进解析链，否则技能一个都加载不到（见 §8） | ★ 已落地 |
 | 23 | `web/src/lib/projects.ts:95` `groupSessions` + `web/src/components/sidebar.tsx` | 侧栏分组 + 新会话选项目 | ★ 已落地 |
-| 24 | `web/src/components/projects-dialog.tsx` `ProjectsButton` / `ProjectsDialog` | ★ **表的写面**：输入框下方的「+ Project」；新建 / 重命名 / 删除（见 §3.5） | ★ 已落地 |
+| 24 | `web/src/components/projects-dialog.tsx` `ProjectsButton` / `ProjectsDialog` | ★ **表的界面**：输入框下方的按钮（**写着当前项目**）；切换 / 新建 / 重命名 / 删除（见 §3.5） | ★ 已落地 |
 | 25 | `agentkit/dirpick` + `api/v2_dirpick.go` `v2PickDirectory` | ★ **写面之二**：目录旁的文件夹按钮 —— **服务端**调起系统自己的选择器（浏览器给不了绝对路径，见 §3.5）；只有本机调用者能用 | ★ 已落地 |
+| 26 | `web/src/lib/projects.ts` `projectSwitch` + `web/src/lib/store/actions.ts` `switchProject` / `openSession` / `refreshList` | ★ **「当前项目」一份真相**（见 §3.6）：按钮切换、会话跟着走、「没有项目」是一个选择 | ★ 已落地 |
 
 ## 8. 落地顺序
 
@@ -534,12 +571,19 @@ CI 里有一个 `LISTEN_ADDR=0.0.0.0:9000`，openheron 的监听地址就被改�
 
 ★ **落地后又补了一处设计里没有的：表的写面**（§3.5）—— 设计把 `POST /v2/projects` 写进了
 API，却没写**谁**在界面上调它。★ 结果是多项目模式启动时表是空的、空表让侧栏选择器不渲染，
-于是**界面上没有任何办法建项目**：后端有端点，前端只读。⇒ 加了输入框下方的「+ Project」
-和那一个对话框（新建 / 重命名 / 删除）。
+于是**界面上没有任何办法建项目**：后端有端点，前端只读。⇒ 加了输入框下方那个按钮
+和那一个对话框（切换 / 新建 / 重命名 / 删除）。
 ★ 还顺手记了一条**前端会踩的坑**：那个入口的 `open` 状态住在 `ComposerMeta` 的一个 prop 里，
 而 prop 的**下标会随 agent 徽章的分支变化** —— React 按下标认孩子，下标一变就是卸载重挂，
 挂在里面的对话框就**自己关掉了**。修法是让入口在 DOM 里的位置**恒定**
 （`web/src/components/composer-meta.tsx` 的 `contents` 包装）。详见 `docs/pitfalls.md` §15.1。
+
+★ **界面上又提了一个要求：那个按钮要能切换项目**（§3.6）。⇒ 设计里原本只有「写面」，
+没有「切换面」：项目表能写了，可**界面上没有一处能说「我现在在哪个项目里」** ——
+侧栏那个选择器说的是「新会话属于哪个项目」，输入框这头是另一回事。
+⇒ 于是把「当前项目」收成**一份真相**（`activeProjectId`），三个面读它；
+★ 顺带发现两件事：**会话打开时当前项目要跟着会话走**（否则按钮和 `@` 选择器说的不是
+同一个目录），**「没有项目」是一个选择**（一次刷新不该把它改掉）。
 
 ## 9. 迁移：不做自动的
 

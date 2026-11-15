@@ -1,4 +1,4 @@
-import { FolderIcon, Loader2Icon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import { FolderIcon, Loader2Icon, PencilIcon, Trash2Icon } from "lucide-react"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -12,7 +12,8 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { projectNameError, projectRenameError, projectRootError, sortProjects } from "@/lib/projects"
-import { useStore } from "@/lib/store"
+import { selectActiveProjectId, useStore } from "@/lib/store"
+import { cn } from "@/lib/utils"
 
 /**
  * ProjectsButton is the way into the project table.
@@ -27,11 +28,20 @@ import { useStore } from "@/lib/store"
  * ★ It is also only there when the **server** has a table. A server from
  *   before the projects answers 503, and offering an entry that would fail
  *   is worse than not offering it.
+ *
+ * ★ The button **names the project the composer works in** — it is the
+ *   switcher, not just a way in: ★ the value is the same one the @-mention
+ *   picker reads, so the files it lists and the project named here are the
+ *   same directory. ★ A button that said "Project" no matter what the
+ *   composer was in would say nothing about where the work happens.
  */
 export function ProjectsButton() {
   const [open, setOpen] = useState(false)
   const scope = useStore((s) => s.projectScope)
   const known = useStore((s) => s.projectsKnown)
+  const projects = useStore((s) => s.projects)
+  const currentId = useStore(selectActiveProjectId)
+  const current = projects.find((p) => p.id === currentId)
 
   if (scope || !known) return null
 
@@ -44,11 +54,11 @@ export function ProjectsButton() {
         className="text-muted-foreground hover:text-foreground ms-auto h-6 gap-1 px-1.5 text-[11px]"
         onClick={() => setOpen(true)}
         data-testid="projects-button"
-        aria-label="Projects"
-        title="A project is a directory. Conversations belong to one and work in its directory."
+        aria-label={current ? `Project: ${current.name}` : "Project"}
+        title="The project this conversation works in. Click to switch to another one, or to make a new one."
       >
-        <PlusIcon className="size-3" />
-        Project
+        <FolderIcon aria-hidden="true" className="size-3" />
+        {current ? current.name : "No project"}
       </Button>
       <ProjectsDialog open={open} onOpenChange={setOpen} />
     </>
@@ -66,6 +76,12 @@ export function ProjectsButton() {
  * ★ Deleting a project does not delete its conversations: they fall back to
  *   "no project" and keep their history. Removing a label must not remove
  *   the work.
+ *
+ * ★ **Clicking a project switches to it.** ★ The composer moves into that
+ *   project — and since a conversation's project is immutable, a
+ *   conversation that belongs to another project is left behind (it stays in
+ *   the sidebar). ★ The row that is the current one says so: the button
+ *   under the input box names it, and the two must not disagree.
  */
 export function ProjectsDialog({
   open,
@@ -79,6 +95,10 @@ export function ProjectsDialog({
   const renameProject = useStore((s) => s.renameProject)
   const deleteProject = useStore((s) => s.deleteProject)
   const pickDirectory = useStore((s) => s.pickDirectory)
+  const switchProject = useStore((s) => s.switchProject)
+  // ★ The project the composer works in — the one the button under the input
+  //   box names and the @-mention picker lists the files of.
+  const currentId = useStore(selectActiveProjectId)
 
   const [name, setName] = useState("")
   const [root, setRoot] = useState("")
@@ -172,6 +192,17 @@ export function ProjectsDialog({
     //   person says "not now".
   }
 
+  // choose moves the composer into a project and closes the dialog.
+  //
+  // ★ The dialog is a switch, not only a list: picking a project is how the
+  //   user says "work here now". ★ A conversation's project is immutable, so
+  //   the switch leaves a conversation that belongs to another project — it
+  //   stays in the sidebar, and the composer comes back empty.
+  const choose = (id: string) => {
+    switchProject(id)
+    onOpenChange?.(false)
+  }
+
   if (open === undefined) return null
 
   return (
@@ -202,73 +233,119 @@ export function ProjectsDialog({
           </p>
         ) : (
           <ul className="flex flex-col gap-1" data-testid="projects-list">
-            {sortProjects(projects).map((p) => (
-              <li
-                key={p.id}
-                data-testid="project-row"
-                data-project-id={p.id}
-                className="flex items-center gap-2 rounded-md border px-2 py-1.5"
-              >
-                <div className="min-w-0 flex-1">
-                  {editing === p.id ? (
-                    <Input
-                      autoFocus
-                      value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault()
-                          void commitRename(p.id)
-                        }
-                        if (e.key === "Escape") {
-                          // ★ Escape cancels the rename and leaves the dialog
-                          //   open — the dialog's own Escape is held back by
-                          //   `onEscapeKeyDown` above while a name is being
-                          //   edited.
-                          e.preventDefault()
-                          setEditing(null)
-                          setDraft("")
-                        }
-                      }}
-                      aria-label={`Name of ${p.name}`}
-                      data-testid="project-rename-input"
-                      className="h-7 text-sm"
-                    />
-                  ) : (
-                    <div className="truncate text-sm font-medium" data-testid="project-name">
-                      {p.name}
-                    </div>
+            {sortProjects(projects).map((p) => {
+              const isCurrent = p.id === currentId
+              return (
+                <li
+                  key={p.id}
+                  data-testid="project-row"
+                  data-project-id={p.id}
+                  data-active={isCurrent ? "true" : "false"}
+                  className={cn(
+                    "flex items-center gap-2 rounded-md border px-2 py-1.5",
+                    // ★ The current project is marked: the button under the
+                    //   input box names it, and the list must say the same
+                    //   thing.
+                    isCurrent && "border-primary/60 bg-primary/5",
                   )}
-                  <div className="text-muted-foreground truncate font-mono text-[11px]" title={p.root}>
-                    {p.root}
-                  </div>
-                </div>
-                <span className="text-muted-foreground shrink-0 text-[11px]">
-                  {p.sessionCount} {p.sessionCount === 1 ? "session" : "sessions"}
-                </span>
-                <button
-                  type="button"
-                  aria-label={`Rename ${p.name}`}
                   onClick={() => {
-                    setEditing(p.id)
-                    setDraft(p.name)
-                    setRefusal(undefined)
+                    // ★ While a name is being edited the row is **not** a
+                    //   switch — the click belongs to the input, and a
+                    //   rename that also moved the composer would be two
+                    //   things at once.
+                    if (editing !== null) return
+                    choose(p.id)
                   }}
-                  className="hover:bg-muted grid size-6 shrink-0 place-items-center rounded-md"
                 >
-                  <PencilIcon className="size-3.5" />
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Delete ${p.name}`}
-                  title="The conversations are kept — they fall back to no project."
-                  onClick={() => void remove(p.id)}
-                  className="hover:bg-muted text-destructive grid size-6 shrink-0 place-items-center rounded-md"
-                >
-                  <Trash2Icon className="size-3.5" />
-                </button>
-              </li>
-            ))}
+                  <div className="min-w-0 flex-1">
+                    {editing === p.id ? (
+                      <Input
+                        autoFocus
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault()
+                            void commitRename(p.id)
+                          }
+                          if (e.key === "Escape") {
+                            // ★ Escape cancels the rename and leaves the dialog
+                            //   open — the dialog's own Escape is held back by
+                            //   `onEscapeKeyDown` above while a name is being
+                            //   edited.
+                            e.preventDefault()
+                            setEditing(null)
+                            setDraft("")
+                          }
+                        }}
+                        aria-label={`Name of ${p.name}`}
+                        data-testid="project-rename-input"
+                        className="h-7 text-sm"
+                      />
+                    ) : (
+                      // ★ The name is the button: the row is a switch, and
+                      //   this is the part of it that a keyboard can reach.
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          // ★ The row handles the click too — this one must
+                          //   not do it twice.
+                          e.stopPropagation()
+                          choose(p.id)
+                        }}
+                        aria-current={isCurrent ? "true" : undefined}
+                        data-testid="project-name"
+                        className="block max-w-full truncate text-left text-sm font-medium hover:underline"
+                      >
+                        {p.name}
+                      </button>
+                    )}
+                    <div className="text-muted-foreground truncate font-mono text-[11px]" title={p.root}>
+                      {p.root}
+                    </div>
+                  </div>
+                  {isCurrent && (
+                    <span
+                      data-testid="project-current"
+                      className="text-primary shrink-0 text-[11px]"
+                      title="The project this conversation works in"
+                    >
+                      Current
+                    </span>
+                  )}
+                  <span className="text-muted-foreground shrink-0 text-[11px]">
+                    {p.sessionCount} {p.sessionCount === 1 ? "session" : "sessions"}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`Rename ${p.name}`}
+                    onClick={(e) => {
+                      // ★ The row is a switch — the rename button is not.
+                      e.stopPropagation()
+                      setEditing(p.id)
+                      setDraft(p.name)
+                      setRefusal(undefined)
+                    }}
+                    className="hover:bg-muted grid size-6 shrink-0 place-items-center rounded-md"
+                  >
+                    <PencilIcon className="size-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Delete ${p.name}`}
+                    title="The conversations are kept — they fall back to no project."
+                    onClick={(e) => {
+                      // ★ The row is a switch — the delete button is not.
+                      e.stopPropagation()
+                      void remove(p.id)
+                    }}
+                    className="hover:bg-muted text-destructive grid size-6 shrink-0 place-items-center rounded-md"
+                  >
+                    <Trash2Icon className="size-3.5" />
+                  </button>
+                </li>
+              )
+            })}
           </ul>
         )}
 

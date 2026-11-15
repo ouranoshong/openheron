@@ -1602,20 +1602,24 @@ openheron              # every project: one group per project
 openheron .            # one project: one group, and the "no project" conversations join it
 ```
 
-★ **The picker above the list** says which project a **new** conversation belongs to.
-It is there only when there is a choice: with one project there is nothing to pick, so
-there is no picker. ★ A conversation keeps its project for its whole life — there is no
-"move it to another project"; a conversation that works in another directory is a new
-conversation.
+★ **The picker above the list** says which project the composer works in — and
+that is **one** answer for both cases: the project a **new** conversation
+belongs to, and the project the conversation on screen belongs to. It is there
+only when there is a choice: with one project there is nothing to pick, so
+there is no picker. ★ A conversation keeps its project for its whole life —
+there is no "move it to another project"; a conversation that works in another
+directory is a new conversation.
 
 ★ **The `@` picker follows the project too**: it lists the files of the project the
 conversation on screen belongs to.
 
-### 6.11 Creating, renaming and deleting a project
+### 6.11 Switching, creating, renaming and deleting a project
 
-★ **The entry is the "+ Project" button under the input box**, on the line that
-says which agent is answering. A project is the decision "which directory does
-this conversation work in", and that is made before the first word is typed — so
+★ **The entry is the button under the input box**, on the line that says which
+agent is answering. ★ It **names the project the composer works in** — the
+same project the `@` picker lists the files of — and clicking it opens the
+dialog of the table. A project is the decision "which directory does this
+conversation work in", and that is made before the first word is typed — so
 the button sits with the composer, not in the sidebar.
 
 ★ **The button is only there when there is a choice.** In the single-project
@@ -1623,8 +1627,15 @@ mode (`openheron .`) there is nothing to pick, so there is no button; and a
 server that does not know the project table answers `503`, so the button is not
 drawn there either.
 
-The dialog is the whole write surface of the table:
+The dialog is the whole surface of the table:
 
+- **Switch** — click a project row and the composer moves into it: the
+  button under the input box, the picker above the sidebar and the `@` picker
+  all name that project from then on, and the row that is the current one
+  says so. ★ A conversation keeps its project for its whole life, so
+  switching **leaves** a conversation that belongs to another project — it
+  stays in the sidebar with its history, and the composer comes back empty.
+  ★ The next question then opens a conversation in the project you picked.
 - **Create** — a name (optional; the directory's own name is used when you
   leave it empty) and a root directory (required, and it must not be empty).
   The server turns the root into an absolute path and takes it as it is.
@@ -1641,8 +1652,8 @@ The dialog is the whole write surface of the table:
   they fall back to "no project" and keep their history. Removing a label must
   not remove the work.
 
-★ **The project you just created is the one your next conversation belongs
-to** — the picker above the sidebar selects it right away.
+★ **The project you just created is the one you work in right away** — the
+composer switches into it, and the picker above the sidebar selects it too.
 
 ★ **A refused create keeps the dialog open**, with what you typed still in it
 and the server's reason under the form. The reason is the server's own

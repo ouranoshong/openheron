@@ -1377,6 +1377,41 @@ network can ask for.
 ★ **The chooser is a seam** (`Server.SetDirectoryPicker`): the real one opens a **window**,
 and a test may not do that on the machine it runs on.
 
+### 3.17 ★ One current project, one value
+
+★ **The interface names the project in three places** — the picker's value, the button under
+the input box, and the file list of the `@` mention picker — and they must **never disagree**.
+⇒ They read **one** value: `activeProjectId` in the store, which means "the project the
+composer works in".
+
+| Surface | Reads |
+|---|---|
+| The picker's value (`web/src/components/sidebar.tsx`) | `activeProjectId` |
+| The button under the input box (`web/src/components/projects-dialog.tsx`) | `selectActiveProjectId` — the session's project first |
+| The `@` mention picker (`web/src/components/composer.tsx`) | `selectActiveProjectId` |
+
+★ **The conversation on screen owns that value.** `openSession` and `refreshList` copy the
+session's project into `activeProjectId`: the conversation you are reading is where the
+composer works, so the picker and the button follow it. ★ `refreshList` does it too because at
+startup the session is opened **before** the list arrives — at that moment the session does
+not know its own project yet.
+
+★ **A session's project is immutable.** `PATCH /v2/sessions/:id` does not take a `projectId`,
+so switching **leaves** a session that belongs to another project: the composer comes back
+empty, the session stays in the sidebar with its history, and the next question opens a
+session in the project that was picked. ⇒ That decision is a **pure function**
+(`projectSwitch` in `web/src/lib/projects.ts`) — it is the only judgment in this story, and a
+judgment belongs where it can be tested.
+
+★ **"No project" is a choice.** The picker offers it and the server accepts it (the session
+works in the default project root), so `resolveActiveProject` keeps an empty id; only **null**
+("nothing was picked yet") falls back to the first project. ★ A refresh must not undo it.
+
+★ **A new project goes through the same switch** (`createProject` → `switchProject`): the
+project you just made is the one you work in.
+
+The whole rule, in the design document: `docs/projects-design.md` §3.6.
+
 ## 4. The frontend
 
 ### 4.1 The pure layers

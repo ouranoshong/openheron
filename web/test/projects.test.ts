@@ -9,6 +9,7 @@ import {
   projectNameError,
   projectRenameError,
   projectRootError,
+  projectSwitch,
   resolveActiveProject,
   sortProjects,
   type ProjectScope,
@@ -132,6 +133,38 @@ describe("resolveActiveProject", () => {
 
   test("一个项目都没有时没有答案", () => {
     expect(resolveActiveProject(null, [], null)).toBeNull()
+  })
+
+  test("「没有项目」是一个选择 —— 刷新不能把它改掉", () => {
+    // ★ The sidebar offers "No project", and the server accepts a
+    //   conversation without one — it works in the default project root.
+    //   ★ A refresh must not turn that choice back into the first project.
+    expect(resolveActiveProject("", [project("alpha", 0), project("beta", 1)], null)).toBe("")
+  })
+
+  test("还没选过（null）才退回第一个项目", () => {
+    expect(resolveActiveProject(null, [project("alpha", 0), project("beta", 1)], null)).toBe("alpha")
+  })
+})
+
+describe("projectSwitch", () => {
+  test("屏幕上没有会话时，切换只是选一个项目", () => {
+    expect(projectSwitch("beta", undefined)).toEqual({ projectId: "beta", leaveSession: false })
+  })
+
+  test("会话已经在这个项目里 —— 不动它", () => {
+    expect(projectSwitch("beta", "beta")).toEqual({ projectId: "beta", leaveSession: false })
+  })
+
+  test("会话在别的项目里 —— 换项目就得离开它", () => {
+    // ★ A conversation's project is immutable: there is no path that moves
+    //   one, so the composer comes back empty and the next conversation is
+    //   created in the project that was picked.
+    expect(projectSwitch("beta", "alpha")).toEqual({ projectId: "beta", leaveSession: true })
+  })
+
+  test("没有项目的会话也是一个地方 —— 换个项目同样得离开", () => {
+    expect(projectSwitch("beta", "")).toEqual({ projectId: "beta", leaveSession: true })
   })
 })
 

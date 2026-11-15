@@ -33,6 +33,7 @@ const PROJECT_CREATE = '[data-testid="project-create"]'
 const PROJECT_RENAME_INPUT = '[data-testid="project-rename-input"]'
 const PROJECT_REFUSAL = '[data-testid="project-refusal"]'
 const PROJECT_PICK = '[data-testid="project-pick-directory"]'
+const PROJECT_CURRENT = '[data-testid="project-current"]'
 
 interface FakeThreadMeta {
   threadId: string
@@ -283,4 +284,103 @@ test("机器上没有选择器，理由写在那儿", async ({ page }) => {
   //   the path can still be typed.
   await expect(page.locator(PROJECT_REFUSAL)).toContainText("no folder chooser")
   await expect(page.locator(PROJECT_ROOT_INPUT)).toBeVisible()
+})
+
+// ★ The button is the switcher.
+//
+// ★ It sits under the input box, so it names the project the composer works
+//   in — the same one the @-mention picker lists the files of. ★ A button
+//   that said "Project" no matter what the composer was in would say
+//   nothing about where the work happens.
+
+test("按钮上写着当前项目", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  // ★ The first project is the default: a new conversation needs a project,
+  //   and the one the user put at the top is the one it gets. ★ The button
+  //   and the sidebar's picker say the same thing.
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Alpha")
+  await expect(page.locator(PICKER)).toHaveValue("alpha")
+})
+
+test("点项目行就切换过去", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  await page.locator(PROJECTS_BUTTON).click()
+  await page.locator(PROJECT_ROW).filter({ hasText: "Beta" }).click()
+
+  // ★ The dialog closes — the user picked, the work is over — and both
+  //   controls name the project that was picked.
+  await expect(page.locator(PROJECTS_DIALOG)).toHaveCount(0)
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Beta")
+  await expect(page.locator(PICKER)).toHaveValue("beta")
+
+  // ★ And the next conversation is created in it.
+  await sendMessage(page, `${MARKER_A} after the switch`)
+  await expect
+    .poll(async () => {
+      const threads = await fakeThreads()
+      return threads[threads.length - 1]?.projectId
+    }, { timeout: 7000 })
+    .toBe("beta")
+})
+
+test("当前项目在列表里标出来", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  await page.locator(PROJECTS_BUTTON).click()
+
+  // ★ The list says which one is current — the button under the input box
+  //   and the list must not disagree.
+  const alpha = page.locator(PROJECT_ROW).filter({ hasText: "Alpha" })
+  const beta = page.locator(PROJECT_ROW).filter({ hasText: "Beta" })
+  await expect(alpha).toHaveAttribute("data-active", "true")
+  await expect(alpha.locator(PROJECT_CURRENT)).toBeVisible()
+  await expect(beta).toHaveAttribute("data-active", "false")
+  await expect(beta.locator(PROJECT_CURRENT)).toHaveCount(0)
+})
+
+test("切换项目会离开当前会话 —— 归属不可改", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  // ★ Open a conversation that belongs to Beta.
+  const beta = page.locator(GROUP).filter({ has: page.getByText("Beta", { exact: true }) })
+  await beta.locator(THREAD_ITEM).first().click()
+  // ★ The button names the conversation's project: the composer works there.
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Beta")
+
+  // ★ Switching to another project leaves that conversation — a
+  //   conversation's project is immutable, so the next one is created in the
+  //   project that was picked. ★ The conversation itself stays in the
+  //   sidebar: its work is not lost, only left.
+  await page.locator(PROJECTS_BUTTON).click()
+  await page.locator(PROJECT_ROW).filter({ hasText: "Alpha" }).click()
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Alpha")
+  await expect(page.locator(GROUP)).toHaveCount(3)
+
+  await sendMessage(page, `${MARKER_A} in alpha`)
+  await expect
+    .poll(async () => {
+      const threads = await fakeThreads()
+      return threads[threads.length - 1]?.projectId
+    }, { timeout: 7000 })
+    .toBe("alpha")
+})
+
+test("改名的时候点行不切换 —— 那一下属于输入框", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  await page.locator(PROJECTS_BUTTON).click()
+  await page.getByRole("button", { name: "Rename Beta" }).click()
+  await page.locator(PROJECT_RENAME_INPUT).fill("Beta Two")
+
+  // ★ The row is a switch, but the click belongs to the rename: two things
+  //   at once is two things done wrong.
+  await expect(page.locator(PROJECTS_DIALOG)).toBeVisible()
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Alpha")
 })

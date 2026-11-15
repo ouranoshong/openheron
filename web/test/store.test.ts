@@ -20,6 +20,10 @@ const history: Record<string, AgMessage[]> = {
   [B]: [{ id: "b1", role: "user", content: "MARKER-BRAVO question" }],
 }
 
+// sessionProjects says which project a session belongs to — the server's
+// answer, the way the project table would give it.
+const sessionProjects = new Map<string, string>()
+
 const meta = (id: string, title: string) => ({
   threadId: id,
   title,
@@ -29,7 +33,7 @@ const meta = (id: string, title: string) => ({
   state: "idle" as const,
   hasPendingApproval: false,
   agentId: "main",
-  projectId: "",
+  projectId: sessionProjects.get(id) ?? "",
 })
 
 const store = new Map<string, string>()
@@ -101,6 +105,7 @@ function json(body: unknown, status = 200): Response {
 function reset(): void {
   emptyList = false
   missing.clear()
+  sessionProjects.clear()
   localStorage.clear()
   useStore.setState({
     sessions: {},
@@ -235,6 +240,75 @@ describe("startNewThread —— Phase 0 钉红的第三个缺陷", () => {
     const before = useStore.getState().order.length
     useStore.getState().startNewThread()
     expect(useStore.getState().order).toHaveLength(before)
+  })
+})
+
+describe("switchProject —— 切换项目", () => {
+  // plant puts a project on a session, the way the server's list would.
+  function plant(threadId: string, projectId: string): void {
+    useStore.setState((s) => ({
+      sessions: {
+        ...s.sessions,
+        [threadId]: {
+          ...s.sessions[threadId]!,
+          meta: { ...s.sessions[threadId]!.meta, projectId },
+        },
+      },
+    }))
+  }
+
+  test("屏幕上没有会话时，切换只是选一个项目", () => {
+    useStore.getState().switchProject("beta")
+    expect(useStore.getState().activeProjectId).toBe("beta")
+    expect(useStore.getState().activeId).toBeNull()
+  })
+
+  test("会话已经在这个项目里 —— 不动它", async () => {
+    await useStore.getState().refreshList()
+    plant(A, "beta")
+    useStore.setState({ activeId: A })
+
+    useStore.getState().switchProject("beta")
+
+    expect(useStore.getState().activeId).toBe(A)
+    expect(useStore.getState().activeProjectId).toBe("beta")
+  })
+
+  test("会话在别的项目里 —— 换项目就得离开它，会话还在侧栏里", async () => {
+    await useStore.getState().refreshList()
+    plant(A, "alpha")
+    useStore.setState({ activeId: A })
+
+    useStore.getState().switchProject("beta")
+
+    // ★ The composer is empty again — the next question creates a
+    //   conversation in the project that was picked.
+    expect(useStore.getState().activeId).toBeNull()
+    expect(useStore.getState().activeProjectId).toBe("beta")
+    // ★ And the conversation itself is untouched: its work is not lost,
+    //   only left.
+    expect(useStore.getState().order).toContain(A)
+  })
+})
+
+describe("当前项目跟着会话走", () => {
+  test("打开一个会话，当前项目就是它的项目", async () => {
+    sessionProjects.set(A, "alpha")
+    await useStore.getState().refreshList()
+
+    await useStore.getState().openSession(A)
+
+    expect(useStore.getState().activeProjectId).toBe("alpha")
+  })
+
+  test("会话列表到达时也跟上 —— 启动时会话比列表先到", async () => {
+    sessionProjects.set(A, "alpha")
+    await useStore.getState().refreshList()
+    useStore.setState({ activeId: A, activeProjectId: null })
+
+    await useStore.getState().refreshList()
+
+    expect(useStore.getState().activeProjectId).toBe("alpha")
   })
 })
 

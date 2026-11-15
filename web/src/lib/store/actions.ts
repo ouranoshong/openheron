@@ -14,7 +14,7 @@ import {
 import { readActiveThreadId, writeActiveThreadId } from "@/lib/active-thread"
 import { attachTarget, busyElsewhere } from "@/lib/attach"
 import { closeAllOpenParts, type AgEvent } from "@/lib/events"
-import { directoryPick, resolveActiveProject } from "@/lib/projects"
+import { directoryPick, projectSwitch, resolveActiveProject } from "@/lib/projects"
 import { applySessionFact as foldSessionFact, type SessionFact } from "@/lib/session-events"
 import {
   emptyConversation,
@@ -148,19 +148,33 @@ export const useStore = create<StoreState>((set, get) => ({
     }
   },
 
-  setActiveProject(id) {
-    if (get().activeProjectId === id) return
-    set({ activeProjectId: id })
+  switchProject(id) {
+    const s = get()
+    // ★ The project of the conversation on screen — undefined when there is
+    //   none. ★ It is what decides whether the switch leaves that
+    //   conversation: a conversation's project is immutable, so the only way
+    //   to work in another project is a new conversation.
+    const sessionProject = s.activeId ? s.sessions[s.activeId]?.meta.projectId : undefined
+    const plan = projectSwitch(id, sessionProject)
+    set({
+      activeProjectId: plan.projectId,
+      // ★ The composer leaves the conversation it was in — the conversation
+      //   itself stays in the sidebar (its work is not lost, only left),
+      //   and what is on screen is what the composer is about to work in.
+      ...(plan.leaveSession ? { activeId: null } : {}),
+    })
   },
 
   async createProject(name, root) {
     try {
       const p = await api.createProject(name.trim(), root.trim())
       await get().refreshProjects()
-      // ★ The new project becomes the one a new conversation belongs to: the
-      //   user just made it, and the next conversation is the one they are
-      //   about to start.
-      set({ activeProjectId: p.id })
+      // ★ The new project becomes the one the composer works in: the user
+      //   just made it, and the next conversation is the one they are about
+      //   to start. ★ It goes through the same switch as every other pick —
+      //   a conversation's project is immutable, so one that belongs to
+      //   another project is left behind.
+      get().switchProject(p.id)
       return undefined
     } catch (e) {
       return describeError(e)
@@ -219,7 +233,18 @@ export const useStore = create<StoreState>((set, get) => ({
           loaded: old?.loaded ?? false,
         }
       }
-      set({ sessions, order, loadingList: false })
+      // ★ The list is where the project of the conversation on screen becomes
+      //   known — at startup the session is opened before the list has
+      //   arrived, so the follow-up there had nothing to read. ★ The
+      //   composer follows the conversation, not the other way round.
+      const activeId = get().activeId
+      const projectId = activeId ? sessions[activeId]?.meta.projectId : undefined
+      set({
+        sessions,
+        order,
+        loadingList: false,
+        ...(projectId !== undefined ? { activeProjectId: projectId } : {}),
+      })
 
       if (items.length === 0) {
         writeActiveThreadId("")
@@ -233,9 +258,18 @@ export const useStore = create<StoreState>((set, get) => ({
   async openSession(id) {
     if (get().activeId === id && get().sessions[id]?.loaded) return
     writeActiveThreadId(id)
-    set({ activeId: id })
 
+    // ★ The conversation on screen is the one the composer works in, so its
+    //   project is the project: the sidebar's picker, the button under the
+    //   input box and the @-mention picker all read that one value. ★ A
+    //   conversation that belongs to no project says so — it works in the
+    //   default project root.
     const entry = get().sessions[id]
+    set({
+      activeId: id,
+      ...(entry ? { activeProjectId: entry.meta.projectId ?? "" } : {}),
+    })
+
     if (entry?.loaded) return
 
     set((s) => ({
