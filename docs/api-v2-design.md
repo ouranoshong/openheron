@@ -49,6 +49,68 @@
    SSE）；一个事实属于**会话**，就走会话的公告通道（§7）。★ 审批属于会话 ——
    抛出它的那一轮在抛出它的那一刻就结束了，而审批还在等一个答案。
 
+### 1.1 ★ 为什么是 AG-UI，为什么是 `/v2`
+
+★ **命名空间直接跳到 `/v2`** —— 避免产生一个从未存在的 v1 世代。
+
+★ **协议是 AG-UI**：它是**连接层**协议，多个 agent 框架官方接入，`1.0` 已发布并有
+JSON Schema，TS/Python/.NET 的 SDK 由 schema 生成 —— ★ **Go SDK 属社区层**。
+
+★ **不实现 A2UI**：★ 上游核对 `google/A2UI` 仓库全树的结果是 —— CI workflows **无
+Go**、setup action **无 setup-go**、代码生成器全是 Python、仓库根**无 `go.mod`**，
+而仓库内的 skill 还写着「新语言 SDK 仍是待实现状态」。⇒ 在 Go 上做 A2UI producer 意味着
+独自承担无 schema 校验、无 conformance 测试、无 catalog 生成，而规格本身 v0.9.1、
+v0.8→v0.9 已经 breaking（消息全改名、组件 wrapper 扁平化、`usageHint`→`variant`）。
+★ **代价**：Go SDK 是社区层，升级要自己盯（见 §1.2 的最后一条）。
+
+★ **单条运行端点**：`POST /v2/run` 一条，chat 与 approve 合并 —— ★ 少一条路由而非
+多一条。
+
+★ **历史端点返回 AG-UI 原生数组**：与流式共用一个前端状态机。
+
+### 1.2 ★ 上游那份留下的风险，在这棵树上的落点
+
+★ 上游的风险登记里，有三条在这棵树**仍然成立** —— 后果一样，但落点不一样：
+
+| 风险 | 影响 | 这棵树上的落点 |
+|---|---|---|
+| 路由注册顺序写错 | `/v2/*` 被静态路由吞掉，静默 404 | ★ **已经被测试锁住**（`api/v2_test.go:37` 的路由优先级用例）—— 上游把它列成风险时，它还是一条待办 |
+| 误引 `pkg/encoding/sse` | 与 hertz-contrib/sse 双重分帧，前端**全量静默丢弃** | ★ **零引用**（依赖里只有 `hertz-contrib/sse`）；帧格式由 `web/scripts/interop-check.ts` 与前端单测盯着（§5.1 第 4 条） |
+| `effectiveTools` 在 API 层重算 | 与真实装配漂移 | ★ API 层只**问** builder（`api/v2_introspect.go:272`），档位表来自 builder 而不是配置（`api/v2_introspect.go:407`） |
+
+★ 还有一条不是风险而是**约束**：★ **AG-UI SDK 锁在 pseudo-version 上**（依赖里没有
+semver tag）—— 上游的修复不会自动进来，升级是一次单文件的 diff。
+
+### 1.3 ★ 怎么验（分层，各验各的）
+
+★ 上面这些契约分三层验，各验各的 —— ★ 一层通不过，不能拿另一层的通过来说事。
+
+| 层 | 命令 | 验什么 |
+|---|---|---|
+| 协议契约 | `task test` / `task test-race` | 事件序列（`events.ValidateSequence`）、错误模型、审批的两层语义 |
+| 真后端联调 | `task smoke` | **真实 SSE 字节流**：分帧、历史回放逐字节喂入 |
+| 界面 | `task test-e2e` | 确定性假后端 + 真实浏览器；★ **不验模型** |
+
+★ `task smoke` 打的是**测试实例**（`:18099`，独立配置与会话目录，端口定义在仓库根
+`.env.test`），三个脚本默认连它，无需手写 `OPENHERON_BASE`：
+
+```bash
+cd web && bun run smoke:interop            # SSE 分帧、拼接、历史水合
+cd web && bun run smoke:no-undefined-url   # 不会发出拼错的 URL
+cd web && bun run smoke:hitl               # 审批 resume 走通
+```
+
+★ **`smoke:hitl` 依赖模型选择**调用 `write_file` 才能触发审批 —— 模型不调就失败
+（实测约 5 次抖 1 次）。★ 那是模型的自由，不是代码回归；脚本重试若干次，全都不触发
+时**明确报错**，不伪装成接线有问题。
+
+★ **为什么界面测试用假后端而不是真后端**：真后端依赖模型配合，用它做界面断言时，
+失败分不清是界面坏了还是模型没听话。★ 取舍是**牺牲与真实模型的端到端联调，换取
+界面断言的确定性** —— 而与真实后端的协议层验证由上面那层 `task smoke` 负责，两者
+互补。
+
+★ 完整的测试与隔离规则在 `docs/developer-manual.md` §5。
+
 ---
 
 ## 2. 路由表
