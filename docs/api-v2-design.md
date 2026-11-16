@@ -56,6 +56,8 @@
 ★ 全部注册在 `api/v2_files.go` 的 `registerV2Routes`（`api/v2_files.go:40`）。
 ★ 注册顺序是「**全部 `/v2/*` → SPA `NoRoute` 兜底 → `StaticFS("/")` 兜底**」——
 一条放错位置的路由会静默变成 404，读起来跟「端点没实现」一模一样。
+★ **这个顺序必须被测试锁住**（`api/v2_test.go:37` 的路由优先级用例）—— 这是典型的
+「重构时不看顺序就静默坏掉」的坑。
 
 | # | 方法 | 路径 | 说的是什么 |
 |---|---|---|---|
@@ -145,6 +147,25 @@
 
 ★ **默认 agent 是 main，且不是配置项**：「谁是默认」不是配置项，只是「新会话没指定
 时用哪个」的约定。
+
+★ **会话创建时机的三版取舍**（这一节的结论改过两次，每一版都有它的问题）：
+
+| 版本 | 规则 | 问题 |
+|---|---|---|
+| **懒创建**（最早的 v2） | `threadId` 可选，缺了就由 `/v2/run` 此刻创建 | 「谁决定建会话」没有归属：客户端以为服务端会建、服务端以为客户端会传 id |
+| **预创建 + 本地槽位** | `POST /v2/sessions` 唯一入口，但前端只持有**本地槽位 id** | ① 两次往返；② **双 id** —— 助手 UI 在发消息之前就要一个 thread id 当列表 key，那个 id 只能是本地占位，于是每个会话前后两个 id，需要一整套注册表去收敛，收敛失败时 `GET /v2/sessions/{slot}/messages` 打 404，历史整个空掉 |
+| **现在的** | `POST /v2/sessions` 唯一入口，**前端决定建不建** | 第一条消息两次往返（建 + 跑），之后都是一次 |
+
+★ 为什么最后选「前端决定」：服务端只能从「有没有 threadId」推断，而那是**结果**不是
+**决定**。「建不建」得有归属 —— 归属在知道当前有没有会话的那一端，也就是客户端。
+★ 双 id 的问题在现在这版**不存在**：前端建完会话就拿到了**真 id**，本地占位与真实 id
+是同一个东西，没有「收敛」这一步。
+
+★ **试过并否决的中间方案**：`CreateWithID`（前端生成 uuid、服务端首次写入时落盘）
+—— ★ 前端必须猜 `validateID` 的规则，格式漂移的表现是 404，而在懒创建语义下 404
+会被理解成「会话丢了」，排查方向完全错位；以及「读写都自动创建」—— ★ 读写不对称，
+读路径 404 / 写路径创建这条边界很容易在后续改动中被无意抹平，一旦抹平，**拼错的
+URL 会静默造出会话**。现在只有 `POST /v2/sessions` 一个创建入口，读路径一律 404。
 
 ### 3.2 `GET /v2/sessions`
 
@@ -338,6 +359,71 @@ AG-UI 的 resume entry 带 `status`（`resolved` / `cancelled`），但那描述
 它是给人看的兜底文案。`toolName` / `arguments` 直接来自 `*approval.ApprovalInfo`；
 `arguments` 只在是合法 JSON 时出现。
 
+### 5.1 ★ 实测踩出来的七条
+
+★ 这七条是**真模型联调**撞出来的：每一条看起来都像「模型的问题」，实际是**契约的
+问题**。★ 上游那份把它们记在 `heron` 的坐标上；搬过来时每一条都重新定位到了本仓库
+现在的那一行。
+
+1. **审批链路需要 `gob.Register`。** `ApprovalInfo` 挂在 eino interrupt 的 `Info`
+   字段上（接口值），而 checkpoint 用 gob 序列化 —— ★ gob 对接口字段的具体类型必须在
+   包初始化时 Register，否则编码失败。★ 失败发生在**停机提交 checkpoint 的那一刻**，
+   现象是「模型说要调工具 → 直接 RUN_ERROR」，看着像模型出错，实际是编码器。
+   本仓库：`approval/approval.go:18` 与 `:19`；守着的测试是
+   `agentkit/build/gate_test.go:84` 的 `TestApprovalInfoSurvivesGob` 与
+   `approval/approval_test.go:9` 的 `TestDecisionSurvivesGob`。
+
+2. **interrupt 的 message 不能用 `%v`。** `fmt.Sprintf("%v", ic.Info)` 会把
+   `*ApprovalInfo` 打平成 `&{write_file {"file_path": ...}}` —— 这段文本经事件流直达
+   前端审批卡，等于把内部 Go 表示泄漏成界面文案。本仓库走 `describe(ic.Info)`
+   （`agentkit/emit/emit.go:444`），守着的测试是
+   `agentkit/emit/interrupt_test.go:14` 的 `TestTheInterruptDescribesTheApprovalInfo`。
+
+3. **`state` 停在 `running`。** 轮次完成后 turn 句柄仍被持有，于是
+   `GET /v2/sessions/{id}` 永远报 `running`。★ 根因是「loop 还活着」（在等下一条
+   item）被当成了「有活动在进行」—— 这两件事不等价。修法是 turn 一旦上报就释放引用
+   （`agentkit/run/bridge.go:73` 的 `markTurnDone`），★ **只清匹配的那个句柄**，免得
+   误伤期间被替换掉的 turn。整套运行时设计在 `docs/runtime-design.md`。
+
+4. **SSE 分帧是 `data:{`，不是 `data: `。** `data:{...}`（冒号后无空格）是合法的
+   SSE，但任何按 `data: ` 严格匹配的解析器都会**静默地一条都收不到** —— 不报错、不
+   抛异常，流只是空的。★ AG-UI 是跨语言契约，这个缝隙必须显式测。本仓库的解析器在
+   `web/src/lib/sse.ts:43` 只吃掉**一个**可选空格，所以两种都收；断言在
+   `web/scripts/interop-check.ts:34` —— ★ 它用的是**生产路径上那个**解析器，不是
+   自己另写一个假装兼容（用第三方 SDK 验等于验错了对象）。
+
+5. **审批 resume 是两层语义。** AG-UI 规范里 resume entry 的 `status` 只有
+   `resolved` / `cancelled`，描述的是「中断被处理掉没有」，不表达「用户同不同意」；
+   openheron 读的是 `payload.approved` —— ★ 这样拒绝理由才能跟着 payload 过去。
+   ★ `status` **不在结构体上**，而不是「接收并忽略」：一个「到了却什么都不做」的字段
+   会教会每个后来者 `status` 能决定什么。本仓库：`api/v2_run.go:108` 的 `resumeEntry`
+   —— 它只有 `interruptId` 与 `payload`（`approved` + `reason`）。
+
+6. **`REASONING_MESSAGE_START` 的 `role` 只有前端会校验。** 必须是字面量
+   `"reasoning"`。★ Go 侧 `events.Validate()` 不查这个字段，契约测试全绿也照样漏；
+   前端拒绝后整条事件丢弃，表现为「推理一出现，后面所有内容都没了」。★ 这类**只有
+   单侧有的校验**是跨语言协议最危险的地方：Go 侧加一条断言只能保证「我们自己没写
+   错」，保证不了「对方认不认」。本仓库：`transport/transport.go:398` 的
+   `reasoningRole`。
+
+7. **`TOOL_CALL_RESULT` 的 `messageId` 不是 callId。** 它是一次新生成的 `uuid`
+   （`transport/transport.go:445`）。★ 前端按 `toolCallId` 回填就够（工具调用可能
+   挂在别的 `parentMessageId` 上），但这个字段确实存在 —— 它是在把前端的 fixture 从
+   `Record<string, unknown>[]` 改成 `AgEvent[]` 之后冒出来的。
+
+### 5.2 ★ 传输层的两条
+
+★ **sink 断了要停止渲染，但必须继续消费事件流** —— 否则归档的消息会缺，`Outcome`
+不完整。★ 这条是上游从 `a2ui` 照搬来的，本仓库的传输层也守着它：写失败之后
+`emit` 直接返回（`transport/transport.go:220`），而 `Render` 的循环**不退出** ——
+事件继续被消费掉。
+
+★ **契约测试用 SDK 自带的 `events.ValidateSequence`**，它强制校验
+`RUN_STARTED` 先于 `RUN_FINISHED` / `RUN_ERROR`、`TEXT_MESSAGE_START` →
+`CONTENT`… → `END` 配对、`TOOL_CALL_START` → `ARGS`… → `END` 配对、
+`outcome.type == "interrupt"` 时至少一个 interrupt。★ 强度远高于自己手写断言。
+本仓库：`transport/transport_test.go:93`。
+
 ---
 
 ## 6. 历史回放
@@ -363,16 +449,30 @@ AG-UI 的 resume entry 带 `status`（`resolved` / `cancelled`），但那描述
 ★ `messages` 是 **AG-UI 原生 `types.Message`**，前端用**同一个事件归约器**水合流式
 与回放两路数据 —— 一套状态机，两个数据源。
 
+★ **`?agent=xxx` 按 agent 过滤消息**（`api/v2_sessions.go:326`）：
+
+| 情形 | 响应 |
+|---|---|
+| 有该 agent 的消息 | `200`，`messages` 只含该 agent 的消息；`agent` 回显 `"coder"` |
+| 没有该 agent 的消息 | `200`，`messages` 为空数组（**不是 404** —— 「过滤条件不认识」与「会话不存在」是两回事） |
+
+★ **过滤只影响 `messages`，不影响 `usage` 与 `usage.byAgent`**：用量是会话级的
+事实，而过滤是「看哪些消息」。★ 若两者一起收窄，客户端拿到的 `byAgent` 各桶之和就
+对不上 `usage`。
+
+★ **过滤时保留消息的原始下标** —— 消息 id 由下标派生（`stableID`），改了它，同一条
+消息在「全部视图」与「按 agent 视图」里会有两个 id，前端的重连与去重就乱了。
+
 ### 6.2 `pendingApprovals` —— 待批的卡片数据
 
 ```json
 {
   "interruptId": "ic-7f3a",
   "reason": "tool_call",
-  "message": "执行 go test ./… 需要批准",
+  "message": "write_file needs approval",
   "toolCallId": "call-9x2",
-  "toolName": "execute",
-  "arguments": { "command": "go test ./..." },
+  "toolName": "write_file",
+  "arguments": { "path": "config.yaml" },
   "requestedByAgent": "main",
   "subagentRunId": null,
   "createdAt": "2026-10-11T09:14:12.004Z"
@@ -775,6 +875,7 @@ MCP 服务器与它们的工具。★ 挂载即授予：收窄 MCP 工具的地�
 | `file_too_large` | 413 | 上传超限 |
 | `config_would_break_merge` | 422 | 写入会破坏继承链合并 |
 | `forbidden_host` / `forbidden_origin` | 403 | 主机守卫 |
+| `config_unavailable` | 503 | ★ 没有可用的配置源（自省、项目文件、配置读写的入口） |
 | `directory_picker_unavailable` / `directory_picker_remote` / `directory_picker_failed` | 503 / 403 / 500 | 目录选择器 |
 | `secret_unavailable` | 503 | 没有可用的密钥后端 |
 | `internal` | 500 | 未分类 |
@@ -783,6 +884,48 @@ MCP 服务器与它们的工具。★ 挂载即授予：收窄 MCP 工具的地�
 了，或者审批被答了。★ 它从前叫 `agent_busy`，那个名字**是错的**：它的三个调用点
 （切 agent、压缩、跑一轮）守的都是**会话**，而并行委派意味着几个 agent 同时忙是
 合法的 —— 把 `agent_busy` 读成「这个 agent 在忙」的客户端会得出恰恰相反的结论。
+
+### 13.3 ★ `model_bad_request` 里最容易踩的一种：历史不合法
+
+`model_bad_request` 大多来自端点对**请求参数**的拒绝，但有一种是服务端自己造成的 ——
+历史里有 `tool_calls` 却没有对应的 tool 消息：
+
+```
+An assistant message with 'tool_calls' must be followed by tool messages
+responding to each 'tool_call_id'. (insufficient tool messages following
+tool_calls message)
+```
+
+★ **这不是用户能修的**：历史由运行时归档落盘，它无条件 append。一旦某个工具**没跑出
+结果**就结束了（未知工具、abort、轮次被抢占、迭代上限耗尽），那条 assistant 消息就
+成了孤儿，而**此后每一轮都 400** —— 重开会话、换模型、改配置都救不回来。
+
+⇒ 修在**读取侧**（`agentkit/run/history.go:10` 的 `normalizeHistory`）。★ 一次修同时
+做到三件事：治好新的一轮、治好**已经坏掉**的老会话、不必去逐个堵产生孤儿的位置
+（那不止一处，每堵一处都会再冒出新的）。★ 守着的测试是
+`agentkit/run/input_history_test.go:61` 与
+`agentkit/run/input_history_contract_test.go:99`。
+
+★ **落盘历史不被改写** —— 规范化只作用于发出去的那份副本。★ 所以修复是「每次读都
+重做一遍」，而不是一次性掩盖证据：那批孤儿消息仍留在会话里，导出问题时看得到。
+
+★ 补出来的消息**只说事实、不猜原因**（`"grep" did not run: the turn ended before
+its result came back`）—— 模型会照着编出来的原因往下推，说「被拒绝了」它就去找
+绕过路线。
+
+### 13.4 ★ 5xx 的日志必须带 cause
+
+★ 5xx 的**主要出口**是 `v2FailInternal(c, err)`：客户端只拿到 `"internal error"`，
+真实原因只进日志。★ 描述在本地目录里查得到，**原因是唯一查不到的那半** —— 而三种
+可能的处置完全不同：文件损坏、目录没权限、路径类型不对。
+
+> ★ **例外**：配置类端点在没有可用配置源时返 **503 `config_unavailable`**，它走的是
+> `v2Fail`（不带 cause、不记 5xx 日志）—— ★ 因为那时根本没有「内部错误」可带。位置：
+> `api/v2_introspect.go:33`、`api/v2_project.go:51`、`api/v2_settings.go:57`。
+
+★ `cause` 是 `errBody` 的**非导出字段**（`api/v2_types.go:78`）：「日志里有、客户端
+看不到」由 `encoding/json` 只序列化导出字段这条规则保证，不靠文档约定。★ error 里常
+带绝对路径，回给客户端对用户没帮助，只会在转贴 issue 时泄露本地目录结构。
 
 ---
 
@@ -819,7 +962,7 @@ MCP 服务器与它们的工具。★ 挂载即授予：收窄 MCP 工具的地�
   `v2UploadFiles`(:138)、`maxUploadBytes`(:136)、`v2RawFile`(:291)、`isPreviewImage`(:361)、
   `isTextualMime`(:375)、`listWorkspace`(:438)
 - `api/v2_types.go` — 错误码(:28)、`codeSessionBusy`(:48)、`codeRunNotLive`(:58)、
-  `errBody`(:63)、`v2Err`(:82)、`v2FailInternal`(:99)、`v2FailErr`(:108)、
+  `errBody`(:63)、`cause`(:78)、`v2Err`(:82)、`v2FailInternal`(:99)、`v2FailErr`(:108)、
   `threadState`(:151)、`threadMeta`(:159)、`pendingView`(:193)、`threadDetail`(:212)、
   `runView`(:233)、`runsView`(:256)、`usageView`(:292)、`contextUsageView`(:306)、
   `messagesView`(:341)、`toPendingViews`(:351)、`toPendingView`(:363)、`toUsageView`(:383)
@@ -841,16 +984,19 @@ MCP 服务器与它们的工具。★ 挂载即授予：收窄 MCP 工具的地�
   `v2DeleteProject`(:225)
 - `api/v2_dirpick.go` — 三个码(:31)、`v2PickDirectory`(:59)、`pickDirectory`(:93)、
   `localCaller`(:115)
-- `api/v2_project.go` — `v2ProjectFiles`(:49)、`projectRootOf`(:95)、`listProjectFiles`(:121)
+- `api/v2_project.go` — `v2ProjectFiles`(:49)、`config_unavailable`(:51)、
+  `projectRootOf`(:95)、`listProjectFiles`(:121)
 
 ### A.3 自省、配置与密钥
 
-- `api/v2_introspect.go` — `requireConfig`(:31)、`modelView`(:97)、`agentView`(:108)、
+- `api/v2_introspect.go` — `requireConfig`(:31)、`config_unavailable`(:33)、
+  `modelView`(:97)、`agentView`(:108)、
   `toolView`(:132)、`v2Agents`(:147)、`v2AgentDetail`(:160)、`agentViews`(:183)、
   `effectiveTools`(:268)、`policyTools`(:287)、`SkillView`(:337)、`v2Skills`(:350)、
   `serverView`(:358)、`configView`(:369)、`v2Config`(:401)、`v2Health`(:485)、
   `v2Runtime`(:502)
-- `api/v2_settings.go` — 四个码(:13)、`v2SettingsManifest`(:91)、`v2SettingsItem`(:109)、
+- `api/v2_settings.go` — 四个码(:13)、`config_unavailable`(:57)、
+  `v2SettingsManifest`(:91)、`v2SettingsItem`(:109)、
   `v2SettingsSave`(:134)、`v2SettingsDelete`(:154)、`v2SettingsValidate`(:173)
 - `api/v2_secrets.go` — `codeSecretUnavailable`(:32)、`secretItemView`(:48)、
   `v2Secrets`(:89)、`v2SecretWrite`(:151)、`v2SecretDelete`(:192)、`v2SecretGroupDelete`(:231)
@@ -885,3 +1031,20 @@ MCP 服务器与它们的工具。★ 挂载即授予：收窄 MCP 工具的地�
   `applySessionFact`(:126)
 - `web/src/lib/store/actions.ts` — `watchSession`(:935)、`applySessionFact`(:988)、
   `followRun`(:1009)、`recoverRound`(:770)
+
+### A.5 实测与传输层（§5.1、§5.2、§13.3、§13.4）
+
+- `approval/approval.go` — `gob.Register`(:18)、`gob.Register`(:19)
+- `approval/approval_test.go` — `TestDecisionSurvivesGob`(:9)
+- `agentkit/build/gate_test.go` — `TestApprovalInfoSurvivesGob`(:84)
+- `agentkit/emit/emit.go` — `describe(ic.Info)`(:444)
+- `agentkit/emit/interrupt_test.go` — `TestTheInterruptDescribesTheApprovalInfo`(:14)
+- `agentkit/run/history.go` — `normalizeHistory`(:10)
+- `agentkit/run/input_history_test.go` — `TestNormalizeHistoryFillsTheMissingResult`(:61)
+- `agentkit/run/input_history_contract_test.go` — `TestNormalizeHistoryDoesNotFabricateResults`(:99)
+- `web/src/lib/sse.ts` — 吃掉一个可选空格(:43)
+- `web/scripts/interop-check.ts` — 无空格分帧的计数(:34)
+- `transport/transport.go` — `emit`(:220)、`reasoningRole`(:398)、
+  `NewToolCallResultEvent`(:445)
+- `transport/transport_test.go` — `ValidateSequence`(:93)
+- `api/v2_test.go` — 路由优先级(:37)
