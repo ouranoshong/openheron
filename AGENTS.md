@@ -15,7 +15,7 @@ one — change one and change the other.
 > `docs/user-manual.md` / `docs/user-manual_zh.md` (user guide),
 > `docs/developer-manual.md` / `docs/developer-manual_zh.md` (developer guide).
 >
-> **and eight Chinese-only documents** under `docs/` — the architecture and code-design
+> **and nine Chinese-only documents** under `docs/` — the architecture and code-design
 > ones. ★ Their Chinese content **took over the plain name**: `docs/config-design.md`
 > **is** the Chinese document — there is no `_zh` twin and no English one:
 > `docs/config-design.md` (the configuration system — the config root and its three
@@ -24,6 +24,9 @@ one — change one and change the other.
 > `docs/runtime-design.md` (the runtime — a run as a durable row with a lease and a
 > fence, the one-turn-per-session admission gate, context usage and compaction, and the
 > logging assembly),
+> `docs/api-v2-design.md` (the `/v2` HTTP API — the route table, the request and
+> response shapes, the error codes, the run's SSE contract, history replay, and the
+> session's announcement channel),
 > `docs/tools-design.md` (tools and integrations — where a tool comes from, the bounded
 > filesystem backend, the MCP integration, and the Docker Sandbox Kit),
 > `docs/ui-design.md` (the interface and its resources — attachments and motion),
@@ -37,7 +40,7 @@ one — change one and change the other.
 > `docs/pitfalls.md` (the pitfall register — the traps this tree has hit, what caused
 > each of them, and how it was handled).
 > **Every other design document under `docs/` still lives in the upstream repository** ——
-> any `docs/xxx.md` reference below that is not one of these eight, is the upstream copy.
+> any `docs/xxx.md` reference below that is not one of these nine, is the upstream copy.
 > If you cannot get hold of it before changing semantics, ask first; do not change
 > configuration or interfaces from memory.
 >
@@ -54,7 +57,7 @@ one — change one and change the other.
 > `sandbox-kit/BUILDING.md`) are bilingual for the same reason.
 >
 > ★ The four bilingual sets describe **what the code surface already is**; the Chinese-only
-> designs say the same about their own subject: each of the eight **describes the code as
+> designs say the same about their own subject: each of the nine **describes the code as
 > it is**, and the proposals that have not landed are collected in its own "待决" section.
 > `docs/config-design.md` covers **the configuration system** — the config root and its
 > three levels, the partitions and their file specs, loading and precedence, the tool
@@ -68,6 +71,11 @@ one — change one and change the other.
 > and a fence, the connection demoted to a subscriber, the one-turn-per-session admission
 > gate and its cross-client 409, context usage and compaction, and the logging assembly
 > (the mutable level, `log_level`, the composition root and the hertz adapter).
+> ★ `docs/api-v2-design.md` covers **the `/v2` HTTP API** — the route table and every
+> request and response shape, the error model and its code table, the run's SSE
+> contract, history replay, and the session's announcement channel (the three facts it
+> carries, one of which says an approval is waiting). **Its body describes the code as
+> it is**; the proposals that have not landed are in its own "待决" section.
 > `docs/tools-design.md` covers **tools and integrations** — where a tool comes from
 > (`tools:` / `mcps:` / `skills:` and the `mcp__<server>__<tool>` namespace), the bounded
 > filesystem backend in `agentkit/fsx`, the MCP integration, and the Docker Sandbox Kit
@@ -264,8 +272,9 @@ the log's destination is configuration, and the configuration must not be able t
   an interface, read `docs/api-design.md`; before adding a `/v2` endpoint, read
   `docs/api-v2-design.md`; before touching the frontend, read `docs/frontend-design.md`; before
   touching the test environment (ports / isolation directories), read `docs/frontend-design.md`
-  §11.2 and `docs/config-design.md` §3.3. ★ `docs/config-design.md` **is** in this repository;
-  the other three are upstream documents that are **not** — if you cannot get them, ask
+  §11.2 and `docs/config-design.md` §3.3. ★ `docs/config-design.md` and
+  `docs/api-v2-design.md` **are** in this repository; the other two are upstream
+  documents that are **not** — if you cannot get them, ask
   first. The `docs/architecture.md` / `docs/user-manual.md` / `docs/developer-manual.md` shipped here (and their `_zh` Chinese
   versions) describe **this code surface** as it actually is — just read them.
   `docs/runtime-design.md` covers context usage and compaction: the usage dashboard and
@@ -479,6 +488,7 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 |---|---|
 | `docs/config-design.md` | **Configuration system design** — the config root and its three levels, the partitions and their file specs, loading and precedence, the tool surface, the six `config_*` tools, hot reload, and the dependency iron rules (**the body describes the code as it is**) |
 | `docs/runtime-design.md` | **Runtime design** — a run as a durable row with a lease and a fence, the one-turn-per-session admission gate, context usage and compaction, and the logging assembly (**the body describes the code as it is**) |
+| `docs/api-v2-design.md` | **`/v2` HTTP API design** — the route table, the request and response shapes, the error codes, the run's SSE contract, history replay, and the session's announcement channel (**the body describes the code as it is**) |
 | `docs/tools-design.md` | **Tools and integrations design** — where a tool comes from, the bounded filesystem backend in `agentkit/fsx`, the MCP integration, and the Docker Sandbox Kit (**the body describes the code as it is**) |
 | `docs/ui-design.md` | **Interface and resources design** — how an uploaded file lands on disk, what the server does to it, how the interface shows it, and the motion tokens (**the body describes the code as it is**) |
 | `docs/secrets-design.md` | **Secret system design** — the two namespaces, the shared resolution chain, the keyring backend, the write surface, and the interface entry (**the body describes a proposal being landed**) |
@@ -502,7 +512,6 @@ overview and the index of the volumes.
 | `docs/agent-architecture-survey.md` | **Survey of external agent architectures** — the gateway and background-service problems of pi / rakazo / OpenClaw / Hermes / Letta (2026-10-24) |
 | `docs/positioning.md` | **Positioning and trade-offs** — expert per expert model × agent as a tool: mechanism breakdown and boundaries (2026-10-25) |
 | `docs/api-design.md` | The old unprefixed APIs (**retired on 2026-10-23 together with M3**, kept as history) |
-| `docs/api-v2-design.md` | The `/v2` API family and the AG-UI event contract |
 | `docs/frontend-design.md` | React frontend architecture and interface |
 | `docs/agent-design.md` | Agent pool, approvals, depth protection |
 | `docs/agent-design-v2.md` | Agent assembly API v2 (`deep.Config` leaves openheron) |

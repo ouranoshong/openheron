@@ -45,6 +45,7 @@ the documents say how it works.
 | Understand how the code is put together | [`docs/architecture.md`](docs/architecture.md) · [`docs/architecture_zh.md`](docs/architecture_zh.md) |
 | Read the configuration system and the tool surface | [`docs/config-design.md`](docs/config-design.md) |
 | Read the runtime — the run lifecycle, admission, context, logging | [`docs/runtime-design.md`](docs/runtime-design.md) |
+| Read the `/v2` HTTP API — routes, shapes, error codes, the announcement channel | [`docs/api-v2-design.md`](docs/api-v2-design.md) |
 | Read where a tool comes from, the filesystem backend, MCP, the Kit | [`docs/tools-design.md`](docs/tools-design.md) |
 | Read the interface and its resources — attachments and motion | [`docs/ui-design.md`](docs/ui-design.md) |
 | Read the secret system — naming, resolution, the keyring, the surface | [`docs/secrets-design.md`](docs/secrets-design.md) |
@@ -56,7 +57,7 @@ the documents say how it works.
 | Read the factory configuration sample | [`.openheron-example/README.md`](.openheron-example/README.md) |
 
 ★ The first three rows are **bilingual** — the English file is the main version, the `_zh`
-one the Chinese, and the two correspond one to one. The eight design documents are
+one the Chinese, and the two correspond one to one. The nine design documents are
 **Chinese only**: their Chinese content took over the plain name, so the link above is the
 only entry there is. The Kit's two guides have `_zh` twins beside them.
 

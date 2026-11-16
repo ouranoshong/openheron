@@ -687,7 +687,7 @@ and the message list draws a divider in place of the chat bubble
 (`web/src/components/message-list.tsx:156`, drawn by
 `web/src/components/compaction-divider.tsx`). A compaction that happens **mid-turn** is
 announced on the stream instead: the transport emits a `CUSTOM "context_compacted"` event
-(`transport/transport.go:215`) and the reducer puts a boundary into the list at once
+(`transport/transport.go:264`) and the reducer puts a boundary into the list at once
 (`web/src/lib/events.ts:447`).
 
 ★ The live event carries **no numbers**. The numbers — how many messages were superseded, how
@@ -1428,6 +1428,85 @@ The whole rule, in the design document: `docs/projects-design.md` §3.6.
 
 ★ The sidebar's own shape — its folders, its rows, the menu on a project, and the fold —
 is `docs/sidebar-design.md`.
+
+### 3.18 ★ The session's announcement channel
+
+★ **The channel belongs to the session, not to a run.** `GET /v2/sessions/{threadId}/events`
+is an SSE stream of **facts about the session**, and the facts outlive the run that
+raised them. A run's stream closes with the run; an approval does not: the round ends,
+the question stays, and the surface waiting on the question has no stream left to hear
+that it was answered.
+
+★ **Facts are notifications; the scan is the truth.** The truth is
+`GET /v2/sessions/{id}/messages` and `GET /v2/sessions/{id}/runs`. ★ A client
+subscribes **first** and scans after: whatever happened before the scan is in the scan,
+and whatever happened after it arrives here.
+
+| Fact | Frame | Payload |
+|---|---|---|
+| a round began | `run_started` | `run_id` `kind` |
+| ★ **an approval is waiting** | `approval_pending` | `interrupt_id` `reason` `message` `tool_call_id` `tool_name` `arguments` `requested_by_agent` `subagent_run_id` `created_at` `run_id` |
+| the approval was answered | `approval_resolved` | `interrupt_id` `approved` `reason` `run_id` |
+
+★ **All three are CUSTOM frames.** AG-UI has no vocabulary for "an approval is
+waiting", and its frames are about a **round** — while these three are about the
+**session**.
+
+★ **The channel has no terminal frame.** It ends when the client goes away, and the
+client reads that as "come back to the scan" — not as "the session is over".
+
+#### ★ Announce a fact only once it is durable
+
+★ **A fact that names something the server cannot honour is a bug in the client's
+hands.** So the order in `agentkit/run/bridge.go` is fixed:
+
+1. write the approval to disk — a `writeHeldApproval` that fails announces **nothing**;
+2. raise the barrier — the ledger's row becomes terminal (`waiting_approval`);
+3. announce — `announceApprovalPending`;
+4. release the slot.
+
+★ **Announcing before the write would hand a surface a card that errors when it is
+clicked** — an approval that was never persisted cannot be answered. ★ Announcing
+before the barrier would let a surface show a card and then read a ledger that still
+says "running".
+
+★ **One fact per approval.** A card that carries several approvals is answered as one
+thing, while the surface drops exactly one card per fact — so a bundle would leave a
+card that never goes away.
+
+#### ★ The card travels with the fact
+
+★ **The payload carries the card's data, not just the fact that there is one.** A
+surface that was not watching the round which raised the approval has no stream of its
+own, so the tool name and the arguments exist nowhere else for it — and a card
+without them is a card nobody can judge.
+
+★ **Two spellings, one card.** The scan answers the same card in the REST spelling
+(`interruptId`, `pendingApprovals`); the channel spells it in its own (`interrupt_id`).
+★ The client translates **once**, in one place: `readInterrupt` in
+`web/src/lib/session-events.ts`. ★ Do not add a second translation — a card that says
+one thing on one surface and another thing on another is exactly the bug this rule
+exists to prevent.
+
+#### Adding a fact
+
+| Step | Where |
+|---|---|
+| the kind | `contract/runevent.go` — a `RunEvent` kind |
+| the announcement | `agentkit/run/announce.go` — a `publish` on the session's bus |
+| the frame | `transport/transport.go` — `RenderSession` and an `emit…` |
+| the client | `web/src/lib/session-events.ts` — `parseSessionFact` and `applySessionFact` |
+
+★ **The client has to be able to say "I do not know this".** A frame it does not know
+is not an error — the channel is a live path, and the server may add facts to it. ★
+What must not happen is a frame that is **half** understood: an approval without an id
+names no card, so it is dropped.
+
+★ **The client merges by id.** The surface that asked for the round already saw the
+interrupt on the run's own stream, and the channel says the **same** card — so a
+second copy of it would be two cards for one question.
+
+The whole rule, in the design document: `docs/api-v2-design.md` §7.
 
 ## 4. The frontend
 

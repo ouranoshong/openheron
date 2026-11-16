@@ -1308,6 +1308,12 @@ says so.
 window, the other window's card disappears on its own and it goes on to follow the round
 that continued — no reload, and no button left over that the server would refuse.
 
+★ **The card reaches the windows that are watching, not only the one that started the
+round.** The approval is announced on the session's own channel, so every window looking
+at that session gets the card — and what it is asking for — the moment it appears.
+★ A window that opens afterwards finds the same card by reading the session's history:
+the channel carries what happens next, not what already happened.
+
 ★ **The card does not need a reload.** If the connection drops while a round is running,
 the client comes back to that round and reads the open approvals out of the transcript — so
 an approval raised in that round still arrives on its own. ★ And if the server refuses that
@@ -1478,6 +1484,11 @@ tabs, or a tab and another machine — only one of them can be running a turn.
 ★ **The second window watches that turn.** It is not kept out of the conversation: it asks
 the server which run owns the session and attaches to it, and the rest of the turn arrives
 in that window too.
+
+★ **An approval that appears reaches the second window too.** The session's own channel
+carries the card — with the tool and its arguments — to every window watching that
+session, so the window that did not start the round still shows the card and can answer
+it.
 
 ```
 POST /v2/run

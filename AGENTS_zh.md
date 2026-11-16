@@ -15,13 +15,15 @@
 > `docs/user-manual.md` / `docs/user-manual_zh.md`（用户使用说明）、
 > `docs/developer-manual.md` / `docs/developer-manual_zh.md`（开发者说明）。
 >
-> **另有八篇只有中文的文档**在 `docs/` 下 —— 架构与代码设计那一类。
+> **另有九篇只有中文的文档**在 `docs/` 下 —— 架构与代码设计那一类。
 > ★ 它们的中文内容**接管了原文件名**：`docs/config-design.md` **就是**那篇中文文档 ——
 > 既没有 `_zh` 副本，也没有英文版：
 > `docs/config-design.md`（配置系统 —— 配置根与它的三级解析、各个分区与它们的
 > 文件规格、加载与优先级、工具面、六个 `config_*` 工具、热更新，以及依赖铁律）、
 > `docs/runtime-design.md`（运行时 —— run 变成一行持久事实、配上租约与 fence、
 > 连接降级为订阅者、一个会话一轮的准入闸门、上下文占用与压缩，以及日志装配）、
+> `docs/api-v2-design.md`（`/v2` HTTP 接口 —— 路由表、请求与响应的形状、错误码、
+> 一轮自己的 SSE 契约、历史回放，以及会话的公告通道）、
 > `docs/tools-design.md`（工具与集成 —— 工具从哪来、有界的文件系统后端、
 > MCP 接入，以及 Docker Sandbox Kit）、
 > `docs/ui-design.md`（界面与它的资源 —— 附件与动效）、
@@ -31,7 +33,7 @@
 > `docs/sidebar-design.md`（侧栏 —— 它的分组、行与菜单、一份「当前项目」，以及还缺什么）、
 > `docs/pitfalls.md`（坑点登记册 —— 这棵树踩过的坑、每个坑的成因，以及它怎么处理）。
 > **`docs/` 下其余设计文档仍在上游仓库** ——
-> 下面凡引用 `docs/xxx.md` 而这八篇之外的，都是上游那份。
+> 下面凡引用 `docs/xxx.md` 而这九篇之外的，都是上游那份。
 > 改语义前若拿不到它，先问，别凭印象改配置或接口。
 >
 > ★ **设计类文档只写中文。** 讲代码怎么搭起来的文档 —— 分层、
@@ -43,7 +45,7 @@
 > `docs/developer-manual.md`。不假定他们的读者读中文。Kit 的那两份指南
 > （`sandbox-kit/TUTORIAL.md` 与 `sandbox-kit/BUILDING.md`）出于同样的理由保持双语。
 >
-> ★ 前面四组讲的是**代码面已经是什么样**；那八篇中文单份讲的也是**各自的主题
+> ★ 前面四组讲的是**代码面已经是什么样**；那九篇中文单份讲的也是**各自的主题
 > 现状**：每一篇都**讲代码现在是什么样**，没落地的提案集中放在各自的「待决」一节里。
 > `docs/config-design.md` 讲的是**配置系统** —— 配置根与它的三级解析、各个分区与它们的
 > 文件规格、加载与优先级、工具面、六个 `config_*` 工具、热更新，以及依赖铁律。
@@ -53,6 +55,10 @@
 > `docs/runtime-design.md` 讲的是**运行时** —— run 变成一行持久事实、配上租约与 fence、
 > 连接降级为订阅者、一个会话一轮的准入闸门与它的跨客户端 409、上下文占用与压缩，
 > 以及日志装配（可变等级、`log_level`、组合根与 hertz 适配器）。
+> ★ `docs/api-v2-design.md` 讲的是 **`/v2` HTTP 接口** —— 路由表与每个请求和响应的形状、
+> 错误模型与它的码表、一轮自己的 SSE 契约、历史回放，以及会话的公告通道
+> （它送的三条事实，其中一条说「审批在等」）。**它的正文讲的就是现在**；没落地的提案
+> 放在它自己的「待决」一节里。
 > `docs/tools-design.md` 讲的是**工具与集成** —— 工具从哪来
 > （`tools:` / `mcps:` / `skills:` 与 `mcp__<server>__<tool>` 命名空间）、
 > `agentkit/fsx` 那个有界的文件系统后端、MCP 接入，以及把整个进程打包成 v3 workload 的
@@ -216,8 +222,9 @@
 - 改配置语义前先读 `docs/config-design.md`；改接口前先读 `docs/api-design.md`；
   新增 `/v2` 接口读 `docs/api-v2-design.md`；动前端读 `docs/frontend-design.md`；
   动测试环境（端口 / 隔离目录）读 `docs/frontend-design.md` §11.2 与
-  `docs/config-design.md` §3.3。★ `docs/config-design.md` **就在本仓库里**，
-  另外三份是**不在**本仓库的上游文档 —— 拿不到就先问。
+  `docs/config-design.md` §3.3。★ `docs/config-design.md` 与
+  `docs/api-v2-design.md` **就在本仓库里**，
+  另外两份是**不在**本仓库的上游文档 —— 拿不到就先问。
   本仓库自带的 `docs/architecture.md` / `docs/user-manual.md` /
   `docs/developer-manual.md`（及其 `_zh` 中文版）讲的是**本代码面**的实际结构，
   直接看就行。`docs/runtime-design.md` 讲的是上下文占用与压缩：占用仪表盘
@@ -412,6 +419,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
 |---|---|
 | `docs/config-design.md` | **配置系统设计说明** —— 配置根与它的三级解析、各个分区与它们的文件规格、加载与优先级、工具面、六个 `config_*` 工具、热更新，以及依赖铁律（**正文讲的是代码现状**） |
 | `docs/runtime-design.md` | **运行时设计说明** —— run 变成一行持久事实、配上租约与 fence、一个会话一轮的准入闸门、上下文占用与压缩，以及日志装配（**正文讲的是代码现状**） |
+| `docs/api-v2-design.md` | **`/v2` HTTP 接口设计说明** —— 路由表、请求与响应的形状、错误码、一轮自己的 SSE 契约、历史回放，以及会话的公告通道（**正文讲的是代码现状**） |
 | `docs/tools-design.md` | **工具与集成设计说明** —— 工具从哪来、`agentkit/fsx` 那个有界的文件系统后端、MCP 接入，以及 Docker Sandbox Kit（**正文讲的是代码现状**） |
 | `docs/ui-design.md` | **界面与资源设计说明** —— 上传的文件怎么落盘、服务端对它做了什么、界面怎么显示它，以及动效令牌（**正文讲的是代码现状**） |
 | `docs/secrets-design.md` | **密钥体系设计说明** —— 两个命名空间、共用的解析链、钥匙串后端、写入面，以及界面入口（**正文讲的是正在落地的方案**） |
@@ -434,7 +442,6 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
 | `docs/agent-architecture-survey.md` | **外部 Agent 架构调研** —— pi / rakazo / OpenClaw / Hermes / Letta 的 gateway 与后台服务问题（2026-10-24） |
 | `docs/positioning.md` | **定位与取舍** —— 专家配专模 × Agent 即工具：机制拆解与边界（2026-10-25） |
 | `docs/api-design.md` | 旧的无前缀接口（**已于 2026-10-23 随 M3 下线**，保留为历史记录） |
-| `docs/api-v2-design.md` | `/v2` 接口族与 AG-UI 事件契约 |
 | `docs/frontend-design.md` | React 前端架构与界面 |
 | `docs/agent-design.md` | Agent 池、审批、深度保护 |
 | `docs/agent-design-v2.md` | agent 装配 API v2（`deep.Config` 请出 openheron） |

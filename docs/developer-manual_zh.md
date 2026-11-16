@@ -588,7 +588,7 @@ Messages(effective bool) []*schema.Message
 出来（`web/src/lib/store/history.ts:42`），消息列表在气泡该在的位置上画一条分隔线
 （`web/src/components/message-list.tsx:156`，由 `web/src/components/compaction-divider.tsx`
 绘制）。**轮内**发生的压缩改走事件流通知：transport 发一个 `CUSTOM "context_compacted"` 事件
-（`transport/transport.go:215`），reducer 当场把边界插进列表（`web/src/lib/events.ts:447`）。
+（`transport/transport.go:264`），reducer 当场把边界插进列表（`web/src/lib/events.ts:447`）。
 
 ★ 实时事件**不带数字**。数字 —— 顶替了多少条消息、摘要省下了多少 token —— 是拿记录量出来的，
 而记录要等这一轮结束才写；transport 手里没有记录可量。所以实时分隔线写的是*「earlier messages ·
@@ -1206,6 +1206,73 @@ Linux 让 `zenity` 或 `kdialog` —— 装了哪个用哪个，一个都没装�
 
 ★ 侧栏自己的形状 —— 它的文件夹、它的行、项目上的那个菜单，以及折叠 —— 在
 `docs/sidebar-design.md`。
+
+### 3.18 ★ 会话的公告通道
+
+★ **通道属于会话，不属于某一轮。** `GET /v2/sessions/{threadId}/events` 是一条推
+**会话事实**的 SSE，而这些事实活得比抛出它们的那一轮更久。一轮的流随那一轮结束而关，
+审批不会：轮次结束了，问题还在 —— 而等着那个问题的界面已经没有流可以听「它被答了」。
+
+★ **事实是通知，扫描才是真相。** 真相是 `GET /v2/sessions/{id}/messages` 与
+`GET /v2/sessions/{id}/runs`。★ 客户端**先订阅、后扫描**：扫描之前发生的事在扫描里，
+扫描之后发生的从这里来。
+
+| 事实 | 帧 | 载荷 |
+|---|---|---|
+| 一轮开始 | `run_started` | `run_id` `kind` |
+| ★ **审批在等** | `approval_pending` | `interrupt_id` `reason` `message` `tool_call_id` `tool_name` `arguments` `requested_by_agent` `subagent_run_id` `created_at` `run_id` |
+| 审批被回答 | `approval_resolved` | `interrupt_id` `approved` `reason` `run_id` |
+
+★ **三条都是 CUSTOM 帧。** AG-UI 没有「审批在等」这种词汇，而它的帧都是关于**一轮**
+的 —— 这三条关于**会话**。
+
+★ **通道没有终态帧。** 它在客户端离开时结束，而客户端把这读成「回去扫描」，不是
+「这个会话结束了」。
+
+#### ★ 事实落稳了才宣布
+
+★ **一条指着服务端兑现不了的东西的事实，是客户端那边的 bug。** 所以
+`agentkit/run/bridge.go` 里的次序是固定的：
+
+1. 把审批写进磁盘 —— `writeHeldApproval` 失败就**什么都不宣布**；
+2. 立屏障 —— 账本那一行变成终态（`waiting_approval`）；
+3. 宣布 —— `announceApprovalPending`；
+4. 释放槽位。
+
+★ **在写盘之前宣布，就是递给界面一张点了就报错的卡** —— 一个没持久化的审批答不了。
+★ 在屏障之前宣布，就是让界面先显示卡，再去扫出一个仍写着「在跑」的账本。
+
+★ **一个审批一条事实。** 一张装着好几个审批的卡是被当成一件事回答的，而界面一条事实
+摘一张卡 —— 所以捆在一起会剩下一张永远不消失的卡。
+
+#### ★ 卡随事实一起走
+
+★ **载荷带的是卡的内容，不只是「有一张卡」这件事。** 一个没看着抛出审批的那一轮的界面
+没有自己的流，所以工具名与参数对它来说别处不存在 —— 一张没有内容的卡，是一张没法判断
+的卡。
+
+★ **两种拼写，同一张卡。** 扫描用 REST 的拼法（`interruptId`、`pendingApprovals`），
+通道用它自己的（`interrupt_id`）。★ 客户端在**一处**翻译：
+`web/src/lib/session-events.ts` 里的 `readInterrupt`。★ 别再加第二处翻译 —— 一张卡在
+一个界面上是一回事、在另一个界面上是另一回事，正是这条规则要防的 bug。
+
+#### 加一条事实
+
+| 步骤 | 在哪儿 |
+|---|---|
+| 事件种类 | `contract/runevent.go` —— 一个 `RunEvent` 种类 |
+| 宣布 | `agentkit/run/announce.go` —— 会话那条总线上的一个 `publish` |
+| 帧 | `transport/transport.go` —— `RenderSession` 与一个 `emit…` |
+| 客户端 | `web/src/lib/session-events.ts` —— `parseSessionFact` 与 `applySessionFact` |
+
+★ **客户端得能说「我不认识这条」。** 它不认识的帧不是错误 —— 通道是一条活着的路径，
+服务端会往里加事实。★ 但**半懂**的帧才是问题：一个没有 id 的审批指不到任何一张卡，
+所以它被丢掉。
+
+★ **客户端按 id 合并。** 发起那一轮的那个界面已经从那一轮自己的流里看到过那个 interrupt，
+而通道说的是**同一张**卡 —— 多一份就是一个问题两张卡。
+
+整套规则在设计文档里：`docs/api-v2-design.md` §7。
 
 ## 4. 前端
 

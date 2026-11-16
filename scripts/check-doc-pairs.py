@@ -39,6 +39,7 @@ PAIRS = [
 #   so a `_zh` twin for any of these is a mistake, not a mirror. This
 #   catches it before it becomes a pair nobody updates.
 CHINESE_ONLY = [
+    "api-v2-design.md",
     "config-design.md",
     "pitfalls.md",
     "projects-design.md",

@@ -35,6 +35,7 @@
 | 弄懂代码是怎么搭起来的 | [`docs/architecture.md`](docs/architecture.md) · [`docs/architecture_zh.md`](docs/architecture_zh.md) |
 | 读配置系统与工具面 | [`docs/config-design.md`](docs/config-design.md) |
 | 读运行时 —— run 生命周期、会话准入、上下文、日志 | [`docs/runtime-design.md`](docs/runtime-design.md) |
+| 读 `/v2` HTTP 接口 —— 路由、形状、错误码、公告通道 | [`docs/api-v2-design.md`](docs/api-v2-design.md) |
 | 读工具从哪来、文件系统后端、MCP、沙箱 Kit | [`docs/tools-design.md`](docs/tools-design.md) |
 | 读界面与它的资源 —— 附件与动效 | [`docs/ui-design.md`](docs/ui-design.md) |
 | 读密钥体系 —— 命名、解析、钥匙串、写入面 | [`docs/secrets-design.md`](docs/secrets-design.md) |
@@ -45,7 +46,7 @@
 | 遵守这里人与 AI 的约定 | [`AGENTS.md`](AGENTS.md) · [`AGENTS_zh.md`](AGENTS_zh.md) |
 | 读出厂配置样例 | [`.openheron-example/README.md`](.openheron-example/README.md) |
 
-★ 前三行是**双语**的 —— 英文是主版本，`_zh` 是中文版，两版一一对应。那八篇设计文档
+★ 前三行是**双语**的 —— 英文是主版本，`_zh` 是中文版，两版一一对应。那九篇设计文档
 **只有中文**：它们的中文内容接管了原文件名，所以上面的链接就是它们唯一的入口。
 Kit 的那两份指南旁边各有一个 `_zh` 版本。
 
