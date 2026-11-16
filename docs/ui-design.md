@@ -544,7 +544,7 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
    `blockedNote`。
 2. ★ **上游 `docs/frontend-design.md` §10.3 把 spec 文件数与条数写死在表里。** 那份文档不在本
    仓库，本仓库改不了它；给动效加 E2E 用例时，那张表也得跟着改 —— **记一笔交给上游**。
-   ★ 本仓库当前的数：spec 文件 **15** 个，`web/test/e2e/chat.spec.ts` **63** 条（工具卡图标这轮
+   ★ 本仓库当前的数：spec 文件 **19** 个，`web/test/e2e/chat.spec.ts` **68** 条（工具卡图标这轮
    加了 3 条）。上游按这两个数改表。
 
 ### 3.1 ★ 已撤回的路线（不是待办）
