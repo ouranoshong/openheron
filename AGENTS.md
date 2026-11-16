@@ -146,7 +146,12 @@ notifications, and **interface copy**.
 | Notification | English | `c.deferKey("watch.debounce fell back to default: %s", msg)` |
 | API response body | English | `c.JSON(400, map[string]string{"error": "thread not found"})` |
 | **Interface copy** | **English** | `"Run in a separate agent"` |
-| **Content written into user configuration** | **English** | the header of `catalog.md`, the comment block of `server/config.yaml`, the comment block of `tools/http.yaml` |
+
+★ **What is written into a user's configuration is not bound by this rule.** English is the
+**default** the factory tree ships — the header of `catalog.md`, the comment block of
+`server/config.yaml`, the comment block of `tools/http.yaml` — but a default is not an
+obligation. ★ The factory tree's **agent files** (`agentkit/templates/files/agents/*.md`)
+are written in **Chinese** and stay that way.
 
 ### Code comments
 
@@ -178,8 +183,8 @@ When you add comments, follow these rules:
 | **Test case names** | Descriptive text, not runtime output |
 | **Test fixture data** | Sample values used by assertions (e.g. `"答完了"`); changing them detaches the assertion from the behavior under test |
 
-The test: **will this string be printed at runtime, returned to a caller, or written into a file
-the user reads?** Yes → English; no → keep Chinese.
+The test: **will this string be printed at runtime, or returned to a caller?** Yes → English;
+no → the rules above do not apply.
 
 Why: error messages get grepped, get collected by log pipelines, and get consumed by the `Kind`
 classification in `llm/common`; mixing languages breaks retrieval and matching while debugging,

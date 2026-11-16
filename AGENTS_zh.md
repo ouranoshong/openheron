@@ -120,7 +120,11 @@
 | 消息提醒 | 英文 | `c.deferKey("watch.debounce fell back to default: %s", msg)` |
 | 接口响应体 | 英文 | `c.JSON(400, map[string]string{"error": "thread not found"})` |
 | **界面文案** | **英文** | `"Run in a separate agent"` |
-| **写入用户配置的文件内容** | **英文** | `catalog.md` 的表头、`server/config.yaml` 的注释段、`tools/http.yaml` 的注释段 |
+
+★ **写进用户配置的内容不受这条约束。** 英文是出厂树**默认**用的语言 ——
+`catalog.md` 的表头、`server/config.yaml` 的注释段、`tools/http.yaml` 的注释段 ——
+但默认不是义务。★ 出厂树的 **agent 文件**（`agentkit/templates/files/agents/*.md`）
+是**中文**写的，就保持中文。
 
 ### 代码注释
 
@@ -150,8 +154,8 @@
 | **测试用例名** | 描述性文本，不是运行时输出 |
 | **测试夹具数据** | 断言用的样本值（如 `"答完了"`），改了会让断言与被测行为脱节 |
 
-判断标准：**这段字符串在进程运行时会被打印、返回给调用方，或写进用户读到的文件吗？**
-会 → 英文；不会 → 保持中文。
+判断标准：**这段字符串在进程运行时会被打印，或者返回给调用方吗？**
+会 → 英文；不会 → 上面这些规则不适用。
 
 为什么：错误信息常被 grep、被日志采集、被 `llm/common` 的 `Kind` 分类消费；混语言会让排障时的检索与匹配失效，也让 `/v2/config` 的 `deferred` 字段混入两种语言。
 界面文案同理 —— 用户看的是界面，不是源码，中英混排会让「这是 bug 还是我配置错了」更难判断。
