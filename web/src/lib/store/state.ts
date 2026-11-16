@@ -56,7 +56,10 @@ export interface StoreState {
   //   interface argue with itself.
   //
   // ★ In the single-project mode it is the scope — the process serves that
-  //   directory and nothing else.
+  //   directory and nothing else. ★ In the multi-project mode **null** and
+  //   **""** both mean "no project", whose conversations work in the default
+  //   project root; "" is the deliberate fallback and the value the store
+  //   settles on once the table is read.
   activeProjectId: string | null
   refreshProjects(): Promise<void>
   // switchProject moves the composer into a project.
@@ -100,6 +103,15 @@ export interface StoreState {
   // ── actions ────────────────────────────────────────────────────────────
   refreshList(): Promise<void>
   openSession(id: string): Promise<void>
+  // startNewThread lets go of the conversation on screen — and of its
+  // project.
+  //
+  // ★ The two go together: the project was that conversation's, and a new
+  //   conversation has none until the user picks one. ★ The button under the
+  //   input box says "Default Project" — that is the default project root —
+  //   and the conversation that is started from there really has none.
+  //   ★ In the single-project mode the scope stays: the process serves one
+  //   directory, and there is nowhere else to go.
   startNewThread(): void
   renameSession(id: string, title: string): Promise<void>
   deleteSession(id: string): Promise<void>

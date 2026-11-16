@@ -59,7 +59,7 @@ export function ProjectsButton() {
 
   if (scope || !known) return null
 
-  const name = current ? current.name : "No project"
+  const name = current ? current.name : "Default Project"
 
   // ★ The label: it says where the work happens, and it says nothing else.
   if (!emptyView) {
@@ -217,11 +217,11 @@ export function ProjectsDialog({
           </p>
         ) : (
           <ul className="flex flex-col gap-1" data-testid="projects-list">
-            {/* ★ "No project" is a choice of its own: the conversations that
-                belong to no project work in the default project root, and the
-                server accepts them. ★ It **leads** the list — it is "do not
+            {/* ★ "Default Project" is a choice of its own: the conversations
+                that belong to no project work in the default project root, and
+                the server accepts them. ★ It **leads** the list — it is "do not
                 pick a project", not one of the projects, and putting it last
-                would make it look like the default one. */}
+                would make it look like one of the rows above it. */}
             <li
               data-testid="project-row"
               data-project-id=""
@@ -245,7 +245,7 @@ export function ProjectsDialog({
                   data-testid="project-name"
                   className="block max-w-full truncate text-left text-sm font-medium hover:underline"
                 >
-                  No project
+                  Default Project
                 </button>
                 <div className="text-muted-foreground truncate font-mono text-[11px]">
                   the default project root

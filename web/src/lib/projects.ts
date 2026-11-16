@@ -77,8 +77,15 @@ export const NO_PROJECT_GROUP = "no-project"
 /** The heading of the pinned group. */
 export const PINNED_GROUP_TITLE = "Pinned"
 
-/** The heading of the group for the sessions that belong to no project. */
-export const NO_PROJECT_GROUP_TITLE = "No project"
+/**
+ * The heading of the group for the sessions that belong to no project.
+ *
+ * ★ It **is** the default project root — the directory those conversations
+ * work in — so it is named after the place, not after the absence of a
+ * project. ★ The **key** stays `no-project`: it is what the fold preference
+ * is stored under, and renaming it would forget every user's fold.
+ */
+export const DEFAULT_PROJECT_GROUP_TITLE = "Default Project"
 
 /**
  * groupSessions sorts the sessions into the groups the sidebar renders.
@@ -176,7 +183,7 @@ export function groupSessions<T extends GroupableSession>(
 
   const orphans = buckets.get(NO_PROJECT_GROUP)
   if (orphans && orphans.length > 0) {
-    groups.push({ key: NO_PROJECT_GROUP, title: NO_PROJECT_GROUP_TITLE, sessions: orphans })
+    groups.push({ key: NO_PROJECT_GROUP, title: DEFAULT_PROJECT_GROUP_TITLE, sessions: orphans })
   }
   return groups
 }
@@ -223,52 +230,39 @@ export function sortProjects(projects: readonly ProjectSummary[]): ProjectSummar
 }
 
 /**
- * defaultProject picks the project a new conversation belongs to.
- *
- * ★ In the single-project mode it is the scope — there is no other choice,
- * and the process serves that directory. ★ In the multi-project mode it is
- * the first project by order, because a new conversation needs **some**
- * project and the first one is the one the user put at the top.
- */
-export function defaultProject(
-  projects: readonly ProjectSummary[],
-  scope: ProjectScope | null,
-): ProjectSummary | null {
-  if (scope) {
-    const found = projects.find((p) => p.id === scope.projectId)
-    if (found) return found
-    return { id: scope.projectId, name: scope.name, root: scope.root, order: 0, sessionCount: 0 }
-  }
-  const ordered = sortProjects(projects)
-  return ordered.length > 0 ? ordered[0] : null
-}
-
-/**
  * resolveActiveProject says which project the composer works in.
  *
  * ★ The single-project mode has no choice: the process serves one directory,
- * and a conversation created anywhere else would work in a place the user
- * did not ask for. ★ In the multi-project mode the user's own choice is
- * kept as long as it is still a project — a project that was deleted must
- * not stay selected, because the next conversation would name a project the
- * server does not have.
+ *   and a conversation created anywhere else would work in a place the user
+ *   did not ask for.
+ *
+ * ★ The multi-project mode falls back to **no project** — the row the
+ *   interface calls **Default Project**, because that *is* the **default
+ *   project root**: the server accepts a conversation without a project,
+ *   and it works there. ★ So the fallback is not "the first project in the
+ *   table": that one is where the user put it in the list, not a directory
+ *   they picked for this conversation, and starting the work there would be
+ *   a guess.
+ *
+ * ★ A choice the user made is kept as long as it is still a project — a
+ * project that was deleted must not stay selected, because the next
+ * conversation would name a project the server does not have. ⇒ It falls
+ * back to "no project" like everything that was not chosen.
  */
 export function resolveActiveProject(
   current: string | null,
   projects: readonly ProjectSummary[],
   scope: ProjectScope | null,
-): string | null {
+): string {
   if (scope) return scope.projectId
-  // ★ "No project" is a choice too: the sidebar offers it, and the server
-  //   accepts a conversation without one — it works in the default project
-  //   root. ★ So an empty id is kept as it is; only **null** ("nothing was
-  //   chosen yet") falls back to the first project. ★ A refresh must not
-  //   undo the user's own "no project".
-  if (current !== null && (current === "" || projects.some((p) => p.id === current))) {
-    return current
-  }
-  const def = defaultProject(projects, scope)
-  return def ? def.id : null
+  // ★ "Default Project" is a choice too — an empty id — and it is the
+  //   fallback: null ("nothing was chosen yet") and a project the table no
+  //   longer has both mean "the next conversation works in the default
+  //   project root". ★ A refresh must not undo the user's own "Default
+  //   Project".
+  if (current === null) return ""
+  if (current === "" || projects.some((p) => p.id === current)) return current
+  return ""
 }
 
 /**

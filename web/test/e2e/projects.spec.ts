@@ -100,7 +100,7 @@ test("多项目模式按项目分组，每个会话只出现一次", async ({ pa
   await openApp(page)
 
   await expect(page.locator(GROUP)).toHaveCount(3)
-  await expect(page.locator(GROUP_TITLE)).toHaveText(["Alpha", "Beta", "No project"])
+  await expect(page.locator(GROUP_TITLE)).toHaveText(["Alpha", "Beta", "Default Project"])
 
   const alpha = page.locator('[data-group="alpha"]')
   await expect(alpha.locator(THREAD_ITEM)).toHaveCount(2)
@@ -200,13 +200,15 @@ test("★ 折叠会被记住", async ({ page }) => {
 
 // ★ The button under the input box has two forms.
 
-test("空视图上那个按钮写着当前项目", async ({ page }) => {
+test("空视图上那个按钮默认是「Default Project」—— 那是默认项目根", async ({ page }) => {
   await setProjectsMode("multi")
   await openApp(page)
 
-  // ★ The first project is the default: a new conversation needs a project,
-  //   and the one the user put at the top is the one it gets.
-  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Alpha")
+  // ★ "Default Project" is the fallback, and it **is** the default project
+  //   root: the server accepts a conversation without a project, and it works
+  //   there. ★ It is not "the first project in the table" — that one is where
+  //   the user put it in the list, not a directory they picked.
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Default Project")
 })
 
 test("★ 对话页上那个按钮只是标签，不能切换", async ({ page }) => {
@@ -249,18 +251,18 @@ test("空视图上那个按钮可以切换", async ({ page }) => {
     .toBe("beta")
 })
 
-test("★「没有项目」是列表的第一项", async ({ page }) => {
+test("★「Default Project」是列表的第一项", async ({ page }) => {
   await setProjectsMode("multi")
   await openApp(page)
 
   await page.locator(PROJECTS_BUTTON).click()
 
-  // ★ "No project" leads the list: it is "do not pick a project", not one of
-  //   the projects, and last would make it look like the default one.
-  await expect(page.locator(PROJECT_ROW).first().locator(PROJECT_NAME)).toHaveText("No project")
+  // ★ "Default Project" leads the list: it is "do not pick a project", not one
+  //   of the projects, and last would make it look like one of the rows above.
+  await expect(page.locator(PROJECT_ROW).first().locator(PROJECT_NAME)).toHaveText("Default Project")
   await page.locator(PROJECT_ROW).first().click()
 
-  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("No project")
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Default Project")
   await sendMessage(page, `${MARKER_A} without a project`)
   await expect
     .poll(async () => {
@@ -277,11 +279,16 @@ test("当前项目在列表里标出来", async ({ page }) => {
   await page.locator(PROJECTS_BUTTON).click()
 
   // ★ The list says which one is current — the button under the input box
-  //   and the list must not disagree.
+  //   and the list must not disagree. ★ Nothing was picked yet, so the
+  //   current one is "Default Project" (the default project root).
+  const none = page.locator(PROJECT_ROW).first()
   const alpha = page.locator(PROJECT_ROW).filter({ hasText: "Alpha" })
   const beta = page.locator(PROJECT_ROW).filter({ hasText: "Beta" })
-  await expect(alpha).toHaveAttribute("data-active", "true")
-  await expect(alpha.locator(PROJECT_CURRENT)).toBeVisible()
+  await expect(none.locator(PROJECT_NAME)).toHaveText("Default Project")
+  await expect(none).toHaveAttribute("data-active", "true")
+  await expect(none.locator(PROJECT_CURRENT)).toBeVisible()
+  await expect(alpha).toHaveAttribute("data-active", "false")
+  await expect(alpha.locator(PROJECT_CURRENT)).toHaveCount(0)
   await expect(beta).toHaveAttribute("data-active", "false")
   await expect(beta.locator(PROJECT_CURRENT)).toHaveCount(0)
 })
@@ -307,6 +314,33 @@ test("★ 换项目要回空视图 —— 对话页上那个地方不提供开�
   //   is not lost, only left.
   await expect(page.locator(GROUP)).toHaveCount(3)
   await expect(beta.locator(THREAD_ITEM)).toHaveCount(2)
+})
+
+test("★ New thread 回到空白 —— 项目也回到「Default Project」", async ({ page }) => {
+  await setProjectsMode("multi")
+  await openApp(page)
+
+  // ★ The conversation on screen belongs to Beta, and the composer says so.
+  const beta = page.locator('[data-group="beta"]')
+  await beta.locator(THREAD_ITEM).first().click()
+  await expect(page.locator(PROJECTS_LABEL)).toHaveText("Beta")
+
+  // ★ A new thread is not "the conversation I was in, with a fresh
+  //   transcript": the project belonged to that conversation, and a
+  //   conversation's project cannot change. ★ So the composer comes back
+  //   with **no** project, and the user picks one on the empty view.
+  await page.locator(NEW_THREAD).click()
+  await expect(page.locator(PROJECTS_BUTTON)).toHaveText("Default Project")
+
+  // ★ And the conversation it creates really has none: the button and the
+  //   server agree — the next question works in the default project root.
+  await sendMessage(page, `${MARKER_A} without a project`)
+  await expect
+    .poll(async () => {
+      const threads = await fakeThreads()
+      return threads[threads.length - 1]?.projectId
+    }, { timeout: 7000 })
+    .toBe("")
 })
 
 // ★ The project's own row: the actions on a project that is already on the
@@ -353,7 +387,7 @@ test("★ 项目行的菜单里能改名", async ({ page }) => {
   await beta.locator(PROJECT_GROUP_RENAME).fill("Beta Two")
   await beta.locator(PROJECT_GROUP_RENAME).press("Enter")
 
-  await expect(page.locator(GROUP_TITLE)).toHaveText(["Alpha", "Beta Two", "No project"])
+  await expect(page.locator(GROUP_TITLE)).toHaveText(["Alpha", "Beta Two", "Default Project"])
   const projects = await fakeProjects()
   expect(projects.find((p) => p.id === "beta")?.name).toBe("Beta Two")
 })
@@ -434,7 +468,7 @@ test("★ 项目行的菜单里能移除项目", async ({ page }) => {
   // ★ The project is gone from the map — and the conversations that belonged
   //   to it are **kept**: they fall back to no project.
   await expect(page.locator(GROUP)).toHaveCount(2)
-  await expect(page.locator(GROUP_TITLE)).toHaveText(["Alpha", "No project"])
+  await expect(page.locator(GROUP_TITLE)).toHaveText(["Alpha", "Default Project"])
   const projects = await fakeProjects()
   expect(projects.find((p) => p.id === "beta")).toBeUndefined()
 })

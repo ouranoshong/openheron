@@ -39,7 +39,7 @@ model 就在一个目录被告知去另一个目录读写。
 
 | 块 | 是什么 | 在哪儿 |
 |---|---|---|
-| **New thread** | 放掉当前会话，回到欢迎页 | `web/src/components/sidebar.tsx:104` |
+| **New thread** | 放掉当前会话（连同它的项目），回到欢迎页 | `web/src/components/sidebar.tsx:104` |
 | **分组列表** | 一棵树：文件夹是项目，文件是会话 | `web/src/components/sidebar.tsx:137` |
 | **设置入口** | 配置文件与密钥 | `web/src/components/sidebar.tsx` 的 `SettingsEntry` |
 
@@ -55,7 +55,7 @@ model 就在一个目录被告知去另一个目录读写。
 |---|---|---|
 | 置顶组 | `pinned`（`web/src/lib/projects.ts:72`） | ★ **今天是空的** —— 服务端还没有 `pinned` 字段（`docs/projects-design.md` §3.4） |
 | 项目组 | 项目的 id | 项目表里有它 |
-| 未选项目组 | `no-project`（`web/src/lib/projects.ts:75`） | 有会话不属于任何项目 |
+| 未选项目组 —— 标题 **Default Project** | `no-project`（`web/src/lib/projects.ts:75`） | 有会话不属于任何项目 |
 
 ★ 三条规则：**项目组一律画**（表里有的项目就是一行，哪怕它一个会话也没有 —— §1.4）；
 **一个会话只在一组里**；单项目模式下**只有一组**（作用域那个），
@@ -100,7 +100,8 @@ model 就在一个目录被告知去另一个目录读写。
 ★ **折叠状态是偏好，不是事实**：它记在本机（localStorage 的
 `openheron.sidebar.folded`），服务端不知道，★ 判定是一个**纯函数**
 （`web/src/lib/projects.ts:207` `foldGroups`）—— 这样能 `bun test`，不用开浏览器。
-★ 记住的是**组键**（项目 id、`no-project`），不是项目 id —— 「没有项目」那个组也要能记住。
+★ 记住的是**组键**（项目 id、`no-project`），不是项目 id —— 「Default Project」那个组也要能记住。
+★ 组键仍是 `no-project`：改名的是**标题**，键一变，所有人的折叠记忆都会丢。
 
 ★ **会话缩进一级**（`web/src/components/sidebar.tsx` 的 `ps-4`）—— ★ 缩进是树的主要语言：
 没有缩进，三角和图标只是装饰。
@@ -115,12 +116,12 @@ model 就在一个目录被告知去另一个目录读写。
 | `@` 提及选择器 | 同上 |
 
 ★ **屏幕上的会话说了算**：打开一个会话，它的项目就是当前项目
-（`web/src/lib/store/actions.ts:317` `openSession`，以及 `web/src/lib/store/actions.ts:279`
+（`web/src/lib/store/actions.ts:319` `openSession`，以及 `web/src/lib/store/actions.ts:281`
 `refreshList` —— 启动时会话比列表先到，那一刻它还不知道自己属于哪个项目）。
 
 ★ **会话的归属不可改**（`api/v2_sessions.go:38` 的 `ProjectID` 只在创建时读，`PATCH`
 不接受它）⇒ 「切到那个项目」只能是「下一个会话在那个项目里」。判据是纯函数
-`web/src/lib/projects.ts:288` `projectSwitch`。
+`web/src/lib/projects.ts:273` `projectSwitch`。
 
 ★ **那个按钮有两种形态**，判据是**空视图**（`web/src/lib/store/selectors.ts:68`
 `selectIsEmptyView`）：
@@ -133,10 +134,19 @@ model 就在一个目录被告知去另一个目录读写。
 ★ 一段对话的项目是定的，所以对话页上那个地方**不提供开关** —— 一个写着「切换」却会
 「把你正在看的对话从屏幕上拿走」的按钮，比没有按钮更糟。
 
-★ **「没有项目」是一个选择**：它在项目对话框的**第一项**
-（`web/src/components/projects-dialog.tsx:226`），服务端也认（会话落在默认项目根），
-所以 `web/src/lib/projects.ts:256` `resolveActiveProject` 保留空 id —— 只有 **null**
-（「还没选过」）才退回第一个项目。
+★ **`Default Project` 是一个选择，也是兜底**：它就是「没有项目」那一项 —— 项目对话框的
+**第一项**（`web/src/components/projects-dialog.tsx:227`），服务端也认（会话落在默认项目根），
+所以 `web/src/lib/projects.ts:244` `resolveActiveProject` 保留空 id：**null**（「还没选过」）和
+「表里没有那个项目了」都给出它。★ 「没有项目」**就是**默认项目根，所以兜底不是表里第一个
+项目 —— 那个项目是用户在列表里排在前面的，不是他给这段对话挑的目录。
+
+★ **New thread 把项目也放掉**：上一段会话的项目是**那段会话的**，而会话的归属不可改
+（§1.5「会话的归属不可改」）——⇒ 在用户为它选一个之前，新对话就是「**没有项目**」
+（`web/src/lib/store/actions.ts:390` `startNewThread`）：输入框下方的按钮写着 `Default Project`，
+服务端也接受这样一段会话（它用默认项目根）。★ 单项目模式例外：进程只服务一个目录，
+作用域就是答案，那里没有 `Default Project` 可选。★ 项目行菜单里的 **New conversation** 是
+反过来的一条路：先回到空白，再把项目放进去（`web/src/lib/store/actions.ts:208` `startThreadInProject`）
+—— ★ 顺序反过来，项目就会被 `startNewThread` 抹掉。
 
 ### 1.6 写面分两半：新的在空视图，已有的在侧栏
 
@@ -150,9 +160,9 @@ model 就在一个目录被告知去另一个目录读写。
 | 项 | 做什么 | 现状 |
 |---|---|---|
 | **New conversation** | 在这个项目里新起一段对话 | ★ 有：`web/src/lib/store/actions.ts:208` `startThreadInProject` |
-| **Rename project** | 就地改项目的名字 | ★ 有：`web/src/lib/store/actions.ts:234` `renameProject`；★ 名字**必填**（`web/src/lib/projects.ts:322` `projectRenameError`） |
-| **Change folder** | 改项目指向哪个目录 | ★ 接口有（`api/v2_projects.go:177` 收 `root`），客户端的动作是 `web/src/lib/store/actions.ts:240` `updateProject` |
-| **Remove project** | 从地图上摘掉这个项目 | ★ 有：`api/v2_projects.go:225` + `web/src/lib/store/actions.ts:253` `deleteProject` |
+| **Rename project** | 就地改项目的名字 | ★ 有：`web/src/lib/store/actions.ts:236` `renameProject`；★ 名字**必填**（`web/src/lib/projects.ts:307` `projectRenameError`） |
+| **Change folder** | 改项目指向哪个目录 | ★ 接口有（`api/v2_projects.go:177` 收 `root`），客户端的动作是 `web/src/lib/store/actions.ts:242` `updateProject` |
+| **Remove project** | 从地图上摘掉这个项目 | ★ 有：`api/v2_projects.go:225` + `web/src/lib/store/actions.ts:255` `deleteProject` |
 
 ★ **单项目模式不给「改目录」和「移除」**：进程只服务一个目录，而那个目录就是作用域 ——
 挪走或删掉它，等于改了进程服务的东西。
@@ -263,14 +273,14 @@ model 就在一个目录被告知去另一个目录读写。
 | 文件 | 动什么 |
 |---|---|
 | `web/src/components/sidebar.tsx` | ★ 项目行：三角、文件夹图标、「⋯」菜单、就地改名；★ 树：`role="tree"`、缩进、折叠状态 |
-| `web/src/components/projects-dialog.tsx` | ★ 输入框下方的按钮分两种形态；★ 对话框的列表第一项是「没有项目」；★ 新增 `ProjectRootDialog`（改目录） |
+| `web/src/components/projects-dialog.tsx` | ★ 输入框下方的按钮分两种形态；★ 对话框的列表第一项是 `Default Project`（也就是「没有项目」）；★ 新增 `ProjectRootDialog`（改目录） |
 | `web/src/lib/projects.ts` | ★ `foldGroups` —— 折叠的判定是纯函数（`:207`） |
-| `web/src/lib/store/actions.ts` | ★ `updateProject`（`:200`）—— 改目录要走它；★ `renameProject` 走同一条路 |
+| `web/src/lib/store/actions.ts` | ★ `updateProject`（`:242`）—— 改目录要走它；★ `renameProject` 走同一条路 |
 | `web/src/lib/store/selectors.ts` | 不用改：`selectIsEmptyView`（`:68`）已经是那个判据 |
 | `api/v2_projects.go` | 不用改：`PATCH` 已经收 `name` / `root` / `order`（`:177`） |
 
 ★ 界面文案一律英文：菜单项是 `New conversation` / `Rename project` / `Change folder` /
-`Remove project`；对话框列表第一项是 `No project`；标签的 `aria-label` 是 `Project: <名字>`；
+`Remove project`；对话框列表第一项是 `Default Project`；标签的 `aria-label` 是 `Project: <名字>`；
 折叠按钮的是 `Collapse <项目名>` / `Expand <项目名>`。
 
 ## 6. 接口要动哪几个
@@ -303,7 +313,7 @@ model 就在一个目录被告知去另一个目录读写。
 | 阶段 | 内容 | 代价 | 状态 |
 |---|---|---|---|
 | **S1** | 项目行上的「+」 | 小 | ★ **已落地** —— ★ 后来并进了「⋯」菜单 |
-| **S2** | ★ **删掉侧栏的项目选择器 + 输入框按钮分两种形态 + 对话框补「没有项目」（排第一） + 项目行的「⋯」菜单**（并掉「+」） | 中 —— 接口都在，差界面与一个 store 动作 | ★ **已落地** |
+| **S2** | ★ **删掉侧栏的项目选择器 + 输入框按钮分两种形态 + 对话框补 `Default Project`（排第一） + 项目行的「⋯」菜单**（并掉「+」） | 中 —— 接口都在，差界面与一个 store 动作 | ★ **已落地** |
 | **S3** | ★ **侧栏画成文件树**：三角 + 文件夹图标 + 缩进 + 折叠 + 记住折叠状态 + `role="tree"` | 中 —— 纯前端，但要改语义 | ★ **已落地** |
 | **S4** | 树的键盘导航（↑↓ / ←→ / Enter） | 中 | 未实现 |
 | **S5** | 在文件夹中显示（新叶子 + 新端点） | 中 —— 与 `pick-directory` 同形 | 未实现 |
@@ -316,7 +326,7 @@ model 就在一个目录被告知去另一个目录读写。
 | 取舍 | 决定 | 为什么 |
 |---|---|---|
 | 组头的「+」并进「⋯」？ | ★ **并进** | 「一个动作一个地方」；组头于是只有「三角 + 文件夹 + 名字 + 一个「⋯」」；★ 与会话行同形（会话行是「标题 + ⋯」，项目行是「▾ 名字 + ⋯」），侧栏只有一种菜单形状。★ 代价：最高频的动作从一键变成两键 |
-| 「没有项目」在对话框列表里排哪？ | ★ **排第一** | 它是「**不选**项目」这一项，不是某一个项目；★ 排在最后会让人以为它是默认项 |
+| `Default Project` 在对话框列表里排哪？ | ★ **排第一** | 它是「**不选**项目」这一项，不是某一个项目；★ 排在最后会让人以为它是默认项 |
 | 折叠要不要记住？ | ★ **记住**（localStorage，键 `openheron.sidebar.folded`，存组键的 JSON 数组） | 跟侧栏自己的折叠一个待遇（`web/src/app/shell.tsx:16`）；★ 项目被删了要把那个键滤掉 |
 | 侧栏的项目选择器？ | ★ **删掉** | §1.1 / §1.5 |
 | 侧栏长什么样？ | ★ **文件树** | §1.4 / §1.7 |
@@ -361,23 +371,25 @@ model 就在一个目录被告知去另一个目录读写。
 | `web/src/components/projects-dialog.tsx` | `:68` | 输入框下方的**标签**（对话页） |
 | | `:87` | 输入框下方的**按钮**（空视图） |
 | | `:205` | 项目对话框 |
-| | `:226` | 「No project」那一项（第一项） |
+| | `:227` | 「Default Project」那一项（第一项） |
 | `web/src/components/composer-meta.tsx` | `:133` | `contents` 包装 —— action 的下标钉死 |
 | `web/src/app/shell.tsx` | `:16` | `SIDEBAR_KEY` —— 侧栏折叠的存储键 |
 | | `:113` | 空视图与对话页的分叉 |
 | `web/src/lib/projects.ts` | `:72` / `:75` | 置顶组键 / 未选项目组键 |
+| | `:88` | `DEFAULT_PROJECT_GROUP_TITLE` —— 「未选项目组」的标题 |
 | | `:113` | `groupSessions` —— 分组这个纯函数 |
 | | `:207` | `foldGroups` —— 折叠这个纯函数 |
 | | `:221` | `sortProjects` |
-| | `:256` | `resolveActiveProject` |
-| | `:288` | `projectSwitch` |
-| | `:322` | `projectRenameError` |
-| `web/src/lib/store/actions.ts` | `:168` | `startThreadInProject` |
-| | `:194` | `renameProject` |
-| | `:200` | `updateProject` —— 改目录 |
-| | `:213` | `deleteProject` |
-| | `:239` | `refreshList` |
-| | `:277` | `openSession` |
+| | `:244` | `resolveActiveProject` —— 兜底是 `Default Project` |
+| | `:273` | `projectSwitch` |
+| | `:307` | `projectRenameError` |
+| `web/src/lib/store/actions.ts` | `:208` | `startThreadInProject` |
+| | `:236` | `renameProject` |
+| | `:242` | `updateProject` —— 改目录 |
+| | `:255` | `deleteProject` |
+| | `:281` | `refreshList` |
+| | `:319` | `openSession` |
+| | `:390` | `startNewThread` —— 放掉会话，也放掉它的项目 |
 | `web/src/lib/store/selectors.ts` | `:68` | `selectIsEmptyView` —— 对话页还是空视图 |
 | | `:94` | `selectActiveProjectId` |
 | `projects/projects.go` | `:62` | `Project` —— 表里的一条 |

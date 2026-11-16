@@ -1251,7 +1251,7 @@ In the interface:
 | Element | What it does |
 |---|---|
 | **Header** | The agent filter (each chip names an agent; hover it for its context occupancy and spend), the theme switch, and the status of the current turn |
-| **Sidebar** | The session list — grouped by project — the "New thread" button, the project picker, the settings entry |
+| **Sidebar** | The session list — grouped by project — the "New thread" button and the settings entry |
 | **Composer** | Ask a question; `/` opens the slash commands; supports drag/paste attachments |
 | **Message list** | Assistant replies, reasoning, tool-call cards, sub-agent output (with attribution) |
 | **Approval card** | Appears when your nod is needed: approve / deny (with an optional reason) |
@@ -1606,7 +1606,8 @@ messages.
 
 ★ **Every conversation belongs to a project** (§3.1), and the sidebar shows that: one
 folder per project, named after it, with the conversations in it. ★ The conversations that
-belong to no project sit in a "No project" folder. ★ **A project is a folder even when it
+belong to no project sit in a "Default Project" folder — that is the default project root.
+★ **A project is a folder even when it
 holds no conversations** — that folder is where the project's own actions live (§6.11),
 so a project with nothing in it is still a folder you can rename, move or remove.
 
@@ -1644,11 +1645,18 @@ mode (`openheron .`) there is nothing to pick, so there is no button; and a
 server that does not know the project table answers `503`, so the button is not
 drawn there either.
 
+★ **The empty page starts on "Default Project" — and that is the default project root.** A
+conversation without a project works in `<openheron-root>/projects/default`, and that is the
+fallback: nothing is picked until you pick it. ★ **New thread lets go of the project too** —
+the project belonged to the conversation that was on screen, and a conversation's project is
+fixed, so the composer comes back with no project. ★ The single-project mode is the
+exception: the process serves one directory, so there is nothing to let go of.
+
 The dialog holds two things:
 
-- **Choose** — the first row is "No project": the conversations then work in the default
-  project root. Then one row per project. Clicking a row moves the composer into it: the
-  button under the input box and the `@` picker all name that project from then on, and
+- **Choose** — the first row is "Default Project": the conversations then work in the
+  default project root. Then one row per project. Clicking a row moves the composer into it:
+  the button under the input box and the `@` picker all name that project from then on, and
   the row that is the current one says so. ★ A conversation keeps its project for its whole
   life, so choosing another one **leaves** a conversation that belongs to a different
   project — it stays in the sidebar with its history, and the composer comes back empty.

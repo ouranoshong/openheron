@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test"
 import {
   NO_PROJECT_GROUP,
   PINNED_GROUP,
-  defaultProject,
   directoryPick,
   foldGroups,
   groupSessions,
@@ -125,20 +124,6 @@ describe("sortProjects", () => {
   })
 })
 
-describe("defaultProject", () => {
-  test("多项目模式取第一个", () => {
-    expect(defaultProject([project("b", 1), project("a", 0)], null)?.id).toBe("a")
-  })
-
-  test("单项目模式取作用域", () => {
-    expect(defaultProject([project("b", 1)], scope("b"))?.id).toBe("b")
-  })
-
-  test("表里还没有这个项目时也答得出作用域", () => {
-    expect(defaultProject([], scope("b"))?.id).toBe("b")
-  })
-})
-
 describe("resolveActiveProject", () => {
   test("单项目模式由作用域说了算", () => {
     expect(resolveActiveProject("alpha", [project("alpha", 0), project("beta", 1)], scope("beta"))).toBe("beta")
@@ -148,23 +133,26 @@ describe("resolveActiveProject", () => {
     expect(resolveActiveProject("beta", [project("alpha", 0), project("beta", 1)], null)).toBe("beta")
   })
 
-  test("选的项目没了就退回第一个", () => {
-    expect(resolveActiveProject("gone", [project("alpha", 0)], null)).toBe("alpha")
+  test("选的项目没了 —— 退回「没有项目」，不是列表里的第一个", () => {
+    // ★ A project the table no longer has must not stay selected, and the
+    //   first project is not a stand-in for it: that one is a directory the
+    //   user did not pick for this conversation.
+    expect(resolveActiveProject("gone", [project("alpha", 0)], null)).toBe("")
   })
 
-  test("一个项目都没有时没有答案", () => {
-    expect(resolveActiveProject(null, [], null)).toBeNull()
+  test("一个项目都没有时也是「没有项目」—— 那是默认项目根", () => {
+    expect(resolveActiveProject(null, [], null)).toBe("")
   })
 
-  test("「没有项目」是一个选择 —— 刷新不能把它改掉", () => {
-    // ★ The sidebar offers "No project", and the server accepts a
-    //   conversation without one — it works in the default project root.
+  test("「Default Project」是一个选择 —— 刷新不能把它改掉", () => {
+    // ★ The sidebar offers "Default Project", and the server accepts a
+    //   conversation without a project — it works in the default project root.
     //   ★ A refresh must not turn that choice back into the first project.
     expect(resolveActiveProject("", [project("alpha", 0), project("beta", 1)], null)).toBe("")
   })
 
-  test("还没选过（null）才退回第一个项目", () => {
-    expect(resolveActiveProject(null, [project("alpha", 0), project("beta", 1)], null)).toBe("alpha")
+  test("还没选过（null）时兜底是「Default Project」—— 也就是默认项目根", () => {
+    expect(resolveActiveProject(null, [project("alpha", 0), project("beta", 1)], null)).toBe("")
   })
 })
 

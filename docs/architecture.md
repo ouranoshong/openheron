@@ -964,7 +964,8 @@ function: `web/src/lib/projects.ts:113`'s `groupSessions(sessions, projects, sco
 The client reads the project table and the scope **from the server** and draws what
 it was given — it never decides which project a session belongs to, because the
 table is the only truth about that relation. ★ A session without a project goes to
-the "no project" folder. ★ **A project is a folder even when it holds no conversations**:
+the "Default Project" folder — the default project root. ★ **A project is a folder even
+when it holds no conversations**:
 that folder is where the project's own actions live, so a project with nothing in it can
 still be renamed, moved or removed. ★ The
 folding is the client's own business and stays on the machine

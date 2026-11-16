@@ -114,6 +114,9 @@ function reset(): void {
     pendingAgentId: null,
     loadingList: false,
     listError: undefined,
+    projects: [],
+    projectScope: null,
+    activeProjectId: null,
   } as Partial<StoreState>)
 }
 
@@ -240,6 +243,36 @@ describe("startNewThread —— Phase 0 钉红的第三个缺陷", () => {
     const before = useStore.getState().order.length
     useStore.getState().startNewThread()
     expect(useStore.getState().order).toHaveLength(before)
+  })
+
+  // ★ A new conversation has no project.
+  //
+  // ★ The project the composer was in belonged to the conversation on
+  //   screen, and a conversation's project is immutable — inheriting it
+  //   would put the next conversation in a directory the user did not pick
+  //   for it. "Default Project" is a choice the server accepts: that
+  //   conversation works in the default project root.
+  test("★ 放掉会话，也放掉它的项目 —— 新对话是「Default Project」", async () => {
+    await useStore.getState().refreshList()
+    useStore.setState({ activeId: A, activeProjectId: "alpha" })
+
+    useStore.getState().startNewThread()
+
+    expect(useStore.getState().activeId).toBeNull()
+    expect(useStore.getState().activeProjectId).toBe("")
+  })
+
+  test("单项目模式留在作用域里 —— 进程只服务一个目录", () => {
+    useStore.setState({
+      activeId: A,
+      activeProjectId: "alpha",
+      projectScope: { projectId: "beta", name: "Beta", root: "/tmp/beta" },
+    })
+
+    useStore.getState().startNewThread()
+
+    expect(useStore.getState().activeId).toBeNull()
+    expect(useStore.getState().activeProjectId).toBe("beta")
   })
 })
 

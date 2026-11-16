@@ -1407,10 +1407,19 @@ project cannot change, so the only thing a switch could do there would be to lea
 session. ⇒ `selectIsEmptyView` is the judgment, and it is a selector
 (`web/src/lib/store/selectors.ts`).
 
-★ **"No project" is a choice.** The dialog offers it — it is the **first** row of the list —
-and the server accepts it (the session works in the default project root), so
-`resolveActiveProject` keeps an empty id; only **null** ("nothing was picked yet") falls back
-to the first project. ★ A refresh must not undo it.
+★ **"Default Project" is a choice — and it is the fallback.** The dialog offers it — it is
+the **first** row of the list — and the server accepts it (the session works in the default
+project root), so `resolveActiveProject` keeps an empty id; **null** ("nothing was picked
+yet") and a project the table no longer has both fall back to it. ★ It is not the first
+project in the table: "Default Project" *is* the default project root, and the first project
+is a directory the user did not pick for this conversation. ★ A refresh must not undo it.
+
+★ **`startNewThread` lets go of the project too** (`web/src/lib/store/actions.ts`): the
+project was the conversation's, so the composer comes back with **no** project — the button
+says "Default Project", and the next session works in the default project root. ★ The
+single-project mode keeps the scope: the process serves one directory, and there is nowhere
+else to go. ★ `startThreadInProject` writes the project **after** it — the other order would
+be undone by it.
 
 ★ **A new project goes through the same switch** (`createProject` → `switchProject`): the
 project you just made is the one you work in.

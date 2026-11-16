@@ -208,11 +208,13 @@ export const useStore = create<StoreState>((set, get) => ({
   startThreadInProject(id) {
     // ★ The "+" next to a project in the sidebar means "a new conversation
     //   here", and a new conversation is never the one that is already open
-    //   — not even when that one belongs to the same project. ⇒ The switch
-    //   moves the composer into the project, and the new thread always
-    //   comes back empty.
-    get().switchProject(id)
+    //   — not even when that one belongs to the same project. ⇒ The new
+    //   thread comes back empty first, and only then is it put in the
+    //   project: ★ a new thread has **no** project of its own
+    //   (`startNewThread` says so), so the project has to be written after
+    //   it — the other order would be undone by it.
     get().startNewThread()
+    get().switchProject(id)
   },
 
   async createProject(name, root) {
@@ -386,7 +388,19 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   startNewThread() {
-    set({ activeId: null })
+    // ★ A new conversation **has no project**. The project the composer was
+    //   in belonged to the conversation that was on screen — a conversation's
+    //   project is immutable — so inheriting it would put the next
+    //   conversation in a directory the user did not pick for it.
+    //   ★ A conversation without a project is a choice the server accepts —
+    //   the interface calls it "Default Project", and that conversation works
+    //   in the default project root.
+    //
+    // ★ The single-project mode is the exception: the process serves one
+    //   directory, and there is no other place a conversation could go — the
+    //   scope *is* the answer there (`resolveActiveProject` says the same).
+    const scope = get().projectScope
+    set({ activeId: null, activeProjectId: scope?.projectId ?? "" })
   },
 
   async switchAgent(agentId) {

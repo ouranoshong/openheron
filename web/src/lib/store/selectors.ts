@@ -90,7 +90,8 @@ export function selectSessionList(s: StoreState): SessionEntry[] {
 //
 // ★ The session's own project comes first — a conversation belongs to the
 //   project it was born in. ★ A thread that does not exist yet falls back
-//   to the project a new thread would belong to.
+//   to the composer's own choice, and **null** there means "no project" —
+//   the default project root, which is what a new conversation starts on.
 export function selectActiveProjectId(s: StoreState): string {
   const id = s.activeId ? s.sessions[s.activeId]?.meta.projectId : undefined
   return id || s.activeProjectId || ""

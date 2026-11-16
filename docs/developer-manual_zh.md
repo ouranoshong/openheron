@@ -1189,9 +1189,16 @@ Linux 让 `zenity` 或 `kdialog` —— 装了哪个用哪个，一个都没装�
 是**标签**：会话的项目改不了，所以在那儿一个开关唯一能做的就是**离开这段会话**。
 ⇒ 判据是 `selectIsEmptyView`，它是一个 selector（`web/src/lib/store/selectors.ts`）。
 
-★ **「没有项目」是一个选择。** 对话框里有这一项 —— 它是列表的**第一**行 —— 服务端也认
-（会话落在默认项目根），所以 `resolveActiveProject` 保留空 id；只有 **null**（「还没选过」）
-才退回第一个项目。★ 一次刷新不该把它改掉。
+★ **「Default Project」是一个选择，也是兜底。** 对话框里有这一项 —— 它是列表的**第一**行 ——
+服务端也认（会话落在默认项目根），所以 `resolveActiveProject` 保留空 id；**null**
+（「还没选过」）和「表里没有那个项目了」都兜底成它。★ 兜底不是表里第一个项目：
+「Default Project」**就是**默认项目根，而第一个项目是用户没给这段对话挑过的目录。
+★ 一次刷新不该把它改掉。
+
+★ **`startNewThread` 把项目也放掉**（`web/src/lib/store/actions.ts`）：项目是那段会话的，
+所以输入框回到**没有项目** —— 按钮写着「Default Project」，下一段会话落在默认项目根。
+★ 单项目模式保留作用域：进程只服务一个目录，没有别的地方可去。★ `startThreadInProject`
+在它**之后**写项目 —— 顺序反过来，项目会被它抹掉。
 
 ★ **新建的项目走同一条路**（`createProject` → `switchProject`）：刚建的项目就是你干活的那个。
 
