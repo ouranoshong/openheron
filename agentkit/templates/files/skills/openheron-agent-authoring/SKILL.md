@@ -134,7 +134,7 @@ skills:
   - openheron-config-validate
 mcps: []
 temperature: 0.1
-max_tokens: 2048
+max_tokens: 8192
 summarize_at: 80%
 ---
 

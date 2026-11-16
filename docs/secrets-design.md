@@ -134,7 +134,7 @@ timeout: 5m
 
 models:
   - id: deepseek-flash
-    context_window: 131072
+    context_window: 1000000
     reasoning:
       off:  { reasoning_effort: none, thinking: { type: disabled } }
       low:  { reasoning_effort: low,  thinking: { type: enabled } }

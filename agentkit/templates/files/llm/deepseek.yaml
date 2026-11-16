@@ -19,7 +19,7 @@ timeout: 5m
 
 models:
   - id: {{model|deepseek-flash}}
-    context_window: 131072
+    context_window: 1000000
 
     # Tier vocabulary: tier name → the field this endpoint sends it as.
     # An agent only writes `reasoning: high`; it does not need to know what shape

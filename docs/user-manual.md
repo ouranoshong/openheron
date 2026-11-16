@@ -591,7 +591,7 @@ timeout: 5m
 
 models:
   - id: deepseek-flash
-    context_window: 131072
+    context_window: 1000000
     reasoning:
       off:  { reasoning_effort: none, thinking: { type: disabled } }
       low:  { reasoning_effort: low,  thinking: { type: enabled } }
@@ -734,7 +734,7 @@ nothing in it — resolves to **no key at all**, and the reminder says so in as 
 look at are `hasApiKey` and `keySource` in `GET /v2/config`; the provider entry reads
 
 ```json
-{"id":"deepseek","baseUrl":"https://api.deepseek.com","hasApiKey":true,"keySource":"env:LLM_DEEPSEEK_API_KEY","models":[{"id":"deepseek-flash","contextWindow":1310720}]}
+{"id":"deepseek","baseUrl":"https://api.deepseek.com","hasApiKey":true,"keySource":"env:LLM_DEEPSEEK_API_KEY","models":[{"id":"deepseek-flash","contextWindow":1000000}]}
 ```
 
 `hasApiKey` is `true` when a key was found and `false` when there is none — and the key

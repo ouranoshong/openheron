@@ -530,7 +530,7 @@ timeout: 5m
 
 models:
   - id: deepseek-flash
-    context_window: 131072
+    context_window: 1000000
     reasoning:
       off:  { reasoning_effort: none, thinking: { type: disabled } }
       low:  { reasoning_effort: low,  thinking: { type: enabled } }
@@ -656,7 +656,7 @@ export LLM_DEEPSEEK_API_KEY='@file:/etc/openheron/deepseek.key'
 长这样：
 
 ```json
-{"id":"deepseek","baseUrl":"https://api.deepseek.com","hasApiKey":true,"keySource":"env:LLM_DEEPSEEK_API_KEY","models":[{"id":"deepseek-flash","contextWindow":1310720}]}
+{"id":"deepseek","baseUrl":"https://api.deepseek.com","hasApiKey":true,"keySource":"env:LLM_DEEPSEEK_API_KEY","models":[{"id":"deepseek-flash","contextWindow":1000000}]}
 ```
 
 找到密钥时 `hasApiKey` 是 `true`，没有密钥时是 `false` —— 而密钥本身永远不出进程。
