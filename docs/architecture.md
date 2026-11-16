@@ -333,8 +333,12 @@ says the file was part of the question.
   **pure cosine** when the lexical score is zero.
 - The lexical score **weights identifiers**: a term appearing in the title, a section
   heading or a link is worth more than one buried in the prose.
-- `openheron kb index` takes a **run lock** (`kb/store.go:146-148`'s `StartRun`): only one
+- `openheron kb index` takes a **run lock** (`kb/store.go:190-192`'s `StartRun`): only one
   run at a time.
+- ★ A **commit** is not a run. The catalog is shared, and writing it is a read-modify-write:
+  the merge happens under a **commit lock** (`persist/filelock.go:38`'s `WriteLockPath`), and
+  a writer may only remove an entry it had already seen when it started — otherwise it would
+  take away an entry another writer had just added.
 - Agents get two tools: `kb_search` (returns a document **outline**, not the full text)
   and `kb_index`. `kb_index` defaults to the `ask` tier — letting an agent rebuild the
   index needs a human nod.

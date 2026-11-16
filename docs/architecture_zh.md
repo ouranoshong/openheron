@@ -250,7 +250,10 @@ workspace 里拿走；已经随消息发出去的文件留在那条消息上。
   `0.5*词法分 + 0.5*余弦相似度`；无向量（或维度不符）时纯词法（所以 `kb status` 会报
   `lexical-only retrieval`），词法分为 0 时纯余弦。
 - 词法分给标识符加权：出现在标题/小节标题/链接里的词比出现在正文里的词值钱。
-- `openheron kb index` 有运行锁（`kb/store.go:146-148` 的 `StartRun`）：同时只能跑一轮。
+- `openheron kb index` 有运行锁（`kb/store.go:190-192` 的 `StartRun`）：同时只能跑一轮。
+- ★ **提交不是运行**。目录页是共享的，写它是一次「读—改—写」：合并在**提交锁**
+  （`persist/filelock.go:38` 的 `WriteLockPath`）里进行，而且写者只能删掉**自己开始时就看见**的
+  条目 —— 否则就会把别人刚写进去的条目一起带走。
 - agent 侧拿到两个工具：`kb_search`（返回文档大纲而非全文）与 `kb_index`。`kb_index` 默认
   落在 `ask` 档 —— 让 agent 自己重建索引需要人点头。
 
