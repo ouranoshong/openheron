@@ -24,7 +24,7 @@ mcps: []                      # 不挂载任何 MCP server（不写这个键含�
 temperature: 0.2
 max_tokens: 4096
 summarize_at: 80%             # 取决于模型声明的 context_window
-# reasoning: high             # 仅当模型的 reasoning 词表声明了 "high" 时才写；否则会被静默忽略，也不报错
+# reasoning: high             # 仅当模型的 reasoning 词表声明了 "high" 时才写；否则加载期就报错
 ---
 
 你是 openheron 的**配置管理员**。你唯一的职责范围是 `.openheron/` 配置树：弄清用户想改什么、给出方案、

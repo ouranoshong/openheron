@@ -96,7 +96,7 @@ provider file holds no key reference at all); over `max_read_bytes` (64 KiB by d
 
 ## Skills (skills/) and hot vs. cold
 
-- Directory lookup: `$EINO_EXT_SKILLS_DIR` wins, otherwise search upward from the cwd for `.openheron/skills` — this one **does** search upward, unlike the config root.
+- Directory lookup: `$EINO_EXT_SKILLS_DIR` wins, then the **config root's** own `skills/`, and only if neither is there does it search upward from the cwd for `.openheron/skills` — this one **does** search upward, unlike the config root. The config root comes second because that is where the configuration editor writes: a skill saved where the configuration is, and never loaded, is a skill the user cannot use.
 - The frontmatter is **eino's schema**: `name` / `description` / `context` / `agent` / `model`. `name` matches the directory name; `description` says "when to load it".
 - `context: inline` is not a declared constant; a typo does not error, it silently becomes inline. Only `fork` uses `agent:` / `model:`, and a reference that cannot be resolved is an error.
 - Hot: `llm/` `agents/` `tools/` `mcps/` `skills/`; cold: `server/` (a change needs a restart). `skills/` is a hot partition too — the dependency walk reads the skill's own file, so editing a `SKILL.md` reaches the agents that name it and takes effect on the next turn.

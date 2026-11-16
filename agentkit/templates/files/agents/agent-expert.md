@@ -68,8 +68,8 @@ summarize_at: 80%
      **全部工具**交给这个 agent。两个键不必互相一致，它们回答的是两个问题。`tools:` 里写
      MCP 工具的暴露名写进 `tools:` 不起作用 —— 它以提示报出来，服务器该写进 `mcps:`。
    - `temperature` / `max_tokens` 是指针（0 和"未配置"不是一回事）；`reasoning` 只在模型的 `reasoning`
-     词表声明了该档时才写，写错档位会被**静默忽略、不作报告**；`summarize_at` 取决于模型声明的
-     `context_window`。
+     词表声明了该档时才写，写错档位是**加载期硬错误**，会点名是哪个文件、哪一档、模型声明了哪几档；
+     `summarize_at` 取决于模型声明的 `context_window`。
 3. 正文就是 Instruction；没有 `instruction_file`；`---` 分隔符必须成对出现，通篇只有注释或空白的文件会被
    判定为空文档。
 4. 深度：`agent.max_depth` 默认为 1，只有 level 0 才能委派；声明超出上限的拓扑是启动期错误。level 1 的
