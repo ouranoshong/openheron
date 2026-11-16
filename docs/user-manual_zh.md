@@ -44,7 +44,10 @@ irm https://github.com/ouranoshong/openheron/releases/latest/download/install.ps
 | `INSTALL_DIR` | 装到哪（缺省 `~/.local/bin`，Windows 上是 `%LOCALAPPDATA%\Programs\openheron`） |
 | `OPENHERON_REPO` | 从别的 `owner/repo` 装 |
 | `OPENHERON_TOKEN` | 私有仓库用的 token |
+| `OPENHERON_BASE_URL` | GitHub 站点（默认 `https://github.com`） |
 | `OPENHERON_API_URL` | API 主机（默认 `https://api.github.com`；GitHub Enterprise 是 `https://<host>/api/v3`） |
+| `OPENHERON_ASSET` | 已经在磁盘上的安装包：跳过下载，但仍然验校验和 |
+| `OPENHERON_CHECKSUMS` | 拿哪个校验和文件对（缺省：安装包旁边那个） |
 
 ★ 想先看一眼再执行，就从[发布页](https://github.com/ouranoshong/openheron/releases/latest)
 把 `install.sh` 下载下来读一遍 —— 脚本本身就是这个 release 的一部分，就在它装的那些
@@ -235,7 +238,7 @@ openheron
 `init` 跑完会打印一行提示：
 
 ```
-the api key is read at request time from LLM_DEEPSEEK_API_KEY, or from the keyring entry llm:deepseek
+the api key is read from LLM_DEEPSEEK_API_KEY when the configuration loads, or from the keyring entry llm:deepseek
 store one with: openheron secret set llm <provider>
 ```
 
@@ -295,10 +298,11 @@ $env:LLM_DEEPSEEK_API_KEY = '@file:C:\Users\you\deepseek.key'
 #### 启动前
 
 ★ **`init` 写的地方和服务读的地方可能不是一个。** `init` 写它被指到的那个配置根 ——
-缺省是 `<openheron-root>/configs` —— 它**不看**环境变量；而服务读的顺序是 `--config-root` →
-`$OPENHERON_CONFIG_ROOT` → `<openheron-root>/configs`（§3）。这个环境变量指着别处的时候，
-服务起来会报 "no configuration at ..."，因为它读的不是 `init` 写的那一棵 ——
+缺省是 `<openheron-root>/configs` —— 它**不读 `$OPENHERON_CONFIG_ROOT`**；而服务读的顺序是
+`--config-root` → `$OPENHERON_CONFIG_ROOT` → `<openheron-root>/configs`（§3）。这个环境变量
+指着别处的时候，服务起来会报 "no configuration at ..."，因为它读的不是 `init` 写的那一棵 ——
 ★ 而它也不会在那儿写一棵：你点名的根是你自己的。
+★ `init` **读** `$OPENHERON_ROOT`，因为缺省配置根就是从那儿来的。
 
 ★ **Windows 上子进程找不到命令时**，把 `mcps/fetch.yaml` 和 `mcps/time.yaml` 里的
 `command` 改成 `uvx.exe` —— 那两个 MCP 服务器要 PATH 里有 `uvx`（§2.3）。
@@ -309,37 +313,42 @@ shell 命令（§9）。
 
 ### 2.3 配置里有什么
 
-整棵树由 `openheron init` 写出 —— 服务端自己第一次启动时写的也是这棵树：
+整棵树由 `openheron init` 写出 —— 服务端自己第一次起来、拿的还是**缺省配置根**、
+而那里还什么都没有时，写的也是这棵树：
 
 ```
-your/project/
-└── .openheron/
-    ├── agents/
-    │   ├── main.md           # 入口 Agent：理解需求、给方案、分派、汇总
-    │   ├── task.md           # 通用执行专家：llm/ tools/ mcps/ server/
-    │   ├── agent-expert.md   # agent 域专家：agents/*.md
-    │   └── skill-expert.md   # 技能域专家：skills/<name>/SKILL.md
-    ├── skills/
-    │   ├── openheron-config-map/SKILL.md        # 配置系统的事实地图
-    │   ├── openheron-config-edit/SKILL.md       # 修改配置的规程
-    │   ├── openheron-config-templates/SKILL.md  # 骨架怎么拿
-    │   ├── openheron-config-validate/SKILL.md   # 静默失效
-    │   └── openheron-agent-authoring/SKILL.md   # 怎么写一个 agent
-    ├── llm/
-    │   └── deepseek.yaml    # 模型档案
-    ├── mcps/
-    │   ├── fetch.yaml        # 抓网页转 markdown
-    │   ├── time.yaml         # 当前时间与时区换算
-    │   └── deepwiki.yaml     # 公开仓库文档与问答
-    ├── tools/
-    │   ├── filesystem.yaml   # 文件系统工具的档位
-    │   ├── http.yaml         # request_get
-    │   ├── web_search.yaml   # duckduckgo_search
-    │   ├── wikipedia.yaml    # wikipedia_search
-    │   └── kb.yaml           # 知识库（关着：corpus_dir 是空的）
-    └── server/
-        └── config.yaml      # 进程自身参数（不热重载）
+~/.openheron/configs/           ← the config root
+├── agents/
+│   ├── main.md           # 入口 Agent：理解需求、给方案、分派、汇总
+│   ├── task.md           # 通用执行专家：llm/ tools/ mcps/ server/
+│   ├── agent-expert.md   # agent 域专家：agents/*.md
+│   └── skill-expert.md   # 技能域专家：skills/<name>/SKILL.md
+├── skills/
+│   ├── openheron-config-map/SKILL.md        # 配置系统的事实地图
+│   ├── openheron-config-edit/SKILL.md       # 修改配置的规程
+│   ├── openheron-config-templates/SKILL.md  # 骨架怎么拿
+│   ├── openheron-config-validate/SKILL.md   # 静默失效
+│   └── openheron-agent-authoring/SKILL.md   # 怎么写一个 agent
+├── llm/
+│   └── deepseek.yaml    # 模型档案
+├── mcps/
+│   ├── fetch.yaml        # 抓网页转 markdown
+│   ├── time.yaml         # 当前时间与时区换算
+│   └── deepwiki.yaml     # 公开仓库文档与问答
+├── tools/
+│   ├── filesystem.yaml   # 文件系统工具的档位
+│   ├── http.yaml         # request_get
+│   ├── web_search.yaml   # duckduckgo_search
+│   ├── wikipedia.yaml    # wikipedia_search
+│   ├── kb.yaml           # 知识库（关着：corpus_dir 是空的）
+│   └── config.yaml       # 六个配置工具
+└── server/
+    └── config.yaml      # 进程自身参数（不热重载）
 ```
+
+★ **这棵树住在配置根里，不在项目里。** 项目目录是项目自己的事；配置是用户的事，
+它在上一层的**大本营**下面（§3）。★ 唯一一种把这棵树放进项目里的布局是旧布局 ——
+一次**根本没有**大本营的运行，那时配置根落到 `<project>/.openheron`。
 
 ★ 那三个 MCP 服务器里有两个是 stdio 的 —— `fetch` 和 `time`，要 PATH 里有 `uvx`，而且
 第一次启动时会下载自己的包；起不来的服务器只赔上它自己的工具，别的什么都不影响（§4.7）。
@@ -394,8 +403,11 @@ your/project/
   目录，它空着是你的决定，不是一个缺口。
 - ★ **状态与日志文件住在大本营**，不在配置根里：搬走配置不会把历史一起搬走。
 - ★ **旧名字仍然生效** —— `$OPENHERON_CONFIG_DIR`、`$PROJECT_ROOT`、`$DATA_DIR`、
-  `$LISTEN_ADDR`、`$STATIC_DIR`、`$FRONTEND_MODE`、`--config-dir`、`--project-root` ——
+  `$LISTEN_ADDR`、`$STATIC_DIR`、`$FRONTEND_MODE`、`--project-root` ——
   而且用了旧名字会被点名，所以不会有哪个设置悄悄不再生效。
+- ★ **`--config-dir` 不是服务端的 flag。** `openheron --config-dir x` 是硬错误
+  （`flag provided but not defined: -config-dir`）。这个旧名长在**自带 flag 集合**的两个
+  子命令上 —— `openheron secret` 与 `openheron kb`（§8）—— 它们照收，只是**不点名**。
 
 如果默认根下没有 `agents/main.md`、而服务端也没能写出来，启动会直接告诉你：
 
@@ -462,7 +474,7 @@ frontmatter 可用键：
 | `description` | 这个 Agent 干什么用的（父 Agent 靠它决定委派给谁） |
 | `model` | `<vendor>/<model>`，**必填**，不继承也不回退 |
 | `max_iterations` | 工具循环的轮数上限 |
-| `summarize_at` | 这个 Agent 的上下文什么时候被**压缩**成摘要：模型窗口的 `80%`（默认）、绝对 token 数（`104858`）、或 `0` 表示永不 |
+| `summarize_at` | 这个 Agent 的上下文什么时候被**压缩**成摘要：模型窗口的 `80%`（默认）、绝对 token 数（`104858`）、或 `off` / `0` 表示永不 |
 | `subagents` | 它能委派给谁（见 §5） |
 | `tools` | **这个 Agent 能用的工具** —— **所有非 MCP 工具**：内置工具、`tools/` 下各文件提供的工具，以及 `config_*` 工具。★ **不写就是一个工具都没有**：这张清单就是全部答案。★ MCP 的工具**不写在这里** —— 挂载那个 server 就会得到它的工具（见 §4.8） |
 | `skills` | 这个 Agent 能加载的技能 —— `skills/` 下文件夹的白名单。**不写就是没有技能**，写空列表也一样 |
@@ -488,18 +500,19 @@ frontmatter 可用键：
 openai/gpt-4o-mini is not declared under llm/` —— 这一轮以 `agent_unavailable` 这个码结束。
 ★ 这个码意味着「你的配置坏了」，所以该做的是打开编辑器改文件，而不是把消息再发一遍。
 
-★ **`reasoning` 档位必须在模型档案里声明过才有效**。没声明的档位会被**静默忽略**：
-Agent 写着 `reasoning: high`，而端点没有 `high`，实际效果是「完全不思考」，且没有任何报错。
+★ **`reasoning` 档位必须在模型档案里声明过才有效**。没声明的档位在**加载配置时就被拒**：
+整棵树起不来，报错会点名是哪个 Agent、它要了哪一档、模型声明了哪几档。
 详见 §4.2。
 
 ★ **`summarize_at` 是长对话活下来的原因**。越过这个点，对话会被一段摘要取代，从那以后
-agent 带着摘要往前走。它有三种写法：
+agent 带着摘要往前走。它有四种写法：
 
 | 写法 | 含义 |
 |---|---|
 | `summarize_at: 80%` | 该 Agent 实际所用模型 `context_window` 的 80% |
 | `summarize_at: 104858` | 绝对 token 数 |
-| `summarize_at: 0` | 永不压缩 —— 上下文一直长到端点拒绝请求 |
+| `summarize_at: off` | 永不压缩 —— 上下文一直长到端点拒绝请求 |
+| `summarize_at: 0` | 与 `off` 一样 |
 
 不写这个键，Agent 拿到的是**窗口的 80%** —— 自动压缩默认开着。常用区间是 80–90%：
 正好填满窗口的请求就是会被拒绝的请求，剩下的那点余量正是摘要自己需要的。
@@ -552,8 +565,8 @@ Agent。模型档案里留着的 `summarize_at` 不再被读，openheron 加载�
 旁边。你自己的话不会在切口处丢失 —— 摘要把它们留住了。
 
 ★ **`reasoning` 档位表不是可选的**。它是「Agent 写 `reasoning: high`」与
-「这个端点怎么表达 high」之间的翻译层。表里没有的档位会被静默忽略，
-于是「开了 high 档却不思考」这个坑会以最隐蔽的方式出现。
+「这个端点怎么表达 high」之间的翻译层。表里没有的档位**在加载配置时就被拒** ——
+整棵树都起不来，报错会说清要的是哪一档、模型声明了哪几档。
 
 #### 密钥从哪来
 
@@ -620,7 +633,9 @@ export LLM_DEEPSEEK_API_KEY='@file:/etc/openheron/deepseek.key'
 
 - ★ **相对路径是相对启动 openheron 时所在的那个目录**，不是相对配置根 —— 用绝对路径。
 - ★ **路径不存在是启动错误**，不是提醒：
-  `config: parse llm/deepseek.yaml: read secret file: open /etc/openheron/deepseek.key: no such file or directory`。
+  `config: parse llm/deepseek.yaml: llm/deepseek.yaml: read secret file: open /etc/openheron/deepseek.key: no such file or directory`。
+  路径在报错里出现两次 —— 一次是被解析的那个文件，一次是加载器在读的那个文件 ——
+  这是加载器自己的说法，不是笔误。
   这个区别是刻意的：变量没设是运行期状态，路径写错是配置本身写错了。
 
 **怎么知道配好了。** 哪个 provider 没密钥，启动日志会点名：
@@ -796,11 +811,15 @@ allows: [request_get]
 | `retry.max_retries` | `5` | 一轮里一次模型调用最多重试几次 |
 | `log_level` | `info` | `debug`、`info`、`warn`、`error` —— 决定哪些行会进输出 |
 | `log_requests` | `false` | 是否在 `debug` 下打印脱敏后的模型请求体与 `tools` 原始字节；等价于 `OPENHERON_LOG_LLM_REQUESTS=1` |
-| `log.file` | `""` | 日志写到的文件，相对**配置根**解析 —— 空串 = 只写标准错误。新项目的模板写的是 `logs/openheron.log` |
+| `log.file` | `""` | 日志写到的文件，相对**大本营**解析 —— 空串 = 只写标准错误。新项目的模板写的是 `logs/openheron.log` |
 | `log.console` | `true` | 标准错误是否在文件旁边留一份 —— 新项目的模板设成 `false` |
+| `log.max_size_mb` | `20` | 单个日志文件的大小上限 —— `0` = 不限；负值会被归一成 `0` 并写进 `deferred` |
+| `log.max_age_days` | `14` | 轮转出来的文件留几天 —— `0` = 不限 |
+| `log.max_backups` | `5` | 留几个轮转文件 —— `0` = 不限 |
+| `log.compress` | `false` | 轮转出来的文件要不要 gzip |
 
 ★ **`server/` 不热重载** —— 改了要重启才生效。所以配置编辑器里它是**只读**的，
-提交会报 `section "server" is not editable`。
+提交会报 `section "server" is not editable: it is not hot-reloaded, so changes would need a restart`。
 
 以下环境变量可以覆盖进程参数，优先级高于配置文件：
 `OPENHERON_LISTEN_ADDR`、`OPENHERON_DATA_DIR`、`OPENHERON_DEFAULT_PROJECT_ROOT`、
@@ -817,8 +836,8 @@ allows: [request_get]
 
 ★ `log_level` 不是这四个之一时回退 `info`；配置的 `deferred` 提示里带着原因。
 
-★ 日志写到哪儿由两个键决定：`log.file` 指文件（相对**配置根**解析），`log.console` 说标准
-错误旁边还留不留一份。**代码**的缺省是空路径加 stderr 一份，所以没动过的配置只写标准错误。
+★ 日志写到哪儿由两个键决定：`log.file` 指文件（相对**大本营**解析，那儿也是其它运行时状态
+的所在地），`log.console` 说标准错误旁边还留不留一份。**代码**的缺省是空路径加 stderr 一份，所以没动过的配置只写标准错误。
 ★ 新项目拿到的是 `logs/openheron.log`，而 `log.console` 是**关**的：日志进文件，配置
 读出之后终端就安静了。之前那些行 —— 以及文件打不开的原因 —— 仍然写标准错误。
 
@@ -847,8 +866,8 @@ allows: [request_get]
 skills: [refactor, review]
 ```
 
-不写这个键就是**目录里的全部技能**；写空列表就是**一个都没有**。不在名单里的技能
-不会出现在给模型看的技能清单里，点名去调也会失败 —— 看不见的东西调不到。
+不写这个键就是**一个都没有** —— 键不写和写空列表是一回事，跟 `tools:` 同一条规矩。
+不在名单里的技能不会出现在给模型看的技能清单里，点名去调也会失败 —— 看不见的东西调不到。
 名单里写了目录里没有的名字，Agent 装配时日志会报出来，不会被忽略。
 
 ★ **一个技能就是一层文件夹，编辑器问的就是这个名字。** `/settings` 把每个分区显示成文件树
@@ -1504,7 +1523,7 @@ openheron .            # 一个项目：一个文件夹，「未选项目」的�
 # .openheron/tools/kb.yaml
 corpus_dir: docs      # a directory relative to the project root
 index: default
-model: openai/text-embedding-3-small
+model: <vendor>/<embedding-model>
 top_k: 8
 ```
 
@@ -1513,6 +1532,10 @@ top_k: 8
   索引和语料必须同生共死，放到系统目录里的语料会让索引失去意义。
 - `model` 必填，且必须指向一个声明了 `kind: embedding` 的模型，
   否则启动报错（`kb.model ... is not an embedding model`）。
+- ★ **出厂树里没有 embedding 模型。** `llm/openai.yaml` 只有对话模型 `gpt-4o`，别的都没有，
+  所以你从厂商文档上抄下来的名字 —— 比如 `openai/text-embedding-3-small` —— **没有声明**：
+  `kb.model openai/text-embedding-3-small is not declared under llm/`。
+  先在 `llm/<vendor>.yaml` 里把这个模型声明出来，标上 `kind: embedding`。
 
 索引落在 `<data_dir>/kb/<index>/`。
 
@@ -1528,7 +1551,11 @@ openheron kb status --json         # machine-readable
 
 三条命令都支持 `--config-root <path>`，用来指向别的配置根（`--config-dir` 是旧名，仍然生效）。
 
-★ `kb index` 有**运行锁**：同一时间只能跑一轮，重复调用会等前一轮结束。
+★ `kb index` 有**运行锁**：同一时间只能跑一轮，重复调用**立刻失败**，不会排队等：
+
+```
+another index run is in progress (...); wait for it to finish, or check `openheron kb status`
+```
 
 ★ `kb status` 显示 `lexical-only retrieval` 表示**没有向量** —— 索引是纯词法的，
 检索能用但不如混合检索准。配了 embedding 模型并重新索引后才是混合打分。
@@ -1583,11 +1610,14 @@ openheron version                                         print the version
 | PATCH | `/v2/sessions/:id/agent` | 换会话的 Agent |
 | DELETE | `/v2/sessions/:id` | 删会话 |
 | GET | `/v2/sessions/:id/messages` | 历史 + 用量（可 `?agent=` 过滤） |
+| GET | `/v2/sessions/:id/events` | 会话的**公告通道** —— 一条 SSE，推的是属于会话、不属于某一轮的事实（§6.7） |
 | GET | `/v2/sessions/:id/runs` | run 账本：这个会话的每一次 run，以及当前那一次 |
 | GET | `/v2/sessions/:id/runs/:runId` | 这个会话的某一次 run |
 | POST | `/v2/sessions/:id/abort` | 中断在跑的这轮 |
 | POST | `/v2/sessions/:id/compact` | 立刻压缩当前对话（见 §6.6） |
 | POST/GET | `/v2/sessions/:id/files` | 上传 / 列会话工作区文件（单文件上限 32 MiB） |
+| GET | `/v2/sessions/:id/files/raw` | 一个工作区文件的字节 —— 预览打开的就是它 |
+| DELETE | `/v2/sessions/:id/files` | 删掉一个工作区文件 |
 | GET | `/v2/project/files` | 列项目根文件（`?q=` `?limit=` `?project=`） |
 | GET | `/v2/projects` | 项目表与本进程的作用域（`{items, scope}`） |
 | POST | `/v2/projects` | 登记一个项目（`{"name": "…", "root": "…"}`） |
@@ -1670,7 +1700,8 @@ Agent 和它的父 Agent，其余的照旧留着。改之前想知道这个集�
 `config_get` 会告诉你（§4.9）。
 
 **Q：模型不思考，`reasoning: high` 像是没用？**
-多半是模型档案里**没有声明 `high` 档**。档位表缺哪档，那档就被静默忽略。
+多半是模型档案里**没有声明 `high` 档**。这不是静默无效：配置**根本加载不起来**，
+报错会点名是哪个 Agent、哪一档、模型声明了哪几档。
 去 `llm/<vendor>.yaml` 的 `models[].reasoning` 补上。
 
 **Q：`kb_search` 找不到东西 / 搜得不准？**

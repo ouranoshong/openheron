@@ -48,7 +48,10 @@ match the checksum is not installed.
 | `INSTALL_DIR` | Where to install (default `~/.local/bin`, or `%LOCALAPPDATA%\Programs\openheron` on Windows) |
 | `OPENHERON_REPO` | Install from another `owner/repo` |
 | `OPENHERON_TOKEN` | A token, for a private repository |
+| `OPENHERON_BASE_URL` | The GitHub base URL (default `https://github.com`) |
 | `OPENHERON_API_URL` | The API host (default `https://api.github.com`; a GitHub Enterprise one is `https://<host>/api/v3`) |
+| `OPENHERON_ASSET` | An archive already on disk: the download is skipped, the checksum is still verified |
+| `OPENHERON_CHECKSUMS` | The checksums file to verify against (default: next to the asset) |
 
 ★ Prefer to look before you run? Download `install.sh` from the
 [releases page](https://github.com/ouranoshong/openheron/releases/latest) and read it —
@@ -101,8 +104,9 @@ task build-go     # backend only (no UI) — faster while iterating on Go code
 
 ★ On Windows the product is `bin\openheron.exe` — the executable keeps the `.exe` suffix
 there. And `python3` on Windows is the Microsoft Store alias — it exists and runs
-nothing — so the repository's own scripts call `python` there. It only matters for the
-document checks (`task lint-docs`).
+nothing — so the repository's own scripts call `python` there. It matters for the
+document checks (`task lint-docs`) and for the zip fallback in `task release` on
+Windows.
 
 ### 1.3 On Windows
 
@@ -127,9 +131,9 @@ powershell -c "irm https://github.com/ouranoshong/openheron/releases/latest/down
 
 **Where the tools differ.** The file tools (`read_file`, `write_file`, `edit_file`,
 `ls` and `glob`) are the runtime's own code, and they work on Windows as they are;
-only `grep` needs [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on top —
-Windows does not ship it, and without it you get
-`ripgrep (rg) is not installed or not in PATH` (§10).
+only `grep` prefers [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on top —
+Windows does not ship it, and without it the search **falls back to the built-in
+engine** and says so in the result (§10).
 
 **The shell tool finds a shell by itself.** `execute` needs a program to run the
 command in, and openheron looks for one when the process starts, in this order: `sh`
@@ -260,7 +264,7 @@ openheron
 `init` prints one line when it is done:
 
 ```
-the api key is read at request time from LLM_DEEPSEEK_API_KEY, or from the keyring entry llm:deepseek
+the api key is read from LLM_DEEPSEEK_API_KEY when the configuration loads, or from the keyring entry llm:deepseek
 store one with: openheron secret set llm <provider>
 ```
 
@@ -328,11 +332,13 @@ the place the key came from; the startup log must not carry
 
 ★ **The place `init` writes to and the place the server reads from may not be the same.**
 `init` writes the config root it is given — by default `<openheron-root>/configs` — and it
-**does not look at** the environment; the server reads `--config-root` →
+**does not read `$OPENHERON_CONFIG_ROOT`**; the server reads `--config-root` →
 `$OPENHERON_CONFIG_ROOT` → `<openheron-root>/configs` (§3). With
 `$OPENHERON_CONFIG_ROOT` set to somewhere else, the server comes up with "no configuration
 at ...", because it is not reading the tree `init` wrote —
 ★ and it does not write one there either: a root you named is a root you own.
+★ `init` does read `$OPENHERON_ROOT`, because that is where the default config root comes
+from.
 
 ★ **When the child process cannot find the command on Windows**, change `command` to
 `uvx.exe` in `mcps/fetch.yaml` and `mcps/time.yaml` — the two MCP servers need `uvx` on
@@ -345,37 +351,43 @@ tools run shell commands (§9).
 ### 2.3 What the configuration holds
 
 The whole tree is written by `openheron init` — and by the server itself, the
-first time it starts in a project that has none:
+first time it comes up with the **defaulted** config root and nothing in it:
 
 ```
-your/project/
-└── .openheron/
-    ├── agents/
-    │   ├── main.md           # entry agent: understand the request, plan, dispatch
-    │   ├── task.md           # general execution expert: llm/ tools/ mcps/ server/
-    │   ├── agent-expert.md   # agent-domain expert: agents/*.md
-    │   └── skill-expert.md   # skill-domain expert: skills/<name>/SKILL.md
-    ├── skills/
-    │   ├── openheron-config-map/SKILL.md        # the facts of the configuration system
-    │   ├── openheron-config-edit/SKILL.md       # the procedure for changing it
-    │   ├── openheron-config-templates/SKILL.md  # how to get a skeleton
-    │   ├── openheron-config-validate/SKILL.md   # the silent failures
-    │   └── openheron-agent-authoring/SKILL.md   # how to write an agent
-    ├── llm/
-    │   └── deepseek.yaml    # model profile
-    ├── mcps/
-    │   ├── fetch.yaml        # fetch a page and turn it into markdown
-    │   ├── time.yaml         # the current time and time-zone conversion
-    │   └── deepwiki.yaml     # public repository documentation and Q&A
-    ├── tools/
-    │   ├── filesystem.yaml   # the tiers of the filesystem tools
-    │   ├── http.yaml         # request_get
-    │   ├── web_search.yaml   # duckduckgo_search
-    │   ├── wikipedia.yaml    # wikipedia_search
-    │   └── kb.yaml           # the knowledge base (off: its corpus_dir is empty)
-    └── server/
-        └── config.yaml      # process parameters (not hot-reloaded)
+~/.openheron/configs/           ← the config root
+├── agents/
+│   ├── main.md           # entry agent: understand the request, plan, dispatch
+│   ├── task.md           # general execution expert: llm/ tools/ mcps/ server/
+│   ├── agent-expert.md   # agent-domain expert: agents/*.md
+│   └── skill-expert.md   # skill-domain expert: skills/<name>/SKILL.md
+├── skills/
+│   ├── openheron-config-map/SKILL.md        # the facts of the configuration system
+│   ├── openheron-config-edit/SKILL.md       # the procedure for changing it
+│   ├── openheron-config-templates/SKILL.md  # how to get a skeleton
+│   ├── openheron-config-validate/SKILL.md   # the silent failures
+│   └── openheron-agent-authoring/SKILL.md   # how to write an agent
+├── llm/
+│   └── deepseek.yaml    # model profile
+├── mcps/
+│   ├── fetch.yaml        # fetch a page and turn it into markdown
+│   ├── time.yaml         # the current time and time-zone conversion
+│   └── deepwiki.yaml     # public repository documentation and Q&A
+├── tools/
+│   ├── filesystem.yaml   # the tiers of the filesystem tools
+│   ├── http.yaml         # request_get
+│   ├── web_search.yaml   # duckduckgo_search
+│   ├── wikipedia.yaml    # wikipedia_search
+│   ├── kb.yaml           # the knowledge base (off: its corpus_dir is empty)
+│   └── config.yaml       # the six configuration tools
+└── server/
+    └── config.yaml      # process parameters (not hot-reloaded)
 ```
+
+★ **The tree lives in the config root, not in the project.** A project directory is a
+project's business; the configuration is the user's, and it sits one level up, under the
+openheron root (§3). ★ The one layout that puts the tree inside a project is the old one
+— a run with **no** openheron root at all, where the config root falls back to
+`<project>/.openheron`.
 
 ★ Two of the three MCP servers are stdio ones — `fetch` and `time` — and they need `uvx`
 on the PATH and download their package on the first start; a server that cannot be
@@ -438,8 +450,12 @@ does not move when the configuration moves:
 - ★ **The state and the log file live in the openheron root**, not in the config root: moving
   the configuration does not move your history with it.
 - ★ **The old names still work** — `$OPENHERON_CONFIG_DIR`, `$PROJECT_ROOT`, `$DATA_DIR`,
-  `$LISTEN_ADDR`, `$STATIC_DIR`, `$FRONTEND_MODE`, `--config-dir`, `--project-root` — and the
+  `$LISTEN_ADDR`, `$STATIC_DIR`, `$FRONTEND_MODE`, `--project-root` — and the
   old one is reported when it is used, so a setting that silently stopped working never does.
+- ★ **`--config-dir` is not one of the server's flags.** `openheron --config-dir x` is a
+  hard error (`flag provided but not defined: -config-dir`). The previous name lives on
+  the two subcommands that have their own flag set — `openheron secret` and `openheron kb`
+  (§8) — and those take it quietly, without the report.
 
 If the default root has no `agents/main.md` **and the server could not write one**,
 startup says so directly:
@@ -511,7 +527,7 @@ Available frontmatter keys:
 | `description` | What this agent is for (the parent agent uses it to decide whom to delegate to) |
 | `model` | `<vendor>/<model>`, **required**, never inherited and never falls back |
 | `max_iterations` | Cap on tool-loop iterations |
-| `summarize_at` | When this agent's context is **compacted** into a summary: `80%` of the model's window (the default), an absolute token count (`104858`), or `0` for never |
+| `summarize_at` | When this agent's context is **compacted** into a summary: `80%` of the model's window (the default), an absolute token count (`104858`), or `off` / `0` for never |
 | `subagents` | Whom it may delegate to (see §5) |
 | `tools` | The tools **this agent may use** — every tool that is **not** an MCP one: the built-ins, the ones the files under `tools/` provide, and the `config_*` tools. ★ **Not declared means no tools at all**: the list is the whole answer. ★ MCP tools are **not** named here — the agent gets them by mounting the server (see §4.8) |
 | `skills` | The skills this agent may load — an allow-list of the folders under `skills/`. **Not declared means no skill**, and so does an empty list |
@@ -542,18 +558,20 @@ the code `agent_unavailable`. ★ That code means "your configuration is broken"
 answer is to open the editor and fix the file, not to send the message again.
 
 ★ **A `reasoning` tier only works if the model profile declares it.** An undeclared tier
-is **silently ignored**: an agent says `reasoning: high`, the endpoint has no `high`, and
-the effect is "no thinking at all" — with no error and no message. See §4.2.
+is **refused while the configuration loads**: the tree does not come up at all, and the
+message names the agent, the tier it asked for and the levels the model does declare.
+See §4.2.
 
 ★ **`summarize_at` is what keeps a long conversation alive.** Past that point the
 conversation is replaced by a summary, and the summary is what the agent carries forward from
-there on. It comes in three spellings:
+there on. It comes in four spellings:
 
 | Spelling | Means |
 |---|---|
 | `summarize_at: 80%` | 80% of the `context_window` of the model this agent runs on |
 | `summarize_at: 104858` | An absolute token count |
-| `summarize_at: 0` | Never compact — the context grows until the endpoint refuses the request |
+| `summarize_at: off` | Never compact — the context grows until the endpoint refuses the request |
+| `summarize_at: 0` | The same as `off` |
 
 Leave the key out and the agent gets **80% of its window** — compaction is on by default.
 80–90% is the usual range: a request that exactly fills the window is a request that gets
@@ -614,8 +632,9 @@ survive the cut: the summary keeps them.
 
 ★ **The `reasoning` tier table is not optional.** It is the translation layer between
 "the agent writes `reasoning: high`" and "how this endpoint expresses high". A tier
-missing from the table is silently ignored, so "I turned on high and it still does not
-think" shows up in the most hidden way possible.
+missing from the table is **refused when the configuration loads** — the whole tree stays
+down, and the message says which tier was asked for and which levels the model does
+declare.
 
 #### The key: where it comes from
 
@@ -692,7 +711,9 @@ content trimmed. Two things to know:
 - ★ **A relative path is relative to the directory openheron was started from**, not
   to the configuration root — use an absolute path.
 - ★ **A path that does not exist is a startup error**, not a reminder:
-  `config: parse llm/deepseek.yaml: read secret file: open /etc/openheron/deepseek.key: no such file or directory`.
+  `config: parse llm/deepseek.yaml: llm/deepseek.yaml: read secret file: open /etc/openheron/deepseek.key: no such file or directory`.
+  The path is in the message twice — once as the file being parsed, once as the file the
+  loader was reading — and that is the loader's own wording, not a typo.
   The difference is deliberate: an unset variable is a runtime state, a wrong path is
   a mistake in the configuration.
 
@@ -888,10 +909,14 @@ told to (`proxy: env`).
 | `log_requests` | `false` | Whether to print the redacted model request body and the raw `tools` array at `debug` level; same effect as `OPENHERON_LOG_LLM_REQUESTS=1` |
 | `log.file` | `""` | A file to write the log to, relative to the **openheron root** — empty means stderr only. A new project's template names `logs/openheron.log` |
 | `log.console` | `true` | Whether the standard error keeps a copy beside the file — a new project's template sets it to `false` |
+| `log.max_size_mb` | `20` | Cap on one log file — `0` means no cap, and a negative value is normalised to `0` and reported |
+| `log.max_age_days` | `14` | How many days a rotated file survives — `0` means no limit |
+| `log.max_backups` | `5` | How many rotated files are kept — `0` means no limit |
+| `log.compress` | `false` | Whether the rotated files are gzipped |
 
 ★ **`server/` is not hot-reloaded** — a change only takes effect after a restart. That is
 why it is **read-only** in the config editor, and submitting it fails with
-`section "server" is not editable`.
+`section "server" is not editable: it is not hot-reloaded, so changes would need a restart`.
 
 These environment variables override the file and take precedence:
 `OPENHERON_LISTEN_ADDR`, `OPENHERON_DATA_DIR`, `OPENHERON_DEFAULT_PROJECT_ROOT`,
@@ -912,7 +937,8 @@ it has nothing to do with where `log.file` writes.
 notices carry the reason.
 
 ★ Where the log goes is decided by two keys. `log.file` names the file — relative to the
-**config root** — and `log.console` says whether the standard error keeps a copy beside it.
+**openheron root**, where the rest of the runtime state lives — and `log.console` says
+whether the standard error keeps a copy beside it.
 The **code's** defaults are an empty path and a stderr copy, so an untouched configuration
 logs to the standard error only. A new project gets `logs/openheron.log` and a **false**
 `log.console`: the log goes to the file, and the terminal goes quiet once the configuration
@@ -948,10 +974,10 @@ directory tree, and searching upwards lets you use skills from your home directo
 skills: [refactor, review]
 ```
 
-Not declaring the key means **every** skill in the directory; declaring an empty list
-means **none**. A skill outside the list is not advertised to the model, and asking for
-it by name fails — a model cannot load what it cannot see. A name that is not in the
-directory is reported in the log when the agent is built, rather than ignored.
+Not declaring the key means **none** — an absent list and an empty list mean the same
+thing, the same rule as `tools:`. A skill outside the list is not advertised to the model,
+and asking for it by name fails — a model cannot load what it cannot see. A name that is
+not in the directory is reported in the log when the agent is built, rather than ignored.
 
 ★ **A skill is a folder, and that is what the editor asks for.** `/settings` lists each
 partition as a folder in a file tree, so a skill appears as `skills/code-review/SKILL.md`:
@@ -1724,7 +1750,7 @@ are indexed (`kb/index.go:21`).
 # .openheron/tools/kb.yaml
 corpus_dir: docs      # a directory relative to the project root
 index: default
-model: openai/text-embedding-3-small
+model: <vendor>/<embedding-model>
 top_k: 8
 ```
 
@@ -1734,6 +1760,11 @@ top_k: 8
   living in a system directory would rob the index of meaning.
 - `model` is required and must point at a model declared with `kind: embedding`;
   otherwise startup errors out (`kb.model ... is not an embedding model`).
+- ★ **The factory tree ships no embedding model.** `llm/openai.yaml` carries the chat
+  model `gpt-4o` and nothing else, so the name you copy off the vendor's page —
+  `openai/text-embedding-3-small`, say — is **not declared**:
+  `kb.model openai/text-embedding-3-small is not declared under llm/`. Declare the
+  embedding model in `llm/<vendor>.yaml` first, with `kind: embedding` on it.
 
 The index lands in `<data_dir>/kb/<index>/`.
 
@@ -1750,8 +1781,12 @@ openheron kb status --json         # machine-readable
 All three accept `--config-root <path>` to point at a different config root (`--config-dir`
 is the previous name and still works).
 
-★ `kb index` takes a **run lock**: only one run at a time, and a second call waits for
-the first to finish.
+★ `kb index` takes a **run lock**: only one run at a time, and a second call **fails
+right away** rather than queueing:
+
+```
+another index run is in progress (...); wait for it to finish, or check `openheron kb status`
+```
 
 ★ `kb status` reporting `lexical-only retrieval` means **there are no vectors** — the
 index is purely lexical. Search still works but is less accurate than the hybrid. It
@@ -1813,11 +1848,14 @@ from here. Both answers are `403`.
 | PATCH | `/v2/sessions/:id/agent` | Change the session's agent |
 | DELETE | `/v2/sessions/:id` | Delete the session |
 | GET | `/v2/sessions/:id/messages` | History + usage (filter with `?agent=`) |
+| GET | `/v2/sessions/:id/events` | The session's **announcement channel** — an SSE stream of the facts that belong to the session, not to a round (§6.7) |
 | GET | `/v2/sessions/:id/runs` | The run ledger: every run of the session + the active one |
 | GET | `/v2/sessions/:id/runs/:runId` | One run of the session |
 | POST | `/v2/sessions/:id/abort` | Abort the running turn |
 | POST | `/v2/sessions/:id/compact` | Compact the conversation now (see §6.6) |
 | POST/GET | `/v2/sessions/:id/files` | Upload / list session workspace files (32 MiB per file) |
+| GET | `/v2/sessions/:id/files/raw` | The bytes of one workspace file — what the preview opens |
+| DELETE | `/v2/sessions/:id/files` | Delete one workspace file |
 | GET | `/v2/project/files` | List files under a project root (`?q=` `?limit=` `?project=`) |
 | GET | `/v2/projects` | The project table and the scope of this process (`{items, scope}`) |
 | POST | `/v2/projects` | Register a project (`{"name": "…", "root": "…"}`) |
@@ -1906,9 +1944,9 @@ turn rebuilds the agent you edited and its parents, and the others keep what the
 (§4.9).
 
 **Q: The model does not think — `reasoning: high` seems to do nothing?**
-Most likely the model profile **does not declare the `high` tier**. A tier missing from
-the table is silently ignored. Add it under `models[].reasoning` in
-`llm/<vendor>.yaml`.
+Most likely the model profile **does not declare the `high` tier**. That is not a silent
+no-op: the configuration does not load, and the message names the agent, the tier and the
+levels the model does declare. Add it under `models[].reasoning` in `llm/<vendor>.yaml`.
 
 **Q: `kb_search` finds nothing, or finds the wrong things?**
 Run `openheron kb status` first: `lexical-only retrieval` means there are no vectors
