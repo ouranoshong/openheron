@@ -1029,7 +1029,7 @@ what does it say?
 **磁盘**。两个问题，两边（`docs/config-design.md` §8.5）。
 
 ★ **被审批打断的一轮回到它开始时的那棵树。** 那一轮把树的指纹钉住（`turn.pin`，
-`agentkit/run/runtime.go:599`），run 账本把它记下来（`TreeFingerprint`，
+`agentkit/run/runtime.go:657`），run 账本把它记下来（`TreeFingerprint`，
 `storage/runledger.go:176`），恢复时按名字向池要那一条（`Lookup`，
 `agentkit/build/pool.go:90`）。★ 池把旧的那条**留着** —— 钉住上一棵树的 run 仍然需要它
 —— 而旧条目是进程退出时才回收，不是更早。

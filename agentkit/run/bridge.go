@@ -81,6 +81,39 @@ func (st *sessionState) markTurnDone(done *Turn) {
 	}
 }
 
+// releaseRound gives the session's slot back at the end of a round.
+//
+// ★ The loop pointer and the turn pointer go **together**. ★ The admission
+//
+//	gate reads the pair, and a half-released session reads "free" while a
+//	round is still standing — so a new query could take the session over
+//	in the middle of the round's own bookkeeping.
+//
+// ★ They go **behind the barrier**: the approval is on disk, the ledger's
+//
+//	row is terminal and the publisher is closed. ★ Until then an attach must
+//	still find the run, and a new query must not be able to take the session
+//	over — ★ the takeover branch does not write the approval, so a query
+//	that squeezed in during the window would take the user's question with
+//	it.
+//
+// ★ Only the matching handles are cleared: a turn superseded in the meantime
+//
+//	keeps its slot.
+func (st *sessionState) releaseRound(done *Turn, loop *adk.TurnLoop[loopItem, *schema.Message]) {
+	st.mu.Lock()
+	if st.loop == loop {
+		st.loop = nil
+	}
+	if st.turn == done {
+		st.turn = nil
+	}
+	st.mu.Unlock()
+	if done != nil {
+		done.markReleased()
+	}
+}
+
 func (st *sessionState) markError(err error) {
 	if err == nil {
 		return
@@ -146,20 +179,20 @@ func (rt *Runtime) startLoop(ctx context.Context, sessionID string, turn *Turn,
 //	no longer live" while the approval it is waiting for is nowhere on
 //	disk — and the transcript, which is where the client would look for
 //	it, cannot answer that yet.
+//
+// ★ ★ The LOOP pointer waits with it. ★ The admission gate reads the turn
+//
+//	and the loop as a pair, so a loop that is released early makes the
+//	session look free while the round is still standing: a new query would
+//	be admitted, it would take the session over, and ★ the takeover branch
+//	does not write the approval — the user's question would be gone with
+//	nothing saying so.
 func (rt *Runtime) loopExited(sessionID string, turn *Turn, loop *adk.TurnLoop[loopItem, *schema.Message],
 	exit *adk.TurnLoopExitState[loopItem, *schema.Message], cancel context.CancelFunc) {
 	st := rt.stateFor(sessionID)
 	st.mu.Lock()
 	current := st.loop
 	stale := current != nil && current != loop
-	if current == loop {
-		// ★ The loop is gone; the turn is not released yet. ★ A round is
-		//   over only when its ledger row says so — and until then an
-		//   attach must still find it, or the client is told "the run is no
-		//   longer live" while the approval it is waiting for is nowhere on
-		//   disk. ★ The release is at the end of this function.
-		st.loop = nil
-	}
 	st.mu.Unlock()
 
 	if cancel != nil {
@@ -193,8 +226,10 @@ func (rt *Runtime) loopExited(sessionID string, turn *Turn, loop *adk.TurnLoop[l
 	// ★ Now the round is over in every sense: the approval is on disk, the
 	//   ledger's row is terminal, the publisher is closed. ★ Only now does
 	//   the turn stop being live — and a client that attaches after this
-	//   reads the transcript, where the approval is.
-	st.markTurnDone(turn)
+	//   reads the transcript, where the approval is. ★ The loop pointer
+	//   goes with it, so a query that arrives in between is refused
+	//   instead of taking the session over.
+	st.releaseRound(turn, loop)
 	rt.removeStateIfIdle(sessionID)
 }
 

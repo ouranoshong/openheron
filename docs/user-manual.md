@@ -1314,6 +1314,11 @@ an approval raised in that round still arrives on its own. ★ And if the server
 return — the round is over, but its approval has not landed on disk yet — the client waits
 for the round's ledger row to close and reads the transcript then.
 
+★ **A message sent in that instant is refused, not swapped for the approval.** The session
+stays busy until the card is on disk, so the server answers `409 session_busy` and the
+message goes back to the input box — ★ the approval is never taken away by a message that
+happened to arrive at the same moment.
+
 ### 6.3 The config editor
 
 `/settings` opens it. It can edit `llm/`, `agents/`, `tools/` and `mcps/`.

@@ -1216,7 +1216,7 @@ tree's — so it answers about the **running** tree, while `config_get` with a
 (`docs/config-design.md` §8.5).
 
 ★ **A round interrupted by an approval comes back to the tree it started with.**
-The turn pins the tree's fingerprint (`turn.pin`, `agentkit/run/runtime.go:599`),
+The turn pins the tree's fingerprint (`turn.pin`, `agentkit/run/runtime.go:657`),
 the run ledger records it (`TreeFingerprint`, `storage/runledger.go:176`), and the
 resume asks the pool for that entry by name (`Lookup`,
 `agentkit/build/pool.go:90`). ★ The pool **keeps** the old entry — a run that

@@ -16,6 +16,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/cloudwego/hertz/pkg/app"
 	hertzconfig "github.com/cloudwego/hertz/pkg/common/config"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/cloudwego/hertz/pkg/route"
 
 	"github.com/ouranoshong/openheron/agentkit/run"
@@ -411,6 +412,125 @@ func TestAnAttachDuringTheApprovalWriteIsServed(t *testing.T) {
 	})
 	if late.code != 404 {
 		t.Fatalf("a finished run must be refused: %d (%s)", late.code, late.body)
+	}
+}
+
+// ★ A query that arrives while the approval is being written must be refused
+// — and the approval must still land. ★
+//
+// The session's slot used to be free in that window: the query was admitted,
+// it took the session over, and the old round's exit took the "superseded"
+// branch — which does not write the approval. ★ The user's question was
+// gone, and nothing said so.
+func TestAQueryDuringTheApprovalWriteIsRefused(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "sessions")
+
+	fm, err := filestore.NewFileManager(root, filestore.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := newApprovalGate()
+	defer gate.open()
+	sm := &gatedSessionManager{SessionManager: fm, gate: gate}
+
+	rt := run.New(run.Config{
+		AgentBuilder:   interruptingBuilder{},
+		SessionManager: sm,
+		Input:          run.InputConfig{},
+		StartTimeout:   5 * time.Second,
+	})
+	t.Cleanup(func() { _ = rt.Shutdown(ctx) })
+
+	engine := route.NewEngine(hertzconfig.NewOptions(nil))
+	srv := New(rt, sm, obs.Discard())
+	srv.h = engine
+	sink := &streamSink{}
+	srv.newStream = sink.stream
+	srv.registerRoutes()
+	t.Cleanup(func() { _ = engine.Close() })
+
+	id := createThread(t, srv)
+	sess, err := srv.sm.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// ★ The run's own response ends when the run ends, and the run ends when
+	//	the approval is written — which the gate holds. ★ So the request runs
+	//	beside the test, not in front of it.
+	runDone := make(chan result, 1)
+	go func() {
+		runDone <- callJSON(t, srv, "POST", "/v2/run", map[string]any{
+			"threadId": id,
+			"query":    "写个文件",
+		})
+	}()
+
+	select {
+	case <-gate.hit:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the approval was never written")
+	}
+
+	// ★ The session still owes the user a question: the query is refused.
+	// ★ It has to be refused **at once** — a refusal is an answer, not a
+	//	wait — and it has to be refused while the window is open, so the
+	//	request runs beside the test: ★ a query that was admitted instead
+	//	would stream until the round ended, and the round ends when the
+	//	gate opens, which happens after this test is over.
+	busyDone := make(chan result, 1)
+	go func() {
+		busyDone <- callJSON(t, srv, "POST", "/v2/run", map[string]any{
+			"threadId": id,
+			"query":    "换个问题",
+		})
+	}()
+
+	select {
+	case busy := <-busyDone:
+		if busy.code != consts.StatusConflict {
+			t.Fatalf("a query in the approval window must be refused: %d (%s)", busy.code, busy.body)
+		}
+		var body errBody
+		if err := json.Unmarshal([]byte(busy.body), &body); err != nil {
+			t.Fatalf("decode: %v (%s)", err, busy.body)
+		}
+		if body.Code != codeSessionBusy {
+			t.Fatalf("code = %q, want %q", body.Code, codeSessionBusy)
+		}
+		if !body.Retryable {
+			t.Fatal("the window closes on its own, so the conflict is retryable")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the query in the approval window was not refused")
+	}
+
+	// ★ And the approval must land behind the window.
+	gate.open()
+	if got := <-runDone; got.code != 200 {
+		t.Fatalf("run = %d (%s)", got.code, got.body)
+	}
+	waitForPending(t, sess, 1)
+
+	got := callJSON(t, srv, "GET", "/v2/sessions/"+id+"/messages", nil)
+	if got.code != 200 {
+		t.Fatalf("messages = %d (%s)", got.code, got.body)
+	}
+	var view struct {
+		PendingApprovals []struct {
+			InterruptID string `json:"interruptId"`
+		} `json:"pendingApprovals"`
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal([]byte(got.body), &view); err != nil {
+		t.Fatalf("decode: %v (%s)", err, got.body)
+	}
+	if len(view.PendingApprovals) != 1 || view.PendingApprovals[0].InterruptID != "int-e2e" {
+		t.Fatalf("the card must reach the client: %+v", view.PendingApprovals)
+	}
+	if view.State != "waiting_approval" {
+		t.Fatalf("state = %q, want waiting_approval", view.State)
 	}
 }
 

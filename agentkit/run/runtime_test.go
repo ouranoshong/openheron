@@ -411,6 +411,72 @@ func TestTheRunStaysLiveUntilItsApprovalIsOnDisk(t *testing.T) {
 	})
 }
 
+// ★ A query that arrives while the approval is being written must be refused
+// — and the approval must still land. ★
+//
+// The session's slot used to be free in that window: the query was admitted,
+// it took the session over, and the old loop's exit then took the
+// "superseded" branch — which does not write the approval. ★ The user's
+// question was gone, and nothing said so.
+func TestAQueryInTheApprovalWindowIsRefusedAndTheApprovalLands(t *testing.T) {
+	b := &fakeBuilder{agent: func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
+		return &fakeAgent{script: func(ctx context.Context, emit func(*adk.TypedAgentEvent[*schema.Message]) bool) {
+			emit(textEvent("about to write"))
+			emit(interruptedEvent("agent:A;tool:call_1", "write_file needs approval"))
+			emit(exitEvent())
+		}}
+	}}
+	rt, sm := newTestRuntime(t, b)
+	ctx := context.Background()
+	sess := mustSession(t, sm)
+
+	hit := make(chan struct{}, 1)
+	release := sess.gateApproval(hit)
+	defer release()
+
+	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := turn.Wait(5 * time.Second); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	drain(t, turn)
+
+	// ★ The approval is being written: the round is in the window.
+	select {
+	case <-hit:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the approval was never written")
+	}
+
+	// ★ The session still owes the user a question: the query must be
+	//	refused, not admitted.
+	if _, err := rt.Submit(ctx, sess.ID(), "", "another question", nil); !errors.Is(err, ErrSessionBusy) {
+		t.Fatalf("a query in the approval window must be refused, got %v", err)
+	}
+
+	// ★ And the approval must land: the window closed behind it.
+	release()
+	waitFor(t, func() bool {
+		p, _ := sess.PendingApproval()
+		return p != nil && len(p.Interrupts) == 1
+	})
+
+	// ★ The round's row must say what happened to it: it is waiting for an
+	//	answer, not aborted by a query that was never admitted.
+	rows, err := sess.RunLedger().List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1 — the refused query must not have run", len(rows))
+	}
+	if rows[0].State != storage.RunWaitingApproval {
+		t.Fatalf("the row says %q, want %q", rows[0].State, storage.RunWaitingApproval)
+	}
+}
+
 // hasInterrupt reports whether the subscription already carries the run's
 // approval.
 //

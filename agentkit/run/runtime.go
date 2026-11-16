@@ -548,8 +548,9 @@ func conflictTurns(kind, live contract.TurnKind) bool {
 // ★ Both are needed. st.turn is set while the turn runs and cleared once
 //
 //	its row is terminal; st.loop is set while the loop lives, which
-//	is longer — the loop stays alive waiting for the next item. The pair
-//	reads "busy" only while a turn is genuinely in flight.
+//	is longer — the loop stays alive waiting for the next item, and it
+//	goes with the turn when the round ends (releaseRound). The pair reads
+//	"busy" only while a turn is genuinely in flight.
 func (rt *Runtime) ensureNoLiveTurn(ctx context.Context, sess storage.Session) error {
 	st, ok := rt.lookupState(sess.ID())
 	if !ok {
