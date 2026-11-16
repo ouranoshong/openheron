@@ -90,9 +90,17 @@ capabilities:
   #
   # ★ No --provider and no --env: openheron init decides both from its own
   #   rules, which is what the credential mixin mirrors.
+  #
+  # ★ The config root is named explicitly, and it is the one the entrypoint
+  #   uses: the workspace's own .openheron/. The default is
+  #   <openheron-root>/configs, which lives in the container's filesystem and
+  #   disappears with the sandbox — and the configuration the user edits is
+  #   the one on the mount. ★ --dir is not the way to say it: init writes a
+  #   **config root**, not a project directory, and it refuses the retired
+  #   name outright.
   - type: com.docker.sandbox/lifecycle@1
     config:
       startup:
-        - command: 'openheron init --dir "$WORKSPACE_DIR" || echo "[kit] init did not complete; the configuration was left as it was, and with none at all the server will not start"'
+        - command: 'openheron init --config-root "$WORKSPACE_DIR/.openheron" || echo "[kit] init did not complete; the configuration was left as it was, and with none at all the server will not start"'
           env: [WORKSPACE_DIR]
           description: Seed the project configuration in the workspace
