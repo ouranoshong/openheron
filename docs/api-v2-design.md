@@ -115,7 +115,7 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 
 ## 2. 路由表
 
-★ 全部注册在 `api/v2_files.go` 的 `registerV2Routes`（`api/v2_files.go:40`）。
+★ 全部注册在 `api/v2_files.go` 的 `registerV2Routes`（`api/v2_files.go:40-113`）。
 ★ 注册顺序是「**全部 `/v2/*` → SPA `NoRoute` 兜底 → `StaticFS("/")` 兜底**」——
 一条放错位置的路由会静默变成 404，读起来跟「端点没实现」一模一样。
 ★ **这个顺序必须被测试锁住**（`api/v2_test.go:37` 的路由优先级用例）—— 这是典型的
@@ -248,7 +248,7 @@ URL 会静默造出会话**。现在只有 `POST /v2/sessions` 一个创建入�
 
 **404** → `{"error":"session not found","code":"thread_not_found"}`
 
-**`state` 的推导规则**（`api/v2_sessions.go:559` 的 `stateOf`）
+**`state` 的推导规则**（`api/v2_sessions.go` 的 `stateOf`）
 
 ```
 待批非空                → "waiting_approval"
@@ -320,7 +320,7 @@ URL 会静默造出会话**。现在只有 `POST /v2/sessions` 一个创建入�
 **`query` vs `messages`**
 
 `messages`（AG-UI 的完整对话数组）保留但**不作为主入口**：服务端只读最后一条 user
-文本（`api/v2_run.go:371` 的 `lastUserText`）。取值优先级：`query` → 回退到
+文本（`api/v2_run.go:371-394` 的 `lastUserText`）。取值优先级：`query` → 回退到
 `messages` 里的最后一条 user 文本。
 
 **分支判定**：`len(resume) == 0` → `rt.Submit`；否则 → `rt.Resume`。
@@ -371,7 +371,7 @@ AG-UI 的 resume entry 带 `status`（`resolved` / `cancelled`），但那描述
 { "threadId": "3f2a1c8e-…", "runId": "01J8X7K2M9" }
 ```
 
-★ 判据是 `isAttachRequest`（`api/v2_run.go:224`）：带 `runId` 且不带 `query`/`resume`
+★ 判据是 `isAttachRequest`（`api/v2_run.go`）：带 `runId` 且不带 `query`/`resume`
 就是挂回去。挂不上的答复是 **404 `run_not_live`**（`api/v2_types.go:58`）。
 
 ★ **`run_not_live` 是它自己的码**，因为「你要挂的那一轮没了」既不是「会话忙」也不是
@@ -432,19 +432,19 @@ AG-UI 的 resume entry 带 `status`（`resolved` / `cancelled`），但那描述
    包初始化时 Register，否则编码失败。★ 失败发生在**停机提交 checkpoint 的那一刻**，
    现象是「模型说要调工具 → 直接 RUN_ERROR」，看着像模型出错，实际是编码器。
    本仓库：`approval/approval.go:18` 与 `:19`；守着的测试是
-   `agentkit/build/gate_test.go:84` 的 `TestApprovalInfoSurvivesGob` 与
-   `approval/approval_test.go:9` 的 `TestDecisionSurvivesGob`。
+   `agentkit/build/gate_test.go:84-105` 的 `TestApprovalInfoSurvivesGob` 与
+   `approval/approval_test.go:9-27` 的 `TestDecisionSurvivesGob`。
 
 2. **interrupt 的 message 不能用 `%v`。** `fmt.Sprintf("%v", ic.Info)` 会把
    `*ApprovalInfo` 打平成 `&{write_file {"file_path": ...}}` —— 这段文本经事件流直达
    前端审批卡，等于把内部 Go 表示泄漏成界面文案。本仓库走 `describe(ic.Info)`
    （`agentkit/emit/emit.go:444`），守着的测试是
-   `agentkit/emit/interrupt_test.go:14` 的 `TestTheInterruptDescribesTheApprovalInfo`。
+   `agentkit/emit/interrupt_test.go:14-45` 的 `TestTheInterruptDescribesTheApprovalInfo`。
 
 3. **`state` 停在 `running`。** 轮次完成后 turn 句柄仍被持有，于是
    `GET /v2/sessions/{id}` 永远报 `running`。★ 根因是「loop 还活着」（在等下一条
    item）被当成了「有活动在进行」—— 这两件事不等价。修法是 turn 一旦上报就释放引用
-   （`agentkit/run/bridge.go:73` 的 `markTurnDone`），★ **只清匹配的那个句柄**，免得
+   （`agentkit/run/bridge.go:73-82` 的 `markTurnDone`），★ **只清匹配的那个句柄**，免得
    误伤期间被替换掉的 turn。整套运行时设计在 `docs/runtime-design.md`。
 
 4. **SSE 分帧是 `data:{`，不是 `data: `。** `data:{...}`（冒号后无空格）是合法的
@@ -857,7 +857,7 @@ MCP 服务器与它们的工具。★ 挂载即授予：收窄 MCP 工具的地�
   ★ `orphan`（有 pending 无 checkpoint，审批无法恢复）与 `ownerless`（有 checkpoint
   无 pending）都是需要人工介入的状态。
 
-★ 这几个端点在**没有配置源**时返 **503**（`api/v2_introspect.go:31` 的
+★ 这几个端点在**没有配置源**时返 **503**（`api/v2_introspect.go:31-44` 的
 `requireConfig`）—— 它们是自省用的，而运行时端点在没有配置源时照样工作。
 
 ---
@@ -962,7 +962,7 @@ tool_calls message)
 结果**就结束了（未知工具、abort、轮次被抢占、迭代上限耗尽），那条 assistant 消息就
 成了孤儿，而**此后每一轮都 400** —— 重开会话、换模型、改配置都救不回来。
 
-⇒ 修在**读取侧**（`agentkit/run/history.go:10` 的 `normalizeHistory`）。★ 一次修同时
+⇒ 修在**读取侧**（`agentkit/run/history.go:10-15` 的 `normalizeHistory`）。★ 一次修同时
 做到三件事：治好新的一轮、治好**已经坏掉**的老会话、不必去逐个堵产生孤儿的位置
 （那不止一处，每堵一处都会再冒出新的）。★ 守着的测试是
 `agentkit/run/input_history_test.go:61` 与

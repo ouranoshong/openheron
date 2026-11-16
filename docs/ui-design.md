@@ -48,23 +48,23 @@
 ★ **`Path` 是会话 workspace 里的相对路径**，不是绝对路径：绝对路径是某一台机器的事实，
 写进 transcript 就成了一条只在那台机器上成立的记录。
 
-★ **清单存的是 JSON 字节**（`message/attachment.go:58` 的 `StampAttachments`），不是
+★ **清单存的是 JSON 字节**（`message/attachment.go:58-67` 的 `StampAttachments`），不是
 `[]Attachment`。`Extra` 在写 checkpoint 时走 **gob** 编码，而 gob 编不了 interface 里没注册过的
 类型 —— 一份 `[]Attachment` 会让 checkpoint 在 stop 的时候写失败（`message/provenance_gob_test.go:68`
 有一张类型白名单的用例），留下一半写坏的审批。字节在白名单里，而 JSON 本来就是 transcript 载它的形式。
 
-读的时候要认三种形态（`message/attachment.go:82` 的 `ReadAttachments`）：本包写的 `[]byte`、
+读的时候要认三种形态（`message/attachment.go:82-121` 的 `ReadAttachments`）：本包写的 `[]byte`、
 JSON 往返之后变成的 **base64 字符串**（JSON 把 `[]byte` 编成字符串），以及调用方可能直接塞进去的
 `[]Attachment`。★ **JSON 往返之后的那种才是 transcript 真正载着的形态。**
 
 ★ **为什么是 `Extra` 而不是消息的正文**：正文是给模型看的，`Extra` 是给程序看的。模型的输入靠
-`message/extract.go:60` 的 `UserText` 取文本，`Extra` 不参与；同时 `Extra` 随 transcript 的 JSON
+`message/extract.go:60-65` 的 `UserText` 取文本，`Extra` 不参与；同时 `Extra` 随 transcript 的 JSON
 往返，**不用改 transcript 的格式版本**。
 
 清单是**只写一次**的：`message/provenance.go:71` 的 `put` 先写为准，`StampAttachments` 复用它 ——
 一条消息在管线里被重新盖章时，保留它出生时的样子。
 
-★ **消息有自己的身份**：`message/identity.go:18` 的 `StampMessageID`。清单挂在一条**有稳定 ID** 的
+★ **消息有自己的身份**：`message/identity.go:18-23` 的 `StampMessageID`。清单挂在一条**有稳定 ID** 的
 消息上，才谈得上「精确回溯这条消息引用了哪些文件」；压缩在 transcript 中间插入一条消息时，
 带 ID 的消息不改号。
 
@@ -76,7 +76,7 @@ JSON 往返之后变成的 **base64 字符串**（JSON 把 `[]byte` 编成字符
 `POST /v2/run` 的请求体多一个 `attachments[]`（`api/v2_run.go:76`），每一项是
 `runAttachment{Name, Path, Size}`（`api/v2_run.go:91`）。
 
-★ **线上没有 content type**：内容类型由**服务端按文件名判定**（`message/attachment.go:149` 的
+★ **线上没有 content type**：内容类型由**服务端按文件名判定**（`message/attachment.go:149-182` 的
 `MIMEOfExt`，在 `api/v2_attachments.go:64` 落到清单上）。客户端要是把一个文本文件说成
 `image/png`，服务端就会去把一段文本当图片读，模型于是对着它没有看见过的图片作答。
 判定不了的扩展名一律是 `application/octet-stream` —— 猜错的代价是模型读不到文件，诚实作答的
@@ -86,17 +86,17 @@ JSON 往返之后变成的 **base64 字符串**（JSON 把 `[]byte` 编成字符
 清单里记的是文件自己的大小。留着这个字段是为了让「客户端的说法」与「文件的实情」有一处可以
 对照的地方，不是为了用它。
 
-解析在 `api/v2_attachments.go:33` 的 `resolveAttachments`：
+解析在 `api/v2_attachments.go:33-68` 的 `resolveAttachments`：
 
 - ★ **客户端给的是相对路径，服务端拼的是自己的 workspace。** 这条规则让「越权读文件」在结构上
   不可能：客户端能写的字符串里没有绝对路径，服务端只做一次拼接再校验。
-- 校验用 `storage/filestore/session.go:628` 的 `safeJoin` —— **同一个函数**，不另写一份。
+- 校验用 `storage/filestore/session.go:628-639` 的 `safeJoin` —— **同一个函数**，不另写一份。
 - ★ **越界是拒绝，不是夹取**：夹取会解析到另一个文件，模型就会对着另一个文件作答，而且没有任何
   东西说它读错了。
 - 路径还要**存在**且不是目录（`api/v2_attachments.go:46`）：一个不在那里的附件会让模型去找一个
   不存在的文件，然后说「文件不见了」—— 而用户相信他发过。
 
-★ **附件算「一个问题」**：`isAttachRequest`（`api/v2_run.go:224`）判的是「没有 query、没有
+★ **附件算「一个问题」**：`isAttachRequest`（`api/v2_run.go`）判的是「没有 query、没有
 messages、没有 resume」，附件也进了这条判据（`:229`）。否则「只有附件、没有文字」的一轮会被误判
 成重连，去找一个不存在的 run。
 
@@ -114,37 +114,37 @@ messages、没有 resume」，附件也进了这条判据（`:229`）。否则�
 —— 一个写盘失败，换成了「模型答非所问」。换顺序正好解掉这个洞：装配用的就是那条消息对象本身，
 **无论落盘成不成功，模型都看得见它**。
 
-`buildInput` 的签名收的是**消息对象**（`agentkit/run/input.go:86`），不是文本。装配函数不需要知道
+`buildInput` 的签名收的是**消息对象**（`agentkit/run/input.go:92-128`），不是文本。装配函数不需要知道
 附件是什么，它只需要把消息原样交给模型。
 
-装配按类型分流（`agentkit/run/attachments.go:233` 的 `assembleAttachments`）。
+装配按类型分流（`agentkit/run/attachments.go:233-237` 的 `assembleAttachments`）。
 
 **文本类：给路径。**
 
-- `@` 头由 `agentkit/run/attachments.go:148` 的 `attachmentPaths` 生成，一行一个路径。
+- `@` 头由 `agentkit/run/attachments.go:148-169` 的 `attachmentPaths` 生成，一行一个路径。
 - ★ **绝对路径是硬要求**：`agentkit/fsx/fsx.go:218` 的 `resolve` 把相对路径按**项目根**解析，而
   `Extra` 里的 `path` 是 **workspace 相对**的 —— 直接把那个相对名字交给 `read_file` 会读到另一个
   文件（甚至项目根下的同名文件）。
-- 路径含空白时写成 `@"..."`（`agentkit/run/attachments.go:128` 的 `mentionPath`），提示词让模型调用
+- 路径含空白时写成 `@"..."`（`agentkit/run/attachments.go:128-134` 的 `mentionPath`），提示词让模型调用
   时去掉引号；路径统一转成正斜杠 —— Windows 的反斜杠在 JSON 参数里是转义符。
-- ★ **消息头是视图，不是改写**：`agentkit/run/attachments.go:203` 的 `presentMessage` 返回**一条
+- ★ **消息头是视图，不是改写**：`agentkit/run/attachments.go:203-223` 的 `presentMessage` 返回**一条
   副本**，transcript 里留着用户自己的话。★ 副本与落盘那条**共用同一个 `Extra`** —— id 与清单照旧
   跟着消息走，副本就这些事实而言还是那条消息。
 - ★ 消息头**不能**写进落盘那条：界面渲染的是 `UserText(msg.Content)`，把机器路径写进用户自己的
   气泡，界面上就会显示一串绝对路径。
-- 历史消息也重建 `@` 头（`agentkit/run/input.go:128` 的 `withHistoryAttachmentPaths`）：transcript
+- 历史消息也重建 `@` 头（`agentkit/run/input.go:142-148` 的 `withHistoryAttachmentPaths`）：transcript
   只存相对路径，绝对路径是请求时从 workspace 推导出来的。★ **图片不在这里重新内联** —— 把每一轮
   的图片都重新变成 base64，会把每次请求都撑大。
 - 内容**不在消息里**：上下文提示词把 `read_file` 写成义务（`agentkit/run/input.go:51` 的
   `attachmentRules`）—— 一条以 `@` 开头的行是系统注入的路径，不是用户的话；附件内容**不在**消息里，
   回答之前必须自己 `read_file`；大文件用 `offset` / `limit` 分段读。
-- ★ **二进制附件不给路径**：`agentkit/run/attachments.go:91` 的 `isReadableText` 判它是不是能当文本
+- ★ **二进制附件不给路径**：`agentkit/run/attachments.go:91-102` 的 `isReadableText` 判它是不是能当文本
   读；不能的写进「暂时不能处理」清单（`:173` 的 `blockedReason`、`:183` 的 `blockedNote`）。对
   非文本字节调用 `read_file` 只会得到噪声，而噪声读起来像内容。
 
 **图片类：多模态 part。**
 
-- `agentkit/run/attachments.go:272` 的 `inlineImage`：现读盘、现编码，字节进 `Base64Data`、类型进
+- `agentkit/run/attachments.go:272-300` 的 `inlineImage`：现读盘、现编码，字节进 `Base64Data`、类型进
   `MIMEType`（`:289`）—— eino 推荐的是这个形状，不是 `data:` URL。
 - ★ **base64 不落 transcript**：transcript 是 JSONL，一行上限 8 MiB
   （`storage/filestore/transcript.go:22` 的 `maxLineBytes`），一张 2 MiB 的图 base64 之后是
@@ -157,16 +157,16 @@ messages、没有 resume」，附件也进了这条判据（`:229`）。否则�
 `Content` 与多模态 part 时会把两个都填上，客户端拒绝序列化：
 `can't use both Content and MultiContent properties simultaneously`。
 
-★ 所以归一化落在 **wire 边界**（`llm/common/shape.go:52` 的 `normalizeWireShape`），在 `Generate` /
+★ 所以归一化落在 **wire 边界**（`llm/common/shape.go:52-58` 的 `normalizeWireShape`），在 `Generate` /
 `Stream` 交给适配器之前过一遍（`llm/common/model.go:88`、`:108`）。★ **为什么不是装配层**：装配只管
 得到**这一轮**的消息，而历史是持久数据 —— 早于「正文挪进 part」的那段时间里写下的消息同时带着
 正文和图片 part，一进模型就死，而会话不能改写自己的历史，下一句关于它的话会以同样的方式死一次。
 
-- ★ **正文挪进 text part，`Content` 清空**（`llm/common/shape.go:93` 的 `oneShape`）—— 不是反过来：
+- ★ **正文挪进 text part，`Content` 清空**（`llm/common/shape.go:93-121` 的 `oneShape`）—— 不是反过来：
   parts 是更丰富的形状，一张没有正文的图片，模型认不出它讲的是什么事。
 - 同一个边界还兜住另一种脏历史：只有思维链、没有正文的 assistant 消息。客户端的 `content` 是
   `omitempty`，那条消息在线上变成 `{"role":"assistant"}`，端点直接拒绝**整个请求**。
-  `llm/common/shape.go:74` 的 `withVisibleAssistantContent` 在副本里补上 `noVisibleResponseText`
+  `llm/common/shape.go:74-90` 的 `withVisibleAssistantContent` 在副本里补上 `noVisibleResponseText`
   （`:68`），**如实说明**「上一轮没有产出回答」，而不是编造一段回答。
 - ★ **一次请求，没有降级**：`llm/common` 里没有 `files.go` / `vision.go`。文件块那条路已于
   2026-11-10 撤回（见 §3）。
@@ -228,7 +228,7 @@ stem  = 原名去扩展名，清洗掉 Windows 不许的字符，截到 60 个 r
 
 ★ **哈希里的 mtime，以及那个循环**（细节见 `docs/pitfalls.md` §6.2）：文件的 mtime 是内核在写的
 那一刻定的，写之前拿不到；而哈希要写进文件名里。**一次写，不改名** —— `t0` = 收到这次上传的时刻，
-哈希由 `(名, 大小, t0)` 算出，写入后用 `os.Chtimes` 把 mtime 钉成 `t0`（`api/v2_files.go:199`）。
+哈希由 `(名, 大小, t0)` 算出，写入后用 `os.Chtimes` 把 mtime 钉成 `t0`（`api/v2_files.go:217`）。
 
 ★ **`Chtimes` 是对的而不是人造的**：`t0` 是这次上传的**真实时刻**，钉上去之后文件自己的 mtime 与
 哈希里的 mtime 是同一个值，于是「读文件 → stat → 重算哈希 → 对上名字」这条校验链成立。另一条路
@@ -250,7 +250,7 @@ FAT32 上不可复算。毫秒是「跨平台都稳」的刻度，而两次上�
 - 写入在会话的锁下（`uploads.go:38` 的 `RecordUpload`）—— 读—改—写不是原子的就会在并发上传时丢
   条目；删除时同步删掉那一条（`uploads.go:80` 的 `forgetUpload`，由 `storage/filestore/session.go:548`
   调用）。
-- 列举端点用它还原 `Name`（`api/v2_files.go:420` 的 `listWorkspace`），所以前端零改动。
+- 列举端点用它还原 `Name`（`api/v2_files.go:438-480` 的 `listWorkspace`），所以前端零改动。
 - ★ 旧会话的文件没压也没改名，但 `MIMEOfExt` 照旧判定 ⇒ **继续能用**。新旧两种命名并存于同一个
   workspace，没有任何代码依赖「文件名长什么样」。
 
@@ -302,8 +302,8 @@ FAT32 上不可复算。毫秒是「跨平台都稳」的刻度，而两次上�
   （`actions.ts:490` 调 `api.deleteFile`）；已发消息里的附件 → **不删**，它是历史的一部分，删了
   那条消息就说谎了。前端删失败时要把 chip **放回去**（`:244`）—— 一个把服务端还留着的文件藏起来
   的 chip 是在说谎。
-- 服务端：`DELETE /v2/sessions/:id/files?path=`（`api/v2_files.go:478`），路径相对 workspace，
-  越界的名字被拒（`storage/filestore/session.go:537`）。★ **删一个不存在的文件不是错误**：调用方
+- 服务端：`DELETE /v2/sessions/:id/files?path=`（`api/v2_files.go:496-517`），路径相对 workspace，
+  越界的名字被拒（`storage/filestore/session.go:537-550`）。★ **删一个不存在的文件不是错误**：调用方
   要的是「这个文件没了」，而它确实没了。
 
 ### 1.7 前端：预览 —— 缩略图与放大
@@ -329,7 +329,7 @@ FAT32 上不可复算。毫秒是「跨平台都稳」的刻度，而两次上�
 （`web/src/components/markdown.tsx:43`）/ `CodeBlock`（`web/src/components/code-block.tsx:6`）渲染，
 不需要在服务端引一个 HTML 渲染器，也不需要信任上传的 HTML。
 
-★ **SVG 归到「其他」**（`api/v2_files.go:343` 的 `isPreviewImage`）：SVG 是 XML，可以带
+★ **SVG 归到「其他」**（`api/v2_files.go:361-368` 的 `isPreviewImage`）：SVG 是 XML，可以带
 `<script>`，而浏览器把它当图片渲染时**会执行脚本**。它走 `attachment`（下载）。
 
 ★ `max` 只对图片有意义（`api/v2_files.go:308`）：图片走即时缩放 —— 解码 → 缩放 → 编码 → 返回，
@@ -537,7 +537,7 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 ## 3. 待决
 
 1. ★ **二进制附件还没有处理办法。** PDF、压缩包、docx 走不进「可当文本读」的判据
-   （`agentkit/run/attachments.go:91` 的 `isReadableText`），于是它们**拿不到 `@` 路径**，只在提示词
+   （`agentkit/run/attachments.go:91-102` 的 `isReadableText`），于是它们**拿不到 `@` 路径**，只在提示词
    里被列为「暂时不能处理」（`:183` 的 `blockedNote`）。★ 为什么现在这样：对非文本字节调用
    `read_file` 只会得到噪声，而噪声读起来像内容 —— 一个模型对着噪声作答，比一个明说「这个文件我
    读不了」的模型更危险。**出处**：`agentkit/run/attachments.go` 的 `isReadableText` 与
@@ -571,15 +571,15 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 |---|---|
 | `message/attachment.go:19` | `ExtraAttachments` 的键 |
 | `message/attachment.go:30` | `Attachment{Name, Path, Size, MIME}` |
-| `message/attachment.go:58` | `StampAttachments`：清单存成 JSON 字节 |
-| `message/attachment.go:82` | `ReadAttachments`：认三种形态 |
-| `message/attachment.go:149` | `MIMEOfExt`：按文件名判定类型 |
+| `message/attachment.go:58-67` | `StampAttachments`：清单存成 JSON 字节 |
+| `message/attachment.go:82-121` | `ReadAttachments`：认三种形态 |
+| `message/attachment.go:149-182` | `MIMEOfExt`：按文件名判定类型 |
 | `message/provenance.go:10` | `Extra` 里那组 `openheron_*` 键 |
 | `message/provenance.go:26` | `ExtraMessageID` |
 | `message/provenance.go:71` | `put`：「只写一次」的盖章语义 |
 | `message/provenance_gob_test.go:68` | `Extra` 值的 gob 可编码性白名单 |
-| `message/extract.go:60` | `UserText`：模型看得见的正文 |
-| `message/identity.go:18` | `StampMessageID`：消息自己的身份 |
+| `message/extract.go:60-65` | `UserText`：模型看得见的正文 |
+| `message/identity.go:18-23` | `StampMessageID`：消息自己的身份 |
 
 ### A.2 后端：契约、解析与落盘
 
@@ -587,38 +587,38 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 |---|---|
 | `api/v2_run.go:76` | `runInput.Attachments` |
 | `api/v2_run.go:91` | `runAttachment`：线上没有 content type |
-| `api/v2_run.go:224` | `isAttachRequest` |
+| `api/v2_run.go` | `isAttachRequest` |
 | `api/v2_run.go:229` | 附件也算一个问题的判据 |
 | `api/v2_run.go:304` | 附件在轮次开始之前解析 |
 | `api/v2_run.go:311` | 只有附件没有文字的一轮也是一轮 |
-| `api/v2_attachments.go:33` | `resolveAttachments` |
+| `api/v2_attachments.go:33-68` | `resolveAttachments` |
 | `api/v2_attachments.go:46` | 服务端自己 stat；目录不是附件 |
 | `api/v2_attachments.go:64` | 类型由服务端按名字判定 |
 | `api/v2_files.go:64` | `GET /v2/sessions/:id/files/raw` 路由 |
 | `api/v2_files.go:118` | `maxUploadBytes` = 32 MiB |
 | `api/v2_files.go:176` | 上传时在服务端压缩 |
 | `api/v2_files.go:192` | 哈希命名对**所有**文件 |
-| `api/v2_files.go:199` | `os.Chtimes` 把 mtime 钉成 t0 |
+| `api/v2_files.go:217` | `os.Chtimes` 把 mtime 钉成 t0 |
 | `api/v2_files.go:217` | `RecordUpload`：原名映射 |
 | `api/v2_files.go:253` | raw 端点的四种响应 |
 | `api/v2_files.go:308` | `max` 只对图片有意义 |
 | `api/v2_files.go:327` | 文本类一律 `text/plain` |
-| `api/v2_files.go:343` | `isPreviewImage`：SVG 不是图片 |
-| `api/v2_files.go:420` | `listWorkspace`：用原名映射还原 `Name` |
-| `api/v2_files.go:478` | `v2DeleteFile` |
+| `api/v2_files.go:361-368` | `isPreviewImage`：SVG 不是图片 |
+| `api/v2_files.go:438-480` | `listWorkspace`：用原名映射还原 `Name` |
+| `api/v2_files.go:496-517` | `v2DeleteFile` |
 | `api/v2_convert.go:76` | 清单进 `Metadata["attachments"]` |
 | `api/v2_convert.go:110` | 只有附件的消息不再被丢掉 |
 | `storage/storage.go:97` | `Session.ResolveWorkspaceFile` |
 | `storage/storage.go:109` | `Session.DeleteWorkspaceFile` |
-| `storage/filestore/session.go:522` | `ResolveWorkspaceFile` → `safeJoin` |
-| `storage/filestore/session.go:537` | `DeleteWorkspaceFile`：删一个不存在的文件不是错误 |
+| `storage/filestore/session.go:522-524` | `ResolveWorkspaceFile` → `safeJoin` |
+| `storage/filestore/session.go:537-550` | `DeleteWorkspaceFile`：删一个不存在的文件不是错误 |
 | `storage/filestore/session.go:548` | 删文件时清掉原名映射 |
-| `storage/filestore/session.go:552` | `PutFile` |
-| `storage/filestore/session.go:628` | `safeJoin`：越界的名字被拒 |
+| `storage/filestore/session.go:552-578` | `PutFile` |
+| `storage/filestore/session.go:628-639` | `safeJoin`：越界的名字被拒 |
 | `storage/filestore/uploads.go:16` | `uploads.json` 住在会话目录，不在 workspace |
-| `storage/filestore/uploads.go:38` | `RecordUpload`：在会话的锁下写 |
-| `storage/filestore/uploads.go:63` | `OriginalNames` |
-| `storage/filestore/uploads.go:80` | `forgetUpload` |
+| `storage/filestore/uploads.go:38-55` | `RecordUpload`：在会话的锁下写 |
+| `storage/filestore/uploads.go:63-72` | `OriginalNames` |
+| `storage/filestore/uploads.go:80-100` | `forgetUpload` |
 | `storage/filestore/transcript.go:22` | `maxLineBytes` = 8 MiB |
 
 ### A.3 后端：装配与 wire
@@ -631,26 +631,26 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 | `agentkit/run/loop.go:96` | 后落盘；写盘失败不中断这一轮 |
 | `agentkit/run/bridge.go:28` | `loopItem.Attachments` |
 | `agentkit/run/input.go:51` | `attachmentRules`：`read_file` 是义务 |
-| `agentkit/run/input.go:86` | `buildInput` 收消息对象 |
-| `agentkit/run/input.go:128` | `withHistoryAttachmentPaths` |
+| `agentkit/run/input.go:92-128` | `buildInput` 收消息对象 |
+| `agentkit/run/input.go:142-148` | `withHistoryAttachmentPaths` |
 | `agentkit/run/attachments.go:28` | `maxInlineImageBytes` = 5 MiB |
 | `agentkit/run/attachments.go:35` | `imageMIMEs` |
-| `agentkit/run/attachments.go:91` | `isReadableText` |
-| `agentkit/run/attachments.go:128` | `mentionPath`：绝对路径，含空白时加引号 |
-| `agentkit/run/attachments.go:148` | `attachmentPaths` |
-| `agentkit/run/attachments.go:173` | `blockedReason` |
-| `agentkit/run/attachments.go:183` | `blockedNote` |
-| `agentkit/run/attachments.go:203` | `presentMessage`：给模型的是一条副本 |
-| `agentkit/run/attachments.go:233` | `assembleAttachments` |
+| `agentkit/run/attachments.go:91-102` | `isReadableText` |
+| `agentkit/run/attachments.go:128-134` | `mentionPath`：绝对路径，含空白时加引号 |
+| `agentkit/run/attachments.go:148-169` | `attachmentPaths` |
+| `agentkit/run/attachments.go:173-179` | `blockedReason` |
+| `agentkit/run/attachments.go:183-190` | `blockedNote` |
+| `agentkit/run/attachments.go:203-223` | `presentMessage`：给模型的是一条副本 |
+| `agentkit/run/attachments.go:233-237` | `assembleAttachments` |
 | `agentkit/run/attachments.go:257` | 超限的图片进「不能处理」清单 |
-| `agentkit/run/attachments.go:272` | `inlineImage` |
+| `agentkit/run/attachments.go:272-300` | `inlineImage` |
 | `agentkit/run/attachments.go:289` | base64 进 `Base64Data` |
 | `agentkit/fsx/fsx.go:218` | `resolve`：相对路径按项目根解析 |
-| `agentkit/build/snapshot.go:89` | workspace 所在的 dataDir 进 fsx 的 `ExtraRoots`（`:103` 赋值） |
-| `llm/common/shape.go:52` | `normalizeWireShape` |
+| `agentkit/build/snapshot.go:103` | workspace 所在的 dataDir 进 fsx 的 `ExtraRoots`（`:103` 赋值） |
+| `llm/common/shape.go:52-58` | `normalizeWireShape` |
 | `llm/common/shape.go:68` | `noVisibleResponseText` |
-| `llm/common/shape.go:74` | `withVisibleAssistantContent` |
-| `llm/common/shape.go:93` | `oneShape`：正文挪进 text part |
+| `llm/common/shape.go:74-90` | `withVisibleAssistantContent` |
+| `llm/common/shape.go:93-121` | `oneShape`：正文挪进 text part |
 | `llm/common/model.go:88` | `Generate` 之前的归一化 |
 | `llm/common/model.go:108` | `Stream` 之前的归一化 |
 
@@ -666,8 +666,8 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 | `agentkit/imaging/imaging.go:144` | PNG 用 `BestCompression` |
 | `agentkit/imaging/imaging.go:149` | JPEG 用 `Quality: 85` |
 | `agentkit/imaging/imaging.go:212` | `orient`：八个 EXIF 取值 |
-| `agentkit/imaging/imaging.go:310` | `HashedName` |
-| `agentkit/imaging/imaging.go:356` | `hashOf`：定宽大端 + `0x00` 分隔 |
+| `agentkit/imaging/imaging.go:310-323` | `HashedName` |
+| `agentkit/imaging/imaging.go:356-367` | `hashOf`：定宽大端 + `0x00` 分隔 |
 
 ### A.5 前端：store 与装配
 
@@ -703,10 +703,10 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 | `web/src/lib/file-kind.ts:173` | `isImage`：SVG 不是图片 |
 | `web/src/lib/file-kind.ts:197` | `fileKind` |
 | `web/src/lib/file-kind.ts:218` | `fileLang` |
-| `web/src/components/composer.tsx:523` | `onDragOver` |
-| `web/src/components/composer.tsx:536` | `onDrop` |
+| `web/src/components/composer.tsx:529` | `onDragOver` |
+| `web/src/components/composer.tsx:542` | `onDrop` |
 | `web/src/components/composer.tsx:546` | `<input type="file">` |
-| `web/src/components/composer.tsx:601` | `onPaste` |
+| `web/src/components/composer.tsx:607` | `onPaste` |
 | `web/src/components/composer.tsx:611` | 粘贴时 `preventDefault()` |
 | `web/src/components/attachment-chip.tsx:40` | `THUMB` = 48 |
 | `web/src/components/attachment-chip.tsx:62` | `AttachmentChip` |

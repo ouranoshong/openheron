@@ -62,15 +62,16 @@
 | 默认项目根 | `--default-project-root` | `OPENHERON_DEFAULT_PROJECT_ROOT` | `<openheron_root>/projects/default` | openheron_root |
 | 作用域项目 | 位置参数 `openheron [dir]` | — | 无（= 全部项目） | — |
 
-★ **相对基准从「配置根」改成「openheron_root」是这一版的核心改动。**
-`Service.DataDir`（`agentkit/spec/config.go:784`）今天把相对路径 join 到 `s.root`，
-`Service.LogFile`（`agentkit/spec/config.go:806`）也一样。两处都要改成 join `home`。
-⇒ 于是**配置搬到哪儿，数据和日志都跟着 openheron_root 走** —— 配置是配置，状态是状态。
+★ **相对基准是 `openheron_root`，配置根不参与。**
+`Service.DataDir`（`agentkit/spec/config.go:784-796`）与 `Service.LogFile`
+（`agentkit/spec/config.go:806-818`）都把相对路径 join 到 `s.home`。
+⇒ **配置搬到哪儿，数据和日志都跟着 openheron_root 走** —— 配置是配置，状态是状态。
 
-★ 配置根今天的解析是三级（`agentkit/spec/config.go:505-548`）：
-`--config-dir` → `$OPENHERON_CONFIG_DIR` → `<projectRoot>/.openheron`。
-提案里第三级换成 **`<openheron_root>/configs`**，第四级才是项目根 ——
-但项目根不再推导配置根（见 §2），所以它不是一个解析级，而是**作用域**。
+★ 配置根的解析是四级（`agentkit/spec/config.go:651-694`）：
+`--config-root` → `$OPENHERON_CONFIG_ROOT` → `$OPENHERON_CONFIG_DIR`（旧名，会被点名）→
+`<openheron_root>/configs`（缺省时创建）。
+★ 项目根**不推导**配置根（见 §2）：它是一个**作用域**，不是解析里的一级。
+★ 只有**缺省派生的**那个根会被创建 —— 点名的根空着，是用户的决定。
 
 ### 1.2 名字的由来
 
@@ -152,7 +153,7 @@
 | **项目级** | 某个项目自己的配置树 | `projects.json` 里登记 `configDir`（可选字段，先留口不实现） |
 
 ★ **项目级配置要显式登记，不靠「探测 `<R>/.openheron` 存在就用」**：
-老用户每个项目下的 `.openheron/` 都是服务端自动写的**出厂树**（`main.go:283-308`）。
+老用户每个项目下的 `.openheron/` 都是服务端自动写的**出厂树**（`main.go:284-309`）。
 按「探测就用」的规则，每个项目都会用自己那份出厂树，用户级共享配置的意义就没了。
 显式登记没有这个副作用：老的 `.openheron/` 还在原地，用户想用就登记一行。
 
@@ -171,7 +172,7 @@ openheron .            # 单项目模式：只关注这个目录，界面渲染�
 openheron /work/api    # 同上
 ```
 
-多于一个位置参数报错（`main.go:121-147` `parseServerFlags`）。
+多于一个位置参数报错（`main.go:122-148` `parseServerFlags`）。
 
 ### 3.2 位置参数同时定两件事
 
@@ -390,7 +391,7 @@ Submit(ctx, sessionID, …)                       agentkit/run/runtime.go:240
              ├ GenInput(ctx, …)                 agentkit/run/loop.go:43
              │   └ inputParams{ProjectRoot: …}  loop.go:88 → input.go:191
              └ 工具调用拿到的就是同一个 ctx
-                ⇒ fsx.resolveWrite 查得到「本轮允许的根」  agentkit/fsx/fsx.go:298
+                ⇒ fsx.resolveWrite 查得到「本轮允许的根」  agentkit/fsx/fsx.go:307-331
 ```
 
 ★ **`runtime.go:461` 为什么是对的地方**：那里造出这一轮的 `runCtx`，
@@ -446,7 +447,7 @@ GET    /v2/sessions            → 不过滤；每条带 projectId（从表查�
 
 | 端点 | 变什么 |
 |---|---|
-| `GET /v2/project/files` | ★ 加 `?project=<id>` —— **唯一要加参数的端点**：@ 提及该列哪个项目的文件（`api/v2_project.go:95` 的 `projectRootOf`）。缺省 = 作用域项目，没有作用域 = 默认项目根。★ 名字不认识 ⇒ `404` + `codeProjectNotFound` |
+| `GET /v2/project/files` | ★ 加 `?project=<id>` —— **唯一要加参数的端点**：@ 提及该列哪个项目的文件（`api/v2_project.go:95-116` 的 `projectRootOf`）。缺省 = 作用域项目，没有作用域 = 默认项目根。★ 名字不认识 ⇒ `404` + `codeProjectNotFound` |
 | `POST /v2/sessions` | body 从 `{agentId}` 变成 `{agentId, projectId?}`；**响应**加 `projectId`。★ `projectId` 不认识 ⇒ `404`，而且**会话不会被创建** —— 一个指名了不存在项目的请求，不该留下一个无处归属的会话 |
 | `GET /v2/sessions` | 响应每条加 `projectId`（**从 `projects.json` 查**） |
 | `GET /v2/sessions/:id` | 响应加 `projectId` |
@@ -535,28 +536,28 @@ CI 里有一个 `LISTEN_ADDR=0.0.0.0:9000`，openheron 的监听地址就被改�
 
 | # | 位置 | 改什么 | 状态 |
 |---|---|---|---|
-| 1 | `agentkit/spec/config.go:599` `NewService` | 配置根解析：点名 → env → **`<home>/configs`** | ★ 已落地 |
+| 1 | `agentkit/spec/config.go:599-695` `NewService` | 配置根解析：点名 → env → **`<home>/configs`** | ★ 已落地 |
 | 2 | `agentkit/spec/config.go:318` `Service` | 加 `home` 字段 | ★ 已落地 |
-| 3 | `agentkit/spec/config.go:784` `DataDir` | 相对基准 `s.root` → **`s.home`** | ★ 已落地 |
-| 4 | `agentkit/spec/config.go:806` `LogFile` | 相对基准 `s.root` → **`s.home`** | ★ 已落地 |
-| 5 | `main.go:121-147` `parseServerFlags` | 新增 `--openheron-root` / `--default-project-root`；`--config-dir` → `--config-root`；接受一个可选位置参数 | ★ 已落地 |
+| 3 | `agentkit/spec/config.go:784-796` `DataDir` | 相对基准 `s.root` → **`s.home`** | ★ 已落地 |
+| 4 | `agentkit/spec/config.go:806-818` `LogFile` | 相对基准 `s.root` → **`s.home`** | ★ 已落地 |
+| 5 | `main.go:122-148` `parseServerFlags` | 新增 `--openheron-root` / `--default-project-root`；`--config-dir` → `--config-root`；接受一个可选位置参数 | ★ 已落地 |
 | 6 | `main.go:149-166` `printServerUsage` | `openheron [flags] [dir]` | ★ 已落地 |
 | 7 | `main.go` 的 `warnUnusedHomeConfig` | ★ **删掉** —— home 现在是合法的大本营，不是「废弃的配置根」 | ★ 已落地 |
-| 8 | `main.go:283-308` `initConfigIfEmpty` | 出厂树只写进**默认配置根** | ★ 已落地 |
-| 9 | `main.go:481-623` `setupConfig` | 解析 openheron_root → 建 Service → 装默认配置树 | ★ 已落地 |
+| 8 | `main.go:284-309` `initConfigIfEmpty` | 出厂树只写进**默认配置根** | ★ 已落地 |
+| 9 | `main.go:488-632` `setupConfig` | 解析 openheron_root → 建 Service → 装默认配置树 | ★ 已落地 |
 | 10 | `main.go:587,599,760,774` + `agentkit/spec/config.go:641-698` | 环境变量读点改名（+ 旧名 warn） | ★ 已落地 |
-| 11 | `main.go:633` `setupRuntime`（`:650-666` 注册表接线，`:695-721` `run.Config`） | 数据目录**共享**；按会话取 project root | ★ 已落地 |
-| 12 | `agentkit/run/loop.go:88` | `inputParams` 加 `ProjectRoot`（**从会话/项目取**） | ★ 已落地 |
+| 11 | `main.go:634-779` `setupRuntime`（`:650-666` 注册表接线，`:695-721` `run.Config`） | 数据目录**共享**；按会话取 project root | ★ 已落地 |
+| 12 | `agentkit/run/loop.go:81` | `inputParams` 加 `ProjectRoot`（**从会话/项目取**） | ★ 已落地 |
 | 13 | `agentkit/run/input.go:191` | prompt 的 `Project root:` 用会话的值 | ★ 已落地 |
 | 14 | `api/v2_project.go` `projectRootOf` | `@` 提及按项目取 root（`?project=<id>`） | ★ 已落地 |
-| 15 | `agentkit/fsx/context.go:25` + `agentkit/fsx/fsx.go:298` | 写边界 per-session（ctx 带本轮允许的根） | ★ 已落地 |
+| 15 | `agentkit/fsx/context.go:25` + `agentkit/fsx/fsx.go:307-331` | 写边界 per-session（ctx 带本轮允许的根） | ★ 已落地 |
 | 16 | 新 `projects` 包（`projects/projects.go:99` `Location` / `:111` `Registry` / `:122` `Open` / `:297` `mutate` / `:228` `RootOf`） | 类型 + 读写 + 文件锁 + `$OPENHERON_PROJECTS_FILE` | ★ 已落地 |
 | 17 | `api/v2_projects.go:57/143/183/225` 四个端点 + `api/v2_sessions.go` / `api/v2_types.go:159` `threadMeta` | `/v2/projects` 的 GET/POST/PATCH/DELETE；`projectId` | ★ 已落地 |
 | 18 | `initcmd.go:20-21,30-38,61` | `--dir` → `--config-root`；默认 `<openheron_root>/configs` | ★ 已落地 |
 | 19 | `agentkit/templates/files/server/config.yaml:23-28,44-48` | 注释：相对基准改成 openheron_root（**值不变**） | ★ 已落地 |
 | 20 | `scripts/test-backend.sh:132-136` | 环境变量改名 | ★ 已落地 |
 | 21 | `sandbox-kit/openheron/entrypoint.sh:18-19,29,35,38` | 显式 `OPENHERON_CONFIG_ROOT`；`OPENHERON_LISTEN_ADDR`；`OPENHERON_DATA_DIR`；位置参数给项目 | ★ 已落地 |
-| 22 | `agentkit/build/skill.go:198` `ResolveSkillsDir` | ★ **设计里没写，但不改就坏**：配置根进解析链，否则技能一个都加载不到（见 §8） | ★ 已落地 |
+| 22 | `agentkit/build/skill.go:198-231` `ResolveSkillsDir` | ★ **设计里没写，但不改就坏**：配置根进解析链，否则技能一个都加载不到（见 §8） | ★ 已落地 |
 | 23 | `web/src/lib/projects.ts:113` `groupSessions` + `web/src/components/sidebar.tsx` | 侧栏分组 + 新会话选项目 | ★ 已落地 |
 | 24 | `web/src/components/projects-dialog.tsx` `ProjectsButton` / `ProjectsDialog` | ★ **表的界面**：输入框下方的按钮（**写着当前项目**）；**选择**与**新建**（见 §3.5） | ★ 已落地 |
 | 25 | `agentkit/dirpick` + `api/v2_dirpick.go` `v2PickDirectory` | ★ **写面之二**：目录旁的文件夹按钮 —— **服务端**调起系统自己的选择器（浏览器给不了绝对路径，见 §3.5）；只有本机调用者能用 | ★ 已落地 |
@@ -577,7 +578,7 @@ CI 里有一个 `LISTEN_ADDR=0.0.0.0:9000`，openheron 的监听地址就被改�
 
 ★ **P1 落地时多改了两处设计里没写的**，因为不改它们功能就是坏的：
 
-1. **技能目录的解析**（`agentkit/build/skill.go:198` `ResolveSkillsDir`）多了一个参数 ——
+1. **技能目录的解析**（`agentkit/build/skill.go:198-231` `ResolveSkillsDir`）多了一个参数 ——
    **配置根**。★ 配置根搬到 `<openheron_root>/configs` 之后，向上探测 `<cwd>/.openheron/skills`
    找的是**旧布局**，技能会**一个都加载不到**。现在顺序是：`$EINO_EXT_SKILLS_DIR` →
    `<配置根>/skills` → 向上探测。配置根排在探测前面，是因为配置编辑器就往那儿写。

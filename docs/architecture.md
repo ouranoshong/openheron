@@ -70,20 +70,20 @@ think-act-observe loop so that each observation decides the next step.
 ### 2.1 Agent definitions
 
 An agent is a markdown file: **frontmatter + body**. The frontmatter is **strictly
-decoded** (`agentkit/spec/load.go:95`'s `loadAgent`) — a single wrong key is a startup
+decoded** (`agentkit/spec/load.go:95-138`'s `loadAgent`) — a single wrong key is a startup
 error.
 
 ★ **A model that nobody declares is not a startup error — it takes that agent out of
 the tree.** The rule is stated in full in `docs/config-design.md` §4.6; what the
 architecture has to say about it is where the boundary falls: `validate()` **settles**
-the tree (`agentkit/spec/load.go:712` `leaveOutUndeclaredModels`) — the agent is dropped
+the tree (`agentkit/spec/load.go:711-750` `leaveOutUndeclaredModels`) — the agent is dropped
 from `Config.Agents` and from every parent's `subagents:`, and the reason is kept in
 `Config.leftOut` (`agentkit/spec/config.go:189`). Everything downstream —
 `AgentNames()`, `MCPServersInUse()`, the tier table, the builder — sees the settled
 tree and therefore never meets an agent it cannot run. ★ Two consequences worth
 knowing before touching this code: the default agent is left out like any other (with
 no session possible until it is fixed, but a process that starts, which is where the
-editor lives), and the write gate (`agentkit/spec/write.go:474` `checkNoAgentLost`)
+editor lives), and the write gate (`agentkit/spec/write.go:476-486` `checkNoAgentLost`)
 compares **settled before** against **settled after**, so a change may add an agent and
 may leave a broken one alone, but may not take a working one away.
 
@@ -129,7 +129,7 @@ exists to prevent.
 **mounted** — mounting a server starts a child process — and it also says that the agent
 **gets all of that server's tools**. ★ `tools:` does not name MCP tools:
 an `mcp__<server>__*` entry there grants nothing, is dropped, and is reported as a
-**notice** (`agentkit/spec/load.go:983` `checkAgentMCPNames`) — not a load-time error,
+**notice** (`agentkit/spec/load.go:982-1012` `checkAgentMCPNames`) — not a load-time error,
 because the meaning changed rather than contradicting itself.
 ★ **The cost is real**: narrowing one agent's MCP tools is no longer possible. The
 server's own file (`mcps/<server>.yaml`) filters its tools, and that filter is shared by
@@ -150,7 +150,7 @@ approving.
    error.
 2. Compute the **effective tool table**: the snapshot's tool set is **one set for the
    whole snapshot**, and each agent narrows it with its own `tools:` allow-list
-   (`agentkit/build/topology.go:72` `specTable`). The tier table (§5.5) then decides
+   (`agentkit/build/topology.go:72-74` `specTable`). The tier table (§5.5) then decides
    which of the tools that survive ask a human. ★ **There is no "nothing to do"
    shortcut** (`agentkit/build/policy.go:190`): the list is an allow-list, so an
    **empty** list removes **everything** — the shortcut a blacklist could afford
@@ -201,9 +201,9 @@ the current tree, **never swap it silently**.
 
 `agentkit/run` is a thin layer over eino ADK and does three things:
 
-1. **Build the input** (`agentkit/run/input.go:86`): assemble the system prompt + session
+1. **Build the input** (`agentkit/run/input.go:92-128`): assemble the system prompt + session
    history + this turn's query into an ADK input. A sub-agent's messages **do not mix
-   into the parent's history** (`input.go:136`'s `withoutSubagentMessages`) — this is
+   into the parent's history** (`input.go:150`'s `withoutSubagentMessages`) — this is
    where "isolation" lands at the data level.
 2. **Drive the loop** (`agentkit/run/loop.go`): run ADK's run and translate its events
    into AG-UI events.
@@ -239,7 +239,7 @@ works in is **per session**, not per process.
 project the session belongs to) and puts it into that round's context
 (`fsx.WithProjectRoot`, `agentkit/fsx/context.go:25`). Two consumers read it from
 there, and they must agree: the prompt (`agentkit/run/input.go:191`'s `Project root:`
-line, fed by `loop.go:88`) and the tools (`agentkit/fsx/fsx.go:298`'s write boundary).
+line, fed by `loop.go:88`) and the tools (`agentkit/fsx/fsx.go:307-331`'s write boundary).
 
 ★ The filesystem backend is built **once** and shared by every round, so a root baked
 into it would be the root of the last round that used it. ★ The context replaces the
@@ -327,13 +327,13 @@ says the file was part of the question.
   `tools/kb.yaml` (relative to the project root).
 - The index lands in `<data-dir>/kb/<index>/` (`build/kb.go:45`), with a `catalog.md`
   index page.
-- **Retrieval is a hybrid score**: `scoreDoc` in `kb/score.go:53` computes
+- **Retrieval is a hybrid score**: `scoreDoc` in `kb/score.go:53-63` computes
   `0.5*lexical + 0.5*cosine` when vectors are available, is **purely lexical** without
   them (which is why `kb status` reports `lexical-only retrieval`), and falls back to
   **pure cosine** when the lexical score is zero.
 - The lexical score **weights identifiers**: a term appearing in the title, a section
   heading or a link is worth more than one buried in the prose.
-- `openheron kb index` takes a **run lock** (`kb/store.go:146`'s `StartRun`): only one
+- `openheron kb index` takes a **run lock** (`kb/store.go:146-148`'s `StartRun`): only one
   run at a time.
 - Agents get two tools: `kb_search` (returns a document **outline**, not the full text)
   and `kb_index`. `kb_index` defaults to the `ask` tier — letting an agent rebuild the
@@ -350,9 +350,9 @@ they are mounted onto an Agent, and how skills are scoped to a particular Agent.
 |---|---|---|
 | Filesystem middleware | `agentkit/build/snapshot.go:101` | `ls` `read_file` `write_file` `edit_file` |
 | The execute tool | `agentkit/build/execute.go:40` | `execute` |
-| Network tools | `build/nettools.go` | `web_search` `http` |
-| Knowledge base | `build/kb.go` | `kb_search` `kb_index` |
-| Encyclopedia | `build/nettools.go:232` | `wikipedia` |
+| Network tools | `agentkit/build/nettools.go` | `duckduckgo_search` `request_get` `request_post` `request_put` `request_delete` |
+| Knowledge base | `agentkit/build/kb.go` | `kb_search` `kb_index` |
+| Encyclopedia | `agentkit/build/nettools.go:256` | `wikipedia_search` |
 | The configuration itself | `agentkit/build/configtools.go:92` | `config_get` `config_validate` `config_template` `config_notices` `config_tier` `config_write` |
 | MCP servers | `agentkit/build/mcptools.go:194` | `mcp__<server>__<tool>` |
 
@@ -384,11 +384,11 @@ The path a tool takes is the same for every source:
 
 `tools/*.yaml` → `spec.loadTool` (`agentkit/spec/load.go:269`) → `decl.ToolsCfg` →
 `toolRegistry.Build` (`agentkit/build/tools.go:152`) → `snapshot.buildHeavy`
-(`agentkit/build/snapshot.go:84`) → `applyToolConfig` (`agentkit/build/assemble.go:30`) →
+(`agentkit/build/snapshot.go:84-145`) → `applyToolConfig` (`agentkit/build/assemble.go:30-40`) →
 `deep.Config.ToolsConfig.Tools` → `deep.New` (`agentkit/build/assemble.go:43`).
 
 The MCP branch joins it at the registry: `mcps/<server>.yaml` → `spec.loadMCP`
-(`agentkit/spec/load.go:489`) → `decl.MCPServerCfg` → the MCP provider
+(`agentkit/spec/load.go`) → `decl.MCPServerCfg` → the MCP provider
 (`agentkit/build/mcptools.go:194`), registered at `agentkit/build/tools.go:55` → the same
 `toolRegistry.Build` → the same `applyToolConfig`.
 
@@ -417,9 +417,9 @@ them; when it comes up, the tool surface changes, the builder notices the differ
 and **the next turn** has its tools.
 
 ★ The exposed name is `mcp__<server>__<tool>`, composed in exactly one place
-(`agentkit/build/mcptools.go:141`). The server's own name is the namespace segment, and
+(`agentkit/build/mcptools.go:141-143`). The server's own name is the namespace segment, and
 which server an exposed name belongs to is read back out of it
-(`agentkit/spec/decl/decl.go:662` `MCPServerOf`). ★ **The namespace is not negotiable**:
+(`agentkit/spec/decl/decl.go:661-671` `MCPServerOf`). ★ **The namespace is not negotiable**:
 a server name may not contain a run of underscores, so the prefix of one server cannot
 reach another.
 
@@ -428,7 +428,7 @@ reach another.
 `skills/` is a **nested partition** in `Categories` (`skills/<name>/SKILL.md`), but its
 `loader` is nil: the manifest, the path rules and the editor belong to `spec`, while the
 content is resolved independently by `build`'s skill backend
-(`agentkit/build/skill.go:190` `ResolveSkillsDir`): `$EINO_EXT_SKILLS_DIR` first, then the
+(`agentkit/build/skill.go:198-231` `ResolveSkillsDir`): `$EINO_EXT_SKILLS_DIR` first, then the
 **config root's** own `skills/`, and only if neither is there does it search **upwards** from
 the current directory for `.openheron/skills`.
 
@@ -441,7 +441,7 @@ writes `<config root>/skills/`, which is the directory in force only when the pr
 landed there; when it did not, a save would land in a tree nobody reads. So the
 resolved path is pushed into the config layer at startup (`spec.Service.SetSkillsDir`,
 `agentkit/spec/config.go:444`), the write is refused when it points elsewhere
-(`agentkit/spec/write.go:151` `validateWritable`), and the manifest marks the section
+(`agentkit/spec/write.go:151-164` `validateWritable`), and the manifest marks the section
 read-only with a note naming the real directory. ★ The rule lives in `build` only: a
 second copy in `spec` would be a second answer to "which skills are loaded".
 
@@ -592,7 +592,7 @@ would read as "that tool does not exist".
 
 **Validating** the knowledge-base config (`tools/kb.yaml`) needs to know whether the
 corpus path is relative, whether the model is declared at all, and whether it is
-declared as `kind: embedding` (`agentkit/spec/load.go:408` `loadKB`, `agentkit/spec/load.go:1081` `validateKB`).
+declared as `kind: embedding` (`agentkit/spec/load.go:408-437` `loadKB`, `agentkit/spec/load.go:1080-1106` `validateKB`).
 
 ★ All three answers live in the **declarations** (`decl.Model.IsEmbedding`,
 `decl.Model.Dimensions`), so the configuration layer does not import the knowledge base
@@ -663,10 +663,12 @@ Implemented in `agentkit/spec/config.go`'s `NewService`. **Ancestor directories 
 searched** — once the config root depends on "where the process was started from", the
 same command run from a different directory reads a different configuration, and a test
 instance would read the development configuration too. ★ The **previous** names
-(`--config-dir`, `$OPENHERON_CONFIG_DIR`, `$PROJECT_ROOT`, `$DATA_DIR`, `$LISTEN_ADDR`,
+(`--project-root`, `$OPENHERON_CONFIG_DIR`, `$PROJECT_ROOT`, `$DATA_DIR`, `$LISTEN_ADDR`,
 `$STATIC_DIR`, `$FRONTEND_MODE`) still work, and the old one is reported when it is used.
+★ `--config-dir` is not one of the server's flags: only `openheron secret` and
+`openheron kb` take it, and they take it quietly.
 
-Only a **defaulted** root is created automatically (`agentkit/spec/config.go:544`'s `os.MkdirAll`). An
+Only a **defaulted** root is created automatically (`agentkit/spec/config.go:683`'s `os.MkdirAll`). An
 explicit root or an env root pointing nowhere is **not** created: a typo must not silently
 grow an empty configuration tree.
 
@@ -687,7 +689,7 @@ write the new configuration somewhere the user did not point at.
 |---|---|---|---|
 | `agents/` | `spec.DirAgent` | ✅ | One `.md` per agent |
 | `llm/` | `spec.DirLLM` | ✅ | One `.yaml` per vendor |
-| `tools/` | `spec.DirTools` | ✅ | `http.yaml` / `web_search.yaml` / `wikipedia.yaml` / `kb.yaml` |
+| `tools/` | `spec.DirTools` | ✅ | `filesystem.yaml` / `http.yaml` / `web_search.yaml` / `wikipedia.yaml` / `kb.yaml` / `config.yaml` |
 | `mcps/` | `spec.DirMCP` | ✅ | One `.yaml` per MCP server |
 | `server/` | `spec.DirServer` | ❌ | Process parameters; needs a restart |
 | `state/` | `spec.DirState` | — | Sessions and checkpoints; auto-created |
@@ -703,7 +705,7 @@ configuration is **not read** — nothing loads it — and the tier model it use
 lives in the tool files and the agent files instead (§5.5). ★ The configuration **still
 starts**: the rest of it may be perfectly good, and a broken file elsewhere would keep it
 from loading at all. But the directory raises a **notice**
-(`agentkit/spec/config.go:709` `noteRetiredDirs`) that names its new home — a dropped
+(`agentkit/spec/config.go:917-926` `noteRetiredDirs`) that names its new home — a dropped
 configuration that says nothing is the worst kind, because the process starts fine and the
 setting is gone.
 
@@ -758,9 +760,9 @@ There are **two** tiers, and the default is the safe one:
 | `allow` | The tool runs without a nod |
 | `ask` | The tool interrupts the run and waits for a human decision |
 
-`build.Policy.TierOf` (`agentkit/build/policy.go:55`) answers the tier of one tool
+`build.Policy.TierOf` (`agentkit/build/policy.go:55-60`) answers the tier of one tool
 name: a name in the allow list is `allow`, and **every other name is `ask`**. The
-mirrored declaration `decl.Tier` (`agentkit/spec/decl/decl.go:275`) holds `TierAllow`
+mirrored declaration `decl.Tier` (`agentkit/spec/decl/decl.go:274`) holds `TierAllow`
 and `TierAsk` and nothing else — there is no third tier.
 
 ★ **The default is `ask` because the cost of guessing wrong is asymmetric**: one extra
@@ -773,10 +775,10 @@ The **exceptions are named**, and they are named by the file that provides the t
 | Source | What it names | Assembled at |
 |---|---|---|
 | The built-in tools that have no file of their own | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill` | `agentkit/build/tools.go:95` `builtinAllowedTools` |
-| A tool's own file — `tools/*.yaml` and the knowledge base | that file's `allows:` | `agentkit/spec/load.go:449` `AllowedTools` |
-| An MCP server's own file | that server's `allows:`, in the server's own vocabulary, translated to the exposed names | `agentkit/build/mcptools.go:173` `mcpAllowedNames` |
+| A tool's own file — `tools/*.yaml` and the knowledge base | that file's `allows:` | `agentkit/spec/load.go:449-478` `AllowedTools` |
+| An MCP server's own file | that server's `allows:`, in the server's own vocabulary, translated to the exposed names | `agentkit/build/mcptools.go:173-184` `mcpAllowedNames` |
 
-`agentkit/build/spec.go:73` `policyOf` puts the three together and `Policy.TierOf`
+`agentkit/build/spec.go:73-80` `policyOf` puts the three together and `Policy.TierOf`
 reads the result. ★ The table is assembled from the **configuration**, so the tier of
 a tool is answerable before its server is even up.
 
@@ -795,7 +797,7 @@ that agent's tool set, so the model never sees it.
 
 ★ **A blocked tool keeps its own tier**, and says why in its `reason` — and there are
 now exactly **two** reasons: `tools` for a tool that is not an MCP one
-(`agentkit/build/introspect.go:36` `reasonOf`), and `mcps` for an MCP tool whose server
+(`agentkit/build/introspect.go:36-47` `reasonOf`), and `mcps` for an MCP tool whose server
 this agent does not mount (`LayerNotMounted`). ★ The old second reason is gone with the
 layer it named: a server the agent does not mount has no tools to block, and one it does
 mount brings **all** of its tools. So `Table.Blocked` answers `LayerNotLoaded`
@@ -812,9 +814,9 @@ second copy of the same keys that could only *tighten* the file — is gone, and
 takes effect after a restart.
 
 A declared topology that exceeds the cap is a **startup error**
-(`agentkit/spec/load.go:1109`'s `validateDepth`) — never a silent truncation. A sub-agent
+(`agentkit/spec/load.go:1108-1124`'s `validateDepth`) — never a silent truncation. A sub-agent
 referencing an unknown agent and a cyclic topology are startup errors too
-(`agentkit/spec/load.go:1180` `validateAgentGraph`, `agentkit/spec/load.go:1197` `detectCycle`).
+(`agentkit/spec/load.go:1179-1194` `validateAgentGraph`, `agentkit/spec/load.go:1196-1239` `detectCycle`).
 
 ### 5.7 Write gates
 
@@ -830,11 +832,11 @@ The write path of the config editor (`/v2/settings`) has several gates:
   ```
 - Optimistic concurrency: the write carries `baseRevision`; a mismatch with the revision
   on disk is reported as a conflict.
-- A change may not take a **working agent** out of the tree (`agentkit/spec/write.go:474` `checkNoAgentLost`): the settled tree on disk is compared with the settled trial tree,
+- A change may not take a **working agent** out of the tree (`agentkit/spec/write.go:476-486` `checkNoAgentLost`): the settled tree on disk is compared with the settled trial tree,
   and a write, a batch or a delete that would drop an agent that used to work is
   refused. ★ An agent that was already out of the tree is out on both sides, so an
   unrelated edit is never counted as taking it out.
-- A **delete** that something still names is refused (`agentkit/spec/write.go:722` `checkNotReferenced`), and the refusal names the referrer: which file still names the
+- A **delete** that something still names is refused (`agentkit/spec/write.go:787-814` `checkNotReferenced`), and the refusal names the referrer: which file still names the
   deleted one, and what to remove. ★ The gate runs before the trial load, because the
   trial load's error is the symptom it replaces — it names the deleted file and hides
   the real reason somewhere else.
@@ -859,7 +861,7 @@ reason), **not** an error — the model sees "denied, the reason is X" and can a
 accordingly.
 
 ★ The MCP tools go through the **same** gate: they are looked up **by name** like every
-other tool (`agentkit/build/policy.go:55`'s `TierOf`), so `mcp__<server>__<tool>` asks
+other tool (`agentkit/build/policy.go:55-60`'s `TierOf`), so `mcp__<server>__<tool>` asks
 or runs exactly like any other name. The gate does not change — only the namespace does.
 
 ### 5.9 Approval resume

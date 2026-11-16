@@ -408,9 +408,9 @@ models:
     # "high" has at this vendor.
     #
     # ★ This table is **not optional**: a tier the endpoint does not declare is
-    #   **silently ignored** — an agent writes `reasoning: high` while the model
-    #   has no "high", which means "no thinking at all", with no error and no
-    #   message. Declaring it is what makes `high` / `low` actually take effect.
+    #   **refused when the configuration loads** — the message names the agent,
+    #   the tier it asked for and the levels this model does declare.
+    #   Declaring it is what makes `high` / `low` actually take effect.
     reasoning:
       off:  { reasoning_effort: none, thinking: { type: disabled } }
       low:  { reasoning_effort: low,  thinking: { type: enabled } }

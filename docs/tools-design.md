@@ -48,13 +48,13 @@ MCP 服务器是另一种来源：它带的工具进同一张档位表，只是�
 也没有别名 —— 那会让黑名单继续活着。
 
 ★ **`tools:` 不点名 MCP 工具。** `mcp__<server>__*` 的条目现在什么也不授予，
-它们被丢弃并留下一条**提示**（`agentkit/spec/load.go:983` 的 `checkAgentMCPNames`）——
+它们被丢弃并留下一条**提示**（`agentkit/spec/load.go:982-1012` 的 `checkAgentMCPNames`）——
 不是加载期错误，因为语义已经变了，不是自相矛盾。
 代价是真实的：**按 agent 收窄 MCP 工具的能力没有了**；收窄的地方变成 server 自己的文件。
 
 ★ **一个 agent 的 `tools:` 接受尾部 `*` 的前缀模式**（`decl.ParseToolNamePattern`，
 `agentkit/spec/decl/decl.go:697`）。但只有**结尾**的 `*` 是模式，`mcp*foo` 与单独的 `*`
-都是加载期硬错误（`agentkit/spec/load.go:132` 的 `validateAgentTools`）：
+都是加载期硬错误（`agentkit/spec/load.go:150-157` 的 `validateAgentTools`）：
 一条读起来与实际覆盖范围不同的规则，就是一次静默的错配。
 
 ### 1.2 名字就是策略：`mcp__<server>__<tool>`
@@ -71,7 +71,7 @@ mcp__github__read_issue
 |---|---|---|---|
 | `mcp__` | 协议层定的 | 常量 `decl.MCPToolPrefix`（`agentkit/spec/decl/decl.go:610`） | 服务器暴露一个 `ls` 就顶掉内置 `ls` |
 | `<server>__` | **我们定** —— `<server>.yaml` 的文件名 | 常量 `decl.MCPSeparator`（`agentkit/spec/decl/decl.go:619`）；server 名匹配 `^[a-z0-9]+(_[a-z0-9]+)*$`（`agentkit/spec/decl/decl.go:642`） | `mcp__github__ls` 与 `mcp__gitlab__ls` 撞成一个 |
-| `<tool>` | **服务器定** | `[A-Za-z0-9_-]` 之外的字符换成 `_`；大小写保持原样（`agentkit/build/mcptools.go:151`） | 带 `.`/`:` 的名字过不了厂商的函数名集合 |
+| `<tool>` | **服务器定** | `[A-Za-z0-9_-]` 之外的字符换成 `_`；大小写保持原样（`agentkit/build/mcptools.go:151-164`） | 带 `.`/`:` 的名字过不了厂商的函数名集合 |
 
 ★ **server 名里不许出现连续的下划线。** 否则 `mcp__a__b__x` 有两种读法 ——
 那是 server `a` 的工具 `b__x`，还是 server `a__b` 的工具 `x`？
@@ -81,9 +81,9 @@ mcp__github__read_issue
 ★ **合成名永远不被读回来拆开。** 策略层只做整名与前缀匹配。
 这正是工具段能保留原始大小写与字符的原因。
 一个工具属于哪台 server，是从它的**名字**读出来的
-（`decl.MCPServerOf`，`agentkit/spec/decl/decl.go:662`）。
+（`decl.MCPServerOf`，`agentkit/spec/decl/decl.go:661-671`）。
 
-名字在**一处**拼装：`mcpExposedName`（`agentkit/build/mcptools.go:141`）。
+名字在**一处**拼装：`mcpExposedName`（`agentkit/build/mcptools.go:141-143`）。
 provider 与面板都走它，所以它们不可能对某个工具叫什么有分歧。
 
 ★ **名字不合法时跳过并警告，绝不让进程起不来。** 工具名是**远端服务器**定的，
@@ -105,7 +105,7 @@ provider 与面板都走它，所以它们不可能对某个工具叫什么有�
 ### 1.3 批次、档位与闸门
 
 **批次**：一个快照里的工具集建一次，所有 agent 共享它
-（`agentkit/build/snapshot.go:77` 的 `heavyDepsOf`，在一个 `sync.Once` 之下）。
+（`agentkit/build/snapshot.go:77-82` 的 `heavyDepsOf`，在一个 `sync.Once` 之下）。
 装配路径是一条线：
 
 ```
@@ -119,7 +119,7 @@ mcps/<server>.yaml → spec.loadMCP → decl.MCPServerCfg
 
 `toolProvider` 是全部的扩展点（`agentkit/build/tools.go:49`）：
 `ID()` / `Optional()` / `Provide()`。
-注册表 `defaultToolRegistry`（`agentkit/build/tools.go:65`）里带着 MCP provider。
+注册表 `defaultToolRegistry`（`agentkit/build/tools.go:65-75`）里带着 MCP provider。
 ★ MCP provider 是**唯一**一个需要 manager 的 provider：MCP 客户端活得比 provider
 返回的那一批工具更久，所以客户端归 manager 管，不归 provider 管。
 
@@ -134,7 +134,7 @@ provider 那条 `Warn` 是**唯一**的通知 —— 工具不进表，用户看
 | `allow` | 工具直接跑，不需要人点头 |
 | `ask` | 工具打断这一轮，等一个人的决定 |
 
-`build.Policy.TierOf`（`agentkit/build/policy.go:55`）按名字查档位：
+`build.Policy.TierOf`（`agentkit/build/policy.go:55-60`）按名字查档位：
 在 allow 表里就是 `allow`，其余一律 `ask`。
 ★ **缺省是 `ask`** —— 猜错的代价不对称，多点一次换来的是一次没人看见的破坏性调用不被执行。
 
@@ -143,10 +143,10 @@ provider 那条 `Warn` 是**唯一**的通知 —— 工具不进表，用户看
 | 来源 | 它点名什么 | 装配位置 |
 |---|---|---|
 | 没有自己文件的内置工具 | `ls` `read_file` `glob` `grep` `task` `write_todos` `skill` | `agentkit/build/tools.go:95` 的 `builtinAllowedTools` |
-| 工具自己的文件 —— `tools/*.yaml` 与知识库 | 那个文件的 `allows:` | `agentkit/spec/load.go:449` 的 `AllowedTools` |
-| MCP server 自己的文件 | 那个 server 的 `allows:`，**用它自己的词汇**，翻译成暴露出来的名字 | `agentkit/build/mcptools.go:173` 的 `mcpAllowedNames` |
+| 工具自己的文件 —— `tools/*.yaml` 与知识库 | 那个文件的 `allows:` | `agentkit/spec/load.go:449-478` 的 `AllowedTools` |
+| MCP server 自己的文件 | 那个 server 的 `allows:`，**用它自己的词汇**，翻译成暴露出来的名字 | `agentkit/build/mcptools.go:173-184` 的 `mcpAllowedNames` |
 
-三处合成的地方是 `agentkit/build/spec.go:73` 的 `policyOf`。
+三处合成的地方是 `agentkit/build/spec.go:73-80` 的 `policyOf`。
 ★ **合并之后没有摘除**：例外来自三处，就没有第四处能拿走一个。
 `config_write` 改的是配置本身，而它和其它工具一样由 `tools/config.yaml` 点名放行 ——
 点名一个工具为例外的规则，是一条得有人记住的规则。
@@ -156,7 +156,7 @@ provider 那条 `Warn` 是**唯一**的通知 —— 工具不进表，用户看
 （`agentkit/build/policy.go:163`），来自它以 `decl.SubAgentSpec` 带在身上的清单。
 清单没点名的工具不在工具集里，模型也看不见。
 一个 agent 不许用的工具**保住自己的档位**，并在 `reason` 里说清为什么
-（`agentkit/build/introspect.go:36` 的 `reasonOf`）：
+（`agentkit/build/introspect.go:36-47` 的 `reasonOf`）：
 非 MCP 工具的理由是 `tools`，MCP 工具的理由是 `mcps`。
 
 **闸门**：`agentkit/build/gate.go` 实现「工具能不能用」。
@@ -174,7 +174,7 @@ provider 那条 `Warn` 是**唯一**的通知 —— 工具不进表，用户看
 ★ 要跑的参数取自中断时存下的那一份：恢复时模型可能发了别的，工具必须跑**人批过的那条**。
 
 ★ **收窄发生在 agent 的表里**，也就是它的 `tools` 与 `mcps` 两份清单已经在决定一切的那个地方
-（`agentkit/build/gate.go:33` 的 `BeforeAgent` 在 agent 开跑之前就把工具从
+（`agentkit/build/gate.go:27-38` 的 `BeforeAgent` 在 agent 开跑之前就把工具从
 `runCtx.Tools` 里摘掉，所以模型从来看不见它们）。
 表拿到这个 agent 的 server 清单，而一个 MCP 工具属于哪台 server 是从**它的名字**读出来的：
 
@@ -231,7 +231,7 @@ StreamingShell（`eino@v0.9.22/adk/prebuilt/deep/deep.go:219-223`）。
 的 `base`）—— 上下文里带了 root 就用它，没带才用后端自己的。★ 相对路径挂在**会话工作的那个
 目录**下面，不是进程启动的那个：会话属于项目，项目是一个目录。
 
-真正的边界是写，它走 `resolveWrite`（`agentkit/fsx/fsx.go:298`）：
+真正的边界是写，它走 `resolveWrite`（`agentkit/fsx/fsx.go:307-331`）：
 
 ```go
 func (s *Local) resolveWrite(ctx context.Context, p string) (string, error) {
@@ -271,7 +271,7 @@ func (s *Local) resolveWrite(ctx context.Context, p string) (string, error) {
   把任何错误都当成「这里没有符号链接」而返回未经检查的字面路径，
   等于一个读不了的祖先就能写到任何地方。
 
-★ **允许写的目录是「本轮」的**（`agentkit/fsx/fsx.go:274` 的 `writeRoots`）：
+★ **允许写的目录是「本轮」的**（`agentkit/fsx/fsx.go:283-292` 的 `writeRoots`）：
 ★ ctx 里带了 root，就用**那个** root 顶替后端自己的 root —— 会话 A 写不了会话 B 的目录，
 边界没有因此放宽；ctx 里没带（老调用、测试），才用后端自己的
 project root 加 `ExtraRoots`（会话工作区与 skills 目录 —— 它们可能活在项目之外）。
@@ -303,7 +303,7 @@ project root 加 `ExtraRoots`（会话工作区与 skills 目录 —— 它们�
 预算耗尽时遍历停下，并在结果里说明：一个看起来完整、其实被截断的搜索，
 正是模型得出「这个文件不存在」的路径。
 
-`ls`（`agentkit/fsx/fsx.go:282`）：
+`ls`（`agentkit/fsx/fsx.go:351-395`）：
 
 - `os.ReadDir` 本来就按文件名排好序，**只排一次**。
 - 目录以 `/` 结尾（`agentkit/fsx/fsx.go:317`）：渲染层丢掉 `IsDir`，
@@ -312,21 +312,21 @@ project root 加 `ExtraRoots`（会话工作区与 skills 目录 —— 它们�
   `ls` 工具只渲染 `FileInfo.Path`，所以上限只能表达成「又多一条条目」。
 - 每条检查一次 `ctx.Err()`。
 
-`glob`（`agentkit/fsx/fsx.go:577`）的四条性质：
+`glob`（`agentkit/fsx/fsx.go:646-739`）的四条性质：
 
 | 性质 | 落点 |
 |---|---|
 | 深度上限、结果上限、忽略列表，从一个允许的 root 起步 | `agentkit/fsx/fsx.go:621-641` |
 | 一个读不了的子树**跳过自己**而不是打断整次遍历 | `agentkit/fsx/fsx.go:606`（`walkErr != nil` 返回 nil） |
 | 撞到上限就**停下遍历**（`filepath.SkipAll`），而不是继续 stat 一百万条再排序 200 条 | `agentkit/fsx/fsx.go:639` |
-| **按模式剪枝**：目录名对不上模式的下一段，它就不可能装着匹配 | `agentkit/fsx/fsx.go:629` 的 `mayHold` |
+| **按模式剪枝**：目录名对不上模式的下一段，它就不可能装着匹配 | `agentkit/fsx/fsx.go:764-787` 的 `mayHold` |
 
 ★ 剪枝那一条的效果：`docs/**` 只走 `docs/`，`*.go` 一个目录都不走。
 
 ★ **绝对 pattern 会被归一化。** 运行提示词教模型写 `glob(pattern="<projectRoot>/**/*.go")`，
 而匹配是相对遍历根的路径算的 —— 不归一化的话，提示词教的每一次 glob 调用
 都返回「没找到文件」，而且是**安静地**返回。
-`globPattern`（`agentkit/fsx/fsx.go:724`）把绝对 pattern 变成相对遍历根的形式；
+`globPattern`（`agentkit/fsx/fsx.go:793-806`）把绝对 pattern 变成相对遍历根的形式；
 指向遍历根之外的被拒绝，并同时报出两个路径（这是 pattern 与 path 自相矛盾，
 不是收敛规则）。★ 于是提示词里现有的建议继续可用，这件事不需要改任何提示词文本。
 
@@ -408,7 +408,7 @@ project root 加 `ExtraRoots`（会话工作区与 skills 目录 —— 它们�
 ★ **跑命令的程序归调用方管。** 后端不再写死 `/bin/sh -c`：
 `Config.Shell` 是程序加它自己的开关，`Config.ShellPathDir` 会被放到子进程 PATH 的最前面 ——
 一个在 PATH 之外找到的 shell（Git for Windows、MSYS2）否则找不到自己那套 `ls`。
-命令接在开关后面（`agentkit/fsx/fsx.go:871`），`cmd.Dir = s.root`（`:880`），
+命令接在开关后面（`agentkit/fsx/fsx.go:940-968`），`cmd.Dir = s.root`（`:880`），
 所以 shell 命令里的相对路径现在意味着 project root。
 
 ★ **探测在 `agentkit/shell`**（`agentkit/shell/shell.go:90` 的 `Detect`），一份快照一次：
@@ -453,7 +453,7 @@ MCP 服务器与 openheron 今天的每一个工具，差别恰好在两处。
 | 没做 | 对 openheron 的后果 |
 |---|---|
 | 不管客户端生命周期 —— 不拉起、不 `Start`、不 `Initialize`、不 `Close` | 连接归 openheron 管：manager 建它、初始化它、养着它，进程退出时拆掉它 |
-| 不选传输方式 | stdio / streamable HTTP 由 openheron 挑（`agentkit/build/mcpmanager.go:786`、`:897`） |
+| 不选传输方式 | stdio / streamable HTTP 由 openheron 挑（`agentkit/build/mcpmanager.go:786-832`、`:897`） |
 | 没有配置格式 | schema 是 §3.2 说的 `mcps/<server>.yaml`，一个 server 一个文件 |
 | 不支持流式 | 那层包装只实现了 `Info` 与 `InvokableRun`，所以它是 `tool.InvokableTool`，永远不是 `tool.StreamableTool`。整个结果作为一块 JSON 回来 |
 
@@ -479,7 +479,7 @@ MCP 服务器与 openheron 今天的每一个工具，差别恰好在两处。
 | `headers` | `map[string]string` | `{}` | 仅 http：每次请求都带的头 |
 | `timeout` | `MCPDuration` | `30s` | 连接 + 初始化 + 取工具清单的上限 |
 | `call_timeout` | `MCPDuration` | `60s` | **一次工具调用**的上限 |
-| `tools` | `[]string` | `[]`→全部 | ★ **过滤器，不是开关** —— 从这个 server **自己有的**工具里挑出来要提供的那些**原始**工具名；不写 = 全部（`agentkit/build/mcptools.go:123`） |
+| `tools` | `[]string` | `[]`→全部 | ★ **过滤器，不是开关** —— 从这个 server **自己有的**工具里挑出来要提供的那些**原始**工具名；不写 = 全部（`agentkit/build/mcptools.go:123-133`） |
 | `allows` | `[]string` | `[]` | 这个 server **自己的**工具名里，哪些**不用点头**就跑 |
 
 ★ **`http` 就是 streamable HTTP，而且只是它。** `mcp-go` 还带着一个 SSE 客户端，
@@ -514,7 +514,7 @@ MCP 服务器与 openheron 今天的每一个工具，差别恰好在两处。
 一个写着 `githbu` 的 agent 会安安静静地一个 MCP 服务器都拿不到，
 而「因为笔误而少掉的工具」与「因为服务器倒了而少掉的工具」长得一模一样。
 
-★ **`command` 在沙箱的 PATH 里解析，绝不相对项目根**（`agentkit/build/mcpmanager.go:883`）。
+★ **`command` 在沙箱的 PATH 里解析，绝不相对项目根**（`agentkit/build/mcpmanager.go:883-889`）。
 工作区不许决定跑什么：一个相对项目根解析的命令，
 等于让一次 checkout 决定 agent 跑哪个可执行文件，还带着 agent 的权限。
 
@@ -568,7 +568,7 @@ MCP server 从那儿读到它 —— 而那是 **MCP server 的事**，不是 op
   ▼
 decl.MCPServerCfg — transport / command / args / env / allows / tools / 两个超时
   │
-  │  snapshot.buildHeavy (agentkit/build/snapshot.go:84)
+  │  snapshot.buildHeavy (agentkit/build/snapshot.go:84-145)
   │    → mcpToolProvider.Provide (agentkit/build/mcptools.go:201)
   ▼
 the mcps manager (agentkit/build/mcpmanager.go:44):
@@ -608,7 +608,7 @@ the gate: Policy.TierOf("mcp__github__create_issue")
 | 职责 | 落点 |
 |---|---|
 | **一个 server 一个客户端** | 一个 server 就是一条连接，对 stdio 来说还是一个子进程 |
-| **只起某个 agent 要的 server** | 管理者只启动那些 agent 的 `mcps:` 清单里的服务器 —— 这份清单是**并集**（`agentkit/spec/load.go:1022` 的 `MCPServersInUse`），因为快照的工具集是所有 agent 共享的 |
+| **只起某个 agent 要的 server** | 管理者只启动那些 agent 的 `mcps:` 清单里的服务器 —— 这份清单是**并集**（`agentkit/spec/load.go:1021-1039` 的 `MCPServersInUse`），因为快照的工具集是所有 agent 共享的 |
 | **子进程的生命归管理者** | 拉起子进程的那个上下文由**管理者的生命周期**派生，不是调用方的（`agentkit/build/mcpmanager.go:447`） |
 | **崩了的子进程自动重启** | 一个死掉的 stdio server 在下一次调用时被重新拉起 |
 | **发现工具清单变了** | 管理者重新列举；清单变了就**换掉工具面**、工具重建 |
@@ -647,7 +647,7 @@ the gate: Policy.TierOf("mcp__github__create_issue")
 
 ★ **失败的启动不能拖住装配。** 初始化失败之后的拆解要**等子进程退出**，
 而一个还在装自己依赖的子进程不会因为 stdin 关了就退出。
-⇒ 失败路径**先杀掉子进程**（`killMCPChild`，`agentkit/build/mcpmanager.go:840`）
+⇒ 失败路径**先杀掉子进程**（`killMCPChild`，`agentkit/build/mcpmanager.go:840-848`）
 再拆解，而拆解本身也有一个上限（`closeMCPClient`，`:856`，宽限 5s）。
 ★ **装配等的是一个 server，不是一个 server 的尸体。**
 
@@ -656,7 +656,7 @@ the gate: Policy.TierOf("mcp__github__create_issue")
 而一个 10MB 的页面会把这一轮撑爆 —— 表现是「模型突然开始胡说」，不是报错。
 ★ MCP 工具的输出没有不同：它也是别人的文本，未经滤就进了上下文。
 封顶对 MCP 工具同样适用，而实现它的位置就是组件的 `ToolCallResultHandler`
-（`agentkit/build/mcptools.go:384` 的 `capMCPToolResult`）。
+（`agentkit/build/mcptools.go:384-411` 的 `capMCPToolResult`）。
 
 ★ **拆 stdio 客户端时那两行 `ERROR: Error reading from stdout` 不是故障。**
 `mcp-go` 的 reader 醒来拿到的是 `file already closed`，被当成传输错误打到 stderr，
@@ -671,7 +671,7 @@ the gate: Policy.TierOf("mcp__github__create_issue")
 ★ 没人拧的旋钮就是没人测的旋钮，而一个 server 的工具清单是以天为尺度变化的。
 
 ★ **没有人通知「树变了」，只有比较。** 快照的身份是**（配置对象，MCP 工具面）**
-（`agentkit/build/snapshot.go:207` 的 `snapshotFor`）；
+（`agentkit/build/snapshot.go:215-230` 的 `snapshotFor`）；
 builder 每次建树前把当前的身份和手上那份比一比。
 ★ 通知的路会漏（有人忘了通知），比较的路不会漏 —— 而且它只有一条。
 
@@ -730,7 +730,7 @@ builder 每次建树前把当前的身份和手上那份比一比。
 
 ★ **预热不是唯一的起法**：一次要求（provider 或面板）也会起，走的是同一个单飞。
 那正是「失败的退避重试」能成立的原因 —— 而**退避就是文件自己的 `timeout:`**
-（`mcpStartTimeout`，`agentkit/build/mcpmanager.go:371`）：
+（`mcpStartTimeout`，`agentkit/build/mcpmanager.go:371-379`）：
 ★ 刚失败过的 server 在那个期限过去之前不会被再问一次，
 所以起不来的 server 不会被拉成热循环，而起得来的 server 也不会被放弃。
 
@@ -795,7 +795,7 @@ allows: [read_issue, list_issues]
 ★ **run ledger 说什么。** 一次 MCP 工具调用就是一次普通工具调用，所以它本来就跟别的调用一样
 进 transcript、进事件流。**ledger** 多出来的是 server：一个 run 的行记下这次 run
 碰过哪些 MCP server（`storage/runledger.go:168`），
-名字是从这次 run 用过的带命名空间的工具名里读出来的（`agentkit/run/runrow.go:141`），
+名字是从这次 run 用过的带命名空间的工具名里读出来的（`agentkit/run/runrow.go:141-159`），
 于是事后复盘能回答「这是哪个 server、是不是它把这次 run 弄失败的」，
 而不必读完整个 transcript。
 
@@ -810,13 +810,13 @@ prompt 会去问**模型**那些服务器的事，而模型的回答会是关于
 ★ 这个 action 打开一个面板；它不往对话记录里写一条消息。
 
 面板的每一行都由一个函数推出（`Builder.MCPServers`，`agentkit/build/mcpstatus.go:77`），
-API 层只转发它返回的东西（`api/v2_mcps.go:74`）：
+API 层只转发它返回的东西（`api/v2_mcps.go:74-113`）：
 
 | 问题 | 答案来自哪儿 |
 |---|---|
 | 服务器起来了吗？ | 管理者的客户端 |
 | 它提供了什么？ | 管理者的清单 |
-| 这个工具叫什么？ | 那份计划 —— `mcpPlan`（`agentkit/build/mcptools.go:68`） |
+| 这个工具叫什么？ | 那份计划 —— `mcpPlan`（`agentkit/build/mcptools.go:68-116`） |
 | 它会问我吗？ | `Policy.TierOf` —— 闸门自己那次查找 |
 | 这个 agent 能拿到它吗？ | agent 的表 |
 
@@ -824,7 +824,7 @@ API 层只转发它返回的东西（`api/v2_mcps.go:74`）：
 一个重新判断任何东西的面板就成了一份第二真相，而最先坏掉的正是档位：
 面板会说 `ask`，而闸门说 `allow`。
 
-★ **工具那几行就是 agents 视图已经报出来的判定**（`agentkit/build/introspect.go:116`），
+★ **工具那几行就是 agents 视图已经报出来的判定**（`agentkit/build/introspect.go:116-130`），
 用的是同一条边界，所以 `/mcps` 与 `/v2/agents/<id>` 不可能对同一个工具报出两个不同的档位。
 ★ 唯一的差别是**名字的全集**：agents 视图走的是观察到的工具，
 面板走的是管理者的清单 —— 所以一个倒下的服务器仍然能显示它提供过什么。
@@ -853,7 +853,7 @@ API 层只转发它返回的东西（`api/v2_mcps.go:74`）：
 ★ **拿不到的理由只剩一个，就是 agent 自己的清单。**
 ★ `name_too_long` 与 `name_collision` 是另一类 —— 它们说的是 server 选的**名字**。
 
-★ **配置面视图也列出那些服务器**（`api/v2_mcps.go:121`）：配置说**什么存在**，
+★ **配置面视图也列出那些服务器**（`api/v2_mcps.go:121-131`）：配置说**什么存在**，
 面板说**什么起来了**。★ 一个把 `mcps/` 分区藏起来的配置面视图，
 会让设置界面没东西可显示。
 
@@ -1217,30 +1217,30 @@ workload 是**内容**。跑在沙箱里的 MCP 服务器是 workload 内容；
 | `agentkit/spec/decl/decl.go:504-535` | `decl.ConfigToolsCfg` —— `tools/config.yaml` 的形状与 `max_read_bytes` 的范围 |
 | `agentkit/spec/decl/decl.go:697` | `decl.ParseToolNamePattern` |
 | `agentkit/spec/load.go:126` | 拒绝旧键 `disabled_tools` |
-| `agentkit/spec/load.go:150` | `validateAgentTools`（拒绝假通配符） |
-| `agentkit/spec/load.go:449` | `Config.AllowedTools`（`tools/` 各文件的 `allows:`） |
+| `agentkit/spec/load.go:150-157` | `validateAgentTools`（拒绝假通配符） |
+| `agentkit/spec/load.go:449-478` | `Config.AllowedTools`（`tools/` 各文件的 `allows:`） |
 | `agentkit/spec/load.go:375-406` | `noticeConfigToolsAbsent`（★ 文件不在时的提示） |
-| `agentkit/spec/load.go:983` | `checkAgentMCPNames`（`tools:` 里的 `mcp__*` 只报提示） |
-| `agentkit/spec/load.go:1022` | `Config.MCPServersInUse`（并集） |
+| `agentkit/spec/load.go:982-1012` | `checkAgentMCPNames`（`tools:` 里的 `mcp__*` 只报提示） |
+| `agentkit/spec/load.go:1021-1039` | `Config.MCPServersInUse`（并集） |
 | `agentkit/build/tools.go:49` | `toolProvider` 接口 |
-| `agentkit/build/tools.go:65` | `defaultToolRegistry`（MCP provider 注册处） |
+| `agentkit/build/tools.go:65-75` | `defaultToolRegistry`（MCP provider 注册处） |
 | `agentkit/build/tools.go:95` | `builtinAllowedTools` |
 | `agentkit/build/tools.go:126` | `reservedToolNames`（★ 带 owner：拥有它的 provider 可以提供它） |
 | `agentkit/build/tools.go:152` | `toolRegistry.Build` |
-| `agentkit/build/tools.go:180` | `validateBatch` |
-| `agentkit/build/policy.go:55` | `Policy.TierOf` |
-| `agentkit/build/policy.go:115` | `newTable`（丢掉 `tools:` 里的 MCP 条目） |
+| `agentkit/build/tools.go:180-219` | `validateBatch` |
+| `agentkit/build/policy.go:55-60` | `Policy.TierOf` |
+| `agentkit/build/policy.go:115-148` | `newTable`（丢掉 `tools:` 里的 MCP 条目） |
 | `agentkit/build/policy.go:163` | `Table.Blocked` |
 | `agentkit/build/policy.go:184` | `Table.Filter` |
 | `agentkit/build/policy.go:242-258` | `LayerNotLoaded` / `LayerNotMounted` |
-| `agentkit/build/spec.go:73` | `policyOf`（三处合成一张表） |
-| `agentkit/build/topology.go:72` | `specTable` |
-| `agentkit/build/gate.go:33` | 收窄发生在 agent 开跑之前 |
+| `agentkit/build/spec.go:73-80` | `policyOf`（三处合成一张表） |
+| `agentkit/build/topology.go:72-74` | `specTable` |
+| `agentkit/build/gate.go:27-38` | 收窄发生在 agent 开跑之前 |
 | `agentkit/build/gate.go:55` | 同步那条闸门 |
 | `agentkit/build/gate.go:89` | 流式那条闸门 |
 | `agentkit/build/gate.go:126` | `decide`（两条路共用的那一个决策） |
-| `agentkit/build/introspect.go:36` | `reasonOf` |
-| `agentkit/build/introspect.go:116` | `verdictOf` |
+| `agentkit/build/introspect.go:36-47` | `reasonOf` |
+| `agentkit/build/introspect.go:116-130` | `verdictOf` |
 | `agentkit/build/execute.go:40` | openheron 自己的 `execute` 工具 |
 | `agentkit/build/execute.go:109` | 工具描述里那句方言 |
 | `agentkit/build/nettools.go:25` | `defaultToolOutputBytes`（20000） |
@@ -1252,7 +1252,7 @@ workload 是**内容**。跑在沙箱里的 MCP 服务器是 workload 内容；
 | `agentkit/spec/decl/decl.go:610` | `decl.MCPToolPrefix` |
 | `agentkit/spec/decl/decl.go:619` | `decl.MCPSeparator` |
 | `agentkit/spec/decl/decl.go:642` | `decl.MCPServerNamePattern` |
-| `agentkit/spec/decl/decl.go:662` | `decl.MCPServerOf` |
+| `agentkit/spec/decl/decl.go:661-671` | `decl.MCPServerOf` |
 | `agentkit/spec/decl/decl.go:724-726` | `stdio` / `http` |
 | `agentkit/spec/decl/decl.go:734` | `decl.MCPMaxExposedNameLen`（64） |
 | `agentkit/spec/decl/decl.go:724-727` | 两个缺省超时 |
@@ -1261,7 +1261,7 @@ workload 是**内容**。跑在沙箱里的 MCP 服务器是 workload 内容；
 | `agentkit/spec/decl/decl.go:830` | `decl.MCPFiles` |
 | `agentkit/spec/config.go:26` | `spec.DirMCP` |
 | `agentkit/spec/config.go:85` | `mcps/` 分类（可编辑、热） |
-| `agentkit/spec/load.go:489` | `loadMCP` |
+| `agentkit/spec/load.go` | `loadMCP` |
 | `agentkit/spec/load.go:492` | server 名的形状是加载期硬错误 |
 | `agentkit/spec/load.go:505-513` | `transport` 的取值 |
 | `agentkit/spec/load.go:515-518` | http 的 `url` / `env`，stdio 的 `command` |
@@ -1270,55 +1270,55 @@ workload 是**内容**。跑在沙箱里的 MCP 服务器是 workload 内容；
 | `agentkit/spec/write.go:185` | 编辑器拒绝读不回来的 server 名 |
 | `agentkit/spec/write.go:309` | `mcps/` 的脚手架 |
 | `agentkit/build/mcptools.go:27-30` | 两个跳过理由码 |
-| `agentkit/build/mcptools.go:68` | `mcpPlan`（共享的映射） |
-| `agentkit/build/mcptools.go:123` | `mcpOffers`（`tools:` 是过滤器） |
-| `agentkit/build/mcptools.go:141` | `mcpExposedName`（唯一拼名的地方） |
-| `agentkit/build/mcptools.go:151` | `sanitizeMCPToolName` |
-| `agentkit/build/mcptools.go:173` | `mcpAllowedNames` |
+| `agentkit/build/mcptools.go:68-116` | `mcpPlan`（共享的映射） |
+| `agentkit/build/mcptools.go:123-133` | `mcpOffers`（`tools:` 是过滤器） |
+| `agentkit/build/mcptools.go:141-143` | `mcpExposedName`（唯一拼名的地方） |
+| `agentkit/build/mcptools.go:151-164` | `sanitizeMCPToolName` |
+| `agentkit/build/mcptools.go:173-184` | `mcpAllowedNames` |
 | `agentkit/build/mcptools.go:194-199` | `mcpToolProvider` 与 `Optional` |
 | `agentkit/build/mcptools.go:201-232` | `Provide`（「还在起」不告警） |
 | `agentkit/build/mcptools.go:244` | 跳过工具的警告 |
 | `agentkit/build/mcptools.go:264-269` | 组件的 `Config`（含输出封顶） |
 | `agentkit/build/mcptools.go:299-309` | stdio 的 per-server 互斥锁 |
 | `agentkit/build/mcptools.go:343` | `serialTool` |
-| `agentkit/build/mcptools.go:384` | `capMCPToolResult` |
+| `agentkit/build/mcptools.go:384-411` | `capMCPToolResult` |
 | `agentkit/build/mcpmanager.go:36` | `mcpRelistInterval`（30s） |
 | `agentkit/build/mcpmanager.go:44` | `mcpManager` |
 | `agentkit/build/mcpmanager.go:98` | `Warm`（统一的后台作业） |
 | `agentkit/build/mcpmanager.go:149` | `Tools`（不等待） |
 | `agentkit/build/mcpmanager.go:175` | `Refresh` |
-| `agentkit/build/mcpmanager.go:215` | `ToolsOf`（实时清单） |
-| `agentkit/build/mcpmanager.go:246` | `surfaceHash`（工具面） |
+| `agentkit/build/mcpmanager.go:215-226` | `ToolsOf`（实时清单） |
+| `agentkit/build/mcpmanager.go:246-260` | `surfaceHash`（工具面） |
 | `agentkit/build/mcpmanager.go:267` | `Close` |
 | `agentkit/build/mcpmanager.go:285` | `mcpEntry`（状态字段） |
 | `agentkit/build/mcpmanager.go:340-351` | 四个状态 |
 | `agentkit/build/mcpmanager.go:358` / `:361` | `errMCPStarting` / `errMCPNotStarted` |
-| `agentkit/build/mcpmanager.go:371` | `mcpStartTimeout`（退避用的期限） |
+| `agentkit/build/mcpmanager.go:371-379` | `mcpStartTimeout`（退避用的期限） |
 | `agentkit/build/mcpmanager.go:447` | `dispatch`（单飞 + 退避） |
-| `agentkit/build/mcpmanager.go:504` | `runStart`（那个后台作业） |
-| `agentkit/build/mcpmanager.go:646` | `mcpFingerprint` |
+| `agentkit/build/mcpmanager.go:504-543` | `runStart`（那个后台作业） |
+| `agentkit/build/mcpmanager.go:646-679` | `mcpFingerprint` |
 | `agentkit/build/mcpmanager.go:756` | `mcpCommandLogger` |
-| `agentkit/build/mcpmanager.go:786` | `startStdioClient` |
-| `agentkit/build/mcpmanager.go:840` | `killMCPChild` |
-| `agentkit/build/mcpmanager.go:856` | `closeMCPClient` |
-| `agentkit/build/mcpmanager.go:883` | `mcpChildEnv` |
-| `agentkit/build/mcpmanager.go:897` | `startHTTPClient` |
+| `agentkit/build/mcpmanager.go:786-832` | `startStdioClient` |
+| `agentkit/build/mcpmanager.go:840-848` | `killMCPChild` |
+| `agentkit/build/mcpmanager.go:856-868` | `closeMCPClient` |
+| `agentkit/build/mcpmanager.go:883-889` | `mcpChildEnv` |
+| `agentkit/build/mcpmanager.go:897-914` | `startHTTPClient` |
 | `agentkit/build/mcpstatus.go:16-27` | 四个 server 状态与三个 tool 状态 |
 | `agentkit/build/mcpstatus.go:77` | `Builder.MCPServers`（面板的那一个投影） |
-| `agentkit/build/mcpstatus.go:159` | `mcpToolViews` |
-| `agentkit/build/snapshot.go:77` | `heavyDepsOf`（`sync.Once`） |
-| `agentkit/build/snapshot.go:84` | `buildHeavy` |
+| `agentkit/build/mcpstatus.go:159-186` | `mcpToolViews` |
+| `agentkit/build/snapshot.go:77-82` | `heavyDepsOf`（`sync.Once`） |
+| `agentkit/build/snapshot.go:84-145` | `buildHeavy` |
 | `agentkit/build/snapshot.go:120` | 启动日志里打印搜索引擎 |
-| `agentkit/build/snapshot.go:207` | `snapshotFor`（树的身份） |
+| `agentkit/build/snapshot.go:215-230` | `snapshotFor`（树的身份） |
 | `agentkit/build/builder.go:104` | `Builder.Warm` |
 | `agentkit/build/builder.go:159-201` | `Build`（先列举，再建树） |
 | `agentkit/build/manager.go:13-29` | `ConfigManager`（只有 `Current` 与 `Publish`） |
 | `api/commands.go:61` | `/mcps` 这个 action |
 | `api/v2_files.go:76` | `GET /v2/mcps` |
-| `api/v2_mcps.go:74` | `v2MCPServers` |
-| `api/v2_mcps.go:121` | `configuredMCP`（配置面视图） |
-| `agentkit/run/runrow.go:88` | `noteMCPServers` |
-| `agentkit/run/runrow.go:141` | `mcpServersOf`（从名字读出 server） |
+| `api/v2_mcps.go:74-113` | `v2MCPServers` |
+| `api/v2_mcps.go:121-131` | `configuredMCP`（配置面视图） |
+| `agentkit/run/runrow.go:88-111` | `noteMCPServers` |
+| `agentkit/run/runrow.go:141-159` | `mcpServersOf`（从名字读出 server） |
 | `storage/runledger.go:168` | `Run.MCPServers` |
 | `main.go:526` | 预热挂在配置的加载与重载上 |
 | `main.go:561` | `SetMCPSource` |
@@ -1335,36 +1335,36 @@ workload 是**内容**。跑在沙箱里的 MCP 服务器是 workload 内容；
 | `agentkit/fsx/fsx.go:156` | `New`（每个 root 一次性绝对化） |
 | `agentkit/fsx/fsx.go:187` | `exec.LookPath("rg")` |
 | `agentkit/fsx/fsx.go:218` | `resolve`（空路径是 root） |
-| `agentkit/fsx/fsx.go:240` | `resolveWrite`（fail-closed） |
+| `agentkit/fsx/fsx.go:307-331` | `resolveWrite`（fail-closed） |
 | `agentkit/fsx/fsx.go:265` | `inside` |
 | `agentkit/fsx/fsx.go:278` | `ignored` |
-| `agentkit/fsx/fsx.go:282` | `LsInfo` |
+| `agentkit/fsx/fsx.go:351-395` | `LsInfo` |
 | `agentkit/fsx/fsx.go:309` | `ls` 的封顶提示 |
 | `agentkit/fsx/fsx.go:317` | 目录以 `/` 结尾 |
-| `agentkit/fsx/fsx.go:409` | `GrepRaw` |
+| `agentkit/fsx/fsx.go:478-610` | `GrepRaw` |
 | `agentkit/fsx/fsx.go:444` | pattern 前加 `--` |
 | `agentkit/fsx/fsx.go:454` | 搜索共用 `walkBudget` |
 | `agentkit/fsx/fsx.go:457` | `cmd.Dir = s.root` |
 | `agentkit/fsx/fsx.go:492` | `maxGrepMatches` |
 | `agentkit/fsx/fsx.go:517` | 预算耗尽的错误 |
 | `agentkit/fsx/fsx.go:532-539` | 封顶提示挂在最后一条匹配上 |
-| `agentkit/fsx/fsx.go:548` | `SearchEngine` |
-| `agentkit/fsx/fsx.go:577` | `GlobInfo` |
+| `agentkit/fsx/fsx.go:617-622` | `SearchEngine` |
+| `agentkit/fsx/fsx.go:646-739` | `GlobInfo` |
 | `agentkit/fsx/fsx.go:593` | 遍历的期限 |
 | `agentkit/fsx/fsx.go:606` | 读不了的子树跳过自己 |
 | `agentkit/fsx/fsx.go:621-641` | 深度、忽略、模式剪枝、结果上限 |
-| `agentkit/fsx/fsx.go:695` | `mayHold`（按模式剪枝） |
-| `agentkit/fsx/fsx.go:724` | `globPattern`（绝对 pattern 归一化） |
-| `agentkit/fsx/fsx.go:837` | `ExecuteStreaming` |
-| `agentkit/fsx/fsx.go:871` | `initStreamingCmd` |
+| `agentkit/fsx/fsx.go:764-787` | `mayHold`（按模式剪枝） |
+| `agentkit/fsx/fsx.go:793-806` | `globPattern`（绝对 pattern 归一化） |
+| `agentkit/fsx/fsx.go:906-937` | `ExecuteStreaming` |
+| `agentkit/fsx/fsx.go:940-968` | `initStreamingCmd` |
 | `agentkit/fsx/fsx.go:883-885` | shell 目录进子进程 PATH |
-| `agentkit/fsx/grep_fallback.go:235` | `grepBuiltin`（内置引擎） |
+| `agentkit/fsx/grep_fallback.go:235-352` | `grepBuiltin`（内置引擎） |
 | `agentkit/shell/shell.go:90` | `Detect` |
 | `agentkit/shell/shell.go:152` | 候选 shell 的活性检查 |
 | `agentkit/shell/shell.go:240` | `Note`（模型读到的方言） |
 | `agentkit/build/snapshot.go:101` | `fsx.New`（两个调用点之一） |
 | `agentkit/build/snapshot.go:109` | `newConfigGate`（配置根里的写走服务） |
-| `agentkit/build/skill.go:251` | `fsx.New`（另一个调用点：技能目录） |
+| `agentkit/build/skill.go:267` | `fsx.New`（另一个调用点：技能目录） |
 
 ### A.4 沙箱 Kit
 
@@ -1391,6 +1391,6 @@ workload 是**内容**。跑在沙箱里的 MCP 服务器是 workload 内容；
 | `main.go:258` | 没有配置就不肯启动 |
 | `main.go:587` / `:599` | `DATA_DIR` / `LISTEN_ADDR` 的覆盖顺序 |
 | `main.go:626` | 会话目录 |
-| `agentkit/spec/config.go:599` | `NewService`（三个根的解析） |
+| `agentkit/spec/config.go:599-695` | `NewService`（三个根的解析） |
 | `agentkit/spec/config.go:766` | `Service.DefaultProjectRoot` |
-| `agentkit/spec/config.go:784` | `Service.DataDir`（缺省 `state`） |
+| `agentkit/spec/config.go:784-796` | `Service.DataDir`（缺省 `state`） |

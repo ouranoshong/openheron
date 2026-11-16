@@ -58,7 +58,7 @@
 
 ★ MCP 侧直接沿用现成的 `decl.ValidMCPServerName`（`agentkit/spec/decl/decl.go:641`），
 LLM 侧取同一条形状。装载器里两侧各有一处先例：MCP server 的名字今天就是这么校验的
-（`agentkit/spec/load.go:489`），LLM 侧照它写（`agentkit/spec/load.go:28-30`）。
+（`agentkit/spec/load.go`），LLM 侧照它写（`agentkit/spec/load.go:28-30`）。
 
 ★ **不许 `-`**：推导名不做 `-`→`_` 映射 —— `initcfg` 里那段映射
 （旧的 `initcfg/initcfg.go:382-384`）是「变量名可以自己挑」的遗产，方案落地后它作废，
@@ -323,7 +323,7 @@ GET /v2/secrets
 ★ 迁移说明写在用户手册（`docs/user-manual.md` 与 `_zh`）与本文 §6，别只写在提交信息里。
 
 ★ `api_key` 字段**从结构体里删掉**会让旧文件撞上严格解码
-（`agentkit/spec/config.go:829-841` 的 `decodeStrict`，`KnownFields(true)`）—— 那句报错是
+（`agentkit/spec/config.go:1038-1048` 的 `decodeStrict`，`KnownFields(true)`）—— 那句报错是
 yaml 自己的话（「field api_key not found in type spec.Provider」），对人无意义。⇒ **字段保留但
 降级**：不再由 YAML 给值，只用来**捕获旧文件并给一句人话**（`agentkit/spec/decl/decl.go:23-32`）。
 

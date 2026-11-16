@@ -346,11 +346,11 @@ A 放弃时发现槽位不是它的（走掉），B 放弃时发现槽位是它�
 
 ★ **「审批在等」那条带的是卡片的内容，不只是「有一张卡」** —— 一个没有看着那一轮的
 界面没有自己的流，工具名与参数对它来说别处不存在，而一张没有内容的卡是一张没法
-判断的卡（`agentkit/run/announce.go:141` 的 `announceApprovalPending`）。
+判断的卡（`agentkit/run/announce.go:141-149` 的 `announceApprovalPending`）。
 
 ★ **它在屏障之后发布**：账本的行已经是终态，于是事实与账本说的是同一件事；而**落盘
 失败时不发布** —— 一个没有持久化的审批**答不了**，提前宣布它就是给一个界面一张点了
-就报错的卡（`agentkit/run/bridge.go:308` 的 `writeHeldApproval` 在失败时返回 nil）。
+就报错的卡（`agentkit/run/bridge.go:308-326` 的 `writeHeldApproval` 在失败时返回 nil）。
 
 ★ **事实是实时通知，过去归账本** —— 所以通道**没有回放窗口**：一个迟到的订阅者会去挂
 一个早就结束的老 run（`docs/runtime-design.md` §1.7）。
@@ -395,7 +395,7 @@ A 放弃时发现槽位不是它的（走掉），B 放弃时发现槽位是它�
 **修法（客户端）**：★ 404 不再是一次性的「读 transcript」，而是**回到恢复流程**；而恢复流程
 多了一个「等」的状态（`web/src/lib/attach.ts:76` 的 `recoveryPlan`）：★ 被拒的那一轮在
 账本里**还不是终态** ⇒ 屏障还没立起来 ⇒ 等账本再问一次；终态了 ⇒ 审批必定已经在盘上
-（屏障站在审批卡后面，`agentkit/run/bridge.go:255`）⇒ 这时才读 transcript。
+（屏障站在审批卡后面，`agentkit/run/bridge.go:255-263`）⇒ 这时才读 transcript。
 ★ **服务端关了缝，客户端这一层仍然留着**：另一个实例的旧账本、陈旧的服务端，两种情况下
 404 依然可能出现 —— 客户端不能把「服务端已经修好」当成契约。
 
@@ -407,7 +407,7 @@ A 放弃时发现槽位不是它的（走掉），B 放弃时发现槽位是它�
 `st.loop` 这一对，而「顶替」走的那条分支**不写审批**（`agentkit/run/bridge.go:201` 的
 `stale`）—— ★ 于是**只挪 turn 是不够的**：审批落盘前的几毫秒里会话仍然不忙，一个这时挤
 进来的**新问题**会被放行，它会接管这个会话，那条审批连同用户的问题一起没了，**没有任何
-提示**。★ 现在这一对指针**一起**放掉（`agentkit/run/bridge.go:103` 的 `releaseRound`），
+提示**。★ 现在这一对指针**一起**放掉（`agentkit/run/bridge.go:103-115` 的 `releaseRound`），
 缝里的新问题被拒：回 **409 `session_busy`**（可重试，窗口几毫秒后就关上）。
 
 **现状**：`已修` —— 服务端 `agentkit/run/bridge.go`（`loopExited` / `releaseRound`）与
@@ -677,7 +677,7 @@ ctime），但要额外给 storage 加「重命名」的能力，而且中途会
 
 **修法**：带理由的那一块不再进 `held`；它和 `held` 一起放出去，只放一次（`agentkit/build/callguard.go:217`）。
 ★ 另外加一道防御：参数若能被修成「一个完整对象」（剩下的正好是它自己的后缀），就把尾巴去掉再跑
-（`repairDuplicatedTail`，`agentkit/build/callguard.go:133`）。
+（`repairDuplicatedTail`，`agentkit/build/callguard.go:133-160`）。
 
 **现状**：已修 —— ★ 出处：`agentkit/build/callguard.go` 的 `callGuardModel.Stream`。★ 实测：同一段载荷，旧二进制把参数发了两遍
 （工具报 unmarshal 错），修完之后 39 块参数拼成合法 JSON，一次写成功。
@@ -869,7 +869,7 @@ ctime），但要额外给 storage 加「重命名」的能力，而且中途会
 | `kb` 不 import 任何 heron 包 | `kb` import 了 `obs` 与 `persist` | `obs` 是日志的装配处，知识库也需要那个共用的原子写 |
 | `agentkit/spec` → `agentkit/run` 的破例在上游已于 2026-10-21 撤销 | openheron **从未有过** —— 代码面是在撤销之后抽出来的 | 撤销是上游的一个设计决定；openheron 直接继承了撤销后的形态 |
 | `models[].context_window` 是纯元数据，不生效 | 它**生效**：它是压缩阈值的分母（`agentkit/spec/summarize.go:25`） | openheron 实施了压缩与上下文用量看板 —— 见 `docs/runtime-design.md` §3 |
-| agent 写了模型没有声明的思考档位会进 `deferred` | **不会** —— 现在是**加载期错误**（`agentkit/spec/load.go:815` 的 `checkReasoning`） | 词汇表属于**模型**；档位名写在 agent 里。★ 这一行在 2026-11-12 复核时改过：旧文档写的是「静默忽略」，那个检查已经搬进了加载期 |
+| agent 写了模型没有声明的思考档位会进 `deferred` | **不会** —— 现在是**加载期错误**（`agentkit/spec/load.go:814-835` 的 `checkReasoning`） | 词汇表属于**模型**；档位名写在 agent 里。★ 这一行在 2026-11-12 复核时改过：旧文档写的是「静默忽略」，那个检查已经搬进了加载期 |
 | `go test -race ./...` 全仓是绿的 | 它**曾经不是**：竞态检测器在 `agentkit/run`、`api`、`kb`、`agentkit/spec` 报了竞态 | 四处现在都修好了，`task check`（含 `test-race`）全绿 |
 | `tools/` 里的坏超时会被报成 `watch.debounce` | 这个标签是错的：`agentkit/spec/reload.go:124` 给**每一条**坏时长都加上前缀 "watch.debounce fell back to default"，于是 `tools/http.yaml` 里的坏 `timeout` 落到了同一个标签下 | `decl.BadDurations()` 是一个不带来源信息的包级列表（`agentkit/spec/decl/decl.go:883`） |
 
@@ -991,7 +991,7 @@ request after 10 seconds`），于是 E2E 里「另一个界面听见了审批�
 `the server serves on url=http://127.0.0.1:8080`。★ 框架自己那行横幅被拦下了
 （`agentkit/obs/hertz/hertz.go:47`）：说的是同一件事，留着就是两行。
 
-★ **通告在监听就绪之后才打印**（`main.go:860`）：绑好之前印出来的是一句承诺，不是一件事实。
+★ **通告在监听就绪之后才打印**（`main.go:895-906`）：绑好之前印出来的是一句承诺，不是一件事实。
 
 **现状**：`已修` —— `agentkit/obs/sink.go` 的 `Install` 与 `Notice`、
 `agentkit/obs/notice.go` 的 `NewNotice`、`main.serve` 的 `waitRunning` 与 `announceServing`。
@@ -1012,7 +1012,7 @@ request after 10 seconds`），于是 E2E 里「另一个界面听见了审批�
 就绪之后 —— 暴露是那个地址的意思，两行是一件事。★ **环回时不说话**：一句关于
 「没有发生的事」的告警是噪声，而一句总出现的告警是没人看的告警。
 
-**现状**：`已修` —— `main.go:946` 的 `announceExposure`（判定用 `api.LoopbackOnly`）；
+**现状**：`已修` —— `main.go:946-956` 的 `announceExposure`（判定用 `api.LoopbackOnly`）；
 测试在 `main_test.go`（`TestAnnounceExposureReachesTheTerminal`、
 `TestAnnounceExposureIsSilentOnTheLoopback`、`TestAnnounceExposureNamesABarePort`）。
 

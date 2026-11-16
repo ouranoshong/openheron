@@ -178,7 +178,7 @@ Recomputing either one is the same mistake twice.
    Note that `Provide` returns a **batch** — one provider may supply several tools.
 
 2. **Register it.** Add your provider to `defaultToolRegistry` at
-   `agentkit/build/tools.go:65`. The position determines the order, and it also
+   `agentkit/build/tools.go:65-75`. The position determines the order, and it also
    determines how optional and required providers are told apart.
 
 3. **Optionality is decided by `Optional()`, not by returning an error.** A provider
@@ -230,7 +230,7 @@ Recomputing either one is the same mistake twice.
 #### The MCP provider
 
 `mcpToolProvider` is registered like any other provider — `defaultToolRegistry`
-at `agentkit/build/tools.go:65` — and it answers the same `toolProvider` contract
+at `agentkit/build/tools.go:65-75` — and it answers the same `toolProvider` contract
 at `agentkit/build/tools.go:49`. Four things about it are not generic:
 
 - **The client outlives the batch.** ★ The batch is built once per snapshot:
@@ -239,9 +239,9 @@ at `agentkit/build/tools.go:49`. Four things about it are not generic:
   **manager** owns the clients (`agentkit/build/mcpmanager.go:44`), and the
   provider asks the manager for them (`agentkit/build/mcpmanager.go:149`).
 - **The names are namespaced, and composed in one place.** `mcpPlan`
-  (`agentkit/build/mcptools.go:68`) maps the server's own tool names to the
+  (`agentkit/build/mcptools.go:68-116`) maps the server's own tool names to the
   exposed names and their tiers, and the name itself is composed once, in
-  `mcpExposedName` (`agentkit/build/mcptools.go:141`). The provider and the
+  `mcpExposedName` (`agentkit/build/mcptools.go:141-143`). The provider and the
   `/mcps` projection both go through `mcpPlan`, so they cannot disagree about
   what a tool is called.
 - **The provider is optional, and the warning is the only notice.** An
@@ -252,7 +252,7 @@ at `agentkit/build/tools.go:49`. Four things about it are not generic:
   simply missing from the table, and the user sees "this feature seems to be
   missing".
 - **The output is capped, and the stdio calls are serialized.** The cap lives in
-  the component's result handler (`agentkit/build/mcptools.go:384`), and the
+  the component's result handler (`agentkit/build/mcptools.go:384-411`), and the
   calls of one stdio server go through `serialTool`
   (`agentkit/build/mcptools.go:343`), which takes a per-server mutex and a call
   deadline.
@@ -278,15 +278,15 @@ For a developer who has to debug it:
   and the same child process. Two child processes for one server would make the
   tools the model sees depend on which process answered.
 - **A crashed child is started again on the next call.** `markBroken`
-  (`agentkit/build/mcpmanager.go:161`) closes the client when the pipe broke,
+  (`agentkit/build/mcpmanager.go:161-164`) closes the client when the pipe broke,
   and the next call starts a new one. ★ A call that runs out of time is **not**
   a broken connection: the server may simply be slow, so a deadline gives up
   without tearing the client down (`agentkit/build/mcptools.go:362`).
 - **A failed start does not hold the build.** The teardown of a failed start
   waits for the child to exit, and a child that is still installing its own
   package does not exit because its stdin closed — so `startStdioClient`
-  (`agentkit/build/mcpmanager.go:786`) kills the child
-  (`agentkit/build/mcpmanager.go:840`) and bounds the teardown
+  (`agentkit/build/mcpmanager.go:786-832`) kills the child
+  (`agentkit/build/mcpmanager.go:840-848`) and bounds the teardown
   (`agentkit/build/mcpmanager.go:733`). ★ A build waits for a server, not for a
   server's corpse: without the kill, a server that cannot be started takes the
   turn down with it, and the client is told "turn start timeout" — a symptom
@@ -294,15 +294,15 @@ For a developer who has to debug it:
 - **The start is a background job, and every server has a state.** The manager
   starts the servers in the background (`Warm`, `agentkit/build/mcpmanager.go:98`)
   and each entry carries one of four states (`mcpState`,
-  `agentkit/build/mcpmanager.go:340`): `not_started`, `starting`, `ready` or
+  `agentkit/build/mcpmanager.go:344`): `not_started`, `starting`, `ready` or
   `failed`. ★ `Tools` never waits — it answers `errMCPStarting` while the job is
   in flight, and the provider skips the server **without** a warning: a server
   on its way is not a broken server. ★ The tools a server brings join the
   **next** turn: the job lists the tools when it lands (`runStart`,
-  `agentkit/build/mcpmanager.go:504`), the **tool surface** changes, and the
+  `agentkit/build/mcpmanager.go:504-543`), the **tool surface** changes, and the
   builder notices the difference when it compares the surface.
   ★ A failed start is retried, but not before the file's own `timeout:` has
-  passed (`mcpStartTimeout`, `agentkit/build/mcpmanager.go:371`) — a server that
+  passed (`mcpStartTimeout`, `agentkit/build/mcpmanager.go:371-379`) — a server that
   cannot start must not be spawned in a loop.
 - **The tool list is re-listed when a turn asks for it**, and the previous
   listing is older than 30 seconds (`agentkit/build/mcpmanager.go:36`,
@@ -312,9 +312,9 @@ For a developer who has to debug it:
 - **A changed list moves the tool surface, and the builder compares.** `Refresh`
   (`agentkit/build/mcpmanager.go:175`) re-lists the servers whose listing is
   older than the interval, and `surfaceHash`
-  (`agentkit/build/mcpmanager.go:246`) says what the mounted servers offer right
+  (`agentkit/build/mcpmanager.go:246-260`) says what the mounted servers offer right
   now. ★ The builder **compares** that with the surface the tree was built from
-  (`agentkit/build/snapshot.go:207`): different ⇒ a new tree, the same ⇒ the
+  (`agentkit/build/snapshot.go:215-230`): different ⇒ a new tree, the same ⇒ the
   old one. ★ There is no notification and no counter — a notification can be
   forgotten, and a comparison cannot. The refresh happens before the turn's
   agent is assembled (`agentkit/build/builder.go:176`), because the batch is
@@ -360,7 +360,7 @@ Say you want a new `mcps/` directory:
    and **non-hot-reloaded** directories clearly apart — whether a directory is hot
    changes what users expect.
 
-2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`agentkit/spec/config.go:720`) and
+2. **`agentkit/spec/load.go`**: add the branch in `loaderFor` (`agentkit/spec/config.go:928-933`) and
    implement `loadXXX`.
 
    ★ **Two shapes the recipe did not have before `skills/`.** A partition may be
@@ -429,14 +429,14 @@ definition — there is no `enabled` key.
 - **Declared** by the constant `DirMCP = "mcps"` (`agentkit/spec/config.go:26`) and the
   `Categories` entry (`agentkit/spec/config.go:85`), which is editable, hot and
   `.yaml`.
-- **Loaded** by `loadMCP` (`agentkit/spec/load.go:489`): one file, one server.
+- **Loaded** by `loadMCP` (`agentkit/spec/load.go`): one file, one server.
 - ★ **"Hot" for this partition means the client is rebuilt.** The declaration is the
   server's identity, so a changed declaration means a changed server: the old client
   is torn down and a new one is started (`agentkit/build/mcpmanager.go:447`), keyed on
-  the declaration's fingerprint (`agentkit/build/mcpmanager.go:646`). ★ A hot partition
+  the declaration's fingerprint (`agentkit/build/mcpmanager.go:646-679`). ★ A hot partition
   whose resources are not rebuilt lies about being hot.
 - **The write gate** refuses a name that could not be read back:
-  `validateFileName` (`agentkit/spec/write.go:166`) accepts only a `<server>.yaml` whose
+  `validateFileName` (`agentkit/spec/write.go:166-206`) accepts only a `<server>.yaml` whose
   name is a valid server name (`agentkit/spec/write.go:185`) — the file's name is the
   server's name, and the server's name is the namespace segment of that server's tools.
 - **The scaffold** is `Skeleton` (`agentkit/spec/write.go:280`), and the `mcps/` branch
@@ -465,7 +465,7 @@ definition — there is no `enabled` key.
    ```
 
 3. **Data sources.** To wire up a new source, add a `SetXxxSource` method on
-   `api.Server` (the pattern is `api/server.go:145`'s `SetSkillsSource`) and connect it
+   `api.Server` (the pattern is `api/server.go:164-191`'s `SetSkillsSource`) and connect it
    in `main.go`. **Do not** let a handler read a global variable directly.
 
 4. **Streaming.** The SSE sink lives in `transport`; `api` only writes the events out.
@@ -486,7 +486,7 @@ Editing `agents/*.md` is enough; no code change is needed. But keep in mind:
   dangling reference, because the settled tree no longer mentions it.
 - Exceeding `max_depth` is a **startup error**, never a silent truncation.
 
-★ **The write gate is the other half of "left out".** `agentkit/spec/write.go:474` `checkNoAgentLost` compares the **settled** tree on disk with the **settled** trial tree and
+★ **The write gate is the other half of "left out".** `agentkit/spec/write.go:476-486` `checkNoAgentLost` compares the **settled** tree on disk with the **settled** trial tree and
 refuses a write, a batch or a delete that would take a working agent out. Without it,
 repointing an agent at a nonexistent model would remove it silently — which is exactly the
 failure the load-time rule stopped being. ★ Do not "simplify" it by comparing the raw
@@ -494,7 +494,7 @@ file set: an agent that was already broken is out on both sides, and counting it
 would make every unrelated edit fail.
 
 ★ **The delete gate runs before the trial load.** `checkNotReferenced`
-(`agentkit/spec/write.go:722`) reads the tree as it is **now**, so it can refuse a delete
+(`agentkit/spec/write.go:787-814`) reads the tree as it is **now**, so it can refuse a delete
 that something still names — and the refusal names **who names it** and what to remove.
 ★ It runs before the trial load because the trial load's error is the symptom it replaces:
 that error names the deleted file and hides the real reason somewhere else. ★ What the user
@@ -510,7 +510,7 @@ The assembly logic is in `agentkit/build/assemble.go`; the validation logic is i
 
 #### ★ When the agent cannot be built, the turn has to be told
 
-`agentkit/run/loop.go:125` `makePrepareAgent` is where the builder is asked for this
+`agentkit/run/loop.go:131-156` `makePrepareAgent` is where the builder is asked for this
 turn's agent — and where a configuration problem becomes a runtime one. ★ The error
 has to be handed to the turn (`turn.fail`): the framework records it and stops the
 loop, but nobody else marks the turn failed, so the waiter sat until the **start
@@ -544,14 +544,14 @@ flip the agent's tool set on the user's behalf.
 
 ★ **The tool set is the snapshot's, and the list narrows it.** The snapshot's tools are
 one set for the whole snapshot; each agent's `tools:` list removes what that agent may
-not use (`agentkit/build/topology.go:72` `specTable`), and the model never sees a tool
+not use (`agentkit/build/topology.go:72-74` `specTable`), and the model never sees a tool
 the list removed. ★ **There is no "nothing to do" shortcut**
 (`agentkit/build/policy.go:190`): an **empty** list removes **everything**.
 
 ★ **MCP has one key, and mounting is the grant.** `mcps:` says which servers are
 **mounted** — and mounting one hands the agent **all of that server's tools**. ★ `tools:`
 does not name MCP tools: an `mcp__<server>__*` entry there grants nothing, is
-dropped, and is reported as a **notice** (`agentkit/spec/load.go:983`
+dropped, and is reported as a **notice** (`agentkit/spec/load.go:982-1012`
 `checkAgentMCPNames`) — not a load-time error, because the meaning changed rather than
 contradicting itself. ★ **The cost is real**: narrowing one agent's MCP tools is no longer
 possible — the server's own file filters them, and that filter is shared by every agent
@@ -561,7 +561,7 @@ file's `allows:`, and the default there is still `ask` — mounting is not appro
 #### The three notices
 
 All three are **notices**, not errors — the configuration is legal, it just does not say
-what the author meant (`agentkit/spec/load.go:855` `noticeAgentTools`):
+what the author meant (`agentkit/spec/load.go:854-897` `noticeAgentTools`):
 
 | Notice | What it means | What to do |
 |---|---|---|
@@ -581,9 +581,9 @@ different one — it says the line does not do what it reads as.
 
 2. The `reasoning` tier table is the **translation layer**: the agent writes
    `reasoning: high`, and the table decides what this endpoint actually sends.
-   ★ **A tier missing from the table is silently ignored** — an agent writes `high`
-   while the endpoint has no `high`, the effect is "no thinking at all", and there is no
-   error. Always fill the table in for a new endpoint.
+   ★ **A tier missing from the table is a load-time error** — the configuration is
+   refused, and the message names the agent, the tier and the levels the model does
+   declare. Always fill the table in for a new endpoint.
 
 3. `reasoning_default` is the tier used when the agent names no `reasoning`.
    Leave it empty and **nothing is injected**.
@@ -644,7 +644,7 @@ it still protects that agent's window. The derivation only picks up the **root's
 | the finalizer | `finalize`, same file | the replacement history is the agent's system messages **plus the summary** — openheron's context prompt is a system message (`agentkit/run/input.go`), and dropping it would leave the agent without its rules for the rest of the turn |
 | the announcement | eino's `after_summarize` event | the middleware publishes the replacement history on the agent's event stream |
 | the pickup | `compactionFrom` in `agentkit/emit/emit.go` | the derivation reads the event and puts the compacted message on `Artifacts.Compaction` — the **summary**, not the system message that shares the replacement history |
-| the write | `archiveCompaction` in `agentkit/run/loop.go:373` | the message is appended to the transcript **before the turn's own messages** |
+| the write | `archiveCompaction` in `agentkit/run/loop.go:379-400` | the message is appended to the transcript **before the turn's own messages** |
 | the boundary | `message/compaction.go:103` | the marker rides on that message, so the transcript stays the single source of truth |
 
 ★ **The write order is not a detail.** The compacted message summarizes everything that came
@@ -1192,7 +1192,7 @@ no automatic second attempt.
 ★ **The tree's identity is (the configuration object, the MCP tool surface).**
 There is no generation counter any more: the builder **compares** instead of
 being **notified**. `snapshotFor` reads both under the builder's lock and
-rebuilds when either moved (`agentkit/build/snapshot.go:207`). ★ **Read order =
+rebuilds when either moved (`agentkit/build/snapshot.go:215-230`). ★ **Read order =
 build order**, so the tree never goes backwards — a caller that arrives late
 with an older configuration cannot put an older tree back.
 
@@ -1205,7 +1205,7 @@ forget and no counter to fall behind. The wiring is in
 |---|---|
 | one agent's **dependency fingerprint** — a file that says nothing about the agent does not rebuild it, and a file that starts naming one of its tools does | `agentkit/build/fingerprint.go:24` |
 | the pool's key is **(name, fingerprint)** — a change to one file no longer swaps the whole tree | `agentkit/build/pool.go:48` |
-| **"the next turn uses it" is a promise, not a guess** — the write path only **marks**; the builder re-reads the configuration before it builds | `reloadIfMarked` in `agentkit/build/builder.go:285` |
+| **"the next turn uses it" is a promise, not a guess** — the write path only **marks**; the builder re-reads the configuration before it builds | `reloadIfMarked` in `agentkit/build/builder.go:297-316` |
 | the **impact query** — `config_get` with `impact` answers "who depends on this file, and who the next turn rebuilds" | `agentkit/build/impact.go:26` |
 | a **file tool that writes into the configuration root goes through the configuration service** — the service's checks run, and a refusal comes with the service's reason | `agentkit/fsx/configgate.go:11`, `agentkit/build/configgate.go:19` |
 
@@ -1228,7 +1228,7 @@ the loop stops, and the agent's stream is what writes it — so a round that end
 while the agent was still winding down left the framework reading a field the
 agent was still writing. ★ The fix is to **drain** the agent's event stream
 before the round ends (`Options.Drained` in `agentkit/emit/emit.go:98`,
-`settleAgent` in `agentkit/run/loop.go:253`). ★ Draining **cancels nothing**: the
+`settleAgent` in `agentkit/run/loop.go:259-269`). ★ Draining **cancels nothing**: the
 turn's context is what the framework writes the checkpoint with, and a cancelled
 context would take the checkpoint with it.
 
@@ -1315,7 +1315,7 @@ and they must agree:
 | Consumer | Where | What it does with the root |
 |---|---|---|
 | The prompt | `agentkit/run/input.go:191` | names it: `Project root: …` |
-| The tools | `agentkit/fsx/fsx.go:298` | the write boundary, and the base of a relative path |
+| The tools | `agentkit/fsx/fsx.go:307-331` | the write boundary, and the base of a relative path |
 
 ★ **Never bake a root into the filesystem backend.** The backend is built **once** and
 shared by every round (`agentkit/build/snapshot.go:78`), so a root inside it is the root
@@ -1911,7 +1911,7 @@ about text the user has already changed.
 
 ★ **A rule that was the client's moved to the server rather than disappearing.** An
 agent's `reasoning` level is checked against the model's declared vocabulary in
-`agentkit/spec/load.go:815` `checkReasoning` — where every file passes, not only the
+`agentkit/spec/load.go:814-835` `checkReasoning` — where every file passes, not only the
 edits made in the settings editor. ★ Deleting a client rule is only a simplification if
 the server already has it; that is the question to ask of the next one.
 
@@ -2152,14 +2152,14 @@ misses something.
 | Startup reports a missing configuration | The `config root` line in the startup log — it prints the root actually used and the project root |
 | A config change does not take effect | Is that partition hot-reloaded? `llm/` `agents/` `tools/` `mcps/` `skills/` are hot; `server/` needs a restart |
 | Startup fails with `disabled_tools` was renamed to `tools` | ★ The two mean **opposite** things — one removed tools, the other names them. Delete `disabled_tools` and list the tools the agent should have in `tools:` (`agentkit/spec/load.go:127`) |
-| A notice says `tools` names MCP tools | ★ `tools` does not name MCP tools, and `mcps:` is what mounts a server **and** grants its tools: drop the `mcp__*` lines and put the server in `mcps:` (`agentkit/spec/load.go:983`) |
+| A notice says `tools` names MCP tools | ★ `tools` does not name MCP tools, and `mcps:` is what mounts a server **and** grants its tools: drop the `mcp__*` lines and put the server in `mcps:` (`agentkit/spec/load.go:982-1012`) |
 | An agent cannot call an MCP tool | Is the server in that agent's `mcps:`? Mounting **is** the grant — the agent's `tools:` list has nothing to do with it (`agentkit/spec/decl/decl.go:164`) |
 | A notice says `tools` names a tool that does not exist | The built-in tools are the ones in `decl.BuiltinToolNames` (`agentkit/spec/decl/decl.go:383`); a provider's tool exists only when its file under `tools/` is written |
 | A notice says `tools` names the `skill` tool but `skills` is empty | The configuration is legal but self-contradictory: name the skill in `skills:`, or drop `skill` from `tools:` |
 | An agent cannot call a tool | `GET /v2/agents/:agentId` for the effective tool table; then read the tool's `reason` — `tools`, or the default `ask` tier, which asks |
 | An agent has **no** tools at all | ★ The tool list is an allow-list and it **defaults to none**: an absent `tools:` means no tool. List the tools the agent should have |
 | A leftover `policy/` directory still seems to carry your old tiers | The partition was retired: the tiers live in the files that provide the tools, and the default tier is `ask`. The startup log says so — the notice lands in `deferred` |
-| `reasoning` seems to do nothing | Is that tier declared in the model profile? Undeclared means silently ignored |
+| `reasoning` seems to do nothing | Is that tier declared in the model profile? An undeclared tier is a load-time error, not a silent no-op |
 | The editor blames the file you are editing for a problem in **another** file | ★ Every issue names the file it is about (`Issue.Path`), and the editor shows another file's issue under **that** file's name — as a link that opens it. ★ But the tree has to load: a broken file anywhere still refuses the save, so fix that file first |
 | An approval cannot resume | Is the checkpoint still there? Check `pendingApprovals` on `/v2/sessions/:id` |
 | White screen + `Maximum update depth exceeded` | Is some selector returning a new array/object? |
@@ -2186,7 +2186,7 @@ the current state of the code, not a to-do list** — fixing one is a separate c
 | **The conflict dialog does not show the on-disk version** | `web/src/components/settings/conflict-dialog.tsx:18-23` | It shows only your stale `baseRevision` plus a hard-coded "changed by someone else", and **never fetches the disk version**. There is no "overwrite anyway" button either — "Keep editing" merely clears the conflict marker, so the next save resends the same stale revision and conflicts again. |
 | **Four runtime dependencies sit in `devDependencies`** | `web/package.json` | `lucide-react` (imported by 10 files), `clsx`, `tailwind-merge` and `class-variance-authority` are all imported by `src/` and bundled into `web/dist`. The build passes (Vite resolves them at build time), but the manifest is wrong. |
 | **The comment at `api/server.go:144` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
-| **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the six partitions (`agentkit/spec/config.go:664`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:709`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:116`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |
+| **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the six partitions (`agentkit/spec/config.go:917-926`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:917-926`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:116`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |
 
 ## 8. Before committing
 
