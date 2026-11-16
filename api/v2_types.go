@@ -361,7 +361,7 @@ func toPendingViews(p *storage.PendingApproval) []pendingView {
 
 // toPendingView converts one outstanding decision.
 func toPendingView(it contract.PendingInterrupt) pendingView {
-	out := pendingView{InterruptID: it.InterruptID, Reason: "tool_call"}
+	out := pendingView{InterruptID: it.InterruptID, Reason: contract.PendingReasonToolCall}
 	if it.Detail == nil {
 		return out
 	}

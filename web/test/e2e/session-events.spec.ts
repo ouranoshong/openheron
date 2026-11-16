@@ -50,4 +50,29 @@ test.describe("会话的公告通道", () => {
     await expect(other.getByText(/scripted answer/).first()).toBeVisible({ timeout: 7000 })
     await expect(other.locator('[data-testid="run-error"]')).toHaveCount(0)
   })
+
+  // ★ The card that is **waiting** comes over the same channel.
+  //
+  // ★ The round's own stream is cut, so the interrupt never reaches the wire;
+  //   and the transcript and the ledger catch up later. ★ A card that is on
+  //   screen before they do can only have come from the channel — and the
+  //   channel is the only thing that knows the card's *data*, not just that
+  //   there is one.
+  test("★ 审批在等的时候，通道把那张卡连同内容一起送到这一边", async ({ page }) => {
+    await setScenario("approvalOnChannel")
+    await openApp(page)
+
+    // ★ The reload count is the point: the card has to arrive on its own.
+    let reloads = 0
+    page.on("load", () => {
+      reloads += 1
+    })
+
+    await sendMessage(page, `${MARKER_A} write the file`)
+
+    // ★ The card is on screen well before the transcript catches up.
+    await expect(page.locator('[data-testid="approval-card"]')).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('[data-testid="approval-tool"]')).toHaveText("write_file")
+    expect(reloads).toBe(0)
+  })
 })

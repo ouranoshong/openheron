@@ -43,6 +43,78 @@ func customOf(t *testing.T, evs []events.Event, name string) map[string]any {
 	return nil
 }
 
+// The card that is waiting goes out on the session's channel.
+//
+// ★ It carries the card's **data**: a surface that was not watching the run
+//
+//	that raised the approval has no stream of its own, so the tool name and
+//	the arguments exist nowhere else for it — and a card without them is a
+//	card nobody can judge.
+func TestTheWaitingCardIsRenderedAsACustomFrame(t *testing.T) {
+	evs := renderSession(t, contract.RunEvent{
+		Kind:  contract.RunEventApprovalPending,
+		RunID: "run-1",
+		Pending: []contract.PendingInterrupt{{
+			InterruptID: "int-1",
+			Detail: &contract.InterruptDetail{
+				ToolCallID:       "call-1",
+				ToolName:         "write_file",
+				Arguments:        []byte(`{"path":"config.yaml"}`),
+				Message:          "write_file needs approval",
+				RequestedByAgent: "task",
+				SubagentRunID:    "sub-1",
+			},
+		}},
+	})
+
+	value := customOf(t, evs, "approval_pending")
+	if value["interrupt_id"] != "int-1" {
+		t.Fatalf("the frame names the wrong approval: %v", value)
+	}
+	if value["run_id"] != "run-1" {
+		t.Fatalf("the frame must name the round that raised it: %v", value)
+	}
+	if value["tool_name"] != "write_file" {
+		t.Fatalf("the frame must carry the tool's name: %v", value)
+	}
+	if value["tool_call_id"] != "call-1" {
+		t.Fatalf("the frame must carry the tool call's id: %v", value)
+	}
+	if value["message"] != "write_file needs approval" {
+		t.Fatalf("the frame must carry the message: %v", value)
+	}
+	if value["subagent_run_id"] != "sub-1" {
+		t.Fatalf("the frame must carry the sub-agent's run: %v", value)
+	}
+	// ★ The arguments are the tool call's own bytes: they are not a string
+	//	the client has to parse a second time.
+	args, ok := value["arguments"].(map[string]any)
+	if !ok || args["path"] != "config.yaml" {
+		t.Fatalf("the frame must carry the arguments as JSON: %#v", value["arguments"])
+	}
+}
+
+// The card and the answer say the same thing about the same card.
+//
+// ★ The scan answers it in the REST spelling (pendingApprovals) and the
+//
+//	channel in its own — and the reason is one word, not two: a card that
+//	says one thing here and another there is a card nobody can read.
+func TestTheCardSaysTheSameReasonEverywhere(t *testing.T) {
+	evs := renderSession(t, contract.RunEvent{
+		Kind:  contract.RunEventApprovalPending,
+		RunID: "run-1",
+		Pending: []contract.PendingInterrupt{{
+			InterruptID: "int-1",
+		}},
+	})
+
+	value := customOf(t, evs, "approval_pending")
+	if value["reason"] != contract.PendingReasonToolCall {
+		t.Fatalf("reason = %v, want %q", value["reason"], contract.PendingReasonToolCall)
+	}
+}
+
 // The answer to an approval goes out on the session's channel.
 //
 // ★ It is a **custom** frame: AG-UI has no vocabulary for "an approval was

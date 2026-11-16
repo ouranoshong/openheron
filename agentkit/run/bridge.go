@@ -216,9 +216,21 @@ func (rt *Runtime) loopExited(sessionID string, turn *Turn, loop *adk.TurnLoop[l
 	}
 	// ★ The loop is gone: nobody holds the session any more.
 	turn.lease.release()
-	rt.writeHeldApproval(sessionID, turn)
+	pending := rt.writeHeldApproval(sessionID, turn)
 	rt.closeApprovalRow(turn)
 	rt.closeOpenRow(turn, exit)
+	// ★ The session hears that a card is waiting. ★ It runs **after** the
+	//   barrier: the ledger's row is terminal now, so the fact and the
+	//   ledger say the same thing — a surface that shows the card and then
+	//   scans the ledger must not find one "running" and the other
+	//   "waiting_approval".
+	//
+	// ★ Only approvals that are on disk are announced: an approval that
+	//   failed to persist cannot be answered, and a card the server
+	//   refuses every answer on is worse than no card.
+	if len(pending) > 0 {
+		rt.announceApprovalPending(sessionID, pending, turn.RunID)
+	}
 	// ★ The publisher closes here for the run that ended by raising an
 	//   interrupt: the approval is on disk now, so a client that answers
 	//   it cannot be refused.
@@ -287,22 +299,30 @@ func (rt *Runtime) closeOpenRow(turn *Turn, exit *adk.TurnLoopExitState[loopItem
 //	returns first — and an approval is only answerable if the checkpoint
 //	it resumes from exists. Writing it earlier would leave a window where
 //	the user sees the card but answering it fails with no_checkpoint.
-func (rt *Runtime) writeHeldApproval(sessionID string, turn *Turn) {
+//
+// ★ It answers with the approvals that actually landed on disk. ★ An
+//
+//	approval that failed to persist is **not** in the answer: it cannot be
+//	answered, so it must not be announced either — a card the server
+//	refuses every answer on is worse than no card.
+func (rt *Runtime) writeHeldApproval(sessionID string, turn *Turn) []contract.PendingInterrupt {
 	interrupts := turn.takePending()
 	if len(interrupts) == 0 {
-		return
+		return nil
 	}
 	sess, err := rt.cfg.SessionManager.Get(context.Background(), sessionID)
 	if err != nil {
 		rt.logf("session=%s failed to persist the pending approval: %v", sessionID, err)
-		return
+		return nil
 	}
 	if err := sess.SetPendingApproval(&storage.PendingApproval{Interrupts: interrupts}); err != nil {
 		// Fail-closed: without a persisted approval the user could never
 		// approve, so surface it loudly rather than silently degrading.
 		rt.logf("session=%s FAILED to persist pending approval %v: %v",
 			sessionID, interrupts[0].InterruptID, err)
+		return nil
 	}
+	return interrupts
 }
 
 func (rt *Runtime) stateFor(sessionID string) *sessionState {

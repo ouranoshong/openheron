@@ -116,6 +116,8 @@ func RenderSession(w io.Writer, threadID string, ch <-chan contract.RunEvent) er
 	r := &renderer{w: w, threadID: threadID}
 	for ev := range ch {
 		switch ev.Kind {
+		case contract.RunEventApprovalPending:
+			r.emitApprovalPending(ev)
 		case contract.RunEventApprovalResolved:
 			r.emitApprovalResolved(ev)
 		case contract.RunEventRunStarted:
@@ -281,6 +283,50 @@ func (r *renderer) emitRetry(message, agent string) {
 		value["agent"] = agent
 	}
 	r.emit(events.NewCustomEvent("model_retry", events.WithValue(value)))
+}
+
+// emitApprovalPending publishes that an approval is waiting for an answer.
+//
+// ★ It is a **custom** frame for the same reason as the answer's: no run is
+//
+//	being described here — the session is.
+//
+// ★ The card's data travels with the fact. ★ A surface that was not watching
+//
+//	the run that raised the approval has no stream of its own, so the tool
+//	name and the arguments exist nowhere else for it — and a card without
+//	them is a card nobody can judge.
+//
+// ★ The payload is the card's fields, one by one, in the **channel's**
+//
+//	spelling. ★ The scan answers the same card in the REST spelling
+//	(pendingApprovals): two surfaces, one card, each saying it in its own
+//	words — and the client translates once, in one place.
+func (r *renderer) emitApprovalPending(ev contract.RunEvent) {
+	for _, p := range ev.Pending {
+		value := map[string]any{
+			"interrupt_id": p.InterruptID,
+			"reason":       contract.PendingReasonToolCall,
+			"run_id":       ev.RunID,
+		}
+		if d := p.Detail; d != nil {
+			value["message"] = d.Message
+			value["tool_call_id"] = d.ToolCallID
+			value["tool_name"] = d.ToolName
+			value["requested_by_agent"] = d.RequestedByAgent
+			value["subagent_run_id"] = d.SubagentRunID
+			// ★ The arguments are raw JSON: they are the tool call's own
+			//   bytes, and re-encoding them as a string would make the
+			//   client parse them twice.
+			if len(d.Arguments) > 0 {
+				value["arguments"] = d.Arguments
+			}
+			if !d.CreatedAt.IsZero() {
+				value["created_at"] = d.CreatedAt.UTC().Format(time.RFC3339Nano)
+			}
+		}
+		r.emit(events.NewCustomEvent("approval_pending", events.WithValue(value)))
+	}
 }
 
 // emitApprovalResolved publishes that the approval was answered.

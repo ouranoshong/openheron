@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   applySessionFact,
   parseSessionFact,
+  type ApprovalPending,
   type ApprovalResolved,
   type RunStarted,
 } from "../src/lib/session-events"
@@ -21,6 +22,38 @@ function waiting(ids: string[] = ["int-1"]): ConversationState {
 }
 
 describe("会话事实的解析", () => {
+  test("审批在等，读出那张卡的内容", () => {
+    const fact = parseSessionFact({
+      type: "CUSTOM",
+      name: "approval_pending",
+      value: {
+        interrupt_id: "int-1",
+        reason: "tool_call",
+        message: "write_file needs approval",
+        tool_call_id: "call-1",
+        tool_name: "write_file",
+        arguments: { path: "config.yaml" },
+        requested_by_agent: "task",
+        subagent_run_id: "sub-1",
+        run_id: "run-1",
+      },
+    })
+    expect(fact).toEqual({
+      kind: "approval-pending",
+      interrupt: {
+        id: "int-1",
+        reason: "tool_call",
+        message: "write_file needs approval",
+        toolCallId: "call-1",
+        toolName: "write_file",
+        arguments: { path: "config.yaml" },
+        // ★ 子 agent 的 run id 说了算——跟扫描那条路一个规矩。
+        requestedByAgent: "sub-1",
+      },
+      runId: "run-1",
+    } satisfies ApprovalPending)
+  })
+
   test("审批被回答，读出那张卡的名字和决定", () => {
     const fact = parseSessionFact({
       type: "CUSTOM",
@@ -66,10 +99,34 @@ describe("会话事实的解析", () => {
       parseSessionFact({ type: "CUSTOM", name: "approval_resolved", value: { approved: true } }),
     ).toBeNull()
     expect(parseSessionFact({ type: "CUSTOM", name: "run_started", value: {} })).toBeNull()
+    expect(parseSessionFact({ type: "CUSTOM", name: "approval_pending", value: {} })).toBeNull()
   })
 })
 
 describe("会话事实的折叠", () => {
+  test("审批在等，卡出现，这一边在等答案", () => {
+    const convo = applySessionFact(emptyConversation(), {
+      kind: "approval-pending",
+      interrupt: { id: "int-1", reason: "tool_call", toolName: "write_file" },
+      runId: "run-1",
+    })
+    expect(convo.interrupts.map((i) => i.id)).toEqual(["int-1"])
+    expect(convo.status).toBe("awaiting-approval")
+  })
+
+  test("这张卡已经在手上，就不添第二张", () => {
+    // ★ 发起那一轮的那一边是从 run 自己的流里看到这张卡的，
+    //   通道说的是同一张卡——不是两张。
+    const before = waiting(["int-1"])
+    const after = applySessionFact(before, {
+      kind: "approval-pending",
+      interrupt: { id: "int-1", reason: "tool_call", toolName: "write_file" },
+      runId: "run-1",
+    })
+    expect(after.interrupts).toHaveLength(1)
+    expect(after.interrupts).toBe(before.interrupts)
+  })
+
   test("审批被回答，那张卡消失", () => {
     const convo = applySessionFact(waiting(), {
       kind: "approval-resolved",

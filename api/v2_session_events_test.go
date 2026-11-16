@@ -243,6 +243,64 @@ func TestTheSessionChannelCarriesTheFacts(t *testing.T) {
 	}
 }
 
+// The channel carries the card that is waiting.
+//
+// ★ The round is over by the time the card is on the disk, and the run's own
+//
+//	stream is closed — so a surface that was not watching that run has
+//	nowhere else to learn that a card is waiting, and nobody to ask.
+func TestTheSessionChannelCarriesTheWaitingCard(t *testing.T) {
+	srv, rt, frames, _ := newSessionEventsServer(t)
+	id := createThread(t, srv)
+
+	// ★ The channel never ends on its own, so the request runs in the
+	//   background and the test breaks it when it is done.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		call(t, srv, "GET", "/v2/sessions/"+id+"/events", "")
+	}()
+
+	// ★ Wait until the handler is listening: a fact published before the
+	//   subscription exists is gone for good.
+	deadline := time.Now().Add(5 * time.Second)
+	for rt.AnnounceWatchers(id) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the session's channel was never opened")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	got := callJSON(t, srv, "POST", "/v2/run", map[string]any{
+		"threadId": id,
+		"query":    "write the config",
+	})
+	if got.code != 200 {
+		t.Fatalf("run = %d (%s)", got.code, got.body)
+	}
+
+	card := waitForFrame(t, frames, "approval_pending")
+	if card.Value["interrupt_id"] != "int-e2e" {
+		t.Fatalf("the frame names the wrong approval: %v", card.Value)
+	}
+	if card.Value["reason"] != "tool_call" {
+		t.Fatalf("the frame must carry the reason: %v", card.Value)
+	}
+	if card.Value["message"] != "write_file needs approval" {
+		t.Fatalf("the frame must carry the message: %v", card.Value)
+	}
+	if card.Value["run_id"] == "" {
+		t.Fatalf("the frame must name the round that raised it: %v", card.Value)
+	}
+
+	frames.Break()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the session's channel did not end")
+	}
+}
+
 // An unknown session has no channel to open.
 func TestTheSessionChannelRefusesAnUnknownSession(t *testing.T) {
 	srv, _, _, _ := newSessionEventsServer(t)

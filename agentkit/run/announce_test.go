@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -109,6 +110,82 @@ func TestTheSessionHearsThatARoundBegan(t *testing.T) {
 	}
 }
 
+// The session hears that a card is waiting.
+//
+// ★ This is the fact a surface that did not watch the run needs: the round
+//
+//	is over, the approval is still on the table, and the run's own stream is
+//	closed — so the run's stream can no longer tell anybody anything.
+func TestTheSessionHearsThatAnApprovalIsWaiting(t *testing.T) {
+	rt, sess := announceRuntime(t)
+	ctx := context.Background()
+
+	sub := rt.Announce(sess.ID())
+	defer sub.Close()
+
+	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := turn.Wait(5 * time.Second); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	drain(t, turn)
+	// ★ The slot comes back **after** the approval is on disk, so waiting
+	//	for it is waiting for the fact too.
+	turn.WaitReleased()
+
+	started := awaitEvent(t, sub)
+	if started.Kind != contract.RunEventRunStarted {
+		t.Fatalf("want the round that began, got %v", started.Kind)
+	}
+
+	pending := awaitEvent(t, sub)
+	if pending.Kind != contract.RunEventApprovalPending {
+		t.Fatalf("want the approval to be pending, got %v", pending.Kind)
+	}
+	if len(pending.Pending) != 1 {
+		t.Fatalf("want one approval in the fact, got %d", len(pending.Pending))
+	}
+	if pending.Pending[0].InterruptID != "int-1" {
+		t.Fatalf("want the approval of %q, got %q", "int-1", pending.Pending[0].InterruptID)
+	}
+	if pending.RunID != turn.RunID {
+		t.Fatalf("want the round's id %q, got %q", turn.RunID, pending.RunID)
+	}
+}
+
+// An approval that did not reach the disk is not announced.
+//
+// ★ A card the server refuses every answer on is worse than no card: the
+//
+//	surface would offer a decision that cannot be made, and the user would
+//	blame the agent for it.
+func TestAnApprovalThatDidNotLandIsNotAnnounced(t *testing.T) {
+	rt, sess := announceRuntime(t)
+	ctx := context.Background()
+
+	sub := rt.Announce(sess.ID())
+	defer sub.Close()
+
+	sess.mu.Lock()
+	sess.approvalErr = errors.New("the disk is full")
+	sess.mu.Unlock()
+
+	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := turn.Wait(5 * time.Second); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	drain(t, turn)
+	turn.WaitReleased()
+
+	_ = awaitEvent(t, sub) // the round that began
+	expectNothing(t, sub)
+}
+
 // The approval is answered: every surface that holds the card must hear it.
 //
 // ★ This is the fact the second surface needs. Without it the card stays on
@@ -141,16 +218,24 @@ func TestTheSessionHearsThatTheApprovalWasAnswered(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// ★ The first fact is the round that began, the second is the answer.
-	//	★ The order matters: the approval is answered by a **new** run, and
-	//	the surface that follows the round must know the card is stale
-	//	before it attaches.
+	// ★ The first fact is the round that began, the second is the card, and
+	//	the third is the answer. ★ The order matters: the approval is
+	//	answered by a **new** run, and the surface that follows the round
+	//	must know the card is stale before it attaches.
 	started := awaitEvent(t, sub)
 	if started.Kind != contract.RunEventRunStarted {
 		t.Fatalf("want the round that began, got %v", started.Kind)
 	}
 	if started.TurnKind != contract.TurnQuery {
 		t.Fatalf("want a query round, got %s", started.TurnKind)
+	}
+
+	pending := awaitEvent(t, sub)
+	if pending.Kind != contract.RunEventApprovalPending {
+		t.Fatalf("want the approval to be pending, got %v", pending.Kind)
+	}
+	if pending.Pending[0].InterruptID != "int-1" {
+		t.Fatalf("want the approval of %q, got %q", "int-1", pending.Pending[0].InterruptID)
 	}
 
 	resolved := awaitEvent(t, sub)
@@ -203,6 +288,7 @@ func TestTheSessionHearsThatTheApprovalWasRefused(t *testing.T) {
 	}
 
 	_ = awaitEvent(t, sub) // the round that began
+	_ = awaitEvent(t, sub) // the card
 	resolved := awaitEvent(t, sub)
 	if resolved.Kind != contract.RunEventApprovalResolved {
 		t.Fatalf("want the approval to be resolved, got %v", resolved.Kind)
@@ -252,6 +338,13 @@ func TestTheApprovalFactOutlivesTheRunThatRaisedIt(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// ★ The card came first, and the answer after it: the channel carries
+	//	the approval's whole life, not half of it.
+	pending := awaitEvent(t, sub)
+	if pending.Kind != contract.RunEventApprovalPending {
+		t.Fatalf("want the approval to be pending, got %v", pending.Kind)
+	}
+
 	resolved := awaitEvent(t, sub)
 	if resolved.Kind != contract.RunEventApprovalResolved {
 		t.Fatalf("want the approval to be resolved, got %v", resolved.Kind)
@@ -278,7 +371,12 @@ func TestTheSessionChannelHasNoReplay(t *testing.T) {
 		t.Fatalf("Wait: %v", err)
 	}
 	drain(t, turn)
-	_ = awaitEvent(t, sub)
+	_ = awaitEvent(t, sub) // the round that began
+
+	// ★ The round is over before the late surface arrives: the card is on
+	//	disk and the approval has been announced. ★ A surface that was not
+	//	listening hears none of it — the past is the scan's job.
+	turn.WaitReleased()
 	sub.Close()
 
 	// ★ A surface that arrives late gets nothing from the past.

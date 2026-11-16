@@ -440,7 +440,7 @@ func interruptsFrom(ev *adk.TypedAgentEvent[*schema.Message], mainAgent string) 
 		}
 		item := contract.Interrupt{
 			ID:       ic.ID,
-			Reason:   "tool_call",
+			Reason:   contract.PendingReasonToolCall,
 			Message:  describe(ic.Info),
 			Metadata: approvalMetadata(ic.Info),
 		}

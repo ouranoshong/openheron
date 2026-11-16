@@ -89,6 +89,13 @@ type fakeSession struct {
 	// a test that cannot reproduce the timing cannot guard it.
 	approvalGate chan struct{}
 	approvalHit  chan struct{}
+
+	// approvalErr makes the approval write fail.
+	//
+	// ★ It is how a test proves that an approval which did not reach the
+	//	disk is **not** announced: a card the server refuses every answer on
+	//	is worse than no card at all.
+	approvalErr error
 }
 
 func (s *fakeSession) ID() string           { return s.id }
@@ -153,6 +160,9 @@ func (s *fakeSession) SetPendingApproval(p *storage.PendingApproval) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.approvalErr != nil {
+		return s.approvalErr
+	}
 	s.pending = p
 	return nil
 }

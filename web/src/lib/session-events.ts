@@ -1,6 +1,6 @@
-import type { ConversationState, TurnStatus } from "@/lib/types"
+import type { ConversationState, Interrupt, TurnStatus } from "@/lib/types"
 
-// The session's channel carries two facts, and both of them outlive a run.
+// The session's channel carries three facts, and all of them outlive a run.
 //
 // ★ An approval belongs to the **session**: the run that raised it is over
 //   by the time anybody can answer it. ★ A round belongs to the session too:
@@ -8,7 +8,23 @@ import type { ConversationState, TurnStatus } from "@/lib/types"
 //   session is what tells it that a round began.
 //
 // ★ The wire uses snake_case — the server owns the shape, and this module
-//   translates it once, here.
+//   translates it once, here. ★ The scan answers the same card in the REST
+//   spelling (pendingApprovals), so the two surfaces say one thing in two
+//   words — and this module is where the channel's words become the card.
+
+// ApprovalPending says an approval is waiting for an answer.
+//
+// ★ It carries the **card's data**, not just the fact that there is one: a
+//   surface that was not watching the run that raised the approval has no
+//   stream of its own, so the tool name and the arguments exist nowhere else
+//   for it — and a card without them is a card nobody can judge.
+export interface ApprovalPending {
+  kind: "approval-pending"
+  // interrupt is the card itself.
+  interrupt: Interrupt
+  // runId names the run that raised the approval.
+  runId: string
+}
 
 // ApprovalResolved says the approval was answered.
 export interface ApprovalResolved {
@@ -32,7 +48,28 @@ export interface RunStarted {
   turnKind: string
 }
 
-export type SessionFact = ApprovalResolved | RunStarted
+export type SessionFact = ApprovalPending | ApprovalResolved | RunStarted
+
+// readInterrupt turns the channel's words into the card.
+//
+// ★ The card is the same card the scan answers: the channel spells it in
+//   snake_case, the scan in camelCase, and the fields are the same fields.
+// ★ The sub-agent's run id wins over the agent that asked — the same rule
+//   the scan's mapping uses, so a card looks the same whichever surface
+//   built it.
+function readInterrupt(value: Record<string, unknown>): Interrupt {
+  const subagentRunId = typeof value.subagent_run_id === "string" ? value.subagent_run_id : ""
+  const requestedBy = typeof value.requested_by_agent === "string" ? value.requested_by_agent : ""
+  return {
+    id: typeof value.interrupt_id === "string" ? value.interrupt_id : "",
+    reason: typeof value.reason === "string" ? value.reason : "tool_call",
+    message: typeof value.message === "string" ? value.message : undefined,
+    toolCallId: typeof value.tool_call_id === "string" ? value.tool_call_id : undefined,
+    toolName: typeof value.tool_name === "string" ? value.tool_name : undefined,
+    arguments: value.arguments,
+    requestedByAgent: subagentRunId || requestedBy || undefined,
+  }
+}
 
 // parseSessionFact reads one frame off the session's channel.
 //
@@ -45,6 +82,16 @@ export function parseSessionFact(raw: unknown): SessionFact | null {
   const ev = raw as { type?: unknown; name?: unknown; value?: unknown }
   if (ev.type !== "CUSTOM") return null
   const value = (ev.value ?? {}) as Record<string, unknown>
+
+  if (ev.name === "approval_pending") {
+    const interruptId = typeof value.interrupt_id === "string" ? value.interrupt_id : ""
+    if (!interruptId) return null
+    return {
+      kind: "approval-pending",
+      interrupt: readInterrupt(value),
+      runId: typeof value.run_id === "string" ? value.run_id : "",
+    }
+  }
 
   if (ev.name === "approval_resolved") {
     const interruptId = typeof value.interrupt_id === "string" ? value.interrupt_id : ""
@@ -78,6 +125,17 @@ export function parseSessionFact(raw: unknown): SessionFact | null {
 //   refuse every answer on — so the fact drops it.
 export function applySessionFact(convo: ConversationState, fact: SessionFact): ConversationState {
   switch (fact.kind) {
+    case "approval-pending": {
+      // ★ The card may already be here: the surface that asked for the
+      //   round saw the interrupt on the run's own stream. ★ The fact is
+      //   the same card, so it merges instead of doubling it.
+      const known = convo.interrupts.some((i) => i.id === fact.interrupt.id)
+      const interrupts = known ? convo.interrupts : [...convo.interrupts, fact.interrupt]
+      // ★ The status follows the card: the session is waiting for an
+      //   answer, and that is what the card says.
+      return { ...convo, interrupts, status: "awaiting-approval" }
+    }
+
     case "approval-resolved": {
       const interrupts = convo.interrupts.filter((i) => i.id !== fact.interruptId)
       // ★ An approval this surface never held is not this surface's news.

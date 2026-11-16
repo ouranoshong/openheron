@@ -41,6 +41,22 @@ const (
 	RunEventContextUsage
 	// RunEventInterrupt reports the approvals the run is waiting for.
 	RunEventInterrupt
+	// RunEventApprovalPending says an approval is waiting for an answer.
+	//
+	// ★ It is a **session** fact, for the same reason the answer is: the
+	//   approval belongs to the session, and the run that raised it is over
+	//   by the time anybody can answer it.
+	//
+	// ★ It carries the card's **data**, not just the fact that there is
+	//   one. A surface that was not watching that run has no stream of its
+	//   own, so the card's contents exist nowhere else for it: the scan
+	//   (GET /v2/sessions/{id}/messages) is the truth, but the scan is a
+	//   round trip, and the surface has nothing to show in the meantime.
+	//
+	// ★ The data is the shape the session **persists** — the same
+	//   PendingInterrupt the scan answers with — so the two surfaces cannot
+	//   drift apart: there is one card, not two renderings of it.
+	RunEventApprovalPending
 	// RunEventApprovalResolved says the approval was answered.
 	//
 	// ★ It is a **session** fact, not a run's: the approval belongs to the
@@ -96,8 +112,8 @@ type RunEvent struct {
 	Usage ContextUsage
 	// Interrupts is set on RunEventInterrupt.
 	Interrupts []Interrupt
-	// Pending is set on RunEventInterrupt: the same interrupts in the shape
-	// the session persists.
+	// Pending is set on RunEventInterrupt and on RunEventApprovalPending:
+	// the same interrupts in the shape the session persists.
 	Pending []PendingInterrupt
 	// Code is the failure's code, on RunEventError.
 	Code string

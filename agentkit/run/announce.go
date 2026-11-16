@@ -122,6 +122,32 @@ func (rt *Runtime) AnnounceWatchers(sessionID string) int {
 	return p.watcherCount()
 }
 
+// announceApprovalPending says an approval is waiting for an answer.
+//
+// ★ It is published **after** the approval is on disk, and never before:
+//
+//	an approval that is not persisted cannot be answered, so announcing it
+//	would put a card on a surface that offers answers the server refuses.
+//
+// ★ The card's data travels with the fact. A surface that was not watching
+//
+//	the run that raised the approval has no stream of its own, so the tool
+//	name and the arguments exist nowhere else for it — and a card without
+//	them is a card nobody can judge.
+//
+// ★ One fact per approval: a card with several approvals in it is answered
+//
+//	one by one, and each one has its own id.
+func (rt *Runtime) announceApprovalPending(sessionID string, pending []contract.PendingInterrupt, runID string) {
+	for _, p := range pending {
+		rt.announcer.publish(sessionID, contract.RunEvent{
+			Kind:    contract.RunEventApprovalPending,
+			RunID:   runID,
+			Pending: []contract.PendingInterrupt{p},
+		})
+	}
+}
+
 // announceApprovalResolved says the approvals were answered.
 //
 // ★ The approval belongs to the session, and the run that consumed it is a

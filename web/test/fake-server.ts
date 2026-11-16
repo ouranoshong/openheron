@@ -236,6 +236,29 @@ function pendingsFrom(hits: RawInterrupt[]): PendingApproval[] {
   }))
 }
 
+// approvalPendingFrame turns an interrupt into the session's fact.
+//
+// ★ The card's data travels with the fact: a surface that was not watching
+//   the run that raised the approval has no stream of its own, so the tool
+//   name and the arguments exist nowhere else for it — and a card without
+//   them is a card nobody can judge.
+function approvalPendingFrame(hit: RawInterrupt, runId: string): RunEvent {
+  return {
+    type: "CUSTOM",
+    name: "approval_pending",
+    value: {
+      interrupt_id: hit.id,
+      reason: hit.reason,
+      message: hit.message,
+      tool_call_id: hit.toolCallId,
+      tool_name: hit.metadata?.toolName,
+      arguments: hit.metadata?.arguments,
+      subagent_run_id: hit.subagentRunId,
+      run_id: runId,
+    },
+  }
+}
+
 const USAGE: Usage = {
   promptTokens: 100,
   completionTokens: 50,
@@ -323,6 +346,13 @@ export const SCENARIOS = {
   // ★ cutLive: the round's stream is cut and the round goes on — it raises
   //   its approval a moment later. ★ The approval is never on the wire.
   cutLive: ["A"],
+
+  // ★ approvalOnChannel: the round's stream is cut, and the approval reaches
+  //   the surface over the **session's channel** — the fact the channel now
+  //   carries (agentkit/run/announce.go). ★ The transcript and the ledger
+  //   catch up later, so a card that is on screen before they do can only
+  //   have come from the channel.
+  approvalOnChannel: ["A"],
 
   // ★ refusedAttach: the round's stream is cut, and the client comes back
   //   for it — and the server refuses the attach **while the ledger's row
@@ -2265,6 +2295,61 @@ export function startFakeServer(port = 0): FakeServer {
         thread!.pendings = pendingsFrom([hit])
         thread!.state = "waiting_approval"
       }, 1500)
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          for (const ev of head) c.enqueue(encode(ev))
+          // ★ The stream is cut: the round goes on without it.
+          c.close()
+        },
+      })
+      return sse(stream)
+    }
+
+    // ★ approvalOnChannel: the round's stream is cut, and the approval
+    //   reaches the surface over the **session's channel**. ★ The channel
+    //   carries the card's data (agentkit/run/announce.go), so a surface
+    //   that never saw the run can still show what it is being asked.
+    //
+    //   ★ The transcript and the ledger catch up later on purpose: a card
+    //   that is on screen before they do can only have come from the
+    //   channel.
+    if (scenario === "approvalOnChannel") {
+      const head: RunEvent[] = [
+        started(thread!.threadId, runId),
+        textStart(msgId, "assistant"),
+        textDelta(msgId, `${marker} working`),
+      ]
+      for (const ev of head) applyToMessage(assistantMsg, ev)
+      thread!.runs = [
+        ...(thread!.runs ?? []),
+        {
+          runId,
+          state: "running",
+          kind: "query",
+          startedAt: new Date().toISOString(),
+          events: head,
+          messageId: assistantMsg.id,
+        },
+      ]
+      thread!.state = "running"
+      const hit: RawInterrupt = {
+        id: "int-1",
+        reason: "tool_call",
+        message: "write_file requires approval",
+        toolCallId: "call_1",
+        metadata: { toolName: "write_file", arguments: { file_path: "/tmp/x.txt" } },
+      }
+      // ★ The approval lands: the session hears about it right away.
+      setTimeout(() => {
+        publish(thread!.threadId, approvalPendingFrame(hit, runId))
+      }, 1000)
+      // ★ The ledger and the transcript catch up later.
+      setTimeout(() => {
+        const run = (thread!.runs ?? []).find((r) => r.runId === runId)
+        if (run) run.state = "waiting_approval"
+        thread!.pendings = pendingsFrom([hit])
+        thread!.state = "waiting_approval"
+      }, 8000)
       const stream = new ReadableStream<Uint8Array>({
         start(c) {
           for (const ev of head) c.enqueue(encode(ev))
