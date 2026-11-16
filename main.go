@@ -262,20 +262,20 @@ func configLoadError(svc *spec.Service, err error) error {
 	return fmt.Errorf("config: load %s: %w", svc.Root(), err)
 }
 
-// initConfigIfEmpty writes the factory configuration when the process starts on
-// a project that has none.
+// initConfigIfEmpty writes the factory configuration when the process starts
+// with the defaulted config root and nothing in it.
 //
-// ★ Only the **defaulted** root is filled: `--config-dir` and
-// `$OPENHERON_CONFIG_DIR` name a root, and a named root that is empty is the
+// ★ Only the **defaulted** root is filled: `--config-root` and
+// `$OPENHERON_CONFIG_ROOT` name a root, and a named root that is empty is the
 // user's decision, not a gap for us to fill. ★ The test instance names its
 // root, so it never has a configuration written under it.
 //
 // ★ The plan is the one `openheron init` builds — the same templates, the
 // same rules — so "the server created it" and "the command created it" are the
 // same tree. The model is the provider template's own default
-// (deepseek/deepseek-flash) and the api key is read at request time from the
-// environment or from the keyring, exactly as with `openheron init` without
-// flags.
+// (deepseek/deepseek-flash) and the api key is read when the configuration
+// loads, from the environment or from the keyring, exactly as with
+// `openheron init` without flags.
 //
 // ★ "Empty" means **no agent file**: a tree that has one is a configuration,
 // whether or not it loads, and this must not touch it. The plan itself skips
@@ -302,7 +302,7 @@ func initConfigIfEmpty(svc *spec.Service, log *slog.Logger) error {
 	log.Info("[main] configuration initialized", "dir", svc.Root(),
 		"model", plan.Model, "files", len(plan.Files))
 	if plan.EnvHint != "" {
-		log.Info("[main] the api key is read at request time",
+		log.Info("[main] the api key is read when the configuration loads",
 			"env", plan.EnvHint, "keyring", plan.SecretHint)
 	}
 	return nil
@@ -404,7 +404,7 @@ func applyLogLevel(log *slog.Logger, level *slog.LevelVar, c *spec.Config) {
 //	directory) would be discovered at startup. The probe makes both visible
 //	while there is still someone to tell.
 //
-// ★ The path is inside the config root, with the rest of the runtime state.
+// ★ The path is inside the openheron root, with the rest of the runtime state.
 //
 //	OPENHERON_LOG_FILE overrides it for one run, the way OPENHERON_LOG_LEVEL
 //	does: an operator who has to capture a log should not have to edit the

@@ -157,7 +157,7 @@ func reportInit(plan *initcfg.Plan, root string, dryRun, asJSON bool, stdout io.
 		//   precedence: the environment wins over the keyring. A user who
 		//   stores a key while an old export is still in the shell would
 		//   otherwise see "stored" and a key that is not in force.
-		fmt.Fprintf(stdout, "the api key is read at request time from %s, or from the keyring entry %s\n",
+		fmt.Fprintf(stdout, "the api key is read from %s when the configuration loads, or from the keyring entry %s\n",
 			plan.EnvHint, plan.SecretHint)
 		fmt.Fprintf(stdout, "store one with: openheron secret set llm <provider>\n")
 	}
@@ -176,9 +176,10 @@ func printInitUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Written: agents/main.md, agents/task.md, agents/agent-expert.md,")
 	fmt.Fprintln(stdout, "        agents/skill-expert.md, llm/<provider>.yaml, server/config.yaml,")
-	fmt.Fprintln(stdout, "        tools/{filesystem,http,kb,web_search,wikipedia}.yaml,")
+	fmt.Fprintln(stdout, "        tools/{filesystem,http,kb,web_search,wikipedia,config}.yaml,")
 	fmt.Fprintln(stdout, "        mcps/{fetch,time,deepwiki}.yaml,")
-	fmt.Fprintln(stdout, "        skills/openheron-config-{map,edit,templates,validate}/SKILL.md.")
+	fmt.Fprintln(stdout, "        skills/openheron-config-{map,edit,templates,validate}/SKILL.md,")
+	fmt.Fprintln(stdout, "        skills/openheron-agent-authoring/SKILL.md.")
 	fmt.Fprintln(stdout, "--no-tools leaves tools/ unwritten; every other partition is always written.")
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "The api key is not written to the configuration: the provider's name says")
