@@ -644,7 +644,7 @@ it still protects that agent's window. The derivation only picks up the **root's
 | the finalizer | `finalize`, same file | the replacement history is the agent's system messages **plus the summary** — openheron's context prompt is a system message (`agentkit/run/input.go`), and dropping it would leave the agent without its rules for the rest of the turn |
 | the announcement | eino's `after_summarize` event | the middleware publishes the replacement history on the agent's event stream |
 | the pickup | `compactionFrom` in `agentkit/emit/emit.go` | the derivation reads the event and puts the compacted message on `Artifacts.Compaction` — the **summary**, not the system message that shares the replacement history |
-| the write | `archiveCompaction` in `agentkit/run/loop.go:362` | the message is appended to the transcript **before the turn's own messages** |
+| the write | `archiveCompaction` in `agentkit/run/loop.go:373` | the message is appended to the transcript **before the turn's own messages** |
 | the boundary | `message/compaction.go:103` | the marker rides on that message, so the transcript stays the single source of truth |
 
 ★ **The write order is not a detail.** The compacted message summarizes everything that came

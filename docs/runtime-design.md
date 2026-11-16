@@ -128,16 +128,43 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 ★ **终态行写在归档落地之后。** 单是这个次序，就让忙标记天然诚实：扫描看到
 `completed` 就知道消息已经在盘上，不必等任何超时。
 
-实现顺序在 `agentkit/run/loop.go:212-216`：`rt.archive` → `turn.markArchived()` →
-`rt.finishRun`。`finishRun`（`agentkit/run/loop.go:277`）把消费者的错误带进终态：
+实现顺序在 `agentkit/run/loop.go:218-222`：`rt.archive` → `turn.markArchived()` →
+`rt.finishRun`。`finishRun`（`agentkit/run/loop.go:283`）把消费者的错误带进终态：
 模型超时记作 `failed`，用户停掉记作 `aborted`（`agentkit/run/turn.go:428` 的
 `failedState`）。★ 少了这一步，账本就成了唯一会撒谎的地方 —— 它会把一个中途死掉
 的 turn 记成 `completed`。
 
 ★ **一个例外：以抛审批结束的 run 要等 loop 退出。** 审批和 checkpoint 是在那里写的
-（`agentkit/run/bridge.go:227` 的 `writeHeldApproval`），而扫描不能比「用户要答的那
+（`agentkit/run/bridge.go:255` 的 `writeHeldApproval`），而扫描不能比「用户要答的那
 个问题已经落盘」更早地宣布这一轮结束。所以那一行的终态写在 `closeApprovalRow`
-（`agentkit/run/bridge.go:180`），排在审批落盘之后。
+（`agentkit/run/bridge.go:208`），排在审批落盘之后。
+
+#### 释放排在屏障之后
+
+★ **turn 的释放排在屏障之后，不排在它前面。** 一轮结束要做两件事：**释放 turn**
+（准入闸门读的那个指针，`agentkit/run/bridge.go:73` 的 `markTurnDone`）与**立起屏障**
+（审批落盘 + 终态行）。★ 它们的先后不是风格问题：服务端拒绝挂靠看的就是那个 turn 指针
+（`agentkit/run/runtime.go:1010` 的 `LiveRun`），而审批是在屏障那一侧写的 ——
+★ **先释放，就会在两者之间开出一道缝**：缝里的 attach 收到 404，而它要找的那条审批
+还没落盘，transcript 里也没有。用户看到的现象是「审批卡自己不见了，刷新一下又回来了」。
+
+现在这一轮结束时，次序是（`agentkit/run/bridge.go:186-197`）：
+
+| 次序 | 做什么 | 落点 |
+|---|---|---|
+| 1 | 写审批 | `writeHeldApproval` → `SetPendingApproval` |
+| 2 | 立起屏障（终态行） | `closeApprovalRow` → `row.finish(waiting_approval)` |
+| 3 | 关发布方 | `turn.publisher.Close()` |
+| 4 | **释放 turn** | `st.markTurnDone(turn)` |
+
+★ 所以缝里的 attach 挂得上：它从这一轮自己的窗口里回放出了那条审批
+（`agentkit/run/publish.go:144` 的 `Subscribe` 回放窗口）—— **审批从线上回来了，
+不是从 transcript 里翻出来的**。
+
+★ **准入闸门没有因此变松。** 「忙」判定是 `st.turn != nil && st.loop != nil`
+（`agentkit/run/runtime.go:304`），而 `st.loop` 在 loop 退出时照旧清掉 ⇒ 屏障那几毫秒里
+会话不忙，与改动之前一样。★ 一个从**别的路径**进来的人（另一个实例接管、陈旧账本）
+仍然可能吃到 404，所以客户端的「等屏障」状态留着（§1.6）。
 
 ★ **第一行在 loop 启动之前就写。** `claimTurn` 先 `openRunRow`
 （`agentkit/run/runtime.go:298`），再开跑；写不进去就把槽位还回去并拒绝 —— 一个
@@ -314,15 +341,21 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
   ★ 还有活跃的一轮 ⇒ 这一轮还在跑 ⇒ 客户端重新挂上去（`reattach`，
   `web/src/lib/store/actions.ts:648`），剩下的部分照常渲染，审批照常到达。
 - ★ **`run_not_live` 说的是「运行时的 turn 没了」，不是「transcript 里已经有审批了」。**
-  ★ 服务端拒绝挂靠，看的是**运行时的易失 turn**（`agentkit/run/runtime.go:1002` 的
-  `LiveRun`）；而落盘的次序是：先释放 turn（`agentkit/run/bridge.go:142`），再写审批
-  （`:163`），最后立起账本的屏障（`:164`）。★ **拒绝与审批之间因此有一道缝**：客户端在
-  这道缝里收到 404，而此刻 transcript 里还没有那条审批 —— 读一次就放弃，等于把审批
-  永远藏起来，用户只能靠刷新页面把它逼出来。
-- ★ **所以 404 之后是等屏障，不是读一次 transcript 就走。** 恢复计划多了一个「等」的状态
+  ★ 服务端拒绝挂靠，看的是**运行时的易失 turn**（`agentkit/run/runtime.go:1010` 的
+  `LiveRun`）。★ 这个指针**曾经**在审批落盘之前就被释放（`agentkit/run/bridge.go:142`
+  那句 `st.turn = nil`），而落盘的次序是「释放 turn → 写审批 → 立起账本的屏障」——
+  ★ **拒绝与审批之间因此有一道缝**：客户端在这道缝里收到 404，而此刻 transcript 里还没有
+  那条审批 —— 读一次就放弃，等于把审批永远藏起来，用户只能靠刷新页面把它逼出来。
+  ★ **服务端把缝关上了**：turn 现在在「审批已落盘 + 账本行终态 + 发布方已关闭」之后才
+  释放（`agentkit/run/bridge.go:197` 的 `markTurnDone`），而拒绝挂靠看的是同一个指针 ⇒
+  缝里的 attach 现在**挂得上**，挂上之后那一轮自己的窗口里带着那条审批（见 §1.2 的
+  「释放排在屏障之后」）。
+- ★ **所以 404 之后仍然是等屏障，不是读一次 transcript 就走。** 恢复计划多了一个「等」的状态
   （`web/src/lib/attach.ts:76` 的 `recoveryPlan`）：★ 被拒的那一轮在账本里**还不是终态**
   ⇒ 屏障还没立起来 ⇒ 等账本（`RECOVER_WAIT_MS`）再问一次；终态了 ⇒ 审批必定已经在盘上
-  （屏障站在审批卡后面，`agentkit/run/bridge.go:176`）⇒ 这时才读 transcript。★
+  （屏障站在审批卡后面，`agentkit/run/bridge.go:204`）⇒ 这时才读 transcript。★
+  ★ 服务端关了缝，客户端这一层**仍然留着**：另一个实例的旧账本、陈旧的服务端，两种情况下
+  404 依然可能出现 —— 客户端不能把「服务端已经修好」当成契约。★
   这道缝很窄但真实：2026-11-15 用户实例的账本里，那一次 attach 比账本行关闭早 **13ms**。
 - ★ **要跟哪一轮，由账本说了算。** ★ 会话自己记住的那个 run id 是「这个界面最后看见的
   那一轮」，而**答完审批之后的那一轮是新的 run** —— 客户端要等它 announce 才知道它的 id。
@@ -340,7 +373,7 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 - ★ **窗口的回放与登记在同一把锁里**（`agentkit/run/publish.go:144` 的 `Subscribe`），
   所以一个订阅者每个事件恰好看一次：先是窗口里的那些，然后是随后来的那些。
 - ★ **run 在这一轮结束**时才关掉订阅** —— 而一个以抛审批结束的这一轮，在审批落盘
-  之前不算结束**（`agentkit/run/bridge.go:169`）。这不是细节：客户端是从通道关闭那一刻
+  之前不算结束**（`agentkit/run/bridge.go:192`）。这不是细节：客户端是从通道关闭那一刻
   知道「有审批」的，所以一个在审批落盘之前就关掉的通道，等于邀请客户端去回答一个
   服务端还找不到的审批。
 
@@ -351,7 +384,7 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 ### 1.7 会话公告通道：审批不属于任何一轮
 
 ★ **审批属于会话，不属于任何一轮。** 抛出审批的那一轮在抛出审批的那一刻就结束了
-（§1.6：loop 退出时关发布方，`agentkit/run/bridge.go:169`），而审批还在等一个答案。
+（§1.6：loop 退出时关发布方，`agentkit/run/bridge.go:192`），而审批还在等一个答案。
 于是「审批被回答了」这个事实**无处可去** —— 它不能骑在旧一轮的总线上，那条总线已经
 死了；而等着这个答案的界面，手里那张卡于是永远留着，它给的每一个答案服务端都会拒。
 
@@ -491,10 +524,10 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 
 ★ **闸门与 `stateOf` 刻意读的不是同一个东西。** `stateOf` 走 `StatusOf`，而它是从
 **run 账本**推导 `PhaseRunning` 的 —— 也就是对这个会话的 run 做的那次扫描。闸门则
-直接读 `turn` + `loop` 这一对。两者是在同一口气里被释放的：终态行落在归档那条路上
-（`agentkit/run/loop.go:216`），闸门由 `markTurnDone`（`agentkit/run/bridge.go:67`）
-晚一点点放开。于是，一轮答案落地后的片刻，**界面**可能已经说着「空闲」，而**闸门**
-还没放行下一次查询。
+直接读 `turn` + `loop` 这一对。两者不是同一口气里被释放的：终态行落在归档那条路上
+（`agentkit/run/loop.go:216`），闸门由 `markTurnDone`（`agentkit/run/bridge.go:73`）
+在**屏障立起之后**才放开（§1.2 的「释放排在屏障之后」）。于是，一轮答案落地后的片刻，
+**界面**可能已经说着「空闲」，而**闸门**还没放行下一次查询。
 
 这个不对称是对的：
 
@@ -696,7 +729,7 @@ Agent 上的那个设置（`agentkit/spec/load.go:82-86`）。
 
 **落盘的是什么。** 替换后的历史是**一条消息**。就这一个事实，让持久化变得简单：
 
-- **压缩消息**像别的消息一样追加进 transcript（`agentkit/run/loop.go:362` 的
+- **压缩消息**像别的消息一样追加进 transcript（`agentkit/run/loop.go:373` 的
   `archiveCompaction`）：一行，一条 `schema.Message`。格式版本不动
   （`formatVersion`，`storage/filestore/session.go:661`），既有读法照旧。
 - **边界**搭在这条消息上，放在 `Extra` map 里（`message/compaction.go:14` 的
@@ -978,7 +1011,7 @@ stderr（`main.go:296-300`）。
 ★ **挂上请求不带问题**（`api/v2_run.go:224` 的 `isAttachRequest`）：带问题就意味着
 「开始一轮新的」，在这里开始一轮新的等于把用户那句话悄悄跑第二遍。挂上走
 `attachRun`（`api/v2_run.go:241`），它按 id 找到那个活着的 run
-（`agentkit/run/runtime.go:1002` 的 `LiveRun`），订阅它并渲染它的窗口。
+（`agentkit/run/runtime.go:1010` 的 `LiveRun`），订阅它并渲染它的窗口。
 
 ★ **结束的 run 挂不上。** 服务端回 **404 `run_not_live`**
 （`api/v2_run.go:244`，码在 `api/v2_types.go:58`），而不是开始一轮新的 —— 客户端对
@@ -1233,6 +1266,16 @@ stderr（`main.go:296-300`）。
 8. ★ **日志的 JSON 格式。**
    `log.format` 需要第二个 handler，而现在的 `Handler` 是手写的文本封装。留作后续
    迭代 —— **不预留空键**，配置里没有这个键（§4.3）。
+
+9. ★ **准入闸门要不要也等到屏障？**
+   turn 的释放已经排在屏障之后（§1.2），而准入闸门读的是 `st.turn` 与 `st.loop` 这一对
+   （`agentkit/run/runtime.go:304`）。★ `st.loop` 在 loop 退出时照旧清掉 ⇒ 屏障立起前的
+   那几毫秒里，会话**不忙**：一个这时进来的新问题会被放行，而它顶掉的那一轮正带着一条
+   还没落盘的审批 —— 顶替走的是「过期」分支，那条分支不写审批
+   （`agentkit/run/bridge.go:168`）。★ 也就是说：**新问题抢在审批落盘前到达，那条审批会丢**。
+   ★ **这是未实施的**：把 `st.loop` 也留到屏障之后就能关上它，代价是那几毫秒里会话一直
+   读作忙（409）。★ 窗口很窄（毫秒级），而且改动前更大 —— 改动前是「整段收尾时间」，
+   因为那时连 turn 都先释放了。
 
 ---
 

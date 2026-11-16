@@ -552,7 +552,7 @@ agent** 的压缩（`agentkit/emit/emit.go`）：子 agent 的摘要不是会话
 | finalizer | 同文件的 `finalize` | 替换后的历史是 agent 的 system 消息**加上摘要** —— openheron 的上下文提示就是一条 system 消息（`agentkit/run/input.go`），丢掉它会让 agent 在这一轮余下的时间里没有自己的规则 |
 | 宣告 | eino 的 `after_summarize` 事件 | 中间件把替换后的历史发到 agent 的事件流上 |
 | 接住 | `agentkit/emit/emit.go` 的 `compactionFrom` | 推导层读这个事件，把压缩消息放进 `Artifacts.Compaction` —— 取的是**摘要**，不是同处替换历史里的那条 system 消息 |
-| 落盘 | `agentkit/run/loop.go:362` 的 `archiveCompaction` | 消息被追加到记录里，位置在**本轮消息之前** |
+| 落盘 | `agentkit/run/loop.go:373` 的 `archiveCompaction` | 消息被追加到记录里，位置在**本轮消息之前** |
 | 边界 | `message/compaction.go:103` | 标记搭在这条消息上，所以记录仍是唯一真相源 |
 
 ★ **写入顺序不是细节。** 压缩消息总结的是本轮消息之前的一切，所以必须先写。写在后面，摘要

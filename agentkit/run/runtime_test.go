@@ -344,6 +344,96 @@ func TestInterruptRecordsPendingApproval(t *testing.T) {
 	}
 }
 
+// ★ The run must stay live until its approval is on disk. ★
+//
+// The turn was released as soon as the round produced its answer, and the
+// approval was written after that: an attach that landed in between was
+// refused with "the run is no longer live", and the transcript — which is
+// where the client would look for the approval — could not answer it yet.
+// ★ The barrier is the ledger's row, and the turn is released behind it.
+func TestTheRunStaysLiveUntilItsApprovalIsOnDisk(t *testing.T) {
+	b := &fakeBuilder{agent: func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {
+		return &fakeAgent{script: func(ctx context.Context, emit func(*adk.TypedAgentEvent[*schema.Message]) bool) {
+			emit(textEvent("about to write"))
+			emit(interruptedEvent("agent:A;tool:call_1", "write_file needs approval"))
+			emit(exitEvent())
+		}}
+	}}
+	rt, sm := newTestRuntime(t, b)
+	ctx := context.Background()
+	sess := mustSession(t, sm)
+
+	hit := make(chan struct{}, 1)
+	release := sess.gateApproval(hit)
+	defer release()
+
+	turn, err := rt.Submit(ctx, sess.ID(), "", "write the config", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := turn.Wait(5 * time.Second); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	drain(t, turn)
+
+	// ★ The approval is being written: the run is in the window, and a
+	//	client that re-attaches right now must still find it.
+	select {
+	case <-hit:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the approval was never written")
+	}
+
+	live, ok := rt.LiveRun(sess.ID(), turn.RunID)
+	if !ok || live == nil {
+		t.Fatal("the run must stay live until its approval is on disk")
+	}
+
+	// ★ And the approval has to be in the run's window: that is where the
+	//	attach reads it from, and it is the only place it is before the
+	//	transcript can hold it.
+	sub := live.Subscribe()
+	defer sub.Close()
+	if !hasInterrupt(sub) {
+		t.Fatal("the run's window must carry the approval the attach replays")
+	}
+
+	// ★ The barrier stands behind the approval: once it is on disk the run
+	//	is over, and the client hydrates from the transcript.
+	release()
+	waitFor(t, func() bool {
+		p, _ := sess.PendingApproval()
+		return p != nil && len(p.Interrupts) > 0
+	})
+	waitFor(t, func() bool {
+		_, ok := rt.LiveRun(sess.ID(), turn.RunID)
+		return !ok
+	})
+}
+
+// hasInterrupt reports whether the subscription already carries the run's
+// approval.
+//
+// ★ The subscription replays the run's window when it is made, so the answer
+//
+//	is already in the queue — no waiting, and no blocking on a run that has
+//	ended.
+func hasInterrupt(sub *subscription) bool {
+	for {
+		select {
+		case ev, ok := <-sub.Events():
+			if !ok {
+				return false
+			}
+			if ev.Kind == contract.RunEventInterrupt {
+				return true
+			}
+		default:
+			return false
+		}
+	}
+}
+
 func TestMultiplePendingApprovalsAreAnsweredAsAGroup(t *testing.T) {
 	ids := []string{"agent:A;tool:call_1", "agent:B;tool:call_2"}
 	b := &fakeBuilder{agent: func(int, contract.TurnKind) adk.TypedAgent[*schema.Message] {

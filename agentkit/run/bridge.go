@@ -64,6 +64,12 @@ func (st *sessionState) markStarted(t time.Time) {
 // releasing the waiter are one step on purpose — an HTTP response that ends
 // in between hands the client a session it cannot use, and the client is
 // told "a turn is already running" about the turn it just finished.
+//
+// ★ ★ WHEN it runs is the round's business, not the loop's. ★ A round that
+// raised an approval is not over until that approval is on disk and its
+// ledger row has closed (bridge.go) — releasing the turn earlier would let an
+// attach be refused with "the run is no longer live" while the approval the
+// client needs is nowhere to be found.
 func (st *sessionState) markTurnDone(done *Turn) {
 	st.mu.Lock()
 	if st.turn == done {
@@ -131,6 +137,15 @@ func (rt *Runtime) startLoop(ctx context.Context, sessionID string, turn *Turn,
 //	older loop finishing late must not wipe a newer turn's bookkeeping —
 //	that would make a live session look idle, and the admission gate
 //	would then let a second turn in.
+//
+// ★ ★ The turn is released LAST, after the approval is on disk and the
+//
+//	ledger's row is closed. ★ The server refuses an attach on the
+//	runtime's turn, and the approval is written after that turn would
+//	have been released: a refusal in between tells the client "the run is
+//	no longer live" while the approval it is waiting for is nowhere on
+//	disk — and the transcript, which is where the client would look for
+//	it, cannot answer that yet.
 func (rt *Runtime) loopExited(sessionID string, turn *Turn, loop *adk.TurnLoop[loopItem, *schema.Message],
 	exit *adk.TurnLoopExitState[loopItem, *schema.Message], cancel context.CancelFunc) {
 	st := rt.stateFor(sessionID)
@@ -138,8 +153,12 @@ func (rt *Runtime) loopExited(sessionID string, turn *Turn, loop *adk.TurnLoop[l
 	current := st.loop
 	stale := current != nil && current != loop
 	if current == loop {
+		// ★ The loop is gone; the turn is not released yet. ★ A round is
+		//   over only when its ledger row says so — and until then an
+		//   attach must still find it, or the client is told "the run is no
+		//   longer live" while the approval it is waiting for is nowhere on
+		//   disk. ★ The release is at the end of this function.
 		st.loop = nil
-		st.turn = nil
 	}
 	st.mu.Unlock()
 
@@ -153,6 +172,10 @@ func (rt *Runtime) loopExited(sessionID string, turn *Turn, loop *adk.TurnLoop[l
 		// ★ The run is over even so: its subscribers must not wait for a
 		//   stream that will never come.
 		turn.publisher.Close()
+		// ★ The slot is not ours to give back — a newer turn owns it — but
+		//   the waiter is ours: the response for the run that was
+		//   superseded still has to end.
+		st.markTurnDone(turn)
 		return
 	}
 	if exit != nil && exit.ExitReason != nil {
@@ -167,6 +190,11 @@ func (rt *Runtime) loopExited(sessionID string, turn *Turn, loop *adk.TurnLoop[l
 	//   interrupt: the approval is on disk now, so a client that answers
 	//   it cannot be refused.
 	turn.publisher.Close()
+	// ★ Now the round is over in every sense: the approval is on disk, the
+	//   ledger's row is terminal, the publisher is closed. ★ Only now does
+	//   the turn stop being live — and a client that attaches after this
+	//   reads the transcript, where the approval is.
+	st.markTurnDone(turn)
 	rt.removeStateIfIdle(sessionID)
 }
 

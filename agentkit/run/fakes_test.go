@@ -76,6 +76,19 @@ type fakeSession struct {
 	decisions         []storage.ApprovalRecord
 	ckpt              *fakeCheckpoints
 	ledger            *fakeRunLedger
+
+	// approvalGate and approvalHit are the seam that widens the window
+	// between "the loop has exited" and "the approval is on disk".
+	//
+	// ★ The window is a few milliseconds wide in production, and it is the
+	// window a client that re-attaches lands in: the run's turn was
+	// released before the approval was written, so the attach was refused
+	// with "the run is no longer live" while the approval the client needs
+	// was nowhere on disk yet. ★ The gate holds that window open so a test
+	// can look at the runtime from the inside — the timing is the bug, and
+	// a test that cannot reproduce the timing cannot guard it.
+	approvalGate chan struct{}
+	approvalHit  chan struct{}
 }
 
 func (s *fakeSession) ID() string           { return s.id }
@@ -124,10 +137,41 @@ func (s *fakeSession) SetCursor(cursor int) error {
 }
 
 func (s *fakeSession) SetPendingApproval(p *storage.PendingApproval) error {
+	// ★ The gate comes first: the hit says "the approval is being written",
+	//	and the wait holds the write until the test opens it.
+	s.mu.Lock()
+	gate, hit := s.approvalGate, s.approvalHit
+	s.mu.Unlock()
+	if hit != nil {
+		select {
+		case hit <- struct{}{}:
+		default:
+		}
+	}
+	if gate != nil {
+		<-gate
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pending = p
 	return nil
+}
+
+// gateApproval holds the session's next approval write until the returned
+// function is called.
+//
+// ★ It exists to make the window between "the loop exited" and "the approval
+//
+//	is on disk" observable. ★ The hit channel fires when the write starts,
+//	so a test knows it is inside the window.
+func (s *fakeSession) gateApproval(hit chan struct{}) (release func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	gate := make(chan struct{})
+	s.approvalGate = gate
+	s.approvalHit = hit
+	var once sync.Once
+	return func() { once.Do(func() { close(gate) }) }
 }
 
 func (s *fakeSession) PendingApproval() (*storage.PendingApproval, error) {

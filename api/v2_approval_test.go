@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/ouranoshong/openheron/agentkit/obs"
@@ -201,6 +202,233 @@ func readSessionState(t *testing.T, root, id string) (state, error) {
 
 type state struct {
 	Decisions []storage.ApprovalRecord `json:"decisions"`
+}
+
+// ── the approval window ──────────────────────────────────────────────────
+
+// approvalGate holds a session's approval write open.
+//
+// ★ The window between "the run's loop has exited" and "the approval is on
+//
+//	disk" is a few milliseconds wide in production, and it is the window a
+//	reconnecting client lands in. ★ The gate makes it wide enough to look
+//	at, and the hit channel says when the window is open.
+type approvalGate struct {
+	hit     chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func newApprovalGate() *approvalGate {
+	return &approvalGate{hit: make(chan struct{}, 1), release: make(chan struct{})}
+}
+
+// open lets the held write through.
+func (g *approvalGate) open() { g.once.Do(func() { close(g.release) }) }
+
+// gatedSessionManager holds every approval write of the sessions it hands out.
+type gatedSessionManager struct {
+	storage.SessionManager
+	gate *approvalGate
+}
+
+func (m *gatedSessionManager) Get(ctx context.Context, id string) (storage.Session, error) {
+	sess, err := m.SessionManager.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &gatedSession{Session: sess, gate: m.gate}, nil
+}
+
+// gatedSession holds the approval writes of one session.
+type gatedSession struct {
+	storage.Session
+	gate *approvalGate
+}
+
+func (s *gatedSession) SetPendingApproval(p *storage.PendingApproval) error {
+	select {
+	case s.gate.hit <- struct{}{}:
+	default:
+	}
+	<-s.gate.release
+	return s.Session.SetPendingApproval(p)
+}
+
+// streamSink hands out one capture buffer per connection.
+//
+// ★ The attach is a second connection, and it has to be read on its own: the
+//
+//	run's own stream already carries the approval, and a test that read both
+//	out of one buffer would pass even when the attach carried nothing.
+type streamSink struct {
+	mu      sync.Mutex
+	writers []*bufExtWriter
+}
+
+func (s *streamSink) stream(c *app.RequestContext) *transport.SSEStream {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	w := &bufExtWriter{}
+	s.writers = append(s.writers, w)
+	return transport.NewWithWriter(c, w)
+}
+
+// waitFor waits until the i-th connection carries the wanted text.
+func (s *streamSink) waitFor(t *testing.T, i int, want string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.text(i).contains(want) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("stream %d never carried %q: %s", i, want, s.text(i).string())
+}
+
+// text reads one connection's capture buffer.
+func (s *streamSink) text(i int) captured {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if i >= len(s.writers) {
+		return captured{}
+	}
+	return captured{body: s.writers[i].String()}
+}
+
+// captured is what one connection wrote.
+type captured struct{ body string }
+
+func (c captured) contains(want string) bool { return strings.Contains(c.body, want) }
+func (c captured) string() string            { return c.body }
+
+// An attach that lands while the approval is being written must still be
+// served — and it must carry the approval with it.
+//
+// ★ The server refuses an attach on the runtime's turn, and the turn used to
+//
+//	be released before the approval reached the disk: an attach in between was
+//	answered "the run is no longer live", and the client had nothing to show
+//	— the transcript could not hold the approval yet either. ★ The run keeps
+//	its turn until the barrier stands, so the attach is served and the
+//	approval comes straight out of the run's own window.
+func TestAnAttachDuringTheApprovalWriteIsServed(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "sessions")
+
+	fm, err := filestore.NewFileManager(root, filestore.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := newApprovalGate()
+	defer gate.open()
+	sm := &gatedSessionManager{SessionManager: fm, gate: gate}
+
+	rt := run.New(run.Config{
+		AgentBuilder:   interruptingBuilder{},
+		SessionManager: sm,
+		Input:          run.InputConfig{},
+		StartTimeout:   5 * time.Second,
+	})
+	t.Cleanup(func() { _ = rt.Shutdown(ctx) })
+
+	engine := route.NewEngine(hertzconfig.NewOptions(nil))
+	srv := New(rt, sm, obs.Discard())
+	srv.h = engine
+	sink := &streamSink{}
+	srv.newStream = sink.stream
+	srv.registerRoutes()
+	t.Cleanup(func() { _ = engine.Close() })
+
+	id := createThread(t, srv)
+	sess, err := srv.sm.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// ★ The run's own response ends when the run ends — and the run ends
+	//	when the approval is written, which the gate holds. ★ So the request
+	//	has to run beside the test, not in front of it.
+	runDone := make(chan result, 1)
+	go func() {
+		runDone <- callJSON(t, srv, "POST", "/v2/run", map[string]any{
+			"threadId": id,
+			"query":    "写个文件",
+		})
+	}()
+
+	// ★ The approval is being written: the run is in the window, and this is
+	//	where a reconnecting client lands.
+	select {
+	case <-gate.hit:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the approval was never written")
+	}
+
+	runID := activeRunID(t, srv, id)
+	attachDone := make(chan result, 1)
+	go func() {
+		attachDone <- callJSON(t, srv, "POST", "/v2/run", map[string]any{
+			"threadId": id,
+			"runId":    runID,
+		})
+	}()
+
+	// ★ The attach was served: its own stream opened. ★ A refused attach
+	//	writes nothing — the refusal is a JSON body, not a stream.
+	sink.waitFor(t, 1, "RUN_STARTED")
+
+	// ★ The barrier stands behind the approval: once it is on disk the run
+	//	is over, and the run's own response ends.
+	gate.open()
+
+	attach := <-attachDone
+	if attach.code != 200 {
+		t.Fatalf("the attach must be served while the approval is being written: %d (%s)",
+			attach.code, attach.body)
+	}
+	if !sink.text(1).contains("int-e2e") {
+		t.Fatalf("the attach must carry the approval: %s", sink.text(1).string())
+	}
+	if got := <-runDone; got.code != 200 {
+		t.Fatalf("run = %d (%s)", got.code, got.body)
+	}
+
+	// ★ And now the run is over: the same attach is refused, and the client
+	//	reads the transcript instead — where the approval is.
+	waitForPending(t, sess, 1)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := rt.LiveRun(id, runID); !ok {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	late := callJSON(t, srv, "POST", "/v2/run", map[string]any{
+		"threadId": id,
+		"runId":    runID,
+	})
+	if late.code != 404 {
+		t.Fatalf("a finished run must be refused: %d (%s)", late.code, late.body)
+	}
+}
+
+// activeRunID reads the run that owns the session.
+func activeRunID(t *testing.T, srv *Server, id string) string {
+	t.Helper()
+	got := callJSON(t, srv, "GET", "/v2/sessions/"+id+"/runs", nil)
+	if got.code != 200 {
+		t.Fatalf("runs = %d (%s)", got.code, got.body)
+	}
+	var view runsView
+	if err := json.Unmarshal([]byte(got.body), &view); err != nil {
+		t.Fatalf("decode: %v (%s)", err, got.body)
+	}
+	if view.ActiveRunID == "" {
+		t.Fatalf("the session must have an active run: %s", got.body)
+	}
+	return view.ActiveRunID
 }
 
 type interruptingBuilder struct{}

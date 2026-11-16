@@ -332,7 +332,7 @@ A 放弃时发现槽位不是它的（走掉），B 放弃时发现槽位是它�
 用户看着一个解不开的死结。
 
 **根因**：★ **审批属于会话，事件属于轮次。** 抛出审批的那一轮在抛出审批的那一刻就结束
-了（`agentkit/run/bridge.go:169` 关掉发布方），而审批还在等一个答案 ⇒ 「审批被回答了」
+了（`agentkit/run/bridge.go:192` 关掉发布方），而审批还在等一个答案 ⇒ 「审批被回答了」
 这个事实**无处可去** —— 它不能骑在旧一轮的总线上，那条总线已经死了。
 
 ★ 客户端这一侧也没有别的通道：`applyScan`（`web/src/lib/store/actions.ts:821`）只改
@@ -367,8 +367,8 @@ A 放弃时发现槽位不是它的（走掉），B 放弃时发现槽位是它�
 而**审批窗口弹不出来** —— 用户只能刷新页面才看得见那张卡。
 
 **根因**：★ **服务端拒绝挂靠，看的是运行时的易失 turn；而审批落盘在释放 turn 之后。**
-落盘的次序是：先释放 turn（`agentkit/run/bridge.go:142`），再写审批（`:163`），最后立起
-账本的屏障（`:164`）。★ 于是「这一轮没了」与「审批在盘上」之间有**一道缝**。
+落盘的次序是：先释放 turn，再写审批，最后立起账本的屏障。★ 于是「这一轮没了」与「审批在
+盘上」之间有**一道缝**。
 
 ★ 而客户端把 404 读成了「transcript 里已经有答案了」—— 读一次 transcript 就放弃。
 ★ 那一次读取正好落在缝里：transcript 里还没有那条审批 ⇒ 界面停在旧状态 ⇒
@@ -377,17 +377,36 @@ A 放弃时发现槽位不是它的（走掉），B 放弃时发现槽位是它�
 ★ 缝有多宽：2026-11-15 用户实例的账本里，那一次 attach 请求比那一行关闭早 **13ms**
 （21:44:16.6898 对 21:44:16.7030）。
 
-**修法**：★ 404 不再是一次性的「读 transcript」，而是**回到恢复流程**；而恢复流程多了一个
-「等」的状态（`web/src/lib/attach.ts:76` 的 `recoveryPlan`）：★ 被拒的那一轮在账本里
-**还不是终态** ⇒ 屏障还没立起来 ⇒ 等账本再问一次；终态了 ⇒ 审批必定已经在盘上（屏障站在
-审批卡后面，`agentkit/run/bridge.go:176`）⇒ 这时才读 transcript。
+**修法（服务端）**：★ **把释放挪到屏障之后。** 拒绝挂靠看的就是那个 turn 指针，而审批是在
+屏障那一侧写的 —— ★ 先释放就必然开缝。★ 现在这一轮结束时的次序是「写审批 → 立起屏障
+→ 关发布方 → 释放 turn」（`agentkit/run/bridge.go:186-197`），⇒ 缝里的 attach 挂得上，
+挂上之后那一轮自己的窗口里带着那条审批（`agentkit/run/publish.go:144` 回放窗口）——
+**审批从线上回来了**。★ 准入闸门没有因此变松：「忙」判定要 `st.turn` 与 `st.loop` 都在
+（`agentkit/run/runtime.go:304`），而 `st.loop` 照旧在 loop 退出时清掉。
+
+**修法（客户端）**：★ 404 不再是一次性的「读 transcript」，而是**回到恢复流程**；而恢复流程
+多了一个「等」的状态（`web/src/lib/attach.ts:76` 的 `recoveryPlan`）：★ 被拒的那一轮在
+账本里**还不是终态** ⇒ 屏障还没立起来 ⇒ 等账本再问一次；终态了 ⇒ 审批必定已经在盘上
+（屏障站在审批卡后面，`agentkit/run/bridge.go:204`）⇒ 这时才读 transcript。
+★ **服务端关了缝，客户端这一层仍然留着**：另一个实例的旧账本、陈旧的服务端，两种情况下
+404 依然可能出现 —— 客户端不能把「服务端已经修好」当成契约。
 
 ★ 顺带修掉的是**挂回去的目标**：★ 答完审批之后的那一轮是**新的 run**，客户端要等它 announce
 才知道它的 id；用会话自己记住的 run id 去挂，挂的是上一轮（早就结束的那一轮）。★ 账本的
 `activeRunId` 才是「还在跑的那一轮」（`web/src/lib/store/actions.ts:648`）。
 
-**现状**：`已修` —— 客户端 `web/src/lib/attach.ts`、`web/src/lib/store/actions.ts`；
-用例在 `web/test/attach.test.ts`、`web/test/store-recover.test.ts`、
+★ **剩下的边界**：★ 准入闸门读的是 `st.turn` 与 `st.loop` 这一对，而 `st.loop` 在 loop 退出时
+照旧清掉 ⇒ 审批落盘前的几毫秒里会话**不忙** ⇒ 一个这时进来的**新问题**会被放行，而它顶掉的
+那一轮带着一条还没落盘的审批 —— 顶替走的是「过期」分支，那条分支不写审批 ⇒ **审批会丢**。
+★ 窗口很窄（毫秒级），而且改动前更大（那时连 turn 都先释放了）。★ 关掉它的办法与它的代价在
+`docs/runtime-design.md` §7 第 9 条（**未实施**）。
+
+**现状**：`已修` —— 服务端 `agentkit/run/bridge.go`（`loopExited`）与
+`agentkit/run/loop.go`（`finalize`）；客户端 `web/src/lib/attach.ts`、
+`web/src/lib/store/actions.ts`。
+用例在 `agentkit/run/runtime_test.go`（`TestTheRunStaysLiveUntilItsApprovalIsOnDisk`）、
+`api/v2_approval_test.go`（`TestAnAttachDuringTheApprovalWriteIsServed`）、
+`web/test/attach.test.ts`、`web/test/store-recover.test.ts`、
 `web/test/e2e/approval-recovery.spec.ts`。
 
 ## 4. 文件系统后端

@@ -521,8 +521,8 @@ func (rt *Runtime) ensureIdle(ctx context.Context, sess storage.Session) error {
 //
 //	directions. It answers an approval, and the approval is written after
 //	the round that raised it has finished, so a resume never overlaps a
-//	query: the round's turn is cleared when its outcome is archived
-//	(markTurnDone), and the approval lands after that.
+//	query: the round's turn is cleared when its ledger row is terminal
+//	(markTurnDone), and that row closes after the approval lands.
 //
 // ★ Two resumes do overlap — the second one finds the approval already
 //
@@ -540,14 +540,14 @@ func conflictTurns(kind, live contract.TurnKind) bool {
 //
 // ★ It asks about the LOOP, not the turn pointer alone. st.turn is
 //
-//	cleared when the turn finishes archiving (markTurnDone), so it lags:
-//	a turn that has already produced its answer still reads as "running"
-//	for a moment, and refusing on that would be a false positive. The
-//	loop is the thing that is actually executing.
+//	cleared when the round's ledger row is terminal (markTurnDone), so it
+//	lags: a turn that has already produced its answer still reads as
+//	"running" for a moment, and refusing on that would be a false positive.
+//	The loop is the thing that is actually executing.
 //
 // ★ Both are needed. st.turn is set while the turn runs and cleared once
 //
-//	its outcome is archived; st.loop is set while the loop lives, which
+//	its row is terminal; st.loop is set while the loop lives, which
 //	is longer — the loop stays alive waiting for the next item. The pair
 //	reads "busy" only while a turn is genuinely in flight.
 func (rt *Runtime) ensureNoLiveTurn(ctx context.Context, sess storage.Session) error {
@@ -997,8 +997,16 @@ type RunSnapshot struct {
 //
 // ★ A run that has finished is not live: its turn is released when its
 //
-//	archive lands, so an attach that arrives too late finds nothing and
-//	the client has to hydrate from the transcript.
+//	ledger row is terminal, so an attach that arrives too late finds
+//	nothing and the client has to hydrate from the transcript.
+//
+// ★ The row is the barrier, and it stands behind the approval. ★ A run
+//
+//	that raised an approval keeps its turn until that approval is on disk
+//	and its row has closed (bridge.go): an attach that arrives in between
+//	is still served — it reads the approval out of the run's window —
+//	instead of being told "the run is no longer live" while the approval
+//	it needs is nowhere to be found.
 func (rt *Runtime) LiveRun(sessionID, runID string) (*Turn, bool) {
 	if runID == "" {
 		return nil, false

@@ -313,7 +313,17 @@ func (rt *Runtime) finalize(sess storage.Session, turn *Turn, out Outcome) error
 	//   the session state made /v2/sessions/{id} keep reporting "running"
 	//   forever after a completed turn — the loop stays alive waiting for
 	//   the next item, so "a loop exists" says nothing about activity.
-	rt.stateFor(sess.ID()).markTurnDone(turn)
+	//
+	// ★ A run that ended by raising an interrupt is the exception. ★ Its
+	//   approval and its checkpoint are written at the loop's exit, and the
+	//   ledger's row closes behind them — so the round is not over yet, and
+	//   the turn must not be released: ★ an attach that arrives in between
+	//   would be refused with "the run is no longer live", and that refusal
+	//   says nothing about the approval, which is not on disk yet. ★ The
+	//   release waits for the loop's exit (bridge.go).
+	if !turn.awaitingApproval {
+		rt.stateFor(sess.ID()).markTurnDone(turn)
+	}
 
 	if out.Err != nil {
 		return out.Err
