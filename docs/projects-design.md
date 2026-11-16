@@ -334,19 +334,26 @@ React 的 `preventDefault` 来不及 ⇒ 唯一能拦住的是 `onEscapeKeyDown`
 
 会话的 project root = **它所属项目的 root**；未选项目的会话用**默认项目根**。
 
-★ 三处必须永远一致 —— 任何一处不一致，model 就会在一个目录被告知去另一个目录读写：
+★ **四处必须永远一致** —— 任何一处不一致，model 就会在一个目录被告知去另一个目录读写：
 
-| 面 | 今天 | 要变成 |
+| 面 | 在哪儿 | 现在是什么 |
 |---|---|---|
-| prompt 里的 `Project root:` | `agentkit/run/input.go:170-186`，用的是 runtime 的值 | **会话的** root |
-| `@` 提及选择器 | `api/v2_project.go:72`，用 `cfgSvc.ProjectRoot()` | **会话的** root |
-| fsx 写边界 | `agentkit/build/snapshot.go:101-110`，`Root` 写死 | **per-session** |
+| prompt 里的 `Project root:` | `agentkit/run/input.go:104-111` | **会话的** root |
+| `@` 提及选择器 | `api/v2_project.go:95-116` 的 `projectRootOf` | **会话的** root |
+| fsx 写边界 | `agentkit/fsx/fsx.go:283-292` 的 `writeRoots` | **本轮**的 root（ctx 带的那个） |
+| `execute` 的工作目录 | `agentkit/fsx/fsx.go:957` | **本轮**的 root（同一个 ctx 值） |
+
+★ **第四处是漏掉的那一处**：它一度烤在后端自己的 `Root` 里，而那个 root 是**默认项目根** ——
+后端建一次、被所有轮次共用，于是每个会话的命令都跑在「没有项目归属」的那个目录里。
+★ 提示词写着会话的目录、写的边界也守着会话的目录，只有命令的工作目录在别处 ——
+★ 一个跑在别处的命令，它的输出不说明它自己说明了什么。
+（`grep` 的工作目录是同一处，`agentkit/fsx/fsx.go:528`。）
 
 ★ **读不用动**：fsx 本来就不设读边界（`agentkit/fsx/fsx.go:14-16`）——
 `execute` 都能 cat 任意文件，把 `read_file` 关进笼子买不到安全。多根对读几乎没有成本。
 
-★ **写边界是唯一有架构代价的一步**。今天的边界是 `Root + ExtraRoots`
-（`agentkit/fsx/fsx.go:240-247`），`Root` 在 builder 里写死（`agentkit/build/snapshot.go:102`），
+★ **写边界是唯一有架构代价的一步**。后端是**共享**的：`Root` 在 builder 里定下
+（`agentkit/build/snapshot.go:102`），
 而 backend 被 `heavyOnce` 缓存（`agentkit/build/snapshot.go:78-82`），一个配置版本只建一次。
 一个 backend 服务多个 root，只有两条路：
 
@@ -356,22 +363,22 @@ React 的 `preventDefault` 来不及 ⇒ 唯一能拦住的是 `onEscapeKeyDown`
 - (b) 把所有项目根塞进 `ExtraRoots`：代码少，但一个会话能写另一个项目的目录。
 
 ★ **落地时把名字改了一点**：设计里写的是 `fsx.WithWriteRoots`，代码里是
-`fsx.WithProjectRoot`（`agentkit/fsx/context.go:25`）。★ 原因是同一个值要管**两件事**：
-它既是「本轮允许写哪儿」，也是「相对路径的基准」和「提示词里那个目录」。
-一个值、两个消费者 —— 叫 `WriteRoots` 会让人以为它只管写。
+`fsx.WithProjectRoot`（`agentkit/fsx/context.go:25`）。★ 原因是同一个值要管**三件事**：
+它既是「本轮允许写哪儿」（`agentkit/fsx/fsx.go:283-292` 的 `writeRoots`），
+也是「相对路径的基准」（`agentkit/fsx/fsx.go:265-274` 的 `base`），
+还是「命令的工作目录」（`agentkit/fsx/fsx.go:942-984` 的 `initStreamingCmd` 里那一行）。
+一个值、三个消费者 —— 叫 `WriteRoots` 会让人以为它只管写。
+★ 三个消费者必须取**同一个**值：提示词说会话的目录、写边界守会话的目录，
+而命令跑在别处，那个输出就不说明它自己说明了什么。
 
 ★ **子 agent 拿得到同一个 ctx，这不是新问题**：`task` 工具把收到的 ctx 原样交给子 agent
 （eino `adk/prebuilt/deep/task_tool.go:174`，`a.InvokableRun(ctx, params, opts...)`），
 框架自己还有一条测试断言子 agent 看得见父级的 ctx 值
 （eino `adk/prebuilt/deep/deep_test.go:153`，`TestDeepSubAgentSharesSessionValues`）。
 
-★ **今天为什么不需要传递**：project root 是**进程级常量**，它被烘焙进两处 ——
-prompt 里那行 `Project root: %s`（`agentkit/run/input.go:170-186`），
-和 fsx 后端的 `Root`（`agentkit/build/snapshot.go:101-110`，backend 被 `heavyOnce` 缓存）。
-两处都是「建一次、用到底」，所以压根没有「传递」这回事。
-★ **新设计第一次需要传递**：root 变成**每轮可变**（按会话），于是
+★ **root 现在必须传递**：它是**每轮可变**的（按会话），于是
 - **prompt 侧**走显式参数：`inputParams` 加 `ProjectRoot`（`agentkit/run/input.go:26-29`）；
-- **工具侧**只能走 ctx —— backend 是共享的，写边界是**调用时**才知道的事。
+- **工具侧**只能走 ctx —— backend 是共享的，边界是**调用时**才知道的事。
 
 ### 4.1 root 在轮次开始时读一次，之后不变
 

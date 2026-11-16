@@ -620,6 +620,7 @@ func NewService(root, projectRoot string, opts ...ServiceOption) (*Service, erro
 	}
 
 	// ★ The default project root.
+	projectDefaulted := false
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
 		projectRoot = strings.TrimSpace(os.Getenv(DefaultProjectRootEnv))
@@ -635,6 +636,7 @@ func NewService(root, projectRoot string, opts ...ServiceOption) (*Service, erro
 	if projectRoot == "" {
 		if home != "" {
 			projectRoot = filepath.Join(home, DefaultProjectsDirName, "default")
+			projectDefaulted = true
 		} else {
 			wd, err := os.Getwd()
 			if err != nil {
@@ -646,6 +648,16 @@ func NewService(root, projectRoot string, opts ...ServiceOption) (*Service, erro
 	projectAbs, err := filepath.Abs(projectRoot)
 	if err != nil {
 		return nil, fmt.Errorf("config: resolve project root %q: %w", projectRoot, err)
+	}
+	if projectDefaulted {
+		// ★ Only the defaulted root is created, and the rule is the config
+		//   root's: a named root that points nowhere is a user typo, and it
+		//   must not turn into a silently empty directory. ★ This one has
+		//   to exist: it is where a session that belongs to no project does
+		//   its work, and a command that cannot chdir into it never starts.
+		if err := os.MkdirAll(projectAbs, 0o755); err != nil {
+			return nil, fmt.Errorf("config: create the default project root %q: %w", projectAbs, err)
+		}
 	}
 
 	// ★ The config root.

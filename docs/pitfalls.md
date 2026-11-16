@@ -1149,3 +1149,43 @@ store 时会各自以为持有了它 —— 所以还有 `commitMu`（`kb/store.
 `TestReconcileKeepsAnEntryTheWriterNeverSaw`、
 `TestTwoFullIndexesDoNotTakeOverEachOther`、
 `TestSidecarKeepsAnotherWritersEntry`）。
+
+## 17. 项目根与工具
+
+### 17.1 ★ 命令跑在了别的目录里
+
+**症状**：会话明明属于某个项目，提示词里写的也是那个目录，而 `execute` 一条命令都跑不起来：
+
+```
+failed to start command: chdir C:\Users\<user>\.openheron\projects\default:
+The system cannot find the path specified.
+```
+
+★ 那个路径是**默认项目根**（没有项目归属的会话工作的地方）。它通常**根本不存在** ——
+于是不是「命令跑错了地方」，而是**一条命令都启动不了**。
+
+**根因**：★ 提示词、相对路径的基准、写边界三处都用**同一个值**：本轮的 project root
+（`fsx.WithProjectRoot` 放进 ctx 的那个）。★ 而 `execute` 的工作目录是第四处，它读的是
+**后端自己的 `Root`** —— 后端建一次、被所有轮次共用，所以那个目录是「默认项目根」。
+★ 写边界守会话的目录、命令却跑在别处 ⇒ 模型在一个目录被告知去另一个目录读写，
+而命令的输出**不说明它自己说明了什么**。
+
+★ 同一个值有三个消费者（`agentkit/fsx/fsx.go:265-274` 的 `base`、
+`agentkit/fsx/fsx.go:283-292` 的 `writeRoots`、`agentkit/fsx/fsx.go:942-984` 的 `initStreamingCmd`），
+**少接一个**就是现在这个洞。★ `grep` 的工作目录是同一处（`agentkit/fsx/fsx.go:528`）。
+
+**修法**：★ 工作目录也从 ctx 取：`cmd.Dir = s.base(ctx)`。
+★ 目录不存在时给一句人话（「这个会话工作的目录不存在：…」），而不是系统的 chdir 错误 ——
+★ 后者只报一个路径，不报原因。
+
+★ 另一半：**默认项目根得存在**。它和配置根一样是「缺省就填、点名就不填」
+（`agentkit/spec/config.go:652-661`）：点名的目录是用户自己的，不替他建；
+缺省的那个在**大本营**里，是服务端自己的 —— 而它此前**从来没被创建过**。
+
+**现状**：`已修` —— `agentkit/fsx/fsx.go` 的 `cmd.Dir` 改走 ctx（`execute` 与 `grep`）、
+缺省工作目录不存在时报人话、`agentkit/spec/config.go` 创建缺省的默认项目根。
+回归用例在 `agentkit/fsx/exec_shell_test.go`
+（`TestExecuteRunsInTheRoundsProjectRoot`、
+`TestExecuteWithoutARoundRootRunsInTheBackendsRoot`、
+`TestExecuteReportsAMissingProjectRoot`）与 `agentkit/spec/roots_test.go`
+（`TestTheDefaultedProjectRootIsCreated`、`TestANamedProjectRootIsNotCreated`）。

@@ -523,7 +523,9 @@ func (s *Local) GrepRaw(ctx context.Context, req *filesystem.GrepRequest) ([]fil
 	ctx, cancel := context.WithTimeout(ctx, s.walkBudget)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, s.rgPath, args...)
-	cmd.Dir = s.root
+	// ★ The round's project root, like the execute tool's: the search runs
+	//   where the session works.
+	cmd.Dir = s.base(ctx)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()
@@ -944,9 +946,21 @@ func (s *Local) initStreamingCmd(ctx context.Context, command string) (*exec.Cmd
 	args = append(args, s.shell[1:]...)
 	args = append(args, command)
 	cmd := exec.CommandContext(ctx, s.shell[0], args...)
-	// Relative paths in a shell command mean the project root, not wherever the server
-	// happened to be started.
-	cmd.Dir = s.root
+	// ★ Relative paths in a shell command mean **the round's** project root:
+	//   the same directory the prompt names and the write boundary uses.
+	//   ★ It is not the server's working directory, and not the backend's
+	//   own root — the backend is built once and shared by every round, so
+	//   a root baked into it is the root of the last round that used it
+	//   (the default project root, for a session that belongs to no
+	//   project). ★ A command that runs somewhere else than the model was
+	//   told is a command whose output does not mean what it says.
+	cmd.Dir = s.base(ctx)
+	// ★ A directory that does not exist is a fact worth reporting: the
+	//   raw failure is a chdir error from the operating system, which
+	//   names a path and not the reason.
+	if _, err := os.Stat(cmd.Dir); err != nil {
+		return nil, nil, nil, fmt.Errorf("the directory this session works in does not exist: %s", cmd.Dir)
+	}
 	// ★ The shell's own directory goes first: a shell that was found outside
 	//   PATH (Git for Windows, MSYS2) cannot find `ls` without it.
 	if s.shellPathDir != "" {

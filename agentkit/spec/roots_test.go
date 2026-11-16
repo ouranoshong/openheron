@@ -89,6 +89,44 @@ func TestTheDefaultProjectRootLivesInTheOpenheronRoot(t *testing.T) {
 	}
 }
 
+// ★ The default project root has to **exist**: it is where a session that
+//
+//	belongs to no project does its work, and a command that cannot chdir
+//	into it never starts. ★ Only the defaulted one is created — a named root
+//	is the user's directory, and making it for them would hide a typo.
+func TestTheDefaultedProjectRootIsCreated(t *testing.T) {
+	clearRootEnv(t)
+	home := filepath.Join(t.TempDir(), "base")
+
+	if _, err := NewService(filepath.Join(t.TempDir(), "cfg"), "", WithHome(home)); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, DefaultProjectsDirName, "default")
+	fi, err := os.Stat(want)
+	if err != nil {
+		t.Fatalf("the default project root must exist: %v", err)
+	}
+	if !fi.IsDir() {
+		t.Fatalf("the default project root must be a directory: %s", want)
+	}
+}
+
+// ★ A named project root is the user's own directory: the server does not
+//
+//	create it for them, the same rule the config root follows.
+func TestANamedProjectRootIsNotCreated(t *testing.T) {
+	clearRootEnv(t)
+	home := filepath.Join(t.TempDir(), "base")
+	named := filepath.Join(t.TempDir(), "mine")
+
+	if _, err := NewService(filepath.Join(t.TempDir(), "cfg"), named, WithHome(home)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(named); !os.IsNotExist(err) {
+		t.Fatalf("a named project root must not be created for the user: %v", err)
+	}
+}
+
 // TestAnUnnamedOpenheronRootKeepsTheOldLayout pins the compatibility rule: a
 // caller that never heard of the openheron root must not find a directory
 // appearing in the user's home.

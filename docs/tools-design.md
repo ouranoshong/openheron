@@ -408,8 +408,12 @@ project root 加 `ExtraRoots`（会话工作区与 skills 目录 —— 它们�
 ★ **跑命令的程序归调用方管。** 后端不再写死 `/bin/sh -c`：
 `Config.Shell` 是程序加它自己的开关，`Config.ShellPathDir` 会被放到子进程 PATH 的最前面 ——
 一个在 PATH 之外找到的 shell（Git for Windows、MSYS2）否则找不到自己那套 `ls`。
-命令接在开关后面（`agentkit/fsx/fsx.go:940-968`），`cmd.Dir = s.root`（`:880`），
-所以 shell 命令里的相对路径现在意味着 project root。
+命令接在开关后面（`agentkit/fsx/fsx.go:942-984` 的 `initStreamingCmd`），工作目录取的是
+`agentkit/fsx/fsx.go:957` 那一行 —— 所以 shell 命令里的相对路径现在意味着 project root。
+★ **是「本轮」的 root**（`agentkit/fsx/fsx.go:265-274` 的 `base`）：与相对路径的基准、
+写边界是**同一个值**。★ 后端自己那个 root 只是兜底 —— 后端建一次、被所有轮次共用，
+烤进它的目录是「最后一个用过它的轮次」的目录（没有项目归属的会话 = 默认项目根）。
+★ 工作目录不存在时给的是一句人话（「这个会话工作的目录不存在：…」），不是系统的 chdir 错误。
 
 ★ **探测在 `agentkit/shell`**（`agentkit/shell/shell.go:90` 的 `Detect`），一份快照一次：
 
@@ -1068,7 +1072,7 @@ microVM 外面转发进来的连接**到不了环回** —— 沙箱起来了，
 对话要挺过沙箱的停止、重建，甚至移除。
 
 ★ **VM 里的路径语义**：工作区挂在与宿主**同一个绝对路径**上，于是
-`cmd.Dir = s.root`（`agentkit/fsx/fsx.go:880`）含义不变；
+`cmd.Dir = s.base(ctx)`（`agentkit/fsx/fsx.go:957`）含义不变；
 shell 命令里的相对路径仍然指项目根；配置根是 `<工作区>/.openheron` ——
 既是用户在宿主上编辑的那个地方，也是 `openheron init` 写入的那个地方；
 报错里引用的路径，仍然是用户看到的那几个路径。
