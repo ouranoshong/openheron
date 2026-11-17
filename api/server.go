@@ -17,6 +17,7 @@ import (
 	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/agentkit/run"
 	hcfg "github.com/ouranoshong/openheron/agentkit/spec"
+	"github.com/ouranoshong/openheron/projects"
 	"github.com/ouranoshong/openheron/storage"
 	"github.com/ouranoshong/openheron/transport"
 	"github.com/ouranoshong/openheron/webui"
@@ -71,9 +72,42 @@ type Server struct {
 	// logLevelFn reports the log level in effect. A function because the level
 	// can move without the file changing — an env override, or a reload.
 	logLevelFn func() string
+	// pickDirFn opens the folder chooser. Nil means the operating system's
+	// own.
+	//
+	// ★ It is a seam because the real one opens a **window** — on the
+	//   machine the tests run on, which is not a thing a test may do.
+	pickDirFn func(ctx context.Context, start string) (string, error)
 	// log is the transport's logger. Nil is accepted: tests build a server
 	// without one and the lines are dropped.
 	log *slog.Logger
+	// guard is the access policy: who may drive the agent. Nil means the
+	// server serves anybody — the tests build one without a policy.
+	//
+	// ★ It is the difference between an open port and remote code
+	//   execution, because the agent's tools run shell commands.
+	guard *Guard
+	// sessionKeepalive is how often the session's channel says "still
+	// here".
+	//
+	// ★ It is also the **disconnect probe**. The channel is idle most of
+	//   the time, so nothing is written to it — and a write that fails is
+	//   the only portable way to learn that the client went away. ★
+	//   Without the probe a dead client would hold its subscription, and
+	//   the session's bus with it, until the next fact came.
+	sessionKeepalive time.Duration
+	// projects is the project registry: the table that says which sessions
+	// belong to which project.
+	//
+	// ★ It is the only truth about that relation, and it is read from disk
+	//   on every request — the table is a user-level file and the user may
+	//   edit it while the server runs.
+	projects *projects.Registry
+	// scopeProjectID names the project this process focuses on.
+	//
+	// ★ Empty means the multi-project mode: the process serves every
+	//   project and the client renders every group.
+	scopeProjectID string
 }
 
 func (s *Server) logger() *slog.Logger {
@@ -85,6 +119,23 @@ func (s *Server) logger() *slog.Logger {
 
 // defaultStartTimeout matches the shipped default when no config is wired.
 const defaultStartTimeout = 60 * time.Second
+
+// defaultSessionKeepalive is how often an idle session channel says "still
+// here".
+//
+// ★ Five seconds: the probe has to be frequent enough that an abandoned
+//
+//	channel does not hold its bus for long, and rare enough that an idle
+//	tab costs almost nothing.
+const defaultSessionKeepalive = 5 * time.Second
+
+// sessionKeepaliveOrDefault reports the channel's probe interval.
+func (s *Server) sessionKeepaliveOrDefault() time.Duration {
+	if s.sessionKeepalive > 0 {
+		return s.sessionKeepalive
+	}
+	return defaultSessionKeepalive
+}
 
 func (s *Server) startTimeout() time.Duration {
 	if s.startTimeoutFn == nil {
@@ -115,6 +166,30 @@ func (s *Server) SetSkillsSource(fn func() []SkillView) { s.skillsFn = fn }
 // SetPoolSource wires the agent-pool block of GET /v2/runtime.
 func (s *Server) SetPoolSource(fn func() map[string]any) { s.poolFn = fn }
 
+// SetProjectsRegistry wires the project registry.
+//
+// ★ The endpoints answer 503 without it: a project table that is not there
+//
+//	is not "no projects", it is "this build does not know about projects".
+func (s *Server) SetProjectsRegistry(reg *projects.Registry) { s.projects = reg }
+
+// SetProjectScope names the project this process focuses on.
+//
+// ★ Empty means the multi-project mode. ★ The two modes have the **same**
+//
+//	shape — the same table, the same session list, the same endpoints — and
+//	the scope is the only thing that says how many groups the client
+//	renders.
+func (s *Server) SetProjectScope(id string) { s.scopeProjectID = id }
+
+// projectRegistry returns the registry, or nil when it is not wired.
+func (s *Server) projectRegistry() *projects.Registry {
+	if s == nil {
+		return nil
+	}
+	return s.projects
+}
+
 // New builds the server. Both collaborators are explicit so tests can inject
 // fakes without touching the filesystem or a model.
 func New(rt *run.Runtime, sm storage.SessionManager, log *slog.Logger,
@@ -125,6 +200,14 @@ func New(rt *run.Runtime, sm storage.SessionManager, log *slog.Logger,
 // SetStaticDir serves the front end from a directory on disk. Empty disables
 // it, which is what an embedding application wants.
 func (s *Server) SetStaticDir(dir string) { s.staticFS = dir }
+
+// SetGuard installs the access policy.
+//
+// ★ It is set before the routes are registered, because hertz wraps the
+//
+//	handlers registered after a middleware — a guard installed later is a
+//	guard that never runs.
+func (s *Server) SetGuard(g *Guard) { s.guard = g }
 
 // SetEmbeddedFrontend serves the React front end from assets, the go:embed
 // tree of web/dist. Takes precedence over SetStaticDir.
@@ -147,10 +230,32 @@ func (s *Server) Spin() error {
 	return s.h.(*hserver.Hertz).Run()
 }
 
+// Running reports whether the listener is up.
+//
+// ★ hertz marks the engine running before it binds, and the check is the
+//
+//	listener itself: the transporter publishes it only once the socket is
+//	bound. So this answers "the address answers", not "the server was asked
+//	to start" — which is the difference between an address that can be
+//	opened and a promise.
+func (s *Server) Running() bool {
+	h, ok := s.h.(*hserver.Hertz)
+	if !ok {
+		return false
+	}
+	return h.IsRunning()
+}
+
 // registerRoutes is split from Spin so a test can exercise routing without
 // binding a port.
 func (s *Server) registerRoutes() {
 	h := s.h
+	// ★ The guard is registered **before** the routes: hertz wraps the
+	//   handlers that come after a middleware, so a guard added later is a
+	//   guard that never runs.
+	if s.guard != nil {
+		h.Use(s.guardMiddleware)
+	}
 	s.registerV2Routes()
 
 	if s.spa != nil {
@@ -172,6 +277,29 @@ func (s *Server) registerRoutes() {
 			CacheDuration: time.Second,
 		})
 	}
+}
+
+// guardMiddleware is the hertz handler that enforces the access policy.
+//
+// ★ It logs every rejection: a refused request is somebody trying to drive
+//
+//	the agent, and that belongs in the log next to the runs it would have
+//	started.
+func (s *Server) guardMiddleware(ctx context.Context, c *app.RequestContext) {
+	status, body := s.guard.Reject(c)
+	if status == 0 {
+		c.Next(ctx)
+		return
+	}
+	s.logger().Warn("[api] request rejected",
+		"method", c.Request.Method(), "uri", c.Request.URI().String(),
+		"status", status, "code", body.Code)
+	c.JSON(status, body)
+	// ★ Abort, and not merely "return": hertz's Next is a **loop** over the
+	//   handlers, so a middleware that returns does not stop the chain — the
+	//   route handler still runs, writes its own body, and overwrites the
+	//   status the guard has just set.
+	c.Abort()
 }
 
 func (s *Server) session(ctx context.Context, c *app.RequestContext) (storage.Session, error) {

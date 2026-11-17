@@ -19,14 +19,17 @@ while the tool asks `spec.TemplateFor` / `Templates` / `Skeleton`, which is the 
 
 ★ The file template wins over the partition template; the manifest has already settled this, so do not implement a fallback yourself.
 ★ `llm/` is the **fallback** (the provider's own template + a generic catch-all), the manifest carries no `llm/` template, and it is still read from the templates package.
-★ Only one partition is served at a time; a `config_get` over 64 KiB is refused instead of truncated.
+★ `config_template` serves **one partition at a time** — `{section}` returns that partition's files, and with neither argument it returns an **index** (the partition names and the paths under them), not every template at once: the whole set is tens of kilobytes, and a model handed all of it has to find the one it wanted anyway.
+★ `config_get` over 64 KiB is **refused** rather than truncated — a tool that returns half a file invites the model to edit the half it got.
 
 ## After you have the skeleton
 
 - **Delete the pure comment lines** after copying, and keep at least one real key: a file that is only comments = an empty document = `ErrEmptyDocument`.
 - `<...>` is a placeholder and has to be replaced; the `<provider>/<model>` of `model` has to be declared in `llm/`.
 - Every duration carries a unit (`5m` / `60s` / `200ms`); do not add keys that the template does not list, strict mode refuses them.
-- `api_key` may only be written as `${ENV_VAR}` or `@file:/path`.
+- The api key is **not** written into the file: the provider's name says where it
+  comes from — the environment variable `LLM_<PROVIDER>_API_KEY`, or the keyring
+  entry `llm:<provider>`. An `api_key:` line is refused.
 - The field names and the rules of effect follow `openheron-config-map`, the way to change them follows `openheron-config-edit`;
   once it is filled in, run `config_validate {path, content}` before `config_write`.
 

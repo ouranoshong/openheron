@@ -100,15 +100,15 @@ vars:
   # Only kit-push-mixin sets this, through the task call below.
   MIXINS: ''
 
-  # ★ The configuration root the **server** will read: $OPENHERON_CONFIG_DIR
-  #   when it is set, else <project-root>/.openheron. `openheron init` has to
+  # ★ The configuration root the **server** will read: $OPENHERON_CONFIG_ROOT
+  #   when it is set, else <openheron-root>/configs. `openheron init` has to
   #   write to that exact root, or the server starts and finds nothing — and
-  #   init deliberately ignores $OPENHERON_CONFIG_DIR (it writes where it is
+  #   init deliberately ignores the environment (it writes where it is
   #   pointed, so it never writes somewhere else than asked). So the
   #   environment variable is passed through explicitly here.
   #   CLI_ARGS comes after this in the init task, so a flag the caller gives
   #   wins over this default.
-  INIT_ARGS: '{{if .OPENHERON_CONFIG_DIR}}--config-dir "{{.OPENHERON_CONFIG_DIR}}"{{else}}--dir "{{.ROOT_DIR}}"{{end}}'
+  INIT_ARGS: '{{if .OPENHERON_CONFIG_ROOT}}--config-root "{{.OPENHERON_CONFIG_ROOT}}"{{else}}--config-root "{{.ROOT_DIR}}/.openheron"{{end}}'
 
 tasks:
   # A bare `task` has no "first target" rule; `default` keeps that behaviour
@@ -167,20 +167,28 @@ tasks:
       - '{{.GO}} build -ldflags "-X main.version={{.VERSION}}" -o {{.BIN}} .'
 
   run:
-    desc: 'Run the binary (the UI comes from the existing web/dist)'
+    desc: 'Run the binary against the repository''s own configuration (the UI comes from the existing web/dist)'
     deps: [build-go]
     cmds:
-      - '{{.BIN}}'
+      # ★ The repository's own .openheron/ is named explicitly, and the
+      #   repository root is the project: the configuration root and the
+      #   project root are two different things now, and neither is the
+      #   working directory any more.
+      - '{{.BIN}} --config-root "{{.ROOT_DIR}}/.openheron" "{{.ROOT_DIR}}"'
 
   # ── Configuration ───────────────────────────────────────────────────────────
   #
   # ★ The server reads exactly one configuration root — $OPENHERON_CONFIG_DIR,
-  #   else <project-root>/.openheron — and refuses to start without one:
-  #   "no configuration at <root>: run `openheron init` to create one". The
+  #   else <project-root>/.openheron — and writes the factory tree itself when
+  #   that root is the defaulted one and holds no agents/main.md. The
   #   repository ships .openheron-example/ (the sample) but not .openheron/
   #   (the real one — it holds the developer's own model and API key, so it
-  #   is git-ignored). A fresh clone therefore cannot start the server at
-  #   all, and this is the command that makes it startable.
+  #   is git-ignored).
+  #
+  # ★ This task is the **explicit** path: it takes --model / --provider /
+  #   --base-url, and the automatic initialization has no way to ask for
+  #   those. The api key is not one of these files: it comes from
+  #   LLM_<PROVIDER>_API_KEY or the keyring entry llm:<provider>.
   #
   # ★ init writes only the files that are missing and keeps the ones that are
   #   already there ("kept <file> (already exists)"), so it is **idempotent**:
@@ -208,6 +216,16 @@ tasks:
   # The artifact is a **single binary** (the UI is already embedded with
   # go:embed), so "installing" means putting it somewhere on PATH — there is no
   # runtime dependency to install alongside it.
+  #
+  # ★ An install that failed must say so. The Windows branch used to print
+  #   "installed" even when the copy had failed: Copy-Item's failure is a
+  #   **non-terminating** error, so the statement after it ran anyway — the
+  #   old binary kept running while the task claimed a new one was in place.
+  #   The copy now happens in a script that stops on it (scripts/install-local.ps1).
+  #   ★ Both branches check the version the installed binary reports before
+  #   anything is claimed: "it is installed" is a claim, and a claim is
+  #   checked. ★ And `uninstall` stops on a failed removal on both platforms
+  #   — it used to print "removed" either way.
 
   install:
     desc: 'Install the binary into PREFIX (platform default); openheron is then runnable from anywhere'
@@ -217,13 +235,28 @@ tasks:
       - cmd: |-
           set -e
           mkdir -p "{{.PREFIX}}"
-          install -m 0755 "{{.BIN}}" "{{.INSTALL_PATH}}"
+          # ★ Copy first, claim later: a failed copy stops here, before
+          #   anything is claimed. ★ The destination is usually the binary
+          #   that is running right now, and the kernel refuses to truncate
+          #   a running executable.
+          install -m 0755 "{{.BIN}}" "{{.INSTALL_PATH}}" || {
+            echo "install failed: could not write {{.INSTALL_PATH}}" >&2
+            echo "hint: if openheron is running, stop it first (pkill -x openheron)" >&2
+            exit 1
+          }
+          # ★ The installed binary has to be the one that was built: "it is
+          #   installed" is a claim, and a claim is checked.
+          got=$("{{.INSTALL_PATH}}" version 2>/dev/null || true)
+          if [ "$got" != "{{.VERSION}}" ]; then
+            echo "install failed: the installed binary reports '$got' but {{.VERSION}} was expected" >&2
+            exit 1
+          fi
           echo "installed: {{.INSTALL_PATH}}"
           command -v openheron >/dev/null 2>&1 || \
             echo 'hint: {{.PREFIX}} is not on PATH — export PATH="{{.PREFIX}}:$PATH"'
         platforms: [linux, darwin]
       - cmd: |-
-          powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '{{.PREFIX}}' | Out-Null; Copy-Item -Force -Path '{{.BIN}}' -Destination '{{.INSTALL_PATH}}'; Write-Host 'installed: {{.INSTALL_PATH}}'; Write-Host 'hint: add {{.PREFIX}} to your user PATH if it is not there yet'"
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-local.ps1 -Bin "{{.BIN}}" -Dest "{{.INSTALL_PATH}}" -ExpectVersion "{{.VERSION}}"
         platforms: [windows]
 
   uninstall:
@@ -231,11 +264,14 @@ tasks:
     silent: true
     cmds:
       - cmd: |-
+          # ★ set -e, because a removal that failed must not print "removed".
+          #   rm -f on a file that is not there is still a success.
+          set -e
           rm -f "{{.INSTALL_PATH}}"
           echo "removed: {{.INSTALL_PATH}}"
         platforms: [linux, darwin]
       - cmd: |-
-          powershell -NoProfile -Command "Remove-Item -Force -ErrorAction SilentlyContinue -Path '{{.INSTALL_PATH}}'; Write-Host 'removed: {{.INSTALL_PATH}}'"
+          powershell -NoProfile -Command "if (Test-Path '{{.INSTALL_PATH}}') { Remove-Item -Force -Path '{{.INSTALL_PATH}}' -ErrorAction Stop }; Write-Host 'removed: {{.INSTALL_PATH}}'"
         platforms: [windows]
 
   # ── Multi-platform release ─────────────────────────────────────────────────
@@ -304,7 +340,7 @@ tasks:
   # ★ A separate artifact, not part of the release pipeline: `task release` still
   #   produces the six static binaries and nothing else. The Kit packages
   #   openheron as a Docker Sandboxes workload — its design is
-  #   docs/sandbox-kit-design.md.
+  #   docs/tools-design.md.
   #
 # The build context is sandbox-kit/, because the Kit specification finds the
 # content recipe by the descriptor's filename stem, beside it.

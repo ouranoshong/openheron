@@ -1,4 +1,7 @@
 import { readSse } from "@/lib/sse"
+import { parseSessionFact, type SessionFact } from "@/lib/session-events"
+import type { AuthorizationMode } from "@/lib/authorization"
+import type { ProjectScope, ProjectSummary } from "@/lib/projects"
 import type { ContextUsage } from "@/lib/types"
 
 export interface Usage {
@@ -40,6 +43,30 @@ export interface ThreadMeta {
   state: "idle" | "running" | "waiting_approval"
   hasPendingApproval: boolean
   agentId: string
+  /**
+   * The project the session belongs to.
+   *
+   * ★ It comes from the **project table**, not from the session record, and
+   * an empty string is the answer "no project" — the session works in the
+   * default project root.
+   */
+  projectId: string
+  /**
+   * The authorization mode of the session.
+   *
+   * ★ The server always sends it: a missing field says "this version does
+   * not know about authorization modes", and an empty one would say "this
+   * session has no mode" — two different things.
+   */
+  authorizationMode: AuthorizationMode
+  /**
+   * Whether this session has already confirmed full authorization.
+   *
+   * ★ It is the **server's** memory, and it travels with the session: a
+   * second surface must not ask a second time, and the client keeps no
+   * copy of it.
+   */
+  authorizationConfirmed: boolean
 }
 
 export interface ThreadDetail extends ThreadMeta {
@@ -83,6 +110,47 @@ export interface RunView {
 export interface RunsView {
   items: RunView[]
   activeRunId?: string
+}
+
+// OperationView is one line of the session's operation log.
+//
+// ★ The kinds are the **server's** vocabulary: it names what happened, and
+//   the client reads the name. ★ Every field beyond the four the line
+//   always carries is optional — a line about a turn has no file path, and a
+//   line about a file has no tool name.
+export interface OperationView {
+  seq: number
+  at: string
+  kind: string
+  actor: "user" | "system"
+  runId?: string
+  turnKind?: string
+  interruptId?: string
+  toolName?: string
+  // approved is the decision on an approval.
+  //
+  // ★ It is optional and not defaulted: "the approval was refused" and
+  //   "this line is not about an approval" are two different facts, and a
+  //   plain boolean would fold them into one.
+  approved?: boolean
+  agentId?: string
+  projectId?: string
+  mode?: string
+  title?: string
+  path?: string
+  name?: string
+  size?: number
+  state?: string
+}
+
+// OperationsView is the session's operation log.
+//
+// ★ total is the number of lines the filter selected — before `limit` cut
+//   the tail off — and items are the lines themselves, oldest first.
+export interface OperationsView {
+  threadId: string
+  total: number
+  items: OperationView[]
 }
 
 export interface MessagesView {
@@ -310,10 +378,82 @@ export function fileUrl(sessionId: string, path: string, max?: number): string {
 export const api = {
   listThreads: () => call<{ items: ThreadMeta[] }>("/v2/sessions"),
 
-  createThread: (agentId?: string) =>
+  // listProjects reads the project table and the scope of this process.
+  //
+  // ★ It is a **separate** call from the session list on purpose: the
+  //   session list is the sessions' answer, and the project list is the
+  //   table's answer. Two answers, two endpoints — and the client joins
+  //   them itself, by the project id.
+  listProjects: () => call<{ items: ProjectSummary[]; scope: ProjectScope | null }>("/v2/projects"),
+
+  // createProject adds a project to the table.
+  //
+  // ★ The name is optional: the server derives it from the directory when it
+  //   is empty. ★ The root is not optional — a project **is** a directory,
+  //   and a project without one is a label with nothing under it.
+  createProject: (name: string, root: string) =>
+    call<ProjectSummary>("/v2/projects", {
+      method: "POST",
+      body: JSON.stringify({ name, root }),
+    }),
+
+  // updateProject renames a project, moves it, or reorders it.
+  //
+  // ★ The id does not change: it is what the sessions carry, and a session
+  //   that belonged to "api" cannot become a session of "api2" by a rename.
+  updateProject: (id: string, patch: { name?: string; root?: string; order?: number }) =>
+    call<ProjectSummary>(`/v2/projects/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  // deleteProject removes a project from the table.
+  //
+  // ★ The sessions are **not** deleted: they fall back to "no project" and
+  //   keep their history. Removing a label must not remove the work.
+  deleteProject: (id: string) =>
+    call<{ id: string }>(`/v2/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  // pickDirectory opens the operating system's folder chooser.
+  //
+  // ★ It is the **server's** dialog: a browser will not tell a page where a
+  //   chosen directory lives — it hands the page the folder's name and the
+  //   paths inside it — and the absolute path is the one thing a project
+  //   root has to be. ★ The server runs on the user's machine, so the
+  //   machine is the one that is asked.
+  pickDirectory: (start: string) =>
+    call<{ picked: boolean; path: string }>("/v2/fs/pick-directory", {
+      method: "POST",
+      body: JSON.stringify({ start }),
+    }),
+
+  // createThread opens a session.
+  //
+  // ★ The project id goes with the request: a session belongs to a
+  //   project from the moment it is born, and it never moves.
+  // ★ The authorization mode goes with it for the same reason: a session
+  //   born in the mode the user picked is born in it — there is no window
+  //   in which it is in the default mode and a turn could run.
+  createThread: (
+    agentId?: string,
+    projectId?: string,
+    authorization?: { mode?: AuthorizationMode; confirmed?: boolean },
+  ) =>
     call<ThreadMeta>("/v2/sessions", {
       method: "POST",
-      body: agentId ? JSON.stringify({ agentId }) : undefined,
+      body:
+        agentId || projectId || authorization?.mode
+          ? JSON.stringify({
+              ...(agentId ? { agentId } : {}),
+              ...(projectId ? { projectId } : {}),
+              ...(authorization?.mode
+                ? {
+                    authorizationMode: authorization.mode,
+                    ...(authorization.confirmed ? { authorizationConfirmed: true } : {}),
+                  }
+                : {}),
+            })
+          : undefined,
     }),
 
   getThread: (id: string) => call<ThreadDetail>(sessionPath(id)),
@@ -332,6 +472,20 @@ export const api = {
       body: JSON.stringify({ agentId }),
     }),
 
+  // setAuthorizationMode changes the authorization mode of one session.
+  //
+  // ★ The server's answer is the truth: the client never writes the mode on
+  //   its own, and a refused change leaves the old one standing.
+  // ★ `confirm` is the second half of the full-authorization handshake — the
+  //   server answers 409 `confirmation_required` for `full` until the
+  //   request carries the confirmation, and only then does it remember that
+  //   this session confirmed it.
+  setAuthorizationMode: (id: string, mode: AuthorizationMode, confirm?: boolean) =>
+    call<ThreadMeta>(`${sessionPath(id)}/authorization`, {
+      method: "PATCH",
+      body: JSON.stringify(confirm ? { mode, confirm: true } : { mode }),
+    }),
+
   getMessages: (id: string) => call<MessagesView>(sessionPath(id, "/messages")),
 
   // listRuns scans the session's run ledger.
@@ -341,6 +495,21 @@ export const api = {
   //   the run, because the run outlives the connection.
   listRuns: (id: string) => call<RunsView>(sessionPath(id, "/runs")),
 
+  // listOperations reads the session's operation log.
+  //
+  // ★ The log is the server's record of what happened to the session, and it
+  //   is read as a **tail**: `after` skips the lines the client already has,
+  //   and `limit` keeps the last n of what is left. ★ Both may be given at
+  //   once, and the answer is always in ascending order — the timeline is
+  //   read from the top down, like a log.
+  listOperations: (id: string, opts?: { after?: number; limit?: number }) => {
+    const query = new URLSearchParams()
+    if (opts?.after !== undefined) query.set("after", String(Math.trunc(opts.after)))
+    if (opts?.limit !== undefined) query.set("limit", String(Math.trunc(opts.limit)))
+    const suffix = query.toString()
+    return call<OperationsView>(sessionPath(id, "/operations") + (suffix ? `?${suffix}` : ""))
+  },
+
   abortRun: (id: string) => call<{ aborted: boolean }>(sessionPath(id, "/abort"), { method: "POST" }),
 
   // compact compacts the session's context now. It is the manual
@@ -348,15 +517,36 @@ export const api = {
   compact: (id: string) =>
     call<CompactionResult>(sessionPath(id, "/compact"), { method: "POST" }),
 
-  listProjectFiles: (q: string, signal?: AbortSignal) =>
+  // listProjectFiles lists the files the @-mention picker offers.
+  //
+  // ★ The project is named in the query: the picker lists the files of
+  //   **one** project, and the session on screen decides which one. ★ An
+  //   empty project leaves the server to decide — the scope, or the default
+  //   project root.
+  listProjectFiles: (q: string, projectId: string, signal?: AbortSignal) =>
     call<ProjectFileList>(
-      `/v2/project/files?q=${encodeURIComponent(q)}&limit=50`,
+      `/v2/project/files?q=${encodeURIComponent(q)}&limit=50${
+        projectId ? `&project=${encodeURIComponent(projectId)}` : ""
+      }`,
       signal ? { signal } : undefined,
     ),
 
   listCommands: () => call<{ commands: SlashCommand[] }>("/v2/commands"),
 
   listAgents: () => call<AgentsView>("/v2/agents", { cache: "no-store" }),
+
+  // configVersion reads the configuration's fingerprint, and nothing else.
+  //
+  // ★ It is the **cheap** way to ask "did the configuration change?": the
+  //   agent table is a fat payload, and a watcher only needs this one
+  //   string. The health endpoint carries it.
+  //
+  // ★ An empty string means the server has no configuration to fingerprint —
+  //   the caller has to fall back to reading the whole view.
+  configVersion: () =>
+    call<{ configVersion?: string }>("/v2/health", { cache: "no-store" }).then((v) =>
+      v.configVersion ?? "",
+    ),
 
   listSkills: () => call<{ skills: SkillView[] }>("/v2/skills", { cache: "no-store" }),
 
@@ -449,7 +639,27 @@ export interface RunHandlers {
   //   code is what tells them apart — "session_busy" means the session
   //   has a live turn, so the optimistic message must be rolled back.
   onError?(message: string, code?: string): void
-  onDone?(): void
+  // onDone says whether the stream ended with the round's **last frame**.
+  //
+  // ★ The two endings look the same on the wire: a round that finished and
+  //   a stream that was cut both close the response. ★ The server writes
+  //   the round's last frame for the first one and deliberately does not for
+  //   the second (transport/transport.go) — a last frame says "this is
+  //   everything the run had to say", and an approval raised after that
+  //   point would stay invisible until the user reloaded the page.
+  //
+  //   So the caller has to know which one it got: the second one has to go
+  //   back to the ledger and the transcript.
+  onDone?(terminal: boolean): void
+}
+
+export interface SessionHandlers {
+  // onFact carries one announcement of the session.
+  onFact(fact: SessionFact): void
+  // onClosed says the channel ended. It ended because the connection went
+  // away, not because the session did — the caller comes back to the scan.
+  onClosed?(): void
+  onError?(message: string): void
 }
 
 // FRAME_MS is how often the stream's events reach the store.
@@ -468,6 +678,17 @@ const FRAME_MS = 33
 //   to click something, and a card that arrives a frame late reads as
 //   a broken button. They are never batched.
 const URGENT_EVENTS = new Set(["RUN_STARTED", "RUN_FINISHED", "RUN_ERROR"])
+
+// TERMINAL_EVENTS are the frames a round ends with.
+//
+// ★ A round that finished says so in its last frame, and the client reads
+//   that frame as "this is everything the run had to say". ★ These two are
+//   the frames the server closes a stream with — RUN_FINISHED for a round
+//   that ended, RUN_ERROR for one that failed.
+//
+// ★ A stream that was **cut** ends with neither, and that difference is the
+//   whole point: the cut stream must not look like a finished round.
+const TERMINAL_EVENTS = new Set(["RUN_FINISHED", "RUN_ERROR"])
 
 /**
  * batcher groups the stream's events into frames.
@@ -548,20 +769,78 @@ export function runStream(input: RunInput, handlers: RunHandlers): RunHandle {
 
       // ★ The events are batched into frames (see FRAME_MS). The order is
       //   the wire's order; only the timing changes.
+      //
+      //   ★ The flag says whether the round's last frame arrived. A round
+      //   that finished and a stream that was cut close the response the
+      //   same way, and the caller has to tell them apart: the cut one may
+      //   still be raising an approval.
+      let terminal = false
       for await (const ev of readSse(res.body)) {
         try {
-          batch.push(JSON.parse(ev.data))
+          const parsed = JSON.parse(ev.data) as { type?: string }
+          if (parsed.type && TERMINAL_EVENTS.has(parsed.type)) terminal = true
+          batch.push(parsed)
         } catch {
           // A single event that will not parse must not destroy the whole turn — skip it and keep reading.
         }
       }
       batch.flushAll()
-      handlers.onDone?.()
+      handlers.onDone?.(terminal)
     } catch (e) {
       // ★ Whatever the stream managed to deliver still belongs to the
       //   turn: the user saw half an answer, and half an answer is better
       //   than none.
       batch.flushAll()
+      if (controller.signal.aborted) return
+      handlers.onError?.((e as Error).message)
+    }
+  })()
+
+  return { abort: () => controller.abort() }
+}
+
+// sessionStream opens the session's announcement channel.
+//
+// ★ It is the session's channel, not a run's. ★ A run's stream ends with
+//   the run, and the approval outlives the run that raised it: the round
+//   ends, the question stays — and the surface waiting on the question
+//   has no stream left to hear that it was answered.
+//
+// ★ The channel has no terminal frame. ★ It ends when the connection goes
+//   away, and the caller reads that as "come back to the scan" — not as
+//   "the session is over".
+export function sessionStream(threadId: string, handlers: SessionHandlers): RunHandle {
+  const controller = new AbortController()
+
+  void (async () => {
+    try {
+      const res = await fetch(`/v2/sessions/${encodeURIComponent(threadId)}/events`, {
+        method: "GET",
+        signal: controller.signal,
+        headers: { Accept: "text/event-stream" },
+      })
+      if (!res.ok) {
+        handlers.onError?.(`HTTP ${res.status}`)
+        return
+      }
+      if (!res.body) {
+        handlers.onError?.("response has no body — expected an event stream")
+        return
+      }
+
+      for await (const ev of readSse(res.body)) {
+        let parsed: unknown
+        try {
+          parsed = JSON.parse(ev.data)
+        } catch {
+          // A frame that will not parse is not a reason to end the channel.
+          continue
+        }
+        const fact = parseSessionFact(parsed)
+        if (fact) handlers.onFact(fact)
+      }
+      handlers.onClosed?.()
+    } catch (e) {
       if (controller.signal.aborted) return
       handlers.onError?.((e as Error).message)
     }

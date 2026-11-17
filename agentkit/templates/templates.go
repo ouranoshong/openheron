@@ -159,14 +159,15 @@ var placeholder = regexp.MustCompile(`\{\{([a-z_]+)(?:\|([^}]*))?\}\}`)
 
 // renderers say how a placeholder's value is written into the file.
 //
-// ★ `api_key_env` is the reason the placeholders exist at all: the file
+// ★ There is no renderer for a secret any more: the api key is **derived**
 //
-//	carries `${NAME}`, not the secret, so the key never lands in the
-//	configuration.
+//	from the provider's name, so no file carries a reference to it and no
+//	template has to hand one out. What is left is the two things a file
+//	cannot guess — the model and the endpoint — and both are written
+//	verbatim.
 var renderers = map[string]func(string) string{
-	"model":       func(v string) string { return v },
-	"base_url":    func(v string) string { return v },
-	"api_key_env": func(v string) string { return "${" + v + "}" },
+	"model":    func(v string) string { return v },
+	"base_url": func(v string) string { return v },
 }
 
 // Default returns the value a placeholder carries in the template itself.

@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/helpers"
 	"github.com/ouranoshong/openheron/storage"
 )
 
@@ -70,12 +71,44 @@ type Turn struct {
 	// connections subscribe.
 	publisher *publisher
 
+	// toolFailures collects the tool calls that failed in this round.
+	//
+	// ★ It is the round's pipe between the tool call that failed and the
+	//   derivation that reports it: the middleware records the failure
+	//   into it, and the derivation takes it out. ★ The collector itself
+	//   travels in the context, because that is the only channel that
+	//   reaches a tool call.
+	toolFailures *helpers.ToolFailures
+
 	// lease is the run's claim on its session. Nil when no arbiter is
 	// wired — the runtime then behaves as it did before the lease.
 	lease *runLease
 
 	// row is the run's durable record. Nil when the session has no ledger.
-	row *runRow
+	//
+	// ★ rowMu guards row, rowFailed and rowErr. The row is opened **after**
+	//
+	//	the turn has claimed the session's slot, so a turn that is superseded
+	//	in that window is failed by the turn that replaced it — before the
+	//	row exists. The field cannot be a plain pointer any more: the
+	//	superseding goroutine reads it while the claiming one writes it.
+	//
+	// ★ rowFailed is the latch for that window. The failure is remembered
+	//	and applied when the row arrives, because a run whose row is never
+	//	closed stays open in the ledger — and the session reads as busy for
+	//	ever.
+	rowMu     sync.Mutex
+	row       *runRow
+	rowFailed bool
+	rowErr    error
+
+	// pin is the tree this turn runs on.
+	//
+	// ★ A resume continues the round it answers, and it runs on the tree
+	//   that round started with — not on the tree the disk would build
+	//   now. ★ The fingerprint says which tree that is; an empty one means
+	//   "the current tree", and it is what a fresh query asks for.
+	pin string
 
 	// awaitingApproval says the run ended by raising an interrupt. The
 	// terminal row waits for the approval to be persisted — the loop's
@@ -225,6 +258,26 @@ func (t *Turn) markReleased() {
 	t.releaseOnce.Do(func() { close(t.released) })
 }
 
+// holdsSlot reports whether the turn still holds the session's slot.
+//
+// ★ A released turn does not: it gave the slot up, either because its
+//
+//	outcome was archived (markTurnDone) or because its claim failed.
+//
+// ★ The runtime asks this before it puts a displaced claim back into the
+//
+//	slot: a claim that was itself displaced already gave up, and restoring
+//	it would put a dead turn — and a loop that was never run — back into
+//	the session.
+func (t *Turn) holdsSlot() bool {
+	select {
+	case <-t.released:
+		return false
+	default:
+		return true
+	}
+}
+
 // WaitReleased blocks until the turn no longer holds the session.
 //
 // ★ A response that ends before this has ended hands the client a session it
@@ -304,13 +357,76 @@ func (t *Turn) failure() error {
 	return t.failErr
 }
 
+// setRow attaches the run's durable record.
+//
+// ★ The row can arrive after the turn has already failed: the claim takes
+//
+//	the session's slot before it opens the row, and the turn that replaced
+//	it can fail it in that window. The remembered failure is applied here,
+//	so the row is closed exactly once whichever order the two arrive in.
+func (t *Turn) setRow(row *runRow) {
+	t.rowMu.Lock()
+	t.row = row
+	failed, err := t.rowFailed, t.rowErr
+	t.rowMu.Unlock()
+	if failed && row != nil {
+		t.finishRow(row, err)
+	}
+}
+
+// runRow returns the run's durable record, or nil when the session has no
+// ledger.
+//
+// ★ Every read goes through here: the row is written by the goroutine that
+//
+//	claimed the turn and read by the one that superseded it.
+func (t *Turn) runRow() *runRow {
+	t.rowMu.Lock()
+	defer t.rowMu.Unlock()
+	return t.row
+}
+
 // closeRow writes the terminal row of a turn that will not run.
+//
+// ★ The row may not be here yet — the failure can land before the row is
+//
+//	opened. The failure is remembered and applied when the row arrives;
+//	otherwise the run would stay open in the ledger, and the session would
+//	read as busy for ever.
+//
+// ★ The **first** failure is the one that counts: the row keeps the first
+//
+//	ending, the way every other terminal write does.
 func (t *Turn) closeRow(err error) {
-	if t.row == nil {
+	t.rowMu.Lock()
+	row := t.row
+	if row == nil {
+		if !t.rowFailed {
+			t.rowFailed = true
+			t.rowErr = err
+		}
+		t.rowMu.Unlock()
+		return
+	}
+	t.rowMu.Unlock()
+	t.finishRow(row, err)
+}
+
+// finishRow writes the terminal row.
+//
+// ★ The row keeps the first ending: a run that is closed by an abort and
+//
+//	then by the archive must not change its story halfway through.
+func (t *Turn) finishRow(row *runRow, err error) {
+	if row == nil {
 		return
 	}
 	state, code := failedState(err)
-	t.row.finish(state, code, err.Error())
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	row.finish(state, code, msg)
 }
 
 // failedState maps a fatal error onto the run's terminal state.

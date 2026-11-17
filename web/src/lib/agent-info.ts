@@ -68,8 +68,29 @@ export function loadAgents(force = false): Promise<AgentsView | null> {
   return inflight
 }
 
+// checkConfigChanged asks whether the configuration moved.
+//
+// ★ It asks the **cheap** way: the health endpoint carries the
+//   configuration's fingerprint and nothing else, while the agent table is
+//   a fat payload. ★ A watcher that pulled the whole table every three
+//   seconds to read one field was paying for the answer before it knew
+//   there was an answer.
+//
+// ★ It does not refresh the view. It says "it moved"; the caller fetches
+//   the view that says **how** it moved — and only when it moved.
 export async function checkConfigChanged(): Promise<boolean> {
   try {
+    const version = await api.configVersion()
+    if (version) {
+      if (!cached) {
+        // ★ There is nothing to compare against yet: the badge has not been
+        //   loaded, so the client knows no version.
+        return true
+      }
+      return version !== cached.version
+    }
+    // ★ The server could not give the cheap signal — it has no
+    //   configuration to fingerprint. Fall back to the fat answer.
     const view = await api.listAgents()
     if (!cached) {
       cached = view
@@ -79,6 +100,8 @@ export async function checkConfigChanged(): Promise<boolean> {
     cached = view
     return true
   } catch {
+    // ★ A failed check says nothing. The badge keeps what it has, and the
+    //   next tick tries again.
     return false
   }
 }

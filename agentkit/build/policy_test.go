@@ -169,7 +169,7 @@ func TestFilterMiddlewareDropsTheToolsTheAgentDoesNotHave(t *testing.T) {
 
 func TestApprovalMiddlewareAsksEvenIfFilterMissed(t *testing.T) {
 	p := NewPolicy([]string{"write_file"})
-	mw := newApprovalMiddleware(p)
+	mw := newApprovalMiddleware(p, scope{})
 
 	endpoint := func(context.Context, string, ...tool.Option) (string, error) {
 		t.Fatal("★ a denied tool must never reach the endpoint")
@@ -187,7 +187,7 @@ func TestApprovalMiddlewareAsksEvenIfFilterMissed(t *testing.T) {
 
 func TestApprovalMiddlewareLetsAllowTierThrough(t *testing.T) {
 	p := NewPolicy([]string{"read_file"})
-	mw := newApprovalMiddleware(p)
+	mw := newApprovalMiddleware(p, scope{})
 
 	called := false
 	endpoint := func(context.Context, string, ...tool.Option) (string, error) {

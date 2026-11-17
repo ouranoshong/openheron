@@ -193,7 +193,7 @@ func (s *Server) v2Run(ctx context.Context, c *app.RequestContext) {
 	sub := turn.Subscribe()
 	defer sub.Close()
 
-	transport.Render(stream, sess.ID(), turn.RunID, sub.Events())
+	transport.RenderStream(stream, sess.ID(), turn.RunID, sub.Events(), sub.Truncated)
 
 	// ★ The archive is the run's work, and the response waits for it: the
 	//   client's next message must find a complete history, or the next
@@ -254,7 +254,7 @@ func (s *Server) attachRun(ctx context.Context, c *app.RequestContext, sess stor
 	sub := turn.Subscribe()
 	defer sub.Close()
 
-	transport.Render(stream, sess.ID(), turn.RunID, sub.Events())
+	transport.RenderStream(stream, sess.ID(), turn.RunID, sub.Events(), sub.Truncated)
 	turn.WaitArchived()
 	turn.WaitReleased()
 	stream.Flush()

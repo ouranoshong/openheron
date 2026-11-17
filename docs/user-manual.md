@@ -48,7 +48,10 @@ match the checksum is not installed.
 | `INSTALL_DIR` | Where to install (default `~/.local/bin`, or `%LOCALAPPDATA%\Programs\openheron` on Windows) |
 | `OPENHERON_REPO` | Install from another `owner/repo` |
 | `OPENHERON_TOKEN` | A token, for a private repository |
+| `OPENHERON_BASE_URL` | The GitHub base URL (default `https://github.com`) |
 | `OPENHERON_API_URL` | The API host (default `https://api.github.com`; a GitHub Enterprise one is `https://<host>/api/v3`) |
+| `OPENHERON_ASSET` | An archive already on disk: the download is skipped, the checksum is still verified |
+| `OPENHERON_CHECKSUMS` | The checksums file to verify against (default: next to the asset) |
 
 ★ Prefer to look before you run? Download `install.sh` from the
 [releases page](https://github.com/ouranoshong/openheron/releases/latest) and read it —
@@ -101,8 +104,9 @@ task build-go     # backend only (no UI) — faster while iterating on Go code
 
 ★ On Windows the product is `bin\openheron.exe` — the executable keeps the `.exe` suffix
 there. And `python3` on Windows is the Microsoft Store alias — it exists and runs
-nothing — so the repository's own scripts call `python` there. It only matters for the
-document checks (`task lint-docs`).
+nothing — so the repository's own scripts call `python` there. It matters for the
+document checks (`task lint-docs`) and for the zip fallback in `task release` on
+Windows.
 
 ### 1.3 On Windows
 
@@ -127,9 +131,9 @@ powershell -c "irm https://github.com/ouranoshong/openheron/releases/latest/down
 
 **Where the tools differ.** The file tools (`read_file`, `write_file`, `edit_file`,
 `ls` and `glob`) are the runtime's own code, and they work on Windows as they are;
-only `grep` needs [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on top —
-Windows does not ship it, and without it you get
-`ripgrep (rg) is not installed or not in PATH` (§10).
+only `grep` prefers [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on top —
+Windows does not ship it, and without it the search **falls back to the built-in
+engine** and says so in the result (§10).
 
 **The shell tool finds a shell by itself.** `execute` needs a program to run the
 command in, and openheron looks for one when the process starts, in this order: `sh`
@@ -164,8 +168,8 @@ name is the only thing that crosses the boundary.
 Linux), and the model key bound on the host the way openheron reads it:
 
 ```sh
-printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
-    --host api.deepseek.com --env DEEPSEEK_API_KEY \
+printf '%s' "$LLM_DEEPSEEK_API_KEY" | sbx secret set-custom \
+    --host api.deepseek.com --env LLM_DEEPSEEK_API_KEY \
     --placeholder proxy-managed --value-stdin
 ```
 
@@ -217,7 +221,7 @@ same agent.
 ★ The step-by-step guide is
 [`sandbox-kit/TUTORIAL.md`](../sandbox-kit/TUTORIAL.md) (Chinese:
 [`sandbox-kit/TUTORIAL_zh.md`](../sandbox-kit/TUTORIAL_zh.md)), and the design
-behind it is in [`docs/sandbox-kit-design.md`](sandbox-kit-design.md) — that document is
+behind it is in [`docs/tools-design.md`](tools-design.md) — that document is
 Chinese only, like every design document in this repository.
 
 ## 2. First run
@@ -226,15 +230,23 @@ Chinese only, like every design document in this repository.
 
 ```bash
 cd /your/project
-openheron init                      # generate the configuration in the current directory
-export DEEPSEEK_API_KEY=sk-...     # secrets are read from the environment only
-openheron
+export LLM_DEEPSEEK_API_KEY=sk-...   # or keep it in the keyring (§4.2)
+openheron                             # the configuration is written on the first start
 ```
 
-Open <http://localhost:8080>.
+Open <http://localhost:8080>. ★ The terminal prints the address it serves on —
+`the server serves on url=http://127.0.0.1:8080` — and that line shows up whatever
+the log's destination is.
 
-★ The key is read from the environment, and **how** you set it depends on the system
-you are on — macOS and Linux see §4.2, Windows see §2.2.
+★ The key is read from the environment **or** from the keyring, and the environment
+wins — §4.2 says how the two fit together and where each one lives; Windows sees §2.2.
+
+★ **The server writes the configuration itself** the first time it starts in a
+project that has none: the same tree `openheron init` writes (§2.3), with the
+DeepSeek provider template. ★ **The key is not in that tree** — the provider's
+name says where it comes from: `LLM_DEEPSEEK_API_KEY`, or the keyring entry
+`llm:deepseek`. ★ Use `openheron init` when you want another model or provider,
+or when you want the configuration written without starting the server.
 
 ### 2.2 Running it for the first time on Windows
 
@@ -242,8 +254,7 @@ In PowerShell, from nothing to running:
 
 ```powershell
 cd C:\path\to\your-project
-openheron init                      # generate the configuration in the current directory
-$env:DEEPSEEK_API_KEY = "sk-..."    # secrets are read from the environment only
+$env:LLM_DEEPSEEK_API_KEY = "sk-..."   # or keep it in the keyring (§4.2)
 openheron
 ```
 
@@ -253,21 +264,41 @@ openheron
 `init` prints one line when it is done:
 
 ```
-the api key is read from the environment at request time: export DEEPSEEK_API_KEY=...
+the api key is read from LLM_DEEPSEEK_API_KEY when the configuration loads, or from the keyring entry llm:deepseek
+store one with: openheron secret set llm <provider>
 ```
 
-★ That line uses **the Unix `export`**, which runs in neither PowerShell nor cmd.exe — on
-Windows the same thing is `$env:DEEPSEEK_API_KEY = "sk-..."` (PowerShell) or
-`set DEEPSEEK_API_KEY=sk-...` (cmd.exe).
+★ The server reports the same thing in its startup log when it writes the
+configuration itself.
+
+★ That line names **the Unix `export`**, which runs in neither PowerShell nor cmd.exe —
+on Windows the same thing is `$env:LLM_DEEPSEEK_API_KEY = "sk-..."` (PowerShell) or
+`set LLM_DEEPSEEK_API_KEY=sk-...` (cmd.exe).
 
 #### How to set the key
 
-One command, four ways of writing it, and they do not reach the same far:
+There are **two places** a key can live, and the provider's name decides what each
+one is called: the environment variable `LLM_DEEPSEEK_API_KEY`, and the keyring
+entry `llm:deepseek`. ★ **The environment wins** — §4.2 has the whole chain; this
+is the Windows half of it.
 
-- **The PowerShell window you are in** — `$env:DEEPSEEK_API_KEY = "sk-..."`: that window only.
-- **Every terminal this user opens from now on** — `[Environment]::SetEnvironmentVariable('DEEPSEEK_API_KEY', 'sk-...', 'User')`: permanently; ★ **you have to open a new terminal**.
-- **The cmd.exe window you are in** — `set DEEPSEEK_API_KEY=sk-...`: that window only.
-- **The cmd.exe window, for this user** — `setx DEEPSEEK_API_KEY sk-...`: permanently; ★ **the value is truncated at 1024 characters**.
+**In the keyring — nothing lands on disk.** The Settings dialog's **Secrets** tab
+(§6.3) takes a value, or the command line does:
+
+```sh
+openheron secret set llm deepseek
+```
+
+★ The value is read from the **standard input**, so it lands neither in the shell's
+history nor in the process table. The command waits for you to paste the key and
+press Enter.
+
+**In the environment — four ways of writing it, and they do not reach the same far:**
+
+- **The PowerShell window you are in** — `$env:LLM_DEEPSEEK_API_KEY = "sk-..."`: that window only.
+- **Every terminal this user opens from now on** — `[Environment]::SetEnvironmentVariable('LLM_DEEPSEEK_API_KEY', 'sk-...', 'User')`: permanently; ★ **you have to open a new terminal**.
+- **The cmd.exe window you are in** — `set LLM_DEEPSEEK_API_KEY=sk-...`: that window only.
+- **The cmd.exe window, for this user** — `setx LLM_DEEPSEEK_API_KEY sk-...`: permanently; ★ **the value is truncated at 1024 characters**.
 
 ★ **A shell keeps the environment it started with** — the window that ran `setx` or
 `[Environment]::SetEnvironmentVariable` does not see the variable; you have to **open
@@ -277,73 +308,86 @@ another terminal**.
 reach **the process that starts openheron**: setting it in another terminal afterwards
 does nothing for a server that is already running.
 
-★ **On Windows the variable name is case-insensitive** — `$env:deepseek_api_key` is the
-`DEEPSEEK_API_KEY` variable; on macOS and Linux it is not (§4.2).
+★ **On Windows the variable name is case-insensitive** — `$env:llm_deepseek_api_key` is the
+`LLM_DEEPSEEK_API_KEY` variable; on macOS and Linux it is not (§4.2).
 
-**Putting the key in a file.** To keep the secret out of the environment, point
-`@file:` at a file:
+**Keeping the key out of the environment.** A variable may hold a **path** instead of
+the key — the value starts with `@file:` and openheron reads the file:
 
-```yaml
-api_key: '@file:C:\Users\you\deepseek.key'   # single quotes
-api_key: "@file:C:/Users/you/deepseek.key"    # or forward slashes
+```powershell
+$env:LLM_DEEPSEEK_API_KEY = '@file:C:\Users\you\deepseek.key'
 ```
 
-★ **Double quotes with backslashes do not work on Windows**: `\` is an escape character
-inside a YAML double-quoted scalar and `\U` is not a legal escape, so the whole profile
-fails to parse (`yaml: did not find expected hexdecimal number`). Use single quotes, or
-write the path with forward slashes. ★ The path has to be **absolute**: a relative one is
-relative to **the directory openheron was started from** (§4.2).
+★ **The quotes are not optional**: without them the `@` starts a word. ★ **The path
+has to be absolute** — a relative one is relative to **the directory openheron was
+started from** (§4.2) — and ★ **a path that does not resolve is a startup error**,
+not a reminder.
 
-**How to tell that it worked.** Open `http://localhost:8080/v2/config` in a browser; the
-provider entry reads `hasApiKey` and it should be `true`; and the startup log must not
-carry `api_key env DEEPSEEK_API_KEY is not set` (§4.2).
+**How to tell that it worked.** Open `http://localhost:8080/v2/config` in a browser;
+the provider entry reads `hasApiKey` and it should be `true`, and `keySource` names
+the place the key came from; the startup log must not carry
+`no key for this provider` (§4.2).
 
 #### Before it starts
 
 ★ **The place `init` writes to and the place the server reads from may not be the same.**
-`init` always writes `.openheron` under the current directory and it **does not look at**
-`$OPENHERON_CONFIG_DIR`; the server reads `--config-dir` → `$OPENHERON_CONFIG_DIR` →
-`.openheron` under the project root (§3). With that environment variable set, the server
-comes up with "no configuration at ...", because it is not reading the tree `init` wrote.
+`init` writes the config root it is given — by default `<openheron-root>/configs` — and it
+**does not read `$OPENHERON_CONFIG_ROOT`**; the server reads `--config-root` →
+`$OPENHERON_CONFIG_ROOT` → `<openheron-root>/configs` (§3). With
+`$OPENHERON_CONFIG_ROOT` set to somewhere else, the server comes up with "no configuration
+at ...", because it is not reading the tree `init` wrote —
+★ and it does not write one there either: a root you named is a root you own.
+★ `init` does read `$OPENHERON_ROOT`, because that is where the default config root comes
+from.
 
 ★ **When the child process cannot find the command on Windows**, change `command` to
 `uvx.exe` in `mcps/fetch.yaml` and `mcps/time.yaml` — the two MCP servers need `uvx` on
 the PATH (§2.3).
 
-If the port is taken, change it **before** it starts: `$env:LISTEN_ADDR = ":9090"` (§10).
+If the port is taken, change it **before** it starts: `$env:OPENHERON_LISTEN_ADDR = "127.0.0.1:9090"` (§10).
+★ Keep the host in the address: `":9090"` alone binds **every** interface, and the agent's
+tools run shell commands (§9).
 
-### 2.3 What init writes
+### 2.3 What the configuration holds
 
-`openheron init` writes the whole tree:
+The whole tree is written by `openheron init` — and by the server itself, the
+first time it comes up with the **defaulted** config root and nothing in it:
 
 ```
-your/project/
-└── .openheron/
-    ├── agents/
-    │   ├── main.md           # entry agent: understand the request, plan, dispatch
-    │   ├── task.md           # general execution expert: llm/ tools/ mcps/ server/
-    │   ├── agent-expert.md   # agent-domain expert: agents/*.md
-    │   └── skill-expert.md   # skill-domain expert: skills/<name>/SKILL.md
-    ├── skills/
-    │   ├── openheron-config-map/SKILL.md        # the facts of the configuration system
-    │   ├── openheron-config-edit/SKILL.md       # the procedure for changing it
-    │   ├── openheron-config-templates/SKILL.md  # how to get a skeleton
-    │   └── openheron-config-validate/SKILL.md   # the silent failures
-    ├── llm/
-    │   └── deepseek.yaml    # model profile
-    ├── mcps/
-    │   ├── fetch.yaml        # fetch a page and turn it into markdown
-    │   ├── time.yaml         # the current time and time-zone conversion
-    │   └── deepwiki.yaml     # public repository documentation and Q&A
-    ├── tools/
-    │   ├── filesystem.yaml   # the tiers of the filesystem tools
-    │   ├── http.yaml         # request_get
-    │   ├── web_search.yaml   # duckduckgo_search
-    │   ├── wikipedia.yaml    # wikipedia_search
-    │   └── kb.yaml           # the knowledge base (off: its corpus_dir is empty)
-    └── server/
-        └── config.yaml      # process parameters (not hot-reloaded)
+~/.openheron/configs/           ← the config root
+├── agents/
+│   ├── main.md           # entry agent: understand the request, plan, dispatch
+│   ├── task.md           # general execution expert: llm/ tools/ mcps/ server/
+│   ├── agent-expert.md   # agent-domain expert: agents/*.md
+│   └── skill-expert.md   # skill-domain expert: skills/<name>/SKILL.md
+├── skills/
+│   ├── openheron-config-map/SKILL.md        # the facts of the configuration system
+│   ├── openheron-config-edit/SKILL.md       # the procedure for changing it
+│   ├── openheron-config-templates/SKILL.md  # how to get a skeleton
+│   ├── openheron-config-validate/SKILL.md   # the silent failures
+│   └── openheron-agent-authoring/SKILL.md   # how to write an agent
+├── llm/
+│   └── deepseek.yaml    # model profile
+├── mcps/
+│   ├── fetch.yaml        # fetch a page and turn it into markdown
+│   ├── time.yaml         # the current time and time-zone conversion
+│   └── deepwiki.yaml     # public repository documentation and Q&A
+├── tools/
+│   ├── filesystem.yaml   # the tiers of the filesystem tools
+│   ├── http.yaml         # request_get
+│   ├── web_search.yaml   # duckduckgo_search
+│   ├── wikipedia.yaml    # wikipedia_search
+│   ├── kb.yaml           # the knowledge base (off: its corpus_dir is empty)
+│   └── config.yaml       # the six configuration tools
+└── server/
+    └── config.yaml      # process parameters (not hot-reloaded)
 ```
+
+★ **The tree lives in the config root, not in the project.** A project directory is a
+project's business; the configuration is the user's, and it sits one level up, under the
+openheron root (§3). ★ The one layout that puts the tree inside a project is the old one
+— a run with **no** openheron root at all, where the config root falls back to
+`<project>/.openheron`.
 
 ★ Two of the three MCP servers are stdio ones — `fetch` and `time` — and they need `uvx`
 on the PATH and download their package on the first start; a server that cannot be
@@ -361,35 +405,110 @@ Other `init` options:
 
 | Option | Effect |
 |---|---|
-| `--dir <path>` | Write into the given directory (default: current directory) |
+| `--config-root <path>` | Write into the given config root (default: `<openheron-root>/configs`) |
 | `--provider <name>` | Choose the vendor, default `deepseek` |
 | `--model <name>` | Choose the model, default `deepseek-flash` |
 | `--base-url <url>` | The vendor endpoint (**with the path**, copy it from their docs) |
-| `--env <NAME>` | The environment variable holding the secret, default `<PROVIDER>_API_KEY` |
 | `--no-tools` | Leave the tool configurations under `tools/` unwritten |
 | `--force` | Overwrite existing files |
 | `--dry-run` | Print what would be written, write nothing |
 | `--json` | Machine-readable output |
 
-## 3. The config root: where your configuration lives
+★ `init` also creates the **default project root** (`<openheron-root>/projects/default`)
+— the directory a conversation that belongs to no project works in. The command prints
+the directory it created:
+
+```
+created /home/you/.openheron/projects/default (the default project root)
+```
+
+★ A **named** project root is not created for you: a typo must not grow an empty
+directory. ★ A `--dry-run` writes nothing — a directory included.
+
+## 3. The roots: where your configuration, your state and your project live
 
 **Exactly three levels, no upward search**:
 
 ```
---config-dir  →  $OPENHERON_CONFIG_DIR  →  <project-root>/.openheron
+--config-root  →  $OPENHERON_CONFIG_ROOT  →  <openheron-root>/configs
 ```
 
-- **The default level is created for you** when it does not exist.
+★ The **openheron root** is the user-level base directory, and it is the one thing that
+does not move when the configuration moves:
+
+```
+--openheron-root  →  $OPENHERON_ROOT  →  ~/.openheron
+```
+
+```
+~/.openheron/                  ← the openheron root
+  configs/                     ← the config root: agents/ llm/ mcps/ tools/ skills/ server/
+  state/                       ← the data dir: sessions, checkpoints, the knowledge-base index
+    projects.json              ← the project table: which session belongs to which project
+  logs/openheron.log           ← the log file
+  projects/default/            ← the default project root
+```
+
+- **The default level is created for you** when it does not exist — and the tree in it
+  is written for you too, on the first start (§2.1).
+- ★ **The default project root is created for you too** — by the server when it starts,
+  and by `openheron init` when it lays the layout out. ★ A **named** project root
+  (`--default-project-root`, `$OPENHERON_DEFAULT_PROJECT_ROOT`) is never created for
+  you: a typo must not grow an empty directory.
 - The first two levels are **not** created when they point nowhere — a typo must not
   silently grow an empty configuration tree. Startup then reports
   `config: load <path>: ...`, which tells you where it went wrong.
 - The config root **does not depend on "where the process was started from"**: running
   `openheron` in a subdirectory still reads the same configuration.
+- ★ **A root you named is never written into**: `--config-root` and `$OPENHERON_CONFIG_ROOT`
+  point at a directory you chose, and an empty one is your decision, not a gap.
+- ★ **The state and the log file live in the openheron root**, not in the config root: moving
+  the configuration does not move your history with it.
+- ★ **The old names still work** — `$OPENHERON_CONFIG_DIR`, `$PROJECT_ROOT`, `$DATA_DIR`,
+  `$LISTEN_ADDR`, `$STATIC_DIR`, `$FRONTEND_MODE`, `--project-root` — and the
+  old one is reported when it is used, so a setting that silently stopped working never does.
+- ★ **`--config-dir` is not one of the server's flags.** `openheron --config-dir x` is a
+  hard error (`flag provided but not defined: -config-dir`). The previous name lives on
+  the two subcommands that have their own flag set — `openheron secret` and `openheron kb`
+  (§8) — and those take it quietly, without the report.
 
-If the default root has no `agents/main.md`, startup says so directly:
+If the default root has no `agents/main.md` **and the server could not write one**,
+startup says so directly:
 
 ```
-no configuration at /your/project/.openheron: run `openheron init` to create one
+no configuration at /home/you/.openheron/configs: run `openheron init` to create one
+```
+
+### 3.1 Projects: a directory a conversation works in
+
+★ **A project is a directory, and a conversation belongs to one.** The agent of that
+conversation reads and writes **in that directory** — not in the directory the server
+happens to run in.
+
+Start the server **with a directory** and it serves that one:
+
+```bash
+openheron .            # this project: one group in the sidebar, one working directory
+openheron              # every project: one group per project in the sidebar
+```
+
+★ The directory you name is **registered** in the project table on the first start — naming
+a directory is a statement about it, not a guess. ★ Start it without one and the table
+stays as it is: the conversations that belong to no project work in the **default
+project root** (`<openheron-root>/projects/default`).
+
+★ **The table is yours**: `state/projects.json` is a plain file, and you may read it or
+edit it. It is the **only** truth about which conversation belongs to which project —
+delete it and every conversation falls back to "no project" (nothing is lost: the
+transcripts, the uploads and the checkpoints all live in the data dir).
+
+```json
+{
+  "version": 1,
+  "projects": [
+    { "id": "openheron", "name": "openheron", "root": "/home/you/code/openheron", "order": 0, "sessions": ["…"] }
+  ]
+}
 ```
 
 ## 4. Writing configuration
@@ -423,7 +542,7 @@ Available frontmatter keys:
 | `description` | What this agent is for (the parent agent uses it to decide whom to delegate to) |
 | `model` | `<vendor>/<model>`, **required**, never inherited and never falls back |
 | `max_iterations` | Cap on tool-loop iterations |
-| `summarize_at` | When this agent's context is **compacted** into a summary: `80%` of the model's window (the default), an absolute token count (`104858`), or `0` for never |
+| `summarize_at` | When this agent's context is **compacted** into a summary: `80%` of the model's window (the default), an absolute token count (`104858`), or `off` / `0` for never |
 | `subagents` | Whom it may delegate to (see §5) |
 | `tools` | The tools **this agent may use** — every tool that is **not** an MCP one: the built-ins, the ones the files under `tools/` provide, and the `config_*` tools. ★ **Not declared means no tools at all**: the list is the whole answer. ★ MCP tools are **not** named here — the agent gets them by mounting the server (see §4.8) |
 | `skills` | The skills this agent may load — an allow-list of the folders under `skills/`. **Not declared means no skill**, and so does an empty list |
@@ -454,18 +573,20 @@ the code `agent_unavailable`. ★ That code means "your configuration is broken"
 answer is to open the editor and fix the file, not to send the message again.
 
 ★ **A `reasoning` tier only works if the model profile declares it.** An undeclared tier
-is **silently ignored**: an agent says `reasoning: high`, the endpoint has no `high`, and
-the effect is "no thinking at all" — with no error and no message. See §4.2.
+is **refused while the configuration loads**: the tree does not come up at all, and the
+message names the agent, the tier it asked for and the levels the model does declare.
+See §4.2.
 
 ★ **`summarize_at` is what keeps a long conversation alive.** Past that point the
 conversation is replaced by a summary, and the summary is what the agent carries forward from
-there on. It comes in three spellings:
+there on. It comes in four spellings:
 
 | Spelling | Means |
 |---|---|
 | `summarize_at: 80%` | 80% of the `context_window` of the model this agent runs on |
 | `summarize_at: 104858` | An absolute token count |
-| `summarize_at: 0` | Never compact — the context grows until the endpoint refuses the request |
+| `summarize_at: off` | Never compact — the context grows until the endpoint refuses the request |
+| `summarize_at: 0` | The same as `off` |
 
 Leave the key out and the agent gets **80% of its window** — compaction is on by default.
 80–90% is the usual range: a request that exactly fills the window is a request that gets
@@ -481,12 +602,11 @@ configuration. Declare `context_window` in `llm/<vendor>.yaml`, or set an absolu
 ```yaml
 type: openai_compat
 base_url: https://api.deepseek.com
-api_key: ${DEEPSEEK_API_KEY}
 timeout: 5m
 
 models:
   - id: deepseek-flash
-    context_window: 131072
+    context_window: 1000000
     reasoning:
       off:  { reasoning_effort: none, thinking: { type: disabled } }
       low:  { reasoning_effort: low,  thinking: { type: enabled } }
@@ -499,7 +619,7 @@ models:
 |---|---|
 | `type` | Protocol type; currently `openai_compat` |
 | `base_url` | The endpoint, **including the path**, copied from the vendor docs |
-| `api_key` | An **environment variable name**, written as `${NAME}` — never a literal |
+| `api_key` | **Retired** — the key comes from the environment or the keyring, and the provider's own **file name** says which (§4.2) |
 | `timeout` | Timeout, with a unit (`5m` / `30m`) |
 | `models[].id` | Model name |
 | `models[].context_window` | Context window — the size the compaction threshold is measured against |
@@ -509,11 +629,11 @@ models:
 | `hint_keys` | The endpoint's field names, used to give an accurate hint when a request is rejected |
 | `extra` | Vendor-level dialect, passed through to every request |
 
-★ **`api_key` may only be an environment variable name** (`${OPENAI_API_KEY}`) or a file
-reference (`@file:/path`). Writing a literal secret into the configuration makes the
-config editor refuse to save it — secrets do not belong in the repository. ★ The
-`@file:` form needs **quotes** in YAML; the subsection below says where the key comes
-from on each system.
+★ **`api_key:` is retired.** A profile that still carries the line is **refused** —
+both when it is loaded and when it is saved through the config editor — and the message
+says where the key comes from now: the environment variable and the keyring entry that
+the provider's own name derives. ★ Secrets do not belong in the repository: the key is
+never written into the configuration tree.
 
 ★ **The compaction threshold belongs to the agent, not to the model.** `context_window` is the
 model's; `summarize_at` is the agent's, because how much of that window this agent fills before
@@ -527,46 +647,47 @@ survive the cut: the summary keeps them.
 
 ★ **The `reasoning` tier table is not optional.** It is the translation layer between
 "the agent writes `reasoning: high`" and "how this endpoint expresses high". A tier
-missing from the table is silently ignored, so "I turned on high and it still does not
-think" shows up in the most hidden way possible.
+missing from the table is **refused when the configuration loads** — the whole tree stays
+down, and the message says which tier was asked for and which levels the model does
+declare.
 
 #### The key: where it comes from
 
-The profile names **where** the secret is — never the secret itself. Two forms work,
-and both are read **when the configuration is loaded**:
+A model profile says nothing about the key any more. ★ **The provider's file name says
+where the key comes from** — there is no `api_key:` line in `llm/<vendor>.yaml` any
+more, and a file that still carries one is refused (the note above).
 
-```yaml
-# .openheron/llm/deepseek.yaml
-api_key: ${DEEPSEEK_API_KEY}                  # an environment variable
-api_key: "@file:/etc/openheron/deepseek.key"  # the same key, read from a file
-```
+For the provider `deepseek` — the file `llm/deepseek.yaml` — the key has two possible
+homes:
 
-★ **The quotes around `@file:` are not optional.** `@` is a reserved character in
-YAML, so an unquoted `api_key: @file:/path` does not parse at all ("found character
-that cannot start any token") and the profile never loads. `${NAME}` needs no quotes.
+| | where it is |
+|---|---|
+| the environment (the override) | `LLM_DEEPSEEK_API_KEY` |
+| the keyring (the store) | the entry `llm:deepseek` |
 
-★ **The key is read when the configuration is loaded** — so set the variable
-**before** you start openheron. A variable you export in another terminal afterwards
-is not seen by the running server; saving the profile file again reloads the
-configuration, and that reload reads the variable once more.
+★ **The environment wins.** The chain is: the environment first, the keyring second. The
+environment is asked first because it is what a container, a CI runner or an operator's
+shell hands to this process for exactly this run; the keyring is what the machine keeps.
+★ So a key stored in the keyring while a variable is set is **not in effect** — and both
+the interface (§6.3) and `openheron secret list` say so out loud, because "stored" and
+"in force" are two different questions.
 
-★ **How the variable is set on Windows, see §2.2** — the four ways of writing it in
-PowerShell and cmd.exe, the case-insensitive variable name, and the `@file:` quoting pit
-on Windows are all there.
+★ **The name is derived, not chosen.** `llm/deepseek.yaml` can only ever be the provider
+`deepseek`, so it can only ever be `LLM_DEEPSEEK_API_KEY` and `llm:deepseek`. One rule
+instead of a table — and a profile cannot disagree with its own file name. ★ The MCP side
+works the same way: `mcps/github.yaml` is `MCP_GITHUB_TOKEN` and the keyring entry
+`mcp:github` (§4.7).
 
-**macOS and Linux.**
+**In the environment.** macOS and Linux:
 
 ```sh
-export DEEPSEEK_API_KEY=sk-...
+export LLM_DEEPSEEK_API_KEY=sk-...
 ```
 
 To make it permanent, put the line in `~/.zshrc` (macOS), `~/.bashrc` (Linux with
-bash) or `~/.profile` (any POSIX shell).
-
-★ **On macOS and Linux the variable name is case-sensitive.** `$env:deepseek_api_key` is
-another variable there, and the profile then reads
-`api_key env DEEPSEEK_API_KEY is not set`; on Windows it is the other way round
-(§2.2).
+bash) or `~/.profile` (any POSIX shell). ★ **On macOS and Linux the variable name is
+case-sensitive.** `$env:llm_deepseek_api_key` is another variable there, and the provider
+then reports that it has no key; on Windows it is the other way round (§2.2).
 
 ★ **The variable has to reach the process, not your login.** A `~/.bashrc` line is
 read by **interactive bash only**: a systemd unit, a launchd job, a container and a CI
@@ -576,51 +697,69 @@ files. Give it to whatever starts openheron:
 | openheron runs in | where the variable goes |
 |---|---|
 | a terminal | `export ...` (macOS and Linux) / `$env:... = ...` (Windows, see §2.2) |
-| a systemd unit (Linux) | `Environment=DEEPSEEK_API_KEY=sk-...` in the unit file, then `systemctl daemon-reload` |
+| a systemd unit (Linux) | `Environment=LLM_DEEPSEEK_API_KEY=sk-...` in the unit file, then `systemctl daemon-reload` |
 | a launchd job (macOS) | `EnvironmentVariables` in the job's plist |
-| a container | `docker run -e DEEPSEEK_API_KEY=sk-...`, or `--env-file .env` |
+| a container | `docker run -e LLM_DEEPSEEK_API_KEY=sk-...`, or `--env-file .env` |
 | CI | the runner's secret store — the variable, not the key |
 
-**The `@file:` form.** The file holds the same secret the variable would, and it is
-read at load time with its content trimmed. Two things to know:
+**In the keyring.** The Settings dialog's **Secrets** tab (§6.3) takes a value, or the
+command line does:
+
+```sh
+openheron secret set llm deepseek
+```
+
+★ The value is read from the **standard input**, so it lands neither in the shell's
+history nor in the process table. The keyring is the machine's own credential store —
+the Windows Credential Manager, the macOS Keychain, the Linux Secret Service — so a key
+in it is not a file in your project.
+
+**The `@file:` form.** A variable may hold a **path** instead of the key:
+
+```sh
+export LLM_DEEPSEEK_API_KEY='@file:/etc/openheron/deepseek.key'
+```
+
+The file holds the same secret the variable would, and it is read at load time with its
+content trimmed. Two things to know:
 
 - ★ **A relative path is relative to the directory openheron was started from**, not
   to the configuration root — use an absolute path.
 - ★ **A path that does not exist is a startup error**, not a reminder:
-  `config: parse llm/deepseek.yaml: api_key: read secret file: open /etc/openheron/deepseek.key: no such file or directory`.
+  `config: parse llm/deepseek.yaml: llm/deepseek.yaml: read secret file: open /etc/openheron/deepseek.key: no such file or directory`.
+  The path is in the message twice — once as the file being parsed, once as the file the
+  loader was reading — and that is the loader's own wording, not a typo.
   The difference is deliberate: an unset variable is a runtime state, a wrong path is
   a mistake in the configuration.
 
-**How to tell that it worked.** A variable that is not set is named in the startup log:
+**How to tell that it worked.** A provider with no key is named in the startup log:
 
 ```
-[main] config notice notice="llm/deepseek.yaml: api_key env DEEPSEEK_API_KEY is not set; calls to this endpoint will fail with 401 Unauthorized"
+[main] config notice notice="llm/deepseek.yaml: no key for this provider: LLM_DEEPSEEK_API_KEY is not set and the keyring holds no llm:deepseek; calls to this endpoint will fail with 401 Unauthorized"
 ```
 
 ★ That reminder **does not stop the server**: openheron starts, the agent builds, and
 the endpoint answers `401 Unauthorized` the first time it is called. The same notices
 are under `deferred` in `GET /v2/config` and `GET /v2/health`.
 
-★ **An empty variable is not an unset one.** `DEEPSEEK_API_KEY=` — set, but with
-nothing in it — resolves to an empty key and produces **no reminder at all**, so the
-absence of a notice is not the absence of a problem. The field to look at is
-`hasApiKey` in `GET /v2/config`; the provider entry reads
+★ **An empty variable is not an unset one.** `LLM_DEEPSEEK_API_KEY=` — set, but with
+nothing in it — resolves to **no key at all**, and the reminder says so in as many words:
+`LLM_DEEPSEEK_API_KEY is set but empty`. An unset variable produces the other sentence:
+`LLM_DEEPSEEK_API_KEY is not set and the keyring holds no llm:deepseek`. The fields to
+look at are `hasApiKey` and `keySource` in `GET /v2/config`; the provider entry reads
 
 ```json
-{"id":"deepseek","baseUrl":"https://api.deepseek.com","hasApiKey":true,"models":[{"id":"deepseek-flash","contextWindow":1310720}]}
+{"id":"deepseek","baseUrl":"https://api.deepseek.com","hasApiKey":true,"keySource":"env:LLM_DEEPSEEK_API_KEY","models":[{"id":"deepseek-flash","contextWindow":1000000}]}
 ```
 
-`hasApiKey` is `true` when a key was found and `false` when there is none — and the
-key itself never leaves the process. ★ **How the variable is emptied decides which of
-the two you get**: `$env:DEEPSEEK_API_KEY = ""` leaves an empty value behind (silent),
-while `$env:DEEPSEEK_API_KEY = $null` removes the variable (the reminder appears);
-`export DEEPSEEK_API_KEY=` and `unset DEEPSEEK_API_KEY` are the same pair on a Unix
-shell.
-
-★ **The name of the variable is yours to choose.** `openheron init --env DEEPSEEK_API_KEY`
-writes the profile with `${DEEPSEEK_API_KEY}`, and a profile that names another
-variable needs that other variable in the environment — what matters is that the two
-name the same one.
+`hasApiKey` is `true` when a key was found and `false` when there is none — and the key
+itself never leaves the process. `keySource` names the **place**:
+`env:LLM_DEEPSEEK_API_KEY`, `keyring:llm:deepseek`, `file:/etc/openheron/deepseek.key`
+or `none`. ★ **How the variable is emptied decides which of the two reminders you get**:
+`$env:LLM_DEEPSEEK_API_KEY = ""` leaves an empty value behind ("set but empty"), while
+`$env:LLM_DEEPSEEK_API_KEY = $null` removes the variable ("not set");
+`export LLM_DEEPSEEK_API_KEY=` and `unset LLM_DEEPSEEK_API_KEY` are the same pair on a
+Unix shell.
 
 ### 4.3 Which tools ask
 
@@ -693,15 +832,15 @@ reason `tools` (§4.8). There is no third tier and no global
 refusal — a tool is either available to that agent, or it is not in that agent's tool
 set at all.
 
-★ **The one exception cannot be widened.** `config_write` (§4.9) edits the
-configuration itself, including the file whose `allows:` list would grant it — so a file
-that could name it would be granting the tool that rewrites that file. It always asks,
-whatever any file says.
+★ **No tool is exempt from its file.** `config_write` (§4.9) edits the configuration
+itself, including the file whose `allows:` list grants it — so a file that names it is
+granting the tool that rewrites that file. It asks like every other tool until
+`tools/config.yaml` names it, and that file does not name it by default.
 
 ### 4.4 External tools (`tools/`)
 
 **No code change needed** — a provider whose configuration is absent mounts nothing, so
-writing the file is what turns the tool on. Four file names are recognised today:
+writing the file is what turns the tool on. Six file names are recognised today:
 
 | File | Provides |
 |---|---|
@@ -709,45 +848,98 @@ writing the file is what turns the tool on. Four file names are recognised today
 | `web_search.yaml` | Web search |
 | `wikipedia.yaml` | Encyclopedia lookup |
 | `kb.yaml` | The knowledge base (see §7) |
+| `filesystem.yaml` | The filesystem tool set |
+| `config.yaml` | The configuration tools themselves |
 
-★ The knowledge base is the one exception: its file only holds the settings — it is
-switched on by a **non-empty `corpus_dir`**, not by the file's presence.
+★ The knowledge base is not switched on by its file: it is switched on by a **non-empty
+`corpus_dir`**, and its file only holds the settings. The filesystem and configuration
+tools are the other way round — they are mounted whether their file is there or not.
 
-★ **Only these four file names are accepted** under `tools/`; any other name is a
+★ **Only these six file names are accepted** under `tools/`; any other name is a
 **startup error** and is never silently ignored.
 
-★ **`openheron init` writes the five files above** — the tool configurations are part
+★ **`openheron init` writes the six files above** — the tool configurations are part
 of the tree, because the factory agents name `request_get`, `duckduckgo_search` and
 `wikipedia_search`, and a name no provider offers is reported as a typo. Pass
-`--no-tools` and that directory stays empty. Not writing a file means not enabled: the
-tool does not appear in the agent's tool table, and the model cannot see it.
+`--no-tools` and that directory stays empty. ★ For a provider-driven tool, not writing
+its file means not enabled: the tool does not appear in the agent's tool table, and the
+model cannot see it. The filesystem and configuration tools are mounted either way —
+for those two, a missing file takes away an exception, not the tool.
 
 ★ **The file's `allows:` line decides what runs without asking** — `tools/http.yaml`
 names `request_get`, `tools/kb.yaml` names `kb_search`. Everything else that file
 provides asks (§4.3).
 
+★ **A proxy moves the boundary; it does not add to it.** `http.yaml` and `web_search.yaml`
+carry an optional `proxy:` key. Empty is **no proxy**: the tool dials the target itself and
+refuses a target that does not resolve to a public address, and that refusal is what keeps a
+model from being used to reach the machine's own network. A proxy **replaces** that rule — a
+proxy exists to reach what cannot be reached directly (an intranet host is not public, and
+reaching it is what the proxy is for) — so with one configured the target may be any address
+the proxy can reach, and the proxy is the boundary. The schemes are `http`, `https`, `socks5`
+and `socks5h`; a wrong one is a **startup error**.
+
+★ **The key has three settings**, and the third one is spelled out: `""` is no proxy, a URL
+names the proxy — and the environment is ignored — and `env` hands the route to the
+environment: `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`. The default cannot mean "whatever
+the environment happens to say": that would move the route of every tool on a machine that
+exports a proxy, and the one who pays for that is the person whose machine it is. The
+environment is read **once**, when the tool is built, so changing it later does not move a
+running tool.
+
+```yaml
+# .openheron/tools/http.yaml
+methods: [get]
+proxy: http://127.0.0.1:7890
+allows: [request_get]
+```
+
+```yaml
+# .openheron/tools/http.yaml
+methods: [get]
+proxy: env
+allows: [request_get]
+```
+
+★ The **model API calls** are a different client: they read `HTTP_PROXY` and `HTTPS_PROXY`
+from the environment, and that is the path the sandbox Kit's credential substitution depends
+on. The `proxy:` key is for the **tools**, and it looks at the environment only when it is
+told to (`proxy: env`).
+
 ### 4.5 Process parameters (`server/config.yaml`)
 
 | Field | Default | Meaning |
 |---|---|---|
-| `listen_addr` | `:8080` | Listen address |
+| `listen_addr` | `127.0.0.1:8080` | Listen address — the loopback by default; a bare `:8080` binds every interface (§9) |
 | `data_dir` | `state` | Where sessions and checkpoints live |
 | `static_dir` | `web/dist` | Frontend build output (used when `frontend_mode: dir`) |
 | `frontend_mode` | `embed` | `embed` uses the interface baked into the binary; `dir` reads from disk |
 | `start_timeout` | `60s` | Startup timeout |
 | `lease_ttl` | `10m` | How long a run's lease survives without progress — **longer than the provider's own timeout** |
 | `agent.max_depth` | `1` | Cap on delegation depth |
+| `watch.enabled` | `true` | Whether the hot-reload watcher runs at all — with it off, **every** change needs a restart |
+| `watch.debounce` | `200ms` | How long the watcher waits before it reads a changed file |
+| `retry.max_retries` | `5` | How many times one turn may retry a model call |
 | `log_level` | `info` | `debug`, `info`, `warn` or `error` — decides which lines reach the output |
 | `log_requests` | `false` | Whether to print the redacted model request body and the raw `tools` array at `debug` level; same effect as `OPENHERON_LOG_LLM_REQUESTS=1` |
-| `log.file` | `""` | A file to write the log to, relative to the **config root** — empty means stderr only |
+| `log.file` | `""` | A file to write the log to, relative to the **openheron root** — empty means stderr only. A new project's template names `logs/openheron.log` |
+| `log.console` | `true` | Whether the standard error keeps a copy beside the file — a new project's template sets it to `false` |
+| `log.max_size_mb` | `20` | Cap on one log file — `0` means no cap, and a negative value is normalised to `0` and reported |
+| `log.max_age_days` | `14` | How many days a rotated file survives — `0` means no limit |
+| `log.max_backups` | `5` | How many rotated files are kept — `0` means no limit |
+| `log.compress` | `false` | Whether the rotated files are gzipped |
 
 ★ **`server/` is not hot-reloaded** — a change only takes effect after a restart. That is
 why it is **read-only** in the config editor, and submitting it fails with
-`section "server" is not editable`.
+`section "server" is not editable: it is not hot-reloaded, so changes would need a restart`.
 
 These environment variables override the file and take precedence:
-`LISTEN_ADDR`, `DATA_DIR`, `PROJECT_ROOT`, `FRONTEND_MODE`, `STATIC_DIR`, `OPENHERON_LOG_LEVEL`,
-`OPENHERON_LOG_FILE`, `OPENHERON_LOG_LLM_REQUESTS`.
+`OPENHERON_LISTEN_ADDR`, `OPENHERON_DATA_DIR`, `OPENHERON_DEFAULT_PROJECT_ROOT`,
+`OPENHERON_FRONTEND_MODE`, `OPENHERON_STATIC_DIR`,
+`OPENHERON_LOG_LEVEL`, `OPENHERON_LOG_FILE`, `OPENHERON_LOG_LLM_REQUESTS`.
+
+★ `data_dir` and `log.file` are measured from the **openheron root**; `static_dir` is measured
+from the **project root** (§3).
 
 ★ `log_requests` and `OPENHERON_LOG_LLM_REQUESTS` are two spellings of the same switch: the
 first sets the project default, the second decides one run (**the environment variable wins** —
@@ -759,18 +951,36 @@ it has nothing to do with where `log.file` writes.
 ★ A `log_level` that is not one of the four falls back to `info`; the config's `deferred`
 notices carry the reason.
 
-★ The log goes to the standard error unless `log.file` names a path — relative to the
-**config root**. The file is rotated by size, and a file that cannot be opened is a warning
-rather than a failed start: the process stays on the standard error and says why.
+★ Where the log goes is decided by two keys. `log.file` names the file — relative to the
+**openheron root**, where the rest of the runtime state lives — and `log.console` says
+whether the standard error keeps a copy beside it.
+The **code's** defaults are an empty path and a stderr copy, so an untouched configuration
+logs to the standard error only. A new project gets `logs/openheron.log` and a **false**
+`log.console`: the log goes to the file, and the terminal goes quiet once the configuration
+is read. The lines before that — and the reason a file could not be opened — still go to
+the standard error.
+
+★ **One line always reaches the terminal: the address the server serves on.** It is
+printed once the listener is up, and neither `log.file` nor `log_level` can hide it —
+the address is not a log record, it is what the process says about itself to the
+terminal it was started on (`docs/runtime-design.md` §4.4).
+
+★ **A second line appears when the listener is beyond the loopback**: `the server listens beyond the loopback; anyone who can reach this port can drive the agent`. It travels the same way, so a configuration that sends the log to a file cannot hide the fact that the agent is reachable from the network. On the loopback there is nothing to say, and nothing is said (`docs/runtime-design.md` §4.4).
+
+★ The file is rotated by size, and a file that cannot be opened is a warning rather than a
+failed start: the process stays on the standard error and says why.
 
 ### 4.6 Skills (`skills/`)
 
 `skills/<name>/SKILL.md`, following eino's native skill convention.
 
-★ Skills are looked up by **a different rule**: `$EINO_EXT_SKILLS_DIR` first, and only if
-that is unset does it search **upwards** from the current directory for
-`.openheron/skills`. That differs from the config root's "never search upwards" — skills
-are a directory tree, and searching upwards lets you use skills from your home directory.
+★ Skills are looked up by **a different rule**: `$EINO_EXT_SKILLS_DIR` first, then the
+**config root's** own `skills/`, and only if neither is there does it search **upwards**
+from the current directory for `.openheron/skills`. The config root comes before the probe
+because that is where the configuration editor writes — a skill saved where the
+configuration is, and never loaded, is a skill nobody can use. The upward search is the
+old layout, and it differs from the config root's "never search upwards" — skills are a
+directory tree, and searching upwards lets you use skills from your home directory.
 
 ★ **Which skills an agent may use is declared by that agent.** The `skills` key in
 `agents/<name>.md` is an allow-list, and the names are the folders under `skills/`:
@@ -779,10 +989,10 @@ are a directory tree, and searching upwards lets you use skills from your home d
 skills: [refactor, review]
 ```
 
-Not declaring the key means **every** skill in the directory; declaring an empty list
-means **none**. A skill outside the list is not advertised to the model, and asking for
-it by name fails — a model cannot load what it cannot see. A name that is not in the
-directory is reported in the log when the agent is built, rather than ignored.
+Not declaring the key means **none** — an absent list and an empty list mean the same
+thing, the same rule as `tools:`. A skill outside the list is not advertised to the model,
+and asking for it by name fails — a model cannot load what it cannot see. A name that is
+not in the directory is reported in the log when the agent is built, rather than ignored.
 
 ★ **A skill is a folder, and that is what the editor asks for.** `/settings` lists each
 partition as a folder in a file tree, so a skill appears as `skills/code-review/SKILL.md`:
@@ -798,6 +1008,10 @@ editor shows what the process actually reads and keeps the section read-only. A 
 that found no skills directory at all is not that case: `<config root>/skills/` is then
 where the next start will look, and creating the first skill there works.
 
+★ **`skills/` is hot.** Editing a `SKILL.md` under the config root takes effect on the
+next turn — no restart. A skills directory that lives **elsewhere** is not watched: a
+change there reaches the agents on the next start.
+
 ### 4.7 MCP servers (`mcps/`)
 
 An MCP server is a program that offers tools to a model. openheron mounts **one server
@@ -811,7 +1025,7 @@ transport: stdio
 command: npx
 args: ["-y", "@modelcontextprotocol/server-github"]
 env:
-  GITHUB_TOKEN: ${GITHUB_TOKEN}
+  GITHUB_TOKEN: ${MCP_GITHUB_TOKEN}
 timeout: 30s
 call_timeout: 60s
 tools: []
@@ -825,7 +1039,7 @@ The same server over HTTP:
 transport: http
 url: https://mcp.example.com/mcp
 headers:
-  Authorization: Bearer ${REMOTE_TOKEN}
+  Authorization: Bearer ${MCP_REMOTE_TOKEN}
 timeout: 30s
 call_timeout: 60s
 ```
@@ -846,6 +1060,14 @@ call_timeout: 60s
 ★ **The file's name must match `^[a-z0-9]+(_[a-z0-9]+)*$`.** A name with a run of
 underscores is refused: the exposed name `mcp__a__b__x` could not be read back later —
 is that the server `a` with the tool `b__x`, or the server `a__b` with the tool `x`?
+
+★ **The credential's name is derived from the file's name.** `mcps/github.yaml` is the
+server `github`, so its token is `MCP_GITHUB_TOKEN` and its keyring entry is
+`mcp:github` — the same rule the model side uses (§4.2). ★ A `${MCP_GITHUB_TOKEN}` in
+`env:` or in `headers:` is therefore not "a variable that happens to be spelled that
+way": it is **that server's token**, resolved through the environment first and the
+keyring second. ★ Every other `${NAME}` keeps its old meaning — a plain environment
+lookup.
 
 ★ **`openheron init` writes three servers** — `mcps/fetch.yaml`, `mcps/time.yaml` and
 `mcps/deepwiki.yaml`. ★ Each of them **defines** a server, so a file that cannot be
@@ -937,14 +1159,61 @@ Six tools let an agent read and change the configuration it runs from. They are 
 mounted and, like every other tool that is not an MCP one, only **visible** to the agents
 whose `tools:` list names them:
 
-| Tool | What it answers | Tier |
-|---|---|---|
-| `config_get` | One file (`{path}`: its text, revision, and whether it is hot), or `{}`: the partitions, the files that exist, and what the running process holds | allow |
-| `config_validate` | `{path, content}`: would this file load, and where exactly is it wrong — the server reports the line. `{}`: check the tree on disk | allow |
-| `config_template` | `{path}`: the skeleton that file starts from. `{section}`: that partition's templates. Neither: an index of what to ask for | allow |
-| `config_notices` | What the loader noticed but did not refuse: renamed keys, retired directories, values that fell back to a default | allow |
-| `config_tier` | `{tool}`: whether it asks. `{agent}`: that agent's tools and their tiers. Neither: the default tier and the whole exception list. Answers use this turn's configuration snapshot, so an agent written earlier in the same turn is not visible yet — the tool says so instead of claiming it does not exist | allow |
-| `config_write` | Writes a file: checked against the tree, checked against the revision you read, and refused whole if the merge breaks. Takes effect on the next turn — `applied` means the watcher will pick it up, not that this turn can already see it | **ask** |
+| Tool | What it answers | Which side it answers from | Tier |
+|---|---|---|---|
+| `config_get` | One file (`{path}`: its text, revision, and whether it is hot), or `{}`: the partitions, the files that exist, and what the running process holds. With `impact` it answers a different question instead: who depends on that file, and who the next turn rebuilds | the **disk** (`disk`) for a file's text; the overview carries both sides | allow — named by `tools/config.yaml`; ask without it |
+| `config_validate` | `{path, content}`: would this file load, and where exactly is it wrong — the server reports the line. `{}`: check the tree on disk | the **disk** (`disk`) | allow — named by `tools/config.yaml`; ask without it |
+| `config_template` | `{path}`: the skeleton that file starts from. `{section}`: that partition's templates. Neither: an index of what to ask for | neither — a skeleton is neither a file nor a tree | allow — named by `tools/config.yaml`; ask without it |
+| `config_notices` | What the loader noticed but did not refuse: renamed keys, retired directories, values that fell back to a default | the **running** tree (`running`) | allow — named by `tools/config.yaml`; ask without it |
+| `config_tier` | `{tool}`: whether it asks. `{agent}`: that agent's tools and their tiers. Neither: the default tier and the whole exception list. Answers use the tree this turn runs, so an agent written earlier in the same turn is not visible yet — the tool says so instead of claiming it does not exist | the **running** tree (`running`) | allow — named by `tools/config.yaml`; ask without it |
+| `config_write` | Writes a file: checked against the tree, checked against the revision you read, and refused whole if the merge breaks. Takes effect on the next turn — `applied` means the watcher will pick it up, not that this turn can already see it. With `append` it adds the content to the end of the file instead of replacing it — the way to write a file whose whole text does not fit in one call | the write lands on the **disk**; the answer carries both sides | **ask** — the default file does not name it; `tools/config.yaml` can |
+
+★ **Every answer says which side it came from.** The field is `source`, and it is `disk`
+(the files on disk right now) or `running` (the tree this turn was built with). The two
+do not contradict each other — they answer different questions: a change written earlier
+in this turn is already in the disk's text and is not yet in the running tree's.
+
+★ **The overview and the write answer carry the two versions instead**: `runningVersion`
+and `diskVersion`. They differ for as long as a change has not been picked up, and that
+difference is the answer to "has my change landed".
+
+★ **A file longer than one call is written in pieces.** `config_write` replaces the whole
+file, and one tool call is bounded by the model's own output limit — so a file whose text
+does not fit in one call is written in pieces: the first piece replaces the file, and every
+later piece goes with `append`, which adds to what is already on disk. Every piece goes
+through the same gates, so the file on disk is loadable after **every** piece.
+
+★ **A call the model could not finish is refused, not run.** When the output hits the
+model's token limit, the arguments of the tool call are incomplete — and the server
+refuses that call with a message that says so. Nothing is written and no approval card is
+raised; the model is told to send less in one call.
+
+★ **`config_get` has a second question: `impact`.** It does not read the file — it
+answers "who depends on this file, and who does the next turn rebuild":
+
+| Answer | What is in it |
+|---|---|
+| with a `path` | `dependents` (the agents this file says something about), `rebuilds` (the agents the next turn rebuilds), `changed` (did this file's contribution to some agent move), and `requiresRestart` when the change cannot be picked up without a restart |
+| without one | `changedFiles` (the files whose contribution to some agent moved) and the same `rebuilds` |
+
+★ **The impact answer comes from the running tree** (`running`), even though it compares
+the disk with it: the dependency graph it walks is the running tree's, and the answer
+says what the disk would change about it. So `config_get` with a `path` answers `disk`
+and `config_get` with `impact` answers `running` — two questions, two sides.
+
+★ **A change reaches only the agents that read the file.** The next turn rebuilds the
+agents whose own dependencies moved — an agent that never reads the changed file keeps
+the one it has. So editing one agent's file rebuilds that agent and its parents, and
+leaves the rest of the tree alone.
+
+★ **`dependents` is direct, `rebuilds` is transitive.** A parent carries its children's
+identity, so a change to a sub-agent rebuilds the parent too: changing
+`agents/skill-expert.md` lists `skill-expert` under `dependents`, and `skill-expert`
+plus its parent under `rebuilds`.
+
+★ **`requiresRestart` is the honest answer for a cold partition.** A file under `server/`
+configures the process, not an agent: nothing reaches an agent, so the answer is
+"nothing changes, and you have to restart" — not "nothing happens".
 
 ```markdown
 ---
@@ -963,6 +1232,14 @@ partition configures the process itself and is not hot-reloaded, so a change nee
 restart — the write path refuses it rather than saving something that silently does
 nothing. Reading is a different question, and it is the one an agent asks when it wants
 to know what the process is actually running with.
+
+★ **The file tools go through the same checks.** `write_file` and `edit_file` on a path
+inside the config root are handed to the configuration service, so the same gates run:
+the tree must still load, a provider file may not carry an `api_key` line, and a
+working agent must not disappear from the tree. ★ `edit_file` reads the file through the
+service too, so it carries the revision and a change that raced it is refused;
+`write_file` carries no revision, so a whole-file write is "the last writer wins" — the
+gates still run.
 
 ## 5. Multiple agents and delegation
 
@@ -1015,11 +1292,12 @@ In the interface:
 | Element | What it does |
 |---|---|
 | **Header** | The agent filter (each chip names an agent; hover it for its context occupancy and spend), the theme switch, and the status of the current turn |
-| **Sidebar** | The session list, the "New thread" button, the settings entry |
+| **Sidebar** | The session list — grouped by project — the "New thread" button and the settings entry |
 | **Composer** | Ask a question; `/` opens the slash commands; supports drag/paste attachments |
 | **Message list** | Assistant replies, reasoning, tool-call cards, sub-agent output (with attribution) |
 | **Approval card** | Appears when your nod is needed: approve / deny (with an optional reason) |
 | **Tool card** | The arguments and result of each tool call |
+| **Tool group** | Calls that follow each other, gathered into one line; open it for the steps |
 | **Settings** | Entry point to the config editor |
 
 ★ The **theme switch** is in the header: light or dark. It follows your desktop until you
@@ -1061,6 +1339,34 @@ error — so it can adjust its approach instead of falling over.
 approval can no longer be resumed and asks you to send a new message, instead of
 silently starting a fresh turn.
 
+★ **The round comes back to the tree it started with.** A round that was interrupted for
+an approval records the tree it ran on, and the resume continues on that tree — so a
+configuration change made in the meantime does not change what that round concludes.
+The change takes effect on the **next** round (§4.9). ★ If openheron was restarted in
+the meantime, that tree is gone: the round continues on the current one, and the log
+says so.
+
+★ **A second window on the same session keeps up.** If the approval is answered in one
+window, the other window's card disappears on its own and it goes on to follow the round
+that continued — no reload, and no button left over that the server would refuse.
+
+★ **The card reaches the windows that are watching, not only the one that started the
+round.** The approval is announced on the session's own channel, so every window looking
+at that session gets the card — and what it is asking for — the moment it appears.
+★ A window that opens afterwards finds the same card by reading the session's history:
+the channel carries what happens next, not what already happened.
+
+★ **The card does not need a reload.** If the connection drops while a round is running,
+the client comes back to that round and reads the open approvals out of the transcript — so
+an approval raised in that round still arrives on its own. ★ And if the server refuses that
+return — the round is over, but its approval has not landed on disk yet — the client waits
+for the round's ledger row to close and reads the transcript then.
+
+★ **A message sent in that instant is refused, not swapped for the approval.** The session
+stays busy until the card is on disk, so the server answers `409 session_busy` and the
+message goes back to the input box — ★ the approval is never taken away by a message that
+happened to arrive at the same moment.
+
 ### 6.3 The config editor
 
 `/settings` opens it. It can edit `llm/`, `agents/`, `tools/` and `mcps/`.
@@ -1090,8 +1396,8 @@ The write path has several gates:
   and **what to remove** — remove that reference first, then delete the file. The same
   goes for a model profile an agent uses and for an agent another agent delegates to.
 - `server/` is **not editable** (not hot-reloaded, so a change needs a restart).
-- **Literal secrets are rejected** — `api_key must be a reference, not a literal`. Use
-  `${ENV_VAR}` or `@file:/path`.
+- **The `api_key` line is retired** — a profile that still carries it is refused, and
+  the message names the variable and the keyring entry that replace it (§4.2).
 - **A file with no YAML content is rejected** — a file that is empty, or holds nothing
   but comments, carries no configuration at all. The message names the fields the file
   needs; under `tools/` it says which tool is missing what.
@@ -1104,6 +1410,39 @@ The write path has several gates:
   server's (`server/` is read-only, `tools/` takes five names, `mcps/` takes
   `<server>.yaml`), so the refusal comes back from the server, not from a copy in the
   dialog.
+
+#### The Secrets tab
+
+The same dialog has **two tabs**: **Files** (the config editor above) and **Secrets**.
+The Secrets tab lists the two namespaces the keys live in — **Providers** and **MCP
+servers** — and the entities the configuration declares in them.
+
+For the entity you pick, the panel shows three rows and no value:
+
+| Row | What it means |
+|---|---|
+| Stored in | where the key is kept — `keyring:llm:deepseek`, or `—` |
+| In effect | which key is actually used — the environment's, the keyring's, a file's, or `none` |
+| Environment | the derived variable, and whether it is set |
+
+★ **The value is write-only.** The panel never shows the key, not even its length: the
+input is a password field, it is emptied after every write, and the value goes to the
+keyring and nowhere else — not into the configuration tree, not into a log line, not
+back to the browser.
+
+★ **"Stored" and "in effect" disagree exactly when the environment overrides the
+keyring** — and that is the trap of the whole design: the key was written, the write
+said "stored", and the key that is used is a different one. The panel says so in a
+warning, and so does `openheron secret set`.
+
+★ **Removing a whole group asks first.** "Remove all providers" deletes the model keys
+of the entities the configuration declares — and only those; the MCP servers' tokens are
+in a different namespace and are not touched. The confirmation names the scope and the
+count.
+
+★ **The list is driven by the configuration.** An entry whose entity is gone — a provider
+file you deleted — is invisible and cannot be removed from here: the keyring cannot be
+enumerated, so there is no way to know it is there.
 
 ### 6.4 The context meter
 
@@ -1184,7 +1523,32 @@ The same thing is available over HTTP — `POST /v2/sessions/{id}/compact` — f
 A session runs **one turn at a time**. If the same session is open in two windows — two
 tabs, or a tab and another machine — only one of them can be running a turn.
 
-The other one says so:
+★ **The second window watches that turn.** It is not kept out of the conversation: it asks
+the server which run owns the session and attaches to it, and the rest of the turn arrives
+in that window too.
+
+★ **An approval that appears reaches the second window too.** The session's own channel
+carries the card — with the tool and its arguments — to every window watching that
+session, so the window that did not start the round still shows the card and can answer
+it.
+
+```
+POST /v2/run
+{"threadId": "...", "runId": "..."}
+```
+
+★ **The attach is a read.** It is `POST /v2/run` with the run's `runId` and **no
+question**: it starts no turn and claims no session, so the turn goes on whoever is
+watching, and the server refuses an attach to a run that is over.
+
+★ **The turn belongs to the server, not to the window that started it.** Close that window
+and the attached one keeps receiving: the server archives the turn either way.
+
+★ **The stop button is the way to take over.** It stops the session's turn — whoever owns
+it — and then you can send. Every window that is watching sees it stop.
+
+★ **A message that arrives while a turn is running is refused.** The window that sent it
+says so:
 
 ```
 This session is running in another window — stop it to take over
@@ -1193,20 +1557,11 @@ This session is running in another window — stop it to take over
 ★ **Nothing is lost.** The refused message is not sent, so it does not appear in the
 conversation. The turn that is running keeps going, untouched.
 
-★ **The stop button is the way to take over.** It stops the session's turn — whoever
-owns it — and then you can send. The window that owned the turn sees it stop.
-
-★ **This is a server-side rule, not a browser one.** Any client that talks to the API
-gets the same answer, and the session's `state` reports `"running"` to every client
-looking at it. A second window opened while a turn is running hydrates as busy, with the
-send button already disabled.
-
-★ **A broken connection does not lose the turn.** The turn belongs to the server, not
-to the connection that happened to be watching it: the server archives it either way.
-A client whose connection drops comes back with the run's id — `POST /v2/run` with
-`runId` and **no question** — and gets the rest of the turn. `GET
-/v2/sessions/{id}/runs` says whether the run is still going, and the run's own history
-is there for the times when it is not.
+★ **This is a server-side rule, not a browser one.** Any client that talks to the API gets
+the same answer, and the session's `state` reports `"running"` to every client looking at
+it. `GET /v2/sessions/{id}/runs` says which run owns the session — that is how a second
+window finds the turn to attach to — and the run's own history is there for the times when
+it is not.
 
 ### 6.8 `/mcps` — the MCP servers of this agent
 
@@ -1300,6 +1655,160 @@ other — and the interface still shows you the name you recognise.
 back (the server keeps them), and the files you already sent stay on their
 messages.
 
+### 6.10 The sidebar is a file tree of projects
+
+★ **Every conversation belongs to a project** (§3.1), and the sidebar shows that: one
+folder per project, named after it, with the conversations in it. ★ The conversations that
+belong to no project sit in a "Default Project" folder — that is the default project root.
+★ **A project is a folder even when it
+holds no conversations** — that folder is where the project's own actions live (§6.11),
+so a project with nothing in it is still a folder you can rename, move or remove.
+
+```bash
+openheron              # every project: one folder per project
+openheron .            # one project: one folder, and the "no project" conversations join it
+```
+
+★ **The folders open and close.** The arrow in front of a project's name folds it away, and
+the number of conversations in it stays on the heading. ★ The folders you closed are
+remembered on this machine, so the sidebar looks the same the next time you open it.
+★ A project with no conversations has no arrow: there is nothing to open.
+
+★ **A conversation keeps its project for its whole life** — there is no "move it to another
+project"; a conversation that works in another directory is a new conversation.
+
+★ **The `@` picker follows the project too**: it lists the files of the project the
+conversation on screen belongs to.
+
+### 6.11 Choosing a project, and managing the ones you have
+
+★ **The entry is the button under the input box**, on the line that says which agent is
+answering. ★ It **names the project the composer works in** — the same project the `@`
+picker lists the files of — and clicking it opens the dialog of the table.
+
+★ **The button has two forms, and the difference is the point.** On the **empty page** —
+no conversation, or one that has not said anything yet — it is a button and it opens the
+dialog. On a **conversation page** it is a **label**: it says where the work happens and
+does nothing else. ★ A conversation's project is fixed, so the only thing a switch could do
+there would be to leave the conversation — and a button that says one thing and does
+another is worse than no button.
+
+★ **The button is only there when there is a choice.** In the single-project
+mode (`openheron .`) there is nothing to pick, so there is no button; and a
+server that does not know the project table answers `503`, so the button is not
+drawn there either.
+
+★ **The empty page starts on "Default Project" — and that is the default project root.** A
+conversation without a project works in `<openheron-root>/projects/default`, and that is the
+fallback: nothing is picked until you pick it. ★ **New thread lets go of the project too** —
+the project belonged to the conversation that was on screen, and a conversation's project is
+fixed, so the composer comes back with no project. ★ The single-project mode is the
+exception: the process serves one directory, so there is nothing to let go of.
+
+The dialog holds two things:
+
+- **Choose** — the first row is "Default Project": the conversations then work in the
+  default project root. Then one row per project. Clicking a row moves the composer into it:
+  the button under the input box and the `@` picker all name that project from then on, and
+  the row that is the current one says so. ★ A conversation keeps its project for its whole
+  life, so choosing another one **leaves** a conversation that belongs to a different
+  project — it stays in the sidebar with its history, and the composer comes back empty.
+  ★ The next question then opens a conversation in the project you picked.
+- **Create** — a name (optional; the directory's own name is used when you
+  leave it empty) and a root directory (required, and it must not be empty).
+  The server turns the root into an absolute path and takes it as it is.
+  ★ **Browse** — the button next to the root field opens **your system's own
+  folder chooser**, the window you would open by hand, and puts the directory
+  you pick into the field. ★ The window opens **on the machine the server
+  runs on**, so a browser on another machine cannot use it — and closing it
+  without choosing is not an error: what you typed stays where it is.
+
+★ **The projects that already exist are managed in the sidebar**, on the project's own
+row: the "⋯" next to the name opens its menu.
+
+- **New conversation** — a new conversation in that project. The composer comes back empty
+  and that project becomes the one it works in. ★ It never keeps the conversation that is
+  already open — not even when that conversation belongs to that very project: a new
+  conversation is a new one.
+- **Rename project** — the name changes where it stands; the directory stays where it is.
+  ★ The name is **required** here — the project already has one, and an empty name would
+  take it away; the editor says so and keeps what you typed.
+- **Change folder** — the directory the project points at. ★ That directory is where the
+  work happens: a project *is* a directory. The **Browse** button opens your system's own
+  folder chooser, the same one the create form uses.
+- **Remove project** — the project leaves the sidebar. ★ **The conversations are kept**:
+  they fall back to "no project" and keep their history. Removing a label must not remove
+  the work.
+
+★ **The project you just created is the one you work in right away** — the
+composer switches into it. ★ The dialog stays open, with the new project in
+the list and marked as the current one: it shows what the create did, and it
+is where the next project would be created from.
+
+★ **A refused create keeps the dialog open**, with what you typed still in it
+and the server's reason under the form. The reason is the server's own
+sentence: the server owns the rules, so the client keeps no second copy of
+them.
+
+### 6.12 The authorization mode
+
+Under the input box, next to the project button, there is a **shield** that
+says which approval level this conversation runs at:
+
+| Level | What it says | What it means |
+|---|---|---|
+| `Default approval` | Tools ask before they run | The configuration decides (§4.3): every `ask`-tier tool stops and waits for you |
+| `Trusted paths` | Writes inside the project, the session workspace and the configuration do not ask | A write that lands inside one of those three directories runs without stopping |
+| `Full authorization` | Every tool runs without asking | Nothing asks any more — including the shell and configuration changes |
+
+★ **The mode never gives the agent new tools.** It only answers "does this
+call need a human decision?". Which tools an agent may use at all is decided
+by the agent's own `tools:` list (§4.1) — a level above `Default approval`
+cannot conjure a tool the agent was not given.
+
+★ **The trusted paths are three directories, and they are yours:**
+
+- the **project directory** the conversation works in (§3.1);
+- the conversation's own **upload folder**, where the files you attached live;
+- the **configuration directory** (§3).
+
+★ **The shell still asks in the middle level.** A shell command can write
+anywhere, so "inside a trusted path" is not a question a command line can
+answer — only `Full authorization` stops asking about it.
+
+★ **Configuration changes are still checked.** In the middle level the
+configuration directory is a trusted path, so a write there does not stop for
+your approval — but the configuration's own checks all still run: the file has
+to parse, the tree has to keep loading, and a working agent may not vanish
+because of the change (§4.9).
+
+★ **Switching to `Full authorization` asks you once.** The interface says
+plainly what that level means, and only then does the switch go through.
+★ **Once per conversation**: switching away and back does not ask a second
+time, but a **new** conversation asks again. The server keeps that fact, so a
+second window on the same conversation does not ask either.
+
+★ **A running turn keeps the level it started with.** You may change the
+level while a turn is running — a change takes effect on the **next** turn,
+and the mode dialog says so, so it cannot look as if it had already taken
+effect.
+
+★ **The level belongs to the conversation, not to you.** A new conversation
+starts at `Default approval` unless you pick another level on the welcome
+page; the configuration tree is unchanged by any of this, and the same
+configuration gives two conversations two different behaviour.
+
+★ **You can pick the level before the conversation starts.** The welcome page
+has the shield too: the level you choose there is the level the conversation
+is **born** in, and its first turn already runs under it. Choosing
+`Full authorization` there asks you the same question an open conversation
+asks — and the server still checks your answer when the conversation is
+created.
+
+★ **What the level was, stays in the record.** Each round's ledger row records
+the level it ran under, so afterwards you can tell which rounds ran without
+anyone watching.
+
 ## 7. The knowledge base
 
 The knowledge base is an **optional** local corpus retrieval layer: it turns a set of
@@ -1316,7 +1825,7 @@ are indexed (`kb/index.go:21`).
 # .openheron/tools/kb.yaml
 corpus_dir: docs      # a directory relative to the project root
 index: default
-model: openai/text-embedding-3-small
+model: <vendor>/<embedding-model>
 top_k: 8
 ```
 
@@ -1326,6 +1835,11 @@ top_k: 8
   living in a system directory would rob the index of meaning.
 - `model` is required and must point at a model declared with `kind: embedding`;
   otherwise startup errors out (`kb.model ... is not an embedding model`).
+- ★ **The factory tree ships no embedding model.** `llm/openai.yaml` carries the chat
+  model `gpt-4o` and nothing else, so the name you copy off the vendor's page —
+  `openai/text-embedding-3-small`, say — is **not declared**:
+  `kb.model openai/text-embedding-3-small is not declared under llm/`. Declare the
+  embedding model in `llm/<vendor>.yaml` first, with `kind: embedding` on it.
 
 The index lands in `<data_dir>/kb/<index>/`.
 
@@ -1339,10 +1853,15 @@ openheron kb status                # inspect the index
 openheron kb status --json         # machine-readable
 ```
 
-All three accept `--config-dir <path>` to point at a different config root.
+All three accept `--config-root <path>` to point at a different config root (`--config-dir`
+is the previous name and still works).
 
-★ `kb index` takes a **run lock**: only one run at a time, and a second call waits for
-the first to finish.
+★ `kb index` takes a **run lock**: only one run at a time, and a second call **fails
+right away** rather than queueing:
+
+```
+another index run is in progress (...); wait for it to finish, or check `openheron kb status`
+```
 
 ★ `kb status` reporting `lexical-only retrieval` means **there are no vectors** — the
 index is purely lexical. Search still works but is less accurate than the hybrid. It
@@ -1361,19 +1880,39 @@ Agents get two tools:
 ## 8. Command-line reference
 
 ```
-openheron [--config-dir <path>] [--project-root <path>]   start the server
+openheron [--openheron-root <path>] [--config-root <path>]      start the server
+           [--default-project-root <path>] [dir]
 openheron init [options]                                   generate a minimal runnable configuration
-openheron kb index [--config-dir] [--json] [files...]      build the index
-openheron kb search [--config-dir] <query>                 search
-openheron kb status [--config-dir] [--json]                inspect the index
+openheron secret set <llm|mcp> <name>                      store a key in the keyring (the value is read from stdin)
+openheron secret get <llm|mcp> <name>                      print the key that is in effect
+openheron secret list [--json]                             the entities and which key is in force
+openheron secret remove <llm|mcp> <name>                   remove one entry
+openheron secret remove <llm|mcp>                          remove every entry of that group
+openheron kb index [--config-root] [--json] [files...]     build the index
+openheron kb search [--config-root] <query>                search
+openheron kb status [--config-root] [--json]               inspect the index
 openheron version                                         print the version
 ```
 
+★ The **directory** is the project this process focuses on — it is also the default project
+root, unless `--default-project-root` says otherwise. The flags come **before** it:
+`openheron --config-root ./cfg .`.
+
 ## 9. HTTP API reference
 
-The service exposes only the `/v2` family. There is no authentication and no CORS; the
-default `:8080` binds every interface, so put a reverse proxy in front to expose it
-publicly, or narrow `listen_addr` to `127.0.0.1`.
+The service exposes only the `/v2` family. ★ The default listener is the **loopback**
+(`127.0.0.1:8080`), so only this machine can reach it, and there is no CORS.
+
+★ **There is no account and no token.** This is a single-user tool on one machine: the
+address is the whole boundary. Exposing it — `listen_addr: 0.0.0.0:8080`, or a reverse
+proxy in front — is a decision you write down, and the server says so on the terminal at
+startup.
+
+★ Two rules hold whatever the address is. A request that **changes** something and
+comes from another site is refused. And while the listener is on the loopback, a
+request whose **Host** is not this machine is refused — a page on another site can
+point a browser at `127.0.0.1`, and then the request would otherwise look like it came
+from here. Both answers are `403`.
 
 | Method | Path | Effect |
 |---|---|---|
@@ -1384,12 +1923,20 @@ publicly, or narrow `listen_addr` to `127.0.0.1`.
 | PATCH | `/v2/sessions/:id/agent` | Change the session's agent |
 | DELETE | `/v2/sessions/:id` | Delete the session |
 | GET | `/v2/sessions/:id/messages` | History + usage (filter with `?agent=`) |
+| GET | `/v2/sessions/:id/events` | The session's **announcement channel** — an SSE stream of the facts that belong to the session, not to a round (§6.7) |
 | GET | `/v2/sessions/:id/runs` | The run ledger: every run of the session + the active one |
 | GET | `/v2/sessions/:id/runs/:runId` | One run of the session |
 | POST | `/v2/sessions/:id/abort` | Abort the running turn |
 | POST | `/v2/sessions/:id/compact` | Compact the conversation now (see §6.6) |
 | POST/GET | `/v2/sessions/:id/files` | Upload / list session workspace files (32 MiB per file) |
-| GET | `/v2/project/files` | List files under the project root (`?q=` `?limit=`) |
+| GET | `/v2/sessions/:id/files/raw` | The bytes of one workspace file — what the preview opens |
+| DELETE | `/v2/sessions/:id/files` | Delete one workspace file |
+| GET | `/v2/project/files` | List files under a project root (`?q=` `?limit=` `?project=`) |
+| GET | `/v2/projects` | The project table and the scope of this process (`{items, scope}`) |
+| POST | `/v2/projects` | Register a project (`{"name": "…", "root": "…"}`) |
+| PATCH | `/v2/projects/:id` | Rename a project, move it, or reorder it |
+| DELETE | `/v2/projects/:id` | Remove a project — its conversations fall back to "no project" |
+| POST | `/v2/fs/pick-directory` | Open the system's folder chooser on the server's machine (`{"start": "…"}`) |
 | GET | `/v2/commands` | The slash-command list |
 | POST | `/v2/run` | **SSE entry point**: ask a question, or answer an approval (see §6.7) |
 | GET | `/v2/skills` | The skill list |
@@ -1401,6 +1948,10 @@ publicly, or narrow `listen_addr` to `127.0.0.1`.
 | GET | `/v2/settings` | The list of editable items |
 | GET/POST/PUT/DELETE | `/v2/settings/item` | Read/write config (carries `baseRevision`) |
 | POST | `/v2/settings/validate` | Validate a configuration without writing it |
+| GET | `/v2/secrets` | The two namespaces and where each key is (§6.3) |
+| PUT | `/v2/secrets/:group/:name` | Store one key in the keyring (`{"value":"..."}`) |
+| DELETE | `/v2/secrets/:group/:name` | Remove one key |
+| DELETE | `/v2/secrets/:group` | Remove every key of that group |
 
 ### 9.1 Running a turn
 
@@ -1445,22 +1996,32 @@ The decision goes back into the **same** `/v2/run`:
 ## 10. FAQ
 
 **Q: Startup says `no configuration at ...: run \`openheron init\` to create one`**
-The config root is empty. Run `openheron init` in the project root.
+The config root is empty and the server could not write one itself — it does
+that on the first start in a project that has none. The startup log says why
+the automatic initialization failed; `openheron init` does the same thing with a
+model and a provider of your choice.
 
 **Q: `config: load <path>: agents/main.md does not exist or could not be parsed`**
 One of two things: the config root points at the wrong place (fix it with
-`--config-dir` or `$OPENHERON_CONFIG_DIR`), or the frontmatter of `agents/main.md` has
+`--config-root` or `$OPENHERON_CONFIG_ROOT`), or the frontmatter of `agents/main.md` has
 a wrong key.
 
 **Q: I changed `agents/main.md` and nothing happened?**
 `agents/` is hot-reloaded, so it should have taken effect. If it did not, look for the
-reload error in the startup log. `server/` and `skills/` are **not** hot-reloaded and
-need a restart.
+reload error in the startup log. `server/` is **not** hot-reloaded and needs a restart.
+`skills/` is hot too — a `SKILL.md` under the config root takes effect on the next turn
+(§4.6) — but a skills directory that lives elsewhere is not watched.
+
+**Q: I changed one agent's file — do the other agents change too?**
+No, and that is the point. A change reaches only the agents that read the file: the next
+turn rebuilds the agent you edited and its parents, and the others keep what they had.
+`config_get` with `impact` tells you who is in that set before you change anything
+(§4.9).
 
 **Q: The model does not think — `reasoning: high` seems to do nothing?**
-Most likely the model profile **does not declare the `high` tier**. A tier missing from
-the table is silently ignored. Add it under `models[].reasoning` in
-`llm/<vendor>.yaml`.
+Most likely the model profile **does not declare the `high` tier**. That is not a silent
+no-op: the configuration does not load, and the message names the agent, the tier and the
+levels the model does declare. Add it under `models[].reasoning` in `llm/<vendor>.yaml`.
 
 **Q: `kb_search` finds nothing, or finds the wrong things?**
 Run `openheron kb status` first: `lexical-only retrieval` means there are no vectors
@@ -1491,8 +2052,9 @@ It is on its way: the servers are started in the background when the configurati
 known. The tools it brings join the **next** turn — press **Refresh** to see them.
 
 **Q: The port is taken / the interface will not open?**
-Change the port in `listen_addr`, or override it with the `LISTEN_ADDR` environment
-variable.
+Change the port in `listen_addr`, or override it with the `OPENHERON_LISTEN_ADDR`
+environment variable. ★ Keep the host in it: `127.0.0.1:9090` is the safe form, and a bare `:9090`
+binds every interface.
 
 **Q: How do I see what the server actually loaded?**
 `GET /v2/config` returns the effective configuration; `GET /v2/health` returns the
@@ -1513,3 +2075,16 @@ budget, and the same answer to "is this file there". What it does not do is read
 `.gitignore`, and it knows fewer file types — a type it does not know is refused
 rather than guessed at. ★ The startup log names the engine that was picked; install
 ripgrep to get the other one.
+
+**Q: Where does my API key go?**
+Nowhere in the configuration. The provider's **file name** says where the key comes
+from: `llm/deepseek.yaml` is the environment variable `LLM_DEEPSEEK_API_KEY` or the
+keyring entry `llm:deepseek` — and the environment wins. Store one with
+`openheron secret set llm deepseek` or in the Settings dialog's **Secrets** tab
+(§6.3); export the variable instead when a container or a CI runner has to see it
+(§4.2).
+
+**Q: The startup says the `api_key` line is no longer read?**
+The profile still carries the old line. ★ Delete it: the key is not in the configuration
+any more, and the message names the variable and the keyring entry that replace it
+(§4.2).

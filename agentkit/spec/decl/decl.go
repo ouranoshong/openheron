@@ -20,7 +20,23 @@ type Provider struct {
 
 	Type string `yaml:"type"`
 
+	// APIKey is the key of this provider, once it is resolved.
+	//
+	// ★ It is **not read from the file any more**: the key comes from the
+	//   naming convention (see `spec.ResolveSecret`), and the loader fills
+	//   this in with what it resolved. The yaml tag stays so that an old
+	//   file which says `api_key:` is caught by the loader and answered
+	//   with a sentence that says what to do — the yaml decoder's own
+	//   "field api_key not found in type spec.Provider" is a sentence
+	//   nobody can act on.
 	APIKey string `yaml:"api_key"`
+
+	// KeySource says where the key came from: "env:LLM_DEEPSEEK_API_KEY",
+	// "keyring:llm:deepseek", "file:/path" or "none".
+	//
+	// ★ It names the **place**, never the value: the value never leaves the
+	//   process.
+	KeySource string `yaml:"-"`
 
 	BaseURL string `yaml:"base_url"`
 
@@ -336,6 +352,23 @@ const (
 	ToolNameWikipedia  = "wikipedia_search"
 )
 
+// The filesystem middleware's own tools.
+//
+// ★ They are named here, and not only in the list below, because the table
+//
+//	that says which `tools/` file configures them needs the same names: two
+//	copies of a name are two answers to "which file carries this tool", and
+//	the second one to drift is the one nobody reads.
+const (
+	ToolNameLs        = "ls"
+	ToolNameReadFile  = "read_file"
+	ToolNameWriteFile = "write_file"
+	ToolNameEditFile  = "edit_file"
+	ToolNameGlob      = "glob"
+	ToolNameGrep      = "grep"
+	ToolNameExecute   = "execute"
+)
+
 // BuiltinToolNames are the tools openheron's own middleware provides.
 //
 // ★ They live here, not in the build package, because **both** halves need
@@ -347,7 +380,8 @@ const (
 //
 //	built-in tool, and the model would see two tools with one name.
 var BuiltinToolNames = []string{
-	"ls", "read_file", "write_file", "edit_file", "glob", "grep", "execute",
+	ToolNameLs, ToolNameReadFile, ToolNameWriteFile, ToolNameEditFile,
+	ToolNameGlob, ToolNameGrep, ToolNameExecute,
 	"task", "write_todos",
 	"skill",
 }
@@ -372,10 +406,15 @@ const (
 // agent's `tools:` as a typo. A real tool the loader does not know about is
 // reported as a mistake the author did not make.
 //
-// ★ `config_write` is the only one that changes anything. It is deliberately
-// **not** in build's exception list, so it always asks — and the tier
-// assembly strips it from any file's `allows:`, because a file that could
-// grant it would be granting the tool that rewrites that file.
+// ★ `config_write` is the only one that changes anything. It is granted by
+//
+//	`tools/config.yaml` like every other tool of this family — the file that
+//
+//	says which tools run without a nod is the file that says it about this
+//
+//	one too. ★ No tool is exempt: a rule that named one tool as the
+//
+//	exception is a rule somebody has to remember.
 const (
 	ToolNameConfigGet      = "config_get"
 	ToolNameConfigValidate = "config_validate"
@@ -396,11 +435,21 @@ var ConfigToolNames = []string{
 	ToolNameConfigWrite,
 }
 
+// KnownToolNames are every tool name the configuration knows about.
+//
+// ★ The built-in names are the framework's and the config names are
+//
+//	ours, so the two live in two lists — and a reader that needs "all of
+//
+//	them" joins them here, once, instead of knowing that there are two.
+var KnownToolNames = append(append([]string{}, BuiltinToolNames...), ConfigToolNames...)
+
 type ToolsCfg struct {
-	HTTP       *HTTPToolsCfg  `yaml:"http"`
-	WebSearch  *WebSearchCfg  `yaml:"web_search"`
-	Wikipedia  *WikipediaCfg  `yaml:"wikipedia"`
-	Filesystem *FilesystemCfg `yaml:"filesystem"`
+	HTTP       *HTTPToolsCfg   `yaml:"http"`
+	WebSearch  *WebSearchCfg   `yaml:"web_search"`
+	Wikipedia  *WikipediaCfg   `yaml:"wikipedia"`
+	Filesystem *FilesystemCfg  `yaml:"filesystem"`
+	Config     *ConfigToolsCfg `yaml:"config"`
 }
 
 // FilesystemCfg is the filesystem tool set's own configuration.
@@ -418,6 +467,72 @@ type FilesystemCfg struct {
 	Allows []string `yaml:"allows"`
 }
 
+// ConfigToolsCfg is the configuration tool set's own configuration.
+//
+// ★ The six `config_*` tools are **always mounted** — the provider answers
+//
+//	from the configuration service, and no file switches them on. So this
+//
+//	file is a **tuner**, not a switch: it names the exceptions and tunes the
+//
+//	limits, and it never decides which tools exist.
+//
+// ★ `allows:` is **additive**, like every other file under tools/: a name
+//
+//	here joins the exceptions the code already carries, and it never takes
+//
+//	one away.
+//
+// ★ `config_write` is granted here like every other tool of the family. It
+//
+//	edits the configuration — this file among them — and it is granted by the
+//
+//	same `allows:` list that speaks about the others. ★ That is a property
+//
+//	of the model rather than of this tool: a tool that writes the
+//
+//	configuration can widen the exceptions the configuration carries.
+//
+//	★ The default template does not name it, for the same reason the
+//
+//	knowledge base does not name the tool that writes its index: a question
+//
+//	about the configuration should not cost an approval, and a change to it
+//
+//	should.
+type ConfigToolsCfg struct {
+	Allows []string `yaml:"allows"`
+
+	// MaxReadBytes is the largest file `config_get` hands back.
+	//
+	// ★ It **refuses** rather than truncates: a tool that returns half a
+	//
+	//	file is a tool that invites the model to edit the half it got and
+	//
+	//	write it back — and the revision it was given is the revision of
+	//
+	//	the truncated text, so the write would go through.
+	//
+	// ★ Zero means the default. A value outside the range below is a
+	//
+	//	hard error at load time, not a clamp: a limit that silently becomes
+	//
+	//	another number is a limit the user did not write.
+	MaxReadBytes int `yaml:"max_read_bytes"`
+}
+
+// The range `max_read_bytes` may take.
+//
+// ★ The ceiling lives here rather than in the provider because **both**
+//
+//	halves have to know it: the loader refuses a value outside it, and the
+//
+//	provider reads what is left.
+const (
+	MinConfigReadBytes = 1024
+	MaxConfigReadBytes = 1024 * 1024
+)
+
 // HTTPToolsCfg is the HTTP tool's own configuration.
 //
 // ★ Allows names the tools that run **without a nod**, in this file's own
@@ -429,6 +544,30 @@ type HTTPToolsCfg struct {
 	Headers map[string]string `yaml:"headers"`
 	Timeout LenientDuration   `yaml:"timeout"`
 	Allows  []string          `yaml:"allows"`
+
+	// Proxy is the proxy every request of this tool goes through.
+	//
+	// ★ It is empty by default, and an empty proxy is **no proxy**: the
+	//
+	//	tool dials the target itself and refuses a target that does not
+	//	resolve to a public address.
+	//
+	// ★ A proxy **replaces** that rule rather than adding to it. A proxy
+	//
+	//	exists to reach what cannot be reached directly — an intranet
+	//	host is not public, and reaching it is exactly what the proxy is
+	//	for — so with a proxy configured the target may be any address
+	//	the proxy can reach. The proxy is named in the configuration, so
+	//	it is the user's own boundary and not ours to police.
+	//
+	// ★ It has three settings: "" (no proxy), a URL (that proxy, and the
+	//
+	//	environment is ignored), and "env" (the environment decides —
+	//	HTTP_PROXY / HTTPS_PROXY / NO_PROXY). The default cannot mean
+	//	"whatever the environment says": a client that picks the proxy
+	//	up on its own changes its route without anybody asking, and the
+	//	one who pays for that is the person whose machine it is.
+	Proxy string `yaml:"proxy"`
 }
 
 type WebSearchCfg struct {
@@ -437,6 +576,13 @@ type WebSearchCfg struct {
 	Timeout    LenientDuration `yaml:"timeout"`
 	Region     string          `yaml:"region"`
 	Allows     []string        `yaml:"allows"`
+
+	// Proxy is the proxy the search goes through. ★ It follows the HTTP
+	//
+	//	tool's rule: empty is no proxy, and a proxy replaces the
+	//	public-address rule rather than adding to it. ★ The three
+	//	settings are the same: "", a URL, or "env".
+	Proxy string `yaml:"proxy"`
 }
 
 type WikipediaCfg struct {
@@ -470,6 +616,21 @@ const MCPToolPrefix = "mcp__"
 //	contain a run of underscores: the boundary has to be unambiguous, or
 //	"mcp__a__b__x" could not be read back.
 const MCPSeparator = "__"
+
+// ProviderNamePattern is the shape a provider name may take.
+//
+// ★ It is the same shape an MCP server name takes, and for the same reason:
+//
+//	the name is the anchor of the whole secret naming scheme, so it has to
+//	read as an environment variable name and as a keyring user.
+const ProviderNamePattern = `^[a-z0-9]+(_[a-z0-9]+)*$`
+
+var providerNameRE = regexp.MustCompile(ProviderNamePattern)
+
+// ValidProviderName reports whether a provider name may be used.
+func ValidProviderName(name string) bool {
+	return providerNameRE.MatchString(name)
+}
 
 // MCPServerNamePattern is the shape a server name may take.
 //
@@ -662,6 +823,20 @@ type MCPServerCfg struct {
 	//   has not offered yet. The names are the server's own, not the
 	//   exposed ones: a file speaks its own vocabulary.
 	Allows []string `yaml:"allows"`
+
+	// Writes names the server's own tools that **write into the trusted
+	// paths** — the session's project root, the session's own workspace
+	// and the configuration root.
+	//
+	// ★ It is the same shape as Allows: the server's own names, in the
+	//   server's own vocabulary. ★ It is a **declaration**: openheron
+	//   cannot see where an MCP tool writes, so the file that brings the
+	//   server in is the one that says what its tools do.
+	//
+	// ★ A tool named here runs without a nod **only in the trusted
+	//   authorization mode**. In the default mode it asks like any other,
+	//   and in the full mode everything runs anyway.
+	Writes []string `yaml:"writes"`
 }
 
 // MCPFiles is the mcps/ partition: one entry per server, keyed by its name.

@@ -129,3 +129,85 @@ test("agent 过滤器报出这个 agent 的压缩阈值", async ({ page }) => {
   const coder = page.locator('[data-testid="agent-filter-coder"]')
   await expect(coder).not.toHaveAttribute("title", /Compacted at/)
 })
+
+// ★ The line under the input box has to stay readable on a narrow screen.
+//
+// ★ A phone is not a small laptop: the facts wrap, and nothing is squeezed
+//   into an ellipsis — a name cut in half says less than a name on the
+//   next line.
+test.describe("窄屏", () => {
+  const PHONE = { width: 390, height: 844 }
+
+  // cut tells whether an element is ellipsized: a truncated element's
+  // content is wider than the box it is drawn in.
+  async function cut(page: import("@playwright/test").Page, selector: string) {
+    return page.locator(selector).evaluate((el) => el.scrollWidth - el.clientWidth)
+  }
+
+  test("★ 这一行不横向溢出", async ({ page }) => {
+    await page.setViewportSize(PHONE)
+    await openApp(page)
+    await openThread(page, "Multi agent conversation")
+
+    const meta = page.locator(META)
+    await expect(meta).toBeVisible()
+
+    // ★ The row fits the screen: nothing hangs off the edge.
+    expect(await cut(page, META)).toBeLessThanOrEqual(1)
+
+    // ★ And the last entry is on the screen, not past it.
+    const right = await page
+      .locator('[data-testid="operations-button"]')
+      .evaluate((el) => el.getBoundingClientRect().right)
+    expect(right).toBeLessThanOrEqual(PHONE.width)
+  })
+
+  test("★ 名字换行，不被截成半个", async ({ page }) => {
+    await page.setViewportSize(PHONE)
+    await openApp(page)
+    await openThread(page, "Multi agent conversation")
+
+    await expect(page.locator(MODEL)).toHaveText("deepseek/deepseek-v4")
+    // ★ The whole name is on the screen: it is not "deepsee…".
+    expect(await cut(page, MODEL)).toBeLessThanOrEqual(1)
+    expect(await cut(page, REASONING)).toBeLessThanOrEqual(1)
+  })
+
+  test("★ 分隔符跟着后一项走，不留在行尾", async ({ page }) => {
+    await page.setViewportSize(PHONE)
+    await openApp(page)
+    await openThread(page, "Multi agent conversation")
+
+    // ★ The separator and the item it introduces are **one unit**: they are
+    //   never on two lines, so no line ends with a dangling "·".
+    const pairs = await page.evaluate(() => {
+      const out: { sep: number; item: number }[] = []
+      for (const id of [
+        "composer-meta-model",
+        "composer-meta-reasoning",
+        "composer-meta-context",
+      ]) {
+        const item = document.querySelector(`[data-testid="${id}"]`)
+        const sep = item?.parentElement?.firstElementChild
+        if (item && sep) {
+          out.push({
+            sep: Math.round(sep.getBoundingClientRect().top),
+            item: Math.round(item.getBoundingClientRect().top),
+          })
+        }
+      }
+      return out
+    })
+    expect(pairs).toHaveLength(3)
+    for (const p of pairs) expect(p.sep).toBe(p.item)
+  })
+
+  test("★ 窄屏上入口还在", async ({ page }) => {
+    await page.setViewportSize(PHONE)
+    await openApp(page)
+    await openThread(page, "Multi agent conversation")
+
+    await expect(page.locator('[data-testid="authorization-button"]')).toBeVisible()
+    await expect(page.locator('[data-testid="operations-button"]')).toBeVisible()
+  })
+})

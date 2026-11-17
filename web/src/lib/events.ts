@@ -312,6 +312,11 @@ export function reduceEvent(state: ConversationState, event: AgEvent): Conversat
     case "RUN_STARTED":
       // ★ The run id is kept: it is the client's way back to this run if
       //   the connection drops.
+      //
+      // ★ And the busy flag goes. It said the live turn belongs to
+      //   somebody else, and it does not any more: this surface is
+      //   following the run now, so it is watching the turn rather than
+      //   being kept out of it.
       return {
         ...state,
         status: "running",
@@ -319,6 +324,7 @@ export function reduceEvent(state: ConversationState, event: AgEvent): Conversat
         interrupts: [],
         error: undefined,
         retry: undefined,
+        busy: false,
       }
 
     case "RUN_FINISHED":
@@ -381,6 +387,7 @@ export function reduceEvent(state: ConversationState, event: AgEvent): Conversat
       }
       if (event.name === "context_usage") return onContextUsage(state, event)
       if (event.name === "context_compacted") return onContextCompacted(state, event)
+      if (event.name === "tool_failed") return onToolFailed(state, event)
       return state
     }
 
@@ -512,13 +519,39 @@ function onToolResult(state: ConversationState, event: ToolCallResultEvent): Con
   }))
 }
 
+// onToolFailed marks the tool call that failed.
+//
+// ★ The frame carries the call id — the same id the tool result frame
+//   carries — so the failure lands on the call it belongs to. ★ The
+//   verdict is a separate frame from the content because the content says
+//   what the **model** read, and this says what happened to the call.
+//
+// ★ The content is left alone: the failure is a fact about the call, and
+//   the text in it is what the model was told.
+function onToolFailed(state: ConversationState, event: CustomEvent): ConversationState {
+  const value = event.value as { tool_call_id?: string } | undefined
+  const id = value?.tool_call_id
+  if (!id) return state
+  // ★ A verdict never invents a card: the failure judges a call, and a
+  //   call that is not on the screen has nothing to be wrong about.
+  return updateToolPart(state, id, (p) => ({ ...p, isError: true }), false)
+}
+
 function updateToolPart(
   state: ConversationState,
   toolCallId: string,
   fn: (p: ToolPart) => ToolPart,
+  // ★ create says whether a card that is not on the screen yet may be made.
+  //
+  //   ★ The content frames may create one — a result that arrives before
+  //     its start must not be lost. ★ A **verdict** never does: it judges
+  //     a call, and a call that is not there has nothing to be wrong
+  //     about.
+  create = true,
 ): ConversationState {
   const midx = state.messages.findIndex((m) => m.parts.some((p) => p.kind === "tool" && p.id === toolCallId))
   if (midx < 0) {
+    if (!create) return state
     const parent = `tool:${toolCallId}`
     const withMsg = ensureMessage(state, parent, "assistant")
     const part: ToolPart = { kind: "tool", id: toolCallId, name: "", argsText: "", phase: "running" }

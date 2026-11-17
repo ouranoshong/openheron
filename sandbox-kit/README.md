@@ -8,7 +8,7 @@ The openheron agent server, packaged as Docker Sandboxes **v3 Kits**.
 |---|---|
 | **I want to run openheron in a sandbox** | [`TUTORIAL.md`](TUTORIAL.md) — the published image, the credential, the browser. The Chinese version is [`TUTORIAL_zh.md`](TUTORIAL_zh.md). |
 | **I want to change the Kit** | [`BUILDING.md`](BUILDING.md) — build it, change the descriptor, publish a version. The Chinese version is [`BUILDING_zh.md`](BUILDING_zh.md). |
-| **I want to know why it is shaped this way** | [`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md) — the design, and every assumption it rests on, measured. |
+| **I want to know why it is shaped this way** | [`docs/tools-design.md`](../docs/tools-design.md) — the design, and every assumption it rests on, measured. |
 | **I want to see it work** | [`examples/demo-project`](examples/demo-project) — a tiny Go program with a bug in it, to point a sandbox at. |
 
 ## What is in here
@@ -38,6 +38,6 @@ business. Vendor mixins are **optional** and compose in any number.
   and the default holds `docker.io/` and `dhi.io/`.
 
 ★ Each of those is measured, and the measurements are in
-[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md) §6. The
+[`docs/tools-design.md`](../docs/tools-design.md) §4.4. The
 repeatable form of them is [`acceptance/run.sh`](acceptance/run.sh) — 21
 checks, and it exits non-zero if any of them stops holding.

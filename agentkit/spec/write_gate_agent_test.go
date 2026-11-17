@@ -49,7 +49,7 @@ func TestABatchThatWouldTakeAWorkingAgentOutIsRefused(t *testing.T) {
 	//   not about the file being edited.
 	_, _, err := s.WriteMany([]File{
 		{Rel: "llm/openai.yaml", Content: []byte(
-			"type: openai_compat\nbase_url: https://api.example.com\napi_key: ${TEST_LLM_KEY}\nmodels:\n  - id: other\n")},
+			"type: openai_compat\nbase_url: https://api.example.com\nmodels:\n  - id: other\n")},
 	}, "")
 	if err == nil {
 		t.Fatal("a batch that takes a working agent out of the tree must be refused")
@@ -103,7 +103,7 @@ func TestAWriteThatBringsAnAgentIntoTheTreeIsAccepted(t *testing.T) {
 	// ★ The provider that declares the model arrives: the agent comes into
 	//   the tree, and nothing that worked stops working.
 	_, _, err := s.Write("llm/second.yaml", []byte(
-		"type: openai_compat\nbase_url: https://api.example.com\napi_key: ${TEST_LLM_KEY}\nmodels:\n  - id: nope\n"), "")
+		"type: openai_compat\nbase_url: https://api.example.com\nmodels:\n  - id: nope\n"), "")
 	if err != nil {
 		t.Fatalf("a change that brings an agent into the tree must be accepted: %v", err)
 	}

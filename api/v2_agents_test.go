@@ -31,6 +31,7 @@ models:
 	write("agents/lead.md", "---\ndescription: Lead\nmodel: test/small\nsubagents: [coder]\n---\nbody\n")
 	write("agents/coder.md", "---\ndescription: Coder\nmodel: test/small\n---\nbody\n")
 
+	t.Setenv(spec.RootEnv, "")
 	svc, err := spec.NewService(base, root)
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
@@ -97,6 +98,7 @@ models:
 `)
 	write("agents/main.md", "---\ndescription: Root\nmodel: test/small\n---\nbody\n")
 
+	t.Setenv(spec.RootEnv, "")
 	svc, err := spec.NewService(base, root)
 	if err != nil {
 		t.Fatalf("NewService: %v", err)

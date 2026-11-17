@@ -51,6 +51,10 @@ func Handler(assets fs.FS, prefix string) (app.HandlerFunc, error) {
 		}
 		c.SetStatusCode(consts.StatusOK)
 		c.SetContentType("text/html; charset=utf-8")
+		// ★ The UI is a window onto an agent that runs shell commands, and
+		//   one of its cards is an approval button. A page that framed it
+		//   could put a fake card under the user's mouse. Refuse the frame.
+		c.Response.Header.Set("X-Frame-Options", "DENY")
 		c.SetBodyString(string(index))
 	}, nil
 }

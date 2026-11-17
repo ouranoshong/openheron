@@ -75,14 +75,14 @@ func (s *Service) Diagnostics(rel string, content []byte) (*Diagnostics, error) 
 	}
 	trial, d := s.diagnose(rel, map[string]*mutation{rel: {Rel: rel, Content: content}})
 	if cat.Dir == DirLLM {
-		if line := secretLiteralLine(content); line > 0 {
-			// ★ Ahead of the rest, not instead of it: the key makes the file
-			//   unsavable, but hiding the other issues behind it would send
-			//   the user round the loop twice.
+		if line := apiKeyLine(content); line > 0 {
+			// ★ Ahead of the rest, not instead of it: the retired field makes
+			//   the file unsavable, but hiding the other issues behind it
+			//   would send the user round the loop twice.
 			d.OK = false
 			d.Issues = append([]Issue{{
 				Path: rel, Line: line, Severity: SeverityError,
-				Message: secretLiteralMessage,
+				Message: apiKeyRetiredMessage(rel),
 			}}, d.Issues...)
 		}
 	}

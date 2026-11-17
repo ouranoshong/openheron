@@ -102,6 +102,72 @@ func TestSinkSwapsUnderConcurrentWrites(t *testing.T) {
 	}
 }
 
+// ★ The notice route: the console and the log file, whatever the log's route
+//
+//	is. This is the test that says the address still reaches the terminal
+//	when the log has moved to a file.
+func TestNoticeReachesTheConsoleAndTheFile(t *testing.T) {
+	var console, file bytes.Buffer
+	sink := NewSink(&console)
+	log := slog.New(NewHandler(sink, slog.LevelDebug))
+
+	sink.Install(&file, false)
+	log.Info("a record")
+	NewNotice(sink.NoticeWriter()).Info("a notice")
+
+	if strings.Contains(console.String(), "a record") {
+		t.Fatalf("the log left the console behind:\n%s", console.String())
+	}
+	if !strings.Contains(file.String(), "a record") {
+		t.Fatalf("the record never reached the file:\n%s", file.String())
+	}
+	if !strings.Contains(console.String(), "a notice") {
+		t.Fatalf("the notice never reached the console:\n%s", console.String())
+	}
+	if !strings.Contains(file.String(), "a notice") {
+		t.Fatalf("the notice never reached the file:\n%s", file.String())
+	}
+}
+
+// ★ One notice, one line on the terminal: the log's route covers the console
+//
+//	here, and a second copy would say the same thing twice.
+func TestNoticeIsNotDuplicatedWhenTheLogCoversTheConsole(t *testing.T) {
+	var console, file bytes.Buffer
+	sink := NewSink(&console)
+	sink.Install(&file, true)
+	log := slog.New(NewHandler(sink, slog.LevelDebug))
+
+	log.Info("a record")
+	NewNotice(sink.NoticeWriter()).Info("a notice")
+
+	if n := strings.Count(console.String(), "a notice"); n != 1 {
+		t.Fatalf("the notice appeared %d times on the console:\n%s", n, console.String())
+	}
+	if !strings.Contains(file.String(), "a notice") {
+		t.Fatalf("the notice never reached the file:\n%s", file.String())
+	}
+}
+
+// ★ A notice is not a log record: the level does not filter it.
+func TestNoticeIsNotFilteredByTheLevel(t *testing.T) {
+	var console bytes.Buffer
+	sink := NewSink(&console)
+	lv := new(slog.LevelVar)
+	lv.Set(slog.LevelError)
+	log := slog.New(NewHandlerWithLevel(sink, lv))
+	log.Info("a record")
+
+	NewNotice(sink.NoticeWriter()).Info("a notice")
+
+	if strings.Contains(console.String(), "a record") {
+		t.Fatalf("the record was not filtered by the level:\n%s", console.String())
+	}
+	if !strings.Contains(console.String(), "a notice") {
+		t.Fatalf("the level filtered the notice:\n%s", console.String())
+	}
+}
+
 type failingWriter struct {
 	err   error
 	calls int

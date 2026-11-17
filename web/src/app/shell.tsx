@@ -37,7 +37,9 @@ export function Shell() {
   const status = useStore(selectStatus)
   const isEmptyView = useStore(selectIsEmptyView)
   const refreshList = useStore((s) => s.refreshList)
+  const refreshProjects = useStore((s) => s.refreshProjects)
   const openSession = useStore((s) => s.openSession)
+  const watchSession = useStore((s) => s.watchSession)
   const activeId = useStore((s) => s.activeId)
 
   const toggleSidebar = () =>
@@ -53,8 +55,19 @@ export function Shell() {
 
   useEffect(() => {
     void refreshList()
+    // ★ The project table is a second answer, and it is read beside the
+    //   session list: the sidebar groups the sessions by it.
+    void refreshProjects()
     if (activeId) void openSession(activeId)
-  }, [refreshList, openSession, activeId])
+  }, [refreshList, refreshProjects, openSession, activeId])
+
+  // ★ The session's announcement channel follows the session on screen.
+  //   It is what tells this surface that an approval was answered in
+  //   another tab: without it the card stays and every answer it offers
+  //   is refused.
+  useEffect(() => {
+    watchSession(activeId)
+  }, [watchSession, activeId])
 
   const dot = DOT[status] ?? DOT.idle!
 

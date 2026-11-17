@@ -37,14 +37,14 @@ func TestNewBuilderDefersEverythingToBuild(t *testing.T) {
 	if b.snap != nil {
 		t.Fatal("NewBuilder must not derive a snapshot before the manager is asked")
 	}
-	if _, _, size, _ := b.Stats(); size != 0 {
+	if _, _, size := b.Stats(); size != 0 {
 		t.Fatalf("NewBuilder must not populate the pool, got %d entries", size)
 	}
 }
 
 // The gate must wrap mutating tools and leave read-only ones untouched.
 func TestApprovalMiddlewareOnlyGatesMutatingTools(t *testing.T) {
-	mw := newApprovalMiddleware(defaultTestPolicy())
+	mw := newApprovalMiddleware(defaultTestPolicy(), scope{})
 
 	for _, name := range []string{"write_file", "edit_file", "execute"} {
 		tCtx := &adk.ToolContext{Name: name}

@@ -22,9 +22,37 @@ export async function setMCPMode(mode: "default" | "empty" | "starting"): Promis
   if (!r.ok) throw new Error(`failed to set the MCP mode ${mode}: ${r.status}`)
 }
 
+// ★ setProjectsMode chooses the project table the fake serves.
+//
+// ★ "default" has **no** projects at all — the sidebar is a flat list, and
+//   that is how the interface looked before the projects landed. ★ "multi"
+//   has two projects and no scope; ★ "single" has one project and a scope.
+export async function setProjectsMode(mode: "default" | "multi" | "single"): Promise<void> {
+  const r = await fetch(`${FAKE_URL}/__fake/projects-mode?mode=${mode}`, { method: "POST" })
+  if (!r.ok) throw new Error(`failed to set the projects mode ${mode}: ${r.status}`)
+}
+
 export async function setDefaultRoot(agent: string): Promise<void> {
   const r = await fetch(`${FAKE_URL}/__fake/default-root?agent=${agent}`, { method: "POST" })
   if (!r.ok) throw new Error(`failed to set the default root ${agent}: ${r.status}`)
+}
+
+// ★ setDirPickMode chooses what the folder chooser answers.
+//
+// ★ The real chooser opens the operating system's dialog on the machine the
+//   server runs on, so the fake answers with a fixed path. ★ The three
+//   modes are the three answers the client has to tell apart: a directory
+//   was chosen, the chooser was closed, and the machine has none.
+export async function setDirPickMode(
+  mode: "picked" | "cancelled" | "failed",
+  path = "/tmp/picked-project",
+): Promise<void> {
+  const r = await fetch(`${FAKE_URL}/__fake/dir-pick`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode, path }),
+  })
+  if (!r.ok) throw new Error(`failed to set the dir pick mode ${mode}: ${r.status}`)
 }
 
 export async function clearFakeThreads(): Promise<void> {
@@ -46,6 +74,15 @@ export const COMPOSER_OPTION = '[data-testid="composer-option"]'
 
 export const APPROVE_BUTTON = "button, [role=button]"
 export const STOP_BUTTON = '[aria-label="Stop generating"]'
+
+// ★ The operation log's surface: the entry below the input box, the panel it
+//   opens, and the lines inside it.
+export const OPERATIONS_BUTTON = '[data-testid="operations-button"]'
+export const OPERATIONS_DIALOG = '[data-testid="operations-dialog"]'
+export const OPERATIONS_ITEM = '[data-testid="operations-item"]'
+export const OPERATIONS_TEXT = '[data-testid="operations-text"]'
+export const OPERATIONS_EMPTY = '[data-testid="operations-empty"]'
+export const OPERATIONS_ERROR = '[data-testid="operations-error"]'
 
 export async function clickByText(page: Page, ...texts: string[]): Promise<void> {
   const el = await findByText(page, ["button"], texts)
@@ -104,6 +141,20 @@ export async function openThread(page: Page, title: string): Promise<void> {
   const row = page.locator(THREAD_ITEM).filter({ hasText: title }).first()
   await row.waitFor({ state: "visible", timeout: 5000 })
   await row.click()
+}
+
+// ★ openToolCard opens the **first** tool card of the transcript.
+//
+// ★ The card starts closed — a tool call is a step, not a message — so a
+//   test that wants the arguments or the result has to open it first.
+export async function openToolCard(page: Page, index = 0): Promise<void> {
+  const card = page.locator('[data-testid="tool-card"]').nth(index)
+  await card.waitFor({ state: "visible", timeout: 7000 })
+  const toggle = card.locator('[data-testid="tool-card-toggle"]')
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click()
+  }
+  await expect(card).toHaveAttribute("data-open", "true")
 }
 
 export function trackRequests(page: Page): string[] {

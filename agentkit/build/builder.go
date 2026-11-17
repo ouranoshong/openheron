@@ -29,15 +29,18 @@ type Builder struct {
 	log                  *slog.Logger
 	models               modelFactory
 	tools                *toolRegistry
+	// roundBlock renders the block that names the round's project root.
+	//
+	// ★ It is a function and not a string: the tree is pooled and reused
+	// across rounds, and the root is a fact of the round.
+	roundBlock func(context.Context) string
 	// mcp owns the MCP clients. They outlive the snapshot — that is what
 	// the provider's batch does not.
 	mcp *mcpManager
 	// svc is the configuration service: where the tree is, how to read it
 	// and how to write it without leaving half a file behind. The config_*
 	// tools answer through it rather than growing a second way in.
-	svc *spec.Service
-	// bump moves the generation when a server's tool list changed.
-	bump func()
+	svc  *spec.Service
 	mu   sync.Mutex
 	snap *snapshot
 	// closers are resources a snapshot opened and never hands back — the KB
@@ -74,10 +77,35 @@ func WithConfigService(svc *spec.Service) Option {
 	}
 }
 
+// configRoot returns the configuration root, or "" when there is none.
+//
+// ★ Empty means "nobody wired a configuration service", and the skills are
+//
+//	then resolved by the probe alone.
+func (b *Builder) configRoot() string {
+	if b == nil || b.svc == nil {
+		return ""
+	}
+	return b.svc.Root()
+}
+
 func WithPaths(projectRoot, dataDir string) Option {
 	return func(b *Builder) {
 		b.projectRoot = projectRoot
 		b.dataDir = dataDir
+	}
+}
+
+// WithRoundBlock wires the block that names the round's project root.
+//
+// ★ The builder cannot import the run package — the run package builds on
+// the builder — so the caller hands over the rendering instead of the text.
+//
+// ★ The text itself is not an option: it changes with the round, and the
+// tree is pooled.
+func WithRoundBlock(block func(context.Context) string) Option {
+	return func(b *Builder) {
+		b.roundBlock = block
 	}
 }
 
@@ -94,25 +122,6 @@ func NewBuilder(mgr ConfigManager, opts ...Option) *Builder {
 	b.mcp = newMCPManager(b.log)
 	b.tools = defaultToolRegistry(b.mcp)
 	return b
-}
-
-// SetGenerationBump wires the callback that moves the generation.
-//
-// ★ A server's tool list can change while the configuration stands still,
-//
-//	and the tools have to be rebuilt for it. The rebuild is the same road
-//	a configuration change takes, so the generation moves through the same
-//	hook — a second way to move it would be a second way to be wrong
-//	about it.
-func (b *Builder) SetGenerationBump(fn func()) {
-	b.bump = fn
-	// ★ The manager needs the same hook: a server that comes up changes
-	//   the tool surface, and the surface is rebuilt once per
-	//   generation — so the generation has to move when that happens,
-	//   not when a turn happens to ask.
-	if b.mcp != nil {
-		b.mcp.SetBump(fn)
-	}
 }
 
 // Warm starts every mounted MCP server in the background.
@@ -159,39 +168,52 @@ func (b *Builder) currentSnapshot() *snapshot {
 	if b.mgr == nil {
 		return nil
 	}
-	cfg, gen := b.mgr.Current()
-	s, err := b.snapshotFor(cfg, gen)
+	s, err := b.snapshotFor()
 	if err != nil {
 		return nil
 	}
 	return s
 }
 
-func (b *Builder) Stats() (hits, misses uint64, size int, gen uint64) {
+func (b *Builder) Stats() (hits, misses uint64, size int) {
 	return b.pool.Stats()
 }
 
-// Build returns the agent for this turn.
+// Build returns the agent for this turn, and the fingerprint of the tree it
+// was built from.
+//
+// ★ The fingerprint comes back **with** the agent because it is the agent's
+//
+//	identity: a name is not enough, because the agent behind a name may
+//	have been rebuilt. ★ And a resume needs it — see BuildPinned.
 func (b *Builder) Build(ctx context.Context, _ string, agentID string,
-	_ contract.TurnKind) (adk.TypedAgent[*schema.Message], error) {
+	_ contract.TurnKind, pinned string) (adk.TypedAgent[*schema.Message], string, error) {
 
 	if b.mgr == nil {
-		return nil, errors.New("agent: no config manager is wired")
+		return nil, "", errors.New("agent: no config manager is wired")
 	}
-	cfg, gen := b.mgr.Current()
+	cfg := b.mgr.Current()
 
 	// ★ The re-list happens before the turn's agent is assembled, not
-	//   inside the batch build: the batch is built once per generation,
-	//   and the generation moves only when a list changes — so a re-list
-	//   inside the build would never run.
-	if b.mcp != nil && b.mcp.Refresh(ctx, cfg) && b.bump != nil {
-		b.bump()
-		cfg, gen = b.mgr.Current()
+	//   inside the build: the listing is what the tree is built from, and
+	//   a re-list inside the build would never run.
+	//
+	// ★ The answer is **not** used here: the tree's identity carries the
+	//   tool surface, so the builder compares it (see snapshotFor) instead
+	//   of being told that it moved. ★ "Told" was the old road — and it
+	//   was a second way to be wrong about it.
+	if b.mcp != nil {
+		b.mcp.Refresh(ctx, cfg)
 	}
 
-	snap, err := b.snapshotFor(cfg, gen)
+	// ★ A change the write path made is read **before** the tree is built,
+	//   not after the watcher's next poll: "the next turn uses it" has to
+	//   be a promise, and a poll is a guess.
+	b.reloadIfMarked()
+
+	snap, err := b.snapshotFor()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	name := strings.TrimSpace(agentID)
@@ -199,13 +221,13 @@ func (b *Builder) Build(ctx context.Context, _ string, agentID string,
 		name = snap.agentSpec.defaultAgent
 	}
 	if _, ok := snap.agentSpec.agentSpec(name); !ok {
-		return nil, b.agentUnavailable(name, snap)
+		return nil, "", b.agentUnavailable(name, snap)
 	}
-	e, err := b.pooledRoot(ctx, snap, name)
+	e, fingerprint, err := b.pooledRoot(ctx, snap, name, pinned)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return e.agent, nil
+	return e.agent, fingerprint, nil
 }
 
 // agentUnavailable says why an agent is not there.
@@ -241,21 +263,74 @@ func leftOutMessage(cfg *spec.Config, name string) string {
 	return fmt.Sprintf("agent %q is left out of the tree: %s", name, why)
 }
 
-func (b *Builder) pooledRoot(ctx context.Context, snap *snapshot, name string) (*entry, error) {
+func (b *Builder) pooledRoot(ctx context.Context, snap *snapshot, name, pinned string) (
+	*entry, string, error) {
 
 	sp, ok := snap.agentSpec.agentSpec(name)
 	if !ok {
-		return nil, b.agentUnavailable(name, snap)
+		return nil, "", b.agentUnavailable(name, snap)
 	}
 	table := snap.tableFor(name)
 	if table == nil {
-		return nil, fmt.Errorf("agent: %q has no tool table", name)
+		return nil, "", fmt.Errorf("agent: %q has no tool table", name)
 	}
-	return b.pool.GetOrBuild(ctx, name, snap.gen,
+	fingerprint := snap.fingerprintOf(name)
+	if pinned != "" {
+		// ★ The pinned tree: the pool keeps an entry per fingerprint, and
+		//   the old one lives as long as the process does — so the round
+		//   that started with that tree can finish on it.
+		if e, ok := b.pool.Lookup(name, pinned); ok {
+			return e, pinned, nil
+		}
+		// ★ The tree is gone: the process restarted, or the pool was
+		//   rebuilt. ★ The round continues on the current tree, and it
+		//   says so — a silent swap would be the very bug this pin
+		//   exists to stop.
+		b.logger().Warn("[agent] the pinned tree is gone, continuing on the current one",
+			"agent", name, "pinned", pinned, "current", fingerprint)
+	}
+	e, err := b.pool.GetOrBuild(ctx, name, fingerprint,
 		func(ctx context.Context) (adk.TypedAgent[*schema.Message],
 			model.BaseModel[*schema.Message], error) {
 			return b.assemble(ctx, snap, &sp, table)
 		})
+	if err != nil {
+		return nil, "", err
+	}
+	return e, e.fingerprint, nil
+}
+
+// reloadIfMarked reads the configuration again when the write path marked a
+// change.
+//
+// ★ The mark is what makes "the next turn uses it" a **promise**: the
+//
+//	watcher's poll would notice the same change a moment later, and a turn
+//	that starts in between would run the old tree.
+//
+// ★ The marks are drained **before** the read, not after: a write that
+//
+//	lands between the two is in the configuration the read returns, so
+//	losing its mark loses nothing.
+func (b *Builder) reloadIfMarked() {
+	if b.svc == nil {
+		return
+	}
+	marks := b.svc.DrainMarks()
+	if len(marks) == 0 {
+		return
+	}
+	fresh, err := b.svc.Load()
+	if err != nil {
+		// ★ The configuration on disk does not load. The previous one stays
+		//   in force and the turn says so — the watcher will say it too,
+		//   but the watcher speaks to the log and the turn speaks to the
+		//   user.
+		b.logger().Error("[config] the configuration on disk does not load, keeping the previous one",
+			"err", err, "marked", strings.Join(marks, ","))
+		return
+	}
+	b.mgr.Publish(fresh)
 }
 
 var errAgentNotDeclared = errors.New("agent is not declared")

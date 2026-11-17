@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,11 @@ func TestShellHelperProcess(t *testing.T) {
 		t.Skip("this is the helper program, not a test")
 	}
 	fmt.Println(strings.Join(os.Args[1:], " "))
+	// ★ The working directory is part of what the command did: a program
+	//	that answers "where am I" has to answer with the truth.
+	if wd, err := os.Getwd(); err == nil {
+		fmt.Println("CWD=" + wd)
+	}
 	os.Exit(0)
 }
 
@@ -45,9 +51,103 @@ func TestExecuteRunsTheConfiguredProgram(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := runExecute(t, b, "the-command-marker")
+	out := runExecute(t, b, context.Background(), "the-command-marker")
 	if !strings.Contains(out, "the-command-marker") {
 		t.Fatalf("the configured program never saw the command: %q", out)
+	}
+}
+
+// ★ The command runs in **the round's** project root: the directory the
+//
+//	prompt names and the write boundary uses. ★ The backend is built once
+//	and shared by every round, so a working directory baked into it is the
+//	root of the last round that used it — and a command that runs
+//	somewhere else than the model was told produces output that does not
+//	mean what it says.
+func TestExecuteRunsInTheRoundsProjectRoot(t *testing.T) {
+	t.Setenv("FSX_TEST_SHELL", "1")
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundRoot := t.TempDir()
+	b, err := New(Config{
+		// ★ The backend's own root is a different directory: it is the
+		//   fallback for a context that carries no root.
+		Root:  t.TempDir(),
+		Shell: []string{self, "-test.run=TestShellHelperProcess"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := WithProjectRoot(context.Background(), roundRoot)
+	out := runExecute(t, b, ctx, "the-command-marker")
+
+	want, err := canonical(roundRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "CWD="+want) {
+		t.Fatalf("the command must run in the round's project root %q, got %q", want, out)
+	}
+}
+
+// ★ Without a round root the backend's own root holds — that is what the
+//
+//	fallback is for.
+func TestExecuteWithoutARoundRootRunsInTheBackendsRoot(t *testing.T) {
+	t.Setenv("FSX_TEST_SHELL", "1")
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backendRoot := t.TempDir()
+	b, err := New(Config{
+		Root:  backendRoot,
+		Shell: []string{self, "-test.run=TestShellHelperProcess"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out := runExecute(t, b, context.Background(), "the-command-marker")
+
+	want, err := canonical(backendRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "CWD="+want) {
+		t.Fatalf("the command must run in the backend's root %q, got %q", want, out)
+	}
+}
+
+// ★ A directory that does not exist is reported as what it is: the raw
+//
+//	failure is a chdir error from the operating system, and it names a path
+//	without saying why.
+func TestExecuteReportsAMissingProjectRoot(t *testing.T) {
+	t.Setenv("FSX_TEST_SHELL", "1")
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := New(Config{
+		Root:  t.TempDir(),
+		Shell: []string{self, "-test.run=TestShellHelperProcess"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	missing := filepath.Join(t.TempDir(), "gone")
+	ctx := WithProjectRoot(context.Background(), missing)
+	_, _, _, err = b.initStreamingCmd(ctx, "the-command-marker")
+	if err == nil {
+		t.Fatal("a missing project root must be reported")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("the error must say what is wrong, got: %v", err)
 	}
 }
 
@@ -88,9 +188,9 @@ func TestTheChildPathStartsWithTheShellDirectory(t *testing.T) {
 }
 
 // runExecute runs a command and collects what came back.
-func runExecute(t *testing.T, b *Local, command string) string {
+func runExecute(t *testing.T, b *Local, ctx context.Context, command string) string {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	sr, err := b.ExecuteStreaming(ctx, &filesystem.ExecuteRequest{Command: command})

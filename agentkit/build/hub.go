@@ -142,7 +142,7 @@ func (h *skillAgentHub) Get(ctx context.Context, name string,
 		if h.builder == nil || h.snap == nil {
 			return nil, fmt.Errorf("no builder is wired for skill agent %q", target)
 		}
-		e, err := h.builder.pooledRoot(ctx, h.snap, target)
+		e, _, err := h.builder.pooledRoot(ctx, h.snap, target, "")
 		if err != nil {
 			return nil, err
 		}

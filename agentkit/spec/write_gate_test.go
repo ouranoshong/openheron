@@ -114,49 +114,49 @@ func TestRevisionIsStableAndContentAddressed(t *testing.T) {
 	}
 }
 
-func TestWriteRejectsLiteralSecret(t *testing.T) {
+// ★ The field is retired, so **every** occurrence is refused — a reference
+//
+//	to a variable is no more acceptable than a literal: the key does not
+//	live in the file any more, it lives in the environment or the keyring.
+func TestWriteRejectsTheRetiredAPIKeyField(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 	s := f.service(t)
-
-	_, _, err := s.Write("llm/openai.yaml",
-		[]byte("type: openai\nbase_url: https://x.example\napi_key: sk-realsecret\nmodels:\n  - id: fast\n"), "")
-
-	if err == nil {
-		t.Fatal("a literal api_key must be rejected")
-	}
-	if writeErrKind(err) != ErrSecretLiteral {
-		t.Fatalf("kind = %v, want ErrSecretLiteral", err)
-	}
-	if !strings.Contains(f.read(t, "llm/openai.yaml"), "${TEST_LLM_KEY}") {
-		t.Fatal("the original file was overwritten by a rejected write")
-	}
-}
-
-func TestWriteAcceptsSecretReferences(t *testing.T) {
-	f := newFixture(t)
-	f.seedMinimal(t)
-	s := f.service(t)
-
-	secretFile := filepath.Join(t.TempDir(), "key")
-	if err := os.WriteFile(secretFile, []byte("sk-from-file"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 
 	cases := []struct{ label, key string }{
-		{"env ref", "${TEST_LLM_KEY}"},
-		// ★ Quoted through strconv: a Windows path contains backslashes, and
-		//   pasting it into a double-quoted YAML scalar would make \U an
-		//   escape sequence instead of a path separator.
-		{"at-file ref", strconv.Quote("@file:" + secretFile)},
-		{"no auth", ""},
+		{"literal", "sk-realsecret"},
+		{"env reference", "${LLM_OPENAI_API_KEY}"},
+		{"at-file reference", strconv.Quote("@file:/etc/openheron/key")},
+		{"no value", ""},
 	}
 	for _, c := range cases {
 		content := "type: openai\nbase_url: https://x.example\n" +
 			"api_key: " + c.key + "\nmodels:\n  - id: fast\n"
-		if _, _, err := s.Write("llm/openai.yaml", []byte(content), ""); err != nil {
-			t.Errorf("%s (api_key: %s) was rejected: %v", c.label, c.key, err)
+		_, _, err := s.Write("llm/openai.yaml", []byte(content), "")
+		if err == nil {
+			t.Errorf("%s (api_key: %s) must be rejected", c.label, c.key)
+			continue
 		}
+		if writeErrKind(err) != ErrKeyFieldRetired {
+			t.Errorf("%s: kind = %v, want ErrKeyFieldRetired", c.label, err)
+		}
+		if !strings.Contains(err.Error(), "LLM_OPENAI_API_KEY") {
+			t.Errorf("%s: the refusal must say where the key comes from now: %v", c.label, err)
+		}
+	}
+}
+
+// ★ A provider file without a key is the ordinary shape now: the key comes
+//
+//	from the environment or the keyring, and the file says nothing.
+func TestWriteAcceptsAProviderFileWithoutAKey(t *testing.T) {
+	f := newFixture(t)
+	f.seedMinimal(t)
+	s := f.service(t)
+
+	content := "type: openai\nbase_url: https://x.example\nmodels:\n  - id: fast\n"
+	if _, _, err := s.Write("llm/openai.yaml", []byte(content), ""); err != nil {
+		t.Fatalf("a provider file without a key must be accepted: %v", err)
 	}
 }
 

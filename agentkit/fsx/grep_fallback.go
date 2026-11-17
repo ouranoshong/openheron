@@ -236,7 +236,7 @@ func (s *Local) grepBuiltin(ctx context.Context, req *filesystem.GrepRequest) ([
 	if req.Pattern == "" {
 		return nil, fmt.Errorf("pattern is required")
 	}
-	base, err := s.resolve(req.Path)
+	base, err := s.resolve(ctx, req.Path)
 	if err != nil {
 		return nil, err
 	}

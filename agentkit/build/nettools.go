@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"net/http"
 	"strings"
 	"time"
 
@@ -26,25 +25,15 @@ const (
 	defaultToolOutputBytes  = 20000
 )
 
-func newPublicOnlyClient(timeout time.Duration) *http.Client {
-	if timeout <= 0 {
-		timeout = defaultHTTPTimeout
-	}
-	dialer := &net.Dialer{Timeout: timeout, KeepAlive: 30 * time.Second}
-	return &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return dialPublicOnly(ctx, dialer, network, addr)
-			},
-			MaxIdleConns:          32,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-		},
-	}
-}
-
+// dialPublicOnly dials a target that has to be a public address.
+//
+// ★ The check happens **here**, at the moment of the dial, and the
+//
+//	connection is made to the address that was just checked. A check
+//	that ran at the name-resolution step alone would leave a hole: the
+//	name is resolved twice — once to judge it and once to reach it —
+//	and a name that answers differently the second time is the
+//	rebinding that the check was supposed to stop.
 func dialPublicOnly(ctx context.Context, dialer *net.Dialer, network, addr string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -129,7 +118,10 @@ func (httpRequestToolProvider) Provide(ctx context.Context, env toolEnv) ([]tool
 	if cfg == nil {
 		return nil, nil
 	}
-	cli := newPublicOnlyClient(cfg.Timeout.Duration())
+	cli, err := newNetworkClient(cfg.Timeout.Duration(), cfg.Proxy)
+	if err != nil {
+		return nil, err
+	}
 	headers := cfg.Headers
 
 	methods := map[string]bool{}
@@ -220,12 +212,16 @@ func (webSearchToolProvider) Provide(ctx context.Context, env toolEnv) ([]tool.B
 		timeout = defaultWebSearchTimeout
 	}
 
+	cli, err := newNetworkClient(timeout, cfg.Proxy)
+	if err != nil {
+		return nil, err
+	}
 	t, err := duckduckgo.NewTextSearchTool(ctx, &duckduckgo.Config{
 		ToolName:   decl.ToolNameWebSearch,
 		MaxResults: maxResults,
 		Region:     region,
 		Timeout:    timeout,
-		HTTPClient: newPublicOnlyClient(timeout),
+		HTTPClient: cli,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build the duckduckgo search tool: %w", err)

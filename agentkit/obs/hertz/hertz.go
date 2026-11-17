@@ -36,6 +36,21 @@ func New(log *slog.Logger) *Logger {
 	return &Logger{log: log}
 }
 
+// listeningBanner is hertz's own announcement of the listener.
+//
+// ★ hertz prints it once the socket is bound ("HTTP server listening on
+//
+//	address=..."). openheron announces the address itself, on the console
+//	route, where it is visible whatever the log's destination is — so the
+//	framework's line would say the same thing a second time, in the
+//	framework's shape and at the framework's file:line.
+const listeningBanner = "HTTP server listening on address="
+
+// isListeningBanner reports whether a message is hertz's announcement.
+func isListeningBanner(msg string) bool {
+	return strings.Contains(msg, listeningBanner)
+}
+
 // emit writes one record.
 //
 // ★ The record is built by hand so the caller's program counter can be
@@ -44,6 +59,9 @@ func New(log *slog.Logger) *Logger {
 // Enabled is checked here because Handler.Handle bypasses Logger's own gate.
 func (l *Logger) emit(ctx context.Context, level slog.Level, msg string) {
 	if l.log == nil || !l.log.Enabled(ctx, level) {
+		return
+	}
+	if isListeningBanner(msg) {
 		return
 	}
 	r := slog.NewRecord(time.Now(), level, msg, callerPC())

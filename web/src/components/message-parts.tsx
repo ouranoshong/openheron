@@ -3,7 +3,8 @@ import { memo, useState } from "react"
 
 import { AttachmentChip } from "@/components/attachment-chip"
 import { MarkdownText, MessageBody } from "@/components/markdown"
-import { ToolCard } from "@/components/tool-card"
+import { ToolGroup } from "@/components/tool-group"
+import { segments } from "@/lib/tool-groups"
 import { thinkingLabel } from "@/lib/thinking"
 import type { Message, Part } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -63,7 +64,15 @@ export const MessageParts = memo(function MessageParts({
 }) {
   return (
     <>
-      {parts.map((p) => {
+      {/* ★ The tool calls that follow each other are **one run**: three
+          calls in a row are one thing that happened, not three things —
+          and three cards would put three boxes on the screen where the
+          reader came for one answer. */}
+      {segments(parts).map((segment) => {
+        if (segment.kind === "run") {
+          return <ToolGroup key={segment.run.key} run={segment.run} />
+        }
+        const p = segment.part
         switch (p.kind) {
           case "text":
             if (!p.text) return null
@@ -92,9 +101,6 @@ export const MessageParts = memo(function MessageParts({
                 elapsedMs={p.elapsedMs ?? null}
               />
             )
-
-          case "tool":
-            return <ToolCard key={p.id} part={p} />
 
           // ★ A file that came with the message. It has no remove button:
           //   the list is history, and deleting the file would make the

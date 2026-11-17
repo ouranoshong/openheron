@@ -52,7 +52,10 @@ export interface SettingsValidateResult {
 
 export const SETTINGS_ERROR_CODES = {
   pathInvalid: "config_path_invalid",
-  secretLiteral: "config_secret_literal",
+  // ★ The `api_key` line is retired, so the server no longer refuses a
+  //   literal — it refuses the retired field itself, and the message says
+  //   which variable and which keyring entry replace it.
+  keyFieldRetired: "config_key_field_retired",
   wouldBreak: "config_would_break_merge",
   conflict: "config_write_conflict",
 } as const

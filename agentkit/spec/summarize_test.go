@@ -80,7 +80,6 @@ func TestTheThresholdIsReadFromTheAgentFile(t *testing.T) {
 	f.write(t, "llm/openai.yaml", `
 type: openai_compat
 base_url: https://api.example.com
-api_key: ${TEST_LLM_KEY}
 models:
   - id: fast
     context_window: 100000
@@ -110,7 +109,6 @@ func TestTheOldModelThresholdIsReportedNotFatal(t *testing.T) {
 	f.write(t, "llm/openai.yaml", `
 type: openai_compat
 base_url: https://api.example.com
-api_key: ${TEST_LLM_KEY}
 models:
   - id: fast
     context_window: 100000
@@ -140,7 +138,6 @@ func TestAnAgentWithoutAWindowIsReported(t *testing.T) {
 	f.write(t, "llm/openai.yaml", `
 type: openai_compat
 base_url: https://api.example.com
-api_key: ${TEST_LLM_KEY}
 models:
   - id: fast
 `)
@@ -167,7 +164,6 @@ func TestAnAbsoluteThresholdNeedsNoWindow(t *testing.T) {
 	f.write(t, "llm/openai.yaml", `
 type: openai_compat
 base_url: https://api.example.com
-api_key: ${TEST_LLM_KEY}
 models:
   - id: fast
 `)

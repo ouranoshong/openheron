@@ -23,10 +23,11 @@ type runIDCapturingBuilder struct {
 // models, so there are no windows.
 func (b *runIDCapturingBuilder) Contexts() map[string]contract.AgentContext { return nil }
 
-func (b *runIDCapturingBuilder) Build(ctx context.Context, _, _ string, _ contract.TurnKind) (
-	adk.TypedAgent[*schema.Message], error) {
+func (b *runIDCapturingBuilder) Build(ctx context.Context, _, _ string, _ contract.TurnKind, _ string) (
+	adk.TypedAgent[*schema.Message], string, error) {
+
 	b.seen = obs.RunID(ctx)
-	return noopAgent{}, nil
+	return noopAgent{}, "", nil
 }
 
 func TestV2RunUsesOneRunIDForTheLogAndTheStream(t *testing.T) {

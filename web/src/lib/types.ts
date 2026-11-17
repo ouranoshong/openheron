@@ -124,6 +124,17 @@ export interface ContextUsage {
   updatedAt?: string
 }
 
+// DirectoryPick is the answer to "open the folder chooser".
+//
+// ★ Three outcomes, not two: a directory was chosen, the chooser was
+//   closed, or the chooser could not be opened at all. ★ The second is not a
+//   failure — it is how a person says "not now" — and the third is the
+//   machine's answer, not the user's.
+export type DirectoryPick =
+  | { kind: "picked"; path: string }
+  | { kind: "cancelled" }
+  | { kind: "failed"; reason: string }
+
 export interface ConversationState {
   messages: Message[]
   status: TurnStatus

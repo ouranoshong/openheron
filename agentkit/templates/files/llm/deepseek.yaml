@@ -5,23 +5,30 @@
 type: openai_compat
 base_url: {{base_url|https://api.deepseek.com}}
 
-# ★ api_key holds the **name of an environment variable**, rendered as ${NAME}.
-api_key: {{api_key_env|DEEPSEEK_API_KEY}}
+# ★ The api key is **not** in this file. The provider's name is the file's
+#   name, and the name says where the key comes from:
+#
+#     the environment variable LLM_DEEPSEEK_API_KEY, or
+#     the keyring entry llm:deepseek
+#
+# ★ The environment wins when both are there. Store one with
+#   `openheron secret set llm deepseek`, or export the variable — a key that
+#   is in neither place is one reminder away from a 401.
 
 timeout: 5m
 
 models:
   - id: {{model|deepseek-flash}}
-    context_window: 131072
+    context_window: 1000000
 
     # Tier vocabulary: tier name → the field this endpoint sends it as.
     # An agent only writes `reasoning: high`; it does not need to know what shape
     # "high" has at this vendor.
     #
     # ★ This table is **not optional**: a tier the endpoint does not declare is
-    #   **silently ignored** — an agent writes `reasoning: high` while the model
-    #   has no "high", which means "no thinking at all", with no error and no
-    #   message. Declaring it is what makes `high` / `low` actually take effect.
+    #   **refused when the configuration loads** — the message names the agent,
+    #   the tier it asked for and the levels this model does declare.
+    #   Declaring it is what makes `high` / `low` actually take effect.
     reasoning:
       off:  { reasoning_effort: none, thinking: { type: disabled } }
       low:  { reasoning_effort: low,  thinking: { type: enabled } }
