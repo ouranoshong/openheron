@@ -103,7 +103,7 @@ jobs:
           version=$(bun -e "console.log((await Bun.file('node_modules/@playwright/test/package.json').json()).version)")
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: the browser cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.browsers.outputs.version }}
