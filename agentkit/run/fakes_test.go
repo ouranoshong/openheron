@@ -76,6 +76,36 @@ type fakeSession struct {
 	decisions         []storage.ApprovalRecord
 	ckpt              *fakeCheckpoints
 	ledger            *fakeRunLedger
+	// operations is the session's operation log. ★ It is the interface, not
+	// the fake type: a test replaces it with a log that cannot be written.
+	operations storage.OperationLog
+
+	// mode and confirmed are the session's authorization facts. ★ They
+	// live on the fake because the runtime reads them per round — a fake
+	// that answered "default" for ever could not test a session that runs
+	// without asking.
+	mode      contract.AuthorizationMode
+	confirmed bool
+
+	// approvalGate and approvalHit are the seam that widens the window
+	// between "the loop has exited" and "the approval is on disk".
+	//
+	// ★ The window is a few milliseconds wide in production, and it is the
+	// window a client that re-attaches lands in: the run's turn was
+	// released before the approval was written, so the attach was refused
+	// with "the run is no longer live" while the approval the client needs
+	// was nowhere on disk yet. ★ The gate holds that window open so a test
+	// can look at the runtime from the inside — the timing is the bug, and
+	// a test that cannot reproduce the timing cannot guard it.
+	approvalGate chan struct{}
+	approvalHit  chan struct{}
+
+	// approvalErr makes the approval write fail.
+	//
+	// ★ It is how a test proves that an approval which did not reach the
+	//	disk is **not** announced: a card the server refuses every answer on
+	//	is worse than no card at all.
+	approvalErr error
 }
 
 func (s *fakeSession) ID() string           { return s.id }
@@ -124,10 +154,44 @@ func (s *fakeSession) SetCursor(cursor int) error {
 }
 
 func (s *fakeSession) SetPendingApproval(p *storage.PendingApproval) error {
+	// ★ The gate comes first: the hit says "the approval is being written",
+	//	and the wait holds the write until the test opens it.
+	s.mu.Lock()
+	gate, hit := s.approvalGate, s.approvalHit
+	s.mu.Unlock()
+	if hit != nil {
+		select {
+		case hit <- struct{}{}:
+		default:
+		}
+	}
+	if gate != nil {
+		<-gate
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.approvalErr != nil {
+		return s.approvalErr
+	}
 	s.pending = p
 	return nil
+}
+
+// gateApproval holds the session's next approval write until the returned
+// function is called.
+//
+// ★ It exists to make the window between "the loop exited" and "the approval
+//
+//	is on disk" observable. ★ The hit channel fires when the write starts,
+//	so a test knows it is inside the window.
+func (s *fakeSession) gateApproval(hit chan struct{}) (release func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	gate := make(chan struct{})
+	s.approvalGate = gate
+	s.approvalHit = hit
+	var once sync.Once
+	return func() { once.Do(func() { close(gate) }) }
 }
 
 func (s *fakeSession) PendingApproval() (*storage.PendingApproval, error) {
@@ -193,6 +257,37 @@ func (s *fakeSession) SetTitle(t string) error {
 	return nil
 }
 
+// AuthorizationMode is the session's approval mode. ★ An empty one reads as
+// the default — the same as a session that never chose one.
+func (s *fakeSession) AuthorizationMode() contract.AuthorizationMode {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.mode == "" {
+		return contract.AuthzDefault
+	}
+	return s.mode
+}
+
+func (s *fakeSession) SetAuthorizationMode(mode contract.AuthorizationMode) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.mode = mode
+	return nil
+}
+
+func (s *fakeSession) AuthorizationConfirmed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.confirmed
+}
+
+func (s *fakeSession) SetAuthorizationConfirmed(confirmed bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.confirmed = confirmed
+	return nil
+}
+
 // Init lays down a fake session (the real one writes files; this one does not).
 func (s *fakeSession) Init(agentID string) error {
 	s.mu.Lock()
@@ -253,6 +348,44 @@ func (s *fakeSession) RunLedger() storage.RunLedger {
 		s.ledger = &fakeRunLedger{}
 	}
 	return s.ledger
+}
+
+// Operations returns the fake session's in-memory operation log.
+//
+// ★ The log is not optional in the fake either: the runtime writes the
+//
+//	round's start and end through it, and a fake without one would exercise
+//	a different code path than production.
+func (s *fakeSession) Operations() storage.OperationLog {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.operations == nil {
+		s.operations = &fakeOperationLog{}
+	}
+	return s.operations
+}
+
+// fakeOperationLog is the in-memory operation log of a fake session.
+type fakeOperationLog struct {
+	mu  sync.Mutex
+	ops []storage.Operation
+}
+
+func (l *fakeOperationLog) Append(_ context.Context, op storage.Operation) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	op.Seq = uint64(len(l.ops)) + 1
+	if op.At.IsZero() {
+		op.At = time.Now().UTC()
+	}
+	l.ops = append(l.ops, op)
+	return nil
+}
+
+func (l *fakeOperationLog) List(_ context.Context) ([]storage.Operation, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]storage.Operation(nil), l.ops...), nil
 }
 
 // fakeRunLedger is the in-memory ledger of a fake session.
@@ -411,8 +544,20 @@ type fakeBuilder struct {
 	mu       sync.Mutex
 	builds   int
 	agentIDs []string
-	agent    func(call int, kind contract.TurnKind) adk.TypedAgent[*schema.Message]
-	err      error
+	// pins are the tree fingerprints the turns asked for, in order.
+	pins []string
+	// tree is the tree the builder claims to be on. Empty means "whatever
+	// was pinned".
+	tree  string
+	agent func(call int, kind contract.TurnKind) adk.TypedAgent[*schema.Message]
+	err   error
+}
+
+// pinsSeen returns the tree fingerprints the turns asked for, in order.
+func (b *fakeBuilder) pinsSeen() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.pins...)
 }
 
 // Contexts reports what each agent's context allows.
@@ -425,21 +570,34 @@ func (b *fakeBuilder) Contexts() map[string]contract.AgentContext {
 	return nil
 }
 
-func (b *fakeBuilder) Build(_ context.Context, _ string, agentID string, kind contract.TurnKind) (adk.TypedAgent[*schema.Message], error) {
+// Build returns the fake agent, and the tree it pretends to be.
+//
+// ★ The fingerprint is what a resume pins: the fake remembers the pin it
+//
+//	was given, so a test can say "the round continues on the tree it
+//	started with" and check that it did.
+func (b *fakeBuilder) Build(_ context.Context, _ string, agentID string, kind contract.TurnKind,
+	pinned string) (adk.TypedAgent[*schema.Message], string, error) {
+
 	b.mu.Lock()
 	b.builds++
 	n := b.builds
 	b.agentIDs = append(b.agentIDs, agentID)
+	b.pins = append(b.pins, pinned)
 	agent := b.agent
+	tree := b.tree
 	b.mu.Unlock()
 
 	if b.err != nil {
-		return nil, b.err
+		return nil, "", b.err
+	}
+	if tree == "" {
+		tree = pinned
 	}
 	if agent == nil {
-		return &fakeAgent{}, nil
+		return &fakeAgent{}, tree, nil
 	}
-	return agent(n, kind), nil
+	return agent(n, kind), tree, nil
 }
 
 // drain consumes a turn's events to completion and reports the outcome.

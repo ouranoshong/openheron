@@ -194,10 +194,10 @@ func TestDiagnosticsOnAValidFile(t *testing.T) {
 	}
 }
 
-// A literal key is not a parse problem and not a cross-file rule: it is
+// The retired field is not a parse problem and not a cross-file rule: it is
 // refused for a reason that belongs to the repository. It still has a line,
 // and the editor shows it while the user is typing.
-func TestDiagnosticsPointAtALiteralAPIKey(t *testing.T) {
+func TestDiagnosticsPointAtTheRetiredAPIKeyField(t *testing.T) {
 	f := newFixture(t)
 	f.seedMinimal(t)
 	s := f.service(t)
@@ -207,7 +207,7 @@ func TestDiagnosticsPointAtALiteralAPIKey(t *testing.T) {
 
 	iss := findIssue(d, SeverityError)
 	if iss == nil {
-		t.Fatalf("a literal key must be an error: %+v", d.Issues)
+		t.Fatalf("the retired field must be an error: %+v", d.Issues)
 	}
 	if iss.Line != 3 {
 		t.Fatalf("line = %d, want 3 (%+v)", iss.Line, d.Issues)
@@ -266,7 +266,6 @@ func TestAnUndeclaredReasoningLevelIsRefused(t *testing.T) {
 	f.write(t, "llm/openai.yaml", `
 type: openai_compat
 base_url: https://api.example.com
-api_key: ${TEST_LLM_KEY}
 models:
   - id: fast
     reasoning:
@@ -298,7 +297,6 @@ func TestAModelWithoutAVocabularyAcceptsAnyLevel(t *testing.T) {
 	f.write(t, "llm/openai.yaml", `
 type: openai_compat
 base_url: https://api.example.com
-api_key: ${TEST_LLM_KEY}
 models:
   - id: fast
 `)

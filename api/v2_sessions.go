@@ -29,6 +29,26 @@ var (
 func (s *Server) v2CreateSession(ctx context.Context, c *app.RequestContext) {
 	var body struct {
 		AgentID string `json:"agentId"`
+		// ProjectID names the project the session belongs to.
+		//
+		// ★ An empty value means "no project": the session works in the
+		//   default project root. ★ It is **not** filled in from the scope —
+		//   the client says which project it means, and a server that
+		//   guessed would put the session somewhere the user did not ask for.
+		ProjectID string `json:"projectId"`
+		// AuthorizationMode is the approval mode the session is born with.
+		//
+		// ★ It is the same field the PATCH route carries, and it means the
+		//   same thing: the mode belongs to the conversation. ★ An empty
+		//   value means "no choice" — the session is born in the default
+		//   mode, the way it always was.
+		AuthorizationMode string `json:"authorizationMode"`
+		// AuthorizationConfirmed says the person was asked about full
+		// authorization and said yes.
+		//
+		// ★ The server still demands it: the flag is the client's word, and
+		//   the server checks that word against the rule it holds.
+		AuthorizationConfirmed bool `json:"authorizationConfirmed"`
 	}
 	_ = c.Bind(&body)
 
@@ -42,13 +62,115 @@ func (s *Server) v2CreateSession(ctx context.Context, c *app.RequestContext) {
 		root = r
 	}
 
+	// ★ The project is checked **before** the session is created: a request
+	//   that names a project that is not there is a wrong request, and
+	//   answering it with a session nobody can find is worse.
+	projectID := trimSpace(body.ProjectID)
+	if projectID != "" {
+		snap := s.projectSnapshot(ctx)
+		if snap == nil {
+			s.v2Fail(c, consts.StatusServiceUnavailable, codeInternal,
+				"the project registry is not wired", false)
+			return
+		}
+		if _, ok := snap.Get(projectID); !ok {
+			s.v2Fail(c, consts.StatusNotFound, codeProjectNotFound,
+				"no such project: "+projectID, false)
+			return
+		}
+	}
+
+	// ★ The mode is checked **before** the session is created, for the same
+	//   reason the project is: a session that could not get the mode it asked
+	//   for is a session nobody can use, and answering such a request with
+	//   one is worse than refusing it.
+	mode := contract.AuthzDefault
+	modeAsked := false
+	if raw := trimSpace(body.AuthorizationMode); raw != "" {
+		parsed, err := contract.ParseAuthorizationMode(raw)
+		if err != nil {
+			// ★ An unknown mode is refused, not defaulted — the same rule the
+			//   PATCH route holds: a name nobody recognises must not become
+			//   the safest one.
+			s.v2Fail(c, consts.StatusBadRequest, codeInvalidBody, err.Error(), false)
+			return
+		}
+		mode, modeAsked = parsed, true
+	}
+	// ★ Full authorization needs the confirmation **before** anything is
+	//   created — the same handshake the PATCH route has, and the same
+	//   answer: a session is not born in full authorization that nobody
+	//   confirmed.
+	if modeAsked && mode == contract.AuthzFull && !body.AuthorizationConfirmed {
+		s.v2Fail(c, consts.StatusConflict, codeConfirmationRequired,
+			"full authorization needs an explicit confirmation", false)
+		return
+	}
+
 	sess, err := s.sm.Create(ctx, root)
 	if err != nil {
 		s.v2FailInternal(c, err)
 		return
 	}
 
-	meta := s.metaOf(ctx, sess, nil)
+	// ★ The mode is written **with** the session, not after it: a session
+	//   that is born in the default mode and switched a moment later has a
+	//   window in which the first turn could run in the wrong mode.
+	if modeAsked {
+		if err := s.applyNewAuthorization(sess, mode, body.AuthorizationConfirmed); err != nil {
+			// ★ The session must not stay behind half-made: it exists, it has
+			//   no mode anybody chose, and nobody can tell which one it has.
+			//   ⇒ It is removed, and the request fails.
+			if delErr := s.sm.Delete(ctx, sess.ID()); delErr != nil {
+				s.logger().Warn("[api] the session cleanup failed after the authorization write",
+					"session", sess.ID(), "err", delErr)
+			}
+			s.v2FailInternal(c, err)
+			return
+		}
+	}
+
+	// ★ The session file is on disk, and that is a fact. ★ A table that could
+	//   not be written does not un-create the session: the session simply
+	//   has no project, and the log says why.
+	if projectID != "" {
+		if err := s.projectRegistry().Attach(ctx, sess.ID(), projectID); err != nil {
+			s.logger().Warn("[api] the project table write failed; the session has no project",
+				"session", sess.ID(), "project", projectID, "err", err)
+			projectID = ""
+		}
+	}
+
+	// ★ The timeline's first line. ★ It is written **after** the attach, so
+	//   it carries the project the session really has — a project that could
+	//   not be attached is not the session's project.
+	s.recordOperation(ctx, sess, storage.Operation{
+		Kind:      storage.OpSessionCreated,
+		Actor:     storage.ActorUser,
+		AgentID:   sess.AgentID(),
+		ProjectID: projectID,
+	})
+
+	// ★ The mode a session is born with is a line of its own, and so is the
+	//   confirmation: they are the same two facts the PATCH route records,
+	//   and a reader sees the same story either way. ★ A session born in the
+	//   default mode has nothing to record — nothing was chosen.
+	if modeAsked && mode != contract.AuthzDefault {
+		if mode == contract.AuthzFull {
+			s.recordOperation(ctx, sess, storage.Operation{
+				Kind:  storage.OpSessionAuthorizationConfirmed,
+				Actor: storage.ActorUser,
+				Mode:  string(contract.AuthzFull),
+			})
+		}
+		s.recordOperation(ctx, sess, storage.Operation{
+			Kind:  storage.OpSessionAuthorizationChanged,
+			Actor: storage.ActorUser,
+			Mode:  string(mode),
+		})
+	}
+
+	meta := s.metaOf(ctx, sess, nil, projectID)
 	c.JSON(consts.StatusCreated, meta)
 }
 
@@ -60,6 +182,9 @@ func (s *Server) v2ListSessions(ctx context.Context, c *app.RequestContext) {
 		s.v2FailInternal(c, err)
 		return
 	}
+	// ★ One read of the table for the whole list: it is a file, and a list of
+	//   a hundred sessions must not read it a hundred times.
+	snap := s.projectSnapshot(ctx)
 	out := threadList{Items: make([]threadMeta, 0, len(metas))}
 	for i := range metas {
 		m := metas[i]
@@ -68,7 +193,7 @@ func (s *Server) v2ListSessions(ctx context.Context, c *app.RequestContext) {
 			continue
 		}
 		pending, _ := sess.PendingApproval()
-		detail := s.metaOf(ctx, sess, pending)
+		detail := s.metaOf(ctx, sess, pending, projectIDOf(snap, sess.ID()))
 		out.Items = append(out.Items, detail.threadMeta)
 	}
 	c.JSON(consts.StatusOK, out)
@@ -89,7 +214,7 @@ func (s *Server) v2GetSession(ctx context.Context, c *app.RequestContext) {
 	}
 	status, _ := s.rt.StatusOf(ctx, sess.ID())
 
-	detail := s.metaOf(ctx, sess, pending)
+	detail := s.metaOf(ctx, sess, pending, projectIDOf(s.projectSnapshot(ctx), sess.ID()))
 	detail.RunID = status.RunID
 	if recs := sess.Decisions(); len(recs) > 0 {
 		detail.Decisions = toDecisionViews(recs)
@@ -133,8 +258,13 @@ func (s *Server) v2RenameSession(ctx context.Context, c *app.RequestContext) {
 		s.v2FailInternal(c, err)
 		return
 	}
+	s.recordOperation(ctx, sess, storage.Operation{
+		Kind:  storage.OpSessionRenamed,
+		Actor: storage.ActorUser,
+		Title: title,
+	})
 	pending, _ := sess.PendingApproval()
-	c.JSON(consts.StatusOK, s.metaOf(ctx, sess, pending))
+	c.JSON(consts.StatusOK, s.metaOf(ctx, sess, pending, projectIDOf(s.projectSnapshot(ctx), sess.ID())))
 }
 
 // trimTitle clamps a user-supplied title the same way List() clamps a
@@ -198,9 +328,14 @@ func (s *Server) v2SwitchAgent(ctx context.Context, c *app.RequestContext) {
 		s.v2FailInternal(c, err)
 		return
 	}
+	s.recordOperation(ctx, sess, storage.Operation{
+		Kind:    storage.OpSessionAgentChanged,
+		Actor:   storage.ActorUser,
+		AgentID: id,
+	})
 
 	pending, _ := sess.PendingApproval()
-	c.JSON(consts.StatusOK, s.metaOf(ctx, sess, pending))
+	c.JSON(consts.StatusOK, s.metaOf(ctx, sess, pending, projectIDOf(s.projectSnapshot(ctx), sess.ID())))
 }
 
 // resolveAgentID validates an agent id against the live config.
@@ -258,6 +393,16 @@ func (s *Server) v2DeleteSession(ctx context.Context, c *app.RequestContext) {
 	if err := s.sm.Delete(ctx, id); err != nil {
 		s.v2FailInternal(c, err)
 		return
+	}
+	// ★ The session is gone from the disk, so it must go from the table too:
+	//   a stale id there would be a session that belongs to a project and
+	//   does not exist. ★ A table that could not be written is logged, not
+	//   fatal — the session is already gone.
+	if reg := s.projectRegistry(); reg != nil {
+		if err := reg.Detach(ctx, id); err != nil {
+			s.logger().Warn("[api] the project table write failed; the session id is still listed",
+				"session", id, "err", err)
+		}
 	}
 	c.JSON(consts.StatusOK, map[string]any{"threadId": id, "deleted": true})
 }
@@ -471,12 +616,23 @@ func (s *Server) v2SessionRun(ctx context.Context, c *app.RequestContext) {
 //
 //	alone: a session waiting on a human has no loop running, so the runtime
 //	would report idle and the sidebar dot would lie.
-func (s *Server) metaOf(ctx context.Context, sess storage.Session, pending *storage.PendingApproval) threadDetail {
+//
+// ★ The project id is passed in rather than read here: the table is a file,
+//
+//	and this function is called once per session.
+func (s *Server) metaOf(ctx context.Context, sess storage.Session, pending *storage.PendingApproval, projectID string) threadDetail {
 	meta := threadDetail{
 		ThreadID:     sess.ID(),
 		MessageCount: sess.Len(),
 		State:        s.stateOf(ctx, sess),
 		AgentID:      s.activeAgentID(sess),
+		ProjectID:    projectID,
+		// ★ The mode and the confirmation are the session's own facts, so
+		//   they are read from the session and not from anywhere else.
+		//   ★ The mode is never empty: a session that never chose one reads
+		//   as the default, and "no mode" would be a fourth thing.
+		AuthorizationMode:      sess.AuthorizationMode().String(),
+		AuthorizationConfirmed: sess.AuthorizationConfirmed(),
 	}
 	if status, ok := s.rt.StatusOf(ctx, sess.ID()); ok && !status.StartedAt.IsZero() {
 		meta.UpdatedAt = status.StartedAt.UTC().Format(rfc3339Nano)

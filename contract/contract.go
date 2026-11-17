@@ -101,6 +101,15 @@ type AgentContext struct {
 	Model    string
 }
 
+// PendingReasonToolCall says what kind of decision an outstanding one is.
+//
+// ★ It is a constant and not a per-approval field: every approval openheron
+//
+//	raises is a tool call asking to be allowed, so the reason is the same
+//	every time — and two surfaces that answer about the same card must not
+//	each carry their own copy of the word.
+const PendingReasonToolCall = "tool_call"
+
 // PendingInterrupt is one outstanding decision.
 type PendingInterrupt struct {
 	// InterruptID is the framework interrupt context ID. It is an address-like

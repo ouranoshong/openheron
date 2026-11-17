@@ -103,7 +103,7 @@ func runScripted(t *testing.T, unknownName string, without ...string) [][]*schem
 		model.BaseModel[*schema.Message], error) {
 		return m, nil
 	}
-	a, err := b.Build(context.Background(), "main", "", contract.TurnQuery)
+	a, _, err := b.Build(context.Background(), "main", "", contract.TurnQuery, "")
 	if err != nil {
 		t.Fatalf("build agent: %v", err)
 	}
@@ -224,8 +224,8 @@ func TestUnknownToolScopeIsRegisteredAfterTheFilter(t *testing.T) {
 	b := newTestBuilder(t)
 	snap := mustSnapshot(t, b)
 	policy, table, maxDepth := snap.agentSpec.policy, snap.tableFor(snap.agentSpec.defaultAgent), snap.agentSpec.maxDepth
-	check(t, "root", toolChain(newBoundary(policy, table), maxDepth))
-	check(t, "sub-agent", subHandlers(NewPolicy(nil), decl.SubAgentSpec{ID: "x"}, 1))
+	check(t, "root", toolChain(newBoundary(policy, table, scope{}), maxDepth))
+	check(t, "sub-agent", subHandlers(NewPolicy(nil), decl.SubAgentSpec{ID: "x"}, 1, scope{}))
 }
 
 func TestUnknownToolsReplyIsSafeWithoutToolNames(t *testing.T) {

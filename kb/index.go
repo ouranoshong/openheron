@@ -85,6 +85,11 @@ func Index(ctx context.Context, ix *FileIndexer, opts IndexOptions, paths []stri
 		Corpus: corpusName(opts.CorpusDir),
 		Fresh:  fresh,
 		Scope:  paths,
+		// ★ The catalog as it was **before** the corpus was walked. It is
+		//   what tells a removal from a takeover: a file that appeared in
+		//   the corpus while this run was walking it belongs to whoever
+		//   indexed it, and this run must not drop it on the way out.
+		BasePaths: pathsOf(prev),
 	}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("kb: after %d files this round: %w", res.Changed, err)

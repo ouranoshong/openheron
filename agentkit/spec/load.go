@@ -21,6 +21,13 @@ func (c *Config) loadProvider(file string, data []byte) error {
 	if id == "" {
 		return fmt.Errorf("provider file name is empty")
 	}
+	// ★ The name is the anchor of the whole secret naming scheme: it is the
+	//   environment variable's middle and the keyring user's middle, so it
+	//   has to be one that both can carry. The same shape an MCP server
+	//   name takes, for the same reason.
+	if !decl.ValidProviderName(id) {
+		return fmt.Errorf("llm/%s: the provider name %q must match %s", file, id, decl.ProviderNamePattern)
+	}
 
 	var p decl.Provider
 	if err := decodeStrict(data, &p); err != nil {
@@ -34,18 +41,30 @@ func (c *Config) loadProvider(file string, data []byte) error {
 	if p.BaseURL == "" {
 		return fmt.Errorf("missing base_url")
 	}
-	rawKey := p.APIKey
-	key, resolved, err := expandValue(rawKey)
-	if err != nil {
-		return fmt.Errorf("api_key: %w", err)
+	// ★ `api_key` is retired. It is refused here, with a sentence that says
+	//   where the key comes from now — the yaml decoder's own "field
+	//   api_key not found in type spec.Provider" would name a type the
+	//   user has never heard of and say nothing about what to do instead.
+	if strings.TrimSpace(p.APIKey) != "" {
+		return fmt.Errorf("llm/%s: `api_key` is no longer read — the key comes from %s "+
+			"(or from the keyring entry %s); delete this line",
+			file, LLMEnvName(id), LLMSecretUser(id))
 	}
-	if !resolved {
-		p.APIKey = ""
+
+	// ★ The key is not written in the file any more: its **place** is
+	//   derived from the file's own name. The environment is asked first
+	//   and the keyring second, and the file says nothing about either.
+	name := LLMEnvName(id)
+	sec, err := c.resolver().resolve(name)
+	if err != nil {
+		return fmt.Errorf("llm/%s: %w", file, err)
+	}
+	p.APIKey = sec.Value
+	p.KeySource = sec.Source
+	if !sec.Found {
 		c.deferFile(DirLLM+"/"+id+".yaml",
-			"api_key env %s is not set; calls to this endpoint will fail with 401 Unauthorized",
-			envVarName(rawKey))
-	} else {
-		p.APIKey = key
+			"no key for this provider: %s; calls to this endpoint will fail with 401 Unauthorized",
+			secretNotice(name, sec))
 	}
 
 	for ref := range c.Models {
@@ -206,6 +225,9 @@ var toolHints = map[string]string{
 	"web_search": "the web search configuration (provider, max_results, timeout)",
 	"wikipedia":  "the Wikipedia configuration (top_k, language, timeout)",
 	"kb":         "the knowledge base configuration (corpus, index, model)",
+	// ★ The configuration tools have a file of their own, and it is what
+	//	says that the read-only ones run without a nod.
+	"config": "the configuration tools' exceptions and limits",
 }
 
 // ToolFileNames are the file names tools/ accepts, sorted.
@@ -251,11 +273,21 @@ func (c *Config) loadTool(file string, data []byte) error {
 		if err := decodeTool(data, &t, toolHints["http"]); err != nil {
 			return err
 		}
+		// ★ The proxy is checked **here**, not when the tool is built: a
+		//   wrong proxy means every request of this tool fails, and the
+		//   user has to hear about it while the file is the thing being
+		//   edited.
+		if _, err := ParseProxy(t.Proxy); err != nil {
+			return err
+		}
 		c.Tools.HTTP = &t
 		return nil
 	case "web_search":
 		var t decl.WebSearchCfg
 		if err := decodeTool(data, &t, toolHints["web_search"]); err != nil {
+			return err
+		}
+		if _, err := ParseProxy(t.Proxy); err != nil {
 			return err
 		}
 		c.Tools.WebSearch = &t
@@ -276,10 +308,101 @@ func (c *Config) loadTool(file string, data []byte) error {
 		return nil
 	case "kb":
 		return c.loadKB(data)
+	case "config":
+		var t decl.ConfigToolsCfg
+		if err := decodeTool(data, &t, toolHints["config"]); err != nil {
+			return err
+		}
+		if err := validateConfigReadBytes(&t); err != nil {
+			return err
+		}
+		// ★ `allows:` speaks for the whole family, `config_write` included:
+		//	a tool that edits the configuration is granted by the very file
+		//	that says which tools run without a nod, like every other tool.
+		//	Nothing here removes a name — a file's `allows:` is additive and
+		//	its only power is to widen.
+		c.Tools.Config = &t
+		return nil
 	default:
-		return fmt.Errorf("tools/ only accepts %s; unknown file %q",
-			strings.Join(ToolFileNames(), ", "), file)
+		return fmt.Errorf("tools/ accepts one file per tool: %s; unknown file %q",
+			toolFileList(), file)
 	}
+}
+
+// toolFileList is the accepted file names, for the messages that name them.
+//
+// ★ One sentence for both messages: two lists is two answers to "which
+//
+//	files may I write here", and the one nobody reads is the one that
+//
+//	drifts.
+func toolFileList() string {
+	return strings.Join(ToolFileNames(), ", ")
+}
+
+// validateConfigReadBytes refuses a limit outside the range the tool takes.
+//
+// ★ It is a **hard error**, not a clamp: a limit that silently becomes
+//
+//	another number is a limit the user did not write, and what follows is
+//
+//	a tool that refuses a file the user expected to read.
+func validateConfigReadBytes(t *decl.ConfigToolsCfg) error {
+	if t == nil || t.MaxReadBytes == 0 {
+		return nil
+	}
+	if t.MaxReadBytes < decl.MinConfigReadBytes || t.MaxReadBytes > decl.MaxConfigReadBytes {
+		return fmt.Errorf("max_read_bytes is %d; it must be between %d and %d",
+			t.MaxReadBytes, decl.MinConfigReadBytes, decl.MaxConfigReadBytes)
+	}
+	return nil
+}
+
+// noticeConfigToolsAbsent says what the configuration tools cost when
+// their file is not there.
+//
+// ★ The configuration tools run **without a nod** because their file says so
+//
+//	— there is no code list that names them any more. A tree without the
+//
+//	file therefore asks for every configuration question, and that shows up
+//
+//	only in the approval card, so it is said here as well.
+//
+// ★ The notice is only worth its noise when it changes something: an agent
+//
+//	that names none of the tools never sees them.
+func (c *Config) noticeConfigToolsAbsent() {
+	if c.Tools.Config != nil {
+		return
+	}
+	used := false
+	for _, a := range c.Agents {
+		if a == nil {
+			continue
+		}
+		for _, entry := range a.Tools {
+			// ★ An entry is either a name or a trailing-* pattern, and a
+			//	pattern is spelled with the same prefix — so one check
+			//	covers both.
+			if strings.HasPrefix(entry, "config_") {
+				used = true
+				break
+			}
+		}
+		if used {
+			break
+		}
+	}
+	if !used {
+		return
+	}
+	c.deferFile(DirTools+"/config.yaml",
+		"the configuration tools ask for a nod: this file is what says that they "+
+			"run without one. Write it with `allows: [config_get, config_validate, "+
+			"config_template, config_notices, config_tier]`, add `config_write` only "+
+			"if an agent should rewrite the configuration unattended, or let an agent "+
+			"that does not need them drop them from its own `tools:` list")
 }
 
 func (c *Config) loadKB(data []byte) error {
@@ -345,6 +468,9 @@ func (c *Config) AllowedTools() []string {
 		add(t.Allows)
 	}
 	if t := c.Tools.Filesystem; t != nil {
+		add(t.Allows)
+	}
+	if t := c.Tools.Config; t != nil {
 		add(t.Allows)
 	}
 	add(c.KB.Allows)
@@ -437,6 +563,26 @@ func (c *Config) expandMCPMaps(file, key string, in map[string]string) (map[stri
 	}
 	out := make(map[string]string, len(in))
 	for k, v := range in {
+		// ★ A value that names one of the **derived** secrets is resolved
+		//   through the secret chain — the environment first, the keyring
+		//   second — so that `${MCP_GITHUB_TOKEN}` means "that server's
+		//   token" and not "a variable that happens to be spelled that
+		//   way". Every other reference keeps its old meaning: a plain
+		//   environment lookup.
+		if name, ok := derivedSecretRef(v); ok {
+			sec, err := c.resolver().resolve(name)
+			if err != nil {
+				return nil, fmt.Errorf("mcps/%s: %s %s: %w", file, key, k, err)
+			}
+			if !sec.Found {
+				c.deferFile(DirMCP+"/"+file,
+					"%s %s refers to a secret that is not there: %s; the entry is left out",
+					key, k, secretNotice(name, sec))
+				continue
+			}
+			out[k] = sec.Value
+			continue
+		}
 		val, resolved, err := expandValue(v)
 		if err != nil {
 			return nil, fmt.Errorf("mcps/%s: %s %s: %w", file, key, k, err)

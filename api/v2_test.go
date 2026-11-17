@@ -638,6 +638,7 @@ models:
 	// base is the user-level dir, root is the project root — both arguments
 	// matter: leaving projectRoot empty makes the loader look for .openheron
 	// relative to the test's cwd and silently skip the project layer.
+	t.Setenv(spec.RootEnv, "")
 	svc, err := spec.NewService(base, root)
 	if err != nil {
 		t.Fatalf("NewService: %v", err)

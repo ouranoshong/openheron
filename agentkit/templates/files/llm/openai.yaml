@@ -4,10 +4,15 @@
 type: openai_compat
 base_url: {{base_url|https://api.openai.com/v1}}
 
-# ★ api_key holds the **name of an environment variable**, rendered as ${NAME}.
-#   The key is read from the environment only when a request is made: an unset
-#   variable does not block startup, it only records one reminder.
-api_key: {{api_key_env|OPENAI_API_KEY}}
+# ★ The api key is **not** in this file. The provider's name is the file's
+#   name, and the name says where the key comes from:
+#
+#     the environment variable LLM_OPENAI_API_KEY, or
+#     the keyring entry llm:openai
+#
+# ★ The environment wins when both are there. Store one with
+#   `openheron secret set llm openai`, or export the variable — a key that is
+#   in neither place is one reminder away from a 401.
 
 timeout: 5m
 

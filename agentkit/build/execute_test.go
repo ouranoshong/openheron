@@ -61,7 +61,7 @@ func TestOnlyOneExecuteToolIsMounted(t *testing.T) {
 	b := newTestBuilderWithConfig(t, cfg)
 
 	bc := countBuilds(t)
-	if _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery); err != nil {
+	if _, _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery, ""); err != nil {
 		t.Fatal(err)
 	}
 	if len(bc.inputs) == 0 {
@@ -91,7 +91,7 @@ func TestTheMountedExecuteToolCarriesTheDialect(t *testing.T) {
 	b := newTestBuilderWithConfig(t, cfg)
 
 	bc := countBuilds(t)
-	if _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery); err != nil {
+	if _, _, err := b.Build(context.Background(), "s1", "", contract.TurnQuery, ""); err != nil {
 		t.Fatal(err)
 	}
 

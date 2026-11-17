@@ -20,6 +20,10 @@ require (
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
 	github.com/tidwall/sjson v1.2.9
 	golang.org/x/image v0.48.0
+	github.com/tidwall/sjson v1.2.5
+	github.com/zalando/go-keyring v0.2.8
+	golang.org/x/image v0.48.0
+	golang.org/x/net v0.39.0
 	golang.org/x/sys v0.50.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1+incompatible
 	gopkg.in/yaml.v3 v3.0.1
@@ -36,11 +40,13 @@ require (
 	github.com/cloudwego/gopkg v0.2.0 // indirect
 	github.com/cloudwego/netpoll v0.7.5 // indirect
 	github.com/corpix/uarand v0.2.0 // indirect
+	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/eino-contrib/jsonschema v1.0.3 // indirect
 	github.com/evanphx/json-patch v0.5.2 // indirect
 	github.com/fsnotify/fsnotify v1.5.4 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
+	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/goph/emperror v0.17.2 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect

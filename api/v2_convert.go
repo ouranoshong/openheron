@@ -80,6 +80,20 @@ func toAgUiMessage(m *schema.Message, index int) (types.Message, bool) {
 		out.Metadata["attachments"] = atts
 	}
 
+	// ★ A tool call that failed says so in the metadata: the history has to
+	//   show the same failure the live stream showed. ★ A reload that lost
+	//   it would show a failed call as a successful one — and the two
+	//   surfaces would disagree about the same call.
+	//
+	//   The value is the reason, and its presence is the fact: an empty
+	//   reason still says the call failed.
+	if reason, failed := message.ReadToolError(m); failed {
+		if out.Metadata == nil {
+			out.Metadata = types.Metadata{}
+		}
+		out.Metadata["toolError"] = reason
+	}
+
 	switch m.Role {
 	case schema.User:
 		out.Role = types.RoleUser

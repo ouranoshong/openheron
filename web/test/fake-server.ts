@@ -7,7 +7,10 @@ import { createHash } from "node:crypto"
 //   attach path needs the run's events to replay.
 export interface FakeRun {
   runId: string
-  state: "starting" | "running" | "completed" | "failed"
+  // ★ "waiting_approval" is the state a run that stopped to ask the user a
+  //   question ends in. ★ It is terminal — the answer starts a new run — so
+  //   the scan does not report it as the live one.
+  state: "starting" | "running" | "completed" | "failed" | "waiting_approval"
   kind: "query" | "resume"
   startedAt: string
   endedAt?: string
@@ -18,6 +21,18 @@ export interface FakeRun {
   messageId?: string
 }
 
+// FakeProject is one row of the fake's project table.
+//
+// ★ The shape is the server's `projectView`: the client reads the table
+//   through the same contract it reads the real one through.
+export interface FakeProject {
+  id: string
+  name: string
+  root: string
+  order: number
+  sessionCount: number
+}
+
 export interface FakeThread {
   threadId: string
   title: string
@@ -26,15 +41,57 @@ export interface FakeThread {
   messages: FakeMessage[]
   state: "idle" | "running" | "waiting_approval"
   agentId?: string
+  // projectId is the project the session belongs to.
+  //
+  // ★ The fake has no project table: the id comes from the **mode** (see
+  //   fakeProjectOf), so the same thread is in the same project every time
+  //   it is read.
+  projectId?: string
   pendings?: PendingApproval[]
   runs?: FakeRun[]
   usage?: Usage
+  // ★ The session's authorization mode, and whether this session has already
+  //   confirmed the full one. ★ They belong to the session and travel with
+  //   it — the fake keeps them on the thread for the same reason.
+  authorizationMode?: "default" | "trusted" | "full"
+  authorizationConfirmed?: boolean
+  // operations is the session's operation log — the timeline the panel reads.
+  //
+  // ★ A thread without one has **no** activity, and the fake says so with an
+  //   empty list: the panel's empty state is a real state, and the fake has
+  //   to be able to show it.
+  operations?: FakeOperation[]
   files: { name: string; path: string; size: number; mime: string }[]
   // blobs holds the bytes of the uploaded files, keyed by the stored path.
   //
   // ★ The fake needs them because the raw endpoint serves **bytes** — a
   //   fake that answered the preview with a name would test nothing.
   blobs?: Map<string, ArrayBuffer>
+}
+
+// FakeOperation is one line of the session's operation log.
+//
+// ★ The kinds are the server's own vocabulary — the fake uses the same
+//   names, so a client that reads them right here reads them right against
+//   the real server too.
+export interface FakeOperation {
+  seq: number
+  at: string
+  kind: string
+  actor: "user" | "system"
+  runId?: string
+  turnKind?: string
+  interruptId?: string
+  toolName?: string
+  approved?: boolean
+  agentId?: string
+  projectId?: string
+  mode?: string
+  title?: string
+  path?: string
+  name?: string
+  size?: number
+  state?: string
 }
 
 export interface FakeMessage {
@@ -95,6 +152,11 @@ interface RawInterrupt {
   reason: string
   message?: string
   toolCallId?: string
+  // ★ metadata is what the wire carries beside the interrupt: the tool's
+  //   name and its arguments, so the card can say what it is about.
+  metadata?: { toolName?: string; arguments?: unknown }
+  // ★ subagentRunId names the agent that raised it.
+  subagentRunId?: string
 }
 
 interface RunEvent {
@@ -192,6 +254,47 @@ function runError(code: string, message: string): RunEvent {
   return { type: "RUN_ERROR", code, message }
 }
 
+// pendingsFrom turns the interrupts of a finished frame into the pending
+// approvals the session holds.
+//
+// ★ The frame is what the client reads; the pending approval is what the
+//   transcript answers with. ★ A cut stream never carries the frame, so an
+//   approval can be on the server's side without ever being on the wire —
+//   and the recovery reads it from here.
+function pendingsFrom(hits: RawInterrupt[]): PendingApproval[] {
+  return hits.map((hit) => ({
+    interruptId: hit.id,
+    reason: hit.reason,
+    message: hit.message,
+    toolCallId: hit.toolCallId,
+    toolName: hit.metadata?.toolName ?? "write_file",
+    subagentRunId: hit.subagentRunId,
+  }))
+}
+
+// approvalPendingFrame turns an interrupt into the session's fact.
+//
+// ★ The card's data travels with the fact: a surface that was not watching
+//   the run that raised the approval has no stream of its own, so the tool
+//   name and the arguments exist nowhere else for it — and a card without
+//   them is a card nobody can judge.
+function approvalPendingFrame(hit: RawInterrupt, runId: string): RunEvent {
+  return {
+    type: "CUSTOM",
+    name: "approval_pending",
+    value: {
+      interrupt_id: hit.id,
+      reason: hit.reason,
+      message: hit.message,
+      tool_call_id: hit.toolCallId,
+      tool_name: hit.metadata?.toolName,
+      arguments: hit.metadata?.arguments,
+      subagent_run_id: hit.subagentRunId,
+      run_id: runId,
+    },
+  }
+}
+
 const USAGE: Usage = {
   promptTokens: 100,
   completionTokens: 50,
@@ -206,6 +309,12 @@ export const SCENARIOS = {
   twoQuestions: ["A", "B"],
 
   approval: ["A"],
+
+  // ★ approvalLive: the approval is raised as usual, and the round that
+  //   continues after the answer stays **live**. ★ It is the case a second
+  //   surface needs: the other surface attaches to that round, and the
+  //   server refuses a run that is not live.
+  approvalLive: ["A"],
 
   slowRun: ["A"],
 
@@ -240,7 +349,24 @@ export const SCENARIOS = {
 
   toolDone: ["A"],
 
+  // ★ toolFailed: a call that came back with an error. ★ The failure is a
+  //   frame of its own — the tool result frame carries the content and
+  //   nothing else, and the content says what the **model** read, not what
+  //   happened to the call (transport/transport.go's emitToolFailed).
+  toolFailed: ["A"],
+
+  // ★ toolMany: **two calls in one message** — the model asked for both at
+  //   once. ★ They are one thing that happened, and the interface says so.
+  toolMany: ["A"],
+
   toolJson: ["A"],
+
+  // ★ toolConfig is the **most common tool in a real run**: the
+  //   configuration service answers more calls than the filesystem does.
+  toolConfig: ["A"],
+
+  // ★ toolUnknown: a tool the title table does not name.
+  toolUnknown: ["A"],
 
   reasoningDone: ["A"],
 
@@ -249,6 +375,39 @@ export const SCENARIOS = {
   // busySession: the session already has a live turn, so a second run is
   // refused with 409 session_busy — the cross-client case.
   busySession: ["A"],
+
+  // ★ cutApproval: the round's stream is cut **before** its last frame, and
+  //   the round ends with an approval. ★ The approval never reaches the
+  //   wire — it stays on the server's side — which is what the real server
+  //   does when a subscriber falls behind (agentkit/run/publish.go): the
+  //   stream is cut, not finished, and no terminal frame is written for it.
+  cutApproval: ["A"],
+
+  // ★ cutResume: the query round ends with an approval as usual, and the
+  //   round that follows the answer is cut the same way. ★ This is the case
+  //   the user reported: the approval after the answer never showed up, and
+  //   only a page reload brought it back.
+  cutResume: ["A"],
+
+  // ★ cutLive: the round's stream is cut and the round goes on — it raises
+  //   its approval a moment later. ★ The approval is never on the wire.
+  cutLive: ["A"],
+
+  // ★ approvalOnChannel: the round's stream is cut, and the approval reaches
+  //   the surface over the **session's channel** — the fact the channel now
+  //   carries (agentkit/run/announce.go). ★ The transcript and the ledger
+  //   catch up later, so a card that is on screen before they do can only
+  //   have come from the channel.
+  approvalOnChannel: ["A"],
+
+  // ★ refusedAttach: the round's stream is cut, and the client comes back
+  //   for it — and the server refuses the attach **while the ledger's row
+  //   is still open**. ★ This is the window the user hit: the runtime
+  //   releases its turn first, the approval is written next, and the row
+  //   closes last (agentkit/run/bridge.go). ★ A client that reads the
+  //   transcript right away finds no approval in it, and the card never
+  //   shows up until the page is reloaded.
+  refusedAttach: ["A"],
 } as const
 
 export type ScenarioName = keyof typeof SCENARIOS
@@ -268,6 +427,15 @@ export const THREAD_COMPACT = "77777777-7777-4777-8777-777777777777"
 // A session whose context holds a fraction of a percent of a very large
 // window — the case where "0 %" would be a lie.
 export const THREAD_TINY = "88888888-8888-4888-8888-888888888888"
+
+// LATE_DELTA is what a run publishes **after** a second surface attached.
+//
+// ★ It is the proof that the attached surface is still receiving: the
+//   window was replayed at the attach, and this was published after it.
+export const LATE_DELTA = " \u2014 and still going"
+
+// LATE_DELAY_MS is how long the run waits before publishing it.
+export const LATE_DELAY_MS = 150
 
 export const MARKER_A = "MARKER-ALPHA"
 export const MARKER_B = "MARKER-BRAVO"
@@ -563,7 +731,35 @@ function seedThreads(): FakeThread[] {
       ],
     },
     { id: "h-t1", role: "tool", content: toolResult, toolCallId: "h-call-1" },
-    { id: "h-a2", role: "assistant", content: `${MARKER_HISTORY} answer` },
+    {
+      id: "h-a2",
+      role: "assistant",
+      content: `${MARKER_HISTORY} answer`,
+      // ★ A call that failed: the tool result carries the failure in its
+      //   metadata, the way api/v2_convert.go stamps it. ★ The history has
+      //   to show it — a reload that lost it would show a failed call as a
+      //   successful one.
+      //
+      //   ★ The failed call hangs off the **answer** message, and not off
+      //     the one that holds the successful call: two calls in one
+      //     message are one run, and a run is a bar — the cards only exist
+      //     once the reader opens it. The history's own card would
+      //     disappear into that bar.
+      toolCalls: [
+        {
+          id: "h-call-2",
+          type: "function",
+          function: { name: "read_file", arguments: '{"file_path":"/tmp/missing.txt"}' },
+        },
+      ],
+    },
+    {
+      id: "h-t2",
+      role: "tool",
+      content: "[tool error] file not found: /tmp/missing.txt",
+      toolCallId: "h-call-2",
+      metadata: { toolError: "file not found: /tmp/missing.txt" },
+    },
   ]
 
   const multiMessages: FakeMessage[] = [
@@ -678,6 +874,51 @@ function seedThreads(): FakeThread[] {
         { id: "a-u1", role: "user", content: `${MARKER_A} first question` },
         { id: "a-a1", role: "assistant", content: `${MARKER_A} first answer` },
       ],
+      // ★ The session's operation log. ★ The lines cover the kinds the
+      //   timeline shows: the session, a turn, an approval that was asked
+      //   for and answered, and the turn's end.
+      operations: [
+        {
+          seq: 1,
+          at: "2026-10-12T10:00:00Z",
+          kind: "session.created",
+          actor: "system",
+          agentId: "main",
+        },
+        {
+          seq: 2,
+          at: "2026-10-12T10:01:00Z",
+          kind: "run.started",
+          actor: "user",
+          runId: "run-alpha-0001",
+          turnKind: "query",
+        },
+        {
+          seq: 3,
+          at: "2026-10-12T10:02:00Z",
+          kind: "approval.requested",
+          actor: "system",
+          interruptId: "int-alpha-0001",
+          toolName: "write_file",
+        },
+        {
+          seq: 4,
+          at: "2026-10-12T10:03:00Z",
+          kind: "approval.resolved",
+          actor: "user",
+          interruptId: "int-alpha-0001",
+          toolName: "write_file",
+          approved: true,
+        },
+        {
+          seq: 5,
+          at: "2026-10-12T10:04:00Z",
+          kind: "run.finished",
+          actor: "system",
+          runId: "run-alpha-0001",
+          state: "completed",
+        },
+      ],
       // A model that declares no window: the occupancy is reported, and
       // there is no ratio to show.
       usage: {
@@ -737,6 +978,10 @@ function eventsFor(
   runId: string,
 ): RunEvent[] {
   switch (scenario) {
+    case "approvalLive":
+    // ★ cutResume: the query round is an ordinary approval round — the cut
+    //   happens in the round that follows the answer.
+    case "cutResume":
     case "approval":
       return [
         started(threadId, runId),
@@ -873,6 +1118,106 @@ function eventsFor(
         ...msg,
         { type: "TOOL_CALL_RESULT", toolCallId: "call_1", messageId: "call_1", content: "package main\n\nfunc main() {}\n", role: "tool" },
         ...announce("m-1"),
+        finished(threadId, runId),
+      ]
+    }
+
+    // ★ toolFailed: a call that came back with an error. ★ The result frame
+    //   carries the content the model read; the failure is a **separate**
+    //   frame, because the content cannot say what happened to the call.
+    case "toolFailed": {
+      return [
+        started(threadId, runId),
+        toolStart("call_1", "read_file", "m-1"),
+        toolArgs("call_1", JSON.stringify({ file_path: "/tmp/missing.txt" })),
+        toolEnd("call_1"),
+        {
+          type: "TOOL_CALL_RESULT",
+          toolCallId: "call_1",
+          messageId: "call_1",
+          role: "tool",
+          content: "[tool error] file not found: /tmp/missing.txt",
+        },
+        {
+          type: "CUSTOM",
+          name: "tool_failed",
+          value: {
+            tool_call_id: "call_1",
+            tool_name: "read_file",
+            error: "file not found: /tmp/missing.txt",
+          },
+        },
+        ...announce("m-1"),
+        finished(threadId, runId),
+      ]
+    }
+
+    // ★ toolMany: **two calls in one message**, the way a model asks for
+    //   two things at once. ★ The interface gathers the calls that follow
+    //   each other into one run — one line on the screen, not two cards.
+    case "toolMany": {
+      return [
+        started(threadId, runId),
+        toolStart("call_1", "read_file", "m-1"),
+        toolArgs("call_1", JSON.stringify({ file_path: "/tmp/x.txt" })),
+        toolStart("call_2", "grep", "m-1"),
+        toolArgs("call_2", JSON.stringify({ pattern: "TODO", path: "/tmp" })),
+        toolEnd("call_1"),
+        toolEnd("call_2"),
+        {
+          type: "TOOL_CALL_RESULT",
+          toolCallId: "call_1",
+          messageId: "call_1",
+          role: "tool",
+          content: "package main\n\nfunc main() {}\n",
+        },
+        {
+          type: "TOOL_CALL_RESULT",
+          toolCallId: "call_2",
+          messageId: "call_2",
+          role: "tool",
+          content: "x.txt:3:\t// TODO: fix me\n",
+        },
+        { type: "TEXT_MESSAGE_START", messageId: "m-2", role: "assistant", name: "main" },
+        { type: "TEXT_MESSAGE_CONTENT", messageId: "m-2", delta: "两个都看过了。" },
+        { type: "TEXT_MESSAGE_END", messageId: "m-2" },
+        ...announce("m-1"),
+        finished(threadId, runId),
+      ]
+    }
+
+    case "toolConfig": {
+      return [
+        started(threadId, runId),
+        toolStart("call_1", "config_get", "m-1"),
+        toolArgs("call_1", JSON.stringify({ path: "agents/main.md" })),
+        toolEnd("call_1"),
+        {
+          type: "TOOL_CALL_RESULT",
+          toolCallId: "call_1",
+          messageId: "call_1",
+          role: "tool",
+          content: JSON.stringify({ path: "agents/main.md", exists: true, hot: true }, null, 2),
+        },
+        finished(threadId, runId),
+      ]
+    }
+
+    case "toolUnknown": {
+      // ★ A tool the title table does not name: an MCP server's tool. The
+      //   card shows the name the model called, not the word "tool".
+      return [
+        started(threadId, runId),
+        toolStart("call_1", "mcp__github__create_issue", "m-1"),
+        toolArgs("call_1", JSON.stringify({ title: "a bug" })),
+        toolEnd("call_1"),
+        {
+          type: "TOOL_CALL_RESULT",
+          toolCallId: "call_1",
+          messageId: "call_1",
+          role: "tool",
+          content: JSON.stringify({ number: 7 }, null, 2),
+        },
         finished(threadId, runId),
       ]
     }
@@ -1135,9 +1480,114 @@ export function startFakeServer(port = 0): FakeServer {
   let scenario: ScenarioName = "simple"
   let agentsMode: "default" | "multi" | "many" | "grew" = "default"
   let mcpMode: "default" | "empty" | "starting" = "default"
+  let projectsMode: "default" | "multi" | "single" = "default"
+  // ★ The chooser's answer. ★ It is a mode, not a constant: the client has
+  //   to tell "a directory was chosen" from "the chooser was closed" from
+  //   "this machine has no chooser", and only a mode can produce the last
+  //   two on demand.
+  let dirPickMode: "picked" | "cancelled" | "failed" = "picked"
+  let dirPickPath = "/tmp/picked-project"
+  // ★ The table is **mutable**: the interface can write to it, and a project
+  //   that was created has to be in the list the next GET answers with — or
+  //   the dialog would show a project that does not exist.
+  let fakeProjectTable: FakeProject[] = []
   let defaultRoot = "main"
 
+  // seedProjects fills the table the mode asks for.
+  const seedProjects = (mode: "default" | "multi" | "single") => {
+    if (mode === "multi") {
+      fakeProjectTable = [
+        { id: "alpha", name: "Alpha", root: "/tmp/alpha", order: 0, sessionCount: 2 },
+        { id: "beta", name: "Beta", root: "/tmp/beta", order: 1, sessionCount: 2 },
+      ]
+      return
+    }
+    if (mode === "single") {
+      fakeProjectTable = [{ id: "alpha", name: "Alpha", root: "/tmp/alpha", order: 0, sessionCount: 1 }]
+      return
+    }
+    fakeProjectTable = []
+  }
+  seedProjects(projectsMode)
+
   const find = (id: string) => threads.find((t) => t.threadId === id)
+
+  // ── the session's announcement channel ─────────────────────────────────
+  //
+  // ★ The channel is the session's, not a run's: an approval belongs to the
+  //   session, and the run that raised it is over by the time anybody can
+  //   answer it. ★ A second surface has to hear that the approval was
+  //   answered — otherwise it keeps a card the server refuses every answer
+  //   on.
+  const channels = new Map<string, Set<ReadableStreamDefaultController<Uint8Array>>>()
+
+  // publish hands one fact to the session's subscribers.
+  //
+  // ★ A session with no subscribers gets nothing: the fact is a
+  //   notification, and the durable truth is the transcript.
+  const publish = (threadId: string, ev: RunEvent) => {
+    const subs = channels.get(threadId)
+    if (!subs) return
+    const bytes = encode(ev)
+    for (const c of subs) {
+      try {
+        c.enqueue(bytes)
+      } catch {
+        // The reader is gone.
+      }
+    }
+  }
+
+  // fakeAgents is the agent table the fake server currently serves.
+  //
+  // ★ The health endpoint answers with the **same** version: the client's
+  //   watcher reads the cheap signal and compares it against the one it
+  //   already has, so the two have to be the same number.
+  const fakeAgents = (): { version: string } => {
+    if (agentsMode === "multi") return FAKE_AGENTS_MULTI
+    if (agentsMode === "many") return FAKE_AGENTS_MANY
+    if (agentsMode === "grew") return FAKE_AGENTS_GREW
+    return FAKE_AGENTS
+  }
+
+  // fakeProjectOf says which project a session belongs to.
+  //
+  // ★ It is a **pure function of the thread id and the mode**: the fake has
+  //   no project table, and a table that changed under the reader would
+  //   show the same conversation in two places.
+  //
+  // ★ A project that is not in the table any more counts as no project: the
+  //   same thing the real server does when a project is deleted — the
+  //   conversations fall back to "no project".
+  const fakeProjectOf = (threadId: string): string => {
+    let id = ""
+    if (projectsMode === "multi") {
+      if (threadId === THREAD_A || threadId === THREAD_MULTI) id = "alpha"
+      else if (threadId === THREAD_B || threadId === THREAD_COMPACT) id = "beta"
+    } else if (projectsMode === "single") {
+      if (threadId === THREAD_A) id = "alpha"
+    }
+    if (!id) return ""
+    return fakeProjectTable.some((p) => p.id === id) ? id : ""
+  }
+
+  // fakeProjects is the project table the fake serves, and the scope.
+  //
+  // ★ The scope is null in the multi-project mode and names the project in
+  //   the single-project mode — the same two answers the real server gives.
+  const fakeProjects = (): {
+    items: FakeProject[]
+    scope: { projectId: string; name: string; root: string } | null
+  } => {
+    if (projectsMode === "single") {
+      const one = fakeProjectTable.find((p) => p.id === "alpha")
+      return {
+        items: fakeProjectTable,
+        scope: one ? { projectId: one.id, name: one.name, root: one.root } : null,
+      }
+    }
+    return { items: fakeProjectTable, scope: null }
+  }
 
   const meta = (t: FakeThread) => ({
     threadId: t.threadId,
@@ -1148,6 +1598,14 @@ export function startFakeServer(port = 0): FakeServer {
     state: t.state,
     hasPendingApproval: !!t.pendings?.length,
     agentId: t.agentId ?? "main",
+    // ★ The project the session belongs to — the same answer the real
+    //   server reads from the project table.
+    projectId: t.projectId ?? fakeProjectOf(t.threadId),
+    // ★ The authorization mode is always sent: a missing field says "this
+    //   version does not know about modes", and an empty one would say
+    //   "this session has no mode" — two different things.
+    authorizationMode: t.authorizationMode ?? "default",
+    authorizationConfirmed: t.authorizationConfirmed ?? false,
   })
 
   function queryParams(u: URL): Record<string, string> {
@@ -1259,6 +1717,10 @@ export function startFakeServer(port = 0): FakeServer {
     settingsRev = 0
     const put = (path: string, body: string) => settingsDisk.push({ path, body, rev: nextRev() })
     put("tools/http.yaml", "methods: [get]\nallows: [request_get]\n")
+    // ★ The configuration tools' own file. It is in the real tree, and the
+    //   editor must be able to open it — a file the real server has and the
+    //   fake does not is a file no spec can see.
+    put("tools/config.yaml", "allows: [config_get, config_validate, config_template, config_notices, config_tier]\nmax_read_bytes: 65536\n")
     // ★ An mcps/ file on disk, so the editor can be opened on the partition
     //   that carries YAML like tools/ does. Without it the MCP partition has
     //   no item to select, and "mcps/ is not highlighted" cannot be seen.
@@ -1267,13 +1729,70 @@ export function startFakeServer(port = 0): FakeServer {
     // ★ A second agent, so an issue about another file has a file to be
     //   about — and so the editor's link to it goes somewhere.
     put("agents/agent-expert.md", "---\nmodel: openai/gpt-4o-mini\ndescription: expert\n---\nexpert body\n")
-    put("llm/deepseek.yaml", "type: openai\nbase_url: https://x\napi_key: ${KEY}\nmodels:\n  - id: flash\n")
+    put("llm/deepseek.yaml", "type: openai\nbase_url: https://x\nmodels:\n  - id: flash\n")
     // ★ A skill, so the tree has a folder that is two levels deep — the one
     //   partition whose path is not `<section>/<file>`.
     put("skills/code-review/SKILL.md", "---\ndescription: reviews a diff\n---\nbody\n")
     put("server/config.yaml", 'listen_addr: ":8080"\n')
   }
   seedSettings()
+
+  // ── /v2/secrets ─────────────────────────────────────────────────────────
+  //
+  // ★ An in-memory keyring. The entries are the ones the **configuration**
+  //   names — the same rule the real server follows, because a keyring
+  //   cannot be enumerated: an entry whose entity is gone is invisible, and
+  //   so is one whose provider file was never written.
+  const secretStore = new Map<string, string>()
+  // ★ The variables the fake says are set. One entry is stored **and** its
+  //   variable is set, so the shadowing case has a stable subject: "the
+  //   environment overrides the keyring" is the trap the whole design has to
+  //   show, and a fake that never showed it would not test it.
+  const secretEnvSet = new Set<string>(["MCP_FILESYSTEM_TOKEN"])
+  secretStore.set("mcp:filesystem", "fake-token")
+
+  const secretEntities = (group: string): string[] => {
+    const prefix = group === "llm" ? "llm/" : "mcps/"
+    return settingsDisk
+      .filter((f) => f.path.startsWith(prefix) && f.path.endsWith(".yaml"))
+      .map((f) => f.path.slice(prefix.length, -".yaml".length))
+      .sort()
+  }
+
+  const secretEnvName = (group: string, name: string): string =>
+    group === "llm" ? `LLM_${name.toUpperCase()}_API_KEY` : `MCP_${name.toUpperCase()}_TOKEN`
+
+  const secretUser = (group: string, name: string): string => `${group}:${name}`
+
+  const secretItem = (group: string, name: string) => {
+    const user = secretUser(group, name)
+    const envVar = secretEnvName(group, name)
+    const stored = secretStore.has(user)
+    const envSet = secretEnvSet.has(envVar)
+    return {
+      name,
+      stored,
+      source: stored ? `keyring:${user}` : "",
+      effective: envSet ? `env:${envVar}` : stored ? `keyring:${user}` : "none",
+      shadowed: stored && envSet,
+      envVar,
+    }
+  }
+
+  const secretList = () => ({
+    groups: [
+      {
+        id: "llm",
+        label: "Providers",
+        items: secretEntities("llm").map((n) => secretItem("llm", n)),
+      },
+      {
+        id: "mcp",
+        label: "MCP servers",
+        items: secretEntities("mcp").map((n) => secretItem("mcp", n)),
+      },
+    ],
+  })
 
   const SETTINGS_MANIFEST = {
     // ★ The order mirrors the real server's partition table
@@ -1298,12 +1817,13 @@ export function startFakeServer(port = 0): FakeServer {
       { path: "agents/agent-expert.md", exists: true, hot: true, revision: "r3" },
       { path: "server/config.yaml", exists: true, hot: false, revision: "r5" },
       { path: "tools/http.yaml", exists: true, hot: true, revision: "r1" },
+      { path: "tools/config.yaml", exists: true, hot: true, revision: "r1" },
       { path: "mcps/filesystem.yaml", exists: true, hot: true, revision: "r1" },
       { path: "skills/code-review/SKILL.md", exists: true, hot: true, revision: "r1" },
     ],
     templates: {
       agents: "---\nmodel: \ndescription: \n---\n\n# available models: deepseek/flash\n",
-      llm: "type: openai\nbase_url: \napi_key: ${}\nmodels: []\n",
+      llm: "type: openai\nbase_url: \nmodels: []\n",
       mcps: "transport: stdio\ncommand: mcp-example-server\nargs: []\ntimeout: 30s\ncall_timeout: 60s\n",
       skills: "---\ndescription: \n---\n\n# Instructions\n",
       // ★ The tools section template is **nothing but comments**, exactly as
@@ -1312,16 +1832,54 @@ export function startFakeServer(port = 0): FakeServer {
       //   FILE's template — this is the shape the bug lived in.
       tools:
         "# tools/ one file = one tool:\n" +
-        "#   filesystem.yaml   the filesystem tools' tiers (always mounted)\n" +
         "#   http.yaml         request_get / request_post / request_put / request_delete\n" +
         "#   web_search.yaml   duckduckgo_search\n" +
         "#   wikipedia.yaml    wikipedia_search\n" +
         "#   kb.yaml           knowledge base\n" +
+        "#   filesystem.yaml   ls / read_file / write_file / edit_file / glob / grep / execute\n" +
+        "#   config.yaml       config_get / config_validate / config_template / config_notices / config_tier / config_write\n" +
         "#\n" +
         "# ★ The content of the file IS **that tool's own configuration** (no outer wrapper key).\n" +
-        "#   Whether the file exists IS the switch — turning a tool off = deleting that file.\n" +
+        "#   A provider whose configuration is absent mounts nothing, so for those tools\n" +
+        "#   the file's presence IS the switch — turning a tool off = deleting that file.\n" +
+        "#   The filesystem and configuration tools are mounted either way: for those\n" +
+        "#   two, a missing file takes away an exception, not the tool.\n" +
         "#\n" +
         "# ★ tools/ is hot-reloaded: the change takes effect on the next turn, no process restart.\n",
+      "tools/config.yaml":
+        "# tools/config.yaml\n" +
+        "#\n" +
+        "# The configuration tools. ★ They are **always mounted** — the provider\n" +
+        "#   answers from the configuration service, and no file switches them on.\n" +
+        "#   This file names their exceptions and tunes them.\n" +
+        "#\n" +
+        "# The tools this file configures:\n" +
+        "#   config_get  config_validate  config_template  config_notices\n" +
+        "#   config_tier  config_write\n" +
+        "#\n" +
+        "# ★ `allows:` is **additive**, like every other file under tools/: a name\n" +
+        "#   here joins the exceptions and never takes one away. It speaks **this\n" +
+        "#   file's own vocabulary** — the tool names as they are exposed.\n" +
+        "#\n" +
+        "# ★ Absent, every tool this provider offers asks — the read-only ones\n" +
+        "#   included: this file is what says that a question about the\n" +
+        "#   configuration does not cost an approval.\n" +
+        "#\n" +
+        "# ★ `config_write` is not named below, and that is a **default, not a rule**:\n" +
+        "#   it edits the configuration — this file among them — so a change to the\n" +
+        "#   configuration should cost an approval. Nothing forbids naming it; to let\n" +
+        "#   an agent rewrite the configuration unattended, replace the line below\n" +
+        "#   with this one:\n" +
+        "#\n" +
+        "#   allows: [config_get, config_validate, config_template, config_notices, config_tier, config_write]\n" +
+        "#\n" +
+        "# ★ The largest file `config_get` hands back. It **refuses** a file bigger\n" +
+        "#   than this rather than truncating it: a tool that returns half a file\n" +
+        "#   invites the model to edit the half it got and write it back.\n" +
+        "#   1024..1048576; the default is 65536.\n" +
+        "allows: [config_get, config_validate, config_template, config_notices, config_tier]\n" +
+        "\n" +
+        "max_read_bytes: 65536\n",
       "tools/filesystem.yaml":
         "# The filesystem tools. ★ They are **always mounted** — this file does not\n" +
         "#   switch them on, it tunes their tiers.\n" +
@@ -1396,14 +1954,14 @@ export function startFakeServer(port = 0): FakeServer {
       return issues
     }
     if (path.startsWith("llm/")) {
-      const m = /^api_key:\s*(?!\$\{|@file:)/m.exec(content)
+      const m = /^\s*api_key:/m.exec(content)
       if (m) {
         issues.push({
           path,
           line: content.slice(0, m.index).split("\n").length,
           severity: "error",
           message:
-            "api_key must be a reference, not a literal: use ${ENV_VAR} or @file:/path so the secret stays out of the repository",
+            "api_key is no longer read — the key comes from LLM_<PROVIDER>_API_KEY (or from the keyring entry llm:<provider>); delete this line",
         })
       }
     }
@@ -1477,7 +2035,7 @@ export function startFakeServer(port = 0): FakeServer {
       return fail(400, `${section}/ holds <name>`, "config_path_invalid")
     }
     if (section === "tools") {
-      const known = ["filesystem.yaml", "http.yaml", "kb.yaml", "web_search.yaml", "wikipedia.yaml"]
+      const known = ["config.yaml", "filesystem.yaml", "http.yaml", "kb.yaml", "web_search.yaml", "wikipedia.yaml"]
       if (!known.includes(file)) {
         return fail(400, `tools/ only accepts ${known.join(", ")}; other files here are rejected at load time`, "config_path_invalid")
       }
@@ -1496,8 +2054,15 @@ export function startFakeServer(port = 0): FakeServer {
   }
 
   const writeSetting = (path: string, body: string, baseRevision?: string): Response => {
-    if (path.startsWith("llm/") && /^api_key:\s*(?!\$\{|@file:)/m.test(body)) {
-      return fail(400, "api_key must be a ${ENV} or @file: reference", "config_secret_literal")
+    // ★ The `api_key:` line is **retired**: the provider's name says where
+    //   the key comes from, so a file that carries one is a file the loader
+    //   refuses. Any line is refused — not only a literal one.
+    if (path.startsWith("llm/") && /^\s*api_key:/m.test(body)) {
+      return fail(
+        400,
+        "api_key is no longer read — the key comes from LLM_<PROVIDER>_API_KEY (or from the keyring entry llm:<provider>); delete this line",
+        "config_key_field_retired",
+      )
     }
     if (body.includes("BROKEN")) {
       return fail(
@@ -1546,6 +2111,21 @@ export function startFakeServer(port = 0): FakeServer {
     const runId = body.runId ?? `run-${++seq}`
     let thread = body.threadId ? find(body.threadId) : undefined
 
+    // \u2605 stillRunning is the scenario that leaves a live turn behind: the
+    //
+    //   run stays open in the ledger and the session stays busy.
+    const stillRunning = scenario === "busySession" || scenario === "slowRun"
+
+    // ★ resumedStaysLive keeps the round that continues after an answer
+    //   open. ★ It is what a second surface attaches to: the server refuses
+    //   a run that is not live.
+    const resumedStaysLive = scenario === "approvalLive"
+
+    // ★ cutLive: the round goes on after its stream was cut — it raises its
+    //   approval a moment later. ★ The attach has to wait for the round:
+    //   the round is what ends, not the connection.
+    const cutLive = scenario === "cutLive"
+
     if (!body.threadId) {
       return fail(400, "threadId is required; create the session with POST /v2/sessions first", "invalid_body")
     }
@@ -1575,13 +2155,78 @@ export function startFakeServer(port = 0): FakeServer {
         content: approved ? "written" : `denied: ${answers[0]?.payload?.reason ?? "rejected by user"}`,
         toolCallId: "call_1",
       })
+      const msg: FakeMessage = { id: `m-${++seq}`, role: "assistant", content: "" }
+      thread.messages.push(msg)
+      const events = eventsFor("simple", thread.threadId, MARKER_A, runId)
+      // ★ The "cutResume" scenario: the round that follows the answer is cut
+      //   before its last frame, and it raises a **new** approval. ★ This is
+      //   the case the user reported — the approval after the answer never
+      //   showed up, and only a reload brought it back.
+      const cutResume = scenario === "cutResume"
+      // ★ The cut round never says how it ended: its last frame is the one
+      //   the client must not see.
+      const sent = cutResume ? events.slice(0, -1) : events
+      for (const ev of sent) applyToMessage(msg, ev)
+
+      // ★ The run is a row in the ledger **before** anything is announced: a
+      //   surface that attaches on the announcement must find it live.
+      const resumed: FakeRun = {
+        runId,
+        state: cutResume
+          ? "waiting_approval"
+          : resumedStaysLive
+            ? "running"
+            : "completed",
+        kind: "resume",
+        startedAt: new Date().toISOString(),
+        events: sent,
+        messageId: msg.id,
+      }
+      thread.runs = [...(thread.runs ?? []), resumed]
+
+      // ★ The approval is gone: it was consumed, and every surface waiting
+      //   on it has to hear that its card is stale.
+      for (const a of answers) {
+        publish(thread.threadId, {
+          type: "CUSTOM",
+          name: "approval_resolved",
+          value: {
+            interrupt_id: a.interruptId,
+            approved: a.payload?.approved ?? false,
+            reason: a.payload?.reason ?? "",
+            run_id: runId,
+          },
+        })
+      }
+      // ★ And the round that continues the work is announced on the same
+      //   channel: the surface that was waiting follows it.
+      publish(thread.threadId, {
+        type: "CUSTOM",
+        name: "run_started",
+        value: { run_id: runId, kind: "resume" },
+      })
+
       const stream = new ReadableStream<Uint8Array>({
         start(c) {
-          const msg: FakeMessage = { id: `m-${++seq}`, role: "assistant", content: "" }
-          thread!.messages.push(msg)
-          for (const ev of eventsFor("simple", thread!.threadId, MARKER_A, runId)) {
-            applyToMessage(msg, ev)
-            c.enqueue(encode(ev))
+          for (const ev of sent) c.enqueue(encode(ev))
+          if (resumedStaysLive) return
+          if (cutResume) {
+            // ★ The round raised another approval and was cut before its last
+            //   frame. ★ The approval is on the server's side only: the
+            //   client has to read it back from the transcript.
+            thread!.state = "waiting_approval"
+            thread!.pendings = pendingsFrom([
+              {
+                id: "int-2",
+                reason: "tool_call",
+                message: "edit_file requires approval",
+                toolCallId: "call_2",
+                metadata: { toolName: "edit_file", arguments: { file_path: "/tmp/y.txt" } },
+              },
+            ])
+            thread!.usage = USAGE
+            c.close()
+            return
           }
           thread!.state = "idle"
           thread!.usage = USAGE
@@ -1605,7 +2250,12 @@ export function startFakeServer(port = 0): FakeServer {
       !body.attachments?.length
     ) {
       const run = (thread.runs ?? []).find((r) => r.runId === body.runId)
-      if (!run || run.state !== "running") {
+      // ★ refusedAttach: the row is still open, but the runtime's turn is
+      //   gone. ★ The server refuses on the runtime and the ledger's barrier
+      //   comes up later (agentkit/run/bridge.go), so this is what the
+      //   client sees in the window between the two — and it has to wait for
+      //   the barrier before it reads the transcript.
+      if (!run || run.state !== "running" || scenario === "refusedAttach") {
         return fail(404, "the run is no longer live; load the session's history instead", "run_not_live")
       }
       const assistant = thread.messages.find((m) => m.id === run.messageId)
@@ -1613,6 +2263,39 @@ export function startFakeServer(port = 0): FakeServer {
         start(c) {
           // The window: what the client missed when it lost the connection.
           for (const ev of run.events) c.enqueue(encode(ev))
+          if (cutLive) {
+            // ★ The round goes on: the stream stays open until the round
+            //   raises its approval, and it closes **without** a last
+            //   frame. ★ The approval is on the server's side only — the
+            //   client has to read it from the transcript.
+            const wait = setInterval(() => {
+              if (run.state === "running") return
+              clearInterval(wait)
+              try {
+                c.close()
+              } catch {
+                // The reader is gone.
+              }
+            }, 50)
+            return
+          }
+          if (stillRunning) {
+            // \u2605 The run goes on. A second surface that attached is
+            //
+            //   watching the same turn, and the turn does not stop because
+            //   somebody looked at it.
+            //
+            //   The late delta is what proves the attached surface is
+            //   still receiving: it was published after the attach.
+            setTimeout(() => {
+              try {
+                c.enqueue(encode(textDelta(run.messageId ?? "m-1", LATE_DELTA)))
+              } catch {
+                // The reader is gone.
+              }
+            }, LATE_DELAY_MS)
+            return
+          }
           // And the rest of the turn.
           for (const ev of run.remaining ?? []) {
             if (assistant) applyToMessage(assistant, ev)
@@ -1634,6 +2317,14 @@ export function startFakeServer(port = 0): FakeServer {
     }
 
     thread.state = "running"
+
+    // ★ The session hears that a round began. ★ It is the fact that lets a
+    //   surface that did not ask for the round follow it.
+    publish(thread.threadId, {
+      type: "CUSTOM",
+      name: "run_started",
+      value: { run_id: runId, kind: "query" },
+    })
 
     const query = (body.query ?? "").trim() || lastUserText(body.messages)
     // ★ A turn with files and no text is still a turn: the question may be
@@ -1666,7 +2357,13 @@ export function startFakeServer(port = 0): FakeServer {
     }
     thread.messages.push(userMessage)
     const assistantMsg: FakeMessage = { id: msgId, role: "assistant", content: "" }
-    thread.messages.push(assistantMsg)
+    // \u2605 A turn that is still running has not been archived, so its
+    //
+    //   answer is not in the transcript. The fake keeps the message for
+    //   the run's own bookkeeping, but the transcript must not have it: a
+    //   second surface that attaches has to see the text **arrive**, not
+    //   read it out of the history.
+    if (!stillRunning) thread.messages.push(assistantMsg)
     if (thread.title === "New Session") thread.title = query.slice(0, 40)
 
     // ★ The "dropped" scenario: the connection dies mid-turn, but the run
@@ -1706,6 +2403,202 @@ export function startFakeServer(port = 0): FakeServer {
       return sse(stream)
     }
 
+    // ★ The "cutApproval" scenario: the round's stream is cut before its
+    //   last frame, and the round ends with an approval. ★ The approval
+    //   never reaches the wire — the real server does the same when a
+    //   subscriber falls behind (agentkit/run/publish.go), and it writes no
+    //   terminal frame for a cut stream (transport/transport.go).
+    //
+    //   ★ The client has to find the approval by itself: the ledger says
+    //   the round is over, and the transcript holds what it raised.
+    if (scenario === "cutApproval") {
+      const events = eventsFor("approval", thread!.threadId, marker, runId)
+      const cut = events.slice(0, -1)
+      const fin = events.at(-1)
+      const hits = fin?.outcome?.type === "interrupt" ? (fin.outcome.interrupts ?? []) : []
+      for (const ev of cut) applyToMessage(assistantMsg, ev)
+      thread!.runs = [
+        ...(thread!.runs ?? []),
+        {
+          runId,
+          state: "waiting_approval",
+          kind: "query",
+          startedAt: new Date().toISOString(),
+          endedAt: new Date().toISOString(),
+          events: cut,
+          messageId: assistantMsg.id,
+        },
+      ]
+      thread!.state = "waiting_approval"
+      thread!.pendings = pendingsFrom(hits)
+      thread!.usage = USAGE
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          for (const ev of cut) c.enqueue(encode(ev))
+          // ★ The stream is cut: there is no terminal frame. ★ The client
+          //   must not read this as "the round said everything it had to
+          //   say" — the approval is still waiting, and only the transcript
+          //   knows.
+          c.close()
+        },
+      })
+      return sse(stream)
+    }
+
+    // ★ The "cutLive" scenario: the round's stream is cut and the round goes
+    //   on — it raises its approval a moment later. ★ The approval is never
+    //   on the wire: the client has to wait for the round to end and read
+    //   the transcript, because the transcript is the only place it is.
+    if (scenario === "cutLive") {
+      const head: RunEvent[] = [
+        started(thread!.threadId, runId),
+        textStart(msgId, "assistant"),
+        textDelta(msgId, `${marker} working`),
+      ]
+      for (const ev of head) applyToMessage(assistantMsg, ev)
+      thread!.runs = [
+        ...(thread!.runs ?? []),
+        {
+          runId,
+          state: "running",
+          kind: "query",
+          startedAt: new Date().toISOString(),
+          events: head,
+          messageId: assistantMsg.id,
+        },
+      ]
+      thread!.state = "running"
+      // ★ The round raises its approval a moment later, and there is no
+      //   stream left to carry it.
+      const hit: RawInterrupt = {
+        id: "int-1",
+        reason: "tool_call",
+        message: "write_file requires approval",
+        toolCallId: "call_1",
+        metadata: { toolName: "write_file", arguments: { file_path: "/tmp/x.txt" } },
+      }
+      setTimeout(() => {
+        const run = (thread!.runs ?? []).find((r) => r.runId === runId)
+        if (run) run.state = "waiting_approval"
+        thread!.pendings = pendingsFrom([hit])
+        thread!.state = "waiting_approval"
+      }, 1500)
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          for (const ev of head) c.enqueue(encode(ev))
+          // ★ The stream is cut: the round goes on without it.
+          c.close()
+        },
+      })
+      return sse(stream)
+    }
+
+    // ★ approvalOnChannel: the round's stream is cut, and the approval
+    //   reaches the surface over the **session's channel**. ★ The channel
+    //   carries the card's data (agentkit/run/announce.go), so a surface
+    //   that never saw the run can still show what it is being asked.
+    //
+    //   ★ The transcript and the ledger catch up later on purpose: a card
+    //   that is on screen before they do can only have come from the
+    //   channel.
+    if (scenario === "approvalOnChannel") {
+      const head: RunEvent[] = [
+        started(thread!.threadId, runId),
+        textStart(msgId, "assistant"),
+        textDelta(msgId, `${marker} working`),
+      ]
+      for (const ev of head) applyToMessage(assistantMsg, ev)
+      thread!.runs = [
+        ...(thread!.runs ?? []),
+        {
+          runId,
+          state: "running",
+          kind: "query",
+          startedAt: new Date().toISOString(),
+          events: head,
+          messageId: assistantMsg.id,
+        },
+      ]
+      thread!.state = "running"
+      const hit: RawInterrupt = {
+        id: "int-1",
+        reason: "tool_call",
+        message: "write_file requires approval",
+        toolCallId: "call_1",
+        metadata: { toolName: "write_file", arguments: { file_path: "/tmp/x.txt" } },
+      }
+      // ★ The approval lands: the session hears about it right away.
+      setTimeout(() => {
+        publish(thread!.threadId, approvalPendingFrame(hit, runId))
+      }, 1000)
+      // ★ The ledger and the transcript catch up later.
+      setTimeout(() => {
+        const run = (thread!.runs ?? []).find((r) => r.runId === runId)
+        if (run) run.state = "waiting_approval"
+        thread!.pendings = pendingsFrom([hit])
+        thread!.state = "waiting_approval"
+      }, 8000)
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          for (const ev of head) c.enqueue(encode(ev))
+          // ★ The stream is cut: the round goes on without it.
+          c.close()
+        },
+      })
+      return sse(stream)
+    }
+
+    // ★ refusedAttach: the round's stream is cut, the client comes back for
+    //   it, and the server refuses the attach — while the ledger's row is
+    //   still open. ★ The row closes a moment later, and that is when the
+    //   approval is on disk: the runtime released its turn first, so the
+    //   refusal says nothing about the approval (agentkit/run/bridge.go).
+    if (scenario === "refusedAttach") {
+      const head: RunEvent[] = [
+        started(thread!.threadId, runId),
+        textStart(msgId, "assistant"),
+        textDelta(msgId, `${marker} working`),
+      ]
+      for (const ev of head) applyToMessage(assistantMsg, ev)
+      thread!.runs = [
+        ...(thread!.runs ?? []),
+        {
+          runId,
+          state: "running",
+          kind: "query",
+          startedAt: new Date().toISOString(),
+          events: head,
+          messageId: assistantMsg.id,
+        },
+      ]
+      thread!.state = "running"
+      const hit: RawInterrupt = {
+        id: "int-1",
+        reason: "tool_call",
+        message: "write_file requires approval",
+        toolCallId: "call_1",
+        metadata: { toolName: "write_file", arguments: { file_path: "/tmp/x.txt" } },
+      }
+      setTimeout(() => {
+        // ★ The barrier goes up: the row closes and the approval lands.
+        const run = (thread!.runs ?? []).find((r) => r.runId === runId)
+        if (run) {
+          run.state = "waiting_approval"
+          run.endedAt = new Date().toISOString()
+        }
+        thread!.pendings = pendingsFrom([hit])
+        thread!.state = "waiting_approval"
+      }, 900)
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          for (const ev of head) c.enqueue(encode(ev))
+          // ★ The stream is cut: the round goes on without it.
+          c.close()
+        },
+      })
+      return sse(stream)
+    }
+
     const stream = new ReadableStream<Uint8Array>({
       start(c) {
         const events = eventsFor(scenario, thread!.threadId, marker, runId)
@@ -1719,7 +2612,6 @@ export function startFakeServer(port = 0): FakeServer {
         //   A scenario that keeps the session busy leaves the run open:
         //   the session's state and the ledger must agree, or the client
         //   gets two different answers to the same question.
-        const stillRunning = scenario === "busySession" || scenario === "slowRun"
         thread!.runs = [
           ...(thread!.runs ?? []),
           {
@@ -1736,14 +2628,7 @@ export function startFakeServer(port = 0): FakeServer {
         const hits = fin?.outcome?.type === "interrupt" ? (fin.outcome.interrupts ?? []) : []
         if (hits.length > 0) {
           thread!.state = "waiting_approval"
-          thread!.pendings = hits.map((hit) => ({
-            interruptId: hit.id,
-            reason: hit.reason,
-            message: hit.message,
-            toolCallId: hit.toolCallId,
-            toolName: "write_file",
-            subagentRunId: (hit as { subagentRunId?: string }).subagentRunId,
-          }))
+          thread!.pendings = pendingsFrom(hits)
         } else if (scenario === "busySession") {
           // ★ The session keeps its live turn: the stream stays open and
           //   the state stays "running", so the next run meets the gate.
@@ -1763,16 +2648,18 @@ export function startFakeServer(port = 0): FakeServer {
 
   const server = Bun.serve({
     port,
+    // ★ The session's announcement channel is a long-lived request, and
+    //   Bun's default idle timeout is ten seconds — which would cut the
+    //   channel in the middle of the very wait it exists for. ★ Zero
+    //   disables the timeout; the client closes the channel when it goes.
+    idleTimeout: 0,
     async fetch(req) {
       const url = new URL(req.url)
       const path = url.pathname
       requests.push(`${req.method} ${path}`)
 
       if (path === "/v2/agents") {
-        if (agentsMode === "multi") return json(FAKE_AGENTS_MULTI)
-        if (agentsMode === "many") return json(FAKE_AGENTS_MANY)
-        if (agentsMode === "grew") return json(FAKE_AGENTS_GREW)
-        return json(FAKE_AGENTS)
+        return json(fakeAgents())
       }
       if (path === "/v2/mcps" && req.method === "GET") {
         const agent = url.searchParams.get("agent") ?? "main"
@@ -1786,7 +2673,11 @@ export function startFakeServer(port = 0): FakeServer {
               : FAKE_MCP_SERVERS
         return json({ agent, servers })
       }
-      if (path === "/v2/health") return json({ ok: true })
+      if (path === "/v2/health") {
+        // ★ The cheap signal the client's watcher reads: the configuration's
+        //   fingerprint, and nothing else.
+        return json({ ok: true, configVersion: fakeAgents().version })
+      }
 
       if (path === "/__fake/reset" && req.method === "POST") {
         threads = seedThreads()
@@ -1796,6 +2687,10 @@ export function startFakeServer(port = 0): FakeServer {
         scenario = "simple"
         agentsMode = "default"
         mcpMode = "default"
+        projectsMode = "default"
+        seedProjects("default")
+        dirPickMode = "picked"
+        dirPickPath = "/tmp/picked-project"
         defaultRoot = "main"
         return json({ ok: true })
       }
@@ -1823,6 +2718,31 @@ export function startFakeServer(port = 0): FakeServer {
         }
         agentsMode = mode
         return json({ ok: true, mode: agentsMode })
+      }
+      // ★ The project mode: "default" has no projects at all, "multi" has
+      //   two of them and no scope, "single" has one and a scope.
+      if (path === "/__fake/projects-mode" && req.method === "POST") {
+        const mode = url.searchParams.get("mode") ?? "default"
+        if (mode !== "default" && mode !== "multi" && mode !== "single") {
+          return fail(400, `unknown projects mode: ${mode}`, "invalid_body")
+        }
+        projectsMode = mode
+        seedProjects(mode)
+        return json({ ok: true, mode: projectsMode })
+      }
+      // ★ The chooser's mode: which of the three answers it gives.
+      if (path === "/__fake/dir-pick" && req.method === "POST") {
+        const body = (await req.json().catch(() => ({}))) as {
+          mode?: string
+          path?: string
+        }
+        const mode = body.mode ?? "picked"
+        if (mode !== "picked" && mode !== "cancelled" && mode !== "failed") {
+          return fail(400, `unknown dir pick mode: ${mode}`, "invalid_body")
+        }
+        dirPickMode = mode
+        if (body.path) dirPickPath = body.path
+        return json({ ok: true, mode: dirPickMode, path: dirPickPath })
       }
       if (path === "/__fake/scenario" && req.method === "POST") {
         const name = new URL(req.url).searchParams.get("name") ?? ""
@@ -1857,6 +2777,47 @@ export function startFakeServer(port = 0): FakeServer {
 
       if (path === "/v2/settings" && req.method === "GET") {
         return json(SETTINGS_MANIFEST)
+      }
+
+      // ★ The secret surface: two namespaces, one shape. The group is in the
+      //   path, so "delete everything" is scoped by the request itself.
+      if (path === "/v2/secrets" && req.method === "GET") {
+        return json(secretList())
+      }
+
+      const secretOne = /^\/v2\/secrets\/([^/]+)\/([^/]+)$/.exec(path)
+      if (secretOne) {
+        const group = decodeURIComponent(secretOne[1])
+        const name = decodeURIComponent(secretOne[2])
+        if (group !== "llm" && group !== "mcp") {
+          return fail(404, "the group must be llm or mcp", "invalid_body")
+        }
+        if (req.method === "PUT") {
+          const body = (await readJSON(req))
+          const value = typeof body.value === "string" ? body.value.trim() : ""
+          if (value === "") return fail(400, "the value is empty", "invalid_body")
+          secretStore.set(secretUser(group, name), value)
+          // ★ The answer carries no value: the interface shows where a key
+          //   is and whether it is in force, never what it is.
+          return json({ group, ...secretItem(group, name) })
+        }
+        if (req.method === "DELETE") {
+          const had = secretStore.delete(secretUser(group, name))
+          return json({ group, name, deleted: had ? 1 : 0 })
+        }
+      }
+
+      const secretGroup = /^\/v2\/secrets\/([^/]+)$/.exec(path)
+      if (secretGroup && req.method === "DELETE") {
+        const group = decodeURIComponent(secretGroup[1])
+        if (group !== "llm" && group !== "mcp") {
+          return fail(404, "the group must be llm or mcp", "invalid_body")
+        }
+        let deleted = 0
+        for (const name of secretEntities(group)) {
+          if (secretStore.delete(secretUser(group, name))) deleted++
+        }
+        return json({ group, deleted })
       }
 
       if (path === "/v2/settings/validate" && req.method === "POST") {
@@ -1900,11 +2861,118 @@ export function startFakeServer(port = 0): FakeServer {
         return json({ items: threads.map(meta) })
       }
 
+      // ★ The project table and the scope of this process. ★ It is a
+      //   separate endpoint from the session list, and the client joins the
+      //   two by the project id.
+      if (path === "/v2/projects" && req.method === "GET") {
+        return json(fakeProjects())
+      }
+
+      // ★ The write side of the table. ★ The interface creates, renames and
+      //   deletes projects, so the fake answers the way the server does —
+      //   including the refusal: a project without a root is refused, and a
+      //   project that is not in the table is a 404 with its own code.
+      if (path === "/v2/projects" && req.method === "POST") {        const body = (await req.json().catch(() => ({}))) as { name?: string; root?: string }
+        const root = (body.root ?? "").trim()
+        if (!root) return fail(400, "the project root must not be empty", "invalid_body")
+        const existing = fakeProjectTable.find((p) => p.root === root)
+        if (existing) return json(existing)
+        const slug = (root.split(/[\\/]/).filter(Boolean).pop() ?? "project")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+        let id = slug || "project"
+        let n = 1
+        while (fakeProjectTable.some((p) => p.id === id)) {
+          n += 1
+          id = `${slug || "project"}-${n}`
+        }
+        const p: FakeProject = {
+          id,
+          name: (body.name ?? "").trim() || slug || "project",
+          root,
+          order: fakeProjectTable.length,
+          sessionCount: 0,
+        }
+        fakeProjectTable.push(p)
+        return json(p, 201)
+      }
+
+      const projectRoute = path.match(/^\/v2\/projects\/([^/]+)$/)
+      if (projectRoute && req.method === "PATCH") {
+        const p = fakeProjectTable.find((x) => x.id === projectRoute[1])
+        if (!p) return fail(404, `no such project: ${projectRoute[1]}`, "project_not_found")
+        const body = (await req.json().catch(() => ({}))) as {
+          name?: string
+          root?: string
+          order?: number
+        }
+        if (body.name !== undefined) {
+          const name = body.name.trim()
+          // ★ The server refuses an empty name on a rename: the project
+          //   already has one, and an empty name would take it away.
+          if (!name) return fail(400, "the project name must not be empty", "invalid_body")
+          p.name = name
+        }
+        if (body.root !== undefined) {
+          const root = body.root.trim()
+          if (!root) return fail(400, "the project root must not be empty", "invalid_body")
+          p.root = root
+        }
+        if (typeof body.order === "number") p.order = body.order
+        return json(p)
+      }
+
+      if (projectRoute && req.method === "DELETE") {
+        const idx = fakeProjectTable.findIndex((x) => x.id === projectRoute[1])
+        if (idx < 0) return fail(404, `no such project: ${projectRoute[1]}`, "project_not_found")
+        fakeProjectTable.splice(idx, 1)
+        // ★ The sessions are not deleted: they fall back to "no project".
+        return json({ id: projectRoute[1] })
+      }
+
+      // ★ The folder chooser. ★ The real one opens the operating system's
+      //   own dialog on the machine the server runs on, so the fake answers
+      //   with a fixed path — and with the three outcomes the client has to
+      //   tell apart: a directory, a closed chooser, and a machine that
+      //   cannot open one.
+      if (path === "/v2/fs/pick-directory" && req.method === "POST") {
+        if (dirPickMode === "cancelled") return json({ picked: false, path: "" })
+        if (dirPickMode === "failed") {
+          return fail(503, "this machine has no folder chooser — type the path instead",
+            "directory_picker_unavailable")
+        }
+        return json({ picked: true, path: dirPickPath })
+      }
+
       if (path === "/v2/sessions" && req.method === "POST") {
-        const body = (await req.json().catch(() => ({}))) as { agentId?: string }
+        const body = (await req.json().catch(() => ({}))) as {
+          agentId?: string
+          projectId?: string
+          authorizationMode?: string
+          authorizationConfirmed?: boolean
+        }
         const agentId = (body.agentId ?? "").trim()
         if (agentId && !fakeAgentIds().has(agentId)) {
           return fail(400, `agent not found: ${agentId}`, "agent_not_found")
+        }
+        const projectId = (body.projectId ?? "").trim()
+        if (projectId && !fakeProjects().items.some((p) => p.id === projectId)) {
+          return fail(404, `no such project: ${projectId}`, "project_not_found")
+        }
+        // ★ The mode a session is born with. ★ It is checked **before** the
+        //   session exists, the way the real server checks it — a request
+        //   that cannot be honoured must not leave a session behind.
+        const mode = (body.authorizationMode ?? "").trim()
+        if (mode && mode !== "default" && mode !== "trusted" && mode !== "full") {
+          return fail(400, `unknown authorization mode: ${mode}`, "invalid_body")
+        }
+        if (mode === "full" && body.authorizationConfirmed !== true) {
+          return fail(
+            409,
+            "full authorization needs an explicit confirmation",
+            "confirmation_required",
+          )
         }
         const t: FakeThread = {
           threadId: `new-${++seq}`,
@@ -1914,7 +2982,10 @@ export function startFakeServer(port = 0): FakeServer {
           messages: [],
           state: "idle",
           agentId: agentId || defaultRoot,
+          projectId,
           files: [],
+          ...(mode ? { authorizationMode: mode as FakeThread["authorizationMode"] } : {}),
+          ...(mode === "full" ? { authorizationConfirmed: true } : {}),
         }
         threads.push(t)
         return json(meta(t), 201)
@@ -1935,6 +3006,66 @@ export function startFakeServer(port = 0): FakeServer {
         }
         t.agentId = id
         return json(meta(t))
+      }
+
+      // ★ The session's authorization mode. ★ It is the session's own
+      //   property, and the server is the one that refuses `full` until the
+      //   session confirmed it — the client asks, the server answers.
+      const authz = path.match(/^\/v2\/sessions\/([^/]+)\/authorization$/)
+      if (authz && req.method === "PATCH") {
+        const t = find(authz[1])
+        if (!t) return notFound()
+        const body = (await req.json().catch(() => ({}))) as { mode?: string; confirm?: boolean }
+        const mode = (body.mode ?? "").trim()
+        if (mode !== "default" && mode !== "trusted" && mode !== "full") {
+          return fail(400, `unknown authorization mode: ${mode}`, "invalid_body")
+        }
+        // ★ The confirmation belongs to the session: once it is given, the
+        //   server does not ask again — a second surface reads the same
+        //   fact off the session and stays quiet.
+        if (mode === "full" && !t.authorizationConfirmed && body.confirm !== true) {
+          return fail(
+            409,
+            "full authorization needs an explicit confirmation",
+            "confirmation_required",
+          )
+        }
+        t.authorizationMode = mode
+        if (mode === "full") t.authorizationConfirmed = true
+        return json(meta(t))
+      }
+
+      // ★ The session's announcement channel. ★ It has no terminal frame:
+      //   it ends when the client goes away.
+      const evs = path.match(/^\/v2\/sessions\/([^/]+)\/events$/)
+      if (evs && req.method === "GET") {
+        const t = find(evs[1])
+        if (!t) return notFound()
+        const id = t.threadId
+        // ★ cancel() has no controller in scope, so the reader keeps one.
+        let reader: ReadableStreamDefaultController<Uint8Array> | null = null
+        const stream = new ReadableStream<Uint8Array>({
+          start(c) {
+            reader = c
+            let subs = channels.get(id)
+            if (!subs) {
+              subs = new Set()
+              channels.set(id, subs)
+            }
+            subs.add(c)
+            // ★ The channel says "I am here" right away. ★ A fetch does not
+            //   resolve until the first byte arrives, and a client that is
+            //   not reading yet has not heard the facts.
+            c.enqueue(keepalive())
+          },
+          cancel() {
+            const subs = channels.get(id)
+            if (!subs || !reader) return
+            subs.delete(reader)
+            if (subs.size === 0) channels.delete(id)
+          },
+        })
+        return sse(stream)
       }
 
       const m = path.match(/^\/v2\/sessions\/([^/]+)(\/messages)?$/)
@@ -1968,6 +3099,32 @@ export function startFakeServer(port = 0): FakeServer {
         }))
         const active = items.find((r) => r.state === "running" || r.state === "starting")
         return json({ items, ...(active ? { activeRunId: active.runId } : {}) })
+      }
+
+      // ★ The session's operation log — the timeline of what happened.
+      //
+      //   ★ The order is **ascending**: the timeline is read from the top
+      //     down, like a log. ★ `after` skips the lines a client already
+      //     has, and `limit` keeps the last n of what is left — and the
+      //     total counts what the filter selected, before the limit cut
+      //     the tail off.
+      const operationsRoute = path.match(/^\/v2\/sessions\/([^/]+)\/operations$/)
+      if (operationsRoute && req.method === "GET") {
+        const t = find(operationsRoute[1])
+        if (!t) return notFound()
+        const afterRaw = url.searchParams.get("after")
+        const after = afterRaw === null ? 0 : Number(afterRaw)
+        if (!Number.isFinite(after) || after < 0) {
+          return fail(400, "after must be a sequence number", "invalid_body")
+        }
+        const limitRaw = url.searchParams.get("limit")
+        const limit = limitRaw === null ? 0 : Number(limitRaw)
+        if (!Number.isFinite(limit) || limit < 0) {
+          return fail(400, "limit must be a non-negative number", "invalid_body")
+        }
+        const selected = (t.operations ?? []).filter((o) => o.seq > after)
+        const items = limit > 0 ? selected.slice(selected.length - limit) : selected
+        return json({ threadId: t.threadId, total: selected.length, items })
       }
 
       // ★ The bytes of one file, for the preview.
@@ -2146,6 +3303,8 @@ export function startFakeServer(port = 0): FakeServer {
       requests.length = 0
       seq = 0
       scenario = "simple"
+      projectsMode = "default"
+      seedProjects("default")
     },
     setScenario: (name: ScenarioName) => {
       scenario = name
@@ -2156,6 +3315,13 @@ export function startFakeServer(port = 0): FakeServer {
 function encode(ev: RunEvent): Uint8Array {
   const withTs = ev.timestamp === undefined ? { ...ev, timestamp: Date.now() } : ev
   return new TextEncoder().encode(`data:${JSON.stringify(withTs)}\n\n`)
+}
+
+// keepalive is the frame that carries no payload.
+//
+// ★ It is not a fact: it says the channel is open, and nothing more.
+function keepalive(): Uint8Array {
+  return new TextEncoder().encode("data:\n\n")
 }
 
 function sse(stream: ReadableStream<Uint8Array>): Response {

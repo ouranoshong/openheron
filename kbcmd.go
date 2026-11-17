@@ -17,33 +17,33 @@ import (
 
 func kbCmd(ctx context.Context, args []string, stdout io.Writer, log *slog.Logger) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: openheron kb index [--config-dir <path>] [files...] | openheron kb status")
+		return fmt.Errorf("usage: openheron kb index [--config-root <path>] [files...] | openheron kb status")
 	}
 	switch args[0] {
 	case "index":
 		rest, asJSON := splitJSONFlag(args[1:])
-		rest, configDir, err := splitConfigDirFlag(rest)
+		rest, configRoot, err := splitConfigRootFlag(rest)
 		if err != nil {
 			return err
 		}
-		return kbIndex(ctx, rest, configDir, stdout, asJSON, log)
+		return kbIndex(ctx, rest, configRoot, stdout, asJSON, log)
 	case "status":
 		rest, asJSON := splitJSONFlag(args[1:])
-		rest, configDir, err := splitConfigDirFlag(rest)
+		rest, configRoot, err := splitConfigRootFlag(rest)
 		if err != nil {
 			return err
 		}
-		return kbStatus(ctx, configDir, stdout, asJSON)
+		return kbStatus(ctx, configRoot, stdout, asJSON)
 	case "search":
 		rest, asJSON := splitJSONFlag(args[1:])
-		rest, configDir, err := splitConfigDirFlag(rest)
+		rest, configRoot, err := splitConfigRootFlag(rest)
 		if err != nil {
 			return err
 		}
-		return kbSearch(ctx, rest, configDir, stdout, asJSON)
+		return kbSearch(ctx, rest, configRoot, stdout, asJSON)
 	case "-h", "--help", "help":
-		fmt.Fprintln(stdout, "usage: openheron kb index [--config-dir <path>] [--json] [files...] | "+
-			"openheron kb search [--config-dir <path>] <query> | openheron kb status [--config-dir <path>] [--json]")
+		fmt.Fprintln(stdout, "usage: openheron kb index [--config-root <path>] [--json] [files...] | "+
+			"openheron kb search [--config-root <path>] <query> | openheron kb status [--config-root <path>] [--json]")
 		return nil
 	default:
 		return fmt.Errorf("unknown subcommand %q; want index or status", args[0])
@@ -61,28 +61,55 @@ func splitJSONFlag(args []string) (rest []string, asJSON bool) {
 	return rest, asJSON
 }
 
-// splitConfigDirFlag pulls --config-dir out of the argument list.
+// splitConfigRootFlag pulls --config-root out of the argument list.
 //
-// The kb subcommands have no other way to name a config root: without it
-// they fall back to the project root's own .openheron/, which is not where a
-// single-user setup keeps its configuration.
-func splitConfigDirFlag(args []string) (rest []string, configDir string, err error) {
+// ★ The kb subcommands have no other way to name a config root: without it
+//
+//	they fall back to the openheron root's own configs/, which is where a
+//	single-user setup keeps its configuration.
+//
+// ★ --config-dir is the previous name and still works: the flag is in other
+//
+//	people's scripts, and a flag that stops working is a flag that breaks
+//	somebody's day.
+func splitConfigRootFlag(args []string) (rest []string, configRoot string, err error) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
+		case a == "--config-root":
+			if i+1 >= len(args) {
+				return nil, "", fmt.Errorf("--config-root needs a path")
+			}
+			configRoot = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--config-root="):
+			configRoot = strings.TrimPrefix(a, "--config-root=")
 		case a == "--config-dir":
 			if i+1 >= len(args) {
 				return nil, "", fmt.Errorf("--config-dir needs a path")
 			}
-			configDir = args[i+1]
+			configRoot = args[i+1]
 			i++
 		case strings.HasPrefix(a, "--config-dir="):
-			configDir = strings.TrimPrefix(a, "--config-dir=")
+			configRoot = strings.TrimPrefix(a, "--config-dir=")
 		default:
 			rest = append(rest, a)
 		}
 	}
-	return rest, configDir, nil
+	return rest, configRoot, nil
+}
+
+// kbService builds the configuration service for a kb subcommand.
+//
+// ★ The project root is the working directory: the knowledge base belongs to
+//
+//	the project the command is standing in.
+func kbService(configRoot string) (*spec.Service, error) {
+	root, err := commandProjectRoot()
+	if err != nil {
+		return nil, err
+	}
+	return newConfigService(configRoot, root)
 }
 
 type kbEnv struct {
@@ -96,11 +123,11 @@ type kbEnv struct {
 	headers map[string]string
 }
 
-func assemble(ctx context.Context, configDir string, log *slog.Logger) (*kbEnv, error) {
+func assemble(ctx context.Context, configRoot string, log *slog.Logger) (*kbEnv, error) {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	svc, err := spec.NewService(configDir, "")
+	svc, err := kbService(configRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -155,9 +182,9 @@ func assemble(ctx context.Context, configDir string, log *slog.Logger) (*kbEnv, 
 	}, nil
 }
 
-func kbIndex(ctx context.Context, paths []string, configDir string, stdout io.Writer,
+func kbIndex(ctx context.Context, paths []string, configRoot string, stdout io.Writer,
 	asJSON bool, log *slog.Logger) error {
-	env, err := assemble(ctx, configDir, log)
+	env, err := assemble(ctx, configRoot, log)
 	if err != nil {
 		return err
 	}
@@ -165,7 +192,7 @@ func kbIndex(ctx context.Context, paths []string, configDir string, stdout io.Wr
 	fmt.Fprintf(stdout, "corpus_dir: %s\nindex:  %s\nmodel:  %s\n\n",
 		env.corpus, filepath.Join(env.store.Dir()), env.model)
 
-	rel, err := kb.CorpusRel(env.svc.ProjectRoot(), env.corpus, paths)
+	rel, err := kb.CorpusRel(env.svc.DefaultProjectRoot(), env.corpus, paths)
 	if err != nil {
 		return err
 	}
@@ -205,12 +232,12 @@ func kbIndex(ctx context.Context, paths []string, configDir string, stdout io.Wr
 	return nil
 }
 
-func kbSearch(ctx context.Context, args []string, configDir string, stdout io.Writer, asJSON bool) error {
+func kbSearch(ctx context.Context, args []string, configRoot string, stdout io.Writer, asJSON bool) error {
 	query := strings.Join(args, " ")
 	if query == "" {
 		return fmt.Errorf("usage: openheron kb search <query>")
 	}
-	svc, err := spec.NewService(configDir, "")
+	svc, err := kbService(configRoot)
 	if err != nil {
 		return err
 	}
@@ -309,8 +336,8 @@ func assembleSearch(ctx context.Context, svc *spec.Service, cfg *spec.Config) (*
 	return &searchEnv{store: st, rt: rt}, nil
 }
 
-func kbStatus(ctx context.Context, configDir string, stdout io.Writer, asJSON bool) error {
-	svc, err := spec.NewService(configDir, "")
+func kbStatus(ctx context.Context, configRoot string, stdout io.Writer, asJSON bool) error {
+	svc, err := kbService(configRoot)
 	if err != nil {
 		return err
 	}

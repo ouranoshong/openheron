@@ -14,6 +14,7 @@ import {
   clickMenuItem,
   openApp,
   openThread,
+  openToolCard,
   resetBackend,
   sendMessage,
   setScenario,
@@ -1023,6 +1024,8 @@ test.describe("工具卡的语法高亮", () => {
     await openApp(page)
     await openThread(page, "Alpha conversation")
     await sendMessage(page, `${MARKER_A} read the file`)
+    // ★ The card starts closed, so the arguments have to be opened first.
+    await openToolCard(page)
     await expect(page.locator('[data-testid="tool-args"]')).toBeVisible({ timeout: 7000 })
 
     const args = page.locator('[data-testid="tool-args"]')
@@ -1042,6 +1045,7 @@ test.describe("工具卡的语法高亮", () => {
     await openApp(page)
     await openThread(page, "Alpha conversation")
     await sendMessage(page, `${MARKER_A} read the file`)
+    await openToolCard(page)
     const args = page.locator('[data-testid="tool-args"]')
     await expect(args).toBeVisible({ timeout: 7000 })
 
@@ -1058,6 +1062,7 @@ test.describe("工具卡的语法高亮", () => {
     await openApp(page)
     await openThread(page, "Alpha conversation")
     await sendMessage(page, `${MARKER_A} read the file`)
+    await openToolCard(page)
 
     const result = page.locator('[data-testid="tool-result"]')
     await expect(result).toBeVisible({ timeout: 7000 })
@@ -1071,6 +1076,7 @@ test.describe("工具卡的语法高亮", () => {
     await openApp(page)
     await openThread(page, "Alpha conversation")
     await sendMessage(page, `${MARKER_A} run a json tool`)
+    await openToolCard(page)
 
     const result = page.locator('[data-testid="tool-result"]')
     await expect(result).toBeVisible({ timeout: 7000 })
@@ -1078,5 +1084,233 @@ test.describe("工具卡的语法高亮", () => {
     await expect(result.locator("span[style*='--shiki-light']").first()).toBeVisible({
       timeout: 8000,
     })
+  })
+})
+
+test.describe("工具卡的宽度", () => {
+  // ★ The header carries three things and they do not fit on one line
+  //   everywhere: the title, the argument (the path the call was about),
+  //   and the metadata ("80 lines / done"). The argument is the one that
+  //   must never be squeezed, so the metadata is what moves.
+  async function rows(page: import("@playwright/test").Page) {
+    // ★ `getBoundingClientRect` and not `boundingBox()`: the second one
+    //   answers null for an element that is outside the viewport, and on a
+    //   narrow screen the card is exactly that.
+    const box = async (sel: string) =>
+      page
+        .locator(sel)
+        .first()
+        .evaluate((el) => {
+          const r = el.getBoundingClientRect()
+          return { top: Math.round(r.top), left: Math.round(r.left), width: Math.round(r.width) }
+        })
+    return {
+      hint: await box('[data-testid="tool-hint"]'),
+      meta: await box('[data-testid="tool-meta"]'),
+    }
+  }
+
+  test("★ 宽屏时元信息留在第一行，路径落到标题之下", async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await setScenario("toolDone")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the file`)
+
+    const { hint, meta } = await rows(page)
+    // ★ The metadata sits on the **first** row, at the far end; the
+    //   argument is on the row below, in the title's own column. So the
+    //   metadata is **above** the argument here.
+    expect(meta.top).toBeLessThan(hint.top)
+  })
+
+  test("★ 窄屏时元信息换到独立的一行，路径不被挤掉", async ({ page }) => {
+    // ★ Below the `sm` breakpoint the header is three rows: the title, the
+    //   argument, and the metadata. The argument still gets a full row of
+    //   its own — it is the one that must stay readable.
+    await page.setViewportSize({ width: 420, height: 900 })
+    await setScenario("toolDone")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the file`)
+
+    const { hint, meta } = await rows(page)
+    // ★ A row of its own: the metadata is below the argument.
+    expect(meta.top).toBeGreaterThan(hint.top)
+    // ★ And the argument was not squeezed out of the card.
+    expect(hint.width).toBeGreaterThan(100)
+  })
+})
+
+test.describe("工具卡的图标", () => {
+  // ★ The icon sits one gap away from the chevron that folds the card. A
+  //   glyph that reads as a `>` reads as a **second folding control**: the
+  //   reader clicks the wrong thing and the card does not open.
+  //
+  // ★ The name the table gives is on the element that draws it, so the
+  //   assertion is about what is on the screen — not about a table that
+  //   happens to be right in a file nobody opened.
+  function icon(page: import("@playwright/test").Page) {
+    return page.locator('[data-testid="tool-card"] [data-icon]').first()
+  }
+
+  test("★ read_file 画的是一张纸，不是剪贴板", async ({ page }) => {
+    await setScenario("toolDone")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the file`)
+
+    // ★ `clipboard` is a small square at 14px, and next to the chevron it
+    //   read as a second folding symbol.
+    await expect(icon(page)).toHaveAttribute("data-icon", "file-text")
+  })
+
+  test("★ execute 画的是带框的终端，不是裸的 >", async ({ page }) => {
+    await setScenario("toolJson")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} run a json tool`)
+
+    // ★ The bare `>_` was the same shape as the chevron beside it.
+    await expect(icon(page)).toHaveAttribute("data-icon", "square-terminal")
+  })
+
+  test("★ config_get 画的是齿轮", async ({ page }) => {
+    await setScenario("toolConfig")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the config`)
+
+    // ★ The configuration service answers more calls in a real run than the
+    //   filesystem does, and the whole family is one gear.
+    await expect(icon(page)).toHaveAttribute("data-icon", "settings")
+  })
+
+  test("★ 图标和折叠箭头不是同一个图形", async ({ page }) => {
+    await setScenario("toolDone")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the file`)
+
+    const card = page.locator('[data-testid="tool-card"]').first()
+    const [chevron, drawing] = await Promise.all([
+      card.locator('[data-testid="tool-chevron"]').evaluate((el) => el.innerHTML),
+      card.locator("[data-icon]").first().evaluate((el) => el.innerHTML),
+    ])
+    // ★ Two identical chevrons side by side are two folding controls.
+    expect(drawing).not.toBe(chevron)
+  })
+})
+
+test.describe("工具卡的标题", () => {
+  // ★ The card names the call, not the tool. `config_get` says what the
+  //   model asked for; "Read configuration" says what the reader sees.
+  //
+  // ★ The assertion is about the text **on the screen** — a table that
+  //   happens to be right in a file nobody opened is not what the reader
+  //   reads.
+  function title(page: import("@playwright/test").Page) {
+    return page.locator('[data-testid="tool-card"] [data-testid="tool-title"]').first()
+  }
+
+  test("★ read_file 的标题是「Read file」，不是工具名", async ({ page }) => {
+    await setScenario("toolDone")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the file`)
+
+    await expect(title(page)).toHaveText("Read file")
+  })
+
+  test("★ config_get 的标题是「Read configuration」", async ({ page }) => {
+    await setScenario("toolConfig")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the config`)
+
+    // ★ The configuration service answers more calls in a real run than the
+    //   filesystem does, and the whole family used to show a raw name.
+    await expect(title(page)).toHaveText("Read configuration")
+  })
+
+  test("★ 表里没有的工具保留自己的名字", async ({ page }) => {
+    await setScenario("toolUnknown")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} call an unknown tool`)
+
+    // ★ An MCP server's tool is named by the server. Hiding that behind the
+    //   word "tool" says less than showing it.
+    await expect(title(page)).toHaveText("mcp__github__create_issue")
+  })
+
+  test("★ 标题不是原始工具名", async ({ page }) => {
+    await setScenario("toolConfig")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the config`)
+
+    // ★ The raw name is what the table is supposed to have replaced.
+    await expect(title(page)).not.toHaveText("config_get")
+  })
+})
+
+// ★ The tool calls that follow each other are **one thing that happened**.
+//
+// ★ A conversation that opens every call shows the reader a screen of steps
+//   and buries the answer they came for — so the run is one line until the
+//   reader asks for the steps.
+test.describe("连续的调用：并成一段", () => {
+  const GROUP = '[data-testid="tool-group"]'
+  const GROUP_COUNT = '[data-testid="tool-group-count"]'
+  const GROUP_TITLES = '[data-testid="tool-group-titles"]'
+  const GROUP_TOGGLE = '[data-testid="tool-group-toggle"]'
+  const CARD = '[data-testid="tool-card"]'
+
+  test("★ 两次调用并成一行，展开才看见两步", async ({ page }) => {
+    await setScenario("toolMany")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} look at two things`)
+
+    const group = page.locator(GROUP)
+    await expect(group).toBeVisible({ timeout: 7000 })
+
+    // ★ One line for the run: how many calls, and which tools.
+    await expect(group.locator(GROUP_COUNT)).toHaveText("2 steps")
+    await expect(group.locator(GROUP_TITLES)).toContainText("Read file")
+    await expect(group.locator(GROUP_TITLES)).toContainText("Search content")
+
+    // ★ And while it is closed, the steps themselves are not on the screen.
+    await expect(page.locator(CARD)).toHaveCount(0)
+
+    await group.locator(GROUP_TOGGLE).click()
+    await expect(page.locator(CARD)).toHaveCount(2)
+  })
+
+  test("★ 一次调用还是一行，不是一个组", async ({ page }) => {
+    await setScenario("toolDone")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the file`)
+
+    await expect(page.locator(CARD)).toHaveCount(1)
+    // ★ A bar that says "1 steps" would say less than the step itself.
+    await expect(page.locator(GROUP)).toHaveCount(0)
+  })
+
+  test("★ 展开后结果在参数之前", async ({ page }) => {
+    await setScenario("toolDone")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the file`)
+
+    await openToolCard(page)
+
+    // ★ The result is what the world said back; the arguments are what the
+    //   model thought. The reader came for the first one.
+    const result = await page.locator('[data-testid="tool-result"]').boundingBox()
+    const args = await page.locator('[data-testid="tool-args"]').boundingBox()
+    expect(result!.y).toBeLessThan(args!.y)
   })
 })

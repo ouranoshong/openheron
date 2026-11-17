@@ -11,6 +11,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/ouranoshong/openheron/agentkit/spec/decl"
+	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/storage"
 )
 
@@ -28,16 +29,24 @@ import (
 type runRow struct {
 	mu     sync.Mutex
 	ledger storage.RunLedger
-	run    storage.Run
+	// ops is the session's operation log. ★ The timeline's "the round ended"
+	//   line is written here, because this is the one place every ending
+	//   passes through — the abort, the archive and the loop's own exit all
+	//   call finish.
+	ops storage.OperationLog
+	run storage.Run
+	// closed says the row is final. ★ A closed row stays closed: the run's
+	// story is written once.
 	closed bool
 
 	log *slog.Logger
 }
 
 // newRunRow wraps a run's first snapshot. log may be nil: the row then drops
-// the one warning it can write.
-func newRunRow(ledger storage.RunLedger, r storage.Run, log *slog.Logger) *runRow {
-	return &runRow{ledger: ledger, run: r, log: log}
+// the one warning it can write. ops may be nil too: the row then keeps no
+// timeline.
+func newRunRow(ledger storage.RunLedger, ops storage.OperationLog, r storage.Run, log *slog.Logger) *runRow {
+	return &runRow{ledger: ledger, ops: ops, run: r, log: log}
 }
 
 // set writes a non-terminal state.
@@ -77,6 +86,32 @@ func (rw *runRow) finish(state storage.RunState, code, message string) {
 	rw.run.ErrorMessage = message
 	rw.closed = true
 	rw.writeLocked()
+	// ★ The row is terminal, so the round is over — whatever it ended as.
+	//   ★ The timeline says which ending it was, and it is written here
+	//   because this is the one place every ending passes through.
+	rw.recordFinished(state)
+}
+
+// recordFinished writes the timeline's "the round ended" line.
+//
+// ★ It never fails the run: the line is a record of the ending, and a
+//
+//	record that could not be written is a gap in the timeline, not a
+//	different ending.
+func (rw *runRow) recordFinished(state storage.RunState) {
+	if rw.ops == nil {
+		return
+	}
+	op := storage.Operation{
+		Kind:  storage.OpRunFinished,
+		Actor: storage.ActorSystem,
+		RunID: rw.run.RunID,
+		State: state.String(),
+	}
+	if err := rw.ops.Append(context.Background(), op); err != nil {
+		logf(rw.log, "session=%s run=%s failed to write the run's end line: %v",
+			rw.run.SessionID, rw.run.RunID, err)
+	}
 }
 
 // noteMCPServers records the MCP servers the run touched.
@@ -106,6 +141,56 @@ func (rw *runRow) noteMCPServers(names []string) {
 		rw.run.MCPServers = append(rw.run.MCPServers, n)
 	}
 	sort.Strings(rw.run.MCPServers)
+	rw.run.UpdatedAt = time.Now().UTC()
+	rw.writeLocked()
+}
+
+// noteAuthorizationMode records the approval mode the round ran under.
+//
+// ★ The decision log only holds what a human decided, so a round that ran
+//
+//	without asking leaves no trace there. This is the row that says it.
+//
+// ★ The mode is written once, when the round starts: the round keeps the
+//
+//	mode it began with, and a row that followed the session's mode would
+//	change its story halfway through.
+func (rw *runRow) noteAuthorizationMode(mode contract.AuthorizationMode) {
+	if rw == nil || mode == "" {
+		return
+	}
+	rw.mu.Lock()
+	defer rw.mu.Unlock()
+	if rw.closed {
+		return
+	}
+	// ★ The first note wins. The round keeps the mode it began with, so a
+	//   second note would rewrite the row's story about the same round.
+	if rw.run.AuthorizationMode != "" {
+		return
+	}
+	rw.run.AuthorizationMode = mode
+	rw.run.UpdatedAt = time.Now().UTC()
+	rw.writeLocked()
+}
+
+// noteTree records the tree the run ran on.
+//
+// ★ The fingerprint is what a resume asks for: the round it continues must
+//
+//	run on the tree that round started with. ★ An empty fingerprint means
+//	the tree is not known — and a resume that finds none falls back to the
+//	current tree and says so.
+func (rw *runRow) noteTree(fingerprint string) {
+	if rw == nil || fingerprint == "" {
+		return
+	}
+	rw.mu.Lock()
+	defer rw.mu.Unlock()
+	if rw.closed {
+		return
+	}
+	rw.run.TreeFingerprint = fingerprint
 	rw.run.UpdatedAt = time.Now().UTC()
 	rw.writeLocked()
 }

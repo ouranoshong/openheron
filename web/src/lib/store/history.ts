@@ -54,6 +54,16 @@ function findToolOwner(messages: Message[], toolCallId: string): Message | undef
   return messages.find((m) => m.parts.some((p) => p.kind === "tool" && p.id === toolCallId))
 }
 
+// readToolError reads the failure off the wire metadata.
+//
+// ★ The server stamps it on the tool result (api/v2_convert.go). Its
+//   presence is the fact; the reason inside it is what the call said, and
+//   the result's content already carries it.
+function readToolError(raw: unknown): boolean {
+  if (typeof raw === "string") return true
+  return raw === true
+}
+
 export function seedFromHistory(
   raw: AgMessage[],
   pending?: PendingApproval[],
@@ -71,11 +81,16 @@ export function seedFromHistory(
   for (const m of raw) {
     if (m.role === "tool") {
       const target = findToolOwner(messages, m.toolCallId ?? "") ?? messages.at(-1)
+      // ★ The history has to show the same failure the live stream showed:
+      //   a reload that lost it would show a failed call as a successful
+      //   one, and the two surfaces would disagree about the same call.
+      const failed = readToolError(m.metadata?.toolError)
       if (target) {
         for (const p of target.parts) {
           if (p.kind === "tool" && p.id === m.toolCallId) {
             p.result = typeof m.content === "string" ? m.content : ""
             p.phase = "complete"
+            if (failed) p.isError = true
           }
         }
       }
@@ -135,15 +150,13 @@ export function seedFromHistory(
   //   Without it a second tab hydrates as idle and its send button works —
   //   the tab has no memory of the turn another tab started.
   //
-  // ★ A hydrated "running" is ALWAYS somebody else's turn. This surface
-  //   has just opened the session: it cannot own a turn it did not start
-  //   (a surface that owns one keeps its own event stream and never
-  //   re-hydrates — openSession returns early for a loaded session). So
-  //   the busy flag goes up here too, and the composer says whose turn it
-  //   is.
+  // ★ The busy **flag** does not go up here, though. The flag says the
+  //   live turn belongs to somebody else, and this surface is about to
+  //   find out whether it can watch that turn instead (attachToLiveRun):
+  //   a flag that went up and came down again would flash the warning at
+  //   a surface that is following the turn after all.
   if (state === "running") {
     convo.status = "running"
-    convo.busy = true
   }
   if (pending && pending.length > 0) {
     convo.status = "awaiting-approval"

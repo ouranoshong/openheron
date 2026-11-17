@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/ouranoshong/openheron/agentkit/emit"
+	"github.com/ouranoshong/openheron/agentkit/fsx"
 	"github.com/ouranoshong/openheron/agentkit/obs"
 	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/message"
@@ -80,6 +81,11 @@ func (rt *Runtime) makeGenInput(sess storage.Session, turn *Turn) func(context.C
 		built, err := rt.cfg.Input.buildInput(ctx, inputParams{
 			History:   sess.Messages(true),
 			Workspace: sess.Workspace(),
+			// ★ The round's project root, read from the context the round
+			//   runs in. ★ It is the session's project — the directory the
+			//   tools write in and the directory the prompt names are the
+			//   same one.
+			ProjectRoot: fsx.ProjectRoot(ctx),
 		}, userMsg)
 		if err != nil {
 			// ★ An error the framework records but nobody hands to the turn
@@ -129,7 +135,8 @@ func (rt *Runtime) makePrepareAgent(sess storage.Session, turn *Turn) func(conte
 			turn.fail(agentUnavailable{reason: err})
 			return nil, err
 		}
-		agent, err := rt.cfg.AgentBuilder.Build(ctx, sess.ID(), sess.AgentID(), contract.TurnQuery)
+		agent, fingerprint, err := rt.cfg.AgentBuilder.Build(ctx, sess.ID(), sess.AgentID(),
+			contract.TurnQuery, turn.pin)
 		if err != nil {
 			// ★ The reason is wrapped, not replaced: the client's message is
 			//   the builder's, and the sentinel is what lets the transport
@@ -138,6 +145,12 @@ func (rt *Runtime) makePrepareAgent(sess storage.Session, turn *Turn) func(conte
 			turn.fail(agentUnavailable{reason: err})
 			return nil, err
 		}
+		// ★ The row records the tree the run ran on. ★ It is the only place
+		//   that tree is written down, and it is what a resume asks for:
+		//   the round it continues has to run on the same tree, or the
+		//   report is written by an agent that is not the one that
+		//   started the work.
+		turn.runRow().noteTree(fingerprint)
 		return agent, nil
 	}
 }
@@ -158,16 +171,36 @@ func (rt *Runtime) makeOnAgentEvents(sess storage.Session, turn *Turn) func(cont
 	return func(ctx context.Context, _ *adk.TurnContext[loopItem, *schema.Message], events *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.Message]]) error {
 		// ★ The agent has started producing events: the run is executing,
 		//   not just claimed. The row says so before anything is archived.
-		turn.row.set(storage.RunRunning)
+		turn.runRow().set(storage.RunRunning)
 
 		turn.events = events
 		turn.signalReady()
 
+		// ★ The drain channel is the run's word that the agent is done:
+		//   the derivation closes it when the agent's stream has closed.
+		drained := make(chan struct{})
+
 		artifacts, err := emit.Derive(events, emit.Options{
-			RunID:     turn.RunID,
-			RootAgent: sess.AgentID(),
-			Contexts:  rt.contexts(),
+			RunID:        turn.RunID,
+			RootAgent:    sess.AgentID(),
+			Contexts:     rt.contexts(),
+			ToolFailures: turn.toolFailures,
+			Drained:      drained,
 		}, turn.publisher, turn.abort)
+
+		// ★ The agent may still be winding down: the framework reads the
+		//   agent's state when the loop stops, and the agent's stream is
+		//   what writes it. ★ So a round that ended waits for the stream
+		//   to close — otherwise the framework reads a field the agent is
+		//   still writing.
+		//
+		// ★ A round that ENDED is the case: the agent has said what it
+		//   had to say, and the stream closes right behind it. ★ A round
+		//   that FAILED is not: the agent may still be running, and the
+		//   framework's teardown is what stops it.
+		if err == nil {
+			rt.settleAgent(turn, drained)
+		}
 
 		out := Outcome{
 			Intermediates: artifacts.Intermediates,
@@ -181,7 +214,7 @@ func (rt *Runtime) makeOnAgentEvents(sess storage.Session, turn *Turn) func(cont
 		// ★ The ledger names the servers this run touched, so a
 		//   post-mortem can answer "which server was this" without
 		//   reading the whole transcript.
-		turn.row.noteMCPServers(mcpServersOf(artifacts.Intermediates))
+		turn.runRow().noteMCPServers(mcpServersOf(artifacts.Intermediates))
 
 		rt.archive(sess, turn, out)
 		// ★ The messages are on disk: the turn is finished with the
@@ -203,6 +236,39 @@ func (rt *Runtime) makeOnAgentEvents(sess storage.Session, turn *Turn) func(cont
 	}
 }
 
+// agentSettleTimeout bounds the wait for the agent's event stream to close.
+//
+// ★ The wait is short in practice — the agent's stream closes right
+//
+//	behind its last event — and it is bounded because an agent that
+//	never closes would otherwise hold the round for ever.
+const agentSettleTimeout = time.Second
+
+// settleAgent waits for the agent's event stream to close.
+//
+// ★ The framework reads the agent's state when the loop stops, and the
+//
+//	agent's stream is what writes it. ★ Ending the round while the agent
+//	is still winding down leaves the framework reading a field the agent
+//	is still writing — a data race inside the framework.
+//
+// ★ The wait does not cancel anything. ★ The turn's context is what the
+//
+//	framework writes the checkpoint with, and a cancelled context would
+//	take the checkpoint with it — and the checkpoint is what makes the
+//	approval answerable.
+func (rt *Runtime) settleAgent(turn *Turn, drained <-chan struct{}) {
+	if drained == nil {
+		return
+	}
+	select {
+	case <-drained:
+		return
+	case <-time.After(agentSettleTimeout):
+		rt.logf("session=%s the agent's stream did not close after the round ended", turn.sessionID)
+	}
+}
+
 // finishRun writes the run's terminal row.
 //
 // ★ It runs AFTER the archive. That single ordering is what makes the row
@@ -216,7 +282,8 @@ func (rt *Runtime) makeOnAgentEvents(sess storage.Session, turn *Turn) func(cont
 //	checkpoint are written. A scan must not be able to call the run over
 //	before the question the user has to answer is on disk.
 func (rt *Runtime) finishRun(turn *Turn, out Outcome) {
-	if turn.row == nil {
+	row := turn.runRow()
+	if row == nil {
 		return
 	}
 	switch {
@@ -225,11 +292,11 @@ func (rt *Runtime) finishRun(turn *Turn, out Outcome) {
 		//   it. The distinction is the user's, and the row is what a
 		//   post-mortem reads.
 		state, code := failedState(out.Err)
-		turn.row.finish(state, code, out.Err.Error())
+		row.finish(state, code, out.Err.Error())
 	case len(out.Interrupts) > 0:
 		turn.awaitingApproval = true
 	default:
-		turn.row.finish(storage.RunCompleted, "", "")
+		row.finish(storage.RunCompleted, "", "")
 	}
 }
 
@@ -247,7 +314,17 @@ func (rt *Runtime) finalize(sess storage.Session, turn *Turn, out Outcome) error
 	//   the session state made /v2/sessions/{id} keep reporting "running"
 	//   forever after a completed turn — the loop stays alive waiting for
 	//   the next item, so "a loop exists" says nothing about activity.
-	rt.stateFor(sess.ID()).markTurnDone(turn)
+	//
+	// ★ A run that ended by raising an interrupt is the exception. ★ Its
+	//   approval and its checkpoint are written at the loop's exit, and the
+	//   ledger's row closes behind them — so the round is not over yet, and
+	//   the turn must not be released: ★ an attach that arrives in between
+	//   would be refused with "the run is no longer live", and that refusal
+	//   says nothing about the approval, which is not on disk yet. ★ The
+	//   release waits for the loop's exit (bridge.go).
+	if !turn.awaitingApproval {
+		rt.stateFor(sess.ID()).markTurnDone(turn)
+	}
 
 	if out.Err != nil {
 		return out.Err

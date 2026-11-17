@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -31,6 +32,8 @@ import (
 	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/api"
 	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/initcfg"
+	"github.com/ouranoshong/openheron/projects"
 	"github.com/ouranoshong/openheron/storage/filestore"
 	"github.com/ouranoshong/openheron/storage/memarbit"
 	"github.com/ouranoshong/openheron/webui"
@@ -63,6 +66,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "secret" {
+		if err := secretCmd(os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			boot.Error("openheron secret failed", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "version", "--version", "-v":
@@ -86,56 +96,153 @@ func main() {
 }
 
 type serverFlags struct {
-	configDir   string
-	projectRoot string
+	openheronRoot      string
+	configRoot         string
+	defaultProjectRoot string
+	// legacyProjectRoot is the previous name of defaultProjectRoot.
+	legacyProjectRoot string
+	// scopeDir is the optional positional argument: the project this process
+	// focuses on.
+	scopeDir string
 }
+
+// The environment variables that override the server's own settings.
+//
+// ★ They carry the OPENHERON_ prefix: a bare LISTEN_ADDR or STATIC_DIR is a
+//
+//	name any other tool in the environment may also set, and a variable
+//	somebody else owns is a variable that can change this process's
+//	behaviour without anybody meaning to.
+const (
+	listenAddrEnv   = "OPENHERON_LISTEN_ADDR"
+	frontendModeEnv = "OPENHERON_FRONTEND_MODE"
+	staticDirEnv    = "OPENHERON_STATIC_DIR"
+)
 
 func parseServerFlags(args []string) (serverFlags, error) {
 	fs := flag.NewFlagSet("openheron", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var f serverFlags
-	fs.StringVar(&f.configDir, "config-dir", "",
-		"the config root to read (default: <project-root>/.openheron, created when missing; or $OPENHERON_CONFIG_DIR)")
-	fs.StringVar(&f.projectRoot, "project-root", "",
-		"the project root (default: the current directory)")
+	fs.StringVar(&f.openheronRoot, "openheron-root", "",
+		"the user-level base directory (default: ~/.openheron; or $OPENHERON_ROOT)")
+	fs.StringVar(&f.configRoot, "config-root", "",
+		"the config root to read (default: <openheron-root>/configs, created when missing; or $OPENHERON_CONFIG_ROOT)")
+	fs.StringVar(&f.defaultProjectRoot, "default-project-root", "",
+		"the project root for sessions that belong to no project (default: <openheron-root>/projects/default)")
+	fs.StringVar(&f.legacyProjectRoot, "project-root", "",
+		"deprecated: the previous name of --default-project-root")
 	if err := fs.Parse(args); err != nil {
 		return f, err
 	}
-	if fs.NArg() > 0 {
-		return f, fmt.Errorf("unexpected argument %q; openheron takes flags only", fs.Arg(0))
+	// ★ The flags come first: Go's flag parser stops at the first argument
+	//   that is not a flag, so `openheron . --config-root x` would read the
+	//   two flags as two more directories.
+	if fs.NArg() > 1 {
+		return f, fmt.Errorf("unexpected argument %q; openheron takes one directory, and the flags come first",
+			fs.Arg(1))
+	}
+	if fs.NArg() == 1 {
+		f.scopeDir = fs.Arg(0)
 	}
 	return f, nil
 }
 
 func printServerUsage(stdout io.Writer) {
-	fmt.Fprintln(stdout, "usage: openheron [--config-dir <path>] [--project-root <path>]")
+	fmt.Fprintln(stdout, "usage: openheron [flags] [dir]")
 	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout, "Reads exactly one configuration root: --config-dir, else $OPENHERON_CONFIG_DIR,")
-	fmt.Fprintln(stdout, "else <project-root>/.openheron (created when missing).")
+	fmt.Fprintln(stdout, "The directory is the project this process focuses on. It is also the")
+	fmt.Fprintln(stdout, "default project root, unless --default-project-root says otherwise.")
 	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout, "  --config-dir   the config root (llm/ agents/ mcps/ server/ tools/ live here)")
-	fmt.Fprintln(stdout, "  --project-root the project root: agent workdir and relative-path base")
+	fmt.Fprintln(stdout, "  --openheron-root       the user-level base directory (default: ~/.openheron)")
+	fmt.Fprintln(stdout, "  --config-root         the config root (llm/ agents/ mcps/ server/ tools/)")
+	fmt.Fprintln(stdout, "  --default-project-root the project root for sessions that belong to no project")
 	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout, "Other commands: openheron init, openheron kb, openheron version")
+	fmt.Fprintln(stdout, "Reads exactly one configuration root: --config-root, else $OPENHERON_CONFIG_ROOT,")
+	fmt.Fprintln(stdout, "else <openheron-root>/configs (created when missing).")
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "Other commands: openheron init, openheron secret, openheron kb, openheron version")
 }
 
-func warnUnusedHomeConfig(root string, log *slog.Logger) {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return
+// resolveOpenheronRoot resolves the user-level base directory.
+//
+// ★ The flag, else $OPENHERON_ROOT, else ~/.openheron.
+//
+//	The default is the user's home directory because the base directory
+//	holds the three things a person expects to find again on the next
+//	machine: the configuration, the state and the log file.
+func resolveOpenheronRoot(flagValue string) (string, error) {
+	v := strings.TrimSpace(flagValue)
+	if v == "" {
+		v = strings.TrimSpace(os.Getenv(spec.RootEnv))
 	}
-	homeCfg := filepath.Join(home, spec.DefaultBaseDirName)
-	if homeCfg == root {
-		return
+	if v == "" {
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return "", fmt.Errorf("resolve the openheron root: no home directory; "+
+				"pass --openheron-root or set %s", spec.RootEnv)
+		}
+		v = filepath.Join(home, ".openheron")
 	}
-	if fi, err := os.Stat(homeCfg); err != nil || !fi.IsDir() {
-		return
+	abs, err := filepath.Abs(v)
+	if err != nil {
+		return "", fmt.Errorf("resolve the openheron root %q: %w", v, err)
 	}
-	// The config root is never searched for anymore, so a config in the home
-	// directory is never picked up on its own — it has to be named.
-	log.Warn("[main] a config dir exists but is not the config root in use; "+
-		"pass --config-dir or set $OPENHERON_CONFIG_DIR to use it",
-		"dir", homeCfg, "root", root)
+	return abs, nil
+}
+
+// overrideEnv reads the environment variable that overrides a configured
+// value.
+//
+// ★ The previous name still works, and it is reported: an environment
+//
+//	variable that quietly stops working is the hardest kind of mistake to
+//	find — the user believes the setting changed, and nothing changed.
+func overrideEnv(log *slog.Logger, key, legacyKey, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	if legacyKey != "" {
+		if v := strings.TrimSpace(os.Getenv(legacyKey)); v != "" {
+			if log != nil {
+				log.Warn("[main] the environment variable was renamed",
+					"old", legacyKey, "new", key)
+			}
+			return v
+		}
+	}
+	return fallback
+}
+
+// commandProjectRoot returns the project root a command runs against.
+//
+// ★ The working directory, as it always was. A command is a thing a person
+//
+//	types while standing in a project, and the project they are standing in
+//	is the one they mean. ★ The server's default project root is a different
+//	question — it answers for a session that belongs to no project, and the
+//	server may be serving several projects at once.
+func commandProjectRoot() (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve the working directory: %w", err)
+	}
+	return wd, nil
+}
+
+// newConfigService builds the configuration service for a command that has
+// no server flags.
+//
+// ★ The openheron root is resolved the way the server resolves it: the
+//
+//	environment, else the user's home directory. ★ One answer per question —
+//	a command that read a different configuration than the server would be a
+//	command that lies.
+func newConfigService(configRoot, projectRoot string) (*spec.Service, error) {
+	home, err := resolveOpenheronRoot("")
+	if err != nil {
+		return nil, err
+	}
+	return spec.NewService(configRoot, projectRoot, spec.WithHome(home))
 }
 
 // configLoadError turns a config load failure into an actionable message.
@@ -155,11 +262,61 @@ func configLoadError(svc *spec.Service, err error) error {
 	return fmt.Errorf("config: load %s: %w", svc.Root(), err)
 }
 
+// initConfigIfEmpty writes the factory configuration when the process starts
+// with the defaulted config root and nothing in it.
+//
+// ★ Only the **defaulted** root is filled: `--config-root` and
+// `$OPENHERON_CONFIG_ROOT` name a root, and a named root that is empty is the
+// user's decision, not a gap for us to fill. ★ The test instance names its
+// root, so it never has a configuration written under it.
+//
+// ★ The plan is the one `openheron init` builds — the same templates, the
+// same rules — so "the server created it" and "the command created it" are the
+// same tree. The model is the provider template's own default
+// (deepseek/deepseek-flash) and the api key is read when the configuration
+// loads, from the environment or from the keyring, exactly as with
+// `openheron init` without flags.
+//
+// ★ "Empty" means **no agent file**: a tree that has one is a configuration,
+// whether or not it loads, and this must not touch it. The plan itself skips
+// the files that are already there, so a half-written tree is topped up
+// rather than replaced.
+func initConfigIfEmpty(svc *spec.Service, log *slog.Logger) error {
+	if log == nil {
+		log = obs.Discard()
+	}
+	if !svc.RootIsDefaulted() {
+		return nil
+	}
+	agent := filepath.Join(svc.Root(), spec.DirAgent, spec.DefaultAgentID+".md")
+	if _, err := os.Stat(agent); err == nil {
+		return nil
+	}
+	plan, err := initcfg.BuildPlan(svc, initcfg.Options{})
+	if err != nil {
+		return err
+	}
+	if err := plan.Apply(svc); err != nil {
+		return err
+	}
+	log.Info("[main] configuration initialized", "dir", svc.Root(),
+		"model", plan.Model, "files", len(plan.Files))
+	if plan.EnvHint != "" {
+		log.Info("[main] the api key is read when the configuration loads",
+			"env", plan.EnvHint, "keyring", plan.SecretHint)
+	}
+	return nil
+}
+
 func runServer(flags serverFlags) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	log, level, sink := installLogger()
+	// ★ The notice channel: the terminal the process was started on, and the
+	//   log file when one is installed. The address the service serves on
+	//   goes here — see serve.
+	notice := obs.NewNotice(sink.NoticeWriter())
 
 	st, err := setupConfig(flags, log, level, sink)
 	if err != nil {
@@ -167,6 +324,7 @@ func runServer(flags serverFlags) error {
 	}
 	st.log = log
 	st.level = level
+	st.notice = notice
 	if err := setupRuntime(ctx, st, log); err != nil {
 		return err
 	}
@@ -246,7 +404,7 @@ func applyLogLevel(log *slog.Logger, level *slog.LevelVar, c *spec.Config) {
 //	directory) would be discovered at startup. The probe makes both visible
 //	while there is still someone to tell.
 //
-// ★ The path is inside the config root, with the rest of the runtime state.
+// ★ The path is inside the openheron root, with the rest of the runtime state.
 //
 //	OPENHERON_LOG_FILE overrides it for one run, the way OPENHERON_LOG_LEVEL
 //	does: an operator who has to capture a log should not have to edit the
@@ -285,11 +443,10 @@ func applyLogFile(log *slog.Logger, sink *obs.Sink, svc *spec.Service, c *spec.C
 		// hertz's logger prints local time already.
 		LocalTime: true,
 	}
-	var w io.Writer = file
-	if cfg.Console {
-		w = io.MultiWriter(os.Stderr, file)
-	}
-	sink.Set(w)
+	// ★ The sink keeps the file apart from the log's route: a notice has to
+	//   reach the terminal even when the route has left it, and the file
+	//   even when the route still covers the terminal.
+	sink.Install(file, cfg.Console)
 	log.Info("[main] log file", "path", resolved, "console", cfg.Console,
 		"max_size_mb", cfg.MaxSizeMB, "max_age_days", cfg.MaxAgeDays)
 	return file
@@ -308,10 +465,20 @@ type startup struct {
 
 	addr        string
 	dataDir     string
+	home        string
 	projectRoot string
+	// scopeDir is the project this process focuses on — the positional
+	// argument, empty in the multi-project mode.
+	scopeDir string
+	// projects is the project registry: the table that says which sessions
+	// belong to which project.
+	projects *projects.Registry
 
 	log   *slog.Logger
 	level *slog.LevelVar
+	// notice is the channel the terminal always sees: the address the
+	// service serves on, whatever the log's destination is.
+	notice *slog.Logger
 	// logClose is the rotator behind the file destination, when one was
 	// configured. It is closed on shutdown so the last buffer flushes and
 	// Windows can delete a rotated file.
@@ -319,18 +486,72 @@ type startup struct {
 }
 
 func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar, sink *obs.Sink) (*startup, error) {
-	cfgSvc, err := spec.NewService(flags.configDir, flags.projectRoot)
+	// ★ The openheron root first: it is the base the other two are
+	//   measured from, and the config root's default lives inside it.
+	home, err := resolveOpenheronRoot(flags.openheronRoot)
 	if err != nil {
 		return nil, err
+	}
+	// ★ The default project root. Three sources, in this order: the flag,
+	//   the positional directory, and the default inside the openheron root.
+	//   The directory is the second one because `openheron .` is the way to
+	//   keep the old intuition — "the agent works where I started it" — and
+	//   that intuition is worth more than a flag's precedence.
+	projectRoot := flags.defaultProjectRoot
+	if projectRoot == "" {
+		projectRoot = flags.legacyProjectRoot
+		if projectRoot != "" {
+			log.Warn("[main] --project-root was renamed to --default-project-root; " +
+				"the old name still works, but it will go")
+		}
+	}
+	if projectRoot == "" && flags.scopeDir != "" {
+		projectRoot = flags.scopeDir
+	}
+	// ★ The service gets the logger so that the one fact the write path has
+	//   to report — the tier table being widened — lands in the log. A
+	//   package that cannot log reports it as a notice instead, and a
+	//   notice is read by a person looking at the answer, not by an
+	//   operator looking for what changed.
+	cfgSvc, err := spec.NewService(flags.configRoot, projectRoot,
+		spec.WithHome(home), spec.WithServiceLogger(log))
+	if err != nil {
+		return nil, err
+	}
+	// ★ The old environment variable names are reported here, once: the
+	//   service resolved them and cannot log them.
+	for _, d := range cfgSvc.Notices() {
+		log.Warn("[main] config notice", "notice", d)
+	}
+	// ★ The keyring is wired **here** and nowhere else. It is a global OS
+	//   resource — the Windows Credential Manager, the macOS Keychain, the
+	//   Linux Secret Service — so the one process that reads and writes it
+	//   asks for it by name. Everything else (a library user, a test) gets
+	//   no store at all and never reaches the developer's credentials.
+	cfgSvc.SetSecretStore(spec.KeyringStore())
+	// ★ The configuration is written on the first start, so a fresh clone
+	//   starts without a command in front of it.
+	//
+	//   ★ It has to happen **before** the skills directory is resolved: that
+	//     probe looks for the directory on disk, and a tree that was written
+	//     a moment ago is the one it has to find.
+	//
+	//   ★ The line about it goes to the console, not to the log file: the
+	//     file's destination is part of the configuration, and the
+	//     configuration is what this line is about.
+	if err := initConfigIfEmpty(cfgSvc, log); err != nil {
+		// ★ Not fatal: a configuration that is there but does not load is a
+		//   different thing, and the load below reports it in the way that
+		//   fits it.
+		log.Warn("[main] the configuration could not be initialized", "err", err)
 	}
 	// ★ The editor writes <config root>/skills/, and the runtime reads
 	//   whatever its own probe resolved. Tell the config layer where that is,
 	//   so a skill written into a directory nobody loads is refused instead
 	//   of saved in silence.
-	if dir, ok := build.ResolveSkillsDir(log); ok {
+	if dir, ok := build.ResolveSkillsDir(log, cfgSvc.Root()); ok {
 		cfgSvc.SetSkillsDir(dir)
 	}
-	warnUnusedHomeConfig(cfgSvc.Root(), log)
 
 	mgr := &agentConfig{}
 	// ★ The file destination is installed **once**, on the first configuration
@@ -357,7 +578,7 @@ func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar, sink
 	if err != nil {
 		return nil, configLoadError(cfgSvc, err)
 	}
-	cfg, _ := mgr.Current()
+	cfg := mgr.Current()
 	applyLogLevel(log, level, cfg)
 	// In case the reloader did not call back synchronously.
 	openLogFile(cfg)
@@ -368,21 +589,50 @@ func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar, sink
 	//   threshold that no configuration could close.
 	log.Info("[main] openheron", "version", version)
 	log.Info("[main] config root",
-		"root", cfgSvc.Root(), "projectRoot", cfgSvc.ProjectRoot())
+		"root", cfgSvc.Root(), "home", cfgSvc.Home(),
+		"projectRoot", cfgSvc.DefaultProjectRoot())
 
-	cfgDataDir, err := cfgSvc.DataDir(cfg.Server.DataDir)
+	// ★ The data directory: the configured value, else the environment. The
+	//   environment wins — it is the one that can change without an editor
+	//   restart — and it goes through the same resolution, so a relative
+	//   value lands in the openheron root like the configured one does.
+	dataDirValue := cfg.Server.DataDir
+	if env := strings.TrimSpace(os.Getenv(spec.DataDirEnv)); env != "" {
+		dataDirValue = env
+	} else if env := strings.TrimSpace(os.Getenv("DATA_DIR")); env != "" {
+		log.Warn("[main] the environment variable was renamed",
+			"old", "DATA_DIR", "new", spec.DataDirEnv)
+		dataDirValue = env
+	}
+	cfgDataDir, err := cfgSvc.DataDir(dataDirValue)
 	if err != nil {
 		return nil, err
 	}
+
+	addr := overrideEnv(log, listenAddrEnv, "LISTEN_ADDR", cfg.Server.ListenAddr)
+
+	// ★ The exposure note is **not** here. A listener beyond the loopback is
+	//   reachable by every machine on the network, and the tools this server
+	//   drives run shell commands — there is no token and no account, so the
+	//   address itself is the whole boundary, and saying so is what makes it
+	//   a decision instead of an accident.
+	//
+	// ★ It must not be a log record: the log's destination is configuration
+	//   (`log.file` with `log.console: false` takes the terminal away), and a
+	//   warning about being exposed is exactly the line a configuration must
+	//   not be able to hide. ⇒ It is a **notice**, said with the address once
+	//   the listener is up — see announceExposure.
 
 	return &startup{
 		cfgSvc:      cfgSvc,
 		mgr:         mgr,
 		reloader:    reloader,
 		cfg:         cfg,
-		addr:        override("LISTEN_ADDR", cfg.Server.ListenAddr),
-		dataDir:     override("DATA_DIR", cfgDataDir),
-		projectRoot: override("PROJECT_ROOT", cfgSvc.ProjectRoot()),
+		addr:        addr,
+		dataDir:     cfgDataDir,
+		home:        cfgSvc.Home(),
+		projectRoot: cfgSvc.DefaultProjectRoot(),
+		scopeDir:    flags.scopeDir,
 		logClose:    logClose,
 	}, nil
 }
@@ -401,19 +651,51 @@ func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 	}
 	st.fm = fm
 
+	// ★ The project registry: the table that says which sessions belong to
+	//   which project. ★ It lives in the **data directory** — the relation
+	//   changes, and the configuration is the user's to point anywhere.
+	reg, err := projects.Open(projects.Location(st.dataDir))
+	if err != nil {
+		return err
+	}
+	st.projects = reg
+	// ★ The scope: the project this process focuses on. ★ Naming a
+	//   directory is a statement, so the directory is registered — without a
+	//   registration the new sessions would have nowhere to belong.
+	scopeID := ""
+	if st.scopeDir != "" {
+		p, err := reg.Ensure(ctx, st.scopeDir)
+		if err != nil {
+			return err
+		}
+		scopeID = p.ID
+		log.Info("[main] the process focuses on one project", "id", p.ID, "root", p.Root)
+	}
+
 	// The filesystem tools take paths, and the agent has no other way to learn
 	// where the code lives. It arrives through WithPaths, not the spec.
+	//
+	// ★ There is no "a server's tool list changed" hook here any more: the
+	//   tool surface is part of the tree's identity, and the builder
+	//   compares the surface the servers offer now with the one the tree
+	//   was built from. ★ A separate way to announce a change would be a
+	//   second way to be wrong about it.
+	// ★ The round's project root is rendered in **one** place, and the two
+	//   readers share it: the prompt the root agent sees, and the block a
+	//   sub-agent is given. ★ Two renderings would be two answers, and the
+	//   model would pick the one that reads like a rule.
+	input := run.InputConfig{ProjectRoot: st.projectRoot, Workspace: sessionsRoot}
+
 	builder := build.NewBuilder(st.mgr,
 		build.WithPaths(st.projectRoot, st.dataDir),
-		build.WithConfigService(st.cfgSvc))
+		build.WithRoundBlock(input.RoundProjectRootBlock),
+		build.WithConfigService(st.cfgSvc),
+		// ★ Without this the builder's logger is obs.Discard(), and its
+		//   warnings go nowhere: the MCP servers' lifecycle, "the
+		//   configuration on disk does not load", and the skill that is not
+		//   in the skills directory.
+		build.WithLogger(st.log))
 	st.builder = builder
-
-	// ★ A server's tool list can change while the configuration stands
-	//   still, and the tools have to be rebuilt for it. The rebuild is the
-	//   same road a configuration change takes, so the generation moves
-	//   through the same hook the reloader uses — a second way to move it
-	//   would be a second way to be wrong about it.
-	builder.SetGenerationBump(st.mgr.bump)
 
 	// ★ The pre-warm: every server some agent mounts is started in the
 	//   background as soon as the configuration is known — so the first
@@ -427,13 +709,29 @@ func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 	rt := run.New(run.Config{
 		AgentBuilder:   builder,
 		SessionManager: fm,
-		Input:          run.InputConfig{ProjectRoot: st.projectRoot, Workspace: sessionsRoot},
+		Input:          input,
 		StartTimeout:   startTimeout(st.cfg),
 		// ★ The lease is the ownership rule: it says a run may hold the
 		//   session, and it expires when the holder stops making
 		//   progress. The turn slot alone cannot say that.
 		LeaseArbiter: memarbit.New(),
 		LeaseTTL:     leaseTTL(st.cfg),
+		// ★ The directory a session works in: the root of the project it
+		//   belongs to. ★ It is resolved **at the start of every round**, so
+		//   a project that moved between rounds is picked up by the next one
+		//   — and the round that is running keeps the root it began with.
+		ProjectRootFor: func(ctx context.Context, sessionID string) string {
+			root, err := reg.RootOf(ctx, sessionID)
+			if err != nil {
+				// ★ A table that cannot be read is not a reason to fail the
+				//   round: the session works in the default project root,
+				//   and the log says why.
+				log.Warn("[main] the project table could not be read; the session works in the default project root",
+					"session", sessionID, "err", err)
+				return ""
+			}
+			return root
+		},
 	})
 	fm.SetTeardown(rt)
 	st.rt = rt
@@ -448,11 +746,16 @@ func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 	}
 
 	st.srv = api.New(rt, fm, log, hserver.WithHostPorts(st.addr))
+	// ★ The guard goes on before the server registers its routes: hertz
+	//   wraps the handlers that come after a middleware, and a guard added
+	//   later is a guard that never runs.
+	st.srv.SetGuard(api.NewGuard(api.LoopbackOnly(st.addr)))
 	st.srv.SetConfigSource(func() *spec.Config {
-		c, _ := st.mgr.Current()
-		return c
+		return st.mgr.Current()
 	})
 	st.srv.SetConfigService(st.cfgSvc)
+	st.srv.SetProjectsRegistry(reg)
+	st.srv.SetProjectScope(scopeID)
 	st.srv.SetToolsSource(toolsAdapter{b: builder})
 	st.srv.SetMCPSource(mcpAdapter{b: builder})
 	st.srv.SetContextSource(contextsAdapter{b: builder})
@@ -461,17 +764,17 @@ func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 		st.srv.SetLogLevelSource(func() string { return obs.LevelName(st.level.Level()) })
 	}
 	st.srv.SetStartTimeoutSource(func() time.Duration {
-		c, _ := st.mgr.Current()
-		return startTimeout(c)
+		return startTimeout(st.mgr.Current())
 	})
 	st.srv.SetPoolSource(func() map[string]any {
-		hits, misses, size, gen := builder.Stats()
+		hits, misses, size := builder.Stats()
 		return map[string]any{
-			"hits": hits, "misses": misses, "size": size, "gen": gen,
+			"hits": hits, "misses": misses, "size": size,
+			"version": configVersion(st.mgr.Current()),
 		}
 	})
 	st.srv.SetSkillsSource(func() []api.SkillView {
-		list := build.Skills(context.Background(), st.log)
+		list := build.Skills(context.Background(), st.log, st.cfgSvc.Root())
 		out := make([]api.SkillView, 0, len(list))
 		for _, s := range list {
 			out = append(out, api.SkillView{
@@ -489,8 +792,10 @@ func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 }
 
 func inspectSessions(ctx context.Context, st *startup, log *slog.Logger) {
-	if h, m, size, gen := st.builder.Stats(); st.cfg.WatchEnabled() {
-		log.Info("[main] agent pool", "gen", gen, "entries", size, "hits", h, "misses", m)
+	if h, m, size := st.builder.Stats(); st.cfg.WatchEnabled() {
+		log.Info("[main] agent pool",
+			"version", configVersion(st.mgr.Current()),
+			"entries", size, "hits", h, "misses", m)
 	}
 
 	report, err := st.fm.Inspect(ctx)
@@ -513,7 +818,7 @@ func inspectSessions(ctx context.Context, st *startup, log *slog.Logger) {
 }
 
 func setupFrontend(st *startup, log *slog.Logger) error {
-	mode := override("FRONTEND_MODE", st.cfg.Server.FrontendMode)
+	mode := overrideEnv(log, frontendModeEnv, "FRONTEND_MODE", st.cfg.Server.FrontendMode)
 	assets, aerr := fs.Sub(webAssets, "web/dist")
 
 	switch mode {
@@ -527,9 +832,10 @@ func setupFrontend(st *startup, log *slog.Logger) error {
 		}
 		log.Info("[main] frontend: embedded from web/dist")
 	case "dir":
-		dir := st.cfgSvc.ResolveDir(override("STATIC_DIR", st.cfg.Server.StaticDir))
+		dir := st.cfgSvc.ResolveDir(overrideEnv(log, staticDirEnv, "STATIC_DIR", st.cfg.Server.StaticDir))
 		if dir == "" {
-			log.Warn("[main] frontend_mode=dir but static_dir is empty; set STATIC_DIR")
+			log.Warn("[main] frontend_mode=dir but static_dir is empty; set the environment variable",
+				"env", staticDirEnv)
 			return nil
 		}
 		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
@@ -551,9 +857,27 @@ func serve(ctx context.Context, st *startup, log *slog.Logger) error {
 		if st.logClose != nil {
 			_ = st.logClose.Close()
 		}
+		// ★ The registry holds the lock file open. ★ Windows will not delete
+		//   a file that is still open, so it has to go before the process
+		//   ends — otherwise the next start finds the table locked.
+		if st.projects != nil {
+			_ = st.projects.Close()
+		}
 	}()
 	errCh := make(chan error, 1)
 	go func() { errCh <- st.srv.Spin() }()
+
+	// ★ The address is announced once the listener is up: an address
+	//   printed before the server accepts connections is a promise, not a
+	//   fact. A server that failed to start has nothing to announce.
+	running, err := waitRunning(ctx, st.srv, errCh)
+	if err != nil {
+		return err
+	}
+	if running {
+		announceServing(st)
+		announceExposure(st)
+	}
 
 	select {
 	case err := <-errCh:
@@ -573,6 +897,93 @@ func serve(ctx context.Context, st *startup, log *slog.Logger) error {
 		}
 		return nil
 	}
+}
+
+// waitRunning waits until the server is listening.
+//
+// ★ It ends when the socket is bound, when the server fails to start, or
+//
+//	when the process is asked to stop — and it reports which of those it
+//	was, because the address is only worth announcing in the first case.
+func waitRunning(ctx context.Context, srv *api.Server, errCh <-chan error) (bool, error) {
+	for !srv.Running() {
+		select {
+		case err := <-errCh:
+			return false, err
+		case <-ctx.Done():
+			return false, nil
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	return true, nil
+}
+
+// announceServing tells the terminal where the service serves.
+//
+// ★ It is a notice, not a log record: the log's destination is configuration
+//
+//	(`log.file` with `log.console: false` takes the terminal away from every
+//	record), and the address is the one thing the person who started the
+//	process has to be able to read off the terminal.
+//
+// ★ The address is the configured one — the one the operator wrote down. A
+//
+//	port of 0 asks the operating system for a free port, and the line would
+//	then say `0`: `listen_addr` is a fixed port a person can type.
+func announceServing(st *startup) {
+	if st == nil || st.notice == nil {
+		return
+	}
+	st.notice.Info("[main] the server serves on", "url", serverURL(st.addr))
+}
+
+// announceExposure says what a listener beyond the loopback means.
+//
+// ★ It is a notice, for the same reason the address is one: the log's
+//
+//	destination is configuration, and a warning that says "anyone who can
+//	reach this port can drive the agent" must not be the thing the
+//	configuration hides. ★ The record is a **warning** and the notice
+//	channel does not filter it — the notice logger's own threshold is fixed
+//	at info, so the line survives `log_level: error` as well.
+//
+// ★ It is said **with** the address and not before it: the exposure is what
+//
+//	that address means, the two lines belong together, and both are facts
+//	only once the listener is up.
+//
+// ★ A listener on the loopback is not an exposure, and the line is silent
+//
+//	then: a warning about nothing is noise, and a warning that always
+//	appears is a warning nobody reads.
+func announceExposure(st *startup) {
+	if st == nil || st.notice == nil {
+		return
+	}
+	if api.LoopbackOnly(st.addr) {
+		return
+	}
+	st.notice.Warn("[main] the server listens beyond the loopback; "+
+		"anyone who can reach this port can drive the agent",
+		"addr", st.addr)
+}
+
+// serverURL renders the listen address as a URL.
+//
+// ★ ":8080" binds every interface, and "http://:8080" is not something a
+//
+//	browser opens: the loopback name is what a person means by "the server
+//	on this machine".
+func serverURL(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "http://" + addr
+	}
+	switch host {
+	case "", "0.0.0.0", "::":
+		host = "localhost"
+	}
+	return "http://" + net.JoinHostPort(host, port)
 }
 
 // contextsAdapter exposes the builder's context windows to the API layer.
@@ -673,14 +1084,15 @@ func (a toolsAdapter) RuntimeTools(agentID string) api.Observed {
 
 // agentConfig holds the configuration the process runs on.
 //
-// ★ The generation moves in exactly one place, and this is it: a server's
+// ★ The configuration **object** is the tree's identity: a reload
 //
-//	tool list can change while the configuration stands still, and the
-//	tools have to be rebuilt for it.
+//	publishes a new one, and the builder compares the object it holds
+//	with the one the tree was built from. ★ There is no generation
+//	counter here any more — a counter said "everything changed", and
+//	the pool's fingerprint says which agents a change reaches.
 type agentConfig struct {
 	mu  sync.RWMutex
 	cfg *spec.Config
-	gen uint64
 
 	// warm starts the mounted MCP servers in the background.
 	//
@@ -698,16 +1110,21 @@ func (c *agentConfig) setWarm(fn func(*spec.Config)) {
 	c.warm = fn
 }
 
-func (c *agentConfig) Current() (*spec.Config, uint64) {
+// Current returns the configuration the process runs on.
+//
+// ★ It is the whole answer, and that is the point: the tree is built
+//
+//	from the configuration the manager holds **now**, and a reload
+//	publishes a new one.
+func (c *agentConfig) Current() *spec.Config {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.cfg, c.gen
+	return c.cfg
 }
 
 func (c *agentConfig) set(cfg *spec.Config) {
 	c.mu.Lock()
 	c.cfg = cfg
-	c.gen++
 	warm := c.warm
 	c.mu.Unlock()
 	// ★ The pre-warm is outside the lock: it starts child processes, and
@@ -718,23 +1135,32 @@ func (c *agentConfig) set(cfg *spec.Config) {
 	}
 }
 
-// bump moves the generation without changing the configuration.
+// Publish accepts a configuration the builder read itself.
 //
-// ★ The generation moves in exactly one place, and this is it: a server's
+// ★ The builder reads the configuration again when the write path marked a
 //
-//	tool list can change while the configuration stands still, and the
-//	tools have to be rebuilt for it.
-func (c *agentConfig) bump() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.gen++
+//	change, and publishes it here — so that "the next turn uses it" is a
+//	promise rather than a race with the watcher's poll. ★ The tree moves
+//	with it: the pool's key is a fingerprint now, and the fingerprint is
+//	what says which agents the change reaches.
+func (c *agentConfig) Publish(cfg *spec.Config) {
+	c.set(cfg)
 }
 
-func override(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+// configVersion is the configuration's own version, and "" when there is
+// none.
+//
+// ★ It is the fingerprint of the configuration's **content**, so two
+//
+//	runs of the same configuration report the same version, and a
+//	reload that changed something reports a different one. ★ It says
+//	"which configuration" — the tree's identity is the object, and
+//	this is the object's name.
+func configVersion(cfg *spec.Config) string {
+	if cfg == nil {
+		return ""
 	}
-	return fallback
+	return cfg.Version
 }
 
 func short(v string) string {

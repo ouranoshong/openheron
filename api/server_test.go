@@ -195,8 +195,9 @@ type noopBuilder struct{}
 // models, so there are no windows.
 func (noopBuilder) Contexts() map[string]contract.AgentContext { return nil }
 
-func (noopBuilder) Build(context.Context, string, string, contract.TurnKind) (adk.TypedAgent[*schema.Message], error) {
-	return noopAgent{}, nil
+func (noopBuilder) Build(context.Context, string, string, contract.TurnKind, string) (
+	adk.TypedAgent[*schema.Message], string, error) {
+	return noopAgent{}, "", nil
 }
 
 // bufExtWriter captures SSE bytes; it stands in for the connection writer, which

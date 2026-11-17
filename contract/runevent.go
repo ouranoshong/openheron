@@ -33,6 +33,14 @@ const (
 	RunEventToolEnd
 	// RunEventToolResult carries the tool's output.
 	RunEventToolResult
+	// RunEventToolFailed says a tool call failed.
+	//
+	// ★ It is a **separate** event, not a flag on the tool result: the
+	//   upstream's tool result frame carries the content and nothing else,
+	//   and the content says what the **model** read — not what happened to
+	//   the call. ★ The call id rides along, so the failure can be joined
+	//   with the call it belongs to.
+	RunEventToolFailed
 	// RunEventAnnounce publishes a message that produced no visible delta.
 	RunEventAnnounce
 	// RunEventCompaction reports that the context was compacted.
@@ -41,6 +49,38 @@ const (
 	RunEventContextUsage
 	// RunEventInterrupt reports the approvals the run is waiting for.
 	RunEventInterrupt
+	// RunEventApprovalPending says an approval is waiting for an answer.
+	//
+	// ★ It is a **session** fact, for the same reason the answer is: the
+	//   approval belongs to the session, and the run that raised it is over
+	//   by the time anybody can answer it.
+	//
+	// ★ It carries the card's **data**, not just the fact that there is
+	//   one. A surface that was not watching that run has no stream of its
+	//   own, so the card's contents exist nowhere else for it: the scan
+	//   (GET /v2/sessions/{id}/messages) is the truth, but the scan is a
+	//   round trip, and the surface has nothing to show in the meantime.
+	//
+	// ★ The data is the shape the session **persists** — the same
+	//   PendingInterrupt the scan answers with — so the two surfaces cannot
+	//   drift apart: there is one card, not two renderings of it.
+	RunEventApprovalPending
+	// RunEventApprovalResolved says the approval was answered.
+	//
+	// ★ It is a **session** fact, not a run's: the approval belongs to the
+	//   session, and the run that answered it is a *different* run. A
+	//   surface that is not watching that run still has to learn that the
+	//   card it holds is no longer answerable — otherwise it sits on a
+	//   question that was already answered, and every answer it offers is
+	//   refused.
+	RunEventApprovalResolved
+	// RunEventRunStarted says a new run owns the session.
+	//
+	// ★ It is what lets a surface that missed the start follow the round:
+	//   the run's own stream belongs to the surface that asked, and a
+	//   surface that was not there when the round began has no stream at
+	//   all.
+	RunEventRunStarted
 	// RunEventRetry reports that the provider is retrying.
 	RunEventRetry
 	// RunEventError reports that the run failed.
@@ -80,11 +120,20 @@ type RunEvent struct {
 	Usage ContextUsage
 	// Interrupts is set on RunEventInterrupt.
 	Interrupts []Interrupt
-	// Pending is set on RunEventInterrupt: the same interrupts in the shape
-	// the session persists.
+	// Pending is set on RunEventInterrupt and on RunEventApprovalPending:
+	// the same interrupts in the shape the session persists.
 	Pending []PendingInterrupt
 	// Code is the failure's code, on RunEventError.
 	Code string
+	// InterruptID names the approval the event is about, on
+	// RunEventApprovalResolved.
+	InterruptID string
+	// Approved carries the decision, on RunEventApprovalResolved.
+	Approved bool
+	// Reason carries the user's reason, on RunEventApprovalResolved.
+	Reason string
+	// TurnKind says what kind of turn a RunEventRunStarted announces.
+	TurnKind TurnKind
 }
 
 // Interrupt is one approval request, in openheron's own shape.

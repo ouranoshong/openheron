@@ -173,7 +173,7 @@ func TestTheScopeReachesTheSkillToolDescription(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fsx.New: %v", err)
 	}
-	mw, err := skillChain(context.Background(), backend, nil, skillScopeOf(scopeOfNames("alpha")), nil)
+	mw, err := skillChain(context.Background(), backend, nil, skillScopeOf(scopeOfNames("alpha")), nil, "")
 	if err != nil {
 		t.Fatalf("skillChain: %v", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ouranoshong/openheron/agentkit/spec"
 	"github.com/ouranoshong/openheron/llm/common"
 )
 
@@ -21,9 +22,14 @@ func ConfigFromEnv() (*common.Config, error) {
 	c := &common.Config{
 		ProviderID: providerID,
 		BaseURL:    firstEnv("OPENAI_BASE_URL", "ARK_BASE_URL"),
-		APIKey:     firstEnv("OPENAI_API_KEY", "ARK_API_KEY"),
-		Model:      firstEnv("OPENAI_MODEL", "OPENAI_MODEL_ID", "ARK_MODEL", "ARK_MODEL_ID"),
-		Timeout:    5 * time.Minute,
+		// ★ The **derived** name comes first: the provider's id is what the
+		//   configuration tree would have called it, and a key that lives
+		//   under one name in the tree and another here is two names for
+		//   one fact. The old names stay as fallbacks — this path has no
+		//   configuration file at all, and it is the path a container takes.
+		APIKey:  firstEnv(spec.LLMEnvName(providerID), "OPENAI_API_KEY", "ARK_API_KEY"),
+		Model:   firstEnv("OPENAI_MODEL", "OPENAI_MODEL_ID", "ARK_MODEL", "ARK_MODEL_ID"),
+		Timeout: 5 * time.Minute,
 	}
 
 	if c.BaseURL == "" {

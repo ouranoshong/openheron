@@ -3,9 +3,33 @@ import { formatPercent, formatTokens } from "@/lib/agents"
 import type { AgentBadge } from "@/lib/agent-info"
 import type { ContextUsage } from "@/lib/types"
 import { Loader2Icon } from "lucide-react"
+import type { ReactNode } from "react"
 
 const META =
-  "text-muted-foreground mx-auto mt-1.5 flex min-h-4 w-full max-w-[var(--chat-column)] flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[11px]"
+  "text-muted-foreground mx-auto mt-1.5 flex min-h-4 w-full max-w-[var(--chat-column)] flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[11px] max-sm:gap-y-1"
+
+// ★ Joined is a separator and the item it introduces, as **one unit**.
+//
+// ★ A separator that is a flex item of its own lands wherever the wrapping
+//   puts it: a line that ends with "·" reads as a dangling mark, and a line
+//   that begins with one reads as a continuation of the line above. Bundling
+//   the two means they wrap together — the separator never falls behind the
+//   item it belongs to.
+//
+// ★ The unit does not shrink: an item that squeezes itself to fit the line
+//   beside it is read as "deepsee…", and a name that is cut in half says
+//   less than a name on the next line. ⇒ The unit wraps instead, and it
+//   truncates only when the name is longer than the whole row.
+function Joined({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex min-w-0 max-w-full shrink-0 items-center gap-1">
+      <span aria-hidden="true" className="shrink-0">
+        ·
+      </span>
+      {children}
+    </span>
+  )
+}
 
 export function ComposerMeta({
   badge,
@@ -14,6 +38,7 @@ export function ComposerMeta({
   context,
   notice,
   busy,
+  action,
 }: {
   badge: AgentBadge | null
   loading: boolean
@@ -24,11 +49,21 @@ export function ComposerMeta({
   // busy says the session has a live turn that this surface does not own —
   // another tab, another window, another client. It is not a failure.
   busy?: boolean
+  // action is an entry that belongs **on this line**: the line under the
+  // input box is where the things about the next conversation live.
+  action?: ReactNode
 }) {
   // The notice says the server is working on something. It is not an error,
   // and it does not replace anything — the rest of the line still stands.
+  //
+  // ★ On a narrow screen it takes a row of its own: a state sentence and the
+  //   facts beside it are two different readings, and sharing a line makes
+  //   both of them harder.
   const noticeNode = notice ? (
-    <span data-testid="composer-meta-notice" className="inline-flex items-center gap-1.5">
+    <span
+      data-testid="composer-meta-notice"
+      className="inline-flex max-sm:basis-full items-center gap-1.5"
+    >
       <Loader2Icon aria-hidden="true" className="size-3 shrink-0 animate-spin" />
       {notice}
     </span>
@@ -38,37 +73,85 @@ export function ComposerMeta({
   // the session's turn, whoever owns it — that is the only way for this
   // surface to proceed.
   const busyNode = busy ? (
-    <span data-testid="composer-meta-busy" className="inline-flex items-center gap-1.5">
+    <span
+      data-testid="composer-meta-busy"
+      className="inline-flex max-sm:basis-full items-center gap-1.5"
+    >
       <Loader2Icon aria-hidden="true" className="size-3 shrink-0 animate-spin" />
       This session is running in another window — stop it to take over
     </span>
   ) : null
 
+  // ★ The line's own content changes **shape** with the agent's state — a
+  //   skeleton, an error, the badge. ★ The action is rendered beside it, and
+  //   it must not move when the shape changes: React reconciles children by
+  //   index, so an action that shifts because a sibling appeared before it
+  //   is an action that is unmounted and mounted again — and a dialog that
+  //   lives in it closes when it is.
+  //
+  //   ⇒ The content goes into one wrapper and the action sits beside it, so
+  //   the action's index never changes.
+  let body: ReactNode
   if (loading && !badge) {
-    return (
-      <div data-testid="composer-meta" aria-hidden="true" className={META}>
+    body = (
+      <div aria-hidden="true">
         <Skeleton className="h-3 w-56" />
       </div>
     )
-  }
-
-  if (!badge) {
-    return (
-      <div data-testid="composer-meta" className={META}>
+  } else if (!badge) {
+    body = (
+      <>
         {noticeNode}
         {busyNode}
         <span data-testid="composer-meta-error" title={error}>
           Agent info unavailable
         </span>
-      </div>
+      </>
+    )
+  } else {
+    const model = `${badge.provider}/${badge.model}`
+    const reasoningTitle =
+      badge.reasoningAvailable.length > 0
+        ? `Reasoning: ${badge.reasoning}\nAvailable: ${badge.reasoningAvailable.join(", ")}`
+        : `Reasoning: ${badge.reasoning}`
+
+    body = (
+      <>
+        {noticeNode}
+        {busyNode}
+        <span
+          data-testid="composer-meta-agent"
+          title={badge.description || badge.id}
+          className="max-w-[min(12rem,100%)] shrink-0 truncate"
+        >
+          Agent: {badge.id}
+        </span>
+        <Joined>
+          <span
+            data-testid="composer-meta-model"
+            title={model}
+            className="min-w-0 max-w-[min(24rem,100%)] truncate"
+          >
+            {model}
+          </span>
+        </Joined>
+        <Joined>
+          <span
+            data-testid="composer-meta-reasoning"
+            title={reasoningTitle}
+            className="min-w-0 max-w-[min(12rem,100%)] truncate"
+          >
+            Reasoning: {badge.reasoning}
+          </span>
+        </Joined>
+        {context ? (
+          <Joined>
+            <ContextMeter usage={context} />
+          </Joined>
+        ) : null}
+      </>
     )
   }
-
-  const model = `${badge.provider}/${badge.model}`
-  const reasoningTitle =
-    badge.reasoningAvailable.length > 0
-      ? `Reasoning: ${badge.reasoning}\nAvailable: ${badge.reasoningAvailable.join(", ")}`
-      : `Reasoning: ${badge.reasoning}`
 
   return (
     <div
@@ -76,39 +159,11 @@ export function ComposerMeta({
       aria-label="Current agent configuration"
       className={META}
     >
-      {noticeNode}
-      {busyNode}
-      <span
-        data-testid="composer-meta-agent"
-        title={badge.description || badge.id}
-        className="max-w-48 min-w-0 truncate"
-      >
-        Agent: {badge.id}
-      </span>
-      <span aria-hidden="true" className="shrink-0">
-        ·
-      </span>
-      <span data-testid="composer-meta-model" title={model} className="min-w-0 truncate">
-        {model}
-      </span>
-      <span aria-hidden="true" className="shrink-0">
-        ·
-      </span>
-      <span
-        data-testid="composer-meta-reasoning"
-        title={reasoningTitle}
-        className="min-w-0 truncate"
-      >
-        Reasoning: {badge.reasoning}
-      </span>
-      {context ? (
-        <>
-          <span aria-hidden="true" className="shrink-0">
-            ·
-          </span>
-          <ContextMeter usage={context} />
-        </>
-      ) : null}
+      {/* ★ `contents` puts the line's own children back into the flex row:
+          the wrapper has no box of its own, so the gaps and the wrapping are
+          the row's. */}
+      <div className="contents">{body}</div>
+      {action}
     </div>
   )
 }
@@ -149,9 +204,9 @@ function ContextMeter({ usage }: { usage: ContextUsage }) {
     <span
       data-testid="composer-meta-context"
       title={lines.join("\n")}
-      className="inline-flex min-w-0 items-center gap-1.5"
+      className="inline-flex min-w-0 max-w-full items-center gap-1.5"
     >
-      <span className="truncate tabular-nums">{label}</span>
+      <span className="min-w-0 max-w-[min(24rem,100%)] truncate tabular-nums">{label}</span>
       {known ? (
         <span
           aria-hidden="true"

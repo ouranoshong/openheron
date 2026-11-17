@@ -23,9 +23,20 @@ import (
 )
 
 type snapshot struct {
-	gen uint64
+	// ★ The tree's identity: the configuration it was derived from, and
+	// ★ the tool surface the MCP servers offered at that moment.
+	//
+	// ★ A new configuration **object** is a new tree — that is what a
+	//   reload publishes, and what the write path publishes. ★ A surface
+	//   that moved is a new tree too: the tool set is built once, and a
+	//   server that comes up offers tools the tree does not have yet.
+	//
+	// ★ There is no counter here any more. ★ A counter said "everything
+	//   changed"; these two say "**this** changed", and the pool's key
+	//   (the fingerprint) says the same thing per agent.
+	cfg     *spec.Config
+	surface string
 
-	cfg                  *spec.Config
 	svc                  *spec.Service
 	projectRoot, dataDir string
 	log                  *slog.Logger
@@ -34,15 +45,40 @@ type snapshot struct {
 	tables               map[string]*Table
 	models               modelFactory
 	tools                *toolRegistry
-	heavyOnce            sync.Once
-	heavy                heavyDeps
-	heavyErr             error
+	// mcp owns the MCP clients. ★ It outlives the snapshot — a client owns
+	//   a child process — and the dependency walk asks it what the servers
+	//   offer right now.
+	mcp       *mcpManager
+	heavyOnce sync.Once
+	heavy     heavyDeps
+	heavyErr  error
+
+	// skillsDir is where the runtime reads skills from.
+	//
+	// ★ It is resolved **once** per snapshot: the dependency walk hashes
+	//   the skill files and the filesystem backend reads them, and two
+	//   resolutions could be two answers.
+	skillsDir string
+	// deps is what each agent depends on, by the file that carries it.
+	//
+	// ★ It is the tree's **identity**: two agents with the same
+	//   fingerprint are the same agent, whatever the rest of the
+	//   configuration did. ★ And it is the answer to "who depends on this
+	//   file" — see impact.go.
+	deps map[string]agentDeps
 }
 
 type heavyDeps struct {
 	backend fsapi.Backend
-	shell   shell.Shell
-	tools   []tool.BaseTool
+	// local is the concrete backend behind `backend`.
+	//
+	// ★ It is kept because the trusted authorization mode asks the
+	//   filesystem itself whether a path lands inside a directory — the
+	//   write boundary is the backend's own, and a second implementation
+	//   of it would be a second answer.
+	local *fsx.Local
+	shell shell.Shell
+	tools []tool.BaseTool
 }
 
 func (s *snapshot) heavyDepsOf(ctx context.Context) (heavyDeps, error) {
@@ -58,8 +94,8 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 	// The session workspace (uploads) and the skills directory may live outside the
 	// project root; everything else is off limits.
 	roots := []string{s.dataDir}
-	if dir, ok := ResolveSkillsDir(s.log); ok {
-		roots = append(roots, dir)
+	if s.skillsDir != "" {
+		roots = append(roots, s.skillsDir)
 	}
 
 	// ★ The shell is decided **once**, here: the execute tool's description
@@ -74,11 +110,16 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 		ExtraRoots:   roots,
 		Shell:        sh.Command(),
 		ShellPathDir: sh.Dir,
+		// ★ The writes that land inside the configuration root go through
+		//   the configuration service: a configuration file is written with
+		//   the checks the editor uses (see configgate.go).
+		ConfigGate: newConfigGate(s.svc),
 	})
 	if err != nil {
 		return out, fmt.Errorf("build filesystem backend: %w", err)
 	}
 	out.backend = local
+	out.local = local
 	out.shell = sh
 
 	// ★ The search engine is decided with the backend, and it is worth a
@@ -89,6 +130,9 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 	tools, err := s.tools.Build(ctx, toolEnv{
 		cfg:         s.cfg,
 		svc:         s.svc,
+		deps:        s.deps,
+		mcp:         s.mcp,
+		skillsDir:   s.skillsDir,
 		projectRoot: s.projectRoot,
 		dataDir:     s.dataDir,
 		log:         s.log,
@@ -108,11 +152,11 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 	return out, nil
 }
 
-func newSnapshot(gen uint64, cfg *spec.Config, svc *spec.Service,
+func newSnapshot(cfg *spec.Config, surface string, svc *spec.Service, mcp *mcpManager,
 	projectRoot, dataDir string, models modelFactory,
 	tools *toolRegistry, log *slog.Logger, track func(io.Closer)) (*snapshot, error) {
 
-	sp, err := specOf(cfg, projectRoot)
+	sp, err := specOf(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -126,11 +170,23 @@ func newSnapshot(gen uint64, cfg *spec.Config, svc *spec.Service,
 		tools = defaultToolRegistry(nil)
 	}
 	tables := tablesOf(sp)
+	// ★ The skills directory is resolved **once** per snapshot: the
+	//   dependency walk hashes the skill files, and the filesystem backend
+	//   reads them, and two resolutions could be two answers.
+	//
+	//   ★ The configuration root is part of the question: the skills live
+	//     inside the configuration tree, and a configuration root the editor
+	//     does not write into is a configuration root nobody reads.
+	configRoot := ""
+	if svc != nil {
+		configRoot = svc.Root()
+	}
+	skillsDir, _ := ResolveSkillsDir(log, configRoot)
 	return &snapshot{
 		log:         log,
 		track:       track,
-		gen:         gen,
 		cfg:         cfg,
+		surface:     surface,
 		svc:         svc,
 		projectRoot: projectRoot,
 		dataDir:     dataDir,
@@ -138,21 +194,59 @@ func newSnapshot(gen uint64, cfg *spec.Config, svc *spec.Service,
 		tables:      tables,
 		models:      models,
 		tools:       tools,
+		mcp:         mcp,
+		skillsDir:   skillsDir,
+		deps:        computeDeps(cfg, svc, skillsDir, mcp),
 	}, nil
 }
 
-func (b *Builder) snapshotFor(cfg *spec.Config, gen uint64) (*snapshot, error) {
+// snapshotFor returns the tree the process runs on.
+//
+// ★ The tree is built from the configuration the manager holds **now**, and
+//
+//	from the tool surface the MCP servers offer right now. ★ Those two are
+//	its identity: a reload publishes a new configuration, and a server
+//	that comes up changes the surface.
+//
+// ★ The configuration is read **inside the lock**, so the order of the
+//
+//	reads is the order of the builds: a caller that arrived late with an
+//	older configuration cannot put an older tree back. ★ That is what the
+//	generation used to guarantee — and it guaranteed it with a counter
+//	that said "everything changed", where this says "**this** changed".
+//
+// ★ The snapshot is heavier than the agents: it owns the filesystem
+//
+//	backend and the tool set. ★ The agents themselves are pooled by
+//	**fingerprint**, so a snapshot that moves does not rebuild the agents
+//	whose inputs did not change.
+func (b *Builder) snapshotFor() (*snapshot, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.snap != nil && b.snap.gen >= gen {
+	cfg := b.mgr.Current()
+	surface := b.mcp.surfaceHash(cfg)
+	if b.snap != nil && b.snap.cfg == cfg && b.snap.surface == surface {
 		return b.snap, nil
 	}
-	snap, err := newSnapshot(gen, cfg, b.svc, b.projectRoot, b.dataDir, b.models, b.tools, b.log, b.track)
+	snap, err := newSnapshot(cfg, surface, b.svc, b.mcp, b.projectRoot, b.dataDir,
+		b.models, b.tools, b.log, b.track)
 	if err != nil {
 		return nil, err
 	}
 	b.snap = snap
 	return snap, nil
+}
+
+// fingerprintOf returns the agent's fingerprint, and "" when it has none.
+//
+// ★ An agent that is not in the dependency map has no fingerprint — and the
+//
+//	pool then keys it by the empty string, which is a key like any other.
+func (s *snapshot) fingerprintOf(name string) string {
+	if d, ok := s.deps[name]; ok {
+		return d.fingerprint
+	}
+	return ""
 }
 
 func resolveModel(ctx context.Context, snap *snapshot, sp decl.SubAgentSpec,
@@ -192,8 +286,10 @@ func buildModel(ctx context.Context, log *slog.Logger, requestDump bool) (model.
 	if err != nil {
 		return nil, err
 	}
-	return common.AttachRequestOptions(cm, common.RequestOptions{
+	// ★ The same call guard as the configured path: the cut is the
+	//   model's, not the provider file's.
+	return newCallGuardModel(common.AttachRequestOptions(cm, common.RequestOptions{
 		Model:  mc.Model,
 		Fields: mc.ExtraFields,
-	}, "", ""), nil
+	}, "", "")), nil
 }

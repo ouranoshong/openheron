@@ -74,7 +74,11 @@ func (i *FileIndexer) Store(ctx context.Context, docs []*schema.Document, opts .
 	if err != nil {
 		return nil, err
 	}
-	res, err := i.Reconcile(ctx, ReconcileRequest{Fresh: fresh}, options.Embedding)
+	// ★ The scope is the documents this call stores. Without it the merge
+	//   would read an empty scope as "this call owns the whole catalog" and
+	//   drop everything it was not asked to store — a store call that
+	//   removes the index is not what "store these" means.
+	res, err := i.Reconcile(ctx, ReconcileRequest{Fresh: fresh, Scope: pathsOf(fresh)}, options.Embedding)
 	if err != nil {
 		return nil, err
 	}

@@ -3,14 +3,17 @@ package spec
 import (
 	"errors"
 	"fmt"
-	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"io"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
+	"github.com/ouranoshong/openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"gopkg.in/yaml.v3"
 )
 
@@ -127,8 +130,41 @@ func hotDirList() []string {
 
 const DefaultAgentID = "main"
 
-const ConfigDirEnv = "OPENHERON_CONFIG_DIR"
+// ★ The environment variables that name the roots.
+//
+//	Every one of them carries the OPENHERON_ prefix. ★ A bare name like
+//	LISTEN_ADDR or DATA_DIR is a name any other tool in the environment may
+//	also set, and a variable somebody else owns is a variable that can
+//	change this process's behaviour without anybody meaning to.
+//
+// ★ The previous names still work, and the old one is reported: a variable
+//
+//	that quietly stops working is the hardest kind of mistake to find.
+const (
+	// RootEnv names the openheron root — the user-level base directory the
+	// configuration, the state and the log file live under.
+	RootEnv = "OPENHERON_ROOT"
+	// ConfigRootEnv names the config root.
+	ConfigRootEnv = "OPENHERON_CONFIG_ROOT"
+	// ConfigDirEnv is the previous name of ConfigRootEnv.
+	ConfigDirEnv = "OPENHERON_CONFIG_DIR"
+	// DefaultProjectRootEnv names the default project root: where a session
+	// that belongs to no project does its work.
+	DefaultProjectRootEnv = "OPENHERON_DEFAULT_PROJECT_ROOT"
+	// ProjectRootEnv is the previous name of DefaultProjectRootEnv.
+	ProjectRootEnv = "PROJECT_ROOT"
+	// DataDirEnv names the data directory.
+	DataDirEnv = "OPENHERON_DATA_DIR"
+)
 
+// DefaultConfigDirName is the config root's own name inside the openheron root.
+const DefaultConfigDirName = "configs"
+
+// DefaultProjectsDirName is the directory that holds the project roots.
+const DefaultProjectsDirName = "projects"
+
+// DefaultBaseDirName is the name of the config tree that lives inside a
+// project directory — the layout that predates the openheron root.
 const DefaultBaseDirName = ".openheron"
 
 type Config struct {
@@ -162,6 +198,29 @@ type Config struct {
 	//   builder says it when a session asks for that agent, and the write
 	//   gate says it when a change would take the agent out.
 	leftOut map[string]string
+
+	// secrets resolves the keys the configuration refers to.
+	//
+	// ★ It is a field because the keyring is a **global OS resource**: a
+	//
+	//	test has to be able to hand the loader a fake one. A package
+	//	variable would be shared by every tree in the process, and a test
+	//	that replaced it would race every other test that loads a tree.
+	secrets *secretResolver
+}
+
+// resolver returns the resolver this configuration reads its keys through.
+//
+// ★ A configuration built by hand (the tests do that) has no resolver of
+//
+//	its own, and gets the **null** one: no store wired means no keyring
+//	is reached. The tree that has a store — the server's, the one a test
+//	installs — carries it.
+func (c *Config) resolver() *secretResolver {
+	if c == nil || c.secrets == nil {
+		return nullResolver
+	}
+	return c.secrets
 }
 
 // LeftOut returns the agents that were left out of the tree, and why.
@@ -259,9 +318,38 @@ func (c *Config) deferFile(path, format string, args ...any) {
 }
 
 type Service struct {
+	// mu guards the marks: the write path marks from one goroutine and
+	// the builder drains from another.
+	mu          sync.Mutex
 	root        string
 	projectRoot string
 	defaulted   bool
+
+	// home is the **openheron root**: the user-level base directory the
+	// configuration, the state and the log file live under.
+	//
+	// ★ It is empty when nobody named it — no option and no environment
+	//   variable. ★ That is not a gap: a service that was never told about
+	//   the openheron root keeps the old layout, where the config root is
+	//   also the base of the relative paths. A library caller must not find
+	//   a directory appearing in the user's home because it opened a
+	//   configuration.
+	home string
+
+	// notices are the things the caller should report.
+	//
+	// ★ The old environment variable names land here rather than in a log:
+	//   the service has no logger, and a line that names the variable that
+	//   still works is worth one line in the caller's log.
+	notices []string
+
+	// log is the logger the write path says one thing through: the tier
+	// table being widened is not refused, it is **reported** — and a fact
+	// that is only reported has to have somewhere to go.
+	//
+	// ★ It is nil by default, and the write path then stays quiet: a
+	//   library caller that wired no logger gets no lines.
+	log *slog.Logger
 
 	// skillsDir is the directory the **runtime** reads skills from, as
 	// resolved by `agentkit/build` — see `SetSkillsDir`.
@@ -272,6 +360,137 @@ type Service struct {
 	//   a second copy of it in this package would be a second answer to
 	//   "which skills are loaded". Empty means "the runtime found none".
 	skillsDir string
+
+	// marked are the configuration files that changed since the last drain.
+	//
+	// ★ The mark is a **cache, not the truth**: the truth is the content
+	//   hash on disk (see reload.go). ★ It exists so that the next turn
+	//   sees a change without waiting for the watcher's next poll — the
+	//   write path knows what it wrote, and the poll only guesses.
+	//
+	// ★ It is in-process on purpose: a mark that had to survive a restart
+	//   would be a fact about the past, and the past is what the content
+	//   hash is for.
+	marked map[string]bool
+
+	// secrets resolves the keys. Nil means no store is wired, so the tree
+	// resolves through the null resolver and never reaches a keyring.
+	//
+	// ★ It belongs to the **service** and not to the tree, because the
+	//   service is the thing that outlives a reload: a tree is built again
+	//   on every change, and a store that had to be handed to each of them
+	//   would be a store that could be forgotten between two of them.
+	secrets *secretResolver
+}
+
+// SetSecretStore replaces where the secrets are read from and written to.
+//
+// ★ It exists so that a test — or an embedding process — can hand the
+//
+//	configuration a store of its own. ★ And so that the **keyring** is
+//	reached only where somebody asked for it: the default is no store at
+//	all, because the keyring is a global OS resource, and a test that
+//	wrote to it would leave entries in the developer's own credential
+//	store, under a name nobody would remember to delete.
+func (s *Service) SetSecretStore(store SecretStore) {
+	if s == nil {
+		return
+	}
+	if store == nil {
+		s.secrets = nil
+		return
+	}
+	s.secrets = &secretResolver{store: store}
+}
+
+// SecretStore returns the store the secrets live in.
+//
+// ★ Nil means **no store is wired**, and the caller turns that into a 503
+//
+//	rather than pretending the tree is empty. The interface, not the
+//	resolver: a caller that wants to write a secret wants the store, and
+//	the resolver's chain is the loader's business.
+func (s *Service) SecretStore() SecretStore {
+	if s == nil || s.secrets == nil {
+		return nil
+	}
+	return s.secrets.store
+}
+
+// MarkSecret records that a secret changed, so the next turn resolves it again.
+//
+// ★ The key is not in the configuration tree, so the tree's fingerprint does
+//
+//	not change when it does — the watcher's poll would never notice, and
+//	"the next turn uses it" would be a hope instead of a promise.
+//
+// ★ It marks the file that **names** the entity: the provider's profile or
+//
+//	the server's file. That file did not change, but the tree it stands for
+//	did, and that is what the mark means.
+func (s *Service) MarkSecret(group, name string) {
+	if s == nil || name == "" {
+		return
+	}
+	rel := DirLLM + "/" + name + ".yaml"
+	if group == SecretGroupMCP {
+		rel = DirMCP + "/" + name + ".yaml"
+	}
+	s.Mark(rel)
+}
+
+// Mark records that a configuration file changed.
+//
+// ★ The mark says "look again", not "this is the new content": the content
+//
+//	hash is what says what the file says now.
+func (s *Service) Mark(rel string) {
+	if s == nil || rel == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.marked == nil {
+		s.marked = map[string]bool{}
+	}
+	s.marked[rel] = true
+}
+
+// Marks returns the files that changed since the last drain, sorted.
+func (s *Service) Marks() []string {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.marked))
+	for rel := range s.marked {
+		out = append(out, rel)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// DrainMarks returns the files that changed and forgets them.
+//
+// ★ The drain happens **after** the caller has read the configuration
+//
+//	again: a mark that is dropped before the read would lose the change,
+//	and the next turn would run the old configuration with no trace that
+//	it ever moved.
+func (s *Service) DrainMarks() []string {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.marked))
+	for rel := range s.marked {
+		out = append(out, rel)
+	}
+	s.marked = nil
+	sort.Strings(out)
+	return out
 }
 
 // SetSkillsDir tells the service where the runtime actually reads skills.
@@ -289,6 +508,21 @@ func (s *Service) SetSkillsDir(dir string) {
 		}
 	}
 	s.skillsDir = dir
+}
+
+// SkillsDir returns the directory the runtime reads skills from.
+//
+// ★ It is the editor's question too: a skill written into a directory
+//
+//	nobody loads is a silent degradation, and the service refuses that
+//	write. ★ So the answer has to be readable from outside — the rule
+//	itself lives in build.ResolveSkillsDir, and the service only carries
+//	what it was told.
+func (s *Service) SkillsDir() string {
+	if s == nil {
+		return ""
+	}
+	return s.skillsDir
 }
 
 // skillsElsewhere reports the runtime's skills directory when it is not the
@@ -324,57 +558,279 @@ func samePath(a, b string) bool {
 	return aa == bb
 }
 
-// NewService resolves the configuration root and the project root.
+// ServiceOption configures a service before its roots are resolved.
+type ServiceOption func(*Service)
+
+// WithHome names the openheron root.
 //
-// The configuration root is resolved in exactly three steps, in this order:
+// ★ It is the user-level base directory: the config root, the data directory
+//
+//	and the log file live under it. ★ It is an option and not an argument
+//	because the home is a **base**, not a root the service owns — the config
+//	root may point anywhere, and the home is what the relative paths are
+//	measured from.
+func WithHome(home string) ServiceOption {
+	return func(s *Service) {
+		if s != nil {
+			s.home = strings.TrimSpace(home)
+		}
+	}
+}
+
+// WithServiceLogger sets the logger the service writes through.
+//
+// ★ It is a logger, not a notice sink: the notices are the things the
+//
+//	caller must **report to the user**, and they travel in the answer.
+//
+// A line in the log is for the operator, and the one the write path
+//
+//	needs is the tier table being widened — a fact nobody asked for and
+//	nobody can unsee afterwards.
+//
+// ★ The name says which one it is: the package already has a WithLogger
+//
+//	for the reloader's own logger, and two of them in one package would
+//	be one name for two things.
+func WithServiceLogger(log *slog.Logger) ServiceOption {
+	return func(s *Service) {
+		if s != nil {
+			s.log = log
+		}
+	}
+}
+
+// logger is the service's logger, or the one that drops everything.
+//
+// ★ A package that needs to log takes a logger and defaults it to
+//
+//	obs.Discard() — it does not reach for a package-level variable, and
+//	neither does this one.
+func (s *Service) logger() *slog.Logger {
+	if s == nil || s.log == nil {
+		return obs.Discard()
+	}
+	return s.log
+}
+
+// NewService resolves the configuration root, the openheron root and the
+// default project root.
+//
+// ★ The **openheron root** is the user-level base directory: the config root,
+//
+//	the data directory and the log file live under it, and it is the one
+//	root that does not move when the configuration moves. It is named by
+//	`WithHome`, else by $OPENHERON_ROOT; when neither names it the service
+//	keeps the old layout — the config root is also the base of the relative
+//	paths — so a caller that never heard of the openheron root is not
+//	surprised by a directory appearing in the user's home.
+//
+// ★ The **config root** is resolved in exactly three steps, in this order:
 //
 //  1. root, when it is not empty
-//  2. $OPENHERON_CONFIG_DIR, when it is set
-//  3. <projectRoot>/.openheron, created when it does not exist yet
+//  2. $OPENHERON_CONFIG_ROOT, else its previous name $OPENHERON_CONFIG_DIR
+//  3. <openheron root>/configs, created when it does not exist yet
 //
 // There is deliberately no upward search for an ancestor's .openheron/.
 // Probing made the effective configuration root depend on the working
 // directory, so the same command read a different configuration depending on
 // where it happened to be started — the classic way a test run ends up
 // writing into the developer's own session history.
-func NewService(root, projectRoot string) (*Service, error) {
-	if projectRoot == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("config: resolve working directory: %w", err)
+//
+// ★ The **default project root** is where a session that belongs to no
+//
+//	project does its work. It is resolved in the same shape: the argument,
+//	then $OPENHERON_DEFAULT_PROJECT_ROOT, else its previous name
+//	$PROJECT_ROOT, then <openheron root>/projects/default.
+func NewService(root, projectRoot string, opts ...ServiceOption) (*Service, error) {
+	s := &Service{}
+	for _, o := range opts {
+		if o != nil {
+			o(s)
 		}
-		projectRoot = wd
 	}
-	projectRoot, err := filepath.Abs(projectRoot)
-	if err != nil {
-		return nil, fmt.Errorf("config: resolve project root %q: %w", projectRoot, err)
+	notices := s.notices
+
+	// ★ The openheron root. Empty stays empty: an unnamed home keeps the
+	//   old layout, and the layout is decided by the bases below.
+	home := strings.TrimSpace(s.home)
+	if home == "" {
+		home = strings.TrimSpace(os.Getenv(RootEnv))
+	}
+	if home != "" {
+		abs, err := filepath.Abs(home)
+		if err != nil {
+			return nil, fmt.Errorf("config: resolve openheron root %q: %w", home, err)
+		}
+		home = abs
 	}
 
+	// ★ The default project root.
+	projectAbs, projectDefaulted, projectNotices, err := resolveDefaultProjectRoot(projectRoot, home)
+	if err != nil {
+		return nil, err
+	}
+	notices = append(notices, projectNotices...)
+	if projectDefaulted {
+		if err := ensureProjectRoot(projectAbs); err != nil {
+			return nil, err
+		}
+	}
+
+	// ★ The config root.
 	defaulted := false
+	root = strings.TrimSpace(root)
 	if root == "" {
-		root = os.Getenv(ConfigDirEnv)
+		root = strings.TrimSpace(os.Getenv(ConfigRootEnv))
 	}
 	if root == "" {
-		root = filepath.Join(projectRoot, DefaultBaseDirName)
+		if v := strings.TrimSpace(os.Getenv(ConfigDirEnv)); v != "" {
+			root = v
+			notices = append(notices, fmt.Sprintf(
+				"%s was renamed to %s; the old name still works, but it will go",
+				ConfigDirEnv, ConfigRootEnv))
+		}
+	}
+	if root == "" {
+		if home != "" {
+			root = filepath.Join(home, DefaultConfigDirName)
+		} else {
+			// ★ The old layout: no openheron root means the config tree
+			//   lives inside the project, the way it always did.
+			root = filepath.Join(projectAbs, DefaultBaseDirName)
+		}
 		defaulted = true
 	}
-
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("config: resolve config root %q: %w", root, err)
 	}
 	if defaulted {
-		// Only the defaulted root is created: an explicit --config-dir or
-		// $OPENHERON_CONFIG_DIR pointing nowhere is a user typo, and it must
+		// Only the defaulted root is created: an explicit --config-root or
+		// $OPENHERON_CONFIG_ROOT pointing nowhere is a user typo, and it must
 		// not turn into a silently empty configuration tree.
 		if err := os.MkdirAll(abs, 0o755); err != nil {
 			return nil, fmt.Errorf("config: create config root %q: %w", abs, err)
 		}
 	}
-	return &Service{root: abs, projectRoot: projectRoot, defaulted: defaulted}, nil
+
+	return &Service{
+		root:        abs,
+		home:        home,
+		projectRoot: projectAbs,
+		defaulted:   defaulted,
+		notices:     notices,
+		log:         s.log,
+	}, nil
 }
 
-func NewServiceAt(root, projectRoot string) (*Service, error) {
+// resolveDefaultProjectRoot resolves the project root a session that belongs
+// to no project works in.
+//
+// ★ The resolution has **one** shape everywhere: the argument, then
+// $OPENHERON_DEFAULT_PROJECT_ROOT, else its previous name $PROJECT_ROOT, else
+// <openheron root>/projects/default. ★ The server and `openheron init` share
+// it — a directory that one of them creates and the other does not is a
+// directory that exists on one machine and not on another.
+//
+// ★ It resolves and it does **not** create: whether the directory is created
+// is the caller's decision, and the caller knows whether it may write.
+//
+// ★ The old name still works, and it is reported: a variable that quietly
+// stops working is the hardest kind of mistake to find.
+func resolveDefaultProjectRoot(explicit, home string) (string, bool, []string, error) {
+	root := strings.TrimSpace(explicit)
+	var notices []string
+	if root == "" {
+		root = strings.TrimSpace(os.Getenv(DefaultProjectRootEnv))
+	}
+	if root == "" {
+		if v := strings.TrimSpace(os.Getenv(ProjectRootEnv)); v != "" {
+			root = v
+			notices = append(notices, fmt.Sprintf(
+				"%s was renamed to %s; the old name still works, but it will go",
+				ProjectRootEnv, DefaultProjectRootEnv))
+		}
+	}
+	defaulted := false
+	if root == "" {
+		if home == "" {
+			// ★ No openheron root means the old layout: the project root is
+			//   the working directory.
+			wd, err := os.Getwd()
+			if err != nil {
+				return "", false, nil, fmt.Errorf("config: resolve working directory: %w", err)
+			}
+			return wd, false, notices, nil
+		}
+		root = filepath.Join(home, DefaultProjectsDirName, "default")
+		defaulted = true
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", false, nil, fmt.Errorf("config: resolve project root %q: %w", root, err)
+	}
+	return abs, defaulted, notices, nil
+}
+
+// ensureProjectRoot creates the directory a project root names.
+//
+// ★ Only the **defaulted** root is created, and the rule is the config
+//
+//	root's: a named root that points nowhere is a user typo, and it must not
+//	turn into a silently empty directory. ★ The defaulted one has to exist:
+//	it is where a session that belongs to no project does its work, and a
+//	command that cannot chdir into it never starts.
+func ensureProjectRoot(root string) error {
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return fmt.Errorf("config: create the default project root %q: %w", root, err)
+	}
+	return nil
+}
+
+// EnsureDefaultProjectRoot creates the project root a session that belongs
+// to no project works in, when it is the server's own, and returns the
+// directory it created.
+//
+// ★ The server does the same when it starts (see NewService): the directory
+//
+//	belongs to the server, and `openheron init` is where the base directory
+//	is laid out — a person who looks into it afterwards must find the whole
+//	layout, not half of it.
+//
+// ★ Only the defaulted one is created: a named root is the user's directory,
+//
+//	and making it for them would hide a typo. ★ An empty answer means
+//	nothing was created, and the caller says so rather than claiming a
+//	directory it did not make.
+func EnsureDefaultProjectRoot(home string) (string, error) {
+	root, defaulted, _, err := resolveDefaultProjectRoot("", home)
+	if err != nil {
+		return "", err
+	}
+	if !defaulted {
+		return "", nil
+	}
+	if err := ensureProjectRoot(root); err != nil {
+		return "", err
+	}
+	return root, nil
+}
+
+// NewServiceAt builds a service at the paths it is given.
+//
+// ★ It honours **only** those paths: no environment variable and no default
+//
+//	is consulted, because the callers that use it (`openheron init`) write
+//	into the directory they were pointed at and must not read a variable
+//	that decides somewhere else.
+func NewServiceAt(root, projectRoot string, opts ...ServiceOption) (*Service, error) {
+	s := &Service{}
+	for _, o := range opts {
+		if o != nil {
+			o(s)
+		}
+	}
 	if root != "" {
 		abs, err := filepath.Abs(root)
 		if err != nil {
@@ -389,28 +845,72 @@ func NewServiceAt(root, projectRoot string) (*Service, error) {
 		}
 		projectRoot = abs
 	}
-	return &Service{root: root, projectRoot: projectRoot}, nil
+	return &Service{root: root, home: s.home, projectRoot: projectRoot, log: s.log}, nil
 }
 
 func (s *Service) Root() string { return s.root }
 
-// RootIsDefaulted reports whether the config root was derived from the
-// project root instead of being named explicitly.
+// Home returns the openheron root — the user-level base directory.
+//
+// ★ Empty means "nobody named one", and the service then keeps the old
+//
+//	layout: the config root is also the base of the relative paths.
+func (s *Service) Home() string { return s.home }
+
+// Notices returns what the caller should report about the way the roots were
+// resolved.
+//
+// ★ The old environment variable names land here rather than in a log: the
+//
+//	service has no logger, and a line that names the variable that still
+//	works is worth one line in the caller's log.
+func (s *Service) Notices() []string {
+	if s == nil {
+		return nil
+	}
+	return s.notices
+}
+
+// RootIsDefaulted reports whether the config root was derived instead of
+// being named explicitly.
 //
 // Callers use it to tell "the user asked for a config root that is not
 // there" apart from "the user did not ask for one, so we made one" — the
 // two need different advice.
 func (s *Service) RootIsDefaulted() bool { return s.defaulted }
 
-func (s *Service) ProjectRoot() string { return s.projectRoot }
+// DefaultProjectRoot returns the project root the process works in when a
+// session belongs to no project.
+//
+// ★ It is the **default**, not the only one: a session that belongs to a
+//
+//	project works in that project's own root, and this is where the rest of
+//	them work.
+func (s *Service) DefaultProjectRoot() string { return s.projectRoot }
 
+// base is what a relative path in the configuration is measured from.
+//
+// ★ The openheron root when there is one, the config root otherwise.
+//
+//	The state and the log file are runtime state, and the runtime state
+//	lives in the user-level base directory — not in the configuration tree,
+//	which the user may point anywhere.
+func (s *Service) base() string {
+	if s.home != "" {
+		return s.home
+	}
+	return s.root
+}
+
+// DataDir resolves the data directory: absolute as given, relative against
+// the openheron root.
 func (s *Service) DataDir(v string) (string, error) {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		v = DirState
 	}
 	if !filepath.IsAbs(v) {
-		v = filepath.Join(s.root, v)
+		v = filepath.Join(s.base(), v)
 	}
 	if err := os.MkdirAll(v, 0o755); err != nil {
 		return "", fmt.Errorf("config: create data directory: %w", err)
@@ -418,22 +918,21 @@ func (s *Service) DataDir(v string) (string, error) {
 	return v, nil
 }
 
-// LogFile resolves the configured log file against the **config root** and
+// LogFile resolves the configured log file against the **openheron root** and
 // creates the directory it lives in. Empty means no file, and that is not an
 // error: stderr is the default destination.
 //
-// ★ The config root, not the project root. `data_dir`, `logs/` and the
+// ★ The openheron root, not the config root. The log file is runtime state,
 //
-//	partitions all live inside .openheron/; `static_dir` is the one path that
-//	points into the project. A log file is runtime state, so it goes with the
-//	runtime state.
+//	and the runtime state lives in the user-level base directory — the
+//	configuration tree is the user's to point anywhere.
 func (s *Service) LogFile(v string) (string, error) {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return "", nil
 	}
 	if !isAbsPath(v) {
-		v = filepath.Join(s.root, v)
+		v = filepath.Join(s.base(), v)
 	}
 	if err := os.MkdirAll(filepath.Dir(v), 0o755); err != nil {
 		return "", fmt.Errorf("config: create log directory: %w", err)
@@ -441,12 +940,18 @@ func (s *Service) LogFile(v string) (string, error) {
 	return v, nil
 }
 
+// ResolveDir resolves a relative path against the default project root.
+//
+// ★ The project root and not the config root: `static_dir` and the knowledge
+//
+//	base corpus are the one thing that points **into a project**, and a
+//	project is a directory.
 func (s *Service) ResolveDir(v string) string {
 	v = strings.TrimSpace(v)
 	if v == "" || filepath.IsAbs(v) {
 		return v
 	}
-	return filepath.Join(s.ProjectRoot(), v)
+	return filepath.Join(s.DefaultProjectRoot(), v)
 }
 
 func (s *Service) Load() (*Config, error) {
@@ -484,6 +989,7 @@ func (s *Service) loadOnly(ms map[string]*mutation) (*Config, error) {
 		ConfigRoot: s.root,
 		Server:     defaultServer(),
 		KB:         defaultKB(),
+		secrets:    s.secrets,
 	}
 
 	for _, cat := range Categories {
@@ -502,6 +1008,7 @@ func (s *Service) loadOnly(ms map[string]*mutation) (*Config, error) {
 	}
 
 	cfg.noteRetiredDirs(s.root)
+	cfg.noticeConfigToolsAbsent()
 	cfg.collectBadDurations()
 	return cfg, nil
 }
