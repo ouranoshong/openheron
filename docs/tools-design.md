@@ -514,7 +514,7 @@ MCP 服务器与 openheron 今天的每一个工具，差别恰好在两处。
 | 没做 | 对 openheron 的后果 |
 |---|---|
 | 不管客户端生命周期 —— 不拉起、不 `Start`、不 `Initialize`、不 `Close` | 连接归 openheron 管：manager 建它、初始化它、养着它，进程退出时拆掉它 |
-| 不选传输方式 | stdio / streamable HTTP 由 openheron 挑（`agentkit/build/mcpmanager.go:786-832`、`:897`） |
+| 不选传输方式 | stdio / streamable HTTP 由 openheron 挑（`agentkit/build/mcpmanager.go:802-848`、`:897`） |
 | 没有配置格式 | schema 是 §3.2 说的 `mcps/<server>.yaml`，一个 server 一个文件 |
 | 不支持流式 | 那层包装只实现了 `Info` 与 `InvokableRun`，所以它是 `tool.InvokableTool`，永远不是 `tool.StreamableTool`。整个结果作为一块 JSON 回来 |
 
@@ -716,7 +716,7 @@ the gate: Policy.TierOf("mcp__github__create_issue")
 
 ★ **失败的启动不能拖住装配。** 初始化失败之后的拆解要**等子进程退出**，
 而一个还在装自己依赖的子进程不会因为 stdin 关了就退出。
-⇒ 失败路径**先杀掉子进程**（`killMCPChild`，`agentkit/build/mcpmanager.go:840-848`）
+⇒ 失败路径**先杀掉子进程**（`killMCPChild`，`agentkit/build/mcpmanager.go:856-864`）
 再拆解，而拆解本身也有一个上限（`closeMCPClient`，`:856`，宽限 5s）。
 ★ **装配等的是一个 server，不是一个 server 的尸体。**
 
@@ -730,7 +730,7 @@ the gate: Policy.TierOf("mcp__github__create_issue")
 ★ **拆 stdio 客户端时那两行 `ERROR: Error reading from stdout` 不是故障。**
 `mcp-go` 的 reader 醒来拿到的是 `file already closed`，被当成传输错误打到 stderr，
 **每个 stdio 子进程一行**，而且绕过了 `log_level` 与 `log.file`。
-⇒ `mcpCommandLogger`（`agentkit/build/mcpmanager.go:756`）把 `WithCommandLogger`
+⇒ `mcpCommandHandler`（`agentkit/build/mcpmanager.go:758`）把 `WithCommandLogger`
 接回进程 logger：只有「`Error reading from stdout` + 关闭管道措辞」降级为 `Debug`，
 其它错误仍是 `Error`。
 
@@ -1406,10 +1406,10 @@ workload 是**内容**。跑在沙箱里的 MCP 服务器是 workload 内容；
 | `agentkit/build/mcpmanager.go:447` | `dispatch`（单飞 + 退避） |
 | `agentkit/build/mcpmanager.go:504-543` | `runStart`（那个后台作业） |
 | `agentkit/build/mcpmanager.go:646-679` | `mcpFingerprint` |
-| `agentkit/build/mcpmanager.go:756` | `mcpCommandLogger` |
-| `agentkit/build/mcpmanager.go:786-832` | `startStdioClient` |
-| `agentkit/build/mcpmanager.go:840-848` | `killMCPChild` |
-| `agentkit/build/mcpmanager.go:856-868` | `closeMCPClient` |
+| `agentkit/build/mcpmanager.go:758` | `mcpCommandHandler` |
+| `agentkit/build/mcpmanager.go:802-848` | `startStdioClient` |
+| `agentkit/build/mcpmanager.go:856-864` | `killMCPChild` |
+| `agentkit/build/mcpmanager.go:872-884` | `closeMCPClient` |
 | `agentkit/build/mcpmanager.go:883-889` | `mcpChildEnv` |
 | `agentkit/build/mcpmanager.go:897-914` | `startHTTPClient` |
 | `agentkit/build/mcpstatus.go:16-27` | 四个 server 状态与三个 tool 状态 |

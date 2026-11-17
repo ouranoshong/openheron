@@ -747,27 +747,37 @@ const mcpTeardownGrace = 5 * time.Second
 //
 // mcpCommandLogger puts mcp-go's stdio transport back on the process logger.
 //
-// ★ Left alone, the library calls log.Default() and writes straight to
+// ★ Left alone, the library calls slog.Default() and writes straight to
 //
 //	stderr: those lines ignore log_level, miss log.file and our sink, and a
 //	normal shutdown prints "ERROR: Error reading from stdout" once per
-//	stdio child. This adapter implements the library's tiny Infof/Errorf
-//	interface, so no import of its util package is needed.
-type mcpCommandLogger struct{ log *slog.Logger }
+//	stdio child. mcp-go v1.5.0 takes a *slog.Logger and logs structured
+//	records, so the adapter wraps the handler instead of the retired
+//	Infof/Errorf interface: it keeps the "[mcp]" tag and downgrades the
+//	teardown-only "file already closed" error to Debug.
+type mcpCommandHandler struct{ inner slog.Handler }
 
-func newMCPCommandLogger(log *slog.Logger) mcpCommandLogger {
+func newMCPCommandLogger(log *slog.Logger) *slog.Logger {
 	if log == nil {
 		log = obs.Discard()
 	}
-	return mcpCommandLogger{log: log}
+	return slog.New(&mcpCommandHandler{inner: log.Handler()})
 }
 
-func (l mcpCommandLogger) Infof(format string, v ...any) {
-	l.log.Debug("[mcp] " + fmt.Sprintf(format, v...))
+func (h *mcpCommandHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.inner.Enabled(ctx, level)
 }
 
-func (l mcpCommandLogger) Errorf(format string, v ...any) {
-	msg := fmt.Sprintf(format, v...)
+func (h *mcpCommandHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &mcpCommandHandler{inner: h.inner.WithAttrs(attrs)}
+}
+
+func (h *mcpCommandHandler) WithGroup(name string) slog.Handler {
+	return &mcpCommandHandler{inner: h.inner.WithGroup(name)}
+}
+
+func (h *mcpCommandHandler) Handle(ctx context.Context, r slog.Record) error {
+	level, msg := r.Level, r.Message
 	// ★ readResponses is blocked in ReadString when Close closes done and
 	//   cmd.Wait closes the stdout pipe. The library treats the resulting
 	//   os.ErrClosed as a transport failure; in fact the reader is simply
@@ -775,12 +785,18 @@ func (l mcpCommandLogger) Errorf(format string, v ...any) {
 	//   (which the library already ignores) or a different error, so only
 	//   the exact os.ErrClosed wording is downgraded — real errors stay
 	//   Errors.
-	if strings.HasPrefix(msg, "Error reading from stdout:") &&
-		strings.Contains(msg, "file already closed") {
-		l.log.Debug("[mcp] stdio reader stopped on teardown", "detail", msg)
-		return
+	if level == slog.LevelError && msg == "Error reading from stdout" {
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == "err" && strings.Contains(a.Value.String(), "file already closed") {
+				level = slog.LevelDebug
+				msg = "stdio reader stopped on teardown"
+				return false
+			}
+			return true
+		})
 	}
-	l.log.Error("[mcp] " + msg)
+	r.Level, r.Message = level, "[mcp] "+msg
+	return h.inner.Handle(ctx, r)
 }
 
 func startStdioClient(opCtx, lifeCtx context.Context, cfg *decl.MCPServerCfg, log *slog.Logger) (mcpClient, error) {
