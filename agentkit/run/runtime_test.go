@@ -458,9 +458,17 @@ func TestAQueryInTheApprovalWindowIsRefusedAndTheApprovalLands(t *testing.T) {
 
 	// ★ And the approval must land: the window closed behind it.
 	release()
+	// ★ PendingApproval is written before the row is closed (bridge.go:
+	//	writeHeldApproval, then closeApprovalRow). Waiting only for the
+	//	approval sees the row still "running" — wait for the row's terminal
+	//	state too, so the assertion below tests the settled round.
 	waitFor(t, func() bool {
 		p, _ := sess.PendingApproval()
-		return p != nil && len(p.Interrupts) == 1
+		if p == nil || len(p.Interrupts) != 1 {
+			return false
+		}
+		rows, err := sess.RunLedger().List(ctx)
+		return err == nil && len(rows) == 1 && rows[0].State == storage.RunWaitingApproval
 	})
 
 	// ★ The round's row must say what happened to it: it is waiting for an
