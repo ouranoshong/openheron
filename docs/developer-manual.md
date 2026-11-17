@@ -285,8 +285,8 @@ For a developer who has to debug it:
 - **A failed start does not hold the build.** The teardown of a failed start
   waits for the child to exit, and a child that is still installing its own
   package does not exit because its stdin closed — so `startStdioClient`
-  (`agentkit/build/mcpmanager.go:786-832`) kills the child
-  (`agentkit/build/mcpmanager.go:840-848`) and bounds the teardown
+  (`agentkit/build/mcpmanager.go:802-848`) kills the child
+  (`agentkit/build/mcpmanager.go:856-864`) and bounds the teardown
   (`agentkit/build/mcpmanager.go:733`). ★ A build waits for a server, not for a
   server's corpse: without the kill, a server that cannot be started takes the
   turn down with it, and the client is told "turn start timeout" — a symptom

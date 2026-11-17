@@ -246,8 +246,8 @@ Agent 的 `tools:` 列表里点到的名字，装配器拿它拒绝冒用这些�
   客户端（`agentkit/build/mcptools.go:396`）。
 - **起不来的服务器不会拖住装配。** 启动失败之后的拆解要等子进程退出，而一个还在
   装自己依赖的子进程不会因为 stdin 关了就退出 —— 所以 `startStdioClient`
-  （`agentkit/build/mcpmanager.go:786-832`）先杀掉子进程
-  （`agentkit/build/mcpmanager.go:840-848`），拆解也有上限
+  （`agentkit/build/mcpmanager.go:802-848`）先杀掉子进程
+  （`agentkit/build/mcpmanager.go:856-864`），拆解也有上限
   （`agentkit/build/mcpmanager.go:733`）。
   ★ 装配等的是一个 server，不是一个 server 的尸体：不杀它，一个起不来的服务器会
   把这一轮一起拖下水，而客户端收到的是「turn start timeout」——

@@ -305,8 +305,8 @@ MCP 这一支在注册表处并进来：`mcps/<server>.yaml` → `spec.loadMCP`
 provider 只回答「这个 snapshot 有哪些工具」并交回一批工具，背后的客户端由 manager 拥有
 （`agentkit/build/mcpmanager.go:44`），因为 stdio server 是子进程，下一轮还得在。provider 是
 可选的 —— 连不上的 server 只跳过并告警，绝不报错。启动失败后先杀掉子进程再拆解，拆解有
-上限（`agentkit/build/mcpmanager.go:840-856` 的 `killMCPChild` / `closeMCPClient`、
-`agentkit/build/mcpmanager.go:864`），不会因为一个还在装依赖的子进程卡住装配。
+上限（`agentkit/build/mcpmanager.go:856-872` 的 `killMCPChild` / `closeMCPClient`、
+`agentkit/build/mcpmanager.go:880`），不会因为一个还在装依赖的子进程卡住装配。
 
 启动不站在那一轮的关键路径上：配置一被读到，所有挂载的 server 就在后台起起来
 （`agentkit/build/mcpmanager.go:98` `Warm`），每台各有状态 —— `not_started`、`starting`、
