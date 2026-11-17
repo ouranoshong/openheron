@@ -29,6 +29,11 @@ type Builder struct {
 	log                  *slog.Logger
 	models               modelFactory
 	tools                *toolRegistry
+	// roundBlock renders the block that names the round's project root.
+	//
+	// ★ It is a function and not a string: the tree is pooled and reused
+	// across rounds, and the root is a fact of the round.
+	roundBlock func(context.Context) string
 	// mcp owns the MCP clients. They outlive the snapshot — that is what
 	// the provider's batch does not.
 	mcp *mcpManager
@@ -88,6 +93,19 @@ func WithPaths(projectRoot, dataDir string) Option {
 	return func(b *Builder) {
 		b.projectRoot = projectRoot
 		b.dataDir = dataDir
+	}
+}
+
+// WithRoundBlock wires the block that names the round's project root.
+//
+// ★ The builder cannot import the run package — the run package builds on
+// the builder — so the caller hands over the rendering instead of the text.
+//
+// ★ The text itself is not an option: it changes with the round, and the
+// tree is pooled.
+func WithRoundBlock(block func(context.Context) string) Option {
+	return func(b *Builder) {
+		b.roundBlock = block
 	}
 }
 

@@ -23,6 +23,7 @@ import { useState } from "react"
 
 import { CodeBlock } from "@/components/code-block"
 import { looksLikeJson } from "@/lib/highlight"
+import { phaseLabel } from "@/lib/tool-groups"
 import { prettyArgs } from "@/lib/tool-args"
 import { toolIcon, type ToolIconName } from "@/lib/tool-icons"
 import { toolTitle } from "@/lib/tool-titles"
@@ -94,12 +95,6 @@ function hintOf(name: string, args: string): string | undefined {
   }
   const v = parsed[key]
   return typeof v === "string" ? v : undefined
-}
-
-const PHASE_LABEL: Record<ToolPart["phase"], string> = {
-  streaming: "reading arguments",
-  running: "running",
-  complete: "done",
 }
 
 export function ToolCard({ part }: { part: ToolPart }) {
@@ -174,7 +169,19 @@ export function ToolCard({ part }: { part: ToolPart }) {
           className="col-span-3 flex items-center justify-end gap-2 text-[11px] tracking-wide uppercase opacity-70 sm:col-span-1 sm:col-start-4 sm:row-start-1"
         >
           {resultLines !== undefined && <span className="normal-case">{resultLines} lines</span>}
-          <span>{PHASE_LABEL[part.phase]}</span>
+          {/* ★ A failure is **never** folded away. ★ A call that came back
+              with an error says so here, in the warning's own colour — the
+              reader must not have to open the card to learn that something
+              went wrong, and a collapsed card that says "done" about a
+              failed call is a lie. ★ The group's bar says the same thing
+              the same way (tool-group.tsx). */}
+          {part.isError ? (
+            <span data-testid="tool-failed" className="text-destructive normal-case">
+              failed
+            </span>
+          ) : (
+            <span>{phaseLabel(part.phase)}</span>
+          )}
         </span>
       </button>
 
@@ -183,16 +190,9 @@ export function ToolCard({ part }: { part: ToolPart }) {
           data-testid="tool-body"
           className="max-h-[70vh] overflow-y-auto overscroll-contain"
         >
-          {part.argsText && (
-            <CodeBlock
-              testId="tool-args"
-              lang="json"
-              text={args.text}
-              wrap
-              className="max-w-full overflow-x-hidden border-t rounded-none border-x-0 border-b-0"
-            />
-          )}
-
+          {/* ★ The result comes **first**. The arguments are what the model
+              thought; the result is what the world said back — and the
+              reader came for the second one. */}
           {part.result !== undefined && (
             <CodeBlock
               testId="tool-result"
@@ -202,6 +202,16 @@ export function ToolCard({ part }: { part: ToolPart }) {
                 "max-h-80 overflow-y-auto overscroll-contain border-t rounded-none border-x-0 border-b-0",
                 part.isError && "text-destructive",
               )}
+            />
+          )}
+
+          {part.argsText && (
+            <CodeBlock
+              testId="tool-args"
+              lang="json"
+              text={args.text}
+              wrap
+              className="max-w-full overflow-x-hidden border-t rounded-none border-x-0 border-b-0"
             />
           )}
         </div>

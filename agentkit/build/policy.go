@@ -64,10 +64,17 @@ type Layer string
 type boundary struct {
 	policy Policy
 	table  *Table
+	// scope answers "is this write inside a trusted path?" — the question
+	// the trusted mode asks before it waives the nod.
+	//
+	// ★ It travels with the boundary because the boundary is what the
+	//   agent's tool chain is built from: the root agent and every
+	//   sub-agent get the same answer.
+	scope scope
 }
 
-func newBoundary(policy Policy, table *Table) boundary {
-	return boundary{policy: policy, table: table}
+func newBoundary(policy Policy, table *Table, sc scope) boundary {
+	return boundary{policy: policy, table: table, scope: sc}
 }
 
 func (b boundary) Policy() Policy { return b.policy }

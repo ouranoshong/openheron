@@ -34,6 +34,8 @@ const meta = (id: string, title: string) => ({
   hasPendingApproval: false,
   agentId: "main",
   projectId: sessionProjects.get(id) ?? "",
+  authorizationMode: "default" as const,
+  authorizationConfirmed: false,
 })
 
 const store = new Map<string, string>()

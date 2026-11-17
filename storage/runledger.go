@@ -166,6 +166,18 @@ type Run struct {
 	//   reading the whole transcript. The individual calls are in the
 	//   transcript — the row says which servers were involved.
 	MCPServers []string `json:"mcp_servers,omitempty"`
+	// AuthorizationMode is the approval mode the round ran under.
+	//
+	// ★ It answers "was anybody watching" **after the fact**. The decision
+	//   log only holds the decisions a human made (storage.ApprovalRecord),
+	//   so a round that ran without asking has no trace there — without
+	//   this field the ledger could not tell an unattended round from a
+	//   quiet one.
+	//
+	// ★ It is the mode the round **started** with, not the mode the session
+	//   carries now: a mode the user changes mid-round applies to the next
+	//   round, and the row must say what actually happened.
+	AuthorizationMode contract.AuthorizationMode `json:"authorization_mode,omitempty"`
 	// TreeFingerprint identifies the agent tree this run ran on.
 	//
 	// ★ A resume continues the round it answers, so it must run on the

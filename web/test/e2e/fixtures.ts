@@ -75,6 +75,15 @@ export const COMPOSER_OPTION = '[data-testid="composer-option"]'
 export const APPROVE_BUTTON = "button, [role=button]"
 export const STOP_BUTTON = '[aria-label="Stop generating"]'
 
+// ★ The operation log's surface: the entry below the input box, the panel it
+//   opens, and the lines inside it.
+export const OPERATIONS_BUTTON = '[data-testid="operations-button"]'
+export const OPERATIONS_DIALOG = '[data-testid="operations-dialog"]'
+export const OPERATIONS_ITEM = '[data-testid="operations-item"]'
+export const OPERATIONS_TEXT = '[data-testid="operations-text"]'
+export const OPERATIONS_EMPTY = '[data-testid="operations-empty"]'
+export const OPERATIONS_ERROR = '[data-testid="operations-error"]'
+
 export async function clickByText(page: Page, ...texts: string[]): Promise<void> {
   const el = await findByText(page, ["button"], texts)
   if (!el) throw new Error(`no button matching any of: ${texts.join(" / ")}`)

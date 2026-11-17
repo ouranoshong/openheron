@@ -473,16 +473,80 @@ func (s *Service) agentsLostByChange(after *Config, removed []string) []string {
 
 // checkNoAgentLost refuses a change that would take a working agent out of
 // the tree.
-func (s *Service) checkNoAgentLost(after *Config, rel string, removed []string) error {
-	lost := s.agentsLostByChange(after, removed)
-	if len(lost) == 0 {
-		return nil
+//
+// ★ It returns the tree as it **was**, because the write path has a second
+//
+//	question to ask about the same pair of trees: did the change widen the
+//	tier table? Loading the tree twice would be a second full read of the
+//	configuration for one write.
+func (s *Service) checkNoAgentLost(after *Config, rel string, removed []string) (*Config, error) {
+	before, err := s.loadWithMany(nil)
+	if err != nil {
+		// ★ A tree that does not load has nothing known to be working, and
+		//   the change may only add. (That is also how a broken file gets
+		//   fixed — the editor's draft replaces it, so the trial tree is
+		//   the one that parses.)
+		return nil, nil
 	}
-	return &WriteError{
+	lost := agentsLostBy(before, after, removed)
+	if len(lost) == 0 {
+		return before, nil
+	}
+	return before, &WriteError{
 		Kind:    ErrMergeRejected,
 		Rel:     rel,
 		Message: lostAgentMessage(lost[0], after),
 	}
+}
+
+// widenedTools returns the tools the tier table gained.
+//
+// ★ The tier table is the set of tools that run **without a nod**, and a
+//
+//	configuration file widens it by naming a tool in its `allows:` list.
+//	The comparison is between the two **trees**, not between the two files:
+//	the change may come from anywhere, and it is the table that matters.
+//
+// ★ Only the gained names are reported. A table that shrank is not the
+//
+//	thing an operator has to look for — it is the safe direction.
+func widenedTools(before, after *Config) []string {
+	if before == nil || after == nil {
+		return nil
+	}
+	was := make(map[string]bool)
+	for _, n := range before.AllowedTools() {
+		was[n] = true
+	}
+	var out []string
+	for _, n := range after.AllowedTools() {
+		if !was[n] {
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// reportWidenedTier says one line when a change widened the tier table.
+//
+// ★ It does not refuse. The file that provides a tool owns the exceptions
+//
+//	for that tool — that is the tree's own rule — so a write that names a
+//	tool is legitimate. ★ But it is **said**: a table that widened is
+//	exactly the fact an operator has to be able to find afterwards, and a
+//	silent widening is how a session ends up running tools nobody chose.
+//
+// ★ A tree that does not load has no table to compare against, and then
+//
+//	nothing is said: "every tool is new" is not a fact, it is an absence.
+func (s *Service) reportWidenedTier(before, after *Config, rel string) {
+	gained := widenedTools(before, after)
+	if len(gained) == 0 {
+		return
+	}
+	s.logger().Warn("[config] the tier table was widened",
+		"file", rel, "tools", strings.Join(gained, ", "))
 }
 
 func (s *Service) Write(rel string, content []byte, baseRev string) (rev string, cfg *Config, err error) {
@@ -505,7 +569,8 @@ func (s *Service) Write(rel string, content []byte, baseRev string) (rev string,
 	// ★ The gate the tree needs: a change may not take a working agent out
 	//   of it. The trial tree loads either way — an agent that cannot run is
 	//   left out — so without this the gate would have no teeth.
-	if err := s.checkNoAgentLost(trial, rel, nil); err != nil {
+	before, err := s.checkNoAgentLost(trial, rel, nil)
+	if err != nil {
 		return "", nil, err
 	}
 
@@ -516,6 +581,10 @@ func (s *Service) Write(rel string, content []byte, baseRev string) (rev string,
 	if err := persist.AtomicWrite(dst, content, writeTmpSuffix); err != nil {
 		return "", nil, err
 	}
+	// ★ The tier table may have just widened, and that is reported, not
+	//   refused. ★ It is said **after** the write: the line describes a
+	//   fact that is now on the disk.
+	s.reportWidenedTier(before, trial, rel)
 	// ★ The file landed, so it is **marked**: the next turn reads the
 	//   configuration again before it builds, and the change is in it.
 	//   ★ The watcher's poll would notice the same thing a moment later,
@@ -574,7 +643,8 @@ func (s *Service) Append(rel string, content []byte, baseRev string) (rev string
 	if err != nil {
 		return "", nil, &WriteError{Kind: ErrMergeRejected, Rel: rel, Message: err.Error(), Err: err}
 	}
-	if err := s.checkNoAgentLost(trial, rel, nil); err != nil {
+	before, err := s.checkNoAgentLost(trial, rel, nil)
+	if err != nil {
 		return "", nil, err
 	}
 
@@ -585,6 +655,9 @@ func (s *Service) Append(rel string, content []byte, baseRev string) (rev string
 	if err := persist.AtomicWrite(dst, full, writeTmpSuffix); err != nil {
 		return "", nil, err
 	}
+	// ★ The same report as the whole-file write: a piece can widen the tier
+	//   table just as well as a whole file can.
+	s.reportWidenedTier(before, trial, rel)
 	s.Mark(rel)
 
 	return Revision(full), trial, nil
@@ -619,12 +692,9 @@ func (s *Service) WriteMany(files []File, baseRev string) (rev string, cfg *Conf
 	}
 	// ★ The same gate as the single-file write: a batch may not take a
 	//   working agent out of the tree either.
-	if lost := s.agentsLostByChange(trial, nil); len(lost) > 0 {
-		return "", nil, &WriteError{
-			Kind:    ErrMergeRejected,
-			Rel:     relsOf(files),
-			Message: lostAgentMessage(lost[0], trial),
-		}
+	before, err := s.checkNoAgentLost(trial, relsOf(files), nil)
+	if err != nil {
+		return "", nil, err
 	}
 
 	if s.root == "" {
@@ -659,6 +729,8 @@ func (s *Service) WriteMany(files []File, baseRev string) (rev string, cfg *Conf
 	for _, f := range files {
 		s.Mark(f.Rel)
 	}
+	// ★ And the same report: a batch can widen the tier table too.
+	s.reportWidenedTier(before, trial, relsOf(files))
 	return s.Fingerprint(), trial, nil
 }
 
@@ -863,7 +935,10 @@ func (s *Service) Delete(rel string) (cfg *Config, err error) {
 	// ★ The gate, on the delete path too: removing the provider that an
 	//   agent names takes that agent out of the tree just as surely as
 	//   pointing it at a model that does not exist.
-	if err := s.checkNoAgentLost(trial, rel, deletedAgent(rel)); err != nil {
+	//
+	// ★ A delete is the one write that cannot widen the tier table — it can
+	//   only take names away — so there is nothing to report here.
+	if _, err := s.checkNoAgentLost(trial, rel, deletedAgent(rel)); err != nil {
 		return nil, err
 	}
 

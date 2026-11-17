@@ -9,6 +9,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/helpers"
 	"github.com/ouranoshong/openheron/message"
 	"github.com/ouranoshong/openheron/storage"
 )
@@ -322,6 +323,21 @@ func (rt *Runtime) writeHeldApproval(sessionID string, turn *Turn) []contract.Pe
 			sessionID, interrupts[0].InterruptID, err)
 		return nil
 	}
+	// ★ The approval is on disk, so the timeline says it is waiting. ★ It
+	//   says so **before** the announcement, because the order the code
+	//   already keeps — persist, then announce — is the order the reader
+	//   needs: an approval that could not be persisted is never announced.
+	for _, it := range interrupts {
+		op := storage.Operation{
+			Kind:        storage.OpApprovalRequested,
+			Actor:       storage.ActorSystem,
+			InterruptID: it.InterruptID,
+		}
+		if it.Detail != nil {
+			op.ToolName = it.Detail.ToolName
+		}
+		rt.recordOperation(sess, op)
+	}
 	return interrupts
 }
 
@@ -362,12 +378,13 @@ func (rt *Runtime) removeStateIfIdle(sessionID string) {
 //	report.
 func newTurnHandle(sessionID string, kind contract.TurnKind) *Turn {
 	return &Turn{
-		sessionID: sessionID,
-		Kind:      kind,
-		ready:     make(chan struct{}),
-		archived:  make(chan struct{}),
-		released:  make(chan struct{}),
-		abort:     make(chan struct{}),
-		publisher: newPublisher(),
+		sessionID:    sessionID,
+		Kind:         kind,
+		ready:        make(chan struct{}),
+		archived:     make(chan struct{}),
+		released:     make(chan struct{}),
+		abort:        make(chan struct{}),
+		publisher:    newPublisher(),
+		toolFailures: helpers.NewToolFailures(),
 	}
 }

@@ -84,6 +84,18 @@ type Options struct {
 	// a token count into a ratio; it must not resolve model refs itself —
 	// the builder owns that lookup.
 	Contexts map[string]contract.AgentContext
+	// ToolFailures carries the failures the round's tool calls reported.
+	//
+	// ★ The middleware is the only layer that sees a tool error — it is
+	//   the one that turns it into a string for the model — so the
+	//   failure travels from there to here through the round's collector.
+	//   ★ The derivation is where it becomes a fact: the wire learns that
+	//   the call failed, and the archived message carries the same
+	//   failure so the history says it too.
+	//
+	// ★ Nil means the round collects nothing, and no call is reported as
+	//   failed.
+	ToolFailures *helpers.ToolFailures
 	// Logger is injected by the run. Nil drops the derivation's own lines.
 	Logger *slog.Logger
 	// Drained is closed when the agent's event stream has closed.
@@ -313,6 +325,28 @@ func (d *deriver) run(cancel <-chan struct{}) (Artifacts, error) {
 				})
 				out := []*schema.Message{message.NewToolResult(callID, name, content)}
 				stamp(out[0], ownerOf(ev, mainAgent))
+				// ★ The failure is the **call's** own fact, and it reaches two
+				//   places: the wire (so the interface can say the call failed)
+				//   and the archived message (so the history says it too).
+				//   ★ One fact, two readers — and they must not drift: a
+				//   reload that lost the failure would show a failed call as a
+				//   successful one, and the two surfaces would disagree about
+				//   the same call.
+				//
+				//   ★ The failure is taken **after** the result was published:
+				//   the client learns the content first and the verdict second,
+				//   and the verdict is what colours the content.
+				if failure, failed := d.opts.ToolFailures.Take(callID); failed {
+					message.StampToolError(out[0], failure.Error)
+					d.publish(contract.RunEvent{
+						Kind:     contract.RunEventToolFailed,
+						RunID:    d.opts.RunID,
+						Text:     failure.Error,
+						ToolID:   failure.ToolID,
+						ToolName: failure.ToolName,
+						Sub:      sub,
+					})
+				}
 				d.intermediates = append(d.intermediates, out...)
 
 			case mo.IsStreaming && mo.MessageStream != nil:

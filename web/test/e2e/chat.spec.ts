@@ -1254,3 +1254,63 @@ test.describe("工具卡的标题", () => {
     await expect(title(page)).not.toHaveText("config_get")
   })
 })
+
+// ★ The tool calls that follow each other are **one thing that happened**.
+//
+// ★ A conversation that opens every call shows the reader a screen of steps
+//   and buries the answer they came for — so the run is one line until the
+//   reader asks for the steps.
+test.describe("连续的调用：并成一段", () => {
+  const GROUP = '[data-testid="tool-group"]'
+  const GROUP_COUNT = '[data-testid="tool-group-count"]'
+  const GROUP_TITLES = '[data-testid="tool-group-titles"]'
+  const GROUP_TOGGLE = '[data-testid="tool-group-toggle"]'
+  const CARD = '[data-testid="tool-card"]'
+
+  test("★ 两次调用并成一行，展开才看见两步", async ({ page }) => {
+    await setScenario("toolMany")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} look at two things`)
+
+    const group = page.locator(GROUP)
+    await expect(group).toBeVisible({ timeout: 7000 })
+
+    // ★ One line for the run: how many calls, and which tools.
+    await expect(group.locator(GROUP_COUNT)).toHaveText("2 steps")
+    await expect(group.locator(GROUP_TITLES)).toContainText("Read file")
+    await expect(group.locator(GROUP_TITLES)).toContainText("Search content")
+
+    // ★ And while it is closed, the steps themselves are not on the screen.
+    await expect(page.locator(CARD)).toHaveCount(0)
+
+    await group.locator(GROUP_TOGGLE).click()
+    await expect(page.locator(CARD)).toHaveCount(2)
+  })
+
+  test("★ 一次调用还是一行，不是一个组", async ({ page }) => {
+    await setScenario("toolDone")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the file`)
+
+    await expect(page.locator(CARD)).toHaveCount(1)
+    // ★ A bar that says "1 steps" would say less than the step itself.
+    await expect(page.locator(GROUP)).toHaveCount(0)
+  })
+
+  test("★ 展开后结果在参数之前", async ({ page }) => {
+    await setScenario("toolDone")
+    await openApp(page)
+    await openThread(page, "Alpha conversation")
+    await sendMessage(page, `${MARKER_A} read the file`)
+
+    await openToolCard(page)
+
+    // ★ The result is what the world said back; the arguments are what the
+    //   model thought. The reader came for the first one.
+    const result = await page.locator('[data-testid="tool-result"]').boundingBox()
+    const args = await page.locator('[data-testid="tool-args"]').boundingBox()
+    expect(result!.y).toBeLessThan(args!.y)
+  })
+})

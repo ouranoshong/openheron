@@ -46,6 +46,11 @@ import { cn } from "@/lib/utils"
  *   take a `projectId`), so the only thing a switch could do there is leave
  *   the conversation — ★ a button that says one thing and does another is
  *   worse than no button.
+ *
+ * ★ It does not push itself to the right end of the line any more: the
+ *   **action node** does that, because the authorization picker and this
+ *   button share it — and two entries that each carry their own margin
+ *   would drift apart.
  */
 export function ProjectsButton() {
   const [open, setOpen] = useState(false)
@@ -62,16 +67,21 @@ export function ProjectsButton() {
   const name = current ? current.name : "Default Project"
 
   // ★ The label: it says where the work happens, and it says nothing else.
+  //
+  // ★ The name is the user's, and it can be longer than a phone is wide.
+  //   ⇒ The name truncates instead of pushing the rest of the line off the
+  //   screen, and the full name stays in the tooltip and in the label a
+  //   screen reader reads.
   if (!emptyView) {
     return (
       <span
         data-testid="projects-label"
         aria-label={`Project: ${name}`}
-        title="The project this conversation works in. A conversation's project cannot change — start a new conversation to work elsewhere."
-        className="text-muted-foreground ms-auto flex h-6 items-center gap-1 px-1.5 text-[11px]"
+        title={`${name} — the project this conversation works in. A conversation's project cannot change — start a new conversation to work elsewhere.`}
+        className="text-muted-foreground flex h-6 max-w-full items-center gap-1 px-1.5 text-[11px]"
       >
-        <FolderIcon aria-hidden="true" className="size-3" />
-        {name}
+        <FolderIcon aria-hidden="true" className="size-3 shrink-0" />
+        <span className="min-w-0 truncate">{name}</span>
       </span>
     )
   }
@@ -82,14 +92,14 @@ export function ProjectsButton() {
         type="button"
         variant="ghost"
         size="sm"
-        className="text-muted-foreground hover:text-foreground ms-auto h-6 gap-1 px-1.5 text-[11px]"
+        className="text-muted-foreground hover:text-foreground h-6 max-w-full gap-1 px-1.5 text-[11px]"
         onClick={() => setOpen(true)}
         data-testid="projects-button"
         aria-label={`Project: ${name}`}
-        title="The project the next conversation works in. Click to choose another one, or to make a new one."
+        title={`${name} — the project the next conversation works in. Click to choose another one, or to make a new one.`}
       >
-        <FolderIcon aria-hidden="true" className="size-3" />
-        {name}
+        <FolderIcon aria-hidden="true" className="size-3 shrink-0" />
+        <span className="min-w-0 truncate">{name}</span>
       </Button>
       <ProjectsDialog open={open} onOpenChange={setOpen} />
     </>

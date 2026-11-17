@@ -1,3 +1,5 @@
+import type { OperationView } from "@/lib/api"
+import { authorizationMode, type AuthorizationMode } from "@/lib/authorization"
 import {
   emptyConversation,
   type ContextUsage,
@@ -59,6 +61,22 @@ export function selectInterrupts(s: StoreState): Interrupt[] {
 
 export const EMPTY_ATTACHMENTS: Attachment[] = []
 
+// EMPTY_OPERATIONS is the answer for a session whose log has not been read.
+//
+// ★ It is a **module-level constant**: a selector that built a new array on
+//   every call would make Object.is report "changed" every time, and the
+//   store would re-render forever (AGENTS.md on zustand selectors).
+export const EMPTY_OPERATIONS: OperationView[] = []
+
+// selectOperations is the operation log of one session.
+//
+// ★ It hands back the array the store already holds, so the reference stays
+//   stable — and a session without a log answers with the shared empty
+//   constant, not with a fresh array.
+export function selectOperations(s: StoreState, id: string): OperationView[] {
+  return s.sessions[id]?.operations ?? EMPTY_OPERATIONS
+}
+
 export function selectActiveLoading(s: StoreState): boolean {
   if (!s.activeId) return false
   const entry = s.sessions[s.activeId]
@@ -117,4 +135,32 @@ export function selectActiveUsage(s: StoreState): Usage | undefined {
 // change (see AGENTS.md on zustand selectors).
 export function selectActiveContext(s: StoreState): Record<string, ContextUsage> | undefined {
   return s.activeId ? s.sessions[s.activeId]?.convo?.context : undefined
+}
+
+// selectAuthorizationMode is the authorization mode of the session on screen.
+//
+// ★ It returns a **primitive**, not a fresh object: a selector that built a
+// new value on every call would make Object.is report "changed" every time,
+// and the store would re-render forever (AGENTS.md on zustand selectors).
+//
+// ★ A session that does not exist yet has no mode, and the default is what
+//   the server gives it when it creates it. ★ The **staged** mode is what
+//   the user picked on the welcome page: it is the mode the conversation is
+//   about to be born in, and it travels with the creation request.
+export function selectAuthorizationMode(s: StoreState): AuthorizationMode {
+  if (!s.activeId) return s.pendingAuthorizationMode ?? "default"
+  return authorizationMode(s.sessions[s.activeId]?.meta.authorizationMode)
+}
+
+// selectAuthorizationConfirmed says whether this session has already
+// confirmed full authorization.
+//
+// ★ It is the **server's** fact and not the client's memory: the server
+//   remembers it per session, so a second surface must not ask a second
+//   time. ★ Without a session there is no fact yet — only the client's word
+//   that the person already said yes, and it goes with the session that is
+//   about to be born.
+export function selectAuthorizationConfirmed(s: StoreState): boolean {
+  if (!s.activeId) return s.pendingAuthorizationConfirmed
+  return s.sessions[s.activeId]?.meta.authorizationConfirmed === true
 }

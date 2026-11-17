@@ -332,10 +332,10 @@ A 放弃时发现槽位不是它的（走掉），B 放弃时发现槽位是它�
 用户看着一个解不开的死结。
 
 **根因**：★ **审批属于会话，事件属于轮次。** 抛出审批的那一轮在抛出审批的那一刻就结束
-了（`agentkit/run/bridge.go:237` 关掉发布方），而审批还在等一个答案 ⇒ 「审批被回答了」
+了（`agentkit/run/bridge.go:238` 关掉发布方），而审批还在等一个答案 ⇒ 「审批被回答了」
 这个事实**无处可去** —— 它不能骑在旧一轮的总线上，那条总线已经死了。
 
-★ 客户端这一侧也没有别的通道：`applyScan`（`web/src/lib/store/actions.ts:821`）只改
+★ 客户端这一侧也没有别的通道：`applyScan`（`web/src/lib/store/actions.ts:931`）只改
 `busy`，**不碰审批卡**；于是等着的那一边**没有任何通道**能知道审批已经被消费。
 
 **修法**：★ 加一条**会话级**的公告通道（`agentkit/run/announce.go`），事实有三个：
@@ -350,7 +350,7 @@ A 放弃时发现槽位不是它的（走掉），B 放弃时发现槽位是它�
 
 ★ **它在屏障之后发布**：账本的行已经是终态，于是事实与账本说的是同一件事；而**落盘
 失败时不发布** —— 一个没有持久化的审批**答不了**，提前宣布它就是给一个界面一张点了
-就报错的卡（`agentkit/run/bridge.go:308-326` 的 `writeHeldApproval` 在失败时返回 nil）。
+就报错的卡（`agentkit/run/bridge.go:309-342` 的 `writeHeldApproval` 在失败时返回 nil）。
 
 ★ **事实是实时通知，过去归账本** —— 所以通道**没有回放窗口**：一个迟到的订阅者会去挂
 一个早就结束的老 run（`docs/runtime-design.md` §1.7）。
@@ -388,26 +388,26 @@ A 放弃时发现槽位不是它的（走掉），B 放弃时发现槽位是它�
 
 **修法（服务端，第一步）**：★ **把释放挪到屏障之后。** 拒绝挂靠看的就是那个 turn 指针，而审批是在
 屏障那一侧写的 —— ★ 先释放就必然开缝。★ 现在这一轮结束时的次序是「写审批 → 立起屏障
-→ 关发布方 → 释放槽位」（`agentkit/run/bridge.go:219-244`），⇒ 缝里的 attach 挂得上，
+→ 关发布方 → 释放槽位」（`agentkit/run/bridge.go:220-245`），⇒ 缝里的 attach 挂得上，
 挂上之后那一轮自己的窗口里带着那条审批（`agentkit/run/publish.go:144` 回放窗口）——
 **审批从线上回来了**。
 
 **修法（客户端）**：★ 404 不再是一次性的「读 transcript」，而是**回到恢复流程**；而恢复流程
 多了一个「等」的状态（`web/src/lib/attach.ts:76` 的 `recoveryPlan`）：★ 被拒的那一轮在
 账本里**还不是终态** ⇒ 屏障还没立起来 ⇒ 等账本再问一次；终态了 ⇒ 审批必定已经在盘上
-（屏障站在审批卡后面，`agentkit/run/bridge.go:255-263`）⇒ 这时才读 transcript。
+（屏障站在审批卡后面，`agentkit/run/bridge.go:256-264`）⇒ 这时才读 transcript。
 ★ **服务端关了缝，客户端这一层仍然留着**：另一个实例的旧账本、陈旧的服务端，两种情况下
 404 依然可能出现 —— 客户端不能把「服务端已经修好」当成契约。
 
 ★ **顺带修掉的是**挂回去的目标**：★ 答完审批之后的那一轮是**新的 run**，客户端要等它 announce
 才知道它的 id；用会话自己记住的 run id 去挂，挂的是上一轮（早就结束的那一轮）。★ 账本的
-`activeRunId` 才是「还在跑的那一轮」（`web/src/lib/store/actions.ts:648`）。
+`activeRunId` 才是「还在跑的那一轮」（`web/src/lib/store/actions.ts:758`）。
 
 ★ **修法（服务端，第二步）**：★ **准入闸门也要等到屏障。** 闸门读的是 `st.turn` 与
-`st.loop` 这一对，而「顶替」走的那条分支**不写审批**（`agentkit/run/bridge.go:201` 的
+`st.loop` 这一对，而「顶替」走的那条分支**不写审批**（`agentkit/run/bridge.go:202` 的
 `stale`）—— ★ 于是**只挪 turn 是不够的**：审批落盘前的几毫秒里会话仍然不忙，一个这时挤
 进来的**新问题**会被放行，它会接管这个会话，那条审批连同用户的问题一起没了，**没有任何
-提示**。★ 现在这一对指针**一起**放掉（`agentkit/run/bridge.go:103-115` 的 `releaseRound`），
+提示**。★ 现在这一对指针**一起**放掉（`agentkit/run/bridge.go:104-116` 的 `releaseRound`），
 缝里的新问题被拒：回 **409 `session_busy`**（可重试，窗口几毫秒后就关上）。
 
 **现状**：`已修` —— 服务端 `agentkit/run/bridge.go`（`loopExited` / `releaseRound`）与
@@ -855,7 +855,7 @@ ctime），但要额外给 storage 加「重命名」的能力，而且中途会
 
 | 上游的说法 | openheron 的实际 | 原因 |
 |---|---|---|
-| 配置根按「env → 上溯 → 自身」解析 | 它恰好按**三级**解析：显式 `--config-root` → `$OPENHERON_CONFIG_ROOT` → `<openheron-root>/configs`（不存在则创建），并且**刻意没有**上溯祖先目录（`agentkit/spec/config.go:582-585`）。★ 状态与日志另有一个根：`<openheron-root>`（`--openheron-root` → `$OPENHERON_ROOT` → `~/.openheron`） | 一旦配置根取决于「进程是从哪儿启动的」，同一条命令换个目录跑就会读到另一份配置 —— 测试实例也会读到开发者的那份 |
+| 配置根按「env → 上溯 → 自身」解析 | 它恰好按**三级**解析：显式 `--config-root` → `$OPENHERON_CONFIG_ROOT` → `<openheron-root>/configs`（不存在则创建），并且**刻意没有**上溯祖先目录（`agentkit/spec/config.go:628-631`）。★ 状态与日志另有一个根：`<openheron-root>`（`--openheron-root` → `$OPENHERON_ROOT` → `~/.openheron`） | 一旦配置根取决于「进程是从哪儿启动的」，同一条命令换个目录跑就会读到另一份配置 —— 测试实例也会读到开发者的那份 |
 | 测试实例靠「预置一份 `.heron/`」来隔离 | 隔离靠 `.env.test` 加 `task test-env-backend` / `test-env-reset` / `test-env-sync` 三个目标：实例跑在 `:18099`，**自带大本营、配置根、会话目录与项目** | 端口不同不等于数据隔离 —— openheron 把会话写在大本营下的 `state/`，一个写在那儿的测试会污染真实历史 |
 | `agentkit/spec` 包有 **115** 个 `Test` 函数 | 它有 **228** 个 | 包随代码一起长大 |
 | 模块路径是 `heron/...` | 是 `github.com/ouranoshong/openheron/...` | `go.mod` |
@@ -863,15 +863,15 @@ ctime），但要额外给 storage 加「重命名」的能力，而且中途会
 | `docs/architecture.md` §2.2 说 `agentkit/spec` import `kb` | **生产代码**并没有 —— 只有用例文件 `agentkit/spec/policy_contract_test.go:7` 这么做 | 校验知识库配置只需要声明（`decl.Model.IsEmbedding`），不需要 `kb` 包本身 |
 | `llm.ConfigFromEnv` | 它是 `build.ConfigFromEnv`（`agentkit/build/config.go:17`） | 配置包不能依赖厂商协议层，而 `llm/common` 是零 openheron 依赖的叶子包 |
 | 模型结构体 | openheron 的 `decl.Model` 带 `kind`、`dimensions` 与 `context_window`；`summarize_at` **存在但已废弃** —— 阈值属于 agent（`decl.Agent.SummarizeAt`，`agentkit/spec/decl/decl.go:179`） | 阈值是 agent 的策略，窗口是模型的 —— 两者只在一个地方相遇（`agentkit/spec/summarize.go:25`） |
-| agent 结构体 | openheron 的 `decl.Agent` 把 `tools`、`skills` 与 `mcps` 都带成裸 `[]string`：**不写 = 一个都没有**，空列表也是没有（`agentkit/spec/decl/decl.go:130`、`:134`、`:150`） | 「没声明」与「声明为空」现在意思相同，所以那个用来区分它们的指针没了 —— 而它们共享的缺省就是**没有** |
-| server 结构体 | openheron 的 `decl.Server` 带 `lease_ttl`（还有 `frontend_mode`，`agentkit/spec/decl/decl.go:290`、`:297`） | 租约的预算必须长于 provider 自己的超时，而两者住在不同的文件里 |
+| agent 结构体 | openheron 的 `decl.Agent` 把 `tools`、`skills` 与 `mcps` 都带成裸 `[]string`：**不写 = 一个都没有**，空列表也是没有（`agentkit/spec/decl/decl.go:130`、`:150`、`:166`） | 「没声明」与「声明为空」现在意思相同，所以那个用来区分它们的指针没了 —— 而它们共享的缺省就是**没有** |
+| server 结构体 | openheron 的 `decl.Server` 带 `lease_ttl`（还有 `frontend_mode`，`agentkit/spec/decl/decl.go:290`、`:289`） | 租约的预算必须长于 provider 自己的超时，而两者住在不同的文件里 |
 | `internal/atomicfile` | 是 `persist/atomicfile.go`，一个**顶层**叶子包 | openheron 没有 `internal/` 目录；`persist` 装着 `AtomicWrite` 与 `FileLock` 一族 |
 | `kb` 不 import 任何 heron 包 | `kb` import 了 `obs` 与 `persist` | `obs` 是日志的装配处，知识库也需要那个共用的原子写 |
 | `agentkit/spec` → `agentkit/run` 的破例在上游已于 2026-10-21 撤销 | openheron **从未有过** —— 代码面是在撤销之后抽出来的 | 撤销是上游的一个设计决定；openheron 直接继承了撤销后的形态 |
 | `models[].context_window` 是纯元数据，不生效 | 它**生效**：它是压缩阈值的分母（`agentkit/spec/summarize.go:25`） | openheron 实施了压缩与上下文用量看板 —— 见 `docs/runtime-design.md` §3 |
 | agent 写了模型没有声明的思考档位会进 `deferred` | **不会** —— 现在是**加载期错误**（`agentkit/spec/load.go:814-835` 的 `checkReasoning`） | 词汇表属于**模型**；档位名写在 agent 里。★ 这一行在 2026-11-12 复核时改过：旧文档写的是「静默忽略」，那个检查已经搬进了加载期 |
 | `go test -race ./...` 全仓是绿的 | 它**曾经不是**：竞态检测器在 `agentkit/run`、`api`、`kb`、`agentkit/spec` 报了竞态 | 四处现在都修好了，`task check`（含 `test-race`）全绿 |
-| `tools/` 里的坏超时会被报成 `watch.debounce` | 这个标签是错的：`agentkit/spec/reload.go:124` 给**每一条**坏时长都加上前缀 "watch.debounce fell back to default"，于是 `tools/http.yaml` 里的坏 `timeout` 落到了同一个标签下 | `decl.BadDurations()` 是一个不带来源信息的包级列表（`agentkit/spec/decl/decl.go:883`） |
+| `tools/` 里的坏超时会被报成 `watch.debounce` | 这个标签是错的：`agentkit/spec/reload.go:124` 给**每一条**坏时长都加上前缀 "watch.debounce fell back to default"，于是 `tools/http.yaml` 里的坏 `timeout` 落到了同一个标签下 | `decl.BadDurations()` 是一个不带来源信息的包级列表（`agentkit/spec/decl/decl.go:897`） |
 
 **现状**：`已知边界`（永远存在，除非 fork）。
 
@@ -991,7 +991,7 @@ request after 10 seconds`），于是 E2E 里「另一个界面听见了审批�
 `the server serves on url=http://127.0.0.1:8080`。★ 框架自己那行横幅被拦下了
 （`agentkit/obs/hertz/hertz.go:47`）：说的是同一件事，留着就是两行。
 
-★ **通告在监听就绪之后才打印**（`main.go:895-906`）：绑好之前印出来的是一句承诺，不是一件事实。
+★ **通告在监听就绪之后才打印**（`main.go:908-919`）：绑好之前印出来的是一句承诺，不是一件事实。
 
 **现状**：`已修` —— `agentkit/obs/sink.go` 的 `Install` 与 `Notice`、
 `agentkit/obs/notice.go` 的 `NewNotice`、`main.serve` 的 `waitRunning` 与 `announceServing`。
@@ -1012,7 +1012,7 @@ request after 10 seconds`），于是 E2E 里「另一个界面听见了审批�
 就绪之后 —— 暴露是那个地址的意思，两行是一件事。★ **环回时不说话**：一句关于
 「没有发生的事」的告警是噪声，而一句总出现的告警是没人看的告警。
 
-**现状**：`已修` —— `main.go:946-956` 的 `announceExposure`（判定用 `api.LoopbackOnly`）；
+**现状**：`已修` —— `main.go:959-969` 的 `announceExposure`（判定用 `api.LoopbackOnly`）；
 测试在 `main_test.go`（`TestAnnounceExposureReachesTheTerminal`、
 `TestAnnounceExposureIsSilentOnTheLoopback`、`TestAnnounceExposureNamesABarePort`）。
 
@@ -1171,21 +1171,220 @@ The system cannot find the path specified.
 而命令的输出**不说明它自己说明了什么**。
 
 ★ 同一个值有三个消费者（`agentkit/fsx/fsx.go:265-274` 的 `base`、
-`agentkit/fsx/fsx.go:283-292` 的 `writeRoots`、`agentkit/fsx/fsx.go:942-984` 的 `initStreamingCmd`），
-**少接一个**就是现在这个洞。★ `grep` 的工作目录是同一处（`agentkit/fsx/fsx.go:528`）。
+`agentkit/fsx/fsx.go:283-292` 的 `writeRoots`、`agentkit/fsx/fsx.go:992-1034` 的 `initStreamingCmd`），
+**少接一个**就是现在这个洞。★ `grep` 的工作目录是同一处（`agentkit/fsx/fsx.go:578`）。
 
 **修法**：★ 工作目录也从 ctx 取：`cmd.Dir = s.base(ctx)`。
 ★ 目录不存在时给一句人话（「这个会话工作的目录不存在：…」），而不是系统的 chdir 错误 ——
 ★ 后者只报一个路径，不报原因。
 
 ★ 另一半：**默认项目根得存在**。它和配置根一样是「缺省就填、点名就不填」
-（`agentkit/spec/config.go:652-661`）：点名的目录是用户自己的，不替他建；
+（`agentkit/spec/config.go:674-678` 与 `agentkit/spec/config.go:776-789`）：点名的目录是用户自己的，不替他建；
 缺省的那个在**大本营**里，是服务端自己的 —— 而它此前**从来没被创建过**。
+★ 现在**两处**建它：服务端启动时（`agentkit/spec/config.go:674-678`）与 `openheron init`
+（`initcmd.go:56-69`）—— 只建一处，就成了「有的机器上有这个目录、有的没有」。
 
 **现状**：`已修` —— `agentkit/fsx/fsx.go` 的 `cmd.Dir` 改走 ctx（`execute` 与 `grep`）、
-缺省工作目录不存在时报人话、`agentkit/spec/config.go` 创建缺省的默认项目根。
-回归用例在 `agentkit/fsx/exec_shell_test.go`
+缺省工作目录不存在时报人话、`agentkit/spec/config.go` 创建缺省的默认项目根，
+`openheron init` 也建同一个目录。回归用例在 `agentkit/fsx/exec_shell_test.go`
 （`TestExecuteRunsInTheRoundsProjectRoot`、
 `TestExecuteWithoutARoundRootRunsInTheBackendsRoot`、
-`TestExecuteReportsAMissingProjectRoot`）与 `agentkit/spec/roots_test.go`
-（`TestTheDefaultedProjectRootIsCreated`、`TestANamedProjectRootIsNotCreated`）。
+`TestExecuteReportsAMissingProjectRoot`）、`agentkit/spec/roots_test.go`
+（`TestTheDefaultedProjectRootIsCreated`、`TestANamedProjectRootIsNotCreated`）
+与 `initcmd_test.go`（`TestInitCreatesTheDefaultProjectRoot`、
+`TestInitDoesNotCreateANamedProjectRoot`）。
+
+### 17.2 ★ 「项目根」有两个家：一个在构建期，一个在每轮
+
+**症状**：会话的工作区已经切到某个项目，模型问「列一下当前目录」，列出来的是**另一个目录**：
+
+```
+TOOL_CALL_START name=ls  {"path":"C:\\Users\\<user>\\.openheron"}
+```
+
+★ 而且模型会**自己解释**：「`.` 在这里指的是 `~/.openheron`」——
+★ 它没有猜错路径，它是**按它看到的那条规则**算出来的。
+
+**根因**：★ 「项目根」这个事实有两个家：
+
+| 家 | 说的是哪个目录 |
+|---|---|
+| 构建期的 agent 指令 | **进程级**的默认项目根 `<openheron-root>/projects/default` |
+| 每轮上下文提示词 | **会话级**的、会话所属项目的 root |
+
+★ builder 是进程级的（`main.go:634`），它手里只有默认项目根；
+而会话的 root 是每轮的（`agentkit/run/runtime.go:472`）。
+★ 两行同时在模型眼前，模型挑了**读起来像规则**的那一行
+（`The project root directory is: …`）⇒ `.` 被翻译成默认项目根。
+
+★ 更糟的一层：上游 `ls` 的描述明写「路径必须是绝对路径」
+（eino `adk/middlewares/filesystem/prompt.go:47`），
+★ 所以模型**必须**自己把 `.` 翻译成绝对路径 —— 工具层根本没有机会纠正它。
+★ 也就是说：模型拿到的是错的根，工具层再正确也没用。
+
+**修法**：★ **把家收成一个**，不是再添一句提示：
+
+- 构建期指令**不含任何目录**（`agentkit/build/spec.go:104`）；
+- 那一段文字**只渲染一次**（`agentkit/run/input.go:255`），
+  root agent 从提示词读它，子 agent 从中间件读它（`agentkit/build/projectroot.go:35`）；
+- 子 agent 的中间件在**运行时**从 ctx 取根，因为树是按指纹池化的
+  （`agentkit/build/builder.go:189`）。
+
+**现状**：`已修` —— 构建期指令不再含路径（`agentkit/build/spec.go:104`），
+提示词与子 agent 指令共用同一段渲染（`agentkit/run/input.go:255`、
+`agentkit/run/input.go:286`、`agentkit/build/projectroot.go:35`），
+子 agent 的块由 `build.WithRoundBlock`（`agentkit/build/builder.go:106`）在运行时注入。
+回归用例在 `agentkit/build/projectroot_test.go`
+（`TestTheBuildTimeRuleNamesNoDirectory`、`TestTheDefaultProjectRootNeverReachesAnInstruction`、
+`TestTheSubAgentIsGivenTheRoundsDirectory`）与 `agentkit/run/project_root_test.go`
+（`TestTheRoundBlockIsTheTextThePromptCarries`）。
+
+## 18. 授权模式
+
+### 18.1 ★ 一个动作槽里放两个入口，两份自动边距会各推各的
+
+**症状**：输入框下面那一行的右端，授权选择器与项目按钮**各往一边靠**——
+中间空出一大截，或者两者叠在一起。
+
+**根因**：★ 两个按钮各自带一份 `ms-auto`（外边距自动）。
+在一个 flex 容器里，两份自动边距**各分一份剩余空间**，而不是「都贴到右边」——
+于是两个入口被分开了。
+
+★ 顺带说一句：**下标**那一面已经被 `docs/pitfalls.md` §15.1 管住了
+（两个入口必须住在**同一个** `action` 节点里，顺序固定），但那条规矩管的是
+「位置不能变」，管不了「位置对不对」。
+
+**修法**：**一份自动边距** —— 两个按钮包进**同一个** `span`，自动边距挂在那个 `span` 上
+（`web/src/components/composer.tsx`），项目按钮自己那份去掉。
+
+★ 一般的形状：**一个槽里的多个入口，槽自己负责对齐，入口只管自己的样子。**
+
+**现状**：`已修` —— `web/src/components/composer.tsx` 的 `action` 是一个 `span`，
+带 `ms-auto`，里面依次是 `AuthorizationPicker` 与 `ProjectsButton`；
+`web/src/components/projects-dialog.tsx` 里的 `ms-auto` 已去掉。
+
+### 18.2 ★ 同一个值读两次，两处就可能不一致
+
+**症状**：账本里记着这一轮跑在 `trusted`，而闸门那一轮其实跑在 `default` ——
+或者反过来。★ 没有报错，没有失败，事后复盘时两个地方对不上。
+
+**根因**：★ 会话的授权模式要**用两遍**：进那一轮的上下文（闸门读它），
+进那一轮的账本行（事后查它）。★ **两次读之间，用户可能改了档位** ——
+于是两处不再是同一个值。
+
+★ 这一条不是「读错了」，是**读了两遍**这件事本身：一个会话的属性被读两次，
+中间夹着一个可变的时刻。
+
+**修法**：★ **读一次，两个去处**。模式在 `runClaimedTurn` 里读一次，
+同一个值既进上下文，也写进账本行（`agentkit/run/runtime.go`）。
+★ 账本行那边还多一条：**第一次写下的算数**（`noteAuthorizationMode` 不覆盖）——
+那一轮的模式是它开始时的那一档，后来的任何写都不能改写这件事。
+
+**现状**：`已修` —— `agentkit/run/runtime.go` 一次读取两处投递；
+`agentkit/run/runrow.go` 的 `noteAuthorizationMode` 先到先得。
+回归用例在 `agentkit/run/runrow_authz_test.go`。
+
+## 19. 会话的操作时间线
+
+### 19.1 ★ 一个裸 `bool` 加 `omitempty`，「拒绝」就变成了「没有结论」
+
+**症状**：审批**被拒绝**了，而时间线的那一行里**没有** `approved` 字段 ——
+读的人分不出「这个人说了不」与「这一行压根不关于审批」。
+
+**根因**：`omitempty` 丢的是**零值**，而 `bool` 的零值是 `false`。
+★ 在这里 `false` **是一个答案**（「人说了不」），不是「没有」。
+
+★ 一般的形状：**一个能装两个有意义值的字段，不能用零值表示「缺席」** ——
+「缺席」得是第三种状态，而 `bool` 只有两种。
+
+**修法**：**指针**。`Approved *bool` —— `nil` 是「这一行不关于审批」，
+`&false` 是「人说了不」。
+★ 树里紧挨着就有这个形状的反面教材：`contract.RunEvent.Approved` 是裸 `bool`
+（`contract/runevent.go:132`），所以它**不能**带 `omitempty`。
+
+**现状**：`已修` —— `storage.Operation.Approved` 是 `*bool`，
+`api/v2_operations.go` 的 `operationView.Approved` 也是指针。
+
+### 19.2 ★ 序号与它那一行，必须在同一把锁里落盘
+
+**症状**：时间线的序号是 1、2、3、4，而文件里的行却是 1、3、2、4 ——
+按序号排的界面给出的是一个**没有发生过**的顺序。
+
+**根因**：★ 这个日志有**两个写者** —— API 层（人做的事）与运行时（系统做的事），
+它们没有互相排斥。★ 序号与那一行如果分两次加锁，
+**先拿到号的**可能**后落盘** —— 文件的顺序与号的顺序就此分家。
+
+★ 顺带一提：**号必须从文件播种**。只在内存里数的计数器重启后从 1 开始，
+会撞上文件里已经用过的号。
+
+**修法**：**一把锁护住两件事** —— 分配序号与写这一行在同一个临界区里
+（`storage/filestore/operations.go` 的 `Append`）。
+
+**现状**：`已修` —— `storage/filestore/operations.go`；
+回归用例是 `TestConcurrentAppendsKeepTheFileAndTheNumbersInTheSameOrder`
+（`storage/filestore/operations_test.go`）。
+
+### 19.3 ★ 近 50 条的工作集不是档案
+
+**症状**：要「这个会话批准过什么」的完整答案时，读了会话记录里的 `decisions` ——
+它只给了**最近 50 条**，再往前的那些**一个字都没说**。
+
+**根因**：★ `state.json` 是**整体重写**的，所以住在里面的、会变长的列表必须被裁剪，
+否则每次变化都要重写整份历史。`decisions` 的 50 条上限就是这么来的
+（`storage/filestore/session.go:28`）。★ 它是**界面上的审批卡片**读的工作集，
+不是档案。
+
+★ 一般的形状：**一个被裁剪过的列表，只能回答「最近怎样」**，
+不能回答「一共怎样」—— 读它的人得知道它是哪一种。
+
+**修法**：**完整记录另有一处** —— 会话的操作时间线
+（`docs/session-operations-design.md`）：`approval.resolved` 那一行
+带 `interrupt_id`、`tool_name` 与 `approved`，**永不裁剪**。
+
+★ 而**会话记录才是那个事实的家**：`state.json` 的 `decisions` 与日志的那一行
+由**同一次写入**产生，所以近 50 条之内两者必然一致。
+
+**现状**：`已修` —— `storage/filestore/session.go` 的 `maxAuditRecords`；
+完整的那一份在 `storage/operations.go` 与 `storage/filestore/operations.go`。
+
+## 20. 工具失败
+
+### 20.1 ★ 错误被吞掉之后，只有那一层知道
+
+**症状**：界面说「这次调用成功了」，而模型明明读到了一句
+`[tool error] file not found: ...`。
+
+**根因**：★ safe-tool 中间件把工具的错误**吞成字符串**给模型 ——
+这是对的：模型要的是一个能接着往下说的结果，不是一堆栈。
+★ 但**被吞掉的错误不会自己浮上来**：中间件之上看到的是字符串，
+模型看到的也是字符串。⇒ 「这次调用失败了」这件事，
+**只有中间件那一层知道**，而它把这件事说成了**内容**。
+
+★ 顺带一提：**客户端不能靠嗅探那一行文本补上** ——
+`[tool error]` 是给模型看的约定，不是协议；上游换个说法，界面就跟着撒谎。
+
+**修法**：**在吞掉的地方记下来，往上带** ——
+失败由中间件记进**这一轮**的收集器（`helpers/toolfail.go:123`），
+收集器**随上下文走**（`agentkit/run/runtime.go:497`），
+归约层取走它（`agentkit/emit/emit.go:339`）：既发一帧 `tool_failed`
+（`transport/transport.go:460`），又在归档消息上盖一枚章
+（`message/toolerror.go:23`）。
+
+★ **一个事实，两个读者**：线路上的帧给正在看的界面，
+消息上的章给以后重新加载的界面。⇒ **重新加载不会把失败变成成功**。
+
+★ **中断重跑不算失败**：审批在等答案时，那一轮不是坏了
+（`compose.IsInterruptRerunError`）—— 把它读成失败，审批看起来就像出错。
+
+★ 一般的形状：**被翻译过的东西要同时留着原文** ——
+模型要的是一句能接着说下去的话，界面要的是「这次失败了没有」；
+两者是**同一件事的两种说法**，不是两件事。
+
+**现状**：`已修` —— `helpers/toolfail.go`、`helpers/middleware.go`、
+`contract/runevent.go:43`、`agentkit/emit/emit.go:339`、
+`transport/transport.go:460`、`message/toolerror.go`、
+`api/v2_convert.go:90`、`web/src/lib/events.ts:531`、
+`web/src/lib/store/history.ts:62`、`web/src/components/tool-card.tsx:179`。
+回归用例：`helpers/toolfail_test.go`、`transport/tool_failure_test.go`、
+`api/v2_tool_error_test.go`、`web/test/tool-failure.test.ts`、
+`web/test/e2e/tool-failure.spec.ts`。

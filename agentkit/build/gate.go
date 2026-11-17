@@ -8,7 +8,9 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/ouranoshong/openheron/agentkit/authz"
 	"github.com/ouranoshong/openheron/approval"
+	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/helpers"
 )
 
@@ -40,16 +42,47 @@ func (m *filterMiddleware) BeforeAgent(ctx context.Context, runCtx *adk.ChatMode
 // newApprovalMiddleware gates every ask-tier tool behind a human decision.
 // The gate re-raises itself on resume unless it is the explicit resume target,
 // because the framework may resume a different tool in the same turn.
-func newApprovalMiddleware(p Policy) adk.TypedChatModelAgentMiddleware[*schema.Message] {
+func newApprovalMiddleware(p Policy, sc scope) adk.TypedChatModelAgentMiddleware[*schema.Message] {
 	return &approvalMiddleware{
 		TypedBaseChatModelAgentMiddleware: &adk.TypedBaseChatModelAgentMiddleware[*schema.Message]{},
 		policy:                            p,
+		scope:                             sc,
 	}
 }
 
 type approvalMiddleware struct {
 	*adk.TypedBaseChatModelAgentMiddleware[*schema.Message]
 	policy Policy
+	scope  scope
+}
+
+// waived reports whether this call runs without asking anyone.
+//
+// ★ The mode is read from the **context**, not from the agent: the agent is
+//
+//	pooled by fingerprint and shared by every session, so a mode baked into
+//	it would leak from one session into all the others. The context is per
+//	round, so the mode in it is per session.
+//
+// ★ **Both** call paths ask here — the synchronous one and the streaming
+//
+//	one. The streaming path is not an alternative to the synchronous one: it
+//	is the same gate (see the comment on WrapStreamableToolCall), and a
+//	waiver that only the synchronous path knows about would leave the
+//	tool the policy names most often unguarded.
+func (m *approvalMiddleware) waived(ctx context.Context, name, args string) bool {
+	switch authz.ModeOf(ctx) {
+	case contract.AuthzFull:
+		// ★ Full authorization waives every ask-tier tool. It never widens
+		//   the tool surface: a tool the agent may not use is not in its
+		//   hands at all.
+		return true
+	case contract.AuthzTrusted:
+		return m.scope.trusted(ctx, name, args)
+	default:
+		// ★ The default asks. A context that carries no mode asks too.
+		return false
+	}
 }
 
 func (m *approvalMiddleware) WrapInvokableToolCall(
@@ -69,6 +102,11 @@ func (m *approvalMiddleware) WrapInvokableToolCall(
 	}
 
 	return func(ctx context.Context, args string, opts ...tool.Option) (string, error) {
+		// ★ The mode may waive the nod: a write inside a trusted path, or a
+		//   tool the server declared as a writer.
+		if m.waived(ctx, name, args) {
+			return endpoint(ctx, args, opts...)
+		}
 		decision, runArgs, ok, err := m.decide(ctx, name, args)
 		if err != nil {
 			return "", err
@@ -104,6 +142,11 @@ func (m *approvalMiddleware) WrapStreamableToolCall(
 	}
 
 	return func(ctx context.Context, args string, opts ...tool.Option) (*schema.StreamReader[string], error) {
+		// ★ The same waiver as the synchronous path — one decision, two
+		//   wrappers.
+		if m.waived(ctx, name, args) {
+			return endpoint(ctx, args, opts...)
+		}
 		decision, runArgs, ok, err := m.decide(ctx, name, args)
 		if err != nil {
 			return nil, err
@@ -173,7 +216,7 @@ func toolChain(b boundary, maxDepth int) []adk.TypedChatModelAgentMiddleware[*sc
 		//   reverse), so this one sees the call before the gate does.
 		newCallGuardMiddleware(),
 		newFilterMiddleware(b.table),
-		newApprovalMiddleware(b.policy),
+		newApprovalMiddleware(b.policy, b.scope),
 		newDepthMiddleware(maxDepth),
 		newUnknownToolScope(),
 		helpers.NewSafeToolMiddleware(),

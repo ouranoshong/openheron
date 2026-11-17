@@ -19,7 +19,7 @@ type agentSpec struct {
 	mcpServers []string
 }
 
-func specOf(cfg *spec.Config, projectRoot string) (agentSpec, error) {
+func specOf(cfg *spec.Config) (agentSpec, error) {
 	if cfg == nil {
 		return agentSpec{}, fmt.Errorf("agent: nil config")
 	}
@@ -29,7 +29,7 @@ func specOf(cfg *spec.Config, projectRoot string) (agentSpec, error) {
 	}
 	agents := make(map[string]decl.SubAgentSpec, len(agentSpecs))
 	for id, sp := range agentSpecs {
-		sp.Instruction = instruction(projectRoot, sp.Instruction)
+		sp.Instruction = instruction(sp.Instruction)
 		if sp.MaxIter <= 0 {
 			sp.MaxIter = defaultMaxIterations
 		}
@@ -94,18 +94,23 @@ func (s *agentSpec) subsOf(id string) []decl.SubAgentSpec {
 
 const defaultMaxIterations = 50
 
-func instruction(projectRoot, body string) string {
-	rule := fmt.Sprintf(`You are a helpful assistant exploring a Go codebase.
-
-The project root directory is: %s
+// instruction is the rule every agent starts from.
+//
+// ★ It names **no directory**. ★ The project root is a fact of the round,
+// and a fact of the round has one home: the context. ★ A directory baked
+// in here would be the process's default project root — a different
+// directory from the one the session works in — and a model that is told
+// about two roots picks the one that reads like a rule.
+func instruction(body string) string {
+	rule := `You are a helpful assistant exploring a Go codebase.
 
 - Always pass ABSOLUTE paths to filesystem tools (ls, read_file, glob, grep).
-- When the user names a relative path, prepend the project root.
+- The directory you work in is named in the round's context: when the user
+  names a relative path, use that directory.
 - When writing or editing a file and then claiming it compiles, run the build
   first with the execute tool; never assume a build succeeded.
 - Anything that mutates the machine (write_file, edit_file, execute) requires
-  explicit human approval. Explain what you intend to do before asking.`,
-		projectRoot)
+  explicit human approval. Explain what you intend to do before asking.`
 	if body = strings.TrimSpace(body); body == "" {
 		return rule
 	}

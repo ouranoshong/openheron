@@ -823,6 +823,20 @@ type MCPServerCfg struct {
 	//   has not offered yet. The names are the server's own, not the
 	//   exposed ones: a file speaks its own vocabulary.
 	Allows []string `yaml:"allows"`
+
+	// Writes names the server's own tools that **write into the trusted
+	// paths** — the session's project root, the session's own workspace
+	// and the configuration root.
+	//
+	// ★ It is the same shape as Allows: the server's own names, in the
+	//   server's own vocabulary. ★ It is a **declaration**: openheron
+	//   cannot see where an MCP tool writes, so the file that brings the
+	//   server in is the one that says what its tools do.
+	//
+	// ★ A tool named here runs without a nod **only in the trusted
+	//   authorization mode**. In the default mode it asks like any other,
+	//   and in the full mode everything runs anyway.
+	Writes []string `yaml:"writes"`
 }
 
 // MCPFiles is the mcps/ partition: one entry per server, keyed by its name.

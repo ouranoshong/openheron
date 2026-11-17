@@ -115,7 +115,7 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 
 ## 2. 路由表
 
-★ 全部注册在 `api/v2_files.go` 的 `registerV2Routes`（`api/v2_files.go:40-113`）。
+★ 全部注册在 `api/v2_files.go` 的 `registerV2Routes`（`api/v2_files.go:40-122`）。
 ★ 注册顺序是「**全部 `/v2/*` → SPA `NoRoute` 兜底 → `StaticFS("/")` 兜底**」——
 一条放错位置的路由会静默变成 404，读起来跟「端点没实现」一模一样。
 ★ **这个顺序必须被测试锁住**（`api/v2_test.go:37` 的路由优先级用例）—— 这是典型的
@@ -128,44 +128,46 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 | 3 | `GET` | `/v2/sessions/:id` | 一个会话的详情 |
 | 4 | `PATCH` | `/v2/sessions/:id` | 改名 |
 | 5 | `PATCH` | `/v2/sessions/:id/agent` | 换根 agent |
-| 6 | `DELETE` | `/v2/sessions/:id` | 删会话 |
-| 7 | `GET` | `/v2/sessions/:id/messages` | 历史回放 + 待批 + 用量 |
-| 8 | `POST` | `/v2/sessions/:id/abort` | 停止 |
-| 9 | `POST` | `/v2/sessions/:id/compact` | 压缩上下文 |
-| 10 | `GET` | `/v2/sessions/:id/runs` | **账本扫描**：这个会话跑过什么 |
-| 11 | `GET` | `/v2/sessions/:id/runs/:runId` | 账本里的一行 |
-| 12 | `GET` | `/v2/sessions/:id/events` | ★ **会话的公告通道**（§7） |
-| 13 | `POST` | `/v2/sessions/:id/files` | 上传（多文件） |
-| 14 | `GET` | `/v2/sessions/:id/files` | 列工作区 |
-| 15 | `GET` | `/v2/sessions/:id/files/raw` | 一个文件的字节（预览用） |
-| 16 | `DELETE` | `/v2/sessions/:id/files` | 删一个文件 |
-| 17 | `GET` | `/v2/project/files` | 项目文件（composer 的 `@` 提示用） |
-| 18 | `GET` | `/v2/commands` | 斜杠命令表 |
-| 19 | `GET` | `/v2/projects` | 项目表 |
-| 20 | `POST` | `/v2/projects` | 建项目 |
-| 21 | `PATCH` | `/v2/projects/:id` | 改项目（目录 / 名字） |
-| 22 | `DELETE` | `/v2/projects/:id` | 删项目 |
-| 23 | `POST` | `/v2/fs/pick-directory` | 打开**操作系统**的目录选择器 |
-| 24 | `POST` | `/v2/run` | 跑一轮（提问 / 恢复审批） |
-| 25 | `GET` | `/v2/skills` | 技能清单 |
-| 26 | `GET` | `/v2/agents` | agent 清单 |
-| 27 | `GET` | `/v2/agents/:agentId` | 一个 agent + 它的生效工具表 |
-| 28 | `GET` | `/v2/mcps` | MCP 服务器与它们的工具 |
-| 29 | `GET` | `/v2/config` | 配置视图 |
-| 30 | `GET` | `/v2/health` | 健康 |
-| 31 | `GET` | `/v2/runtime` | 运行时与一致性巡检 |
-| 32 | `GET` | `/v2/settings` | 配置树的清单 |
-| 33 | `GET` | `/v2/settings/item` | 读一个配置文件 |
-| 34 | `POST` | `/v2/settings/item` | 写一个配置文件 |
-| 35 | `PUT` | `/v2/settings/item` | 同上（`PUT` 是同一支） |
-| 36 | `DELETE` | `/v2/settings/item` | 删一个配置文件 |
-| 37 | `POST` | `/v2/settings/validate` | 校验一份配置草稿 |
-| 38 | `GET` | `/v2/secrets` | 密钥清单（**永不含值**） |
-| 39 | `PUT` | `/v2/secrets/:group/:name` | 写一把钥匙 |
-| 40 | `DELETE` | `/v2/secrets/:group/:name` | 删一把钥匙 |
-| 41 | `DELETE` | `/v2/secrets/:group` | 删一个组 |
+| 6 | `PATCH` | `/v2/sessions/:id/authorization` | ★ 改**会话的授权模式**（§3.6） |
+| 7 | `DELETE` | `/v2/sessions/:id` | 删会话 |
+| 8 | `GET` | `/v2/sessions/:id/messages` | 历史回放 + 待批 + 用量 |
+| 9 | `POST` | `/v2/sessions/:id/abort` | 停止 |
+| 10 | `POST` | `/v2/sessions/:id/compact` | 压缩上下文 |
+| 11 | `GET` | `/v2/sessions/:id/runs` | **账本扫描**：这个会话跑过什么 |
+| 12 | `GET` | `/v2/sessions/:id/runs/:runId` | 账本里的一行 |
+| 13 | `GET` | `/v2/sessions/:id/operations` | ★ **会话的操作时间线**：这个会话上发生过什么，按顺序（§7.5） |
+| 14 | `GET` | `/v2/sessions/:id/events` | ★ **会话的公告通道**（§7） |
+| 15 | `POST` | `/v2/sessions/:id/files` | 上传（多文件） |
+| 16 | `GET` | `/v2/sessions/:id/files` | 列工作区 |
+| 17 | `GET` | `/v2/sessions/:id/files/raw` | 一个文件的字节（预览用） |
+| 18 | `DELETE` | `/v2/sessions/:id/files` | 删一个文件 |
+| 19 | `GET` | `/v2/project/files` | 项目文件（composer 的 `@` 提示用） |
+| 20 | `GET` | `/v2/commands` | 斜杠命令表 |
+| 21 | `GET` | `/v2/projects` | 项目表 |
+| 22 | `POST` | `/v2/projects` | 建项目 |
+| 23 | `PATCH` | `/v2/projects/:id` | 改项目（目录 / 名字） |
+| 24 | `DELETE` | `/v2/projects/:id` | 删项目 |
+| 25 | `POST` | `/v2/fs/pick-directory` | 打开**操作系统**的目录选择器 |
+| 26 | `POST` | `/v2/run` | 跑一轮（提问 / 恢复审批） |
+| 27 | `GET` | `/v2/skills` | 技能清单 |
+| 28 | `GET` | `/v2/agents` | agent 清单 |
+| 29 | `GET` | `/v2/agents/:agentId` | 一个 agent + 它的生效工具表 |
+| 30 | `GET` | `/v2/mcps` | MCP 服务器与它们的工具 |
+| 31 | `GET` | `/v2/config` | 配置视图 |
+| 32 | `GET` | `/v2/health` | 健康 |
+| 33 | `GET` | `/v2/runtime` | 运行时与一致性巡检 |
+| 34 | `GET` | `/v2/settings` | 配置树的清单 |
+| 35 | `GET` | `/v2/settings/item` | 读一个配置文件 |
+| 36 | `POST` | `/v2/settings/item` | 写一个配置文件 |
+| 37 | `PUT` | `/v2/settings/item` | 同上（`PUT` 是同一支） |
+| 38 | `DELETE` | `/v2/settings/item` | 删一个配置文件 |
+| 39 | `POST` | `/v2/settings/validate` | 校验一份配置草稿 |
+| 40 | `GET` | `/v2/secrets` | 密钥清单（**永不含值**） |
+| 41 | `PUT` | `/v2/secrets/:group/:name` | 写一把钥匙 |
+| 42 | `DELETE` | `/v2/secrets/:group/:name` | 删一把钥匙 |
+| 43 | `DELETE` | `/v2/secrets/:group` | 删一个组 |
 
-★ **扫描的路由只读**（`api/v2_files.go:57`）—— 一条读路由若会写账本，扫描就分不清
+★ **扫描的路由只读**（`api/v2_files.go:61`）—— 一条读路由若会写账本，扫描就分不清
 「是什么」与「刚被修好了」。
 
 ★ **主机守卫**在路由之外：`api/guard.go` 的 `Guard.Reject`（`api/guard.go:61`）按
@@ -180,12 +182,27 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
 请求体可选：
 
 ```json
-{ "agentId": "task", "projectId": "11111111-1111-4111-8111-111111111111" }
+{
+  "agentId": "task",
+  "projectId": "11111111-1111-4111-8111-111111111111",
+  "authorizationMode": "trusted",
+  "authorizationConfirmed": false
+}
 ```
 
 - `agentId` 可选：**建会话时定根**，省掉「先建、再 `PATCH` 改根」的一次往返。
 - `projectId` 可选：会话归属哪个项目。★ 归属**不可改** —— 见
   [projects-design.md](./projects-design.md) §2.3。
+- `authorizationMode` 可选：**建会话时定档**（`default` / `trusted` / `full`）。
+  ★ 不带就是 `default`，与从前一样。★ 形状与
+  `PATCH /v2/sessions/{id}/authorization` **同形**，因为说的是同一件事：
+  档位属于会话（[authorization-design.md](./authorization-design.md) §4）。
+  ★ 校验**在建会话之前**做完：不认识的档位名 → **400 `invalid_body`**；
+  `full` 而没有 `authorizationConfirmed` → **409 `confirmation_required`**；
+  ★ 两种拒绝都**不留下会话**。
+  ★ 档位**写失败就把刚建的会话删掉** ⇒ 「要么生来就是这个档，要么这个会话不存在」。
+- `authorizationConfirmed` 可选：那个人已经被问过、并且说了「是」。
+  ★ 服务端**照样要求**它 —— 那是客户端的话，服务端拿它对照自己手里的规矩。
 - 名字先校验再建会话：写错时**不留下一个空会话**。
 
 **201 Created**
@@ -200,12 +217,18 @@ cd web && bun run smoke:hitl               # 审批 resume 走通
   "state": "idle",
   "hasPendingApproval": false,
   "agentId": "main",
-  "projectId": ""
+  "projectId": "",
+  "authorizationMode": "default",
+  "authorizationConfirmed": false
 }
 ```
 
 ★ `agentId` 与 `projectId` **总是出现**：空串就是答案「没选」，而缺字段说的是
 「这个版本不知道有这回事」—— 另一件事。
+★ `authorizationMode` 与 `authorizationConfirmed` **同样总是出现**：
+前者是这一档（`default` / `trusted` / `full`），后者是「这个会话确认过完全授权没有」。
+★ 后者**必须**也发出来：第二个界面要知道**不必再问**，
+否则它会多弹一次确认框（§3.6）。
 
 ★ **默认 agent 是 main，且不是配置项**：「谁是默认」不是配置项，只是「新会话没指定
 时用哪个」的约定。
@@ -277,7 +300,35 @@ URL 会静默造出会话**。现在只有 `POST /v2/sessions` 一个创建入�
 ★ **运行中直接 409 而不是排队**：切换发生在轮次中途会留下「前半段按 main 跑、
 后半段按 task 归档」的记录，而两边都自洽 —— 这种历史最难查。
 
-### 3.6 `DELETE /v2/sessions/{threadId}`
+### 3.6 `PATCH /v2/sessions/{threadId}/authorization`
+
+改这个会话的**授权模式**（`default` / `trusted` / `full`）——
+**会话的属性**，不是配置项，也不进 `POST /v2/run` 的请求体。
+完整的设计在 `docs/authorization-design.md`。
+
+**请求** `{"mode": "trusted"}` 或 `{"mode": "full", "confirm": true}` →
+**200 OK** 返回更新后的 meta（形状同 §3.1）。
+
+| 场景 | 状态码 | `code` |
+|---|---|---|
+| 档位名不认识 | 400 | `invalid_body` |
+| 切 `full` 而本会话**还没确认过**、请求里也没有 `confirm` | 409 | `confirmation_required` |
+| 会话不存在 | 404 | `thread_not_found` |
+
+★ **完全授权要一次确认，每个会话一次。** 服务端记着「本会话已确认过」
+（会话记录里的一个字段），⇒ 第二次切 `full` **不再问**；
+换一个会话**重新问**。★ 为什么在**服务端**拦：这一棵树的规矩是「服务端的答案是权威」——
+若确认只是客户端的事，一个忘了弹框的客户端就能把会话推进完全授权，
+而这恰恰是**最不该靠客户端自觉**的一步。
+
+★ **`confirmation_required` 是 409 而不是 400**：请求本身是好的，
+同一个请求体加上 `confirm: true` 就被接受 ⇒ 客户端读到它时的动作是
+「问那个人，然后重发」，不是「你的请求有问题」。
+
+★ **改模式不需要会话空闲。** 换 agent 要空闲（§3.5），因为换 agent 会换掉那一轮的 agent；
+模式不会：**已经跑起来的那一轮，用的是它开始时的那一档** ⇒ 改的是**下一轮**。
+
+### 3.7 `DELETE /v2/sessions/{threadId}`
 
 **200 OK** `{"threadId":"…","deleted":true}`；**404** 会话不存在。
 
@@ -438,13 +489,13 @@ AG-UI 的 resume entry 带 `status`（`resolved` / `cancelled`），但那描述
 2. **interrupt 的 message 不能用 `%v`。** `fmt.Sprintf("%v", ic.Info)` 会把
    `*ApprovalInfo` 打平成 `&{write_file {"file_path": ...}}` —— 这段文本经事件流直达
    前端审批卡，等于把内部 Go 表示泄漏成界面文案。本仓库走 `describe(ic.Info)`
-   （`agentkit/emit/emit.go:444`），守着的测试是
+   （`agentkit/emit/emit.go:478`），守着的测试是
    `agentkit/emit/interrupt_test.go:14-45` 的 `TestTheInterruptDescribesTheApprovalInfo`。
 
 3. **`state` 停在 `running`。** 轮次完成后 turn 句柄仍被持有，于是
    `GET /v2/sessions/{id}` 永远报 `running`。★ 根因是「loop 还活着」（在等下一条
    item）被当成了「有活动在进行」—— 这两件事不等价。修法是 turn 一旦上报就释放引用
-   （`agentkit/run/bridge.go:73-82` 的 `markTurnDone`），★ **只清匹配的那个句柄**，免得
+   （`agentkit/run/bridge.go:74-83` 的 `markTurnDone`），★ **只清匹配的那个句柄**，免得
    误伤期间被替换掉的 turn。整套运行时设计在 `docs/runtime-design.md`。
 
 4. **SSE 分帧是 `data:{`，不是 `data: `。** `data:{...}`（冒号后无空格）是合法的
@@ -465,11 +516,11 @@ AG-UI 的 resume entry 带 `status`（`resolved` / `cancelled`），但那描述
    `"reasoning"`。★ Go 侧 `events.Validate()` 不查这个字段，契约测试全绿也照样漏；
    前端拒绝后整条事件丢弃，表现为「推理一出现，后面所有内容都没了」。★ 这类**只有
    单侧有的校验**是跨语言协议最危险的地方：Go 侧加一条断言只能保证「我们自己没写
-   错」，保证不了「对方认不认」。本仓库：`transport/transport.go:398` 的
+   错」，保证不了「对方认不认」。本仓库：`transport/transport.go:400` 的
    `reasoningRole`。
 
 7. **`TOOL_CALL_RESULT` 的 `messageId` 不是 callId。** 它是一次新生成的 `uuid`
-   （`transport/transport.go:445`）。★ 前端按 `toolCallId` 回填就够（工具调用可能
+   （`transport/transport.go:447`）。★ 前端按 `toolCallId` 回填就够（工具调用可能
    挂在别的 `parentMessageId` 上），但这个字段确实存在 —— 它是在把前端的 fixture 从
    `Record<string, unknown>[]` 改成 `AgEvent[]` 之后冒出来的。
 
@@ -477,7 +528,7 @@ AG-UI 的 resume entry 带 `status`（`resolved` / `cancelled`），但那描述
 
 ★ **sink 断了要停止渲染，但必须继续消费事件流** —— 否则归档的消息会缺，`Outcome`
 不完整。★ 这条是上游从 `a2ui` 照搬来的，本仓库的传输层也守着它：写失败之后
-`emit` 直接返回（`transport/transport.go:220`），而 `Render` 的循环**不退出** ——
+`emit` 直接返回（`transport/transport.go:222`），而 `Render` 的循环**不退出** ——
 事件继续被消费掉。
 
 ★ **契约测试用 SDK 自带的 `events.ValidateSequence`**，它强制校验
@@ -511,7 +562,7 @@ AG-UI 的 resume entry 带 `status`（`resolved` / `cancelled`），但那描述
 ★ `messages` 是 **AG-UI 原生 `types.Message`**，前端用**同一个事件归约器**水合流式
 与回放两路数据 —— 一套状态机，两个数据源。
 
-★ **`?agent=xxx` 按 agent 过滤消息**（`api/v2_sessions.go:326`）：
+★ **`?agent=xxx` 按 agent 过滤消息**（`api/v2_sessions.go:422`）：
 
 | 情形 | 响应 |
 |---|---|
@@ -558,7 +609,7 @@ AG-UI 的 resume entry 带 `status`（`resolved` / `cancelled`），但那描述
 
 ---
 
-## 7. 会话的公告通道
+## 7. 会话的公告通道与操作时间线
 
 ### 7.1 `GET /v2/sessions/{threadId}/events`
 
@@ -659,6 +710,67 @@ AG-UI 的 resume entry 带 `status`（`resolved` / `cancelled`），但那描述
 ★ **未知的事实不是错误**：通道是活的通知路径，服务端会往里加事实。一个**半懂**的
 帧才是问题（没有 id 的审批指不到任何一张卡），所以它被丢掉。
 
+### 7.5 `GET /v2/sessions/{threadId}/operations`
+
+★ 这是本文的**新增部分**，上游那份文档里没有。
+
+它是**落盘**的那一份：会话目录下的 `operations.jsonl`，一行一条操作事件。
+
+★ **它和通道是一对，但不是同一个东西**：通道说「有事发生」，日志说「发生了什么」。
+通道是内存里的实时事实（进程一停就没了），日志是**永不裁剪**的时间线。
+★ **通道里那三个事实，日志里都有对应的行** —— 但通道仍然只说「发生了」，
+因为它得马上送到，而日志要落盘。
+
+**查询参数**
+
+| 参数 | 意思 |
+|---|---|
+| `after=<seq>` | 只给 `seq` 更大的（增量刷新） |
+| `limit=<n>` | 在选中的集合里**取最后 n 条**（顺序仍然是升序） |
+
+★ **顺序是升序**（最早在前）：时间线是**从上往下读**的，像日志，不像消息列表那样
+倒序。★ 两个参数可以同时给：先按 `after` 过滤，再取最后 `limit` 条。
+★ `after` 不是数字或 `limit` 是负数 → **400** `invalid_body`。
+
+**响应**
+
+```json
+{
+  "threadId": "3f2a1c8e-…",
+  "total": 42,
+  "items": [
+    { "seq": 1, "at": "2026-11-16T12:39:50.1Z", "kind": "session.created", "actor": "user", "agentId": "main" },
+    { "seq": 2, "at": "2026-11-16T12:40:02.4Z", "kind": "run.started", "actor": "system", "runId": "01J8X…", "turnKind": "query" }
+  ]
+}
+```
+
+★ `total` 是**过滤后**的条数，`items` 按 `seq` 升序。
+★ 线上的形状是 camelCase，文件里的形状是 snake_case —— 与账本和它的视图同一刀。
+
+**十一种 `kind`**
+
+| `kind` | `actor` | 带什么 |
+|---|---|---|
+| `session.created` | `user` | `agentId`、`projectId` |
+| `session.renamed` | `user` | `title` |
+| `session.agent_changed` | `user` | `agentId` |
+| `session.authorization_confirmed` | `user` | `mode` |
+| `session.authorization_changed` | `user` | `mode` |
+| `file.uploaded` | `user` | `path`、`name`、`size` |
+| `file.deleted` | `user` | `path` |
+| `run.started` | `system` | `runId`、`turnKind` |
+| `run.finished` | `system` | `runId`、`state` |
+| `approval.requested` | `system` | `interruptId`、`toolName` |
+| `approval.resolved` | `user` | `interruptId`、`toolName`、`approved` |
+
+★ **`approved` 是一个可选的布尔**：被拒绝的审批也要能显示，所以它不能是一个
+「没有 `omitempty` 的裸 bool 之外的东西」—— 它是**指针**，缺席表示「这一行不关于审批」。
+
+★ **这份日志是投影，不是真相。** 没有任何一处逻辑把它当权威来读：闸门读会话记录，
+轮次状态读账本，对话读 transcript。**两者不一致时，家说了算。**
+（设计见 `docs/session-operations-design.md`。）
+
 ---
 
 ## 8. 运行控制
@@ -718,7 +830,7 @@ checkpoint 就等于假装什么都没发生。
 **原样送回来**，所以它必须是服务端自己认得的名字。
 
 ★ **`name` 是用户认得的那个名字**，盘上那个是带哈希的：给模型看的是 workspace，
-而哈希名字对它毫无意义（`api/v2_files.go:234` 的 `imaging.DisplayName`）。
+而哈希名字对它毫无意义（`api/v2_files.go:243` 的 `imaging.DisplayName`）。
 
 ★ 图片在**服务端**压缩，格式保持（PNG 还是 PNG，透明像素还在）；其它格式原样通过。
 
@@ -732,7 +844,7 @@ checkpoint 就等于假装什么都没发生。
 
 ### 9.3 `GET /v2/sessions/{tid}/files/raw`
 
-一个文件的字节，给预览用（`api/v2_files.go:291`）。
+一个文件的字节，给预览用（`api/v2_files.go:311`）。
 
 ★ **它从不解释内容**，只有四种回答：
 
@@ -933,6 +1045,7 @@ MCP 服务器与它们的工具。★ 挂载即授予：收窄 MCP 工具的地�
 | `thread_not_found` | 404 | 会话不存在或 id 非法 |
 | `project_not_found` | 404 | 项目不存在 |
 | `session_busy` / `interrupt_mismatch` / `no_pending_interrupt` / `no_checkpoint` / `turn_superseded` / `turn_start_timeout` / `config_write_conflict` | 409 | 状态冲突 |
+| `confirmation_required` | 409 | ★ 完全授权还没被确认（**请求本身是好的**，加上 `confirm: true` 就接受 —— §3.6） |
 | `run_not_live` | 404 | ★ 挂回去的那一轮没了（**不是 409**：它不是冲突，是「去读历史」） |
 | `file_too_large` | 413 | 上传超限 |
 | `config_would_break_merge` | 422 | 写入会破坏继承链合并 |
@@ -942,7 +1055,7 @@ MCP 服务器与它们的工具。★ 挂载即授予：收窄 MCP 工具的地�
 | `secret_unavailable` | 503 | 没有可用的密钥后端 |
 | `internal` | 500 | 未分类 |
 
-★ `session_busy` **可重试**（`api/v2_types.go:124`）：冲突会自己消失 —— 那一轮结束
+★ `session_busy` **可重试**（`api/v2_types.go:132`）：冲突会自己消失 —— 那一轮结束
 了，或者审批被答了。★ 它从前叫 `agent_busy`，那个名字**是错的**：它的三个调用点
 （切 agent、压缩、跑一轮）守的都是**会话**，而并行委派意味着几个 agent 同时忙是
 合法的 —— 把 `agent_busy` 读成「这个 agent 在忙」的客户端会得出恰恰相反的结论。
@@ -985,7 +1098,7 @@ its result came back`）—— 模型会照着编出来的原因往下推，说�
 > `v2Fail`（不带 cause、不记 5xx 日志）—— ★ 因为那时根本没有「内部错误」可带。位置：
 > `api/v2_introspect.go:33`、`api/v2_project.go:51`、`api/v2_settings.go:57`。
 
-★ `cause` 是 `errBody` 的**非导出字段**（`api/v2_types.go:78`）：「日志里有、客户端
+★ `cause` 是 `errBody` 的**非导出字段**（`api/v2_types.go:86`）：「日志里有、客户端
 看不到」由 `encoding/json` 只序列化导出字段这条规则保证，不靠文档约定。★ error 里常
 带绝对路径，回给客户端对用户没帮助，只会在转贴 issue 时泄露本地目录结构。
 
@@ -1000,14 +1113,15 @@ its result came back`）—— 模型会照着编出来的原因往下推，说�
 |---|---|---|---|
 | 1 | AG-UI 标准的 `usage[]` | SDK 的 `events.WithUsage` 在本仓库零调用；用量只在 `/messages` | 做不做 —— 它与 `context_usage` 是**两个轴**（逐 (provider, model) 的厂商记账 vs 逐 agent 的占用） |
 | 2 | 「是谁答的审批」 | 帧里带着 `approved` 与 `reason`，但没有答的人 | 说「谁」就得先有「谁」的身份 |
-| 3 | 会话的公告通道**回放** | 通道没有窗口，过去只归扫描 | 要不要给后来者补一段 |
+| 3 | 会话的公告通道**回放** | 通道没有窗口；过去现在多了一份落盘的时间线（§7.5） | 要不要给**通道本身**补一段回放 |
 | 4 | 公告通道的**终态帧** | 没有：它在客户端离开时结束 | 要不要一个「这个会话结束了」的帧 |
 | 5 | `POST /v2/run` 的**流内用量** | 用量在 `/messages` | 与第 1 条同源 |
 | 6 | `/v2/sessions` 的**分页** | 一次全给 | 会话多了以后要不要游标 |
 
 ★ **第 3 条与第 4 条是一件事的两面**：通道是「活的通知」，而一个**晚到的**界面需要
-「过去」。★ 现在两者分工：过去归扫描（`/messages` + `/runs`），通知归通道。★ 补回放
-会让「晚到」与「一直在听」这两种界面拿到同一种待遇，代价是第三份要裁剪的东西。
+「过去」。★ 现在两者分工：过去归扫描（`/messages` + `/runs`）与**操作时间线**
+（`/operations`，§7.5），通知归通道。★ 补回放会让「晚到」与「一直在听」这两种界面拿到
+同一种待遇，代价是第三份要裁剪的东西。
 
 ★ **第 6 条的代价**是一次全量列会话要重开每个会话的文件 —— 而标题已经缓存了，
 所以它现在是「读一个目录」，不是「读 n 个文件」。
@@ -1020,14 +1134,15 @@ its result came back`）—— 模型会照着编出来的原因往下推，说�
 
 ### A.1 路由与错误
 
-- `api/v2_files.go` — `registerV2Routes`(:40)、扫描的路由只读(:57)、公告通道的路由(:64)、
-  `v2UploadFiles`(:138)、`maxUploadBytes`(:136)、`v2RawFile`(:291)、`isPreviewImage`(:361)、
-  `isTextualMime`(:375)、`listWorkspace`(:438)
+- `api/v2_files.go` — `registerV2Routes`(:40)、扫描的路由只读(:61)、操作时间线的路由(:67)、
+  公告通道的路由(:73)、`v2UploadFiles`(:147)、`maxUploadBytes`(:145)、`v2RawFile`(:311)、
+  `isPreviewImage`(:381)、`isTextualMime`(:395)、`listWorkspace`(:458)
 - `api/v2_types.go` — 错误码(:28)、`codeSessionBusy`(:48)、`codeRunNotLive`(:58)、
-  `errBody`(:63)、`cause`(:78)、`v2Err`(:82)、`v2FailInternal`(:99)、`v2FailErr`(:108)、
-  `threadState`(:151)、`threadMeta`(:159)、`pendingView`(:193)、`threadDetail`(:212)、
-  `runView`(:233)、`runsView`(:256)、`usageView`(:292)、`contextUsageView`(:306)、
-  `messagesView`(:341)、`toPendingViews`(:351)、`toPendingView`(:363)、`toUsageView`(:383)
+  `codeConfirmationRequired`(:66)、`errBody`(:71)、`cause`(:86)、`v2Err`(:90)、
+  `v2FailInternal`(:107)、`v2FailErr`(:116)、
+  `threadState`(:159)、`threadMeta`(:167)、`pendingView`(:216)、`threadDetail`(:235),
+  `runView`(:256)、`runsView`(:279)、`usageView`(:315)、`contextUsageView`(:329),
+  `messagesView`(:364)、`toPendingViews`(:374)、`toPendingView`(:386)、`toUsageView`(:406)
 - `api/guard.go` — 主机守卫(:46)、`Reject`(:61)、`sameSite`(:93)、`mutating`(:122)、
   `LoopbackOnly`(:136)
 - `api/v2_run.go` — `runInput`(:28)、`runAttachment`(:91)、`resumeEntry`(:108)、
@@ -1036,11 +1151,12 @@ its result came back`）—— 模型会照着编出来的原因往下推，说�
 
 ### A.2 会话与项目
 
-- `api/v2_sessions.go` — `v2CreateSession`(:29)、`v2ListSessions`(:93)、`v2GetSession`(:118)、
-  `v2RenameSession`(:155)、`v2SwitchAgent`(:210)、`resolveAgentID`(:246)、
-  `ensureAgentIdle`(:259)、`v2DeleteSession`(:288)、`v2Messages`(:317)、
-  `sessionUsage`(:390)、`v2Abort`(:434)、`v2SessionRuns`(:471)、`v2SessionRun`(:492)、
-  `metaOf`(:527)、`stateOf`(:559)
+- `api/v2_sessions.go` — `v2CreateSession`(:29)、`v2ListSessions`(:103)、`v2GetSession`(:128)、
+  `v2RenameSession`(:165)、`v2SwitchAgent`(:225)、`resolveAgentID`(:266)、
+  `ensureAgentIdle`(:279)、`v2DeleteSession`(:308)、`v2Messages`(:337)、
+  `sessionUsage`(:410)、`v2Abort`(:454)、`v2SessionRuns`(:491)、`v2SessionRun`(:512)、
+  `metaOf`(:547)、`stateOf`(:585)
+- `api/v2_authorization.go` — `authorizationReq`(:15)、`v2SetAuthorization`(:41)（§3.6）
 - `api/v2_projects.go` — `codeProjectNotFound`(:20)、`projectView`(:29)、`projectScope`(:44)、
   `v2Projects`(:57)、`projectSnapshot`(:107)、`v2CreateProject`(:143)、`v2UpdateProject`(:183)、
   `v2DeleteProject`(:225)
@@ -1077,9 +1193,9 @@ its result came back`）—— 模型会照着编出来的原因往下推，说�
   `writeHeldApproval` 调用(:219)、`closeApprovalRow` 调用(:220)、`closeOpenRow` 调用(:221)、
   宣布待批(:232)、`publisher.Close()`(:237)、`releaseRound` 调用(:244)、
   `closeApprovalRow`(:255)、`closeOpenRow`(:277)、`writeHeldApproval`(:308)
-- `agentkit/run/runtime.go` — `busy` 的判定(:304)、
-  `releaseClaim`(:409)、`runClaimedTurn`(:440)、`announceRunStarted` 调用(:469)、
-  `Resume`(:622)、`announceApprovalResolved` 调用(:676)、`StatusOf`(:897)、`LiveRun`(:1011)
+- `agentkit/run/runtime.go` — `busy` 的判定(:305)、
+  `releaseClaim`(:407)、`runClaimedTurn`(:450)、`announceRunStarted` 调用(:496)、
+  `Resume`(:649)、`announceApprovalResolved` 调用(:703)、`StatusOf`(:937)、`LiveRun`(:1051)
 - `agentkit/run/turn.go` — `pin`(:101)、`holdPending`(:228)、`takePending`(:233)、
   `holdsSlot`(:262)、`setRow`(:357)、`closeRow`(:390)
 - `contract/runevent.go` — `RunEventKind`(:13)、`RunEventApprovalPending`(:59)、
@@ -1091,10 +1207,30 @@ its result came back`）—— 模型会照着编出来的原因往下推，说�
 - `api/v2_session_events.go` — `sessionPoll`(:20)、`v2SessionEvents`(:40)
 - `web/src/lib/session-events.ts` — `readInterrupt`(:60)、`parseSessionFact`(:80)、
   `applySessionFact`(:126)
-- `web/src/lib/store/actions.ts` — `watchSession`(:935)、`applySessionFact`(:988)、
-  `followRun`(:1009)、`recoverRound`(:770)
+- `web/src/lib/store/actions.ts` — `watchSession`(:979)、`applySessionFact`(:1032)、
+  `followRun`(:1060)、`recoverRound`(:814)
 
-### A.5 实测与传输层（§5.1、§5.2、§13.3、§13.4）
+### A.5 会话的操作时间线（§7.5）
+
+- `storage/operations.go` — `OperationKind`(:14)、十一种 kind(:16)、`OperationActor`(:48)、
+  `Operation`(:68)、`OperationLog`(:119)
+- `storage/filestore/operations.go` — `operationsFile`(:27)、`fileOperationLog`(:35)、
+  `newOperationLog`(:52)、`operationsPath`(:64)、`Append`(:75)、`seedLocked`(:125)、
+  `List`(:149)、`readOperationRows`(:162)
+- `storage/storage.go` — `Session.Operations()`(:184)
+- `storage/filestore/session.go` — `FileSession.Operations()`(:359)
+- `api/v2_operations.go` — `operationView`(:20)、`operationsView`(:41)、
+  `toOperationView`(:48)、`v2Operations`(:78)、`operationsOf`(:136)、
+  `recordOperation`(:152)
+- `api/v2_sessions.go` — 建会话(:90)、改名(:185)、换 agent(:255)
+- `api/v2_authorization.go` — 确认(:87)、改档位(:97)
+- `api/v2_files.go` — 上传(:252)、删文件(:535)
+- `agentkit/run/operations.go` — `recordOperation`(:21)
+- `agentkit/run/runtime.go` — 轮次开始(:398)、审批解决(:761)
+- `agentkit/run/runrow.go` — `recordFinished` 调用(:92)、`recordFinished`(:101)
+- `agentkit/run/bridge.go` — 审批挂起(:331)
+
+### A.6 实测与传输层（§5.1、§5.2、§13.3、§13.4）
 
 - `approval/approval.go` — `gob.Register`(:18)、`gob.Register`(:19)
 - `approval/approval_test.go` — `TestDecisionSurvivesGob`(:9)

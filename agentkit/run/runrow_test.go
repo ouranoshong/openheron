@@ -353,7 +353,7 @@ func TestATurnThatFailedBeforeItsRowArrivedStillClosesTheRow(t *testing.T) {
 	turn := newTurnHandle("s1", contract.TurnResume)
 	turn.fail(ErrSuperseded)
 
-	row := newRunRow(nil, storage.Run{RunID: "r1", SessionID: "s1"}, nil)
+	row := newRunRow(nil, nil, storage.Run{RunID: "r1", SessionID: "s1"}, nil)
 	turn.setRow(row)
 
 	if !row.isClosed() {
@@ -376,7 +376,7 @@ func TestTheFirstFailureIsTheRowsEnding(t *testing.T) {
 	turn.fail(ErrSuperseded)
 	turn.fail(ErrStartTimeout)
 
-	row := newRunRow(nil, storage.Run{RunID: "r1", SessionID: "s1"}, nil)
+	row := newRunRow(nil, nil, storage.Run{RunID: "r1", SessionID: "s1"}, nil)
 	turn.setRow(row)
 
 	if row.run.ErrorCode != "superseded" {

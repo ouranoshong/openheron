@@ -58,6 +58,9 @@ type FileSession struct {
 	// ledger is this session's run ledger. It lives next to the transcript,
 	// in the same directory.
 	ledger *fileRunLedger
+	// operations is this session's operation log. It lives in the same
+	// directory too.
+	operations *fileOperationLog
 
 	messages []*schema.Message
 	loaded   bool
@@ -70,6 +73,13 @@ type FileSession struct {
 	count     int
 	agentID   string
 	decisions []storage.ApprovalRecord
+	// mode is the session's authorization mode, and confirmed says whether
+	// this session has confirmed full authorization once.
+	//
+	// ★ Both are cached like the title: the write path reads them under the
+	//   lock and the state file is the truth behind them.
+	mode      contract.AuthorizationMode
+	confirmed bool
 }
 
 // setLog installs the logger on the session and the two stores that live
@@ -93,6 +103,9 @@ func (fs *FileSession) setLog(log *slog.Logger) {
 	if fs.ledger != nil {
 		fs.ledger.log = log
 	}
+	if fs.operations != nil {
+		fs.operations.log = log
+	}
 }
 
 func (fs *FileSession) logger() *slog.Logger {
@@ -105,10 +118,11 @@ func (fs *FileSession) logger() *slog.Logger {
 // newSession assembles a session object without touching the disk.
 func newSession(root, id, legacyCkptRoot string) *FileSession {
 	return &FileSession{
-		root:   root,
-		id:     id,
-		ckpt:   newfileCheckpointStore(root, id, legacyCkptRoot),
-		ledger: newRunLedger(root, id),
+		root:       root,
+		id:         id,
+		ckpt:       newfileCheckpointStore(root, id, legacyCkptRoot),
+		ledger:     newRunLedger(root, id),
+		operations: newOperationLog(root, id),
 	}
 }
 
@@ -301,12 +315,14 @@ func (fs *FileSession) Append(msg *schema.Message) error {
 // ★ The caller must hold fs.mu: it reads the cached fields.
 func (fs *FileSession) stateForWrite() state {
 	st := state{
-		Title:        fs.title,
-		MessageCount: fs.count,
-		CreatedAt:    fs.createdAt,
-		UpdatedAt:    fs.updatedAt,
-		AgentID:      fs.agentID,
-		Decisions:    append([]storage.ApprovalRecord(nil), fs.decisions...),
+		Title:                  fs.title,
+		MessageCount:           fs.count,
+		CreatedAt:              fs.createdAt,
+		UpdatedAt:              fs.updatedAt,
+		AgentID:                fs.agentID,
+		Decisions:              append([]storage.ApprovalRecord(nil), fs.decisions...),
+		Authorization:          string(fs.mode),
+		AuthorizationConfirmed: fs.confirmed,
 	}
 	if fs.pending != nil {
 		st.Pending = pendingToDisk(fs.pending)
@@ -333,6 +349,18 @@ func (fs *FileSession) RunLedger() storage.RunLedger {
 		return nil
 	}
 	return fs.ledger
+}
+
+// Operations returns this session's operation log.
+//
+// ★ The log is the session's own, like the ledger: its file lives in the
+//
+//	session's directory, next to the transcript.
+func (fs *FileSession) Operations() storage.OperationLog {
+	if fs.operations == nil {
+		return nil
+	}
+	return fs.operations
 }
 
 // Messages returns the session's messages.
@@ -479,6 +507,65 @@ func (fs *FileSession) SetAgentID(id string) error {
 	if err := fs.writeState(fs.stateForWrite()); err != nil {
 		fs.agentID = prev
 		return fmt.Errorf("persist agent id: %w", err)
+	}
+	return nil
+}
+
+// AuthorizationMode returns the session's approval mode.
+//
+// ★ An empty field reads as the default: a session that never chose one
+//
+//	asks, which is what it did before the mode existed.
+func (fs *FileSession) AuthorizationMode() contract.AuthorizationMode {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if fs.mode == "" {
+		return contract.AuthzDefault
+	}
+	return fs.mode
+}
+
+// SetAuthorizationMode persists a new approval mode.
+//
+// ★ The write is **all or nothing**: the mode is rolled back when the state
+//
+//	file cannot be written, so the answer the interface shows and the answer
+//	the gate reads are the same one.
+func (fs *FileSession) SetAuthorizationMode(mode contract.AuthorizationMode) error {
+	if mode == "" {
+		mode = contract.AuthzDefault
+	}
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	prev := fs.mode
+	fs.mode = mode
+	if err := fs.writeState(fs.stateForWrite()); err != nil {
+		fs.mode = prev
+		return fmt.Errorf("persist the authorization mode: %w", err)
+	}
+	return nil
+}
+
+// AuthorizationConfirmed reports whether this session has confirmed full
+// authorization once.
+func (fs *FileSession) AuthorizationConfirmed() bool {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.confirmed
+}
+
+// SetAuthorizationConfirmed records that this session confirmed full
+// authorization once.
+func (fs *FileSession) SetAuthorizationConfirmed(confirmed bool) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	prev := fs.confirmed
+	fs.confirmed = confirmed
+	if err := fs.writeState(fs.stateForWrite()); err != nil {
+		fs.confirmed = prev
+		return fmt.Errorf("persist the authorization confirmation: %w", err)
 	}
 	return nil
 }
@@ -655,6 +742,16 @@ type state struct {
 	UpdatedAt time.Time                `json:"updated_at"`
 	Decisions []storage.ApprovalRecord `json:"decisions,omitempty"`
 	AgentID   string                   `json:"agent_id,omitempty"`
+	// Authorization is the session's approval mode.
+	//
+	// ★ Absent reads as the default (ask): a session written before the
+	//   mode existed asks, exactly as it did then — no migration, and no
+	//   behaviour change on upgrade.
+	Authorization string `json:"authorization,omitempty"`
+	// AuthorizationConfirmed says whether this session has confirmed full
+	// authorization once. It is what keeps the confirmation a once-per-
+	// session thing.
+	AuthorizationConfirmed bool `json:"authorization_confirmed,omitempty"`
 }
 
 // formatVersion guards the on-disk layout.
@@ -711,6 +808,14 @@ func (fs *FileSession) loadState() error {
 	fs.agentID = st.AgentID
 	fs.decisions = append([]storage.ApprovalRecord(nil), st.Decisions...)
 	fs.pending = pendingFromDisk(st.Pending)
+	// ★ An absent mode is the default, and an absent confirmation is "not
+	//   confirmed" — a session written before the mode existed asks, and it
+	//   has confirmed nothing.
+	fs.mode = contract.AuthzDefault
+	if m, err := contract.ParseAuthorizationMode(st.Authorization); err == nil {
+		fs.mode = m
+	}
+	fs.confirmed = st.AuthorizationConfirmed
 	return nil
 }
 

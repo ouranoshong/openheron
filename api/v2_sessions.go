@@ -36,6 +36,19 @@ func (s *Server) v2CreateSession(ctx context.Context, c *app.RequestContext) {
 		//   the client says which project it means, and a server that
 		//   guessed would put the session somewhere the user did not ask for.
 		ProjectID string `json:"projectId"`
+		// AuthorizationMode is the approval mode the session is born with.
+		//
+		// ★ It is the same field the PATCH route carries, and it means the
+		//   same thing: the mode belongs to the conversation. ★ An empty
+		//   value means "no choice" — the session is born in the default
+		//   mode, the way it always was.
+		AuthorizationMode string `json:"authorizationMode"`
+		// AuthorizationConfirmed says the person was asked about full
+		// authorization and said yes.
+		//
+		// ★ The server still demands it: the flag is the client's word, and
+		//   the server checks that word against the rule it holds.
+		AuthorizationConfirmed bool `json:"authorizationConfirmed"`
 	}
 	_ = c.Bind(&body)
 
@@ -67,10 +80,54 @@ func (s *Server) v2CreateSession(ctx context.Context, c *app.RequestContext) {
 		}
 	}
 
+	// ★ The mode is checked **before** the session is created, for the same
+	//   reason the project is: a session that could not get the mode it asked
+	//   for is a session nobody can use, and answering such a request with
+	//   one is worse than refusing it.
+	mode := contract.AuthzDefault
+	modeAsked := false
+	if raw := trimSpace(body.AuthorizationMode); raw != "" {
+		parsed, err := contract.ParseAuthorizationMode(raw)
+		if err != nil {
+			// ★ An unknown mode is refused, not defaulted — the same rule the
+			//   PATCH route holds: a name nobody recognises must not become
+			//   the safest one.
+			s.v2Fail(c, consts.StatusBadRequest, codeInvalidBody, err.Error(), false)
+			return
+		}
+		mode, modeAsked = parsed, true
+	}
+	// ★ Full authorization needs the confirmation **before** anything is
+	//   created — the same handshake the PATCH route has, and the same
+	//   answer: a session is not born in full authorization that nobody
+	//   confirmed.
+	if modeAsked && mode == contract.AuthzFull && !body.AuthorizationConfirmed {
+		s.v2Fail(c, consts.StatusConflict, codeConfirmationRequired,
+			"full authorization needs an explicit confirmation", false)
+		return
+	}
+
 	sess, err := s.sm.Create(ctx, root)
 	if err != nil {
 		s.v2FailInternal(c, err)
 		return
+	}
+
+	// ★ The mode is written **with** the session, not after it: a session
+	//   that is born in the default mode and switched a moment later has a
+	//   window in which the first turn could run in the wrong mode.
+	if modeAsked {
+		if err := s.applyNewAuthorization(sess, mode, body.AuthorizationConfirmed); err != nil {
+			// ★ The session must not stay behind half-made: it exists, it has
+			//   no mode anybody chose, and nobody can tell which one it has.
+			//   ⇒ It is removed, and the request fails.
+			if delErr := s.sm.Delete(ctx, sess.ID()); delErr != nil {
+				s.logger().Warn("[api] the session cleanup failed after the authorization write",
+					"session", sess.ID(), "err", delErr)
+			}
+			s.v2FailInternal(c, err)
+			return
+		}
 	}
 
 	// ★ The session file is on disk, and that is a fact. ★ A table that could
@@ -82,6 +139,35 @@ func (s *Server) v2CreateSession(ctx context.Context, c *app.RequestContext) {
 				"session", sess.ID(), "project", projectID, "err", err)
 			projectID = ""
 		}
+	}
+
+	// ★ The timeline's first line. ★ It is written **after** the attach, so
+	//   it carries the project the session really has — a project that could
+	//   not be attached is not the session's project.
+	s.recordOperation(ctx, sess, storage.Operation{
+		Kind:      storage.OpSessionCreated,
+		Actor:     storage.ActorUser,
+		AgentID:   sess.AgentID(),
+		ProjectID: projectID,
+	})
+
+	// ★ The mode a session is born with is a line of its own, and so is the
+	//   confirmation: they are the same two facts the PATCH route records,
+	//   and a reader sees the same story either way. ★ A session born in the
+	//   default mode has nothing to record — nothing was chosen.
+	if modeAsked && mode != contract.AuthzDefault {
+		if mode == contract.AuthzFull {
+			s.recordOperation(ctx, sess, storage.Operation{
+				Kind:  storage.OpSessionAuthorizationConfirmed,
+				Actor: storage.ActorUser,
+				Mode:  string(contract.AuthzFull),
+			})
+		}
+		s.recordOperation(ctx, sess, storage.Operation{
+			Kind:  storage.OpSessionAuthorizationChanged,
+			Actor: storage.ActorUser,
+			Mode:  string(mode),
+		})
 	}
 
 	meta := s.metaOf(ctx, sess, nil, projectID)
@@ -172,6 +258,11 @@ func (s *Server) v2RenameSession(ctx context.Context, c *app.RequestContext) {
 		s.v2FailInternal(c, err)
 		return
 	}
+	s.recordOperation(ctx, sess, storage.Operation{
+		Kind:  storage.OpSessionRenamed,
+		Actor: storage.ActorUser,
+		Title: title,
+	})
 	pending, _ := sess.PendingApproval()
 	c.JSON(consts.StatusOK, s.metaOf(ctx, sess, pending, projectIDOf(s.projectSnapshot(ctx), sess.ID())))
 }
@@ -237,6 +328,11 @@ func (s *Server) v2SwitchAgent(ctx context.Context, c *app.RequestContext) {
 		s.v2FailInternal(c, err)
 		return
 	}
+	s.recordOperation(ctx, sess, storage.Operation{
+		Kind:    storage.OpSessionAgentChanged,
+		Actor:   storage.ActorUser,
+		AgentID: id,
+	})
 
 	pending, _ := sess.PendingApproval()
 	c.JSON(consts.StatusOK, s.metaOf(ctx, sess, pending, projectIDOf(s.projectSnapshot(ctx), sess.ID())))
@@ -531,6 +627,12 @@ func (s *Server) metaOf(ctx context.Context, sess storage.Session, pending *stor
 		State:        s.stateOf(ctx, sess),
 		AgentID:      s.activeAgentID(sess),
 		ProjectID:    projectID,
+		// ★ The mode and the confirmation are the session's own facts, so
+		//   they are read from the session and not from anywhere else.
+		//   ★ The mode is never empty: a session that never chose one reads
+		//   as the default, and "no mode" would be a fourth thing.
+		AuthorizationMode:      sess.AuthorizationMode().String(),
+		AuthorizationConfirmed: sess.AuthorizationConfirmed(),
 	}
 	if status, ok := s.rt.StatusOf(ctx, sess.ID()); ok && !status.StartedAt.IsZero() {
 		meta.UpdatedAt = status.StartedAt.UTC().Format(rfc3339Nano)

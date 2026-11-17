@@ -76,6 +76,16 @@ type fakeSession struct {
 	decisions         []storage.ApprovalRecord
 	ckpt              *fakeCheckpoints
 	ledger            *fakeRunLedger
+	// operations is the session's operation log. ★ It is the interface, not
+	// the fake type: a test replaces it with a log that cannot be written.
+	operations storage.OperationLog
+
+	// mode and confirmed are the session's authorization facts. ★ They
+	// live on the fake because the runtime reads them per round — a fake
+	// that answered "default" for ever could not test a session that runs
+	// without asking.
+	mode      contract.AuthorizationMode
+	confirmed bool
 
 	// approvalGate and approvalHit are the seam that widens the window
 	// between "the loop has exited" and "the approval is on disk".
@@ -247,6 +257,37 @@ func (s *fakeSession) SetTitle(t string) error {
 	return nil
 }
 
+// AuthorizationMode is the session's approval mode. ★ An empty one reads as
+// the default — the same as a session that never chose one.
+func (s *fakeSession) AuthorizationMode() contract.AuthorizationMode {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.mode == "" {
+		return contract.AuthzDefault
+	}
+	return s.mode
+}
+
+func (s *fakeSession) SetAuthorizationMode(mode contract.AuthorizationMode) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.mode = mode
+	return nil
+}
+
+func (s *fakeSession) AuthorizationConfirmed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.confirmed
+}
+
+func (s *fakeSession) SetAuthorizationConfirmed(confirmed bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.confirmed = confirmed
+	return nil
+}
+
 // Init lays down a fake session (the real one writes files; this one does not).
 func (s *fakeSession) Init(agentID string) error {
 	s.mu.Lock()
@@ -307,6 +348,44 @@ func (s *fakeSession) RunLedger() storage.RunLedger {
 		s.ledger = &fakeRunLedger{}
 	}
 	return s.ledger
+}
+
+// Operations returns the fake session's in-memory operation log.
+//
+// ★ The log is not optional in the fake either: the runtime writes the
+//
+//	round's start and end through it, and a fake without one would exercise
+//	a different code path than production.
+func (s *fakeSession) Operations() storage.OperationLog {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.operations == nil {
+		s.operations = &fakeOperationLog{}
+	}
+	return s.operations
+}
+
+// fakeOperationLog is the in-memory operation log of a fake session.
+type fakeOperationLog struct {
+	mu  sync.Mutex
+	ops []storage.Operation
+}
+
+func (l *fakeOperationLog) Append(_ context.Context, op storage.Operation) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	op.Seq = uint64(len(l.ops)) + 1
+	if op.At.IsZero() {
+		op.At = time.Now().UTC()
+	}
+	l.ops = append(l.ops, op)
+	return nil
+}
+
+func (l *fakeOperationLog) List(_ context.Context) ([]storage.Operation, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]storage.Operation(nil), l.ops...), nil
 }
 
 // fakeRunLedger is the in-memory ledger of a fake session.

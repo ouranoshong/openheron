@@ -74,26 +74,26 @@ run 的记录是**生命周期**，不是载荷。transcript 已经管着内容�
 
 两个字段值得单独说：
 
-- **`Owner`** 是写下这一行的实例标识（`agentkit/run/runtime.go:160` 的
+- **`Owner`** 是写下这一行的实例标识（`agentkit/run/runtime.go:162` 的
   `defaultInstanceID`：主机名 + 进程号）。它回答事故后的第一个问题：「这一行是谁写的」。
 - ★ **`TreeFingerprint`** 是这一轮跑的那棵 agent 树的指纹
-  （`agentkit/run/loop.go:147` 的 `turn.runRow().noteTree`）。恢复续接的是它所回答的那一轮，
+  （`agentkit/run/loop.go:153` 的 `turn.runRow().noteTree`）。恢复续接的是它所回答的那一轮，
   所以它必须跑在**同一棵树**上 —— 名字不够，因为同一个名字背后的 agent 可能已经被
-  重建过；指纹才是「同一棵树」的凭证（`storage/runledger.go:169-176`）。
+  重建过；指纹才是「同一棵树」的凭证（`storage/runledger.go:181-188`）。
 
 ### 1.2 账本与归档屏障
 
-账本是一个接口（`storage/runledger.go:187`）：`Append` 写一行完整快照、`List` 读出
+账本是一个接口（`storage/runledger.go:199`）：`Append` 写一行完整快照、`List` 读出
 每个 run 的一行、`NextEpoch` 分配 fence 号、`Reconcile` 收掉进程死时还开着的 run。
 
 ★ **每写一行是完整快照，不是增量。** 读方按 run id 取最后一行，跨 run 时由 epoch
 裁决 —— 两条规则都与顺序无关，这正是「被 fence 掉的持有者无害」的原因：它写不回
-自己那一行（`storage/runledger.go:179-186`）。代价是字段重复，在这个量级上无关紧要。
+自己那一行（`storage/runledger.go:191-198`）。代价是字段重复，在这个量级上无关紧要。
 
 两个读规则分开住在两个函数里：
 
-- `storage.FoldRuns`（`storage/runledger.go:214`）—— **同一个 run 内部**，「最后一行赢」。
-- `storage.ActiveRun`（`storage/runledger.go:238`）—— **跨 run**，「未结束的 run 里
+- `storage.FoldRuns`（`storage/runledger.go:226`）—— **同一个 run 内部**，「最后一行赢」。
+- `storage.ActiveRun`（`storage/runledger.go:250`）—— **跨 run**，「未结束的 run 里
   epoch 最高的那个是持有者」。★ 不是「最后一行赢」：一个来自 epoch 3 的僵尸持有者在
   epoch 4 接管之后醒来写了一行，读者仍然认为 epoch 4 是持有者 —— 这就是 fence 在
   读侧起作用的地方，那里既便宜又不需要锁。
@@ -128,16 +128,16 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 ★ **终态行写在归档落地之后。** 单是这个次序，就让忙标记天然诚实：扫描看到
 `completed` 就知道消息已经在盘上，不必等任何超时。
 
-实现顺序在 `agentkit/run/loop.go:218-222`：`rt.archive` → `turn.markArchived()` →
-`rt.finishRun`。`finishRun`（`agentkit/run/loop.go:283-300`）把消费者的错误带进终态：
-模型超时记作 `failed`，用户停掉记作 `aborted`（`agentkit/run/turn.go:428-437` 的
+实现顺序在 `agentkit/run/loop.go:219-223`：`rt.archive` → `turn.markArchived()` →
+`rt.finishRun`。`finishRun`（`agentkit/run/loop.go:284-301`）把消费者的错误带进终态：
+模型超时记作 `failed`，用户停掉记作 `aborted`（`agentkit/run/turn.go:438-447` 的
 `failedState`）。★ 少了这一步，账本就成了唯一会撒谎的地方 —— 它会把一个中途死掉
 的 turn 记成 `completed`。
 
 ★ **一个例外：以抛审批结束的 run 要等 loop 退出。** 审批和 checkpoint 是在那里写的
-（`agentkit/run/bridge.go:308-326` 的 `writeHeldApproval`），而扫描不能比「用户要答的那
+（`agentkit/run/bridge.go:309-342` 的 `writeHeldApproval`），而扫描不能比「用户要答的那
 个问题已经落盘」更早地宣布这一轮结束。所以那一行的终态写在 `closeApprovalRow`
-（`agentkit/run/bridge.go:255-263`），排在审批落盘之后。
+（`agentkit/run/bridge.go:256-264`），排在审批落盘之后。
 
 #### 释放排在屏障之后
 
@@ -145,16 +145,16 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 （准入闸门读的那一对指针：`st.turn` 与 `st.loop`）与**立起屏障**（审批落盘 + 终态行）。
 ★ 它们的先后不是风格问题，两条理由都落在同一处：
 
-- ★ **拒绝挂靠看的就是那个 turn 指针**（`agentkit/run/runtime.go:1011-1025` 的 `LiveRun`），
+- ★ **拒绝挂靠看的就是那个 turn 指针**（`agentkit/run/runtime.go:1060-1074` 的 `LiveRun`），
   而审批是在屏障那一侧写的 —— ★ **先释放，就会在两者之间开出一道缝**：缝里的 attach 收到
   404，而它要找的那条审批还没落盘，transcript 里也没有。用户看到的现象是「审批卡自己不见了，
   刷新一下又回来了」。
-- ★ **准入闸门看的是那一对指针**（`agentkit/run/runtime.go:304`），而「顶替」走的那条分支
-  **不写审批**（`agentkit/run/bridge.go:201` 的 `stale`）—— ★ **先释放 loop，就会在两者之间
+- ★ **准入闸门看的是那一对指针**（`agentkit/run/runtime.go:306`），而「顶替」走的那条分支
+  **不写审批**（`agentkit/run/bridge.go:202` 的 `stale`）—— ★ **先释放 loop，就会在两者之间
   留出一条缝**：缝里的新问题会被放行，它会接管这个会话，而接管那条分支不写审批 ⇒
   **用户的问题连同那张卡一起没了，没有任何提示**。
 
-现在这一轮结束时，次序是（`agentkit/run/bridge.go:219-244`）：
+现在这一轮结束时，次序是（`agentkit/run/bridge.go:220-245`）：
 
 | 次序 | 做什么 | 落点 |
 |---|---|---|
@@ -162,7 +162,7 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 | 2 | 立起屏障（终态行） | `closeApprovalRow` → `row.finish(waiting_approval)` |
 | 3 | 关发布方 | `turn.publisher.Close()` |
 | 4 | **告诉会话：卡在等** | `announceApprovalPending`（§1.7） |
-| 5 | **释放 turn 与 loop** | `st.releaseRound(turn, loop)`（`agentkit/run/bridge.go:103-115`） |
+| 5 | **释放 turn 与 loop** | `st.releaseRound(turn, loop)`（`agentkit/run/bridge.go:104-116`） |
 
 ★ 第 4 步排在这里，是因为它要说的是「卡在等」—— ★ 那时账本的行已经是终态
 （`waiting_approval`），事实与账本说的是同一件事；★ 一个界面先显示卡、再去扫账本，
@@ -176,18 +176,18 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 不是从 transcript 里翻出来的**。
 
 ★ **缝里的新问题被拒，不是被放行**：闸门看到那一对指针都还在，回 **409 `session_busy`**
-（码在 `api/v2_types.go:48`，映射在 `api/v2_types.go:120`）—— ★ 那是一个**可重试**的冲突：
+（码在 `api/v2_types.go:48`，映射在 `api/v2_types.go:128`）—— ★ 那是一个**可重试**的冲突：
 窗口几毫秒后就关上，重试就能过。★ 一个从**别的路径**进来的人（另一个实例接管、陈旧账本）
 仍然可能吃到 404，所以客户端的「等屏障」状态留着（§1.6）。
 
 ★ **第一行在 loop 启动之前就写。** `claimTurn` 先 `openRunRow`
-（`agentkit/run/runtime.go:367-395`），再开跑；写不进去就把槽位还回去并拒绝 —— 一个
-记不下来的 run 不能被拥有（`agentkit/run/runtime.go:324-329`）。
+（`agentkit/run/runtime.go:369-406`），再开跑；写不进去就把槽位还回去并拒绝 —— 一个
+记不下来的 run 不能被拥有（`agentkit/run/runtime.go:326-331`）。
 
 ★ **失败可能早于第一行。** claim 是**先占槽、再开行**，而顶掉它的那一轮会立刻 `fail` 它 ——
 在那两步之间，那一行还没到。★ 所以失败要**等**行：行没到就把失败记下来（`rowFailed`），
-行一到达就补上终态（`agentkit/run/turn.go:357-365` 的 `setRow`；`closeRow` 在
-`agentkit/run/turn.go:390`）。★ 终态**取第一个**，与账本的「第一次终态写入获胜」一致。
+行一到达就补上终态（`agentkit/run/turn.go:367-375` 的 `setRow`；`closeRow` 在
+`agentkit/run/turn.go:400`）。★ 终态**取第一个**，与账本的「第一次终态写入获胜」一致。
 ★ 少了这道闩，那一行永远开着 —— 账本里挂着一个没人结束的 run，会话读起来一直 busy。
 ★ `turn.row` 因此收进一把锁：写它的是申领的那个 goroutine，读它的是顶替它的那个。
 
@@ -197,11 +197,11 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 
 | 事实 | 落点 |
 |---|---|
-| `GET /v2/sessions/{id}/runs` —— 扫描，回答「发生过什么、正在发生什么」 | `api/v2_sessions.go:471` |
-| `GET /v2/sessions/{id}/runs/{runId}` —— 取一行 | `api/v2_sessions.go:492` |
-| 扫描读的是账本，不是易失的运行时状态 | `agentkit/run/runtime.go:1033-1058`（`ScanRuns`） |
-| 会话的 `state` 来自扫描 | `api/v2_sessions.go`（`stateOf`）→ `agentkit/run/runtime.go:897-928`（`StatusOf`）→ `agentkit/run/runtime.go:935-946`（`activeRun`） |
-| 扫描**永不写**：会修账本的读，就分不清「是什么」与「刚被改成什么」 | `api/v2_sessions.go:468-470` |
+| `GET /v2/sessions/{id}/runs` —— 扫描，回答「发生过什么、正在发生什么」 | `api/v2_sessions.go:567` |
+| `GET /v2/sessions/{id}/runs/{runId}` —— 取一行 | `api/v2_sessions.go:588` |
+| 扫描读的是账本，不是易失的运行时状态 | `agentkit/run/runtime.go:1082-1107`（`ScanRuns`） |
+| 会话的 `state` 来自扫描 | `api/v2_sessions.go`（`stateOf`）→ `agentkit/run/runtime.go:946-977`（`StatusOf`）→ `agentkit/run/runtime.go:984-995`（`activeRun`） |
+| 扫描**永不写**：会修账本的读，就分不清「是什么」与「刚被改成什么」 | `api/v2_sessions.go:564-566` |
 
 扫描的形状是 `runsView`（`api/v2_types.go`）：`items` 是每一行 run（`runId`、
 `state`、`kind`、`epoch`、时间戳，失败时带 `error`），`activeRunId` 是此刻占着
@@ -211,7 +211,7 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 是 `{"items": []}`。一个永远存在却永远为空的字段，是客户端还得学会忽略的噪音。
 `activeRunId` 是 UI 最需要的那个字段：它让一个 run **可以被挂上**。
 
-★ **易失的 map 降级为缓存。** `sessionState`（`agentkit/run/bridge.go:39`）留着 ——
+★ **易失的 map 降级为缓存。** `sessionState`（`agentkit/run/bridge.go:40`）留着 ——
 它持有活的 loop 和活的 turn，这两样本来就是内存里的东西 —— 但它不再是**真相**。
 `StatusOf` 混着一个易失来源（map 里的时间戳）和两个持久来源（会话文件里的待审批、
 账本里的活动 run），现在由持久的那一边决定阶段。
@@ -220,13 +220,13 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 
 | 标记从前从哪来 | 标记现在从哪来 |
 |---|---|
-| 流结束 → 假定空闲 | 流结束 → **重新扫描**（`web/src/lib/store/actions.ts:626`） |
-| `stop()` 乐观地置 `busy: false` | `stop()` → 发 abort → **重新扫描** → 再决定（`web/src/lib/store/actions.ts:1158`） |
+| 流结束 → 假定空闲 | 流结束 → **重新扫描**（`web/src/lib/store/actions.ts:736`） |
+| `stop()` 乐观地置 `busy: false` | `stop()` → 发 abort → **重新扫描** → 再决定（`web/src/lib/store/actions.ts:1275`） |
 | 409 `session_busy` → 标记忙 | 不变 —— 但这条消息背后现在是一个扫描出来的事实 |
 | 页面加载 → 读 `state` | 不变 —— 扫的是账本 |
 
 ★ **一句话规则：客户端只有在扫描发话时才可以清掉 `busy`。** 扫描失败就让标记留在
-原样（`web/src/lib/store/actions.ts:1045-1052`）—— 猜正是扫描要治的病。
+原样（`web/src/lib/store/actions.ts:1162-1169`）—— 猜正是扫描要治的病。
 
 ★ **「栅栏换扫描」到客户端为止，而且只能到客户端为止。** 响应路径上那道栅栏回答的
 是另一个问题：「一个刚读完这个响应结尾的调用方，能不能立刻发下一条？」账本回答得
@@ -261,7 +261,7 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 需要在租约之上加一层进展驱动的续租**。
 
 ★ **进展驱动的续租。** run 发布它的事件，每发布一次就是一次进展报告；发布方上的
-`onProgress` 就是续租的触发点（`agentkit/run/runtime.go:343`）。TTL 是**预算**，
+`onProgress` 就是续租的触发点（`agentkit/run/runtime.go:345`）。TTL 是**预算**，
 不是日程：一次 TTL 之内什么都没报告的 run 丢掉租约，不管它是不是活着的
 （`agentkit/run/lease.go:105`）。★ 续租被节流到 TTL 的四分之一：流式模型每个 token
 都报一次进展，每个 token 续一次租约等于每个 token 抢一次锁。
@@ -273,11 +273,11 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 `server/` 不热重载：改了要重启。
 
 ★ **丢租约等于把自己 fence 掉。** 续租失败意味着别人持有着租约，这个 run 就取消
-自己的上下文并停下（`agentkit/run/runtime.go:318-325`）。它不会继续为一个自己已经
+自己的上下文并停下（`agentkit/run/runtime.go:320-327`）。它不会继续为一个自己已经
 不拥有的会话写 `running` 行 —— fence 让这些写入无害，但停下来更好。
 
 ★ **闸门现在会问仲裁器。** `ensureNoLiveTurn` 与 `claimTurn` 都问「上一个持有者的
-租约过期了吗」（`agentkit/run/runtime.go:504`、`agentkit/run/runtime.go:280`）：过期
+租约过期了吗」（`agentkit/run/runtime.go:598`、`agentkit/run/runtime.go:307`）：过期
 的持有者已经不再占着这个会话，别的 run 可以接手，而 epoch 说得出此后两个里谁才是
 持有者。★ 没有仲裁器时一律按「没过期」处理（`agentkit/run/lease.go:28`）—— 闸门
 不能因为没人接上仲裁器就变弱。
@@ -314,8 +314,8 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 拆法是两件事、两个包：**推导**在 `agentkit/emit/`（L1），eino 事件 → 归档产物 +
 `contract.RunEvent`；**渲染**在 `transport/`（L2），`contract.RunEvent` → AG-UI 帧 →
 SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 与 `obs`，
-不依赖任何上层。入口是 `emit.Derive`（`agentkit/emit/emit.go:131`）：它读一遍 agent
-的事件，同时产出**归档产物**（`Artifacts`，`agentkit/emit/emit.go:107`）与**发布出去
+不依赖任何上层。入口是 `emit.Derive`（`agentkit/emit/emit.go:143`）：它读一遍 agent
+的事件，同时产出**归档产物**（`Artifacts`，`agentkit/emit/emit.go:119`）与**发布出去
 的事件**。
 
 ★ **run 的事件词汇表是 openheron 自己的，不是 AG-UI 的**（`contract/runevent.go:13`
@@ -341,41 +341,41 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
   而它会信 —— 审批窗口于是要等一次手动刷新。
 - ★ **客户端自己知道流是被切的。** 一次流结束只有两种可能，而线上长得一样：这一轮说完了，
   或者流被切了。★ 区分它们的是**最后一帧**：`RUN_FINISHED` / `RUN_ERROR` 才是「说完了」
-  （`web/src/lib/api.ts:583` 的 `TERMINAL_EVENTS`），被切的流一帧都没有 —— 所以 `runStream`
-  的 `onDone` 带着这个事实走（`web/src/lib/api.ts:680`）。★ **这是唯一能分开两者的信号**：
+  （`web/src/lib/api.ts:691` 的 `TERMINAL_EVENTS`），被切的流一帧都没有 —— 所以 `runStream`
+  的 `onDone` 带着这个事实走（`web/src/lib/api.ts:788`）。★ **这是唯一能分开两者的信号**：
   响应体结束这件事，两边一模一样。
 - ★ **切了的那一轮，客户端去问账本。** 恢复的动作是 `recoverRound`
-  （`web/src/lib/store/actions.ts:756`）：★ **线上答不了这个问题** —— 流就是被切的那一样东西，
+  （`web/src/lib/store/actions.ts:866`）：★ **线上答不了这个问题** —— 流就是被切的那一样东西，
   再挂一次很可能被同样地切掉。★ 账本答得了：`GET /v2/sessions/{id}/runs` 的 `activeRunId`
   是「这一轮还在不在」的权威，而**等着审批的那一轮算已经结束**
   （`storage/runledger.go:83-90` 的 `IsTerminal`）—— 审批一抛出来，`activeRunId` 就是空的。
 - ★ **答案在 transcript 里 —— 但要等它落盘。** 没有活跃的一轮 ⇒ 这一轮说完了 ⇒ 它抛出的
   审批在 `GET /v2/sessions/{id}/messages` 的 `pendingApprovals` 里，客户端重读一遍
-  transcript，卡片就回来了（`web/src/lib/store/history.ts:57` 的 `seedFromHistory`）。
+  transcript，卡片就回来了（`web/src/lib/store/history.ts:67` 的 `seedFromHistory`）。
   ★ 还有活跃的一轮 ⇒ 这一轮还在跑 ⇒ 客户端重新挂上去（`reattach`，
-  `web/src/lib/store/actions.ts:648`），剩下的部分照常渲染，审批照常到达。
+  `web/src/lib/store/actions.ts:758`），剩下的部分照常渲染，审批照常到达。
 - ★ **`run_not_live` 说的是「运行时的 turn 没了」，不是「transcript 里已经有审批了」。**
-  ★ 服务端拒绝挂靠，看的是**运行时的易失 turn**（`agentkit/run/runtime.go:1011-1025` 的
+  ★ 服务端拒绝挂靠，看的是**运行时的易失 turn**（`agentkit/run/runtime.go:1060-1074` 的
   `LiveRun`）。★ 这个指针**曾经**在审批落盘之前就被释放（`loopExited` 里那句
   `st.turn = nil`），而落盘的次序是「释放 turn → 写审批 → 立起账本的屏障」——
   ★ **拒绝与审批之间因此有一道缝**：客户端在这道缝里收到 404，而此刻 transcript 里还没有
   那条审批 —— 读一次就放弃，等于把审批永远藏起来，用户只能靠刷新页面把它逼出来。
   ★ **服务端把缝关上了**：turn 现在在「审批已落盘 + 账本行终态 + 发布方已关闭」之后才
-  释放（`agentkit/run/bridge.go:103-115` 的 `releaseRound`），而拒绝挂靠看的是同一个指针 ⇒
+  释放（`agentkit/run/bridge.go:104-116` 的 `releaseRound`），而拒绝挂靠看的是同一个指针 ⇒
   缝里的 attach 现在**挂得上**，挂上之后那一轮自己的窗口里带着那条审批（见 §1.2 的
   「释放排在屏障之后」）。★ loop 指针与它一起放掉，所以缝里的**新问题**被拒（409），
   而不是被放行后接管掉这个会话。
 - ★ **所以 404 之后仍然是等屏障，不是读一次 transcript 就走。** 恢复计划多了一个「等」的状态
   （`web/src/lib/attach.ts:76` 的 `recoveryPlan`）：★ 被拒的那一轮在账本里**还不是终态**
   ⇒ 屏障还没立起来 ⇒ 等账本（`RECOVER_WAIT_MS`）再问一次；终态了 ⇒ 审批必定已经在盘上
-  （屏障站在审批卡后面，`agentkit/run/bridge.go:255-263`）⇒ 这时才读 transcript。★
+  （屏障站在审批卡后面，`agentkit/run/bridge.go:256-264`）⇒ 这时才读 transcript。★
   ★ 服务端关了缝，客户端这一层**仍然留着**：另一个实例的旧账本、陈旧的服务端，两种情况下
   404 依然可能出现 —— 客户端不能把「服务端已经修好」当成契约。★
   这道缝很窄但真实：2026-11-15 用户实例的账本里，那一次 attach 比账本行关闭早 **13ms**。
 - ★ **要跟哪一轮，由账本说了算。** ★ 会话自己记住的那个 run id 是「这个界面最后看见的
   那一轮」，而**答完审批之后的那一轮是新的 run** —— 客户端要等它 announce 才知道它的 id。
   ★ 于是「挂回去」若用会话记住的 id，挂的是上一轮（早就结束的那一轮）；账本的
-  `activeRunId` 才是「还在跑的那一轮」（`reattach`，`web/src/lib/store/actions.ts:648`）。
+  `activeRunId` 才是「还在跑的那一轮」（`reattach`，`web/src/lib/store/actions.ts:758`）。
 - ★ **恢复有护栏。** 重新挂上去最多三次（`RECOVER_ATTACH_LIMIT`）：★ 被切的流再挂一次很可能
   再被切一次，而每一次重挂都把这一轮的事件重放一遍 —— 一个已经读不动的客户端不该被这样喂。
   超过上限就改成**等**：读账本，等这一轮结束，然后读 transcript。★ 用户已经走开的那一轮
@@ -388,7 +388,7 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 - ★ **窗口的回放与登记在同一把锁里**（`agentkit/run/publish.go:144` 的 `Subscribe`），
   所以一个订阅者每个事件恰好看一次：先是窗口里的那些，然后是随后来的那些。
 - ★ **run 在这一轮结束**时才关掉订阅** —— 而一个以抛审批结束的这一轮，在审批落盘
-  之前不算结束**（`agentkit/run/bridge.go:237`）。这不是细节：客户端是从通道关闭那一刻
+  之前不算结束**（`agentkit/run/bridge.go:238`）。这不是细节：客户端是从通道关闭那一刻
   知道「有审批」的，所以一个在审批落盘之前就关掉的通道，等于邀请客户端去回答一个
   服务端还找不到的审批。
 
@@ -399,7 +399,7 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 ### 1.7 会话公告通道：审批不属于任何一轮
 
 ★ **审批属于会话，不属于任何一轮。** 抛出审批的那一轮在抛出审批的那一刻就结束了
-（§1.6：loop 退出时关发布方，`agentkit/run/bridge.go:237`），而审批还在等一个答案。
+（§1.6：loop 退出时关发布方，`agentkit/run/bridge.go:238`），而审批还在等一个答案。
 于是「审批被回答了」这个事实**无处可去** —— 它不能骑在旧一轮的总线上，那条总线已经
 死了；而等着这个答案的界面，手里那张卡于是永远留着，它给的每一个答案服务端都会拒。
 
@@ -408,9 +408,9 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 
 | 事实 | 发布点 | 帧 |
 |---|---|---|
-| ★ **审批在等** | 审批落盘、账本终态行立起之后（`agentkit/run/bridge.go:232`） | `CUSTOM "approval_pending"`，值是 `interrupt_id` / `reason` / `message` / `tool_call_id` / `tool_name` / `arguments` / `requested_by_agent` / `subagent_run_id` / `run_id` |
-| 审批被回答 | `TakePendingApproval` 成功之后（`agentkit/run/runtime.go:622`） | `CUSTOM "approval_resolved"`，值是 `interrupt_id` / `approved` / `reason` / `run_id` |
-| 新一轮开始 | `startLoop` 之后（`agentkit/run/runtime.go:463`） | `CUSTOM "run_started"`，值是 `run_id` / `kind` |
+| ★ **审批在等** | 审批落盘、账本终态行立起之后（`agentkit/run/bridge.go:233`） | `CUSTOM "approval_pending"`，值是 `interrupt_id` / `reason` / `message` / `tool_call_id` / `tool_name` / `arguments` / `requested_by_agent` / `subagent_run_id` / `run_id` |
+| 审批被回答 | `TakePendingApproval` 成功之后（`agentkit/run/runtime.go:658`） | `CUSTOM "approval_resolved"`，值是 `interrupt_id` / `approved` / `reason` / `run_id` |
+| 新一轮开始 | `startLoop` 之后（`agentkit/run/runtime.go:499`） | `CUSTOM "run_started"`，值是 `run_id` / `kind` |
 
 ★ **三个事实是分开的，不是一个。** 「审批被回答」不等于「新一轮开始」：一次恢复消费了
 审批却没有继续这一轮（`Resume` 里 `len(approvals) == 0` 那条路），这时候只有前一个
@@ -422,7 +422,7 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 
 ★ **它在屏障之后发布**（§1.2 的次序表第 4 步）：账本的行已经是终态，于是事实与账本
 说的是同一件事。★ **落盘失败时不发布** —— 一个没有持久化的审批**答不了**，提前宣布
-它就是给一个界面一张点了就报错的卡（`agentkit/run/bridge.go:308-326` 的 `writeHeldApproval`
+它就是给一个界面一张点了就报错的卡（`agentkit/run/bridge.go:309-342` 的 `writeHeldApproval`
 在失败时返回 nil）。
 
 ★ **载荷是会话持久化的那份形状**（`contract.PendingInterrupt`），所以扫描与通道说的
@@ -452,9 +452,9 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 ★ **客户端这一边**（`web/src/lib/session-events.ts`）：`approval_pending` 把那张卡**并进**
 对话（按 id 去重 —— 发起那一轮的那一边是从轮次自己的流里看到同一张卡的），
 `approval_resolved` 把那张卡拿掉，`run_started` 让这一边跟上去
-（`web/src/lib/store/actions.ts:986` 的 `followRun`）。
+（`web/src/lib/store/actions.ts:1096` 的 `followRun`）。
 ★ **一次只跟一条流**：还握着上一轮的时候，新的挂上要等它结束
-（`web/src/lib/store/actions.ts:132` 的 `releaseRun`）—— 服务端一个会话只允许一轮活着的
+（`web/src/lib/store/actions.ts:133` 的 `releaseRun`）—— 服务端一个会话只允许一轮活着的
 轮次，新的那一轮本来就只可能在旧的结束之后开始。
 ★ **公告不写下 run id**：那个 id 说的是「这一边正在看哪一轮」，而这一边还没挂上去。
 
@@ -475,11 +475,11 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 
 | 方法 | 守什么 | 用在哪 |
 |---|---|---|
-| `ensureIdle`（`agentkit/run/runtime.go:504-509`） | 有活轮次**和**有待审批都拒绝 | 新查询（`Submit`，`agentkit/run/runtime.go:215`） |
-| `ensureNoLiveQuery`（`agentkit/run/runtime.go:589-601`） | 只在有**查询**轮次在跑时拒绝 | 恢复（`Resume`，`agentkit/run/runtime.go:565`） |
+| `ensureIdle`（`agentkit/run/runtime.go:540-545`） | 有活轮次**和**有待审批都拒绝 | 新查询（`Submit`，`agentkit/run/runtime.go:242`） |
+| `ensureNoLiveQuery`（`agentkit/run/runtime.go:625-637`） | 只在有**查询**轮次在跑时拒绝 | 恢复（`Resume`，`agentkit/run/runtime.go:658`） |
 
 两个预检都只是**话术**；规则在占槽。★ **槽位只有一个，而槽位不问「这一轮是不是
-查询」，只问「是不是恢复撞恢复」**（`agentkit/run/runtime.go:532-537` 的 `conflictTurns`）：
+查询」，只问「是不是恢复撞恢复」**（`agentkit/run/runtime.go:568-573` 的 `conflictTurns`）：
 
 | 在跑的轮次 | 新查询 | 新恢复 |
 |---|---|---|
@@ -501,16 +501,16 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 那个用 `ErrSuperseded` 打死。
 
 ★ **竞态由「占槽」关掉，不是由「检查」关掉。** `ensureIdle` 是给人看的友好提示；
-权威的是 `claimTurn`（`agentkit/run/runtime.go:290-353`）—— 它把「忙不忙」的判定与
+权威的是 `claimTurn`（`agentkit/run/runtime.go:292-355`）—— 它把「忙不忙」的判定与
 「接管」放在**同一把锁**下。两个同时到达的请求不可能都通过它：输家拿到
 `ErrSessionBusy`，而不是半启动的一轮。
 
-★ **Resume 先申领槽位，再消费审批**（`agentkit/run/runtime.go:642-667`）。
+★ **Resume 先申领槽位，再消费审批**（`agentkit/run/runtime.go:678-703`）。
 `TakePendingApproval` 会清掉记录并落盘，所以在那之后的任何拒绝都会**吃掉用户的
 决定** —— 卡片消失了，而那个审批再也答不上。先申领意味着拒绝时审批原样留着。
 
-★ **恢复钉住父轮次的那棵树**（`agentkit/run/runtime.go:651-657`）：父 run id 与树的
-指纹一起从账本里查出来（`agentkit/run/runtime.go:960-977` 的 `parentRunOf`），指纹写在
+★ **恢复钉住父轮次的那棵树**（`agentkit/run/runtime.go:687-693`）：父 run id 与树的
+指纹一起从账本里查出来（`agentkit/run/runtime.go:1009-1026` 的 `parentRunOf`），指纹写在
 `turn.pin` 上。⇒ 被打断的那一轮继续用它开始时的那棵树；**新配置在下一轮生效**。
 
 ### 2.2 「忙」就是忙 —— 包括等着审批
@@ -526,22 +526,22 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 | 有活轮次在跑 | 运行时的内存 `sessionState`（`turn` + `loop` 这一对） | **扛不住**（但租约与账本补上了这一半） |
 
 ★ **拒绝必须是惰性的。** `Submit` 里那些破坏性的动作 —— 丢弃检查点、清掉待审批 ——
-排在闸门**之后**（`agentkit/run/runtime.go:236-242`）。★ 只在确认会话归我们之后，
+排在闸门**之后**（`agentkit/run/runtime.go:238-244`）。★ 只在确认会话归我们之后，
 它们才是对的：一个被拒的请求不删检查点、不清审批、不落消息。
 
 ★ **「有活轮次」问的是 loop，不是轮次指针。** `st.turn` 在轮次归档完才清（滞后），
 而 `st.loop` 在 loop 活着期间一直都在（更长寿）—— 两者**都在**，才读作「忙」
-（`agentkit/run/runtime.go:554-568`）。★ 一轮结束时这一对**一起**放掉
-（`agentkit/run/bridge.go:103-115` 的 `releaseRound`）：只放一个，闸门就会在那一轮还站着的时候
+（`agentkit/run/runtime.go:590-604`）。★ 一轮结束时这一对**一起**放掉
+（`agentkit/run/bridge.go:104-116` 的 `releaseRound`）：只放一个，闸门就会在那一轮还站着的时候
 读作「空闲」—— 而那正是新问题挤掉一条还没落盘的审批的缝（§1.2）。
 
 ★ **放回槽位的只能是还占着槽位的轮次。** `releaseClaim`
-（`agentkit/run/runtime.go:409-436`）在把被顶掉的轮次放回槽位之前先问 `holdsSlot()`
-（`agentkit/run/turn.go:262`）：一个**已经放弃**的轮次不再放回去 —— 否则槽位里会留下
+（`agentkit/run/runtime.go:420-447`）在把被顶掉的轮次放回槽位之前先问 `holdsSlot()`
+（`agentkit/run/turn.go:272`）：一个**已经放弃**的轮次不再放回去 —— 否则槽位里会留下
 一个**从未 `Run()` 过的 loop**，而 eino 的 `TurnLoop.Wait` 明写「`Run` 没被调用时
 `Wait` 永远阻塞」⇒ 中止与关停会挂死，那个会话也永远读作「忙」。
 
-★ **中止会清掉那张作废的审批**（`agentkit/run/runtime.go:803-815`，`clearVoidApproval` 在
+★ **中止会清掉那张作废的审批**（`agentkit/run/runtime.go:852-864`，`clearVoidApproval` 在
 `:736`）。否则「先停、再接管」接管不了 —— 闸门在有待审批时拒绝新查询，而那张审批
 属于一个已经不存在了的轮次。★ 只有**孤儿**审批（检查点已经没了）值得留着：它同样
 答不了，但那不是这次调用的业务，卡片留在屏幕上。
@@ -553,13 +553,13 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 `running` / `idle`。
 
 ★ **一次读，一个答案。** 阶段本身已经算进了待审批（`StatusOf` 从会话自己的待批记录
-推导 `PhaseWaitingApproval`，`agentkit/run/runtime.go:906-914`），分开读两遍可能看见
+推导 `PhaseWaitingApproval`，`agentkit/run/runtime.go:955-963`），分开读两遍可能看见
 它们不一致 —— 两次读之间待审批被清了。
 
 ★ **闸门与 `stateOf` 刻意读的不是同一个东西。** `stateOf` 走 `StatusOf`，而它是从
 **run 账本**推导 `PhaseRunning` 的 —— 也就是对这个会话的 run 做的那次扫描。闸门则
 直接读 `turn` + `loop` 这一对。两者不是同一口气里被释放的：终态行落在归档那条路上
-（`agentkit/run/loop.go:216`），闸门由 `releaseRound`（`agentkit/run/bridge.go:103-115`）
+（`agentkit/run/loop.go:217`），闸门由 `releaseRound`（`agentkit/run/bridge.go:104-116`）
 在**屏障立起之后**才放开（§1.2 的「释放排在屏障之后」）。于是，一轮答案落地后的片刻，
 **界面**可能已经说着「空闲」，而**闸门**还没放行下一次查询。
 
@@ -572,7 +572,7 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 
 ★ 把两者改成读同一个东西，就等于给它们同一个滞后 —— 而闸门的滞后会变成误拒。
 
-前端：`seedFromHistory` 认服务端的 `state`（`web/src/lib/store/history.ts:143`）：
+前端：`seedFromHistory` 认服务端的 `state`（`web/src/lib/store/history.ts:158`）：
 `state === "running"` 就把 `status` 置成 `running`。
 
 ★ **「在跑」与「忙」是两个字段。** `status === "running"` 说的是**会话**在跑（禁发送
@@ -582,14 +582,14 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 ★ **水合出来的「running」一定是别人的轮次，但那个界面不必只是看着。** 刚打开会话的
 那个界面不可能拥有它没启动的轮次 —— 拥有轮次的界面自己拿着事件流，永远不会重新
 水合。★ 而水合**不**把 `busy` 置上：那个界面接下来会去**挂上**那一轮
-（`attachToLiveRun`，`web/src/lib/store/actions.ts:859`），挂上之后它就是在跟着这一轮
+（`attachToLiveRun`，`web/src/lib/store/actions.ts:969`），挂上之后它就是在跟着这一轮
 的人。★ 先置上再撤掉，只会让「在别的窗口里跑着」这句话在一个本来就在跟着的界面上
 闪一下。待审批那一支保持优先：审批卡比「在跑」更具体。
 
 ### 2.4 409 是一等公民
 
 `ErrSessionBusy`（`agentkit/run/errors.go:43`）变成带自己错误码的 409：
-**`session_busy`**（`api/v2_types.go:48`），映射在 `api/v2_types.go:120`，
+**`session_busy`**（`api/v2_types.go:48`），映射在 `api/v2_types.go:128`，
 `retryable: true` —— 正在跑的那轮结束后冲突自行解除，稍后重试是有意义的。
 
 ★ **`agent_busy` 改名成 `session_busy`**：旧名字说的是错的话。它的三处调用点
@@ -601,9 +601,9 @@ agent **可以**合法地同时忙 —— 客户端若把 `agent_busy` 读成「
 this session」），客户端不必多一个码就能分辨。
 
 前端必须处理被拒的发送，**且不破坏本地视图**：**错误码不能丢** —— `runStream` 把
-`body.code` 一起交给 `onError`（`web/src/lib/api.ts:654`，签名在 `:533`），只剩散文
+`body.code` 一起交给 `onError`（`web/src/lib/api.ts:762`，签名在 `:620`），只剩散文
 的话前端分不清「忙」与「失败」；**乐观气泡要回滚** —— 那条消息根本没到服务端，却留在
-屏幕上像是发出去过（`web/src/lib/store/actions.ts:593-601`）；**会话被标记为忙，不是
+屏幕上像是发出去过（`web/src/lib/store/actions.ts:703-711`）；**会话被标记为忙，不是
 失败**。
 
 ★ **停止并接管。** 忙着的会话给一个「停止」动作：用户可以先停掉另一轮再发。停止
@@ -718,10 +718,10 @@ Agent 上的那个设置（`agentkit/spec/load.go:82-86`）。
 占用快照（`agent`、`provider`、`model`、`used_tokens`、`context_window`、
 `summarize_at`、`updated_at`）。
 
-发射点：`transport/transport.go:244-255` 的 `emitContextUsage`。★ **载荷是该 agent 的完整
+发射点：`transport/transport.go:246-257` 的 `emitContextUsage`。★ **载荷是该 agent 的完整
 快照 —— 客户端是替换而不是合并，所以丢一个事件不会留下错数字。**
 
-**历史通道**：会话视图上的 `usage.context`（`api/v2_sessions.go:279-284`）。
+**历史通道**：会话视图上的 `usage.context`（`api/v2_sessions.go:375-380`）。
 ★ **历史用与实时路径同一个函数算**（`agentkit/emit/context.go:21-31`）：顺着记录走一遍，
 取每个 agent 最后一条带用量的 assistant 消息。⇒ 刷新后的数字就是实时路径收尾时的
 那个数字，两条通道不可能各说各话。
@@ -734,13 +734,13 @@ Agent 上的那个设置（`agentkit/spec/load.go:82-86`）。
 | 累加自 | 整个会话 | 一次请求 |
 | 什么时候会掉 | —— | 会话被压缩，或换新会话 |
 
-★ **压缩次数**数在 `context[agent].summarized` 上（`api/v2_sessions.go:374-386` 的
+★ **压缩次数**数在 `context[agent].summarized` 上（`api/v2_sessions.go:470-482` 的
 `compactionCount`）—— 压缩的消息留在记录里（压缩不是删除），所以这个数是关于**记录**
 的事实。
 
 前端：reducer 处理 `CUSTOM`（`web/src/lib/events.ts:382-383`），`onContextUsage`
-（`web/src/lib/events.ts:425`）替换该 agent 的那一项，其余不动；selector
-`selectActiveContext`（`web/src/lib/store/selectors.ts:103`）返回 store 自己持有的
+（`web/src/lib/events.ts:432`）替换该 agent 的那一项，其余不动；selector
+`selectActiveContext`（`web/src/lib/store/selectors.ts:121`）返回 store 自己持有的
 那个 map —— 引用稳定，`Object.is` 判定不变。
 
 ### 3.4 压缩：落盘的是什么、有效历史、摘要不能丢的东西
@@ -758,14 +758,14 @@ Agent 上的那个设置（`agentkit/spec/load.go:82-86`）。
 ★ **finalizer 用的是 eino 的默认实现**（`agentkit/build/summarize.go:172`）：替换后的
 历史**保留 system 消息** —— 上下文提示（规则、项目根、workspace）就是一条 system
 消息，丢掉它会让 agent 在这一轮剩下的时间里没有那些规则。摘要是**唯一**值得进
-记录的那一条，由推导层从替换历史里挑出来（`agentkit/emit/emit.go:400-424` 的
+记录的那一条，由推导层从替换历史里挑出来（`agentkit/emit/emit.go:434-458` 的
 `compactionFrom`）。
 
 **落盘的是什么。** 替换后的历史是**一条消息**。就这一个事实，让持久化变得简单：
 
-- **压缩消息**像别的消息一样追加进 transcript（`agentkit/run/loop.go:379-400` 的
+- **压缩消息**像别的消息一样追加进 transcript（`agentkit/run/loop.go:380-401` 的
   `archiveCompaction`）：一行，一条 `schema.Message`。格式版本不动
-  （`formatVersion`，`storage/filestore/session.go:661`），既有读法照旧。
+  （`formatVersion`，`storage/filestore/session.go:758`），既有读法照旧。
 - **边界**搭在这条消息上，放在 `Extra` map 里（`message/compaction.go:14` 的
   `ExtraCompaction`），与 openheron 已经打戳的地方相同。`Compaction` 结构带着
   `Superseded`、`SavedTokens`、`At` 三个数（`message/compaction.go:21`）。
@@ -780,7 +780,7 @@ Agent 上的那个设置（`agentkit/spec/load.go:82-86`）。
 ```
 
 实现是 `message.EffectiveView`（`message/compaction.go:103`），由
-`Session.Messages(effective)` 这个读法暴露（`storage/filestore/session.go:344`，
+`Session.Messages(effective)` 这个读法暴露（`storage/filestore/session.go:372`，
 接口在 `storage/storage.go:48`）。★ **Go 没有默认参数，所以默认靠零值表达**：`false`
 就是「全部」。参数在每个调用点写出来，而不是藏在另一个方法后面。
 
@@ -789,9 +789,9 @@ Agent 上的那个设置（`agentkit/spec/load.go:82-86`）。
 | 调用点 | 视图 | 为什么 |
 |---|---|---|
 | 运行循环（`agentkit/run/loop.go:81`） | `sess.Messages(true)` | agent 的上下文就是有效历史 |
-| 消息视图（`api/v2_sessions.go:274`） | `sess.Messages(false)` | 界面显示整份记录 —— 被取代的消息与压缩标记都在里面 |
+| 消息视图（`api/v2_sessions.go:370`） | `sess.Messages(false)` | 界面显示整份记录 —— 被取代的消息与压缩标记都在里面 |
 
-★ **顺序：压缩消息在本轮消息之前**（`agentkit/run/loop.go:379-400`，`archiveCompaction`
+★ **顺序：压缩消息在本轮消息之前**（`agentkit/run/loop.go:380-401`，`archiveCompaction`
 在归档循环之前跑）。这正是语义顺序：压缩总结的是它之前的一切，本轮的消息在它之后。
 ⇒ 追加之后、下一次读之前崩了，代价为零（压缩消息已在盘上）；**追加之前**崩了，
 代价也为零（历史还是长的，下一轮再压一次）。★ 顺序只在一边要紧：如果**先**记边界、
@@ -800,7 +800,7 @@ Agent 上的那个设置（`agentkit/spec/load.go:82-86`）。
 ★ **只有根 agent 的上下文会被压缩。** 子 agent 的上下文活在自己的那一轮里，随轮而死；
 子 agent 的消息带自己的标记（`message.IsSubagent`），在构造上下文之前就被丢掉了
 （`agentkit/run/input.go:150-159`）。推导层也只认根 agent 的压缩
-（`agentkit/emit/emit.go:268-283`）—— 子 agent 的摘要绝不能到 transcript 里，否则
+（`agentkit/emit/emit.go:280-295`）—— 子 agent 的摘要绝不能到 transcript 里，否则
 会在子 agent 的摘要处切掉根的有效历史。
 
 **摘要不能丢的东西。**
@@ -825,7 +825,7 @@ Agent 上的那个设置（`agentkit/spec/load.go:82-86`）。
    多少，写在分隔线上而不在仪表盘上：仪表盘回答「上下文现在有多满」，分隔线回答
    「上一次切口省了多少」。
 3. **一个实时事件。** 压缩发生在轮内，所以界面从事件流里知道它：
-   `CUSTOM "context_compacted"`（`transport/transport.go:264`）。★ **实时事件只带
+   `CUSTOM "context_compacted"`（`transport/transport.go:266`）。★ **实时事件只带
    事实、agent 与时间 —— 不带数字。** 数字是拿记录量出来的，而记录由运行循环在轮次
    结束时写入；transport 手里没有记录可量。
 4. **一个手动命令。** `/compact` 随叫随压：`POST /v2/sessions/{id}/compact`
@@ -866,10 +866,10 @@ logger 只在 `main` 里造一次再传下去：`newLogger()` → `installLogger
 （`applyLogLevel` / `applyLogFile`）→ `setupRuntime` → `api.New(..., log)` →
 `hserver.New`。
 
-- `main.newLogger`（`main.go:252`）围绕共享的 `slog.LevelVar` 与 `obs.Sink` 建好
+- `main.newLogger`（`main.go:350`）围绕共享的 `slog.LevelVar` 与 `obs.Sink` 建好
   logger，**在**配置读出来**之前** —— 等级与文件路径由配置决定，而 logger 必须先
   存在，`setupConfig` 才能打第一行日志。
-- `main.installLogger`（`main.go:263`）完成两次框架交接：`hlog.SetLogger`
+- `main.installLogger`（`main.go:361`）完成两次框架交接：`hlog.SetLogger`
   （`main.go:368`）与 `callbacks.AppendGlobalHandlers`（`main.go:368`）。
   ★ **这是仅有的两处全局注册**，其余全是注入。
 
@@ -901,7 +901,7 @@ logger 就是竞态；组合根先装配正好消掉它（用 `task test-race` �
 `installLogger` 已经把它交给了 hertz 与 eino —— 两个进程级注册表，运行期不能换。
 配置文件路径只有读完之后才知道，所以**能换的只有 writer**。
 
-`agentkit/obs/sink.go:32` 的 `Sink` 实现 `io.Writer`，`Set`（`:76`）原子改向，
+`agentkit/obs/sink.go:32` 的 `Sink` 实现 `io.Writer`，`Set`（`:81`）原子改向，
 `Install`（`:95`）把日志装进文件；`obs.Handler` 与两份注册表都不动。启动时
 `main.newLogger` 就建好 sink（`main.go:259`），logger 从第一天起写在 sink 后面。
 
@@ -909,7 +909,7 @@ logger 就是竞态；组合根先装配正好消掉它（用 `task test-race` �
 （进程从哪儿启动）。路线会离开终端 —— `log.file` 就是干这个的 —— 而通告还要落在
 终端上，所以终端被单独记着（§4.4）。
 
-接线在 `main.applyLogFile`（`main.go:314`）：
+接线在 `main.applyLogFile`（`main.go:319`）：
 
 | 位置 | 做什么 |
 |---|---|
@@ -920,14 +920,14 @@ logger 就是竞态；组合根先装配正好消掉它（用 `task test-race` �
 
 ★ **探针的理由：** `lumberjack` 第一次写入才开文件，且以 0644 创建。不先探一次，
 权限错误和 0600 都到不了启动期 —— 而启动期是唯一有人能读到那条告警的时候
-（`main.go:331-334`）。
+（`main.go:361-372`）。
 
 ★ **落不进文件是警告，不是失败的启动。** 服务的活儿是服务，而它的日志正是失败原因
 唯一的容身之处；为了去处把进程拉下去，等于拿掉唯一能解释原因的地方。进程继续走
-stderr（`main.go:296-300`）。
+stderr（`main.go:421-432`）。
 
 ★ **路径落在配置根**（`spec.Service.LogFile` 解析），`$OPENHERON_LOG_FILE` 覆盖它一次
-（`main.go:320`）。`server/` 不热更新：改了要重启。
+（`main.go:418-420`）。`server/` 不热更新：改了要重启。
 
 ★ **代码缺省是空路径**（只走 stderr），而**出厂模板给的是 `logs/openheron.log`**，且
 `log.console` 是 `false` —— 对新项目来说落盘是常态而不是可选项，**日志进文件**：
@@ -951,7 +951,7 @@ stderr（`main.go:296-300`）。
 
 ★ **越界的那一句也走这条通道。** 监听地址越过环回时，服务器会说一句
 `the server listens beyond the loopback; anyone who can reach this port can drive the agent`
-（`main.go:946-956` 的 `announceExposure`）。★ 这句话以前是**一条日志记录**，而日志记录
+（`main.go:959-969` 的 `announceExposure`）。★ 这句话以前是**一条日志记录**，而日志记录
 的去处是配置 —— 出厂模板的 `log.console` 是 `false`，于是**恰恰是暴露出去的那一次运行，
 终端上什么也没有**：一句「你把 agent 暴露给全网了」被配置藏了起来。
 ⇒ 安全相关的告警不能是日志记录，它跟地址一样是**通告**：终端永远有一份，
@@ -988,7 +988,7 @@ stderr（`main.go:296-300`）。
 `HTTP server listening on address=...`（`agentkit/obs/hertz/hertz.go:47`）—— 说的是
 同一件事，留着就是两行，而且那一行是框架的形状、框架的 file:line。
 
-★ **打印的时机是监听就绪之后**（`main.go:895-906` 的 `waitRunning` 等的是套接字绑好，
+★ **打印的时机是监听就绪之后**（`main.go:908-919` 的 `waitRunning` 等的是套接字绑好，
 不是「进程说要启动」）：绑好之前印出来的是一句承诺，不是一件事实。★ **印的是配置
 的地址**（`main.go:466`）—— 端口写 `0` 时操作系统给一个随机端口，而那一行说的
 是 `0`；★ `listen_addr` 是给人看的固定端口，写 `0` 的运行没有人找得到服务。
@@ -1024,7 +1024,7 @@ stderr（`main.go:296-300`）。
 
 ## 5. API 表面
 
-`/v2` 路由全部在 `api/v2_files.go:40-113` 一处注册。
+`/v2` 路由全部在 `api/v2_files.go:40-122` 一处注册。
 
 ### 5.1 `POST /v2/run`
 
@@ -1045,7 +1045,7 @@ stderr（`main.go:296-300`）。
 ★ **挂上请求不带问题**（`api/v2_run.go` 的 `isAttachRequest`）：带问题就意味着
 「开始一轮新的」，在这里开始一轮新的等于把用户那句话悄悄跑第二遍。挂上走
 `attachRun`（`api/v2_run.go:241-261`），它按 id 找到那个活着的 run
-（`agentkit/run/runtime.go:1011-1025` 的 `LiveRun`），订阅它并渲染它的窗口。
+（`agentkit/run/runtime.go:1060-1074` 的 `LiveRun`），订阅它并渲染它的窗口。
 
 ★ **结束的 run 挂不上。** 服务端回 **404 `run_not_live`**
 （`api/v2_run.go:244`，码在 `api/v2_types.go:58`），而不是开始一轮新的 —— 客户端对
@@ -1069,11 +1069,11 @@ stderr（`main.go:296-300`）。
 |---|---|
 | `GET /v2/sessions/{id}/runs` | 这个会话的每一次 run，加上 `activeRunId` |
 | `GET /v2/sessions/{id}/runs/{runId}` | 一行 run |
-| `GET /v2/sessions/{id}` | 会话的 `state` 与 `runId`（`api/v2_sessions.go:90-93`） |
+| `GET /v2/sessions/{id}` | 会话的 `state` 与 `runId`（`api/v2_sessions.go:176-179`） |
 | `GET /v2/sessions/{id}/messages` | 整份记录 + `state` + `usage`（含 `usage.context`） |
 | `GET /v2/sessions/{id}/events` | 这个会话的公告通道 —— 审批被回答了、新一轮开始了（§1.7） |
 
-★ 扫描的路由**只读**（`api/v2_files.go:57-58`）。
+★ 扫描的路由**只读**（`api/v2_files.go:61-62`）。
 
 ★ **公告通道不是扫描。** 它只推**实时事实**，不回答「发生过什么」；那件事永远归扫描
 （§1.3）。★ 它不读账本、不改任何状态 —— 真相仍然在账本与 transcript 里。
@@ -1082,7 +1082,7 @@ stderr（`main.go:296-300`）。
 
 | 路由 | 语义 |
 |---|---|
-| `POST /v2/sessions/{id}/abort` | 中止的是**run**，不是 loop；返回它中止的那个 run id（`api/v2_sessions.go:404-406`） |
+| `POST /v2/sessions/{id}/abort` | 中止的是**run**，不是 loop；返回它中止的那个 run id（`api/v2_sessions.go:500-502`） |
 | `POST /v2/sessions/{id}/compact` | 手动压缩；轮次在跑或审批在等时 409（`api/v2_compact.go:46`） |
 
 ★ **中止会顺带清掉作废的审批**（见 §2.2），否则「先停、再接管」接管不了。
@@ -1311,53 +1311,53 @@ stderr（`main.go:296-300`）。
 
 - `storage/runledger.go` — `ErrFenceStale`(:21)、七个状态(:32)、状态用名字上线(:55)、
   `waiting_approval` 是终态(:83)、不认识的名字是错误(:101)、`Run`(:134)、
-  `RunLedger`(:187)、`FoldRuns`(:214)、`ActiveRun`(:238)、`SortRunsByStart`(:262)
+  `RunLedger`(:199)、`FoldRuns`(:226)、`ActiveRun`(:250)、`SortRunsByStart`(:274)
 - `storage/lease.go` — `ErrLeaseHeld`(:14)、`Lease`(:23)、`LeaseArbiter`(:58)、
-  仲裁器不分配 epoch(:45)
+  仲裁器不分配 epoch(:47)
 - `storage/memarbit/arbiter.go` — 包注释(:1)、`Arbiter`(:24)、`Held` 连过期租约一起
   返回(:136)
 - `storage/filestore/runledger.go` — `runs.jsonl`(:29)、上界 200(:36)、`Append`(:83)、
   `Sync`(:109)、裁剪(:126)、`List` 丢坏行(:173)、`NextEpoch`(:200)、epoch 分配的洞
   (:189)、分配不原子(:195)、`Reconcile`(:232)、不替别人背锅(:229)
 - `storage/filestore/manager.go` — `Inspect`(:219)、账本对账(:267)
-- `storage/filestore/session.go` — `Messages(effective)`(:344)、`formatVersion`(:661)
-- `storage/storage.go` — `Messages(effective bool)`(:48)、`RunLedger()`(:149)
+- `storage/filestore/session.go` — `Messages(effective)`(:372)、`formatVersion`(:758)
+- `storage/storage.go` — `Messages(effective bool)`(:48)、`RunLedger()`(:173)
 
 ### A.2 运行时
 
-- `agentkit/run/runtime.go` — `defaultInstanceID`(:185)、`newRunID`(:212)、
-  `Submit`(:240)、闸门之后的破坏性动作(:249)、`claimTurn`(:290)、租约过期可接管
-  (:293)、`openRunRow`(:367)、记不下来就拒绝(:312)、申领租约(:326)、进展续租与丢租
-  即取消(:331)、`releaseClaim`(:397)、放弃的 claim 不复活(:411)、释放被换下的轮次
-  (:422)、run 上下文解绑(:438)、`ensureIdle`(:504)、`conflictTurns`(:532)、
-  问 loop 不问指针(:503)、`ensureNoLiveTurn`(:554)、`ensureNoLiveQuery`(:589)、
-  `Resume` 预检(:595)、先申领再消费审批(:603)、父 run 与父树(:612)、
-  `TakePendingApproval`(:659)、`Abort`(:751)、清作废审批(:719)、
-  `clearVoidApproval`(:803)、`StatusOf`(:897)、待审批推导阶段(:873)、`activeRun`(:935)、
-  `parentRunOf`(:960)、`LiveRun`(:1011)、`ScanRuns`(:1033)
-- `agentkit/run/loop.go` — 读有效历史(:81)、装配失败要判失败(:139)、记下树(:147)、
-  行变 running(:168)、`emit.Derive`(:183)、归档→标记→终态行(:212)、`finishRun`(:283)、
-  压缩消息在前(:326)、`archiveCompaction`(:379)
+- `agentkit/run/runtime.go` — `defaultInstanceID`(:186)、`newRunID`(:213)、
+  `Submit`(:241)、闸门之后的破坏性动作(:254)、`claimTurn`(:291)、租约过期可接管
+  (:294)、`openRunRow`(:368)、记不下来就拒绝(:326)、申领租约(:339)、进展续租与丢租
+  即取消(:344)、`releaseClaim`(:407)、放弃的 claim 不复活(:434)、释放被换下的轮次
+  (:444)、run 上下文解绑(:460)、`ensureIdle`(:531)、`conflictTurns`(:559)、
+  问 loop 不问指针(:568)、`ensureNoLiveTurn`(:581)、`ensureNoLiveQuery`(:616)、
+  `Resume` 预检(:661)、先申领再消费审批(:669)、父 run 与父树(:675)、
+  `TakePendingApproval`(:686)、`Abort`(:791)、清作废审批(:798)、
+  `clearVoidApproval`(:843)、`StatusOf`(:937)、待审批推导阶段(:953)、`activeRun`(:975)、
+  `parentRunOf`(:1000)、`LiveRun`(:1051)、`ScanRuns`(:1073)
+- `agentkit/run/loop.go` — 读有效历史(:82)、装配失败要判失败(:140)、记下树(:148)、
+  行变 running(:174)、`emit.Derive`(:183)、归档→标记→终态行(:218)、`finishRun`(:283)、
+  压缩消息在前(:343)、`archiveCompaction`(:379)
 - `agentkit/run/bridge.go` — `sessionState`(:39)、`markTurnDone`(:73)、`loopExited`(:190)、
-  抛审批的 run 在这里关发布方(:169)、`closeApprovalRow`(:255)、`closeOpenRow`(:277)、
+  抛审批的 run 在这里关发布方(:237)、`closeApprovalRow`(:255)、`closeOpenRow`(:277)、
   `writeHeldApproval`(:308)
 - `agentkit/run/publish.go` — 窗口上界 1000(:20)、`publisher`(:36)、`Publish` 永不阻塞
   (:98)、`newLivePublisher`（公告通道没有窗口）(:68)、`watcherCount`(:85)、
   `Subscribe` 回放窗口(:144)、`subscription.truncated`(:203)
-- `agentkit/run/turn.go` — `Wait` 超时判失败(:158)、`markReleased`(:247)、
+- `agentkit/run/turn.go` — `Wait` 超时判失败(:195)、`markReleased`(:247)、
   `holdsSlot`(:262)、`WaitReleased`(:281)、`WaitArchived`(:294)、归档等待上界 30 秒
-  (:292)、`failedState`(:428)
+  (:307)、`failedState`(:428)
 - `agentkit/run/lease.go` — 默认 TTL 10 分钟(:20)、`leaseExpired`(:28)、进展驱动的续租
   与节流(:105)
 - `agentkit/run/errors.go` — `ErrSessionBusy`(:43)
 - `agentkit/run/compact.go` — `MinCompactMessages`(:34)、`MinCompactTokens`(:36)、
   `run.Compact`(:70)
-- `agentkit/run/input.go` — `withoutSubagentMessages`(:150)
+- `agentkit/run/input.go` — `withoutSubagentMessages`(:152)
 
 ### A.3 事件管线
 
 - `agentkit/emit/emit.go` — 包注释(:1)、错误码(:45)、`Sink` 不得阻塞(:70)、`Derive`(:131)、
-  只有根 agent 的压缩(:268)、`compactionFrom`(:400)
+  只有根 agent 的压缩(:269)、`compactionFrom`(:400)
 - `agentkit/emit/context.go` — `ContextUsageOf`(:21)、占用取 `TotalTokens`(:45)
 - `agentkit/emit/usage.go` — `aggregateUsage`(:71)
 - `contract/runevent.go` — `RunEventKind`(:13)、`RunEvent`(:88)
@@ -1370,13 +1370,13 @@ stderr（`main.go:296-300`）。
 - `api/v2_run.go` — run id 定下来(:129)、挂上分支(:161)、连接订阅(:193)、等归档(:201)、
   等释放(:209)、`isAttachRequest`(:224)、`attachRun`(:241)、挂不上 404(:244)、
   `agent_unavailable` 映射(:275)
-- `api/v2_sessions.go` — 会话的 `runId`(:132)、`ensureAgentIdle`(:259)、消息视图读整份
-  记录(:274)、`sessionContextUsage`(:358)、`compactionCount`(:374)、
-  `v2Abort`(:434)、中止返回 run id(:454)、`v2SessionRuns`(:471)、只读(:468)、
-  `v2SessionRun`(:492)、`stateOf`(:559)
+- `api/v2_sessions.go` — 会话的 `runId`(:142)、`ensureAgentIdle`(:279)、消息视图读整份
+  记录(:343)、`sessionContextUsage`(:378)、`compactionCount`(:394)、
+  `v2Abort`(:454)、中止返回 run id(:474)、`v2SessionRuns`(:491)、只读(:488)、
+  `v2SessionRun`(:512)、`stateOf`(:585)
 - `api/v2_types.go` — `session_busy` 与改名理由(:40)、`run_not_live`(:58)、
-  `ErrSessionBusy` → 409(:124)、`no_checkpoint` 的消息(:129)、`usage.context`(:302)
-- `api/v2_files.go` — 路由注册(:40)、两条扫描路由(:57)、公告通道的路由(:64)
+  `ErrSessionBusy` → 409(:132)、`no_checkpoint` 的消息(:137)、`usage.context`(:325)
+- `api/v2_files.go` — 路由注册(:40)、两条扫描路由(:61)、公告通道的路由(:73)
 - `api/v2_compact.go` — `v2Compact`(:35)、轮次在跑 → 409(:46)
 - `api/v2_introspect.go` — `modelView.ContextWindow`(:105)、`modelBrief.ContextWindow`(:105)
 
@@ -1387,21 +1387,21 @@ stderr（`main.go:296-300`）。
 - `agentkit/build/summarize.go` — 摘要中间件(:28)、`Trigger.ContextTokens`(:44)、
   `EmitInternalEvents`(:49)、finalizer(:172)
 - `agentkit/spec/summarize.go` — 默认阈值 80 %(:13)、`SummarizeAt`(:25)
-- `agentkit/spec/load.go` — 模型档案里的 `summarize_at` 已废弃(:63)、
+- `agentkit/spec/load.go` — 模型档案里的 `summarize_at` 已废弃(:84)、
   `noticeCompactionWindows`(:1048)
 - `agentkit/spec/decl/decl.go` — `context_window`(:61)、`server.lease_ttl`(:313)、
-  `server.log_level`(:293)、`LogCfg` 没有 `format` 键(:315)
+  `server.log_level`(:293)、`LogCfg` 没有 `format` 键(:331)
 - `message/compaction.go` — `ExtraCompaction`(:14)、`Compaction`(:21)、`EffectiveView`(:103)
 - `web/src/lib/attach.ts` — `attachTarget`(:17)、`busyElsewhere`(:35)、`recoveryPlan`(:76)
 - `web/src/lib/events.ts` — `RUN_STARTED` 清忙(:312)、reducer 处理两个 `CUSTOM`(:383)、
   `onContextUsage`(:431)、`onContextCompacted`(:453)
 - `web/src/lib/store/history.ts` — 水合时认服务端的 `state`(:143)
-- `web/src/lib/store/selectors.ts` — `selectActiveContext`(:118)
-- `web/src/lib/store/actions.ts` — 409 回滚与标记(:593)、`reattach`(:620)、流结束后
-  重新扫描(:626)、`applyScan`(:835)、`attachToLiveRun`(:369)、`recoverRound`(:723)、
-  `scanBusy`(:640)、扫描失败保持原样(:1049-1051)、`stop` 后重新扫描(:1158)
-- `web/src/lib/api.ts` — `listRuns`(:403)、`configVersion`(:438)、`onError` 带 code(:533)、
-  把 `body.code` 传下去(:654)
+- `web/src/lib/store/selectors.ts` — `selectActiveContext`(:136)
+- `web/src/lib/store/actions.ts` — 409 回滚与标记(:722)、`reattach`(:772)、流结束后
+  重新扫描(:750)、`applyScan`(:945)、`attachToLiveRun`(:983)、`recoverRound`(:880)、
+  `scanBusy`(:1176)、扫描失败保持原样(:1180-1182)、`stop` 后重新扫描(:1289)
+- `web/src/lib/api.ts` — `listRuns`(:496)、`configVersion`(:546)、`onError` 带 code(:641)、
+  把 `body.code` 传下去(:762)
 - `web/src/lib/types.ts` — `busy` 的含义(:158)
 
 ### A.6 会话公告通道
@@ -1410,19 +1410,19 @@ stderr（`main.go:296-300`）。
   `subscribe`(:54)、`release`(:59)、`publish`(:77)、`Announce`(:93)、
   `ReleaseAnnounce`(:102)、`AnnounceWatchers`(:115)、审批在等(:141)、审批被回答(:168)、
   新一轮开始(:190)
-- `agentkit/run/runtime.go` — 新一轮开始(:469)、审批被回答(:676)
+- `agentkit/run/runtime.go` — 新一轮开始(:496)、审批被回答(:703)
 - `contract/runevent.go` — `RunEventApprovalPending`(:59)、`RunEventApprovalResolved`(:68)、
   `RunEventRunStarted`(:75)
 - `transport/transport.go` — `RenderSession`(:115)、`emitApprovalPending`(:305)、
   `emitApprovalResolved`(:342)、`emitRunStarted`(:358)
 - `transport/sse.go` — `Ping`(:113)
 - `api/v2_session_events.go` — `v2SessionEvents`(:40)、开通道先 ping(:63)
-- `api/v2_files.go` — 公告通道的路由(:64)
+- `api/v2_files.go` — 公告通道的路由(:73)
 - `web/src/lib/session-events.ts` — `readInterrupt`(:60)、`parseSessionFact`(:80)、
   `applySessionFact`(:126)
-- `web/src/lib/api.ts` — `sessionStream`(:704)
-- `web/src/lib/store/actions.ts` — `releaseRun`(:132)、`watchSession`(:935)、
-  `applySessionFact`(:988)、`followRun`(:1009)
+- `web/src/lib/api.ts` — `sessionStream`(:812)
+- `web/src/lib/store/actions.ts` — `releaseRun`(:133)、`watchSession`(:1045)、
+  `applySessionFact`(:1098)、`followRun`(:1126)
 - `web/src/app/shell.tsx` — 通道跟着屏幕上的会话(:65)
 
 ### A.7 日志装配
@@ -1440,4 +1440,4 @@ stderr（`main.go:296-300`）。
 - `main.go` — `newLogger`(:350)、`installLogger`(:361)、`hlog.SetLogger`(:367)、
   `callbacks.AppendGlobalHandlers`(:368)、`applyLogLevel`(:374)、告警在切换等级之前
   (:386)、`applyLogFile`(:412)、落不进文件是警告(:423)、0600 探针(:429)、
-  `lumberjack`(:436)、`sink.Install`(:449)、地址的通告(:920)、越界的通告(:946)
+  `lumberjack`(:436)、`sink.Install`(:449)、地址的通告(:926)、越界的通告(:952)

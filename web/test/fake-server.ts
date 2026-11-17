@@ -50,12 +50,48 @@ export interface FakeThread {
   pendings?: PendingApproval[]
   runs?: FakeRun[]
   usage?: Usage
+  // ★ The session's authorization mode, and whether this session has already
+  //   confirmed the full one. ★ They belong to the session and travel with
+  //   it — the fake keeps them on the thread for the same reason.
+  authorizationMode?: "default" | "trusted" | "full"
+  authorizationConfirmed?: boolean
+  // operations is the session's operation log — the timeline the panel reads.
+  //
+  // ★ A thread without one has **no** activity, and the fake says so with an
+  //   empty list: the panel's empty state is a real state, and the fake has
+  //   to be able to show it.
+  operations?: FakeOperation[]
   files: { name: string; path: string; size: number; mime: string }[]
   // blobs holds the bytes of the uploaded files, keyed by the stored path.
   //
   // ★ The fake needs them because the raw endpoint serves **bytes** — a
   //   fake that answered the preview with a name would test nothing.
   blobs?: Map<string, ArrayBuffer>
+}
+
+// FakeOperation is one line of the session's operation log.
+//
+// ★ The kinds are the server's own vocabulary — the fake uses the same
+//   names, so a client that reads them right here reads them right against
+//   the real server too.
+export interface FakeOperation {
+  seq: number
+  at: string
+  kind: string
+  actor: "user" | "system"
+  runId?: string
+  turnKind?: string
+  interruptId?: string
+  toolName?: string
+  approved?: boolean
+  agentId?: string
+  projectId?: string
+  mode?: string
+  title?: string
+  path?: string
+  name?: string
+  size?: number
+  state?: string
 }
 
 export interface FakeMessage {
@@ -312,6 +348,16 @@ export const SCENARIOS = {
   bigChunks: ["A"],
 
   toolDone: ["A"],
+
+  // ★ toolFailed: a call that came back with an error. ★ The failure is a
+  //   frame of its own — the tool result frame carries the content and
+  //   nothing else, and the content says what the **model** read, not what
+  //   happened to the call (transport/transport.go's emitToolFailed).
+  toolFailed: ["A"],
+
+  // ★ toolMany: **two calls in one message** — the model asked for both at
+  //   once. ★ They are one thing that happened, and the interface says so.
+  toolMany: ["A"],
 
   toolJson: ["A"],
 
@@ -685,7 +731,35 @@ function seedThreads(): FakeThread[] {
       ],
     },
     { id: "h-t1", role: "tool", content: toolResult, toolCallId: "h-call-1" },
-    { id: "h-a2", role: "assistant", content: `${MARKER_HISTORY} answer` },
+    {
+      id: "h-a2",
+      role: "assistant",
+      content: `${MARKER_HISTORY} answer`,
+      // ★ A call that failed: the tool result carries the failure in its
+      //   metadata, the way api/v2_convert.go stamps it. ★ The history has
+      //   to show it — a reload that lost it would show a failed call as a
+      //   successful one.
+      //
+      //   ★ The failed call hangs off the **answer** message, and not off
+      //     the one that holds the successful call: two calls in one
+      //     message are one run, and a run is a bar — the cards only exist
+      //     once the reader opens it. The history's own card would
+      //     disappear into that bar.
+      toolCalls: [
+        {
+          id: "h-call-2",
+          type: "function",
+          function: { name: "read_file", arguments: '{"file_path":"/tmp/missing.txt"}' },
+        },
+      ],
+    },
+    {
+      id: "h-t2",
+      role: "tool",
+      content: "[tool error] file not found: /tmp/missing.txt",
+      toolCallId: "h-call-2",
+      metadata: { toolError: "file not found: /tmp/missing.txt" },
+    },
   ]
 
   const multiMessages: FakeMessage[] = [
@@ -799,6 +873,51 @@ function seedThreads(): FakeThread[] {
       messages: [
         { id: "a-u1", role: "user", content: `${MARKER_A} first question` },
         { id: "a-a1", role: "assistant", content: `${MARKER_A} first answer` },
+      ],
+      // ★ The session's operation log. ★ The lines cover the kinds the
+      //   timeline shows: the session, a turn, an approval that was asked
+      //   for and answered, and the turn's end.
+      operations: [
+        {
+          seq: 1,
+          at: "2026-10-12T10:00:00Z",
+          kind: "session.created",
+          actor: "system",
+          agentId: "main",
+        },
+        {
+          seq: 2,
+          at: "2026-10-12T10:01:00Z",
+          kind: "run.started",
+          actor: "user",
+          runId: "run-alpha-0001",
+          turnKind: "query",
+        },
+        {
+          seq: 3,
+          at: "2026-10-12T10:02:00Z",
+          kind: "approval.requested",
+          actor: "system",
+          interruptId: "int-alpha-0001",
+          toolName: "write_file",
+        },
+        {
+          seq: 4,
+          at: "2026-10-12T10:03:00Z",
+          kind: "approval.resolved",
+          actor: "user",
+          interruptId: "int-alpha-0001",
+          toolName: "write_file",
+          approved: true,
+        },
+        {
+          seq: 5,
+          at: "2026-10-12T10:04:00Z",
+          kind: "run.finished",
+          actor: "system",
+          runId: "run-alpha-0001",
+          state: "completed",
+        },
       ],
       // A model that declares no window: the occupancy is reported, and
       // there is no ratio to show.
@@ -998,6 +1117,70 @@ function eventsFor(
       return [
         ...msg,
         { type: "TOOL_CALL_RESULT", toolCallId: "call_1", messageId: "call_1", content: "package main\n\nfunc main() {}\n", role: "tool" },
+        ...announce("m-1"),
+        finished(threadId, runId),
+      ]
+    }
+
+    // ★ toolFailed: a call that came back with an error. ★ The result frame
+    //   carries the content the model read; the failure is a **separate**
+    //   frame, because the content cannot say what happened to the call.
+    case "toolFailed": {
+      return [
+        started(threadId, runId),
+        toolStart("call_1", "read_file", "m-1"),
+        toolArgs("call_1", JSON.stringify({ file_path: "/tmp/missing.txt" })),
+        toolEnd("call_1"),
+        {
+          type: "TOOL_CALL_RESULT",
+          toolCallId: "call_1",
+          messageId: "call_1",
+          role: "tool",
+          content: "[tool error] file not found: /tmp/missing.txt",
+        },
+        {
+          type: "CUSTOM",
+          name: "tool_failed",
+          value: {
+            tool_call_id: "call_1",
+            tool_name: "read_file",
+            error: "file not found: /tmp/missing.txt",
+          },
+        },
+        ...announce("m-1"),
+        finished(threadId, runId),
+      ]
+    }
+
+    // ★ toolMany: **two calls in one message**, the way a model asks for
+    //   two things at once. ★ The interface gathers the calls that follow
+    //   each other into one run — one line on the screen, not two cards.
+    case "toolMany": {
+      return [
+        started(threadId, runId),
+        toolStart("call_1", "read_file", "m-1"),
+        toolArgs("call_1", JSON.stringify({ file_path: "/tmp/x.txt" })),
+        toolStart("call_2", "grep", "m-1"),
+        toolArgs("call_2", JSON.stringify({ pattern: "TODO", path: "/tmp" })),
+        toolEnd("call_1"),
+        toolEnd("call_2"),
+        {
+          type: "TOOL_CALL_RESULT",
+          toolCallId: "call_1",
+          messageId: "call_1",
+          role: "tool",
+          content: "package main\n\nfunc main() {}\n",
+        },
+        {
+          type: "TOOL_CALL_RESULT",
+          toolCallId: "call_2",
+          messageId: "call_2",
+          role: "tool",
+          content: "x.txt:3:\t// TODO: fix me\n",
+        },
+        { type: "TEXT_MESSAGE_START", messageId: "m-2", role: "assistant", name: "main" },
+        { type: "TEXT_MESSAGE_CONTENT", messageId: "m-2", delta: "两个都看过了。" },
+        { type: "TEXT_MESSAGE_END", messageId: "m-2" },
         ...announce("m-1"),
         finished(threadId, runId),
       ]
@@ -1418,6 +1601,11 @@ export function startFakeServer(port = 0): FakeServer {
     // ★ The project the session belongs to — the same answer the real
     //   server reads from the project table.
     projectId: t.projectId ?? fakeProjectOf(t.threadId),
+    // ★ The authorization mode is always sent: a missing field says "this
+    //   version does not know about modes", and an empty one would say
+    //   "this session has no mode" — two different things.
+    authorizationMode: t.authorizationMode ?? "default",
+    authorizationConfirmed: t.authorizationConfirmed ?? false,
   })
 
   function queryParams(u: URL): Record<string, string> {
@@ -2758,7 +2946,12 @@ export function startFakeServer(port = 0): FakeServer {
       }
 
       if (path === "/v2/sessions" && req.method === "POST") {
-        const body = (await req.json().catch(() => ({}))) as { agentId?: string; projectId?: string }
+        const body = (await req.json().catch(() => ({}))) as {
+          agentId?: string
+          projectId?: string
+          authorizationMode?: string
+          authorizationConfirmed?: boolean
+        }
         const agentId = (body.agentId ?? "").trim()
         if (agentId && !fakeAgentIds().has(agentId)) {
           return fail(400, `agent not found: ${agentId}`, "agent_not_found")
@@ -2766,6 +2959,20 @@ export function startFakeServer(port = 0): FakeServer {
         const projectId = (body.projectId ?? "").trim()
         if (projectId && !fakeProjects().items.some((p) => p.id === projectId)) {
           return fail(404, `no such project: ${projectId}`, "project_not_found")
+        }
+        // ★ The mode a session is born with. ★ It is checked **before** the
+        //   session exists, the way the real server checks it — a request
+        //   that cannot be honoured must not leave a session behind.
+        const mode = (body.authorizationMode ?? "").trim()
+        if (mode && mode !== "default" && mode !== "trusted" && mode !== "full") {
+          return fail(400, `unknown authorization mode: ${mode}`, "invalid_body")
+        }
+        if (mode === "full" && body.authorizationConfirmed !== true) {
+          return fail(
+            409,
+            "full authorization needs an explicit confirmation",
+            "confirmation_required",
+          )
         }
         const t: FakeThread = {
           threadId: `new-${++seq}`,
@@ -2777,6 +2984,8 @@ export function startFakeServer(port = 0): FakeServer {
           agentId: agentId || defaultRoot,
           projectId,
           files: [],
+          ...(mode ? { authorizationMode: mode as FakeThread["authorizationMode"] } : {}),
+          ...(mode === "full" ? { authorizationConfirmed: true } : {}),
         }
         threads.push(t)
         return json(meta(t), 201)
@@ -2796,6 +3005,33 @@ export function startFakeServer(port = 0): FakeServer {
           return fail(409, "session is busy; finish or stop the run first", "agent_busy")
         }
         t.agentId = id
+        return json(meta(t))
+      }
+
+      // ★ The session's authorization mode. ★ It is the session's own
+      //   property, and the server is the one that refuses `full` until the
+      //   session confirmed it — the client asks, the server answers.
+      const authz = path.match(/^\/v2\/sessions\/([^/]+)\/authorization$/)
+      if (authz && req.method === "PATCH") {
+        const t = find(authz[1])
+        if (!t) return notFound()
+        const body = (await req.json().catch(() => ({}))) as { mode?: string; confirm?: boolean }
+        const mode = (body.mode ?? "").trim()
+        if (mode !== "default" && mode !== "trusted" && mode !== "full") {
+          return fail(400, `unknown authorization mode: ${mode}`, "invalid_body")
+        }
+        // ★ The confirmation belongs to the session: once it is given, the
+        //   server does not ask again — a second surface reads the same
+        //   fact off the session and stays quiet.
+        if (mode === "full" && !t.authorizationConfirmed && body.confirm !== true) {
+          return fail(
+            409,
+            "full authorization needs an explicit confirmation",
+            "confirmation_required",
+          )
+        }
+        t.authorizationMode = mode
+        if (mode === "full") t.authorizationConfirmed = true
         return json(meta(t))
       }
 
@@ -2863,6 +3099,32 @@ export function startFakeServer(port = 0): FakeServer {
         }))
         const active = items.find((r) => r.state === "running" || r.state === "starting")
         return json({ items, ...(active ? { activeRunId: active.runId } : {}) })
+      }
+
+      // ★ The session's operation log — the timeline of what happened.
+      //
+      //   ★ The order is **ascending**: the timeline is read from the top
+      //     down, like a log. ★ `after` skips the lines a client already
+      //     has, and `limit` keeps the last n of what is left — and the
+      //     total counts what the filter selected, before the limit cut
+      //     the tail off.
+      const operationsRoute = path.match(/^\/v2\/sessions\/([^/]+)\/operations$/)
+      if (operationsRoute && req.method === "GET") {
+        const t = find(operationsRoute[1])
+        if (!t) return notFound()
+        const afterRaw = url.searchParams.get("after")
+        const after = afterRaw === null ? 0 : Number(afterRaw)
+        if (!Number.isFinite(after) || after < 0) {
+          return fail(400, "after must be a sequence number", "invalid_body")
+        }
+        const limitRaw = url.searchParams.get("limit")
+        const limit = limitRaw === null ? 0 : Number(limitRaw)
+        if (!Number.isFinite(limit) || limit < 0) {
+          return fail(400, "limit must be a non-negative number", "invalid_body")
+        }
+        const selected = (t.operations ?? []).filter((o) => o.seq > after)
+        const items = limit > 0 ? selected.slice(selected.length - limit) : selected
+        return json({ threadId: t.threadId, total: selected.length, items })
       }
 
       // ★ The bytes of one file, for the preview.

@@ -15,7 +15,7 @@ one — change one and change the other.
 > `docs/user-manual.md` / `docs/user-manual_zh.md` (user guide),
 > `docs/developer-manual.md` / `docs/developer-manual_zh.md` (developer guide).
 >
-> **and nine Chinese-only documents** under `docs/` — the architecture and code-design
+> **and eleven Chinese-only documents** under `docs/` — the architecture and code-design
 > ones. ★ Their Chinese content **took over the plain name**: `docs/config-design.md`
 > **is** the Chinese document — there is no `_zh` twin and no English one:
 > `docs/config-design.md` (the configuration system — the config root and its three
@@ -29,7 +29,10 @@ one — change one and change the other.
 > session's announcement channel),
 > `docs/tools-design.md` (tools and integrations — where a tool comes from, the bounded
 > filesystem backend, the MCP integration, and the Docker Sandbox Kit),
-> `docs/ui-design.md` (the interface and its resources — attachments and motion),
+> `docs/authorization-design.md` (the authorization mode — the three per-session
+> levels, where the mode lives, and how the gate reads it),
+> `docs/ui-design.md` (the frontend and the interface — the architecture, the event
+> stream, the state, the interface itself, and how it is tested),
 > `docs/secrets-design.md` (the secret system — the naming of the two namespaces, the
 > resolution chain, the keyring, and the write surface),
 > `docs/projects-design.md` (projects and directories — the user-level `openheron_root`,
@@ -37,10 +40,13 @@ one — change one and change the other.
 > per-session project root),
 > `docs/sidebar-design.md` (the sidebar — its groups, rows and menus, the one
 > current project, and what is still missing),
+> `docs/session-operations-design.md` (the session's operation log — what a session
+> directory holds today, the gap it leaves, and the proposed `operations.jsonl`
+> timeline),
 > `docs/pitfalls.md` (the pitfall register — the traps this tree has hit, what caused
 > each of them, and how it was handled).
 > **Every other design document under `docs/` still lives in the upstream repository** ——
-> any `docs/xxx.md` reference below that is not one of these nine, is the upstream copy.
+> any `docs/xxx.md` reference below that is not one of these eleven, is the upstream copy.
 > If you cannot get hold of it before changing semantics, ask first; do not change
 > configuration or interfaces from memory.
 >
@@ -57,7 +63,7 @@ one — change one and change the other.
 > `sandbox-kit/BUILDING.md`) are bilingual for the same reason.
 >
 > ★ The four bilingual sets describe **what the code surface already is**; the Chinese-only
-> designs say the same about their own subject: each of the nine **describes the code as
+> designs say the same about their own subject: each of the eleven **describes the code as
 > it is**, and the proposals that have not landed are collected in its own "待决" section.
 > `docs/config-design.md` covers **the configuration system** — the config root and its
 > three levels, the partitions and their file specs, loading and precedence, the tool
@@ -81,9 +87,15 @@ one — change one and change the other.
 > filesystem backend in `agentkit/fsx`, the MCP integration, and the Docker Sandbox Kit
 > that packages the whole process as a v3 workload. ★ How a sandbox Kit packages an MCP
 > server is still a proposal.
-> `docs/ui-design.md` covers **the interface and its resources** — how an uploaded file
-> lands on disk, what the server does to it, how the interface shows it, and the motion
-> tokens with the reduced-motion fallback.
+> `docs/ui-design.md` covers **the frontend and the interface** — the architecture
+> (the stack, the dependency list, the bundle chunks, the directory), how a turn reaches
+> the screen (the session identity, the SSE framing, the reducer, the store), the
+> interface itself (the shell, the messages, the tool calls, the approvals, the
+> attachments, the motion, the authorization picker, the activity timeline), and how it
+> is accepted (the three test layers, the E2E coverage, the engineering).
+> ★ It absorbed the upstream `docs/frontend-design.md` on 2026-11-17: that document
+> described the heron-era frontend, and every claim in it was re-checked against this
+> tree before it was merged — where the two disagree, this one is right.
 > ★ And `docs/secrets-design.md` covers **the secret system** — the two namespaces
 > (`LLM_<PROVIDER>_API_KEY` / `llm:<provider>` and `MCP_<SERVER>_TOKEN` /
 > `mcp:<server>`), the one resolution chain they share (the environment overrides the
@@ -97,6 +109,13 @@ one — change one and change the other.
 > ★ And `docs/sidebar-design.md` covers **the sidebar** — its groups, rows and the two
 > menus, the one current project, and what is still missing. **Its body describes the
 > code as it is**; the proposals that have not landed are in its own "待决" section.
+> ★ And `docs/authorization-design.md` covers **the authorization mode** — the three
+> per-session levels, where the mode lives (the session record), and how the gate reads
+> it (the round's context). **Its body describes the code as it is.**
+> ★ And `docs/session-operations-design.md` covers **the session's operation log** — what
+> a session directory holds, the gap it left (no place answered "what happened to this
+> session, in order"), and the `operations.jsonl` timeline that closed it. **Its body
+> describes the code as it is.**
 > ★ And `docs/pitfalls.md` is the **pitfall register**: the traps this tree has hit, what
 > caused each of them, how it was fixed or what boundary it still has. Read it before
 > touching a subsystem you have not touched yet — it is cheaper than rediscovering the
@@ -275,11 +294,11 @@ the log's destination is configuration, and the configuration must not be able t
   comes back empty — "switch" can only mean "the next conversation is in that project".
 - Before changing configuration semantics, read `docs/config-design.md`; before changing
   an interface, read `docs/api-design.md`; before adding a `/v2` endpoint, read
-  `docs/api-v2-design.md`; before touching the frontend, read `docs/frontend-design.md`; before
-  touching the test environment (ports / isolation directories), read `docs/frontend-design.md`
-  §11.2 and `docs/config-design.md` §3.3. ★ `docs/config-design.md` and
-  `docs/api-v2-design.md` **are** in this repository; the other two are upstream
-  documents that are **not** — if you cannot get them, ask
+  `docs/api-v2-design.md`; before touching the frontend, read `docs/ui-design.md`; before
+  touching the test environment (ports / isolation directories), read `docs/ui-design.md`
+  §14.2 and `docs/config-design.md` §3.3. ★ `docs/config-design.md`,
+  `docs/api-v2-design.md` and `docs/ui-design.md` **are** in this repository;
+  `docs/api-design.md` is an upstream document that is **not** — if you cannot get it, ask
   first. The `docs/architecture.md` / `docs/user-manual.md` / `docs/developer-manual.md` shipped here (and their `_zh` Chinese
   versions) describe **this code surface** as it actually is — just read them.
   `docs/runtime-design.md` covers context usage and compaction: the usage dashboard and
@@ -461,8 +480,8 @@ cd web && bun run smoke:config             # config_write's approval round trip 
   not survive the tool call that started it (it is killed when the call ends), which shows up
   as "it ran for a while and then vanished" and "the port never comes up" — while the log holds
   only the first line, so you cannot tell who killed it.
-- **When you add or remove cases, sync the counts in the docs.** The tree in
-  `docs/frontend-design.md` hard-codes the counts, so that "forgot to update" turns into a diff
+- **When you add or remove cases, sync the counts in the docs.** The table in
+  `docs/ui-design.md` §13.3 hard-codes the counts, so that "forgot to update" turns into a diff
   conflict instead of silent drift — the last 65/14 drifted for three rounds unnoticed.
 - **After touching `bun run build`, dependencies, or the build flow, verify a fresh clone**
   (`rm -rf node_modules && bun install`, then run it again). Passing locally does not mean the
@@ -471,7 +490,7 @@ cd web && bun run smoke:config             # config_write's approval round trip 
   git decides level by level, and once a parent directory is excluded it no longer descends into
   children; the nearer rule wins.
 
-The full isolation details are in `docs/frontend-design.md` §11.2 and
+The full isolation details are in `docs/ui-design.md` §14.2 and
 `docs/config-design.md` §3.3.
 
 ## Related documents
@@ -495,9 +514,11 @@ The full isolation details are in `docs/frontend-design.md` §11.2 and
 | `docs/runtime-design.md` | **Runtime design** — a run as a durable row with a lease and a fence, the one-turn-per-session admission gate, context usage and compaction, and the logging assembly (**the body describes the code as it is**) |
 | `docs/api-v2-design.md` | **`/v2` HTTP API design** — the route table, the request and response shapes, the error codes, the run's SSE contract, history replay, and the session's announcement channel (**the body describes the code as it is**) |
 | `docs/tools-design.md` | **Tools and integrations design** — where a tool comes from, the bounded filesystem backend in `agentkit/fsx`, the MCP integration, and the Docker Sandbox Kit (**the body describes the code as it is**) |
-| `docs/ui-design.md` | **Interface and resources design** — how an uploaded file lands on disk, what the server does to it, how the interface shows it, and the motion tokens (**the body describes the code as it is**) |
+| `docs/ui-design.md` | **Frontend and interface design** — the stack and the bundle chunks, the session identity, the SSE framing and the reducer, the store, the shell and the messages, the tool calls, the approvals, the attachments, the motion, the authorization picker, the activity timeline, and the three test layers (**the body describes the code as it is**) |
 | `docs/secrets-design.md` | **Secret system design** — the two namespaces, the shared resolution chain, the keyring backend, the write surface, and the interface entry (**the body describes a proposal being landed**) |
 | `docs/projects-design.md` | **Projects and directories design** — the user-level `openheron_root`, where the config root / data dir / log file land, the project↔session relation in `projects.json`, and the per-session project root (**the body describes the code as it is**) |
+| `docs/authorization-design.md` | **Authorization mode design** — the three per-session levels, where the mode lives, how the gate reads it, and the interface entry (**the body describes the code as it is**) |
+| `docs/session-operations-design.md` | **Session operation log design** — what a session directory holds, the gap it left, and the `operations.jsonl` timeline that closed it (**the body describes the code as it is**) |
 | `docs/pitfalls.md` | **Pitfall register** — the traps this tree has hit, what caused each of them, and how it was fixed or what boundary it still has |
 
 ★ For the bilingual set, the file without a suffix is the **English main version**; `_zh` is the
@@ -517,7 +538,7 @@ overview and the index of the volumes.
 | `docs/agent-architecture-survey.md` | **Survey of external agent architectures** — the gateway and background-service problems of pi / rakazo / OpenClaw / Hermes / Letta (2026-10-24) |
 | `docs/positioning.md` | **Positioning and trade-offs** — expert per expert model × agent as a tool: mechanism breakdown and boundaries (2026-10-25) |
 | `docs/api-design.md` | The old unprefixed APIs (**retired on 2026-10-23 together with M3**, kept as history) |
-| `docs/frontend-design.md` | React frontend architecture and interface |
+| `docs/frontend-design.md` | ★ **已并入 `docs/ui-design.md`（2026-11-17）** —— 上游那份讲的是 heron 时代的前端，引用它时以本仓库那份为准 |
 | `docs/agent-design.md` | Agent pool, approvals, depth protection |
 | `docs/agent-design-v2.md` | Agent assembly API v2 (`deep.Config` leaves openheron) |
 | `docs/multi-agent-design.md` | Multiple roles, parallel delegation, per-agent accounting and history filtering |

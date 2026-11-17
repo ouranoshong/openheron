@@ -11,6 +11,9 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/ouranoshong/openheron/agentkit/authz"
+	"github.com/ouranoshong/openheron/agentkit/fsx"
+	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/message"
 )
 
@@ -105,10 +108,7 @@ func (c InputConfig) buildInput(ctx context.Context, p inputParams, query *schem
 	//   the session works in. ★ The prompt, the relative paths and the write
 	//   boundary have to be the same directory — a model that is told about
 	//   one root and refused at another is being lied to.
-	root := p.ProjectRoot
-	if root == "" {
-		root = c.ProjectRoot
-	}
+	root := c.roundRoot(ctx, p)
 	messages = append(messages, newSystem(c.contextPrompt(ctx, root, p.Workspace, note)))
 
 	history := withoutSubagentMessages(p.History)
@@ -186,23 +186,7 @@ func (c InputConfig) contextPrompt(ctx context.Context, root, workspace, attachm
 	lines = append(lines, defaultRules...)
 	lines = append(lines, attachmentRules...)
 
-	if root != "" {
-		lines = append(lines,
-			fmt.Sprintf("Project root: %s", root),
-			"  IMPORTANT: Always pass the project root as the path argument when using filesystem tools.",
-			fmt.Sprintf("  - grep(pattern=\"...\", path=\"%s\")", root),
-			fmt.Sprintf("  - glob(pattern=\"%s/**/*.go\")", root),
-			fmt.Sprintf("  - read_file(file_path=\"%s/some/file.go\")", root),
-			"  grep and glob recurse into ALL subdirectories under the given path.",
-		)
-		if dirs := subdirs(ctx, root); len(dirs) > 0 {
-			lines = append(lines, "  Top-level subdirectories of the project root:")
-			for _, d := range dirs {
-				lines = append(lines, "    - "+d+"/")
-			}
-		}
-		lines = append(lines, "  Use these tools to read actual source code before answering questions about the codebase.")
-	}
+	lines = append(lines, c.projectRootBlock(ctx, root)...)
 
 	if c.ExamplesDir != "" && c.ExamplesDir != root {
 		lines = append(lines,
@@ -221,6 +205,15 @@ func (c InputConfig) contextPrompt(ctx context.Context, root, workspace, attachm
 		)
 	}
 
+	// ★ The authorization mode comes last of the environment facts: the
+	//   model has to know which level it runs under, so it does not take a
+	//   detour through a tool that asks when a plain write would not.
+	//
+	// ★ **All three levels say something**, the default one included: a
+	//   model that knows a call will ask does not read the pause as a
+	//   broken tool.
+	lines = append(lines, authorizationNote(ctx))
+
 	// ★ The attachments come last: they are what this turn is about, and
 	//   they are the one thing the workspace note cannot say on its own.
 	if attachments != "" {
@@ -228,6 +221,93 @@ func (c InputConfig) contextPrompt(ctx context.Context, root, workspace, attachm
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// roundRoot resolves the directory the round works in.
+//
+// ★ It is the **session's** project root, and the context is where that fact
+//
+//	lives: the round carries it, and every reader of it reads the context.
+//	A second answer — the process's default project root — is how a model
+//	ends up with two directories and picks the wrong one.
+//
+// ★ The fallbacks are for the callers that have no context to read: a
+//
+//	prompt built outside a round, and a process that serves a session
+//	belonging to no project.
+func (c InputConfig) roundRoot(ctx context.Context, p inputParams) string {
+	if root := fsx.ProjectRoot(ctx); root != "" {
+		return root
+	}
+	if p.ProjectRoot != "" {
+		return p.ProjectRoot
+	}
+	return c.ProjectRoot
+}
+
+// projectRootBlock renders the lines that name the round's directory.
+//
+// ★ It is **one** rendering with two readers: the round prompt, and the
+//
+//	sub-agent's instruction (see the build package's round block
+//	middleware). ★ Two copies of these lines would drift, and the copy
+//	that drifts is the one a model reads as the rule.
+func (c InputConfig) projectRootBlock(ctx context.Context, root string) []string {
+	if root == "" {
+		return nil
+	}
+	lines := []string{
+		fmt.Sprintf("Project root: %s", root),
+		"  IMPORTANT: Always pass the project root as the path argument when using filesystem tools.",
+		fmt.Sprintf("  - grep(pattern=\"...\", path=\"%s\")", root),
+		fmt.Sprintf("  - glob(pattern=\"%s/**/*.go\")", root),
+		fmt.Sprintf("  - read_file(file_path=\"%s/some/file.go\")", root),
+		"  grep and glob recurse into ALL subdirectories under the given path.",
+	}
+	if dirs := subdirs(ctx, root); len(dirs) > 0 {
+		lines = append(lines, "  Top-level subdirectories of the project root:")
+		for _, d := range dirs {
+			lines = append(lines, "    - "+d+"/")
+		}
+	}
+	lines = append(lines,
+		"  Use these tools to read actual source code before answering questions about the codebase.")
+	return lines
+}
+
+// RoundProjectRootBlock renders the project-root block of the round in
+// flight, for a reader outside this package.
+//
+// ★ A sub-agent never sees the round prompt: the framework hands it the
+//
+//	request and nothing else. ★ This is the channel that gives it the
+//	directory the round works in — and it is the same rendering the prompt
+//	uses, so the two cannot drift.
+func (c InputConfig) RoundProjectRootBlock(ctx context.Context) string {
+	root := c.roundRoot(ctx, inputParams{})
+	return strings.Join(c.projectRootBlock(ctx, root), "\n")
+}
+
+// authorizationNote is the one line that tells the model which level it runs
+// under.
+//
+// ★ It reads the mode from the **context**: the prompt is built per round,
+//
+//	and the mode is the round's.
+//
+// ★ The wording is the mode's own promise, not a summary of it: "runs without
+//
+//	asking" is what the gate does.
+func authorizationNote(ctx context.Context) string {
+	switch authz.ModeOf(ctx) {
+	case contract.AuthzFull:
+		return "Approval mode: full — every tool runs without asking."
+	case contract.AuthzTrusted:
+		return "Approval mode: trusted — writes inside the project root, " +
+			"the session workspace and the configuration run without asking."
+	default:
+		return "Approval mode: default — tools ask before they run."
+	}
 }
 
 func subdirs(ctx context.Context, root string) []string {

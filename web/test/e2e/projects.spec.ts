@@ -655,3 +655,35 @@ test("机器上没有选择器，理由写在那儿", async ({ page }) => {
   await expect(page.locator(PROJECT_REFUSAL)).toContainText("no folder chooser")
   await expect(page.locator(PROJECT_ROOT_INPUT)).toBeVisible()
 })
+
+// ★ A project name is the user's, and it can be longer than a phone is wide.
+//
+// ★ The line under the input box has to wrap it — the entries behind it must
+//   not be pushed off the screen. ★ A name that is cut off is still a name:
+//   the whole one stays in the tooltip and in the label a screen reader
+//   reads.
+test("★ 项目名很长时，输入框下面那一行也不溢出", async ({ page }) => {
+  const PHONE = 390
+  await page.setViewportSize({ width: PHONE, height: 844 })
+  await setProjectsMode("default")
+  await openApp(page)
+
+  await page.locator(PROJECTS_BUTTON).click()
+  await page.locator(PROJECT_NAME_INPUT).fill("A project name that is far too long for a phone")
+  await page.locator(PROJECT_ROOT_INPUT).fill("/tmp/long-name")
+  await page.locator(PROJECT_CREATE).click()
+  await page.keyboard.press("Escape")
+
+  const meta = page.locator('[data-testid="composer-meta"]')
+  await expect(meta).toBeVisible()
+
+  // ★ The row fits the screen: nothing hangs off the edge.
+  const overflow = await meta.evaluate((el) => el.scrollWidth - el.clientWidth)
+  expect(overflow).toBeLessThanOrEqual(1)
+
+  // ★ And the last entry is on the screen, not past it.
+  const right = await page
+    .locator('[data-testid="operations-button"]')
+    .evaluate((el) => el.getBoundingClientRect().right)
+  expect(right).toBeLessThanOrEqual(PHONE)
+})

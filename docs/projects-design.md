@@ -5,7 +5,7 @@
 > 范围：`openheron_root` / `config_root` / `data_dir` / 日志的落点，项目与会话的归属关系，
 > 命令行与环境变量，接口与界面上的分组。
 > 不包含：配置树自身的结构（见 `docs/config-design.md`）、运行时的一轮（见 `docs/runtime-design.md`）、
-> 工具与集成（见 `docs/tools-design.md`）、界面资源与动效（见 `docs/ui-design.md`）。
+> 工具与集成（见 `docs/tools-design.md`）、前端与界面（见 `docs/ui-design.md`）。
 > 本文按 AGENTS.md 的文档语言规则**只有中文版** —— 架构与代码设计类文档不做双语。
 >
 > ★ **本文描述的东西已经全部落在代码里** —— P1（三个根、环境变量前缀、`init` 的默认目标）、
@@ -63,15 +63,18 @@
 | 作用域项目 | 位置参数 `openheron [dir]` | — | 无（= 全部项目） | — |
 
 ★ **相对基准是 `openheron_root`，配置根不参与。**
-`Service.DataDir`（`agentkit/spec/config.go:784-796`）与 `Service.LogFile`
-（`agentkit/spec/config.go:806-818`）都把相对路径 join 到 `s.home`。
+`Service.DataDir`（`agentkit/spec/config.go:905-919`）与 `Service.LogFile`
+（`agentkit/spec/config.go:921-941`）都把相对路径 join 到 `s.home`。
 ⇒ **配置搬到哪儿，数据和日志都跟着 openheron_root 走** —— 配置是配置，状态是状态。
 
-★ 配置根的解析是四级（`agentkit/spec/config.go:651-694`）：
+★ 配置根的解析是四级（`agentkit/spec/config.go:682-703`）：
 `--config-root` → `$OPENHERON_CONFIG_ROOT` → `$OPENHERON_CONFIG_DIR`（旧名，会被点名）→
 `<openheron_root>/configs`（缺省时创建）。
 ★ 项目根**不推导**配置根（见 §2）：它是一个**作用域**，不是解析里的一级。
 ★ 只有**缺省派生的**那个根会被创建 —— 点名的根空着，是用户的决定。
+★ **默认项目根照同一条规则**：缺省的那个会被建出来 —— 服务端启动时建
+（`agentkit/spec/config.go:674-678`），`openheron init` 也建（`initcmd.go:56-69`）；
+点名的那个不建，笔误不该长出一个空目录。
 
 ### 1.2 名字的由来
 
@@ -80,9 +83,9 @@
 拆开之后，配置根可以被 `--config-root` 指到任何一个目录，而状态留在大本营。
 
 ★ **`workspace` 这个名字不能用来指项目根**：会话的上传目录已经叫它了
-（`storage.Session.Workspace()`，`storage/storage.go:84`；目录名 `workspace`，
-`storage/filestore/session.go:666`；prompt 里那一行是 `storage.Session workspace: …`，
-`agentkit/run/input.go:198-203`）。项目根的容器叫 **`projects/`**。
+（`storage.Session.Workspace()`，`storage/storage.go:108`；目录名 `workspace`，
+`storage/filestore/session.go:763`；prompt 里那一行是 `storage.Session workspace: …`，
+`agentkit/run/input.go:203`）。项目根的容器叫 **`projects/`**。
 
 ## 2. 项目：一个目录，不是一棵配置树
 
@@ -116,7 +119,7 @@
 
 **表里 `projects[].sessions` 有这个 id ⇒ 会话属于该项目；没有 ⇒ 未选项目。**
 
-会话自己的记录（`storage/filestore/session.go:643-658` 的 `state` 结构）**不记 project** ——
+会话自己的记录（`storage/filestore/session.go:730-755` 的 `state` 结构）**不记 project** ——
 归属只有这一份真相，两处都记就会出现「表说 A、会话说 B」的分裂，而没有任何地方能仲裁。
 
 ★ 代价是**表丢了会怎样**：所有会话回落成「未选项目」，用默认项目根干活。
@@ -315,12 +318,12 @@ React 的 `preventDefault` 来不及 ⇒ 唯一能拦住的是 `onEscapeKeyDown`
 另起一个会话。⇒ 这个判断是一个**纯函数**（`projectSwitch`）：它是这套语义里唯一需要
 判断的地方，而需要判断的地方就该能被测。
 
-★ **New thread 把项目也放掉**（`web/src/lib/store/actions.ts:390` `startNewThread`）：上一段
+★ **New thread 把项目也放掉**（`web/src/lib/store/actions.ts:442` `startNewThread`）：上一段
 会话的项目是**那段会话的**，而会话的归属不可改 —— ⇒ 在用户为它选一个之前，新对话就是
 「**没有项目**」，输入框下方的按钮写 `Default Project`，下一段会话落在**默认项目根**。
 ★ 单项目模式例外：进程只服务一个目录，作用域就是答案，那里没有「没有项目」可选。
 ★ 侧栏项目行的 **New conversation** 是反过来的一条路：先把输入框放空，再把那个项目放进去
-（`web/src/lib/store/actions.ts:208` `startThreadInProject`）—— ★ 顺序反了，项目会被
+（`web/src/lib/store/actions.ts:238` `startThreadInProject`）—— ★ 顺序反了，项目会被
 `startNewThread` 抹掉。
 
 ★ **新建的项目走同一条路**（`createProject` → `switchProject`）：刚建的项目就是
@@ -338,27 +341,27 @@ React 的 `preventDefault` 来不及 ⇒ 唯一能拦住的是 `onEscapeKeyDown`
 
 | 面 | 在哪儿 | 现在是什么 |
 |---|---|---|
-| prompt 里的 `Project root:` | `agentkit/run/input.go:104-111` | **会话的** root |
+| prompt 里的 `Project root:` | `agentkit/run/input.go:260` | **会话的** root |
 | `@` 提及选择器 | `api/v2_project.go:95-116` 的 `projectRootOf` | **会话的** root |
 | fsx 写边界 | `agentkit/fsx/fsx.go:283-292` 的 `writeRoots` | **本轮**的 root（ctx 带的那个） |
-| `execute` 的工作目录 | `agentkit/fsx/fsx.go:957` | **本轮**的 root（同一个 ctx 值） |
+| `execute` 的工作目录 | `agentkit/fsx/fsx.go:1007` | **本轮**的 root（同一个 ctx 值） |
 
 ★ **第四处是漏掉的那一处**：它一度烤在后端自己的 `Root` 里，而那个 root 是**默认项目根** ——
 后端建一次、被所有轮次共用，于是每个会话的命令都跑在「没有项目归属」的那个目录里。
 ★ 提示词写着会话的目录、写的边界也守着会话的目录，只有命令的工作目录在别处 ——
 ★ 一个跑在别处的命令，它的输出不说明它自己说明了什么。
-（`grep` 的工作目录是同一处，`agentkit/fsx/fsx.go:528`。）
+（`grep` 的工作目录是同一处，`agentkit/fsx/fsx.go:578`。）
 
 ★ **读不用动**：fsx 本来就不设读边界（`agentkit/fsx/fsx.go:14-16`）——
 `execute` 都能 cat 任意文件，把 `read_file` 关进笼子买不到安全。多根对读几乎没有成本。
 
 ★ **写边界是唯一有架构代价的一步**。后端是**共享**的：`Root` 在 builder 里定下
-（`agentkit/build/snapshot.go:102`），
-而 backend 被 `heavyOnce` 缓存（`agentkit/build/snapshot.go:78-82`），一个配置版本只建一次。
+（`agentkit/build/snapshot.go:109`），
+而 backend 被 `heavyOnce` 缓存（`agentkit/build/snapshot.go:85-89`），一个配置版本只建一次。
 一个 backend 服务多个 root，只有两条路：
 
 - **(a) ctx 带本轮允许的根**（**已落地**）：`fsx.WithProjectRoot(ctx, root)`，
-  `resolveWrite` 额外查 ctx。工具方法都带 ctx（`agentkit/fsx/fsx.go:739`）⇒ 可行，
+  `resolveWrite` 额外查 ctx。工具方法都带 ctx（`agentkit/fsx/fsx.go:789`）⇒ 可行，
   而且**边界没有被放宽** —— 会话 A 写不了会话 B 的目录。
 - (b) 把所有项目根塞进 `ExtraRoots`：代码少，但一个会话能写另一个项目的目录。
 
@@ -366,7 +369,7 @@ React 的 `preventDefault` 来不及 ⇒ 唯一能拦住的是 `onEscapeKeyDown`
 `fsx.WithProjectRoot`（`agentkit/fsx/context.go:25`）。★ 原因是同一个值要管**三件事**：
 它既是「本轮允许写哪儿」（`agentkit/fsx/fsx.go:283-292` 的 `writeRoots`），
 也是「相对路径的基准」（`agentkit/fsx/fsx.go:265-274` 的 `base`），
-还是「命令的工作目录」（`agentkit/fsx/fsx.go:942-984` 的 `initStreamingCmd` 里那一行）。
+还是「命令的工作目录」（`agentkit/fsx/fsx.go:992-1034` 的 `initStreamingCmd` 里那一行）。
 一个值、三个消费者 —— 叫 `WriteRoots` 会让人以为它只管写。
 ★ 三个消费者必须取**同一个**值：提示词说会话的目录、写边界守会话的目录，
 而命令跑在别处，那个输出就不说明它自己说明了什么。
@@ -377,7 +380,7 @@ React 的 `preventDefault` 来不及 ⇒ 唯一能拦住的是 `onEscapeKeyDown`
 （eino `adk/prebuilt/deep/deep_test.go:153`，`TestDeepSubAgentSharesSessionValues`）。
 
 ★ **root 现在必须传递**：它是**每轮可变**的（按会话），于是
-- **prompt 侧**走显式参数：`inputParams` 加 `ProjectRoot`（`agentkit/run/input.go:26-29`）；
+- **prompt 侧**走显式参数：`inputParams` 加 `ProjectRoot`（`agentkit/run/input.go:29-32`）；
 - **工具侧**只能走 ctx —— backend 是共享的，边界是**调用时**才知道的事。
 
 ### 4.1 root 在轮次开始时读一次，之后不变
@@ -387,21 +390,21 @@ React 的 `preventDefault` 来不及 ⇒ 唯一能拦住的是 `onEscapeKeyDown`
 ⇒ 解析点就在轮次开始处，一轮之内固定：
 
 ```
-Submit(ctx, sessionID, …)                       agentkit/run/runtime.go:240
- └ SessionManager.Get(ctx, sessionID)           runtime.go:241
- └ claimTurn(ctx, sess, …)                      runtime.go:253 → :290
- └ runClaimedTurn(ctx, sess, turn, loop, …)     runtime.go:269 → :440
-     ★ runCtx, cancel := context.WithCancel(…)  runtime.go:450   ← 注入点
-     ★ runCtx = fsx.WithProjectRoot(runCtx, …)  runtime.go:461   ← root 进 ctx
-     └ startLoop(runCtx, sess.ID(), turn, loop) runtime.go:463
+Submit(ctx, sessionID, …)                       agentkit/run/runtime.go:242
+ └ SessionManager.Get(ctx, sessionID)           runtime.go:243
+ └ claimTurn(ctx, sess, …)                      runtime.go:255 → :292
+ └ runClaimedTurn(ctx, sess, turn, loop, …)     runtime.go:271 → :451
+     ★ runCtx, cancel := context.WithCancel(…)  runtime.go:461   ← 注入点
+     ★ runCtx = fsx.WithProjectRoot(runCtx, …)  runtime.go:472   ← root 进 ctx
+     └ startLoop(runCtx, sess.ID(), turn, loop) runtime.go:499
          └ loop.Run(ctx)                        agentkit/run/bridge.go:121
              ├ GenInput(ctx, …)                 agentkit/run/loop.go:43
-             │   └ inputParams{ProjectRoot: …}  loop.go:88 → input.go:191
+             │   └ inputParams{ProjectRoot: …}  loop.go:88 → input.go:107-111
              └ 工具调用拿到的就是同一个 ctx
                 ⇒ fsx.resolveWrite 查得到「本轮允许的根」  agentkit/fsx/fsx.go:307-331
 ```
 
-★ **`runtime.go:461` 为什么是对的地方**：那里造出这一轮的 `runCtx`，
+★ **`runtime.go:472` 为什么是对的地方**：那里造出这一轮的 `runCtx`，
 它一路传到 `loop.Run(ctx)`（`bridge.go:121`）⇒ 框架给 `GenInput` 的 ctx、
 以及**所有工具调用**的 ctx，都是它。而且那里用的是 `context.WithoutCancel(ctx)` ——
 **丢取消、留值**，所以放进去的东西一定传得下去。
@@ -416,6 +419,40 @@ Submit(ctx, sessionID, …)                       agentkit/run/runtime.go:240
 
 ★ **解析不在 API 层**：「会话 → 项目 → 目录」是领域逻辑，住在 `projects` 包，`run` 调用它。
 API 层只负责把 `projectId` 写进表、把 `projectId` 读出来。
+
+### 4.2 ★ 「项目根」只有一个家：这一轮的 ctx
+
+★ **模型眼里的「项目根」曾经有两个来源，而它们说的是两个不同的目录**：
+
+| 来源 | 曾经说什么 | 现在说什么 |
+|---|---|---|
+| 构建期的 agent 指令 | `The project root directory is: <openheron-root>/projects/default` | **不含任何目录** |
+| 每轮上下文提示词 | 本轮会话的 root | 本轮会话的 root（不变） |
+| 子 agent 的指令 | 什么也没有 | 本轮会话的 root（不变） |
+
+★ **构建期那一行为什么是错的**：builder 是**进程级**的，它手里只有**默认项目根**
+（`main.go:634` 的 `cfgSvc.DefaultProjectRoot()`），而会话的 root 是**每轮**的
+（`agentkit/run/runtime.go:472` 从 ctx 读）。★ 两行同时在模型眼前，
+模型挑了**读起来像规则**的那一行 ⇒ `.` 被翻译成默认项目根。
+
+★ **修法不是「再添一句」，是「把家收成一个」**：
+
+- **构建期指令不含路径**（`agentkit/build/spec.go:104` 的 `instruction`）：
+  它只说「这一轮的工作目录由上下文给出」。
+- **解析只有一处**：`agentkit/run/input.go:238` 的 `roundRoot` —— ctx 里的根优先，
+  `inputParams.ProjectRoot` 与 `InputConfig.ProjectRoot` 只是回落。★ ctx 是唯一的家。
+- **一份渲染，两个读者**：`agentkit/run/input.go:255` 的 `projectRootBlock`
+  渲染那几行；root agent 从提示词读到它（`agentkit/run/input.go:189`），
+  子 agent 从中间件读到它（`agentkit/build/projectroot.go:35`）。
+- **子 agent 的中间件在运行时取根**（`agentkit/build/assemble.go:124`）：
+  树是**按指纹池化**的（`agentkit/build/builder.go:189`），
+  烤进去的目录会是「建树那一轮」的目录。
+
+★ **为什么要有两条通道**：提示词不进子 agent —— 框架只把 request 交给它
+（eino `adk/prebuilt/deep/task_tool.go:174`）—— 所以子 agent 必须另有一条。
+★ 但两条通道**用同一个渲染**：`agentkit/run/input.go:286` 的 `RoundProjectRootBlock`
+把 `run` 包的渲染交给 `build` 包（`agentkit/build/builder.go:106` 的 `WithRoundBlock`），
+否则它们会各说各话。
 
 ## 5. 接口
 
@@ -473,7 +510,7 @@ GET    /v2/sessions            → 不过滤；每条带 projectId（从表查�
 - **老客户端**：不带 `projectId` ⇒ 会话是「未选项目」⇒ agent 在**默认项目根**干活。
   接口形状没变，客户端照常能用。
 - ★ **一处行为变化**：老行为是「在哪个目录启动，agent 就在哪儿干活」
-  （cwd 是默认项目根，`agentkit/spec/config.go:686-693`）。新行为里 cwd 不再自动是工作目录
+  （cwd 是默认项目根，`agentkit/spec/config.go:756-765`）。新行为里 cwd 不再自动是工作目录
   ⇒ **要保留这个直觉就写 `openheron .`**（位置参数会顺手把默认项目根也设成这个目录）。
 
 ## 6. 命令行与环境变量
@@ -489,11 +526,11 @@ GET    /v2/sessions            → 不过滤；每条带 projectId（从表查�
 ★ `--project-root` 这个名字**退役**：它今天的含义是「agent 的工作目录」，
 提案里那个位置由 `--default-project-root` 接手（语义更准：它是**默认**，不是唯一的），
 而「进程关注哪个项目」由位置参数接手。★ **它仍然作为别名生效**，用了会打一条 warn
-（`main.go:494-500`）—— 一个悄悄不再生效的 flag 是最难查的那种错误。
+（`main.go:503-506`）—— 一个悄悄不再生效的 flag 是最难查的那种错误。
 ★ `--config-dir` 改成 `--config-root`：`init` 那边的 `--dir` 也改成 `--config-root`
 （`initcmd.go:20-21`），**同一个概念不许两个名字**。
 ★ `openheron init` 的默认目标改成 **`<openheron_root>/configs`**（今天是 `<dir>/.openheron`，
-`initcmd.go:61`）—— 它要写的是服务器默认读的那一份。
+`initcmd.go:76`）—— 它要写的是服务器默认读的那一份。
 
 ### 6.2 环境变量
 
@@ -511,8 +548,8 @@ GET    /v2/sessions            → 不过滤；每条带 projectId（从表查�
 | `OPENHERON_LOG_LLM_REQUESTS` | 请求体日志 | 已合规 |
 | `OPENHERON_PROJECTS_FILE` | `projects.json` 的位置 | —（新，可选） |
 
-★ **旧名仍然生效，但打一条 warn 点名新名字**（`main.go:587,599,760,774` 与
-`agentkit/spec/config.go:641-698` 那几个读点）。
+★ **旧名仍然生效，但打一条 warn 点名新名字**（`main.go:599,612,821,835` 与
+`agentkit/spec/config.go:686-693` 与 `agentkit/spec/config.go:747-754` 那几个读点）。
 环境变量常写在 shell profile 或 CI 的 env 块里，**静默失效最难查** ——
 用户以为改了端口，其实没改。
 
@@ -543,24 +580,24 @@ CI 里有一个 `LISTEN_ADDR=0.0.0.0:9000`，openheron 的监听地址就被改�
 
 | # | 位置 | 改什么 | 状态 |
 |---|---|---|---|
-| 1 | `agentkit/spec/config.go:599-695` `NewService` | 配置根解析：点名 → env → **`<home>/configs`** | ★ 已落地 |
-| 2 | `agentkit/spec/config.go:318` `Service` | 加 `home` 字段 | ★ 已落地 |
-| 3 | `agentkit/spec/config.go:784-796` `DataDir` | 相对基准 `s.root` → **`s.home`** | ★ 已落地 |
-| 4 | `agentkit/spec/config.go:806-818` `LogFile` | 相对基准 `s.root` → **`s.home`** | ★ 已落地 |
+| 1 | `agentkit/spec/config.go:645-725` `NewService` | 配置根解析：点名 → env → **`<home>/configs`** | ★ 已落地 |
+| 2 | `agentkit/spec/config.go:320` `Service` | 加 `home` 字段 | ★ 已落地 |
+| 3 | `agentkit/spec/config.go:905-919` `DataDir` | 相对基准 `s.root` → **`s.home`** | ★ 已落地 |
+| 4 | `agentkit/spec/config.go:921-941` `LogFile` | 相对基准 `s.root` → **`s.home`** | ★ 已落地 |
 | 5 | `main.go:122-148` `parseServerFlags` | 新增 `--openheron-root` / `--default-project-root`；`--config-dir` → `--config-root`；接受一个可选位置参数 | ★ 已落地 |
-| 6 | `main.go:149-166` `printServerUsage` | `openheron [flags] [dir]` | ★ 已落地 |
+| 6 | `main.go:150-171` `printServerUsage` | `openheron [flags] [dir]` | ★ 已落地 |
 | 7 | `main.go` 的 `warnUnusedHomeConfig` | ★ **删掉** —— home 现在是合法的大本营，不是「废弃的配置根」 | ★ 已落地 |
 | 8 | `main.go:284-309` `initConfigIfEmpty` | 出厂树只写进**默认配置根** | ★ 已落地 |
-| 9 | `main.go:488-632` `setupConfig` | 解析 openheron_root → 建 Service → 装默认配置树 | ★ 已落地 |
-| 10 | `main.go:587,599,760,774` + `agentkit/spec/config.go:641-698` | 环境变量读点改名（+ 旧名 warn） | ★ 已落地 |
-| 11 | `main.go:634-779` `setupRuntime`（`:650-666` 注册表接线，`:695-721` `run.Config`） | 数据目录**共享**；按会话取 project root | ★ 已落地 |
+| 9 | `main.go:488-638` `setupConfig` | 解析 openheron_root → 建 Service → 装默认配置树 | ★ 已落地 |
+| 10 | `main.go:599,612,821,835` + `agentkit/spec/config.go:686-693` + `agentkit/spec/config.go:747-754` | 环境变量读点改名（+ 旧名 warn） | ★ 已落地 |
+| 11 | `main.go:640-792` `setupRuntime`（`:654-668` 注册表接线，`:709-735` `run.Config`） | 数据目录**共享**；按会话取 project root | ★ 已落地 |
 | 12 | `agentkit/run/loop.go:81` | `inputParams` 加 `ProjectRoot`（**从会话/项目取**） | ★ 已落地 |
-| 13 | `agentkit/run/input.go:191` | prompt 的 `Project root:` 用会话的值 | ★ 已落地 |
+| 13 | `agentkit/run/input.go:260` | prompt 的 `Project root:` 用会话的值 | ★ 已落地 |
 | 14 | `api/v2_project.go` `projectRootOf` | `@` 提及按项目取 root（`?project=<id>`） | ★ 已落地 |
-| 15 | `agentkit/fsx/context.go:25` + `agentkit/fsx/fsx.go:307-331` | 写边界 per-session（ctx 带本轮允许的根） | ★ 已落地 |
+| 15 | `agentkit/fsx/context.go:25` + `agentkit/fsx/fsx.go:311-381` | 写边界 per-session（ctx 带本轮允许的根） | ★ 已落地 |
 | 16 | 新 `projects` 包（`projects/projects.go:99` `Location` / `:111` `Registry` / `:122` `Open` / `:297` `mutate` / `:228` `RootOf`） | 类型 + 读写 + 文件锁 + `$OPENHERON_PROJECTS_FILE` | ★ 已落地 |
-| 17 | `api/v2_projects.go:57/143/183/225` 四个端点 + `api/v2_sessions.go` / `api/v2_types.go:159` `threadMeta` | `/v2/projects` 的 GET/POST/PATCH/DELETE；`projectId` | ★ 已落地 |
-| 18 | `initcmd.go:20-21,30-38,61` | `--dir` → `--config-root`；默认 `<openheron_root>/configs` | ★ 已落地 |
+| 17 | `api/v2_projects.go:57/143/183/225` 四个端点 + `api/v2_sessions.go` / `api/v2_types.go:167` `threadMeta` | `/v2/projects` 的 GET/POST/PATCH/DELETE；`projectId` | ★ 已落地 |
+| 18 | `initcmd.go:20-21,30-38,76` | `--dir` → `--config-root`；默认 `<openheron_root>/configs` | ★ 已落地 |
 | 19 | `agentkit/templates/files/server/config.yaml:23-28,44-48` | 注释：相对基准改成 openheron_root（**值不变**） | ★ 已落地 |
 | 20 | `scripts/test-backend.sh:132-136` | 环境变量改名 | ★ 已落地 |
 | 21 | `sandbox-kit/openheron/entrypoint.sh:18-19,29,35,38` | 显式 `OPENHERON_CONFIG_ROOT`；`OPENHERON_LISTEN_ADDR`；`OPENHERON_DATA_DIR`；位置参数给项目 | ★ 已落地 |
@@ -645,7 +682,7 @@ API，却没写**谁**在界面上调它。★ 结果是多项目模式启动时
 | 会话记录里记 project 字段 | **不做** —— 归属只有表一个真相 |
 | 一进程多配置树（每个项目一套 agents） | **不做** —— 配置共享是这一版的前提 |
 | 自动迁移历史数据 | **不做** —— §9 的四步手动做 |
-| 钥匙串 | 不变 —— 它是**全局 OS 资源**，本来就不按项目分（`main.go:393`） |
+| 钥匙串 | 不变 —— 它是**全局 OS 资源**，本来就不按项目分（`main.go:531`） |
 | 知识库的语料目录 | 不变 —— `corpus_dir` 仍相对**默认项目根**（`kb/tools.go:97`）。★ 语料是**一份**的：按会话切换它，就等于每个项目一份索引，而索引落在状态目录里的那一份 |
 
 ## 11. 与其它文档的边界
@@ -656,6 +693,6 @@ API，却没写**谁**在界面上调它。★ 结果是多项目模式启动时
   本文只说**日志文件落在哪儿**。
 - `docs/tools-design.md` —— 工具从哪来、`agentkit/fsx` 的边界、MCP、Docker Sandbox Kit。
   本文只说**写边界是 per-session**，边界本身的规则在那份文档里。
-- `docs/ui-design.md` —— 附件与动效。本文只说**侧栏分几组**。
+- `docs/ui-design.md` —— 前端与界面。本文只说**侧栏分几组**。
 - `docs/sidebar-design.md` —— 侧栏本身：分组、行、两个菜单、一份「当前项目」，以及还缺什么。
   本文只说**项目的表与项目↔会话的关系**；侧栏长什么样、菜单怎么组织在那份文档里。

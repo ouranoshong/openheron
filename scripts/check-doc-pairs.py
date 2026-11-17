@@ -40,11 +40,13 @@ PAIRS = [
 #   catches it before it becomes a pair nobody updates.
 CHINESE_ONLY = [
     "api-v2-design.md",
+    "authorization-design.md",
     "config-design.md",
     "pitfalls.md",
     "projects-design.md",
     "runtime-design.md",
     "secrets-design.md",
+    "session-operations-design.md",
     "sidebar-design.md",
     "tools-design.md",
     "ui-design.md",

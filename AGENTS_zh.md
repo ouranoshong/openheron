@@ -15,7 +15,7 @@
 > `docs/user-manual.md` / `docs/user-manual_zh.md`（用户使用说明）、
 > `docs/developer-manual.md` / `docs/developer-manual_zh.md`（开发者说明）。
 >
-> **另有九篇只有中文的文档**在 `docs/` 下 —— 架构与代码设计那一类。
+> **另有十一篇只有中文的文档**在 `docs/` 下 —— 架构与代码设计那一类。
 > ★ 它们的中文内容**接管了原文件名**：`docs/config-design.md` **就是**那篇中文文档 ——
 > 既没有 `_zh` 副本，也没有英文版：
 > `docs/config-design.md`（配置系统 —— 配置根与它的三级解析、各个分区与它们的
@@ -26,14 +26,17 @@
 > 一轮自己的 SSE 契约、历史回放，以及会话的公告通道）、
 > `docs/tools-design.md`（工具与集成 —— 工具从哪来、有界的文件系统后端、
 > MCP 接入，以及 Docker Sandbox Kit）、
-> `docs/ui-design.md`（界面与它的资源 —— 附件与动效）、
+> `docs/authorization-design.md`（授权模式 —— 每会话三档、模式住在哪儿、闸门怎么读它）、
+> `docs/ui-design.md`（前端与界面 —— 架构、事件流、状态、界面本身，以及怎么验收）、
 > `docs/secrets-design.md`（密钥体系 —— 两个命名空间、解析链、钥匙串，以及写入面）、
 > `docs/projects-design.md`（项目与目录 —— 用户级的 `openheron_root`、配置根 / 数据目录 /
 > 日志落在哪儿、`projects.json` 里的项目与会话关系，以及按会话切换的 project root）、
 > `docs/sidebar-design.md`（侧栏 —— 它的分组、行与菜单、一份「当前项目」，以及还缺什么）、
+> `docs/session-operations-design.md`（会话的操作事件日志 —— 会话目录今天装着什么、
+> 它留下的缺口，以及提出来的 `operations.jsonl` 时间线）、
 > `docs/pitfalls.md`（坑点登记册 —— 这棵树踩过的坑、每个坑的成因，以及它怎么处理）。
 > **`docs/` 下其余设计文档仍在上游仓库** ——
-> 下面凡引用 `docs/xxx.md` 而这九篇之外的，都是上游那份。
+> 下面凡引用 `docs/xxx.md` 而这十一篇之外的，都是上游那份。
 > 改语义前若拿不到它，先问，别凭印象改配置或接口。
 >
 > ★ **设计类文档只写中文。** 讲代码怎么搭起来的文档 —— 分层、
@@ -45,7 +48,7 @@
 > `docs/developer-manual.md`。不假定他们的读者读中文。Kit 的那两份指南
 > （`sandbox-kit/TUTORIAL.md` 与 `sandbox-kit/BUILDING.md`）出于同样的理由保持双语。
 >
-> ★ 前面四组讲的是**代码面已经是什么样**；那九篇中文单份讲的也是**各自的主题
+> ★ 前面四组讲的是**代码面已经是什么样**；那十一篇中文单份讲的也是**各自的主题
 > 现状**：每一篇都**讲代码现在是什么样**，没落地的提案集中放在各自的「待决」一节里。
 > `docs/config-design.md` 讲的是**配置系统** —— 配置根与它的三级解析、各个分区与它们的
 > 文件规格、加载与优先级、工具面、六个 `config_*` 工具、热更新，以及依赖铁律。
@@ -63,8 +66,12 @@
 > （`tools:` / `mcps:` / `skills:` 与 `mcp__<server>__<tool>` 命名空间）、
 > `agentkit/fsx` 那个有界的文件系统后端、MCP 接入，以及把整个进程打包成 v3 workload 的
 > Docker Sandbox Kit。★「沙箱 Kit 怎么打包一个 MCP server」仍是提案。
-> `docs/ui-design.md` 讲的是**界面与它的资源** —— 上传的文件怎么落盘、服务端对它做了什么、
-> 界面怎么显示它，以及动效令牌与减少动态效果的降级。
+> `docs/ui-design.md` 讲的是**前端与界面** —— 架构（技术栈、依赖清单、产物分块、目录）、
+> 一轮运行怎么走到屏幕上（会话身份、SSE 分帧、reducer、store）、界面本身
+> （骨架、消息、工具调用、审批、附件、动效、授权选择器、活动时间线），
+> 以及怎么验收（三层测试、E2E 覆盖、工程化）。
+> ★ 它在 2026-11-17 吸收了上游那份 `docs/frontend-design.md`：那份讲的是 heron 时代的前端，
+> 并入时每一条都对着这棵树重新核过 —— 两者不一致时，**以本仓库这份为准**。
 > ★ 还有 `docs/secrets-design.md` —— **密钥体系**：两个命名空间
 > （`LLM_<PROVIDER>_API_KEY` / `llm:<provider>` 与 `MCP_<SERVER>_TOKEN` / `mcp:<server>`）、
 > 它们共用的那一条解析链（环境变量盖过钥匙串）、写入面（`/v2/secrets` 与 `openheron secret`），
@@ -76,6 +83,12 @@
 > ★ 还有 `docs/sidebar-design.md` —— **侧栏**：它的分组、行与两个菜单、
 > 一份「当前项目」，以及还缺什么。**它的正文讲的是代码现状**；
 > 没落地的提案放在它自己的「待决」一节里。
+> ★ 还有 `docs/authorization-design.md` —— **授权模式**：每会话三档、
+> 模式住在哪儿（会话记录）、闸门怎么读它（轮次的上下文）。
+> **它的正文讲的是代码现状。**
+> ★ 还有 `docs/session-operations-design.md` —— **会话的操作事件日志**：
+> 会话目录装着什么、它留下的缺口（没有一处能按顺序回答「这个会话上发生过什么」），
+> 以及补上这个缺口的 `operations.jsonl` 时间线。**它的正文讲的是代码现状。**
 > ★ 还有 `docs/pitfalls.md` —— **坑点登记册**：这棵树踩过的坑、每个坑的成因、
 > 它是修好了还是仍有一条边界。动一个你还没动过的子系统之前先读它 ——
 > 比重新发现同一个坑便宜。
@@ -224,11 +237,11 @@
   跟自己吵。★ 会话的归属**不可改**，所以切换会**离开**属于别的项目的那个会话
   （它连同历史留在侧栏里），输入框这头回到空白 —— 「切换」只能是「下一个会话在那个项目里」。
 - 改配置语义前先读 `docs/config-design.md`；改接口前先读 `docs/api-design.md`；
-  新增 `/v2` 接口读 `docs/api-v2-design.md`；动前端读 `docs/frontend-design.md`；
-  动测试环境（端口 / 隔离目录）读 `docs/frontend-design.md` §11.2 与
-  `docs/config-design.md` §3.3。★ `docs/config-design.md` 与
-  `docs/api-v2-design.md` **就在本仓库里**，
-  另外两份是**不在**本仓库的上游文档 —— 拿不到就先问。
+  新增 `/v2` 接口读 `docs/api-v2-design.md`；动前端读 `docs/ui-design.md`；
+  动测试环境（端口 / 隔离目录）读 `docs/ui-design.md` §14.2 与
+  `docs/config-design.md` §3.3。★ `docs/config-design.md`、
+  `docs/api-v2-design.md` 与 `docs/ui-design.md` **就在本仓库里**，
+  剩下那份 `docs/api-design.md` 是**不在**本仓库的上游文档 —— 拿不到就先问。
   本仓库自带的 `docs/architecture.md` / `docs/user-manual.md` /
   `docs/developer-manual.md`（及其 `_zh` 中文版）讲的是**本代码面**的实际结构，
   直接看就行。`docs/runtime-design.md` 讲的是上下文占用与压缩：占用仪表盘
@@ -392,7 +405,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
 - **长任务要放到后台任务里跑**，不要用 shell 的 `&`。后台进程活不过那次
   工具调用（调用一结束它就被杀），表现是「跑了一会儿就没了」「端口始终
   没起来」—— 而日志里只有第一行，看不出是被谁杀的。
-- **新增/删除用例要同步文档里的条数**。`docs/frontend-design.md` 的目录树
+- **新增/删除用例要同步文档里的条数**。`docs/ui-design.md` §13.3 的那张表
   把条数写死了，是为了让「忘了改」变成一次 diff 冲突而不是无声漂移 ——
   上一次的 65/14 已经漂了三个轮次没人发现。
 - **动 `bun run build`、依赖或构建流程后要验新 clone**
@@ -401,7 +414,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
   才暴露。`.gitignore` 的例外规则也有同类坑 —— git 逐层判断，父目录被
   排除就不再下降到子文件，近的规则优先。
 
-隔离的完整细节见 `docs/frontend-design.md` §11.2 与
+隔离的完整细节见 `docs/ui-design.md` §14.2 与
 `docs/config-design.md` §3.3。
 
 ## 关联文档
@@ -425,9 +438,11 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
 | `docs/runtime-design.md` | **运行时设计说明** —— run 变成一行持久事实、配上租约与 fence、一个会话一轮的准入闸门、上下文占用与压缩，以及日志装配（**正文讲的是代码现状**） |
 | `docs/api-v2-design.md` | **`/v2` HTTP 接口设计说明** —— 路由表、请求与响应的形状、错误码、一轮自己的 SSE 契约、历史回放，以及会话的公告通道（**正文讲的是代码现状**） |
 | `docs/tools-design.md` | **工具与集成设计说明** —— 工具从哪来、`agentkit/fsx` 那个有界的文件系统后端、MCP 接入，以及 Docker Sandbox Kit（**正文讲的是代码现状**） |
-| `docs/ui-design.md` | **界面与资源设计说明** —— 上传的文件怎么落盘、服务端对它做了什么、界面怎么显示它，以及动效令牌（**正文讲的是代码现状**） |
+| `docs/ui-design.md` | **前端与界面设计说明** —— 技术栈与产物分块、会话身份、SSE 分帧与 reducer、store、界面骨架与消息、工具调用、审批、附件、动效、授权选择器、活动时间线，以及三层测试（**正文讲的是代码现状**） |
 | `docs/secrets-design.md` | **密钥体系设计说明** —— 两个命名空间、共用的解析链、钥匙串后端、写入面，以及界面入口（**正文讲的是正在落地的方案**） |
 | `docs/projects-design.md` | **项目与目录设计说明** —— 用户级的 `openheron_root`、配置根 / 数据目录 / 日志文件落在哪儿、`projects.json` 里的项目↔会话关系，以及按会话切换的 project root（**正文讲的是代码现状**） |
+| `docs/authorization-design.md` | **授权模式设计说明** —— 每会话三档、模式住在哪儿、闸门怎么读它，以及界面入口（**正文讲的是代码现状**） |
+| `docs/session-operations-design.md` | **会话操作事件日志设计说明** —— 会话目录装着什么、它留下的缺口，以及补上这个缺口的 `operations.jsonl` 时间线（**正文讲的是代码现状**） |
 | `docs/sidebar-design.md` | **侧栏设计说明** —— 侧栏的分组、行与两个菜单、一份「当前项目」，以及还缺什么（**正文讲的是代码现状**，没落地的提案在「待决」一节） |
 | `docs/pitfalls.md` | **坑点登记册** —— 这棵树踩过的坑、每个坑的成因、是修好了还是仍有一条边界 |
 
@@ -446,7 +461,7 @@ cd web && bun run smoke:config             # config_write 的审批往返（有�
 | `docs/agent-architecture-survey.md` | **外部 Agent 架构调研** —— pi / rakazo / OpenClaw / Hermes / Letta 的 gateway 与后台服务问题（2026-10-24） |
 | `docs/positioning.md` | **定位与取舍** —— 专家配专模 × Agent 即工具：机制拆解与边界（2026-10-25） |
 | `docs/api-design.md` | 旧的无前缀接口（**已于 2026-10-23 随 M3 下线**，保留为历史记录） |
-| `docs/frontend-design.md` | React 前端架构与界面 |
+| `docs/frontend-design.md` | ★ **已并入 `docs/ui-design.md`（2026-11-17）** —— 上游那份讲的是 heron 时代的前端，引用它时以本仓库那份为准 |
 | `docs/agent-design.md` | Agent 池、审批、深度保护 |
 | `docs/agent-design-v2.md` | agent 装配 API v2（`deep.Config` 请出 openheron） |
 | `docs/multi-agent-design.md` | 多角色、并行委派、按 agent 分账与历史过滤 |

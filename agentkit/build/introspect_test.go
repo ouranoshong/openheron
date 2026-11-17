@@ -67,7 +67,7 @@ func TestEffectiveToolsReportTheTierAndTheBlockingLayer(t *testing.T) {
 //	default is ask, and the allow-list says nothing about the tier.
 func TestVerdictOfFallsBackToAsk(t *testing.T) {
 	p := NewPolicy(nil)
-	v := verdictOf(newBoundary(p, newTable("main", []string{"brand_new_write_tool"}, nil)),
+	v := verdictOf(newBoundary(p, newTable("main", []string{"brand_new_write_tool"}, nil), scope{}),
 		"brand_new_write_tool", Observed{})
 
 	if v.Tier != TierAsk || v.Blocked != LayerNone || !v.Reached() {

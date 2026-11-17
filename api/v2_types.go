@@ -56,7 +56,15 @@ const (
 	//   to it is "load the history", and it must be able to tell that
 	//   apart from a session it may retry.
 	codeRunNotLive = "run_not_live"
-	codeInternal   = "internal"
+	// codeConfirmationRequired is the refusal to widen a session's
+	// authorization without a human saying so.
+	//
+	// ★ It is a conflict, not a bad request: the request is well-formed, and
+	//   the same body with "confirm": true is accepted. ⇒ A client reads it
+	//   as "ask the person, then send it again", not as "your request was
+	//   wrong".
+	codeConfirmationRequired = "confirmation_required"
+	codeInternal             = "internal"
 )
 
 // errBody is the v2 error envelope.
@@ -180,6 +188,21 @@ type threadMeta struct {
 	//   "no project", and a missing field would say "this build does not
 	//   know about projects" — a different thing.
 	ProjectID string `json:"projectId"`
+	// AuthorizationMode is the session's approval mode: "default",
+	// "trusted" or "full".
+	//
+	// ★ It is always emitted, like agentId: an empty string would say
+	//   "this session has no mode", and a missing field would say "this
+	//   build does not know about authorization modes" — two different
+	//   things.
+	AuthorizationMode string `json:"authorizationMode"`
+	// AuthorizationConfirmed says whether this session has confirmed full
+	// authorization once.
+	//
+	// ★ It travels with the mode because a second surface has to know it
+	//   must not ask again: the confirmation is the server's fact, and a
+	//   client keeping its own copy would ask twice.
+	AuthorizationConfirmed bool `json:"authorizationConfirmed"`
 }
 
 type threadList struct {

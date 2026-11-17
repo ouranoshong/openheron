@@ -52,6 +52,21 @@ func initCmd(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+
+	// ★ The default project root: the directory a session that belongs to no
+	//   project works in. ★ The server creates it when it starts, but "init"
+	//   is where the base directory is laid out — and a person who looks
+	//   into it afterwards must find the whole layout, not half of it.
+	//
+	// ★ A dry run writes nothing, so the directory is only created when the
+	//   run is real.
+	defaultProject := ""
+	if !*dryRun {
+		defaultProject, err = spec.EnsureDefaultProjectRoot(home)
+		if err != nil {
+			return fmt.Errorf("openheron init: %w", err)
+		}
+	}
 	root := strings.TrimSpace(*configRoot)
 	if root == "" {
 		// ★ The default is the config root the server reads, so that "init
@@ -97,10 +112,10 @@ func initCmd(args []string, stdout io.Writer) error {
 			return err
 		}
 	}
-	return reportInit(plan, abs, *dryRun, *asJSON, stdout)
+	return reportInit(plan, abs, defaultProject, *dryRun, *asJSON, stdout)
 }
 
-func reportInit(plan *initcfg.Plan, root string, dryRun, asJSON bool, stdout io.Writer) error {
+func reportInit(plan *initcfg.Plan, root, defaultProject string, dryRun, asJSON bool, stdout io.Writer) error {
 	created := make([]string, 0, len(plan.Files))
 	for _, f := range plan.Files {
 		// ★ The paths are relative to the **config root** — the tree's own
@@ -118,6 +133,9 @@ func reportInit(plan *initcfg.Plan, root string, dryRun, asJSON bool, stdout io.
 			"skipped": plan.Skipped,
 			"notes":   plan.Notes,
 			"dryRun":  dryRun,
+		}
+		if defaultProject != "" {
+			out["project_root"] = defaultProject
 		}
 		if plan.EnvHint != "" {
 			out["env"] = plan.EnvHint
@@ -141,6 +159,12 @@ func reportInit(plan *initcfg.Plan, root string, dryRun, asJSON bool, stdout io.
 	}
 	for _, c := range created {
 		fmt.Fprintf(stdout, "created %s\n", c)
+	}
+	// ★ The default project root is a directory, not a file: it is where a
+	//   session that belongs to no project does its work, and the command
+	//   would not start without it.
+	if defaultProject != "" {
+		fmt.Fprintf(stdout, "created %s (the default project root)\n", defaultProject)
 	}
 
 	if len(created) == 0 {

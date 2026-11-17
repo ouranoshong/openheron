@@ -57,7 +57,10 @@ func (b *Builder) EffectiveTools(agentID string) []ToolVerdict {
 	}
 
 	obs := observedOf(table)
-	boundary := newBoundary(policy, table)
+	// ★ The introspection answers "what is the tier", not "would the trusted
+	//   mode waive it" — so the boundary carries no scope. The scope is a
+	//   **session's** question, and this view is the configuration's.
+	boundary := newBoundary(policy, table, scope{})
 	names := toolNameUniverse(boundary, snap.cfg.EnabledToolNames(), nil, obs)
 	out := make([]ToolVerdict, 0, len(names))
 	for _, n := range names {
@@ -100,12 +103,12 @@ func (b *Builder) PolicyTools() []ToolVerdict {
 	}
 	policy, rootTable, subs := snap.agentSpec.policy, snap.tableFor(snap.agentSpec.defaultAgent), snap.subs()
 	obs := observedOf(rootTable)
-	names := toolNameUniverse(newBoundary(policy, rootTable), snap.cfg.EnabledToolNames(), subs, obs)
+	names := toolNameUniverse(newBoundary(policy, rootTable, scope{}), snap.cfg.EnabledToolNames(), subs, obs)
 
 	// ★ The policy view carries **no agent's narrowing**: it is the tier
 	//   table on its own. ★ A nil table is what says "nothing is narrowed
 	//   here" — with an allow-list, an empty one would say the opposite.
-	flat := newBoundary(policy, nil)
+	flat := newBoundary(policy, nil, scope{})
 	out := make([]ToolVerdict, 0, len(names))
 	for _, n := range names {
 		out = append(out, verdictOf(flat, n, obs))

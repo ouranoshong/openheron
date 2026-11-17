@@ -44,7 +44,7 @@ func TestNewBuilderDefersEverythingToBuild(t *testing.T) {
 
 // The gate must wrap mutating tools and leave read-only ones untouched.
 func TestApprovalMiddlewareOnlyGatesMutatingTools(t *testing.T) {
-	mw := newApprovalMiddleware(defaultTestPolicy())
+	mw := newApprovalMiddleware(defaultTestPolicy(), scope{})
 
 	for _, name := range []string{"write_file", "edit_file", "execute"} {
 		tCtx := &adk.ToolContext{Name: name}

@@ -6,7 +6,7 @@
 > 范围：侧栏的结构（分组 / 文件夹 / 行 / 菜单）、**文件树形态**、分组与排序规则、会话行与
 > 项目行的菜单、折叠，以及它们和「当前项目」那份真相的关系。
 > 不包含：项目表与目录的语义、会话归属与 project root（见 `docs/projects-design.md`）、
-> 附件与动效（见 `docs/ui-design.md`）、一轮是什么（见 `docs/runtime-design.md`）。
+> 前端与界面（见 `docs/ui-design.md`）、一轮是什么（见 `docs/runtime-design.md`）。
 
 ★ **本文分两半**：§1 讲**代码现在是什么样**（每一条都指得到行），§2 起是**提案 ——
 尚未实现**。★ 提案不许混进现状那一半：store 里有动作、界面上没有入口的那种「半个功能」，
@@ -112,57 +112,57 @@ model 就在一个目录被告知去另一个目录读写。
 
 | 面 | 读的是 |
 |---|---|
-| 输入框下方的标签（`web/src/components/projects-dialog.tsx:68`） | `selectActiveProjectId`（`web/src/lib/store/selectors.ts:94`） |
+| 输入框下方的标签（`web/src/components/projects-dialog.tsx:78`） | `selectActiveProjectId`（`web/src/lib/store/selectors.ts:112`） |
 | `@` 提及选择器 | 同上 |
 
 ★ **屏幕上的会话说了算**：打开一个会话，它的项目就是当前项目
-（`web/src/lib/store/actions.ts:319` `openSession`，以及 `web/src/lib/store/actions.ts:281`
+（`web/src/lib/store/actions.ts:353` `openSession`，以及 `web/src/lib/store/actions.ts:311`
 `refreshList` —— 启动时会话比列表先到，那一刻它还不知道自己属于哪个项目）。
 
 ★ **会话的归属不可改**（`api/v2_sessions.go:38` 的 `ProjectID` 只在创建时读，`PATCH`
 不接受它）⇒ 「切到那个项目」只能是「下一个会话在那个项目里」。判据是纯函数
 `web/src/lib/projects.ts:273` `projectSwitch`。
 
-★ **那个按钮有两种形态**，判据是**空视图**（`web/src/lib/store/selectors.ts:68`
+★ **那个按钮有两种形态**，判据是**空视图**（`web/src/lib/store/selectors.ts:86`
 `selectIsEmptyView`）：
 
 | 页面 | 形态 | 在哪儿 |
 |---|---|---|
-| 空视图（**新建对话页面**） | 按钮 —— 打开项目对话框 | `web/src/components/projects-dialog.tsx:87` |
-| 对话页（有消息） | **标签** —— 只显示项目名，点了什么都不发生 | `web/src/components/projects-dialog.tsx:68` |
+| 空视图（**新建对话页面**） | 按钮 —— 打开项目对话框 | `web/src/components/projects-dialog.tsx:97` |
+| 对话页（有消息） | **标签** —— 只显示项目名，点了什么都不发生 | `web/src/components/projects-dialog.tsx:78` |
 
 ★ 一段对话的项目是定的，所以对话页上那个地方**不提供开关** —— 一个写着「切换」却会
 「把你正在看的对话从屏幕上拿走」的按钮，比没有按钮更糟。
 
 ★ **`Default Project` 是一个选择，也是兜底**：它就是「没有项目」那一项 —— 项目对话框的
-**第一项**（`web/src/components/projects-dialog.tsx:227`），服务端也认（会话落在默认项目根），
+**第一项**（`web/src/components/projects-dialog.tsx:237`），服务端也认（会话落在默认项目根），
 所以 `web/src/lib/projects.ts:244` `resolveActiveProject` 保留空 id：**null**（「还没选过」）和
 「表里没有那个项目了」都给出它。★ 「没有项目」**就是**默认项目根，所以兜底不是表里第一个
 项目 —— 那个项目是用户在列表里排在前面的，不是他给这段对话挑的目录。
 
 ★ **New thread 把项目也放掉**：上一段会话的项目是**那段会话的**，而会话的归属不可改
 （§1.5「会话的归属不可改」）——⇒ 在用户为它选一个之前，新对话就是「**没有项目**」
-（`web/src/lib/store/actions.ts:390` `startNewThread`）：输入框下方的按钮写着 `Default Project`，
+（`web/src/lib/store/actions.ts:442` `startNewThread`）：输入框下方的按钮写着 `Default Project`，
 服务端也接受这样一段会话（它用默认项目根）。★ 单项目模式例外：进程只服务一个目录，
 作用域就是答案，那里没有 `Default Project` 可选。★ 项目行菜单里的 **New conversation** 是
-反过来的一条路：先回到空白，再把项目放进去（`web/src/lib/store/actions.ts:208` `startThreadInProject`）
+反过来的一条路：先回到空白，再把项目放进去（`web/src/lib/store/actions.ts:238` `startThreadInProject`）
 —— ★ 顺序反过来，项目就会被 `startNewThread` 抹掉。
 
 ### 1.6 写面分两半：新的在空视图，已有的在侧栏
 
 | 动作 | 在哪儿 | 为什么 |
 |---|---|---|
-| **新建项目** | 空视图那个对话框（`web/src/components/projects-dialog.tsx:205`） | ★ 它是「决定下一段对话在哪儿干活」的一部分 —— 属于「还没决定」的那一刻 |
+| **新建项目** | 空视图那个对话框（`web/src/components/projects-dialog.tsx:215`） | ★ 它是「决定下一段对话在哪儿干活」的一部分 —— 属于「还没决定」的那一刻 |
 | **改名 / 改目录 / 移除** | 侧栏项目行的「⋯」 | ★ 它动的是**已经在地图上的东西** —— 地图上看见的，就该在地图上改 |
 
 ★ 项目行的菜单（`web/src/components/sidebar.tsx:354`）今天有四项：
 
 | 项 | 做什么 | 现状 |
 |---|---|---|
-| **New conversation** | 在这个项目里新起一段对话 | ★ 有：`web/src/lib/store/actions.ts:208` `startThreadInProject` |
-| **Rename project** | 就地改项目的名字 | ★ 有：`web/src/lib/store/actions.ts:236` `renameProject`；★ 名字**必填**（`web/src/lib/projects.ts:307` `projectRenameError`） |
-| **Change folder** | 改项目指向哪个目录 | ★ 接口有（`api/v2_projects.go:177` 收 `root`），客户端的动作是 `web/src/lib/store/actions.ts:242` `updateProject` |
-| **Remove project** | 从地图上摘掉这个项目 | ★ 有：`api/v2_projects.go:225` + `web/src/lib/store/actions.ts:255` `deleteProject` |
+| **New conversation** | 在这个项目里新起一段对话 | ★ 有：`web/src/lib/store/actions.ts:238` `startThreadInProject` |
+| **Rename project** | 就地改项目的名字 | ★ 有：`web/src/lib/store/actions.ts:266` `renameProject`；★ 名字**必填**（`web/src/lib/projects.ts:307` `projectRenameError`） |
+| **Change folder** | 改项目指向哪个目录 | ★ 接口有（`api/v2_projects.go:177` 收 `root`），客户端的动作是 `web/src/lib/store/actions.ts:272` `updateProject` |
+| **Remove project** | 从地图上摘掉这个项目 | ★ 有：`api/v2_projects.go:225` + `web/src/lib/store/actions.ts:285` `deleteProject` |
 
 ★ **单项目模式不给「改目录」和「移除」**：进程只服务一个目录，而那个目录就是作用域 ——
 挪走或删掉它，等于改了进程服务的东西。

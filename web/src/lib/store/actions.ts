@@ -25,6 +25,7 @@ import {
 } from "@/lib/types"
 
 import { getCurrentRunKey, handleEvent, promote, setCurrentRunKey, withoutKey } from "./events"
+import type { Set as StoreSet } from "./events"
 import { seedFromHistory } from "./history"
 import { MAIN_AGENT, type Attachment, type SessionEntry, type StoreState } from "./state"
 
@@ -145,6 +146,33 @@ function releaseRun(): void {
 //   to the composer, or the user loses them.
 let lastSentAttachments: Attachment[] = []
 
+// applyServerAuthorization writes a session's authorization facts into the
+// store, as the server reported them.
+//
+// ★ The server is the authority: the client keeps no copy of its own, and a
+//   mode it guessed would be a mode nobody confirmed. ★ The optimistic
+//   placeholder carries the client's choice — this is where the server's
+//   answer takes its place.
+function applyServerAuthorization(set: StoreSet, id: string, meta: ThreadMeta): void {
+  set((s) => {
+    const entry = s.sessions[id]
+    if (!entry) return {}
+    return {
+      sessions: {
+        ...s.sessions,
+        [id]: {
+          ...entry,
+          meta: {
+            ...entry.meta,
+            authorizationMode: meta.authorizationMode,
+            authorizationConfirmed: meta.authorizationConfirmed,
+          },
+        },
+      },
+    }
+  })
+}
+
 export const useStore = create<StoreState>((set, get) => ({
   sessions: {},
   order: [],
@@ -152,6 +180,8 @@ export const useStore = create<StoreState>((set, get) => ({
   uploading: false,
   activeId: readActiveThreadId() ?? null,
   pendingAgentId: null,
+  pendingAuthorizationMode: null,
+  pendingAuthorizationConfirmed: false,
   loadingList: false,
   agentFilter: null,
   projects: [],
@@ -292,6 +322,10 @@ export const useStore = create<StoreState>((set, get) => ({
           meta,
           convo: old?.convo,
           loaded: old?.loaded ?? false,
+          // ★ The log that was read stays read: a refresh of the list is a
+          //   refresh of the **list**, and it must not throw away what the
+          //   session already knows.
+          operations: old?.operations,
         }
       }
       // ★ The list is where the project of the conversation on screen becomes
@@ -340,6 +374,7 @@ export const useStore = create<StoreState>((set, get) => ({
           meta: s.sessions[id]?.meta ?? stubMeta(id),
           convo: emptyConversation(),
           loaded: false,
+          operations: s.sessions[id]?.operations,
         },
       },
     }))
@@ -380,11 +415,28 @@ export const useStore = create<StoreState>((set, get) => ({
       set((s) => ({
         sessions: {
           ...s.sessions,
-          [id]: { meta: s.sessions[id]?.meta ?? stubMeta(id), convo: emptyConversation(), loaded: true },
+          [id]: {
+            meta: s.sessions[id]?.meta ?? stubMeta(id),
+            convo: emptyConversation(),
+            loaded: true,
+            operations: s.sessions[id]?.operations,
+          },
         },
       }))
       get().loadError(id, (e as Error).message)
     }
+  },
+
+  async loadOperations(id, opts) {
+    // ★ The log is the server's record of the session: it is read, and it is
+    //   never written here. ★ A session that is not in the store yet has
+    //   nowhere to put the lines — the panel reads them again when it opens.
+    const view = await api.listOperations(id, opts)
+    set((s) => {
+      const entry = s.sessions[id]
+      if (!entry) return {}
+      return { sessions: { ...s.sessions, [id]: { ...entry, operations: view.items } } }
+    })
   },
 
   startNewThread() {
@@ -410,6 +462,39 @@ export const useStore = create<StoreState>((set, get) => ({
       return
     }
     const meta = await api.switchAgent(id, agentId)
+    set((s) => {
+      const entry = s.sessions[id]
+      if (!entry) return {}
+      return {
+        sessions: { ...s.sessions, [id]: { ...entry, meta: { ...entry.meta, ...meta } } },
+      }
+    })
+  },
+
+  async setAuthorizationMode(mode, confirm) {
+    const id = get().activeId
+    // ★ There is no session to change yet. ★ The mode belongs to the
+    // conversation, and the conversation that is about to be born is the one
+    // this choice is about — so the choice is **staged**, the same way the
+    // agent choice is staged, and it travels with the creation request.
+    //
+    // ★ A discarded choice would be worse than a useless one: the welcome
+    // page has no way to say "not this one", and the first turn would run
+    // in a mode the user never picked.
+    if (!id) {
+      set((s) => ({
+        pendingAuthorizationMode: mode,
+        // ★ The confirmation is a **fact about the person**, and it is not
+        //   taken back by a later choice: a person who confirmed full
+        //   authorization confirmed it, and the server is told so once.
+        pendingAuthorizationConfirmed: confirm === true ? true : s.pendingAuthorizationConfirmed,
+      }))
+      return
+    }
+    const meta = await api.setAuthorizationMode(id, mode, confirm)
+    // ★ The meta that comes back is the server's account of the session, so
+    // the mode on screen is the mode the server holds. ★ A refused change
+    //   never reaches this line — the old mode simply stays standing.
     set((s) => {
       const entry = s.sessions[id]
       if (!entry) return {}
@@ -523,6 +608,11 @@ export const useStore = create<StoreState>((set, get) => ({
 
     const { activeId, sessions, pendingAgentId } = get()
     const localKey = activeId ?? `pending:${Date.now()}`
+    // ★ The mode a **new** conversation is born in. ★ It is the one the
+    //   user picked on the welcome page, and null means they picked nothing
+    //   — the server then creates the conversation in the default mode.
+    const pendingAuthorizationMode = get().pendingAuthorizationMode
+    const pendingAuthorizationConfirmed = get().pendingAuthorizationConfirmed
     // ★ The project a **new** conversation belongs to. ★ It is the one the
     //   user picked in the sidebar — or the scope, when the process serves a
     //   single directory.
@@ -557,6 +647,12 @@ export const useStore = create<StoreState>((set, get) => ({
             hasPendingApproval: false,
             agentId,
             projectId: projectId ?? "",
+            // ★ The mode the conversation is born with: the one the user
+            //   picked on the welcome page, or the default when they picked
+            //   nothing. ★ The server's answer replaces it the moment the
+            //   session exists.
+            authorizationMode: pendingAuthorizationMode ?? "default",
+            authorizationConfirmed: pendingAuthorizationConfirmed,
           },
       // ★ The optimistic bubble carries the files too: the user has to see
       //   what they sent, and the bubble is the only thing on screen at the
@@ -574,7 +670,16 @@ export const useStore = create<StoreState>((set, get) => ({
     if (!threadId) {
       let created: ThreadMeta
       try {
-        created = await api.createThread(requested, projectId)
+        // ★ The mode travels with the creation request: a conversation born
+        //   in the mode the user picked is born in it — there is no window in
+        //   which it is in the default mode and the first turn could run in
+        //   it.
+        created = await api.createThread(requested, projectId, {
+          ...(pendingAuthorizationMode ? { mode: pendingAuthorizationMode } : {}),
+          // ★ The confirmation is only meaningful for `full`: the server asks
+          //   for it there and nowhere else.
+          confirmed: pendingAuthorizationMode === "full" && pendingAuthorizationConfirmed,
+        })
       } catch (e) {
         run = null
         setCurrentRunKey(null)
@@ -583,6 +688,11 @@ export const useStore = create<StoreState>((set, get) => ({
       }
       threadId = created.threadId
       promote(set, get, localKey, threadId, created.agentId)
+      // ★ The mode on screen is the **server's** account of the session it
+      //   just created. ★ The placeholder carried the client's choice, and
+      //   the server's answer replaces it — the server is the one that
+      //   decided, so it is the one that says so.
+      applyServerAuthorization(set, threadId, created)
       setCurrentRunKey(threadId)
     }
 
@@ -992,6 +1102,13 @@ export const useStore = create<StoreState>((set, get) => ({
       const convo = foldSessionFact(entry.convo ?? emptyConversation(), fact)
       return { sessions: { ...s.sessions, [id]: { ...entry, convo } } }
     })
+    // ★ These three facts are lines of the session's operation log: a round
+    //   began, an approval was asked for, an approval was answered. ⇒ The
+    //   log is read again, so a panel that is already open shows the new
+    //   line instead of waiting for the next open.
+    void get()
+      .loadOperations(id)
+      .catch(() => {})
     if (fact.kind !== "run-started") return
     // ★ A new round owns the session: follow it.
     void get().followRun(id, fact.runId)
@@ -1312,12 +1429,26 @@ async function ensureSession(): Promise<string> {
   if (current !== null) return current
 
   const state = useStore.getState()
-  const created = await api.createThread(state.pendingAgentId ?? undefined, state.activeProjectId ?? undefined)
+  // ★ The mode travels with the creation request, here as everywhere: a
+  //   conversation is born in the mode the user picked.
+  const created = await api.createThread(
+    state.pendingAgentId ?? undefined,
+    state.activeProjectId ?? undefined,
+    {
+      ...(state.pendingAuthorizationMode ? { mode: state.pendingAuthorizationMode } : {}),
+      confirmed:
+        state.pendingAuthorizationMode === "full" && state.pendingAuthorizationConfirmed,
+    },
+  )
   const id = created.threadId
   useStore.setState((s) => ({
     sessions: { ...s.sessions, [id]: { meta: created, convo: emptyConversation(), loaded: true } },
     order: [id, ...s.order],
     activeId: id,
+    // ★ The staged choice is spent: the conversation that carries it exists
+    //   now, and it carries the mode itself.
+    pendingAuthorizationMode: null,
+    pendingAuthorizationConfirmed: false,
   }))
   writeActiveThreadId(id)
   return id
@@ -1334,6 +1465,10 @@ function stubMeta(id: string): ThreadMeta {
     hasPendingApproval: false,
     agentId: MAIN_AGENT,
     projectId: "",
+    // ★ A session that does not exist yet has no mode of its own, and the
+    // default is what the server gives it when it creates it.
+    authorizationMode: "default",
+    authorizationConfirmed: false,
   }
 }
 

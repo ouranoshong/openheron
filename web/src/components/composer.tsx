@@ -3,7 +3,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 
 import { AgentPicker } from "@/components/agent-picker"
 import { AttachmentChip } from "@/components/attachment-chip"
+import { AuthorizationPicker } from "@/components/authorization-picker"
 import { MCPPanel } from "@/components/mcp-panel"
+import { OperationsPanel } from "@/components/operations-panel"
 import { SkillPicker } from "@/components/skill-picker"
 import { ComposerMeta } from "@/components/composer-meta"
 import { ComposerPopup, type PopupItem } from "@/components/composer-popup"
@@ -698,7 +700,26 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         context={contextUsage}
         notice={notice}
         busy={busyElsewhere}
-        action={<ProjectsButton />}
+        // ★ One action node holds both entries, and the order never changes:
+        //   React reconciles children by index, so an entry that shifts is an
+        //   entry that is unmounted and mounted again — and the dialog that
+        //   lives in it closes when it is.
+        action={
+          // ★ The action node wraps: a project whose name is long enough
+          //   would otherwise push the row past the screen's edge, and a
+          //   button that hangs off the edge is a button nobody can read.
+          //   ⇒ The three entries wrap inside it, and they stay right-aligned
+          //   because that is where they sit on a wide screen.
+          <span className="ms-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1">
+            <AuthorizationPicker />
+            <ProjectsButton />
+            {/* ★ The entry goes **last**, and it never moves: React
+                reconciles children by index, so an entry in the middle
+                would push the ones behind it — and the dialog that lives
+                in one of them closes when it shifts. */}
+            <OperationsPanel />
+          </span>
+        }
       />
 
       {skillPicker.open ? (

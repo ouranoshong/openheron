@@ -67,7 +67,7 @@ checkpoint（`approval` + `storage`）恢复。
 模型没人声明**不是**启动错误，而是把那个 Agent 留在树外：`validate()` 会 settle 这棵树
 （`agentkit/spec/load.go:711-750` 的 `leaveOutUndeclaredModels`）—— Agent 从 `Config.Agents` 里
 删掉，每个父 Agent 的 `subagents:` 里也删掉，理由留在 `Config.leftOut`
-（`agentkit/spec/config.go:189`）。下游（`AgentNames()`、`MCPServersInUse()`、档位表、
+（`agentkit/spec/config.go:200`）。下游（`AgentNames()`、`MCPServersInUse()`、档位表、
 装配层）看到的都是 settle 之后的树。默认 Agent 也一样被留在树外。写入门
 （`agentkit/spec/write.go:476-486` 的 `checkNoAgentLost`）比的是 settle 后的 before 与 after：
 可以加 Agent、可以放着已坏的不动，不能把一个能跑的拿走。规则见 `docs/config-design.md` §4.6。
@@ -118,13 +118,13 @@ frontmatter 键。正文就是提示词本身（`Instruction`）。
 2. 算生效工具表：snapshot 的工具集是整个 snapshot 共用的一套，每个 Agent 用自己的 `tools:`
    白名单收窄（`agentkit/build/topology.go:72-74` 的 `specTable`），档位表（§5.5）再决定活下来
    的工具里哪些要问人。白名单没有「没有规则就全都留着」的捷径
-   （`agentkit/build/policy.go:190`）：空清单意味着全部移除。
+   （`agentkit/build/policy.go:197`）：空清单意味着全部移除。
 3. 按 `subagents` 递归装配子树，把 `SubAgents` 填进 eino ADK 的 `deep.Config`
-   （`assemble.go:100`）。
+   （`assemble.go:103`）。
 4. `WithoutGeneralSubAgent: true`（`assemble.go:18` 的 `baseConfig`、`hub.go:162`）：关掉 eino
    自带的通用子 Agent，否则模型能凭空造子 agent，绕过拓扑与深度校验。
 
-`assemble.go:158-161` 还有一处：`base.SubAgents = nil` 且
+`assemble.go:164-167` 还有一处：`base.SubAgents = nil` 且
 `base.Name/Description/Instruction` 被清空，那是逐节点装配时剥掉继承来的子 agent 列表。
 
 #### ★ 树的身份：它依赖什么，而不是第几代
@@ -154,8 +154,8 @@ frontmatter 键。正文就是提示词本身（`Instruction`）。
 
 `agentkit/run` 是 eino ADK 的一层封装，做三件事：构造输入、驱动循环、桥接审批。
 
-1. **构造输入**（`agentkit/run/input.go:92-128`）：系统提示词 + 会话历史 + 本轮 query 组装成
-   ADK 输入。子 Agent 的消息不混进父的历史（`input.go:150` 的 `withoutSubagentMessages`）。
+1. **构造输入**（`agentkit/run/input.go:95-128`）：系统提示词 + 会话历史 + 本轮 query 组装成
+   ADK 输入。子 Agent 的消息不混进父的历史（`input.go:148` 的 `withoutSubagentMessages`）。
 2. **驱动循环**（`agentkit/run/loop.go`）：跑 ADK 的 run，把事件转成 AG-UI 事件。
 3. **桥接审批**（`agentkit/run/bridge.go`）：工具请求审批时挂起，结果回来后从 checkpoint 恢复。
 
@@ -181,10 +181,10 @@ frontmatter 键。正文就是提示词本身（`Instruction`）。
 
 会话属于项目，项目是一个目录 —— 所以一轮干活的目录是**按会话**的，不是按进程的。
 
-`agentkit/run/runtime.go:461` 在**轮次开始处**读它（会话所属项目的 root），放进这一轮的
+`agentkit/run/runtime.go:472` 在**轮次开始处**读它（会话所属项目的 root），放进这一轮的
 context（`fsx.WithProjectRoot`，`agentkit/fsx/context.go:25`）。两个消费者从那里读，而且必须
-一致：提示词（`agentkit/run/input.go:191` 的 `Project root:` 那行，由 `loop.go:88` 喂进去）
-与工具（`agentkit/fsx/fsx.go:307-331` 的写边界）。
+一致：提示词（`agentkit/run/input.go:260` 的 `Project root:` 那行，由 `loop.go:88` 喂进去）
+与工具（`agentkit/fsx/fsx.go:311-381` 的写边界）。
 
 ★ 文件系统后端**只建一次**、被所有轮次共用，所以把 root 烘焙进去等于用「上一轮用过的那个
 root」。★ context 里的 root **顶替**后端自己的 root：干别的项目的会话不该能写进这个项目的
@@ -266,13 +266,13 @@ workspace 里拿走；已经随消息发出去的文件留在那条消息上。
 
 | 来源 | 装配位置 | 例子 |
 |---|---|---|
-| 文件系统中间件 | `agentkit/build/snapshot.go:101` | `ls` `read_file` `write_file` `edit_file` |
+| 文件系统中间件 | `agentkit/build/snapshot.go:108` | `ls` `read_file` `write_file` `edit_file` |
 | execute 工具 | `agentkit/build/execute.go:40` | `execute` |
 | 网络工具 | `agentkit/build/nettools.go` | `duckduckgo_search` `request_get` `request_post` `request_put` `request_delete` |
 | 知识库 | `agentkit/build/kb.go` | `kb_search` `kb_index` |
 | 百科 | `agentkit/build/nettools.go:256` | `wikipedia_search` |
 | 配置本身 | `agentkit/build/configtools.go:92` | `config_get` `config_validate` `config_template` `config_notices` `config_tier` `config_write` |
-| MCP server | `agentkit/build/mcptools.go:194` | `mcp__<server>__<tool>` |
+| MCP server | `agentkit/build/mcptools.go:219` | `mcp__<server>__<tool>` |
 
 config 工具总是被挂上，但几乎从不可见：它们进每个 Agent 的批次，Agent 只看见自己 `tools:`
 点名的那些，与其它非 MCP 工具一样。其中五个只读，`tools/config.yaml` 点名它们时它们不用点头；
@@ -284,7 +284,7 @@ config 工具总是被挂上，但几乎从不可见：它们进每个 Agent 的
 （`ls` `read_file` `glob` `grep`）与委派类（`task` `write_todos` `skill`）。MCP server 用
 **它自己的词汇**说这件事，不是暴露出来的名字。对外网络工具不用改代码：配置缺失的 provider
 什么都不挂，写下 `tools/*.yaml` 才是把工具挂上去的那一步。文件系统中间件是例外 ——
-`fsx.New` 无条件挂载（`agentkit/build/snapshot.go:101`）；知识库由它的 **corpus** 开关，
+`fsx.New` 无条件挂载（`agentkit/build/snapshot.go:108`）；知识库由它的 **corpus** 开关，
 而不是由文件开关。`openheron init` 会写 `tools/` 下的工具配置，因为出厂 agent 会点名
 `request_get`、`duckduckgo_search` 和 `wikipedia_search`；`--no-tools` 可以留下不写。
 
@@ -292,12 +292,12 @@ config 工具总是被挂上，但几乎从不可见：它们进每个 Agent 的
 
 `tools/*.yaml` → `spec.loadTool`（`agentkit/spec/load.go:269`）→ `decl.ToolsCfg` →
 `toolRegistry.Build`（`agentkit/build/tools.go:152`）→ `snapshot.buildHeavy`
-（`agentkit/build/snapshot.go:84-145`）→ `applyToolConfig`（`agentkit/build/assemble.go:30-40`）→
+（`agentkit/build/snapshot.go:91-153`）→ `applyToolConfig`（`agentkit/build/assemble.go:30-40`）→
 `deep.Config.ToolsConfig.Tools` → `deep.New`（`agentkit/build/assemble.go:43`）。
 
 MCP 这一支在注册表处并进来：`mcps/<server>.yaml` → `spec.loadMCP`
 （`agentkit/spec/load.go`）→ `decl.MCPServerCfg` → MCP provider
-（`agentkit/build/mcptools.go:194`），注册在 `agentkit/build/tools.go:55` → 同一个
+（`agentkit/build/mcptools.go:219`），注册在 `agentkit/build/tools.go:55` → 同一个
 `toolRegistry.Build` → 同一个 `applyToolConfig`。
 
 重依赖（fsx 后端 + 工具批次）在 `sync.Once` 下只构建一次
@@ -330,7 +330,7 @@ provider 只回答「这个 snapshot 有哪些工具」并交回一批工具，�
 
 编辑器写的是 `<配置根>/skills/`，那个目录只有在探针正好落在那里时才是生效的那一个；不是的
 话保存会落进一棵没人读的树。所以解析结果在启动时被推进配置层
-（`spec.Service.SetSkillsDir`，`agentkit/spec/config.go:444`），指向别处时保存被拒
+（`spec.Service.SetSkillsDir`，`agentkit/spec/config.go:504`），指向别处时保存被拒
 （`agentkit/spec/write.go:151-164` 的 `validateWritable`），清单里那个分区标成只读并点名真正的
 目录。这条规则只住在 `build` 里，在 `spec` 里再写一份就是第二个答案。
 
@@ -410,7 +410,7 @@ openheron 的篇幅大部分在这里 —— 边界比能力更决定一个 Agen
 MCP 路径带进来两个第三方包：`github.com/cloudwego/eino-ext/components/tool/mcp`（eino
 适配器）与 `github.com/mark3labs/mcp-go`（协议客户端），都在 `agentkit/build` 里。
 `agentkit/run` 引 `agentkit/spec/decl` 只为命名空间常量 —— run 账本要记这一轮碰过哪些 server。
-`storage/filestore` 只在组合根 `main.go:36` 被引用，`api` 不直接引它。
+`storage/filestore` 只在组合根 `main.go:37` 被引用，`api` 不直接引它。
 
 #### 两条不能破的依赖铁律
 
@@ -453,7 +453,7 @@ logger 由组合根 `main.installLogger` 围绕共享的 `slog.LevelVar` 建起�
 
 #### 组合根装配 logger
 
-logger 只在 `main` 里造一次再传下去（`main.newLogger`，`main.go:252`）：
+logger 只在 `main` 里造一次再传下去（`main.newLogger`，`main.go:350`）：
 
 ```
 main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
@@ -495,7 +495,7 @@ main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
 而且收得不声不响。
 
 只有默认派生的根会被自动创建
-（`agentkit/spec/config.go:683` 的 `os.MkdirAll`）；显式 root / env root 指向不存在的路径时
+（`agentkit/spec/config.go:712` 的 `os.MkdirAll`）；显式 root / env root 指向不存在的路径时
 不创建。
 
 ★ **第一次启动时写的是整棵树**，不只是那个目录：当配置根是缺省派生的那个、而且里面没有
@@ -506,6 +506,10 @@ main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
 
 `spec.NewServiceAt` 是给 `openheron init` 用的另一条入口，只认显式传入的路径，
 不读环境变量。
+
+★ **默认项目根两处都建** —— 服务端启动时建（`agentkit/spec/config.go:674-678`），
+`openheron init` 也建（`initcmd.go:56-69`）。一处建、另一处不建，就是「有的机器上有
+这个目录、有的没有」。★ **点名的项目根谁都不建**：笔误不该长出一个空目录。
 
 ### 5.3 目录分区
 
@@ -519,16 +523,16 @@ main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
 | `server/` | `spec.DirServer` | ❌ | 进程参数，需重启 |
 | `state/` | `spec.DirState` | — | 会话与 checkpoint，自动创建 |
 
-`Categories` 有**六个**分区（`agentkit/spec/config.go:59-104`），其中五个是热分区
+`Categories` 有**六个**分区（`agentkit/spec/config.go:61-106`），其中五个是热分区
 （`agents/` `llm/` `mcps/` `skills/` `tools/`，见 `agentkit/spec/reload.go` 的 `HotDirs`），
-`server/` 不热（`agentkit/spec/config.go:71`）。`skills/` 的指纹是递归 walk，改 `SKILL.md`
+`server/` 不热（`agentkit/spec/config.go:73`）。`skills/` 的指纹是递归 walk，改 `SKILL.md`
 下一轮生效。
 
-**没有 `policy/` 分区**（`agentkit/spec/config.go:917-926` `noteRetiredDirs`）：它当年承载的
+**没有 `policy/` 分区**（`agentkit/spec/config.go:1040` `noteRetiredDirs`）：它当年承载的
 档位模型现在住在工具文件与 Agent 文件里（§5.5）。遗留的 `policy/` 目录不会被读，但会留下
 一条提示说清新家在哪儿，不会一声不吭地丢掉配置。`tools/` 下的
 文件名是白名单，未知文件直接报错（`agentkit/spec/load.go:327`）。`mcps/` 一个 server 一个
-文件（`agentkit/spec/config.go:26` 的 `spec.DirMCP`），文件在定义就在，没有 `enabled` 键，
+文件（`agentkit/spec/config.go:28` 的 `spec.DirMCP`），文件在定义就在，没有 `enabled` 键，
 文件名就是 server 名，也是其工具命名空间那一段。
 
 ★ **热分区变了之后不是立刻换树**：**写路径只做标记**，下一轮建树之前把标记取走、重读一次配置、
@@ -539,9 +543,9 @@ main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
 
 ### 5.4 装载的两种模式与「deferred」
 
-`spec.Service.Load()`（`agentkit/spec/config.go:626`）严格校验，失败即启动失败；
-`LoadUnchecked()`（`agentkit/spec/config.go:649`）跳过校验。`Config.Deferred()`
-（`config.go:203`）收集非致命问题（比如某个 duration 字符串没法解析），以 `deferred` 数组
+`spec.Service.Load()`（`agentkit/spec/config.go:957`）严格校验，失败即启动失败；
+`LoadUnchecked()`（`agentkit/spec/config.go:980`）跳过校验。`Config.Deferred()`
+（`config.go:261-272`）收集非致命问题（比如某个 duration 字符串没法解析），以 `deferred` 数组
 出现在 `/v2/health` 与 `/v2/config` 里。分界是：会导致运行时行为错乱的是致命的。
 
 ★ **密钥是在装载时解析的，而这条链有两节。** 先环境变量，后钥匙串 —— 而名字是
@@ -585,17 +589,17 @@ main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
 
 档位与可见性是两个问题，分开摆着：「这个工具要不要人点头」是共享的档位表
 `Policy.TierOf`；「这个 Agent 能不能用它」是逐 Agent 的 `Table.Blocked`
-（`agentkit/build/policy.go:163`），来自它以 `decl.SubAgentSpec` 带在身上的清单。清单没点名
+（`agentkit/build/policy.go:170`），来自它以 `decl.SubAgentSpec` 带在身上的清单。清单没点名
 的工具不在工具集里，模型也看不见。被挡住的工具保留自己的档位，并在 `reason` 里说明：
 非 MCP 工具是 `tools`，MCP 工具是 server 没挂载（`LayerNotMounted`）
 （`agentkit/build/introspect.go:36-47` 的 `reasonOf`）。`Table.Blocked` 回答 `LayerNotLoaded`
-（`agentkit/build/policy.go:251`）或 `LayerNotMounted`（`agentkit/build/policy.go:258`）。
+（`agentkit/build/policy.go:258`）或 `LayerNotMounted`（`agentkit/build/policy.go:265`）。
 
 ### 5.6 深度上限与拓扑校验
 
 委派深度上限是 `server/config.yaml` 里的 `agent.max_depth`（默认 `1`），
 `retry.max_retries` 就在旁边。上限只住在这里 —— `policy/limits.yaml` 那份只能收紧的副本
-没有了，而 `server/` 不是热分区（`agentkit/spec/config.go:71`），改上限要重启。
+没有了，而 `server/` 不是热分区（`agentkit/spec/config.go:73`），改上限要重启。
 
 声明的拓扑超过上限是启动错误（`agentkit/spec/load.go:1108-1124` 的 `validateDepth`），不静默截断；
 引用不存在的 agent、成环也都是启动错误（`agentkit/spec/load.go:1179-1194` 的
@@ -606,7 +610,7 @@ main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
 配置编辑器（`/v2/settings`）的写路径有几道闸门：
 
 - `server/` 不可编辑（`api/v2_settings.go`）：它不热重载，接口直接拒绝。
-- 已退休的 `api_key` 那一行被拒（`agentkit/spec/write.go:929`）—— 密钥不进配置树，
+- 已退休的 `api_key` 那一行被拒（`agentkit/spec/write.go:1004`）—— 密钥不进配置树，
   所以仓库里装不下一个：
 
   ```
@@ -616,15 +620,15 @@ main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
 - 一次改动不许把一个本来能跑的 Agent 带出树外（`agentkit/spec/write.go:476-486`
   `checkNoAgentLost`）：比磁盘上 settle 后的树与试装后 settle 的树。本来就在树外的 Agent
   两边都不在，所以一次无关的编辑不会被算成「把它弄丢」。
-- **还有东西指着它**的删除被拒（`agentkit/spec/write.go:787-814` `checkNotReferenced`），拒绝
+- **还有东西指着它**的删除被拒（`agentkit/spec/write.go:859-886` `checkNotReferenced`），拒绝
   点名是谁在指、要移除什么。这道闸门跑在试装之前：试装的装载错误正是它要取代的症状。
 
 ### 5.8 工具闸门
 
 `agentkit/build/gate.go` 实现「工具能不能用」：
 
-- 名字在 allow 表里 → 直接跑，闸门原样放行（`agentkit/build/gate.go:67`）。
-- 名字不在 → 调用中断，等一个人的决定（流式那条路是 `agentkit/build/gate.go:89`）。
+- 名字在 allow 表里 → 直接跑，闸门原样放行（`agentkit/build/gate.go:100`）。
+- 名字不在 → 调用中断，等一个人的决定（流式那条路是 `agentkit/build/gate.go:127`）。
 - 这个 Agent 的 `tools:` 没点名的工具压根不在它的工具表里，闸门连看都看不到。
 
 没有 `deny` 这一支：一个 Agent 拿不到的工具不会注册给它，闸门从不需要拒绝谁。人拒绝一次
@@ -632,15 +636,50 @@ main(): newLogger() -> installLogger() -> hlog.SetLogger(hertzlog.New(log))
 X」就可以据此调整。MCP 工具走同一道闸门，按名字查 `TierOf`
 （`agentkit/build/policy.go:55-60`），所以 `mcp__<server>__<tool>` 同样要人点头或直接放行。
 
-### 5.9 审批恢复
+### 5.9 会话的授权模式
+
+档位表（§5.5）答的是**每个工具**的事：这次调用要不要人点头？
+**授权模式**答的是同一个问题，但按**会话**分三档 ——
+`default`（照旧问）、`trusted`（受信路径内的写不问）、`full`（什么都不问）。
+
+★ **模式是会话的属性，不是树的属性。** 它住在会话记录里（`state.json`，与 `agent_id`
+同级），闸门从**这一轮的上下文**里读它（`agentkit/authz`，由
+`agentkit/run/runtime.go` 带进去）。★ 它不能住在 agent 里：agent 是**按指纹池化**的、
+所有会话共用同一个对象，模式烧进去就会从一个会话漏给所有会话。
+上下文是每轮的，所以里面的模式是每会话的。
+
+★ **模式不放宽工具面。** 它只答「这次调用要不要人点头」；
+一个 Agent 能用哪些工具是它自己的 `tools:` 清单（§5.5）。
+★ 它也不放宽**写边界** —— `agentkit/fsx` 照旧拒绝越界的写。
+模式答「要不要问」，后端答「这个路径能不能写」。
+
+★ **受信路径是三处目录**：这一轮的项目根、这个会话自己的上传目录、配置根。
+路径判定归 `agentkit/fsx`（`InsideRoot`，一次问一个根 —— 与 `resolveWrite` 同一套
+祖先行走），闸门那一侧把三处合并（`agentkit/build/scope.go`）。
+★ **fail-closed**：目标读不出来的调用一律要问。
+
+★ **MCP 那一半靠声明。** MCP 工具的参数是服务器自己的，闸门读不出它写在哪
+⇒ 由**服务器自己的文件**点名它的写类工具（`mcps/<server>.yaml` 的 `writes:` 键），
+与它的 `allows:` 并排。
+
+★ **完全授权要一次明确确认，每个会话一次。** 服务端记着这件事
+（模式旁边的一个字段），没拿到确认之前拒绝这次切换（`409 confirmation_required`）——
+一个忘了弹框的客户端不能靠疏忽拿到它。
+
+★ **那一轮的档位被写下来。** 账本的每一行记着它跑在哪一档（`authorization_mode`），
+因为决策日志只记人的决定 —— 没人看管地跑的一轮，在那儿没有痕迹。
+
+完整设计在 `docs/authorization-design.md`（只有中文版）。
+
+### 5.10 审批恢复
 
 审批请求被持久化（`storage` 的 `PendingApproval`），checkpoint store 是恢复的真相源。客户端
 把决定塞回同一个 `POST /v2/run` 的 `resume[]` 里（每项带 `interruptId` 与
 `payload.approved` / `payload.reason`）。checkpoint 没了就恢复不了，接口返回
 `this approval can no longer be resumed: its checkpoint is gone. Send a new message to continue.`
-（`api/v2_types.go:131`），而不是静默新开一轮。
+（`api/v2_types.go:139`），而不是静默新开一轮。
 
-### 5.10 会话准入
+### 5.11 会话准入
 
 一个会话至多有一轮活着的轮次。对忙着的会话发第二个 `POST /v2/run` 一律被拒
 （`409 session_busy`），绝不接管正在跑的那一轮。规则住在 `agentkit/run`，就在它守护的状态
@@ -653,7 +692,7 @@ X」就可以据此调整。MCP 工具走同一道闸门，按名字查 `TierOf`
   它问的是 `conflictTurns`：**槽位只有一个，只有「恢复撞恢复」放行。**
 
 拒绝不改变任何东西：不删检查点、不清审批、不落消息。run 的终态行由 `runRow.finish`
-（`agentkit/run/runrow.go:63`）在消息归档后追加；`v2Run` 等 `WaitArchived()` /
+（`agentkit/run/runrow.go:72`）在消息归档后追加；`v2Run` 等 `WaitArchived()` /
 `WaitReleased()`（`api/v2_run.go:258-259`）才收流，所以客户端的「这轮完了」与服务端的
 「这个会话空了」不会各说各话。待审批在 **loop 退出时**写，不是在那一轮的回调返回时 ——
 框架正是在 loop 退出时写检查点。
@@ -666,11 +705,11 @@ run 账本是一次 run 的持久记录，每次 run 一行，由 run 自己的 
 `GET /v2/sessions/{id}/runs` 读回来；终态行落在消息落盘之后，单是这个次序就让 busy 标记
 不用超时也天然诚实。被崩溃留下的、还开着的 run 会在启动巡检时被收成 `interrupted`。
 
-### 5.11 HTTP 层
+### 5.12 HTTP 层
 
 `api` 只暴露 `/v2` 接口族（旧的无前缀接口已下线，实测 `/health` 返回 404）。
 
-- 全部 `/v2` 路由在 `api/v2_files.go:40-99` 一处注册。
+- 全部 `/v2` 路由在 `api/v2_files.go:40-108` 一处注册。
 - 错误信封统一由 `api/v2_types.go` 的 `v2Fail` 产出：
   `{"error": "...", "code": "...", "retryable": false}`。
 - `/v2` 路由先注册，catch-all `GET /*` 后注册 —— SPA 回退不会吞掉接口。
@@ -685,7 +724,7 @@ run 账本是一次 run 的持久记录，每次 run 一行，由 run 自己的 
 - `POST /v2/run` 的 `threadId` 必填（`api/v2_run.go:139`）：先 `POST /v2/sessions` 拿会话，
   再发起 run。
 
-### 5.12 前端
+### 5.13 前端
 
 React 19 + Vite + zustand，构建产物 `web/dist` 通过 `go:embed` 打进二进制
 （`webui/webui.go`）。`frontend_mode` 默认 `embed`（用嵌进二进制的界面）；`dir` 则从
@@ -734,12 +773,12 @@ zustand 的 selector 必须返回引用稳定的值：每次调用造新数组/�
 两者一漂移单测就失败。标记是内联 SVG —— 装在 `img` 里的 SVG 是另一个文档，页面的样式表
 选不进去它的部件。
 
-### 5.13 可观测性
+### 5.14 可观测性
 
 `agentkit/obs` 是唯一日志出口，级别与前缀只在这里定义。`agentkit/obs/hook` 提供观测钩子
 （依赖 `obs`，不反向依赖）。
 
-### 5.14 边界与不做的事
+### 5.15 边界与不做的事
 
 以下都是当前没有的：
 

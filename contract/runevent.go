@@ -33,6 +33,14 @@ const (
 	RunEventToolEnd
 	// RunEventToolResult carries the tool's output.
 	RunEventToolResult
+	// RunEventToolFailed says a tool call failed.
+	//
+	// ★ It is a **separate** event, not a flag on the tool result: the
+	//   upstream's tool result frame carries the content and nothing else,
+	//   and the content says what the **model** read — not what happened to
+	//   the call. ★ The call id rides along, so the failure can be joined
+	//   with the call it belongs to.
+	RunEventToolFailed
 	// RunEventAnnounce publishes a message that produced no visible delta.
 	RunEventAnnounce
 	// RunEventCompaction reports that the context was compacted.

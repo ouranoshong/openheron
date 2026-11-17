@@ -525,7 +525,7 @@ func TestTheAgentSeesOnlyTheConfigToolsItNames(t *testing.T) {
 	_, cfg, _ := configToolEnv(t)
 
 	policy := policyOf(cfg)
-	sp, err := specOf(cfg, "/tmp")
+	sp, err := specOf(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

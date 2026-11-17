@@ -25,7 +25,7 @@
 **引用**（配置文件里怎么指名这把钥匙）。这三件事曾经挤在一个字段里，所以每一个都说不清。
 
 ★ **文件名里的那个 `api_key` 行没了。** 加载器**拒绝**它并说清新写法
-（`agentkit/spec/load.go:44-52`），编辑器与诊断也一样（`agentkit/spec/write.go:929-945`）。
+（`agentkit/spec/load.go:44-52`），编辑器与诊断也一样（`agentkit/spec/write.go:1004-1020`）。
 这不是兼容性保留 —— 那个字段现在只用来**抓住旧文件**。
 
 ## 1. 命名：两类密钥，两个命名空间
@@ -95,7 +95,7 @@ autolaunch（那会白等一次进程启动）。
 ★ **钥匙串是一个全局 OS 资源**，所以它**默认不接**：`Service` 上没有装 store 时，解析器走的是
 `nullStore`（`agentkit/spec/secret.go:220-231`），它回答「不可用」，而不是去碰开发者自己的
 凭据库。真正接上它的地方只有三处，都是**明确地问了**：服务端的组合根
-（`main.go:393`）、`openheron init`（`initcmd.go:69`）与 `openheron secret`（`secretcmd.go:32-44`）。
+（`main.go:531`）、`openheron init`（`initcmd.go:98`）与 `openheron secret`（`secretcmd.go:32-44`）。
 
 ### 2.2 两个入口共用一个名字
 
@@ -187,7 +187,7 @@ headers:
 | `DELETE /v2/secrets/:group/:name` | 删这一条 | 一条 |
 | `DELETE /v2/secrets/:group` | **删整组** | **只删那一组** |
 
-路由在 `api/v2_files.go:96-99`，实现是 `api/v2_secrets.go`。
+路由在 `api/v2_files.go:105-108`，实现是 `api/v2_secrets.go`。
 
 写入的四条规矩：
 
@@ -197,7 +197,7 @@ headers:
    ★ 宿主环境里已经设了变量时，往钥匙串写**不生效** —— 接口必须说这件事，否则用户写完发现
    什么都没变。
 3. **写完要生效**：钥匙串不是文件，热更新看不见它 ⇒ 写入成功后必须走**同一条热更新路径**
-   重新解析（`Service.MarkSecret`，`agentkit/spec/config.go:370-385`）。
+   重新解析（`Service.MarkSecret`，`agentkit/spec/config.go:431-445`）。
 4. **暴露面不新增**：这个服务今天没有鉴权，本地进程本来就能 `PUT /v2/settings/item` 改配置树；
    钥匙串写入不制造新的一类面，但**值不得进任何日志路径**。
 
@@ -214,7 +214,7 @@ openheron secret remove llm deepseek  # 删一条
 openheron secret remove llm           # 删整组
 ```
 
-实现是 `secretcmd.go`（命令在 `main.go:68` 接上）。
+实现是 `secretcmd.go`（命令在 `main.go:69` 接上）。
 
 ★ `set` **从 stdin 读**（不进 argv、不回显）—— 与沙箱 Kit 的 `sbx secret set-custom --value-stdin`
 同一套习惯（`sandbox-kit/TUTORIAL.md:67-69`）。
@@ -298,7 +298,7 @@ GET /v2/secrets
 | `web/src/lib/settings-store.ts` | 加 `tab: "files" \| "secrets"` |
 
 ★ 两条前端铁律：zustand 选择器返回**引用稳定**的值（模块级空常量）；颜色只用 token，不写字面量。
-★ 错误沿用 `ApiError`（`web/src/lib/api.ts:240-264`），服务端给什么码前端就按什么码分。
+★ 错误沿用 `ApiError`（`web/src/lib/api.ts:298-322`），服务端给什么码前端就按什么码分。
 
 ### 5.5 E2E 断言了什么
 
@@ -323,7 +323,7 @@ GET /v2/secrets
 ★ 迁移说明写在用户手册（`docs/user-manual.md` 与 `_zh`）与本文 §6，别只写在提交信息里。
 
 ★ `api_key` 字段**从结构体里删掉**会让旧文件撞上严格解码
-（`agentkit/spec/config.go:1038-1048` 的 `decodeStrict`，`KnownFields(true)`）—— 那句报错是
+（`agentkit/spec/config.go:1161-1171` 的 `decodeStrict`，`KnownFields(true)`）—— 那句报错是
 yaml 自己的话（「field api_key not found in type spec.Provider」），对人无意义。⇒ **字段保留但
 降级**：不再由 YAML 给值，只用来**捕获旧文件并给一句人话**（`agentkit/spec/decl/decl.go:23-32`）。
 

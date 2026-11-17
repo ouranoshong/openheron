@@ -1,4 +1,5 @@
-import type { RunsView, ThreadMeta } from "@/lib/api"
+import type { OperationView, RunsView, ThreadMeta } from "@/lib/api"
+import type { AuthorizationMode } from "@/lib/authorization"
 import type { AgEvent } from "@/lib/events"
 import type { ProjectScope, ProjectSummary } from "@/lib/projects"
 import type { SessionFact } from "@/lib/session-events"
@@ -18,6 +19,12 @@ export interface SessionEntry {
   meta: ThreadMeta
   convo?: ConversationState
   loaded: boolean
+  // operations is the session's operation log, as the server last reported it.
+  //
+  // ★ It is absent until the log has been read: the client keeps no copy of
+  //   its own, and "nothing has been read yet" is not the same fact as
+  //   "nothing happened".
+  operations?: OperationView[]
 }
 
 export interface StoreState {
@@ -27,6 +34,21 @@ export interface StoreState {
   uploading: boolean
   activeId: string | null
   pendingAgentId: string | null
+  // pendingAuthorizationMode is the mode the next conversation is born in.
+  //
+  // ★ It is the **staging** the agent choice uses, and it exists for the
+  //   same reason: a conversation that does not exist yet has no mode of
+  //   its own, so the choice is kept until the server can take it. ★ null
+  //   means "nothing was chosen" — the conversation is born in the default
+  //   mode, the way it always was.
+  pendingAuthorizationMode: AuthorizationMode | null
+  // pendingAuthorizationConfirmed says the person already confirmed full
+  // authorization for the conversation that is about to be born.
+  //
+  // ★ It is the **client's** word, not the server's fact: the server has
+  //   no session to record it on until the conversation exists, so it
+  //   travels with the creation request and the server decides.
+  pendingAuthorizationConfirmed: boolean
   loadingList: boolean
   listError?: string
   agentFilter: string | null
@@ -103,6 +125,12 @@ export interface StoreState {
   // ── actions ────────────────────────────────────────────────────────────
   refreshList(): Promise<void>
   openSession(id: string): Promise<void>
+  // loadOperations reads the session's operation log and keeps it with the
+  // session.
+  //
+  // ★ The log is the **server's** record: the client reads it and shows it,
+  //   and it never writes a line of its own.
+  loadOperations(id: string, opts?: { after?: number; limit?: number }): Promise<void>
   // startNewThread lets go of the conversation on screen — and of its
   // project.
   //
@@ -116,6 +144,18 @@ export interface StoreState {
   renameSession(id: string, title: string): Promise<void>
   deleteSession(id: string): Promise<void>
   switchAgent(agentId: string): Promise<void>
+  // setAuthorizationMode changes the authorization mode of the session on
+  // screen.
+  //
+  // ★ The server's answer is the truth: the mode on the screen is the mode
+  // the server holds, and a refused change leaves the old one standing.
+  // ★ `confirm` is the second half of the full-authorization handshake — the
+  //   server refuses `full` with 409 `confirmation_required` until the
+  //   request carries the confirmation.
+  // ★ **Without a session the choice is staged**: there is nothing to
+  //   change yet, and the mode belongs to the conversation that is about to
+  //   be born — so it goes with that conversation when it is created.
+  setAuthorizationMode(mode: AuthorizationMode, confirm?: boolean): Promise<void>
 
   send(text: string): Promise<void>
   // reattach comes back to a run after the connection dropped. The run

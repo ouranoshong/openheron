@@ -1,5 +1,6 @@
 import { readSse } from "@/lib/sse"
 import { parseSessionFact, type SessionFact } from "@/lib/session-events"
+import type { AuthorizationMode } from "@/lib/authorization"
 import type { ProjectScope, ProjectSummary } from "@/lib/projects"
 import type { ContextUsage } from "@/lib/types"
 
@@ -50,6 +51,22 @@ export interface ThreadMeta {
    * default project root.
    */
   projectId: string
+  /**
+   * The authorization mode of the session.
+   *
+   * ★ The server always sends it: a missing field says "this version does
+   * not know about authorization modes", and an empty one would say "this
+   * session has no mode" — two different things.
+   */
+  authorizationMode: AuthorizationMode
+  /**
+   * Whether this session has already confirmed full authorization.
+   *
+   * ★ It is the **server's** memory, and it travels with the session: a
+   * second surface must not ask a second time, and the client keeps no
+   * copy of it.
+   */
+  authorizationConfirmed: boolean
 }
 
 export interface ThreadDetail extends ThreadMeta {
@@ -93,6 +110,47 @@ export interface RunView {
 export interface RunsView {
   items: RunView[]
   activeRunId?: string
+}
+
+// OperationView is one line of the session's operation log.
+//
+// ★ The kinds are the **server's** vocabulary: it names what happened, and
+//   the client reads the name. ★ Every field beyond the four the line
+//   always carries is optional — a line about a turn has no file path, and a
+//   line about a file has no tool name.
+export interface OperationView {
+  seq: number
+  at: string
+  kind: string
+  actor: "user" | "system"
+  runId?: string
+  turnKind?: string
+  interruptId?: string
+  toolName?: string
+  // approved is the decision on an approval.
+  //
+  // ★ It is optional and not defaulted: "the approval was refused" and
+  //   "this line is not about an approval" are two different facts, and a
+  //   plain boolean would fold them into one.
+  approved?: boolean
+  agentId?: string
+  projectId?: string
+  mode?: string
+  title?: string
+  path?: string
+  name?: string
+  size?: number
+  state?: string
+}
+
+// OperationsView is the session's operation log.
+//
+// ★ total is the number of lines the filter selected — before `limit` cut
+//   the tail off — and items are the lines themselves, oldest first.
+export interface OperationsView {
+  threadId: string
+  total: number
+  items: OperationView[]
 }
 
 export interface MessagesView {
@@ -369,12 +427,33 @@ export const api = {
       body: JSON.stringify({ start }),
     }),
 
-  createThread: (agentId?: string, projectId?: string) =>
+  // createThread opens a session.
+  //
+  // ★ The project id goes with the request: a session belongs to a
+  //   project from the moment it is born, and it never moves.
+  // ★ The authorization mode goes with it for the same reason: a session
+  //   born in the mode the user picked is born in it — there is no window
+  //   in which it is in the default mode and a turn could run.
+  createThread: (
+    agentId?: string,
+    projectId?: string,
+    authorization?: { mode?: AuthorizationMode; confirmed?: boolean },
+  ) =>
     call<ThreadMeta>("/v2/sessions", {
       method: "POST",
-      // ★ The project id goes with the request: a session belongs to a
-      //   project from the moment it is born, and it never moves.
-      body: agentId || projectId ? JSON.stringify({ ...(agentId ? { agentId } : {}), ...(projectId ? { projectId } : {}) }) : undefined,
+      body:
+        agentId || projectId || authorization?.mode
+          ? JSON.stringify({
+              ...(agentId ? { agentId } : {}),
+              ...(projectId ? { projectId } : {}),
+              ...(authorization?.mode
+                ? {
+                    authorizationMode: authorization.mode,
+                    ...(authorization.confirmed ? { authorizationConfirmed: true } : {}),
+                  }
+                : {}),
+            })
+          : undefined,
     }),
 
   getThread: (id: string) => call<ThreadDetail>(sessionPath(id)),
@@ -393,6 +472,20 @@ export const api = {
       body: JSON.stringify({ agentId }),
     }),
 
+  // setAuthorizationMode changes the authorization mode of one session.
+  //
+  // ★ The server's answer is the truth: the client never writes the mode on
+  //   its own, and a refused change leaves the old one standing.
+  // ★ `confirm` is the second half of the full-authorization handshake — the
+  //   server answers 409 `confirmation_required` for `full` until the
+  //   request carries the confirmation, and only then does it remember that
+  //   this session confirmed it.
+  setAuthorizationMode: (id: string, mode: AuthorizationMode, confirm?: boolean) =>
+    call<ThreadMeta>(`${sessionPath(id)}/authorization`, {
+      method: "PATCH",
+      body: JSON.stringify(confirm ? { mode, confirm: true } : { mode }),
+    }),
+
   getMessages: (id: string) => call<MessagesView>(sessionPath(id, "/messages")),
 
   // listRuns scans the session's run ledger.
@@ -401,6 +494,21 @@ export const api = {
   //   The stream cannot say that: a broken connection says nothing about
   //   the run, because the run outlives the connection.
   listRuns: (id: string) => call<RunsView>(sessionPath(id, "/runs")),
+
+  // listOperations reads the session's operation log.
+  //
+  // ★ The log is the server's record of what happened to the session, and it
+  //   is read as a **tail**: `after` skips the lines the client already has,
+  //   and `limit` keeps the last n of what is left. ★ Both may be given at
+  //   once, and the answer is always in ascending order — the timeline is
+  //   read from the top down, like a log.
+  listOperations: (id: string, opts?: { after?: number; limit?: number }) => {
+    const query = new URLSearchParams()
+    if (opts?.after !== undefined) query.set("after", String(Math.trunc(opts.after)))
+    if (opts?.limit !== undefined) query.set("limit", String(Math.trunc(opts.limit)))
+    const suffix = query.toString()
+    return call<OperationsView>(sessionPath(id, "/operations") + (suffix ? `?${suffix}` : ""))
+  },
 
   abortRun: (id: string) => call<{ aborted: boolean }>(sessionPath(id, "/abort"), { method: "POST" }),
 

@@ -124,3 +124,27 @@ func TestThePromptFallsBackToTheConfiguredRoot(t *testing.T) {
 		t.Fatalf("the prompt must name the configured root:\n%s", in.Messages[0].Content)
 	}
 }
+
+// ★ The block a sub-agent gets is the **same text** the prompt carries.
+//
+// ★ Two renderings would be two answers to "where is the code", and the
+// second one is the one a model reads as the rule.
+func TestTheRoundBlockIsTheTextThePromptCarries(t *testing.T) {
+	c := InputConfig{ProjectRoot: "/default/root"}
+	ctx := fsx.WithProjectRoot(context.Background(), "/work/beta")
+
+	in, err := c.buildInput(ctx, inputParams{}, schema.UserMessage("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := c.RoundProjectRootBlock(ctx)
+	if block == "" {
+		t.Fatal("the round must name its directory")
+	}
+	if !strings.Contains(in.Messages[0].Content, block) {
+		t.Fatalf("the prompt must carry the block:\n%s", in.Messages[0].Content)
+	}
+	if strings.Contains(block, "/default/root") {
+		t.Fatalf("the block must not name the process's root:\n%s", block)
+	}
+}

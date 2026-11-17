@@ -181,10 +181,11 @@ func (rt *Runtime) makeOnAgentEvents(sess storage.Session, turn *Turn) func(cont
 		drained := make(chan struct{})
 
 		artifacts, err := emit.Derive(events, emit.Options{
-			RunID:     turn.RunID,
-			RootAgent: sess.AgentID(),
-			Contexts:  rt.contexts(),
-			Drained:   drained,
+			RunID:        turn.RunID,
+			RootAgent:    sess.AgentID(),
+			Contexts:     rt.contexts(),
+			ToolFailures: turn.toolFailures,
+			Drained:      drained,
 		}, turn.publisher, turn.abort)
 
 		// ★ The agent may still be winding down: the framework reads the

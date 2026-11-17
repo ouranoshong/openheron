@@ -414,6 +414,17 @@ Other `init` options:
 | `--dry-run` | Print what would be written, write nothing |
 | `--json` | Machine-readable output |
 
+★ `init` also creates the **default project root** (`<openheron-root>/projects/default`)
+— the directory a conversation that belongs to no project works in. The command prints
+the directory it created:
+
+```
+created /home/you/.openheron/projects/default (the default project root)
+```
+
+★ A **named** project root is not created for you: a typo must not grow an empty
+directory. ★ A `--dry-run` writes nothing — a directory included.
+
 ## 3. The roots: where your configuration, your state and your project live
 
 **Exactly three levels, no upward search**:
@@ -440,6 +451,10 @@ does not move when the configuration moves:
 
 - **The default level is created for you** when it does not exist — and the tree in it
   is written for you too, on the first start (§2.1).
+- ★ **The default project root is created for you too** — by the server when it starts,
+  and by `openheron init` when it lays the layout out. ★ A **named** project root
+  (`--default-project-root`, `$OPENHERON_DEFAULT_PROJECT_ROOT`) is never created for
+  you: a typo must not grow an empty directory.
 - The first two levels are **not** created when they point nowhere — a typo must not
   silently grow an empty configuration tree. Startup then reports
   `config: load <path>: ...`, which tells you where it went wrong.
@@ -1282,6 +1297,7 @@ In the interface:
 | **Message list** | Assistant replies, reasoning, tool-call cards, sub-agent output (with attribution) |
 | **Approval card** | Appears when your nod is needed: approve / deny (with an optional reason) |
 | **Tool card** | The arguments and result of each tool call |
+| **Tool group** | Calls that follow each other, gathered into one line; open it for the steps |
 | **Settings** | Entry point to the config editor |
 
 ★ The **theme switch** is in the header: light or dark. It follows your desktop until you
@@ -1733,6 +1749,65 @@ is where the next project would be created from.
 and the server's reason under the form. The reason is the server's own
 sentence: the server owns the rules, so the client keeps no second copy of
 them.
+
+### 6.12 The authorization mode
+
+Under the input box, next to the project button, there is a **shield** that
+says which approval level this conversation runs at:
+
+| Level | What it says | What it means |
+|---|---|---|
+| `Default approval` | Tools ask before they run | The configuration decides (§4.3): every `ask`-tier tool stops and waits for you |
+| `Trusted paths` | Writes inside the project, the session workspace and the configuration do not ask | A write that lands inside one of those three directories runs without stopping |
+| `Full authorization` | Every tool runs without asking | Nothing asks any more — including the shell and configuration changes |
+
+★ **The mode never gives the agent new tools.** It only answers "does this
+call need a human decision?". Which tools an agent may use at all is decided
+by the agent's own `tools:` list (§4.1) — a level above `Default approval`
+cannot conjure a tool the agent was not given.
+
+★ **The trusted paths are three directories, and they are yours:**
+
+- the **project directory** the conversation works in (§3.1);
+- the conversation's own **upload folder**, where the files you attached live;
+- the **configuration directory** (§3).
+
+★ **The shell still asks in the middle level.** A shell command can write
+anywhere, so "inside a trusted path" is not a question a command line can
+answer — only `Full authorization` stops asking about it.
+
+★ **Configuration changes are still checked.** In the middle level the
+configuration directory is a trusted path, so a write there does not stop for
+your approval — but the configuration's own checks all still run: the file has
+to parse, the tree has to keep loading, and a working agent may not vanish
+because of the change (§4.9).
+
+★ **Switching to `Full authorization` asks you once.** The interface says
+plainly what that level means, and only then does the switch go through.
+★ **Once per conversation**: switching away and back does not ask a second
+time, but a **new** conversation asks again. The server keeps that fact, so a
+second window on the same conversation does not ask either.
+
+★ **A running turn keeps the level it started with.** You may change the
+level while a turn is running — a change takes effect on the **next** turn,
+and the mode dialog says so, so it cannot look as if it had already taken
+effect.
+
+★ **The level belongs to the conversation, not to you.** A new conversation
+starts at `Default approval` unless you pick another level on the welcome
+page; the configuration tree is unchanged by any of this, and the same
+configuration gives two conversations two different behaviour.
+
+★ **You can pick the level before the conversation starts.** The welcome page
+has the shield too: the level you choose there is the level the conversation
+is **born** in, and its first turn already runs under it. Choosing
+`Full authorization` there asks you the same question an open conversation
+asks — and the server still checks your answer when the conversation is
+created.
+
+★ **What the level was, stays in the record.** Each round's ledger row records
+the level it ran under, so afterwards you can tell which rounds ran without
+anyone watching.
 
 ## 7. The knowledge base
 

@@ -73,6 +73,6 @@ func specTable(policy Policy, agentSpec decl.SubAgentSpec) *Table {
 	return newTable(agentSpec.ID, agentSpec.Tools, agentSpec.MCPServers)
 }
 
-func subHandlers(policy Policy, agentSpec decl.SubAgentSpec, maxDepth int) []adk.TypedChatModelAgentMiddleware[*schema.Message] {
-	return toolChain(newBoundary(policy, specTable(policy, agentSpec)), maxDepth)
+func subHandlers(policy Policy, agentSpec decl.SubAgentSpec, maxDepth int, sc scope) []adk.TypedChatModelAgentMiddleware[*schema.Message] {
+	return toolChain(newBoundary(policy, specTable(policy, agentSpec), sc), maxDepth)
 }

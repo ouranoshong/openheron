@@ -22,7 +22,9 @@ import (
 	"github.com/ouranoshong/openheron/message"
 	"github.com/ouranoshong/openheron/storage"
 
+	"github.com/ouranoshong/openheron/agentkit/authz"
 	"github.com/ouranoshong/openheron/agentkit/fsx"
+	"github.com/ouranoshong/openheron/helpers"
 )
 
 // DefaultStartTimeout bounds how long a caller waits for a turn to become
@@ -391,7 +393,16 @@ func (rt *Runtime) openRunRow(ctx context.Context, sess storage.Session, turn *T
 	if err := ledger.Append(ctx, row); err != nil {
 		return nil, fmt.Errorf("write the run row: %w", err)
 	}
-	return newRunRow(ledger, row, rt.log), nil
+	// ★ The round exists: the ledger's first row is on disk. ★ The timeline
+	//   says so, and it says what kind of round it is — the two names are
+	//   different things, so they are different fields.
+	rt.recordOperation(sess, storage.Operation{
+		Kind:     storage.OpRunStarted,
+		Actor:    storage.ActorSystem,
+		RunID:    turn.RunID,
+		TurnKind: kind.String(),
+	})
+	return newRunRow(ledger, sess.Operations(), row, rt.log), nil
 }
 
 // releaseClaim gives the slot back when a claimed turn cannot start.
@@ -459,6 +470,31 @@ func (rt *Runtime) runClaimedTurn(ctx context.Context, sess storage.Session, tur
 	//   lives) and the tools (the write boundary). ★ The context is built
 	//   with WithoutCancel, so it **keeps the values** it was given.
 	runCtx = fsx.WithProjectRoot(runCtx, rt.projectRootOf(runCtx, sess.ID()))
+
+	// ★ The authorization mode travels the same way, and it is read **here**
+	// too: the round keeps the mode it began with, the way it keeps the
+	// root it began with. A mode the user changes mid-round applies to the
+	// **next** round.
+	//
+	// ★ The session's own workspace comes with it: it is one of the trusted
+	// paths, and it belongs to the session — not to the process.
+	//
+	// ★ One read, two destinations: the context decides whether a call asks,
+	//   and the ledger row records what the round actually ran under. Two
+	//   reads could disagree — the user may switch the mode between them —
+	//   and then the row would say something the round did not do.
+	mode := sess.AuthorizationMode()
+	runCtx = authz.WithMode(runCtx, mode)
+	runCtx = authz.WithSessionWorkspace(runCtx, sess.Workspace())
+	turn.runRow().noteAuthorizationMode(mode)
+
+	// ★ The tool failures of this round travel in the context too, and for
+	//   the same reason: the context is the only channel that reaches a
+	//   tool call, and the tool call is the only layer that knows a call
+	//   failed. ★ The collector is the round's — the derivation reads the
+	//   same one, so the failure the model was told about and the failure
+	//   the interface is told about are one fact.
+	runCtx = helpers.WithToolFailures(runCtx, turn.toolFailures)
 
 	rt.startLoop(runCtx, sess.ID(), turn, loop, cancel)
 
@@ -725,6 +761,19 @@ func (rt *Runtime) recordDecisions(sess storage.Session, pending *storage.Pendin
 	}
 	if err := sess.RecordDecision(recs...); err != nil {
 		rt.logf("session=%s failed to record the approval decisions: %v", sess.ID(), err)
+		return
+	}
+	// ★ The decision is on disk now, so the timeline says so. ★ The actor is
+	//   the **person**: the runtime writes the line, but a human answered.
+	for _, rec := range recs {
+		approved := rec.Approved
+		rt.recordOperation(sess, storage.Operation{
+			Kind:        storage.OpApprovalResolved,
+			Actor:       storage.ActorUser,
+			InterruptID: rec.InterruptID,
+			ToolName:    rec.ToolName,
+			Approved:    &approved,
+		})
 	}
 }
 

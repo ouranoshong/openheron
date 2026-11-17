@@ -71,9 +71,9 @@ func newTestBuilder(t *testing.T) *Builder {
 	return newTestBuilderWithConfig(t, minimalTestConfig())
 }
 
-func newTestBuilderWithConfig(t *testing.T, cfg *spec.Config) *Builder {
+func newTestBuilderWithConfig(t *testing.T, cfg *spec.Config, opts ...Option) *Builder {
 	t.Helper()
-	b := NewBuilder(testManager(cfg))
+	b := NewBuilder(testManager(cfg), opts...)
 	b.models = func(context.Context, *spec.Config, string, CallIntent, *slog.Logger) (
 		model.BaseModel[*schema.Message], error) {
 

@@ -50,7 +50,10 @@ type node struct {
 	depth     int
 	root      bool
 	backend   fsapi.Backend
-	model     model.BaseModel[*schema.Message]
+	// scope answers "is this write inside a trusted path?" for the trusted
+	// authorization mode.
+	scope scope
+	model model.BaseModel[*schema.Message]
 }
 
 func (b *Builder) buildNode(ctx context.Context, snap *snapshot, n node) (
@@ -109,11 +112,18 @@ func (b *Builder) buildNode(ctx context.Context, snap *snapshot, n node) (
 		if err != nil {
 			return nil, nil, err
 		}
-		boundary := newBoundary(snap.agentSpec.policy, n.table)
+		sc := n.scope
+		boundary := newBoundary(snap.agentSpec.policy, n.table, sc)
 		cfg.Handlers = append(handlers, toolChain(boundary, snap.agentSpec.maxDepth)...)
 		hubs.agent.bindRoot(cfg)
 	} else if sp != nil {
-		cfg.Handlers = subHandlers(snap.agentSpec.policy, *sp, snap.agentSpec.maxDepth)
+		cfg.Handlers = subHandlers(snap.agentSpec.policy, *sp, snap.agentSpec.maxDepth, n.scope)
+		// ★ The sub-agent does not see the round prompt: the framework hands
+		//   it the request and nothing else. ★ The block gives it the
+		//   directory the round works in — the same one the prompt names.
+		if b.roundBlock != nil {
+			cfg.Handlers = append(cfg.Handlers, newRoundBlockMiddleware(b.roundBlock))
+		}
 	}
 
 	// The compaction middleware goes on every agent that declares a
@@ -167,11 +177,31 @@ func (b *Builder) assemble(ctx context.Context, snap *snapshot,
 		depth:     0,
 		root:      true,
 		backend:   heavy.backend,
+		scope:     trustedScope(snap, heavy),
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("build agent %q: %w", entrySp.ID, err)
 	}
 	return agent, mdl, nil
+}
+
+// trustedScope assembles the scope the trusted mode asks.
+//
+// ★ The three trusted paths are the code's own facts: the round's project
+//
+//	root and the session's workspace travel in the context, and the
+//	configuration root is the process's own — it is known here, where the
+//	configuration service is.
+//
+// ★ The MCP writers come from the configuration, so the answer is available
+//
+//	before any server is up: the gate's lookup never waits for a connection.
+func trustedScope(snap *snapshot, heavy heavyDeps) scope {
+	sc := scope{local: heavy.local, trustedWriters: mcpTrustedWriteNames(snap.cfg.MCPs)}
+	if snap.svc != nil {
+		sc.configRoot = snap.svc.Root()
+	}
+	return sc
 }
 
 func (b *Builder) skillHandlers(ctx context.Context, backend fsapi.Backend, hubs *skillHubs,

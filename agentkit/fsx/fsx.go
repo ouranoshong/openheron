@@ -304,12 +304,25 @@ func (s *Local) writeRoots(ctx context.Context) []string {
 //
 //	session works in, and the backend's own root is the fallback for a
 //	context that carries none.
+//
+// ★ The roots are the backend's own write roots. The question "is this path
+//
+//	inside **that** directory" is asked with InsideRoot instead.
 func (s *Local) resolveWrite(ctx context.Context, p string) (string, error) {
+	return s.resolveInside(ctx, p, s.writeRoots(ctx))
+}
+
+// resolveInside resolves p and verifies that it lands inside one of roots.
+//
+// ★ It is the one walk: the containment check and the ancestor walk that
+//
+//	catches a symlinked directory. Every boundary question goes through it,
+//	so two callers cannot get two answers.
+func (s *Local) resolveInside(ctx context.Context, p string, roots []string) (string, error) {
 	abs, err := s.resolve(ctx, p)
 	if err != nil {
 		return "", err
 	}
-	roots := s.writeRoots(ctx)
 	if !insideRoots(roots, abs) {
 		return "", fmt.Errorf("path %q is outside the project root %q", abs, s.base(ctx))
 	}
@@ -328,6 +341,43 @@ func (s *Local) resolveWrite(ctx context.Context, p string) (string, error) {
 			return abs, nil
 		}
 	}
+}
+
+// AbsolutePath turns a request path into the absolute path this round would
+// use.
+//
+// ★ A relative path is relative to the **round's** root, not to the process's
+//
+//	working directory: the model is told to pass absolute paths, and when it
+//	does not, the directory the session works in is the only sensible base.
+func (s *Local) AbsolutePath(ctx context.Context, p string) (string, error) {
+	return s.resolve(ctx, p)
+}
+
+// InsideRoot reports whether the absolute path abs lands inside dir.
+//
+// ★ It is the same boundary resolveWrite enforces, asked for one root: the
+//
+//	same resolution and the same ancestor walk decide it. ★ The path must be
+//	absolute — a relative one has no single base, and guessing one would
+//	answer a different question than the caller asked.
+//
+// ★ The answer is a **boolean**, not an error: the caller asks "may this
+//
+//	write happen without asking", and a path it cannot vouch for is a path
+//	that asks.
+func (s *Local) InsideRoot(ctx context.Context, dir, abs string) bool {
+	dir = strings.TrimSpace(dir)
+	abs = strings.TrimSpace(abs)
+	if dir == "" || abs == "" || !filepath.IsAbs(abs) {
+		return false
+	}
+	root, err := canonical(dir)
+	if err != nil {
+		return false
+	}
+	_, err = s.resolveInside(ctx, abs, []string{root})
+	return err == nil
 }
 
 // insideRoots says whether a path is inside one of the roots.

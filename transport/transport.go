@@ -173,6 +173,8 @@ func (r *renderer) render(ev contract.RunEvent) {
 		r.emitToolEnd(ev.ToolID, ev.Sub)
 	case contract.RunEventToolResult:
 		r.emitToolResult(ev.Text, ev.ToolID, ev.Sub)
+	case contract.RunEventToolFailed:
+		r.emitToolFailed(ev)
 	case contract.RunEventAnnounce:
 		r.announce(ev.MsgID, ev.Role, ev.Owner)
 	case contract.RunEventCompaction:
@@ -445,4 +447,23 @@ func (r *renderer) emitToolResult(content, callID, sub string) {
 	ev := events.NewToolCallResultEvent(uuid.NewString(), callID, content)
 	ev.SubagentRunID = sub
 	r.emit(ev)
+}
+
+// emitToolFailed publishes that a tool call failed.
+//
+// ★ It is a **custom** frame: the upstream's tool result frame carries the
+//
+//	content and nothing else, and the content says what the **model** read —
+//	not what happened to the call. ★ The call id rides along, so the client
+//	can join the failure with the call it belongs to, and the error text
+//	travels with it so the interface can say why.
+func (r *renderer) emitToolFailed(ev contract.RunEvent) {
+	value := map[string]any{
+		"tool_call_id": ev.ToolID,
+		"error":        ev.Text,
+	}
+	if ev.ToolName != "" {
+		value["tool_name"] = ev.ToolName
+	}
+	r.emit(events.NewCustomEvent("tool_failed", events.WithValue(value)))
 }

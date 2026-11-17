@@ -26,6 +26,11 @@ func initEnv(t *testing.T) string {
 	t.Setenv(spec.RootEnv, filepath.Join(root, "base"))
 	t.Setenv(spec.ConfigRootEnv, "")
 	t.Setenv(spec.ConfigDirEnv, "")
+	// ★ The project root names are cleared too: the machine the tests run on
+	//   may have one of them set, and the command would then work somewhere
+	//   else than the temporary directory.
+	t.Setenv(spec.DefaultProjectRootEnv, "")
+	t.Setenv(spec.ProjectRootEnv, "")
 	return filepath.Join(root, "configs")
 }
 
@@ -111,6 +116,54 @@ func TestInitDryRunWritesNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); err == nil {
 		t.Fatal("a dry run must not create anything")
+	}
+	// ★ The default project root is a directory, and a dry run writes
+	//   nothing — a directory included.
+	if _, err := os.Stat(defaultProjectRootOf(t)); err == nil {
+		t.Fatal("a dry run must not create the default project root")
+	}
+}
+
+// defaultProjectRootOf returns the default project root the command would
+// create: the openheron root the test named, plus the two path segments.
+func defaultProjectRootOf(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(os.Getenv(spec.RootEnv), spec.DefaultProjectsDirName, "default")
+}
+
+// ★ The default project root is part of the layout the command lays out: it
+//
+//	is where a session that belongs to no project does its work, and a
+//	command that cannot chdir into it never starts.
+func TestInitCreatesTheDefaultProjectRoot(t *testing.T) {
+	dir := initEnv(t)
+	var buf bytes.Buffer
+	if err := initCmd([]string{"--config-root", dir}, &buf); err != nil {
+		t.Fatalf("initCmd: %v", err)
+	}
+	root := defaultProjectRootOf(t)
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("the default project root must exist: %v", err)
+	}
+	if !strings.Contains(buf.String(), root) {
+		t.Fatalf("the output must name the directory it created:\n%s", buf.String())
+	}
+}
+
+// ★ A **named** project root is the user's directory: making it for them
+//
+//	would hide a typo, so the command leaves it alone.
+func TestInitDoesNotCreateANamedProjectRoot(t *testing.T) {
+	dir := initEnv(t)
+	named := filepath.Join(t.TempDir(), "named")
+	t.Setenv(spec.DefaultProjectRootEnv, named)
+
+	var buf bytes.Buffer
+	if err := initCmd([]string{"--config-root", dir}, &buf); err != nil {
+		t.Fatalf("initCmd: %v", err)
+	}
+	if _, err := os.Stat(named); err == nil {
+		t.Fatal("a named project root must not be created")
 	}
 }
 

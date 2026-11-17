@@ -27,21 +27,21 @@
 
 | # | 目标 | 可验证判据 |
 |---|---|---|
-| 1 | **一个**配置根 | 任一时刻只有一份配置生效，没有继承链（`agentkit/spec/config.go:425`） |
-| 2 | 按功能分区 | 新增一类配置不改已有文件布局（`agentkit/spec/config.go:59-104`） |
-| 3 | 「配了没用」必须可见 | 未知字段报错；认识但未兑现的键进 `deferred` 并**强制打印**（`agentkit/spec/config.go:203`、`main.go:437-439`） |
+| 1 | **一个**配置根 | 任一时刻只有一份配置生效，没有继承链（`agentkit/spec/config.go:628-638`） |
+| 2 | 按功能分区 | 新增一类配置不改已有文件布局（`agentkit/spec/config.go:61-106`） |
+| 3 | 「配了没用」必须可见 | 未知字段报错；认识但未兑现的键进 `deferred` 并**强制打印**（`agentkit/spec/config.go:261-272`、`main.go:574-576`） |
 | 4 | 密钥不入库 | ★ 档案**不写密钥** —— 密钥的**位置**由 provider 的名字推导（`agentkit/spec/secret.go:68-132`），值在环境变量或钥匙串里；`api_key` 这一行**已退休**，加载器拒绝它（`agentkit/spec/load.go:44-52`） |
 | 5 | 配置层零新增依赖 | `agentkit/spec` 只用已在缓存的 `gopkg.in/yaml.v3 v3.0.1`（`go.mod:27`）—— ★ **唯一的例外是密钥后端**：`github.com/zalando/go-keyring v0.2.8`（`go.mod:22`），它是一个显式的、被点名的例外（见 `docs/secrets-design.md`） |
 
 ### 非目标
 
-- ❌ **配置根不做上溯搜索。** 这条规则写在 `NewService` 的文档注释里（`agentkit/spec/config.go:412-424`）。
+- ❌ **配置根不做上溯搜索。** 这条规则写在 `NewService` 的文档注释里（`agentkit/spec/config.go:616-644`）。
 - ❌ **没有家目录那一层。** `~/.openheron` 永远不会被自动认领 —— 若它存在而不在用，运行时会把话说明白，
-  请你显式指名（`main.go:131-147`）。
+  请你显式指名（`main.go:126-131`）。
 - ❌ **不让配置承载密钥本体。** ★ 加载器**拒绝**任何 `api_key` 行（`agentkit/spec/load.go:44-52`）——
   密钥的位置由**名字**推导（`agentkit/spec/secret.go:68-132`），配置文件里没有它的位置，也就没有它可以写错的地方。
 - ❌ **不做字段级合并。** 只有一份配置，没有「谁覆盖谁」；字段级合并让配置来源不可辨。
-- ❌ **不让 `server/` 参与热更新。** 它配的是进程自身，改了要重启（`agentkit/spec/config.go:71-74`）。
+- ❌ **不让 `server/` 参与热更新。** 它配的是进程自身，改了要重启（`agentkit/spec/config.go:73-76`）。
 
 ## 2. 目录布局
 
@@ -56,11 +56,11 @@
 └─ state/                    ← runtime data, never committed
 ```
 
-分区清单住在**一处**：`Categories`（`agentkit/spec/config.go:59-104`），每个分区带一个 `hot` 标志。
+分区清单住在**一处**：`Categories`（`agentkit/spec/config.go:61-106`），每个分区带一个 `hot` 标志。
 
 | 目录 | 类别常量 | 可编辑 | 热 | 内容 |
 |---|---|---|---|---|
-| `agents/` | `spec.DirAgent`（`agentkit/spec/config.go:19`） | ✅ | ✅ | 每个 Agent 一个 `.md` |
+| `agents/` | `spec.DirAgent`（`agentkit/spec/config.go:21`） | ✅ | ✅ | 每个 Agent 一个 `.md` |
 | `llm/` | `spec.DirLLM`（`:20`） | ✅ | ✅ | 每个厂商一个 `.yaml` |
 | `tools/` | `spec.DirTools`（`:24`） | ✅ | ✅ | 一个工具一个 `.yaml`（外加知识库） |
 | `mcps/` | `spec.DirMCP`（`:26`） | ✅ | ✅ | 一个 MCP server 一个 `.yaml` |
@@ -72,18 +72,18 @@
 
 ★ **没有 `policy/` 分区。** 那个分区退役了：档位住在**提供**工具的那些文件里，而上限住在
 `server/config.yaml`（§6.2、§5.5）。一份仍然带着这个目录的配置**不会被读**，但它**也不沉默**：加载器把
-这个退役分区记进 `deferred`，并说明它的内容去了哪儿（`agentkit/spec/config.go:603-609` 的
-`retiredDirs`、`:618-627` 的 `noteRetiredDirs`）。
+这个退役分区记进 `deferred`，并说明它的内容去了哪儿（`agentkit/spec/config.go:1024-1030` 的
+`retiredDirs`、`:1040-1049` 的 `noteRetiredDirs`）。
 
-空的子目录**不自动创建**：目录不存在就当「没有东西可加载」（`agentkit/spec/config.go:669-672`）。
-★ **配置根本身是例外** —— 缺省的那份根不存在时会被建出来（`agentkit/spec/config.go:451-458`），
+空的子目录**不自动创建**：目录不存在就当「没有东西可加载」（`agentkit/spec/config.go:1090-1093`）。
+★ **配置根本身是例外** —— 缺省的那份根不存在时会被建出来（`agentkit/spec/config.go:708-715`），
 因为「还没有配置」和「目录不在」本来就是同一件事。
 
 ★ **没有 `.config.lock`。** 配置编辑器走的是**内容哈希的乐观并发**：`Revision` 是文件 SHA-256 的前八位
 十六进制（`agentkit/spec/write.go:381`），带着过期 `baseRevision` 的写入会被判为冲突
-（`agentkit/spec/write.go:894-911`）。
+（`agentkit/spec/write.go:969-986`）。
 
-`state/` 取代了旧的 `DATA_DIR=./data`，由 `Service.DataDir` 创建（`agentkit/spec/config.go:784-796`）：
+`state/` 取代了旧的 `DATA_DIR=./data`，由 `Service.DataDir` 创建（`agentkit/spec/config.go:905-919`）：
 
 ```
 <openheron-root>/state/
@@ -99,9 +99,9 @@
 ★ **`state/` 里不落日志。** 运行日志落在**大本营**下 —— 代码缺省是**只走标准错误**（`log.file`
 为空串），而**出厂模板给的是 `logs/openheron.log`**（`server/config.yaml` 的 `log.file`），所以
 新项目开箱就有一份落盘的日志。路径相对**大本营**解析，打不开文件只告警、不阻止启动
-（`agentkit/spec/config.go:806-818` 的 `Service.LogFile`；见 `docs/runtime-design.md` §4.3）。
+（`agentkit/spec/config.go:921-941` 的 `Service.LogFile`；见 `docs/runtime-design.md` §4.3）。
 ★ 出厂模板的 `log.console` 是 `false` —— **日志进文件**：配置读出、文件打开之后，
-标准错误就安静了（`main.go:448`）。★ **只有一行不走这条路**：服务地址那一行仍然落在
+标准错误就安静了（`main.go:449`）。★ **只有一行不走这条路**：服务地址那一行仍然落在
 终端上（`docs/runtime-design.md` §4.4）。
 ★ 于是 `logs/` 与 `state/` 是同一类东西 —— **运行数据**，进版本库之前要把它排掉。
 ★ 而它们与大本营是**分开的**：配置可以搬走，历史不会跟着搬走。
@@ -142,7 +142,7 @@ llm/*.local.yaml
 `duckduckgo_search` / `wikipedia_search`，而没有 provider 提供的名字会被当成笔误报出来；想留下它就加
 `--no-tools`。★ **没有 `policy/` 这一段 —— 那个分区已经没了。**
 ★ **`--dir` 退役了**：它指的是**项目**目录，而 `init` 写的是**配置根** —— 两个不同的目录，
-拿旧名字当新名字会把配置写到没人要求的地方（`initcmd.go:44-50`）。
+拿旧名字当新名字会把配置写到没人要求的地方（`initcmd.go:30-39`）。
 
 ★ **服务端第一次启动时写的是同一棵树。** 缺省根下没有 `agents/main.md` 时，它在装载配置之前先把
 出厂树写出来（`main.go:284-309` 的 `initConfigIfEmpty`），用的就是上面那份计划 —— 所以
@@ -166,33 +166,39 @@ llm/*.local.yaml
      ↓ unset
    $OPENHERON_CONFIG_ROOT            agentkit/spec/config.go:146
      ↓ unset
-   <openheron-root>/configs          agentkit/spec/config.go:670, created when missing
+   <openheron-root>/configs          agentkit/spec/config.go:696, created when missing
 
 ③ resolve the default project root
    --default-project-root            main.go:130
      ↓ unset
    $OPENHERON_DEFAULT_PROJECT_ROOT   agentkit/spec/config.go:151
      ↓ unset
-   <openheron-root>/projects/default agentkit/spec/config.go:685
+   <openheron-root>/projects/default agentkit/spec/config.go:766, created when missing
 ```
 
-实现在 `agentkit/spec/config.go:599-695` 的 `NewService`，而它的文档注释（`:573-597`）写明了为什么
+实现在 `agentkit/spec/config.go:645-725` 的 `NewService`，而它的文档注释（`:616-644`）写明了为什么
 **不向上查找祖先目录**：探测让生效的配置根取决于工作目录，于是同一条命令换个目录跑就会读到另一份
 配置，测试实例也会读到开发者自己的配置。★ 差别在代码的形状上就看得见：`NewService`
-（`agentkit/spec/config.go:599-701`）是**三个**分支、**没有循环**。
+（`agentkit/spec/config.go:645-725`）是**三个**分支、**没有循环**。
 
-★ **只有默认出来的那个根才会被创建**（`agentkit/spec/config.go:679-685`）：`--config-root` 或
+★ **只有默认出来的那个根才会被创建**（`agentkit/spec/config.go:708-715`）：`--config-root` 或
 `$OPENHERON_CONFIG_ROOT` 指向一个不存在的地方是用户笔误，它不能变成一棵悄悄空着的配置树。
-`Service.RootIsDefaulted`（`agentkit/spec/config.go:757`）就是为了把两者分开 ——
-`main.go:254-265` 给出的是 "no configuration at <root>: run `openheron init` to create one"，
+`Service.RootIsDefaulted`（`agentkit/spec/config.go:880`）就是为了把两者分开 ——
+`main.go:255-263` 给出的是 "no configuration at <root>: run `openheron init` to create one"，
 而不是 "agents/main.md does not exist"。★ **还有第二个入口，给 `init` 用**：`openheron init` 走
-`spec.NewServiceAt`（`agentkit/spec/config.go:704-726`），从不读环境变量 —— 否则 init
+`spec.NewServiceAt`（`agentkit/spec/config.go:827-849`），从不读环境变量 —— 否则 init
 会把新配置写到用户没指的地方去。
+
+★ **默认项目根也是「缺省就建、点名就不建」**，而且**建它的有两处**：服务端启动时
+（`agentkit/spec/config.go:674-678`）与 `openheron init`（`initcmd.go:56-69`）。
+★ 只建一处，就成了「有的机器上有这个目录、有的没有」—— 两处走的是同一份解析
+（`agentkit/spec/config.go:741-774` 的 `resolveDefaultProjectRoot`），所以它们指的是同一个目录。
+★ `openheron init --dry-run` 什么都不写，目录也不写。
 
 ★ **旧名字仍然生效，而且会被点名。** `$OPENHERON_CONFIG_DIR`、`$PROJECT_ROOT`、`$DATA_DIR`、
 `$LISTEN_ADDR`、`$STATIC_DIR`、`$FRONTEND_MODE` 与 `--project-root` 都是旧名；
-读到了会记一条 notice（`Service.Notices`，`agentkit/spec/config.go:744`），由组合根打出来
-（`main.go:517-519`）。★ `--config-dir` 不在其中：它不是服务端的 flag，只有 `openheron secret`
+读到了会记一条 notice（`Service.Notices`，`agentkit/spec/config.go:867`），由组合根打出来
+（`main.go:523-525`）。★ `--config-dir` 不在其中：它不是服务端的 flag，只有 `openheron secret`
 与 `openheron kb` 收它，而且**不点名**。★ 环境变量常写在 shell profile 或 CI 的 env 块里，
 **静默失效最难查** —— 用户以为改了端口，其实没改。
 
@@ -213,12 +219,12 @@ llm/*.local.yaml
 
 | 方法 | 值 | 用途 |
 |---|---|---|
-| `Service.Root()`（`agentkit/spec/config.go:728`） | 配置根本身 —— 默认是 `<大本营>/configs` | 读配置；`skills/` 住在它下面 |
-| `Service.Home()`（`:735`） | 大本营 —— `--openheron-root`，否则 `$OPENHERON_ROOT`，否则 `~/.openheron` | `state/` 与 `logs/` 的基准 |
-| `Service.DefaultProjectRoot()`（`:766`） | 默认项目根 —— `--default-project-root`，否则 `$OPENHERON_DEFAULT_PROJECT_ROOT`，否则 `<大本营>/projects/default` | agent 的工作目录；相对路径的解析基准 |
-| `Service.DataDir(v)`（`:784`） | `v` 是绝对路径就原样返回，否则落在**大本营**下；不存在则创建 | 会话与 checkpoint |
-| `Service.LogFile(v)`（`:806`） | 同上，相对**大本营** | 日志文件 |
-| `Service.ResolveDir(v)`（`:826`） | `v` 是绝对路径就原样返回，否则落在**项目根**下 | `static_dir`、知识库语料 |
+| `Service.Root()`（`agentkit/spec/config.go:851`） | 配置根本身 —— 默认是 `<大本营>/configs` | 读配置；`skills/` 住在它下面 |
+| `Service.Home()`（`:858`） | 大本营 —— `--openheron-root`，否则 `$OPENHERON_ROOT`，否则 `~/.openheron` | `state/` 与 `logs/` 的基准 |
+| `Service.DefaultProjectRoot()`（`:889`） | 默认项目根 —— `--default-project-root`，否则 `$OPENHERON_DEFAULT_PROJECT_ROOT`，否则 `<大本营>/projects/default` | agent 的工作目录；相对路径的解析基准 |
+| `Service.DataDir(v)`（`:907`） | `v` 是绝对路径就原样返回，否则落在**大本营**下；不存在则创建 | 会话与 checkpoint |
+| `Service.LogFile(v)`（`:929`） | 同上，相对**大本营** | 日志文件 |
+| `Service.ResolveDir(v)`（`:949`） | `v` 是绝对路径就原样返回，否则落在**项目根**下 | `static_dir`、知识库语料 |
 
 ★ **它们是解耦的。** `--config-root /etc/openheron-cfg` 把配置放到别处，而默认项目根仍然是
 agent 干活的地方。不解耦的话，「配置根的父目录」就会变成 `/etc` —— agent 去那儿 grep/glob。
@@ -227,7 +233,7 @@ agent 干活的地方。不解耦的话，「配置根的父目录」就会变�
 `web/dist` 找资源 → **403/404**；agent 被告知「项目根 = 配置根」→ 在错误目录里 grep/glob。
 
 ★ **大本营没有被点名时，配置根住在项目根里。** `spec.NewService` 不带 `WithHome`
-（`agentkit/spec/config.go:562-568`）时，`Service.base()`（`:775`）回落到配置根本身 —— 于是**旧布局
+（`agentkit/spec/config.go:572-578`）时，`Service.base()`（`:898`）回落到配置根本身 —— 于是**旧布局
 原样保留**：库的调用者不会因为打开了一份配置就在用户主目录里长出一个目录。
 
 ### 3.2 相对路径的解析基准
@@ -236,9 +242,9 @@ agent 干活的地方。不解耦的话，「配置根的父目录」就会变�
 
 | 路径 | 基准 | 代码 |
 |---|---|---|
-| `server.data_dir`（相对） | **大本营** | `agentkit/spec/config.go:786-788` |
-| `server.log.file`（相对） | **大本营** | `agentkit/spec/config.go:808-810` |
-| `server.static_dir`（相对） | **项目根** | `agentkit/spec/config.go:826-832`，用在 `main.go:774` |
+| `server.data_dir`（相对） | **大本营** | `agentkit/spec/config.go:905-919` |
+| `server.log.file`（相对） | **大本营** | `agentkit/spec/config.go:921-941` |
+| `server.static_dir`（相对） | **项目根** | `agentkit/spec/config.go:949-955`，用在 `main.go:835` |
 | `kb.corpus_dir`（相对） | **项目根** | `agentkit/spec/load.go:1045-1048` |
 
 ★ **这个划分是刻意的：状态跟着大本营走，工作树跟着项目走。** 相对的 `data_dir` 在配置被搬走时
@@ -257,7 +263,7 @@ agent 干活的地方。不解耦的话，「配置根的父目录」就会变�
 
 ★ **端口与状态必须一起隔离。** 换个端口不等于数据隔离：openheron 把会话写在大本营下的 `state/`，
 测试写在那里就污染了真实历史。测试实例是**点名**自己的配置根的，而配置根**从不上溯**
-（`agentkit/spec/config.go:573-597`），所以仓库根那个 `.openheron/` **结构上就够不着** —— 隔离靠的不是
+（`agentkit/spec/config.go:619-643`），所以仓库根那个 `.openheron/` **结构上就够不着** —— 隔离靠的不是
 「一次恰好停在那里的探测」，而是一个被点名的根。
 
 ★ **配置根是预置出来的，不是探测出来的。** 脚本会创建 `$TEST_ROOT/configs/` 与
@@ -287,9 +293,9 @@ environment variables        highest
 ### 4.1 缺省值靠「预填充结构体再 decode」
 
 加载器先用内置缺省值**预填充**配置结构体，再把每个文件 decode 到它上面
-（`agentkit/spec/config.go:861-891` 的 `loadOnly`）：`server/` 段从 `defaultServer()` 起步
-（`agentkit/spec/config.go:570`，定义在 `agentkit/spec/defaults.go:57-75`），知识库从
-`defaultKB()` 起步（`agentkit/spec/config.go:571`，定义在 `agentkit/spec/defaults.go:48-55`）。
+（`agentkit/spec/config.go:984-1014` 的 `loadOnly`）：`server/` 段从 `defaultServer()` 起步
+（`agentkit/spec/config.go:990`，定义在 `agentkit/spec/defaults.go:57-75`），知识库从
+`defaultKB()` 起步（`agentkit/spec/config.go:991`，定义在 `agentkit/spec/defaults.go:48-55`）。
 
 ★ 没有第三份预填充：档位表**不再**是一个配置段 —— 它由提供工具的那些文件装配而成（§6.2）。
 `loadServer` 是 decode 到预填充结构体的一份**副本**上（`agentkit/spec/load.go:140-144`），于是
@@ -301,7 +307,7 @@ environment variables        highest
 
 ### 4.2 严格模式
 
-每个分区都走同一个严格解码器（`agentkit/spec/config.go:740-748`）：
+每个分区都走同一个严格解码器（`agentkit/spec/config.go:1161-1171`）：
 
 ```go
 func decodeStrict(data []byte, v any) error {
@@ -322,7 +328,7 @@ func decodeStrict(data []byte, v any) error {
 
 ★ **空文档不是解析错误。** 解码器把一份没有 YAML 的文件报成 `io.EOF` —— 这话是真的，却毫无用处：
 「EOF」没告诉用户该做什么。openheron 把它换成 `ErrEmptyDocument`（「the file is empty (or contains
-only comments)」，`agentkit/spec/config.go:738`），因为「只有注释的模板」是一种真实存在的文件形状：
+only comments)」，`agentkit/spec/config.go:1159`），因为「只有注释的模板」是一种真实存在的文件形状：
 照着模板建出来的 `tools/` 文件根本没有文档（`agentkit/spec/load.go:255-261` 的 `decodeTool`）。
 
 ### 4.3 「配了没用」的三种形态
@@ -333,8 +339,8 @@ only comments)」，`agentkit/spec/config.go:738`），因为「只有注释的�
 | **认识但本版不兑现** | 进 `deferred[]`，**启动必须逐条打印** | `models[].summarize_at` 仍会被解析，但不再被读 —— 阈值归 agent 管 |
 | **认识但此刻缺运行期前提** | 同上，且**不阻塞启动** | provider 的密钥没有着落 —— 请求该端点时才 401 |
 
-`Config.Deferred()`（`agentkit/spec/config.go:203-213`）收集这些句子；启动时逐条打印
-（`main.go:437-439`）：
+`Config.Deferred()`（`agentkit/spec/config.go:261-272`）收集这些句子；启动时逐条打印
+（`main.go:574-576`）：
 
 ```go
 for _, d := range c.Deferred() {
@@ -343,10 +349,10 @@ for _, d := range c.Deferred() {
 ```
 
 ★ **一条提示带着它属于哪个文件。** 内部存的是 `Notice{Path, Message}`
-（`agentkit/spec/config.go:189-195`），`Deferred()` 把路径拼回消息 —— 启动日志那一行因此**一个字
+（`agentkit/spec/config.go:247-253`），`Deferred()` 把路径拼回消息 —— 启动日志那一行因此**一个字
 都没有变**，而诊断接口能拿到结构化的路径。产生提示的有两个入口：`Config.deferFile`（有文件，
-`agentkit/spec/config.go:258`）与 `Config.deferKey`（没有文件，比如退役的分区、watch 的设置，
-`:246`）。★ **路径是一个字段，不是消息的前缀** —— 路径由调用点原样给出，消息里不再有它。
+`agentkit/spec/config.go:316-318`）与 `Config.deferKey`（没有文件，比如退役的分区、watch 的设置，
+`:304-314`）。★ **路径是一个字段，不是消息的前缀** —— 路径由调用点原样给出，消息里不再有它。
 
 今天全部的产生者：
 
@@ -362,11 +368,11 @@ for _, d := range c.Deferred() {
 | `agentkit/spec/load.go:968-972` | `tools:` 里点名了 MCP 工具 —— 那一行不授予任何东西 | `agents/<id>.md` |
 | `agentkit/spec/load.go:1064-1065` | 该模型没有声明 `context_window` —— 该 agent 的自动压缩不会发生 | `llm/<provider>.yaml` |
 | `agentkit/spec/load.go:149-151` / `:168-171` | `log_level` 拼错 → 归一为 `info`；`log.*` 的上限是负数 → 归一为 `0` | — |
-| `agentkit/spec/config.go:626` | 磁盘上还留着一个退役的分区（`policy/`）—— 它**没有被读**，而这条提示说明它的内容去了哪儿 | — |
+| `agentkit/spec/config.go:1040-1049` | 磁盘上还留着一个退役的分区（`policy/`）—— 它**没有被读**，而这条提示说明它的内容去了哪儿 | — |
 | `agentkit/spec/reload.go:122-126` | 某个宽松时长解析不了，退回了缺省值 | — |
 
 ★ **最后这条消息对所有宽松时长都写 `watch.debounce`。** 写坏的长时被收进同一个全局列表
-（`agentkit/spec/decl/decl.go:835-851`），又在同一处上报，所以 `tools/http.yaml` 的超时写错了，
+（`agentkit/spec/decl/decl.go:849-865`），又在同一处上报，所以 `tools/http.yaml` 的超时写错了，
 也会以 `watch.debounce` 的名义出现。读它时要读成「有个宽松时长写错了」，而不是「debounce 写错了」。
 
 `deferred` 不只是被打印：它们也出现在 `/v2/health`（`api/v2_introspect.go:482`）与
@@ -380,31 +386,31 @@ export），不是配置写错。写错的东西（拼错的键、写错的 `@fi
 
 | 环境变量 | 覆盖什么 | 在哪里读 |
 |---|---|---|
-| `OPENHERON_ROOT` | **大本营**（配置根 / 状态 / 日志的共同基准） | `agentkit/spec/config.go:144`（常量 `RootEnv`） |
-| `OPENHERON_CONFIG_ROOT` | **配置根**（唯一的那一份） | `agentkit/spec/config.go:146`（常量 `ConfigRootEnv`） |
-| `OPENHERON_DEFAULT_PROJECT_ROOT` | 默认项目根 | `agentkit/spec/config.go:151`（常量 `DefaultProjectRootEnv`） |
-| `OPENHERON_DATA_DIR` | 解析后的数据目录（会话、checkpoint） | `main.go:587` |
-| `OPENHERON_LISTEN_ADDR` | `server.listen_addr` | `main.go:599` |
-| `OPENHERON_FRONTEND_MODE` | `server.frontend_mode` | `main.go:760` |
-| `OPENHERON_STATIC_DIR` | `server.static_dir` | `main.go:774` |
+| `OPENHERON_ROOT` | **大本营**（配置根 / 状态 / 日志的共同基准） | `agentkit/spec/config.go:146`（常量 `RootEnv`） |
+| `OPENHERON_CONFIG_ROOT` | **配置根**（唯一的那一份） | `agentkit/spec/config.go:148`（常量 `ConfigRootEnv`） |
+| `OPENHERON_DEFAULT_PROJECT_ROOT` | 默认项目根 | `agentkit/spec/config.go:153`（常量 `DefaultProjectRootEnv`） |
+| `OPENHERON_DATA_DIR` | 解析后的数据目录（会话、checkpoint） | `main.go:599` |
+| `OPENHERON_LISTEN_ADDR` | `server.listen_addr` | `main.go:612` |
+| `OPENHERON_FRONTEND_MODE` | `server.frontend_mode` | `main.go:821` |
+| `OPENHERON_STATIC_DIR` | `server.static_dir` | `main.go:835` |
 | `EINO_EXT_SKILLS_DIR` | skills 目录 | `agentkit/build/skill.go:194` |
 
 ★ **旧名字仍然生效**：`OPENHERON_CONFIG_DIR`、`PROJECT_ROOT`、`DATA_DIR`、`LISTEN_ADDR`、
 `STATIC_DIR`、`FRONTEND_MODE` 各自对应上表的一行。★ 用到旧名字会被点名
-（`overrideEnv`，`main.go:199-216`；配置根那两个由 `Service.Notices` 报告）—— 环境变量常写在
+（`overrideEnv`，`main.go:200-215`；配置根那两个由 `Service.Notices` 报告）—— 环境变量常写在
 shell profile 或 CI 的 env 块里，**静默失效最难查**。
 
-server 侧那几个覆盖走同一个辅助函数 —— `overrideEnv`（`main.go:199-216`）在环境变量非空时返回环境值，
+server 侧那几个覆盖走同一个辅助函数 —— `overrideEnv`（`main.go:200-215`）在环境变量非空时返回环境值，
 否则返回配置值。
 
-★ **server 侧那三个覆盖只在启动时读一次。** `server/` 不参与热重载（`agentkit/spec/config.go:71-74`），
+★ **server 侧那三个覆盖只在启动时读一次。** `server/` 不参与热重载（`agentkit/spec/config.go:73-76`），
 所以环境变量覆盖不是活旋钮 —— 改了要重启。`EINO_EXT_SKILLS_DIR` 是例外：每次解析 skills 目录都会
 重新读它（`agentkit/build/skill.go:194`），所以改动会在 agent 池重建时生效。
 
 ★ 另有三个环境变量**只管日志**，不碰别的配置：`OPENHERON_LOG_LEVEL`（`agentkit/obs/logger.go:11`，读于
-`main.go:281`）覆盖 `server/config.yaml` 的 `log_level`；`OPENHERON_LOG_LLM_REQUESTS`
+`main.go:379-381`）覆盖 `server/config.yaml` 的 `log_level`；`OPENHERON_LOG_LLM_REQUESTS`
 （`agentkit/obs/httplog/logging.go:29`，读于 `agentkit/obs/httplog/logging.go:207-208`）决定是否打印请求体，
-变量为空时才由配置决定；`OPENHERON_LOG_FILE`（`agentkit/obs/sink.go:12`，读于 `main.go:320`）覆盖
+变量为空时才由配置决定；`OPENHERON_LOG_FILE`（`agentkit/obs/sink.go:12`，读于 `main.go:418-420`）覆盖
 `server/config.yaml` 的 `log.file` —— ★ 打不开文件**不阻止启动**，进程留在 stderr。
 
 ★ 还有第三组确实从环境变量读配置，但**不在主路径上**：`MODEL_TYPE`、`MODEL_TIMEOUT`、
@@ -416,7 +422,7 @@ server 侧那几个覆盖走同一个辅助函数 —— `overrideEnv`（`main.g
 
 **`llm/*.yaml` 与 `agents/*.md` 里的字段没有环境变量覆盖。** 主路径是 `build.Resolve` +
 `build.FromConfig`（`agentkit/build/provider.go:71`、`agentkit/build/provider.go:30`），只读文件。
-`ConfigFromEnv` 现在只是「入口 agent 没声明模型」时的兜底（`agentkit/build/snapshot.go:257-259`），
+`ConfigFromEnv` 现在只是「入口 agent 没声明模型」时的兜底（`agentkit/build/snapshot.go:274`），
 而加载器对没声明模型的 agent 直接报错（`agentkit/spec/load.go:98-100`）—— 所以**一份合法的配置
 根本走不到那里**。这是刻意的取舍：模型档案是**要被 review 和提交**的东西；给它一个进程外的高
 优先级通道，等于允许「repo 里的配置和线上跑的不一样」而两边都看不出来。
@@ -465,7 +471,7 @@ server 侧那几个覆盖走同一个辅助函数 —— `overrideEnv`（`main.g
 |---|---|---|
 | 1 | 从 `Config.Agents` 里删掉 | `agentkit/spec/load.go:700` |
 | 2 | 从**每个**父 agent 的 `subagents:` 里删掉 —— 委派工具不能提供一个跑不起来的工 | `agentkit/spec/load.go:705-710` |
-| 3 | 记下**为什么**（`Config.leftOut`，`agentkit/spec/config.go:165`） | `agentkit/spec/config.go:173-178` 的 `LeftOut()` |
+| 3 | 记下**为什么**（`Config.leftOut`，`agentkit/spec/config.go:200`） | `agentkit/spec/config.go:231-236` 的 `LeftOut()` |
 | 4 | 出声：一条 `deferred`，路径是**它自己的文件** | `agentkit/spec/load.go:692-694` |
 
 ★ **不删父 agent 的 `subagents:` 就是留了个坑。** 委派工具按 `subagents:` 列表提供子 agent，列表里
@@ -473,7 +479,7 @@ server 侧那几个覆盖走同一个辅助函数 —— `overrideEnv`（`main.g
 问题。
 
 ★ **`main` 也不例外。** 默认 agent 被留在树外时，`DefaultAgent()` 仍然返回 `main`
-（`agentkit/spec/config.go:228-243`），**不顶替成别的 agent**：顶替会让会话悄悄跑在用户没点名的
+（`agentkit/spec/config.go:286-302`），**不顶替成别的 agent**：顶替会让会话悄悄跑在用户没点名的
 agent 上，而且完全不提原来那个为什么不见了。代价是没有会话能跑 —— 但进程还在，编辑器还在，
 这就够了。
 
@@ -481,12 +487,12 @@ agent 上，而且完全不提原来那个为什么不见了。代价是没有�
 
 | 谁说 | 说什么 | 在哪 |
 |---|---|---|
-| 启动日志 | `[main] config notice` + 那条 `deferred` | `main.go:437-439` |
+| 启动日志 | `[main] config notice` + 那条 `deferred` | `main.go:574-576` |
 | `/v2/health`、`/v2/config` | 同一条 `deferred` | `api/v2_introspect.go:482`、`api/v2_introspect.go:406` |
 | 配置编辑器 | 一条 **hint**，落在那个 agent 自己的文件上 | `agentkit/spec/diag.go:71-123` 的 `Diagnostics` |
-| 会话真的要用它时 | `agent "x" is left out of the tree: the model ... is not declared under llm/` | `agentkit/build/builder.go:237-246` 的 `leftOutMessage` |
+| 会话真的要用它时 | `agent "x" is left out of the tree: the model ... is not declared under llm/` | `agentkit/build/builder.go:255-264` 的 `leftOutMessage` |
 
-★ **一句话只写一处。** `leftOutMessage` 同时供装配层（`agentkit/build/builder.go:212`）与默认
+★ **一句话只写一处。** `leftOutMessage` 同时供装配层（`agentkit/build/builder.go:242`）与默认
 agent 的检查使用 —— 两份拷贝会漂移，而漂移的那份是没人读的那份。
 
 ★ **编辑器里是 hint，不是 error。** hint 说的是「这棵树少了一样东西」，文件本身没坏，保存照常可以
@@ -506,12 +512,12 @@ agent 是另一件事；不然的话任何 agent 文件都删不掉。
 #### 删除门：谁还指着它
 
 ★ 删除一个**别人还指着**的文件是一次降级，与写入门是同一条纪律。★ **闸门跑在试装之前**
-（`agentkit/spec/write.go:787-814` 的 `checkNotReferenced`）：试装的装载错误正是要取代的症状 —— 它点名
+（`agentkit/spec/write.go:859-886` 的 `checkNotReferenced`）：试装的装载错误正是要取代的症状 —— 它点名
 被删掉的那个文件，把真正的原因藏在别处；用户要动手改的是**引用它的那一处**。⇒ 拒绝的文案点名
-**谁引用了它**与**移除什么**。★ 被引用的分区只有三个，各有各的引用者（`agentkit/spec/write.go:718-769`
+**谁引用了它**与**移除什么**。★ 被引用的分区只有三个，各有各的引用者（`agentkit/spec/write.go:790-841`
 的 `referencesTo`）：`mcps/<server>.yaml` ← 一个 agent 的 `mcps:` 清单；`llm/<provider>.yaml` ← 一个
 agent 的 `model:`；`agents/<id>.md` ← 另一个 agent 的 `subagents:` 清单。★ **默认 agent 单独一条拒绝**
-（`agentkit/spec/write.go:796-802`）：`the default agent cannot be deleted: a tree needs one` —— 树总得
+（`agentkit/spec/write.go:868-874`）：`the default agent cannot be deleted: a tree needs one` —— 树总得
 有一个默认 agent，而试装的装载错误说的是「agents/main.md does not exist」，那读起来像一个坏文件，
 而不是一次被拒绝的删除。
 
@@ -596,7 +602,7 @@ models:                            # ★ several models under one provider
 
 `timeout` 等一律走 `time.ParseDuration`（`5m` / `30s`），**不用纳秒整数**。空串 = 不设置。★ **坑**：
 `timeout: 60`（缺单位）必须**报错**而非当作 60 秒 —— 自定义 `Duration` 类型强制要求字符串形式
-（`agentkit/spec/decl/decl.go:914-937`）。★ **但不是每个时长都严格**：`server/config.yaml` 与 `tools/`、
+（`agentkit/spec/decl/decl.go:928-951`）。★ **但不是每个时长都严格**：`server/config.yaml` 与 `tools/`、
 `mcps/` 下的文件用的是宽松变体（`agentkit/spec/decl/decl.go:807-818`），解析不过的值被记下来并换成
 默认值，而不是让整次加载失败。★ **而宽松回退的值到处都一样：`200ms`** —— 也就是 debounce 的默认值
 （`agentkit/spec/decl/decl.go:16`）。所以 `start_timeout: 60`（裸数字）既不会变成 60 秒，也不会回退到 60 秒
@@ -854,16 +860,16 @@ skills 怎么没生效」变成一个查不出原因的问题。★ **这次向�
 里写的就是它；一个 skill 就是「一个文件夹 + 一个固定文件名」，所以它的路径天生比别的分区深一层。别的
 分区写深一层会被**拒掉**：加载器只读一层，`agents/sub/main.md` 这样的文件会被保存、然后永远不会被
 加载（`agentkit/spec/write.go:102-125`）。里面的文件名固定 `SKILL.md`
-（`agentkit/spec/config.go:34`），文件夹名要能被读回来：`^[a-z0-9]+([_-][a-z0-9]+)*$`
+（`agentkit/spec/config.go:36`），文件夹名要能被读回来：`^[a-z0-9]+([_-][a-z0-9]+)*$`
 （`agentkit/spec/decl/decl.go:649`）。★ **`skills/` 也是唯一没有 loader 的分区**：skill 文件不是配置层
 读的 —— 运行时自己的 backend 读它（`agentkit/build/skill.go:23`）；配置层要这一项只是为了**表面**（清单、
-路径规则、编辑器），所以加载循环跳过 `loader == nil` 的分区（`agentkit/spec/config.go:576-582`），而不是
+路径规则、编辑器），所以加载循环跳过 `loader == nil` 的分区（`agentkit/spec/config.go:995-1008`），而不是
 给它一个空 loader。
 
 ★ **写入门在这里多一道别处没有的拒绝。** 运行时从哪个目录读 skill 由 `ResolveSkillsDir()`
 （`agentkit/build/skill.go:190-215`）回答，它可以**不是**配置根下的 `skills/`。当它不是的时候，编辑器
 写进来的文件根本不会被加载 —— 于是保存被拒，清单里这一分区标成只读并**点名真正的目录**
-（`agentkit/spec/write.go:151-164` 的 `validateWritable`、`agentkit/spec/config.go:525-534` 的
+（`agentkit/spec/write.go:151-164` 的 `validateWritable`、`agentkit/spec/config.go:535-544` 的
 `skillsElsewhere`）。★ 反过来说：进程启动时**一个 skills 目录都没找到**，不算这种情况 —— 那时配置根
 下的 `skills/` 正是探针下次会找到的地方，保存照常，否则「从零建起第一个 skill」就没有入口。
 
@@ -875,12 +881,12 @@ skills 怎么没生效」变成一个查不出原因的问题。★ **这次向�
 ### 5.5 `server/config.yaml`
 
 进程自身的配置。**它不进热更新** —— 改了要重启（§8）。server 分区带着 `Editable: false, hot: false`
-（`agentkit/spec/config.go:71-74`），配置编辑器干脆不写它。
+（`agentkit/spec/config.go:73-76`），配置编辑器干脆不写它。
 
 | 字段 | 类型 | 缺省 | 说明 |
 |---|---|---|---|
 | `listen_addr` | `string` | `127.0.0.1:8080` | Hertz 监听地址。★ 必须加引号 —— 以 `:` 开头的值解析得有歧义。★ 缺省是**环回**：光一个 `:8080` 绑的是**所有网卡**，而这台服务器的工具跑的是 shell 命令 |
-| `frontend_mode` | `string` | `embed` | `embed` 服务编译进二进制的界面；`dir` 服务磁盘上的一个目录。值不认识时只记一条告警，前端不启用（`main.go:648`） |
+| `frontend_mode` | `string` | `embed` | `embed` 服务编译进二进制的界面；`dir` 服务磁盘上的一个目录。值不认识时只记一条告警，前端不启用（`main.go:837-838`） |
 | `static_dir` | `string` | `web/dist` | 相对**项目根**解析（`Service.ResolveDir`）；只在 `frontend_mode: dir` 时才被读 |
 | `data_dir` | `string` | `state` | 相对**大本营**解析（`Service.DataDir`）；空串等同 `state`；目录不存在时创建 |
 | `log_level` | `string` | `info` | `debug` `info` `warn` `error`；非法值回退 `info` 并记 `deferred`（`agentkit/spec/load.go:149-151`） |
@@ -898,7 +904,7 @@ skills 怎么没生效」变成一个查不出原因的问题。★ **这次向�
 ★ **`listen_addr` 就是全部的边界。** 没有账号，也没有令牌 —— 这是一台机器上一个人用的工具。
 环回监听时，服务器自己会挡住别处来的请求（`api/guard.go` 的 Host 与 Origin 两条规则）；
 一旦把它写到 `0.0.0.0`，那两条规则就不管用了，所以启动时会留下一条告警
-（`main.go:946-956` 的 `announceExposure`）：**能碰到这个端口的人就能驱动这个 agent。**
+（`main.go:959-969` 的 `announceExposure`）：**能碰到这个端口的人就能驱动这个 agent。**
 ★ 那一条走**通告通道**，不走日志通道 —— 日志的去处是配置，而「你把 agent 暴露了」
 这句话不能被配置藏起来（`docs/runtime-design.md` §4.4）。★ 环回时不说话。
 
@@ -969,11 +975,40 @@ server 是带着 agent 自己权限的子进程。
 | | |
 |---|---|
 | `Policy.TierOf(name)`（`agentkit/build/policy.go:55-60`） | **allow** / **ask** —— 这个工具要不要人点头？★ **每个 agent 共享** |
-| `Table.Blocked(name)`（`agentkit/build/policy.go:163`） | **这个 agent** 能不能用它？★ **按 agent**：agent 自己的 `tools:` 清单 |
+| `Table.Blocked(name)`（`agentkit/build/policy.go:170`） | **这个 agent** 能不能用它？★ **按 agent**：agent 自己的 `tools:` 清单 |
 
 ★ **档位清单是共享的，agent 的清单不是。** 一个说「这个工具不用点头」，另一个说「这个 agent 能不能用
 它」。一个工具可以是 `allow` 而仍然不在某个 agent 里 —— 这两个答案根本不搭话，而这正是要点：决定档位
 的代码不知道当前跑的是哪个 agent，决定 agent 工具的代码不知道档位。
+
+#### ★ 档位是**工具级**的，授权模式是**会话级**的
+
+档位表回答的是「**这个工具**要不要人点头」；它由配置装配，因此**整棵树共用一张**。
+
+**授权模式**回答的是另一个问题：「**这个会话**里，哪些 `ask` 档的调用不用点头」。
+它是**会话的一个属性**，住在会话记录里，不在配置树里
+（`docs/authorization-design.md` §1、§3）。★ 两者不能混：
+配置里的档位是**工具级**的（哪个工具不问），模式是**会话级**的（这个会话里哪些不问）——
+混在一起，「这一轮到底用哪张表」就会有两个答案。
+
+| | 档位表 | 授权模式 |
+|---|---|---|
+| 住在哪儿 | 配置树（`allows:` 列表） | 会话记录（`state.json`） |
+| 粒度 | **工具** | **会话** |
+| 谁定 | 提供那个工具的文件 | 人，在界面上选 |
+| 装配时 | `policyOf`（`agentkit/build/spec.go:73-80`） | 每轮读一次上下文（`agentkit/run/runtime.go:465-480`） |
+
+★ **模式不新增第二套「哪些工具不问」的名单**：它只是把**受信路径**
+（项目根、会话上传目录、配置根）加进那张表的判断里
+（`agentkit/build/scope.go`）。⇒ 「现在到底什么不问」仍然是一次查询的事。
+
+★ **档位表被放宽时留一行日志。** 写路径在发现改前改后的 `AllowedTools()` 不一样时记
+`[config] the tier table was widened`（`agentkit/spec/write.go` 的 `reportWidenedTier`）——
+**不阻止，但喊一声**。★ 这是「会话级授权模式」带来的新口子：中间档下配置根是受信路径，
+agent 改 `tools/*.yaml` 的 `allows:` 是不问的 ⇒ 它能把自己变宽
+（`docs/authorization-design.md` §13 讲的是这件事的完整决定与它的缓解）。
+★ 它进的是**日志**，不是 notice：配置服务本来没有 logger，所以它多了一个
+`WithServiceLogger` 选项，没接 logger 的调用方那边就是安静的。
 
 ★ **没有 `deny` 这一档。** 一个 agent 不能用的工具**保留自己的档位**，并在它的 `reason` 里说明原因：是
 **这个 agent** 拿不到它，不是这个工具不合法（`agentkit/build/introspect.go:36-47` 的 `reasonOf`）。
@@ -997,8 +1032,8 @@ agent 工具集里的工具根本到不了闸门。
 
 ★ **它住在哪儿。** 加载器拒绝那些不是模式的写法（`agentkit/spec/load.go:150-157` 的
 `validateAgentTools`，语法本身在 `agentkit/spec/decl/decl.go:696-715` 的 `ParseToolNamePattern`）；那张
-表把前缀模式与精确名放在一起留着（`agentkit/build/policy.go:115-148` 的 `newTable`），而
-`Table.Blocked` 匹配它们（`agentkit/build/policy.go:163-182`）。
+表把前缀模式与精确名放在一起留着（`agentkit/build/policy.go:122-155` 的 `newTable`），而
+`Table.Blocked` 匹配它们（`agentkit/build/policy.go:170-189`）。
 
 ★ **前缀模式之所以安全，是因为 server 名里不许出现连续的下划线**
 （`agentkit/spec/decl/decl.go:641` 的 `MCPServerNamePattern`）：`mcp__github__` 够不到
@@ -1117,7 +1152,7 @@ MCP 工具可以用 `mcp__` 前缀**。★ **合成名超过 64 个字符会被�
 | `config_template` | `{path}` / `{section}` | `{path, content}` / `{section, templates}`；都没有时给索引 | `TemplateFor` / `Templates` / `Skeleton` | ★ 文件点名时 allow，否则 ask |
 | `config_notices` | `{}` | `{deferred[], runningVersion, diskVersion, watch, source}` | `Deferred()` / `Fingerprint()` | ★ 文件点名时 allow，否则 ask |
 | `config_tier` | `{tool}` / `{agent}` | `{tool, tier, source}` / `{agent, tools[], source}`；都没有时 `{defaultTier, allow[], source}`。★ 查不到 agent 时按「刚写入待下一轮 / 被 loader 排除 / 根本不存在」分别给诊断 | `policyOf` / `TierOf` / `missingAgentError` | ★ 文件点名时 allow，否则 ask |
-| `config_write` | `{path, content, baseRevision?, append?}` | `{path, revision, runningVersion, diskVersion, applied, requiresRestart, note}` | `Write` / `Append`（`agentkit/spec/write.go:488` / `agentkit/spec/write.go:549`） | ★ 文件点名时 allow，否则 ask |
+| `config_write` | `{path, content, baseRevision?, append?}` | `{path, revision, runningVersion, diskVersion, applied, requiresRestart, note}` | `Write` / `Append`（`agentkit/spec/write.go:552` / `agentkit/spec/write.go:618`） | ★ 文件点名时 allow，否则 ask |
 
 ★ **`source` 说的是这个答案从哪一边来**：`disk`（此刻盘上的文件）或 `running`（这一轮跑的那棵树）——
 两个常量在 `agentkit/build/configtools.go:87-89`。★ **六个工具里只有 `config_tier` 与 `config_notices`
@@ -1125,7 +1160,7 @@ MCP 工具可以用 `mcp__` 前缀**。★ **合成名超过 64 个字符会被�
 
 ★ **`runningVersion` 与 `diskVersion` 是两个数**：盘上那份和本轮跑的那份，在热更新接手之前一直是不同的。
 
-★ **模型没有删除动作。** `svc.Delete`（`agentkit/spec/write.go:841-892`）留在服务层，删除不可逆 —— 所以
+★ **模型没有删除动作。** `svc.Delete`（`agentkit/spec/write.go:913-967`）留在服务层，删除不可逆 —— 所以
 工具面上**不**给模型一个「删掉这个文件」的动作。★ 那道删除门（§4.6）是给**编辑器**用的，不是给模型的。
 
 ★ **`config_get` 的第二个参数是 `impact`**（`agentkit/build/configtools.go:108-124`）：它回答
@@ -1165,18 +1200,18 @@ MCP 工具可以用 `mcp__` 前缀**。★ **合成名超过 64 个字符会被�
 ### 7.3 自举循环：允许
 
 `config_write` 允许写任意放行路径，**包括 agent 文件自己**。生效时点是下一轮建树之前
-（`agentkit/build/builder.go:297-316`），不影响当前轮次和正在进行的 LLM 请求。返回里带 `applied` /
+（`agentkit/build/builder.go:315-334`），不影响当前轮次和正在进行的 LLM 请求。返回里带 `applied` /
 `requiresRestart` 说明这次到底生效了没有，不做额外禁止 —— 禁止的收益抵不上规则复杂度。
 
 ★ **`applied: true` 也不等于「本轮可见」。** 六个 `config_*` 工具在装配时拿的是**这一轮开始时的
-`*spec.Config` 快照**（`agentkit/build/snapshot.go:122-132`），写入只改磁盘；热重载要到下一轮重新装配
+`*spec.Config` 快照**（`agentkit/build/snapshot.go:130-140`），写入只改磁盘；热重载要到下一轮重新装配
 才会换掉这份快照。★ **`config_write` 成功时返回里也带 `note`**，把生效时点写在模型刚拿到结果的地方
 （`agentkit/build/configtools.go:432-436`）。
 
 ★ **`config_tier` 查不到 agent 时，三种情况给三种答案**（`agentkit/build/configtools.go:601-615` 的
 `missingAgentError`）：文件在磁盘且没被排除 → 明说「下一轮生效，别重写、别在本轮复查」；被 `leftOut`
 排除 → 明说「修文件，下一轮也不会出现」；磁盘上没有文件 → 才是原来那句。★ **装配失败自己成为一个错误码**
-（`agent_unavailable`），消息是装配器自己的原话（`agentkit/build/builder.go:237-246`），而 run 层把这条
+（`agent_unavailable`），消息是装配器自己的原话（`agentkit/build/builder.go:255-264`），而 run 层把这条
 错误交那一轮 —— 而不是让它顶成「turn start timeout」。
 
 ### 7.4 写不下的文件与写不完的调用
@@ -1190,7 +1225,7 @@ MCP 工具可以用 `mcp__` 前缀**。★ **合成名超过 64 个字符会被�
 
 | 情形 | 规则 | 落点 |
 |---|---|---|
-| 文件比一次调用大 | `config_write` 接受 `append`：第一块替换文件，之后每一块**加到**盘上已有内容的后面。每一块都走**同一套**闸门（试合并、树还装不装得上、`baseRevision` 对不对得上），所以盘上的文件在**每一块之后**都是能加载的 | `Service.Append`（`agentkit/spec/write.go:547`） |
+| 文件比一次调用大 | `config_write` 接受 `append`：第一块替换文件，之后每一块**加到**盘上已有内容的后面。每一块都走**同一套**闸门（试合并、树还装不装得上、`baseRevision` 对不对得上），所以盘上的文件在**每一块之后**都是能加载的 | `Service.Append`（`agentkit/spec/write.go:616`） |
 | 模型没写完这一次 | 截断只发生在**模型**这一层看得见（厂商的 `finish_reason=length`）。参数被换成一份带标记的 JSON，中间件在**审批之前**就拒绝这次调用：没有东西被写下，也不弹审批卡片，模型拿到的是一句「这次被砍断了，少带点」 | `markTruncatedArgs`（`agentkit/build/callguard.go:59-75`） |
 | 参数到了，但不是一份完整 JSON | 参数可能是「一个完整对象 + 它自己的尾巴再来一遍」——尾巴被数了两次。剩下的正好是它自己的后缀时，就把尾巴去掉，工具跑的是那份完整对象；不是这个形状就不动 | `repairDuplicatedTail`（`agentkit/build/callguard.go:133-160`） |
 | 参数根本不是 JSON | 参数被换成一份带标记的 JSON，中间件拒绝这次调用，模型拿到的是一句「参数没到齐，再发一次，或者少带点」 | `markMalformedArgs`（`agentkit/build/callguard.go:84-86`） |
@@ -1199,7 +1234,7 @@ MCP 工具可以用 `mcp__` 前缀**。★ **合成名超过 64 个字符会被�
 `max_tokens`）；读到 `unexpected end of JSON input` 它只会**再试一次同样大的调用** —— 那正是把一次手滑放大
 成一个死循环的那一步。★ 同理，参数不是 JSON 时回的是「参数没到齐」，不是 Go 的 JSON 报错原文。
 
-★ **闸门顺序是这件事的一半。** 守卫是中间件链的**第一个**（`agentkit/build/gate.go:167`）：eino 把 handler
+★ **闸门顺序是这件事的一半。** 守卫是中间件链的**第一个**（`agentkit/build/gate.go:210`）：eino 把 handler
 按倒序套，所以链首就是**最外层**，它先于审批闸门看到这次调用 —— 一个坏掉的调用**不该**变成一张等人点的
 卡片。★ 模型那一侧的实现是 `newCallGuardModel`（`agentkit/build/callguard.go:198-200`），装在
 `BuildModel`（`agentkit/build/provider.go:94-112`）—— 截断只有模型层看得见，它下面的一切都只看到一次
@@ -1225,7 +1260,7 @@ MCP 工具可以用 `mcp__` 前缀**。★ **合成名超过 64 个字符会被�
 
 | 目录 | 热更新 | 理由 |
 |---|---|---|
-| `llm/` `agents/` `tools/` `mcps/` `skills/` | ✅ | 都在 `Categories` 里带 `hot: true`（`agentkit/spec/config.go:59-104`），于是 `hotDirList()`（`agentkit/spec/config.go:115-127`）把它们放进 `HotDirs`（`agentkit/spec/reload.go:21`） |
+| `llm/` `agents/` `tools/` `mcps/` `skills/` | ✅ | 都在 `Categories` 里带 `hot: true`（`agentkit/spec/config.go:61-106`），于是 `hotDirList()`（`agentkit/spec/config.go:117-129`）把它们放进 `HotDirs`（`agentkit/spec/reload.go:21`） |
 | `server/` | ❌ | 配进程自身（listen / 静态目录 / 上限 / `log_level`、`log_requests` 与 `log.file`），改了要重启 |
 
 ★ 这条边界**有测试守着**（`TestServerDirIsNotHot`、`TestWatchIgnoresServerDir`）。★ 这份清单是**推导
@@ -1262,13 +1297,13 @@ Reloader.Reload() (at runtime)
 改坏配置**不让进程死**：`Reload` 失败时旧配置继续服务，`Watch` 只记一条日志
 （`agentkit/spec/reload.go:246-247`）；只有**首次**加载失败会让进程起不来（那时没有「旧配置」可用）——
 `NewReloader` 返回错误（`agentkit/spec/reload.go:163-172`），`setupConfig` 把它变成启动失败
-（`main.go:427-429`）。换代成功会连同版本号与变了哪些分区一起记下来
+（`main.go:567-577`）。换代成功会连同版本号与变了哪些分区一起记下来
 （`agentkit/spec/reload.go:249-251`）。
 
 ### 8.3 指纹与 `Config.Version`
 
 `Service.Fingerprint()` 算出热更新目录的指纹（`agentkit/spec/reload.go:23-34`），`Load()` 结束时写入
-`Config.Version`（`agentkit/spec/config.go:556`，在 `:553` 的校验之后）。
+`Config.Version`（`agentkit/spec/config.go:976`，在 `:973` 的校验之后）。
 
 **指纹怎么算的**：对 `HotDirs` 里的每个目录（都在配置根之下），喂进 sha256 的是
 
@@ -1289,9 +1324,9 @@ Reloader.Reload() (at runtime)
 指征必须按 turn 记，否则调试会变成猜谜；它由 `/v2/health` 以 `configVersion` 暴露
 （`api/v2_introspect.go:481`）。
 
-★★ **「代际」这个概念已经退休。** `main.go` 的 `agentConfig`（`main.go:855-866`）只有 `Current()` 与
+★★ **「代际」这个概念已经退休。** `main.go` 的 `agentConfig`（`main.go:1093-1104`）只有 `Current()` 与
 `Publish()`，没有计数器。⇒ 树的身份是**（配置对象，MCP 工具面）**
-（`agentkit/build/snapshot.go:207-222`），而不是「第几代」。
+（`agentkit/build/snapshot.go:223-238`），而不是「第几代」。
 
 ### 8.4 换代的实际接线：标记 → 按依赖重建 → 一轮钉住自己的树
 
@@ -1321,14 +1356,14 @@ config_write / the file tools land a change
          → agentkit/build/builder.go:236-271 → pool.Lookup)
 ```
 
-★ **写路径只标记。** 落盘的是**配置服务**，它记下「哪些文件变了」（`agentkit/spec/config.go:298-308`
+★ **写路径只标记。** 落盘的是**配置服务**，它记下「哪些文件变了」（`agentkit/spec/config.go:447-457`
 的 `Mark`）；**重建发生在下一轮建树之前**，而且**只重建受影响的那几个 agent**。★ **标记是缓存不是真相**：
-进程重启后标记是空的，答案仍然对 —— 因为真相是磁盘上的内容哈希（`agentkit/spec/config.go:471-484` 的
+进程重启后标记是空的，答案仍然对 —— 因为真相是磁盘上的内容哈希（`agentkit/spec/config.go:481-494` 的
 `DrainMarks`）。
 
 ★ **指纹是「谁变了」的答案，也是「我是谁」的答案。** 池的键从 (名字, 代际) 变成 **(名字, 指纹)**
 （`agentkit/build/pool.go:48-82`）。★ **指纹与 agent 同一次调用交出来** —— `Build` 返回
-`(agent, fingerprint, err)`（`agentkit/build/builder.go:159-201`），中间若有一次重载，记下来的树就错了。
+`(agent, fingerprint, err)`（`agentkit/build/builder.go:189-239`），中间若有一次重载，记下来的树就错了。
 ★ **贡献是「窄」的**：`tools/` 分区只算**这个 agent 用到的那些工具**的配置，加上**覆盖了它那些工具的
 `allows:` 子集** —— 一份文件对这个 agent 什么都没说，就算作「没贡献」
 （`agentkit/build/fingerprint.go:200-215`）。★ 但**文件路径仍然进指纹的映射**：这样「某文件开始给它的
@@ -1337,11 +1372,11 @@ config_write / the file tools land a change
 ★ **MCP 服务器的工具清单已经并进指纹**（`agentkit/build/fingerprint.go:285-300`）：清单变了 ⇒ 挂载它
 的 agent 指纹变了 ⇒ 它们重建。清单不进「文件哈希」那一栏，因为服务器起来的时候没有改任何文件。
 
-★ **一轮钉住自己开始时的那棵树。** run 的行记下这棵树的指纹（`storage/runledger.go:176` 的
-`Run.TreeFingerprint`），恢复那一轮**按指纹要 agent**（`agentkit/run/runtime.go:960-977` 的
-`parentRunOf` → `agentkit/run/turn.go:101` 的 `Turn.pin`），而不是按名字要「当前那棵」。⇒ 被打断的那
+★ **一轮钉住自己开始时的那棵树。** run 的行记下这棵树的指纹（`storage/runledger.go:188` 的
+`Run.TreeFingerprint`），恢复那一轮**按指纹要 agent**（`agentkit/run/runtime.go:1009-1026` 的
+`parentRunOf` → `agentkit/run/turn.go:111` 的 `Turn.pin`），而不是按名字要「当前那棵」。⇒ 被打断的那
 一轮继续用它开始时的那棵树；**新配置在下一轮生效**。★ 钉住的那棵树不在池里（进程重启过）⇒ 打一条
-warn，退回当前那棵，**不静默换树**（`agentkit/build/builder.go:255-260`）。
+warn，退回当前那棵，**不静默换树**（`agentkit/build/builder.go:282-287`）。
 
 ★ **恢复轮拿到的是池里那一份实例，不是新装的。** 这不是省事，是**必须**：旧树的内容**只存在于那个实例
 里** —— 磁盘上的文件已经变了，重新装配出来的是**新树**。⇒ 池里的旧 entry 因此不是缓存，是**旧树的材料**
@@ -1523,7 +1558,7 @@ github.com/ouranoshong/openheron/llm/common
 | 2 | `tools/kb.yaml` 的 `splitter.headers` | 仍然解析，但加载器随后把它清空（`agentkit/spec/load.go:391-395`）—— **自 v2 起不再生效**，分段改由行扫描得出 | 与上一条同类：接线，还是删键 |
 | 3 | `tools/kb.yaml` 模板与加载器的说法不一致 | 模板第 12 行写着 "empty = pure lexical retrieval"（`agentkit/templates/files/tools/kb.yaml:12`），而加载器在 `corpus_dir` 非空时**拒绝**空的 `model`（`agentkit/spec/load.go:1049-1052`） | 改模板，还是让加载器接受空 `model` |
 | 4 | `execute`（shell）能绕过配置根的写闸门 | `execute` 是 openheron 自己的工具（`agentkit/build/execute.go`），它跑 shell，shell 里的重定向能写配置根 | 堵它等于给 shell 对配置根只读，那是另一件事；当前选择是**不堵**，并把这条边界写在这里 |
-| 5 | `write_file`（整篇替换）没有冲突语义 | `edit_file` 的冲突语义是 **`OldString` 必须仍在**（`agentkit/fsx/fsx.go:809`）；而 `write_file` 没有基线可给 —— 框架的写请求里没有 revision 字段 | 要不要给整篇替换也一条基线；差异已写进 `config_write` 的描述（`agentkit/build/configtools.go:345-355`） |
+| 5 | `write_file`（整篇替换）没有冲突语义 | `edit_file` 的冲突语义是 **`OldString` 必须仍在**（`agentkit/fsx/fsx.go:859`）；而 `write_file` 没有基线可给 —— 框架的写请求里没有 revision 字段 | 要不要给整篇替换也一条基线；差异已写进 `config_write` 的描述（`agentkit/build/configtools.go:345-355`） |
 | 6 | 全树校验仍是 fail-fast | `loadWithMany` 遇到第一个错误就返回，所以 `config_validate {}` 给的是「第一条阻塞错误 + 全部 hint」 | 要一次给全部，得把 loader 从「返回 error」改成「累积 issues」；本轮没做 |
 | 7 | `.openheron-example/.gitignore` 仍列着 `.config.lock` | 没有任何代码路径会创建这个文件（并发控制走内容哈希的 revision） | 删掉那行，还是保留它作为「曾经有过的东西」的说明 |
 | 8 | 一个 agent 的工具清单不能收窄 MCP 工具 | 收窄 MCP 工具的地方是 server 自己的 `tools:` 过滤器，那是**按 server** 的，对所有挂载它的 agent 共享 | 这是一个**已拍板**的代价（§6.3），不是待办；记在这里是因为它是「挂载即授予」明说的交换 |
@@ -1535,15 +1570,15 @@ github.com/ouranoshong/openheron/llm/common
 
 | 位置 | 是什么 |
 |---|---|
-| `agentkit/spec/config.go:19-26` / `:34` | 目录常量 `DirAgent` `DirLLM` `DirServer` `DirSkills` `DirState` `DirTools` `DirKBIndex` `DirMCP` / `SkillFileName = "SKILL.md"` |
-| `agentkit/spec/config.go:59-104` / `:115-127` | `Categories`（各分区与 `hot` 标志） / `hotDirList()` |
-| `agentkit/spec/config.go:135` / `:196-201` / `:212-218` / `:226-236` | `Config.leftOut` / `LeftOut()` / `Notice{Path, Message}` / `Deferred()` |
-| `agentkit/spec/config.go:251-266` / `:269` / `:281` | `DefaultAgent()` / `deferKey` / `deferFile` |
-| `agentkit/spec/config.go:386-396` / `:420-433` / `:443-450` / `:474-483` | `Mark` / `DrainMarks` / `SetSkillsDir` / `skillsElsewhere` |
-| `agentkit/spec/config.go:513-548` / `:550-566` | `NewService` —— 三级解析与「只创建缺省根」 / `NewServiceAt` —— 给 `init` 的入口 |
-| `agentkit/spec/config.go:568` / `:576` / `:578` / `:580-592` / `:603-615` / `:617-623` | `Root` / `RootIsDefaulted` / `ProjectRoot` / `DataDir` / `LogFile` / `ResolveDir` |
-| `agentkit/spec/config.go:636-646` / `:652-682` / `:692-695` / `:708-717` | `loadWithMany`（校验后写 `Version`） / `loadOnly`（预填充、跳过无 loader 的分区） / `retiredDirs` / `noteRetiredDirs` |
-| `agentkit/spec/config.go:759-762` / `:827` / `:829-841` | 目录不存在不是错误 / `ErrEmptyDocument` / `decodeStrict` |
+| `agentkit/spec/config.go:21-28` / `:36` | 目录常量 `DirAgent` `DirLLM` `DirServer` `DirSkills` `DirState` `DirTools` `DirKBIndex` `DirMCP` / `SkillFileName = "SKILL.md"` |
+| `agentkit/spec/config.go:61-106` / `:117-129` | `Categories`（各分区与 `hot` 标志） / `hotDirList()` |
+| `agentkit/spec/config.go:200` / `:231-236` / `:247-253` / `:261-272` | `Config.leftOut` / `LeftOut()` / `Notice{Path, Message}` / `Deferred()` |
+| `agentkit/spec/config.go:286-302` / `:304` / `:316` | `DefaultAgent()` / `deferKey` / `deferFile` |
+| `agentkit/spec/config.go:447-457` / `:481-494` / `:504-511` / `:535-544` | `Mark` / `DrainMarks` / `SetSkillsDir` / `skillsElsewhere` |
+| `agentkit/spec/config.go:645-725` / `:827-849` | `NewService` —— 三级解析与「只创建缺省根」 / `NewServiceAt` —— 给 `init` 的入口 |
+| `agentkit/spec/config.go:851` / `:880` / `:889` / `:905-919` / `:921-941` / `:943-955` | `Root` / `RootIsDefaulted` / `ProjectRoot` / `DataDir` / `LogFile` / `ResolveDir` |
+| `agentkit/spec/config.go:968-978` / `:984-1014` / `:1024-1030` / `:1040-1049` | `loadWithMany`（校验后写 `Version`） / `loadOnly`（预填充、跳过无 loader 的分区） / `retiredDirs` / `noteRetiredDirs` |
+| `agentkit/spec/config.go:1090-1093` / `:1159` / `:1161-1171` | 目录不存在不是错误 / `ErrEmptyDocument` / `decodeStrict` |
 | `agentkit/spec/defaults.go:11-13` / `:48-55` / `:57-75` | `DefaultMaxDepth` `DefaultMaxRetries` / `defaultKB` / `defaultServer` |
 | `agentkit/spec/decl/decl.go:18-52` / `:54-83` / `:95-179` | `Provider` / `Model` / `Agent` |
 | `agentkit/spec/decl/decl.go:286-318` / `:319-328` / `:346-371` / `:402-420` | `Server` / `LogCfg` / 内置工具名 / 六个 `config_*` 工具名的常量块与清单 |
@@ -1566,14 +1601,14 @@ github.com/ouranoshong/openheron/llm/common
 | `agentkit/spec/write.go:381` / `:386-402` / `:417-441` / `:466-476` / `:488-528` / `:549-591` / `:598-663` | `Revision`（内容哈希） / `ReadFile` / `agentsLostBy` / `agentsLostByChange` `checkNoAgentLost` / `Write`（闸门 + 原子写 + 标记） / `Append`（★ 分块写：同一套闸门，结果必须是能加载的） / `WriteMany` |
 | `agentkit/spec/secret.go:33-60` / `:62-132` / `:160-178` / `:180-205` / `:207-231` / `:233-264` / `:272-311` / `:325-359` / `:360-396` | 两组命名空间的常量 / 名字与 user 的推导 / `SecretStore` 与两个错误 / `Secret`（三态） / `KeyringStore` 与 `nullStore` / `ResolveSecret` `ResolveSecretFrom` / 解析链（环境 → 钥匙串） / `SecretStatus` / `StatusFor` |
 | `agentkit/spec/secret_keyring.go:22-56` / `agentkit/spec/secret_keyring_linux.go` / `agentkit/spec/secret_keyring_other.go` | `keyringStore`（包一层 keyring 库） / Linux 的 D-Bus 预检 / 其余平台的实现 |
-| `agentkit/spec/write.go:720-773` / `:787-814` / `:841-892` / `:894-911` / `:929-945` / `:969-987` | `referencesTo` / `checkNotReferenced` / `Delete` / `checkRevision` / `apiKeyRetiredMessage` / `apiKeyLine` |
+| `agentkit/spec/write.go:792-845` / `:787-814` / `:841-892` / `:894-911` / `:929-945` / `:969-987` | `referencesTo` / `checkNotReferenced` / `Delete` / `checkRevision` / `apiKeyRetiredMessage` / `apiKeyLine` |
 
 ### 装配层（`agentkit/build`）
 
 | 位置 | 是什么 |
 |---|---|
-| `agentkit/build/assemble.go:18-28` / `:30-40` / `:136-175` | `baseConfig` / `applyToolConfig` / `assemble` |
-| `agentkit/build/builder.go:159-201` / `:211-216` / `:225-234` / `:236-271` / `:285-304` | `Build`（返回 agent **与**它的指纹） / `agentUnavailable` / `leftOutMessage` / `pooledRoot`（钉住的那棵树在这里取回） / `reloadIfMarked`（标记 → 重读 → 发布） |
+| `agentkit/build/assemble.go:18-28` / `:30-40` / `:142-181` | `baseConfig` / `applyToolConfig` / `assemble` |
+| `agentkit/build/builder.go:189-239` / `:241-253` / `:255-264` / `:266-313` / `:315-334` | `Build`（返回 agent **与**它的指纹） / `agentUnavailable` / `leftOutMessage` / `pooledRoot`（钉住的那棵树在这里取回） / `reloadIfMarked`（标记 → 重读 → 发布） |
 | `agentkit/build/config.go:16-50` | `ConfigFromEnv` —— 不在主路径上的兜底 |
 | `agentkit/build/configgate.go:30-46` / `:57-66` / `:88-101` / `:110-117` | `newConfigGate` / `OwnsPath` / `ReadConfig` / `WriteConfig` |
 | `agentkit/build/configtools.go:85-90` / `:92-449` / `:127-129` / `:277-283` / `:307` / `:313` / `:331` / `:380` / `:382` / `:390-391` / `:430-435` / `:466` / `:473-478` / `:599` | `sourceDisk` `sourceRunning` / 六个工具 / `impact` 分支 / `config_notices` / `config_tier` 的三个答案 / `svc.Append`、`svc.Write`、两个版本号、那条 `note` / `defaultConfigReadBytes` / `configReadBytesLimit` / `missingAgentError` |
@@ -1589,7 +1624,7 @@ github.com/ouranoshong/openheron/llm/common
 | `agentkit/build/pool.go:48-82` / `:90-99` | `GetOrBuild`（键是名字+指纹） / `Lookup` |
 | `agentkit/build/provider.go:30-69` / `:71-86` / `:94-112` / `:114-120` / `:122-147` / `:149-161` / `:163-172` | `FromConfig` / `Resolve` / `BuildModel`（★ 这里装上截断守卫的模型包装） / `effectiveTier` / `RequestOptionsFor` / `shallowMerge` / `ReasoningFields` |
 | `agentkit/build/skill.go:78-87` / `:198-231` / `:233-249` | `scopedSkillBackend` / `ResolveSkillsDir` / `probeProjectSkills` |
-| `agentkit/build/snapshot.go:147-185` / `:207-222` / `agentkit/build/spec.go:73-80` | `newSnapshot` / `snapshotFor`（身份是（配置对象，工具面）） / `policyOf`（三处合成一张表） |
+| `agentkit/build/snapshot.go:155-201` / `:223-243` / `agentkit/build/spec.go:73-80` | `newSnapshot` / `snapshotFor`（身份是（配置对象，工具面）） / `policyOf`（三处合成一张表） |
 | `agentkit/build/tools.go:95-101` / `:112-126` / `:55-57` | `builtinAllowedTools` / `reservedTool` 与 `reservedToolNames`（★ 保留名带 owner：拥有它的那个 provider 可以提供它，别的不行） / `toolRegistry.Build` |
 | `agentkit/build/callguard.go:30-49` / `:59-110` / `:133-161` / `:194-317` / `:319-465` / `:467-535` / `:537-579` | 两个标记与它们的常量 / `markTruncatedArgs` `markMalformedArgs` `isTruncatedArgs` `isMalformedArgs` `isJSONObject` / `repairDuplicatedTail`（去掉重复的尾巴） / `callGuardModel`（模型包装：★ 只有它看得见截断与重复的尾巴） / `guardCalls` `guardChunks` `markChunksTruncated`（★ 分块的参数要拼起来才能判） / `newCallGuardMiddleware`（★ 链首，所以它先于审批看到这次调用） / `truncationRefusal` `malformedRefusal` |
 
@@ -1599,9 +1634,9 @@ github.com/ouranoshong/openheron/llm/common
 |---|---|
 | `agentkit/fsx/configgate.go:11-35` | `ConfigGate` —— fsx 自己定义的窄接口 |
 | `agentkit/fsx/fsx.go:232-250` / `:739-775` / `:776-835` / `:809` | `resolveWrite`（写入边界） / `Write` / `Edit` —— 配置根的写在这里转交 / ★ `OldString` 找不到就报错 —— 文件工具的冲突语义 |
-| `agentkit/run/loop.go:125-140` / `:240-260` / `agentkit/run/runtime.go:651-657` / `:960-974` / `agentkit/run/turn.go:95-101` | `makePrepareAgent`（带钉住） / `settleAgent` / 恢复时取父 run 的树 / `parentRunOf` / `Turn.pin` |
-| `storage/runledger.go:134-177` | `Run.TreeFingerprint` |
-| `main.go:122-148` / `:149-166` / `:172-196` / `:199-216` / `:254-265` / `:481-623` / `:587` / `:599` / `:760` / `:774` / `:994` / `:1020` / `:1047` / `:1060` | 三个 flag / 用法 / `resolveOpenheronRoot` / `overrideEnv` / `configLoadError` / `setupConfig` / `DATA_DIR` 读点 / `LISTEN_ADDR` 读点 / `FRONTEND_MODE` / `STATIC_DIR` / `agentConfig` / `Current` / `Publish` / `configVersion` |
+| `agentkit/run/loop.go:125-140` / `:240-260` / `agentkit/run/runtime.go:687-693` / `:960-974` / `agentkit/run/turn.go:105-111` | `makePrepareAgent`（带钉住） / `settleAgent` / 恢复时取父 run 的树 / `parentRunOf` / `Turn.pin` |
+| `storage/runledger.go:134-189` | `Run.TreeFingerprint` |
+| `main.go:122-148` / `:150-171` / `:173-198` / `:200-215` / `:255-263` / `:488-638` / `:599` / `:612` / `:821` / `:835` / `:1093` / `:1119` / `:1146` / `:1159` | 三个 flag / 用法 / `resolveOpenheronRoot` / `overrideEnv` / `configLoadError` / `setupConfig` / `DATA_DIR` 读点 / `LISTEN_ADDR` 读点 / `FRONTEND_MODE` / `STATIC_DIR` / `agentConfig` / `Current` / `Publish` / `configVersion` |
 | `api/v2_introspect.go:416` / `:481-482` / `api/v2_settings.go:64-90` / `:91-104` / `:201-216` | `deferred` 与 `configVersion` / `settingsFail` / manifest handler / `readPath` `writePath` |
 | `api/v2_secrets.go:48-79` / `:89-100` / `:151-182` / `:192-216` / `:231-263` / `:274-372` | 两组的视图 / `GET /v2/secrets` / `PUT /v2/secrets/:group/:name` / `DELETE` 一条 / `DELETE` 整组 / 助手（store、target、user、mark） |
 | `initcfg/initcfg.go:66-194` / `:212-237` | `BuildPlan` / `copySection` |

@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/ouranoshong/openheron/contract"
+	"github.com/ouranoshong/openheron/helpers"
 	"github.com/ouranoshong/openheron/storage"
 )
 
@@ -69,6 +70,15 @@ type Turn struct {
 	// publisher is the run's event bus. The run publishes to it; the
 	// connections subscribe.
 	publisher *publisher
+
+	// toolFailures collects the tool calls that failed in this round.
+	//
+	// ★ It is the round's pipe between the tool call that failed and the
+	//   derivation that reports it: the middleware records the failure
+	//   into it, and the derivation takes it out. ★ The collector itself
+	//   travels in the context, because that is the only channel that
+	//   reaches a tool call.
+	toolFailures *helpers.ToolFailures
 
 	// lease is the run's claim on its session. Nil when no arbiter is
 	// wired — the runtime then behaves as it did before the lease.

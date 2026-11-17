@@ -3,8 +3,8 @@ package spec
 import (
 	"errors"
 	"fmt"
-	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"io"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ouranoshong/openheron/agentkit/obs"
+	"github.com/ouranoshong/openheron/agentkit/spec/decl"
 	"gopkg.in/yaml.v3"
 )
 
@@ -341,6 +343,14 @@ type Service struct {
 	//   still works is worth one line in the caller's log.
 	notices []string
 
+	// log is the logger the write path says one thing through: the tier
+	// table being widened is not refused, it is **reported** — and a fact
+	// that is only reported has to have somewhere to go.
+	//
+	// ★ It is nil by default, and the write path then stays quiet: a
+	//   library caller that wired no logger gets no lines.
+	log *slog.Logger
+
 	// skillsDir is the directory the **runtime** reads skills from, as
 	// resolved by `agentkit/build` — see `SetSkillsDir`.
 	//
@@ -567,6 +577,42 @@ func WithHome(home string) ServiceOption {
 	}
 }
 
+// WithServiceLogger sets the logger the service writes through.
+//
+// ★ It is a logger, not a notice sink: the notices are the things the
+//
+//	caller must **report to the user**, and they travel in the answer.
+//
+// A line in the log is for the operator, and the one the write path
+//
+//	needs is the tier table being widened — a fact nobody asked for and
+//	nobody can unsee afterwards.
+//
+// ★ The name says which one it is: the package already has a WithLogger
+//
+//	for the reloader's own logger, and two of them in one package would
+//	be one name for two things.
+func WithServiceLogger(log *slog.Logger) ServiceOption {
+	return func(s *Service) {
+		if s != nil {
+			s.log = log
+		}
+	}
+}
+
+// logger is the service's logger, or the one that drops everything.
+//
+// ★ A package that needs to log takes a logger and defaults it to
+//
+//	obs.Discard() — it does not reach for a package-level variable, and
+//	neither does this one.
+func (s *Service) logger() *slog.Logger {
+	if s == nil || s.log == nil {
+		return obs.Discard()
+	}
+	return s.log
+}
+
 // NewService resolves the configuration root, the openheron root and the
 // default project root.
 //
@@ -620,43 +666,14 @@ func NewService(root, projectRoot string, opts ...ServiceOption) (*Service, erro
 	}
 
 	// ★ The default project root.
-	projectDefaulted := false
-	projectRoot = strings.TrimSpace(projectRoot)
-	if projectRoot == "" {
-		projectRoot = strings.TrimSpace(os.Getenv(DefaultProjectRootEnv))
-	}
-	if projectRoot == "" {
-		if v := strings.TrimSpace(os.Getenv(ProjectRootEnv)); v != "" {
-			projectRoot = v
-			notices = append(notices, fmt.Sprintf(
-				"%s was renamed to %s; the old name still works, but it will go",
-				ProjectRootEnv, DefaultProjectRootEnv))
-		}
-	}
-	if projectRoot == "" {
-		if home != "" {
-			projectRoot = filepath.Join(home, DefaultProjectsDirName, "default")
-			projectDefaulted = true
-		} else {
-			wd, err := os.Getwd()
-			if err != nil {
-				return nil, fmt.Errorf("config: resolve working directory: %w", err)
-			}
-			projectRoot = wd
-		}
-	}
-	projectAbs, err := filepath.Abs(projectRoot)
+	projectAbs, projectDefaulted, projectNotices, err := resolveDefaultProjectRoot(projectRoot, home)
 	if err != nil {
-		return nil, fmt.Errorf("config: resolve project root %q: %w", projectRoot, err)
+		return nil, err
 	}
+	notices = append(notices, projectNotices...)
 	if projectDefaulted {
-		// ★ Only the defaulted root is created, and the rule is the config
-		//   root's: a named root that points nowhere is a user typo, and it
-		//   must not turn into a silently empty directory. ★ This one has
-		//   to exist: it is where a session that belongs to no project does
-		//   its work, and a command that cannot chdir into it never starts.
-		if err := os.MkdirAll(projectAbs, 0o755); err != nil {
-			return nil, fmt.Errorf("config: create the default project root %q: %w", projectAbs, err)
+		if err := ensureProjectRoot(projectAbs); err != nil {
+			return nil, err
 		}
 	}
 
@@ -703,7 +720,101 @@ func NewService(root, projectRoot string, opts ...ServiceOption) (*Service, erro
 		projectRoot: projectAbs,
 		defaulted:   defaulted,
 		notices:     notices,
+		log:         s.log,
 	}, nil
+}
+
+// resolveDefaultProjectRoot resolves the project root a session that belongs
+// to no project works in.
+//
+// ★ The resolution has **one** shape everywhere: the argument, then
+// $OPENHERON_DEFAULT_PROJECT_ROOT, else its previous name $PROJECT_ROOT, else
+// <openheron root>/projects/default. ★ The server and `openheron init` share
+// it — a directory that one of them creates and the other does not is a
+// directory that exists on one machine and not on another.
+//
+// ★ It resolves and it does **not** create: whether the directory is created
+// is the caller's decision, and the caller knows whether it may write.
+//
+// ★ The old name still works, and it is reported: a variable that quietly
+// stops working is the hardest kind of mistake to find.
+func resolveDefaultProjectRoot(explicit, home string) (string, bool, []string, error) {
+	root := strings.TrimSpace(explicit)
+	var notices []string
+	if root == "" {
+		root = strings.TrimSpace(os.Getenv(DefaultProjectRootEnv))
+	}
+	if root == "" {
+		if v := strings.TrimSpace(os.Getenv(ProjectRootEnv)); v != "" {
+			root = v
+			notices = append(notices, fmt.Sprintf(
+				"%s was renamed to %s; the old name still works, but it will go",
+				ProjectRootEnv, DefaultProjectRootEnv))
+		}
+	}
+	defaulted := false
+	if root == "" {
+		if home == "" {
+			// ★ No openheron root means the old layout: the project root is
+			//   the working directory.
+			wd, err := os.Getwd()
+			if err != nil {
+				return "", false, nil, fmt.Errorf("config: resolve working directory: %w", err)
+			}
+			return wd, false, notices, nil
+		}
+		root = filepath.Join(home, DefaultProjectsDirName, "default")
+		defaulted = true
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", false, nil, fmt.Errorf("config: resolve project root %q: %w", root, err)
+	}
+	return abs, defaulted, notices, nil
+}
+
+// ensureProjectRoot creates the directory a project root names.
+//
+// ★ Only the **defaulted** root is created, and the rule is the config
+//
+//	root's: a named root that points nowhere is a user typo, and it must not
+//	turn into a silently empty directory. ★ The defaulted one has to exist:
+//	it is where a session that belongs to no project does its work, and a
+//	command that cannot chdir into it never starts.
+func ensureProjectRoot(root string) error {
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return fmt.Errorf("config: create the default project root %q: %w", root, err)
+	}
+	return nil
+}
+
+// EnsureDefaultProjectRoot creates the project root a session that belongs
+// to no project works in, when it is the server's own, and returns the
+// directory it created.
+//
+// ★ The server does the same when it starts (see NewService): the directory
+//
+//	belongs to the server, and `openheron init` is where the base directory
+//	is laid out — a person who looks into it afterwards must find the whole
+//	layout, not half of it.
+//
+// ★ Only the defaulted one is created: a named root is the user's directory,
+//
+//	and making it for them would hide a typo. ★ An empty answer means
+//	nothing was created, and the caller says so rather than claiming a
+//	directory it did not make.
+func EnsureDefaultProjectRoot(home string) (string, error) {
+	root, defaulted, _, err := resolveDefaultProjectRoot("", home)
+	if err != nil {
+		return "", err
+	}
+	if !defaulted {
+		return "", nil
+	}
+	if err := ensureProjectRoot(root); err != nil {
+		return "", err
+	}
+	return root, nil
 }
 
 // NewServiceAt builds a service at the paths it is given.
@@ -734,7 +845,7 @@ func NewServiceAt(root, projectRoot string, opts ...ServiceOption) (*Service, er
 		}
 		projectRoot = abs
 	}
-	return &Service{root: root, home: s.home, projectRoot: projectRoot}, nil
+	return &Service{root: root, home: s.home, projectRoot: projectRoot, log: s.log}, nil
 }
 
 func (s *Service) Root() string { return s.root }

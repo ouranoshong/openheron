@@ -70,8 +70,15 @@ type snapshot struct {
 
 type heavyDeps struct {
 	backend fsapi.Backend
-	shell   shell.Shell
-	tools   []tool.BaseTool
+	// local is the concrete backend behind `backend`.
+	//
+	// ★ It is kept because the trusted authorization mode asks the
+	//   filesystem itself whether a path lands inside a directory — the
+	//   write boundary is the backend's own, and a second implementation
+	//   of it would be a second answer.
+	local *fsx.Local
+	shell shell.Shell
+	tools []tool.BaseTool
 }
 
 func (s *snapshot) heavyDepsOf(ctx context.Context) (heavyDeps, error) {
@@ -112,6 +119,7 @@ func (s *snapshot) buildHeavy(ctx context.Context) (heavyDeps, error) {
 		return out, fmt.Errorf("build filesystem backend: %w", err)
 	}
 	out.backend = local
+	out.local = local
 	out.shell = sh
 
 	// ★ The search engine is decided with the backend, and it is worth a
@@ -148,7 +156,7 @@ func newSnapshot(cfg *spec.Config, surface string, svc *spec.Service, mcp *mcpMa
 	projectRoot, dataDir string, models modelFactory,
 	tools *toolRegistry, log *slog.Logger, track func(io.Closer)) (*snapshot, error) {
 
-	sp, err := specOf(cfg, projectRoot)
+	sp, err := specOf(cfg)
 	if err != nil {
 		return nil, err
 	}

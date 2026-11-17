@@ -508,7 +508,13 @@ func setupConfig(flags serverFlags, log *slog.Logger, level *slog.LevelVar, sink
 	if projectRoot == "" && flags.scopeDir != "" {
 		projectRoot = flags.scopeDir
 	}
-	cfgSvc, err := spec.NewService(flags.configRoot, projectRoot, spec.WithHome(home))
+	// ★ The service gets the logger so that the one fact the write path has
+	//   to report — the tier table being widened — lands in the log. A
+	//   package that cannot log reports it as a notice instead, and a
+	//   notice is read by a person looking at the answer, not by an
+	//   operator looking for what changed.
+	cfgSvc, err := spec.NewService(flags.configRoot, projectRoot,
+		spec.WithHome(home), spec.WithServiceLogger(log))
 	if err != nil {
 		return nil, err
 	}
@@ -674,8 +680,15 @@ func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 	//   compares the surface the servers offer now with the one the tree
 	//   was built from. ★ A separate way to announce a change would be a
 	//   second way to be wrong about it.
+	// ★ The round's project root is rendered in **one** place, and the two
+	//   readers share it: the prompt the root agent sees, and the block a
+	//   sub-agent is given. ★ Two renderings would be two answers, and the
+	//   model would pick the one that reads like a rule.
+	input := run.InputConfig{ProjectRoot: st.projectRoot, Workspace: sessionsRoot}
+
 	builder := build.NewBuilder(st.mgr,
 		build.WithPaths(st.projectRoot, st.dataDir),
+		build.WithRoundBlock(input.RoundProjectRootBlock),
 		build.WithConfigService(st.cfgSvc),
 		// ★ Without this the builder's logger is obs.Discard(), and its
 		//   warnings go nowhere: the MCP servers' lifecycle, "the
@@ -696,7 +709,7 @@ func setupRuntime(ctx context.Context, st *startup, log *slog.Logger) error {
 	rt := run.New(run.Config{
 		AgentBuilder:   builder,
 		SessionManager: fm,
-		Input:          run.InputConfig{ProjectRoot: st.projectRoot, Workspace: sessionsRoot},
+		Input:          input,
 		StartTimeout:   startTimeout(st.cfg),
 		// ★ The lease is the ownership rule: it says a run may hold the
 		//   session, and it expires when the holder stops making
