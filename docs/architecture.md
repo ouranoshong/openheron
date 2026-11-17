@@ -409,8 +409,8 @@ is skipped with a warning, never an error, so one dead server cannot keep the ag
 a failed start waits for the child to exit, and a child that is still installing its own
 package does not exit because its stdin closed — so the child is killed first and the
 teardown is bounded (`killMCPChild` / `closeMCPClient` at
-`agentkit/build/mcpmanager.go:840-856`, with the grace at
-`agentkit/build/mcpmanager.go:864`).
+`agentkit/build/mcpmanager.go:856-872`, with the grace at
+`agentkit/build/mcpmanager.go:880`).
 A build waits for a server, not for a server's corpse.
 
 ★ **The start does not stand on the turn's critical path.** Every mounted server is

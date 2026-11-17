@@ -1016,7 +1016,7 @@ stderr（`main.go:421-432`）。
   一个问题、一段回答都不进日志。
 
 ★ **第三方库也会绕开这套出口。** `mcp-go` 的 stdio transport 默认用 `log.Default()`
-直写 stderr。`agentkit/build/mcpmanager.go:748` 的 `mcpCommandLogger` 经
+直写 stderr。`agentkit/build/mcpmanager.go:758` 的 `mcpCommandHandler` 经
 `WithCommandLogger` 把它接回注入的 `*slog.Logger`，于是 `log_level` / `log.file` /
 统一前缀重新生效。
 
@@ -1436,7 +1436,7 @@ stderr（`main.go:421-432`）。
 - `agentkit/obs/httplog/logging.go` — `Wrap`(:52)、被拒绝的请求(:161)、`tools` 原始字节
   (:263)
 - `agentkit/obs/hertz/hertz.go` — hertz 适配器(:32)、框架横幅被拦下(:47)
-- `agentkit/build/mcpmanager.go` — `mcpCommandLogger`(:748)
+- `agentkit/build/mcpmanager.go` — `mcpCommandHandler`(:758)
 - `main.go` — `newLogger`(:350)、`installLogger`(:361)、`hlog.SetLogger`(:367)、
   `callbacks.AppendGlobalHandlers`(:368)、`applyLogLevel`(:374)、告警在切换等级之前
   (:386)、`applyLogFile`(:412)、落不进文件是警告(:423)、0600 探针(:429)、

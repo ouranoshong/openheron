@@ -428,7 +428,7 @@ func TestMCPCommandLoggerSeparatesTeardownFromFailure(t *testing.T) {
 	log := slog.New(obs.NewHandler(&buf, slog.LevelDebug))
 	l := newMCPCommandLogger(log)
 
-	l.Errorf("Error reading from stdout: %v", errors.New("read |0: file already closed"))
+	l.Error("Error reading from stdout", "err", errors.New("read |0: file already closed"))
 	quiet := buf.String()
 	if strings.Contains(quiet, "[Error]") {
 		t.Fatalf("our own teardown must not be an error:\n%s", quiet)
@@ -439,7 +439,7 @@ func TestMCPCommandLoggerSeparatesTeardownFromFailure(t *testing.T) {
 	}
 
 	buf.Reset()
-	l.Errorf("Error reading from stdout: %v", errors.New("read |0: broken pipe"))
+	l.Error("Error reading from stdout", "err", errors.New("read |0: broken pipe"))
 	loud := buf.String()
 	if !strings.Contains(loud, "[Error]") ||
 		!strings.Contains(loud, "Error reading from stdout") {
@@ -447,7 +447,7 @@ func TestMCPCommandLoggerSeparatesTeardownFromFailure(t *testing.T) {
 	}
 
 	buf.Reset()
-	l.Errorf("Error writing response: %v", errors.New("short write"))
+	l.Error("Error writing response", "err", errors.New("short write"))
 	if !strings.Contains(buf.String(), "[Error]") {
 		t.Fatalf("other library errors must stay visible:\n%s", buf.String())
 	}
@@ -456,13 +456,13 @@ func TestMCPCommandLoggerSeparatesTeardownFromFailure(t *testing.T) {
 func TestMCPCommandLoggerRoutesInfoAndSurvivesANilLogger(t *testing.T) {
 	var buf bytes.Buffer
 	l := newMCPCommandLogger(slog.New(obs.NewHandler(&buf, slog.LevelDebug)))
-	l.Infof("connected to %s", "fetch")
+	l.Debug("connected to fetch")
 	if !strings.Contains(buf.String(), "[Debug]") ||
 		!strings.Contains(buf.String(), "connected to fetch") {
-		t.Fatalf("the library's Info line must follow our level and sink:\n%s", buf.String())
+		t.Fatalf("the library's Debug line must follow our level and sink:\n%s", buf.String())
 	}
 	// ★ The kb CLI builds a client without a process logger. Adapting the
 	//   library must not turn that path into a nil-pointer panic.
-	newMCPCommandLogger(nil).Errorf("Error reading from stdout: %v",
+	newMCPCommandLogger(nil).Error("Error reading from stdout", "err",
 		errors.New("file already closed"))
 }
