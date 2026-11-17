@@ -117,7 +117,7 @@ func buildNestedRoleAgents(t *testing.T) (adk.TypedAgent[*schema.Message], *nest
 		ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{
 			Tools: []tool.BaseTool{writeTool},
 		}},
-		Handlers:               []adk.TypedChatModelAgentMiddleware[*schema.Message]{newApprovalMiddleware(NewPolicy(nil))},
+		Handlers:               []adk.TypedChatModelAgentMiddleware[*schema.Message]{newApprovalMiddleware(NewPolicy(nil), scope{})},
 		MaxIteration:           4,
 		WithoutGeneralSubAgent: true,
 	})

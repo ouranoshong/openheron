@@ -64,15 +64,15 @@ sudo usermod -aG kvm "$USER"
 sandbox must not hold the key itself. Bind it on the host once:
 
 ```sh
-printf '%s' "$DEEPSEEK_API_KEY" | sbx secret set-custom \
-    --host api.deepseek.com --env DEEPSEEK_API_KEY \
+printf '%s' "$LLM_DEEPSEEK_API_KEY" | sbx secret set-custom \
+    --host api.deepseek.com --env LLM_DEEPSEEK_API_KEY \
     --placeholder proxy-managed --value-stdin
 ```
 
 ★ The placeholder `proxy-managed` is deliberate: it is the sentinel the
 runtime injects into the container. The real key stays in the host's secret
 store, and the sandbox's proxy swaps it in on the way out. The container only
-ever sees `DEEPSEEK_API_KEY=proxy-managed`.
+ever sees `LLM_DEEPSEEK_API_KEY=proxy-managed`.
 
 ★ `--value-stdin` keeps the key out of your shell history and out of the
 process arguments.
@@ -135,7 +135,7 @@ capabilities:
       service: deepseek
       phase: runtime
       apiKey:
-        name: DEEPSEEK_API_KEY
+        name: LLM_DEEPSEEK_API_KEY
         proxyManaged: true
         inject:
           - {domain: api.deepseek.com, header: Authorization, format: "Bearer %s"}
@@ -227,7 +227,7 @@ mixin came from:
   ✓ image — ready
   ✓ assembled kit image (21 layers)
     setting 1 environment variable
-      +DEEPSEEK_API_KEY
+      +LLM_DEEPSEEK_API_KEY
   ✓ http — published localhost:32772 -> 8080/tcp
 
   ✓ Created sandbox openheron
@@ -389,23 +389,28 @@ model profile — this is what `llm/deepseek.yaml` contains:
 type: openai_compat
 base_url: https://api.deepseek.com
 
-# ★ api_key holds the **name of an environment variable**, rendered as ${NAME}.
-api_key: ${DEEPSEEK_API_KEY}
+# ★ The api key is **not** in this file. The provider's name is the file's
+#   name, and the name says where the key comes from:
+#
+#     the environment variable LLM_DEEPSEEK_API_KEY, or
+#     the keyring entry llm:deepseek
+#
+# ★ The environment wins when both are there.
 
 timeout: 5m
 
 models:
   - id: deepseek-flash
-    context_window: 131072
+    context_window: 1000000
 
     # Tier vocabulary: tier name → the field this endpoint sends it as.
     # An agent only writes `reasoning: high`; it does not need to know what shape
     # "high" has at this vendor.
     #
     # ★ This table is **not optional**: a tier the endpoint does not declare is
-    #   **silently ignored** — an agent writes `reasoning: high` while the model
-    #   has no "high", which means "no thinking at all", with no error and no
-    #   message. Declaring it is what makes `high` / `low` actually take effect.
+    #   **refused when the configuration loads** — the message names the agent,
+    #   the tier it asked for and the levels this model does declare.
+    #   Declaring it is what makes `high` / `low` actually take effect.
     reasoning:
       off:  { reasoning_effort: none, thinking: { type: disabled } }
       low:  { reasoning_effort: low,  thinking: { type: enabled } }
@@ -418,8 +423,10 @@ models:
 
 - `base_url` — the vendor's endpoint, **path included**, exactly as their
   documentation writes it.
-- `api_key` — the **name** of an environment variable, written as `${NAME}`. A
-  literal key is rejected: the configuration is meant to be committed.
+- the **api key** is not in the file at all — the provider's name is the
+  anchor. `llm/deepseek.yaml` reads `LLM_DEEPSEEK_API_KEY`, or the keyring
+  entry `llm:deepseek`. A literal key is rejected: the configuration is meant
+  to be committed.
 
 ★ **`agents/main.md` and `agents/task.md`** are the two agents: the entry one
 understands the request, splits it, delegates and verifies; the executor one
@@ -527,8 +534,8 @@ sbx run docker.io/ouranoshong/openheron-kit:latest \
 ★ **And bind that vendor's key** before you start:
 
 ```sh
-printf '%s' "$OPENAI_API_KEY" | sbx secret set-custom \
-    --host api.openai.com --env OPENAI_API_KEY \
+printf '%s' "$LLM_OPENAI_API_KEY" | sbx secret set-custom \
+    --host api.openai.com --env LLM_OPENAI_API_KEY \
     --placeholder proxy-managed --value-stdin
 ```
 
@@ -627,5 +634,5 @@ narrow that, narrow it on the host, not by editing the Kit.
 ★ **Building this yourself?** The image is published, but the sources are
 in the repository: [`BUILDING.md`](BUILDING.md) covers building it from
 source, changing the descriptor, and publishing a new version.
-[`docs/sandbox-kit-design.md`](../docs/sandbox-kit-design.md) is the design
+[`docs/tools-design.md`](../docs/tools-design.md) is the design
 behind it, and every assumption it rests on is measured.

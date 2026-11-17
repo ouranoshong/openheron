@@ -112,46 +112,88 @@ describe("loadAgentBadge", () => {
 })
 
 describe("checkConfigChanged", () => {
-  function stubFetch(responder: () => Promise<Response>): void {
-    globalThis.fetch = (async () => responder()) as unknown as typeof fetch
+  // stubFetch answers by URL: the cheap signal and the fat view are two
+  // different endpoints, and the test has to be able to tell them apart.
+  function stubFetch(responder: (url: string) => Promise<Response>): string[] {
+    const seen: string[] = []
+    globalThis.fetch = (async (input: any) => {
+      const url = typeof input === "string" ? input : String(input?.url ?? "")
+      seen.push(url)
+      return responder(url)
+    }) as unknown as typeof fetch
+    return seen
   }
 
-  test("本来没有缓存时，填上并报「该刷新」", async () => {
-    stubFetch(async () =>
-      new Response(JSON.stringify(makeView([makeAgent("main")], "main", "v1")), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
+  function jsonRes(body: unknown): Response {
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })
+  }
+
+  // ★ The whole point of the cheap check: it reads the fingerprint and
+  //   nothing else. The agent table is fetched by the caller, and only
+  //   when the fingerprint moved.
+  test("只读指纹，不拉整张 agent 表", async () => {
+    const seen = stubFetch(async (url) =>
+      url === "/v2/health"
+        ? jsonRes({ configVersion: "v1" })
+        : jsonRes(makeView([makeAgent("main")], "main", "v1")),
     )
 
-    expect(await checkConfigChanged()).toBe(true)
-    expect((await loadAgentBadge())?.id).toBe("main")
+    await loadAgentBadge(true)
+    seen.length = 0
+    expect(await checkConfigChanged()).toBe(false)
+    expect(seen).toEqual(["/v2/health"])
   })
 
-  test("指纹变了才算变了，并把缓存换成新的", async () => {
-    let version = "v1"
-    stubFetch(async () =>
-      new Response(JSON.stringify(makeView([makeAgent("main")], "main", version)), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
+  test("指纹没变就是没变", async () => {
+    stubFetch(async (url) =>
+      url === "/v2/health"
+        ? jsonRes({ configVersion: "v1" })
+        : jsonRes(makeView([makeAgent("main")], "main", "v1")),
     )
+    await loadAgentBadge(true)
+    expect(await checkConfigChanged()).toBe(false)
+  })
 
+  test("指纹变了就报变了 —— 视图由调用方重新拉", async () => {
+    let version = "v1"
+    stubFetch(async (url) =>
+      url === "/v2/health"
+        ? jsonRes({ configVersion: version })
+        : jsonRes(makeView([makeAgent("main")], "main", version)),
+    )
     await loadAgentBadge(true)
     expect(await checkConfigChanged()).toBe(false)
 
     version = "v2"
     expect(await checkConfigChanged()).toBe(true)
+    // ★ The check does not refresh the view — the caller does, and only
+    //   now that the fingerprint has moved.
+    await loadAgentBadge(true)
+    expect((await loadAgentBadge())?.id).toBe("main")
+  })
+
+  test("服务器给不出便宜信号时退回整张表", async () => {
+    const seen = stubFetch(async (url) =>
+      url === "/v2/health"
+        ? jsonRes({ ok: true })
+        : jsonRes(makeView([makeAgent("main")], "main", "v1")),
+    )
+    await loadAgentBadge(true)
+    seen.length = 0
+    expect(await checkConfigChanged()).toBe(false)
+    expect(seen).toContain("/v2/agents")
   })
 
   test("拉取失败时安静地当没变，旧缓存留着", async () => {
     let fail = false
-    stubFetch(async () => {
+    stubFetch(async (url) => {
       if (fail) throw new Error("boom")
-      return new Response(JSON.stringify(makeView([makeAgent("main")], "main", "v1")), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      })
+      return url === "/v2/health"
+        ? jsonRes({ configVersion: "v1" })
+        : jsonRes(makeView([makeAgent("main")], "main", "v1"))
     })
 
     await loadAgentBadge(true)

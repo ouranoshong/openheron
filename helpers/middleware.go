@@ -29,7 +29,7 @@ type safeToolMiddleware struct {
 func (m *safeToolMiddleware) WrapInvokableToolCall(
 	_ context.Context,
 	endpoint adk.InvokableToolCallEndpoint,
-	_ *adk.ToolContext,
+	tCtx *adk.ToolContext,
 ) (adk.InvokableToolCallEndpoint, error) {
 	return func(ctx context.Context, args string, opts ...tool.Option) (string, error) {
 		result, err := endpoint(ctx, args, opts...)
@@ -37,6 +37,10 @@ func (m *safeToolMiddleware) WrapInvokableToolCall(
 			if _, ok := compose.IsInterruptRerunError(err); ok {
 				return "", err
 			}
+			// ★ The failure is recorded **here**: this is the only layer
+			//   that sees the error. Everything above it — and the model
+			//   itself — sees a string.
+			recordToolFailure(ctx, tCtx, err)
 			return fmt.Sprintf("[tool error] %v", err), nil
 		}
 		return result, nil
@@ -46,7 +50,7 @@ func (m *safeToolMiddleware) WrapInvokableToolCall(
 func (m *safeToolMiddleware) WrapStreamableToolCall(
 	_ context.Context,
 	endpoint adk.StreamableToolCallEndpoint,
-	_ *adk.ToolContext,
+	tCtx *adk.ToolContext,
 ) (adk.StreamableToolCallEndpoint, error) {
 	return func(ctx context.Context, args string, opts ...tool.Option) (*schema.StreamReader[string], error) {
 		sr, err := endpoint(ctx, args, opts...)
@@ -54,9 +58,10 @@ func (m *safeToolMiddleware) WrapStreamableToolCall(
 			if _, ok := compose.IsInterruptRerunError(err); ok {
 				return nil, err
 			}
+			recordToolFailure(ctx, tCtx, err)
 			return SingleChunkReader(fmt.Sprintf("[tool error] %v", err)), nil
 		}
-		return SafeWrapReader(sr), nil
+		return SafeWrapReader(ctx, tCtx, sr), nil
 	}, nil
 }
 
@@ -71,7 +76,12 @@ func SingleChunkReader(msg string) *schema.StreamReader[string] {
 // SafeWrapReader proxies chunks from sr; on a stream error it emits the error
 // as a final chunk instead of propagating it, so the model sees a complete
 // (if error-annotated) tool result rather than a pipeline failure.
-func SafeWrapReader(sr *schema.StreamReader[string]) *schema.StreamReader[string] {
+//
+// ★ The failure is recorded too: the stream failed **after** it started, so
+//
+//	there was no error to catch at the call — and the call is the thing the
+//	interface has to mark as failed.
+func SafeWrapReader(ctx context.Context, tCtx *adk.ToolContext, sr *schema.StreamReader[string]) *schema.StreamReader[string] {
 	r, w := schema.Pipe[string](64)
 	go func() {
 		defer w.Close()
@@ -81,6 +91,7 @@ func SafeWrapReader(sr *schema.StreamReader[string]) *schema.StreamReader[string
 				return
 			}
 			if err != nil {
+				recordToolFailure(ctx, tCtx, err)
 				_ = w.Send(fmt.Sprintf("\n[tool error] %v", err), nil)
 				return
 			}

@@ -9,7 +9,7 @@ cp -r .openheron-example/{agents,llm,skills} /your/project/.openheron/
 | Directory | Contents |
 |---|---|
 | `agents/main.md` | agent declaration — frontmatter (`model` / `max_iterations` …) + **the body is the prompt** |
-| `llm/openai.yaml` | vendor profile — `base_url` / `api_key` / `models[]` / thinking tier table |
+| `llm/openai.yaml` | vendor profile — `base_url` / `models[]` / thinking tier table |
 | `server/config.yaml` | process parameters — listen address / directories / timeouts / **not hot-reloaded** |
 | `skills/<name>/SKILL.md` | eino native skill convention |
 | `tools/<tool>.yaml` | external tools and the knowledge base — **a provider without a configuration mounts nothing** (this sample ships none; external tools are all off by default) |
@@ -29,13 +29,17 @@ one log line is written.
 
 ## Three rules that trip people up
 
-1. **`api_key` must be written as `${ENV}`** — an environment variable that is not
-   set does **not** block startup, it only records one reminder in the startup log;
-   the "no permission" (401) only comes back when that endpoint is actually
-   requested. You can also use `@file:/path` to read the key from a file (a wrong
-   path is an error at startup). ★ **The `@file:` form needs quotes in YAML** — `@`
-   is a reserved character there, and an unquoted value does not parse at all.
-   **Do not write the key into this file** — it normally belongs in version control.
+1. **The api key is not written in this file** — the provider's **name** says where
+   it comes from: the environment variable `LLM_<PROVIDER>_API_KEY`, or the keyring
+   entry `llm:<provider>`. `llm/openai.yaml` therefore reads `LLM_OPENAI_API_KEY` and
+   `llm:openai`. ★ The **environment wins** when both are there, so a key stored in
+   the keyring is not in force while an old export is still in the shell. Store one
+   with `openheron secret set llm openai`. An unset variable does **not** block
+   startup, it only records one reminder in the startup log; the "no permission"
+   (401) only comes back when that endpoint is actually requested. You can also
+   point the variable at a file with `@file:/path` (a wrong path is an error at
+   startup). ★ **The `@file:` form needs quotes in YAML** — `@` is a reserved
+   character there, and an unquoted value does not parse at all.
 
 2. **`model` must be written as `<provider>/<model>`** — `provider` is the file name
    under `llm/`, and `model` is the `id` declared in that file's `models[]`. A

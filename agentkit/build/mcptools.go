@@ -183,6 +183,31 @@ func mcpAllowedNames(files decl.MCPFiles) map[string]bool {
 	return out
 }
 
+// mcpTrustedWriteNames returns the exposed names the servers' files declare
+// as writers.
+//
+// ★ It is the same assembly as the allow list, for the trusted
+//
+//	authorization mode: a tool the server's own file calls a writer runs
+//	without a nod when — and only when — the session is in the trusted
+//	mode.
+//
+// ★ It is assembled from the configuration, not from the server: the entry
+//
+//	"mcp__github__create_issue → writer" exists before the server is up.
+func mcpTrustedWriteNames(files decl.MCPFiles) map[string]bool {
+	out := map[string]bool{}
+	for name, cfg := range files {
+		if cfg == nil {
+			continue
+		}
+		for _, own := range cfg.Writes {
+			out[mcpExposedName(name, own)] = true
+		}
+	}
+	return out
+}
+
 // ── the provider ────────────────────────────────────────────────────────
 
 // mcpToolProvider mounts the configured MCP servers as tools.
@@ -247,6 +272,15 @@ func (p mcpToolProvider) mount(ctx context.Context, cfg *decl.MCPServerCfg,
 	for _, want := range cfg.Tools {
 		if !containsString(own, want) {
 			log.Warn("[mcp] the file asks for a tool the server does not have",
+				"server", cfg.Name, "tool", want, "offers", strings.Join(own, ","))
+		}
+	}
+	// ★ The same for the writers: a declared writer the server does not
+	// offer is a name nobody will ever call — it must not lie in the file
+	// unnoticed.
+	for _, want := range cfg.Writes {
+		if !containsString(own, want) {
+			log.Warn("[mcp] the file declares a writer the server does not have",
 				"server", cfg.Name, "tool", want, "offers", strings.Join(own, ","))
 		}
 	}

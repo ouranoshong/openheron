@@ -3,6 +3,7 @@ package kb
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,229 @@ import (
 
 	"github.com/ouranoshong/openheron/persist"
 )
+
+// ★ The regression this file exists for: a commit is a read-modify-write of
+//
+//	a shared catalog, and it was not atomic. Two writers that merged onto
+//	the same base took each other's entries away, and the sequential test
+//	above passed while the concurrent one lost everything.
+func TestConcurrentWritersKeepEveryEntry(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "docs")
+	a, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	b, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+
+	const rounds = 25
+	var wg sync.WaitGroup
+	for i := 0; i < rounds; i++ {
+		wg.Add(2)
+		go func(i int) {
+			defer wg.Done()
+			path := fmt.Sprintf("a%d.md", i)
+			for k := 0; k < 3; k++ {
+				if _, err := a.Reconcile(context.Background(), ReconcileRequest{
+					Fresh: []Entry{ent(path, "t", "甲")}, Scope: []string{path},
+				}); err != nil {
+					t.Errorf("writer A: %v", err)
+					return
+				}
+			}
+		}(i)
+		go func(i int) {
+			defer wg.Done()
+			path := fmt.Sprintf("b%d.md", i)
+			for k := 0; k < 3; k++ {
+				if _, err := b.Reconcile(context.Background(), ReconcileRequest{
+					Fresh: []Entry{ent(path, "t", "乙")}, Scope: []string{path},
+				}); err != nil {
+					t.Errorf("writer B: %v", err)
+					return
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	want := make([]string, 0, rounds*2)
+	for i := 0; i < rounds; i++ {
+		want = append(want, fmt.Sprintf("a%d.md", i), fmt.Sprintf("b%d.md", i))
+	}
+	for _, p := range want {
+		if _, ok := findEntry(t, dir, p); !ok {
+			t.Fatalf("entry %s was lost to a concurrent writer; catalog holds %v", p, allPaths(t, dir))
+		}
+	}
+}
+
+// ★ Two goroutines of **one** process share one store, so the file lock
+//
+//	cannot separate them: a FileLock is re-entrant per object, and both
+//	would believe they held it. The in-process mutex is what does.
+func TestConcurrentWritersOnOneStoreKeepEveryEntry(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "docs")
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	const rounds = 25
+	var wg sync.WaitGroup
+	for i := 0; i < rounds; i++ {
+		wg.Add(2)
+		go func(i int) {
+			defer wg.Done()
+			path := fmt.Sprintf("a%d.md", i)
+			for k := 0; k < 3; k++ {
+				if _, err := s.Reconcile(context.Background(), ReconcileRequest{
+					Fresh: []Entry{ent(path, "t", "甲")}, Scope: []string{path},
+				}); err != nil {
+					t.Errorf("writer A: %v", err)
+					return
+				}
+			}
+		}(i)
+		go func(i int) {
+			defer wg.Done()
+			path := fmt.Sprintf("b%d.md", i)
+			for k := 0; k < 3; k++ {
+				if _, err := s.Reconcile(context.Background(), ReconcileRequest{
+					Fresh: []Entry{ent(path, "t", "乙")}, Scope: []string{path},
+				}); err != nil {
+					t.Errorf("writer B: %v", err)
+					return
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	for i := 0; i < rounds; i++ {
+		for _, p := range []string{fmt.Sprintf("a%d.md", i), fmt.Sprintf("b%d.md", i)} {
+			if _, ok := findEntry(t, dir, p); !ok {
+				t.Fatalf("entry %s was lost to a concurrent writer; catalog holds %v", p, allPaths(t, dir))
+			}
+		}
+	}
+}
+
+// ★ A writer may only remove what it saw. An entry that appeared in the
+//
+//	catalog after the writer looked belongs to somebody else, and taking it
+//	away is how a full index drops the work of a partial one.
+func TestReconcileKeepsAnEntryTheWriterNeverSaw(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "docs")
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	reconcile(t, s, ReconcileRequest{
+		Fresh: []Entry{ent("x.md", "t", "x")}, Scope: []string{"x.md"},
+	})
+
+	// ★ The base is empty: this writer saw no catalog at all.
+	reconcile(t, s, ReconcileRequest{
+		Fresh:     []Entry{ent("y.md", "t", "y")},
+		BasePaths: []string{},
+	})
+
+	for _, p := range []string{"x.md", "y.md"} {
+		if _, ok := findEntry(t, dir, p); !ok {
+			t.Fatalf("entry %s was lost; catalog holds %v", p, allPaths(t, dir))
+		}
+	}
+}
+
+// ★ Two full indexes that ran at the same time must not take the catalog
+//
+//	away from each other: each may only remove what it saw.
+func TestTwoFullIndexesDoNotTakeOverEachOther(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "docs")
+	a, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	b, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if _, err := a.Reconcile(context.Background(), ReconcileRequest{
+			Fresh:     []Entry{ent("a.md", "t", "甲")},
+			BasePaths: []string{},
+		}); err != nil {
+			t.Errorf("writer A: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if _, err := b.Reconcile(context.Background(), ReconcileRequest{
+			Fresh:     []Entry{ent("b.md", "t", "乙")},
+			BasePaths: []string{},
+		}); err != nil {
+			t.Errorf("writer B: %v", err)
+		}
+	}()
+	wg.Wait()
+
+	for _, p := range []string{"a.md", "b.md"} {
+		if _, ok := findEntry(t, dir, p); !ok {
+			t.Fatalf("entry %s was lost; catalog holds %v", p, allPaths(t, dir))
+		}
+	}
+}
+
+// ★ The sidecar is a cache of the catalog's derived state, and it is a
+//
+//	**whole file**: a writer that saved the map it held in memory dropped
+//	every entry another writer had added.
+func TestSidecarKeepsAnotherWritersEntry(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "docs")
+	a, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	b, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+
+	reconcile(t, a, ReconcileRequest{
+		Fresh: []Entry{ent("a.md", "t", "甲")}, Scope: []string{"a.md"},
+	})
+	reconcile(t, b, ReconcileRequest{
+		Fresh: []Entry{ent("b.md", "t", "乙")}, Scope: []string{"b.md"},
+	})
+
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	der := s.Sidecar()
+	for _, p := range []string{"a.md", "b.md"} {
+		if _, ok := der.Entries[p]; !ok {
+			t.Fatalf("the sidecar lost %s; it holds %v", p, der.Entries)
+		}
+	}
+}
 
 func TestReconcileDoesNotLoseAnotherWritersEntries(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "docs")

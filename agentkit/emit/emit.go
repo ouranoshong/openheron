@@ -84,8 +84,30 @@ type Options struct {
 	// a token count into a ratio; it must not resolve model refs itself —
 	// the builder owns that lookup.
 	Contexts map[string]contract.AgentContext
+	// ToolFailures carries the failures the round's tool calls reported.
+	//
+	// ★ The middleware is the only layer that sees a tool error — it is
+	//   the one that turns it into a string for the model — so the
+	//   failure travels from there to here through the round's collector.
+	//   ★ The derivation is where it becomes a fact: the wire learns that
+	//   the call failed, and the archived message carries the same
+	//   failure so the history says it too.
+	//
+	// ★ Nil means the round collects nothing, and no call is reported as
+	//   failed.
+	ToolFailures *helpers.ToolFailures
 	// Logger is injected by the run. Nil drops the derivation's own lines.
 	Logger *slog.Logger
+	// Drained is closed when the agent's event stream has closed.
+	//
+	// ★ The run owns the channel, and it is the run's word that the agent
+	//   is done. ★ The framework reads the agent's state when the loop
+	//   stops, and the agent's stream is what writes it — so a round that
+	//   ends while the agent is still winding down leaves the framework
+	//   reading a field the agent is still writing.
+	//
+	// ★ Nil means the caller does not care.
+	Drained chan struct{}
 }
 
 // Artifacts are what the run archives.
@@ -123,6 +145,7 @@ func Derive(src Source, opts Options, sink Sink, cancel <-chan struct{}) (Artifa
 		opts:   opts,
 		sink:   sink,
 		events: make(chan *adk.TypedAgentEvent[*schema.Message], 64),
+		done:   make(chan struct{}),
 	}
 	go d.pump(src, cancel)
 	return d.run(cancel)
@@ -144,6 +167,13 @@ type deriver struct {
 	// events is the agent's stream, pumped by a goroutine.
 	events chan *adk.TypedAgentEvent[*schema.Message]
 
+	// done is closed when the derivation is over.
+	//
+	// ★ It tells the pump to stop handing events over: the run has
+	//   what it needs, and the events that are left are the agent's
+	//   way of winding down.
+	done chan struct{}
+
 	intermediates []*schema.Message
 	pending       []contract.PendingInterrupt
 	usage         contract.Usage
@@ -164,6 +194,9 @@ type deriver struct {
 //	the events it takes are the ones the cancelled run no longer wants.
 func (d *deriver) pump(src Source, cancel <-chan struct{}) {
 	defer close(d.events)
+	if d.opts.Drained != nil {
+		defer close(d.opts.Drained)
+	}
 	for {
 		ev, ok := src.Next()
 		if !ok {
@@ -173,11 +206,29 @@ func (d *deriver) pump(src Source, cancel <-chan struct{}) {
 		case d.events <- ev:
 		case <-cancel:
 			return
+		case <-d.done:
+			// ★ The derivation is over and the run does not want these
+			//   events any more. ★ The stream still has to be read to the
+			//   end: the framework reads the agent's state when the loop
+			//   stops, and the agent's stream is what writes it. ★ So the
+			//   pump reads the rest and drops it — it is still the only
+			//   reader, and the run's wait ends when the stream closes.
+			for {
+				if _, ok := src.Next(); !ok {
+					return
+				}
+			}
 		}
 	}
 }
 
 func (d *deriver) run(cancel <-chan struct{}) (Artifacts, error) {
+	// ★ The derivation is over the moment this returns — and the pump has
+	//
+	//	to know it: the events that are left belong to an agent that is
+	//	winding down, and nobody is going to read them.
+	defer close(d.done)
+
 	mainAgent := d.opts.RootAgent
 
 	for {
@@ -274,6 +325,28 @@ func (d *deriver) run(cancel <-chan struct{}) (Artifacts, error) {
 				})
 				out := []*schema.Message{message.NewToolResult(callID, name, content)}
 				stamp(out[0], ownerOf(ev, mainAgent))
+				// ★ The failure is the **call's** own fact, and it reaches two
+				//   places: the wire (so the interface can say the call failed)
+				//   and the archived message (so the history says it too).
+				//   ★ One fact, two readers — and they must not drift: a
+				//   reload that lost the failure would show a failed call as a
+				//   successful one, and the two surfaces would disagree about
+				//   the same call.
+				//
+				//   ★ The failure is taken **after** the result was published:
+				//   the client learns the content first and the verdict second,
+				//   and the verdict is what colours the content.
+				if failure, failed := d.opts.ToolFailures.Take(callID); failed {
+					message.StampToolError(out[0], failure.Error)
+					d.publish(contract.RunEvent{
+						Kind:     contract.RunEventToolFailed,
+						RunID:    d.opts.RunID,
+						Text:     failure.Error,
+						ToolID:   failure.ToolID,
+						ToolName: failure.ToolName,
+						Sub:      sub,
+					})
+				}
 				d.intermediates = append(d.intermediates, out...)
 
 			case mo.IsStreaming && mo.MessageStream != nil:
@@ -401,7 +474,7 @@ func interruptsFrom(ev *adk.TypedAgentEvent[*schema.Message], mainAgent string) 
 		}
 		item := contract.Interrupt{
 			ID:       ic.ID,
-			Reason:   "tool_call",
+			Reason:   contract.PendingReasonToolCall,
 			Message:  describe(ic.Info),
 			Metadata: approvalMetadata(ic.Info),
 		}

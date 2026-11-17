@@ -81,6 +81,30 @@ type Session interface {
 	//   underneath the loop.
 	SetAgentID(id string) error
 
+	// AuthorizationMode is the session's approval mode.
+	//
+	// ★ It is the session's own property: every client that asks gets the
+	//   same answer, and it survives a restart. It says **whether a call
+	//   needs a human decision**, never which tools the agent may use.
+	//
+	// ★ A session that never chose one reads as the default (ask).
+	AuthorizationMode() contract.AuthorizationMode
+	// SetAuthorizationMode persists a new mode.
+	//
+	// ★ It affects **later rounds**: the round in flight keeps the mode it
+	//   started with, the way it keeps the project root it started with.
+	SetAuthorizationMode(mode contract.AuthorizationMode) error
+
+	// AuthorizationConfirmed reports whether this session has confirmed full
+	// authorization once.
+	//
+	// ★ It is what keeps the confirmation a **once per session** thing: the
+	//   second switch to full does not ask again, and another session asks
+	//   again.
+	AuthorizationConfirmed() bool
+	// SetAuthorizationConfirmed records that confirmation.
+	SetAuthorizationConfirmed(confirmed bool) error
+
 	Workspace() string
 	PutFile(name string, r io.Reader) (string, error)
 
@@ -147,6 +171,17 @@ type Session interface {
 	//	the session is busy — the volatile runtime state cannot answer that
 	//	after a crash.
 	RunLedger() RunLedger
+
+	// Operations returns this session's operation log.
+	//
+	// ★ It is the session's own, like the ledger: the file lives next to the
+	//   transcript, and it is where "what happened to this session, in
+	//   order" is answered.
+	//
+	// ★ Nothing reads it back as the truth. It is a projection of the other
+	//   homes — the session record, the run ledger, the transcript — and
+	//   when the two disagree, the home wins.
+	Operations() OperationLog
 }
 
 // PendingApproval is the set of outstanding human decisions.

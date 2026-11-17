@@ -4,8 +4,16 @@
 type: openai_compat
 base_url: {{base_url}}
 
-# ★ api_key holds the **name of an environment variable**, rendered as ${NAME}.
-api_key: {{api_key_env}}
+# ★ The api key is **not** in this file. The provider's name is the file's
+#   name, and the name says where the key comes from:
+#
+#     the environment variable LLM_<PROVIDER>_API_KEY, or
+#     the keyring entry llm:<provider>
+#
+#   ★ Rename this file to llm/<provider>.yaml and the names follow it.
+#   ★ The environment wins when both are there. Store one with
+#   `openheron secret set llm <provider>`, or export the variable — a key that
+#   is in neither place is one reminder away from a 401.
 
 timeout: 5m
 

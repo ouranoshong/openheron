@@ -38,6 +38,11 @@ export function promote(set: Set, get: Get, fromKey: string, serverId: string, a
     order: s.order.map((x) => (x === fromKey ? serverId : x)),
     activeId: s.activeId === null ? serverId : s.activeId,
     pendingAgentId: null,
+    // ★ The staged mode is spent: the session exists, and it carries the
+    //   mode the server gave it. ★ Keeping the staging would put the next
+    //   conversation in the mode of this one.
+    pendingAuthorizationMode: null,
+    pendingAuthorizationConfirmed: false,
   })
   writeActiveThreadId(serverId)
   currentRunKey = serverId

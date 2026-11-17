@@ -24,6 +24,14 @@ const (
 	IndexVersion = 2
 
 	maxCommitAttempts = 3
+
+	// commitWait bounds how long a writer waits for the commit lock.
+	//
+	// ★ The critical section is two file writes, so a wait that reaches
+	//   this bound means the holder is gone without releasing the lock —
+	//   which the operating system does not do for a process that died, so
+	//   it means something is wrong rather than slow.
+	commitWait = 30 * time.Second
 )
 
 type Derived struct {
@@ -52,6 +60,25 @@ type Store struct {
 	dir string
 
 	run *persist.FileLock
+
+	// write guards the commit: the read-modify-write of the catalog and
+	// the sidecar.
+	//
+	// ★ It is a **different** lock from the run lock on purpose. The run
+	//   lock says "one indexing run at a time" and is held across the
+	//   embedding, which is slow. The commit lock says "one commit at a
+	//   time" and is held across the merge alone, which is fast — so a
+	//   writer waiting to embed never blocks a writer that is ready to
+	//   commit.
+	write *persist.FileLock
+
+	// commitMu serialises the commits **inside this process**.
+	//
+	// ★ The file lock alone cannot do that: a FileLock is re-entrant per
+	//   object, so two goroutines that share one Store would each believe
+	//   they hold it, and both would merge onto the same base — which is
+	//   exactly how one writer's entries disappear.
+	commitMu sync.Mutex
 
 	// log is injected by the assembly layer. Nil drops the lines, which is
 	// what a test that does not care about them gets.
@@ -123,22 +150,39 @@ func NewStore(dir string, opts ...Option) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{dir: dir, run: run, der: Derived{IndexVersion: IndexVersion, Entries: map[string]DerivedEntry{}}}
+	write, err := persist.OpenFileLock(persist.WriteLockPath(dir))
+	if err != nil {
+		_ = run.Close()
+		return nil, err
+	}
+	s := &Store{dir: dir, run: run, write: write, der: Derived{IndexVersion: IndexVersion, Entries: map[string]DerivedEntry{}}}
 	for _, o := range opts {
 		o(s)
 	}
 	if err := s.load(); err != nil {
 		_ = run.Close()
+		_ = write.Close()
 		return nil, err
 	}
 	return s, nil
 }
 
 func (s *Store) Close() error {
-	if s == nil || s.run == nil {
+	if s == nil {
 		return nil
 	}
-	return s.run.Close()
+	var first error
+	if s.run != nil {
+		if err := s.run.Close(); err != nil {
+			first = err
+		}
+	}
+	if s.write != nil {
+		if err := s.write.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 func (s *Store) Dir() string { return s.dir }
@@ -234,19 +278,48 @@ type ReconcileRequest struct {
 
 	Scope []string
 
+	// BasePaths is the set of paths the catalog held when this writer
+	// decided what to index.
+	//
+	// ★ It is what separates a **removal** from a **takeover**. An entry
+	//   that is in the catalog, missing from Fresh, and *not* in BasePaths
+	//   was written by somebody else after this writer looked — removing it
+	//   would drop another writer's work. ★ The scope says which entries
+	//   this writer may touch; the base says which of them it has seen.
+	//
+	//   A nil BasePaths means "no base was recorded": the writer then falls
+	//   back to the catalog as it was when the reconcile began.
+	BasePaths []string
+
 	Embed func(ctx context.Context, entries []Entry) (map[string][]float32, error)
 }
 
 type ReconcileResult struct {
-	ReEmbedded   int
-	Unchanged    int
-	Added        int
-	Removed      int
-	removedPaths []string
-	Attempts     int
-	Warnings     []string
+	ReEmbedded int
+	Unchanged  int
+	Added      int
+	Removed    int
+	Attempts   int
+	Warnings   []string
 }
 
+// Reconcile merges req into the catalog and commits it.
+//
+// ★ The commit is a **read-modify-write** of two files, and it is the one
+//
+//	place in this package where two writers can destroy each other's work.
+//	The shape below is what makes it safe:
+//
+//	- The embedding runs **before** the commit lock is taken. It is the slow
+//	  part — a network round trip per batch — and a writer that held the
+//	  lock across it would make every other writer wait for the slowest
+//	  embedding instead of for the merge.
+//	- The merge base is read **inside** the lock, and it is read from the
+//	  disk: both the catalog and the sidecar. ★ A base read before the lock
+//	  is a base another writer may have changed in the meantime, and merging
+//	  onto it is how an entry that was just written disappears.
+//	- The write is read back and compared. That catches the writer that
+//	  does not take the lock at all — a person editing catalog.md.
 func (s *Store) Reconcile(ctx context.Context, req ReconcileRequest) (*ReconcileResult, error) {
 	if req.Dim < 0 {
 		return nil, fmt.Errorf("kb: dim must not be negative, got %d", req.Dim)
@@ -260,6 +333,62 @@ func (s *Store) Reconcile(ctx context.Context, req ReconcileRequest) (*Reconcile
 				"the path is the primary key of a catalog entry", e.Title)
 		}
 	}
+
+	// ★ The base: the paths this writer had seen when it decided what to
+	//   index. It is what separates a removal from a takeover.
+	//
+	//   A caller that recorded its own base — the indexer does, because it
+	//   reads the catalog before it walks the corpus — keeps it. A caller
+	//   that did not falls back to the catalog as it was when this reconcile
+	//   began, which is the safe direction: it can still remove what it
+	//   saw, and it cannot remove what it did not.
+	cur, _, err := s.readCatalog()
+	if err != nil {
+		return nil, err
+	}
+	if req.BasePaths == nil {
+		req.BasePaths = pathsOf(cur.Entries)
+	}
+
+	der, err := s.readDerived()
+	if err != nil {
+		return nil, err
+	}
+
+	// ★ Phase one: the embedding. It runs outside the commit lock on
+	//   purpose — see the note above. The entries it is given are the
+	//   candidate set of a merge that has not happened yet; the commit
+	//   merges again and keeps whatever of it still applies.
+	var vectors map[string][]float32
+	if req.Embed != nil {
+		cand, _, _ := mergeCatalog(cur, der, req)
+		vectors, err = req.Embed(ctx, cand.Entries)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return s.commit(ctx, req, vectors)
+}
+
+// commit merges req onto the state on disk and writes it.
+//
+// ★ It holds the commit lock for the whole read-modify-write. Every read of
+//
+//	the merge base happens here, under the lock: a base read before the lock
+//	was taken is a base another writer may already have moved.
+func (s *Store) commit(ctx context.Context, req ReconcileRequest, vectors map[string][]float32) (
+	*ReconcileResult, error) {
+
+	s.commitMu.Lock()
+	defer s.commitMu.Unlock()
+
+	release, err := s.write.Lock(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("kb: %s is being written by another process: %w", s.dir, err)
+	}
+	defer release()
+
 	mdPath := filepath.Join(s.dir, catalogFile)
 
 	var lastWarnings []string
@@ -268,27 +397,39 @@ func (s *Store) Reconcile(ctx context.Context, req ReconcileRequest) (*Reconcile
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+
 		cur, warnings, err := s.readCatalog()
 		if err != nil {
 			return nil, err
 		}
 		lastWarnings = warnings
 
-		// ★ The derived state is snapshotted under the lock, and the snapshot
-		//   is a **deep** copy: s.der.Entries is a map that install and
-		//   SetVectors mutate in place, so a shallow copy would still be
-		//   shared with the writer — and mergeCatalog iterates it.
+		// ★ The derived state is read from the disk as well. It is a cache
+		//   of another writer's work: a store that was opened before that
+		//   writer committed holds a map that is already out of date, and
+		//   merging onto it drops the entries that writer added.
+		der, err := s.readDerived()
+		if err != nil {
+			return nil, err
+		}
+		// ★ The identity — the model and the dimension the vectors mean —
+		//   belongs to the index, not to one merge. ★ The copy on the disk
+		//   may not carry it yet: the first run learns it in memory, and
+		//   the sidecar that would persist it is written by this very
+		//   commit. So the merge takes the identity from the store.
 		s.mu.RLock()
-		der := cloneDerived(s.der)
+		model, dim := s.der.Model, s.der.Dim
 		s.mu.RUnlock()
+		if model != "" {
+			der.Model = model
+		}
+		if dim > 0 {
+			der.Dim = dim
+		}
 
 		merged, next, res := mergeCatalog(cur, der, req)
 
-		if req.Embed != nil {
-			vectors, err := req.Embed(ctx, merged.Entries)
-			if err != nil {
-				return nil, err
-			}
+		if len(vectors) > 0 {
 			freshSet := make(map[string]bool, len(req.Fresh))
 			for _, e := range req.Fresh {
 				freshSet[e.Path] = true
@@ -329,7 +470,7 @@ func (s *Store) Reconcile(ctx context.Context, req ReconcileRequest) (*Reconcile
 
 		res.Attempts = attempt
 		res.Warnings = lastWarnings
-		s.install(merged, next, req, res)
+		s.install(merged, next, req)
 		return res, nil
 	}
 	if lastReadErr != nil {
@@ -348,6 +489,13 @@ func mergeCatalog(cur Catalog, der Derived, req ReconcileRequest) (Catalog, Deri
 	scope := map[string]bool{}
 	for _, p := range req.Scope {
 		scope[p] = true
+	}
+	// ★ The base is what this writer had seen. An entry that is missing
+	//   from it belongs to somebody else: it was written after this writer
+	//   looked, and taking it over is not this writer's call.
+	base := map[string]bool{}
+	for _, p := range req.BasePaths {
+		base[p] = true
 	}
 	willEmbed := req.Embed != nil
 
@@ -388,9 +536,16 @@ func mergeCatalog(cur Catalog, der Derived, req ReconcileRequest) (Catalog, Deri
 		}
 		f, ok := fresh[cur_e.Path]
 		if !ok {
+			if !base[cur_e.Path] {
+				// ★ Another writer put it there after this writer's
+				//   scan. Keeping it is the only safe answer: it is not
+				//   this writer's entry, and dropping it would take away
+				//   work nobody asked it to redo.
+				kept = append(kept, cur_e)
+				continue
+			}
 			delete(next.Entries, cur_e.Path)
 			res.Removed++
-			res.removedPaths = append(res.removedPaths, cur_e.Path)
 			continue
 		}
 		e := applyFresh(cur_e, f, der.Entries[cur_e.Path], &next, res, willEmbed)
@@ -439,6 +594,14 @@ func applyFresh(cur, fresh Entry, der DerivedEntry, next *Derived, res *Reconcil
 
 	de.EmbedText = out.EmbedText()
 
+	// ★ A vector belongs to the text it was made from. When the text
+	//   changed, the old vector describes a document that no longer
+	//   exists, and keeping it would answer a search with yesterday's
+	//   embedding. The new vector replaces it below; until it arrives the
+	//   entry has none — and a missing vector is cheaper than a wrong one.
+	if out.EmbedText() != der.EmbedText {
+		de.Vector = nil
+	}
 	if !willEmbed {
 		de.Vector = nil
 	}
@@ -516,6 +679,14 @@ func cloneDerived(d Derived) Derived {
 
 func (d Derived) clone() Derived { return cloneDerived(d) }
 
+func pathsOf(entries []Entry) []string {
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.Path)
+	}
+	return out
+}
+
 func cloneCatalog(c Catalog) Catalog {
 	out := c
 	out.Entries = append([]Entry(nil), c.Entries...)
@@ -526,40 +697,36 @@ func cloneCatalog(c Catalog) Catalog {
 	return out
 }
 
-func (s *Store) install(cat Catalog, next Derived, req ReconcileRequest, res *ReconcileResult) {
-	touched := make(map[string]bool, len(req.Fresh)+len(res.removedPaths))
-	for _, e := range req.Fresh {
-		touched[e.Path] = true
-	}
-
-	// ★ The stamp is the catalog file's stat, and the catalog has already
-	//   been written — so it can be stat'ed here, before the lock, and the
-	//   result assigned inside it. Stat'ing under the lock would hold it
-	//   across I/O, and assigning it after the unlock would write a guarded
-	//   field outside the guard.
+func (s *Store) install(cat Catalog, next Derived, req ReconcileRequest) {
+	// ★ The catalog has already been written, so it can be stat'ed here,
+	//   before the lock, and the result assigned inside it. Stat'ing under
+	//   the lock would hold it across I/O, and assigning it after the
+	//   unlock would write a guarded field outside the guard.
 	stamp, _ := statStamp(filepath.Join(s.dir, catalogFile))
 
 	s.mu.Lock()
-	if s.der.Entries == nil {
-		s.der.Entries = make(map[string]DerivedEntry, len(touched))
+	// ★ The derived state is **replaced**, not patched. It was merged onto
+	//   the state on disk, so it already holds every other writer's
+	//   entries; patching the in-memory map over it would keep the stale
+	//   ones and drop the fresh ones.
+	//
+	//   ★ The identity — the model and the dimension the vectors mean — is
+	//   not part of any one merge, so it is carried over rather than
+	//   inherited from the merge: a commit that started before the
+	//   identity was learned must not wipe it.
+	model, dim := s.der.Model, s.der.Dim
+	s.der = next
+	if model != "" {
+		s.der.Model = model
 	}
-	for p, de := range next.Entries {
-		old, had := s.der.Entries[p]
-		if !had || old.EmbedText != de.EmbedText || !sameVector(old.Vector, de.Vector) {
-			touched[p] = true
+	if dim > 0 {
+		s.der.Dim = dim
+	}
+	for _, de := range s.der.Entries {
+		if len(de.Vector) > 0 {
+			s.der.Dim = len(de.Vector)
+			break
 		}
-	}
-
-	for p := range touched {
-		if de, ok := next.Entries[p]; ok {
-			s.der.Entries[p] = de
-			if len(de.Vector) > 0 {
-				s.der.Dim = len(de.Vector)
-			}
-		}
-	}
-	for _, p := range res.removedPaths {
-		delete(s.der.Entries, p)
 	}
 	s.der.IndexVersion = IndexVersion
 	if req.Model != "" {
@@ -581,6 +748,20 @@ func (s *Store) SetVectors(vectors map[string][]float32) error {
 	if len(vectors) == 0 {
 		return nil
 	}
+	// ★ The sidecar is written from the in-memory state, so it must not
+	//   race a commit: a commit that lands in between would be overwritten
+	//   by a sidecar that knows nothing about it.
+	s.commitMu.Lock()
+	defer s.commitMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), commitWait)
+	defer cancel()
+	release, err := s.write.Lock(ctx)
+	if err != nil {
+		return fmt.Errorf("kb: %s is being written by another process: %w", s.dir, err)
+	}
+	defer release()
+
 	s.mu.Lock()
 	for path, v := range vectors {
 		de := s.der.Entries[path]
@@ -656,6 +837,41 @@ func readFileRetry(path string) ([]byte, error) {
 	return nil, err
 }
 
+// readDerived reads the sidecar from the disk.
+//
+// ★ The derived state is a **cache of another writer's work**: a store that
+//
+//	was opened before that writer committed holds a map that is already out
+//	of date, and merging onto it drops the entries that writer added. The
+//	merge base therefore comes from the disk, not from the memory.
+func (s *Store) readDerived() (Derived, error) {
+	path := filepath.Join(s.dir, sidecarFile)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Derived{IndexVersion: IndexVersion, Entries: map[string]DerivedEntry{}}, nil
+		}
+		return Derived{}, fmt.Errorf("kb: read %s: %w", path, err)
+	}
+	var der Derived
+	if err := gob.NewDecoder(bytes.NewReader(b)).Decode(&der); err != nil {
+		s.logger().Warn("[kb] sidecar is unreadable, vectors will be rebuilt next run", "err", err)
+		return Derived{IndexVersion: IndexVersion, Entries: map[string]DerivedEntry{}}, nil
+	}
+	if der.Entries == nil {
+		der.Entries = map[string]DerivedEntry{}
+	}
+	if der.IndexVersion != 0 && der.IndexVersion != IndexVersion {
+		s.logger().Warn("[kb] sidecar was written by another build; vectors will be rebuilt",
+			"written_by_version", der.IndexVersion, "this_build_version", IndexVersion)
+		return Derived{IndexVersion: IndexVersion, Entries: map[string]DerivedEntry{}}, nil
+	}
+	if der.IndexVersion == 0 {
+		der.IndexVersion = IndexVersion
+	}
+	return der, nil
+}
+
 // load reads the catalog and the sidecar into the store.
 //
 // ★ It does not take the lock: it runs while the store is being opened,
@@ -688,29 +904,9 @@ func (s *Store) load() error {
 		s.stamp = st
 	}
 
-	sb, err := os.ReadFile(filepath.Join(s.dir, sidecarFile))
+	der, err := s.readDerived()
 	if err != nil {
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("kb: read %s: %w", filepath.Join(s.dir, sidecarFile), err)
-		}
-		s.der = Derived{IndexVersion: IndexVersion, Entries: map[string]DerivedEntry{}}
-		return nil
-	}
-	var der Derived
-	if err := gob.NewDecoder(bytes.NewReader(sb)).Decode(&der); err != nil {
-		s.logger().Warn("[kb] sidecar is unreadable, vectors will be rebuilt next run", "err", err)
-		der = Derived{IndexVersion: IndexVersion, Entries: map[string]DerivedEntry{}}
-	}
-	if der.Entries == nil {
-		der.Entries = map[string]DerivedEntry{}
-	}
-	if der.IndexVersion != 0 && der.IndexVersion != IndexVersion {
-		s.logger().Warn("[kb] sidecar was written by another build; vectors will be rebuilt",
-			"written_by_version", der.IndexVersion, "this_build_version", IndexVersion)
-		der = Derived{IndexVersion: IndexVersion, Entries: map[string]DerivedEntry{}}
-	}
-	if der.IndexVersion == 0 {
-		der.IndexVersion = IndexVersion
+		return err
 	}
 	s.der = der
 	return nil

@@ -152,8 +152,9 @@ func (a attachAgent) Run(ctx context.Context, _ *adk.TypedAgentInput[*schema.Mes
 
 type attachBuilder struct{ released chan struct{} }
 
-func (b attachBuilder) Build(context.Context, string, string, contract.TurnKind) (adk.TypedAgent[*schema.Message], error) {
-	return attachAgent{released: b.released}, nil
+func (b attachBuilder) Build(context.Context, string, string, contract.TurnKind, string) (
+	adk.TypedAgent[*schema.Message], string, error) {
+	return attachAgent{released: b.released}, "", nil
 }
 
 // Contexts reports what each agent's context allows. The fake has no

@@ -17,33 +17,32 @@ import (
 type fakeManager struct {
 	mu  sync.Mutex
 	cfg *spec.Config
-	gen uint64
 }
 
-func (m *fakeManager) Current() (*spec.Config, uint64) {
+// Current returns the configuration the manager holds.
+//
+// ★ There is no generation beside it: the configuration **object** is the
+//
+//	tree's identity, and a counter said "everything changed" where the
+//	object says "**this** changed".
+func (m *fakeManager) Current() *spec.Config {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.cfg, m.gen
+	return m.cfg
 }
 
 func (m *fakeManager) set(cfg *spec.Config) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.cfg = cfg
-	m.gen++
 }
 
-// bump moves the generation without changing the configuration.
+// Publish accepts a configuration the builder read itself.
 //
-// ★ It is what the real configuration manager does when a server's tool
+// ★ The real manager publishes the same way: the configuration is
 //
-//	list changes, and the test needs the same hook: the tools are rebuilt
-//	once per generation.
-func (m *fakeManager) bump() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.gen++
-}
+//	replaced, and the tree's identity moves with it.
+func (m *fakeManager) Publish(cfg *spec.Config) { m.set(cfg) }
 
 func minimalTestConfig() *spec.Config {
 	return &spec.Config{
@@ -64,7 +63,7 @@ func testManager(cfg *spec.Config) *fakeManager {
 	if cfg == nil {
 		cfg = minimalTestConfig()
 	}
-	return &fakeManager{cfg: cfg, gen: 1}
+	return &fakeManager{cfg: cfg}
 }
 
 func newTestBuilder(t *testing.T) *Builder {
@@ -72,9 +71,9 @@ func newTestBuilder(t *testing.T) *Builder {
 	return newTestBuilderWithConfig(t, minimalTestConfig())
 }
 
-func newTestBuilderWithConfig(t *testing.T, cfg *spec.Config) *Builder {
+func newTestBuilderWithConfig(t *testing.T, cfg *spec.Config, opts ...Option) *Builder {
 	t.Helper()
-	b := NewBuilder(testManager(cfg))
+	b := NewBuilder(testManager(cfg), opts...)
 	b.models = func(context.Context, *spec.Config, string, CallIntent, *slog.Logger) (
 		model.BaseModel[*schema.Message], error) {
 
@@ -92,30 +91,34 @@ func newTestBuilderWithConfig(t *testing.T, cfg *spec.Config) *Builder {
 
 func mustSnapshot(t *testing.T, b *Builder) *snapshot {
 	t.Helper()
-	cfg, gen := b.mgr.Current()
-	s, err := b.snapshotFor(cfg, gen)
+	s, err := b.snapshotFor()
 	if err != nil {
 		t.Fatalf("snapshotFor: %v", err)
 	}
 	return s
 }
 
-// waitForGeneration waits until the builder's generation passed gen.
+// waitForSurfaceChange waits until the MCP tool surface moved, and returns
+// the new one.
 //
-// ★ The manager marks a server ready and calls its bump at the end of the same
-// goroutine, so "ready" does not imply "the generation moved". A snapshot is
-// cached by generation, so a test that waited only for ready could be handed
-// the previous one — a false failure under load, not a missing bump.
-func waitForGeneration(t *testing.T, b *Builder, gen uint64) {
+// ★ The surface is part of the tree's identity: a server that comes up
+//
+//	offers tools the tree does not have yet, and the next tree is a
+//	different one. ★ The listing and the surface are two steps by one
+//	goroutine, so "ready" does not imply "the surface moved" — a test
+//	that waited only for ready could be handed the previous tree, and
+//	would read that as a missing rebuild.
+func waitForSurfaceChange(t *testing.T, b *Builder, before string) string {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, g := b.mgr.Current(); g > gen {
-			return
+		if got := b.mcp.surfaceHash(b.mgr.Current()); got != before {
+			return got
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
-	t.Fatalf("the generation never moved past %d", gen)
+	t.Fatalf("the tool surface never moved past %q", before)
+	return ""
 }
 
 func managerOf(t *testing.T, b *Builder) *fakeManager {
@@ -125,6 +128,27 @@ func managerOf(t *testing.T, b *Builder) *fakeManager {
 		t.Fatalf("builder is not backed by a fakeManager: %T", b.mgr)
 	}
 	return m
+}
+
+// poolEntry returns the pool's entry for an agent, whatever fingerprint it
+// was built at.
+//
+// ★ The pool holds one entry per (agent, fingerprint), so a test that wants
+//
+//	"the entry for this agent" has to pick one — and there is only one
+//	unless the agent was rebuilt at a new fingerprint.
+func poolEntry(t *testing.T, b *Builder, name string) *entry {
+	t.Helper()
+	b.pool.mu.Lock()
+	defer b.pool.mu.Unlock()
+	m, ok := b.pool.ents[name]
+	if !ok || len(m) == 0 {
+		t.Fatalf("no pool entry for %q", name)
+	}
+	for _, e := range m {
+		return e
+	}
+	return nil
 }
 
 // configFromSpecs builds a configuration for the assembly tests.

@@ -101,6 +101,12 @@ tmp_dir = "tmp"
   # Reuse the default port that Vite proxies to. During development the
   # frontend is on :5173 and the proxy points here.
   full_bin = "tmp/openheron-dev.exe"
+  # ★ The repository's own .openheron/ is the configuration root, and the
+  #   repository root is the project. ★ Neither is the working directory any
+  #   more: the configuration root is named, and the positional directory
+  #   says which project the agent works in. The flags come first — Go's
+  #   flag parser stops at the first argument that is not a flag.
+  args = ["--config-root", ".openheron", "."]
   # The frontend hot-reloads through Vite, so there is no need to watch the
   # static directory on every restart.
   include_dir = ["agents", "llm", "policy", "skills"]

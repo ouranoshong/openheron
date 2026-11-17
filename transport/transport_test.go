@@ -678,3 +678,23 @@ func TestContractReasoningRoleIsTheReasoningLiteral(t *testing.T) {
 	}
 	t.Fatalf("no REASONING_MESSAGE_START in stream:\n%s", buf.String())
 }
+
+// A stream the run cut off must not end with a terminal frame.
+//
+// ★ "Success" would say the run finished and this is its whole outcome.
+//
+//	The client then stops looking — and an approval raised after the cut
+//	would stay invisible until a manual reload. An open-ended stream sends
+//	it to the transcript instead, where the approval is.
+func TestACutStreamDoesNotClaimTheRunFinished(t *testing.T) {
+	ch := make(chan contract.RunEvent)
+	close(ch)
+
+	var buf bytes.Buffer
+	RenderStream(&buf, "thread-1", "run-1", ch, func() bool { return true })
+
+	got := typesOf(decode(t, buf.Bytes()))
+	if len(got) != 1 || got[0] != events.EventTypeRunStarted {
+		t.Fatalf("a cut stream must carry RUN_STARTED and no terminal frame, got %v", got)
+	}
+}

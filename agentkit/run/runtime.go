@@ -21,6 +21,10 @@ import (
 	"github.com/ouranoshong/openheron/contract"
 	"github.com/ouranoshong/openheron/message"
 	"github.com/ouranoshong/openheron/storage"
+
+	"github.com/ouranoshong/openheron/agentkit/authz"
+	"github.com/ouranoshong/openheron/agentkit/fsx"
+	"github.com/ouranoshong/openheron/helpers"
 )
 
 // DefaultStartTimeout bounds how long a caller waits for a turn to become
@@ -30,7 +34,19 @@ const DefaultStartTimeout = 60 * time.Second
 // AgentBuilder produces the agent for one turn. It is injected so openheronrt
 // never imports the agent package, which keeps its tests free of a real model.
 type AgentBuilder interface {
-	Build(ctx context.Context, sessionID, agentID string, kind contract.TurnKind) (adk.TypedAgent[*schema.Message], error)
+	// Build returns the agent for this turn, and the fingerprint of the
+	// tree it was built from.
+	//
+	// ★ The fingerprint comes back **with** the agent because it is the
+	//   agent's identity: a name is not enough, because the agent behind a
+	//   name may have been rebuilt. ★ And a resume needs it: the round it
+	//   continues must run on the tree that round started with.
+	//
+	// ★ A **pinned** fingerprint asks for that tree by name — that is what
+	//   a resume does. ★ An empty one means "the current tree", and it is
+	//   what a fresh query asks for.
+	Build(ctx context.Context, sessionID, agentID string, kind contract.TurnKind,
+		fingerprint string) (adk.TypedAgent[*schema.Message], string, error)
 	// Contexts reports what each agent's context allows: the model's window
 	// and the compaction threshold.
 	//
@@ -62,6 +78,16 @@ type Config struct {
 	// ★ It must be longer than the provider's own timeout, or a slow but
 	//	alive model is fenced out while it is thinking.
 	LeaseTTL time.Duration
+	// ProjectRootFor resolves the directory a session works in.
+	//
+	// ★ It is a **function**, not a value: the root belongs to the session,
+	//   and the session's project may change between rounds. ★ It is called
+	//   once per round, at the round's start — the round keeps the root it
+	//   started with.
+	//
+	// ★ Without it the runtime falls back to Input.ProjectRoot: the default
+	//   project root of the process.
+	ProjectRootFor func(ctx context.Context, sessionID string) string
 	// Logger is the run's log. Nil drops the run's own warnings.
 	Logger *slog.Logger
 }
@@ -123,6 +149,13 @@ type Runtime struct {
 
 	mu     sync.Mutex
 	states map[string]*sessionState
+
+	// announcer is the session's announcement channel — the facts that
+	// outlive a run.
+	//
+	// ★ It is a separate bus per session, and not a field of sessionState:
+	//   the state dies with the turn, and the approval outlives the turn.
+	announcer *sessionAnnouncer
 }
 
 // New builds a Runtime. It performs no IO and starts nothing.
@@ -136,7 +169,13 @@ func New(cfg Config) *Runtime {
 	if cfg.Logger == nil {
 		cfg.Logger = discard
 	}
-	return &Runtime{cfg: cfg, instanceID: cfg.InstanceID, states: make(map[string]*sessionState), log: cfg.Logger}
+	return &Runtime{
+		cfg:        cfg,
+		instanceID: cfg.InstanceID,
+		states:     make(map[string]*sessionState),
+		log:        cfg.Logger,
+		announcer:  newSessionAnnouncer(),
+	}
 }
 
 // defaultInstanceID names this process.
@@ -291,7 +330,7 @@ func (rt *Runtime) claimTurn(ctx context.Context, sess storage.Session, kind con
 		rt.releaseClaim(sess, turn, prev, prevLoop)
 		return nil, nil, nil, nil, err
 	}
-	turn.row = row
+	turn.setRow(row)
 
 	// ★ The lease is the ownership rule. The turn slot says "a turn is
 	//   live"; the lease says "that turn is making progress". A session
@@ -354,7 +393,16 @@ func (rt *Runtime) openRunRow(ctx context.Context, sess storage.Session, turn *T
 	if err := ledger.Append(ctx, row); err != nil {
 		return nil, fmt.Errorf("write the run row: %w", err)
 	}
-	return newRunRow(ledger, row, rt.log), nil
+	// ★ The round exists: the ledger's first row is on disk. ★ The timeline
+	//   says so, and it says what kind of round it is — the two names are
+	//   different things, so they are different fields.
+	rt.recordOperation(sess, storage.Operation{
+		Kind:     storage.OpRunStarted,
+		Actor:    storage.ActorSystem,
+		RunID:    turn.RunID,
+		TurnKind: kind.String(),
+	})
+	return newRunRow(ledger, sess.Operations(), row, rt.log), nil
 }
 
 // releaseClaim gives the slot back when a claimed turn cannot start.
@@ -370,12 +418,28 @@ func (rt *Runtime) openRunRow(ctx context.Context, sess storage.Session, turn *T
 //	still in flight — the next turn would then read an incomplete
 //	history.
 func (rt *Runtime) releaseClaim(sess storage.Session, turn *Turn, prev *Turn, prevLoop *adk.TurnLoop[loopItem, *schema.Message]) {
+	// ★ The turn gave the slot up: it does not hold the session any more,
+	//
+	//	and whoever waits on it must not be left hanging.
+	turn.markReleased()
+
 	st := rt.stateFor(sess.ID())
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.turn != turn {
 		// A newer turn took over in the meantime; its state is not ours
 		// to touch.
+		return
+	}
+	if prev == nil || !prev.holdsSlot() {
+		// ★ The displaced claim already gave up — it was displaced itself,
+		//
+		//	and its own release found the slot taken. Putting it back
+		//	would resurrect a dead turn, and the slot would hold a loop
+		//	that was never run: the session would read as busy for ever,
+		//	and the shutdown would wait for a loop nobody ever started.
+		st.turn = nil
+		st.loop = nil
 		return
 	}
 	st.turn = prev
@@ -397,11 +461,68 @@ func (rt *Runtime) runClaimedTurn(ctx context.Context, sess storage.Session, tur
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	turn.cancel = cancel
 
+	// ★ The project root of this round. ★ It is read **here**, at the start
+	//   of the round: a project may be moved or renamed between rounds, and
+	//   the round that is running keeps the root it began with.
+	//
+	// ★ The root travels in the context, and the context is what reaches
+	//   both consumers: the prompt (the model must be told where the code
+	//   lives) and the tools (the write boundary). ★ The context is built
+	//   with WithoutCancel, so it **keeps the values** it was given.
+	runCtx = fsx.WithProjectRoot(runCtx, rt.projectRootOf(runCtx, sess.ID()))
+
+	// ★ The authorization mode travels the same way, and it is read **here**
+	// too: the round keeps the mode it began with, the way it keeps the
+	// root it began with. A mode the user changes mid-round applies to the
+	// **next** round.
+	//
+	// ★ The session's own workspace comes with it: it is one of the trusted
+	// paths, and it belongs to the session — not to the process.
+	//
+	// ★ One read, two destinations: the context decides whether a call asks,
+	//   and the ledger row records what the round actually ran under. Two
+	//   reads could disagree — the user may switch the mode between them —
+	//   and then the row would say something the round did not do.
+	mode := sess.AuthorizationMode()
+	runCtx = authz.WithMode(runCtx, mode)
+	runCtx = authz.WithSessionWorkspace(runCtx, sess.Workspace())
+	turn.runRow().noteAuthorizationMode(mode)
+
+	// ★ The tool failures of this round travel in the context too, and for
+	//   the same reason: the context is the only channel that reaches a
+	//   tool call, and the tool call is the only layer that knows a call
+	//   failed. ★ The collector is the round's — the derivation reads the
+	//   same one, so the failure the model was told about and the failure
+	//   the interface is told about are one fact.
+	runCtx = helpers.WithToolFailures(runCtx, turn.toolFailures)
+
 	rt.startLoop(runCtx, sess.ID(), turn, loop, cancel)
+
+	// ★ The session hears that a new round began. ★ It is published here
+	//   and not in claimTurn: a claim that gives up (a resume that found
+	//   nothing to answer) never starts a round, and announcing it would
+	//   tell the other surfaces to follow a run that does not exist.
+	rt.announceRunStarted(sess.ID(), turn.RunID, turn.Kind)
 
 	if ok, _ := loop.Push(item, adk.WithPreempt[loopItem, *schema.Message](adk.AfterToolCalls)); !ok {
 		rt.logf("session=%s push was rejected: the loop is stopping or its buffer is full", sess.ID())
 	}
+}
+
+// projectRootOf resolves the directory a session works in.
+//
+// ★ The answer is the session's **project**: the relation lives in the
+//
+//	project table, and the table is the only truth about it. ★ Without an
+//	injected resolver — or for a session that belongs to no project — the
+//	root is the default project root of the process.
+func (rt *Runtime) projectRootOf(ctx context.Context, sessionID string) string {
+	if rt.cfg.ProjectRootFor != nil {
+		if root := rt.cfg.ProjectRootFor(ctx, sessionID); root != "" {
+			return root
+		}
+	}
+	return rt.cfg.Input.ProjectRoot
 }
 
 // ensureIdle refuses the request when the session already owes the user
@@ -423,20 +544,49 @@ func (rt *Runtime) ensureIdle(ctx context.Context, sess storage.Session) error {
 	return rt.ensureNoLiveTurn(ctx, sess)
 }
 
+// conflictTurns reports whether a new turn of kind "kind" may not start
+// while a turn of kind "live" is running.
+//
+// ★ The session's slot holds one turn, and a fresh query may not take
+//
+//	it: a query is a new round, and the session is in the middle of one —
+//	whichever kind is live. So a query behind a query and a query behind a
+//	resume are both refused.
+//
+// ★ A resume is the exception, and it is the exception in both
+//
+//	directions. It answers an approval, and the approval is written after
+//	the round that raised it has finished, so a resume never overlaps a
+//	query: the round's turn is cleared when its ledger row is terminal
+//	(markTurnDone), and that row closes after the approval lands.
+//
+// ★ Two resumes do overlap — the second one finds the approval already
+//
+//	consumed and says so — and the rule has to allow that: a replayed
+//	approve must be told "there is nothing to answer", not "the session
+//	is busy".
+func conflictTurns(kind, live contract.TurnKind) bool {
+	if kind == contract.TurnResume && live == contract.TurnResume {
+		return false
+	}
+	return true
+}
+
 // ensureNoLiveTurn refuses the request when a turn is executing.
 //
 // ★ It asks about the LOOP, not the turn pointer alone. st.turn is
 //
-//	cleared when the turn finishes archiving (markTurnDone), so it lags:
-//	a turn that has already produced its answer still reads as "running"
-//	for a moment, and refusing on that would be a false positive. The
-//	loop is the thing that is actually executing.
+//	cleared when the round's ledger row is terminal (markTurnDone), so it
+//	lags: a turn that has already produced its answer still reads as
+//	"running" for a moment, and refusing on that would be a false positive.
+//	The loop is the thing that is actually executing.
 //
 // ★ Both are needed. st.turn is set while the turn runs and cleared once
 //
-//	its outcome is archived; st.loop is set while the loop lives, which
-//	is longer — the loop stays alive waiting for the next item. The pair
-//	reads "busy" only while a turn is genuinely in flight.
+//	its row is terminal; st.loop is set while the loop lives, which
+//	is longer — the loop stays alive waiting for the next item, and it
+//	goes with the turn when the round ends (releaseRound). The pair reads
+//	"busy" only while a turn is genuinely in flight.
 func (rt *Runtime) ensureNoLiveTurn(ctx context.Context, sess storage.Session) error {
 	st, ok := rt.lookupState(sess.ID())
 	if !ok {
@@ -455,41 +605,23 @@ func (rt *Runtime) ensureNoLiveTurn(ctx context.Context, sess storage.Session) e
 	return nil
 }
 
-// conflictTurns reports whether a new turn of kind "kind" may not start
-// while a turn of kind "live" is running.
-//
-// ★ A resume continues the interrupted turn it answers — the same round
-//
-//	of the conversation — so two resumes never conflict. A query is a
-//	new round, and that is exactly what must not overlap: the
-//	cross-client case, where a second surface's message would take the
-//	running turn over.
-//
-// ★ So the only conflicting pair is query-behind-query. Everything else
-//
-//	— a resume behind a query (the user answering an approval raised by
-//	the running query), or a resume behind a resume — is the same
-//	conversation continuing.
-func conflictTurns(kind, live contract.TurnKind) bool {
-	if live == contract.TurnResume {
-		return false
-	}
-	return kind == contract.TurnQuery
-}
-
 // ensureNoLiveQuery refuses the request when a QUERY turn is executing.
 //
 // ★ A resume turn is not a conflict with another resume. A resume
 //
 //	continues the interrupted turn it answers — it is the same round of
 //	the conversation, not a new one — so the user may answer a second
-//	group of approvals while the first resume is still settling. What
-//	must never overlap is a fresh query: that is the "another tab cuts
-//	in" case, and it is what destroys the running turn.
+//	group of approvals while the first resume is still settling.
 //
-// ★ So the gate is about the KIND of the live turn:
-//   - a query turn running → refuse (a new query would take it over);
+// ★ So this pre-check is about the KIND of the live turn:
+//   - a query turn running → refuse (a fresh query would take it over);
 //   - a resume turn running → allow (it is the same conversation).
+//
+// ★ It is a pre-check, and the claim below is the stricter one: the slot
+//
+//	holds a single turn, so a fresh query behind a running resume is
+//	refused there as well (conflictTurns). A resume behind a query is
+//	refused by both.
 func (rt *Runtime) ensureNoLiveQuery(ctx context.Context, sess storage.Session) error {
 	st, ok := rt.lookupState(sess.ID())
 	if !ok {
@@ -548,11 +680,17 @@ func (rt *Runtime) Resume(ctx context.Context, sessionID, runID string, decision
 	//   point would eat the user's decision: the card disappears and the
 	//   approval can never be answered again. Claiming first means a
 	//   refusal leaves the approval untouched.
+	//
+	// ★ The parent's tree comes with it: the resume continues the round
+	//   the approval belongs to, so it runs on the tree that round started
+	//   with — not on the tree the disk would build now.
+	parentRunID, parentTree := rt.parentRunOf(ctx, sess)
 	turn, loop, prev, prevLoop, err := rt.claimTurn(ctx, sess, contract.TurnResume, runID,
-		rt.parentRunOf(ctx, sess))
+		parentRunID)
 	if err != nil {
 		return nil, err
 	}
+	turn.pin = parentTree
 
 	pending, err := sess.TakePendingApproval()
 	if err != nil {
@@ -563,6 +701,15 @@ func (rt *Runtime) Resume(ctx context.Context, sessionID, runID string, decision
 		rt.releaseClaim(sess, turn, prev, prevLoop)
 		return nil, ErrNoPendingInterrupt
 	}
+
+	// ★ The approval is gone: it was consumed, and every surface waiting on
+	//   it has to hear that its card is stale — a surface that keeps a card
+	//   the server has already answered offers answers that are refused.
+	//
+	// ★ It is published here and not when the round starts: the
+	//   consumption is the fact, and a resume that finds nothing to answer
+	//   consumes the approval without continuing the round.
+	rt.announceApprovalResolved(sess.ID(), pending.Interrupts, decisions, turn.RunID)
 
 	approvals := map[string]any{}
 	for _, d := range decisions {
@@ -614,6 +761,19 @@ func (rt *Runtime) recordDecisions(sess storage.Session, pending *storage.Pendin
 	}
 	if err := sess.RecordDecision(recs...); err != nil {
 		rt.logf("session=%s failed to record the approval decisions: %v", sess.ID(), err)
+		return
+	}
+	// ★ The decision is on disk now, so the timeline says so. ★ The actor is
+	//   the **person**: the runtime writes the line, but a human answered.
+	for _, rec := range recs {
+		approved := rec.Approved
+		rt.recordOperation(sess, storage.Operation{
+			Kind:        storage.OpApprovalResolved,
+			Actor:       storage.ActorUser,
+			InterruptID: rec.InterruptID,
+			ToolName:    rec.ToolName,
+			Approved:    &approved,
+		})
 	}
 }
 
@@ -834,30 +994,35 @@ func (rt *Runtime) activeRun(ctx context.Context, sess storage.Session) (storage
 	return storage.ActiveRun(runs)
 }
 
-// parentRunOf returns the run a resume continues.
+// parentRunOf returns the run a resume continues, and the tree it ran on.
 //
 // ★ It is the newest run that ended by raising an approval. The pending
 //
 //	approval itself does not carry the run's id — the record that holds
 //	the interrupt id is the checkpoint's business — so the ledger is where
 //	the question's owner is looked up.
-func (rt *Runtime) parentRunOf(ctx context.Context, sess storage.Session) string {
+//
+// ★ The tree comes with it: a resume continues the round it answers, so it
+//
+//	runs on the tree that round started with, and the parent's row is
+//	where that tree is written down.
+func (rt *Runtime) parentRunOf(ctx context.Context, sess storage.Session) (string, string) {
 	ledger := sess.RunLedger()
 	if ledger == nil {
-		return ""
+		return "", ""
 	}
 	runs, err := ledger.List(ctx)
 	if err != nil {
 		rt.logf("session=%s failed to read the run ledger: %v", sess.ID(), err)
-		return ""
+		return "", ""
 	}
 	storage.SortRunsByStart(runs)
 	for i := len(runs) - 1; i >= 0; i-- {
 		if runs[i].State == storage.RunWaitingApproval {
-			return runs[i].RunID
+			return runs[i].RunID, runs[i].TreeFingerprint
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // RunSnapshot is the scan of one session's runs.
@@ -882,8 +1047,16 @@ type RunSnapshot struct {
 //
 // ★ A run that has finished is not live: its turn is released when its
 //
-//	archive lands, so an attach that arrives too late finds nothing and
-//	the client has to hydrate from the transcript.
+//	ledger row is terminal, so an attach that arrives too late finds
+//	nothing and the client has to hydrate from the transcript.
+//
+// ★ The row is the barrier, and it stands behind the approval. ★ A run
+//
+//	that raised an approval keeps its turn until that approval is on disk
+//	and its row has closed (bridge.go): an attach that arrives in between
+//	is still served — it reads the approval out of the run's window —
+//	instead of being told "the run is no longer live" while the approval
+//	it needs is nowhere to be found.
 func (rt *Runtime) LiveRun(sessionID, runID string) (*Turn, bool) {
 	if runID == "" {
 		return nil, false

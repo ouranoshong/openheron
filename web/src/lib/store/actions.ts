@@ -4,6 +4,7 @@ import {
   ApiError,
   api,
   runStream,
+  sessionStream,
   type CompactionResult,
   type RunHandle,
   type RunsView,
@@ -11,7 +12,10 @@ import {
   type WorkspaceFile,
 } from "@/lib/api"
 import { readActiveThreadId, writeActiveThreadId } from "@/lib/active-thread"
+import { attachTarget, busyElsewhere, recoveryPlan } from "@/lib/attach"
 import { closeAllOpenParts, type AgEvent } from "@/lib/events"
+import { directoryPick, projectSwitch, resolveActiveProject } from "@/lib/projects"
+import { applySessionFact as foldSessionFact, type SessionFact } from "@/lib/session-events"
 import {
   emptyConversation,
   type ConversationState,
@@ -21,6 +25,7 @@ import {
 } from "@/lib/types"
 
 import { getCurrentRunKey, handleEvent, promote, setCurrentRunKey, withoutKey } from "./events"
+import type { Set as StoreSet } from "./events"
 import { seedFromHistory } from "./history"
 import { MAIN_AGENT, type Attachment, type SessionEntry, type StoreState } from "./state"
 
@@ -28,7 +33,110 @@ function isThreadNotFound(e: unknown): boolean {
   return e instanceof ApiError && e.code === "thread_not_found"
 }
 
+// describeError turns a failed call into the **server's** sentence.
+//
+// ★ The server owns the rules — which name is refused, which root is empty —
+//   so the reason on the screen is the one the server wrote, not a copy of
+//   them on this side that could drift.
+function describeError(e: unknown): string {
+  if (e instanceof ApiError) return e.message
+  return (e as Error).message ?? String(e)
+}
+
 let run: RunHandle | null = null
+
+// sessionChannel is the announcement channel of the session on screen.
+//
+// ★ It is the session's channel, not a run's: an approval belongs to the
+//   session, and the run that raised it is over by the time anybody can
+//   answer it. ★ One at a time — the channel follows the session the user
+//   is looking at, and a channel for a session nobody is looking at is a
+//   connection nobody reads.
+let sessionChannel: RunHandle | null = null
+let sessionChannelId: string | null = null
+
+// sessionReopen is the timer that brings the channel back after it ended.
+//
+// ★ The channel ends when the connection goes away, and that is not the
+//   end of the session: a surface that stops listening stops hearing
+//   that an approval was answered.
+let sessionReopen: ReturnType<typeof setTimeout> | null = null
+
+// pendingAttach is the run this surface will follow when its current
+// stream ends.
+//
+// ★ One stream at a time. ★ The server allows one live turn per session,
+//   so the new round can only begin after the old one is over — and the
+//   surface that is still holding the old stream has to let go first.
+let pendingAttach: { id: string; runId: string } | null = null
+
+// SESSION_REOPEN_MS is how long the client waits before it listens again
+// after the channel ended.
+//
+// ★ A second is long enough not to spin and short enough that the user
+//   does not notice the gap.
+const SESSION_REOPEN_MS = 1000
+
+// SESSION_RETRY_MS is how long the client waits before it tries again
+// after the channel could not be opened at all.
+//
+// ★ It is longer than the reopen: the server said no, and asking again
+//   every second would be a loop rather than a retry.
+const SESSION_RETRY_MS = 5000
+
+// RECOVER_WAIT_MS is how long the recovery waits between two reads of the
+// ledger.
+//
+// ★ A second is long enough not to hammer the server and short enough that
+//   the approval reaches the card the moment the round raises it.
+const RECOVER_WAIT_MS = 1000
+
+// RECOVER_DEADLINE_MS is how long the recovery keeps looking for the end of
+// a round.
+//
+// ★ The recovery is a safety net, not a lease: a round that never ends must
+//   not keep the client reading the ledger forever. ★ Past the deadline the
+//   recovery stops — the transcript is still there, and the next scan or a
+//   reload picks the approval up.
+const RECOVER_DEADLINE_MS = 10 * 60 * 1000
+
+// RECOVER_ATTACH_LIMIT is how many times the recovery attaches to a round
+// before it settles for waiting.
+//
+// ★ Three covers the ordinary case: the first attach is the one that
+//   follows the cut, and the two after it cover a round that was cut more
+//   than once. ★ Past the limit the recovery waits instead — an attach
+//   that keeps being cut would keep replaying the round's events into a
+//   client that is already too slow to read them.
+const RECOVER_ATTACH_LIMIT = 3
+
+// recovering is the set of sessions whose cut round is being recovered.
+//
+// ★ One recovery per session: two of them would read the same transcript
+//   twice and race each other into the store.
+const recovering = new Set<string>()
+
+// recoverAttempts counts the attaches a session's recovery has made.
+//
+// ★ It is not reset by the recovery itself: the chain is
+//   "attach → cut → recover → attach", and a counter that restarted with
+//   every recovery would never reach the limit. ★ It is reset when a round
+//   is over — the next round starts fresh.
+const recoverAttempts = new Map<string, number>()
+
+// releaseRun ends the local stream and starts the attach that waited for
+// it.
+//
+// ★ The wait is the point: a new round cannot begin before the old one is
+//   over, so a surface that is still holding the old stream has to let go
+//   of it before it can follow the new one.
+function releaseRun(): void {
+  run = null
+  setCurrentRunKey(null)
+  const pending = pendingAttach
+  pendingAttach = null
+  if (pending) void useStore.getState().followRun(pending.id, pending.runId)
+}
 
 // lastSentAttachments remembers the files that went out with the current
 // turn.
@@ -38,6 +146,33 @@ let run: RunHandle | null = null
 //   to the composer, or the user loses them.
 let lastSentAttachments: Attachment[] = []
 
+// applyServerAuthorization writes a session's authorization facts into the
+// store, as the server reported them.
+//
+// ★ The server is the authority: the client keeps no copy of its own, and a
+//   mode it guessed would be a mode nobody confirmed. ★ The optimistic
+//   placeholder carries the client's choice — this is where the server's
+//   answer takes its place.
+function applyServerAuthorization(set: StoreSet, id: string, meta: ThreadMeta): void {
+  set((s) => {
+    const entry = s.sessions[id]
+    if (!entry) return {}
+    return {
+      sessions: {
+        ...s.sessions,
+        [id]: {
+          ...entry,
+          meta: {
+            ...entry.meta,
+            authorizationMode: meta.authorizationMode,
+            authorizationConfirmed: meta.authorizationConfirmed,
+          },
+        },
+      },
+    }
+  })
+}
+
 export const useStore = create<StoreState>((set, get) => ({
   sessions: {},
   order: [],
@@ -45,12 +180,132 @@ export const useStore = create<StoreState>((set, get) => ({
   uploading: false,
   activeId: readActiveThreadId() ?? null,
   pendingAgentId: null,
+  pendingAuthorizationMode: null,
+  pendingAuthorizationConfirmed: false,
   loadingList: false,
   agentFilter: null,
+  projects: [],
+  projectScope: null,
+  projectsKnown: false,
+  activeProjectId: null,
 
   setAgentFilter(agent) {
     if (get().agentFilter === agent) return
     set({ agentFilter: agent })
+  },
+
+  async refreshProjects() {
+    try {
+      const { items, scope } = await api.listProjects()
+      set((s) => ({
+        projects: items,
+        projectScope: scope,
+        projectsKnown: true,
+        activeProjectId: resolveActiveProject(s.activeProjectId, items, scope),
+      }))
+    } catch (e) {
+      // ★ A server that does not know about projects answers 503. ★ That is
+      //   not a broken sidebar: the conversations are still there, they are
+      //   simply not grouped, and the sidebar renders one flat list.
+      // ★ A transport failure is **not** the same thing — the server may
+      //   know perfectly well, and the next refresh says so. ⇒ only a 503
+      //   takes the table away for good.
+      if (e instanceof ApiError && e.status === 503) {
+        set({ projects: [], projectScope: null, projectsKnown: false })
+        return
+      }
+      set({ projects: [], projectScope: null })
+    }
+  },
+
+  switchProject(id) {
+    const s = get()
+    // ★ The project of the conversation on screen — undefined when there is
+    //   none. ★ It is what decides whether the switch leaves that
+    //   conversation: a conversation's project is immutable, so the only way
+    //   to work in another project is a new conversation.
+    const sessionProject = s.activeId ? s.sessions[s.activeId]?.meta.projectId : undefined
+    const plan = projectSwitch(id, sessionProject)
+    set({
+      activeProjectId: plan.projectId,
+      // ★ The composer leaves the conversation it was in — the conversation
+      //   itself stays in the sidebar (its work is not lost, only left),
+      //   and what is on screen is what the composer is about to work in.
+      ...(plan.leaveSession ? { activeId: null } : {}),
+    })
+  },
+
+  startThreadInProject(id) {
+    // ★ The "+" next to a project in the sidebar means "a new conversation
+    //   here", and a new conversation is never the one that is already open
+    //   — not even when that one belongs to the same project. ⇒ The new
+    //   thread comes back empty first, and only then is it put in the
+    //   project: ★ a new thread has **no** project of its own
+    //   (`startNewThread` says so), so the project has to be written after
+    //   it — the other order would be undone by it.
+    get().startNewThread()
+    get().switchProject(id)
+  },
+
+  async createProject(name, root) {
+    try {
+      const p = await api.createProject(name.trim(), root.trim())
+      await get().refreshProjects()
+      // ★ The new project becomes the one the composer works in: the user
+      //   just made it, and the next conversation is the one they are about
+      //   to start. ★ It goes through the same switch as every other pick —
+      //   a conversation's project is immutable, so one that belongs to
+      //   another project is left behind.
+      get().switchProject(p.id)
+      return undefined
+    } catch (e) {
+      return describeError(e)
+    }
+  },
+
+  async renameProject(id, name) {
+    // ★ A rename is a patch with one field in it: the server takes the name,
+    //   the root and the order in one body, so the client has one path.
+    return get().updateProject(id, { name: name.trim() })
+  },
+
+  async updateProject(id, patch) {
+    try {
+      await api.updateProject(id, patch)
+      // ★ The table is re-read after the write: the project that was changed
+      //   is the one that is drawn, and the list that comes back is the
+      //   server's answer.
+      await get().refreshProjects()
+      return undefined
+    } catch (e) {
+      return describeError(e)
+    }
+  },
+
+  async deleteProject(id) {
+    try {
+      await api.deleteProject(id)
+      // ★ The table is re-read after the write: the project is gone, and the
+      //   session list has to be re-grouped — the sessions that belonged to it
+      //   are now "no project".
+      await get().refreshProjects()
+      await get().refreshList()
+      return undefined
+    } catch (e) {
+      return describeError(e)
+    }
+  },
+
+  async pickDirectory(start) {
+    try {
+      const answer = await api.pickDirectory(start.trim())
+      return directoryPick(answer)
+    } catch (e) {
+      // ★ The reason is the server's own sentence: the machine has no
+      //   chooser, or the chooser failed, and the client keeps no second
+      //   copy of those rules.
+      return { kind: "failed", reason: describeError(e) }
+    }
   },
 
   async refreshList() {
@@ -67,9 +322,24 @@ export const useStore = create<StoreState>((set, get) => ({
           meta,
           convo: old?.convo,
           loaded: old?.loaded ?? false,
+          // ★ The log that was read stays read: a refresh of the list is a
+          //   refresh of the **list**, and it must not throw away what the
+          //   session already knows.
+          operations: old?.operations,
         }
       }
-      set({ sessions, order, loadingList: false })
+      // ★ The list is where the project of the conversation on screen becomes
+      //   known — at startup the session is opened before the list has
+      //   arrived, so the follow-up there had nothing to read. ★ The
+      //   composer follows the conversation, not the other way round.
+      const activeId = get().activeId
+      const projectId = activeId ? sessions[activeId]?.meta.projectId : undefined
+      set({
+        sessions,
+        order,
+        loadingList: false,
+        ...(projectId !== undefined ? { activeProjectId: projectId } : {}),
+      })
 
       if (items.length === 0) {
         writeActiveThreadId("")
@@ -83,9 +353,18 @@ export const useStore = create<StoreState>((set, get) => ({
   async openSession(id) {
     if (get().activeId === id && get().sessions[id]?.loaded) return
     writeActiveThreadId(id)
-    set({ activeId: id })
 
+    // ★ The conversation on screen is the one the composer works in, so its
+    //   project is the project: the sidebar's picker, the button under the
+    //   input box and the @-mention picker all read that one value. ★ A
+    //   conversation that belongs to no project says so — it works in the
+    //   default project root.
     const entry = get().sessions[id]
+    set({
+      activeId: id,
+      ...(entry ? { activeProjectId: entry.meta.projectId ?? "" } : {}),
+    })
+
     if (entry?.loaded) return
 
     set((s) => ({
@@ -95,6 +374,7 @@ export const useStore = create<StoreState>((set, get) => ({
           meta: s.sessions[id]?.meta ?? stubMeta(id),
           convo: emptyConversation(),
           loaded: false,
+          operations: s.sessions[id]?.operations,
         },
       },
     }))
@@ -116,6 +396,13 @@ export const useStore = create<StoreState>((set, get) => ({
       //   is the server's account of them, and the client has none of its
       //   own after a reload.
       await restorePendingFiles(id, convo)
+      // ★ The session may already have a live turn — another tab started
+      //   it. This surface can watch that turn instead of being kept out
+      //   of it: the scan says which run owns the session, and the attach
+      //   hands over the rest of the turn.
+      if (view.state === "running") {
+        void get().attachToLiveRun(id)
+      }
     } catch (e) {
       if (isThreadNotFound(e)) {
         writeActiveThreadId("")
@@ -128,15 +415,44 @@ export const useStore = create<StoreState>((set, get) => ({
       set((s) => ({
         sessions: {
           ...s.sessions,
-          [id]: { meta: s.sessions[id]?.meta ?? stubMeta(id), convo: emptyConversation(), loaded: true },
+          [id]: {
+            meta: s.sessions[id]?.meta ?? stubMeta(id),
+            convo: emptyConversation(),
+            loaded: true,
+            operations: s.sessions[id]?.operations,
+          },
         },
       }))
       get().loadError(id, (e as Error).message)
     }
   },
 
+  async loadOperations(id, opts) {
+    // ★ The log is the server's record of the session: it is read, and it is
+    //   never written here. ★ A session that is not in the store yet has
+    //   nowhere to put the lines — the panel reads them again when it opens.
+    const view = await api.listOperations(id, opts)
+    set((s) => {
+      const entry = s.sessions[id]
+      if (!entry) return {}
+      return { sessions: { ...s.sessions, [id]: { ...entry, operations: view.items } } }
+    })
+  },
+
   startNewThread() {
-    set({ activeId: null })
+    // ★ A new conversation **has no project**. The project the composer was
+    //   in belonged to the conversation that was on screen — a conversation's
+    //   project is immutable — so inheriting it would put the next
+    //   conversation in a directory the user did not pick for it.
+    //   ★ A conversation without a project is a choice the server accepts —
+    //   the interface calls it "Default Project", and that conversation works
+    //   in the default project root.
+    //
+    // ★ The single-project mode is the exception: the process serves one
+    //   directory, and there is no other place a conversation could go — the
+    //   scope *is* the answer there (`resolveActiveProject` says the same).
+    const scope = get().projectScope
+    set({ activeId: null, activeProjectId: scope?.projectId ?? "" })
   },
 
   async switchAgent(agentId) {
@@ -146,6 +462,39 @@ export const useStore = create<StoreState>((set, get) => ({
       return
     }
     const meta = await api.switchAgent(id, agentId)
+    set((s) => {
+      const entry = s.sessions[id]
+      if (!entry) return {}
+      return {
+        sessions: { ...s.sessions, [id]: { ...entry, meta: { ...entry.meta, ...meta } } },
+      }
+    })
+  },
+
+  async setAuthorizationMode(mode, confirm) {
+    const id = get().activeId
+    // ★ There is no session to change yet. ★ The mode belongs to the
+    // conversation, and the conversation that is about to be born is the one
+    // this choice is about — so the choice is **staged**, the same way the
+    // agent choice is staged, and it travels with the creation request.
+    //
+    // ★ A discarded choice would be worse than a useless one: the welcome
+    // page has no way to say "not this one", and the first turn would run
+    // in a mode the user never picked.
+    if (!id) {
+      set((s) => ({
+        pendingAuthorizationMode: mode,
+        // ★ The confirmation is a **fact about the person**, and it is not
+        //   taken back by a later choice: a person who confirmed full
+        //   authorization confirmed it, and the server is told so once.
+        pendingAuthorizationConfirmed: confirm === true ? true : s.pendingAuthorizationConfirmed,
+      }))
+      return
+    }
+    const meta = await api.setAuthorizationMode(id, mode, confirm)
+    // ★ The meta that comes back is the server's account of the session, so
+    // the mode on screen is the mode the server holds. ★ A refused change
+    //   never reaches this line — the old mode simply stays standing.
     set((s) => {
       const entry = s.sessions[id]
       if (!entry) return {}
@@ -259,6 +608,15 @@ export const useStore = create<StoreState>((set, get) => ({
 
     const { activeId, sessions, pendingAgentId } = get()
     const localKey = activeId ?? `pending:${Date.now()}`
+    // ★ The mode a **new** conversation is born in. ★ It is the one the
+    //   user picked on the welcome page, and null means they picked nothing
+    //   — the server then creates the conversation in the default mode.
+    const pendingAuthorizationMode = get().pendingAuthorizationMode
+    const pendingAuthorizationConfirmed = get().pendingAuthorizationConfirmed
+    // ★ The project a **new** conversation belongs to. ★ It is the one the
+    //   user picked in the sidebar — or the scope, when the process serves a
+    //   single directory.
+    const projectId = get().activeProjectId ?? undefined
     // ★ The files that go with this question. They belong to the session the
     //   user is in, so they are read before the thread may be created.
     const pending = activeId ? (get().attachments[activeId] ?? []) : []
@@ -288,6 +646,13 @@ export const useStore = create<StoreState>((set, get) => ({
             state: "running",
             hasPendingApproval: false,
             agentId,
+            projectId: projectId ?? "",
+            // ★ The mode the conversation is born with: the one the user
+            //   picked on the welcome page, or the default when they picked
+            //   nothing. ★ The server's answer replaces it the moment the
+            //   session exists.
+            authorizationMode: pendingAuthorizationMode ?? "default",
+            authorizationConfirmed: pendingAuthorizationConfirmed,
           },
       // ★ The optimistic bubble carries the files too: the user has to see
       //   what they sent, and the bubble is the only thing on screen at the
@@ -305,7 +670,16 @@ export const useStore = create<StoreState>((set, get) => ({
     if (!threadId) {
       let created: ThreadMeta
       try {
-        created = await api.createThread(requested)
+        // ★ The mode travels with the creation request: a conversation born
+        //   in the mode the user picked is born in it — there is no window in
+        //   which it is in the default mode and the first turn could run in
+        //   it.
+        created = await api.createThread(requested, projectId, {
+          ...(pendingAuthorizationMode ? { mode: pendingAuthorizationMode } : {}),
+          // ★ The confirmation is only meaningful for `full`: the server asks
+          //   for it there and nowhere else.
+          confirmed: pendingAuthorizationMode === "full" && pendingAuthorizationConfirmed,
+        })
       } catch (e) {
         run = null
         setCurrentRunKey(null)
@@ -314,6 +688,11 @@ export const useStore = create<StoreState>((set, get) => ({
       }
       threadId = created.threadId
       promote(set, get, localKey, threadId, created.agentId)
+      // ★ The mode on screen is the **server's** account of the session it
+      //   just created. ★ The placeholder carried the client's choice, and
+      //   the server's answer replaces it — the server is the one that
+      //   decided, so it is the one that says so.
+      applyServerAuthorization(set, threadId, created)
       setCurrentRunKey(threadId)
     }
 
@@ -333,9 +712,8 @@ export const useStore = create<StoreState>((set, get) => ({
       {
         onEvent: (ev) => handleEvent(set, get, localKey, ev as AgEvent),
         onError: (message, code) => {
-          run = null
           const k = getCurrentRunKey() ?? localKey
-          setCurrentRunKey(null)
+          releaseRun()
           if (code === "session_busy") {
             // ★ The session has a live turn that this surface does not own.
             //   The message never reached the server, so the optimistic
@@ -351,18 +729,21 @@ export const useStore = create<StoreState>((set, get) => ({
           //   still going and come back to it if it is.
           void get().reattach(k, message)
         },
-        onDone: () => {
-          run = null
-          setCurrentRunKey(null)
+        onDone: (terminal) => {
+          releaseRun()
           lastSentAttachments = []
-          // ★ The stream ended without a terminal frame: the connection
-          //   died, not the run. The server archives the turn, not the
-          //   stream — so come back to the run instead of losing the
-          //   answer. A run that finished (or failed) left the
-          //   conversation out of "running", and those need no rescue.
-          if (get().sessions[threadId]?.convo?.status === "running") {
-            void get().reattach(threadId, "the connection dropped before the run finished")
-            return
+          // ★ The stream ended without the round's last frame: the
+          //   connection died, not the run. The server archives the turn,
+          //   not the stream — so come back to the run instead of losing
+          //   the answer.
+          if (!terminal) {
+            const started = get().sessions[threadId]?.convo?.runId
+            if (started) {
+              void get().reattach(threadId, "the connection dropped before the run finished")
+              return
+            }
+            // ★ The stream died before the round even started: there is
+            //   nothing to come back to.
           }
           // ★ The stream ended; the session may still be busy — another
           //   surface's turn may be running. The scan decides.
@@ -384,13 +765,20 @@ export const useStore = create<StoreState>((set, get) => ({
   //   - over        → the transcript is the truth, so load it;
   //   - unknown     → report the error, because there is nothing better
   //     to say.
-  async reattach(id: string, message: string) {
+  //
+  // ★ And an attach that is cut too does not end the story: the recovery
+  //   (recoverRound) takes over, because the approval the round raises is
+  //   still waiting — the cut only took the stream away.
+  async reattach(id: string, message: string, runId?: string) {
+    // ★ One stream at a time. ★ A pending attach may have taken the slot
+    //   already — the session's channel announced a round while this
+    //   stream was ending — and two streams would fight over the run.
+    if (run) return
     const entry = get().sessions[id]
-    const runId = entry?.convo?.runId
-    if (!runId) {
-      get().loadError(id, message)
-      return
-    }
+    // ★ The run the caller names. ★ The recovery knows which run the ledger
+    //   says is live, and that is the authority — the conversation's own run
+    //   id is what this surface saw last, which is not the same thing.
+    const requested = runId ?? entry?.convo?.runId
 
     let runs: RunsView
     try {
@@ -399,10 +787,29 @@ export const useStore = create<StoreState>((set, get) => ({
       get().loadError(id, message)
       return
     }
-    const live = runs.items.find(
-      (r) => r.runId === runId && (r.state === "running" || r.state === "starting"),
-    )
-    if (!live) {
+    // ★ A ledger that answers with nothing is a ledger that cannot be read:
+    //   the scan is the only thing that can say a run is over, and an answer
+    //   without rows is not a scan.
+    if (!runs || !Array.isArray(runs.items)) {
+      get().loadError(id, message)
+      return
+    }
+    // ★ The run to follow. ★ The ledger names the run that owns the
+    //   session, and it is the only thing that can say a run is over.
+    //
+    //   ★ The conversation's own run id is not enough. ★ The round that
+    //   follows an answer is a **new** run, and the client does not learn
+    //   its id until the round announces it — so a client that reattaches
+    //   after a cut names the round *before* it, which is over and gone.
+    //   ★ The ledger names the round that is actually going.
+    const live = (candidate?: string) =>
+      candidate
+        ? runs.items.find(
+            (r) => r.runId === candidate && (r.state === "running" || r.state === "starting"),
+          )
+        : undefined
+    const target = live(runs.activeRunId)?.runId ?? live(requested)?.runId
+    if (!target) {
       // ★ The run is over. The transcript holds the finished turn, and it
       //   is the only truth about what the session contains.
       await get().reloadHistory(id)
@@ -411,49 +818,133 @@ export const useStore = create<StoreState>((set, get) => ({
 
     setCurrentRunKey(id)
     run = runStream(
-      { threadId: id, runId },
+      { threadId: id, runId: target },
       {
         onEvent: (ev) => get().applyEvent(id, ev as AgEvent),
         onError: (msg, code) => {
-          run = null
-          setCurrentRunKey(null)
+          releaseRun()
           if (code === "run_not_live") {
-            // ★ The run ended between the scan and the attach. The
-            //   transcript has the answer.
-            void get().reloadHistory(id)
+            // ★ The server says this round's turn is gone. ★ It does NOT
+            //   say the transcript already holds what the round raised: the
+            //   runtime releases its turn first and the approval lands
+            //   after it (agentkit/run/bridge.go), so reading the transcript
+            //   now can find nothing. ★ The recovery waits for the barrier
+            //   and reads the transcript then.
+            void get().recoverRound(id, target)
             return
           }
           get().loadError(id, msg)
         },
-        onDone: () => {
-          run = null
-          setCurrentRunKey(null)
+        onDone: (terminal) => {
+          releaseRun()
+          if (!terminal) {
+            // ★ The stream was cut: the round may still be running, and the
+            //   approval it raises has to reach the card. ★ The recovery
+            //   asks the ledger, and the transcript answers.
+            void get().recoverRound(id)
+            return
+          }
           void get().refreshList()
         },
       },
     )
   },
 
-  // scanBusy decides whether the session is busy, from the run ledger.
+  // recoverRound comes back to a round whose stream ended without the
+  // round's last frame.
+  //
+  // ★ The wire cannot tell the two endings apart: a round that finished and
+  //   a stream that was cut both close the response. ★ The server writes the
+  //   round's last frame for the first one and deliberately does not for the
+  //   second (transport/transport.go) — a last frame says "this is
+  //   everything the run had to say", and an approval raised after that
+  //   point would stay invisible until the user reloaded the page.
+  //
+  //   ★ That is the bug this action exists for: the card that only shows up
+  //   after a refresh.
+  //
+  // ★ So the recovery asks the ledger, and the ledger is the truth: a live
+  //   run means the round is still going, and no live run means it is over
+  //   and the transcript holds the approvals it raised.
+  //
+  // ★ "refused" is the run the server said is no longer live. ★ It is the
+  //   server's runtime that says so, and the runtime releases its turn
+  //   **before** the approval is written and before the row closes
+  //   (agentkit/run/bridge.go) — so a refused run's row can still be open,
+  //   and the approval is not on disk yet. ★ Reading the transcript then
+  //   finds nothing, and a card that was never read never shows. ★ So the
+  //   recovery waits for the barrier instead.
+  //
+  // ★ The transcript is where the answer comes from. ★ The stream is the one
+  //   thing that cannot be asked: it is the thing that was cut.
+  async recoverRound(id: string, refused?: string) {
+    if (recovering.has(id)) return
+    recovering.add(id)
+    try {
+      const deadline = Date.now() + RECOVER_DEADLINE_MS
+      for (;;) {
+        // ★ The user moved on: a card for a session nobody is looking at is
+        //   a card nobody answers, and the session is read from the
+        //   transcript when they come back.
+        if (get().activeId !== id) return
+        let runs: RunsView
+        try {
+          runs = await api.listRuns(id)
+        } catch {
+          // ★ A ledger that cannot be read says nothing. The conversation
+          //   keeps what it has.
+          return
+        }
+        // ★ And an answer that is not a ledger says nothing either.
+        if (!runs || !Array.isArray(runs.items)) return
+        const plan = recoveryPlan(runs, refused)
+        if (plan.kind === "transcript") {
+          // ★ The round is over: the transcript holds what it raised, the
+          //   approval above all. ★ The counter goes with it — the next
+          //   round starts fresh.
+          recoverAttempts.delete(id)
+          await get().reloadHistory(id)
+          return
+        }
+        if (plan.kind === "wait") {
+          // ★ The barrier is not up yet: the round ended, and its question
+          //   has not landed. ★ Waiting is the whole answer here — reading
+          //   the transcript now would find a session with no approval in
+          //   it, and nothing would ask again.
+          if (Date.now() >= deadline) return
+          await new Promise<void>((r) => setTimeout(r, RECOVER_WAIT_MS))
+          continue
+        }
+        const attempts = recoverAttempts.get(id) ?? 0
+        if (attempts < RECOVER_ATTACH_LIMIT) {
+          // ★ The round is still going: watch it. ★ The attach's own end
+          //   comes back here, and by then the round is usually over.
+          recoverAttempts.set(id, attempts + 1)
+          void get().reattach(id, "the connection dropped before the round finished", plan.runId)
+          return
+        }
+        // ★ The attach did not help — the stream was cut again. ★ Wait for
+        //   the round to end: the ledger says so, and the transcript holds
+        //   the answer.
+        if (Date.now() >= deadline) return
+        await new Promise<void>((r) => setTimeout(r, RECOVER_WAIT_MS))
+      }
+    } finally {
+      recovering.delete(id)
+    }
+  },
+
+  // applyScan records what the run ledger says about the session.
   //
   // ★ The busy flag may only be cleared on the word of a scan. A stream
   //   that ends says nothing about the session: another surface's turn
   //   may still be running, and the ledger is the only thing that knows.
   //
-  // ★ The run this surface owns is not "busy". Busy means "a live turn
+  // ★ The run this surface follows is not "busy". Busy means "a live turn
   //   that belongs to somebody else".
-  //
-  // ★ A failed scan leaves the flag alone. Guessing is what the scan
-  //   exists to stop.
-  async scanBusy(id: string) {
-    let runs: RunsView
-    try {
-      runs = await api.listRuns(id)
-    } catch {
-      return
-    }
+  applyScan(id: string, runs: RunsView) {
     const mine = get().sessions[id]?.convo?.runId
-    const busy = !!runs.activeRunId && runs.activeRunId !== mine
+    const busy = busyElsewhere(runs, mine)
     set((s) => {
       const entry = s.sessions[id]
       if (!entry) return s
@@ -472,6 +963,224 @@ export const useStore = create<StoreState>((set, get) => ({
         },
       }
     })
+  },
+
+  // attachToLiveRun follows the run that owns the session.
+  //
+  // ★ The run outlives the connection: the server archives the turn, not
+  //   this stream. So a surface that opens a session with a live turn can
+  //   come back to it — the scan says which run owns the session, and the
+  //   attach hands over the rest of the turn.
+  //
+  // ★ This is what a second tab does. Before it, the tab hydrated as
+  //   idle, said the session was busy in another window, and showed
+  //   nothing of the turn that was actually running. Now it watches the
+  //   same turn.
+  //
+  // ★ It is a read. The attach does not claim the session and does not
+  //   start a turn: the server refuses a run that is not live, and the
+  //   turn goes on whoever is watching.
+  async attachToLiveRun(id: string) {
+    // ★ One stream at a time. A surface that is already following a turn
+    //   has that turn to look after, and the run it follows is the one
+    //   the scan would name.
+    if (run) return
+
+    let runs: RunsView
+    try {
+      runs = await api.listRuns(id)
+    } catch {
+      return
+    }
+    const target = attachTarget(runs, get().sessions[id]?.convo?.runId)
+    if (!target) {
+      // ★ The scan says the session is free. Whatever said otherwise was
+      //   a reading from a moment ago, and the ledger is the truth.
+      get().applyScan(id, runs)
+      return
+    }
+
+    setCurrentRunKey(id)
+    run = runStream(
+      { threadId: id, runId: target },
+      {
+        onEvent: (ev) => get().applyEvent(id, ev as AgEvent),
+        onError: (msg, code) => {
+          releaseRun()
+          if (code === "run_not_live") {
+            // ★ The server says this round's turn is gone. ★ The approval it
+            //   raised may not be on disk yet — the runtime releases the
+            //   turn first (agentkit/run/bridge.go) — so the recovery waits
+            //   for the barrier and reads the transcript then.
+            void get().recoverRound(id, target)
+            return
+          }
+          get().loadError(id, msg)
+        },
+        onDone: (terminal) => {
+          releaseRun()
+          if (!terminal) {
+            // ★ The stream was cut: the round may still be running, and the
+            //   approval it raises has to reach the card.
+            void get().recoverRound(id)
+            return
+          }
+          // ★ The transcript is the truth once the run is over, and this
+          //   surface never owned the turn: it watched it. The replayed
+          //   events give way to the recorded ones.
+          void get().reloadHistory(id)
+          void get().scanBusy(id)
+          void get().refreshList()
+        },
+      },
+    )
+  },
+
+  // watchSession follows the session's announcements.
+  //
+  // ★ The channel is the session's, and it is what tells this surface
+  //   that an approval was answered somewhere else. ★ It follows the
+  //   session on screen: a channel for a session nobody is looking at is
+  //   a connection nobody reads.
+  watchSession(id: string | null) {
+    if (sessionChannelId === id) return
+    if (sessionReopen !== null) {
+      clearTimeout(sessionReopen)
+      sessionReopen = null
+    }
+    sessionChannel?.abort()
+    sessionChannel = null
+    sessionChannelId = id
+    if (!id) return
+
+    const reopen = (delay: number) => {
+      if (get().activeId !== id) return
+      sessionReopen = setTimeout(() => {
+        sessionReopen = null
+        get().watchSession(id)
+      }, delay)
+    }
+
+    sessionChannel = sessionStream(id, {
+      onFact: (fact) => get().applySessionFact(id, fact),
+      onClosed: () => {
+        // ★ The channel ended: the connection went away. ★ The facts it
+        //   carried are notifications, and the ones that were missed are
+        //   in the ledger — so come back to the scan, and listen again.
+        if (sessionChannelId !== id) return
+        sessionChannelId = null
+        void get().scanBusy(id)
+        if (get().sessions[id]?.convo?.status === "awaiting-approval") {
+          // ★ A card the server may have already answered: the transcript
+          //   is the truth about which approvals are still open.
+          void get().reloadHistory(id)
+        }
+        reopen(SESSION_REOPEN_MS)
+      },
+      onError: () => {
+        // ★ The channel could not be opened. ★ Nothing is lost: the
+        //   approval card is rebuilt from the transcript, and the next
+        //   scan says whether the session is busy. ★ The retry is slower
+        //   than the reopen — the server said no, and asking again every
+        //   second would be a loop rather than a retry.
+        if (sessionChannelId !== id) return
+        sessionChannelId = null
+        reopen(SESSION_RETRY_MS)
+      },
+    })
+  },
+
+  // applySessionFact folds one announcement of the session into the view.
+  //
+  // ★ The card is the point: a surface that waits on an approval and is
+  //   not told that the approval was answered keeps a card the server
+  //   refuses every answer on.
+  applySessionFact(id: string, fact: SessionFact) {
+    set((s) => {
+      const entry = s.sessions[id]
+      if (!entry) return {}
+      const convo = foldSessionFact(entry.convo ?? emptyConversation(), fact)
+      return { sessions: { ...s.sessions, [id]: { ...entry, convo } } }
+    })
+    // ★ These three facts are lines of the session's operation log: a round
+    //   began, an approval was asked for, an approval was answered. ⇒ The
+    //   log is read again, so a panel that is already open shows the new
+    //   line instead of waiting for the next open.
+    void get()
+      .loadOperations(id)
+      .catch(() => {})
+    if (fact.kind !== "run-started") return
+    // ★ A new round owns the session: follow it.
+    void get().followRun(id, fact.runId)
+  },
+
+  // followRun attaches to the run the session named.
+  //
+  // ★ The channel named it, so there is nothing to look for: the scan
+  //   exists for a surface that has to *find* the live run, and this one
+  //   was told.
+  //
+  // ★ One stream at a time. ★ A surface that is still holding the previous
+  //   run waits for it to end: the server allows one live turn per
+  //   session, so the new round cannot begin before the old one is over.
+  followRun(id: string, runId: string) {
+    if (!runId) return
+    // ★ Already following it: the attach has nothing to do. ★ The
+    //   conversation's run id is the one the surface is watching, and the
+    //   announcement does not write it down — so this says "this surface
+    //   is on that run", not "the session has that run".
+    if (get().sessions[id]?.convo?.runId === runId) return
+    if (run) {
+      pendingAttach = { id, runId }
+      return
+    }
+
+    setCurrentRunKey(id)
+    run = runStream(
+      { threadId: id, runId },
+      {
+        onEvent: (ev) => get().applyEvent(id, ev as AgEvent),
+        onError: (msg, code) => {
+          releaseRun()
+          if (code === "run_not_live") {
+            // ★ The run ended between the announcement and the attach. ★
+            //   The approval it raised may not be on disk yet — the runtime
+            //   releases the turn first (agentkit/run/bridge.go) — so the
+            //   recovery waits for the barrier and reads the transcript
+            //   then.
+            void get().recoverRound(id, runId)
+            return
+          }
+          get().loadError(id, msg)
+        },
+        onDone: (terminal) => {
+          releaseRun()
+          if (!terminal) {
+            // ★ The stream was cut: the round may still be running, and the
+            //   approval it raises has to reach the card.
+            void get().recoverRound(id)
+            return
+          }
+          void get().reloadHistory(id)
+          void get().scanBusy(id)
+          void get().refreshList()
+        },
+      },
+    )
+  },
+
+  // scanBusy asks the ledger whether the session is busy.
+  //
+  // ★ A failed scan leaves the flag alone. Guessing is what the scan
+  //   exists to stop.
+  async scanBusy(id: string) {
+    let runs: RunsView
+    try {
+      runs = await api.listRuns(id)
+    } catch {
+      return
+    }
+    get().applyScan(id, runs)
   },
 
   // reloadHistory re-reads the session's transcript.
@@ -525,13 +1234,20 @@ export const useStore = create<StoreState>((set, get) => ({
       {
         onEvent: (ev) => handleEvent(set, get, id, ev as AgEvent),
         onError: (message) => {
-          run = null
-          setCurrentRunKey(null)
+          releaseRun()
           get().loadError(id, message)
         },
-        onDone: () => {
-          run = null
-          setCurrentRunKey(null)
+        onDone: (terminal) => {
+          releaseRun()
+          if (!terminal) {
+            // ★ The stream was cut: the round that follows the answer may
+            //   still be running, and the approval it raises has to reach
+            //   the card. ★ This path used to be missing — the round after
+            //   an answer had no way back, so its approval stayed invisible
+            //   until the page was reloaded.
+            void get().reattach(id, "the connection dropped before the round finished")
+            return
+          }
           void get().refreshList()
         },
       },
@@ -543,8 +1259,7 @@ export const useStore = create<StoreState>((set, get) => ({
     if (!id) return
 
     run?.abort()
-    run = null
-    setCurrentRunKey(null)
+    releaseRun()
     set((s) => {
       const entry = s.sessions[id]
       if (!entry) return s
@@ -713,12 +1428,27 @@ async function ensureSession(): Promise<string> {
   const current = useStore.getState().activeId
   if (current !== null) return current
 
-  const created = await api.createThread(useStore.getState().pendingAgentId ?? undefined)
+  const state = useStore.getState()
+  // ★ The mode travels with the creation request, here as everywhere: a
+  //   conversation is born in the mode the user picked.
+  const created = await api.createThread(
+    state.pendingAgentId ?? undefined,
+    state.activeProjectId ?? undefined,
+    {
+      ...(state.pendingAuthorizationMode ? { mode: state.pendingAuthorizationMode } : {}),
+      confirmed:
+        state.pendingAuthorizationMode === "full" && state.pendingAuthorizationConfirmed,
+    },
+  )
   const id = created.threadId
   useStore.setState((s) => ({
     sessions: { ...s.sessions, [id]: { meta: created, convo: emptyConversation(), loaded: true } },
     order: [id, ...s.order],
     activeId: id,
+    // ★ The staged choice is spent: the conversation that carries it exists
+    //   now, and it carries the mode itself.
+    pendingAuthorizationMode: null,
+    pendingAuthorizationConfirmed: false,
   }))
   writeActiveThreadId(id)
   return id
@@ -734,6 +1464,11 @@ function stubMeta(id: string): ThreadMeta {
     state: "idle",
     hasPendingApproval: false,
     agentId: MAIN_AGENT,
+    projectId: "",
+    // ★ A session that does not exist yet has no mode of its own, and the
+    // default is what the server gives it when it creates it.
+    authorizationMode: "default",
+    authorizationConfirmed: false,
   }
 }
 

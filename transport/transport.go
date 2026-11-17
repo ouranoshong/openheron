@@ -54,6 +54,22 @@ const (
 //
 //	changed who derives them, not what they say.
 func Render(w io.Writer, threadID, runID string, ch <-chan contract.RunEvent) error {
+	return RenderStream(w, threadID, runID, ch, nil)
+}
+
+// RenderStream is Render with the ability to tell a finished stream from a
+// cut one.
+//
+// ★ A subscriber the run dropped is not a run that finished: the renderer
+// must not close its stream with a terminal frame. The client reads a
+// terminal frame as "the run is over, this is the whole outcome", and the
+// approval it did not receive would then be invisible until a reload. An
+// open-ended stream sends the client down its "the connection dropped, come
+// back to the run" path instead, which reads the transcript and therefore
+// the approval.
+func RenderStream(w io.Writer, threadID, runID string, ch <-chan contract.RunEvent,
+	truncated func() bool) error {
+
 	if runID == "" {
 		runID = uuid.NewString()
 	}
@@ -65,6 +81,9 @@ func Render(w io.Writer, threadID, runID string, ch <-chan contract.RunEvent) er
 	}
 
 	switch {
+	case truncated != nil && truncated():
+		// ★ No terminal frame: the stream was cut, and a "success" here
+		//   would tell the client the run said everything it had to say.
 	case len(r.interrupts) > 0:
 		r.emit(events.NewRunFinishedEventWithOptions(threadID, runID,
 			events.WithInterruptOutcome(r.interrupts)))
@@ -74,6 +93,36 @@ func Render(w io.Writer, threadID, runID string, ch <-chan contract.RunEvent) er
 	default:
 		r.emit(events.NewRunFinishedEventWithOptions(threadID, runID,
 			events.WithSuccessOutcome()))
+	}
+	return r.runErr
+}
+
+// RenderSession writes the session's announcements as AG-UI frames.
+//
+// ★ There is no run here, so there is no RUN_STARTED and no RUN_FINISHED:
+//
+//	those frames say "this run began" and "this run ended", and neither is
+//	true of a channel that outlives every run on the session.
+//
+// ★ The channel has no terminal frame either. It ends when the session goes
+//
+//	away or the connection drops, and the client reads that as "come back
+//	to the scan" — not as "the session is over".
+//
+// ★ Only the session's facts are rendered. A run's events belong to the
+//
+//	run's own stream, and a client that wants them attaches to the run.
+func RenderSession(w io.Writer, threadID string, ch <-chan contract.RunEvent) error {
+	r := &renderer{w: w, threadID: threadID}
+	for ev := range ch {
+		switch ev.Kind {
+		case contract.RunEventApprovalPending:
+			r.emitApprovalPending(ev)
+		case contract.RunEventApprovalResolved:
+			r.emitApprovalResolved(ev)
+		case contract.RunEventRunStarted:
+			r.emitRunStarted(ev)
+		}
 	}
 	return r.runErr
 }
@@ -124,6 +173,8 @@ func (r *renderer) render(ev contract.RunEvent) {
 		r.emitToolEnd(ev.ToolID, ev.Sub)
 	case contract.RunEventToolResult:
 		r.emitToolResult(ev.Text, ev.ToolID, ev.Sub)
+	case contract.RunEventToolFailed:
+		r.emitToolFailed(ev)
 	case contract.RunEventAnnounce:
 		r.announce(ev.MsgID, ev.Role, ev.Owner)
 	case contract.RunEventCompaction:
@@ -132,6 +183,10 @@ func (r *renderer) render(ev contract.RunEvent) {
 		r.emitContextUsage(ev.Usage)
 	case contract.RunEventInterrupt:
 		r.interrupts = append(r.interrupts, toWireInterrupts(ev.Interrupts)...)
+	case contract.RunEventApprovalResolved:
+		r.emitApprovalResolved(ev)
+	case contract.RunEventRunStarted:
+		r.emitRunStarted(ev)
 	case contract.RunEventRetry:
 		r.emitRetry(ev.Text, ev.Agent)
 	case contract.RunEventError:
@@ -232,6 +287,84 @@ func (r *renderer) emitRetry(message, agent string) {
 	r.emit(events.NewCustomEvent("model_retry", events.WithValue(value)))
 }
 
+// emitApprovalPending publishes that an approval is waiting for an answer.
+//
+// ★ It is a **custom** frame for the same reason as the answer's: no run is
+//
+//	being described here — the session is.
+//
+// ★ The card's data travels with the fact. ★ A surface that was not watching
+//
+//	the run that raised the approval has no stream of its own, so the tool
+//	name and the arguments exist nowhere else for it — and a card without
+//	them is a card nobody can judge.
+//
+// ★ The payload is the card's fields, one by one, in the **channel's**
+//
+//	spelling. ★ The scan answers the same card in the REST spelling
+//	(pendingApprovals): two surfaces, one card, each saying it in its own
+//	words — and the client translates once, in one place.
+func (r *renderer) emitApprovalPending(ev contract.RunEvent) {
+	for _, p := range ev.Pending {
+		value := map[string]any{
+			"interrupt_id": p.InterruptID,
+			"reason":       contract.PendingReasonToolCall,
+			"run_id":       ev.RunID,
+		}
+		if d := p.Detail; d != nil {
+			value["message"] = d.Message
+			value["tool_call_id"] = d.ToolCallID
+			value["tool_name"] = d.ToolName
+			value["requested_by_agent"] = d.RequestedByAgent
+			value["subagent_run_id"] = d.SubagentRunID
+			// ★ The arguments are raw JSON: they are the tool call's own
+			//   bytes, and re-encoding them as a string would make the
+			//   client parse them twice.
+			if len(d.Arguments) > 0 {
+				value["arguments"] = d.Arguments
+			}
+			if !d.CreatedAt.IsZero() {
+				value["created_at"] = d.CreatedAt.UTC().Format(time.RFC3339Nano)
+			}
+		}
+		r.emit(events.NewCustomEvent("approval_pending", events.WithValue(value)))
+	}
+}
+
+// emitApprovalResolved publishes that the approval was answered.
+//
+// ★ It is a **custom** frame: AG-UI has no vocabulary for "an approval was
+//
+//	answered", and its frames are about a run — while this fact belongs to
+//	the session and outlives the run that answered it.
+//
+// ★ The frame names the answering run, so a surface that was waiting on the
+//
+//	approval knows where the round went.
+func (r *renderer) emitApprovalResolved(ev contract.RunEvent) {
+	r.emit(events.NewCustomEvent("approval_resolved",
+		events.WithValue(map[string]any{
+			"interrupt_id": ev.InterruptID,
+			"approved":     ev.Approved,
+			"reason":       ev.Reason,
+			"run_id":       ev.RunID,
+		})))
+}
+
+// emitRunStarted publishes that a new run owns the session.
+//
+// ★ It is a custom frame for the same reason as the approval's: no run is
+//
+//	being described here — the session is. ★ The kind is a name, not a
+//	number: this frame outlives the process that wrote it.
+func (r *renderer) emitRunStarted(ev contract.RunEvent) {
+	r.emit(events.NewCustomEvent("run_started",
+		events.WithValue(map[string]any{
+			"run_id": ev.RunID,
+			"kind":   ev.TurnKind.String(),
+		})))
+}
+
 // emitRunError publishes the run's failure.
 //
 // ★ The code is the classification the derivation made; the frame carries
@@ -314,4 +447,23 @@ func (r *renderer) emitToolResult(content, callID, sub string) {
 	ev := events.NewToolCallResultEvent(uuid.NewString(), callID, content)
 	ev.SubagentRunID = sub
 	r.emit(ev)
+}
+
+// emitToolFailed publishes that a tool call failed.
+//
+// ★ It is a **custom** frame: the upstream's tool result frame carries the
+//
+//	content and nothing else, and the content says what the **model** read —
+//	not what happened to the call. ★ The call id rides along, so the client
+//	can join the failure with the call it belongs to, and the error text
+//	travels with it so the interface can say why.
+func (r *renderer) emitToolFailed(ev contract.RunEvent) {
+	value := map[string]any{
+		"tool_call_id": ev.ToolID,
+		"error":        ev.Text,
+	}
+	if ev.ToolName != "" {
+		value["tool_name"] = ev.ToolName
+	}
+	r.emit(events.NewCustomEvent("tool_failed", events.WithValue(value)))
 }

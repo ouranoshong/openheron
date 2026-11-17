@@ -9,7 +9,6 @@ import (
 
 const embeddingLLM = `type: openai_compat
 base_url: http://127.0.0.1:8089/v1
-api_key: ""
 models:
   - id: Qwen3-Embedding-0.6B-GGUF
     kind: embedding

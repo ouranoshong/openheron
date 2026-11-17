@@ -8,6 +8,11 @@ import { requireTestBackend, testBackendBase } from "./test-env"
 //   tests prove Service.Write refuses what it should; only this proves the
 //   wiring between "the model calls the tool" and "a human said yes".
 //
+// ★ The tier is the file's business — `tools/config.yaml` grants `config_write`
+//   like any other name — so the ask tier is a **prerequisite** here, not a
+//   rule of the code: a file that grants it turns this smoke off, and it says
+//   so instead of pretending the wiring is broken.
+//
 // ★ It fails loudly when its own prerequisite is missing. `config_write` is
 //   invisible unless the agent that runs the turn names it in its own `tools:`
 //   list — the same shape as smoke:hitl, except that one is documented and this
@@ -90,10 +95,24 @@ if (verdict.reason) {
 }
 ok(verdict.tier === "ask", "config_write is in the ask tier", verdict.tier)
 if (verdict.tier !== "ask") {
-  // Nothing else can be asserted: an allow-tier config_write would have run
-  // without an approval, which is the one thing this smoke exists to catch.
-  console.error("✗ config_write must always ask; see agentkit/build/tools.go's alwaysAsk")
-  process.exit(1)
+  // ★ The tier comes from the file that owns the family, so this smoke needs
+  //   that file to leave `config_write` out: an allow-tier config_write runs
+  //   without an approval, and the approval wiring is the one thing this
+  //   smoke exists to prove.
+  console.error(
+    [
+      "✗ config_write is in the allow tier, so this smoke cannot exercise the approval path.",
+      "",
+      "  The tier is decided by the file that owns the family:",
+      "",
+      "      .openheron/tools/config.yaml",
+      "      allows: [config_get, config_validate, config_template, config_notices, config_tier]",
+      "",
+      "  Leave config_write out of that list, run: task test-env-sync,",
+      "  and run this smoke again.",
+    ].join("\n"),
+  )
+  process.exit(2)
 }
 
 // ── the probe file ───────────────────────────────────────────────────────

@@ -19,10 +19,10 @@ import (
 )
 
 func skillChain(ctx context.Context, backend fsapi.Backend, hubs *skillHubs, scope skillScope,
-	log *slog.Logger) (
+	log *slog.Logger, configRoot string) (
 	adk.TypedChatModelAgentMiddleware[*schema.Message], error) {
 
-	dir, ok := ResolveSkillsDir(log)
+	dir, ok := ResolveSkillsDir(log, configRoot)
 	if !ok {
 		return nil, nil
 	}
@@ -187,11 +187,27 @@ func (b *scopedSkillBackend) Get(ctx context.Context, name string) (skill.Skill,
 // ★ The rule lives here and nowhere else: a second copy of it in the config
 //
 //	layer would be a second answer to "which skills are loaded".
-func ResolveSkillsDir(log *slog.Logger) (string, bool) {
+//
+// ★ The order is: `$EINO_EXT_SKILLS_DIR`, then the **config root's** own
+//
+//	`skills/`, then the upward probe. ★ The config root comes second because
+//	it is the one the configuration editor writes into — a skill that is
+//	saved where the configuration is, and is not loaded, is a skill the
+//	user cannot use. The upward probe is the old layout, and it is still
+//	there: a project that keeps its own `.openheron/skills/` keeps working.
+func ResolveSkillsDir(log *slog.Logger, configRoot string) (string, bool) {
 	if log == nil {
 		log = obs.Discard()
 	}
 	dir := strings.TrimSpace(os.Getenv("EINO_EXT_SKILLS_DIR"))
+	if dir == "" {
+		if root := strings.TrimSpace(configRoot); root != "" {
+			cand := filepath.Join(root, "skills")
+			if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
+				dir = cand
+			}
+		}
+	}
 	if dir == "" {
 		if found, ok := probeProjectSkills(); ok {
 			dir = found
@@ -240,11 +256,11 @@ type SkillInfo struct {
 	Model       string `json:"model,omitempty"`
 }
 
-func Skills(ctx context.Context, log *slog.Logger) []SkillInfo {
+func Skills(ctx context.Context, log *slog.Logger, configRoot string) []SkillInfo {
 	if log == nil {
 		log = obs.Discard()
 	}
-	dir, ok := ResolveSkillsDir(log)
+	dir, ok := ResolveSkillsDir(log, configRoot)
 	if !ok {
 		return nil
 	}

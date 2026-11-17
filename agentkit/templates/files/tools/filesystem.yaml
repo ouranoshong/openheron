@@ -27,5 +27,5 @@
 #   allows: [write_file, edit_file, execute]
 #
 # Note: changing the configuration under .openheron goes through `config_write`;
-# it is always ask, and this file does not affect it.
+# its tier is decided by `tools/config.yaml`, not by this file.
 allows: []

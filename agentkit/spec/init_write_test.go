@@ -70,7 +70,6 @@ func TestAnAbsentConfigRootLoadsNothing(t *testing.T) {
 
 const batchProvider = `type: openai_compat
 base_url: https://api.openai.com/v1
-api_key: ${TEST_LLM_KEY}
 models:
   - id: gpt-4o
 `

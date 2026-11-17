@@ -45,6 +45,10 @@ func (s *Server) registerV2Routes() {
 	h.GET("/v2/sessions/:id", s.v2GetSession)
 	h.PATCH("/v2/sessions/:id", s.v2RenameSession)
 	h.PATCH("/v2/sessions/:id/agent", s.v2SwitchAgent)
+	// ★ The authorization mode: a session's own property, and the only way
+	//   to change it. ★ A separate route, not a field of the rename route:
+	//   one concern, one route.
+	h.PATCH("/v2/sessions/:id/authorization", s.v2SetAuthorization)
 	h.DELETE("/v2/sessions/:id", s.v2DeleteSession)
 
 	h.GET("/v2/sessions/:id/messages", s.v2Messages)
@@ -57,6 +61,17 @@ func (s *Server) registerV2Routes() {
 	h.GET("/v2/sessions/:id/runs", s.v2SessionRuns)
 	h.GET("/v2/sessions/:id/runs/:runId", s.v2SessionRun)
 
+	// ★ The operation timeline: what happened to this session, in order.
+	//   ★ It is not the announcement channel — that one is live and forgets
+	//   everything; this one is on disk and keeps every line.
+	h.GET("/v2/sessions/:id/operations", s.v2Operations)
+
+	// ★ The session's announcement channel: the facts that outlive a run —
+	//   an approval was answered, a new round began. ★ It is what keeps a
+	//   second surface from sitting on a question the server has already
+	//   answered.
+	h.GET("/v2/sessions/:id/events", s.v2SessionEvents)
+
 	h.POST("/v2/sessions/:id/files", s.v2UploadFiles)
 	h.GET("/v2/sessions/:id/files", s.v2ListFiles)
 	// ★ The bytes of one file, for the preview. It never interprets the
@@ -67,6 +82,19 @@ func (s *Server) registerV2Routes() {
 	//   /v2 route. project/files feeds the composer picker; it is read-only.
 	h.GET("/v2/project/files", s.v2ProjectFiles)
 	h.GET("/v2/commands", s.v2Commands)
+
+	// ★ The project surface: the table that says which sessions belong to
+	//   which project. ★ Four endpoints, one table, and no mode branch — the
+	//   scope in the answer says how many groups the client renders.
+	h.GET("/v2/projects", s.v2Projects)
+	h.POST("/v2/projects", s.v2CreateProject)
+	h.PATCH("/v2/projects/:id", s.v2UpdateProject)
+	h.DELETE("/v2/projects/:id", s.v2DeleteProject)
+
+	// ★ The folder chooser: the server opens the operating system's own
+	//   dialog, because the browser will not tell a page where a chosen
+	//   directory lives.
+	h.POST("/v2/fs/pick-directory", s.v2PickDirectory)
 
 	h.POST("/v2/run", s.v2Run)
 
@@ -84,6 +112,13 @@ func (s *Server) registerV2Routes() {
 	h.PUT("/v2/settings/item", s.v2SettingsSave)
 	h.DELETE("/v2/settings/item", s.v2SettingsDelete)
 	h.POST("/v2/settings/validate", s.v2SettingsValidate)
+
+	// ★ The secret surface: two namespaces, one shape. The group is in the
+	//   path, so "delete everything" is scoped by the request itself.
+	h.GET("/v2/secrets", s.v2Secrets)
+	h.PUT("/v2/secrets/:group/:name", s.v2SecretWrite)
+	h.DELETE("/v2/secrets/:group/:name", s.v2SecretDelete)
+	h.DELETE("/v2/secrets/:group", s.v2SecretGroupDelete)
 }
 
 // ── POST /v2/sessions/{id}/files ─────────────────────────────────────────
@@ -210,6 +245,17 @@ func (s *Server) v2UploadFiles(ctx context.Context, c *app.RequestContext) {
 			s.logger().Warn("could not remember the original name of an uploaded file",
 				"path", rel, "err", err)
 		}
+
+		// ★ The file is on disk, so the timeline says so. ★ The name the
+		//   person recognises travels with the line: the stored name carries
+		//   a hash, and a hash in a timeline is a name nobody can read.
+		s.recordOperation(ctx, sess, storage.Operation{
+			Kind:  storage.OpFileUploaded,
+			Actor: storage.ActorUser,
+			Path:  rel,
+			Name:  display,
+			Size:  size,
+		})
 
 		out.Files = append(out.Files, uploadedFile{
 			Name: display,
@@ -484,6 +530,13 @@ func (s *Server) v2DeleteFile(ctx context.Context, c *app.RequestContext) {
 		s.v2Fail(c, consts.StatusBadRequest, codeInvalidFileName, err.Error(), false)
 		return
 	}
+	// ★ The file is gone, so the timeline says so. ★ The name is the one the
+	//   caller sent — the same name the workspace listing uses.
+	s.recordOperation(ctx, sess, storage.Operation{
+		Kind:  storage.OpFileDeleted,
+		Actor: storage.ActorUser,
+		Path:  name,
+	})
 	c.JSON(consts.StatusOK, map[string]any{
 		"deleted": true,
 		"path":    name,

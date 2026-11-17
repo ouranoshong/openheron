@@ -23,6 +23,20 @@ type FileLock struct {
 
 func RunLockPath(dir string) string { return filepath.Join(dir, ".lock.run") }
 
+// WriteLockPath is the lock that guards a read-modify-write of the files in
+// dir.
+//
+// ★ It is **not** the run lock, and the two answer different questions. The
+//
+//	run lock says "one indexing run at a time"; this one says "one commit
+//	at a time". A run embeds (slow, a network round trip per batch) and
+//	then commits (fast, two file writes). Holding the run lock across the
+//	commit would keep two runs apart for the whole embedding; holding this
+//	lock across the embedding would keep them apart for the whole commit —
+//	and the whole point of the commit lock is that it is held for the
+//	merge alone.
+func WriteLockPath(dir string) string { return filepath.Join(dir, ".lock.write") }
+
 func LockPath(dir string) string { return filepath.Join(dir, ".lock") }
 
 func OpenFileLock(path string) (*FileLock, error) {

@@ -23,10 +23,10 @@ const revisionLen = 8
 type WriteErrorKind string
 
 const (
-	ErrPathInvalid   WriteErrorKind = "config_path_invalid"
-	ErrSecretLiteral WriteErrorKind = "config_secret_literal"
-	ErrMergeRejected WriteErrorKind = "config_would_break_merge"
-	ErrConflict      WriteErrorKind = "config_write_conflict"
+	ErrPathInvalid     WriteErrorKind = "config_path_invalid"
+	ErrKeyFieldRetired WriteErrorKind = "config_key_field_retired"
+	ErrMergeRejected   WriteErrorKind = "config_would_break_merge"
+	ErrConflict        WriteErrorKind = "config_write_conflict"
 )
 
 type WriteError struct {
@@ -175,8 +175,8 @@ func validateFileName(cat Category, rel string) error {
 			}
 		}
 		return writeErrf(ErrPathInvalid, rel,
-			"tools/ only accepts %s; other files here are rejected at load time",
-			strings.Join(ToolFileNames(), ", "))
+			"tools/ accepts one file per tool: %s; other files here are rejected at load time",
+			toolFileList())
 	case DirMCP:
 		// ★ The file's name is the server's name, and it is the namespace
 		//   segment of that server's tools: a name that does not match the
@@ -280,7 +280,7 @@ func listNested(dir string, entries []os.DirEntry) []string {
 func Skeleton(catDir string, modelRefs []string) string {
 	switch catDir {
 	case DirLLM:
-		return "type: openai\nbase_url: \napi_key: ${}\nmodels: []\n"
+		return "type: openai\nbase_url: \nmodels: []\n"
 	case DirAgent:
 		s := "---\nmodel: \ndescription: \n"
 		// ★ The skills hint belongs in the frontmatter: the key is a
@@ -298,10 +298,14 @@ func Skeleton(catDir string, modelRefs []string) string {
 			"#   web_search.yaml   duckduckgo_search\n" +
 			"#   wikipedia.yaml    wikipedia_search\n" +
 			"#   kb.yaml           knowledge base\n" +
+			"#   filesystem.yaml   ls / read_file / write_file / edit_file / glob / grep / execute\n" +
+			"#   config.yaml       config_get / config_validate / config_template / config_notices / config_tier / config_write\n" +
 			"#\n" +
 			"# ★ The content of the file IS **that tool's own configuration** (no outer wrapper key).\n" +
-			"#   A provider whose configuration is absent mounts nothing, so for these tools\n" +
+			"#   A provider whose configuration is absent mounts nothing, so for those tools\n" +
 			"#   the file's presence IS the switch — turning a tool off = deleting that file.\n" +
+			"#   The filesystem and configuration tools are mounted either way: for those\n" +
+			"#   two, a missing file takes away an exception, not the tool.\n" +
 			"#\n" +
 			"# ★ tools/ is hot-reloaded: the change takes effect on the next turn, no process restart.\n"
 	case DirMCP:
@@ -469,16 +473,80 @@ func (s *Service) agentsLostByChange(after *Config, removed []string) []string {
 
 // checkNoAgentLost refuses a change that would take a working agent out of
 // the tree.
-func (s *Service) checkNoAgentLost(after *Config, rel string, removed []string) error {
-	lost := s.agentsLostByChange(after, removed)
-	if len(lost) == 0 {
-		return nil
+//
+// ★ It returns the tree as it **was**, because the write path has a second
+//
+//	question to ask about the same pair of trees: did the change widen the
+//	tier table? Loading the tree twice would be a second full read of the
+//	configuration for one write.
+func (s *Service) checkNoAgentLost(after *Config, rel string, removed []string) (*Config, error) {
+	before, err := s.loadWithMany(nil)
+	if err != nil {
+		// ★ A tree that does not load has nothing known to be working, and
+		//   the change may only add. (That is also how a broken file gets
+		//   fixed — the editor's draft replaces it, so the trial tree is
+		//   the one that parses.)
+		return nil, nil
 	}
-	return &WriteError{
+	lost := agentsLostBy(before, after, removed)
+	if len(lost) == 0 {
+		return before, nil
+	}
+	return before, &WriteError{
 		Kind:    ErrMergeRejected,
 		Rel:     rel,
 		Message: lostAgentMessage(lost[0], after),
 	}
+}
+
+// widenedTools returns the tools the tier table gained.
+//
+// ★ The tier table is the set of tools that run **without a nod**, and a
+//
+//	configuration file widens it by naming a tool in its `allows:` list.
+//	The comparison is between the two **trees**, not between the two files:
+//	the change may come from anywhere, and it is the table that matters.
+//
+// ★ Only the gained names are reported. A table that shrank is not the
+//
+//	thing an operator has to look for — it is the safe direction.
+func widenedTools(before, after *Config) []string {
+	if before == nil || after == nil {
+		return nil
+	}
+	was := make(map[string]bool)
+	for _, n := range before.AllowedTools() {
+		was[n] = true
+	}
+	var out []string
+	for _, n := range after.AllowedTools() {
+		if !was[n] {
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// reportWidenedTier says one line when a change widened the tier table.
+//
+// ★ It does not refuse. The file that provides a tool owns the exceptions
+//
+//	for that tool — that is the tree's own rule — so a write that names a
+//	tool is legitimate. ★ But it is **said**: a table that widened is
+//	exactly the fact an operator has to be able to find afterwards, and a
+//	silent widening is how a session ends up running tools nobody chose.
+//
+// ★ A tree that does not load has no table to compare against, and then
+//
+//	nothing is said: "every tool is new" is not a fact, it is an absence.
+func (s *Service) reportWidenedTier(before, after *Config, rel string) {
+	gained := widenedTools(before, after)
+	if len(gained) == 0 {
+		return
+	}
+	s.logger().Warn("[config] the tier table was widened",
+		"file", rel, "tools", strings.Join(gained, ", "))
 }
 
 func (s *Service) Write(rel string, content []byte, baseRev string) (rev string, cfg *Config, err error) {
@@ -501,7 +569,8 @@ func (s *Service) Write(rel string, content []byte, baseRev string) (rev string,
 	// ★ The gate the tree needs: a change may not take a working agent out
 	//   of it. The trial tree loads either way — an agent that cannot run is
 	//   left out — so without this the gate would have no teeth.
-	if err := s.checkNoAgentLost(trial, rel, nil); err != nil {
+	before, err := s.checkNoAgentLost(trial, rel, nil)
+	if err != nil {
 		return "", nil, err
 	}
 
@@ -512,8 +581,86 @@ func (s *Service) Write(rel string, content []byte, baseRev string) (rev string,
 	if err := persist.AtomicWrite(dst, content, writeTmpSuffix); err != nil {
 		return "", nil, err
 	}
+	// ★ The tier table may have just widened, and that is reported, not
+	//   refused. ★ It is said **after** the write: the line describes a
+	//   fact that is now on the disk.
+	s.reportWidenedTier(before, trial, rel)
+	// ★ The file landed, so it is **marked**: the next turn reads the
+	//   configuration again before it builds, and the change is in it.
+	//   ★ The watcher's poll would notice the same thing a moment later,
+	//   and a turn that starts in between would run the old tree — so the
+	//   mark is what makes "the next turn uses it" a promise instead of a
+	//   race.
+	s.Mark(rel)
 
 	return Revision(content), trial, nil
+}
+
+// Append adds content to the end of a file instead of replacing it.
+//
+// ★ This exists because a file's whole text has to travel in **one** tool
+//
+//	call, and one tool call is bounded by the model's output budget. A
+//	file bigger than that budget cannot be written at all — and the
+//	alternative (a file replaced by half of itself) is worse than not
+//	writing it, because nothing says so afterwards.
+//
+// ★ The result goes through the **same** gates as a whole-file write: the
+//
+//	tree must still load, a working agent must not disappear, the base
+//	revision must still match. So the file on disk is a valid
+//	configuration file after **every** piece — never a half-written one.
+//
+// ★ Appending to a file that does not exist creates it. The model that
+//
+//	writes a long file in pieces should not have to know whether the
+//	first piece is the first piece or the only one.
+func (s *Service) Append(rel string, content []byte, baseRev string) (rev string, cfg *Config, err error) {
+	if _, err := s.validateWritable(rel); err != nil {
+		return "", nil, err
+	}
+	// ★ The revision is checked **before** the file is read: the read and
+	//   the check have to see the same version of the disk.
+	if err := s.checkRevision(rel, baseRev); err != nil {
+		return "", nil, err
+	}
+	cur, _, err := s.ReadFile(rel)
+	if err != nil {
+		return "", nil, err
+	}
+	full := make([]byte, 0, len(cur)+len(content))
+	full = append(full, cur...)
+	full = append(full, content...)
+
+	// ★ The secret check reads the **whole** file, not the piece: the file
+	//   is what lands on disk, and that is what the check is about.
+	if err := s.checkSecretFor(rel, full); err != nil {
+		return "", nil, err
+	}
+
+	m := &mutation{Rel: rel, Content: full}
+	trial, err := s.loadWith(m)
+	if err != nil {
+		return "", nil, &WriteError{Kind: ErrMergeRejected, Rel: rel, Message: err.Error(), Err: err}
+	}
+	before, err := s.checkNoAgentLost(trial, rel, nil)
+	if err != nil {
+		return "", nil, err
+	}
+
+	if s.root == "" {
+		return "", nil, writeErrf(ErrPathInvalid, rel, "no config root")
+	}
+	dst := filepath.Join(s.root, filepath.FromSlash(rel))
+	if err := persist.AtomicWrite(dst, full, writeTmpSuffix); err != nil {
+		return "", nil, err
+	}
+	// ★ The same report as the whole-file write: a piece can widen the tier
+	//   table just as well as a whole file can.
+	s.reportWidenedTier(before, trial, rel)
+	s.Mark(rel)
+
+	return Revision(full), trial, nil
 }
 
 type File struct {
@@ -545,12 +692,9 @@ func (s *Service) WriteMany(files []File, baseRev string) (rev string, cfg *Conf
 	}
 	// ★ The same gate as the single-file write: a batch may not take a
 	//   working agent out of the tree either.
-	if lost := s.agentsLostByChange(trial, nil); len(lost) > 0 {
-		return "", nil, &WriteError{
-			Kind:    ErrMergeRejected,
-			Rel:     relsOf(files),
-			Message: lostAgentMessage(lost[0], trial),
-		}
+	before, err := s.checkNoAgentLost(trial, relsOf(files), nil)
+	if err != nil {
+		return "", nil, err
 	}
 
 	if s.root == "" {
@@ -580,6 +724,13 @@ func (s *Service) WriteMany(files []File, baseRev string) (rev string, cfg *Conf
 			return "", nil, err
 		}
 	}
+	// ★ The same mark the single write leaves: the files landed, so the
+	//   next turn reads the configuration again before it builds.
+	for _, f := range files {
+		s.Mark(f.Rel)
+	}
+	// ★ And the same report: a batch can widen the tier table too.
+	s.reportWidenedTier(before, trial, relsOf(files))
 	return s.Fingerprint(), trial, nil
 }
 
@@ -784,7 +935,10 @@ func (s *Service) Delete(rel string) (cfg *Config, err error) {
 	// ★ The gate, on the delete path too: removing the provider that an
 	//   agent names takes that agent out of the tree just as surely as
 	//   pointing it at a model that does not exist.
-	if err := s.checkNoAgentLost(trial, rel, deletedAgent(rel)); err != nil {
+	//
+	// ★ A delete is the one write that cannot widen the tier table — it can
+	//   only take names away — so there is nothing to report here.
+	if _, err := s.checkNoAgentLost(trial, rel, deletedAgent(rel)); err != nil {
 		return nil, err
 	}
 
@@ -838,11 +992,21 @@ func orNone(rev string) string {
 	return rev
 }
 
-// secretLiteralMessage is the one sentence both callers say about a key
-// written out in plain text: the save refuses it, and the editor shows it
-// before the save is attempted.
-const secretLiteralMessage = "api_key must be a reference, not a literal: " +
-	"use ${ENV_VAR} or @file:/path so the secret stays out of the repository"
+// apiKeyRetiredMessage is the one sentence both callers say about a file
+// that still carries `api_key`: the save refuses it, and the editor shows
+// it before the save is attempted.
+//
+// ★ It names the provider's **own** variable and keyring entry, because the
+//
+//	user's next question is "where do I put it now", and the answer is
+//	different for every provider. A message that only said "api_key is gone"
+//	would leave them guessing.
+func apiKeyRetiredMessage(rel string) string {
+	id := strings.TrimSuffix(path.Base(rel), ".yaml")
+	return fmt.Sprintf("`api_key` is no longer read — the key of %q comes from %s "+
+		"(or from the keyring entry %s); delete this line",
+		id, LLMEnvName(id), LLMSecretUser(id))
+}
 
 func (s *Service) checkSecretFor(rel string, content []byte) error {
 	cat, ok := CategoryByDir(path.Dir(path.Clean(filepath.ToSlash(rel))))
@@ -856,36 +1020,31 @@ func (s *Service) checkSecret(cat Category, rel string, content []byte) error {
 	if cat.Dir != DirLLM {
 		return nil
 	}
-	if secretLiteralLine(content) == 0 {
+	if apiKeyLine(content) == 0 {
 		return nil
 	}
-	return writeErrf(ErrSecretLiteral, rel, "%s", secretLiteralMessage)
+	return writeErrf(ErrKeyFieldRetired, rel, "%s", apiKeyRetiredMessage(rel))
 }
 
-// secretLiteralLine reports the 1-based line of a literal api_key, or 0 when
-// there is none.
+// apiKeyLine reports the 1-based line of an `api_key` key, or 0 when there
+// is none.
 //
-// ★ A literal key is not something the YAML decoder objects to: by the time
+// ★ The field is **retired**, so every occurrence counts — a line with no
 //
-//	it is a "problem" the file has already parsed, and the tree has already
-//	loaded. It is refused for a reason that belongs to the repository, not to
-//	the parser — which is exactly why it needs its own line number instead of
-//	riding on a parse error, and why the editor can show it while the user is
-//	still typing.
-func secretLiteralLine(content []byte) int {
+//	value and a line with a plaintext value are the same mistake now, and
+//	the loader refuses both. What is left of the old rule ("a reference is
+//	allowed") was the shape of the world before the key moved to the
+//	environment and the keyring.
+//
+// ★ It is a line scan and not a yaml walk because the answer has to be
+//
+//	usable **while the user is typing**: the editor shows the marker
+//	beside the line, and a decoder that only complains after the document
+//	parses cannot say where the problem is.
+func apiKeyLine(content []byte) int {
 	for i, line := range strings.Split(string(content), "\n") {
-		key, val, ok := splitYAMLLine(line)
+		key, _, ok := splitYAMLLine(line)
 		if !ok || key != "api_key" {
-			continue
-		}
-		v := unquote(strings.TrimSpace(val))
-		if v == "" {
-			continue
-		}
-		if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") {
-			continue
-		}
-		if strings.HasPrefix(v, "@file:") {
 			continue
 		}
 		return i + 1

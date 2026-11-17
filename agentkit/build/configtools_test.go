@@ -27,7 +27,7 @@ func configToolEnv(t *testing.T) (*spec.Service, *spec.Config, map[string]tool.I
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("TEST_CONFIG_TOOLS_KEY", "sk-test")
+	t.Setenv("LLM_OPENAI_API_KEY", "sk-test")
 
 	write := func(rel, body string) {
 		t.Helper()
@@ -36,10 +36,13 @@ func configToolEnv(t *testing.T) (*spec.Service, *spec.Config, map[string]tool.I
 			t.Fatal(err)
 		}
 	}
-	write("llm/openai.yaml", "type: openai\nbase_url: https://a.example\napi_key: ${TEST_CONFIG_TOOLS_KEY}\n"+
+	write("llm/openai.yaml", "type: openai\nbase_url: https://a.example\n"+
 		"models:\n  - id: fast\n    reasoning:\n      off: { reasoning_effort: none }\n      high: { reasoning_effort: high }\n")
 	write("agents/main.md", "---\nmodel: openai/fast\ntools: [ls, config_get, config_write]\n---\nbody\n")
-	write("tools/http.yaml", "methods: [get]\nallows: [config_write]\n")
+	write("tools/http.yaml", "methods: [get]\n")
+	// ★ The configuration family speaks for itself: the file that owns the
+	//   family names its exceptions, `config_write` among them.
+	write("tools/config.yaml", "allows: ["+decl.ToolNameConfigWrite+"]\n")
 	write("server/config.yaml", "listen_addr: \":18099\"\n")
 
 	svc, err := spec.NewService(cfgRoot, root)
@@ -167,8 +170,9 @@ func TestConfigGetReadsAFileAndTheOverview(t *testing.T) {
 	}
 
 	overview := callToolJSON[struct {
-		ConfigVersion string `json:"configVersion"`
-		Items         []struct {
+		DiskVersion    string `json:"diskVersion"`
+		RunningVersion string `json:"runningVersion"`
+		Items          []struct {
 			Path string `json:"path"`
 		} `json:"items"`
 		Effective struct {
@@ -179,8 +183,8 @@ func TestConfigGetReadsAFileAndTheOverview(t *testing.T) {
 		} `json:"effective"`
 	}](t, tools, decl.ToolNameConfigGet, `{}`)
 
-	if overview.ConfigVersion == "" {
-		t.Fatal("the overview must carry the fingerprint")
+	if overview.DiskVersion == "" || overview.RunningVersion == "" {
+		t.Fatalf("the overview must carry both versions: %+v", overview)
 	}
 	var sawAgent bool
 	for _, it := range overview.Items {
@@ -196,6 +200,65 @@ func TestConfigGetReadsAFileAndTheOverview(t *testing.T) {
 	}
 	if len(overview.Effective.Models) == 0 {
 		t.Fatal("the overview must name the models the process holds")
+	}
+}
+
+// ★ Every answer says which side it comes from.
+//
+// ★ The two sides do not contradict each other — they answer different
+//
+//	questions — but a model that cannot tell them apart reads a change it
+//	just made as a change that did not happen, and writes it again.
+func TestTheConfigToolsSayWhichSideTheyAnswerFrom(t *testing.T) {
+	_, _, tools := configToolEnv(t)
+
+	get := callToolJSON[struct {
+		Source string `json:"source"`
+	}](t, tools, decl.ToolNameConfigGet, `{"path":"agents/main.md"}`)
+	if get.Source != sourceDisk {
+		t.Fatalf("config_get reads the files on disk, source = %q", get.Source)
+	}
+
+	validate := callToolJSON[struct {
+		Source string `json:"source"`
+	}](t, tools, decl.ToolNameConfigValidate, `{}`)
+	if validate.Source != sourceDisk {
+		t.Fatalf("config_validate re-reads the tree from disk, source = %q", validate.Source)
+	}
+
+	tier := callToolJSON[struct {
+		Source string `json:"source"`
+	}](t, tools, decl.ToolNameConfigTier, `{"tool":"read_file"}`)
+	if tier.Source != sourceRunning {
+		t.Fatalf("config_tier answers from the tree this turn runs, source = %q", tier.Source)
+	}
+}
+
+// ★ The two versions are the machine-readable answer to "has my change
+// landed": the disk moved, the tree this turn runs did not.
+func TestAWriteReportsBothVersionsAndSaysWhichMoved(t *testing.T) {
+	_, _, tools := configToolEnv(t)
+
+	out := callToolJSON[struct {
+		RunningVersion string `json:"runningVersion"`
+		DiskVersion    string `json:"diskVersion"`
+		Note           string `json:"note"`
+	}](t, tools, decl.ToolNameConfigWrite,
+		`{"path":"agents/main.md","content":"---\nmodel: openai/fast\ntools: [ls]\n---\nbody two\n"}`)
+
+	if out.RunningVersion == "" || out.DiskVersion == "" {
+		t.Fatalf("both versions must be present: %+v", out)
+	}
+	if out.RunningVersion == out.DiskVersion {
+		t.Fatalf("the write must move the disk version only: %+v", out)
+	}
+	// ★ The note has to name both sides. It used to claim that every
+	//   config_* tool in a turn reads the snapshot, which was false, and a
+	//   model that believed it read its own write as a stale value.
+	for _, want := range []string{"next turn", "config_get reads the disk"} {
+		if !strings.Contains(out.Note, want) {
+			t.Fatalf("the note must say %q: %q", want, out.Note)
+		}
 	}
 }
 
@@ -300,14 +363,18 @@ func TestConfigNoticesReportsWhatTheLoaderNoticed(t *testing.T) {
 	svc, cfg, tools := configToolEnv(t)
 
 	out := callToolJSON[struct {
-		Deferred      []string `json:"deferred"`
-		Version       string   `json:"version"`
-		ConfigVersion string   `json:"configVersion"`
-		Watch         bool     `json:"watch"`
+		Deferred       []string `json:"deferred"`
+		RunningVersion string   `json:"runningVersion"`
+		DiskVersion    string   `json:"diskVersion"`
+		Watch          bool     `json:"watch"`
+		Source         string   `json:"source"`
 	}](t, tools, decl.ToolNameConfigNotices, `{}`)
 
-	if out.Version == "" || out.ConfigVersion == "" {
-		t.Fatalf("both fingerprints must be present: %+v", out)
+	if out.RunningVersion == "" || out.DiskVersion == "" {
+		t.Fatalf("both versions must be present: %+v", out)
+	}
+	if out.Source != sourceRunning {
+		t.Fatalf("source = %q, want %q — the notices answer from the running tree", out.Source, sourceRunning)
 	}
 	if out.Deferred == nil {
 		t.Fatal("an empty list must be [], not null: a model reads the shape")
@@ -337,14 +404,16 @@ func TestConfigTierExplainsTheExceptionList(t *testing.T) {
 		t.Fatalf("write_file tier = %q, want ask", ask.Tier)
 	}
 
-	// ★ The one rule that cannot be widened: tools/http.yaml in this tree
-	//   says `allows: [config_write]`, and the answer is still ask.
+	// ★ The rule every tool follows: the file that speaks about a family
+	//   names that family's exceptions. `tools/config.yaml` names
+	//   `config_write`, so it runs without a nod — like a reader the same
+	//   file names.
 	self := callToolJSON[struct {
 		Tool string `json:"tool"`
 		Tier Tier   `json:"tier"`
 	}](t, tools, decl.ToolNameConfigTier, `{"tool":"config_write"}`)
-	if self.Tier != TierAsk {
-		t.Fatalf("config_write tier = %q; a file that lists it must not grant its own editor", self.Tier)
+	if self.Tier != TierAllow {
+		t.Fatalf("config_write tier = %q; the file that names it grants it", self.Tier)
 	}
 
 	perAgent := callToolJSON[struct {
@@ -368,10 +437,16 @@ func TestConfigTierExplainsTheExceptionList(t *testing.T) {
 	if len(all.Allow) == 0 {
 		t.Fatal("the exception list must not be empty")
 	}
+	// ★ And the exception list carries the name, because the file put it
+	//   there: a file that says it may not be granted would be a lie.
+	found := false
 	for _, n := range all.Allow {
 		if n == decl.ToolNameConfigWrite {
-			t.Fatal("config_write must never be in the exception list")
+			found = true
 		}
+	}
+	if !found {
+		t.Fatalf("the exception list must carry the name the file gave it: %v", all.Allow)
 	}
 }
 
@@ -381,14 +456,15 @@ func TestConfigWriteSavesAndReportsWhenItApplies(t *testing.T) {
 	out := callToolJSON[struct {
 		Path            string `json:"path"`
 		Revision        string `json:"revision"`
-		ConfigVersion   string `json:"configVersion"`
+		RunningVersion  string `json:"runningVersion"`
+		DiskVersion     string `json:"diskVersion"`
 		Applied         bool   `json:"applied"`
 		RequiresRestart bool   `json:"requiresRestart"`
 	}](t, tools, decl.ToolNameConfigWrite,
 		`{"path":"agents/main.md","content":"---\nmodel: openai/fast\ntools: [ls, config_get]\n---\nbody two\n"}`)
 
-	if out.Revision == "" || out.ConfigVersion == "" {
-		t.Fatalf("a write must report both revisions: %+v", out)
+	if out.Revision == "" || out.RunningVersion == "" || out.DiskVersion == "" {
+		t.Fatalf("a write must report the revision and both versions: %+v", out)
 	}
 	body, _, err := svc.ReadFile("agents/main.md")
 	if err != nil {
@@ -449,7 +525,7 @@ func TestTheAgentSeesOnlyTheConfigToolsItNames(t *testing.T) {
 	_, cfg, _ := configToolEnv(t)
 
 	policy := policyOf(cfg)
-	sp, err := specOf(cfg, "/tmp")
+	sp, err := specOf(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -472,9 +548,13 @@ func TestTheAgentSeesOnlyTheConfigToolsItNames(t *testing.T) {
 // ★ A turn that has just created an agent with config_write used to be told
 //
 //	"no agent X under agents/". It read that as a failed write, wrote the file
-//	again, polled config_get and even delegated a lookup to a subagent. All
-//	config_* tools in a turn hold the snapshot that turn started with, so the
+//	again, polled config_get and even delegated a lookup to a subagent. The
 //	answer has to name the timing instead of claiming the agent is absent.
+//
+// ★ The tool that answers is config_tier, and it answers from the tree this
+//
+//	turn runs — not from the disk. That is why the message says which side
+//	it comes from: config_get reads the disk and already shows the new file.
 func TestConfigTierNamesAJustWrittenAgentAsPending(t *testing.T) {
 	_, _, tools := configToolEnv(t)
 
@@ -486,7 +566,7 @@ func TestConfigTierNamesAJustWrittenAgentAsPending(t *testing.T) {
 	if write.Path != "agents/brand-new.md" {
 		t.Fatalf("the file was not written: %+v", write)
 	}
-	for _, want := range []string{"next turn", "snapshot"} {
+	for _, want := range []string{"next turn", "tree this turn runs"} {
 		if !strings.Contains(write.Note, want) {
 			t.Fatalf("a successful write must say when it takes effect (%q): %q", want, write.Note)
 		}
@@ -540,5 +620,89 @@ func TestMissingAgentErrorSeparatesLeftOutFromAbsent(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "takes effect on the next turn") {
 		t.Fatalf("a broken file never takes effect; do not promise the next turn: %v", err)
+	}
+}
+
+// ★ A file's whole text has to travel in **one** tool call, and one tool
+//
+//	call is bounded by the model's output limit. A file bigger than that
+//	limit cannot be written in one go — so it is written in pieces, and
+//	every piece must leave the file loadable.
+func TestConfigWriteBuildsALongFileInPieces(t *testing.T) {
+	_, _, tools := configToolEnv(t)
+
+	first := "---\nmodel: openai/fast\ntools: [ls, config_get, config_write]\n---\nbody one\n"
+	args, err := json.Marshal(map[string]any{
+		"path": "agents/main.md", "content": first,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := callToolJSON[map[string]any](t, tools, decl.ToolNameConfigWrite, string(args))
+	rev, _ := out["revision"].(string)
+	if rev == "" {
+		t.Fatalf("the write must answer with a revision: %#v", out)
+	}
+
+	args, err = json.Marshal(map[string]any{
+		"path": "agents/main.md", "content": "body two\n", "append": true, "baseRevision": rev,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	callToolJSON[map[string]any](t, tools, decl.ToolNameConfigWrite, string(args))
+
+	got := callToolJSON[map[string]any](t, tools, decl.ToolNameConfigGet, `{"path":"agents/main.md"}`)
+	content, _ := got["content"].(string)
+	if !strings.Contains(content, "body one") || !strings.Contains(content, "body two") {
+		t.Fatalf("both pieces must be on disk: %q", content)
+	}
+}
+
+// ★ An append goes through the same gates as a whole-file write: a piece
+//
+//	that would break the tree is refused whole, and the file on disk keeps
+//	the text it had.
+func TestAnAppendThatBreaksTheTreeIsRefused(t *testing.T) {
+	_, _, tools := configToolEnv(t)
+
+	args, err := json.Marshal(map[string]any{
+		"path": "tools/http.yaml", "content": "methods: [post]\n", "append": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := callTool(t, tools, decl.ToolNameConfigWrite, string(args)); err == nil {
+		t.Fatal("an append that breaks the tree must be refused")
+	}
+
+	got := callToolJSON[map[string]any](t, tools, decl.ToolNameConfigGet, `{"path":"tools/http.yaml"}`)
+	content, _ := got["content"].(string)
+	if strings.Contains(content, "post") {
+		t.Fatalf("the refused piece must not be on disk: %q", content)
+	}
+}
+
+// ★ Appending to a file that does not exist creates it: a model that writes
+//
+//	a long file in pieces should not have to know whether the first piece is
+//	the first piece or the only one.
+func TestAnAppendToAMissingFileCreatesIt(t *testing.T) {
+	_, _, tools := configToolEnv(t)
+
+	args, err := json.Marshal(map[string]any{
+		"path":    "skills/piece/SKILL.md",
+		"content": "---\nname: piece\ndescription: a skill written in pieces\n---\nbody\n",
+		"append":  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	callToolJSON[map[string]any](t, tools, decl.ToolNameConfigWrite, string(args))
+
+	got := callToolJSON[map[string]any](t, tools, decl.ToolNameConfigGet,
+		`{"path":"skills/piece/SKILL.md"}`)
+	if exists, _ := got["exists"].(bool); !exists {
+		t.Fatalf("the file must be there: %#v", got)
 	}
 }

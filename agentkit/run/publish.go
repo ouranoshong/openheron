@@ -2,6 +2,7 @@ package run
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/ouranoshong/openheron/contract"
 )
@@ -20,10 +21,11 @@ const windowSize = 1000
 
 // subscriberQueue is how many events a subscriber may fall behind by.
 //
-// ★ It matches the window: a subscriber that joins late has the window
-//
-//	replayed into its queue, and the queue has to hold it.
-const subscriberQueue = windowSize
+// ★ It is the window plus headroom. A subscriber that joins late has the
+// **whole** window replayed into its queue, and it must still have room for
+// the events that follow: a queue that only fits the replay drops the
+// subscriber on its very next event — and that event could be the approval.
+const subscriberQueue = windowSize + 64
 
 // publisher is the run's event bus.
 //
@@ -37,6 +39,14 @@ type publisher struct {
 	subs   map[*subscription]struct{}
 	closed bool
 
+	// replay says whether a late subscriber gets the window.
+	//
+	// ★ A run's bus replays: a client that attaches while the run is still
+	//   going must not miss the approval the run raised. The session's bus
+	//   does not: its facts are live notifications, and "what happened
+	//   before you arrived" is the scan's job — the ledger holds it.
+	replay bool
+
 	// onProgress is called when an event is published.
 	//
 	// ★ It is the run's liveness signal: the lease is renewed by
@@ -45,7 +55,37 @@ type publisher struct {
 }
 
 func newPublisher() *publisher {
+	return &publisher{subs: map[*subscription]struct{}{}, replay: true}
+}
+
+// newLivePublisher is a bus without a window: a subscriber gets what comes
+// after it, and nothing before.
+//
+// ★ It is the session's announcement channel. The facts it carries are
+//
+//	notifications, and the durable past is the ledger's — a surface that
+//	was not listening hydrates from the scan, not from a replay.
+func newLivePublisher() *publisher {
 	return &publisher{subs: map[*subscription]struct{}{}}
+}
+
+// empty reports whether the bus has no subscribers left.
+//
+// ★ It is what lets the session's bus be dropped when its last reader goes:
+//
+//	a bus kept for a session nobody watches is a leak with one entry per
+//	session the process ever saw.
+func (p *publisher) empty() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.subs) == 0
+}
+
+// watcherCount reports how many subscribers the bus has.
+func (p *publisher) watcherCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.subs)
 }
 
 // Publish hands one event to the window and to every subscriber.
@@ -72,6 +112,16 @@ func (p *publisher) Publish(ev contract.RunEvent) {
 		if !sub.push(ev) {
 			// ★ The subscriber is gone. It stopped reading, and the run
 			//   does not wait for it.
+			//
+			// ★ But its stream was **cut**, not finished, and the two must
+			//   not look alike on the wire: the renderer closes a finished
+			//   stream with a terminal frame, and a client that reads
+			//   "success" stops looking — so an approval raised after this
+			//   point would never be shown until a manual reload. The
+			//   subscriber marks itself, and the renderer leaves the stream
+			//   open-ended instead; the client's own "the stream ended with
+			//   no terminal frame" path then re-attaches or reloads.
+			sub.truncated.Store(true)
 			delete(p.subs, sub)
 			sub.close()
 		}
@@ -95,8 +145,10 @@ func (p *publisher) Subscribe() *subscription {
 	sub := &subscription{p: p, ch: make(chan contract.RunEvent, subscriberQueue)}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for _, ev := range p.window {
-		sub.ch <- ev
+	if p.replay {
+		for _, ev := range p.window {
+			sub.ch <- ev
+		}
 	}
 	if p.closed {
 		// ★ The run is over: no more events will come, so the channel
@@ -141,6 +193,14 @@ type subscription struct {
 	p    *publisher
 	ch   chan contract.RunEvent
 	once sync.Once
+
+	// truncated says this stream was cut short, not finished.
+	//
+	// ★ The difference is the terminal frame. A run that ended normally
+	//   closes its subscribers and lets the renderer say "finished"; one
+	//   that dropped a subscriber must not, because the subscriber did not
+	//   see the end of the run — and the end is where the approval lives.
+	truncated atomic.Bool
 }
 
 // Events is the subscriber's channel.
@@ -149,6 +209,12 @@ type subscription struct {
 //
 //	stream is over.
 func (s *subscription) Events() <-chan contract.RunEvent { return s.ch }
+
+// Truncated reports whether the run cut this subscriber off.
+//
+// ★ It is read after the channel closes, and the flag is set before the
+// close — so the answer describes this stream, not a later one.
+func (s *subscription) Truncated() bool { return s.truncated.Load() }
 
 // Close detaches the subscriber.
 //

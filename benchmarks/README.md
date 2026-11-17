@@ -137,7 +137,7 @@ Prerequisites:
 cp -r .openheron .openheron-bench     # then add the qwen endpoints
 
 # 2. the server, pointed at the scratch root and at a scratch project root
-OPENHERON_CONFIG_DIR=$PWD/.openheron-bench ./bin/openheron --project-root $PWD/benchmarks/fixtures/work
+OPENHERON_CONFIG_ROOT=$PWD/.openheron-bench ./bin/openheron --default-project-root $PWD/benchmarks/fixtures/work
 
 # 3. the benchmark
 bun run benchmarks/run.ts \
