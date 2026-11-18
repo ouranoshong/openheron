@@ -7,13 +7,20 @@ import { BrandMark } from "@/components/brand-mark"
 import { Composer } from "@/components/composer"
 import { EmptyHero, MessageList } from "@/components/message-list"
 import { Sidebar } from "@/components/sidebar"
+import { SidebarDrawer } from "@/components/sidebar-drawer"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { selectIsEmptyView, selectStatus, useStore } from "@/lib/store"
 import { cn } from "@/lib/utils"
+import { useMediaQuery } from "@/lib/use-media-query"
 
 type Dot = { className: string; label: string }
 
 const SIDEBAR_KEY = "openheron.sidebar.collapsed"
+
+// ★ The breakpoint the layout turns on. ★ It is Tailwind's `md`, and it is
+//   the same number the stylesheet uses — a second breakpoint would be a
+//   second truth, and the two would disagree on the tablet.
+const WIDE = "(min-width: 768px)"
 
 const DOT: Record<string, Dot> = {
   idle: { className: "bg-muted-foreground/40", label: "Idle" },
@@ -34,6 +41,11 @@ export function Shell() {
       return false
     }
   })
+  // ★ The drawer is its own state. ★ Collapsing is a preference about a
+  //   desktop; the drawer is about a screen — and a small screen has no
+  //   use for the first one.
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const wide = useMediaQuery(WIDE)
   const status = useStore(selectStatus)
   const isEmptyView = useStore(selectIsEmptyView)
   const refreshList = useStore((s) => s.refreshList)
@@ -42,7 +54,11 @@ export function Shell() {
   const watchSession = useStore((s) => s.watchSession)
   const activeId = useStore((s) => s.activeId)
 
-  const toggleSidebar = () =>
+  const toggleSidebar = () => {
+    if (!wide) {
+      setDrawerOpen((v) => !v)
+      return
+    }
     setCollapsed((v) => {
       const next = !v
       try {
@@ -52,6 +68,28 @@ export function Shell() {
       }
       return next
     })
+  }
+
+  // ★ The drawer has no business being open on a wide screen: it would
+  //   cover the chat that the docked sidebar now sits beside. ★ The state
+  //   is dropped **during render**, not in an effect: an effect would set
+  //   it a frame later, and the drawer would be open for that frame.
+  //   React re-renders immediately, so the drawer is never drawn open.
+  const [wasWide, setWasWide] = useState(wide)
+  if (wasWide !== wide) {
+    setWasWide(wide)
+    if (wide) setDrawerOpen(false)
+  }
+
+  // ★ Choosing a conversation closes the drawer. ★ The point of choosing
+  //   one is to read it, and the drawer is in the way of reading it. ★ The
+  //   comparison is against the **previous** one: opening the drawer on
+  //   the conversation that is already open must not close it again.
+  const [lastActive, setLastActive] = useState(activeId)
+  if (lastActive !== activeId) {
+    setLastActive(activeId)
+    setDrawerOpen(false)
+  }
 
   useEffect(() => {
     void refreshList()
@@ -71,22 +109,45 @@ export function Shell() {
 
   const dot = DOT[status] ?? DOT.idle!
 
+  // ★ The button says what it does **here**: on a wide screen it shows or
+  //   hides the column, on a narrow one it opens or closes the drawer.
+  //   One label for both would be a label that is wrong half the time.
+  const sidebarLabel = wide
+    ? collapsed
+      ? "Show sidebar"
+      : "Hide sidebar"
+    : drawerOpen
+      ? "Close conversations"
+      : "Open conversations"
+
   return (
     // ★ The frame is for the small screens only. On a desktop the window is
     //   the frame, and a grey border around the whole app makes the content
     //   look narrower than it is — which is the opposite of what a wider
     //   column is for.
-    <div className="bg-muted/30 flex h-dvh flex-col overflow-hidden p-2 md:p-0">
+    // ★ The padding comes from the stylesheet rather than from a utility
+    //   class: the safe area has to be part of it, and `env()` cannot live
+    //   in a class attribute.
+    <div className="app-frame bg-muted/30 flex h-dvh flex-col overflow-hidden">
       <div className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg md:rounded-none md:flex-row">
-        {!collapsed && <Sidebar />}
+        {/* ★ One sidebar, never two. ★ A wide screen keeps it in the flow
+            beside the chat; a narrow one keeps it in a drawer over the
+            chat. ★ Rendering both would give the page two session trees —
+            two of everything that reads and writes them. */}
+        {wide ? (
+          !collapsed && <Sidebar />
+        ) : (
+          <SidebarDrawer open={drawerOpen} onOpenChange={setDrawerOpen} />
+        )}
 
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-12 shrink-0 items-center gap-2 px-4">
             <button
               type="button"
               onClick={toggleSidebar}
-              className="hover:bg-accent hover:text-accent-foreground grid size-8 shrink-0 place-items-center rounded-md"
-              aria-label={collapsed ? "Show sidebar" : "Hide sidebar"}
+              className="hover:bg-accent hover:text-accent-foreground touch-target grid size-8 shrink-0 place-items-center rounded-md"
+              aria-label={sidebarLabel}
+              aria-expanded={wide ? !collapsed : drawerOpen}
             >
               <PanelLeftIcon className="size-4" />
             </button>

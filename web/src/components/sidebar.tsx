@@ -48,7 +48,7 @@ function writeFolded(folded: ReadonlySet<string>): void {
   }
 }
 
-export function Sidebar() {
+export function Sidebar({ className }: { className?: string }) {
   const sessions = useStore(useShallow(selectSessionList))
   const projects = useStore((s) => s.projects)
   const scope = useStore((s) => s.projectScope)
@@ -98,7 +98,13 @@ export function Sidebar() {
   }
 
   return (
-    <aside data-testid="sidebar" className="border-e flex w-64 shrink-0 flex-col">
+    <aside
+      data-testid="sidebar"
+      // ★ The width is a token: the docked column and the drawer have to
+      //   be the same width, and a width written in two places is two
+      //   widths that drift.
+      className={cn("border-e flex w-[var(--sidebar-width)] shrink-0 flex-col", className)}
+    >
       <div className="p-2">
         <Button
           data-testid="new-thread"
@@ -557,7 +563,10 @@ function SessionRow({
         data-active={active || undefined}
         onClick={onOpen}
         className={cn(
-          "hover:bg-muted flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm",
+          // ★ The row reserves room for its own menu on a small screen:
+          //   there the menu is always there, and a title that runs under it
+          //   is a title nobody can read to the end.
+          "hover:bg-muted flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm max-md:pe-8",
           active && "bg-muted font-medium",
         )}
       >
@@ -576,7 +585,10 @@ function SessionRow({
         type="button"
         aria-label="More options"
         onClick={() => setMenuOpen((v) => !v)}
-        className="hover:bg-muted absolute end-1 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-md opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+        // ★ The opacity lives in the stylesheet, not here: on a touch screen
+        //   the button has to be there — `group-hover` compiles into
+        //   `@media (hover: hover)` and never fires without a pointer.
+        className="hover:bg-muted thread-row-menu absolute end-1 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-md md:size-6"
       >
         <MoreHorizontalIcon className="size-4" />
       </button>
