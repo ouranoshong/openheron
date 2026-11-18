@@ -568,7 +568,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
           aria-label="Add attachment"
           disabled={uploading}
           onClick={() => fileRef.current?.click()}
-          className="hover:bg-muted grid size-8 shrink-0 place-items-center rounded-lg disabled:opacity-50"
+          className="hover:bg-muted touch-target grid size-8 shrink-0 place-items-center rounded-lg disabled:opacity-50"
         >
           {uploading ? <Loader2Icon className="size-4 animate-spin" /> : <PaperclipIcon className="size-4" />}
         </button>
@@ -686,7 +686,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
             aria-label="Send message"
             disabled={!text.trim() || busy || blocked}
             onClick={() => void submit()}
-            className="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-lg disabled:opacity-40"
+            className="bg-primary text-primary-foreground touch-target grid size-8 shrink-0 place-items-center rounded-lg disabled:opacity-40"
           >
             ↑
           </button>

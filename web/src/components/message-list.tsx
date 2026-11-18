@@ -195,7 +195,7 @@ export function MessageList() {
           data-testid="jump-to-latest"
           aria-label="Jump to latest"
           onClick={jumpToLatest}
-          className="bg-background hover:bg-accent hover:text-accent-foreground border-border absolute right-4 bottom-4 grid size-9 place-items-center rounded-full border shadow-md"
+          className="bg-background hover:bg-accent hover:text-accent-foreground border-border touch-target absolute right-4 bottom-4 grid size-9 place-items-center rounded-full border shadow-md"
         >
           <ArrowDownIcon className="size-4" />
         </button>
@@ -323,7 +323,7 @@ export function StopButton() {
       type="button"
       aria-label="Stop generating"
       onClick={() => void stop()}
-      className="bg-primary text-primary-foreground hover:bg-primary/90 grid size-8 shrink-0 place-items-center rounded-lg"
+      className="bg-primary text-primary-foreground hover:bg-primary/90 touch-target grid size-8 shrink-0 place-items-center rounded-lg"
     >
       <SquareIcon data-testid="stop-icon" className="size-3.5 fill-current" strokeWidth={0} />
     </button>
