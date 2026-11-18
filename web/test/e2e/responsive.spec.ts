@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 
-import { openApp, SEND_BUTTON, THREAD_ITEM, THREAD_ROW } from "./fixtures"
+import { openApp, openThread, SEND_BUTTON, THREAD_ITEM, THREAD_ROW } from "./fixtures"
 
 // ★ The three viewports the interface has to survive.
 //
@@ -59,6 +59,26 @@ async function growTree(page: Page, rows = 30): Promise<void> {
       tree.appendChild(row)
     }
   }, rows)
+}
+
+/**
+ * Make the transcript taller than the screen.
+ *
+ * ★ The transcript is the other half of the same story: a conversation is as
+ *   tall as its messages, and a person with five hundred messages must not get
+ *   a different interface from a person with five. ★ The filler is injected
+ *   rather than served — the point of the test is a transcript that is
+ *   **taller than the screen**, and it has to be taller by a lot: the chat
+ *   column grows to its content's height when it is allowed to.
+ */
+async function growTranscript(page: Page, height = 3000): Promise<void> {
+  await page.evaluate((h) => {
+    const list = document.querySelector('[data-testid="message-list"]')
+    if (!(list instanceof HTMLElement)) throw new Error("no message list")
+    const filler = document.createElement("div")
+    filler.style.height = `${h}px`
+    list.firstElementChild?.appendChild(filler)
+  }, height)
 }
 
 /**
@@ -182,6 +202,26 @@ test.describe("响应式 · 视口", () => {
       expect(drawer!.y + drawer!.height).toBeLessThanOrEqual(PHONE.height + 1)
     })
 
+    test("★ 长对话不会把输入框顶出屏幕", async ({ page }) => {
+      await openNarrowApp(page)
+      await openThread(page, "Long conversation")
+      await growTranscript(page)
+      const composer = await composerBox(page)
+      expect(composer).not.toBeNull()
+      // ★ The input box stays in the window. ★ The chat column is the
+      //   frame's height — a flex item's automatic minimum size is its
+      //   content, so a column without `min-h-0` grows to the height of the
+      //   whole conversation and pushes the input box thousands of pixels
+      //   below the window.
+      expect(composer!.y).toBeGreaterThanOrEqual(0)
+      expect(composer!.y + composer!.height).toBeLessThanOrEqual(PHONE.height)
+      // ★ And the transcript is the thing that scrolls.
+      const scrolls = await page
+        .locator('[data-testid="message-list"]')
+        .evaluate((el) => el.scrollHeight > el.clientHeight)
+      expect(scrolls).toBe(true)
+    })
+
     test("★ 弹层不超出视口", async ({ page }) => {
       await openNarrowApp(page)
       // ★ The settings entry lives in the sidebar, so reaching it on a
@@ -263,6 +303,23 @@ test.describe("响应式 · 视口", () => {
       // ★ The chat starts **after** the sidebar: they are side by side, and a
       //   chat that starts under the sidebar is the stacked layout.
       expect(composer!.x).toBeGreaterThanOrEqual(sidebar!.x + sidebar!.width - 1)
+    })
+
+    test("★ 长对话不会把输入框顶出屏幕", async ({ page }) => {
+      await openApp(page)
+      await openThread(page, "Long conversation")
+      await growTranscript(page)
+      const composer = await composerBox(page)
+      expect(composer).not.toBeNull()
+      // ★ The same rule on a wide screen: the chat column is the frame's
+      //   height, and the transcript scrolls inside it. ★ A window can be
+      //   short on a desktop too.
+      expect(composer!.y).toBeGreaterThanOrEqual(0)
+      expect(composer!.y + composer!.height).toBeLessThanOrEqual(DESKTOP.height)
+      const scrolls = await page
+        .locator('[data-testid="message-list"]')
+        .evaluate((el) => el.scrollHeight > el.clientHeight)
+      expect(scrolls).toBe(true)
     })
   })
 })

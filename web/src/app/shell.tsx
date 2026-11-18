@@ -140,7 +140,16 @@ export function Shell() {
           <SidebarDrawer open={drawerOpen} onOpenChange={setDrawerOpen} />
         )}
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        {/* ★ `min-h-0` is load-bearing, and it is the same rule the sidebar
+            follows: ★ a flex item's automatic minimum size is its content, so
+            a column without it grows to whatever is inside it. ★ The chat
+            column holds the transcript, and a transcript is as tall as the
+            conversation — ★ so the column grew to the height of the whole
+            conversation, the input box was pushed thousands of pixels below
+            the window, and the outer `overflow-hidden` cut it away. ★ The
+            column's height is the frame's height; the transcript scrolls
+            inside it. */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <header className="flex h-12 shrink-0 items-center gap-2 px-4">
             <button
               type="button"
