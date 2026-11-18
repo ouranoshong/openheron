@@ -428,10 +428,10 @@ interrupts: Interrupt[]
 └──────────────────────────────────────────────────────────┘
 ```
 
-侧栏 256px（`web/src/components/sidebar.tsx:101` 的 `w-64`）。
+侧栏 256px（`--sidebar-width`，`web/src/index.css:31`；用在 `web/src/components/sidebar.tsx:102`）。
 
 ★ **等待审批时审批卡取代 composer，不挂在消息流里**
-（`web/src/app/shell.tsx:125` 的二选一）。
+（`web/src/app/shell.tsx:186` 的二选一）。
 审批发生在轮次**结束**之后，此刻输入框本来就不能用；
 留着一个灰色的空输入框会让用户以为还能打字，也把真正要做的决定挤到上面去。
 不插进消息流是因为流已经收尾，插进去等于要等用户滚动才看得见。
@@ -450,12 +450,12 @@ interrupts: Interrupt[]
   （`web/src/lib/store/actions.ts:344-347`），或打开它时答 404（被删过，
   `:404-412`），localStorage 里那个 id 一定是悬空的 —— 清掉并回欢迎界面。
   不清的话每次刷新都去打那个不存在的会话，界面还甩一条「session not found」。
-- 每行有 `data-testid="thread-row"`（`<li>`，`web/src/components/sidebar.tsx:551`）
+- 每行有 `data-testid="thread-row"`（`<li>`，`web/src/components/sidebar.tsx:557`）
   与 `data-testid="thread-item"`（可点击按钮，`:556`）两个定位点 ——
-  More options 按钮是按钮的**兄弟**而非后代（`:575-582`），开菜单要从行去找。
+  More options 按钮是按钮的**兄弟**而非后代（`:585-592`），开菜单要从行去找。
 - 改名走乐观更新，失败回滚（`web/src/lib/store/actions.ts:507-528`）。
 - 删除正在看的那条 → 回到欢迎界面（`web/src/lib/store/actions.ts:530`）。
-- 侧栏折叠状态持久化在 localStorage（`web/src/app/shell.tsx:16`、`:29-36`）。
+- 侧栏折叠状态持久化在 localStorage（`web/src/app/shell.tsx:18`、`:36-43`）。
 
 ### 5.3 自动滚动
 
@@ -470,7 +470,7 @@ interrupts: Interrupt[]
 
 ### 5.4 状态点
 
-`awaiting-approval` 与 `running` 各占一档（`web/src/app/shell.tsx:18-23` 的 `DOT` 表）。
+`awaiting-approval` 与 `running` 各占一档（`web/src/app/shell.tsx:25-30` 的 `DOT` 表）。
 ★ **等审批时要看得见**：等审批时轮次已经结束，
 显示成「Idle」会让状态点在最需要提醒的那一刻什么都不说。
 
@@ -603,6 +603,94 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
 ★ 测「焦点还在不在」要用**打字 + Enter**，不能点发送按钮：
 按钮在输入框清空后变 `disabled`，焦点会掉到 body —— 那是**测试路径的假象**。
 
+### 5.9 响应式
+
+界面只有**三个**断点，而且它们是 Tailwind 自带的那三个：`sm` 640 / `md` 768 / `lg` 1024。
+★ 自定义断点是「第二套真相」：样式表里的一个数字和组件里的一个数字迟早对不上，
+而对不上的那天，谁也不知道该改哪一个。
+
+| 视口 | 侧栏 | 聊天 | 弹层 |
+|---|---|---|---|
+| `< md`（< 768） | **抽屉**，默认关 | 单栏，占满整屏 | 满窗（`dvh`） |
+| `≥ md` | 常驻一列（`--sidebar-width`） | 单栏 + gutter | `sm:max-w-*` |
+
+★ 断点本身是 `md`，而 `min-width: 768px` **在 768 上就成立** ——
+`web/src/app/shell.tsx:23` 的 `WIDE` 与 Tailwind 的 `md` 是同一个数字。
+窄屏/宽屏的判据是 `web/src/lib/use-media-query.ts` 的 `useMediaQuery`：
+它订阅查询本身（不是轮询），而且**第一次就同步读出答案** ——
+界面在第一个 effect 之前就画出来了，抽屉在桌面上闪一帧就是闪错了版式。
+
+#### 5.9.1 侧栏在窄屏上是抽屉
+
+★ 以前窄屏上的侧栏是**堆在聊天上面**的：整个会话列表先占掉一屏，
+要读一段对话得先滚过整个列表。
+
+现在是抽屉（`web/src/components/sidebar-drawer.tsx`）：
+
+- ★ 它是 **Radix Dialog**，不是自己写的浮层。★ Radix 在 document 的
+  **capture 阶段**监听 Escape，那个阶段早于 React 的 handler ——
+  想留住它只能用 `onEscapeKeyDown`。同一套机制还带来焦点陷阱、滚动锁与
+  `aria-modal`，这三样都不值得手写：一个让底下的页面还能滚、或者把焦点丢进
+  背后聊天里的抽屉，是跟它所属的界面吵架。
+- ★ 抽屉与「折叠」是**两个状态**：折叠是关于桌面的偏好，抽屉是关于屏幕的，
+  窄屏用不着第一个（`web/src/app/shell.tsx:44-48`）。
+- ★ 宽屏上只渲染**一个**侧栏（`web/src/app/shell.tsx:137-140`）：
+  两个都渲染就是两棵会话树，也就是两套读写的会话。
+- ★ 选了一个会话就关抽屉：选它是为了读它，而抽屉挡着它。
+  判据是「活动会话**变了**」，不是「抽屉开着」——
+  否则在当前会话上打开抽屉会立刻把它关掉（`web/src/app/shell.tsx:88-92`）。
+- ★ 屏幕变宽时抽屉的状态是**在渲染里**丢掉的，不是在 effect 里：
+  effect 会晚一帧才改，抽屉就会在那一帧里开着
+  （`web/src/app/shell.tsx:78-82`）。
+
+#### 5.9.2 触摸目标
+
+★ 44px 是平台指南都认可的数字。图标还是 32px，**长的是目标**：
+一个伪元素盖住最小边长，版式不动 —— 一排按钮在手机上变大，就是一排放不下的按钮。
+
+- `.touch-target`（`web/src/index.css:234`）：在
+  `@media (pointer: coarse), (max-width: 767px)` 下，伪元素把命中区域撑到
+  `--touch-target`（`web/src/index.css:37`）。
+- ★ 带这个类的按钮必须是**孤立的**：目标会长过图标，挨得比最小边长还近的
+  邻居会把自己的点击被抢走 —— 所以会话行自己的菜单键不带它（它压在标题上）。
+
+★ 会话行自己的菜单键（`web/src/components/sidebar.tsx:586`）原来在触摸端是
+**永远不可达**的：它 `opacity-0`，靠 `group-hover:opacity-100` 显形，
+而 Tailwind 把 `group-hover` 编译进 `@media (hover: hover)` ——
+触摸屏没有指针，它就永远不出现。
+现在窄屏上它一直显形（`.thread-row-menu`，`web/src/index.css:290`），
+标题也给它留出了位置（`max-md:pe-8`）。
+
+#### 5.9.3 安全区
+
+★ 刘海与 home 条**不是窗口**。`env()` 在没有它们的设备上答 0，
+所以同一份样式表两边都能用；`web/index.html` 的 viewport 带上
+`viewport-fit=cover` 之后它才变成非零（`web/src/index.css:43-46`）。
+
+★ 内边距加在**框架**上而不是 body 上（`.app-frame`，`web/src/index.css:261`）：
+框架是 `h-dvh`，给 body 加内边距会把框架顶得比窗口还高，
+页面就多出一条它本来没有的滚动条。
+
+#### 5.9.4 弹层按动态视口量高度
+
+★ `vh` 是「窗口藏起工具栏之后还剩多少」的**估计**，`dvh` 是**当前**的值：
+键盘弹出来、手机浏览器的工具栏收起来，高度都变。
+弹层用 `dvh`（`h-[85dvh]`、`max-h-[70dvh]`），不用 `vh`。
+
+#### 5.9.5 回归网
+
+★ 响应式没有回归网的时候，「看起来对」是唯一的验收标准。
+`web/test/e2e/responsive.spec.ts` 用三档视口（390 / 768 / 1440）跑：
+页面不横向滚动、聊天列不超 token、抽屉能开能关、弹层不超出视口、
+触摸目标够大、那行菜单键看得见。
+
+★ 平板那档（768）是最要紧的一档：它**坐在断点上**，
+只有「在断点以上」或「在断点以下」才成立的版式，只有在这里才现形。
+
+★ 窄屏上 `openApp`（`web/test/e2e/fixtures.ts:113`）等不到会话行 ——
+会话树在抽屉里，还没被打开。所以窄屏另有一个就绪判据：
+页头的状态点与输入框。
+
 ## 6. 消息渲染
 
 ### 6.1 四种 part
@@ -665,7 +753,7 @@ react-markdown 默认不解析原始 HTML，这是刻意的：
 GFM 任务清单带 `contains-task-list`，这类清单改为 `list-none`，只保留复选框。
 
 ★ **中英混排。** 全局 `--font-sans` 显式列出平台 CJK 字体回退
-（`web/src/index.css:122-124`：PingFang SC / Hiragino Sans GB / Microsoft YaHei /
+（`web/src/index.css:142-144`：PingFang SC / Hiragino Sans GB / Microsoft YaHei /
 Noto Sans CJK SC / Source Han Sans SC），不让各平台随机挑字形。
 正文为 `15px` + `line-height: 1.75`（`web/src/components/markdown.tsx:150`），
 中文密排时仍有行间距；`overflow-wrap: break-word` 让长 URL / 连续拉丁字符
@@ -1219,7 +1307,7 @@ Kind / Dimensions / ContextWindow / SummarizeAt / Timeout / Reasoning* / Extra�
 ★ **唯一的例外**：折叠面板的展开/收起。它本来就要改布局，动效只是让这次**已经要发生**的布局变化
 变平滑 —— 不存在「新增的布局抖动」。
 
-**尊重 `prefers-reduced-motion`。** 一条全局规则（`web/src/index.css:185`），把所有动画降到
+**尊重 `prefers-reduced-motion`。** 一条全局规则（`web/src/index.css:205`），把所有动画降到
 「立刻完成」。
 
 ★ `0.01ms` 而不是 `0s`：有 `animation-fill-mode: both` 的入场动画在 `0s` 下会被**跳过**（某些浏览器
@@ -1230,7 +1318,7 @@ Kind / Dimensions / ContextWindow / SummarizeAt / Timeout / Reasoning* / Extra�
 
 ### 10.2 动效令牌：一份，不是六处
 
-`web/src/index.css:76` 起的一组，和 `--chat-column` 同一个思路 —— **改一次，不是改六处**：
+`web/src/index.css:96` 起的一组，和 `--chat-column` 同一个思路 —— **改一次，不是改六处**：
 
 ```css
 --motion-duration-fast: 120ms;
@@ -1281,10 +1369,10 @@ token, never a literal」。
 
 ★ **mask 里的部件只能做 opacity 动画**：body 的缩放是 1.3、halo 是 1.365，同样的位移在两份拷贝里
 走的距离不同 ⇒ 描边和主体立刻错开。所以 `.mark-parts` 只淡入，**不做位移**
-（`web/src/index.css:235`）。走线与数据点本来就在 mask 之外，不受这个限制：走线走
+（`web/src/index.css:344`）。走线与数据点本来就在 mask 之外，不受这个限制：走线走
 `stroke-dashoffset`，数据点走 `opacity` + `scale`。
 
-动效只做一件事 —— **电路接通、数据点亮起**，全程一次性，不循环（`web/src/index.css:206` 起的三个
+动效只做一件事 —— **电路接通、数据点亮起**，全程一次性，不循环（`web/src/index.css:315` 起的三个
 `@keyframes`）：
 
 | 部件 | 动作 | 时序 |
@@ -1301,10 +1389,10 @@ token, never a literal」。
 **`scale` 属性**而不是 `transform` —— 数据点自带一个 `transform` 属性（它要落在画布的固定位置），
 而 CSS 的 `transform` 会**整个盖掉**属性值，`scale` 是独立属性，它排在 `transform` 之前施加，
 两者共存。★ 圆点要绕**自己的圆心**长，所以配了 `transform-box: fill-box`
-（`web/src/index.css:248`）—— SVG 的 `transform-origin` 默认取的是**视口**的中心，不是图元的中心。
+（`web/src/index.css:357`）—— SVG 的 `transform-origin` 默认取的是**视口**的中心，不是图元的中心。
 
 **用在哪儿**：只在欢迎页 hero（`web/src/components/message-list.tsx:214`，`size-16` 64px，**播一次
-入场**）；页头（`web/src/app/shell.tsx:80`，`size-5` 20px，**不播**）。
+入场**）；页头（`web/src/app/shell.tsx:154`，`size-5` 20px，**不播**）。
 
 ★ 页头为什么不播：20px 下四个部件各只有几个像素，细节全糊；而页头是**常驻**的 —— 一个一直动的
 东西在常驻位置就是噪声，不是信息。
@@ -1321,7 +1409,7 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 |---|---|---|---|---|
 | 消息入场 | 无 | 淡入 + 上移 4px | `opacity` / `transform` | 新元素出现；第二条铁律合规（不改布局） |
 | 审批卡出现 | 无 | 从下 8px 淡入 | `opacity` / `transform` | ★ 它**取代 composer**，出现得晚、位置显眼 |
-| 状态点切换 | 只有 `animate-pulse`（`web/src/app/shell.tsx:20`） | 保留 pulse，另加**颜色过渡** | `background-color` | 状态点的语义由上游文档定义 |
+| 状态点切换 | 只有 `animate-pulse`（`web/src/app/shell.tsx:27`） | 保留 pulse，另加**颜色过渡** | `background-color` | 状态点的语义由上游文档定义 |
 | 「Working…」 | `animate-pulse` 小点（`web/src/components/message-list.tsx:233`） | 保留 | — | 已有 |
 | 工具卡展开 | 箭头 `rotate-90`（`web/src/components/tool-card.tsx:133`） | 箭头保留；**内容**用 `grid-template-rows: 0fr → 1fr` 做高度过渡 | `height`（第二条铁律的例外） | 内容本来就要变高 |
 | 折叠箭头 | 已有 `transition-transform`（三处各写一遍） | 补上 `--motion-duration-fast` | `transform` | 三个地方各写一遍 = 会漂 |
@@ -1538,7 +1626,7 @@ E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没
 
 ### 13.3 E2E 覆盖什么
 
-`web/test/e2e/` 下 **22 个 spec 文件，共 277 条**（实测）：
+`web/test/e2e/` 下 **23 个 spec 文件，共 290 条**（实测）：
 
 | spec 文件 | 条数 | 钉的是什么 |
 |---|---|---|
@@ -1548,6 +1636,7 @@ E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没
 | `agents.spec.ts` | 15 | `/skill` 与 `/agents` 的选择器与直接切换、焦点 4 条、未知名字不发消息、没选过 agent 时用服务端的默认根 |
 | `attachments.spec.ts` | 14 | 附件随消息走、拖拽与粘贴、移除、预览 |
 | `composer-autocomplete.spec.ts` | 13 | 10 行封顶 / 自动聚焦 / @ 文件提示 / 命令 Tab 补全与 Enter 执行 / 键盘滚动跟随 / 切换后聚焦 |
+| `responsive.spec.ts` | 13 | 三档视口（390 / 768 / 1440）：不横向滚动 / 聊天列不超 token / 输入框与发送键在窗口里 / 触摸目标够大 / 行自己的菜单键看得见 / 侧栏是抽屉且能开能关 / 弹层不超出视口 / 断点边上的侧栏仍然常驻 |
 | `composer-meta.spec.ts` | 12 | 默认 agent / 模型 / 思考档位 / 上下文占用 / 接口不可用 / 设置关闭后刷新 / **窄屏 4 条** |
 | `scroll.spec.ts` | 10 | 滚动跟随 —— 溢出时停在视口内、用户上翻后不被拽回、流式未结束时也跟随、高亮撑高后仍跟随、打开停在最后一条、切会话停在底部、刷新停在最后一条 |
 | `secrets.spec.ts` | 9 | Secrets 标签页：两个命名空间、写入与删除、来源与覆盖、删除的确认 |
@@ -1576,7 +1665,7 @@ E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没
 
 需要稳定的钩子时加 `data-testid`，不用 `data-slot="aui_*"` 那种框架命名的属性。
 
-★ 实测 22 个 spec 里的选择器：`getByText` 67 次、`data-testid` 259 次、
+★ 实测 23 个 spec 里的选择器：`getByText` 67 次、`data-testid` 286 次、
 `getByRole` 29 次、`getByLabel` 2 次；**`data-slot` 0 次**；
 类名选择器只有 3 处，全在 `web/test/e2e/motion.spec.ts:40`、`:48`、`:58` ——
 那是手写 SVG 的 class，不是 Tailwind 工具类（`motion.spec.ts:38-39` 有注释说明）。
@@ -1747,7 +1836,7 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 这一条以前是「记一笔交给上游」——
 上游那份 `docs/frontend-design.md` 有同一张表，而它的内容已并入本文（§0），
 所以这张表现在是**本仓库自己的**。
-★ 本仓库当前的数：spec 文件 **22** 个、**277** 条；
+★ 本仓库当前的数：spec 文件 **23** 个、**290** 条；
 `web/test/e2e/chat.spec.ts` **71** 条。
 ★ 加用例时要改这张表 —— 它的作用是让「加了用例忘了改文档」变成一次 diff 冲突。
 
@@ -1993,15 +2082,15 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | `web/src/components/message-list.tsx:120` | `ResizeObserver`：按内容高度跟随 |
 | `web/src/components/message-list.tsx:214` | 欢迎页 hero 的品牌标记 |
 | `web/src/components/message-list.tsx:233` | 「Working…」的 pulse 点 |
-| `web/src/app/shell.tsx:20` | 状态点的 pulse |
-| `web/src/app/shell.tsx:80` | 页头的品牌标记（不播） |
+| `web/src/app/shell.tsx:27` | 状态点的 pulse |
+| `web/src/app/shell.tsx:154` | 页头的品牌标记（不播） |
 | `web/src/components/tool-card.tsx:133` | 折叠箭头 |
 | `web/src/components/ui/dialog.tsx:42` | 对话框浮层的 `data-open` |
-| `web/src/index.css:76` | 动效令牌 |
-| `web/src/index.css:185` | `prefers-reduced-motion` 的全局规则 |
-| `web/src/index.css:206` | 三个 `@keyframes` |
-| `web/src/index.css:235` | `.mark-parts` 只淡入 |
-| `web/src/index.css:248` | `transform-box: fill-box` |
+| `web/src/index.css:96` | 动效令牌 |
+| `web/src/index.css:205` | `prefers-reduced-motion` 的全局规则 |
+| `web/src/index.css:315` | 三个 `@keyframes` |
+| `web/src/index.css:344` | `.mark-parts` 只淡入 |
+| `web/src/index.css:357` | `transform-box: fill-box` |
 | `web/src/components/brand-mark.tsx:14` | `BrandMark`：内联 SVG 的理由 |
 | `web/src/components/brand-mark.generated.tsx:29` | `role="img"` / `aria-hidden` |
 | `web/src/components/brand-mark.generated.tsx:35` | `<title>openheron</title>` |
@@ -2136,11 +2225,23 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 
 | 位置 | 说的是什么 |
 |---|---|
-| `web/src/app/shell.tsx:18-23` | 状态点的两档 |
-| `web/src/app/shell.tsx:125` | 审批卡取代 composer |
-| `web/src/components/sidebar.tsx:101` | 侧栏 256px |
-| `web/src/components/sidebar.tsx:551` | `thread-row` |
-| `web/src/components/sidebar.tsx:556` | `thread-item` |
+| `web/src/app/shell.tsx:25-30` | 状态点的两档 |
+| `web/src/app/shell.tsx:186` | 审批卡取代 composer |
+| `web/src/components/sidebar.tsx:102` | 侧栏 256px |
+| `web/src/components/sidebar.tsx:557` | `thread-row` |
+| `web/src/components/sidebar.tsx:562` | `thread-item` |
+| `web/src/components/sidebar.tsx:586` | 行自己的菜单键（窄屏上一直显形） |
+| `web/src/app/shell.tsx:23` | `WIDE` —— 断点本身 |
+| `web/src/app/shell.tsx:137-140` | 一个侧栏：宽屏常驻，窄屏是抽屉 |
+| `web/src/components/sidebar-drawer.tsx:33-53` | 抽屉本体（Radix Dialog） |
+| `web/src/lib/use-media-query.ts:19` | `useMediaQuery` |
+| `web/src/index.css:31` | `--sidebar-width` |
+| `web/src/index.css:37` | `--touch-target` |
+| `web/src/index.css:43-46` | 安全区的四个 `env()` |
+| `web/src/index.css:234` | `.touch-target` —— 伪元素撑开命中区域 |
+| `web/src/index.css:261` | `.app-frame` —— 安全区加在框架上 |
+| `web/src/index.css:290` | `.thread-row-menu` —— 窄屏上一直显形 |
+| `web/test/e2e/responsive.spec.ts` | 三档视口的回归网（§5.9.5） |
 | `web/src/lib/scroll-follow.ts:13` | `BOTTOM_TOLERANCE` = 32 |
 | `web/src/components/message-list.tsx:134-139` | Jump to latest 是瞬时滚动 |
 | `web/src/components/message-list.tsx:266` | 每条消息一个节点 |
