@@ -497,7 +497,7 @@ interrupts: Interrupt[]
 - `model.reasoning` 是**生效档位**（agent 指定，或模型 `reasoning_default`），
   为空显示 `off`。
 - `reasoningAvailable` 只放进 `title`，不铺开成选择器
-  （`web/src/components/composer-meta.tsx:113-116`）。
+  （`web/src/components/composer-meta.tsx:129-131`）。
 
 ★ **取数与缓存**：`web/src/lib/agent-info.ts` 负责取拓扑、按 id 选条目、归一化空
 reasoning、模块级缓存与单飞请求；`api.listAgents()` 用 `cache: "no-store"`
@@ -519,10 +519,10 @@ reasoning、模块级缓存与单飞请求；`api.listAgents()` 用 `cache: "no-
 - 首次加载显示一行骨架，避免居中版式跳动；
 - 请求失败但已有旧值时继续显示旧值；
 - 从未成功过则显示 `Agent info unavailable`，`title` 带错误
-  （`web/src/components/composer-meta.tsx:101-110`）；
+  （`web/src/components/composer-meta.tsx:120-129`）；
 - 加载失败不阻塞输入、发送与审批。
 
-★ **上下文占用**也在这一行（`web/src/components/composer-meta.tsx:179-228` 的
+★ **上下文占用**也在这一行（`web/src/components/composer-meta.tsx:209-272` 的
 `ContextMeter`，`data-testid="composer-meta-context"`）。
 
 ### 5.6.2 版式：换行，不被挤成半个
@@ -540,7 +540,32 @@ reasoning、模块级缓存与单飞请求；`api.listAgents()` 用 `cache: "no-
 ★ **状态句自己占一行**（`notice` / `busy`）：一句状态和旁边的事实是两种读法，
 挤在一行里，两种都更难读。
 
-### 5.6.3 入口：在自己的节点里换行
+### 5.6.3 窄屏上事实只有一行
+
+★ 输入框下面那一块是**手机上最大的一块**，它坐在键盘上面，
+它的每一像素都是从聊天区里扣下来的。★ 在 390px 的屏幕上，
+它原来占 **65px**（事实两行 + 入口一行）—— ★ 比输入框本身（50px）还高。
+
+★ 窄屏上事实**必须只有一行**（`max-sm`，< 640px），于是让位的是**标签与细节**，
+留下的是**身份与那个数**：
+
+| 项 | 宽屏 | 窄屏 |
+|---|---|---|
+| agent | `Agent: product-manager` | `product-manager`（「Agent: 」是宽屏的标签，页头本来就写着 Agent） |
+| 模型 | `deepseek/deepseek-flash` | 不变 —— ★ 名字不许被切（§5.6.2） |
+| 思考档位 | `Reasoning: low` | **让位**，进模型的 `title` |
+| 上下文 | `Context: ≈15k / 1.0M (1.4 %)` | `1.4 %` + 占用条（token 数与窗口进 `title`） |
+| 入口 | 三个按钮带文字 | 不变 —— ★ 图标不是标签 |
+
+★ **让位的东西不许丢**：思考档位进**模型**的 `title`
+（`web/src/components/composer-meta.tsx:159`），上下文数字进占用条的 `title`
+（`:221`）—— ★ 手机是**按需读**提示气泡的，而那一行是**一眼扫**的。
+
+★ 入口那一行**保留文字**（§5.6.4）：一个图标是谜语，不是标签。
+
+**结果**：65px → **45px**，省下的 20px 回到聊天区。
+
+### 5.6.4 入口：在自己的节点里换行
 
 ★ 三个入口在**同一个** `span` 里（`web/src/components/composer.tsx:713-721`），
 那个 `span` 是这一行**最后**的子节点，位置恒定（§11.1）。
@@ -1501,7 +1526,7 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 
 ★ 三个入口被包进**同一个** `span`，那个 `span` 带着右对齐（`ms-auto`）——
 项目按钮自己那份 `ms-auto` 被去掉了，几份都靠自动边距会各推各的。
-★ 窄屏上这个 `span` 自己**换行**（§5.6.3）—— 项目名是用户起的，可能比手机还宽。
+★ 窄屏上这个 `span` 自己**换行**（§5.6.4）—— 项目名是用户起的，可能比手机还宽。
 
 ★ **按钮在欢迎页上也不禁用**（§11.5）：那里还没有会话，而档位是**暂存**的 ——
 一个点不开的选择，就是一个欢迎页表达不出来的意图。
@@ -1663,7 +1688,7 @@ E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没
 
 ### 13.3 E2E 覆盖什么
 
-`web/test/e2e/` 下 **23 个 spec 文件，共 294 条**（实测）：
+`web/test/e2e/` 下 **23 个 spec 文件，共 296 条**（实测）：
 
 | spec 文件 | 条数 | 钉的是什么 |
 |---|---|---|
@@ -1674,7 +1699,7 @@ E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没
 | `attachments.spec.ts` | 14 | 附件随消息走、拖拽与粘贴、移除、预览 |
 | `composer-autocomplete.spec.ts` | 13 | 10 行封顶 / 自动聚焦 / @ 文件提示 / 命令 Tab 补全与 Enter 执行 / 键盘滚动跟随 / 切换后聚焦 |
 | `responsive.spec.ts` | 17 | 三档视口（390 / 768 / 1440）：不横向滚动 / 聊天列不超 token / 输入框与发送键在窗口里 / 触摸目标够大 / 行自己的菜单键看得见 / 侧栏是抽屉且能开能关 / 弹层不超出视口 / 断点边上的侧栏仍然常驻 / **树再长也挤不掉输入框（手机）、树再长聊天列也不缩水（平板）、长对话不会把输入框顶出屏幕（手机 + 桌面）** |
-| `composer-meta.spec.ts` | 12 | 默认 agent / 模型 / 思考档位 / 上下文占用 / 接口不可用 / 设置关闭后刷新 / **窄屏 4 条** |
+| `composer-meta.spec.ts` | 14 | 默认 agent / 模型 / 思考档位 / 上下文占用 / 接口不可用 / 设置关闭后刷新 / **窄屏 6 条** |
 | `scroll.spec.ts` | 10 | 滚动跟随 —— 溢出时停在视口内、用户上翻后不被拽回、流式未结束时也跟随、高亮撑高后仍跟随、打开停在最后一条、切会话停在底部、刷新停在最后一条 |
 | `secrets.spec.ts` | 9 | Secrets 标签页：两个命名空间、写入与删除、来源与覆盖、删除的确认 |
 | `mcps.spec.ts` | 7 | `/mcps` 面板：两种名字与档位、够不着的服务器、正在启动与起不来、每次打开都重读、Refresh |
@@ -1702,7 +1727,7 @@ E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没
 
 需要稳定的钩子时加 `data-testid`，不用 `data-slot="aui_*"` 那种框架命名的属性。
 
-★ 实测 23 个 spec 里的选择器：`getByText` 67 次、`data-testid` 292 次、
+★ 实测 23 个 spec 里的选择器：`getByText` 67 次、`data-testid` 293 次、
 `getByRole` 29 次、`getByLabel` 2 次；**`data-slot` 0 次**；
 类名选择器只有 3 处，全在 `web/test/e2e/motion.spec.ts:40`、`:48`、`:58` ——
 那是手写 SVG 的 class，不是 Tailwind 工具类（`motion.spec.ts:38-39` 有注释说明）。
@@ -2169,13 +2194,13 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 
 | 位置 | 说的是什么 |
 |---|---|
-| `web/src/components/composer-meta.tsx:8` | `META`：那一行的行盒 |
-| `web/src/components/composer-meta.tsx:11` | ★ `Joined`：分隔符跟着后一项走 |
-| `web/src/components/composer-meta.tsx:118` | 事实那一半：agent / 模型 / 思考档位 / 上下文 |
-| `web/src/components/composer-meta.tsx:156` | `contents` 包装与 `action` 槽 |
+| `web/src/components/composer-meta.tsx:9` | `META`：那一行的行盒 |
+| `web/src/components/composer-meta.tsx:28` | ★ `Joined`：分隔符跟着后一项走 |
+| `web/src/components/composer-meta.tsx:134` | 事实那一半：agent / 模型 / 思考档位 / 上下文 |
+| `web/src/components/composer-meta.tsx:188-196` | `contents` 包装与 `action` 槽 |
 | `web/src/components/composer.tsx:713` | ★ 入口节点：窄屏上换行，右对齐 |
 | `web/src/components/projects-dialog.tsx:71` | ★ 项目名截断，全名留在 tooltip 与 `aria-label` |
-| `web/test/e2e/composer-meta.spec.ts:147` | 窄屏的验收（不溢出 / 不截断 / 分隔符不落单） |
+| `web/test/e2e/composer-meta.spec.ts:147` | 窄屏的验收（不溢出 / 不截断 / 分隔符不落单 / 事实只有一行 / 让位的档位在提示里） |
 | `web/test/e2e/projects.spec.ts:665` | ★ 项目名很长时那一行也不溢出 |
 
 ### A.9 前端：工具调用的渲染
@@ -2291,8 +2316,8 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | `web/src/components/composer.tsx:264-279` | 焦点回到输入框 |
 | `web/src/components/composer.tsx:681-693` | 停止按钮取代发送按钮 |
 | `web/src/components/composer.tsx:713-721` | 三个入口在同一个节点里 |
-| `web/src/components/composer-meta.tsx:113-116` | `reasoningAvailable` 只进 title |
-| `web/src/components/composer-meta.tsx:179-228` | 上下文占用 |
+| `web/src/components/composer-meta.tsx:129-131` | `reasoningAvailable` 只进 title |
+| `web/src/components/composer-meta.tsx:209-272` | 上下文占用 |
 | `web/src/components/markdown.tsx:45-46` | 不开 `rehype-raw` |
 | `web/src/components/markdown.tsx:51` | 表格的滚动容器 |
 | `web/src/components/markdown.tsx:54` | 表格本身 `w-full` |
