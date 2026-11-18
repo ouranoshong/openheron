@@ -2,6 +2,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { formatPercent, formatTokens } from "@/lib/agents"
 import type { AgentBadge } from "@/lib/agent-info"
 import type { ContextUsage } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { Loader2Icon } from "lucide-react"
 import type { ReactNode } from "react"
 
@@ -20,9 +21,24 @@ const META =
 //   beside it is read as "deepsee…", and a name that is cut in half says
 //   less than a name on the next line. ⇒ The unit wraps instead, and it
 //   truncates only when the name is longer than the whole row.
-function Joined({ children }: { children: ReactNode }) {
+//
+// ★ `className` is how a unit steps aside on a narrow screen. ★ Hiding it is
+//   not hiding the fact: the fact moves into a tooltip, where a phone can
+//   still read it.
+function Joined({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) {
   return (
-    <span className="inline-flex min-w-0 max-w-full shrink-0 items-center gap-1">
+    <span
+      className={cn(
+        "inline-flex min-w-0 max-w-full shrink-0 items-center gap-1",
+        className,
+      )}
+    >
       <span aria-hidden="true" className="shrink-0">
         ·
       </span>
@@ -124,18 +140,32 @@ export function ComposerMeta({
           title={badge.description || badge.id}
           className="max-w-[min(12rem,100%)] shrink-0 truncate"
         >
-          Agent: {badge.id}
+          {/* ★ The word "Agent" is a **label for the wide layout**: there is
+              room for it there, and the row is a ledger of names. ★ On a
+              narrow screen the row has to fit on one line, and the header
+              already says "Agent" — so the prefix steps aside and the name
+              stays. */}
+          <span className="max-sm:hidden">Agent: </span>
+          {badge.id}
         </span>
         <Joined>
           <span
             data-testid="composer-meta-model"
-            title={model}
+            // ★ The model's tooltip carries the reasoning level as well. ★ On
+            //   a narrow screen the reasoning **steps aside** — it is the
+            //   item that costs the most space and says the least — and a
+            //   fact that steps aside has to land somewhere a phone can
+            //   still read it.
+            title={`${model}\n${reasoningTitle}`}
             className="min-w-0 max-w-[min(24rem,100%)] truncate"
           >
             {model}
           </span>
         </Joined>
-        <Joined>
+        {/* ★ The reasoning level steps aside on a narrow screen: it is in the
+            model's tooltip there. ★ The unit is hidden whole — separator and
+            item together — so no line is left with a dangling "·". */}
+        <Joined className="max-sm:hidden">
           <span
             data-testid="composer-meta-reasoning"
             title={reasoningTitle}
@@ -182,8 +212,15 @@ function ContextMeter({ usage }: { usage: ContextUsage }) {
   const label = known
     ? `Context: ≈${formatTokens(usage.usedTokens)} / ${formatTokens(usage.contextWindow)} (${formatPercent(ratio)})`
     : `Context: ≈${formatTokens(usage.usedTokens)} tokens`
+  // ★ The narrow line keeps the **number that matters** and the bar: the
+  //   share is what the eye watches, and the bar says the same thing. ★ The
+  //   tokens and the window are in the tooltip — a phone reads a tooltip
+  //   on demand, and a line reads at a glance.
+  const shortLabel = known ? formatPercent(ratio) : `≈${formatTokens(usage.usedTokens)}`
 
   const lines = [
+    // ★ The full sentence, because the narrow line does not carry it.
+    label,
     // The number is the context's size. It is measured by the most recent
     // request — or by the summary, right after a manual compaction.
     "Tokens in this agent's context — the most recent request, or the summary after a compaction.",
@@ -206,7 +243,13 @@ function ContextMeter({ usage }: { usage: ContextUsage }) {
       title={lines.join("\n")}
       className="inline-flex min-w-0 max-w-full items-center gap-1.5"
     >
-      <span className="min-w-0 max-w-[min(24rem,100%)] truncate tabular-nums">{label}</span>
+      <span className="min-w-0 max-w-[min(24rem,100%)] truncate tabular-nums">
+        {/* ★ Two sentences, one line: the narrow one is the short label, the
+            wide one the whole sentence. ★ Only one of them is displayed —
+            the other is `display: none`, so it is not read aloud either. */}
+        <span className="hidden sm:inline">{label}</span>
+        <span className="sm:hidden">{shortLabel}</span>
+      </span>
       {known ? (
         <span
           aria-hidden="true"

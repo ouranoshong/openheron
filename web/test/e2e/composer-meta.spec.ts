@@ -210,4 +210,48 @@ test.describe("窄屏", () => {
     await expect(page.locator('[data-testid="authorization-button"]')).toBeVisible()
     await expect(page.locator('[data-testid="operations-button"]')).toBeVisible()
   })
+
+  // ★ The line under the input box is the **biggest** block on a phone: it
+  //   sits under the keyboard, and every pixel of it comes out of the chat.
+  test("★ 窄屏上事实只有一行，入口在第二行", async ({ page }) => {
+    await page.setViewportSize(PHONE)
+    await openApp(page)
+    await openThread(page, "Multi agent conversation")
+
+    const tops = await page.evaluate(() => {
+      const top = (id: string) => {
+        const el = document.querySelector(`[data-testid="${id}"]`)
+        return el ? Math.round(el.getBoundingClientRect().top) : null
+      }
+      return {
+        agent: top("composer-meta-agent"),
+        model: top("composer-meta-model"),
+        context: top("composer-meta-context"),
+        entry: top("authorization-button"),
+      }
+    })
+    expect(tops.agent).not.toBeNull()
+    // ★ The facts share **one** line: the agent, the model and the context.
+    expect(Math.abs(tops.model! - tops.agent!)).toBeLessThanOrEqual(1)
+    expect(Math.abs(tops.context! - tops.agent!)).toBeLessThanOrEqual(1)
+    // ★ The entries sit on the line below: they are buttons, and they keep
+    //   their labels — an icon alone is a puzzle, not a label.
+    expect(tops.entry!).toBeGreaterThan(tops.agent!)
+  })
+
+  // ★ A fact that steps aside has to land somewhere it can still be read.
+  test("★ 窄屏上让位的思考档位进了提示气泡", async ({ page }) => {
+    await page.setViewportSize(PHONE)
+    await openApp(page)
+    await openThread(page, "Multi agent conversation")
+
+    // ★ The reasoning level is not on the narrow line any more — it is in
+    //   the model's tooltip, which a phone reads on demand.
+    await expect(page.locator(REASONING)).toBeHidden()
+    await expect(page.locator(MODEL)).toHaveAttribute("title", /Reasoning: high/)
+    // ★ And the context keeps only the share and the bar; the tokens and
+    //   the window are in the tooltip.
+    await expect(page.locator(CONTEXT)).toContainText("14 %")
+    await expect(page.locator(CONTEXT)).toHaveAttribute("title", /Context: ≈18k \/ 131k/)
+  })
 })
