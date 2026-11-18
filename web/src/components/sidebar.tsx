@@ -103,7 +103,14 @@ export function Sidebar({ className }: { className?: string }) {
       // ★ The width is a token: the docked column and the drawer have to
       //   be the same width, and a width written in two places is two
       //   widths that drift.
-      className={cn("border-e flex w-[var(--sidebar-width)] shrink-0 flex-col", className)}
+      // ★ `min-h-0` is the load-bearing part: a flex item's default
+      //   `min-height` is **auto**, so the tree inside would make the column
+      //   at least as tall as the tree — and `shrink-0` would stop it from
+      //   shrinking back. ★ That is how a long list of conversations once
+      //   pushed the whole chat, the input box included, out of the screen.
+      //   The column's height is the screen's height; the tree scrolls
+      //   inside it.
+      className={cn("border-e flex min-h-0 w-[var(--sidebar-width)] shrink-0 flex-col", className)}
     >
       <div className="p-2">
         <Button

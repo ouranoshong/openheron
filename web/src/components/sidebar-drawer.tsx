@@ -46,8 +46,10 @@ export function SidebarDrawer({
           <DialogPrimitive.Title className="sr-only">Conversations</DialogPrimitive.Title>
           {/* ★ The tree fills the drawer and scrolls inside it: the list can
               be long, and a drawer that grows past the screen is a drawer
-              that hides its own bottom. */}
-          <Sidebar className="h-full min-h-0" />
+              that hides its own bottom. ★ `min-h-0` comes from the sidebar
+              itself — the column's height is the screen's height, never the
+              tree's. */}
+          <Sidebar className="h-full" />
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>

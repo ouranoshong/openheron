@@ -40,6 +40,35 @@ async function openNarrowApp(page: Page): Promise<void> {
 }
 
 /**
+ * Make the conversation tree longer than the screen.
+ *
+ * ★ The tree is the one part of the layout whose length the **user** decides:
+ *   a person with thirty conversations must not get a different interface from
+ *   a person with three. ★ The rows are injected rather than served — the fake
+ *   backend's tree is short, and the point of the test is a tree that is
+ *   **longer than the screen**.
+ */
+async function growTree(page: Page, rows = 30): Promise<void> {
+  await page.evaluate((count) => {
+    const tree = document.querySelector('[data-testid="session-tree"]')
+    if (!(tree instanceof HTMLElement)) throw new Error("no session tree")
+    for (let i = 0; i < count; i++) {
+      const row = document.createElement("li")
+      row.textContent = `Filler conversation ${i}`
+      row.style.height = "40px"
+      tree.appendChild(row)
+    }
+  }, rows)
+}
+
+/**
+ * Where the input box sits.
+ */
+async function composerBox(page: Page) {
+  return page.locator('[data-testid="composer-box"]').boundingBox()
+}
+
+/**
  * Open the drawer and wait for the tree it holds.
  */
 async function openDrawer(page: Page): Promise<void> {
@@ -132,6 +161,27 @@ test.describe("响应式 · 视口", () => {
       await expect(page.locator('[data-testid="sidebar-drawer"]')).toHaveCount(0)
     })
 
+    test("★ 会话树再长，输入框也不会被挤走", async ({ page }) => {
+      await openNarrowApp(page)
+      await openDrawer(page)
+      const before = await composerBox(page)
+      await growTree(page)
+      const after = await composerBox(page)
+      expect(before).not.toBeNull()
+      expect(after).not.toBeNull()
+      // ★ The tree does not move the input box. ★ The drawer is **over** the
+      //   chat, not **above** it — and that is the whole difference: a tree
+      //   that stands above the chat takes the chat's height with it, and a
+      //   person with thirty conversations loses the input box entirely.
+      expect(Math.abs(after!.y - before!.y)).toBeLessThan(1)
+      expect(after!.y + after!.height).toBeLessThanOrEqual(PHONE.height)
+      // ★ The drawer stays inside the screen: the tree scrolls inside it.
+      const drawer = await page.locator('[data-testid="sidebar-drawer"]').boundingBox()
+      expect(drawer).not.toBeNull()
+      expect(drawer!.y).toBeGreaterThanOrEqual(0)
+      expect(drawer!.y + drawer!.height).toBeLessThanOrEqual(PHONE.height + 1)
+    })
+
     test("★ 弹层不超出视口", async ({ page }) => {
       await openNarrowApp(page)
       // ★ The settings entry lives in the sidebar, so reaching it on a
@@ -178,6 +228,21 @@ test.describe("响应式 · 视口", () => {
       expect(sidebar).not.toBeNull()
       expect(composer).not.toBeNull()
       expect(composer!.x).toBeGreaterThanOrEqual(sidebar!.x + sidebar!.width - 1)
+    })
+
+    test("★ 会话树再长，聊天列也不缩水", async ({ page }) => {
+      await openApp(page)
+      const before = await composerBox(page)
+      await growTree(page)
+      const after = await composerBox(page)
+      expect(before).not.toBeNull()
+      expect(after).not.toBeNull()
+      // ★ The docked sidebar is the screen's height, **never** the tree's:
+      //   the tree scrolls inside it.
+      expect(Math.abs(after!.y - before!.y)).toBeLessThan(1)
+      const sidebar = await page.locator('[data-testid="sidebar"]').boundingBox()
+      expect(sidebar).not.toBeNull()
+      expect(sidebar!.height).toBeLessThanOrEqual(TABLET.height)
     })
   })
 
