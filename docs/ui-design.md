@@ -450,7 +450,7 @@ interrupts: Interrupt[]
   （`web/src/lib/store/actions.ts:344-347`），或打开它时答 404（被删过，
   `:404-412`），localStorage 里那个 id 一定是悬空的 —— 清掉并回欢迎界面。
   不清的话每次刷新都去打那个不存在的会话，界面还甩一条「session not found」。
-- 每行有 `data-testid="thread-row"`（`<li>`，`web/src/components/sidebar.tsx:557`）
+- 每行有 `data-testid="thread-row"`（`<li>`，`web/src/components/sidebar.tsx:564`）
   与 `data-testid="thread-item"`（可点击按钮，`:556`）两个定位点 ——
   More options 按钮是按钮的**兄弟**而非后代（`:585-592`），开菜单要从行去找。
 - 改名走乐观更新，失败回滚（`web/src/lib/store/actions.ts:507-528`）。
@@ -642,6 +642,12 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
 - ★ 屏幕变宽时抽屉的状态是**在渲染里**丢掉的，不是在 effect 里：
   effect 会晚一帧才改，抽屉就会在那一帧里开着
   （`web/src/app/shell.tsx:78-82`）。
+- ★ 侧栏的高度是**屏幕**的高度，永远不是**会话树**的高度。★ 旧版窄屏把侧栏
+  堆在聊天上面，而那一列是 `shrink-0` 的：它有多高就占多高。★ 会话一多，
+  整个聊天（连输入框）被推出窗口 —— 有三十段对话的人打开界面只看得见一列
+  会话，**输入框不见了**，而且会话越多越是这样。
+  现在窄屏上侧栏在抽屉里（`fixed inset-y-0`），树在抽屉内部滚；
+  常驻的那一列是 `align-items: stretch` 给的高度，树在它里面滚。
 
 #### 5.9.2 触摸目标
 
@@ -654,7 +660,7 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
 - ★ 带这个类的按钮必须是**孤立的**：目标会长过图标，挨得比最小边长还近的
   邻居会把自己的点击被抢走 —— 所以会话行自己的菜单键不带它（它压在标题上）。
 
-★ 会话行自己的菜单键（`web/src/components/sidebar.tsx:586`）原来在触摸端是
+★ 会话行自己的菜单键（`web/src/components/sidebar.tsx:593`）原来在触摸端是
 **永远不可达**的：它 `opacity-0`，靠 `group-hover:opacity-100` 显形，
 而 Tailwind 把 `group-hover` 编译进 `@media (hover: hover)` ——
 触摸屏没有指针，它就永远不出现。
@@ -686,6 +692,11 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
 
 ★ 平板那档（768）是最要紧的一档：它**坐在断点上**，
 只有「在断点以上」或「在断点以下」才成立的版式，只有在这里才现形。
+
+★ **会话树的长度**是用户说了算的，所以它有两条专门的回归：
+手机上「树再长也挤不掉输入框」，平板上「树再长聊天列也不缩水」。
+两条都把树撑到比屏幕还长，然后量输入框的位置**有没有动** ——
+量的是「动没动」，不是「在不在」，因为一个被推出窗口的输入框仍然「存在」。
 
 ★ 窄屏上 `openApp`（`web/test/e2e/fixtures.ts:113`）等不到会话行 ——
 会话树在抽屉里，还没被打开。所以窄屏另有一个就绪判据：
@@ -1626,7 +1637,7 @@ E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没
 
 ### 13.3 E2E 覆盖什么
 
-`web/test/e2e/` 下 **23 个 spec 文件，共 290 条**（实测）：
+`web/test/e2e/` 下 **23 个 spec 文件，共 292 条**（实测）：
 
 | spec 文件 | 条数 | 钉的是什么 |
 |---|---|---|
@@ -1636,7 +1647,7 @@ E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没
 | `agents.spec.ts` | 15 | `/skill` 与 `/agents` 的选择器与直接切换、焦点 4 条、未知名字不发消息、没选过 agent 时用服务端的默认根 |
 | `attachments.spec.ts` | 14 | 附件随消息走、拖拽与粘贴、移除、预览 |
 | `composer-autocomplete.spec.ts` | 13 | 10 行封顶 / 自动聚焦 / @ 文件提示 / 命令 Tab 补全与 Enter 执行 / 键盘滚动跟随 / 切换后聚焦 |
-| `responsive.spec.ts` | 13 | 三档视口（390 / 768 / 1440）：不横向滚动 / 聊天列不超 token / 输入框与发送键在窗口里 / 触摸目标够大 / 行自己的菜单键看得见 / 侧栏是抽屉且能开能关 / 弹层不超出视口 / 断点边上的侧栏仍然常驻 |
+| `responsive.spec.ts` | 15 | 三档视口（390 / 768 / 1440）：不横向滚动 / 聊天列不超 token / 输入框与发送键在窗口里 / 触摸目标够大 / 行自己的菜单键看得见 / 侧栏是抽屉且能开能关 / 弹层不超出视口 / 断点边上的侧栏仍然常驻 / **树再长也挤不掉输入框（手机）、树再长聊天列也不缩水（平板）** |
 | `composer-meta.spec.ts` | 12 | 默认 agent / 模型 / 思考档位 / 上下文占用 / 接口不可用 / 设置关闭后刷新 / **窄屏 4 条** |
 | `scroll.spec.ts` | 10 | 滚动跟随 —— 溢出时停在视口内、用户上翻后不被拽回、流式未结束时也跟随、高亮撑高后仍跟随、打开停在最后一条、切会话停在底部、刷新停在最后一条 |
 | `secrets.spec.ts` | 9 | Secrets 标签页：两个命名空间、写入与删除、来源与覆盖、删除的确认 |
@@ -1665,7 +1676,7 @@ E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没
 
 需要稳定的钩子时加 `data-testid`，不用 `data-slot="aui_*"` 那种框架命名的属性。
 
-★ 实测 23 个 spec 里的选择器：`getByText` 67 次、`data-testid` 286 次、
+★ 实测 23 个 spec 里的选择器：`getByText` 67 次、`data-testid` 289 次、
 `getByRole` 29 次、`getByLabel` 2 次；**`data-slot` 0 次**；
 类名选择器只有 3 处，全在 `web/test/e2e/motion.spec.ts:40`、`:48`、`:58` ——
 那是手写 SVG 的 class，不是 Tailwind 工具类（`motion.spec.ts:38-39` 有注释说明）。
@@ -2227,13 +2238,15 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 |---|---|
 | `web/src/app/shell.tsx:25-30` | 状态点的两档 |
 | `web/src/app/shell.tsx:186` | 审批卡取代 composer |
-| `web/src/components/sidebar.tsx:102` | 侧栏 256px |
-| `web/src/components/sidebar.tsx:557` | `thread-row` |
-| `web/src/components/sidebar.tsx:562` | `thread-item` |
-| `web/src/components/sidebar.tsx:586` | 行自己的菜单键（窄屏上一直显形） |
+| `web/src/components/sidebar.tsx:102` | 侧栏：宽度是 token，高度是**屏幕**的（`min-h-0`） |
+| `web/src/components/sidebar.tsx:564` | `thread-row` |
+| `web/src/components/sidebar.tsx:569` | `thread-item` |
+| `web/src/components/sidebar.tsx:593` | 行自己的菜单键（窄屏上一直显形） |
 | `web/src/app/shell.tsx:23` | `WIDE` —— 断点本身 |
 | `web/src/app/shell.tsx:137-140` | 一个侧栏：宽屏常驻，窄屏是抽屉 |
 | `web/src/components/sidebar-drawer.tsx:33-53` | 抽屉本体（Radix Dialog） |
+| `web/src/components/sidebar-drawer.tsx:44` | 抽屉的高度是**屏幕**的高度（`inset-y-0`） |
+| `web/src/components/sidebar.tsx:127` | 会话树的滚动容器（`min-h-0 flex-1 overflow-y-auto`） |
 | `web/src/lib/use-media-query.ts:19` | `useMediaQuery` |
 | `web/src/index.css:31` | `--sidebar-width` |
 | `web/src/index.css:37` | `--touch-target` |
