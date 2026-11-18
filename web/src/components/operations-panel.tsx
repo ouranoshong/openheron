@@ -90,7 +90,7 @@ export function OperationsPanel() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
           data-testid="operations-dialog"
-          className="sm:max-w-2xl h-[85vh] flex flex-col gap-3 p-4"
+          className="sm:max-w-2xl h-[85dvh] flex flex-col gap-3 p-4"
           onEscapeKeyDown={(e) => {
             // ★ Escape has to close this box, and Radix listens for it on the
             //   document in the **capture** phase — so a handler in the tree

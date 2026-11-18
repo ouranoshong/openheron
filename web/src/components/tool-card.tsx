@@ -188,7 +188,7 @@ export function ToolCard({ part }: { part: ToolPart }) {
       {open && (
         <div
           data-testid="tool-body"
-          className="max-h-[70vh] overflow-y-auto overscroll-contain"
+          className="max-h-[70dvh] overflow-y-auto overscroll-contain"
         >
           {/* ★ The result comes **first**. The arguments are what the model
               thought; the result is what the world said back — and the

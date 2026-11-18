@@ -45,7 +45,7 @@ export function SettingsDialog() {
     <>
       <Dialog open={open} onOpenChange={(v) => (!v ? close() : undefined)}>
         <DialogContent
-          className="sm:max-w-6xl h-[85vh] flex flex-col gap-3 p-4"
+          className="sm:max-w-6xl h-[85dvh] flex flex-col gap-3 p-4"
           data-testid="settings-dialog"
           showCloseButton={false}
         >
