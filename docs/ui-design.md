@@ -431,7 +431,7 @@ interrupts: Interrupt[]
 侧栏 256px（`--sidebar-width`，`web/src/index.css:31`；用在 `web/src/components/sidebar.tsx:102`）。
 
 ★ **等待审批时审批卡取代 composer，不挂在消息流里**
-（`web/src/app/shell.tsx:186` 的二选一）。
+（`web/src/app/shell.tsx:195` 的二选一）。
 审批发生在轮次**结束**之后，此刻输入框本来就不能用；
 留着一个灰色的空输入框会让用户以为还能打字，也把真正要做的决定挤到上面去。
 不插进消息流是因为流已经收尾，插进去等于要等用户滚动才看得见。
@@ -649,7 +649,26 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
   现在窄屏上侧栏在抽屉里（`fixed inset-y-0`），树在抽屉内部滚；
   常驻的那一列是 `align-items: stretch` 给的高度，树在它里面滚。
 
-#### 5.9.2 触摸目标
+#### 5.9.2 聊天列的高度是框架的高度
+
+★ 这是这一节里最贵的一条规矩。★ flex item 的 `min-height` 默认是 `auto`，
+而 `auto` 的意思是「**内容有多高，我就有多高**」。★ 聊天列里装着整段对话，
+对话有多高取决于用户聊了多少 —— ★ 所以没有 `min-h-0` 的聊天列会一路长到
+对话那么高，把输入框推到几千像素以外，被外层的 `overflow-hidden` 裁掉。
+
+★ 症状是「**闪现，然后消失**」：消息还没加载时对话很短，输入框在；
+消息一到，列长高，输入框被推出窗口。★ 消息区同时也不再滚动 ——
+它的 `clientHeight` 等于 `scrollHeight`，滚不动，而内容已经在屏幕外面。
+
+★ **只有窄屏中招**：宽屏的容器是 `md:flex-row`，聊天列被拉伸到容器的高度，
+自动最小尺寸不生效；窄屏是 `flex-col`，聊天列落在主轴上，`auto` 就落在它身上。
+
+修法是 `min-h-0`（`web/src/app/shell.tsx:152`）：列的高度是框架的高度，
+对话在它里面滚。侧栏那一列是同一条规矩（`web/src/components/sidebar.tsx:102`）——
+★ 「一个容器的高度是屏幕的高度，永远不是它内容的高度」，这句话要同时管住
+会话树和对话记录。
+
+#### 5.9.3 触摸目标
 
 ★ 44px 是平台指南都认可的数字。图标还是 32px，**长的是目标**：
 一个伪元素盖住最小边长，版式不动 —— 一排按钮在手机上变大，就是一排放不下的按钮。
@@ -667,7 +686,7 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
 现在窄屏上它一直显形（`.thread-row-menu`，`web/src/index.css:290`），
 标题也给它留出了位置（`max-md:pe-8`）。
 
-#### 5.9.3 安全区
+#### 5.9.4 安全区
 
 ★ 刘海与 home 条**不是窗口**。`env()` 在没有它们的设备上答 0，
 所以同一份样式表两边都能用；`web/index.html` 的 viewport 带上
@@ -677,13 +696,13 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
 框架是 `h-dvh`，给 body 加内边距会把框架顶得比窗口还高，
 页面就多出一条它本来没有的滚动条。
 
-#### 5.9.4 弹层按动态视口量高度
+#### 5.9.5 弹层按动态视口量高度
 
 ★ `vh` 是「窗口藏起工具栏之后还剩多少」的**估计**，`dvh` 是**当前**的值：
 键盘弹出来、手机浏览器的工具栏收起来，高度都变。
 弹层用 `dvh`（`h-[85dvh]`、`max-h-[70dvh]`），不用 `vh`。
 
-#### 5.9.5 回归网
+#### 5.9.6 回归网
 
 ★ 响应式没有回归网的时候，「看起来对」是唯一的验收标准。
 `web/test/e2e/responsive.spec.ts` 用三档视口（390 / 768 / 1440）跑：
@@ -697,6 +716,13 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
 手机上「树再长也挤不掉输入框」，平板上「树再长聊天列也不缩水」。
 两条都把树撑到比屏幕还长，然后量输入框的位置**有没有动** ——
 量的是「动没动」，不是「在不在」，因为一个被推出窗口的输入框仍然「存在」。
+
+★ **对话记录的长度**同样是用户说了算的，所以它也有两条：
+手机上和桌面上各一条「长对话不会把输入框顶出屏幕」。
+★ 这两条把记录撑到比屏幕高三千像素，然后量输入框**还在不在窗口里**，
+并且量消息区**滚得动**（`scrollHeight > clientHeight`）——
+★ 只量输入框不够：一个被推到屏幕外的输入框，位置是「存在」的，
+而一个滚不动的消息区，用户看到的是「消息卡住了，推不动」。
 
 ★ 窄屏上 `openApp`（`web/test/e2e/fixtures.ts:113`）等不到会话行 ——
 会话树在抽屉里，还没被打开。所以窄屏另有一个就绪判据：
@@ -1403,7 +1429,7 @@ token, never a literal」。
 （`web/src/index.css:357`）—— SVG 的 `transform-origin` 默认取的是**视口**的中心，不是图元的中心。
 
 **用在哪儿**：只在欢迎页 hero（`web/src/components/message-list.tsx:214`，`size-16` 64px，**播一次
-入场**）；页头（`web/src/app/shell.tsx:154`，`size-5` 20px，**不播**）。
+入场**）；页头（`web/src/app/shell.tsx:163`，`size-5` 20px，**不播**）。
 
 ★ 页头为什么不播：20px 下四个部件各只有几个像素，细节全糊；而页头是**常驻**的 —— 一个一直动的
 东西在常驻位置就是噪声，不是信息。
@@ -1637,7 +1663,7 @@ E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没
 
 ### 13.3 E2E 覆盖什么
 
-`web/test/e2e/` 下 **23 个 spec 文件，共 292 条**（实测）：
+`web/test/e2e/` 下 **23 个 spec 文件，共 294 条**（实测）：
 
 | spec 文件 | 条数 | 钉的是什么 |
 |---|---|---|
@@ -1647,7 +1673,7 @@ E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没
 | `agents.spec.ts` | 15 | `/skill` 与 `/agents` 的选择器与直接切换、焦点 4 条、未知名字不发消息、没选过 agent 时用服务端的默认根 |
 | `attachments.spec.ts` | 14 | 附件随消息走、拖拽与粘贴、移除、预览 |
 | `composer-autocomplete.spec.ts` | 13 | 10 行封顶 / 自动聚焦 / @ 文件提示 / 命令 Tab 补全与 Enter 执行 / 键盘滚动跟随 / 切换后聚焦 |
-| `responsive.spec.ts` | 15 | 三档视口（390 / 768 / 1440）：不横向滚动 / 聊天列不超 token / 输入框与发送键在窗口里 / 触摸目标够大 / 行自己的菜单键看得见 / 侧栏是抽屉且能开能关 / 弹层不超出视口 / 断点边上的侧栏仍然常驻 / **树再长也挤不掉输入框（手机）、树再长聊天列也不缩水（平板）** |
+| `responsive.spec.ts` | 17 | 三档视口（390 / 768 / 1440）：不横向滚动 / 聊天列不超 token / 输入框与发送键在窗口里 / 触摸目标够大 / 行自己的菜单键看得见 / 侧栏是抽屉且能开能关 / 弹层不超出视口 / 断点边上的侧栏仍然常驻 / **树再长也挤不掉输入框（手机）、树再长聊天列也不缩水（平板）、长对话不会把输入框顶出屏幕（手机 + 桌面）** |
 | `composer-meta.spec.ts` | 12 | 默认 agent / 模型 / 思考档位 / 上下文占用 / 接口不可用 / 设置关闭后刷新 / **窄屏 4 条** |
 | `scroll.spec.ts` | 10 | 滚动跟随 —— 溢出时停在视口内、用户上翻后不被拽回、流式未结束时也跟随、高亮撑高后仍跟随、打开停在最后一条、切会话停在底部、刷新停在最后一条 |
 | `secrets.spec.ts` | 9 | Secrets 标签页：两个命名空间、写入与删除、来源与覆盖、删除的确认 |
@@ -1676,7 +1702,7 @@ E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没
 
 需要稳定的钩子时加 `data-testid`，不用 `data-slot="aui_*"` 那种框架命名的属性。
 
-★ 实测 23 个 spec 里的选择器：`getByText` 67 次、`data-testid` 289 次、
+★ 实测 23 个 spec 里的选择器：`getByText` 67 次、`data-testid` 292 次、
 `getByRole` 29 次、`getByLabel` 2 次；**`data-slot` 0 次**；
 类名选择器只有 3 处，全在 `web/test/e2e/motion.spec.ts:40`、`:48`、`:58` ——
 那是手写 SVG 的 class，不是 Tailwind 工具类（`motion.spec.ts:38-39` 有注释说明）。
@@ -2094,7 +2120,7 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | `web/src/components/message-list.tsx:214` | 欢迎页 hero 的品牌标记 |
 | `web/src/components/message-list.tsx:233` | 「Working…」的 pulse 点 |
 | `web/src/app/shell.tsx:27` | 状态点的 pulse |
-| `web/src/app/shell.tsx:154` | 页头的品牌标记（不播） |
+| `web/src/app/shell.tsx:163` | 页头的品牌标记（不播） |
 | `web/src/components/tool-card.tsx:133` | 折叠箭头 |
 | `web/src/components/ui/dialog.tsx:42` | 对话框浮层的 `data-open` |
 | `web/src/index.css:96` | 动效令牌 |
@@ -2237,13 +2263,14 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | 位置 | 说的是什么 |
 |---|---|
 | `web/src/app/shell.tsx:25-30` | 状态点的两档 |
-| `web/src/app/shell.tsx:186` | 审批卡取代 composer |
+| `web/src/app/shell.tsx:195` | 审批卡取代 composer |
 | `web/src/components/sidebar.tsx:102` | 侧栏：宽度是 token，高度是**屏幕**的（`min-h-0`） |
 | `web/src/components/sidebar.tsx:564` | `thread-row` |
 | `web/src/components/sidebar.tsx:569` | `thread-item` |
 | `web/src/components/sidebar.tsx:593` | 行自己的菜单键（窄屏上一直显形） |
 | `web/src/app/shell.tsx:23` | `WIDE` —— 断点本身 |
 | `web/src/app/shell.tsx:137-140` | 一个侧栏：宽屏常驻，窄屏是抽屉 |
+| `web/src/app/shell.tsx:152` | 聊天列：高度是**框架**的（`min-h-0`） |
 | `web/src/components/sidebar-drawer.tsx:33-53` | 抽屉本体（Radix Dialog） |
 | `web/src/components/sidebar-drawer.tsx:44` | 抽屉的高度是**屏幕**的高度（`inset-y-0`） |
 | `web/src/components/sidebar.tsx:127` | 会话树的滚动容器（`min-h-0 flex-1 overflow-y-auto`） |
@@ -2254,7 +2281,7 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | `web/src/index.css:234` | `.touch-target` —— 伪元素撑开命中区域 |
 | `web/src/index.css:261` | `.app-frame` —— 安全区加在框架上 |
 | `web/src/index.css:290` | `.thread-row-menu` —— 窄屏上一直显形 |
-| `web/test/e2e/responsive.spec.ts` | 三档视口的回归网（§5.9.5） |
+| `web/test/e2e/responsive.spec.ts` | 三档视口的回归网（§5.9.6） |
 | `web/src/lib/scroll-follow.ts:13` | `BOTTOM_TOLERANCE` = 32 |
 | `web/src/components/message-list.tsx:134-139` | Jump to latest 是瞬时滚动 |
 | `web/src/components/message-list.tsx:266` | 每条消息一个节点 |
