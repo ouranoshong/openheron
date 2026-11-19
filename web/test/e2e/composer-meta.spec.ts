@@ -169,8 +169,40 @@ test.describe("窄屏", () => {
 
     await expect(page.locator(MODEL)).toHaveText("deepseek/deepseek-v4")
     // ★ The whole name is on the screen: it is not "deepsee…".
+    //   ★ At 390px there is room for it — the name gives way only when the
+    //     line really runs out (the next test).
     expect(await cut(page, MODEL)).toBeLessThanOrEqual(1)
     expect(await cut(page, REASONING)).toBeLessThanOrEqual(1)
+  })
+
+  // ★ The line's priority when it runs out of room.
+  //
+  // ★ **The context first, then the model name** — and the agent's name is
+  //   always there. ⇒ The **model name** is the one that gives way: it
+  //   truncates, and the row keeps **one** line.
+  //
+  // ★ The context occupancy and the agent's name are never cut: they are the
+  //   number and the identity, and a row that says "deepsee… · 14 %" still
+  //   says what is left of the context.
+  test("★ 挤不下时让位的是模型名", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 844 })
+    await openApp(page)
+    await openThread(page, "Multi agent conversation")
+
+    // ★ The model gives way.
+    expect(await cut(page, MODEL)).toBeGreaterThan(0)
+    // ★ The agent's name does not — and neither does the context.
+    expect(await cut(page, AGENT)).toBeLessThanOrEqual(1)
+    await expect(page.locator(CONTEXT)).toContainText("14 %")
+    expect(await cut(page, CONTEXT)).toBeLessThanOrEqual(1)
+    // ★ And the line is still **one** line: the model truncated instead of
+    //   the row growing a second one.
+    const height = await page
+      .locator(META)
+      .evaluate((el) => el.getBoundingClientRect().height)
+    expect(height).toBeLessThanOrEqual(30)
+    // ★ The whole name is not lost: it is in the model's tooltip.
+    await expect(page.locator(MODEL)).toHaveAttribute("title", /deepseek\/deepseek-v4/)
   })
 
   test("★ 分隔符跟着后一项走，不留在行尾", async ({ page }) => {
@@ -209,5 +241,141 @@ test.describe("窄屏", () => {
 
     await expect(page.locator('[data-testid="authorization-button"]')).toBeVisible()
     await expect(page.locator('[data-testid="operations-button"]')).toBeVisible()
+  })
+
+  // ★ On a narrow screen the entries keep **only their icon**.
+  //
+  // ★ The words are what make that row wide, and the row sits under the
+  //   keyboard — every pixel of it comes out of the chat. ★ The icon is the
+  //   entry's shape; the word is a label that a phone has no room for.
+  test("★ 窄屏上入口只留图标", async ({ page }) => {
+    await page.setViewportSize(PHONE)
+    await openApp(page)
+    await openThread(page, "Multi agent conversation")
+
+    const entries = [
+      '[data-testid="authorization-button"]',
+      '[data-testid="projects-label"]',
+      '[data-testid="operations-button"]',
+    ]
+
+    for (const entry of entries) {
+      const el = page.locator(entry)
+      await expect(el).toBeVisible()
+      // ★ `innerText` is the **shown** text: a word that is hidden by the
+      //   stylesheet is not in it, and a word that is only in the DOM is not
+      //   what the reader sees.
+      expect(await el.evaluate((node) => (node as HTMLElement).innerText.trim())).toBe("")
+      // ★ And the icon stays — an entry without one is a mark nobody can
+      //   read.
+      await expect(el.locator("svg").first()).toBeVisible()
+    }
+
+    // ★ The fact that stepped aside is not lost: the name the screen reader
+    //   reads still carries it.
+    await expect(page.locator('[data-testid="authorization-button"]')).toHaveAttribute(
+      "aria-label",
+      /Authorization: Default approval/,
+    )
+    await expect(page.locator('[data-testid="projects-label"]')).toHaveAttribute(
+      "aria-label",
+      /Project: /,
+    )
+    await expect(page.locator('[data-testid="operations-button"]')).toHaveAttribute(
+      "aria-label",
+      /Session activity/,
+    )
+  })
+
+  // ★ The line under the input box is the **biggest** block on a phone: it
+  //   sits under the keyboard, and every pixel of it comes out of the chat.
+  //   ⇒ The facts **and** the three entries share **one** line.
+  test("★ 窄屏上事实与入口挤在一行", async ({ page }) => {
+    await page.setViewportSize(PHONE)
+    await openApp(page)
+    await openThread(page, "Multi agent conversation")
+
+    const tops = await page.evaluate(() => {
+      const box = (id: string) => {
+        const el = document.querySelector(`[data-testid="${id}"]`)
+        if (!el) return null
+        const r = el.getBoundingClientRect()
+        return { top: Math.round(r.top), bottom: Math.round(r.bottom) }
+      }
+      const meta = document.querySelector('[data-testid="composer-meta"]')
+      return {
+        agent: box("composer-meta-agent"),
+        model: box("composer-meta-model"),
+        context: box("composer-meta-context"),
+        entry: box("authorization-button"),
+        height: meta instanceof HTMLElement ? Math.round(meta.getBoundingClientRect().height) : null,
+      }
+    })
+    expect(tops.agent).not.toBeNull()
+    // ★ The facts share **one** line: the agent, the model and the context.
+    expect(Math.abs(tops.model!.top - tops.agent!.top)).toBeLessThanOrEqual(1)
+    expect(Math.abs(tops.context!.top - tops.agent!.top)).toBeLessThanOrEqual(1)
+    // ★ And the entries share it with them: the icons sit at the **right**
+    //   end of the facts' own line — the entry's box overlaps the facts', so
+    //   it is not a line of its own below them.
+    expect(tops.entry!.top).toBeLessThan(tops.agent!.bottom)
+    // ★ The whole block is one row: a second line is a line of chat the
+    //   reader does not get.
+    expect(tops.height!).toBeLessThanOrEqual(30)
+  })
+
+  // ★ A fact that steps aside has to land somewhere it can still be read.
+  test("★ 窄屏上让位的思考档位进了提示气泡", async ({ page }) => {
+    await page.setViewportSize(PHONE)
+    await openApp(page)
+    await openThread(page, "Multi agent conversation")
+
+    // ★ The reasoning level is not on the narrow line any more — it is in
+    //   the model's tooltip, which a phone reads on demand.
+    await expect(page.locator(REASONING)).toBeHidden()
+    await expect(page.locator(MODEL)).toHaveAttribute("title", /Reasoning: high/)
+    // ★ And the context keeps only the share and the bar; the tokens and
+    //   the window are in the tooltip.
+    await expect(page.locator(CONTEXT)).toContainText("14 %")
+    await expect(page.locator(CONTEXT)).toHaveAttribute("title", /Context: ≈18k \/ 131k/)
+  })
+})
+
+// ★ The line under the input box answers to the **chat column**, not to the
+//   window.
+//
+// ★ A tablet in portrait is the case that proves it: the window is 960px
+//   wide, but the docked sidebar takes 256 of them, and the column is left
+//   with ~670px — a phone's worth of room on a window that looks like a
+//   desktop. ⇒ The entries keep only their icons there, while the facts
+//   still have room for their words.
+test.describe("宽窗窄列", () => {
+  // ★ The Surface Pro 10 in portrait: 960 × 1440.
+  const TABLET_PORTRAIT = { width: 960, height: 1440 }
+
+  test("★ 窗口宽但列窄时，右边只留图标", async ({ page }) => {
+    await page.setViewportSize(TABLET_PORTRAIT)
+    await openApp(page)
+    await openThread(page, "Multi agent conversation")
+
+    // ★ The column is the one that is narrow — the window is not.
+    const column = await page
+      .locator('[data-testid="composer-meta"]')
+      .evaluate((el) => el.getBoundingClientRect().width)
+    expect(column).toBeLessThan(768)
+    expect(column).toBeGreaterThan(512)
+
+    // ★ The entries keep only their icons.
+    await expect(page.locator('[data-testid="authorization-label"]')).toBeHidden()
+    await expect(page.locator('[data-testid="projects-name"]')).toBeHidden()
+    // ★ The facts still have room for their words: this column is not a
+    //   phone's.
+    await expect(page.locator(REASONING)).toBeVisible()
+    await expect(page.locator(CONTEXT)).toContainText("Context:")
+    // ★ And it is still one line.
+    const height = await page
+      .locator(META)
+      .evaluate((el) => el.getBoundingClientRect().height)
+    expect(height).toBeLessThanOrEqual(30)
   })
 })

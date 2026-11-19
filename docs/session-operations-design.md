@@ -435,11 +435,11 @@ Operations() OperationLog
 ### 5.12 界面
 
 **入口**：输入框下方那一行的**最右端** —— `<ComposerMeta>` 的 `action` 节点
-（`web/src/components/composer.tsx`）：
+（`web/src/components/composer.tsx:726-734`）：
 
 ```tsx
 action={
-  <span className="ms-auto flex shrink-0 items-center gap-1">
+  <span className="ms-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1 @max-3xl:gap-0.5">
     <AuthorizationPicker />
     <ProjectsButton />
     <OperationsPanel />   // ← 新入口，接在最后
@@ -448,8 +448,13 @@ action={
 ```
 
 ★ `ms-auto` 把这一组推到那一行的右端；`ComposerMeta` 把它渲染成那一行的
-**最后一个子节点**（`web/src/components/composer-meta.tsx:124-136`，
+**最后一个子节点**（`web/src/components/composer-meta.tsx:200-204`，
 `body` 用 `<div className="contents">` 包着，所以那一行里只有两个盒子参与排版）。
+
+★ **列窄时这个入口只留时钟**（聊天列 < 768px —— ★ 判据是**列宽**，不是窗口宽，
+`docs/ui-design.md` §5.6.5）：`Activity` 这个词让位，时钟留着，
+而且它**和事实同一行**（`web/src/components/operations-panel.tsx:90`）。
+★ 让位的词没有丢：它在 `title` 与 `aria-label` 里。
 
 ★ **新按钮接在最后，不许插在中间**：React 按 index 对齐孩子，
 插在中间会把后面那个 entry 换掉 —— 那个 entry 里的弹窗会自己关上。

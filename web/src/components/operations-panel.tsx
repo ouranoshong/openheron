@@ -70,7 +70,7 @@ export function OperationsPanel() {
         type="button"
         variant="ghost"
         size="sm"
-        className="text-muted-foreground hover:text-foreground h-6 gap-1 px-1.5 text-[11px]"
+        className="text-muted-foreground hover:text-foreground h-6 gap-1 px-1.5 text-[11px] @max-3xl:border-0 @max-3xl:px-1"
         onClick={() => {
           // ★ The read starts with the click, not with the effect: the
           //   panel says it is loading from the first frame.
@@ -84,13 +84,16 @@ export function OperationsPanel() {
         title="What happened in this conversation — the session's operation log."
       >
         <HistoryIcon aria-hidden="true" className="size-3" />
-        Activity
+        {/* ★ On a narrow screen the **word** steps aside and the icon stays:
+            the panel's own name is in the tooltip and in the button's name,
+            and the dialog says it too. */}
+        <span className="@max-3xl:hidden">Activity</span>
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
           data-testid="operations-dialog"
-          className="sm:max-w-2xl h-[85vh] flex flex-col gap-3 p-4"
+          className="sm:max-w-2xl h-[85dvh] flex flex-col gap-3 p-4"
           onEscapeKeyDown={(e) => {
             // ★ Escape has to close this box, and Radix listens for it on the
             //   document in the **capture** phase — so a handler in the tree

@@ -25,6 +25,26 @@
   --chat-gutter: clamp(1rem, 2.5vw, 2rem);
   --prose-column: 46rem;
 
+  /* ★ The sidebar's width is a token too. The docked column and the drawer
+     have to be the same width: a drawer that opens at 256px beside a column
+     of 240px is the interface arguing with itself. */
+  --sidebar-width: 16rem;
+
+  /* ★ The smallest edge a finger can be trusted to hit. 44px is the number
+     the platform guidelines agree on, and a 32px icon button misses about
+     half the time — on a touch screen there is no pointer to correct the
+     miss with. */
+  --touch-target: 44px;
+
+  /* ★ The safe area: a notch and a home indicator are **not** the window.
+     `env()` answers 0 on a device that has neither, so one stylesheet
+     serves both — the values only become non-zero on a page that opted in
+     with `viewport-fit=cover`. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -190,6 +210,95 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* ── The touch target ─────────────────────────────────────────────────────
+ *
+ * ★ A 32px icon button misses about half the time, and on a touch screen
+ *   there is no pointer to correct the miss with. ★ The icon stays small;
+ *   the **target** grows — a pseudo element covers the minimum edge, and
+ *   the layout does not move. A row of buttons that grows on a phone is a
+ *   row that no longer fits.
+ *
+ * ★ The target grows on a **coarse pointer** and on a **small screen**.
+ *   The first catches the tablet in landscape, whose width is past the
+ *   breakpoint but whose finger is still a finger; the second catches the
+ *   phone, and it is testable without a device.
+ *
+ * ★ The buttons that carry it are **isolated**. The target grows past the
+ *   icon, so a neighbour sitting closer than the minimum edge would have
+ *   its own taps stolen — that is why the row's own menu button (which
+ *   sits over the title) does not carry this class.
+ */
+.touch-target {
+  position: relative;
+}
+
+@media (pointer: coarse), (max-width: 767px) {
+  .touch-target::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, var(--touch-target));
+    height: max(100%, var(--touch-target));
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* ── The safe area ────────────────────────────────────────────────────────
+ *
+ * ★ A notch and a home indicator are **not** the window. ★ The insets go
+ *   on the frame, not on the body: the frame is `h-dvh`, so padding the
+ *   body would make the frame taller than the window and hand the page a
+ *   scrollbar it never had.
+ *
+ * ★ `env()` answers 0 on a device that has neither, so the same rule
+ *   serves the desktop — the values only become non-zero on a page that
+ *   opted in with `viewport-fit=cover`.
+ */
+.app-frame {
+  padding-top: max(var(--safe-top), 0.5rem);
+  padding-right: max(var(--safe-right), 0.5rem);
+  padding-bottom: max(var(--safe-bottom), 0.5rem);
+  padding-left: max(var(--safe-left), 0.5rem);
+}
+
+@media (min-width: 768px) {
+  .app-frame {
+    padding-top: var(--safe-top);
+    padding-right: var(--safe-right);
+    padding-bottom: var(--safe-bottom);
+    padding-left: var(--safe-left);
+  }
+}
+
+/* ── The row's own menu ───────────────────────────────────────────────────
+ *
+ * ★ On a desktop it waits for the pointer; on a touch screen it has to be
+ *   **there**. ★ There is no hover to reveal it, and a button nobody can
+ *   see is a button nobody can use — Tailwind compiles `group-hover` into
+ *   `@media (hover: hover)`, so on a touch device the reveal never fires
+ *   and the button is unreachable for good.
+ *
+ * ★ The rule is written out instead of being assembled from variants: the
+ *   cascade between a media-query variant and a hover variant is a source
+ *   order question, and nobody should have to answer it to make a button
+ *   reachable.
+ */
+.thread-row-menu {
+  opacity: 1;
+}
+
+@media (min-width: 768px) {
+  .thread-row-menu {
+    opacity: 0;
+  }
+
+  .group:hover .thread-row-menu,
+  .thread-row-menu:focus-visible {
+    opacity: 1;
   }
 }
 

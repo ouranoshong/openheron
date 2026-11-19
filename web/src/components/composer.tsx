@@ -501,7 +501,16 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         : undefined
 
   return (
-    <div className={inset ? "shrink-0 px-4 pb-3" : undefined}>
+    // ★ `@container` makes **this** the size context for the line under the
+    //   input box: that line has to answer to the **chat column's** width,
+    //   not to the window's.
+    //
+    // ★ A tablet in portrait is the case that proves it: the window is 960px
+    //   wide, but the docked sidebar takes 256 of them, and the column is
+    //   left with ~670px — ★ a phone's worth of room on a window that looks
+    //   like a desktop. ⇒ The rules below are container queries, and the
+    //   line adapts to the room it actually has.
+    <div className={cn("@container", inset && "shrink-0 px-4 pb-3")}>
       {attachments.length > 0 && (
         <ul data-testid="attachments" className="mx-auto mb-1.5 flex w-full max-w-[var(--chat-column)] flex-wrap gap-1.5">
           {attachments.map((f) => (
@@ -568,7 +577,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
           aria-label="Add attachment"
           disabled={uploading}
           onClick={() => fileRef.current?.click()}
-          className="hover:bg-muted grid size-8 shrink-0 place-items-center rounded-lg disabled:opacity-50"
+          className="hover:bg-muted touch-target grid size-8 shrink-0 place-items-center rounded-lg disabled:opacity-50"
         >
           {uploading ? <Loader2Icon className="size-4 animate-spin" /> : <PaperclipIcon className="size-4" />}
         </button>
@@ -686,7 +695,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
             aria-label="Send message"
             disabled={!text.trim() || busy || blocked}
             onClick={() => void submit()}
-            className="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-lg disabled:opacity-40"
+            className="bg-primary text-primary-foreground touch-target grid size-8 shrink-0 place-items-center rounded-lg disabled:opacity-40"
           >
             ↑
           </button>
@@ -710,7 +719,11 @@ export function Composer({ inset = true }: { inset?: boolean }) {
           //   button that hangs off the edge is a button nobody can read.
           //   ⇒ The three entries wrap inside it, and they stay right-aligned
           //   because that is where they sit on a wide screen.
-          <span className="ms-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1">
+          //   ★ On a narrow screen the icons sit on the facts' **own line** —
+          //   that row is the biggest block on a phone, and a second line is
+          //   a line of chat the user cannot read. ⇒ The gap between them
+          //   tightens; the icons themselves do not grow.
+          <span className="ms-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1 @max-3xl:gap-0.5">
             <AuthorizationPicker />
             <ProjectsButton />
             {/* ★ The entry goes **last**, and it never moves: React

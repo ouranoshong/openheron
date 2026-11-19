@@ -82,7 +82,7 @@ export function FilePreview({
               data-testid="file-preview-pdf"
               title={name}
               src={url}
-              className="h-[70vh] w-full rounded-lg border"
+              className="h-[70dvh] w-full rounded-lg border"
             />
           )}
           {(kind === "markdown" || kind === "code" || kind === "text") && (
@@ -114,7 +114,7 @@ function ImagePreview({ url, name }: { url: string; name: string }) {
       src={url}
       alt={name}
       onError={() => setBroken(true)}
-      className="mx-auto max-h-[70vh] max-w-full rounded-lg object-contain"
+      className="mx-auto max-h-[70dvh] max-w-full rounded-lg object-contain"
     />
   )
 }

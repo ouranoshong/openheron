@@ -112,7 +112,28 @@ async function findByText(
 
 export async function openApp(page: Page): Promise<void> {
   await page.goto("/")
-  await expect(page.locator(THREAD_ITEM).first()).toBeVisible()
+  // ★ The session tree lives in the sidebar, and on a narrow screen the
+  //   sidebar is a **drawer** — the tree is not on the screen until the
+  //   drawer is opened. ★ So the readiness signal is the header, which
+  //   every width has, and the tree is waited for only where the sidebar
+  //   is docked.
+  await expect(page.locator('[data-testid="status-dot"]')).toBeVisible()
+  if (await sidebarIsDocked(page)) {
+    await expect(page.locator(THREAD_ITEM).first()).toBeVisible()
+  }
+}
+
+/**
+ * Whether the sidebar is docked beside the chat, or a drawer over it.
+ *
+ * ★ The width is read from the **document**, not from the test's own idea
+ *   of it: a viewport resized after the page opened is not the viewport the
+ *   application sees.
+ * ★ The number is the one the application uses (`web/src/app/shell.tsx`'s
+ *   `WIDE`) — a second breakpoint in the tests would be a second truth.
+ */
+async function sidebarIsDocked(page: Page): Promise<boolean> {
+  return page.evaluate(() => document.documentElement.clientWidth >= 768)
 }
 
 export async function sendMessage(page: Page, text: string): Promise<void> {
@@ -138,9 +159,21 @@ export async function threadTitles(page: Page): Promise<string[]> {
 }
 
 export async function openThread(page: Page, title: string): Promise<void> {
+  // ★ On a narrow screen the tree is in the drawer, so the drawer has to
+  //   be opened before a row in it can be clicked.
+  if (!(await sidebarIsDocked(page))) {
+    await page.locator('[aria-label="Open conversations"]').click()
+    await expect(page.locator('[data-testid="sidebar-drawer"]')).toBeVisible()
+  }
   const row = page.locator(THREAD_ITEM).filter({ hasText: title }).first()
   await row.waitFor({ state: "visible", timeout: 5000 })
   await row.click()
+  // ★ Picking a conversation closes the drawer. ★ If it did not — the row
+  //   was already the active one — it is closed here: a modal drawer over
+  //   the chat would swallow the clicks that come next.
+  if (await page.locator('[data-testid="sidebar-drawer"]').count()) {
+    await page.keyboard.press("Escape")
+  }
 }
 
 // ★ openToolCard opens the **first** tool card of the transcript.

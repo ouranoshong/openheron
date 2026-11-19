@@ -423,15 +423,15 @@ writes: [create_issue]        # ★ 新键：这个工具写受信路径
 ## 7. 界面：输入框下面那一行
 
 位置：**输入框下面那一行的右端**，与「项目」按钮同一行
-（`web/src/components/composer.tsx:696-723` 的 `<ComposerMeta … action={…} />`）。
+（`web/src/components/composer.tsx:705-736` 的 `<ComposerMeta … action={…} />`）。
 
 ★ **顺序固定，位置就是身份。** React 按**下标**对齐子节点，
 一个下标变了就是「卸载了旧的、挂载了新的」，而挂在里面的状态全没了。
 `ComposerMeta` 已经把这一行的内容包进一个 `contents` 里、把 `action` 放在最后
-（`web/src/components/composer-meta.tsx:156-168`）。
+（`web/src/components/composer-meta.tsx:200-204`）。
 ⇒ 授权选择器、项目按钮与操作时间线的入口**一起**放进那一个 `action` 槽，
 顺序永远是「授权 → 项目 → 活动」，多一个兄弟节点也不许换位。
-★ 落法：三个入口被包进**同一个** `span`（`web/src/components/composer.tsx:713-721`），
+★ 落法：三个入口被包进**同一个** `span`（`web/src/components/composer.tsx:726-734`），
 那个 `span` 带着右对齐（`ms-auto`）—— 项目按钮自己那份 `ms-auto` 被去掉了，
 几份都靠自动边距会各推各的。
 
@@ -449,7 +449,7 @@ writes: [create_issue]        # ★ 新键：这个工具写受信路径
 
 ★ **完全授权要用警告色**（`--warning` 令牌，不是字面色值），
 中间档用中性色。⇒ 用户一眼能看出「这一档不再有人看着」。
-（`web/src/components/authorization-picker.tsx:151-159`。）
+（`web/src/components/authorization-picker.tsx:159-167`。）
 
 * 选中即写：`PATCH /v2/sessions/{id}/authorization`，失败就把界面弹回原值
   （界面不自己乐观更新 —— 服务端的答案是权威）。
@@ -460,11 +460,11 @@ writes: [create_issue]        # ★ 新键：这个工具写受信路径
   已经在跑的那一轮用的是**它开始时的那一档**。
   ★ 不能让它看起来已经生效了。
 * ★ 落法：这句话写在**弹窗的描述**里
-  （`web/src/components/authorization-picker.tsx:171-181`），
+  （`web/src/components/authorization-picker.tsx:186-190`），
   **不**在按钮旁边挂一个「下一轮生效」的小牌子 ——
   这条规则**一直**成立，不是有条件才显示的；
   而一个会来来去去的小牌子会让按钮那一行文字跳。
-  ⇒ 按钮上只有档位名（`web/src/components/authorization-picker.tsx:151-159`）。
+  ⇒ 按钮上只有档位名（`web/src/components/authorization-picker.tsx:153-167`）。
 
 ★ **切到完全授权要弹一次确认框。**
 流程：**先不带 `confirm` 发** ⇒ 服务端回 **409 `confirmation_required`**
@@ -503,6 +503,17 @@ writes: [create_issue]        # ★ 新键：这个工具写受信路径
   ⇒ 已经确认过的人**不再问第二次**（暂存里的那个确认标志跟着走）。
 * ★ **弹窗的描述在两处不一样**：有会话时说的是「下一轮生效」；
   欢迎页上没有正在跑的一轮，说的是这个会话**生来**就在这一档里。
+
+### 7.2 列窄时：只留盾牌
+
+★ **列窄时**（聊天列 < 768px，★ 判据是列宽不是窗口宽 —— `docs/ui-design.md` §5.6.5）
+入口**只留图标**（`docs/ui-design.md` §5.6.4）：
+档位名让位，盾牌留着，而且它**和事实同一行**。
+
+★ **让位的档位名不许丢**：按钮的 `aria-label`（读屏读到的名字）与
+`title`（提示气泡）都还带着它 —— ★ `title` 现在是「档位名 — 档位说明」，
+所以提示气泡里既说得清是哪一档，也说得清那一档意味着什么。
+★ 而且点开弹窗就能看见当前档位（三个选项里的那个勾）。
 
 ## 8. 审计
 

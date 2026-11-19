@@ -77,7 +77,7 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
         //   a dozen lines of YAML, and at 32rem it was edited in a column
         //   that folded every key onto two lines. ★ The height cap keeps it
         //   inside the window — the dialog scrolls, the page does not.
-        className="sm:max-w-3xl max-h-[85vh] overflow-y-auto"
+        className="sm:max-w-3xl max-h-[85dvh] overflow-y-auto"
         data-testid="new-file-dialog"
       >
         <DialogHeader>

@@ -36,6 +36,7 @@ const THREAD_ROW = '[data-testid="thread-row"]'
 const NEW_THREAD = '[data-testid="new-thread"]'
 const PROJECTS_BUTTON = '[data-testid="projects-button"]'
 const PROJECTS_LABEL = '[data-testid="projects-label"]'
+const PROJECTS_NAME = '[data-testid="projects-name"]'
 const PROJECTS_DIALOG = '[data-testid="projects-dialog"]'
 const PROJECTS_EMPTY = '[data-testid="projects-empty"]'
 const PROJECT_ROW = '[data-testid="project-row"]'
@@ -662,6 +663,11 @@ test("机器上没有选择器，理由写在那儿", async ({ page }) => {
 //   not be pushed off the screen. ★ A name that is cut off is still a name:
 //   the whole one stays in the tooltip and in the label a screen reader
 //   reads.
+//
+// ★ On a **narrow** screen the name **steps aside** instead of being cut:
+//   the entry keeps only its icon (the row has to hold the facts and the
+//   three entries on one line), and the name is in the tooltip, in the
+//   button's name and in the sidebar's project folder.
 test("★ 项目名很长时，输入框下面那一行也不溢出", async ({ page }) => {
   const PHONE = 390
   await page.setViewportSize({ width: PHONE, height: 844 })
@@ -686,4 +692,15 @@ test("★ 项目名很长时，输入框下面那一行也不溢出", async ({ p
     .locator('[data-testid="operations-button"]')
     .evaluate((el) => el.getBoundingClientRect().right)
   expect(right).toBeLessThanOrEqual(PHONE)
+
+  // ★ On a narrow screen the name is not on the row at all — the entry keeps
+  //   its icon only.
+  await expect(page.locator(PROJECTS_NAME)).toBeHidden()
+
+  // ★ Above the narrow breakpoint the name is back on the row — and the row
+  //   still fits the screen.
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await expect(page.locator(PROJECTS_NAME)).toBeVisible()
+  const wideOverflow = await meta.evaluate((el) => el.scrollWidth - el.clientWidth)
+  expect(wideOverflow).toBeLessThanOrEqual(1)
 })
