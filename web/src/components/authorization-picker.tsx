@@ -137,22 +137,31 @@ export function AuthorizationPicker() {
         type="button"
         variant="ghost"
         size="sm"
-        className="hover:text-foreground h-6 gap-1 px-1.5 text-[11px]"
+        className="hover:text-foreground h-6 gap-1 px-1.5 text-[11px] @max-3xl:border-0 @max-3xl:px-1"
         onClick={() => setOpen(true)}
         data-testid="authorization-button"
         aria-label={`Authorization: ${option.label}`}
+        // ★ The tooltip carries the **level** as well as its meaning: on a
+        //   narrow screen the word steps aside and the icon stays, and a fact
+        //   that steps aside has to land somewhere it can still be read.
         title={
           activeId
-            ? option.title
-            : "The mode belongs to the conversation that is about to start."
+            ? `${option.label} — ${option.title}`
+            : `${option.label} — the mode belongs to the conversation that is about to start.`
         }
       >
         <ShieldIcon aria-hidden="true" className="size-3" />
         {/* ★ The color is a token, and the full level wears the warning one:
-            the user has to see at a glance that nobody is watching anymore. */}
+            the user has to see at a glance that nobody is watching anymore.
+            ★ On a narrow screen the **word** steps aside and the icon stays:
+            the level is in the tooltip, in the button's name and in the
+            dialog that opens on it. */}
         <span
           data-testid="authorization-label"
-          className={mode === "full" ? "text-warning" : "text-muted-foreground"}
+          className={cn(
+            "@max-3xl:hidden",
+            mode === "full" ? "text-warning" : "text-muted-foreground",
+          )}
         >
           {option.label}
         </span>

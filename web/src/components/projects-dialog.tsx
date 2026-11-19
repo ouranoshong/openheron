@@ -78,10 +78,16 @@ export function ProjectsButton() {
         data-testid="projects-label"
         aria-label={`Project: ${name}`}
         title={`${name} — the project this conversation works in. A conversation's project cannot change — start a new conversation to work elsewhere.`}
-        className="text-muted-foreground flex h-6 max-w-full items-center gap-1 px-1.5 text-[11px]"
+        className="text-muted-foreground flex h-6 max-w-full items-center gap-1 px-1.5 text-[11px] @max-3xl:px-1"
       >
         <FolderIcon aria-hidden="true" className="size-3 shrink-0" />
-        <span className="min-w-0 truncate">{name}</span>
+        {/* ★ On a narrow screen the **name** steps aside and the icon stays.
+            ★ The name is not lost: it is in the tooltip and in the label a
+              screen reader reads — and the project is a folder in the
+              sidebar, where its name is written out. */}
+        <span data-testid="projects-name" className="min-w-0 truncate @max-3xl:hidden">
+          {name}
+        </span>
       </span>
     )
   }
@@ -92,14 +98,19 @@ export function ProjectsButton() {
         type="button"
         variant="ghost"
         size="sm"
-        className="text-muted-foreground hover:text-foreground h-6 max-w-full gap-1 px-1.5 text-[11px]"
+        className="text-muted-foreground hover:text-foreground h-6 max-w-full gap-1 px-1.5 text-[11px] @max-3xl:border-0 @max-3xl:px-1"
         onClick={() => setOpen(true)}
         data-testid="projects-button"
         aria-label={`Project: ${name}`}
         title={`${name} — the project the next conversation works in. Click to choose another one, or to make a new one.`}
       >
         <FolderIcon aria-hidden="true" className="size-3 shrink-0" />
-        <span className="min-w-0 truncate">{name}</span>
+        {/* ★ On a narrow screen the **name** steps aside and the icon stays —
+            the same rule as the other two entries on this line. ★ The name is
+            in the tooltip and in the button's name. */}
+        <span data-testid="projects-name" className="min-w-0 truncate @max-3xl:hidden">
+          {name}
+        </span>
       </Button>
       <ProjectsDialog open={open} onOpenChange={setOpen} />
     </>

@@ -7,7 +7,7 @@ import { Loader2Icon } from "lucide-react"
 import type { ReactNode } from "react"
 
 const META =
-  "text-muted-foreground mx-auto mt-1.5 flex min-h-4 w-full max-w-[var(--chat-column)] flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[11px] max-sm:gap-y-1"
+  "text-muted-foreground mx-auto mt-1.5 flex min-h-4 w-full max-w-[var(--chat-column)] flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[11px] @max-lg:gap-y-1"
 
 // ★ Joined is a separator and the item it introduces, as **one unit**.
 //
@@ -78,7 +78,7 @@ export function ComposerMeta({
   const noticeNode = notice ? (
     <span
       data-testid="composer-meta-notice"
-      className="inline-flex max-sm:basis-full items-center gap-1.5"
+      className="inline-flex @max-lg:basis-full items-center gap-1.5"
     >
       <Loader2Icon aria-hidden="true" className="size-3 shrink-0 animate-spin" />
       {notice}
@@ -91,7 +91,7 @@ export function ComposerMeta({
   const busyNode = busy ? (
     <span
       data-testid="composer-meta-busy"
-      className="inline-flex max-sm:basis-full items-center gap-1.5"
+      className="inline-flex @max-lg:basis-full items-center gap-1.5"
     >
       <Loader2Icon aria-hidden="true" className="size-3 shrink-0 animate-spin" />
       This session is running in another window — stop it to take over
@@ -145,10 +145,18 @@ export function ComposerMeta({
               narrow screen the row has to fit on one line, and the header
               already says "Agent" — so the prefix steps aside and the name
               stays. */}
-          <span className="max-sm:hidden">Agent: </span>
+          <span className="@max-lg:hidden">Agent: </span>
           {badge.id}
         </span>
-        <Joined>
+        {/* ★ The model is the item that **gives way** on a narrow screen.
+            ★ The priority is written down: the agent's name and the context
+            ★ occupancy are never cut — they are the identity and the number
+            ★ — and the model name is the one that truncates.
+            ★ The unit may shrink, and it may take at most what is left after
+            ★ the protected items (the agent's name, the context, the three
+            ★ entries and the gaps — about 12rem). ⇒ The row keeps **one**
+            ★ line, and the model's full name stays in its tooltip. */}
+        <Joined className="@max-3xl:shrink @max-3xl:max-w-[min(24rem,calc(100%_-_12rem))]">
           <span
             data-testid="composer-meta-model"
             // ★ The model's tooltip carries the reasoning level as well. ★ On
@@ -165,7 +173,7 @@ export function ComposerMeta({
         {/* ★ The reasoning level steps aside on a narrow screen: it is in the
             model's tooltip there. ★ The unit is hidden whole — separator and
             item together — so no line is left with a dangling "·". */}
-        <Joined className="max-sm:hidden">
+        <Joined className="@max-lg:hidden">
           <span
             data-testid="composer-meta-reasoning"
             title={reasoningTitle}
@@ -247,13 +255,17 @@ function ContextMeter({ usage }: { usage: ContextUsage }) {
         {/* ★ Two sentences, one line: the narrow one is the short label, the
             wide one the whole sentence. ★ Only one of them is displayed —
             the other is `display: none`, so it is not read aloud either. */}
-        <span className="hidden sm:inline">{label}</span>
-        <span className="sm:hidden">{shortLabel}</span>
+        <span className="hidden @lg:inline">{label}</span>
+        <span className="@lg:hidden">{shortLabel}</span>
       </span>
       {known ? (
         <span
           aria-hidden="true"
-          className="bg-muted/40 relative inline-block h-1 w-10 shrink-0 overflow-hidden rounded-full"
+          // ★ The bar is the **second** encoding of the same number — the
+          //   share is right beside it. ★ On a narrow screen it is shorter:
+          //   the row has to hold the facts **and** the three entries on one
+          //   line, and every pixel of that line comes out of the chat.
+          className="bg-muted/40 relative inline-block h-1 w-10 shrink-0 overflow-hidden rounded-full @max-3xl:w-8"
         >
           <span
             className={
