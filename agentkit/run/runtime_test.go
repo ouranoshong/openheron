@@ -547,6 +547,19 @@ func TestMultiplePendingApprovalsAreAnsweredAsAGroup(t *testing.T) {
 		}
 	}
 
+	// ★ The round is not settled yet. The approval is on disk, but the
+	//   barrier still stands behind it: the ledger's row closes, the
+	//   publisher closes and the turn is released **after** the approval
+	//   lands (bridge.go). ★ A resume that arrives inside that window is
+	//   refused with ErrSessionBusy — the same retryable conflict a query
+	//   gets, and the window is 13ms wide on a live instance
+	//   (docs/pitfalls.md §3.10). ⇒ Wait for the turn to stop being live,
+	//   the way the other approval tests do.
+	waitFor(t, func() bool {
+		_, ok := rt.LiveRun(sess.ID(), turn.RunID)
+		return !ok
+	})
+
 	if _, err := rt.Resume(ctx, sess.ID(), "", []ApprovalDecision{
 		{InterruptID: ids[0], Approved: true},
 		{InterruptID: ids[1], Approved: true},
