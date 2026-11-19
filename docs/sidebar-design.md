@@ -134,8 +134,13 @@ model 就在一个目录被告知去另一个目录读写。
 ★ 一段对话的项目是定的，所以对话页上那个地方**不提供开关** —— 一个写着「切换」却会
 「把你正在看的对话从屏幕上拿走」的按钮，比没有按钮更糟。
 
+★ **列窄时那个标签只剩文件夹图标**（聊天列 < 768px —— ★ 判据是**列宽**，
+不是窗口宽，`docs/ui-design.md` §5.6.5）：项目名让位，图标留着。
+★ 名字没有丢：它在 `title` 与 `aria-label` 里，也在侧栏里那个**文件夹**上
+（`web/src/components/projects-dialog.tsx:88`、`:111`）。
+
 ★ **`Default Project` 是一个选择，也是兜底**：它就是「没有项目」那一项 —— 项目对话框的
-**第一项**（`web/src/components/projects-dialog.tsx:237`），服务端也认（会话落在默认项目根），
+**第一项**（`web/src/components/projects-dialog.tsx:247`），服务端也认（会话落在默认项目根），
 所以 `web/src/lib/projects.ts:244` `resolveActiveProject` 保留空 id：**null**（「还没选过」）和
 「表里没有那个项目了」都给出它。★ 「没有项目」**就是**默认项目根，所以兜底不是表里第一个
 项目 —— 那个项目是用户在列表里排在前面的，不是他给这段对话挑的目录。
@@ -152,7 +157,7 @@ model 就在一个目录被告知去另一个目录读写。
 
 | 动作 | 在哪儿 | 为什么 |
 |---|---|---|
-| **新建项目** | 空视图那个对话框（`web/src/components/projects-dialog.tsx:215`） | ★ 它是「决定下一段对话在哪儿干活」的一部分 —— 属于「还没决定」的那一刻 |
+| **新建项目** | 空视图那个对话框（`web/src/components/projects-dialog.tsx:226`） | ★ 它是「决定下一段对话在哪儿干活」的一部分 —— 属于「还没决定」的那一刻 |
 | **改名 / 改目录 / 移除** | 侧栏项目行的「⋯」 | ★ 它动的是**已经在地图上的东西** —— 地图上看见的，就该在地图上改 |
 
 ★ 项目行的菜单（`web/src/components/sidebar.tsx:354`）今天有四项：
@@ -368,11 +373,11 @@ model 就在一个目录被告知去另一个目录读写。
 | | `:551` | 会话行 |
 | | `:556` | 会话行本体 |
 | | `:586` | 会话菜单 |
-| `web/src/components/projects-dialog.tsx` | `:68` | 输入框下方的**标签**（对话页） |
-| | `:87` | 输入框下方的**按钮**（空视图） |
-| | `:205` | 项目对话框 |
-| | `:227` | 「Default Project」那一项（第一项） |
-| `web/src/components/composer-meta.tsx` | `:133` | `contents` 包装 —— action 的下标钉死 |
+| `web/src/components/projects-dialog.tsx` | `:75-91` | 输入框下方的**标签**（对话页） |
+| | `:95-113` | 输入框下方的**按钮**（空视图） |
+| | `:226` | 项目对话框 |
+| | `:247` | 「Default Project」那一项（第一项） |
+| `web/src/components/composer-meta.tsx` | `:203` | `contents` 包装 —— action 的下标钉死 |
 | `web/src/app/shell.tsx` | `:16` | `SIDEBAR_KEY` —— 侧栏折叠的存储键 |
 | | `:113` | 空视图与对话页的分叉 |
 | `web/src/lib/projects.ts` | `:72` / `:75` | 置顶组键 / 未选项目组键 |

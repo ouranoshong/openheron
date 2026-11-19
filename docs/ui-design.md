@@ -522,15 +522,19 @@ reasoning、模块级缓存与单飞请求；`api.listAgents()` 用 `cache: "no-
   （`web/src/components/composer-meta.tsx:120-129`）；
 - 加载失败不阻塞输入、发送与审批。
 
-★ **上下文占用**也在这一行（`web/src/components/composer-meta.tsx:209-272` 的
+★ **上下文占用**也在这一行（`web/src/components/composer-meta.tsx:217-284` 的
 `ContextMeter`，`data-testid="composer-meta-context"`）。
 
 ### 5.6.2 版式：换行，不被挤成半个
 
-★ **窄屏上（< 640px）一个名字要么整个出现，要么换到下一行 —— 不许被挤成
+★ **列窄时一个名字要么整个出现，要么换到下一行 —— 不许被挤成
 「deepsee…」**：一个被切掉一半的名字，说得比一个换行的名字更少。
 ⇒ 每一项都是**一个整体**（`shrink-0`）：它不会为了挤进行里而缩窄，
 它只会**换行**；只有在名字比**整行**还长的时候才截断（`max-w-[min(…,100%)]`）。
+
+★ **唯一的例外是模型名**（§5.6.4）：那一行的**优先级**写在下面 ——
+上下文占用先保，模型名次之，agent 名**一定出现**。
+⇒ 列窄时模型名**可以**被截断，而 agent 名与上下文占用**永不被切**。
 
 ★ **分隔符跟着后一项走。** 分隔符是**后一项**的一部分，不是一个自己排版的节点
 （`web/src/components/composer-meta.tsx` 的 `Joined`）——
@@ -540,42 +544,103 @@ reasoning、模块级缓存与单飞请求；`api.listAgents()` 用 `cache: "no-
 ★ **状态句自己占一行**（`notice` / `busy`）：一句状态和旁边的事实是两种读法，
 挤在一行里，两种都更难读。
 
-### 5.6.3 窄屏上事实只有一行
+### 5.6.3 列窄时事实只有一行
 
 ★ 输入框下面那一块是**手机上最大的一块**，它坐在键盘上面，
 它的每一像素都是从聊天区里扣下来的。★ 在 390px 的屏幕上，
 它原来占 **65px**（事实两行 + 入口一行）—— ★ 比输入框本身（50px）还高。
 
-★ 窄屏上事实**必须只有一行**（`max-sm`，< 640px），于是让位的是**标签与细节**，
+★ 列窄时事实**必须只有一行**（§5.6.5：列 < 512px），于是让位的是**标签与细节**，
 留下的是**身份与那个数**：
 
-| 项 | 宽屏 | 窄屏 |
+| 项 | 列宽时 | 列窄时 |
 |---|---|---|
-| agent | `Agent: product-manager` | `product-manager`（「Agent: 」是宽屏的标签，页头本来就写着 Agent） |
-| 模型 | `deepseek/deepseek-flash` | 不变 —— ★ 名字不许被切（§5.6.2） |
+| agent | `Agent: product-manager` | `product-manager`（「Agent: 」是宽列的标签，页头本来就写着 Agent） |
+| 模型 | `deepseek/deepseek-flash` | **让位** —— ★ 它是这一行里优先级最低的一项（§5.6.4） |
 | 思考档位 | `Reasoning: low` | **让位**，进模型的 `title` |
-| 上下文 | `Context: ≈15k / 1.0M (1.4 %)` | `1.4 %` + 占用条（token 数与窗口进 `title`） |
-| 入口 | 三个按钮带文字 | 不变 —— ★ 图标不是标签 |
+| 上下文 | `Context: ≈15k / 1.0M (1.4 %)` | `1.4 %` + 占用条（token 数与窗口进 `title`；★ 占用条短一截，§5.6.4） |
+| 入口 | 三个按钮带文字 | **只留图标**，并且**和事实同一行**（§5.6.4） |
 
 ★ **让位的东西不许丢**：思考档位进**模型**的 `title`
-（`web/src/components/composer-meta.tsx:159`），上下文数字进占用条的 `title`
+（`web/src/components/composer-meta.tsx:167`），上下文数字进占用条的 `title`
 （`:221`）—— ★ 手机是**按需读**提示气泡的，而那一行是**一眼扫**的。
 
-★ 入口那一行**保留文字**（§5.6.4）：一个图标是谜语，不是标签。
+★ 入口让位的方式也一样：三个词都让位，**三个图标都留下**，而且它们
+**留在事实那一行**（§5.6.4）—— ★ 入口还在，入口还认得出来，
+而那一行不必再占第二行。
 
-**结果**：65px → **45px**，省下的 20px 回到聊天区。
+**结果**：65px → 45px → **24px**（一行），省下的 41px 回到聊天区。
 
-### 5.6.4 入口：在自己的节点里换行
+### 5.6.4 入口：列窄时只留图标，与事实同一行
 
-★ 三个入口在**同一个** `span` 里（`web/src/components/composer.tsx:713-721`），
+★ 三个入口在**同一个** `span` 里（`web/src/components/composer.tsx:726-734`），
 那个 `span` 是这一行**最后**的子节点，位置恒定（§11.1）。
-★ 窄屏上它**换行**，而且**右对齐**（宽屏上它们在右端，窄屏上它们还是在右端）。
-⇒ 一个入口**换行**，不是一个入口被挤出屏幕。
+★ 列宽时它们在右端；列窄时**还是在右端**（`ms-auto`），但它们**和事实同一行**。
 
-★ **项目名是用户起的，可能比手机还宽。** ⇒ 名字**截断**
+| 入口 | 列宽时 | 列窄时 |
+|---|---|---|
+| 授权 | 🛡 `Default approval` | 🛡 |
+| 项目 | 📁 `Default Project` | 📁 |
+| 活动 | 🕘 `Activity` | 🕘 |
+
+★ **为什么**：那一行坐在键盘上面，它的每一像素都是从聊天区里扣出来的；
+而一个图标是入口的**形状** —— 是三个入口各自唯一的、认得出来的东西。
+
+★ **怎么腾出这一行**：省下的是**看不见的东西** ——
+三个入口的透明边框（`@max-3xl:border-0`）、它们的左右留白（`@max-3xl:px-1`）、
+入口之间的间距（`@max-3xl:gap-0.5`），以及占用条的长度（`@max-3xl:w-8`）。
+⇒ 三个入口从 84px 宽收到 **64px**，事实与入口**同一行**
+（390px 上事实与入口之间还余 21px —— 这 21px 里模型名最多再用掉 14px，
+它的上限是「行宽 − 12rem」）。
+
+★ **图标不长大**：入口在小屏幕上也不变大 —— 那一行的高度就是
+**24px**（图标按钮的高度），它省下来的每一像素都回到聊天区。
+
+★ **挤不下时谁让位**：**上下文占用先保，模型名次之，agent 名一定出现**。
+⇒ 让位的是**模型名**：列窄时它可以缩（`@max-3xl:shrink`），
+也可以被截断（上限 = 行宽减去被保下来的那些，约 12rem ——
+agent 名、上下文、三个入口与间隙）。
+⇒ 而 agent 名与上下文占用是 `shrink-0`：**永不被切**。
+
+| 项 | 挤不下时 |
+|---|---|
+| agent | **不让位** —— 它是「在跟谁说话」 |
+| 上下文 | **不让位** —— 它是那个数 |
+| 模型名 | **让位** —— 截成「deepseek/deepse…」，全名在 `title` 里 |
+
+★ 390px 上模型名是**整个**的（还有 21px 余量）；360px 上它开始让位，
+那一行**仍然只有一行** —— ★ 让位的是一个名字，不是整行聊天。
+
+★ **让位的词不许丢**：每个入口的 `aria-label`（读屏读到的名字）与
+`title`（提示气泡）都还带着它 —— 授权档位的 `title` 现在是
+「档位名 — 档位说明」，项目名与活动面板的名字也都在。
+★ 项目的名字还有第二个家：侧栏里它就是一个**文件夹**，名字写在那里。
+
+★ **项目名是用户起的，可能比手机还宽。** ⇒ 在**列宽**时名字**截断**
 （`web/src/components/projects-dialog.tsx`），而**全名**留在两处：
 tooltip（`title`）与读屏读到的标签（`aria-label`）。
 ★ 名字被截断不等于名字丢了。
+
+### 5.6.5 判据是**列宽**，不是窗口宽
+
+★ 这一行住在**聊天列**里，它有多少地方取决于**列**，不取决于窗口。
+
+★ **平板竖屏就是那个证明**：窗口 960px 宽，看着像台电脑，
+可是常驻的侧栏拿走了 256px，列只剩 **~670px** —— ★ 一个手机那么宽的地方，
+长在一扇像电脑的窗里。⇒ 那一行按**列**算，不按**窗**算。
+
+⇒ 这一行的规则全是**容器查询**（`@container` + `@max-lg:` / `@max-3xl:`），
+容器是 composer 的根（`web/src/components/composer.tsx:513` 的 `@container`）。
+
+| 列宽 | 事实 | 入口 | 模型名 |
+|---|---|---|---|
+| ≥ 768px（`@3xl`） | 完整版 | 带文字 | 完整 |
+| 512–768px | 完整版 | **只留图标** | 可让位 |
+| < 512px（`@lg`） | 紧凑版 | **只留图标** | 可让位 |
+
+★ 两个阈值**不是**一回事：入口的词先让（它占 250px，事实占 400px），
+事实的紧凑版后让（它省下的 300px 只有列真的挤了才值得省）。
+
 
 ### 5.7 /skill 与 /agents
 
@@ -593,7 +658,7 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
   前端缓存的清单可能过期 —— 拦下来反而会拦住一个刚建的 skill。
 - 选择器列出**这一代挂着的** skill：名字、**description**（模型选它的唯一依据）、
   **执行模式**（`inline` / `fork`，`web/src/lib/skill-info.ts:26-35`）；
-  选中只**回填命令文本**（`web/src/components/composer.tsx:732-736`），不直接发送。
+  选中只**回填命令文本**（`web/src/components/composer.tsx:736-740`），不直接发送。
 - 选择器列出**全部** agent（`web/src/lib/agent-info.ts:40-42` 的 `selectableAgents`）
   —— 没有「主 agent」这回事。
 - ★ **切换请求不做乐观更新**（`web/src/lib/store/actions.ts:458-472`）：
@@ -966,7 +1031,7 @@ preflight 同样把标题字号/字重重置成正文，所以 `h1`–`h6` 单�
 ### 8.2 中断（停止）
 
 ★ **运行中，停止按钮取代发送按钮**，不是并排：同一槽位、同一主色，
-图标是实心方块（`web/src/components/composer.tsx:681-693`、
+图标是实心方块（`web/src/components/composer.tsx:690-702`、
 `web/src/components/message-list.tsx:319-331`）。
 并排会多占一个槽位，并让人误以为「发送只是暂时灰掉」；
 空心方块则会被读成未选中的复选框。
@@ -1244,13 +1309,13 @@ FAT32 上不可复算。毫秒是「跨平台都稳」的刻度，而两次上�
 
 | 交互 | 落点 | 处理 |
 |---|---|---|
-| 纸夹 | `web/src/components/composer.tsx:548` | `<input type="file" multiple>` |
-| 拖拽 | `composer.tsx:523` 的 `onDragOver` / `:536` 的 `onDrop` | `e.dataTransfer.files` → `acceptFiles` |
-| 粘贴 | `composer.tsx:601` 的 `onPaste` | `e.clipboardData.items` 里 `kind === "file"` 的项 |
+| 纸夹 | `web/src/components/composer.tsx:563-566` | `<input type="file" multiple>` |
+| 拖拽 | `composer.tsx:540` 的 `onDragOver` / `:553` 的 `onDrop` | `e.dataTransfer.files` → `acceptFiles` |
+| 粘贴 | `composer.tsx:618` 的 `onPaste` | `e.clipboardData.items` 里 `kind === "file"` 的项 |
 
 - ★ 拖拽悬停必须 `preventDefault()`：默认动作是**拒绝**这次拖放，不允许就不会触发 drop。
 - ★ **粘贴截图是这个交互里最有价值的那个**：截图进剪贴板，按 Ctrl+V 就发出去了，没有「先存成
-  文件再选」的中间步骤。而 `onPaste` 里也必须 `preventDefault()`（`composer.tsx:619`）—— 默认粘贴
+  文件再选」的中间步骤。而 `onPaste` 里也必须 `preventDefault()`（`composer.tsx:628`）—— 默认粘贴
   会把图片的**文件名**塞进消息里，而用户要发的是图。
 
 ### 9.6 前端：刷新不丢，历史回看
@@ -1516,7 +1581,7 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 ### 11.1 位置与形状
 
 位置：**输入框下面那一行的右端**，与「项目」按钮同一行
-（`web/src/components/composer.tsx:696-723` 的 `<ComposerMeta … action={…} />`）。
+（`web/src/components/composer.tsx:705-736` 的 `<ComposerMeta … action={…} />`）。
 
 ★ **顺序固定，位置就是身份。** React 按**下标**对齐子节点，
 一个下标变了就是「卸载了旧的、挂载了新的」，而挂在里面的状态全没了
@@ -1526,7 +1591,10 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 
 ★ 三个入口被包进**同一个** `span`，那个 `span` 带着右对齐（`ms-auto`）——
 项目按钮自己那份 `ms-auto` 被去掉了，几份都靠自动边距会各推各的。
-★ 窄屏上这个 `span` 自己**换行**（§5.6.4）—— 项目名是用户起的，可能比手机还宽。
+★ 列窄时入口**只留图标**（§5.6.5：列 < 768px），并且**和事实同一行**（§5.6.4）：
+档位名让位，盾牌留着；让位的档位名在 `title` 与 `aria-label` 里都还在。
+★ 那一行放不下的时候，这个 `span` 自己**换行**（`flex-wrap`）——
+事实的名字不许被挤成半个（§5.6.2），入口让位。
 
 ★ **按钮在欢迎页上也不禁用**（§11.5）：那里还没有会话，而档位是**暂存**的 ——
 一个点不开的选择，就是一个欢迎页表达不出来的意图。
@@ -1546,7 +1614,7 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 一个每次渲染都换顺序的列表，用户就得每次重读一遍。
 
 ★ **完全授权用警告色**（`--warning` 令牌，不是字面色值），中间档用中性色
-（`web/src/components/authorization-picker.tsx:151-159`）⇒ 用户一眼能看出
+（`web/src/components/authorization-picker.tsx:159-167`）⇒ 用户一眼能看出
 「这一档不再有人看着」。
 
 ### 11.3 服务端是权威，界面不乐观更新
@@ -1558,11 +1626,11 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
   已经在跑的那一轮用的是**它开始时的那一档**。
   ★ 不能让它看起来已经生效了。
 * ★ 落法：这句话写在**弹窗的描述**里
-  （`web/src/components/authorization-picker.tsx:171-181`），
+  （`web/src/components/authorization-picker.tsx:186-190`），
   **不**在按钮旁边挂一个「下一轮生效」的小牌子 ——
   这条规则**一直**成立，不是有条件才显示的；
   而一个会来来去去的小牌子会让按钮那一行文字跳。
-  ⇒ 按钮上只有档位名（`web/src/components/authorization-picker.tsx:151-159`）。
+  ⇒ 按钮上只有档位名（`web/src/components/authorization-picker.tsx:153-167`）。
 
 ### 11.4 切到完全授权：一次确认框
 
@@ -1624,6 +1692,9 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 
 ★ **入口是一个普通按钮，不是下拉菜单**：这棵树里唯一的浮层基建是 `Dialog`，
 而这个面板**只有一个入口** —— 一个菜单项不值得一整套 DropdownMenu。
+
+★ 列窄时入口**只留图标**（§5.6.5：列 < 768px，§5.6.4）：`Activity` 这个词让位，时钟留着。
+★ 而且它**和事实同一行** —— 那一行是键盘上面最大的一块。
 
 ### 12.2 面板
 
@@ -1688,7 +1759,7 @@ E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没
 
 ### 13.3 E2E 覆盖什么
 
-`web/test/e2e/` 下 **23 个 spec 文件，共 296 条**（实测）：
+`web/test/e2e/` 下 **23 个 spec 文件，共 299 条**（实测）：
 
 | spec 文件 | 条数 | 钉的是什么 |
 |---|---|---|
@@ -1699,7 +1770,7 @@ E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没
 | `attachments.spec.ts` | 14 | 附件随消息走、拖拽与粘贴、移除、预览 |
 | `composer-autocomplete.spec.ts` | 13 | 10 行封顶 / 自动聚焦 / @ 文件提示 / 命令 Tab 补全与 Enter 执行 / 键盘滚动跟随 / 切换后聚焦 |
 | `responsive.spec.ts` | 17 | 三档视口（390 / 768 / 1440）：不横向滚动 / 聊天列不超 token / 输入框与发送键在窗口里 / 触摸目标够大 / 行自己的菜单键看得见 / 侧栏是抽屉且能开能关 / 弹层不超出视口 / 断点边上的侧栏仍然常驻 / **树再长也挤不掉输入框（手机）、树再长聊天列也不缩水（平板）、长对话不会把输入框顶出屏幕（手机 + 桌面）** |
-| `composer-meta.spec.ts` | 14 | 默认 agent / 模型 / 思考档位 / 上下文占用 / 接口不可用 / 设置关闭后刷新 / **窄屏 6 条** |
+| `composer-meta.spec.ts` | 17 | 默认 agent / 模型 / 思考档位 / 上下文占用 / 接口不可用 / 设置关闭后刷新 / **窄屏 8 条 + 宽窗窄列 1 条** |
 | `scroll.spec.ts` | 10 | 滚动跟随 —— 溢出时停在视口内、用户上翻后不被拽回、流式未结束时也跟随、高亮撑高后仍跟随、打开停在最后一条、切会话停在底部、刷新停在最后一条 |
 | `secrets.spec.ts` | 9 | Secrets 标签页：两个命名空间、写入与删除、来源与覆盖、删除的确认 |
 | `mcps.spec.ts` | 7 | `/mcps` 面板：两种名字与档位、够不着的服务器、正在启动与起不来、每次打开都重读、Refresh |
@@ -2113,9 +2184,9 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | `web/src/lib/store/selectors.ts` `selectAuthorizationMode` / `selectAuthorizationConfirmed` | ★ 引用稳定的原始值 |
 | `web/src/components/authorization-picker.tsx:61` | `AuthorizationPicker` |
 | `web/src/components/authorization-picker.tsx:75-90` | ★ 欢迎页上选 `full` 时本地弹确认框 |
-| `web/src/components/authorization-picker.tsx:171-181` | ★ 弹窗描述写着「下一轮生效」 |
-| `web/src/components/authorization-picker.tsx:244` | ★ `onEscapeKeyDown`：平台拥有的键 |
-| `web/src/components/composer.tsx:696-723` | 三个入口在同一个 `action` 槽里 |
+| `web/src/components/authorization-picker.tsx:186-190` | ★ 弹窗描述写着「下一轮生效」 |
+| `web/src/components/authorization-picker.tsx:253` | ★ `onEscapeKeyDown`：平台拥有的键 |
+| `web/src/components/composer.tsx:705-736` | 三个入口在同一个 `action` 槽里 |
 
 ### A.6 前端：预览与动效
 
@@ -2125,11 +2196,11 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | `web/src/lib/file-kind.ts:173` | `isImage`：SVG 不是图片 |
 | `web/src/lib/file-kind.ts:197` | `fileKind` |
 | `web/src/lib/file-kind.ts:218` | `fileLang` |
-| `web/src/components/composer.tsx:531` | `onDragOver` |
-| `web/src/components/composer.tsx:544` | `onDrop` |
-| `web/src/components/composer.tsx:548` | `<input type="file">` |
-| `web/src/components/composer.tsx:609` | `onPaste` |
-| `web/src/components/composer.tsx:613` | 粘贴时 `preventDefault()` |
+| `web/src/components/composer.tsx:540` | `onDragOver` |
+| `web/src/components/composer.tsx:553` | `onDrop` |
+| `web/src/components/composer.tsx:563-566` | `<input type="file">` |
+| `web/src/components/composer.tsx:618` | `onPaste` |
+| `web/src/components/composer.tsx:628` | 粘贴时 `preventDefault()` |
 | `web/src/components/attachment-chip.tsx:40` | `THUMB` = 48 |
 | `web/src/components/attachment-chip.tsx:62` | `AttachmentChip` |
 | `web/src/components/attachment-chip.tsx:179` | 缩略图在出站时缩放 |
@@ -2171,11 +2242,11 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 |---|---|
 | `web/src/components/operations-panel.tsx:28` | `OperationsPanel`：入口与弹窗 |
 | `web/src/components/operations-panel.tsx:68` | ★ 按钮与弹窗住在一个 wrapper 里 |
-| `web/src/components/operations-panel.tsx:94` | ★ Esc 走 `onEscapeKeyDown` |
-| `web/src/components/operations-panel.tsx:128` | 列表：`min-h-0 flex-1 overflow-y-auto` |
-| `web/src/components/operations-panel.tsx:185` | 十一种 `kind` 的英文句子 |
-| `web/src/components/operations-panel.tsx:268` | 颜色只用令牌 |
-| `web/src/components/operations-panel.tsx:283` | `formatAt`：时间自己写，不跟 locale |
+| `web/src/components/operations-panel.tsx:97` | ★ Esc 走 `onEscapeKeyDown` |
+| `web/src/components/operations-panel.tsx:131` | 列表：`min-h-0 flex-1 overflow-y-auto` |
+| `web/src/components/operations-panel.tsx:188` | 十一种 `kind` 的英文句子 |
+| `web/src/components/operations-panel.tsx:271` | 颜色只用令牌 |
+| `web/src/components/operations-panel.tsx:286` | `formatAt`：时间自己写，不跟 locale |
 | `web/src/lib/api.ts:121` | `OperationView` |
 | `web/src/lib/api.ts:150` | `OperationsView` |
 | `web/src/lib/api.ts:505` | `listOperations` |
@@ -2186,7 +2257,7 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | `web/src/lib/store/selectors.ts:69` | `EMPTY_OPERATIONS` |
 | `web/src/lib/store/selectors.ts:150-166` | `selectAuthorizationMode` / `selectAuthorizationConfirmed`（没有会话时读暂存值） |
 | `web/src/lib/store/selectors.ts:73` | `selectOperations` |
-| `web/src/components/composer.tsx:713` | `action` 槽：授权 → 项目 → 活动 |
+| `web/src/components/composer.tsx:716` | `action` 槽：授权 → 项目 → 活动 |
 | `web/test/operations.test.ts` | selector 的引用稳定性 |
 | `web/test/e2e/operations.spec.ts` | 面板的验收 |
 
@@ -2197,11 +2268,18 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | `web/src/components/composer-meta.tsx:9` | `META`：那一行的行盒 |
 | `web/src/components/composer-meta.tsx:28` | ★ `Joined`：分隔符跟着后一项走 |
 | `web/src/components/composer-meta.tsx:134` | 事实那一半：agent / 模型 / 思考档位 / 上下文 |
-| `web/src/components/composer-meta.tsx:188-196` | `contents` 包装与 `action` 槽 |
-| `web/src/components/composer.tsx:713` | ★ 入口节点：窄屏上换行，右对齐 |
-| `web/src/components/projects-dialog.tsx:71` | ★ 项目名截断，全名留在 tooltip 与 `aria-label` |
-| `web/test/e2e/composer-meta.spec.ts:147` | 窄屏的验收（不溢出 / 不截断 / 分隔符不落单 / 事实只有一行 / 让位的档位在提示里） |
-| `web/test/e2e/projects.spec.ts:665` | ★ 项目名很长时那一行也不溢出 |
+| `web/src/components/composer-meta.tsx:203-204` | `contents` 包装与 `action` 槽 |
+| `web/src/components/composer.tsx:513` | ★ `@container`：那一行的宽度判据是**列**，不是窗口（§5.6.5） |
+| `web/src/components/composer.tsx:726` | ★ 入口节点：列窄时与事实同一行，右对齐 |
+| `web/src/components/projects-dialog.tsx:71-74` | ★ 项目名截断，全名留在 tooltip 与 `aria-label` |
+| `web/src/components/authorization-picker.tsx:159-167` | ★ 列窄时让位的那个词（档位名） |
+| `web/src/components/projects-dialog.tsx:88`、`:111` | ★ 列窄时让位的那个词（项目名） |
+| `web/src/components/operations-panel.tsx:90` | ★ 列窄时让位的那个词（Activity） |
+| `web/src/components/composer-meta.tsx:159` | ★ 模型名：列窄时唯一让位的那一项（`shrink` + 上限） |
+| `web/src/components/composer-meta.tsx:268` | 占用条：列窄时短一截 |
+| `web/test/e2e/composer-meta.spec.ts:147` | 列窄的验收（不溢出 / 不截断 / 分隔符不落单 / 事实与入口同一行 / 入口只留图标 / 让位的档位在提示里） |
+| `web/test/e2e/composer-meta.spec.ts:356` | ★ 宽窗窄列的验收（960×1440：入口只留图标，事实仍是完整版） |
+| `web/test/e2e/projects.spec.ts:671` | ★ 项目名很长时那一行也不溢出 |
 
 ### A.9 前端：工具调用的渲染
 
@@ -2314,10 +2392,10 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | `web/src/components/message-list.tsx:283-290` | 多 agent 时角色标签显示 agent 名 |
 | `web/src/components/message-list.tsx:297-317` | 加载骨架 |
 | `web/src/components/composer.tsx:264-279` | 焦点回到输入框 |
-| `web/src/components/composer.tsx:681-693` | 停止按钮取代发送按钮 |
-| `web/src/components/composer.tsx:713-721` | 三个入口在同一个节点里 |
+| `web/src/components/composer.tsx:690-702` | 停止按钮取代发送按钮 |
+| `web/src/components/composer.tsx:726-734` | 三个入口在同一个节点里 |
 | `web/src/components/composer-meta.tsx:129-131` | `reasoningAvailable` 只进 title |
-| `web/src/components/composer-meta.tsx:209-272` | 上下文占用 |
+| `web/src/components/composer-meta.tsx:217-284` | 上下文占用 |
 | `web/src/components/markdown.tsx:45-46` | 不开 `rehype-raw` |
 | `web/src/components/markdown.tsx:51` | 表格的滚动容器 |
 | `web/src/components/markdown.tsx:54` | 表格本身 `w-full` |
