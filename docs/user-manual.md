@@ -21,6 +21,7 @@ nothing has to be installed next to it. How you install it depends on where you 
 | You are going to change the code | §1.2 Build it from source |
 | You are on Windows | §1.3 On Windows |
 | You want the agent's tools to have no way to reach your machine | §1.4 Running it in a sandbox |
+| You want a tray icon instead of a terminal | §1.5 Install the desktop app |
 
 ### 1.1 Install a release
 
@@ -224,6 +225,47 @@ same agent.
 behind it is in [`docs/tools-design.md`](tools-design.md) — that document is
 Chinese only, like every design document in this repository.
 
+### 1.5 Install the desktop app
+
+★ **If you would rather not type a command, there is a desktop app**:
+`openheron-desktop` is a **launcher that lives in the system tray** — it starts
+openheron on a loopback address and opens an embedded window for you, and it
+keeps the binary up to date. It **does exactly nine things** (the user-level
+directories, the single instance, the port allocation, the binary version, the
+health check, the forced loopback, the tray, the capability probe and the
+embedded window), ★ **and it does not touch a single byte of your keys,
+configuration or projects** (§4.2).
+
+**Windows.** Download `openheron-desktop-*-windows-amd64-setup.exe` from the
+[website](https://openheron.bytebits.top):
+
+- It installs into `%LOCALAPPDATA%\Programs\openheron-desktop` — a **per-user
+  install, so no administrator rights are needed**;
+- The installer **carries a verified openheron of its own**, placed at
+  `%LOCALAPPDATA%\openheron-desktop\bin\openheron.exe`;
+- When it finishes, a page offers three checkboxes: "launch now", "read the
+  first-run notes" and "open the user manual online".
+
+★ The installer is **unsigned** — SmartScreen may object once, so choose
+"More info → Run anyway"; if you want to be sure, check it against the sha256
+on the download page (the `SHA256SUMS.txt` next to it says the same).
+
+**Linux.** Download `openheron-desktop-*-linux-amd64.AppImage`:
+
+```sh
+chmod +x openheron-desktop-*-linux-amd64.AppImage
+./openheron-desktop-*-linux-amd64.AppImage
+```
+
+★ **There is no "installation" step on Linux** — an AppImage is a **self-contained
+archive**, so running it is all it takes; on the first run it puts its own
+openheron into `~/.config/openheron-desktop/bin/`.
+
+★ The desktop app is **not required**: the command line works just as well
+(§1.1), and **both use the same things** — the home base, the configuration
+tree, the project table and the history are the same ones (§3). How to use it
+is §2.4.
+
 ## 2. First run
 
 ### 2.1 Getting it running
@@ -424,6 +466,78 @@ created /home/you/.openheron/projects/default (the default project root)
 
 ★ A **named** project root is not created for you: a typo must not grow an empty
 directory. ★ A `--dry-run` writes nothing — a directory included.
+
+### 2.4 Running it with the desktop app
+
+★ The desktop app **changes none of openheron's rules** — it only starts the
+service and opens the interface for you. All of this assumes you installed it
+as described in §1.5.
+
+**The first launch.** Start menu → **openheron desktop** (on Linux, run the
+AppImage again). The openheron mark appears in the tray, and ★ **hovering over
+the icon** shows one line:
+
+`openheron-desktop · 127.0.0.1:53214 · running`
+
+★ **The address appears here and nowhere else** — there is no address bar in the
+window title and none in the interface. A free port is **re-picked on every
+start**, so the number changes.
+
+★ On the first run, when there is no configuration tree yet, the desktop app
+**runs `openheron init` for you** — the same tree the server writes itself
+(§2.3).
+
+★ **Starting it again does not open a second service**: the second instance
+**brings the first instance's window to the front** and quits itself.
+
+**The tray menu.** Right-click the tray icon: **9 rows** in all (eight actions
+plus one read-only block):
+
+| Row | What it does | Note |
+|---|---|---|
+| **打开界面** | Opens the embedded window | If the window is already open it **brings it to the front**, and **never** opens a second one; while the service is still starting this row is **greyed out** |
+| **打开 openheron 大本营** | Opens the home-base directory | The configuration, sessions, project table and logs **all live under it** (§3) |
+| **打开配置目录** | Opens the config root | |
+| **打开默认项目目录** | Opens the working directory of "sessions that belong to no project" | |
+| **打开日志** | Opens the desktop app's own log directory | That is where to look first when something breaks (§10) |
+| **重启服务** | Stops the service and starts it again | ★ **It picks a different port**, and the window reopens with it — the window was still showing the old address |
+| **检查更新** | Really asks GitHub whether a newer openheron exists | ★ It is the **only** update entry point — it **never polls** and **never swaps versions behind your back** |
+| **版本信息 ▸** | A **read-only block**, three grey lines | desktop version / openheron version / the result of the last check. ★ Grey means **not clickable**, not broken |
+| **退出** | Stops the service and quits | The service process goes with it |
+
+★ The **row names are Chinese** — the desktop app's interface is Chinese.
+
+**Updating openheron.** Click "check for updates": it asks GitHub for the
+latest release → compares it with **the version that is running** → ★ **asks
+you** whether to update → downloads → verifies the sha256 against upstream's
+`checksums.txt` → unpacks → ★ **asks the new binary what it can do** (whether
+it supports the new root model) → **if it does not qualify, nothing is
+replaced** → stops the service → swaps the files → starts it again.
+
+★ Every click answers back: a message box when you are already up to date; ★
+**a local copy that is newer than the release is never downgraded**; a
+confirmation box when there is a new version; an error box when it fails — and
+★ **not one byte of the running binary was touched**.
+
+★ **It never phones home on its own**: apart from you clicking "check for
+updates", it **does not contact any external address**; everything between it
+and openheron happens on `127.0.0.1`.
+
+**Where your things live.**
+
+| Whose | Windows | Linux |
+|---|---|---|
+| **The desktop app's data** | `%LOCALAPPDATA%\openheron-desktop\` | `~/.config/openheron-desktop/` |
+| **openheron's home base** | `%USERPROFILE%\.openheron\` | `~/.openheron/` |
+
+★ **The home base belongs to openheron, not to the desktop app** — so the
+openheron you run from the command line and the one the tray runs **use the
+same** configuration, the same project table and the same history: **they never
+disagree**.
+
+★ **The keys do not belong to the desktop app either**: it does not read, write,
+detect or remind. The key still has its two places — the environment variable
+`LLM_DEEPSEEK_API_KEY`, or the keyring entry `llm:deepseek` (§4.2).
 
 ## 3. The roots: where your configuration, your state and your project live
 
@@ -1995,7 +2109,7 @@ The decision goes back into the **same** `/v2/run`:
 
 ## 10. FAQ
 
-**Q: Startup says `no configuration at ...: run \`openheron init\` to create one`**
+**Q: Startup says ``no configuration at ...: run `openheron init` to create one``**
 The config root is empty and the server could not write one itself — it does
 that on the first start in a project that has none. The startup log says why
 the automatic initialization failed; `openheron init` does the same thing with a
@@ -2088,3 +2202,32 @@ keyring entry `llm:deepseek` — and the environment wins. Store one with
 The profile still carries the old line. ★ Delete it: the key is not in the configuration
 any more, and the message names the variable and the keyring entry that replace it
 (§4.2).
+
+**Q: With the desktop app, no interface appears but a browser opened?**
+The embedded window could not start (usually a missing WebView2 Runtime or
+`WebKitGTK`). This is the **fallback path, not a fault** — the browser does
+exactly the same; install that runtime if you want the embedded window.
+
+**Q: The desktop app's tray icon never appears (Linux)?**
+Your desktop environment **has no tray host**: the tray speaks the StatusNotifier
+protocol, so an SNI host has to display it. KDE Plasma has one built in; ★
+**GNOME does not by default** ⇒ install an AppIndicator extension
+(Debian/Ubuntu: `gnome-shell-extension-appindicator`) and enable it. Searching
+the log for `systray error` shows whether that is the problem.
+
+**Q: The desktop app does not start and says openheron is too old?**
+★ The desktop app **does not read version numbers, it reads capabilities** — it
+runs `openheron --help` before starting and looks for `--config-root` /
+`--openheron-root`. Without them it refuses to start: update openheron by hand
+(§1.1), then start the desktop app again.
+
+**Q: Where do I look when the desktop app misbehaves?**
+Its own log: `%LOCALAPPDATA%\openheron-desktop\logs\desktop.log` (on Linux,
+`~/.config/openheron-desktop/logs/desktop.log`). It holds the port, the
+arguments and the raw output of the child processes, and **no key values**.
+★ Almost every broken state is fixed by clicking **"restart the service"** once
+(§2.4).
+
+**Q: Can the desktop app hold a fixed port?**
+★ **No** — the forced loopback and the port picked on every start are hard
+constraints, and there is no switch for them (§2.4).

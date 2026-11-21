@@ -19,6 +19,7 @@ openheron 是一个自包含的可执行程序 —— 界面已经嵌在二进�
 | 要改代码 | §1.2 从源码构建 |
 | 在 Windows 上 | §1.3 在 Windows 上 |
 | 想让 agent 的工具够不到你的机器 | §1.4 在沙箱里跑 |
+| 想用托盘里的图形界面 | §1.5 装桌面版 |
 
 ### 1.1 装发布版
 
@@ -199,6 +200,36 @@ HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
 [`sandbox-kit/TUTORIAL_zh.md`](../sandbox-kit/TUTORIAL_zh.md)），
 背后的设计见 [`docs/tools-design.md`](tools-design.md) —— 那篇文档只有中文，
 本仓库的设计文档都是这样。
+
+### 1.5 装桌面版
+
+★ **不想敲命令的话，还有一个桌面版**：`openheron-desktop` 是个**常驻系统托盘的启动器** ——
+它在回环地址上把 openheron 拉起来，再开一个内嵌窗口给你看，顺手管更新。
+它**只做九件事**（用户级目录、单实例、端口分配、二进制版本、健康检查、
+强制回环、托盘、能力探测、内嵌窗口），★ **密钥、配置、项目它一个字都不碰**（§4.2）。
+
+**Windows。** 从[官网](https://openheron.bytebits.top)下载
+`openheron-desktop-*-windows-amd64-setup.exe`：
+
+- 装到 `%LOCALAPPDATA%\Programs\openheron-desktop` —— **per-user 安装，不需要管理员权限**；
+- 安装包**自带一份校验过的 openheron**，放在 `%LOCALAPPDATA%\openheron-desktop\bin\openheron.exe`；
+- 装完有一页可以勾三件事：「立刻启动」「读首次运行说明」「打开官网上的手册」。
+
+★ 安装包**未签名** —— SmartScreen 可能拦一下，选「更多信息 → 仍要运行」；
+想稳一点就用下载页上那串 sha256 核对（同目录的 `SHA256SUMS.txt` 里就是）。
+
+**Linux。** 下载 `openheron-desktop-*-linux-amd64.AppImage`：
+
+```sh
+chmod +x openheron-desktop-*-linux-amd64.AppImage
+./openheron-desktop-*-linux-amd64.AppImage
+```
+
+★ **Linux 上没有「安装」这一步** —— AppImage 是**自包含归档**，跑起来就在了；
+第一次运行时它把自带的 openheron 放进 `~/.config/openheron-desktop/bin/`。
+
+★ 桌面版**不是必须的**：命令行装法（§1.1）一样能用，而且**两边用的是同一份东西** ——
+大本营、配置树、项目表、历史都是同一份（§3）。怎么用见 §2.4。
 
 ## 2. 第一次使用
 
@@ -381,6 +412,63 @@ created /home/you/.openheron/projects/default (the default project root)
 
 ★ **点名的项目根不替你建**：笔误不该长出一个空目录。★ `--dry-run` 什么都不写 ——
   目录也不写。
+
+### 2.4 用桌面版跑起来
+
+★ 桌面版**不改变 openheron 的任何一条规矩** —— 它只是替你把服务拉起来、把界面开出来。
+下面这些都以前面 §1.5 装好桌面版为前提。
+
+**第一次启动。** 开始菜单 → **openheron desktop**（Linux 上就是再跑一次那个 AppImage）。
+托盘出现 openheron 标记图标；★ **鼠标悬停在图标上**会看到一行：
+
+`openheron-desktop · 127.0.0.1:53214 · 运行中`
+
+★ **地址只在这里出现一次** —— 窗口标题里没有地址栏，界面里也没有。
+端口每次启动都**重新选一个空闲的**，所以数字会变。
+
+★ 第一次跑、还没有配置树时，桌面版会**自动**执行一次 `openheron init` ——
+和服务端自己写出来的是同一棵树（§2.3）。
+
+★ **再启动一次不会开第二个服务**：第二个实例把第一个实例的界面**顶到你面前**，然后自己退出。
+
+**托盘菜单。** 右键托盘图标，一共 **9 行**（8 个动作 + 1 个只读信息块）：
+
+| 行 | 干什么 | 注意 |
+|---|---|---|
+| **打开界面** | 开内嵌窗口 | 窗口已经开着就**把它顶到前面**，**绝不**开第二个；服务还没起来时这一行是**灰的** |
+| **打开 openheron 大本营** | 打开大本营目录 | 配置、会话、项目表、日志**都在它下面**（§3） |
+| **打开配置目录** | 打开配置根目录 | |
+| **打开默认项目目录** | 打开「不属于任何项目的会话」的工作目录 | |
+| **打开日志** | 打开桌面版自己的日志目录 | 出问题先看它（§10） |
+| **重启服务** | 停掉服务再起来 | ★ **会换一个端口**，窗口跟着重开 —— 因为窗口刚才显示的还是旧地址 |
+| **检查更新** | 真的去问 GitHub 有没有新的 openheron | ★ 这是**唯一**一条更新入口 —— 它**不定时检查**，也**不在后台偷换版本** |
+| **版本信息 ▸** | 一个**只读块**，三行灰字 | desktop 版本 / openheron 版本 / 上一次检查的结果。★ 灰的 = **点不动**，不是坏了 |
+| **退出** | 停掉服务并退出 | 服务进程会被一起带走 |
+
+★ 菜单里的**行名是中文的** —— 桌面版的界面本身就是中文的。
+
+**更新 openheron。** 点「检查更新」：问 GitHub 最新发布版 → 和**正在跑**的这一版比 →
+★ **问你**要不要更新 → 下载 → 按上游的 `checksums.txt` 校验 sha256 → 解压 →
+★ 再**问它自己会什么**（支不支持新的根模型）→ **不合格就不换** → 停服务 → 换文件 → 重启。
+
+★ 每次点都有回话：已是最新就弹信息框；★ **你本地这版比发布版还新也不降级**；
+有新版本弹确认框；失败弹错误框 —— ★ **正在跑的二进制一个字都没动**。
+
+★ **它不会偷偷联网**：除了你点「检查更新」，它**不访问任何外部地址**；
+它和 openheron 之间的往来**全部在 `127.0.0.1` 上**。
+
+**东西放在哪。**
+
+| 谁的 | Windows | Linux |
+|---|---|---|
+| **桌面版的数据** | `%LOCALAPPDATA%\openheron-desktop\` | `~/.config/openheron-desktop/` |
+| **openheron 的大本营** | `%USERPROFILE%\.openheron\` | `~/.openheron/` |
+
+★ **大本营归 openheron，不归桌面版** —— 所以命令行跑的 openheron 和托盘跑的
+**用的是同一份**配置、同一张项目表、同一份历史，**不会各说各话**。
+
+★ **密钥也不归桌面版**：它不读、不写、不检测、不提醒。
+密钥还是那两条路 —— 环境变量 `LLM_DEEPSEEK_API_KEY`，或者钥匙串条目 `llm:deepseek`（§4.2）。
 
 ## 3. 三个根：配置、状态与项目各在哪
 
@@ -1740,7 +1828,7 @@ curl -N -X POST localhost:8080/v2/run \
 
 ## 10. 常见问题
 
-**Q：启动报 `no configuration at ...: run \`openheron init\` to create one`**
+**Q：启动报 ``no configuration at ...: run `openheron init` to create one``**
 配置根是空的，而服务端没能自己写出来 —— 它会在第一次启动时写。启动日志里说了自动
 初始化为什么失败；在项目根跑 `openheron init` 做的是同一件事，只是模型和 provider
 由你定。
@@ -1817,3 +1905,27 @@ POSIX shell，机器上一个都没有时退回 `cmd.exe`；两种情况工具�
 **Q：启动时说 `api_key` 这一行不再被读了？**
 那个档案里还留着旧的那一行。★ 把它删掉：密钥已经不在配置里了，而那句话会点名
 替代它的变量与钥匙串条目（§4.2）。
+
+**Q：用桌面版时界面没出来，但浏览器弹了？**
+内嵌窗口起不来（多半是缺 WebView2 Runtime 或 `WebKitGTK`）。这是**降级路径，不是故障** ——
+用浏览器完全一样；想用内嵌窗口就把那个运行时装上。
+
+**Q：桌面版的托盘图标不出现（Linux）？**
+你的桌面环境**没有托盘宿主**：托盘走的是 StatusNotifier 协议，得有一个 SNI 宿主来显示它。
+KDE Plasma 自带；★ **GNOME 默认不带** ⇒ 装个 AppIndicator 扩展
+（Debian/Ubuntu：`gnome-shell-extension-appindicator`）并启用。
+日志里搜 `systray error` 能看出是不是它。
+
+**Q：桌面版起不来，提示 openheron 太旧？**
+★ 桌面版**不认版本号、只认能力** —— 启动前跑一次 `openheron --help`，看有没有
+`--config-root` / `--openheron-root`。没有就拒绝启动：手动更新 openheron（§1.1），
+再回来启动它。
+
+**Q：桌面版出问题了看哪儿？**
+看它自己的日志：`%LOCALAPPDATA%\openheron-desktop\logs\desktop.log`
+（Linux 上是 `~/.config/openheron-desktop/logs/desktop.log`）。
+里面只有端口、参数和子进程的原始输出，**不会有密钥值**。
+★ 绝大多数状态，点一次托盘的「**重启服务**」就能恢复（§2.4）。
+
+**Q：桌面版能固定端口吗？**
+★ **不能** —— 强制回环 + 每次重选端口是硬约束，不给开关（§2.4）。
