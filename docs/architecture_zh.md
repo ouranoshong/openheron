@@ -740,8 +740,8 @@ zustand 的 selector 必须返回引用稳定的值：每次调用造新数组/�
 「变了」，表现为 `Maximum update depth exceeded` 白屏。selector 里不要写 `?? []`；用模块级
 常量或 store 里的 selector。
 
-★ **侧栏是一棵项目的文件树**，分组是纯函数：`web/src/lib/projects.ts:113` 的
-`groupSessions(sessions, projects, scope)`。项目表与作用域都**从服务端读**，客户端只画拿到
+★ **侧栏是一棵项目的文件树**，分组是纯函数：`web/src/lib/projects.ts:132` 的
+`groupSessions(sessions, projects, scope, t)`。项目表与作用域都**从服务端读**，客户端只画拿到
 的东西 —— 它从不自己判断会话属于哪个项目，因为那张表是归属关系的唯一真相。★ 没有项目的会话
 进「Default Project」那个文件夹 —— 它是默认项目根。★ **项目空着也是一个文件夹** —— 那个文件夹
 正是项目自己的动作住的地方，
@@ -758,8 +758,14 @@ zustand 的 selector 必须返回引用稳定的值：每次调用造新数组/�
 ★ 它只在有得选的时候才在：单项目模式只服务一个目录，而不认识这张表的服务端答 `503`。
 
 对话的宽度是一个 token，不是同一个数字抄六遍：`--chat-column`（那一列）、`--prose-column`
-（里面的文字）与 `--chat-gutter`（两侧留白）住在 `web/src/index.css`。列要宽，宽表才看得全；
-正文停得更早。
+（独自阅读的行文的可读行宽 —— 一份文档）、`--welcome-column`（欢迎页的那一句问话）
+与 `--chat-gutter`（两侧留白）住在 `web/src/index.css`。
+对话就是那一列，列里的**文字吃满整列** —— 正文过去停在列的右缘之前，而用户的气泡正贴在
+右缘上，于是宽屏上答案显得被挤在左边。
+
+★ **界面的语言**只在一处决定（`web/src/lib/i18n.ts`）：存过的偏好 → 浏览器的语言 → 英文。
+文案本身是一份**目录**（`web/src/lib/locales/`），每一条把英文与中文并排放着。
+★ **运行时**在哪种语言下都是英文（AGENTS.md）。
 
 主题在首屏之前就定了，由 `web/index.html` 里的一段脚本决定，并且只从一处读：
 `web/src/lib/theme.ts`。浅色与暗色是同一套 token 的两组取值，一边有的颜色另一边也有。

@@ -155,7 +155,7 @@ one — change one and change the other.
 ## Language rules (mandatory)
 
 **Everything the runtime emits is English**: log lines, error messages, warnings, user-facing
-notifications, and **interface copy**.
+notifications, and the **API response body**.
 
 | Scope | Rule | Example |
 |---|---|---|
@@ -164,7 +164,14 @@ notifications, and **interface copy**.
 | Warning | English | `fmt.Fprintln(os.Stderr, "[config] hot reload failed, keeping previous config:", err)` |
 | Notification | English | `c.deferKey("watch.debounce fell back to default: %s", msg)` |
 | API response body | English | `c.JSON(400, map[string]string{"error": "thread not found"})` |
-| **Interface copy** | **English** | `"Run in a separate agent"` |
+| **Interface copy** | **the reader's language** — English is the source | `"Run in a separate agent"` |
+
+★ **The interface's copy is a catalog**, not a string in the code: every entry in
+`web/src/lib/locales/` carries its English and its Chinese side by side, and the reader's
+language decides which one is on the screen. ⇒ A new sentence is written **once**, in one
+place, in both languages; a key that does not exist is a compile error, not a hole in the
+interface. ★ The **runtime** stays English in every language: an error the server sends is
+the server's English, and the interface shows it as it is.
 
 ★ **What is written into a user's configuration is not bound by this rule.** English is the
 **default** the factory tree ships — the header of `catalog.md`, the comment block of
@@ -207,9 +214,10 @@ no → the rules above do not apply.
 
 Why: error messages get grepped, get collected by log pipelines, and get consumed by the `Kind`
 classification in `llm/common`; mixing languages breaks retrieval and matching while debugging,
-and it mixes two languages into the `deferred` field of `/v2/config`. Interface copy is the same
-story — the user reads the interface, not the source, and a Chinese/English mix makes "is this a
-bug or did I misconfigure it?" harder to answer.
+and it mixes two languages into the `deferred` field of `/v2/config`. ★ The interface is the
+**other** way round: the reader is its audience, so the interface follows the reader's language
+— and the boundary is where the **runtime** starts. A Chinese interface that shows an English
+error from the server is that boundary, not a mistake.
 
 **There is exactly one logging assembly**, and it is not a global:
 `agentkit/obs` (`github.com/ouranoshong/openheron/agentkit/obs`) **builds** loggers — `New`,
@@ -334,11 +342,19 @@ docs(readme): drop the API table, it lives in the user manual
 - **Every interface change needs a Playwright spec** (reasons and acceptance requirements are in
   the "Testing" section below).
 - **The chat's width is one token, not a number repeated in six places.** `--chat-column`,
-  `--prose-column` and `--chat-gutter` live in `web/src/index.css`: the **blocks** (tables,
-  code, tool cards) take the whole column and the **prose** stops earlier, because a paragraph
-  of sixty characters is a hard read. ★ A table has a **floor** (7rem per column — that is
-  what makes a table of many columns scroll inside its own wrapper) and a **ceiling** (28rem
-  per cell — that is what makes a long sentence wrap instead of stretching the table).
+  `--chat-gutter`, `--prose-column` and `--welcome-column` live in `web/src/index.css`.
+  ★ The conversation is **that column** and the text in it **fills** it — the prose used to
+  stop short of the column's right edge while the user's bubble sat on that edge, so on a
+  wide screen the answer looked pushed to the left and the right half of the window stayed
+  empty. `--prose-column` is the **measure** of running text that is read **on its own** — a
+  **document** (the file preview) — not to a message. ★ The **welcome page** has a width of
+  its own: it asks one question, so it is narrower than the conversation — but it stays
+  **above 48rem**, because below that the line of facts under the box drops the project
+  name and the authorization mode, and the first screen is exactly where those two have to
+  be readable.
+  ★ A table has a **floor** (7rem per column — that is what makes a table of many columns
+  scroll inside its own wrapper) and a **ceiling** (28rem per cell — that is what makes a long
+  sentence wrap instead of stretching the table).
 - **A color is a token, never a literal.** `sky-500` in a component is a bug: the status
   colors are `--info`, `--warning` and `--success`, and the light and the dark palette are
   **the same token set with two values** — so a color that exists in one exists in the other.

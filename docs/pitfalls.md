@@ -335,7 +335,7 @@ A 放弃时发现槽位不是它的（走掉），B 放弃时发现槽位是它�
 了（`agentkit/run/bridge.go:238` 关掉发布方），而审批还在等一个答案 ⇒ 「审批被回答了」
 这个事实**无处可去** —— 它不能骑在旧一轮的总线上，那条总线已经死了。
 
-★ 客户端这一侧也没有别的通道：`applyScan`（`web/src/lib/store/actions.ts:931`）只改
+★ 客户端这一侧也没有别的通道：`applyScan`（`web/src/lib/store/actions.ts:951`）只改
 `busy`，**不碰审批卡**；于是等着的那一边**没有任何通道**能知道审批已经被消费。
 
 **修法**：★ 加一条**会话级**的公告通道（`agentkit/run/announce.go`），事实有三个：
@@ -401,7 +401,7 @@ A 放弃时发现槽位不是它的（走掉），B 放弃时发现槽位是它�
 
 ★ **顺带修掉的是**挂回去的目标**：★ 答完审批之后的那一轮是**新的 run**，客户端要等它 announce
 才知道它的 id；用会话自己记住的 run id 去挂，挂的是上一轮（早就结束的那一轮）。★ 账本的
-`activeRunId` 才是「还在跑的那一轮」（`web/src/lib/store/actions.ts:758`）。
+`activeRunId` 才是「还在跑的那一轮」（`web/src/lib/store/actions.ts:778`）。
 
 ★ **修法（服务端，第二步）**：★ **准入闸门也要等到屏障。** 闸门读的是 `st.turn` 与
 `st.loop` 这一对，而「顶替」走的那条分支**不写审批**（`agentkit/run/bridge.go:202` 的
@@ -1124,8 +1124,8 @@ request after 10 seconds`），于是 E2E 里「另一个界面听见了审批�
 **内容比屏幕矮**，列就永远长不大。★ 只有真实用户的几百条消息才会触发它。
 ⇒ 这类坑的回归网必须**主动把内容撑到比屏幕高**。
 
-**修法**：聊天列加 `min-h-0`（`web/src/app/shell.tsx:152`）—— 列的高度是框架的高度，
-对话在它里面滚。侧栏那一列是**同一条规矩**（`web/src/components/sidebar.tsx:102`）：
+**修法**：聊天列加 `min-h-0`（`web/src/app/shell.tsx:156`）—— 列的高度是框架的高度，
+对话在它里面滚。侧栏那一列是**同一条规矩**（`web/src/components/sidebar.tsx:104`）：
 ★ 「一个容器的高度是屏幕的高度，永远不是它内容的高度」。
 
 **现状**：`已修` —— `web/src/app/shell.tsx` 的 `min-h-0`；
@@ -1413,7 +1413,7 @@ TOOL_CALL_START name=ls  {"path":"C:\\Users\\<user>\\.openheron"}
 `contract/runevent.go:43`、`agentkit/emit/emit.go:339`、
 `transport/transport.go:460`、`message/toolerror.go`、
 `api/v2_convert.go:90`、`web/src/lib/events.ts:531`、
-`web/src/lib/store/history.ts:62`、`web/src/components/tool-card.tsx:179`。
+`web/src/lib/store/history.ts:62`、`web/src/components/tool-card.tsx:183`。
 回归用例：`helpers/toolfail_test.go`、`transport/tool_failure_test.go`、
 `api/v2_tool_error_test.go`、`web/test/tool-failure.test.ts`、
 `web/test/e2e/tool-failure.spec.ts`。

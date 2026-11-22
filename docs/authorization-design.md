@@ -423,15 +423,15 @@ writes: [create_issue]        # ★ 新键：这个工具写受信路径
 ## 7. 界面：输入框下面那一行
 
 位置：**输入框下面那一行的右端**，与「项目」按钮同一行
-（`web/src/components/composer.tsx:705-736` 的 `<ComposerMeta … action={…} />`）。
+（`web/src/components/composer.tsx:713-754` 的 `<ComposerMeta … action={…} />`）。
 
 ★ **顺序固定，位置就是身份。** React 按**下标**对齐子节点，
 一个下标变了就是「卸载了旧的、挂载了新的」，而挂在里面的状态全没了。
 `ComposerMeta` 已经把这一行的内容包进一个 `contents` 里、把 `action` 放在最后
-（`web/src/components/composer-meta.tsx:200-204`）。
+（`web/src/components/composer-meta.tsx:230-231`）。
 ⇒ 授权选择器、项目按钮与操作时间线的入口**一起**放进那一个 `action` 槽，
 顺序永远是「授权 → 项目 → 活动」，多一个兄弟节点也不许换位。
-★ 落法：三个入口被包进**同一个** `span`（`web/src/components/composer.tsx:726-734`），
+★ 落法：三个入口被包进**同一个** `span`（`web/src/components/composer.tsx:744-752`），
 那个 `span` 带着右对齐（`ms-auto`）—— 项目按钮自己那份 `ms-auto` 被去掉了，
 几份都靠自动边距会各推各的。
 
@@ -443,13 +443,13 @@ writes: [create_issue]        # ★ 新键：这个工具写受信路径
 | 中间 | `Trusted paths` | Writes inside the project, the session workspace and the configuration do not ask |
 | 完全 | `Full authorization` | Every tool runs without asking |
 
-★ 这三段文案住在**一处**：`web/src/lib/authorization.ts` 的 `AUTHORIZATION_OPTIONS`
+★ 这三段文案住在**一处**：`web/src/lib/authorization.ts` 的 `authorizationOptions`
 —— 选项的顺序（从「问得最多」到「问得最少」）也是定死的，
 一个每次渲染都换顺序的列表，用户就得每次重读一遍。
 
 ★ **完全授权要用警告色**（`--warning` 令牌，不是字面色值），
 中间档用中性色。⇒ 用户一眼能看出「这一档不再有人看着」。
-（`web/src/components/authorization-picker.tsx:159-167`。）
+（`web/src/components/authorization-picker.tsx:161-169`。）
 
 * 选中即写：`PATCH /v2/sessions/{id}/authorization`，失败就把界面弹回原值
   （界面不自己乐观更新 —— 服务端的答案是权威）。
@@ -460,11 +460,11 @@ writes: [create_issue]        # ★ 新键：这个工具写受信路径
   已经在跑的那一轮用的是**它开始时的那一档**。
   ★ 不能让它看起来已经生效了。
 * ★ 落法：这句话写在**弹窗的描述**里
-  （`web/src/components/authorization-picker.tsx:186-190`），
+  （`web/src/components/authorization-picker.tsx:188-192`），
   **不**在按钮旁边挂一个「下一轮生效」的小牌子 ——
   这条规则**一直**成立，不是有条件才显示的；
   而一个会来来去去的小牌子会让按钮那一行文字跳。
-  ⇒ 按钮上只有档位名（`web/src/components/authorization-picker.tsx:153-167`）。
+  ⇒ 按钮上只有档位名（`web/src/components/authorization-picker.tsx:155-169`）。
 
 ★ **切到完全授权要弹一次确认框。**
 流程：**先不带 `confirm` 发** ⇒ 服务端回 **409 `confirmation_required`**

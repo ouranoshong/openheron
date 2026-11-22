@@ -586,7 +586,7 @@ Messages(effective bool) []*schema.Message
 
 **客户端拿这个标记做什么。** 消息视图把标记盖在消息上（`api/v2_convert.go:63`），历史水合把它读
 出来（`web/src/lib/store/history.ts:42`），消息列表在气泡该在的位置上画一条分隔线
-（`web/src/components/message-list.tsx:156`，由 `web/src/components/compaction-divider.tsx`
+（`web/src/components/message-list.tsx:158`，由 `web/src/components/compaction-divider.tsx`
 绘制）。**轮内**发生的压缩改走事件流通知：transport 发一个 `CUSTOM "context_compacted"` 事件
 （`transport/transport.go:266`），reducer 当场把边界插进列表（`web/src/lib/events.ts:448`）。
 
@@ -1429,12 +1429,25 @@ const selectMessages = (s: State) => s.convo?.messages ?? EMPTY
 | token | 是什么 |
 |---|---|
 | `--chat-column` | 对话所在的那一列（64rem） |
-| `--prose-column` | 里面的**文字**停在哪（46rem） |
+| `--prose-column` | 独自阅读的行文的**可读行宽**（46rem） |
+| `--welcome-column` | **欢迎页**的宽度 —— 一句问话，不是一段答案（52rem） |
 | `--chat-gutter` | 这一列两侧的留白 |
 
-★ 两个宽度**故意不一样**：列要宽，宽表与宽代码才看得全；而六十个字符长的一段话是难读的，
-所以正文停得更早。**块级内容**吃满整列，只有文字被按住 —— 这也是为什么这个上限挂在
-文字元素上（`markdown.tsx` 的 `PROSE`），而不是挂在消息气泡上。
+★ 对话就是**那一列**，列里的**文字吃满整列**。正文过去停在列的右缘之前，而用户的气泡正贴在
+右缘上 —— 于是宽屏上答案显得被挤在左边，右半屏空着。⇒ 上限离开了消息。剩下的是给**独自阅读
+的那一块**的**可读行宽**：一份**文档**（文件预览）—— 行文是独自读的，
+而六十个字符长的一段话是难读的。
+★ 所以 `markdown.tsx` 里有两个类：消息用 `FILL`，文档用 `PROSE`。
+
+★ **欢迎页**有自己的宽度（`--welcome-column`，`web/src/app/shell.tsx`）：那一页上只有一句问话，
+没有长答案可读，所以按对话列的宽度算时，输入框在宽屏上横跨半屏。
+★ **整块一起收窄** —— 品牌区、那行文案与输入框下面那行事实共用一个宽度；
+只窄化输入框的话，那行事实会从它两侧溢出来。
+
+★ **欢迎页那一列留在 48rem 以上，是故意的。** 输入框下面那行事实在这个宽度以下会收起名字：
+项目与授权档位只剩图标（名字在 tooltip 与读屏标签里）。★ 欢迎页是**第一屏** ——
+项目是这段对话在哪个目录里，授权档位是「agent 不用问就能做什么」的决定，
+所以这两个在那儿必须读得到。⇒ 52rem：比对话列窄，而下面那行还留得住字。
 
 ★ 表格有**两个**上限，各回答一个问题：每列 **7rem 的下限**让列多的表撑出去、在自己的框里
 横向滚动；每格 **28rem 的上限**让长句在格子里换行，而不是把表格撑宽。
@@ -1508,6 +1521,52 @@ return (
 
 ★ **通则**：★ **这个键归平台管，就用它给的那个口子，别从里面跟它抢。**
 在跑得比平台**晚**的处理器里 `preventDefault`，是一行看起来该生效、实际不生效的代码。
+
+### 4.9 ★ 界面的语言
+
+★ **文案是一份目录，不是代码里的字符串。** `web/src/lib/locales/parts/` 里的每一条
+把英文与中文**并排**放着：
+
+```ts
+export const composer = {
+  "composer.input.placeholder": { en: "Send a message...", zh: "" },
+} as const
+```
+
+⇒ 一句话**只写一次**、写在一处、两种语言一起写。键集本身是一个**类型**
+（`MessageKey` 就是 `keyof typeof catalog`），所以不存在的键在**用它的地方**就是
+一个**编译错误** —— 不是运行时界面上一个洞。
+
+★ `zh: ""` 是**还没写**：界面落在英文上，`web/test/i18n.test.ts` 里有计数告诉你
+还剩多少句。
+
+★ **加一句文案的做法**：在那个界面的 part 文件里加上这一条（两种语言都写），
+然后在组件里用它：
+
+```tsx
+const t = useT()
+…
+<button title={t("composer.input.placeholder")}>{t("composer.input.placeholder")}</button>
+```
+
+★ **CI 会跑两条检查**（`web/test/i18n.test.ts`）：没有没人用的键，界面里也没有写死的英文。
+★ 写死在组件里的句子是翻不了的 —— 就是这条检查拦着它。
+
+★ `lib/` 里那些**产出文案**的纯函数（工具标题、授权档位、思维链那句）不能用 hook ——
+hook 会把它们变成不纯 —— 所以它们**把翻译器作为参数收进来**：`toolTitle(name, t)`，
+调用方把自己手上那个传进去。★ 某种语言还没写出来的键**落在英文上**：一个毛边
+比一个空洞好。
+
+★ **语言在一处决定**（`web/src/lib/i18n.ts`）：存过的偏好 → 浏览器的语言 → 英文。
+存过的偏好压过浏览器 —— 用户已经说过他要用哪种语言，浏览器只是猜测。
+这个选择同时落在 `<html lang>` 上：读屏软件用英文规则念中文，断句与停顿都会错。
+
+★ **运行时在哪种语言下都是英文**（AGENTS.md）：服务端发来的句子就是服务端的英文，
+界面原样显示。模型输出、工具名与手写的时间戳格式也不翻。
+
+★ **测试里语言只钉一次**：`web/playwright.config.ts` 里设 `locale: "en-US"`，
+`navigator.language` 于是是英文，断言英文文案的那些用例照旧过。
+⇒ 没有这一行，把浏览器设成中文的开发者会看到整套用例变红。
 
 ## 5. 测试
 
@@ -1658,8 +1717,8 @@ loader 写的是 `corpus_dir`。`settings-validate.ts` 现在只剩字符串整�
 `issueLine`、`suggestPath`、`resolveTemplate`。
 
 ★ **换来的是「带落款的往返」。** 一次编辑在打字停下 250 ms 后发一个问题
-（`web/src/lib/settings-store.ts:261` `scheduleValidate`），保存则立刻再问一次并取消挂起的
-那个。每个回包都带落款（`:229` `validateSeq`）：不再是最新的、或不再是选中的那个文件的，
+（`web/src/lib/settings-store.ts:269` `scheduleValidate`），保存则立刻再问一次并取消挂起的
+那个。每个回包都带落款（`:42` `validateSeq`）：不再是最新的、或不再是选中的那个文件的，
 直接丢掉 —— 否则两张答案赛跑，赢的是慢的那张，也就是关于用户已经改过的文本的那张。
 
 ★ **有一条规则是「搬到服务端」而不是「删掉」。** agent 的 `reasoning` 档位现在在
@@ -1897,7 +1956,7 @@ gitleaks 报的**提交数**比 git 报的低；但内容照样扫到了，因�
 |---|---|---|
 | **活跃流的用量没有按 Agent 分账** | `contract.Usage` 没有 `byAgent` 字段；前端 `events.ts:552` 的 `toUsage` 只映射扁平计数 | `usage.byAgent` **只在历史水合时才有**。所以新开的一轮里，Agent 过滤条提示里的累计 token 数是空的 —— 刷新一下（拉历史）才会出现。**上下文占用**是实时的（§3.7）：它走自己的 `context_usage` 事件。E2E 之所以没发现这个缺口，是因为它测的是**带种子的历史线程**。 |
 | **SSE 断了不会自动重连** | `web/src/lib/api.ts` | 流断掉就是断掉：走 `onError` → 错误面板，用户得自己重发。没有重连、没有断点续传。 |
-| **冲突对话框不显示磁盘上的版本** | `web/src/components/settings/conflict-dialog.tsx:18-23` | 它只显示你那个陈旧的 `baseRevision` 加一句写死的「changed by someone else」，**没有真去取磁盘版本**。也没有「强行覆盖」按钮 —— 「Keep editing」只是清掉冲突标记，下次保存会带着同样的陈旧 revision 再冲突一次。 |
+| **冲突对话框不显示磁盘上的版本** | `web/src/components/settings/conflict-dialog.tsx:20-25` | 它只显示你那个陈旧的 `baseRevision` 加一句写死的「changed by someone else」，**没有真去取磁盘版本**。也没有「强行覆盖」按钮 —— 「Keep editing」只是清掉冲突标记，下次保存会带着同样的陈旧 revision 再冲突一次。 |
 | **四个运行时依赖被放在 `devDependencies`** | `web/package.json` | `lucide-react`（10 个文件引）、`clsx`、`tailwind-merge`、`class-variance-authority` 都被 `src/` 引用并打进 `web/dist`。构建能过（Vite 在构建期解析），但清单是错的。 |
 | **`api/server.go:144` 的注释指向不存在的路由** | 该行 | 注释写的是「GET /v2/spec」，但 `SetSkillsSource` 实际喂的是 `/v2/skills`。 |
 | **残留的 `policy/` 目录被丢弃了 —— 而配置照样加载** | 装载器只走六个分区（`agentkit/spec/config.go:995-1008`）；退役的目录只被「注意到」，不会被读（`noteRetiredDirs`，`agentkit/spec/config.go:1040`） | `policy/` 分区在 2026-11-07 退役了：档位住在提供工具的那些文件里，而默认档位是 `ask`。从前留下的 `policy/permissions.yaml` **不会被读** —— 以前被禁的工具现在会问，以前不用点头就过的工具现在也会问。★ 那条提示落在 `deferred` 里（启动日志与 `/v2/health` 都带着它），并说清新档位在哪儿；配置编辑器直接拒绝这个路径（「unknown config section」，`agentkit/spec/write.go:116`）。★ **空的** `policy/` 目录不报任何东西 —— 它里面本来就没有被丢掉的东西。 |

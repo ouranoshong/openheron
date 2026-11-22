@@ -1430,7 +1430,7 @@ In the interface:
 
 | Element | What it does |
 |---|---|
-| **Header** | The agent filter (each chip names an agent; hover it for its context occupancy and spend), the theme switch, and the status of the current turn |
+| **Header** | The agent filter (each chip names an agent; hover it for its context occupancy and spend), the theme switch, the language switch, and the status of the current turn |
 | **Sidebar** | The session list — grouped by project — the "New thread" button and the settings entry |
 | **Composer** | Ask a question; `/` opens the slash commands; supports drag/paste attachments |
 | **Message list** | Assistant replies, reasoning, tool-call cards, sub-agent output (with attribution) |
@@ -1441,6 +1441,9 @@ In the interface:
 
 ★ The **theme switch** is in the header: light or dark. It follows your desktop until you
 pick one, and the choice is remembered.
+★ The **language switch** is next to it: the interface follows your browser's language until
+you pick one, and the choice is remembered on this machine. ★ A sentence that has no
+translation yet is shown in English rather than left blank.
 ★ A **table** in a reply has a width of its own: it fills the column, a long cell wraps
 inside it, and a table with many columns scrolls inside its own frame instead of pushing
 the page sideways.
@@ -1453,7 +1456,7 @@ the page sideways.
 | `/stop` | Stop the current turn |
 | `/attach` | Attach files to the **next** message — see §6.9 |
 | `/settings` | Open the config editor |
-| `/agents` | Switch the session's agent |
+| `/agents` | Switch the session's agent — clicking the agent's name under the input box opens the same picker |
 | `/mcps` | Show the MCP servers of this agent — see §6.8 |
 | `/compact` | **Compact the conversation now** — see §6.6 |
 | `/skill` | Pick a named skill for this task |

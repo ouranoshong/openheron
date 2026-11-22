@@ -77,6 +77,13 @@ tw-animate-css  zustand
 ★ 前端**不依赖任何 AG-UI 包**。后端仍然是 AG-UI 协议（见 `docs/api-v2-design.md`），
 但那是线上的形状，不是前端的依赖 —— `web/` 下没有任何 `ag-ui` 字样。
 
+★ **多语言没有引任何包。** 文案目录是纯 TypeScript 对象，语言状态是一个
+**不依赖框架**的模块（`web/src/lib/i18n.ts`）—— 与 `lib/theme.ts` 同一个写法。
+理由：这里的语言只有两种、几乎没有复数、插值只有 `{name}` 一种；i18next 带来的
+fallback / plural / context 那一整套语义，与本仓库「一个决定一处」的写法不合。
+★ 目录是纯数据 ⇒ `bun test` 能直接验它（键位、占位符、兜底），
+这正是双语文档那套纪律在代码里的对应物。
+
 ★ 清单里除了 UI 四件，其余都**不进主 chunk**：shiki 的语言/主题与 CodeMirror
 都是动态 import 拆出的独立 chunk，只在真的遇到代码块或打开设置弹窗时才拉。
 
@@ -156,6 +163,7 @@ web/src/
     code-block.tsx            代码块（懒加载语言 chunk）
     compaction-divider.tsx    压缩边界
     theme-toggle.tsx          明暗切换
+    locale-toggle.tsx         语言切换
     settings/                 配置编辑器（★ 对话框与其入口分文件）
       settings-entry.tsx        入口 + ⌘, 监听（首屏，**只几十字节**）
       settings-dialog.tsx       对话框外壳（懒加载）
@@ -202,6 +210,19 @@ web/src/
     scroll-follow.ts          滚动跟随的判据（纯函数）
     active-thread.ts          「当前是哪个会话」的 localStorage 记忆
     theme.ts                  明暗偏好
+    i18n.ts                   语言的决定与持久化（纯逻辑，不依赖框架）
+    locales/                  界面文案的目录（英中并排）
+      index.ts                合成 catalog，导出 MessageKey
+      parts/                  一个界面一份
+        common.ts             到处都一样的那些词
+        header.ts             页头
+        lib.ts                纯函数产出的文案
+        sidebar.ts            侧栏
+        composer.ts           输入区
+        messages.ts           消息区
+        projects.ts           项目与两个组标题
+        settings.ts           设置面板与 MCP 面板
+    use-t.ts                  useT()：组件拿到翻译器的地方
     thinking.ts               思维链的那句英文
     file-kind.ts              文件类型判定（纯函数）
     format-size.ts            字节的显示（纯函数）
@@ -209,7 +230,7 @@ web/src/
     fixtures/                 真后端录下的事件序列与原始帧
 web/test/
   *.test.ts                   纯函数层的单测
-  e2e/                        Playwright spec（21 个文件，见 §13.3）
+  e2e/                        Playwright spec（24 个文件，见 §13.3）
     fixtures.ts               e2e 专用夹具（假后端脚本、选择器常量）
   fake-server.ts              确定性假后端
   serve.ts                    假后端可执行入口
@@ -238,12 +259,12 @@ sessionId —— 后端认的 id，所有 HTTP 请求都用它
 于是：
 
 - 打开页面 / 点 New thread / 什么都不说 → 服务端一个会话都不增加
-  （`web/src/lib/store/actions.ts:442-456` 的 `startNewThread` 只动本地状态）。
+  （`web/src/lib/store/actions.ts:448-462` 的 `startNewThread` 只动本地状态）。
 - 刷新页面 → 回到同一个对话，且那个对话一定真实存在。
 - 侧栏条目数只由 `GET /v2/sessions` 决定，不存在「删不掉的占位条目」。
 
 ★ 新会话在 store 里先落在 `pending:<时间戳>` 这个**仅内存**的键上
-（`web/src/lib/store/actions.ts:610`），建会话成功后**就地换成**真实 id
+（`web/src/lib/store/actions.ts:616`），建会话成功后**就地换成**真实 id
 （`web/src/lib/store/events.ts:25-44` 的 `promote`）。
 ★ **就地换**是关键：换键而不是搬键，搬键会让这个会话在 `order` 里换位置。
 
@@ -253,7 +274,7 @@ sessionId —— 后端认的 id，所有 HTTP 请求都用它
 （`web/src/lib/store/events.ts:12-23` 的 `handleEvent`）。
 
 ★ **主路径不等 `RUN_STARTED`**：会话先建、id 先拿到，然后才发流
-（`web/src/lib/store/actions.ts:669-697`）。
+（`web/src/lib/store/actions.ts:675-712`）。
 ⇒ `RUN_STARTED` 里的那个 promote 分支降级成**兜底**，
 它的触发条件是键仍以 `pending:` 开头（`web/src/lib/store/events.ts:16`）。
 
@@ -351,7 +372,7 @@ activeId: string | null    // null = 欢迎界面
 
 类型在 `web/src/lib/store/state.ts:18-32`（`SessionEntry`）与 `:35`（`activeId`）。
 ★ `convo` 是**懒加载**的：只有打开过的会话才有对话状态
-（`web/src/lib/store/actions.ts:370-381` 先放空 `convo` + `loaded: false`，
+（`web/src/lib/store/actions.ts:376-382` 先放空 `convo` + `loaded: false`，
 拉到 `/v2/sessions/:id/messages` 后再填）。
 
 ★ 会话条目上还有几样别的东西：`operations`（这个会话的操作日志）、
@@ -370,7 +391,7 @@ zustand 默认用 `Object.is` 比较快照。selector 每次调用都造新数�
   （`web/src/lib/store/selectors.ts:26-27`）、`EMPTY_ATTACHMENTS`（`:62`）、
   `EMPTY_OPERATIONS`（`:69`），另有一个私有的 `EMPTY_CONVERSATION`（`:28`）。
 - 返回数组的 selector（`selectSessionList`，`web/src/lib/store/selectors.ts:99-101`）
-  **必须**配 `useShallow`（`web/src/components/sidebar.tsx:52`）。
+  **必须**配 `useShallow`（`web/src/components/sidebar.tsx:54`）。
 - 其余 selector 返回 store 已持有的引用，引用天然稳定
   （`web/src/lib/store/selectors.ts:30-33`、`:54-60`、`:76-78`、`:94-97`）。
 
@@ -408,7 +429,7 @@ interrupts: Interrupt[]
   `RUN_STARTED` / `RUN_FINISHED` / `RUN_ERROR`）—— 用户马上要点的按钮不能等。
 - ★ **终止帧**（`web/src/lib/api.ts:682-691` 的 `TERMINAL_EVENTS`）区分
   「轮次正常结束」与「流被截断」：调用方据此决定要不要去恢复那一轮
-  （`web/src/lib/store/actions.ts:880-888` 的 `recoverRound`）。
+  （`web/src/lib/store/actions.ts:886-894` 的 `recoverRound`）。
 
 ## 5. 界面骨架
 
@@ -428,10 +449,35 @@ interrupts: Interrupt[]
 └──────────────────────────────────────────────────────────┘
 ```
 
-侧栏 256px（`--sidebar-width`，`web/src/index.css:31`；用在 `web/src/components/sidebar.tsx:102`）。
+侧栏 256px（`--sidebar-width`，`web/src/index.css:56`；用在 `web/src/components/sidebar.tsx:104`）。
+
+★ **对话列的宽度是一个 token**（`--chat-column`，`web/src/index.css:24`），
+消息列表、输入框与审批卡都用它 —— 所以「更宽」是一处改动，不是六处。
+
+★ **列里的文字吃满整列。** 正文过去停在 `--prose-column`（46rem），而列是 64rem ——
+于是每条助手正文右边空出 224px，而用户的气泡正贴在列的右缘上：宽屏上答案显得被挤在左边，
+右半屏空着。⇒ 消息里的段落、标题、清单与引用都吃满容器
+（`web/src/components/markdown.tsx:26` 的 `FILL`），代码块与表格本来就吃满整列。
+`--prose-column` 留下来给**独自读的那一块**：文档（文件预览，
+`web/src/components/file-preview.tsx:189` 的 `measure`）—— 行文是独自读的，
+六十个字符长的一段话是难读的。
+
+★ **欢迎页的输入框有它自己的宽度**（`--welcome-column`，52rem = 832px，
+`web/src/index.css:51`；用在 `web/src/app/shell.tsx:209`）。它过去跟着对话列走
+（1024px），宽屏上横跨半屏 —— 可这一页上只有一句问话，没有长答案可读。
+★ **整块一起收**：品牌区、输入框与下面那行元信息共用一个宽度；只窄化输入框的话，
+那行元信息会从它两侧溢出来。
+⇒ 发出第一句话、界面变成对话之后，输入框回到对话列的宽度
+（`web/src/components/composer.tsx:561`）—— 欢迎页是「问一句」，对话是「读一段」。
+
+★ **那行元信息在欢迎页上必须留住名字。** 项目名与授权档位住在它下面；容器窄过 48rem
+时，这两个就只剩图标（名字在 tooltip 与读屏标签里）。★ 欢迎页是**第一屏** ——
+项目是这段对话在哪个目录里，授权档位是「agent 不用问就能做什么」的决定，
+所以欢迎页那一列**留在 48rem 以上**。⇒ 这条是钉着的：
+`web/test/e2e/chat.spec.ts` 的「窄下来以后，那一行的事实还留着名字」。
 
 ★ **等待审批时审批卡取代 composer，不挂在消息流里**
-（`web/src/app/shell.tsx:195` 的二选一）。
+（`web/src/app/shell.tsx:218` 的二选一）。
 审批发生在轮次**结束**之后，此刻输入框本来就不能用；
 留着一个灰色的空输入框会让用户以为还能打字，也把真正要做的决定挤到上面去。
 不插进消息流是因为流已经收尾，插进去等于要等用户滚动才看得见。
@@ -442,20 +488,20 @@ interrupts: Interrupt[]
 `docs/sidebar-design.md`。
 
 - 「New thread」只回到欢迎界面：不碰服务端、不碰 localStorage
-  （`web/src/lib/store/actions.ts:442-456`）。
+  （`web/src/lib/store/actions.ts:448-462`）。
   ★ 清 localStorage 的话刷新页面就回不到上一个对话了。
   ★ 它顺带把「当前项目」清掉 —— **新会话没有项目**（会话的项目不可变，
   继承上一个会话的项目等于把用户没挑过的目录按死；见 `docs/projects-design.md`）。
 - ★ **记住的会话没了 ⇒ 清掉那个 id**：服务端一个会话都没有时
-  （`web/src/lib/store/actions.ts:344-347`），或打开它时答 404（被删过，
+  （`web/src/lib/store/actions.ts:314-350`），或打开它时答 404（被删过，
   `:404-412`），localStorage 里那个 id 一定是悬空的 —— 清掉并回欢迎界面。
   不清的话每次刷新都去打那个不存在的会话，界面还甩一条「session not found」。
-- 每行有 `data-testid="thread-row"`（`<li>`，`web/src/components/sidebar.tsx:564`）
-  与 `data-testid="thread-item"`（可点击按钮，`:556`）两个定位点 ——
+- 每行有 `data-testid="thread-row"`（`<li>`，`web/src/components/sidebar.tsx:582`）
+  与 `data-testid="thread-item"`（可点击按钮，`:587`）两个定位点 ——
   More options 按钮是按钮的**兄弟**而非后代（`:585-592`），开菜单要从行去找。
-- 改名走乐观更新，失败回滚（`web/src/lib/store/actions.ts:507-528`）。
-- 删除正在看的那条 → 回到欢迎界面（`web/src/lib/store/actions.ts:530`）。
-- 侧栏折叠状态持久化在 localStorage（`web/src/app/shell.tsx:18`、`:36-43`）。
+- 改名走乐观更新，失败回滚（`web/src/lib/store/actions.ts:511-513`）。
+- 删除正在看的那条 → 回到欢迎界面（`web/src/lib/store/actions.ts:536`）。
+- 侧栏折叠状态持久化在 localStorage（`web/src/app/shell.tsx:21`、`:41-48`）。
 
 ### 5.3 自动滚动
 
@@ -464,21 +510,59 @@ interrupts: Interrupt[]
 用户往上翻看历史时来了新 token，把视口拽回底部是最烦人的一种行为。
 
 ★ 上翻后 `pinned=false`（`web/src/lib/scroll-follow.ts:46-60`），
-右下角出现 `Jump to latest` 按钮（`web/src/components/message-list.tsx:192-202`）。
-★ **那个按钮是瞬时滚动，不是平滑滚动**（`web/src/components/message-list.tsx:134-139`）：
+右下角出现 `Jump to latest` 按钮（`web/src/components/message-list.tsx:171-194`）。
+★ **那个按钮是瞬时滚动，不是平滑滚动**（`web/src/components/message-list.tsx:120-136`）：
 平滑滚动会产生一串「位置不在底部」的中间事件，被跟随规则读成「用户滚走了」。
 
 ### 5.4 状态点
 
-`awaiting-approval` 与 `running` 各占一档（`web/src/app/shell.tsx:25-30` 的 `DOT` 表）。
+`awaiting-approval` 与 `running` 各占一档（`web/src/app/shell.tsx:28-33` 的 `DOT` 表）。
 ★ **等审批时要看得见**：等审批时轮次已经结束，
 显示成「Idle」会让状态点在最需要提醒的那一刻什么都不说。
 
 ### 5.5 文案
 
-★ **全英文**，与 AGENTS.md 的「界面文案用英文」一致，也与后端错误文案、
-审批卡文案一致。全量扫过 `web/src` 的 CJK 字符，唯一的命中是测试夹具里
-录制下来的模型输出（`web/src/lib/fixtures/recorded-run.ts:192`）。
+★ **界面文案是一份目录**（`web/src/lib/locales/`）：每一条把英文与中文**并排**放着，
+读者用什么语言，屏幕上就是哪一句。⇒ 一句新话只写一次、写在一处、两种语言一起写；
+不存在的键是**编译错误**（`MessageKey` 就是 `keyof typeof catalog`），不是界面上的一个洞。
+★ 目录按界面分文件（`parts/`），所以两个界面可以同时改文案而不碰同一个文件。
+
+★ **语言在一处决定**（`web/src/lib/i18n.ts`）：存过的偏好 → 浏览器的语言 → 英文。
+★ 存过的偏好**压过**浏览器 —— 用户已经说过他要用哪种语言，浏览器只是猜测。
+★ `<html lang>` 跟着变（读屏软件靠它决定怎么断句：中文用中文规则念，英文用英文规则念）；
+模块在 React 之前跑，所以**第一帧**就是对的。
+
+★ **英文兜底**：一个还没写中文的键显示英文，而不是一个洞 —— 这条规则还在，
+只是现在没有键用它了。`web/test/i18n.test.ts` 里的计数断言两种语言都写满。
+★ **当前状态**：机制与全部界面文案都在目录里（**313 条**，含主题开关的两条），
+中文一栏**全部写完** ⇒ 切到中文，界面说的就是中文。当初先立机制（键位对齐、
+兜底、开关、测试）再填中文，是为了让译文落进一个已经稳住的骨架。
+★ 两种语言写在同一条里，键位**不会漂**：编译期就知道键对不对。
+★ 两条检查住在 `web/test/i18n.test.ts` 里，CI 会跑：**没有没人用的键**
+（一条白写的句子翻译器永远不知道它存在），**界面里没有写死的英文**
+（写死在组件里的句子翻不了）。★ 第一条检查按**字符串出现**计数，
+不只算 `t("…")` —— `tool-titles.ts` 那张表就是一个键一个字符串。
+
+★ **不翻的部分**：服务端发来的句子（API 响应体、`/v2/config` 的 `deferred`）保持英文 ——
+AGENTS.md 的运行时规则不管界面是什么语言。模型输出、工具名（`read_file`）、
+时间戳格式也不翻：`operations-panel.tsx` 的 `formatAt` 手写格式，
+它的注释写着「日志的列不跟着语言跑」。
+
+★ **测试里语言被钉住**（`web/playwright.config.ts` 的 `locale: "en-US"`）：
+E2E 断言的是英文文案，一次钉住，那 87 条断言一条都不用改。
+⇒ 没有这一行，一个把浏览器设成中文的开发者会看到满屏红。
+★ 语言 spec（`web/test/e2e/i18n.spec.ts`）断言 `lang` 属性、记住的偏好，
+以及切换后界面文案真的变成中文（当时期望的是英文兜底，中文填好后改为断言中文）。
+
+### 5.5.1 语言开关
+
+页头**最右端**，紧挨主题开关（`web/src/components/locale-toggle.tsx`）：★ 两者都是
+**这台机器上的偏好**，都是一下点开。★ 按钮上写的是**要切过去的**那种语言自己的名字
+（「中」/「EN」）—— 不读当前语言的人也认得；无障碍标签用文字说明。
+
+★ 两个开关**并成一组**放在行的右端（`web/src/app/shell.tsx`）：语言开关原来夹在
+agent 过滤条与主题开关之间，孤零零地杵在标题中间 —— 那是一个外壳按钮，却站在
+对话标题该在的位置上。★ 主题开关留在最右（它本来就在那儿），语言开关挪到它旁边。
 
 ### 5.6 输入框下面那一行
 
@@ -497,7 +581,7 @@ interrupts: Interrupt[]
 - `model.reasoning` 是**生效档位**（agent 指定，或模型 `reasoning_default`），
   为空显示 `off`。
 - `reasoningAvailable` 只放进 `title`，不铺开成选择器
-  （`web/src/components/composer-meta.tsx:129-131`）。
+  （`web/src/components/composer-meta.tsx:139-144`）。
 
 ★ **取数与缓存**：`web/src/lib/agent-info.ts` 负责取拓扑、按 id 选条目、归一化空
 reasoning、模块级缓存与单飞请求；`api.listAgents()` 用 `cache: "no-store"`
@@ -519,10 +603,10 @@ reasoning、模块级缓存与单飞请求；`api.listAgents()` 用 `cache: "no-
 - 首次加载显示一行骨架，避免居中版式跳动；
 - 请求失败但已有旧值时继续显示旧值；
 - 从未成功过则显示 `Agent info unavailable`，`title` 带错误
-  （`web/src/components/composer-meta.tsx:120-129`）；
+  （`web/src/components/composer-meta.tsx:126-135`）；
 - 加载失败不阻塞输入、发送与审批。
 
-★ **上下文占用**也在这一行（`web/src/components/composer-meta.tsx:217-284` 的
+★ **上下文占用**也在这一行（`web/src/components/composer-meta.tsx:244-316` 的
 `ContextMeter`，`data-testid="composer-meta-context"`）。
 
 ### 5.6.2 版式：换行，不被挤成半个
@@ -562,8 +646,8 @@ reasoning、模块级缓存与单飞请求；`api.listAgents()` 用 `cache: "no-
 | 入口 | 三个按钮带文字 | **只留图标**，并且**和事实同一行**（§5.6.4） |
 
 ★ **让位的东西不许丢**：思考档位进**模型**的 `title`
-（`web/src/components/composer-meta.tsx:167`），上下文数字进占用条的 `title`
-（`:221`）—— ★ 手机是**按需读**提示气泡的，而那一行是**一眼扫**的。
+（`web/src/components/composer-meta.tsx:194`），上下文数字进占用条的 `title`
+（`:283`）—— ★ 手机是**按需读**提示气泡的，而那一行是**一眼扫**的。
 
 ★ 入口让位的方式也一样：三个词都让位，**三个图标都留下**，而且它们
 **留在事实那一行**（§5.6.4）—— ★ 入口还在，入口还认得出来，
@@ -573,7 +657,7 @@ reasoning、模块级缓存与单飞请求；`api.listAgents()` 用 `cache: "no-
 
 ### 5.6.4 入口：列窄时只留图标，与事实同一行
 
-★ 三个入口在**同一个** `span` 里（`web/src/components/composer.tsx:726-734`），
+★ 三个入口在**同一个** `span` 里（`web/src/components/composer.tsx:744-752`），
 那个 `span` 是这一行**最后**的子节点，位置恒定（§11.1）。
 ★ 列宽时它们在右端；列窄时**还是在右端**（`ms-auto`），但它们**和事实同一行**。
 
@@ -630,7 +714,7 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
 长在一扇像电脑的窗里。⇒ 那一行按**列**算，不按**窗**算。
 
 ⇒ 这一行的规则全是**容器查询**（`@container` + `@max-lg:` / `@max-3xl:`），
-容器是 composer 的根（`web/src/components/composer.tsx:513` 的 `@container`）。
+容器是 composer 的根（`web/src/components/composer.tsx:515` 的 `@container`）。
 
 | 列宽 | 事实 | 入口 | 模型名 |
 |---|---|---|---|
@@ -657,15 +741,25 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
 - ★ **没拦未知名字是有意的**：skill 清单是**活**的（新建的 skill 不用重启就能用），
   前端缓存的清单可能过期 —— 拦下来反而会拦住一个刚建的 skill。
 - 选择器列出**这一代挂着的** skill：名字、**description**（模型选它的唯一依据）、
-  **执行模式**（`inline` / `fork`，`web/src/lib/skill-info.ts:26-35`）；
-  选中只**回填命令文本**（`web/src/components/composer.tsx:736-740`），不直接发送。
+  **执行模式**（`inline` / `fork`，`web/src/lib/skill-info.ts:25-27`）；
+  选中只**回填命令文本**（`web/src/components/composer.tsx:763-767`），不直接发送。
 - 选择器列出**全部** agent（`web/src/lib/agent-info.ts:40-42` 的 `selectableAgents`）
   —— 没有「主 agent」这回事。
-- ★ **切换请求不做乐观更新**（`web/src/lib/store/actions.ts:458-472`）：
+- ★ **底栏的 agent 名字也是一扇门**：点它打开**同一个**选择器
+  （`web/src/components/composer-meta.tsx:150-177` 的 `onPickAgent`）。
+  ★ 一份名单、一种行为 —— 再造一套「点名字换 agent」就是第二份规则。
+  ★ 点击**不清空**输入框：命令清空是因为那行字**就是**命令，而点击不是命令。
+- ★ **名字按右侧那几个入口的样子渲染**：同一个 `Button` 的 `ghost` / `sm`，
+  同一串类名（`web/src/components/composer-meta.tsx:150-177`）。
+  ★ hover 就是这一行的 hover —— **不是下划线**。
+  ★ 下划线说的是「这是一个链接，通到别处去」；★ 这个名字不离开这一行，
+  它打开的就是这一行上已经有的那个选择器。
+  ⇒ 一行里四个入口，一套渲染；名字不因为是名字就长得像别的东西。
+- ★ **切换请求不做乐观更新**（`web/src/lib/store/actions.ts:464-478`）：
   服务端会以 409 拒绝运行中/待审批的会话，
   先改界面再回滚会让用户看到 task 闪一下、而拒绝原因没地方显示。
   错误留在选择器里（`web/src/components/agent-picker.tsx:107-111`）。
-- ★ **没选过就不带 `agentId`**（`web/src/lib/store/actions.ts:1445-1457`）：
+- ★ **没选过就不带 `agentId`**（`web/src/lib/store/actions.ts:1440-1448`）：
   根 agent 由服务端定。前端自作主张发一个 `main` 过去，
   等于把「默认根」按死在界面上 —— 服务端改口时它也不算数。
 - ★ 建完会话后，底栏的 agent 用**服务端回的**那个，不用发请求前猜的那个：
@@ -680,10 +774,10 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
 症状很隐蔽 —— 命令**已经执行完了**，但用户接着敲字发现什么都没进去，
 于是会以为「命令没生效」，而不是「焦点跑了」。
 
-所以 `web/src/components/composer.tsx:264-279` 用 `pickerWasOpen` 记住「开过」，
+所以 `web/src/components/composer.tsx:238-281` 用 `pickerWasOpen` 记住「开过」，
 在关掉的那一刻把焦点显式交回输入框（`requestAnimationFrame`）。
 
-★ 用 ref 而不是只看 `picker.open` 的真假（`web/src/components/composer.tsx:110`）：
+★ 用 ref 而不是只看 `picker.open` 的真假（`web/src/components/composer.tsx:112`）：
 关掉的那一刻 `open` 已经是 `false` 了，只看它会漏掉「开 → 关」这个跃迁。
 
 ★ `/agents <name>` 的**直接切换**路径不开选择器，焦点本来就没丢 ——
@@ -705,7 +799,7 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
 | `≥ md` | 常驻一列（`--sidebar-width`） | 单栏 + gutter | `sm:max-w-*` |
 
 ★ 断点本身是 `md`，而 `min-width: 768px` **在 768 上就成立** ——
-`web/src/app/shell.tsx:23` 的 `WIDE` 与 Tailwind 的 `md` 是同一个数字。
+`web/src/app/shell.tsx:26` 的 `WIDE` 与 Tailwind 的 `md` 是同一个数字。
 窄屏/宽屏的判据是 `web/src/lib/use-media-query.ts` 的 `useMediaQuery`：
 它订阅查询本身（不是轮询），而且**第一次就同步读出答案** ——
 界面在第一个 effect 之前就画出来了，抽屉在桌面上闪一帧就是闪错了版式。
@@ -723,15 +817,15 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
   `aria-modal`，这三样都不值得手写：一个让底下的页面还能滚、或者把焦点丢进
   背后聊天里的抽屉，是跟它所属的界面吵架。
 - ★ 抽屉与「折叠」是**两个状态**：折叠是关于桌面的偏好，抽屉是关于屏幕的，
-  窄屏用不着第一个（`web/src/app/shell.tsx:44-48`）。
-- ★ 宽屏上只渲染**一个**侧栏（`web/src/app/shell.tsx:137-140`）：
+  窄屏用不着第一个（`web/src/app/shell.tsx:47-51`）。
+- ★ 宽屏上只渲染**一个**侧栏（`web/src/app/shell.tsx:141-144`）：
   两个都渲染就是两棵会话树，也就是两套读写的会话。
 - ★ 选了一个会话就关抽屉：选它是为了读它，而抽屉挡着它。
   判据是「活动会话**变了**」，不是「抽屉开着」——
-  否则在当前会话上打开抽屉会立刻把它关掉（`web/src/app/shell.tsx:88-92`）。
+  否则在当前会话上打开抽屉会立刻把它关掉（`web/src/app/shell.tsx:65-92`）。
 - ★ 屏幕变宽时抽屉的状态是**在渲染里**丢掉的，不是在 effect 里：
   effect 会晚一帧才改，抽屉就会在那一帧里开着
-  （`web/src/app/shell.tsx:78-82`）。
+  （`web/src/app/shell.tsx:45-82`）。
 - ★ 侧栏的高度是**屏幕**的高度，永远不是**会话树**的高度。★ 旧版窄屏把侧栏
   堆在聊天上面，而那一列是 `shrink-0` 的：它有多高就占多高。★ 会话一多，
   整个聊天（连输入框）被推出窗口 —— 有三十段对话的人打开界面只看得见一列
@@ -753,8 +847,8 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
 ★ **只有窄屏中招**：宽屏的容器是 `md:flex-row`，聊天列被拉伸到容器的高度，
 自动最小尺寸不生效；窄屏是 `flex-col`，聊天列落在主轴上，`auto` 就落在它身上。
 
-修法是 `min-h-0`（`web/src/app/shell.tsx:152`）：列的高度是框架的高度，
-对话在它里面滚。侧栏那一列是同一条规矩（`web/src/components/sidebar.tsx:102`）——
+修法是 `min-h-0`（`web/src/app/shell.tsx:156`）：列的高度是框架的高度，
+对话在它里面滚。侧栏那一列是同一条规矩（`web/src/components/sidebar.tsx:104`）——
 ★ 「一个容器的高度是屏幕的高度，永远不是它内容的高度」，这句话要同时管住
 会话树和对话记录。
 
@@ -763,26 +857,26 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
 ★ 44px 是平台指南都认可的数字。图标还是 32px，**长的是目标**：
 一个伪元素盖住最小边长，版式不动 —— 一排按钮在手机上变大，就是一排放不下的按钮。
 
-- `.touch-target`（`web/src/index.css:234`）：在
+- `.touch-target`（`web/src/index.css:259`）：在
   `@media (pointer: coarse), (max-width: 767px)` 下，伪元素把命中区域撑到
-  `--touch-target`（`web/src/index.css:37`）。
+  `--touch-target`（`web/src/index.css:62`）。
 - ★ 带这个类的按钮必须是**孤立的**：目标会长过图标，挨得比最小边长还近的
   邻居会把自己的点击被抢走 —— 所以会话行自己的菜单键不带它（它压在标题上）。
 
-★ 会话行自己的菜单键（`web/src/components/sidebar.tsx:593`）原来在触摸端是
+★ 会话行自己的菜单键（`web/src/components/sidebar.tsx:613`）原来在触摸端是
 **永远不可达**的：它 `opacity-0`，靠 `group-hover:opacity-100` 显形，
 而 Tailwind 把 `group-hover` 编译进 `@media (hover: hover)` ——
 触摸屏没有指针，它就永远不出现。
-现在窄屏上它一直显形（`.thread-row-menu`，`web/src/index.css:290`），
+现在窄屏上它一直显形（`.thread-row-menu`，`web/src/index.css:315`），
 标题也给它留出了位置（`max-md:pe-8`）。
 
 #### 5.9.4 安全区
 
 ★ 刘海与 home 条**不是窗口**。`env()` 在没有它们的设备上答 0，
 所以同一份样式表两边都能用；`web/index.html` 的 viewport 带上
-`viewport-fit=cover` 之后它才变成非零（`web/src/index.css:43-46`）。
+`viewport-fit=cover` 之后它才变成非零（`web/src/index.css:68-71`）。
 
-★ 内边距加在**框架**上而不是 body 上（`.app-frame`，`web/src/index.css:261`）：
+★ 内边距加在**框架**上而不是 body 上（`.app-frame`，`web/src/index.css:286`）：
 框架是 `h-dvh`，给 body 加内边距会把框架顶得比窗口还高，
 页面就多出一条它本来没有的滚动条。
 
@@ -791,6 +885,8 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
 ★ `vh` 是「窗口藏起工具栏之后还剩多少」的**估计**，`dvh` 是**当前**的值：
 键盘弹出来、手机浏览器的工具栏收起来，高度都变。
 弹层用 `dvh`（`h-[85dvh]`、`max-h-[70dvh]`），不用 `vh`。
+★ **设置面板铺满整屏**，它是唯一用 `h-[100dvh]` 的弹层：左边一棵文件树，
+右边一个编辑器，而编辑器是这个弹窗存在的理由。
 
 #### 5.9.6 回归网
 
@@ -829,23 +925,26 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
 | `tool` | 图标 + 工具名 + 关键参数 + 原始 JSON + 原始结果（§7） |
 | `attachment` | 附件 chip（§9） |
 
-分派在 `web/src/components/message-parts.tsx:71-121`。
-★ **用户消息按字面渲染**（`web/src/components/message-parts.tsx:79-87`）：
+分派在 `web/src/components/message-parts.tsx:73-89`。
+★ **用户消息按字面渲染**（`web/src/components/message-parts.tsx:51-81`）：
 `whitespace-pre-wrap break-words` 直接展示，不经过 Markdown。
 原因：`react-markdown` 默认把软换行折叠成空格，多行指令在历史里会变形；
 用户写下的 `#` / `**` 也不应被解释成格式。assistant 仍走 Markdown。
 
-★ **reasoning 默认折叠**（`web/src/components/message-parts.tsx:23`）。
+★ **reasoning 默认折叠**（`web/src/components/message-parts.tsx:24`）。
 
 ### 6.2 markdown 与代码高亮
 
-★ **不开 `rehype-raw`**（`web/src/components/markdown.tsx:45-46`）——
+★ **行文有两个宽度**：消息吃满容器，文档停在可读行宽 —— 判据是**在哪儿读**
+（`web/src/components/markdown.tsx:61` 的 `measure`），理由见 §5.1。
+
+★ **不开 `rehype-raw`**（`web/src/components/markdown.tsx:65-66`）——
 react-markdown 默认不解析原始 HTML，这是刻意的：
 模型输出是不可信输入，开了就等于让模型往页面里塞标签。
 
 语法高亮用 **shiki**（`web/src/lib/highlight.ts` + `web/src/components/markdown.tsx` 的
 `code` 组件）。★ **`shiki/core` + 精选语言，不引全量包**
-（`web/src/lib/highlight.ts:1`、`:20-42`）：
+（`web/src/lib/highlight.ts:1`、`:19-25`）：
 全量 `codeToHtml` 带所有语言与主题，raw 数 MB；这里只要 10 个语言
 （ts/tsx/js/jsx/json/go/python/bash/yaml/diff），用 JS 正则引擎而不是 oniguruma 的 WASM。
 
@@ -862,32 +961,32 @@ react-markdown 默认不解析原始 HTML，这是刻意的：
    否则出现「旧内容的新着色」。
 
 块级与行内的判别用 `InPreContext`（由 `pre` 组件提供，
-`web/src/components/markdown.tsx:9`、`:18-20`），**不用
+`web/src/components/markdown.tsx:9`、`:28-30`），**不用
 「className 里有没有 language-」**：不带语言标签的围栏代码块 className 是空的，
 用那个判据会被当成行内代码。
 
 ★ **GFM 表格**：外层 `overflow-x-auto` 承载宽表格
-（`web/src/components/markdown.tsx:51`），表格本身 `w-full`
-（`:54`），而宽度上下限由**单元格**承担（`:63`：`min-w-[7rem]` / `max-w-[28rem]`）。
+（`web/src/components/markdown.tsx:71`），表格本身 `w-full`
+（`:74`），而宽度上下限由**单元格**承担（`:83`：`min-w-[7rem]` / `max-w-[28rem]`）。
 ★ 上游那份文档写的是「表格 `w-max min-w-full`」—— 那是另一个判据：
 `w-max` 会让两列表格撑到全宽，而**列数很多**的时候该靠单元格的 `min-w` 逼出滚动。
 ★ Tailwind preflight 会清掉表格的默认间距，不补就是一片贴在一起的文字；
 不包滚动容器则会把消息列和整页一起撑出横向滚动。
 
 清单同理。preflight 把 `ul` / `ol` 的 `list-style` 与 padding 清成 0，
-所以 `ul` / `ol` / `li` 都做了覆写（`web/src/components/markdown.tsx:106-133`）：
+所以 `ul` / `ol` / `li` 都做了覆写（`web/src/components/markdown.tsx:94-126`）：
 无序 `list-disc`、有序 `list-decimal`、左缩进 `pl-5`。
 GFM 任务清单带 `contains-task-list`，这类清单改为 `list-none`，只保留复选框。
 
 ★ **中英混排。** 全局 `--font-sans` 显式列出平台 CJK 字体回退
-（`web/src/index.css:142-144`：PingFang SC / Hiragino Sans GB / Microsoft YaHei /
+（`web/src/index.css:167-169`：PingFang SC / Hiragino Sans GB / Microsoft YaHei /
 Noto Sans CJK SC / Source Han Sans SC），不让各平台随机挑字形。
-正文为 `15px` + `line-height: 1.75`（`web/src/components/markdown.tsx:150`），
+正文为 `15px` + `line-height: 1.75`（`web/src/components/markdown.tsx:170`），
 中文密排时仍有行间距；`overflow-wrap: break-word` 让长 URL / 连续拉丁字符
 在消息列内折行；支持 `text-autospace` 的浏览器会在 CJK 与拉丁字符之间自动补空隙。
 
 preflight 同样把标题字号/字重重置成正文，所以 `h1`–`h6` 单独覆写
-（`web/src/components/markdown.tsx:72-91`）：标题加粗、字号递增，并补 `mt-*` / `mb-*`。
+（`web/src/components/markdown.tsx:90-92`）：标题加粗、字号递增，并补 `mt-*` / `mb-*`。
 
 ### 6.3 历史消息显示
 
@@ -900,14 +999,14 @@ preflight 同样把标题字号/字重重置成正文，所以 `h1`–`h6` 单�
 
 - 以 `user` 消息开启新一轮；
 - 同一轮中只有第一条 assistant 显示角色标签（多 agent 时标签显示 agent 名，
-  `web/src/components/message-list.tsx:283-290`）；
-- 轮间间距 `mt-6`，轮内片段 `mt-1.5`（`web/src/components/message-list.tsx:271`）；
+  `web/src/components/message-list.tsx:276-287`）；
+- 轮间间距 `mt-6`，轮内片段 `mt-1.5`（`web/src/components/message-list.tsx:275`）；
 - 不改协议数据形状，每条消息仍是一个 `[data-testid="message"]` 节点
-  （`web/src/components/message-list.tsx:266`），避免破坏滚动锚点与现有宽度断言。
+  （`web/src/components/message-list.tsx:270`），避免破坏滚动锚点与现有宽度断言。
 
 **加载骨架。** 切换会话时 `openSession` 先清空消息再请求。此时
 `selectActiveLoading`（`web/src/lib/store/selectors.ts:80-84`）为 true，
-消息流渲染骨架而不是空白（`web/src/components/message-list.tsx:297-317`）；
+消息流渲染骨架而不是空白（`web/src/components/message-list.tsx:301-321`）；
 历史到达后直接替换。骨架与底部 composer 版式共存，不会闪欢迎页居中布局。
 
 **离屏代码块不排高亮。** `CodeBlock` 用 `IntersectionObserver`
@@ -945,7 +1044,7 @@ preflight 同样把标题字号/字重重置成正文，所以 `h1`–`h6` 单�
 * 段在跑的时候会在**尾部**长出来（模型又发了一次调用），所以段的 key 是
   **第一次调用的 id** —— key 变了，节点就被卸载重挂，展开的状态跟着没了。
 
-★ **单张工具卡默认收起**（`web/src/components/tool-card.tsx:110-116`）——
+★ **单张工具卡默认收起**（`web/src/components/tool-card.tsx:112-118`）——
   实时的那张也是收起的：一次工具循环会产出多张卡，每张展开都是两块代码区，答案被埋。
   ★ 上游那份文档说「实时运行中的卡片默认展开」—— 这一条已经改了。
 
@@ -987,7 +1086,7 @@ preflight 同样把标题字号/字重重置成正文，所以 `h1`–`h6` 单�
 而重新中断拿到的是**新的 id**。逐个发的话，答完第一个，其余的 id 立刻作废 ——
 后面每一次都会撞上「interruptId does not match the pending approval」。
 协议两端本来就是为「一次答多个」设计的：AG-UI 的 `resume` 是**数组**
-（`web/src/lib/store/actions.ts:1229-1233` 一次发一份数组）。
+（`web/src/lib/store/actions.ts:1235-1239` 一次发一份数组）。
 
 ★ **提交的是 `payload.approved`，不是 AG-UI 的 `status`**
 （`web/src/lib/api.ts:595-599` 的 `ResumeInput`）。
@@ -995,20 +1094,20 @@ preflight 同样把标题字号/字重重置成正文，所以 `h1`–`h6` 单�
 描述的是「这个中断被处理掉了没有」，不表达「用户同不同意」；后端读的是 `approved`。
 ★ 只发 `status` 的后果：用户的「同意」被当成拒绝，工具永远不执行，**而且不报错**。
 
-★ **「拒绝」要求理由**（`web/src/components/approval-card.tsx:94-110`）——
+★ **「拒绝」要求理由**（`web/src/components/approval-card.tsx:77-96`）——
 后端把它存进审批记录，且会回灌给模型（`ApprovalResult.Reason`）。
 没有理由的拒绝对模型等于凭空断路。
 
 **UI**：一张卡**取代输入框**，标题写「N tool calls need your approval」
-（`web/src/lib/approval.ts:6-8`），下面逐条只列三样东西：
+（`web/src/lib/approval.ts:7-9`），下面逐条只列三样东西：
 
 | 列 | testid | 是什么 |
 |---|---|---|
 | 工具名 | `approval-tool` | 优先取事件的 `metadata.toolName`，历史回放取 `pendingView.toolName`；两者都没有时才从兜底文案里取，仍没有则显示 `Tool call` |
 | 请求方 | `approval-requested-by` | 只对子 agent 显示 `Requested by <agent>` |
-| 参数摘要 | `approval-arguments` | 单行归一 + 180 字符封顶（`web/src/lib/approval.ts:4`、`:53-57`） |
+| 参数摘要 | `approval-arguments` | 单行归一 + 180 字符封顶（`web/src/lib/approval.ts:5`、`:55-62`） |
 
-★ **参数摘要显示时允许两行**（`web/src/components/approval-card.tsx:80` 的 `line-clamp-2`），
+★ **参数摘要显示时允许两行**（`web/src/components/approval-card.tsx:82` 的 `line-clamp-2`），
 全文在 `title` 里。上游那份文档写的是「单行、封顶 180 字符」。
 
 ★ **请求方的两个来源归一成同一个字段** `Interrupt.requestedByAgent`：
@@ -1019,7 +1118,7 @@ preflight 同样把标题字号/字重重置成正文，所以 `h1`–`h6` 单�
 
 ★ **不展示**协议字段 `reason`（恒为 `tool_call`）与 `toolCallId`（一串 uuid）——
 它们对用户没有信息量，排查时在网络层看。
-整组仍然只有**一个**同意/拒绝按钮（`web/src/components/approval-card.tsx:112-119`），
+整组仍然只有**一个**同意/拒绝按钮（`web/src/components/approval-card.tsx:97-112`），
 同意就是全同意。
 ★ 逐条各给一个按钮会让「只批其中一个」变得可疑：
 框架的语义是「不在 Targets 里的会重新中断」，用户会看到审批卡闪一次、id 全变。
@@ -1031,8 +1130,8 @@ preflight 同样把标题字号/字重重置成正文，所以 `h1`–`h6` 单�
 ### 8.2 中断（停止）
 
 ★ **运行中，停止按钮取代发送按钮**，不是并排：同一槽位、同一主色，
-图标是实心方块（`web/src/components/composer.tsx:690-702`、
-`web/src/components/message-list.tsx:319-331`）。
+图标是实心方块（`web/src/components/composer.tsx:698-699`、
+`web/src/components/message-list.tsx:333`）。
 并排会多占一个槽位，并让人误以为「发送只是暂时灰掉」；
 空心方块则会被读成未选中的复选框。
 
@@ -1043,7 +1142,7 @@ preflight 同样把标题字号/字重重置成正文，所以 `h1`–`h6` 单�
 那是「假停止」，比没有停止按钮更糟：用户以为停了。
 
 所以 `stop()` 做三件事，顺序是刻意的
-（`web/src/lib/store/actions.ts:1257-1290`）：
+（`web/src/lib/store/actions.ts:1263-1269`）：
 
 | 步骤 | 为什么是这个顺序 |
 |---|---|
@@ -1226,7 +1325,7 @@ messages、没有 resume」，附件也进了这条判据（`:229`）。否则�
 
 - 只有 **PNG 与 JPEG** 重编码，格式保持不变。★ 格式不变 ⇒ MIME 判定不变、清单不变、模型的
   `image_url` part 不变；而转 JPEG 会把透明通道变成白底，截图与抠图都毁掉。
-- 触发条件是「长边 > 1600px」**或**「体积 > 200 KiB」（`imaging.go:43`、`:46`）。★ 是「或」不是
+- 触发条件是「长边 > 1600px」**或**「体积 > 200 KiB」（`imaging.go:43`、`:23`）。★ 是「或」不是
   「且」：一张 800×600 却有 3 MiB 的 PNG 要压，一张 4000×200 只有 90 KiB 的 JPEG 不必压 ——
   重新编码一张小图是白费力气，还白白掉画质。
 - 缩放用 `golang.org/x/image/draw` 的 `CatmullRom`（`imaging.go:137`），合成用 `draw.Over`、
@@ -1298,24 +1397,24 @@ FAT32 上不可复算。毫秒是「跨平台都稳」的刻度，而两次上�
 待发清单按会话存在 store 里（`web/src/lib/store/state.ts:33` 的
 `attachments: Record<string, Attachment[]>`），一项是 `{name, path, size, mime}`（`state.ts:8`）。
 
-- 发送时清单从 store 里取出来一起发（`web/src/lib/store/actions.ts:603`、`:710`）。
+- 发送时清单从 store 里取出来一起发（`web/src/lib/store/actions.ts:628`、`:716`）。
 - ★ **发完要清空**（`:577`）—— 否则下一轮会把同一批文件再发一遍。
-- ★ **被拒的一轮要把文件还回待发清单**（`:599` 的 `restorePending`）：服务端没拿到这个问题，文件
+- ★ **被拒的一轮要把文件还回待发清单**（`:1522` 的 `restorePending`）：服务端没拿到这个问题，文件
   就还是用户的，不是消息的。
-- ★ **乐观气泡里也要画附件**（`:1288` 的 `appendLocalUserMessage`）：附件是这条消息的一部分，用户
+- ★ **乐观气泡里也要画附件**（`:1489` 的 `appendLocalUserMessage`）：附件是这条消息的一部分，用户
   发出去的瞬间看不到自己发了什么，就等于没有发出去。★ 文件在前、文字在后 —— chip 读起来是这个
   问题的附件，问题跟在后面。
 - 三件交互都要：
 
 | 交互 | 落点 | 处理 |
 |---|---|---|
-| 纸夹 | `web/src/components/composer.tsx:563-566` | `<input type="file" multiple>` |
-| 拖拽 | `composer.tsx:540` 的 `onDragOver` / `:553` 的 `onDrop` | `e.dataTransfer.files` → `acceptFiles` |
-| 粘贴 | `composer.tsx:618` 的 `onPaste` | `e.clipboardData.items` 里 `kind === "file"` 的项 |
+| 纸夹 | `web/src/components/composer.tsx:565-568` | `<input type="file" multiple>` |
+| 拖拽 | `composer.tsx:542` 的 `onDragOver` / `:555` 的 `onDrop` | `e.dataTransfer.files` → `acceptFiles` |
+| 粘贴 | `composer.tsx:622` 的 `onPaste` | `e.clipboardData.items` 里 `kind === "file"` 的项 |
 
 - ★ 拖拽悬停必须 `preventDefault()`：默认动作是**拒绝**这次拖放，不允许就不会触发 drop。
 - ★ **粘贴截图是这个交互里最有价值的那个**：截图进剪贴板，按 Ctrl+V 就发出去了，没有「先存成
-  文件再选」的中间步骤。而 `onPaste` 里也必须 `preventDefault()`（`composer.tsx:628`）—— 默认粘贴
+  文件再选」的中间步骤。而 `onPaste` 里也必须 `preventDefault()`（`composer.tsx:632`）—— 默认粘贴
   会把图片的**文件名**塞进消息里，而用户要发的是图。
 
 ### 9.6 前端：刷新不丢，历史回看
@@ -1324,7 +1423,7 @@ FAT32 上不可复算。毫秒是「跨平台都稳」的刻度，而两次上�
 一回事。所以 `GET /v2/sessions/{id}/files` **不能**用来还原消息上的清单，它只能还原**待发清单**。
 
 - 恢复靠一条判据：workspace 里**没有任何消息认领过**的文件才是「待发」
-  （`web/src/lib/store/actions.ts:1535`）。一条消息认领过的文件是跟那个问题一起发出去的，把它放回
+  （`web/src/lib/store/actions.ts:1539-1541`）。一条消息认领过的文件是跟那个问题一起发出去的，把它放回
   待发清单，下一个问题就会再发一次 —— 用户只问了一次。
 - ★ 清单是**合并**而不是覆盖（`:1364`）：用户刚上传的文件比还在路上的那份列举新。
 - 真正的消息级清单在 **transcript 里**，历史水合时跟着消息一起回来：`web/src/lib/store/history.ts:16`
@@ -1336,10 +1435,10 @@ FAT32 上不可复算。毫秒是「跨平台都稳」的刻度，而两次上�
   字段**，所以 `p.kind === kind && p.complete === false` 这种写法在联合类型变宽之后**编译不过**
   （`kind` 是个变量，TypeScript 没法靠它收窄 `p`）。抽了一个 `isOpenPart` 出来做收窄
   （`web/src/lib/events.ts:188`）。
-- 渲染：`web/src/components/message-parts.tsx:108` 的 `case "attachment"`。
+- 渲染：`web/src/components/message-parts.tsx:110` 的 `case "attachment"`。
 - ★ **「移除」的语义**：待发清单里的附件 → 移除 = **真的删掉** workspace 里的文件
-  （`actions.ts:490` 调 `api.deleteFile`）；已发消息里的附件 → **不删**，它是历史的一部分，删了
-  那条消息就说谎了。前端删失败时要把 chip **放回去**（`:244`）—— 一个把服务端还留着的文件藏起来
+  （`actions.ts:595` 调 `api.deleteFile`）；已发消息里的附件 → **不删**，它是历史的一部分，删了
+  那条消息就说谎了。前端删失败时要把 chip **放回去**（`:599`）—— 一个把服务端还留着的文件藏起来
   的 chip 是在说谎。
 - 服务端：`DELETE /v2/sessions/:id/files?path=`（`api/v2_files.go:516-544`），路径相对 workspace，
   越界的名字被拒（`storage/filestore/session.go:624-637`）。★ **删一个不存在的文件不是错误**：调用方
@@ -1365,7 +1464,7 @@ FAT32 上不可复算。毫秒是「跨平台都稳」的刻度，而两次上�
 `text/html` 或 `image/svg+xml` 的上传文件，如果服务端按它自己的 MIME 内联，浏览器就会**执行**它
 里面的脚本 —— 而那脚本跑在 openheron 的源头上。一律 `text/plain` 之后，浏览器只把它当**字**。
 ★ 它顺带解决了「Markdown 谁来渲染」：服务端返回纯文本，前端用**已有的** `MarkdownText`
-（`web/src/components/markdown.tsx:43`）/ `CodeBlock`（`web/src/components/code-block.tsx:6`）渲染，
+（`web/src/components/markdown.tsx:53`）/ `CodeBlock`（`web/src/components/code-block.tsx:6`）渲染，
 不需要在服务端引一个 HTML 渲染器，也不需要信任上传的 HTML。
 
 ★ **SVG 归到「其他」**（`api/v2_files.go:381-388` 的 `isPreviewImage`）：SVG 是 XML，可以带
@@ -1377,23 +1476,23 @@ FAT32 上不可复算。毫秒是「跨平台都稳」的刻度，而两次上�
 Content-Type 由服务端按扩展名判定（`message.MIMEOfExt`），**不是**按内容嗅探 —— 嗅探要多读一遍，
 而且用户改个扩展名就该按扩展名算。判不出来就是 `application/octet-stream`。
 
-分类放在一个**纯函数**模块 `web/src/lib/file-kind.ts`：`fileKind`（`:197`）、`effectiveMime`
-（`:129`）、`isImage`（`:173`）、`fileLang`（`:218`）。★ **mime 优先，扩展名其次**（`:194`）：
+分类放在一个**纯函数**模块 `web/src/lib/file-kind.ts`：`fileKind`（`:201`）、`effectiveMime`
+（`:133`）、`isImage`（`:177`）、`fileLang`（`:222`）。★ **mime 优先，扩展名其次**（`:198`）：
 服务端判定的 mime 比客户端可信；唯一的例外是 `application/octet-stream` —— 那是服务端的
 「我不知道」，不携带信息，于是扩展名说了算。
 
-- chip：`web/src/components/attachment-chip.tsx:62` 的 `AttachmentChip`，缩略图 48px（`:40` 的
+- chip：`web/src/components/attachment-chip.tsx:63` 的 `AttachmentChip`，缩略图 48px（`:41` 的
   `THUMB`）。★ 图片走**缩略图**而不是回形针：「我发的是不是那张图」是发附件这件事里用户最想确认
-  的，而回形针答不了。缩略图在**出站时**缩放（`attachment-chip.tsx:179`），chip 不为 48 像素去拉
+  的，而回形针答不了。缩略图在**出站时**缩放（`attachment-chip.tsx:181`），chip 不为 48 像素去拉
   一张两兆的图。
 - ★ **文件可能已经不在了**（用户在历史里看到一条附件，而那个文件后来被删了）：`<img>` 会
-  `onError`，那时**回退成图标 + 文件名**（`attachment-chip.tsx:182`）—— 一个碎图比一句「文件没了」
+  `onError`，那时**回退成图标 + 文件名**（`attachment-chip.tsx:184`）—— 一个碎图比一句「文件没了」
   更像出了故障。
-- 放大是一个**覆盖层**：`web/src/components/file-preview.tsx:27` 的 `FilePreview`，点背景或按 Esc
-  关闭（`:45`）。★ 放大是**纯前端状态**，不写进 store：它是一次「看一眼」，不是一个可以跨刷新
+- 放大是一个**覆盖层**：`web/src/components/file-preview.tsx:28` 的 `FilePreview`，点背景或按 Esc
+  关闭（`:47`）。★ 放大是**纯前端状态**，不写进 store：它是一次「看一眼」，不是一个可以跨刷新
   恢复的东西。
-- ★ 覆盖层也承载非图片：点开一个 Markdown 附件出来的是渲染后的内容（`file-preview.tsx:181`），点开
-  一个 PDF 是浏览器内嵌的 PDF（`:81`）。同一个覆盖层、同一个 Esc —— **一个交互学到底**，而不是
+- ★ 覆盖层也承载非图片：点开一个 Markdown 附件出来的是渲染后的内容（`file-preview.tsx:185`），点开
+  一个 PDF 是浏览器内嵌的 PDF（`:83`）。同一个覆盖层、同一个 Esc —— **一个交互学到底**，而不是
   「图片一种弹法、文本另一种弹法」。
 - 字节的 URL 是一个**字符串**而不是一次 fetch（`web/src/lib/api.ts:370` 的 `fileUrl`）：`<img src>`
   把文件交给浏览器自己的图片管线 —— 它的缓存、它的并发限制、它的解码器 —— 而且那个 URL 可以被复制
@@ -1427,14 +1526,14 @@ Kind / Dimensions / ContextWindow / SummarizeAt / Timeout / Reasoning* / Extra�
 **★ 新增动效不改变元素的最终布局。** 只动 `transform` / `opacity` / `filter` 这类**合成器属性**，
 不动 `height` / `margin` / `top` / `width`。
 
-★ **为什么**：消息流靠 `ResizeObserver` 按**内容高度**跟随滚动（`web/src/components/message-list.tsx:120`），
+★ **为什么**：消息流靠 `ResizeObserver` 按**内容高度**跟随滚动（`web/src/components/message-list.tsx:122`），
 动布局会跟这套跟随机制抢方向盘 —— `web/test/e2e/scroll.spec.ts` 的十条用例正盯着这件事（溢出时
 停在视口内 / 用户上翻后不被拽回 / 流式未结束也跟随 / 高亮撑高后仍跟随 …）。
 
 ★ **唯一的例外**：折叠面板的展开/收起。它本来就要改布局，动效只是让这次**已经要发生**的布局变化
 变平滑 —— 不存在「新增的布局抖动」。
 
-**尊重 `prefers-reduced-motion`。** 一条全局规则（`web/src/index.css:205`），把所有动画降到
+**尊重 `prefers-reduced-motion`。** 一条全局规则（`web/src/index.css:230`），把所有动画降到
 「立刻完成」。
 
 ★ `0.01ms` 而不是 `0s`：有 `animation-fill-mode: both` 的入场动画在 `0s` 下会被**跳过**（某些浏览器
@@ -1445,7 +1544,7 @@ Kind / Dimensions / ContextWindow / SummarizeAt / Timeout / Reasoning* / Extra�
 
 ### 10.2 动效令牌：一份，不是六处
 
-`web/src/index.css:96` 起的一组，和 `--chat-column` 同一个思路 —— **改一次，不是改六处**：
+`web/src/index.css:121` 起的一组，和 `--chat-column` 同一个思路 —— **改一次，不是改六处**：
 
 ```css
 --motion-duration-fast: 120ms;
@@ -1496,10 +1595,10 @@ token, never a literal」。
 
 ★ **mask 里的部件只能做 opacity 动画**：body 的缩放是 1.3、halo 是 1.365，同样的位移在两份拷贝里
 走的距离不同 ⇒ 描边和主体立刻错开。所以 `.mark-parts` 只淡入，**不做位移**
-（`web/src/index.css:344`）。走线与数据点本来就在 mask 之外，不受这个限制：走线走
+（`web/src/index.css:369`）。走线与数据点本来就在 mask 之外，不受这个限制：走线走
 `stroke-dashoffset`，数据点走 `opacity` + `scale`。
 
-动效只做一件事 —— **电路接通、数据点亮起**，全程一次性，不循环（`web/src/index.css:315` 起的三个
+动效只做一件事 —— **电路接通、数据点亮起**，全程一次性，不循环（`web/src/index.css:340` 起的三个
 `@keyframes`）：
 
 | 部件 | 动作 | 时序 |
@@ -1516,16 +1615,16 @@ token, never a literal」。
 **`scale` 属性**而不是 `transform` —— 数据点自带一个 `transform` 属性（它要落在画布的固定位置），
 而 CSS 的 `transform` 会**整个盖掉**属性值，`scale` 是独立属性，它排在 `transform` 之前施加，
 两者共存。★ 圆点要绕**自己的圆心**长，所以配了 `transform-box: fill-box`
-（`web/src/index.css:357`）—— SVG 的 `transform-origin` 默认取的是**视口**的中心，不是图元的中心。
+（`web/src/index.css:382`）—— SVG 的 `transform-origin` 默认取的是**视口**的中心，不是图元的中心。
 
-**用在哪儿**：只在欢迎页 hero（`web/src/components/message-list.tsx:214`，`size-16` 64px，**播一次
-入场**）；页头（`web/src/app/shell.tsx:163`，`size-5` 20px，**不播**）。
+**用在哪儿**：只在欢迎页 hero（`web/src/components/message-list.tsx:217`，`size-16` 64px，**播一次
+入场**）；页头（`web/src/app/shell.tsx:167`，`size-5` 20px，**不播**）。
 
 ★ 页头为什么不播：20px 下四个部件各只有几个像素，细节全糊；而页头是**常驻**的 —— 一个一直动的
 东西在常驻位置就是噪声，不是信息。
 
 **无障碍**：内联 SVG 带 `role="img"` + `<title>openheron</title>`
-（`web/src/components/brand-mark.generated.tsx:29`、`:35`）；页头那处是装饰件（旁边的文字已经写了
+（`web/src/components/brand-mark.generated.tsx:29`、`:40`）；页头那处是装饰件（旁边的文字已经写了
 openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 
 ### 10.4 界面功能性动效（未实施的提案）
@@ -1536,11 +1635,11 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 |---|---|---|---|---|
 | 消息入场 | 无 | 淡入 + 上移 4px | `opacity` / `transform` | 新元素出现；第二条铁律合规（不改布局） |
 | 审批卡出现 | 无 | 从下 8px 淡入 | `opacity` / `transform` | ★ 它**取代 composer**，出现得晚、位置显眼 |
-| 状态点切换 | 只有 `animate-pulse`（`web/src/app/shell.tsx:27`） | 保留 pulse，另加**颜色过渡** | `background-color` | 状态点的语义由上游文档定义 |
-| 「Working…」 | `animate-pulse` 小点（`web/src/components/message-list.tsx:233`） | 保留 | — | 已有 |
-| 工具卡展开 | 箭头 `rotate-90`（`web/src/components/tool-card.tsx:133`） | 箭头保留；**内容**用 `grid-template-rows: 0fr → 1fr` 做高度过渡 | `height`（第二条铁律的例外） | 内容本来就要变高 |
+| 状态点切换 | 只有 `animate-pulse`（`web/src/app/shell.tsx:29`） | 保留 pulse，另加**颜色过渡** | `background-color` | 状态点的语义由上游文档定义 |
+| 「Working…」 | `animate-pulse` 小点（`web/src/components/message-list.tsx:237`） | 保留 | — | 已有 |
+| 工具卡展开 | 箭头 `rotate-90`（`web/src/components/tool-card.tsx:135`） | 箭头保留；**内容**用 `grid-template-rows: 0fr → 1fr` 做高度过渡 | `height`（第二条铁律的例外） | 内容本来就要变高 |
 | 折叠箭头 | 已有 `transition-transform`（三处各写一遍） | 补上 `--motion-duration-fast` | `transform` | 三个地方各写一遍 = 会漂 |
-| 对话框 | `data-open` / `data-closed` 已有（`web/src/components/ui/dialog.tsx:42`、`:64`） | 保留 | — | 现成的模式，新动效照它写 |
+| 对话框 | `data-open` / `data-closed` 已有（`web/src/components/ui/dialog.tsx:43`、`:64`） | 保留 | — | 现成的模式，新动效照它写 |
 
 ★ **审批卡那条是本节唯一「有存在感」的动效**：审批发生时轮次已经结束、输入框被取代，用户此刻最
 需要知道「轮子停在我这儿了」。
@@ -1581,7 +1680,7 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 ### 11.1 位置与形状
 
 位置：**输入框下面那一行的右端**，与「项目」按钮同一行
-（`web/src/components/composer.tsx:705-736` 的 `<ComposerMeta … action={…} />`）。
+（`web/src/components/composer.tsx:713-754` 的 `<ComposerMeta … action={…} />`）。
 
 ★ **顺序固定，位置就是身份。** React 按**下标**对齐子节点，
 一个下标变了就是「卸载了旧的、挂载了新的」，而挂在里面的状态全没了
@@ -1609,12 +1708,12 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 | 中间 | `Trusted paths` | Writes inside the project, the session workspace and the configuration do not ask |
 | 完全 | `Full authorization` | Every tool runs without asking |
 
-★ 这三段文案住在**一处**：`web/src/lib/authorization.ts` 的 `AUTHORIZATION_OPTIONS`
+★ 这三段文案住在**一处**：`web/src/lib/authorization.ts` 的 `authorizationOptions`
 —— 选项的顺序（从「问得最多」到「问得最少」）也是定死的，
 一个每次渲染都换顺序的列表，用户就得每次重读一遍。
 
 ★ **完全授权用警告色**（`--warning` 令牌，不是字面色值），中间档用中性色
-（`web/src/components/authorization-picker.tsx:159-167`）⇒ 用户一眼能看出
+（`web/src/components/authorization-picker.tsx:161-169`）⇒ 用户一眼能看出
 「这一档不再有人看着」。
 
 ### 11.3 服务端是权威，界面不乐观更新
@@ -1626,11 +1725,11 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
   已经在跑的那一轮用的是**它开始时的那一档**。
   ★ 不能让它看起来已经生效了。
 * ★ 落法：这句话写在**弹窗的描述**里
-  （`web/src/components/authorization-picker.tsx:186-190`），
+  （`web/src/components/authorization-picker.tsx:188-192`），
   **不**在按钮旁边挂一个「下一轮生效」的小牌子 ——
   这条规则**一直**成立，不是有条件才显示的；
   而一个会来来去去的小牌子会让按钮那一行文字跳。
-  ⇒ 按钮上只有档位名（`web/src/components/authorization-picker.tsx:153-167`）。
+  ⇒ 按钮上只有档位名（`web/src/components/authorization-picker.tsx:155-169`）。
 
 ### 11.4 切到完全授权：一次确认框
 
@@ -1698,8 +1797,9 @@ openheron），用 `aria-hidden="true"` 而不是塞一个空的 `alt`。
 
 ### 12.2 面板
 
-Radix 的 `Dialog`，壳是 `sm:max-w-2xl h-[85vh] flex flex-col gap-3 p-4`
-（照设置对话框 `web/src/components/settings/settings-dialog.tsx:47-48`）。
+Radix 的 `Dialog`，壳是 `sm:max-w-2xl h-[85dvh] flex flex-col gap-3 p-4`
+（`web/src/components/operations-panel.tsx:99`）。★ 它**不**照设置面板 —— 那个铺满整屏
+（§5.9.5），这个是一张卡片。
 一个可滚动列表（`min-h-0 flex-1 overflow-y-auto`），每条一行：
 **时间** + **一句话** + **标识**（run id / interrupt id / 路径 / agent / 档位 / 大小）。
 
@@ -1733,8 +1833,8 @@ Radix 的 `Dialog`，壳是 `sm:max-w-2xl h-[85vh] flex flex-col gap-3 p-4`
 
 | 层 | 命令 | 覆盖 |
 |---|---|---|
-| 纯函数 | `bun run test:unit` | reducer 每个事件分支、分帧边角、store 行为 —— **470 条 / 37 个文件** |
-| 界面 | `task test-e2e` | 真实浏览器 + 确定性假后端 —— **277 条 / 22 个 spec** |
+| 纯函数 | `bun run test:unit` | reducer 每个事件分支、分帧边角、store 行为 —— **484 条 / 38 个文件** |
+| 界面 | `task test-e2e` | 真实浏览器 + 确定性假后端 —— **311 条 / 24 个 spec** |
 | 协议 | `task smoke` | 真后端的 SSE 兼容性 |
 
 ★ **CI 跑仓库自己的命令**：`task lint-web` + `bun run test:unit`
@@ -1754,22 +1854,22 @@ AG-UI 事件序列，**不打真模型**。原因：界面断言必须确定。
 ★ **端口一定要错开，不能「复用开发实例」**：本机开着 vite dev server 时，
 E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没注入。
 ⇒ 两条 webServer 都是 `reuseExistingServer: false`
-（`web/playwright.config.ts:44-60`），Vite 那边 `strictPort: true`
+（`web/playwright.config.ts:49-65`），Vite 那边 `strictPort: true`
 （`web/vite.config.ts:40`）。**让这种情况结构上不可能**，而不是靠人记得。
 
 ### 13.3 E2E 覆盖什么
 
-`web/test/e2e/` 下 **23 个 spec 文件，共 299 条**（实测）：
+`web/test/e2e/` 下 **24 个 spec 文件，共 311 条**（实测）：
 
 | spec 文件 | 条数 | 钉的是什么 |
 |---|---|---|
-| `chat.spec.ts` | 71 | 会话列表 8 / 会话标题 2 / 发送与流式渲染 3 / 审批（HITL）3 / 多个待批 2 / 中断（停止）7 / 协议：一次往返 2 / 附件 6 / markdown 与高亮 10 / 空状态版式 6 / 消息卡片宽度 5 / 工具卡 14（语法高亮 4 / 宽度 2 / 图标 4 / 标题 4）/ **连续的调用并成一段 3** |
-| `settings.spec.ts` | 43 | 配置编辑器：opening 10 / 配置根 3 / 无档位切换 1 / 只读分区 2 / 编辑与保存 4 / 别的文件的问题 2 / 不在树里的 agent 2 / 文件列表是一棵树 6 / skill 可编辑 3 / 新建文件对话框 9 / 关闭 1 |
+| `chat.spec.ts` | 74 | 会话列表 8 / 会话标题 2 / 发送与流式渲染 3 / 审批（HITL）3 / 多个待批 2 / 中断（停止）7 / 协议：一次往返 2 / 附件 6 / markdown 与高亮 10 / 空状态版式 6 / 消息卡片宽度 5 / **欢迎页宽度 3** / 工具卡 14（语法高亮 4 / 宽度 2 / 图标 4 / 标题 4）/ **连续的调用并成一段 3** |
+| `settings.spec.ts` | 44 | 配置编辑器：opening 10 / 配置根 3 / 无档位切换 1 / 只读分区 2 / 编辑与保存 4 / 别的文件的问题 2 / 不在树里的 agent 2 / 文件列表是一棵树 6 / skill 可编辑 3 / 新建文件对话框 9 / 关闭 1 / **弹窗铺满全屏 1** |
 | `projects.spec.ts` | 30 | 项目分组、会话只出现一次、侧栏没有项目选择器、树的读屏结构、折叠与记忆、当前项目、新建与改名与改目录与移除 |
-| `agents.spec.ts` | 15 | `/skill` 与 `/agents` 的选择器与直接切换、焦点 4 条、未知名字不发消息、没选过 agent 时用服务端的默认根 |
+| `agents.spec.ts` | 17 | `/skill` 与 `/agents` 的选择器与直接切换、焦点 4 条、未知名字不发消息、没选过 agent 时用服务端的默认根、**点底栏的 agent 名字开同一个选择器 + 点击不清空输入框** |
 | `attachments.spec.ts` | 14 | 附件随消息走、拖拽与粘贴、移除、预览 |
 | `composer-autocomplete.spec.ts` | 13 | 10 行封顶 / 自动聚焦 / @ 文件提示 / 命令 Tab 补全与 Enter 执行 / 键盘滚动跟随 / 切换后聚焦 |
-| `responsive.spec.ts` | 17 | 三档视口（390 / 768 / 1440）：不横向滚动 / 聊天列不超 token / 输入框与发送键在窗口里 / 触摸目标够大 / 行自己的菜单键看得见 / 侧栏是抽屉且能开能关 / 弹层不超出视口 / 断点边上的侧栏仍然常驻 / **树再长也挤不掉输入框（手机）、树再长聊天列也不缩水（平板）、长对话不会把输入框顶出屏幕（手机 + 桌面）** |
+| `responsive.spec.ts` | 19 | 三档视口（390 / 768 / 1440）：不横向滚动 / 聊天列不超 token / 输入框与发送键在窗口里 / 触摸目标够大 / 行自己的菜单键看得见 / 侧栏是抽屉且能开能关 / 弹层不超出视口 / 断点边上的侧栏仍然常驻 / **树再长也挤不掉输入框（手机）、树再长聊天列也不缩水（平板）、长对话不会把输入框顶出屏幕（手机 + 桌面）** / **宽屏上助手正文吃满整列，与用户气泡共用右边缘** / **设置入口不贴着侧栏的边** |
 | `composer-meta.spec.ts` | 17 | 默认 agent / 模型 / 思考档位 / 上下文占用 / 接口不可用 / 设置关闭后刷新 / **窄屏 8 条 + 宽窗窄列 1 条** |
 | `scroll.spec.ts` | 10 | 滚动跟随 —— 溢出时停在视口内、用户上翻后不被拽回、流式未结束时也跟随、高亮撑高后仍跟随、打开停在最后一条、切会话停在底部、刷新停在最后一条 |
 | `secrets.spec.ts` | 9 | Secrets 标签页：两个命名空间、写入与删除、来源与覆盖、删除的确认 |
@@ -1786,6 +1886,7 @@ E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没
 | `tool-failure.spec.ts` | 4 | 失败的那次调用写着 failed / 展开后内容照旧 / 历史里仍然是失败 / 成功的那次没有被说成失败 |
 | `reattach.spec.ts` | 2 | 连接断了以后重新挂上、重新挂上时只带 run id |
 | `session-events.spec.ts` | 2 | 审批在别处被回答后另一个标签页跟上、审批在等的时候通道把那张卡送过来 |
+| `i18n.spec.ts` | 4 | 切一次语言：偏好记住了、`lang` 跟着变 / 切到中文：界面文案真的变成中文 / 切回英文 / **语言开关在页头的右端，和主题开关并排** |
 
 ★ 条数写死在这张表里，是为了让「加了用例忘了改文档」变成一次 diff 冲突。
 ★ 上游那份文档的同一张表写的是 **8 个 spec、122 条** —— 那是很久以前，
@@ -1897,7 +1998,7 @@ const apiTarget =
 
 ★ 代理**只代理 `/v2`**（`web/vite.config.ts:41-43`）——
 静态资源不走代理，所以开发时改前端不需要重启后端。
-E2E 启动时注入假后端的地址（`web/playwright.config.ts:52-59`），产品代码零改动。
+E2E 启动时注入假后端的地址（`web/playwright.config.ts:45-50`），产品代码零改动。
 
 ### 14.5 类型检查分三个 project
 
@@ -1920,11 +2021,11 @@ E2E 启动时注入假后端的地址（`web/playwright.config.ts:52-59`），�
 
 - ★ **审批卡只标请求方，不做分组**。`Interrupt` 会显示 `Requested by <agent>`，
   但多个 subagent 同时要审批时仍是一条一条列
-  （`web/src/components/approval-card.tsx:51-91` 的 `interrupts.map()`），
+  （`web/src/components/approval-card.tsx:53-93` 的 `interrupts.map()`），
   没有按 agent 折叠。真正的分组要等同时挂起多个子 agent 的场景出现再设计。
-- ★ **参数摘要是不可展开的**。超过 180 字符截断（`web/src/lib/approval.ts:4`、`:55-57`）；
+- ★ **参数摘要是不可展开的**。超过 180 字符截断（`web/src/lib/approval.ts:5`、`:23-62`）；
   ★ 而 `title` **不再**给出全量 —— 它挂的就是那份**已被截断**的字符串
-  （`web/src/components/approval-card.tsx:81`）。
+  （`web/src/components/approval-card.tsx:83`）。
   要看全量参数目前得看工具卡片或网络事件。
 - ★ **没有 Inspector 第三栏**。原设计里有，未实现。
 - ★ **附件的语义是「提前把文件放进 workspace」**，不是随消息发送。
@@ -1932,7 +2033,7 @@ E2E 启动时注入假后端的地址（`web/playwright.config.ts:52-59`），�
   compose 阶段移除 chip 只是「这一轮不发它」，服务端上的文件不删 ——
   附件已落盘，与会话历史一样不可逆。
 - ★ **选文件会建会话**。没有会话时上传会先 `POST /v2/sessions` 换一个
-  （`web/src/lib/store/actions.ts:554`）。选了文件又放弃会留下一个只含文件的会话 ——
+  （`web/src/lib/store/actions.ts:560`）。选了文件又放弃会留下一个只含文件的会话 ——
   它不是垃圾，但确实是残留。「打开页面 / 点 New thread 零请求」不变，且有专门的 E2E 盯着。
 - ★ **设置弹窗那一块 653 KB**（§1.3）—— 上游那轮就提过要换掉 CodeMirror 的 React 包装层，
   这件事没做。
@@ -1969,8 +2070,8 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 这一条以前是「记一笔交给上游」——
 上游那份 `docs/frontend-design.md` 有同一张表，而它的内容已并入本文（§0），
 所以这张表现在是**本仓库自己的**。
-★ 本仓库当前的数：spec 文件 **23** 个、**290** 条；
-`web/test/e2e/chat.spec.ts` **71** 条。
+★ 本仓库当前的数：spec 文件 **24** 个、**311** 条；
+`web/test/e2e/chat.spec.ts` **74** 条。
 ★ 加用例时要改这张表 —— 它的作用是让「加了用例忘了改文档」变成一次 diff 冲突。
 
 ### 17.3 ★ 逐工具的结果摘要还没有 —— 这一轮决定交给上游。
@@ -2011,12 +2112,12 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 ★ **中断重跑不算失败**：审批在等答案（`compose.IsInterruptRerunError`）时，
   那一轮不是坏了 —— 把它读成失败，审批看起来就像出错。
 ★ **界面自己说**：一次失败的调用，卡片头部写 `failed`
-（`web/src/components/tool-card.tsx:179`），不写 `done` ——
+（`web/src/components/tool-card.tsx:183`），不写 `done` ——
 折叠状态说「done」是撒谎。
 **出处**：`helpers/toolfail.go`、`helpers/middleware.go`、`contract/runevent.go:43`、
 `agentkit/emit/emit.go:339`、`transport/transport.go:460`、`message/toolerror.go`、
 `api/v2_convert.go:90`、`web/src/lib/events.ts:531`、`web/src/lib/store/history.ts:62`、
-`web/src/components/tool-card.tsx:179`。
+`web/src/components/tool-card.tsx:183`。
 
 
 ### 17.5 ★ 已撤回的路线（不是待办）
@@ -2067,11 +2168,11 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | `api/v2_attachments.go:46` | 服务端自己 stat；目录不是附件 |
 | `api/v2_attachments.go:64` | 类型由服务端按名字判定 |
 | `api/v2_files.go:73` | `GET /v2/sessions/:id/files/raw` 路由 |
-| `api/v2_files.go:127` | `maxUploadBytes` = 32 MiB |
+| `api/v2_files.go:145` | `maxUploadBytes` = 32 MiB |
 | `api/v2_files.go:185` | 上传时在服务端压缩 |
 | `api/v2_files.go:201` | 哈希命名对**所有**文件 |
 | `api/v2_files.go:226` | `os.Chtimes` 把 mtime 钉成 t0 |
-| `api/v2_files.go:226` | `RecordUpload`：原名映射 |
+| `api/v2_files.go:244` | `RecordUpload`：原名映射 |
 | `api/v2_files.go:273` | raw 端点的四种响应 |
 | `api/v2_files.go:328` | `max` 只对图片有意义 |
 | `api/v2_files.go:347` | 文本类一律 `text/plain` |
@@ -2161,69 +2262,69 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | `web/src/lib/types.ts:50` | `Part` 联合类型 |
 | `web/src/lib/store/state.ts:8` | `Attachment` |
 | `web/src/lib/store/state.ts:33` | 待发清单按会话存放 |
-| `web/src/lib/store/actions.ts:566` | `removeFile`：删真文件，失败就把 chip 放回去 |
-| `web/src/lib/store/actions.ts:579` | 删失败时把 chip 放回去 |
-| `web/src/lib/store/actions.ts:590` | `send` |
-| `web/src/lib/store/actions.ts:603` | 取出待发清单 |
-| `web/src/lib/store/actions.ts:701` | 发完清空 |
-| `web/src/lib/store/actions.ts:696` | 请求体带上附件 |
-| `web/src/lib/store/actions.ts:709` | 被拒的一轮把文件还回 |
-| `web/src/lib/store/actions.ts:1465` | `appendLocalUserMessage`：乐观气泡 |
-| `web/src/lib/store/actions.ts:1502` | `restorePending` |
-| `web/src/lib/store/actions.ts:1525` | `restorePendingFiles` |
-| `web/src/lib/store/actions.ts:1535` | 「没有消息认领过」才是待发 |
-| `web/src/lib/store/actions.ts:1523` | 合并而不是覆盖 |
+| `web/src/lib/store/actions.ts:586` | `removeFile`：删真文件，失败就把 chip 放回去 |
+| `web/src/lib/store/actions.ts:599` | 删失败时把 chip 放回去 |
+| `web/src/lib/store/actions.ts:610` | `send` |
+| `web/src/lib/store/actions.ts:628` | 取出待发清单 |
+| `web/src/lib/store/actions.ts:708` | 发完清空 |
+| `web/src/lib/store/actions.ts:716` | 请求体带上附件 |
+| `web/src/lib/store/actions.ts:729` | 被拒的一轮把文件还回 |
+| `web/src/lib/store/actions.ts:1489` | `appendLocalUserMessage`：乐观气泡 |
+| `web/src/lib/store/actions.ts:1522` | `restorePending` |
+| `web/src/lib/store/actions.ts:1545` | `restorePendingFiles` |
+| `web/src/lib/store/actions.ts:1539` | 「没有消息认领过」才是待发 |
+| `web/src/lib/store/actions.ts:1527` | 合并而不是覆盖 |
 | `web/src/lib/store/history.ts:16` | `readAttachments` |
 | `web/src/lib/store/history.ts:100` | 历史水合时装配 part |
 | `web/src/lib/events.ts:188` | `isOpenPart`：联合类型变宽后的收窄 |
 | `web/src/lib/api.ts:370` | `fileUrl`：字符串而不是 fetch |
 | `web/src/lib/api.ts:752` | 请求体里的 `attachments` |
-| `web/src/lib/authorization.ts:21` | `AUTHORIZATION_OPTIONS`：三档的文案与顺序 |
-| `web/src/lib/authorization.ts:45` | `authorizationMode`：不认识的名字读作默认 |
+| `web/src/lib/authorization.ts:26` | `authorizationOptions`：三档的文案与顺序 |
+| `web/src/lib/authorization.ts:51` | `authorizationMode`：不认识的名字读作默认 |
 | `web/src/lib/store/actions.ts` `setAuthorizationMode` | ★ 改档位：合进服务端回来的 meta，失败再抛 |
 | `web/src/lib/store/selectors.ts` `selectAuthorizationMode` / `selectAuthorizationConfirmed` | ★ 引用稳定的原始值 |
-| `web/src/components/authorization-picker.tsx:61` | `AuthorizationPicker` |
-| `web/src/components/authorization-picker.tsx:75-90` | ★ 欢迎页上选 `full` 时本地弹确认框 |
-| `web/src/components/authorization-picker.tsx:186-190` | ★ 弹窗描述写着「下一轮生效」 |
-| `web/src/components/authorization-picker.tsx:253` | ★ `onEscapeKeyDown`：平台拥有的键 |
-| `web/src/components/composer.tsx:705-736` | 三个入口在同一个 `action` 槽里 |
+| `web/src/components/authorization-picker.tsx:62` | `AuthorizationPicker` |
+| `web/src/components/authorization-picker.tsx:77-92` | ★ 欢迎页上选 `full` 时本地弹确认框 |
+| `web/src/components/authorization-picker.tsx:188-192` | ★ 弹窗描述写着「下一轮生效」 |
+| `web/src/components/authorization-picker.tsx:257` | ★ `onEscapeKeyDown`：平台拥有的键 |
+| `web/src/components/composer.tsx:713-754` | 三个入口在同一个 `action` 槽里 |
 
 ### A.6 前端：预览与动效
 
 | 位置 | 说的是什么 |
 |---|---|
-| `web/src/lib/file-kind.ts:129` | `effectiveMime`：服务端的 mime 优先 |
-| `web/src/lib/file-kind.ts:173` | `isImage`：SVG 不是图片 |
-| `web/src/lib/file-kind.ts:197` | `fileKind` |
-| `web/src/lib/file-kind.ts:218` | `fileLang` |
-| `web/src/components/composer.tsx:540` | `onDragOver` |
-| `web/src/components/composer.tsx:553` | `onDrop` |
-| `web/src/components/composer.tsx:563-566` | `<input type="file">` |
-| `web/src/components/composer.tsx:618` | `onPaste` |
-| `web/src/components/composer.tsx:628` | 粘贴时 `preventDefault()` |
-| `web/src/components/attachment-chip.tsx:40` | `THUMB` = 48 |
-| `web/src/components/attachment-chip.tsx:62` | `AttachmentChip` |
-| `web/src/components/attachment-chip.tsx:179` | 缩略图在出站时缩放 |
-| `web/src/components/attachment-chip.tsx:182` | `onError` 回退成图标 |
-| `web/src/components/file-preview.tsx:27` | `FilePreview` 覆盖层 |
-| `web/src/components/file-preview.tsx:45` | Esc 关闭 |
-| `web/src/components/file-preview.tsx:81` | PDF 内嵌 |
-| `web/src/components/file-preview.tsx:181` | 文本预览 |
-| `web/src/components/markdown.tsx:43` | `MarkdownText` |
+| `web/src/lib/file-kind.ts:133` | `effectiveMime`：服务端的 mime 优先 |
+| `web/src/lib/file-kind.ts:177` | `isImage`：SVG 不是图片 |
+| `web/src/lib/file-kind.ts:201` | `fileKind` |
+| `web/src/lib/file-kind.ts:222` | `fileLang` |
+| `web/src/components/composer.tsx:542` | `onDragOver` |
+| `web/src/components/composer.tsx:555` | `onDrop` |
+| `web/src/components/composer.tsx:565-568` | `<input type="file">` |
+| `web/src/components/composer.tsx:622` | `onPaste` |
+| `web/src/components/composer.tsx:632` | 粘贴时 `preventDefault()` |
+| `web/src/components/attachment-chip.tsx:41` | `THUMB` = 48 |
+| `web/src/components/attachment-chip.tsx:63` | `AttachmentChip` |
+| `web/src/components/attachment-chip.tsx:181` | 缩略图在出站时缩放 |
+| `web/src/components/attachment-chip.tsx:184` | `onError` 回退成图标 |
+| `web/src/components/file-preview.tsx:28` | `FilePreview` 覆盖层 |
+| `web/src/components/file-preview.tsx:47` | Esc 关闭 |
+| `web/src/components/file-preview.tsx:83` | PDF 内嵌 |
+| `web/src/components/file-preview.tsx:185` | 文本预览 |
+| `web/src/components/markdown.tsx:53` | `MarkdownText` |
 | `web/src/components/code-block.tsx:6` | `CodeBlock` |
-| `web/src/components/message-parts.tsx:108` | `case "attachment"` |
-| `web/src/components/message-list.tsx:120` | `ResizeObserver`：按内容高度跟随 |
-| `web/src/components/message-list.tsx:214` | 欢迎页 hero 的品牌标记 |
-| `web/src/components/message-list.tsx:233` | 「Working…」的 pulse 点 |
-| `web/src/app/shell.tsx:27` | 状态点的 pulse |
-| `web/src/app/shell.tsx:163` | 页头的品牌标记（不播） |
-| `web/src/components/tool-card.tsx:133` | 折叠箭头 |
-| `web/src/components/ui/dialog.tsx:42` | 对话框浮层的 `data-open` |
-| `web/src/index.css:96` | 动效令牌 |
-| `web/src/index.css:205` | `prefers-reduced-motion` 的全局规则 |
-| `web/src/index.css:315` | 三个 `@keyframes` |
-| `web/src/index.css:344` | `.mark-parts` 只淡入 |
-| `web/src/index.css:357` | `transform-box: fill-box` |
+| `web/src/components/message-parts.tsx:110` | `case "attachment"` |
+| `web/src/components/message-list.tsx:122` | `ResizeObserver`：按内容高度跟随 |
+| `web/src/components/message-list.tsx:217` | 欢迎页 hero 的品牌标记 |
+| `web/src/components/message-list.tsx:237` | 「Working…」的 pulse 点 |
+| `web/src/app/shell.tsx:29` | 状态点的 pulse |
+| `web/src/app/shell.tsx:167` | 页头的品牌标记（不播） |
+| `web/src/components/tool-card.tsx:135` | 折叠箭头 |
+| `web/src/components/ui/dialog.tsx:43` | 对话框浮层的 `data-open` |
+| `web/src/index.css:121` | 动效令牌 |
+| `web/src/index.css:230` | `prefers-reduced-motion` 的全局规则 |
+| `web/src/index.css:340` | 三个 `@keyframes` |
+| `web/src/index.css:369` | `.mark-parts` 只淡入 |
+| `web/src/index.css:382` | `transform-box: fill-box` |
 | `web/src/components/brand-mark.tsx:14` | `BrandMark`：内联 SVG 的理由 |
 | `web/src/components/brand-mark.generated.tsx:29` | `role="img"` / `aria-hidden` |
 | `web/src/components/brand-mark.generated.tsx:35` | `<title>openheron</title>` |
@@ -2240,24 +2341,24 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 
 | 位置 | 说的是什么 |
 |---|---|
-| `web/src/components/operations-panel.tsx:28` | `OperationsPanel`：入口与弹窗 |
-| `web/src/components/operations-panel.tsx:68` | ★ 按钮与弹窗住在一个 wrapper 里 |
-| `web/src/components/operations-panel.tsx:97` | ★ Esc 走 `onEscapeKeyDown` |
-| `web/src/components/operations-panel.tsx:131` | 列表：`min-h-0 flex-1 overflow-y-auto` |
-| `web/src/components/operations-panel.tsx:188` | 十一种 `kind` 的英文句子 |
-| `web/src/components/operations-panel.tsx:271` | 颜色只用令牌 |
-| `web/src/components/operations-panel.tsx:286` | `formatAt`：时间自己写，不跟 locale |
+| `web/src/components/operations-panel.tsx:30` | `OperationsPanel`：入口与弹窗 |
+| `web/src/components/operations-panel.tsx:71` | ★ 按钮与弹窗住在一个 wrapper 里 |
+| `web/src/components/operations-panel.tsx:100` | ★ Esc 走 `onEscapeKeyDown` |
+| `web/src/components/operations-panel.tsx:132` | 列表：`min-h-0 flex-1 overflow-y-auto` |
+| `web/src/components/operations-panel.tsx:190` | 十一种 `kind` 的英文句子 |
+| `web/src/components/operations-panel.tsx:297` | 颜色只用令牌 |
+| `web/src/components/operations-panel.tsx:312` | `formatAt`：时间自己写，不跟 locale |
 | `web/src/lib/api.ts:121` | `OperationView` |
 | `web/src/lib/api.ts:150` | `OperationsView` |
 | `web/src/lib/api.ts:505` | `listOperations` |
 | `web/src/lib/store/state.ts:27` | `SessionEntry.operations` |
-| `web/src/lib/store/state.ts:118` | `loadOperations` |
-| `web/src/lib/store/actions.ts:430` | `loadOperations` 的实现 |
-| `web/src/lib/store/actions.ts:1105-1111` | ★ 通道的事实到达时重读日志 |
+| `web/src/lib/store/state.ts:133` | `loadOperations` |
+| `web/src/lib/store/actions.ts:436` | `loadOperations` 的实现 |
+| `web/src/lib/store/actions.ts:1111-1117` | ★ 通道的事实到达时重读日志 |
 | `web/src/lib/store/selectors.ts:69` | `EMPTY_OPERATIONS` |
 | `web/src/lib/store/selectors.ts:150-166` | `selectAuthorizationMode` / `selectAuthorizationConfirmed`（没有会话时读暂存值） |
-| `web/src/lib/store/selectors.ts:73` | `selectOperations` |
-| `web/src/components/composer.tsx:716` | `action` 槽：授权 → 项目 → 活动 |
+| `web/src/lib/store/selectors.ts:76` | `selectOperations` |
+| `web/src/components/composer.tsx:734` | `action` 槽：授权 → 项目 → 活动 |
 | `web/test/operations.test.ts` | selector 的引用稳定性 |
 | `web/test/e2e/operations.spec.ts` | 面板的验收 |
 
@@ -2265,18 +2366,18 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 
 | 位置 | 说的是什么 |
 |---|---|
-| `web/src/components/composer-meta.tsx:9` | `META`：那一行的行盒 |
-| `web/src/components/composer-meta.tsx:28` | ★ `Joined`：分隔符跟着后一项走 |
-| `web/src/components/composer-meta.tsx:134` | 事实那一半：agent / 模型 / 思考档位 / 上下文 |
-| `web/src/components/composer-meta.tsx:203-204` | `contents` 包装与 `action` 槽 |
-| `web/src/components/composer.tsx:513` | ★ `@container`：那一行的宽度判据是**列**，不是窗口（§5.6.5） |
-| `web/src/components/composer.tsx:726` | ★ 入口节点：列窄时与事实同一行，右对齐 |
-| `web/src/components/projects-dialog.tsx:71-74` | ★ 项目名截断，全名留在 tooltip 与 `aria-label` |
-| `web/src/components/authorization-picker.tsx:159-167` | ★ 列窄时让位的那个词（档位名） |
-| `web/src/components/projects-dialog.tsx:88`、`:111` | ★ 列窄时让位的那个词（项目名） |
-| `web/src/components/operations-panel.tsx:90` | ★ 列窄时让位的那个词（Activity） |
-| `web/src/components/composer-meta.tsx:159` | ★ 模型名：列窄时唯一让位的那一项（`shrink` + 上限） |
-| `web/src/components/composer-meta.tsx:268` | 占用条：列窄时短一截 |
+| `web/src/components/composer-meta.tsx:11` | `META`：那一行的行盒 |
+| `web/src/components/composer-meta.tsx:30` | ★ `Joined`：分隔符跟着后一项走 |
+| `web/src/components/composer-meta.tsx:119` | 事实那一半：agent / 模型 / 思考档位 / 上下文 |
+| `web/src/components/composer-meta.tsx:230-231` | `contents` 包装与 `action` 槽 |
+| `web/src/components/composer.tsx:515` | ★ `@container`：那一行的宽度判据是**列**，不是窗口（§5.6.5） |
+| `web/src/components/composer.tsx:744` | ★ 入口节点：列窄时与事实同一行，右对齐 |
+| `web/src/components/projects-dialog.tsx:73-76` | ★ 项目名截断，全名留在 tooltip 与 `aria-label` |
+| `web/src/components/authorization-picker.tsx:161-169` | ★ 列窄时让位的那个词（档位名） |
+| `web/src/components/projects-dialog.tsx:90`、`:111` | ★ 列窄时让位的那个词（项目名） |
+| `web/src/components/operations-panel.tsx:93` | ★ 列窄时让位的那个词（Activity） |
+| `web/src/components/composer-meta.tsx:186` | ★ 模型名：列窄时唯一让位的那一项（`shrink` + 上限） |
+| `web/src/components/composer-meta.tsx:300` | 占用条：列窄时短一截 |
 | `web/test/e2e/composer-meta.spec.ts:147` | 列窄的验收（不溢出 / 不截断 / 分隔符不落单 / 事实与入口同一行 / 入口只留图标 / 让位的档位在提示里） |
 | `web/test/e2e/composer-meta.spec.ts:356` | ★ 宽窗窄列的验收（960×1440：入口只留图标，事实仍是完整版） |
 | `web/test/e2e/projects.spec.ts:671` | ★ 项目名很长时那一行也不溢出 |
@@ -2285,15 +2386,15 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 
 | 位置 | 说的是什么 |
 |---|---|
-| `web/src/lib/tool-groups.ts:34` | `segments`：连续的调用并成一段 |
-| `web/src/lib/tool-groups.ts:83` | `summarize`：几步、哪些工具、成了没有 |
-| `web/src/lib/tool-groups.ts:117` | `phaseLabel`：阶段的那句英文 |
-| `web/src/components/tool-group.tsx:25` | `ToolGroup`：组条与那几行 |
-| `web/src/components/message-parts.tsx:71` | ★ 消息里的调用按段渲染 |
-| `web/src/components/tool-card.tsx:194` | ★ 结果先于参数 |
-| `web/src/components/tool-card.tsx:179` | ★ 一次失败的调用，卡片头部说 `failed` |
+| `web/src/lib/tool-groups.ts:36` | `segments`：连续的调用并成一段 |
+| `web/src/lib/tool-groups.ts:85` | `summarize`：几步、哪些工具、成了没有 |
+| `web/src/lib/tool-groups.ts:120` | `phaseLabel`：阶段的那句英文 |
+| `web/src/components/tool-group.tsx:26` | `ToolGroup`：组条与那几行 |
+| `web/src/components/message-parts.tsx:73` | ★ 消息里的调用按段渲染 |
+| `web/src/components/tool-card.tsx:197-199` | ★ 结果先于参数 |
+| `web/src/components/tool-card.tsx:183` | ★ 一次失败的调用，卡片头部说 `failed` |
 | `web/test/tool-failure.test.ts:33` | 失败标志的纯函数用例 |
-| `web/test/tool-groups.test.ts:16` | 归并的边界与段的 key |
+| `web/test/tool-groups.test.ts:21` | 归并的边界与段的 key |
 | `web/test/fake-server.ts:1158` | `toolMany`：一条消息里的两次调用 |
 | `web/test/e2e/chat.spec.ts:1263` | 组的验收 |
 
@@ -2341,18 +2442,18 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | `web/src/lib/store/events.ts:10` | 模块级 `currentRunKey` |
 | `web/src/lib/store/events.ts:12-23` | `handleEvent` |
 | `web/src/lib/store/events.ts:25-49` | `promote`：就地换键（并把暂存的档位清掉） |
-| `web/src/lib/store/actions.ts:183` | `useStore = create<StoreState>` |
-| `web/src/lib/store/actions.ts:353-381` | `openSession`：`convo` 懒加载 |
-| `web/src/lib/store/actions.ts:442-456` | `startNewThread`：不碰服务端 |
-| `web/src/lib/store/actions.ts:507-528` | 改名乐观更新与回滚 |
-| `web/src/lib/store/actions.ts:530` | 删掉正在看的那条 ⇒ 回欢迎界面 |
-| `web/src/lib/store/actions.ts:610` | `pending:<时间戳>` 这个仅内存的键 |
-| `web/src/lib/store/actions.ts:474-506` | `setAuthorizationMode`：没有会话时**暂存** |
-| `web/src/lib/store/actions.ts:1434-1442` | `ensureSession` 建会话时带上暂存的档位 |
-| `web/src/lib/store/actions.ts:669-697` | 建会话成功后立刻 promote |
-| `web/src/lib/store/actions.ts:1229-1233` | 一次答完整组 |
-| `web/src/lib/store/actions.ts:1257-1290` | `stop()` 的三步 |
-| `web/src/lib/store/history.ts:159-170` | 从 `pendingApprovals` 恢复审批 |
+| `web/src/lib/store/actions.ts:177` | `useStore = create<StoreState>` |
+| `web/src/lib/store/actions.ts:359-385` | `openSession`：`convo` 懒加载 |
+| `web/src/lib/store/actions.ts:448-462` | `startNewThread`：不碰服务端 |
+| `web/src/lib/store/actions.ts:511-513` | 改名乐观更新与回滚 |
+| `web/src/lib/store/actions.ts:536` | 删掉正在看的那条 ⇒ 回欢迎界面 |
+| `web/src/lib/store/actions.ts:616` | `pending:<时间戳>` 这个仅内存的键 |
+| `web/src/lib/store/actions.ts:480-506` | `setAuthorizationMode`：没有会话时**暂存** |
+| `web/src/lib/store/actions.ts:1433-1450` | `ensureSession` 建会话时带上暂存的档位 |
+| `web/src/lib/store/actions.ts:696` | 建会话成功后立刻 promote |
+| `web/src/lib/store/actions.ts:1218-1261` | 一次答完整组 |
+| `web/src/lib/store/actions.ts:1263-1269` | `stop()` 的三步 |
+| `web/src/lib/store/history.ts:161-172` | 从 `pendingApprovals` 恢复审批 |
 | `web/src/lib/store/history.ts:62` | `readToolError`：历史里的失败是事实 |
 | `web/src/lib/store/history.ts:93` | 水合时把失败补回工具卡 |
 | `web/src/lib/api.ts:536` | `listAgents` 用 `cache: "no-store"` |
@@ -2365,59 +2466,60 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 
 | 位置 | 说的是什么 |
 |---|---|
-| `web/src/app/shell.tsx:25-30` | 状态点的两档 |
-| `web/src/app/shell.tsx:195` | 审批卡取代 composer |
-| `web/src/components/sidebar.tsx:102` | 侧栏：宽度是 token，高度是**屏幕**的（`min-h-0`） |
-| `web/src/components/sidebar.tsx:564` | `thread-row` |
-| `web/src/components/sidebar.tsx:569` | `thread-item` |
-| `web/src/components/sidebar.tsx:593` | 行自己的菜单键（窄屏上一直显形） |
-| `web/src/app/shell.tsx:23` | `WIDE` —— 断点本身 |
-| `web/src/app/shell.tsx:137-140` | 一个侧栏：宽屏常驻，窄屏是抽屉 |
-| `web/src/app/shell.tsx:152` | 聊天列：高度是**框架**的（`min-h-0`） |
-| `web/src/components/sidebar-drawer.tsx:33-53` | 抽屉本体（Radix Dialog） |
-| `web/src/components/sidebar-drawer.tsx:44` | 抽屉的高度是**屏幕**的高度（`inset-y-0`） |
-| `web/src/components/sidebar.tsx:127` | 会话树的滚动容器（`min-h-0 flex-1 overflow-y-auto`） |
+| `web/src/app/shell.tsx:28-33` | 状态点的两档 |
+| `web/src/app/shell.tsx:218` | 审批卡取代 composer |
+| `web/src/components/sidebar.tsx:104` | 侧栏：宽度是 token，高度是**屏幕**的（`min-h-0`） |
+| `web/src/components/sidebar.tsx:582` | `thread-row` |
+| `web/src/components/sidebar.tsx:587` | `thread-item` |
+| `web/src/components/sidebar.tsx:613` | 行自己的菜单键（窄屏上一直显形） |
+| `web/src/app/shell.tsx:26` | `WIDE` —— 断点本身 |
+| `web/src/app/shell.tsx:141-144` | 一个侧栏：宽屏常驻，窄屏是抽屉 |
+| `web/src/app/shell.tsx:156` | 聊天列：高度是**框架**的（`min-h-0`） |
+| `web/src/components/sidebar-drawer.tsx:35-57` | 抽屉本体（Radix Dialog） |
+| `web/src/components/sidebar-drawer.tsx:46` | 抽屉的高度是**屏幕**的高度（`inset-y-0`） |
+| `web/src/components/sidebar.tsx:129` | 会话树的滚动容器（`min-h-0 flex-1 overflow-y-auto`） |
 | `web/src/lib/use-media-query.ts:19` | `useMediaQuery` |
-| `web/src/index.css:31` | `--sidebar-width` |
-| `web/src/index.css:37` | `--touch-target` |
-| `web/src/index.css:43-46` | 安全区的四个 `env()` |
-| `web/src/index.css:234` | `.touch-target` —— 伪元素撑开命中区域 |
-| `web/src/index.css:261` | `.app-frame` —— 安全区加在框架上 |
-| `web/src/index.css:290` | `.thread-row-menu` —— 窄屏上一直显形 |
+| `web/src/index.css:51` | `--welcome-column` —— 欢迎页那一列，留在 48rem 以上 |
+| `web/src/index.css:56` | `--sidebar-width` |
+| `web/src/index.css:62` | `--touch-target` |
+| `web/src/index.css:68-71` | 安全区的四个 `env()` |
+| `web/src/index.css:259` | `.touch-target` —— 伪元素撑开命中区域 |
+| `web/src/index.css:286` | `.app-frame` —— 安全区加在框架上 |
+| `web/src/index.css:315` | `.thread-row-menu` —— 窄屏上一直显形 |
 | `web/test/e2e/responsive.spec.ts` | 三档视口的回归网（§5.9.6） |
 | `web/src/lib/scroll-follow.ts:13` | `BOTTOM_TOLERANCE` = 32 |
-| `web/src/components/message-list.tsx:134-139` | Jump to latest 是瞬时滚动 |
-| `web/src/components/message-list.tsx:266` | 每条消息一个节点 |
-| `web/src/components/message-list.tsx:271` | 轮间 `mt-6` / 轮内 `mt-1.5` |
-| `web/src/components/message-list.tsx:283-290` | 多 agent 时角色标签显示 agent 名 |
-| `web/src/components/message-list.tsx:297-317` | 加载骨架 |
-| `web/src/components/composer.tsx:264-279` | 焦点回到输入框 |
-| `web/src/components/composer.tsx:690-702` | 停止按钮取代发送按钮 |
-| `web/src/components/composer.tsx:726-734` | 三个入口在同一个节点里 |
-| `web/src/components/composer-meta.tsx:129-131` | `reasoningAvailable` 只进 title |
-| `web/src/components/composer-meta.tsx:217-284` | 上下文占用 |
-| `web/src/components/markdown.tsx:45-46` | 不开 `rehype-raw` |
-| `web/src/components/markdown.tsx:51` | 表格的滚动容器 |
-| `web/src/components/markdown.tsx:54` | 表格本身 `w-full` |
-| `web/src/components/markdown.tsx:63` | 单元格的 `min-w` / `max-w` |
-| `web/src/components/markdown.tsx:106-133` | 清单的覆写 |
-| `web/src/components/markdown.tsx:150` | 正文 15px / 1.75 / break-words |
+| `web/src/components/message-list.tsx:120-136` | Jump to latest 是瞬时滚动 |
+| `web/src/components/message-list.tsx:270` | 每条消息一个节点 |
+| `web/src/components/message-list.tsx:275` | 轮间 `mt-6` / 轮内 `mt-1.5` |
+| `web/src/components/message-list.tsx:276-287` | 多 agent 时角色标签显示 agent 名 |
+| `web/src/components/message-list.tsx:301-321` | 加载骨架 |
+| `web/src/components/composer.tsx:238-281` | 焦点回到输入框 |
+| `web/src/components/composer.tsx:698-699` | 停止按钮取代发送按钮 |
+| `web/src/components/composer.tsx:744-752` | 三个入口在同一个节点里 |
+| `web/src/components/composer-meta.tsx:139-144` | `reasoningAvailable` 只进 title |
+| `web/src/components/composer-meta.tsx:244-316` | 上下文占用 |
+| `web/src/components/markdown.tsx:65-66` | 不开 `rehype-raw` |
+| `web/src/components/markdown.tsx:71` | 表格的滚动容器 |
+| `web/src/components/markdown.tsx:74` | 表格本身 `w-full` |
+| `web/src/components/markdown.tsx:83` | 单元格的 `min-w` / `max-w` |
+| `web/src/components/markdown.tsx:94-126` | 清单的覆写 |
+| `web/src/components/markdown.tsx:170` | 正文 15px / 1.75 / break-words |
 | `web/src/lib/highlight.ts:20-42` | shiki 的动态 import |
 | `web/src/lib/highlight.ts:68` | `structure: "inline"` |
 | `web/src/lib/highlight.ts:70-72` | 高亮失败退回纯文本 |
 | `web/src/components/code-block.tsx:30-39` | 离屏不排高亮 |
 | `web/src/components/code-block.tsx:45-55` | 流式下不高亮正在写的那段 |
 | `web/src/lib/turns.ts:13-19` | 轮次边界与角色标签 |
-| `web/src/lib/approval.ts:4` | `MAX_ARGUMENT_CHARS` = 180 |
-| `web/src/lib/approval.ts:53-57` | 参数摘要归一与截断 |
-| `web/src/components/approval-card.tsx:51-91` | 审批卡逐条只列三样 |
-| `web/src/components/approval-card.tsx:112-119` | 整组一个同意/拒绝按钮 |
+| `web/src/lib/approval.ts:5` | `MAX_ARGUMENT_CHARS` = 180 |
+| `web/src/lib/approval.ts:55-59` | 参数摘要归一与截断 |
+| `web/src/components/approval-card.tsx:53-93` | 审批卡逐条只列三样 |
+| `web/src/components/approval-card.tsx:97-112` | 整组一个同意/拒绝按钮 |
 | `web/src/lib/agent-info.ts:14-22` | 按 id 选 agent |
 | `web/src/lib/agent-info.ts:81-107` | 配置指纹 |
 | `web/src/lib/use-agent-badge.ts:6` | `CONFIG_POLL_MS` = 3000 |
 | `web/src/lib/use-agent-badge.ts:64-82` | 轮询指纹 |
 | `web/src/lib/commands.ts:92-102` | `agentCommandFor` |
-| `web/src/lib/store/history.ts:128` | ★ `fromHistory` —— 今天没有任何读取方 |
+| `web/src/lib/store/history.ts:130` | ★ `fromHistory` —— 今天没有任何读取方 |
 
 ### A.13 前端：工程化与验收
 
@@ -2426,8 +2528,8 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | `main.go:42-43` | `//go:embed all:web/dist` |
 | `.env.test:25-39` | 测试环境的端口与路径 |
 | `web/playwright.config.ts:7-24` | `envFile()` |
-| `web/playwright.config.ts:44-60` | 两条 webServer，`reuseExistingServer: false` |
-| `web/playwright.config.ts:52-59` | 注入 `OPENHERON_API_TARGET` |
+| `web/playwright.config.ts:49-65` | 两条 webServer，`reuseExistingServer: false` |
+| `web/playwright.config.ts:61` | 注入 `OPENHERON_API_TARGET` |
 | `web/test/e2e/fixtures.ts:67-85` | 定位点常量 |
 | `web/test/e2e/fixtures.ts:87-111` | 点菜单走 `getByRole` |
 | `web/test/fake-server.ts:306` | `SCENARIOS`：32 个场景 |
@@ -2438,7 +2540,7 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | `web/src/lib/fixtures/recorded-run.ts:3` | 真后端录下的事件序列 |
 | `web/test/sse.test.ts:17-25` | 两种写法都收 |
 | `web/test/events.test.ts:9-30` | fixture 覆盖后端发出的每一种事件 |
-| `web/test/approval.test.ts:57-63` | 参数摘要 ≤ 180 |
+| `web/test/approval.test.ts:23-62` | 参数摘要 ≤ 180 |
 | `webui/webui.go:21` | API 前缀 |
 | `webui/webui.go:24-31` | `looksLikeAPI` |
 | `webui/webui.go:46-51` | 命中前缀回 404 + JSON |
@@ -2466,7 +2568,7 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 |---|---|
 | `transport/transport.go:77` | `RUN_STARTED` |
 | `transport/transport.go:88`、`:94` | `RUN_FINISHED`：interrupt / success |
-| `transport/transport.go:372` | `RUN_ERROR` |
+| `transport/transport.go:373-374` | `RUN_ERROR` |
 | `transport/transport.go:379` / `:390` / `:396` | 正文的三个事件 |
 | `transport/transport.go:400` | ★ `reasoningRole` = 字面量 `"reasoning"` |
 | `transport/transport.go:402-405` | 思维链开始 |

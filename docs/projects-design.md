@@ -211,7 +211,7 @@ openheron .
 分组是**纯函数**（仓库铁律：新逻辑放纯函数层，`bun test` 覆盖）：
 
 ```
-groupSessions(sessions, projects, scope) → Group[]
+groupSessions(sessions, projects, scope, t) → Group[]
 ```
 
 | scope | 返回 |
@@ -224,7 +224,7 @@ groupSessions(sessions, projects, scope) → Group[]
 
 ★ **前端不许自己判断模式**：它读服务端给的 `scope`。界面读服务端的答案，不读自己的记忆。
 
-★ **项目组一律画**（`web/src/lib/projects.ts:113` `groupSessions`）：表里有的项目就是一行，
+★ **项目组一律画**（`web/src/lib/projects.ts:132` `groupSessions`）：表里有的项目就是一行，
 哪怕它一个会话也没有。★ 那一行正是它的动作（改名、改目录、移除）住的地方 ——
 一个没有行的项目，用户既改不了名字，也扔不掉。
 
@@ -318,12 +318,12 @@ React 的 `preventDefault` 来不及 ⇒ 唯一能拦住的是 `onEscapeKeyDown`
 另起一个会话。⇒ 这个判断是一个**纯函数**（`projectSwitch`）：它是这套语义里唯一需要
 判断的地方，而需要判断的地方就该能被测。
 
-★ **New thread 把项目也放掉**（`web/src/lib/store/actions.ts:442` `startNewThread`）：上一段
+★ **New thread 把项目也放掉**（`web/src/lib/store/actions.ts:448` `startNewThread`）：上一段
 会话的项目是**那段会话的**，而会话的归属不可改 —— ⇒ 在用户为它选一个之前，新对话就是
 「**没有项目**」，输入框下方的按钮写 `Default Project`，下一段会话落在**默认项目根**。
 ★ 单项目模式例外：进程只服务一个目录，作用域就是答案，那里没有「没有项目」可选。
 ★ 侧栏项目行的 **New conversation** 是反过来的一条路：先把输入框放空，再把那个项目放进去
-（`web/src/lib/store/actions.ts:238` `startThreadInProject`）—— ★ 顺序反了，项目会被
+（`web/src/lib/store/actions.ts:239` `startThreadInProject`）—— ★ 顺序反了，项目会被
 `startNewThread` 抹掉。
 
 ★ **新建的项目走同一条路**（`createProject` → `switchProject`）：刚建的项目就是
@@ -602,14 +602,14 @@ CI 里有一个 `LISTEN_ADDR=0.0.0.0:9000`，openheron 的监听地址就被改�
 | 20 | `scripts/test-backend.sh:132-136` | 环境变量改名 | ★ 已落地 |
 | 21 | `sandbox-kit/openheron/entrypoint.sh:18-19,29,35,38` | 显式 `OPENHERON_CONFIG_ROOT`；`OPENHERON_LISTEN_ADDR`；`OPENHERON_DATA_DIR`；位置参数给项目 | ★ 已落地 |
 | 22 | `agentkit/build/skill.go:198-231` `ResolveSkillsDir` | ★ **设计里没写，但不改就坏**：配置根进解析链，否则技能一个都加载不到（见 §8） | ★ 已落地 |
-| 23 | `web/src/lib/projects.ts:113` `groupSessions` + `web/src/components/sidebar.tsx` | 侧栏分组 + 新会话选项目 | ★ 已落地 |
+| 23 | `web/src/lib/projects.ts:132` `groupSessions` + `web/src/components/sidebar.tsx` | 侧栏分组 + 新会话选项目 | ★ 已落地 |
 | 24 | `web/src/components/projects-dialog.tsx` `ProjectsButton` / `ProjectsDialog` | ★ **表的界面**：输入框下方的按钮（**写着当前项目**）；**选择**与**新建**（见 §3.5） | ★ 已落地 |
 | 25 | `agentkit/dirpick` + `api/v2_dirpick.go` `v2PickDirectory` | ★ **写面之二**：目录旁的文件夹按钮 —— **服务端**调起系统自己的选择器（浏览器给不了绝对路径，见 §3.5）；只有本机调用者能用 | ★ 已落地 |
 | 26 | `web/src/lib/projects.ts` `projectSwitch` + `web/src/lib/store/actions.ts` `switchProject` / `openSession` / `refreshList` | ★ **「当前项目」一份真相**（见 §3.6）：按钮切换、会话跟着走、`Default Project` 是一个选择 | ★ 已落地 |
 | 27 | `web/src/components/sidebar.tsx` + `web/src/components/projects-dialog.tsx` | ★ **侧栏的选择器删掉**；输入框下方的按钮**分两种形态**（空白页是开关、对话页是标签）；`Default Project` 进列表第一项 | ★ 已落地 |
 | 28 | `web/src/lib/projects.ts` `foldGroups` + `web/src/components/sidebar.tsx` | ★ **侧栏画成文件树**：三角 + 文件夹图标 + 缩进 + 折叠（记住在本机）+ `role="tree"` | ★ 已落地 |
 | 29 | `web/src/components/sidebar.tsx` 的项目行菜单 + `web/src/lib/store/actions.ts` `updateProject` | ★ **写面搬进侧栏**：改名 / 改目录 / 移除都在项目自己那一行上 | ★ 已落地 |
-| 30 | `web/src/lib/store/actions.ts` `startNewThread`（`:390`）/ `startThreadInProject`（`:208`） | ★ **New thread 把项目也放掉**：新对话在用户选之前是「没有项目」（§3.6）—— 上一段会话的项目不是它的；项目行的 New conversation 反过来，先放空再放项目 | ★ 已落地 |
+| 30 | `web/src/lib/store/actions.ts` `startNewThread`（`:448`）/ `startThreadInProject`（`:239`） | ★ **New thread 把项目也放掉**：新对话在用户选之前是「没有项目」（§3.6）—— 上一段会话的项目不是它的；项目行的 New conversation 反过来，先放空再放项目 | ★ 已落地 |
 
 ## 8. 落地顺序
 

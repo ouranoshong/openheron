@@ -228,7 +228,7 @@ openheron secret remove llm           # 删整组
 
 ### 5.1 位置
 
-Settings 对话框（`web/src/components/settings/settings-dialog.tsx:23-119`）加一个标签页：
+Settings 对话框（`web/src/components/settings/settings-dialog.tsx:26-126`）加一个标签页：
 
 ```
 ┌ Settings ──────────────────────────── [ Files ] [ Secrets ]  ✕ ┐
@@ -242,11 +242,11 @@ Settings 对话框（`web/src/components/settings/settings-dialog.tsx:23-119`）
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-面板是 `web/src/components/settings/secrets-panel.tsx:41-124`，标签条是同文件的
-`TabBar`（`:122-147`）。
+面板是 `web/src/components/settings/secrets-panel.tsx:42-151`，标签条是 Settings 对话框那个文件里的
+`TabBar`（`web/src/components/settings/settings-dialog.tsx:136-162`）。
 
 ★ **为什么不进左侧那棵文件树**：那棵树是**从服务端给的路径搭出来的**
-（`web/src/components/settings/file-list.tsx:23-26` 的注释写得很清楚：分区自己长什么样，这棵树
+（`web/src/components/settings/file-list.tsx:31-34` 的注释写得很清楚：分区自己长什么样，这棵树
 不关心）。秘密没有路径，进树里就是破坏那个模型。
 
 ★ **为什么不是侧边栏第二个按钮**：秘密是**配置**，配置聚在一处。

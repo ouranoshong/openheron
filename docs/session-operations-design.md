@@ -435,7 +435,7 @@ Operations() OperationLog
 ### 5.12 界面
 
 **入口**：输入框下方那一行的**最右端** —— `<ComposerMeta>` 的 `action` 节点
-（`web/src/components/composer.tsx:726-734`）：
+（`web/src/components/composer.tsx:744-752`）：
 
 ```tsx
 action={
@@ -448,18 +448,18 @@ action={
 ```
 
 ★ `ms-auto` 把这一组推到那一行的右端；`ComposerMeta` 把它渲染成那一行的
-**最后一个子节点**（`web/src/components/composer-meta.tsx:200-204`，
+**最后一个子节点**（`web/src/components/composer-meta.tsx:230-231`，
 `body` 用 `<div className="contents">` 包着，所以那一行里只有两个盒子参与排版）。
 
 ★ **列窄时这个入口只留时钟**（聊天列 < 768px —— ★ 判据是**列宽**，不是窗口宽，
 `docs/ui-design.md` §5.6.5）：`Activity` 这个词让位，时钟留着，
-而且它**和事实同一行**（`web/src/components/operations-panel.tsx:90`）。
+而且它**和事实同一行**（`web/src/components/operations-panel.tsx:93`）。
 ★ 让位的词没有丢：它在 `title` 与 `aria-label` 里。
 
 ★ **新按钮接在最后，不许插在中间**：React 按 index 对齐孩子，
 插在中间会把后面那个 entry 换掉 —— 那个 entry 里的弹窗会自己关上。
 
-★ **按钮和它的弹窗包在同一个 wrapper 里**（`web/src/components/operations-panel.tsx:68`：
+★ **按钮和它的弹窗包在同一个 wrapper 里**（`web/src/components/operations-panel.tsx:71`：
 一个 `<span>` 包住按钮 + 那个 `Dialog`）。条件渲染的东西要放在 wrapper **内部**，
 放在外面就会挪动这个 entry 的 index。
 
@@ -468,8 +468,9 @@ action={
 一个菜单项不值得一整套浮层基建。
 
 **面板**：`web/src/components/operations-panel.tsx`。
-Radix 的 `Dialog`，壳是 `sm:max-w-2xl h-[85vh] flex flex-col gap-3 p-4`
-（照 `web/src/components/settings/settings-dialog.tsx:47-48`）。
+Radix 的 `Dialog`，壳是 `sm:max-w-2xl h-[85dvh] flex flex-col gap-3 p-4`
+（`web/src/components/operations-panel.tsx:99`）。★ 它**不**照设置面板 —— 那个铺满整屏
+（`docs/ui-design.md` §5.9.5），这个是一张卡片。
 一个可滚动列表（`min-h-0 flex-1 overflow-y-auto`），每条一行：
 **时间** + **一句话** + **标识**（run id / interrupt id / 路径 / agent / 档位 / 大小）。
 

@@ -684,7 +684,7 @@ marker says where the cut happened.
 **What the client does with the marker.** The messages view stamps it on the message
 (`api/v2_convert.go:63`), the history hydration reads it (`web/src/lib/store/history.ts:42`),
 and the message list draws a divider in place of the chat bubble
-(`web/src/components/message-list.tsx:156`, drawn by
+(`web/src/components/message-list.tsx:158`, drawn by
 `web/src/components/compaction-divider.tsx`). A compaction that happens **mid-turn** is
 announced on the stream instead: the transport emits a `CUSTOM "context_compacted"` event
 (`transport/transport.go:266`) and the reducer puts a boundary into the list at once
@@ -1689,13 +1689,30 @@ the DOM is not the problem and virtualization would buy nothing.
 | Token | What it is |
 |---|---|
 | `--chat-column` | the column the conversation lives in (64rem) |
-| `--prose-column` | the width the **text** inside it stops at (46rem) |
+| `--prose-column` | the **measure** of running text that is read on its own (46rem) |
+| `--welcome-column` | the width of the **welcome page** — one question, not an answer (52rem) |
 | `--chat-gutter` | the space on both sides of the column |
 
-★ The two widths are different **on purpose**. The column is wide so that a table or a code
-block fits whole; a paragraph of sixty characters is a hard read, so the prose stops
-earlier. The **blocks** take the whole column and only the text is held back — which is why
-the cap sits on the text elements (`markdown.tsx`'s `PROSE`) and not on the message bubble.
+★ The conversation is **that column**, and the text in it **fills** it. The prose used to stop
+short of the column's right edge while the user's bubble sat on that edge — so on a wide
+screen the answer looked pushed to the left and the right half of the window stayed empty.
+⇒ The cap left the message. What is left is a **measure** for what is read **on its own** — a
+**document** (the file preview), where running text is read alone and a paragraph of sixty
+characters is a hard read. ★ That is why `markdown.tsx` carries two classes: `FILL` for a
+message, `PROSE` for a document.
+
+★ The **welcome page** has a width of its own (`--welcome-column`, `web/src/app/shell.tsx`):
+that page holds one question, not a long answer, so at the column's width the box stretched
+across half the window. ★ The whole block narrows with it — the mark, the line of copy and
+the line of facts under the box — because narrowing only the box would leave that line
+sticking out on both sides of it.
+
+★ **The welcome column stays above 48rem, on purpose.** The line of facts under the box
+drops its names below that width: the project and the authorization mode become icons with
+tooltips. ★ The welcome page is the **first** screen — the project is what the conversation
+works in, and the authorization mode is a decision about what the agent may do on its own —
+so those two have to be readable there. ⇒ 52rem: narrower than the conversation, wide enough
+for the line under the box to keep its words.
 
 ★ A table has **two** limits, and they answer different questions: a **floor** of 7rem per
 column is what makes a table of many columns overflow and scroll inside its own wrapper, and
@@ -1781,6 +1798,58 @@ it before it looks at `defaultPrevented`.
 ★ **The general rule**: when the platform owns a key, use the hook it offers rather
 than fighting it from the inside. A `preventDefault` in a handler that runs *after*
 the platform's is a line of code that looks like it should work — and does not.
+
+### 4.9 ★ The interface's language
+
+★ **The copy is a catalog, not a string in the code.** Every entry in
+`web/src/lib/locales/parts/` carries its English and its Chinese side by side:
+
+```ts
+export const composer = {
+  "composer.input.placeholder": { en: "Send a message...", zh: "" },
+} as const
+```
+
+⇒ A sentence is written **once**, in one place, in both languages. The key set is a
+**type** (`MessageKey` is `keyof typeof catalog`), so a key that does not exist is a
+**compile error** where it is used — not a hole in the interface at runtime.
+
+★ `zh: ""` means **not written yet**: the interface falls back to the English, and
+`web/test/i18n.test.ts` counts how many sentences are still missing.
+
+★ **How to add a string**: add the entry to the part file of that surface (both
+languages), then use it in the component:
+
+```tsx
+const t = useT()
+…
+<button title={t("composer.input.placeholder")}>{t("composer.input.placeholder")}</button>
+```
+
+★ **Two checks run in CI** (`web/test/i18n.test.ts`): no key that nothing reads, and no
+English written straight into a component. ★ A sentence written into the component cannot be
+translated — that check is what stops it.
+
+★ The pure functions in `lib/` that produce copy (the tool titles, the authorization
+modes, the thinking label) cannot use a hook — a hook would make them impure — so they
+**take the translator as an argument**: `toolTitle(name, t)`. The caller passes the one it
+has. ★ A language that has not written the string yet falls back to **English**: a rough
+edge is better than an empty space.
+
+★ **The language is decided in one place** (`web/src/lib/i18n.ts`): the stored preference
+first, then the browser's language, then English. A stored preference beats the browser —
+the user said which language they want, and the browser is only a guess. The choice also
+lands on `<html lang>`, because a screen reader pronouncing Chinese with English rules
+gets the pauses and the word breaks wrong.
+
+★ **The runtime stays English in every language** (AGENTS.md): the sentences the server
+sends are the server's English, and the interface shows them as they are. Model output,
+tool names and the hand-written timestamp format are not translated either.
+
+★ **The tests pin the language once**: `web/playwright.config.ts` sets `locale: "en-US"`,
+so `navigator.language` is English and the specs that assert the English copy keep
+passing. ⇒ Without that line, a developer whose browser is Chinese sees the whole suite
+go red.
 
 ## 5. Testing
 
@@ -1947,9 +2016,9 @@ had drifted (`corpus` where the loader says `corpus_dir`). `settings-validate.ts
 string shaping and rendering: `issueLine`, `suggestPath`, `resolveTemplate`.
 
 ★ **What replaced it is a round trip with a stamp.** An edit schedules one question 250 ms
-after the typing stops (`web/src/lib/settings-store.ts:261` `scheduleValidate`), and a
+after the typing stops (`web/src/lib/settings-store.ts:269` `scheduleValidate`), and a
 save asks again immediately and cancels the pending one. Every reply is stamped
-(`:229` `validateSeq`): a reply that is no longer the newest, or no longer about the
+(`:42` `validateSeq`): a reply that is no longer the newest, or no longer about the
 selected file, is dropped — otherwise the slower of two answers wins, which is the one
 about text the user has already changed.
 
@@ -2228,7 +2297,7 @@ the current state of the code, not a to-do list** — fixing one is a separate c
 |---|---|---|
 | **Usage on a live stream is not accounted per agent** | `contract.Usage` has no `byAgent` field; the frontend's `toUsage` at `events.ts:552` maps only flat counts | `usage.byAgent` **exists only with history hydration**. So in a fresh turn the agent filter's tooltips show no cumulative token counts — they appear once you reload (pulling history). The **context occupancy** is live (§3.7): it arrives as its own `context_usage` event. E2E missed the gap because it tests a **seeded history thread**. |
 | **A broken SSE stream does not reconnect** | `web/src/lib/api.ts` | A broken stream is simply broken: it goes to `onError` → the error panel, and the user has to resend. There is no reconnect and no resume-from-offset. |
-| **The conflict dialog does not show the on-disk version** | `web/src/components/settings/conflict-dialog.tsx:18-23` | It shows only your stale `baseRevision` plus a hard-coded "changed by someone else", and **never fetches the disk version**. There is no "overwrite anyway" button either — "Keep editing" merely clears the conflict marker, so the next save resends the same stale revision and conflicts again. |
+| **The conflict dialog does not show the on-disk version** | `web/src/components/settings/conflict-dialog.tsx:20-25` | It shows only your stale `baseRevision` plus a hard-coded "changed by someone else", and **never fetches the disk version**. There is no "overwrite anyway" button either — "Keep editing" merely clears the conflict marker, so the next save resends the same stale revision and conflicts again. |
 | **Four runtime dependencies sit in `devDependencies`** | `web/package.json` | `lucide-react` (imported by 10 files), `clsx`, `tailwind-merge` and `class-variance-authority` are all imported by `src/` and bundled into `web/dist`. The build passes (Vite resolves them at build time), but the manifest is wrong. |
 | **The comment at `api/server.go:144` points at a route that does not exist** | that line | The comment says "GET /v2/spec", but `SetSkillsSource` actually feeds `/v2/skills`. |
 | **A leftover `policy/` directory is dropped — the configuration still loads** | the loader walks the six partitions (`agentkit/spec/config.go:995-1008`); a retired directory is noticed, not read (`noteRetiredDirs`, `agentkit/spec/config.go:1040`) | The `policy/` partition was retired on 2026-11-07: the tiers live in the files that provide the tools, and the default tier is `ask`. A `policy/permissions.yaml` left over from before is **not read** — a tool that used to be denied now asks, and one that used to run without a nod now asks too. ★ The notice lands in `deferred` (the startup log and `/v2/health` carry it) and names the new home; the settings editor refuses the path outright ("unknown config section", `agentkit/spec/write.go:116`). ★ An **empty** `policy/` directory raises nothing — it holds nothing that was dropped. |

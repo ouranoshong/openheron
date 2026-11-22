@@ -220,13 +220,13 @@ run 没有主人了：没有东西会结束它，也没有东西会归档它的�
 
 | 标记从前从哪来 | 标记现在从哪来 |
 |---|---|
-| 流结束 → 假定空闲 | 流结束 → **重新扫描**（`web/src/lib/store/actions.ts:736`） |
-| `stop()` 乐观地置 `busy: false` | `stop()` → 发 abort → **重新扫描** → 再决定（`web/src/lib/store/actions.ts:1275`） |
+| 流结束 → 假定空闲 | 流结束 → **重新扫描**（`web/src/lib/store/actions.ts:756`） |
+| `stop()` 乐观地置 `busy: false` | `stop()` → 发 abort → **重新扫描** → 再决定（`web/src/lib/store/actions.ts:1263-1295`） |
 | 409 `session_busy` → 标记忙 | 不变 —— 但这条消息背后现在是一个扫描出来的事实 |
 | 页面加载 → 读 `state` | 不变 —— 扫的是账本 |
 
 ★ **一句话规则：客户端只有在扫描发话时才可以清掉 `busy`。** 扫描失败就让标记留在
-原样（`web/src/lib/store/actions.ts:1162-1169`）—— 猜正是扫描要治的病。
+原样（`web/src/lib/store/actions.ts:1180-1188`）—— 猜正是扫描要治的病。
 
 ★ **「栅栏换扫描」到客户端为止，而且只能到客户端为止。** 响应路径上那道栅栏回答的
 是另一个问题：「一个刚读完这个响应结尾的调用方，能不能立刻发下一条？」账本回答得
@@ -345,7 +345,7 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
   的 `onDone` 带着这个事实走（`web/src/lib/api.ts:788`）。★ **这是唯一能分开两者的信号**：
   响应体结束这件事，两边一模一样。
 - ★ **切了的那一轮，客户端去问账本。** 恢复的动作是 `recoverRound`
-  （`web/src/lib/store/actions.ts:866`）：★ **线上答不了这个问题** —— 流就是被切的那一样东西，
+  （`web/src/lib/store/actions.ts:886`）：★ **线上答不了这个问题** —— 流就是被切的那一样东西，
   再挂一次很可能被同样地切掉。★ 账本答得了：`GET /v2/sessions/{id}/runs` 的 `activeRunId`
   是「这一轮还在不在」的权威，而**等着审批的那一轮算已经结束**
   （`storage/runledger.go:83-90` 的 `IsTerminal`）—— 审批一抛出来，`activeRunId` 就是空的。
@@ -353,7 +353,7 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
   审批在 `GET /v2/sessions/{id}/messages` 的 `pendingApprovals` 里，客户端重读一遍
   transcript，卡片就回来了（`web/src/lib/store/history.ts:67` 的 `seedFromHistory`）。
   ★ 还有活跃的一轮 ⇒ 这一轮还在跑 ⇒ 客户端重新挂上去（`reattach`，
-  `web/src/lib/store/actions.ts:758`），剩下的部分照常渲染，审批照常到达。
+  `web/src/lib/store/actions.ts:778`），剩下的部分照常渲染，审批照常到达。
 - ★ **`run_not_live` 说的是「运行时的 turn 没了」，不是「transcript 里已经有审批了」。**
   ★ 服务端拒绝挂靠，看的是**运行时的易失 turn**（`agentkit/run/runtime.go:1060-1074` 的
   `LiveRun`）。★ 这个指针**曾经**在审批落盘之前就被释放（`loopExited` 里那句
@@ -375,7 +375,7 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 - ★ **要跟哪一轮，由账本说了算。** ★ 会话自己记住的那个 run id 是「这个界面最后看见的
   那一轮」，而**答完审批之后的那一轮是新的 run** —— 客户端要等它 announce 才知道它的 id。
   ★ 于是「挂回去」若用会话记住的 id，挂的是上一轮（早就结束的那一轮）；账本的
-  `activeRunId` 才是「还在跑的那一轮」（`reattach`，`web/src/lib/store/actions.ts:758`）。
+  `activeRunId` 才是「还在跑的那一轮」（`reattach`，`web/src/lib/store/actions.ts:778`）。
 - ★ **恢复有护栏。** 重新挂上去最多三次（`RECOVER_ATTACH_LIMIT`）：★ 被切的流再挂一次很可能
   再被切一次，而每一次重挂都把这一轮的事件重放一遍 —— 一个已经读不动的客户端不该被这样喂。
   超过上限就改成**等**：读账本，等这一轮结束，然后读 transcript。★ 用户已经走开的那一轮
@@ -452,9 +452,9 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 ★ **客户端这一边**（`web/src/lib/session-events.ts`）：`approval_pending` 把那张卡**并进**
 对话（按 id 去重 —— 发起那一轮的那一边是从轮次自己的流里看到同一张卡的），
 `approval_resolved` 把那张卡拿掉，`run_started` 让这一边跟上去
-（`web/src/lib/store/actions.ts:1096` 的 `followRun`）。
+（`web/src/lib/store/actions.ts:1132` 的 `followRun`）。
 ★ **一次只跟一条流**：还握着上一轮的时候，新的挂上要等它结束
-（`web/src/lib/store/actions.ts:133` 的 `releaseRun`）—— 服务端一个会话只允许一轮活着的
+（`web/src/lib/store/actions.ts:134` 的 `releaseRun`）—— 服务端一个会话只允许一轮活着的
 轮次，新的那一轮本来就只可能在旧的结束之后开始。
 ★ **公告不写下 run id**：那个 id 说的是「这一边正在看哪一轮」，而这一边还没挂上去。
 
@@ -582,7 +582,7 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 ★ **水合出来的「running」一定是别人的轮次，但那个界面不必只是看着。** 刚打开会话的
 那个界面不可能拥有它没启动的轮次 —— 拥有轮次的界面自己拿着事件流，永远不会重新
 水合。★ 而水合**不**把 `busy` 置上：那个界面接下来会去**挂上**那一轮
-（`attachToLiveRun`，`web/src/lib/store/actions.ts:969`），挂上之后它就是在跟着这一轮
+（`attachToLiveRun`，`web/src/lib/store/actions.ts:989`），挂上之后它就是在跟着这一轮
 的人。★ 先置上再撤掉，只会让「在别的窗口里跑着」这句话在一个本来就在跟着的界面上
 闪一下。待审批那一支保持优先：审批卡比「在跑」更具体。
 
@@ -603,7 +603,7 @@ this session」），客户端不必多一个码就能分辨。
 前端必须处理被拒的发送，**且不破坏本地视图**：**错误码不能丢** —— `runStream` 把
 `body.code` 一起交给 `onError`（`web/src/lib/api.ts:762`，签名在 `:620`），只剩散文
 的话前端分不清「忙」与「失败」；**乐观气泡要回滚** —— 那条消息根本没到服务端，却留在
-屏幕上像是发出去过（`web/src/lib/store/actions.ts:703-711`）；**会话被标记为忙，不是
+屏幕上像是发出去过（`web/src/lib/store/actions.ts:723-729`）；**会话被标记为忙，不是
 失败**。
 
 ★ **停止并接管。** 忙着的会话给一个「停止」动作：用户可以先停掉另一轮再发。停止

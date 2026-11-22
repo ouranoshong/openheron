@@ -1013,7 +1013,7 @@ zustand instance, so importing it pulls in zustand, `fetch` and `localStorage` t
 `bun test`, which is far faster than "changed the UI, now open a browser".
 
 ★ **The sidebar is a file tree of projects**, and the grouping is a pure
-function: `web/src/lib/projects.ts:113`'s `groupSessions(sessions, projects, scope)`.
+function: `web/src/lib/projects.ts:132`'s `groupSessions(sessions, projects, scope, t)`.
 The client reads the project table and the scope **from the server** and draws what
 it was given — it never decides which project a session belongs to, because the
 table is the only truth about that relation. ★ A session without a project goes to
@@ -1044,9 +1044,16 @@ as a `Maximum update depth exceeded` white screen. Never write `?? []` in a sele
 use a module-level constant or a selector from the store.
 
 ★ The **width** of the chat is one token, not a number repeated in six places:
-`--chat-column` (the column), `--prose-column` (the text inside it) and `--chat-gutter`
-live in `web/src/index.css`. The column is wide so that a table fits whole, and the prose
-stops earlier — a paragraph of sixty characters is a hard read.
+`--chat-column` (the column), `--prose-column` (the measure of running text read on its own —
+a document), `--welcome-column` (the welcome page's one question) and `--chat-gutter` live in
+`web/src/index.css`. The conversation is that column and the text in it **fills** it — the prose
+used to stop short of the column's right edge while the user's bubble sat on that edge, so on a
+wide screen the answer looked pushed to the left.
+
+★ The **interface's language** is decided in one place (`web/src/lib/i18n.ts`): the stored
+preference, then the browser's language, then English. The copy itself is a **catalog**
+(`web/src/lib/locales/`), where every entry carries its English and its Chinese side by side.
+★ The **runtime** stays English in every language (AGENTS.md).
 
 ★ The **theme** is decided before the first paint, by a script in `web/index.html`, and read
 from one place (`web/src/lib/theme.ts`). The light and the dark palette are the same token
