@@ -18,8 +18,10 @@ import {
 import { turnFlags } from "@/lib/turns"
 import type { Message, TurnStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/use-t"
 
 export function MessageList() {
+  const t = useT()
   const messages = useStore(selectMessages)
   const status = useStore(selectStatus)
   const error = useStore(selectActiveError)
@@ -180,7 +182,7 @@ export function MessageList() {
               role="alert"
               className="border-destructive/40 bg-destructive/10 text-destructive mt-4 space-y-2 rounded-lg border p-3 text-sm"
             >
-              <p className="font-medium">Run failed</p>
+              <p className="font-medium">{t("messages.runFailed")}</p>
               <p className="text-xs break-words opacity-90">{error.message}</p>
             </div>
           )}
@@ -193,7 +195,7 @@ export function MessageList() {
         <button
           type="button"
           data-testid="jump-to-latest"
-          aria-label="Jump to latest"
+          aria-label={t("messages.jumpToLatest")}
           onClick={jumpToLatest}
           className="bg-background hover:bg-accent hover:text-accent-foreground border-border touch-target absolute right-4 bottom-4 grid size-9 place-items-center rounded-full border shadow-md"
         >
@@ -205,6 +207,7 @@ export function MessageList() {
 }
 
 export function EmptyHero() {
+  const t = useT()
   return (
     <div className="text-muted-foreground mb-6 flex flex-col items-center gap-1 text-center">
       {/* ★ The welcome screen is the one place the mark is big enough to be
@@ -213,7 +216,7 @@ export function EmptyHero() {
           permanent position is noise, not information. */}
       <BrandMark className="mb-1 size-16" play testId="brand-mark" />
       <p className="text-foreground text-xl font-semibold">openheron</p>
-      <p className="text-sm">Ask anything about this workspace.</p>
+      <p className="text-sm">{t("messages.askAnything")}</p>
     </div>
   )
 }
@@ -227,11 +230,12 @@ function Welcome() {
 }
 
 function StatusLine({ status }: { status: TurnStatus }) {
+  const t = useT()
   if (status === "running") {
     return (
       <p className="text-muted-foreground mt-4 flex items-center gap-1.5 text-xs" role="status">
         <span className="bg-info size-1.5 animate-pulse rounded-full" />
-        Working…
+        {t("messages.working")}
       </p>
     )
   }
@@ -317,11 +321,12 @@ function MessageSkeleton() {
 }
 
 export function StopButton() {
+  const t = useT()
   const stop = useStore((s) => s.stop)
   return (
     <button
       type="button"
-      aria-label="Stop generating"
+      aria-label={t("messages.stopGenerating")}
       onClick={() => void stop()}
       className="bg-primary text-primary-foreground hover:bg-primary/90 touch-target grid size-8 shrink-0 place-items-center rounded-lg"
     >

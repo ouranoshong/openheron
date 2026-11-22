@@ -1,19 +1,21 @@
+import type { Translate } from "./i18n"
 import type { Interrupt } from "./types"
 
 const MESSAGE_TOOL = /^tool\s+(\S+)\s+requires approval\.?$/i
 const MAX_ARGUMENT_CHARS = 180
 
-export function approvalTitle(count: number): string {
-  return count === 1 ? "Approval required" : `${count} tool calls need your approval`
+export function approvalTitle(count: number, t: Translate): string {
+  return count === 1 ? t("approval.title.one") : t("approval.title.many", { count })
 }
 
 export function approvalToolName(
   interrupt: Pick<Interrupt, "toolName" | "message">,
+  t: Translate,
 ): string {
   return (
     interrupt.toolName?.trim() ||
     MESSAGE_TOOL.exec(interrupt.message?.trim() ?? "")?.[1] ||
-    "Tool call"
+    t("approval.toolCall")
   )
 }
 

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 
+import { translator } from "../src/lib/i18n"
+
 import { formatThinkingDuration, thinkingLabel } from "../src/lib/thinking"
+
+// ★ The copy is English here: these assertions are written against it.
+const en = translator("en")
 
 describe("formatThinkingDuration", () => {
   test("sub-second keeps one decimal", () => {
@@ -29,33 +34,33 @@ describe("formatThinkingDuration", () => {
 
 describe("thinkingLabel", () => {
   test("while thinking it says Thinking…", () => {
-    expect(thinkingLabel({ complete: false, elapsedMs: null })).toBe("Thinking…")
-    expect(thinkingLabel({ complete: false, elapsedMs: 3000 })).toBe("Thinking…")
+    expect(thinkingLabel({ complete: false, elapsedMs: null }, en)).toBe("Thinking…")
+    expect(thinkingLabel({ complete: false, elapsedMs: 3000 }, en)).toBe("Thinking…")
   })
 
   test("when finished with a known duration it says Thought for N", () => {
-    expect(thinkingLabel({ complete: true, elapsedMs: 3200 })).toBe("Thought for 3.2s")
+    expect(thinkingLabel({ complete: true, elapsedMs: 3200 }, en)).toBe("Thought for 3.2s")
   })
 
   test("when finished without a duration it just says Thought", () => {
-    expect(thinkingLabel({ complete: true, elapsedMs: null })).toBe("Thought")
+    expect(thinkingLabel({ complete: true, elapsedMs: null }, en)).toBe("Thought")
   })
 
   test("it never says Thinking once it is over", () => {
     for (const elapsedMs of [null, 0, 1, 3200]) {
-      expect(thinkingLabel({ complete: true, elapsedMs })).not.toContain("Thinking")
+      expect(thinkingLabel({ complete: true, elapsedMs }, en)).not.toContain("Thinking")
     }
   })
 
   test("an interrupted one says Interrupted, not Thought", () => {
-    expect(thinkingLabel({ complete: true, elapsedMs: 2100, interrupted: true })).toBe(
+    expect(thinkingLabel({ complete: true, elapsedMs: 2100, interrupted: true }, en)).toBe(
       "Interrupted after 2.1s",
     )
-    expect(thinkingLabel({ complete: true, elapsedMs: null, interrupted: true })).toBe("Interrupted")
-    expect(thinkingLabel({ complete: true, elapsedMs: 2100 })).toBe("Thought for 2.1s")
+    expect(thinkingLabel({ complete: true, elapsedMs: null, interrupted: true }, en)).toBe("Interrupted")
+    expect(thinkingLabel({ complete: true, elapsedMs: 2100 }, en)).toBe("Thought for 2.1s")
   })
 
   test("an interrupted one that is still running still says Thinking…", () => {
-    expect(thinkingLabel({ complete: false, elapsedMs: null, interrupted: true })).toBe("Thinking…")
+    expect(thinkingLabel({ complete: false, elapsedMs: null, interrupted: true }, en)).toBe("Thinking…")
   })
 })

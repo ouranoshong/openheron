@@ -37,6 +37,11 @@ export default defineConfig({
     baseURL: FRONTEND_URL,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
+    // ★ The interface follows the **browser's** language (`web/src/lib/i18n.ts`),
+    //   and the specs assert the English copy — so the browser is pinned to
+    //   English here, once, instead of every spec pinning it. ★ Without this
+    //   a developer whose browser is Chinese would see the whole suite go red.
+    locale: "en-US",
   },
 
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],

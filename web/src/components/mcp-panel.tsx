@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { api, type MCPServerView } from "@/lib/api"
+import { useT } from "@/lib/use-t"
 import { cn } from "@/lib/utils"
 
 export interface MCPPanelProps {
@@ -31,6 +32,7 @@ export function MCPPanel({ open, onClose, agentId }: MCPPanelProps) {
   const [servers, setServers] = useState<MCPServerView[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const t = useT()
 
   useEffect(() => {
     if (!open) return
@@ -71,15 +73,15 @@ export function MCPPanel({ open, onClose, agentId }: MCPPanelProps) {
     <Dialog open={open} onOpenChange={(v) => (!v ? onClose() : undefined)}>
       <DialogContent data-testid="mcp-panel" className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>MCP servers</DialogTitle>
+          <DialogTitle>{t("settings.section.mcps")}</DialogTitle>
           <DialogDescription>
-            The servers of agent <code>{agentId}</code> — what it would get from them.
+            {t("settings.mcp.descriptionBefore")} <code>{agentId}</code> {t("settings.mcp.descriptionAfter")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground text-xs">
-            {servers === null ? "Asking the servers…" : "Live state, read on open."}
+            {servers === null ? t("settings.mcp.asking") : t("settings.mcp.liveState")}
           </span>
           <Button
             variant="outline"
@@ -88,7 +90,7 @@ export function MCPPanel({ open, onClose, agentId }: MCPPanelProps) {
             onClick={refresh}
           >
             <RefreshCwIcon className={cn("size-3.5", refreshing && "animate-spin")} />
-            Refresh
+            {t("settings.mcp.refresh")}
           </Button>
         </div>
 
@@ -100,7 +102,7 @@ export function MCPPanel({ open, onClose, agentId }: MCPPanelProps) {
 
         {servers !== null && servers.length === 0 ? (
           <p data-testid="mcp-panel-empty" className="text-muted-foreground text-sm">
-            No MCP servers are configured
+            {t("settings.mcp.empty")}
           </p>
         ) : null}
 
@@ -128,21 +130,26 @@ export function MCPPanel({ open, onClose, agentId }: MCPPanelProps) {
                 <table className="mt-2 w-full text-xs">
                   <thead>
                     <tr className="text-muted-foreground text-left">
-                      <th className="font-normal">Tool</th>
-                      <th className="font-normal">Exposed name</th>
-                      <th className="font-normal">Tier</th>
-                      <th className="font-normal">State</th>
+                      <th className="font-normal">{t("settings.mcp.tool")}</th>
+                      <th className="font-normal">{t("settings.mcp.exposedName")}</th>
+                      <th className="font-normal">{t("settings.mcp.tier")}</th>
+                      <th className="font-normal">{t("settings.mcp.state")}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {srv.tools.map((t) => (
-                      <tr key={`${srv.name}/${t.exposedName}/${t.name}`} data-testid="mcp-tool">
-                        <td className="py-0.5 pr-2">{t.name}</td>
-                        <td className="py-0.5 pr-2 font-mono">{t.exposedName}</td>
-                        <td className="py-0.5 pr-2">{t.tier}</td>
+                    {srv.tools.map((tool) => (
+                      <tr
+                        key={`${srv.name}/${tool.exposedName}/${tool.name}`}
+                        data-testid="mcp-tool"
+                      >
+                        <td className="py-0.5 pr-2">{tool.name}</td>
+                        <td className="py-0.5 pr-2 font-mono">{tool.exposedName}</td>
+                        <td className="py-0.5 pr-2">{tool.tier}</td>
                         <td className="py-0.5">
-                          {t.status}
-                          {t.reason ? <span className="text-muted-foreground"> ({t.reason})</span> : null}
+                          {tool.status}
+                          {tool.reason ? (
+                            <span className="text-muted-foreground"> ({tool.reason})</span>
+                          ) : null}
                         </td>
                       </tr>
                     ))}

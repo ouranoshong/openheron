@@ -2,6 +2,8 @@ import { useMemo } from "react"
 
 import { useSettings, selectCanSave, selectServerIssues } from "@/lib/settings-store"
 import { groupIssues, issueLabel, type Issue } from "@/lib/settings-validate"
+import type { Translate } from "@/lib/i18n"
+import { useT } from "@/lib/use-t"
 import { Button } from "@/components/ui/button"
 
 export function SettingsFooter() {
@@ -18,6 +20,7 @@ export function SettingsFooter() {
   const exists = useSettings((s) => s.exists)
   const select = useSettings((s) => s.select)
   const items = useSettings((s) => s.manifest?.items)
+  const t = useT()
 
   // ★ The set is built here, not in a selector: a selector that returns a
   //   fresh Set on every call reports "changed" every time, and the store
@@ -50,7 +53,7 @@ export function SettingsFooter() {
         onClick={() => void remove()}
         data-testid="settings-delete"
       >
-        Delete
+        {t("common.delete")}
       </Button>
       <Button
         type="button"
@@ -59,7 +62,11 @@ export function SettingsFooter() {
         onClick={() => void save()}
         data-testid="settings-save"
       >
-        {saveState === "saving" ? "Saving…" : saveState === "validating" ? "Validating…" : "Save"}
+        {saveState === "saving"
+          ? t("settings.footer.saving")
+          : saveState === "validating"
+            ? t("settings.footer.validating")
+            : t("common.save")}
       </Button>
     </div>
   )
@@ -86,8 +93,9 @@ function Status({
   known: ReadonlySet<string>
   onOpen: (path: string) => void
 }) {
-  if (saveState === "validating") return <span className="text-muted-foreground">Validating…</span>
-  if (saveState === "saving") return <span className="text-muted-foreground">Saving…</span>
+  const t = useT()
+  if (saveState === "validating") return <span className="text-muted-foreground">{t("settings.footer.validating")}</span>
+  if (saveState === "saving") return <span className="text-muted-foreground">{t("settings.footer.saving")}</span>
 
   if (serverIssues.length > 0) {
     return (
@@ -117,7 +125,7 @@ function Status({
   //   and it hides nothing — it says "the tree is short something", which is
   //   true whatever else is on screen, and the file can save cleanly while it
   //   stands there.
-  const state = saveStateLine(saveState, saveError, applied, dirty)
+  const state = saveStateLine(saveState, saveError, applied, dirty, t)
   if (state || errors.length > 0 || hints.length > 0) {
     return (
       <ul className="flex flex-col gap-0.5">
@@ -135,7 +143,7 @@ function Status({
       </ul>
     )
   }
-  return <span className="text-muted-foreground">Valid</span>
+  return <span className="text-muted-foreground">{t("settings.footer.valid")}</span>
 }
 
 // ★ The line that says what the save did.
@@ -148,20 +156,21 @@ function saveStateLine(
   saveError: string | undefined,
   applied: boolean,
   dirty: boolean,
+  t: Translate,
 ): { text: string; className: string } | null {
   if (saveState === "error" && saveError) {
     return { text: saveError, className: "text-destructive whitespace-pre-line" }
   }
   if (saveState === "conflict") {
-    return { text: "This file changed on disk — reload or overwrite.", className: "text-warning" }
+    return { text: t("settings.footer.conflict"), className: "text-warning" }
   }
   if (saveState === "saved") {
     return {
-      text: applied ? "Saved · applied" : "Saved · restart openheron to apply",
+      text: applied ? t("settings.footer.savedApplied") : t("settings.footer.savedRestart"),
       className: applied ? "text-muted-foreground" : "text-warning",
     }
   }
-  if (dirty) return { text: "Unsaved changes", className: "text-muted-foreground" }
+  if (dirty) return { text: t("settings.footer.unsaved"), className: "text-muted-foreground" }
   return null
 }
 
@@ -179,7 +188,8 @@ function IssueLine({
   known: ReadonlySet<string>
   onOpen: (path: string) => void
 }) {
-  const label = issueLabel(issue, selected)
+  const t = useT()
+  const label = issueLabel(issue, selected, t)
   const path = issue.path
   if (!path || path === selected || !known.has(path)) {
     return <>{label}</>
@@ -189,7 +199,7 @@ function IssueLine({
       type="button"
       className="hover:underline text-left"
       onClick={() => onOpen(path)}
-      title={`Open ${path}`}
+      title={t("settings.footer.openFile", { path })}
     >
       {label}
     </button>

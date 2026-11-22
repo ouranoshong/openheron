@@ -8,47 +8,49 @@
 // ★ The card shows the tool's **name** when the table has no title for it:
 //   a name nobody has a word for is still a name, and it is what the model
 //   called. Hiding it behind "tool" would say less, not more.
+import type { Translate } from "./i18n"
+
 const TITLES = {
   // the filesystem and the shell
-  ls: "List directory",
-  glob: "Find files",
-  grep: "Search content",
-  read_file: "Read file",
-  write_file: "Write file",
-  edit_file: "Edit file",
-  execute: "Run command",
+  ls: "tool.title.ls",
+  glob: "tool.title.glob",
+  grep: "tool.title.grep",
+  read_file: "tool.title.readFile",
+  write_file: "tool.title.writeFile",
+  edit_file: "tool.title.editFile",
+  execute: "tool.title.execute",
 
   // the delegation, the plans, the manuals
-  task: "Run a sub-agent",
-  write_todos: "Update todos",
-  skill: "Load a skill",
+  task: "tool.title.task",
+  write_todos: "tool.title.writeTodos",
+  skill: "tool.title.skill",
 
   // ★ The configuration service is one service, so the six calls are six
   //   words about the same thing: read, check, scaffold, notices, tiers,
   //   and write.
-  config_get: "Read configuration",
-  config_validate: "Validate configuration",
-  config_template: "Show a template",
-  config_notices: "Show notices",
-  config_tier: "Explain approval tiers",
-  config_write: "Write configuration",
+  config_get: "tool.title.configGet",
+  config_validate: "tool.title.configValidate",
+  config_template: "tool.title.configTemplate",
+  config_notices: "tool.title.configNotices",
+  config_tier: "tool.title.configTier",
+  config_write: "tool.title.configWrite",
 
   // ★ The HTTP file is one verb on the web; the method is the difference.
-  request_get: "Send a GET request",
-  request_post: "Send a POST request",
-  request_put: "Send a PUT request",
-  request_delete: "Send a DELETE request",
+  request_get: "tool.title.requestGet",
+  request_post: "tool.title.requestPost",
+  request_put: "tool.title.requestPut",
+  request_delete: "tool.title.requestDelete",
 
   // the search and the reference
-  duckduckgo_search: "Search the web",
-  wikipedia_search: "Search Wikipedia",
+  duckduckgo_search: "tool.title.duckduckgoSearch",
+  wikipedia_search: "tool.title.wikipediaSearch",
 
   // the knowledge base: one reads, one writes the index
-  kb_search: "Search the knowledge base",
-  kb_index: "Index the knowledge base",
+  kb_search: "tool.title.kbSearch",
+  kb_index: "tool.title.kbIndex",
 
   // a provider's own web tool
-  fetch: "Fetch URL",
+  fetch: "tool.title.fetch",
 } as const
 
 // ToolTitleName is every title the table can produce.
@@ -62,6 +64,10 @@ const LOOKUP: Record<string, ToolTitleName | undefined> = TITLES
 //   gets a title — the name itself — because a card that shows a bare
 //   `mcp__github__create_issue` tells the reader more than one that shows
 //   the word "tool".
-export function toolTitle(name: string): string {
-  return LOOKUP[name] ?? name
+//
+// ★ The translator comes **in**: this module is pure, and a pure function
+//   cannot read the language on its own.
+export function toolTitle(name: string, t: Translate): string {
+  const key = LOOKUP[name]
+  return key ? t(key) : name
 }

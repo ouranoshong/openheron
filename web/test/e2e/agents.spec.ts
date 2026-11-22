@@ -59,6 +59,43 @@ test("/agents 打开选择器，选中后底栏与刷新都跟着变", async ({ 
   await expect(page.locator(AGENT)).toHaveText("Agent: worker", { timeout: 7000 })
 })
 
+// ★ The name in the meta row is a **door**, not a label: it opens the same
+//   picker the `/agents` command opens. ★ One list, one behavior — a second
+//   way to switch an agent would be a second copy of the rules.
+test("点底栏的 agent 名字打开选择器，效果与 /agents 一致", async ({ page }) => {
+  await openApp(page)
+  await sendMessage(page, `${MARKER_A} hello`)
+  await expect(page.locator(AGENT)).toHaveText("Agent: main")
+
+  await page.click(AGENT)
+  await expect(page.locator(PICKER)).toBeVisible()
+  await expect(page.locator(OPTION("main"))).toBeVisible()
+  await expect(page.locator(OPTION("worker"))).toBeVisible()
+
+  await page.click(OPTION("worker"))
+  await expect(page.locator(PICKER)).toHaveCount(0)
+  await expect(page.locator(AGENT)).toHaveText("Agent: worker")
+  await expect(page.locator(MODEL)).toHaveText("openai/fast")
+  await expect(page.locator(REASONING)).toHaveText("Reasoning: low")
+
+  // ★ The picker closes the same way it does for the command: the focus goes
+  //   back to the input box, so the next thing typed lands there.
+  await expect(page.locator(COMPOSER)).toBeFocused()
+})
+
+// ★ A click is not a command. ★ The command cleared the input box because the
+//   text *was* the command; clicking a name must not eat what someone was
+//   writing.
+test("点 agent 名字不清空输入框里的字", async ({ page }) => {
+  await openApp(page)
+  await sendMessage(page, `${MARKER_A} hello`)
+  await page.locator(COMPOSER).fill("写了一半的话")
+
+  await page.click(AGENT)
+  await expect(page.locator(PICKER)).toBeVisible()
+  await expect(page.locator(COMPOSER)).toHaveValue("写了一半的话")
+})
+
 test("/agents <name> 直接切换，不弹选择器", async ({ page }) => {
   await openApp(page)
   await sendMessage(page, `${MARKER_A} hello`)

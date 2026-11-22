@@ -1,4 +1,5 @@
 
+import type { Translate } from "@/lib/i18n"
 import type { SecretGroup, SecretItem } from "@/lib/secrets-api"
 
 // The pure layer of the secrets panel.
@@ -7,9 +8,10 @@ import type { SecretGroup, SecretItem } from "@/lib/secrets-api"
 //   state, no framework. That is what makes it testable by `bun test`
 //   without a browser, and it is what keeps the panel itself a rendering.
 //
-// ★ The wording is **English** — the whole interface is, and a panel that
-//   mixed two languages would make "is this a bug or did I misconfigure it?"
-//   harder to answer.
+// ★ The wording is the **reader's** language: it comes from the catalog, and
+//   the translator is an **argument** — a pure function cannot read the
+//   language by itself. ★ The sentences the **server** sends stay English:
+//     they are the runtime's own voice, and the boundary is the boundary.
 
 export type SecretState = "stored" | "not set" | "unavailable"
 
@@ -42,19 +44,19 @@ export function groupLabel(group: SecretGroup): string {
  *   something a reader should have to decode. This is the one place where
  *   the raw string is turned into a sentence.
  */
-export function sourceLabel(source: string): string {
-  if (!source || source === "none") return "nowhere — no key is in effect"
+export function sourceLabel(source: string, t: Translate): string {
+  if (!source || source === "none") return t("secrets.source.none")
   const sep = source.indexOf(":")
   if (sep < 0) return source
   const kind = source.slice(0, sep)
   const rest = source.slice(sep + 1)
   switch (kind) {
     case "env":
-      return `the environment variable ${rest}`
+      return t("secrets.source.env", { name: rest })
     case "keyring":
-      return `the keyring entry ${rest}`
+      return t("secrets.source.keyring", { name: rest })
     case "file":
-      return `the file ${rest}`
+      return t("secrets.source.file", { name: rest })
     default:
       return source
   }
@@ -68,20 +70,20 @@ export function sourceLabel(source: string): string {
  *   because a panel that showed only one of them would leave the user
  *   believing a stored key is in use when it is not.
  */
-export function statusOf(item: SecretItem): SecretStatus {
-  const effective = sourceLabel(item.effective)
+export function statusOf(item: SecretItem, t: Translate): SecretStatus {
+  const effective = sourceLabel(item.effective, t)
   if (item.shadowed) {
     return {
       state: "stored",
-      label: "stored",
+      label: t("secrets.status.stored"),
       effective,
-      warning: `The environment variable ${item.envVar} wins — the stored key is not in effect.`,
+      warning: t("secrets.status.shadowed", { envVar: item.envVar }),
     }
   }
   if (!item.stored) {
-    return { state: "not set", label: "not set", effective }
+    return { state: "not set", label: t("secrets.status.notSet"), effective }
   }
-  return { state: "stored", label: "stored", effective }
+  return { state: "stored", label: t("secrets.status.stored"), effective }
 }
 
 /**
@@ -93,6 +95,10 @@ export function statusOf(item: SecretItem): SecretStatus {
  *   one question, and they would disagree the day one of them is forgotten.
  */
 export function envState(item: SecretItem): "set" | "not set" {
+  // ★ The answer is a **fact**, not a sentence: "set" here is a value the
+  //   panel turns into words, and the words come from the catalog at the
+  //   place that shows them. ⇒ A translation of the word does not belong
+  //   inside the fact.
   return item.effective.startsWith("env:") || item.effective.startsWith("file:")
     ? "set"
     : "not set"
@@ -106,10 +112,20 @@ export function envState(item: SecretItem): "set" | "not set" {
  *   tokens are not affected — that is the difference between a scoped
  *   operation and a guess.
  */
-export function removeGroupMessage(group: SecretGroup): string {
+export function removeGroupMessage(group: SecretGroup, t: Translate): string {
   const count = group.items.length
-  const scope = group.id === "llm" ? "provider secret" : "MCP server secret"
-  const plural = count === 1 ? scope : `${scope}s`
-  const other = group.id === "llm" ? "MCP server secrets" : "provider secrets"
-  return `Remove ${count} ${plural}? Only the ${group.label} group is affected; ${other} are untouched.`
+  // ★ The two namespaces are named by **keys**, not by words written here: the
+  //   sentence has to name the group that is being emptied and the one that
+  //   is not, and a language that has no plural still needs both.
+  const scope =
+    group.id === "llm"
+      ? count === 1
+        ? t("secrets.scope.providerOne")
+        : t("secrets.scope.providerMany")
+      : count === 1
+        ? t("secrets.scope.mcpOne")
+        : t("secrets.scope.mcpMany")
+  const other =
+    group.id === "llm" ? t("secrets.scope.mcpMany") : t("secrets.scope.providerMany")
+  return t("secrets.remove.message", { count, scope, group: group.label, other })
 }

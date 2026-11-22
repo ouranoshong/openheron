@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
+import { translator } from "../src/lib/i18n"
+
 import {
   approvalArguments,
   approvalMessage,
@@ -7,24 +9,27 @@ import {
   approvalToolName,
 } from "../src/lib/approval"
 
+// ★ The copy is English here: these assertions are written against it.
+const en = translator("en")
+
 describe("approval content", () => {
   test("工具名优先用结构化字段", () => {
     expect(
       approvalToolName({
         toolName: "write_file",
         message: "tool edit_file requires approval",
-      }),
+      }, en),
     ).toBe("write_file")
   })
 
   test("没有结构化字段时从兜底文案里取工具名", () => {
-    expect(approvalToolName({ message: "tool write_file requires approval" })).toBe(
+    expect(approvalToolName({ message: "tool write_file requires approval" }, en)).toBe(
       "write_file",
     )
   })
 
   test("确实没有工具名时用中性占位，不把 reason 当内容", () => {
-    expect(approvalToolName({ message: "something happened" })).toBe("Tool call")
+    expect(approvalToolName({ message: "something happened" }, en)).toBe("Tool call")
   })
 
   test("和工具名重复的兜底说明不再展示", () => {
@@ -68,7 +73,7 @@ describe("approval content", () => {
   })
 
   test("标题区分单个与整组", () => {
-    expect(approvalTitle(1)).toBe("Approval required")
-    expect(approvalTitle(3)).toBe("3 tool calls need your approval")
+    expect(approvalTitle(1, en)).toBe("Approval required")
+    expect(approvalTitle(3, en)).toBe("3 tool calls need your approval")
   })
 })

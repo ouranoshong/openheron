@@ -1,4 +1,5 @@
 import { api, type SkillView } from "@/lib/api"
+import type { Translate } from "@/lib/i18n"
 
 let cached: SkillView[] | null = null
 let inflight: Promise<SkillView[]> | null = null
@@ -23,14 +24,14 @@ export function loadSkills(force = false): Promise<SkillView[]> {
   return inflight
 }
 
-export function skillModeLabel(skill: SkillView): string {
+export function skillModeLabel(skill: SkillView, t: Translate): string {
   switch (skill.context) {
     case "fork":
-      return "Run in a separate agent"
+      return t("skill.mode.fork")
     case "fork_with_context":
-      return "Run in a separate agent (with context)"
+      return t("skill.mode.forkWithContext")
     case "inline":
     default:
-      return "Run in the current agent"
+      return t("skill.mode.inline")
   }
 }

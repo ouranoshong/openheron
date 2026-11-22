@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 
 import { cn } from "@/lib/utils"
 import { skillModeLabel } from "@/lib/skill-info"
+import { useT } from "@/lib/use-t"
 import type { SkillView } from "@/lib/api"
 
 import { Input } from "@/components/ui/input"
@@ -23,6 +24,7 @@ export interface SkillPickerProps {
 }
 
 export function SkillPicker({ open, onClose, skills, filter, error, onPick }: SkillPickerProps) {
+  const t = useT()
   const [query, setQuery] = useState(filter ?? "")
   const [active, setActive] = useState(0)
   const listRef = useRef<HTMLUListElement>(null)
@@ -55,10 +57,8 @@ export function SkillPicker({ open, onClose, skills, filter, error, onPick }: Sk
     <Dialog open={open} onOpenChange={(v) => (!v ? onClose() : undefined)}>
       <DialogContent data-testid="skill-picker" className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Use a skill</DialogTitle>
-          <DialogDescription>
-            The skill is read by the model before it works — pick one, then say what to do.
-          </DialogDescription>
+          <DialogTitle>{t("composer.skillPicker.title")}</DialogTitle>
+          <DialogDescription>{t("composer.skillPicker.description")}</DialogDescription>
         </DialogHeader>
 
         <Input
@@ -68,8 +68,8 @@ export function SkillPicker({ open, onClose, skills, filter, error, onPick }: Sk
             setQuery(e.target.value)
             setActive(0)
           }}
-          placeholder="Filter skills"
-          aria-label="Filter skills"
+          placeholder={t("composer.skillPicker.filter")}
+          aria-label={t("composer.skillPicker.filter")}
           data-testid="skill-picker-filter"
           onKeyDown={(e) => {
             if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -98,7 +98,7 @@ export function SkillPicker({ open, onClose, skills, filter, error, onPick }: Sk
         <ul
           ref={listRef}
           role="listbox"
-          aria-label="Skills"
+          aria-label={t("common.skills")}
           data-testid="skill-picker-list"
           className="max-h-72 overflow-y-auto"
         >
@@ -124,7 +124,7 @@ export function SkillPicker({ open, onClose, skills, filter, error, onPick }: Sk
                       data-testid="skill-option-mode"
                       className="text-muted-foreground rounded border px-1 text-[10px] leading-4"
                     >
-                      {skillModeLabel(skill)}
+                      {skillModeLabel(skill, t)}
                     </span>
                   </span>
                   {skill.description ? (
@@ -134,7 +134,8 @@ export function SkillPicker({ open, onClose, skills, filter, error, onPick }: Sk
                   ) : null}
                   {skill.agent ? (
                     <span className="text-muted-foreground block truncate text-xs">
-                      agent: {skill.agent}
+                      {t("composer.skillPicker.agent")}
+                      {skill.agent}
                     </span>
                   ) : null}
                 </span>
@@ -145,7 +146,7 @@ export function SkillPicker({ open, onClose, skills, filter, error, onPick }: Sk
 
         {items.length === 0 ? (
           <p data-testid="skill-picker-empty" className="text-muted-foreground text-xs">
-            No skill matches. Skills come from .openheron/skills/&lt;name&gt;/SKILL.md.
+            {t("composer.skillPicker.empty")}
           </p>
         ) : null}
       </DialogContent>

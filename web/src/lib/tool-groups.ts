@@ -1,3 +1,5 @@
+import type { Translate } from "@/lib/i18n"
+import type { MessageKey } from "@/lib/locales"
 import type { AttachmentPart, Part, ReasoningPart, TextPart, ToolPart } from "@/lib/types"
 import { toolTitle } from "@/lib/tool-titles"
 
@@ -80,14 +82,14 @@ export interface RunSummary {
  *   going is a run that is still going, whatever else in it already
  *   finished.
  */
-export function summarize(run: ToolRun): RunSummary {
+export function summarize(run: ToolRun, t: Translate): RunSummary {
   const titles: string[] = []
   let failed = 0
   let streaming = false
   let running = false
 
   for (const p of run.parts) {
-    const title = toolTitle(p.name)
+    const title = toolTitle(p.name, t)
     if (!titles.includes(title)) titles.push(title)
     if (p.isError) failed++
     if (p.phase === "streaming") streaming = true
@@ -104,16 +106,17 @@ export function summarize(run: ToolRun): RunSummary {
 
 // PHASE_LABEL is the word the interface gives a call's state.
 //
-// ★ It is **English** (AGENTS.md: interface copy → English), and it lives
-//   here because the card and the group's bar are the two places that say it.
-const PHASE_LABEL: Record<RunPhase, string> = {
-  streaming: "reading arguments",
-  running: "running",
-  complete: "done",
-  failed: "failed",
+// ★ It lives here because the card and the group's bar are the two places
+//   that say it — and it is a **key**, so both say it in the reader's
+//   language.
+const PHASE_LABEL: Record<RunPhase, MessageKey> = {
+  streaming: "tool.phase.readingArguments",
+  running: "tool.phase.running",
+  complete: "tool.phase.done",
+  failed: "tool.phase.failed",
 }
 
 // phaseLabel is the word the interface gives a call's state.
-export function phaseLabel(phase: RunPhase): string {
-  return PHASE_LABEL[phase]
+export function phaseLabel(phase: RunPhase, t: Translate): string {
+  return t(PHASE_LABEL[phase])
 }

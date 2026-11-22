@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
+import { translator } from "../src/lib/i18n"
+
 import {
   NO_PROJECT_GROUP,
   PINNED_GROUP,
@@ -26,12 +28,19 @@ function session(threadId: string, projectId?: string, pinned = false) {
 
 const scope = (id: string): ProjectScope => ({ projectId: id, name: id, root: `/tmp/${id}` })
 
+// ★ The English translator: the catalog's English is the text the interface
+//   showed before the copy moved into it.
+const en = translator("en")
+
 describe("groupSessions —— 多项目模式", () => {
   test("置顶组在最前，项目按 order，未选项目在最后", () => {
     const groups = groupSessions(
       [session("a", "beta"), session("b", "alpha"), session("c"), session("d", "beta", true)],
       [project("beta", 2), project("alpha", 1)],
       null,
+
+    en,
+
     )
     expect(groups.map((g) => g.key)).toEqual([PINNED_GROUP, "alpha", "beta", NO_PROJECT_GROUP])
     expect(groups[0]!.sessions.map((s) => s.meta.threadId)).toEqual(["d"])
@@ -41,7 +50,7 @@ describe("groupSessions —— 多项目模式", () => {
   })
 
   test("组标题是项目的名字", () => {
-    const groups = groupSessions([session("a", "alpha")], [project("alpha", 0, "CodeLab")], null)
+    const groups = groupSessions([session("a", "alpha")], [project("alpha", 0, "CodeLab")], null, en)
     expect(groups[0]!.title).toBe("CodeLab")
   })
 
@@ -49,13 +58,13 @@ describe("groupSessions —— 多项目模式", () => {
   //   project live on the project's own row, so a project that is not drawn
   //   is a project that cannot be renamed, moved or removed.
   test("空项目也画出来，它是地图上的一格", () => {
-    const groups = groupSessions([session("a", "alpha")], [project("alpha", 0), project("empty", 1)], null)
+    const groups = groupSessions([session("a", "alpha")], [project("alpha", 0), project("empty", 1)], null, en)
     expect(groups.map((g) => g.key)).toEqual(["alpha", "empty"])
     expect(groups[1]!.sessions).toEqual([])
   })
 
   test("一个会话只在一个组里", () => {
-    const groups = groupSessions([session("a", "alpha", true)], [project("alpha", 0)], null)
+    const groups = groupSessions([session("a", "alpha", true)], [project("alpha", 0)], null, en)
     // ★ The pinned conversation is in the pinned group and nowhere else — and
     //   the project it came from is still a row, holding nothing.
     expect(groups[0]!.key).toBe(PINNED_GROUP)
@@ -65,15 +74,28 @@ describe("groupSessions —— 多项目模式", () => {
   })
 
   test("表里没有的项目 id 落到未选项目组", () => {
-    const groups = groupSessions([session("a", "gone")], [project("alpha", 0)], null)
+    const groups = groupSessions([session("a", "gone")], [project("alpha", 0)], null, en)
     // ★ The conversation whose project is gone lands in the "no project"
     //   bucket, and the project that is still in the table is still a row.
     expect(groups.map((g) => g.key)).toEqual(["alpha", NO_PROJECT_GROUP])
     expect(groups[1]!.sessions.map((s) => s.meta.threadId)).toEqual(["a"])
   })
 
+  test("★ 两个特殊组的标题来自目录，不是写死的字面量", () => {
+    // ★ The heading is **copy**: it is said in the reader's language, so it
+    //   comes from the catalog and not from a constant in this file.
+    const groups = groupSessions(
+      [session("a", "alpha"), session("b", "alpha", true), session("c")],
+      [project("alpha", 0)],
+      null,
+      en,
+    )
+    expect(groups[0]!.title).toBe("Pinned")
+    expect(groups[2]!.title).toBe("Default Project")
+  })
+
   test("没有项目也没有会话时没有组", () => {
-    expect(groupSessions([], [], null)).toEqual([])
+    expect(groupSessions([], [], null, en)).toEqual([])
   })
 })
 
@@ -83,6 +105,9 @@ describe("groupSessions —— 单项目模式", () => {
       [session("a", "alpha"), session("b"), session("c", "other")],
       [project("alpha", 0), project("other", 1)],
       scope("alpha"),
+
+    en,
+
     )
     expect(groups).toHaveLength(1)
     expect(groups[0]!.key).toBe("alpha")
@@ -91,21 +116,21 @@ describe("groupSessions —— 单项目模式", () => {
   })
 
   test("别的项目的会话不进来", () => {
-    const groups = groupSessions([session("c", "other")], [project("other", 0)], scope("alpha"))
+    const groups = groupSessions([session("c", "other")], [project("other", 0)], scope("alpha"), en)
     expect(groups).toEqual([])
   })
 
   test("★ 作用域项目在表里时，没有会话也画出来", () => {
     // ★ The scope project is the one directory this process serves, and the
     //   map says so even when nothing has been started in it yet.
-    const groups = groupSessions([], [project("alpha", 0)], scope("alpha"))
+    const groups = groupSessions([], [project("alpha", 0)], scope("alpha"), en)
     expect(groups).toHaveLength(1)
     expect(groups[0]!.key).toBe("alpha")
     expect(groups[0]!.sessions).toEqual([])
   })
 
   test("只有未选项目的会话时也在那一组里", () => {
-    const groups = groupSessions([session("b")], [], scope("alpha"))
+    const groups = groupSessions([session("b")], [], scope("alpha"), en)
     expect(groups).toHaveLength(1)
     expect(groups[0]!.title).toBe("alpha")
   })
@@ -181,19 +206,19 @@ describe("projectNameError", () => {
   test("空名字不算错 —— 新建时它可以由目录名推出来", () => {
     // ★ The name is optional: the server derives it from the directory.
     //   So the empty name must not stop the create.
-    expect(projectNameError("")).toBeUndefined()
-    expect(projectNameError("   ")).toBeUndefined()
+    expect(projectNameError("", en)).toBeUndefined()
+    expect(projectNameError("   ", en)).toBeUndefined()
   })
 
   test("名字只能是一行", () => {
     // ★ The sidebar draws the name as a heading, and a name with a newline
     //   in it breaks that heading into two.
-    expect(projectNameError("api\ngateway")).toBeDefined()
-    expect(projectNameError("api\r\ngateway")).toBeDefined()
+    expect(projectNameError("api\ngateway", en)).toBeDefined()
+    expect(projectNameError("api\r\ngateway", en)).toBeDefined()
   })
 
   test("普通名字没有理由", () => {
-    expect(projectNameError("CodeLab")).toBeUndefined()
+    expect(projectNameError("CodeLab", en)).toBeUndefined()
   })
 })
 
@@ -201,16 +226,16 @@ describe("projectRenameError", () => {
   test("重命名时名字是必填的 —— 项目本来就有名字", () => {
     // ★ Renaming is the one place where the name is required: the server
     //   refuses an empty one ("the project name must not be empty").
-    expect(projectRenameError("")).toBeDefined()
-    expect(projectRenameError("  ")).toBeDefined()
+    expect(projectRenameError("", en)).toBeDefined()
+    expect(projectRenameError("  ", en)).toBeDefined()
   })
 
   test("重命名也是一行", () => {
-    expect(projectRenameError("api\ngateway")).toBeDefined()
+    expect(projectRenameError("api\ngateway", en)).toBeDefined()
   })
 
   test("普通名字没有理由", () => {
-    expect(projectRenameError("CodeLab")).toBeUndefined()
+    expect(projectRenameError("CodeLab", en)).toBeUndefined()
   })
 })
 
@@ -219,6 +244,9 @@ describe("foldGroups", () => {
     [session("a", "alpha"), session("b", "alpha"), session("c", "beta")],
     [project("alpha", 1), project("beta", 2)],
     null,
+
+  en,
+
   )
 
   test("没折叠的组原样", () => {
@@ -248,7 +276,7 @@ describe("foldGroups", () => {
   test("★ 空组不折叠 —— 没有东西可以收起来", () => {
     // ★ A folded heading that says "0" is a folder the user has to open to
     //   learn that it is empty.
-    const withEmpty = groupSessions([session("a", "alpha")], [project("alpha", 0), project("empty", 1)], null)
+    const withEmpty = groupSessions([session("a", "alpha")], [project("alpha", 0), project("empty", 1)], null, en)
     const folded = foldGroups(withEmpty, new Set(["empty"]))
     expect(folded.map((g) => g.folded)).toEqual([false, false])
   })
@@ -256,37 +284,37 @@ describe("foldGroups", () => {
 
 describe("projectRootError", () => {
   test("目录是唯一必填项，空的不行", () => {
-    expect(projectRootError("")).toBeDefined()
-    expect(projectRootError("  ")).toBeDefined()
+    expect(projectRootError("", en)).toBeDefined()
+    expect(projectRootError("  ", en)).toBeDefined()
   })
 
   test("目录不检查存不存在 —— 那是服务端的事", () => {
     // ★ The client must not keep a second copy of the rules: the server
     //   resolves the path, and it is the one that says no.
-    expect(projectRootError("/tmp/does-not-exist")).toBeUndefined()
+    expect(projectRootError("/tmp/does-not-exist", en)).toBeUndefined()
   })
 })
 
 describe("directoryPick", () => {
   test("选中了就是那条路径", () => {
-    const got = directoryPick({ picked: true, path: "/tmp/picked" })
+    const got = directoryPick({ picked: true, path: "/tmp/picked" }, en)
     expect(got).toEqual({ kind: "picked", path: "/tmp/picked" })
   })
 
   test("关掉选择器不是失败", () => {
     // ★ "Not now" is how a person says it, and the client must not report
     //   it as an error.
-    const got = directoryPick({ picked: false, path: "" })
+    const got = directoryPick({ picked: false, path: "" }, en)
     expect(got).toEqual({ kind: "cancelled" })
   })
 
   test("说选了却没说是哪个，就是服务端说错了", () => {
-    const got = directoryPick({ picked: true, path: "  " })
+    const got = directoryPick({ picked: true, path: "  " }, en)
     expect(got.kind).toBe("failed")
   })
 
   test("路径两边的空格去掉", () => {
-    const got = directoryPick({ picked: true, path: "  /tmp/picked \n" })
+    const got = directoryPick({ picked: true, path: "  /tmp/picked \n" }, en)
     expect(got).toEqual({ kind: "picked", path: "/tmp/picked" })
   })
 })

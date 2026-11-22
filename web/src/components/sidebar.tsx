@@ -18,6 +18,7 @@ import { foldGroups, groupSessions, projectRenameError } from "@/lib/projects"
 import type { ProjectSummary, SessionGroup } from "@/lib/projects"
 import { selectSessionList, useStore } from "@/lib/store"
 import type { SessionEntry } from "@/lib/store"
+import { useT } from "@/lib/use-t"
 import { cn } from "@/lib/utils"
 
 // ★ The folded groups are remembered on this machine.
@@ -49,6 +50,7 @@ function writeFolded(folded: ReadonlySet<string>): void {
 }
 
 export function Sidebar({ className }: { className?: string }) {
+  const t = useT()
   const sessions = useStore(useShallow(selectSessionList))
   const projects = useStore((s) => s.projects)
   const scope = useStore((s) => s.projectScope)
@@ -62,8 +64,8 @@ export function Sidebar({ className }: { className?: string }) {
   //   not decide anything here — it does not guess which project a session
   //   belongs to, and it does not decide how many groups there are.
   const groups = useMemo(
-    () => groupSessions(sessions, projects, scope),
-    [sessions, projects, scope],
+    () => groupSessions(sessions, projects, scope, t),
+    [sessions, projects, scope, t],
   )
 
   // ★ The flat list — no heading — is the case where there is nothing to
@@ -120,21 +122,23 @@ export function Sidebar({ className }: { className?: string }) {
           onClick={() => startNew()}
         >
           <PlusIcon className="size-4" />
-          New thread
+          {t("sidebar.newThread")}
         </Button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {loading && sessions.length === 0 ? (
-          <p className="text-muted-foreground p-2 text-xs">Loading…</p>
+          <p className="text-muted-foreground p-2 text-xs">{t("common.loading")}</p>
         ) : flat ? (
           sessions.length === 0 ? (
-            <p className="text-muted-foreground p-2 text-xs">No conversations yet.</p>
+            <p className="text-muted-foreground p-2 text-xs">
+              {t("sidebar.emptyConversations")}
+            </p>
           ) : (
             // ★ No project to be a folder: the conversations sit at the root of
             //   the tree, and there is no heading to draw. ★ The sidebar looks
             //   exactly as it looked before the projects landed.
-            <ul role="tree" aria-label="Conversations" data-testid="session-tree" className="space-y-0.5">
+            <ul role="tree" aria-label={t("sidebar.conversations")} data-testid="session-tree" className="space-y-0.5">
               {groups[0]!.sessions.map((s) => (
                 <SessionRow
                   key={s.meta.threadId}
@@ -147,7 +151,7 @@ export function Sidebar({ className }: { className?: string }) {
             </ul>
           )
         ) : (
-          <ul role="tree" aria-label="Conversations" data-testid="session-tree" className="space-y-0.5">
+          <ul role="tree" aria-label={t("sidebar.conversations")} data-testid="session-tree" className="space-y-0.5">
             {shown.map((group) => (
               <li
                 key={group.key}
@@ -175,7 +179,15 @@ export function Sidebar({ className }: { className?: string }) {
           </ul>
         )}
       </div>
-      <SettingsEntry className="border-border border-t px-2 py-1.5" />
+      {/* ★ The settings entry is a **row of the column**, not a line drawn on
+          its edge. ★ It used to be a flex item that stretched to the very
+          edge of the sidebar: the label sat flush against the left border,
+          the shortcut hint flush against the right one, and nothing was
+          between the button and the bottom of the window. ★ The hairline
+          stays full width — it is the column's divider, not the button's. */}
+      <div className="border-border border-t p-2">
+        <SettingsEntry className="w-full px-2" />
+      </div>
     </aside>
   )
 }
@@ -207,6 +219,7 @@ function ProjectGroup({
   onToggle(): void
   onOpen(id: string): void
 }) {
+  const t = useT()
   const startThreadInProject = useStore((s) => s.startThreadInProject)
   const renameProject = useStore((s) => s.renameProject)
   const deleteProject = useStore((s) => s.deleteProject)
@@ -255,7 +268,7 @@ function ProjectGroup({
     // ★ An empty name is refused: the project already has one, and an empty
     //   name would take it away. ★ The rule is the client's own — it is the
     //   same one the server keeps.
-    const error = projectRenameError(name)
+    const error = projectRenameError(name, t)
     if (error !== undefined) {
       setNameError(error)
       return
@@ -293,7 +306,11 @@ function ProjectGroup({
             type="button"
             data-testid="group-toggle"
             aria-expanded={!folded}
-            aria-label={`${folded ? "Expand" : "Collapse"} ${group.title}`}
+            aria-label={
+              folded
+                ? t("sidebar.expandGroup", { title: group.title })
+                : t("sidebar.collapseGroup", { title: group.title })
+            }
             onClick={onToggle}
             className="hover:bg-muted grid size-4 shrink-0 place-items-center rounded-sm"
           >
@@ -333,7 +350,7 @@ function ProjectGroup({
                 setEditing(false)
               }
             }}
-            aria-label={`Name of ${group.title}`}
+            aria-label={t("sidebar.projectName", { title: group.title })}
             aria-invalid={nameError !== undefined}
             title={nameError}
             data-testid="project-group-rename"
@@ -353,7 +370,7 @@ function ProjectGroup({
           <div className="relative shrink-0">
             <button
               type="button"
-              aria-label={`Options for ${group.title}`}
+              aria-label={t("sidebar.projectOptions", { title: group.title })}
               data-testid="project-menu-button"
               onClick={() => setMenuOpen((v) => !v)}
               className="hover:bg-muted grid size-5 place-items-center rounded-md opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
@@ -369,7 +386,7 @@ function ProjectGroup({
               >
                 <MenuItem
                   icon={<PlusIcon className="size-3.5" />}
-                  label="New conversation"
+                  label={t("sidebar.newConversation")}
                   onClick={() => {
                     setMenuOpen(false)
                     startThreadInProject(group.key)
@@ -377,7 +394,7 @@ function ProjectGroup({
                 />
                 <MenuItem
                   icon={<PencilIcon className="size-3.5" />}
-                  label="Rename project"
+                  label={t("sidebar.renameProject")}
                   onClick={startEditing}
                 />
                 {/*
@@ -389,7 +406,7 @@ function ProjectGroup({
                 {!scoped && (
                   <MenuItem
                     icon={<FolderIcon className="size-3.5" />}
-                    label="Change folder"
+                    label={t("projects.changeFolder")}
                     onClick={() => {
                       setMenuOpen(false)
                       // ★ The key changes with the opening: the dialog is
@@ -403,7 +420,7 @@ function ProjectGroup({
                 {!scoped && (
                   <MenuItem
                     icon={<Trash2Icon className="size-3.5" />}
-                    label="Remove project"
+                    label={t("sidebar.removeProject")}
                     danger
                     onClick={() => void remove()}
                   />
@@ -454,6 +471,7 @@ function SessionRow({
   active: boolean
   onOpen(): void
 }) {
+  const t = useT()
   const rename = useStore((s) => s.renameSession)
   const remove = useStore((s) => s.deleteSession)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -515,11 +533,11 @@ function SessionRow({
   const commit = async () => {
     // ★ The title is one line: the sidebar shows one line, and a pasted
     //   name may carry a newline of its own.
-    const t = draft.replace(/[\r\n]+/g, " ").trim()
+    const name = draft.replace(/[\r\n]+/g, " ").trim()
     setEditing(false)
     setMenuOpen(false)
-    if (!t || t === entry.meta.title) return
-    await rename(entry.meta.threadId, t).catch(() => {
+    if (!name || name === entry.meta.title) return
+    await rename(entry.meta.threadId, name).catch(() => {
       // ★ The rename failed and the store rolled the title back: the
       //   editor opens on that name again, not on the placeholder.
       setDraft(entry.meta.title)
@@ -532,7 +550,7 @@ function SessionRow({
         <textarea
           ref={inputRef}
           autoFocus
-          aria-label="Thread title"
+          aria-label={t("sidebar.threadTitle")}
           rows={1}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -560,7 +578,7 @@ function SessionRow({
       ref={wrapRef}
       role="treeitem"
       aria-level={level}
-      aria-label={entry.meta.title || "New Chat"}
+      aria-label={entry.meta.title || t("sidebar.newChat")}
       data-testid="thread-row"
       className="group relative"
     >
@@ -577,12 +595,14 @@ function SessionRow({
           active && "bg-muted font-medium",
         )}
       >
-        <span className="min-w-0 flex-1 truncate">{entry.meta.title || "New Chat"}</span>
+        <span className="min-w-0 flex-1 truncate">
+          {entry.meta.title || t("sidebar.newChat")}
+        </span>
         {entry.meta.hasPendingApproval && (
           <span
             data-testid="pending-dot"
-            title="Waiting for approval"
-            aria-label="Waiting for approval"
+            title={t("header.status.awaitingApproval")}
+            aria-label={t("header.status.awaitingApproval")}
             className="bg-warning size-1.5 shrink-0 rounded-full"
           />
         )}
@@ -590,7 +610,7 @@ function SessionRow({
 
       <button
         type="button"
-        aria-label="More options"
+        aria-label={t("sidebar.moreOptions")}
         onClick={() => setMenuOpen((v) => !v)}
         // ★ The opacity lives in the stylesheet, not here: on a touch screen
         //   the button has to be there — `group-hover` compiles into
@@ -608,12 +628,12 @@ function SessionRow({
         >
           <MenuItem
             icon={<PencilIcon className="size-3.5" />}
-            label="Rename"
+            label={t("common.rename")}
             onClick={startEditing}
           />
           <MenuItem
             icon={<Trash2Icon className="size-3.5" />}
-            label="Delete"
+            label={t("common.delete")}
             danger
             onClick={() => {
               setMenuOpen(false)

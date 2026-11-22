@@ -4,6 +4,7 @@ import { useState } from "react"
 import { ToolCard } from "@/components/tool-card"
 import { phaseLabel, summarize, type ToolRun } from "@/lib/tool-groups"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/use-t"
 
 /**
  * ToolGroup is a stretch of tool calls that follow each other.
@@ -26,7 +27,8 @@ export function ToolGroup({ run }: { run: ToolRun }) {
   // ★ The state is here even for a single call: the run grows while the
   //   turn runs, and a node that is unmounted and mounted again loses it.
   const [open, setOpen] = useState(false)
-  const summary = summarize(run)
+  const t = useT()
+  const summary = summarize(run, t)
 
   if (run.parts.length === 1) return <ToolCard part={run.parts[0]!} />
 
@@ -46,7 +48,7 @@ export function ToolGroup({ run }: { run: ToolRun }) {
         <LayersIcon aria-hidden="true" className="size-3.5 shrink-0" />
         <span data-testid="tool-group-summary" className="min-w-0 truncate">
           <span data-testid="tool-group-count" className="font-medium">
-            {summary.count} steps
+            {t("messages.toolSteps", { count: summary.count })}
           </span>
           {summary.titles.length > 0 ? (
             <span data-testid="tool-group-titles" className="opacity-80">
@@ -64,10 +66,10 @@ export function ToolGroup({ run }: { run: ToolRun }) {
         >
           {summary.failed > 0 ? (
             <span data-testid="tool-group-failed" className="text-destructive normal-case">
-              {summary.failed} failed
+              {t("messages.toolFailedCount", { count: summary.failed })}
             </span>
           ) : null}
-          {summary.phase !== "failed" ? <span>{phaseLabel(summary.phase)}</span> : null}
+          {summary.phase !== "failed" ? <span>{phaseLabel(summary.phase, t)}</span> : null}
         </span>
       </button>
 

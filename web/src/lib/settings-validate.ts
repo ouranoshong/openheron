@@ -1,3 +1,5 @@
+import type { Translate } from "@/lib/i18n"
+
 export interface Issue {
   line: number
   message: string
@@ -71,8 +73,8 @@ export function groupIssues(issues: readonly Issue[], selected?: string): IssueG
  *   edited is named in the editor's own header, and repeating it on every
  *   line is noise.
  */
-export function issueLabel(i: Issue, selected?: string): string {
-  const base = issueLine(i)
+export function issueLabel(i: Issue, selected: string | undefined, t: Translate): string {
+  const base = issueLine(i, t)
   if (!i.path || i.path === selected) return base
   return `${i.path} · ${base}`
 }
@@ -85,8 +87,13 @@ export function issueLabel(i: Issue, selected?: string): string {
  *   "line 0: agents/main.md references model …" would send the reader to the
  *   top of a file that is not the problem.
  */
-export function issueLine(i: Issue): string {
-  return i.line > 0 ? `line ${i.line}: ${i.message}` : i.message
+export function issueLine(i: Issue, t: Translate): string {
+  // ★ The **message** is the server's own sentence, and it comes in as a
+  //   parameter: the runtime speaks English, and the reader's language is
+  //   for the words the interface owns.
+  return i.line > 0
+    ? t("settings.issue.line", { line: i.line, message: i.message })
+    : i.message
 }
 
 export type KnownSection = "agents" | "llm" | "server" | "tools" | "mcps"

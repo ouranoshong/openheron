@@ -4,6 +4,8 @@
 //   `bun test` can prove it right on its own. The icon it names is a
 //   **string**, not a React component — the component that draws the icon
 //   lives in the component layer, and this file stays testable.
+
+import type { Translate } from "./i18n"
 //
 // ★ The classification answers one question: "how should this file be
 //   looked at?" A picture is a picture, a PDF is a PDF, and a `.md` is
@@ -17,8 +19,10 @@ export interface FileClass {
   kind: FileKind
   // icon is the **name** of a lucide icon, without the "Icon" suffix.
   icon: string
-  // label is the English name of the kind. It is interface copy, so it is
-  // English — the interface speaks English everywhere.
+  // label is the name of the kind, in the reader's language. ★ It is
+  // interface copy, so it is translated — and the translator comes in,
+  // because this module is pure and a pure function cannot read the
+  // language on its own.
   label: string
 }
 
@@ -238,27 +242,27 @@ const LANG_BY_MIME: Record<string, string> = {
 }
 
 // fileClass answers "what is this file, and how should it be shown".
-export function fileClass(name: string, mime?: string): FileClass {
+export function fileClass(name: string, mime: string | undefined, t: Translate): FileClass {
   const kind = fileKind(name, mime)
   const ext = fileExt(name)
   switch (kind) {
     case "image":
-      return { kind, icon: "file-image", label: "Image" }
+      return { kind, icon: "file-image", label: t("file.kind.image") }
     case "pdf":
-      return { kind, icon: "file-type", label: "PDF" }
+      return { kind, icon: "file-type", label: t("file.kind.pdf") }
     case "markdown":
-      return { kind, icon: "file-text", label: "Markdown" }
+      return { kind, icon: "file-text", label: t("file.kind.markdown") }
     case "code":
-      return { kind, icon: "file-code", label: "Code" }
+      return { kind, icon: "file-code", label: t("file.kind.code") }
     case "text":
       if (ext === "csv" || ext === "tsv") {
-        return { kind, icon: "file-spreadsheet", label: "Table" }
+        return { kind, icon: "file-spreadsheet", label: t("file.kind.table") }
       }
-      return { kind, icon: "file-text", label: "Text" }
+      return { kind, icon: "file-text", label: t("file.kind.text") }
     default:
       if (ext === "zip" || ext === "tar" || ext === "gz" || ext === "tgz" || ext === "7z") {
-        return { kind, icon: "file-archive", label: "Archive" }
+        return { kind, icon: "file-archive", label: t("file.kind.archive") }
       }
-      return { kind, icon: "file", label: "File" }
+      return { kind, icon: "file", label: t("file.kind.file") }
   }
 }

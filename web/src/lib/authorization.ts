@@ -1,3 +1,5 @@
+import type { Translate } from "./i18n"
+
 // AuthorizationMode is one of the three authorization levels a session can be
 // in.
 //
@@ -13,29 +15,33 @@ export interface AuthorizationOption {
   title: string
 }
 
-// AUTHORIZATION_OPTIONS are the three levels, in the order they are offered.
+// authorizationOptions are the three levels, in the order they are offered.
 //
 // ★ The order is fixed: it runs from "asks the most" to "asks the least", and
 //   a list that reorders itself between two renders is a list the user has to
 //   read again every time.
-export const AUTHORIZATION_OPTIONS: readonly AuthorizationOption[] = [
-  {
-    mode: "default",
-    label: "Default approval",
-    title: "Tools ask before they run, as the configuration says",
-  },
-  {
-    mode: "trusted",
-    label: "Trusted paths",
-    title:
-      "Writes inside the project, the session workspace and the configuration do not ask",
-  },
-  {
-    mode: "full",
-    label: "Full authorization",
-    title: "Every tool runs without asking",
-  },
-]
+//
+// ★ The translator comes **in**: this module is pure, and a pure function
+//   cannot read the language on its own.
+export function authorizationOptions(t: Translate): AuthorizationOption[] {
+  return [
+    {
+      mode: "default",
+      label: t("authorization.label.default"),
+      title: t("authorization.title.default"),
+    },
+    {
+      mode: "trusted",
+      label: t("authorization.label.trusted"),
+      title: t("authorization.title.trusted"),
+    },
+    {
+      mode: "full",
+      label: t("authorization.label.full"),
+      title: t("authorization.title.full"),
+    },
+  ]
+}
 
 // authorizationMode reads a mode off the wire.
 //
@@ -47,6 +53,10 @@ export function authorizationMode(value: unknown): AuthorizationMode {
 }
 
 // authorizationOption is the option a mode is drawn from.
-export function authorizationOption(mode: AuthorizationMode): AuthorizationOption {
-  return AUTHORIZATION_OPTIONS.find((o) => o.mode === mode) ?? AUTHORIZATION_OPTIONS[0]
+export function authorizationOption(
+  mode: AuthorizationMode,
+  t: Translate,
+): AuthorizationOption {
+  const options = authorizationOptions(t)
+  return options.find((o) => o.mode === mode) ?? options[0]
 }

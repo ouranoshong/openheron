@@ -1,5 +1,6 @@
 import { formatTokens } from "@/lib/agents"
 import type { CompactionMark } from "@/lib/types"
+import { useT } from "@/lib/use-t"
 
 // CompactionDivider marks the boundary of the effective history.
 //
@@ -12,19 +13,26 @@ import type { CompactionMark } from "@/lib/types"
 // the compaction was announced live: the estimate is measured against the
 // transcript, which is written when the turn ends.
 export function CompactionDivider({ mark }: { mark: CompactionMark }) {
-  const saved = mark.savedTokens > 0 ? `≈${formatTokens(mark.savedTokens)} tokens saved` : ""
-  const label = mark.superseded > 0 ? `${mark.superseded} earlier messages` : "Earlier messages"
-  const text = [label, "compacted into a summary", saved].filter(Boolean).join(" · ")
+  const t = useT()
+  const saved =
+    mark.savedTokens > 0
+      ? t("messages.tokensSaved", { tokens: formatTokens(mark.savedTokens) })
+      : ""
+  const label =
+    mark.superseded > 0
+      ? t("messages.earlierMessages", { count: mark.superseded })
+      : t("messages.earlierMessagesPlain")
+  const text = [label, t("messages.compactedIntoSummary"), saved].filter(Boolean).join(" · ")
 
   const title = [
-    "The model reads a summary of the messages above this line, not the messages themselves.",
-    "The messages are still in the transcript.",
+    t("messages.compactionReadsSummary"),
+    t("messages.compactionStillThere"),
   ]
   if (mark.superseded > 0) {
-    title.push(`Superseded messages: ${mark.superseded}`)
+    title.push(t("messages.compactionSuperseded", { count: mark.superseded }))
   }
   if (mark.savedTokens > 0) {
-    title.push(`Estimated tokens saved: ${mark.savedTokens}`)
+    title.push(t("messages.compactionEstimatedTokens", { count: mark.savedTokens }))
   }
 
   return (

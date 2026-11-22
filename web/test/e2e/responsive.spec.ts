@@ -305,6 +305,40 @@ test.describe("响应式 · 视口", () => {
       expect(composer!.x).toBeGreaterThanOrEqual(sidebar!.x + sidebar!.width - 1)
     })
 
+    test("★ 宽屏上，助手正文吃满整列，与用户气泡共用右边缘", async ({ page }) => {
+      // ★ A viewport wide enough that the column is at its own width: the
+      //   symptom only shows when the window is wider than the column.
+      await page.setViewportSize({ width: 1920, height: 1080 })
+      await openApp(page)
+      await openThread(page, "Alpha conversation")
+
+      const edges = await page.evaluate(() => {
+        const right = (sel: string) => {
+          const el = document.querySelector(sel)
+          return el ? Math.round(el.getBoundingClientRect().right) : null
+        }
+        const assistant = '[data-testid="message"][data-role="assistant"]'
+        return {
+          // ★ The message body is the full width of the column's content box.
+          body: right(`${assistant} [data-testid="message-body"]`),
+          // ★ The paragraph inside it — the **text**.
+          prose: right(`${assistant} [data-testid="message-body"] p`),
+          // ★ The user's bubble, on the other side of the same column.
+          bubble: right('[data-testid="message"][data-role="user"] > div'),
+        }
+      })
+
+      expect(edges.body, "the assistant message should be there").not.toBeNull()
+      // ★ The text takes the width it is given. ★ The prose used to stop
+      //   224px short of the column's right edge while the user's bubble sat
+      //   on that edge — so on a wide screen the answer looked pushed to the
+      //   left and the right half of the window stayed empty.
+      expect(edges.prose, "the paragraph should fill the message").toBe(edges.body)
+      expect(edges.bubble, "the user's bubble should share the column's right edge").toBe(
+        edges.body,
+      )
+    })
+
     test("★ 长对话不会把输入框顶出屏幕", async ({ page }) => {
       await openApp(page)
       await openThread(page, "Long conversation")
@@ -320,6 +354,23 @@ test.describe("响应式 · 视口", () => {
         .locator('[data-testid="message-list"]')
         .evaluate((el) => el.scrollHeight > el.clientHeight)
       expect(scrolls).toBe(true)
+    })
+
+    test("★ 设置入口不贴着侧栏的边", async ({ page }) => {
+      await openApp(page)
+      const entry = await page.locator('[data-testid="settings-entry"]').boundingBox()
+      const sidebar = await page.locator('[data-testid="sidebar"]').boundingBox()
+      expect(entry).not.toBeNull()
+      expect(sidebar).not.toBeNull()
+
+      // ★ The settings entry is a **row of the column**, not a line drawn on
+      //   its edge. ★ It used to be a flex item that stretched to the very
+      //   edge: the label sat on the left border, the shortcut hint on the
+      //   right one, and nothing was between the button and the bottom of the
+      //   window.
+      expect(entry!.x - sidebar!.x).toBeGreaterThanOrEqual(8)
+      expect(sidebar!.x + sidebar!.width - (entry!.x + entry!.width)).toBeGreaterThanOrEqual(8)
+      expect(sidebar!.y + sidebar!.height - (entry!.y + entry!.height)).toBeGreaterThanOrEqual(8)
     })
   })
 })

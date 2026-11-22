@@ -6,6 +6,7 @@ import { Dialog as DialogPrimitive } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
 import { IconPlaceholder } from "@/components/ui/icon-placeholder"
+import { useT } from "@/lib/use-t"
 
 function Dialog({
   ...props
@@ -55,6 +56,11 @@ function DialogContent({
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
 }) {
+  // ★ The close button's name is **copy**: it is read out by a screen
+  //   reader, and a reader who reads the interface in Chinese needs a
+  //   Chinese word for it. ⇒ The base component asks the catalog, like
+  //   every other surface does.
+  const t = useT()
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -81,7 +87,7 @@ function DialogContent({
                 phosphor="XIcon"
                 remixicon="RiCloseLine"
               />
-              <span className="sr-only">Close</span>
+              <span className="sr-only">{t("common.close")}</span>
             </Button>
           </DialogPrimitive.Close>
         )}
@@ -108,6 +114,7 @@ function DialogFooter({
 }: React.ComponentProps<"div"> & {
   showCloseButton?: boolean
 }) {
+  const t = useT()
   return (
     <div
       data-slot="dialog-footer"
@@ -120,7 +127,7 @@ function DialogFooter({
       {children}
       {showCloseButton && (
         <DialogPrimitive.Close asChild>
-          <Button variant="outline">Close</Button>
+          <Button variant="outline">{t("common.close")}</Button>
         </DialogPrimitive.Close>
       )}
     </div>

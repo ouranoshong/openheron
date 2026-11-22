@@ -16,14 +16,39 @@
      gutter takes the rest, and a column wider than that starts to push the
      content past the edge of the window.
 
-     The prose column is narrower on purpose. A paragraph of about 45
-     characters is comfortable to read; 60 is not. So the **blocks** — tables,
-     code, tool cards — take the whole column, and only the prose is held
-     back. Widening the conversation is about seeing a wide table whole, not
-     about making every sentence a long line. */
+     ★ The conversation is **that column**, and the text in it **fills** it.
+     The prose used to stop 224px short of the column's right edge while the
+     user's bubble sat on that edge — so on a wide screen the answer looked
+     pushed to the left and the right half of the window stayed empty. ⇒ One
+     width for the conversation, and the text takes all of it. */
   --chat-column: 64rem;
   --chat-gutter: clamp(1rem, 2.5vw, 2rem);
+
+  /* ★ The **measure**: how wide a thing gets when it is read **on its own** —
+     a document in a panel (the file preview). A paragraph of about 45
+     characters is comfortable to read; 60 is not.
+
+     ★ It is **not** the conversation's width, and that is the distinction
+     this token now carries: a message is read in short paragraphs, in a
+     column the reader already knows how wide it is, and next to the user's
+     own message on the other side of the same column — so the message fills
+     that column and the measure does not apply to it. */
   --prose-column: 46rem;
+
+  /* ★ The **welcome page**: the question you are about to ask. ★ It is
+     narrower than the conversation's column — a question is not an answer,
+     and a 1024px input box on a wide screen reads as a form that fills the
+     window.
+
+     ★ But it stays **above 48rem**, on purpose. ★ The line of facts under
+     the box (the agent, the model, the project, the authorization mode)
+     drops its names below that width: the project and the approval mode
+     become icons with tooltips. ★ And the **first** screen is exactly where
+     those two have to be readable — the project is what the conversation
+     works in, and the authorization mode is a decision about what the agent
+     may do without being asked. ⇒ 52rem: narrower than the conversation,
+     wide enough for the line under the box to keep its words. */
+  --welcome-column: 52rem;
 
   /* ★ The sidebar's width is a token too. The docked column and the drawer
      have to be the same width: a drawer that opens at 256px beside a column

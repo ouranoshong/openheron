@@ -5,6 +5,7 @@ import { CodeBlock } from "@/components/code-block"
 import { MarkdownText } from "@/components/markdown"
 import { fileUrl } from "@/lib/api"
 import { fileClass, fileKind, fileLang } from "@/lib/file-kind"
+import { useT } from "@/lib/use-t"
 
 // ★ The text preview has a ceiling.
 //
@@ -39,6 +40,7 @@ export function FilePreview({
 }) {
   const kind = fileKind(name, mime)
   const url = fileUrl(sessionId, path)
+  const t = useT()
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -68,7 +70,7 @@ export function FilePreview({
           </span>
           <button
             type="button"
-            aria-label="Close preview"
+            aria-label={t("messages.closePreview")}
             onClick={onClose}
             className="hover:bg-accent ml-auto grid size-6 shrink-0 place-items-center rounded"
           >
@@ -101,10 +103,11 @@ export function FilePreview({
 //   about seeing the detail, and a thumbnail has none.
 function ImagePreview({ url, name }: { url: string; name: string }) {
   const [broken, setBroken] = useState(false)
+  const t = useT()
   if (broken) {
     return (
       <div data-testid="file-preview-missing" className="text-muted-foreground py-10 text-center text-sm">
-        The file is no longer in the session.
+        {t("messages.fileGone")}
       </div>
     )
   }
@@ -134,6 +137,7 @@ function TextPreview({
 }) {
   const [state, setState] = useState<{ text: string; truncated: boolean } | null>(null)
   const [failed, setFailed] = useState(false)
+  const t = useT()
 
   useEffect(() => {
     let live = true
@@ -165,14 +169,14 @@ function TextPreview({
   if (failed) {
     return (
       <div data-testid="file-preview-missing" className="text-muted-foreground py-10 text-center text-sm">
-        The file is no longer in the session.
+        {t("messages.fileGone")}
       </div>
     )
   }
   if (!state) {
     return (
       <div data-testid="file-preview-loading" className="text-muted-foreground py-10 text-center text-sm">
-        Loading…
+        {t("common.loading")}
       </div>
     )
   }
@@ -180,7 +184,9 @@ function TextPreview({
   return (
     <div data-testid="file-preview-text">
       {kind === "markdown" ? (
-        <MarkdownText text={state.text} />
+        // ★ A document is read on its own, so it keeps the **measure** — the
+        //   conversation's text fills its column instead.
+        <MarkdownText text={state.text} measure />
       ) : kind === "code" ? (
         <CodeBlock lang={fileLang(name)} text={state.text} />
       ) : (
@@ -193,7 +199,7 @@ function TextPreview({
       )}
       {state.truncated && (
         <p data-testid="file-preview-truncated" className="text-muted-foreground mt-3 text-xs">
-          Showing the first {Math.floor(MAX_TEXT_BYTES / 1024)} KiB. Download the file to read the rest.
+          {t("messages.previewTruncated", { size: Math.floor(MAX_TEXT_BYTES / 1024) })}
         </p>
       )}
     </div>
@@ -205,7 +211,8 @@ function TextPreview({
 // ★ It is not an error: a zip is a zip, and the way to look at a zip is to
 //   download it.
 function OtherPreview({ url, name }: { url: string; name: string }) {
-  const cls = fileClass(name)
+  const t = useT()
+  const cls = fileClass(name, undefined, t)
   return (
     <div className="flex flex-col items-center gap-3 py-10 text-center">
       <FileTextIcon className="text-muted-foreground size-10" />
@@ -217,7 +224,7 @@ function OtherPreview({ url, name }: { url: string; name: string }) {
         className="border-border inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm"
       >
         <DownloadIcon className="size-4" />
-        Download
+        {t("messages.download")}
       </a>
     </div>
   )

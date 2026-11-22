@@ -10,7 +10,14 @@
 // ★ Everything here is a **pure function**: no fetch, no store, no React.
 //	The grouping is the one piece of logic the sidebar needs, and a piece of
 //	logic that cannot be run without a browser cannot be tested.
+//
+// ★ The copy these functions show — the two group headings, the sentences
+//	that refuse a name or a root — comes from the catalog, so the
+//	**translator is an argument**: a pure function cannot read the language
+//	by itself, and one that did would be a function whose answer depends on
+//	what happened before it was called.
 
+import type { Translate } from "@/lib/i18n"
 import type { DirectoryPick } from "@/lib/types"
 
 /** One project, as the API shows it. */
@@ -75,7 +82,12 @@ export const PINNED_GROUP = "pinned"
 export const NO_PROJECT_GROUP = "no-project"
 
 /** The heading of the pinned group. */
-export const PINNED_GROUP_TITLE = "Pinned"
+// ★ The two headings are **copy**, not identifiers: they come from the
+//   catalog (`projects.*`), because the interface says them in the reader's
+//   language. ★ The **keys** stay what they were — a key is what the fold
+//   preference is stored under, and renaming it would forget every user's
+//   fold.
+const PINNED_GROUP_TITLE_KEY = "projects.group.pinned" as const
 
 /**
  * The heading of the group for the sessions that belong to no project.
@@ -85,7 +97,7 @@ export const PINNED_GROUP_TITLE = "Pinned"
  * project. ★ The **key** stays `no-project`: it is what the fold preference
  * is stored under, and renaming it would forget every user's fold.
  */
-export const DEFAULT_PROJECT_GROUP_TITLE = "Default Project"
+const DEFAULT_PROJECT_GROUP_TITLE_KEY = "projects.defaultName" as const
 
 /**
  * groupSessions sorts the sessions into the groups the sidebar renders.
@@ -121,6 +133,7 @@ export function groupSessions<T extends GroupableSession>(
   sessions: readonly T[],
   projects: readonly ProjectSummary[],
   scope: ProjectScope | null,
+  t: Translate,
 ): SessionGroup<T>[] {
   if (scope) {
     const group: SessionGroup<T> = { key: scope.projectId, title: scope.name, sessions: [] }
@@ -154,7 +167,7 @@ export function groupSessions<T extends GroupableSession>(
 
   const groups: SessionGroup<T>[] = []
   if (pinned.length > 0) {
-    groups.push({ key: PINNED_GROUP, title: PINNED_GROUP_TITLE, sessions: pinned })
+    groups.push({ key: PINNED_GROUP, title: t(PINNED_GROUP_TITLE_KEY), sessions: pinned })
   }
 
   const ordered = sortProjects(projects)
@@ -183,7 +196,11 @@ export function groupSessions<T extends GroupableSession>(
 
   const orphans = buckets.get(NO_PROJECT_GROUP)
   if (orphans && orphans.length > 0) {
-    groups.push({ key: NO_PROJECT_GROUP, title: DEFAULT_PROJECT_GROUP_TITLE, sessions: orphans })
+    groups.push({
+      key: NO_PROJECT_GROUP,
+      title: t(DEFAULT_PROJECT_GROUP_TITLE_KEY),
+      sessions: orphans,
+    })
   }
   return groups
 }
@@ -300,8 +317,8 @@ export function projectSwitch(
  *   derives it from the root). ★ Renaming is the other case — see
  *   `projectRenameError`.
  */
-export function projectNameError(name: string): string | undefined {
-  if (/[\r\n]/.test(name.trim())) return "The name must be one line."
+export function projectNameError(name: string, t: Translate): string | undefined {
+  if (/[\r\n]/.test(name.trim())) return t("projects.error.nameOneLine")
   return undefined
 }
 
@@ -313,9 +330,9 @@ export function projectNameError(name: string): string | undefined {
  *   the same thing (`projects.Registry.Update`: "the project name must not be
  *   empty") — the client says it first, so the field is not sent at all.
  */
-export function projectRenameError(name: string): string | undefined {
-  if (name.trim() === "") return "The name must not be empty."
-  return projectNameError(name)
+export function projectRenameError(name: string, t: Translate): string | undefined {
+  if (name.trim() === "") return t("projects.error.nameNotEmpty")
+  return projectNameError(name, t)
 }
 
 /**
@@ -328,8 +345,8 @@ export function projectRenameError(name: string): string | undefined {
  * ★ The directory is not checked for existence here: the server is the one
  *   that resolves the path, and a client-side copy of that rule would drift.
  */
-export function projectRootError(root: string): string | undefined {
-  if (root.trim() === "") return "The root must not be empty."
+export function projectRootError(root: string, t: Translate): string | undefined {
+  if (root.trim() === "") return t("projects.error.rootNotEmpty")
   return undefined
 }
 
@@ -343,11 +360,14 @@ export function projectRootError(root: string): string | undefined {
  * ★ "Picked" without a path is a contradiction, and the server would be
  *   wrong: the client says so rather than filling in an empty root.
  */
-export function directoryPick(answer: { picked: boolean; path?: string }): DirectoryPick {
+export function directoryPick(
+  answer: { picked: boolean; path?: string },
+  t: Translate,
+): DirectoryPick {
   if (!answer.picked) return { kind: "cancelled" }
   const path = (answer.path ?? "").trim()
   if (path === "") {
-    return { kind: "failed", reason: "The server did not say which directory." }
+    return { kind: "failed", reason: t("projects.pick.noDirectory") }
   }
   return { kind: "picked", path }
 }

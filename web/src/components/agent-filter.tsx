@@ -3,9 +3,11 @@ import { useMemo } from "react"
 import { collectAgents, formatTokens } from "@/lib/agents"
 import { selectActiveContext, selectActiveUsage, selectMessages, useStore } from "@/lib/store"
 import type { ContextUsage } from "@/lib/types"
+import { useT } from "@/lib/use-t"
 import { cn } from "@/lib/utils"
 
 export function AgentFilter({ className }: { className?: string }) {
+  const t = useT()
   const usage = useStore(selectActiveUsage)
   const context = useStore(selectActiveContext)
   const messages = useStore(selectMessages)
@@ -26,10 +28,12 @@ export function AgentFilter({ className }: { className?: string }) {
         className,
       )}
     >
-      <span className="text-muted-foreground shrink-0 text-xs">Agent</span>
+      <span className="text-muted-foreground shrink-0 text-xs">
+        {t("sidebar.agentFilterLabel")}
+      </span>
       <FilterChip
         active={filter === null}
-        label="All"
+        label={t("common.all")}
         testId="agent-filter-all"
         onClick={() => setFilter(null)}
       />
@@ -63,6 +67,7 @@ function FilterChip({
   testId: string
   onClick: () => void
 }) {
+  const t = useT()
   // ★ The chip carries the **name** and nothing else. The numbers used to
   //   ride on it, and the header turned into a ledger: four agents meant
   //   four numbers per chip, and the eye could not tell which was which.
@@ -75,18 +80,21 @@ function FilterChip({
   const title = context
     ? [
         // The first line keeps its old shape: the label and the spend.
-        tokens === undefined ? label : `${label} — ${tokens} tokens`,
+        tokens === undefined ? label : t("sidebar.agentSpend", { label, count: tokens }),
         context.contextWindow > 0
-          ? `Context: ≈${formatTokens(context.usedTokens)} / ${formatTokens(context.contextWindow)}`
-          : `Context: ≈${formatTokens(context.usedTokens)} tokens`,
+          ? t("sidebar.contextUsage", {
+              used: formatTokens(context.usedTokens),
+              window: formatTokens(context.contextWindow),
+            })
+          : t("common.contextUsed", { used: formatTokens(context.usedTokens) }),
         // Where the context gets cut, when it does.
         ...(context.summarizeAt && context.summarizeAt > 0
-          ? [`Compacted at: ${context.summarizeAt} tokens`]
+          ? [t("sidebar.contextCompactedAt", { count: context.summarizeAt })]
           : []),
       ].join("\n")
     : tokens === undefined
       ? label
-      : `${label} — ${tokens} tokens`
+      : t("sidebar.agentSpend", { label, count: tokens })
 
   return (
     <button

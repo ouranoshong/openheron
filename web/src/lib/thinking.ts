@@ -1,4 +1,6 @@
 
+import type { Translate } from "./i18n"
+
 export interface ThinkingState {
   complete: boolean
   elapsedMs: number | null
@@ -11,13 +13,13 @@ export function formatThinkingDuration(ms: number): string {
   return `${Math.round(ms / 1000)}s`
 }
 
-export function thinkingLabel(state: ThinkingState): string {
-  if (!state.complete) return "Thinking…"
+export function thinkingLabel(state: ThinkingState, t: Translate): string {
+  if (!state.complete) return t("thinking.running")
   if (state.interrupted) {
     return state.elapsedMs === null
-      ? "Interrupted"
-      : `Interrupted after ${formatThinkingDuration(state.elapsedMs)}`
+      ? t("thinking.interrupted")
+      : t("thinking.interruptedFor", { duration: formatThinkingDuration(state.elapsedMs) })
   }
-  if (state.elapsedMs === null) return "Thought"
-  return `Thought for ${formatThinkingDuration(state.elapsedMs)}`
+  if (state.elapsedMs === null) return t("thinking.done")
+  return t("thinking.doneFor", { duration: formatThinkingDuration(state.elapsedMs) })
 }

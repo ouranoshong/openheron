@@ -9,10 +9,12 @@ import {
   approvalToolName,
 } from "@/lib/approval"
 import { selectInterrupts, useStore } from "@/lib/store"
+import { useT } from "@/lib/use-t"
 
 export function ApprovalCard({ inset = true }: { inset?: boolean }) {
   const interrupts = useStore(selectInterrupts)
   const answer = useStore((s) => s.answer)
+  const t = useT()
 
   const [rejecting, setRejecting] = useState(false)
   const [reason, setReason] = useState("")
@@ -39,10 +41,10 @@ export function ApprovalCard({ inset = true }: { inset?: boolean }) {
           <ShieldAlertIcon className="mt-0.5 size-4 shrink-0" />
           <div className="min-w-0">
             <p id="approval-title" className="text-sm font-medium">
-              {approvalTitle(interrupts.length)}
+              {approvalTitle(interrupts.length, t)}
             </p>
             <p className="text-muted-foreground text-xs">
-              The agent is paused until you respond.
+              {t("messages.approvalPaused")}
             </p>
           </div>
         </div>
@@ -62,14 +64,14 @@ export function ApprovalCard({ inset = true }: { inset?: boolean }) {
                     data-testid="approval-tool"
                     className="font-mono text-xs font-semibold"
                   >
-                    {approvalToolName(i)}
+                    {approvalToolName(i, t)}
                   </code>
                   {i.requestedByAgent ? (
                     <span
                       data-testid="approval-requested-by"
                       className="text-muted-foreground text-xs"
                     >
-                      Requested by {i.requestedByAgent}
+                      {t("messages.requestedBy", { agent: i.requestedByAgent })}
                     </span>
                   ) : null}
                 </div>
@@ -94,27 +96,27 @@ export function ApprovalCard({ inset = true }: { inset?: boolean }) {
         {rejecting ? (
           <div className="flex gap-2">
             <input
-              aria-label="Rejection reason"
+              aria-label={t("messages.rejectionReason")}
               autoFocus
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="Reason (sent back to the model)"
+              placeholder={t("messages.rejectionPlaceholder")}
               className="border-input bg-background min-w-0 flex-1 rounded-md border px-2 py-1 text-xs outline-none focus-visible:ring-2"
             />
             <Button size="sm" variant="destructive" onClick={() => void respond(false)}>
-              Confirm denial
+              {t("messages.confirmDenial")}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setRejecting(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
           </div>
         ) : (
           <div className="flex gap-2">
             <Button size="sm" onClick={() => void respond(true)}>
-              {multiple ? "Approve all" : "Approve"}
+              {multiple ? t("messages.approveAll") : t("messages.approve")}
             </Button>
             <Button size="sm" variant="outline" onClick={() => setRejecting(true)}>
-              {multiple ? "Deny all" : "Deny"}
+              {multiple ? t("messages.denyAll") : t("messages.deny")}
             </Button>
           </div>
         )}

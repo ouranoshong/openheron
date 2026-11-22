@@ -2,11 +2,13 @@ import { useEffect } from "react"
 
 import { Button } from "@/components/ui/button"
 import { useSettings } from "@/lib/settings-store"
+import { useT } from "@/lib/use-t"
 
 export function SettingsEntry({ className }: { className?: string }) {
   const openSettings = useSettings((s) => s.openSettings)
   const open = useSettings((s) => s.open)
   const close = useSettings((s) => s.closeSettings)
+  const t = useT()
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -28,7 +30,7 @@ export function SettingsEntry({ className }: { className?: string }) {
       onClick={() => void openSettings()}
       data-testid="settings-entry"
     >
-      Settings
+      {t("settings.title")}
       <kbd className="text-muted-foreground ml-auto text-[10px]">⌘,</kbd>
     </Button>
   )

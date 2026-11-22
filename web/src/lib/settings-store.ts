@@ -2,6 +2,7 @@
 import { create } from "zustand"
 
 import { ApiError } from "@/lib/api"
+import { locale, translator } from "@/lib/i18n"
 import {
   isSettingsError,
   settingsApi,
@@ -155,7 +156,14 @@ export const useSettings = create<SettingsState>((set, get) => ({
 
     const errors = blocking(issues)
     if (errors.length > 0) {
-      set({ saveState: "error", saveError: errors.map(issueLine).join("\n") })
+      set({
+        saveState: "error",
+        // ★ The store is not a component, so it has no hook to read the
+        //   language with: it reads the one in effect right now. ★ The
+        //   message inside each line is the **server's** sentence and stays
+        //   English — only the word before it is the reader's.
+        saveError: errors.map((e) => issueLine(e, translator(locale()))).join("\n"),
+      })
       return
     }
 

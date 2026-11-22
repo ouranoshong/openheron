@@ -110,6 +110,28 @@ test.describe("opening", () => {
     await expect(page.locator(DIALOG)).toHaveCount(0)
   })
 
+  // ★ The settings panel is the **whole screen**. ★ It used to stop at
+  //   72rem on a wide screen, so the editor — the reason the dialog exists —
+  //   sat in a column with empty space beside it, and a YAML file is read
+  //   line by line: the room was not the point.
+  // ★ The assertion is about **covering the window**, not about a number:
+  //   the panel has no margin and no radius, so its box is the window's box.
+  test("★ 设置弹窗铺满全屏", async ({ page }) => {
+    await openSettings(page)
+    const viewport = await page.evaluate(() => ({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }))
+    const box = await page.locator(DIALOG).boundingBox()
+    expect(box).not.toBeNull()
+    if (!box) return
+
+    expect(box.x).toBeLessThanOrEqual(1)
+    expect(box.y).toBeLessThanOrEqual(1)
+    expect(box.x + box.width).toBeGreaterThanOrEqual(viewport.width - 2)
+    expect(box.y + box.height).toBeGreaterThanOrEqual(viewport.height - 2)
+  })
+
   test("selecting the first file shows its real content", async ({ page }) => {
     await openSettings(page)
     // ★ The first **editable** file — llm/deepseek.yaml, because the real

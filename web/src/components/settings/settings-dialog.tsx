@@ -20,6 +20,7 @@ import { ConflictDialog } from "@/components/settings/conflict-dialog"
 import { useSettings } from "@/lib/settings-store"
 import { selectCategories, selectIsEditable, type SettingsTab } from "@/lib/settings-store"
 import { isDark, subscribeTheme } from "@/lib/theme"
+import { useT } from "@/lib/use-t"
 import { cn } from "@/lib/utils"
 
 export function SettingsDialog() {
@@ -32,6 +33,7 @@ export function SettingsDialog() {
   const edit = useSettings((s) => s.edit)
   const tab = useSettings((s) => s.tab)
   const setTab = useSettings((s) => s.setTab)
+  const t = useT()
 
   const categories = useSettings(useShallow(selectCategories))
   const isEditable = useSettings(selectIsEditable)
@@ -45,21 +47,33 @@ export function SettingsDialog() {
     <>
       <Dialog open={open} onOpenChange={(v) => (!v ? close() : undefined)}>
         <DialogContent
-          className="sm:max-w-6xl h-[85dvh] flex flex-col gap-3 p-4"
+          // ★ The settings are a **workspace**, not a card: a file tree on the
+          //   left and an editor on the right, and the editor is the reason
+          //   the dialog exists. ★ A dialog that stops at 72rem leaves the
+          //   editor in a column with room to spare on a wide screen — and a
+          //   YAML file is read line by line, so the room is not the point.
+          //   ⇒ The panel is the whole screen: no margin, no radius.
+          //   ★ The base component centers itself with `top-1/2 left-1/2` and a
+          //   half-translate, so those are taken back here — `inset-0` plus
+          //   `translate-x-0 translate-y-0` — rather than in the base, which
+          //   every other dialog still wants.
+          className="inset-0 translate-x-0 translate-y-0 max-w-none sm:max-w-none h-[100dvh] w-full rounded-none flex flex-col gap-3 p-4"
           data-testid="settings-dialog"
           showCloseButton={false}
         >
           <DialogHeader className="flex-row items-center justify-between gap-4 space-y-0">
             <div className="min-w-0">
-              <DialogTitle>Settings</DialogTitle>
+              <DialogTitle>{t("settings.title")}</DialogTitle>
               <DialogDescription className="truncate">
-                {tab === "secrets" ? "the keys, and where each one comes from" : (selected ?? "no file selected")}
+                {tab === "secrets"
+                  ? t("settings.description.secrets")
+                  : (selected ?? t("settings.description.none"))}
               </DialogDescription>
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <TabBar tab={tab} onChange={setTab} />
               <DialogClose asChild>
-                <Button variant="ghost" size="icon-sm" aria-label="Close settings">
+                <Button variant="ghost" size="icon-sm" aria-label={t("settings.close")}>
                   <XIcon className="size-4" />
                 </Button>
               </DialogClose>
@@ -82,7 +96,7 @@ export function SettingsDialog() {
                     <>
                       {categories.find((c) => !c.editable && selected.startsWith(c.id)) && (
                         <p className="text-muted-foreground bg-muted rounded-md px-3 py-2 text-xs" role="status">
-                          This section is not hot-reloaded; changes apply after a restart.
+                          {t("settings.notHotReloaded")}
                         </p>
                       )}
                       <ConfigEditor
@@ -95,7 +109,7 @@ export function SettingsDialog() {
                     </>
                   ) : (
                     <div className="text-muted-foreground grid flex-1 place-items-center text-sm">
-                      {loading ? "Loading…" : "Select a file"}
+                      {loading ? t("common.loading") : t("settings.selectFile")}
                     </div>
                   )}
                 </div>
@@ -120,26 +134,27 @@ export function SettingsDialog() {
  *   second entry in the sidebar (the configuration is in one place).
  */
 function TabBar({ tab, onChange }: { tab: SettingsTab; onChange(t: SettingsTab): void }) {
+  const t = useT()
   const tabs: { id: SettingsTab; label: string }[] = [
-    { id: "files", label: "Files" },
-    { id: "secrets", label: "Secrets" },
+    { id: "files", label: t("settings.tab.files") },
+    { id: "secrets", label: t("settings.tab.secrets") },
   ]
   return (
-    <div role="tablist" aria-label="Settings sections" className="flex items-center gap-1">
-      {tabs.map((t) => (
+    <div role="tablist" aria-label={t("settings.sections")} className="flex items-center gap-1">
+      {tabs.map((item) => (
         <button
-          key={t.id}
+          key={item.id}
           type="button"
           role="tab"
-          aria-selected={tab === t.id}
-          data-testid={`settings-tab-${t.id}`}
-          onClick={() => onChange(t.id)}
+          aria-selected={tab === item.id}
+          data-testid={`settings-tab-${item.id}`}
+          onClick={() => onChange(item.id)}
           className={cn(
             "rounded-md border px-2.5 py-1 text-xs",
-            tab === t.id && "bg-accent",
+            tab === item.id && "bg-accent",
           )}
         >
-          {t.label}
+          {item.label}
         </button>
       ))}
     </div>

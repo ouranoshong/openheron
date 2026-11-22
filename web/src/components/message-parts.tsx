@@ -8,6 +8,7 @@ import { segments } from "@/lib/tool-groups"
 import { thinkingLabel } from "@/lib/thinking"
 import type { Message, Part } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/use-t"
 
 export function Reasoning({
   text,
@@ -21,6 +22,7 @@ export function Reasoning({
   elapsedMs: number | null
 }) {
   const [open, setOpen] = useState(false)
+  const t = useT()
 
   if (!text) return null
 
@@ -35,9 +37,9 @@ export function Reasoning({
         <ChevronRightIcon className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
         <BrainIcon className="size-3.5 shrink-0" />
         <span className="font-medium" data-testid="reasoning-label">
-          {thinkingLabel({ complete, elapsedMs, interrupted })}
+          {thinkingLabel({ complete, elapsedMs, interrupted }, t)}
         </span>
-        {open && <span className="ml-auto opacity-70">collapse</span>}
+        {open && <span className="ml-auto opacity-70">{t("messages.collapse")}</span>}
       </button>
       {open && (
         <div className="text-muted-foreground border-t px-3 py-2 text-xs whitespace-pre-wrap">

@@ -18,6 +18,7 @@ import {
   type ProjectSummary,
 } from "@/lib/projects"
 import { selectActiveProjectId, selectIsEmptyView, useStore } from "@/lib/store"
+import { useT } from "@/lib/use-t"
 import { cn } from "@/lib/utils"
 
 /**
@@ -53,6 +54,7 @@ import { cn } from "@/lib/utils"
  *   would drift apart.
  */
 export function ProjectsButton() {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const scope = useStore((s) => s.projectScope)
   const known = useStore((s) => s.projectsKnown)
@@ -64,7 +66,7 @@ export function ProjectsButton() {
 
   if (scope || !known) return null
 
-  const name = current ? current.name : "Default Project"
+  const name = current ? current.name : t("projects.defaultName")
 
   // ★ The label: it says where the work happens, and it says nothing else.
   //
@@ -76,8 +78,8 @@ export function ProjectsButton() {
     return (
       <span
         data-testid="projects-label"
-        aria-label={`Project: ${name}`}
-        title={`${name} — the project this conversation works in. A conversation's project cannot change — start a new conversation to work elsewhere.`}
+        aria-label={t("composer.projects.ariaLabel", { name })}
+        title={t("composer.projects.labelTitle", { name })}
         className="text-muted-foreground flex h-6 max-w-full items-center gap-1 px-1.5 text-[11px] @max-3xl:px-1"
       >
         <FolderIcon aria-hidden="true" className="size-3 shrink-0" />
@@ -101,8 +103,8 @@ export function ProjectsButton() {
         className="text-muted-foreground hover:text-foreground h-6 max-w-full gap-1 px-1.5 text-[11px] @max-3xl:border-0 @max-3xl:px-1"
         onClick={() => setOpen(true)}
         data-testid="projects-button"
-        aria-label={`Project: ${name}`}
-        title={`${name} — the project the next conversation works in. Click to choose another one, or to make a new one.`}
+        aria-label={t("composer.projects.ariaLabel", { name })}
+        title={t("composer.projects.buttonTitle", { name })}
       >
         <FolderIcon aria-hidden="true" className="size-3 shrink-0" />
         {/* ★ On a narrow screen the **name** steps aside and the icon stays —
@@ -142,6 +144,7 @@ export function ProjectsDialog({
   open?: boolean
   onOpenChange?: (v: boolean) => void
 }) {
+  const t = useT()
   const projects = useStore((s) => s.projects)
   const createProject = useStore((s) => s.createProject)
   const pickDirectory = useStore((s) => s.pickDirectory)
@@ -161,8 +164,8 @@ export function ProjectsDialog({
   //   directory, and the server derives the name from it when the name is
   //   empty. ★ So an empty name is not what stops the create — an empty root
   //   is.
-  const nameError = projectNameError(name)
-  const rootError = projectRootError(root)
+  const nameError = projectNameError(name, t)
+  const rootError = projectRootError(root, t)
   const canCreate = nameError === undefined && rootError === undefined
 
   const reset = () => {
@@ -225,16 +228,13 @@ export function ProjectsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg" data-testid="projects-dialog">
         <DialogHeader>
-          <DialogTitle>Projects</DialogTitle>
-          <DialogDescription>
-            A project is a directory. The conversations that belong to one work in its directory, and
-            they are listed under it in the sidebar.
-          </DialogDescription>
+          <DialogTitle>{t("composer.projects.title")}</DialogTitle>
+          <DialogDescription>{t("composer.projects.description")}</DialogDescription>
         </DialogHeader>
 
         {sortProjects(projects).length === 0 ? (
           <p className="text-muted-foreground text-xs" data-testid="projects-empty">
-            No projects yet. The conversations you start now work in the default project root.
+            {t("composer.projects.empty")}
           </p>
         ) : (
           <ul className="flex flex-col gap-1" data-testid="projects-list">
@@ -266,19 +266,19 @@ export function ProjectsDialog({
                   data-testid="project-name"
                   className="block max-w-full truncate text-left text-sm font-medium hover:underline"
                 >
-                  Default Project
+                  {t("projects.defaultName")}
                 </button>
                 <div className="text-muted-foreground truncate font-mono text-[11px]">
-                  the default project root
+                  {t("composer.projects.defaultRoot")}
                 </div>
               </div>
               {currentId === "" && (
                 <span
                   data-testid="project-current"
                   className="text-primary shrink-0 text-[11px]"
-                  title="The project this conversation works in"
+                  title={t("composer.projects.currentTitle")}
                 >
-                  Current
+                  {t("composer.projects.current")}
                 </span>
               )}
             </li>
@@ -327,13 +327,15 @@ export function ProjectsDialog({
                     <span
                       data-testid="project-current"
                       className="text-primary shrink-0 text-[11px]"
-                      title="The project this conversation works in"
+                      title={t("composer.projects.currentTitle")}
                     >
-                      Current
+                      {t("composer.projects.current")}
                     </span>
                   )}
                   <span className="text-muted-foreground shrink-0 text-[11px]">
-                    {p.sessionCount} {p.sessionCount === 1 ? "session" : "sessions"}
+                    {p.sessionCount === 1
+                      ? t("composer.projects.sessionOne", { count: p.sessionCount })
+                      : t("composer.projects.sessionMany", { count: p.sessionCount })}
                   </span>
                 </li>
               )
@@ -342,15 +344,15 @@ export function ProjectsDialog({
         )}
 
         <div className="flex flex-col gap-2 border-t pt-3">
-          <span className="text-xs font-medium">New project</span>
+          <span className="text-xs font-medium">{t("composer.projects.new")}</span>
           <Input
             value={name}
             onChange={(e) => {
               setName(e.target.value)
               setRefusal(undefined)
             }}
-            placeholder="Name (optional — the directory's own name is used)"
-            aria-label="Project name"
+            placeholder={t("composer.projects.namePlaceholder")}
+            aria-label={t("composer.projects.nameLabel")}
             data-testid="project-name-input"
             className="h-8 text-sm"
           />
@@ -361,8 +363,8 @@ export function ProjectsDialog({
                 setRoot(e.target.value)
                 setRefusal(undefined)
               }}
-              placeholder="Root directory"
-              aria-label="Project root"
+              placeholder={t("composer.projects.rootPlaceholder")}
+              aria-label={t("composer.projects.rootLabel")}
               data-testid="project-root-input"
               className="h-8 font-mono text-xs"
             />
@@ -376,8 +378,8 @@ export function ProjectsDialog({
               onClick={() => void chooseDirectory()}
               disabled={picking}
               data-testid="project-pick-directory"
-              aria-label="Choose a directory"
-              title="Open the file browser and choose a directory"
+              aria-label={t("composer.projects.chooseDirectory")}
+              title={t("composer.projects.browseTitle")}
               className="h-8 shrink-0 gap-1.5 px-2 text-xs"
             >
               {picking ? (
@@ -385,7 +387,7 @@ export function ProjectsDialog({
               ) : (
                 <FolderIcon aria-hidden="true" className="size-3.5" />
               )}
-              Browse
+              {t("composer.projects.browse")}
             </Button>
           </div>
           {refusal !== undefined && (
@@ -397,7 +399,7 @@ export function ProjectsDialog({
 
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={() => onOpenChange?.(false)}>
-            Close
+            {t("common.close")}
           </Button>
           <Button
             type="button"
@@ -405,7 +407,7 @@ export function ProjectsDialog({
             onClick={() => void submit()}
             data-testid="project-create"
           >
-            Create project
+            {t("composer.projects.create")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -441,6 +443,7 @@ export function ProjectRootDialog({
   open: boolean
   onOpenChange(v: boolean): void
 }) {
+  const t = useT()
   const updateProject = useStore((s) => s.updateProject)
   const pickDirectory = useStore((s) => s.pickDirectory)
   const [root, setRoot] = useState(project.root)
@@ -448,7 +451,7 @@ export function ProjectRootDialog({
   const [picking, setPicking] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  const rootError = projectRootError(root)
+  const rootError = projectRootError(root, t)
 
   const chooseDirectory = async () => {
     if (picking) return
@@ -488,9 +491,9 @@ export function ProjectRootDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg" data-testid="project-root-dialog">
         <DialogHeader>
-          <DialogTitle>Change folder</DialogTitle>
+          <DialogTitle>{t("projects.changeFolder")}</DialogTitle>
           <DialogDescription>
-            The directory {project.name} points at. The conversations in it work in that directory.
+            {t("composer.projects.changeFolderDescription", { name: project.name })}
           </DialogDescription>
         </DialogHeader>
 
@@ -501,8 +504,8 @@ export function ProjectRootDialog({
               setRoot(e.target.value)
               setRefusal(undefined)
             }}
-            placeholder="Root directory"
-            aria-label="Project root"
+            placeholder={t("composer.projects.rootPlaceholder")}
+            aria-label={t("composer.projects.rootLabel")}
             data-testid="project-root-edit"
             className="h-8 font-mono text-xs"
           />
@@ -513,8 +516,8 @@ export function ProjectRootDialog({
             onClick={() => void chooseDirectory()}
             disabled={picking}
             data-testid="project-root-pick"
-            aria-label="Choose a directory"
-            title="Open the file browser and choose a directory"
+            aria-label={t("composer.projects.chooseDirectory")}
+            title={t("composer.projects.browseTitle")}
             className="h-8 shrink-0 gap-1.5 px-2 text-xs"
           >
             {picking ? (
@@ -522,7 +525,7 @@ export function ProjectRootDialog({
             ) : (
               <FolderIcon aria-hidden="true" className="size-3.5" />
             )}
-            Browse
+            {t("composer.projects.browse")}
           </Button>
         </div>
         {refusal !== undefined && (
@@ -533,7 +536,7 @@ export function ProjectRootDialog({
 
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             type="button"
@@ -541,7 +544,7 @@ export function ProjectRootDialog({
             onClick={() => void submit()}
             data-testid="project-root-save"
           >
-            Save
+            {t("common.save")}
           </Button>
         </DialogFooter>
       </DialogContent>

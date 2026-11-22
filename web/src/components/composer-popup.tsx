@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react"
 
+import { useT } from "@/lib/use-t"
+
 export interface PopupItem {
   id: string
   label: string
@@ -30,6 +32,7 @@ export function ComposerPopup({
   onPick(index: number): void
   onHover(index: number): void
 }) {
+  const t = useT()
   const listRef = useRef<HTMLDivElement>(null)
   const activeId = items[active]?.id
 
@@ -54,11 +57,13 @@ export function ComposerPopup({
       ref={listRef}
       id="composer-popup"
       role="listbox"
-      aria-label="Completions"
+      aria-label={t("composer.popup.ariaLabel")}
       data-testid="composer-popup"
       className="bg-popover absolute right-0 bottom-full left-0 z-20 mb-2 max-h-64 overflow-y-auto rounded-lg border p-1 shadow-md"
     >
-      {loading && <div className="text-muted-foreground px-2 py-1.5 text-xs">Searching…</div>}
+      {loading && (
+        <div className="text-muted-foreground px-2 py-1.5 text-xs">{t("composer.popup.searching")}</div>
+      )}
       {!loading && error && <div className="text-muted-foreground px-2 py-1.5 text-xs">{error}</div>}
       {!loading && !error && items.length === 0 && (
         <div className="text-muted-foreground px-2 py-1.5 text-xs">{emptyLabel}</div>

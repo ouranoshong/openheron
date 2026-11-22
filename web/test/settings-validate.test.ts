@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
+import { translator } from "../src/lib/i18n"
+
 import {
   blocking,
   fileTemplate,
@@ -18,9 +20,13 @@ import {
 // that drifted on every rename; those specs now live in agentkit/spec, where
 // the loader can be asked directly.
 
+// ★ The English translator: the catalog's English is the text the
+//   interface showed before the copy moved into it.
+const en = translator("en")
+
 describe("issueLine", () => {
   test("a line-numbered issue reads with its line", () => {
-    expect(issueLine({ line: 3, message: "field bogus_key not found" })).toBe(
+    expect(issueLine({ line: 3, message: "field bogus_key not found" }, en)).toBe(
       "line 3: field bogus_key not found",
     )
   })
@@ -28,7 +34,7 @@ describe("issueLine", () => {
   // ★ 0 means "no line", not "line zero". A cross-file rule has no position
   //   to point at, and its message names the files.
   test("an issue without a line reads as its message alone", () => {
-    expect(issueLine({ line: 0, message: "agents/main.md references model a/b" })).toBe(
+    expect(issueLine({ line: 0, message: "agents/main.md references model a/b" }, en)).toBe(
       "agents/main.md references model a/b",
     )
   })
@@ -73,7 +79,7 @@ describe("groupIssues", () => {
 
 describe("issueLabel", () => {
   test("the file being edited is not repeated on every line", () => {
-    expect(issueLabel({ line: 3, message: "bad key", path: "agents/main.md" }, "agents/main.md")).toBe(
+    expect(issueLabel({ line: 3, message: "bad key", path: "agents/main.md" }, "agents/main.md", en)).toBe(
       "line 3: bad key",
     )
   })
@@ -82,12 +88,12 @@ describe("issueLabel", () => {
   //   has to go and open.
   test("another file is named in front of its issue", () => {
     expect(
-      issueLabel({ line: 0, message: "references model x/y", path: "agents/agent-expert.md" }, "agents/main.md"),
+      issueLabel({ line: 0, message: "references model x/y", path: "agents/agent-expert.md" }, "agents/main.md", en),
     ).toBe("agents/agent-expert.md · references model x/y")
   })
 
   test("a rule about the tree names no file", () => {
-    expect(issueLabel({ line: 0, message: "the tree does not hold", path: "" }, "agents/main.md")).toBe(
+    expect(issueLabel({ line: 0, message: "the tree does not hold", path: "" }, "agents/main.md", en)).toBe(
       "the tree does not hold",
     )
   })

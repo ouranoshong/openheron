@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test"
 
+import { translator } from "../src/lib/i18n"
+
 import { phaseLabel, segments, summarize, type ToolRun } from "../src/lib/tool-groups"
 import type { Part, ToolPart } from "../src/lib/types"
+
+// ★ The copy is English here: these assertions are written against it.
+const en = translator("en")
 
 // tool is one call, with the phase the test wants.
 function tool(id: string, name = "read_file", phase: ToolPart["phase"] = "complete"): ToolPart {
@@ -50,39 +55,39 @@ describe("summarize —— 这一段说了什么", () => {
   const run = (parts: ToolPart[]): ToolRun => ({ parts, key: parts[0]!.id })
 
   test("几次调用、用了哪些工具", () => {
-    const s = summarize(run([tool("c1", "read_file"), tool("c2", "grep"), tool("c3", "read_file")]))
+    const s = summarize(run([tool("c1", "read_file"), tool("c2", "grep"), tool("c3", "read_file")]), en)
     expect(s.count).toBe(3)
     // ★ 同样的工具只说一次，顺序是它们跑过的顺序。
     expect(s.titles).toEqual(["Read file", "Search content"])
   })
 
   test("★ 名单里没有的工具保留自己的名字", () => {
-    const s = summarize(run([tool("c1", "mcp__github__create_issue")]))
+    const s = summarize(run([tool("c1", "mcp__github__create_issue")]), en)
     expect(s.titles).toEqual(["mcp__github__create_issue"])
   })
 
   test("★ 有一步在跑 ⇒ 这一段还在跑", () => {
-    const s = summarize(run([tool("c1", "read_file", "complete"), tool("c2", "grep", "running")]))
+    const s = summarize(run([tool("c1", "read_file", "complete"), tool("c2", "grep", "running")]), en)
     expect(s.phase).toBe("running")
   })
 
   test("★ 有一步失败 ⇒ 这一段说失败，而且说了几步失败", () => {
     const failed: ToolPart = { ...tool("c2", "execute"), isError: true }
-    const s = summarize(run([tool("c1"), failed]))
+    const s = summarize(run([tool("c1"), failed]), en)
     expect(s.failed).toBe(1)
     expect(s.phase).toBe("failed")
   })
 
   test("都完了就是完了", () => {
-    expect(summarize(run([tool("c1")])).phase).toBe("complete")
+    expect(summarize(run([tool("c1")]), en).phase).toBe("complete")
   })
 })
 
 describe("phaseLabel —— 界面上的那个词", () => {
   test("英文", () => {
-    expect(phaseLabel("complete")).toBe("done")
-    expect(phaseLabel("running")).toBe("running")
-    expect(phaseLabel("streaming")).toBe("reading arguments")
-    expect(phaseLabel("failed")).toBe("failed")
+    expect(phaseLabel("complete", en)).toBe("done")
+    expect(phaseLabel("running", en)).toBe("running")
+    expect(phaseLabel("streaming", en)).toBe("reading arguments")
+    expect(phaseLabel("failed", en)).toBe("failed")
   })
 })

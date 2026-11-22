@@ -12,7 +12,9 @@ import {
 import { ApiError, type OperationView } from "@/lib/api"
 import { authorizationMode, authorizationOption } from "@/lib/authorization"
 import { formatSize } from "@/lib/format-size"
+import type { Translate } from "@/lib/i18n"
 import { EMPTY_OPERATIONS, selectOperations, useStore } from "@/lib/store"
+import { useT } from "@/lib/use-t"
 
 /**
  * OperationsPanel is the session's operation log — the timeline of what
@@ -26,6 +28,7 @@ import { EMPTY_OPERATIONS, selectOperations, useStore } from "@/lib/store"
  *   shows what came back; it never writes a line of its own.
  */
 export function OperationsPanel() {
+  const t = useT()
   const activeId = useStore((s) => s.activeId)
   const loadOperations = useStore((s) => s.loadOperations)
   // ★ The selector hands back the array the store already holds, so the
@@ -80,14 +83,14 @@ export function OperationsPanel() {
         }}
         disabled={!activeId}
         data-testid="operations-button"
-        aria-label="Session activity"
-        title="What happened in this conversation — the session's operation log."
+        aria-label={t("messages.sessionActivity")}
+        title={t("messages.operationsTooltip")}
       >
         <HistoryIcon aria-hidden="true" className="size-3" />
         {/* ★ On a narrow screen the **word** steps aside and the icon stays:
             the panel's own name is in the tooltip and in the button's name,
             and the dialog says it too. */}
-        <span className="@max-3xl:hidden">Activity</span>
+        <span className="@max-3xl:hidden">{t("messages.activity")}</span>
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -104,15 +107,13 @@ export function OperationsPanel() {
           }}
         >
           <DialogHeader>
-            <DialogTitle>Session activity</DialogTitle>
-            <DialogDescription>
-              What happened in this conversation, oldest first. The log is the server's record.
-            </DialogDescription>
+            <DialogTitle>{t("messages.sessionActivity")}</DialogTitle>
+            <DialogDescription>{t("messages.operationsDescription")}</DialogDescription>
           </DialogHeader>
 
           {status === "loading" ? (
             <p data-testid="operations-loading" className="text-muted-foreground text-sm">
-              Loading…
+              {t("common.loading")}
             </p>
           ) : null}
 
@@ -124,7 +125,7 @@ export function OperationsPanel() {
 
           {status === "ready" && operations.length === 0 ? (
             <p data-testid="operations-empty" className="text-muted-foreground text-sm">
-              No activity yet.
+              {t("messages.noActivity")}
             </p>
           ) : null}
 
@@ -142,7 +143,8 @@ export function OperationsPanel() {
 // OperationRow is one line of the log: when it happened, what it was, and
 // what it was about.
 function OperationRow({ op }: { op: OperationView }) {
-  const details = operationDetails(op)
+  const t = useT()
+  const details = operationDetails(op, t)
   return (
     <li
       data-testid="operations-item"
@@ -159,7 +161,7 @@ function OperationRow({ op }: { op: OperationView }) {
           {formatAt(op.at)}
         </time>
         <span data-testid="operations-text" className={tone(op)}>
-          {describeOperation(op)}
+          {describeOperation(op, t)}
         </span>
       </div>
       {details.length === 0 ? null : (
@@ -185,46 +187,70 @@ function OperationRow({ op }: { op: OperationView }) {
 //   client's — but the client never invents a kind: a line it does not know
 //   is shown under its own name, so a new kind shows up instead of
 //   vanishing.
-function describeOperation(op: OperationView): string {
+function describeOperation(op: OperationView, t: Translate): string {
   switch (op.kind) {
     case "session.created":
-      return "Session created."
+      return t("messages.op.sessionCreated")
     case "session.renamed":
-      return `Session renamed to "${op.title ?? "a new title"}".`
+      return t("messages.op.sessionRenamed", {
+        title: op.title ?? t("messages.op.defaultTitle"),
+      })
     case "session.agent_changed":
-      return `Agent changed to ${op.agentId ?? "another agent"}.`
+      return t("messages.op.agentChanged", {
+        agent: op.agentId ?? t("messages.op.defaultAgent"),
+      })
     case "session.authorization_confirmed":
-      return "Full authorization confirmed."
+      return t("messages.op.fullAuthorization")
     case "session.authorization_changed":
-      return `Authorization mode changed to ${modeLabel(op.mode)}.`
+      return t("messages.op.authorizationChanged", { mode: modeLabel(op.mode, t) })
     case "file.uploaded":
-      return `File uploaded: ${op.name ?? op.path ?? "a file"}.`
+      return t("messages.op.fileUploaded", {
+        file: op.name ?? op.path ?? t("messages.op.defaultFile"),
+      })
     case "file.deleted":
-      return `File deleted: ${op.path ?? "a file"}.`
+      return t("messages.op.fileDeleted", {
+        file: op.path ?? t("messages.op.defaultFile"),
+      })
     case "run.started":
       return op.turnKind === "resume"
-        ? "Turn resumed — the round picked up where it stopped."
-        : "Turn started — a new question."
+        ? t("messages.op.turnResumed")
+        : t("messages.op.turnStarted")
     case "run.finished":
-      return `Turn finished: ${stateLabel(op.state)}.`
+      return t("messages.op.turnFinished", { state: stateLabel(op.state, t) })
     case "approval.requested":
-      return `Approval requested for ${op.toolName ?? "a tool"}.`
+      return t("messages.op.approvalRequested", {
+        tool: op.toolName ?? t("messages.op.defaultTool"),
+      })
     case "approval.resolved":
-      return `Approval ${decisionLabel(op.approved)} for ${op.toolName ?? "a tool"}.`
+      return t("messages.op.approvalResolved", {
+        decision: decisionLabel(op.approved, t),
+        tool: op.toolName ?? t("messages.op.defaultTool"),
+      })
     default:
       return op.kind
   }
 }
 
 // operationDetails are the identifiers of one line: what it is about.
-function operationDetails(op: OperationView): { key: string; label: string }[] {
+function operationDetails(op: OperationView, t: Translate): { key: string; label: string }[] {
   const out: { key: string; label: string }[] = []
-  if (op.runId) out.push({ key: "run", label: `run ${shortId(op.runId)}` })
-  if (op.interruptId) out.push({ key: "interrupt", label: `interrupt ${shortId(op.interruptId)}` })
+  if (op.runId) {
+    out.push({ key: "run", label: t("messages.op.detailRun", { id: shortId(op.runId) }) })
+  }
+  if (op.interruptId) {
+    out.push({
+      key: "interrupt",
+      label: t("messages.op.detailInterrupt", { id: shortId(op.interruptId) }),
+    })
+  }
   if (op.path) out.push({ key: "path", label: op.path })
-  if (op.agentId) out.push({ key: "agent", label: `agent ${op.agentId}` })
-  if (op.projectId) out.push({ key: "project", label: `project ${op.projectId}` })
-  if (op.mode) out.push({ key: "mode", label: modeLabel(op.mode) })
+  if (op.agentId) {
+    out.push({ key: "agent", label: t("messages.op.detailAgent", { id: op.agentId }) })
+  }
+  if (op.projectId) {
+    out.push({ key: "project", label: t("messages.op.detailProject", { id: op.projectId }) })
+  }
+  if (op.mode) out.push({ key: "mode", label: modeLabel(op.mode, t) })
   if (op.size !== undefined) out.push({ key: "size", label: formatSize(op.size) })
   return out
 }
@@ -233,25 +259,25 @@ function operationDetails(op: OperationView): { key: string; label: string }[] {
 //
 // ★ It is the same word the authorization picker uses: two names for one
 //   level would make the reader wonder whether they are the same thing.
-function modeLabel(mode?: string): string {
-  return authorizationOption(authorizationMode(mode)).label
+function modeLabel(mode: string | undefined, t: Translate): string {
+  return authorizationOption(authorizationMode(mode), t).label
 }
 
 // stateLabel names the round's ending.
-function stateLabel(state?: string): string {
+function stateLabel(state: string | undefined, t: Translate): string {
   switch (state) {
     case "completed":
-      return "completed"
+      return t("messages.op.state.completed")
     case "failed":
-      return "failed"
+      return t("messages.op.state.failed")
     case "aborted":
-      return "aborted"
+      return t("messages.op.state.aborted")
     case "interrupted":
-      return "interrupted"
+      return t("messages.op.state.interrupted")
     case "waiting_approval":
-      return "waiting for approval"
+      return t("messages.op.state.waitingApproval")
     default:
-      return state ?? "finished"
+      return state ?? t("messages.op.state.finished")
   }
 }
 
@@ -259,9 +285,9 @@ function stateLabel(state?: string): string {
 //
 // ★ "resolved" is the answer when the line carries no decision: a refusal
 //   and a line that is not about an approval are two different facts.
-function decisionLabel(approved?: boolean): string {
-  if (approved === undefined) return "resolved"
-  return approved ? "approved" : "refused"
+function decisionLabel(approved: boolean | undefined, t: Translate): string {
+  if (approved === undefined) return t("messages.op.decisionResolved")
+  return approved ? t("messages.op.decisionApproved") : t("messages.op.decisionRefused")
 }
 
 // tone is the color of the line.

@@ -1,6 +1,7 @@
 import { Dialog as DialogPrimitive } from "radix-ui"
 
 import { Sidebar } from "@/components/sidebar"
+import { useT } from "@/lib/use-t"
 
 /**
  * The sidebar as a drawer: the same tree, over the chat, on a small screen.
@@ -29,6 +30,7 @@ export function SidebarDrawer({
   open: boolean
   onOpenChange(open: boolean): void
 }) {
+  const t = useT()
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
@@ -43,7 +45,9 @@ export function SidebarDrawer({
           aria-describedby={undefined}
           className="bg-background fixed inset-y-0 left-0 z-50 flex w-[var(--sidebar-width)] max-w-[85vw] flex-col shadow-2xl outline-none"
         >
-          <DialogPrimitive.Title className="sr-only">Conversations</DialogPrimitive.Title>
+          <DialogPrimitive.Title className="sr-only">
+            {t("sidebar.conversations")}
+          </DialogPrimitive.Title>
           {/* ★ The tree fills the drawer and scrolls inside it: the list can
               be long, and a drawer that grows past the screen is a drawer
               that hides its own bottom. ★ `min-h-0` comes from the sidebar

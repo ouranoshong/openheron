@@ -21,6 +21,7 @@ import {
   useSecrets,
 } from "@/lib/secrets-store"
 import type { SecretGroup, SecretItem } from "@/lib/secrets-api"
+import { useT } from "@/lib/use-t"
 
 /**
  * The Secrets tab of the Settings dialog.
@@ -48,6 +49,7 @@ export function SecretsPanel() {
   const select = useSecrets((s) => s.select)
   const removeGroup = useSecrets((s) => s.removeGroup)
   const busy = useSecrets((s) => s.busy)
+  const t = useT()
 
   const [confirming, setConfirming] = useState<SecretGroup | undefined>(undefined)
 
@@ -85,13 +87,13 @@ export function SecretsPanel() {
                         dot is a shape, and a reader who cannot see the color
                         is left with nothing. */}
                     <span className="text-muted-foreground ml-auto text-[10px]">
-                      {statusOf(item).label}
+                      {statusOf(item, t).label}
                     </span>
                   </button>
                 </li>
               ))}
               {group.items.length === 0 ? (
-                <li className="text-muted-foreground px-2 py-1.5 text-xs">Nothing here yet</li>
+                <li className="text-muted-foreground px-2 py-1.5 text-xs">{t("settings.secrets.empty")}</li>
               ) : null}
             </ul>
             <Button
@@ -102,12 +104,12 @@ export function SecretsPanel() {
               data-testid={`secrets-remove-group-${group.id}`}
               onClick={() => setConfirming(group)}
             >
-              Remove all {group.label.toLowerCase()}
+              {t("settings.secrets.removeAll", { group: group.label.toLowerCase() })}
             </Button>
           </section>
         ))}
         {groups.length === 0 && !loading ? (
-          <p className="text-muted-foreground px-2 py-1.5 text-xs">No providers or MCP servers yet</p>
+          <p className="text-muted-foreground px-2 py-1.5 text-xs">{t("settings.secrets.noGroups")}</p>
         ) : null}
       </div>
 
@@ -122,7 +124,7 @@ export function SecretsPanel() {
           <SecretDetail group={selectedGroup} item={selected} busy={busy === `${selectedGroup.id}:${selected.name}`} />
         ) : (
           <div className="text-muted-foreground grid flex-1 place-items-center text-sm">
-            {loading ? "Loading…" : "Select a secret"}
+            {loading ? t("common.loading") : t("settings.secrets.select")}
           </div>
         )}
       </div>
@@ -159,8 +161,9 @@ function SecretDetail({
   const set = useSecrets((s) => s.set)
   const remove = useSecrets((s) => s.remove)
   const [value, setValue] = useState("")
+  const t = useT()
 
-  const status = statusOf(item)
+  const status = statusOf(item, t)
 
   const submit = () => {
     if (value.trim() === "") return
@@ -180,17 +183,17 @@ function SecretDetail({
       </header>
 
       <dl className="text-muted-foreground grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-        <dt>Stored in</dt>
+        <dt>{t("settings.secrets.storedIn")}</dt>
         <dd className="text-foreground font-mono" data-testid="secrets-source">
           {item.stored ? item.source : "—"}
         </dd>
-        <dt>In effect</dt>
+        <dt>{t("settings.secrets.inEffect")}</dt>
         <dd className="text-foreground" data-testid="secrets-effective">
-          {sourceLabel(item.effective)}
+          {sourceLabel(item.effective, t)}
         </dd>
-        <dt>Environment</dt>
+        <dt>{t("settings.secrets.environment")}</dt>
         <dd className="text-foreground font-mono">
-          {item.envVar} ({envState(item)})
+          {item.envVar} ({envState(item) === "set" ? t("secrets.env.set") : t("secrets.env.notSet")})
         </dd>
       </dl>
 
@@ -210,7 +213,7 @@ function SecretDetail({
           autoComplete="off"
           spellCheck={false}
           data-testid="secrets-value"
-          placeholder="Paste the key"
+          placeholder={t("settings.secrets.pasteKey")}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
@@ -225,7 +228,7 @@ function SecretDetail({
           disabled={busy || value.trim() === ""}
           onClick={submit}
         >
-          Set value
+          {t("settings.secrets.setValue")}
         </Button>
         <Button
           type="button"
@@ -235,13 +238,12 @@ function SecretDetail({
           disabled={busy || !item.stored}
           onClick={() => void remove(group.id, item.name)}
         >
-          Remove
+          {t("common.remove")}
         </Button>
       </div>
 
       <p className="text-muted-foreground text-xs">
-        The value goes to the keyring only — it is never written into the configuration, and it is
-        never shown here again.
+        {t("settings.secrets.note")}
       </p>
     </div>
   )
@@ -286,16 +288,17 @@ function RemoveGroupDialog({
   onCancel(): void
   onConfirm(group: SecretGroup): void
 }) {
+  const t = useT()
   return (
     <Dialog open={group !== undefined} onOpenChange={(v) => (!v ? onCancel() : undefined)}>
       <DialogContent className="sm:max-w-md" data-testid="secrets-remove-dialog">
         <DialogHeader>
-          <DialogTitle>Remove the stored secrets?</DialogTitle>
-          <DialogDescription>{group ? removeGroupMessage(group) : ""}</DialogDescription>
+          <DialogTitle>{t("settings.secrets.removeTitle")}</DialogTitle>
+          <DialogDescription>{group ? removeGroupMessage(group, t) : ""}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={onCancel} data-testid="secrets-remove-cancel">
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             type="button"
@@ -303,7 +306,7 @@ function RemoveGroupDialog({
             onClick={() => group && onConfirm(group)}
             data-testid="secrets-remove-confirm"
           >
-            Remove
+            {t("common.remove")}
           </Button>
         </DialogFooter>
       </DialogContent>

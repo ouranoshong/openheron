@@ -15,6 +15,7 @@ import { FilePreview } from "@/components/file-preview"
 import { fileUrl } from "@/lib/api"
 import { fileClass, isImage } from "@/lib/file-kind"
 import { formatSize } from "@/lib/format-size"
+import { useT } from "@/lib/use-t"
 import { cn } from "@/lib/utils"
 
 // ★ The icons the classification names.
@@ -84,8 +85,9 @@ export function AttachmentChip({
   className?: string
   thumbSize?: number
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
-  const cls = fileClass(name, mime)
+  const cls = fileClass(name, mime, t)
   const Icon = ICONS[cls.icon] ?? FileIcon
   const previewable = !!sessionId && !!path
   const picture = previewable && isImage(name, mime)
@@ -105,7 +107,7 @@ export function AttachmentChip({
           <button
             type="button"
             data-testid={`${testId}-open`}
-            aria-label={`Preview ${name}`}
+            aria-label={t("sidebar.previewFile", { name })}
             onClick={() => setOpen(true)}
             className="hover:bg-accent flex min-w-0 items-center gap-1.5 rounded text-left"
           >
@@ -133,7 +135,7 @@ export function AttachmentChip({
         {onRemove && (
           <button
             type="button"
-            aria-label={`Remove ${name}`}
+            aria-label={`${t("common.remove")} ${name}`}
             onClick={onRemove}
             className="hover:bg-accent grid size-4 shrink-0 place-items-center rounded"
           >

@@ -5,15 +5,18 @@ import { ApprovalCard } from "@/components/approval-card"
 import { AgentFilter } from "@/components/agent-filter"
 import { BrandMark } from "@/components/brand-mark"
 import { Composer } from "@/components/composer"
+import { LocaleToggle } from "@/components/locale-toggle"
 import { EmptyHero, MessageList } from "@/components/message-list"
 import { Sidebar } from "@/components/sidebar"
 import { SidebarDrawer } from "@/components/sidebar-drawer"
 import { ThemeToggle } from "@/components/theme-toggle"
+import type { MessageKey } from "@/lib/locales"
 import { selectIsEmptyView, selectStatus, useStore } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { useMediaQuery } from "@/lib/use-media-query"
+import { useT } from "@/lib/use-t"
 
-type Dot = { className: string; label: string }
+type Dot = { className: string; label: MessageKey }
 
 const SIDEBAR_KEY = "openheron.sidebar.collapsed"
 
@@ -23,10 +26,10 @@ const SIDEBAR_KEY = "openheron.sidebar.collapsed"
 const WIDE = "(min-width: 768px)"
 
 const DOT: Record<string, Dot> = {
-  idle: { className: "bg-muted-foreground/40", label: "Idle" },
-  running: { className: "bg-info animate-pulse", label: "Running" },
-  "awaiting-approval": { className: "bg-warning", label: "Waiting for approval" },
-  error: { className: "bg-destructive", label: "Failed" },
+  idle: { className: "bg-muted-foreground/40", label: "header.status.idle" },
+  running: { className: "bg-info animate-pulse", label: "header.status.running" },
+  "awaiting-approval": { className: "bg-warning", label: "header.status.awaitingApproval" },
+  error: { className: "bg-destructive", label: "header.status.error" },
 }
 
 export function Shell() {
@@ -46,6 +49,7 @@ export function Shell() {
   //   use for the first one.
   const [drawerOpen, setDrawerOpen] = useState(false)
   const wide = useMediaQuery(WIDE)
+  const t = useT()
   const status = useStore(selectStatus)
   const isEmptyView = useStore(selectIsEmptyView)
   const refreshList = useStore((s) => s.refreshList)
@@ -114,11 +118,11 @@ export function Shell() {
   //   One label for both would be a label that is wrong half the time.
   const sidebarLabel = wide
     ? collapsed
-      ? "Show sidebar"
-      : "Hide sidebar"
+      ? t("header.showSidebar")
+      : t("header.hideSidebar")
     : drawerOpen
-      ? "Close conversations"
-      : "Open conversations"
+      ? t("header.closeConversations")
+      : t("header.openConversations")
 
   return (
     // ★ The frame is for the small screens only. On a desktop the window is
@@ -165,8 +169,8 @@ export function Shell() {
             <span
               data-testid="status-dot"
               className={cn("size-1.5 shrink-0 rounded-full", dot.className)}
-              title={dot.label}
-              aria-label={dot.label}
+              title={t(dot.label)}
+              aria-label={t(dot.label)}
               role="status"
             />
             {/* ★ The agent filter and the context occupancy moved into the
@@ -174,16 +178,35 @@ export function Shell() {
                 a chat is mostly text. ★ The filter sits **left**, next to the
                 title it belongs to — the numbers on the chips are about the
                 conversation you are reading, and the eye reaches for them
-                there, not across the window. The theme switch takes the far
+                there, not across the window. The switches take the far
                 end of the row. */}
             <AgentFilter />
-            <ThemeToggle className="ml-auto" />
+            {/* ★ The two switches are a **preference of this machine**, and
+                they sit at the far end of the row, next to each other. ★ The
+                language used to stand between the agent filter and the theme
+                switch, stranded in the middle of the row: it was a chrome
+                button sitting where the conversation's title belongs. */}
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              <LocaleToggle />
+              <ThemeToggle />
+            </div>
           </header>
 
           {isEmptyView ? (
             <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 pb-[8vh]">
-                <div className="w-full max-w-[var(--chat-column)]">
+                {/* ★ The welcome page asks **one question**, so it is narrower
+                    than the conversation's column — a question is not an
+                    answer. ★ The whole block — the mark, the line of copy and
+                    the input box — shares one width: narrowing only the box
+                    would leave the line under it (the agent, the model, the
+                    entries) sticking out on both sides of it.
+
+                    ★ The width is `--welcome-column`, not the measure: the
+                    line of facts under the box drops its names below 48rem
+                    (the project and the authorization mode become icons), and
+                    the first screen is where those two have to be readable. */}
+                <div className="w-full max-w-[var(--welcome-column)]">
                   <EmptyHero />
                   <Composer inset={false} />
                 </div>

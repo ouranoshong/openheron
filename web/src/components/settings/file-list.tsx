@@ -3,21 +3,29 @@ import { ChevronRightIcon } from "lucide-react"
 import { useShallow } from "zustand/react/shallow"
 
 import { cn } from "@/lib/utils"
+import type { Translate } from "@/lib/i18n"
+import type { MessageKey } from "@/lib/locales"
 import {
   selectCategories,
   selectItems,
   useSettings,
   type SettingsState,
 } from "@/lib/settings-store"
+import { useT } from "@/lib/use-t"
 import { NewFileButton } from "@/components/settings/new-file-dialog"
 
-const LABEL: Record<string, string> = {
-  agents: "Agents",
-  llm: "Providers",
-  server: "Server",
-  skills: "Skills",
-  tools: "Tools",
-  mcps: "MCP servers",
+const SECTION_LABEL: Record<string, MessageKey | undefined> = {
+  agents: "common.agents",
+  llm: "settings.section.llm",
+  server: "settings.section.server",
+  skills: "common.skills",
+  tools: "settings.section.tools",
+  mcps: "settings.section.mcps",
+}
+
+function sectionLabel(id: string, t: Translate): string {
+  const key = SECTION_LABEL[id]
+  return key ? t(key) : id
 }
 
 // ★ The list is a **file tree**, and the tree is built from the paths the
@@ -80,6 +88,7 @@ export function SettingsFileList() {
   const categories = useSettings(useShallow(selectCategories))
   const selected = useSettings((s) => s.selected)
   const select = useSettings((s) => s.select)
+  const t = useT()
 
   const visible = useMemo(
     () =>
@@ -132,7 +141,7 @@ export function SettingsFileList() {
           />
         ))}
         {tree.length === 0 && (
-          <li className="text-muted-foreground px-2 py-1.5 text-xs">No files yet</li>
+          <li className="text-muted-foreground px-2 py-1.5 text-xs">{t("settings.fileList.empty")}</li>
         )}
       </ul>
 
@@ -169,8 +178,9 @@ function TreeBranch({
   onSelect: (path: string) => void
   onToggle: (path: string) => void
 }) {
+  const t = useT()
   if (node.children.length > 0) {
-    const label = depth === 0 ? (LABEL[node.name] ?? node.name) : node.name
+    const label = depth === 0 ? sectionLabel(node.name, t) : node.name
     const open = expanded.has(node.path)
     const heading =
       depth === 0
@@ -248,7 +258,9 @@ function TreeBranch({
         >
           {node.name}
         </span>
-        {node.leaf && !node.leaf.hot && <Badge title="requires a restart">restart</Badge>}
+        {node.leaf && !node.leaf.hot && (
+          <Badge title={t("settings.fileList.restartTitle")}>{t("settings.fileList.restartBadge")}</Badge>
+        )}
       </button>
     </li>
   )
@@ -265,8 +277,9 @@ function Badge({ children, title }: { children: React.ReactNode; title: string }
 export function SectionPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const categories = useSettings(useShallow(selectCategories))
   const editable = categories.filter((c: SettingsState["manifest"] extends undefined ? never : NonNullable<SettingsState["manifest"]>["categories"][number]) => c.editable)
+  const t = useT()
   return (
-    <div className="flex flex-wrap gap-1" role="group" aria-label="Config section">
+    <div className="flex flex-wrap gap-1" role="group" aria-label={t("settings.sectionPicker")}>
       {editable.map((c) => (
         <button
           key={c.id}
@@ -275,7 +288,7 @@ export function SectionPicker({ value, onChange }: { value: string; onChange: (v
           aria-pressed={value === c.id}
           className={cn("rounded-md border px-2 py-1 text-xs", value === c.id && "bg-accent")}
         >
-          {LABEL[c.id] ?? c.id}
+          {sectionLabel(c.id, t)}
         </button>
       ))}
     </div>

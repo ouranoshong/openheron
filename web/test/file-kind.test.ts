@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
+import { translator } from "../src/lib/i18n"
 import {
   effectiveMime,
   fileClass,
@@ -10,6 +11,11 @@ import {
   isPdf,
   isTextual,
 } from "../src/lib/file-kind"
+
+// ★ The English translator: the catalog's English is the text the interface
+//   showed before the copy moved into it, so the assertions stay the same
+//   sentences.
+const en = translator("en")
 
 describe("fileExt", () => {
   test("取扩展名并转成小写", () => {
@@ -125,20 +131,20 @@ describe("isImage / isPdf / isTextual", () => {
 
 describe("fileClass", () => {
   test("每一种都有自己的图标与名字", () => {
-    expect(fileClass("shot.png", "image/png")).toEqual({
+    expect(fileClass("shot.png", "image/png", en)).toEqual({
       kind: "image",
       icon: "file-image",
       label: "Image",
     })
-    expect(fileClass("doc.pdf", "application/pdf").label).toBe("PDF")
-    expect(fileClass("notes.md", "text/markdown").label).toBe("Markdown")
-    expect(fileClass("main.go").label).toBe("Code")
-    expect(fileClass("readme.txt", "text/plain").label).toBe("Text")
-    expect(fileClass("bundle.zip", "application/zip").label).toBe("Archive")
-    expect(fileClass("mystery", "application/octet-stream").label).toBe("File")
+    expect(fileClass("doc.pdf", "application/pdf", en).label).toBe("PDF")
+    expect(fileClass("notes.md", "text/markdown", en).label).toBe("Markdown")
+    expect(fileClass("main.go", undefined, en).label).toBe("Code")
+    expect(fileClass("readme.txt", "text/plain", en).label).toBe("Text")
+    expect(fileClass("bundle.zip", "application/zip", en).label).toBe("Archive")
+    expect(fileClass("mystery", "application/octet-stream", en).label).toBe("File")
   })
 
   test("表格有自己的图标", () => {
-    expect(fileClass("table.csv", "text/csv").icon).toBe("file-spreadsheet")
+    expect(fileClass("table.csv", "text/csv", en).icon).toBe("file-spreadsheet")
   })
 })

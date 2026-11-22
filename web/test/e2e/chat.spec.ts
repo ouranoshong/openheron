@@ -908,7 +908,7 @@ test.describe("空状态的版式", () => {
 })
 
 test.describe("消息卡片的宽度", () => {
-  // ★ The width of a token, in pixels. The column and the prose have their
+  // ★ The width of a token, in pixels. The column and the measure have their
   //   own widths, and the tests read them from the document rather than
   //   repeating the numbers — a test that hard-codes 1024 would keep
   //   passing after the token changed.
@@ -952,7 +952,7 @@ test.describe("消息卡片的宽度", () => {
     expect(Math.round(composer!.width), "the composer should be as wide as the column").toBe(chat)
   })
 
-  test("★ 同一条消息里，工具卡与气泡等宽，正文停在正文列上", async ({ page }) => {
+  test("★ 同一条消息里，工具卡、气泡与正文同宽", async ({ page }) => {
     await setScenario("approval")
     await openApp(page)
     await openThread(page, "Alpha conversation")
@@ -963,11 +963,11 @@ test.describe("消息卡片的宽度", () => {
     const withTool = rows.find((r) => r.tool !== null)
     expect(withTool, "the scenario should contain a tool card").toBeDefined()
     expect(withTool!.tool).toBe(withTool!.bubble)
-    // ★ The prose has a width of its own: the column is wide so that a table
-    //   fits whole, but a paragraph of sixty characters is a hard read.
-    const prose = await cssRem(page, "--prose-column")
-    expect(withTool!.prose, "the paragraph should stop at the prose column").toBe(prose)
-    expect(withTool!.prose!).toBeLessThanOrEqual(withTool!.bubble!)
+    // ★ The text takes the width it is given: the conversation's column is
+    //   the width of the conversation, and the prose used to stop short of
+    //   its right edge — so on a wide screen the answer looked pushed to the
+    //   left while the user's bubble sat on that edge.
+    expect(withTool!.prose, "the paragraph should fill the message").toBe(withTool!.bubble)
   })
 
   test("★ 所有 assistant 消息宽度一致", async ({ page }) => {
@@ -1312,5 +1312,71 @@ test.describe("连续的调用：并成一段", () => {
     const result = await page.locator('[data-testid="tool-result"]').boundingBox()
     const args = await page.locator('[data-testid="tool-args"]').boundingBox()
     expect(result!.y).toBeLessThan(args!.y)
+  })
+})
+
+// ★ The welcome page asks **one question**, so it is narrower than the
+//   conversation's column — at 1024px the input box stretched across half the
+//   window and asked for a sentence that was never going to be that long.
+test.describe("欢迎页的宽度", () => {
+  // ★ The width of a token, in pixels: the test reads it from the document
+  //   rather than repeating the number — a test that hard-codes 832 would
+  //   keep passing after the token changed.
+  async function cssRem(page: import("@playwright/test").Page, name: string): Promise<number> {
+    return page.evaluate((n) => {
+      const raw = getComputedStyle(document.documentElement).getPropertyValue(n).trim()
+      return Math.round(parseFloat(raw) * 16)
+    }, name)
+  }
+
+  test("★ 欢迎页的输入框比对话列窄", async ({ page }) => {
+    // ★ A viewport wide enough that neither width is clamped by the window:
+    //   otherwise the test would measure the window, not the token.
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await openApp(page)
+
+    const welcome = await cssRem(page, "--welcome-column")
+    const column = await cssRem(page, "--chat-column")
+    expect(welcome, "the welcome page should be narrower than the conversation").toBeLessThan(column)
+
+    const box = await page.locator('[data-testid="composer-box"]').boundingBox()
+    const meta = await page.locator('[data-testid="composer-meta"]').boundingBox()
+    expect(Math.round(box!.width), "the input box should be the welcome column wide").toBe(welcome)
+    // ★ The line under the box shares that width: narrowing only the box
+    //   would leave the agent, the model and the entries sticking out on
+    //   both sides of it.
+    expect(Math.round(meta!.width), "the line under it should be the welcome column wide too").toBe(welcome)
+  })
+
+  test("★ 窄下来以后，那一行的事实还留着名字", async ({ page }) => {
+    // ★ The line of facts under the box drops its names below the container
+    //   query's 3xl size: the project and the authorization mode become
+    //   icons with tooltips. ★ The welcome page is the **first** screen —
+    //   the project is what the conversation works in, and the authorization
+    //   mode is a decision about what the agent may do on its own — so the
+    //   welcome column has to stay above that width.
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await openApp(page)
+
+    const welcome = await cssRem(page, "--welcome-column")
+    const namesVanishAt = await cssRem(page, "--container-3xl")
+    expect(welcome, "the welcome column must stay above the width where the names step aside").toBeGreaterThan(
+      namesVanishAt,
+    )
+
+    // ★ And the name is really there — not hidden by a rule that moved.
+    await expect(page.locator('[data-testid="projects-name"]')).toBeVisible()
+  })
+
+  test("★ 有对话了，输入框回到对话列的宽度", async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await setScenario("simple")
+    await openApp(page)
+    await sendMessage(page, `${MARKER_A} hi`)
+    await expect(page.getByText(/scripted answer/).first()).toBeVisible({ timeout: 7000 })
+
+    const column = await cssRem(page, "--chat-column")
+    const box = await page.locator('[data-testid="composer-box"]').boundingBox()
+    expect(Math.round(box!.width), "the composer should go back to the conversation's column").toBe(column)
   })
 })

@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test"
 
 import { envState, removeGroupMessage, sourceLabel, statusOf } from "@/lib/secrets"
+import { translator } from "@/lib/i18n"
 import type { SecretGroup, SecretItem } from "@/lib/secrets-api"
 
 // ★ The whole point of the pure layer: the wording and the states are
 //   functions of the server's answer, so they can be checked without a
 //   browser and without a server.
+//
+// ★ The English translator: the catalog's English is the text the
+//   interface showed before the copy moved into it.
 
 function item(over: Partial<SecretItem> = {}): SecretItem {
   return {
@@ -19,22 +23,24 @@ function item(over: Partial<SecretItem> = {}): SecretItem {
   }
 }
 
+const en = translator("en")
+
 describe("sourceLabel", () => {
   test("a place becomes a sentence", () => {
-    expect(sourceLabel("env:LLM_DEEPSEEK_API_KEY")).toBe(
+    expect(sourceLabel("env:LLM_DEEPSEEK_API_KEY", en)).toBe(
       "the environment variable LLM_DEEPSEEK_API_KEY",
     )
-    expect(sourceLabel("keyring:llm:deepseek")).toBe("the keyring entry llm:deepseek")
-    expect(sourceLabel("file:/etc/openheron/key")).toBe("the file /etc/openheron/key")
+    expect(sourceLabel("keyring:llm:deepseek", en)).toBe("the keyring entry llm:deepseek")
+    expect(sourceLabel("file:/etc/openheron/key", en)).toBe("the file /etc/openheron/key")
   })
 
   test("no key says so", () => {
-    expect(sourceLabel("none")).toBe("nowhere — no key is in effect")
-    expect(sourceLabel("")).toBe("nowhere — no key is in effect")
+    expect(sourceLabel("none", en)).toBe("nowhere — no key is in effect")
+    expect(sourceLabel("", en)).toBe("nowhere — no key is in effect")
   })
 
   test("an unknown kind is passed through", () => {
-    expect(sourceLabel("weird:thing")).toBe("weird:thing")
+    expect(sourceLabel("weird:thing", en)).toBe("weird:thing")
   })
 })
 
@@ -42,6 +48,9 @@ describe("statusOf", () => {
   test("a stored key says where it is and which one is in force", () => {
     const s = statusOf(
       item({ stored: true, source: "keyring:llm:deepseek", effective: "keyring:llm:deepseek" }),
+
+    en,
+
     )
     expect(s.state).toBe("stored")
     expect(s.label).toBe("stored")
@@ -50,7 +59,7 @@ describe("statusOf", () => {
   })
 
   test("a key that is not there says so", () => {
-    const s = statusOf(item())
+    const s = statusOf(item(), en)
     expect(s.state).toBe("not set")
     expect(s.label).toBe("not set")
   })
@@ -65,6 +74,9 @@ describe("statusOf", () => {
         effective: "env:LLM_DEEPSEEK_API_KEY",
         shadowed: true,
       }),
+
+    en,
+
     )
     expect(s.state).toBe("stored")
     expect(s.effective).toBe("the environment variable LLM_DEEPSEEK_API_KEY")
@@ -90,18 +102,18 @@ describe("removeGroupMessage", () => {
   })
 
   test("the count and the scope are both named", () => {
-    const msg = removeGroupMessage(group("llm", 2))
+    const msg = removeGroupMessage(group("llm", 2), en)
     expect(msg).toContain("Remove 2 provider secrets")
     expect(msg).toContain("Providers")
     expect(msg).toContain("MCP server secrets are untouched")
   })
 
   test("one is singular", () => {
-    expect(removeGroupMessage(group("mcp", 1))).toContain("Remove 1 MCP server secret?")
+    expect(removeGroupMessage(group("mcp", 1), en)).toContain("Remove 1 MCP server secret?")
   })
 
   test("the other group names the other scope", () => {
-    const msg = removeGroupMessage(group("mcp", 3))
+    const msg = removeGroupMessage(group("mcp", 3), en)
     expect(msg).toContain("provider secrets are untouched")
   })
 })

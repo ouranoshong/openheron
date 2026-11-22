@@ -1,7 +1,9 @@
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatPercent, formatTokens } from "@/lib/agents"
 import type { AgentBadge } from "@/lib/agent-info"
 import type { ContextUsage } from "@/lib/types"
+import { useT } from "@/lib/use-t"
 import { cn } from "@/lib/utils"
 import { Loader2Icon } from "lucide-react"
 import type { ReactNode } from "react"
@@ -55,6 +57,7 @@ export function ComposerMeta({
   notice,
   busy,
   action,
+  onPickAgent,
 }: {
   badge: AgentBadge | null
   loading: boolean
@@ -68,7 +71,13 @@ export function ComposerMeta({
   // action is an entry that belongs **on this line**: the line under the
   // input box is where the things about the next conversation live.
   action?: ReactNode
+  // ★ onPickAgent opens the agent picker. ★ The agent's name is a **door**,
+  //   not a label: it opens the same picker the `/agents` command opens, so
+  //   there is one list and one behavior, not two.
+  onPickAgent(): void
 }) {
+  const t = useT()
+
   // The notice says the server is working on something. It is not an error,
   // and it does not replace anything — the rest of the line still stands.
   //
@@ -94,7 +103,7 @@ export function ComposerMeta({
       className="inline-flex @max-lg:basis-full items-center gap-1.5"
     >
       <Loader2Icon aria-hidden="true" className="size-3 shrink-0 animate-spin" />
-      This session is running in another window — stop it to take over
+      {t("composer.meta.busyElsewhere")}
     </span>
   ) : null
 
@@ -120,34 +129,55 @@ export function ComposerMeta({
         {noticeNode}
         {busyNode}
         <span data-testid="composer-meta-error" title={error}>
-          Agent info unavailable
+          {t("composer.meta.agentUnavailable")}
         </span>
       </>
     )
   } else {
     const model = `${badge.provider}/${badge.model}`
+    const reasoning = t("composer.reasoning", { reasoning: badge.reasoning })
     const reasoningTitle =
       badge.reasoningAvailable.length > 0
-        ? `Reasoning: ${badge.reasoning}\nAvailable: ${badge.reasoningAvailable.join(", ")}`
-        : `Reasoning: ${badge.reasoning}`
+        ? `${reasoning}\n${t("composer.meta.reasoningAvailable", {
+            available: badge.reasoningAvailable.join(", "),
+          })}`
+        : reasoning
 
     body = (
       <>
         {noticeNode}
         {busyNode}
-        <span
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          // ★ The name is an **entry**, and it is rendered like the entries
+          //   beside it: the same ghost button, the same size, the same hover.
+          //   ★ A name that underlines on hover says "this is a link to
+          //   somewhere else" — ★ this one stays on this line and opens the
+          //   picker that already lives on this line. ⇒ No underline.
+          //   ★ On a narrow column the padding goes: ★ the icon next to it
+          //   needs a little air around it, a **word** does not — and the
+          //   row is one line only if the name does not push the facts over.
+          className="text-muted-foreground hover:text-foreground h-6 max-w-[min(12rem,100%)] gap-1 px-1.5 text-[11px] @max-3xl:border-0 @max-3xl:px-0"
+          onClick={onPickAgent}
           data-testid="composer-meta-agent"
-          title={badge.description || badge.id}
-          className="max-w-[min(12rem,100%)] shrink-0 truncate"
+          // ★ The tooltip carries **two** things: what this agent is, and
+          //   what the click does. ★ A name on its own is a fact; a name you
+          //   can click is a door, and a door that says nothing about where it
+          //   leads is a door nobody uses.
+          title={[badge.description || badge.id, t("composer.meta.switchAgent")].join("\n")}
         >
-          {/* ★ The word "Agent" is a **label for the wide layout**: there is
-              room for it there, and the row is a ledger of names. ★ On a
-              narrow screen the row has to fit on one line, and the header
-              already says "Agent" — so the prefix steps aside and the name
-              stays. */}
-          <span className="@max-lg:hidden">Agent: </span>
-          {badge.id}
-        </span>
+          <span data-testid="composer-meta-agent-name" className="min-w-0 truncate">
+            {/* ★ The word "Agent" is a **label for the wide layout**: there is
+                room for it there, and the row is a ledger of names. ★ On a
+                narrow screen the row has to fit on one line, and the header
+                already says "Agent" — so the prefix steps aside and the name
+                stays. */}
+            <span className="@max-lg:hidden">{t("composer.meta.agentLabel")}</span>
+            {badge.id}
+          </span>
+        </Button>
         {/* ★ The model is the item that **gives way** on a narrow screen.
             ★ The priority is written down: the agent's name and the context
             ★ occupancy are never cut — they are the identity and the number
@@ -179,7 +209,7 @@ export function ComposerMeta({
             title={reasoningTitle}
             className="min-w-0 max-w-[min(12rem,100%)] truncate"
           >
-            Reasoning: {badge.reasoning}
+            {reasoning}
           </span>
         </Joined>
         {context ? (
@@ -194,7 +224,7 @@ export function ComposerMeta({
   return (
     <div
       data-testid="composer-meta"
-      aria-label="Current agent configuration"
+      aria-label={t("composer.meta.ariaLabel")}
       className={META}
     >
       {/* ★ `contents` puts the line's own children back into the flex row:
@@ -215,11 +245,16 @@ export function ComposerMeta({
 // A window of zero means the user configured none. There is then no ratio to
 // show, and showing "0 %" would be a lie.
 function ContextMeter({ usage }: { usage: ContextUsage }) {
+  const t = useT()
   const known = usage.contextWindow > 0
   const ratio = known ? Math.min(1, usage.usedTokens / usage.contextWindow) : 0
   const label = known
-    ? `Context: ≈${formatTokens(usage.usedTokens)} / ${formatTokens(usage.contextWindow)} (${formatPercent(ratio)})`
-    : `Context: ≈${formatTokens(usage.usedTokens)} tokens`
+    ? t("composer.meta.context.label", {
+        used: formatTokens(usage.usedTokens),
+        window: formatTokens(usage.contextWindow),
+        percent: formatPercent(ratio),
+      })
+    : t("common.contextUsed", { used: formatTokens(usage.usedTokens) })
   // ★ The narrow line keeps the **number that matters** and the bar: the
   //   share is what the eye watches, and the bar says the same thing. ★ The
   //   tokens and the window are in the tooltip — a phone reads a tooltip
@@ -231,18 +266,18 @@ function ContextMeter({ usage }: { usage: ContextUsage }) {
     label,
     // The number is the context's size. It is measured by the most recent
     // request — or by the summary, right after a manual compaction.
-    "Tokens in this agent's context — the most recent request, or the summary after a compaction.",
+    t("composer.meta.context.tokens"),
   ]
   if (known) {
-    lines.push(`Window: ${usage.contextWindow} tokens`)
+    lines.push(t("composer.meta.context.window", { tokens: usage.contextWindow }))
   } else {
-    lines.push("The model declares no context window.")
+    lines.push(t("composer.meta.context.noWindow"))
   }
   if (usage.summarizeAt && usage.summarizeAt > 0) {
-    lines.push(`Compacted at: ${usage.summarizeAt} tokens`)
+    lines.push(t("composer.meta.context.compactedAt", { tokens: usage.summarizeAt }))
   }
   if (usage.summarized) {
-    lines.push(`Compacted ${usage.summarized} time(s)`)
+    lines.push(t("composer.meta.context.compactedTimes", { count: usage.summarized }))
   }
 
   return (

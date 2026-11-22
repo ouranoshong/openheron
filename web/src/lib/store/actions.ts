@@ -14,6 +14,7 @@ import {
 import { readActiveThreadId, writeActiveThreadId } from "@/lib/active-thread"
 import { attachTarget, busyElsewhere, recoveryPlan } from "@/lib/attach"
 import { closeAllOpenParts, type AgEvent } from "@/lib/events"
+import { locale, translator } from "@/lib/i18n"
 import { directoryPick, projectSwitch, resolveActiveProject } from "@/lib/projects"
 import { applySessionFact as foldSessionFact, type SessionFact } from "@/lib/session-events"
 import {
@@ -299,7 +300,12 @@ export const useStore = create<StoreState>((set, get) => ({
   async pickDirectory(start) {
     try {
       const answer = await api.pickDirectory(start.trim())
-      return directoryPick(answer)
+      // ★ The store is not a component, so it has no hook to read the
+      //   language with: it reads the one in effect right now and binds a
+      //   translator to it. ★ The sentence it needs is the **client's own**
+      //   — the server's own reason stays English, because that is what the
+      //   runtime speaks.
+      return directoryPick(answer, translator(locale()))
     } catch (e) {
       // ★ The reason is the server's own sentence: the machine has no
       //   chooser, or the chooser failed, and the client keeps no second

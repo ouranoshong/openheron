@@ -40,6 +40,7 @@ import {
   useStore,
 } from "@/lib/store"
 import { useAgentBadge } from "@/lib/use-agent-badge"
+import { useT } from "@/lib/use-t"
 import { cn } from "@/lib/utils"
 
 interface MentionState {
@@ -50,6 +51,7 @@ interface MentionState {
 }
 
 export function Composer({ inset = true }: { inset?: boolean }) {
+  const t = useT()
   const send = useStore((s) => s.send)
   const status = useStore(selectStatus)
   const busy = status === "running"
@@ -220,7 +222,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
           setMention({
             query: mentionQuery,
             items: [],
-            error: err instanceof Error ? err.message : "Failed to load files",
+            error: err instanceof Error ? err.message : t("composer.files.loadFailed"),
           })
         })
     }, 120)
@@ -229,7 +231,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [mentionQuery, mentionProject])
+  }, [mentionQuery, mentionProject, t])
 
   // Opening settings from the composer should return focus to the composer
   // when the dialog closes.
@@ -426,21 +428,21 @@ export function Composer({ inset = true }: { inset?: boolean }) {
   }
 
   const submit = async () => {
-    const t = text.trim()
-    if (!t || busy || blocked) return
+    const trimmed = text.trim()
+    if (!trimmed || busy || blocked) return
 
-    if (t.startsWith("/")) {
+    if (trimmed.startsWith("/")) {
       // Retry a failed manifest load on submit; a transient failure should not
       // permanently disable action commands for this tab.
       const cmds = commands && commands.length > 0 ? commands : await loadCommands().catch(() => [])
 
-      const skillCmd = skillCommandFor(t, cmds)
+      const skillCmd = skillCommandFor(trimmed, cmds)
       if (skillCmd) {
         closeTrigger()
         if (skillCmd.mode === "run" && skillCmd.name) {
           const known = skills.some((sk) => sk.name === skillCmd.name)
           if (known) {
-            void send(t)
+            void send(trimmed)
           } else {
             setSkillPicker({ open: true, filter: skillCmd.name })
           }
@@ -450,7 +452,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         return
       }
 
-      const agentCmd = agentCommandFor(t, cmds)
+      const agentCmd = agentCommandFor(trimmed, cmds)
       if (agentCmd) {
         setText("")
         closeTrigger()
@@ -471,7 +473,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         return
       }
 
-      const action = actionCommandFor(t, cmds)
+      const action = actionCommandFor(trimmed, cmds)
       if (action?.action) {
         setText("")
         closeTrigger()
@@ -482,7 +484,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
 
     setText("")
     closeTrigger()
-    void send(t)
+    void send(trimmed)
   }
 
   const popupLoading =
@@ -497,7 +499,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         ? mention.error
         : undefined
       : trigger?.kind === "command" && commands?.length === 0
-        ? "No commands available"
+        ? t("composer.popup.noCommandsAvailable")
         : undefined
 
   return (
@@ -565,7 +567,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
           type="file"
           multiple
           className="hidden"
-          aria-label="Attach files"
+          aria-label={t("composer.input.attachFiles")}
           onChange={(e) => {
             const files = Array.from(e.target.files ?? [])
             e.target.value = ""
@@ -574,7 +576,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         />
         <button
           type="button"
-          aria-label="Add attachment"
+          aria-label={t("composer.input.attach")}
           disabled={uploading}
           onClick={() => fileRef.current?.click()}
           className="hover:bg-muted touch-target grid size-8 shrink-0 place-items-center rounded-lg disabled:opacity-50"
@@ -585,7 +587,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         <div ref={rowRef} className="relative min-w-0 flex-1">
           <textarea
             ref={taRef}
-            aria-label="Message input"
+            aria-label={t("composer.input.label")}
             data-testid="composer-textarea"
             aria-autocomplete="list"
             aria-expanded={trigger !== null}
@@ -598,7 +600,9 @@ export function Composer({ inset = true }: { inset?: boolean }) {
             autoFocus
             value={text}
             disabled={blocked}
-            placeholder={blocked ? "Answer the approval above to continue" : "Send a message..."}
+            placeholder={
+              blocked ? t("composer.input.placeholderBlocked") : t("composer.input.placeholder")
+            }
             rows={1}
             onChange={(e) => {
               const value = e.target.value
@@ -680,7 +684,11 @@ export function Composer({ inset = true }: { inset?: boolean }) {
               items={popupItems}
               active={activeIndex}
               loading={popupLoading}
-              emptyLabel={trigger.kind === "mention" ? "No matching files" : "No matching commands"}
+              emptyLabel={
+                trigger.kind === "mention"
+                  ? t("composer.popup.noFiles")
+                  : t("composer.popup.noCommands")
+              }
               error={popupError}
               onPick={activate}
               onHover={setActive}
@@ -692,7 +700,7 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         ) : (
           <button
             type="button"
-            aria-label="Send message"
+            aria-label={t("composer.input.send")}
             disabled={!text.trim() || busy || blocked}
             onClick={() => void submit()}
             className="bg-primary text-primary-foreground touch-target grid size-8 shrink-0 place-items-center rounded-lg disabled:opacity-40"
@@ -709,6 +717,16 @@ export function Composer({ inset = true }: { inset?: boolean }) {
         context={contextUsage}
         notice={notice}
         busy={busyElsewhere}
+        // ★ The name in this line is a **door to the same picker** the
+        //   `/agents` command opens — one list, one behavior, one place that
+        //   knows how to switch an agent.
+        //   ★ The text in the box is left alone: the command cleared it
+        //   because the text *was* the command. ★ A click is not a command,
+        //   and a click must not eat what someone was writing.
+        onPickAgent={() => {
+          closeTrigger()
+          setPicker({ open: true })
+        }}
         // ★ One action node holds both entries, and the order never changes:
         //   React reconciles children by index, so an entry that shifts is an
         //   entry that is unmounted and mounted again — and the dialog that

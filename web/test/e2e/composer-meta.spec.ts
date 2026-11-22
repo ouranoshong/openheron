@@ -304,7 +304,10 @@ test.describe("窄屏", () => {
       }
       const meta = document.querySelector('[data-testid="composer-meta"]')
       return {
-        agent: box("composer-meta-agent"),
+        // ★ The name is a **button**, and a button's box is taller than the
+        //   word inside it. ★ "Share one line" is a claim about the **words**,
+        //   so the word is what is measured.
+        agent: box("composer-meta-agent-name"),
         model: box("composer-meta-model"),
         context: box("composer-meta-context"),
         entry: box("authorization-button"),
@@ -377,5 +380,59 @@ test.describe("宽窗窄列", () => {
       .locator(META)
       .evaluate((el) => el.getBoundingClientRect().height)
     expect(height).toBeLessThanOrEqual(30)
+  })
+})
+
+// ★ The name is an **entry**, and it is rendered like the entries beside it.
+//
+// ★ It used to underline on hover — and an underline says "this is a link to
+//   somewhere else". ★ The name does not go anywhere else: it opens the
+//   picker that already lives on this line. ⇒ Its hover is **their** hover.
+test.describe("名字的渲染", () => {
+  async function read(loc: import("@playwright/test").Locator) {
+    return loc.evaluate((el) => {
+      const cs = getComputedStyle(el)
+      return {
+        decoration: cs.textDecorationLine,
+        radius: cs.borderRadius,
+        height: cs.height,
+        weight: cs.fontWeight,
+        size: cs.fontSize,
+        background: cs.backgroundColor,
+        color: cs.color,
+      }
+    })
+  }
+
+  test("★ 名字和右侧的入口同一套渲染，hover 不是下划线", async ({ page }) => {
+    await openApp(page)
+
+    const name = page.locator(AGENT)
+    const entry = page.locator('[data-testid="projects-button"]')
+    await expect(name).toBeVisible()
+    await expect(entry).toBeVisible()
+
+    const rest = await read(name)
+    const restEntry = await read(entry)
+
+    // ★ One kind of thing: the same box, the same type, the same weight.
+    expect(rest.decoration).toBe("none")
+    expect(rest.radius).toBe(restEntry.radius)
+    expect(rest.height).toBe(restEntry.height)
+    expect(rest.weight).toBe(restEntry.weight)
+    expect(rest.size).toBe(restEntry.size)
+
+    // ★ The hover is **theirs**: a tint and a brighter word — and still no
+    //   underline.
+    await name.hover()
+    const hovered = await read(name)
+    expect(hovered.decoration).toBe("none")
+    expect(hovered.background).not.toBe(rest.background)
+    expect(hovered.color).not.toBe(rest.color)
+
+    await entry.hover()
+    const hoveredEntry = await read(entry)
+    expect(hovered.background).toBe(hoveredEntry.background)
+    expect(hovered.color).toBe(hoveredEntry.color)
   })
 })

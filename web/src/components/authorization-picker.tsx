@@ -12,8 +12,8 @@ import {
 } from "@/components/ui/dialog"
 import { ApiError } from "@/lib/api"
 import {
-  AUTHORIZATION_OPTIONS,
   authorizationOption,
+  authorizationOptions,
   type AuthorizationMode,
 } from "@/lib/authorization"
 import {
@@ -21,6 +21,7 @@ import {
   selectAuthorizationMode,
   useStore,
 } from "@/lib/store"
+import { useT } from "@/lib/use-t"
 import { cn } from "@/lib/utils"
 
 // describe turns a refused call into the **server's** sentence.
@@ -59,6 +60,7 @@ function describe(e: unknown): string {
  *   the server checks the answer when the conversation is born.
  */
 export function AuthorizationPicker() {
+  const t = useT()
   const mode = useStore(selectAuthorizationMode)
   const confirmed = useStore(selectAuthorizationConfirmed)
   const setMode = useStore((s) => s.setAuthorizationMode)
@@ -70,7 +72,7 @@ export function AuthorizationPicker() {
   const [error, setError] = useState<string | undefined>()
   const [confirmError, setConfirmError] = useState<string | undefined>()
 
-  const option = authorizationOption(mode)
+  const option = authorizationOption(mode, t)
 
   const choose = async (next: AuthorizationMode) => {
     if (busy) return
@@ -140,14 +142,14 @@ export function AuthorizationPicker() {
         className="hover:text-foreground h-6 gap-1 px-1.5 text-[11px] @max-3xl:border-0 @max-3xl:px-1"
         onClick={() => setOpen(true)}
         data-testid="authorization-button"
-        aria-label={`Authorization: ${option.label}`}
+        aria-label={t("composer.authorization.ariaLabel", { mode: option.label })}
         // ★ The tooltip carries the **level** as well as its meaning: on a
         //   narrow screen the word steps aside and the icon stays, and a fact
         //   that steps aside has to land somewhere it can still be read.
         title={
           activeId
             ? `${option.label} — ${option.title}`
-            : `${option.label} — the mode belongs to the conversation that is about to start.`
+            : `${option.label} — ${t("composer.authorization.stagedTitle")}`
         }
       >
         <ShieldIcon aria-hidden="true" className="size-3" />
@@ -176,7 +178,7 @@ export function AuthorizationPicker() {
       >
         <DialogContent data-testid="authorization-picker-dialog" className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Authorization mode</DialogTitle>
+            <DialogTitle>{t("composer.authorization.title")}</DialogTitle>
             {/* ★ The next-turn rule lives **here**, and not on the button: it
                 is always true, so it needs no badge that appears only while a
                 turn is running — and a badge that comes and goes would make
@@ -185,18 +187,18 @@ export function AuthorizationPicker() {
                 conversation that is about to start. */}
             <DialogDescription data-testid="authorization-picker-description">
               {activeId
-                ? "The mode belongs to this conversation. A running turn keeps the mode it started with, so a change you make now takes effect on the next turn."
-                : "The mode belongs to the conversation that is about to start. It is sent when that conversation is created, so the first turn already runs in it."}
+                ? t("composer.authorization.descriptionActive")
+                : t("composer.authorization.descriptionStaged")}
             </DialogDescription>
           </DialogHeader>
 
           <ul
             role="listbox"
-            aria-label="Authorization modes"
+            aria-label={t("composer.authorization.modesAriaLabel")}
             data-testid="authorization-options"
             className="max-h-72 overflow-y-auto"
           >
-            {AUTHORIZATION_OPTIONS.map((opt) => {
+            {authorizationOptions(t).map((opt) => {
               const current = opt.mode === mode
               return (
                 <li key={opt.mode} role="presentation">
@@ -218,12 +220,14 @@ export function AuthorizationPicker() {
                         <span className={opt.mode === "full" ? "text-warning" : undefined}>
                           {opt.label}
                         </span>
-                        {current ? <CheckIcon className="size-3.5" aria-label="Current mode" /> : null}
+                        {current ? (
+                          <CheckIcon className="size-3.5" aria-label={t("composer.authorization.currentMode")} />
+                        ) : null}
                       </span>
                       <span className="text-muted-foreground block truncate text-xs">{opt.title}</span>
                       {opt.mode === "full" && confirmed ? (
                         <span className="text-muted-foreground block text-xs">
-                          Already confirmed for this conversation — it will not ask again.
+                          {t("composer.authorization.confirmed")}
                         </span>
                       ) : null}
                     </span>
@@ -260,11 +264,8 @@ export function AuthorizationPicker() {
           }}
         >
           <DialogHeader>
-            <DialogTitle>Full authorization</DialogTitle>
-            <DialogDescription>
-              Full authorization — every tool runs without asking, including shell commands and
-              configuration changes.
-            </DialogDescription>
+            <DialogTitle>{t("authorization.label.full")}</DialogTitle>
+            <DialogDescription>{t("composer.authorization.confirmDescription")}</DialogDescription>
           </DialogHeader>
 
           {confirmError ? (
@@ -275,10 +276,10 @@ export function AuthorizationPicker() {
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setConfirmOpen(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="button" onClick={() => void confirmFull()}>
-              Enable full authorization
+              {t("composer.authorization.enableFull")}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -29,6 +29,7 @@ import { toolIcon, type ToolIconName } from "@/lib/tool-icons"
 import { toolTitle } from "@/lib/tool-titles"
 import type { ToolPart } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/use-t"
 
 // ★ The icons the tool table names.
 //
@@ -98,12 +99,13 @@ function hintOf(name: string, args: string): string | undefined {
 }
 
 export function ToolCard({ part }: { part: ToolPart }) {
+  const t = useT()
   // ★ The name comes from the table, so the drawing is **total**: every
   //   name the table can produce has a glyph, or the build would not
   //   compile. There is no second fallback here to hide a mistake.
   const glyph = toolIcon(part.name)
   const Icon = GLYPHS[glyph]
-  const title = toolTitle(part.name)
+  const title = toolTitle(part.name, t)
   const hint = part.name ? hintOf(part.name, part.argsText) : undefined
   const resultLines = part.result?.split("\n").length
   const args = prettyArgs(part.argsText)
@@ -168,7 +170,9 @@ export function ToolCard({ part }: { part: ToolPart }) {
           data-testid="tool-meta"
           className="col-span-3 flex items-center justify-end gap-2 text-[11px] tracking-wide uppercase opacity-70 sm:col-span-1 sm:col-start-4 sm:row-start-1"
         >
-          {resultLines !== undefined && <span className="normal-case">{resultLines} lines</span>}
+          {resultLines !== undefined && (
+            <span className="normal-case">{t("messages.toolLines", { count: resultLines })}</span>
+          )}
           {/* ★ A failure is **never** folded away. ★ A call that came back
               with an error says so here, in the warning's own colour — the
               reader must not have to open the card to learn that something
@@ -177,10 +181,10 @@ export function ToolCard({ part }: { part: ToolPart }) {
               the same way (tool-group.tsx). */}
           {part.isError ? (
             <span data-testid="tool-failed" className="text-destructive normal-case">
-              failed
+              {t("tool.phase.failed")}
             </span>
           ) : (
-            <span>{phaseLabel(part.phase)}</span>
+            <span>{phaseLabel(part.phase, t)}</span>
           )}
         </span>
       </button>

@@ -8,12 +8,22 @@ import { cn } from "@/lib/utils"
 
 const InPreContext = createContext(false)
 
-// ★ The prose width. The chat column is wide so that a table or a code block
-//   fits whole — but a paragraph of sixty characters is a hard read, so the
-//   **text** blocks stop at the prose column and the block elements do not.
-//   One class, applied to the text elements only: a table inside a paragraph
-//   is not a thing, and the ceiling lives on the cells.
+// ★ The width of running text, and it is **two** widths.
+//
+//   A **message** in a chat is read in short paragraphs, in a column the
+//   reader already knows how wide it is, and next to the user's own message
+//   on the other side of the same column. ⇒ It **fills** that column: the
+//   prose used to stop 224px short of the column's right edge while the
+//   user's bubble sat on that edge — so on a wide screen the answer looked
+//   pushed to the left and the right half of the window stayed empty.
+//
+//   A **document** (the file preview) is read on its own, and a paragraph of
+//   sixty characters is a hard read — so it stops at the measure.
+//
+//   ★ One class per context, applied to the text elements only: a table
+//   inside a paragraph is not a thing, and the ceiling lives on the cells.
 const PROSE = "max-w-[var(--prose-column)]"
+const FILL = "max-w-full"
 
 function Pre({ children }: { children: ReactNode }) {
   return <InPreContext.Provider value>{children}</InPreContext.Provider>
@@ -40,7 +50,17 @@ function CodeAdapter({
   return <InlineCode className={className} {...rest}>{children}</InlineCode>
 }
 
-export const MarkdownText = memo(function MarkdownText({ text }: { text: string }) {
+export const MarkdownText = memo(function MarkdownText({
+  text,
+  measure = false,
+}: {
+  text: string
+  // ★ `measure` is for the **document**: running text read on its own stops
+  //   at the readable measure. ★ A message is not that — it takes the width
+  //   it is given, which is the conversation's column.
+  measure?: boolean
+}) {
+  const prose = measure ? PROSE : FILL
   return (
     <Markdown
       remarkPlugins={[remarkGfm]}
@@ -68,24 +88,24 @@ export const MarkdownText = memo(function MarkdownText({ text }: { text: string 
             </table>
           </div>
         ),
-        p: ({ children }) => <p className={cn("my-2", PROSE)}>{children}</p>,
+        p: ({ children }) => <p className={cn("my-2", prose)}>{children}</p>,
         h1: ({ children }) => (
-          <h1 className={cn("mt-6 mb-2 text-xl leading-snug font-semibold", PROSE)}>{children}</h1>
+          <h1 className={cn("mt-6 mb-2 text-xl leading-snug font-semibold", prose)}>{children}</h1>
         ),
         h2: ({ children }) => (
-          <h2 className={cn("mt-5 mb-2 text-lg leading-snug font-semibold", PROSE)}>{children}</h2>
+          <h2 className={cn("mt-5 mb-2 text-lg leading-snug font-semibold", prose)}>{children}</h2>
         ),
         h3: ({ children }) => (
-          <h3 className={cn("mt-4 mb-1.5 text-base leading-snug font-semibold", PROSE)}>{children}</h3>
+          <h3 className={cn("mt-4 mb-1.5 text-base leading-snug font-semibold", prose)}>{children}</h3>
         ),
         h4: ({ children }) => (
-          <h4 className={cn("mt-4 mb-1.5 text-sm font-semibold", PROSE)}>{children}</h4>
+          <h4 className={cn("mt-4 mb-1.5 text-sm font-semibold", prose)}>{children}</h4>
         ),
         h5: ({ children }) => (
-          <h5 className={cn("mt-4 mb-1.5 text-sm font-semibold", PROSE)}>{children}</h5>
+          <h5 className={cn("mt-4 mb-1.5 text-sm font-semibold", prose)}>{children}</h5>
         ),
         h6: ({ children }) => (
-          <h6 className={cn("text-muted-foreground mt-4 mb-1.5 text-sm font-semibold", PROSE)}>
+          <h6 className={cn("text-muted-foreground mt-4 mb-1.5 text-sm font-semibold", prose)}>
             {children}
           </h6>
         ),
@@ -94,7 +114,7 @@ export const MarkdownText = memo(function MarkdownText({ text }: { text: string 
         del: ({ children }) => <del className="opacity-70 line-through">{children}</del>,
         blockquote: ({ children }) => (
           <blockquote
-            className={cn("border-border text-muted-foreground my-3 border-l-2 pl-3", PROSE)}
+            className={cn("border-border text-muted-foreground my-3 border-l-2 pl-3", prose)}
           >
             {children}
           </blockquote>
@@ -110,7 +130,7 @@ export const MarkdownText = memo(function MarkdownText({ text }: { text: string 
               className={cn(
                 "my-2 space-y-1 pl-5",
                 taskList ? "list-none pl-1" : "list-disc",
-                PROSE,
+                prose,
                 className,
               )}
             >
@@ -119,7 +139,7 @@ export const MarkdownText = memo(function MarkdownText({ text }: { text: string 
           )
         },
         ol: ({ children, start }) => (
-          <ol start={start} className={cn("my-2 list-decimal space-y-1 pl-5", PROSE)}>
+          <ol start={start} className={cn("my-2 list-decimal space-y-1 pl-5", prose)}>
             {children}
           </ol>
         ),

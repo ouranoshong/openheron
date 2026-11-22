@@ -6,13 +6,15 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { SectionPicker } from "@/components/settings/file-list"
 import { useSettings } from "@/lib/settings-store"
 import { fileTemplate, resolveTemplate, suggestPath, type Section } from "@/lib/settings-validate"
+import { useT } from "@/lib/use-t"
 
 export function NewFileButton() {
   const [open, setOpen] = useState(false)
+  const t = useT()
   return (
     <>
       <Button type="button" variant="ghost" size="sm" className="w-full justify-start text-xs" onClick={() => setOpen(true)} data-testid="settings-new-file">
-        + New file
+        {t("settings.newFile.button")}
       </Button>
       <NewFileDialog open={open} onOpenChange={setOpen} />
     </>
@@ -23,6 +25,7 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
   const templates = useSettings((s) => s.manifest?.templates)
   const modelRefs = useSettings((s) => s.manifest?.modelRefs)
   const newFile = useSettings((s) => s.newFile)
+  const t = useT()
 
   const [section, setSection] = useState<Section>("agents")
   const [name, setName] = useState("")
@@ -81,15 +84,15 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
         data-testid="new-file-dialog"
       >
         <DialogHeader>
-          <DialogTitle>New file</DialogTitle>
+          <DialogTitle>{t("settings.newFile.title")}</DialogTitle>
           <DialogDescription>
-            The skeleton is intentionally incomplete — the server rejects it until you fill in what it requires.
+            {t("settings.newFile.description")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium">Section</span>
+            <span className="text-xs font-medium">{t("settings.newFile.section")}</span>
             <SectionPicker
               value={section}
               onChange={(v) => {
@@ -101,7 +104,7 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
 
           <div className="flex flex-col gap-1.5">
             <label htmlFor="new-file-name" className="text-xs font-medium">
-              {section === "skills" ? "Skill name (its folder)" : "File name"}
+              {section === "skills" ? t("settings.newFile.skillName") : t("settings.newFile.fileName")}
             </label>
             <input
               id="new-file-name"
@@ -151,7 +154,7 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
 
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium">Content</span>
+              <span className="text-xs font-medium">{t("settings.newFile.content")}</span>
               <Button
                 type="button"
                 variant="ghost"
@@ -162,7 +165,7 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
                   setEdited(false)
                 }}
               >
-                Reset to template
+                {t("settings.newFile.reset")}
               </Button>
             </div>
             <textarea
@@ -177,7 +180,9 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
               data-testid="new-file-content"
             />
             {section === "agents" && (modelRefs?.length ?? 0) > 0 && (
-              <span className="text-muted-foreground text-[11px]">available models: {modelRefs!.join(", ")}</span>
+              <span className="text-muted-foreground text-[11px]">
+                {t("settings.newFile.models", { models: modelRefs!.join(", ") })}
+              </span>
             )}
           </div>
 
@@ -185,10 +190,10 @@ export function NewFileDialog({ open, onOpenChange }: { open?: boolean; onOpenCh
 
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={() => onOpenChange?.(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="button" disabled={!named} onClick={() => void submit()} data-testid="new-file-create">
-            Create
+            {t("common.create")}
           </Button>
         </DialogFooter>
       </DialogContent>

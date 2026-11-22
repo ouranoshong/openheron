@@ -12,6 +12,7 @@ import {
 import { Input } from "@/components/ui/input"
 import type { AgentView } from "@/lib/api"
 import { teamSize } from "@/lib/agent-info"
+import { useT } from "@/lib/use-t"
 import { cn } from "@/lib/utils"
 
 export interface AgentPickerProps {
@@ -35,6 +36,7 @@ export function AgentPicker({
   error,
   onPick,
 }: AgentPickerProps) {
+  const t = useT()
   const [query, setQuery] = useState(filter ?? "")
   const [active, setActive] = useState(0)
   const listRef = useRef<HTMLUListElement>(null)
@@ -68,11 +70,9 @@ export function AgentPicker({
     <Dialog open={open} onOpenChange={(v) => (!v ? onClose() : undefined)}>
       <DialogContent data-testid="agent-picker" className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Switch agent</DialogTitle>
+          <DialogTitle>{t("composer.agentPicker.title")}</DialogTitle>
           <DialogDescription>
-            {busy
-              ? "A run is in progress — finish or stop it before switching."
-              : "The selected agent runs the next turn as the root."}
+            {busy ? t("composer.agentPicker.busy") : t("composer.agentPicker.description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -83,8 +83,8 @@ export function AgentPicker({
             setQuery(e.target.value)
             setActive(0)
           }}
-          placeholder="Filter agents"
-          aria-label="Filter agents"
+          placeholder={t("composer.agentPicker.filter")}
+          aria-label={t("composer.agentPicker.filter")}
           data-testid="agent-picker-filter"
           onKeyDown={(e) => {
             if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -113,7 +113,7 @@ export function AgentPicker({
         <ul
           ref={listRef}
           role="listbox"
-          aria-label="Agents"
+          aria-label={t("common.agents")}
           data-testid="agent-picker-list"
           className="max-h-72 overflow-y-auto"
         >
@@ -121,6 +121,10 @@ export function AgentPicker({
             const current = agent.id === currentId
             const model = `${agent.model?.provider ?? "unknown"}/${agent.model?.model ?? "unknown"}`
             const team = teamSize(agent)
+            const teamLabel =
+              team > 1
+                ? t("composer.agentPicker.subAgents", { count: team })
+                : t("composer.agentPicker.subAgent", { count: team })
             return (
               <li key={agent.id} role="presentation">
                 <button
@@ -141,13 +145,13 @@ export function AgentPicker({
                     <span className="flex items-center gap-1 font-medium">
                       {agent.id}
                       {current ? (
-                        <CheckIcon className="size-3.5" aria-label="Current agent" />
+                        <CheckIcon className="size-3.5" aria-label={t("composer.agentPicker.current")} />
                       ) : null}
                       {team > 0 ? (
                         <span
                           data-testid="agent-option-team"
                           className="text-muted-foreground rounded border px-1 text-[10px] leading-4"
-                          title={`${team} sub-agent${team > 1 ? "s" : ""}`}
+                          title={teamLabel}
                         >
                           {team}
                         </span>
@@ -155,8 +159,10 @@ export function AgentPicker({
                     </span>
                     <span className="text-muted-foreground block truncate text-xs">
                       {model}
-                      {agent.model?.reasoning ? ` · Reasoning: ${agent.model.reasoning}` : ""}
-                      {team > 0 ? ` · ${team} sub-agent${team > 1 ? "s" : ""}` : ""}
+                      {agent.model?.reasoning
+                        ? ` · ${t("composer.reasoning", { reasoning: agent.model.reasoning })}`
+                        : ""}
+                      {team > 0 ? ` · ${teamLabel}` : ""}
                     </span>
                     {agent.description ? (
                       <span className="text-muted-foreground block truncate text-xs">
@@ -170,7 +176,7 @@ export function AgentPicker({
           })}
           {items.length === 0 ? (
             <li data-testid="agent-picker-empty" className="text-muted-foreground px-2 py-2 text-sm">
-              No matching agents
+              {t("composer.agentPicker.empty")}
             </li>
           ) : null}
         </ul>
