@@ -207,6 +207,8 @@ HOST IP     HOST PORT   SANDBOX PORT   PROTOCOL
 它在回环地址上把 openheron 拉起来，再开一个内嵌窗口给你看，顺手管更新。
 它**只做九件事**（用户级目录、单实例、端口分配、二进制版本、健康检查、
 强制回环、托盘、能力探测、内嵌窗口），★ **密钥、配置、项目它一个字都不碰**（§4.2）。
+★ 它要的是 **openheron `v0.3.0` 或更新**（安装包自带一份）—— 但它**不认版本号、只认能力**：
+启动前跑一次 `openheron --help`，少了 `--config-root` 它就拒绝启动（§10）。
 
 **Windows。** 从[官网](https://openheron.bytebits.top)下载
 `openheron-desktop-*-windows-amd64-setup.exe`：
@@ -227,6 +229,10 @@ chmod +x openheron-desktop-*-linux-amd64.AppImage
 
 ★ **Linux 上没有「安装」这一步** —— AppImage 是**自包含归档**，跑起来就在了；
 第一次运行时它把自带的 openheron 放进 `~/.config/openheron-desktop/bin/`。
+
+★ Linux 上还差两样：**GTK 3 + WebKitGTK 4.1**（内嵌窗口用；缺了**不是故障** ——
+窗口退回复系统浏览器，托盘和功能照旧）与 **FUSE**（AppImage 靠它把自己挂成文件系统）。
+缺 FUSE 时用 AppImage 自带的绕法：`--appimage-extract-and-run`（慢一点，但不用装东西）。
 
 ★ 桌面版**不是必须的**：命令行装法（§1.1）一样能用，而且**两边用的是同一份东西** ——
 大本营、配置树、项目表、历史都是同一份（§3）。怎么用见 §2.4。
@@ -431,7 +437,7 @@ created /home/you/.openheron/projects/default (the default project root)
 
 ★ **再启动一次不会开第二个服务**：第二个实例把第一个实例的界面**顶到你面前**，然后自己退出。
 
-**托盘菜单。** 右键托盘图标，一共 **9 行**（8 个动作 + 1 个只读信息块）：
+**托盘菜单。** 右键托盘图标，一共 **10 行**（8 个动作 + 2 个块）：
 
 | 行 | 干什么 | 注意 |
 |---|---|---|
@@ -443,9 +449,15 @@ created /home/you/.openheron/projects/default (the default project root)
 | **重启服务** | 停掉服务再起来 | ★ **会换一个端口**，窗口跟着重开 —— 因为窗口刚才显示的还是旧地址 |
 | **检查更新** | 真的去问 GitHub 有没有新的 openheron | ★ 这是**唯一**一条更新入口 —— 它**不定时检查**，也**不在后台偷换版本** |
 | **版本信息 ▸** | 一个**只读块**，三行灰字 | desktop 版本 / openheron 版本 / 上一次检查的结果。★ 灰的 = **点不动**，不是坏了 |
+| **语言 ▸** | 一个**动作块**，两行 | `中文` / `English`。★ 点一下**菜单当场就变**，而且**记住了**（下次启动还是这个） |
 | **退出** | 停掉服务并退出 | 服务进程会被一起带走 |
 
-★ 菜单里的**行名是中文的** —— 桌面版的界面本身就是中文的。
+★ 菜单**默认跟着你的系统语言**：系统是中文就中文，是英文就英文（同一批行，名字翻译过）。
+想改就点托盘的「**语言 ▸**」—— ★ **菜单当场重画**，不用重启；
+选了什么会**记住**（写进 `desktop.yaml` 的 `lang:`）。
+
+★ **它管不到内嵌窗口里那个网页界面** —— 那是 openheron 自己的界面，桌面版不插手。
+★ **日志一直是英文**：里面是技术错误，英文好搜。
 
 **更新 openheron。** 点「检查更新」：问 GitHub 最新发布版 → 和**正在跑**的这一版比 →
 ★ **问你**要不要更新 → 下载 → 按上游的 `checksums.txt` 校验 sha256 → 解压 →
@@ -466,6 +478,9 @@ created /home/you/.openheron/projects/default (the default project root)
 
 ★ **大本营归 openheron，不归桌面版** —— 所以命令行跑的 openheron 和托盘跑的
 **用的是同一份**配置、同一张项目表、同一份历史，**不会各说各话**。
+
+★ 桌面版的数据目录里还有一份 `desktop.yaml` —— 它是**桌面版自己的**配置：
+记着界面语言（`lang:`）、下的是哪个 openheron、大本营放哪。
 
 ★ **密钥也不归桌面版**：它不读、不写、不检测、不提醒。
 密钥还是那两条路 —— 环境变量 `LLM_DEEPSEEK_API_KEY`，或者钥匙串条目 `llm:deepseek`（§4.2）。
@@ -1915,6 +1930,11 @@ POSIX shell，机器上一个都没有时退回 `cmd.exe`；两种情况工具�
 KDE Plasma 自带；★ **GNOME 默认不带** ⇒ 装个 AppIndicator 扩展
 （Debian/Ubuntu：`gnome-shell-extension-appindicator`）并启用。
 日志里搜 `systray error` 能看出是不是它。
+
+**Q：托盘菜单能换成英文吗？**
+能：托盘「**语言 ▸**」里点 `English` —— ★ **菜单当场重画**，不用重启；
+选了什么会**记住**（写进 `desktop.yaml` 的 `lang:`）。★ 默认**跟着你的系统语言**。
+★ 但**内嵌窗口里那个网页界面**不受它管 —— 那是 openheron 自己的界面。
 
 **Q：桌面版起不来，提示 openheron 太旧？**
 ★ 桌面版**不认版本号、只认能力** —— 启动前跑一次 `openheron --help`，看有没有

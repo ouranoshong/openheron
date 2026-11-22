@@ -235,6 +235,10 @@ directories, the single instance, the port allocation, the binary version, the
 health check, the forced loopback, the tray, the capability probe and the
 embedded window), ★ **and it does not touch a single byte of your keys,
 configuration or projects** (§4.2).
+★ It wants **openheron `v0.3.0` or newer** (the package carries one of its
+own) — but it **does not read version numbers, it reads capabilities**: it runs
+`openheron --help` before starting, and without `--config-root` it refuses to
+start (§10).
 
 **Windows.** Download `openheron-desktop-*-windows-amd64-setup.exe` from the
 [website](https://openheron.bytebits.top):
@@ -260,6 +264,12 @@ chmod +x openheron-desktop-*-linux-amd64.AppImage
 ★ **There is no "installation" step on Linux** — an AppImage is a **self-contained
 archive**, so running it is all it takes; on the first run it puts its own
 openheron into `~/.config/openheron-desktop/bin/`.
+
+★ Linux wants two more things: **GTK 3 + WebKitGTK 4.1** (for the embedded
+window; missing them is **not a fault** — the window falls back to the system
+browser and the tray keeps working) and **FUSE** (an AppImage mounts itself as
+a filesystem through it). Without FUSE, use the AppImage's own way out:
+`--appimage-extract-and-run` (slower, but nothing to install).
 
 ★ The desktop app is **not required**: the command line works just as well
 (§1.1), and **both use the same things** — the home base, the configuration
@@ -490,22 +500,33 @@ start**, so the number changes.
 ★ **Starting it again does not open a second service**: the second instance
 **brings the first instance's window to the front** and quits itself.
 
-**The tray menu.** Right-click the tray icon: **9 rows** in all (eight actions
-plus one read-only block):
+**The tray menu.** Right-click the tray icon: **10 rows** in all (eight actions
+plus two blocks). The row names are written in **English** here with the Chinese
+in brackets — the menu itself **follows your system language**, so a Chinese
+system shows the Chinese names.
 
 | Row | What it does | Note |
 |---|---|---|
-| **打开界面** | Opens the embedded window | If the window is already open it **brings it to the front**, and **never** opens a second one; while the service is still starting this row is **greyed out** |
-| **打开 openheron 大本营** | Opens the home-base directory | The configuration, sessions, project table and logs **all live under it** (§3) |
-| **打开配置目录** | Opens the config root | |
-| **打开默认项目目录** | Opens the working directory of "sessions that belong to no project" | |
-| **打开日志** | Opens the desktop app's own log directory | That is where to look first when something breaks (§10) |
-| **重启服务** | Stops the service and starts it again | ★ **It picks a different port**, and the window reopens with it — the window was still showing the old address |
-| **检查更新** | Really asks GitHub whether a newer openheron exists | ★ It is the **only** update entry point — it **never polls** and **never swaps versions behind your back** |
-| **版本信息 ▸** | A **read-only block**, three grey lines | desktop version / openheron version / the result of the last check. ★ Grey means **not clickable**, not broken |
-| **退出** | Stops the service and quits | The service process goes with it |
+| **Open interface** (打开界面) | Opens the embedded window | If the window is already open it **brings it to the front**, and **never** opens a second one; while the service is still starting this row is **greyed out** |
+| **Open the home base** (打开 openheron 大本营) | Opens the home-base directory | The configuration, sessions, project table and logs **all live under it** (§3) |
+| **Open the config directory** (打开配置目录) | Opens the config root | |
+| **Open the default project directory** (打开默认项目目录) | Opens the working directory of "sessions that belong to no project" | |
+| **Open the logs** (打开日志) | Opens the desktop app's own log directory | That is where to look first when something breaks (§10) |
+| **Restart service** (重启服务) | Stops the service and starts it again | ★ **It picks a different port**, and the window reopens with it — because the window was still showing the old address |
+| **Check for updates** (检查更新) | Really asks GitHub whether a newer openheron exists | ★ It is the **only** update entry point — it **never polls** and **never swaps versions behind your back** |
+| **Version info ▸** (版本信息) | A **read-only block**, three grey lines | desktop version / openheron version / the result of the last check. ★ Grey means **not clickable**, not broken |
+| **Language ▸** (语言) | An **action block**, two lines | `中文` / `English`. ★ Clicking one **redraws the menu at once**, and the choice is **remembered** (it is still in effect next time you start) |
+| **Quit** (退出) | Stops the service and quits | The service process goes with it |
 
-★ The **row names are Chinese** — the desktop app's interface is Chinese.
+★ The menu **follows your system language** by default: Chinese system, Chinese
+menu; English system, English menu. To change it, click **"language ▸"** in the
+tray — ★ the menu **redraws at once**, no restart; and the choice is
+**remembered** (it is written into `desktop.yaml` as `lang:`).
+
+★ **What it cannot change**: the language of the **web interface in the embedded
+window** — that is openheron's own interface, and the desktop does not touch
+it. ★ **The log does not change**: technical errors in the log have always been
+English, which makes them easy to search.
 
 **Updating openheron.** Click "check for updates": it asks GitHub for the
 latest release → compares it with **the version that is running** → ★ **asks
@@ -534,6 +555,10 @@ and openheron happens on `127.0.0.1`.
 openheron you run from the command line and the one the tray runs **use the
 same** configuration, the same project table and the same history: **they never
 disagree**.
+
+★ The desktop app's data directory also holds a `desktop.yaml` — that is the
+desktop app's **own** configuration: it remembers the interface language
+(`lang:`), which openheron it downloaded and where the home base lives.
 
 ★ **The keys do not belong to the desktop app either**: it does not read, write,
 detect or remind. The key still has its two places — the environment variable
@@ -2214,6 +2239,13 @@ protocol, so an SNI host has to display it. KDE Plasma has one built in; ★
 **GNOME does not by default** ⇒ install an AppIndicator extension
 (Debian/Ubuntu: `gnome-shell-extension-appindicator`) and enable it. Searching
 the log for `systray error` shows whether that is the problem.
+
+**Q: Can the tray menu be switched to English?**
+Yes: click **"language ▸"** in the tray and pick `English` — ★ the menu
+**redraws at once**, no restart, and the choice is **remembered** (it is written
+into `desktop.yaml` as `lang:`). ★ By default it **follows your system
+language**. ★ But the **web interface in the embedded window** is not affected
+— that is openheron's own interface.
 
 **Q: The desktop app does not start and says openheron is too old?**
 ★ The desktop app **does not read version numbers, it reads capabilities** — it
