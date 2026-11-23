@@ -231,18 +231,21 @@ openheron secret remove llm           # 删整组
 Settings 对话框（`web/src/components/settings/settings-dialog.tsx:26-126`）加一个标签页：
 
 ```
-┌ Settings ──────────────────────────── [ Files ] [ Secrets ]  ✕ ┐
-│ left (w-56)        │ right                                       │
-│ ▾ Providers        │ deepseek                                    │
-│   deepseek ●       │ Stored in: keyring:llm:deepseek             │
-│   openai   ○       │ In effect:  keyring:llm:deepseek            │
-│ ▾ MCP servers      │ Environment: LLM_DEEPSEEK_API_KEY (set)     │
-│   github   ●       │ ⚠ The environment variable wins.            │
-│                    │ [ Set value… ]  [ Remove ]                  │
-└───────────────────────────────────────────────────────────────────┘
+┌ Settings ────────────────────────────────────────────────────────────────────────────── [ Files ] [ Secrets ]  ✕ ┐
+│ left (w-56)        │ right                                                                                       │
+│ ▾ Providers        │ deepseek                                                                                    │
+│   deepseek ●       │ Stored in: keyring:llm:deepseek                                                             │
+│   openai   ○       │ In effect:  the keyring entry llm:deepseek                                                  │
+│ ▾ MCP servers      │ Environment: LLM_DEEPSEEK_API_KEY (set)                                                     │
+│   github   ●       │ ⚠ The environment variable LLM_DEEPSEEK_API_KEY wins — the stored key is not in effect.     │
+│                    │ [ Save key ]  [ Remove ]                                                                    │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-面板是 `web/src/components/settings/secrets-panel.tsx:42-151`，标签条是 Settings 对话框那个文件里的
+★ 分组标题随界面语言变化：英文界面是 `Providers` / `MCP servers`，
+  中文界面是「服务商」/「连接器」（词条 `secrets.group.llm` / `secrets.group.mcp`）。
+
+面板是 `web/src/components/settings/secrets-panel.tsx:42-144`，标签条是 Settings 对话框那个文件里的
 `TabBar`（`web/src/components/settings/settings-dialog.tsx:136-162`）。
 
 ★ **为什么不进左侧那棵文件树**：那棵树是**从服务端给的路径搭出来的**
@@ -251,8 +254,15 @@ Settings 对话框（`web/src/components/settings/settings-dialog.tsx:26-126`）
 
 ★ **为什么不是侧边栏第二个按钮**：秘密是**配置**，配置聚在一处。
 
-★ 组的标签由**服务端**给（`api/v2_secrets.go:38-43` 的 `label`），客户端不自带一份名单 ——
-服务器拥有分区表，客户端自带一份就是第二个真相。
+★ 组的**显示名**由**前端**按 `group.id`（`llm` / `mcp`）查词条表本地化（`secrets.group.llm` /
+`secrets.group.mcp`，`web/src/lib/secrets.ts:25-28`、`:66-71`）；服务端的 `label`
+（`api/v2_secrets.go:38`）是**英文回退**，也是**未知 `id` 的兜底**。
+
+★ 这是**显示层**的一条规则，**不是分区表的第二份真相**：分区表仍然归服务端
+（`api/v2_secrets.go:95-97` 给出有哪些组），客户端不决定有哪些分组，只是把它给的名字按读者的语言说出来。
+
+★ 之所以要这样改：密钥窗口要本地化（见契约 `docs/agile/contract.md` 的 S1/S5 与 §6 词条契约）——
+服务端继续说英文，前端负责翻译与回退；运行时的语言不动。
 
 ### 5.2 数据：一个载荷，两组，同一段渲染代码
 
@@ -277,10 +287,10 @@ GET /v2/secrets
 | 规矩 | 做法 |
 |---|---|
 | **值只写不读** | 面板只显示 `stored` / `not set` 与来源；输入框 `type="password"`、`autoComplete="off"`，写完清空；DOM 里永不出现值 |
-| **`shadowed` 必须看得见** | 环境变量覆盖时显示警告条：「The environment variable … wins — the stored key is not in effect.」 |
+| **`shadowed` 必须看得见** | 环境变量覆盖时显示警告条：「The environment variable {envVar} wins — the stored key is not in effect.」（词条 `secrets.status.shadowed`） |
 | 状态标记 | `stored` / `not set` 两个词 + 一枚 token 色的圆点（`--success` / `--warning`） |
-| 删除确认 | 删整组时确认框写明数量与范围：「Remove 1 provider secret? Only the Providers group is affected; MCP server secrets are untouched.」 |
-| 文案 | **全部英文**（仓库规矩） |
+| 删除确认 | 删整组时确认框写明数量与范围：「Remove 1 provider secret? Only the Providers group is affected; MCP server secrets are untouched.」★ 中文界面显示本地化文案（「服务商密钥」/「连接器密钥」），**数量**与**范围**两个语义都不丢 |
+| 文案 | **界面文案随界面语言**（zh / en）；**服务端**仍产出英文（错误句、分组 `label`） |
 
 ★ 新逻辑都在**纯函数层**（`web/src/lib/secrets.ts`）：`sourceLabel()` 把「地方」翻成句子、
 `statusOf()` 给出状态与警告、`envState()` 回答变量有没有东西、`removeGroupMessage()` 写出
@@ -298,7 +308,7 @@ GET /v2/secrets
 | `web/src/lib/settings-store.ts` | 加 `tab: "files" \| "secrets"` |
 
 ★ 两条前端铁律：zustand 选择器返回**引用稳定**的值（模块级空常量）；颜色只用 token，不写字面量。
-★ 错误沿用 `ApiError`（`web/src/lib/api.ts:298-322`），服务端给什么码前端就按什么码分。
+★ 错误沿用 `ApiError`（`web/src/lib/api.ts:315-331`）与 `ApiErrorBody`（`web/src/lib/api.ts:307-313`），服务端给什么码前端就按什么码分。
 
 ### 5.5 E2E 断言了什么
 
