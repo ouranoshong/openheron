@@ -178,7 +178,7 @@
 **`operations.jsonl`**，与 `session.jsonl` / `runs.jsonl` 同目录。
 
 ★ **为什么不叫 `events.jsonl`**：`/v2/sessions/:id/events` 已经是**实时公告通道**的路由
-（`api/v2_files.go:73`，实现见 `api/v2_session_events.go:22-91`）。
+（`api/v2_files.go:73`，实现见 `api/v2_session_events.go:22-95`）。
 两个同名的东西，一个转瞬即逝、一个落盘留痕 —— 名字必须分开。
 **「operations」是落盘的时间线，「events」是实时的公告。**
 
@@ -448,7 +448,7 @@ action={
 ```
 
 ★ `ms-auto` 把这一组推到那一行的右端；`ComposerMeta` 把它渲染成那一行的
-**最后一个子节点**（`web/src/components/composer-meta.tsx:230-231`，
+**最后一个子节点**（`web/src/components/composer-meta.tsx:233-234`，
 `body` 用 `<div className="contents">` 包着，所以那一行里只有两个盒子参与排版）。
 
 ★ **列窄时这个入口只留时钟**（聊天列 < 768px —— ★ 判据是**列宽**，不是窗口宽，

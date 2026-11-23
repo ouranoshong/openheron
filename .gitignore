@@ -86,6 +86,7 @@ probe*.txt
 /sandbox-kit/examples/demo-project/.openheron/
 
 # E2E (Playwright)
+/web/tmp/
 /web/test-results/
 /web/playwright-report/
 /web/blob-report/

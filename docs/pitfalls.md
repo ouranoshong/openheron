@@ -125,6 +125,53 @@ eino 的 `fsapi.Backend` 接口，装配时把它交给框架（`agentkit/build/
 
 **现状**：`已修` —— `api/server.go` 的 `guardMiddleware`。
 
+### 1.8 ★ hertz 的连接写入器不是并发安全的
+
+**症状**：进程整个死掉，栈顶是 Go 自己的代码，不是我们的：
+
+```
+panic: runtime error: index out of range [0] with length 0
+  internal/poll.(*FD).Writev.func1   internal/poll/fd_windows.go:985
+  net.(*Buffers).WriteTo              net/net.go:855
+  bufiox.(*DefaultWriter).Flush       bufiox/defaultbuf.go:432
+  hertz .../standard.(*Conn).Flush    connection.go:262
+  hertz .../resp.(*chunkedBodyWriter).Flush
+  sse.(*Stream).Publish               sse.go:109
+  transport.(*SSEStream).Write        transport/sse.go
+```
+
+★ 只有 Windows 上出现（writev 那条路），栈里的行号（`fd_windows.go:984/985`）落在
+go1.27.0/1.27.1 的 `internal/poll` 上。
+
+**根因**：★ **hertz 的连接写入器（`standard.Conn` 里那个 bufiox writer）不是并发安全的。**
+它持有一个 `net.Buffers` 缓冲区列表，而 `net.Buffers.WriteTo` 会**消耗**这个列表 ——
+`internal/poll` 的 `consume` 把**调用方**的切片头截短（`net.Buffers` 是切片类型，Go 拿到的
+是它的地址）。
+
+⇒ 于是两个 goroutine 同时写同一条连接时：flush 先看一眼列表（非空，放行），另一个
+goroutine 在这中间把列表写空（它的 `consume` 把长度截成 0），真正写进 socket 的那一次
+`Writev` 拿到的是**空列表** → `(*bufs)[0]` 越界 → 进程死。
+★ Go 侧那个 `len(*buf) == 0` 的早退**救不了**：它读的就是列表长度，而列表是**在它读过之后**
+才被对方清空的（中间隔着 `writeLock`，一阻塞窗口就很宽）。
+
+⇒ 我们的 keepalive goroutine 直接调 `sse.Stream.Publish`，**没有拿 stream 的锁** ——
+而渲染那一侧（`SSEStream.Write`）是拿了的。两个写者，一条连接。
+
+**修法**：★ **连接只归一个写者。** 生产者（渲染器、keepalive、flush）把帧交给一个写者
+goroutine，它独占响应写入器 —— 于是「两个写者」在**结构上**不可能出现，而不是靠纪律。
+★ 帧因此可以**合并**：写者把已经排队的帧攒成一次 flush，一次 flush 就是一次写 socket
+（实测一帧一次写约 10 µs，十六帧合并成一次写约 10.7 µs）。
+★ `Flush` 变成**栅栏**：返回时字节已经出门（handler 在响应结束前 flush）。
+★ 断连**传播**：写者失败 → 置 broken → 关闭 broken 通道 → 阻塞在队列上的生产者立刻
+拿到错误，而不是永远等一个没人排空的队列。
+★ keepalive 的 goroutine 由 `StartKeepalive` 拥有，它返回的 `stop` 会**等**这个 goroutine
+退出；`Close` 同样会**等**写者把队列排空再退出：handler 返回之后 hertz 就会把连接还进
+池子，一帧落在别人的 socket 上，比崩掉更糟。
+
+**现状**：`已修` —— `transport/sse.go` 的 `write` / `publish` / `fail` 与 `Close`；
+用例在 `transport/sse_test.go`（连接只有一个写者；一串帧合并成一次写；`Flush` 是栅栏；
+帧序不变；断连传播；写者死掉时阻塞的生产者被释放；`Close` 排空并停写）。
+
 ## 2. 身份与重建
 
 ### 2.1 ★ 「代际」这个全局计数器

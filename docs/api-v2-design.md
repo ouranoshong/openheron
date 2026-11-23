@@ -371,7 +371,7 @@ URL 会静默造出会话**。现在只有 `POST /v2/sessions` 一个创建入�
 **`query` vs `messages`**
 
 `messages`（AG-UI 的完整对话数组）保留但**不作为主入口**：服务端只读最后一条 user
-文本（`api/v2_run.go:371-394` 的 `lastUserText`）。取值优先级：`query` → 回退到
+文本（`api/v2_run.go:379-402` 的 `lastUserText`）。取值优先级：`query` → 回退到
 `messages` 里的最后一条 user 文本。
 
 **分支判定**：`len(resume) == 0` → `rt.Submit`；否则 → `rt.Resume`。

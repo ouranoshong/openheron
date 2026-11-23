@@ -172,7 +172,7 @@ frontmatter 键。正文就是提示词本身（`Instruction`）。
 | `TOOL_CALL_START/ARGS/END/RESULT` | `transport.go:302-336` | 工具调用 |
 | `CUSTOM`（`model_retry`） | `transport.go:246` | 模型重试提示 |
 | `RUN_FINISHED` | `transport.go:88`, `:94` | 本轮结束，带结果与用量。★ 被 run 截断的流**不写终态帧**（`RenderStream`），客户端于是重新挂回来，而不是相信一个假的 success（`docs/runtime-design.md` §2.3） |
-| `RUN_ERROR` | `transport.go:259`, `api/v2_run.go:283` | 失败 —— 码说明哪一类，消息说明为什么（见 `docs/runtime-design.md` §5.4） |
+| `RUN_ERROR` | `transport.go:259`, `api/v2_run.go:291` | 失败 —— 码说明哪一类，消息说明为什么（见 `docs/runtime-design.md` §5.4） |
 
 子 Agent 的产出通过事件上的 `subagentRunId` 归属，不另开事件类型，前端能用同一套 reducer
 处理所有 Agent 的输出。
@@ -693,7 +693,7 @@ X」就可以据此调整。MCP 工具走同一道闸门，按名字查 `TierOf`
 
 拒绝不改变任何东西：不删检查点、不清审批、不落消息。run 的终态行由 `runRow.finish`
 （`agentkit/run/runrow.go:72`）在消息归档后追加；`v2Run` 等 `WaitArchived()` /
-`WaitReleased()`（`api/v2_run.go:258-259`）才收流，所以客户端的「这轮完了」与服务端的
+`WaitReleased()`（`api/v2_run.go:266-267`）才收流，所以客户端的「这轮完了」与服务端的
 「这个会话空了」不会各说各话。待审批在 **loop 退出时**写，不是在那一轮的回调返回时 ——
 框架正是在 loop 退出时写检查点。
 

@@ -87,15 +87,33 @@ export const lib = {
   // ★ The four **scope** words are keys of their own: the sentence needs the
   //   singular and the plural, and a language that has no plural still has
   //   to be able to say which namespace is being emptied.
-  "secrets.scope.providerOne": { en: "provider secret", zh: "provider 密钥" },
-  "secrets.scope.providerMany": { en: "provider secrets", zh: "provider 密钥" },
+  // ★ The **group names**: the server sends its own English labels, and the
+  //   interface says the ones the reader is reading. The server's label is
+  //   the English fallback, not the Chinese one.
+  "secrets.group.llm": { en: "Providers", zh: "服务商" },
+  "secrets.group.mcp": { en: "MCP servers", zh: "连接器" },
+
+  // ★ The **error sentences**: the server's `code` is stable and machine
+  //   readable, so the interface can say the failure in the reader's words.
+  //   A code that is not mapped here shows the server's English sentence as
+  //   it is — untranslated, unprefixed, unswallowed.
+  "secrets.error.secretUnavailable": {
+    en: "The keyring is not available on this machine.",
+    zh: "本机密钥环不可用。",
+  },
+  "secrets.error.invalidBody": { en: "The request was not valid.", zh: "请求不合法。" },
+  "secrets.error.unknown": { en: "Something went wrong.", zh: "出了点问题。" },
+  "secrets.error.network": { en: "The server could not be reached.", zh: "无法连接到服务端。" },
+
+  "secrets.scope.providerOne": { en: "provider secret", zh: "服务商密钥" },
+  "secrets.scope.providerMany": { en: "provider secrets", zh: "服务商密钥" },
   "secrets.scope.mcpOne": { en: "MCP server secret", zh: "连接器密钥" },
   "secrets.scope.mcpMany": { en: "MCP server secrets", zh: "连接器密钥" },
   "secrets.remove.message": {
     en: "Remove {count} {scope}? Only the {group} group is affected; {other} are untouched.",
-    zh: "移除 {count} 个 {scope}？仅 {group} 分组受影响，{other}保持不变。",
+    zh: "移除 {count} 个 {scope}？仅 {group} 分组受影响，{other} 保持不变。",
   },
-  "secrets.source.none": { en: "nowhere — no key is in effect", zh: "无处 —— 没有生效的密钥" },
+  "secrets.source.none": { en: "no source — no key is in effect", zh: "无来源 —— 没有生效的密钥" },
   "secrets.source.env": { en: "the environment variable {name}", zh: "环境变量 {name}" },
   "secrets.source.keyring": { en: "the keyring entry {name}", zh: "密钥环条目 {name}" },
   "secrets.source.file": { en: "the file {name}", zh: "文件 {name}" },

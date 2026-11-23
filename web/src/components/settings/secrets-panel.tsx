@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { envState, removeGroupMessage, sourceLabel, statusOf } from "@/lib/secrets"
+import { envState, errorMessage, groupLabel, removeGroupMessage, sourceLabel, statusOf } from "@/lib/secrets"
 import {
   selectSecretError,
   selectSecretGroups,
@@ -65,8 +65,10 @@ export function SecretsPanel() {
       <div className="flex w-56 shrink-0 flex-col gap-3 overflow-y-auto">
         {groups.map((group) => (
           <section key={group.id} className="flex flex-col gap-1">
-            <h3 className="text-muted-foreground px-2 text-[11px] font-medium tracking-wide uppercase">
-              {group.label}
+            {/* ★ The heading is the reader's language, and it is not
+                case-folded: "MCP servers" keeps its capitals. */}
+            <h3 className="text-muted-foreground px-2 text-[11px] font-medium tracking-wide">
+              {groupLabel(group, t)}
             </h3>
             <ul className="flex flex-col gap-0.5">
               {group.items.map((item) => (
@@ -104,7 +106,7 @@ export function SecretsPanel() {
               data-testid={`secrets-remove-group-${group.id}`}
               onClick={() => setConfirming(group)}
             >
-              {t("settings.secrets.removeAll", { group: group.label.toLowerCase() })}
+              {t("settings.secrets.removeAll", { group: groupLabel(group, t) })}
             </Button>
           </section>
         ))}
@@ -116,7 +118,7 @@ export function SecretsPanel() {
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         {error ? (
           <p className="text-destructive text-sm" role="alert" data-testid="secrets-error">
-            {error}
+            {errorMessage(error, t)}
           </p>
         ) : null}
 

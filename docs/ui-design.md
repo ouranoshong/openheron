@@ -606,7 +606,7 @@ reasoning、模块级缓存与单飞请求；`api.listAgents()` 用 `cache: "no-
   （`web/src/components/composer-meta.tsx:126-135`）；
 - 加载失败不阻塞输入、发送与审批。
 
-★ **上下文占用**也在这一行（`web/src/components/composer-meta.tsx:244-316` 的
+★ **上下文占用**也在这一行（`web/src/components/composer-meta.tsx:247-319` 的
 `ContextMeter`，`data-testid="composer-meta-context"`）。
 
 ### 5.6.2 版式：换行，不被挤成半个
@@ -646,8 +646,8 @@ reasoning、模块级缓存与单飞请求；`api.listAgents()` 用 `cache: "no-
 | 入口 | 三个按钮带文字 | **只留图标**，并且**和事实同一行**（§5.6.4） |
 
 ★ **让位的东西不许丢**：思考档位进**模型**的 `title`
-（`web/src/components/composer-meta.tsx:194`），上下文数字进占用条的 `title`
-（`:283`）—— ★ 手机是**按需读**提示气泡的，而那一行是**一眼扫**的。
+（`web/src/components/composer-meta.tsx:197`），上下文数字进占用条的 `title`
+（`:286`）—— ★ 手机是**按需读**提示气泡的，而那一行是**一眼扫**的。
 
 ★ 入口让位的方式也一样：三个词都让位，**三个图标都留下**，而且它们
 **留在事实那一行**（§5.6.4）—— ★ 入口还在，入口还认得出来，
@@ -746,15 +746,17 @@ tooltip（`title`）与读屏读到的标签（`aria-label`）。
 - 选择器列出**全部** agent（`web/src/lib/agent-info.ts:40-42` 的 `selectableAgents`）
   —— 没有「主 agent」这回事。
 - ★ **底栏的 agent 名字也是一扇门**：点它打开**同一个**选择器
-  （`web/src/components/composer-meta.tsx:150-177` 的 `onPickAgent`）。
+  （`web/src/components/composer-meta.tsx:150-180` 的 `onPickAgent`）。
   ★ 一份名单、一种行为 —— 再造一套「点名字换 agent」就是第二份规则。
   ★ 点击**不清空**输入框：命令清空是因为那行字**就是**命令，而点击不是命令。
 - ★ **名字按右侧那几个入口的样子渲染**：同一个 `Button` 的 `ghost` / `sm`，
-  同一串类名（`web/src/components/composer-meta.tsx:150-177`）。
+  同一串类名（`web/src/components/composer-meta.tsx:150-180`）。
   ★ hover 就是这一行的 hover —— **不是下划线**。
   ★ 下划线说的是「这是一个链接，通到别处去」；★ 这个名字不离开这一行，
   它打开的就是这一行上已经有的那个选择器。
   ⇒ 一行里四个入口，一套渲染；名字不因为是名字就长得像别的东西。
+  ★ 列窄的时候名字**去掉内边距**（`@max-3xl:px-0`）：★ 图标要一点空气，
+  一个**词**不要 —— 而且这一行要是一行，名字就不能把事实挤下去。
 - ★ **切换请求不做乐观更新**（`web/src/lib/store/actions.ts:464-478`）：
   服务端会以 409 拒绝运行中/待审批的会话，
   先改界面再回滚会让用户看到 task 闪一下、而拒绝原因没地方显示。
@@ -1238,8 +1240,8 @@ JSON 往返之后变成的 **base64 字符串**（JSON 把 `[]byte` 编成字符
 messages、没有 resume」，附件也进了这条判据（`:229`）。否则「只有附件、没有文字」的一轮会被误判
 成重连，去找一个不存在的 run。
 
-附件在轮次开始**之前**解析（`api/v2_run.go:304`）：一个越界的名字或一个不存在的文件，要在客户端
-还听得懂原因的时候被拒。只有附件没有文字的一轮也是一轮（`api/v2_run.go:311`）。
+附件在轮次开始**之前**解析（`api/v2_run.go:312`）：一个越界的名字或一个不存在的文件，要在客户端
+还听得懂原因的时候被拒。只有附件没有文字的一轮也是一轮（`api/v2_run.go:319`）。
 
 ### 9.3 后端：落盘与装配 —— 让模型看见附件
 
@@ -1834,7 +1836,7 @@ Radix 的 `Dialog`，壳是 `sm:max-w-2xl h-[85dvh] flex flex-col gap-3 p-4`
 | 层 | 命令 | 覆盖 |
 |---|---|---|
 | 纯函数 | `bun run test:unit` | reducer 每个事件分支、分帧边角、store 行为 —— **484 条 / 38 个文件** |
-| 界面 | `task test-e2e` | 真实浏览器 + 确定性假后端 —— **311 条 / 24 个 spec** |
+| 界面 | `task test-e2e` | 真实浏览器 + 确定性假后端 —— **312 条 / 24 个 spec** |
 | 协议 | `task smoke` | 真后端的 SSE 兼容性 |
 
 ★ **CI 跑仓库自己的命令**：`task lint-web` + `bun run test:unit`
@@ -1859,7 +1861,7 @@ E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没
 
 ### 13.3 E2E 覆盖什么
 
-`web/test/e2e/` 下 **24 个 spec 文件，共 311 条**（实测）：
+`web/test/e2e/` 下 **24 个 spec 文件，共 312 条**（实测）：
 
 | spec 文件 | 条数 | 钉的是什么 |
 |---|---|---|
@@ -1870,7 +1872,7 @@ E2E 会「全绿」但打的是真后端 —— `OPENHERON_API_TARGET` 根本没
 | `attachments.spec.ts` | 14 | 附件随消息走、拖拽与粘贴、移除、预览 |
 | `composer-autocomplete.spec.ts` | 13 | 10 行封顶 / 自动聚焦 / @ 文件提示 / 命令 Tab 补全与 Enter 执行 / 键盘滚动跟随 / 切换后聚焦 |
 | `responsive.spec.ts` | 19 | 三档视口（390 / 768 / 1440）：不横向滚动 / 聊天列不超 token / 输入框与发送键在窗口里 / 触摸目标够大 / 行自己的菜单键看得见 / 侧栏是抽屉且能开能关 / 弹层不超出视口 / 断点边上的侧栏仍然常驻 / **树再长也挤不掉输入框（手机）、树再长聊天列也不缩水（平板）、长对话不会把输入框顶出屏幕（手机 + 桌面）** / **宽屏上助手正文吃满整列，与用户气泡共用右边缘** / **设置入口不贴着侧栏的边** |
-| `composer-meta.spec.ts` | 17 | 默认 agent / 模型 / 思考档位 / 上下文占用 / 接口不可用 / 设置关闭后刷新 / **窄屏 8 条 + 宽窗窄列 1 条** |
+| `composer-meta.spec.ts` | 18 | 默认 agent / 模型 / 思考档位 / 上下文占用 / 接口不可用 / 设置关闭后刷新 / **窄屏 8 条 + 宽窗窄列 1 条 + 名字的渲染 1 条** |
 | `scroll.spec.ts` | 10 | 滚动跟随 —— 溢出时停在视口内、用户上翻后不被拽回、流式未结束时也跟随、高亮撑高后仍跟随、打开停在最后一条、切会话停在底部、刷新停在最后一条 |
 | `secrets.spec.ts` | 9 | Secrets 标签页：两个命名空间、写入与删除、来源与覆盖、删除的确认 |
 | `mcps.spec.ts` | 7 | `/mcps` 面板：两种名字与档位、够不着的服务器、正在启动与起不来、每次打开都重读、Refresh |
@@ -2070,7 +2072,7 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 这一条以前是「记一笔交给上游」——
 上游那份 `docs/frontend-design.md` 有同一张表，而它的内容已并入本文（§0），
 所以这张表现在是**本仓库自己的**。
-★ 本仓库当前的数：spec 文件 **24** 个、**311** 条；
+★ 本仓库当前的数：spec 文件 **24** 个、**312** 条；
 `web/test/e2e/chat.spec.ts` **74** 条。
 ★ 加用例时要改这张表 —— 它的作用是让「加了用例忘了改文档」变成一次 diff 冲突。
 
@@ -2161,9 +2163,9 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | `api/v2_run.go:76` | `runInput.Attachments` |
 | `api/v2_run.go:91` | `runAttachment`：线上没有 content type |
 | `api/v2_run.go` | `isAttachRequest` |
-| `api/v2_run.go:229` | 附件也算一个问题的判据 |
-| `api/v2_run.go:304` | 附件在轮次开始之前解析 |
-| `api/v2_run.go:311` | 只有附件没有文字的一轮也是一轮 |
+| `api/v2_run.go:233` | 附件也算一个问题的判据 |
+| `api/v2_run.go:312` | 附件在轮次开始之前解析 |
+| `api/v2_run.go:319` | 只有附件没有文字的一轮也是一轮 |
 | `api/v2_attachments.go:33-68` | `resolveAttachments` |
 | `api/v2_attachments.go:46` | 服务端自己 stat；目录不是附件 |
 | `api/v2_attachments.go:64` | 类型由服务端按名字判定 |
@@ -2369,17 +2371,18 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | `web/src/components/composer-meta.tsx:11` | `META`：那一行的行盒 |
 | `web/src/components/composer-meta.tsx:30` | ★ `Joined`：分隔符跟着后一项走 |
 | `web/src/components/composer-meta.tsx:119` | 事实那一半：agent / 模型 / 思考档位 / 上下文 |
-| `web/src/components/composer-meta.tsx:230-231` | `contents` 包装与 `action` 槽 |
+| `web/src/components/composer-meta.tsx:150-180` | ★ 名字：一个**入口**，和右侧那几个同一套渲染（`ghost` / `sm`），hover 不是下划线 |
+| `web/src/components/composer-meta.tsx:233-234` | `contents` 包装与 `action` 槽 |
 | `web/src/components/composer.tsx:515` | ★ `@container`：那一行的宽度判据是**列**，不是窗口（§5.6.5） |
 | `web/src/components/composer.tsx:744` | ★ 入口节点：列窄时与事实同一行，右对齐 |
 | `web/src/components/projects-dialog.tsx:73-76` | ★ 项目名截断，全名留在 tooltip 与 `aria-label` |
 | `web/src/components/authorization-picker.tsx:161-169` | ★ 列窄时让位的那个词（档位名） |
 | `web/src/components/projects-dialog.tsx:90`、`:111` | ★ 列窄时让位的那个词（项目名） |
 | `web/src/components/operations-panel.tsx:93` | ★ 列窄时让位的那个词（Activity） |
-| `web/src/components/composer-meta.tsx:186` | ★ 模型名：列窄时唯一让位的那一项（`shrink` + 上限） |
-| `web/src/components/composer-meta.tsx:300` | 占用条：列窄时短一截 |
+| `web/src/components/composer-meta.tsx:189` | ★ 模型名：列窄时唯一让位的那一项（`shrink` + 上限） |
+| `web/src/components/composer-meta.tsx:303` | 占用条：列窄时短一截 |
 | `web/test/e2e/composer-meta.spec.ts:147` | 列窄的验收（不溢出 / 不截断 / 分隔符不落单 / 事实与入口同一行 / 入口只留图标 / 让位的档位在提示里） |
-| `web/test/e2e/composer-meta.spec.ts:356` | ★ 宽窗窄列的验收（960×1440：入口只留图标，事实仍是完整版） |
+| `web/test/e2e/composer-meta.spec.ts:359` | ★ 宽窗窄列的验收（960×1440：入口只留图标，事实仍是完整版） |
 | `web/test/e2e/projects.spec.ts:671` | ★ 项目名很长时那一行也不溢出 |
 
 ### A.9 前端：工具调用的渲染
@@ -2497,7 +2500,7 @@ PDF、压缩包、docx 走不进「可当文本读」的判据
 | `web/src/components/composer.tsx:698-699` | 停止按钮取代发送按钮 |
 | `web/src/components/composer.tsx:744-752` | 三个入口在同一个节点里 |
 | `web/src/components/composer-meta.tsx:139-144` | `reasoningAvailable` 只进 title |
-| `web/src/components/composer-meta.tsx:244-316` | 上下文占用 |
+| `web/src/components/composer-meta.tsx:247-319` | 上下文占用 |
 | `web/src/components/markdown.tsx:65-66` | 不开 `rehype-raw` |
 | `web/src/components/markdown.tsx:71` | 表格的滚动容器 |
 | `web/src/components/markdown.tsx:74` | 表格本身 `w-full` |

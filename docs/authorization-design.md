@@ -428,7 +428,7 @@ writes: [create_issue]        # ★ 新键：这个工具写受信路径
 ★ **顺序固定，位置就是身份。** React 按**下标**对齐子节点，
 一个下标变了就是「卸载了旧的、挂载了新的」，而挂在里面的状态全没了。
 `ComposerMeta` 已经把这一行的内容包进一个 `contents` 里、把 `action` 放在最后
-（`web/src/components/composer-meta.tsx:230-231`）。
+（`web/src/components/composer-meta.tsx:233-234`）。
 ⇒ 授权选择器、项目按钮与操作时间线的入口**一起**放进那一个 `action` 槽，
 顺序永远是「授权 → 项目 → 活动」，多一个兄弟节点也不许换位。
 ★ 落法：三个入口被包进**同一个** `span`（`web/src/components/composer.tsx:744-752`），

@@ -170,6 +170,11 @@ func (s *Server) v2Run(ctx context.Context, c *app.RequestContext) {
 	}
 
 	stream := s.newStream(c)
+	// ★ The stream owns the connection's writer, and the writer
+	//   goroutine has to be gone before the response is finalized:
+	//   hertz hands the connection back to its pool right after, and a
+	//   frame that goes out then lands on another request's socket.
+	defer stream.Close()
 
 	//   makeOnAgentEvents, so reading it earlier hands back a nil iterator.
 	//   Readying is not executing — the agent may still be running after this
@@ -183,9 +188,8 @@ func (s *Server) v2Run(ctx context.Context, c *app.RequestContext) {
 	}
 	// Keepalives start before rendering: a preempted turn can take a long time
 	// to unwind, and silence on the wire reads as a dead connection.
-	kaStop := make(chan struct{})
-	defer close(kaStop)
-	go stream.Keepalive(kaStop, 15_000_000_000) // 15s
+	stopKeepalive := stream.StartKeepalive(transport.DefaultKeepalive)
+	defer stopKeepalive()
 
 	// ★ The connection subscribes to the run. It does not consume it: the
 	//   run reads its own events and archives them, so a connection that
@@ -247,9 +251,13 @@ func (s *Server) attachRun(ctx context.Context, c *app.RequestContext, sess stor
 	}
 
 	stream := s.newStream(c)
-	kaStop := make(chan struct{})
-	defer close(kaStop)
-	go stream.Keepalive(kaStop, 15_000_000_000) // 15s
+	// ★ The writer goroutine has to be gone before the response is
+	//   finalized: hertz hands the connection back to its pool right
+	//   after, and a frame that goes out then lands on another
+	//   request's socket.
+	defer stream.Close()
+	stopKeepalive := stream.StartKeepalive(transport.DefaultKeepalive)
+	defer stopKeepalive()
 
 	sub := turn.Subscribe()
 	defer sub.Close()

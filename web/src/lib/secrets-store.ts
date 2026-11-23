@@ -1,13 +1,21 @@
 
 import { create } from "zustand"
 
-import { ApiError } from "@/lib/api"
 import { secretsApi, type SecretGroup, type SecretItem } from "@/lib/secrets-api"
+import { failureOf, type SecretsFailure } from "@/lib/secrets"
 
 export interface SecretsState {
   groups: SecretGroup[]
   loading: boolean
-  error?: string
+  /**
+   * The failure, in parts.
+   *
+   * ★ It is **not** a sentence: the code says what happened and the message
+   *   says what the server said, and the panel turns the pair into the
+   *   reader's language at the moment it shows it. ⇒ A failure stored as
+   *   English text would stay English after the language changes.
+   */
+  error?: SecretsFailure
 
   /**
    * The entry the panel shows, as "group:name".
@@ -47,7 +55,7 @@ export const useSecrets = create<SecretsState>((set, get) => ({
         set({ selected: undefined })
       }
     } catch (e) {
-      set({ loading: false, error: describe(e) })
+      set({ loading: false, error: failureOf(e) })
     }
   },
 
@@ -62,7 +70,7 @@ export const useSecrets = create<SecretsState>((set, get) => ({
       await secretsApi.set(group, name, value)
       await get().load()
     } catch (e) {
-      set({ error: describe(e) })
+      set({ error: failureOf(e) })
     } finally {
       set({ busy: undefined })
     }
@@ -75,7 +83,7 @@ export const useSecrets = create<SecretsState>((set, get) => ({
       await secretsApi.remove(group, name)
       await get().load()
     } catch (e) {
-      set({ error: describe(e) })
+      set({ error: failureOf(e) })
     } finally {
       set({ busy: undefined })
     }
@@ -87,7 +95,7 @@ export const useSecrets = create<SecretsState>((set, get) => ({
       await secretsApi.removeGroup(group)
       await get().load()
     } catch (e) {
-      set({ error: describe(e) })
+      set({ error: failureOf(e) })
     } finally {
       set({ busy: undefined })
     }
@@ -114,7 +122,7 @@ export function selectSelectedGroup(s: SecretsState): SecretGroup | undefined {
   return findItem(s.groups, s.selected)?.group
 }
 
-export function selectSecretError(s: SecretsState): string | undefined {
+export function selectSecretError(s: SecretsState): SecretsFailure | undefined {
   return s.error
 }
 
@@ -132,9 +140,4 @@ function findItem(
   const item = group.items.find((i) => i.name === name)
   if (!item) return undefined
   return { group, item }
-}
-
-function describe(e: unknown): string {
-  if (e instanceof ApiError) return e.message
-  return (e as Error).message ?? String(e)
 }

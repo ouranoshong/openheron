@@ -66,7 +66,7 @@ export const settings = {
   "settings.secrets.inEffect": { en: "In effect", zh: "生效中" },
   "settings.secrets.environment": { en: "Environment", zh: "环境变量" },
   "settings.secrets.pasteKey": { en: "Paste the key", zh: "粘贴密钥" },
-  "settings.secrets.setValue": { en: "Set value", zh: "设置值" },
+  "settings.secrets.setValue": { en: "Save key", zh: "保存密钥" },
   "settings.secrets.note": {
     en: "The value goes to the keyring only — it is never written into the configuration, and it is never shown here again.",
     zh: "该值仅存入密钥环 —— 绝不写入配置，也不会再次在这里显示。",
