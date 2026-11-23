@@ -1,5 +1,6 @@
 
-import type { Translate } from "@/lib/i18n"
+import { ApiError } from "@/lib/api"
+import type { MessageKey, Translate } from "@/lib/i18n"
 import type { SecretGroup, SecretItem } from "@/lib/secrets-api"
 
 // The pure layer of the secrets panel.
@@ -15,6 +16,30 @@ import type { SecretGroup, SecretItem } from "@/lib/secrets-api"
 
 export type SecretState = "stored" | "not set" | "unavailable"
 
+/**
+ * The groups the interface knows by name.
+ *
+ * ★ Keyed by the server's **id**, which is stable; the server's `label` is
+ *   the English fallback and the safety net for an id that is not in here.
+ */
+const GROUP_KEYS: Record<string, MessageKey> = {
+  llm: "secrets.group.llm",
+  mcp: "secrets.group.mcp",
+}
+
+/**
+ * The failures the interface can say in its own words.
+ *
+ * ★ The `code` is the server's, and it is stable; a code that is not in here
+ *   is shown as the server's English sentence.
+ */
+const ERROR_KEYS: Record<string, MessageKey> = {
+  secret_unavailable: "secrets.error.secretUnavailable",
+  invalid_body: "secrets.error.invalidBody",
+  unknown: "secrets.error.unknown",
+  network: "secrets.error.network",
+}
+
 export interface SecretStatus {
   state: SecretState
   /** The one-word badge. */
@@ -26,14 +51,70 @@ export interface SecretStatus {
 }
 
 /**
- * The label of a group.
+ * The display name of a group.
  *
- * ★ The server sends one, and it is used as it is: the server owns the
- *   partition table, and a client that keeps its own list of names is a
- *   second truth.
+ * ★ The **id** is the stable identifier, and it is what the interface
+ *   translates: the server's `label` is its English voice, and a reader who
+ *   is reading Chinese must not be handed an English heading.
+ *
+ * ★ The server's label is still the fallback — for an id the catalog does not
+ *   know, and for the English interface itself. ⇒ A group the client has
+ *   never heard of still gets a heading instead of a blank line.
+ *
+ * ★ The name is never case-folded: "MCP servers" is not "mcp servers".
  */
-export function groupLabel(group: SecretGroup): string {
-  return group.label
+export function groupLabel(group: SecretGroup, t: Translate): string {
+  const key = GROUP_KEYS[group.id]
+  if (key) return t(key)
+  const label = group.label?.trim()
+  return label ? label : group.id
+}
+
+/**
+ * A failure, in the parts the interface needs.
+ *
+ * ★ The server's `code` is stable and machine-readable; the sentence it sent
+ *   is English. ⇒ The two travel together: the code says **what** happened,
+ *   the message says what the server said, and the interface picks the
+ *   sentence by the code.
+ */
+export interface SecretsFailure {
+  /** The server's code, or a client-synthesized one ("network" / "unknown"). */
+  code: string
+  /** The server's English sentence — shown as it is when the code is unknown. */
+  message: string
+}
+
+/**
+ * Read a failure off a thrown value.
+ *
+ * ★ A failure that is not an `ApiError` never reached the server's error
+ *   envelope: the response could not be parsed (`unknown`) or the server
+ *   could not be reached at all (`network`). ⇒ Its English text
+ *   ("Failed to fetch") is never shown; it is replaced by a sentence of the
+ *   reader's own language.
+ */
+export function failureOf(e: unknown): SecretsFailure {
+  if (e instanceof ApiError) {
+    return { code: e.code, message: e.message }
+  }
+  if (e instanceof SyntaxError) {
+    return { code: "unknown", message: e.message }
+  }
+  return { code: "network", message: e instanceof Error ? e.message : String(e) }
+}
+
+/**
+ * The sentence the panel shows for a failure.
+ *
+ * ★ A known code says the failure in the reader's words; an unknown code
+ *   says what the server said, untranslated and unswallowed — the server's
+ *   sentence is better than a wrong guess.
+ */
+export function errorMessage(failure: SecretsFailure, t: Translate): string {
+  const key = ERROR_KEYS[failure.code]
+  if (key) return t(key)
+  return failure.message
 }
 
 /**
@@ -127,5 +208,8 @@ export function removeGroupMessage(group: SecretGroup, t: Translate): string {
         : t("secrets.scope.mcpMany")
   const other =
     group.id === "llm" ? t("secrets.scope.mcpMany") : t("secrets.scope.providerMany")
-  return t("secrets.remove.message", { count, scope, group: group.label, other })
+  // ★ The group that is being emptied is named in the reader's language, too:
+  //   the sentence names one group and clears the other, and both names have
+  //   to be the ones the reader sees on the panel.
+  return t("secrets.remove.message", { count, scope, group: groupLabel(group, t), other })
 }
