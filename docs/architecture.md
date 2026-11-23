@@ -224,7 +224,7 @@ The event types come from the `ag-ui-protocol/ag-ui` Go SDK. The frames are rend
 | `TOOL_CALL_START/ARGS/END/RESULT` | `transport.go:302-336` | Tool calls |
 | `CUSTOM` (`model_retry`) | `transport.go:246` | Model-retry notice |
 | `RUN_FINISHED` | `transport.go:88`, `:94` | The turn ended; carries result and usage. ★ A stream the run cut off gets no terminal frame (`RenderStream`), so the client re-attaches instead of believing a false "success" (`docs/runtime-design.md` §2.3) |
-| `RUN_ERROR` | `transport.go:259`, `api/v2_run.go:283` | Failure — ★ the code says which kind, and the message says why (see `docs/runtime-design.md` §5.4) |
+| `RUN_ERROR` | `transport.go:259`, `api/v2_run.go:291` | Failure — ★ the code says which kind, and the message says why (see `docs/runtime-design.md` §5.4) |
 
 A sub-agent's output is **attributed through `subagentRunId` on the event** rather than
 through a separate event type — that lets the frontend handle every agent's output with
@@ -947,7 +947,7 @@ message persisted. The running turn is untouched.
 
 The run's final row is appended by `runRow.finish` (`agentkit/run/runrow.go:72`) after the
 messages are archived; `v2Run` waits for `WaitArchived()` / `WaitReleased()`
-(`api/v2_run.go:258-259`) before closing the stream. That is what keeps the client's
+(`api/v2_run.go:266-267`) before closing the stream. That is what keeps the client's
 "your turn is done" and the server's "this session is free" from disagreeing — and it is
 why the next turn's input never reads an incomplete history.
 

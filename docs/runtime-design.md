@@ -446,7 +446,7 @@ SSE。`agentkit/emit` 只依赖 `contract`、`message`、`approval`、`helpers` 
 
 ★ **客户端先订阅、后扫描**（`api/v2_session_events.go:40`）：订阅之前发生的事在扫描
 里，订阅之后发生的事在这里。★ 通道一开就**先 ping 一下**
-（`transport/sse.go:112` 的 `Ping`）—— fetch 在第一个字节到来之前不会 resolve，而一个
+（`transport/sse.go:221` 的 `Ping`）—— fetch 在第一个字节到来之前不会 resolve，而一个
 还没开始读的客户端，是没听见事实的客户端。
 
 ★ **客户端这一边**（`web/src/lib/session-events.ts`）：`approval_pending` 把那张卡**并进**
@@ -1044,18 +1044,18 @@ stderr（`main.go:421-432`）。
 
 ★ **挂上请求不带问题**（`api/v2_run.go` 的 `isAttachRequest`）：带问题就意味着
 「开始一轮新的」，在这里开始一轮新的等于把用户那句话悄悄跑第二遍。挂上走
-`attachRun`（`api/v2_run.go:241-261`），它按 id 找到那个活着的 run
+`attachRun`（`api/v2_run.go:245-269`），它按 id 找到那个活着的 run
 （`agentkit/run/runtime.go:1060-1074` 的 `LiveRun`），订阅它并渲染它的窗口。
 
 ★ **结束的 run 挂不上。** 服务端回 **404 `run_not_live`**
-（`api/v2_run.go:244`，码在 `api/v2_types.go:58`），而不是开始一轮新的 —— 客户端对
+（`api/v2_run.go:248`，码在 `api/v2_types.go:58`），而不是开始一轮新的 —— 客户端对
 这个拒绝的回答是「去加载历史」，它必须能把它和「会话可以重试」分得开。
 
 ★ **但这个拒绝只说了「运行时的 turn 没了」。** ★ 它**没有**说审批已经落盘：拒绝看的是
 易失的 turn，而审批是在释放 turn **之后**才写的（§1.6）。★ 所以客户端在 404 上不能
 「读一次 transcript 就走」—— 要等账本的屏障立起来再读（`web/src/lib/attach.ts:76`）。
 
-响应在归档与释放之后才收（`api/v2_run.go:201` 与 `:209`）：`turn.WaitArchived()`
+响应在归档与释放之后才收（`api/v2_run.go:205` 与 `:213`）：`turn.WaitArchived()`
 （消息在盘上）与 `turn.WaitReleased()`（槽位空了）。
 
 ★ **两个等待不是一回事。** 归档是落盘，放置是「会话空了」；中间那段窗口里，响应如果
@@ -1105,7 +1105,7 @@ stderr（`main.go:421-432`）。
 声明、文件解析不了），那一轮从未变得可流出，于是超时的症状顶了上来 —— 用户看到
 「turn start timeout」，看不到是哪个文件、哪个模型。所以装配失败自己成为一个错误码，
 消息是装配器自己的原话，客户端的下一个动作也据此不同：改文件，而不是重试
-（`api/v2_run.go:275-279`）。
+（`api/v2_run.go:283-287`）。
 
 ---
 
@@ -1415,8 +1415,8 @@ stderr（`main.go:421-432`）。
   `RunEventRunStarted`(:75)
 - `transport/transport.go` — `RenderSession`(:115)、`emitApprovalPending`(:305)、
   `emitApprovalResolved`(:342)、`emitRunStarted`(:358)
-- `transport/sse.go` — `Ping`(:113)
-- `api/v2_session_events.go` — `v2SessionEvents`(:40)、开通道先 ping(:63)
+- `transport/sse.go` — `Ping`(:221)
+- `api/v2_session_events.go` — `v2SessionEvents`(:40)、开通道先 ping(:67)
 - `api/v2_files.go` — 公告通道的路由(:73)
 - `web/src/lib/session-events.ts` — `readInterrupt`(:60)、`parseSessionFact`(:80)、
   `applySessionFact`(:126)

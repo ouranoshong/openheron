@@ -45,12 +45,16 @@ func (s *Server) v2SessionEvents(ctx context.Context, c *app.RequestContext) {
 	}
 
 	stream := s.newStream(c)
-	kaStop := make(chan struct{})
-	defer close(kaStop)
+	// ★ The writer goroutine has to be gone before the response is
+	//   finalized: hertz hands the connection back to its pool right
+	//   after, and a frame that goes out then lands on another
+	//   request's socket.
+	defer stream.Close()
 	// ★ The keepalive is the disconnect probe: it is the only thing that
 	//   writes to an idle channel, and a write to a connection that went
 	//   away is what tells the handler to stop.
-	go stream.Keepalive(kaStop, s.sessionKeepaliveOrDefault())
+	stopKeepalive := stream.StartKeepalive(s.sessionKeepaliveOrDefault())
+	defer stopKeepalive()
 
 	sub := s.rt.Announce(sess.ID())
 	defer sub.Close()
